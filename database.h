@@ -30,8 +30,8 @@ public:
     static void Initialize();
 
     Database();
-    void open(const std::string &file);
-    void close();
+    Database &open(const std::string &file);
+    Database &close();
     ~Database();
 };
 

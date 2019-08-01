@@ -24,21 +24,25 @@ void Database::Initialize() {
 
 Database::Database() : db(nullptr) {}
 
-void Database::open(const std::string &file) {
+Database &Database::open(const std::string &file) {
     if (db != nullptr) throw DBException("Can't open database " + file + ", one is already open (" + open_file + ")");
     LOGD << "DATABASE: Opening connection to " << file;
     if( sqlite3_open(file.c_str(), &db) ) throw DBException("Can't open database: " + file);
     this->open_file = file;
+
+    return *this;
 }
 
 // char *zErrMsg = nullptr;
 
-void Database::close() {
+Database &Database::close() {
     if (db != nullptr) {
         LOGD << "DATABASE: Closing connection to " << open_file;
         sqlite3_close(db);
         db = nullptr;
     }
+
+    return *this;
 }
 
 Database::~Database() {

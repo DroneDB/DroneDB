@@ -80,20 +80,23 @@ static int callback(void *NotUsed, int argc, char **argv, char **azColName) {
 
 int main(int argc, char* argv[]) {
     init_logger();
-    Database::Initialize();
 
     auto result = parse(argc, argv);
     auto arguments = result.arguments();
 
     if (result.count("verbose")) set_logger_verbose();
 
+
     try {
-        std::unique_ptr<Database> db = std::make_unique<Database>();
+        // Initialization steps
+        Database::Initialize();
 
         LOGV << "ddb v" VERSION;
         LOGV << "SQLite version: " << sqlite3_libversion();
         LOGV << "SpatiaLite version: " << spatialite_version();
 
+
+        std::unique_ptr<Database> db = std::make_unique<Database>();
         db->open(result["input"].as<std::string>());
 
         if (result.count("command")) {
