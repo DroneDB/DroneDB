@@ -19,14 +19,6 @@ limitations under the License. */
 #include "libs/plog/Appenders/ConsoleAppender.h"
 #include "libs/plog/Formatters/MessageOnlyFormatter.h"
 
-#define LOGV PLOG_VERBOSE
-#define LOGD PLOG_DEBUG
-#define LOGI PLOG_INFO
-#define LOGW PLOG_WARNING
-#define LOGE PLOG_ERROR
-#define LOGF PLOG_FATAL
-#define LOGN PLOG_NONE
-
 void init_logger();
 void set_logger_verbose();
 

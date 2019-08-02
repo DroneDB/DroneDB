@@ -51,20 +51,14 @@ cxxopts::ParseResult parse(int argc, char* argv[]) {
 
         auto result = options.parse(argc, argv);
 
-        if (result.count("help") || noArgs) {
-            std::cout << options.help({""}) << std::endl;
-            exit(0);
-        }
-
-        if (result.count("version")) {
-            std::cout << VERSION << std::endl;
+        if (result.count("help") || noArgs || (result.count("command") && result["command"].as<std::string>() == "help")) {
+            LOGI << options.help({""});
             exit(0);
         }
 
         return result;
-
     } catch (const cxxopts::OptionException& e) {
-        std::cout << "Error parsing options: " << e.what() << std::endl;
+        LOGE << "Error parsing options: " << e.what() << std::endl;
         exit(1);
     }
 }
@@ -86,6 +80,10 @@ int main(int argc, char* argv[]) {
 
     if (result.count("verbose")) set_logger_verbose();
 
+    if (result.count("version")) {
+        LOGI << VERSION;
+        exit(0);
+    }
 
     try {
         // Initialization steps
@@ -95,9 +93,16 @@ int main(int argc, char* argv[]) {
         LOGV << "SQLite version: " << sqlite3_libversion();
         LOGV << "SpatiaLite version: " << spatialite_version();
 
-
-        std::unique_ptr<Database> db = std::make_unique<Database>();
-        db->open(result["input"].as<std::string>());
+        auto cmd = result["command"].as<std::string>();
+        if (cmd == "build") {
+            if (result.count("input")) {
+                cmd::Build(result["input"].as<std::string>());
+            } else {
+                throw InvalidArgsException("No input path specified");
+            }
+        } else {
+            throw InvalidArgsException("Invalid command \"" + cmd + "\"");
+        }
 
         if (result.count("command")) {
             std::cout << "Command = " << result["command"].as<std::string>()
@@ -126,6 +131,8 @@ int main(int argc, char* argv[]) {
         //        fprintf(stderr, "SQL error: %s\n", zErrMsg);
         //        sqlite3_free(zErrMsg);
         //    }
+    } catch (const InvalidArgsException &exception) {
+        LOGE << exception.what() << ". Run ./dbb --help for usage information.";
     } catch (const AppException &exception) {
         LOGF << exception.what();
         return 1;

@@ -22,5 +22,14 @@ class AppException : public std::runtime_error{
 class DBException : public AppException{
     using AppException::AppException;
 };
+class SQLException : public DBException{
+    using DBException::DBException;
+};
+class FSException : public AppException{
+    using AppException::AppException;
+};
+class InvalidArgsException : public AppException{
+    using AppException::AppException;
+};
 
 #endif // EXCEPTIONS_H

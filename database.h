@@ -32,6 +32,9 @@ public:
     Database();
     Database &open(const std::string &file);
     Database &close();
+    Database &exec(const std::string &sql);
+    Database &createTables();
+
     ~Database();
 };
 

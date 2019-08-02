@@ -13,6 +13,8 @@ See the License for the specific language governing permissions and
 limitations under the License. */
 
 #include <cassert>
+#include <string>
+
 #include "logger.h"
 #include "exceptions.h"
 #include "database.h"
@@ -41,6 +43,41 @@ Database &Database::close() {
         sqlite3_close(db);
         db = nullptr;
     }
+
+    return *this;
+}
+
+Database &Database::exec(const std::string &sql) {
+    if (db == nullptr) throw DBException("Can't execute SQL: " + sql + ", db is not open");
+
+    char *errMsg;
+    if (sqlite3_exec(db, sql.c_str(), nullptr, nullptr, &errMsg) != SQLITE_OK ) {
+        std::string error(errMsg);
+        sqlite3_free(errMsg);
+        throw SQLException(error);
+    }
+
+    return *this;
+}
+
+Database &Database::createTables() {
+    std::string sql = R"<<<(
+  SELECT InitSpatialMetaData(TRUE);
+
+  CREATE TABLE IF NOT EXISTS meta (
+      path TEXT,
+      sha1 TEXT,
+      type INTEGER,
+      meta TEXT,
+      mtime INTEGER,
+      size  INTEGER
+  );
+  SELECT AddGeometryColumn("meta", "geom", 4326, "GEOMETRYZ", "XYZ");
+)<<<";
+
+    LOGD << "DATABASE: About to create tables...";
+    this->exec(sql);
+    LOGD << "DATABASE: Created tables";
 
     return *this;
 }

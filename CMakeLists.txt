@@ -18,6 +18,10 @@ add_executable(${PROJECT_NAME} ${SRC_LIST})
 if (WIN32)
 
 else()
-   target_link_libraries(${PROJECT_NAME} pthread dl spatialite sqlite3)
+   target_link_libraries(${PROJECT_NAME} pthread dl spatialite sqlite3 stdc++fs)
 endif()
+
+set_target_properties(${PROJECT_NAME} PROPERTIES
+    CXX_STANDARD 17
+    )
 
