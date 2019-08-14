@@ -7,6 +7,7 @@ set(SRC_LIST
     ${CMAKE_CURRENT_SOURCE_DIR}/logger.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/database.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/exceptions.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/statement.cpp
 
     )
 add_subdirectory("cmd")

@@ -23,6 +23,8 @@ limitations under the License. */
 #include <string>
 #include <memory>
 
+#include "statement.h"
+
 class Database{
     sqlite3 *db;
     std::string open_file;
@@ -34,6 +36,9 @@ public:
     Database &close();
     Database &exec(const std::string &sql);
     Database &createTables();
+    bool tableExists(const std::string &table);
+
+    std::unique_ptr<Statement> query(const std::string &query);
 
     ~Database();
 };

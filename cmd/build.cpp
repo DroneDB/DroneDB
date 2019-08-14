@@ -31,7 +31,7 @@ void cmd::Build(const std::string &directory) {
 
     LOGD << "CMD::BUILD: Checking if .ddb directory exists...";
     if (fs::exists(ddbDirPath)) {
-        LOGD << ddbDirPath.u8string() + " exists";
+        LOGD << "CMD::BUILD: " << ddbDirPath.u8string() + " exists";
         ddbPathExists = true;
     } else {
         if (fs::create_directory(ddbDirPath)) {
@@ -54,9 +54,10 @@ void cmd::Build(const std::string &directory) {
         std::unique_ptr<Database> db = std::make_unique<Database>();
         db->open(dbasePath.u8string());
 
-        // TODO: check database instead
-        if (!dbaseExists) {
+        if (!db->tableExists("meta")) {
             db->createTables();
+        } else {
+            LOGD << "CMD::BUILD: " << "meta table exists";
         }
 
         // fs::directory_options::skip_permission_denied

@@ -30,7 +30,7 @@ cxxopts::ParseResult parse(int argc, char* argv[]) {
     try {
         bool noArgs = argc <= 1;
 
-        cxxopts::Options options(argv[0], "ddb v" VERSION " - Aerial data management utility");
+        cxxopts::Options options(argv[0], "DDB v" VERSION " - Aerial data management utility");
         options
         .positional_help("[args]")
         .custom_help("<command>")
@@ -40,8 +40,8 @@ cxxopts::ParseResult parse(int argc, char* argv[]) {
         .allow_unrecognised_options()
         .add_options()
 
-        ("command", "build", cxxopts::value<std::string>())
-        ("i,input", "Input", cxxopts::value<std::string>())
+        ("command", "[build]", cxxopts::value<std::string>())
+        ("i,input", "Input directory", cxxopts::value<std::string>())
         ("o,output", "Output file", cxxopts::value<std::string>())
         ("h,help", "Print help")
         ("v,verbose", "Show verbose output")
@@ -89,7 +89,7 @@ int main(int argc, char* argv[]) {
         // Initialization steps
         Database::Initialize();
 
-        LOGV << "ddb v" VERSION;
+        LOGV << "DDB v" VERSION;
         LOGV << "SQLite version: " << sqlite3_libversion();
         LOGV << "SpatiaLite version: " << spatialite_version();
 
@@ -118,19 +118,6 @@ int main(int argc, char* argv[]) {
             std::cout << "Output = " << result["output"].as<std::string>()
                       << std::endl;
         }
-
-        // Load spatialite
-        //    sqlite3_db_config(db, SQLITE_DBCONFIG_ENABLE_LOAD_EXTENSION, 1, NULL);
-        //    if (sqlite3_load_extension(db, "mod_spatialite", 0, &zErrMsg) != SQLITE_OK) {
-        //        std::cerr << "Cannot load mod_spatialite. Make sure it is installed." << std::endl;
-        //        sqlite3_close(db);
-        //        return(1);
-        //    }
-
-        //    if( sqlite3_exec(db, "SELECT spatialite_version()", callback, nullptr, &zErrMsg)!=SQLITE_OK ) {
-        //        fprintf(stderr, "SQL error: %s\n", zErrMsg);
-        //        sqlite3_free(zErrMsg);
-        //    }
     } catch (const InvalidArgsException &exception) {
         LOGE << exception.what() << ". Run ./dbb --help for usage information.";
     } catch (const AppException &exception) {

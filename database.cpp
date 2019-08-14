@@ -62,7 +62,8 @@ Database &Database::exec(const std::string &sql) {
 
 Database &Database::createTables() {
     std::string sql = R"<<<(
-  SELECT InitSpatialMetaData(TRUE);
+  SELECT InitSpatialMetaData(TRUE, 'NONE');
+  SELECT InsertEpsgSrid(4326);
 
   CREATE TABLE IF NOT EXISTS meta (
       path TEXT,
@@ -81,6 +82,22 @@ Database &Database::createTables() {
 
     return *this;
 }
+
+bool Database::tableExists(const std::string &table){
+    auto q = query("SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?");
+    q->bind(1, table);
+
+    if (q->fetch()){
+        return q->getInt(0) == 1;
+    }
+
+    return false;
+}
+
+std::unique_ptr<Statement> Database::query(const std::string &query){
+    return std::make_unique<Statement>(db, query);
+}
+
 
 Database::~Database() {
     this->close();
