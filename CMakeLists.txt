@@ -18,10 +18,12 @@ add_subdirectory("libs")
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}/libs")
 add_executable(${PROJECT_NAME} ${SRC_LIST})
 
-if (WIN32)
+find_package(exiv2 REQUIRED CONFIG NAMES exiv2)
 
+if (WIN32)
+    # TODO
 else()
-   target_link_libraries(${PROJECT_NAME} pthread dl spatialite sqlite3 stdc++fs)
+   target_link_libraries(${PROJECT_NAME} pthread dl spatialite sqlite3 stdc++fs exiv2)
 endif()
 
 set_target_properties(${PROJECT_NAME} PROPERTIES
