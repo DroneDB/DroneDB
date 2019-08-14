@@ -8,7 +8,7 @@ Statement::Statement(sqlite3 *db, const std::string &query)
         throw SQLException("Cannot prepare SQL statement: " + query);
     }
 
-    LOGD << "Statement: created " + query;
+    LOGD << "Statement: " + query;
 }
 
 void Statement::bindCheck(int ret) {
@@ -26,9 +26,7 @@ Statement::~Statement() {
 
 Statement &Statement::bind(int paramNum, const std::string &value) {
     assert(stmt != nullptr && db != nullptr);
-
     bindCheck(sqlite3_bind_text(stmt, paramNum, value.c_str(), static_cast<int>(value.size()), SQLITE_STATIC));
-
     return *this;
 }
 

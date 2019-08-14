@@ -35,8 +35,6 @@ Database &Database::open(const std::string &file) {
     return *this;
 }
 
-// char *zErrMsg = nullptr;
-
 Database &Database::close() {
     if (db != nullptr) {
         LOGD << "DATABASE: Closing connection to " << open_file;

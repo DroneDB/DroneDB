@@ -15,6 +15,7 @@ limitations under the License. */
 #include <iostream>
 #include <experimental/filesystem>
 #include "build.hpp"
+#include "../index.h"
 #include "../database.h"
 #include "../exceptions.h"
 #include "../logger.h"
@@ -60,10 +61,7 @@ void cmd::Build(const std::string &directory) {
             LOGD << "CMD::BUILD: " << "meta table exists";
         }
 
-        // fs::directory_options::skip_permission_denied
-        for(auto& p: fs::recursive_directory_iterator(directory)) {
-            //std::cout << p.path() << '\n';
-        }
+        updateIndex(directory, db.get());
     } catch (const AppException &exception) {
         LOGV << "Exception caught, cleaning up...";
 
@@ -84,3 +82,5 @@ void cmd::Build(const std::string &directory) {
         throw exception;
     }
 }
+
+
