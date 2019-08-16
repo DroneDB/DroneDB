@@ -31,7 +31,11 @@ void updateIndex(const std::string &directory, Database *db) {
                     LOGD << "Make: " << p.extractMake();
                     LOGD << "Model: " << p.extractModel();
                     LOGD << "Sensor width: " << p.extractSensorWidth();
-                    LOGD << "Sensor: " << p.sensor();
+                    LOGD << "Sensor: " << p.extractSensor();
+                    LOGD << "Focal35: " << p.computeFocal().f35;
+                    LOGD << "FocalRatio: " << p.computeFocal().ratio;
+
+
 
                     Exiv2::ExifData::const_iterator end = exifData.end();
                     for (Exiv2::ExifData::const_iterator i = exifData.begin(); i != end; ++i) {

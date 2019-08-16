@@ -49,7 +49,7 @@ std::string Parser::extractModel() {
     }
 }
 
-std::string Parser::sensor() {
+std::string Parser::extractSensor() {
     std::string make = extractMake();
     std::string model = extractModel();
     utils::toLower(make);
@@ -70,15 +70,28 @@ std::string Parser::sensor() {
     return make + " " + model;
 }
 
-FocalInfo Parser::computeFocal() {
+Focal Parser::computeFocal() {
     auto focal35 = findKey({"Exif.Photo.FocalLengthIn35mmFilm", "Exif.Image.FocalLengthIn35mmFilm"});
-    auto focalLength = findKey({"Exif.Photo.FocalLength", "Exif.Image.FocalLength"});
-    FocalInfo res;
+    auto focal = findKey({"Exif.Photo.FocalLength", "Exif.Image.FocalLength"});
+    Focal res;
 
     if (focal35 != exifData.end() && focal35->toFloat() > 0) {
-        res.focalRatio = focal35->toFloat() / 36.0f;
+        res.f35 = focal35->toFloat();
+        res.ratio = res.f35 / 36.0f;
     } else {
+        float sensorWidth = extractSensorWidth();
+        std::string sensor = extractSensor();
+        if (sensorWidth == 0.0f && sensorData.count(sensor) > 0) {
+            sensorWidth = sensorData.at(sensor);
+        }
 
+        if (sensorWidth > 0.0f && focal != exifData.end()) {
+            res.ratio = focal->toFloat() / sensorWidth;
+            res.f35 = 36.0f * res.ratio;
+        } else {
+            res.f35 = 0.0f;
+            res.ratio = 0.0f;
+        }
     }
 
     return res;

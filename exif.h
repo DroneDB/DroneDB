@@ -3,6 +3,7 @@
 
 #include <exiv2/exiv2.hpp>
 #include "utils.h"
+#include "sensor_data.h"
 
 namespace exif{
 
@@ -12,9 +13,10 @@ struct ImageSize{
     ImageSize(int width, int height) : width(width), height(height){};
 };
 
-struct FocalInfo{
-    float focal35;
-    float focalRatio;
+struct Focal{
+    float f35;
+    float ratio;
+    Focal() : f35(0), ratio(0) {};
 };
 
 class Parser{
@@ -28,10 +30,14 @@ public:
     ImageSize extractImageSize();
     std::string extractMake();
     std::string extractModel();
-    std::string sensor();
-    FocalInfo computeFocal();
+    std::string extractSensor();
+    Focal computeFocal();
     float extractSensorWidth();
     float getMmPerUnit(long resolutionUnit);
+
+    // TODO: extract orientation
+    //       geo
+    //       capture time
 };
 
 
