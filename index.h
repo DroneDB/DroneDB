@@ -2,14 +2,12 @@
 #define INDEX_H
 
 #include <experimental/filesystem>
-#include <algorithm>
-#include <cctype>
-#include <string>
 #include <exiv2/exiv2.hpp>
 
 #include "database.h"
 #include "exceptions.h"
 #include "logger.h"
+#include "utils.h"
 
 namespace fs = std::experimental::filesystem;
 

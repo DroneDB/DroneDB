@@ -1,5 +1,5 @@
 #include "index.h"
-
+#include "exif.h"
 
 void updateIndex(const std::string &directory, Database *db) {
     // fs::directory_options::skip_permission_denied
@@ -24,6 +24,15 @@ void updateIndex(const std::string &directory, Database *db) {
                 auto exifData = image->exifData();
 
                 if (!exifData.empty()) {
+
+                    exif::Parser p(exifData);
+                    auto imageSize = p.extractImageSize();
+                    LOGD << "Image Size: " << imageSize.width << "x" << imageSize.height;
+                    LOGD << "Make: " << p.extractMake();
+                    LOGD << "Model: " << p.extractModel();
+                    LOGD << "Sensor width: " << p.extractSensorWidth();
+                    LOGD << "Sensor: " << p.sensor();
+
                     Exiv2::ExifData::const_iterator end = exifData.end();
                     for (Exiv2::ExifData::const_iterator i = exifData.begin(); i != end; ++i) {
                         const char* tn = i->typeName();
@@ -83,10 +92,8 @@ bool checkExtension(const fs::path &extension, const std::initializer_list<std::
     std::string ext = extension.string();
     if (ext.size() < 1) return false;
     std::string extLowerCase = ext.substr(1, ext.size());
-    std::transform(extLowerCase.begin(), extLowerCase.end(), extLowerCase.begin(),
-    [](unsigned char c) {
-        return std::tolower(c);
-    });
+    utils::toLower(extLowerCase);
+
     for (auto &m : matches) {
         if (m == extLowerCase) return true;
     }

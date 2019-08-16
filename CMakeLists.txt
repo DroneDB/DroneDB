@@ -4,12 +4,13 @@ project(ddb)
 
 set(SRC_LIST
     ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/utils.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/logger.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/database.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/exceptions.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/statement.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/index.cpp
-
+    ${CMAKE_CURRENT_SOURCE_DIR}/exif.cpp
 
     )
 add_subdirectory("cmd")
