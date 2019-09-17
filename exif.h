@@ -19,6 +19,14 @@ struct Focal{
     Focal() : f35(0), ratio(0) {};
 };
 
+struct GeoLocation{
+    double latitude;
+    double longitude;
+    double altitude;
+
+    GeoLocation() : latitude(0), longitude(0), altitude(0){}
+};
+
 class Parser{
     Exiv2::ExifData exifData;
 public:
@@ -33,8 +41,11 @@ public:
     std::string extractSensor();
     Focal computeFocal();
     float extractSensorWidth();
-    float getMmPerUnit(long resolutionUnit);
+    inline float getMmPerUnit(long resolutionUnit);
 
+    GeoLocation extractGeo();
+    inline double geoToDecimal(const Exiv2::ExifData::const_iterator &geoTag, const Exiv2::ExifData::const_iterator &geoRefTag);
+    inline double evalFrac(const Exiv2::Rational &rational);
     // TODO: extract orientation
     //       geo
     //       capture time

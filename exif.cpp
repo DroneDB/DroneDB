@@ -49,6 +49,7 @@ std::string Parser::extractModel() {
     }
 }
 
+// Extract "${make} ${model}" lowercase
 std::string Parser::extractSensor() {
     std::string make = extractMake();
     std::string model = extractModel();
@@ -116,7 +117,7 @@ float Parser::extractSensorWidth() {
 
 // Length of resolution unit in millimiters
 // https://www.sno.phy.queensu.ca/~phil/exiftool/TagNames/EXIF.html
-float Parser::getMmPerUnit(long resolutionUnit) {
+inline float Parser::getMmPerUnit(long resolutionUnit) {
     if (resolutionUnit == 2) {
         return 25.4f; // mm in 1 inch
     } else if (resolutionUnit == 3) {
@@ -125,6 +126,51 @@ float Parser::getMmPerUnit(long resolutionUnit) {
         LOGE << "Unknown EXIF resolution unit: " << resolutionUnit;
         return 0.0;
     }
+}
+
+// Extract geolocation information
+GeoLocation Parser::extractGeo() {
+    GeoLocation r;
+
+    auto latitude = findKey({"Exif.GPSInfo.GPSLatitude"});
+    auto latitudeRef = findKey({"Exif.GPSInfo.GPSLatitudeRef"});
+    auto longitude = findKey({"Exif.GPSInfo.GPSLongitude"});
+    auto longitudeRef = findKey({"Exif.GPSInfo.GPSLongitudeRef"});
+
+    r.latitude = geoToDecimal(latitude, latitudeRef);
+    r.longitude = geoToDecimal(longitude, longitudeRef);
+
+    auto altitude = findKey({"Exif.GPSInfo.GPSAltitude"});
+    if (altitude != exifData.end()) {
+        r.altitude = evalFrac(altitude->toRational());
+    }
+
+    return r;
+}
+
+// Converts a geotag location to decimal degrees
+inline double Parser::geoToDecimal(const Exiv2::ExifData::const_iterator &geoTag, const Exiv2::ExifData::const_iterator &geoRefTag) {
+    if (geoTag == exifData.end()) return 0.0;
+
+    // N/S, W/E
+    double sign = 1.0;
+    if (geoRefTag != exifData.end()) {
+        std::string ref = geoRefTag->toString();
+        utils::toUpper(ref);
+        if (ref == "S" || ref == "W") sign = -1.0;
+    }
+
+    double degrees = evalFrac(geoTag->toRational(0));
+    double minutes = evalFrac(geoTag->toRational(1));
+    double seconds = evalFrac(geoTag->toRational(2));
+
+    return sign * (degrees + minutes / 60.0 + seconds / 3600.0);
+}
+
+// Evaluates a rational
+double Parser::evalFrac(const Exiv2::Rational &rational) {
+    if (rational.second == 0) return 0.0;
+    return static_cast<double>(rational.first) / static_cast<double>(rational.second);
 }
 
 

@@ -26,7 +26,9 @@ void updateIndex(const std::string &directory, Database *db) {
                 if (!exifData.empty()) {
 
                     exif::Parser p(exifData);
+
                     auto imageSize = p.extractImageSize();
+                    LOGD << "Filename: " << file;
                     LOGD << "Image Size: " << imageSize.width << "x" << imageSize.height;
                     LOGD << "Make: " << p.extractMake();
                     LOGD << "Model: " << p.extractModel();
@@ -34,9 +36,11 @@ void updateIndex(const std::string &directory, Database *db) {
                     LOGD << "Sensor: " << p.extractSensor();
                     LOGD << "Focal35: " << p.computeFocal().f35;
                     LOGD << "FocalRatio: " << p.computeFocal().ratio;
+                    LOGD << "Latitude: " << std::setprecision(14) << p.extractGeo().latitude;
+                    LOGD << "Longitude: " << std::setprecision(14) << p.extractGeo().longitude;
+                    LOGD << "Altitude: " << std::setprecision(14) << p.extractGeo().altitude;
 
-
-
+                    exit(1);
                     Exiv2::ExifData::const_iterator end = exifData.end();
                     for (Exiv2::ExifData::const_iterator i = exifData.begin(); i != end; ++i) {
                         const char* tn = i->typeName();

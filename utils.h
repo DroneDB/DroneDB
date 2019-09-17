@@ -13,6 +13,12 @@ static inline void toLower(std::string &s) {
     });
 }
 
+static inline void toUpper(std::string &s) {
+    std::transform(s.begin(), s.end(), s.begin(),[](int ch) {
+        return std::toupper(ch);
+    });
+}
+
 static inline void ltrim(std::string &s) {
     s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](int ch) {
         return !std::isspace(ch);
