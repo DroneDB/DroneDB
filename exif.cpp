@@ -1,5 +1,6 @@
 #include "exif.h"
 #include "logger.h"
+#include "timezone.h"
 
 namespace exif {
 
@@ -171,6 +172,50 @@ inline double Parser::geoToDecimal(const Exiv2::ExifData::const_iterator &geoTag
 double Parser::evalFrac(const Exiv2::Rational &rational) {
     if (rational.second == 0) return 0.0;
     return static_cast<double>(rational.first) / static_cast<double>(rational.second);
+}
+
+// Extracts timestamp (seconds from Jan 1st 1970)
+time_t Parser::extractCaptureTime() {
+
+    // TODO:
+    // 1. Import https://github.com/HowardHinnant/date (+ timezone lib)
+    // 2. Use https://github.com/HowardHinnant/date/wiki/Examples-and-Recipes#time_point_to_components to use chrono time instead
+    // 3. Apply timezone info
+
+    for (auto &k : {
+                "Exif.Photo.DateTimeOriginal",
+                "Exif.Photo.DateTimeDigitized",
+                "Exif.Image.DateTime"
+            }) {
+        auto time = findKey(k);
+        if (time == exifData.end()) continue;
+
+        int year, month, day, hour, minute, second;
+
+        if (sscanf(time->toString().c_str(),"%d:%d:%d %d:%d:%d", &year,&month,&day,&hour,&minute,&second) == 6) {
+            struct tm d;
+            d.tm_year = year - 1900;
+            d.tm_mon = month - 1;
+            d.tm_mday = day;
+            d.tm_hour = hour;
+            d.tm_min = minute;
+            d.tm_sec = second;
+            d.tm_isdst = -1;
+
+            time_t timestamp = mktime(&d);
+
+            // Attempt to use geolocation information to
+            // find the proper timezone and adjust the timestamp
+            GeoLocation geo = extractGeo();
+            if (geo.latitude != 0.0 && geo.longitude != 0.0) {
+                Timezone::lookupUTCOffset(geo.latitude, geo.longitude);
+            }
+
+            return timestamp;
+        }
+    }
+
+    return 0;
 }
 
 

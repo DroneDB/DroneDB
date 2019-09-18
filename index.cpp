@@ -39,8 +39,9 @@ void updateIndex(const std::string &directory, Database *db) {
                     LOGD << "Latitude: " << std::setprecision(14) << p.extractGeo().latitude;
                     LOGD << "Longitude: " << std::setprecision(14) << p.extractGeo().longitude;
                     LOGD << "Altitude: " << std::setprecision(14) << p.extractGeo().altitude;
+                    LOGD << "Capture Time: " << p.extractCaptureTime();
 
-                    exit(1);
+                    exit(0);
                     Exiv2::ExifData::const_iterator end = exifData.end();
                     for (Exiv2::ExifData::const_iterator i = exifData.begin(); i != end; ++i) {
                         const char* tn = i->typeName();

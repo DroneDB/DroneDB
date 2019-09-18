@@ -28,6 +28,9 @@ class SQLException : public DBException{
 class FSException : public AppException{
     using AppException::AppException;
 };
+class TimezoneException : public AppException{
+    using AppException::AppException;
+};
 class IndexException : public AppException{
     using AppException::AppException;
 };

@@ -2,6 +2,7 @@
 #define EXIF_H
 
 #include <exiv2/exiv2.hpp>
+#include <stdio.h>
 #include "utils.h"
 #include "sensor_data.h"
 
@@ -46,8 +47,9 @@ public:
     GeoLocation extractGeo();
     inline double geoToDecimal(const Exiv2::ExifData::const_iterator &geoTag, const Exiv2::ExifData::const_iterator &geoRefTag);
     inline double evalFrac(const Exiv2::Rational &rational);
+
+    time_t extractCaptureTime();
     // TODO: extract orientation
-    //       geo
     //       capture time
 };
 

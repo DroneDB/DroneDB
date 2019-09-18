@@ -11,6 +11,8 @@ set(SRC_LIST
     ${CMAKE_CURRENT_SOURCE_DIR}/statement.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/index.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/exif.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/timezone.cpp
+
 
     )
 add_subdirectory("cmd")
@@ -18,6 +20,12 @@ add_subdirectory("libs")
 
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}/libs")
 add_executable(${PROJECT_NAME} ${SRC_LIST})
+
+file(GLOB DATA_FILES
+  "${CMAKE_CURRENT_SOURCE_DIR}/ddb_data/*"
+)
+file(COPY ${DATA_FILES} DESTINATION ${CMAKE_BINARY_DIR})
+
 
 find_package(exiv2 REQUIRED CONFIG NAMES exiv2)
 
