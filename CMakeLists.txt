@@ -13,7 +13,6 @@ set(SRC_LIST
     ${CMAKE_CURRENT_SOURCE_DIR}/exif.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/timezone.cpp
 
-
     )
 add_subdirectory("cmd")
 add_subdirectory("libs")
@@ -26,13 +25,12 @@ file(GLOB DATA_FILES
 )
 file(COPY ${DATA_FILES} DESTINATION ${CMAKE_BINARY_DIR})
 
-
 find_package(exiv2 REQUIRED CONFIG NAMES exiv2)
 
 if (WIN32)
     # TODO
 else()
-   target_link_libraries(${PROJECT_NAME} pthread dl spatialite sqlite3 stdc++fs exiv2)
+   target_link_libraries(${PROJECT_NAME} pthread dl spatialite sqlite3 stdc++fs exiv2 cctz::cctz)
 endif()
 
 set_target_properties(${PROJECT_NAME} PROPERTIES

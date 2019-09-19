@@ -1,3 +1,4 @@
+#include "cctz/time_zone.h"
 #include "timezone.h"
 #include "logger.h"
 #include "exceptions.h"
@@ -21,7 +22,7 @@ void Timezone::init() {
     initialized = true;
 }
 
-time_t Timezone::lookupUTCOffset(double latitude, double longitude) {
+long long int Timezone::getUTCEpoch(int year, int month, int day, int hour, int minute, int second, double latitude, double longitude) {
     Timezone::init();
     if (!db) return 0;
 
@@ -33,20 +34,30 @@ time_t Timezone::lookupUTCOffset(double latitude, double longitude) {
     }
 
     unsigned int index = 0;
+    cctz::time_zone tz = cctz::utc_time_zone();
+    bool found = false;
+
     while(results[index].lookupResult != ZD_LOOKUP_END) {
-        printf("%s:\n", ZDLookupResultToString(results[index].lookupResult));
-        printf("  meta: %u\n", results[index].metaId);
-        printf("  polygon: %u\n", results[index].polygonId);
         if(results[index].data) {
-            for(unsigned int i = 0; i < results[index].numFields; i++) {
-                if(results[index].fieldNames[i] && results[index].data[i]) {
-                    printf("  %s: %s\n", results[index].fieldNames[i], results[index].data[i]);
-                }
+            std::string timezoneId = std::string(results[index].data[0]) + std::string(results[index].data[1]);
+
+            if (!cctz::load_time_zone(timezoneId, &tz)) {
+                LOGE << "Cannot load timezone, defaulting to UTC: " << timezoneId;
+            } else {
+                found = true;
+                break;
             }
         }
 
         index++;
     }
 
-    return 0;
+    if (!found) {
+        LOGW << "Cannot find timezone for " << latitude << "," << longitude << ", defaulting to UTC";
+    }
+
+    auto time = tz.lookup(cctz::civil_second(year, month, day, hour, minute, second));
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+               time.post.time_since_epoch()
+           ).count();
 }

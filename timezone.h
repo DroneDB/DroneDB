@@ -10,7 +10,7 @@ public:
     static ZoneDetect *db;
 
     static void init();
-    static time_t lookupUTCOffset(double latitude, double longitude);
+    static long long int getUTCEpoch(int year, int month, int day, int hour, int minute, int second, double latitude, double longitude);
 };
 
 #endif // TIMEZONE_H
