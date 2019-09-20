@@ -201,5 +201,14 @@ time_t Parser::extractCaptureTime() {
     return 0;
 }
 
+int Parser::extractOrientation() {
+    auto k = findKey({"Exif.Image.Orientation"});
+    if (k != exifData.end()) {
+        return static_cast<int>(k->toLong());
+    }
+
+    return 1;
+}
+
 
 }

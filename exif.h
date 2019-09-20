@@ -49,8 +49,7 @@ public:
     inline double evalFrac(const Exiv2::Rational &rational);
 
     time_t extractCaptureTime();
-    // TODO: extract orientation
-    //       capture time
+    int extractOrientation();
 };
 
 
