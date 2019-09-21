@@ -12,10 +12,17 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License. */
 
-
+#include "command.h"
 
 namespace cmd {
 
-void Build(const std::string &directory);
+class Command;
+
+class Build : public Command {
+  public:
+    Build() {}
+
+    void run(const cxxopts::ParseResult &opts) override;
+};
 
 }

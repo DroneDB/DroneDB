@@ -3,6 +3,16 @@
 #include "hash.h"
 
 void updateIndex(const std::string &directory, Database *db) {
+
+    // Build map of current entries --> hash
+    std::unordered_map<std::string, std::string> entries;
+    auto q = db->query("SELECT path FROM entries");
+    while (q->fetch()) {
+        entries[q->getText(0)] = q->getText(1);
+    }
+
+    // Search directory and add/remove/update entries
+
     // fs::directory_options::skip_permission_denied
     for(auto i = fs::recursive_directory_iterator(directory);
             i != fs::recursive_directory_iterator();
@@ -12,11 +22,39 @@ void updateIndex(const std::string &directory, Database *db) {
         // Skip .ddb
         if(filename == ".ddb") i.disable_recursion_pending();
 
-        else {
-            if (checkExtension(i->path().extension(), {"jpg", "jpeg", "tif", "tiff"})) {
-                std::cout << i->path() << '\n';
+        // Skip directory entries (but recurse)
+        else if (fs::is_directory(i->path())) continue;
 
-                std::string file = i->path().string();
+        // Process files
+        else {
+            std::string unixPath = i->path().generic_string();
+            std::string file = i->path().string();
+
+            bool update = false;
+            auto entryKey = entries.find(unixPath);
+
+            if (entryKey == entries.end()) {
+                // Entry not in DB, add
+                LOGV << "Adding " << unixPath << "\n";
+            } else {
+                // Entry in DB
+                if (Hash::ingest(file) != entryKey->second) {
+                    // Hashes differ, file changed
+                    LOGV << "Updating " << unixPath << "\n";
+                    update = true;
+                } else {
+                    // Skip this file
+                    continue;
+                }
+            }
+
+
+            // TODO: this needs fixing
+
+
+            // Images
+            if (checkExtension(filename.extension(), {"jpg", "jpeg", "tif", "tiff"})) {
+
 
                 auto image = Exiv2::ImageFactory::open(file);
                 if (!image.get()) throw new IndexException("Cannot open " + file);
@@ -43,7 +81,7 @@ void updateIndex(const std::string &directory, Database *db) {
                     LOGD << "Capture Time: " << p.extractCaptureTime();
                     LOGD << "Orientation: " << p.extractOrientation();
 
-                    LOGD << "Hash: " << Hash::ingestFile(file);
+                    LOGD << "Hash: " << Hash::ingest(file);
 
                     exit(0);
                     Exiv2::ExifData::const_iterator end = exifData.end();
@@ -112,6 +150,4 @@ bool checkExtension(const fs::path &extension, const std::initializer_list<std::
     }
     return false;
 }
-
-
 

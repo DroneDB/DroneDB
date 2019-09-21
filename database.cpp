@@ -63,7 +63,7 @@ Database &Database::createTables() {
   SELECT InitSpatialMetaData(TRUE, 'NONE');
   SELECT InsertEpsgSrid(4326);
 
-  CREATE TABLE IF NOT EXISTS meta (
+  CREATE TABLE IF NOT EXISTS entries (
       path TEXT,
       hash TEXT,
       type INTEGER,
@@ -71,7 +71,7 @@ Database &Database::createTables() {
       mtime INTEGER,
       size  INTEGER
   );
-  SELECT AddGeometryColumn("meta", "geom", 4326, "GEOMETRYZ", "XYZ");
+  SELECT AddGeometryColumn("entries", "geom", 4326, "GEOMETRYZ", "XYZ");
 )<<<";
 
     LOGD << "DATABASE: About to create tables...";

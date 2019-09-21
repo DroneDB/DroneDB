@@ -57,3 +57,8 @@ int Statement::getInt(int columnId) {
     assert(stmt != nullptr);
     return sqlite3_column_int(stmt, columnId);
 }
+
+std::string Statement::getText(int columnId) {
+    assert(stmt != nullptr);
+    return std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, columnId)));
+}

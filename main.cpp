@@ -14,8 +14,7 @@ limitations under the License. */
 
 #include <iostream>
 
-#include "libs/cxxopts.hpp"
-
+#include "cmd/command.h"
 #include "logger.h"
 #include "database.h"
 #include "exceptions.h"
@@ -26,104 +25,102 @@ limitations under the License. */
 
 using namespace std;
 
-cxxopts::ParseResult parse(int argc, char* argv[]) {
-    try {
-        bool noArgs = argc <= 1;
+cxxopts::Options getDefaultOptions(char *argv[]) {
+    cxxopts::Options options(argv[0], "DDB v" VERSION " - Aerial data management utility");
+    options
+    .positional_help("[args] [PATH]")
+    .custom_help("<init|add|rm|status|commit|build>")
+    .show_positional_help()
+    .add_options()
+    ("command", "Command", cxxopts::value<std::string>())
+    ("h,help", "Print help")
+    ("v,verbose", "Show verbose output")
+    ("version", "Show version");
 
-        cxxopts::Options options(argv[0], "DDB v" VERSION " - Aerial data management utility");
-        options
-        .positional_help("[args]")
-        .custom_help("<command>")
-        .show_positional_help();
+    options.parse_positional({"command"});
 
-        options
-        .allow_unrecognised_options()
-        .add_options()
-
-        ("command", "[build]", cxxopts::value<std::string>())
-        ("i,input", "Input directory", cxxopts::value<std::string>())
-        ("o,output", "Output file", cxxopts::value<std::string>())
-        ("h,help", "Print help")
-        ("v,verbose", "Show verbose output")
-        ("version", "Show version");
-
-        options.parse_positional({"command", "input", "output"});
-
-        auto result = options.parse(argc, argv);
-
-        if (result.count("help") || noArgs || (result.count("command") && result["command"].as<std::string>() == "help")) {
-            LOGI << options.help({""});
-            exit(0);
-        }
-
-        return result;
-    } catch (const cxxopts::OptionException& e) {
-        LOGE << "Error parsing options: " << e.what() << std::endl;
-        exit(1);
-    }
+    return options;
 }
 
-static int callback(void *NotUsed, int argc, char **argv, char **azColName) {
-    int i;
-    for(i=0; i<argc; i++) {
-        printf("%s = %s\n", azColName[i], argv[i] ? argv[i] : "NULL");
-    }
-    printf("\n");
-    return 0;
-}
+
+//        options
+//        .add_options()
+//        ("i,input", "Input directory", cxxopts::value<std::vector<std::string>>())
+//        ("o,output", "Output file", cxxopts::value<std::string>())
+
+
+
+//options.parse_positional({"command", "input", "output"});
 
 int main(int argc, char* argv[]) {
     init_logger();
 
-    auto result = parse(argc, argv);
-    auto arguments = result.arguments();
-
-    if (result.count("verbose")) set_logger_verbose();
-
-    if (result.count("version")) {
-        LOGI << VERSION;
-        exit(0);
-    }
-
+    auto opts = getDefaultOptions(argv);
     try {
-        // Initialization steps
-        Database::Initialize();
+        auto result = opts.parse(argc, argv);
+        std::string command = result.count("command") ? result["command"].as<std::string>() : "";
 
-        LOGV << "DDB v" VERSION;
-        LOGV << "SQLite version: " << sqlite3_libversion();
-        LOGV << "SpatiaLite version: " << spatialite_version();
-
-        auto cmd = result["command"].as<std::string>();
-        if (cmd == "build") {
-            if (result.count("input")) {
-                cmd::Build(result["input"].as<std::string>());
-            } else {
-                throw InvalidArgsException("No input path specified");
-            }
-        } else {
-            throw InvalidArgsException("Invalid command \"" + cmd + "\"");
+        if (result.count("help") || command == "help" || command == "") {
+            std::cout << opts.help({""});
+            exit(0);
         }
 
-        if (result.count("command")) {
-            std::cout << "Command = " << result["command"].as<std::string>()
-                      << std::endl;
-        }
+        std::cout << command;
 
-        if (result.count("input")) {
-            std::cout << "Input = " << result["input"].as<std::string>()
-                      << std::endl;
-        }
-
-        if (result.count("output")) {
-            std::cout << "Output = " << result["output"].as<std::string>()
-                      << std::endl;
-        }
-    } catch (const InvalidArgsException &exception) {
-        LOGE << exception.what() << ". Run ./dbb --help for usage information.";
-    } catch (const AppException &exception) {
-        LOGF << exception.what();
-        return 1;
+    } catch (const cxxopts::OptionException& e) {
+        std::cerr << "Error parsing options: " << e.what() << std::endl;
+        exit(1);
     }
 
     return 0;
+
+    // ------ OLD -----------
+    /*
+        if (result.count("verbose")) set_logger_verbose();
+
+        if (result.count("version")) {
+            std::cout << VERSION;
+            exit(0);
+        }
+
+        try {
+            // Initialization steps
+            Database::Initialize();
+
+            LOGV << "DDB v" VERSION;
+            LOGV << "SQLite version: " << sqlite3_libversion();
+            LOGV << "SpatiaLite version: " << spatialite_version();
+
+            auto cmd = result["command"].as<std::string>();
+            if (cmd == "build") {
+                if (result.count("input")) {
+    //                cmd::Build(result["input"].as<std::string>());
+                } else {
+                    throw InvalidArgsException("No input path specified");
+                }
+            } else {
+                throw InvalidArgsException("Invalid command \"" + cmd + "\"");
+            }
+
+            if (result.count("command")) {
+                std::cout << "Command = " << result["command"].as<std::string>()
+                          << std::endl;
+            }
+
+            if (result.count("input")) {
+                std::cout << "Input = " << result["input"].as<std::string>()
+                          << std::endl;
+            }
+
+            if (result.count("output")) {
+                std::cout << "Output = " << result["output"].as<std::string>()
+                          << std::endl;
+            }
+        } catch (const InvalidArgsException &exception) {
+            LOGE << exception.what() << ". Run ./dbb --help for usage information.";
+        } catch (const AppException &exception) {
+            LOGF << exception.what();
+            return 1;
+        }
+    */
 }

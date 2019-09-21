@@ -22,7 +22,12 @@ limitations under the License. */
 
 namespace fs = std::experimental::filesystem;
 
-void cmd::Build(const std::string &directory) {
+namespace cmd {
+
+void Build::run(const cxxopts::ParseResult &opts) {
+    std::string directory = "test/"; // TODO!!! CHANGE ME
+    LOGV << "CHANGE THIS!!!!\n";
+
     fs::path dirPath = directory;
     fs::path ddbDirPath = dirPath / ".ddb";
     fs::path dbasePath = ddbDirPath / "dbase";
@@ -55,10 +60,10 @@ void cmd::Build(const std::string &directory) {
         std::unique_ptr<Database> db = std::make_unique<Database>();
         db->open(dbasePath.u8string());
 
-        if (!db->tableExists("meta")) {
+        if (!db->tableExists("entries")) {
             db->createTables();
         } else {
-            LOGD << "CMD::BUILD: " << "meta table exists";
+            LOGD << "CMD::BUILD: " << "entries table exists";
         }
 
         updateIndex(directory, db.get());
@@ -81,6 +86,8 @@ void cmd::Build(const std::string &directory) {
 
         throw exception;
     }
+}
+
 }
 
 

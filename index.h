@@ -14,4 +14,5 @@ namespace fs = std::experimental::filesystem;
 void updateIndex(const std::string &directory, Database *db);
 bool checkExtension(const fs::path &extension, const std::initializer_list<std::string>& matches);
 
+
 #endif // INDEX_H

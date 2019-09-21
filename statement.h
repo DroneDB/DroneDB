@@ -26,6 +26,7 @@ public:
     bool fetch();
 
     int getInt(int columnId);
+    std::string getText(int columnId);
     // TODO: more
 
     // TODO: reset via sqlite3_reset
