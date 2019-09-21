@@ -2,6 +2,14 @@ cmake_minimum_required(VERSION 2.8)
 
 project(ddb)
 
+if(NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE "Release" CACHE STRING
+      "Choose the type of build, options are: Debug Release
+RelWithDebInfo MinSizeRel."
+      FORCE)
+endif(NOT CMAKE_BUILD_TYPE)
+
+
 set(SRC_LIST
     ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/utils.cpp
@@ -12,6 +20,8 @@ set(SRC_LIST
     ${CMAKE_CURRENT_SOURCE_DIR}/index.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/exif.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/timezone.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/hash.cpp
+
 
     )
 add_subdirectory("cmd")

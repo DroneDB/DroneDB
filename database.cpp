@@ -65,7 +65,7 @@ Database &Database::createTables() {
 
   CREATE TABLE IF NOT EXISTS meta (
       path TEXT,
-      sha1 TEXT,
+      hash TEXT,
       type INTEGER,
       meta TEXT,
       mtime INTEGER,

@@ -1,5 +1,6 @@
 #include "index.h"
 #include "exif.h"
+#include "hash.h"
 
 void updateIndex(const std::string &directory, Database *db) {
     // fs::directory_options::skip_permission_denied
@@ -41,6 +42,8 @@ void updateIndex(const std::string &directory, Database *db) {
                     LOGD << "Altitude: " << std::setprecision(14) << p.extractGeo().altitude;
                     LOGD << "Capture Time: " << p.extractCaptureTime();
                     LOGD << "Orientation: " << p.extractOrientation();
+
+                    LOGD << "Hash: " << Hash::ingestFile(file);
 
                     exit(0);
                     Exiv2::ExifData::const_iterator end = exifData.end();
