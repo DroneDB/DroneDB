@@ -11,14 +11,21 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License. */
+#ifndef LIST_H
+#define LIST_H
 
-#include "logger.h"
+#include <map>
+#include "build.h"
+#include "init.h"
 
-void init_logger() {
-    static plog::ConsoleAppender<plog::TxtFormatter> consoleAppender;
-    plog::init(plog::info, &consoleAppender);
+namespace cmd{
+
+std::map<std::string, Command*> commands = {
+    {"build", new Build()},
+    {"init", new Init()}
+
+};
+
 }
 
-void set_logger_verbose() {
-    plog::get()->setMaxSeverity(plog::verbose);
-}
+#endif // LIST_H

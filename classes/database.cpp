@@ -15,7 +15,7 @@ limitations under the License. */
 #include <cassert>
 #include <string>
 
-#include "logger.h"
+#include "../logger.h"
 #include "exceptions.h"
 #include "database.h"
 
@@ -28,7 +28,7 @@ Database::Database() : db(nullptr) {}
 
 Database &Database::open(const std::string &file) {
     if (db != nullptr) throw DBException("Can't open database " + file + ", one is already open (" + open_file + ")");
-    LOGD << "DATABASE: Opening connection to " << file;
+    LOGD << "Opening connection to " << file;
     if( sqlite3_open(file.c_str(), &db) ) throw DBException("Can't open database: " + file);
     this->open_file = file;
 
@@ -37,7 +37,7 @@ Database &Database::open(const std::string &file) {
 
 Database &Database::close() {
     if (db != nullptr) {
-        LOGD << "DATABASE: Closing connection to " << open_file;
+        LOGD << "Closing connection to " << open_file;
         sqlite3_close(db);
         db = nullptr;
     }
@@ -74,9 +74,9 @@ Database &Database::createTables() {
   SELECT AddGeometryColumn("entries", "geom", 4326, "GEOMETRYZ", "XYZ");
 )<<<";
 
-    LOGD << "DATABASE: About to create tables...";
+    LOGD << "About to create tables...";
     this->exec(sql);
-    LOGD << "DATABASE: Created tables";
+    LOGD << "Created tables";
 
     return *this;
 }

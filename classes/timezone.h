@@ -2,7 +2,7 @@
 #define TIMEZONE_H
 
 #include <time.h>
-#include "libs/zonedetect/zonedetect.h"
+#include "../vendor/zonedetect/zonedetect.h"
 
 class Timezone{
 public:

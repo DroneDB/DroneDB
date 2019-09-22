@@ -15,9 +15,9 @@ limitations under the License. */
 #ifndef LOGGER_H
 #define LOGGER_H
 
-#include "libs/plog/Log.h"
-#include "libs/plog/Appenders/ConsoleAppender.h"
-#include "libs/plog/Formatters/MessageOnlyFormatter.h"
+#include "vendor/plog/Log.h"
+#include "vendor/plog/Appenders/ConsoleAppender.h"
+#include "vendor/plog/Formatters/MessageOnlyFormatter.h"
 
 void init_logger();
 void set_logger_verbose();

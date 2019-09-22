@@ -2,5 +2,7 @@ set(SRC_LIST
    ${SRC_LIST}
    ${CMAKE_CURRENT_SOURCE_DIR}/command.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/build.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/init.cpp
+
    PARENT_SCOPE
 )

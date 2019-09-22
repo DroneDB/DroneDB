@@ -12,13 +12,17 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License. */
 
-#include "logger.h"
+#include "command.h"
 
-void init_logger() {
-    static plog::ConsoleAppender<plog::TxtFormatter> consoleAppender;
-    plog::init(plog::info, &consoleAppender);
-}
+namespace cmd {
 
-void set_logger_verbose() {
-    plog::get()->setMaxSeverity(plog::verbose);
+class Build : public Command {
+  public:
+    Build() {}
+
+    virtual void run(cxxopts::ParseResult &opts) override;
+    virtual void setOptions(cxxopts::Options &opts) override;
+    virtual std::string description() override;
+};
+
 }

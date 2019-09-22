@@ -14,113 +14,61 @@ limitations under the License. */
 
 #include <iostream>
 
-#include "cmd/command.h"
+#include "cmd/list.h"
 #include "logger.h"
-#include "database.h"
-#include "exceptions.h"
-
-#include "cmd/build.hpp"
+#include "classes/exceptions.h"
+#include "classes/database.h"
 
 #define VERSION "0.9.0"
 
 using namespace std;
 
-cxxopts::Options getDefaultOptions(char *argv[]) {
-    cxxopts::Options options(argv[0], "DDB v" VERSION " - Aerial data management utility");
-    options
-    .positional_help("[args] [PATH]")
-    .custom_help("<init|add|rm|status|commit|build>")
-    .show_positional_help()
-    .add_options()
-    ("command", "Command", cxxopts::value<std::string>())
-    ("h,help", "Print help")
-    ("v,verbose", "Show verbose output")
-    ("version", "Show version");
-
-    options.parse_positional({"command"});
-
-    return options;
+[[ noreturn ]] void printHelp(char *argv[]) {
+    std::cout << "DroneDB v" VERSION " - Easily manage and share aerial datasets :)" << std::endl <<
+              "Usage:" << std::endl <<
+              "	" << argv[0] << " <init|add|rm|status|commit|build> [args] [PATHS]" << std::endl << std::endl <<
+              "   -h, --help		Print help" << std::endl <<
+              "   --version		Print version" << std::endl << std::endl <<
+              "For detailed command help use: " << argv[0] << " <command> --help " << std::endl <<
+              "See https://uav4geo.com for more information.";
+    exit(0);
 }
-
-
-//        options
-//        .add_options()
-//        ("i,input", "Input directory", cxxopts::value<std::vector<std::string>>())
-//        ("o,output", "Output file", cxxopts::value<std::string>())
-
-
-
-//options.parse_positional({"command", "input", "output"});
 
 int main(int argc, char* argv[]) {
     init_logger();
 
-    auto opts = getDefaultOptions(argv);
-    try {
-        auto result = opts.parse(argc, argv);
-        std::string command = result.count("command") ? result["command"].as<std::string>() : "";
-
-        if (result.count("help") || command == "help" || command == "") {
-            std::cout << opts.help({""});
+    if (argc <= 1) printHelp(argv);
+    else {
+        std::string cmdKey = std::string(argv[1]);
+        if (cmdKey == "--help" || cmdKey == "-h") {
+            printHelp(argv);
+        } else if (cmdKey == "--version") {
+            std::cout << VERSION << std::endl;
             exit(0);
+        } else {
+            auto cmdIter = cmd::commands.find(cmdKey);
+            if (cmdIter == cmd::commands.end()) {
+                printHelp(argv);
+            }
+
+            auto command = cmdIter->second;
+            try {
+                // Initialization steps
+                Database::Initialize();
+
+                LOGV << "DDB v" VERSION;
+                LOGV << "SQLite version: " << sqlite3_libversion();
+                LOGV << "SpatiaLite version: " << spatialite_version();
+
+                // Run command
+                argv[1] = argv[0];
+                command->run(argc - 1, argv + 1);
+            } catch (const AppException &exception) {
+                std::cerr << exception.what() << std::endl;
+                return 1;
+            }
         }
-
-        std::cout << command;
-
-    } catch (const cxxopts::OptionException& e) {
-        std::cerr << "Error parsing options: " << e.what() << std::endl;
-        exit(1);
     }
 
     return 0;
-
-    // ------ OLD -----------
-    /*
-        if (result.count("verbose")) set_logger_verbose();
-
-        if (result.count("version")) {
-            std::cout << VERSION;
-            exit(0);
-        }
-
-        try {
-            // Initialization steps
-            Database::Initialize();
-
-            LOGV << "DDB v" VERSION;
-            LOGV << "SQLite version: " << sqlite3_libversion();
-            LOGV << "SpatiaLite version: " << spatialite_version();
-
-            auto cmd = result["command"].as<std::string>();
-            if (cmd == "build") {
-                if (result.count("input")) {
-    //                cmd::Build(result["input"].as<std::string>());
-                } else {
-                    throw InvalidArgsException("No input path specified");
-                }
-            } else {
-                throw InvalidArgsException("Invalid command \"" + cmd + "\"");
-            }
-
-            if (result.count("command")) {
-                std::cout << "Command = " << result["command"].as<std::string>()
-                          << std::endl;
-            }
-
-            if (result.count("input")) {
-                std::cout << "Input = " << result["input"].as<std::string>()
-                          << std::endl;
-            }
-
-            if (result.count("output")) {
-                std::cout << "Output = " << result["output"].as<std::string>()
-                          << std::endl;
-            }
-        } catch (const InvalidArgsException &exception) {
-            LOGE << exception.what() << ". Run ./dbb --help for usage information.";
-        } catch (const AppException &exception) {
-            LOGF << exception.what();
-            return 1;
-        }
-    */
 }

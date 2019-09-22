@@ -11,18 +11,22 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License. */
+#ifndef INIT_H
+#define INIT_H
 
 #include "command.h"
 
 namespace cmd {
 
-class Command;
-
-class Build : public Command {
+class Init : public Command {
   public:
-    Build() {}
+    Init() {}
 
-    void run(const cxxopts::ParseResult &opts) override;
+    virtual void run(cxxopts::ParseResult &opts) override;
+    virtual void setOptions(cxxopts::Options &opts) override;
+    virtual std::string description() override;
 };
 
 }
+
+#endif // INIT_H

@@ -1,9 +1,92 @@
-#include "index.h"
-#include "exif.h"
-#include "hash.h"
+/* Copyright 2019 MasseranoLabs LLC
 
-void updateIndex(const std::string &directory, Database *db) {
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
 
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License. */
+#include "ddb.h"
+#include "../classes/exif.h"
+#include "../classes/hash.h"
+#include "../classes/database.h"
+#include "../classes/exceptions.h"
+#include "../utils.h"
+
+namespace ddb {
+
+#define DDB_FOLDER ".ddb"
+#define DDB_DBASE_FILENAME "dbase"
+
+std::string create(const std::string &directory) {
+    fs::path dirPath = directory;
+    if (!fs::exists(dirPath)) throw FSException("Invalid directory: " + directory  + " (does not exist)");
+
+    fs::path ddbDirPath = dirPath / DDB_FOLDER;
+    if (directory == ".") ddbDirPath = DDB_FOLDER; // Nicer to the eye
+    fs::path dbasePath = ddbDirPath / DDB_DBASE_FILENAME;
+
+    try {
+        LOGD << "Checking if .ddb directory exists...";
+        if (fs::exists(ddbDirPath)) {
+            throw FSException("Cannot initialize database: " + ddbDirPath.u8string() + " already exists");
+        } else {
+            if (fs::create_directory(ddbDirPath)) {
+                LOGD << ddbDirPath.u8string() + " created";
+            } else {
+                throw FSException("Cannot create directory: " + ddbDirPath.u8string() + ". Check that you have the proper permissions?");
+            }
+        }
+
+        LOGD << "Checking if dbase exists...";
+        if (fs::exists(dbasePath)) {
+            throw FSException(ddbDirPath.u8string() + " already exists");
+        } else {
+            LOGD << "Creating " << dbasePath.u8string();
+
+            // Create database
+            std::unique_ptr<Database> db = std::make_unique<Database>();
+            db->open(dbasePath.u8string());
+            db->createTables();
+            db->close();
+
+            return ddbDirPath;
+        }
+    } catch (const AppException &exception) {
+        LOGV << "Exception caught, cleaning up...";
+
+        throw exception;
+    }
+}
+
+std::unique_ptr<Database> open(const std::string &directory) {
+    fs::path dirPath = directory;
+    fs::path ddbDirPath = dirPath / DDB_FOLDER;
+    fs::path dbasePath = ddbDirPath / DDB_DBASE_FILENAME;
+
+    if (fs::exists(dbasePath)) {
+        LOGD << dbasePath.u8string() + " exists";
+
+        std::unique_ptr<Database> db = std::make_unique<Database>();
+        db->open(dbasePath.u8string());
+        if (!db->tableExists("entries")) {
+            throw DBException("Table 'entries' not found (not a valid database: " + dbasePath.u8string() + ")");
+        }
+        return db;
+    } else {
+        throw FSException(ddbDirPath.u8string() + " does not exist");
+    }
+}
+
+void updateIndex(const std::string &directory) {
+
+
+    /*
     // Build map of current entries --> hash
     std::unordered_map<std::string, std::string> entries;
     auto q = db->query("SELECT path FROM entries");
@@ -95,18 +178,18 @@ void updateIndex(const std::string &directory, Database *db) {
                                 << "\n";
 
                         if (i->key() == "Exif.GPSInfo.GPSLatitude") {
-//                            std::cout << "===========" << std::endl;
-//                            std::cout << std::setw(44) << std::setfill(' ') << std::left
-//                                      << i->key() << " "
-//                                      << "0x" << std::setw(4) << std::setfill('0') << std::right
-//                                      << std::hex << i->tag() << " "
-//                                      << std::setw(9) << std::setfill(' ') << std::left
-//                                      << (tn ? tn : "Unknown") << " "
-//                                      << std::dec << std::setw(3)
-//                                      << std::setfill(' ') << std::right
-//                                      << i->count() << "  "
-//                                      << std::dec << i->value()
-//                                      << "\n";
+    //                            std::cout << "===========" << std::endl;
+    //                            std::cout << std::setw(44) << std::setfill(' ') << std::left
+    //                                      << i->key() << " "
+    //                                      << "0x" << std::setw(4) << std::setfill('0') << std::right
+    //                                      << std::hex << i->tag() << " "
+    //                                      << std::setw(9) << std::setfill(' ') << std::left
+    //                                      << (tn ? tn : "Unknown") << " "
+    //                                      << std::dec << std::setw(3)
+    //                                      << std::setfill(' ') << std::right
+    //                                      << i->count() << "  "
+    //                                      << std::dec << i->value()
+    //                                      << "\n";
                         }
 
 
@@ -136,18 +219,8 @@ void updateIndex(const std::string &directory, Database *db) {
                 exit(1);
             }
         }
-    }
+    }*/
 }
 
-bool checkExtension(const fs::path &extension, const std::initializer_list<std::string>& matches) {
-    std::string ext = extension.string();
-    if (ext.size() < 1) return false;
-    std::string extLowerCase = ext.substr(1, ext.size());
-    utils::toLower(extLowerCase);
-
-    for (auto &m : matches) {
-        if (m == extLowerCase) return true;
-    }
-    return false;
 }
 

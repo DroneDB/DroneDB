@@ -3,8 +3,8 @@
 
 #include <exiv2/exiv2.hpp>
 #include <stdio.h>
-#include "utils.h"
-#include "sensor_data.h"
+#include "../utils.h"
+#include "../sensor_data.h"
 
 namespace exif{
 

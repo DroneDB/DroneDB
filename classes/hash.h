@@ -3,7 +3,7 @@
 
 #include <string>
 #include <fstream>
-#include "libs/hash-library/sha256.h"
+#include "../vendor/hash-library/sha256.h"
 
 class Hash{
 public:

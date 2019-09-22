@@ -11,14 +11,23 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License. */
+#ifndef INDEX_H
+#define INDEX_H
 
-#include "logger.h"
+#include <experimental/filesystem>
+#include <exiv2/exiv2.hpp>
 
-void init_logger() {
-    static plog::ConsoleAppender<plog::TxtFormatter> consoleAppender;
-    plog::init(plog::info, &consoleAppender);
+#include "../classes/database.h"
+
+namespace fs = std::experimental::filesystem;
+
+namespace ddb{
+
+std::string create(const std::string &directory);
+std::unique_ptr<Database> open(const std::string &directory);
+void updateIndex(const std::string &directory);
+
 }
 
-void set_logger_verbose() {
-    plog::get()->setMaxSeverity(plog::verbose);
-}
+
+#endif // INDEX_H

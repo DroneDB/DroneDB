@@ -14,7 +14,7 @@ limitations under the License. */
 
 #include <iostream>
 #include <experimental/filesystem>
-#include "build.h"
+#include "init.h"
 #include "../libs/ddb.h"
 #include "../classes/database.h"
 #include "../classes/exceptions.h"
@@ -24,30 +24,23 @@ namespace fs = std::experimental::filesystem;
 
 namespace cmd {
 
-void Build::setOptions(cxxopts::Options &opts) {
+void Init::setOptions(cxxopts::Options &opts) {
     opts
-    .positional_help("[args] [PATHS]")
-    .custom_help("build")
+    .positional_help("[args] [DIRECTORY]")
+    .custom_help("init")
     .add_options()
-    ("paths", "Paths", cxxopts::value<std::vector<std::string>>());
+    ("d,directory", "Directory", cxxopts::value<std::string>()->default_value("."));
 
-    opts.parse_positional({"paths"});
+    opts.parse_positional({"directory"});
 }
 
-std::string Build::description() {
-    return "Initialize and build an index. Shorthand for running an init,add,commit command sequence.";
+std::string Init::description() {
+    return "Initialize an index. If a directory is not specified, initializes the index in the current directory";
 }
 
-void Build::run(cxxopts::ParseResult &opts) {
-    if (!opts.count("paths")) {
-        printHelp();
-    }
-
-    auto paths = opts["paths"].as<std::vector<std::string>>();
-    for (auto &p : paths) {
-        std::cout << p << "\n";
-    }
-    exit(1);
+void Init::run(cxxopts::ParseResult &opts) {
+    std::string p = ddb::create(opts["directory"].as<std::string>());
+    std::cout << "Initialized empty database in " << p << std::endl;
 }
 
 }
