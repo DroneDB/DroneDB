@@ -17,13 +17,14 @@ limitations under the License. */
 #include <map>
 #include "build.h"
 #include "init.h"
+#include "add.h"
 
 namespace cmd{
 
 std::map<std::string, Command*> commands = {
     {"build", new Build()},
-    {"init", new Init()}
-
+    {"init", new Init()},
+    {"add", new Add()}
 };
 
 }

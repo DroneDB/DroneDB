@@ -14,7 +14,7 @@ limitations under the License. */
 
 #include <iostream>
 #include <experimental/filesystem>
-#include "init.h"
+#include "add.h"
 #include "../libs/ddb.h"
 #include "../classes/database.h"
 #include "../classes/exceptions.h"
@@ -24,23 +24,30 @@ namespace fs = std::experimental::filesystem;
 
 namespace cmd {
 
-void Init::setOptions(cxxopts::Options &opts) {
+void Add::setOptions(cxxopts::Options &opts) {
     opts
-    .positional_help("[args] [DIRECTORY]")
-    .custom_help("init")
+    .positional_help("[args] [PATHS]")
+    .custom_help("add")
     .add_options()
-    ("d,directory", "Working directory", cxxopts::value<std::string>()->default_value("."));
+    ("d,directory", "Working directory", cxxopts::value<std::string>()->default_value("."))
+    ("p,paths", "Paths to add to index (files or directories)", cxxopts::value<std::vector<std::string>>());
 
-    opts.parse_positional({"directory"});
+    opts.parse_positional({"paths"});
 }
 
-std::string Init::description() {
-    return "Initialize an index. If a directory is not specified, initializes the index in the current directory";
+std::string Add::description() {
+    return "Add files and directories to an index.";
 }
 
-void Init::run(cxxopts::ParseResult &opts) {
-    std::string p = ddb::create(opts["directory"].as<std::string>());
-    std::cout << "Initialized empty database in " << p << std::endl;
+void Add::run(cxxopts::ParseResult &opts) {
+    if (!opts.count("paths")) {
+        printHelp();
+    }
+    auto paths = opts["paths"].as<std::vector<std::string>>();
+    for (auto &p: paths) {
+        std::cout << p << std::endl;
+    }
+    std::cout << "hi";
 }
 
 }

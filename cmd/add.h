@@ -11,41 +11,22 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License. */
+#ifndef ADD_H
+#define ADD_H
+
 #include "command.h"
-#include "../logger.h"
 
 namespace cmd {
 
-Command::Command() {
-}
+class Add : public Command {
+  public:
+    Add() {}
 
-void Command::run(int argc, char *argv[]) {
-    cxxopts::Options opts(argv[0], description());
-    opts
-    .show_positional_help();
-
-    setOptions(opts);
-    opts.add_options()
-    ("h,help", "Print help")
-    ("v,verbose", "Show verbose output");
-    help = opts.help({""});
-
-    auto result = opts.parse(argc, argv);
-
-    if (result.count("help")) {
-        printHelp();
-    }
-
-    if (result.count("verbose")) {
-        set_logger_verbose();
-    }
-
-    run(result);
-}
-
-void Command::printHelp() {
-    std::cout << help;
-    exit(0);
-}
+    virtual void run(cxxopts::ParseResult &opts) override;
+    virtual void setOptions(cxxopts::Options &opts) override;
+    virtual std::string description() override;
+};
 
 }
+
+#endif // ADD_H

@@ -1,7 +1,8 @@
+file(GLOB SOURCES "*.cpp")
 set(SRC_LIST
    ${SRC_LIST}
-   ${CMAKE_CURRENT_SOURCE_DIR}/ddb.cpp
-
+   ${SOURCES}
    PARENT_SCOPE
 )
+
 

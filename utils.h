@@ -19,6 +19,15 @@ limitations under the License. */
 #include <cctype>
 #include <string>
 #include <experimental/filesystem>
+#include <sys/types.h>
+#include <sys/stat.h>
+#ifndef WIN32
+#include <unistd.h>
+#endif
+
+#ifdef WIN32
+#define stat _stat
+#endif
 
 namespace fs = std::experimental::filesystem;
 
@@ -65,6 +74,16 @@ static bool checkExtension(const fs::path &extension, const std::initializer_lis
         if (m == extLowerCase) return true;
     }
     return false;
+}
+
+static st_mtime getModifiedTime(const std::string &filePath){
+    struct stat result;
+    if(stat(filePath.c_str(), &result) == 0){
+        // TODO: test and find data type
+        return result.st_mtime;
+    }else{
+        return 0;
+    }
 }
 
 }

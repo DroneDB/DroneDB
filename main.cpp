@@ -30,22 +30,43 @@ using namespace std;
               "   -h, --help		Print help" << std::endl <<
               "   --version		Print version" << std::endl << std::endl <<
               "For detailed command help use: " << argv[0] << " <command> --help " << std::endl <<
-              "See https://uav4geo.com for more information.";
+              "See https://uav4geo.com for more information." << std::endl;
     exit(0);
+}
+
+bool hasParam(int argc, char *argv[], const char* param) {
+    for (int i = 0; i < argc; i++) {
+        if (strcmp(argv[i], param) == 0) return true;
+    }
+    return false;
 }
 
 int main(int argc, char* argv[]) {
     init_logger();
+    if (hasParam(argc, argv, "-v")) {
+        set_logger_verbose();
+    }
+
+    // Initialization steps
+    Database::Initialize();
+
+    LOGV << "DDB v" VERSION;
+    LOGV << "SQLite version: " << sqlite3_libversion();
+    LOGV << "SpatiaLite version: " << spatialite_version();
 
     if (argc <= 1) printHelp(argv);
     else {
         std::string cmdKey = std::string(argv[1]);
+
         if (cmdKey == "--help" || cmdKey == "-h") {
             printHelp(argv);
-        } else if (cmdKey == "--version") {
+        }
+
+        if (hasParam(argc, argv, "--version")) {
             std::cout << VERSION << std::endl;
             exit(0);
         } else {
+
             auto cmdIter = cmd::commands.find(cmdKey);
             if (cmdIter == cmd::commands.end()) {
                 printHelp(argv);
@@ -53,13 +74,6 @@ int main(int argc, char* argv[]) {
 
             auto command = cmdIter->second;
             try {
-                // Initialization steps
-                Database::Initialize();
-
-                LOGV << "DDB v" VERSION;
-                LOGV << "SQLite version: " << sqlite3_libversion();
-                LOGV << "SpatiaLite version: " << spatialite_version();
-
                 // Run command
                 argv[1] = argv[0];
                 command->run(argc - 1, argv + 1);
@@ -72,3 +86,5 @@ int main(int argc, char* argv[]) {
 
     return 0;
 }
+
+
