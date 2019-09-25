@@ -20,16 +20,13 @@ limitations under the License. */
 
 namespace ddb {
 
-#define DDB_FOLDER ".ddb"
-#define DDB_DBASE_FILENAME "dbase"
-
 std::string create(const std::string &directory) {
     fs::path dirPath = directory;
     if (!fs::exists(dirPath)) throw FSException("Invalid directory: " + directory  + " (does not exist)");
 
-    fs::path ddbDirPath = dirPath / DDB_FOLDER;
-    if (directory == ".") ddbDirPath = DDB_FOLDER; // Nicer to the eye
-    fs::path dbasePath = ddbDirPath / DDB_DBASE_FILENAME;
+    fs::path ddbDirPath = dirPath / ".ddb";
+    if (directory == ".") ddbDirPath = ".ddb"; // Nicer to the eye
+    fs::path dbasePath = ddbDirPath / "dbase";
 
     try {
         LOGD << "Checking if .ddb directory exists...";
@@ -64,10 +61,10 @@ std::string create(const std::string &directory) {
     }
 }
 
-std::unique_ptr<Database> open(const std::string &directory) {
+std::unique_ptr<Database> open(const std::string &directory, bool traverseUp = false) {
     fs::path dirPath = directory;
-    fs::path ddbDirPath = dirPath / DDB_FOLDER;
-    fs::path dbasePath = ddbDirPath / DDB_DBASE_FILENAME;
+    fs::path ddbDirPath = dirPath / ".ddb";
+    fs::path dbasePath = ddbDirPath / "dbase";
 
     if (fs::exists(dbasePath)) {
         LOGD << dbasePath.u8string() + " exists";
@@ -78,8 +75,59 @@ std::unique_ptr<Database> open(const std::string &directory) {
             throw DBException("Table 'entries' not found (not a valid database: " + dbasePath.u8string() + ")");
         }
         return db;
+    } else if (traverseUp && dirPath.parent_path() != dirPath) {
+        return open(dirPath.parent_path().u8string(), true);
     } else {
-        throw FSException(ddbDirPath.u8string() + " does not exist");
+        throw FSException("Not in a valid DroneDB directory, " + ddbDirPath.u8string() + " does not exist");
+    }
+}
+
+fs::path rootDirectory(Database *db) {
+    assert(db != nullptr);
+    return fs::path(db->getOpenFile()).parent_path().parent_path();
+}
+
+void addToIndex(Database *db, const std::vector<std::string> &paths) {
+    // Validate paths
+    std::string directory = rootDirectory(db);
+
+    if (!utils::pathsAreChildren(directory, paths)) {
+        throw FSException("Some paths cannot be added to the index because we couldn't find a parent .ddb folder.");
+    }
+
+    std::vector<fs::path> fileList;
+
+    for (fs::path p : paths) {
+        // fs::directory_options::skip_permission_denied
+        if (p.filename() == ".ddb") continue;
+
+        if (fs::is_directory(p)) {
+            for(auto i = fs::recursive_directory_iterator(p);
+                    i != fs::recursive_directory_iterator();
+                    ++i ) {
+                fs::path filename = i->path().filename();
+
+                // Skip .ddb
+                if(filename == ".ddb") i.disable_recursion_pending();
+
+                // Skip directory entries (but recurse)
+                else if (fs::is_directory(i->path())) continue;
+
+                // Process files
+                else {
+                    fileList.push_back(i->path());
+                }
+            }
+        } else if (fs::exists(p)) {
+            // File
+            fileList.push_back(p);
+        } else {
+            throw FSException("File does not exist: " + p.u8string());
+        }
+    }
+
+    for (auto &p : fileList) {
+        LOGV << p.u8string();
     }
 }
 

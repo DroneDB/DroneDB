@@ -24,8 +24,10 @@ namespace fs = std::experimental::filesystem;
 namespace ddb{
 
 std::string create(const std::string &directory);
-std::unique_ptr<Database> open(const std::string &directory);
+std::unique_ptr<Database> open(const std::string &directory, bool traverseUp);
+void addToIndex(Database *db, const std::vector<std::string> &paths);
 void updateIndex(const std::string &directory);
+
 
 }
 

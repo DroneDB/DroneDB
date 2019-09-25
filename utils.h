@@ -76,14 +76,26 @@ static bool checkExtension(const fs::path &extension, const std::initializer_lis
     return false;
 }
 
-static st_mtime getModifiedTime(const std::string &filePath){
+static long int getModifiedTime(const std::string &filePath){
     struct stat result;
     if(stat(filePath.c_str(), &result) == 0){
-        // TODO: test and find data type
         return result.st_mtime;
     }else{
         return 0;
     }
+}
+
+static bool pathsAreChildren(const std::string &parentPath, const std::vector<std::string> &childPaths){
+    fs::path p = parentPath;
+    std::string absP = fs::absolute(p);
+
+    for (auto &cp : childPaths){
+        fs::path c = cp;
+        std::string absC = fs::absolute(c);
+        if (absC.rfind(absP, 0) != 0) return false;
+    }
+
+    return true;
 }
 
 }

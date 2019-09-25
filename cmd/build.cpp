@@ -43,10 +43,6 @@ void Build::run(cxxopts::ParseResult &opts) {
         printHelp();
     }
 
-    auto paths = opts["paths"].as<std::vector<std::string>>();
-    for (auto &p : paths) {
-        std::cout << p << "\n";
-    }
     exit(1);
 }
 

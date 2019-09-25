@@ -27,17 +27,17 @@ void Database::Initialize() {
 Database::Database() : db(nullptr) {}
 
 Database &Database::open(const std::string &file) {
-    if (db != nullptr) throw DBException("Can't open database " + file + ", one is already open (" + open_file + ")");
+    if (db != nullptr) throw DBException("Can't open database " + file + ", one is already open (" + openFile + ")");
     LOGD << "Opening connection to " << file;
     if( sqlite3_open(file.c_str(), &db) ) throw DBException("Can't open database: " + file);
-    this->open_file = file;
+    this->openFile = file;
 
     return *this;
 }
 
 Database &Database::close() {
     if (db != nullptr) {
-        LOGD << "Closing connection to " << open_file;
+        LOGD << "Closing connection to " << openFile;
         sqlite3_close(db);
         db = nullptr;
     }
@@ -92,10 +92,13 @@ bool Database::tableExists(const std::string &table){
     return false;
 }
 
+std::string Database::getOpenFile(){
+    return openFile;
+}
+
 std::unique_ptr<Statement> Database::query(const std::string &query){
     return std::make_unique<Statement>(db, query);
 }
-
 
 Database::~Database() {
     this->close();

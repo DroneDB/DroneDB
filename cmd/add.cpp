@@ -19,6 +19,7 @@ limitations under the License. */
 #include "../classes/database.h"
 #include "../classes/exceptions.h"
 #include "../logger.h"
+#include "../utils.h"
 
 namespace fs = std::experimental::filesystem;
 
@@ -43,11 +44,9 @@ void Add::run(cxxopts::ParseResult &opts) {
     if (!opts.count("paths")) {
         printHelp();
     }
-    auto paths = opts["paths"].as<std::vector<std::string>>();
-    for (auto &p: paths) {
-        std::cout << p << std::endl;
-    }
-    std::cout << "hi";
+
+    auto db = ddb::open(opts["directory"].as<std::string>(), true);
+    ddb::addToIndex(db.get(), opts["paths"].as<std::vector<std::string>>());
 }
 
 }

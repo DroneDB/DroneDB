@@ -32,15 +32,18 @@ limitations under the License. */
 #include <sqlite3.h>
 #include <spatialite/gaiageo.h>
 #include <spatialite.h>
+#include <experimental/filesystem>
 
 #include <string>
 #include <memory>
 
 #include "statement.h"
 
+namespace fs = std::experimental::filesystem;
+
 class Database{
     sqlite3 *db;
-    std::string open_file;
+    std::string openFile;
 public:
     static void Initialize();
 
@@ -50,6 +53,7 @@ public:
     Database &exec(const std::string &sql);
     Database &createTables();
     bool tableExists(const std::string &table);
+    std::string getOpenFile();
 
     std::unique_ptr<Statement> query(const std::string &query);
 

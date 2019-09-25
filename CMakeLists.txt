@@ -22,10 +22,13 @@ set(SRC_LIST
     ${CMAKE_CURRENT_SOURCE_DIR}/logger.cpp
 
     )
+set(LINK_LIBRARIES pthread dl spatialite sqlite3 stdc++fs exiv2 cctz::cctz)
+
 add_subdirectory("cmd")
 add_subdirectory("classes")
 add_subdirectory("libs")
 add_subdirectory("vendor")
+add_subdirectory("test")
 
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}/vendor")
 add_executable(${PROJECT_NAME} ${SRC_LIST})
@@ -40,7 +43,7 @@ find_package(exiv2 REQUIRED CONFIG NAMES exiv2)
 if (WIN32)
     # TODO
 else()
-   target_link_libraries(${PROJECT_NAME} pthread dl spatialite sqlite3 stdc++fs exiv2 cctz::cctz)
+   target_link_libraries(${PROJECT_NAME} ${LINK_LIBRARIES})
 endif()
 
 set_target_properties(${PROJECT_NAME} PROPERTIES
