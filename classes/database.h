@@ -32,14 +32,14 @@ limitations under the License. */
 #include <sqlite3.h>
 #include <spatialite/gaiageo.h>
 #include <spatialite.h>
-#include <experimental/filesystem>
+#include <filesystem>
 
 #include <string>
 #include <memory>
 
 #include "statement.h"
 
-namespace fs = std::experimental::filesystem;
+namespace fs = std::filesystem;
 
 class Database{
     sqlite3 *db;

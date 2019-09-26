@@ -43,7 +43,7 @@ public:
     std::string getText(int columnId);
     // TODO: more
 
-    // TODO: reset via sqlite3_reset
+    void reset();
 };
 
 #endif // STATEMENT_H

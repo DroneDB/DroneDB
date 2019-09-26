@@ -136,6 +136,10 @@ inline float Parser::getMmPerUnit(long resolutionUnit) {
         return 25.4f; // mm in 1 inch
     } else if (resolutionUnit == 3) {
         return 10.0f; //  mm in 1 cm
+    } else if (resolutionUnit == 4) {
+        return 1.0f; // mm in 1 mm
+    } else if (resolutionUnit == 5) {
+        return 0.001f; // mm in 1 um
     } else {
         LOGE << "Unknown EXIF resolution unit: " << resolutionUnit;
         return 0.0;

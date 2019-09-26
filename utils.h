@@ -18,7 +18,7 @@ limitations under the License. */
 #include <algorithm>
 #include <cctype>
 #include <string>
-#include <experimental/filesystem>
+#include <filesystem>
 #include <sys/types.h>
 #include <sys/stat.h>
 #ifndef WIN32
@@ -29,7 +29,7 @@ limitations under the License. */
 #define stat _stat
 #endif
 
-namespace fs = std::experimental::filesystem;
+namespace fs = std::filesystem;
 
 namespace utils{
 
@@ -85,14 +85,13 @@ static long int getModifiedTime(const std::string &filePath){
     }
 }
 
-static bool pathsAreChildren(const std::string &parentPath, const std::vector<std::string> &childPaths){
-    fs::path p = parentPath;
-    std::string absP = fs::absolute(p);
+static bool pathsAreChildren(const fs::path &parentPath, const std::vector<std::string> &childPaths){
+    std::string canP = fs::absolute(parentPath).u8string();
 
     for (auto &cp : childPaths){
         fs::path c = cp;
-        std::string absC = fs::absolute(c);
-        if (absC.rfind(absP, 0) != 0) return false;
+        std::string canC = fs::absolute(c).u8string();
+        if (canC.rfind(canP, 0) != 0) return false;
     }
 
     return true;

@@ -26,7 +26,7 @@ Statement::Statement(sqlite3 *db, const std::string &query)
 
 void Statement::bindCheck(int ret) {
     if (ret != SQLITE_OK) {
-        throw SQLException("Failed binding values for " + query);
+        throw SQLException("Failed binding values for " + query + " (error code: " + std::to_string(ret) + ")");
     }
 }
 
@@ -74,4 +74,16 @@ int Statement::getInt(int columnId) {
 std::string Statement::getText(int columnId) {
     assert(stmt != nullptr);
     return std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, columnId)));
+}
+
+void Statement::reset() {
+    assert(stmt != nullptr);
+
+    if (sqlite3_reset(stmt) != SQLITE_OK) {
+        throw SQLException("Cannot reset query: " + query);
+    }
+
+    if (sqlite3_clear_bindings(stmt) != SQLITE_OK) {
+        throw SQLException("Cannot reset bindings: " + query);
+    }
 }

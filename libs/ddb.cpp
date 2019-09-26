@@ -89,7 +89,7 @@ fs::path rootDirectory(Database *db) {
 
 void addToIndex(Database *db, const std::vector<std::string> &paths) {
     // Validate paths
-    std::string directory = rootDirectory(db);
+    fs::path directory = rootDirectory(db);
 
     if (!utils::pathsAreChildren(directory, paths)) {
         throw FSException("Some paths cannot be added to the index because we couldn't find a parent .ddb folder.");
@@ -115,19 +115,45 @@ void addToIndex(Database *db, const std::vector<std::string> &paths) {
 
                 // Process files
                 else {
-                    fileList.push_back(i->path());
+                    fileList.push_back(fs::relative(i->path(), directory));
                 }
             }
         } else if (fs::exists(p)) {
             // File
-            fileList.push_back(p);
+            fileList.push_back(fs::relative(p, directory));
         } else {
             throw FSException("File does not exist: " + p.u8string());
         }
     }
 
-    for (auto &p : fileList) {
-        LOGV << p.u8string();
+    // TODO: there could be speed optimizations here?
+    auto q = db->query("SELECT mtime,hash FROM entries WHERE path=?");
+
+    for (auto &filePath : fileList) {
+        q->bind(1, filePath.generic_u8string());
+        if (q->fetch()) {
+            // Entry exist, update if necessary
+            // (check modified date and hash)
+
+            // Entry in DB
+//            if (Hash::ingest(file) != entryKey->second) {
+//                // Hashes differ, file changed
+//                LOGV << "Updating " << unixPath << "\n";
+//                update = true;
+//            } else {
+//                // Skip this file
+//                continue;
+//            }
+
+        } else {
+            // Brand new, add
+            // TODO
+            LOGV << "Adding " << filePath.generic_u8string() << "\n";
+        }
+
+//        LOGV << filePath.u8string();
+
+        q->reset();
     }
 }
 
@@ -135,12 +161,7 @@ void updateIndex(const std::string &directory) {
 
 
     /*
-    // Build map of current entries --> hash
-    std::unordered_map<std::string, std::string> entries;
-    auto q = db->query("SELECT path FROM entries");
-    while (q->fetch()) {
-        entries[q->getText(0)] = q->getText(1);
-    }
+
 
     // Search directory and add/remove/update entries
 

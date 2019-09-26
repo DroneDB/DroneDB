@@ -14,12 +14,12 @@ limitations under the License. */
 #ifndef INDEX_H
 #define INDEX_H
 
-#include <experimental/filesystem>
+#include <filesystem>
 #include <exiv2/exiv2.hpp>
 
 #include "../classes/database.h"
 
-namespace fs = std::experimental::filesystem;
+namespace fs = std::filesystem;
 
 namespace ddb{
 

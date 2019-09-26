@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License. */
 
 #include <iostream>
-#include <experimental/filesystem>
+#include <filesystem>
 #include "add.h"
 #include "../libs/ddb.h"
 #include "../classes/database.h"
@@ -21,7 +21,7 @@ limitations under the License. */
 #include "../logger.h"
 #include "../utils.h"
 
-namespace fs = std::experimental::filesystem;
+namespace fs = std::filesystem;
 
 namespace cmd {
 
