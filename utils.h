@@ -21,6 +21,7 @@ limitations under the License. */
 #include <filesystem>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include "classes/exceptions.h"
 #ifndef WIN32
 #include <unistd.h>
 #endif
@@ -76,21 +77,30 @@ static bool checkExtension(const fs::path &extension, const std::initializer_lis
     return false;
 }
 
-static long int getModifiedTime(const std::string &filePath){
+static time_t getModifiedTime(const std::string &filePath){
     struct stat result;
     if(stat(filePath.c_str(), &result) == 0){
         return result.st_mtime;
     }else{
-        return 0;
+        throw FSException("Cannot stat " + filePath);
+    }
+}
+
+static off_t getSize(const std::string &filePath){
+    struct stat result;
+    if(stat(filePath.c_str(), &result) == 0){
+        return result.st_size;
+    }else{
+        throw FSException("Cannot stat " + filePath);
     }
 }
 
 static bool pathsAreChildren(const fs::path &parentPath, const std::vector<std::string> &childPaths){
-    std::string canP = fs::absolute(parentPath).u8string();
+    std::string canP = fs::absolute(parentPath);
 
     for (auto &cp : childPaths){
         fs::path c = cp;
-        std::string canC = fs::absolute(c).u8string();
+        std::string canC = fs::absolute(c);
         if (canC.rfind(canP, 0) != 0) return false;
     }
 
