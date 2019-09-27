@@ -1,9 +1,9 @@
-file(GLOB SOURCES "*.cpp")
+file(GLOB TEST_SOURCES "*.cpp")
 
-add_executable(test ${SOURCES})
+include_directories("${CMAKE_CURRENT_SOURCE_DIR}/../vendor")
+add_executable(test ${TEST_SOURCES} ${SRC_LIST})
 target_link_libraries(test gtest_main ${LINK_LIBRARIES})
-add_test(NAME all_tests COMMAND test)
 
 set_target_properties(test PROPERTIES
-    CXX_STANDARD 17
-    )
+   CXX_STANDARD 17
+   )

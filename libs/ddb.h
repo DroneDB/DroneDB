@@ -15,9 +15,15 @@ limitations under the License. */
 #define INDEX_H
 
 #include <filesystem>
-#include <exiv2/exiv2.hpp>
 
 #include "../classes/database.h"
+#include "types.h"
+#include "../classes/exif.h"
+#include "../classes/hash.h"
+#include "../classes/database.h"
+#include "../classes/exceptions.h"
+#include "../utils.h"
+#include "entry.h"
 
 namespace fs = std::filesystem;
 

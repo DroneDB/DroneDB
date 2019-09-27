@@ -17,7 +17,6 @@ endif(CCACHE_FOUND)
 
 
 set(SRC_LIST
-    ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/utils.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/logger.cpp
 
@@ -31,7 +30,7 @@ add_subdirectory("vendor")
 add_subdirectory("test")
 
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}/vendor")
-add_executable(${PROJECT_NAME} ${SRC_LIST})
+add_executable(${PROJECT_NAME} ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp ${SRC_LIST})
 
 file(GLOB DATA_FILES
   "${CMAKE_CURRENT_SOURCE_DIR}/ddb_data/*"

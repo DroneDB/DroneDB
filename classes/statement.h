@@ -35,11 +35,13 @@ public:
     ~Statement();
 
     Statement &bind(int paramNum, const std::string &value);
-    // TODO: more
+    Statement &bind(int paramNum, int value);
+    Statement &bind(int paramNum, long long value);
 
     bool fetch();
 
     int getInt(int columnId);
+    long long getInt64(int columnId);
     std::string getText(int columnId);
     // TODO: more
 

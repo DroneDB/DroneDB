@@ -15,7 +15,9 @@ limitations under the License. */
 #define TYPES_H
 
 namespace ddb{
-    enum Type { Directory = 1, Generic, Image, Raster, PointCloud }
+
+enum Type { Undefined = 0, Directory = 1, Generic, GeoImage, Raster, PointCloud };
+
 }
 
 #endif // TYPES_H

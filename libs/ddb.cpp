@@ -12,11 +12,6 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License. */
 #include "ddb.h"
-#include "../classes/exif.h"
-#include "../classes/hash.h"
-#include "../classes/database.h"
-#include "../classes/exceptions.h"
-#include "../utils.h"
 
 namespace ddb {
 
@@ -62,7 +57,7 @@ std::string create(const std::string &directory) {
 }
 
 std::unique_ptr<Database> open(const std::string &directory, bool traverseUp = false) {
-    fs::path dirPath = directory;
+    fs::path dirPath = fs::absolute(directory);
     fs::path ddbDirPath = dirPath / ".ddb";
     fs::path dbasePath = ddbDirPath / "dbase";
 
@@ -95,7 +90,7 @@ void addToIndex(Database *db, const std::vector<std::string> &paths) {
         throw FSException("Some paths cannot be added to the index because we couldn't find a parent .ddb folder.");
     }
 
-    std::vector<fs::path> fileList;
+    std::vector<fs::path> pathList;
 
     for (fs::path p : paths) {
         // fs::directory_options::skip_permission_denied
@@ -105,22 +100,16 @@ void addToIndex(Database *db, const std::vector<std::string> &paths) {
             for(auto i = fs::recursive_directory_iterator(p);
                     i != fs::recursive_directory_iterator();
                     ++i ) {
-                fs::path filename = i->path().filename();
-
                 // Skip .ddb
-                if(filename == ".ddb") i.disable_recursion_pending();
+                if(i->path().filename() == ".ddb") i.disable_recursion_pending();
 
-                // Skip directory entries (but recurse)
-                else if (fs::is_directory(i->path())) continue;
-
-                // Process files
-                else {
-                    fileList.push_back(i->path());
-                }
+                pathList.push_back(i->path());
             }
+
+            pathList.push_back(p);
         } else if (fs::exists(p)) {
             // File
-            fileList.push_back(p);
+            pathList.push_back(p);
         } else {
             throw FSException("File does not exist: " + p.string());
         }
@@ -128,31 +117,39 @@ void addToIndex(Database *db, const std::vector<std::string> &paths) {
 
     // TODO: there could be speed optimizations here?
     auto q = db->query("SELECT mtime,hash FROM entries WHERE path=?");
+    auto insertQ = db->query("INSERT INTO entries (path, hash, type, meta, mtime, size) "
+                             "VALUES (?, ?, ?, ?, ?, ?)");
+    // TODO: execute in a transaction (speed up? bulk?)
 
-    for (auto &filePath : fileList) {
-        fs::path relPath = fs::relative(filePath, directory);
+    for (auto &p : pathList) {
+        fs::path relPath = fs::relative(p, directory);
         q->bind(1, relPath.generic_string());
 
         bool update = false;
         bool add = false;
+        bool folder = fs::is_directory(p);
 
-        std::string hash;
-        time_t mtime = -1;
+        Entry e;
 
         if (q->fetch()) {
             // Entry exist, update if necessary
-            // (check modified date and hash)
-            long int oldMtime = q->getInt(1);
-            mtime = utils::getModifiedTime(filePath);
 
-            if (mtime != oldMtime) {
-                LOGD << filePath << " modified time differs from " << mtime;
-                std::string oldHash = q->getText(2);
-                hash = Hash::ingest(filePath);
+            // - Never need to update a folder, the meta doesn't change
+            // If file, check modified date and hash
 
-                if (oldHash != hash) {
-                    LOGD << filePath << " hash differs (old: " << oldHash << " | new: " << hash << ")";
-                    update = true;
+            if (!folder) {
+                long long oldMtime = q->getInt64(0);
+                e.mtime = utils::getModifiedTime(p);
+
+                if (e.mtime != oldMtime) {
+                    LOGD << p.string() << " modified time ( " << oldMtime << " ) differs from file value: " << e.mtime;
+                    std::string oldHash = q->getText(1);
+                    e.hash = Hash::ingest(p);
+
+                    if (oldHash != e.hash) {
+                        LOGD << p.string() << " hash differs (old: " << oldHash << " | new: " << e.hash << ")";
+                        update = true;
+                    }
                 }
             }
         } else {
@@ -161,106 +158,32 @@ void addToIndex(Database *db, const std::vector<std::string> &paths) {
         }
 
         if (add || update) {
-            // Parse file
-            if (mtime == -1) mtime = utils::getModifiedTime(filePath);
-            if (hash == "") hash = Hash::ingest(filePath);
-            off_t size = utils::getSize(filePath);
+            parseEntry(p, directory, e);
 
-
-            // Images
-            if (utils::checkExtension(filePath.extension(), {"jpg", "jpeg", "tif", "tiff"})) {
-                auto image = Exiv2::ImageFactory::open(filePath);
-                if (!image.get()) throw new IndexException("Cannot open " + filePath);
-                image->readMetadata();
-
-                auto exifData = image->exifData();
-
-                if (!exifData.empty()) {
-
-                    exif::Parser p(exifData);
-
-                    auto imageSize = p.extractImageSize();
-                    LOGD << "Filename: " << filePath;
-                    LOGD << "Image Size: " << imageSize.width << "x" << imageSize.height;
-                    LOGD << "Make: " << p.extractMake();
-                    LOGD << "Model: " << p.extractModel();
-                    LOGD << "Sensor width: " << p.extractSensorWidth();
-                    LOGD << "Sensor: " << p.extractSensor();
-                    LOGD << "Focal35: " << p.computeFocal().f35;
-                    LOGD << "FocalRatio: " << p.computeFocal().ratio;
-                    LOGD << "Latitude: " << std::setprecision(14) << p.extractGeo().latitude;
-                    LOGD << "Longitude: " << std::setprecision(14) << p.extractGeo().longitude;
-                    LOGD << "Altitude: " << std::setprecision(14) << p.extractGeo().altitude;
-                    LOGD << "Capture Time: " << p.extractCaptureTime();
-                    LOGD << "Orientation: " << p.extractOrientation();
-
-                    Exiv2::ExifData::const_iterator end = exifData.end();
-                    for (Exiv2::ExifData::const_iterator i = exifData.begin(); i != end; ++i) {
-                        const char* tn = i->typeName();
-                        std::cout
-                                << i->key() << " "
-
-                                << i->value()
-                                << " | " << tn
-                                << "\n";
-
-                        if (i->key() == "Exif.GPSInfo.GPSLatitude") {
-                            //                            std::cout << "===========" << std::endl;
-                            //                            std::cout << std::setw(44) << std::setfill(' ') << std::left
-                            //                                      << i->key() << " "
-                            //                                      << "0x" << std::setw(4) << std::setfill('0') << std::right
-                            //                                      << std::hex << i->tag() << " "
-                            //                                      << std::setw(9) << std::setfill(' ') << std::left
-                            //                                      << (tn ? tn : "Unknown") << " "
-                            //                                      << std::dec << std::setw(3)
-                            //                                      << std::setfill(' ') << std::right
-                            //                                      << i->count() << "  "
-                            //                                      << std::dec << i->value()
-                            //                                      << "\n";
-                        }
-
-
-                    }
-
-                } else {
-                    LOGW << "No EXIF data found in " << filePath;
-                }
-
-//                auto xmpData = image->xmpData();
-//                if (!xmpData.empty()) {
-//                    for (Exiv2::XmpData::const_iterator md = xmpData.begin();
-//                            md != xmpData.end(); ++md) {
-//                        std::cout << std::setfill(' ') << std::left
-//                                  << std::setw(44)
-//                                  << md->key() << " "
-//                                  << std::setw(9) << std::setfill(' ') << std::left
-//                                  << md->typeName() << " "
-//                                  << std::dec << std::setw(3)
-//                                  << std::setfill(' ') << std::right
-//                                  << md->count() << "  "
-//                                  << std::dec << md->value()
-//                                  << std::endl;
-//                    }
-//                }
-            } else {
-                // Other files
-            }
-
+            insertQ->bind(1, e.path);
+            insertQ->bind(2, e.hash);
+            insertQ->bind(3, e.type);
+            insertQ->bind(4, e.meta);
+            insertQ->bind(5, static_cast<long long>(e.mtime));
+            insertQ->bind(6, static_cast<long long>(e.size));
 
             if (add) {
-                LOGV << "Adding " << filePath.generic_string() << "\n";
+                std::cout << "[+] " << e.path << std::endl;
             } else {
-                LOGV << "Updating " << filePath.generic_string() << "\n";
+                std::cout << "[*] " << e.path << std::endl;
             }
+
+            insertQ->fetch();
+            insertQ->reset();
         }
 
         q->reset();
     }
+
 }
 
 void updateIndex(const std::string &directory) {
-
-
+    LOGV << directory << " TODO!";
 }
 
 }

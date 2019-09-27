@@ -14,4 +14,60 @@ limitations under the License. */
 
 #include "utils.h"
 
+namespace utils {
 
+bool checkExtension(const fs::path &extension, const std::initializer_list<std::string>& matches) {
+    std::string ext = extension.string();
+    if (ext.size() < 1) return false;
+    std::string extLowerCase = ext.substr(1, ext.size());
+    utils::toLower(extLowerCase);
+
+    for (auto &m : matches) {
+        if (m == extLowerCase) return true;
+    }
+    return false;
+}
+
+time_t getModifiedTime(const std::string &filePath) {
+    struct stat result;
+    if(stat(filePath.c_str(), &result) == 0) {
+        return result.st_mtime;
+    } else {
+        throw FSException("Cannot stat " + filePath);
+    }
+}
+
+off_t getSize(const std::string &filePath) {
+    struct stat result;
+    if(stat(filePath.c_str(), &result) == 0) {
+        return result.st_size;
+    } else {
+        throw FSException("Cannot stat " + filePath);
+    }
+}
+
+bool pathsAreChildren(const fs::path &parentPath, const std::vector<std::string> &childPaths) {
+    std::string absP = fs::weakly_canonical(fs::absolute(parentPath));
+    if (absP.length() > 1 && absP.back() == fs::path::preferred_separator) absP.pop_back();
+
+    for (auto &cp : childPaths) {
+        std::string absC = fs::weakly_canonical(fs::absolute(cp));
+        if (absC.rfind(absP, 0) != 0) return false;
+    }
+
+    return true;
+}
+
+fs::path getExeFolderPath() {
+#ifdef WIN32
+    wchar_t path[MAX_PATH] = { 0 };
+    GetModuleFileNameW(NULL, path, MAX_PATH);
+    return fs::path(path).parent_path();
+#else
+    char result[PATH_MAX];
+    ssize_t count = readlink("/proc/self/exe", result, PATH_MAX);
+    return fs::path(std::string(result, static_cast<size_t>((count > 0) ? count : 0))).parent_path();
+#endif
+}
+
+}

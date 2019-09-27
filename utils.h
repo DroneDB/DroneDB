@@ -22,12 +22,19 @@ limitations under the License. */
 #include <sys/types.h>
 #include <sys/stat.h>
 #include "classes/exceptions.h"
-#ifndef WIN32
-#include <unistd.h>
-#endif
+#include "logger.h"
 
 #ifdef WIN32
+#include <windows.h>    //GetModuleFileNameW
 #define stat _stat
+#else
+#include <limits.h>
+#include <unistd.h>
+
+#ifndef PATH_MAX
+#define PATH_MAX 4096
+#endif
+
 #endif
 
 namespace fs = std::filesystem;
@@ -65,47 +72,13 @@ static inline void trim(std::string &s) {
 
 // Compares an extension with a list of extension strings
 // @return true if the extension matches one of those in the list
-static bool checkExtension(const fs::path &extension, const std::initializer_list<std::string>& matches) {
-    std::string ext = extension.string();
-    if (ext.size() < 1) return false;
-    std::string extLowerCase = ext.substr(1, ext.size());
-    utils::toLower(extLowerCase);
+bool checkExtension(const fs::path &extension, const std::initializer_list<std::string>& matches);
 
-    for (auto &m : matches) {
-        if (m == extLowerCase) return true;
-    }
-    return false;
-}
+time_t getModifiedTime(const std::string &filePath);
+off_t getSize(const std::string &filePath);
+bool pathsAreChildren(const fs::path &parentPath, const std::vector<std::string> &childPaths);
 
-static time_t getModifiedTime(const std::string &filePath){
-    struct stat result;
-    if(stat(filePath.c_str(), &result) == 0){
-        return result.st_mtime;
-    }else{
-        throw FSException("Cannot stat " + filePath);
-    }
-}
-
-static off_t getSize(const std::string &filePath){
-    struct stat result;
-    if(stat(filePath.c_str(), &result) == 0){
-        return result.st_size;
-    }else{
-        throw FSException("Cannot stat " + filePath);
-    }
-}
-
-static bool pathsAreChildren(const fs::path &parentPath, const std::vector<std::string> &childPaths){
-    std::string canP = fs::absolute(parentPath);
-
-    for (auto &cp : childPaths){
-        fs::path c = cp;
-        std::string canC = fs::absolute(c);
-        if (canC.rfind(canP, 0) != 0) return false;
-    }
-
-    return true;
-}
+fs::path getExeFolderPath();
 
 }
 

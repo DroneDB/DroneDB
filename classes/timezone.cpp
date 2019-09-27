@@ -14,6 +14,7 @@ limitations under the License. */
 #include "cctz/time_zone.h"
 #include "timezone.h"
 #include "../logger.h"
+#include "../utils.h"
 #include "exceptions.h"
 
 bool Timezone::initialized = false;
@@ -27,10 +28,9 @@ void Timezone::init() {
     if (initialized) return;
 
     ZDSetErrorHandler(onError);
-    db = ZDOpenDatabase("./timezone21.bin");
-    if (!db) {
-        LOGE << "Cannot open timezone database ./timezone21.bin";
-    }
+    std::cerr << "HERE! " << utils::getExeFolderPath() / "timezone21.bin" << "\n";
+    db = ZDOpenDatabase((utils::getExeFolderPath() / "timezone21.bin").c_str());
+    if (!db) throw TimezoneException("Cannot open timezone database ./timezone21.bin");
 
     initialized = true;
 }

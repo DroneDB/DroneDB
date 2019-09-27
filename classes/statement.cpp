@@ -16,7 +16,7 @@ limitations under the License. */
 #include "exceptions.h"
 
 Statement::Statement(sqlite3 *db, const std::string &query)
-    : db(db), query(query) {
+    : db(db), query(query), hasRow(false), done(false) {
     if (sqlite3_prepare_v2(db, query.c_str(), static_cast<int>(query.size()), &stmt, nullptr) != SQLITE_OK) {
         throw SQLException("Cannot prepare SQL statement: " + query);
     }
@@ -32,6 +32,7 @@ void Statement::bindCheck(int ret) {
 
 Statement::~Statement() {
     if (stmt != nullptr) {
+        LOGD << "Destroying statement: " << stmt;
         sqlite3_finalize(stmt);
         stmt = nullptr;
     }
@@ -39,14 +40,30 @@ Statement::~Statement() {
 
 Statement &Statement::bind(int paramNum, const std::string &value) {
     assert(stmt != nullptr && db != nullptr);
-    bindCheck(sqlite3_bind_text(stmt, paramNum, value.c_str(), static_cast<int>(value.size()), SQLITE_STATIC));
+//    LOGD << "Bind \"" << value << "\" as param " << paramNum;
+    bindCheck(sqlite3_bind_text(stmt, paramNum, value.c_str(), static_cast<int>(value.size()), SQLITE_TRANSIENT));
+    return *this;
+}
+
+Statement &Statement::bind(int paramNum, int value) {
+    assert(stmt != nullptr && db != nullptr);
+//    LOGD << "Bind " << value << " as param " << paramNum;
+    bindCheck(sqlite3_bind_int(stmt, paramNum, value));
+    return *this;
+}
+
+Statement &Statement::bind(int paramNum, long long value) {
+    assert(stmt != nullptr && db != nullptr);
+//    LOGD << "Bind " << value << " as param " << paramNum;
+    bindCheck(sqlite3_bind_int64(stmt, paramNum, value));
     return *this;
 }
 
 Statement &Statement::step() {
     assert(stmt != nullptr);
 
-    switch(sqlite3_step(stmt)) {
+    int code = sqlite3_step(stmt);
+    switch(code) {
     case SQLITE_DONE:
         done = true;
         hasRow = false;
@@ -54,6 +71,10 @@ Statement &Statement::step() {
     case SQLITE_ROW:
         hasRow = true;
         break;
+    case SQLITE_ERROR:
+    case SQLITE_MISUSE:
+    case SQLITE_BUSY:
+        throw DBException("Cannot execute step for " + query + " (error code: " + std::to_string(code) + ")");
     default:
         hasRow = done = false;
     }
@@ -71,6 +92,11 @@ int Statement::getInt(int columnId) {
     return sqlite3_column_int(stmt, columnId);
 }
 
+long long Statement::getInt64(int columnId) {
+    assert(stmt != nullptr);
+    return sqlite3_column_int64(stmt, columnId);
+}
+
 std::string Statement::getText(int columnId) {
     assert(stmt != nullptr);
     return std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, columnId)));
@@ -86,4 +112,7 @@ void Statement::reset() {
     if (sqlite3_clear_bindings(stmt) != SQLITE_OK) {
         throw SQLException("Cannot reset bindings: " + query);
     }
+
+    done = false;
+    hasRow = false;
 }
