@@ -73,7 +73,7 @@ std::unique_ptr<Database> open(const std::string &directory, bool traverseUp = f
     } else if (traverseUp && dirPath.parent_path() != dirPath) {
         return open(dirPath.parent_path(), true);
     } else {
-        throw FSException("Not in a valid DroneDB directory, " + ddbDirPath.string() + " does not exist");
+        throw FSException("Not a valid DroneDB directory, .ddb does not exist. Did you forget to run ./ddb init?");
     }
 }
 
@@ -168,9 +168,9 @@ void addToIndex(Database *db, const std::vector<std::string> &paths) {
             insertQ->bind(6, static_cast<long long>(e.size));
 
             if (add) {
-                std::cout << "[+] " << e.path << std::endl;
+                std::cout << "A\t" << e.path << std::endl;
             } else {
-                std::cout << "[*] " << e.path << std::endl;
+                std::cout << "U\t" << e.path << std::endl;
             }
 
             insertQ->fetch();
