@@ -1,11 +1,14 @@
 #include <exiv2/exiv2.hpp>
 #include "entry.h"
 
+using json = nlohmann::json;
+
 namespace ddb {
 
 void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entry) {
     // Parse file
     entry.path = fs::relative(path, rootDirectory).generic_string();
+    json meta;
 
     if (fs::is_directory(path)) {
         entry.type = Type::Directory;
@@ -32,14 +35,21 @@ void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
                 exif::Parser p(exifData);
 
                 auto imageSize = p.extractImageSize();
-                LOGD << "Filename: " << path.string();
-                LOGD << "Image Size: " << imageSize.width << "x" << imageSize.height;
-                LOGD << "Make: " << p.extractMake();
-                LOGD << "Model: " << p.extractModel();
-                LOGD << "Sensor width: " << p.extractSensorWidth();
-                LOGD << "Sensor: " << p.extractSensor();
-                LOGD << "Focal35: " << p.computeFocal().f35;
-                LOGD << "FocalRatio: " << p.computeFocal().ratio;
+                meta["imageWidth"] = imageSize.width;
+                meta["imageHeight"] = imageSize.height;
+                meta["make"] = p.extractMake();
+                meta["model"] = p.extractModel();
+                meta["sensorWidth"] = p.extractSensorWidth();
+                meta["sensor"] = p.extractSensor();
+
+                auto focal = p.computeFocal();
+                meta["focal35"] = focal.f35;
+                meta["focalRatio"] = focal.ratio;
+
+                auto geo = p.extractGeo();
+//                meta["latitude"]
+                // TODO!
+
                 LOGD << "Latitude: " << std::setprecision(14) << p.extractGeo().latitude;
                 LOGD << "Longitude: " << std::setprecision(14) << p.extractGeo().longitude;
                 LOGD << "Altitude: " << std::setprecision(14) << p.extractGeo().altitude;
@@ -56,6 +66,9 @@ void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
             }
         }
     }
+
+    // Serialize JSON
+    entry.meta = meta.dump();
 }
 
 }

@@ -119,7 +119,7 @@ void addToIndex(Database *db, const std::vector<std::string> &paths) {
     auto q = db->query("SELECT mtime,hash FROM entries WHERE path=?");
     auto insertQ = db->query("INSERT INTO entries (path, hash, type, meta, mtime, size) "
                              "VALUES (?, ?, ?, ?, ?, ?)");
-    // TODO: execute in a transaction (speed up? bulk?)
+    db->exec("BEGIN TRANSACTION");
 
     for (auto &p : pathList) {
         fs::path relPath = fs::relative(p, directory);
@@ -180,6 +180,7 @@ void addToIndex(Database *db, const std::vector<std::string> &paths) {
         q->reset();
     }
 
+    db->exec("COMMIT");
 }
 
 void updateIndex(const std::string &directory) {

@@ -2,6 +2,7 @@
 #define ENTRY_H
 
 #include <filesystem>
+#include "../vendor/json.hpp"
 #include "types.h"
 #include "../logger.h"
 #include "../classes/exceptions.h"

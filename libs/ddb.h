@@ -15,7 +15,6 @@ limitations under the License. */
 #define INDEX_H
 
 #include <filesystem>
-
 #include "../classes/database.h"
 #include "types.h"
 #include "../classes/exif.h"
