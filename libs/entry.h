@@ -2,7 +2,8 @@
 #define ENTRY_H
 
 #include <filesystem>
-#include "../vendor/json.hpp"
+#include "json_fwd.hpp"
+#include "json.hpp"
 #include "types.h"
 #include "../logger.h"
 #include "../classes/exceptions.h"
@@ -12,15 +13,16 @@
 
 namespace fs = std::filesystem;
 
-namespace ddb{
+namespace ddb {
 
-struct Entry{
+struct Entry {
     std::string path = "";
     std::string hash = "";
     Type type = Type::Undefined;
     std::string meta = "";
     time_t mtime = 0;
     off_t size = 0;
+    int depth = 0;
 };
 
 void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entry);

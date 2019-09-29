@@ -18,6 +18,7 @@ limitations under the License. */
 #include "../logger.h"
 #include "exceptions.h"
 #include "database.h"
+#include "../utils.h"
 
 // Initialize spatialite
 void Database::Initialize() {
@@ -29,7 +30,16 @@ Database::Database() : db(nullptr) {}
 Database &Database::open(const std::string &file) {
     if (db != nullptr) throw DBException("Can't open database " + file + ", one is already open (" + openFile + ")");
     LOGD << "Opening connection to " << file;
-    if( sqlite3_open(file.c_str(), &db) ) throw DBException("Can't open database: " + file);
+    if( sqlite3_open(file.c_str(), &db) != SQLITE_OK ) throw DBException("Can't open database: " + file);
+
+//    if( sqlite3_enable_load_extension(db, 1) != SQLITE_OK ) throw DBException("Cannot enable load extension");
+//    char *errMsg;
+//    if( sqlite3_load_extension(db, (utils::getExeFolderPath() / "json1").c_str(), nullptr, &errMsg) == SQLITE_ERROR ) {
+//        std::string error(errMsg);
+//        sqlite3_free(errMsg);
+//        throw DBException("Error during extension loading: " + error);
+//    }
+
     this->openFile = file;
 
     return *this;
@@ -69,7 +79,8 @@ Database &Database::createTables() {
       type INTEGER,
       meta TEXT,
       mtime INTEGER,
-      size  INTEGER
+      size  INTEGER,
+      depth INTEGER
   );
   SELECT AddGeometryColumn("entries", "geom", 4326, "GEOMETRYZ", "XYZ");
 )<<<";

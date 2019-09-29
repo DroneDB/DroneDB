@@ -70,4 +70,15 @@ fs::path getExeFolderPath() {
 #endif
 }
 
+
+// Counts the number of path components
+// it does NOT normalize the path to account for ".." and "." folders
+int pathDepth(const fs::path &path) {
+    int count = 0;
+    for (auto &it : path) {
+        if (it.c_str()[0] != fs::path::preferred_separator) count++;
+    }
+    return std::max(count - 1, 0);
+}
+
 }

@@ -7,7 +7,10 @@ namespace ddb {
 
 void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entry) {
     // Parse file
-    entry.path = fs::relative(path, rootDirectory).generic_string();
+    fs::path relPath = fs::relative(path, rootDirectory);
+    entry.path = relPath.generic_string();
+    entry.depth = utils::pathDepth(relPath);
+
     json meta;
 
     if (fs::is_directory(path)) {
@@ -22,47 +25,66 @@ void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
 
         entry.type = Type::Generic; // Default
 
+        bool jpg = utils::checkExtension(path.extension(), {"jpg", "jpeg"});
+        bool tif = utils::checkExtension(path.extension(), {"tif", "tiff"});
+
         // Images
-        if (utils::checkExtension(path.extension(), {"jpg", "jpeg", "tif", "tiff"})) {
-            auto image = Exiv2::ImageFactory::open(path);
-            if (!image.get()) throw new IndexException("Cannot open " + path.string());
-            image->readMetadata();
+        if (jpg || tif) {
+            // TODO: if tif, check with GDAL if this is a georeferenced raster
+            // for now, we don't allow tif
+            if (jpg) {
+                auto image = Exiv2::ImageFactory::open(path);
+                if (!image.get()) throw new IndexException("Cannot open " + path.string());
+                image->readMetadata();
 
-            auto exifData = image->exifData();
+                auto exifData = image->exifData();
 
-            if (!exifData.empty()) {
+                if (!exifData.empty()) {
 
-                exif::Parser p(exifData);
+                    //                Exiv2::ExifData::const_iterator end = exifData.end();
+                    //                for (Exiv2::ExifData::const_iterator i = exifData.begin(); i != end; ++i) {
+                    //                    const char* tn = i->typeName();
+                    //                    std::cout
+                    //                            << i->key() << " "
 
-                auto imageSize = p.extractImageSize();
-                meta["imageWidth"] = imageSize.width;
-                meta["imageHeight"] = imageSize.height;
-                meta["make"] = p.extractMake();
-                meta["model"] = p.extractModel();
-                meta["sensorWidth"] = p.extractSensorWidth();
-                meta["sensor"] = p.extractSensor();
+                    //                            << i->value()
+                    //                            << " | " << tn
+                    //                            << "\n";
+                    //                }
 
-                auto focal = p.computeFocal();
-                meta["focal35"] = focal.f35;
-                meta["focalRatio"] = focal.ratio;
+                    exif::Parser p(exifData);
+                    auto imageSize = p.extractImageSize();
+                    meta["imageWidth"] = imageSize.width;
+                    meta["imageHeight"] = imageSize.height;
 
-                auto geo = p.extractGeo();
-//                meta["latitude"]
-                // TODO!
+                    meta["make"] = p.extractMake();
+                    meta["model"] = p.extractModel();
+                    meta["sensorWidth"] = p.extractSensorWidth();
+                    meta["sensor"] = p.extractSensor();
 
-                LOGD << "Latitude: " << std::setprecision(14) << p.extractGeo().latitude;
-                LOGD << "Longitude: " << std::setprecision(14) << p.extractGeo().longitude;
-                LOGD << "Altitude: " << std::setprecision(14) << p.extractGeo().altitude;
-                LOGD << "Capture Time: " << p.extractCaptureTime();
-                LOGD << "Orientation: " << p.extractOrientation();
+                    auto focal = p.computeFocal();
+                    meta["focal35"] = focal.f35;
+                    meta["focalRatio"] = focal.ratio;
 
+                    meta["captureTime"] = p.extractCaptureTime();
+                    meta["orientation"] = p.extractOrientation();
 
-                entry.type = Type::GeoImage;
+                    auto geo = p.extractGeo();
+                    if (geo.latitude != 0.0 && geo.longitude != 0.0) {
+                        meta["latitude"] = geo.latitude;
+                        meta["longitude"] = geo.longitude;
+                        meta["altitude"] = geo.altitude;
 
-                // TODO: meta
-
+                        entry.type = Type::GeoImage;
+                    } else {
+                        // Not a georeferenced image, just a plain image
+                        // do nothing
+                    }
+                } else {
+                    LOGW << "No EXIF data found in " << path.string();
+                }
             } else {
-                LOGW << "No EXIF data found in " << path.string();
+                LOGW << path.string() << " .tif file classified as generic";
             }
         }
     }
@@ -72,17 +94,6 @@ void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
 }
 
 }
-
-
-//                        Exiv2::ExifData::const_iterator end = exifData.end();
-//                        for (Exiv2::ExifData::const_iterator i = exifData.begin(); i != end; ++i) {
-//                            const char* tn = i->typeName();
-//                            std::cout
-//                                    << i->key() << " "
-
-//                                    << i->value()
-//                                    << " | " << tn
-//                                    << "\n";
 
 //                            if (i->key() == "Exif.GPSInfo.GPSLatitude") {
 //                            std::cout << "===========" << std::endl;

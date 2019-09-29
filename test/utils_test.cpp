@@ -31,4 +31,14 @@ TEST(PathsAreChildren, Normal) {
     EXPECT_FALSE(utils::pathsAreChildren("/my/path", {"/my/pat", "/my/path/1"}));
 }
 
+TEST(pathDepth, Normal) {
+    EXPECT_EQ(utils::pathDepth(""), 0);
+    EXPECT_EQ(utils::pathDepth("/"), 0);
+    EXPECT_EQ(utils::pathDepth("/file.txt"), 0);
+    EXPECT_EQ(utils::pathDepth("/a/file.txt"), 1);
+    EXPECT_EQ(utils::pathDepth("/a/b/file.txt"), 2);
+    EXPECT_EQ(utils::pathDepth("."), 0);
+    EXPECT_EQ(utils::pathDepth("./."), 1);
+}
+
 }

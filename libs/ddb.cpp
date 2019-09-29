@@ -82,15 +82,20 @@ fs::path rootDirectory(Database *db) {
     return fs::path(db->getOpenFile()).parent_path().parent_path();
 }
 
-void addToIndex(Database *db, const std::vector<std::string> &paths) {
-    // Validate paths
-    fs::path directory = rootDirectory(db);
+// Computes a list of paths inside rootDirectory
+// all paths must be subfolders/files within rootDirectory
+// or an exception is thrown
+// The list includes paths to directories that are in paths
+// eg. if path/to/file is in paths, both "path/" and "path/to"
+// are includes in the result.
+// ".ddb" files/dirs are always ignored and skipped.
+std::vector<fs::path> getPathList(fs::path rootDirectory, const std::vector<std::string> &paths) {
+    std::vector<fs::path> result;
+    std::unordered_map<std::string, bool> directories;
 
-    if (!utils::pathsAreChildren(directory, paths)) {
-        throw FSException("Some paths cannot be added to the index because we couldn't find a parent .ddb folder.");
+    if (!utils::pathsAreChildren(rootDirectory, paths)) {
+        throw FSException("Some paths are not contained within: " + rootDirectory.string() + ". Did you run ./ddb init?");
     }
-
-    std::vector<fs::path> pathList;
 
     for (fs::path p : paths) {
         // fs::directory_options::skip_permission_denied
@@ -100,25 +105,54 @@ void addToIndex(Database *db, const std::vector<std::string> &paths) {
             for(auto i = fs::recursive_directory_iterator(p);
                     i != fs::recursive_directory_iterator();
                     ++i ) {
-                // Skip .ddb
-                if(i->path().filename() == ".ddb") i.disable_recursion_pending();
 
-                pathList.push_back(i->path());
+                fs::path rp = i->path();
+
+                // Skip .ddb
+                if(rp.filename() == ".ddb") i.disable_recursion_pending();
+
+                if (fs::is_directory(rp)) {
+                    directories[rp.string()] = true;
+                } else {
+                    result.push_back(rp);
+                }
+
+                while(rp.has_parent_path()) {
+                    rp = rp.parent_path();
+                    directories[rp.string()] = true;
+                }
             }
 
-            pathList.push_back(p);
+            directories[p.string()] = true;
         } else if (fs::exists(p)) {
             // File
-            pathList.push_back(p);
+            result.push_back(p);
+
+            while(p.has_parent_path()) {
+                p = p.parent_path();
+                directories[p.string()] = true;
+            }
         } else {
-            throw FSException("File does not exist: " + p.string());
+            throw FSException("Path does not exist: " + p.string());
         }
     }
 
-    // TODO: there could be speed optimizations here?
+    for (auto it : directories) {
+        result.push_back(it.first);
+    }
+
+    return result;
+}
+
+void addToIndex(Database *db, const std::vector<std::string> &paths) {
+    fs::path directory = rootDirectory(db);
+    auto pathList = getPathList(directory, paths);
+
     auto q = db->query("SELECT mtime,hash FROM entries WHERE path=?");
-    auto insertQ = db->query("INSERT INTO entries (path, hash, type, meta, mtime, size) "
-                             "VALUES (?, ?, ?, ?, ?, ?)");
+    auto insertQ = db->query("INSERT INTO entries (path, hash, type, meta, mtime, size, depth) "
+                             "VALUES (?, ?, ?, ?, ?, ?, ?)");
+    auto updateQ = db->query("UPDATE entries SET hash=?, type=?, meta=?, mtime=?, size=?, depth=?"
+                             "WHERE path=?");
     db->exec("BEGIN TRANSACTION");
 
     for (auto &p : pathList) {
@@ -160,27 +194,42 @@ void addToIndex(Database *db, const std::vector<std::string> &paths) {
         if (add || update) {
             parseEntry(p, directory, e);
 
-            insertQ->bind(1, e.path);
-            insertQ->bind(2, e.hash);
-            insertQ->bind(3, e.type);
-            insertQ->bind(4, e.meta);
-            insertQ->bind(5, static_cast<long long>(e.mtime));
-            insertQ->bind(6, static_cast<long long>(e.size));
-
             if (add) {
+                insertQ->bind(1, e.path);
+                insertQ->bind(2, e.hash);
+                insertQ->bind(3, e.type);
+                insertQ->bind(4, e.meta);
+                insertQ->bind(5, static_cast<long long>(e.mtime));
+                insertQ->bind(6, static_cast<long long>(e.size));
+                insertQ->bind(7, e.depth);
+
+
+                insertQ->fetch();
+                insertQ->reset();
                 std::cout << "A\t" << e.path << std::endl;
             } else {
+                updateQ->bind(1, e.hash);
+                updateQ->bind(2, e.type);
+                updateQ->bind(3, e.meta);
+                updateQ->bind(4, static_cast<long long>(e.mtime));
+                updateQ->bind(5, static_cast<long long>(e.size));
+                updateQ->bind(6, e.path);
+                updateQ->bind(7, e.depth);
+
+                updateQ->fetch();
+                updateQ->reset();
                 std::cout << "U\t" << e.path << std::endl;
             }
-
-            insertQ->fetch();
-            insertQ->reset();
         }
 
         q->reset();
     }
 
     db->exec("COMMIT");
+}
+
+void removeFromIndex(Database *db, const std::vector<std::string> &paths) {
+    LOGV << "HERE";
 }
 
 void updateIndex(const std::string &directory) {

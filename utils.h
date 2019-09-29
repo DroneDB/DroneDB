@@ -39,7 +39,7 @@ limitations under the License. */
 
 namespace fs = std::filesystem;
 
-namespace utils{
+namespace utils {
 
 static inline void toLower(std::string &s) {
     std::transform(s.begin(), s.end(), s.begin(),[](int ch) {
@@ -77,6 +77,7 @@ bool checkExtension(const fs::path &extension, const std::initializer_list<std::
 time_t getModifiedTime(const std::string &filePath);
 off_t getSize(const std::string &filePath);
 bool pathsAreChildren(const fs::path &parentPath, const std::vector<std::string> &childPaths);
+int pathDepth(const fs::path &path);
 
 fs::path getExeFolderPath();
 

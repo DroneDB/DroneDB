@@ -66,6 +66,10 @@ int main(int argc, char* argv[]) {
             std::cout << VERSION << std::endl;
             exit(0);
         } else {
+            auto aliasIter = cmd::aliases.find(cmdKey);
+            if (aliasIter != cmd::aliases.end()) {
+                cmdKey = aliasIter->second;
+            }
 
             auto cmdIter = cmd::commands.find(cmdKey);
             if (cmdIter == cmd::commands.end()) {

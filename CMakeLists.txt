@@ -49,3 +49,7 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
     CXX_STANDARD 17
     )
 
+# json1 extension
+#add_library(json1 SHARED vendor/ext/json1.c)
+#set_target_properties(json1 PROPERTIES PREFIX "")
+#set_property(TARGET json1 PROPERTY POSITION_INDEPENDENT_CODE ON)

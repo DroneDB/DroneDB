@@ -31,15 +31,15 @@ Exiv2::ExifData::const_iterator Parser::findKey(const std::initializer_list<std:
 }
 
 ImageSize Parser::extractImageSize() {
-    auto imgWidth = findKey("Exif.Photo.PixelXDimension");
-    auto imgHeight = findKey("Exif.Photo.PixelYDimension");
+    auto imgWidth = findKey({"Exif.Photo.PixelXDimension", "Exif.Image.ImageWidth"});
+    auto imgHeight = findKey({"Exif.Photo.PixelYDimension", "Exif.Image.ImageLength"});
 
     // TODO: fallback on actual image size
 
     if (imgWidth != exifData.end() && imgHeight != exifData.end()) {
         return ImageSize(static_cast<int>(imgWidth->toLong()), static_cast<int>(imgHeight->toLong()));
     } else {
-        return ImageSize(-1, -1);
+        return ImageSize(0, 0);
     }
 }
 
@@ -86,8 +86,8 @@ std::string Parser::extractSensor() {
 }
 
 Focal Parser::computeFocal() {
-    auto focal35 = findKey({"Exif.Photo.FocalLengthIn35mmFilm", "Exif.Image.FocalLengthIn35mmFilm"});
-    auto focal = findKey({"Exif.Photo.FocalLength", "Exif.Image.FocalLength"});
+    auto focal35 = findKey("Exif.Photo.FocalLengthIn35mmFilm");
+    auto focal = findKey("Exif.Photo.FocalLength");
     Focal res;
 
     if (focal35 != exifData.end() && focal35->toFloat() > 0) {
@@ -114,8 +114,8 @@ Focal Parser::computeFocal() {
 
 // Extracts sensor width. Returns 0 on failure
 float Parser::extractSensorWidth() {
-    auto fUnit = findKey({"Exif.Photo.FocalPlaneResolutionUnit", "Exif.Image.FocalPlaneResolutionUnit"});
-    auto fXRes = findKey({"Exif.Photo.FocalPlaneXResolution", "Exif.Image.FocalPlaneXResolution"});
+    auto fUnit = findKey("Exif.Photo.FocalPlaneResolutionUnit");
+    auto fXRes = findKey("Exif.Photo.FocalPlaneXResolution");
 
     if (fUnit == exifData.end() || fXRes == exifData.end()) return 0.0;
 
