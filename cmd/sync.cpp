@@ -13,36 +13,29 @@ See the License for the specific language governing permissions and
 limitations under the License. */
 
 #include <iostream>
-#include <filesystem>
-#include "add.h"
+#include "sync.h"
 #include "../libs/ddb.h"
+
 
 namespace fs = std::filesystem;
 
 namespace cmd {
 
-void Add::setOptions(cxxopts::Options &opts) {
+void Sync::setOptions(cxxopts::Options &opts) {
     opts
-    .positional_help("[args] [PATHS]")
-    .custom_help("add")
+    .positional_help("[args]")
+    .custom_help("sync")
     .add_options()
-    ("d,directory", "Working directory", cxxopts::value<std::string>()->default_value("."))
-    ("p,paths", "Paths to add to index (files or directories)", cxxopts::value<std::vector<std::string>>());
-
-    opts.parse_positional({"paths"});
+    ("d,directory", "Working directory", cxxopts::value<std::string>()->default_value("."));
 }
 
-std::string Add::description() {
-    return "Add files and directories to an index.";
+std::string Sync::description() {
+    return "Sync files and directories in the index with changes from the filesystem";
 }
 
-void Add::run(cxxopts::ParseResult &opts) {
-    if (!opts.count("paths")) {
-        printHelp();
-    }
-
+void Sync::run(cxxopts::ParseResult &opts) {
     auto db = ddb::open(opts["directory"].as<std::string>(), true);
-    ddb::addToIndex(db.get(), opts["paths"].as<std::vector<std::string>>());
+    ddb::syncIndex(db.get());
 }
 
 }

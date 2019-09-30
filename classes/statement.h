@@ -19,7 +19,7 @@ limitations under the License. */
 #include <string>
 #include "../logger.h"
 
-class Statement{
+class Statement {
     sqlite3 *db;
     std::string query;
 
@@ -30,7 +30,7 @@ class Statement{
 
     void bindCheck(int ret);
     Statement &step();
-public:
+  public:
     Statement(sqlite3 *db, const std::string &query);
     ~Statement();
 
@@ -46,6 +46,7 @@ public:
     // TODO: more
 
     void reset();
+    void execute();
 };
 
 #endif // STATEMENT_H

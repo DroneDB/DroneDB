@@ -16,9 +16,6 @@ limitations under the License. */
 #include <filesystem>
 #include "build.h"
 #include "../libs/ddb.h"
-#include "../classes/database.h"
-#include "../classes/exceptions.h"
-#include "../logger.h"
 
 namespace fs = std::filesystem;
 

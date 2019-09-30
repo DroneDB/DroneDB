@@ -18,8 +18,8 @@ limitations under the License. */
 
 namespace {
 
-TEST(getPathList, Normal) {
-    auto pathList = ddb::getPathList("data", {fs::path("data") / "folderA" / "test.txt"});
+TEST(getPathList, includeDirs) {
+    auto pathList = ddb::getPathList("data", {fs::path("data") / "folderA" / "test.txt"}, true);
     EXPECT_EQ(pathList.size(), 3);
     EXPECT_STREQ(pathList[0].c_str(), (fs::path("data") / "folderA" / "test.txt").c_str());
     EXPECT_STREQ(pathList[1].c_str(), fs::path("data").c_str());
@@ -28,7 +28,7 @@ TEST(getPathList, Normal) {
     pathList = ddb::getPathList(".", {
         fs::path("data") / "folderA" / "test.txt",
         fs::path("data") / "folderA" / "folderB" / "test.txt"
-    });
+    }, true);
     EXPECT_EQ(pathList.size(), 5);
     EXPECT_STREQ(pathList[0].c_str(), (fs::path("data") / "folderA" / "test.txt").c_str());
     EXPECT_STREQ(pathList[1].c_str(), (fs::path("data") / "folderA" / "folderB" / "test.txt").c_str());
@@ -39,11 +39,18 @@ TEST(getPathList, Normal) {
     EXPECT_THROW(
     pathList = ddb::getPathList("otherRoot", {
         fs::path("data") / "folderA" / "test.txt",
-    }),
+    }, true),
     FSException
     );
 
 //    EXPECT_FALSE(utils::pathsAreChildren("/my/path", {"/my/pat", "/my/path/1"}));
+}
+
+TEST(getPathList, dontIncludeDirs) {
+    auto pathList = ddb::getPathList("data", {fs::path("data") / "folderA" / "test.txt"}, false);
+    EXPECT_EQ(pathList.size(), 1);
+    EXPECT_STREQ(pathList[0].c_str(), (fs::path("data") / "folderA" / "test.txt").c_str());
+
 }
 
 }

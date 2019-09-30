@@ -116,3 +116,8 @@ void Statement::reset() {
     done = false;
     hasRow = false;
 }
+
+void Statement::execute() {
+    fetch();
+    reset();
+}

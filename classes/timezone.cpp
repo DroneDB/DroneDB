@@ -28,7 +28,6 @@ void Timezone::init() {
     if (initialized) return;
 
     ZDSetErrorHandler(onError);
-    std::cerr << "HERE! " << utils::getExeFolderPath() / "timezone21.bin" << "\n";
     db = ZDOpenDatabase((utils::getExeFolderPath() / "timezone21.bin").c_str());
     if (!db) throw TimezoneException("Cannot open timezone database ./timezone21.bin");
 

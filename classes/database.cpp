@@ -82,7 +82,7 @@ Database &Database::createTables() {
       size  INTEGER,
       depth INTEGER
   );
-  SELECT AddGeometryColumn("entries", "geom", 4326, "GEOMETRYZ", "XYZ");
+  SELECT AddGeometryColumn("entries", "point_geom", 4326, "POINTZ", "XYZ");
 )<<<";
 
     LOGD << "About to create tables...";
@@ -105,6 +105,12 @@ bool Database::tableExists(const std::string &table){
 
 std::string Database::getOpenFile(){
     return openFile;
+}
+
+// @return  the number of rows modified, inserted or deleted by the
+// most recently completed INSERT, UPDATE or DELETE statement
+int Database::changes(){
+    return sqlite3_changes(db);
 }
 
 std::unique_ptr<Statement> Database::query(const std::string &query){

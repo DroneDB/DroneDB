@@ -41,10 +41,10 @@ limitations under the License. */
 
 namespace fs = std::filesystem;
 
-class Database{
+class Database {
     sqlite3 *db;
     std::string openFile;
-public:
+  public:
     static void Initialize();
 
     Database();
@@ -54,6 +54,7 @@ public:
     Database &createTables();
     bool tableExists(const std::string &table);
     std::string getOpenFile();
+    int changes();
 
     std::unique_ptr<Statement> query(const std::string &query);
 

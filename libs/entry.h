@@ -23,6 +23,8 @@ struct Entry {
     time_t mtime = 0;
     off_t size = 0;
     int depth = 0;
+
+    std::string point_geom = "";
 };
 
 void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entry);

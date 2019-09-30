@@ -10,16 +10,15 @@ void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
     fs::path relPath = fs::relative(path, rootDirectory);
     entry.path = relPath.generic_string();
     entry.depth = utils::pathDepth(relPath);
+    if (entry.mtime == 0) entry.mtime = utils::getModifiedTime(path);
 
     json meta;
 
     if (fs::is_directory(path)) {
         entry.type = Type::Directory;
-        entry.mtime = 0;
         entry.hash = "";
         entry.size = 0;
     } else {
-        if (entry.mtime == 0) entry.mtime = utils::getModifiedTime(path);
         if (entry.hash == "") entry.hash = Hash::ingest(path);
         entry.size = utils::getSize(path);
 
@@ -71,9 +70,8 @@ void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
 
                     auto geo = p.extractGeo();
                     if (geo.latitude != 0.0 && geo.longitude != 0.0) {
-                        meta["latitude"] = geo.latitude;
-                        meta["longitude"] = geo.longitude;
-                        meta["altitude"] = geo.altitude;
+                        entry.point_geom = utils::stringFormat("POINT Z (%f %f %f)", geo.longitude, geo.latitude, geo.altitude);
+                        LOGV << "POINT GEOM: "<< entry.point_geom;
 
                         entry.type = Type::GeoImage;
                     } else {

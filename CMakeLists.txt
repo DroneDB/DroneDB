@@ -27,7 +27,10 @@ add_subdirectory("cmd")
 add_subdirectory("classes")
 add_subdirectory("libs")
 add_subdirectory("vendor")
+
+if(BUILD_TESTING)
 add_subdirectory("test")
+endif()
 
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}/vendor")
 add_executable(${PROJECT_NAME} ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp ${SRC_LIST})

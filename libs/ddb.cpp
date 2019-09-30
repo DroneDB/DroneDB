@@ -15,13 +15,15 @@ limitations under the License. */
 
 namespace ddb {
 
+#define UPDATE_QUERY "UPDATE entries SET hash=?, type=?, meta=?, mtime=?, size=?, depth=?, point_geom=GeomFromText(?, 4326) WHERE path=?"
+
 std::string create(const std::string &directory) {
     fs::path dirPath = directory;
     if (!fs::exists(dirPath)) throw FSException("Invalid directory: " + directory  + " (does not exist)");
 
     fs::path ddbDirPath = dirPath / ".ddb";
     if (directory == ".") ddbDirPath = ".ddb"; // Nicer to the eye
-    fs::path dbasePath = ddbDirPath / "dbase";
+    fs::path dbasePath = ddbDirPath / "dbase.sqlite";
 
     try {
         LOGD << "Checking if .ddb directory exists...";
@@ -59,7 +61,7 @@ std::string create(const std::string &directory) {
 std::unique_ptr<Database> open(const std::string &directory, bool traverseUp = false) {
     fs::path dirPath = fs::absolute(directory);
     fs::path ddbDirPath = dirPath / ".ddb";
-    fs::path dbasePath = ddbDirPath / "dbase";
+    fs::path dbasePath = ddbDirPath / "dbase.sqlite";
 
     if (fs::exists(dbasePath)) {
         LOGD << dbasePath.string() + " exists";
@@ -73,7 +75,7 @@ std::unique_ptr<Database> open(const std::string &directory, bool traverseUp = f
     } else if (traverseUp && dirPath.parent_path() != dirPath) {
         return open(dirPath.parent_path(), true);
     } else {
-        throw FSException("Not a valid DroneDB directory, .ddb does not exist. Did you forget to run ./ddb init?");
+        throw FSException("Not a valid DroneDB directory, .ddb does not exist. Did you run ddb init?");
     }
 }
 
@@ -85,16 +87,17 @@ fs::path rootDirectory(Database *db) {
 // Computes a list of paths inside rootDirectory
 // all paths must be subfolders/files within rootDirectory
 // or an exception is thrown
-// The list includes paths to directories that are in paths
+// If includeDirs is true and the list includes paths to directories that are in paths
 // eg. if path/to/file is in paths, both "path/" and "path/to"
 // are includes in the result.
 // ".ddb" files/dirs are always ignored and skipped.
-std::vector<fs::path> getPathList(fs::path rootDirectory, const std::vector<std::string> &paths) {
+// If a directory is in the input paths, they are included regardless of includeDirs
+std::vector<fs::path> getPathList(fs::path rootDirectory, const std::vector<std::string> &paths, bool includeDirs) {
     std::vector<fs::path> result;
     std::unordered_map<std::string, bool> directories;
 
     if (!utils::pathsAreChildren(rootDirectory, paths)) {
-        throw FSException("Some paths are not contained within: " + rootDirectory.string() + ". Did you run ./ddb init?");
+        throw FSException("Some paths are not contained within: " + rootDirectory.string() + ". Did you run ddb init?");
     }
 
     for (fs::path p : paths) {
@@ -111,15 +114,17 @@ std::vector<fs::path> getPathList(fs::path rootDirectory, const std::vector<std:
                 // Skip .ddb
                 if(rp.filename() == ".ddb") i.disable_recursion_pending();
 
-                if (fs::is_directory(rp)) {
+                if (fs::is_directory(rp) && includeDirs) {
                     directories[rp.string()] = true;
                 } else {
                     result.push_back(rp);
                 }
 
-                while(rp.has_parent_path()) {
-                    rp = rp.parent_path();
-                    directories[rp.string()] = true;
+                if (includeDirs) {
+                    while(rp.has_parent_path()) {
+                        rp = rp.parent_path();
+                        directories[rp.string()] = true;
+                    }
                 }
             }
 
@@ -128,9 +133,11 @@ std::vector<fs::path> getPathList(fs::path rootDirectory, const std::vector<std:
             // File
             result.push_back(p);
 
-            while(p.has_parent_path()) {
-                p = p.parent_path();
-                directories[p.string()] = true;
+            if (includeDirs) {
+                while(p.has_parent_path()) {
+                    p = p.parent_path();
+                    directories[p.string()] = true;
+                }
             }
         } else {
             throw FSException("Path does not exist: " + p.string());
@@ -144,15 +151,56 @@ std::vector<fs::path> getPathList(fs::path rootDirectory, const std::vector<std:
     return result;
 }
 
+bool checkUpdate(Entry &e, const fs::path &p, long long dbMtime, const std::string &dbHash) {
+    bool folder = fs::is_directory(p);
+
+    // Did it change?
+    e.mtime = utils::getModifiedTime(p);
+
+    if (e.mtime != dbMtime) {
+        LOGD << p.string() << " modified time ( " << dbMtime << " ) differs from file value: " << e.mtime;
+
+        if (folder) {
+            // Don't check hashes for folders
+            return true;
+        } else {
+            e.hash = Hash::ingest(p);
+
+            if (dbHash != e.hash) {
+                LOGD << p.string() << " hash differs (old: " << dbHash << " | new: " << e.hash << ")";
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+void doUpdate(Statement *updateQ, const Entry &e) {
+    // Fields
+    updateQ->bind(1, e.hash);
+    updateQ->bind(2, e.type);
+    updateQ->bind(3, e.meta);
+    updateQ->bind(4, static_cast<long long>(e.mtime));
+    updateQ->bind(5, static_cast<long long>(e.size));
+    updateQ->bind(6, e.depth);
+    updateQ->bind(7, e.point_geom);
+
+    // Where
+    updateQ->bind(8, e.path);
+
+    updateQ->execute();
+    std::cout << "U\t" << e.path << std::endl;
+}
+
 void addToIndex(Database *db, const std::vector<std::string> &paths) {
     fs::path directory = rootDirectory(db);
-    auto pathList = getPathList(directory, paths);
+    auto pathList = getPathList(directory, paths, true);
 
     auto q = db->query("SELECT mtime,hash FROM entries WHERE path=?");
-    auto insertQ = db->query("INSERT INTO entries (path, hash, type, meta, mtime, size, depth) "
-                             "VALUES (?, ?, ?, ?, ?, ?, ?)");
-    auto updateQ = db->query("UPDATE entries SET hash=?, type=?, meta=?, mtime=?, size=?, depth=?"
-                             "WHERE path=?");
+    auto insertQ = db->query("INSERT INTO entries (path, hash, type, meta, mtime, size, depth, point_geom) "
+                             "VALUES (?, ?, ?, ?, ?, ?, ?, GeomFromText(?, 4326))");
+    auto updateQ = db->query(UPDATE_QUERY);
     db->exec("BEGIN TRANSACTION");
 
     for (auto &p : pathList) {
@@ -161,31 +209,11 @@ void addToIndex(Database *db, const std::vector<std::string> &paths) {
 
         bool update = false;
         bool add = false;
-        bool folder = fs::is_directory(p);
-
         Entry e;
 
         if (q->fetch()) {
             // Entry exist, update if necessary
-
-            // - Never need to update a folder, the meta doesn't change
-            // If file, check modified date and hash
-
-            if (!folder) {
-                long long oldMtime = q->getInt64(0);
-                e.mtime = utils::getModifiedTime(p);
-
-                if (e.mtime != oldMtime) {
-                    LOGD << p.string() << " modified time ( " << oldMtime << " ) differs from file value: " << e.mtime;
-                    std::string oldHash = q->getText(1);
-                    e.hash = Hash::ingest(p);
-
-                    if (oldHash != e.hash) {
-                        LOGD << p.string() << " hash differs (old: " << oldHash << " | new: " << e.hash << ")";
-                        update = true;
-                    }
-                }
-            }
+            update = checkUpdate(e, p, q->getInt64(0), q->getText(1));
         } else {
             // Brand new, add
             add = true;
@@ -202,23 +230,12 @@ void addToIndex(Database *db, const std::vector<std::string> &paths) {
                 insertQ->bind(5, static_cast<long long>(e.mtime));
                 insertQ->bind(6, static_cast<long long>(e.size));
                 insertQ->bind(7, e.depth);
+                insertQ->bind(8, e.point_geom);
 
-
-                insertQ->fetch();
-                insertQ->reset();
+                insertQ->execute();
                 std::cout << "A\t" << e.path << std::endl;
             } else {
-                updateQ->bind(1, e.hash);
-                updateQ->bind(2, e.type);
-                updateQ->bind(3, e.meta);
-                updateQ->bind(4, static_cast<long long>(e.mtime));
-                updateQ->bind(5, static_cast<long long>(e.size));
-                updateQ->bind(6, e.path);
-                updateQ->bind(7, e.depth);
-
-                updateQ->fetch();
-                updateQ->reset();
-                std::cout << "U\t" << e.path << std::endl;
+                doUpdate(updateQ.get(), e);
             }
         }
 
@@ -229,11 +246,53 @@ void addToIndex(Database *db, const std::vector<std::string> &paths) {
 }
 
 void removeFromIndex(Database *db, const std::vector<std::string> &paths) {
-    LOGV << "HERE";
+    fs::path directory = rootDirectory(db);
+    auto pathList = getPathList(directory, paths, false);
+
+    auto q = db->query("DELETE FROM entries WHERE path = ?");
+    db->exec("BEGIN TRANSACTION");
+
+    for (auto &p : pathList) {
+        fs::path relPath = fs::relative(p, directory);
+        q->bind(1, relPath.generic_string());
+        q->execute();
+        if (db->changes() >= 1) {
+            std::cout << "D\t" << relPath.generic_string() << std::endl;
+        }
+    }
+
+    db->exec("COMMIT");
 }
 
-void updateIndex(const std::string &directory) {
-    LOGV << directory << " TODO!";
+void syncIndex(Database *db) {
+    fs::path directory = rootDirectory(db);
+
+    auto q = db->query("SELECT path,mtime,hash FROM entries");
+    auto deleteQ = db->query("DELETE FROM entries WHERE path = ?");
+    auto updateQ = db->query(UPDATE_QUERY);
+
+    db->exec("BEGIN TRANSACTION");
+
+    while(q->fetch()) {
+        fs::path relPath = q->getText(0);
+        fs::path p = directory / relPath; // TODO: does this work on Windows?
+//        LOGV << p;
+        Entry e;
+
+        if (fs::exists(p)) {
+            if (checkUpdate(e, p, q->getInt64(1), q->getText(2))) {
+                parseEntry(p, directory, e);
+                doUpdate(updateQ.get(), e);
+            }
+        } else {
+            // Removed
+            deleteQ->bind(1, relPath.generic_string());
+            deleteQ->execute();
+            std::cout << "D\t" << relPath.generic_string() << std::endl;
+        }
+    }
+
+    db->exec("COMMIT");
 }
 
 }
