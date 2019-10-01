@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 2.8)
 
 project(ddb)
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "Release" CACHE STRING
@@ -21,18 +22,13 @@ set(SRC_LIST
     ${CMAKE_CURRENT_SOURCE_DIR}/logger.cpp
 
     )
-set(LINK_LIBRARIES pthread dl spatialite sqlite3 stdc++fs exiv2 cctz::cctz)
-
 add_subdirectory("cmd")
 add_subdirectory("classes")
 add_subdirectory("libs")
 add_subdirectory("vendor")
 
-if(BUILD_TESTING)
-add_subdirectory("test")
-endif()
-
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}/vendor")
+include_directories("${CMAKE_BINARY_DIR}/install/include")
 add_executable(${PROJECT_NAME} ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp ${SRC_LIST})
 
 file(GLOB DATA_FILES
@@ -41,6 +37,9 @@ file(GLOB DATA_FILES
 file(COPY ${DATA_FILES} DESTINATION ${CMAKE_BINARY_DIR})
 
 find_package(exiv2 REQUIRED CONFIG NAMES exiv2)
+find_package(GeographicLib REQUIRED)
+
+set(LINK_LIBRARIES pthread dl spatialite sqlite3 stdc++fs exiv2 cctz::cctz ${GeographicLib_LIBRARIES})
 
 if (WIN32)
     # TODO
@@ -51,6 +50,10 @@ endif()
 set_target_properties(${PROJECT_NAME} PROPERTIES
     CXX_STANDARD 17
     )
+
+if(BUILD_TESTING)
+add_subdirectory("test")
+endif()
 
 # json1 extension
 #add_library(json1 SHARED vendor/ext/json1.c)

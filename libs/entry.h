@@ -10,6 +10,7 @@
 #include "../utils.h"
 #include "../classes/hash.h"
 #include "../classes/exif.h"
+#include "../libs/geo.h"
 
 namespace fs = std::filesystem;
 

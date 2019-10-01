@@ -17,12 +17,12 @@ limitations under the License. */
 
 namespace exif {
 
-Exiv2::ExifData::const_iterator Parser::findKey(const std::string &key) {
-    return findKey({key});
+Exiv2::ExifData::const_iterator Parser::findExifKey(const std::string &key) {
+    return findExifKey({key});
 }
 
 // Find the first available key, or exifData::end() if none exist
-Exiv2::ExifData::const_iterator Parser::findKey(const std::initializer_list<std::string>& keys) {
+Exiv2::ExifData::const_iterator Parser::findExifKey(const std::initializer_list<std::string>& keys) {
     for (auto &k : keys) {
         auto it = exifData.findKey(Exiv2::ExifKey(k));
         if (it != exifData.end()) return it;
@@ -30,9 +30,22 @@ Exiv2::ExifData::const_iterator Parser::findKey(const std::initializer_list<std:
     return exifData.end();
 }
 
+Exiv2::XmpData::const_iterator Parser::findXmpKey(const std::string &key) {
+    return findXmpKey({key});
+}
+
+// Find the first available key, or xmpData::end() if none exist
+Exiv2::XmpData::const_iterator Parser::findXmpKey(const std::initializer_list<std::string>& keys) {
+    for (auto &k : keys) {
+        auto it = xmpData.findKey(Exiv2::XmpKey(k));
+        if (it != xmpData.end()) return it;
+    }
+    return xmpData.end();
+}
+
 ImageSize Parser::extractImageSize() {
-    auto imgWidth = findKey({"Exif.Photo.PixelXDimension", "Exif.Image.ImageWidth"});
-    auto imgHeight = findKey({"Exif.Photo.PixelYDimension", "Exif.Image.ImageLength"});
+    auto imgWidth = findExifKey({"Exif.Photo.PixelXDimension", "Exif.Image.ImageWidth"});
+    auto imgHeight = findExifKey({"Exif.Photo.PixelYDimension", "Exif.Image.ImageLength"});
 
     // TODO: fallback on actual image size
 
@@ -44,7 +57,7 @@ ImageSize Parser::extractImageSize() {
 }
 
 std::string Parser::extractMake() {
-    auto k = findKey({"Exif.Photo.LensMake", "Exif.Image.Make"});
+    auto k = findExifKey({"Exif.Photo.LensMake", "Exif.Image.Make"});
 
     if (k != exifData.end()) {
         return k->toString();
@@ -54,7 +67,7 @@ std::string Parser::extractMake() {
 }
 
 std::string Parser::extractModel() {
-    auto k = findKey({"Exif.Photo.LensModel", "Exif.Image.Model"});
+    auto k = findExifKey({"Exif.Photo.LensModel", "Exif.Image.Model"});
 
     if (k != exifData.end()) {
         return k->toString();
@@ -86,8 +99,8 @@ std::string Parser::extractSensor() {
 }
 
 Focal Parser::computeFocal() {
-    auto focal35 = findKey("Exif.Photo.FocalLengthIn35mmFilm");
-    auto focal = findKey("Exif.Photo.FocalLength");
+    auto focal35 = findExifKey("Exif.Photo.FocalLengthIn35mmFilm");
+    auto focal = findExifKey("Exif.Photo.FocalLength");
     Focal res;
 
     if (focal35 != exifData.end() && focal35->toFloat() > 0) {
@@ -114,8 +127,8 @@ Focal Parser::computeFocal() {
 
 // Extracts sensor width. Returns 0 on failure
 float Parser::extractSensorWidth() {
-    auto fUnit = findKey("Exif.Photo.FocalPlaneResolutionUnit");
-    auto fXRes = findKey("Exif.Photo.FocalPlaneXResolution");
+    auto fUnit = findExifKey("Exif.Photo.FocalPlaneResolutionUnit");
+    auto fXRes = findExifKey("Exif.Photo.FocalPlaneXResolution");
 
     if (fUnit == exifData.end() || fXRes == exifData.end()) return 0.0;
 
@@ -147,23 +160,28 @@ inline float Parser::getMmPerUnit(long resolutionUnit) {
 }
 
 // Extract geolocation information
-GeoLocation Parser::extractGeo() {
-    GeoLocation r;
+bool Parser::extractGeo(GeoLocation &geo) {
+    auto latitude = findExifKey({"Exif.GPSInfo.GPSLatitude"});
+    auto latitudeRef = findExifKey({"Exif.GPSInfo.GPSLatitudeRef"});
+    auto longitude = findExifKey({"Exif.GPSInfo.GPSLongitude"});
+    auto longitudeRef = findExifKey({"Exif.GPSInfo.GPSLongitudeRef"});
 
-    auto latitude = findKey({"Exif.GPSInfo.GPSLatitude"});
-    auto latitudeRef = findKey({"Exif.GPSInfo.GPSLatitudeRef"});
-    auto longitude = findKey({"Exif.GPSInfo.GPSLongitude"});
-    auto longitudeRef = findKey({"Exif.GPSInfo.GPSLongitudeRef"});
+    if (latitude == exifData.end() || longitude == exifData.end()) return false;
 
-    r.latitude = geoToDecimal(latitude, latitudeRef);
-    r.longitude = geoToDecimal(longitude, longitudeRef);
+    geo.latitude = geoToDecimal(latitude, latitudeRef);
+    geo.longitude = geoToDecimal(longitude, longitudeRef);
 
-    auto altitude = findKey({"Exif.GPSInfo.GPSAltitude"});
+    auto altitude = findExifKey({"Exif.GPSInfo.GPSAltitude"});
     if (altitude != exifData.end()) {
-        r.altitude = evalFrac(altitude->toRational());
+        geo.altitude = evalFrac(altitude->toRational());
     }
 
-    return r;
+    auto xmpAltitude = findXmpKey({"Xmp.drone-dji.AbsoluteAltitude"});
+    if (xmpAltitude != xmpData.end()) {
+        geo.altitude = evalFrac(xmpAltitude->toRational());
+    }
+
+    return true;
 }
 
 // Converts a geotag location to decimal degrees
@@ -198,7 +216,7 @@ time_t Parser::extractCaptureTime() {
                 "Exif.Photo.DateTimeDigitized",
                 "Exif.Image.DateTime"
             }) {
-        auto time = findKey(k);
+        auto time = findExifKey(k);
         if (time == exifData.end()) continue;
 
         int year, month, day, hour, minute, second;
@@ -206,8 +224,8 @@ time_t Parser::extractCaptureTime() {
         if (sscanf(time->toString().c_str(),"%d:%d:%d %d:%d:%d", &year,&month,&day,&hour,&minute,&second) == 6) {
             // Attempt to use geolocation information to
             // find the proper timezone and adjust the timestamp
-            GeoLocation geo = extractGeo();
-            if (geo.latitude != 0.0 && geo.longitude != 0.0) {
+            GeoLocation geo;
+            if (extractGeo(geo)) {
                 return Timezone::getUTCEpoch(year, month, day, hour, minute, second, geo.latitude, geo.longitude);
             }
 
@@ -218,13 +236,45 @@ time_t Parser::extractCaptureTime() {
     return 0;
 }
 
-int Parser::extractOrientation() {
-    auto k = findKey({"Exif.Image.Orientation"});
+int Parser::extractImageOrientation() {
+    auto k = findExifKey({"Exif.Image.Orientation"});
     if (k != exifData.end()) {
         return static_cast<int>(k->toLong());
     }
 
     return 1;
+}
+
+bool Parser::extractCameraOrientation(CameraOrientation &cameraOri) {
+    auto pk = findXmpKey("Xmp.drone-dji.GimbalPitchDegree");
+    auto yk = findXmpKey("Xmp.drone-dji.GimbalYawDegree");
+    auto rk = findXmpKey("Xmp.drone-dji.GimbalRollDegree");
+
+    if (pk == xmpData.end() || yk == xmpData.end() || rk == xmpData.end()) return false;
+
+    cameraOri.pitch = static_cast<double>(pk->toFloat());
+    cameraOri.yaw = static_cast<double>(yk->toFloat());
+    cameraOri.roll = static_cast<double>(rk->toFloat());
+    return true;
+}
+
+void Parser::printAllTags() {
+    Exiv2::ExifData::const_iterator end = exifData.end();
+    for (Exiv2::ExifData::const_iterator i = exifData.begin(); i != end; ++i) {
+        const char* tn = i->typeName();
+        std::cout << i->key() << " "
+                  << i->value()
+                  << " | " << tn
+                  << std::endl;
+    }
+}
+
+bool Parser::hasExif() {
+    return !exifData.empty();
+}
+
+bool Parser::hasXmp() {
+    return !xmpData.empty();
 }
 
 

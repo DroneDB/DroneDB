@@ -36,42 +36,41 @@ void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
                 if (!image.get()) throw new IndexException("Cannot open " + path.string());
                 image->readMetadata();
 
-                auto exifData = image->exifData();
+                exif::Parser e(image.get());
 
-                if (!exifData.empty()) {
-
-                    //                Exiv2::ExifData::const_iterator end = exifData.end();
-                    //                for (Exiv2::ExifData::const_iterator i = exifData.begin(); i != end; ++i) {
-                    //                    const char* tn = i->typeName();
-                    //                    std::cout
-                    //                            << i->key() << " "
-
-                    //                            << i->value()
-                    //                            << " | " << tn
-                    //                            << "\n";
-                    //                }
-
-                    exif::Parser p(exifData);
-                    auto imageSize = p.extractImageSize();
+                if (e.hasExif()) {
+                    auto imageSize = e.extractImageSize();
                     meta["imageWidth"] = imageSize.width;
                     meta["imageHeight"] = imageSize.height;
+                    meta["imageOrientation"] = e.extractImageOrientation();
 
-                    meta["make"] = p.extractMake();
-                    meta["model"] = p.extractModel();
-                    meta["sensorWidth"] = p.extractSensorWidth();
-                    meta["sensor"] = p.extractSensor();
+                    meta["make"] = e.extractMake();
+                    meta["model"] = e.extractModel();
+                    meta["sensorWidth"] = e.extractSensorWidth();
+                    meta["sensor"] = e.extractSensor();
 
-                    auto focal = p.computeFocal();
+                    auto focal = e.computeFocal();
                     meta["focal35"] = focal.f35;
                     meta["focalRatio"] = focal.ratio;
+                    meta["captureTime"] = e.extractCaptureTime();
 
-                    meta["captureTime"] = p.extractCaptureTime();
-                    meta["orientation"] = p.extractOrientation();
+                    exif::CameraOrientation cameraOri;
+                    if (e.extractCameraOrientation(cameraOri)) {
+                        meta["cameraYaw"] = cameraOri.yaw;
+                        meta["cameraPitch"] = cameraOri.pitch;
+                        meta["cameraRoll"] = cameraOri.roll;
+                    }
 
-                    auto geo = p.extractGeo();
-                    if (geo.latitude != 0.0 && geo.longitude != 0.0) {
+                    exif::GeoLocation geo;
+                    if (e.extractGeo(geo)) {
                         entry.point_geom = utils::stringFormat("POINT Z (%f %f %f)", geo.longitude, geo.latitude, geo.altitude);
                         LOGV << "POINT GEOM: "<< entry.point_geom;
+
+
+                        auto zone = geo::getUTMZone(geo.latitude, geo.longitude);
+                        LOGV << "UTM Zone: " << zone;
+                        auto utmCoords = geo::toUTM(geo.latitude, geo.longitude, zone);
+                        LOGV << "UTM Point: " << utmCoords;
 
                         entry.type = Type::GeoImage;
                     } else {
@@ -108,19 +107,4 @@ void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
 //                                      << "\n";
 //                            }
 
-//                auto xmpData = image->xmpData();
-//                if (!xmpData.empty()) {
-//                    for (Exiv2::XmpData::const_iterator md = xmpData.begin();
-//                            md != xmpData.end(); ++md) {
-//                        std::cout << std::setfill(' ') << std::left
-//                                  << std::setw(44)
-//                                  << md->key() << " "
-//                                  << std::setw(9) << std::setfill(' ') << std::left
-//                                  << md->typeName() << " "
-//                                  << std::dec << std::setw(3)
-//                                  << std::setfill(' ') << std::right
-//                                  << md->count() << "  "
-//                                  << std::dec << md->value()
-//                                  << std::endl;
-//                    }
-//                }
+
