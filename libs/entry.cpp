@@ -46,16 +46,20 @@ void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
 
                     meta["make"] = e.extractMake();
                     meta["model"] = e.extractModel();
-                    meta["sensorWidth"] = e.extractSensorWidth();
                     meta["sensor"] = e.extractSensor();
 
+                    auto sensorSize = e.extractSensorSize();
+                    meta["sensorWidth"] = sensorSize.width;
+                    meta["sensorHeight"] = sensorSize.height;
+
                     auto focal = e.computeFocal();
-                    meta["focal35"] = focal.f35;
-                    meta["focalRatio"] = focal.ratio;
+                    meta["focalLength"] = focal.length;
+                    meta["focalLength35"] = focal.length35;
                     meta["captureTime"] = e.extractCaptureTime();
 
                     exif::CameraOrientation cameraOri;
-                    if (e.extractCameraOrientation(cameraOri)) {
+                    bool hasCameraOri = e.extractCameraOrientation(cameraOri);
+                    if (hasCameraOri) {
                         meta["cameraYaw"] = cameraOri.yaw;
                         meta["cameraPitch"] = cameraOri.pitch;
                         meta["cameraRoll"] = cameraOri.roll;
@@ -66,11 +70,17 @@ void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
                         entry.point_geom = utils::stringFormat("POINT Z (%f %f %f)", geo.longitude, geo.latitude, geo.altitude);
                         LOGV << "POINT GEOM: "<< entry.point_geom;
 
+                        //e.printAllTags();
 
-                        auto zone = geo::getUTMZone(geo.latitude, geo.longitude);
-                        LOGV << "UTM Zone: " << zone;
-                        auto utmCoords = geo::toUTM(geo.latitude, geo.longitude, zone);
-                        LOGV << "UTM Point: " << utmCoords;
+                        // Estimate image footprint
+                        // TODO: if altitude is not known,
+                        // we need to lookup an estimate from a DTM
+                        // or set a default value
+                        double relAltitude = e.extractRelAltitude();
+
+                        if (hasCameraOri && relAltitude != 0.0 && sensorSize.width > 0.0) {
+                            entry.polygon_geom = calculateFootprint(imageSize, sensorSize, geo, focal, cameraOri, relAltitude);
+                        }
 
                         entry.type = Type::GeoImage;
                     } else {
@@ -88,6 +98,15 @@ void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
 
     // Serialize JSON
     entry.meta = meta.dump();
+}
+
+std::string calculateFootprint(const exif::ImageSize &imsize, const exif::SensorSize &sensorSize, const exif::GeoLocation &geo, const exif::Focal &focal, const exif::CameraOrientation &cameraOri, double relAltitude) {
+    auto utmZone = geo::getUTMZone(geo.latitude, geo.longitude);
+    auto center = geo::toUTM(geo.latitude, geo.longitude, utmZone);
+
+    // TODO: implement!
+    return "";
+
 }
 
 }

@@ -28,9 +28,15 @@ struct ImageSize {
 };
 
 struct Focal {
-    float f35;
-    float ratio;
-    Focal() : f35(0), ratio(0) {};
+    double length; // in mm
+    double length35; // in 35mm film equivalent
+    Focal() : length(0), length35(0) {};
+};
+
+struct SensorSize {
+    double width; // mm
+    double height; // mm
+    SensorSize() : width(0), height(0) {};
 };
 
 struct GeoLocation {
@@ -66,10 +72,11 @@ class Parser {
     std::string extractModel();
     std::string extractSensor();
     Focal computeFocal();
-    float extractSensorWidth();
-    inline float getMmPerUnit(long resolutionUnit);
+    SensorSize extractSensorSize();
+    inline double getMmPerUnit(long resolutionUnit);
 
     bool extractGeo(GeoLocation &geo);
+    double extractRelAltitude();
     inline double geoToDecimal(const Exiv2::ExifData::const_iterator &geoTag, const Exiv2::ExifData::const_iterator &geoRefTag);
     inline double evalFrac(const Exiv2::Rational &rational);
 

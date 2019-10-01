@@ -40,8 +40,5 @@ Geographic2D fromUTM(double x, double y, const UTMZone &zone) {
     return result;
 }
 
-
-
-
 }
 

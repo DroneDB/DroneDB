@@ -1,7 +1,6 @@
 cmake_minimum_required(VERSION 2.8)
 
 project(ddb)
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "Release" CACHE STRING
@@ -28,7 +27,6 @@ add_subdirectory("libs")
 add_subdirectory("vendor")
 
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}/vendor")
-include_directories("${CMAKE_BINARY_DIR}/install/include")
 add_executable(${PROJECT_NAME} ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp ${SRC_LIST})
 
 file(GLOB DATA_FILES

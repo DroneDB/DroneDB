@@ -21,7 +21,7 @@ with urllib.request.urlopen(SENSOR_DATA) as response:
 
 #include <map>
 
-static std::map<std::string,float> sensorData = {
+static std::map<std::string,double> sensorData = {
 """)
         for k in d:
             focal = d[k]

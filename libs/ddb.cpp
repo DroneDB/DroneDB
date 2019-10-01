@@ -15,7 +15,7 @@ limitations under the License. */
 
 namespace ddb {
 
-#define UPDATE_QUERY "UPDATE entries SET hash=?, type=?, meta=?, mtime=?, size=?, depth=?, point_geom=GeomFromText(?, 4326) WHERE path=?"
+#define UPDATE_QUERY "UPDATE entries SET hash=?, type=?, meta=?, mtime=?, size=?, depth=?, point_geom=GeomFromText(?, 4326), polygon_geom=GeomFromText(?, 4326) WHERE path=?"
 
 std::string create(const std::string &directory) {
     fs::path dirPath = directory;
@@ -185,9 +185,10 @@ void doUpdate(Statement *updateQ, const Entry &e) {
     updateQ->bind(5, static_cast<long long>(e.size));
     updateQ->bind(6, e.depth);
     updateQ->bind(7, e.point_geom);
+    updateQ->bind(8, e.polygon_geom);
 
     // Where
-    updateQ->bind(8, e.path);
+    updateQ->bind(9, e.path);
 
     updateQ->execute();
     std::cout << "U\t" << e.path << std::endl;
@@ -198,8 +199,8 @@ void addToIndex(Database *db, const std::vector<std::string> &paths) {
     auto pathList = getPathList(directory, paths, true);
 
     auto q = db->query("SELECT mtime,hash FROM entries WHERE path=?");
-    auto insertQ = db->query("INSERT INTO entries (path, hash, type, meta, mtime, size, depth, point_geom) "
-                             "VALUES (?, ?, ?, ?, ?, ?, ?, GeomFromText(?, 4326))");
+    auto insertQ = db->query("INSERT INTO entries (path, hash, type, meta, mtime, size, depth, point_geom, polygon_geom) "
+                             "VALUES (?, ?, ?, ?, ?, ?, ?, GeomFromText(?, 4326), GeomFromText(?, 4326))");
     auto updateQ = db->query(UPDATE_QUERY);
     db->exec("BEGIN TRANSACTION");
 
@@ -231,6 +232,7 @@ void addToIndex(Database *db, const std::vector<std::string> &paths) {
                 insertQ->bind(6, static_cast<long long>(e.size));
                 insertQ->bind(7, e.depth);
                 insertQ->bind(8, e.point_geom);
+                insertQ->bind(9, e.polygon_geom);
 
                 insertQ->execute();
                 std::cout << "A\t" << e.path << std::endl;

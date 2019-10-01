@@ -83,6 +83,8 @@ Database &Database::createTables() {
       depth INTEGER
   );
   SELECT AddGeometryColumn("entries", "point_geom", 4326, "POINTZ", "XYZ");
+  SELECT AddGeometryColumn("entries", "polygon_geom", 4326, "POLYGONZ", "XYZ");
+
 )<<<";
 
     LOGD << "About to create tables...";

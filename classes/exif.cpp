@@ -99,60 +99,73 @@ std::string Parser::extractSensor() {
 }
 
 Focal Parser::computeFocal() {
-    auto focal35 = findExifKey("Exif.Photo.FocalLengthIn35mmFilm");
-    auto focal = findExifKey("Exif.Photo.FocalLength");
-    Focal res;
+    Focal f;
+    double sensorWidth = extractSensorSize().width;
 
-    if (focal35 != exifData.end() && focal35->toFloat() > 0) {
-        res.f35 = focal35->toFloat();
-        res.ratio = res.f35 / 36.0f;
-    } else {
-        float sensorWidth = extractSensorWidth();
-        std::string sensor = extractSensor();
-        if (sensorWidth == 0.0f && sensorData.count(sensor) > 0) {
-            sensorWidth = sensorData.at(sensor);
-        }
+    if (sensorWidth > 0.0) {
+        auto focal35 = findExifKey("Exif.Photo.FocalLengthIn35mmFilm");
+        auto focal = findExifKey("Exif.Photo.FocalLength");
 
-        if (sensorWidth > 0.0f && focal != exifData.end()) {
-            res.ratio = focal->toFloat() / sensorWidth;
-            res.f35 = 36.0f * res.ratio;
-        } else {
-            res.f35 = 0.0f;
-            res.ratio = 0.0f;
+        if (focal35 != exifData.end() && focal35->toFloat() > 0) {
+            f.length35 = static_cast<double>(focal35->toFloat());
+            f.length = (f.length35 / 36.0) * sensorWidth;
+        } else if (focal != exifData.end() && focal->toFloat() > 0) {
+            f.length = static_cast<double>(focal->toFloat());
+            f.length35 = (36.0 * f.length) / sensorWidth;
         }
     }
 
-    return res;
+    return f;
 }
 
-// Extracts sensor width. Returns 0 on failure
-float Parser::extractSensorWidth() {
+// Extracts sensor sizes (in mm). Returns 0 on failure
+SensorSize Parser::extractSensorSize() {
+    SensorSize r;
+
     auto fUnit = findExifKey("Exif.Photo.FocalPlaneResolutionUnit");
     auto fXRes = findExifKey("Exif.Photo.FocalPlaneXResolution");
+    auto fYRes = findExifKey("Exif.Photo.FocalPlaneYResolution");
 
-    if (fUnit == exifData.end() || fXRes == exifData.end()) return 0.0;
+    if (fUnit != exifData.end() && fXRes != exifData.end() && fYRes != exifData.end()) {
+        long resolutionUnit = fUnit->toLong();
+        double mmPerUnit = getMmPerUnit(resolutionUnit);
+        if (mmPerUnit != 0.0) {
+            auto imsize = extractImageSize();
 
-    long resolutionUnit = fUnit->toLong();
-    float mmPerUnit = getMmPerUnit(resolutionUnit);
-    if (mmPerUnit == 0.0f) return 0.0f;
+            double xUnitsPerPixel = 1.0 / static_cast<double>(fXRes->toFloat());
+            r.width = imsize.width * xUnitsPerPixel * mmPerUnit;
 
-    float pixelsPerUnit = fXRes->toFloat();
-    float unitsPerPixel = 1.0f / pixelsPerUnit;
-    float widthInPixels = extractImageSize().width;
-    return widthInPixels * unitsPerPixel * mmPerUnit;
+            double yUnitsPerPixel = 1.0 / static_cast<double>(fYRes->toFloat());
+            r.height = imsize.width * yUnitsPerPixel * mmPerUnit;
+
+            return r; // Good, exit here
+        }
+    }
+
+    // If we reached this point, we fallback to database lookup
+    std::string sensor = extractSensor();
+    if (sensorData.count(sensor) > 0) {
+        r.width = sensorData.at(sensor);
+
+        // This is an estimate
+        auto imsize = extractImageSize();
+        r.height = (r.width / imsize.width) * imsize.height;
+    }
+
+    return r;
 }
 
 // Length of resolution unit in millimiters
 // https://www.sno.phy.queensu.ca/~phil/exiftool/TagNames/EXIF.html
-inline float Parser::getMmPerUnit(long resolutionUnit) {
+inline double Parser::getMmPerUnit(long resolutionUnit) {
     if (resolutionUnit == 2) {
-        return 25.4f; // mm in 1 inch
+        return 25.4; // mm in 1 inch
     } else if (resolutionUnit == 3) {
-        return 10.0f; //  mm in 1 cm
+        return 10.0; //  mm in 1 cm
     } else if (resolutionUnit == 4) {
-        return 1.0f; // mm in 1 mm
+        return 1.0; // mm in 1 mm
     } else if (resolutionUnit == 5) {
-        return 0.001f; // mm in 1 um
+        return 0.001; // mm in 1 um
     } else {
         LOGE << "Unknown EXIF resolution unit: " << resolutionUnit;
         return 0.0;
@@ -182,6 +195,12 @@ bool Parser::extractGeo(GeoLocation &geo) {
     }
 
     return true;
+}
+
+double Parser::extractRelAltitude() {
+    auto k = findXmpKey("Xmp.drone-dji.RelativeAltitude");
+    if (k == xmpData.end()) return 0.0;
+    return static_cast<double>(k->toFloat());
 }
 
 // Converts a geotag location to decimal degrees
