@@ -136,7 +136,7 @@ SensorSize Parser::extractSensorSize() {
             r.width = imsize.width * xUnitsPerPixel * mmPerUnit;
 
             double yUnitsPerPixel = 1.0 / static_cast<double>(fYRes->toFloat());
-            r.height = imsize.width * yUnitsPerPixel * mmPerUnit;
+            r.height = imsize.height * yUnitsPerPixel * mmPerUnit;
 
             return r; // Good, exit here
         }
@@ -147,7 +147,8 @@ SensorSize Parser::extractSensorSize() {
     if (sensorData.count(sensor) > 0) {
         r.width = sensorData.at(sensor);
 
-        // This is an estimate
+        // This is an (inaccurate) estimate
+        // TODO: is this the best way?
         auto imsize = extractImageSize();
         r.height = (r.width / imsize.width) * imsize.height;
     }

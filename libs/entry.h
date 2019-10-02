@@ -30,7 +30,7 @@ struct Entry {
 };
 
 void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entry);
-std::string calculateFootprint(const exif::ImageSize &imsize, const exif::SensorSize &sensorSize, const exif::GeoLocation &geo, const exif::Focal &focal, const exif::CameraOrientation &cameraOri, double relAltitude);
+std::string calculateFootprint(const exif::SensorSize &sensorSize, const exif::GeoLocation &geo, const exif::Focal &focal, const exif::CameraOrientation &cameraOri, double relAltitude);
 
 }
 

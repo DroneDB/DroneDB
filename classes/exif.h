@@ -31,12 +31,14 @@ struct Focal {
     double length; // in mm
     double length35; // in 35mm film equivalent
     Focal() : length(0), length35(0) {};
+    Focal(double length, double length35) : length(length), length35(length35) {};
 };
 
 struct SensorSize {
     double width; // mm
     double height; // mm
     SensorSize() : width(0), height(0) {};
+    SensorSize(double width, double height) : width(width), height(height) {};
 };
 
 struct GeoLocation {
@@ -45,14 +47,16 @@ struct GeoLocation {
     double altitude;
 
     GeoLocation() : latitude(0), longitude(0), altitude(0) {}
+    GeoLocation(double latitude, double longitude, double altitude) : latitude(latitude), longitude(longitude), altitude(altitude) {};
 };
 
 struct CameraOrientation {
-    double pitch;
-    double yaw;
-    double roll;
+    double pitch; // degrees. -90 = nadir, 0 = front straight
+    double yaw; // degress. 0 = magnetic north, 90 = east, -90 = west, 180 = south
+    double roll; // degrees. 20 = left roll, -20 = right roll
 
     CameraOrientation() : pitch(0), yaw(0), roll(0) {};
+    CameraOrientation(double pitch, double yaw, double roll) : pitch(pitch), yaw(yaw), roll(roll) {};
 };
 
 class Parser {

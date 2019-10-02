@@ -34,6 +34,10 @@ Projected2D toUTM(double latitude, double longitude, const geo::UTMZone &zone) {
     return result;
 }
 
+Geographic2D fromUTM(const Projected2D &p, const UTMZone &zone) {
+    return fromUTM(p.x, p.y, zone);
+}
+
 Geographic2D fromUTM(double x, double y, const UTMZone &zone) {
     Geographic2D result;
     UTMUPS::Reverse(zone.zone, zone.north, x, y, result.latitude, result.longitude);

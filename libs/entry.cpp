@@ -67,7 +67,7 @@ void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
 
                     exif::GeoLocation geo;
                     if (e.extractGeo(geo)) {
-                        entry.point_geom = utils::stringFormat("POINT Z (%f %f %f)", geo.longitude, geo.latitude, geo.altitude);
+                        entry.point_geom = utils::stringFormat("POINT Z (%lf %lf %lf)", geo.longitude, geo.latitude, geo.altitude);
                         LOGV << "POINT GEOM: "<< entry.point_geom;
 
                         //e.printAllTags();
@@ -79,7 +79,7 @@ void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
                         double relAltitude = e.extractRelAltitude();
 
                         if (hasCameraOri && relAltitude != 0.0 && sensorSize.width > 0.0) {
-                            entry.polygon_geom = calculateFootprint(imageSize, sensorSize, geo, focal, cameraOri, relAltitude);
+                            entry.polygon_geom = calculateFootprint(sensorSize, geo, focal, cameraOri, relAltitude);
                         }
 
                         entry.type = Type::GeoImage;
@@ -100,12 +100,63 @@ void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
     entry.meta = meta.dump();
 }
 
-std::string calculateFootprint(const exif::ImageSize &imsize, const exif::SensorSize &sensorSize, const exif::GeoLocation &geo, const exif::Focal &focal, const exif::CameraOrientation &cameraOri, double relAltitude) {
+std::string calculateFootprint(const exif::SensorSize &sensorSize, const exif::GeoLocation &geo, const exif::Focal &focal, const exif::CameraOrientation &cameraOri, double relAltitude) {
     auto utmZone = geo::getUTMZone(geo.latitude, geo.longitude);
     auto center = geo::toUTM(geo.latitude, geo.longitude, utmZone);
+    double groundHeight = geo.altitude != 0.0 ? geo.altitude - relAltitude : relAltitude;
 
-    // TODO: implement!
-    return "";
+    // Field of view
+
+    // Wide
+    double xView = 2.0 * atan(sensorSize.width / (2.0 * focal.length));
+
+    // Tall
+    double yView = 2.0 * atan(sensorSize.height / (2.0 * focal.length));
+
+    // From drone to...
+    double bottom = relAltitude * tan(utils::deg2rad(90.0 + cameraOri.pitch) - 0.5 * xView);
+    double top = relAltitude * tan(utils::deg2rad(90.0 + cameraOri.pitch) + 0.5 * xView);
+    double left = relAltitude * tan(utils::deg2rad(cameraOri.roll) - 0.5 * yView);
+    double right = relAltitude * tan(utils::deg2rad(cameraOri.roll) + 0.5 * yView);
+    // ... of picture.
+
+    LOGD << "xView: " << utils::rad2deg(xView);
+    LOGD << "yView: " << utils::rad2deg(yView);
+    LOGD << "bottom: " << bottom;
+    LOGD << "top: " << top;
+    LOGD << "left: " << left;
+    LOGD << "right: " << right;
+
+    // Corners aligned north
+    auto upperLeft = geo::Projected2D(center.x + left, center.y + top);
+    auto upperRight = geo::Projected2D(center.x + right, center.y + top);
+    auto lowerLeft = geo::Projected2D(center.x + left, center.y + bottom);
+    auto lowerRight = geo::Projected2D(center.x + right, center.y + bottom);
+
+    LOGD << "UL: " << upperLeft;
+    LOGD << "UR: " << upperRight;
+    LOGD << "LL: " << lowerLeft;
+    LOGD << "LR: " << lowerRight;
+
+
+    // TODO: rotate
+
+    // Convert to geographic
+    auto ul = geo::fromUTM(upperLeft, utmZone);
+    auto ur = geo::fromUTM(upperRight, utmZone);
+    auto ll = geo::fromUTM(lowerLeft, utmZone);
+    auto lr = geo::fromUTM(lowerRight, utmZone);
+
+    LOGD << "ULG: " << ul;
+    LOGD << "URG: " << ur;
+    LOGD << "LLG: " << ll;
+    LOGD << "LRG: " << lr;
+
+    return utils::stringFormat("POLYGONZ ((%lf %lf %lf, %lf %lf %lf, %lf %lf %lf, %lf %lf %lf))",
+                               ul.longitude, ul.latitude, groundHeight,
+                               ll.longitude, ll.latitude, groundHeight,
+                               lr.longitude, lr.latitude, groundHeight,
+                               ur.longitude, ur.latitude, groundHeight);
 
 }
 

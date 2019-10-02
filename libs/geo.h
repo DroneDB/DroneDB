@@ -31,6 +31,8 @@ inline std::ostream& operator<<(std::ostream& os, const UTMZone& z)
 struct Projected2D{
     double x;
     double y;
+    Projected2D() : x(0.0), y(0.0) {};
+    Projected2D(double x, double y) : x(x), y(y) {};
 };
 inline std::ostream& operator<<(std::ostream& os, const Projected2D& p)
 {
@@ -42,9 +44,16 @@ struct Geographic2D{
     double latitude;
     double longitude;
 };
+inline std::ostream& operator<<(std::ostream& os, const Geographic2D& p)
+{
+    os << p.latitude << " " << p.longitude;
+    return os;
+}
 
 UTMZone getUTMZone(double latitude, double longitude);
 Projected2D toUTM(double latitude, double longitude, const UTMZone &zone);
+
+Geographic2D fromUTM(const Projected2D &p, const UTMZone &zone);
 Geographic2D fromUTM(double x, double y, const UTMZone &zone);
 
 }

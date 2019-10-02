@@ -21,11 +21,16 @@ limitations under the License. */
 #include <algorithm>
 #include <cctype>
 #include <string>
+#include <cmath>
 #include <filesystem>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include "classes/exceptions.h"
 #include "logger.h"
+
+#ifndef M_PI
+#define M_PI 3.1415926535
+#endif
 
 #ifdef WIN32
 #include <windows.h>    //GetModuleFileNameW
@@ -71,6 +76,14 @@ static inline void rtrim(std::string &s) {
 static inline void trim(std::string &s) {
     ltrim(s);
     rtrim(s);
+}
+
+static inline double rad2deg(double rad) {
+    return (rad * 180.0) / M_PI;
+}
+
+static inline double deg2rad(double deg) {
+    return (deg * M_PI) / 180.0;
 }
 
 // https://stackoverflow.com/questions/2342162/stdstring-formatting-like-sprintf/25440014
