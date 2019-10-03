@@ -26,7 +26,7 @@ using namespace std;
 [[ noreturn ]] void printHelp(char *argv[]) {
     std::cout << "DroneDB v" VERSION " - Easily manage and share aerial datasets :)" << std::endl <<
               "Usage:" << std::endl <<
-              "	" << argv[0] << " <init|add|rm|status|commit|build> [args] [PATHS]" << std::endl << std::endl <<
+              "	" << argv[0] << " <init|add|rm|sync> [args] [PATHS]" << std::endl << std::endl <<
               "   -h, --help		Print help" << std::endl <<
               "   --version		Print version" << std::endl << std::endl <<
               "For detailed command help use: " << argv[0] << " <command> --help " << std::endl <<
