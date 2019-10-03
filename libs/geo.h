@@ -15,6 +15,7 @@ limitations under the License. */
 #define GEO_H
 
 #include <iostream>
+#include "../utils.h"
 
 namespace geo{
 
@@ -33,6 +34,8 @@ struct Projected2D{
     double y;
     Projected2D() : x(0.0), y(0.0) {};
     Projected2D(double x, double y) : x(x), y(y) {};
+
+    void rotate(const Projected2D &center, double degrees);
 };
 inline std::ostream& operator<<(std::ostream& os, const Projected2D& p)
 {

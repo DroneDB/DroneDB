@@ -100,6 +100,7 @@ void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
     entry.meta = meta.dump();
 }
 
+// Adapted from https://github.com/mountainunicycler/dronecamerafov/tree/master
 std::string calculateFootprint(const exif::SensorSize &sensorSize, const exif::GeoLocation &geo, const exif::Focal &focal, const exif::CameraOrientation &cameraOri, double relAltitude) {
     auto utmZone = geo::getUTMZone(geo.latitude, geo.longitude);
     auto center = geo::toUTM(geo.latitude, geo.longitude, utmZone);
@@ -114,10 +115,10 @@ std::string calculateFootprint(const exif::SensorSize &sensorSize, const exif::G
     double yView = 2.0 * atan(sensorSize.height / (2.0 * focal.length));
 
     // From drone to...
-    double bottom = relAltitude * tan(utils::deg2rad(90.0 + cameraOri.pitch) - 0.5 * xView);
-    double top = relAltitude * tan(utils::deg2rad(90.0 + cameraOri.pitch) + 0.5 * xView);
-    double left = relAltitude * tan(utils::deg2rad(cameraOri.roll) - 0.5 * yView);
-    double right = relAltitude * tan(utils::deg2rad(cameraOri.roll) + 0.5 * yView);
+    double bottom = relAltitude * tan(utils::deg2rad(90.0 + cameraOri.pitch) - 0.5 * yView);
+    double top = relAltitude * tan(utils::deg2rad(90.0 + cameraOri.pitch) + 0.5 * yView);
+    double left = relAltitude * tan(utils::deg2rad(cameraOri.roll) - 0.5 * xView);
+    double right = relAltitude * tan(utils::deg2rad(cameraOri.roll) + 0.5 * xView);
     // ... of picture.
 
     LOGD << "xView: " << utils::rad2deg(xView);
@@ -133,24 +134,22 @@ std::string calculateFootprint(const exif::SensorSize &sensorSize, const exif::G
     auto lowerLeft = geo::Projected2D(center.x + left, center.y + bottom);
     auto lowerRight = geo::Projected2D(center.x + right, center.y + bottom);
 
+    // Rotate
+    upperLeft.rotate(center, -cameraOri.yaw);
+    upperRight.rotate(center, -cameraOri.yaw);
+    lowerLeft.rotate(center, -cameraOri.yaw);
+    lowerRight.rotate(center, -cameraOri.yaw);
+
     LOGD << "UL: " << upperLeft;
     LOGD << "UR: " << upperRight;
     LOGD << "LL: " << lowerLeft;
     LOGD << "LR: " << lowerRight;
-
-
-    // TODO: rotate
 
     // Convert to geographic
     auto ul = geo::fromUTM(upperLeft, utmZone);
     auto ur = geo::fromUTM(upperRight, utmZone);
     auto ll = geo::fromUTM(lowerLeft, utmZone);
     auto lr = geo::fromUTM(lowerRight, utmZone);
-
-    LOGD << "ULG: " << ul;
-    LOGD << "URG: " << ur;
-    LOGD << "LLG: " << ll;
-    LOGD << "LRG: " << lr;
 
     return utils::stringFormat("POLYGONZ ((%lf %lf %lf, %lf %lf %lf, %lf %lf %lf, %lf %lf %lf))",
                                ul.longitude, ul.latitude, groundHeight,
@@ -162,19 +161,5 @@ std::string calculateFootprint(const exif::SensorSize &sensorSize, const exif::G
 
 }
 
-//                            if (i->key() == "Exif.GPSInfo.GPSLatitude") {
-//                            std::cout << "===========" << std::endl;
-//                            std::cout << std::setw(44) << std::setfill(' ') << std::left
-//                                      << i->key() << " "
-//                                      << "0x" << std::setw(4) << std::setfill('0') << std::right
-//                                      << std::hex << i->tag() << " "
-//                                      << std::setw(9) << std::setfill(' ') << std::left
-//                                      << (tn ? tn : "Unknown") << " "
-//                                      << std::dec << std::setw(3)
-//                                      << std::setfill(' ') << std::right
-//                                      << i->count() << "  "
-//                                      << std::dec << i->value()
-//                                      << "\n";
-//                            }
 
 

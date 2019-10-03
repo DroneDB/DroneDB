@@ -44,5 +44,13 @@ Geographic2D fromUTM(double x, double y, const UTMZone &zone) {
     return result;
 }
 
+void Projected2D::rotate(const Projected2D &center, double degrees) {
+    double px = this->x;
+    double py = this->y;
+    double radians = utils::deg2rad(degrees);
+    x = cos(radians) * (px - center.x) - sin(radians) * (py - center.y) + center.x;
+    y = sin(radians) * (px - center.x) + cos(radians) * (py - center.y) + center.y;
+}
+
 }
 
