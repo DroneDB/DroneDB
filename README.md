@@ -66,6 +66,8 @@ Create a new query similar to:
 SELECT AsGeoJSON(MakeLine(point_geom)) FROM (SELECT point_geom, json_extract(meta, '$.captureTime') as captureTime FROM entries ORDER by captureTime ASC);
 ```
 
+The 'point_geom' column contains the GPS locations, while 'polygon_geom' has the footprint extents. Footprint extents can be calculated only if gimbal orientation and camera parameters are present.
+
 ## Roadmap
 
 We will publish a roadmap in the upcoming months. Stay tuned.
