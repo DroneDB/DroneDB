@@ -70,7 +70,7 @@ Database &Database::exec(const std::string &sql) {
 
 Database &Database::createTables() {
     std::string sql = R"<<<(
-  SELECT InitSpatialMetaData(TRUE, 'NONE');
+  SELECT InitSpatialMetaData(1, 'NONE');
   SELECT InsertEpsgSrid(4326);
 
   CREATE TABLE IF NOT EXISTS entries (

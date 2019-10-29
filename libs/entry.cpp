@@ -30,68 +30,64 @@ void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
         // Images
         if (jpg || tif) {
             // TODO: if tif, check with GDAL if this is a georeferenced raster
-            // for now, we don't allow tif
-            if (jpg) {
-                auto image = Exiv2::ImageFactory::open(path);
-                if (!image.get()) throw new IndexException("Cannot open " + path.string());
-                image->readMetadata();
 
-                exif::Parser e(image.get());
+            auto image = Exiv2::ImageFactory::open(path);
+            if (!image.get()) throw new IndexException("Cannot open " + path.string());
+            image->readMetadata();
 
-                if (e.hasExif()) {
-                    auto imageSize = e.extractImageSize();
-                    meta["imageWidth"] = imageSize.width;
-                    meta["imageHeight"] = imageSize.height;
-                    meta["imageOrientation"] = e.extractImageOrientation();
+            exif::Parser e(image.get());
 
-                    meta["make"] = e.extractMake();
-                    meta["model"] = e.extractModel();
-                    meta["sensor"] = e.extractSensor();
+            if (e.hasExif()) {
+                auto imageSize = e.extractImageSize();
+                meta["imageWidth"] = imageSize.width;
+                meta["imageHeight"] = imageSize.height;
+                meta["imageOrientation"] = e.extractImageOrientation();
 
-                    auto sensorSize = e.extractSensorSize();
-                    meta["sensorWidth"] = sensorSize.width;
-                    meta["sensorHeight"] = sensorSize.height;
+                meta["make"] = e.extractMake();
+                meta["model"] = e.extractModel();
+                meta["sensor"] = e.extractSensor();
 
-                    auto focal = e.computeFocal();
-                    meta["focalLength"] = focal.length;
-                    meta["focalLength35"] = focal.length35;
-                    meta["captureTime"] = e.extractCaptureTime();
+                auto sensorSize = e.extractSensorSize();
+                meta["sensorWidth"] = sensorSize.width;
+                meta["sensorHeight"] = sensorSize.height;
 
-                    exif::CameraOrientation cameraOri;
-                    bool hasCameraOri = e.extractCameraOrientation(cameraOri);
-                    if (hasCameraOri) {
-                        meta["cameraYaw"] = cameraOri.yaw;
-                        meta["cameraPitch"] = cameraOri.pitch;
-                        meta["cameraRoll"] = cameraOri.roll;
+                auto focal = e.computeFocal();
+                meta["focalLength"] = focal.length;
+                meta["focalLength35"] = focal.length35;
+                meta["captureTime"] = e.extractCaptureTime();
+
+                exif::CameraOrientation cameraOri;
+                bool hasCameraOri = e.extractCameraOrientation(cameraOri);
+                if (hasCameraOri) {
+                    meta["cameraYaw"] = cameraOri.yaw;
+                    meta["cameraPitch"] = cameraOri.pitch;
+                    meta["cameraRoll"] = cameraOri.roll;
+                }
+
+                exif::GeoLocation geo;
+                if (e.extractGeo(geo)) {
+                    entry.point_geom = utils::stringFormat("POINT Z (%lf %lf %lf)", geo.longitude, geo.latitude, geo.altitude);
+                    LOGV << "POINT GEOM: "<< entry.point_geom;
+
+                    //e.printAllTags();
+
+                    // Estimate image footprint
+                    // TODO: if altitude is not known,
+                    // we need to lookup an estimate from a DTM
+                    // or set a default value
+                    double relAltitude = e.extractRelAltitude();
+
+                    if (hasCameraOri && relAltitude != 0.0 && sensorSize.width > 0.0) {
+                        entry.polygon_geom = calculateFootprint(sensorSize, geo, focal, cameraOri, relAltitude);
                     }
 
-                    exif::GeoLocation geo;
-                    if (e.extractGeo(geo)) {
-                        entry.point_geom = utils::stringFormat("POINT Z (%lf %lf %lf)", geo.longitude, geo.latitude, geo.altitude);
-                        LOGV << "POINT GEOM: "<< entry.point_geom;
-
-                        //e.printAllTags();
-
-                        // Estimate image footprint
-                        // TODO: if altitude is not known,
-                        // we need to lookup an estimate from a DTM
-                        // or set a default value
-                        double relAltitude = e.extractRelAltitude();
-
-                        if (hasCameraOri && relAltitude != 0.0 && sensorSize.width > 0.0) {
-                            entry.polygon_geom = calculateFootprint(sensorSize, geo, focal, cameraOri, relAltitude);
-                        }
-
-                        entry.type = Type::GeoImage;
-                    } else {
-                        // Not a georeferenced image, just a plain image
-                        // do nothing
-                    }
+                    entry.type = Type::GeoImage;
                 } else {
-                    LOGW << "No EXIF data found in " << path.string();
+                    // Not a georeferenced image, just a plain image
+                    // do nothing
                 }
             } else {
-                LOGW << path.string() << " .tif file classified as generic";
+                LOGW << "No EXIF data found in " << path.string();
             }
         }
     }
