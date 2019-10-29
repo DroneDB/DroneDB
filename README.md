@@ -16,6 +16,8 @@ Requirements:
  * geographiclib
  * exiv2
  * cmake
+ * libgeos
+ * gcc-8
  
 Then:
 
