@@ -58,6 +58,13 @@ struct CameraOrientation {
     CameraOrientation() : pitch(0), yaw(0), roll(0) {};
     CameraOrientation(double pitch, double yaw, double roll) : pitch(pitch), yaw(yaw), roll(roll) {};
 };
+inline std::ostream& operator<<(std::ostream& os, const CameraOrientation& c)
+{
+    os << "Pitch: " << c.pitch << " | Yaw: " << c.yaw << " | Roll: " << c.roll;
+    return os;
+}
+
+void Initialize();
 
 class Parser {
     Exiv2::ExifData exifData;

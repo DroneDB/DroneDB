@@ -62,12 +62,13 @@ void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
                     meta["cameraYaw"] = cameraOri.yaw;
                     meta["cameraPitch"] = cameraOri.pitch;
                     meta["cameraRoll"] = cameraOri.roll;
+                    LOGD << "Camera Orientation: " << cameraOri;
                 }
 
                 exif::GeoLocation geo;
                 if (e.extractGeo(geo)) {
                     entry.point_geom = utils::stringFormat("POINT Z (%lf %lf %lf)", geo.longitude, geo.latitude, geo.altitude);
-                    LOGV << "POINT GEOM: "<< entry.point_geom;
+                    LOGD << "POINT GEOM: "<< entry.point_geom;
 
                     //e.printAllTags();
 

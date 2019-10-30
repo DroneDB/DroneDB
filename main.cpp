@@ -18,6 +18,7 @@ limitations under the License. */
 #include "logger.h"
 #include "classes/exceptions.h"
 #include "classes/database.h"
+#include "classes/exif.h"
 
 #define VERSION "0.9.0"
 
@@ -49,6 +50,7 @@ int main(int argc, char* argv[]) {
 
     // Initialization steps
     Database::Initialize();
+    exif::Initialize();
 
     LOGV << "DDB v" VERSION;
     LOGV << "SQLite version: " << sqlite3_libversion();

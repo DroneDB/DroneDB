@@ -17,6 +17,11 @@ limitations under the License. */
 
 namespace exif {
 
+// Register XMP namespaces
+void Initialize(){
+    Exiv2::XmpProperties::registerNs("http://www.dji.com/drone-dji/1.0/", "drone-dji");
+}
+
 Exiv2::ExifData::const_iterator Parser::findExifKey(const std::string &key) {
     return findExifKey({key});
 }
@@ -266,9 +271,9 @@ int Parser::extractImageOrientation() {
 }
 
 bool Parser::extractCameraOrientation(CameraOrientation &cameraOri) {
-    auto pk = findXmpKey("Xmp.drone-dji.GimbalPitchDegree");
-    auto yk = findXmpKey("Xmp.drone-dji.GimbalYawDegree");
-    auto rk = findXmpKey("Xmp.drone-dji.GimbalRollDegree");
+    auto pk = findXmpKey({"Xmp.drone-dji.GimbalPitchDegree", "Xmp.Camera.Pitch"});
+    auto yk = findXmpKey({"Xmp.drone-dji.GimbalYawDegree", "Xmp.Camera.Yaw"});
+    auto rk = findXmpKey({"Xmp.drone-dji.GimbalRollDegree", "Xmp.Camera.Roll"});
 
     if (pk == xmpData.end() || yk == xmpData.end() || rk == xmpData.end()) return false;
 
