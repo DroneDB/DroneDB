@@ -37,5 +37,8 @@ class IndexException : public AppException{
 class InvalidArgsException : public AppException{
     using AppException::AppException;
 };
+class GDALException : public AppException{
+    using AppException::AppException;
+};
 
 #endif // EXCEPTIONS_H

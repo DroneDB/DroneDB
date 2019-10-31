@@ -52,5 +52,10 @@ void Projected2D::rotate(const Projected2D &center, double degrees) {
     y = sin(radians) * (px - center.x) + cos(radians) * (py - center.y) + center.y;
 }
 
+void Projected2D::transform(double *affine){
+     x = affine[0] + x*affine[1] + y*affine[2];
+     y = affine[3] + x*affine[4] + y*affine[5];
+}
+
 }
 

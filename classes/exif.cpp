@@ -275,6 +275,10 @@ bool Parser::extractCameraOrientation(CameraOrientation &cameraOri) {
     auto yk = findXmpKey({"Xmp.drone-dji.GimbalYawDegree", "Xmp.Camera.Yaw"});
     auto rk = findXmpKey({"Xmp.drone-dji.GimbalRollDegree", "Xmp.Camera.Roll"});
 
+    // TODO: sensefly pitch = 0 --> nadir
+    //                pitch = 90 --> forward
+    // https://support.pix4d.com/hc/en-us/articles/205675256-How-are-yaw-pitch-roll-defined
+
     if (pk == xmpData.end() || yk == xmpData.end() || rk == xmpData.end()) return false;
 
     cameraOri.pitch = static_cast<double>(pk->toFloat());

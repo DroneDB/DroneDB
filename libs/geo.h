@@ -36,10 +36,35 @@ struct Projected2D{
     Projected2D(double x, double y) : x(x), y(y) {};
 
     void rotate(const Projected2D &center, double degrees);
+    void transform(double *affine);
 };
+typedef Projected2D Point2D;
+
 inline std::ostream& operator<<(std::ostream& os, const Projected2D& p)
 {
-    os << p.x << " " << p.y;
+    os << "[" << p.x << ", " << p.y << "]";
+    return os;
+}
+
+template <typename T>
+struct BoundingBox{
+    T max;
+    T min;
+
+    BoundingBox(): max(T()), min(T()){}
+    BoundingBox(T min, T max): max(max), min(min){}
+    bool contains(const T &p){
+        return p.x >= min.x &&
+                p.x <= max.x &&
+                p.y >= min.y &&
+                p.y <= max.y;
+    }
+};
+
+template <typename T>
+inline std::ostream& operator<<(std::ostream& os, const BoundingBox<T>& b)
+{
+    os << "[" << b.min << "],[" << b.max << "]]";
     return os;
 }
 
@@ -49,7 +74,7 @@ struct Geographic2D{
 };
 inline std::ostream& operator<<(std::ostream& os, const Geographic2D& p)
 {
-    os << p.latitude << " " << p.longitude;
+    os << "[" << p.latitude << ", " << p.longitude << "]";
     return os;
 }
 
