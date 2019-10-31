@@ -1,4 +1,5 @@
 #include "dsmservice.h"
+#include "userprofile.h"
 #include "exceptions.h"
 
 DSMService::DSMService(){
@@ -6,34 +7,64 @@ DSMService::DSMService(){
 }
 
 float DSMService::getAltitude(double latitude, double longitude){
-//    auto dsm = getDSM(latitude, longitude);
-    addGeoTIFFToCache("/data/drone/msimbasi/test.tif", latitude, longitude);
-    return 0;
+    geo::Point2D point(longitude, latitude);
 
+    // Search cache
+    for (auto &it : cache){
+        if (it.second.bbox.contains(point)){
+            return it.second.getElevation(latitude, longitude);
+        }
+    }
+
+    // Load existing DSMs in cache until we find a matching one
+    if (loadDiskCache(latitude, longitude)){
+        return getAltitude(latitude, longitude);
+    }
+
+    // TODO: load from network
+
+    return 0;
 }
 
-void DSMService::addGeoTIFFToCache(const std::string &filename, double latitude, double longitude){
-    GDALDataset *dataset = static_cast<GDALDataset *>(GDALOpen(filename.c_str(), GA_ReadOnly));
-    if( dataset == nullptr ) throw GDALException("Cannot open " + filename);
+bool DSMService::loadDiskCache(double latitude, double longitude){
+    fs::path dsmCacheDir = UserProfile::Instance()->getProfilePath("dsm_service_cache", true);
+    for (const auto &entry : fs::directory_iterator(dsmCacheDir)){
+
+        // Not found in cache?
+        std::string filename = entry.path().filename().string();
+        if (cache.find(filename) == cache.end()){
+            LOGD << "Adding " << entry.path().string() << " to DSM service cache";
+            if (addGeoTIFFToCache(filename, latitude, longitude)){
+                return true; // Stop early, we've found a match
+            }
+        }
+    }
+
+    return false; // No match
+}
+
+bool DSMService::addGeoTIFFToCache(const fs::path &filePath, double latitude, double longitude){
+    GDALDataset *dataset = static_cast<GDALDataset *>(GDALOpen(filePath.string().c_str(), GA_ReadOnly));
+    if( dataset == nullptr ) throw GDALException("Cannot open " + filePath.string());
 
     DSMCacheEntry e;
     e.width = static_cast<unsigned int>(dataset->GetRasterXSize());
     e.height = static_cast<unsigned int>(dataset->GetRasterYSize());
 
-    if (dataset->GetGeoTransform(e.geoTransform) != CE_None) throw GDALException("Cannot get geotransform for " + filename);
+    if (dataset->GetGeoTransform(e.geoTransform) != CE_None) throw GDALException("Cannot get geotransform for " + filePath.string());
 
     std::string wkt = GDALGetProjectionRef(dataset);
-    if (wkt.empty()) throw GDALException("Cannot get projection ref for " + filename);
+    if (wkt.empty()) throw GDALException("Cannot get projection ref for " + filePath.string());
     char *wktp = const_cast<char *>(wkt.c_str());
     OGRSpatialReference *srs = new OGRSpatialReference();
-    if (srs->importFromWkt(&wktp) != OGRERR_NONE) throw GDALException("Cannot read spatial reference system for " + filename + ". Is PROJ installed?");
+    if (srs->importFromWkt(&wktp) != OGRERR_NONE) throw GDALException("Cannot read spatial reference system for " + filePath.string() + ". Is PROJ installed?");
 
     OGRSpatialReference *compare = new OGRSpatialReference();
     compare->importFromEPSG(4326);
 
     // TODO: support for DSM with EPSG different than 4326
-    if (!srs->IsSame(compare)) throw GDALException("Cannot read DSM values from raster: " + filename + " (EPSG != 4326)");
-    if (dataset->GetRasterCount() != 1) throw GDALException("More than 1 raster band found in elevation raster: " + filename);
+    if (!srs->IsSame(compare)) throw GDALException("Cannot read DSM values from raster: " + filePath.string() + " (EPSG != 4326)");
+    if (dataset->GetRasterCount() != 1) throw GDALException("More than 1 raster band found in elevation raster: " + filePath.string());
 
     geo::Point2D min(0, e.height);
     geo::Point2D max(e.width, 0);
@@ -43,16 +74,18 @@ void DSMService::addGeoTIFFToCache(const std::string &filename, double latitude,
     e.bbox.min = min;
     e.bbox.max = max;
     geo::Point2D position(longitude, latitude);
+    bool contained = e.bbox.contains(position);
 
-    if (e.bbox.contains(position)){
+    if (contained){
         // Inside the boundaries, load data
-        LOGD << position << " inside raster boundary, loading data from " << filename;
+        LOGD << position << " inside raster boundary, loading data from " << filePath.string();
         e.loadData(dataset);
     }
 
-    std::cout << "Elevation: " << e.getElevation(latitude, longitude) << "\n";
-
+    cache[filePath.filename().string()] = e;
     GDALClose(dataset);
+
+    return contained;
 }
 
 void DSMCacheEntry::loadData(GDALDataset *dataset){

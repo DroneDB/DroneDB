@@ -29,7 +29,8 @@ public:
 
     float getAltitude(double latitude, double longitude);
 
-    void addGeoTIFFToCache(const std::string &filename, double latitude, double longitude);
+    bool loadDiskCache(double latitude, double longitude);
+    bool addGeoTIFFToCache(const fs::path &filePath, double latitude, double longitude);
 
 };
 
