@@ -102,6 +102,11 @@ std::string Statement::getText(int columnId) {
     return std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, columnId)));
 }
 
+double Statement::getDouble(int columnId){
+    assert(stmt != nullptr);
+    return sqlite3_column_double(stmt, columnId);
+}
+
 void Statement::reset() {
     assert(stmt != nullptr);
 

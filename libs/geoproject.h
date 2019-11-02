@@ -18,7 +18,7 @@ limitations under the License. */
 
 namespace ddb {
 
-void geoProject(Database *db, const std::vector<std::string> &images, const std::vector<std::string> &outputs);
+void geoProject(Database *db, const std::vector<std::string> &images, const std::string &output);
 
 }
 

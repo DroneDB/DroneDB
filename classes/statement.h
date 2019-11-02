@@ -43,6 +43,7 @@ class Statement {
     int getInt(int columnId);
     long long getInt64(int columnId);
     std::string getText(int columnId);
+    double getDouble(int columnId);
     // TODO: more
 
     void reset();

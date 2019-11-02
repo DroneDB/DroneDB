@@ -18,7 +18,7 @@ Requirements:
  * cmake
  * libgeos
  * gcc-8
- * GDAL
+ * GDAL >= 2.1
  
 Then:
 

@@ -278,7 +278,6 @@ void syncIndex(Database *db) {
     while(q->fetch()) {
         fs::path relPath = q->getText(0);
         fs::path p = directory / relPath; // TODO: does this work on Windows?
-//        LOGV << p;
         Entry e;
 
         if (fs::exists(p)) {

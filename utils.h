@@ -17,6 +17,7 @@ limitations under the License. */
 
 #include <memory>
 #include <iostream>
+#include <sstream>
 #include <cstdio>
 #include <algorithm>
 #include <cctype>
@@ -99,6 +100,16 @@ std::string stringFormat( const std::string& format, Args ... args ) {
     std::unique_ptr<char[]> buf( new char[ size ] );
     snprintf( buf.get(), size, format.c_str(), args ... );
     return std::string( buf.get(), buf.get() + size - 1 ); // We don't want the '\0' inside
+}
+
+//https://stackoverflow.com/questions/16605967/set-precision-of-stdto-string-when-converting-floating-point-values
+template <typename T>
+std::string to_str(const T value, const int n = 6)
+{
+    std::ostringstream out;
+    out.precision(n);
+    out << std::fixed << value;
+    return out.str();
 }
 
 // Compares an extension with a list of extension strings

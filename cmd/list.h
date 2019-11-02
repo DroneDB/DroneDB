@@ -20,7 +20,7 @@ limitations under the License. */
 #include "add.h"
 #include "remove.h"
 #include "sync.h"
-#include "geoproject.h"
+#include "geoproj.h"
 
 namespace cmd {
 
@@ -30,7 +30,7 @@ std::map<std::string, Command*> commands = {
     {"add", new Add()},
     {"remove", new Remove()},
     {"sync", new Sync()},
-    {"geoproject", new GeoProject()}
+    {"geoproj", new GeoProj()}
 };
 
 std::map<std::string, std::string> aliases = {
@@ -39,7 +39,7 @@ std::map<std::string, std::string> aliases = {
     {"i", "init"},
     {"a", "add"},
     {"s", "sync"},
-    {"gp", "geoproject"}
+    {"gp", "geoproj"}
 };
 
 }
