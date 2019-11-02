@@ -298,6 +298,7 @@ bool Parser::extractCameraOrientation(CameraOrientation &cameraOri) {
     // TODO: JSON orientation database
     if (extractMake() == "senseFly"){
         cameraOri.pitch += -90;
+        cameraOri.roll *= -1;
     }
 
     return true;

@@ -24,7 +24,7 @@ namespace cmd {
 void Add::setOptions(cxxopts::Options &opts) {
     opts
     .positional_help("[args] [PATHS]")
-    .custom_help("add")
+    .custom_help("add -i *.JPG")
     .add_options()
     ("d,directory", "Working directory", cxxopts::value<std::string>()->default_value("."))
     ("p,paths", "Paths to add to index (files or directories)", cxxopts::value<std::vector<std::string>>());

@@ -11,8 +11,8 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License. */
-#ifndef INDEX_H
-#define INDEX_H
+#ifndef DDB_H
+#define DDB_H
 
 #include <filesystem>
 #include "../classes/database.h"
@@ -42,4 +42,4 @@ void syncIndex(Database *db);
 }
 
 
-#endif // INDEX_H
+#endif // DDB_H

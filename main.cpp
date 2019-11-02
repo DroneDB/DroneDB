@@ -28,9 +28,14 @@ using namespace std;
 [[ noreturn ]] void printHelp(char *argv[]) {
     std::cout << "DroneDB v" VERSION " - Easily manage and share aerial datasets :)" << std::endl <<
               "Usage:" << std::endl <<
-              "	" << argv[0] << " <init|add|rm|sync> [args] [PATHS]" << std::endl << std::endl <<
-              "   -h, --help		Print help" << std::endl <<
-              "   --version		Print version" << std::endl << std::endl <<
+              "	" << argv[0] << " <command> [args] [PATHS]" << std::endl << std::endl <<
+              "Commands:" << std::endl;
+    for (auto &cmd : cmd::commands){
+        std::cout << "	" << cmd.first << " - " << cmd.second->description() << std::endl;
+    }
+    std::cout << std::endl <<
+              "	-h, --help		Print help" << std::endl <<
+              "	--version		Print version" << std::endl << std::endl <<
               "For detailed command help use: " << argv[0] << " <command> --help " << std::endl <<
               "See https://uav4geo.com for more information." << std::endl;
     exit(0);
