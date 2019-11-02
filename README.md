@@ -57,6 +57,12 @@ To sync an index after filesystem changes:
 ddb sync
 ```
 
+To project an image footprint estimate onto a map:
+
+```bash
+ddb geoproj images/DJI_0018.JPG -o projected/
+```
+
 ## Browsing data with QGIS
 
 You can explore the indexed data with a program such as QGIS. The index creates a `.ddb/dbase.sqlite` file when running the `ddb init` command. This is a SpatiaLite database and can be imported by adding a new SpatiaLite layer.

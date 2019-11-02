@@ -70,7 +70,7 @@ void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
                     entry.point_geom = utils::stringFormat("POINT Z (%lf %lf %lf)", geo.longitude, geo.latitude, geo.altitude);
                     LOGD << "POINT GEOM: "<< entry.point_geom;
 
-                    //e.printAllTags();
+//                    e.printAllTags();
 
                     // Estimate image footprint
                     double relAltitude = 0.0;
