@@ -22,3 +22,7 @@ void init_logger() {
 void set_logger_verbose() {
     plog::get()->setMaxSeverity(plog::verbose);
 }
+
+bool is_logger_verbose(){
+    return plog::get()->getMaxSeverity() == plog::verbose;
+}

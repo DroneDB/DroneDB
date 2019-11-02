@@ -3,7 +3,7 @@
 
 UserProfile *UserProfile::instance = nullptr;
 
-UserProfile *UserProfile::Instance(){
+UserProfile *UserProfile::get(){
     if (!instance){
         instance = new UserProfile();
     }

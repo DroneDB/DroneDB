@@ -19,7 +19,6 @@ limitations under the License. */
 #include "classes/exceptions.h"
 #include "classes/database.h"
 #include "classes/exif.h"
-#include "classes/dsmservice.h"
 #include "gdal_priv.h"
 
 #define VERSION "0.9.0"
@@ -57,9 +56,6 @@ int main(int argc, char* argv[]) {
     LOGV << "SQLite version: " << sqlite3_libversion();
     LOGV << "SpatiaLite version: " << spatialite_version();
     LOGV << "GDAL version: " << GDALVersionInfo("RELEASE_NAME");
-
-    auto d = new DSMService();
-    std::cout << d->getAltitude(37.3651884097577,   -119.327222016594035);
 
     if (argc <= 1) printHelp(argv);
     else {

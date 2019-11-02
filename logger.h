@@ -21,5 +21,6 @@ limitations under the License. */
 
 void init_logger();
 void set_logger_verbose();
+bool is_logger_verbose();
 
 #endif // LOGGER_H

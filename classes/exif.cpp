@@ -14,6 +14,7 @@ limitations under the License. */
 #include "exif.h"
 #include "../logger.h"
 #include "timezone.h"
+#include "dsmservice.h"
 
 namespace exif {
 
@@ -72,7 +73,7 @@ std::string Parser::extractMake() {
 }
 
 std::string Parser::extractModel() {
-    auto k = findExifKey({"Exif.Photo.LensModel", "Exif.Image.Model"});
+    auto k = findExifKey({"Exif.Image.Model", "Exif.Photo.LensModel"});
 
     if (k != exifData.end()) {
         return k->toString();
@@ -203,10 +204,23 @@ bool Parser::extractGeo(GeoLocation &geo) {
     return true;
 }
 
-double Parser::extractRelAltitude() {
+bool Parser::extractRelAltitude(double &relAltitude) {
+    // Some drones have a value for relative altitude
     auto k = findXmpKey("Xmp.drone-dji.RelativeAltitude");
-    if (k == xmpData.end()) return 0.0;
-    return static_cast<double>(k->toFloat());
+    if (k != xmpData.end()){
+        relAltitude = static_cast<double>(k->toFloat());
+        return true;
+    }
+
+    // For others, we lookup an estimate from a world DSM source
+    GeoLocation geo;
+    if (extractGeo(geo) && geo.altitude > 0){
+        relAltitude = geo.altitude - static_cast<double>(DSMService::get()->getAltitude(geo.latitude, geo.longitude));
+        return true;
+    }
+
+    relAltitude = 0.0;
+    return false; // Not available
 }
 
 // Converts a geotag location to decimal degrees
@@ -275,15 +289,17 @@ bool Parser::extractCameraOrientation(CameraOrientation &cameraOri) {
     auto yk = findXmpKey({"Xmp.drone-dji.GimbalYawDegree", "Xmp.Camera.Yaw"});
     auto rk = findXmpKey({"Xmp.drone-dji.GimbalRollDegree", "Xmp.Camera.Roll"});
 
-    // TODO: sensefly pitch = 0 --> nadir
-    //                pitch = 90 --> forward
-    // https://support.pix4d.com/hc/en-us/articles/205675256-How-are-yaw-pitch-roll-defined
-
     if (pk == xmpData.end() || yk == xmpData.end() || rk == xmpData.end()) return false;
 
     cameraOri.pitch = static_cast<double>(pk->toFloat());
     cameraOri.yaw = static_cast<double>(yk->toFloat());
     cameraOri.roll = static_cast<double>(rk->toFloat());
+
+    // TODO: JSON orientation database
+    if (extractMake() == "senseFly"){
+        cameraOri.pitch += -90;
+    }
+
     return true;
 }
 

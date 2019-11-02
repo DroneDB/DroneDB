@@ -87,7 +87,7 @@ class Parser {
     inline double getMmPerUnit(long resolutionUnit);
 
     bool extractGeo(GeoLocation &geo);
-    double extractRelAltitude();
+    bool extractRelAltitude(double &relAltitude);
     inline double geoToDecimal(const Exiv2::ExifData::const_iterator &geoTag, const Exiv2::ExifData::const_iterator &geoRefTag);
     inline double evalFrac(const Exiv2::Rational &rational);
 

@@ -8,7 +8,7 @@ namespace fs = std::filesystem;
 
 class UserProfile{
 public:
-    static UserProfile* Instance();
+    static UserProfile* get();
 
     fs::path getHomeDir();
     fs::path getProfileDir();

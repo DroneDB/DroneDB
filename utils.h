@@ -32,6 +32,8 @@ limitations under the License. */
 #define M_PI 3.1415926535
 #endif
 
+#define F_EPSILON 0.000001
+
 #ifdef WIN32
 #include <windows.h>    //GetModuleFileNameW
 #define stat _stat
@@ -84,6 +86,10 @@ static inline double rad2deg(double rad) {
 
 static inline double deg2rad(double deg) {
     return (deg * M_PI) / 180.0;
+}
+
+static inline bool sameFloat(float a, float b){
+    return fabs(a - b) < F_EPSILON;
 }
 
 // https://stackoverflow.com/questions/2342162/stdstring-formatting-like-sprintf/25440014

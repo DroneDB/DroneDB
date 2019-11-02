@@ -73,12 +73,9 @@ void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
                     //e.printAllTags();
 
                     // Estimate image footprint
-                    // TODO: if altitude is not known,
-                    // we need to lookup an estimate from a DTM
-                    // or set a default value
-                    double relAltitude = e.extractRelAltitude();
+                    double relAltitude = 0.0;
 
-                    if (hasCameraOri && relAltitude != 0.0 && sensorSize.width > 0.0) {
+                    if (hasCameraOri && e.extractRelAltitude(relAltitude) && sensorSize.width > 0.0) {
                         entry.polygon_geom = calculateFootprint(sensorSize, geo, focal, cameraOri, relAltitude);
                     }
 

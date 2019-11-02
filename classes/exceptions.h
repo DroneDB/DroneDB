@@ -40,5 +40,8 @@ class InvalidArgsException : public AppException{
 class GDALException : public AppException{
     using AppException::AppException;
 };
+class CURLException : public AppException{
+    using AppException::AppException;
+};
 
 #endif // EXCEPTIONS_H
