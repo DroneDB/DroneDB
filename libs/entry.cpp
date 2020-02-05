@@ -145,11 +145,12 @@ std::string calculateFootprint(const exif::SensorSize &sensorSize, const exif::G
     auto ll = geo::fromUTM(lowerLeft, utmZone);
     auto lr = geo::fromUTM(lowerRight, utmZone);
 
-    return utils::stringFormat("POLYGONZ ((%lf %lf %lf, %lf %lf %lf, %lf %lf %lf, %lf %lf %lf))",
+    return utils::stringFormat("POLYGONZ ((%lf %lf %lf, %lf %lf %lf, %lf %lf %lf, %lf %lf %lf, %lf %lf %lf))",
                                ul.longitude, ul.latitude, groundHeight,
                                ll.longitude, ll.latitude, groundHeight,
                                lr.longitude, lr.latitude, groundHeight,
-                               ur.longitude, ur.latitude, groundHeight);
+                               ur.longitude, ur.latitude, groundHeight,
+                               ul.longitude, ul.latitude, groundHeight);
 
 }
 

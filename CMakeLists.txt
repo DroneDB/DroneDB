@@ -27,7 +27,13 @@ add_subdirectory("libs")
 add_subdirectory("vendor")
 
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}/vendor")
-add_executable(${PROJECT_NAME} ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp ${SRC_LIST})
+include_directories("${CMAKE_CURRENT_SOURCE_DIR}/vendor/cctz/include")
+
+add_library(${PROJECT_NAME} SHARED ${SRC_LIST})
+add_executable("${PROJECT_NAME}cmd" ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp)
+
+set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 17)
+set_target_properties("${PROJECT_NAME}cmd" PROPERTIES CXX_STANDARD 17)
 
 file(GLOB DATA_FILES
   "${CMAKE_CURRENT_SOURCE_DIR}/ddb_data/*"
@@ -41,16 +47,13 @@ find_package(CURL REQUIRED)
 include_directories(${GDAL_INCLUDE_DIR})
 
 set(LINK_LIBRARIES pthread dl spatialite sqlite3 stdc++fs exiv2 cctz::cctz ${GeographicLib_LIBRARIES} ${GDAL_LIBRARY} ${CURL_LIBRARY})
+set_target_properties("${PROJECT_NAME}cmd" PROPERTIES OUTPUT_NAME ${PROJECT_NAME})
 
 if (WIN32)
     # TODO
 else()
-   target_link_libraries(${PROJECT_NAME} ${LINK_LIBRARIES})
+   target_link_libraries("${PROJECT_NAME}cmd" ${PROJECT_NAME} ${LINK_LIBRARIES})
 endif()
-
-set_target_properties(${PROJECT_NAME} PROPERTIES
-    CXX_STANDARD 17
-    )
 
 if(BUILD_TESTING)
 add_subdirectory("test")
