@@ -19,7 +19,8 @@ endif(CCACHE_FOUND)
 set(SRC_LIST
     ${CMAKE_CURRENT_SOURCE_DIR}/utils.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/logger.cpp
-
+    )
+set(CMD_SRC_LIST ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
     )
 add_subdirectory("cmd")
 add_subdirectory("classes")
@@ -30,7 +31,7 @@ include_directories("${CMAKE_CURRENT_SOURCE_DIR}/vendor")
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}/vendor/cctz/include")
 
 add_library(${PROJECT_NAME} SHARED ${SRC_LIST})
-add_executable("${PROJECT_NAME}cmd" ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp)
+add_executable("${PROJECT_NAME}cmd" ${CMD_SRC_LIST})
 
 set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 17)
 set_target_properties("${PROJECT_NAME}cmd" PROPERTIES CXX_STANDARD 17)

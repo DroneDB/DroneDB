@@ -1,6 +1,6 @@
 file(GLOB SOURCES "*.cpp")
-set(SRC_LIST
-   ${SRC_LIST}
+set(CMD_SRC_LIST
+   ${CMD_SRC_LIST}
    ${SOURCES}
    PARENT_SCOPE
 )

@@ -28,6 +28,7 @@ namespace fs = std::filesystem;
 
 namespace ddb {
 
+std::string getVersion();
 std::string create(const std::string &directory);
 std::unique_ptr<Database> open(const std::string &directory, bool traverseUp);
 fs::path rootDirectory(Database *db);

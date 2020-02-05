@@ -19,14 +19,14 @@ limitations under the License. */
 #include "classes/exceptions.h"
 #include "classes/database.h"
 #include "classes/exif.h"
+#include "libs/ddb.h"
 #include "gdal_priv.h"
 
-#define VERSION "0.9.0"
 
 using namespace std;
 
 [[ noreturn ]] void printHelp(char *argv[]) {
-    std::cout << "DroneDB v" VERSION " - Easily manage and share aerial datasets :)" << std::endl <<
+    std::cout << "DroneDB v" << ddb::getVersion() << " - Easily manage and share aerial datasets :)" << std::endl <<
               "Usage:" << std::endl <<
               "	" << argv[0] << " <command> [args] [PATHS]" << std::endl << std::endl <<
               "Commands:" << std::endl;
@@ -57,7 +57,7 @@ int main(int argc, char* argv[]) {
     // DB initialization steps
     Database::Initialize();
     GDALAllRegister();
-    LOGV << "DDB v" VERSION;
+    LOGV << "DDB v" << ddb::getVersion();
     LOGV << "SQLite version: " << sqlite3_libversion();
     LOGV << "SpatiaLite version: " << spatialite_version();
     LOGV << "GDAL version: " << GDALVersionInfo("RELEASE_NAME");
@@ -71,7 +71,7 @@ int main(int argc, char* argv[]) {
         }
 
         if (hasParam(argc, argv, "--version")) {
-            std::cout << VERSION << std::endl;
+            std::cout << ddb::getVersion() << std::endl;
             exit(0);
         } else {
             auto aliasIter = cmd::aliases.find(cmdKey);

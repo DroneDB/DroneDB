@@ -1,0 +1,29 @@
+{
+  "name": "ddb",
+  "version": "0.9.1",
+  "description": "![license](https://img.shields.io/github/license/uav4geo/DroneDB) ![commits](https://img.shields.io/github/commit-activity/m/uav4geo/DroneDB) ![languages](https://img.shields.io/github/languages/top/uav4geo/DroneDB)",
+  "main": "index.js",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "install": "cmake-js compile"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/uav4geo/DroneDB.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/uav4geo/DroneDB/issues"
+  },
+  "homepage": "https://github.com/uav4geo/DroneDB#readme",
+  "devDependencies": {
+    "nan": "^2.14.0"
+  },
+  "dependencies": {
+    "bindings": "^1.5.0"
+  }
+}

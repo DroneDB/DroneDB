@@ -296,5 +296,9 @@ void syncIndex(Database *db) {
     db->exec("COMMIT");
 }
 
+std::string getVersion(){
+    return "0.9.1";
+}
+
 }
 
