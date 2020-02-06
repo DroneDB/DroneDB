@@ -1,7 +1,6 @@
 #include <exiv2/exiv2.hpp>
 #include "entry.h"
-
-using json = nlohmann::json;
+#include "gdal_priv.h"
 
 namespace ddb {
 
@@ -11,8 +10,6 @@ void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
     entry.path = relPath.generic_string();
     entry.depth = utils::pathDepth(relPath);
     if (entry.mtime == 0) entry.mtime = utils::getModifiedTime(path);
-
-    json meta;
 
     if (fs::is_directory(path)) {
         entry.type = Type::Directory;
@@ -26,9 +23,25 @@ void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
 
         bool jpg = utils::checkExtension(path.extension(), {"jpg", "jpeg"});
         bool tif = utils::checkExtension(path.extension(), {"tif", "tiff"});
+        bool georaster = false;
 
-        // Images
-        if (jpg || tif) {
+        if (tif){
+            GDALDatasetH  hDataset;
+            hDataset = GDALOpen( path.c_str(), GA_ReadOnly );
+            if( hDataset != NULL ){
+                const char *proj = GDALGetProjectionRef(hDataset);
+                if (proj != NULL){
+                    georaster = std::string(proj) != "";
+                }
+                GDALClose(hDataset);
+            }else{
+                LOGW << "Cannot open " << path.c_str() << " for georaster test";
+            }
+        }
+
+        bool image = (jpg || tif) && !georaster;
+
+        if (image) {
             // TODO: if tif, check with GDAL if this is a georeferenced raster
 
             auto image = Exiv2::ImageFactory::open(path);
@@ -39,29 +52,29 @@ void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
 
             if (e.hasExif()) {
                 auto imageSize = e.extractImageSize();
-                meta["imageWidth"] = imageSize.width;
-                meta["imageHeight"] = imageSize.height;
-                meta["imageOrientation"] = e.extractImageOrientation();
+                entry.meta["imageWidth"] = imageSize.width;
+                entry.meta["imageHeight"] = imageSize.height;
+                entry.meta["imageOrientation"] = e.extractImageOrientation();
 
-                meta["make"] = e.extractMake();
-                meta["model"] = e.extractModel();
-                meta["sensor"] = e.extractSensor();
+                entry.meta["make"] = e.extractMake();
+                entry.meta["model"] = e.extractModel();
+                entry.meta["sensor"] = e.extractSensor();
 
                 auto sensorSize = e.extractSensorSize();
-                meta["sensorWidth"] = sensorSize.width;
-                meta["sensorHeight"] = sensorSize.height;
+                entry.meta["sensorWidth"] = sensorSize.width;
+                entry.meta["sensorHeight"] = sensorSize.height;
 
                 auto focal = e.computeFocal();
-                meta["focalLength"] = focal.length;
-                meta["focalLength35"] = focal.length35;
-                meta["captureTime"] = e.extractCaptureTime();
+                entry.meta["focalLength"] = focal.length;
+                entry.meta["focalLength35"] = focal.length35;
+                entry.meta["captureTime"] = e.extractCaptureTime();
 
                 exif::CameraOrientation cameraOri;
                 bool hasCameraOri = e.extractCameraOrientation(cameraOri);
                 if (hasCameraOri) {
-                    meta["cameraYaw"] = cameraOri.yaw;
-                    meta["cameraPitch"] = cameraOri.pitch;
-                    meta["cameraRoll"] = cameraOri.roll;
+                    entry.meta["cameraYaw"] = cameraOri.yaw;
+                    entry.meta["cameraPitch"] = cameraOri.pitch;
+                    entry.meta["cameraRoll"] = cameraOri.roll;
                     LOGD << "Camera Orientation: " << cameraOri;
                 }
 
@@ -70,7 +83,7 @@ void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
                     entry.point_geom = utils::stringFormat("POINT Z (%lf %lf %lf)", geo.longitude, geo.latitude, geo.altitude);
                     LOGD << "POINT GEOM: "<< entry.point_geom;
 
-//                    e.printAllTags();
+                    //e.printAllTags();
 
                     // Estimate image footprint
                     double relAltitude = 0.0;
@@ -87,11 +100,12 @@ void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
             } else {
                 LOGW << "No EXIF data found in " << path.string();
             }
+        }else if (georaster){
+            entry.type = Type::GeoRaster;
+
+            // TODO: fill entries
         }
     }
-
-    // Serialize JSON
-    entry.meta = meta.dump();
 }
 
 // Adapted from https://github.com/mountainunicycler/dronecamerafov/tree/master

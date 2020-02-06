@@ -180,7 +180,7 @@ void doUpdate(Statement *updateQ, const Entry &e) {
     // Fields
     updateQ->bind(1, e.hash);
     updateQ->bind(2, e.type);
-    updateQ->bind(3, e.meta);
+    updateQ->bind(3, e.meta.dump());
     updateQ->bind(4, static_cast<long long>(e.mtime));
     updateQ->bind(5, static_cast<long long>(e.size));
     updateQ->bind(6, e.depth);
@@ -227,7 +227,7 @@ void addToIndex(Database *db, const std::vector<std::string> &paths) {
                 insertQ->bind(1, e.path);
                 insertQ->bind(2, e.hash);
                 insertQ->bind(3, e.type);
-                insertQ->bind(4, e.meta);
+                insertQ->bind(4, e.meta.dump());
                 insertQ->bind(5, static_cast<long long>(e.mtime));
                 insertQ->bind(6, static_cast<long long>(e.size));
                 insertQ->bind(7, e.depth);

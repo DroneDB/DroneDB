@@ -14,9 +14,13 @@ limitations under the License. */
 #ifndef TYPES_H
 #define TYPES_H
 
+#include <string>
+
 namespace ddb{
 
-enum Type { Undefined = 0, Directory = 1, Generic, GeoImage, Raster, PointCloud };
+enum Type { Undefined = 0, Directory = 1, Generic, GeoImage, GeoRaster, PointCloud };
+
+std::string typeToHuman(Type t);
 
 }
 

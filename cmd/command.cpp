@@ -30,17 +30,21 @@ void Command::run(int argc, char *argv[]) {
     ("v,verbose", "Show verbose output");
     help = opts.help({""});
 
-    auto result = opts.parse(argc, argv);
+    try{
+        auto result = opts.parse(argc, argv);
 
-    if (result.count("help")) {
+        if (result.count("help")) {
+            printHelp();
+        }
+
+        if (result.count("verbose")) {
+            set_logger_verbose();
+        }
+
+        run(result);
+    }catch(const cxxopts::option_not_exists_exception &){
         printHelp();
     }
-
-    if (result.count("verbose")) {
-        set_logger_verbose();
-    }
-
-    run(result);
 }
 
 void Command::printHelp() {

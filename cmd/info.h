@@ -11,28 +11,23 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License. */
-#include "types.h"
 
-namespace ddb{
+#ifndef INFO_CMD_H
+#define INFO_CMD_H
 
-std::string typeToHuman(Type t){
-    switch(t){
-        case Type::Undefined:
-            return "Undefined";
-        case Type::Directory:
-            return "Directory";
-        case Type::Generic:
-            return "Generic";
-        case Type::GeoImage:
-            return "GeoImage";
-        case Type::GeoRaster:
-            return "GeoRaster";
-        case Type::PointCloud:
-            return "PointCloud";
-        default:
-            return "?";
-    }
-}
+#include "command.h"
+
+namespace cmd {
+
+class Info : public Command {
+  public:
+    Info() {}
+
+    virtual void run(cxxopts::ParseResult &opts) override;
+    virtual void setOptions(cxxopts::Options &opts) override;
+    virtual std::string description() override;
+};
 
 }
 
+#endif // INFO_CMD_H

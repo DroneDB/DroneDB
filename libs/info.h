@@ -11,28 +11,13 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License. */
-#include "types.h"
+#ifndef INFO_H
+#define INFO_H
 
-namespace ddb{
+namespace ddb {
 
-std::string typeToHuman(Type t){
-    switch(t){
-        case Type::Undefined:
-            return "Undefined";
-        case Type::Directory:
-            return "Directory";
-        case Type::Generic:
-            return "Generic";
-        case Type::GeoImage:
-            return "GeoImage";
-        case Type::GeoRaster:
-            return "GeoRaster";
-        case Type::PointCloud:
-            return "PointCloud";
-        default:
-            return "?";
-    }
-}
+void getFilesInfo(const std::vector<std::string> &input, const std::string &format, std::ostream &output);
 
 }
 
+#endif // INFO_H
