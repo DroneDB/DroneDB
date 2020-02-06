@@ -28,13 +28,15 @@ namespace fs = std::filesystem;
 
 namespace ddb {
 
+using namespace entry;
+
 std::string getVersion();
 std::string create(const std::string &directory);
 std::unique_ptr<Database> open(const std::string &directory, bool traverseUp);
 fs::path rootDirectory(Database *db);
 std::vector<fs::path> getPathList(fs::path rootDirectory, const std::vector<std::string> &paths, bool includeDirs);
-bool checkUpdate(Entry &e, const fs::path &p, long long dbMtime, const std::string &dbHash);
-void doUpdate(Statement *updateQ, const Entry &e);
+bool checkUpdate(entry::Entry &e, const fs::path &p, long long dbMtime, const std::string &dbHash);
+void doUpdate(Statement *updateQ, const entry::Entry &e);
 
 void addToIndex(Database *db, const std::vector<std::string> &paths);
 void removeFromIndex(Database *db, const std::vector<std::string> &paths);

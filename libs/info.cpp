@@ -21,8 +21,14 @@ namespace ddb {
 
 using json = nlohmann::json;
 
-void getFilesInfo(const std::vector<std::string> &input, const std::string &format, std::ostream &output){
-    auto filePaths = getPathList("/", input, false);
+void getFilesInfo(const std::vector<std::string> &input, const std::string &format, std::ostream &output, bool computeHash, bool recursive){
+    std::vector<fs::path> filePaths;
+
+    if (recursive){
+        filePaths = getPathList("/", input, true);
+    }else{
+        filePaths = std::vector<fs::path>(input.begin(), input.end());
+    }
 
     if (format == "json"){
         output << "[";
@@ -33,17 +39,24 @@ void getFilesInfo(const std::vector<std::string> &input, const std::string &form
     }
 
     json j;
+    bool first = true;
+
     for (auto &fp : filePaths){
-        LOGD << "Parsing entry " << fp.u8string();
+        LOGD << "Parsing entry " << fp.string();
 
         Entry e;
-        parseEntry(fp, ".", e);
+        if (entry::parseEntry(fp, ".", e, computeHash)){
+            if (format == "json"){
+                e.toJSON(j);
+                if (!first) output << ",";
+                output << j.dump();
+            }else{
+                output << e.toString() << "\n";
+            }
 
-        if (format == "json"){
-            e.toJSON(j);
-            output << j.dump();
+            first = false;
         }else{
-            output << e.toString() << "\n";
+            throw FSException("Failed to parse " + fp.string());
         }
     }
 

@@ -50,7 +50,7 @@ bool hasParam(int argc, char *argv[], const char* param) {
 
 int main(int argc, char* argv[]) {
     init_logger();
-    if (hasParam(argc, argv, "-v") || hasParam(argc, argv, "--verbose")) {
+    if (hasParam(argc, argv, "--debug")) {
         set_logger_verbose();
     }
 

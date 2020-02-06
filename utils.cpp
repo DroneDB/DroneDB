@@ -81,4 +81,31 @@ int pathDepth(const fs::path &path) {
     return std::max(count - 1, 0);
 }
 
+std::string bytesToHuman(off_t bytes){
+    std::ostringstream os;
+
+    const char* suffixes[7];
+    suffixes[0] = "B";
+    suffixes[1] = "KB";
+    suffixes[2] = "MB";
+    suffixes[3] = "GB";
+    suffixes[4] = "TB";
+    suffixes[5] = "PB";
+    suffixes[6] = "EB";
+    off_t s = 0;
+
+    double count = bytes;
+    while (count >= 1024 && s < 7){
+        s++;
+        count /= 1024;
+    }
+    if (count - floor(count) == 0.0){
+        os << int(count) << " " << suffixes[s];
+    }else{
+        os << std::fixed << std::setprecision(2) << count << " " << suffixes[s];
+    }
+
+    return os.str();
+}
+
 }

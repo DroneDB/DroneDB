@@ -82,8 +82,8 @@ class Parser {
     std::string extractMake();
     std::string extractModel();
     std::string extractSensor();
-    Focal computeFocal();
-    SensorSize extractSensorSize();
+    bool computeFocal(Focal &f);
+    bool extractSensorSize(SensorSize &r);
     inline double getMmPerUnit(long resolutionUnit);
 
     bool extractGeo(GeoLocation &geo);

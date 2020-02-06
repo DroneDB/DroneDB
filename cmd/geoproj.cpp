@@ -26,9 +26,7 @@ void GeoProj::setOptions(cxxopts::Options &opts) {
     .custom_help("geoproj *.JPG -o output/")
     .add_options()
     ("i,images", "Images to project", cxxopts::value<std::vector<std::string>>())
-    ("o,output", "Output path (file or directory)", cxxopts::value<std::string>())
-    ("a,add", "Automatically add images to index if needed", cxxopts::value<bool>())
-    ("d,directory", "Working directory", cxxopts::value<std::string>()->default_value("."));
+    ("o,output", "Output path (file or directory)", cxxopts::value<std::string>());
 
     opts.parse_positional({"images"});
 }
@@ -44,13 +42,8 @@ void GeoProj::run(cxxopts::ParseResult &opts) {
 
     auto images = opts["images"].as<std::vector<std::string>>();
     auto output = opts["output"].as<std::string>();
-    auto db = ddb::open(opts["directory"].as<std::string>(), true);
 
-    if (opts["add"].count()){
-        ddb::addToIndex(db.get(), images);
-    }
-
-    ddb::geoProject(db.get(), images, output);
+    ddb::geoProject(images, output);
 }
 
 }

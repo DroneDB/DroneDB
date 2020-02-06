@@ -27,7 +27,7 @@ void Command::run(int argc, char *argv[]) {
     setOptions(opts);
     opts.add_options()
     ("h,help", "Print help")
-    ("v,verbose", "Show verbose output");
+    ("debug", "Show debug output");
     help = opts.help({""});
 
     try{
@@ -37,7 +37,7 @@ void Command::run(int argc, char *argv[]) {
             printHelp();
         }
 
-        if (result.count("verbose")) {
+        if (result.count("debug")) {
             set_logger_verbose();
         }
 

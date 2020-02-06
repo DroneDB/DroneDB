@@ -19,34 +19,34 @@ limitations under the License. */
 
 namespace ddb {
 
-void geoProject(Database *db, const std::vector<std::string> &images, const std::string &output){
+void geoProject(const std::vector<std::string> &images, const std::string &output){
     bool isDirectory = fs::is_directory(output);
     bool outputToDir = images.size() > 1 || isDirectory;
     if (outputToDir){
         if (!isDirectory) throw FSException(output + " is not a valid directory.");
     }
 
-    fs::path directory = rootDirectory(db);
-    auto imagePaths = getPathList(directory, images, false);
+    auto imagePaths = getPathList("/", images, false);
+    // TODO: remove getPathList ?!
 
-    auto q = db->query(R"<<<(
-                       WITH bounds AS (
-                            SELECT ExteriorRing(polygon_geom) as geom,
-                                   json_extract(meta, '$.imageWidth') as width,
-                                   json_extract(meta, '$.imageHeight') as height
-                            FROM entries
-                            WHERE type=? AND path=? AND
-                                  polygon_geom IS NOT NULL AND
-                                  width IS NOT NULL AND
-                                  height IS NOT NULL
-                       )
-                       SELECT  X(PointN(geom, 1)), Y(PointN(geom, 1)),
-                               X(PointN(geom, 2)), Y(PointN(geom, 2)),
-                               X(PointN(geom, 3)), Y(PointN(geom, 3)),
-                               X(PointN(geom, 4)), Y(PointN(geom, 4)),
-                               width, height
-                       FROM bounds
-                       )<<<");
+//    auto q = db->query(R"<<<(
+//                       WITH bounds AS (
+//                            SELECT ExteriorRing(polygon_geom) as geom,
+//                                   json_extract(meta, '$.imageWidth') as width,
+//                                   json_extract(meta, '$.imageHeight') as height
+//                            FROM entries
+//                            WHERE type=? AND path=? AND
+//                                  polygon_geom IS NOT NULL AND
+//                                  width IS NOT NULL AND
+//                                  height IS NOT NULL
+//                       )
+//                       SELECT  X(PointN(geom, 1)), Y(PointN(geom, 1)),
+//                               X(PointN(geom, 2)), Y(PointN(geom, 2)),
+//                               X(PointN(geom, 3)), Y(PointN(geom, 3)),
+//                               X(PointN(geom, 4)), Y(PointN(geom, 4)),
+//                               width, height
+//                       FROM bounds
+//                       )<<<");
 
     for (auto &ip : imagePaths){
         fs::path relPath = fs::relative(ip, directory);

@@ -16,7 +16,7 @@ limitations under the License. */
 
 #include <string>
 
-namespace ddb{
+namespace entry{
 
 enum Type { Undefined = 0, Directory = 1, Generic, GeoImage, GeoRaster, PointCloud };
 

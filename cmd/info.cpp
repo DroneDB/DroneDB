@@ -25,7 +25,10 @@ void Info::setOptions(cxxopts::Options &opts) {
     .custom_help("info *.JPG")
     .add_options()
     ("i,input", "File(s) to examine", cxxopts::value<std::vector<std::string>>())
-    ("f,format", "Output format (text or json)", cxxopts::value<std::string>()->default_value("text"));
+    ("f,format", "Output format (text or json)", cxxopts::value<std::string>()->default_value("text"))
+    ("r,recursive", "Recursively search in subdirectories", cxxopts::value<bool>())
+    ("with-hash", "Compute SHA256 hashes", cxxopts::value<bool>());
+
 
     opts.parse_positional({"input"});
 }
@@ -43,7 +46,7 @@ void Info::run(cxxopts::ParseResult &opts) {
     auto format = opts["format"].as<std::string>();
 
     try{
-        ddb::getFilesInfo(input, format, std::cout);
+        ddb::getFilesInfo(input, format, std::cout, opts["with-hash"].count(), opts["recursive"].count());
     }catch(InvalidArgsException){
         printHelp();
     }

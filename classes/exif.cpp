@@ -21,6 +21,7 @@ namespace exif {
 // Register XMP namespaces
 void Initialize(){
     Exiv2::XmpProperties::registerNs("http://www.dji.com/drone-dji/1.0/", "drone-dji");
+    Exiv2::XmpProperties::registerNs("sensefly", "Camera");
 }
 
 Exiv2::ExifData::const_iterator Parser::findExifKey(const std::string &key) {
@@ -43,6 +44,7 @@ Exiv2::XmpData::const_iterator Parser::findXmpKey(const std::string &key) {
 // Find the first available key, or xmpData::end() if none exist
 Exiv2::XmpData::const_iterator Parser::findXmpKey(const std::initializer_list<std::string>& keys) {
     for (auto &k : keys) {
+        LOGD << "SEARCH: " << k;
         auto it = xmpData.findKey(Exiv2::XmpKey(k));
         if (it != xmpData.end()) return it;
     }
@@ -104,11 +106,11 @@ std::string Parser::extractSensor() {
     return make + " " + model;
 }
 
-Focal Parser::computeFocal() {
-    Focal f;
-    double sensorWidth = extractSensorSize().width;
+bool Parser::computeFocal(Focal &f) {
+    SensorSize r;
 
-    if (sensorWidth > 0.0) {
+    if (extractSensorSize(r)) {
+        double sensorWidth = r.width;
         auto focal35 = findExifKey("Exif.Photo.FocalLengthIn35mmFilm");
         auto focal = findExifKey("Exif.Photo.FocalLength");
 
@@ -119,15 +121,15 @@ Focal Parser::computeFocal() {
             f.length = static_cast<double>(focal->toFloat());
             f.length35 = (36.0 * f.length) / sensorWidth;
         }
+
+        return true;
     }
 
-    return f;
+    return false;
 }
 
 // Extracts sensor sizes (in mm). Returns 0 on failure
-SensorSize Parser::extractSensorSize() {
-    SensorSize r;
-
+bool Parser::extractSensorSize(SensorSize &r) {
     auto fUnit = findExifKey("Exif.Photo.FocalPlaneResolutionUnit");
     auto fXRes = findExifKey("Exif.Photo.FocalPlaneXResolution");
     auto fYRes = findExifKey("Exif.Photo.FocalPlaneYResolution");
@@ -144,7 +146,7 @@ SensorSize Parser::extractSensorSize() {
             double yUnitsPerPixel = 1.0 / static_cast<double>(fYRes->toFloat());
             r.height = imsize.height * yUnitsPerPixel * mmPerUnit;
 
-            return r; // Good, exit here
+            return true; // Good, exit here
         }
     }
 
@@ -157,9 +159,10 @@ SensorSize Parser::extractSensorSize() {
         // TODO: is this the best way?
         auto imsize = extractImageSize();
         r.height = (r.width / imsize.width) * imsize.height;
+        return true;
     }
 
-    return r;
+    return false;
 }
 
 // Length of resolution unit in millimiters

@@ -123,6 +123,9 @@ int pathDepth(const fs::path &path);
 
 fs::path getExeFolderPath();
 
+// Prints to the provided buffer a nice number of bytes (KB, MB, GB, etc)
+std::string bytesToHuman(off_t bytes);
+
 }
 
 #endif // UTILS_H

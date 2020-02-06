@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License. */
 #include "types.h"
 
-namespace ddb{
+namespace entry{
 
 std::string typeToHuman(Type t){
     switch(t){
