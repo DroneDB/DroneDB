@@ -1,0 +1,10 @@
+#ifndef FUNCTIONS_H
+#define FUNCTIONS_H
+
+#include <nan.h>
+
+// Top-level functions
+
+NAN_METHOD(getVersion);
+
+#endif

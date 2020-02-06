@@ -73,3 +73,5 @@ Thumbs.db
 
 # Custom
 CMakeLists.txt.user
+build/
+node_modules/

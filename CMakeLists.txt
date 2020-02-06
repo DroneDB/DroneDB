@@ -15,7 +15,6 @@ if(CCACHE_FOUND)
     set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK ccache)
 endif(CCACHE_FOUND)
 
-
 set(SRC_LIST
     ${CMAKE_CURRENT_SOURCE_DIR}/utils.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/logger.cpp
@@ -64,3 +63,13 @@ endif()
 #add_library(json1 SHARED vendor/ext/json1.c)
 #set_target_properties(json1 PROPERTIES PREFIX "")
 #set_property(TARGET json1 PROPERTY POSITION_INDEPENDENT_CODE ON)
+
+# Nodejs bindings
+if (CMAKE_JS_VERSION)
+  include_directories(${CMAKE_JS_INC})
+  file(GLOB NODE_SOURCE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/nodejs/*.cc")
+  add_library("node-${PROJECT_NAME}" SHARED ${NODE_SOURCE_FILES} ${CMAKE_JS_SRC})
+  set_target_properties("node-${PROJECT_NAME}" PROPERTIES PREFIX "" SUFFIX ".node")
+  set_target_properties("node-${PROJECT_NAME}" PROPERTIES CXX_STANDARD 17)
+  target_link_libraries("node-${PROJECT_NAME}" ${CMAKE_JS_LIB} ${PROJECT_NAME})
+endif()
