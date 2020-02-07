@@ -15,6 +15,8 @@ limitations under the License. */
 #include "statement.h"
 #include "exceptions.h"
 
+using namespace ddb;
+
 Statement::Statement(sqlite3 *db, const std::string &query)
     : db(db), query(query), hasRow(false), done(false) {
     if (sqlite3_prepare_v2(db, query.c_str(), static_cast<int>(query.size()), &stmt, nullptr) != SQLITE_OK) {

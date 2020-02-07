@@ -24,6 +24,7 @@ limitations under the License. */
 
 
 using namespace std;
+using namespace ddb;
 
 [[ noreturn ]] void printHelp(char *argv[]) {
     std::cout << "DroneDB v" << ddb::getVersion() << " - Easily manage and share aerial datasets :)" << std::endl <<

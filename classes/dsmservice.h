@@ -25,6 +25,8 @@ limitations under the License. */
 #include "userprofile.h"
 #include "../libs/geo.h"
 
+using namespace ddb;
+
 struct DSMCacheEntry{
     geo::BoundingBox<geo::Point2D> bbox;
     unsigned int width, height;

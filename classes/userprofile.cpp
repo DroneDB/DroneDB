@@ -15,6 +15,8 @@ limitations under the License. */
 #include "userprofile.h"
 #include "exceptions.h"
 
+using namespace ddb;
+
 UserProfile *UserProfile::instance = nullptr;
 
 UserProfile *UserProfile::get(){

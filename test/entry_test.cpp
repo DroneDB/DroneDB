@@ -23,8 +23,10 @@ TEST(calculateFootprint, Normal) {
     double relAltitude = 100.0;
     exif::CameraOrientation cameraOri(-60, 0, 30);
     exif::GeoLocation geo(46.842607,-91.99456,198.31);
+    entry::BasicPolygonGeometry geom;
+    entry::calculateFootprint(sensorSize, geo, focal, cameraOri, relAltitude, geom);
 
-    EXPECT_STREQ(ddb::calculateFootprint(sensorSize, geo, focal, cameraOri, relAltitude).c_str(), "");
+    EXPECT_STREQ(geom.toWkt().c_str(), "");
 }
 
 }

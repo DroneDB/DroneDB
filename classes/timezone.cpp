@@ -17,6 +17,8 @@ limitations under the License. */
 #include "../utils.h"
 #include "exceptions.h"
 
+using namespace ddb;
+
 bool Timezone::initialized = false;
 ZoneDetect *Timezone::db = nullptr;
 

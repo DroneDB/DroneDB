@@ -15,6 +15,7 @@ limitations under the License. */
 #define EXCEPTIONS_H
 
 #include <stdexcept>
+namespace ddb{
 
 class AppException : public std::runtime_error{
     using std::runtime_error::runtime_error;
@@ -44,4 +45,5 @@ class CURLException : public AppException{
     using AppException::AppException;
 };
 
+}
 #endif // EXCEPTIONS_H

@@ -4,6 +4,8 @@
 
 namespace entry {
 
+using namespace ddb;
+
 bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entry, bool computeHash) {
     if (!fs::exists(path)) return false;
 
@@ -306,6 +308,8 @@ bool Entry::toGeoJSON(json &j){
 //  for (auto &g : geoms){
 //      j["geometry"]["geometries"] += g->toGeoJSON()["geometry"];
 //  }
+
+    return true;
 }
 
 std::string Entry::toString(){

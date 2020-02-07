@@ -52,6 +52,8 @@ namespace fs = std::filesystem;
 
 namespace utils {
 
+using namespace ddb;
+
 static inline void toLower(std::string &s) {
     std::transform(s.begin(), s.end(), s.begin(),[](int ch) {
         return std::tolower(ch);

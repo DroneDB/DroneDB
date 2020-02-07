@@ -8,8 +8,8 @@ using v8::FunctionTemplate;
 NAN_MODULE_INIT(InitAll) {
   Nan::Set(target, Nan::New("getVersion").ToLocalChecked(),
     Nan::GetFunction(Nan::New<FunctionTemplate>(getVersion)).ToLocalChecked());
-  // Nan::Set(target, Nan::New("anArray").ToLocalChecked(),
-  //   Nan::GetFunction(Nan::New<FunctionTemplate>(anArray)).ToLocalChecked());
+  Nan::Set(target, Nan::New("getFilesInfo").ToLocalChecked(),
+    Nan::GetFunction(Nan::New<FunctionTemplate>(getFilesInfo)).ToLocalChecked());
   // Nan::Set(target, Nan::New("callback").ToLocalChecked(),
   //   Nan::GetFunction(Nan::New<FunctionTemplate>(callback)).ToLocalChecked());
   // Nan::Set(target, Nan::New("callbackWithParameter").ToLocalChecked(),

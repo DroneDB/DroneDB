@@ -20,6 +20,8 @@ limitations under the License. */
 #include "database.h"
 #include "../utils.h"
 
+using namespace ddb;
+
 // Initialize spatialite
 void Database::Initialize() {
     spatialite_init (0);

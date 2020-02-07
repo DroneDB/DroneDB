@@ -18,6 +18,8 @@ limitations under the License. */
 
 namespace {
 
+using namespace ddb;
+
 TEST(getPathList, includeDirs) {
     auto pathList = ddb::getPathList("data", {fs::path("data") / "folderA" / "test.txt"}, true);
     EXPECT_EQ(pathList.size(), 3);

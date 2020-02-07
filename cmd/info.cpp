@@ -46,7 +46,7 @@ void Info::run(cxxopts::ParseResult &opts) {
 
     try{
         ddb::getFilesInfo(input, format, std::cout, opts["with-hash"].count(), opts["recursive"].count());
-    }catch(InvalidArgsException){
+    }catch(ddb::InvalidArgsException){
         printHelp();
     }
 }
