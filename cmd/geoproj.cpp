@@ -23,12 +23,13 @@ namespace cmd {
 void GeoProj::setOptions(cxxopts::Options &opts) {
     opts
     .positional_help("[args]")
-    .custom_help("geoproj *.JPG -o output/")
+    .custom_help("geoproj output/ *.JPG")
     .add_options()
+    ("o,output", "Output path (file or directory)", cxxopts::value<std::string>())
     ("i,images", "Images to project", cxxopts::value<std::vector<std::string>>())
-    ("o,output", "Output path (file or directory)", cxxopts::value<std::string>());
+    ("s,size", "Output image size (size[%]|0)", cxxopts::value<std::string>());
 
-    opts.parse_positional({"images"});
+    opts.parse_positional({"output", "images"});
 }
 
 std::string GeoProj::description() {
@@ -42,8 +43,9 @@ void GeoProj::run(cxxopts::ParseResult &opts) {
 
     auto images = opts["images"].as<std::vector<std::string>>();
     auto output = opts["output"].as<std::string>();
+    auto outsize = opts["size"].as<std::string>();
 
-    ddb::geoProject(images, output);
+    ddb::geoProject(images, output, outsize);
 }
 
 }

@@ -18,7 +18,7 @@ limitations under the License. */
 
 namespace ddb {
 
-void geoProject(const std::vector<std::string> &images, const std::string &output);
+void geoProject(const std::vector<std::string> &images, const std::string &output, const std::string &outsize = "");
 
 }
 

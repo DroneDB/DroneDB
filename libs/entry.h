@@ -41,6 +41,11 @@ struct BasicGeometry{
         points.push_back(Point(x, y, z));
     }
 
+    Point getPoint(int index){
+        if (index >= points.size()) throw AppException("Out of bounds exception");
+        return points[index];
+    }
+
     std::string toWktPointZ() const{
         if (empty()) return "";
         else{
@@ -66,6 +71,9 @@ struct BasicGeometry{
 
     bool empty() const{
         return points.empty();
+    }
+    int size() const{
+        return points.size();
     }
     std::vector<Point> points;
 };
