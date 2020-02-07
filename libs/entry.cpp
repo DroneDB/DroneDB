@@ -274,7 +274,13 @@ void Entry::toJSON(json &j){
     if (!this->polygon_geom.empty()) j["polygon_geom"] = this->polygon_geom.toGeoJSON();
 }
 
-void Entry::toGeoJSON(json &j){
+bool Entry::toGeoJSON(json &j){
+    // Only export entries that have valid geometries
+    std::vector<BasicGeometry *> geoms;
+    if (!point_geom.empty()) geoms.push_back(&point_geom);
+    if (!polygon_geom.empty()) geoms.push_back(&polygon_geom);
+    if (geoms.size() == 0) return false;
+
     json p;
     p["path"] = this->path;
     if (this->hash != "") p["hash"] = this->hash;
@@ -284,25 +290,22 @@ void Entry::toGeoJSON(json &j){
 
     // Populate meta
     for (json::iterator it = this->meta.begin(); it != this->meta.end(); ++it) {
-        std::string k = it.key();
-        if (k.length() > 0) k[0] = std::toupper(k[0]);
-        p[k] = it.value();
+        p[it.key()] = it.value();
     }
 
-    std::vector<BasicGeometry *> geoms;
-    if (!point_geom.empty()) geoms.push_back(&point_geom);
-    if (!polygon_geom.empty()) geoms.push_back(&polygon_geom);
-
-    if (geoms.size() == 1){
-        j = geoms[0]->toGeoJSON();
-    }else{
-        j["geometry"] = {{"type", "GeometryCollection"}, {"geometries", json::array()}};
-        for (auto &g : geoms){
-            j["geometries"] += g->toGeoJSON()["geometry"];
-        }
-    }
-
+    // QGIS does not support GeometryCollections, so we only output the first
+    // available geometry
+    j = geoms[0]->toGeoJSON();
     j["properties"] = p;
+
+//  j["type"] = "Feature";
+//  j["geometry"] = json({});
+//  j["geometry"]["type"] = "GeometryCollection";
+//  j["geometry"]["geometries"] = json::array();
+
+//  for (auto &g : geoms){
+//      j["geometry"]["geometries"] += g->toGeoJSON()["geometry"];
+//  }
 }
 
 std::string Entry::toString(){

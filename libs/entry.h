@@ -79,7 +79,7 @@ struct Entry {
     BasicPolygonGeometry polygon_geom;
 
     void toJSON(json &j);
-    void toGeoJSON(json &j);
+    bool toGeoJSON(json &j);
     std::string toString();
 };
 

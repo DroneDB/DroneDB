@@ -32,6 +32,8 @@ void getFilesInfo(const std::vector<std::string> &input, const std::string &form
 
     if (format == "json"){
         output << "[";
+    }else if (format == "geojson"){
+        output << R"<<<({"type":"FeatureCollection","features":[)<<<";
     }else if (format == "text"){
         // Nothing
     }else{
@@ -50,6 +52,14 @@ void getFilesInfo(const std::vector<std::string> &input, const std::string &form
                 e.toJSON(j);
                 if (!first) output << ",";
                 output << j.dump();
+            }else if (format == "geojson"){
+                if (e.toGeoJSON(j)){
+                    if (!first) output << ",";
+                    output << j.dump();
+                    j.clear();
+                }else{
+                    LOGD << "No geometries in " << fp.string() << ", skipping from GeoJSON export";
+                }
             }else{
                 output << e.toString() << "\n";
             }
@@ -62,6 +72,8 @@ void getFilesInfo(const std::vector<std::string> &input, const std::string &form
 
     if (format == "json"){
         output << "]";
+    }else if (format == "geojson"){
+        output << "]}";
     }
 }
 
