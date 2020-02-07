@@ -184,8 +184,8 @@ void doUpdate(Statement *updateQ, const Entry &e) {
     updateQ->bind(4, static_cast<long long>(e.mtime));
     updateQ->bind(5, static_cast<long long>(e.size));
     updateQ->bind(6, e.depth);
-    updateQ->bind(7, e.point_geom.toWktPointZ());
-    updateQ->bind(8, e.polygon_geom.toWktPolygonZ());
+    updateQ->bind(7, e.point_geom.toWkt());
+    updateQ->bind(8, e.polygon_geom.toWkt());
 
     // Where
     updateQ->bind(9, e.path);
@@ -231,8 +231,8 @@ void addToIndex(Database *db, const std::vector<std::string> &paths) {
                 insertQ->bind(5, static_cast<long long>(e.mtime));
                 insertQ->bind(6, static_cast<long long>(e.size));
                 insertQ->bind(7, e.depth);
-                insertQ->bind(8, e.point_geom.toWktPointZ());
-                insertQ->bind(9, e.polygon_geom.toWktPolygonZ());
+                insertQ->bind(8, e.point_geom.toWkt());
+                insertQ->bind(9, e.polygon_geom.toWkt());
 
                 insertQ->execute();
                 std::cout << "A\t" << e.path << std::endl;

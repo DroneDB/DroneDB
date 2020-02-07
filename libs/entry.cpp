@@ -183,6 +183,152 @@ void calculateFootprint(const exif::SensorSize &sensorSize, const exif::GeoLocat
     geom.addPoint(ul.longitude, ul.latitude, groundHeight);
 }
 
+std::string BasicPointGeometry::toWkt() const{
+    if (empty()) return "";
+    return utils::stringFormat("POINT Z (%lf %lf %lf)", points[0].x, points[0].y, points[0].z);
+}
+
+json BasicPointGeometry::toGeoJSON() const{
+    json j;
+    initGeoJsonBase(j);
+    j["geometry"]["type"] = "Point";
+    j["geometry"]["coordinates"] = json::array();
+
+    if (!empty()){
+        j["geometry"]["coordinates"] += points[0].x;
+        j["geometry"]["coordinates"] += points[0].y;
+        j["geometry"]["coordinates"] += points[0].z;
+    }
+    return j;
+}
+
+std::string BasicPolygonGeometry::toWkt() const{
+    if (empty()) return "";
+
+    std::ostringstream os;
+    os << "POLYGONZ ((";
+    bool first = true;
+    for (auto &p : points){
+        if (!first) os << ", ";
+        os << p.x << " " << p.y << " " << p.z;
+        first = false;
+    }
+    os << "))";
+    return os.str();
+}
+
+json BasicPolygonGeometry::toGeoJSON() const{
+    json j;
+    initGeoJsonBase(j);
+    j["geometry"]["type"] = "Polygon";
+    j["geometry"]["coordinates"] = json::array();
+
+    for (auto &p : points){
+        json c = json::array();
+        c += p.x;
+        c += p.y;
+        c += p.z;
+
+        j["geometry"]["coordinates"] += c;
+    }
+    return j;
+}
+
+void BasicGeometry::addPoint(const Point &p){
+    points.push_back(p);
+}
+
+void BasicGeometry::addPoint(double x, double y, double z){
+    points.push_back(Point(x, y, z));
+}
+
+Point BasicGeometry::getPoint(int index){
+    if (index >= static_cast<int>(points.size())) throw AppException("Out of bounds exception");
+    return points[index];
+}
+
+bool BasicGeometry::empty() const{
+    return points.empty();
+}
+
+int BasicGeometry::size() const{
+    return points.size();
+}
+
+void BasicGeometry::initGeoJsonBase(json &j) const{
+    j["type"] = "Feature";
+    j["geometry"] = json({});
+    j["properties"] = json({});
+}
+
+void Entry::toJSON(json &j){
+    j["path"] = this->path;
+    if (this->hash != "") j["hash"] = this->hash;
+    j["type"] = this->type;
+    j["meta"] = this->meta;
+    j["mtime"] = this->mtime;
+    j["size"] = this->size;
+    //j["depth"] = this->depth;
+
+    if (!this->point_geom.empty()) j["point_geom"] = this->point_geom.toGeoJSON();
+    if (!this->polygon_geom.empty()) j["polygon_geom"] = this->polygon_geom.toGeoJSON();
+}
+
+void Entry::toGeoJSON(json &j){
+    json p;
+    p["path"] = this->path;
+    if (this->hash != "") p["hash"] = this->hash;
+    p["type"] = this->type;
+    p["mtime"] = this->mtime;
+    p["size"] = this->size;
+
+    // Populate meta
+    for (json::iterator it = this->meta.begin(); it != this->meta.end(); ++it) {
+        std::string k = it.key();
+        if (k.length() > 0) k[0] = std::toupper(k[0]);
+        p[k] = it.value();
+    }
+
+    std::vector<BasicGeometry *> geoms;
+    if (!point_geom.empty()) geoms.push_back(&point_geom);
+    if (!polygon_geom.empty()) geoms.push_back(&polygon_geom);
+
+    if (geoms.size() == 1){
+        j = geoms[0]->toGeoJSON();
+    }else{
+        j["geometry"] = {{"type", "GeometryCollection"}, {"geometries", json::array()}};
+        for (auto &g : geoms){
+            j["geometries"] += g->toGeoJSON()["geometry"];
+        }
+    }
+
+    j["properties"] = p;
+}
+
+std::string Entry::toString(){
+    std::ostringstream s;
+    s << "Path: " << this->path << "\n";
+    if (this->hash != "") s << "SHA256: " << this->hash << "\n";
+    s << "Type: " << typeToHuman(this->type) << " (" << this->type << ")" << "\n";
+
+    for (json::iterator it = this->meta.begin(); it != this->meta.end(); ++it) {
+        std::string k = it.key();
+        if (k.length() > 0) k[0] = std::toupper(k[0]);
+
+        s << k << ": " << (it.value().is_string() ?
+                               it.value().get<std::string>() :
+                               it.value().dump()) << "\n";
+    }
+
+    s << "Modified Time: " << this->mtime << "\n";
+    s << "Size: " << utils::bytesToHuman(this->size) << "\n";
+    //s << "Tree Depth: " << this->depth << "\n";
+    if (!this->point_geom.empty()) s << "Point Geometry: " << this->point_geom  << "\n";
+    if (!this->polygon_geom.empty()) s << "Polygon Geometry: " << this->polygon_geom << "\n";
+
+    return s.str();
+}
+
 }
 
 
