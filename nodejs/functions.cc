@@ -10,7 +10,7 @@ NAN_METHOD(getVersion) {
 
 class GetFilesInfoWorker : public Nan::AsyncWorker {
  public:
-  GetFilesInfoWorker(Nan::Callback *callback, const v8::Local<v8::Array> &input, bool computeHash,  bool recursive)
+  GetFilesInfoWorker(Nan::Callback *callback, const std::vector<std::string> &input, bool computeHash,  bool recursive)
     : AsyncWorker(callback, "nan:GetFilesInfoWorker"),
       input(input), computeHash(computeHash), recursive(recursive){}
   ~GetFilesInfoWorker() {}
@@ -18,15 +18,11 @@ class GetFilesInfoWorker : public Nan::AsyncWorker {
   void Execute () {
     s.clear();
 
-    // v8 array --> c++ std vector
-    std::vector<std::string> in;
-    for (unsigned int i = 0; i < input->Length(); i++){
-        Nan::Utf8String str(input->Get(Nan::GetCurrentContext(), i).ToLocalChecked());
-        in.push_back(std::string(*str));
-    }
+    std::cout << "A" << std::endl;
 
     try{
-        ddb::getFilesInfo(in, "json", s, computeHash, recursive);
+        ddb::getFilesInfo(input, "json", s, computeHash, recursive);
+        std::cout << "C" << std::endl;
     }catch(ddb::AppException &e){
         SetErrorMessage(e.what());
     }
@@ -37,14 +33,14 @@ class GetFilesInfoWorker : public Nan::AsyncWorker {
 
      v8::Local<v8::Value> argv[] = {
          Nan::Null(),
-         v8::String::NewFromUtf8(input->GetIsolate(), s.str().c_str()).ToLocalChecked()
+         v8::String::NewFromUtf8(v8::Isolate::GetCurrent(), s.str().c_str()).ToLocalChecked()
      };
 
      callback->Call(2, argv, async_resource);
    }
 
  private:
-    v8::Local<v8::Array> input;
+    std::vector<std::string> input;
     bool computeHash;
     bool recursive;
     std::ostringstream s;
@@ -57,16 +53,32 @@ NAN_METHOD(getFilesInfo) {
         return;
 	}
     if (!info[0]->IsArray()){
-        Nan::ThrowError("Argument must be array");
+        Nan::ThrowError("Argument 0 must be an array");
         return;
     }
     if (!info[3]->IsFunction()){
-        Nan::ThrowError("Argument must be function");
+        Nan::ThrowError("Argument 3 must be a function");
         return;
     }
 
+    // v8 array --> c++ std vector
+    auto input = info[0].As<v8::Array>();
+    auto ctx = info.GetIsolate()->GetCurrentContext();
+    std::vector<std::string> in;
+    for (unsigned int i = 0; i < input->Length(); i++){
+        std::cout << "1" << std::endl;
+        auto t = input->Get(ctx, i).ToLocalChecked();
+        std::cout << "1a" << std::endl;
+        Nan::Utf8String str(t);
+        std::cout << "2" << std::endl;
+        in.push_back(std::string(*str));
+        std::cout << std::string(*str) << std::endl;
+    }
+
+
+    std::cout << "HERE" << std::endl;
     Nan::Callback *callback = new Nan::Callback(Nan::To<v8::Function>(info[3]).ToLocalChecked());
-    Nan::AsyncQueueWorker(new GetFilesInfoWorker(callback, info[0].As<v8::Array>(), Nan::To<bool>(info[1]).FromJust(), Nan::To<bool>(info[2]).FromJust()));
+    Nan::AsyncQueueWorker(new GetFilesInfoWorker(callback, in, Nan::To<bool>(info[1]).FromJust(), Nan::To<bool>(info[2]).FromJust()));
 }
 
 // NAN_METHOD(aBoolean) {

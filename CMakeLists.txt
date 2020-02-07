@@ -59,10 +59,6 @@ file(GLOB DATA_FILES
 )
 file(COPY ${DATA_FILES} DESTINATION ${CMAKE_BINARY_DIR})
 
-if(BUILD_TESTING)
-add_subdirectory("test")
-endif()
-
 # json1 extension
 #add_library(json1 SHARED vendor/ext/json1.c)
 #set_target_properties(json1 PROPERTIES PREFIX "")
@@ -70,6 +66,7 @@ endif()
 
 # Nodejs bindings
 if (CMAKE_JS_VERSION)
+  set(BUILD_TESTING OFF)
   include_directories(${CMAKE_JS_INC})
 
   # Statement above doesn't include directories (QtCreator bug?)
@@ -83,4 +80,8 @@ if (CMAKE_JS_VERSION)
   set_target_properties("node-${PROJECT_NAME}" PROPERTIES PREFIX "" SUFFIX ".node")
   set_target_properties("node-${PROJECT_NAME}" PROPERTIES CXX_STANDARD 17)
   target_link_libraries("node-${PROJECT_NAME}" ${CMAKE_JS_LIB} ${PROJECT_NAME} ${LINK_LIBRARIES})
+endif()
+
+if(BUILD_TESTING)
+add_subdirectory("test")
 endif()
