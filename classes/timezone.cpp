@@ -30,7 +30,9 @@ void Timezone::init() {
     if (initialized) return;
 
     ZDSetErrorHandler(onError);
-    db = ZDOpenDatabase((utils::getExeFolderPath() / "timezone21.bin").c_str());
+    fs::path dbPath = utils::getDataPath("timezone21.bin");
+    if (dbPath.empty()) throw TimezoneException("Cannot find timezone database timezone21.bin");
+    db = ZDOpenDatabase(dbPath.string().c_str());
     if (!db) throw TimezoneException("Cannot open timezone database ./timezone21.bin");
 
     initialized = true;
@@ -56,7 +58,7 @@ long long int Timezone::getUTCEpoch(int year, int month, int day, int hour, int 
             std::string timezoneId = std::string(results[index].data[0]) + std::string(results[index].data[1]);
 
             if (!cctz::load_time_zone(timezoneId, &tz)) {
-                LOGE << "Cannot load timezone, defaulting to UTC: " << timezoneId;
+                LOGD << "Cannot load timezone, defaulting to UTC: " << timezoneId;
             } else {
                 found = true;
                 break;
@@ -67,7 +69,7 @@ long long int Timezone::getUTCEpoch(int year, int month, int day, int hour, int 
     }
 
     if (!found) {
-        LOGW << "Cannot find timezone for " << latitude << "," << longitude << ", defaulting to UTC";
+        LOGD << "Cannot find timezone for " << latitude << "," << longitude << ", defaulting to UTC";
     }
 
     auto time = tz.lookup(cctz::civil_second(year, month, day, hour, minute, second));

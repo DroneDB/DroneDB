@@ -267,7 +267,7 @@ void Entry::toJSON(json &j){
     j["path"] = this->path;
     if (this->hash != "") j["hash"] = this->hash;
     j["type"] = this->type;
-    j["meta"] = this->meta;
+    if (!this->meta.empty()) j["meta"] = this->meta;
     j["mtime"] = this->mtime;
     j["size"] = this->size;
     //j["depth"] = this->depth;

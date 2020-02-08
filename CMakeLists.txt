@@ -75,6 +75,8 @@ if (CMAKE_JS_VERSION)
   include_directories("/home/piero/.cmake-js/node-x64/v13.7.0/include/node")
   endif()
 
+  file(COPY ${DATA_FILES} DESTINATION "${CMAKE_BINARY_DIR}/${CMAKE_BUILD_TYPE}")
+
   file(GLOB NODE_SOURCE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/nodejs/*.cc")
   add_library("node-${PROJECT_NAME}" SHARED ${NODE_SOURCE_FILES})
   set_target_properties("node-${PROJECT_NAME}" PROPERTIES PREFIX "" SUFFIX ".node")

@@ -92,7 +92,7 @@ fs::path rootDirectory(Database *db) {
 // are includes in the result.
 // ".ddb" files/dirs are always ignored and skipped.
 // If a directory is in the input paths, they are included regardless of includeDirs
-std::vector<fs::path> getPathList(fs::path rootDirectory, const std::vector<std::string> &paths, bool includeDirs) {
+std::vector<fs::path> getIndexPathList(fs::path rootDirectory, const std::vector<std::string> &paths, bool includeDirs) {
     std::vector<fs::path> result;
     std::unordered_map<std::string, bool> directories;
 
@@ -151,6 +151,42 @@ std::vector<fs::path> getPathList(fs::path rootDirectory, const std::vector<std:
     return result;
 }
 
+std::vector<fs::path> getPathList(const std::vector<std::string> &paths, bool includeDirs) {
+    std::vector<fs::path> result;
+    std::unordered_map<std::string, bool> directories;
+
+    for (fs::path p : paths) {
+        // fs::directory_options::skip_permission_denied
+        if (p.filename() == ".ddb") continue;
+
+        if (fs::is_directory(p)) {
+            for(auto i = fs::recursive_directory_iterator(p);
+                    i != fs::recursive_directory_iterator();
+                    ++i ) {
+
+                fs::path rp = i->path();
+
+                // Skip .ddb
+                if(rp.filename() == ".ddb") i.disable_recursion_pending();
+
+                if (fs::is_directory(rp)) {
+                    if (includeDirs) result.push_back(rp);
+                }else{
+                    result.push_back(rp);
+                }
+            }
+        } else if (fs::exists(p)) {
+            // File
+            result.push_back(p);
+        } else {
+            throw FSException("Path does not exist: " + p.string());
+        }
+    }
+
+    return result;
+}
+
+
 bool checkUpdate(Entry &e, const fs::path &p, long long dbMtime, const std::string &dbHash) {
     bool folder = fs::is_directory(p);
 
@@ -196,7 +232,7 @@ void doUpdate(Statement *updateQ, const Entry &e) {
 
 void addToIndex(Database *db, const std::vector<std::string> &paths) {
     fs::path directory = rootDirectory(db);
-    auto pathList = getPathList(directory, paths, true);
+    auto pathList = getIndexPathList(directory, paths, true);
 
     auto q = db->query("SELECT mtime,hash FROM entries WHERE path=?");
     auto insertQ = db->query("INSERT INTO entries (path, hash, type, meta, mtime, size, depth, point_geom, polygon_geom) "
@@ -249,7 +285,7 @@ void addToIndex(Database *db, const std::vector<std::string> &paths) {
 
 void removeFromIndex(Database *db, const std::vector<std::string> &paths) {
     fs::path directory = rootDirectory(db);
-    auto pathList = getPathList(directory, paths, false);
+    auto pathList = getIndexPathList(directory, paths, false);
 
     auto q = db->query("DELETE FROM entries WHERE path = ?");
     db->exec("BEGIN TRANSACTION");

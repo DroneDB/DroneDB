@@ -16,13 +16,8 @@ class GetFilesInfoWorker : public Nan::AsyncWorker {
   ~GetFilesInfoWorker() {}
 
   void Execute () {
-    s.clear();
-
-    std::cout << "A" << std::endl;
-
     try{
-        ddb::getFilesInfo(input, "json", s, computeHash, recursive);
-        std::cout << "C" << std::endl;
+        ddb::parseFiles(input, "json", s, computeHash, recursive);
     }catch(ddb::AppException &e){
         SetErrorMessage(e.what());
     }
@@ -31,11 +26,13 @@ class GetFilesInfoWorker : public Nan::AsyncWorker {
   void HandleOKCallback () {
      Nan::HandleScope scope;
 
+     Nan::JSON json;
+     Nan::MaybeLocal<v8::Value> result = json.Parse(v8::String::NewFromUtf8(v8::Isolate::GetCurrent(), s.str().c_str()).ToLocalChecked());
+
      v8::Local<v8::Value> argv[] = {
          Nan::Null(),
-         v8::String::NewFromUtf8(v8::Isolate::GetCurrent(), s.str().c_str()).ToLocalChecked()
+         result.ToLocalChecked()
      };
-
      callback->Call(2, argv, async_resource);
    }
 
@@ -66,17 +63,10 @@ NAN_METHOD(getFilesInfo) {
     auto ctx = info.GetIsolate()->GetCurrentContext();
     std::vector<std::string> in;
     for (unsigned int i = 0; i < input->Length(); i++){
-        std::cout << "1" << std::endl;
-        auto t = input->Get(ctx, i).ToLocalChecked();
-        std::cout << "1a" << std::endl;
-        Nan::Utf8String str(t);
-        std::cout << "2" << std::endl;
+        Nan::Utf8String str(input->Get(ctx, i).ToLocalChecked());
         in.push_back(std::string(*str));
-        std::cout << std::string(*str) << std::endl;
     }
 
-
-    std::cout << "HERE" << std::endl;
     Nan::Callback *callback = new Nan::Callback(Nan::To<v8::Function>(info[3]).ToLocalChecked());
     Nan::AsyncQueueWorker(new GetFilesInfoWorker(callback, in, Nan::To<bool>(info[1]).FromJust(), Nan::To<bool>(info[2]).FromJust()));
 }

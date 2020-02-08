@@ -37,6 +37,7 @@ limitations under the License. */
 
 #ifdef WIN32
 #include <windows.h>    //GetModuleFileNameW
+#include <direct.h> // _getcwd
 #define stat _stat
 #else
 #include <limits.h>
@@ -124,6 +125,8 @@ bool pathsAreChildren(const fs::path &parentPath, const std::vector<std::string>
 int pathDepth(const fs::path &path);
 
 fs::path getExeFolderPath();
+fs::path getDataPath(const fs::path &p);
+fs::path getCwd();
 
 // Prints to the provided buffer a nice number of bytes (KB, MB, GB, etc)
 std::string bytesToHuman(off_t bytes);

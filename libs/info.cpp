@@ -21,11 +21,11 @@ namespace ddb {
 
 using json = nlohmann::json;
 
-void getFilesInfo(const std::vector<std::string> &input, const std::string &format, std::ostream &output, bool computeHash, bool recursive){
+void parseFiles(const std::vector<std::string> &input, const std::string &format, std::ostream &output, bool computeHash, bool recursive){
     std::vector<fs::path> filePaths;
 
     if (recursive){
-        filePaths = getPathList("/", input, true);
+        filePaths = getPathList(input, true);
     }else{
         filePaths = std::vector<fs::path>(input.begin(), input.end());
     }
@@ -47,7 +47,9 @@ void getFilesInfo(const std::vector<std::string> &input, const std::string &form
         LOGD << "Parsing entry " << fp.string();
 
         Entry e;
-        if (entry::parseEntry(fp, ".", e, computeHash)){
+        if (entry::parseEntry(fp, "/", e, computeHash)){
+            e.path = "file:///" + e.path;
+
             if (format == "json"){
                 e.toJSON(j);
                 if (!first) output << ",";

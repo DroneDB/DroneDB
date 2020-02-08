@@ -16,7 +16,7 @@ limitations under the License. */
 
 namespace ddb {
 
-void getFilesInfo(const std::vector<std::string> &input, const std::string &format, std::ostream &output, bool computeHash = false, bool recursive = false);
+void parseFiles(const std::vector<std::string> &input, const std::string &format, std::ostream &output, bool computeHash = false, bool recursive = false);
 
 }
 

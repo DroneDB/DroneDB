@@ -45,7 +45,7 @@ void Info::run(cxxopts::ParseResult &opts) {
     auto format = opts["format"].as<std::string>();
 
     try{
-        ddb::getFilesInfo(input, format, std::cout, opts["with-hash"].count(), opts["recursive"].count());
+        ddb::parseFiles(input, format, std::cout, opts["with-hash"].count(), opts["recursive"].count());
     }catch(ddb::InvalidArgsException){
         printHelp();
     }

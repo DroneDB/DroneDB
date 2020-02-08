@@ -70,6 +70,41 @@ fs::path getExeFolderPath() {
 #endif
 }
 
+fs::path getDataPath(const fs::path &p){
+    // Attempt to find a path within the places we would
+    // usually look for DATA files.
+    const char *ddb_data_path = std::getenv("DDB_DATA");
+    if (ddb_data_path && fs::exists(fs::path(ddb_data_path) / p)){
+        return fs::path(ddb_data_path) / p;
+    }
+
+    fs::path exePath = utils::getExeFolderPath();
+    if (fs::exists(exePath / p)){
+        return exePath / p;
+    }
+
+    fs::path cwd = getCwd();
+    if (fs::exists(cwd / "ddb_data" / p)){
+        return cwd / "ddb_data" / p;
+    }
+
+    if (fs::exists(cwd / p)){
+        return cwd / p;
+    }
+
+    return "";
+}
+
+fs::path getCwd(){
+    char result[PATH_MAX];
+#ifdef WIN32
+    _getcwd(result, PATH_MAX);
+#else
+    getcwd(result, PATH_MAX);
+#endif
+    return fs::path(result);
+}
+
 
 // Counts the number of path components
 // it does NOT normalize the path to account for ".." and "." folders

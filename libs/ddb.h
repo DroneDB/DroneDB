@@ -34,7 +34,8 @@ std::string getVersion();
 std::string create(const std::string &directory);
 std::unique_ptr<Database> open(const std::string &directory, bool traverseUp);
 fs::path rootDirectory(Database *db);
-std::vector<fs::path> getPathList(fs::path rootDirectory, const std::vector<std::string> &paths, bool includeDirs);
+std::vector<fs::path> getIndexPathList(fs::path rootDirectory, const std::vector<std::string> &paths, bool includeDirs);
+std::vector<fs::path> getPathList(const std::vector<std::string> &paths, bool includeDirs);
 bool checkUpdate(entry::Entry &e, const fs::path &p, long long dbMtime, const std::string &dbHash);
 void doUpdate(Statement *updateQ, const entry::Entry &e);
 
