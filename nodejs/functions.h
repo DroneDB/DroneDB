@@ -6,7 +6,7 @@
 // Top-level functions
 
 NAN_METHOD(getVersion);
-NAN_METHOD(getFilesInfo);
+NAN_METHOD(parseFiles);
 
 
 #endif

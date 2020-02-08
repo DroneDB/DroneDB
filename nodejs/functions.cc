@@ -8,12 +8,12 @@ NAN_METHOD(getVersion) {
     info.GetReturnValue().Set(Nan::New(ddb::getVersion()).ToLocalChecked());
 }
 
-class GetFilesInfoWorker : public Nan::AsyncWorker {
+class ParseFilesWorker : public Nan::AsyncWorker {
  public:
-  GetFilesInfoWorker(Nan::Callback *callback, const std::vector<std::string> &input, bool computeHash,  bool recursive)
-    : AsyncWorker(callback, "nan:GetFilesInfoWorker"),
+  ParseFilesWorker(Nan::Callback *callback, const std::vector<std::string> &input, bool computeHash,  bool recursive)
+    : AsyncWorker(callback, "nan:ParseFilesWorker"),
       input(input), computeHash(computeHash), recursive(recursive){}
-  ~GetFilesInfoWorker() {}
+  ~ParseFilesWorker() {}
 
   void Execute () {
     try{
@@ -44,7 +44,7 @@ class GetFilesInfoWorker : public Nan::AsyncWorker {
 };
 
 
-NAN_METHOD(getFilesInfo) {
+NAN_METHOD(parseFiles) {
     if (info.Length() != 4){
         Nan::ThrowError("Invalid number of arguments");
         return;
@@ -68,7 +68,7 @@ NAN_METHOD(getFilesInfo) {
     }
 
     Nan::Callback *callback = new Nan::Callback(Nan::To<v8::Function>(info[3]).ToLocalChecked());
-    Nan::AsyncQueueWorker(new GetFilesInfoWorker(callback, in, Nan::To<bool>(info[1]).FromJust(), Nan::To<bool>(info[2]).FromJust()));
+    Nan::AsyncQueueWorker(new ParseFilesWorker(callback, in, Nan::To<bool>(info[1]).FromJust(), Nan::To<bool>(info[2]).FromJust()));
 }
 
 // NAN_METHOD(aBoolean) {

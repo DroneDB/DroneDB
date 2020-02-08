@@ -7,7 +7,7 @@
     "test": "test"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "./node_modules/.bin/mocha nodejs/test/*.js",
     "install": "cmake-js compile"
   },
   "repository": {
@@ -21,6 +21,7 @@
   },
   "homepage": "https://github.com/uav4geo/DroneDB#readme",
   "devDependencies": {
+    "mocha": "^7.0.1",
     "nan": "^2.14.0"
   },
   "dependencies": {

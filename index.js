@@ -1,2 +1,1 @@
-var bindings = require('bindings')('node-ddb.node');
-module.exports = bindings;
+module.exports = require('./nodejs');

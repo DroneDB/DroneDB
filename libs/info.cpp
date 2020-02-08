@@ -40,7 +40,7 @@ void parseFiles(const std::vector<std::string> &input, const std::string &format
         throw InvalidArgsException("Invalid --format " + format);
     }
 
-    json j;
+
     bool first = true;
 
     for (auto &fp : filePaths){
@@ -51,10 +51,12 @@ void parseFiles(const std::vector<std::string> &input, const std::string &format
             e.path = "file:///" + e.path;
 
             if (format == "json"){
+                json j;
                 e.toJSON(j);
                 if (!first) output << ",";
                 output << j.dump();
             }else if (format == "geojson"){
+                json j;
                 if (e.toGeoJSON(j)){
                     if (!first) output << ",";
                     output << j.dump();

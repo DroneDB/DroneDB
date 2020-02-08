@@ -1,56 +1,35 @@
-var nativeExtension = require('../');
+var ext = require('../');
 var assert = require('assert');
 
-
-describe('native extension', function() {
-  it('should export a wrapped object', function() {
-    var obj = new nativeExtension.MyObject(0);
-    assert.equal(obj.plusOne(), 1);
-    assert.equal(obj.plusOne(), 2);
-    assert.equal(obj.plusOne(), 3);
+describe('node-ddb extension', function() {
+  it('should export a getVersion() method', function() {
+    assert.equal(typeof ext.getVersion(), "string");
+    assert(ext.getVersion().length > 0);
   });
 
-  it('should export function that returns nothing', function() {
-    assert.equal(nativeExtension.nothing(), undefined);
+  it('should export a parseFiles() method', function() {
+    assert.equal(typeof ext.parseFiles, "function");
   });
 
-  it('should export a function that returns a string', function() {
-    assert.equal(typeof nativeExtension.aString(), 'string');
-  });
+  it('should be able to call parseFiles without hash', async function(){
+    const res = await ext.parseFiles(__filename);
+    assert.equal(res.length, 1);
+    assert.equal(typeof res.hash, "undefined")
+  })
 
-  it('should export a function that returns a boolean', function() {
-    assert.equal(typeof nativeExtension.aBoolean(), 'boolean');
-  });
+  it('should be able to call parseFiles with hash', async function(){
+    const res = await ext.parseFiles([__filename, __dirname], {withHash: true});
+    assert.equal(res.length, 2);
+    console.log(res);
+    // Files have hash calculated
+    assert.equal(typeof res[0].hash, "string");
+    assert(res[0].hash.length > 0);
 
-  it('should export function that returns a number', function() {
-    assert.equal(typeof nativeExtension.aNumber(), 'number');
-  });
+    // Directories do not
+    assert.equal(typeof res[1].hash, "undefined");
+  })
 
-  it('should export function that returns an object', function() {
-    assert.equal(typeof nativeExtension.anObject(), 'object');
-  });
-
-  it('should export function that returns an object with a key, value pair', function() {
-    assert.deepEqual(nativeExtension.anObject(), {'key': 'value'});
-  });
-
-  it('should export function that returns an array', function() {
-    assert.equal(Array.isArray(nativeExtension.anArray()), true);
-  });
-
-  it('should export function that returns an array with some values', function() {
-    assert.deepEqual(nativeExtension.anArray(), [1, 2, 3]);
-  });
-
-  it('should export function that calls a callback', function(done) {
-    nativeExtension.callback(done);
-  });
-
-  it('should export function that calls a callback with a parameter', function(done) {
-    nativeExtension.callbackWithParameter(function (callbackParameter){
-      assert.equal(callbackParameter, 'parameter test');
-      done();
-    });
-  });
-
+  it('should fail when parseFiles is called on bad files', async function(){
+    await assert.rejects(ext.parseFiles("404", {withHash: true}));
+  })
 });
