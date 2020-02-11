@@ -4,5 +4,7 @@ module.exports = {
     'GENERIC': 2,
     'GEOIMAGE': 3,
     'GEORASTER': 4,
-    'POINTCLOUD': 5
+    'POINTCLOUD': 5,
+    'IMAGE': 6,
+    'DRONEDB': 7
 }

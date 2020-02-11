@@ -18,7 +18,7 @@ limitations under the License. */
 
 namespace entry{
 
-enum Type { Undefined = 0, Directory = 1, Generic, GeoImage, GeoRaster, PointCloud };
+enum Type { Undefined = 0, Directory = 1, Generic, GeoImage, GeoRaster, PointCloud, Image, DroneDB };
 
 std::string typeToHuman(Type t);
 

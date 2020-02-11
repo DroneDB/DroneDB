@@ -1,4 +1,5 @@
 #include "functions.h"
+#include "../libs/ddb.h"
 
 using v8::FunctionTemplate;
 
@@ -17,6 +18,7 @@ NAN_MODULE_INIT(InitAll) {
 
   // Passing target down to the next NAN_MODULE_INIT
   // MyObject::Init(target);
+  ddb::initialize();
 }
 
 NODE_MODULE(NativeExtension, InitAll)

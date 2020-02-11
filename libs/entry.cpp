@@ -10,7 +10,7 @@ bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
     if (!fs::exists(path)) return false;
 
     // Parse file
-    fs::path relPath = fs::absolute(path).lexically_relative(fs::absolute(rootDirectory));
+    fs::path relPath = fs::weakly_canonical(fs::absolute(path).lexically_relative(fs::absolute(rootDirectory)));
     entry.path = relPath.generic_string();
     entry.depth = utils::pathDepth(relPath);
     if (entry.mtime == 0) entry.mtime = utils::getModifiedTime(path);
@@ -19,6 +19,15 @@ bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
         entry.type = Type::Directory;
         entry.hash = "";
         entry.size = 0;
+
+        // Check for DroneDB dir
+        try{
+            if (fs::exists(path / ".ddb" / "dbase.sqlite")){
+                entry.type = Type::DroneDB;
+            }
+        }catch(const fs::filesystem_error &e){
+            LOGD << "Cannot check " << path.string() << " .ddb presence: " << e.what();
+        }
     } else {
         if (entry.hash == "" && opts.withHash) entry.hash = Hash::ingest(path);
         entry.size = utils::getSize(path);
@@ -27,6 +36,8 @@ bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
 
         bool jpg = utils::checkExtension(path.extension(), {"jpg", "jpeg"});
         bool tif = utils::checkExtension(path.extension(), {"tif", "tiff"});
+        bool nongeoImage = utils::checkExtension(path.extension(), {"png", "gif"});
+
         bool georaster = false;
 
         if (tif){
@@ -43,9 +54,12 @@ bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
             }
         }
 
-        bool image = (jpg || tif) && !georaster;
+        bool image = (jpg || tif || nongeoImage) && !georaster;
 
         if (image) {
+            // A normal image by default (refined later)
+            entry.type = Type::Image;
+
             try{
                 auto image = Exiv2::ImageFactory::open(path);
                 if (!image.get()) throw new IndexException("Cannot open " + path.string());

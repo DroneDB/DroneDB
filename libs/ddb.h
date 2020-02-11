@@ -30,6 +30,7 @@ namespace ddb {
 
 using namespace entry;
 
+void initialize();
 std::string getVersion();
 std::string create(const std::string &directory);
 std::unique_ptr<Database> open(const std::string &directory, bool traverseUp);

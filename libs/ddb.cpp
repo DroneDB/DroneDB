@@ -12,6 +12,8 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License. */
 #include "ddb.h"
+#include "gdal_priv.h"
+#include "../logger.h"
 
 namespace ddb {
 
@@ -247,7 +249,7 @@ void addToIndex(Database *db, const std::vector<std::string> &paths) {
     opts.withHash = true;
 
     for (auto &p : pathList) {
-        fs::path relPath = fs::absolute(p).lexically_relative(fs::absolute(directory));
+        fs::path relPath = fs::weakly_canonical(fs::absolute(p).lexically_relative(fs::absolute(directory)));
 
         q->bind(1, relPath.generic_string());
 
@@ -298,7 +300,7 @@ void removeFromIndex(Database *db, const std::vector<std::string> &paths) {
     db->exec("BEGIN TRANSACTION");
 
     for (auto &p : pathList) {
-        fs::path relPath = fs::absolute(p).lexically_relative(fs::absolute(directory));
+        fs::path relPath = fs::weakly_canonical(fs::absolute(p).lexically_relative(fs::absolute(directory)));
         q->bind(1, relPath.generic_string());
         q->execute();
         if (db->changes() >= 1) {
@@ -344,6 +346,14 @@ void syncIndex(Database *db) {
 
 std::string getVersion(){
     return "0.9.1";
+}
+
+// This must be called as the very first function
+// of every DDB process/program
+void initialize(){
+    init_logger();
+    Database::Initialize();
+    GDALAllRegister();
 }
 
 }

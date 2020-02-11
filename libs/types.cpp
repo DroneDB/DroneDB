@@ -29,6 +29,10 @@ std::string typeToHuman(Type t){
             return "GeoRaster";
         case Type::PointCloud:
             return "PointCloud";
+        case Type::Image:
+            return "Image";
+        case Type::DroneDB:
+            return "DroneDB";
         default:
             return "?";
     }
