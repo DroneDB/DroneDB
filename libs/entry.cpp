@@ -10,7 +10,7 @@ bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
     if (!fs::exists(path)) return false;
 
     // Parse file
-    fs::path relPath = fs::relative(path, rootDirectory);
+    fs::path relPath = fs::absolute(path).lexically_relative(fs::absolute(rootDirectory));
     entry.path = relPath.generic_string();
     entry.depth = utils::pathDepth(relPath);
     if (entry.mtime == 0) entry.mtime = utils::getModifiedTime(path);
