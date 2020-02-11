@@ -2,6 +2,7 @@ const n = require('bindings')('node-ddb.node');
 
 module.exports = {
     getVersion: n.getVersion,
+    entryType: require('./entryType'),
 
     parseFiles: async (files, options = {}) => {
         return new Promise((resolve, reject) => {
