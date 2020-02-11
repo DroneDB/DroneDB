@@ -6,7 +6,7 @@ namespace entry {
 
 using namespace ddb;
 
-bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entry, bool computeHash) {
+bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entry, ParseEntryOpts &opts) {
     if (!fs::exists(path)) return false;
 
     // Parse file
@@ -20,7 +20,7 @@ bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
         entry.hash = "";
         entry.size = 0;
     } else {
-        if (entry.hash == "" && computeHash) entry.hash = Hash::ingest(path);
+        if (entry.hash == "" && opts.withHash) entry.hash = Hash::ingest(path);
         entry.size = utils::getSize(path);
 
         entry.type = Type::Generic; // Default
@@ -148,12 +148,12 @@ void calculateFootprint(const exif::SensorSize &sensorSize, const exif::GeoLocat
     double right = relAltitude * tan(utils::deg2rad(cameraOri.roll) + 0.5 * xView);
     // ... of picture.
 
-    LOGD << "xView: " << utils::rad2deg(xView);
-    LOGD << "yView: " << utils::rad2deg(yView);
-    LOGD << "bottom: " << bottom;
-    LOGD << "top: " << top;
-    LOGD << "left: " << left;
-    LOGD << "right: " << right;
+//    LOGD << "xView: " << utils::rad2deg(xView);
+//    LOGD << "yView: " << utils::rad2deg(yView);
+//    LOGD << "bottom: " << bottom;
+//    LOGD << "top: " << top;
+//    LOGD << "left: " << left;
+//    LOGD << "right: " << right;
 
     // Corners aligned north
     auto upperLeft = geo::Projected2D(center.x + left, center.y + top);
@@ -167,10 +167,10 @@ void calculateFootprint(const exif::SensorSize &sensorSize, const exif::GeoLocat
     lowerLeft.rotate(center, -cameraOri.yaw);
     lowerRight.rotate(center, -cameraOri.yaw);
 
-    LOGD << "UL: " << upperLeft;
-    LOGD << "UR: " << upperRight;
-    LOGD << "LL: " << lowerLeft;
-    LOGD << "LR: " << lowerRight;
+//    LOGD << "UL: " << upperLeft;
+//    LOGD << "UR: " << upperRight;
+//    LOGD << "LL: " << lowerLeft;
+//    LOGD << "LR: " << lowerRight;
 
     // Convert to geographic
     auto ul = geo::fromUTM(upperLeft, utmZone);

@@ -36,7 +36,9 @@ void geoProject(const std::vector<std::string> &images, const std::string &outpu
         }
 
         entry::Entry e;
-        if (!parseEntry(p, ".", e, false)){
+        entry::ParseEntryOpts opts;
+        opts.withHash = false;
+        if (!parseEntry(p, ".", e, opts)){
             throw FSException("Cannot parse file " + p.string());
         }
 

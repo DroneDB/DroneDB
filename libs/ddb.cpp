@@ -151,7 +151,7 @@ std::vector<fs::path> getIndexPathList(fs::path rootDirectory, const std::vector
     return result;
 }
 
-std::vector<fs::path> getPathList(const std::vector<std::string> &paths, bool includeDirs) {
+std::vector<fs::path> getPathList(const std::vector<std::string> &paths, bool includeDirs, int maxDepth) {
     std::vector<fs::path> result;
     std::unordered_map<std::string, bool> directories;
 
@@ -168,6 +168,9 @@ std::vector<fs::path> getPathList(const std::vector<std::string> &paths, bool in
 
                 // Skip .ddb
                 if(rp.filename() == ".ddb") i.disable_recursion_pending();
+
+                // Max depth
+                if (maxDepth > 0 && i.depth() >= (maxDepth - 1)) i.disable_recursion_pending();
 
                 if (fs::is_directory(rp)) {
                     if (includeDirs) result.push_back(rp);
@@ -240,6 +243,9 @@ void addToIndex(Database *db, const std::vector<std::string> &paths) {
     auto updateQ = db->query(UPDATE_QUERY);
     db->exec("BEGIN TRANSACTION");
 
+    ParseEntryOpts opts;
+    opts.withHash = true;
+
     for (auto &p : pathList) {
         fs::path relPath = fs::relative(p, directory);
         q->bind(1, relPath.generic_string());
@@ -257,7 +263,7 @@ void addToIndex(Database *db, const std::vector<std::string> &paths) {
         }
 
         if (add || update) {
-            parseEntry(p, directory, e);
+            parseEntry(p, directory, e, opts);
 
             if (add) {
                 insertQ->bind(1, e.path);
@@ -311,6 +317,9 @@ void syncIndex(Database *db) {
 
     db->exec("BEGIN TRANSACTION");
 
+    ParseEntryOpts opts;
+    opts.withHash = true;
+
     while(q->fetch()) {
         fs::path relPath = q->getText(0);
         fs::path p = directory / relPath; // TODO: does this work on Windows?
@@ -318,7 +327,7 @@ void syncIndex(Database *db) {
 
         if (fs::exists(p)) {
             if (checkUpdate(e, p, q->getInt64(1), q->getText(2))) {
-                parseEntry(p, directory, e);
+                parseEntry(p, directory, e, opts);
                 doUpdate(updateQ.get(), e);
             }
         } else {

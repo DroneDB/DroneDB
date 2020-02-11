@@ -14,9 +14,22 @@ limitations under the License. */
 #ifndef INFO_H
 #define INFO_H
 
+#include "entry.h"
+
 namespace ddb {
 
-void parseFiles(const std::vector<std::string> &input, const std::string &format, std::ostream &output, bool computeHash = false, bool recursive = false);
+struct ParseFilesOpts{
+    std::string format;
+    bool recursive;
+    int maxRecursionDepth;
+
+    entry::ParseEntryOpts peOpts;
+
+    ParseFilesOpts() :
+        format("text"), recursive(false), maxRecursionDepth(0) {};
+};
+
+void parseFiles(const std::vector<std::string> &input, std::ostream &output, ParseFilesOpts &opts);
 
 }
 

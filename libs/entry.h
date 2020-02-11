@@ -83,7 +83,14 @@ struct Entry {
     std::string toString();
 };
 
-bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entry, bool computeHash = true);
+struct ParseEntryOpts{
+    bool withHash;
+
+    ParseEntryOpts() :
+        withHash(true) {};
+};
+
+bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entry, ParseEntryOpts &opts);
 void calculateFootprint(const exif::SensorSize &sensorSize, const exif::GeoLocation &geo, const exif::Focal &focal, const exif::CameraOrientation &cameraOri, double relAltitude, BasicGeometry &geom);
 
 }

@@ -10,14 +10,14 @@ NAN_METHOD(getVersion) {
 
 class ParseFilesWorker : public Nan::AsyncWorker {
  public:
-  ParseFilesWorker(Nan::Callback *callback, const std::vector<std::string> &input, bool computeHash,  bool recursive)
+  ParseFilesWorker(Nan::Callback *callback, const std::vector<std::string> &input, ddb::ParseFilesOpts &pfOpts)
     : AsyncWorker(callback, "nan:ParseFilesWorker"),
-      input(input), computeHash(computeHash), recursive(recursive){}
+      input(input), pfOpts(pfOpts){}
   ~ParseFilesWorker() {}
 
   void Execute () {
     try{
-        ddb::parseFiles(input, "json", s, computeHash, recursive);
+        ddb::parseFiles(input, s, pfOpts);
     }catch(ddb::AppException &e){
         SetErrorMessage(e.what());
     }
@@ -38,14 +38,13 @@ class ParseFilesWorker : public Nan::AsyncWorker {
 
  private:
     std::vector<std::string> input;
-    bool computeHash;
-    bool recursive;
     std::ostringstream s;
+    ddb::ParseFilesOpts pfOpts;
 };
 
 
 NAN_METHOD(parseFiles) {
-    if (info.Length() != 4){
+    if (info.Length() != 3){
         Nan::ThrowError("Invalid number of arguments");
         return;
 	}
@@ -53,8 +52,12 @@ NAN_METHOD(parseFiles) {
         Nan::ThrowError("Argument 0 must be an array");
         return;
     }
-    if (!info[3]->IsFunction()){
-        Nan::ThrowError("Argument 3 must be a function");
+    if (!info[1]->IsObject()){
+        Nan::ThrowError("Argument 1 must be an object");
+        return;
+    }
+    if (!info[2]->IsFunction()){
+        Nan::ThrowError("Argument 2 must be a function");
         return;
     }
 
@@ -67,8 +70,33 @@ NAN_METHOD(parseFiles) {
         in.push_back(std::string(*str));
     }
 
-    Nan::Callback *callback = new Nan::Callback(Nan::To<v8::Function>(info[3]).ToLocalChecked());
-    Nan::AsyncQueueWorker(new ParseFilesWorker(callback, in, Nan::To<bool>(info[1]).FromJust(), Nan::To<bool>(info[2]).FromJust()));
+    // Parse options
+    entry::ParseEntryOpts peOpts;
+    v8::Local<v8::String> k = Nan::New<v8::String>("withHash").ToLocalChecked();
+    v8::Local<v8::Object> obj = info[1].As<v8::Object>();
+
+    if (Nan::HasRealNamedProperty(obj, k).FromJust()){
+        peOpts.withHash = Nan::To<bool>(Nan::GetRealNamedProperty(obj, k).ToLocalChecked()).FromJust();
+    }
+
+    ddb::ParseFilesOpts pfOpts;
+    pfOpts.format = "json";
+
+    k = Nan::New<v8::String>("recursive").ToLocalChecked();
+    if (Nan::HasRealNamedProperty(obj, k).FromJust()){
+        pfOpts.recursive = Nan::To<bool>(Nan::GetRealNamedProperty(obj, k).ToLocalChecked()).FromJust();
+    }
+
+    k = Nan::New<v8::String>("maxRecursionDepth").ToLocalChecked();
+    if (Nan::HasRealNamedProperty(obj, k).FromJust()){
+        pfOpts.maxRecursionDepth = Nan::To<int>(Nan::GetRealNamedProperty(obj, k).ToLocalChecked()).FromJust();
+    }
+
+    pfOpts.peOpts = peOpts;
+
+    // Execute
+    Nan::Callback *callback = new Nan::Callback(Nan::To<v8::Function>(info[2]).ToLocalChecked());
+    Nan::AsyncQueueWorker(new ParseFilesWorker(callback, in, pfOpts));
 }
 
 // NAN_METHOD(aBoolean) {

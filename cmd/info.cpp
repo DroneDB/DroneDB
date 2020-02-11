@@ -27,8 +27,8 @@ void Info::setOptions(cxxopts::Options &opts) {
     ("i,input", "File(s) to examine", cxxopts::value<std::vector<std::string>>())
     ("f,format", "Output format (text|json|geojson)", cxxopts::value<std::string>()->default_value("text"))
     ("r,recursive", "Recursively search in subdirectories", cxxopts::value<bool>())
+    ("d,depth", "Max recursion depth", cxxopts::value<int>()->default_value("0"))
     ("with-hash", "Compute SHA256 hashes", cxxopts::value<bool>());
-
     opts.parse_positional({"input"});
 }
 
@@ -42,10 +42,18 @@ void Info::run(cxxopts::ParseResult &opts) {
     }
 
     auto input = opts["input"].as<std::vector<std::string>>();
-    auto format = opts["format"].as<std::string>();
 
     try{
-        ddb::parseFiles(input, format, std::cout, opts["with-hash"].count(), opts["recursive"].count());
+        entry::ParseEntryOpts peOpts;
+        peOpts.withHash = opts["with-hash"].count();
+
+        ddb::ParseFilesOpts pfOpts;
+        pfOpts.format = opts["format"].as<std::string>();
+        pfOpts.recursive = opts["recursive"].count();
+        pfOpts.maxRecursionDepth = opts["depth"].as<int>();
+        pfOpts.peOpts = peOpts;
+
+        ddb::parseFiles(input, std::cout, pfOpts);
     }catch(ddb::InvalidArgsException){
         printHelp();
     }

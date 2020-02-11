@@ -13,7 +13,6 @@ See the License for the specific language governing permissions and
 limitations under the License. */
 
 #include "ddb.h"
-#include "entry.h"
 #include "info.h"
 #include "../classes/exceptions.h"
 
@@ -21,23 +20,23 @@ namespace ddb {
 
 using json = nlohmann::json;
 
-void parseFiles(const std::vector<std::string> &input, const std::string &format, std::ostream &output, bool computeHash, bool recursive){
+void parseFiles(const std::vector<std::string> &input, std::ostream &output, ParseFilesOpts &opts){
     std::vector<fs::path> filePaths;
 
-    if (recursive){
-        filePaths = getPathList(input, true);
+    if (opts.recursive){
+        filePaths = getPathList(input, true, opts.maxRecursionDepth);
     }else{
         filePaths = std::vector<fs::path>(input.begin(), input.end());
     }
 
-    if (format == "json"){
+    if (opts.format == "json"){
         output << "[";
-    }else if (format == "geojson"){
+    }else if (opts.format == "geojson"){
         output << R"<<<({"type":"FeatureCollection","features":[)<<<";
-    }else if (format == "text"){
+    }else if (opts.format == "text"){
         // Nothing
     }else{
-        throw InvalidArgsException("Invalid --format " + format);
+        throw InvalidArgsException("Invalid format " + opts.format);
     }
 
 
@@ -47,15 +46,15 @@ void parseFiles(const std::vector<std::string> &input, const std::string &format
         LOGD << "Parsing entry " << fp.string();
 
         Entry e;
-        if (entry::parseEntry(fp, "/", e, computeHash)){
+        if (entry::parseEntry(fp, "/", e, opts.peOpts)){
             e.path = "file:///" + e.path;
 
-            if (format == "json"){
+            if (opts.format == "json"){
                 json j;
                 e.toJSON(j);
                 if (!first) output << ",";
                 output << j.dump();
-            }else if (format == "geojson"){
+            }else if (opts.format == "geojson"){
                 json j;
                 if (e.toGeoJSON(j)){
                     if (!first) output << ",";
@@ -74,9 +73,9 @@ void parseFiles(const std::vector<std::string> &input, const std::string &format
         }
     }
 
-    if (format == "json"){
+    if (opts.format == "json"){
         output << "]";
-    }else if (format == "geojson"){
+    }else if (opts.format == "geojson"){
         output << "]}";
     }
 }
