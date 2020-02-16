@@ -7,7 +7,11 @@ namespace entry {
 using namespace ddb;
 
 bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entry, ParseEntryOpts &opts) {
-    if (!fs::exists(path)) return false;
+    if (!fs::exists(path)){
+        if (opts.stopOnError) throw FSException(path.string() + " does not exist");
+        entry.type = Type::Undefined;
+        return true;
+    }
 
     // Parse file
     fs::path relPath = fs::weakly_canonical(fs::absolute(path).lexically_relative(fs::absolute(rootDirectory)));
@@ -123,6 +127,7 @@ bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
                 }
             }catch(Exiv2::AnyError& e){
                 LOGD << "Cannot read EXIF data: " << path.string();
+                if (opts.stopOnError) throw FSException("Cannot read EXIF data: " + path.string());
             }
         }else if (georaster){
             entry.type = Type::GeoRaster;

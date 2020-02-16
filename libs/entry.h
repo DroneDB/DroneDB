@@ -84,10 +84,8 @@ struct Entry {
 };
 
 struct ParseEntryOpts{
-    bool withHash;
-
-    ParseEntryOpts() :
-        withHash(true) {};
+    bool withHash = true;
+    bool stopOnError = true;
 };
 
 bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entry, ParseEntryOpts &opts);

@@ -79,6 +79,11 @@ NAN_METHOD(parseFiles) {
         peOpts.withHash = Nan::To<bool>(Nan::GetRealNamedProperty(obj, k).ToLocalChecked()).FromJust();
     }
 
+    k = Nan::New<v8::String>("stopOnError").ToLocalChecked();
+    if (Nan::HasRealNamedProperty(obj, k).FromJust()){
+        peOpts.stopOnError = Nan::To<bool>(Nan::GetRealNamedProperty(obj, k).ToLocalChecked()).FromJust();
+    }
+
     ddb::ParseFilesOpts pfOpts;
     pfOpts.format = "json";
 

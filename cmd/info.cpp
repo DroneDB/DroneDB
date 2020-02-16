@@ -46,6 +46,7 @@ void Info::run(cxxopts::ParseResult &opts) {
     try{
         entry::ParseEntryOpts peOpts;
         peOpts.withHash = opts["with-hash"].count();
+        peOpts.stopOnError = true;
 
         ddb::ParseFilesOpts pfOpts;
         pfOpts.format = opts["format"].as<std::string>();
