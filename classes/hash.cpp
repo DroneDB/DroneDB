@@ -11,12 +11,13 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License. */
+#include <sstream>
 #include "hash.h"
 #include "exceptions.h"
 
 using namespace ddb;
 
-std::string Hash::ingestFile(const std::string &path) {
+std::string Hash::fileSHA256(const std::string &path) {
     std::ifstream f(path, std::ios::binary);
     if (!f.is_open()) {
         throw FSException("Cannot open " + path + " for hashing");
@@ -38,10 +39,29 @@ std::string Hash::ingestFile(const std::string &path) {
     return digestSha2.getHash();
 }
 
-std::string Hash::ingestStr(const std::string &str){
+std::string Hash::strSHA256(const std::string &str){
     SHA256 digestSha2;
     digestSha2.add(str.c_str(), str.length());
     return digestSha2.getHash();
+}
+
+std::string Hash::strCRC64(const std::string &str){
+    return Hash::strCRC64(str.c_str(), str.length());
+}
+
+std::string Hash::strCRC64(const char *str, uint64_t size){
+    uint64_t crc = 0;
+    uint64_t j;
+
+    for (j = 0; j < size; j++) {
+        uint8_t byte = str[j];
+        crc = crc64_table[(uint8_t)crc ^ byte] ^ (crc >> 8);
+    }
+
+    std::ostringstream os;
+    os << std::hex << crc;
+
+    return os.str();
 }
 
 

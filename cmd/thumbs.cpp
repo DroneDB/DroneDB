@@ -24,11 +24,10 @@ void Thumbs::setOptions(cxxopts::Options &opts) {
     .positional_help("[args]")
     .custom_help("thumbs output/ *.JPG")
     .add_options()
-    ("i,input", "Files or directories to generate thumbnails of", cxxopts::value<std::vector<std::string>>())
-    ("o,output", "Output path where to store thumbnails (file or directory)", cxxopts::value<std::string>())
+    ("i,input", "Files to generate thumbnails of", cxxopts::value<std::vector<std::string>>())
+    ("o,output", "Output directory where to store thumbnails", cxxopts::value<std::string>())
     ("s,size", "Size of the largest side of the images", cxxopts::value<int>()->default_value("512"))
-    ("r,recursive", "Recursively process subdirectories", cxxopts::value<bool>())
-    ("d,depth", "Max recursion depth", cxxopts::value<int>()->default_value("0"));
+    ("use-crc", "Use CRC for output filenames", cxxopts::value<bool>());
 
     opts.parse_positional({"output", "input"});
 }
@@ -45,10 +44,9 @@ void Thumbs::run(cxxopts::ParseResult &opts) {
     auto input = opts["input"].as<std::vector<std::string>>();
     auto output = opts["output"].as<std::string>();
     auto thumbSize = opts["size"].as<int>();
-    auto recursive = opts["recursive"].count();
-    auto maxRecursionDepth = opts["depth"].as<int>();
+    auto useCrc = opts["use-crc"].count();
 
-    ddb::generateThumbs(input, output, thumbSize, recursive, maxRecursionDepth);
+    ddb::generateThumbs(input, output, thumbSize, useCrc);
 }
 
 }

@@ -24,14 +24,10 @@ limitations under the License. */
 
 namespace ddb{
 
-void generateThumbs(const std::vector<std::string> &input, const fs::path &output, int thumbSize, bool recursive, int maxRecursionDepth){
-    std::vector<fs::path> filePaths;
+void generateThumbs(const std::vector<std::string> &input, const fs::path &output, int thumbSize, bool useCrc){
+    if (!fs::is_directory(output)) throw FSException(output.string() + " is not a valid directory");
 
-    if (recursive){
-        filePaths = getPathList(input, false, maxRecursionDepth);
-    }else{
-        filePaths = std::vector<fs::path>(input.begin(), input.end());
-    }
+    std::vector<fs::path> filePaths = std::vector<fs::path>(input.begin(), input.end());
 
     ParseEntryOpts peOpts;
     peOpts.withHash = false;
@@ -44,7 +40,13 @@ void generateThumbs(const std::vector<std::string> &input, const fs::path &outpu
         if (entry::parseEntry(fp, "/", e, peOpts)){
             e.path = (fs::path("/") / fs::path(e.path)).string(); // TODO: does this work on Windows?
             if (e.type == Type::Image || e.type == Type::GeoImage || e.type == Type::GeoRaster){
-                std::cout << generateThumb(e.path, e.mtime, thumbSize, output).string() << std::endl;
+                fs::path outImagePath;
+                if (useCrc){
+                    outImagePath = getThumbPath(e.path, e.mtime, thumbSize, output);
+                }else{
+                    outImagePath = output / fs::path(e.path).replace_extension(".jpg").filename();
+                }
+                std::cout << generateThumb(e.path, thumbSize, outImagePath, true).string() << std::endl;
             }else{
                 LOGD << "Skipping " << e.path;
             }
@@ -54,22 +56,24 @@ void generateThumbs(const std::vector<std::string> &input, const fs::path &outpu
     }
 }
 
-// Thumbnails are JPG files idenfitied by:
-// sha256(imagePath + "*" + modifiedTime + "*" + thumbSize).jpg
-//
-// imagePath can be either absolute or relative and it's up to the user to
-// invoke the function properly as to avoid conflicts with relative paths
-fs::path generateThumb(const fs::path &imagePath, time_t modifiedTime, int thumbSize, const fs::path &outdir){
-    if (!fs::is_directory(outdir)) throw FSException(outdir.string() + " is not a valid directory");
-    if (!fs::exists(imagePath)) throw FSException(imagePath.string() + " does not exist");
 
+fs::path getThumbPath(const fs::path &imagePath, time_t modifiedTime, int thumbSize, const fs::path &outdir){
+    // Thumbnails are JPG files idenfitied by:
+    // sha256(imagePath + "*" + modifiedTime + "*" + thumbSize).jpg
     std::ostringstream os;
     os << imagePath.string() << "*" << modifiedTime << "*" << thumbSize;
-    fs::path outPath = outdir / fs::path(Hash::ingestStr(os.str()) + ".jpg");
+    return outdir / fs::path(Hash::strCRC64(os.str()) + ".jpg");
+}
+
+
+// imagePath can be either absolute or relative and it's up to the user to
+// invoke the function properly as to avoid conflicts with relative paths
+fs::path generateThumb(const fs::path &imagePath, int thumbSize, const fs::path &outImagePath, bool forceRecreate){
+    if (!fs::exists(imagePath)) throw FSException(imagePath.string() + " does not exist");
 
     // Check existance of thumbnail, return if exists
-    if (fs::exists(outPath)){
-        return outPath;
+    if (fs::exists(outImagePath) && !forceRecreate){
+        return outImagePath;
     }
 
     // Compute image with GDAL otherwise
@@ -83,22 +87,23 @@ fs::path generateThumb(const fs::path &imagePath, time_t modifiedTime, int thumb
     targs = CSLAddString(targs, std::to_string(thumbSize).c_str());
     targs = CSLAddString(targs, "0");
 
-    targs = CSLAddString(targs, "-co");
-    targs = CSLAddString(targs, "WRITE_EXIF_METADATA=NO");
+    targs = CSLAddString(targs, "-ot");
+    targs = CSLAddString(targs, "Byte");
 
-    targs = CSLAddString(targs, "--config");
-    targs = CSLAddString(targs, "GDAL_PAM_ENABLED");
-    targs = CSLAddString(targs, "NO");
+    targs = CSLAddString(targs, "-scale");
+
+
+    CPLSetConfigOption("GDAL_PAM_ENABLED", "NO"); // avoid aux files for PNG tiles
 
     GDALTranslateOptions* psOptions = GDALTranslateOptionsNew(targs, nullptr);
     CSLDestroy(targs);
-    GDALTranslate(outPath.string().c_str(),
+    GDALTranslate(outImagePath.string().c_str(),
                                     hSrcDataset,
                                     psOptions,
                                     nullptr);
     GDALTranslateOptionsFree(psOptions);
 
-    return outPath;
+    return outImagePath;
 }
 
 }
