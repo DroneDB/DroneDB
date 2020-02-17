@@ -11,6 +11,9 @@ NAN_MODULE_INIT(InitAll) {
     Nan::GetFunction(Nan::New<FunctionTemplate>(getVersion)).ToLocalChecked());
   Nan::Set(target, Nan::New("parseFiles").ToLocalChecked(),
     Nan::GetFunction(Nan::New<FunctionTemplate>(parseFiles)).ToLocalChecked());
+  Nan::Set(target, Nan::New("getThumbFromUserCache").ToLocalChecked(),
+    Nan::GetFunction(Nan::New<FunctionTemplate>(getThumbFromUserCache)).ToLocalChecked());
+
   // Nan::Set(target, Nan::New("callback").ToLocalChecked(),
   //   Nan::GetFunction(Nan::New<FunctionTemplate>(callback)).ToLocalChecked());
   // Nan::Set(target, Nan::New("callbackWithParameter").ToLocalChecked(),

@@ -19,10 +19,18 @@ limitations under the License. */
 #include "../classes/exceptions.h"
 #include "../classes/hash.h"
 #include "../utils.h"
+#include "../classes/userprofile.h"
 #include "ddb.h"
 
 
 namespace ddb{
+
+fs::path getThumbFromUserCache(const fs::path &imagePath, time_t modifiedTime, int thumbSize, bool forceRecreate){
+    fs::path outdir = UserProfile::get()->getThumbsDir(thumbSize);
+    fs::path thumbPath = outdir / getThumbFilename(imagePath, modifiedTime, thumbSize);
+
+    return generateThumb(imagePath, thumbSize, thumbPath, forceRecreate);
+}
 
 void generateThumbs(const std::vector<std::string> &input, const fs::path &output, int thumbSize, bool useCrc){
     if (!fs::is_directory(output)) throw FSException(output.string() + " is not a valid directory");
@@ -42,7 +50,7 @@ void generateThumbs(const std::vector<std::string> &input, const fs::path &outpu
             if (e.type == Type::Image || e.type == Type::GeoImage || e.type == Type::GeoRaster){
                 fs::path outImagePath;
                 if (useCrc){
-                    outImagePath = getThumbPath(e.path, e.mtime, thumbSize, output);
+                    outImagePath = output / getThumbFilename(e.path, e.mtime, thumbSize);
                 }else{
                     outImagePath = output / fs::path(e.path).replace_extension(".jpg").filename();
                 }
@@ -57,12 +65,12 @@ void generateThumbs(const std::vector<std::string> &input, const fs::path &outpu
 }
 
 
-fs::path getThumbPath(const fs::path &imagePath, time_t modifiedTime, int thumbSize, const fs::path &outdir){
+fs::path getThumbFilename(const fs::path &imagePath, time_t modifiedTime, int thumbSize){
     // Thumbnails are JPG files idenfitied by:
     // sha256(imagePath + "*" + modifiedTime + "*" + thumbSize).jpg
     std::ostringstream os;
     os << imagePath.string() << "*" << modifiedTime << "*" << thumbSize;
-    return outdir / fs::path(Hash::strCRC64(os.str()) + ".jpg");
+    return fs::path(Hash::strCRC64(os.str()) + ".jpg");
 }
 
 
@@ -91,6 +99,10 @@ fs::path generateThumb(const fs::path &imagePath, int thumbSize, const fs::path 
     targs = CSLAddString(targs, "Byte");
 
     targs = CSLAddString(targs, "-scale");
+
+    targs = CSLAddString(targs, "-co");
+    targs = CSLAddString(targs, "WRITE_EXIF_METADATA=NO");
+
 
 
     CPLSetConfigOption("GDAL_PAM_ENABLED", "NO"); // avoid aux files for PNG tiles

@@ -33,7 +33,7 @@ void GeoProj::setOptions(cxxopts::Options &opts) {
 }
 
 std::string GeoProj::description() {
-    return "Project indexed images to georeferenced rasters";
+    return "Project images to georeferenced rasters";
 }
 
 void GeoProj::run(cxxopts::ParseResult &opts) {

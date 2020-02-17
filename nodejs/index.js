@@ -13,5 +13,14 @@ module.exports = {
                 else resolve(result);
             });
         });
+    },
+
+    getThumbFromUserCache: async (imagePath, modifiedTime, options = {}) => {
+        return new Promise((resolve, reject) => {
+            n.getThumbFromUserCache(imagePath, modifiedTime, options, (err, result) => {
+                if (err) reject(err);
+                else resolve(result);
+            });
+        });
     }
 };

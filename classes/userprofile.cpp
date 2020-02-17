@@ -71,3 +71,11 @@ fs::path UserProfile::getProfilePath(const fs::path &p, bool createIfNeeded = tr
     if (createIfNeeded) createDir(profilePath);
     return profilePath;
 }
+
+fs::path UserProfile::getThumbsDir(int thumbSize){
+    const fs::path thumbsDir = getProfileDir() / fs::path("thumbs");
+    createDir(thumbsDir);
+    const fs::path thumbsSizeDir = thumbsDir / fs::path(std::to_string(thumbSize));
+    createDir(thumbsSizeDir);
+    return thumbsSizeDir;
+}

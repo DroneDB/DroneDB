@@ -15,21 +15,32 @@ describe('node-ddb extension', function() {
     const res = await ext.parseFiles(__filename);
     assert.equal(res.length, 1);
     assert.equal(typeof res.hash, "undefined")
-  })
+  });
 
   it('should be able to call parseFiles with hash', async function(){
     const res = await ext.parseFiles([__filename, __dirname], {withHash: true});
     assert.equal(res.length, 2);
-    console.log(res);
+
     // Files have hash calculated
     assert.equal(typeof res[0].hash, "string");
     assert(res[0].hash.length > 0);
 
     // Directories do not
     assert.equal(typeof res[1].hash, "undefined");
-  })
+  });
 
   it('should fail when parseFiles is called on bad files', async function(){
     await assert.rejects(ext.parseFiles("404", {withHash: true}));
-  })
+  });
+
+  it('should export a getThumbFromUserCache() method', function() {
+    assert.equal(typeof ext.getThumbFromUserCache, "function");
+  });
+
+  it('should fail when getThumbFromUserCache is called on bad files', async function(){
+    await assert.rejects(ext.getThumbFromUserCache("nonexistant.jpg", 0, {thumbSize: 200}));
+  });
+
+  // TODO: test good getThumbFromUserCache path
+  
 });

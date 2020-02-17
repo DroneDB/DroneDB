@@ -27,6 +27,7 @@ public:
     fs::path getHomeDir();
     fs::path getProfileDir();
     fs::path getProfilePath(const fs::path &p, bool createIfNeeded);
+    fs::path getThumbsDir(int thumbSize);
 private:
     UserProfile();
 

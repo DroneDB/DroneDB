@@ -3,6 +3,7 @@
 #include "functions.h"
 #include "../libs/ddb.h"
 #include "../libs/info.h"
+#include "../libs/thumbs.h"
 
 NAN_METHOD(getVersion) {
     info.GetReturnValue().Set(Nan::New(ddb::getVersion()).ToLocalChecked());
@@ -102,6 +103,88 @@ NAN_METHOD(parseFiles) {
     // Execute
     Nan::Callback *callback = new Nan::Callback(Nan::To<v8::Function>(info[2]).ToLocalChecked());
     Nan::AsyncQueueWorker(new ParseFilesWorker(callback, in, pfOpts));
+}
+
+//(const fs::path &imagePath, time_t modifiedTime, int thumbSize, bool forceRecreate)
+class GetThumbFromUserCacheWorker : public Nan::AsyncWorker {
+ public:
+  GetThumbFromUserCacheWorker(Nan::Callback *callback, const fs::path &imagePath, time_t modifiedTime, int thumbSize, bool forceRecreate)
+    : AsyncWorker(callback, "nan:GetThumbFromUserCacheWorker"),
+      imagePath(imagePath), modifiedTime(modifiedTime), thumbSize(thumbSize), forceRecreate(forceRecreate) {}
+  ~GetThumbFromUserCacheWorker() {}
+
+  void Execute () {
+    try{
+        thumbPath = ddb::getThumbFromUserCache(imagePath, modifiedTime, thumbSize, forceRecreate);
+    }catch(ddb::AppException &e){
+        SetErrorMessage(e.what());
+    }
+  }
+
+  void HandleOKCallback () {
+     Nan::HandleScope scope;
+
+     v8::Local<v8::Value> argv[] = {
+         Nan::Null(),
+         Nan::New(thumbPath.string()).ToLocalChecked()
+     };
+     callback->Call(2, argv, async_resource);
+   }
+
+ private:
+    fs::path imagePath;
+    time_t modifiedTime;
+    int thumbSize;
+    bool forceRecreate;
+
+    fs::path thumbPath;
+};
+
+
+NAN_METHOD(getThumbFromUserCache) {
+    if (info.Length() != 4){
+        Nan::ThrowError("Invalid number of arguments");
+        return;
+    }
+    if (!info[0]->IsString()){
+        Nan::ThrowError("Argument 0 must be a string");
+        return;
+    }
+    if (!info[1]->IsNumber()){
+        Nan::ThrowError("Argument 1 must be a number");
+        return;
+    }
+    if (!info[2]->IsObject()){
+        Nan::ThrowError("Argument 2 must be an object");
+        return;
+    }
+    if (!info[3]->IsFunction()){
+        Nan::ThrowError("Argument 3 must be a function");
+        return;
+    }
+
+    // Parse first two args
+    fs::path imagePath = fs::path(*Nan::Utf8String(info[0].As<v8::String>()));
+    time_t modifiedTime = Nan::To<time_t>(info[1].As<v8::Uint32>()).FromJust();
+
+    // Parse options
+    v8::Local<v8::String> k = Nan::New<v8::String>("thumbSize").ToLocalChecked();
+    v8::Local<v8::Object> obj = info[2].As<v8::Object>();
+    int thumbSize = 512;
+
+    if (Nan::HasRealNamedProperty(obj, k).FromJust()){
+        thumbSize = Nan::To<time_t>(Nan::GetRealNamedProperty(obj, k).ToLocalChecked()).FromJust();
+    }
+
+    bool forceRecreate = false;
+    k = Nan::New<v8::String>("forceRecreate").ToLocalChecked();
+    if (Nan::HasRealNamedProperty(obj, k).FromJust()){
+        forceRecreate = Nan::To<bool>(Nan::GetRealNamedProperty(obj, k).ToLocalChecked()).FromJust();
+    }
+
+    // Execute
+    Nan::Callback *callback = new Nan::Callback(Nan::To<v8::Function>(info[3]).ToLocalChecked());
+    Nan::AsyncQueueWorker(new GetThumbFromUserCacheWorker(callback, imagePath, modifiedTime, thumbSize, forceRecreate));
 }
 
 // NAN_METHOD(aBoolean) {
