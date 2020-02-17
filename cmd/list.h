@@ -22,6 +22,7 @@ limitations under the License. */
 #include "sync.h"
 #include "geoproj.h"
 #include "info.h"
+#include "thumbs.h"
 
 namespace cmd {
 
@@ -33,6 +34,7 @@ std::map<std::string, Command*> commands = {
     {"sync", new Sync()},
     {"geoproj", new GeoProj()},
     {"info", new Info()},
+    {"thumbs", new Thumbs()},
 };
 
 std::map<std::string, std::string> aliases = {

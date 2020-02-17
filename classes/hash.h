@@ -7,7 +7,8 @@
 
 class Hash{
 public:
-    static std::string ingest(const std::string &path);
+    static std::string ingestFile(const std::string &path);
+    static std::string ingestStr(const std::string &str);
 };
 
 #endif // HASH_H

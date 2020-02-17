@@ -205,7 +205,7 @@ bool checkUpdate(Entry &e, const fs::path &p, long long dbMtime, const std::stri
             // Don't check hashes for folders
             return true;
         } else {
-            e.hash = Hash::ingest(p);
+            e.hash = Hash::ingestFile(p);
 
             if (dbHash != e.hash) {
                 LOGD << p.string() << " hash differs (old: " << dbHash << " | new: " << e.hash << ")";

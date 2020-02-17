@@ -37,11 +37,13 @@ std::string Info::description() {
 }
 
 void Info::run(cxxopts::ParseResult &opts) {
-    if (!opts.count("input")) {
+    if (!opts.count("images") || !opts.count("output")) {
         printHelp();
     }
 
     auto input = opts["input"].as<std::vector<std::string>>();
+    auto output = opts["output"].as<std::string>();
+    auto thumbSize = opts["size"].as<std::string>();
 
     try{
         entry::ParseEntryOpts peOpts;

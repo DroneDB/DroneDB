@@ -16,7 +16,7 @@ limitations under the License. */
 
 using namespace ddb;
 
-std::string Hash::ingest(const std::string &path) {
+std::string Hash::ingestFile(const std::string &path) {
     std::ifstream f(path, std::ios::binary);
     if (!f.is_open()) {
         throw FSException("Cannot open " + path + " for hashing");
@@ -35,6 +35,12 @@ std::string Hash::ingest(const std::string &path) {
     f.close();
     delete[] buffer;
 
+    return digestSha2.getHash();
+}
+
+std::string Hash::ingestStr(const std::string &str){
+    SHA256 digestSha2;
+    digestSha2.add(str.c_str(), str.length());
     return digestSha2.getHash();
 }
 

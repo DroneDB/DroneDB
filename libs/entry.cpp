@@ -33,7 +33,7 @@ bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
             LOGD << "Cannot check " << path.string() << " .ddb presence: " << e.what();
         }
     } else {
-        if (entry.hash == "" && opts.withHash) entry.hash = Hash::ingest(path);
+        if (entry.hash == "" && opts.withHash) entry.hash = Hash::ingestFile(path);
         entry.size = utils::getSize(path);
 
         entry.type = Type::Generic; // Default
