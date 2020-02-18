@@ -120,9 +120,6 @@ fs::path generateThumb(const fs::path &imagePath, int thumbSize, const fs::path 
     targs = CSLAddString(targs, "-co");
     targs = CSLAddString(targs, "WRITE_EXIF_METADATA=NO");
 
-    targs = CSLAddString(targs, "-a_nodata");
-    targs = CSLAddString(targs, "255");
-
     CPLSetConfigOption("GDAL_PAM_ENABLED", "NO"); // avoid aux files for PNG tiles
 
     GDALTranslateOptions* psOptions = GDALTranslateOptionsNew(targs, nullptr);
