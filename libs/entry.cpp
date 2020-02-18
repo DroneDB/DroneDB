@@ -10,7 +10,7 @@ bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
     if (!fs::exists(path)){
         if (opts.stopOnError) throw FSException(path.string() + " does not exist");
         entry.type = Type::Undefined;
-        return true;
+        return false;
     }
 
     // Parse file

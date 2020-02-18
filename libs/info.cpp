@@ -69,7 +69,7 @@ void parseFiles(const std::vector<std::string> &input, std::ostream &output, Par
 
             first = false;
         }else{
-            throw FSException("Failed to parse " + fp.string());
+            LOGD << "Cannot parse " << fp.string() << ", skipping";
         }
     }
 

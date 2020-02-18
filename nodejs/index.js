@@ -22,6 +22,13 @@ const ddb = {
         }
     },
 
+    entry: {
+        hasGeometry: function(entry){
+            if (!entry) return false;
+            return !!entry.point_geom || !!entry.polygon_geom;
+        }
+    },
+
     parseFiles: async (files, options = {}) => {
         return new Promise((resolve, reject) => {
             if (typeof files === "string") files = [files];
