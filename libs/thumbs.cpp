@@ -32,6 +32,10 @@ fs::path getThumbFromUserCache(const fs::path &imagePath, time_t modifiedTime, i
     return generateThumb(imagePath, thumbSize, thumbPath, forceRecreate);
 }
 
+bool supportsThumbnails(entry::Type type){
+    return type == entry::Type::Image || type == entry::Type::GeoImage || type == entry::Type::GeoRaster;
+}
+
 void generateThumbs(const std::vector<std::string> &input, const fs::path &output, int thumbSize, bool useCrc){
     if (!fs::is_directory(output)) throw FSException(output.string() + " is not a valid directory");
 
@@ -47,7 +51,7 @@ void generateThumbs(const std::vector<std::string> &input, const fs::path &outpu
         Entry e;
         if (entry::parseEntry(fp, "/", e, peOpts)){
             e.path = (fs::path("/") / fs::path(e.path)).string(); // TODO: does this work on Windows?
-            if (e.type == Type::Image || e.type == Type::GeoImage || e.type == Type::GeoRaster){
+            if (supportsThumbnails(e.type)){
                 fs::path outImagePath;
                 if (useCrc){
                     outImagePath = output / getThumbFilename(e.path, e.mtime, thumbSize);
@@ -88,12 +92,25 @@ fs::path generateThumb(const fs::path &imagePath, int thumbSize, const fs::path 
     GDALDatasetH hSrcDataset = GDALOpen(imagePath.string().c_str(), GA_ReadOnly);
     if (!hSrcDataset){
         throw GDALException("Cannot open " + imagePath.string() + " for reading");
+
+    }
+
+    int width = GDALGetRasterXSize(hSrcDataset);
+    int height = GDALGetRasterYSize(hSrcDataset);
+    int targetWidth = 0;
+    int targetHeight = 0;
+    if (width > height){
+        targetWidth = thumbSize;
+        targetHeight = static_cast<int>((static_cast<float>(thumbSize) / static_cast<float>(width)) * static_cast<float>(height));
+    }else{
+        targetHeight = thumbSize;
+        targetWidth = static_cast<int>((static_cast<float>(thumbSize) / static_cast<float>(height)) * static_cast<float>(width));
     }
 
     char** targs = nullptr;
     targs = CSLAddString(targs, "-outsize");
-    targs = CSLAddString(targs, std::to_string(thumbSize).c_str());
-    targs = CSLAddString(targs, "0");
+    targs = CSLAddString(targs, std::to_string(targetWidth).c_str());
+    targs = CSLAddString(targs, std::to_string(targetHeight).c_str());
 
     targs = CSLAddString(targs, "-ot");
     targs = CSLAddString(targs, "Byte");

@@ -141,7 +141,7 @@ class GetThumbFromUserCacheWorker : public Nan::AsyncWorker {
 };
 
 
-NAN_METHOD(getThumbFromUserCache) {
+NAN_METHOD(_thumbs_getFromUserCache) {
     if (info.Length() != 4){
         Nan::ThrowError("Invalid number of arguments");
         return;

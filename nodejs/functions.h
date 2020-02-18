@@ -7,6 +7,7 @@
 
 NAN_METHOD(getVersion);
 NAN_METHOD(parseFiles);
-NAN_METHOD(getThumbFromUserCache);
+NAN_METHOD(_thumbs_getFromUserCache);
+
 
 #endif

@@ -33,12 +33,12 @@ describe('node-ddb extension', function() {
     await assert.rejects(ext.parseFiles("404", {withHash: true}));
   });
 
-  it('should export a getThumbFromUserCache() method', function() {
-    assert.equal(typeof ext.getThumbFromUserCache, "function");
+  it('should export a thumbs.getFromUserCache() method', function() {
+    assert.equal(typeof ext.thumbs.getFromUserCache, "function");
   });
 
-  it('should fail when getThumbFromUserCache is called on bad files', async function(){
-    await assert.rejects(ext.getThumbFromUserCache("nonexistant.jpg", 0, {thumbSize: 200}));
+  it('should fail when thumbs.getFromUserCache() is called on bad files', async function(){
+    await assert.rejects(ext.thumbs.getFromUserCache("nonexistant.jpg", 0, {thumbSize: 200}));
   });
 
   // TODO: test good getThumbFromUserCache path
