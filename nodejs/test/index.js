@@ -11,6 +11,12 @@ describe('node-ddb extension', function() {
     assert.equal(typeof ext.parseFiles, "function");
   });
 
+  it('should export a parseFile() method', function() {
+    assert.equal(typeof ext.parseFile, "function");
+  });
+
+  // TODO: test parseFile
+
   it('should be able to call parseFiles without hash', async function(){
     const res = await ext.parseFiles(__filename);
     assert.equal(res.length, 1);
