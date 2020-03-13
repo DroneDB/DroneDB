@@ -23,6 +23,7 @@ const ddb = {
 
     entry: {
         type: require('./entryType'),
+        typeToHuman: n.typeToHuman,
         hasGeometry: function(entry){
             if (!entry) return false;
             return !!entry.point_geom || !!entry.polygon_geom;

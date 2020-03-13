@@ -9,6 +9,8 @@ using v8::FunctionTemplate;
 NAN_MODULE_INIT(InitAll) {
   Nan::Set(target, Nan::New("getVersion").ToLocalChecked(),
     Nan::GetFunction(Nan::New<FunctionTemplate>(getVersion)).ToLocalChecked());
+  Nan::Set(target, Nan::New("typeToHuman").ToLocalChecked(),
+    Nan::GetFunction(Nan::New<FunctionTemplate>(typeToHuman)).ToLocalChecked());
   Nan::Set(target, Nan::New("parseFiles").ToLocalChecked(),
     Nan::GetFunction(Nan::New<FunctionTemplate>(parseFiles)).ToLocalChecked());
   Nan::Set(target, Nan::New("_thumbs_getFromUserCache").ToLocalChecked(),

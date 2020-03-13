@@ -4,9 +4,24 @@
 #include "../libs/ddb.h"
 #include "../libs/info.h"
 #include "../libs/thumbs.h"
+#include "../libs/entry.h"
 
 NAN_METHOD(getVersion) {
     info.GetReturnValue().Set(Nan::New(ddb::getVersion()).ToLocalChecked());
+}
+
+NAN_METHOD(typeToHuman) {
+    if (info.Length() != 1){
+        Nan::ThrowError("Invalid number of arguments");
+        return;
+    }
+    if (!info[0]->IsNumber()){
+        Nan::ThrowError("Argument 0 must be a number");
+        return;
+    }
+
+    entry::Type t = static_cast<entry::Type>(Nan::To<int>(info[0]).FromJust());
+    info.GetReturnValue().Set(Nan::New(entry::typeToHuman(t)).ToLocalChecked());
 }
 
 class ParseFilesWorker : public Nan::AsyncWorker {
