@@ -278,6 +278,11 @@ int BasicGeometry::size() const{
 
 void BasicGeometry::initGeoJsonBase(json &j) const{
     j["type"] = "Feature";
+    j["crs"] = json();
+    j["crs"]["type"] = "name";
+    j["crs"]["properties"] = json();
+    j["crs"]["properties"]["name"] = "EPSG:4326";
+
     j["geometry"] = json({});
     j["properties"] = json({});
 }
