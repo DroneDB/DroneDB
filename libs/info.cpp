@@ -32,7 +32,7 @@ void parseFiles(const std::vector<std::string> &input, std::ostream &output, Par
     if (opts.format == "json"){
         output << "[";
     }else if (opts.format == "geojson"){
-        output << R"<<<({"type":"FeatureCollection","crs":{"type":"name","properties":{"name":"EPSG:4326"}},"features":[)<<<";
+        output << R"<<<({"type":"FeatureCollection","features":[)<<<";
     }else if (opts.format == "text"){
         // Nothing
     }else{
