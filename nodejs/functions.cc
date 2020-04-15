@@ -1,5 +1,4 @@
 #include <sstream>
-
 #include "functions.h"
 #include "../libs/ddb.h"
 #include "../libs/info.h"

@@ -127,7 +127,7 @@ bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
                 }
             }catch(Exiv2::AnyError& e){
                 LOGD << "Cannot read EXIF data: " << path.string();
-                if (opts.stopOnError) throw FSException("Cannot read EXIF data: " + path.string());
+                if (opts.stopOnError) throw FSException("Cannot read EXIF data: " + path.string() + " (" + e.what() + ")");
             }
         }else if (georaster){
             entry.type = Type::GeoRaster;

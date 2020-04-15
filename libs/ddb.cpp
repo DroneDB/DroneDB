@@ -353,6 +353,7 @@ std::string getVersion(){
 void initialize(){
     init_logger();
     Database::Initialize();
+    exif::Initialize();
     GDALAllRegister();
 }
 

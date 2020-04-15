@@ -84,9 +84,6 @@ int main(int argc, char* argv[]) {
 
             auto command = cmdIter->second;
             try {
-                // Initialize
-                exif::Initialize();
-
                 // Run command
                 argv[1] = argv[0];
                 command->run(argc - 1, argv + 1);
