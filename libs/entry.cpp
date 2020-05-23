@@ -1,3 +1,6 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include <exiv2/exiv2.hpp>
 #include "entry.h"
 #include "gdal_priv.h"
@@ -50,6 +53,7 @@ bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
             if( hDataset != NULL ){
                 const char *proj = GDALGetProjectionRef(hDataset);
                 if (proj != NULL){
+                    std::cout << std::string(proj);
                     georaster = std::string(proj) != "";
                 }
                 GDALClose(hDataset);
@@ -73,9 +77,9 @@ bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
 
                 if (e.hasExif()) {
                     auto imageSize = e.extractImageSize();
-                    entry.meta["imageWidth"] = imageSize.width;
-                    entry.meta["imageHeight"] = imageSize.height;
-                    entry.meta["imageOrientation"] = e.extractImageOrientation();
+                    entry.meta["width"] = imageSize.width;
+                    entry.meta["height"] = imageSize.height;
+                    entry.meta["orientation"] = e.extractImageOrientation();
 
                     entry.meta["make"] = e.extractMake();
                     entry.meta["model"] = e.extractModel();
@@ -132,7 +136,28 @@ bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
         }else if (georaster){
             entry.type = Type::GeoRaster;
 
-            // TODO: fill entries
+            GDALDatasetH  hDataset;
+            hDataset = GDALOpen( path.c_str(), GA_ReadOnly );
+
+            entry.meta["width"] = GDALGetRasterXSize(hDataset);
+            entry.meta["height"] = GDALGetRasterYSize(hDataset);
+
+            double geotransform[6];
+            if (GDALGetGeoTransform(hDataset, geotransform) == CE_None){
+                entry.meta["geotransform"] = json::array();
+                for (int i = 0; i < 6; i++) entry.meta["geotransform"].push_back(geotransform[i]);
+            }
+
+            entry.meta["bands"] = json::array();
+            for (int i = 0; i < GDALGetRasterCount(hDataset); i++){
+                GDALRasterBandH hBand = GDALGetRasterBand(hDataset, i + 1);
+                auto b = json::object();
+                b["type"] = GDALGetRasterDataType(hBand);
+                b["ci"] = GDALGetRasterColorInterpretation(hBand);
+                entry.meta["bands"].push_back(b);
+            }
+
+
         }
     }
 
