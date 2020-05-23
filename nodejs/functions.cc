@@ -22,8 +22,8 @@ NAN_METHOD(typeToHuman) {
         return;
     }
 
-    entry::Type t = static_cast<entry::Type>(Nan::To<int>(info[0]).FromJust());
-    info.GetReturnValue().Set(Nan::New(entry::typeToHuman(t)).ToLocalChecked());
+    ddb::EntryType t = static_cast<ddb::EntryType>(Nan::To<int>(info[0]).FromJust());
+    info.GetReturnValue().Set(Nan::New(ddb::typeToHuman(t)).ToLocalChecked());
 }
 
 class ParseFilesWorker : public Nan::AsyncWorker {
@@ -89,7 +89,7 @@ NAN_METHOD(parseFiles) {
     }
 
     // Parse options
-    entry::ParseEntryOpts peOpts;
+    ddb::ParseEntryOpts peOpts;
     v8::Local<v8::String> k = Nan::New<v8::String>("withHash").ToLocalChecked();
     v8::Local<v8::Object> obj = info[1].As<v8::Object>();
 

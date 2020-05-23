@@ -36,7 +36,7 @@ void parseFiles(const std::vector<std::string> &input, std::ostream &output, Par
         LOGD << "Parsing entry " << fp.string();
 
         Entry e;
-        if (entry::parseEntry(fp, "/", e, opts.peOpts)){
+        if (parseEntry(fp, "/", e, opts.peOpts)){
             e.path = "file:///" + e.path;
 
             if (opts.format == "json"){
@@ -46,7 +46,7 @@ void parseFiles(const std::vector<std::string> &input, std::ostream &output, Par
                 output << j.dump();
             }else if (opts.format == "geojson"){
                 json j;
-                if (e.toGeoJSON(j)){
+                if (e.toGeoJSON(j, opts.geometry)){
                     if (!first) output << ",";
                     output << j.dump();
                     j.clear();

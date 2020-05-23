@@ -6,11 +6,11 @@
 
 #include <string>
 
-namespace entry{
+namespace ddb{
 
-enum Type { Undefined = 0, Directory = 1, Generic, GeoImage, GeoRaster, PointCloud, Image, DroneDB };
+enum EntryType { Undefined = 0, Directory = 1, Generic, GeoImage, GeoRaster, PointCloud, Image, DroneDB };
 
-std::string typeToHuman(Type t);
+std::string typeToHuman(EntryType t);
 
 }
 

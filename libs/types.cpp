@@ -3,25 +3,25 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "types.h"
 
-namespace entry{
+namespace ddb{
 
-std::string typeToHuman(Type t){
+std::string typeToHuman(EntryType t){
     switch(t){
-        case Type::Undefined:
+        case EntryType::Undefined:
             return "Undefined";
-        case Type::Directory:
+        case EntryType::Directory:
             return "Directory";
-        case Type::Generic:
+        case EntryType::Generic:
             return "Generic";
-        case Type::GeoImage:
+        case EntryType::GeoImage:
             return "GeoImage";
-        case Type::GeoRaster:
+        case EntryType::GeoRaster:
             return "GeoRaster";
-        case Type::PointCloud:
+        case EntryType::PointCloud:
             return "PointCloud";
-        case Type::Image:
+        case EntryType::Image:
             return "Image";
-        case Type::DroneDB:
+        case EntryType::DroneDB:
             return "DroneDB";
         default:
             return "?";

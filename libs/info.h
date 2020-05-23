@@ -12,11 +12,12 @@ struct ParseFilesOpts{
     std::string format;
     bool recursive;
     int maxRecursionDepth;
+    BasicGeometryType geometry;
 
-    entry::ParseEntryOpts peOpts;
+    ParseEntryOpts peOpts;
 
     ParseFilesOpts() :
-        format("text"), recursive(false), maxRecursionDepth(0) {};
+        format("text"), recursive(false), maxRecursionDepth(0), geometry(BasicGeometryType::BGAuto) {};
 };
 
 void parseFiles(const std::vector<std::string> &input, std::ostream &output, ParseFilesOpts &opts);

@@ -6,6 +6,7 @@
 #include "info.h"
 #include "../libs/info.h"
 #include "../classes/exceptions.h"
+#include "../classes/basicgeometry.h"
 
 namespace cmd {
 
@@ -18,6 +19,7 @@ void Info::setOptions(cxxopts::Options &opts) {
     ("f,format", "Output format (text|json|geojson)", cxxopts::value<std::string>()->default_value("text"))
     ("r,recursive", "Recursively search in subdirectories", cxxopts::value<bool>())
     ("d,depth", "Max recursion depth", cxxopts::value<int>()->default_value("0"))
+    ("geometry", "Geometry to output (for geojson format only) (auto|point|polygon)", cxxopts::value<std::string>()->default_value("auto"))
     ("with-hash", "Compute SHA256 hashes", cxxopts::value<bool>());
     opts.parse_positional({"input"});
 }
@@ -34,7 +36,7 @@ void Info::run(cxxopts::ParseResult &opts) {
     auto input = opts["input"].as<std::vector<std::string>>();
 
     try{
-        entry::ParseEntryOpts peOpts;
+        ddb::ParseEntryOpts peOpts;
         peOpts.withHash = opts["with-hash"].count();
         peOpts.stopOnError = true;
 
@@ -42,6 +44,7 @@ void Info::run(cxxopts::ParseResult &opts) {
         pfOpts.format = opts["format"].as<std::string>();
         pfOpts.recursive = opts["recursive"].count();
         pfOpts.maxRecursionDepth = opts["depth"].as<int>();
+        pfOpts.geometry = ddb::getBasicGeometryTypeFromName(opts["geometry"].as<std::string>());
         pfOpts.peOpts = peOpts;
 
         ddb::parseFiles(input, std::cout, pfOpts);

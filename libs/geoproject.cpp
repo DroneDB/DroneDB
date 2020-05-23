@@ -25,14 +25,14 @@ void geoProject(const std::vector<std::string> &images, const std::string &outpu
             throw FSException("Cannot project " + p.string() + " (does not exist)");
         }
 
-        entry::Entry e;
-        entry::ParseEntryOpts opts;
+        Entry e;
+        ParseEntryOpts opts;
         opts.withHash = false;
         if (!parseEntry(p, ".", e, opts)){
             throw FSException("Cannot parse file " + p.string());
         }
 
-        if (e.type != entry::Type::GeoImage){
+        if (e.type != EntryType::GeoImage){
             std::cerr << "Cannot reproject " << p.string() << ", not a GeoImage, skipping..." << std::endl;
             continue;
         }

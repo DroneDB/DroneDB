@@ -22,8 +22,8 @@ fs::path getThumbFromUserCache(const fs::path &imagePath, time_t modifiedTime, i
     return generateThumb(imagePath, thumbSize, thumbPath, forceRecreate);
 }
 
-bool supportsThumbnails(entry::Type type){
-    return type == entry::Type::Image || type == entry::Type::GeoImage || type == entry::Type::GeoRaster;
+bool supportsThumbnails(EntryType type){
+    return type == EntryType::Image || type == EntryType::GeoImage || type == EntryType::GeoRaster;
 }
 
 void generateThumbs(const std::vector<std::string> &input, const fs::path &output, int thumbSize, bool useCrc){
@@ -39,7 +39,7 @@ void generateThumbs(const std::vector<std::string> &input, const fs::path &outpu
         LOGD << "Parsing entry " << fp.string();
 
         Entry e;
-        if (entry::parseEntry(fp, "/", e, peOpts)){
+        if (parseEntry(fp, "/", e, peOpts)){
             e.path = (fs::path("/") / fs::path(e.path)).string(); // TODO: does this work on Windows?
             if (supportsThumbnails(e.type)){
                 fs::path outImagePath;

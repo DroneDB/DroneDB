@@ -61,6 +61,8 @@ inline std::ostream& operator<<(std::ostream& os, const BoundingBox<T>& b)
 struct Geographic2D{
     double latitude;
     double longitude;
+    Geographic2D(){ latitude = longitude = 0.0; }
+    Geographic2D(double longitude, double latitude) : longitude(longitude), latitude(latitude) {};
 };
 inline std::ostream& operator<<(std::ostream& os, const Geographic2D& p)
 {

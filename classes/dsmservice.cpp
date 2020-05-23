@@ -155,6 +155,8 @@ bool DSMService::addGeoTIFFToCache(const fs::path &filePath, double latitude, do
 
     cache[filePath.filename().string()] = e;
     GDALClose(dataset);
+    delete srs;
+    delete compare;
 
     return contained;
 }
