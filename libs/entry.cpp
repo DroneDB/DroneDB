@@ -53,7 +53,6 @@ bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
             if( hDataset != NULL ){
                 const char *proj = GDALGetProjectionRef(hDataset);
                 if (proj != NULL){
-                    std::cout << std::string(proj);
                     georaster = std::string(proj) != "";
                 }
                 GDALClose(hDataset);
@@ -152,11 +151,18 @@ bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
             for (int i = 0; i < GDALGetRasterCount(hDataset); i++){
                 GDALRasterBandH hBand = GDALGetRasterBand(hDataset, i + 1);
                 auto b = json::object();
-                b["type"] = GDALGetRasterDataType(hBand);
-                b["ci"] = GDALGetRasterColorInterpretation(hBand);
+                b["type"] = GDALGetDataTypeName(GDALGetRasterDataType(hBand));
+                b["colorInterp"] = GDALGetColorInterpretationName(GDALGetRasterColorInterpretation(hBand));
                 entry.meta["bands"].push_back(b);
             }
 
+            if (GDALGetProjectionRef(hDataset) != NULL){
+                entry.meta["projection"] = GDALGetProjectionRef(hDataset);
+            }
+
+            // Project
+
+//            entry.polygon_geom.addPoint()
 
         }
     }
@@ -371,9 +377,19 @@ std::string Entry::toString(){
         std::string k = it.key();
         if (k.length() > 0) k[0] = std::toupper(k[0]);
 
-        s << k << ": " << (it.value().is_string() ?
-                               it.value().get<std::string>() :
-                               it.value().dump()) << "\n";
+        if (k == "Bands"){
+            s << k << ": " << it.value().size() << " [";
+            for (json::iterator b = it.value().begin(); b != it.value().end(); b++){
+                auto band = b.value();
+                s << band["colorInterp"].get<std::string>() << "(" << band["type"].get<std::string>() << ")";
+                if (b + 1 != it.value().end()) s << ",";
+            }
+            s << "]\n";
+        }else{
+            s << k << ": " << (it.value().is_string() ?
+                                   it.value().get<std::string>() :
+                                   it.value().dump()) << "\n";
+        }
     }
 
     s << "Modified Time: " << this->mtime << "\n";
