@@ -200,12 +200,12 @@ bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
     return true;
 }
 
-geo::Geographic2D getRasterCoordinate(OGRCoordinateTransformationH hTransform, double *geotransform, double x, double y){
+Geographic2D getRasterCoordinate(OGRCoordinateTransformationH hTransform, double *geotransform, double x, double y){
     double dfGeoX = geotransform[0] + geotransform[1] * x + geotransform[2] * y;
     double dfGeoY = geotransform[3] + geotransform[4] * x + geotransform[5] * y;
 
     if (OCTTransform(hTransform, 1, &dfGeoX, &dfGeoY, nullptr)){
-        return geo::Geographic2D(dfGeoY, dfGeoX);
+        return Geographic2D(dfGeoY, dfGeoX);
     }else{
         throw GDALException("Cannot get raster coordinates of corner " + std::to_string(x) + "," + std::to_string(y));
     }
@@ -213,8 +213,8 @@ geo::Geographic2D getRasterCoordinate(OGRCoordinateTransformationH hTransform, d
 
 // Adapted from https://github.com/mountainunicycler/dronecamerafov/tree/master
 void calculateFootprint(const exif::SensorSize &sensorSize, const exif::GeoLocation &geo, const exif::Focal &focal, const exif::CameraOrientation &cameraOri, double relAltitude, BasicGeometry &geom) {
-    auto utmZone = geo::getUTMZone(geo.latitude, geo.longitude);
-    auto center = geo::toUTM(geo.latitude, geo.longitude, utmZone);
+    auto utmZone = getUTMZone(geo.latitude, geo.longitude);
+    auto center = toUTM(geo.latitude, geo.longitude, utmZone);
     double groundHeight = geo.altitude != 0.0 ? geo.altitude - relAltitude : relAltitude;
 
     // Field of view
@@ -247,10 +247,10 @@ void calculateFootprint(const exif::SensorSize &sensorSize, const exif::GeoLocat
 //    LOGD << "right: " << right;
 
     // Corners aligned north
-    auto upperLeft = geo::Projected2D(center.x + left, center.y + top);
-    auto upperRight = geo::Projected2D(center.x + right, center.y + top);
-    auto lowerLeft = geo::Projected2D(center.x + left, center.y + bottom);
-    auto lowerRight = geo::Projected2D(center.x + right, center.y + bottom);
+    auto upperLeft = Projected2D(center.x + left, center.y + top);
+    auto upperRight = Projected2D(center.x + right, center.y + top);
+    auto lowerLeft = Projected2D(center.x + left, center.y + bottom);
+    auto lowerRight = Projected2D(center.x + right, center.y + bottom);
 
     // Rotate
     upperLeft.rotate(center, -cameraOri.yaw);
@@ -264,10 +264,10 @@ void calculateFootprint(const exif::SensorSize &sensorSize, const exif::GeoLocat
 //    LOGD << "LR: " << lowerRight;
 
     // Convert to geographic
-    auto ul = geo::fromUTM(upperLeft, utmZone);
-    auto ur = geo::fromUTM(upperRight, utmZone);
-    auto ll = geo::fromUTM(lowerLeft, utmZone);
-    auto lr = geo::fromUTM(lowerRight, utmZone);
+    auto ul = fromUTM(upperLeft, utmZone);
+    auto ur = fromUTM(upperRight, utmZone);
+    auto ll = fromUTM(lowerLeft, utmZone);
+    auto lr = fromUTM(lowerRight, utmZone);
 
     geom.addPoint(ul.longitude, ul.latitude, groundHeight);
     geom.addPoint(ll.longitude, ll.latitude, groundHeight);

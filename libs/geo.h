@@ -7,7 +7,7 @@
 #include <iostream>
 #include "../utils.h"
 
-namespace geo{
+namespace ddb{
 
 struct UTMZone{
     bool north;
@@ -70,7 +70,14 @@ inline std::ostream& operator<<(std::ostream& os, const Geographic2D& p)
     return os;
 }
 
+double copysignx(double x, double y);
+double remainderx(double x, double y);
+double angNormalize(double x);
+int latitudeBand(double latitude);
+int standardUTMZone(double latitude, double longitude);
+
 UTMZone getUTMZone(double latitude, double longitude);
+std::string getProjForUTM(const UTMZone &zone);
 Projected2D toUTM(double latitude, double longitude, const UTMZone &zone);
 
 Geographic2D fromUTM(const Projected2D &p, const UTMZone &zone);

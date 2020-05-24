@@ -19,12 +19,11 @@ if(CCACHE_FOUND)
 endif(CCACHE_FOUND)
 
 find_package(exiv2 REQUIRED CONFIG NAMES exiv2)
-find_package(GeographicLib REQUIRED)
 find_package(GDAL REQUIRED)
 find_package(CURL REQUIRED)
 include_directories(${GDAL_INCLUDE_DIR})
 
-set(LINK_LIBRARIES pthread dl spatialite sqlite3 stdc++fs exiv2 cctz::cctz ${GeographicLib_LIBRARIES} ${GDAL_LIBRARY} ${CURL_LIBRARY})
+set(LINK_LIBRARIES pthread dl spatialite sqlite3 stdc++fs exiv2 cctz::cctz ${GDAL_LIBRARY} ${CURL_LIBRARY})
 
 set(SRC_LIST
     ${CMAKE_CURRENT_SOURCE_DIR}/utils.cpp

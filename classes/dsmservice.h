@@ -18,7 +18,7 @@
 using namespace ddb;
 
 struct DSMCacheEntry{
-    geo::BoundingBox<geo::Point2D> bbox;
+    BoundingBox<Point2D> bbox;
     unsigned int width, height;
     double geoTransform[6];
     std::vector<float> data;

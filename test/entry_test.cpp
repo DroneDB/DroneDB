@@ -16,7 +16,7 @@ TEST(calculateFootprint, Normal) {
     ddb::BasicPolygonGeometry geom;
     calculateFootprint(sensorSize, geo, focal, cameraOri, relAltitude, geom);
 
-    EXPECT_STREQ(geom.toWkt().c_str(), "");
+    EXPECT_STREQ(geom.toWkt().c_str(), "POLYGONZ ((-91.994308101 46.84345864217 98.31, -91.99431905836 46.84287152156 98.31, -91.99300336858 46.84285995357 98.31, -91.99299239689 46.84344707395 98.31, -91.994308101 46.84345864217 98.31))");
 }
 
 }

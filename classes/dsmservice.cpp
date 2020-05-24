@@ -30,7 +30,7 @@ DSMService::~DSMService(){
 }
 
 float DSMService::getAltitude(double latitude, double longitude){
-    geo::Point2D point(longitude, latitude);
+    Point2D point(longitude, latitude);
 
     // Search cache
     for (auto &it : cache){
@@ -89,11 +89,11 @@ std::string DSMService::loadFromNetwork(double latitude, double longitude){
     // Estimate bounds around point by a certain radius
     double radius = 5000.0; // meters
 
-    geo::UTMZone z = geo::getUTMZone(latitude, longitude);
-    geo::Projected2D p = geo::toUTM(latitude, longitude, z);
+    UTMZone z = getUTMZone(latitude, longitude);
+    Projected2D p = toUTM(latitude, longitude, z);
 
-    geo::Geographic2D max = geo::fromUTM(geo::Projected2D(p.x + radius, p.y + radius), z);
-    geo::Geographic2D min = geo::fromUTM(geo::Projected2D(p.x - radius, p.y - radius), z);
+    Geographic2D max = fromUTM(Projected2D(p.x + radius, p.y + radius), z);
+    Geographic2D min = fromUTM(Projected2D(p.x - radius, p.y - radius), z);
 
     std::string url = std::regex_replace(format, std::regex("\\{west\\}"), std::to_string(min.longitude));
     url = std::regex_replace(url, std::regex("\\{east\\}"), std::to_string(max.longitude));
@@ -137,14 +137,14 @@ bool DSMService::addGeoTIFFToCache(const fs::path &filePath, double latitude, do
 
     e.nodata = static_cast<float>(dataset->GetRasterBand(1)->GetNoDataValue(&e.hasNodata));
 
-    geo::Point2D min(0, e.height);
-    geo::Point2D max(e.width, 0);
+    Point2D min(0, e.height);
+    Point2D max(e.width, 0);
     min.transform(e.geoTransform);
     max.transform(e.geoTransform);
 
     e.bbox.min = min;
     e.bbox.max = max;
-    geo::Point2D position(longitude, latitude);
+    Point2D position(longitude, latitude);
     bool contained = e.bbox.contains(position);
 
     if (contained){

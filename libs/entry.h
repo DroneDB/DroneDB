@@ -48,7 +48,7 @@ struct ParseEntryOpts{
 };
 
 bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entry, ParseEntryOpts &opts);
-geo::Geographic2D getRasterCoordinate(OGRCoordinateTransformationH hTransform, double *geotransform, double x, double y);
+Geographic2D getRasterCoordinate(OGRCoordinateTransformationH hTransform, double *geotransform, double x, double y);
 void calculateFootprint(const exif::SensorSize &sensorSize, const exif::GeoLocation &geo, const exif::Focal &focal, const exif::CameraOrientation &cameraOri, double relAltitude, BasicGeometry &geom);
 
 }

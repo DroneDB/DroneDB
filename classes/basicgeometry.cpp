@@ -35,7 +35,7 @@ std::string BasicPolygonGeometry::toWkt() const{
     bool first = true;
     for (auto &p : points){
         if (!first) os << ", ";
-        os << p.x << " " << p.y << " " << p.z;
+        os << std::setprecision(13) << p.x << " " << p.y << " " << p.z;
         first = false;
     }
     os << "))";
