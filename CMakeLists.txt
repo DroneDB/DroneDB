@@ -34,6 +34,7 @@ if (WIN32)
         execute_process(COMMAND powershell Expand-Archive "${DOWNLOADS_DIR}/exiv2.zip" "${DOWNLOADS_DIR}/")
     endif()
 
+    include_directories("${DOWNLOADS_DIR}/exiv2-0.27.2-2017msvc64/include")
     list(APPEND CMAKE_PREFIX_PATH "${DOWNLOADS_DIR}/exiv2-0.27.2-2017msvc64/lib/cmake/exiv2")
 
     # Download GDAL/CURL/sqlite3/spatialite binaries
@@ -51,8 +52,13 @@ if (WIN32)
     set(GDAL_INCLUDE_DIR "${DOWNLOADS_DIR}/gdal/include")
     set(CURL_LIBRARY "${DOWNLOADS_DIR}/gdal/lib/libcurl_imp.lib")
     set(CURL_INCLUDE_DIR "${DOWNLOADS_DIR}/gdal/include")
+    set(SPATIALITE_LIBRARY "${DOWNLOADS_DIR}/gdal/lib/spatialite_i.lib")
+    set(SQLITE3_LIBRARY "${DOWNLOADS_DIR}/gdal/lib/sqlite3_i.lib")
     
     set(CURL_DIR "${DOWNLOADS_DIR}/gdal")
+
+    # Fix: auto_ptr is not a member of std
+    add_compile_definitions(_HAS_AUTO_PTR_ETC=1)
 endif()
 
 find_package(exiv2 REQUIRED CONFIG NAMES exiv2)
