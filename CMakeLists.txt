@@ -18,6 +18,8 @@ if(CCACHE_FOUND)
     set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK ccache)
 endif(CCACHE_FOUND)
 
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+
 if (WIN32)
     set(DOWNLOADS_DIR "${CMAKE_BINARY_DIR}/downloads")
 
@@ -56,9 +58,12 @@ endif()
 find_package(exiv2 REQUIRED CONFIG NAMES exiv2)
 find_package(GDAL REQUIRED)
 find_package(CURL REQUIRED)
+find_package(SpatiaLite REQUIRED)
+find_package(Sqlite3 REQUIRED)
 include_directories(${GDAL_INCLUDE_DIR})
 
-set(LINK_LIBRARIES pthread dl spatialite sqlite3 stdc++fs ${EXIV2_LIBRARIES} cctz::cctz ${GDAL_LIBRARY} ${CURL_LIBRARY})
+#dl
+set(LINK_LIBRARIES pthread ${SPATIALITE_LIBRARY} ${SQLITE3_LIBRARY} stdc++fs exiv2 cctz::cctz ${GDAL_LIBRARY} ${CURL_LIBRARY})
 
 set(SRC_LIST
     ${CMAKE_CURRENT_SOURCE_DIR}/utils.cpp
