@@ -1,17 +1,31 @@
 FROM ubuntu:focal
 MAINTAINER Adam Steer <adam.d.steer@gmail.com>
 
+ENV TZ=Australia/Melbourne
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
+#install dependencies
 RUN apt update && apt install  -y --fix-missing --no-install-recommends\
     build-essential \
     ca-certificates \
     cmake \
     git \
-    libboost-all-dev
+    sqlite3 \
+    spatialite-bin \
+    geographiclib-tools \
+    exiv2 \
+    libexiv2-dev \
+    libgeos-dev \
+    libgdal-dev
 
-RUN apt install -y sqlite3 spatialite-bin geographiclib-tools exiv2 cmake geos libgeos-dev gcc-8 gdal libgdal-dev
+RUN apt-get clean
 
+#build DroneDB
 RUN git clone https://github.com/uav4geo/DroneDB.git && \
     cd DroneDB && \
     mkdir build && \
     cd build && \
     cmake .. && make
+
+# Entry point
+ENTRYPOINT ["/DroneDB/build/ddb"]
