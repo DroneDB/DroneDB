@@ -15,7 +15,6 @@ DroneDB is in early development stages and is targeted at GIS developers and ear
 Requirements:
  * sqlite3
  * spatialite
- * geographiclib
  * exiv2
  * cmake
  * libgeos

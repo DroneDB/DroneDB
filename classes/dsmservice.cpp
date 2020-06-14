@@ -1,16 +1,6 @@
-/* Copyright 2019 MasseranoLabs LLC
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License. */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include <regex>
 #include <ogrsf_frmts.h>
@@ -40,7 +30,7 @@ DSMService::~DSMService(){
 }
 
 float DSMService::getAltitude(double latitude, double longitude){
-    geo::Point2D point(longitude, latitude);
+    Point2D point(longitude, latitude);
 
     // Search cache
     for (auto &it : cache){
@@ -99,11 +89,11 @@ std::string DSMService::loadFromNetwork(double latitude, double longitude){
     // Estimate bounds around point by a certain radius
     double radius = 5000.0; // meters
 
-    geo::UTMZone z = geo::getUTMZone(latitude, longitude);
-    geo::Projected2D p = geo::toUTM(latitude, longitude, z);
+    UTMZone z = getUTMZone(latitude, longitude);
+    Projected2D p = toUTM(latitude, longitude, z);
 
-    geo::Geographic2D max = geo::fromUTM(geo::Projected2D(p.x + radius, p.y + radius), z);
-    geo::Geographic2D min = geo::fromUTM(geo::Projected2D(p.x - radius, p.y - radius), z);
+    Geographic2D max = fromUTM(Projected2D(p.x + radius, p.y + radius), z);
+    Geographic2D min = fromUTM(Projected2D(p.x - radius, p.y - radius), z);
 
     std::string url = std::regex_replace(format, std::regex("\\{west\\}"), std::to_string(min.longitude));
     url = std::regex_replace(url, std::regex("\\{east\\}"), std::to_string(max.longitude));
@@ -147,14 +137,14 @@ bool DSMService::addGeoTIFFToCache(const fs::path &filePath, double latitude, do
 
     e.nodata = static_cast<float>(dataset->GetRasterBand(1)->GetNoDataValue(&e.hasNodata));
 
-    geo::Point2D min(0, e.height);
-    geo::Point2D max(e.width, 0);
+    Point2D min(0, e.height);
+    Point2D max(e.width, 0);
     min.transform(e.geoTransform);
     max.transform(e.geoTransform);
 
     e.bbox.min = min;
     e.bbox.max = max;
-    geo::Point2D position(longitude, latitude);
+    Point2D position(longitude, latitude);
     bool contained = e.bbox.contains(position);
 
     if (contained){
@@ -165,6 +155,8 @@ bool DSMService::addGeoTIFFToCache(const fs::path &filePath, double latitude, do
 
     cache[filePath.filename().string()] = e;
     GDALClose(dataset);
+    delete srs;
+    delete compare;
 
     return contained;
 }

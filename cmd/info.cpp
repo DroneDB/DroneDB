@@ -1,21 +1,12 @@
-/* Copyright 2019 MasseranoLabs LLC
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License. */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include <iostream>
 #include "info.h"
 #include "../libs/info.h"
 #include "../classes/exceptions.h"
+#include "../classes/basicgeometry.h"
 
 namespace cmd {
 
@@ -28,6 +19,7 @@ void Info::setOptions(cxxopts::Options &opts) {
     ("f,format", "Output format (text|json|geojson)", cxxopts::value<std::string>()->default_value("text"))
     ("r,recursive", "Recursively search in subdirectories", cxxopts::value<bool>())
     ("d,depth", "Max recursion depth", cxxopts::value<int>()->default_value("0"))
+    ("geometry", "Geometry to output (for geojson format only) (auto|point|polygon)", cxxopts::value<std::string>()->default_value("auto"))
     ("with-hash", "Compute SHA256 hashes", cxxopts::value<bool>());
     opts.parse_positional({"input"});
 }
@@ -44,7 +36,7 @@ void Info::run(cxxopts::ParseResult &opts) {
     auto input = opts["input"].as<std::vector<std::string>>();
 
     try{
-        entry::ParseEntryOpts peOpts;
+        ddb::ParseEntryOpts peOpts;
         peOpts.withHash = opts["with-hash"].count();
         peOpts.stopOnError = true;
 
@@ -52,6 +44,7 @@ void Info::run(cxxopts::ParseResult &opts) {
         pfOpts.format = opts["format"].as<std::string>();
         pfOpts.recursive = opts["recursive"].count();
         pfOpts.maxRecursionDepth = opts["depth"].as<int>();
+        pfOpts.geometry = ddb::getBasicGeometryTypeFromName(opts["geometry"].as<std::string>());
         pfOpts.peOpts = peOpts;
 
         ddb::parseFiles(input, std::cout, pfOpts);
