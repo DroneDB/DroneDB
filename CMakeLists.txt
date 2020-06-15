@@ -18,13 +18,58 @@ if(CCACHE_FOUND)
     set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK ccache)
 endif(CCACHE_FOUND)
 
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+
+if (WIN32)
+    set(DOWNLOADS_DIR "${CMAKE_BINARY_DIR}/downloads")
+
+    # Download exiv2
+    if (NOT EXISTS "${DOWNLOADS_DIR}/exiv2.zip")
+        message("Downloading exiv2...")
+        file(DOWNLOAD "https://www.exiv2.org/builds/exiv2-0.27.2-2017msvc64.zip" "${DOWNLOADS_DIR}/exiv2.zip")
+    endif()
+
+    if (NOT EXISTS "${DOWNLOADS_DIR}/exiv2-0.27.2-2017msvc64")
+        message("Extracting exiv2...")
+        execute_process(COMMAND powershell Expand-Archive "${DOWNLOADS_DIR}/exiv2.zip" "${DOWNLOADS_DIR}/")
+    endif()
+
+    include_directories("${DOWNLOADS_DIR}/exiv2-0.27.2-2017msvc64/include")
+    list(APPEND CMAKE_PREFIX_PATH "${DOWNLOADS_DIR}/exiv2-0.27.2-2017msvc64/lib/cmake/exiv2")
+
+    # Download GDAL/CURL/sqlite3/spatialite binaries
+    if (NOT EXISTS "${DOWNLOADS_DIR}/gdal.zip")
+        message("Downloading GDAL...")
+        file(DOWNLOAD "http://download.gisinternals.com/sdk/downloads/release-1911-x64-gdal-3-0-4-mapserver-7-4-3-libs.zip" "${DOWNLOADS_DIR}/gdal.zip")
+    endif()
+
+    if (NOT EXISTS "${DOWNLOADS_DIR}/gdal")
+        message("Extracting GDAL...")
+        execute_process(COMMAND powershell Expand-Archive "${DOWNLOADS_DIR}/gdal.zip" "${DOWNLOADS_DIR}/gdal")
+    endif()
+
+    set(GDAL_LIBRARY "${DOWNLOADS_DIR}/gdal/lib/gdal_i.lib")
+    set(GDAL_INCLUDE_DIR "${DOWNLOADS_DIR}/gdal/include")
+    set(CURL_LIBRARY "${DOWNLOADS_DIR}/gdal/lib/libcurl_imp.lib")
+    set(CURL_INCLUDE_DIR "${DOWNLOADS_DIR}/gdal/include")
+    set(SPATIALITE_LIBRARY "${DOWNLOADS_DIR}/gdal/lib/spatialite_i.lib")
+    set(SQLITE3_LIBRARY "${DOWNLOADS_DIR}/gdal/lib/sqlite3_i.lib")
+    
+    set(CURL_DIR "${DOWNLOADS_DIR}/gdal")
+
+    # Fix: auto_ptr is not a member of std
+    add_compile_definitions(_HAS_AUTO_PTR_ETC=1)
+endif()
+
 find_package(exiv2 REQUIRED CONFIG NAMES exiv2)
-find_package(GeographicLib REQUIRED)
 find_package(GDAL REQUIRED)
 find_package(CURL REQUIRED)
+find_package(SpatiaLite REQUIRED)
+find_package(Sqlite3 REQUIRED)
 include_directories(${GDAL_INCLUDE_DIR})
 
-set(LINK_LIBRARIES pthread dl spatialite sqlite3 stdc++fs exiv2 cctz::cctz ${GeographicLib_LIBRARIES} ${GDAL_LIBRARY} ${CURL_LIBRARY})
+#dl
+set(LINK_LIBRARIES pthread ${SPATIALITE_LIBRARY} ${SQLITE3_LIBRARY} stdc++fs exiv2 cctz::cctz ${GDAL_LIBRARY} ${CURL_LIBRARY})
 
 set(SRC_LIST
     ${CMAKE_CURRENT_SOURCE_DIR}/utils.cpp
@@ -47,11 +92,7 @@ if (NOT CMAKE_JS_VERSION)
     add_executable("${PROJECT_NAME}cmd" ${CMD_SRC_LIST})
     set_target_properties("${PROJECT_NAME}cmd" PROPERTIES CXX_STANDARD 17)
     set_target_properties("${PROJECT_NAME}cmd" PROPERTIES OUTPUT_NAME ${PROJECT_NAME})
-    if (WIN32)
-        # TODO
-    else()
-       target_link_libraries("${PROJECT_NAME}cmd" ${PROJECT_NAME} ${LINK_LIBRARIES})
-    endif()
+    target_link_libraries("${PROJECT_NAME}cmd" ${PROJECT_NAME} ${LINK_LIBRARIES})
 endif()
 
 file(GLOB DATA_FILES

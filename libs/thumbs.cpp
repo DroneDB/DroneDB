@@ -1,16 +1,6 @@
-/* Copyright 2019 MasseranoLabs LLC
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License. */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include <sstream>
 #include <gdal_priv.h>
 #include <gdal_utils.h>
@@ -32,8 +22,8 @@ fs::path getThumbFromUserCache(const fs::path &imagePath, time_t modifiedTime, i
     return generateThumb(imagePath, thumbSize, thumbPath, forceRecreate);
 }
 
-bool supportsThumbnails(entry::Type type){
-    return type == entry::Type::Image || type == entry::Type::GeoImage || type == entry::Type::GeoRaster;
+bool supportsThumbnails(EntryType type){
+    return type == EntryType::Image || type == EntryType::GeoImage || type == EntryType::GeoRaster;
 }
 
 void generateThumbs(const std::vector<std::string> &input, const fs::path &output, int thumbSize, bool useCrc){
@@ -49,7 +39,7 @@ void generateThumbs(const std::vector<std::string> &input, const fs::path &outpu
         LOGD << "Parsing entry " << fp.string();
 
         Entry e;
-        if (entry::parseEntry(fp, "/", e, peOpts)){
+        if (parseEntry(fp, "/", e, peOpts)){
             e.path = (fs::path("/") / fs::path(e.path)).string(); // TODO: does this work on Windows?
             if (supportsThumbnails(e.type)){
                 fs::path outImagePath;

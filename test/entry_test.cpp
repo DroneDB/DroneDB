@@ -1,16 +1,6 @@
-/* Copyright 2019 MasseranoLabs LLC
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License. */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "gtest/gtest.h"
 #include "../libs/entry.h"
@@ -23,10 +13,10 @@ TEST(calculateFootprint, Normal) {
     double relAltitude = 100.0;
     exif::CameraOrientation cameraOri(-60, 0, 30);
     exif::GeoLocation geo(46.842607,-91.99456,198.31);
-    entry::BasicPolygonGeometry geom;
-    entry::calculateFootprint(sensorSize, geo, focal, cameraOri, relAltitude, geom);
+    ddb::BasicPolygonGeometry geom;
+    calculateFootprint(sensorSize, geo, focal, cameraOri, relAltitude, geom);
 
-    EXPECT_STREQ(geom.toWkt().c_str(), "");
+    EXPECT_STREQ(geom.toWkt().c_str(), "POLYGONZ ((-91.994308101 46.84345864217 98.31, -91.99431905836 46.84287152156 98.31, -91.99300336858 46.84285995357 98.31, -91.99299239689 46.84344707395 98.31, -91.994308101 46.84345864217 98.31))");
 }
 
 }
