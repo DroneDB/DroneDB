@@ -141,7 +141,7 @@ bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
             entry.meta["width"] = width;
             entry.meta["height"] = height;
 
-            double geotransform[6];            
+            double geotransform[6];
             if (GDALGetGeoTransform(hDataset, geotransform) == CE_None){
                 entry.meta["geotransform"] = json::array();
                 for (int i = 0; i < 6; i++) entry.meta["geotransform"].push_back(geotransform[i]);
@@ -225,9 +225,9 @@ void calculateFootprint(const exif::SensorSize &sensorSize, const exif::GeoLocat
     // Tall
     double yView = 2.0 * atan(sensorSize.height / (2.0 * focal.length));
 
-    // Cap pitch to 30 degrees
+    // Cap pitch to 60 degrees
     double pitch = cameraOri.pitch;
-    if (pitch > -60){
+    if (pitch > -30){
         LOGD << "Pitch cap exceeded (" << pitch << ") using nadir";
         pitch = -90; // set to nadir
     }
@@ -360,6 +360,3 @@ std::string Entry::toString(){
 }
 
 }
-
-
-
