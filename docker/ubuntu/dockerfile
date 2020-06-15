@@ -20,7 +20,7 @@ RUN apt update && apt install  -y --fix-missing --no-install-recommends\
 RUN apt-get clean
 
 #build DroneDB
-RUN git clone https://github.com/uav4geo/DroneDB.git && \
+RUN git clone --recurse-submodules https://github.com/uav4geo/DroneDB.git && \
     cd DroneDB && \
     mkdir build && \
     cd build && \
@@ -28,6 +28,9 @@ RUN git clone https://github.com/uav4geo/DroneDB.git && \
 
 RUN mkdir dronedb-data
 ENV PATH="/DroneDB/build:${PATH}"
+
+#add ddb_data to path
+ENV PATH="/DroneDB/ddb_data:${PATH}"
 
 # Entry point
 WORKDIR /dronedb-data/
