@@ -17,9 +17,12 @@ Then run:
 Navigate to the root of a directory tree holding your imagery - for example if your data structure looks like:
 
 `/drone-images`
+
 `/drone-images/mission1/imagery/`
+
 `/drone-images/mission2/imagery/`
-`...``
+
+`...`
 
 ...navigate to `/drone-images`.
 
