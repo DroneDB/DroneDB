@@ -21,10 +21,16 @@ Requirements:
  * gcc-8
  * GDAL >= 2.1
  
+On Ubuntu you can simply execute this script to install the dependencies:
+
+```bash
+scripts/ubuntu_deps.sh
+```
+
 Then:
 
 ```bash
-git clone https://github.com/uav4geo/DroneDB ddb
+git clone --recurse-submodules https://github.com/uav4geo/DroneDB ddb
 cd ddb
 mkdir build && cd build
 cmake .. && make
