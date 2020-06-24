@@ -21,7 +21,13 @@ endif(CCACHE_FOUND)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 
 if (WIN32)
+
     set(DOWNLOADS_DIR "${CMAKE_BINARY_DIR}/downloads")
+
+    #if (NOT EXISTS "\"${DOWNLOADS_DIR}\"")
+    #    message("Creating downloads directory...")
+    #    file(MAKE_DIRECTORY \"${DOWNLOADS_DIR}\")
+    #endif()
 
     # Download exiv2
     if (NOT EXISTS "${DOWNLOADS_DIR}/exiv2.zip")
@@ -31,7 +37,7 @@ if (WIN32)
 
     if (NOT EXISTS "${DOWNLOADS_DIR}/exiv2-0.27.2-2017msvc64")
         message("Extracting exiv2...")
-        execute_process(COMMAND powershell Expand-Archive "${DOWNLOADS_DIR}/exiv2.zip" "${DOWNLOADS_DIR}/")
+        execute_process(COMMAND powershell Expand-Archive "\"${DOWNLOADS_DIR}/exiv2.zip\"" "\"${DOWNLOADS_DIR}/\"")
     endif()
 
     include_directories("${DOWNLOADS_DIR}/exiv2-0.27.2-2017msvc64/include")
@@ -45,7 +51,7 @@ if (WIN32)
 
     if (NOT EXISTS "${DOWNLOADS_DIR}/gdal")
         message("Extracting GDAL...")
-        execute_process(COMMAND powershell Expand-Archive "${DOWNLOADS_DIR}/gdal.zip" "${DOWNLOADS_DIR}/gdal")
+        execute_process(COMMAND powershell Expand-Archive "\"${DOWNLOADS_DIR}/gdal.zip\"" "\"${DOWNLOADS_DIR}/gdal\"")
     endif()
 
     set(GDAL_LIBRARY "${DOWNLOADS_DIR}/gdal/lib/gdal_i.lib")
@@ -55,7 +61,7 @@ if (WIN32)
     set(SPATIALITE_LIBRARY "${DOWNLOADS_DIR}/gdal/lib/spatialite_i.lib")
     set(SQLITE3_LIBRARY "${DOWNLOADS_DIR}/gdal/lib/sqlite3_i.lib")
     
-    set(CURL_DIR "${DOWNLOADS_DIR}/gdal")
+    set(CURL_DIR "\"${DOWNLOADS_DIR}/gdal\"")
 
     # Fix: auto_ptr is not a member of std
     add_compile_definitions(_HAS_AUTO_PTR_ETC=1)
@@ -69,7 +75,7 @@ find_package(Sqlite3 REQUIRED)
 include_directories(${GDAL_INCLUDE_DIR})
 
 #dl
-set(LINK_LIBRARIES pthread ${SPATIALITE_LIBRARY} ${SQLITE3_LIBRARY} stdc++fs exiv2 cctz::cctz ${GDAL_LIBRARY} ${CURL_LIBRARY})
+set(LINK_LIBRARIES pthread \"${SPATIALITE_LIBRARY}\" \"${SQLITE3_LIBRARY}\" stdc++fs exiv2 cctz::cctz \"${GDAL_LIBRARY}\" \"${CURL_LIBRARY}\")
 
 set(SRC_LIST
     ${CMAKE_CURRENT_SOURCE_DIR}/utils.cpp

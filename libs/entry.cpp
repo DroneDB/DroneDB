@@ -18,7 +18,7 @@ bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
     fs::path relPath = fs::weakly_canonical(fs::absolute(path).lexically_relative(fs::absolute(rootDirectory)));
     entry.path = relPath.generic_string();
     entry.depth = utils::pathDepth(relPath);
-    if (entry.mtime == 0) entry.mtime = utils::getModifiedTime(path);
+    if (entry.mtime == 0) entry.mtime = utils::getModifiedTime(path.string());
 
     if (fs::is_directory(path)) {
         entry.type = EntryType::Directory;
@@ -34,8 +34,8 @@ bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
             LOGD << "Cannot check " << path.string() << " .ddb presence: " << e.what();
         }
     } else {
-        if (entry.hash == "" && opts.withHash) entry.hash = Hash::fileSHA256(path);
-        entry.size = utils::getSize(path);
+        if (entry.hash == "" && opts.withHash) entry.hash = Hash::fileSHA256(path.string());
+        entry.size = utils::getSize(path.string());
 
         entry.type = EntryType::Generic; // Default
 
@@ -47,7 +47,7 @@ bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
 
         if (tif){
             GDALDatasetH  hDataset;
-            hDataset = GDALOpen( path.c_str(), GA_ReadOnly );
+            hDataset = GDALOpen( path.string().c_str(), GA_ReadOnly );
             if( hDataset != NULL ){
                 const char *proj = GDALGetProjectionRef(hDataset);
                 if (proj != NULL){
@@ -66,7 +66,7 @@ bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
             entry.type = EntryType::Image;
 
             try{
-                auto image = Exiv2::ImageFactory::open(path);
+                auto image = Exiv2::ImageFactory::open(path.string());
                 if (!image.get()) throw new IndexException("Cannot open " + path.string());
 
                 image->readMetadata();
@@ -134,7 +134,7 @@ bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
             entry.type = EntryType::GeoRaster;
 
             GDALDatasetH  hDataset;
-            hDataset = GDALOpen( path.c_str(), GA_ReadOnly );
+            hDataset = GDALOpen( path.string().c_str(), GA_ReadOnly );
             int width = GDALGetRasterXSize(hDataset);
             int height = GDALGetRasterYSize(hDataset);
 

@@ -37,11 +37,11 @@ off_t getSize(const std::string &filePath) {
 }
 
 bool pathsAreChildren(const fs::path &parentPath, const std::vector<std::string> &childPaths) {
-    std::string absP = fs::weakly_canonical(fs::absolute(parentPath));
+    std::string absP = fs::weakly_canonical(fs::absolute(parentPath)).string();
     if (absP.length() > 1 && absP.back() == fs::path::preferred_separator) absP.pop_back();
 
     for (auto &cp : childPaths) {
-        std::string absC = fs::weakly_canonical(fs::absolute(cp));
+        std::string absC = fs::weakly_canonical(fs::absolute(cp)).string();
         if (absC.rfind(absP, 0) != 0) return false;
     }
 

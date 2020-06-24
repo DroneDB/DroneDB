@@ -46,7 +46,7 @@ void geoProject(const std::vector<std::string> &images, const std::string &outpu
 
         std::string outFile;
         if (outputToDir){
-            outFile = fs::path(output) / p.filename().replace_extension(".tif");
+            outFile = (fs::path(output) / p.filename().replace_extension(".tif")).string();
         }else{
             outFile = output;
         }
