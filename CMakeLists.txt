@@ -60,6 +60,7 @@ if (WIN32)
     set(CURL_INCLUDE_DIR "${DOWNLOADS_DIR}/gdal/include")
     set(SPATIALITE_LIBRARY "${DOWNLOADS_DIR}/gdal/lib/spatialite_i.lib")
     set(SQLITE3_LIBRARY "${DOWNLOADS_DIR}/gdal/lib/sqlite3_i.lib")
+    set(EXIV2_LIBRARY "${DOWNLOADS_DIR}/exiv2-0.27.2-2017msvc64/lib/exiv2.lib")
     
     set(CURL_DIR "\"${DOWNLOADS_DIR}/gdal\"")
 
@@ -75,7 +76,12 @@ find_package(Sqlite3 REQUIRED)
 include_directories(${GDAL_INCLUDE_DIR})
 
 #dl
-set(LINK_LIBRARIES pthread \"${SPATIALITE_LIBRARY}\" \"${SQLITE3_LIBRARY}\" stdc++fs exiv2 cctz::cctz \"${GDAL_LIBRARY}\" \"${CURL_LIBRARY}\")
+if (NOT WIN32)
+    set(EXIV2_LIBRARY "exiv2")
+    set(STDPPFS_LIBRARY stdc++fs)
+endif()
+
+set(LINK_LIBRARIES ${SPATIALITE_LIBRARY} ${SQLITE3_LIBRARY} ${STDPPFS_LIBRARY} ${EXIV2_LIBRARY} cctz::cctz ${GDAL_LIBRARY} ${CURL_LIBRARY})
 
 set(SRC_LIST
     ${CMAKE_CURRENT_SOURCE_DIR}/utils.cpp
@@ -99,6 +105,10 @@ if (NOT CMAKE_JS_VERSION)
     set_target_properties("${PROJECT_NAME}cmd" PROPERTIES CXX_STANDARD 17)
     set_target_properties("${PROJECT_NAME}cmd" PROPERTIES OUTPUT_NAME ${PROJECT_NAME})
     target_link_libraries("${PROJECT_NAME}cmd" ${PROJECT_NAME} ${LINK_LIBRARIES})
+endif()
+
+if (WIN32)
+    target_link_libraries("${PROJECT_NAME}" ${LINK_LIBRARIES})
 endif()
 
 file(GLOB DATA_FILES
