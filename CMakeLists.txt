@@ -99,19 +99,24 @@ include_directories(${CMAKE_BINARY_DIR}/exiv2-build)
 include_directories(${CMAKE_BINARY_DIR}/exiv2/include)
 
 
+set(EXIV2_LIB ${CMAKE_BINARY_DIR}/exiv2-build/lib/exiv2)
+if (WIN32)
+    # TODO: FIX!
+    set(EXIV2_LIB ${CMAKE_BINARY_DIR}/exiv2-build/lib/Debug/exiv2.lib)
+endif()
+
 find_package(GDAL REQUIRED)
 find_package(CURL REQUIRED)
 find_package(SpatiaLite REQUIRED)
 find_package(Sqlite3 REQUIRED)
 include_directories(${GDAL_INCLUDE_DIR})
 
-
 #dl
 if (NOT WIN32)
     set(STDPPFS_LIBRARY stdc++fs)
 endif()
 
-set(LINK_LIBRARIES ${SPATIALITE_LIBRARY} ${SQLITE3_LIBRARY} ${STDPPFS_LIBRARY} exiv2lib cctz::cctz ${GDAL_LIBRARY} ${CURL_LIBRARY})
+set(LINK_LIBRARIES ${SPATIALITE_LIBRARY} ${SQLITE3_LIBRARY} ${STDPPFS_LIBRARY} ${EXIV2_LIB} cctz::cctz ${GDAL_LIBRARY} ${CURL_LIBRARY})
 
 set(SRC_LIST
     ${CMAKE_CURRENT_SOURCE_DIR}/utils.cpp
@@ -153,7 +158,7 @@ if (WIN32)
         COMMENT "Created ${CMAKE_BINARY_DIR}/ddb.dll"
     )
 
-    #file(COPY "${DOWNLOADS_DIR}/${EXIV2_PATH}/bin/exiv2.dll" DESTINATION "${CMAKE_BINARY_DIR}/")
+    file(COPY "${CMAKE_BINARY_DIR}/exiv2-build/bin/exiv2.dll" DESTINATION "${CMAKE_BINARY_DIR}/")
 
     file(GLOB GDAL_DLLS
         "${DOWNLOADS_DIR}/gdal/bin/*.dll"
