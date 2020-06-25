@@ -61,7 +61,7 @@ if (WIN32)
     add_compile_definitions(_HAS_AUTO_PTR_ETC=1)
 endif()
 
-find_package(exiv2 REQUIRED CONFIG NAMES exiv2)
+find_package(Exiv2 REQUIRED)
 find_package(GDAL REQUIRED)
 find_package(CURL REQUIRED)
 find_package(SpatiaLite REQUIRED)
