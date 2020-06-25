@@ -19,34 +19,19 @@ if(CCACHE_FOUND)
 endif(CCACHE_FOUND)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+include(${CMAKE_ROOT}/Modules/ExternalProject.cmake)
+set(DOWNLOADS_DIR "${CMAKE_BINARY_DIR}/downloads")
 
 if (WIN32)
     # Avoid __declspec definitions in code, requires CMake >= 3.3
     set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
     #unset(CMAKE_IMPORT_LIBRARY_SUFFIX)
 
-    set(DOWNLOADS_DIR "${CMAKE_BINARY_DIR}/downloads")
 
     #if (NOT EXISTS "\"${DOWNLOADS_DIR}\"")
     #    message("Creating downloads directory...")
     #    file(MAKE_DIRECTORY \"${DOWNLOADS_DIR}\")
     #endif()
-
-    set(EXIV2_PATH "exiv2-0.27.2-2017msvc64")
-
-    # Download exiv2
-    if (NOT EXISTS "${DOWNLOADS_DIR}/exiv2.zip")
-        message("Downloading exiv2...")
-        file(DOWNLOAD "https://www.exiv2.org/builds/${EXIV2_PATH}.zip" "${DOWNLOADS_DIR}/exiv2.zip")
-    endif()
-
-    if (NOT EXISTS "${DOWNLOADS_DIR}/${EXIV2_PATH}")
-        message("Extracting exiv2...")
-        execute_process(COMMAND powershell Expand-Archive "\"${DOWNLOADS_DIR}/exiv2.zip\"" "\"${DOWNLOADS_DIR}/\"")
-    endif()
-
-    include_directories("${DOWNLOADS_DIR}/${EXIV2_PATH}/include")
-    list(APPEND CMAKE_PREFIX_PATH "${DOWNLOADS_DIR}/${EXIV2_PATH}/lib/cmake/exiv2")
 
     # Download GDAL/CURL/sqlite3/spatialite libraries
     if (NOT EXISTS "${DOWNLOADS_DIR}/gdal_libs.zip")
@@ -75,7 +60,6 @@ if (WIN32)
     set(CURL_INCLUDE_DIR "${DOWNLOADS_DIR}/gdal/include")
     set(SPATIALITE_LIBRARY "${DOWNLOADS_DIR}/gdal/lib/spatialite_i.lib")
     set(SQLITE3_LIBRARY "${DOWNLOADS_DIR}/gdal/lib/sqlite3_i.lib")
-    set(EXIV2_LIBRARY "${DOWNLOADS_DIR}/${EXIV2_PATH}/lib/exiv2.lib")
     
     set(CURL_DIR "\"${DOWNLOADS_DIR}/gdal\"")
 
@@ -83,20 +67,51 @@ if (WIN32)
     add_compile_definitions(_HAS_AUTO_PTR_ETC=1)
 endif()
 
-find_package(exiv2 REQUIRED CONFIG NAMES exiv2)
+set(EXIV_CMAKE_BUILD_FLAGS "-DEXIV2_BUILD_SAMPLES=OFF" "-DEXIV2_BUILD_EXIV2_COMMAND=OFF")
+if (WIN32)
+    list(APPEND EXIV_CMAKE_BUILD_FLAGS "-DEXPAT_LIBRARY=${DOWNLOADS_DIR}/gdal/lib/expat.lib" "-DEXPAT_INCLUDE_DIR=${DOWNLOADS_DIR}/gdal/include" "-DZLIB_LIBRARY=${DOWNLOADS_DIR}/gdal/lib/zlib.lib" "-DZLIB_INCLUDE_DIR=${DOWNLOADS_DIR}/gdal/include")
+endif()
+
+ExternalProject_Add(exiv2
+  PREFIX            ${CMAKE_BINARY_DIR}/exiv2
+  TMP_DIR           ${CMAKE_BINARY_DIR}/exiv2-tmp
+  STAMP_DIR         ${CMAKE_BINARY_DIR}/exiv2-stamp
+  #--Download step--------------
+  DOWNLOAD_DIR      ${DOWNLOADS_DIR}
+  GIT_REPOSITORY    https://github.com/uav4geo/exiv2
+  GIT_TAG           master
+  #--Update/Patch step----------
+  UPDATE_COMMAND    ""
+  #--Configure step-------------
+  SOURCE_DIR        ${CMAKE_BINARY_DIR}/exiv2
+  CMAKE_ARGS ${EXIV_CMAKE_BUILD_FLAGS} --target exiv2lib
+  #--Build step-----------------
+  BINARY_DIR        ${CMAKE_BINARY_DIR}/exiv2-build
+  #--Install step---------------
+  INSTALL_COMMAND    ""
+  #--Output logging-------------
+  LOG_DOWNLOAD      OFF
+  LOG_CONFIGURE     OFF
+  LOG_BUILD         OFF
+)
+link_directories(${CMAKE_BINARY_DIR}/exiv2/build)
+include_directories(${CMAKE_BINARY_DIR}/exiv2-build)
+include_directories(${CMAKE_BINARY_DIR}/exiv2/include)
+
+
 find_package(GDAL REQUIRED)
 find_package(CURL REQUIRED)
 find_package(SpatiaLite REQUIRED)
 find_package(Sqlite3 REQUIRED)
 include_directories(${GDAL_INCLUDE_DIR})
 
+
 #dl
 if (NOT WIN32)
-    set(EXIV2_LIBRARY "exiv2")
     set(STDPPFS_LIBRARY stdc++fs)
 endif()
 
-set(LINK_LIBRARIES ${SPATIALITE_LIBRARY} ${SQLITE3_LIBRARY} ${STDPPFS_LIBRARY} ${EXIV2_LIBRARY} cctz::cctz ${GDAL_LIBRARY} ${CURL_LIBRARY})
+set(LINK_LIBRARIES ${SPATIALITE_LIBRARY} ${SQLITE3_LIBRARY} ${STDPPFS_LIBRARY} exiv2lib cctz::cctz ${GDAL_LIBRARY} ${CURL_LIBRARY})
 
 set(SRC_LIST
     ${CMAKE_CURRENT_SOURCE_DIR}/utils.cpp
@@ -113,6 +128,7 @@ include_directories("${CMAKE_CURRENT_SOURCE_DIR}/vendor")
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}/vendor/cctz/include")
 
 add_library(${PROJECT_NAME} SHARED ${SRC_LIST})
+add_dependencies(${PROJECT_NAME} exiv2)
 set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 17)
 
 if (NOT CMAKE_JS_VERSION)
@@ -137,7 +153,7 @@ if (WIN32)
         COMMENT "Created ${CMAKE_BINARY_DIR}/ddb.dll"
     )
 
-    file(COPY "${DOWNLOADS_DIR}/${EXIV2_PATH}/bin/exiv2.dll" DESTINATION "${CMAKE_BINARY_DIR}/")
+    #file(COPY "${DOWNLOADS_DIR}/${EXIV2_PATH}/bin/exiv2.dll" DESTINATION "${CMAKE_BINARY_DIR}/")
 
     file(GLOB GDAL_DLLS
         "${DOWNLOADS_DIR}/gdal/bin/*.dll"
