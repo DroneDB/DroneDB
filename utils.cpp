@@ -88,9 +88,9 @@ fs::path getDataPath(const fs::path &p){
 fs::path getCwd(){
     char result[PATH_MAX];
 #ifdef WIN32
-    _getcwd(result, PATH_MAX);
+    if (_getcwd(result, PATH_MAX) == NULL) throw FSException("Cannot get cwd");
 #else
-    getcwd(result, PATH_MAX);
+    if (getcwd(result, PATH_MAX) == NULL) throw FSException("Cannot get cwd");
 #endif
     return fs::path(result);
 }
