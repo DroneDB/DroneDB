@@ -158,7 +158,13 @@ if (WIN32)
         COMMENT "Created ${CMAKE_BINARY_DIR}/ddb.dll"
     )
 
-    file(COPY "${CMAKE_BINARY_DIR}/exiv2-build/bin/exiv2.dll" DESTINATION "${CMAKE_BINARY_DIR}/")
+    add_custom_command(
+        TARGET "${PROJECT_NAME}" PRE_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy
+                "${CMAKE_BINARY_DIR}/exiv2-build/bin/exiv2.dll"
+                "${CMAKE_BINARY_DIR}/"
+        COMMENT "Copied ${CMAKE_BINARY_DIR}/exiv2-build/bin/exiv2.dll"
+    )
 
     file(GLOB GDAL_DLLS
         "${DOWNLOADS_DIR}/gdal/bin/*.dll"
