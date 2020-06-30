@@ -6,6 +6,8 @@
 #include "timezone.h"
 #include "dsmservice.h"
 
+// TODO: remove exif namespace and rename exif::Parser --> ExifParser
+// (everything under ddb namespace)
 namespace exif {
 
 // Register XMP namespaces
@@ -187,6 +189,11 @@ bool Parser::extractGeo(GeoLocation &geo) {
     auto altitude = findExifKey({"Exif.GPSInfo.GPSAltitude"});
     if (altitude != exifData.end()) {
         geo.altitude = evalFrac(altitude->toRational());
+
+        auto altitudeRef = findExifKey({"Exif.GPSInfo.GPSAltitudeRef"});
+        if (altitudeRef != exifData.end()) {
+            geo.altitude *= altitudeRef->toLong() == 1 ? -1 : 0;
+        }
     }
 
     auto xmpAltitude = findXmpKey({"Xmp.drone-dji.AbsoluteAltitude"});
@@ -227,6 +234,10 @@ inline double Parser::geoToDecimal(const Exiv2::ExifData::const_iterator &geoTag
         utils::toUpper(ref);
         if (ref == "S" || ref == "W") sign = -1.0;
     }
+
+//    LOGD << geoTag->toRational(0).first << "/" << geoTag->toRational(0).second << " "
+//         << geoTag->toRational(1).first << "/" << geoTag->toRational(1).second << " "
+//         << geoTag->toRational(2).first << "/" << geoTag->toRational(2).second;
 
     double degrees = evalFrac(geoTag->toRational(0));
     double minutes = evalFrac(geoTag->toRational(1));
@@ -315,6 +326,5 @@ bool Parser::hasExif() {
 bool Parser::hasXmp() {
     return !xmpData.empty();
 }
-
 
 }

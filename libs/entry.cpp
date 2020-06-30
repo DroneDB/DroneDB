@@ -67,7 +67,7 @@ bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
 
             try{
                 auto image = Exiv2::ImageFactory::open(path);
-                if (!image.get()) throw new IndexException("Cannot open " + path.string());
+                if (!image.get()) throw IndexException("Cannot open " + path.string());
 
                 image->readMetadata();
                 exif::Parser e(image.get());
