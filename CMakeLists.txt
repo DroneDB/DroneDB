@@ -4,6 +4,8 @@ cmake_policy(SET CMP0048 NEW)
 project(ddb)
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+# set(CMAKE_JS_VERSION ON)
+# set(CMAKE_BUILD_TYPE "Debug")
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "Release" CACHE STRING
@@ -26,12 +28,6 @@ if (WIN32)
     # Avoid __declspec definitions in code, requires CMake >= 3.3
     set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
     #unset(CMAKE_IMPORT_LIBRARY_SUFFIX)
-
-
-    #if (NOT EXISTS "\"${DOWNLOADS_DIR}\"")
-    #    message("Creating downloads directory...")
-    #    file(MAKE_DIRECTORY \"${DOWNLOADS_DIR}\")
-    #endif()
 
     # Download GDAL/CURL/sqlite3/spatialite libraries
     if (NOT EXISTS "${DOWNLOADS_DIR}/gdal_libs.zip")
@@ -140,6 +136,65 @@ if (NOT CMAKE_JS_VERSION)
     add_executable("${PROJECT_NAME}cmd" ${CMD_SRC_LIST})
     set_target_properties("${PROJECT_NAME}cmd" PROPERTIES CXX_STANDARD 17)
     target_link_libraries("${PROJECT_NAME}cmd" ${PROJECT_NAME} ${LINK_LIBRARIES})
+
+    # Rename ddbcmd --> ddb
+    add_custom_command(TARGET "${PROJECT_NAME}cmd" POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:ddbcmd> ${CMAKE_BINARY_DIR}/ddb${EXE_EXT}
+        COMMENT "Created ${CMAKE_BINARY_DIR}/ddb${EXE_EXT}"
+    )
+
+    set(EXE_EXT "")
+    if (WIN32)
+        set(EXE_EXT ".exe")
+
+        # Copy DLLs
+        add_custom_command(TARGET "${PROJECT_NAME}cmd" POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different  $<TARGET_FILE:ddb> "${CMAKE_BINARY_DIR}/ddb.dll"
+            COMMENT "Created ${CMAKE_BINARY_DIR}/ddb.dll"
+        )
+
+        add_custom_command(
+            TARGET "${PROJECT_NAME}" PRE_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy
+                    "${CMAKE_BINARY_DIR}/exiv2-build/bin/exiv2.dll"
+                    "${CMAKE_BINARY_DIR}/"
+            COMMENT "Copied ${CMAKE_BINARY_DIR}/exiv2-build/bin/exiv2.dll"
+        )
+
+        file(GLOB GDAL_DLLS "${DOWNLOADS_DIR}/gdal/bin/*.dll")
+        file(COPY ${GDAL_DLLS} DESTINATION ${CMAKE_BINARY_DIR})
+
+        # Fix linking
+        target_link_libraries("${PROJECT_NAME}" ${LINK_LIBRARIES})
+    endif()
+
+
+    file(GLOB DATA_FILES "${CMAKE_CURRENT_SOURCE_DIR}/ddb_data/*")
+    file(COPY ${DATA_FILES} DESTINATION ${CMAKE_BINARY_DIR})
+
+else()
+    
+    if (WIN32)
+
+        add_custom_command(
+            TARGET "${PROJECT_NAME}" PRE_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy
+                    "${CMAKE_BINARY_DIR}/exiv2-build/bin/exiv2.dll"
+                    "${CMAKE_BINARY_DIR}/"
+            COMMENT "Copied ${CMAKE_BINARY_DIR}/exiv2-build/bin/exiv2.dll"
+        )
+
+        file(GLOB GDAL_DLLS "${DOWNLOADS_DIR}/gdal/bin/*.dll")
+        file(COPY ${GDAL_DLLS} DESTINATION ${CMAKE_BINARY_DIR})
+
+        # Fix linking
+        target_link_libraries("${PROJECT_NAME}" ${LINK_LIBRARIES})
+    endif()
+
+
+    file(GLOB DATA_FILES "${CMAKE_CURRENT_SOURCE_DIR}/ddb_data/*")
+    file(COPY ${DATA_FILES} DESTINATION ${CMAKE_BINARY_DIR})
+
 endif()
 
 # Rename ddbcmd --> ddb
@@ -175,7 +230,6 @@ if (WIN32)
     target_link_libraries("${PROJECT_NAME}" ${LINK_LIBRARIES})
 endif()
 
-
 file(GLOB DATA_FILES
   "${CMAKE_CURRENT_SOURCE_DIR}/ddb_data/*"
 )
@@ -188,24 +242,28 @@ file(COPY ${DATA_FILES} DESTINATION ${CMAKE_BINARY_DIR})
 
 # Nodejs bindings
 if (CMAKE_JS_VERSION)
-  set(BUILD_TESTING OFF)
-  include_directories(${CMAKE_JS_INC})
 
-  # Statement above doesn't include directories (QtCreator bug?)
-  if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-  include_directories("/home/piero/Documents/ddb/node_modules/nan")
-  include_directories("/home/piero/.cmake-js/node-x64/v13.7.0/include/node")
-  endif()
+    message ("BUILDING WITH NODE")
 
-  file(COPY ${DATA_FILES} DESTINATION "${CMAKE_BINARY_DIR}/${CMAKE_BUILD_TYPE}")
+    set(BUILD_TESTING OFF)
+    include_directories(${CMAKE_JS_INC})
 
-  file(GLOB NODE_SOURCE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/nodejs/*.cc")
-  add_library("node-${PROJECT_NAME}" SHARED ${NODE_SOURCE_FILES})
-  set_target_properties("node-${PROJECT_NAME}" PROPERTIES PREFIX "" SUFFIX ".node")
-  set_target_properties("node-${PROJECT_NAME}" PROPERTIES CXX_STANDARD 17)
-  target_link_libraries("node-${PROJECT_NAME}" ${CMAKE_JS_LIB} ${PROJECT_NAME} ${LINK_LIBRARIES})
+    # Statement above doesn't include directories (QtCreator bug?)
+    if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+        message(${CMAKE_CURRENT_SOURCE_DIR})
+        include_directories("${CMAKE_CURRENT_SOURCE_DIR}/node_modules/nan")
+        include_directories("C:/Users/IT 2/.cmake-js/node-x64/v12.16.1/include/node")
+    endif()
+
+    file(COPY ${DATA_FILES} DESTINATION "${CMAKE_BINARY_DIR}/${CMAKE_BUILD_TYPE}")
+
+    file(GLOB NODE_SOURCE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/nodejs/*.cc")
+    add_library("node-${PROJECT_NAME}" SHARED ${NODE_SOURCE_FILES})
+    set_target_properties("node-${PROJECT_NAME}" PROPERTIES PREFIX "" SUFFIX ".node")
+    set_target_properties("node-${PROJECT_NAME}" PROPERTIES CXX_STANDARD 17)
+    target_link_libraries("node-${PROJECT_NAME}" ${CMAKE_JS_LIB} ${PROJECT_NAME} ${LINK_LIBRARIES})
 endif()
 
 if(BUILD_TESTING)
-add_subdirectory("test")
+    add_subdirectory("test")
 endif()
