@@ -24,6 +24,7 @@ bool ExifEditor::canEdit(){
     for (auto &file : files){
         try{
             if (!fs::exists(file)) throw FSException("does not exist");
+            if (fs::is_directory(file)) throw FSException("cannot set EXIFs to a directory");
             auto image = Exiv2::ImageFactory::open(file);
             if (!image.get()) throw FSException("cannot open " + file.string());
             image->readMetadata();
