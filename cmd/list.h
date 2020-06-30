@@ -13,6 +13,7 @@
 #include "geoproj.h"
 #include "info.h"
 #include "thumbs.h"
+#include "set.h"
 
 namespace cmd {
 
@@ -25,6 +26,7 @@ std::map<std::string, Command*> commands = {
     {"geoproj", new GeoProj()},
     {"info", new Info()},
     {"thumbs", new Thumbs()},
+    {"set", new Set()}
 };
 
 std::map<std::string, std::string> aliases = {
@@ -33,7 +35,7 @@ std::map<std::string, std::string> aliases = {
     {"a", "add"},
     {"s", "sync"},
     {"gp", "geoproj"},
-    {"i", "info"},
+    {"i", "info"}
 };
 
 }
