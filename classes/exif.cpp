@@ -6,6 +6,8 @@
 #include "timezone.h"
 #include "dsmservice.h"
 
+// TODO: remove exif namespace and rename exif::Parser --> ExifParser
+// (everything under ddb namespace)
 namespace exif {
 
 // Register XMP namespaces
@@ -187,6 +189,11 @@ bool Parser::extractGeo(GeoLocation &geo) {
     auto altitude = findExifKey({"Exif.GPSInfo.GPSAltitude"});
     if (altitude != exifData.end()) {
         geo.altitude = evalFrac(altitude->toRational());
+
+        auto altitudeRef = findExifKey({"Exif.GPSInfo.GPSAltitudeRef"});
+        if (altitudeRef != exifData.end()) {
+            geo.altitude *= altitudeRef->toLong() == 1 ? -1 : 0;
+        }
     }
 
     auto xmpAltitude = findXmpKey({"Xmp.drone-dji.AbsoluteAltitude"});
@@ -315,6 +322,5 @@ bool Parser::hasExif() {
 bool Parser::hasXmp() {
     return !xmpData.empty();
 }
-
 
 }

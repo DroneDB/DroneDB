@@ -4,6 +4,7 @@
 
 #include <iostream>
 #include "set.h"
+#include "../classes/exifeditor.h"
 #include "../classes/exceptions.h"
 
 namespace cmd {
@@ -41,23 +42,18 @@ void Set::run(cxxopts::ParseResult &opts) {
     }
 
     auto input = opts["input"].as<std::vector<std::string>>();
+    ddb::ExifEditor exifEditor(input);
 
-    try{
-        if (opts.count("gps-alt")){
-            // exif::SetGPSAltitude(input, opts["gps-alt"].as<double>());
-        }
+    if (opts.count("gps-alt")){
+        exifEditor.SetGPSAltitude(opts["gps-alt"].as<double>());
+    }
 
-        if (opts.count("gps-lat")){
+    if (opts.count("gps-lat")){
 
-        }
+    }
 
-        if (opts.count("gps-lon")){
+    if (opts.count("gps-lon")){
 
-        }
-
-
-    }catch(ddb::InvalidArgsException){
-        printHelp();
     }
 }
 
