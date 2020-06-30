@@ -235,6 +235,10 @@ inline double Parser::geoToDecimal(const Exiv2::ExifData::const_iterator &geoTag
         if (ref == "S" || ref == "W") sign = -1.0;
     }
 
+//    LOGD << geoTag->toRational(0).first << "/" << geoTag->toRational(0).second << " "
+//         << geoTag->toRational(1).first << "/" << geoTag->toRational(1).second << " "
+//         << geoTag->toRational(2).first << "/" << geoTag->toRational(2).second;
+
     double degrees = evalFrac(geoTag->toRational(0));
     double minutes = evalFrac(geoTag->toRational(1));
     double seconds = evalFrac(geoTag->toRational(2));

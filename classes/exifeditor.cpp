@@ -1,3 +1,6 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "exifeditor.h"
 #include "../logger.h"
 #include "../classes/exceptions.h"
@@ -15,17 +18,20 @@ ExifEditor::ExifEditor(const std::string &file){
 }
 
 // Verify that all files can be edited
-// this includes only GeoImage and Image type files
 bool ExifEditor::canEdit(){
     int rejectCount = 0;
 
     for (auto &file : files){
-        auto image = Exiv2::ImageFactory::open(file);
-        if (!image.get()) throw new FSException("Cannot open " + file.string());
         try{
+            if (!fs::exists(file)) throw FSException("does not exist");
+            auto image = Exiv2::ImageFactory::open(file);
+            if (!image.get()) throw FSException("cannot open " + file.string());
             image->readMetadata();
-        }catch(const Exiv2::AnyError &){
-            std::cerr << "Cannot read EXIFs: " + file.string();
+        }catch(const FSException &e){
+            std::cerr << file.string() << ": " << e.what() << std::endl;
+            rejectCount++;
+        }catch(const Exiv2::AnyError &e){
+            std::cerr << file.string() << ": " << e.what() << std::endl;
             rejectCount++;
         }
 
@@ -37,9 +43,9 @@ bool ExifEditor::canEdit(){
 
 void ExifEditor::SetGPSAltitude(double altitude){
     eachFile([=](const fs::path &f, Exiv2::ExifData &exifData){
-        exifData["Exif.GPSInfo.GPSAltitude"] = doubleToFraction(altitude, 2);
+        exifData["Exif.GPSInfo.GPSAltitude"] = doubleToFraction(altitude, 4);
         exifData["Exif.GPSInfo.GPSAltitudeRef"] = altitude < 0.0 ? "1" : "0";
-        LOGD << "Setting altitude to " << doubleToDMS(altitude) << " for " << f.string();
+        LOGD << "Setting altitude to " << exifData["Exif.GPSInfo.GPSAltitude"] << " (" << exifData["Exif.GPSInfo.GPSAltitudeRef"] << ") for " << f.string();
 
         // TODO: adjust XMP DJI tags
         // absolute/relative altitude
@@ -47,15 +53,47 @@ void ExifEditor::SetGPSAltitude(double altitude){
 }
 
 void ExifEditor::SetGPSLatitude(double latitude){
+    eachFile([=](const fs::path &f, Exiv2::ExifData &exifData){
+        exifData["Exif.GPSInfo.GPSLatitude"] = doubleToDMS(latitude);
+        exifData["Exif.GPSInfo.GPSLatitudeRef"] = latitude >= 0.0 ? "N" : "S";
 
+        LOGD << "Setting latitude to " << doubleToDMS(latitude) << " " <<
+                exifData["Exif.GPSInfo.GPSLatitude"] << " " <<
+                exifData["Exif.GPSInfo.GPSLatitudeRef"] << " " <<
+                "for " << f.string();
+    });
 }
 
 void ExifEditor::SetGPSLongitude(double longitude){
-
+    eachFile([=](const fs::path &f, Exiv2::ExifData &exifData){
+        exifData["Exif.GPSInfo.GPSLongitude"] = doubleToDMS(longitude);
+        exifData["Exif.GPSInfo.GPSLongitudeRef"] = longitude >= 0.0 ? "E" : "W";
+        LOGD << "Setting longitude to " <<
+                exifData["Exif.GPSInfo.GPSLongitude"] << " " <<
+                exifData["Exif.GPSInfo.GPSLongitudeRef"] << " " <<
+                "for " << f.string();
+    });
 }
 
 void ExifEditor::SetGPS(double latitude, double longitude, double altitude){
+    eachFile([=](const fs::path &f, Exiv2::ExifData &exifData){
+        exifData["Exif.GPSInfo.GPSAltitude"] = doubleToFraction(altitude, 3);
+        exifData["Exif.GPSInfo.GPSAltitudeRef"] = altitude < 0.0 ? "1" : "0";
+        exifData["Exif.GPSInfo.GPSLatitude"] = doubleToDMS(latitude);
+        exifData["Exif.GPSInfo.GPSLatitudeRef"] = latitude >= 0.0 ? "N" : "S";
+        exifData["Exif.GPSInfo.GPSLongitude"] = doubleToDMS(longitude);
+        exifData["Exif.GPSInfo.GPSLongitudeRef"] = longitude >= 0.0 ? "E" : "W";
 
+        LOGD << "Setting lat: " <<
+                exifData["Exif.GPSInfo.GPSLatitude"] << " " <<
+                exifData["Exif.GPSInfo.GPSLatitudeRef"] << " " <<
+                "lon: " <<
+                exifData["Exif.GPSInfo.GPSLongitude"] << " " <<
+                exifData["Exif.GPSInfo.GPSLongitudeRef"] << " " <<
+                "alt: " <<
+                 exifData["Exif.GPSInfo.GPSAltitude"] << " (" << exifData["Exif.GPSInfo.GPSAltitudeRef"] << ") " <<
+                "for " << f.string();
+    });
 }
 
 // Convert a double into a DMS string
@@ -67,11 +105,11 @@ const std::string ExifEditor::doubleToDMS(double d){
     int min = (int)d ;
     d  -= min;
     d  *= 60;
-    int sec = (int)d;
+    int sec = (int)round(d * 10000.0);
 
     return std::to_string(deg) + "/1 " +
            std::to_string(min) + "/1 " +
-            std::to_string(sec) + "/1";
+            std::to_string(sec) + "/10000";
 }
 
 // Convert a double into a fraction suitable for EXIF
@@ -88,7 +126,7 @@ template<typename Func>
 void ExifEditor::eachFile(Func f){
     for (auto &file : files){
         auto image = Exiv2::ImageFactory::open(file);
-        if (!image.get()) throw new FSException("Cannot open " + file.string());
+        if (!image.get()) throw FSException("Cannot open " + file.string());
         image->readMetadata();
 
         f(file, image->exifData());
@@ -96,7 +134,7 @@ void ExifEditor::eachFile(Func f){
         image->setExifData(image->exifData());
         try{
             image->writeMetadata();
-            std::cout << "U\t" << file.string() << std::endl;
+            //std::cout << "U\t" << file.string() << std::endl;
         }catch(const Exiv2::AnyError &){
             std::cerr << "Cannot write metadata to " + file.string();
         }

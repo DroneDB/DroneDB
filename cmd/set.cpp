@@ -44,16 +44,25 @@ void Set::run(cxxopts::ParseResult &opts) {
     auto input = opts["input"].as<std::vector<std::string>>();
     ddb::ExifEditor exifEditor(input);
 
+    if (!exifEditor.canEdit()){
+        exit(EXIT_FAILURE);
+    }
+
     if (opts.count("gps-alt")){
         exifEditor.SetGPSAltitude(opts["gps-alt"].as<double>());
     }
 
     if (opts.count("gps-lat")){
-
+        exifEditor.SetGPSLatitude(opts["gps-lat"].as<double>());
     }
 
     if (opts.count("gps-lon")){
+        exifEditor.SetGPSLongitude(opts["gps-lon"].as<double>());
+    }
 
+    if (opts.count("gps")){
+        auto gps = opts["gps"].as<std::vector<double>>();
+        exifEditor.SetGPS(gps[0], gps[1], gps[2]);
     }
 }
 
