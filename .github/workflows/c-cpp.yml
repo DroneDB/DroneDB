@@ -1,26 +1,44 @@
 name: C/C++ CI
 
 on:
-  push:
-    branches: [ ci-cd-setup ]
-  pull_request:
-    branches: [ ci-cd-setup ]
+    push:
+        branches: [ci-cd-setup]
+    pull_request:
+        branches: [ci-cd-setup]
 
 jobs:
-  build:
+    build:
+        name: Build on Ubuntu
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v2
+            - name: dependencies
+              run: scripts/ubuntu_deps.sh
+            - name: make build folder
+              run: mkdir build
+            - name: show
+              run: cd build && ls -la
+            - name: cmake
+              run: cd build && cmake ..
+            - name: make
+              run: cd build && make
+    test:
+        name: Test on Ubuntu
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v2
+            - name: dependencies
+              run: scripts/ubuntu_deps.sh
+            - name: make build folder
+              run: mkdir build
+            - name: show
+              run: cd build && ls -la
+            - name: cmake
+              run: cd build && cmake -DBUILD_TESTING=ON ..
+            - name: make
+              run: cd build && make
+            - name: test
+              run: cd build/test/test && ./test
 
-    runs-on: ubuntu-latest
-
-    steps:
-    - uses: actions/checkout@v2
-    - name: dependencies
-      run: scripts/ubuntu_deps.sh
-    - name: make build folder
-      run: mkdir build
-    - name: show
-      run: cd build && ls -la
-    - name: cmake
-      run: cd build && cmake ..
-    - name: make
-      run: cd build && make
-
+    
+        
