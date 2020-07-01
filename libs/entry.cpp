@@ -66,6 +66,7 @@ bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
             entry.type = EntryType::Image;
 
             try{
+
                 auto image = Exiv2::ImageFactory::open(path.string());
                 if (!image.get()) throw new IndexException("Cannot open " + path.string());
 

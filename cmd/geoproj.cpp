@@ -17,7 +17,7 @@ void GeoProj::setOptions(cxxopts::Options &opts) {
     .add_options()
     ("o,output", "Output path (file or directory)", cxxopts::value<std::string>())
     ("i,images", "Images to project", cxxopts::value<std::vector<std::string>>())
-    ("s,size", "Output image size (size[%]|0)", cxxopts::value<std::string>());
+    ("s,size", "Output image size (size[%]|0)", cxxopts::value<std::string>()->default_value("100%"));
 
     opts.parse_positional({"output", "images"});
 }

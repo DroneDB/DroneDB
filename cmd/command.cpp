@@ -34,6 +34,8 @@ void Command::run(int argc, char *argv[]) {
         run(result);
     }catch(const cxxopts::option_not_exists_exception &){
         printHelp();
+    }catch(const cxxopts::argument_incorrect_type &){
+        printHelp();
     }
 }
 

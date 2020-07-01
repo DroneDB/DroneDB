@@ -92,8 +92,6 @@ class Parser {
     bool hasXmp();
 };
 
-
-
 }
 
 #endif // EXIF_H
