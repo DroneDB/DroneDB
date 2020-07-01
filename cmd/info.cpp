@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include <iostream>
+#include <fstream>
 #include "info.h"
 #include "../libs/info.h"
 #include "../classes/exceptions.h"
@@ -16,6 +17,7 @@ void Info::setOptions(cxxopts::Options &opts) {
     .custom_help("info *.JPG")
     .add_options()
     ("i,input", "File(s) to examine", cxxopts::value<std::vector<std::string>>())
+    ("o,output", "Output file to write results to", cxxopts::value<std::string>()->default_value("stdout"))
     ("f,format", "Output format (text|json|geojson)", cxxopts::value<std::string>()->default_value("text"))
     ("r,recursive", "Recursively search in subdirectories", cxxopts::value<bool>())
     ("d,depth", "Max recursion depth", cxxopts::value<int>()->default_value("0"))
@@ -47,7 +49,17 @@ void Info::run(cxxopts::ParseResult &opts) {
         pfOpts.geometry = ddb::getBasicGeometryTypeFromName(opts["geometry"].as<std::string>());
         pfOpts.peOpts = peOpts;
 
-        ddb::parseFiles(input, std::cout, pfOpts);
+        if (opts.count("output")){
+            std::string filename = opts["output"].as<std::string>();
+            std::ofstream file(filename, std::ios::out | std::ios::trunc | std::ios::binary);
+            if (!file.is_open()) throw ddb::FSException("Cannot open " + filename);
+
+            ddb::parseFiles(input, file, pfOpts);
+
+            file.close();
+        }else{
+            ddb::parseFiles(input, std::cout, pfOpts);
+        }
     }catch(ddb::InvalidArgsException){
         printHelp();
     }
