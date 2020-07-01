@@ -197,44 +197,6 @@ else()
 
 endif()
 
-# Rename ddbcmd --> ddb
-add_custom_command(TARGET "${PROJECT_NAME}cmd" POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:ddbcmd> ${CMAKE_BINARY_DIR}/ddb${EXE_EXT}
-    COMMENT "Created ${CMAKE_BINARY_DIR}/ddb${EXE_EXT}"
-)
-
-set(EXE_EXT "")
-if (WIN32)
-    set(EXE_EXT ".exe")
-
-    # Copy DLLs
-    add_custom_command(TARGET "${PROJECT_NAME}cmd" POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different  $<TARGET_FILE:ddb> "${CMAKE_BINARY_DIR}/ddb.dll"
-        COMMENT "Created ${CMAKE_BINARY_DIR}/ddb.dll"
-    )
-
-    add_custom_command(
-        TARGET "${PROJECT_NAME}" PRE_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy
-                "${CMAKE_BINARY_DIR}/exiv2-build/bin/exiv2.dll"
-                "${CMAKE_BINARY_DIR}/"
-        COMMENT "Copied ${CMAKE_BINARY_DIR}/exiv2-build/bin/exiv2.dll"
-    )
-
-    file(GLOB GDAL_DLLS
-        "${DOWNLOADS_DIR}/gdal/bin/*.dll"
-    )
-    file(COPY ${GDAL_DLLS} DESTINATION ${CMAKE_BINARY_DIR})
-
-    # Fix linking
-    target_link_libraries("${PROJECT_NAME}" ${LINK_LIBRARIES})
-endif()
-
-file(GLOB DATA_FILES
-  "${CMAKE_CURRENT_SOURCE_DIR}/ddb_data/*"
-)
-file(COPY ${DATA_FILES} DESTINATION ${CMAKE_BINARY_DIR})
-
 # json1 extension
 #add_library(json1 SHARED vendor/ext/json1.c)
 #set_target_properties(json1 PROPERTIES PREFIX "")
