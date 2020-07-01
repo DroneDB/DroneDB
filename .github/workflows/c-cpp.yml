@@ -2,9 +2,9 @@ name: C/C++ CI
 
 on:
   push:
-    branches: [ master ]
+    branches: [ ci-cd-setup ]
   pull_request:
-    branches: [ master ]
+    branches: [ ci-cd-setup ]
 
 jobs:
   build:
@@ -21,4 +21,4 @@ jobs:
       run: cd build && cmake ..
     - name: make
       run: cd build && make
-      
+
