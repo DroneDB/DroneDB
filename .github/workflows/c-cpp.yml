@@ -26,7 +26,7 @@ jobs:
         name: Test on Ubuntu
         runs-on: ubuntu-latest
         steps:
-            continue-on-error: true
+            - continue-on-error: true
             - uses: actions/checkout@v2
             - name: dependencies
               run: scripts/ubuntu_deps.sh
