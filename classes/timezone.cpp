@@ -1,7 +1,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
-#include "cctz/time_zone.h"
 #include "timezone.h"
 #include "../logger.h"
 #include "../utils.h"
@@ -28,15 +27,15 @@ void Timezone::init() {
     initialized = true;
 }
 
-long long int Timezone::getUTCEpoch(int year, int month, int day, int hour, int minute, int second, double latitude, double longitude) {
+cctz::time_zone Timezone::lookupTimezone(double latitude, double longitude){
     Timezone::init();
-    if (!db) return 0;
+    if (!db) return cctz::utc_time_zone();
 
     float safezone = 0;
     ZoneDetectResult *results = ZDLookup(db, static_cast<float>(latitude), static_cast<float>(longitude), &safezone);
     if (!results) {
         ZDFreeResults(results);
-        return 0;
+        return cctz::utc_time_zone();
     }
 
     unsigned int index = 0;
@@ -62,8 +61,12 @@ long long int Timezone::getUTCEpoch(int year, int month, int day, int hour, int 
         LOGD << "Cannot find timezone for " << latitude << "," << longitude << ", defaulting to UTC";
     }
 
+    return tz;
+}
+
+double Timezone::getUTCEpoch(int year, int month, int day, int hour, int minute, int second, double msecs, const cctz::time_zone &tz) {
     auto time = tz.lookup(cctz::civil_second(year, month, day, hour, minute, second));
-    return std::chrono::duration_cast<std::chrono::milliseconds>(
+    return static_cast<double>(std::chrono::duration_cast<std::chrono::milliseconds>(
                time.post.time_since_epoch()
-           ).count();
+           ).count()) + msecs;
 }

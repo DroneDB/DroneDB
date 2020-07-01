@@ -253,30 +253,51 @@ double Parser::evalFrac(const Exiv2::Rational &rational) {
 }
 
 // Extracts timestamp (seconds from Jan 1st 1970)
-time_t Parser::extractCaptureTime() {
-    for (auto &k : {
-                "Exif.Photo.DateTimeOriginal",
-                "Exif.Photo.DateTimeDigitized",
-                "Exif.Image.DateTime"
-            }) {
-        auto time = findExifKey(k);
-        if (time == exifData.end()) continue;
+double Parser::extractCaptureTime() {
+    auto time = findExifKey({"Exif.Photo.DateTimeOriginal",
+                             "Exif.Photo.DateTimeDigitized",
+                             "Exif.Image.DateTime"});
+    if (time == exifData.end()) return 0.0;
 
-        int year, month, day, hour, minute, second;
+    int year, month, day, hour, minute, second;
 
-        if (sscanf(time->toString().c_str(),"%d:%d:%d %d:%d:%d", &year,&month,&day,&hour,&minute,&second) == 6) {
-            // Attempt to use geolocation information to
-            // find the proper timezone and adjust the timestamp
-            GeoLocation geo;
-            if (extractGeo(geo)) {
-                return Timezone::getUTCEpoch(year, month, day, hour, minute, second, geo.latitude, geo.longitude);
-            }
+    if (sscanf(time->toString().c_str(),"%d:%d:%d %d:%d:%d", &year,&month,&day,&hour,&minute,&second) == 6) {
+        double msecs = 0.0;
+        auto subsec = findExifKey({"Exif.Photo.SubSecTimeOriginal",
+                                 "Exif.Photo.SubSecTimeDigitized",
+                                 "Exif.Photo.SubSecTime"});
+        if (subsec != exifData.end()){
+            double ss = static_cast<double>(subsec->toLong());
+            size_t numDigits = subsec->toString().length();
 
-            return 0;
+            // ."1" --> "100"
+            // ."12" --> "120"
+            // ."12345" --> "123.45"
+            if (numDigits == 0) msecs = 0.0;
+            else if (numDigits == 1) msecs = ss * 100.0;
+            else if (numDigits == 2) msecs = ss * 10.0;
+            else if (numDigits == 3) msecs = ss;
+            else msecs = ss / static_cast<double>(pow(10, numDigits - 3));
         }
-    }
 
-    return 0;
+        cctz::time_zone tz = cctz::utc_time_zone();
+
+        // TODO: use OffsetTimeOriginal | OffsetTimeDigitized | OffsetTime
+        // if they are available
+        // https://github.com/mapillary/OpenSfM/blob/master/opensfm/exif.py#L373
+
+        // Attempt to use geolocation information to
+        // find the proper timezone and adjust the timestamp
+        GeoLocation geo;
+        if (extractGeo(geo)) {
+            tz = Timezone::lookupTimezone(geo.latitude, geo.longitude);
+        }
+
+        return Timezone::getUTCEpoch(year, month, day, hour, minute, second, msecs, tz);
+    }else{
+        LOGD << "Invalid date/time format: " << time->toString();
+        return 0.0;
+    }
 }
 
 int Parser::extractImageOrientation() {
