@@ -24,9 +24,8 @@ jobs:
               run: cd build && make
     test:
         name: Test on Ubuntu
-        runs-on: ubuntu-latest
+        runs-on: ubuntu-latest        
         steps:
-            - continue-on-error: true
             - uses: actions/checkout@v2
             - name: dependencies
               run: scripts/ubuntu_deps.sh
@@ -39,6 +38,7 @@ jobs:
             - name: make
               run: cd build && make
             - name: test
+              continue-on-error: true
               run: cd build/test && ./test
     build:
         name: Build on Windows
