@@ -18,5 +18,6 @@ jobs:
     - name: make
       run: 
         cd build
+        ls -la
         cmake ..
         make
