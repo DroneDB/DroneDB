@@ -4,6 +4,8 @@ cmake_policy(SET CMP0048 NEW)
 project(ddb)
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+# set(CMAKE_JS_VERSION ON)
+# set(CMAKE_BUILD_TYPE "Debug")
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "Release" CACHE STRING
@@ -19,33 +21,33 @@ if(CCACHE_FOUND)
 endif(CCACHE_FOUND)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+include(${CMAKE_ROOT}/Modules/ExternalProject.cmake)
+set(DOWNLOADS_DIR "${CMAKE_BINARY_DIR}/downloads")
 
 if (WIN32)
-    set(DOWNLOADS_DIR "${CMAKE_BINARY_DIR}/downloads")
+    # Avoid __declspec definitions in code, requires CMake >= 3.3
+    set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
+    #unset(CMAKE_IMPORT_LIBRARY_SUFFIX)
 
-    # Download exiv2
-    if (NOT EXISTS "${DOWNLOADS_DIR}/exiv2.zip")
-        message("Downloading exiv2...")
-        file(DOWNLOAD "https://www.exiv2.org/builds/exiv2-0.27.2-2017msvc64.zip" "${DOWNLOADS_DIR}/exiv2.zip")
+    # Download GDAL/CURL/sqlite3/spatialite libraries
+    if (NOT EXISTS "${DOWNLOADS_DIR}/gdal_libs.zip")
+        message("Downloading GDAL libs...")
+        file(DOWNLOAD "http://download.gisinternals.com/sdk/downloads/release-1911-x64-gdal-3-0-4-mapserver-7-4-3-libs.zip" "${DOWNLOADS_DIR}/gdal_libs.zip")
     endif()
 
-    if (NOT EXISTS "${DOWNLOADS_DIR}/exiv2-0.27.2-2017msvc64")
-        message("Extracting exiv2...")
-        execute_process(COMMAND powershell Expand-Archive "${DOWNLOADS_DIR}/exiv2.zip" "${DOWNLOADS_DIR}/")
+    if (NOT EXISTS "${DOWNLOADS_DIR}/gdal_bins.zip")
+        message("Downloading GDAL binaries...")
+        file(DOWNLOAD "http://download.gisinternals.com/sdk/downloads/release-1911-x64-gdal-3-0-4-mapserver-7-4-3.zip" "${DOWNLOADS_DIR}/gdal_bins.zip")
     endif()
 
-    include_directories("${DOWNLOADS_DIR}/exiv2-0.27.2-2017msvc64/include")
-    list(APPEND CMAKE_PREFIX_PATH "${DOWNLOADS_DIR}/exiv2-0.27.2-2017msvc64/lib/cmake/exiv2")
-
-    # Download GDAL/CURL/sqlite3/spatialite binaries
-    if (NOT EXISTS "${DOWNLOADS_DIR}/gdal.zip")
-        message("Downloading GDAL...")
-        file(DOWNLOAD "http://download.gisinternals.com/sdk/downloads/release-1911-x64-gdal-3-0-4-mapserver-7-4-3-libs.zip" "${DOWNLOADS_DIR}/gdal.zip")
+    if (NOT EXISTS "${DOWNLOADS_DIR}/gdal/include")
+        message("Extracting GDAL libs...")
+        execute_process(COMMAND powershell Expand-Archive "\"${DOWNLOADS_DIR}/gdal_libs.zip\"" "\"${DOWNLOADS_DIR}/gdal\"")
     endif()
 
-    if (NOT EXISTS "${DOWNLOADS_DIR}/gdal")
-        message("Extracting GDAL...")
-        execute_process(COMMAND powershell Expand-Archive "${DOWNLOADS_DIR}/gdal.zip" "${DOWNLOADS_DIR}/gdal")
+    if (NOT EXISTS "${DOWNLOADS_DIR}/gdal/bin")
+        message("Extracting GDAL bins...")
+        execute_process(COMMAND powershell Expand-Archive "\"${DOWNLOADS_DIR}/gdal_bins.zip\"" "\"${DOWNLOADS_DIR}/gdal\"")
     endif()
 
     set(GDAL_LIBRARY "${DOWNLOADS_DIR}/gdal/lib/gdal_i.lib")
@@ -55,13 +57,50 @@ if (WIN32)
     set(SPATIALITE_LIBRARY "${DOWNLOADS_DIR}/gdal/lib/spatialite_i.lib")
     set(SQLITE3_LIBRARY "${DOWNLOADS_DIR}/gdal/lib/sqlite3_i.lib")
     
-    set(CURL_DIR "${DOWNLOADS_DIR}/gdal")
+    set(CURL_DIR "\"${DOWNLOADS_DIR}/gdal\"")
 
     # Fix: auto_ptr is not a member of std
     add_compile_definitions(_HAS_AUTO_PTR_ETC=1)
 endif()
 
-find_package(Exiv2 REQUIRED)
+set(EXIV_CMAKE_BUILD_FLAGS "-DEXIV2_BUILD_SAMPLES=OFF" "-DEXIV2_BUILD_EXIV2_COMMAND=OFF")
+if (WIN32)
+    list(APPEND EXIV_CMAKE_BUILD_FLAGS "-DEXPAT_LIBRARY=${DOWNLOADS_DIR}/gdal/lib/expat.lib" "-DEXPAT_INCLUDE_DIR=${DOWNLOADS_DIR}/gdal/include" "-DZLIB_LIBRARY=${DOWNLOADS_DIR}/gdal/lib/zlib.lib" "-DZLIB_INCLUDE_DIR=${DOWNLOADS_DIR}/gdal/include")
+endif()
+
+ExternalProject_Add(exiv2
+  PREFIX            ${CMAKE_BINARY_DIR}/exiv2
+  TMP_DIR           ${CMAKE_BINARY_DIR}/exiv2-tmp
+  STAMP_DIR         ${CMAKE_BINARY_DIR}/exiv2-stamp
+  #--Download step--------------
+  DOWNLOAD_DIR      ${DOWNLOADS_DIR}
+  GIT_REPOSITORY    https://github.com/uav4geo/exiv2
+  GIT_TAG           master
+  #--Update/Patch step----------
+  UPDATE_COMMAND    ""
+  #--Configure step-------------
+  SOURCE_DIR        ${CMAKE_BINARY_DIR}/exiv2
+  CMAKE_ARGS ${EXIV_CMAKE_BUILD_FLAGS} --target exiv2lib
+  #--Build step-----------------
+  BINARY_DIR        ${CMAKE_BINARY_DIR}/exiv2-build
+  #--Install step---------------
+  INSTALL_COMMAND    ""
+  #--Output logging-------------
+  LOG_DOWNLOAD      OFF
+  LOG_CONFIGURE     OFF
+  LOG_BUILD         OFF
+)
+link_directories(${CMAKE_BINARY_DIR}/exiv2/build)
+include_directories(${CMAKE_BINARY_DIR}/exiv2-build)
+include_directories(${CMAKE_BINARY_DIR}/exiv2/include)
+
+
+set(EXIV2_LIB ${CMAKE_BINARY_DIR}/exiv2-build/lib/exiv2)
+if (WIN32)
+    # TODO: FIX!
+    set(EXIV2_LIB ${CMAKE_BINARY_DIR}/exiv2-build/lib/Debug/exiv2.lib)
+endif()
+
 find_package(GDAL REQUIRED)
 find_package(CURL REQUIRED)
 find_package(SpatiaLite REQUIRED)
@@ -69,7 +108,11 @@ find_package(Sqlite3 REQUIRED)
 include_directories(${GDAL_INCLUDE_DIR})
 
 #dl
-set(LINK_LIBRARIES pthread ${SPATIALITE_LIBRARY} ${SQLITE3_LIBRARY} stdc++fs exiv2 cctz::cctz ${GDAL_LIBRARY} ${CURL_LIBRARY})
+if (NOT WIN32)
+    set(STDPPFS_LIBRARY stdc++fs)
+endif()
+
+set(LINK_LIBRARIES ${SPATIALITE_LIBRARY} ${SQLITE3_LIBRARY} ${STDPPFS_LIBRARY} ${EXIV2_LIB} cctz::cctz ${GDAL_LIBRARY} ${CURL_LIBRARY})
 
 set(SRC_LIST
     ${CMAKE_CURRENT_SOURCE_DIR}/utils.cpp
@@ -86,13 +129,105 @@ include_directories("${CMAKE_CURRENT_SOURCE_DIR}/vendor")
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}/vendor/cctz/include")
 
 add_library(${PROJECT_NAME} SHARED ${SRC_LIST})
+add_dependencies(${PROJECT_NAME} exiv2)
 set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 17)
 
 if (NOT CMAKE_JS_VERSION)
     add_executable("${PROJECT_NAME}cmd" ${CMD_SRC_LIST})
     set_target_properties("${PROJECT_NAME}cmd" PROPERTIES CXX_STANDARD 17)
-    set_target_properties("${PROJECT_NAME}cmd" PROPERTIES OUTPUT_NAME ${PROJECT_NAME})
     target_link_libraries("${PROJECT_NAME}cmd" ${PROJECT_NAME} ${LINK_LIBRARIES})
+
+    # Rename ddbcmd --> ddb
+    add_custom_command(TARGET "${PROJECT_NAME}cmd" POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:ddbcmd> ${CMAKE_BINARY_DIR}/ddb${EXE_EXT}
+        COMMENT "Created ${CMAKE_BINARY_DIR}/ddb${EXE_EXT}"
+    )
+
+    set(EXE_EXT "")
+    if (WIN32)
+        set(EXE_EXT ".exe")
+
+        # Copy DLLs
+        add_custom_command(TARGET "${PROJECT_NAME}cmd" POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different  $<TARGET_FILE:ddb> "${CMAKE_BINARY_DIR}/ddb.dll"
+            COMMENT "Created ${CMAKE_BINARY_DIR}/ddb.dll"
+        )
+
+        add_custom_command(
+            TARGET "${PROJECT_NAME}" PRE_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy
+                    "${CMAKE_BINARY_DIR}/exiv2-build/bin/exiv2.dll"
+                    "${CMAKE_BINARY_DIR}/"
+            COMMENT "Copied ${CMAKE_BINARY_DIR}/exiv2-build/bin/exiv2.dll"
+        )
+
+        file(GLOB GDAL_DLLS "${DOWNLOADS_DIR}/gdal/bin/*.dll")
+        file(COPY ${GDAL_DLLS} DESTINATION ${CMAKE_BINARY_DIR})
+
+        # Fix linking
+        target_link_libraries("${PROJECT_NAME}" ${LINK_LIBRARIES})
+    endif()
+
+
+    file(GLOB DATA_FILES "${CMAKE_CURRENT_SOURCE_DIR}/ddb_data/*")
+    file(COPY ${DATA_FILES} DESTINATION ${CMAKE_BINARY_DIR})
+
+else()
+    
+    if (WIN32)
+
+        add_custom_command(
+            TARGET "${PROJECT_NAME}" PRE_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy
+                    "${CMAKE_BINARY_DIR}/exiv2-build/bin/exiv2.dll"
+                    "${CMAKE_BINARY_DIR}/"
+            COMMENT "Copied ${CMAKE_BINARY_DIR}/exiv2-build/bin/exiv2.dll"
+        )
+
+        file(GLOB GDAL_DLLS "${DOWNLOADS_DIR}/gdal/bin/*.dll")
+        file(COPY ${GDAL_DLLS} DESTINATION ${CMAKE_BINARY_DIR})
+
+        # Fix linking
+        target_link_libraries("${PROJECT_NAME}" ${LINK_LIBRARIES})
+    endif()
+
+
+    file(GLOB DATA_FILES "${CMAKE_CURRENT_SOURCE_DIR}/ddb_data/*")
+    file(COPY ${DATA_FILES} DESTINATION ${CMAKE_BINARY_DIR})
+
+endif()
+
+# Rename ddbcmd --> ddb
+add_custom_command(TARGET "${PROJECT_NAME}cmd" POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:ddbcmd> ${CMAKE_BINARY_DIR}/ddb${EXE_EXT}
+    COMMENT "Created ${CMAKE_BINARY_DIR}/ddb${EXE_EXT}"
+)
+
+set(EXE_EXT "")
+if (WIN32)
+    set(EXE_EXT ".exe")
+
+    # Copy DLLs
+    add_custom_command(TARGET "${PROJECT_NAME}cmd" POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different  $<TARGET_FILE:ddb> "${CMAKE_BINARY_DIR}/ddb.dll"
+        COMMENT "Created ${CMAKE_BINARY_DIR}/ddb.dll"
+    )
+
+    add_custom_command(
+        TARGET "${PROJECT_NAME}" PRE_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy
+                "${CMAKE_BINARY_DIR}/exiv2-build/bin/exiv2.dll"
+                "${CMAKE_BINARY_DIR}/"
+        COMMENT "Copied ${CMAKE_BINARY_DIR}/exiv2-build/bin/exiv2.dll"
+    )
+
+    file(GLOB GDAL_DLLS
+        "${DOWNLOADS_DIR}/gdal/bin/*.dll"
+    )
+    file(COPY ${GDAL_DLLS} DESTINATION ${CMAKE_BINARY_DIR})
+
+    # Fix linking
+    target_link_libraries("${PROJECT_NAME}" ${LINK_LIBRARIES})
 endif()
 
 file(GLOB DATA_FILES
@@ -107,24 +242,28 @@ file(COPY ${DATA_FILES} DESTINATION ${CMAKE_BINARY_DIR})
 
 # Nodejs bindings
 if (CMAKE_JS_VERSION)
-  set(BUILD_TESTING OFF)
-  include_directories(${CMAKE_JS_INC})
 
-  # Statement above doesn't include directories (QtCreator bug?)
-  if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-  include_directories("/home/piero/Documents/ddb/node_modules/nan")
-  include_directories("/home/piero/.cmake-js/node-x64/v13.7.0/include/node")
-  endif()
+    message ("BUILDING WITH NODE")
 
-  file(COPY ${DATA_FILES} DESTINATION "${CMAKE_BINARY_DIR}/${CMAKE_BUILD_TYPE}")
+    set(BUILD_TESTING OFF)
+    include_directories(${CMAKE_JS_INC})
 
-  file(GLOB NODE_SOURCE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/nodejs/*.cc")
-  add_library("node-${PROJECT_NAME}" SHARED ${NODE_SOURCE_FILES})
-  set_target_properties("node-${PROJECT_NAME}" PROPERTIES PREFIX "" SUFFIX ".node")
-  set_target_properties("node-${PROJECT_NAME}" PROPERTIES CXX_STANDARD 17)
-  target_link_libraries("node-${PROJECT_NAME}" ${CMAKE_JS_LIB} ${PROJECT_NAME} ${LINK_LIBRARIES})
+    # Statement above doesn't include directories (QtCreator bug?)
+    if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+        message(${CMAKE_CURRENT_SOURCE_DIR})
+        include_directories("${CMAKE_CURRENT_SOURCE_DIR}/node_modules/nan")
+        include_directories("C:/Users/IT 2/.cmake-js/node-x64/v12.16.1/include/node")
+    endif()
+
+    file(COPY ${DATA_FILES} DESTINATION "${CMAKE_BINARY_DIR}/${CMAKE_BUILD_TYPE}")
+
+    file(GLOB NODE_SOURCE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/nodejs/*.cc")
+    add_library("node-${PROJECT_NAME}" SHARED ${NODE_SOURCE_FILES})
+    set_target_properties("node-${PROJECT_NAME}" PROPERTIES PREFIX "" SUFFIX ".node")
+    set_target_properties("node-${PROJECT_NAME}" PROPERTIES CXX_STANDARD 17)
+    target_link_libraries("node-${PROJECT_NAME}" ${CMAKE_JS_LIB} ${PROJECT_NAME} ${LINK_LIBRARIES})
 endif()
 
 if(BUILD_TESTING)
-add_subdirectory("test")
+    add_subdirectory("test")
 endif()

@@ -37,11 +37,11 @@ std::string create(const std::string &directory) {
 
             // Create database
             std::unique_ptr<Database> db = std::make_unique<Database>();
-            db->open(dbasePath);
+            db->open(dbasePath.string());
             db->createTables();
             db->close();
 
-            return ddbDirPath;
+            return ddbDirPath.string();
         }
     } catch (const AppException &exception) {
         LOGV << "Exception caught, cleaning up...";
@@ -59,13 +59,13 @@ std::unique_ptr<Database> open(const std::string &directory, bool traverseUp = f
         LOGD << dbasePath.string() + " exists";
 
         std::unique_ptr<Database> db = std::make_unique<Database>();
-        db->open(dbasePath);
+        db->open(dbasePath.string());
         if (!db->tableExists("entries")) {
             throw DBException("Table 'entries' not found (not a valid database: " + dbasePath.string() + ")");
         }
         return db;
     } else if (traverseUp && dirPath.parent_path() != dirPath) {
-        return open(dirPath.parent_path(), true);
+        return open(dirPath.parent_path().string(), true);
     } else {
         throw FSException("Not a valid DroneDB directory, .ddb does not exist. Did you run ddb init?");
     }
@@ -186,7 +186,7 @@ bool checkUpdate(Entry &e, const fs::path &p, long long dbMtime, const std::stri
     bool folder = fs::is_directory(p);
 
     // Did it change?
-    e.mtime = utils::getModifiedTime(p);
+    e.mtime = utils::getModifiedTime(p.string());
 
     if (e.mtime != dbMtime) {
         LOGD << p.string() << " modified time ( " << dbMtime << " ) differs from file value: " << e.mtime;
@@ -195,7 +195,7 @@ bool checkUpdate(Entry &e, const fs::path &p, long long dbMtime, const std::stri
             // Don't check hashes for folders
             return true;
         } else {
-            e.hash = Hash::fileSHA256(p);
+            e.hash = Hash::fileSHA256(p.string());
 
             if (dbHash != e.hash) {
                 LOGD << p.string() << " hash differs (old: " << dbHash << " | new: " << e.hash << ")";

@@ -20,24 +20,29 @@
 #include "logger.h"
 
 #ifndef M_PI
-#define M_PI 3.1415926535
+    #define M_PI 3.1415926535
 #endif
 
 #define F_EPSILON 0.000001
 
 #ifdef WIN32
-#include <windows.h>    //GetModuleFileNameW
-#include <direct.h> // _getcwd
+    
+    // Avoid defining min / max macros
+    #define NOMINMAX
+
+    #include <windows.h>    //GetModuleFileNameW
+    #include <direct.h> // _getcwd
 #define stat _stat
 #else
-#include <limits.h>
-#include <unistd.h>
+    #include <limits.h>
+    #include <unistd.h>
+#endif
 
 #ifndef PATH_MAX
-#define PATH_MAX 4096
+    #define PATH_MAX 4096
 #endif
 
-#endif
+
 
 namespace fs = std::filesystem;
 
@@ -122,5 +127,9 @@ fs::path getCwd();
 std::string bytesToHuman(off_t bytes);
 
 }
+
+// Fix for removing macros
+#undef max
+#undef min
 
 #endif // UTILS_H

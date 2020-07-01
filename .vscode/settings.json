@@ -1,0 +1,15 @@
+{
+    "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
+    "files.associations": {
+        "memory": "cpp",
+        "filesystem": "cpp",
+        "fstream": "cpp",
+        "xlocmes": "cpp",
+        "array": "cpp",
+        "vector": "cpp",
+        "xstring": "cpp",
+        "xutility": "cpp",
+        "iosfwd": "cpp",
+        "sstream": "cpp"
+    }
+}

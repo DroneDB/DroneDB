@@ -104,7 +104,7 @@ std::string DSMService::loadFromNetwork(double latitude, double longitude){
     std::string filename = std::to_string(static_cast<int>(p.x)) + "_" +
                            std::to_string(static_cast<int>(p.y)) + "_" +
                            std::to_string(std::chrono::system_clock::now().time_since_epoch().count()) + ".tif";
-    fs::path filePath = getCacheDir() / filename;
+    std::string filePath = (getCacheDir() / filename).string();
 
     std::cout << "Downloading DSM from " << url << " ..." << std::endl;
     downloadFile(url, filePath);
