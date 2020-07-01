@@ -26,6 +26,7 @@ jobs:
         name: Test on Ubuntu
         runs-on: ubuntu-latest
         steps:
+            continue-on-error: true
             - uses: actions/checkout@v2
             - name: dependencies
               run: scripts/ubuntu_deps.sh
@@ -37,8 +38,20 @@ jobs:
               run: cd build && cmake -DBUILD_TESTING=ON ..
             - name: make
               run: cd build && make
-            - name: test
+            - name: test              
               run: cd build/test && ./test
-
+    build:
+        name: Build on Windows
+        runs-on: windows-latest
+        steps:
+            - uses: actions/checkout@v2
+            - name: make build folder
+                run: mkdir build
+            - name: show
+                run: cd build && dir
+            - name: cmake
+                run: cd build && cmake ..
+            - name: make
+                run: cd build && make
     
         
