@@ -46,12 +46,12 @@ jobs:
         steps:
             - uses: actions/checkout@v2
             - name: make build folder
-                run: mkdir build
+              run: mkdir build
             - name: show
-                run: cd build && dir
+              run: cd build && dir
             - name: cmake
-                run: cd build && cmake ..
+              run: cd build && cmake ..
             - name: make
-                run: cd build && make
+              run: cd build && make
     
         
