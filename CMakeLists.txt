@@ -90,12 +90,11 @@ ExternalProject_Add(exiv2
   LOG_CONFIGURE     OFF
   LOG_BUILD         OFF
 )
-link_directories(${CMAKE_BINARY_DIR}/exiv2/build)
 include_directories(${CMAKE_BINARY_DIR}/exiv2-build)
 include_directories(${CMAKE_BINARY_DIR}/exiv2/include)
 
 
-set(EXIV2_LIB ${CMAKE_BINARY_DIR}/exiv2-build/lib/exiv2)
+set(EXIV2_LIB "${CMAKE_BINARY_DIR}/exiv2-build/lib/libexiv2.so")
 if (WIN32)
     # TODO: FIX!
     set(EXIV2_LIB ${CMAKE_BINARY_DIR}/exiv2-build/lib/Debug/exiv2.lib)
