@@ -7,7 +7,7 @@ on:
         branches: [ci-cd-setup]
 
 jobs:
-    build:
+    build_ubuntu:
         name: Build on Ubuntu
         runs-on: ubuntu-latest
         steps:
@@ -22,7 +22,7 @@ jobs:
               run: cd build && cmake ..
             - name: make
               run: cd build && make
-    test:
+    test_ubuntu:
         name: Test on Ubuntu
         runs-on: ubuntu-latest        
         steps:
@@ -40,7 +40,7 @@ jobs:
             - name: test
               continue-on-error: true
               run: cd build/test && ./test
-    build:
+    build_windows:
         name: Build on Windows
         runs-on: windows-latest
         steps:
