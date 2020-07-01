@@ -13,6 +13,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
+    - name: dependencies
+      run: scripts/ubuntu_deps.sh
     - name: make build folder
       run: mkdir build
     - name: show
