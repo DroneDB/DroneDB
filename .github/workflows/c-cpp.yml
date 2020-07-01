@@ -45,19 +45,12 @@ jobs:
         runs-on: windows-latest
         steps:
             - uses: actions/checkout@v2
-            # - uses: lukka/get-cmake@latest
-            - name: make build folder
-              run: mkdir build
-            - name: enter build folder
-              run: cd build
-            - name: show build folder
-              run: dir
-            - name: cmake
-              run: cmake ..
-            - name: show build folder
-              run: dir
-            - name: make
-              run: make
-            - name: show build folder
-              run: dir
+            # - uses: lukka/get-cmake@latest            
+            - run: |
+                mkdir build
+                cd build                
+                cmake ..
+                dir
+                make
+                dir
         
