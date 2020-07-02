@@ -81,7 +81,7 @@ class Parser {
     inline double geoToDecimal(const Exiv2::ExifData::const_iterator &geoTag, const Exiv2::ExifData::const_iterator &geoRefTag);
     inline double evalFrac(const Exiv2::Rational &rational);
 
-    time_t extractCaptureTime();
+    double extractCaptureTime();
     int extractImageOrientation();
 
     bool extractCameraOrientation(CameraOrientation &cameraOri);
