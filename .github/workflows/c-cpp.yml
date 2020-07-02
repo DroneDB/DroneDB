@@ -51,6 +51,6 @@ jobs:
                 cd build                
                 cmake ..
                 dir
-                make
+                cmake --build . --config Debug --target ALL_BUILD -- /maxcpucount:14
                 dir
         
