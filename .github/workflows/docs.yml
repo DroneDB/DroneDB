@@ -42,5 +42,5 @@ jobs:
       with:
         directory: "docs.dronedb"
         repository: "uav4geo/docs.dronedb"
-        github_token: ${{ secrets.GITHUB_TOKEN }}
+        github_token: ${{ secrets.BOT_TOKEN }}
 
