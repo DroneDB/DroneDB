@@ -24,7 +24,7 @@ jobs:
     - name: Sphinx Build
       uses: ammaraskar/sphinx-action@0.4
       with:
-        build-command: "ls && sphinx-build -b html . _build"
+        build-command: "sphinx-build -b html . _build"
         docs-folder: "docs/"
     - name: Commit files
       run: |
