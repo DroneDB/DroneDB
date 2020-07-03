@@ -173,7 +173,8 @@ namespace plog
 
             #ifndef WIN32
                 m_message << data;
-            //m_message << static_cast<const void *>(data);
+            #else
+                m_message << reinterpret_cast<const void *>(&data);
             #endif
 
             return *this;
