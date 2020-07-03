@@ -24,8 +24,8 @@ jobs:
     - name: Sphinx Build
       uses: ammaraskar/sphinx-action@0.4
       with:
-        # The folder containing your sphinx docs.
-        docs-folder: docs/
+        build-command: "ls && sphinx-build -b html . _build"
+        docs-folder: "docs/"
     - name: Commit files
       run: |
         git clone https://github.com/uav4geo/docs.dronedb
