@@ -1,9 +1,13 @@
 cmake_minimum_required(VERSION 2.8)
 
 cmake_policy(SET CMP0048 NEW)
-project(ddb)
+
+# Used to show all CMake constants
+#set (CMAKE_USER_MAKE_RULES_OVERRIDE "${CMAKE_CURRENT_LIST_DIR}/CompilerOptions.cmake")
+project(ddb LANGUAGES CXX)
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+# set(CMAKE_CXX_EXTENSIONS OFF)
 # set(CMAKE_JS_VERSION ON)
 # set(CMAKE_BUILD_TYPE "Debug")
 
@@ -165,6 +169,7 @@ if (NOT CMAKE_JS_VERSION)
 
         # Fix linking
         target_link_libraries("${PROJECT_NAME}" ${LINK_LIBRARIES})
+
     endif()
 
 
@@ -194,6 +199,12 @@ else()
     file(GLOB DATA_FILES "${CMAKE_CURRENT_SOURCE_DIR}/ddb_data/*")
     file(COPY ${DATA_FILES} DESTINATION ${CMAKE_BINARY_DIR})
 
+endif()
+
+
+if(MSVC)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /W3")
+    string(REPLACE "/RTC1" "" CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
 endif()
 
 # json1 extension
