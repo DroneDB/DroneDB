@@ -17,4 +17,5 @@ DroneDB is a library/toolset for easily managing and sharing aerial datasets.
    about
    download
    commands/index
+   tutorials/index
    copyright
