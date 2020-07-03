@@ -19,31 +19,26 @@ jobs:
 
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
-    - uses: actions/checkout@master
-      with:
-        persist-credentials: false # otherwise, the token used is the GITHUB_TOKEN, instead of your personal token
-        fetch-depth: 0 # otherwise, you will failed to push refs to dest repo
-        repository: "uav4geo/docs.dronedb"
-        path: "docs/docs.dronedb"
-        
     - name: Sphinx Build
+      uses: actions/checkout@v1
       uses: ammaraskar/sphinx-action@0.4
       with:
         # The folder containing your sphinx docs.
         docs-folder: docs/
-        # The command used to build your documentation.
-        build-command: "sphinx-build -b html . docs.dronedb"
-        # Run before the build command, you can use this to install system level dependencies, for example with "apt-get update -y && apt-get install -y perl"
-        #pre-build-command: # optional
     - name: Commit files
       run: |
+        git clone https://github.com/uav4geo/docs.dronedb
+        cp -r docs/_build/html/* docs.dronedb/
+        cd docs.dronedb
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
-        cd docs/docs.dronedb
-        git commit -m "Add changes" -a
+        git add .
+        git commit -m "Update documentation" -a || true
+        # The above command will fail if no changes were present, so we ignore
+        # the return code.
     - name: Push changes
       uses: ad-m/github-push-action@master
       with:
-        directory: "docs/docs.dronedb"
+        directory: "docs.dronedb"
         github_token: ${{ secrets.GITHUB_TOKEN }}
 
