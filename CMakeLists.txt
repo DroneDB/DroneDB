@@ -201,12 +201,6 @@ else()
 
 endif()
 
-
-if(MSVC)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /W3")
-    string(REPLACE "/RTC1" "" CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
-endif()
-
 # json1 extension
 #add_library(json1 SHARED vendor/ext/json1.c)
 #set_target_properties(json1 PROPERTIES PREFIX "")
