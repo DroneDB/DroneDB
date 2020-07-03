@@ -53,4 +53,23 @@ jobs:
                 dir
                 cmake --build . --config Debug --target ALL_BUILD -- /maxcpucount:14
                 dir
+    test_windows:
+        name: Test on Windows
+        runs-on: windows-latest
+        steps:
+            - uses: actions/checkout@v2
+            # - uses: lukka/get-cmake@latest            
+            - run: |
+                mkdir build
+                cd build                
+                cmake -DBUILD_TESTING=ON .. 
+                dir
+                cmake --build . --config Debug --target ALL_BUILD -- /maxcpucount:14
+                dir
+            - name: test
+              continue-on-error: true
+              run: |
+                cd test
+                cd Debug
+                test.exe
         
