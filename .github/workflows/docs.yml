@@ -28,9 +28,9 @@ jobs:
         docs-folder: "docs/"
     - name: Commit files
       run: |
-        git clone https://github.com/uav4geo/uav4geo.github.io
-        cp -r docs/_build/* uav4geo.github.io/
-        cd uav4geo.github.io
+        git clone https://github.com/uav4geo/docs.dronedb
+        cp -r docs/_build/* docs.dronedb/
+        cd docs.dronedb
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
         git add .
@@ -40,7 +40,7 @@ jobs:
     - name: Push changes
       uses: ad-m/github-push-action@master
       with:
-        directory: "uav4geo.github.io"
-        repository: "uav4geo/uav4geo.github.io"
+        directory: "docs.dronedb"
+        repository: "uav4geo/docs.dronedb"
         github_token: ${{ secrets.BOT_TOKEN }}
 
