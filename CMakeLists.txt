@@ -4,7 +4,7 @@ cmake_policy(SET CMP0048 NEW)
 
 # Used to show all CMake constants
 #set (CMAKE_USER_MAKE_RULES_OVERRIDE "${CMAKE_CURRENT_LIST_DIR}/CompilerOptions.cmake")
-project(ddb LANGUAGES CXX)
+project(ddb)
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 # set(CMAKE_CXX_EXTENSIONS OFF)
