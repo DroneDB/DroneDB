@@ -4,7 +4,7 @@
 #ifndef TIMEZONE_H
 #define TIMEZONE_H
 
-#include <time.h>
+#include "cctz/time_zone.h"
 #include "../vendor/zonedetect/zonedetect.h"
 
 class Timezone{
@@ -13,7 +13,8 @@ public:
     static ZoneDetect *db;
 
     static void init();
-    static long long int getUTCEpoch(int year, int month, int day, int hour, int minute, int second, double latitude, double longitude);
+    static cctz::time_zone lookupTimezone(double latitude, double longitude);
+    static double getUTCEpoch(int year, int month, int day, int hour, int minute, int second, double msecs, const cctz::time_zone &tz);
 };
 
 #endif // TIMEZONE_H

@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "command.h"
 #include "../logger.h"
+#include "../classes/exceptions.h"
 
 namespace cmd {
 
@@ -36,6 +37,9 @@ void Command::run(int argc, char *argv[]) {
         printHelp();
     }catch(const cxxopts::argument_incorrect_type &){
         printHelp();
+    }catch(const ddb::AppException &e){
+        std::cerr << e.what() << std::endl;
+        exit(EXIT_FAILURE);
     }
 }
 
