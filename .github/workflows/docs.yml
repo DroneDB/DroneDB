@@ -41,5 +41,6 @@ jobs:
       uses: ad-m/github-push-action@master
       with:
         directory: "docs.dronedb"
+        repository: "uav4geo/docs.dronedb"
         github_token: ${{ secrets.GITHUB_TOKEN }}
 

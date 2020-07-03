@@ -9,7 +9,9 @@ DroneDB - Effortless Aerial Data Management and Sharing
 
 DroneDB is a library/toolset for easily managing and sharing aerial datasets.
 
-**DroneDB is still in active development! We're really excited to work on this and we're implementing features as fast as we can, but some features are not ready yet and there might be bugs! Please open an issue on GitHub is you find one.**
+*DroneDB is in early development stages and is targeted at GIS developers and early adopters. It is not ready for mainstream use.*
+
+We welcome contributions! To contribute to the project, please see the `contributing guidelines <https://github.com/uav4geo/DroneDB/blob/master/CONTRIBUTING.md>`_.
 
 .. toctree::
    :maxdepth: 2
@@ -19,3 +21,4 @@ DroneDB is a library/toolset for easily managing and sharing aerial datasets.
    commands/index
    tutorials/index
    copyright
+
