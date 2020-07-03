@@ -19,8 +19,9 @@ jobs:
 
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
-    - name: Sphinx Build
+    - name: Checkout
       uses: actions/checkout@v1
+    - name: Sphinx Build
       uses: ammaraskar/sphinx-action@0.4
       with:
         # The folder containing your sphinx docs.
