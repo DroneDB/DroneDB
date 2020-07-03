@@ -29,8 +29,8 @@ jobs:
     - name: Commit files
       run: |
         git clone https://github.com/uav4geo/docs.dronedb
-        ls
-        cp -r _build/html/* docs.dronedb/
+        ls docs/ && ls docs/_build
+        cp -r docs/_build/html/* docs.dronedb/
         cd docs.dronedb
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
