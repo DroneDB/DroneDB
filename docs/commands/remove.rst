@@ -4,7 +4,7 @@
 remove
 ********************************************************************************
 
-Initialize an index. If a directory is not specified, initializes the index in the current directory
+Remove files and directories from an index. The filesystem is left unchanged (actual files and directories will not be removed)
 
 ::
 
