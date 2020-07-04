@@ -38,7 +38,7 @@ Projecting an image onto a map
 
 .. image:: https://user-images.githubusercontent.com/1951843/68077866-001de800-fda2-11e9-895f-b5840d9d047d.png
 
-Once you've built an index, you can project images onto a map:
+You can project images onto a map. This does not require an index and can be done on-the-fly.
 
 ::
 
