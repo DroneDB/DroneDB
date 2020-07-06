@@ -1,4 +1,4 @@
-# DroneDB
+![ddb-logo-banner](https://user-images.githubusercontent.com/1951843/86480474-0fcc4280-bd1c-11ea-8663-a7a37f631565.png)
 
 ![license](https://img.shields.io/github/license/uav4geo/DroneDB) ![commits](https://img.shields.io/github/commit-activity/m/uav4geo/DroneDB) ![languages](https://img.shields.io/github/languages/top/uav4geo/DroneDB) ![Docs](https://github.com/uav4geo/DroneDB/workflows/Docs/badge.svg)
 
