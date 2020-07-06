@@ -22,13 +22,21 @@ TEST(PathsAreChildren, Normal) {
 }
 
 TEST(pathDepth, Normal) {
-    EXPECT_EQ(utils::pathDepth(""), 0);
-    EXPECT_EQ(utils::pathDepth("/"), 0);
-    EXPECT_EQ(utils::pathDepth("/file.txt"), 0);
-    EXPECT_EQ(utils::pathDepth("/a/file.txt"), 1);
-    EXPECT_EQ(utils::pathDepth("/a/b/file.txt"), 2);
-    EXPECT_EQ(utils::pathDepth("."), 0);
-    EXPECT_EQ(utils::pathDepth("./."), 1);
+	std::cerr << fs::current_path().root_name().string() << std::endl;
+	EXPECT_EQ(utils::pathDepth(fs::path("")), 0);
+
+#ifdef _WIN32
+	EXPECT_EQ(utils::pathDepth(fs::path("\\")), 0);
+#else
+	EXPECT_EQ(utils::pathDepth(fs::path("/")), 0);
+#endif
+
+	EXPECT_EQ(utils::pathDepth(fs::current_path().root_path()), 0); // C:\ or /
+    EXPECT_EQ(utils::pathDepth((fs::current_path().root_path() / "file.txt").string()), 0);
+	EXPECT_EQ(utils::pathDepth((fs::current_path().root_path() / "a" / "file.txt").string()), 1);
+	EXPECT_EQ(utils::pathDepth((fs::current_path().root_path() / "a" / "b" / "file.txt").string()), 2);
+    EXPECT_EQ(utils::pathDepth(fs::path(".")), 0);
+    EXPECT_EQ(utils::pathDepth(fs::path(".") / "."), 1);
 }
 
 }

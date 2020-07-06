@@ -101,7 +101,8 @@ fs::path getCwd(){
 int pathDepth(const fs::path &path) {
     int count = 0;
     for (auto &it : path) {
-        if (it.c_str()[0] != fs::path::preferred_separator) count++;
+        if (it.c_str()[0] != fs::path::preferred_separator &&
+			it.string() != fs::current_path().root_name()) count++;
     }
     return std::max(count - 1, 0);
 }

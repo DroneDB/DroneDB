@@ -4,11 +4,12 @@
 
 #include <gtest/gtest.h>
 #include "../logger.h"
+#include "../libs/ddb.h"
 
 int main(int argc, char **argv) {
-    init_logger();
+	ddb::initialize();
     set_logger_verbose();
 
-    ::testing::InitGoogleTest(&argc, argv);
-    return RUN_ALL_TESTS();
+	::testing::InitGoogleTest(&argc, argv);
+	return RUN_ALL_TESTS();
 }

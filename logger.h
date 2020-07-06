@@ -6,7 +6,9 @@
 #define LOGGER_H
 
 #include "vendor/plog/Log.h"
+#include "vendor/plog/Init.h"
 #include "vendor/plog/Appenders/ConsoleAppender.h"
+#include "vendor/plog/Formatters/TxtFormatter.h"
 #include "vendor/plog/Formatters/MessageOnlyFormatter.h"
 
 void init_logger();
