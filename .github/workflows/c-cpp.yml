@@ -2,9 +2,9 @@ name: C/C++ CI
 
 on:
     push:
-        branches: [ci-cd-setup]
+        branches: [master]
     pull_request:
-        branches: [ci-cd-setup]
+        branches: [master]
 
 jobs:
     build_ubuntu:
