@@ -25,7 +25,7 @@ bool ExifEditor::canEdit(){
         try{
             if (!fs::exists(file)) throw FSException("does not exist");
             if (fs::is_directory(file)) throw FSException("cannot set EXIFs to a directory");
-            auto image = Exiv2::ImageFactory::open(file);
+            auto image = Exiv2::ImageFactory::open(file.string(), false);
             if (!image.get()) throw FSException("cannot open " + file.string());
             image->readMetadata();
         }catch(const FSException &e){
@@ -126,7 +126,7 @@ const std::string ExifEditor::doubleToFraction(double d, int precision){
 template<typename Func>
 void ExifEditor::eachFile(Func f){
     for (auto &file : files){
-        auto image = Exiv2::ImageFactory::open(file);
+        auto image = Exiv2::ImageFactory::open(file.string(), false);
         if (!image.get()) throw FSException("Cannot open " + file.string());
         image->readMetadata();
 
