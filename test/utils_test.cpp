@@ -12,11 +12,18 @@ namespace {
 
 TEST(PathsAreChildren, Normal) {
 	EXPECT_TRUE(utils::pathsAreChildren("/my/path", { "/my/path/1", "/my/path" }));
+
+#ifdef _WIN32
 	EXPECT_TRUE(utils::pathsAreChildren("C:\\my\\path", { "C:\\my\\path\\1", "C:\\my\\path" }));
+#endif
 
     EXPECT_TRUE(utils::pathsAreChildren("path", {"path/1/2", "path/3", "path"}));
 	EXPECT_TRUE(utils::pathsAreChildren("path/.", { "path/1/2", "path/3", "path" }));
+
+#ifdef _WIN32
 	EXPECT_TRUE(utils::pathsAreChildren("path\\.", { "path\\1\\2", "path\\3", "path" }));
+#endif
+
     EXPECT_TRUE(utils::pathsAreChildren("path/./", {"path/./../path/"}));
     EXPECT_TRUE(utils::pathsAreChildren("path/./.", {"path/./../path"}));
 
