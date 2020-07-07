@@ -108,7 +108,7 @@ bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
                     exif::GeoLocation geo;
                     if (e.extractGeo(geo)) {
                         entry.point_geom.addPoint(geo.longitude, geo.latitude, geo.altitude);
-                        LOGD << "POINT GEOM: "<< entry.point_geom;
+                        LOGD << "POINT GEOM: "<< entry.point_geom.toWkt();
 
                         //e.printAllTags();
 

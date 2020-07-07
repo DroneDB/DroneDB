@@ -18,7 +18,7 @@ namespace fs = std::filesystem;
 
 namespace ddb {
 
-void initialize();
+void initialize(bool verbose);
 std::string getVersion();
 std::string create(const std::string &directory);
 std::unique_ptr<Database> open(const std::string &directory, bool traverseUp);

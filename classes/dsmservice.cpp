@@ -124,7 +124,7 @@ bool DSMService::addGeoTIFFToCache(const fs::path &filePath, double latitude, do
 
     std::string wkt = GDALGetProjectionRef(dataset);
     if (wkt.empty()) throw GDALException("Cannot get projection ref for " + filePath.string());
-    const char *wktp = const_cast<char *>(wkt.c_str());
+    char *wktp = const_cast<char *>(wkt.c_str());
     OGRSpatialReference *srs = new OGRSpatialReference();
     if (srs->importFromWkt(&wktp) != OGRERR_NONE) throw GDALException("Cannot read spatial reference system for " + filePath.string() + ". Is PROJ installed?");
 

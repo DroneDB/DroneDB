@@ -5,7 +5,7 @@
 #include "logger.h"
 
 void init_logger() {
-    static plog::ConsoleAppender<plog::TxtFormatter> consoleAppender;
+	static plog::ConsoleAppender<plog::TxtFormatter> consoleAppender;
     plog::init(plog::info, &consoleAppender);
 }
 

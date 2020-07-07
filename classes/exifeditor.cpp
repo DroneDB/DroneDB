@@ -46,7 +46,7 @@ void ExifEditor::SetGPSAltitude(double altitude){
     eachFile([=](const fs::path &f, Exiv2::ExifData &exifData){
         exifData["Exif.GPSInfo.GPSAltitude"] = doubleToFraction(altitude, 4);
         exifData["Exif.GPSInfo.GPSAltitudeRef"] = altitude < 0.0 ? "1" : "0";
-        LOGD << "Setting altitude to " << exifData["Exif.GPSInfo.GPSAltitude"] << " (" << exifData["Exif.GPSInfo.GPSAltitudeRef"] << ") for " << f.string();
+        LOGD << "Setting altitude to " << exifData["Exif.GPSInfo.GPSAltitude"].toString() << " (" << exifData["Exif.GPSInfo.GPSAltitudeRef"].toString() << ") for " << f.string();
 
         // TODO: adjust XMP DJI tags
         // absolute/relative altitude
@@ -59,8 +59,8 @@ void ExifEditor::SetGPSLatitude(double latitude){
         exifData["Exif.GPSInfo.GPSLatitudeRef"] = latitude >= 0.0 ? "N" : "S";
 
         LOGD << "Setting latitude to " << doubleToDMS(latitude) << " " <<
-                exifData["Exif.GPSInfo.GPSLatitude"] << " " <<
-                exifData["Exif.GPSInfo.GPSLatitudeRef"] << " " <<
+                exifData["Exif.GPSInfo.GPSLatitude"].toString() << " " <<
+                exifData["Exif.GPSInfo.GPSLatitudeRef"].toString() << " " <<
                 "for " << f.string();
     });
 }
@@ -70,8 +70,8 @@ void ExifEditor::SetGPSLongitude(double longitude){
         exifData["Exif.GPSInfo.GPSLongitude"] = doubleToDMS(longitude);
         exifData["Exif.GPSInfo.GPSLongitudeRef"] = longitude >= 0.0 ? "E" : "W";
         LOGD << "Setting longitude to " <<
-                exifData["Exif.GPSInfo.GPSLongitude"] << " " <<
-                exifData["Exif.GPSInfo.GPSLongitudeRef"] << " " <<
+                exifData["Exif.GPSInfo.GPSLongitude"].toString() << " " <<
+                exifData["Exif.GPSInfo.GPSLongitudeRef"].toString() << " " <<
                 "for " << f.string();
     });
 }
@@ -86,13 +86,13 @@ void ExifEditor::SetGPS(double latitude, double longitude, double altitude){
         exifData["Exif.GPSInfo.GPSLongitudeRef"] = longitude >= 0.0 ? "E" : "W";
 
         LOGD << "Setting lat: " <<
-                exifData["Exif.GPSInfo.GPSLatitude"] << " " <<
-                exifData["Exif.GPSInfo.GPSLatitudeRef"] << " " <<
+                exifData["Exif.GPSInfo.GPSLatitude"].toString() << " " <<
+                exifData["Exif.GPSInfo.GPSLatitudeRef"].toString() << " " <<
                 "lon: " <<
-                exifData["Exif.GPSInfo.GPSLongitude"] << " " <<
-                exifData["Exif.GPSInfo.GPSLongitudeRef"] << " " <<
+                exifData["Exif.GPSInfo.GPSLongitude"].toString() << " " <<
+                exifData["Exif.GPSInfo.GPSLongitudeRef"].toString() << " " <<
                 "alt: " <<
-                 exifData["Exif.GPSInfo.GPSAltitude"] << " (" << exifData["Exif.GPSInfo.GPSAltitudeRef"] << ") " <<
+                 exifData["Exif.GPSInfo.GPSAltitude"].toString() << " (" << exifData["Exif.GPSInfo.GPSAltitudeRef"].toString() << ") " <<
                 "for " << f.string();
     });
 }
