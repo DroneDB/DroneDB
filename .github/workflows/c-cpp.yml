@@ -67,6 +67,6 @@ jobs:
                 dir
             - name: test
               run: |
-                ..\scripts\setup_windows_env.bat
+                & "..\scripts\setup_windows_env.bat"
                 test.exe
         
