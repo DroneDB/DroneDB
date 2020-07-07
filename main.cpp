@@ -40,10 +40,7 @@ bool hasParam(int argc, char *argv[], const char* param) {
 }
 
 int main(int argc, char* argv[]) {
-    ddb::initialize();
-    if (hasParam(argc, argv, "--debug")) {
-        set_logger_verbose();
-    }
+    ddb::initialize(hasParam(argc, argv, "--debug"));
 
     LOGV << "DDB v" << ddb::getVersion();
     LOGV << "SQLite version: " << sqlite3_libversion();

@@ -7,8 +7,7 @@
 #include "../libs/ddb.h"
 
 int main(int argc, char **argv) {
-	ddb::initialize();
-    set_logger_verbose();
+	ddb::initialize(true);
 
 	::testing::InitGoogleTest(&argc, argv);
 	return RUN_ALL_TESTS();

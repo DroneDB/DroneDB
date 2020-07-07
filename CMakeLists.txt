@@ -142,6 +142,13 @@ else()
     target_compile_definitions(${PROJECT_NAME} PRIVATE PLOG_GLOBAL)
 endif()
 
+if (WIN32)
+add_custom_command(TARGET "${PROJECT_NAME}" POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different  $<TARGET_FILE:ddb> "${CMAKE_BINARY_DIR}/ddb.dll"
+    COMMENT "Created ${CMAKE_BINARY_DIR}/ddb.dll"
+)
+endif()
+
 if (NOT CMAKE_JS_VERSION)
     add_executable("${PROJECT_NAME}cmd" ${CMD_SRC_LIST})
     set_target_properties("${PROJECT_NAME}cmd" PROPERTIES CXX_STANDARD 17)
@@ -167,11 +174,6 @@ if (NOT CMAKE_JS_VERSION)
 
     if (WIN32)
         # Copy DLLs
-        add_custom_command(TARGET "${PROJECT_NAME}cmd" POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different  $<TARGET_FILE:ddb> "${CMAKE_BINARY_DIR}/ddb.dll"
-            COMMENT "Created ${CMAKE_BINARY_DIR}/ddb.dll"
-        )
-
         add_custom_command(
             TARGET "${PROJECT_NAME}" PRE_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -182,6 +184,8 @@ if (NOT CMAKE_JS_VERSION)
 
         file(GLOB GDAL_DLLS "${DOWNLOADS_DIR}/gdal/bin/*.dll")
         file(COPY ${GDAL_DLLS} DESTINATION ${CMAKE_BINARY_DIR})
+
+        file(COPY "${DOWNLOADS_DIR}/gdal/bin/proj6/share/proj.db" DESTINATION ${CMAKE_BINARY_DIR})
 
         # Fix linking
         target_link_libraries("${PROJECT_NAME}" ${LINK_LIBRARIES})

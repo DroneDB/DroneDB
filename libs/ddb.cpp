@@ -340,8 +340,11 @@ std::string getVersion(){
 
 // This must be called as the very first function
 // of every DDB process/program
-void initialize(){
+void initialize(bool verbose = false){
     init_logger();
+	if (verbose) {
+		set_logger_verbose();
+	}
     Database::Initialize();
     exif::Initialize();
     GDALAllRegister();
