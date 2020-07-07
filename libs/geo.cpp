@@ -5,8 +5,6 @@
 #include <ogr_srs_api.h>
 #include <sstream>
 #include "geo.h"
-#include "../logger.h"
-#include "../utils.h"
 
 namespace ddb {
 
