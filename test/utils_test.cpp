@@ -25,7 +25,6 @@ TEST(PathsAreChildren, Normal) {
 }
 
 TEST(pathDepth, Normal) {
-	std::cerr << fs::current_path().root_name().string() << std::endl;
 	EXPECT_EQ(utils::pathDepth(fs::path("")), 0);
 
 #ifdef _WIN32

@@ -14,8 +14,8 @@ TEST(getIndexPathList, includeDirs) {
     auto pathList = ddb::getIndexPathList("data", {(fs::path("data") / "folderA" / "test.txt").string()}, true);
     EXPECT_EQ(pathList.size(), 3);
     EXPECT_STREQ(pathList[0].string().c_str(), (fs::path("data") / "folderA" / "test.txt").string().c_str());
-    EXPECT_STREQ(pathList[1].string().c_str(), fs::path("data").string().c_str());
-    EXPECT_STREQ(pathList[2].string().c_str(), (fs::path("data") / "folderA").string().c_str());
+    EXPECT_STREQ(pathList[1].string().c_str(), (fs::path("data") / "folderA").string().c_str());
+    EXPECT_STREQ(pathList[2].string().c_str(), fs::path("data").string().c_str());
 
     pathList = ddb::getIndexPathList(".", {
 	(fs::path("data") / "folderA" / "test.txt").string(),
@@ -23,9 +23,9 @@ TEST(getIndexPathList, includeDirs) {
     EXPECT_EQ(pathList.size(), 5);
     EXPECT_STREQ(pathList[0].string().c_str(), (fs::path("data") / "folderA" / "test.txt").string().c_str());
     EXPECT_STREQ(pathList[1].string().c_str(), (fs::path("data") / "folderA" / "folderB" / "test.txt").string().c_str());
-    EXPECT_STREQ(pathList[2].string().c_str(), (fs::path("data") / "folderA" / "folderB").string().c_str());
+    EXPECT_STREQ(pathList[2].string().c_str(), (fs::path("data") / "folderA").string().c_str());
     EXPECT_STREQ(pathList[3].string().c_str(), (fs::path("data")).string().c_str());
-    EXPECT_STREQ(pathList[4].string().c_str(), (fs::path("data") / "folderA").string().c_str());
+    EXPECT_STREQ(pathList[4].string().c_str(), (fs::path("data") / "folderA" / "folderB").string().c_str());
 
     EXPECT_THROW(
     pathList = ddb::getIndexPathList("otherRoot", {
