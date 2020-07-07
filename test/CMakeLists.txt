@@ -27,6 +27,10 @@ add_custom_command(TARGET test POST_BUILD
 file(GLOB DATA_FILES
   "${CMAKE_CURRENT_SOURCE_DIR}/data"
 )
-file(COPY ${DATA_FILES} DESTINATION "${CMAKE_BINARY_DIR}")
+if (WIN32)
+	file(COPY ${DATA_FILES} DESTINATION "${CMAKE_BINARY_DIR}")
+else()
+	file(COPY ${DATA_FILES} DESTINATION "${CMAKE_BINARY_DIR}/test")
+endif()
 
 set_target_properties(test PROPERTIES CXX_STANDARD 17)
