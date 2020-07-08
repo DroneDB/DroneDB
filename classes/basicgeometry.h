@@ -27,7 +27,7 @@ inline std::ostream& operator<<(std::ostream& os, const Point& p){
 }
 
 struct BasicGeometry{
-    BasicGeometry(){}
+	BasicGeometry() {}
 
     void addPoint(const Point &p);
     void addPoint(double x, double y, double z);

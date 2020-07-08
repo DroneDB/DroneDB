@@ -135,10 +135,36 @@ add_library(${PROJECT_NAME} SHARED ${SRC_LIST})
 add_dependencies(${PROJECT_NAME} exiv2)
 set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 17)
 
+# set PLOG to PLOG_GLOBAL/PLOG_EXPORT to share instances across modules (and export on Windows)
+if(WIN32)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE PLOG_EXPORT)
+else()
+    target_compile_definitions(${PROJECT_NAME} PRIVATE PLOG_GLOBAL)
+endif()
+
+if (WIN32)
+add_custom_command(TARGET "${PROJECT_NAME}" POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different  $<TARGET_FILE:ddb> "${CMAKE_BINARY_DIR}/ddb.dll"
+    COMMENT "Created ${CMAKE_BINARY_DIR}/ddb.dll"
+)
+endif()
+
 if (NOT CMAKE_JS_VERSION)
     add_executable("${PROJECT_NAME}cmd" ${CMD_SRC_LIST})
     set_target_properties("${PROJECT_NAME}cmd" PROPERTIES CXX_STANDARD 17)
     target_link_libraries("${PROJECT_NAME}cmd" ${PROJECT_NAME} ${LINK_LIBRARIES})
+
+    set(EXE_EXT "")
+    if (WIN32)
+        set(EXE_EXT ".exe")
+    endif()
+
+    # set PLOG to PLOG_GLOBAL/PLOG_IMPORT to share instances across modules (and import on Windows)
+    if(WIN32)
+        target_compile_definitions("${PROJECT_NAME}cmd" PRIVATE PLOG_IMPORT)
+    else()
+        target_compile_definitions("${PROJECT_NAME}cmd" PRIVATE PLOG_GLOBAL)
+    endif()
 
     # Rename ddbcmd --> ddb
     add_custom_command(TARGET "${PROJECT_NAME}cmd" POST_BUILD
@@ -146,19 +172,11 @@ if (NOT CMAKE_JS_VERSION)
         COMMENT "Created ${CMAKE_BINARY_DIR}/ddb${EXE_EXT}"
     )
 
-    set(EXE_EXT "")
     if (WIN32)
-        set(EXE_EXT ".exe")
-
         # Copy DLLs
-        add_custom_command(TARGET "${PROJECT_NAME}cmd" POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different  $<TARGET_FILE:ddb> "${CMAKE_BINARY_DIR}/ddb.dll"
-            COMMENT "Created ${CMAKE_BINARY_DIR}/ddb.dll"
-        )
-
         add_custom_command(
             TARGET "${PROJECT_NAME}" PRE_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
                     "${CMAKE_BINARY_DIR}/exiv2-build/bin/exiv2.dll"
                     "${CMAKE_BINARY_DIR}/"
             COMMENT "Copied ${CMAKE_BINARY_DIR}/exiv2-build/bin/exiv2.dll"
@@ -167,38 +185,14 @@ if (NOT CMAKE_JS_VERSION)
         file(GLOB GDAL_DLLS "${DOWNLOADS_DIR}/gdal/bin/*.dll")
         file(COPY ${GDAL_DLLS} DESTINATION ${CMAKE_BINARY_DIR})
 
-        # Fix linking
-        target_link_libraries("${PROJECT_NAME}" ${LINK_LIBRARIES})
-
-    endif()
-
-
-    file(GLOB DATA_FILES "${CMAKE_CURRENT_SOURCE_DIR}/ddb_data/*")
-    file(COPY ${DATA_FILES} DESTINATION ${CMAKE_BINARY_DIR})
-
-else()
-    
-    if (WIN32)
-
-        add_custom_command(
-            TARGET "${PROJECT_NAME}" PRE_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy
-                    "${CMAKE_BINARY_DIR}/exiv2-build/bin/exiv2.dll"
-                    "${CMAKE_BINARY_DIR}/"
-            COMMENT "Copied ${CMAKE_BINARY_DIR}/exiv2-build/bin/exiv2.dll"
-        )
-
-        file(GLOB GDAL_DLLS "${DOWNLOADS_DIR}/gdal/bin/*.dll")
-        file(COPY ${GDAL_DLLS} DESTINATION ${CMAKE_BINARY_DIR})
+        file(COPY "${DOWNLOADS_DIR}/gdal/bin/proj6/share/proj.db" DESTINATION ${CMAKE_BINARY_DIR})
 
         # Fix linking
         target_link_libraries("${PROJECT_NAME}" ${LINK_LIBRARIES})
     endif()
 
-
     file(GLOB DATA_FILES "${CMAKE_CURRENT_SOURCE_DIR}/ddb_data/*")
     file(COPY ${DATA_FILES} DESTINATION ${CMAKE_BINARY_DIR})
-
 endif()
 
 # json1 extension
@@ -221,7 +215,26 @@ if (CMAKE_JS_VERSION)
         include_directories("C:/Users/IT 2/.cmake-js/node-x64/v12.16.1/include/node")
     endif()
 
-    file(COPY ${DATA_FILES} DESTINATION "${CMAKE_BINARY_DIR}/${CMAKE_BUILD_TYPE}")
+    if (WIN32)
+        add_custom_command(
+            TARGET "${PROJECT_NAME}" PRE_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${CMAKE_BINARY_DIR}/exiv2-build/bin/exiv2.dll"
+                    "${CMAKE_BINARY_DIR}/"
+            COMMENT "Copied ${CMAKE_BINARY_DIR}/exiv2-build/bin/exiv2.dll"
+        )
+
+        file(GLOB GDAL_DLLS "${DOWNLOADS_DIR}/gdal/bin/*.dll")
+        file(COPY ${GDAL_DLLS} DESTINATION ${CMAKE_BINARY_DIR})
+
+        # Fix linking
+        target_link_libraries("${PROJECT_NAME}" ${LINK_LIBRARIES})
+    endif()
+
+    file(GLOB DATA_FILES "${CMAKE_CURRENT_SOURCE_DIR}/ddb_data/*")
+    file(COPY ${DATA_FILES} DESTINATION ${CMAKE_BINARY_DIR})
+
+    #file(COPY ${DATA_FILES} DESTINATION "${CMAKE_BINARY_DIR}/${CMAKE_BUILD_TYPE}")
 
     file(GLOB NODE_SOURCE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/nodejs/*.cc")
     add_library("node-${PROJECT_NAME}" SHARED ${NODE_SOURCE_FILES})

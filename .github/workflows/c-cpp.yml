@@ -38,7 +38,6 @@ jobs:
             - name: make
               run: cd build && make
             - name: test
-              continue-on-error: true
               run: cd build/test && ./test
     build_windows:
         name: Build on Windows
@@ -67,9 +66,5 @@ jobs:
                 cmake --build . --config Debug --target ALL_BUILD -- /maxcpucount:14
                 dir
             - name: test
-              continue-on-error: true
-              run: |
-                cd test
-                cd Debug
-                test.exe
-        
+              run: .\scripts\setup_windows_env.bat && cd build && test.exe
+              shell: cmd
