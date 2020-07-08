@@ -8,7 +8,7 @@ Add files and directories to an index.
 
 ::
 
-    $ ddb geoproj output/ *.JPG [args]
+    $ ddb add *.JPG [args] [PATHS]
 
 ::
 

@@ -113,7 +113,9 @@ std::vector<fs::path> getIndexPathList(fs::path rootDirectory, const std::vector
                 }
 
                 if (includeDirs) {
-                    while(rp.has_parent_path()) {
+                    while(rp.has_parent_path() &&
+                          utils::pathIsChild(rootDirectory, rp.parent_path()) &&
+                          rp.string() != rp.parent_path().string()) {
                         rp = rp.parent_path();
                         directories[rp.string()] = true;
                     }
@@ -126,7 +128,9 @@ std::vector<fs::path> getIndexPathList(fs::path rootDirectory, const std::vector
             result.push_back(p);
 
             if (includeDirs) {
-                while(p.has_parent_path()) {
+                while(p.has_parent_path() &&
+                      utils::pathIsChild(rootDirectory, p.parent_path()) &&
+                      p.string() != p.parent_path().string()) {
                     p = p.parent_path();
                     directories[p.string()] = true;
                 }

@@ -117,6 +117,7 @@ bool checkExtension(const fs::path &extension, const std::initializer_list<std::
 time_t getModifiedTime(const std::string &filePath);
 off_t getSize(const std::string &filePath);
 bool pathsAreChildren(const fs::path &parentPath, const std::vector<std::string> &childPaths);
+bool pathIsChild(const fs::path &parentPath, const fs::path &p);
 int pathDepth(const fs::path &path);
 
 fs::path getExeFolderPath();

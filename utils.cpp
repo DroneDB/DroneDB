@@ -42,10 +42,19 @@ bool pathsAreChildren(const fs::path &parentPath, const std::vector<std::string>
 
     for (auto &cp : childPaths) {
         std::string absC = fs::weakly_canonical(fs::absolute(cp)).string();
-        if (absC.rfind(absP, 0) != 0) return false;
+        if (absC.length() > 1 && absC.back() == fs::path::preferred_separator) absC.pop_back();
+        if (absC.rfind(absP, 0) != 0 || absP == absC) return false;
     }
 
     return true;
+}
+
+bool pathIsChild(const fs::path &parentPath, const fs::path &p){
+    std::string absP = fs::weakly_canonical(fs::absolute(parentPath)).string();
+    if (absP.length() > 1 && absP.back() == fs::path::preferred_separator) absP.pop_back();
+    std::string absC = fs::weakly_canonical(fs::absolute(p)).string();
+    if (absC.length() > 1 && absC.back() == fs::path::preferred_separator) absC.pop_back();
+    return absC.rfind(absP, 0) == 0 && absP != absC;
 }
 
 fs::path getExeFolderPath() {
