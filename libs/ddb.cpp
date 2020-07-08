@@ -243,8 +243,7 @@ void addToIndex(Database *db, const std::vector<std::string> &paths) {
     opts.withHash = true;
 
     for (auto &p : pathList) {
-        fs::path relPath = fs::weakly_canonical(fs::absolute(p).lexically_relative(fs::absolute(directory)));
-
+        fs::path relPath = fs::relative(fs::weakly_canonical(fs::absolute(p)), fs::weakly_canonical(fs::absolute(directory)));
         q->bind(1, relPath.generic_string());
 
         bool update = false;
@@ -294,7 +293,7 @@ void removeFromIndex(Database *db, const std::vector<std::string> &paths) {
     db->exec("BEGIN TRANSACTION");
 
     for (auto &p : pathList) {
-        fs::path relPath = fs::weakly_canonical(fs::absolute(p).lexically_relative(fs::absolute(directory)));
+        fs::path relPath = fs::relative(fs::weakly_canonical(fs::absolute(p)), fs::weakly_canonical(fs::absolute(directory)));
         q->bind(1, relPath.generic_string());
         q->execute();
         if (db->changes() >= 1) {
