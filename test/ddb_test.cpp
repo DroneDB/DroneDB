@@ -12,10 +12,9 @@ using namespace ddb;
 
 TEST(getIndexPathList, includeDirs) {
     auto pathList = ddb::getIndexPathList("data", {(fs::path("data") / "folderA" / "test.txt").string()}, true);
-    EXPECT_EQ(pathList.size(), 3);
+    EXPECT_EQ(pathList.size(), 2);
 	EXPECT_TRUE(std::find(pathList.begin(), pathList.end(), fs::path("data") / "folderA" / "test.txt") != pathList.end());
 	EXPECT_TRUE(std::find(pathList.begin(), pathList.end(), fs::path("data") / "folderA") != pathList.end());
-	EXPECT_TRUE(std::find(pathList.begin(), pathList.end(), fs::path("data")) != pathList.end());
 
     pathList = ddb::getIndexPathList(".", {
 		(fs::path("data") / "folderA" / "test.txt").string(),
