@@ -45,7 +45,6 @@ public:
     bool loadDiskCache(double latitude, double longitude);
     std::string loadFromNetwork(double latitude, double longitude);
     bool addGeoTIFFToCache(const fs::path &filePath, double latitude, double longitude);
-    void downloadFile(const std::string &url, const std::string &outFile);
     fs::path getCacheDir();
 };
 

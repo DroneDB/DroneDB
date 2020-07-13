@@ -5,5 +5,6 @@
 #define CONSTANTS_H
 
 #define DEFAULT_REGISTRY "index.dronedb.app"
+#define DEFAULT_DSM_SERVICE_URL "http://opentopo.sdsc.edu/otr/getdem?demtype=AW3D30&west={west}&south={south}&east={east}&north={north}&outputFormat=GTiff"
 
 #endif // CONSTANTS_H

@@ -6,6 +6,6 @@
 
 #include <url/Url.h>
 
-using namespace homer6::Url;
+using namespace homer6;
 
 #endif // URL_H

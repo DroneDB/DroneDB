@@ -4,10 +4,11 @@
 
 #include <regex>
 #include <ogrsf_frmts.h>
-#include <curl/curl.h>
 #include "dsmservice.h"
 #include "exceptions.h"
 #include "../utils.h"
+#include "../net.h"
+#include "../constants.h"
 
 #pragma clang diagnostic ignored "-Wdisabled-macro-expansion"
 
@@ -22,11 +23,9 @@ DSMService *DSMService::get(){
 }
 
 DSMService::DSMService(){
-    curl_global_init(CURL_GLOBAL_ALL);
 }
 
 DSMService::~DSMService(){
-    curl_global_cleanup();
 }
 
 float DSMService::getAltitude(double latitude, double longitude){
@@ -84,7 +83,7 @@ bool DSMService::loadDiskCache(double latitude, double longitude){
 
 std::string DSMService::loadFromNetwork(double latitude, double longitude){
     // TODO: allow user to specify different service
-    std::string format = "http://opentopo.sdsc.edu/otr/getdem?demtype=AW3D30&west={west}&south={south}&east={east}&north={north}&outputFormat=GTiff";
+    std::string format = DEFAULT_DSM_SERVICE_URL;
 
     // Estimate bounds around point by a certain radius
     double radius = 5000.0; // meters
@@ -107,7 +106,8 @@ std::string DSMService::loadFromNetwork(double latitude, double longitude){
     std::string filePath = (getCacheDir() / filename).string();
 
     std::cout << "Downloading DSM from " << url << " ..." << std::endl;
-    downloadFile(url, filePath);
+    net::Request r = net::GET(url);
+    r.downloadToFile(filePath);
 
     return filePath;
 }
@@ -159,42 +159,6 @@ bool DSMService::addGeoTIFFToCache(const fs::path &filePath, double latitude, do
     delete compare;
 
     return contained;
-}
-
-void DSMService::downloadFile(const std::string &url, const std::string &outFile){
-    CURL *curl = nullptr;
-    FILE *f = nullptr;
-
-    try {
-        curl = curl_easy_init();
-        if (!curl) throw CURLException("Cannot initialize CURL");
-
-        f = fopen(outFile.c_str(), "wb");
-        if (!f) throw FSException("Cannot open " + outFile + " for writing");
-
-        curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-
-        if (is_logger_verbose()){
-            curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
-        }
-
-        curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 1L);
-        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, nullptr);
-        curl_easy_setopt(curl, CURLOPT_WRITEDATA, f);
-        curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-
-        if (curl_easy_perform(curl) != CURLE_OK) throw CURLException("Cannot download " + url + ", perhaps the service is offline or unreachable.");
-
-        curl_easy_cleanup(curl);
-        curl = nullptr;
-
-        fclose(f);
-        f = nullptr;
-    }catch (AppException &e) {
-        if (curl) curl_easy_cleanup(curl);
-        if (f) fclose(f);
-        throw e;
-    }
 }
 
 fs::path DSMService::getCacheDir(){

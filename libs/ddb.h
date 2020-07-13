@@ -12,6 +12,7 @@
 #include "../classes/exceptions.h"
 #include "../utils.h"
 #include "../fs.h"
+#include "../net.h"
 #include "entry.h"
 
 namespace ddb {

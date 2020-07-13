@@ -10,8 +10,17 @@ namespace ddb{
 
 class Registry{
     std::string url;
+
+    // Last valid token
+    std::string token;
 public:
     Registry(const std::string &url);
+
+    std::string getUrl() const;
+
+    std::string getToken(const std::string &username, const std::string &password) const;
+    bool login(const std::string &username, const std::string &password) const;
+    void logout();
 };
 
 }

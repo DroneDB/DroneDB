@@ -350,6 +350,7 @@ void initialize(bool verbose = false){
 	}
     Database::Initialize();
     exif::Initialize();
+    net::Initialize();
     GDALAllRegister();
 }
 

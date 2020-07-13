@@ -26,7 +26,24 @@ Registry::Registry(const std::string &url){
         throw URLException("Registry URL can only be http/https");
     }
 
-    // TODO...
+    std::string port = u.getPort() != 80 && u.getPort() != 443 ? ":" + std::to_string(u.getPort()) : "";
+    this->url = u.getScheme() + "//" + u.getHost() + port + u.getPath();
+
+}
+
+std::string Registry::getUrl() const{
+    return url;
+}
+
+std::string Registry::getToken(const std::string &username, const std::string &password) const{
+
+}
+
+bool Registry::login(const std::string &username, const std::string &password) const{
+    return true;
+}
+
+void Registry::logout(){
 
 }
 
