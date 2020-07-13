@@ -36,7 +36,7 @@ std::string Registry::getUrl() const{
 }
 
 std::string Registry::getToken(const std::string &username, const std::string &password) const{
-
+	return "TODO";
 }
 
 bool Registry::login(const std::string &username, const std::string &password) const{

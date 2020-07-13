@@ -28,7 +28,7 @@ using namespace ddb;
               "	-h, --help		Print help" << std::endl <<
               "	--version		Print version" << std::endl << std::endl <<
               "For detailed command help use: " << argv[0] << " <command> --help " << std::endl <<
-              "See https://uav4geo.com for more information." << std::endl;
+              "See https://docs.dronedb.app for more information." << std::endl;
     exit(0);
 }
 
