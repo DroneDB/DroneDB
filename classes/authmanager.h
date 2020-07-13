@@ -4,21 +4,24 @@
 #ifndef AUTHMANAGER_H
 #define AUTHMANAGER_H
 
-#include <filesystem>
 #include <fstream>
-
-namespace fs = std::filesystem;
+#include "authcredentials.h"
+#include "../fs.h"
+#include "../json.h"
 
 namespace ddb{
 
 class AuthManager{
+    json auth;
     fs::path authFile;
-
 
     void ReadFromDisk();
     void WriteToDisk();
 public:
     AuthManager(const fs::path &authFile);
+
+    void saveCredentials(const std::string &url, const AuthCredentials &creds);
+    AuthCredentials loadCredentials(const std::string &url);
 };
 
 }

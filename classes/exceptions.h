@@ -34,6 +34,9 @@ class GDALException : public AppException{
 class CURLException : public AppException{
     using AppException::AppException;
 };
+class URLException : public AppException{
+    using AppException::AppException;
+};
 
 }
 #endif // EXCEPTIONS_H
