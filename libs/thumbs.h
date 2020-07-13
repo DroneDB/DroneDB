@@ -5,9 +5,7 @@
 #define THUMBS_H
 
 #include "entry.h"
-#include <filesystem>
-
-namespace fs = std::filesystem;
+#include "../fs.h"
 
 namespace ddb{
 

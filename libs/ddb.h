@@ -4,7 +4,6 @@
 #ifndef DDB_H
 #define DDB_H
 
-#include <filesystem>
 #include "../classes/database.h"
 #include "../classes/statement.h"
 #include "types.h"
@@ -12,9 +11,8 @@
 #include "../classes/hash.h"
 #include "../classes/exceptions.h"
 #include "../utils.h"
+#include "../fs.h"
 #include "entry.h"
-
-namespace fs = std::filesystem;
 
 namespace ddb {
 

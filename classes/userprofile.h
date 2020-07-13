@@ -5,10 +5,11 @@
 #ifndef USERPROFILE_H
 #define USERPROFILE_H
 
-#include <filesystem>
+#include "../fs.h"
 #include "../logger.h"
+#include "authmanager.h"
 
-namespace fs = std::filesystem;
+namespace ddb{
 
 class UserProfile{
 public:
@@ -18,12 +19,19 @@ public:
     fs::path getProfileDir();
     fs::path getProfilePath(const fs::path &p, bool createIfNeeded);
     fs::path getThumbsDir(int thumbSize);
+    fs::path getAuthFile();
+
+    AuthManager *getAuthManager;
 private:
     UserProfile();
 
     void createDir(const fs::path &p);
 
     static UserProfile *instance;
+
+    AuthManager *authManager;
 };
+
+}
 
 #endif // USERPROFILE_H

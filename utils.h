@@ -13,11 +13,11 @@
 #include <cctype>
 #include <string>
 #include <cmath>
-#include <filesystem>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include "classes/exceptions.h"
 #include "logger.h"
+#include "fs.h"
 
 #ifndef M_PI
     #define M_PI 3.1415926535
@@ -41,10 +41,6 @@
 #ifndef PATH_MAX
     #define PATH_MAX 4096
 #endif
-
-
-
-namespace fs = std::filesystem;
 
 namespace utils {
 

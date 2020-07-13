@@ -14,6 +14,8 @@
 #include "info.h"
 #include "thumbs.h"
 #include "set.h"
+#include "login.h"
+#include "logout.h"
 
 namespace cmd {
 
@@ -26,7 +28,9 @@ std::map<std::string, Command*> commands = {
     {"geoproj", new GeoProj()},
     {"info", new Info()},
     {"thumbs", new Thumbs()},
-    {"set", new Set()}
+    {"set", new Set()},
+    {"login", new Login()},
+    {"logout", new Logout()}
 };
 
 std::map<std::string, std::string> aliases = {

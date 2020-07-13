@@ -12,14 +12,12 @@
 #include <sqlite3.h>
 #include <spatialite/gaiageo.h>
 #include <spatialite.h>
-#include <filesystem>
 
 #include <string>
 #include <memory>
 
 #include "statement.h"
-
-namespace fs = std::filesystem;
+#include "../fs.h"
 
 class Database {
     sqlite3 *db;

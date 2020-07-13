@@ -5,9 +5,7 @@
 #define EXIFEDITOR_H
 
 #include <vector>
-#include <filesystem>
-
-namespace fs = std::filesystem;
+#include "../fs.h"
 
 namespace ddb{
 

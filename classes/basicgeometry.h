@@ -7,10 +7,7 @@
 
 #include <string>
 #include <iomanip>
-#include "json_fwd.hpp"
-#include "json.hpp"
-
-using json = nlohmann::json;
+#include "../json.h"
 
 namespace ddb{
 

@@ -3,11 +3,9 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include <iostream>
-#include <filesystem>
 #include "remove.h"
 #include "../libs/ddb.h"
 
-namespace fs = std::filesystem;
 
 namespace cmd {
 
