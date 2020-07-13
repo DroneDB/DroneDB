@@ -18,6 +18,7 @@ public:
     Request(const std::string &url, ReqType reqType);
     ~Request();
 
+	Request& setVerifySSL(bool flag);
     void downloadToFile(const std::string &outFile);
 };
 

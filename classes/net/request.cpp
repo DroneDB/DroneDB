@@ -28,6 +28,22 @@ Request::Request(const std::string &url, ReqType reqType) : url(url), reqType(re
 
 Request::~Request(){
     if (curl) curl_easy_cleanup(curl);
+	curl = nullptr;
+}
+
+Request& Request::setVerifySSL(bool flag) {
+	//VERIFYPEER basically makes sure the certificate itself is valid (i.e.,
+	// signed by a trusted CA, the certificate chain is complete, etc).
+	// VERIFYHOST checks that the host you're talking to is the host named in
+	//	the certificate.
+	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, flag);
+
+	return *this;
+}
+
+size_t write_data(void* ptr, size_t size, size_t nmemb, FILE* stream) {
+	size_t written = fwrite(ptr, size, nmemb, stream);
+	return written;
 }
 
 void Request::downloadToFile(const std::string &outFile){
@@ -37,7 +53,7 @@ void Request::downloadToFile(const std::string &outFile){
     if (!f) throw FSException("Cannot open " + outFile + " for writing");
 
     curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 1L);
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, nullptr);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_data);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, f);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
 
