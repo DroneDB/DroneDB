@@ -162,16 +162,18 @@ std::string getPass(const std::string &prompt){
     GetConsoleMode( hIn, &con_mode );
     SetConsoleMode( hIn, con_mode & ~(ENABLE_ECHO_INPUT | ENABLE_LINE_INPUT) );
 
-    while(ReadConsoleA( hIn, &ch, 1, &dwRead, NULL) && ch !=RETURN){
-         if(ch==BACKSPACE){
+    while(ReadConsoleA( hIn, &ch, 1, &dwRead, NULL) && ch != RETURN){
+         if(ch == BACKSPACE){
             if(password.length() != 0){
                 password.resize(password.length()-1);
             }
          }else{
-             password+=ch;
+             password += ch;
          }
     }
-    std::cout << std::endl;
+
+	std::cout << std::endl;
+
     return password;
 #else
     struct termios oflags, nflags;

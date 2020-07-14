@@ -12,6 +12,36 @@ Response::Response() : statusCode(0), buf(nullptr), bufSize(0){
 
 }
 
+Response::Response(Response&& other) noexcept : statusCode(0), buf(nullptr), bufSize(0) {
+	// Copy
+	statusCode = other.statusCode;
+	buf = other.buf;
+	bufSize = other.bufSize;
+
+	// Prevent multiple de-allocations
+	other.statusCode = 0;
+	other.buf = nullptr;
+	other.bufSize = 0;
+}
+
+Response& Response::operator=(Response&& other) noexcept {
+	if (this != &other)
+	{
+		// Free the existing resource.
+		free(buf);
+
+		// Copy the data
+		buf = other.buf;
+		bufSize = other.bufSize;
+
+		// Release the data pointer from the source object so that
+		// the destructor does not free the memory multiple times.
+		other.buf = nullptr;
+		other.bufSize = 0;
+	}
+	return *this;
+}
+
 Response::~Response(){
     if (buf) {
         free(buf);
@@ -32,7 +62,7 @@ json Response::getJSON(){
 
     try{
         return json::parse(getData());
-    }catch(const json::parse_error &e){
+    }catch(const json::parse_error &){
         throw JSONException("Invalid JSON: " + std::string(getData()));
     }
 }
@@ -45,7 +75,13 @@ size_t Response::WriteCallback(void *contents, size_t size, size_t nmemb, void *
   size_t realsize = size * nmemb;
   Response *res = static_cast<Response *>(userp);
 
-  char *ptr = static_cast<char *>(realloc(res->buf, res->bufSize + realsize + 1));
+  char* ptr;
+  if (!res->buf) {
+	  res->buf = static_cast<char *>(malloc(realsize + 1));
+	  ptr = res->buf;
+  }else{
+	  ptr = static_cast<char*>(realloc(res->buf, res->bufSize + realsize + 1));
+  }
   if(!ptr) {
     /* out of memory! */
     LOGW << "not enough memory (realloc returned NULL)\n";

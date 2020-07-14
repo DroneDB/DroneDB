@@ -18,15 +18,17 @@
 using namespace ddb;
 
 struct DSMCacheEntry{
-    BoundingBox<Point2D> bbox;
     unsigned int width, height;
-    double geoTransform[6];
-    std::vector<float> data;
-
     int hasNodata;
     float nodata;
 
-    DSMCacheEntry() : width(0), height(0) {}
+	double geoTransform[6];
+	std::vector<float> data;
+	BoundingBox<Point2D> bbox;
+
+	DSMCacheEntry() : width(0), height(0), hasNodata(0), nodata(0) {
+		memset(geoTransform, 0, sizeof(double)*6);
+	}
 
     void loadData(GDALDataset *dataset);
     float getElevation(double latitude, double longitude);

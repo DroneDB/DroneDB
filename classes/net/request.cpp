@@ -50,7 +50,7 @@ Request& Request::setVerifySSL(bool flag) {
 }
 
 std::string Request::urlEncode(const std::string &str){
-    char *encoded = curl_easy_escape(curl, str.c_str(), str.length());
+    char *encoded = curl_easy_escape(curl, str.c_str(), static_cast<int>(str.length()));
     if (!encoded) throw NetException("Cannot url encode " + str);
     std::string s(encoded);
     curl_free(encoded);

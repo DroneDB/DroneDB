@@ -17,7 +17,7 @@ using namespace std;
 using namespace ddb;
 
 [[ noreturn ]] void printHelp(char *argv[]) {
-    std::cout << "DroneDB v" << ddb::getVersion() << " - Easily manage and share aerial datasets :)" << std::endl <<
+    std::cout << "DroneDB v" << ddb::getVersion() << " - Effortless aerial data management and sharing" << std::endl <<
               "Usage:" << std::endl <<
               "	" << argv[0] << " <command> [args] [PATHS]" << std::endl << std::endl <<
               "Commands:" << std::endl;

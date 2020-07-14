@@ -17,6 +17,8 @@ class Response{
     size_t bufSize;
 public:
     Response();
+	Response(Response&& other) noexcept;
+	Response& Response::operator=(Response&& other) noexcept;
     ~Response();
 
     char* getData();
@@ -29,6 +31,8 @@ public:
 
     friend class Request;
 };
+
+
 
 }
 
