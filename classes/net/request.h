@@ -24,6 +24,8 @@ public:
 
     Response send();
     Request &formData(std::initializer_list<std::string> params);
+    Request& setVerifySSL(bool flag);
+
     void downloadToFile(const std::string &outFile);
 };
 
