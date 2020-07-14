@@ -12,7 +12,7 @@ namespace ddb::net{
 Request::Request(const std::string &url, ReqType reqType) : url(url), reqType(reqType), curl(nullptr){
     try {
         curl = curl_easy_init();
-        if (!curl) throw CURLException("Cannot initialize CURL");
+        if (!curl) throw NetException("Cannot initialize CURL");
 
         curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
 
@@ -26,7 +26,8 @@ Request::Request(const std::string &url, ReqType reqType) : url(url), reqType(re
         }
 
         curl_easy_setopt(curl, CURLOPT_USERAGENT, "dronedb-agent/" APP_VERSION);
-
+        curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, errorMsg);
+        curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, true);
     }catch (AppException &e) {
         if (curl) curl_easy_cleanup(curl);
         throw e;
@@ -49,7 +50,8 @@ Request& Request::setVerifySSL(bool flag) {
 }
 
 std::string Request::urlEncode(const std::string &str){
-    char *encoded = curl_easy_escape(curl, str.c_str(), str.size());
+    char *encoded = curl_easy_escape(curl, str.c_str(), str.length());
+    if (!encoded) throw NetException("Cannot url encode " + str);
     std::string s(encoded);
     curl_free(encoded);
     return s;
@@ -57,28 +59,25 @@ std::string Request::urlEncode(const std::string &str){
 
 Response Request::send(){
     Response res;
+
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, Response::WriteCallback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&res);
 
-    if (curl_easy_perform(curl) != CURLE_OK) throw CURLException("Cannot complete request to " + url);
+    perform(res);
 
     return res;
 }
 
-Request &Request::formData(std::initializer_list<std::string> params){
-    std::vector<std::string> v = params;
-    if (v.size() % 2 != 0) throw CURLException("Invalid number of formData parameters");
+Request &Request::formData(std::vector<std::string> params){
+    if (params.size() % 2 != 0) throw NetException("Invalid number of formData parameters");
 
     std::stringstream ss;
-    std::cerr << "1" << std::endl;
-    for (int i = 0; params.size(); i += 2){
-        std::cout << v[i].c_str() << "=" << v[i + 1].c_str() << std::endl;
-        ss << urlEncode(v[i]) << "=" <<
-              urlEncode(v[i + 1]);
-        if (i + 2 < static_cast<int>(params.size())) ss << "&";
+    for (unsigned long i = 0; i < params.size(); i += 2){
+        ss << urlEncode(params[i]) << "=" <<
+              urlEncode(params[i + 1]);
+        if (i + 1 < params.size()) ss << "&";
     }
-    std::cerr << "2";
-    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, ss.str().c_str());
+    curl_easy_setopt(curl, CURLOPT_COPYPOSTFIELDS, ss.str().c_str());
 
     return *this;
 }
@@ -88,7 +87,7 @@ size_t write_data(void* ptr, size_t size, size_t nmemb, FILE* stream) {
     return written;
 }
 
-void Request::downloadToFile(const std::string &outFile){
+Response Request::downloadToFile(const std::string &outFile){
     FILE *f = nullptr;
 
     f = fopen(outFile.c_str(), "wb");
@@ -97,11 +96,22 @@ void Request::downloadToFile(const std::string &outFile){
     curl_easy_setopt(curl, CURLOPT_NOPROGRESS, true);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_data);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, f);
-    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, true);
 
-    if (curl_easy_perform(curl) != CURLE_OK) throw CURLException("Cannot download " + url + ", perhaps the service is offline or unreachable.");
-
+    Response res;
+    perform(res);
     fclose(f);
+
+    return res;
+}
+
+void Request::perform(Response &res){
+    CURLcode ret = curl_easy_perform(curl);
+    if (ret != CURLE_OK){
+        std::string err(curl_easy_strerror(ret));
+        throw NetException(err + ": " + errorMsg);
+    }
+
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &res.statusCode);
 }
 
 }

@@ -31,10 +31,13 @@ class InvalidArgsException : public AppException{
 class GDALException : public AppException{
     using AppException::AppException;
 };
-class CURLException : public AppException{
+class NetException : public AppException{
     using AppException::AppException;
 };
 class URLException : public AppException{
+    using AppException::AppException;
+};
+class AuthException : public AppException{
     using AppException::AppException;
 };
 

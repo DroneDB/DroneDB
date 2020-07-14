@@ -10,7 +10,7 @@
 namespace ddb::net{
 
 class Response{
-    int statusCode;
+    long statusCode;
 
     char *buf;
     size_t bufSize;
@@ -19,9 +19,12 @@ public:
     ~Response();
 
     char* getData();
+    long status();
 
     // Use by curl to write result into memory
     static size_t WriteCallback(void *contents, size_t size, size_t nmemb, void *userp);
+
+    friend class Request;
 };
 
 }

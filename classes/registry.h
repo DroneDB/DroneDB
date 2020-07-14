@@ -19,7 +19,7 @@ public:
     std::string getUrl() const;
 
     std::string getToken(const std::string &username, const std::string &password) const;
-    bool login(const std::string &username, const std::string &password) const;
+    std::string login(const std::string &username, const std::string &password) const;
     void logout();
 };
 

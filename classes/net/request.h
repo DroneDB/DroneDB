@@ -16,17 +16,19 @@ class Request{
     std::string url;
     ReqType reqType;
     CURL *curl;
+    char errorMsg[CURL_ERROR_SIZE];
 
     std::string urlEncode(const std::string &str);
+    void perform(Response &res);
 public:
     Request(const std::string &url, ReqType reqType);
     ~Request();
 
     Response send();
-    Request &formData(std::initializer_list<std::string> params);
-    Request& setVerifySSL(bool flag);
+    Response downloadToFile(const std::string &outFile);
 
-    void downloadToFile(const std::string &outFile);
+    Request &formData(std::vector<std::string> params);
+    Request& setVerifySSL(bool flag);
 };
 
 }

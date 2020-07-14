@@ -9,7 +9,7 @@ namespace utils {
 bool checkExtension(const fs::path &extension, const std::initializer_list<std::string>& matches) {
     std::string ext = extension.string();
     if (ext.size() < 1) return false;
-    std::string extLowerCase = ext.substr(1, ext.size());
+    std::string extLowerCase = ext.substr(1, ext.length());
     utils::toLower(extLowerCase);
 
     for (auto &m : matches) {

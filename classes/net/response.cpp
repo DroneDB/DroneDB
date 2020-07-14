@@ -8,7 +8,7 @@
 
 namespace ddb::net{
 
-Response::Response(){
+Response::Response() : statusCode(0), buf(nullptr), bufSize(0){
 
 }
 
@@ -21,6 +21,10 @@ Response::~Response(){
 
 char *Response::getData(){
     return buf;
+}
+
+long Response::status(){
+    return statusCode;
 }
 
 size_t Response::WriteCallback(void *contents, size_t size, size_t nmemb, void *userp){
