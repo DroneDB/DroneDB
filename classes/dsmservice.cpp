@@ -126,14 +126,14 @@ bool DSMService::addGeoTIFFToCache(const fs::path &filePath, double latitude, do
     std::string wkt = GDALGetProjectionRef(dataset);
     if (wkt.empty()) throw GDALException("Cannot get projection ref for " + filePath.string());
     char *wktp = const_cast<char *>(wkt.c_str());
-    OGRSpatialReference *srs = new OGRSpatialReference();
-    if (srs->importFromWkt(&wktp) != OGRERR_NONE) throw GDALException("Cannot read spatial reference system for " + filePath.string() + ". Is PROJ installed?");
+    //OGRSpatialReference *srs = new OGRSpatialReference();
+    //if (srs->importFromWkt(&wktp) != OGRERR_NONE) throw GDALException("Cannot read spatial reference system for " + filePath.string() + ". Is PROJ installed?");
 
-    OGRSpatialReference *compare = new OGRSpatialReference();
-    compare->importFromEPSG(4326);
+    //OGRSpatialReference *compare = new OGRSpatialReference();
+    //compare->importFromEPSG(4326);
 
     // TODO: support for DSM with EPSG different than 4326
-    if (!srs->IsSame(compare)) throw GDALException("Cannot read DSM values from raster: " + filePath.string() + " (EPSG != 4326)");
+    //if (!srs->IsSame(compare)) throw GDALException("Cannot read DSM values from raster: " + filePath.string() + " (EPSG != 4326)");
     if (dataset->GetRasterCount() != 1) throw GDALException("More than 1 raster band found in elevation raster: " + filePath.string());
 
     e.nodata = static_cast<float>(dataset->GetRasterBand(1)->GetNoDataValue(&e.hasNodata));
@@ -156,8 +156,8 @@ bool DSMService::addGeoTIFFToCache(const fs::path &filePath, double latitude, do
 
     cache[filePath.filename().string()] = e;
     GDALClose(dataset);
-    delete srs;
-    delete compare;
+    //delete srs;
+    //delete compare;
 
     return contained;
 }
