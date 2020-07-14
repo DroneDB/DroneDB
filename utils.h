@@ -35,6 +35,7 @@
 #define stat _stat
 #else
     #include <limits.h>
+    #include <termios.h>
     #include <unistd.h>
 #endif
 
@@ -122,6 +123,12 @@ fs::path getCwd();
 
 // Prints to the provided buffer a nice number of bytes (KB, MB, GB, etc)
 std::string bytesToHuman(off_t bytes);
+
+//
+std::string getPrompt(const std::string &prompt = "");
+
+// Cross-platform getpass
+std::string getPass(const std::string &prompt = "Password: ");
 
 }
 

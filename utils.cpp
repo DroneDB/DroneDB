@@ -143,4 +143,76 @@ std::string bytesToHuman(off_t bytes){
     return os.str();
 }
 
+std::string getPass(const std::string &prompt){
+#ifdef _WIN32
+    const char BACKSPACE = 8;
+    const char RETURN = 13;
+
+    std::string password;
+    unsigned char ch = 0;
+
+    std::cout << prompt;
+    std::cout.flush();
+
+    DWORD con_mode;
+    DWORD dwRead;
+
+    HANDLE hIn = GetStdHandle(STD_INPUT_HANDLE);
+
+    GetConsoleMode( hIn, &con_mode );
+    SetConsoleMode( hIn, con_mode & ~(ENABLE_ECHO_INPUT | ENABLE_LINE_INPUT) );
+
+    while(ReadConsoleA( hIn, &ch, 1, &dwRead, NULL) && ch !=RETURN){
+         if(ch==BACKSPACE){
+            if(password.length() != 0){
+                password.resize(password.length()-1);
+            }
+         }else{
+             password+=ch;
+         }
+    }
+    std::cout << std::endl;
+    return password;
+#else
+    struct termios oflags, nflags;
+    char password[1024];
+
+    /* disabling echo */
+    tcgetattr(fileno(stdin), &oflags);
+    nflags = oflags;
+    nflags.c_lflag &= ~ECHO;
+    nflags.c_lflag |= ECHONL;
+
+    if (tcsetattr(fileno(stdin), TCSANOW, &nflags) != 0) {
+        perror("tcsetattr");
+        exit(EXIT_FAILURE);
+    }
+
+    std::cout << prompt;
+    std::cout.flush();
+    fgets(password, sizeof(password), stdin);
+    password[strlen(password) - 1] = 0;
+
+    /* restore terminal */
+    if (tcsetattr(fileno(stdin), TCSANOW, &oflags) != 0) {
+        perror("tcsetattr");
+        exit(EXIT_FAILURE);
+    }
+
+    return std::string(password);
+#endif
+}
+
+std::string getPrompt(const std::string &prompt){
+    char input[1024];
+
+    std::cout << prompt;
+    std::cout.flush();
+
+    fgets(input, sizeof(input), stdin);
+    input[strlen(input) - 1] = 0;
+
+    return std::string(input);
+}
+
 }

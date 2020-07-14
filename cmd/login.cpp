@@ -5,6 +5,7 @@
 #include "login.h"
 #include "../classes/registry.h"
 #include "../constants.h"
+#include "../utils.h"
 
 namespace cmd {
 
@@ -25,13 +26,23 @@ std::string Login::description() {
 }
 
 void Login::run(cxxopts::ParseResult &opts) {
-    //std::string p = ddb::create(opts["directory"].as<std::string>());
-    if (!opts["username"].count() || !opts["password"].count()){
-        printHelp();
+    std::string username;
+    std::string password;
+
+    if (opts["username"].count() > 0){
+        username = opts["username"].as<std::string>();
+    }else{
+        username = utils::getPrompt("Username: ");
+    }
+
+    if (opts["password"].count() > 0){
+        password = opts["password"].as<std::string>();
+    }else{
+        password = utils::getPass("Password: ");
     }
 
     ddb::Registry reg(opts["host"].as<std::string>());
-    std::string token = reg.login(opts["username"].as<std::string>(), opts["password"].as<std::string>());
+    std::string token = reg.login(username, password);
     if (token.length() > 0){
         std::cout << "Login succeeded for " << reg.getUrl() << std::endl;
     }
