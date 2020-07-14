@@ -17,8 +17,8 @@ class Response{
     size_t bufSize;
 public:
     Response();
-	Response(Response&& other) noexcept;
-	Response& Response::operator=(Response&& other) noexcept;
+    Response(Response&& other) noexcept;
+    Response& operator=(Response&& other) noexcept;
     ~Response();
 
     char* getData();

@@ -13,32 +13,32 @@ Response::Response() : statusCode(0), buf(nullptr), bufSize(0){
 }
 
 Response::Response(Response&& other) noexcept : statusCode(0), buf(nullptr), bufSize(0) {
-	// Copy
-	statusCode = other.statusCode;
-	buf = other.buf;
-	bufSize = other.bufSize;
+    // Copy
+    statusCode = other.statusCode;
+    buf = other.buf;
+    bufSize = other.bufSize;
 
-	// Prevent multiple de-allocations
-	other.statusCode = 0;
-	other.buf = nullptr;
-	other.bufSize = 0;
+    // Prevent multiple de-allocations
+    other.statusCode = 0;
+    other.buf = nullptr;
+    other.bufSize = 0;
 }
 
 Response& Response::operator=(Response&& other) noexcept {
-	if (this != &other)
-	{
-		// Free the existing resource.
-		free(buf);
+	if (this != &other){
+        // Free the existing resource.
+        free(buf);
 
-		// Copy the data
-		buf = other.buf;
-		bufSize = other.bufSize;
+        // Copy the data
+        buf = other.buf;
+        bufSize = other.bufSize;
 
-		// Release the data pointer from the source object so that
-		// the destructor does not free the memory multiple times.
-		other.buf = nullptr;
-		other.bufSize = 0;
+        // Release the data pointer from the source object so that
+        // the destructor does not free the memory multiple times.
+        other.buf = nullptr;
+        other.bufSize = 0;
 	}
+
 	return *this;
 }
 
