@@ -22,6 +22,9 @@ public:
 
     void saveCredentials(const std::string &url, const AuthCredentials &creds);
     AuthCredentials loadCredentials(const std::string &url);
+    bool deleteCredentials(const std::string &url);
+
+    std::vector<std::string> getAuthenticatedRegistryUrls();
 };
 
 }

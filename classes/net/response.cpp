@@ -23,7 +23,13 @@ char *Response::getData(){
     return buf;
 }
 
+bool Response::hasData(){
+    return buf != nullptr;
+}
+
 json Response::getJSON(){
+    if (getData() == nullptr) return json();
+
     try{
         return json::parse(getData());
     }catch(const json::parse_error &e){

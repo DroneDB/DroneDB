@@ -20,6 +20,9 @@ UserProfile *UserProfile::get(){
 UserProfile::UserProfile(){
     // Initialize directories
     createDir(getProfileDir());
+
+    // Initialize auth manager
+    authManager = new AuthManager(getAuthFile());
 }
 
 void UserProfile::createDir(const fs::path &dir){
@@ -72,6 +75,10 @@ fs::path UserProfile::getThumbsDir(int thumbSize){
 
 fs::path UserProfile::getAuthFile(){
     return getProfileDir() / "auth.json";
+}
+
+AuthManager *UserProfile::getAuthManager(){
+    return authManager;
 }
 
 }

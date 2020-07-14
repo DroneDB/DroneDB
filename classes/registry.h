@@ -20,7 +20,7 @@ public:
 
     std::string getToken(const std::string &username, const std::string &password) const;
     std::string login(const std::string &username, const std::string &password) const;
-    void logout();
+    bool logout();
 };
 
 }

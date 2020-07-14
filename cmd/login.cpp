@@ -33,7 +33,7 @@ void Login::run(cxxopts::ParseResult &opts) {
     ddb::Registry reg(opts["host"].as<std::string>());
     std::string token = reg.login(opts["username"].as<std::string>(), opts["password"].as<std::string>());
     if (token.length() > 0){
-        std::cout << "Login succeeded" << std::endl;
+        std::cout << "Login succeeded for " << reg.getUrl() << std::endl;
     }
 }
 

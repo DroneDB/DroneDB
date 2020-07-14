@@ -20,6 +20,7 @@ public:
     ~Response();
 
     char* getData();
+    bool hasData();
     json getJSON();
     long status();
 

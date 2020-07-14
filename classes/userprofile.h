@@ -21,7 +21,7 @@ public:
     fs::path getThumbsDir(int thumbSize);
     fs::path getAuthFile();
 
-    AuthManager *getAuthManager;
+    AuthManager *getAuthManager();
 private:
     UserProfile();
 

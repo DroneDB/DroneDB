@@ -57,4 +57,23 @@ AuthCredentials AuthManager::loadCredentials(const std::string &url){
     return ac;
 }
 
+bool AuthManager::deleteCredentials(const std::string &url){
+    if (auth["auths"].contains(url)){
+        LOGD << "Deleting credentials for " << url;
+        auth["auths"].erase(url);
+        WriteToDisk();
+        return true;
+    }
+
+    return false;
+}
+
+std::vector<std::string> AuthManager::getAuthenticatedRegistryUrls(){
+    std::vector<std::string> result;
+    for (auto it = auth["auths"].begin(); it != auth["auths"].end(); it++){
+        result.push_back(it.key());
+    }
+    return result;
+}
+
 }

@@ -8,6 +8,7 @@
 #include "../json.h"
 #include "exceptions.h"
 #include "registry.h"
+#include "userprofile.h"
 
 using homer6::Url;
 
@@ -43,24 +44,25 @@ std::string Registry::login(const std::string &username, const std::string &pass
     net::Response res = net::POST(getUrl("/users/authenticate"))
                             .formData({"username", username, "password", password})
                             .send();
-    if (res.status() == 200){
-        json j = res.getJSON();
-        if (j.contains("token")){
 
-            // TODO: save to creds store
+    json j = res.getJSON();
 
-            return j["token"];
-        }else{
-            // TODO: parse errors
-            throw AuthException("Login failed: cannot authenticate.");
-        }
+    if (res.status() == 200 && j.contains("token")){
+        std::string token = j["token"].get<std::string>();
+
+        // Save for next time
+        UserProfile::get()->getAuthManager()->saveCredentials(url, AuthCredentials(username, password));
+
+        return token;
+    }else if (j.contains("error")){
+        throw AuthException("Login failed: " + j["error"].get<std::string>());
     }else{
         throw AuthException("Login failed: host returned " + std::to_string(res.status()));
     }
 }
 
-void Registry::logout(){
-    // TODO: remove from creds store
+bool Registry::logout(){
+    return UserProfile::get()->getAuthManager()->deleteCredentials(url);
 }
 
 }
