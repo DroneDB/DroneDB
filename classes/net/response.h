@@ -1,0 +1,29 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+#ifndef NET_RESPONSE_H
+#define NET_RESPONSE_H
+
+#include <curl/curl.h>
+#include <string>
+
+namespace ddb::net{
+
+class Response{
+    int statusCode;
+
+    char *buf;
+    size_t bufSize;
+public:
+    Response();
+    ~Response();
+
+    char* getData();
+
+    // Use by curl to write result into memory
+    static size_t WriteCallback(void *contents, size_t size, size_t nmemb, void *userp);
+};
+
+}
+
+#endif // NET_RESPONSE_H

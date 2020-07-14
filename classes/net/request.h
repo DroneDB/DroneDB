@@ -6,7 +6,9 @@
 
 #include <curl/curl.h>
 #include <string>
+#include <vector>
 #include "reqtype.h"
+#include "response.h"
 
 namespace ddb::net{
 
@@ -14,10 +16,14 @@ class Request{
     std::string url;
     ReqType reqType;
     CURL *curl;
+
+    std::string urlEncode(const std::string &str);
 public:
     Request(const std::string &url, ReqType reqType);
     ~Request();
 
+    Response send();
+    Request &formData(std::initializer_list<std::string> params);
     void downloadToFile(const std::string &outFile);
 };
 

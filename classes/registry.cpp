@@ -4,6 +4,7 @@
 
 #include "../url.h"
 #include "../utils.h"
+#include "../net.h"
 #include "exceptions.h"
 #include "registry.h"
 
@@ -40,7 +41,10 @@ std::string Registry::getToken(const std::string &username, const std::string &p
 }
 
 bool Registry::login(const std::string &username, const std::string &password) const{
-    return true;
+    net::Response res = net::POST(url)
+                            .formData({"username", username, "password", password})
+                            .send();
+    std::cout << res.getData() << std::endl;
 }
 
 void Registry::logout(){

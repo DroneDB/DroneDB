@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "login.h"
+#include "../classes/registry.h"
 #include "../constants.h"
 
 namespace cmd {
@@ -25,7 +26,13 @@ std::string Login::description() {
 
 void Login::run(cxxopts::ParseResult &opts) {
     //std::string p = ddb::create(opts["directory"].as<std::string>());
-    //std::cout << "Initialized empty database in " << p << std::endl;
+    if (!opts["username"].count() || !opts["password"].count()){
+        printHelp();
+    }
+
+    ddb::Registry reg(opts["host"].as<std::string>());
+    reg.login(opts["username"].as<std::string>(), opts["password"].as<std::string>());
+
 }
 
 }

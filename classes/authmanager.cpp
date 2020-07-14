@@ -41,4 +41,20 @@ void AuthManager::saveCredentials(const std::string &url, const AuthCredentials 
     WriteToDisk();
 }
 
+AuthCredentials AuthManager::loadCredentials(const std::string &url){
+    AuthCredentials ac;
+
+    if (auth["auths"].contains(url)){
+        std::string userpwd = Base64::decode(auth["auths"][url]);
+        int colonpos = userpwd.rfind(":");
+        if (colonpos > 0){
+            LOGD << "Found username and password for " << url;
+            ac.username = userpwd.substr(0, colonpos - 1);
+            ac.password = userpwd.substr(colonpos + 1, userpwd.length() - colonpos - 1);
+        }
+    }
+
+    return ac;
+}
+
 }

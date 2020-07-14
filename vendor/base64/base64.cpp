@@ -75,7 +75,12 @@ std::string Base64::encode(const uint8_t* buf, unsigned int bufLen)
     return ret;
 }
 
-std::vector<uint8_t> Base64::decode(std::string encoded_string)
+std::string Base64::decode(std::string encoded_string){
+    std::vector<uint8_t> chars = decode_bytes(encoded_string);
+    return std::string(chars.begin(), chars.end());
+}
+
+std::vector<uint8_t> Base64::decode_bytes(std::string encoded_string)
 {
     // Make sure string length is a multiple of 4
     while ((encoded_string.size() % 4) != 0)
