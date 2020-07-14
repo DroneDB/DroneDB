@@ -6,6 +6,7 @@
 
 #include <curl/curl.h>
 #include <string>
+#include "../../json.h"
 
 namespace ddb::net{
 
@@ -19,6 +20,7 @@ public:
     ~Response();
 
     char* getData();
+    json getJSON();
     long status();
 
     // Use by curl to write result into memory

@@ -23,6 +23,14 @@ char *Response::getData(){
     return buf;
 }
 
+json Response::getJSON(){
+    try{
+        return json::parse(getData());
+    }catch(const json::parse_error &e){
+        throw JSONException("Invalid JSON: " + std::string(getData()));
+    }
+}
+
 long Response::status(){
     return statusCode;
 }

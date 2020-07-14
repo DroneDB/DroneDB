@@ -5,6 +5,7 @@
 #include "../url.h"
 #include "../utils.h"
 #include "../net.h"
+#include "../json.h"
 #include "exceptions.h"
 #include "registry.h"
 
@@ -34,24 +35,32 @@ Registry::Registry(const std::string &url){
 
 }
 
-std::string Registry::getUrl() const{
-    return url;
+std::string Registry::getUrl(const std::string &path) const{
+    return url + path;
 }
 
 std::string Registry::login(const std::string &username, const std::string &password) const{
-    net::Response res = net::POST(url)
+    net::Response res = net::POST(getUrl("/users/authenticate"))
                             .formData({"username", username, "password", password})
                             .send();
     if (res.status() == 200){
-        std::cout << res.getData() << std::endl;
-        return "TOKEN";
+        json j = res.getJSON();
+        if (j.contains("token")){
+
+            // TODO: save to creds store
+
+            return j["token"];
+        }else{
+            // TODO: parse errors
+            throw AuthException("Login failed: cannot authenticate.");
+        }
     }else{
-        throw AuthException("Login failed: " + url + " returned " + std::to_string(res.status()));
+        throw AuthException("Login failed: host returned " + std::to_string(res.status()));
     }
 }
 
 void Registry::logout(){
-
+    // TODO: remove from creds store
 }
 
 }

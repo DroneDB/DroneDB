@@ -16,7 +16,7 @@ class Registry{
 public:
     Registry(const std::string &url);
 
-    std::string getUrl() const;
+    std::string getUrl(const std::string &path = "") const;
 
     std::string getToken(const std::string &username, const std::string &password) const;
     std::string login(const std::string &username, const std::string &password) const;

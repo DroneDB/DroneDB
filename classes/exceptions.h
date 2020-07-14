@@ -40,6 +40,9 @@ class URLException : public AppException{
 class AuthException : public AppException{
     using AppException::AppException;
 };
+class JSONException : public AppException{
+    using AppException::AppException;
+};
 
 }
 #endif // EXCEPTIONS_H
