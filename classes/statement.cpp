@@ -9,7 +9,7 @@ using namespace ddb;
 
 Statement::Statement(sqlite3 *db, const std::string &query)
     : db(db), query(query), hasRow(false), done(false) {
-    if (sqlite3_prepare_v2(db, query.c_str(), static_cast<int>(query.size()), &stmt, nullptr) != SQLITE_OK) {
+    if (sqlite3_prepare_v2(db, query.c_str(), static_cast<int>(query.length()), &stmt, nullptr) != SQLITE_OK) {
         throw SQLException("Cannot prepare SQL statement: " + query);
     }
 
@@ -33,7 +33,7 @@ Statement::~Statement() {
 Statement &Statement::bind(int paramNum, const std::string &value) {
     assert(stmt != nullptr && db != nullptr);
 //    LOGD << "Bind \"" << value << "\" as param " << paramNum;
-    bindCheck(sqlite3_bind_text(stmt, paramNum, value.c_str(), static_cast<int>(value.size()), SQLITE_TRANSIENT));
+    bindCheck(sqlite3_bind_text(stmt, paramNum, value.c_str(), static_cast<int>(value.length()), SQLITE_TRANSIENT));
     return *this;
 }
 

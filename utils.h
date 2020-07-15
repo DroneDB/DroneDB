@@ -13,11 +13,11 @@
 #include <cctype>
 #include <string>
 #include <cmath>
-#include <filesystem>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include "classes/exceptions.h"
 #include "logger.h"
+#include "fs.h"
 
 #ifndef M_PI
     #define M_PI 3.1415926535
@@ -35,16 +35,13 @@
 #define stat _stat
 #else
     #include <limits.h>
+    #include <termios.h>
     #include <unistd.h>
 #endif
 
 #ifndef PATH_MAX
     #define PATH_MAX 4096
 #endif
-
-
-
-namespace fs = std::filesystem;
 
 namespace utils {
 
@@ -126,6 +123,12 @@ fs::path getCwd();
 
 // Prints to the provided buffer a nice number of bytes (KB, MB, GB, etc)
 std::string bytesToHuman(off_t bytes);
+
+//
+std::string getPrompt(const std::string &prompt = "");
+
+// Cross-platform getpass
+std::string getPass(const std::string &prompt = "Password: ");
 
 }
 

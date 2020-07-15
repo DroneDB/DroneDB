@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "ddb.h"
+#include "../version.h"
 #include "gdal_priv.h"
 #include "../logger.h"
 
@@ -338,7 +339,7 @@ void syncIndex(Database *db) {
 }
 
 std::string getVersion(){
-    return "0.9.1";
+    return APP_VERSION;
 }
 
 // This must be called as the very first function
@@ -350,6 +351,7 @@ void initialize(bool verbose = false){
 	}
     Database::Initialize();
     exif::Initialize();
+    net::Initialize();
     GDALAllRegister();
 }
 

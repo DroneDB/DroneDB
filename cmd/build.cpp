@@ -3,11 +3,9 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include <iostream>
-#include <filesystem>
+#include "../fs.h"
 #include "build.h"
 #include "../libs/ddb.h"
-
-namespace fs = std::filesystem;
 
 namespace cmd {
 
@@ -29,6 +27,8 @@ void Build::run(cxxopts::ParseResult &opts) {
     if (!opts.count("paths")) {
         printHelp();
     }
+
+    std::cerr << "TODO: HIS MODULE IS A WORK IN PROGRESS!";
 
     exit(1);
 }

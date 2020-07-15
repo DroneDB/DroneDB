@@ -4,12 +4,9 @@
 #ifndef ENTRY_H
 #define ENTRY_H
 
-#include <filesystem>
 #include "gdal_priv.h"
 #include "ogrsf_frmts.h"
 #include "ogr_srs_api.h"
-#include "json_fwd.hpp"
-#include "json.hpp"
 #include "types.h"
 #include "../logger.h"
 #include "../classes/exceptions.h"
@@ -18,12 +15,10 @@
 #include "../classes/exif.h"
 #include "../classes/basicgeometry.h"
 #include "../libs/geo.h"
-
-namespace fs = std::filesystem;
+#include "../json.h"
+#include "../fs.h"
 
 namespace ddb {
-
-using json = nlohmann::json;
 
 struct Entry {
     std::string path = "";

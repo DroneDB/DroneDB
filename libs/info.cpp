@@ -8,8 +8,6 @@
 
 namespace ddb {
 
-using json = nlohmann::json;
-
 void parseFiles(const std::vector<std::string> &input, std::ostream &output, ParseFilesOpts &opts){
     std::vector<fs::path> filePaths;
 

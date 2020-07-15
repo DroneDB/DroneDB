@@ -5,7 +5,7 @@
 #include "userprofile.h"
 #include "exceptions.h"
 
-using namespace ddb;
+namespace ddb{
 
 UserProfile *UserProfile::instance = nullptr;
 
@@ -20,6 +20,9 @@ UserProfile *UserProfile::get(){
 UserProfile::UserProfile(){
     // Initialize directories
     createDir(getProfileDir());
+
+    // Initialize auth manager
+    authManager = new AuthManager(getAuthFile());
 }
 
 void UserProfile::createDir(const fs::path &dir){
@@ -68,4 +71,14 @@ fs::path UserProfile::getThumbsDir(int thumbSize){
     const fs::path thumbsSizeDir = thumbsDir / fs::path(std::to_string(thumbSize));
     createDir(thumbsSizeDir);
     return thumbsSizeDir;
+}
+
+fs::path UserProfile::getAuthFile(){
+    return getProfileDir() / "auth.json";
+}
+
+AuthManager *UserProfile::getAuthManager(){
+    return authManager;
+}
+
 }

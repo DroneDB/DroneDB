@@ -6,9 +6,6 @@
 #include "sync.h"
 #include "../libs/ddb.h"
 
-
-namespace fs = std::filesystem;
-
 namespace cmd {
 
 void Sync::setOptions(cxxopts::Options &opts) {

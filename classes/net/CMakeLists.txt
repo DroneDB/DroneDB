@@ -1,10 +1,7 @@
 file(GLOB SOURCES "*.cpp")
 
-add_subdirectory("net")
-
 set(SRC_LIST
    ${SRC_LIST}
    ${SOURCES}
    PARENT_SCOPE
 )
-
