@@ -3,10 +3,10 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include <sstream>
 #include "functions.h"
-#include "../libs/ddb.h"
-#include "../libs/info.h"
-#include "../libs/thumbs.h"
-#include "../libs/entry.h"
+#include "ddb.h"
+#include "info.h"
+#include "thumbs.h"
+#include "entry.h"
 
 NAN_METHOD(getVersion) {
     info.GetReturnValue().Set(Nan::New(ddb::getVersion()).ToLocalChecked());

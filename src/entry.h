@@ -1,0 +1,51 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+#ifndef ENTRY_H
+#define ENTRY_H
+
+#include <gdal_priv.h>
+#include <ogrsf_frmts.h>
+#include <ogr_srs_api.h>
+#include "entry_types.h"
+#include "logger.h"
+#include "exceptions.h"
+#include "utils.h"
+#include "hash.h"
+#include "exif.h"
+#include "basicgeometry.h"
+#include "geo.h"
+#include "json.h"
+#include "fs.h"
+
+namespace ddb {
+
+struct Entry {
+    std::string path = "";
+    std::string hash = "";
+    EntryType type = EntryType::Undefined;
+    json meta;
+    time_t mtime = 0;
+    off_t size = 0;
+    int depth = 0;
+
+    BasicPointGeometry point_geom;
+    BasicPolygonGeometry polygon_geom;
+
+    void toJSON(json &j);
+    bool toGeoJSON(json &j, BasicGeometryType type = BasicGeometryType::BGAuto);
+    std::string toString();
+};
+
+struct ParseEntryOpts{
+    bool withHash = true;
+    bool stopOnError = true;
+};
+
+bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entry, ParseEntryOpts &opts);
+Geographic2D getRasterCoordinate(OGRCoordinateTransformationH hTransform, double *geotransform, double x, double y);
+void calculateFootprint(const SensorSize &sensorSize, const GeoLocation &geo, const Focal &focal, const CameraOrientation &cameraOri, double relAltitude, BasicGeometry &geom);
+
+}
+
+#endif // ENTRY_H

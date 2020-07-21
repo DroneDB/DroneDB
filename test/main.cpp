@@ -3,8 +3,8 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include <gtest/gtest.h>
-#include "../logger.h"
-#include "../libs/ddb.h"
+#include "logger.h"
+#include "ddb.h"
 
 int main(int argc, char **argv) {
 	ddb::initialize(true);

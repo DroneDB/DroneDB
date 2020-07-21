@@ -6,6 +6,13 @@ cmake_policy(SET CMP0048 NEW)
 #set (CMAKE_USER_MAKE_RULES_OVERRIDE "${CMAKE_CURRENT_LIST_DIR}/CompilerOptions.cmake")
 project(ddb)
 
+# Read version
+file(READ "package.json" PACKAGE_JSON)
+string(REGEX MATCH "\"version\": \"[0-9]+\\.[0-9]+\\.[0-9]+" APP_VERSION ${PACKAGE_JSON})
+string(SUBSTRING ${APP_VERSION} 12 -1 APP_VERSION)
+message("DDB Version: ${APP_VERSION}")
+add_compile_options("-DAPP_VERSION=\"${APP_VERSION}\"")
+
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 if(NOT CMAKE_BUILD_TYPE)
@@ -107,24 +114,18 @@ find_package(SpatiaLite REQUIRED)
 find_package(Sqlite3 REQUIRED)
 include_directories(${GDAL_INCLUDE_DIR})
 
-#dl
 if (NOT WIN32)
     set(STDPPFS_LIBRARY stdc++fs)
 endif()
 
 set(LINK_LIBRARIES ${SPATIALITE_LIBRARY} ${SQLITE3_LIBRARY} ${STDPPFS_LIBRARY} ${EXIV2_LIB} cctz::cctz ${GDAL_LIBRARY} ${CURL_LIBRARY})
 
-set(SRC_LIST
-    ${CMAKE_CURRENT_SOURCE_DIR}/utils.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/logger.cpp
-    )
-set(CMD_SRC_LIST ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
-    )
-add_subdirectory("cmd")
-add_subdirectory("classes")
-add_subdirectory("libs")
+set(CMD_SRC_LIST ${CMAKE_CURRENT_SOURCE_DIR}/src/cmd/main.cpp)
+
+add_subdirectory("src")
 add_subdirectory("vendor")
 
+include_directories("src")
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}/vendor")
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}/vendor/cctz/include")
 
@@ -161,6 +162,7 @@ if (WIN32)
 endif()
 
 file(GLOB DATA_FILES "${CMAKE_CURRENT_SOURCE_DIR}/ddb_data/*")
+list(FILTER DATA_FILES EXCLUDE REGEX "^.git$")
 file(COPY ${DATA_FILES} DESTINATION ${CMAKE_BINARY_DIR})
 
 if (NOT CMAKE_JS_VERSION)
