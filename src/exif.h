@@ -60,7 +60,6 @@ class ExifParser {
     Exiv2::ExifData exifData;
     Exiv2::XmpData xmpData;
   public:
-    static void Initialize();
     ExifParser(const Exiv2::Image *image) : exifData(image->exifData()), xmpData(image->xmpData()) {};
     ExifParser(const Exiv2::ExifData &exifData, const Exiv2::XmpData &xmpData) : exifData(exifData), xmpData(xmpData) {};
 

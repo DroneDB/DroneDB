@@ -356,7 +356,6 @@ void initialize(bool verbose){
 		set_logger_verbose();
 	}
     Database::Initialize();
-    ExifParser::Initialize();
     net::Initialize();
     GDALAllRegister();
 }
