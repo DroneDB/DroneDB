@@ -11,8 +11,8 @@ namespace ddb {
 
 // Register XMP namespaces
 void ExifParser::Initialize(){
-    Exiv2::XmpProperties::registerNs("http://www.dji.com/drone-dji/1.0/", "drone-dji");
-    Exiv2::XmpProperties::registerNs("sensefly", "Camera");
+    //Exiv2::XmpProperties::registerNs("http://www.dji.com/drone-dji/1.0/", "drone-dji");
+    //Exiv2::XmpProperties::registerNs("sensefly", "Camera");
 }
 
 Exiv2::ExifData::const_iterator ExifParser::findExifKey(const std::string &key) {

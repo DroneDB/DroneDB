@@ -19,7 +19,7 @@ void SensorData::checkDbInit(){
         fs::path dbPath = utils::getDataPath("sensor_data.sqlite");
         if (dbPath.empty()) throw DBException("Cannot find sensor database sensor_data.sqlite");
 
-        db->open(dbPath);
+        db->open(dbPath.string());
     }
 }
 
