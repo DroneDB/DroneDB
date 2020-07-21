@@ -143,11 +143,28 @@ else()
 endif()
 
 if (WIN32)
-add_custom_command(TARGET "${PROJECT_NAME}" POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different  $<TARGET_FILE:ddb> "${CMAKE_BINARY_DIR}/ddb.dll"
-    COMMENT "Created ${CMAKE_BINARY_DIR}/ddb.dll"
-)
+    add_custom_command(TARGET "${PROJECT_NAME}" POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different  $<TARGET_FILE:ddb> "${CMAKE_BINARY_DIR}/ddb.dll"
+        COMMENT "Created ${CMAKE_BINARY_DIR}/ddb.dll"
+    )
+
+    add_custom_command(
+        TARGET "${PROJECT_NAME}" PRE_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_BINARY_DIR}/exiv2-build/bin/exiv2.dll"
+                "${CMAKE_BINARY_DIR}/"
+        COMMENT "Copied ${CMAKE_BINARY_DIR}/exiv2-build/bin/exiv2.dll"
+    )
+
+    file(GLOB GDAL_DLLS "${DOWNLOADS_DIR}/gdal/bin/*.dll")
+    file(COPY ${GDAL_DLLS} DESTINATION ${CMAKE_BINARY_DIR})
+
+    # Fix linking
+    target_link_libraries("${PROJECT_NAME}" ${LINK_LIBRARIES})
 endif()
+
+file(GLOB DATA_FILES "${CMAKE_CURRENT_SOURCE_DIR}/ddb_data/*")
+file(COPY ${DATA_FILES} DESTINATION ${CMAKE_BINARY_DIR})
 
 if (NOT CMAKE_JS_VERSION)
     add_executable("${PROJECT_NAME}cmd" ${CMD_SRC_LIST})
@@ -171,28 +188,6 @@ if (NOT CMAKE_JS_VERSION)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:ddbcmd> ${CMAKE_BINARY_DIR}/ddb${EXE_EXT}
         COMMENT "Created ${CMAKE_BINARY_DIR}/ddb${EXE_EXT}"
     )
-
-    if (WIN32)
-        # Copy DLLs
-        add_custom_command(
-            TARGET "${PROJECT_NAME}" PRE_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    "${CMAKE_BINARY_DIR}/exiv2-build/bin/exiv2.dll"
-                    "${CMAKE_BINARY_DIR}/"
-            COMMENT "Copied ${CMAKE_BINARY_DIR}/exiv2-build/bin/exiv2.dll"
-        )
-
-        file(GLOB GDAL_DLLS "${DOWNLOADS_DIR}/gdal/bin/*.dll")
-        file(COPY ${GDAL_DLLS} DESTINATION ${CMAKE_BINARY_DIR})
-
-        file(COPY "${DOWNLOADS_DIR}/gdal/bin/proj6/share/proj.db" DESTINATION ${CMAKE_BINARY_DIR})
-
-        # Fix linking
-        target_link_libraries("${PROJECT_NAME}" ${LINK_LIBRARIES})
-    endif()
-
-    file(GLOB DATA_FILES "${CMAKE_CURRENT_SOURCE_DIR}/ddb_data/*")
-    file(COPY ${DATA_FILES} DESTINATION ${CMAKE_BINARY_DIR})
 endif()
 
 # json1 extension
@@ -202,39 +197,11 @@ endif()
 
 # Nodejs bindings
 if (CMAKE_JS_VERSION)
-
-    message ("BUILDING WITH NODE")
-
-    set(BUILD_TESTING OFF)
+    message ("Building Node.js bindings")
     include_directories(${CMAKE_JS_INC})
 
-    # Statement above doesn't include directories (QtCreator bug?)
-    if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-        message(${CMAKE_CURRENT_SOURCE_DIR})
-        include_directories("${CMAKE_CURRENT_SOURCE_DIR}/node_modules/nan")
-        include_directories("C:/Users/IT 2/.cmake-js/node-x64/v12.16.1/include/node")
-    endif()
-
-    if (WIN32)
-        add_custom_command(
-            TARGET "${PROJECT_NAME}" PRE_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    "${CMAKE_BINARY_DIR}/exiv2-build/bin/exiv2.dll"
-                    "${CMAKE_BINARY_DIR}/"
-            COMMENT "Copied ${CMAKE_BINARY_DIR}/exiv2-build/bin/exiv2.dll"
-        )
-
-        file(GLOB GDAL_DLLS "${DOWNLOADS_DIR}/gdal/bin/*.dll")
-        file(COPY ${GDAL_DLLS} DESTINATION ${CMAKE_BINARY_DIR})
-
-        # Fix linking
-        target_link_libraries("${PROJECT_NAME}" ${LINK_LIBRARIES})
-    endif()
-
-    file(GLOB DATA_FILES "${CMAKE_CURRENT_SOURCE_DIR}/ddb_data/*")
-    file(COPY ${DATA_FILES} DESTINATION ${CMAKE_BINARY_DIR})
-
-    #file(COPY ${DATA_FILES} DESTINATION "${CMAKE_BINARY_DIR}/${CMAKE_BUILD_TYPE}")
+    include_directories("${CMAKE_CURRENT_SOURCE_DIR}/node_modules/nan")
+    #include_directories("C:/Users/IT 2/.cmake-js/node-x64/v12.16.1/include/node")
 
     file(GLOB NODE_SOURCE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/nodejs/*.cc")
     add_library("node-${PROJECT_NAME}" SHARED ${NODE_SOURCE_FILES})
