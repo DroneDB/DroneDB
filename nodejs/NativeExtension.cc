@@ -26,7 +26,7 @@ NAN_MODULE_INIT(InitAll) {
 
   // Passing target down to the next NAN_MODULE_INIT
   // MyObject::Init(target);
-  ddb::initialize();
+  ddb::initialize(false);
 }
 
 NODE_MODULE(NativeExtension, InitAll)

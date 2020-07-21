@@ -7,9 +7,6 @@ cmake_policy(SET CMP0048 NEW)
 project(ddb)
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-# set(CMAKE_CXX_EXTENSIONS OFF)
-# set(CMAKE_JS_VERSION ON)
-# set(CMAKE_BUILD_TYPE "Debug")
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "Release" CACHE STRING
@@ -189,11 +186,6 @@ if (NOT CMAKE_JS_VERSION)
         COMMENT "Created ${CMAKE_BINARY_DIR}/ddb${EXE_EXT}"
     )
 endif()
-
-# json1 extension
-#add_library(json1 SHARED vendor/ext/json1.c)
-#set_target_properties(json1 PROPERTIES PREFIX "")
-#set_property(TARGET json1 PROPERTY POSITION_INDEPENDENT_CODE ON)
 
 # Nodejs bindings
 if (CMAKE_JS_VERSION)

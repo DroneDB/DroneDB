@@ -8,63 +8,35 @@ on:
 
 jobs:
     build_ubuntu:
-        name: Build on Ubuntu
+        name: Build/Test on Ubuntu
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v2
-            - name: dependencies
+            - name: Install deps
               run: scripts/ubuntu_deps.sh
-            - name: make build folder
-              run: mkdir build
-            - name: show
-              run: cd build && ls -la
             - name: cmake
-              run: cd build && cmake ..
-            - name: make
-              run: cd build && make
-    test_ubuntu:
-        name: Test on Ubuntu
-        runs-on: ubuntu-latest        
-        steps:
-            - uses: actions/checkout@v2
-            - name: dependencies
-              run: scripts/ubuntu_deps.sh
-            - name: make build folder
-              run: mkdir build
-            - name: show
-              run: cd build && ls -la
-            - name: cmake
-              run: cd build && cmake -DBUILD_TESTING=ON ..
-            - name: make
-              run: cd build && make
-            - name: test
+              run: mkdir build && cd build && cmake -DBUILD_TESTING=ON ..
+            - name: Build C++ lib/program and tests
+              run: cd build && make -j$(nproc)
+            - name: Test C++ lib/program
               run: cd build/test && ./test
+            - name: Build Node.js bindings
+              run: npm install
+            - name: Test Node.js bindings
+              run: npm test
+
     build_windows:
-        name: Build on Windows
+        name: Build/Test on Windows
         runs-on: windows-latest
         steps:
             - uses: actions/checkout@v2
-            # - uses: lukka/get-cmake@latest            
-            - run: |
+            - name: Build C++ lib/program and tests
+              run: |
                 mkdir build
-                cd build                
+                cd build           
                 cmake ..
-                dir
                 cmake --build . --config Debug --target ALL_BUILD -- /maxcpucount:14
                 dir
-    test_windows:
-        name: Test on Windows
-        runs-on: windows-latest
-        steps:
-            - uses: actions/checkout@v2
-            # - uses: lukka/get-cmake@latest            
-            - run: |
-                mkdir build
-                cd build                
-                cmake -DBUILD_TESTING=ON .. 
-                dir
-                cmake --build . --config Debug --target ALL_BUILD -- /maxcpucount:14
-                dir
-            - name: test
+            - name: Test C++ lib/program
               run: .\scripts\setup_windows_env.bat && cd build && test.exe
               shell: cmd
