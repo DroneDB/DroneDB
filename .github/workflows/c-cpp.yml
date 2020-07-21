@@ -20,10 +20,6 @@ jobs:
               run: cd build && make -j$(nproc)
             - name: Test C++ lib/program
               run: cd build/test && ./test
-            - name: Build Node.js bindings
-              run: npm install
-            - name: Test Node.js bindings
-              run: npm test
 
     build_windows:
         name: Build/Test on Windows
