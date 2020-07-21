@@ -8,7 +8,7 @@ on:
 
 jobs:
     build_ubuntu:
-        name: C++ Build/Test on Ubuntu
+        name: Build/Test on Ubuntu
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v2
@@ -26,7 +26,7 @@ jobs:
               run: npm test
 
     build_windows:
-        name: C++ Build/Test on Windows
+        name: Build/Test on Windows
         runs-on: windows-latest
         steps:
             - uses: actions/checkout@v2

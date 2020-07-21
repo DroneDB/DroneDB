@@ -28,24 +28,24 @@ NAN_METHOD(typeToHuman) {
 
 class ParseFilesWorker : public Nan::AsyncWorker {
  public:
-  ParseFilesWorker(Nan::Callback *callback, const std::vector<std::string> &input, ddb::ParseFilesOpts &pfOpts)
+  ParseFilesWorker(Nan::Callback *callback, std::vector<std::string> *input, ddb::ParseFilesOpts &pfOpts)
     : AsyncWorker(callback, "nan:ParseFilesWorker"),
       input(input), pfOpts(pfOpts){}
   ~ParseFilesWorker() {}
 
-  void Execute () {
+  void Execute () override {
     try{
-        ddb::parseFiles(input, s, pfOpts);
+        ddb::parseFiles(*input, s, pfOpts);
     }catch(ddb::AppException &e){
         SetErrorMessage(e.what());
     }
   }
 
-  void HandleOKCallback () {
+  void HandleOKCallback () override {
      Nan::HandleScope scope;
 
      Nan::JSON json;
-     Nan::MaybeLocal<v8::Value> result = json.Parse(v8::String::NewFromUtf8(v8::Isolate::GetCurrent(), s.str().c_str()).ToLocalChecked());
+     Nan::MaybeLocal<v8::Value> result = json.Parse(Nan::New<v8::String>(s.str()).ToLocalChecked());
 
      v8::Local<v8::Value> argv[] = {
          Nan::Null(),
@@ -54,8 +54,14 @@ class ParseFilesWorker : public Nan::AsyncWorker {
      callback->Call(2, argv, async_resource);
    }
 
+   virtual void Destroy() override {
+     // TODO: is this the best way?
+     delete input;
+     Nan::AsyncWorker::Destroy();
+   }
+
  private:
-    std::vector<std::string> input;
+    std::vector<std::string> *input;
     std::ostringstream s;
     ddb::ParseFilesOpts pfOpts;
 };
@@ -82,10 +88,10 @@ NAN_METHOD(parseFiles) {
     // v8 array --> c++ std vector
     auto input = info[0].As<v8::Array>();
     auto ctx = info.GetIsolate()->GetCurrentContext();
-    std::vector<std::string> in;
+    std::vector<std::string> *in = new std::vector<std::string>();
     for (unsigned int i = 0; i < input->Length(); i++){
         Nan::Utf8String str(input->Get(ctx, i).ToLocalChecked());
-        in.push_back(std::string(*str));
+        in->push_back(std::string(*str));
     }
 
     // Parse options

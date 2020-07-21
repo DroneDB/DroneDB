@@ -8,13 +8,13 @@ on:
 
 jobs:
     nodejs_ubuntu:
-        name: NodeJS Build/Test on Ubuntu
+        name: Build/Test on Ubuntu
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v2
             - name: Install deps
               run: scripts/ubuntu_deps.sh
             - name: Build Node.js bindings
-              run: mkdir build && npm install
+              run: npm install
             - name: Test Node.js bindings
               run: npm test
