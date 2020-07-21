@@ -8,13 +8,13 @@ on:
 
 jobs:
     build_ubuntu:
-        name: Build/Test on Ubuntu
+        name: C++ Build/Test on Ubuntu
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v2
             - name: Install deps
               run: scripts/ubuntu_deps.sh
-            - name: cmake
+            - name: Run CMake
               run: mkdir build && cd build && cmake -DBUILD_TESTING=ON ..
             - name: Build C++ lib/program and tests
               run: cd build && make -j$(nproc)
@@ -26,7 +26,7 @@ jobs:
               run: npm test
 
     build_windows:
-        name: Build/Test on Windows
+        name: C++ Build/Test on Windows
         runs-on: windows-latest
         steps:
             - uses: actions/checkout@v2

@@ -195,7 +195,12 @@ if (CMAKE_JS_VERSION)
     include_directories(${CMAKE_JS_INC})
 
     include_directories("${CMAKE_CURRENT_SOURCE_DIR}/node_modules/nan")
-    #include_directories("C:/Users/IT 2/.cmake-js/node-x64/v12.16.1/include/node")
+
+    # Line below is needed only for development, 
+    # if you want autocomplete to discover certain headers. 
+    # Does not affect compilation
+    # TODO: how to avoid hardcoding this path...
+    include_directories("/home/piero/.cmake-js/node-x64/v14.4.0/include/node")
 
     file(GLOB NODE_SOURCE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/nodejs/*.cc")
     add_library("node-${PROJECT_NAME}" SHARED ${NODE_SOURCE_FILES})

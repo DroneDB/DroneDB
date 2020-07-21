@@ -14,6 +14,9 @@ fi
 hash cmake-js 2>/dev/null || not_found=true 
 if [[ $not_found ]]; then
     sudo npm install -g cmake-js
+
+    # For building bindings and tests
+    sudo npm install nan mocha
 fi
 
 sudo apt install -y --fix-missing --no-install-recommends ca-certificates cmake git sqlite3 spatialite-bin exiv2 libexiv2-dev libgeos-dev libgdal-dev g++-8 gcc-8

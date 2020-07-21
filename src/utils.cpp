@@ -192,7 +192,7 @@ std::string getPass(const std::string &prompt){
 
     std::cout << prompt;
     std::cout.flush();
-    fgets(password, sizeof(password), stdin);
+    if (fgets(password, sizeof(password), stdin) == nullptr) return "";
     password[strlen(password) - 1] = 0;
 
     /* restore terminal */
@@ -211,7 +211,7 @@ std::string getPrompt(const std::string &prompt){
     std::cout << prompt;
     std::cout.flush();
 
-    fgets(input, sizeof(input), stdin);
+    if (fgets(input, sizeof(input), stdin) == nullptr) return "";
     input[strlen(input) - 1] = 0;
 
     return std::string(input);
