@@ -19,10 +19,9 @@ For usage and examples see https://docs.dronedb.app
 Requirements:
  * sqlite3
  * spatialite
- * exiv2
  * cmake
  * libgeos
- * gcc-8
+ * g++ >= 10.1.0 (very important! :warning: g++ 8 has a [bug](https://gcc.gnu.org/bugzilla/show_bug.cgi?id=90050) in the stdc++fs library that will prevent the software from running properly)
  * GDAL >= 2.1
  
 On Ubuntu you can simply execute this script to install the dependencies:
