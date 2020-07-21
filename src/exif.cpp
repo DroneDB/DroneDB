@@ -35,9 +35,12 @@ Exiv2::XmpData::const_iterator ExifParser::findXmpKey(const std::string &key) {
 // Find the first available key, or xmpData::end() if none exist
 Exiv2::XmpData::const_iterator ExifParser::findXmpKey(const std::initializer_list<std::string>& keys) {
     for (auto &k : keys) {
-        LOGD << "SEARCH: " << k;
-        auto it = xmpData.findKey(Exiv2::XmpKey(k));
-        if (it != xmpData.end()) return it;
+        try{
+            auto it = xmpData.findKey(Exiv2::XmpKey(k));
+            if (it != xmpData.end()) return it;
+        }catch(Exiv2::AnyError&){
+            // Do nothing
+        }
     }
     return xmpData.end();
 }
@@ -146,7 +149,6 @@ bool ExifParser::extractSensorSize(SensorSize &r) {
     if (SensorData::contains(sensor)) {
         r.width = SensorData::getFocal(sensor);
 
-        // This is an (inaccurate) estimate
         // TODO: is this the best way?
         auto imsize = extractImageSize();
         r.height = (r.width / imsize.width) * imsize.height;
@@ -191,7 +193,7 @@ bool ExifParser::extractGeo(GeoLocation &geo) {
 
         auto altitudeRef = findExifKey({"Exif.GPSInfo.GPSAltitudeRef"});
         if (altitudeRef != exifData.end()) {
-            geo.altitude *= altitudeRef->toLong() == 1 ? -1 : 0;
+            geo.altitude *= altitudeRef->toLong() == 1 ? -1 : 1;
         }
     }
 
