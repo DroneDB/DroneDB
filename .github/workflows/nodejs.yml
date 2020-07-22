@@ -7,7 +7,7 @@ on:
         branches: [master]
 
 jobs:
-    nodejs_ubuntu:
+    ubuntu:
         name: Build/Test on Ubuntu
         runs-on: ubuntu-latest
         steps:
@@ -18,3 +18,17 @@ jobs:
               run: npm install
             - name: Test Node.js bindings
               run: npm test
+
+    windows:
+        name: Build/Test on Windows
+        runs-on: windows-latest
+        steps:
+            - uses: actions/checkout@v2
+            - uses: actions/setup-node@v2-beta
+              with:
+                node-version: '14'
+            - name: Build Node.js bindings
+              run: npm install
+            - name: Test Node.js bindings
+              run: .\scripts\setup_windows_env.bat && npm test
+              shell: cmd

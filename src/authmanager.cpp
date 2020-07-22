@@ -49,7 +49,7 @@ AuthCredentials AuthManager::loadCredentials(const std::string &url){
 
     if (auth["auths"].contains(url)){
         std::string userpwd = Base64::decode(auth["auths"][url]);
-        int colonpos = userpwd.rfind(":");
+        size_t colonpos = userpwd.rfind(":");
         if (colonpos > 0){
             LOGD << "Found username and password for " << url;
             ac.username = userpwd.substr(0, colonpos - 1);

@@ -104,8 +104,7 @@ include_directories(${CMAKE_BINARY_DIR}/exiv2/include)
 
 set(EXIV2_LIB "${CMAKE_BINARY_DIR}/exiv2-build/lib/libexiv2.so")
 if (WIN32)
-    # TODO: FIX!
-    set(EXIV2_LIB ${CMAKE_BINARY_DIR}/exiv2-build/lib/Debug/exiv2.lib)
+    set(EXIV2_LIB "${CMAKE_BINARY_DIR}/exiv2-build/lib/${CMAKE_BUILD_TYPE}/exiv2.lib")
 endif()
 
 find_package(GDAL REQUIRED)
@@ -157,6 +156,8 @@ if (WIN32)
     file(GLOB GDAL_DLLS "${DOWNLOADS_DIR}/gdal/bin/*.dll")
     file(COPY ${GDAL_DLLS} DESTINATION ${CMAKE_BINARY_DIR})
 
+    file(COPY "${DOWNLOADS_DIR}/gdal/bin/proj6/share/proj.db" DESTINATION ${CMAKE_BINARY_DIR})
+
     # Fix linking
     target_link_libraries("${PROJECT_NAME}" ${LINK_LIBRARIES})
 endif()
@@ -192,21 +193,42 @@ endif()
 # Nodejs bindings
 if (CMAKE_JS_VERSION)
     message ("Building Node.js bindings")
+    execute_process(COMMAND node --version OUTPUT_VARIABLE NODE_VERSION)
+    string(STRIP ${NODE_VERSION} NODE_VERSION)
+    message ("Detected node version: ${NODE_VERSION}")
+
     include_directories(${CMAKE_JS_INC})
+    if (NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/node_modules/nan")
+        message("Installing nan...")
+        execute_process(COMMAND npm install nan)
+    endif()
 
     include_directories("${CMAKE_CURRENT_SOURCE_DIR}/node_modules/nan")
 
-    # Line below is needed only for development, 
-    # if you want autocomplete to discover certain headers. 
-    # Does not affect compilation
-    # TODO: how to avoid hardcoding this path...
-    include_directories("/home/piero/.cmake-js/node-x64/v14.4.0/include/node")
+    set(HOME "$ENV{HOME}")
+    if (WIN32)
+        set(HOME "$ENV{USERPROFILE}")
+    endif()
+
+    set(NODE_PATH "${HOME}/.cmake-js/node-x64/${NODE_VERSION}")
+    include_directories("${NODE_PATH}/include/node")
+
+    if(WIN32)
+        # On Windows we need to link to node.lib
+        set(CMAKE_JS_LIB "${NODE_PATH}/win-x64/node.lib")
+    endif()
 
     file(GLOB NODE_SOURCE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/nodejs/*.cc")
     add_library("node-${PROJECT_NAME}" SHARED ${NODE_SOURCE_FILES})
     set_target_properties("node-${PROJECT_NAME}" PROPERTIES PREFIX "" SUFFIX ".node")
     set_target_properties("node-${PROJECT_NAME}" PROPERTIES CXX_STANDARD 17)
     target_link_libraries("node-${PROJECT_NAME}" ${CMAKE_JS_LIB} ${PROJECT_NAME} ${LINK_LIBRARIES})
+
+    if (WIN32)
+        add_custom_command(TARGET "node-${PROJECT_NAME}" POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:node-ddb> ${CMAKE_BINARY_DIR}/node-ddb.node
+            COMMENT "Created ${CMAKE_BINARY_DIR}/node-ddb.node")
+    endif()
 endif()
 
 if(BUILD_TESTING)

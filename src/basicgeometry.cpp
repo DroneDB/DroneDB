@@ -81,7 +81,7 @@ bool BasicGeometry::empty() const{
 }
 
 int BasicGeometry::size() const{
-    return points.size();
+    return static_cast<int>(points.size());
 }
 
 void BasicGeometry::initGeoJsonBase(json &j) const{
