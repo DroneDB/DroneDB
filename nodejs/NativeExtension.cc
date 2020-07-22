@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "functions.h"
-#include "../libs/ddb.h"
+#include "ddb.h"
 
 using v8::FunctionTemplate;
 
@@ -26,7 +26,7 @@ NAN_MODULE_INIT(InitAll) {
 
   // Passing target down to the next NAN_MODULE_INIT
   // MyObject::Init(target);
-  ddb::initialize();
+  ddb::initialize(false);
 }
 
 NODE_MODULE(NativeExtension, InitAll)

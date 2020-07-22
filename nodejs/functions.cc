@@ -3,10 +3,10 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include <sstream>
 #include "functions.h"
-#include "../libs/ddb.h"
-#include "../libs/info.h"
-#include "../libs/thumbs.h"
-#include "../libs/entry.h"
+#include "ddb.h"
+#include "info.h"
+#include "thumbs.h"
+#include "entry.h"
 
 NAN_METHOD(getVersion) {
     info.GetReturnValue().Set(Nan::New(ddb::getVersion()).ToLocalChecked());
@@ -45,7 +45,7 @@ class ParseFilesWorker : public Nan::AsyncWorker {
      Nan::HandleScope scope;
 
      Nan::JSON json;
-     Nan::MaybeLocal<v8::Value> result = json.Parse(v8::String::NewFromUtf8(v8::Isolate::GetCurrent(), s.str().c_str()).ToLocalChecked());
+     Nan::MaybeLocal<v8::Value> result = json.Parse(Nan::New<v8::String>(s.str()).ToLocalChecked());
 
      v8::Local<v8::Value> argv[] = {
          Nan::Null(),

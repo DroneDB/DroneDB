@@ -3,8 +3,8 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "gtest/gtest.h"
-#include "../libs/ddb.h"
-#include "../classes/exceptions.h"
+#include "ddb.h"
+#include "exceptions.h"
 
 namespace {
 

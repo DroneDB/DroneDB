@@ -32,7 +32,7 @@
 
 #if !defined(ZD_EXPORT)
 #if defined(_MSC_VER)
-#define ZD_EXPORT __declspec(dllimport)
+#define ZD_EXPORT __declspec(dllexport)
 #else
 #define ZD_EXPORT
 #endif

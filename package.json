@@ -1,25 +1,25 @@
 {
   "name": "ddb",
-  "version": "0.9.1",
-  "description": "![license](https://img.shields.io/github/license/uav4geo/DroneDB) ![commits](https://img.shields.io/github/commit-activity/m/uav4geo/DroneDB) ![languages](https://img.shields.io/github/languages/top/uav4geo/DroneDB)",
+  "version": "0.9.2",
+  "description": "Effortless aerial data management and sharing",
   "main": "index.js",
   "directories": {
     "test": "test"
   },
   "scripts": {
     "test": "./node_modules/.bin/mocha nodejs/test/*.js",
-    "install": "cmake-js compile"
+    "install": "cmake-js compile --prefer-make"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/uav4geo/DroneDB.git"
+    "url": "git+https://github.com/DroneDB/DroneDB.git"
   },
   "author": "",
   "license": "ISC",
   "bugs": {
-    "url": "https://github.com/uav4geo/DroneDB/issues"
+    "url": "https://github.com/DroneDB/DroneDB/issues"
   },
-  "homepage": "https://github.com/uav4geo/DroneDB#readme",
+  "homepage": "https://github.com/DroneDB/DroneDB#readme",
   "devDependencies": {
     "mocha": "^7.0.1",
     "nan": "^2.14.0"
