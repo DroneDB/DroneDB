@@ -31,7 +31,7 @@ jobs:
                 mkdir build
                 cd build           
                 cmake .. -DBUILD_TESTING=ON
-                cmake --build . --config Debug --target ALL_BUILD -- /maxcpucount:14
+                cmake --build . --config Release --target ALL_BUILD -- /maxcpucount:14
                 dir
             - name: Test C++ lib/program
               run: .\scripts\setup_windows_env.bat && cd build && test.exe
