@@ -193,30 +193,13 @@ endif()
 # Nodejs bindings
 if (CMAKE_JS_VERSION)
     message ("Building Node.js bindings")
-    execute_process(COMMAND node --version OUTPUT_VARIABLE NODE_VERSION)
-    string(STRIP ${NODE_VERSION} NODE_VERSION)
-    message ("Detected node version: ${NODE_VERSION}")
 
-    include_directories(${CMAKE_JS_INC})
     if (NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/node_modules/nan")
         message("Installing nan...")
         execute_process(COMMAND npm install nan)
     endif()
 
-    include_directories("${CMAKE_CURRENT_SOURCE_DIR}/node_modules/nan")
-
-    set(HOME "$ENV{HOME}")
-    if (WIN32)
-        set(HOME "$ENV{USERPROFILE}")
-    endif()
-
-    set(NODE_PATH "${HOME}/.cmake-js/node-x64/${NODE_VERSION}")
-    include_directories("${NODE_PATH}/include/node")
-
-    if(WIN32)
-        # On Windows we need to link to node.lib
-        set(CMAKE_JS_LIB "${NODE_PATH}/win-x64/node.lib")
-    endif()
+    include_directories(${CMAKE_JS_INC})
 
     file(GLOB NODE_SOURCE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/nodejs/*.cc")
     add_library("node-${PROJECT_NAME}" SHARED ${NODE_SOURCE_FILES})
