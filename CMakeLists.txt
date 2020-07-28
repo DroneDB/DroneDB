@@ -22,6 +22,10 @@ RelWithDebInfo MinSizeRel."
       FORCE)
 endif(NOT CMAKE_BUILD_TYPE)
 
+if (WIN32)
+    set(CMAKE_CONFIGURATION_TYPES "${CMAKE_BUILD_TYPE}")
+endif()
+
 find_program(CCACHE_FOUND ccache)
 if(CCACHE_FOUND)
     set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE ccache)
@@ -165,6 +169,14 @@ endif()
 file(GLOB DATA_FILES "${CMAKE_CURRENT_SOURCE_DIR}/ddb_data/*")
 list(FILTER DATA_FILES EXCLUDE REGEX "^.git$")
 file(COPY ${DATA_FILES} DESTINATION ${CMAKE_BINARY_DIR})
+
+# Copy platform files
+set(PLATFORM "unix")
+if (WIN32)
+    set(PLATFORM "win32")
+endif()
+file(GLOB PLATFORM_FILES "${CMAKE_CURRENT_SOURCE_DIR}/platform/${PLATFORM}/*")
+file(COPY ${PLATFORM_FILES} DESTINATION ${CMAKE_BINARY_DIR})
 
 if (NOT CMAKE_JS_VERSION)
     add_executable("${PROJECT_NAME}cmd" ${CMD_SRC_LIST})
