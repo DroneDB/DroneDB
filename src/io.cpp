@@ -1,13 +1,14 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
-#include "fs.h"
+#include "io.h"
 #include "utils.h"
 
 namespace ddb{
+namespace io{
 
-bool checkExtension(const fs::path &extension, const std::initializer_list<std::string>& matches) {
-    std::string ext = extension.string();
+bool Path::checkExtension(const std::initializer_list<std::string>& matches) {
+    std::string ext = p.string();
     if (ext.size() < 1) return false;
     std::string extLowerCase = ext.substr(1, ext.length());
     utils::toLower(extLowerCase);
@@ -18,26 +19,26 @@ bool checkExtension(const fs::path &extension, const std::initializer_list<std::
     return false;
 }
 
-time_t getModifiedTime(const std::string &filePath) {
+time_t Path::getModifiedTime() {
     struct stat result;
-    if(stat(filePath.c_str(), &result) == 0) {
+    if(stat(p.string().c_str(), &result) == 0) {
         return result.st_mtime;
     } else {
-        throw FSException("Cannot stat " + filePath);
+        throw FSException("Cannot stat " + p.string());
     }
 }
 
-off_t getSize(const std::string &filePath) {
+off_t Path::getSize() {
     struct stat result;
-    if(stat(filePath.c_str(), &result) == 0) {
+    if(stat(p.string().c_str(), &result) == 0) {
         return result.st_size;
     } else {
-        throw FSException("Cannot stat " + filePath);
+        throw FSException("Cannot stat " + p.string());
     }
 }
 
-bool pathsAreChildren(const fs::path &parentPath, const std::vector<std::string> &childPaths) {
-    std::string absP = fs::weakly_canonical(fs::absolute(parentPath)).string();
+bool Path::hasChildren(const std::vector<std::string> &childPaths) {
+    std::string absP = fs::weakly_canonical(fs::absolute(p)).string();
     if (absP.length() > 1 && absP.back() == fs::path::preferred_separator) absP.pop_back();
 
     for (auto &cp : childPaths) {
@@ -49,12 +50,50 @@ bool pathsAreChildren(const fs::path &parentPath, const std::vector<std::string>
     return true;
 }
 
-bool pathIsChild(const fs::path &parentPath, const fs::path &p){
-    std::string absP = fs::weakly_canonical(fs::absolute(parentPath)).string();
+bool Path::isParentOf(const fs::path &childPath){
+    std::string absP = fs::weakly_canonical(fs::absolute(p)).string();
     if (absP.length() > 1 && absP.back() == fs::path::preferred_separator) absP.pop_back();
-    std::string absC = fs::weakly_canonical(fs::absolute(p)).string();
+    std::string absC = fs::weakly_canonical(fs::absolute(childPath)).string();
     if (absC.length() > 1 && absC.back() == fs::path::preferred_separator) absC.pop_back();
     return absC.rfind(absP, 0) == 0 && absP != absC;
+}
+
+
+// Counts the number of path components
+// it does NOT normalize the path to account for ".." and "." folders
+int Path::depth() {
+    int count = 0;
+    for (auto &it : p) {
+        if (it.c_str()[0] != fs::path::preferred_separator &&
+            it.string() != fs::current_path().root_name()) count++;
+    }
+    return std::max(count - 1, 0);
+}
+
+Path Path::relativeTo(const fs::path &parent){
+#ifdef _WIN32
+    // Handle special cases where root is "/"
+    // in this case we return the canonical absolute path
+    // If we don't, we lose the drive information (D:\, C:\, etc.)
+    if (parent == fs::path("/")){
+        return fs::weakly_canonical(fs::absolute(p));
+    }
+#endif
+
+    return Path(fs::relative(fs::weakly_canonical(fs::absolute(p)), fs::weakly_canonical(fs::absolute(parent))));
+}
+
+std::string Path::generic() const{
+    std::string res = p.generic_string();
+
+    // Remove trailing slash from directory (unless "/")
+    if (res.length() > 1 && res[res.length() - 1] == '/') res.pop_back();
+
+    return res;
+}
+
+std::string Path::string() const{
+    return p.string();
 }
 
 fs::path getExeFolderPath() {
@@ -104,18 +143,6 @@ fs::path getCwd(){
     return fs::path(result);
 }
 
-
-// Counts the number of path components
-// it does NOT normalize the path to account for ".." and "." folders
-int pathDepth(const fs::path &path) {
-    int count = 0;
-    for (auto &it : path) {
-        if (it.c_str()[0] != fs::path::preferred_separator &&
-			it.string() != fs::current_path().root_name()) count++;
-    }
-    return std::max(count - 1, 0);
-}
-
 std::string bytesToHuman(off_t bytes){
     std::ostringstream os;
 
@@ -143,17 +170,5 @@ std::string bytesToHuman(off_t bytes){
     return os.str();
 }
 
-fs::path getRelPath(const fs::path &p, const fs::path &parent){
-#ifdef _WIN32
-    // Handle special cases where root is "/"
-    // in this case we return the canonical absolute path
-	// If we don't, we lose the drive information (D:\, C:\, etc.)
-    if (parent == fs::path("/")){
-        return fs::weakly_canonical(fs::absolute(p));
-    }
-#endif
-
-    return fs::relative(fs::weakly_canonical(fs::absolute(p)), fs::weakly_canonical(fs::absolute(parent)));
 }
-
 }

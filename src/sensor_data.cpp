@@ -4,7 +4,7 @@
 #include "sensor_data.h"
 #include "logger.h"
 #include "exceptions.h"
-#include "fs.h"
+#include "io.h"
 
 namespace ddb{
 
@@ -17,7 +17,7 @@ void SensorData::checkDbInit(){
         db = new SqliteDatabase();
         LOGD << "Initializing sensor database";
 
-        fs::path dbPath = getDataPath("sensor_data.sqlite");
+        fs::path dbPath = io::getDataPath("sensor_data.sqlite");
         if (dbPath.empty()) throw DBException("Cannot find sensor database sensor_data.sqlite");
 
         db->open(dbPath.string());

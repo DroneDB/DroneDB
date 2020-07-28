@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include <exiv2/exiv2.hpp>
 #include "entry.h"
+#include "io.h"
 #include "ogr_srs_api.h"
 
 namespace ddb {
@@ -15,10 +16,11 @@ bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
     }
 
     // Parse file
-    fs::path relPath = getRelPath(path, rootDirectory);
-    entry.path = relPath.generic_string();
-    entry.depth = pathDepth(relPath);
-    if (entry.mtime == 0) entry.mtime = getModifiedTime(path.string());
+    io::Path p = io::Path(path);
+    io::Path relPath = p.relativeTo(rootDirectory);
+    entry.path = relPath.generic();
+    entry.depth = relPath.depth();
+    if (entry.mtime == 0) entry.mtime = relPath.getModifiedTime();
 
     if (fs::is_directory(path)) {
         entry.type = EntryType::Directory;
@@ -35,19 +37,19 @@ bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
         }
     } else {
         if (entry.hash == "" && opts.withHash) entry.hash = Hash::fileSHA256(path.string());
-        entry.size = getSize(path.string());
+        entry.size = p.getSize();
 
         entry.type = EntryType::Generic; // Default
 
-        bool jpg = checkExtension(path.extension(), {"jpg", "jpeg"});
-        bool tif = checkExtension(path.extension(), {"tif", "tiff"});
-        bool nongeoImage = checkExtension(path.extension(), {"png", "gif"});
+        bool jpg = p.checkExtension({"jpg", "jpeg"});
+        bool tif = p.checkExtension({"tif", "tiff"});
+        bool nongeoImage = p.checkExtension({"png", "gif"});
 
         bool georaster = false;
 
         if (tif){
             GDALDatasetH  hDataset;
-            hDataset = GDALOpen( path.string().c_str(), GA_ReadOnly );
+            hDataset = GDALOpen( p.string().c_str(), GA_ReadOnly );
             if( hDataset != NULL ){
                 const char *proj = GDALGetProjectionRef(hDataset);
                 if (proj != NULL){
@@ -55,7 +57,7 @@ bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
                 }
                 GDALClose(hDataset);
             }else{
-                LOGW << "Cannot open " << path.c_str() << " for georaster test";
+                LOGW << "Cannot open " << p.string().c_str() << " for georaster test";
             }
         }
 
@@ -352,7 +354,7 @@ std::string Entry::toString(){
     }
 
     s << "Modified Time: " << this->mtime << "\n";
-    s << "Size: " << bytesToHuman(this->size) << "\n";
+    s << "Size: " << io::bytesToHuman(this->size) << "\n";
     //s << "Tree Depth: " << this->depth << "\n";
     if (!this->point_geom.empty()) s << "Point Geometry: " << this->point_geom  << "\n";
     if (!this->polygon_geom.empty()) s << "Polygon Geometry: " << this->polygon_geom << "\n";

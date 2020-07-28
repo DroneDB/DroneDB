@@ -4,6 +4,7 @@
 
 #include "gtest/gtest.h"
 #include "fs.h"
+#include "io.h"
 #include "logger.h"
 #include <vector>
 #include <string>
@@ -12,78 +13,86 @@ namespace {
 
 using namespace ddb;
 
-TEST(pathsAreChildren, Normal) {
-    EXPECT_TRUE(pathsAreChildren("/my/path", { "/my/path/1", "/my/path/a/b/.." }));
+TEST(pathHasChildren, Normal) {
+    EXPECT_TRUE(io::Path("/my/path").hasChildren({ "/my/path/1", "/my/path/a/b/.." }));
 
 #ifdef _WIN32
-    EXPECT_TRUE(pathsAreChildren("C:\\my\\path", { "C:\\my\\path\\1", "C:\\my\\path\\a\\b\\.." }));
+    EXPECT_TRUE(io::Path("C:\\my\\path", { "C:\\my\\path\\1", "C:\\my\\path\\a\\b\\.." }));
 #endif
 
-    EXPECT_TRUE(pathsAreChildren("path", {"path/1/2", "path/3", "path/././6"}));
-    EXPECT_TRUE(pathsAreChildren("path/./", { "path/1/2", "path/3/", "path/./6/7/../" }));
+    EXPECT_TRUE(io::Path("path").hasChildren({"path/1/2", "path/3", "path/././6"}));
+    EXPECT_TRUE(io::Path("path/./").hasChildren({ "path/1/2", "path/3/", "path/./6/7/../" }));
 
 #ifdef _WIN32
-    EXPECT_TRUE(pathsAreChildren("path\\.", { "path\\1\\2", "path\\3", "path\\4\\" }));
+    EXPECT_TRUE(io::Path("path\\.").hasChildren({ "path\\1\\2", "path\\3", "path\\4\\" }));
 #endif
 
-    EXPECT_TRUE(pathsAreChildren("path/./", {"path/./../path/a/"}));
-    EXPECT_TRUE(pathsAreChildren("path/./.", {"path/./../path/b"}));
+    EXPECT_TRUE(io::Path("path/./").hasChildren({"path/./../path/a/"}));
+    EXPECT_TRUE(io::Path("path/./.").hasChildren({"path/./../path/b"}));
 
-    EXPECT_FALSE(pathsAreChildren("path", {"path/3", "path/a/.."}));
-    EXPECT_FALSE(pathsAreChildren("/my/path", {"/my/pat", "/my/path/1"}));
+    EXPECT_FALSE(io::Path("path").hasChildren({"path/3", "path/a/.."}));
+    EXPECT_FALSE(io::Path("/my/path").hasChildren({"/my/pat", "/my/path/1"}));
 }
 
 TEST(pathDepth, Normal) {
-	EXPECT_EQ(pathDepth(fs::path("")), 0);
+    EXPECT_EQ(io::Path("").depth(), 0);
 
 #ifdef _WIN32
-	EXPECT_EQ(pathDepth(fs::path("\\")), 0);
+    EXPECT_EQ(io::Path("\\").depth(), 0);
 #else
-	EXPECT_EQ(pathDepth(fs::path("/")), 0);
+    EXPECT_EQ(io::Path("/").depth(), 0);
 #endif
 
-	EXPECT_EQ(pathDepth(fs::current_path().root_path()), 0); // C:\ or /
-    EXPECT_EQ(pathDepth((fs::current_path().root_path() / "file.txt").string()), 0);
-	EXPECT_EQ(pathDepth((fs::current_path().root_path() / "a" / "file.txt").string()), 1);
-	EXPECT_EQ(pathDepth((fs::current_path().root_path() / "a" / "b" / "file.txt").string()), 2);
-    EXPECT_EQ(pathDepth(fs::path(".")), 0);
-    EXPECT_EQ(pathDepth(fs::path(".") / "."), 1);
+    EXPECT_EQ(io::Path(fs::current_path().root_path()).depth(), 0); // C:\ or /
+    EXPECT_EQ(io::Path(fs::current_path().root_path() / "file.txt").depth(), 0);
+    EXPECT_EQ(io::Path((fs::current_path().root_path() / "a" / "file.txt")).depth(), 1);
+    EXPECT_EQ(io::Path((fs::current_path().root_path() / "a" / "b" / "file.txt")).depth(), 2);
+    EXPECT_EQ(io::Path(".").depth(), 0);
+    EXPECT_EQ(io::Path(fs::path(".") / ".").depth(), 1);
 }
 
-TEST(pathIsChild, Normal){
-    EXPECT_TRUE(pathIsChild(fs::path("/data/drone"), fs::path("/data/drone/a")));
-    EXPECT_FALSE(pathIsChild(fs::path("/data/drone"), fs::path("/data/drone/")));
-    EXPECT_FALSE(pathIsChild(fs::path("/data/drone"), fs::path("/data/drone")));
-    EXPECT_FALSE(pathIsChild(fs::path("/data/drone/"), fs::path("/data/drone")));
-    EXPECT_TRUE(pathIsChild(fs::path("data/drone"), fs::path("data/drone/123")));
-    EXPECT_FALSE(pathIsChild(fs::path("data/drone"), fs::path("data/drone/123/..")));
-    EXPECT_FALSE(pathIsChild(fs::path("data/drone"), fs::path("data/drone/123/./../")));
-    EXPECT_FALSE(pathIsChild(fs::path("data/drone"), fs::path("data/drone/123/./../..")));
-    EXPECT_TRUE(pathIsChild(fs::path("data/drone/a/.."), fs::path("data/drone/123")));
+TEST(pathIsParentOf, Normal){
+    EXPECT_TRUE(io::Path("/data/drone").isParentOf("/data/drone/a"));
+    EXPECT_FALSE(io::Path("/data/drone").isParentOf("/data/drone/"));
+    EXPECT_FALSE(io::Path("/data/drone").isParentOf("/data/drone"));
+    EXPECT_FALSE(io::Path("/data/drone/").isParentOf("/data/drone"));
+    EXPECT_TRUE(io::Path("data/drone").isParentOf("data/drone/123"));
+    EXPECT_FALSE(io::Path("data/drone").isParentOf("data/drone/123/.."));
+    EXPECT_FALSE(io::Path("data/drone").isParentOf("data/drone/123/./../"));
+    EXPECT_FALSE(io::Path("data/drone").isParentOf("data/drone/123/./../.."));
+    EXPECT_TRUE(io::Path("data/drone/a/..").isParentOf("data/drone/123"));
 }
 
-TEST(getRelPath, Normal) {
-	EXPECT_EQ(getRelPath(fs::path("/home/test/aaa"), fs::path("/home/test")).generic_string(), fs::path("aaa").generic_string());
+TEST(pathRelativeTo, Normal) {
+    EXPECT_EQ(io::Path("/home/test/aaa").relativeTo("/home/test").generic(),
+              io::Path("aaa").generic());
 #ifdef _WIN32
-	EXPECT_EQ(getRelPath(fs::path("D:/home/test/aaa"), fs::path("/")).generic_string(), fs::path("D:/home/test/aaa").generic_string());
+    EXPECT_EQ(io::Path("D:/home/test/aaa").relativeTo("/").generic(),
+              io::Path("D:/home/test/aaa").generic());
 #else
-	EXPECT_EQ(getRelPath(fs::path("/home/test/aaa"), fs::path("/")).generic_string(), fs::path("home/test/aaa").generic_string());
+    EXPECT_EQ(io::Path("/home/test/aaa").relativeTo("/").generic(),
+              io::Path("home/test/aaa").generic());
 #endif
-	
-    EXPECT_EQ(getRelPath(fs::path("/home/test/aaa/bbb/ccc/../.."), fs::path("/home")).generic_string(), fs::path("test/aaa/").generic_string());
-    EXPECT_EQ(getRelPath(fs::path("/home/test/aaa/"), fs::path("/home")).generic_string(), fs::path("test/aaa/").generic_string());
-    EXPECT_EQ(getRelPath(fs::path("/home/test/aaa"), fs::path("/home")).generic_string(), fs::path("test/aaa").generic_string());
+    EXPECT_EQ(io::Path("/home/test/aaa/bbb/ccc/../..").relativeTo("/home").generic(),
+              io::Path("test/aaa/").generic());
+    EXPECT_EQ(io::Path("/home/test/aaa/").relativeTo("/home").generic(),
+              io::Path("test/aaa").generic());
 
 #ifdef _WIN32
-	EXPECT_EQ(getRelPath(fs::path("D:\\"), fs::path("/")).generic_string(), fs::path("D:\\").generic_string());
+    EXPECT_EQ(io::Path("D:\\").relativeTo("/").generic(),
+              io::Path("D:\\").generic());
 #else
-	EXPECT_EQ(getRelPath(fs::path("/"), fs::path("/")).generic_string(), fs::path(".").generic_string());
+    EXPECT_EQ(io::Path("/").relativeTo("/").generic(),
+              io::Path(".").generic());
 #endif
-	EXPECT_EQ(getRelPath(fs::path("/"), fs::path("/a/..")).generic_string(), fs::path(".").generic_string());
+    EXPECT_EQ(io::Path("/").relativeTo("/a/..").generic(),
+              io::Path(".").generic());
 
 #ifdef _WIN32
-	EXPECT_EQ(getRelPath(fs::path("C:\\test"), fs::path("/")).generic_string(), fs::path("C:\\test").generic_string());
-	EXPECT_EQ(getRelPath(fs::path("D:\\test\\..\\aaa"), fs::path("D:\\")).generic_string(), fs::path("aaa").generic_string());
+    EXPECT_EQ(io::Path("C:\\test").relativeTo("/").generic(),
+              io::Path("C:\\test").generic());
+    EXPECT_EQ(io::Path("D:\\test\\..\\aaa").relativeTo("D:\\").generic(),
+              io::Path("aaa").generic());
 #endif
 }
 

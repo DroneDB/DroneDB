@@ -7,6 +7,7 @@
 
 #include <memory>
 #include <iostream>
+#include <algorithm>
 #include <sstream>
 #include <cstdio>
 #include <cctype>
