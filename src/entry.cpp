@@ -13,7 +13,7 @@ bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
         entry.type = EntryType::Undefined;
         return false;
     }
-
+	std::cerr << fs::weakly_canonical(fs::absolute(rootDirectory)).generic_string() << std::endl;
     // Parse file
     fs::path relPath = fs::relative(fs::weakly_canonical(fs::absolute(path)), fs::weakly_canonical(fs::absolute(rootDirectory)));
     entry.path = relPath.generic_string();
