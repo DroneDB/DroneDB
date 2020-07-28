@@ -62,4 +62,27 @@ TEST(pathIsChild, Normal){
     EXPECT_TRUE(pathIsChild(fs::path("data/drone/a/.."), fs::path("data/drone/123")));
 }
 
+TEST(getRelPath, Normal) {
+	EXPECT_EQ(getRelPath(fs::path("/home/test/aaa"), fs::path("/home/test")).generic_string(), fs::path("aaa").generic_string());
+#ifdef _WIN32
+	EXPECT_EQ(getRelPath(fs::path("D:/home/test/aaa"), fs::path("/")).generic_string(), fs::path("D:/home/test/aaa").generic_string());
+#else
+	EXPECT_EQ(getRelPath(fs::path("/home/test/aaa"), fs::path("/")).generic_string(), fs::path("home/test/aaa").generic_string());
+#endif
+	
+	EXPECT_EQ(getRelPath(fs::path("/home/test/aaa/bbb/ccc/../.."), fs::path("/home")).generic_string(), fs::path("test/aaa").generic_string());
+
+#ifdef _WIN32
+	EXPECT_EQ(getRelPath(fs::path("D:\\"), fs::path("/")).generic_string(), fs::path("D:\\").generic_string());
+#else
+	EXPECT_EQ(getRelPath(fs::path("/"), fs::path("/")).generic_string(), fs::path(".").generic_string());
+#endif
+	EXPECT_EQ(getRelPath(fs::path("/"), fs::path("/a/..")).generic_string(), fs::path(".").generic_string());
+
+#ifdef _WIN32
+	EXPECT_EQ(getRelPath(fs::path("C:\\test"), fs::path("/")).generic_string(), fs::path("C:\\test").generic_string());
+	EXPECT_EQ(getRelPath(fs::path("D:\\test\\..\\aaa"), fs::path("D:\\")).generic_string(), fs::path("aaa").generic_string());
+#endif
+}
+
 }

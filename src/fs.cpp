@@ -144,15 +144,15 @@ std::string bytesToHuman(off_t bytes){
 }
 
 fs::path getRelPath(const fs::path &p, const fs::path &parent){
-#ifdef WIN32
+#ifdef _WIN32
     // Handle special cases where root is "/"
     // in this case we return the canonical absolute path
-    // since Windows has no concept of "/" and we would lose
-    // the drive letter information.
+	// If we don't, we lose the drive information (D:\, C:\, etc.)
     if (parent == fs::path("/")){
         return fs::weakly_canonical(fs::absolute(p));
     }
 #endif
+
     return fs::relative(fs::weakly_canonical(fs::absolute(p)), fs::weakly_canonical(fs::absolute(parent)));
 }
 

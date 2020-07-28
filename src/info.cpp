@@ -35,7 +35,7 @@ void parseFiles(const std::vector<std::string> &input, std::ostream &output, Par
 
         Entry e;
         if (parseEntry(fp, "/", e, opts.peOpts)){
-            e.path = "file:///" + e.path;
+            e.path = "file://" + e.path;
 
             if (opts.format == "json"){
                 json j;
