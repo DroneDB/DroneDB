@@ -4,7 +4,7 @@
 
 #include "gtest/gtest.h"
 #include "fs.h"
-#include "io.h"
+#include "mio.h"
 #include "logger.h"
 #include <vector>
 #include <string>
@@ -17,7 +17,7 @@ TEST(pathHasChildren, Normal) {
     EXPECT_TRUE(io::Path("/my/path").hasChildren({ "/my/path/1", "/my/path/a/b/.." }));
 
 #ifdef _WIN32
-    EXPECT_TRUE(io::Path("C:\\my\\path", { "C:\\my\\path\\1", "C:\\my\\path\\a\\b\\.." }));
+    EXPECT_TRUE(io::Path("C:\\my\\path").hasChildren({ "C:\\my\\path\\1", "C:\\my\\path\\a\\b\\.." }));
 #endif
 
     EXPECT_TRUE(io::Path("path").hasChildren({"path/1/2", "path/3", "path/././6"}));

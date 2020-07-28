@@ -1,15 +1,16 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
-#ifndef IO_H
-#define IO_H
+#ifndef MIO_H
+#define MIO_H
+
+// "My" I/O library
+// io.h was taken :/
 
 #include <algorithm>
 #include "fs.h"
 
 #ifdef WIN32
-    #include <windows.h>    //GetModuleFileNameW
-    #include <direct.h> // _getcwd
 #define stat _stat
 #endif
 
@@ -56,4 +57,4 @@ std::string bytesToHuman(off_t bytes);
 
 }
 }
-#endif // IO_H
+#endif // MIO_H

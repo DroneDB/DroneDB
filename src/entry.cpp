@@ -3,7 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include <exiv2/exiv2.hpp>
 #include "entry.h"
-#include "io.h"
+#include "mio.h"
 #include "ogr_srs_api.h"
 
 namespace ddb {

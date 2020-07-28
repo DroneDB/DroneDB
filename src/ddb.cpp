@@ -10,7 +10,7 @@
 #include "net.h"
 #include "version.h"
 #include "logger.h"
-#include "io.h"
+#include "mio.h"
 #include <gdal_priv.h>
 
 namespace ddb {
