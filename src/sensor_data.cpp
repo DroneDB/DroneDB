@@ -3,7 +3,8 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "sensor_data.h"
 #include "logger.h"
-#include "utils.h"
+#include "exceptions.h"
+#include "fs.h"
 
 namespace ddb{
 
@@ -16,7 +17,7 @@ void SensorData::checkDbInit(){
         db = new SqliteDatabase();
         LOGD << "Initializing sensor database";
 
-        fs::path dbPath = utils::getDataPath("sensor_data.sqlite");
+        fs::path dbPath = getDataPath("sensor_data.sqlite");
         if (dbPath.empty()) throw DBException("Cannot find sensor database sensor_data.sqlite");
 
         db->open(dbPath.string());

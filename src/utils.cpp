@@ -4,7 +4,8 @@
 
 #include "utils.h"
 
-namespace utils {
+namespace ddb{
+namespace utils{
 
 std::string getPass(const std::string &prompt){
 #ifdef _WIN32
@@ -80,4 +81,5 @@ std::string getPrompt(const std::string &prompt){
     return std::string(input);
 }
 
+}
 }

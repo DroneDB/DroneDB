@@ -95,7 +95,7 @@ std::vector<fs::path> getIndexPathList(fs::path rootDirectory, const std::vector
     std::vector<fs::path> result;
     std::unordered_map<std::string, bool> directories;
 
-    if (!utils::pathsAreChildren(rootDirectory, paths)) {
+    if (!pathsAreChildren(rootDirectory, paths)) {
         throw FSException("Some paths are not contained within: " + rootDirectory.string() + ". Did you run ddb init?");
     }
 
@@ -121,7 +121,7 @@ std::vector<fs::path> getIndexPathList(fs::path rootDirectory, const std::vector
 
                 if (includeDirs) {
                     while(rp.has_parent_path() &&
-                          utils::pathIsChild(rootDirectory, rp.parent_path()) &&
+                          pathIsChild(rootDirectory, rp.parent_path()) &&
                           rp.string() != rp.parent_path().string()) {
                         rp = rp.parent_path();
                         directories[rp.string()] = true;
@@ -136,7 +136,7 @@ std::vector<fs::path> getIndexPathList(fs::path rootDirectory, const std::vector
 
             if (includeDirs) {
                 while(p.has_parent_path() &&
-                      utils::pathIsChild(rootDirectory, p.parent_path()) &&
+                      pathIsChild(rootDirectory, p.parent_path()) &&
                       p.string() != p.parent_path().string()) {
                     p = p.parent_path();
                     directories[p.string()] = true;
@@ -197,7 +197,7 @@ bool checkUpdate(Entry &e, const fs::path &p, long long dbMtime, const std::stri
     bool folder = fs::is_directory(p);
 
     // Did it change?
-    e.mtime = utils::getModifiedTime(p.string());
+    e.mtime = getModifiedTime(p.string());
 
     if (e.mtime != dbMtime) {
         LOGD << p.string() << " modified time ( " << dbMtime << " ) differs from file value: " << e.mtime;
@@ -250,7 +250,7 @@ void addToIndex(Database *db, const std::vector<std::string> &paths) {
     opts.withHash = true;
 
     for (auto &p : pathList) {
-        fs::path relPath = fs::relative(fs::weakly_canonical(fs::absolute(p)), fs::weakly_canonical(fs::absolute(directory)));
+        fs::path relPath = getRelPath(p, directory);
         q->bind(1, relPath.generic_string());
 
         bool update = false;
@@ -300,7 +300,7 @@ void removeFromIndex(Database *db, const std::vector<std::string> &paths) {
     db->exec("BEGIN TRANSACTION");
 
     for (auto &p : pathList) {
-        fs::path relPath = fs::relative(fs::weakly_canonical(fs::absolute(p)), fs::weakly_canonical(fs::absolute(directory)));
+        fs::path relPath = getRelPath(p, directory);
         q->bind(1, relPath.generic_string());
         q->execute();
         if (db->changes() >= 1) {

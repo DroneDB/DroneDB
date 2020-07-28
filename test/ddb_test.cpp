@@ -32,8 +32,6 @@ TEST(getIndexPathList, includeDirs) {
     }, true),
     FSException
     );
-
-//    EXPECT_FALSE(utils::pathsAreChildren("/my/path", {"/my/pat", "/my/path/1"}));
 }
 
 TEST(getIndexPathList, dontIncludeDirs) {

@@ -7,7 +7,15 @@
 #include <filesystem>
 #include <algorithm>
 
+#ifdef WIN32
+    #include <windows.h>    //GetModuleFileNameW
+    #include <direct.h> // _getcwd
+#define stat _stat
+#endif
+
 namespace fs = std::filesystem;
+
+namespace ddb{
 
 // Compares an extension with a list of extension strings
 // @return true if the extension matches one of those in the list
@@ -25,5 +33,12 @@ fs::path getCwd();
 
 // Prints to the provided buffer a nice number of bytes (KB, MB, GB, etc)
 std::string bytesToHuman(off_t bytes);
+
+// Computes a relative path to parent
+// Taking care of edge cases between platforms
+// and canonicalizing the path
+fs::path getRelPath(const fs::path &p, const fs::path &parent);
+
+}
 
 #endif // FILESYSTEM_H

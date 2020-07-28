@@ -13,12 +13,12 @@ bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
         entry.type = EntryType::Undefined;
         return false;
     }
-	std::cerr << fs::weakly_canonical(fs::absolute(rootDirectory)).generic_string() << std::endl;
+
     // Parse file
-    fs::path relPath = fs::relative(fs::weakly_canonical(fs::absolute(path)), fs::weakly_canonical(fs::absolute(rootDirectory)));
+    fs::path relPath = getRelPath(path, rootDirectory);
     entry.path = relPath.generic_string();
-    entry.depth = utils::pathDepth(relPath);
-    if (entry.mtime == 0) entry.mtime = utils::getModifiedTime(path.string());
+    entry.depth = pathDepth(relPath);
+    if (entry.mtime == 0) entry.mtime = getModifiedTime(path.string());
 
     if (fs::is_directory(path)) {
         entry.type = EntryType::Directory;
@@ -35,13 +35,13 @@ bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
         }
     } else {
         if (entry.hash == "" && opts.withHash) entry.hash = Hash::fileSHA256(path.string());
-        entry.size = utils::getSize(path.string());
+        entry.size = getSize(path.string());
 
         entry.type = EntryType::Generic; // Default
 
-        bool jpg = utils::checkExtension(path.extension(), {"jpg", "jpeg"});
-        bool tif = utils::checkExtension(path.extension(), {"tif", "tiff"});
-        bool nongeoImage = utils::checkExtension(path.extension(), {"png", "gif"});
+        bool jpg = checkExtension(path.extension(), {"jpg", "jpeg"});
+        bool tif = checkExtension(path.extension(), {"tif", "tiff"});
+        bool nongeoImage = checkExtension(path.extension(), {"png", "gif"});
 
         bool georaster = false;
 
@@ -352,7 +352,7 @@ std::string Entry::toString(){
     }
 
     s << "Modified Time: " << this->mtime << "\n";
-    s << "Size: " << utils::bytesToHuman(this->size) << "\n";
+    s << "Size: " << bytesToHuman(this->size) << "\n";
     //s << "Tree Depth: " << this->depth << "\n";
     if (!this->point_geom.empty()) s << "Point Geometry: " << this->point_geom  << "\n";
     if (!this->polygon_geom.empty()) s << "Polygon Geometry: " << this->polygon_geom << "\n";

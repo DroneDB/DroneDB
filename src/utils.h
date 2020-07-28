@@ -25,13 +25,8 @@
 #define F_EPSILON 0.000001
 
 #ifdef WIN32
-    
     // Avoid defining min / max macros
     #define NOMINMAX
-
-    #include <windows.h>    //GetModuleFileNameW
-    #include <direct.h> // _getcwd
-#define stat _stat
 #else
     #include <limits.h>
     #include <termios.h>
@@ -42,9 +37,8 @@
     #define PATH_MAX 4096
 #endif
 
-namespace utils {
-
-using namespace ddb;
+namespace ddb{
+namespace utils{
 
 static inline void toLower(std::string &s) {
     std::transform(s.begin(), s.end(), s.begin(),[](int ch) {
@@ -111,10 +105,11 @@ std::string getPrompt(const std::string &prompt = "");
 // Cross-platform getpass
 std::string getPass(const std::string &prompt = "Password: ");
 
-}
-
 // Fix for removing macros
 #undef max
 #undef min
+
+}
+}
 
 #endif // UTILS_H

@@ -2,9 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "fs.h"
+#include "utils.h"
 
 namespace ddb{
-namespace fs{
 
 bool checkExtension(const fs::path &extension, const std::initializer_list<std::string>& matches) {
     std::string ext = extension.string();
@@ -77,7 +77,7 @@ fs::path getDataPath(const fs::path &p){
         return fs::path(ddb_data_path) / p;
     }
 
-    fs::path exePath = utils::getExeFolderPath();
+    fs::path exePath = getExeFolderPath();
     if (fs::exists(exePath / p)){
         return exePath / p;
     }
@@ -143,5 +143,17 @@ std::string bytesToHuman(off_t bytes){
     return os.str();
 }
 
+fs::path getRelPath(const fs::path &p, const fs::path &parent){
+#ifdef WIN32
+    // Handle special cases where root is "/"
+    // in this case we return the canonical absolute path
+    // since Windows has no concept of "/" and we would lose
+    // the drive letter information.
+    if (parent == fs::path("/")){
+        return fs::weakly_canonical(fs::absolute(p));
+    }
+#endif
+    return fs::relative(fs::weakly_canonical(fs::absolute(p)), fs::weakly_canonical(fs::absolute(parent)));
 }
+
 }
