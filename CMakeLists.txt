@@ -40,12 +40,12 @@ if (WIN32)
     # Download GDAL/CURL/sqlite3/spatialite libraries
     if (NOT EXISTS "${DOWNLOADS_DIR}/gdal_libs.zip")
         message("Downloading GDAL libs...")
-        file(DOWNLOAD "http://download.gisinternals.com/sdk/downloads/release-1911-x64-gdal-3-0-4-mapserver-7-4-3-libs.zip" "${DOWNLOADS_DIR}/gdal_libs.zip")
+        file(DOWNLOAD "https://github.com/DroneDB/ddb_data/releases/download/v0.9.2/release-1911-x64-gdal-3-0-4-mapserver-7-4-3-libs.zip" "${DOWNLOADS_DIR}/gdal_libs.zip")
     endif()
 
     if (NOT EXISTS "${DOWNLOADS_DIR}/gdal_bins.zip")
         message("Downloading GDAL binaries...")
-        file(DOWNLOAD "http://download.gisinternals.com/sdk/downloads/release-1911-x64-gdal-3-0-4-mapserver-7-4-3.zip" "${DOWNLOADS_DIR}/gdal_bins.zip")
+        file(DOWNLOAD "https://github.com/DroneDB/ddb_data/releases/download/v0.9.2/release-1911-x64-gdal-3-0-4-mapserver-7-4-3.zip" "${DOWNLOADS_DIR}/gdal_bins.zip")
     endif()
 
     if (NOT EXISTS "${DOWNLOADS_DIR}/gdal/include")
