@@ -18,6 +18,7 @@ bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
     // Parse file
     io::Path p = io::Path(path);
     io::Path relPath = p.relativeTo(rootDirectory);
+
     entry.path = relPath.generic();
     entry.depth = relPath.depth();
     if (entry.mtime == 0) entry.mtime = relPath.getModifiedTime();

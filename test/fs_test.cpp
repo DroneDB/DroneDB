@@ -71,23 +71,27 @@ TEST(pathRelativeTo, Normal) {
               io::Path("D:/home/test/aaa").generic());
 #else
     EXPECT_EQ(io::Path("/home/test/aaa").relativeTo("/").generic(),
-              io::Path("home/test/aaa").generic());
+              io::Path("/home/test/aaa").generic());
 #endif
     EXPECT_EQ(io::Path("/home/test/aaa/bbb/ccc/../..").relativeTo("/home").generic(),
               io::Path("test/aaa/").generic());
     EXPECT_EQ(io::Path("/home/test/aaa/").relativeTo("/home").generic(),
               io::Path("test/aaa").generic());
+    EXPECT_EQ(io::Path("/home/test").relativeTo("/").generic(),
+              io::Path("/home/test").generic());
+
 
 #ifdef _WIN32
     EXPECT_EQ(io::Path("D:\\").relativeTo("/").generic(),
               io::Path("D:\\").generic());
 #else
     EXPECT_EQ(io::Path("/").relativeTo("/").generic(),
-              io::Path(".").generic());
+              io::Path("/").generic());
 #endif
+    EXPECT_EQ(io::Path("/a/..").relativeTo("/").generic(),
+              io::Path("/").generic());
     EXPECT_EQ(io::Path("/").relativeTo("/a/..").generic(),
-              io::Path(".").generic());
-
+              io::Path("/").generic());
 #ifdef _WIN32
     EXPECT_EQ(io::Path("C:\\test").relativeTo("/").generic(),
               io::Path("C:\\test").generic());

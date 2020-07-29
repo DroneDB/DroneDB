@@ -71,16 +71,15 @@ int Path::depth() {
 }
 
 Path Path::relativeTo(const fs::path &parent){
-#ifdef _WIN32
     // Handle special cases where root is "/"
     // in this case we return the canonical absolute path
-    // If we don't, we lose the drive information (D:\, C:\, etc.)
     if (parent == fs::path("/")){
         return fs::weakly_canonical(fs::absolute(p));
     }
-#endif
 
-    return Path(fs::relative(fs::weakly_canonical(fs::absolute(p)), fs::weakly_canonical(fs::absolute(parent))));
+    fs::path relPath = fs::relative(fs::weakly_canonical(fs::absolute(p)), fs::weakly_canonical(fs::absolute(parent)));
+    if (relPath.generic_string() == ".") return fs::weakly_canonical(fs::absolute(parent));
+    else return relPath;
 }
 
 std::string Path::generic() const{
