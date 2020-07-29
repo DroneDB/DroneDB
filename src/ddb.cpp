@@ -196,6 +196,16 @@ std::vector<fs::path> getPathList(const std::vector<std::string> &paths, bool in
 }
 
 
+std::vector<std::string> expandPathList(const std::vector<std::string> &paths, bool recursive, int maxRecursionDepth) {
+	if (recursive) {
+		auto pl = getPathList(paths, true, maxRecursionDepth);
+		return std::vector<std::string>(pl.begin(), pl.end());
+	} else {
+		return paths;
+	}
+}
+
+
 bool checkUpdate(Entry &e, const fs::path &p, long long dbMtime, const std::string &dbHash) {
     bool folder = fs::is_directory(p);
 

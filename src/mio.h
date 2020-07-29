@@ -54,7 +54,6 @@ fs::path getCwd();
 // Prints to the provided buffer a nice number of bytes (KB, MB, GB, etc)
 std::string bytesToHuman(off_t bytes);
 
-
 }
 }
 #endif // MIO_H
