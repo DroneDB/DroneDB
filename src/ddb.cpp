@@ -203,6 +203,7 @@ std::vector<std::string> expandPathList(const std::vector<std::string> &paths, b
 		for (auto& p : pl) {
 			result.push_back(p.string());
 		}
+		return result;
 	} else {
 		return paths;
 	}
