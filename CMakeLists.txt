@@ -186,6 +186,9 @@ if (NOT CMAKE_JS_VERSION)
     set(EXE_EXT "")
     if (WIN32)
         set(EXE_EXT ".exe")
+
+        # Enable globbing/path expansion
+        SET_TARGET_PROPERTIES("${PROJECT_NAME}cmd" PROPERTIES LINK_FLAGS "/link setargv.obj")
     endif()
 
     # set PLOG to PLOG_GLOBAL/PLOG_IMPORT to share instances across modules (and import on Windows)
