@@ -13,6 +13,7 @@ Add files and directories to an index.
 ::
 
   -d, --directory arg  Working directory (default: .)
+  -r, --recursive      Recursively add subdirectories and files
   -p, --paths arg      Paths to add to index (files or directories)
 
 .. toctree::
