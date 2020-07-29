@@ -22,6 +22,10 @@ RelWithDebInfo MinSizeRel."
       FORCE)
 endif(NOT CMAKE_BUILD_TYPE)
 
+if (WIN32)
+    set(CMAKE_CONFIGURATION_TYPES "${CMAKE_BUILD_TYPE}")
+endif()
+
 find_program(CCACHE_FOUND ccache)
 if(CCACHE_FOUND)
     set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE ccache)
@@ -40,12 +44,12 @@ if (WIN32)
     # Download GDAL/CURL/sqlite3/spatialite libraries
     if (NOT EXISTS "${DOWNLOADS_DIR}/gdal_libs.zip")
         message("Downloading GDAL libs...")
-        file(DOWNLOAD "http://download.gisinternals.com/sdk/downloads/release-1911-x64-gdal-3-0-4-mapserver-7-4-3-libs.zip" "${DOWNLOADS_DIR}/gdal_libs.zip")
+        file(DOWNLOAD "https://github.com/DroneDB/ddb_data/releases/download/v0.9.2/release-1911-x64-gdal-3-0-4-mapserver-7-4-3-libs.zip" "${DOWNLOADS_DIR}/gdal_libs.zip")
     endif()
 
     if (NOT EXISTS "${DOWNLOADS_DIR}/gdal_bins.zip")
         message("Downloading GDAL binaries...")
-        file(DOWNLOAD "http://download.gisinternals.com/sdk/downloads/release-1911-x64-gdal-3-0-4-mapserver-7-4-3.zip" "${DOWNLOADS_DIR}/gdal_bins.zip")
+        file(DOWNLOAD "https://github.com/DroneDB/ddb_data/releases/download/v0.9.2/release-1911-x64-gdal-3-0-4-mapserver-7-4-3.zip" "${DOWNLOADS_DIR}/gdal_bins.zip")
     endif()
 
     if (NOT EXISTS "${DOWNLOADS_DIR}/gdal/include")
@@ -165,6 +169,14 @@ endif()
 file(GLOB DATA_FILES "${CMAKE_CURRENT_SOURCE_DIR}/ddb_data/*")
 list(FILTER DATA_FILES EXCLUDE REGEX "^.git$")
 file(COPY ${DATA_FILES} DESTINATION ${CMAKE_BINARY_DIR})
+
+# Copy platform files
+set(PLATFORM "unix")
+if (WIN32)
+    set(PLATFORM "win32")
+endif()
+file(GLOB PLATFORM_FILES "${CMAKE_CURRENT_SOURCE_DIR}/platform/${PLATFORM}/*")
+file(COPY ${PLATFORM_FILES} DESTINATION ${CMAKE_BINARY_DIR})
 
 if (NOT CMAKE_JS_VERSION)
     add_executable("${PROJECT_NAME}cmd" ${CMD_SRC_LIST})

@@ -32,13 +32,13 @@ void Login::run(cxxopts::ParseResult &opts) {
     if (opts["username"].count() > 0){
         username = opts["username"].as<std::string>();
     }else{
-        username = utils::getPrompt("Username: ");
+        username = ddb::utils::getPrompt("Username: ");
     }
 
     if (opts["password"].count() > 0){
         password = opts["password"].as<std::string>();
     }else{
-        password = utils::getPass("Password: ");
+        password = ddb::utils::getPass("Password: ");
     }
 
     ddb::Registry reg(opts["host"].as<std::string>());

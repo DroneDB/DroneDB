@@ -3,7 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "timezone.h"
 #include "logger.h"
-#include "utils.h"
+#include "mio.h"
 #include "exceptions.h"
 
 using namespace ddb;
@@ -19,7 +19,7 @@ void Timezone::init() {
     if (initialized) return;
 
     ZDSetErrorHandler(onError);
-    fs::path dbPath = utils::getDataPath("timezone21.bin");
+    fs::path dbPath = io::getDataPath("timezone21.bin");
     if (dbPath.empty()) throw TimezoneException("Cannot find timezone database timezone21.bin");
     db = ZDOpenDatabase(dbPath.string().c_str());
     if (!db) throw TimezoneException("Cannot open timezone database ./timezone21.bin");
