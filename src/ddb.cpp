@@ -198,8 +198,11 @@ std::vector<fs::path> getPathList(const std::vector<std::string> &paths, bool in
 
 std::vector<std::string> expandPathList(const std::vector<std::string> &paths, bool recursive, int maxRecursionDepth) {
 	if (recursive) {
+		std::vector<std::string> result;
 		auto pl = getPathList(paths, true, maxRecursionDepth);
-		return std::vector<std::string>(pl.begin(), pl.end());
+		for (auto& p : pl) {
+			result.push_back(p.string());
+		}
 	} else {
 		return paths;
 	}
