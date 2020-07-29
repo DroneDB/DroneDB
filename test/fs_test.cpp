@@ -96,7 +96,7 @@ TEST(pathRelativeTo, Normal) {
 #endif
 
 #ifdef _WIN32
-	EXPECT_EQ(io::Path("c:\\a\\..").relativeTo("C:").generic(),
+	EXPECT_EQ(io::Path("C:\\a\\..").relativeTo("C:").generic(),
 		io::Path("C:\\").generic());
 	EXPECT_EQ(io::Path("C:\\").relativeTo("C:\\a\\..").generic(),
 		io::Path("C:\\").generic());
@@ -113,6 +113,16 @@ TEST(pathRelativeTo, Normal) {
     EXPECT_EQ(io::Path("D:\\test\\..\\aaa").relativeTo("D:\\").generic(),
               io::Path("aaa").generic());
 #endif
+}
+
+TEST(pathCheckExtension, Normal) {
+	EXPECT_TRUE(io::Path("/home/test.JPG").checkExtension({ "JPG" }));
+	EXPECT_TRUE(io::Path("/home/test.JPG").checkExtension({ "jpg" }));
+	EXPECT_TRUE(io::Path("/home/test.jpg").checkExtension({ "JpG" }));
+	EXPECT_TRUE(io::Path("/home/test.jpeg").checkExtension({ "JpG", "jpEG" }));
+	EXPECT_FALSE(io::Path("/home/test.jpeg").checkExtension({ "tif" }));
+	EXPECT_FALSE(io::Path("/home/test.jpeg.tif").checkExtension({ "JpG", "jpEG" }));
+	EXPECT_TRUE(io::Path("/home/test.jpeg.tif").checkExtension({ "tif" }));
 }
 
 }
