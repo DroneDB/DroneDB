@@ -366,27 +366,20 @@ std::string getVersion(){
     return APP_VERSION;
 }
 
-#ifdef WIN32
-int setenv(const char *name, const char *value, int overwrite)
-{
-    int errcode = 0;
-    if(!overwrite) {
-        size_t envsize = 0;
-        errcode = getenv_s(&envsize, NULL, 0, name);
-        if(errcode || envsize) return errcode;
-    }
-    return _putenv_s(name, value);
-}
-#endif
-
 // This must be called as the very first function
 // of every DDB process/program
 void initialize(bool verbose){
-    setenv("PROJ_LIB", ddb::io::getExeFolderPath().string().c_str(), 1);
+
+#ifndef WIN32
+    // Windows does not let us change env vars for some reason
+    // so this works only on Unix
+    std::string projPaths = ddb::io::getExeFolderPath().string() + ":/usr/share/proj";
+    setenv("PROJ_LIB", projPaths.c_str(), 1);
+#endif
     init_logger();
 	if (verbose) {
 		set_logger_verbose();
-	}
+    }
     Database::Initialize();
     net::Initialize();
     GDALAllRegister();
