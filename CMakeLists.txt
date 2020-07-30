@@ -183,7 +183,10 @@ if (NOT CMAKE_JS_VERSION)
     set_target_properties("${PROJECT_NAME}cmd" PROPERTIES CXX_STANDARD 17)
     target_link_libraries("${PROJECT_NAME}cmd" ${PROJECT_NAME} ${LINK_LIBRARIES})
 
+    set(EXE_EXT "")
     if (WIN32)
+        set(EXE_EXT ".exe")
+
         # Enable globbing/path expansion
         SET_TARGET_PROPERTIES("${PROJECT_NAME}cmd" PROPERTIES LINK_FLAGS "/link setargv.obj")
     endif()
@@ -195,13 +198,11 @@ if (NOT CMAKE_JS_VERSION)
         target_compile_definitions("${PROJECT_NAME}cmd" PRIVATE PLOG_GLOBAL)
     endif()
 
-    # Copy ddbcmd to build directory
-    if (WIN32)
-        add_custom_command(TARGET "${PROJECT_NAME}cmd" POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:ddbcmd> ${CMAKE_BINARY_DIR}/ddbcmd.exe
-            COMMENT "Created ${CMAKE_BINARY_DIR}/ddbcmd.exe"
-        )
-    endif()
+    # Rename ddbcmd --> ddb
+    add_custom_command(TARGET "${PROJECT_NAME}cmd" POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:ddbcmd> ${CMAKE_BINARY_DIR}/ddb${EXE_EXT}
+        COMMENT "Created ${CMAKE_BINARY_DIR}/ddb${EXE_EXT}"
+    )
 endif()
 
 # Nodejs bindings
@@ -250,10 +251,10 @@ if (WIN32)
     # TODO: Mac
 endif()
 
-set(OUTPUT_DIST_FILE "${PROJECT_NAME}-${APP_VERSION}-${PLATFORM_NAME}.zip")
+#set(OUTPUT_DIST_FILE "${PROJECT_NAME}-${APP_VERSION}-${PLATFORM_NAME}.zip")
 
-file(GLOB DIST_FILES "${CMAKE_BINARY_DIR}/*.dll")
+#file(GLOB DIST_FILES "${CMAKE_BINARY_DIR}/*.dll")
 
-create_zip("${CMAKE_BINARY_DIR}/dist/${OUTPUT_DIST_FILE}" "${DIST_FILES}" "${CMAKE_BINARY_DIR}")
+#create_zip("${CMAKE_BINARY_DIR}/dist/${OUTPUT_DIST_FILE}" "${DIST_FILES}" "${CMAKE_BINARY_DIR}")
 
-add_custom_target("dist" ALL DEPENDS "${CMAKE_BINARY_DIR}/dist/${OUTPUT_DIST_FILE}")
+#add_custom_target("dist" ALL DEPENDS "${CMAKE_BINARY_DIR}/dist/${OUTPUT_DIST_FILE}")

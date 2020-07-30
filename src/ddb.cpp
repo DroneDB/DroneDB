@@ -12,6 +12,7 @@
 #include "logger.h"
 #include "mio.h"
 #include <gdal_priv.h>
+#include <stdlib.h>
 
 namespace ddb {
 
@@ -365,9 +366,27 @@ std::string getVersion(){
     return APP_VERSION;
 }
 
+#ifdef WIN32
+int setenv(const char *name, const char *value, int overwrite)
+{
+    int errcode = 0;
+    if(!overwrite) {
+        size_t envsize = 0;
+        errcode = getenv_s(&envsize, NULL, 0, name);
+        if(errcode || envsize) return errcode;
+    }
+    return _putenv_s(name, value);
+}
+#endif
+
+void setProjLib(){
+    setenv("PROJ_LIB", ddb::io::getExeFolderPath().string().c_str(), 1);
+}
+
 // This must be called as the very first function
 // of every DDB process/program
 void initialize(bool verbose){
+    setProjLib();
     init_logger();
 	if (verbose) {
 		set_logger_verbose();
