@@ -183,10 +183,7 @@ if (NOT CMAKE_JS_VERSION)
     set_target_properties("${PROJECT_NAME}cmd" PROPERTIES CXX_STANDARD 17)
     target_link_libraries("${PROJECT_NAME}cmd" ${PROJECT_NAME} ${LINK_LIBRARIES})
 
-    set(EXE_EXT "")
     if (WIN32)
-        set(EXE_EXT ".exe")
-
         # Enable globbing/path expansion
         SET_TARGET_PROPERTIES("${PROJECT_NAME}cmd" PROPERTIES LINK_FLAGS "/link setargv.obj")
     endif()
@@ -198,10 +195,16 @@ if (NOT CMAKE_JS_VERSION)
         target_compile_definitions("${PROJECT_NAME}cmd" PRIVATE PLOG_GLOBAL)
     endif()
 
-    # Rename ddbcmd --> ddb
+    # On Unix, rename ddbcmd --> ddb
+    # On Windows, keep ddbcmd since we'll use ddb.bat to launch it
+    set(DDBCMD_OUTFILE "ddb")
+    if (WIN32)
+        set(DDBCMD_OUTFILE "ddbcmd.exe")
+    endif()
+
     add_custom_command(TARGET "${PROJECT_NAME}cmd" POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:ddbcmd> ${CMAKE_BINARY_DIR}/ddb${EXE_EXT}
-        COMMENT "Created ${CMAKE_BINARY_DIR}/ddb${EXE_EXT}"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:ddbcmd> ${CMAKE_BINARY_DIR}/${DDBCMD_OUTFILE}
+        COMMENT "Created ${CMAKE_BINARY_DIR}/${DDBCMD_OUTFILE}"
     )
 endif()
 

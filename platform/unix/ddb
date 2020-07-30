@@ -1,6 +1,0 @@
-#!/bin/sh
-
-DDBBASE=$(cd $(dirname "$0"); pwd -P)
-export PROJ_LIB="$DDBBASE"
-
-./ddbcmd "$@"

@@ -379,14 +379,10 @@ int setenv(const char *name, const char *value, int overwrite)
 }
 #endif
 
-void setProjLib(){
-    setenv("PROJ_LIB", ddb::io::getExeFolderPath().string().c_str(), 1);
-}
-
 // This must be called as the very first function
 // of every DDB process/program
 void initialize(bool verbose){
-    setProjLib();
+    setenv("PROJ_LIB", ddb::io::getExeFolderPath().string().c_str(), 1);
     init_logger();
 	if (verbose) {
 		set_logger_verbose();
