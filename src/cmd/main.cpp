@@ -40,6 +40,7 @@ bool hasParam(int argc, char *argv[], const char* param) {
 }
 
 int main(int argc, char* argv[]) {
+	argv[0] = "ddb\0";
     ddb::initialize(hasParam(argc, argv, "--debug"));
 
     LOGV << "DDB v" << ddb::getVersion();

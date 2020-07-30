@@ -176,17 +176,14 @@ if (WIN32)
     set(PLATFORM "win32")
 endif()
 file(GLOB PLATFORM_FILES "${CMAKE_CURRENT_SOURCE_DIR}/platform/${PLATFORM}/*")
-file(COPY ${PLATFORM_FILES} DESTINATION "${CMAKE_BINARY_DIR}/platform")
+file(COPY ${PLATFORM_FILES} DESTINATION "${CMAKE_BINARY_DIR}")
 
 if (NOT CMAKE_JS_VERSION)
     add_executable("${PROJECT_NAME}cmd" ${CMD_SRC_LIST})
     set_target_properties("${PROJECT_NAME}cmd" PROPERTIES CXX_STANDARD 17)
     target_link_libraries("${PROJECT_NAME}cmd" ${PROJECT_NAME} ${LINK_LIBRARIES})
 
-    set(EXE_EXT "")
     if (WIN32)
-        set(EXE_EXT ".exe")
-
         # Enable globbing/path expansion
         SET_TARGET_PROPERTIES("${PROJECT_NAME}cmd" PROPERTIES LINK_FLAGS "/link setargv.obj")
     endif()
@@ -198,11 +195,13 @@ if (NOT CMAKE_JS_VERSION)
         target_compile_definitions("${PROJECT_NAME}cmd" PRIVATE PLOG_GLOBAL)
     endif()
 
-    # Rename ddbcmd --> ddb
-    add_custom_command(TARGET "${PROJECT_NAME}cmd" POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:ddbcmd> ${CMAKE_BINARY_DIR}/ddb${EXE_EXT}
-        COMMENT "Created ${CMAKE_BINARY_DIR}/ddb${EXE_EXT}"
-    )
+    # Copy ddbcmd to build directory
+    if (WIN32)
+        add_custom_command(TARGET "${PROJECT_NAME}cmd" POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:ddbcmd> ${CMAKE_BINARY_DIR}/ddbcmd.exe
+            COMMENT "Created ${CMAKE_BINARY_DIR}/ddbcmd.exe"
+        )
+    endif()
 endif()
 
 # Nodejs bindings
@@ -232,3 +231,29 @@ endif()
 if(BUILD_TESTING)
     add_subdirectory("test")
 endif()
+
+# Distribution
+
+function(create_zip output_file input_files working_dir)
+    add_custom_command(
+        COMMAND ${CMAKE_COMMAND} -E tar "cf" "${output_file}" --format=zip -- ${input_files}
+        WORKING_DIRECTORY "${working_dir}"
+        OUTPUT  "${output_file}"
+        DEPENDS ${input_files}
+        COMMENT "Zipping to ${output_file}."
+    )
+endfunction()
+
+set(PLATFORM_NAME "linux")
+if (WIN32)
+    set(PLATFORM_NAME "windows")
+    # TODO: Mac
+endif()
+
+set(OUTPUT_DIST_FILE "${PROJECT_NAME}-${APP_VERSION}-${PLATFORM_NAME}.zip")
+
+file(GLOB DIST_FILES "${CMAKE_BINARY_DIR}/*.dll")
+
+create_zip("${CMAKE_BINARY_DIR}/dist/${OUTPUT_DIST_FILE}" "${DIST_FILES}" "${CMAKE_BINARY_DIR}")
+
+add_custom_target("dist" ALL DEPENDS "${CMAKE_BINARY_DIR}/dist/${OUTPUT_DIST_FILE}")
