@@ -13,7 +13,7 @@ jobs:
         steps:
             - uses: actions/checkout@v2
               with:
-                recursive: 'recursive'
+                submodules: 'recursive'
             - name: Install deps
               run: scripts/ubuntu_deps.sh
             - name: Run CMake
@@ -35,7 +35,7 @@ jobs:
         steps:
             - uses: actions/checkout@v2
               with:
-                recursive: 'recursive'
+                submodules: 'recursive'
             - name: Build C++ lib/program and tests
               run: |
                 mkdir build

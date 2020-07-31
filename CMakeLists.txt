@@ -300,7 +300,7 @@ if (WIN32)
     create_zip("${CMAKE_BINARY_DIR}/dist/${OUTPUT_DIST_FILE}" "${DIST_FILES}" "${CMAKE_BINARY_DIR}")
 else()
     # On Linux we use exodus
-    find_program(EXODUS exodus "$ENV{HOME}/.local/bin/" REQUIRED)
+    find_program(EXODUS exodus "$ENV{HOME}/.local/bin/" "/usr/local/bin" REQUIRED)
     if (${EXODUS} STREQUAL "EXODUS-NOTFOUND")
         set(SKIP_DIST ON)
         message(WARNING "exodus not found. Install it via: pip install --user exodus if you want to generate a distributable version of ddb")
