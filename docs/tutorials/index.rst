@@ -65,6 +65,21 @@ Create a new query similar to:
 The 'point_geom' column contains the GPS locations, while 'polygon_geom' has the footprint extents. Footprint extents can be calculated only if gimbal orientation and camera parameters are present.
 
 
+Extracting GPS locations/footprints to GeoJSON
+-----------------------------------------------------------------------------
+
+You can quickly extract the locations of images to GeoJSON via:
+
+::
+
+    ddb info *.JPG -f geojson -o gps.geojson
+
+Or for image footprints:
+
+::
+
+    ddb info *.JPG -f geojson --geometry polygon -o footprint.geojson
+
 
 .. toctree::
    :maxdepth: 2
