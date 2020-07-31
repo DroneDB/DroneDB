@@ -19,5 +19,8 @@ if [[ $not_found ]]; then
     sudo npm install nan mocha
 fi
 
-sudo apt install -y --fix-missing --no-install-recommends ca-certificates cmake git sqlite3 spatialite-bin exiv2 libexiv2-dev libgeos-dev libgdal-dev g++-10 gcc-10
+sudo apt install -y --fix-missing --no-install-recommends ca-certificates cmake git sqlite3 spatialite-bin exiv2 libexiv2-dev libgeos-dev libgdal-dev g++-10 gcc-10 python-pip
 sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 1000 --slave /usr/bin/g++ g++ /usr/bin/g++-10
+
+# For dist
+pip install --user exodus

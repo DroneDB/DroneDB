@@ -164,6 +164,9 @@ if (WIN32)
 
     # Fix linking
     target_link_libraries("${PROJECT_NAME}" ${LINK_LIBRARIES})
+else()
+    # Copy proj.db into build directory
+    file(COPY "/usr/share/proj/proj.db" DESTINATION ${CMAKE_BINARY_DIR})
 endif()
 
 file(GLOB DATA_FILES "${CMAKE_CURRENT_SOURCE_DIR}/ddb_data/*")
@@ -251,11 +254,15 @@ endfunction()
 function(exodus_pack exodus_exe_path output_file exe_file dist_files working_dir)
     set(DEPS_PARAMS "")
     foreach(F ${dist_files})
-        list(APPEND DEPS_PARAMS "-a ${F}")
+        list(APPEND DEPS_PARAMS "-a")
+        list(APPEND DEPS_PARAMS "${F}")
     endforeach()
 
+    get_filename_component(DIST_DIRECTORY ${output_file} DIRECTORY)
+    file(MAKE_DIRECTORY ${DIST_DIRECTORY})
+
     add_custom_command(
-        COMMAND ${exodus_exe_path} ${exe_file} -t -o "${output_file}" ${DEPS_PARAMS}
+        COMMAND ${exodus_exe_path} "${exe_file}" "-t" "-o" "${output_file}" ${DEPS_PARAMS}
         WORKING_DIRECTORY "${working_dir}"
         OUTPUT  "${output_file}"
         DEPENDS ${dist_files} ${exe_file}
@@ -277,7 +284,9 @@ set(SUPPORT_FILES "proj.db" "sensor_data.sqlite" "timezone21.bin")
 set(DIST_FILES "")
 
 if (WIN32)
+    # Add DLLs
     file(GLOB DIST_FILES "${CMAKE_BINARY_DIR}/*.dll")
+    
     list(APPEND DIST_FILES "${DDBCMD_OUTFILE}")
     list(APPEND DIST_FILES "${CMAKE_BINARY_DIR}/ddb.bat")
 endif()
@@ -291,8 +300,15 @@ if (WIN32)
     create_zip("${CMAKE_BINARY_DIR}/dist/${OUTPUT_DIST_FILE}" "${DIST_FILES}" "${CMAKE_BINARY_DIR}")
 else()
     # On Linux we use exodus
-    find_program(EXODUS exodus "$ENV{HOME}/.local/bin/exodus" REQUIRED)
-    exodus_pack(${EXODUS} "${CMAKE_BINARY_DIR}/dist/${OUTPUT_DIST_FILE}" "${DDBCMD_OUTFILE}" "${DIST_FILES}" "${CMAKE_BINARY_DIR}")
+    find_program(EXODUS exodus "$ENV{HOME}/.local/bin/" REQUIRED)
+    if (${EXODUS} STREQUAL "EXODUS-NOTFOUND")
+        set(SKIP_DIST ON)
+        message(WARNING "exodus not found. Install it via: pip install --user exodus if you want to generate a distributable version of ddb")
+    else()
+        exodus_pack(${EXODUS} "${CMAKE_BINARY_DIR}/dist/${OUTPUT_DIST_FILE}" "${DDBCMD_OUTFILE}" "${DIST_FILES}" "${CMAKE_BINARY_DIR}")
+    endif()
 endif()
 
-add_custom_target("dist" ALL DEPENDS "${CMAKE_BINARY_DIR}/dist/${OUTPUT_DIST_FILE}")
+if (NOT SKIP_DIST)
+    add_custom_target("dist" ALL DEPENDS "${CMAKE_BINARY_DIR}/dist/${OUTPUT_DIST_FILE}")
+endif()

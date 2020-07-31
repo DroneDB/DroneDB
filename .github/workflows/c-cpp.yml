@@ -17,14 +17,16 @@ jobs:
             - name: Run CMake
               run: mkdir build && cd build && cmake -DBUILD_TESTING=ON ..
             - name: Build C++ lib/program and tests
-              run: cd build && make -j$(nproc)
+              run: cd build && make -j$(nproc) test
             - name: Test C++ lib/program
               run: cd build/test && ./test
+            - name: Build Distribution
+              run: cd build && make -j$(nproc) dist
             - name: Upload distribution Files
               uses: actions/upload-artifact@v2
               with:
                 name: Binaries
-                path: build\dist\*.tgz
+                path: build/dist/*.tgz
     build_windows:
         name: Build/Test on Windows
         runs-on: windows-latest
