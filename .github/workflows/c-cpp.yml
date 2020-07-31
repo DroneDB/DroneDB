@@ -19,7 +19,7 @@ jobs:
             - name: Run CMake
               run: mkdir build && cd build && cmake -DBUILD_TESTING=ON ..
             - name: Build C++ lib/program and tests
-              run: cd build && make -j$(nproc) test
+              run: cd build && make -j$(nproc) test ddbcmd
             - name: Run C++ Tests
               run: cd build/test && ./test
             - name: Run Program Smoke Test
