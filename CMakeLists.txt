@@ -310,5 +310,5 @@ else()
 endif()
 
 if (NOT SKIP_DIST)
-    add_custom_target("dist" ALL DEPENDS "${CMAKE_BINARY_DIR}/dist/${OUTPUT_DIST_FILE}")
+    add_custom_target("dist" ALL DEPENDS "${PROJECT_NAME}cmd" "${CMAKE_BINARY_DIR}/dist/${OUTPUT_DIST_FILE}")
 endif()
