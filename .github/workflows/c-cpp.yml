@@ -12,6 +12,8 @@ jobs:
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v2
+              with:
+                recursive: 'recursive'
             - name: Install deps
               run: scripts/ubuntu_deps.sh
             - name: Run CMake
@@ -32,6 +34,8 @@ jobs:
         runs-on: windows-latest
         steps:
             - uses: actions/checkout@v2
+              with:
+                recursive: 'recursive'
             - name: Build C++ lib/program and tests
               run: |
                 mkdir build
