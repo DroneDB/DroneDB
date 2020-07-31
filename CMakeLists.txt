@@ -287,11 +287,15 @@ set(SUPPORT_FILES "proj.db" "sensor_data.sqlite" "timezone21.bin")
 set(DIST_FILES "")
 
 if (WIN32)
-    # Add DLLs
+    # Add DLLs (added at cmake build time)
     file(GLOB DIST_FILES "${CMAKE_BINARY_DIR}/*.dll")
     
     list(APPEND DIST_FILES "${DDBCMD_OUTFILE}")
     list(APPEND DIST_FILES "${CMAKE_BINARY_DIR}/ddb.bat")
+
+    # These are added after build so they are not available with GLOB
+    list(APPEND DIST_FILES "${CMAKE_BINARY_DIR}/ddb.dll")
+    list(APPEND DIST_FILES "${CMAKE_BINARY_DIR}/exiv2.dll")
 endif()
 
 foreach(F ${SUPPORT_FILES})
