@@ -215,6 +215,9 @@ endif()
 if (CMAKE_JS_VERSION)
     message ("Building Node.js bindings")
 
+    # Don't build distribution target
+    set(SKIP_DIST ON)
+
     if (NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/node_modules/nan")
         message("Installing nan...")
         execute_process(COMMAND npm install nan)

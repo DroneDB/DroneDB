@@ -24,7 +24,7 @@ jobs:
               run: cd build/test && ./test
             - name: Build Distribution
               run: cd build && make -j$(nproc) dist
-            - name: Upload distribution Files
+            - name: Upload Distribution Files
               uses: actions/upload-artifact@v2
               with:
                 name: Binaries
@@ -46,7 +46,7 @@ jobs:
             - name: Test C++ lib/program
               run: .\scripts\setup_windows_env.bat && cd build && test.exe
               shell: cmd
-            - name: Upload distribution Files
+            - name: Upload Distribution Files
               uses: actions/upload-artifact@v2
               with:
                 name: Binaries
