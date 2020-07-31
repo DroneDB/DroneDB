@@ -248,16 +248,51 @@ function(create_zip output_file input_files working_dir)
     )
 endfunction()
 
+function(exodus_pack exodus_exe_path output_file exe_file dist_files working_dir)
+    set(DEPS_PARAMS "")
+    foreach(F ${dist_files})
+        list(APPEND DEPS_PARAMS "-a ${F}")
+    endforeach()
+
+    add_custom_command(
+        COMMAND ${exodus_exe_path} ${exe_file} -t -o "${output_file}" ${DEPS_PARAMS}
+        WORKING_DIRECTORY "${working_dir}"
+        OUTPUT  "${output_file}"
+        DEPENDS ${dist_files} ${exe_file}
+        COMMENT "Packing to ${output_file}."
+    )
+endfunction()
+
 set(PLATFORM_NAME "linux")
+set(OUTPUT_DIST_EXT "tgz")
 if (WIN32)
     set(PLATFORM_NAME "windows")
+    set(OUTPUT_DIST_EXT "zip")
     # TODO: Mac
 endif()
 
-#set(OUTPUT_DIST_FILE "${PROJECT_NAME}-${APP_VERSION}-${PLATFORM_NAME}.zip")
+set(OUTPUT_DIST_FILE "${PROJECT_NAME}-${APP_VERSION}-${PLATFORM_NAME}.${OUTPUT_DIST_EXT}")
+set(SUPPORT_FILES "proj.db" "sensor_data.sqlite" "timezone21.bin")
 
-#file(GLOB DIST_FILES "${CMAKE_BINARY_DIR}/*.dll")
+set(DIST_FILES "")
 
-#create_zip("${CMAKE_BINARY_DIR}/dist/${OUTPUT_DIST_FILE}" "${DIST_FILES}" "${CMAKE_BINARY_DIR}")
+if (WIN32)
+    file(GLOB DIST_FILES "${CMAKE_BINARY_DIR}/*.dll")
+    list(APPEND DIST_FILES "${DDBCMD_OUTFILE}")
+    list(APPEND DIST_FILES "${CMAKE_BINARY_DIR}/ddb.bat")
+endif()
 
-#add_custom_target("dist" ALL DEPENDS "${CMAKE_BINARY_DIR}/dist/${OUTPUT_DIST_FILE}")
+foreach(F ${SUPPORT_FILES})
+    list(APPEND DIST_FILES "${CMAKE_BINARY_DIR}/${F}")
+endforeach()
+
+# On Windows we just zip
+if (WIN32)
+    create_zip("${CMAKE_BINARY_DIR}/dist/${OUTPUT_DIST_FILE}" "${DIST_FILES}" "${CMAKE_BINARY_DIR}")
+else()
+    # On Linux we use exodus
+    find_program(EXODUS exodus "$ENV{HOME}/.local/bin/exodus" REQUIRED)
+    exodus_pack(${EXODUS} "${CMAKE_BINARY_DIR}/dist/${OUTPUT_DIST_FILE}" "${DDBCMD_OUTFILE}" "${DIST_FILES}" "${CMAKE_BINARY_DIR}")
+endif()
+
+add_custom_target("dist" ALL DEPENDS "${CMAKE_BINARY_DIR}/dist/${OUTPUT_DIST_FILE}")
