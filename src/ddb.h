@@ -18,6 +18,8 @@ std::unique_ptr<Database> open(const std::string &directory, bool traverseUp);
 fs::path rootDirectory(Database *db);
 std::vector<fs::path> getIndexPathList(fs::path rootDirectory, const std::vector<std::string> &paths, bool includeDirs);
 std::vector<fs::path> getPathList(const std::vector<std::string> &paths, bool includeDirs, int maxDepth);
+std::vector<std::string> expandPathList(const std::vector<std::string> &paths, bool recursive, int maxRecursionDepth);
+
 bool checkUpdate(Entry &e, const fs::path &p, long long dbMtime, const std::string &dbHash);
 void doUpdate(Statement *updateQ, const Entry &e);
 

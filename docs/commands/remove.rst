@@ -13,6 +13,7 @@ Remove files and directories from an index. The filesystem is left unchanged (ac
 ::
 
   -d, --directory arg  Working directory (default: .)
+  -r, --recursive      Recursively remove subdirectories and files
   -p, --paths arg      Paths to remove from index (files or directories)
 
 .. toctree::

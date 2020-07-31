@@ -8,13 +8,15 @@ namespace ddb{
 namespace io{
 
 bool Path::checkExtension(const std::initializer_list<std::string>& matches) {
-    std::string ext = p.string();
+    std::string ext = p.extension().string();
     if (ext.size() < 1) return false;
     std::string extLowerCase = ext.substr(1, ext.length());
     utils::toLower(extLowerCase);
 
     for (auto &m : matches) {
-        if (m == extLowerCase) return true;
+		std::string ext = m;
+		utils::toLower(ext);
+        if (ext == extLowerCase) return true;
     }
     return false;
 }

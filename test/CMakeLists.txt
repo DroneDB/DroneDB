@@ -19,6 +19,11 @@ add_custom_command(TARGET test POST_BUILD
 )
 endif()
 
+set(EXE_EXT "")
+if (WIN32)
+    set(EXE_EXT ".exe")
+endif()
+
 add_custom_command(TARGET test POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:test> ${CMAKE_BINARY_DIR}/test${EXE_EXT}
         COMMENT "Created ${CMAKE_BINARY_DIR}/test${EXE_EXT}"

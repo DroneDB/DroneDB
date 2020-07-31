@@ -10,8 +10,8 @@
 #include "database.h"
 #include "exif.h"
 #include "ddb.h"
+#include "mio.h"
 #include <gdal_priv.h>
-
 
 using namespace std;
 using namespace ddb;
@@ -39,7 +39,9 @@ bool hasParam(int argc, char *argv[], const char* param) {
     return false;
 }
 
+
 int main(int argc, char* argv[]) {
+    memcpy(argv[0], "ddb\0", 4);
     ddb::initialize(hasParam(argc, argv, "--debug"));
 
     LOGV << "DDB v" << ddb::getVersion();

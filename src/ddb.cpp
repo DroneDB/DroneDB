@@ -12,6 +12,7 @@
 #include "logger.h"
 #include "mio.h"
 #include <gdal_priv.h>
+#include <stdlib.h>
 
 namespace ddb {
 
@@ -196,6 +197,20 @@ std::vector<fs::path> getPathList(const std::vector<std::string> &paths, bool in
 }
 
 
+std::vector<std::string> expandPathList(const std::vector<std::string> &paths, bool recursive, int maxRecursionDepth) {
+	if (recursive) {
+		std::vector<std::string> result;
+		auto pl = getPathList(paths, true, maxRecursionDepth);
+		for (auto& p : pl) {
+			result.push_back(p.string());
+		}
+		return result;
+	} else {
+		return paths;
+	}
+}
+
+
 bool checkUpdate(Entry &e, const fs::path &p, long long dbMtime, const std::string &dbHash) {
     bool folder = fs::is_directory(p);
 
@@ -354,10 +369,17 @@ std::string getVersion(){
 // This must be called as the very first function
 // of every DDB process/program
 void initialize(bool verbose){
+
+#ifndef WIN32
+    // Windows does not let us change env vars for some reason
+    // so this works only on Unix
+    std::string projPaths = ddb::io::getExeFolderPath().string() + ":/usr/share/proj";
+    setenv("PROJ_LIB", projPaths.c_str(), 1);
+#endif
     init_logger();
 	if (verbose) {
 		set_logger_verbose();
-	}
+    }
     Database::Initialize();
     net::Initialize();
     GDALAllRegister();

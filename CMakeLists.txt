@@ -164,6 +164,9 @@ if (WIN32)
 
     # Fix linking
     target_link_libraries("${PROJECT_NAME}" ${LINK_LIBRARIES})
+else()
+    # Copy proj.db into build directory
+    file(COPY "/usr/share/proj/proj.db" DESTINATION ${CMAKE_BINARY_DIR})
 endif()
 
 file(GLOB DATA_FILES "${CMAKE_CURRENT_SOURCE_DIR}/ddb_data/*")
@@ -176,16 +179,16 @@ if (WIN32)
     set(PLATFORM "win32")
 endif()
 file(GLOB PLATFORM_FILES "${CMAKE_CURRENT_SOURCE_DIR}/platform/${PLATFORM}/*")
-file(COPY ${PLATFORM_FILES} DESTINATION ${CMAKE_BINARY_DIR})
+file(COPY ${PLATFORM_FILES} DESTINATION "${CMAKE_BINARY_DIR}")
 
 if (NOT CMAKE_JS_VERSION)
     add_executable("${PROJECT_NAME}cmd" ${CMD_SRC_LIST})
     set_target_properties("${PROJECT_NAME}cmd" PROPERTIES CXX_STANDARD 17)
     target_link_libraries("${PROJECT_NAME}cmd" ${PROJECT_NAME} ${LINK_LIBRARIES})
 
-    set(EXE_EXT "")
     if (WIN32)
-        set(EXE_EXT ".exe")
+        # Enable globbing/path expansion
+        SET_TARGET_PROPERTIES("${PROJECT_NAME}cmd" PROPERTIES LINK_FLAGS "/link setargv.obj")
     endif()
 
     # set PLOG to PLOG_GLOBAL/PLOG_IMPORT to share instances across modules (and import on Windows)
@@ -195,16 +198,25 @@ if (NOT CMAKE_JS_VERSION)
         target_compile_definitions("${PROJECT_NAME}cmd" PRIVATE PLOG_GLOBAL)
     endif()
 
-    # Rename ddbcmd --> ddb
+    # On Unix, rename ddbcmd --> ddb
+    # On Windows, keep ddbcmd since we'll use ddb.bat to launch it
+    set(DDBCMD_OUTFILE "ddb")
+    if (WIN32)
+        set(DDBCMD_OUTFILE "ddbcmd.exe")
+    endif()
+
     add_custom_command(TARGET "${PROJECT_NAME}cmd" POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:ddbcmd> ${CMAKE_BINARY_DIR}/ddb${EXE_EXT}
-        COMMENT "Created ${CMAKE_BINARY_DIR}/ddb${EXE_EXT}"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:ddbcmd> ${CMAKE_BINARY_DIR}/${DDBCMD_OUTFILE}
+        COMMENT "Created ${CMAKE_BINARY_DIR}/${DDBCMD_OUTFILE}"
     )
 endif()
 
 # Nodejs bindings
 if (CMAKE_JS_VERSION)
     message ("Building Node.js bindings")
+
+    # Don't build distribution target
+    set(SKIP_DIST ON)
 
     if (NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/node_modules/nan")
         message("Installing nan...")
@@ -228,4 +240,78 @@ endif()
 
 if(BUILD_TESTING)
     add_subdirectory("test")
+endif()
+
+# Distribution
+
+function(create_zip output_file input_files working_dir)
+    add_custom_command(
+        COMMAND ${CMAKE_COMMAND} -E tar "cf" "${output_file}" --format=zip -- ${input_files}
+        WORKING_DIRECTORY "${working_dir}"
+        OUTPUT  "${output_file}"
+        DEPENDS ${input_files}
+        COMMENT "Zipping to ${output_file}."
+    )
+endfunction()
+
+function(exodus_pack exodus_exe_path output_file exe_file dist_files working_dir)
+    set(DEPS_PARAMS "")
+    foreach(F ${dist_files})
+        list(APPEND DEPS_PARAMS "-a")
+        list(APPEND DEPS_PARAMS "${F}")
+    endforeach()
+
+    get_filename_component(DIST_DIRECTORY ${output_file} DIRECTORY)
+    file(MAKE_DIRECTORY ${DIST_DIRECTORY})
+
+    add_custom_command(
+        COMMAND ${exodus_exe_path} "${exe_file}" "-t" "-o" "${output_file}" ${DEPS_PARAMS}
+        WORKING_DIRECTORY "${working_dir}"
+        OUTPUT  "${output_file}"
+        DEPENDS ${dist_files} ${exe_file}
+        COMMENT "Packing to ${output_file}."
+    )
+endfunction()
+
+set(PLATFORM_NAME "linux")
+set(OUTPUT_DIST_EXT "tgz")
+if (WIN32)
+    set(PLATFORM_NAME "windows")
+    set(OUTPUT_DIST_EXT "zip")
+    # TODO: Mac
+endif()
+
+set(OUTPUT_DIST_FILE "${PROJECT_NAME}-${APP_VERSION}-${PLATFORM_NAME}.${OUTPUT_DIST_EXT}")
+set(SUPPORT_FILES "proj.db" "sensor_data.sqlite" "timezone21.bin")
+
+set(DIST_FILES "")
+
+if (WIN32)
+    # Add DLLs
+    file(GLOB DIST_FILES "${CMAKE_BINARY_DIR}/*.dll")
+    
+    list(APPEND DIST_FILES "${DDBCMD_OUTFILE}")
+    list(APPEND DIST_FILES "${CMAKE_BINARY_DIR}/ddb.bat")
+endif()
+
+foreach(F ${SUPPORT_FILES})
+    list(APPEND DIST_FILES "${CMAKE_BINARY_DIR}/${F}")
+endforeach()
+
+# On Windows we just zip
+if (WIN32)
+    create_zip("${CMAKE_BINARY_DIR}/dist/${OUTPUT_DIST_FILE}" "${DIST_FILES}" "${CMAKE_BINARY_DIR}")
+else()
+    # On Linux we use exodus
+    find_program(EXODUS exodus "$ENV{HOME}/.local/bin/" "/usr/local/bin" REQUIRED)
+    if (${EXODUS} STREQUAL "EXODUS-NOTFOUND")
+        set(SKIP_DIST ON)
+        message(WARNING "exodus not found. Install it via: pip install --user exodus if you want to generate a distributable version of ddb")
+    else()
+        exodus_pack(${EXODUS} "${CMAKE_BINARY_DIR}/dist/${OUTPUT_DIST_FILE}" "${DDBCMD_OUTFILE}" "${DIST_FILES}" "${CMAKE_BINARY_DIR}")
+    endif()
+endif()
+
+if (NOT SKIP_DIST)
+    add_custom_target("dist" ALL DEPENDS "${PROJECT_NAME}cmd" "${CMAKE_BINARY_DIR}/dist/${OUTPUT_DIST_FILE}")
 endif()
