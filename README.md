@@ -8,7 +8,7 @@ DroneDB is a toolset for easily managing and sharing aerial datasets. It can ind
 
 ![image](https://user-images.githubusercontent.com/1951843/68077866-001de800-fda2-11e9-895f-b5840d9d047d.png)
 
-DroneDB is in early development stages and is targeted at GIS developers and early adopters. It is not ready for mainstream use. To contribute to the project, please see the [contributing guidelines](CONTRIBUTING.md).
+DroneDB is in early development stages and is targeted at GIS developers and early adopters. While it's limited in functionality, it can already be used. Give it a try! To contribute to the project, please see the [contributing guidelines](CONTRIBUTING.md).
 
 ## Installation
 
@@ -21,7 +21,7 @@ $ sh get-ddb.sh
 
 On Windows simply download the precompiled binaries from https://github.com/DroneDB/DroneDB/releases/. Binaries for Linux are also published on that page.
 
-On Windows make sure the path to **ddb.bat** program is [in your PATH environment variable](<https://helpdeskgeek.com/windows-10/add-windows-path-environment-variable/).
+On Windows make sure the path to **ddb.bat** program is [in your PATH environment variable](https://helpdeskgeek.com/windows-10/add-windows-path-environment-variable/).
 
 
 ## Documentation
