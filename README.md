@@ -1,6 +1,6 @@
 ![ddb-logo-banner](https://user-images.githubusercontent.com/1951843/86480474-0fcc4280-bd1c-11ea-8663-a7a37f631565.png)
 
-![license](https://img.shields.io/github/license/uav4geo/DroneDB) ![commits](https://img.shields.io/github/commit-activity/m/uav4geo/DroneDB) ![languages](https://img.shields.io/github/languages/top/uav4geo/DroneDB) ![Docs](https://github.com/uav4geo/DroneDB/workflows/Docs/badge.svg) ![C/C++ CI](https://github.com/DroneDB/DroneDB/workflows/C/C++%20CI/badge.svg) ![NodeJS CI](https://github.com/DroneDB/DroneDB/workflows/NodeJS%20CI/badge.svg)
+![license](https://img.shields.io/github/license/DroneDB/DroneDB) ![commits](https://img.shields.io/github/commit-activity/m/DroneDB/DroneDB) ![languages](https://img.shields.io/github/languages/top/DroneDB/DroneDB) ![Docs](https://github.com/DroneDB/DroneDB/workflows/Docs/badge.svg) ![C/C++ CI](https://github.com/DroneDB/DroneDB/workflows/C/C++%20CI/badge.svg) ![NodeJS CI](https://github.com/DroneDB/DroneDB/workflows/NodeJS%20CI/badge.svg)
 
 DroneDB is a toolset for easily managing and sharing aerial datasets. It can index and extract useful information from the EXIF/XMP tags of aerial images to display things like image footprint, flight path and image GPS location. It has timezone-aware date parsing capabilities, a camera sensor database and a DSM lookup system.
 
@@ -10,9 +10,23 @@ DroneDB is a toolset for easily managing and sharing aerial datasets. It can ind
 
 DroneDB is in early development stages and is targeted at GIS developers and early adopters. It is not ready for mainstream use. To contribute to the project, please see the [contributing guidelines](CONTRIBUTING.md).
 
+## Installation
+
+On Linux simply run:
+
+```bash
+$ curl -fsSL https://get.dronedb.app -o get-ddb.sh
+$ sh get-ddb.sh
+```
+
+On Windows simply download the precompiled binaries from https://github.com/DroneDB/DroneDB/releases/. Binaries for Linux are also published on that page.
+
+On Windows make sure the path to **ddb.bat** program is [in your PATH environment variable](<https://helpdeskgeek.com/windows-10/add-windows-path-environment-variable/).
+
+
 ## Documentation
 
-For usage and examples see https://docs.dronedb.app
+For usage, tutorials and references see https://docs.dronedb.app
 
 ## Building
 
@@ -33,9 +47,19 @@ scripts/ubuntu_deps.sh
 Then:
 
 ```bash
-git clone --recurse-submodules https://github.com/uav4geo/DroneDB ddb
+git clone --recurse-submodules https://github.com/DroneDB/DroneDB ddb
 cd ddb
 mkdir build && cd build
 cmake .. && make
+```
+
+On Windows you should install Visual Studio (the free Community Edition works great), Git and CMake. Then:
+
+```
+git clone --recurse-submodules https://github.com/DroneDB/DroneDB ddb
+cd ddb
+md build && cd build
+cmake ..
+cmake --build . --config Release --target ALL_BUILD -- /maxcpucount:14
 ```
 

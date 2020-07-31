@@ -6,12 +6,19 @@ Download
 Installation
 -----------------------------------------------------------------------------
 
-You can download precompiled binaries for both Windows and Linux:
+On Linux simply run:
 
-    * Windows 64bit: 
-    * Linux 64bit: 
+::
 
-Simply extract the binaries in a folder of your choice. Then make sure the **ddb** program is `in your PATH environment variable <https://helpdeskgeek.com/windows-10/add-windows-path-environment-variable/>`__.
+    $ curl -fsSL https://get.dronedb.app -o get-ddb.sh
+    $ sh get-ddb.sh
+
+
+On Windows simply download the precompiled binaries from https://github.com/DroneDB/DroneDB/releases/. Binaries for Linux are also published on that page if you don't trust install scripts.
+
+On Windows make sure the path to **ddb.bat** program is `in your PATH environment variable <https://helpdeskgeek.com/windows-10/add-windows-path-environment-variable/>`__.
+
+MacOS support coming soon (help us and contribute a pull request?)
 
 Build From Sources
 -----------------------------------------------------------------------------
