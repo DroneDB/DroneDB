@@ -27,7 +27,6 @@ jobs:
             - name: Upload Distribution Files
               uses: actions/upload-artifact@v2
               with:
-                name: Binaries
                 path: build/dist/*.tgz
     build_windows:
         name: Build/Test on Windows
@@ -49,5 +48,4 @@ jobs:
             - name: Upload Distribution Files
               uses: actions/upload-artifact@v2
               with:
-                name: Binaries
                 path: build\dist\*.zip
