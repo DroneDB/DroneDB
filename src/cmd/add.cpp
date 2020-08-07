@@ -30,10 +30,12 @@ void Add::run(cxxopts::ParseResult &opts) {
         printHelp();
     }
 
-	auto db = ddb::open(opts["directory"].as<std::string>(), true);
+    fs::current_path(opts["directory"].as<std::string>());
+
+    auto db = ddb::open(opts["directory"].as<std::string>(), true);
     ddb::addToIndex(db.get(), ddb::expandPathList(opts["paths"].as<std::vector<std::string>>(),
-												  opts.count("recursive") > 0,
-												  0));
+                                                  opts.count("recursive") > 0,
+                                                  0));
 }
 
 }

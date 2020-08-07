@@ -21,6 +21,8 @@ std::string Sync::description() {
 }
 
 void Sync::run(cxxopts::ParseResult &opts) {
+    fs::current_path(opts["directory"].as<std::string>());
+    
     auto db = ddb::open(opts["directory"].as<std::string>(), true);
     ddb::syncIndex(db.get());
 }

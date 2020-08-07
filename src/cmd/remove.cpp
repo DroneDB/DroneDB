@@ -30,6 +30,8 @@ void Remove::run(cxxopts::ParseResult &opts) {
         printHelp();
     }
 
+    fs::current_path(opts["directory"].as<std::string>());
+    
     auto db = ddb::open(opts["directory"].as<std::string>(), true);
     ddb::removeFromIndex(db.get(), ddb::expandPathList(opts["paths"].as<std::vector<std::string>>(),
                                                          opts.count("recursive") > 0,
