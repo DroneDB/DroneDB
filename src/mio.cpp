@@ -131,6 +131,31 @@ fs::path getDataPath(const fs::path &p){
         return cwd / p;
     }
 
+    #ifdef WIN32
+    // Check same location as DLL
+    char dllPath[MAX_PATH];
+    HMODULE hm = NULL;
+
+    if (GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | 
+            GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            (LPCSTR) &getDataPath, &hm) == 0){
+        int ret = GetLastError();
+        LOGD << "GetModuleHandle failed, error = " << ret;
+        return "";
+    }
+
+    if (GetModuleFileName(hm, dllPath, sizeof(dllPath)) == 0){
+        int ret = GetLastError();
+        LOGD << "GetModuleFileName failed, error = " << ret;
+        return "";
+    }
+
+    fs::path dllDir = (fs::path(dllPath)).parent_path();
+    if (fs::exists(dllDir / p)){
+        return dllDir / p;
+    }
+    #endif
+
     return "";
 }
 
