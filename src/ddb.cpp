@@ -173,7 +173,16 @@ std::vector<fs::path> getPathList(const std::vector<std::string> &paths, bool in
 
                 fs::path rp = i->path();
 
-                // Skip .ddb
+                // Ignore system files on Windows
+                #ifdef WIN32
+                DWORD attrs = GetFileAttributes(rp.string().c_str());
+                if (attrs & FILE_ATTRIBUTE_HIDDEN || attrs & FILE_ATTRIBUTE_SYSTEM) {
+                    i.disable_recursion_pending();
+                    continue;
+                }
+                #endif
+
+                // Skip .ddb recursion
                 if(rp.filename() == ".ddb") i.disable_recursion_pending();
 
                 // Max depth
@@ -198,16 +207,16 @@ std::vector<fs::path> getPathList(const std::vector<std::string> &paths, bool in
 
 
 std::vector<std::string> expandPathList(const std::vector<std::string> &paths, bool recursive, int maxRecursionDepth) {
-	if (recursive) {
-		std::vector<std::string> result;
-		auto pl = getPathList(paths, true, maxRecursionDepth);
-		for (auto& p : pl) {
-			result.push_back(p.string());
-		}
-		return result;
-	} else {
-		return paths;
-	}
+    if (recursive) {
+        std::vector<std::string> result;
+        auto pl = getPathList(paths, true, maxRecursionDepth);
+        for (auto& p : pl) {
+            result.push_back(p.string());
+        }
+        return result;
+    } else {
+        return paths;
+    }
 }
 
 
@@ -377,8 +386,8 @@ void initialize(bool verbose){
     setenv("PROJ_LIB", projPaths.c_str(), 1);
 #endif
     init_logger();
-	if (verbose) {
-		set_logger_verbose();
+    if (verbose) {
+        set_logger_verbose();
     }
     Database::Initialize();
     net::Initialize();
