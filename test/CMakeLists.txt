@@ -19,7 +19,7 @@ add_custom_command(TARGET test POST_BUILD
 )
 endif()
 
-set(EXE_EXT "")
+set(EXE_EXT ".run")
 if (WIN32)
     set(EXE_EXT ".exe")
 endif()
@@ -32,10 +32,7 @@ add_custom_command(TARGET test POST_BUILD
 file(GLOB DATA_FILES
   "${CMAKE_CURRENT_SOURCE_DIR}/data"
 )
-if (WIN32)
-	file(COPY ${DATA_FILES} DESTINATION "${CMAKE_BINARY_DIR}")
-else()
-	file(COPY ${DATA_FILES} DESTINATION "${CMAKE_BINARY_DIR}/test")
-endif()
+
+file(COPY ${DATA_FILES} DESTINATION "${CMAKE_BINARY_DIR}")
 
 set_target_properties(test PROPERTIES CXX_STANDARD 17)

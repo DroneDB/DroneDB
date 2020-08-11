@@ -139,9 +139,6 @@ TEST(getModifiedTime, Normal) {
 
     // Works on files
     EXPECT_TRUE(io::Path(io::getDataPath("timezone21.bin")).getModifiedTime() > 0);
-
-
-    
 }
 
 }
