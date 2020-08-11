@@ -25,7 +25,7 @@ time_t Path::getModifiedTime() {
 #ifdef WIN32
     HANDLE hFile;
     FILETIME ftModified;
-    hFile = CreateFile(p.string().c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    hFile = CreateFile(p.string().c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_BACKUP_SEMANTICS, NULL);
     if (hFile == INVALID_HANDLE_VALUE){
         throw FSException("Cannot stat mtime (open) " + p.string());
     }
@@ -61,7 +61,7 @@ std::uintmax_t Path::getSize() {
 #ifdef WIN32
     HANDLE hFile;
     FILETIME ftModified;
-    hFile = CreateFile(p.string().c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    hFile = CreateFile(p.string().c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_BACKUP_SEMANTICS, NULL);
     if (hFile == INVALID_HANDLE_VALUE) {
         throw FSException("Cannot stat size (open) " + p.string());
     }

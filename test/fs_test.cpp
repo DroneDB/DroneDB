@@ -133,4 +133,15 @@ TEST(bytesToHuman, Normal) {
     EXPECT_EQ(io::bytesToHuman(3372220416), "3.14 GB");
 }
 
+TEST(getModifiedTime, Normal) {
+    // Works on directories
+    EXPECT_TRUE(io::Path(io::getExeFolderPath()).getModifiedTime() > 0);
+
+    // Works on files
+    EXPECT_TRUE(io::Path(io::getDataPath("timezone21.bin")).getModifiedTime() > 0);
+
+
+    
+}
+
 }
