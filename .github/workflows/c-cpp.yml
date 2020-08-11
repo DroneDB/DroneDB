@@ -21,7 +21,7 @@ jobs:
             - name: Build C++ lib/program and tests
               run: cd build && make -j$(nproc) test ddbcmd
             - name: Run C++ Tests
-              run: cd build/test && ./test
+              run: cd build && ./test.run
             - name: Run Program Smoke Test
               run: cd build && ./ddb --debug
             - name: Build Distribution

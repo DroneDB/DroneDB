@@ -22,21 +22,65 @@ bool Path::checkExtension(const std::initializer_list<std::string>& matches) {
 }
 
 time_t Path::getModifiedTime() {
+#ifdef WIN32
+    HANDLE hFile;
+    FILETIME ftModified;
+    hFile = CreateFile(p.string().c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_BACKUP_SEMANTICS, NULL);
+    if (hFile == INVALID_HANDLE_VALUE){
+        throw FSException("Cannot stat mtime (open) " + p.string());
+    }
+
+    if (!GetFileTime(hFile, NULL, NULL, &ftModified)){
+        CloseHandle(hFile);
+        throw FSException("Cannot stat mtime (get time) " + p.string());
+    }
+
+    CloseHandle(hFile);
+    
+    //Get the number of seconds since January 1, 1970 12:00am UTC
+    LARGE_INTEGER li;
+    li.LowPart = ftModified.dwLowDateTime;
+    li.HighPart = ftModified.dwHighDateTime;
+
+    const int64_t UNIX_TIME_START = 0x019DB1DED53E8000; //January 1, 1970 (start of Unix epoch) in "ticks"
+    const int64_t TICKS_PER_SECOND = 10000000; //a tick is 100ns
+
+    //Convert ticks since 1/1/1970 into seconds
+    return (li.QuadPart - UNIX_TIME_START) / TICKS_PER_SECOND;
+#else
     struct stat result;
     if(stat(p.string().c_str(), &result) == 0) {
         return result.st_mtime;
     } else {
-        throw FSException("Cannot stat " + p.string());
+        throw FSException("Cannot stat mtime " + p.string());
     }
+#endif
 }
 
-off_t Path::getSize() {
+std::uintmax_t Path::getSize() {
+#ifdef WIN32
+    HANDLE hFile;
+    FILETIME ftModified;
+    hFile = CreateFile(p.string().c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_BACKUP_SEMANTICS, NULL);
+    if (hFile == INVALID_HANDLE_VALUE) {
+        throw FSException("Cannot stat size (open) " + p.string());
+    }
+    
+    LARGE_INTEGER size;
+    if (!GetFileSizeEx(hFile, &size)){
+        CloseHandle(hFile);
+        throw FSException("Cannot stat size (getfilesize) " + p.string());
+    }
+    CloseHandle(hFile);
+    return size.QuadPart;
+#else
     struct stat result;
     if(stat(p.string().c_str(), &result) == 0) {
         return result.st_size;
     } else {
-        throw FSException("Cannot stat " + p.string());
+        throw FSException("Cannot stat size " + p.string());
     }
+#endif
 }
 
 bool Path::hasChildren(const std::vector<std::string> &childPaths) {
@@ -169,7 +213,7 @@ fs::path getCwd(){
     return fs::path(result);
 }
 
-std::string bytesToHuman(off_t bytes){
+std::string bytesToHuman(std::uintmax_t bytes){
     std::ostringstream os;
 
     const char* suffixes[7];
@@ -180,9 +224,10 @@ std::string bytesToHuman(off_t bytes){
     suffixes[4] = "TB";
     suffixes[5] = "PB";
     suffixes[6] = "EB";
-    off_t s = 0;
+    std::uintmax_t s = 0;
 
     double count = bytes;
+
     while (count >= 1024 && s < 7){
         s++;
         count /= 1024;
