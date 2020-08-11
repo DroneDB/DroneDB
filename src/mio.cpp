@@ -71,7 +71,6 @@ std::uintmax_t Path::getSize() {
         CloseHandle(hFile);
         throw FSException("Cannot stat size (getfilesize) " + p.string());
     }
-    LOGD << size.QuadPart;
     CloseHandle(hFile);
     return size.QuadPart;
 #else
