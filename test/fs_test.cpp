@@ -125,4 +125,12 @@ TEST(pathCheckExtension, Normal) {
 	EXPECT_TRUE(io::Path("/home/test.jpeg.tif").checkExtension({ "tif" }));
 }
 
+TEST(bytesToHuman, Normal) {
+    EXPECT_EQ(io::bytesToHuman(0), "0 B");
+    EXPECT_EQ(io::bytesToHuman(1024), "1 KB");
+    EXPECT_EQ(io::bytesToHuman(1048576), "1 MB");
+
+    EXPECT_EQ(io::bytesToHuman(3372220416), "3.14 GB");
+}
+
 }

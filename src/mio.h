@@ -30,7 +30,7 @@ public:
     bool checkExtension(const std::initializer_list<std::string>& matches);
 
     time_t getModifiedTime();
-    off_t getSize();
+    std::uintmax_t getSize();
     bool hasChildren(const std::vector<std::string> &childPaths);
     bool isParentOf(const fs::path &childPath);
     int depth();
@@ -52,7 +52,7 @@ fs::path getDataPath(const fs::path &p);
 fs::path getCwd();
 
 // Prints to the provided buffer a nice number of bytes (KB, MB, GB, etc)
-std::string bytesToHuman(off_t bytes);
+std::string bytesToHuman(std::uintmax_t bytes);
 
 }
 }

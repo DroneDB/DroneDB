@@ -26,7 +26,7 @@ struct Entry {
     EntryType type = EntryType::Undefined;
     json meta;
     time_t mtime = 0;
-    off_t size = 0;
+    std::uintmax_t size = 0;
     int depth = 0;
 
     BasicPointGeometry point_geom;
