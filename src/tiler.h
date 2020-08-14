@@ -15,6 +15,18 @@
 
 namespace ddb{
 
+struct GeoExtent{
+    int x;
+    int y;
+    int xsize;
+    int ysize;
+};
+
+struct GQResult{
+    GeoExtent r;
+    GeoExtent w;
+};
+
 class Tiler
 {
     int tileSize;
@@ -34,12 +46,19 @@ class Tiler
     std::string getTilePath(int z, int x, int y, bool createIfNotExists);
     GDALDatasetH createWarpedVRT(const GDALDatasetH &src, const OGRSpatialReferenceH &srs, GDALResampleAlg resampling =  GRA_NearestNeighbour);
 
+    // Returns parameters reading raster data.
+    // (coordinates and x/y shifts for border tiles).
+    // If the querysize is not given, the
+    // extent is returned in the native resolution of dataset ds.
+    GQResult geoQuery()
 public:
     Tiler(const std::string &geotiffPath, const std::string &outputFolder);
 
     std::string tile(int tz, int tx, int ty);
 
 };
+
+
 
 class GlobalMercator{
     double originShift;

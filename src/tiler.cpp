@@ -184,6 +184,26 @@ std::string Tiler::tile(int tz, int tx, int ty)
 
     BoundingBox<Projected2D> b = mercator.tileBounds(tx, ty, tz);
 
+    GQResult g = geoQuery(inputDataset, b.min.x, b.max.y, b.max.x, b.min.y);
+    int nativeSize = g.w.x + g.w.xsize;
+    int querySize = tileSize; // TODO: you will need to change this for interpolations other than NN
+    g = geoQuery(inputDataset, b.min.x, b.max.y, b.max.x, b.min.y, querySize);
+
+    if (g.r.xsize != 0 && g.r.ysize != 0 && g.w.xsize != 0 and g.w.ysize != 0){
+        char *buffer;
+
+        // TODO: choose appropriate buffer based on input dataset
+
+        GDALDatasetRasterIO(inputDataset, GF_Read, g.r.x, g.r.y, g.r.xsize, g.r.ysize,
+                            buffer, g.w.xsize, g.w.ysize, GDALDataType, nBands + 1, nullptr, 0, 0, 0);
+    }else{
+        throw GDALException("Out of bounds");
+    }
+
+//    GDALDatasetRasterIO(inputDataset, )
+
+    //GDALDatasetRasterIO(dsTile, GF_Write, )
+
 //            if (tMinMax.contains(x, y)){
 //                std::string tilePath = getTilePath(x, y, tz, true);
 
@@ -218,6 +238,58 @@ GDALDatasetH Tiler::createWarpedVRT(const GDALDatasetH &src, const OGRSpatialRef
     delete dstWkt;
 
     return warpedVrt;
+}
+
+GQResult Tiler::geoQuery(GDALDatasetH ds, double ulx, double uly, double lrx, double lry, int querySize){
+    GQResult o;
+    double geo[6];
+    if (GDALGetGeoTransform(ds, geo) != CE_None) throw GDALException("Cannot fetch geotransform geo");
+
+    o.r.x = static_cast<int>((ulx - geo[0]) / geo[1] + 0.001);
+    o.r.y = static_cast<int>((uly - geo[3]) / geo[5] + 0.001);
+    o.r.xsize = static_cast<int>((lrx - ulx) / geo[1] + 0.5);
+    o.r.ysize = static_cast<int>((lry - uly) / geo[5] + 0.5);
+
+    if (querySize == 0){
+        o.w.xsize = o.r.xsize;
+        o.w.ysize = o.r.ysize;
+    }else{
+        o.w.xsize = querySize;
+        o.w.ysize = querySize;
+    }
+
+    o.w.x = 0;
+    if (o.r.x < 0){
+        int rxShift = std::abs(o.r.x);
+        o.w.x = static_cast<int>(o.w.xsize * (static_cast<double>(rxShift) / static_cast<double>(o.r.xsize)));
+        o.w.xsize = o.w.xsize - o.w.x;
+        o.r.xsize = o.r.xsize - static_cast<int>(o.r.xsize * (static_cast<double>(rxShift) / static_cast<double>(o.r.xsize)));
+        o.r.x = 0;
+    }
+
+    int rasterXSize = GDALGetRasterXSize(ds);
+    int rasterYSize = GDALGetRasterYSize(ds);
+
+    if (o.r.x + o.r.xsize > rasterXSize){
+        o.w.xsize = static_cast<int>(o.w.xsize * (static_cast<double>(rasterXSize - o.r.x) / static_cast<double>(o.r.xsize)));
+        o.r.xsize = rasterXSize - o.r.x;
+    }
+
+    o.w.y = 0;
+    if (o.r.y < 0){
+        int ryShift = std::abs(o.r.y);
+        o.w.y = static_cast<int>(o.w.ysize * (static_cast<double>(ryShift) / static_cast<double>(o.r.ysize)));
+        o.w.ysize = o.w.ysize - o.w.y;
+        o.r.ysize = o.r.ysize - static_cast<int>(o.r.ysize * (static_cast<double>(ryShift) / static_cast<double>(o.r.ysize)));
+        o.r.y = 0;
+    }
+
+    if (o.r.y + o.r.ysize > rasterYSize){
+        o.w.ysize = static_cast<int>(o.w.ysize * (static_cast<double>(rasterYSize - o.r.y) / static_cast<double>(o.r.ysize)));
+        o.r.ysize = rasterYSize - o.r.y;
+    }
+
+    return o;
 }
 
 GlobalMercator::GlobalMercator(){
