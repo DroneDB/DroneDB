@@ -44,10 +44,14 @@ struct BoundingBox{
     BoundingBox(): max(T()), min(T()){}
     BoundingBox(T min, T max): max(max), min(min){}
     bool contains(const T &p){
-        return p.x >= min.x &&
-                p.x <= max.x &&
-                p.y >= min.y &&
-                p.y <= max.y;
+        return contains(p.x, p.y);
+    }
+    template <typename N>
+    bool contains(N x, N y){
+        return x >= min.x &&
+                x <= max.x &&
+                y >= min.y &&
+                y <= max.y;
     }
 };
 

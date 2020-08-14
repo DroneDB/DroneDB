@@ -16,6 +16,7 @@ struct Point{
     double y;
     double z;
     Point(double x, double y, double z) : x(x), y(y), z(z) {}
+    Point(double x, double y) : x(x), y(y), z(0.0) {}
     Point() : x(0.0), y(0.0), z(0.0) {}
 };
 inline std::ostream& operator<<(std::ostream& os, const Point& p){
