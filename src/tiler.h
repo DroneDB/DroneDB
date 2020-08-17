@@ -7,7 +7,6 @@
 #include <gdal_priv.h>
 #include <ogr_srs_api.h>
 #include <gdalwarper.h>
-#include <random>
 #include <sstream>
 #include <string>
 #include "geo.h"
@@ -36,12 +35,6 @@ class Tiler
     bool hasGeoreference(const GDALDatasetH &dataset);
     bool sameProjection(const OGRSpatialReferenceH &a, const OGRSpatialReferenceH &b);
 
-    static std::random_device              rd;
-    static std::mt19937                    gen(rd());
-    static std::uniform_int_distribution<> dis(0, 15);
-    static std::uniform_int_distribution<> dis2(8, 11);
-    std::string uuidv4();
-
     int dataBandsCount(const GDALDatasetH &dataset);
     std::string getTilePath(int z, int x, int y, bool createIfNotExists);
     GDALDatasetH createWarpedVRT(const GDALDatasetH &src, const OGRSpatialReferenceH &srs, GDALResampleAlg resampling =  GRA_NearestNeighbour);
@@ -50,11 +43,14 @@ class Tiler
     // (coordinates and x/y shifts for border tiles).
     // If the querysize is not given, the
     // extent is returned in the native resolution of dataset ds.
-    GQResult geoQuery()
+    GQResult geoQuery(GDALDatasetH ds, double ulx, double uly, double lrx, double lry, int querySize = 0);
+
+    // Calculates the y-tile number based on whether XYZ or TMS (default) system is used
+    int tmsToXYZ(int ty, int tz);
 public:
     Tiler(const std::string &geotiffPath, const std::string &outputFolder);
 
-    std::string tile(int tz, int tx, int ty);
+    std::string tile(int tz, int tx, int ty, bool tms = false);
 
 };
 

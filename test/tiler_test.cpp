@@ -10,7 +10,7 @@ namespace {
 using namespace ddb;
 
 TEST(testTiler, Normal) {
-    Tiler t("/data/drone/brighton2/odm_orthophoto/odm_orthophoto.tif");
+    Tiler t("/data/drone/brighton2/odm_orthophoto/odm_orthophoto.tif", "/data/drone/brighton2/tiles/");
     t.tile(19, 128168, 184742);
 }
 

@@ -14,8 +14,9 @@ bool Tiler::hasGeoreference(const GDALDatasetH &dataset){
     double geo[6] = {0.0, 1.0, 0.0,
                      0.0, 0.0, 1.0};
     if (GDALGetGeoTransform(dataset, geo) != CE_None) throw GDALException("Cannot fetch geotransform in hasGeoreference");
-    return (geo[0] != 0.0 && geo[1] != 1.0 && geo[2] != 0.0 &&
-            geo[3] != 0.0 && geo[4] != 1.0 && geo[5] != 1.0) || GDALGetGCPCount(dataset) != 0;
+
+    return (geo[0] != 0.0 || geo[1] != 1.0 || geo[2] != 0.0 ||
+            geo[3] != 0.0 || geo[4] != 0.0 || geo[5] != 1.0) || GDALGetGCPCount(dataset) != 0;
 }
 
 bool Tiler::sameProjection(const OGRSpatialReferenceH &a, const OGRSpatialReferenceH &b){
@@ -30,33 +31,6 @@ bool Tiler::sameProjection(const OGRSpatialReferenceH &a, const OGRSpatialRefere
     delete aProj;
     delete bProj;
     return same;
-}
-
-std::string Tiler::uuidv4(){
-   std::stringstream ss;
-   int i;
-   ss << std::hex;
-   for (i = 0; i < 8; i++) {
-       ss << dis(gen);
-   }
-   ss << "-";
-   for (i = 0; i < 4; i++) {
-       ss << dis(gen);
-   }
-   ss << "-4";
-   for (i = 0; i < 3; i++) {
-       ss << dis(gen);
-   }
-   ss << "-";
-   ss << dis2(gen);
-   for (i = 0; i < 3; i++) {
-       ss << dis(gen);
-   }
-   ss << "-";
-   for (i = 0; i < 12; i++) {
-       ss << dis(gen);
-   };
-   return ss.str();
 }
 
 int Tiler::dataBandsCount(const GDALDatasetH &dataset){
@@ -89,12 +63,12 @@ Tiler::Tiler(const std::string &geotiffPath, const std::string &outputFolder) :
     tileSize = 256; // TODO: dynamic?
 }
 
-std::string Tiler::tile(int tz, int tx, int ty)
+std::string Tiler::tile(int tz, int tx, int ty, bool tms)
 {
-    GDALDriverH outDrv = GDALGetDriverByName( "PNG" );
-    if (outDrv == nullptr) throw GDALException("Cannot create PNG driver");
+    GDALDriverH pngDrv = GDALGetDriverByName( "PNG" );
+    if (pngDrv == nullptr) throw GDALException("Cannot create PNG driver");
     GDALDriverH memDrv = GDALGetDriverByName( "MEM" );
-    if (memDrv == nullptr) throw GDALException("Cannot create PNG driver");
+    if (memDrv == nullptr) throw GDALException("Cannot create MEM driver");
 
     GDALDatasetH inputDataset;
     inputDataset = GDALOpen( geotiffPath.c_str(), GA_ReadOnly );
@@ -136,9 +110,7 @@ std::string Tiler::tile(int tz, int tx, int ty)
 
     // Check if we need to reproject
     if (!sameProjection(inputSrs, outputSrs)){
-        GDALDatasetH hTmp = inputDataset;
         inputDataset = createWarpedVRT(inputDataset, outputSrs);
-        GDALClose(hTmp);
     }
 
     // TODO: nodata?
@@ -154,9 +126,9 @@ std::string Tiler::tile(int tz, int tx, int ty)
 
 
     double oMinX = outGt[0];
-    double oMaxX = outGt[0] + GDALGetRasterXSize(inputDataset);
+    double oMaxX = outGt[0] + GDALGetRasterXSize(inputDataset) * outGt[1];
     double oMaxY = outGt[3];
-    double oMinY = outGt[3] - GDALGetRasterYSize(inputDataset);
+    double oMinY = outGt[3] - GDALGetRasterYSize(inputDataset) * outGt[1];
 
     LOGD << "Bounds (output SRS): " << oMinX << "," << oMinY << "," << oMaxX << "," << oMaxY;
 
@@ -177,11 +149,18 @@ std::string Tiler::tile(int tz, int tx, int ty)
 
     LOGD << "MinZ: " << tMinZ;
     LOGD << "MaxZ: " << tMaxZ;
+    LOGD << "Num bands: " << nBands;
 
-    // TODO: should this be GDT_Byte ?
-    GDALDatasetH dsTile = GDALCreate(memDrv, "", tileSize, tileSize, nBands, GDT_Unknown, nullptr);
+    std::string tilePath = getTilePath(tz, tx, ty, true);
+
+    // Need to create in-memory dataset
+    // (PNG driver does not have Create() method)
+    GDALDatasetH dsTile = GDALCreate(memDrv, "", tileSize, tileSize, nBands, GDT_Byte, nullptr);
     if (dsTile == nullptr) throw GDALException("Cannot create dsTile");
 
+    if (!tms){
+        ty = tmsToXYZ(ty, tz);
+    }
     BoundingBox<Projected2D> b = mercator.tileBounds(tx, ty, tz);
 
     GQResult g = geoQuery(inputDataset, b.min.x, b.max.y, b.max.x, b.min.y);
@@ -189,20 +168,46 @@ std::string Tiler::tile(int tz, int tx, int ty)
     int querySize = tileSize; // TODO: you will need to change this for interpolations other than NN
     g = geoQuery(inputDataset, b.min.x, b.max.y, b.max.x, b.min.y, querySize);
 
+    LOGD << g.r.x << ", " << g.r.y << "\n" <<
+            g.r.xsize << "x" << g.r.ysize << "\n" <<
+            g.w.x << ", " << g.w.y << "\n" <<
+            g.w.xsize << "x" << g.w.ysize;
+
     if (g.r.xsize != 0 && g.r.ysize != 0 && g.w.xsize != 0 and g.w.ysize != 0){
-        char *buffer;
+        GDALDataType type = GDALGetRasterDataType(GDALGetRasterBand(inputDataset, 1));
 
-        // TODO: choose appropriate buffer based on input dataset
+        int bufsize = GDALGetDataTypeSizeBytes(type) *
+                      nBands *
+                      g.w.xsize * g.w.ysize;
+        LOGD << "Bufsize: " << bufsize;
+        char *buffer = new char[bufsize];
 
-        GDALDatasetRasterIO(inputDataset, GF_Read, g.r.x, g.r.y, g.r.xsize, g.r.ysize,
-                            buffer, g.w.xsize, g.w.ysize, GDALDataType, nBands + 1, nullptr, 0, 0, 0);
+        if (GDALDatasetRasterIO(inputDataset, GF_Read, g.r.x, g.r.y, g.r.xsize, g.r.ysize,
+                            buffer, g.w.xsize, g.w.ysize, type, nBands, nullptr, 0, 0, 0) != CE_None){
+            throw GDALException("Cannot read input dataset window");
+        }
+
+        LOGD << "Read input dataset";
+
+        // TODO: handle alpha
+
+        if (tileSize == querySize){
+            if (GDALDatasetRasterIO(dsTile, GF_Write, 0, 0, g.w.xsize, g.w.ysize,
+                                buffer, g.w.xsize, g.w.ysize, type, nBands, nullptr, 0, 0, 0) != CE_None){
+                throw GDALException("Cannot write tile data");
+            }
+        }else{
+            // TODO: readraster query in memory scaled to tilesize
+            throw GDALException("Not implemented");
+        }
+
+        delete[] buffer;
     }else{
         throw GDALException("Out of bounds");
     }
 
-//    GDALDatasetRasterIO(inputDataset, )
-
-    //GDALDatasetRasterIO(dsTile, GF_Write, )
+    GDALDatasetH outDs = GDALCreateCopy(pngDrv, tilePath.c_str(), dsTile, FALSE, nullptr, nullptr, nullptr);
+    if (outDs == nullptr) throw GDALException("Cannot create output dataset " + tilePath);
 
 //            if (tMinMax.contains(x, y)){
 //                std::string tilePath = getTilePath(x, y, tz, true);
@@ -217,8 +222,11 @@ std::string Tiler::tile(int tz, int tx, int ty)
     OSRDestroySpatialReference(inputSrs);
     OSRDestroySpatialReference(outputSrs);
 
+    GDALClose(dsTile);
+    GDALClose(outDs);
     GDALClose(inputDataset);
 
+    return tilePath;
 }
 
 GDALDatasetH Tiler::createWarpedVRT(const GDALDatasetH &src, const OGRSpatialReferenceH &srs, GDALResampleAlg resampling){
@@ -290,6 +298,10 @@ GQResult Tiler::geoQuery(GDALDatasetH ds, double ulx, double uly, double lrx, do
     }
 
     return o;
+}
+
+int Tiler::tmsToXYZ(int ty, int tz){
+    return (std::pow(2, tz) - 1) - ty;
 }
 
 GlobalMercator::GlobalMercator(){
