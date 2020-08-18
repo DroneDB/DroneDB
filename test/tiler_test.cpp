@@ -9,9 +9,14 @@ namespace {
 
 using namespace ddb;
 
-TEST(testTiler, Normal) {
+TEST(testTiler, RGB) {
     Tiler t("/data/drone/brighton2/odm_orthophoto/odm_orthophoto.tif", "/data/drone/brighton2/tiles/");
     t.tile(19, 128168, 184742);
+}
+
+TEST(testTiler, DSM){
+    Tiler t("/data/drone/brighton2/odm_dem/dsm.tif", "/data/drone/brighton2/dsm_tiles/");
+    t.tile(21, 512674, 738962);
 }
 
 }

@@ -36,13 +36,14 @@ bool Tiler::sameProjection(const OGRSpatialReferenceH &a, const OGRSpatialRefere
 int Tiler::dataBandsCount(const GDALDatasetH &dataset){
     GDALRasterBandH raster = GDALGetRasterBand(dataset, 1);
     GDALRasterBandH alphaBand = GDALGetMaskBand(raster);
+    int bandsCount = GDALGetRasterCount(dataset);
+
     if ((GDALGetMaskFlags(alphaBand) & GMF_ALPHA) ||
-            GDALGetRasterCount(dataset) == 4 ||
-            GDALGetRasterCount(dataset) == 2){
-        return GDALGetRasterCount(dataset) - 1;
+            bandsCount == 4 ||
+            bandsCount == 2){
+        return bandsCount - 1;
     }else{
-        // TODO: does this work for multispectral TIFFs (B > 4)?
-        return GDALGetRasterCount(dataset);
+        return bandsCount;
     }
 }
 
@@ -120,6 +121,7 @@ std::string Tiler::tile(int tz, int tx, int ty, bool tms)
 
     // warped_input_dataset = inputDataset
     int nBands = dataBandsCount(inputDataset);
+    bool hasAlpha = nBands < GDALGetRasterCount(inputDataset);
 
     double outGt[6];
     if (GDALGetGeoTransform(inputDataset, outGt) != CE_None) throw GDALException("Cannot fetch geotransform outGt");
@@ -155,7 +157,7 @@ std::string Tiler::tile(int tz, int tx, int ty, bool tms)
 
     // Need to create in-memory dataset
     // (PNG driver does not have Create() method)
-    GDALDatasetH dsTile = GDALCreate(memDrv, "", tileSize, tileSize, nBands, GDT_Byte, nullptr);
+    GDALDatasetH dsTile = GDALCreate(memDrv, "", tileSize, tileSize, nBands + 1, GDT_Byte, nullptr);
     if (dsTile == nullptr) throw GDALException("Cannot create dsTile");
 
     if (!tms){
@@ -176,25 +178,49 @@ std::string Tiler::tile(int tz, int tx, int ty, bool tms)
     if (g.r.xsize != 0 && g.r.ysize != 0 && g.w.xsize != 0 and g.w.ysize != 0){
         GDALDataType type = GDALGetRasterDataType(GDALGetRasterBand(inputDataset, 1));
 
-        int bufsize = GDALGetDataTypeSizeBytes(type) *
-                      nBands *
-                      g.w.xsize * g.w.ysize;
-        LOGD << "Bufsize: " << bufsize;
-        char *buffer = new char[bufsize];
-
+        char *buffer = new char[GDALGetDataTypeSizeBytes(type) *
+                                nBands *
+                                g.w.xsize * g.w.ysize];
         if (GDALDatasetRasterIO(inputDataset, GF_Read, g.r.x, g.r.y, g.r.xsize, g.r.ysize,
                             buffer, g.w.xsize, g.w.ysize, type, nBands, nullptr, 0, 0, 0) != CE_None){
             throw GDALException("Cannot read input dataset window");
         }
 
-        LOGD << "Read input dataset";
+        float *buf = reinterpret_cast<float *>(buffer);
+        for (int i = 0; i < g.w.xsize * g.w.ysize; i++){
+            std::cerr << buf[i] << " ";
+        }
 
-        // TODO: handle alpha
+        char *alphaBuffer = nullptr;
+
+        if (hasAlpha){
+            GDALRasterBandH raster = GDALGetRasterBand(inputDataset, 1);
+            GDALRasterBandH alphaBand = GDALGetMaskBand(raster);
+
+            alphaBuffer = new char[GDALGetDataTypeSizeBytes(GDT_Byte) *
+                                    g.w.xsize * g.w.ysize];
+            if (GDALRasterIO(alphaBand, GF_Read, g.r.x, g.r.y, g.r.xsize, g.r.ysize,
+                                alphaBuffer, g.w.xsize, g.w.ysize, GDT_Byte, 0, 0) != CE_None){
+                throw GDALException("Cannot read input dataset alpha window");
+            }
+        }
+
+        LOGD << "Read input dataset";
 
         if (tileSize == querySize){
             if (GDALDatasetRasterIO(dsTile, GF_Write, 0, 0, g.w.xsize, g.w.ysize,
                                 buffer, g.w.xsize, g.w.ysize, type, nBands, nullptr, 0, 0, 0) != CE_None){
                 throw GDALException("Cannot write tile data");
+            }
+
+            if (hasAlpha){
+                GDALRasterBandH tileAlphaBand = GDALGetRasterBand(dsTile, nBands + 1);
+                GDALSetRasterColorInterpretation(tileAlphaBand, GCI_AlphaBand );
+
+                if (GDALRasterIO(tileAlphaBand, GF_Write, 0, 0, g.w.xsize, g.w.ysize,
+                                    alphaBuffer, g.w.xsize, g.w.ysize, GDT_Byte, 0, 0) != CE_None){
+                    throw GDALException("Cannot write tile alpha data");
+                }
             }
         }else{
             // TODO: readraster query in memory scaled to tilesize
@@ -202,6 +228,7 @@ std::string Tiler::tile(int tz, int tx, int ty, bool tms)
         }
 
         delete[] buffer;
+        if (hasAlpha) delete[] alphaBuffer;
     }else{
         throw GDALException("Out of bounds");
     }
@@ -215,9 +242,6 @@ std::string Tiler::tile(int tz, int tx, int ty, bool tms)
 //                GDALOpen(tilePath.c_str(), )
 //            }
 
-    // https://github.com/mapbox/rasterio/blob/master/rasterio/vrt.py
-    // https://github.com/mapbox/rasterio/blob/42d3a9d3ac9deaf22024b5c796f4ab703c87a302/rasterio/_warp.pyx#L722
-    // https://github.com/mapbox/rasterio/blob/925718ea5cc61eaca46dcdb03739ecdde18f8e21/rasterio/_io.pyx#L1665
 
     OSRDestroySpatialReference(inputSrs);
     OSRDestroySpatialReference(outputSrs);
