@@ -47,6 +47,9 @@ class Tiler
 
     // Calculates the y-tile number based on whether XYZ or TMS (default) system is used
     int tmsToXYZ(int ty, int tz);
+
+    template <typename T>
+    void rescale(GDALRasterBandH hBand, char *buffer, size_t bufsize);
 public:
     Tiler(const std::string &geotiffPath, const std::string &outputFolder);
 

@@ -17,6 +17,7 @@ TEST(testTiler, RGB) {
 TEST(testTiler, DSM){
     Tiler t("/data/drone/brighton2/odm_dem/dsm.tif", "/data/drone/brighton2/dsm_tiles/");
     t.tile(21, 512674, 738962);
+    t.tile(20, 256337, 369481);
 }
 
 }
