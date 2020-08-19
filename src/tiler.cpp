@@ -58,34 +58,37 @@ std::string Tiler::getTilePath(int z, int x, int y, bool createIfNotExists){
     return p.string();
 }
 
-Tiler::Tiler(const std::string &geotiffPath, const std::string &outputFolder) :
-    geotiffPath(geotiffPath), outputFolder(outputFolder)
-{
+Tiler::Tiler(const std::string &geotiffPath, const std::string &outputFolder, bool tms) :
+    geotiffPath(geotiffPath), outputFolder(outputFolder), tms(tms){
     tileSize = 256; // TODO: dynamic?
-}
 
-std::string Tiler::tile(int tz, int tx, int ty, bool tms)
-{
-    GDALDriverH pngDrv = GDALGetDriverByName( "PNG" );
+    if (!fs::exists(geotiffPath)) throw FSException(geotiffPath + " does not exists");
+    if (!fs::exists(outputFolder)){
+        // Try to create
+        if (!fs::create_directories(outputFolder)){
+            throw FSException(outputFolder + " is not a valid directory (cannot create it).");
+        }
+    }
+
+    pngDrv = GDALGetDriverByName( "PNG" );
     if (pngDrv == nullptr) throw GDALException("Cannot create PNG driver");
-    GDALDriverH memDrv = GDALGetDriverByName( "MEM" );
+    memDrv = GDALGetDriverByName( "MEM" );
     if (memDrv == nullptr) throw GDALException("Cannot create MEM driver");
 
-    GDALDatasetH inputDataset;
     inputDataset = GDALOpen( geotiffPath.c_str(), GA_ReadOnly );
     if( inputDataset == nullptr ) throw GDALException("Cannot open " + geotiffPath);
 
-    int rasterCount = GDALGetRasterCount(inputDataset);
+    rasterCount = GDALGetRasterCount(inputDataset);
     if (rasterCount == 0) throw GDALException("No raster bands found in " + geotiffPath);
 
     // Extract no data values
-    std::vector<double> inNodata;
-    int success;
-    for (int i = 0; i < rasterCount; i++){
-        GDALRasterBandH band = GDALGetRasterBand(inputDataset, i + 1);
-        double nodata = GDALGetRasterNoDataValue(band, &success);
-        if (success) inNodata.push_back(nodata);
-    }
+//    std::vector<double> inNodata;
+//    int success;
+//    for (int i = 0; i < rasterCount; i++){
+//        GDALRasterBandH band = GDALGetRasterBand(inputDataset, i + 1);
+//        double nodata = GDALGetRasterNoDataValue(band, &success);
+//        if (success) inNodata.push_back(nodata);
+//    }
 
     // Extract input SRS
     OGRSpatialReferenceH inputSrs = OSRNewSpatialReference(nullptr);
@@ -114,6 +117,9 @@ std::string Tiler::tile(int tz, int tx, int ty, bool tms)
         inputDataset = createWarpedVRT(inputDataset, outputSrs);
     }
 
+    OSRDestroySpatialReference(inputSrs);
+    OSRDestroySpatialReference(outputSrs);
+
 //    GDALDatasetH test = GDALCreateCopy(pngDrv, "/data/drone/brighton2/test.png", inputDataset, FALSE, nullptr, nullptr, nullptr);
 //    if (test == nullptr) throw GDALException("Cannot create output dataset");
 //    GDALClose(test);
@@ -125,56 +131,52 @@ std::string Tiler::tile(int tz, int tx, int ty, bool tms)
     //}
 
     // warped_input_dataset = inputDataset
-    int nBands = dataBandsCount(inputDataset);
-    bool hasAlpha = nBands < GDALGetRasterCount(inputDataset);
+    nBands = dataBandsCount(inputDataset);
+//    bool hasAlpha = nBands < GDALGetRasterCount(inputDataset);
 
     double outGt[6];
     if (GDALGetGeoTransform(inputDataset, outGt) != CE_None) throw GDALException("Cannot fetch geotransform outGt");
 
-
-    double oMinX = outGt[0];
-    double oMaxX = outGt[0] + GDALGetRasterXSize(inputDataset) * outGt[1];
-    double oMaxY = outGt[3];
-    double oMinY = outGt[3] - GDALGetRasterYSize(inputDataset) * outGt[1];
+    oMinX = outGt[0];
+    oMaxX = outGt[0] + GDALGetRasterXSize(inputDataset) * outGt[1];
+    oMaxY = outGt[3];
+    oMinY = outGt[3] - GDALGetRasterYSize(inputDataset) * outGt[1];
 
     LOGD << "Bounds (output SRS): " << oMinX << "," << oMinY << "," << oMaxX << "," << oMaxY;
 
-    GlobalMercator mercator;
-
-    // Maximal zoom level
-    int tMaxZ = mercator.zoomForPixelSize(outGt[1]);
-
-    BoundingBox<Projected2D> tMinMax(
-        mercator.metersToTile(oMinX, oMinY, tz),
-        mercator.metersToTile(oMaxX, oMaxY, tz)
-    );
-
-    // TODO: crop tiles extending world limits?
-
-    int tMinZ = mercator.zoomForPixelSize(outGt[1] * std::max(GDALGetRasterXSize(inputDataset), GDALGetRasterYSize(inputDataset)) / tileSize);
-    if (tz < tMinZ) throw GDALException("Requested tile zoom too low (minimum is: " + std::to_string(tMinZ));
+    // Max/min zoom level
+    tMaxZ = mercator.zoomForPixelSize(outGt[1]);
+    tMinZ = mercator.zoomForPixelSize(outGt[1] * std::max(GDALGetRasterXSize(inputDataset), GDALGetRasterYSize(inputDataset)) / tileSize);
 
     LOGD << "MinZ: " << tMinZ;
     LOGD << "MaxZ: " << tMaxZ;
     LOGD << "Num bands: " << nBands;
+}
 
-//    if (tz > tMaxZ) throw GDALException("Cannot render tile, Z level too high (maxZ: " + std::to_string(tMaxZ) + ")");
+Tiler::~Tiler(){
+    if (inputDataset) GDALClose(inputDataset);
+}
 
+std::string Tiler::tile(int tz, int tx, int ty){
     std::string tilePath = getTilePath(tz, tx, ty, true);
+
+    if (tms){
+        ty = tmsToXYZ(ty, tz);
+        LOGD << "TY: " << ty;
+    }
+
+    BoundingBox<Projected2D> tMinMax = getMinMaxCoordsForZ(tz);
+    if (!tMinMax.contains(tx, ty)) throw GDALException("Out of bounds");
 
     // Need to create in-memory dataset
     // (PNG driver does not have Create() method)
     GDALDatasetH dsTile = GDALCreate(memDrv, "", tileSize, tileSize, nBands + 1, GDT_Byte, nullptr);
     if (dsTile == nullptr) throw GDALException("Cannot create dsTile");
 
-    if (!tms){
-        ty = tmsToXYZ(ty, tz);
-        LOGD << "TY: " << ty;
-    }
     BoundingBox<Projected2D> b = mercator.tileBounds(tx, ty, tz);
 
     GQResult g = geoQuery(inputDataset, b.min.x, b.max.y, b.max.x, b.min.y);
-    int nativeSize = g.w.x + g.w.xsize;
+    //int nativeSize = g.w.x + g.w.xsize;
     int querySize = tileSize; // TODO: you will need to change this for interpolations other than NN
     g = geoQuery(inputDataset, b.min.x, b.max.y, b.max.x, b.min.y, querySize);
 
@@ -197,13 +199,35 @@ std::string Tiler::tile(int tz, int tx, int ty, bool tms)
         }
 
         // Rescale if needed
+        // We currently don't rescale byte datasets
+        // TODO: allow people to specify rescale values
+
         if (type != GDT_Byte && type != GDT_Unknown){
             for (int i = 0; i < nBands; i++){
                 GDALRasterBandH hBand = GDALGetRasterBand(inputDataset, i + 1);
+                char *wBuf = (buffer + wSize * i);
+
                 switch(type){
-                    // TODO: more
+                    case GDT_Byte:
+                        rescale<uint8_t>(hBand, wBuf, wSize);
+                        break;
+                    case GDT_UInt16:
+                        rescale<uint16_t>(hBand, wBuf, wSize);
+                        break;
+                    case GDT_Int16:
+                        rescale<int16_t>(hBand, wBuf, wSize);
+                        break;
+                    case GDT_UInt32:
+                        rescale<uint32_t>(hBand, wBuf, wSize);
+                        break;
+                    case GDT_Int32:
+                        rescale<int32_t>(hBand, wBuf, wSize);
+                        break;
                     case GDT_Float32:
-                        rescale<float>(hBand, (buffer + wSize * i), wSize);
+                        rescale<float>(hBand, wBuf, wSize);
+                        break;
+                    case GDT_Float64:
+                        rescale<double>(hBand, wBuf, wSize);
                         break;
                     default:
                         break;
@@ -246,29 +270,119 @@ std::string Tiler::tile(int tz, int tx, int ty, bool tms)
         }
 
         delete[] buffer;
-        if (hasAlpha) delete[] alphaBuffer;
+        delete[] alphaBuffer;
     }else{
-        throw GDALException("Out of bounds");
+        throw GDALException("Geoquery out of bounds");
     }
 
     GDALDatasetH outDs = GDALCreateCopy(pngDrv, tilePath.c_str(), dsTile, FALSE, nullptr, nullptr, nullptr);
     if (outDs == nullptr) throw GDALException("Cannot create output dataset " + tilePath);
 
-//            if (tMinMax.contains(x, y)){
-//                std::string tilePath = getTilePath(x, y, tz, true);
-
-//                GDALOpen(tilePath.c_str(), )
-//            }
-
-
-    OSRDestroySpatialReference(inputSrs);
-    OSRDestroySpatialReference(outputSrs);
-
     GDALClose(dsTile);
     GDALClose(outDs);
-    GDALClose(inputDataset);
 
     return tilePath;
+}
+
+std::string Tiler::tile(const TileInfo &t){
+    return tile(t.tz, t.tx, t.ty);
+}
+
+std::vector<TileInfo> Tiler::getTilesForZoomLevel(int tz) const{
+    std::vector<TileInfo> result;
+    BoundingBox<Projected2D> bounds = getMinMaxCoordsForZ(tz);
+
+    for (int ty = bounds.min.y; ty < bounds.max.y + 1; ty++){
+        for (int tx = bounds.min.x; tx < bounds.max.x + 1; tx++){
+            LOGD << tx << " " << ty << " " << tz;
+            result.push_back(TileInfo(tx, tms ? xyzToTMS(ty, tz) : ty, tz));
+        }
+    }
+
+    return result;
+}
+
+BoundingBox<int> Tiler::getMinMaxZ() const{
+    return BoundingBox(tMinZ, tMaxZ);
+}
+
+BoundingBox<Projected2D> Tiler::getMinMaxCoordsForZ(int tz) const{
+    BoundingBox<Projected2D> b(
+        mercator.metersToTile(oMinX, oMinY, tz),
+        mercator.metersToTile(oMaxX, oMaxY, tz)
+    );
+
+    // Crop tiles extending world limits (+-180,+-90)
+    b.min.x = std::max<double>(0, b.min.x);
+    b.max.x = std::min<double>(std::pow(2, tz - 1), b.max.x);
+
+    // TODO: figure this out (TMS vs. XYZ)
+//    b.min.y = std::max<double>(0, b.min.y);
+//    b.max.y = std::min<double>(std::pow(2, tz - 1), b.max.y);
+
+    return b;
+}
+
+BoundingBox<int> TilerHelper::parseZRange(const std::string &zRange){
+    BoundingBox<int> r;
+
+    std::size_t dashPos = zRange.find("-");
+    if (dashPos != std::string::npos){
+        r.min = std::stoi(zRange.substr(0, dashPos));
+        r.max = std::stoi(zRange.substr(dashPos + 1, zRange.length() - 1));
+        if (r.min > r.max){
+            std::swap(r.min, r.max);
+        }
+    }else{
+        r.min = r.max = std::stoi(zRange);
+    }
+
+    return r;
+}
+
+void TilerHelper::runTiler(Tiler &tiler, std::ostream &output, const std::string &format, const std::string &zRange, const std::string &x, const std::string &y){
+    BoundingBox<int> zb;
+    if (zRange == "auto"){
+        zb = tiler.getMinMaxZ();
+    }else{
+        zb = parseZRange(zRange);
+    }
+
+    bool json = format == "json";
+
+    if (json){
+        output << "[";
+    }
+
+    for (int z = zb.min; z <= zb.max; z++){
+        if (x != "auto" && y != "auto"){
+            // Just one tile
+            if (json) output << "\"";
+            output << tiler.tile(z, std::stoi(x), std::stoi(y));
+            if (json) output << "\"";
+            else output << std::endl;
+        }else{
+            // All tiles
+            std::vector<ddb::TileInfo> tiles = tiler.getTilesForZoomLevel(z);
+            for (auto &t : tiles){
+                if (json) output << "\"";
+
+                LOGD << "Tiling " << t.tx << " " << t.ty << " " << t.tz;
+                output << tiler.tile(t);
+
+                if (json){
+                    output << "\"";
+                    if (&t != &tiles[tiles.size() - 1]) output << ",";
+                }else{
+                    output << std::endl;
+                }
+            }
+        }
+    }
+
+    if (json){
+        output << "]";
+    }
 }
 
 template<typename T>
@@ -287,7 +401,7 @@ void Tiler::rescale(GDALRasterBandH hBand, char *buffer, size_t bufsize){
     double deltamm = minmax[1] - minmax[0];
     T *ptr = reinterpret_cast<T *>(buffer);
 
-    for (int i = 0; i < bufsize; i++){
+    for (size_t i = 0; i < bufsize; i++){
         ptr[i] = ((ptr[i] - minmax[0]) / deltamm) * 255.0;
     }
 }
@@ -363,8 +477,12 @@ GQResult Tiler::geoQuery(GDALDatasetH ds, double ulx, double uly, double lrx, do
     return o;
 }
 
-int Tiler::tmsToXYZ(int ty, int tz){
+int Tiler::tmsToXYZ(int ty, int tz) const{
     return (std::pow(2, tz) - 1) - ty;
+}
+
+int Tiler::xyzToTMS(int ty, int tz) const{
+    return (std::pow(2, tz) - 1) - ty; // The same!
 }
 
 GlobalMercator::GlobalMercator(){
@@ -374,20 +492,20 @@ GlobalMercator::GlobalMercator(){
     maxZoomLevel = 99;
 }
 
-BoundingBox<Geographic2D> GlobalMercator::tileLatLonBounds(int tx, int ty, int zoom){
+BoundingBox<Geographic2D> GlobalMercator::tileLatLonBounds(int tx, int ty, int zoom) const{
     BoundingBox<Projected2D> bounds = tileBounds(tx, ty, zoom);
     Geographic2D min = metersToLatLon(bounds.min.x, bounds.min.y);
     Geographic2D max = metersToLatLon(bounds.max.x, bounds.max.y);
     return BoundingBox<Geographic2D>(min, max);
 }
 
-BoundingBox<Projected2D> GlobalMercator::tileBounds(int tx, int ty, int zoom){
+BoundingBox<Projected2D> GlobalMercator::tileBounds(int tx, int ty, int zoom) const{
     Projected2D min = pixelsToMeters(tx * tileSize, ty * tileSize, zoom);
     Projected2D max = pixelsToMeters((tx + 1) * tileSize, (ty + 1) * tileSize, zoom);
     return BoundingBox<Projected2D>(min, max);
 }
 
-Geographic2D GlobalMercator::metersToLatLon(int mx, int my){
+Geographic2D GlobalMercator::metersToLatLon(int mx, int my) const{
     double lon = static_cast<double>(mx) / originShift * 180.0;
     double lat = static_cast<double>(my) / originShift * 180.0;
 
@@ -395,33 +513,33 @@ Geographic2D GlobalMercator::metersToLatLon(int mx, int my){
     return Geographic2D(lon, lat);
 }
 
-Projected2D GlobalMercator::metersToTile(int mx, int my, int zoom){
+Projected2D GlobalMercator::metersToTile(int mx, int my, int zoom) const{
     Projected2D p = metersToPixels(mx, my, zoom);
     return pixelsToTile(p.x, p.y);
 }
 
-Projected2D GlobalMercator::pixelsToMeters(int px, int py, int zoom){
+Projected2D GlobalMercator::pixelsToMeters(int px, int py, int zoom) const{
     double res = resolution(zoom);
     return Projected2D(px * res - originShift, py * res - originShift);
 }
 
-Projected2D GlobalMercator::metersToPixels(int mx, int my, int zoom){
+Projected2D GlobalMercator::metersToPixels(int mx, int my, int zoom) const{
     double res = resolution(zoom);
     return Projected2D((mx + originShift) / res, (my + originShift) / res);
 }
 
-Projected2D GlobalMercator::pixelsToTile(int px, int py){
+Projected2D GlobalMercator::pixelsToTile(int px, int py) const{
     return Projected2D(
         static_cast<int>(std::ceil(static_cast<double>(px) / static_cast<double>(tileSize)) - 1),
         static_cast<int>(std::ceil(static_cast<double>(py) / static_cast<double>(tileSize)) - 1)
     );
 }
 
-double GlobalMercator::resolution(int zoom){
+double GlobalMercator::resolution(int zoom) const{
     return initialResolution / std::pow(2, zoom);
 }
 
-int GlobalMercator::zoomForPixelSize(double pixelSize){
+int GlobalMercator::zoomForPixelSize(double pixelSize) const{
     for (int i = 0; i < maxZoomLevel; i++){
         if (pixelSize > resolution(i)){
             return i - 1;

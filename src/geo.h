@@ -58,7 +58,7 @@ struct BoundingBox{
 template <typename T>
 inline std::ostream& operator<<(std::ostream& os, const BoundingBox<T>& b)
 {
-    os << "[" << b.min << "],[" << b.max << "]]";
+    os << "[" << b.min << "],[" << b.max << "]";
     return os;
 }
 

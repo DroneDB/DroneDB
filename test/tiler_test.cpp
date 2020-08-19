@@ -11,13 +11,18 @@ using namespace ddb;
 
 TEST(testTiler, RGB) {
     Tiler t("/data/drone/brighton2/odm_orthophoto/odm_orthophoto.tif", "/data/drone/brighton2/tiles/");
-    t.tile(19, 128168, 184742);
+    t.tile(19, 128168, 339545);
 }
 
 TEST(testTiler, DSM){
     Tiler t("/data/drone/brighton2/odm_dem/dsm.tif", "/data/drone/brighton2/dsm_tiles/");
-    t.tile(21, 512674, 738962);
-    t.tile(20, 256337, 369481);
+    t.tile(21, 512674, 1358189);
+    t.tile(20, 256337, 679094);
+}
+
+TEST(testTiler, TMS){
+    Tiler tms("/data/drone/brighton2/odm_dem/dsm.tif", "/data/drone/brighton2/dsm_tiles/", true);
+    tms.tile(20, 256337, 369481);
 }
 
 }
