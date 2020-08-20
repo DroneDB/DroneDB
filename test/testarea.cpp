@@ -38,7 +38,7 @@ fs::path TestArea::downloadTestAsset(const std::string &url, const std::string &
 
     net::Request r = net::GET(url);
     r.setVerifySSL(false);
-    r.downloadToFile(destination);
+    r.downloadToFile(destination.string());
 
     return destination;
 }
