@@ -14,6 +14,8 @@ void generateThumbs(const std::vector<std::string> &input, const fs::path &outpu
 bool supportsThumbnails(EntryType type);
 fs::path getThumbFilename(const fs::path &imagePath, time_t modifiedTime, int thumbSize);
 fs::path generateThumb(const fs::path &imagePath, int thumbSize, const fs::path &outImagePath, bool forceRecreate);
+void cleanupThumbsUserCache();
+
 }
 
 #endif // THUMBS_H

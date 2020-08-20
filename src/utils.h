@@ -7,6 +7,7 @@
 
 #include <memory>
 #include <iostream>
+#include <chrono>
 #include <algorithm>
 #include <sstream>
 #include <cstdio>
@@ -107,6 +108,8 @@ std::string getPrompt(const std::string &prompt = "");
 
 // Cross-platform getpass
 std::string getPass(const std::string &prompt = "Password: ");
+
+time_t currentUnixTimestamp();
 
 // Fix for removing macros
 #undef max

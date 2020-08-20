@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include <sstream>
+#include <cstdlib>
 #include <gdal_priv.h>
 #include <gdal_utils.h>
 
@@ -11,14 +12,15 @@
 #include "utils.h"
 #include "userprofile.h"
 #include "ddb.h"
-
+#include "mio.h"
 
 namespace ddb{
 
 fs::path getThumbFromUserCache(const fs::path &imagePath, time_t modifiedTime, int thumbSize, bool forceRecreate){
+    if (std::rand() % 100 == 0) cleanupThumbsUserCache();
+
     fs::path outdir = UserProfile::get()->getThumbsDir(thumbSize);
     fs::path thumbPath = outdir / getThumbFilename(imagePath, modifiedTime, thumbSize);
-
     return generateThumb(imagePath, thumbSize, thumbPath, forceRecreate);
 }
 
@@ -121,6 +123,37 @@ fs::path generateThumb(const fs::path &imagePath, int thumbSize, const fs::path 
     GDALTranslateOptionsFree(psOptions);
 
     return outImagePath;
+}
+
+void cleanupThumbsUserCache(){
+    LOGD << "Cleaning up thumbs user cache";
+
+    time_t threshold = utils::currentUnixTimestamp() - 60 * 60 * 24 * 5; // 5 days
+    fs::path thumbsDir = UserProfile::get()->getThumbsDir();
+
+    // Iterate size directories
+    for(auto sd = fs::recursive_directory_iterator(thumbsDir);
+            sd != fs::recursive_directory_iterator();
+            ++sd ){
+        fs::path sizeDir = sd->path();
+        if (fs::is_directory(sizeDir)){
+            for(auto t = fs::recursive_directory_iterator(sizeDir);
+                    t != fs::recursive_directory_iterator();
+                    ++t ){
+                fs::path thumb = t->path();
+                if (io::Path(thumb).getModifiedTime() < threshold){
+                    if (fs::remove(thumb)) LOGD << "Cleaned " << thumb.string();
+                    else LOGD << "Cannot clean " << thumb.string();
+                }
+            }
+
+            if (fs::is_empty(sizeDir)){
+                // Remove directory too
+                if (fs::remove(sizeDir)) LOGD << "Cleaned " << sizeDir.string();
+                else LOGD << "Cannot clean " << sizeDir.string();
+            }
+        }
+    }
 }
 
 }
