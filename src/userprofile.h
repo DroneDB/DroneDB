@@ -18,7 +18,10 @@ public:
     fs::path getHomeDir();
     fs::path getProfileDir();
     fs::path getProfilePath(const fs::path &p, bool createIfNeeded);
+    fs::path getThumbsDir();
     fs::path getThumbsDir(int thumbSize);
+    fs::path getTilesDir();
+
     fs::path getAuthFile();
 
     AuthManager *getAuthManager();
