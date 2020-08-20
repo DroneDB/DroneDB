@@ -9,6 +9,8 @@
 int main(int argc, char **argv) {
 	ddb::initialize(true);
 
+    // TODO: ability to clean previous TestAreas
+
 	::testing::InitGoogleTest(&argc, argv);
 	return RUN_ALL_TESTS();
 }
