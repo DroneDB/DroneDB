@@ -20,6 +20,7 @@ void Tile::setOptions(cxxopts::Options &opts) {
     ("z", "Zoom levels, either a single zoom level \"N\" or a range \"min-max\" or \"auto\" to generate all zoom levels", cxxopts::value<std::string>()->default_value("auto"))
     ("x", "Generate a single tile with the specified coordinate (XYZ, unless --tms is used). Must be used with -y", cxxopts::value<std::string>()->default_value("auto"))
     ("y", "Generate a single tile with the specified coordinate (XYZ, unless --tms is used). Must be used with -x", cxxopts::value<std::string>()->default_value("auto"))
+    ("s,size", "Tile size", cxxopts::value<int>()->default_value("256"))
     ("tms", "Generate TMS tiles instead of XYZ", cxxopts::value<bool>());
 
     opts.parse_positional({"input", "output"});
@@ -46,8 +47,9 @@ void Tile::run(cxxopts::ParseResult &opts) {
     auto z = opts["z"].as<std::string>();
     auto x = opts["x"].as<std::string>();
     auto y = opts["y"].as<std::string>();
+    auto tileSize = opts["size"].as<int>();
 
-    ddb::Tiler tiler(input, output, tms);
+    ddb::Tiler tiler(input, output, tileSize, tms);
     ddb::TilerHelper::runTiler(tiler, std::cout, format, z, x, y);
 }
 

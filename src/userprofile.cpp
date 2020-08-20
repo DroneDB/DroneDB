@@ -77,6 +77,12 @@ fs::path UserProfile::getThumbsDir(int thumbSize){
     return thumbsSizeDir;
 }
 
+fs::path UserProfile::getTilesDir(){
+    const fs::path tilesDir = getProfileDir() / fs::path("tiles");
+    createDir(tilesDir);
+    return tilesDir;
+}
+
 fs::path UserProfile::getAuthFile(){
     return getProfileDir() / "auth.json";
 }

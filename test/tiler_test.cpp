@@ -21,7 +21,7 @@ TEST(testTiler, DSM){
 }
 
 TEST(testTiler, TMS){
-    Tiler tms("/data/drone/brighton2/odm_dem/dsm.tif", "/data/drone/brighton2/dsm_tiles/", true);
+    Tiler tms("/data/drone/brighton2/odm_dem/dsm.tif", "/data/drone/brighton2/dsm_tiles/", 256, true);
     tms.tile(20, 256337, 369481);
 }
 

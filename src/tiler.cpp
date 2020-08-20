@@ -7,6 +7,7 @@
 #include "tiler.h"
 #include "exceptions.h"
 #include "logger.h"
+#include "hash.h"
 
 namespace ddb{
 
@@ -58,11 +59,13 @@ std::string Tiler::getTilePath(int z, int x, int y, bool createIfNotExists){
     return p.string();
 }
 
-Tiler::Tiler(const std::string &geotiffPath, const std::string &outputFolder, bool tms) :
-    geotiffPath(geotiffPath), outputFolder(outputFolder), tms(tms){
-    tileSize = 256; // TODO: dynamic?
+Tiler::Tiler(const std::string &geotiffPath, const std::string &outputFolder, int tileSize, bool tms) :
+    geotiffPath(geotiffPath), outputFolder(outputFolder),
+    tileSize(tileSize), tms(tms), mercator(GlobalMercator(tileSize)){
 
     if (!fs::exists(geotiffPath)) throw FSException(geotiffPath + " does not exists");
+    if (tileSize <= 0 || std::ceil(std::log2(tileSize) != std::floor(std::log2(tileSize)))) throw GDALException("Tile size must be a power of 2 greater than 0");
+
     if (!fs::exists(outputFolder)){
         // Try to create
         if (!fs::create_directories(outputFolder)){
@@ -146,7 +149,7 @@ Tiler::Tiler(const std::string &geotiffPath, const std::string &outputFolder, bo
 
     // Max/min zoom level
     tMaxZ = mercator.zoomForPixelSize(outGt[1]);
-    tMinZ = mercator.zoomForPixelSize(outGt[1] * std::max(GDALGetRasterXSize(inputDataset), GDALGetRasterYSize(inputDataset)) / tileSize);
+    tMinZ = mercator.zoomForPixelSize(outGt[1] * std::max(GDALGetRasterXSize(inputDataset), GDALGetRasterYSize(inputDataset)) / 256.0);
 
     LOGD << "MinZ: " << tMinZ;
     LOGD << "MaxZ: " << tMaxZ;
@@ -340,6 +343,12 @@ BoundingBox<int> TilerHelper::parseZRange(const std::string &zRange){
     return r;
 }
 
+fs::path TilerHelper::getCacheFolderName(const fs::path &geotiffPath, time_t modifiedTime){
+    std::ostringstream os;
+    os << geotiffPath.string() << "*" << modifiedTime;
+    return Hash::strCRC64(os.str());
+}
+
 void TilerHelper::runTiler(Tiler &tiler, std::ostream &output, const std::string &format, const std::string &zRange, const std::string &x, const std::string &y){
     BoundingBox<int> zb;
     if (zRange == "auto"){
@@ -485,8 +494,7 @@ int Tiler::xyzToTMS(int ty, int tz) const{
     return (std::pow(2, tz) - 1) - ty; // The same!
 }
 
-GlobalMercator::GlobalMercator(){
-    tileSize = 256; // TODO: dynamic?
+GlobalMercator::GlobalMercator(int tileSize) : tileSize(tileSize){
     originShift = 2.0 * M_PI * 6378137.0 / 2.0;
     initialResolution = 2.0 * M_PI * 6378137.0 / static_cast<double>(tileSize);
     maxZoomLevel = 99;

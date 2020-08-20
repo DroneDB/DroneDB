@@ -63,7 +63,7 @@ void generateThumbs(const std::vector<std::string> &input, const fs::path &outpu
 
 fs::path getThumbFilename(const fs::path &imagePath, time_t modifiedTime, int thumbSize){
     // Thumbnails are JPG files idenfitied by:
-    // sha256(imagePath + "*" + modifiedTime + "*" + thumbSize).jpg
+    // CRC64(imagePath + "*" + modifiedTime + "*" + thumbSize).jpg
     std::ostringstream os;
     os << imagePath.string() << "*" << modifiedTime << "*" << thumbSize;
     return fs::path(Hash::strCRC64(os.str()) + ".jpg");

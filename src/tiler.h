@@ -16,12 +16,12 @@ namespace ddb{
 
 
 class GlobalMercator{
+    int tileSize;
     double originShift;
     double initialResolution;
     int maxZoomLevel;
-    int tileSize;
 public:
-    GlobalMercator();
+    GlobalMercator(int tileSize);
 
     BoundingBox<Geographic2D> tileLatLonBounds(int tx, int ty, int zoom) const;
 
@@ -69,9 +69,9 @@ struct TileInfo{
 };
 
 class Tiler{
-    int tileSize;
     std::string geotiffPath;
     fs::path outputFolder;
+    int tileSize;
     bool tms;
 
     GDALDriverH pngDrv;
@@ -109,7 +109,9 @@ class Tiler{
     template <typename T>
     void rescale(GDALRasterBandH hBand, char *buffer, size_t bufsize);
 public:
-    Tiler(const std::string &geotiffPath, const std::string &outputFolder, bool tms = false);
+    Tiler(const std::string &geotiffPath, const std::string &outputFolder,
+          int tileSize = 256,
+          bool tms = false);
     ~Tiler();
 
     std::string tile(int tz, int tx, int ty);
@@ -128,9 +130,12 @@ class TilerHelper{
     // two ints (min,max)
     static BoundingBox<int> parseZRange(const std::string &zRange);
 
+    // Where to store local cache tiles
+    static fs::path getCacheFolderName(const fs::path &geotiffPath, time_t modifiedTime);
 public:
     static void runTiler(Tiler &tiler, std::ostream &output = std::cout, const std::string &format = "text", const std::string &zRange = "auto", const std::string &x = "auto", const std::string &y = "auto");
 };
+
 
 }
 
