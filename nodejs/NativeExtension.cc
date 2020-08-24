@@ -14,6 +14,7 @@ NAN_MODULE_INIT(InitAll) {
 	NAN_EXPORT(target, typeToHuman);
 	NAN_EXPORT(target, parseFiles);
 	NAN_EXPORT(target, _thumbs_getFromUserCache);
+    NAN_EXPORT(target, _tile_getFromUserCache);
 
 	ddb::initialize(false);
 }

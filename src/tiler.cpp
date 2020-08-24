@@ -8,6 +8,8 @@
 #include "exceptions.h"
 #include "logger.h"
 #include "hash.h"
+#include "mio.h"
+#include "userprofile.h"
 
 namespace ddb{
 
@@ -343,10 +345,27 @@ BoundingBox<int> TilerHelper::parseZRange(const std::string &zRange){
     return r;
 }
 
-fs::path TilerHelper::getCacheFolderName(const fs::path &geotiffPath, time_t modifiedTime){
+fs::path TilerHelper::getCacheFolderName(const fs::path &geotiffPath, time_t modifiedTime, int tileSize){
     std::ostringstream os;
-    os << geotiffPath.string() << "*" << modifiedTime;
+    os << geotiffPath.string() << "*" << modifiedTime << "*" << tileSize;
     return Hash::strCRC64(os.str());
+}
+
+fs::path TilerHelper::getFromUserCache(const fs::path &geotiffPath, int tz, int tx, int ty, int tileSize, bool tms, bool forceRecreate){
+//    if (std::rand() % 100 == 0) cleanupThumbsUserCache();
+    if (!fs::exists(geotiffPath)) throw FSException(geotiffPath.string() + " does not exist");
+
+    time_t modifiedTime = io::Path(geotiffPath).getModifiedTime();
+    fs::path tileCacheFolder = UserProfile::get()->getTilesDir() / getCacheFolderName(geotiffPath, modifiedTime, tileSize);
+    fs::path outputFile = tileCacheFolder / std::to_string(tz) / std::to_string(tx) / (std::to_string(ty) + ".png");
+
+    // Cache hit
+    if (fs::exists(outputFile) && !forceRecreate){
+        return outputFile;
+    }
+
+    Tiler t(geotiffPath, tileCacheFolder, tileSize, tms);
+    return t.tile(tz, tx, ty);
 }
 
 void TilerHelper::runTiler(Tiler &tiler, std::ostream &output, const std::string &format, const std::string &zRange, const std::string &x, const std::string &y){

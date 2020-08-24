@@ -77,7 +77,7 @@ class Tiler{
     GDALDriverH pngDrv;
     GDALDriverH memDrv;
 
-    GDALDatasetH inputDataset;
+    GDALDatasetH inputDataset = nullptr;
     int rasterCount;
     int nBands;
 
@@ -86,12 +86,10 @@ class Tiler{
     int tMaxZ;
     int tMinZ;
 
-
     bool hasGeoreference(const GDALDatasetH &dataset);
     bool sameProjection(const OGRSpatialReferenceH &a, const OGRSpatialReferenceH &b);
 
     int dataBandsCount(const GDALDatasetH &dataset);
-    std::string getTilePath(int z, int x, int y, bool createIfNotExists);
     GDALDatasetH createWarpedVRT(const GDALDatasetH &src, const OGRSpatialReferenceH &srs, GDALResampleAlg resampling =  GRA_NearestNeighbour);
 
     // Returns parameters reading raster data.
@@ -114,6 +112,8 @@ public:
           bool tms = false);
     ~Tiler();
 
+    std::string getTilePath(int z, int x, int y, bool createIfNotExists);
+
     std::string tile(int tz, int tx, int ty);
     std::string tile(const TileInfo &tile);
 
@@ -131,11 +131,14 @@ class TilerHelper{
     static BoundingBox<int> parseZRange(const std::string &zRange);
 
     // Where to store local cache tiles
-    static fs::path getCacheFolderName(const fs::path &geotiffPath, time_t modifiedTime);
+    static fs::path getCacheFolderName(const fs::path &geotiffPath, time_t modifiedTime, int tileSize);
+
 public:
     static void runTiler(Tiler &tiler, std::ostream &output = std::cout, const std::string &format = "text", const std::string &zRange = "auto", const std::string &x = "auto", const std::string &y = "auto");
-};
 
+    // Get a single tile from user cache
+    static fs::path getFromUserCache(const fs::path &geotiffPath, int tz, int tx, int ty, int tileSize, bool tms, bool forceRecreate);
+};
 
 }
 

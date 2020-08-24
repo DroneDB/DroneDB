@@ -7,6 +7,7 @@
 #include "info.h"
 #include "thumbs.h"
 #include "entry.h"
+#include "tiler.h"
 
 NAN_METHOD(getVersion) {
     info.GetReturnValue().Set(Nan::New(ddb::getVersion()).ToLocalChecked());
@@ -202,6 +203,105 @@ NAN_METHOD(_thumbs_getFromUserCache) {
     // Execute
     Nan::Callback *callback = new Nan::Callback(Nan::To<v8::Function>(info[3]).ToLocalChecked());
     Nan::AsyncQueueWorker(new GetThumbFromUserCacheWorker(callback, imagePath, modifiedTime, thumbSize, forceRecreate));
+}
+
+//(const fs::path &geotiffPath, int tz, int tx, int ty, int tileSize, bool tms, bool forceRecreate)
+class GetTileFromUserCacheWorker : public Nan::AsyncWorker {
+ public:
+  GetTileFromUserCacheWorker(Nan::Callback *callback, const fs::path &geotiffPath, int tz, int tx, int ty, int tileSize, bool tms, bool forceRecreate)
+    : AsyncWorker(callback, "nan:GetTileFromUserCacheWorker"),
+      geotiffPath(geotiffPath), tz(tz), tx(tx), ty(ty), tileSize(tileSize), tms(tms), forceRecreate(forceRecreate) {}
+  ~GetTileFromUserCacheWorker() {}
+
+  void Execute () {
+    try{
+        tilePath = ddb::TilerHelper::getFromUserCache(geotiffPath, tz, tx, ty, tileSize, tms, forceRecreate);
+    }catch(ddb::AppException &e){
+        SetErrorMessage(e.what());
+    }
+  }
+
+  void HandleOKCallback () {
+     Nan::HandleScope scope;
+
+     v8::Local<v8::Value> argv[] = {
+         Nan::Null(),
+         Nan::New(tilePath.string()).ToLocalChecked()
+     };
+     callback->Call(2, argv, async_resource);
+   }
+
+ private:
+    fs::path geotiffPath;
+    int tx, ty, tz;
+    int tileSize;
+    bool tms;
+    bool forceRecreate;
+
+    fs::path tilePath;
+};
+
+
+NAN_METHOD(_tile_getFromUserCache) {
+    if (info.Length() != 6){
+        Nan::ThrowError("Invalid number of arguments");
+        return;
+    }
+    if (!info[0]->IsString()){
+        Nan::ThrowError("Argument 0 must be a string");
+        return;
+    }
+    if (!info[1]->IsNumber()){
+        Nan::ThrowError("Argument 1 must be a number");
+        return;
+    }
+    if (!info[2]->IsNumber()){
+        Nan::ThrowError("Argument 2 must be a number");
+        return;
+    }
+    if (!info[3]->IsNumber()){
+        Nan::ThrowError("Argument 3 must be a number");
+        return;
+    }
+    if (!info[4]->IsObject()){
+        Nan::ThrowError("Argument 4 must be an object");
+        return;
+    }
+    if (!info[5]->IsFunction()){
+        Nan::ThrowError("Argument 5 must be a function");
+        return;
+    }
+
+    // Parse args
+    fs::path geotiffPath = fs::path(*Nan::Utf8String(info[0].As<v8::String>()));
+    int tz = Nan::To<time_t>(info[1].As<v8::Uint32>()).FromJust();
+    int tx = Nan::To<time_t>(info[2].As<v8::Uint32>()).FromJust();
+    int ty = Nan::To<time_t>(info[3].As<v8::Uint32>()).FromJust();
+    
+    // Parse options
+    v8::Local<v8::String> k = Nan::New<v8::String>("tileSize").ToLocalChecked();
+    v8::Local<v8::Object> obj = info[4].As<v8::Object>();
+    int tileSize = 256;
+
+    if (Nan::HasRealNamedProperty(obj, k).FromJust()){
+        tileSize = Nan::To<time_t>(Nan::GetRealNamedProperty(obj, k).ToLocalChecked()).FromJust();
+    }
+
+    bool tms = false;
+    k = Nan::New<v8::String>("tms").ToLocalChecked();
+    if (Nan::HasRealNamedProperty(obj, k).FromJust()){
+        tms = Nan::To<bool>(Nan::GetRealNamedProperty(obj, k).ToLocalChecked()).FromJust();
+    }
+
+    bool forceRecreate = false;
+    k = Nan::New<v8::String>("forceRecreate").ToLocalChecked();
+    if (Nan::HasRealNamedProperty(obj, k).FromJust()){
+        forceRecreate = Nan::To<bool>(Nan::GetRealNamedProperty(obj, k).ToLocalChecked()).FromJust();
+    }
+
+    // Execute
+    Nan::Callback *callback = new Nan::Callback(Nan::To<v8::Function>(info[5]).ToLocalChecked());
+    Nan::AsyncQueueWorker(new GetTileFromUserCacheWorker(callback, geotiffPath, tz, tx, ty, tileSize, tms, forceRecreate));
 }
 
 // NAN_METHOD(aBoolean) {
