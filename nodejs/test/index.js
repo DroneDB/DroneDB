@@ -62,7 +62,7 @@ describe('node-ddb extension', function() {
   });
 
   it('should be able to generate tiles', async function(){
-    this.timeout(4000); 
+    this.timeout(4000);
     const t = new TestArea("tile");
     const geotiffPath = await t.downloadTestAsset("https://raw.githubusercontent.com/DroneDB/test_data/master/brighton/odm_orthophoto.tif", 
                               "ortho.tif");

@@ -352,7 +352,7 @@ fs::path TilerHelper::getCacheFolderName(const fs::path &geotiffPath, time_t mod
 }
 
 fs::path TilerHelper::getFromUserCache(const fs::path &geotiffPath, int tz, int tx, int ty, int tileSize, bool tms, bool forceRecreate){
-//    if (std::rand() % 100 == 0) cleanupThumbsUserCache();
+    if (std::rand() % 1000 == 0) cleanupUserCache();
     if (!fs::exists(geotiffPath)) throw FSException(geotiffPath.string() + " does not exist");
 
     time_t modifiedTime = io::Path(geotiffPath).getModifiedTime();
@@ -366,6 +366,26 @@ fs::path TilerHelper::getFromUserCache(const fs::path &geotiffPath, int tz, int 
 
     Tiler t(geotiffPath, tileCacheFolder, tileSize, tms);
     return t.tile(tz, tx, ty);
+}
+
+void TilerHelper::cleanupUserCache(){
+    LOGD << "Cleaning up tiles user cache";
+
+    time_t threshold = utils::currentUnixTimestamp() - 60 * 60 * 24 * 5; // 5 days
+    fs::path tilesDir = UserProfile::get()->getTilesDir();
+
+    // Iterate directories
+    for(auto d = fs::recursive_directory_iterator(tilesDir);
+            d != fs::recursive_directory_iterator();
+            ++d ){
+        fs::path dir = d->path();
+        if (fs::is_directory(dir)){
+            if (io::Path(dir).getModifiedTime() < threshold){
+                if (fs::remove_all(dir)) LOGD << "Cleaned " << dir.string();
+                else LOGD << "Cannot clean " << dir.string();
+            }
+        }
+    }
 }
 
 void TilerHelper::runTiler(Tiler &tiler, std::ostream &output, const std::string &format, const std::string &zRange, const std::string &x, const std::string &y){

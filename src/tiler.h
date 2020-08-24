@@ -138,6 +138,8 @@ public:
 
     // Get a single tile from user cache
     static fs::path getFromUserCache(const fs::path &geotiffPath, int tz, int tx, int ty, int tileSize, bool tms, bool forceRecreate);
+
+    static void cleanupUserCache();
 };
 
 }

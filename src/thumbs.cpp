@@ -17,7 +17,7 @@
 namespace ddb{
 
 fs::path getThumbFromUserCache(const fs::path &imagePath, time_t modifiedTime, int thumbSize, bool forceRecreate){
-    if (std::rand() % 100 == 0) cleanupThumbsUserCache();
+    if (std::rand() % 1000 == 0) cleanupThumbsUserCache();
 
     fs::path outdir = UserProfile::get()->getThumbsDir(thumbSize);
     fs::path thumbPath = outdir / getThumbFilename(imagePath, modifiedTime, thumbSize);
