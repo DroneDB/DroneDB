@@ -8,8 +8,8 @@
   },
   "scripts": {
     "test": "./node_modules/.bin/mocha nodejs/test/*.js",
-    "install": "cmake-js compile --prefer-make",
-    "cmake": "cmake-js configure --prefer-make"
+    "install": "cmake-js compile --prefer-make --target node-ddb",
+    "cmake": "cmake-js configure --prefer-make --target node-ddb"
   },
   "repository": {
     "type": "git",

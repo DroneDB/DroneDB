@@ -32,6 +32,7 @@ jobs:
               shell: cmd
             - name: Build Node.js bindings
               run: npm install
+              shell: cmd
             - name: Test Node.js bindings
               run: .\scripts\setup_windows_env.bat && npm test
               shell: cmd
