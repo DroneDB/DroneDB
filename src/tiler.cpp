@@ -293,8 +293,8 @@ std::vector<TileInfo> Tiler::getTilesForZoomLevel(int tz) const{
     std::vector<TileInfo> result;
     BoundingBox<Projected2D> bounds = getMinMaxCoordsForZ(tz);
 
-    for (int ty = bounds.min.y; ty < bounds.max.y + 1; ty++){
-        for (int tx = bounds.min.x; tx < bounds.max.x + 1; tx++){
+    for (int ty = static_cast<int>(bounds.min.y); ty < static_cast<int>(bounds.max.y) + 1; ty++){
+        for (int tx = static_cast<int>(bounds.min.x); tx < static_cast<int>(bounds.max.x) + 1; tx++){
             LOGD << tx << " " << ty << " " << tz;
             result.push_back(TileInfo(tx, tms ? xyzToTMS(ty, tz) : ty, tz));
         }
@@ -360,7 +360,7 @@ fs::path TilerHelper::getFromUserCache(const fs::path &geotiffPath, int tz, int 
         return outputFile;
     }
 
-    Tiler t(geotiffPath, tileCacheFolder, tileSize, tms);
+    Tiler t(geotiffPath.string(), tileCacheFolder.string(), tileSize, tms);
     return t.tile(tz, tx, ty);
 }
 
@@ -446,7 +446,7 @@ void Tiler::rescale(GDALRasterBandH hBand, char *buffer, size_t bufsize){
     T *ptr = reinterpret_cast<T *>(buffer);
 
     for (size_t i = 0; i < bufsize; i++){
-        ptr[i] = ((ptr[i] - minmax[0]) / deltamm) * 255.0;
+        ptr[i] = static_cast<T>(((ptr[i] - minmax[0]) / deltamm) * 255.0);
     }
 }
 
