@@ -57,7 +57,7 @@ describe('node-ddb extension', function() {
     const t = new TestArea("thumbs");
     const geotiffPath = await t.downloadTestAsset("https://raw.githubusercontent.com/DroneDB/test_data/master/brighton/odm_orthophoto.tif", 
                               "ortho.tif");
-    const thumb = await ddb.thumbs.getFromUserCache(geotiffPath, 0, {thumbSize: 256});
+    const thumb = await ddb.thumbs.getFromUserCache(geotiffPath, 0, {thumbSize: 256, forceRecreate: true});
     assert.ok(fs.existsSync(thumb));
   });
 
@@ -66,7 +66,7 @@ describe('node-ddb extension', function() {
     const t = new TestArea("tile");
     const geotiffPath = await t.downloadTestAsset("https://raw.githubusercontent.com/DroneDB/test_data/master/brighton/odm_orthophoto.tif", 
                               "ortho.tif");
-    const tile = await ddb.tile.getFromUserCache(geotiffPath, 19, 128168, 339545);
+    const tile = await ddb.tile.getFromUserCache(geotiffPath, 19, 128168, 339545, { forceRecreate: true });
     assert.ok(fs.existsSync(tile));
     assert.ok(isPng(tile));
   });
