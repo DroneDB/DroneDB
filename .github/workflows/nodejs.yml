@@ -31,8 +31,7 @@ jobs:
               run: .\scripts\windows_deps.bat
               shell: cmd
             - name: Build Node.js bindings
-              run: set npm_config_cache= && npm install
-              shell: cmd
+              run: npm install
             - name: Test Node.js bindings
               run: .\scripts\setup_windows_env.bat && npm test
               shell: cmd
