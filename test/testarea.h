@@ -16,7 +16,7 @@ class TestArea
 public:
     TestArea(const std::string &name, bool recreateIfExists = false);
 
-    fs::path getFolder(const fs::path &subfolder = ".");
+    fs::path getFolder(const fs::path &subfolder = "");
     fs::path downloadTestAsset(const std::string &url, const std::string &filename, bool overwrite = false);
 };
 

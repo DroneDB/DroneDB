@@ -19,8 +19,10 @@ TestArea::TestArea(const std::string &name, bool recreateIfExists)
 }
 
 fs::path TestArea::getFolder(const fs::path &subfolder){
-    fs::path root = fs::temp_directory_path() / "ddb-tests" / fs::path(name);
-    fs::path dir = root / subfolder;
+    fs::path root = fs::temp_directory_path() / "ddb_test_areas" / fs::path(name);
+    fs::path dir = root;
+    if (!subfolder.empty()) dir = dir / subfolder;
+
     if (!fs::exists(dir)){
         if (!fs::create_directories(dir)) throw FSException("Cannot create " + dir.string());
         LOGD << "Created test folder " << dir;
@@ -38,7 +40,7 @@ fs::path TestArea::downloadTestAsset(const std::string &url, const std::string &
 
     net::Request r = net::GET(url);
     r.setVerifySSL(false);
-    r.downloadToFile(destination);
+    r.downloadToFile(destination.string());
 
     return destination;
 }

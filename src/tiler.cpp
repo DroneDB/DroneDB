@@ -29,11 +29,7 @@ bool Tiler::sameProjection(const OGRSpatialReferenceH &a, const OGRSpatialRefere
     if (OSRExportToProj4(a, &aProj) != CE_None) throw GDALException("Cannot export proj4");
     if (OSRExportToProj4(b, &bProj) != CE_None) throw GDALException("Cannot export proj4");
 
-    bool same = std::string(aProj) == std::string(bProj);
-
-    delete aProj;
-    delete bProj;
-    return same;
+    return std::string(aProj) == std::string(bProj);
 }
 
 int Tiler::dataBandsCount(const GDALDatasetH &dataset){
@@ -190,7 +186,7 @@ std::string Tiler::tile(int tz, int tx, int ty){
             g.w.x << "," << g.w.y << "|" <<
             g.w.xsize << "x" << g.w.ysize;
 
-    if (g.r.xsize != 0 && g.r.ysize != 0 && g.w.xsize != 0 and g.w.ysize != 0){
+    if (g.r.xsize != 0 && g.r.ysize != 0 && g.w.xsize != 0 && g.w.ysize != 0){
         GDALDataType type = GDALGetRasterDataType(GDALGetRasterBand(inputDataset, 1));
 
         size_t wSize = g.w.xsize * g.w.ysize;
@@ -467,8 +463,6 @@ GDALDatasetH Tiler::createWarpedVRT(const GDALDatasetH &src, const OGRSpatialRef
 
     GDALDatasetH warpedVrt = GDALAutoCreateWarpedVRT(src, srcWkt, dstWkt, resampling, 0.001, nullptr);
     if (warpedVrt == nullptr) throw GDALException("Cannot create warped VRT");
-
-    delete dstWkt;
 
     return warpedVrt;
 }
