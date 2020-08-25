@@ -8,6 +8,8 @@
 #include "exceptions.h"
 #include "logger.h"
 #include "hash.h"
+#include "mio.h"
+#include "userprofile.h"
 
 namespace ddb{
 
@@ -291,8 +293,8 @@ std::vector<TileInfo> Tiler::getTilesForZoomLevel(int tz) const{
     std::vector<TileInfo> result;
     BoundingBox<Projected2D> bounds = getMinMaxCoordsForZ(tz);
 
-    for (int ty = bounds.min.y; ty < bounds.max.y + 1; ty++){
-        for (int tx = bounds.min.x; tx < bounds.max.x + 1; tx++){
+    for (int ty = static_cast<int>(bounds.min.y); ty < static_cast<int>(bounds.max.y) + 1; ty++){
+        for (int tx = static_cast<int>(bounds.min.x); tx < static_cast<int>(bounds.max.x) + 1; tx++){
             LOGD << tx << " " << ty << " " << tz;
             result.push_back(TileInfo(tx, tms ? xyzToTMS(ty, tz) : ty, tz));
         }
@@ -339,10 +341,47 @@ BoundingBox<int> TilerHelper::parseZRange(const std::string &zRange){
     return r;
 }
 
-fs::path TilerHelper::getCacheFolderName(const fs::path &geotiffPath, time_t modifiedTime){
+fs::path TilerHelper::getCacheFolderName(const fs::path &geotiffPath, time_t modifiedTime, int tileSize){
     std::ostringstream os;
-    os << geotiffPath.string() << "*" << modifiedTime;
+    os << geotiffPath.string() << "*" << modifiedTime << "*" << tileSize;
     return Hash::strCRC64(os.str());
+}
+
+fs::path TilerHelper::getFromUserCache(const fs::path &geotiffPath, int tz, int tx, int ty, int tileSize, bool tms, bool forceRecreate){
+    if (std::rand() % 1000 == 0) cleanupUserCache();
+    if (!fs::exists(geotiffPath)) throw FSException(geotiffPath.string() + " does not exist");
+
+    time_t modifiedTime = io::Path(geotiffPath).getModifiedTime();
+    fs::path tileCacheFolder = UserProfile::get()->getTilesDir() / getCacheFolderName(geotiffPath, modifiedTime, tileSize);
+    fs::path outputFile = tileCacheFolder / std::to_string(tz) / std::to_string(tx) / (std::to_string(ty) + ".png");
+
+    // Cache hit
+    if (fs::exists(outputFile) && !forceRecreate){
+        return outputFile;
+    }
+
+    Tiler t(geotiffPath.string(), tileCacheFolder.string(), tileSize, tms);
+    return t.tile(tz, tx, ty);
+}
+
+void TilerHelper::cleanupUserCache(){
+    LOGD << "Cleaning up tiles user cache";
+
+    time_t threshold = utils::currentUnixTimestamp() - 60 * 60 * 24 * 5; // 5 days
+    fs::path tilesDir = UserProfile::get()->getTilesDir();
+
+    // Iterate directories
+    for(auto d = fs::recursive_directory_iterator(tilesDir);
+            d != fs::recursive_directory_iterator();
+            ++d ){
+        fs::path dir = d->path();
+        if (fs::is_directory(dir)){
+            if (io::Path(dir).getModifiedTime() < threshold){
+                if (fs::remove_all(dir)) LOGD << "Cleaned " << dir.string();
+                else LOGD << "Cannot clean " << dir.string();
+            }
+        }
+    }
 }
 
 void TilerHelper::runTiler(Tiler &tiler, std::ostream &output, const std::string &format, const std::string &zRange, const std::string &x, const std::string &y){
@@ -407,7 +446,7 @@ void Tiler::rescale(GDALRasterBandH hBand, char *buffer, size_t bufsize){
     T *ptr = reinterpret_cast<T *>(buffer);
 
     for (size_t i = 0; i < bufsize; i++){
-        ptr[i] = ((ptr[i] - minmax[0]) / deltamm) * 255.0;
+        ptr[i] = static_cast<T>(((ptr[i] - minmax[0]) / deltamm) * 255.0);
     }
 }
 

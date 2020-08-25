@@ -38,6 +38,17 @@ const ddb = {
         }
     },
 
+    tile: {
+        getFromUserCache: async function(geotiffPath, tz, tx, ty, options = {}){
+            return new Promise((resolve, reject) => {
+                n._tile_getFromUserCache(geotiffPath, tz, tx, ty, options, (err, result) => {
+                    if (err) reject(err);
+                    else resolve(result);
+                });
+            });
+        }
+    },
+
     parseFiles: async function(files, options = {}){
         return new Promise((resolve, reject) => {
             if (typeof files === "string") files = [files];

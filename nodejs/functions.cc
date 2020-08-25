@@ -7,6 +7,7 @@
 #include "info.h"
 #include "thumbs.h"
 #include "entry.h"
+#include "tiler.h"
 
 NAN_METHOD(getVersion) {
     info.GetReturnValue().Set(Nan::New(ddb::getVersion()).ToLocalChecked());
@@ -204,72 +205,102 @@ NAN_METHOD(_thumbs_getFromUserCache) {
     Nan::AsyncQueueWorker(new GetThumbFromUserCacheWorker(callback, imagePath, modifiedTime, thumbSize, forceRecreate));
 }
 
-// NAN_METHOD(aBoolean) {
-//     info.GetReturnValue().Set(false);
-// }
+//(const fs::path &geotiffPath, int tz, int tx, int ty, int tileSize, bool tms, bool forceRecreate)
+class GetTileFromUserCacheWorker : public Nan::AsyncWorker {
+ public:
+  GetTileFromUserCacheWorker(Nan::Callback *callback, const fs::path &geotiffPath, int tz, int tx, int ty, int tileSize, bool tms, bool forceRecreate)
+    : AsyncWorker(callback, "nan:GetTileFromUserCacheWorker"),
+      geotiffPath(geotiffPath), tz(tz), tx(tx), ty(ty), tileSize(tileSize), tms(tms), forceRecreate(forceRecreate) {}
+  ~GetTileFromUserCacheWorker() {}
 
-// NAN_METHOD(aNumber) {
-//     info.GetReturnValue().Set(1.75);
-// }
+  void Execute () {
+    try{
+        tilePath = ddb::TilerHelper::getFromUserCache(geotiffPath, tz, tx, ty, tileSize, tms, forceRecreate);
+    }catch(ddb::AppException &e){
+        SetErrorMessage(e.what());
+    }
+  }
 
-// NAN_METHOD(anObject) {
-//     v8::Local<v8::Object> obj = Nan::New<v8::Object>();
-//     Nan::Set(obj, Nan::New("key").ToLocalChecked(), Nan::New("value").ToLocalChecked());
-//     info.GetReturnValue().Set(obj);
-// }
-// NAN_METHOD(callback) {
-//     v8::Local<v8::Function> callbackHandle = info[0].As<v8::Function>();
-//     Nan::AsyncResource* resource = new Nan::AsyncResource(Nan::New<v8::String>("MyObject:CallCallback").ToLocalChecked());
-//     resource->runInAsyncScope(Nan::GetCurrentContext()->Global(), callbackHandle, 0, 0);
-// }
+  void HandleOKCallback () {
+     Nan::HandleScope scope;
 
-// NAN_METHOD(callbackWithParameter) {
-//     v8::Local<v8::Function> callbackHandle = info[0].As<v8::Function>();
-//     Nan::AsyncResource* resource = new Nan::AsyncResource(Nan::New<v8::String>("MyObject:CallCallbackWithParam").ToLocalChecked());
-//     int argc = 1;
-//     v8::Local<v8::Value> argv[] = {
-//         Nan::New("parameter test").ToLocalChecked()
-//     };
-//     resource->runInAsyncScope(Nan::GetCurrentContext()->Global(), callbackHandle, argc, argv);
-// }
+     v8::Local<v8::Value> argv[] = {
+         Nan::Null(),
+         Nan::New(tilePath.string()).ToLocalChecked()
+     };
+     callback->Call(2, argv, async_resource);
+   }
 
-// // Wrapper Impl
+ private:
+    fs::path geotiffPath;
+    int tx, ty, tz;
+    int tileSize;
+    bool tms;
+    bool forceRecreate;
 
-// Nan::Persistent<v8::Function> MyObject::constructor;
+    fs::path tilePath;
+};
 
-// NAN_MODULE_INIT(MyObject::Init) {
-//   v8::Local<v8::FunctionTemplate> tpl = Nan::New<v8::FunctionTemplate>(New);
-//   tpl->SetClassName(Nan::New("MyObject").ToLocalChecked());
-//   tpl->InstanceTemplate()->SetInternalFieldCount(1);
 
-//   Nan::SetPrototypeMethod(tpl, "plusOne", PlusOne);
+NAN_METHOD(_tile_getFromUserCache) {
+    if (info.Length() != 6){
+        Nan::ThrowError("Invalid number of arguments");
+        return;
+    }
+    if (!info[0]->IsString()){
+        Nan::ThrowError("Argument 0 must be a string");
+        return;
+    }
+    if (!info[1]->IsNumber()){
+        Nan::ThrowError("Argument 1 must be a number");
+        return;
+    }
+    if (!info[2]->IsNumber()){
+        Nan::ThrowError("Argument 2 must be a number");
+        return;
+    }
+    if (!info[3]->IsNumber()){
+        Nan::ThrowError("Argument 3 must be a number");
+        return;
+    }
+    if (!info[4]->IsObject()){
+        Nan::ThrowError("Argument 4 must be an object");
+        return;
+    }
+    if (!info[5]->IsFunction()){
+        Nan::ThrowError("Argument 5 must be a function");
+        return;
+    }
 
-//   constructor.Reset(Nan::GetFunction(tpl).ToLocalChecked());
-//   Nan::Set(target, Nan::New("MyObject").ToLocalChecked(), Nan::GetFunction(tpl).ToLocalChecked());
-// }
+    // Parse args
+    fs::path geotiffPath = fs::path(*Nan::Utf8String(info[0].As<v8::String>()));
+    int tz = Nan::To<time_t>(info[1].As<v8::Uint32>()).FromJust();
+    int tx = Nan::To<time_t>(info[2].As<v8::Uint32>()).FromJust();
+    int ty = Nan::To<time_t>(info[3].As<v8::Uint32>()).FromJust();
+    
+    // Parse options
+    v8::Local<v8::String> k = Nan::New<v8::String>("tileSize").ToLocalChecked();
+    v8::Local<v8::Object> obj = info[4].As<v8::Object>();
+    int tileSize = 256;
 
-// MyObject::MyObject(double value) : value_(value) {
-// }
+    if (Nan::HasRealNamedProperty(obj, k).FromJust()){
+        tileSize = Nan::To<time_t>(Nan::GetRealNamedProperty(obj, k).ToLocalChecked()).FromJust();
+    }
 
-// MyObject::~MyObject() {
-// }
+    bool tms = false;
+    k = Nan::New<v8::String>("tms").ToLocalChecked();
+    if (Nan::HasRealNamedProperty(obj, k).FromJust()){
+        tms = Nan::To<bool>(Nan::GetRealNamedProperty(obj, k).ToLocalChecked()).FromJust();
+    }
 
-// NAN_METHOD(MyObject::New) {
-//   if (info.IsConstructCall()) {
-//     double value = info[0]->IsUndefined() ? 0 : Nan::To<double>(info[0]).FromJust();
-//     MyObject *obj = new MyObject(value);
-//     obj->Wrap(info.This());
-//     info.GetReturnValue().Set(info.This());
-//   } else {
-//     const int argc = 1;
-//     v8::Local<v8::Value> argv[argc] = {info[0]};
-//     v8::Local<v8::Function> cons = Nan::New(constructor);
-//     info.GetReturnValue().Set(Nan::NewInstance(cons, argc, argv).ToLocalChecked());
-//   }
-// }
+    bool forceRecreate = false;
+    k = Nan::New<v8::String>("forceRecreate").ToLocalChecked();
+    if (Nan::HasRealNamedProperty(obj, k).FromJust()){
+        forceRecreate = Nan::To<bool>(Nan::GetRealNamedProperty(obj, k).ToLocalChecked()).FromJust();
+    }
 
-// NAN_METHOD(MyObject::PlusOne) {
-//   MyObject* obj = Nan::ObjectWrap::Unwrap<MyObject>(info.This());
-//   obj->value_ += 1;
-//   info.GetReturnValue().Set(obj->value_);
-// }
+    // Execute
+    Nan::Callback *callback = new Nan::Callback(Nan::To<v8::Function>(info[5]).ToLocalChecked());
+    Nan::AsyncQueueWorker(new GetTileFromUserCacheWorker(callback, geotiffPath, tz, tx, ty, tileSize, tms, forceRecreate));
+}
+

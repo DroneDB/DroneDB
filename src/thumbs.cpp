@@ -17,7 +17,7 @@
 namespace ddb{
 
 fs::path getThumbFromUserCache(const fs::path &imagePath, time_t modifiedTime, int thumbSize, bool forceRecreate){
-    if (std::rand() % 100 == 0) cleanupThumbsUserCache();
+    if (std::rand() % 1000 == 0) cleanupThumbsUserCache();
 
     fs::path outdir = UserProfile::get()->getThumbsDir(thumbSize);
     fs::path thumbPath = outdir / getThumbFilename(imagePath, modifiedTime, thumbSize);
@@ -130,6 +130,7 @@ void cleanupThumbsUserCache(){
 
     time_t threshold = utils::currentUnixTimestamp() - 60 * 60 * 24 * 5; // 5 days
     fs::path thumbsDir = UserProfile::get()->getThumbsDir();
+    std::vector<fs::path> cleanupDirs;
 
     // Iterate size directories
     for(auto sd = fs::recursive_directory_iterator(thumbsDir);
@@ -149,10 +150,14 @@ void cleanupThumbsUserCache(){
 
             if (fs::is_empty(sizeDir)){
                 // Remove directory too
-                if (fs::remove(sizeDir)) LOGD << "Cleaned " << sizeDir.string();
-                else LOGD << "Cannot clean " << sizeDir.string();
+                cleanupDirs.push_back(sizeDir);
             }
         }
+    }
+
+    for (auto &d : cleanupDirs){
+        if (fs::remove(d)) LOGD << "Cleaned " << d.string();
+        else LOGD << "Cannot clean " << d.string();
     }
 }
 
