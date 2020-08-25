@@ -122,7 +122,8 @@ Geographic2D fromUTM(double x, double y, const UTMZone &zone) {
     }
 }
 
-void Projected2D::rotate(const Projected2D &center, double degrees) {
+template <typename T>
+void Projected2D_t<T>::rotate(const Projected2D_t &center, T degrees) {
     double px = this->x;
     double py = this->y;
     double radians = utils::deg2rad(degrees);
@@ -130,7 +131,8 @@ void Projected2D::rotate(const Projected2D &center, double degrees) {
     y = sin(radians) * (px - center.x) + cos(radians) * (py - center.y) + center.y;
 }
 
-void Projected2D::transform(double *affine){
+template <typename T>
+void Projected2D_t<T>::transform(T *affine){
      x = affine[0] + x*affine[1] + y*affine[2];
      y = affine[3] + x*affine[4] + y*affine[5];
 }
