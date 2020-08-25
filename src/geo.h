@@ -27,8 +27,18 @@ struct Projected2D_t{
     DDB_DLL Projected2D_t() : x(0.0), y(0.0) {};
     DDB_DLL Projected2D_t(T x, T y) : x(x), y(y) {};
 
-    DDB_DLL void rotate(const Projected2D_t &center, T degrees);
-    DDB_DLL void transform(T *affine);
+    DDB_DLL void rotate(const Projected2D_t &center, double degrees){
+        double px = this->x;
+        double py = this->y;
+        double radians = utils::deg2rad(degrees);
+        x = cos(radians) * (px - center.x) - sin(radians) * (py - center.y) + center.x;
+        y = sin(radians) * (px - center.x) + cos(radians) * (py - center.y) + center.y;
+    }
+
+    DDB_DLL void transform(double *affine){
+        x = static_cast<T>(affine[0] + x*affine[1] + y*affine[2]);
+        y = static_cast<T>(affine[3] + x*affine[4] + y*affine[5]);
+    }
 };
 typedef Projected2D_t<double> Projected2D;
 typedef Projected2D_t<double> Point2D;
