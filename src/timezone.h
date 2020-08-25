@@ -6,15 +6,16 @@
 
 #include "cctz/time_zone.h"
 #include "../vendor/zonedetect/zonedetect.h"
+#include "ddb_export.h"
 
 class Timezone{
 public:
     static bool initialized;
     static ZoneDetect *db;
 
-    static void init();
-    static cctz::time_zone lookupTimezone(double latitude, double longitude);
-    static double getUTCEpoch(int year, int month, int day, int hour, int minute, int second, double msecs, const cctz::time_zone &tz);
+    DDB_DLL static void init();
+    DDB_DLL static cctz::time_zone lookupTimezone(double latitude, double longitude);
+    DDB_DLL static double getUTCEpoch(int year, int month, int day, int hour, int minute, int second, double msecs, const cctz::time_zone &tz);
 };
 
 #endif // TIMEZONE_H

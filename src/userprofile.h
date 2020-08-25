@@ -8,23 +8,24 @@
 #include "fs.h"
 #include "logger.h"
 #include "authmanager.h"
+#include "ddb_export.h"
 
 namespace ddb{
 
 class UserProfile{
 public:
-    static UserProfile* get();
+    DDB_DLL static UserProfile* get();
 
-    fs::path getHomeDir();
-    fs::path getProfileDir();
-    fs::path getProfilePath(const fs::path &p, bool createIfNeeded);
-    fs::path getThumbsDir();
-    fs::path getThumbsDir(int thumbSize);
-    fs::path getTilesDir();
+    DDB_DLL fs::path getHomeDir();
+    DDB_DLL fs::path getProfileDir();
+    DDB_DLL fs::path getProfilePath(const fs::path &p, bool createIfNeeded);
+    DDB_DLL fs::path getThumbsDir();
+    DDB_DLL fs::path getThumbsDir(int thumbSize);
+    DDB_DLL fs::path getTilesDir();
 
-    fs::path getAuthFile();
+    DDB_DLL fs::path getAuthFile();
 
-    AuthManager *getAuthManager();
+    DDB_DLL AuthManager *getAuthManager();
 private:
     UserProfile();
 

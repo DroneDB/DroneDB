@@ -17,6 +17,7 @@
 #include "geo.h"
 #include "json.h"
 #include "fs.h"
+#include "ddb_export.h"
 
 namespace ddb {
 
@@ -32,9 +33,9 @@ struct Entry {
     BasicPointGeometry point_geom;
     BasicPolygonGeometry polygon_geom;
 
-    void toJSON(json &j);
-    bool toGeoJSON(json &j, BasicGeometryType type = BasicGeometryType::BGAuto);
-    std::string toString();
+    DDB_DLL void toJSON(json &j);
+    DDB_DLL bool toGeoJSON(json &j, BasicGeometryType type = BasicGeometryType::BGAuto);
+    DDB_DLL std::string toString();
 };
 
 struct ParseEntryOpts{
@@ -42,9 +43,9 @@ struct ParseEntryOpts{
     bool stopOnError = true;
 };
 
-bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entry, ParseEntryOpts &opts);
-Geographic2D getRasterCoordinate(OGRCoordinateTransformationH hTransform, double *geotransform, double x, double y);
-void calculateFootprint(const SensorSize &sensorSize, const GeoLocation &geo, const Focal &focal, const CameraOrientation &cameraOri, double relAltitude, BasicGeometry &geom);
+DDB_DLL bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entry, ParseEntryOpts &opts);
+DDB_DLL Geographic2D getRasterCoordinate(OGRCoordinateTransformationH hTransform, double *geotransform, double x, double y);
+DDB_DLL void calculateFootprint(const SensorSize &sensorSize, const GeoLocation &geo, const Focal &focal, const CameraOrientation &cameraOri, double relAltitude, BasicGeometry &geom);
 
 }
 

@@ -7,6 +7,7 @@
 #include <curl/curl.h>
 #include <string>
 #include "json.h"
+#include "ddb_export.h"
 
 namespace ddb::net{
 
@@ -16,18 +17,18 @@ class Response{
     char *buf;
     size_t bufSize;
 public:
-    Response();
-    Response(Response&& other) noexcept;
-    Response& operator=(Response&& other) noexcept;
-    ~Response();
+    DDB_DLL Response();
+    DDB_DLL Response(Response&& other) noexcept;
+    DDB_DLL Response& operator=(Response&& other) noexcept;
+    DDB_DLL ~Response();
 
-    char* getData();
-    bool hasData();
-    json getJSON();
-    long status();
+    DDB_DLL char* getData();
+    DDB_DLL bool hasData();
+    DDB_DLL json getJSON();
+    DDB_DLL long status();
 
     // Use by curl to write result into memory
-    static size_t WriteCallback(void *contents, size_t size, size_t nmemb, void *userp);
+    DDB_DLL static size_t WriteCallback(void *contents, size_t size, size_t nmemb, void *userp);
 
     friend class Request;
 };

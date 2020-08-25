@@ -19,6 +19,7 @@
 #include "exceptions.h"
 #include "logger.h"
 #include "fs.h"
+#include "ddb_export.h"
 
 #ifndef M_PI
     #define M_PI 3.1415926535
@@ -104,10 +105,10 @@ std::string to_str(const T value, const int n = 6)
     return out.str();
 }
 
-std::string getPrompt(const std::string &prompt = "");
+DDB_DLL std::string getPrompt(const std::string &prompt = "");
 
 // Cross-platform getpass
-std::string getPass(const std::string &prompt = "Password: ");
+DDB_DLL std::string getPass(const std::string &prompt = "Password: ");
 
 time_t currentUnixTimestamp();
 

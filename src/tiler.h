@@ -11,6 +11,7 @@
 #include <string>
 #include "geo.h"
 #include "fs.h"
+#include "ddb_export.h"
 
 namespace ddb{
 
@@ -29,19 +30,19 @@ public:
     BoundingBox<Projected2D> tileBounds(int tx, int ty, int zoom) const;
 
     // Converts XY point from Spherical Mercator EPSG:3857 to lat/lon in WGS84 Datum
-    Geographic2D metersToLatLon(int mx, int my) const;
+    Geographic2D metersToLatLon(double mx, double my) const;
 
     // Tile for given mercator coordinates
-    Projected2D metersToTile(int mx, int my, int zoom) const;
+    Projected2Di metersToTile(double mx, double my, int zoom) const;
 
     // Converts pixel coordinates in given zoom level of pyramid to EPSG:3857"
     Projected2D pixelsToMeters(int px, int py, int zoom) const;
 
     // Converts EPSG:3857 to pyramid pixel coordinates in given zoom level
-    Projected2D metersToPixels(int mx, int my, int zoom) const;
+    Projected2D metersToPixels(double mx, double my, int zoom) const;
 
     // Tile covering region in given pixel coordinates
-    Projected2D pixelsToTile(int px, int py) const;
+    Projected2Di pixelsToTile(double px, double py) const;
 
     // Resolution (meters/pixel) for given zoom level (measured at Equator)
     double resolution(int zoom) const;
@@ -107,21 +108,21 @@ class Tiler{
     template <typename T>
     void rescale(GDALRasterBandH hBand, char *buffer, size_t bufsize);
 public:
-    Tiler(const std::string &geotiffPath, const std::string &outputFolder,
+    DDB_DLL Tiler(const std::string &geotiffPath, const std::string &outputFolder,
           int tileSize = 256,
           bool tms = false);
-    ~Tiler();
+    DDB_DLL ~Tiler();
 
-    std::string getTilePath(int z, int x, int y, bool createIfNotExists);
+    DDB_DLL std::string getTilePath(int z, int x, int y, bool createIfNotExists);
 
-    std::string tile(int tz, int tx, int ty);
-    std::string tile(const TileInfo &tile);
+    DDB_DLL std::string tile(int tz, int tx, int ty);
+    DDB_DLL std::string tile(const TileInfo &tile);
 
-    std::vector<TileInfo> getTilesForZoomLevel(int tz) const;
-    BoundingBox<int> getMinMaxZ() const;
+    DDB_DLL std::vector<TileInfo> getTilesForZoomLevel(int tz) const;
+    DDB_DLL BoundingBox<int> getMinMaxZ() const;
 
     // Min max tile coordinates for specified zoom level
-    BoundingBox<Projected2D> getMinMaxCoordsForZ(int tz) const;
+    DDB_DLL BoundingBox<Projected2Di> getMinMaxCoordsForZ(int tz) const;
 
 };
 
@@ -134,12 +135,12 @@ class TilerHelper{
     static fs::path getCacheFolderName(const fs::path &geotiffPath, time_t modifiedTime, int tileSize);
 
 public:
-    static void runTiler(Tiler &tiler, std::ostream &output = std::cout, const std::string &format = "text", const std::string &zRange = "auto", const std::string &x = "auto", const std::string &y = "auto");
+    DDB_DLL static void runTiler(Tiler &tiler, std::ostream &output = std::cout, const std::string &format = "text", const std::string &zRange = "auto", const std::string &x = "auto", const std::string &y = "auto");
 
     // Get a single tile from user cache
-    static fs::path getFromUserCache(const fs::path &geotiffPath, int tz, int tx, int ty, int tileSize, bool tms, bool forceRecreate);
+    DDB_DLL static fs::path getFromUserCache(const fs::path &geotiffPath, int tz, int tx, int ty, int tileSize, bool tms, bool forceRecreate);
 
-    static void cleanupUserCache();
+    DDB_DLL static void cleanupUserCache();
 };
 
 }

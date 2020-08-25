@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include "fs.h"
+#include "ddb_export.h"
 
 #ifdef WIN32
 #define stat _stat
@@ -23,36 +24,36 @@ class Path{
     fs::path p;
 
 public:
-    Path(const fs::path &p) : p(p) {}
+    DDB_DLL Path(const fs::path &p) : p(p) {}
 
     // Compares an extension with a list of extension strings
     // @return true if the extension matches one of those in the list
-    bool checkExtension(const std::initializer_list<std::string>& matches);
+    DDB_DLL bool checkExtension(const std::initializer_list<std::string>& matches);
 
-    time_t getModifiedTime();
-    std::uintmax_t getSize();
-    bool hasChildren(const std::vector<std::string> &childPaths);
-    bool isParentOf(const fs::path &childPath);
-    int depth();
+    DDB_DLL time_t getModifiedTime();
+    DDB_DLL std::uintmax_t getSize();
+    DDB_DLL bool hasChildren(const std::vector<std::string> &childPaths);
+    DDB_DLL bool isParentOf(const fs::path &childPath);
+    DDB_DLL int depth();
 
     // Computes a relative path to parent
     // Taking care of edge cases between platforms
     // and canonicalizing the path
-    Path relativeTo(const fs::path &parent);
+    DDB_DLL Path relativeTo(const fs::path &parent);
 
     // Cross-platform path.generic_string()
-    std::string generic() const;
+    DDB_DLL std::string generic() const;
 
-    std::string string() const;
-    fs::path get() const{ return p; }
+    DDB_DLL std::string string() const;
+    DDB_DLL fs::path get() const{ return p; }
 };
 
-fs::path getExeFolderPath();
-fs::path getDataPath(const fs::path &p);
-fs::path getCwd();
+DDB_DLL fs::path getExeFolderPath();
+DDB_DLL fs::path getDataPath(const fs::path &p);
+DDB_DLL fs::path getCwd();
 
 // Prints to the provided buffer a nice number of bytes (KB, MB, GB, etc)
-std::string bytesToHuman(std::uintmax_t bytes);
+DDB_DLL std::string bytesToHuman(std::uintmax_t bytes);
 
 }
 }
