@@ -60,7 +60,6 @@ time_t Path::getModifiedTime() {
 std::uintmax_t Path::getSize() {
 #ifdef WIN32
     HANDLE hFile;
-    FILETIME ftModified;
     hFile = CreateFile(p.string().c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_BACKUP_SEMANTICS, NULL);
     if (hFile == INVALID_HANDLE_VALUE) {
         throw FSException("Cannot stat size (open) " + p.string());
@@ -226,7 +225,7 @@ std::string bytesToHuman(std::uintmax_t bytes){
     suffixes[6] = "EB";
     std::uintmax_t s = 0;
 
-    double count = bytes;
+    std::uintmax_t count = bytes;
 
     while (count >= 1024 && s < 7){
         s++;
