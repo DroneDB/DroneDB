@@ -4,7 +4,7 @@
 
 #include <iostream>
 #include "remove.h"
-#include "ddb.h"
+#include "dbops.h"
 
 
 namespace cmd {

@@ -4,13 +4,14 @@
 #include <sstream>
 #include "functions.h"
 #include "ddb.h"
+#include "dbops.h"
 #include "info.h"
 #include "thumbs.h"
 #include "entry.h"
 #include "tiler.h"
 
 NAN_METHOD(getVersion) {
-    info.GetReturnValue().Set(Nan::New(ddb::getVersion()).ToLocalChecked());
+    info.GetReturnValue().Set(Nan::New(DDBGetVersion()).ToLocalChecked());
 }
 
 NAN_METHOD(typeToHuman) {

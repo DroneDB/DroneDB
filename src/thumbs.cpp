@@ -11,7 +11,7 @@
 #include "hash.h"
 #include "utils.h"
 #include "userprofile.h"
-#include "ddb.h"
+#include "dbops.h"
 #include "mio.h"
 
 namespace ddb{

@@ -4,32 +4,37 @@
 #ifndef DDB_H
 #define DDB_H
 
-#include "database.h"
-#include "statement.h"
-#include "entry.h"
-#include "fs.h"
-#include "ddb_export.h"
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-namespace ddb {
-
-DDB_DLL void initialize(bool verbose = false);
-DDB_DLL std::string getVersion();
-DDB_DLL std::string create(const std::string &directory);
-DDB_DLL std::unique_ptr<Database> open(const std::string &directory, bool traverseUp);
-DDB_DLL fs::path rootDirectory(Database *db);
-DDB_DLL std::vector<fs::path> getIndexPathList(fs::path rootDirectory, const std::vector<std::string> &paths, bool includeDirs);
-DDB_DLL std::vector<fs::path> getPathList(const std::vector<std::string> &paths, bool includeDirs, int maxDepth);
-DDB_DLL std::vector<std::string> expandPathList(const std::vector<std::string> &paths, bool recursive, int maxRecursionDepth);
-
-DDB_DLL bool checkUpdate(Entry &e, const fs::path &p, long long dbMtime, const std::string &dbHash);
-DDB_DLL void doUpdate(Statement *updateQ, const Entry &e);
-
-DDB_DLL void addToIndex(Database *db, const std::vector<std::string> &paths);
-DDB_DLL void removeFromIndex(Database *db, const std::vector<std::string> &paths);
-DDB_DLL void syncIndex(Database *db);
-
-
+typedef enum DDBErr {
+    DDBERR_NONE = 0, // No error
+    DDBERR_GENERIC = 1 // Generic app exception
 }
 
+extern char ddbLastError[255];
+
+/** Get the last error message
+ * @return last error message */
+DDB_DLL const char* DDBGetLastError();
+void DDBSetLastError(const char *err);
+
+/** This must be called as the very first function
+ * of every DDB process/program
+ * @param verbose whether the program should output log messages to stdout */
+DDB_DLL void DDBRegisterProcess(int verbose = 0);
+
+/** Get library version */
+DDB_DLL const char* DDBGetVersion();
+
+/** Initialize a DroneDB database
+ * @param directory Path to directory where to initialize the database
+ * @return */
+DDB_DLL DDBErr *DDBInit(const char *directory, char **outPath = NULL);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // DDB_H

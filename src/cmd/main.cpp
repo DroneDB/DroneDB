@@ -10,6 +10,7 @@
 #include "database.h"
 #include "exif.h"
 #include "ddb.h"
+#include "dbops.h"
 #include "mio.h"
 #include <gdal_priv.h>
 
@@ -17,7 +18,7 @@ using namespace std;
 using namespace ddb;
 
 [[ noreturn ]] void printHelp(char *argv[]) {
-    std::cout << "DroneDB v" << ddb::getVersion() << " - Effortless aerial data management and sharing" << std::endl <<
+    std::cout << "DroneDB v" << DDBGetVersion() << " - Effortless aerial data management and sharing" << std::endl <<
               "Usage:" << std::endl <<
               "	" << argv[0] << " <command> [args] [PATHS]" << std::endl << std::endl <<
               "Commands:" << std::endl;
@@ -42,9 +43,9 @@ bool hasParam(int argc, char *argv[], const char* param) {
 
 int main(int argc, char* argv[]) {
     memcpy(argv[0], "ddb\0", 4);
-    ddb::initialize(hasParam(argc, argv, "--debug"));
+    DDBRegisterProcess(hasParam(argc, argv, "--debug") ? 1 : 0);
 
-    LOGV << "DDB v" << ddb::getVersion();
+    LOGV << "DDB v" << DDBGetVersion();
     LOGV << "SQLite version: " << sqlite3_libversion();
     LOGV << "SpatiaLite version: " << spatialite_version();
     LOGV << "GDAL version: " << GDALVersionInfo("RELEASE_NAME");
@@ -58,7 +59,7 @@ int main(int argc, char* argv[]) {
         }
 
         if (hasParam(argc, argv, "--version")) {
-            std::cout << ddb::getVersion() << std::endl;
+            std::cout << DDBGetVersion() << std::endl;
             exit(0);
         } else {
             auto aliasIter = cmd::aliases.find(cmdKey);

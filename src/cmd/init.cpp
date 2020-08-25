@@ -5,7 +5,7 @@
 #include <iostream>
 #include "fs.h"
 #include "init.h"
-#include "ddb.h"
+#include "dbops.h"
 
 namespace cmd {
 

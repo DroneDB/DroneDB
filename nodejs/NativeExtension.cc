@@ -16,7 +16,7 @@ NAN_MODULE_INIT(InitAll) {
 	NAN_EXPORT(target, _thumbs_getFromUserCache);
     NAN_EXPORT(target, _tile_getFromUserCache);
 
-	ddb::initialize(false);
+	DDBRegisterProcess();
 }
 
 NODE_MODULE(ddb, InitAll)
