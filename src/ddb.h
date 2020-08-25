@@ -8,24 +8,25 @@
 #include "statement.h"
 #include "entry.h"
 #include "fs.h"
+#include "ddb_export.h"
 
 namespace ddb {
 
-void initialize(bool verbose = false);
-std::string getVersion();
-std::string create(const std::string &directory);
-std::unique_ptr<Database> open(const std::string &directory, bool traverseUp);
-fs::path rootDirectory(Database *db);
-std::vector<fs::path> getIndexPathList(fs::path rootDirectory, const std::vector<std::string> &paths, bool includeDirs);
-std::vector<fs::path> getPathList(const std::vector<std::string> &paths, bool includeDirs, int maxDepth);
-std::vector<std::string> expandPathList(const std::vector<std::string> &paths, bool recursive, int maxRecursionDepth);
+DDB_DLL void initialize(bool verbose = false);
+DDB_DLL std::string getVersion();
+DDB_DLL std::string create(const std::string &directory);
+DDB_DLL std::unique_ptr<Database> open(const std::string &directory, bool traverseUp);
+DDB_DLL fs::path rootDirectory(Database *db);
+DDB_DLL std::vector<fs::path> getIndexPathList(fs::path rootDirectory, const std::vector<std::string> &paths, bool includeDirs);
+DDB_DLL std::vector<fs::path> getPathList(const std::vector<std::string> &paths, bool includeDirs, int maxDepth);
+DDB_DLL std::vector<std::string> expandPathList(const std::vector<std::string> &paths, bool recursive, int maxRecursionDepth);
 
-bool checkUpdate(Entry &e, const fs::path &p, long long dbMtime, const std::string &dbHash);
-void doUpdate(Statement *updateQ, const Entry &e);
+DDB_DLL bool checkUpdate(Entry &e, const fs::path &p, long long dbMtime, const std::string &dbHash);
+DDB_DLL void doUpdate(Statement *updateQ, const Entry &e);
 
-void addToIndex(Database *db, const std::vector<std::string> &paths);
-void removeFromIndex(Database *db, const std::vector<std::string> &paths);
-void syncIndex(Database *db);
+DDB_DLL void addToIndex(Database *db, const std::vector<std::string> &paths);
+DDB_DLL void removeFromIndex(Database *db, const std::vector<std::string> &paths);
+DDB_DLL void syncIndex(Database *db);
 
 
 }

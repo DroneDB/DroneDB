@@ -8,27 +8,28 @@
 #include <stdio.h>
 #include "utils.h"
 #include "sensor_data.h"
+#include "ddb_export.h"
 
 namespace ddb {
 
 struct ImageSize {
     int width;
     int height;
-    ImageSize(int width, int height) : width(width), height(height) {};
+    DDB_DLL ImageSize(int width, int height) : width(width), height(height) {};
 };
 
 struct Focal {
     double length; // in mm
     double length35; // in 35mm film equivalent
-    Focal() : length(0), length35(0) {};
-    Focal(double length, double length35) : length(length), length35(length35) {};
+    DDB_DLL Focal() : length(0), length35(0) {};
+    DDB_DLL Focal(double length, double length35) : length(length), length35(length35) {};
 };
 
 struct SensorSize {
     double width; // mm
     double height; // mm
-    SensorSize() : width(0), height(0) {};
-    SensorSize(double width, double height) : width(width), height(height) {};
+    DDB_DLL SensorSize() : width(0), height(0) {};
+    DDB_DLL SensorSize(double width, double height) : width(width), height(height) {};
 };
 
 struct GeoLocation {
@@ -36,8 +37,8 @@ struct GeoLocation {
     double longitude;
     double altitude;
 
-    GeoLocation() : latitude(0), longitude(0), altitude(0) {}
-    GeoLocation(double latitude, double longitude, double altitude) : latitude(latitude), longitude(longitude), altitude(altitude) {};
+    DDB_DLL GeoLocation() : latitude(0), longitude(0), altitude(0) {}
+    DDB_DLL GeoLocation(double latitude, double longitude, double altitude) : latitude(latitude), longitude(longitude), altitude(altitude) {};
 };
 
 struct CameraOrientation {
@@ -45,8 +46,8 @@ struct CameraOrientation {
     double yaw; // degress. 0 = magnetic north, 90 = east, -90 = west, 180 = south
     double roll; // degrees. 20 = left roll, -20 = right roll
 
-    CameraOrientation() : pitch(0), yaw(0), roll(0) {};
-    CameraOrientation(double pitch, double yaw, double roll) : pitch(pitch), yaw(yaw), roll(roll) {};
+    DDB_DLL CameraOrientation() : pitch(0), yaw(0), roll(0) {};
+    DDB_DLL CameraOrientation(double pitch, double yaw, double roll) : pitch(pitch), yaw(yaw), roll(roll) {};
 };
 inline std::ostream& operator<<(std::ostream& os, const CameraOrientation& c)
 {
@@ -60,36 +61,36 @@ class ExifParser {
     Exiv2::ExifData exifData;
     Exiv2::XmpData xmpData;
   public:
-    ExifParser(const Exiv2::Image *image) : exifData(image->exifData()), xmpData(image->xmpData()) {};
-    ExifParser(const Exiv2::ExifData &exifData, const Exiv2::XmpData &xmpData) : exifData(exifData), xmpData(xmpData) {};
+    DDB_DLL ExifParser(const Exiv2::Image *image) : exifData(image->exifData()), xmpData(image->xmpData()) {};
+    DDB_DLL ExifParser(const Exiv2::ExifData &exifData, const Exiv2::XmpData &xmpData) : exifData(exifData), xmpData(xmpData) {};
 
-    Exiv2::ExifData::const_iterator findExifKey(const std::string &key);
-    Exiv2::ExifData::const_iterator findExifKey(const std::initializer_list<std::string>& keys);
-    Exiv2::XmpData::const_iterator findXmpKey(const std::string &key);
-    Exiv2::XmpData::const_iterator findXmpKey(const std::initializer_list<std::string>& keys);
+    DDB_DLL Exiv2::ExifData::const_iterator findExifKey(const std::string &key);
+    DDB_DLL Exiv2::ExifData::const_iterator findExifKey(const std::initializer_list<std::string>& keys);
+    DDB_DLL Exiv2::XmpData::const_iterator findXmpKey(const std::string &key);
+    DDB_DLL Exiv2::XmpData::const_iterator findXmpKey(const std::initializer_list<std::string>& keys);
 
-    ImageSize extractImageSize();
-    std::string extractMake();
-    std::string extractModel();
-    std::string extractSensor();
-    bool computeFocal(Focal &f);
-    bool extractSensorSize(SensorSize &r);
-    inline double getMmPerUnit(long resolutionUnit);
+    DDB_DLL ImageSize extractImageSize();
+    DDB_DLL std::string extractMake();
+    DDB_DLL std::string extractModel();
+    DDB_DLL std::string extractSensor();
+    DDB_DLL bool computeFocal(Focal &f);
+    DDB_DLL bool extractSensorSize(SensorSize &r);
+    DDB_DLL inline double getMmPerUnit(long resolutionUnit);
 
-    bool extractGeo(GeoLocation &geo);
-    bool extractRelAltitude(double &relAltitude);
-    inline double geoToDecimal(const Exiv2::ExifData::const_iterator &geoTag, const Exiv2::ExifData::const_iterator &geoRefTag);
-    inline double evalFrac(const Exiv2::Rational &rational);
+    DDB_DLL  bool extractGeo(GeoLocation &geo);
+    DDB_DLL bool extractRelAltitude(double &relAltitude);
+    DDB_DLL inline double geoToDecimal(const Exiv2::ExifData::const_iterator &geoTag, const Exiv2::ExifData::const_iterator &geoRefTag);
+    DDB_DLL inline double evalFrac(const Exiv2::Rational &rational);
 
-    double extractCaptureTime();
-    int extractImageOrientation();
+    DDB_DLL double extractCaptureTime();
+    DDB_DLL int extractImageOrientation();
 
-    bool extractCameraOrientation(CameraOrientation &cameraOri);
+    DDB_DLL bool extractCameraOrientation(CameraOrientation &cameraOri);
 
-    void printAllTags();
+    DDB_DLL void printAllTags();
 
-    bool hasExif();
-    bool hasXmp();
+    DDB_DLL bool hasExif();
+    DDB_DLL bool hasXmp();
 };
 
 }

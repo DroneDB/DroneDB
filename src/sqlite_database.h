@@ -15,6 +15,7 @@
 
 #include "statement.h"
 #include "fs.h"
+#include "ddb_export.h"
 
 namespace ddb{
 
@@ -22,17 +23,17 @@ class SqliteDatabase {
     sqlite3 *db;
     std::string openFile;
   public:
-    SqliteDatabase();
-    SqliteDatabase &open(const std::string &file);
-    SqliteDatabase &close();
-    SqliteDatabase &exec(const std::string &sql);
-    bool tableExists(const std::string &table);
-    std::string getOpenFile();
-    int changes();
+    DDB_DLL SqliteDatabase();
+    DDB_DLL SqliteDatabase &open(const std::string &file);
+    DDB_DLL SqliteDatabase &close();
+    DDB_DLL SqliteDatabase &exec(const std::string &sql);
+    DDB_DLL bool tableExists(const std::string &table);
+    DDB_DLL std::string getOpenFile();
+    DDB_DLL int changes();
 
-    std::unique_ptr<Statement> query(const std::string &query);
+    DDB_DLL std::unique_ptr<Statement> query(const std::string &query);
 
-    ~SqliteDatabase();
+    DDB_DLL ~SqliteDatabase();
 };
 
 }

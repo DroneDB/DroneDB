@@ -37,10 +37,6 @@ include(${CMAKE_ROOT}/Modules/ExternalProject.cmake)
 set(DOWNLOADS_DIR "${CMAKE_BINARY_DIR}/downloads")
 
 if (WIN32)
-    # Avoid __declspec definitions in code, requires CMake >= 3.3
-    set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
-    #unset(CMAKE_IMPORT_LIBRARY_SUFFIX)
-
     # Download GDAL/CURL/sqlite3/spatialite libraries
     if (NOT EXISTS "${DOWNLOADS_DIR}/gdal_libs.zip")
         message("Downloading GDAL libs...")

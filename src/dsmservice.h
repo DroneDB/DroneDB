@@ -14,6 +14,7 @@
 #include <cpl_conv.h>
 #include "userprofile.h"
 #include "geo.h"
+#include "ddb_export.h"
 
 using namespace ddb;
 
@@ -26,12 +27,12 @@ struct DSMCacheEntry{
 	std::vector<float> data;
 	BoundingBox<Point2D> bbox;
 
-	DSMCacheEntry() : width(0), height(0), hasNodata(0), nodata(0) {
+    DDB_DLL DSMCacheEntry() : width(0), height(0), hasNodata(0), nodata(0) {
 		memset(geoTransform, 0, sizeof(double)*6);
 	}
 
-    void loadData(GDALDataset *dataset);
-    float getElevation(double latitude, double longitude);
+    DDB_DLL void loadData(GDALDataset *dataset);
+    DDB_DLL float getElevation(double latitude, double longitude);
 };
 
 class DSMService{
@@ -40,14 +41,14 @@ class DSMService{
     ~DSMService();
     static DSMService *instance;
 public:
-    static DSMService* get();
+    DDB_DLL static DSMService* get();
 
-    float getAltitude(double latitude, double longitude);
+    DDB_DLL float getAltitude(double latitude, double longitude);
 
-    bool loadDiskCache(double latitude, double longitude);
-    std::string loadFromNetwork(double latitude, double longitude);
-    bool addGeoTIFFToCache(const fs::path &filePath, double latitude, double longitude);
-    fs::path getCacheDir();
+    DDB_DLL bool loadDiskCache(double latitude, double longitude);
+    DDB_DLL std::string loadFromNetwork(double latitude, double longitude);
+    DDB_DLL bool addGeoTIFFToCache(const fs::path &filePath, double latitude, double longitude);
+    DDB_DLL fs::path getCacheDir();
 };
 
 #endif // DSMSERVICE_H

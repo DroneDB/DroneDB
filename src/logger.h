@@ -10,9 +10,10 @@
 #include "../vendor/plog/Appenders/ConsoleAppender.h"
 #include "../vendor/plog/Formatters/TxtFormatter.h"
 #include "../vendor/plog/Formatters/MessageOnlyFormatter.h"
+#include "ddb_export.h"
 
-void init_logger();
-void set_logger_verbose();
-bool is_logger_verbose();
+DDB_DLL void init_logger();
+DDB_DLL void set_logger_verbose();
+DDB_DLL bool is_logger_verbose();
 
 #endif // LOGGER_H

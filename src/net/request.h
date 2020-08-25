@@ -9,6 +9,7 @@
 #include <vector>
 #include "reqtype.h"
 #include "response.h"
+#include "ddb_export.h"
 
 namespace ddb::net{
 
@@ -21,14 +22,14 @@ class Request{
     std::string urlEncode(const std::string &str);
     void perform(Response &res);
 public:
-    Request(const std::string &url, ReqType reqType);
-    ~Request();
+    DDB_DLL Request(const std::string &url, ReqType reqType);
+    DDB_DLL ~Request();
 
-    Response send();
-    Response downloadToFile(const std::string &outFile);
+    DDB_DLL Response send();
+    DDB_DLL Response downloadToFile(const std::string &outFile);
 
-    Request &formData(std::vector<std::string> params);
-    Request& setVerifySSL(bool flag);
+    DDB_DLL Request &formData(std::vector<std::string> params);
+    DDB_DLL Request& setVerifySSL(bool flag);
 };
 
 }

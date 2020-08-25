@@ -5,10 +5,11 @@
 #define GEOPROJECT_H
 
 #include "database.h"
+#include "ddb_export.h"
 
 namespace ddb {
 
-void geoProject(const std::vector<std::string> &images, const std::string &output, const std::string &outsize = "");
+DDB_DLL void geoProject(const std::vector<std::string> &images, const std::string &output, const std::string &outsize = "");
 
 }
 

@@ -191,7 +191,7 @@ NAN_METHOD(_thumbs_getFromUserCache) {
     int thumbSize = 512;
 
     if (Nan::HasRealNamedProperty(obj, k).FromJust()){
-        thumbSize = Nan::To<time_t>(Nan::GetRealNamedProperty(obj, k).ToLocalChecked()).FromJust();
+        thumbSize = Nan::To<int>(Nan::GetRealNamedProperty(obj, k).ToLocalChecked()).FromJust();
     }
 
     bool forceRecreate = false;
@@ -274,9 +274,9 @@ NAN_METHOD(_tile_getFromUserCache) {
 
     // Parse args
     fs::path geotiffPath = fs::path(*Nan::Utf8String(info[0].As<v8::String>()));
-    int tz = Nan::To<time_t>(info[1].As<v8::Uint32>()).FromJust();
-    int tx = Nan::To<time_t>(info[2].As<v8::Uint32>()).FromJust();
-    int ty = Nan::To<time_t>(info[3].As<v8::Uint32>()).FromJust();
+    int tz = Nan::To<int>(info[1].As<v8::Uint32>()).FromJust();
+    int tx = Nan::To<int>(info[2].As<v8::Uint32>()).FromJust();
+    int ty = Nan::To<int>(info[3].As<v8::Uint32>()).FromJust();
     
     // Parse options
     v8::Local<v8::String> k = Nan::New<v8::String>("tileSize").ToLocalChecked();
@@ -284,7 +284,7 @@ NAN_METHOD(_tile_getFromUserCache) {
     int tileSize = 256;
 
     if (Nan::HasRealNamedProperty(obj, k).FromJust()){
-        tileSize = Nan::To<time_t>(Nan::GetRealNamedProperty(obj, k).ToLocalChecked()).FromJust();
+        tileSize = Nan::To<int>(Nan::GetRealNamedProperty(obj, k).ToLocalChecked()).FromJust();
     }
 
     bool tms = false;

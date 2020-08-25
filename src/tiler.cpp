@@ -166,7 +166,7 @@ std::string Tiler::tile(int tz, int tx, int ty){
         LOGD << "TY: " << ty;
     }
 
-    BoundingBox<Projected2D> tMinMax = getMinMaxCoordsForZ(tz);
+    BoundingBox<Projected2Di> tMinMax = getMinMaxCoordsForZ(tz);
     if (!tMinMax.contains(tx, ty)) throw GDALException("Out of bounds");
 
     // Need to create in-memory dataset
@@ -291,10 +291,10 @@ std::string Tiler::tile(const TileInfo &t){
 
 std::vector<TileInfo> Tiler::getTilesForZoomLevel(int tz) const{
     std::vector<TileInfo> result;
-    BoundingBox<Projected2D> bounds = getMinMaxCoordsForZ(tz);
+    BoundingBox<Projected2Di> bounds = getMinMaxCoordsForZ(tz);
 
-    for (int ty = static_cast<int>(bounds.min.y); ty < static_cast<int>(bounds.max.y) + 1; ty++){
-        for (int tx = static_cast<int>(bounds.min.x); tx < static_cast<int>(bounds.max.x) + 1; tx++){
+    for (int ty = bounds.min.y; ty < bounds.max.y + 1; ty++){
+        for (int tx = bounds.min.x; tx < bounds.max.x + 1; tx++){
             LOGD << tx << " " << ty << " " << tz;
             result.push_back(TileInfo(tx, tms ? xyzToTMS(ty, tz) : ty, tz));
         }
@@ -307,15 +307,15 @@ BoundingBox<int> Tiler::getMinMaxZ() const{
     return BoundingBox(tMinZ, tMaxZ);
 }
 
-BoundingBox<Projected2D> Tiler::getMinMaxCoordsForZ(int tz) const{
-    BoundingBox<Projected2D> b(
+BoundingBox<Projected2Di> Tiler::getMinMaxCoordsForZ(int tz) const{
+    BoundingBox<Projected2Di> b(
         mercator.metersToTile(oMinX, oMinY, tz),
         mercator.metersToTile(oMaxX, oMaxY, tz)
     );
 
     // Crop tiles extending world limits (+-180,+-90)
-    b.min.x = std::max<double>(0, b.min.x);
-    b.max.x = std::min<double>(std::pow(2, tz - 1), b.max.x);
+    b.min.x = std::max<int>(0, b.min.x);
+    b.max.x = std::min<int>(static_cast<int>(std::pow(2, tz - 1)), b.max.x);
 
     // TODO: figure this out (TMS vs. XYZ)
 //    b.min.y = std::max<double>(0, b.min.y);
@@ -498,7 +498,7 @@ GQResult Tiler::geoQuery(GDALDatasetH ds, double ulx, double uly, double lrx, do
     int rasterYSize = GDALGetRasterYSize(ds);
 
     if (o.r.x + o.r.xsize > rasterXSize){
-        o.w.xsize = static_cast<int>(o.w.xsize * (static_cast<double>(rasterXSize - o.r.x) / static_cast<double>(o.r.xsize)));
+        o.w.xsize = static_cast<int>(o.w.xsize * (static_cast<double>(rasterXSize) - static_cast<double>(o.r.x)) / static_cast<double>(o.r.xsize));
         o.r.xsize = rasterXSize - o.r.x;
     }
 
@@ -512,7 +512,7 @@ GQResult Tiler::geoQuery(GDALDatasetH ds, double ulx, double uly, double lrx, do
     }
 
     if (o.r.y + o.r.ysize > rasterYSize){
-        o.w.ysize = static_cast<int>(o.w.ysize * (static_cast<double>(rasterYSize - o.r.y) / static_cast<double>(o.r.ysize)));
+        o.w.ysize = static_cast<int>(o.w.ysize * (static_cast<double>(rasterYSize) - static_cast<double>(o.r.y)) / static_cast<double>(o.r.ysize));
         o.r.ysize = rasterYSize - o.r.y;
     }
 
@@ -520,11 +520,11 @@ GQResult Tiler::geoQuery(GDALDatasetH ds, double ulx, double uly, double lrx, do
 }
 
 int Tiler::tmsToXYZ(int ty, int tz) const{
-    return (std::pow(2, tz) - 1) - ty;
+    return static_cast<int>((std::pow(2, tz) - 1)) - ty;
 }
 
 int Tiler::xyzToTMS(int ty, int tz) const{
-    return (std::pow(2, tz) - 1) - ty; // The same!
+    return static_cast<int>((std::pow(2, tz) - 1)) - ty; // The same!
 }
 
 GlobalMercator::GlobalMercator(int tileSize) : tileSize(tileSize){
@@ -546,15 +546,15 @@ BoundingBox<Projected2D> GlobalMercator::tileBounds(int tx, int ty, int zoom) co
     return BoundingBox<Projected2D>(min, max);
 }
 
-Geographic2D GlobalMercator::metersToLatLon(int mx, int my) const{
-    double lon = static_cast<double>(mx) / originShift * 180.0;
-    double lat = static_cast<double>(my) / originShift * 180.0;
+Geographic2D GlobalMercator::metersToLatLon(double mx, double my) const{
+    double lon = mx / originShift * 180.0;
+    double lat = my / originShift * 180.0;
 
     lat = 180.0 / M_PI * (2 * std::atan(std::exp(lat * M_PI / 180.0)) - M_PI / 2.0);
     return Geographic2D(lon, lat);
 }
 
-Projected2D GlobalMercator::metersToTile(int mx, int my, int zoom) const{
+Projected2Di GlobalMercator::metersToTile(double mx, double my, int zoom) const{
     Projected2D p = metersToPixels(mx, my, zoom);
     return pixelsToTile(p.x, p.y);
 }
@@ -564,15 +564,15 @@ Projected2D GlobalMercator::pixelsToMeters(int px, int py, int zoom) const{
     return Projected2D(px * res - originShift, py * res - originShift);
 }
 
-Projected2D GlobalMercator::metersToPixels(int mx, int my, int zoom) const{
+Projected2D GlobalMercator::metersToPixels(double mx, double my, int zoom) const{
     double res = resolution(zoom);
     return Projected2D((mx + originShift) / res, (my + originShift) / res);
 }
 
-Projected2D GlobalMercator::pixelsToTile(int px, int py) const{
-    return Projected2D(
-        static_cast<int>(std::ceil(static_cast<double>(px) / static_cast<double>(tileSize)) - 1),
-        static_cast<int>(std::ceil(static_cast<double>(py) / static_cast<double>(tileSize)) - 1)
+Projected2Di GlobalMercator::pixelsToTile(double px, double py) const{
+    return Projected2Di(
+        static_cast<int>(std::ceil(px / static_cast<double>(tileSize)) - 1),
+        static_cast<int>(std::ceil(py / static_cast<double>(tileSize)) - 1)
     );
 }
 

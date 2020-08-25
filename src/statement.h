@@ -8,6 +8,7 @@
 #include <sqlite3.h>
 #include <string>
 #include "logger.h"
+#include "ddb_export.h"
 
 class Statement {
     sqlite3 *db;
@@ -21,23 +22,23 @@ class Statement {
     void bindCheck(int ret);
     Statement &step();
   public:
-    Statement(sqlite3 *db, const std::string &query);
-    ~Statement();
+    DDB_DLL Statement(sqlite3 *db, const std::string &query);
+    DDB_DLL ~Statement();
 
-    Statement &bind(int paramNum, const std::string &value);
-    Statement &bind(int paramNum, int value);
-    Statement &bind(int paramNum, long long value);
+    DDB_DLL Statement &bind(int paramNum, const std::string &value);
+    DDB_DLL Statement &bind(int paramNum, int value);
+    DDB_DLL Statement &bind(int paramNum, long long value);
 
-    bool fetch();
+    DDB_DLL bool fetch();
 
-    int getInt(int columnId);
-    long long getInt64(int columnId);
-    std::string getText(int columnId);
-    double getDouble(int columnId);
+    DDB_DLL int getInt(int columnId);
+    DDB_DLL long long getInt64(int columnId);
+    DDB_DLL std::string getText(int columnId);
+    DDB_DLL double getDouble(int columnId);
     // TODO: more
 
-    void reset();
-    void execute();
+    DDB_DLL void reset();
+    DDB_DLL void execute();
 };
 
 #endif // STATEMENT_H

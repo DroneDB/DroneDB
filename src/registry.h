@@ -5,6 +5,7 @@
 #define REGISTRY_H
 
 #include <string>
+#include "ddb_export.h"
 
 namespace ddb{
 
@@ -14,13 +15,13 @@ class Registry{
     // Last valid token
     std::string token;
 public:
-    Registry(const std::string &url);
+    DDB_DLL Registry(const std::string &url);
 
-    std::string getUrl(const std::string &path = "") const;
+    DDB_DLL std::string getUrl(const std::string &path = "") const;
 
-    std::string getToken(const std::string &username, const std::string &password) const;
-    std::string login(const std::string &username, const std::string &password) const;
-    bool logout();
+    DDB_DLL std::string getToken(const std::string &username, const std::string &password) const;
+    DDB_DLL std::string login(const std::string &username, const std::string &password) const;
+    DDB_DLL bool logout();
 };
 
 }
