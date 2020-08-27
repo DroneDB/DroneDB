@@ -71,7 +71,7 @@ DDB_C_BEGIN
         db->createTables();
         db->close();
 
-        utils::copyToPtr(ddbDirPath, outPath);
+        utils::copyToPtr(ddbDirPath.string(), outPath);
     }
 DDB_C_END
 }

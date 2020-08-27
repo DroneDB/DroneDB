@@ -13,6 +13,11 @@ string(SUBSTRING ${APP_VERSION} 12 -1 APP_VERSION)
 message("DDB Version: ${APP_VERSION}")
 add_compile_options("-DAPP_VERSION=\"${APP_VERSION}\"")
 
+# Disable MS warnings
+if (WIN32)
+    add_compile_options("-D_CRT_SECURE_NO_WARNINGS=1")
+endif()
+
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 if(NOT CMAKE_BUILD_TYPE)

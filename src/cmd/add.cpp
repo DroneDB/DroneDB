@@ -34,9 +34,9 @@ void Add::run(cxxopts::ParseResult &opts) {
     auto paths = opts["paths"].as<std::vector<std::string>>();
 
     std::vector<const char *> cPaths(paths.size());
-    std::transform(paths.begin(), paths.end(), cPaths.begin(), std::mem_fun_ref(&std::string::c_str));
+    std::transform(paths.begin(), paths.end(), cPaths.begin(), [](const std::string& s) { return s.c_str(); });
 
-    if (DDBAdd(ddbPath.c_str(), cPaths.data(), cPaths.size(), opts.count("recursive")) != DDBERR_NONE){
+    if (DDBAdd(ddbPath.c_str(), cPaths.data(), static_cast<int>(cPaths.size()), opts.count("recursive")) != DDBERR_NONE){
         std::cerr << DDBGetLastError() << std::endl;
     }
 }
