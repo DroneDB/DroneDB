@@ -3,7 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "gtest/gtest.h"
-#include "ddb.h"
+#include "dbops.h"
 #include "exceptions.h"
 
 namespace {
