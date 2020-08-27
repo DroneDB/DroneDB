@@ -23,11 +23,11 @@ enum DDBErr {
 return DDBERR_NONE;
 
 extern char ddbLastError[255];
+void DDBSetLastError(const char *err);
 
 /** Get the last error message
  * @return last error message */
 DDB_DLL const char* DDBGetLastError();
-void DDBSetLastError(const char *err);
 
 /** This must be called as the very first function
  * of every DDB process/program
@@ -54,10 +54,20 @@ DDB_DLL DDBErr DDBAdd(const char *ddbPath, const char **paths, int numPaths, boo
  * @param ddbPath path to a DroneDB database (parent of ".ddb")
  * @param paths array of paths to add to index
  * @param numPaths number of paths
- * @param recursive whether to recursively add folders
+ * @param recursive whether to recursively remove folders
  * @return DDBERR_NONE on success, an error otherwise */
 DDB_DLL DDBErr DDBRemove(const char *ddbPath, const char **paths, int numPaths, bool recursive = false);
 
+/** Retrieve information about files 
+ * @param paths array of paths to parse
+ * @param numPaths number of paths
+ * @param format output format. One of: ["text", "json", "geojson"]
+ * @param recursive whether to recursively scan folders
+ * @param maxRecursionDepth limit the depth of recursion
+ * @param geometry type of geometry to return when format is "geojson". One of: ["auto", "point" or "polygon"]
+ * @param withHash whether to compute SHA256 hashes
+ * @param stopOnError whether to stop on failure 
+ * @return DDBERR_NONE on success, an error otherwise */
 DDB_DLL DDBErr DDBInfo(const char **paths, int numPaths, const char *format = "text", bool recursive = false, int maxRecursionDepth = 0,
                        const char *geometry = "auto", bool withHash = false, bool stopOnError = true);
 
