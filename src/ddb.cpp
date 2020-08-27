@@ -10,6 +10,7 @@
 #include "database.h"
 #include "net.h"
 #include "exceptions.h"
+#include "utils.h"
 
 using namespace ddb;
 
@@ -39,46 +40,43 @@ const char* DDBGetVersion(){
 // TODO: C++ function with C wrapper?
 // or C wrapper all the way?
 DDBErr DDBInit(const char *directory, char **outPath){
-    try{
-        fs::path dirPath = directory;
-        if (!fs::exists(dirPath)) throw FSException("Invalid directory: " + directory  + " (does not exist)");
+DDB_C_BEGIN
+    fs::path dirPath = directory;
+    if (!fs::exists(dirPath)) throw FSException("Invalid directory: " + dirPath.string()  + " (does not exist)");
 
-        fs::path ddbDirPath = dirPath / ".ddb";
-        if (std::string(directory) == ".") ddbDirPath = ".ddb"; // Nicer to the eye
-        fs::path dbasePath = ddbDirPath / "dbase.sqlite";
+    fs::path ddbDirPath = dirPath / ".ddb";
+    if (std::string(directory) == ".") ddbDirPath = ".ddb"; // Nicer to the eye
+    fs::path dbasePath = ddbDirPath / "dbase.sqlite";
 
-        LOGD << "Checking if .ddb directory exists...";
-        if (fs::exists(ddbDirPath)) {
-            throw FSException("Cannot initialize database: " + ddbDirPath.string() + " already exists");
+    LOGD << "Checking if .ddb directory exists...";
+    if (fs::exists(ddbDirPath)) {
+        throw FSException("Cannot initialize database: " + ddbDirPath.string() + " already exists");
+    } else {
+        if (fs::create_directory(ddbDirPath)) {
+            LOGD << ddbDirPath.string() + " created";
         } else {
-            if (fs::create_directory(ddbDirPath)) {
-                LOGD << ddbDirPath.string() + " created";
-            } else {
-                throw FSException("Cannot create directory: " + ddbDirPath.string() + ". Check that you have the proper permissions?");
-            }
+            throw FSException("Cannot create directory: " + ddbDirPath.string() + ". Check that you have the proper permissions?");
         }
-
-        LOGD << "Checking if dbase exists...";
-        if (fs::exists(dbasePath)) {
-            throw FSException(ddbDirPath.string() + " already exists");
-        } else {
-            LOGD << "Creating " << dbasePath.string();
-
-            // Create database
-            std::unique_ptr<Database> db = std::make_unique<Database>();
-            db->open(dbasePath.string());
-            db->createTables();
-            db->close();
-
-            if (outPath != NULL) strcpy(ddbDirPath.string(), outPath);
-        }
-    }catch(const AppException &e){
-        DDBSetLastError(e.what());
-        return DDBERR_GENERIC;
     }
+
+    LOGD << "Checking if dbase exists...";
+    if (fs::exists(dbasePath)) {
+        throw FSException(ddbDirPath.string() + " already exists");
+    } else {
+        LOGD << "Creating " << dbasePath.string();
+
+        // Create database
+        std::unique_ptr<Database> db = std::make_unique<Database>();
+        db->open(dbasePath.string());
+        db->createTables();
+        db->close();
+
+        utils::copyToPtr(ddbDirPath, outPath);
+    }
+DDB_C_END
 }
 
-char *DDBGetLastError(){
+const char *DDBGetLastError(){
     return ddbLastError;
 }
 

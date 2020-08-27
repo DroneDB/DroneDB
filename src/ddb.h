@@ -4,14 +4,23 @@
 #ifndef DDB_H
 #define DDB_H
 
+#include "ddb_export.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-typedef enum DDBErr {
+enum DDBErr {
     DDBERR_NONE = 0, // No error
-    DDBERR_GENERIC = 1 // Generic app exception
-}
+    DDBERR_EXCEPTION = 1 // Generic app exception
+};
+
+#define DDB_C_BEGIN try {
+#define DDB_C_END }catch(const AppException &e){ \
+    DDBSetLastError(e.what()); \
+    return DDBERR_EXCEPTION; \
+} \
+return DDBERR_NONE;
 
 extern char ddbLastError[255];
 
@@ -31,7 +40,7 @@ DDB_DLL const char* DDBGetVersion();
 /** Initialize a DroneDB database
  * @param directory Path to directory where to initialize the database
  * @return */
-DDB_DLL DDBErr *DDBInit(const char *directory, char **outPath = NULL);
+DDB_DLL DDBErr DDBInit(const char *directory, char **outPath = NULL);
 
 #ifdef __cplusplus
 }
