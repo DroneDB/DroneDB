@@ -230,9 +230,6 @@ void addToIndex(Database *db, const std::vector<std::string> &paths) {
     auto updateQ = db->query(UPDATE_QUERY);
     db->exec("BEGIN TRANSACTION");
 
-    ParseEntryOpts opts;
-    opts.withHash = true;
-
     for (auto &p : pathList) {
         io::Path relPath = io::Path(p).relativeTo(directory);
         q->bind(1, relPath.generic());
@@ -250,7 +247,7 @@ void addToIndex(Database *db, const std::vector<std::string> &paths) {
         }
 
         if (add || update) {
-            parseEntry(p, directory, e, opts);
+            parseEntry(p, directory, e, true, true);
 
             if (add) {
                 insertQ->bind(1, e.path);
@@ -304,9 +301,6 @@ void syncIndex(Database *db) {
 
     db->exec("BEGIN TRANSACTION");
 
-    ParseEntryOpts opts;
-    opts.withHash = true;
-
     while(q->fetch()) {
         io::Path relPath = fs::path(q->getText(0));
         fs::path p = directory / relPath.get(); // TODO: does this work on Windows?
@@ -314,7 +308,7 @@ void syncIndex(Database *db) {
 
         if (fs::exists(p)) {
             if (checkUpdate(e, p, q->getInt64(1), q->getText(2))) {
-                parseEntry(p, directory, e, opts);
+                parseEntry(p, directory, e, true, true);
                 doUpdate(updateQ.get(), e);
             }
         } else {

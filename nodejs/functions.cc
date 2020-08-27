@@ -28,16 +28,19 @@ NAN_METHOD(typeToHuman) {
     info.GetReturnValue().Set(Nan::New(ddb::typeToHuman(t)).ToLocalChecked());
 }
 
-class ParseFilesWorker : public Nan::AsyncWorker {
+class InfoWorker : public Nan::AsyncWorker {
  public:
-  ParseFilesWorker(Nan::Callback *callback, const std::vector<std::string> &input, ddb::ParseFilesOpts &pfOpts)
-    : AsyncWorker(callback, "nan:ParseFilesWorker"),
-      input(input), pfOpts(pfOpts){}
-  ~ParseFilesWorker() {}
+  InfoWorker(Nan::Callback *callback, const std::vector<std::string> &input,
+             bool recursive, int maxRecursionDepth, bool withHash, bool stopOnError)
+    : AsyncWorker(callback, "nan:InfoWorker"),
+      input(input), recursive(recursive), maxRecursionDepth(maxRecursionDepth),
+      withHash(withHash), stopOnError(stopOnError){}
+  ~InfoWorker() {}
 
   void Execute () {
     try{
-        ddb::parseFiles(input, s, pfOpts);
+        ddb::info(input, s, "json", recursive, maxRecursionDepth,
+                  "auto", withHash, stopOnError);
     }catch(ddb::AppException &e){
         SetErrorMessage(e.what());
     }
@@ -59,11 +62,15 @@ class ParseFilesWorker : public Nan::AsyncWorker {
  private:
     std::vector<std::string> input;
     std::ostringstream s;
-    ddb::ParseFilesOpts pfOpts;
+
+    bool recursive;
+    int maxRecursionDepth;
+    bool withHash;
+    bool stopOnError;
 };
 
 
-NAN_METHOD(parseFiles) {
+NAN_METHOD(info) {
     if (info.Length() != 3){
         Nan::ThrowError("Invalid number of arguments");
         return;
@@ -91,37 +98,35 @@ NAN_METHOD(parseFiles) {
     }
 
     // Parse options
-    ddb::ParseEntryOpts peOpts;
     v8::Local<v8::String> k = Nan::New<v8::String>("withHash").ToLocalChecked();
     v8::Local<v8::Object> obj = info[1].As<v8::Object>();
 
+    bool withHash = false;
     if (Nan::HasRealNamedProperty(obj, k).FromJust()){
-        peOpts.withHash = Nan::To<bool>(Nan::GetRealNamedProperty(obj, k).ToLocalChecked()).FromJust();
+        withHash = Nan::To<bool>(Nan::GetRealNamedProperty(obj, k).ToLocalChecked()).FromJust();
     }
 
+    bool stopOnError = true;
     k = Nan::New<v8::String>("stopOnError").ToLocalChecked();
     if (Nan::HasRealNamedProperty(obj, k).FromJust()){
-        peOpts.stopOnError = Nan::To<bool>(Nan::GetRealNamedProperty(obj, k).ToLocalChecked()).FromJust();
+        stopOnError = Nan::To<bool>(Nan::GetRealNamedProperty(obj, k).ToLocalChecked()).FromJust();
     }
 
-    ddb::ParseFilesOpts pfOpts;
-    pfOpts.format = "json";
-
+    bool recursive = false;
     k = Nan::New<v8::String>("recursive").ToLocalChecked();
     if (Nan::HasRealNamedProperty(obj, k).FromJust()){
-        pfOpts.recursive = Nan::To<bool>(Nan::GetRealNamedProperty(obj, k).ToLocalChecked()).FromJust();
+        recursive = Nan::To<bool>(Nan::GetRealNamedProperty(obj, k).ToLocalChecked()).FromJust();
     }
 
+    int maxRecursionDepth = 0;
     k = Nan::New<v8::String>("maxRecursionDepth").ToLocalChecked();
     if (Nan::HasRealNamedProperty(obj, k).FromJust()){
-        pfOpts.maxRecursionDepth = Nan::To<int>(Nan::GetRealNamedProperty(obj, k).ToLocalChecked()).FromJust();
+        maxRecursionDepth = Nan::To<int>(Nan::GetRealNamedProperty(obj, k).ToLocalChecked()).FromJust();
     }
-
-    pfOpts.peOpts = peOpts;
 
     // Execute
     Nan::Callback *callback = new Nan::Callback(Nan::To<v8::Function>(info[2]).ToLocalChecked());
-    Nan::AsyncQueueWorker(new ParseFilesWorker(callback, in, pfOpts));
+    Nan::AsyncQueueWorker(new InfoWorker(callback, in, recursive, maxRecursionDepth, withHash, stopOnError));
 }
 
 //(const fs::path &imagePath, time_t modifiedTime, int thumbSize, bool forceRecreate)

@@ -12,24 +12,18 @@ describe('node-ddb extension', function() {
     assert(ddb.getVersion().length > 0);
   });
 
-  it('should export a parseFiles() method', function() {
-    assert.equal(typeof ddb.parseFiles, "function");
+  it('should export a info() method', function() {
+    assert.equal(typeof ddb.info, "function");
   });
 
-  it('should export a parseFile() method', function() {
-    assert.equal(typeof ddb.parseFile, "function");
-  });
-
-  // TODO: test parseFile
-
-  it('should be able to call parseFiles without hash', async function(){
-    const res = await ddb.parseFiles(__filename);
-    assert.equal(res.length, 1);
+  it('should be able to call info without hash', async function(){
+    const res = await ddb.info(__filename);
+    assert.ok(res.path.length > 0);
     assert.equal(typeof res.hash, "undefined")
   });
 
-  it('should be able to call parseFiles with hash', async function(){
-    const res = await ddb.parseFiles([__filename, __dirname], {withHash: true});
+  it('should be able to call info with hash', async function(){
+    const res = await ddb.info([__filename, __dirname], {withHash: true});
     assert.equal(res.length, 2);
 
     // Files have hash calculated
@@ -40,8 +34,8 @@ describe('node-ddb extension', function() {
     assert.equal(typeof res[1].hash, "undefined");
   });
 
-  it('should fail when parseFiles is called on bad files', async function(){
-    await assert.rejects(ddb.parseFiles("404", {withHash: true}));
+  it('should fail when info is called on bad files', async function(){
+    await assert.rejects(ddb.info("404", {withHash: true}));
   });
 
   it('should export a thumbs.getFromUserCache() method', function() {

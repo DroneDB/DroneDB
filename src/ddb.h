@@ -32,15 +32,35 @@ void DDBSetLastError(const char *err);
 /** This must be called as the very first function
  * of every DDB process/program
  * @param verbose whether the program should output log messages to stdout */
-DDB_DLL void DDBRegisterProcess(int verbose = 0);
+DDB_DLL void DDBRegisterProcess(bool verbose = false);
 
 /** Get library version */
 DDB_DLL const char* DDBGetVersion();
 
 /** Initialize a DroneDB database
  * @param directory Path to directory where to initialize the database
- * @return */
+ * @return DDBERR_NONE on success, an error otherwise */
 DDB_DLL DDBErr DDBInit(const char *directory, char **outPath = NULL);
+
+/** Add one or more files to a DroneDB database
+ * @param ddbPath path to a DroneDB database (parent of ".ddb")
+ * @param paths array of paths to add to index
+ * @param numPaths number of paths
+ * @param recursive whether to recursively add folders
+ * @return DDBERR_NONE on success, an error otherwise */
+DDB_DLL DDBErr DDBAdd(const char *ddbPath, const char **paths, int numPaths, bool recursive = false);
+
+/** Remove one or more files to a DroneDB database
+ * @param ddbPath path to a DroneDB database (parent of ".ddb")
+ * @param paths array of paths to add to index
+ * @param numPaths number of paths
+ * @param recursive whether to recursively add folders
+ * @return DDBERR_NONE on success, an error otherwise */
+DDB_DLL DDBErr DDBRemove(const char *ddbPath, const char **paths, int numPaths, bool recursive = false);
+
+DDB_DLL DDBErr DDBInfo(const char **paths, int numPaths, const char *format = "text", bool recursive = false, int maxRecursionDepth = 0,
+                       const char *geometry = "auto", bool withHash = false, bool stopOnError = true);
+
 
 #ifdef __cplusplus
 }

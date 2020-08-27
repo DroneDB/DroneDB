@@ -4,6 +4,8 @@
 
 #include <gdal_priv.h>
 #include "ddb.h"
+#include "dbops.h"
+#include "info.h"
 #include "version.h"
 #include "mio.h"
 #include "logger.h"
@@ -16,7 +18,7 @@ using namespace ddb;
 
 char ddbLastError[255];
 
-void DDBRegisterProcess(int verbose){
+void DDBRegisterProcess(bool verbose){
 
 #ifndef WIN32
     // Windows does not let us change env vars for some reason
@@ -37,8 +39,6 @@ const char* DDBGetVersion(){
     return APP_VERSION;
 }
 
-// TODO: C++ function with C wrapper?
-// or C wrapper all the way?
 DDBErr DDBInit(const char *directory, char **outPath){
 DDB_C_BEGIN
     fs::path dirPath = directory;
@@ -83,4 +83,34 @@ const char *DDBGetLastError(){
 void DDBSetLastError(const char *err){
     strncpy(ddbLastError, err, 255);
     ddbLastError[254] = '\0';
+}
+
+DDBErr DDBAdd(const char *ddbPath, const char **paths, int numPaths, bool recursive){
+DDB_C_BEGIN
+    auto db = ddb::open(std::string(ddbPath), true);
+    std::vector<std::string> pathList(paths, paths + numPaths);
+    ddb::addToIndex(db.get(), ddb::expandPathList(pathList,
+                                                  recursive,
+                                                  0));
+DDB_C_END
+}
+
+DDBErr DDBRemove(const char *ddbPath, const char **paths, int numPaths, bool recursive){
+DDB_C_BEGIN
+    auto db = ddb::open(std::string(ddbPath), true);
+    std::vector<std::string> pathList(paths, paths + numPaths);
+    ddb::removeFromIndex(db.get(), ddb::expandPathList(pathList,
+                                                  recursive,
+                                                  0));
+DDB_C_END
+}
+
+DDBErr DDBInfo(const char **paths, int numPaths, char **output, const char *format, bool recursive, int maxRecursionDepth, const char *geometry, bool withHash, bool stopOnError){
+DDB_C_BEGIN
+    std::vector<std::string> input(paths, paths + numPaths);
+    std::ostringstream ss;
+    ddb::info(input, ss, format, recursive, maxRecursionDepth,
+              geometry, withHash, stopOnError);
+    utils::copyToPtr(ss.str(), output);
+DDB_C_END
 }

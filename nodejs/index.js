@@ -49,21 +49,24 @@ const ddb = {
         }
     },
 
-    parseFiles: async function(files, options = {}){
-        return new Promise((resolve, reject) => {
-            if (typeof files === "string") files = [files];
 
-            n.parseFiles(files, options, (err, result) => {
+    info: async function(files, options = {}){
+        return new Promise((resolve, reject) => {
+            const isSingle = typeof files === "string"; 
+            if (isSingle) files = [files];
+
+            n.info(files, options, (err, result) => {
                 if (err) reject(err);
-                else resolve(result);
+                else{
+                    // Return single item
+                    if (isSingle) resolve(result[0]);
+
+                    // Return entire array
+                    else resolve(result);
+                } 
             });
         });
-    },
-
-    parseFile: async function(file, options = {}){
-        const result = await this.parseFiles(file, options);
-        if (result.length) return result[0];
-    },
+    }
 };
 
 module.exports = ddb;

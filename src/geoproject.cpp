@@ -20,15 +20,14 @@ void geoProject(const std::vector<std::string> &images, const std::string &outpu
         }
     }
 
-    for (const fs::path &p : images){
+    for (const std::string &img : images){
+        fs::path p = img;
         if (!fs::exists(p)){
             throw FSException("Cannot project " + p.string() + " (does not exist)");
         }
 
         Entry e;
-        ParseEntryOpts opts;
-        opts.withHash = false;
-        if (!parseEntry(p, ".", e, opts)){
+        if (!parseEntry(p, ".", e, false, true)){
             throw FSException("Cannot parse file " + p.string());
         }
 

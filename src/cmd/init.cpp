@@ -29,7 +29,7 @@ void Init::run(cxxopts::ParseResult &opts) {
     if (DDBInit(p.c_str(), &outPath) == DDBERR_NONE){
         std::cout << "Initialized empty database in " << outPath << std::endl;
     }else{
-        std::cerr << DDBGetLastError();
+        std::cerr << DDBGetLastError() << std::endl;
     }
 }
 

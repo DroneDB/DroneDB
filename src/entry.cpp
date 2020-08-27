@@ -8,9 +8,9 @@
 
 namespace ddb {
 
-bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entry, ParseEntryOpts &opts) {
+bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entry, bool withHash, bool stopOnError) {
     if (!fs::exists(path)){
-        if (opts.stopOnError) throw FSException(path.string() + " does not exist");
+        if (stopOnError) throw FSException(path.string() + " does not exist");
         entry.type = EntryType::Undefined;
         return false;
     }
@@ -37,7 +37,7 @@ bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
             LOGD << "Cannot check " << path.string() << " .ddb presence: " << e.what();
         }
     } else {
-        if (entry.hash == "" && opts.withHash) entry.hash = Hash::fileSHA256(path.string());
+        if (entry.hash == "" && withHash) entry.hash = Hash::fileSHA256(path.string());
         entry.size = p.getSize();
 
         entry.type = EntryType::Generic; // Default
@@ -132,7 +132,7 @@ bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
                 }
             }catch(Exiv2::AnyError& e){
                 LOGD << "Cannot read EXIF data: " << path.string();
-                if (opts.stopOnError) throw FSException("Cannot read EXIF data: " + path.string() + " (" + e.what() + ")");
+                if (stopOnError) throw FSException("Cannot read EXIF data: " + path.string() + " (" + e.what() + ")");
             }
         }else if (georaster){
             entry.type = EntryType::GeoRaster;

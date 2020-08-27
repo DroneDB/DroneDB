@@ -43,7 +43,7 @@ bool hasParam(int argc, char *argv[], const char* param) {
 
 int main(int argc, char* argv[]) {
     memcpy(argv[0], "ddb\0", 4);
-    DDBRegisterProcess(hasParam(argc, argv, "--debug") ? 1 : 0);
+    DDBRegisterProcess(hasParam(argc, argv, "--debug"));
 
     LOGV << "DDB v" << DDBGetVersion();
     LOGV << "SQLite version: " << sqlite3_libversion();
