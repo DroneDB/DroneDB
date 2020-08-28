@@ -112,7 +112,7 @@ static inline void copyToPtr(const std::string &str, char **ptr){
     if (ptr != NULL){
         size_t s = str.size();
         *ptr = (char *)calloc(s, sizeof(char));
-        strncpy(*ptr, str.c_str(), s);
+        strcpy(*ptr, str.c_str());
     }
 }
 
