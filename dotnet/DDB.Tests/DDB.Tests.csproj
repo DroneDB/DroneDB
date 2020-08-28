@@ -13,7 +13,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\DDB.Lib\DDB.Lib.csproj" />
+    <ProjectReference Include="..\DDB.Bindings\DDB.Bindings.csproj" />
   </ItemGroup>
 
   <Target Name="PostBuild" AfterTargets="PostBuildEvent">

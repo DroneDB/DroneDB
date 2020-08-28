@@ -2,8 +2,8 @@ using NUnit.Framework;
 using System;
 using System.IO;
 using System.Reflection;
-using static DDB.Lib.Exports;
-using DDB.Lib;
+using static DDB.Bindings.Exports;
+using DDB.Bindings;
 
 namespace DDB.Tests
 {

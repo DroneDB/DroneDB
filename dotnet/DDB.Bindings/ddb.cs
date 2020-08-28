@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Runtime.InteropServices;
 
-namespace DDB.Lib
+namespace DDB.Bindings
 {
     enum DDBErr
     {

@@ -56,3 +56,18 @@ jobs:
               with:
                 name: Compiled Binaries
                 path: build\dist\*.zip
+
+    build_dotnet_windows:
+      name: Build Windows .NET Bindings
+      needs: build_windows
+      runs-on: windows-latest
+      steps:
+        - name: Download binaries
+          uses: actions/download-artifact@v2
+          with:
+            name: Compiled Binaries
+            path: path/to/artifact
+        TODO
+        # - name: Run Program Smoke Test
+        #   run: cd build && ddb.bat --debug
+        #   shell: cmd

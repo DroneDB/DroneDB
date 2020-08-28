@@ -1,4 +1,4 @@
-﻿namespace DDB.Lib
+﻿namespace DDB.Bindings
 {    public enum EntryType
     {
         Undefined = 0,

@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using System.Text;
 
-namespace DDB.Lib
+namespace DDB.Bindings
 {
     public class DDBException : Exception
     {
