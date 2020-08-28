@@ -9,19 +9,9 @@
 
 namespace ddb {
 
-struct ParseFilesOpts{
-    std::string format;
-    bool recursive;
-    int maxRecursionDepth;
-    BasicGeometryType geometry;
-
-    ParseEntryOpts peOpts;
-
-    DDB_DLL ParseFilesOpts() :
-        format("text"), recursive(false), maxRecursionDepth(0), geometry(BasicGeometryType::BGAuto) {};
-};
-
-DDB_DLL void parseFiles(const std::vector<std::string> &input, std::ostream &output, ParseFilesOpts &opts);
+DDB_DLL void info(const std::vector<std::string> &input, std::ostream &output,
+                  const std::string &format = "text", bool recursive = false, int maxRecursionDepth = 0, const std::string &geometry = "auto",
+                  bool withHash = false, bool stopOnError = true);
 
 }
 

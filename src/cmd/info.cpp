@@ -38,27 +38,24 @@ void Info::run(cxxopts::ParseResult &opts) {
     auto input = opts["input"].as<std::vector<std::string>>();
 
     try{
-        ddb::ParseEntryOpts peOpts;
-        peOpts.withHash = opts["with-hash"].count();
-        peOpts.stopOnError = true;
-
-        ddb::ParseFilesOpts pfOpts;
-        pfOpts.format = opts["format"].as<std::string>();
-        pfOpts.recursive = opts["recursive"].count();
-        pfOpts.maxRecursionDepth = opts["depth"].as<int>();
-        pfOpts.geometry = ddb::getBasicGeometryTypeFromName(opts["geometry"].as<std::string>());
-        pfOpts.peOpts = peOpts;
+        bool withHash = opts["with-hash"].count() > 0;
+        auto format = opts["format"].as<std::string>();
+        auto recursive = opts["recursive"].count() > 0;
+        auto maxRecursionDepth = opts["depth"].as<int>();
+        auto geometry = opts["geometry"].as<std::string>();
 
         if (opts.count("output")){
             std::string filename = opts["output"].as<std::string>();
             std::ofstream file(filename, std::ios::out | std::ios::trunc | std::ios::binary);
             if (!file.is_open()) throw ddb::FSException("Cannot open " + filename);
 
-            ddb::parseFiles(input, file, pfOpts);
+            ddb::info(input, file, format, recursive, maxRecursionDepth,
+                      geometry, withHash, true);
 
             file.close();
         }else{
-            ddb::parseFiles(input, std::cout, pfOpts);
+            ddb::info(input, std::cout, format, recursive, maxRecursionDepth,
+                      geometry, withHash, true);
         }
     }catch(ddb::InvalidArgsException){
         printHelp();

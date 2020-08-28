@@ -12,11 +12,11 @@ using v8::FunctionTemplate;
 NAN_MODULE_INIT(InitAll) {
 	NAN_EXPORT(target, getVersion);
 	NAN_EXPORT(target, typeToHuman);
-	NAN_EXPORT(target, parseFiles);
+    NAN_EXPORT(target, info);
 	NAN_EXPORT(target, _thumbs_getFromUserCache);
     NAN_EXPORT(target, _tile_getFromUserCache);
 
-	ddb::initialize(false);
+	DDBRegisterProcess();
 }
 
 NODE_MODULE(ddb, InitAll)

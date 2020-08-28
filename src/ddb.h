@@ -4,32 +4,76 @@
 #ifndef DDB_H
 #define DDB_H
 
-#include "database.h"
-#include "statement.h"
-#include "entry.h"
-#include "fs.h"
 #include "ddb_export.h"
 
-namespace ddb {
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-DDB_DLL void initialize(bool verbose = false);
-DDB_DLL std::string getVersion();
-DDB_DLL std::string create(const std::string &directory);
-DDB_DLL std::unique_ptr<Database> open(const std::string &directory, bool traverseUp);
-DDB_DLL fs::path rootDirectory(Database *db);
-DDB_DLL std::vector<fs::path> getIndexPathList(fs::path rootDirectory, const std::vector<std::string> &paths, bool includeDirs);
-DDB_DLL std::vector<fs::path> getPathList(const std::vector<std::string> &paths, bool includeDirs, int maxDepth);
-DDB_DLL std::vector<std::string> expandPathList(const std::vector<std::string> &paths, bool recursive, int maxRecursionDepth);
+enum DDBErr {
+    DDBERR_NONE = 0, // No error
+    DDBERR_EXCEPTION = 1 // Generic app exception
+};
 
-DDB_DLL bool checkUpdate(Entry &e, const fs::path &p, long long dbMtime, const std::string &dbHash);
-DDB_DLL void doUpdate(Statement *updateQ, const Entry &e);
+#define DDB_C_BEGIN try {
+#define DDB_C_END }catch(const AppException &e){ \
+    DDBSetLastError(e.what()); \
+    return DDBERR_EXCEPTION; \
+} \
+return DDBERR_NONE;
 
-DDB_DLL void addToIndex(Database *db, const std::vector<std::string> &paths);
-DDB_DLL void removeFromIndex(Database *db, const std::vector<std::string> &paths);
-DDB_DLL void syncIndex(Database *db);
+extern char ddbLastError[255];
+void DDBSetLastError(const char *err);
+
+/** Get the last error message
+ * @return last error message */
+DDB_DLL const char* DDBGetLastError();
+
+/** This must be called as the very first function
+ * of every DDB process/program
+ * @param verbose whether the program should output log messages to stdout */
+DDB_DLL void DDBRegisterProcess(bool verbose = false);
+
+/** Get library version */
+DDB_DLL const char* DDBGetVersion();
+
+/** Initialize a DroneDB database
+ * @param directory Path to directory where to initialize the database
+ * @return DDBERR_NONE on success, an error otherwise */
+DDB_DLL DDBErr DDBInit(const char *directory, char **outPath = NULL);
+
+/** Add one or more files to a DroneDB database
+ * @param ddbPath path to a DroneDB database (parent of ".ddb")
+ * @param paths array of paths to add to index
+ * @param numPaths number of paths
+ * @param recursive whether to recursively add folders
+ * @return DDBERR_NONE on success, an error otherwise */
+DDB_DLL DDBErr DDBAdd(const char *ddbPath, const char **paths, int numPaths, bool recursive = false);
+
+/** Remove one or more files to a DroneDB database
+ * @param ddbPath path to a DroneDB database (parent of ".ddb")
+ * @param paths array of paths to add to index
+ * @param numPaths number of paths
+ * @param recursive whether to recursively remove folders
+ * @return DDBERR_NONE on success, an error otherwise */
+DDB_DLL DDBErr DDBRemove(const char *ddbPath, const char **paths, int numPaths, bool recursive = false);
+
+/** Retrieve information about files 
+ * @param paths array of paths to parse
+ * @param numPaths number of paths
+ * @param format output format. One of: ["text", "json", "geojson"]
+ * @param recursive whether to recursively scan folders
+ * @param maxRecursionDepth limit the depth of recursion
+ * @param geometry type of geometry to return when format is "geojson". One of: ["auto", "point" or "polygon"]
+ * @param withHash whether to compute SHA256 hashes
+ * @param stopOnError whether to stop on failure 
+ * @return DDBERR_NONE on success, an error otherwise */
+DDB_DLL DDBErr DDBInfo(const char **paths, int numPaths, const char *format = "text", bool recursive = false, int maxRecursionDepth = 0,
+                       const char *geometry = "auto", bool withHash = false, bool stopOnError = true);
 
 
+#ifdef __cplusplus
 }
-
+#endif
 
 #endif // DDB_H

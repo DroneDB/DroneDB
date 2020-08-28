@@ -105,6 +105,17 @@ std::string to_str(const T value, const int n = 6)
     return out.str();
 }
 
+// Allocates memory to copy str into **ptr
+// The caller is responsible for deallocating
+// the pointer
+static inline void copyToPtr(const std::string &str, char **ptr){
+    if (ptr != NULL){
+        size_t s = str.size();
+        *ptr = (char *)calloc(s, sizeof(char));
+        strncpy(*ptr, str.c_str(), s);
+    }
+}
+
 DDB_DLL std::string getPrompt(const std::string &prompt = "");
 
 // Cross-platform getpass

@@ -10,7 +10,7 @@
 
 NAN_METHOD(getVersion);
 NAN_METHOD(typeToHuman);
-NAN_METHOD(parseFiles);
+NAN_METHOD(info);
 NAN_METHOD(_thumbs_getFromUserCache);
 NAN_METHOD(_tile_getFromUserCache);
 

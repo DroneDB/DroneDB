@@ -6,7 +6,6 @@
 #include "remove.h"
 #include "ddb.h"
 
-
 namespace cmd {
 
 void Remove::setOptions(cxxopts::Options &opts) {
@@ -30,12 +29,15 @@ void Remove::run(cxxopts::ParseResult &opts) {
         printHelp();
     }
 
-    fs::current_path(opts["directory"].as<std::string>());
-    
-    auto db = ddb::open(opts["directory"].as<std::string>(), true);
-    ddb::removeFromIndex(db.get(), ddb::expandPathList(opts["paths"].as<std::vector<std::string>>(),
-                                                         opts.count("recursive") > 0,
-                                                         0));
+    auto ddbPath = opts["directory"].as<std::string>();
+    auto paths = opts["paths"].as<std::vector<std::string>>();
+
+    std::vector<const char *> cPaths(paths.size());
+    std::transform(paths.begin(), paths.end(), cPaths.begin(), [](const std::string& s) { return s.c_str(); });
+
+    if (DDBRemove(ddbPath.c_str(), cPaths.data(), static_cast<int>(cPaths.size()), opts.count("recursive")) != DDBERR_NONE){
+        std::cerr << DDBGetLastError() << std::endl;
+    }
 }
 
 }

@@ -4,7 +4,7 @@
 
 #include <iostream>
 #include "geoproj.h"
-#include "ddb.h"
+#include "dbops.h"
 #include "geoproject.h"
 
 

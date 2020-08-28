@@ -2,29 +2,31 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-#include "ddb.h"
+#include "dbops.h"
 #include "info.h"
 #include "exceptions.h"
 
 namespace ddb {
 
-void parseFiles(const std::vector<std::string> &input, std::ostream &output, ParseFilesOpts &opts){
+void info(const std::vector<std::string> &input, std::ostream &output,
+          const std::string &format, bool recursive, int maxRecursionDepth, const std::string &geometry,
+          bool withHash, bool stopOnError){
     std::vector<fs::path> filePaths;
 
-    if (opts.recursive){
-        filePaths = getPathList(input, true, opts.maxRecursionDepth);
+    if (recursive){
+        filePaths = getPathList(input, true, maxRecursionDepth);
     }else{
         filePaths = std::vector<fs::path>(input.begin(), input.end());
     }
 
-    if (opts.format == "json"){
+    if (format == "json"){
         output << "[";
-    }else if (opts.format == "geojson"){
+    }else if (format == "geojson"){
         output << R"<<<({"type":"FeatureCollection","crs":{"type":"name","properties":{"name":"EPSG:4326"}},"features":[)<<<";
-    }else if (opts.format == "text"){
+    }else if (format == "text"){
         // Nothing
     }else{
-        throw InvalidArgsException("Invalid format " + opts.format);
+        throw InvalidArgsException("Invalid format " + format);
     }
 
 
@@ -34,17 +36,17 @@ void parseFiles(const std::vector<std::string> &input, std::ostream &output, Par
         LOGD << "Parsing entry " << fp.string();
 
         Entry e;
-        if (parseEntry(fp, "/", e, opts.peOpts)){
+        if (parseEntry(fp, "/", e, withHash, stopOnError)){
             e.path = "file://" + e.path;
 
-            if (opts.format == "json"){
+            if (format == "json"){
                 json j;
                 e.toJSON(j);
                 if (!first) output << ",";
                 output << j.dump();
-            }else if (opts.format == "geojson"){
+            }else if (format == "geojson"){
                 json j;
-                if (e.toGeoJSON(j, opts.geometry)){
+                if (e.toGeoJSON(j, ddb::getBasicGeometryTypeFromName(geometry))){
                     if (!first) output << ",";
                     output << j.dump();
                     j.clear();
@@ -61,9 +63,9 @@ void parseFiles(const std::vector<std::string> &input, std::ostream &output, Par
         }
     }
 
-    if (opts.format == "json"){
+    if (format == "json"){
         output << "]";
-    }else if (opts.format == "geojson"){
+    }else if (format == "geojson"){
         output << "]}";
     }
 }

@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-#include "ddb.h"
+#include "dbops.h"
 #include "geoproject.h"
 #include <gdal_priv.h>
 #include <gdal_utils.h>
@@ -20,15 +20,14 @@ void geoProject(const std::vector<std::string> &images, const std::string &outpu
         }
     }
 
-    for (const fs::path &p : images){
+    for (const std::string &img : images){
+        fs::path p = img;
         if (!fs::exists(p)){
             throw FSException("Cannot project " + p.string() + " (does not exist)");
         }
 
         Entry e;
-        ParseEntryOpts opts;
-        opts.withHash = false;
-        if (!parseEntry(p, ".", e, opts)){
+        if (!parseEntry(p, ".", e, false, true)){
             throw FSException("Cannot parse file " + p.string());
         }
 

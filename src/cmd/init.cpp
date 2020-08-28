@@ -24,8 +24,13 @@ std::string Init::description() {
 }
 
 void Init::run(cxxopts::ParseResult &opts) {
-    std::string p = ddb::create(opts["directory"].as<std::string>());
-    std::cout << "Initialized empty database in " << p << std::endl;
+    std::string p = opts["directory"].as<std::string>();
+    char *outPath;
+    if (DDBInit(p.c_str(), &outPath) == DDBERR_NONE){
+        std::cout << "Initialized empty database in " << outPath << std::endl;
+    }else{
+        std::cerr << DDBGetLastError() << std::endl;
+    }
 }
 
 }

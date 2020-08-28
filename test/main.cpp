@@ -7,7 +7,7 @@
 #include "ddb.h"
 
 int main(int argc, char **argv) {
-	ddb::initialize(true);
+    DDBRegisterProcess(true);
 
     // TODO: ability to clean previous TestAreas
 

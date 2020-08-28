@@ -11,7 +11,7 @@
 #include "hash.h"
 #include "utils.h"
 #include "userprofile.h"
-#include "ddb.h"
+#include "dbops.h"
 #include "mio.h"
 
 namespace ddb{
@@ -33,15 +33,11 @@ void generateThumbs(const std::vector<std::string> &input, const fs::path &outpu
 
     std::vector<fs::path> filePaths = std::vector<fs::path>(input.begin(), input.end());
 
-    ParseEntryOpts peOpts;
-    peOpts.withHash = false;
-    peOpts.stopOnError = true;
-
     for (auto &fp : filePaths){
         LOGD << "Parsing entry " << fp.string();
 
         Entry e;
-        if (parseEntry(fp, "/", e, peOpts)){
+        if (parseEntry(fp, "/", e, false, true)){
             e.path = (fs::path("/") / fs::path(e.path)).string(); // TODO: does this work on Windows?
             if (supportsThumbnails(e.type)){
                 fs::path outImagePath;
