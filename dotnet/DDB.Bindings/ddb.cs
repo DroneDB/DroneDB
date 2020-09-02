@@ -1,4 +1,7 @@
-﻿using System;
+﻿using Newtonsoft.Json;
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Runtime.InteropServices;
 
 namespace DDB.Bindings
@@ -83,8 +86,6 @@ namespace DDB.Bindings
             }
         }
 
-        //DDB_DLL DDBErr DDBInfo(const char** paths, int numPaths, const char* format = "text", bool recursive = false, int maxRecursionDepth = 0,
-        //               const char* geometry = "auto", bool withHash = false, bool stopOnError = true);
         [DllImport("ddb", EntryPoint = "DDBInfo")]
         static extern DDBErr _Info([MarshalAs(UnmanagedType.LPArray, ArraySubType = UnmanagedType.LPStr)] string[] paths,
                                    int numPaths,
@@ -93,18 +94,20 @@ namespace DDB.Bindings
                                    int maxRecursionDepth = 0, [MarshalAs(UnmanagedType.LPStr)] string geometry = "auto",
                                    bool withHash = false, bool stopOnError = true);
 
-        public static string Info(string path, bool recursive = false, int maxRecursionDepth = 0, bool withHash = false)
+        public static Entry Info(string path, bool recursive = false, int maxRecursionDepth = 0, bool withHash = false)
         {
-            return Info(new string[] { path }, recursive, maxRecursionDepth, withHash);
+            return Info(new string[] { path }, recursive, maxRecursionDepth, withHash).First();
         }
 
-        public static string Info(string[] paths, bool recursive = false, int maxRecursionDepth = 0, bool withHash = false)
+        public static List<Entry> Info(string[] paths, bool recursive = false, int maxRecursionDepth = 0, bool withHash = false)
         {
             IntPtr output;
             if (_Info(paths, paths.Length, out output, "json", recursive, maxRecursionDepth, "auto", withHash, true) == DDBErr.DDBERR_NONE)
             {
                 string json = Marshal.PtrToStringAnsi(output);
-                return json;
+                Console.WriteLine(json);
+                List<Entry> entries = JsonConvert.DeserializeObject<List<Entry>>(json);
+                return entries;
             }
             else
             {

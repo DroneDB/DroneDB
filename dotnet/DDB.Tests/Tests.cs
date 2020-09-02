@@ -5,6 +5,8 @@ using static DDB.Bindings.Exports;
 using DDB.Bindings;
 using System.Text.Json;
 using System.Diagnostics;
+using System.Collections.Generic;
+using Newtonsoft.Json;
 
 namespace DDB.Tests
 {
@@ -65,13 +67,24 @@ namespace DDB.Tests
             Directory.CreateDirectory("testInfo");
 
             File.WriteAllText(@"testInfo\file.txt", "test");
+            File.WriteAllText(@"testInfo\file2.txt", "test");
 
+            Entry e = Info(@"testInfo\file.txt", withHash: true);
+            Assert.IsNotEmpty(e.Hash);
 
-            string json = Info(@"testInfo\file.txt", withHash: true);
-            Console.Write(json);
-            //var utf8Reader = new Utf8JsonReader(json);
+            List<Entry> es = Info(new string[] { @"testInfo"}, recursive: true);
+            Assert.AreEqual(2, es.Count);
+            Assert.AreEqual(EntryType.Generic, es[0].Type);
+            Assert.IsTrue(es[0].Size > 0);
+            Assert.AreEqual(DateTime.Now.Year, es[0].ModifiedTime.Year);            
+        }
 
-            //JsonSerializer.Deserialize(json);
+        [Test]
+        public void testEntrySerialization()
+        {
+            string json = "{'hash': 'abc', 'mtime': 5}";
+            Entry e = JsonConvert.DeserializeObject<Entry>(json);
+            Assert.IsTrue(e.ModifiedTime.Year == 1970);
         }
     }
 }
