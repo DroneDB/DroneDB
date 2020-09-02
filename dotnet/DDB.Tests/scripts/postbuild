@@ -1,0 +1,31 @@
+#!/bin/bash
+
+__dirname=$(cd $(dirname "$0"); pwd -P)
+cd "${__dirname}"
+
+echo "Copying libddb to output directory"
+
+TARGETDIR=$1
+
+COPY_FROM="../../../build"
+if [ ! -z "$DDB_LIB_PATH" ]; then
+    COPY_FROM="$DDB_LIB_PATH"
+fi
+
+if [ ! -e "$COPY_FROM/libddb.so" ]; then
+    echo "Error! No libddb.so found in $COPY_FROM. Build libddb first, then try again. You can also set DDB_LIB_PATH to a different path if you've built the library elsewhere."
+    exit 1
+fi
+
+cp -v -u "$COPY_FROM/"*.so "$TARGETDIR"
+cp -v -u "$COPY_FROM/exiv2-build/lib/libexiv2.so" "$TARGETDIR"
+cp -v -u "$COPY_FROM/"*.sqlite "$TARGETDIR"
+cp -v -u "$COPY_FROM/"*.bin "$TARGETDIR"
+cp -v -u "$COPY_FROM/"*.db "$TARGETDIR"
+
+# Link libddb.so --> ddb (dotnet bug? Shouldn't DllImport know to add "lib[name].so" ?)
+if [ -e "$TARGETDIR"/ddb ]; then
+    rm "$TARGETDIR"/ddb
+fi
+cd "$TARGETDIR" && ln -vs libddb.so ddb 
+
