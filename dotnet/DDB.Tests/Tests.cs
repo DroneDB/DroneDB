@@ -76,7 +76,7 @@ namespace DDB.Tests
             Assert.AreEqual(2, es.Count);
             Assert.AreEqual(EntryType.Generic, es[0].Type);
             Assert.IsTrue(es[0].Size > 0);
-            Assert.AreEqual(DateTime.Now.Year, es[0].ModifiedTime.Year);            
+            Assert.AreEqual(DateTime.Now.Year, es[0].ModifiedTime.Year); 
         }
 
         [Test]
