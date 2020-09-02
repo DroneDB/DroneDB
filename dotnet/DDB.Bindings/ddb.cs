@@ -1,5 +1,7 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using System.Text;
 
 namespace DDB.Bindings
 {
@@ -47,5 +49,24 @@ namespace DDB.Bindings
                 throw new DDBException(GetLastError());
             }
         }
+
+        //DDB_DLL DDBErr DDBAdd(const char *ddbPath, const char **paths, int numPaths, bool recursive = false);
+        [DllImport("ddb", EntryPoint = "DDBAdd")]
+        static extern DDBErr _Add([MarshalAs(UnmanagedType.LPStr)] string ddbPath, 
+                                  [MarshalAs(UnmanagedType.LPArray, ArraySubType=UnmanagedType.LPStr)] string[] paths, 
+                                  int numPaths, bool recursive);
+
+        public static void Add(string ddbPath, string path, bool recursive = false)
+        {
+            Add(ddbPath, new string[] { path }, recursive);
+        }
+        public static void Add(string ddbPath, string[] paths, bool recursive = false)
+        {
+            if (_Add(ddbPath, paths, paths.Length, recursive) != DDBErr.DDBERR_NONE) 
+            { 
+                throw new DDBException(GetLastError());
+            }
+        }
+
     }
 }

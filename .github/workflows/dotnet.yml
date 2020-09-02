@@ -9,7 +9,6 @@ on:
 jobs:
     build_dotnet_windows:
       name: Build Windows .NET Bindings
-      needs: build_windows
       runs-on: windows-latest
       steps:
         - uses: actions/checkout@v2
