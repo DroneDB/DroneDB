@@ -5,7 +5,11 @@ if "%DDB_LIB_PATH%"=="" (SET COPY_FROM=..\..\build) ELSE (SET COPY_FROM="%DDB_LI
 
 if NOT EXIST "%COPY_FROM%\ddb.dll" GOTO :NODIR
 
-xcopy "%COPY_FROM%\*.*" "%TARGETDIR%" /i /d /y
+xcopy "%COPY_FROM%\*.dll" "%TARGETDIR%" /i /d /y
+xcopy "%COPY_FROM%\*.sqlite" "%TARGETDIR%" /i /d /y
+xcopy "%COPY_FROM%\*.bin" "%TARGETDIR%" /i /d /y
+xcopy "%COPY_FROM%\*.exe" "%TARGETDIR%" /i /d /y
+xcopy "%COPY_FROM%\*.bat" "%TARGETDIR%" /i /d /y
 
 exit 0
 
