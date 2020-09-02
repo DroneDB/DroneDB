@@ -1,7 +1,5 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Runtime.InteropServices;
-using System.Text;
 
 namespace DDB.Bindings
 {
@@ -10,6 +8,7 @@ namespace DDB.Bindings
         DDBERR_NONE = 0, // No error
         DDBERR_EXCEPTION = 1 // Generic app exception
     };
+
 
     public static class Exports
     {
@@ -50,7 +49,6 @@ namespace DDB.Bindings
             }
         }
 
-        //DDB_DLL DDBErr DDBAdd(const char *ddbPath, const char **paths, int numPaths, bool recursive = false);
         [DllImport("ddb", EntryPoint = "DDBAdd")]
         static extern DDBErr _Add([MarshalAs(UnmanagedType.LPStr)] string ddbPath, 
                                   [MarshalAs(UnmanagedType.LPArray, ArraySubType=UnmanagedType.LPStr)] string[] paths, 
@@ -68,5 +66,50 @@ namespace DDB.Bindings
             }
         }
 
+        [DllImport("ddb", EntryPoint = "DDBRemove")]
+        static extern DDBErr _Remove([MarshalAs(UnmanagedType.LPStr)] string ddbPath,
+                                  [MarshalAs(UnmanagedType.LPArray, ArraySubType = UnmanagedType.LPStr)] string[] paths,
+                                  int numPaths, bool recursive);
+
+        public static void Remove(string ddbPath, string path, bool recursive = false)
+        {
+            Remove(ddbPath, new string[] { path }, recursive);
+        }
+        public static void Remove(string ddbPath, string[] paths, bool recursive = false)
+        {
+            if (_Remove(ddbPath, paths, paths.Length, recursive) != DDBErr.DDBERR_NONE)
+            {
+                throw new DDBException(GetLastError());
+            }
+        }
+
+        //DDB_DLL DDBErr DDBInfo(const char** paths, int numPaths, const char* format = "text", bool recursive = false, int maxRecursionDepth = 0,
+        //               const char* geometry = "auto", bool withHash = false, bool stopOnError = true);
+        [DllImport("ddb", EntryPoint = "DDBInfo")]
+        static extern DDBErr _Info([MarshalAs(UnmanagedType.LPArray, ArraySubType = UnmanagedType.LPStr)] string[] paths,
+                                   int numPaths,
+                                   out IntPtr output,
+                                   [MarshalAs(UnmanagedType.LPStr)] string format, bool recursive = false,
+                                   int maxRecursionDepth = 0, [MarshalAs(UnmanagedType.LPStr)] string geometry = "auto",
+                                   bool withHash = false, bool stopOnError = true);
+
+        public static string Info(string path, bool recursive = false, int maxRecursionDepth = 0, bool withHash = false)
+        {
+            return Info(new string[] { path }, recursive, maxRecursionDepth, withHash);
+        }
+
+        public static string Info(string[] paths, bool recursive = false, int maxRecursionDepth = 0, bool withHash = false)
+        {
+            IntPtr output;
+            if (_Info(paths, paths.Length, out output, "json", recursive, maxRecursionDepth, "auto", withHash, true) == DDBErr.DDBERR_NONE)
+            {
+                string json = Marshal.PtrToStringAnsi(output);
+                return json;
+            }
+            else
+            {
+                throw new DDBException(GetLastError());
+            }
+        }
     }
 }

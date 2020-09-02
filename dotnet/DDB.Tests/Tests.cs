@@ -1,10 +1,10 @@
 using NUnit.Framework;
 using System;
 using System.IO;
-using System.Reflection;
 using static DDB.Bindings.Exports;
 using DDB.Bindings;
-using System.Linq;
+using System.Text.Json;
+using System.Diagnostics;
 
 namespace DDB.Tests
 {
@@ -34,7 +34,7 @@ namespace DDB.Tests
         }
 
         [Test]
-        public void testAdd()
+        public void testAddRemove()
         {
             Assert.Throws<DDBException>(() => Add("nonexistant", ""));
 
@@ -51,6 +51,27 @@ namespace DDB.Tests
 
             Add("testAdd", @"testAdd\file.txt");
             Add("testAdd", new string[]{ @"testAdd\file2.txt", @"testAdd\file3.txt"});
+
+            Remove("testAdd", @"testAdd\file.txt");
+            Assert.Throws<DDBException>(() => Remove("testAdd", "invalid"));
+        }
+
+        [Test]
+        public void testInfo()
+        {
+            Assert.Throws<DDBException>(() => Info("invalid"));
+
+            if (Directory.Exists("testInfo")) Directory.Delete("testInfo", true);
+            Directory.CreateDirectory("testInfo");
+
+            File.WriteAllText(@"testInfo\file.txt", "test");
+
+
+            string json = Info(@"testInfo\file.txt", withHash: true);
+            Console.Write(json);
+            //var utf8Reader = new Utf8JsonReader(json);
+
+            //JsonSerializer.Deserialize(json);
         }
     }
 }
