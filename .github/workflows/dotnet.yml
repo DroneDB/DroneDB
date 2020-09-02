@@ -1,0 +1,38 @@
+name: .NET CI
+
+on:
+    push:
+        branches: [master]
+    pull_request:
+        branches: [master]
+
+jobs:
+    build_dotnet_windows:
+      name: Build Windows .NET Bindings
+      runs-on: windows-latest
+      steps:
+        - uses: actions/checkout@v2
+          with:
+            submodules: 'recursive'
+        - name: Build C++ lib
+          run: |
+            mkdir build
+            cd build
+            cmake .. -DBUILD_TESTING=OFF
+            cmake --build . --config Release --target ALL_BUILD -- /maxcpucount:14
+            dir
+        - name: Test .NET bindings
+          run: |
+            cd dotnet
+            dotnet test -c Release
+        - name: Publish .NET bindings
+          run: |
+            cd dotnet
+            dotnet publish -c Release
+            dir
+        - name: Upload Library Files
+          uses: actions/upload-artifact@v2
+          with:
+            name: .NET Bindings
+            path: dotnet\DDB.Tests\bin\Release\netcoreapp3.1\*.*
+              
