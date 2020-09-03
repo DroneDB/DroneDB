@@ -38,6 +38,7 @@ namespace DDB.Tests
         public void testAddRemove()
         {
             Assert.Throws<DDBException>(() => DroneDB.Add("nonexistant", ""));
+            Assert.Throws<DDBException>(() => DroneDB.Add("nonexistant", "test"));
 
             if (Directory.Exists("testAdd")) Directory.Delete("testAdd", true);
 

@@ -54,6 +54,10 @@ std::vector<fs::path> getIndexPathList(fs::path rootDirectory, const std::vector
     std::vector<fs::path> result;
     std::unordered_map<std::string, bool> directories;
 
+    for (const std::string &p : paths){
+        if (p.empty()) throw FSException("Some paths are empty");
+    }
+
     if (!io::Path(rootDirectory).hasChildren(paths)) {
         throw FSException("Some paths are not contained within: " + rootDirectory.string() + ". Did you run ddb init?");
     }
@@ -221,6 +225,7 @@ void doUpdate(Statement *updateQ, const Entry &e) {
 }
 
 void addToIndex(Database *db, const std::vector<std::string> &paths) {
+    if (paths.size() == 0) return; // Nothing to do
     fs::path directory = rootDirectory(db);
     auto pathList = getIndexPathList(directory, paths, true);
 
@@ -274,6 +279,7 @@ void addToIndex(Database *db, const std::vector<std::string> &paths) {
 }
 
 void removeFromIndex(Database *db, const std::vector<std::string> &paths) {
+    if (paths.size() == 0) return; // Nothing to do
     fs::path directory = rootDirectory(db);
     auto pathList = getIndexPathList(directory, paths, false);
 
