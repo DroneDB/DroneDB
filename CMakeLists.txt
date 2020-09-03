@@ -321,5 +321,14 @@ else()
 endif()
 
 if (NOT SKIP_DIST)
-    add_custom_target("dist" ALL DEPENDS "${PROJECT_NAME}cmd" "${CMAKE_BINARY_DIR}/dist/${OUTPUT_DIST_FILE}")
+    add_custom_target("dist" DEPENDS "${PROJECT_NAME}cmd" "${CMAKE_BINARY_DIR}/dist/${OUTPUT_DIST_FILE}")
+endif()
+
+# Installation
+
+if (NOT WIN32)
+install(TARGETS ${PROJECT_NAME})
+install(PROGRAMS "${CMAKE_BINARY_DIR}/ddbcmd" DESTINATION bin RENAME ddb)
+install(DIRECTORY "${CMAKE_BINARY_DIR}/exiv2-build/lib/" DESTINATION lib PATTERN "*" )
+install(FILES ${DIST_FILES} DESTINATION share/ddb)
 endif()

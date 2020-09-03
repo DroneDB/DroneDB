@@ -197,6 +197,17 @@ fs::path getDataPath(const fs::path &p){
     if (fs::exists(dllDir / p)){
         return dllDir / p;
     }
+    #else
+    // On *nix, check /usr/share /usr/local/share folders
+    fs::path usrLocalShare = fs::path("/usr/local/share/ddb");
+    if (fs::exists(usrLocalShare / p)){
+        return usrLocalShare / p;
+    }
+
+    fs::path usrShare = fs::path("/usr/share/ddb");
+    if (fs::exists(usrShare / p)){
+        return usrShare / p;
+    }
     #endif
 
     return "";
