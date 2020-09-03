@@ -1,7 +1,6 @@
 using NUnit.Framework;
 using System;
 using System.IO;
-using static DDB.Bindings.Exports;
 using DDB.Bindings;
 using System.Text.Json;
 using System.Diagnostics;
@@ -15,53 +14,53 @@ namespace DDB.Tests
         [SetUp]
         public void Setup()
         {
-            RegisterProcess();
+            DroneDB.RegisterProcess();
         }
 
         [Test]
         public void testGetVersion()
         {
-            Assert.IsTrue(GetVersion().Length > 0, "Can call GetVersion()");
+            Assert.IsTrue(DroneDB.GetVersion().Length > 0, "Can call GetVersion()");
         }
 
         [Test]
         public void testInit()
         {
-            Assert.Throws<DDBException>(() => Init("nonexistant"));
+            Assert.Throws<DDBException>(() => DroneDB.Init("nonexistant"));
 
             if (Directory.Exists("testInit")) Directory.Delete("testInit", true);
             Directory.CreateDirectory("testInit");
-            Assert.IsTrue(Init("testInit").Contains("testInit"));
+            Assert.IsTrue(DroneDB.Init("testInit").Contains("testInit"));
             Assert.IsTrue(Directory.Exists(Path.Join("testInit", ".ddb")));
         }
 
         [Test]
         public void testAddRemove()
         {
-            Assert.Throws<DDBException>(() => Add("nonexistant", ""));
+            Assert.Throws<DDBException>(() => DroneDB.Add("nonexistant", ""));
 
             if (Directory.Exists("testAdd")) Directory.Delete("testAdd", true);
 
             Directory.CreateDirectory("testAdd");
-            Init("testAdd");
+            DroneDB.Init("testAdd");
 
             File.WriteAllText(@"testAdd\file.txt", "test");
             File.WriteAllText(@"testAdd\file2.txt", "test");
             File.WriteAllText(@"testAdd\file3.txt", "test");
 
-            Assert.Throws<DDBException>(() => Add("testAdd", "invalid"));
+            Assert.Throws<DDBException>(() => DroneDB.Add("testAdd", "invalid"));
 
-            Add("testAdd", @"testAdd\file.txt");
-            Add("testAdd", new string[]{ @"testAdd\file2.txt", @"testAdd\file3.txt"});
+            DroneDB.Add("testAdd", @"testAdd\file.txt");
+            DroneDB.Add("testAdd", new string[]{ @"testAdd\file2.txt", @"testAdd\file3.txt"});
 
-            Remove("testAdd", @"testAdd\file.txt");
-            Assert.Throws<DDBException>(() => Remove("testAdd", "invalid"));
+            DroneDB.Remove("testAdd", @"testAdd\file.txt");
+            Assert.Throws<DDBException>(() => DroneDB.Remove("testAdd", "invalid"));
         }
 
         [Test]
         public void testInfo()
         {
-            Assert.Throws<DDBException>(() => Info("invalid"));
+            Assert.Throws<DDBException>(() => DroneDB.Info("invalid"));
 
             if (Directory.Exists("testInfo")) Directory.Delete("testInfo", true);
             Directory.CreateDirectory("testInfo");
@@ -69,10 +68,10 @@ namespace DDB.Tests
             File.WriteAllText(@"testInfo\file.txt", "test");
             File.WriteAllText(@"testInfo\file2.txt", "test");
 
-            Entry e = Info(@"testInfo\file.txt", withHash: true);
+            Entry e = DroneDB.Info(@"testInfo\file.txt", withHash: true);
             Assert.IsNotEmpty(e.Hash);
 
-            List<Entry> es = Info(new string[] { @"testInfo"}, recursive: true);
+            List<Entry> es = DroneDB.Info(new string[] { @"testInfo"}, recursive: true);
             Assert.AreEqual(2, es.Count);
             Assert.AreEqual(EntryType.Generic, es[0].Type);
             Assert.IsTrue(es[0].Size > 0);

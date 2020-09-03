@@ -12,7 +12,7 @@ namespace DDB.Bindings
         DDBERR_EXCEPTION = 1 // Generic app exception
     };
 
-    public static class Exports
+    public static class DroneDB
     {
         [DllImport("./ddb", EntryPoint = "DDBRegisterProcess")]
         public static extern void RegisterProcess(bool verbose = false);

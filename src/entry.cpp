@@ -21,7 +21,7 @@ bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
 
     entry.path = relPath.generic();
     entry.depth = relPath.depth();
-    if (entry.mtime == 0) entry.mtime = relPath.getModifiedTime();
+    if (entry.mtime == 0) entry.mtime = p.getModifiedTime();
 
     if (fs::is_directory(path)) {
         entry.type = EntryType::Directory;

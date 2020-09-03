@@ -27,7 +27,7 @@ time_t Path::getModifiedTime() {
     FILETIME ftModified;
     hFile = CreateFile(p.string().c_str(), 0, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_BACKUP_SEMANTICS, NULL);
     if (hFile == INVALID_HANDLE_VALUE){
-        throw FSException("Cannot stat mtime (open) " + p.string() + " (errcode: " + std::to_string(GetLastError()));
+        throw FSException("Cannot stat mtime (open) " + p.string() + " (errcode: " + std::to_string(GetLastError()) + ")");
     }
 
     if (!GetFileTime(hFile, NULL, NULL, &ftModified)){
