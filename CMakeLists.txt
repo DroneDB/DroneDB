@@ -123,7 +123,6 @@ if (NOT WIN32)
 endif()
 
 set(LINK_LIBRARIES ${SPATIALITE_LIBRARY} ${SQLITE3_LIBRARY} ${STDPPFS_LIBRARY} ${EXIV2_LIB} cctz::cctz ${GDAL_LIBRARY} ${CURL_LIBRARY})
-
 set(CMD_SRC_LIST ${CMAKE_CURRENT_SOURCE_DIR}/src/cmd/main.cpp)
 
 add_subdirectory("src")
@@ -136,6 +135,10 @@ include_directories("${CMAKE_CURRENT_SOURCE_DIR}/vendor/cctz/include")
 add_library(${PROJECT_NAME} SHARED ${SRC_LIST})
 add_dependencies(${PROJECT_NAME} exiv2)
 set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 17)
+if(NOT WIN32)
+    # Tell the linker how to resolve library names
+    target_link_libraries(${PROJECT_NAME} PRIVATE "-lspatialite -lsqlite3 -lexiv2 -lgdal -lcurl")
+endif()
 
 # set PLOG to PLOG_GLOBAL/PLOG_EXPORT to share instances across modules (and export on Windows)
 if(WIN32)
@@ -318,5 +321,14 @@ else()
 endif()
 
 if (NOT SKIP_DIST)
-    add_custom_target("dist" ALL DEPENDS "${PROJECT_NAME}cmd" "${CMAKE_BINARY_DIR}/dist/${OUTPUT_DIST_FILE}")
+    add_custom_target("dist" DEPENDS "${PROJECT_NAME}cmd" "${CMAKE_BINARY_DIR}/dist/${OUTPUT_DIST_FILE}")
+endif()
+
+# Installation
+
+if (NOT WIN32)
+install(TARGETS ${PROJECT_NAME})
+install(PROGRAMS "${CMAKE_BINARY_DIR}/ddbcmd" DESTINATION bin RENAME ddb)
+install(DIRECTORY "${CMAKE_BINARY_DIR}/exiv2-build/lib/" DESTINATION lib PATTERN "*" )
+install(FILES ${DIST_FILES} DESTINATION share/ddb)
 endif()

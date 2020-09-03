@@ -1,7 +1,8 @@
-﻿using System;
+﻿using Newtonsoft.Json;
+using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Runtime.InteropServices;
-using System.Text;
 
 namespace DDB.Bindings
 {
@@ -11,12 +12,12 @@ namespace DDB.Bindings
         DDBERR_EXCEPTION = 1 // Generic app exception
     };
 
-    public static class Exports
+    public static class DroneDB
     {
-        [DllImport("ddb", EntryPoint = "DDBRegisterProcess")]
+        [DllImport("./ddb", EntryPoint = "DDBRegisterProcess")]
         public static extern void RegisterProcess(bool verbose = false);
 
-        [DllImport("ddb", EntryPoint = "DDBGetVersion")]
+        [DllImport("./ddb", EntryPoint = "DDBGetVersion")]
         static extern IntPtr _GetVersion();
 
         public static string GetVersion()
@@ -25,7 +26,7 @@ namespace DDB.Bindings
             return Marshal.PtrToStringAnsi(ptr);
         }
 
-        [DllImport("ddb", EntryPoint = "DDBGetLastError")]
+        [DllImport("./ddb", EntryPoint = "DDBGetLastError")]
         static extern IntPtr _GetLastError();
 
         static string GetLastError()
@@ -34,7 +35,7 @@ namespace DDB.Bindings
             return Marshal.PtrToStringAnsi(ptr);
         }
 
-        [DllImport("ddb", EntryPoint = "DDBInit")]
+        [DllImport("./ddb", EntryPoint = "DDBInit")]
         static extern DDBErr _Init([MarshalAs(UnmanagedType.LPStr)]string directory, out IntPtr outPath);
         
         public static string Init(string directory)
@@ -50,8 +51,7 @@ namespace DDB.Bindings
             }
         }
 
-        //DDB_DLL DDBErr DDBAdd(const char *ddbPath, const char **paths, int numPaths, bool recursive = false);
-        [DllImport("ddb", EntryPoint = "DDBAdd")]
+        [DllImport("./ddb", EntryPoint = "DDBAdd")]
         static extern DDBErr _Add([MarshalAs(UnmanagedType.LPStr)] string ddbPath, 
                                   [MarshalAs(UnmanagedType.LPArray, ArraySubType=UnmanagedType.LPStr)] string[] paths, 
                                   int numPaths, bool recursive);
@@ -68,5 +68,49 @@ namespace DDB.Bindings
             }
         }
 
+        [DllImport("./ddb", EntryPoint = "DDBRemove")]
+        static extern DDBErr _Remove([MarshalAs(UnmanagedType.LPStr)] string ddbPath,
+                                  [MarshalAs(UnmanagedType.LPArray, ArraySubType = UnmanagedType.LPStr)] string[] paths,
+                                  int numPaths, bool recursive);
+
+        public static void Remove(string ddbPath, string path, bool recursive = false)
+        {
+            Remove(ddbPath, new string[] { path }, recursive);
+        }
+        public static void Remove(string ddbPath, string[] paths, bool recursive = false)
+        {
+            if (_Remove(ddbPath, paths, paths.Length, recursive) != DDBErr.DDBERR_NONE)
+            {
+                throw new DDBException(GetLastError());
+            }
+        }
+
+        [DllImport("./ddb", EntryPoint = "DDBInfo")]
+        static extern DDBErr _Info([MarshalAs(UnmanagedType.LPArray, ArraySubType = UnmanagedType.LPStr)] string[] paths,
+                                   int numPaths,
+                                   out IntPtr output,
+                                   [MarshalAs(UnmanagedType.LPStr)] string format, bool recursive = false,
+                                   int maxRecursionDepth = 0, [MarshalAs(UnmanagedType.LPStr)] string geometry = "auto",
+                                   bool withHash = false, bool stopOnError = true);
+
+        public static List<Entry> Info(string path, bool recursive = false, int maxRecursionDepth = 0, bool withHash = false)
+        {
+            return Info(new string[] { path }, recursive, maxRecursionDepth, withHash);
+        }
+
+        public static List<Entry> Info(string[] paths, bool recursive = false, int maxRecursionDepth = 0, bool withHash = false)
+        {
+            IntPtr output;
+            if (_Info(paths, paths.Length, out output, "json", recursive, maxRecursionDepth, "auto", withHash, true) == DDBErr.DDBERR_NONE)
+            {
+                string json = Marshal.PtrToStringAnsi(output);
+                List<Entry> entries = JsonConvert.DeserializeObject<List<Entry>>(json);
+                return entries;
+            }
+            else
+            {
+                throw new DDBException(GetLastError());
+            }
+        }
     }
 }

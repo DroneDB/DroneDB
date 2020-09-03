@@ -25,9 +25,9 @@ time_t Path::getModifiedTime() {
 #ifdef WIN32
     HANDLE hFile;
     FILETIME ftModified;
-    hFile = CreateFile(p.string().c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_BACKUP_SEMANTICS, NULL);
+    hFile = CreateFile(p.string().c_str(), 0, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_BACKUP_SEMANTICS, NULL);
     if (hFile == INVALID_HANDLE_VALUE){
-        throw FSException("Cannot stat mtime (open) " + p.string());
+        throw FSException("Cannot stat mtime (open) " + p.string() + " (errcode: " + std::to_string(GetLastError()) + ")");
     }
 
     if (!GetFileTime(hFile, NULL, NULL, &ftModified)){
@@ -60,9 +60,9 @@ time_t Path::getModifiedTime() {
 std::uintmax_t Path::getSize() {
 #ifdef WIN32
     HANDLE hFile;
-    hFile = CreateFile(p.string().c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_BACKUP_SEMANTICS, NULL);
+    hFile = CreateFile(p.string().c_str(), 0, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_BACKUP_SEMANTICS, NULL);
     if (hFile == INVALID_HANDLE_VALUE) {
-        throw FSException("Cannot stat size (open) " + p.string());
+        throw FSException("Cannot stat size (open) " + p.string() + " (errcode: " + std::to_string(GetLastError()));
     }
     
     LARGE_INTEGER size;
@@ -196,6 +196,17 @@ fs::path getDataPath(const fs::path &p){
     fs::path dllDir = (fs::path(dllPath)).parent_path();
     if (fs::exists(dllDir / p)){
         return dllDir / p;
+    }
+    #else
+    // On *nix, check /usr/share /usr/local/share folders
+    fs::path usrLocalShare = fs::path("/usr/local/share/ddb");
+    if (fs::exists(usrLocalShare / p)){
+        return usrLocalShare / p;
+    }
+
+    fs::path usrShare = fs::path("/usr/share/ddb");
+    if (fs::exists(usrShare / p)){
+        return usrShare / p;
     }
     #endif
 
