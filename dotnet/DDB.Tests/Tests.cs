@@ -45,16 +45,16 @@ namespace DDB.Tests
             Directory.CreateDirectory("testAdd");
             DroneDB.Init("testAdd");
 
-            File.WriteAllText(@"testAdd\file.txt", "test");
-            File.WriteAllText(@"testAdd\file2.txt", "test");
-            File.WriteAllText(@"testAdd\file3.txt", "test");
+            File.WriteAllText(Path.Join("testAdd", "file.txt"), "test");
+            File.WriteAllText(Path.Join("testAdd", "file2.txt"), "test");
+            File.WriteAllText(Path.Join("testAdd", "file3.txt"), "test");
 
             Assert.Throws<DDBException>(() => DroneDB.Add("testAdd", "invalid"));
 
-            DroneDB.Add("testAdd", @"testAdd\file.txt");
-            DroneDB.Add("testAdd", new string[]{ @"testAdd\file2.txt", @"testAdd\file3.txt"});
+            DroneDB.Add("testAdd", Path.Join("testAdd", "file.txt"));
+            DroneDB.Add("testAdd", new string[]{ Path.Join("testAdd", "file2.txt"), Path.Join("testAdd", "file3.txt")});
 
-            DroneDB.Remove("testAdd", @"testAdd\file.txt");
+            DroneDB.Remove("testAdd", Path.Join("testAdd", "file.txt"));
             Assert.Throws<DDBException>(() => DroneDB.Remove("testAdd", "invalid"));
         }
 
@@ -66,13 +66,14 @@ namespace DDB.Tests
             if (Directory.Exists("testInfo")) Directory.Delete("testInfo", true);
             Directory.CreateDirectory("testInfo");
 
-            File.WriteAllText(@"testInfo\file.txt", "test");
-            File.WriteAllText(@"testInfo\file2.txt", "test");
+            File.WriteAllText(Path.Join("testInfo", "file.txt"), "test");
+            File.WriteAllText(Path.Join("testInfo", "file2.txt"), "test");
 
-            Entry e = DroneDB.Info(@"testInfo\file.txt", withHash: true);
+            Entry e = DroneDB.Info(Path.Join("testInfo", "file.txt"), withHash: true)[0];
             Assert.IsNotEmpty(e.Hash);
-
-            List<Entry> es = DroneDB.Info(new string[] { @"testInfo"}, recursive: true);
+            
+            // TODO: troubleshoot this and use 
+            List<Entry> es = DroneDB.Info("testInfo", recursive: true);
             Assert.AreEqual(2, es.Count);
             Assert.AreEqual(EntryType.Generic, es[0].Type);
             Assert.IsTrue(es[0].Size > 0);

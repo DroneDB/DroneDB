@@ -19,7 +19,7 @@ jobs:
             mkdir build
             cd build
             cmake .. -DBUILD_TESTING=OFF
-            cmake --build . --config Release --target ALL_BUILD -- /maxcpucount:14
+            cmake --build . --config Release --target ddb -- /maxcpucount:14
             dir
         - name: Test .NET bindings
           run: |
@@ -35,4 +35,20 @@ jobs:
           with:
             name: .NET Bindings
             path: dotnet\DDB.Tests\bin\Release\netcoreapp3.1\*.*
-              
+    build_dotnet_linux:
+      name: Build Linux .NET Bindings
+      runs-on: ubuntu-latest
+      steps:
+        - uses: actions/checkout@v2
+          with:
+            submodules: 'recursive'
+        - name: Install deps
+          run: scripts/ubuntu_deps.sh
+        - name: Run CMake
+          run: mkdir build && cd build && cmake -DBUILD_TESTING=OFF ..
+        - name: Build C++ lib
+          run: cd build && make -j$(nproc) ddb
+        - name: Test .NET bindings
+          run: |
+            cd dotnet
+            dotnet test -c Release

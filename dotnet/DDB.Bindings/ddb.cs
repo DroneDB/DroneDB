@@ -93,9 +93,9 @@ namespace DDB.Bindings
                                    int maxRecursionDepth = 0, [MarshalAs(UnmanagedType.LPStr)] string geometry = "auto",
                                    bool withHash = false, bool stopOnError = true);
 
-        public static Entry Info(string path, bool recursive = false, int maxRecursionDepth = 0, bool withHash = false)
+        public static List<Entry> Info(string path, bool recursive = false, int maxRecursionDepth = 0, bool withHash = false)
         {
-            return Info(new string[] { path }, recursive, maxRecursionDepth, withHash).First();
+            return Info(new string[] { path }, recursive, maxRecursionDepth, withHash);
         }
 
         public static List<Entry> Info(string[] paths, bool recursive = false, int maxRecursionDepth = 0, bool withHash = false)
