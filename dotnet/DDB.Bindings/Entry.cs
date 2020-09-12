@@ -2,6 +2,7 @@
 using Newtonsoft.Json.Converters;
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Text;
 
 namespace DDB.Bindings
@@ -31,24 +32,25 @@ namespace DDB.Bindings
     // Unix seconds, with decimal places for millisecond precision
     class SecondEpochConverter : DateTimeConverterBase
     {
-        private static readonly DateTime _epoch = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        private static readonly DateTime Epoch = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
         public override void WriteJson(JsonWriter writer, object value, JsonSerializer serializer)
         {
-            writer.WriteRawValue((((DateTime)value - _epoch).TotalMilliseconds / 1000.0).ToString());
+            writer.WriteRawValue((((DateTime)value - Epoch).TotalMilliseconds / 1000.0).ToString(CultureInfo.InvariantCulture));
         }
 
         public override object ReadJson(JsonReader reader, Type objectType, object existingValue, JsonSerializer serializer)
         {
             if (reader.Value == null) { return null; }
 
-            double val = 0;
+            double val;
+
             if (reader.ValueType == typeof(int)) val = (int)reader.Value;
-            else if (reader.ValueType == typeof(Int64)) val = (Int64)reader.Value;
+            else if (reader.ValueType == typeof(long)) val = (long)reader.Value;
             else if (reader.ValueType == typeof(double)) val = (double)reader.Value;
             else throw new InvalidCastException();
 
-            return _epoch.AddSeconds(val);
+            return Epoch.AddSeconds(val);
         }
     }
 }
