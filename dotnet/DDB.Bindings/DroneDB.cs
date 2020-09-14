@@ -8,10 +8,10 @@ namespace DDB.Bindings
 {
     public static class DroneDB
     {
-        [DllImport("./ddb", EntryPoint = "DDBRegisterProcess")]
+        [DllImport("ddb", EntryPoint = "DDBRegisterProcess")]
         public static extern void RegisterProcess(bool verbose = false);
 
-        [DllImport("./ddb", EntryPoint = "DDBGetVersion")]
+        [DllImport("ddb", EntryPoint = "DDBGetVersion")]
         private static extern IntPtr _GetVersion();
 
         public static string GetVersion()
@@ -20,7 +20,7 @@ namespace DDB.Bindings
             return Marshal.PtrToStringAnsi(ptr);
         }
 
-        [DllImport("./ddb", EntryPoint = "DDBGetLastError")]
+        [DllImport("ddb", EntryPoint = "DDBGetLastError")]
         private static extern IntPtr _GetLastError();
 
         static string GetLastError()
@@ -29,7 +29,7 @@ namespace DDB.Bindings
             return Marshal.PtrToStringAnsi(ptr);
         }
 
-        [DllImport("./ddb", EntryPoint = "DDBInit")]
+        [DllImport("ddb", EntryPoint = "DDBInit")]
         private static extern DDBError _Init([MarshalAs(UnmanagedType.LPStr)]string directory, out IntPtr outPath);
         
         public static string Init(string directory)
@@ -40,7 +40,7 @@ namespace DDB.Bindings
             throw new DDBException(GetLastError());
         }
 
-        [DllImport("./ddb", EntryPoint = "DDBAdd")]
+        [DllImport("ddb", EntryPoint = "DDBAdd")]
         static extern DDBError _Add([MarshalAs(UnmanagedType.LPStr)] string ddbPath, 
                                   [MarshalAs(UnmanagedType.LPArray, ArraySubType=UnmanagedType.LPStr)] string[] paths, 
                                   int numPaths, bool recursive);
@@ -55,7 +55,7 @@ namespace DDB.Bindings
                 throw new DDBException(GetLastError());
         }
 
-        [DllImport("./ddb", EntryPoint = "DDBRemove")]
+        [DllImport("ddb", EntryPoint = "DDBRemove")]
         static extern DDBError _Remove([MarshalAs(UnmanagedType.LPStr)] string ddbPath,
                                   [MarshalAs(UnmanagedType.LPArray, ArraySubType = UnmanagedType.LPStr)] string[] paths,
                                   int numPaths, bool recursive);
@@ -71,7 +71,7 @@ namespace DDB.Bindings
             
         }
 
-        [DllImport("./ddb", EntryPoint = "DDBInfo")]
+        [DllImport("ddb", EntryPoint = "DDBInfo")]
         static extern DDBError _Info([MarshalAs(UnmanagedType.LPArray, ArraySubType = UnmanagedType.LPStr)] string[] paths,
                                    int numPaths,
                                    out IntPtr output,
