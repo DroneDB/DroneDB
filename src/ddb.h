@@ -56,7 +56,7 @@ DDB_DLL DDBErr DDBAdd(const char *ddbPath, const char **paths, int numPaths, boo
  * @param numPaths number of paths
  * @param recursive whether to recursively remove folders
  * @return DDBERR_NONE on success, an error otherwise */
-DDB_DLL DDBErr DDBRemove(const char *ddbPath, const char **paths, int numPaths, bool recursive = false);
+DDB_DLL DDBErr DDBRemove(const char *ddbPath, const char **paths, int numPaths, bool recursive = false, bool cached = false);
 
 /** Retrieve information about files 
  * @param paths array of paths to parse

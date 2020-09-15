@@ -15,6 +15,7 @@ void Remove::setOptions(cxxopts::Options &opts) {
     .add_options()
     ("d,directory", "Working directory", cxxopts::value<std::string>()->default_value("."))
     ("r,recursive", "Recursively remove subdirectories and files", cxxopts::value<bool>())
+    ("c,cached", "Remove only from index cache", cxxopts::value<bool>())
     ("p,paths", "Paths to remove from index (files or directories)", cxxopts::value<std::vector<std::string>>());
 
     opts.parse_positional({"paths"});
@@ -35,7 +36,7 @@ void Remove::run(cxxopts::ParseResult &opts) {
     std::vector<const char *> cPaths(paths.size());
     std::transform(paths.begin(), paths.end(), cPaths.begin(), [](const std::string& s) { return s.c_str(); });
 
-    if (DDBRemove(ddbPath.c_str(), cPaths.data(), static_cast<int>(cPaths.size()), opts.count("recursive")) != DDBERR_NONE){
+    if (DDBRemove(ddbPath.c_str(), cPaths.data(), static_cast<int>(cPaths.size()), opts.count("recursive"), opts.count("cached")) != DDBERR_NONE){
         std::cerr << DDBGetLastError() << std::endl;
     }
 }
