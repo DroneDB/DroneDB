@@ -109,6 +109,7 @@ fs::path generateThumb(const fs::path &imagePath, int thumbSize, const fs::path 
     targs = CSLAddString(targs, "WRITE_EXIF_METADATA=NO");
 
     CPLSetConfigOption("GDAL_PAM_ENABLED", "NO"); // avoid aux files for PNG tiles
+    CPLSetConfigOption("GDAL_ALLOW_LARGE_LIBJPEG_MEM_ALLOC", "YES"); // Avoids ERROR 6: Reading this image would require libjpeg to allocate at least 107811081 bytes
 
     GDALTranslateOptions* psOptions = GDALTranslateOptionsNew(targs, nullptr);
     CSLDestroy(targs);
