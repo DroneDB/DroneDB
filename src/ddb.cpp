@@ -95,13 +95,13 @@ DDB_C_BEGIN
 DDB_C_END
 }
 
-DDBErr DDBRemove(const char *ddbPath, const char **paths, int numPaths, bool recursive, bool cached){
+DDBErr DDBRemove(const char *ddbPath, const char **paths, int numPaths, bool recursive){
 DDB_C_BEGIN
     auto db = ddb::open(std::string(ddbPath), true);
     std::vector<std::string> pathList(paths, paths + numPaths);
     ddb::removeFromIndex(db.get(), ddb::expandPathList(pathList,
                                                   recursive,
-                                                  0), cached);
+                                                  0));
 DDB_C_END
 }
 

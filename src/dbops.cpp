@@ -278,10 +278,10 @@ void addToIndex(Database *db, const std::vector<std::string> &paths) {
     db->exec("COMMIT");
 }
 
-void removeFromIndex(Database *db, const std::vector<std::string> &paths, bool cached) {
+void removeFromIndex(Database *db, const std::vector<std::string> &paths) {
     if (paths.size() == 0) return; // Nothing to do
     fs::path directory = rootDirectory(db);
-    auto pathList = cached ? std::vector<std::filesystem::path>(paths.begin(), paths.end()) : getIndexPathList(directory, paths, false);
+    auto pathList = getIndexPathList(directory, paths, false);
 
     auto q = db->query("DELETE FROM entries WHERE path = ?");
     db->exec("BEGIN TRANSACTION");

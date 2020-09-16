@@ -22,7 +22,7 @@ DDB_DLL bool checkUpdate(Entry &e, const fs::path &p, long long dbMtime, const s
 DDB_DLL void doUpdate(Statement *updateQ, const Entry &e);
 
 DDB_DLL void addToIndex(Database *db, const std::vector<std::string> &paths);
-DDB_DLL void removeFromIndex(Database *db, const std::vector<std::string> &paths, bool cached);
+DDB_DLL void removeFromIndex(Database *db, const std::vector<std::string> &paths);
 DDB_DLL void syncIndex(Database *db);
 
 

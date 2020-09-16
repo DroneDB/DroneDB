@@ -36,7 +36,7 @@ void Remove::run(cxxopts::ParseResult &opts) {
     std::vector<const char *> cPaths(paths.size());
     std::transform(paths.begin(), paths.end(), cPaths.begin(), [](const std::string& s) { return s.c_str(); });
 
-    if (DDBRemove(ddbPath.c_str(), cPaths.data(), static_cast<int>(cPaths.size()), opts.count("recursive"), opts.count("cached")) != DDBERR_NONE){
+    if (DDBRemove(ddbPath.c_str(), cPaths.data(), static_cast<int>(cPaths.size()), opts.count("recursive")) != DDBERR_NONE){
         std::cerr << DDBGetLastError() << std::endl;
     }
 }
