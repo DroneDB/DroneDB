@@ -116,10 +116,15 @@ int Path::depth() {
 }
 
 Path Path::relativeTo(const fs::path &parent){
+    // Special case where parent == path
+    if (fs::weakly_canonical(fs::absolute(p)) == fs::weakly_canonical(fs::absolute(parent))) {
+        return fs::path("");
+    }
+
     // Handle special cases where root is "/"
-    // in this case we return the canonical absolute path
-    if (parent == fs::path("/")){
-        return fs::weakly_canonical(fs::absolute(p));
+    // in this case we return the relative canonical absolute path
+    if (parent == parent.root_path() || parent == "/"){
+        return fs::weakly_canonical(fs::absolute(p)).relative_path();
     }
 
     fs::path relPath = fs::relative(fs::weakly_canonical(fs::absolute(p)), fs::weakly_canonical(fs::absolute(parent)));
