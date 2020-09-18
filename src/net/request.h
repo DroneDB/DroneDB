@@ -18,6 +18,7 @@ class Request{
     ReqType reqType;
     CURL *curl;
     char errorMsg[CURL_ERROR_SIZE];
+    struct curl_slist *headers;
 
     std::string urlEncode(const std::string &str);
     void perform(Response &res);
@@ -30,6 +31,8 @@ public:
 
     DDB_DLL Request &formData(std::vector<std::string> params);
     DDB_DLL Request& setVerifySSL(bool flag);
+    DDB_DLL Request& setAuthToken(const std::string &token);
+
 };
 
 }

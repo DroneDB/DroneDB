@@ -44,4 +44,13 @@ TagComponents RegistryUtils::parseTag(const std::string &tag, bool useInsecureRe
     return res;
 }
 
+Registry RegistryUtils::CreateFromTag(const std::string &tag, bool useInsecureRegistry){
+    auto tc = parseTag(tag, useInsecureRegistry);
+    return Registry(tc.registryUrl);
+}
+
+std::string TagComponents::tagWithoutUrl() const{
+    return organization + "/" + dataset;
+}
+
 }

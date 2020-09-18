@@ -4,6 +4,10 @@
 
 #include "share.h"
 #include "constants.h"
+#include "exceptions.h"
+#include "shareservice.h"
+#include "registryutils.h"
+#include "utils.h"
 
 namespace cmd {
 
@@ -14,6 +18,7 @@ void Share::setOptions(cxxopts::Options &opts) {
     .add_options()
 
     ("i,input", "Files and directories to share", cxxopts::value<std::vector<std::string>>())
+    ("r,recursive", "Recursively share subdirectories", cxxopts::value<bool>())
     ("t,tag", "Tag to use (organization/dataset or server[:port]/organization/dataset)", cxxopts::value<std::string>()->default_value(DEFAULT_REGISTRY "/public/<randomID>"))
     ("p,password", "Optional password to protect dataset", cxxopts::value<std::string>()->default_value(""));
 
@@ -25,26 +30,32 @@ std::string Share::description() {
 }
 
 void Share::run(cxxopts::ParseResult &opts) {
-//    std::string username;
-//    std::string password;
+    if (!opts.count("input")) {
+        printHelp();
+    }
 
-//    if (opts["username"].count() > 0){
-//        username = opts["username"].as<std::string>();
-//    }else{
-//        username = ddb::utils::getPrompt("Username: ");
-//    }
+    auto input = opts["input"].as<std::vector<std::string>>();
+    auto tag = opts["tag"].as<std::string>();
+    auto password = opts["password"].as<std::string>();
+    auto recursive = opts["recursive"].count() > 0;
 
-//    if (opts["password"].count() > 0){
-//        password = opts["password"].as<std::string>();
-//    }else{
-//        password = ddb::utils::getPass("Password: ");
-//    }
+    ddb::ShareService ss;
 
-//    ddb::Registry reg(opts["host"].as<std::string>());
-//    std::string token = reg.login(username, password);
-//    if (token.length() > 0){
-//        std::cout << "Login succeeded for " << reg.getUrl() << std::endl;
-//    }
+    try{
+        ss.share(input, tag, password, recursive);
+    }catch(const ddb::AuthException &){
+        // Try logging-in
+        auto username = ddb::utils::getPrompt("Username: ");
+        auto password = ddb::utils::getPass("Password: ");
+
+        ddb::Registry reg = ddb::RegistryUtils::CreateFromTag(tag);
+        if (reg.login(username, password).length() > 0){
+            // Retry
+            ss.share(input, tag, password, recursive);
+        }else{
+            throw ddb::AuthException("Cannot authenticate with " + reg.getUrl());
+        }
+    }
 }
 
 }

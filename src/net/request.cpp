@@ -9,7 +9,8 @@
 
 namespace ddb::net{
 
-Request::Request(const std::string &url, ReqType reqType) : url(url), reqType(reqType), curl(nullptr){
+Request::Request(const std::string &url, ReqType reqType) :
+    url(url), reqType(reqType), curl(nullptr), headers(nullptr){
     try {
         curl = curl_easy_init();
         if (!curl) throw NetException("Cannot initialize CURL");
@@ -37,6 +38,8 @@ Request::Request(const std::string &url, ReqType reqType) : url(url), reqType(re
 Request::~Request(){
     if (curl) curl_easy_cleanup(curl);
 	curl = nullptr;
+    if (headers) curl_slist_free_all(headers);
+    headers = nullptr;
 }
 
 Request& Request::setVerifySSL(bool flag) {
@@ -46,7 +49,12 @@ Request& Request::setVerifySSL(bool flag) {
 	//	the certificate.
 	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, flag);
 
-	return *this;
+    return *this;
+}
+
+Request &Request::setAuthToken(const std::string &token){
+    headers = curl_slist_append(headers, ("Authorization: Bearer " + token).c_str());
+    return *this;
 }
 
 std::string Request::urlEncode(const std::string &str){
@@ -105,6 +113,10 @@ Response Request::downloadToFile(const std::string &outFile){
 }
 
 void Request::perform(Response &res){
+    if (headers != nullptr){
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    }
+
     CURLcode ret = curl_easy_perform(curl);
     if (ret != CURLE_OK){
         std::string err(curl_easy_strerror(ret));
