@@ -166,23 +166,26 @@ static int xferinfo(void *p,
                     curl_off_t dltotal, curl_off_t dlnow,
                     curl_off_t ultotal, curl_off_t ulnow){
   struct RequestProgress *progress = static_cast<struct RequestProgress *>(p);
-  CURL *curl = static_cast<CURL *>(progress->curl);
 
-  curl_off_t curTime = 0;
-  curl_easy_getinfo(curl, CURLINFO_TOTAL_TIME_T, &curTime);
+//  CURL *curl = static_cast<CURL *>(progress->curl);
 
-  if((curTime - progress->lastRuntime) >= 10000) {
-    progress->lastRuntime = curTime;
+//  CURLINFO_TOTAL_TIME_T is Unavailable in old cURL versions
+//  curl_off_t curTime = 0;
+//  curl_easy_getinfo(curl, CURLINFO_TOTAL_TIME_T, &curTime);
 
-    float progValue = dltotal + ultotal > 0 ? 
-                        static_cast<float>(dlnow + ulnow) / static_cast<float>(dltotal + ultotal) :
-                      0.0f;
+//  if((curTime - progress->lastRuntime) >= 10000) {
+//    progress->lastRuntime = curTime;
 
-    if (!(*progress->cb)(progValue * 100.0f)){
-        // Handle cancel
-        return 1;
-    }
+  float progValue = dltotal + ultotal > 0 ?
+                      static_cast<float>(dlnow + ulnow) / static_cast<float>(dltotal + ultotal) :
+                    0.0f;
+
+  if (!(*progress->cb)(progValue * 100.0f)){
+      // Handle cancel
+      return 1;
   }
+
+//}
 
   return 0;
 }
