@@ -11,11 +11,15 @@
 
 namespace ddb{
 
+typedef std::function<bool(const std::string &filename, float progress)> ShareCallback;
+
 class ShareService{
     void handleError(net::Response &res);
 public:
-    ShareService();
-    DDB_DLL std::string share(const std::vector<std::string> &input, const std::string &tag, const std::string &password, bool recursive, const std::string &cwd);
+    DDB_DLL ShareService();
+    DDB_DLL std::string share(const std::vector<std::string> &input, const std::string &tag,
+                              const std::string &password, bool recursive, const std::string &cwd,
+                              const ShareCallback &cb = nullptr);
 };
 
 }

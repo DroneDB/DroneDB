@@ -15,7 +15,9 @@ ShareService::ShareService(){
 
 }
 
-std::string ShareService::share(const std::vector<std::string> &input, const std::string &tag, const std::string &password, bool recursive, const std::string &cwd){
+std::string ShareService::share(const std::vector<std::string> &input, const std::string &tag,
+                                const std::string &password, bool recursive, const std::string &cwd,
+                                const ShareCallback &cb){
     // TODO: add callback
     if (input.size() == 0) throw InvalidArgsException("No files to share");
 
@@ -52,25 +54,30 @@ std::string ShareService::share(const std::vector<std::string> &input, const std
             p = p.relativeTo(wd.get());
         }
 
+        std::string sha256 = Hash::fileSHA256(fp.string());
+        std::string filename = fp.filename().string();
+
         LOGD << "Uploading " << p.string();
 
         net::Response res = net::POST(reg.getUrl("/share/upload/" + batchToken))
                 .multiPartFormData({"file", fp.string()},
                                    {"path", p.generic()})
                 .authToken(authToken)
-                .progressCb([&p](float progress){
-                    std::cout << p.generic() << ": " << progress << "%" << std::endl;
-                    return true;
+                .progressCb([&cb, &filename](float progress){
+                    if (cb == nullptr) return true;
+                    else return cb(filename, progress);
                 })
-                .maximumUploadSpeed(1024*1024)
+                //.maximumUploadSpeed(1024*1024)
                 .send();
+
         if (res.status() != 200) handleError(res);
 
         // TODO: handle retries
 
         json j = res.getJSON();
         if (!j.contains("hash")) handleError(res);
-        // TODO: validate sha256 hash
+        if (sha256 != j["hash"]) throw NetException(filename + " file got corrupted during upload (hash mismatch, expected: " +
+                                                    sha256 + ", got: " + j["hash"].get<std::string>() + ". Try again.");
     }
 
     // Commit
