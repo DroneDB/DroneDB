@@ -145,4 +145,16 @@ TEST(getModifiedTime, Normal) {
     EXPECT_TRUE(io::Path(io::getDataPath("timezone21.bin")).getModifiedTime() > 0);
 }
 
+TEST(withoutRoot, Normal){
+    EXPECT_EQ(io::Path("/test/abc").withoutRoot().generic(),
+              io::Path("test/abc").generic());
+    EXPECT_EQ(io::Path("../abc").withoutRoot().generic(),
+              io::Path("../abc").generic());
+
+#ifdef _WIN32
+    EXPECT_EQ(io::Path("C:\\test").withoutRoot().generic(),
+              io::Path("test").generic());
+#endif
+}
+
 }

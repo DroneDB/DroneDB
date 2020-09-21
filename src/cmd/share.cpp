@@ -8,6 +8,7 @@
 #include "shareservice.h"
 #include "registryutils.h"
 #include "utils.h"
+#include "mio.h"
 
 namespace cmd {
 
@@ -38,11 +39,12 @@ void Share::run(cxxopts::ParseResult &opts) {
     auto tag = opts["tag"].as<std::string>();
     auto password = opts["password"].as<std::string>();
     auto recursive = opts["recursive"].count() > 0;
+    auto cwd = ddb::io::getCwd().string();
 
     ddb::ShareService ss;
 
     try{
-        ss.share(input, tag, password, recursive);
+        ss.share(input, tag, password, recursive, cwd);
     }catch(const ddb::AuthException &){
         // Try logging-in
         auto username = ddb::utils::getPrompt("Username: ");
@@ -51,7 +53,7 @@ void Share::run(cxxopts::ParseResult &opts) {
         ddb::Registry reg = ddb::RegistryUtils::CreateFromTag(tag);
         if (reg.login(username, password).length() > 0){
             // Retry
-            ss.share(input, tag, password, recursive);
+            ss.share(input, tag, password, recursive, cwd);
         }else{
             throw ddb::AuthException("Cannot authenticate with " + reg.getUrl());
         }

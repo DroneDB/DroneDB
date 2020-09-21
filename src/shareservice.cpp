@@ -5,6 +5,7 @@
 #include "registry.h"
 #include "registryutils.h"
 #include "fs.h"
+#include "mio.h"
 #include "dbops.h"
 #include "userprofile.h"
 
@@ -14,17 +15,11 @@ ShareService::ShareService(){
 
 }
 
-void ShareService::share(const std::vector<std::string> &input, const std::string &tag, const std::string &password, bool recursive){
+void ShareService::share(const std::vector<std::string> &input, const std::string &tag, const std::string &password, bool recursive, const std::string &cwd){
     // TODO: add callback
     if (input.size() == 0) throw InvalidArgsException("No files to share");
 
-    std::vector<fs::path> filePaths;
-    if (recursive){
-        filePaths = getPathList(input, true, 0);
-    }else{
-        filePaths = std::vector<fs::path>(input.begin(), input.end());
-    }
-
+    std::vector<fs::path> filePaths = getPathList(input, false, recursive ? 0 : 1);
 
     // Parse tag to find registry URL
     TagComponents tc = RegistryUtils::parseTag(tag);
@@ -35,8 +30,7 @@ void ShareService::share(const std::vector<std::string> &input, const std::strin
     std::string authToken = reg.login(ac.username, ac.password); // Will throw error on login failed
 
     // Call init
-    // TODO: ddb/share/init --> /share/init ?
-    net::Response res = net::POST(reg.getUrl("/ddb/share/init"))
+    net::Response res = net::POST(reg.getUrl("/share/init"))
             .formData({"tag", tc.tagWithoutUrl(), "password", password})
             .setAuthToken(authToken)
             .send();
@@ -45,8 +39,29 @@ void ShareService::share(const std::vector<std::string> &input, const std::strin
     std::cout << res.getText() << std::endl;
 
 
-    // TODO: ddb/share/upload
-    // multithreaded
+    // TODO: multithreaded share/upload
+
+    io::Path wd = io::Path(fs::path(cwd));
+
+    for (auto &fp : filePaths){
+        LOGD << "Uploading " << fp.string();
+
+        io::Path p = io::Path(fp);
+        if (p.isAbsolute() && !wd.isParentOf(p.get())){
+            p = p.withoutRoot();
+        }else{
+            p = p.relativeTo(wd.get());
+        }
+
+        LOGD << p.string();
+        //        if
+//        .relativeTo(cwd);
+
+//        net::Response res = net::POST(reg.getUrl("/share/upload"))
+//                .formData({"tag", tc.tagWithoutUrl(), "password", password})
+//                .setAuthToken(authToken)
+//                .send();
+    }
 }
 
 void ShareService::handleError(net::Response &res){

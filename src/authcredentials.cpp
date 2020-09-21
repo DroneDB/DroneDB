@@ -9,6 +9,6 @@ AuthCredentials::AuthCredentials(const std::string &username, const std::string 
     : username(username), password(password){}
 
 bool AuthCredentials::empty() const{
-    return username == "" && password == "";
+    return username.empty() && password.empty();
 }
 
