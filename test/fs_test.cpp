@@ -146,14 +146,16 @@ TEST(getModifiedTime, Normal) {
 }
 
 TEST(withoutRoot, Normal){
-    EXPECT_EQ(io::Path("/test/abc").withoutRoot().generic(),
-              io::Path("test/abc").generic());
-    EXPECT_EQ(io::Path("../abc").withoutRoot().generic(),
-              io::Path("../abc").generic());
-
 #ifdef _WIN32
-    EXPECT_EQ(io::Path("C:\\test").withoutRoot().generic(),
-              io::Path("test").generic());
+    EXPECT_EQ(io::Path("C:\\test\\abc").withoutRoot().string(),
+              io::Path("test\\abc").string());
+    EXPECT_EQ(io::Path("D:\\..\\abc").withoutRoot().string(),
+        io::Path("..\\abc").string());
+#else
+    EXPECT_EQ(io::Path("/test/abc").withoutRoot().string(),
+        io::Path("test/abc").string());
+    EXPECT_EQ(io::Path("../abc").withoutRoot().string(),
+        io::Path("../abc").string());
 #endif
 }
 
