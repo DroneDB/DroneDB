@@ -15,7 +15,7 @@ class ShareService{
     void handleError(net::Response &res);
 public:
     ShareService();
-    DDB_DLL void share(const std::vector<std::string> &input, const std::string &tag, const std::string &password, bool recursive, const std::string &cwd);
+    DDB_DLL std::string share(const std::vector<std::string> &input, const std::string &tag, const std::string &password, bool recursive, const std::string &cwd);
 };
 
 }

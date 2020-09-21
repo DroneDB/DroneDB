@@ -44,7 +44,7 @@ void Share::run(cxxopts::ParseResult &opts) {
     ddb::ShareService ss;
 
     try{
-        ss.share(input, tag, password, recursive, cwd);
+        std::cout << ss.share(input, tag, password, recursive, cwd) << std::endl;
     }catch(const ddb::AuthException &){
         // Try logging-in
         auto username = ddb::utils::getPrompt("Username: ");
@@ -53,7 +53,7 @@ void Share::run(cxxopts::ParseResult &opts) {
         ddb::Registry reg = ddb::RegistryUtils::CreateFromTag(tag);
         if (reg.login(username, password).length() > 0){
             // Retry
-            ss.share(input, tag, password, recursive, cwd);
+            std::cout << ss.share(input, tag, password, recursive, cwd) << std::endl;
         }else{
             throw ddb::AuthException("Cannot authenticate with " + reg.getUrl());
         }

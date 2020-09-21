@@ -13,12 +13,24 @@
 
 namespace ddb::net{
 
+typedef std::function<bool(float progress)> RequestCallback;
+
+struct RequestProgress {
+  curl_off_t lastRuntime;
+  CURL *curl;
+  RequestCallback *cb;
+};
+
+
 class Request{
     std::string url;
     ReqType reqType;
     CURL *curl;
     char errorMsg[CURL_ERROR_SIZE];
     struct curl_slist *headers;
+    curl_mime *form;
+
+    RequestCallback cb;
 
     std::string urlEncode(const std::string &str);
     void perform(Response &res);
@@ -29,10 +41,15 @@ public:
     DDB_DLL Response send();
     DDB_DLL Response downloadToFile(const std::string &outFile);
 
-    DDB_DLL Request &formData(std::vector<std::string> params);
-    DDB_DLL Request& setVerifySSL(bool flag);
-    DDB_DLL Request& setAuthToken(const std::string &token);
+    DDB_DLL Request& formData(std::vector<std::string> params);
+    DDB_DLL Request& multiPartFormData(std::vector<std::string> files, std::vector<std::string> params = {});
+    DDB_DLL Request& header(const std::string &header);
+    DDB_DLL Request& header(const std::string &name, const std::string &value);
+    DDB_DLL Request& verifySSL(bool flag);
+    DDB_DLL Request& authToken(const std::string &token);
 
+    DDB_DLL Request& progressCb(const RequestCallback &cb);
+    DDB_DLL Request& maximumUploadSpeed(unsigned long bytesPerSec);
 };
 
 }
