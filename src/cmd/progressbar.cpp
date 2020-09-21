@@ -14,7 +14,16 @@ void ProgressBar::update(const std::string &label, float progress){
     std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
     auto time_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - startTime).count();
 
-    if (!label.empty()) std::cout << label << " ";
+    // Print label
+    if (!label.empty()){
+        // Check whether we need to print a new line (if label has changed)
+        if (label != lastLabel){
+            if (!lastLabel.empty()) std::cout << std::endl;
+            lastLabel = label;
+        }
+
+        std::cout << label << " ";
+    }
 
     std::cout << "[";
 

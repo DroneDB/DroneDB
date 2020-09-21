@@ -20,6 +20,7 @@ private:
     const char incompleteChar = '-';
     const std::chrono::steady_clock::time_point startTime = std::chrono::steady_clock::now();
 
+    std::string lastLabel = "";
 public:
     ProgressBar() : barWidth(40) {}
     ProgressBar(unsigned int width) :

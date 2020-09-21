@@ -16,7 +16,7 @@ namespace cmd {
 void Share::setOptions(cxxopts::Options &opts) {
     opts
     .positional_help("[args]")
-    .custom_help("share")
+    .custom_help("share *.JPG")
     .add_options()
 
     ("i,input", "Files and directories to share", cxxopts::value<std::vector<std::string>>())
