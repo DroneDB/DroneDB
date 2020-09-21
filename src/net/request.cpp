@@ -174,7 +174,11 @@ static int xferinfo(void *p,
   if((curTime - progress->lastRuntime) >= 10000) {
     progress->lastRuntime = curTime;
 
-    if (!(*progress->cb)(static_cast<float>((static_cast<float>(dlnow + ulnow) / static_cast<float>(dltotal + ultotal)) * 100.0f))){
+    float progValue = dltotal + ultotal > 0 ? 
+                        static_cast<float>(dlnow + ulnow) / static_cast<float>(dltotal + ultotal) :
+                      0.0f;
+
+    if (!(*progress->cb)(progValue * 100.0f)){
         // Handle cancel
         return 1;
     }

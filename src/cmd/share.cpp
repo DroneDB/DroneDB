@@ -66,7 +66,7 @@ void Share::run(cxxopts::ParseResult &opts) {
         auto username = ddb::utils::getPrompt("Username: ");
         auto password = ddb::utils::getPass("Password: ");
 
-        ddb::Registry reg = ddb::RegistryUtils::CreateFromTag(tag);
+        ddb::Registry reg = ddb::RegistryUtils::createFromTag(tag);
         if (reg.login(username, password).length() > 0){
             // Retry
             share();

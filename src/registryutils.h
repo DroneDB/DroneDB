@@ -6,6 +6,7 @@
 
 #include <string>
 #include "registry.h"
+#include "ddb_export.h"
 
 namespace ddb{
 
@@ -19,8 +20,8 @@ struct TagComponents{
 
 class RegistryUtils{
 public:
-    static TagComponents parseTag(const std::string &tag, bool useInsecureRegistry = false);
-    static Registry CreateFromTag(const std::string &tag, bool useInsecureRegistry = false);
+    DDB_DLL static TagComponents parseTag(const std::string &tag, bool useInsecureRegistry = false);
+    DDB_DLL static Registry createFromTag(const std::string &tag, bool useInsecureRegistry = false);
 };
 
 }

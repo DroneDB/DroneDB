@@ -44,7 +44,7 @@ TagComponents RegistryUtils::parseTag(const std::string &tag, bool useInsecureRe
     return res;
 }
 
-Registry RegistryUtils::CreateFromTag(const std::string &tag, bool useInsecureRegistry){
+Registry RegistryUtils::createFromTag(const std::string &tag, bool useInsecureRegistry){
     auto tc = parseTag(tag, useInsecureRegistry);
     return Registry(tc.registryUrl);
 }
