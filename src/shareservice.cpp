@@ -18,7 +18,6 @@ ShareService::ShareService(){
 std::string ShareService::share(const std::vector<std::string> &input, const std::string &tag,
                                 const std::string &password, bool recursive, const std::string &cwd,
                                 const ShareCallback &cb){
-    // TODO: add callback
     if (input.size() == 0) throw InvalidArgsException("No files to share");
 
     std::vector<fs::path> filePaths = getPathList(input, false, recursive ? 0 : 1);
