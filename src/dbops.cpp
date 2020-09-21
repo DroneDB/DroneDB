@@ -168,16 +168,15 @@ std::vector<fs::path> getPathList(const std::vector<std::string> &paths, bool in
 
 
 std::vector<std::string> expandPathList(const std::vector<std::string> &paths, bool recursive, int maxRecursionDepth) {
-    if (recursive) {
-        std::vector<std::string> result;
-        auto pl = getPathList(paths, true, maxRecursionDepth);
-        for (auto& p : pl) {
-            result.push_back(p.string());
-        }
-        return result;
-    } else {
-        return paths;
+
+	if (!recursive) return paths;
+    	
+    std::vector<std::string> result;
+    auto pl = getPathList(paths, true, maxRecursionDepth);
+    for (auto& p : pl) {
+	    result.push_back(p.string());
     }
+    return result;
 }
 
 
@@ -225,7 +224,8 @@ void doUpdate(Statement *updateQ, const Entry &e) {
 }
 
 void addToIndex(Database *db, const std::vector<std::string> &paths) {
-    if (paths.size() == 0) return; // Nothing to do
+    if (paths.empty()) return; // Nothing to do
+
     fs::path directory = rootDirectory(db);
     auto pathList = getIndexPathList(directory, paths, true);
 
@@ -238,7 +238,7 @@ void addToIndex(Database *db, const std::vector<std::string> &paths) {
     for (auto &p : pathList) {
         io::Path relPath = io::Path(p).relativeTo(directory);
         q->bind(1, relPath.generic());
-
+          	
         bool update = false;
         bool add = false;
         Entry e;
@@ -255,6 +255,7 @@ void addToIndex(Database *db, const std::vector<std::string> &paths) {
             parseEntry(p, directory, e, true, true);
 
             if (add) {
+
                 insertQ->bind(1, e.path);
                 insertQ->bind(2, e.hash);
                 insertQ->bind(3, e.type);
@@ -279,23 +280,54 @@ void addToIndex(Database *db, const std::vector<std::string> &paths) {
 }
 
 void removeFromIndex(Database *db, const std::vector<std::string> &paths) {
-    if (paths.size() == 0) return; // Nothing to do
-    fs::path directory = rootDirectory(db);
-    auto pathList = getIndexPathList(directory, paths, false);
 
-    auto q = db->query("DELETE FROM entries WHERE path = ?");
-    db->exec("BEGIN TRANSACTION");
+	if (paths.empty()) return; // Nothing to do
+    const fs::path directory = rootDirectory(db);
+
+    std::cout << "Root directory: " << directory << std::endl;
+	
+    auto pathList = std::vector<fs::path>(paths.begin(), paths.end()); //  getIndexPathList(directory, paths, false);
+
+    //auto q = db->query("DELETE FROM entries WHERE path = ?");
+    //db->exec("BEGIN TRANSACTION");
 
     for (auto &p : pathList) {
         io::Path relPath = io::Path(p).relativeTo(directory);
-        q->bind(1, relPath.generic());
+
+        auto entryMatches = getMatchingEntries(db, relPath);
+
+    	for (auto &e : entryMatches)
+    	{
+            /*if (isFolderEntry(db, e))
+                deleteFolderFromIndex(db, e);
+            else
+                deleteFromIndex(db, e);*/
+    	}
+    	
+        std::cout << "Deleting path: " << relPath.generic() << std::endl;
+    	/*
+    	q->bind(1, relPath.generic());
         q->execute();
         if (db->changes() >= 1) {
             std::cout << "D\t" << relPath.generic() << std::endl;
-        }
+        }*/
     }
 
+    //db->exec("COMMIT");
+}
+
+std::vector<Entry> getMatchingEntries(Database* db, io::Path& path) {
+
+    auto param = path.string().c_str();
+
+	// Sostituire * con %
+	
+    auto q = db->query("SELECT FROM entries WHERE path = ?");
+	db->exec("BEGIN TRANSACTION");
+
+
     db->exec("COMMIT");
+
 }
 
 void syncIndex(Database *db) {
