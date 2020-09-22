@@ -15,7 +15,7 @@ void Remove::setOptions(cxxopts::Options &opts) {
     .add_options()
     ("d,directory", "Working directory", cxxopts::value<std::string>()->default_value("."))
     // ("r,recursive", "Recursively remove subdirectories and files", cxxopts::value<bool>())
-    ("c,cached", "Remove only from index cache", cxxopts::value<bool>())
+    //("c,cached", "Remove only from index cache", cxxopts::value<bool>())
     ("p,paths", "Paths to remove from index (files or directories)", cxxopts::value<std::vector<std::string>>());
 
     opts.parse_positional({"paths"});

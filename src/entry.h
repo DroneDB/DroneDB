@@ -36,6 +36,24 @@ struct Entry {
     DDB_DLL void toJSON(json &j);
     DDB_DLL bool toGeoJSON(json &j, BasicGeometryType type = BasicGeometryType::BGAuto);
     DDB_DLL std::string toString();
+
+    Entry() { }
+
+    Entry(Statement& s) {
+
+        this->path = s.getText(0);
+        this->hash = s.getText(1);
+        this->type = (EntryType)s.getInt(2);
+
+        this->meta.parse(s.getText(3));
+        this->mtime = (time_t)s.getInt(4);
+        this->size = s.getInt64(5);
+        this->depth = s.getInt(6);
+                       
+        // TODO by HeDo: I don't know how to parse these
+        // this->point_geom = ?
+        // this->polygon_geom = ?
+    }
 };
 
 DDB_DLL bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entry, bool wishHash = true, bool stopOnError = true);

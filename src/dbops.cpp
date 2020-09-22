@@ -289,22 +289,27 @@ void removeFromIndex(Database *db, const std::vector<std::string> &paths) {
     auto pathList = std::vector<fs::path>(paths.begin(), paths.end()); //  getIndexPathList(directory, paths, false);
 
     //auto q = db->query("DELETE FROM entries WHERE path = ?");
-    //db->exec("BEGIN TRANSACTION");
+    db->exec("BEGIN TRANSACTION");
 
     for (auto &p : pathList) {
         io::Path relPath = io::Path(p).relativeTo(directory);
 
-        auto entryMatches = getMatchingEntries(db, relPath);
+        std::cout << "Deleting path: " << relPath.generic() << std::endl;
 
+        auto entryMatches = getMatchingEntries(db, relPath.get());
+
+        //std::cout << "Matches: " << entryMatches.size() << std::endl;
+    	
     	for (auto &e : entryMatches)
     	{
-            /*if (isFolderEntry(db, e))
-                deleteFolderFromIndex(db, e);
-            else
-                deleteFromIndex(db, e);*/
+            deleteFromIndex(db, e.path);
+
+    		if (e.type == Directory)    		
+                deleteFromIndex(db, e.path + "/*");
+                		
     	}
     	
-        std::cout << "Deleting path: " << relPath.generic() << std::endl;
+        //std::cout << "Deleting path: " << relPath.generic() << std::endl;
     	/*
     	q->bind(1, relPath.generic());
         q->execute();
@@ -313,20 +318,51 @@ void removeFromIndex(Database *db, const std::vector<std::string> &paths) {
         }*/
     }
 
-    //db->exec("COMMIT");
+    db->exec("COMMIT");
 }
 
-std::vector<Entry> getMatchingEntries(Database* db, io::Path& path) {
+void deleteFromIndex(Database* db, const std::string &query)
+{
 
-    auto param = path.string().c_str();
-
-	// Sostituire * con %
+	auto str(query);
 	
-    auto q = db->query("SELECT FROM entries WHERE path = ?");
-	db->exec("BEGIN TRANSACTION");
+    std::replace(str.begin(), str.end(), '*', '%');
 
+    std::cout << "\tDeleting Match: " << str << std::endl;
+	
+    auto q = db->query("DELETE FROM entries WHERE path = ?");
 
-    db->exec("COMMIT");
+    q->bind(1, str);
+    q->execute();
+	
+    if (db->changes() >= 1) {
+        std::cout << "D\t" << str << std::endl;
+    }
+}
+	
+std::vector<Entry> getMatchingEntries(Database* db, fs::path path) {
+
+    auto str = path.string();
+	
+    std::replace(str.begin(), str.end(), '*', '%');
+
+    std::cout << "Query: " << str << std::endl;
+	
+    std::vector<Entry> entries;
+
+    auto q = db->query("SELECT * FROM entries WHERE path LIKE ?");
+
+    q->bind(1, str);
+
+	while(q->fetch())
+	{
+		Entry e(*q);
+		
+        entries.push_back(e);
+		
+    } 
+
+    return entries;
 
 }
 
