@@ -66,6 +66,27 @@ const ddb = {
                 } 
             });
         });
+    },
+
+    init: async function(directory){
+        return new Promise((resolve, reject) => {
+            n.init(directory, (err, result) => {
+                if (err) reject(err);
+                else resolve(result);
+            })
+        });
+    },
+
+    add: async function(ddbPath, paths, recursive){
+        return new Promise((resolve, reject) => {
+
+        });
+    },
+
+    remove: async function(ddbPath, paths, recursive){
+        return new Promise((resolve, reject) => {
+
+        });
     }
 };
 
