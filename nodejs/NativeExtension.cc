@@ -17,8 +17,8 @@ NAN_MODULE_INIT(InitAll) {
 	NAN_EXPORT(target, _thumbs_getFromUserCache);
     NAN_EXPORT(target, _tile_getFromUserCache);
     NAN_EXPORT(target, init);
-//    NAN_EXPORT(target, add);
-//    NAN_EXPORT(target, remove);
+    NAN_EXPORT(target, add);
+    NAN_EXPORT(target, remove);
 
 	DDBRegisterProcess();
 }

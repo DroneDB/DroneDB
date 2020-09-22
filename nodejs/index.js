@@ -77,15 +77,23 @@ const ddb = {
         });
     },
 
-    add: async function(ddbPath, paths, recursive){
+    add: async function(ddbPath, paths, options = {}){
         return new Promise((resolve, reject) => {
-
+            if (typeof paths === "string") paths = [paths];
+            n.add(ddbPath, paths, options, err => {
+                if (err) reject(err);
+                else resolve(true);                
+            });
         });
     },
 
-    remove: async function(ddbPath, paths, recursive){
+    remove: async function(ddbPath, paths, options = {}){
         return new Promise((resolve, reject) => {
-
+            if (typeof paths === "string") paths = [paths];
+            n.remove(ddbPath, paths, options, err => {
+                if (err) reject(err);
+                else resolve(true);     
+            });
         });
     }
 };
