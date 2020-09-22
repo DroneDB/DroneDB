@@ -60,13 +60,16 @@ NAN_METHOD(init) {
 
 class AddWorker : public Nan::AsyncWorker {
  public:
-  AddWorker(Nan::Callback *callback, const std::string &ddbPath, const std::vector<const char *> &paths, bool recursive)
+  AddWorker(Nan::Callback *callback, const std::string &ddbPath, const std::vector<std::string> &paths, bool recursive)
     : AsyncWorker(callback, "nan:AddWorker"),
       ddbPath(ddbPath), paths(paths), recursive(recursive) {}
   ~AddWorker() {}
 
   void Execute () {
-      if (DDBAdd(ddbPath.c_str(), paths.data(), static_cast<int>(paths.size()), recursive) != DDBERR_NONE){
+      std::vector<const char *> cPaths(paths.size());
+      std::transform(paths.begin(), paths.end(), cPaths.begin(), [](const std::string& s) { return s.c_str(); });
+
+      if (DDBAdd(ddbPath.c_str(), cPaths.data(), static_cast<int>(cPaths.size()), recursive) != DDBERR_NONE){
           SetErrorMessage(DDBGetLastError());
       }
   }
@@ -75,14 +78,15 @@ class AddWorker : public Nan::AsyncWorker {
      Nan::HandleScope scope;
 
      v8::Local<v8::Value> argv[] = {
-         Nan::Null()
+         Nan::Null(),
+         Nan::True()
      };
      callback->Call(2, argv, async_resource);
    }
 
  private:
     std::string ddbPath;
-    std::vector<const char *> paths;
+    std::vector<std::string> paths;
     bool recursive;
 };
 
@@ -114,10 +118,10 @@ NAN_METHOD(add) {
     // v8 array --> c++ std vector
     auto p = info[1].As<v8::Array>();
     auto ctx = info.GetIsolate()->GetCurrentContext();
-    std::vector<const char *> paths;
+    std::vector<std::string> paths;
     for (unsigned int i = 0; i < p->Length(); i++){
         Nan::Utf8String str(p->Get(ctx, i).ToLocalChecked());
-        paths.push_back(*str);
+        paths.push_back(std::string(*str));
     }
 
     // Parse options
@@ -137,13 +141,16 @@ NAN_METHOD(add) {
 
 class RemoveWorker : public Nan::AsyncWorker {
  public:
-  RemoveWorker(Nan::Callback *callback, const std::string &ddbPath, const std::vector<const char *> &paths, bool recursive)
+  RemoveWorker(Nan::Callback *callback, const std::string &ddbPath, const std::vector<std::string> &paths, bool recursive)
     : AsyncWorker(callback, "nan:RemoveWorker"),
       ddbPath(ddbPath), paths(paths), recursive(recursive) {}
   ~RemoveWorker() {}
 
   void Execute () {
-      if (DDBRemove(ddbPath.c_str(), paths.data(), static_cast<int>(paths.size()), recursive) != DDBERR_NONE){
+      std::vector<const char *> cPaths(paths.size());
+      std::transform(paths.begin(), paths.end(), cPaths.begin(), [](const std::string& s) { return s.c_str(); });
+
+      if (DDBRemove(ddbPath.c_str(), cPaths.data(), static_cast<int>(cPaths.size()), recursive) != DDBERR_NONE){
           SetErrorMessage(DDBGetLastError());
       }
   }
@@ -152,14 +159,15 @@ class RemoveWorker : public Nan::AsyncWorker {
      Nan::HandleScope scope;
 
      v8::Local<v8::Value> argv[] = {
-         Nan::Null()
+         Nan::Null(),
+         Nan::True()
      };
      callback->Call(2, argv, async_resource);
    }
 
  private:
     std::string ddbPath;
-    std::vector<const char *> paths;
+    std::vector<std::string> paths;
     bool recursive;
 };
 
@@ -191,10 +199,10 @@ NAN_METHOD(remove) {
     // v8 array --> c++ std vector
     auto p = info[1].As<v8::Array>();
     auto ctx = info.GetIsolate()->GetCurrentContext();
-    std::vector<const char *> paths;
+    std::vector<std::string> paths;
     for (unsigned int i = 0; i < p->Length(); i++){
         Nan::Utf8String str(p->Get(ctx, i).ToLocalChecked());
-        paths.push_back(*str);
+        paths.push_back(std::string(*str));
     }
 
     // Parse options

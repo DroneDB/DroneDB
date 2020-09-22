@@ -50,12 +50,11 @@ class InfoWorker : public Nan::AsyncWorker {
      Nan::HandleScope scope;
 
      Nan::JSON json;
-     Nan::MaybeLocal<v8::Value> result = json.Parse(Nan::New<v8::String>(s.str()).ToLocalChecked());
-
      v8::Local<v8::Value> argv[] = {
          Nan::Null(),
-         result.ToLocalChecked()
+         json.Parse(Nan::New<v8::String>(s.str()).ToLocalChecked()).ToLocalChecked()
      };
+
      callback->Call(2, argv, async_resource);
    }
 
