@@ -100,6 +100,7 @@ include_directories("${CMAKE_CURRENT_SOURCE_DIR}/vendor/exiv2/include")
 
 add_library(${PROJECT_NAME} SHARED ${SRC_LIST})
 set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 17)
+add_dependencies(${PROJECT_NAME} exiv2lib)
 
 if(NOT WIN32)
     # Tell the linker how to resolve library names
