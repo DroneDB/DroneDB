@@ -52,9 +52,11 @@ NAN_METHOD(init) {
         return;
     }
 
+    std::string directory = *Nan::Utf8String(info[0].As<v8::String>());
+
     // Execute
     Nan::Callback *callback = new Nan::Callback(Nan::To<v8::Function>(info[1]).ToLocalChecked());
-    Nan::AsyncQueueWorker(new InitWorker(callback, *Nan::Utf8String(info[0].As<v8::String>())));
+    Nan::AsyncQueueWorker(new InitWorker(callback, directory));
 }
 
 
