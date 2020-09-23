@@ -281,63 +281,81 @@ void addToIndex(Database *db, const std::vector<std::string> &paths) {
 
 void removeFromIndex(Database *db, const std::vector<std::string> &paths) {
 
-	if (paths.empty()) return; // Nothing to do
+    if (paths.empty())
+    {
+    	// Nothing to do
+        std::cout << "No paths provided" << std::endl;
+	    return;
+    }
+	
     const fs::path directory = rootDirectory(db);
 
-    std::cout << "Root directory: " << directory << std::endl;
+    //std::cout << "Root directory: " << directory << std::endl;
 	
-    auto pathList = std::vector<fs::path>(paths.begin(), paths.end()); //  getIndexPathList(directory, paths, false);
-
-    //auto q = db->query("DELETE FROM entries WHERE path = ?");
-    db->exec("BEGIN TRANSACTION");
+    auto pathList = std::vector<fs::path>(paths.begin(), paths.end()); 
 
     for (auto &p : pathList) {
-        io::Path relPath = io::Path(p).relativeTo(directory);
 
-        std::cout << "Deleting path: " << relPath.generic() << std::endl;
+        std::cout << "Deleting path: " << p << std::endl;
 
-        auto entryMatches = getMatchingEntries(db, relPath.get());
+        auto relPath = io::Path(p).relativeTo(directory);
 
-        //std::cout << "Matches: " << entryMatches.size() << std::endl;
+        std::cout << "Rel path: " << relPath.generic() << std::endl;
+
+        auto entryMatches = getMatchingEntries(db, relPath.generic());
     	
     	for (auto &e : entryMatches)
     	{
-            deleteFromIndex(db, e.path);
+            auto cnt = deleteFromIndex(db, e.path);
 
     		if (e.type == Directory)    		
-                deleteFromIndex(db, e.path + "/*");
-                		
-    	}
-    	
-        //std::cout << "Deleting path: " << relPath.generic() << std::endl;
-    	/*
-    	q->bind(1, relPath.generic());
-        q->execute();
-        if (db->changes() >= 1) {
-            std::cout << "D\t" << relPath.generic() << std::endl;
-        }*/
-    }
+                cnt += deleteFromIndex(db, e.path + "/*");
 
-    db->exec("COMMIT");
+            if (!cnt)            
+                std::cout << "No matching entries" << std::endl;
+            
+    	}
+    }
 }
 
-void deleteFromIndex(Database* db, const std::string &query)
+int deleteFromIndex(Database* db, const std::string &query)
 {
 
 	auto str(query);
+    int count = 0;
 	
     std::replace(str.begin(), str.end(), '*', '%');
 
-    std::cout << "\tDeleting Match: " << str << std::endl;
-	
-    auto q = db->query("DELETE FROM entries WHERE path = ?");
+    auto q = db->query("SELECT path, type FROM entries WHERE path LIKE ?");
 
     q->bind(1, str);
-    q->execute();
+
+    bool res = false;
+
+	while(q->fetch())
+	{
+        res = true;
+                
+        std::cout << "D\t" << q->getText(0) << std::endl;
+        count++;        
+	}
 	
-    if (db->changes() >= 1) {
-        std::cout << "D\t" << str << std::endl;
-    }
+    q->reset();
+
+    if (res) {
+        q = db->query("DELETE FROM entries WHERE path LIKE ?");
+
+        q->bind(1, str);
+        q->execute();
+
+        //if (db->changes() >= 1) {
+        //    std::cout << "D\t" << str << std::endl;
+        //}
+
+        q->reset();
+    } 
+
+    return count;
 }
 	
 std::vector<Entry> getMatchingEntries(Database* db, fs::path path) {
@@ -356,11 +374,11 @@ std::vector<Entry> getMatchingEntries(Database* db, fs::path path) {
 
 	while(q->fetch())
 	{
-		Entry e(*q);
-		
-        entries.push_back(e);
-		
-    } 
+		Entry e(*q);		
+        entries.push_back(e);		
+    }
+
+    q->reset();
 
     return entries;
 

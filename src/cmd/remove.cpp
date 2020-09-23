@@ -33,6 +33,9 @@ void Remove::run(cxxopts::ParseResult &opts) {
     const auto ddbPath = opts["directory"].as<std::string>();
     auto paths = opts["paths"].as<std::vector<std::string>>();
 
+    //auto p = paths[0];
+    //std::cout << "Par " << p << std::endl;
+
     std::vector<const char *> cPaths(paths.size());
     std::transform(paths.begin(), paths.end(), cPaths.begin(), [](const std::string& s) { return s.c_str(); });
 
