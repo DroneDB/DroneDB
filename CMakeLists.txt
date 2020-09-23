@@ -103,7 +103,7 @@ add_library(${PROJECT_NAME} SHARED ${SRC_LIST})
 set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 17)
 if(NOT WIN32)
     # Tell the linker how to resolve library names
-    target_link_libraries(${PROJECT_NAME} PRIVATE "-lspatialite -lsqlite3 -lgdal -lcurl")
+    target_link_libraries(${PROJECT_NAME} PRIVATE "-lspatialite -lsqlite3 -lgdal -lcurl -lexiv2")
 endif()
 
 # set PLOG to PLOG_GLOBAL/PLOG_EXPORT to share instances across modules (and export on Windows)
