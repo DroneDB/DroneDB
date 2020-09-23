@@ -100,10 +100,10 @@ include_directories("${CMAKE_CURRENT_SOURCE_DIR}/vendor/exiv2/include")
 
 add_library(${PROJECT_NAME} SHARED ${SRC_LIST})
 set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 17)
-link_directories("${CMAKE_BINARY_DIR}/lib")
+
 if(NOT WIN32)
     # Tell the linker how to resolve library names
-    target_link_libraries(${PROJECT_NAME} PRIVATE "-lspatialite -lsqlite3 -lgdal -lcurl -lexiv2")
+    target_link_libraries(${PROJECT_NAME} PRIVATE "-lspatialite -lsqlite3 -lgdal -lcurl -lexiv2 -L\"${CMAKE_BINARY_DIR}/lib\"")
 endif()
 
 # set PLOG to PLOG_GLOBAL/PLOG_EXPORT to share instances across modules (and export on Windows)
