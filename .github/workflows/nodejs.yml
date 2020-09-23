@@ -16,6 +16,8 @@ jobs:
               run: scripts/ubuntu_deps.sh
             - name: Build Node.js bindings
               run: npm install
+            - name: Setup tmate session
+              uses: mxschmitt/action-tmate@v3
             - name: Test Node.js bindings
               run: npm test
 
