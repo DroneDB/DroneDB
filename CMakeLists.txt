@@ -119,6 +119,11 @@ if (WIN32)
         COMMENT "Created ${CMAKE_BINARY_DIR}/ddb.dll"
     )
 
+    add_custom_command(TARGET "${PROJECT_NAME}" POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different  $<TARGET_FILE:exiv2lib> "${CMAKE_BINARY_DIR}/exiv2.dll"
+        COMMENT "Created ${CMAKE_BINARY_DIR}/exiv2.dll"
+    )
+
     file(GLOB GDAL_DLLS "${DOWNLOADS_DIR}/gdal/bin/*.dll")
     file(COPY ${GDAL_DLLS} DESTINATION ${CMAKE_BINARY_DIR})
 
