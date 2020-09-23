@@ -23,7 +23,7 @@ jobs:
 
     windows:
         name: Build/Test on Windows
-        runs-on: windows-2016
+        runs-on: windows-latest
         steps:
             - uses: actions/checkout@v2
               with:
