@@ -1,3 +1,4 @@
+add_subdirectory("exiv2")
 add_subdirectory("zonedetect")
 add_subdirectory("cctz")
 add_subdirectory("hash-library")
