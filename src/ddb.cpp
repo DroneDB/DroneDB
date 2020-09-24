@@ -94,7 +94,7 @@ DDB_C_BEGIN
     json outJson = json::array();
     ddb::addToIndex(db.get(), ddb::expandPathList(pathList,
                                                   recursive,
-                                                  0), [&outJson](const Entry &e){
+                                                  0), [&outJson](const Entry &e, bool){
         json j;
         e.toJSON(j);
         outJson.push_back(j);

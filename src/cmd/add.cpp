@@ -37,8 +37,8 @@ void Add::run(cxxopts::ParseResult &opts) {
     auto db = ddb::open(std::string(ddbPath), true);
     ddb::addToIndex(db.get(), ddb::expandPathList(paths,
                                                   recursive,
-                                                  0), [](const ddb::Entry &e){
-        std::cout << "A\t" << e.path << std::endl;
+                                                  0), [](const ddb::Entry &e, bool updated){
+        std::cout << (updated ? "U\t" : "A\t") << e.path << std::endl;
         return true;
     });
 }
