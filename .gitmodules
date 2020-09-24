@@ -1,6 +1,3 @@
 [submodule "ddb_data"]
 	path = ddb_data
 	url = https://github.com/DroneDB/ddb_data
-[submodule "vendor/exiv2"]
-	path = vendor/exiv2
-	url = https://github.com/DroneDB/exiv2

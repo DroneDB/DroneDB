@@ -43,10 +43,6 @@ class AuthException : public AppException{
 class JSONException : public AppException{
     using AppException::AppException;
 };
-class RegistryException : public AppException{
-    using AppException::AppException;
-};
-
 
 }
 #endif // EXCEPTIONS_H

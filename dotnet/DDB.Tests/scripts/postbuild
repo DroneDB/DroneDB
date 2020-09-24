@@ -18,6 +18,7 @@ if [ ! -e "$COPY_FROM/libddb.so" ]; then
 fi
 
 cp -v -u "$COPY_FROM/"*.so "$TARGETDIR"
+cp -v -u "$COPY_FROM/exiv2-build/lib/libexiv2.so" "$TARGETDIR"
 cp -v -u "$COPY_FROM/"*.sqlite "$TARGETDIR"
 cp -v -u "$COPY_FROM/"*.bin "$TARGETDIR"
 cp -v -u "$COPY_FROM/"*.db "$TARGETDIR"

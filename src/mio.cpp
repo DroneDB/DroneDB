@@ -103,16 +103,6 @@ bool Path::isParentOf(const fs::path &childPath){
     return absC.rfind(absP, 0) == 0 && absP != absC;
 }
 
-bool Path::isAbsolute() const{
-    return p.is_absolute();
-}
-
-bool Path::isRelative() const{
-    return p.is_relative();
-}
-
-
-
 
 // Counts the number of path components
 // it does NOT normalize the path to account for ".." and "." folders
@@ -127,7 +117,7 @@ int Path::depth() {
 
 Path Path::relativeTo(const fs::path &parent){
     // Special case where parent == path
-    if (fs::weakly_canonical(fs::absolute(p)) == fs::weakly_canonical(fs::absolute(parent))) {
+    if (fs::absolute(p) == fs::absolute(parent)) {
         return fs::path("");
     }
 
@@ -140,12 +130,6 @@ Path Path::relativeTo(const fs::path &parent){
     fs::path relPath = fs::relative(fs::weakly_canonical(fs::absolute(p)), fs::weakly_canonical(fs::absolute(parent)));
     if (relPath.generic_string() == ".") return fs::weakly_canonical(fs::absolute(parent));
     else return relPath;
-}
-
-
-Path Path::withoutRoot(){
-    if (!isAbsolute()) return Path(p);
-    return Path(p.relative_path());
 }
 
 std::string Path::generic() const{

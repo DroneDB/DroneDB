@@ -23,7 +23,6 @@ public:
     DDB_DLL ~Response();
 
     DDB_DLL char* getData();
-    DDB_DLL std::string getText();
     DDB_DLL bool hasData();
     DDB_DLL json getJSON();
     DDB_DLL long status();

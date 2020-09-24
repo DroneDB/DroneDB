@@ -19,7 +19,6 @@ public:
     Command();
     void run(int argc, char* argv[]);
     virtual std::string description(){ return ""; }
-    virtual std::string extendedDescription(){ return ""; }
 };
 
 }

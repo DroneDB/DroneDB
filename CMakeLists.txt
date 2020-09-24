@@ -76,6 +76,42 @@ if (WIN32)
     add_compile_definitions(_HAS_AUTO_PTR_ETC=1)
 endif()
 
+set(EXIV_CMAKE_BUILD_FLAGS "-DEXIV2_BUILD_SAMPLES=OFF" "-DEXIV2_BUILD_EXIV2_COMMAND=OFF -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}")
+if (WIN32)
+    list(APPEND EXIV_CMAKE_BUILD_FLAGS "-DEXPAT_LIBRARY=${DOWNLOADS_DIR}/gdal/lib/expat.lib" "-DEXPAT_INCLUDE_DIR=${DOWNLOADS_DIR}/gdal/include" "-DZLIB_LIBRARY=${DOWNLOADS_DIR}/gdal/lib/zlib.lib" "-DZLIB_INCLUDE_DIR=${DOWNLOADS_DIR}/gdal/include")
+endif()
+
+ExternalProject_Add(exiv2
+  PREFIX            ${CMAKE_BINARY_DIR}/exiv2
+  TMP_DIR           ${CMAKE_BINARY_DIR}/exiv2-tmp
+  STAMP_DIR         ${CMAKE_BINARY_DIR}/exiv2-stamp
+  #--Download step--------------
+  DOWNLOAD_DIR      ${DOWNLOADS_DIR}
+  GIT_REPOSITORY    https://github.com/uav4geo/exiv2
+  GIT_TAG           master
+  #--Update/Patch step----------
+  UPDATE_COMMAND    ""
+  #--Configure step-------------
+  SOURCE_DIR        ${CMAKE_BINARY_DIR}/exiv2
+  CMAKE_ARGS ${EXIV_CMAKE_BUILD_FLAGS} --target exiv2lib
+  #--Build step-----------------
+  BINARY_DIR        ${CMAKE_BINARY_DIR}/exiv2-build
+  #--Install step---------------
+  INSTALL_COMMAND    ""
+  #--Output logging-------------
+  LOG_DOWNLOAD      OFF
+  LOG_CONFIGURE     OFF
+  LOG_BUILD         OFF
+)
+include_directories(${CMAKE_BINARY_DIR}/exiv2-build)
+include_directories(${CMAKE_BINARY_DIR}/exiv2/include)
+
+
+set(EXIV2_LIB "${CMAKE_BINARY_DIR}/exiv2-build/lib/libexiv2.so")
+if (WIN32)
+    set(EXIV2_LIB "${CMAKE_BINARY_DIR}/exiv2-build/lib/${CMAKE_BUILD_TYPE}/exiv2.lib")
+endif()
+
 find_package(GDAL REQUIRED)
 find_package(CURL REQUIRED)
 find_package(SpatiaLite REQUIRED)
@@ -86,25 +122,22 @@ if (NOT WIN32)
     set(STDPPFS_LIBRARY stdc++fs)
 endif()
 
-set(LINK_LIBRARIES ${SPATIALITE_LIBRARY} ${SQLITE3_LIBRARY} ${STDPPFS_LIBRARY} exiv2lib cctz::cctz ${GDAL_LIBRARY} ${CURL_LIBRARY})
+set(LINK_LIBRARIES ${SPATIALITE_LIBRARY} ${SQLITE3_LIBRARY} ${STDPPFS_LIBRARY} ${EXIV2_LIB} cctz::cctz ${GDAL_LIBRARY} ${CURL_LIBRARY})
 set(CMD_SRC_LIST ${CMAKE_CURRENT_SOURCE_DIR}/src/cmd/main.cpp)
 
 add_subdirectory("src")
 add_subdirectory("vendor")
 
 include_directories("src")
-include_directories("${CMAKE_BINARY_DIR}")
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}/vendor")
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}/vendor/cctz/include")
-include_directories("${CMAKE_CURRENT_SOURCE_DIR}/vendor/exiv2/include")
 
 add_library(${PROJECT_NAME} SHARED ${SRC_LIST})
+add_dependencies(${PROJECT_NAME} exiv2)
 set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 17)
-add_dependencies(${PROJECT_NAME} exiv2lib)
-
 if(NOT WIN32)
     # Tell the linker how to resolve library names
-    target_link_libraries(${PROJECT_NAME} PRIVATE "-lspatialite -lsqlite3 -lgdal -lcurl -lexiv2 -L\"${CMAKE_BINARY_DIR}/lib\"")
+    target_link_libraries(${PROJECT_NAME} PRIVATE "-lspatialite -lsqlite3 -lexiv2 -lgdal -lcurl")
 endif()
 
 # set PLOG to PLOG_GLOBAL/PLOG_EXPORT to share instances across modules (and export on Windows)
@@ -120,9 +153,12 @@ if (WIN32)
         COMMENT "Created ${CMAKE_BINARY_DIR}/ddb.dll"
     )
 
-    add_custom_command(TARGET "${PROJECT_NAME}" POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different  $<TARGET_FILE:exiv2lib> "${CMAKE_BINARY_DIR}/exiv2.dll"
-        COMMENT "Created ${CMAKE_BINARY_DIR}/exiv2.dll"
+    add_custom_command(
+        TARGET "${PROJECT_NAME}" PRE_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_BINARY_DIR}/exiv2-build/bin/exiv2.dll"
+                "${CMAKE_BINARY_DIR}/"
+        COMMENT "Copied ${CMAKE_BINARY_DIR}/exiv2-build/bin/exiv2.dll"
     )
 
     file(GLOB GDAL_DLLS "${DOWNLOADS_DIR}/gdal/bin/*.dll")
@@ -263,6 +299,7 @@ if (WIN32)
 
     # These are added after build so they are not available with GLOB
     list(APPEND DIST_FILES "${CMAKE_BINARY_DIR}/ddb.dll")
+    list(APPEND DIST_FILES "${CMAKE_BINARY_DIR}/exiv2.dll")
 endif()
 
 foreach(F ${SUPPORT_FILES})
@@ -292,5 +329,6 @@ endif()
 if (NOT WIN32)
 install(TARGETS ${PROJECT_NAME})
 install(PROGRAMS "${CMAKE_BINARY_DIR}/ddbcmd" DESTINATION bin RENAME ddb)
+install(DIRECTORY "${CMAKE_BINARY_DIR}/exiv2-build/lib/" DESTINATION lib PATTERN "*" )
 install(FILES ${DIST_FILES} DESTINATION share/ddb)
 endif()
