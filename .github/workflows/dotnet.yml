@@ -47,7 +47,7 @@ jobs:
         - name: Run CMake
           run: mkdir build && cd build && cmake -DBUILD_TESTING=OFF ..
         - name: Build C++ lib
-          run: cd build && make -j$(nproc) ddb && sudo make install
+          run: cd build && make -j$(nproc) ddb && sudo make install && sudo ldconfig
         - name: Test .NET bindings
           run: |
             cd dotnet
