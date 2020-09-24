@@ -86,17 +86,9 @@ std::string ShareService::share(const std::vector<std::string> &input, const std
     if (res.status() != 200) handleError(res);
 
     j = res.getJSON();
-    if (!j.contains("objectsCount")) handleError(res);
+    if (!j.contains("url")) handleError(res);
 
-    if (j["objectsCount"].get<unsigned long>() != filePaths.size()){
-        throw RegistryException("Could not upload all files (only " +
-                                std::to_string(j["objectsCount"].get<unsigned long>()) +
-                                " out of " +
-                                std::to_string(filePaths.size()) +
-                                " succeeded)");
-    }
-
-    return reg.getUrl("/r/" + tc.tagWithoutUrl());
+    return reg.getUrl(j["url"]);
 }
 
 void ShareService::handleError(net::Response &res){
