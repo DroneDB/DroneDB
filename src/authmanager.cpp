@@ -38,7 +38,7 @@ void AuthManager::saveCredentials(const std::string &url, const AuthCredentials 
     std::stringstream ss;
     ss << creds.username << ":" << creds.password;
     auth["auths"][url] = {
-        "auth", Base64::encode(ss.str())
+        { "auth", Base64::encode(ss.str()) }
     };
 
     WriteToDisk();
@@ -48,11 +48,11 @@ AuthCredentials AuthManager::loadCredentials(const std::string &url){
     AuthCredentials ac;
 
     if (auth["auths"].contains(url)){
-        std::string userpwd = Base64::decode(auth["auths"][url]);
+        std::string userpwd = Base64::decode(auth["auths"][url]["auth"]);
         size_t colonpos = userpwd.rfind(":");
         if (colonpos > 0){
             LOGD << "Found username and password for " << url;
-            ac.username = userpwd.substr(0, colonpos - 1);
+            ac.username = userpwd.substr(0, colonpos);
             ac.password = userpwd.substr(colonpos + 1, userpwd.length() - colonpos - 1);
         }
     }
