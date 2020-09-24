@@ -33,7 +33,7 @@ struct Entry {
     BasicPointGeometry point_geom;
     BasicPolygonGeometry polygon_geom;
 
-    DDB_DLL void toJSON(json &j);
+    DDB_DLL void toJSON(json &j) const;
     DDB_DLL bool toGeoJSON(json &j, BasicGeometryType type = BasicGeometryType::BGAuto);
     DDB_DLL std::string toString();
 };

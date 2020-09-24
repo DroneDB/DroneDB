@@ -5,7 +5,7 @@
 #include <iostream>
 #include "fs.h"
 #include "add.h"
-#include "ddb.h"
+#include "dbops.h"
 
 namespace cmd {
 
@@ -32,13 +32,15 @@ void Add::run(cxxopts::ParseResult &opts) {
 
     auto ddbPath = opts["directory"].as<std::string>();
     auto paths = opts["paths"].as<std::vector<std::string>>();
+    auto recursive = opts.count("recursive") > 0;
 
-    std::vector<const char *> cPaths(paths.size());
-    std::transform(paths.begin(), paths.end(), cPaths.begin(), [](const std::string& s) { return s.c_str(); });
-
-    if (DDBAdd(ddbPath.c_str(), cPaths.data(), static_cast<int>(cPaths.size()), opts.count("recursive")) != DDBERR_NONE){
-        std::cerr << DDBGetLastError() << std::endl;
-    }
+    auto db = ddb::open(std::string(ddbPath), true);
+    ddb::addToIndex(db.get(), ddb::expandPathList(paths,
+                                                  recursive,
+                                                  0), [](const ddb::Entry &e){
+        std::cout << "A\t" << e.path << std::endl;
+        return true;
+    });
 }
 
 }

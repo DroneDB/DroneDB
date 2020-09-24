@@ -21,7 +21,7 @@ DDB_DLL std::vector<std::string> expandPathList(const std::vector<std::string> &
 DDB_DLL bool checkUpdate(Entry &e, const fs::path &p, long long dbMtime, const std::string &dbHash);
 DDB_DLL void doUpdate(Statement *updateQ, const Entry &e);
 
-DDB_DLL void addToIndex(Database *db, const std::vector<std::string> &paths);
+DDB_DLL void addToIndex(Database *db, const std::vector<std::string> &paths, std::function<bool(const Entry &entry)> callback = nullptr);
 DDB_DLL void removeFromIndex(Database *db, const std::vector<std::string> &paths);
 DDB_DLL void syncIndex(Database *db);
 

@@ -224,7 +224,7 @@ void doUpdate(Statement *updateQ, const Entry &e) {
     std::cout << "U\t" << e.path << std::endl;
 }
 
-void addToIndex(Database *db, const std::vector<std::string> &paths) {
+void addToIndex(Database *db, const std::vector<std::string> &paths, std::function<bool(const Entry &entry)> callback) {
     if (paths.size() == 0) return; // Nothing to do
     fs::path directory = rootDirectory(db);
     auto pathList = getIndexPathList(directory, paths, true);
@@ -266,7 +266,7 @@ void addToIndex(Database *db, const std::vector<std::string> &paths) {
                 insertQ->bind(9, e.polygon_geom.toWkt());
 
                 insertQ->execute();
-                std::cout << "A\t" << e.path << std::endl;
+                if (callback != nullptr) if (!callback(e)) return; // cancel
             } else {
                 doUpdate(updateQ.get(), e);
             }
