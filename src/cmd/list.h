@@ -18,6 +18,7 @@
 #include "logout.h"
 #include "tile.h"
 #include "system.h"
+#include "share.h"
 
 namespace cmd {
 
@@ -33,6 +34,7 @@ std::map<std::string, Command*> commands = {
     {"set", new Set()},
     {"login", new Login()},
     {"logout", new Logout()},
+    {"share", new Share()},
     {"tile", new Tile()},
     {"system", new System()}
 };

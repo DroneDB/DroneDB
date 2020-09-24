@@ -53,6 +53,13 @@ char *Response::getData(){
     return buf;
 }
 
+std::string Response::getText(){
+    if (buf != nullptr){
+        return std::string(buf);
+    }
+    return "";
+}
+
 bool Response::hasData(){
     return buf != nullptr;
 }

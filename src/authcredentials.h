@@ -13,6 +13,7 @@ struct AuthCredentials{
 
     DDB_DLL AuthCredentials();
     DDB_DLL AuthCredentials(const std::string &username, const std::string &password);
+    DDB_DLL bool empty() const;
 
 };
 
