@@ -79,18 +79,11 @@ const ddb = {
 
     add: async function(ddbPath, paths, options = {}){
         return new Promise((resolve, reject) => {
-            const isSingle = typeof paths === "string"; 
-            if (isSingle) paths = [paths];
-            
+            if (typeof paths === "string") paths = [paths];
+
             n.add(ddbPath, paths, options, (err, entries) => {
                 if (err) reject(err);
-                else{
-                    // Return single item
-                    if (isSingle) resolve(entries[0]);
-
-                    // Return entire array
-                    else resolve(entries);
-                }               
+                else return resolve(entries);             
             });
         });
     },

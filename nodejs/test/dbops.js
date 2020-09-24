@@ -17,7 +17,7 @@ describe('ddbops', function() {
     const imagePath = await t.downloadTestAsset("https://raw.githubusercontent.com/DroneDB/test_data/master/test-datasets/drone_dataset_brighton_beach/DJI_0018.JPG", 
                               "DJI_0018.JPG");
 
-    const addRes = await ddb.add(f, imagePath);
+    const addRes = (await ddb.add(f, imagePath))[0];
     assert.ok(typeof addRes.hash === "string");
     assert.ok(typeof addRes.path === "string");
     assert.ok(typeof addRes.size === "number");
