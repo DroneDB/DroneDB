@@ -111,7 +111,7 @@ std::string to_str(const T value, const int n = 6)
 static inline void copyToPtr(const std::string &str, char **ptr){
     if (ptr != NULL){
         size_t s = str.size();
-        *ptr = (char *)calloc(s + 1, sizeof(char));
+        *ptr = (char *)calloc(s, sizeof(char));
         strcpy(*ptr, str.c_str());
     }
 }

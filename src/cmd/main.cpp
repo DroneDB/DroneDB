@@ -13,7 +13,6 @@
 #include "dbops.h"
 #include "mio.h"
 #include <gdal_priv.h>
-#include <curl/curl.h>
 
 using namespace std;
 using namespace ddb;
@@ -50,7 +49,6 @@ int main(int argc, char* argv[]) {
     LOGV << "SQLite version: " << sqlite3_libversion();
     LOGV << "SpatiaLite version: " << spatialite_version();
     LOGV << "GDAL version: " << GDALVersionInfo("RELEASE_NAME");
-    LOGV << "CURL version: " << curl_version();
 
     if (argc <= 1) printHelp(argv);
     else {

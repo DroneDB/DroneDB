@@ -16,7 +16,6 @@ class System : public Command {
     virtual void run(cxxopts::ParseResult &opts) override;
     virtual void setOptions(cxxopts::Options &opts) override;
     virtual std::string description() override;
-    virtual std::string extendedDescription() override;
 };
 
 }

@@ -12,8 +12,6 @@ jobs:
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v2
-              with:
-                  submodules: 'recursive'
             - name: Install deps
               run: scripts/ubuntu_deps.sh
             - name: Build Node.js bindings
@@ -23,11 +21,9 @@ jobs:
 
     windows:
         name: Build/Test on Windows
-        runs-on: windows-latest
+        runs-on: windows-2016
         steps:
             - uses: actions/checkout@v2
-              with:
-                  submodules: 'recursive'
             - uses: actions/setup-node@v2-beta
               with:
                 node-version: '14'

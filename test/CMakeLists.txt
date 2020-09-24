@@ -17,10 +17,6 @@ add_custom_command(TARGET test POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different  $<TARGET_FILE:ddb> "${CMAKE_BINARY_DIR}/ddb.dll"
     COMMENT "Created ${CMAKE_BINARY_DIR}/ddb.dll"
 )
-add_custom_command(TARGET test POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different  $<TARGET_FILE:gtest> "${CMAKE_BINARY_DIR}/gtest.dll"
-    COMMENT "Created ${CMAKE_BINARY_DIR}/gtest.dll"
-)
 endif()
 
 set(EXE_EXT ".run")

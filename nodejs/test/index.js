@@ -6,7 +6,7 @@ const assert = require('assert');
 const { TestArea, isPng } = require('./utils');
 const fs = require('fs');
 
-describe('functions', function() {
+describe('node-ddb extension', function() {
   it('should export a getVersion() method', function() {
     assert.equal(typeof ddb.getVersion(), "string");
     assert(ddb.getVersion().length > 0);

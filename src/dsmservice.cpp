@@ -107,7 +107,7 @@ std::string DSMService::loadFromNetwork(double latitude, double longitude){
 
     std::cout << "Downloading DSM from " << url << " ..." << std::endl;
     net::Request r = net::GET(url);
-	r.verifySSL(false); // Risk is tolerable, we're just fetching altitude
+	r.setVerifySSL(false); // Risk is tolerable, we're just fetching altitude
     r.downloadToFile(filePath);
 
     return filePath;

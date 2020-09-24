@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include <sstream>
-#include "ne_functions.h"
+#include "functions.h"
 #include "ddb.h"
 #include "dbops.h"
 #include "info.h"
@@ -50,11 +50,12 @@ class InfoWorker : public Nan::AsyncWorker {
      Nan::HandleScope scope;
 
      Nan::JSON json;
+     Nan::MaybeLocal<v8::Value> result = json.Parse(Nan::New<v8::String>(s.str()).ToLocalChecked());
+
      v8::Local<v8::Value> argv[] = {
          Nan::Null(),
-         json.Parse(Nan::New<v8::String>(s.str()).ToLocalChecked()).ToLocalChecked()
+         result.ToLocalChecked()
      };
-
      callback->Call(2, argv, async_resource);
    }
 
