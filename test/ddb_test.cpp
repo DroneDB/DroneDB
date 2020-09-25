@@ -353,5 +353,75 @@ TEST(deleteFromIndex, fileExactInvalidPath) {
 }
 
 
+TEST(deleteFromIndex, hardCases) {
+    TestArea ta(TEST_NAME);
+
+    const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/hard/.ddb/dbase.sqlite", "dbase.sqlite");
+
+    const auto testFolder = ta.getFolder("test");
+    create_directory(testFolder / ".ddb");
+    fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
+
+    auto db = ddb::open(std::string(testFolder), false);
+
+    std::vector<std::string> toRemove;
+
+    // Before
+    EXPECT_EQ(countEntries(db.get()), 6);
+    EXPECT_EQ(countEntries(db.get(), "a b\\1/test%2/%2-sub"), 1);
+    EXPECT_EQ(countEntries(db.get(), "a b\\1/test%2/%2-sub/test"), 1);
+
+    toRemove.emplace_back((testFolder / "a b\\1" / "test%2" / ".." / "test%2" / "." / "%2-*").string());
+    removeFromIndex(db.get(), toRemove);
+
+    // Two entries (1 folder, 1 file) should have been removed
+    EXPECT_EQ(countEntries(db.get(), "a b\\1/test%2/%2-sub"), 0);
+    EXPECT_EQ(countEntries(db.get(), "a b\\1/test%2/%2-sub/test"), 0);
+
+    EXPECT_EQ(countEntries(db.get()), 4);
+
+    // Before
+    EXPECT_EQ(countEntries(db.get(), "a b\\1/test%2/%2"), 1);
+
+    toRemove.clear();
+    toRemove.emplace_back((testFolder / "a b\\1" / "test%2" / "%2").string());
+
+    removeFromIndex(db.get(), toRemove);
+
+    // Only one file should have been removed
+    EXPECT_EQ(countEntries(db.get(), "a b\\1/test%2/%2"), 0);
+    EXPECT_EQ(countEntries(db.get()), 3);
+
+    db->close();
+}
+
+TEST(deleteFromIndex, hardCases2) {
+    TestArea ta(TEST_NAME);
+
+    const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/hard/.ddb/dbase.sqlite", "dbase.sqlite");
+
+    const auto testFolder = ta.getFolder("test");
+    create_directory(testFolder / ".ddb");
+    fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
+
+    auto db = ddb::open(std::string(testFolder), false);
+
+    std::vector<std::string> toRemove;
+
+    // Before
+    EXPECT_EQ(countEntries(db.get()), 6);
+
+    toRemove.emplace_back((testFolder / "a b\\1" / "test%2" / "%2").string());
+    removeFromIndex(db.get(), toRemove);
+
+    // 1 entry should have been removed
+    EXPECT_EQ(countEntries(db.get(), "a b\\1/test%2/%2"), 0);
+    EXPECT_EQ(countEntries(db.get(), "a b\\1/test%2/%2-sub/test"), 1);
+
+    EXPECT_EQ(countEntries(db.get()), 5);
+
+    db->close();
+}
+
 
 }
