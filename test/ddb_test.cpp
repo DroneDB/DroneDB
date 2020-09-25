@@ -43,6 +43,27 @@ TEST(getIndexPathList, dontIncludeDirs) {
 
 }
 
+int countEntries(Database* db, const std::string path)
+{
+    auto q = db->query("SELECT COUNT(*) FROM entries WHERE Path = ?");
+    q->bind(1, path);
+    q->fetch();
+    const auto cnt = q->getInt(0);
+    q->reset();
+
+    return cnt;
+}
+
+int countEntries(Database* db)
+{
+    auto q = db->query("SELECT COUNT(*) FROM entries");
+    q->fetch();
+    const auto cnt = q->getInt(0);
+    q->reset();
+
+    return cnt;
+}
+
 TEST(deleteFromIndex, simplePath) {
     TestArea ta(TEST_NAME);
 
@@ -50,11 +71,278 @@ TEST(deleteFromIndex, simplePath) {
 
     const auto testFolder = ta.getFolder("test");
     create_directory(testFolder / ".ddb");
-    fs::copy(sqlite.string(), testFolder / ".ddb");
-    EXPECT_TRUE(fs::exists(testFolder / ".ddb" / "dbase.sqlite"));
+    fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
+    const auto dbPath = testFolder / ".ddb" / "dbase.sqlite";
+    EXPECT_TRUE(fs::exists(dbPath));
 
-	// TODO: Finish here
+    Database db;
+
+    db.open(dbPath.string());
+
+    std::vector<std::string> toRemove;
+    toRemove.emplace_back((testFolder / "pics.jpg").string());
+
+    removeFromIndex(&db, toRemove);
+
+    EXPECT_EQ(countEntries(&db, "pics.jpg"), 0);
+        
+    db.close();	
+	
 }
+
+TEST(deleteFromIndex, folderPath) {
+    TestArea ta(TEST_NAME);
+
+    const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", "dbase.sqlite");
+
+    const auto testFolder = ta.getFolder("test");
+    create_directory(testFolder / ".ddb");
+    fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
+    const auto dbPath = testFolder / ".ddb" / "dbase.sqlite";
+    EXPECT_TRUE(fs::exists(dbPath));
+
+    Database db;
+
+    db.open(dbPath.string());
+
+    std::vector<std::string> toRemove;
+
+	// 9
+    toRemove.emplace_back((testFolder / "pics").string());
+
+    removeFromIndex(&db, toRemove);
+
+    EXPECT_EQ(countEntries(&db), 15);
+
+    db.close();
+
+}
+
+TEST(deleteFromIndex, subFolderPath) {
+    TestArea ta(TEST_NAME);
+
+    const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", "dbase.sqlite");
+
+    const auto testFolder = ta.getFolder("test");
+    create_directory(testFolder / ".ddb");
+    fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
+    const auto dbPath = testFolder / ".ddb" / "dbase.sqlite";
+    EXPECT_TRUE(fs::exists(dbPath));
+
+    Database db;
+
+    db.open(dbPath.string());
+
+    std::vector<std::string> toRemove;
+    // 3
+    toRemove.emplace_back((testFolder / "pics" / "pics2").string());
+
+    removeFromIndex(&db, toRemove);
+
+    EXPECT_EQ(countEntries(&db), 21);
+
+    db.close();
+
+}
+
+TEST(deleteFromIndex, fileExact) {
+    TestArea ta(TEST_NAME);
+
+    const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", "dbase.sqlite");
+
+    const auto testFolder = ta.getFolder("test");
+    create_directory(testFolder / ".ddb");
+    fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
+    const auto dbPath = testFolder / ".ddb" / "dbase.sqlite";
+    EXPECT_TRUE(fs::exists(dbPath));
+
+    Database db;
+
+    db.open(dbPath.string());
+
+    std::vector<std::string> toRemove;
+    // 1
+    toRemove.emplace_back((testFolder / "1JI_0065.JPG").string());
+
+    removeFromIndex(&db, toRemove);
+
+    EXPECT_EQ(countEntries(&db, "1JI_0065.JPG"), 0);
+
+    db.close();
+
+}
+
+
+TEST(deleteFromIndex, fileExactInFolder) {
+    TestArea ta(TEST_NAME);
+
+    const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", "dbase.sqlite");
+
+    const auto testFolder = ta.getFolder("test");
+    create_directory(testFolder / ".ddb");
+    fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
+    const auto dbPath = testFolder / ".ddb" / "dbase.sqlite";
+    EXPECT_TRUE(fs::exists(dbPath));
+
+    Database db;
+
+    db.open(dbPath.string());
+
+    std::vector<std::string> toRemove;
+    // 1
+    toRemove.emplace_back((testFolder / "pics" / "IMG_20160826_181309.jpg").string());
+
+    removeFromIndex(&db, toRemove);
+
+    EXPECT_EQ(countEntries(&db, "pics/1JI_0065.JPG"), 0);
+
+    db.close();
+
+}
+
+TEST(deleteFromIndex, fileWildcard) {
+    TestArea ta(TEST_NAME);
+
+    const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", "dbase.sqlite");
+
+    const auto testFolder = ta.getFolder("test");
+    create_directory(testFolder / ".ddb");
+    fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
+    const auto dbPath = testFolder / ".ddb" / "dbase.sqlite";
+    EXPECT_TRUE(fs::exists(dbPath));
+
+    Database db;
+
+    db.open(dbPath.string());
+
+    std::vector<std::string> toRemove;
+    // 2
+    toRemove.emplace_back((testFolder / "1JI%").string());
+
+    removeFromIndex(&db, toRemove);
+
+    EXPECT_EQ(countEntries(&db), 22);
+
+    db.close();
+
+}
+
+
+TEST(deleteFromIndex, fileInFolderWildcard) {
+    TestArea ta(TEST_NAME);
+
+    const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", "dbase.sqlite");
+
+    const auto testFolder = ta.getFolder("test");
+    create_directory(testFolder / ".ddb");
+    fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
+    const auto dbPath = testFolder / ".ddb" / "dbase.sqlite";
+    EXPECT_TRUE(fs::exists(dbPath));
+
+    Database db;
+
+    db.open(dbPath.string());
+
+    std::vector<std::string> toRemove;
+    // 5
+    toRemove.emplace_back((testFolder / "pics" / "IMG%").string());
+
+    removeFromIndex(&db, toRemove);
+
+    EXPECT_EQ(countEntries(&db), 19);
+
+	EXPECT_EQ(countEntries(&db, "pics/IMG_20160826_181302.jpg"), 0);
+    EXPECT_EQ(countEntries(&db, "pics/IMG_20160826_181305.jpg"), 0);
+    EXPECT_EQ(countEntries(&db, "pics/IMG_20160826_181309.jpg"), 0);
+    EXPECT_EQ(countEntries(&db, "pics/IMG_20160826_181314.jpg"), 0);
+    EXPECT_EQ(countEntries(&db, "pics/IMG_20160826_181317.jpg"), 0);
+
+    db.close();
+
+}
+
+TEST(deleteFromIndex, fileExactDirtyDot) {
+    TestArea ta(TEST_NAME);
+
+    const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", "dbase.sqlite");
+
+    const auto testFolder = ta.getFolder("test");
+    create_directory(testFolder / ".ddb");
+    fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
+    const auto dbPath = testFolder / ".ddb" / "dbase.sqlite";
+    EXPECT_TRUE(fs::exists(dbPath));
+
+    Database db;
+
+    db.open(dbPath.string());
+
+    std::vector<std::string> toRemove;
+    // 1
+    toRemove.emplace_back((testFolder / "." / "1JI_0065.JPG").string());
+
+    removeFromIndex(&db, toRemove);
+
+    EXPECT_EQ(countEntries(&db, "1JI_0065.JPG"), 0);
+
+    db.close();
+
+}
+
+TEST(deleteFromIndex, fileExactDirtyDotDot) {
+    TestArea ta(TEST_NAME);
+
+    const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", "dbase.sqlite");
+
+    const auto testFolder = ta.getFolder("test");
+    create_directory(testFolder / ".ddb");
+    fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
+    const auto dbPath = testFolder / ".ddb" / "dbase.sqlite";
+    EXPECT_TRUE(fs::exists(dbPath));
+
+    Database db;
+
+    db.open(dbPath.string());
+
+    std::vector<std::string> toRemove;
+    // 1
+    toRemove.emplace_back((testFolder / "pics" / ".." / "1JI_0065.JPG").string());
+
+    removeFromIndex(&db, toRemove);
+
+    EXPECT_EQ(countEntries(&db, "1JI_0065.JPG"), 0);
+
+    db.close();
+
+}
+
+TEST(deleteFromIndex, fileExactInvalidPath) {
+    TestArea ta(TEST_NAME);
+
+    const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", "dbase.sqlite");
+
+    const auto testFolder = ta.getFolder("test");
+    create_directory(testFolder / ".ddb");
+    fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
+    const auto dbPath = testFolder / ".ddb" / "dbase.sqlite";
+    EXPECT_TRUE(fs::exists(dbPath));
+
+    Database db;
+
+    db.open(dbPath.string());
+
+    std::vector<std::string> toRemove;
+    // 1
+    toRemove.emplace_back((testFolder / "..." / "1JI_0065.JPG").string());
+
+    removeFromIndex(&db, toRemove);
+
+	// Straaaaaange
+    EXPECT_EQ(countEntries(&db, "1JI_0065.JPG"), 0);
+
+    db.close();
+
+}
+
 
 
 }
