@@ -51,8 +51,12 @@ namespace DDB.Tests
 
             Assert.Throws<DDBException>(() => DroneDB.Add("testAdd", "invalid"));
 
-            DroneDB.Add("testAdd", Path.Join("testAdd", "file.txt"));
-            DroneDB.Add("testAdd", new string[]{ Path.Join("testAdd", "file2.txt"), Path.Join("testAdd", "file3.txt")});
+            var entry = DroneDB.Add("testAdd", Path.Join("testAdd", "file.txt"))[0];
+            Assert.AreEqual(entry.Path, "file.txt");
+            Assert.IsTrue(entry.Hash.Length > 0);
+            
+            var entries = DroneDB.Add("testAdd", new string[]{ Path.Join("testAdd", "file2.txt"), Path.Join("testAdd", "file3.txt")});
+            Assert.AreEqual(entries.Count, 2);
 
             DroneDB.Remove("testAdd", Path.Join("testAdd", "file.txt"));
             Assert.Throws<DDBException>(() => DroneDB.Remove("testAdd", "invalid"));

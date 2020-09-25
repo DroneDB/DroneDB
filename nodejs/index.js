@@ -80,9 +80,10 @@ const ddb = {
     add: async function(ddbPath, paths, options = {}){
         return new Promise((resolve, reject) => {
             if (typeof paths === "string") paths = [paths];
-            n.add(ddbPath, paths, options, err => {
+
+            n.add(ddbPath, paths, options, (err, entries) => {
                 if (err) reject(err);
-                else resolve(true);                
+                else return resolve(entries);             
             });
         });
     },

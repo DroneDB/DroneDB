@@ -280,7 +280,7 @@ void calculateFootprint(const SensorSize &sensorSize, const GeoLocation &geo, co
     geom.addPoint(ul.longitude, ul.latitude, groundHeight);
 }
 
-void Entry::toJSON(json &j){
+void Entry::toJSON(json &j) const{
     j["path"] = this->path;
     if (this->hash != "") j["hash"] = this->hash;
     j["type"] = this->type;

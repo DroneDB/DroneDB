@@ -71,7 +71,7 @@ class AddWorker : public Nan::AsyncWorker {
       std::vector<const char *> cPaths(paths.size());
       std::transform(paths.begin(), paths.end(), cPaths.begin(), [](const std::string& s) { return s.c_str(); });
 
-      if (DDBAdd(ddbPath.c_str(), cPaths.data(), static_cast<int>(cPaths.size()), recursive) != DDBERR_NONE){
+      if (DDBAdd(ddbPath.c_str(), cPaths.data(), static_cast<int>(cPaths.size()), &output, recursive) != DDBERR_NONE){
           SetErrorMessage(DDBGetLastError());
       }
   }
@@ -79,14 +79,18 @@ class AddWorker : public Nan::AsyncWorker {
   void HandleOKCallback () {
      Nan::HandleScope scope;
 
+     Nan::JSON json;
      v8::Local<v8::Value> argv[] = {
          Nan::Null(),
-         Nan::True()
+         json.Parse(Nan::New<v8::String>(output).ToLocalChecked()).ToLocalChecked()
      };
+     delete output; // TODO: is this a leak if the call fails? How do we de-allocate on failure?
      callback->Call(2, argv, async_resource);
    }
 
  private:
+    char *output;
+
     std::string ddbPath;
     std::vector<std::string> paths;
     bool recursive;
