@@ -336,7 +336,16 @@ TEST(deleteFromIndex, fileExactInvalidPath) {
 
     removeFromIndex(&db, toRemove);
 
-	// Straaaaaange
+    // Normal, "..." is not a valid folder
+    EXPECT_EQ(countEntries(&db, "1JI_0065.JPG"), 1);
+
+    toRemove.clear();
+
+    toRemove.emplace_back((testFolder / "abc" / ".." / "1JI_0065.JPG").string());
+    removeFromIndex(&db, toRemove);
+
+    // Should have been removed
+
     EXPECT_EQ(countEntries(&db, "1JI_0065.JPG"), 0);
 
     db.close();
