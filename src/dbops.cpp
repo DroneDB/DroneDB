@@ -318,15 +318,43 @@ void removeFromIndex(Database *db, const std::vector<std::string> &paths) {
     }
 }
 
+
+std::string sanitize_query_param(std::string str)
+{
+
+    auto res(str);
+    // TAKES INTO ACCOUNT PATHS THAT CONTAINS EVERY SORT OF STUFF
+
+    /*
+        REPLACE "/" -> "//"
+        REPLACE "%" -> "/%"
+        REPLACE "_" -> "/_"
+        REPLACE "*" -> "/*"
+        REPLACE "*" -> "%"
+     */
+
+    utils::string_replace(res, "/", "//");
+    utils::string_replace(res, "%", "/%");
+    utils::string_replace(res, "_", "/_");
+    //utils::string_replace(res, "*", "/*");
+    utils::string_replace(res, "*", "%");
+
+    return res;
+
+}
+
 int deleteFromIndex(Database* db, const std::string &query)
 {
 
-	auto str(query);
     int count = 0;
-	
-    std::replace(str.begin(), str.end(), '*', '%');
 
-    auto q = db->query("SELECT path, type FROM entries WHERE path LIKE ?");
+    std::cout << "Query: " << query << std::endl;
+
+    const auto str = sanitize_query_param(query);
+
+    std::cout << "Sanitized: " << str << std::endl;
+
+    auto q = db->query("SELECT path, type FROM entries WHERE path LIKE ? ESCAPE '/'");
 
     q->bind(1, str);
 
@@ -343,7 +371,7 @@ int deleteFromIndex(Database* db, const std::string &query)
     q->reset();
 
     if (res) {
-        q = db->query("DELETE FROM entries WHERE path LIKE ?");
+        q = db->query("DELETE FROM entries WHERE path LIKE ? ESCAPE '/'");
 
         q->bind(1, str);
         q->execute();
@@ -357,20 +385,23 @@ int deleteFromIndex(Database* db, const std::string &query)
 
     return count;
 }
-	
-std::vector<Entry> getMatchingEntries(Database* db, fs::path path) {
 
-    auto str = path.string();
 	
-    std::replace(str.begin(), str.end(), '*', '%');
+std::vector<Entry> getMatchingEntries(Database* db, const fs::path path) {
 
-    std::cout << "Query: " << str << std::endl;
-	
+	const auto query = path.string();
+
+    std::cout << "Query: " << query << std::endl;
+
+    const auto sanitized = sanitize_query_param(query);
+
+    std::cout << "Sanitized: " << sanitized << std::endl;
+
+    auto q = db->query("SELECT * FROM entries WHERE path LIKE ? ESCAPE '/'");
+    	
     std::vector<Entry> entries;
 
-    auto q = db->query("SELECT * FROM entries WHERE path LIKE ?");
-
-    q->bind(1, str);
+    q->bind(1, sanitized);
 
 	while(q->fetch())
 	{
