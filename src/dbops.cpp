@@ -284,7 +284,7 @@ void removeFromIndex(Database *db, const std::vector<std::string> &paths) {
     if (paths.empty())
     {
     	// Nothing to do
-        std::cout << "No paths provided" << std::endl;
+        LOGD << "No paths provided";
 	    return;
     }
 	
@@ -296,11 +296,11 @@ void removeFromIndex(Database *db, const std::vector<std::string> &paths) {
 
     for (auto &p : pathList) {
 
-        std::cout << "Deleting path: " << p << std::endl;
+        LOGD << "Deleting path: " << p;
 
         auto relPath = io::Path(p).relativeTo(directory);
 
-        std::cout << "Rel path: " << relPath.generic() << std::endl;
+        LOGD << "Rel path: " << relPath.generic();
 
         auto entryMatches = getMatchingEntries(db, relPath.generic());
     	
@@ -309,7 +309,7 @@ void removeFromIndex(Database *db, const std::vector<std::string> &paths) {
             auto cnt = deleteFromIndex(db, e.path);
 
     		if (e.type == Directory)    		
-                cnt += deleteFromIndex(db, e.path + "/*");
+                cnt += deleteFromIndex(db, e.path, true);
 
             if (!cnt)            
                 std::cout << "No matching entries" << std::endl;
@@ -323,19 +323,12 @@ std::string sanitize_query_param(std::string str)
 {
 
     auto res(str);
-    // TAKES INTO ACCOUNT PATHS THAT CONTAINS EVERY SORT OF STUFF
 
-    /*
-        REPLACE "/" -> "//"
-        REPLACE "%" -> "/%"
-        REPLACE "_" -> "/_"
-        REPLACE "*" -> "/*"
-        REPLACE "*" -> "%"
-     */
-
+	// TAKES INTO ACCOUNT PATHS THAT CONTAINS EVERY SORT OF STUFF
     utils::string_replace(res, "/", "//");
     utils::string_replace(res, "%", "/%");
     utils::string_replace(res, "_", "/_");
+    //utils::string_replace(res, "?", "/?");
     //utils::string_replace(res, "*", "/*");
     utils::string_replace(res, "*", "%");
 
@@ -343,17 +336,23 @@ std::string sanitize_query_param(std::string str)
 
 }
 
-int deleteFromIndex(Database* db, const std::string &query)
+int deleteFromIndex(Database* db, const std::string &query, bool isFolder)
 {
 
     int count = 0;
 
-    std::cout << "Query: " << query << std::endl;
+    LOGD << "Query: " << query;
 
-    const auto str = sanitize_query_param(query);
+    auto str = sanitize_query_param(query);
 
-    std::cout << "Sanitized: " << str << std::endl;
+    LOGD << "Sanitized: " << str;
 
+	if (isFolder) {
+		str += "//%";
+
+        LOGD << "Folder: " << str;
+    }
+		
     auto q = db->query("SELECT path, type FROM entries WHERE path LIKE ? ESCAPE '/'");
 
     q->bind(1, str);
@@ -391,11 +390,11 @@ std::vector<Entry> getMatchingEntries(Database* db, const fs::path path) {
 
 	const auto query = path.string();
 
-    std::cout << "Query: " << query << std::endl;
+    LOGD << "Query: " << query;
 
     const auto sanitized = sanitize_query_param(query);
 
-    std::cout << "Sanitized: " << sanitized << std::endl;
+    LOGD << "Sanitized: " << sanitized;
 
     auto q = db->query("SELECT * FROM entries WHERE path LIKE ? ESCAPE '/'");
     	
