@@ -80,6 +80,8 @@
         "xmemory": "cpp",
         "xstddef": "cpp",
         "xtr1common": "cpp",
-        "xtree": "cpp"
+        "xtree": "cpp",
+        "string_view": "cpp",
+        "xmemory0": "cpp"
     }
 }
