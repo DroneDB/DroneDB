@@ -46,9 +46,10 @@ DDB_DLL DDBErr DDBInit(const char *directory, char **outPath = NULL);
  * @param ddbPath path to a DroneDB database (parent of ".ddb")
  * @param paths array of paths to add to index
  * @param numPaths number of paths
+ * @param output pointer to C-string where to store output
  * @param recursive whether to recursively add folders
  * @return DDBERR_NONE on success, an error otherwise */
-DDB_DLL DDBErr DDBAdd(const char *ddbPath, const char **paths, int numPaths, bool recursive = false);
+DDB_DLL DDBErr DDBAdd(const char *ddbPath, const char **paths, int numPaths, char** output, bool recursive = false);
 
 /** Remove one or more files to a DroneDB database
  * @param ddbPath path to a DroneDB database (parent of ".ddb")

@@ -68,10 +68,10 @@ TEST(pathRelativeTo, Normal) {
               io::Path("aaa").generic());
 #ifdef _WIN32
     EXPECT_EQ(io::Path("D:/home/test/aaa").relativeTo("/").generic(),
-              io::Path("D:/home/test/aaa").generic());
+              io::Path("home/test/aaa").generic());
 #else
     EXPECT_EQ(io::Path("/home/test/aaa").relativeTo("/").generic(),
-              io::Path("/home/test/aaa").generic());
+              io::Path("home/test/aaa").generic());
 #endif
     EXPECT_EQ(io::Path("/home/test/aaa/bbb/ccc/../..").relativeTo("/home").generic(),
               io::Path("test/aaa/").generic());
@@ -80,36 +80,40 @@ TEST(pathRelativeTo, Normal) {
 
 #ifdef _WIN32
 	EXPECT_EQ(io::Path("D:/home/test").relativeTo("/").generic(),
-		io::Path("D:/home/test").generic());
+		io::Path("home/test").generic());
+    EXPECT_EQ(io::Path("D:/home/test").relativeTo("D:/").generic(),
+        io::Path("home/test").generic());
+    EXPECT_EQ(io::Path("D:/home/test").relativeTo("D:\\").generic(),
+        io::Path("home/test").generic());
 #else
 	EXPECT_EQ(io::Path("/home/test").relativeTo("/").generic(),
-		io::Path("/home/test").generic());
+		io::Path("home/test").generic());
 #endif
     
 
 #ifdef _WIN32
     EXPECT_EQ(io::Path("D:\\").relativeTo("/").generic(),
-              io::Path("D:\\").generic());
+              io::Path("").generic());
 #else
     EXPECT_EQ(io::Path("/").relativeTo("/").generic(),
-              io::Path("/").generic());
+              io::Path("").generic());
 #endif
 
 #ifdef _WIN32
 	EXPECT_EQ(io::Path("C:\\a\\..").relativeTo("C:").generic(),
-		io::Path("C:\\").generic());
+		io::Path("").generic());
 	EXPECT_EQ(io::Path("C:\\").relativeTo("C:\\a\\..").generic(),
-		io::Path("C:\\").generic());
+		io::Path("").generic());
 #else
     EXPECT_EQ(io::Path("/a/..").relativeTo("/").generic(),
-              io::Path("/").generic());
+              io::Path("").generic());
     EXPECT_EQ(io::Path("/").relativeTo("/a/..").generic(),
-              io::Path("/").generic());
+              io::Path("").generic());
 #endif
 
 #ifdef _WIN32
     EXPECT_EQ(io::Path("C:\\test").relativeTo("/").generic(),
-              io::Path("C:\\test").generic());
+              io::Path("test").generic());
     EXPECT_EQ(io::Path("D:\\test\\..\\aaa").relativeTo("D:\\").generic(),
               io::Path("aaa").generic());
 #endif
@@ -139,6 +143,20 @@ TEST(getModifiedTime, Normal) {
 
     // Works on files
     EXPECT_TRUE(io::Path(io::getDataPath("timezone21.bin")).getModifiedTime() > 0);
+}
+
+TEST(withoutRoot, Normal){
+#ifdef _WIN32
+    EXPECT_EQ(io::Path("C:\\test\\abc").withoutRoot().string(),
+              io::Path("test\\abc").string());
+    EXPECT_EQ(io::Path("D:\\..\\abc").withoutRoot().string(),
+        io::Path("..\\abc").string());
+#else
+    EXPECT_EQ(io::Path("/test/abc").withoutRoot().string(),
+        io::Path("test/abc").string());
+    EXPECT_EQ(io::Path("../abc").withoutRoot().string(),
+        io::Path("../abc").string());
+#endif
 }
 
 }

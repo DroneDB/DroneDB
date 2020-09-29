@@ -66,6 +66,36 @@ const ddb = {
                 } 
             });
         });
+    },
+
+    init: async function(directory){
+        return new Promise((resolve, reject) => {
+            n.init(directory, (err, result) => {
+                if (err) reject(err);
+                else resolve(result);
+            })
+        });
+    },
+
+    add: async function(ddbPath, paths, options = {}){
+        return new Promise((resolve, reject) => {
+            if (typeof paths === "string") paths = [paths];
+
+            n.add(ddbPath, paths, options, (err, entries) => {
+                if (err) reject(err);
+                else return resolve(entries);             
+            });
+        });
+    },
+
+    remove: async function(ddbPath, paths, options = {}){
+        return new Promise((resolve, reject) => {
+            if (typeof paths === "string") paths = [paths];
+            n.remove(ddbPath, paths, options, err => {
+                if (err) reject(err);
+                else resolve(true);     
+            });
+        });
     }
 };
 
