@@ -62,16 +62,16 @@ NAN_METHOD(init) {
 
 class AddWorker : public Nan::AsyncWorker {
  public:
-  AddWorker(Nan::Callback *callback, const std::string &ddbPath, const std::vector<std::string> &paths)
+  AddWorker(Nan::Callback *callback, const std::string &ddbPath, const std::vector<std::string> &paths, bool recursive)
     : AsyncWorker(callback, "nan:AddWorker"),
-      ddbPath(ddbPath), paths(paths) {}
+      ddbPath(ddbPath), paths(paths), recursive(recursive) {}
   ~AddWorker() {}
 
   void Execute () {
       std::vector<const char *> cPaths(paths.size());
       std::transform(paths.begin(), paths.end(), cPaths.begin(), [](const std::string& s) { return s.c_str(); });
 
-      if (DDBAdd(ddbPath.c_str(), cPaths.data(), static_cast<int>(cPaths.size()), &output) != DDBERR_NONE){
+      if (DDBAdd(ddbPath.c_str(), cPaths.data(), static_cast<int>(cPaths.size()), &output, recursive) != DDBERR_NONE){
           SetErrorMessage(DDBGetLastError());
       }
   }
@@ -93,6 +93,7 @@ class AddWorker : public Nan::AsyncWorker {
 
     std::string ddbPath;
     std::vector<std::string> paths;
+    bool recursive;
 };
 
 
@@ -130,11 +131,17 @@ NAN_METHOD(add) {
     }
 
     // Parse options
+    v8::Local<v8::String> k = Nan::New<v8::String>("recursive").ToLocalChecked();
     v8::Local<v8::Object> obj = info[2].As<v8::Object>();
+
+    bool recursive = false;
+    if (Nan::HasRealNamedProperty(obj, k).FromJust()){
+        recursive = Nan::To<bool>(Nan::GetRealNamedProperty(obj, k).ToLocalChecked()).FromJust();
+    }
 
     // Execute
     Nan::Callback *callback = new Nan::Callback(Nan::To<v8::Function>(info[3]).ToLocalChecked());
-    Nan::AsyncQueueWorker(new AddWorker(callback, ddbPath, paths));
+    Nan::AsyncQueueWorker(new AddWorker(callback, ddbPath, paths, recursive));
 }
 
 
