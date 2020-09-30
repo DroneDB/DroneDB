@@ -4,6 +4,8 @@
 #include <iomanip>
 #include "progressbar.h"
 
+#include <algorithm>
+
 namespace cmd{
 
 void ProgressBar::update(const std::string &label, float progress){

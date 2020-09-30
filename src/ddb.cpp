@@ -111,8 +111,7 @@ DDB_C_BEGIN
 	const auto db = ddb::open(std::string(ddbPath), true);
 	const std::vector<std::string> pathList(paths, paths + numPaths);
 
-    removeFromIndex(db.get(), pathList);
-	//removeFromIndex(db.get(), ddb::expandPathList(pathList, false, 0));
+    removeFromIndex(db.get(), pathList);	
 DDB_C_END
 }
 

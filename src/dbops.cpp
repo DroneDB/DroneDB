@@ -290,8 +290,6 @@ void removeFromIndex(Database *db, const std::vector<std::string> &paths) {
 	
     const fs::path directory = rootDirectory(db);
 
-    //std::cout << "Root directory: " << directory << std::endl;
-	
     auto pathList = std::vector<fs::path>(paths.begin(), paths.end()); 
 
     for (auto &p : pathList) {
@@ -304,6 +302,8 @@ void removeFromIndex(Database *db, const std::vector<std::string> &paths) {
 
         auto entryMatches = getMatchingEntries(db, relPath.generic());
     	
+        int tot = 0;
+
     	for (auto &e : entryMatches)
     	{
             auto cnt = deleteFromIndex(db, e.path);
@@ -311,10 +311,15 @@ void removeFromIndex(Database *db, const std::vector<std::string> &paths) {
     		if (e.type == Directory)    		
                 cnt += deleteFromIndex(db, e.path, true);
 
-            if (!cnt)            
-                std::cout << "No matching entries" << std::endl;
+            // if (!cnt)            
+            //     std::cout << "No matching entries" << std::endl;
+
+            tot += cnt;
             
     	}
+
+        if (!tot)
+            throw FSException("No matching entries");
     }
 }
 

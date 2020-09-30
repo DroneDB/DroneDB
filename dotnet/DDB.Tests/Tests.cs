@@ -60,8 +60,7 @@ namespace DDB.Tests
 
             DroneDB.Remove("testAdd", Path.Join("testAdd", "file.txt"));
             
-            // NOTE: Should we throw an exception when the requested file to remove does not exist?
-            //Assert.Throws<DDBException>(() => DroneDB.Remove("testAdd", "invalid"));
+            Assert.Throws<DDBException>(() => DroneDB.Remove("testAdd", "invalid"));
         }
 
         [Test]
