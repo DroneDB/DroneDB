@@ -12,6 +12,7 @@
 #include "sync.h"
 #include "geoproj.h"
 #include "info.h"
+#include "list.h"
 #include "thumbs.h"
 #include "set.h"
 #include "login.h"
@@ -29,6 +30,7 @@ std::map<std::string, Command*> commands = {
     {"sync", new Sync()},
     {"geoproj", new GeoProj()},
     {"info", new Info()},
+    {"list", new List()},
     {"thumbs", new Thumbs()},
     {"set", new Set()},
     {"login", new Login()},
@@ -43,7 +45,8 @@ std::map<std::string, std::string> aliases = {
     {"a", "add"},
     {"s", "sync"},
     {"gp", "geoproj"},
-    {"i", "info"}
+    {"i", "info"},
+    {"ls", "list"}
 };
 
 }
