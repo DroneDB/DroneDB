@@ -32,21 +32,21 @@ Statement::~Statement() {
 
 Statement &Statement::bind(int paramNum, const std::string &value) {
     assert(stmt != nullptr && db != nullptr);
-//    LOGD << "Bind \"" << value << "\" as param " << paramNum;
+    LOGD << "Bind \"" << value << "\" as param " << paramNum;
     bindCheck(sqlite3_bind_text(stmt, paramNum, value.c_str(), static_cast<int>(value.length()), SQLITE_TRANSIENT));
     return *this;
 }
 
 Statement &Statement::bind(int paramNum, int value) {
     assert(stmt != nullptr && db != nullptr);
-//    LOGD << "Bind " << value << " as param " << paramNum;
+    LOGD << "Bind " << value << " as param " << paramNum;
     bindCheck(sqlite3_bind_int(stmt, paramNum, value));
     return *this;
 }
 
 Statement &Statement::bind(int paramNum, long long value) {
     assert(stmt != nullptr && db != nullptr);
-//    LOGD << "Bind " << value << " as param " << paramNum;
+    LOGD << "Bind " << value << " as param " << paramNum;
     bindCheck(sqlite3_bind_int64(stmt, paramNum, value));
     return *this;
 }

@@ -147,16 +147,16 @@ NAN_METHOD(add) {
 
 class RemoveWorker : public Nan::AsyncWorker {
  public:
-  RemoveWorker(Nan::Callback *callback, const std::string &ddbPath, const std::vector<std::string> &paths, bool recursive)
+  RemoveWorker(Nan::Callback *callback, const std::string &ddbPath, const std::vector<std::string> &paths)
     : AsyncWorker(callback, "nan:RemoveWorker"),
-      ddbPath(ddbPath), paths(paths), recursive(recursive) {}
+      ddbPath(ddbPath), paths(paths) {}
   ~RemoveWorker() {}
 
   void Execute () {
       std::vector<const char *> cPaths(paths.size());
       std::transform(paths.begin(), paths.end(), cPaths.begin(), [](const std::string& s) { return s.c_str(); });
 
-      if (DDBRemove(ddbPath.c_str(), cPaths.data(), static_cast<int>(cPaths.size()), recursive) != DDBERR_NONE){
+      if (DDBRemove(ddbPath.c_str(), cPaths.data(), static_cast<int>(cPaths.size())) != DDBERR_NONE){
           SetErrorMessage(DDBGetLastError());
       }
   }
@@ -173,8 +173,7 @@ class RemoveWorker : public Nan::AsyncWorker {
 
  private:
     std::string ddbPath;
-    std::vector<std::string> paths;
-    bool recursive;
+    std::vector<std::string> paths;    
 };
 
 
@@ -211,16 +210,10 @@ NAN_METHOD(remove) {
         paths.push_back(std::string(*str));
     }
 
-    // Parse options
-    v8::Local<v8::String> k = Nan::New<v8::String>("recursive").ToLocalChecked();
-    v8::Local<v8::Object> obj = info[2].As<v8::Object>();
-
-    bool recursive = false;
-    if (Nan::HasRealNamedProperty(obj, k).FromJust()){
-        recursive = Nan::To<bool>(Nan::GetRealNamedProperty(obj, k).ToLocalChecked()).FromJust();
-    }
+    // Parse options    
+    v8::Local<v8::Object> obj = info[2].As<v8::Object>();    
 
     // Execute
     Nan::Callback *callback = new Nan::Callback(Nan::To<v8::Function>(info[3]).ToLocalChecked());
-    Nan::AsyncQueueWorker(new RemoveWorker(callback, ddbPath, paths, recursive));
+    Nan::AsyncQueueWorker(new RemoveWorker(callback, ddbPath, paths));
 }

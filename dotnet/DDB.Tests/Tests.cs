@@ -59,6 +59,7 @@ namespace DDB.Tests
             Assert.AreEqual(entries.Count, 2);
 
             DroneDB.Remove("testAdd", Path.Join("testAdd", "file.txt"));
+            
             Assert.Throws<DDBException>(() => DroneDB.Remove("testAdd", "invalid"));
         }
 
