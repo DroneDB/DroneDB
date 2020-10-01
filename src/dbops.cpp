@@ -380,10 +380,6 @@ int deleteFromIndex(Database* db, const std::string &query, bool isFolder)
         q->bind(1, str);
         q->execute();
 
-        //if (db->changes() >= 1) {
-        //    std::cout << "D\t" << str << std::endl;
-        //}
-
         q->reset();
     } 
 
