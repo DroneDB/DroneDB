@@ -123,6 +123,10 @@ DDB_DLL std::string getPass(const std::string &prompt = "Password: ");
 
 time_t currentUnixTimestamp();
 
+// https://stackoverflow.com/questions/3418231/replace-part-of-a-string-with-another-string
+void string_replace(std::string& str, const std::string& from, const std::string& to);
+
+
 // Fix for removing macros
 #undef max
 #undef min

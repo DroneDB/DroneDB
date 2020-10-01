@@ -65,15 +65,15 @@ namespace DDB.Bindings
         [DllImport("ddb", EntryPoint = "DDBRemove")]
         static extern DDBError _Remove([MarshalAs(UnmanagedType.LPStr)] string ddbPath,
                                   [MarshalAs(UnmanagedType.LPArray, ArraySubType = UnmanagedType.LPStr)] string[] paths,
-                                  int numPaths, bool recursive);
+                                  int numPaths);
 
-        public static void Remove(string ddbPath, string path, bool recursive = false)
+        public static void Remove(string ddbPath, string path)
         {
-            Remove(ddbPath, new[] { path }, recursive);
+            Remove(ddbPath, new[] { path });
         }
-        public static void Remove(string ddbPath, string[] paths, bool recursive = false)
+        public static void Remove(string ddbPath, string[] paths)
         {
-            if (_Remove(ddbPath, paths, paths.Length, recursive) != DDBError.DDBERR_NONE)
+            if (_Remove(ddbPath, paths, paths.Length) != DDBError.DDBERR_NONE)
                 throw new DDBException(GetLastError());
             
         }

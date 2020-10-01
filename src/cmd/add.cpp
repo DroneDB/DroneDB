@@ -30,7 +30,7 @@ void Add::run(cxxopts::ParseResult &opts) {
         printHelp();
     }
 
-    auto ddbPath = opts["directory"].as<std::string>();
+    const auto ddbPath = opts["directory"].as<std::string>();
     auto paths = opts["paths"].as<std::vector<std::string>>();
     auto recursive = opts.count("recursive") > 0;
 
