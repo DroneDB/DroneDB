@@ -11,7 +11,7 @@ Command::Command() {
 }
 
 void Command::run(int argc, char *argv[]) {
-    cxxopts::Options opts(argv[0], description());
+    cxxopts::Options opts(argv[0], description() + extendedDescription());
     opts
     .show_positional_help();
 

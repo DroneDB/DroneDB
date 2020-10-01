@@ -132,6 +132,7 @@ bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
                 }
             }catch(Exiv2::AnyError& e){
                 LOGD << "Cannot read EXIF data: " << path.string();
+            	
                 if (stopOnError) throw FSException("Cannot read EXIF data: " + path.string() + " (" + e.what() + ")");
             }
         }else if (georaster){
@@ -280,7 +281,7 @@ void calculateFootprint(const SensorSize &sensorSize, const GeoLocation &geo, co
     geom.addPoint(ul.longitude, ul.latitude, groundHeight);
 }
 
-void Entry::toJSON(json &j){
+void Entry::toJSON(json &j) const{
     j["path"] = this->path;
     if (this->hash != "") j["hash"] = this->hash;
     j["type"] = this->type;

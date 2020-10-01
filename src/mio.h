@@ -34,12 +34,19 @@ public:
     DDB_DLL std::uintmax_t getSize();
     DDB_DLL bool hasChildren(const std::vector<std::string> &childPaths);
     DDB_DLL bool isParentOf(const fs::path &childPath);
+    DDB_DLL bool isAbsolute() const;
+    DDB_DLL bool isRelative() const;
     DDB_DLL int depth();
 
     // Computes a relative path to parent
     // Taking care of edge cases between platforms
     // and canonicalizing the path
     DDB_DLL Path relativeTo(const fs::path &parent);
+
+    // Remove the root path to make this
+    // path relative to its root
+    // (path must be absolute)
+    DDB_DLL Path withoutRoot();
 
     // Cross-platform path.generic_string()
     DDB_DLL std::string generic() const;

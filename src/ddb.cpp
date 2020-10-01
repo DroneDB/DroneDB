@@ -11,6 +11,8 @@
 #include "logger.h"
 #include "database.h"
 #include "net.h"
+#include "entry.h"
+#include "json.h"
 #include "exceptions.h"
 #include "utils.h"
 
@@ -85,32 +87,40 @@ void DDBSetLastError(const char *err){
     ddbLastError[254] = '\0';
 }
 
-DDBErr DDBAdd(const char *ddbPath, const char **paths, int numPaths, bool recursive){
+DDBErr DDBAdd(const char *ddbPath, const char **paths, int numPaths, char** output, bool recursive){
 DDB_C_BEGIN
+
     auto db = ddb::open(std::string(ddbPath), true);
     std::vector<std::string> pathList(paths, paths + numPaths);
+    json outJson = json::array();
     ddb::addToIndex(db.get(), ddb::expandPathList(pathList,
                                                   recursive,
-                                                  0));
+                                                  0), [&outJson](const Entry &e, bool){
+        json j;
+        e.toJSON(j);
+        outJson.push_back(j);
+        return true;
+    });
+
+    utils::copyToPtr(outJson.dump(), output);
 DDB_C_END
 }
 
-DDBErr DDBRemove(const char *ddbPath, const char **paths, int numPaths, bool recursive){
+DDBErr DDBRemove(const char *ddbPath, const char **paths, int numPaths){
 DDB_C_BEGIN
-    auto db = ddb::open(std::string(ddbPath), true);
-    std::vector<std::string> pathList(paths, paths + numPaths);
-    ddb::removeFromIndex(db.get(), ddb::expandPathList(pathList,
-                                                  recursive,
-                                                  0));
+	const auto db = ddb::open(std::string(ddbPath), true);
+	const std::vector<std::string> pathList(paths, paths + numPaths);
+
+    removeFromIndex(db.get(), pathList);	
 DDB_C_END
 }
 
 DDBErr DDBInfo(const char **paths, int numPaths, char **output, const char *format, bool recursive, int maxRecursionDepth, const char *geometry, bool withHash, bool stopOnError){
 DDB_C_BEGIN
-    std::vector<std::string> input(paths, paths + numPaths);
+	const std::vector<std::string> input(paths, paths + numPaths);
     std::ostringstream ss;
-    ddb::info(input, ss, format, recursive, maxRecursionDepth,
-              geometry, withHash, stopOnError);
+	info(input, ss, format, recursive, maxRecursionDepth,
+	     geometry, withHash, stopOnError);
     utils::copyToPtr(ss.str(), output);
 DDB_C_END
 }

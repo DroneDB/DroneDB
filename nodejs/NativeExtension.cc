@@ -1,7 +1,8 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
-#include "functions.h"
+#include "ne_functions.h"
+#include "ne_dbops.h"
 #include "ddb.h"
 
 using v8::FunctionTemplate;
@@ -15,6 +16,9 @@ NAN_MODULE_INIT(InitAll) {
     NAN_EXPORT(target, info);
 	NAN_EXPORT(target, _thumbs_getFromUserCache);
     NAN_EXPORT(target, _tile_getFromUserCache);
+    NAN_EXPORT(target, init);
+    NAN_EXPORT(target, add);
+    NAN_EXPORT(target, remove);
 
 	DDBRegisterProcess();
 }

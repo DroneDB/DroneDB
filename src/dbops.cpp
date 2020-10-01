@@ -168,16 +168,15 @@ std::vector<fs::path> getPathList(const std::vector<std::string> &paths, bool in
 
 
 std::vector<std::string> expandPathList(const std::vector<std::string> &paths, bool recursive, int maxRecursionDepth) {
-    if (recursive) {
-        std::vector<std::string> result;
-        auto pl = getPathList(paths, true, maxRecursionDepth);
-        for (auto& p : pl) {
-            result.push_back(p.string());
-        }
-        return result;
-    } else {
-        return paths;
+
+	if (!recursive) return paths;
+    	
+    std::vector<std::string> result;
+    auto pl = getPathList(paths, true, maxRecursionDepth);
+    for (auto& p : pl) {
+	    result.push_back(p.string());
     }
+    return result;
 }
 
 
@@ -221,10 +220,10 @@ void doUpdate(Statement *updateQ, const Entry &e) {
     updateQ->bind(9, e.path);
 
     updateQ->execute();
-    std::cout << "U\t" << e.path << std::endl;
 }
 
-void addToIndex(Database *db, const std::vector<std::string> &paths) {
+
+void addToIndex(Database *db, const std::vector<std::string> &paths, AddCallback callback) {
     if (paths.size() == 0) return; // Nothing to do
     fs::path directory = rootDirectory(db);
     auto pathList = getIndexPathList(directory, paths, true);
@@ -238,7 +237,7 @@ void addToIndex(Database *db, const std::vector<std::string> &paths) {
     for (auto &p : pathList) {
         io::Path relPath = io::Path(p).relativeTo(directory);
         q->bind(1, relPath.generic());
-
+          	
         bool update = false;
         bool add = false;
         Entry e;
@@ -255,6 +254,7 @@ void addToIndex(Database *db, const std::vector<std::string> &paths) {
             parseEntry(p, directory, e, true, true);
 
             if (add) {
+
                 insertQ->bind(1, e.path);
                 insertQ->bind(2, e.hash);
                 insertQ->bind(3, e.type);
@@ -266,10 +266,11 @@ void addToIndex(Database *db, const std::vector<std::string> &paths) {
                 insertQ->bind(9, e.polygon_geom.toWkt());
 
                 insertQ->execute();
-                std::cout << "A\t" << e.path << std::endl;
             } else {
                 doUpdate(updateQ.get(), e);
             }
+
+            if (callback != nullptr) if (!callback(e, !add)) return; // cancel
         }
 
         q->reset();
@@ -279,23 +280,143 @@ void addToIndex(Database *db, const std::vector<std::string> &paths) {
 }
 
 void removeFromIndex(Database *db, const std::vector<std::string> &paths) {
-    if (paths.size() == 0) return; // Nothing to do
-    fs::path directory = rootDirectory(db);
-    auto pathList = getIndexPathList(directory, paths, false);
 
-    auto q = db->query("DELETE FROM entries WHERE path = ?");
-    db->exec("BEGIN TRANSACTION");
+    if (paths.empty())
+    {
+    	// Nothing to do
+        LOGD << "No paths provided";
+	    return;
+    }
+	
+    const fs::path directory = rootDirectory(db);
+
+    auto pathList = std::vector<fs::path>(paths.begin(), paths.end()); 
 
     for (auto &p : pathList) {
-        io::Path relPath = io::Path(p).relativeTo(directory);
-        q->bind(1, relPath.generic());
+
+        LOGD << "Deleting path: " << p;
+
+        auto relPath = io::Path(p).relativeTo(directory);
+
+        LOGD << "Rel path: " << relPath.generic();
+
+        auto entryMatches = getMatchingEntries(db, relPath.generic());
+    	
+        int tot = 0;
+
+    	for (auto &e : entryMatches)
+    	{
+            auto cnt = deleteFromIndex(db, e.path);
+
+    		if (e.type == Directory)    		
+                cnt += deleteFromIndex(db, e.path, true);
+
+            // if (!cnt)            
+            //     std::cout << "No matching entries" << std::endl;
+
+            tot += cnt;
+            
+    	}
+
+        if (!tot)
+            throw FSException("No matching entries");
+    }
+}
+
+
+std::string sanitize_query_param(std::string str)
+{
+
+    auto res(str);
+
+	// TAKES INTO ACCOUNT PATHS THAT CONTAINS EVERY SORT OF STUFF
+    utils::string_replace(res, "/", "//");
+    utils::string_replace(res, "%", "/%");
+    utils::string_replace(res, "_", "/_");
+    //utils::string_replace(res, "?", "/?");
+    //utils::string_replace(res, "*", "/*");
+    utils::string_replace(res, "*", "%");
+
+    return res;
+
+}
+
+int deleteFromIndex(Database* db, const std::string &query, bool isFolder)
+{
+
+    int count = 0;
+
+    LOGD << "Query: " << query;
+
+    auto str = sanitize_query_param(query);
+
+    LOGD << "Sanitized: " << str;
+
+	if (isFolder) {
+		str += "//%";
+
+        LOGD << "Folder: " << str;
+    }
+		
+    auto q = db->query("SELECT path, type FROM entries WHERE path LIKE ? ESCAPE '/'");
+
+    q->bind(1, str);
+
+    bool res = false;
+
+	while(q->fetch())
+	{
+        res = true;
+                
+        std::cout << "D\t" << q->getText(0) << std::endl;
+        count++;        
+	}
+	
+    q->reset();
+
+    if (res) {
+        q = db->query("DELETE FROM entries WHERE path LIKE ? ESCAPE '/'");
+
+        q->bind(1, str);
         q->execute();
-        if (db->changes() >= 1) {
-            std::cout << "D\t" << relPath.generic() << std::endl;
-        }
+
+        //if (db->changes() >= 1) {
+        //    std::cout << "D\t" << str << std::endl;
+        //}
+
+        q->reset();
+    } 
+
+    return count;
+}
+
+	
+std::vector<Entry> getMatchingEntries(Database* db, const fs::path path) {
+
+	const auto query = path.string();
+
+    LOGD << "Query: " << query;
+
+    const auto sanitized = sanitize_query_param(query);
+
+    LOGD << "Sanitized: " << sanitized;
+
+    auto q = db->query("SELECT * FROM entries WHERE path LIKE ? ESCAPE '/'");
+    	
+    std::vector<Entry> entries;
+
+    q->bind(1, sanitized);
+
+	while(q->fetch())
+	{
+		Entry e(*q);		
+        entries.push_back(e);		
     }
 
-    db->exec("COMMIT");
+    q->reset();
+
+    return entries;
+
 }
 
 void syncIndex(Database *db) {
@@ -316,6 +437,7 @@ void syncIndex(Database *db) {
             if (checkUpdate(e, p, q->getInt64(1), q->getText(2))) {
                 parseEntry(p, directory, e, true, true);
                 doUpdate(updateQ.get(), e);
+                std::cout << "U\t" << e.path << std::endl;
             }
         } else {
             // Removed

@@ -111,7 +111,7 @@ std::string to_str(const T value, const int n = 6)
 static inline void copyToPtr(const std::string &str, char **ptr){
     if (ptr != NULL){
         size_t s = str.size();
-        *ptr = (char *)calloc(s, sizeof(char));
+        *ptr = (char *)calloc(s + 1, sizeof(char));
         strcpy(*ptr, str.c_str());
     }
 }
@@ -122,6 +122,10 @@ DDB_DLL std::string getPrompt(const std::string &prompt = "");
 DDB_DLL std::string getPass(const std::string &prompt = "Password: ");
 
 time_t currentUnixTimestamp();
+
+// https://stackoverflow.com/questions/3418231/replace-part-of-a-string-with-another-string
+void string_replace(std::string& str, const std::string& from, const std::string& to);
+
 
 // Fix for removing macros
 #undef max

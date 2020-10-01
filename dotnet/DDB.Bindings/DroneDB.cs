@@ -43,30 +43,37 @@ namespace DDB.Bindings
         [DllImport("ddb", EntryPoint = "DDBAdd")]
         static extern DDBError _Add([MarshalAs(UnmanagedType.LPStr)] string ddbPath, 
                                   [MarshalAs(UnmanagedType.LPArray, ArraySubType=UnmanagedType.LPStr)] string[] paths, 
-                                  int numPaths, bool recursive);
+                                  int numPaths, out IntPtr output, bool recursive);
 
-        public static void Add(string ddbPath, string path, bool recursive = false)
+        public static List<Entry> Add(string ddbPath, string path, bool recursive = false)
         {
-            Add(ddbPath, new[] { path }, recursive);
+            return Add(ddbPath, new[] { path }, recursive);
         }
-        public static void Add(string ddbPath, string[] paths, bool recursive = false)
+        public static List<Entry> Add(string ddbPath, string[] paths, bool recursive = false)
         {
-            if (_Add(ddbPath, paths, paths.Length, recursive) != DDBError.DDBERR_NONE)
+            if (_Add(ddbPath, paths, paths.Length, out var output, recursive) != DDBError.DDBERR_NONE)
                 throw new DDBException(GetLastError());
+
+            var json = Marshal.PtrToStringAnsi(output);
+
+            if (json == null)
+                throw new DDBException("Unable to add");
+
+            return JsonConvert.DeserializeObject<List<Entry>>(json);
         }
 
         [DllImport("ddb", EntryPoint = "DDBRemove")]
         static extern DDBError _Remove([MarshalAs(UnmanagedType.LPStr)] string ddbPath,
                                   [MarshalAs(UnmanagedType.LPArray, ArraySubType = UnmanagedType.LPStr)] string[] paths,
-                                  int numPaths, bool recursive);
+                                  int numPaths);
 
-        public static void Remove(string ddbPath, string path, bool recursive = false)
+        public static void Remove(string ddbPath, string path)
         {
-            Remove(ddbPath, new[] { path }, recursive);
+            Remove(ddbPath, new[] { path });
         }
-        public static void Remove(string ddbPath, string[] paths, bool recursive = false)
+        public static void Remove(string ddbPath, string[] paths)
         {
-            if (_Remove(ddbPath, paths, paths.Length, recursive) != DDBError.DDBERR_NONE)
+            if (_Remove(ddbPath, paths, paths.Length) != DDBError.DDBERR_NONE)
                 throw new DDBException(GetLastError());
             
         }
