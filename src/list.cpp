@@ -9,18 +9,24 @@
 
 namespace ddb {
 
-void listIndex(Database* db, const std::string &input) {
+// Supported formats: json and text
+void listIndex(Database* db, const std::vector<std::string>& paths, std::ostream& output, const std::string& format, int maxRecursionDepth) {
 	
 	const fs::path directory = rootDirectory(db);
 
 	std::cout << "Root: " << directory << std::endl;
-	auto path = io::Path(input);
-	std::cout << "Path: " << path.string() << std::endl;
+
+	for (const auto& fp : paths){
+        std::cout << "Parsing entry " << fp << std::endl;
+
+	}
+	//auto path = io::Path(input);
+	/*std::cout << "Path: " << path.string() << std::endl;
 
 	const io::Path relPath = path.relativeTo(directory);
 	
 	std::cout << "Listing: " << input << std::endl;
-	std::cout << "Rel path: " << relPath.string() << std::endl;
+	std::cout << "Rel path: " << relPath.string() << std::endl;*/
 }
 
 }
