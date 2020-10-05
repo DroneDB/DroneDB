@@ -9,24 +9,41 @@
 
 namespace ddb {
 
-// Supported formats: json and text
-void listIndex(Database* db, const std::vector<std::string>& paths, std::ostream& output, const std::string& format, int maxRecursionDepth) {
-	
-	const fs::path directory = rootDirectory(db);
+	// Supported formats: json and text
+	void listIndex(Database* db, const std::vector<std::string>& paths, std::ostream& output, const std::string& format, int maxRecursionDepth) {
 
-	std::cout << "Root: " << directory << std::endl;
+		if (paths.empty())
+		{
+			// Nothing to do
+			LOGD << "No paths provided";
+			return;
+		}
 
-	for (const auto& fp : paths){
-        std::cout << "Parsing entry " << fp << std::endl;
+		const fs::path directory = rootDirectory(db);
+
+		std::cout << "Root: " << directory << std::endl;
+
+		auto pathList = std::vector<fs::path>(paths.begin(), paths.end());
+
+		for (const auto& p : pathList) {
+
+			std::cout << "Parsing entry " << p << std::endl;
+
+			auto relPath = io::Path(p).relativeTo(directory);
+
+			std::cout << "Rel path: " << relPath.generic() << std::endl;
+
+			auto entryMatches = getMatchingEntries(db, relPath.generic());
+
+			for (auto& e : entryMatches)
+			{
+
+				std::cout << "Match: " << e.path << std::endl;
+
+			}
+			
+		}
 
 	}
-	//auto path = io::Path(input);
-	/*std::cout << "Path: " << path.string() << std::endl;
-
-	const io::Path relPath = path.relativeTo(directory);
-	
-	std::cout << "Listing: " << input << std::endl;
-	std::cout << "Rel path: " << relPath.string() << std::endl;*/
-}
 
 }
