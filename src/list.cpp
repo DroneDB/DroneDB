@@ -30,23 +30,24 @@ namespace ddb {
 
 		for (const auto& p : pathList) {
 
-			std::cout << "Parsing entry " << p << std::endl;
+			// std::cout << "Parsing entry " << p << std::endl;
 
 			auto relPath = io::Path(p).relativeTo(directory);
 
-			std::cout << "Rel path: " << relPath.generic() << std::endl;
+			// std::cout << "Rel path: " << relPath.generic() << std::endl;
 
-			auto entryMatches = getMatchingEntries(db, relPath.generic());
+			auto entryMatches = getMatchingEntries(db, relPath.generic(), maxRecursionDepth);
+
 
 			for (auto& e : entryMatches)
 			{
 
 				std::cout << "Match: " << e.path << std::endl;
-
+				
 				// If it's a folder we should get all the subfolders till the maxDepth
 
 			}
-			
+
 		}
 
 	}
