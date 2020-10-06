@@ -19,6 +19,9 @@ namespace ddb {
 			return;
 		}
 
+		if (format != "json" && format != "text")
+			throw InvalidArgsException("Invalid format " + format);
+
 		const fs::path directory = rootDirectory(db);
 
 		std::cout << "Root: " << directory << std::endl;
@@ -39,6 +42,8 @@ namespace ddb {
 			{
 
 				std::cout << "Match: " << e.path << std::endl;
+
+				// If it's a folder we should get all the subfolders till the maxDepth
 
 			}
 			
