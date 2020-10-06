@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include <iostream>
+#include <sstream>
 #include "ddb.h"
 #include "ne_dbops.h"
 
@@ -227,11 +228,12 @@ class ListWorker : public Nan::AsyncWorker {
   ~ListWorker() {}
 
   void Execute () {
-      
-    try{
-        ddb::list(paths, s, "json", maxRecursionDepth);
-    } catch(ddb::AppException &e){
-        SetErrorMessage(e.what());
+         
+    std::vector<const char *> cPaths(paths.size());
+    std::transform(paths.begin(), paths.end(), cPaths.begin(), [](const std::string& s) { return s.c_str(); });
+
+    if (DDBList(ddbPath.c_str(), cPaths.data(), static_cast<int>(cPaths.size()), &output, "json", maxRecursionDepth) != DDBERR_NONE){
+        SetErrorMessage(DDBGetLastError());
     }
 
   }
@@ -242,17 +244,20 @@ class ListWorker : public Nan::AsyncWorker {
      Nan::JSON json;
      v8::Local<v8::Value> argv[] = {
          Nan::Null(),
-         json.Parse(Nan::New<v8::String>(s.str()).ToLocalChecked()).ToLocalChecked()
+         json.Parse(Nan::New<v8::String>(output).ToLocalChecked()).ToLocalChecked()
      };
 
+     delete output; // TODO: is this a leak if the call fails? How do we de-allocate on failure?
      callback->Call(2, argv, async_resource);
    }
 
  private:
     std::string ddbPath;
-    std::ostringstream s;
-    std::vector<std::string> paths; 
+    std::vector<std::string> paths;
+
     int maxRecursionDepth;   
+    char *output;
+
 };
 
 NAN_METHOD(list) {
