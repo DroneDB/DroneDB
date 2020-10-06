@@ -217,3 +217,87 @@ NAN_METHOD(remove) {
     Nan::Callback *callback = new Nan::Callback(Nan::To<v8::Function>(info[3]).ToLocalChecked());
     Nan::AsyncQueueWorker(new RemoveWorker(callback, ddbPath, paths));
 }
+
+class ListWorker : public Nan::AsyncWorker {
+ public:
+  ListWorker(Nan::Callback *callback, const std::string &ddbPath, const std::vector<std::string> &paths, 
+     int maxRecursionDepth)
+    : AsyncWorker(callback, "nan:ListWorker"),
+      ddbPath(ddbPath), paths(paths), maxRecursionDepth(maxRecursionDepth) {}
+  ~ListWorker() {}
+
+  void Execute () {
+      
+    try{
+        ddb::list(paths, s, "json", maxRecursionDepth);
+    } catch(ddb::AppException &e){
+        SetErrorMessage(e.what());
+    }
+
+  }
+
+  void HandleOKCallback () {
+     Nan::HandleScope scope;
+
+     Nan::JSON json;
+     v8::Local<v8::Value> argv[] = {
+         Nan::Null(),
+         json.Parse(Nan::New<v8::String>(s.str()).ToLocalChecked()).ToLocalChecked()
+     };
+
+     callback->Call(2, argv, async_resource);
+   }
+
+ private:
+    std::string ddbPath;
+    std::ostringstream s;
+    std::vector<std::string> paths; 
+    int maxRecursionDepth;   
+};
+
+NAN_METHOD(list) {
+    if (info.Length() != 4){
+        Nan::ThrowError("Invalid number of arguments");
+        return;
+    }
+    if (!info[0]->IsString()){
+        Nan::ThrowError("Argument 0 must be a string");
+        return;
+    }
+    if (!info[1]->IsArray()){
+        Nan::ThrowError("Argument 1 must be an array");
+        return;
+    }
+    if (!info[2]->IsNumber()){
+        Nan::ThrowError("Argument 2 must be a number");
+        return;
+    }
+    if (!info[3]->IsFunction()){
+        Nan::ThrowError("Argument 2 must be a function");
+        return;
+    }
+
+    std::string ddbPath = *Nan::Utf8String(info[0].As<v8::String>());
+
+    // v8 array --> c++ std vector
+    auto paths = info[1].As<v8::Array>();
+    auto ctx = info.GetIsolate()->GetCurrentContext();
+    std::vector<std::string> in;
+    for (unsigned int i = 0; i < paths->Length(); i++){
+        Nan::Utf8String str(paths->Get(ctx, i).ToLocalChecked());
+        in.push_back(std::string(*str));
+    }
+
+    // Parse options
+    v8::Local<v8::Object> obj = info[2].As<v8::Object>();
+
+    int maxRecursionDepth = 0;
+    v8::Local<v8::String> k = Nan::New<v8::String>("maxRecursionDepth").ToLocalChecked();
+    if (Nan::HasRealNamedProperty(obj, k).FromJust()){
+        maxRecursionDepth = Nan::To<int>(Nan::GetRealNamedProperty(obj, k).ToLocalChecked()).FromJust();
+    }
+
+    // Execute
+    Nan::Callback *callback = new Nan::Callback(Nan::To<v8::Function>(info[3]).ToLocalChecked());
+    Nan::AsyncQueueWorker(new ListWorker(callback, ddbPath, in, maxRecursionDepth));
+}
