@@ -1,4 +1,4 @@
-/* This Source Code Form is subject to the terms of the Mozilla Public
+﻿/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
@@ -9,15 +9,57 @@
 
 namespace ddb {
 
-	// Supported formats: json and text
+
+	void displayEntries(std::vector<Entry>& entries, std::ostream& output, const std::string& format)
+	{
+		std::sort(entries.begin(), entries.end(), [](const Entry& lhs, const Entry& rhs)
+		{
+			return lhs.path < rhs.path;
+		});
+
+		if (format == "text")
+		{
+			for (auto& e : entries)
+			{
+				// TODO: Tree?
+				// for (auto n = 0; n < e.depth; n++)
+				//	output << "\t";
+				//output << fs::path(e.path).filename().string() << std::endl;
+
+				output << e.path << std::endl;
+
+			}
+		}
+		else if (format == "json")
+		{
+			output << "[";
+
+			bool first = true;
+
+			for (auto& e : entries)
+			{
+			
+				json j;
+				e.toJSON(j);
+				if (!first) output << ",";
+				output << j.dump();
+
+				first = false;
+				
+			}
+			
+			output << "]";
+		}		
+		else
+		{
+			throw FSException("Unsupported format '" + format + "'");
+		}
+
+
+	}
+
 	void listIndex(Database* db, const std::vector<std::string>& paths, std::ostream& output, const std::string& format, int maxRecursionDepth) {
 
-		if (paths.empty())
-		{
-			// Nothing to do
-			LOGD << "No paths provided";
-			return;
-		}
 
 		if (format != "json" && format != "text")
 			throw InvalidArgsException("Invalid format " + format);
@@ -25,31 +67,37 @@ namespace ddb {
 		const fs::path directory = rootDirectory(db);
 
 		std::cout << "Root: " << directory << std::endl;
+		std::cout << "Max depth: " << maxRecursionDepth << std::endl;
 
-		auto pathList = std::vector<fs::path>(paths.begin(), paths.end());
+		// If empty we should list everything till max depth
+		if (paths.empty())
+		{
+			std::cout << "Listing everything" << std::endl;
+			auto entryMatches = getMatchingEntries(db, "*", maxRecursionDepth);
 
-		for (const auto& p : pathList) {
+			displayEntries(entryMatches, output, format);
 
-			// std::cout << "Parsing entry " << p << std::endl;
+		} else {
 
-			auto relPath = io::Path(p).relativeTo(directory);
+			std::cout << "Listing" << std::endl;
 
-			// std::cout << "Rel path: " << relPath.generic() << std::endl;
+			auto pathList = std::vector<fs::path>(paths.begin(), paths.end());
 
-			auto entryMatches = getMatchingEntries(db, relPath.generic(), maxRecursionDepth);
+			for (const auto& p : pathList) {
 
-
-			for (auto& e : entryMatches)
-			{
-
-				std::cout << "Match: " << e.path << std::endl;
+				std::cout << "Path:" << p << std::endl;
 				
-				// If it's a folder we should get all the subfolders till the maxDepth
+				auto relPath = io::Path(p).relativeTo(directory);
+
+				std::cout << "Rel path: " << relPath.generic() << std::endl;
+				std::cout << "Depth: " << relPath.depth() << std::endl;
+
+				auto entryMatches = getMatchingEntries(db, relPath.generic(), std::max(relPath.depth(), maxRecursionDepth));
+
+				displayEntries(entryMatches, output, format);
 
 			}
-
 		}
-
 	}
 
 }

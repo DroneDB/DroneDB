@@ -25,7 +25,7 @@ namespace cmd {
 			("i,input", "File(s) to list", cxxopts::value<std::vector<std::string>>())
 			("o,output", "Output file to write results to", cxxopts::value<std::string>()->default_value("stdout"))
 			("d,directory", "Working directory", cxxopts::value<std::string>()->default_value("."))
-			("m,maxdepth", "Max recursion depth", cxxopts::value<int>()->default_value("0"))
+			("m,maxdepth", "Max recursion depth", cxxopts::value<int>()->default_value("-1"))
 			("f,format", "Output format (text|json)", cxxopts::value<std::string>()->default_value("text"));
 
 		opts.parse_positional({ "input" });
@@ -37,14 +37,10 @@ namespace cmd {
 
 	void List::run(cxxopts::ParseResult& opts) {
 
-		if (!opts.count("input")) {
-			printHelp();
-		}
-
 		try {
 
 			const auto ddbPath = opts["directory"].as<std::string>();
-			const auto paths = opts["input"].as<std::vector<std::string>>();
+			const auto paths = opts.count("input") > 0 ? opts["input"].as<std::vector<std::string>>() : std::vector<std::string>();
 			const auto format = opts["format"].as<std::string>();
 			const auto maxRecursionDepth = opts["maxdepth"].as<int>();
 
