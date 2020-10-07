@@ -79,7 +79,7 @@ DDB_DLL DDBErr DDBInfo(const char **paths, int numPaths, char** output, const ch
  * @param format output format. One of: ["text", "json"]
  * @param maxRecursionDepth limit the depth of recursion
  * @return DDBERR_NONE on success, an error otherwise */
-DDBErr DDBList(const char *ddbPath, const char **paths, int numPaths, char **output, const char *format, int maxRecursionDepth);
+DDB_DLL DDBErr DDBList(const char *ddbPath, const char **paths, int numPaths, char **output, const char *format, int maxRecursionDepth);
 
 
 #ifdef __cplusplus
