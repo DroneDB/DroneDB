@@ -18,7 +18,7 @@ describe('functions', function() {
 
   it('should be able to call info without hash', async function(){
     const res = await ddb.info(__filename);
-    assert.ok(res.path[0].length > 0);
+    assert.ok(res[0].path.length > 0);
     assert.equal(typeof res[0].hash, "undefined")
   });
 
