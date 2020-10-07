@@ -14,7 +14,7 @@ void Add::setOptions(cxxopts::Options &opts) {
     .positional_help("[args] [PATHS]")
     .custom_help("add *.JPG")
     .add_options()
-    ("d,directory", "Working directory", cxxopts::value<std::string>()->default_value("."))
+    ("w,working-dir", "Working directory", cxxopts::value<std::string>()->default_value("."))
     ("r,recursive", "Recursively add subdirectories and files", cxxopts::value<bool>())
     ("p,paths", "Paths to add to index (files or directories)", cxxopts::value<std::vector<std::string>>());
 
@@ -30,7 +30,7 @@ void Add::run(cxxopts::ParseResult &opts) {
         printHelp();
     }
 
-    const auto ddbPath = opts["directory"].as<std::string>();
+    const auto ddbPath = opts["working-dir"].as<std::string>();
     auto paths = opts["paths"].as<std::vector<std::string>>();
     auto recursive = opts.count("recursive") > 0;
 

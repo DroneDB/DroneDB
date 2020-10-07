@@ -13,9 +13,7 @@ void Remove::setOptions(cxxopts::Options &opts) {
     .positional_help("[args] [PATHS]")
     .custom_help("rm image1.JPG image2.JPG [...]")
     .add_options()
-    ("d,directory", "Working directory", cxxopts::value<std::string>()->default_value("."))
-    // ("r,recursive", "Recursively remove subdirectories and files", cxxopts::value<bool>())
-    //("c,cached", "Remove only from index cache", cxxopts::value<bool>())
+    ("w,working-dir", "Working directory", cxxopts::value<std::string>()->default_value("."))
     ("p,paths", "Paths to remove from index (files or directories)", cxxopts::value<std::vector<std::string>>());
 
     opts.parse_positional({"paths"});
@@ -30,7 +28,7 @@ void Remove::run(cxxopts::ParseResult &opts) {
         printHelp();
     }
 
-    const auto ddbPath = opts["directory"].as<std::string>();
+    const auto ddbPath = opts["working-dir"].as<std::string>();
     auto paths = opts["paths"].as<std::vector<std::string>>();
 
     std::vector<const char *> cPaths(paths.size());

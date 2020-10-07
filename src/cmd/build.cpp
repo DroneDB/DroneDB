@@ -28,7 +28,7 @@ void Build::run(cxxopts::ParseResult &opts) {
         printHelp();
     }
 
-    std::cerr << "TODO: HIS MODULE IS A WORK IN PROGRESS!";
+    std::cerr << "TODO: THIS MODULE IS A WORK IN PROGRESS!";
 
     exit(1);
 }
