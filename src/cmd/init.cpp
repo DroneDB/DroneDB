@@ -14,9 +14,9 @@ void Init::setOptions(cxxopts::Options &opts) {
     .positional_help("[args] [DIRECTORY]")
     .custom_help("init")
     .add_options()
-    ("d,directory", "Working directory", cxxopts::value<std::string>()->default_value("."));
+    ("w,working-dir", "Working directory", cxxopts::value<std::string>()->default_value("."));
 
-    opts.parse_positional({"directory"});
+    opts.parse_positional({"working-dir"});
 }
 
 std::string Init::description() {
@@ -24,7 +24,7 @@ std::string Init::description() {
 }
 
 void Init::run(cxxopts::ParseResult &opts) {
-    std::string p = opts["directory"].as<std::string>();
+    std::string p = opts["working-dir"].as<std::string>();
     char *outPath;
     if (DDBInit(p.c_str(), &outPath) == DDBERR_NONE){
         std::cout << "Initialized empty database in " << outPath << std::endl;

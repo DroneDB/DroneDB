@@ -13,7 +13,7 @@ void Sync::setOptions(cxxopts::Options &opts) {
     .positional_help("[args]")
     .custom_help("sync")
     .add_options()
-    ("d,directory", "Working directory", cxxopts::value<std::string>()->default_value("."));
+    ("w,working-dir", "Working directory", cxxopts::value<std::string>()->default_value("."));
 }
 
 std::string Sync::description() {
@@ -21,9 +21,12 @@ std::string Sync::description() {
 }
 
 void Sync::run(cxxopts::ParseResult &opts) {
-    fs::current_path(opts["directory"].as<std::string>());
+
+    auto workingDir = opts["working-dir"].as<std::string>();
+
+    fs::current_path(workingDir);
     
-    auto db = ddb::open(opts["directory"].as<std::string>(), true);
+    auto db = ddb::open(workingDir, true);
     ddb::syncIndex(db.get());
 }
 

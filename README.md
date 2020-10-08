@@ -63,3 +63,20 @@ cmake ..
 cmake --build . --config Release --target ALL_BUILD -- /maxcpucount:14
 ```
 
+## Building NodeJS bindings
+
+After you've made a successful build (see above), make sure the `build` directory is empty (remove it) and that you have `npm` installed. Then:
+
+```
+npm install
+```
+
+Should be sufficient to build the NodeJS bindindgs.
+
+You can test that they work by issuing:
+
+```
+scripts\setup_windows_env.bat (Windows only)
+npm test
+```
+

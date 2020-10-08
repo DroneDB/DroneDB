@@ -52,18 +52,11 @@ const ddb = {
 
     info: async function(files, options = {}) {
         return new Promise((resolve, reject) => {
-            const isSingle = typeof files === "string";
-            if (isSingle) files = [files];
+            if (typeof files === "string") files = [files];
 
             n.info(files, options, (err, result) => {
                 if (err) reject(err);
-                else {
-                    // Return single item
-                    if (isSingle) resolve(result[0]);
-
-                    // Return entire array
-                    else resolve(result);
-                }
+                else resolve(result);
             });
         });
     },
