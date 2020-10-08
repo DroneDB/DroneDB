@@ -298,13 +298,13 @@ NAN_METHOD(list) {
     v8::Local<v8::Object> obj = info[2].As<v8::Object>();
 
     bool recursive = false;
-    k = Nan::New<v8::String>("recursive").ToLocalChecked();
+    v8::Local<v8::String> k = Nan::New<v8::String>("recursive").ToLocalChecked();
     if (Nan::HasRealNamedProperty(obj, k).FromJust()){
         recursive = Nan::To<bool>(Nan::GetRealNamedProperty(obj, k).ToLocalChecked()).FromJust();
     }
 
     int maxRecursionDepth = 0;
-    v8::Local<v8::String> k = Nan::New<v8::String>("maxRecursionDepth").ToLocalChecked();
+    k = Nan::New<v8::String>("maxRecursionDepth").ToLocalChecked();
     if (Nan::HasRealNamedProperty(obj, k).FromJust()){
         maxRecursionDepth = Nan::To<int>(Nan::GetRealNamedProperty(obj, k).ToLocalChecked()).FromJust();
     }
