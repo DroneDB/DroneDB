@@ -80,7 +80,7 @@ DDB_DLL DDBErr DDBInfo(const char **paths, int numPaths, char** output, const ch
  * @param recursive whether to recursively scan folders
  * @param maxRecursionDepth limit the depth of recursion
  * @return DDBERR_NONE on success, an error otherwise */
-DDB_DLL DDBErr DDBList(const char *ddbPath, const char **paths, int numPaths, char **output, const char *format, bool recursive = false, int maxRecursionDepth);
+DDB_DLL DDBErr DDBList(const char *ddbPath, const char **paths, int numPaths, char **output, const char *format, bool recursive = false, int maxRecursionDepth = 0);
 
 
 #ifdef __cplusplus
