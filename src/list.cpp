@@ -58,7 +58,7 @@ namespace ddb {
 
 	}
 
-	void listIndex(Database* db, const std::vector<std::string>& paths, std::ostream& output, const std::string& format, int maxRecursionDepth) {
+	void listIndex(Database* db, const std::vector<std::string>& paths, std::ostream& output, const std::string& format, bool recursive, int maxRecursionDepth) {
 
 
 		if (format != "json" && format != "text")
@@ -68,10 +68,14 @@ namespace ddb {
 
 		std::cout << "Root: " << directory << std::endl;
 		std::cout << "Max depth: " << maxRecursionDepth << std::endl;
+		std::cout << "Recursive: " << recursive << std::endl;
 
 		// If empty we should list everything till max depth
 		if (paths.empty())
 		{
+
+			
+
 			std::cout << "Listing everything" << std::endl;
 			auto entryMatches = getMatchingEntries(db, "*", maxRecursionDepth);
 

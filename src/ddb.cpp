@@ -125,13 +125,13 @@ DDB_C_BEGIN
 DDB_C_END
 }
 
-DDBErr DDBList(const char *ddbPath, const char **paths, int numPaths, char **output, const char *format, int maxRecursionDepth){
+DDBErr DDBList(const char *ddbPath, const char **paths, int numPaths, char **output, const char *format, bool recursive, int maxRecursionDepth){
 DDB_C_BEGIN
 	const auto db = ddb::open(std::string(ddbPath), true);
 	const std::vector<std::string> pathList(paths, paths + numPaths);
 
 	std::ostringstream ss;
-    listIndex(db.get(), pathList, ss, format, maxRecursionDepth);
+    listIndex(db.get(), pathList, ss, format, recursive, maxRecursionDepth);
 
     utils::copyToPtr(ss.str(), output);
 

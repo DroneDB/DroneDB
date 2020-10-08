@@ -110,11 +110,12 @@ namespace DDB.Bindings
                                    int numPaths,
                                    out IntPtr output,
                                    [MarshalAs(UnmanagedType.LPStr)] string format, 
+                                   bool recursive,
                                    int maxRecursionDepth = 0);
 
-        public static List<Entry> List(string[] paths, int maxRecursionDepth = 0)
+        public static List<Entry> List(string[] paths, bool recursive = false, int maxRecursionDepth = 0)
         {
-            if (_List(paths, paths.Length, out var output, "json", maxRecursionDepth) !=
+            if (_List(paths, paths.Length, out var output, "json", recursive, maxRecursionDepth) !=
                 DDBError.DDBERR_NONE) throw new DDBException(GetLastError());
 
             var json = Marshal.PtrToStringAnsi(output);

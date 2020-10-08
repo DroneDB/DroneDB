@@ -222,9 +222,9 @@ NAN_METHOD(remove) {
 class ListWorker : public Nan::AsyncWorker {
  public:
   ListWorker(Nan::Callback *callback, const std::string &ddbPath, const std::vector<std::string> &paths, 
-     int maxRecursionDepth)
+     bool recursive, int maxRecursionDepth)
     : AsyncWorker(callback, "nan:ListWorker"),
-      ddbPath(ddbPath), paths(paths), maxRecursionDepth(maxRecursionDepth) {}
+      ddbPath(ddbPath), paths(paths), recursive(recursive), maxRecursionDepth(maxRecursionDepth) {}
   ~ListWorker() {}
 
   void Execute () {
@@ -232,7 +232,7 @@ class ListWorker : public Nan::AsyncWorker {
     std::vector<const char *> cPaths(paths.size());
     std::transform(paths.begin(), paths.end(), cPaths.begin(), [](const std::string& s) { return s.c_str(); });
 
-    if (DDBList(ddbPath.c_str(), cPaths.data(), static_cast<int>(cPaths.size()), &output, "json", maxRecursionDepth) != DDBERR_NONE){
+    if (DDBList(ddbPath.c_str(), cPaths.data(), static_cast<int>(cPaths.size()), &output, "json", recursive, maxRecursionDepth) != DDBERR_NONE){
         SetErrorMessage(DDBGetLastError());
     }
 
@@ -255,6 +255,7 @@ class ListWorker : public Nan::AsyncWorker {
     std::string ddbPath;
     std::vector<std::string> paths;
 
+    bool recursive;
     int maxRecursionDepth;   
     char *output;
 
@@ -273,12 +274,12 @@ NAN_METHOD(list) {
         Nan::ThrowError("Argument 1 must be an array");
         return;
     }
-    if (!info[2]->IsNumber()){
-        Nan::ThrowError("Argument 2 must be a number");
+    if (!info[2]->IsObject()){
+        Nan::ThrowError("Argument 2 must be a an object");
         return;
     }
     if (!info[3]->IsFunction()){
-        Nan::ThrowError("Argument 2 must be a function");
+        Nan::ThrowError("Argument 3 must be a function");
         return;
     }
 
@@ -296,6 +297,12 @@ NAN_METHOD(list) {
     // Parse options
     v8::Local<v8::Object> obj = info[2].As<v8::Object>();
 
+    bool recursive = false;
+    k = Nan::New<v8::String>("recursive").ToLocalChecked();
+    if (Nan::HasRealNamedProperty(obj, k).FromJust()){
+        recursive = Nan::To<bool>(Nan::GetRealNamedProperty(obj, k).ToLocalChecked()).FromJust();
+    }
+
     int maxRecursionDepth = 0;
     v8::Local<v8::String> k = Nan::New<v8::String>("maxRecursionDepth").ToLocalChecked();
     if (Nan::HasRealNamedProperty(obj, k).FromJust()){
@@ -304,5 +311,5 @@ NAN_METHOD(list) {
 
     // Execute
     Nan::Callback *callback = new Nan::Callback(Nan::To<v8::Function>(info[3]).ToLocalChecked());
-    Nan::AsyncQueueWorker(new ListWorker(callback, ddbPath, in, maxRecursionDepth));
+    Nan::AsyncQueueWorker(new ListWorker(callback, ddbPath, in, recursive, maxRecursionDepth));
 }
