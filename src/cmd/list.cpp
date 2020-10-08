@@ -43,7 +43,7 @@ namespace cmd {
 			const auto ddbPath = opts["working-dir"].as<std::string>();
 			const auto paths = opts.count("input") > 0 ? opts["input"].as<std::vector<std::string>>() : std::vector<std::string>();
 			const auto format = opts["format"].as<std::string>();
-			const auto maxRecursionDepth = opts["maxdepth"].as<int>();
+			const auto maxRecursionDepth = opts["depth"].as<int>();
 			const auto recursive = opts["recursive"].count() > 0;
 
 			const auto db = ddb::open(std::string(ddbPath), true);
