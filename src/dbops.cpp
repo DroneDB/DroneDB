@@ -340,7 +340,7 @@ std::string sanitize_query_param(std::string str)
     return res;
 
 }
-
+	
 int deleteFromIndex(Database* db, const std::string &query, bool isFolder)
 {
 
@@ -387,7 +387,7 @@ int deleteFromIndex(Database* db, const std::string &query, bool isFolder)
 }
 
 	
-std::vector<Entry> getMatchingEntries(Database* db, const fs::path path, int maxRecursionDepth) {
+std::vector<Entry> getMatchingEntries(Database* db, const fs::path path, int maxRecursionDepth, bool isFolder) {
 
 	// -1 is ALL_DEPTHS
 	if (maxRecursionDepth < -1)
@@ -396,10 +396,19 @@ std::vector<Entry> getMatchingEntries(Database* db, const fs::path path, int max
 	const auto query = path.string();
 
     LOGD << "Query: " << query;
+    //std::cout << "Query: " << query << std::endl;
 
-    const auto sanitized = sanitize_query_param(query);
+    auto sanitized = sanitize_query_param(query);
 
-    LOGD << "Sanitized: " << sanitized;
+	LOGD << "Sanitized: " << sanitized;
+
+    if (isFolder) {
+        sanitized += "//%";
+
+        LOGD << "Folder: " << sanitized;
+    }
+
+	//std::cout << "Sanitized: " << sanitized << std::endl;
 
     std::string sql = "SELECT * FROM entries WHERE path LIKE ? ESCAPE '/'";
 
