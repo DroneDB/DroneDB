@@ -43,7 +43,16 @@ std::string ShareService::share(const std::vector<std::string> &input, const std
 
     // TODO: multithreaded share/upload
 
-    io::Path wd = io::Path(fs::path(cwd));
+    // Calculate cwd from paths or use the one provided?
+    io::Path wd;
+    if (cwd.empty()){
+        std::vector<fs::path> paths(input.begin(), input.end());
+        fs::path commonDir = io::commonDirPath(paths);
+        if (commonDir.empty()) throw InvalidArgsException("Cannot share files that don't have a common directory (are you trying to share files from different drives?)");
+        wd = io::Path(commonDir);
+    }else{
+        wd = io::Path(fs::path(cwd));
+    }
 
     for (auto &fp : filePaths){
         io::Path p = io::Path(fp);

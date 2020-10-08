@@ -25,6 +25,7 @@ class Path{
     fs::path p;
 
 public:
+    DDB_DLL Path(){}
     DDB_DLL Path(const fs::path &p) : p(p) {}
 
     // Compares an extension with a list of extension strings

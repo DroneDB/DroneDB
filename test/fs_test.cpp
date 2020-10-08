@@ -171,6 +171,7 @@ TEST(commonDirPath, Normal){
     EXPECT_EQ(io::commonDirPath({"abc/abc/test.txt", "abc", "def"}).string(), "");
 
     EXPECT_EQ(io::commonDirPath({"abc/abc/test.txt", "abc/abc/test2.txt"}).string(), "abc/abc");
+    EXPECT_EQ(io::commonDirPath({"/abc"}).string(), "/abc");
 
 
 #ifdef _WIN32

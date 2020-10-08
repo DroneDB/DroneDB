@@ -5,11 +5,12 @@
 #include "shareservice.h"
 #include "exceptions.h"
 #include "ne_share.h"
+#include "ne_helpers.h"
 
 class ShareWorker : public Nan::AsyncWorker {
  public:
   ShareWorker(Nan::Callback *callback, const std::vector<std::string> &input, const std::string &tag, const std::string &password,
-              bool recursive, )
+              bool recursive)
     : AsyncWorker(callback, "nan:ShareWorker"),
       input(input), tag(tag), password(password),
       recursive(recursive) {}
@@ -18,7 +19,11 @@ class ShareWorker : public Nan::AsyncWorker {
   void Execute () {
     ddb::ShareService ss;
     try{
-        ss.share(input, tag, password, recursive, );
+        ddb::ShareCallback showProgress = [](const std::string &file, float progress){
+            return true;
+        };
+
+        ss.share(input, tag, password, recursive, "", showProgress);
     }catch(const ddb::AuthException &){
         SetErrorMessage("Unauthorized");
     }catch(const ddb::AppException &e){
@@ -47,22 +52,7 @@ class ShareWorker : public Nan::AsyncWorker {
 
 
 NAN_METHOD(share) {
-    if (info.Length() != 2){
-        Nan::ThrowError("Invalid number of arguments");
-        return;
-    }
-    if (!info[0]->IsString()){
-        Nan::ThrowError("Argument 0 must be a string");
-        return;
-    }
-    if (!info[1]->IsFunction()){
-        Nan::ThrowError("Argument 1 must be a function");
-        return;
-    }
+//    ASSERT_NUM_PARAMS(2);
 
-    std::string directory = *Nan::Utf8String(info[0].As<v8::String>());
-
-    // Execute
-    Nan::Callback *callback = new Nan::Callback(Nan::To<v8::Function>(info[1]).ToLocalChecked());
-    Nan::AsyncQueueWorker(new ShareWorker(callback, directory));
+//    Nan::AsyncQueueWorker(new ShareWorker(callback, params....));
 }

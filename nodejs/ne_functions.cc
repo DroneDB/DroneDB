@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include <sstream>
 #include "ne_functions.h"
+#include "ne_helpers.h"
 #include "ddb.h"
 #include "dbops.h"
 #include "info.h"
@@ -15,16 +16,10 @@ NAN_METHOD(getVersion) {
 }
 
 NAN_METHOD(typeToHuman) {
-    if (info.Length() != 1){
-        Nan::ThrowError("Invalid number of arguments");
-        return;
-    }
-    if (!info[0]->IsNumber()){
-        Nan::ThrowError("Argument 0 must be a number");
-        return;
-    }
+    ASSERT_NUM_PARAMS(1);
+    BIND_INT_PARAM(entryType, 0);
 
-    ddb::EntryType t = static_cast<ddb::EntryType>(Nan::To<int>(info[0]).FromJust());
+    ddb::EntryType t = static_cast<ddb::EntryType>(entryType);
     info.GetReturnValue().Set(Nan::New(ddb::typeToHuman(t)).ToLocalChecked());
 }
 
@@ -70,61 +65,19 @@ class InfoWorker : public Nan::AsyncWorker {
 
 
 NAN_METHOD(info) {
-    if (info.Length() != 3){
-        Nan::ThrowError("Invalid number of arguments");
-        return;
-	}
-    if (!info[0]->IsArray()){
-        Nan::ThrowError("Argument 0 must be an array");
-        return;
-    }
-    if (!info[1]->IsObject()){
-        Nan::ThrowError("Argument 1 must be an object");
-        return;
-    }
-    if (!info[2]->IsFunction()){
-        Nan::ThrowError("Argument 2 must be a function");
-        return;
-    }
+    ASSERT_NUM_PARAMS(3);
 
-    // v8 array --> c++ std vector
-    auto input = info[0].As<v8::Array>();
-    auto ctx = info.GetIsolate()->GetCurrentContext();
-    std::vector<std::string> in;
-    for (unsigned int i = 0; i < input->Length(); i++){
-        Nan::Utf8String str(input->Get(ctx, i).ToLocalChecked());
-        in.push_back(std::string(*str));
-    }
+    BIND_STRING_ARRAY_PARAM(in, 0);
 
-    // Parse options
-    v8::Local<v8::String> k = Nan::New<v8::String>("withHash").ToLocalChecked();
-    v8::Local<v8::Object> obj = info[1].As<v8::Object>();
+    BIND_OBJECT_PARAM(obj, 1);
+    BIND_OBJECT_VAR(obj, bool, withHash, false);
+    BIND_OBJECT_VAR(obj, bool, stopOnError, true);
+    BIND_OBJECT_VAR(obj, bool, recursive, false);
+    BIND_OBJECT_VAR(obj, int, maxRecursionDepth, 0);
 
-    bool withHash = false;
-    if (Nan::HasRealNamedProperty(obj, k).FromJust()){
-        withHash = Nan::To<bool>(Nan::GetRealNamedProperty(obj, k).ToLocalChecked()).FromJust();
-    }
-
-    bool stopOnError = true;
-    k = Nan::New<v8::String>("stopOnError").ToLocalChecked();
-    if (Nan::HasRealNamedProperty(obj, k).FromJust()){
-        stopOnError = Nan::To<bool>(Nan::GetRealNamedProperty(obj, k).ToLocalChecked()).FromJust();
-    }
-
-    bool recursive = false;
-    k = Nan::New<v8::String>("recursive").ToLocalChecked();
-    if (Nan::HasRealNamedProperty(obj, k).FromJust()){
-        recursive = Nan::To<bool>(Nan::GetRealNamedProperty(obj, k).ToLocalChecked()).FromJust();
-    }
-
-    int maxRecursionDepth = 0;
-    k = Nan::New<v8::String>("maxRecursionDepth").ToLocalChecked();
-    if (Nan::HasRealNamedProperty(obj, k).FromJust()){
-        maxRecursionDepth = Nan::To<int>(Nan::GetRealNamedProperty(obj, k).ToLocalChecked()).FromJust();
-    }
+    BIND_FUNCTION_PARAM(callback, 2);
 
     // Execute
-    Nan::Callback *callback = new Nan::Callback(Nan::To<v8::Function>(info[2]).ToLocalChecked());
     Nan::AsyncQueueWorker(new InfoWorker(callback, in, recursive, maxRecursionDepth, withHash, stopOnError));
 }
 
@@ -165,52 +118,20 @@ class GetThumbFromUserCacheWorker : public Nan::AsyncWorker {
 
 
 NAN_METHOD(_thumbs_getFromUserCache) {
-    if (info.Length() != 4){
-        Nan::ThrowError("Invalid number of arguments");
-        return;
-    }
-    if (!info[0]->IsString()){
-        Nan::ThrowError("Argument 0 must be a string");
-        return;
-    }
-    if (!info[1]->IsNumber()){
-        Nan::ThrowError("Argument 1 must be a number");
-        return;
-    }
-    if (!info[2]->IsObject()){
-        Nan::ThrowError("Argument 2 must be an object");
-        return;
-    }
-    if (!info[3]->IsFunction()){
-        Nan::ThrowError("Argument 3 must be a function");
-        return;
-    }
+    ASSERT_NUM_PARAMS(4);
 
-    // Parse first two args
-    fs::path imagePath = fs::path(*Nan::Utf8String(info[0].As<v8::String>()));
-    time_t modifiedTime = Nan::To<time_t>(info[1].As<v8::Uint32>()).FromJust();
+    BIND_STRING_PARAM(imagePath, 0);
+    BIND_UNSIGNED_INT_PARAM(modifiedTime, 1);
 
-    // Parse options
-    v8::Local<v8::String> k = Nan::New<v8::String>("thumbSize").ToLocalChecked();
-    v8::Local<v8::Object> obj = info[2].As<v8::Object>();
-    int thumbSize = 512;
+    BIND_OBJECT_PARAM(obj, 2);
+    BIND_OBJECT_VAR(obj, int, thumbSize, 512);
+    BIND_OBJECT_VAR(obj, bool, forceRecreate, false);
 
-    if (Nan::HasRealNamedProperty(obj, k).FromJust()){
-        thumbSize = Nan::To<int>(Nan::GetRealNamedProperty(obj, k).ToLocalChecked()).FromJust();
-    }
+    BIND_FUNCTION_PARAM(callback, 3);
 
-    bool forceRecreate = false;
-    k = Nan::New<v8::String>("forceRecreate").ToLocalChecked();
-    if (Nan::HasRealNamedProperty(obj, k).FromJust()){
-        forceRecreate = Nan::To<bool>(Nan::GetRealNamedProperty(obj, k).ToLocalChecked()).FromJust();
-    }
-
-    // Execute
-    Nan::Callback *callback = new Nan::Callback(Nan::To<v8::Function>(info[3]).ToLocalChecked());
-    Nan::AsyncQueueWorker(new GetThumbFromUserCacheWorker(callback, imagePath, modifiedTime, thumbSize, forceRecreate));
+    Nan::AsyncQueueWorker(new GetThumbFromUserCacheWorker(callback, static_cast<fs::path>(imagePath), static_cast<time_t>(modifiedTime), thumbSize, forceRecreate));
 }
 
-//(const fs::path &geotiffPath, int tz, int tx, int ty, int tileSize, bool tms, bool forceRecreate)
 class GetTileFromUserCacheWorker : public Nan::AsyncWorker {
  public:
   GetTileFromUserCacheWorker(Nan::Callback *callback, const fs::path &geotiffPath, int tz, int tx, int ty, int tileSize, bool tms, bool forceRecreate)
@@ -248,64 +169,20 @@ class GetTileFromUserCacheWorker : public Nan::AsyncWorker {
 
 
 NAN_METHOD(_tile_getFromUserCache) {
-    if (info.Length() != 6){
-        Nan::ThrowError("Invalid number of arguments");
-        return;
-    }
-    if (!info[0]->IsString()){
-        Nan::ThrowError("Argument 0 must be a string");
-        return;
-    }
-    if (!info[1]->IsNumber()){
-        Nan::ThrowError("Argument 1 must be a number");
-        return;
-    }
-    if (!info[2]->IsNumber()){
-        Nan::ThrowError("Argument 2 must be a number");
-        return;
-    }
-    if (!info[3]->IsNumber()){
-        Nan::ThrowError("Argument 3 must be a number");
-        return;
-    }
-    if (!info[4]->IsObject()){
-        Nan::ThrowError("Argument 4 must be an object");
-        return;
-    }
-    if (!info[5]->IsFunction()){
-        Nan::ThrowError("Argument 5 must be a function");
-        return;
-    }
+    ASSERT_NUM_PARAMS(6);
 
-    // Parse args
-    fs::path geotiffPath = fs::path(*Nan::Utf8String(info[0].As<v8::String>()));
-    int tz = Nan::To<int>(info[1].As<v8::Uint32>()).FromJust();
-    int tx = Nan::To<int>(info[2].As<v8::Uint32>()).FromJust();
-    int ty = Nan::To<int>(info[3].As<v8::Uint32>()).FromJust();
-    
-    // Parse options
-    v8::Local<v8::String> k = Nan::New<v8::String>("tileSize").ToLocalChecked();
-    v8::Local<v8::Object> obj = info[4].As<v8::Object>();
-    int tileSize = 256;
+    BIND_STRING_PARAM(geotiffPath, 0);
+    BIND_INT_PARAM(tz, 1);
+    BIND_INT_PARAM(tx, 2);
+    BIND_INT_PARAM(ty, 3);
 
-    if (Nan::HasRealNamedProperty(obj, k).FromJust()){
-        tileSize = Nan::To<int>(Nan::GetRealNamedProperty(obj, k).ToLocalChecked()).FromJust();
-    }
+    BIND_OBJECT_PARAM(obj, 4);
+    BIND_OBJECT_VAR(obj, int, tileSize, 256);
+    BIND_OBJECT_VAR(obj, bool, tms, false);
+    BIND_OBJECT_VAR(obj, bool, forceRecreate, false);
 
-    bool tms = false;
-    k = Nan::New<v8::String>("tms").ToLocalChecked();
-    if (Nan::HasRealNamedProperty(obj, k).FromJust()){
-        tms = Nan::To<bool>(Nan::GetRealNamedProperty(obj, k).ToLocalChecked()).FromJust();
-    }
+    BIND_FUNCTION_PARAM(callback, 5);
 
-    bool forceRecreate = false;
-    k = Nan::New<v8::String>("forceRecreate").ToLocalChecked();
-    if (Nan::HasRealNamedProperty(obj, k).FromJust()){
-        forceRecreate = Nan::To<bool>(Nan::GetRealNamedProperty(obj, k).ToLocalChecked()).FromJust();
-    }
-
-    // Execute
-    Nan::Callback *callback = new Nan::Callback(Nan::To<v8::Function>(info[5]).ToLocalChecked());
     Nan::AsyncQueueWorker(new GetTileFromUserCacheWorker(callback, geotiffPath, tz, tx, ty, tileSize, tms, forceRecreate));
 }
 
