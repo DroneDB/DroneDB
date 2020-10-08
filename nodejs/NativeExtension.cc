@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "ne_functions.h"
 #include "ne_dbops.h"
+#include "ne_share.h"
 #include "ddb.h"
 
 using v8::FunctionTemplate;
@@ -19,6 +20,7 @@ NAN_MODULE_INIT(InitAll) {
     NAN_EXPORT(target, init);
     NAN_EXPORT(target, add);
     NAN_EXPORT(target, remove);
+    NAN_EXPORT(target, share);
 
 	DDBRegisterProcess();
 }

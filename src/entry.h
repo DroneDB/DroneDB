@@ -44,8 +44,7 @@ struct Entry {
         this->path = s.getText(0);
         this->hash = s.getText(1);
         this->type = (EntryType)s.getInt(2);
-
-        this->meta.parse(s.getText(3));
+        this->meta = json::parse(s.getText(3), nullptr, false);
         this->mtime = (time_t)s.getInt(4);
         this->size = s.getInt64(5);
         this->depth = s.getInt(6);

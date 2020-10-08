@@ -8,6 +8,7 @@
 // io.h was taken :/
 
 #include <algorithm>
+#include <limits>
 #include "fs.h"
 #include "ddb_export.h"
 
@@ -61,6 +62,10 @@ DDB_DLL fs::path getCwd();
 
 // Prints to the provided buffer a nice number of bytes (KB, MB, GB, etc)
 DDB_DLL std::string bytesToHuman(std::uintmax_t bytes);
+
+// Computes the common directory path (if any) among the given paths
+DDB_DLL fs::path commonDirPath(const std::vector<fs::path> &paths);
+size_t componentsCount(const fs::path &p);
 
 }
 }
