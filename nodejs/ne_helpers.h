@@ -45,6 +45,14 @@ inline std::vector<std::string> v8ArrayToStrVec(const v8::Local<v8::Array> &arra
         __name = Nan::To<__type>(Nan::GetRealNamedProperty(__obj, __name ## key).ToLocalChecked()).FromJust(); \
     }
 
+#define BIND_OBJECT_STRING(__obj, __name, __defaultValue) \
+    v8::Local<v8::String> __name ## key = Nan::New<v8::String>(#__name).ToLocalChecked(); \
+    std::string __name = __defaultValue; \
+    if (Nan::HasRealNamedProperty(__obj, __name ## key).FromJust()){ \
+        Nan::Utf8String str(Nan::GetRealNamedProperty(__obj, __name ## key).ToLocalChecked().As<v8::String>()); \
+        __name = std::string(*str); \
+    }
+
 #define BIND_FUNCTION_PARAM(__name, __num) \
     if (!info[__num]->IsFunction()){ \
         Nan::ThrowError("Argument " #__num " must be a function"); \

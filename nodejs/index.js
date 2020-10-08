@@ -76,7 +76,7 @@ const ddb = {
 
             n.add(ddbPath, paths, options, (err, entries) => {
                 if (err) reject(err);
-                else return resolve(entries);             
+                else return resolve(entries);
             });
         });
     },
@@ -87,6 +87,16 @@ const ddb = {
             n.remove(ddbPath, paths, options, err => {
                 if (err) reject(err);
                 else resolve(true);     
+            });
+        });
+    },
+
+    share: async function(paths, options = {}, progress = () => true){
+        return new Promise((resolve, reject) => {
+            if (typeof paths === "string") paths = [paths];
+            n.share(paths, options, progress, (err, url) => {
+                if (err) reject(err);
+                else resolve(url);
             });
         });
     }
