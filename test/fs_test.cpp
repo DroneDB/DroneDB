@@ -160,18 +160,18 @@ TEST(withoutRoot, Normal){
 }
 
 TEST(commonDirPath, Normal){
-    EXPECT_EQ(io::commonDirPath({"/test/123", "/test/abc"}).string(), "/test");
-    EXPECT_EQ(io::commonDirPath({"/test/123", "/test2/abc"}).string(), "/");
+    EXPECT_EQ(io::commonDirPath({"/test/123", "/test/abc"}).generic_string(), "/test");
+    EXPECT_EQ(io::commonDirPath({"/test/123", "/test2/abc"}).generic_string(), "/");
 
-    EXPECT_EQ(io::commonDirPath({"test/123", "test2/abc"}).string(), "");
-    EXPECT_EQ(io::commonDirPath({"test/123", "test/abc"}).string(), "test");
+    EXPECT_EQ(io::commonDirPath({"test/123", "test2/abc"}).generic_string(), "");
+    EXPECT_EQ(io::commonDirPath({"test/123", "test/abc"}).generic_string(), "test");
 
-    EXPECT_EQ(io::commonDirPath({"test/123"}).string(), "test/123");
-    EXPECT_EQ(io::commonDirPath({}).string(), "");
-    EXPECT_EQ(io::commonDirPath({"abc/abc/test.txt", "abc", "def"}).string(), "");
+    EXPECT_EQ(io::commonDirPath({"test/123"}).generic_string(), "test/123");
+    EXPECT_EQ(io::commonDirPath({}).generic_string(), "");
+    EXPECT_EQ(io::commonDirPath({"abc/abc/test.txt", "abc", "def"}).generic_string(), "");
 
-    EXPECT_EQ(io::commonDirPath({"abc/abc/test.txt", "abc/abc/test2.txt"}).string(), "abc/abc");
-    EXPECT_EQ(io::commonDirPath({"/abc"}).string(), "/abc");
+    EXPECT_EQ(io::commonDirPath({"abc/abc/test.txt", "abc/abc/test2.txt"}).generic_string(), "abc/abc");
+    EXPECT_EQ(io::commonDirPath({"/abc"}).generic_string(), "/abc");
 
 
 #ifdef _WIN32
