@@ -23,7 +23,7 @@ void Share::setOptions(cxxopts::Options &opts) {
     ("r,recursive", "Recursively share subdirectories", cxxopts::value<bool>())
     ("t,tag", "Tag to use (organization/dataset or server[:port]/organization/dataset)", cxxopts::value<std::string>()->default_value(DEFAULT_REGISTRY "/<username>/<uuid>"))
     ("p,password", "Optional password to protect dataset", cxxopts::value<std::string>()->default_value(""))
-    ("s,server", "Registry to share dataset with (alias of: -t <server>//)", cxxopts::value<std::string>())
+    ("s,server", "Registry server to share dataset with (alias of: -t <server>//)", cxxopts::value<std::string>())
     ("q,quiet", "Do not display progress", cxxopts::value<bool>());
 
     opts.parse_positional({"input"});
