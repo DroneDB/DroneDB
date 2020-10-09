@@ -14,7 +14,7 @@ TagComponents RegistryUtils::parseTag(const std::string &tag, bool useInsecureRe
     utils::toLower(t);
 
     size_t pos = t.rfind("/");
-    if (pos == std::string::npos) throw InvalidArgsException("Invalid tag: " + tag + " missing dataset name");
+    if (pos == std::string::npos) throw InvalidArgsException("Invalid tag: " + tag + " must be in organization/dataset format");
 
     TagComponents res;
     res.dataset = t.substr(pos + 1, t.length() - 1);
