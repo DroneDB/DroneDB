@@ -21,8 +21,9 @@ void Share::setOptions(cxxopts::Options &opts) {
 
     ("i,input", "Files and directories to share", cxxopts::value<std::vector<std::string>>())
     ("r,recursive", "Recursively share subdirectories", cxxopts::value<bool>())
-    ("t,tag", "Tag to use (organization/dataset or server[:port]/organization/dataset)", cxxopts::value<std::string>()->default_value(DEFAULT_REGISTRY "/public/<randomID>"))
+    ("t,tag", "Tag to use (organization/dataset or server[:port]/organization/dataset)", cxxopts::value<std::string>()->default_value(DEFAULT_REGISTRY "/<username>/<uuid>"))
     ("p,password", "Optional password to protect dataset", cxxopts::value<std::string>()->default_value(""))
+    ("s,server", "Registry to share dataset with (alias of: -t <server>//)", cxxopts::value<std::string>())
     ("q,quiet", "Do not display progress", cxxopts::value<bool>());
 
     opts.parse_positional({"input"});
@@ -39,6 +40,9 @@ void Share::run(cxxopts::ParseResult &opts) {
 
     auto input = opts["input"].as<std::vector<std::string>>();
     auto tag = opts["tag"].as<std::string>();
+    if (opts["server"].count() and !opts["tag"].count()){
+        tag = opts["server"].as<std::string>() + "//";
+    }
     auto password = opts["password"].as<std::string>();
     auto recursive = opts["recursive"].count() > 0;
     auto quiet = opts["quiet"].count() > 0;
