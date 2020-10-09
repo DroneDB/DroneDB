@@ -430,7 +430,7 @@ TEST(listIndex, folder) {
     listIndex(&db, toList, out, "text", false, -1);
 
     std::cout << out.str() << std::endl;
-    EXPECT_EQ(out.str(), "pics\npics/IMG_20160826_181302.jpg\npics/IMG_20160826_181305.jpg\npics/IMG_20160826_181309.jpg\npics/IMG_20160826_181314.jpg\npics/IMG_20160826_181317.jpg\npics/pics2\n");
+    EXPECT_EQ(out.str(), "pics/IMG_20160826_181302.jpg\npics/IMG_20160826_181305.jpg\npics/IMG_20160826_181309.jpg\npics/IMG_20160826_181314.jpg\npics/IMG_20160826_181317.jpg\npics/pics2\n");
 
     db.close();
 
@@ -460,7 +460,7 @@ TEST(listIndex, subFolder) {
     listIndex(&db, toList, out, "text", false, -1);
 
     std::cout << out.str() << std::endl;
-    EXPECT_EQ(out.str(), "pics/pics2\npics/pics2/IMG_20160826_181305.jpg\npics/pics2/IMG_20160826_181309.jpg\n");
+    EXPECT_EQ(out.str(), "pics/pics2/IMG_20160826_181305.jpg\npics/pics2/IMG_20160826_181309.jpg\n");
 
     db.close();
 
@@ -610,7 +610,7 @@ TEST(listIndex, folderRecursive) {
     listIndex(&db, toList, out, "text", true, -1);
 
     std::cout << out.str() << std::endl;
-    EXPECT_EQ(out.str(), "pics\npics/IMG_20160826_181302.jpg\npics/IMG_20160826_181305.jpg\npics/IMG_20160826_181309.jpg\npics/IMG_20160826_181314.jpg\npics/IMG_20160826_181317.jpg\npics/pics2\npics/pics2/IMG_20160826_181305.jpg\npics/pics2/IMG_20160826_181309.jpg\n");
+    EXPECT_EQ(out.str(), "pics/IMG_20160826_181302.jpg\npics/IMG_20160826_181305.jpg\npics/IMG_20160826_181309.jpg\npics/IMG_20160826_181314.jpg\npics/IMG_20160826_181317.jpg\npics/pics2\npics/pics2/IMG_20160826_181305.jpg\npics/pics2/IMG_20160826_181309.jpg\n");
 
     db.close();
 
@@ -640,7 +640,7 @@ TEST(listIndex, folderRecursiveWithLimit) {
     listIndex(&db, toList, out, "text", true, 1);
 
     std::cout << out.str() << std::endl;
-    EXPECT_EQ(out.str(), "pics\npics/IMG_20160826_181302.jpg\npics/IMG_20160826_181305.jpg\npics/IMG_20160826_181309.jpg\npics/IMG_20160826_181314.jpg\npics/IMG_20160826_181317.jpg\npics/pics2\n");
+    EXPECT_EQ(out.str(), "pics/IMG_20160826_181302.jpg\npics/IMG_20160826_181305.jpg\npics/IMG_20160826_181309.jpg\npics/IMG_20160826_181314.jpg\npics/IMG_20160826_181317.jpg\npics/pics2\n");
 
     db.close();
 

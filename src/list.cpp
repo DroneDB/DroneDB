@@ -89,8 +89,6 @@ namespace ddb {
 		                                       relPath.string().length() == 0 ? "*" : relPath.generic(),
 		                                       recursive ? (maxRecursionDepth == -1 ? -1 : std::max(relPath.depth(), maxRecursionDepth)) : relPath.depth());
 
-		displayEntries(entryMatches, output, format);
-
 		// Show the contents of THAT directory
 		if (entryMatches.size() == 1)
 		{
@@ -107,8 +105,11 @@ namespace ddb {
 				
 				displayEntries(entryMatches, output, format);
 
-			}
-		}
+			} else 
+				displayEntries(entryMatches, output, format);
+		} else
+			displayEntries(entryMatches, output, format);
+
 	}
 
 	void listIndex(Database* db, const std::vector<std::string>& paths, std::ostream& output, const std::string& format, bool recursive, int maxRecursionDepth) {
