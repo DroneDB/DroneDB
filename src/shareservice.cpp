@@ -54,6 +54,19 @@ std::string ShareService::share(const std::vector<std::string> &input, const std
         wd = io::Path(fs::path(cwd));
     }
 
+    std::vector<ShareFileProgress *> files;
+    ShareFileProgress sfp;
+    files.push_back(&sfp);
+
+    // Calculate total size
+    size_t gTotalBytes = 0;
+    size_t gTxBytes = 0;
+
+    for (auto &fp : filePaths){
+        gTotalBytes += io::Path(fp).getSize();
+    }
+
+    // Upload
     for (auto &fp : filePaths){
         io::Path p = io::Path(fp);
         if (p.isAbsolute() && !wd.isParentOf(p.get())){
@@ -64,6 +77,11 @@ std::string ShareService::share(const std::vector<std::string> &input, const std
 
         std::string sha256 = Hash::fileSHA256(fp.string());
         std::string filename = fp.filename().string();
+        size_t filesize = p.getSize();
+
+        sfp.filename = filename;
+        sfp.totalBytes = filesize;
+        sfp.txBytes = 0;
 
         LOGD << "Uploading " << p.string();
 
@@ -71,9 +89,19 @@ std::string ShareService::share(const std::vector<std::string> &input, const std
                 .multiPartFormData({"file", fp.string()},
                                    {"path", p.generic()})
                 .authToken(authToken)
-                .progressCb([&cb, &filename](float progress){
+                .progressCb([&cb, &files, &sfp, &filesize, &gTotalBytes, &gTxBytes](size_t txBytes, size_t totalBytes){
                     if (cb == nullptr) return true;
-                    else return cb(filename, progress);
+                    else{
+                        // We cap the txBytes from CURL since it
+                        // includes data transferred from the request
+
+                        // CAUTION: this will require a lock if you use threads
+
+                        gTxBytes -= sfp.txBytes;
+                        sfp.txBytes = std::min(filesize, txBytes);
+                        gTxBytes += sfp.txBytes;
+                        return cb(files, gTxBytes, gTotalBytes);
+                    }
                 })
                 //.maximumUploadSpeed(1024*1024)
                 .send();

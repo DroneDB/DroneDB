@@ -45,8 +45,15 @@ void Share::run(cxxopts::ParseResult &opts) {
     auto cwd = ddb::io::getCwd().string();
 
     ProgressBar pb;
-    ddb::ShareCallback showProgress = [&pb](const std::string &file, float progress){
-        pb.update(file, progress);
+    ddb::ShareCallback showProgress = [&pb](const std::vector<ddb::ShareFileProgress *> &files, size_t txBytes, size_t totalBytes){
+        if (files.size() > 0){
+            auto f = files[0];
+            float progress = f->txBytes > 0 ?
+                            static_cast<float>(f->txBytes) / static_cast<float>(f->totalBytes) * 100.0f :
+                            0.0f;
+            // TODO: support for parallel progress updates
+            pb.update(f->filename, progress);
+        }
         return true;
     };
     if (quiet) showProgress = nullptr;
