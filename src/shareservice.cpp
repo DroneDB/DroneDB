@@ -69,11 +69,6 @@ std::string ShareService::share(const std::vector<std::string> &input, const std
     // Upload
     for (auto &fp : filePaths){
         io::Path p = io::Path(fp);
-        if (p.isAbsolute() && !wd.isParentOf(p.get())){
-            p = p.withoutRoot();
-        }else{
-            p = p.relativeTo(wd.get());
-        }
 
         std::string sha256 = Hash::fileSHA256(fp.string());
         std::string filename = fp.filename().string();
@@ -82,6 +77,12 @@ std::string ShareService::share(const std::vector<std::string> &input, const std
         sfp.filename = filename;
         sfp.totalBytes = filesize;
         sfp.txBytes = 0;
+
+        if (p.isAbsolute() && !wd.isParentOf(p.get())){
+            p = p.withoutRoot();
+        }else{
+            p = p.relativeTo(wd.get());
+        }
 
         LOGD << "Uploading " << p.string();
 

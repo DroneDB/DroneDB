@@ -22,11 +22,18 @@ class ShareWorker : public Nan::AsyncProgressWorker {
   void Execute (const Nan::AsyncProgressWorker::ExecutionProgress& progress) {
     ddb::ShareService ss;
     try{
-        ddb::ShareCallback showProgress = [&](const std::string &file, float prog){
+        ddb::ShareCallback showProgress = [&](const std::vector<ddb::ShareFileProgress *> &files, size_t txBytes, size_t totalBytes){
             // Prepare JSON object
+            json fa = json::array();
+            for (auto &f : files){
+                fa.push_back({{"filename", f->filename},
+                              {"txBytes", f->txBytes},
+                              {"totalBytes", f->totalBytes}});
+            }
             json j = {
-                "file", file,
-                "progress", prog
+                {"files", fa},
+                {"txBytes", txBytes},
+                {"totalBytes", totalBytes}
             };
             std::string serialized = j.dump();
             progress.Send(serialized.c_str(), sizeof(char) * serialized.length());
@@ -51,7 +58,10 @@ class ShareWorker : public Nan::AsyncProgressWorker {
           json.Parse(Nan::New<v8::String>(str).ToLocalChecked()).ToLocalChecked()
       };
 
-      cancel = !Nan::To<bool>(progress->Call(1, argv, async_resource).ToLocalChecked()).FromJust();
+      auto ret = progress->Call(1, argv, async_resource).ToLocalChecked();
+      if (!ret->IsUndefined()){
+          cancel = !Nan::To<bool>(ret).FromJust();
+      }
   }
 
   void HandleOKCallback () {
