@@ -78,28 +78,33 @@ namespace ddb {
 	void listPath(Database* db, std::ostream& output, const std::string& format, bool recursive, const int maxRecursionDepth, const fs::path
 	              & directory, const std::vector<fs::path>::value_type& path)
 	{
-		std::cout << "Path:" << path << std::endl;
+		std::cout << "?> Path:" << path << std::endl;
 
 		auto relPath = io::Path(path).relativeTo(directory);
 
-		std::cout << "Rel path: " << relPath.generic() << std::endl;
-		std::cout << "Depth: " << relPath.depth() << std::endl;
+		std::cout << "?> Rel path: " << relPath.generic() << std::endl;
+		std::cout << "?> Depth: " << relPath.depth() << std::endl;
 
 		auto entryMatches = getMatchingEntries(db,
 		                                       relPath.string().length() == 0 ? "*" : relPath.generic(),
-		                                       recursive ? std::max(relPath.depth(), maxRecursionDepth) : relPath.depth());
+		                                       recursive ? (maxRecursionDepth == -1 ? -1 : std::max(relPath.depth(), maxRecursionDepth)) : relPath.depth());
 
 		displayEntries(entryMatches, output, format);
 
 		// Show the contents of THAT directory
 		if (entryMatches.size() == 1)
 		{
-
 			const auto firstMatch = entryMatches[0];
 
 			if (firstMatch.type == Directory) {
-			
-				entryMatches = getMatchingEntries(db, firstMatch.path, recursive ? std::max(firstMatch.depth + 1, maxRecursionDepth) : firstMatch.depth + 1, true);
+
+				std::cout << "?> The match is folder: " << firstMatch.path << std::endl;
+
+				// Get all the deeper folders till maxDepth
+				entryMatches = getMatchingEntries(db, firstMatch.path, 
+					recursive ? (maxRecursionDepth == -1 ? -1 : std::max(firstMatch.depth + 1, maxRecursionDepth)) : firstMatch.depth + 1, 
+					true);
+				
 				displayEntries(entryMatches, output, format);
 
 			}
@@ -114,16 +119,16 @@ namespace ddb {
 
 		const fs::path directory = rootDirectory(db);
 
-		std::cout << "Root: " << directory << std::endl;
-		std::cout << "Max depth: " << maxRecursionDepth << std::endl;
-		std::cout << "Recursive: " << recursive << std::endl;
+		std::cout << "?> Root: " << directory << std::endl;
+		std::cout << "?> Max depth: " << maxRecursionDepth << std::endl;
+		std::cout << "?> Recursive: " << recursive << std::endl;
 
-		std::cout << "Listing" << std::endl;
+		std::cout << "?> Listing" << std::endl;
 
 		std::vector<fs::path> pathList;
 
 		if (paths.empty())
-			pathList.push_back(fs::current_path());
+			pathList.push_back(directory);
 		else
 			pathList = std::vector<fs::path>(paths.begin(), paths.end());
 		
