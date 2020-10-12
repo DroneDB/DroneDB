@@ -377,7 +377,7 @@ TEST(listIndex, fileWildcard) {
 }
 
 
-TEST(listIndex, emptyPaths) {
+TEST(listIndex, rootPath) {
     TestArea ta(TEST_NAME);
 
     const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", "dbase.sqlite");
@@ -393,7 +393,9 @@ TEST(listIndex, emptyPaths) {
     db.open(dbPath.string());
 
     std::vector<std::string> toList;
-    
+
+    toList.emplace_back((testFolder / ".").string());
+   
     std::ostringstream out; 
 
     listIndex(&db, toList, out, "text", false, -1);
@@ -405,6 +407,40 @@ TEST(listIndex, emptyPaths) {
 
 }
 
+TEST(listIndex, rootPath2) {
+    TestArea ta(TEST_NAME);
+
+    const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", "dbase.sqlite");
+
+    const auto testFolder = ta.getFolder("test");
+    create_directory(testFolder / ".ddb");
+    fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
+    const auto dbPath = testFolder / ".ddb" / "dbase.sqlite";
+    EXPECT_TRUE(fs::exists(dbPath));
+
+    std::cout << "Test folder: " << testFolder << std::endl;
+
+    const auto db = ddb::open((testFolder / "pics").string(), true);
+
+    //db.open((testFolder / "pics").string());
+    //db.open(dbPath.string());
+
+    std::vector<std::string> toList;
+
+    toList.emplace_back((testFolder / "pics").string());
+   
+    std::ostringstream out; 
+
+    Database *d = db.get();
+
+    listIndex(d, toList, out, "text", false, -1);
+
+    std::cout << out.str() << std::endl;
+    EXPECT_EQ(out.str(), "pics/IMG_20160826_181302.jpg\npics/IMG_20160826_181305.jpg\npics/IMG_20160826_181309.jpg\npics/IMG_20160826_181314.jpg\npics/IMG_20160826_181317.jpg\npics/pics2\n");
+
+    d->close();
+
+}
 
 TEST(listIndex, folder) {
     TestArea ta(TEST_NAME);

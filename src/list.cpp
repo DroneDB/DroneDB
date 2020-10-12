@@ -129,7 +129,7 @@ namespace ddb {
 		std::vector<fs::path> pathList;
 
 		if (paths.empty())
-			pathList.push_back(directory);
+			pathList.push_back(fs::current_path());
 		else
 			pathList = std::vector<fs::path>(paths.begin(), paths.end());
 		
