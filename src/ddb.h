@@ -72,6 +72,16 @@ DDB_DLL DDBErr DDBRemove(const char *ddbPath, const char **paths, int numPaths);
 DDB_DLL DDBErr DDBInfo(const char **paths, int numPaths, char** output, const char *format = "text", bool recursive = false, int maxRecursionDepth = 0,
                        const char *geometry = "auto", bool withHash = false, bool stopOnError = true);
 
+/** List files inside index 
+ * @param paths array of paths to parse
+ * @param numPaths number of paths
+ * @param output pointer to C-string where to store result
+ * @param format output format. One of: ["text", "json"]
+ * @param recursive whether to recursively scan folders
+ * @param maxRecursionDepth limit the depth of recursion
+ * @return DDBERR_NONE on success, an error otherwise */
+DDB_DLL DDBErr DDBList(const char *ddbPath, const char **paths, int numPaths, char **output, const char *format, bool recursive = false, int maxRecursionDepth = 0);
+
 
 #ifdef __cplusplus
 }

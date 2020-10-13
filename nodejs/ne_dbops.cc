@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include <iostream>
+#include <sstream>
 #include "ddb.h"
 #include "ne_dbops.h"
 #include "ne_helpers.h"
@@ -145,4 +146,59 @@ NAN_METHOD(remove) {
     BIND_FUNCTION_PARAM(callback, 3);
 
     Nan::AsyncQueueWorker(new RemoveWorker(callback, ddbPath, paths));
+}
+
+class ListWorker : public Nan::AsyncWorker {
+ public:
+  ListWorker(Nan::Callback *callback, const std::string &ddbPath, const std::vector<std::string> &paths, 
+     bool recursive, int maxRecursionDepth)
+    : AsyncWorker(callback, "nan:ListWorker"),
+      ddbPath(ddbPath), paths(paths), recursive(recursive), maxRecursionDepth(maxRecursionDepth) {}
+  ~ListWorker() {}
+
+  void Execute () {
+         
+    std::vector<const char *> cPaths(paths.size());
+    std::transform(paths.begin(), paths.end(), cPaths.begin(), [](const std::string& s) { return s.c_str(); });
+
+    if (DDBList(ddbPath.c_str(), cPaths.data(), static_cast<int>(cPaths.size()), &output, "json", recursive, maxRecursionDepth) != DDBERR_NONE){
+        SetErrorMessage(DDBGetLastError());
+    }
+
+  }
+
+  void HandleOKCallback () {
+     Nan::HandleScope scope;
+
+     Nan::JSON json;
+     v8::Local<v8::Value> argv[] = {
+         Nan::Null(),
+         json.Parse(Nan::New<v8::String>(output).ToLocalChecked()).ToLocalChecked()
+     };
+
+     delete output; // TODO: is this a leak if the call fails? How do we de-allocate on failure?
+     callback->Call(2, argv, async_resource);
+   }
+
+ private:
+    std::string ddbPath;
+    std::vector<std::string> paths;
+
+    bool recursive;
+    int maxRecursionDepth;   
+    char *output;
+
+};
+
+NAN_METHOD(list) {
+    ASSERT_NUM_PARAMS(4);
+
+    BIND_STRING_PARAM(ddbPath, 0);
+    BIND_STRING_ARRAY_PARAM(in, 1);
+    BIND_OBJECT_PARAM(obj, 2);
+    BIND_OBJECT_VAR(obj, bool, recursive, false);
+    BIND_OBJECT_VAR(obj, int, maxRecursionDepth, 0);
+    BIND_FUNCTION_PARAM(callback, 3);
+
+    Nan::AsyncQueueWorker(new ListWorker(callback, ddbPath, in, recursive, maxRecursionDepth));
 }

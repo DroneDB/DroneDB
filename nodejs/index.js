@@ -6,15 +6,15 @@ const n = require('bindings')('node-ddb.node');
 const ddb = {
     getVersion: n.getVersion,
 
-    thumbs:{
-        supportedForType: function(entryType){
-            entryType= parseInt(entryType);
+    thumbs: {
+        supportedForType: function(entryType) {
+            entryType = parseInt(entryType);
             return entryType === ddb.entry.type.GEOIMAGE ||
-                    entryType === ddb.entry.type.GEORASTER ||
-                    entryType === ddb.entry.type.IMAGE; 
+                entryType === ddb.entry.type.GEORASTER ||
+                entryType === ddb.entry.type.IMAGE;
         },
 
-        getFromUserCache: async function(imagePath, modifiedTime, options = {}){
+        getFromUserCache: async function(imagePath, modifiedTime, options = {}) {
             return new Promise((resolve, reject) => {
                 n._thumbs_getFromUserCache(imagePath, modifiedTime, options, (err, result) => {
                     if (err) reject(err);
@@ -27,19 +27,19 @@ const ddb = {
     entry: {
         type: require('./entryType'),
         typeToHuman: n.typeToHuman,
-        hasGeometry: function(entry){
+        hasGeometry: function(entry) {
             if (!entry) return false;
             return !!entry.point_geom || !!entry.polygon_geom;
         },
-        isDirectory: function(entry){
+        isDirectory: function(entry) {
             if (!entry) return false;
             return entry.type === this.type.DIRECTORY ||
-                   entry.type === this.type.DRONEDB;
+                entry.type === this.type.DRONEDB;
         }
     },
 
     tile: {
-        getFromUserCache: async function(geotiffPath, tz, tx, ty, options = {}){
+        getFromUserCache: async function(geotiffPath, tz, tx, ty, options = {}) {
             return new Promise((resolve, reject) => {
                 n._tile_getFromUserCache(geotiffPath, tz, tx, ty, options, (err, result) => {
                     if (err) reject(err);
@@ -50,7 +50,7 @@ const ddb = {
     },
 
 
-    info: async function(files, options = {}){
+    info: async function(files, options = {}) {
         return new Promise((resolve, reject) => {
             if (typeof files === "string") files = [files];
 
@@ -61,7 +61,7 @@ const ddb = {
         });
     },
 
-    init: async function(directory){
+    init: async function(directory) {
         return new Promise((resolve, reject) => {
             n.init(directory, (err, result) => {
                 if (err) reject(err);
@@ -70,7 +70,7 @@ const ddb = {
         });
     },
 
-    add: async function(ddbPath, paths, options = {}){
+    add: async function(ddbPath, paths, options = {}) {
         return new Promise((resolve, reject) => {
             if (typeof paths === "string") paths = [paths];
 
@@ -81,20 +81,34 @@ const ddb = {
         });
     },
 
-    remove: async function(ddbPath, paths, options = {}){
+    list: async function(ddbPath, files, options = {}) {
         return new Promise((resolve, reject) => {
-            if (typeof paths === "string") paths = [paths];
-            n.remove(ddbPath, paths, options, err => {
+            const isSingle = typeof files === "string";
+            if (isSingle) files = [files];
+
+            n.list(ddbPath, files, options, (err, result) => {
                 if (err) reject(err);
-                else resolve(true);     
+                else {
+                    resolve(result);
+                }
             });
         });
     },
 
-    share: async function(paths, options = {}, progress = () => true){
+    remove: async function(ddbPath, paths, options = {}) {
         return new Promise((resolve, reject) => {
             if (typeof paths === "string") paths = [paths];
-            n.share(paths, options, progress, (err, url) => {
+            n.remove(ddbPath, paths, options, err => {
+                if (err) reject(err);
+                else resolve(true);
+            });
+        });
+    },
+
+    share: async function(paths, tag, options = {}, progress = () => true){
+        return new Promise((resolve, reject) => {
+            if (typeof paths === "string") paths = [paths];
+            n.share(paths, tag, options, progress, (err, url) => {
                 if (err) reject(err);
                 else resolve(url);
             });

@@ -88,17 +88,17 @@ class ShareWorker : public Nan::AsyncProgressWorker {
 
 
 NAN_METHOD(share) {
-    ASSERT_NUM_PARAMS(4);
+    ASSERT_NUM_PARAMS(5);
 
     BIND_STRING_ARRAY_PARAM(paths, 0);
+    BIND_STRING_PARAM(tag, 1);
 
-    BIND_OBJECT_PARAM(obj, 1);
-    BIND_OBJECT_STRING(obj, tag, "");
+    BIND_OBJECT_PARAM(obj, 2);
     BIND_OBJECT_STRING(obj, password, "");
     BIND_OBJECT_VAR(obj, bool, recursive, false);
 
-    BIND_FUNCTION_PARAM(progress, 2);
-    BIND_FUNCTION_PARAM(callback, 3);
+    BIND_FUNCTION_PARAM(progress, 3);
+    BIND_FUNCTION_PARAM(callback, 4);
 
     Nan::AsyncQueueWorker(new ShareWorker(callback, progress, paths, tag, password, recursive));
 }
