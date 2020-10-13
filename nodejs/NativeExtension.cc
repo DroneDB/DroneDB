@@ -4,6 +4,7 @@
 #include "ne_functions.h"
 #include "ne_dbops.h"
 #include "ne_share.h"
+#include "ne_login.h"
 #include "ddb.h"
 
 using v8::FunctionTemplate;
@@ -22,6 +23,7 @@ NAN_MODULE_INIT(InitAll) {
     NAN_EXPORT(target, remove);
     NAN_EXPORT(target, share);
     NAN_EXPORT(target, list);
+    NAN_EXPORT(target, login);
 
 	DDBRegisterProcess();
 }

@@ -113,6 +113,15 @@ const ddb = {
                 else resolve(url);
             });
         });
+    },
+
+    login: async function(username, password, server = ""){
+        return new Promise((resolve, reject) => {
+            n.login(username, password, server, (err, token) => {
+                if (err) reject(err);
+                else resolve(token);
+            });
+        });
     }
 };
 
