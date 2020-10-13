@@ -400,6 +400,9 @@ std::vector<Entry> getMatchingEntries(Database* db, const fs::path path, int max
 
     auto sanitized = sanitize_query_param(query);
 
+    if (sanitized.length() == 0)
+        sanitized = "%";
+	
 	LOGD << "Sanitized: " << sanitized;
 
     if (isFolder) {

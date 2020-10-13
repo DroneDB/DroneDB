@@ -29,10 +29,6 @@ namespace ddb {
 
 	void displayEntries(std::vector<Entry>& entries, std::ostream& output, const std::string& format)
 	{
-		std::sort(entries.begin(), entries.end(), [](const Entry& lhs, const Entry& rhs)
-		{
-			return lhs.path < rhs.path;
-		});
 
 		if (format == "text")
 		{
@@ -75,47 +71,50 @@ namespace ddb {
 
 	}
 
-	void getBaseEntries(Database* db, std::vector<fs::path> pathList, fs::path rootDirectory, bool recursive, int maxRecursionDepth, bool& expandFolders, std::vector<Entry>& baseEntries)
+	void getBaseEntries(Database* db, std::vector<fs::path> pathList, fs::path rootDirectory, bool& expandFolders, std::vector<Entry>& baseEntries)
 	{
+		const auto ourPath = io::Path(fs::current_path()).relativeTo(rootDirectory);
+
+		LOGD << "Our Path: " << ourPath.generic();
+
 		for (const fs::path& path : pathList) {
 
 			LOGD << "Path: " << path;
 
 			io::Path relPath = io::Path(path).relativeTo(rootDirectory);
 
-			auto pathStr = relPath.string();
+			auto pathStr = relPath.generic();
 
 			LOGD << "Rel path: " << pathStr;
 
-			const auto depth = recursive ? maxRecursionDepth : count(pathStr.begin(), pathStr.end(), '/');
+			// Let's expand only if we were asked to list a different folder
+			expandFolders = expandFolders || pathStr.length() > 0; //ourPath.generic() != pathStr;
+
+			const auto depth = count(pathStr.begin(), pathStr.end(), '/');
 
 			LOGD << "Depth: " << depth;
 
 			std::vector<Entry> matches = getMatchingEntries(db, relPath.generic(), depth);
 
-			expandFolders |= !matches.empty();
-
 			baseEntries.insert(baseEntries.end(), matches.begin(), matches.end());
 
 		}
 
-		expandFolders |= pathList.size() > 1;
-
 		// Remove duplicates 
 		sort(baseEntries.begin(), baseEntries.end(), [](const Entry& l, const Entry& r)
-		{
-			return l.path < r.path;
-		});
+			{
+				return l.path < r.path;
+			});
 		baseEntries.erase(unique(baseEntries.begin(), baseEntries.end(), [](const Entry& l, const Entry& r)
-		{
-			return l.path == r.path;
-		}), baseEntries.end());
+			{
+				return l.path == r.path;
+			}), baseEntries.end());
 
 		// Sort by type
 		sort(baseEntries.begin(), baseEntries.end(), [](const Entry& l, const Entry& r)
-		{
-			return l.type < r.type;
-		});
+			{
+				return l.type < r.type;
+			});
 	}
 
 	void listIndex(Database* db, const std::vector<std::string>& paths, std::ostream& output, const std::string& format, bool recursive, int maxRecursionDepth) {
@@ -134,118 +133,65 @@ namespace ddb {
 
 		std::vector<fs::path> pathList;
 
-		if (paths.empty())
-			pathList.push_back(fs::current_path());
+		bool expandFolders = recursive;
+
+		if (paths.empty()) {
+
+			// It's kind of magic
+			const auto ourPath = io::Path(fs::current_path()).relativeTo(directory);
+
+			pathList.emplace_back(ourPath.generic());
+		}
 		else
 			pathList = std::vector<fs::path>(paths.begin(), paths.end());
 
+
 		std::vector<Entry> baseEntries;
 
-		bool expandFolders = false;
+		getBaseEntries(db, pathList, directory, expandFolders, baseEntries);
 
-		getBaseEntries(db, pathList, directory, recursive, maxRecursionDepth, expandFolders, baseEntries);
+		const bool isSingle = pathList.size() == baseEntries.size();
 
 		LOGD << "Expand folders? " << expandFolders;
-		
-		//bool single = baseEntries.size() == 1;
+
+		std::vector<Entry> outputEntries;
 
 		// Display files first
 		for (const Entry& entry : baseEntries) {
-			if (entry.type != EntryType::Directory)
-				displayEntry(entry, output, format);
-		}
+			if (entry.type != Directory)
+				outputEntries.emplace_back(Entry(entry)); 
+			else {
 
-		// Then folders
-		for (const Entry& entry : baseEntries) {
+				if (!isSingle || !expandFolders)
+					outputEntries.emplace_back(Entry(entry));
 
-			if (entry.type == Directory)
-			{
 				if (expandFolders) {
-					displayEntry(entry, output, format);
-				}
-				else {
-					if (format == "text")
-						output << std::endl << entry.path << ":" << std::endl;
+					/*if (format == "text" && !isSingle && !recursive)
+						output << std::endl << entry.path << ":" << std::endl;*/
 
 					const auto depth = recursive ? maxRecursionDepth : entry.depth + 1;
 
 					std::vector<Entry> entries = getMatchingEntries(db, entry.path, depth, true);
 
 					for (const Entry& e : entries)
-						displayEntry(e, output, format);
+						outputEntries.emplace_back(Entry(e));
 				}
+
+
 			}
 
 		}
 
+		// Sort by path
+		std::sort(outputEntries.begin(), outputEntries.end(), [](const Entry& l, const Entry& r)
+			{
+				return l.path < r.path;
+			});
+
+		
+		displayEntries(outputEntries, output, format);
+
 
 	}
 
-	/*
-	void listPath(Database* db, std::ostream& output, const std::string& format, bool recursive, const int maxRecursionDepth, const fs::path
-				  & directory, const std::vector<fs::path>::value_type& path)
-	{
-		LOGD << "Path:" << path;
-
-		auto relPath = io::Path(path).relativeTo(directory);
-
-		LOGD << "Rel path: " << relPath.generic();
-		LOGD << "Depth: " << relPath.depth();
-
-		auto entryMatches = getMatchingEntries(db,
-											   relPath.string().length() == 0 ? "*" : relPath.generic(),
-											   recursive ? (maxRecursionDepth == -1 ? -1 : std::max(relPath.depth(), maxRecursionDepth)) : relPath.depth());
-
-		// Show the contents of THAT directory
-		if (entryMatches.size() == 1)
-		{
-			const auto firstMatch = entryMatches[0];
-
-			if (firstMatch.type == Directory) {
-
-				LOGD << "The match is folder: " << firstMatch.path;
-
-				// Get all the deeper folders till maxDepth
-				entryMatches = getMatchingEntries(db, firstMatch.path,
-					recursive ? (maxRecursionDepth == -1 ? -1 : std::max(firstMatch.depth + 1, maxRecursionDepth)) : firstMatch.depth + 1,
-					true);
-
-				displayEntries(entryMatches, output, format);
-
-			} else
-				displayEntries(entryMatches, output, format);
-		} else
-			displayEntries(entryMatches, output, format);
-
-	}
-
-	void listIndex(Database* db, const std::vector<std::string>& paths, std::ostream& output, const std::string& format, bool recursive, int maxRecursionDepth) {
-
-
-		if (format != "json" && format != "text")
-			throw InvalidArgsException("Invalid format " + format);
-
-		const fs::path directory = rootDirectory(db);
-
-		LOGD << "Root: " << directory;
-		LOGD << "Max depth: " << maxRecursionDepth;
-		LOGD << "Recursive: " << recursive;
-
-		LOGD << "Listing";
-
-		std::vector<fs::path> pathList;
-
-		if (paths.empty())
-			pathList.push_back(fs::current_path());
-		else
-			pathList = std::vector<fs::path>(paths.begin(), paths.end());
-
-		for (const auto& path : pathList) {
-
-			listPath(db, output, format, recursive, maxRecursionDepth, directory, path);
-
-		}
-
-	}
-	*/
 }
