@@ -73,9 +73,6 @@ namespace ddb {
 
 	void getBaseEntries(Database* db, std::vector<fs::path> pathList, fs::path rootDirectory, bool& expandFolders, std::vector<Entry>& baseEntries)
 	{
-		const auto ourPath = io::Path(fs::current_path()).relativeTo(rootDirectory);
-
-		LOGD << "Our Path: " << ourPath.generic();
 
 		for (const fs::path& path : pathList) {
 
@@ -137,10 +134,16 @@ namespace ddb {
 
 		if (paths.empty()) {
 
-			// It's kind of magic
-			const auto ourPath = io::Path(fs::current_path()).relativeTo(directory);
 
-			pathList.emplace_back(ourPath.generic());
+			const auto currentPath = fs::current_path();
+			auto root = io::Path(directory);
+
+			// If we are inside ddb folder we can use our current path
+			// otherwise we should reset to root folder
+			// I.E: \home\tmp\ddb ls -w \home\img
+
+			pathList.emplace_back(root.isParentOf(fs::current_path()) ? io::Path(currentPath).generic() : directory);
+
 		}
 		else
 			pathList = std::vector<fs::path>(paths.begin(), paths.end());
@@ -159,7 +162,7 @@ namespace ddb {
 		// Display files first
 		for (const Entry& entry : baseEntries) {
 			if (entry.type != Directory)
-				outputEntries.emplace_back(Entry(entry)); 
+				outputEntries.emplace_back(Entry(entry));
 			else {
 
 				if (!isSingle || !expandFolders)
@@ -188,7 +191,7 @@ namespace ddb {
 				return l.path < r.path;
 			});
 
-		
+
 		displayEntries(outputEntries, output, format);
 
 

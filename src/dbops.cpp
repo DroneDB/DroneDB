@@ -396,7 +396,7 @@ std::vector<Entry> getMatchingEntries(Database* db, const fs::path path, int max
 	const auto query = path.string();
 
     LOGD << "Query: " << query;
-    //std::cout << "Query: " << query << std::endl;
+    std::cout << "Query: " << query << std::endl;
 
     auto sanitized = sanitize_query_param(query);
 
@@ -404,11 +404,14 @@ std::vector<Entry> getMatchingEntries(Database* db, const fs::path path, int max
         sanitized = "%";
 	
 	LOGD << "Sanitized: " << sanitized;
+    std::cout << "Sanitized: " << sanitized << std::endl;
 
     if (isFolder) {
         sanitized += "//%";
 
         LOGD << "Folder: " << sanitized;
+        std::cout << "Folder: " << sanitized << std::endl;
+
     }
 
 	//std::cout << "Sanitized: " << sanitized << std::endl;
