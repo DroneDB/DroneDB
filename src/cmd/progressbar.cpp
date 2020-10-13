@@ -4,6 +4,7 @@
 #include <iomanip>
 #include "progressbar.h"
 
+#include <string>
 #include <algorithm>
 
 namespace cmd{

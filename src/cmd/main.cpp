@@ -4,7 +4,7 @@
 
 #include <iostream>
 
-#include "cmd/list.h"
+#include "cmd/cmdlist.h"
 #include "logger.h"
 #include "exceptions.h"
 #include "database.h"

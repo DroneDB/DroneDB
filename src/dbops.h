@@ -19,12 +19,13 @@ DDB_DLL fs::path rootDirectory(Database *db);
 DDB_DLL std::vector<fs::path> getIndexPathList(fs::path rootDirectory, const std::vector<std::string> &paths, bool includeDirs);
 DDB_DLL std::vector<fs::path> getPathList(const std::vector<std::string> &paths, bool includeDirs, int maxDepth);
 DDB_DLL std::vector<std::string> expandPathList(const std::vector<std::string> &paths, bool recursive, int maxRecursionDepth);
-DDB_DLL std::vector<Entry> getMatchingEntries(Database* db, const fs::path path);
+DDB_DLL std::vector<Entry> getMatchingEntries(Database* db, const fs::path path, int maxRecursionDepth = -1, bool isFolder = false);
 DDB_DLL int deleteFromIndex(Database* db, const std::string &query, bool isFolder = false);
 
 DDB_DLL bool checkUpdate(Entry &e, const fs::path &p, long long dbMtime, const std::string &dbHash);
 DDB_DLL void doUpdate(Statement *updateQ, const Entry &e);
 
+DDB_DLL void listIndex(Database* db, const std::vector<std::string> &paths, std::ostream& out, const std::string& format, bool recursive, int maxRecursionDepth);
 DDB_DLL void addToIndex(Database *db, const std::vector<std::string> &paths, AddCallback callback = nullptr);
 DDB_DLL void removeFromIndex(Database *db, const std::vector<std::string> &paths);
 DDB_DLL void syncIndex(Database *db);
