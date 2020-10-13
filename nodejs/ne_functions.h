@@ -7,6 +7,7 @@
 #include <nan.h>
 
 NAN_METHOD(getVersion);
+NAN_METHOD(getDefaultRegistry);
 NAN_METHOD(typeToHuman);
 NAN_METHOD(info);
 NAN_METHOD(_thumbs_getFromUserCache);

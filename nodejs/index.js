@@ -5,6 +5,7 @@ const n = require('bindings')('node-ddb.node');
 
 const ddb = {
     getVersion: n.getVersion,
+    getDefaultRegistry: n.getDefaultRegistry,
 
     thumbs: {
         supportedForType: function(entryType) {

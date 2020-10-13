@@ -4,6 +4,7 @@
 #include <sstream>
 #include "ne_functions.h"
 #include "ne_helpers.h"
+#include "constants.h"
 #include "ddb.h"
 #include "dbops.h"
 #include "info.h"
@@ -13,6 +14,10 @@
 
 NAN_METHOD(getVersion) {
     info.GetReturnValue().Set(Nan::New(DDBGetVersion()).ToLocalChecked());
+}
+
+NAN_METHOD(getDefaultRegistry){
+    info.GetReturnValue().Set(Nan::New(DEFAULT_REGISTRY).ToLocalChecked());
 }
 
 NAN_METHOD(typeToHuman) {

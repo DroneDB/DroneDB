@@ -13,7 +13,8 @@ using v8::FunctionTemplate;
 // C++ constructs that are exposed to javascript are exported here
 
 NAN_MODULE_INIT(InitAll) {
-	NAN_EXPORT(target, getVersion);
+    NAN_EXPORT(target, getVersion);
+    NAN_EXPORT(target, getDefaultRegistry);
 	NAN_EXPORT(target, typeToHuman);
     NAN_EXPORT(target, info);
 	NAN_EXPORT(target, _thumbs_getFromUserCache);

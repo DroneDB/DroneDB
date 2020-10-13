@@ -12,6 +12,11 @@ describe('functions', function() {
     assert(ddb.getVersion().length > 0);
   });
 
+  it('should export a getDefaultRegistry() method', function() {
+    assert.equal(typeof ddb.getDefaultRegistry(), "string");
+    assert(ddb.getDefaultRegistry().length > 0);
+  });
+
   it('should export a info() method', function() {
     assert.equal(typeof ddb.info, "function");
   });
