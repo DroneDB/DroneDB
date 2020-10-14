@@ -13,7 +13,7 @@
 
 namespace ddb::net{
 
-typedef std::function<bool(float progress)> RequestCallback;
+typedef std::function<bool(size_t txBytes, size_t totalBytes)> RequestCallback;
 
 struct RequestProgress {
   curl_off_t lastRuntime;

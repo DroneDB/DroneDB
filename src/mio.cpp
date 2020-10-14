@@ -138,8 +138,9 @@ Path Path::relativeTo(const fs::path &parent){
     }
 
     fs::path relPath = relative(weakly_canonical(absolute(p)), weakly_canonical(absolute(parent)));
-    if (relPath.generic_string() == ".") 
+    if (relPath.generic_string() == "."){
         return weakly_canonical(absolute(parent));
+    }
 
 	return relPath;
 }
@@ -272,6 +273,55 @@ std::string bytesToHuman(std::uintmax_t bytes){
     }
 
     return os.str();
+}
+
+fs::path commonDirPath(const std::vector<fs::path> &paths){
+    if (paths.size() == 0) return fs::path("");
+
+    // Find smallest path (by number of components)
+    fs::path smallest;
+    size_t maxComponents = INT_MAX;
+
+    for (auto &p : paths){
+        size_t count = componentsCount(p);
+        if (count < maxComponents){
+            smallest = p;
+            maxComponents = count;
+        }
+    }
+    size_t matchingComponents = 0;
+
+    while(maxComponents > 0){
+        for (size_t i = matchingComponents; i < maxComponents; i++){
+            for (auto it = paths.begin() + 1; it != paths.end(); it++){
+                if (std::next(it->begin(), i)->string() != std::next(smallest.begin(), i)->string()){
+                    smallest = smallest.parent_path();
+                    maxComponents--;
+                    goto breakout; // Break out of two loops. https://xkcd.com/292/
+                }
+            }
+            matchingComponents = i;
+        }
+
+        // We're done
+        break;
+
+        breakout:;
+    }
+
+
+    fs::path result;
+    for (size_t i = 0; i < maxComponents; i++){
+        result = result / *std::next(smallest.begin(), i);
+    }
+
+    return result;
+}
+
+size_t componentsCount(const fs::path &p){
+    size_t result = 0;
+    for (auto it = p.begin(); it != p.end(); it++) result++;
+    return result;
 }
 
 }

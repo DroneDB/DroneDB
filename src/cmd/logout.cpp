@@ -14,18 +14,18 @@ void Logout::setOptions(cxxopts::Options &opts) {
     .positional_help("[args]")
     .custom_help("logout")
     .add_options()
-    ("host", "Registry host to authenticate to", cxxopts::value<std::string>()->default_value(DEFAULT_REGISTRY));
+    ("server", "Registry server to logout from", cxxopts::value<std::string>()->default_value(DEFAULT_REGISTRY));
 
-    opts.parse_positional({"host"});
+    opts.parse_positional({"server"});
 }
 
 std::string Logout::description() {
-    return "Logout from all registries. To logout from a single registry, use the --host option.";
+    return "Logout from all registries. To logout from a single registry, use the --server option.";
 }
 
 void Logout::run(cxxopts::ParseResult &opts) {
-    if (opts["host"].count() > 0){
-        ddb::Registry reg(opts["host"].as<std::string>());
+    if (opts["server"].count() > 0){
+        ddb::Registry reg(opts["server"].as<std::string>());
         if (reg.logout()){
             std::cout << "Logged out from " << reg.getUrl() << std::endl;
         }

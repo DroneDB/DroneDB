@@ -5,6 +5,7 @@
 #include <sstream>
 #include "ddb.h"
 #include "ne_dbops.h"
+#include "ne_helpers.h"
 
 class InitWorker : public Nan::AsyncWorker {
  public:
@@ -40,23 +41,11 @@ class InitWorker : public Nan::AsyncWorker {
 
 
 NAN_METHOD(init) {
-    if (info.Length() != 2){
-        Nan::ThrowError("Invalid number of arguments");
-        return;
-    }
-    if (!info[0]->IsString()){
-        Nan::ThrowError("Argument 0 must be a string");
-        return;
-    }
-    if (!info[1]->IsFunction()){
-        Nan::ThrowError("Argument 1 must be a function");
-        return;
-    }
+    ASSERT_NUM_PARAMS(2);
 
-    std::string directory = *Nan::Utf8String(info[0].As<v8::String>());
+    BIND_STRING_PARAM(directory, 0);
+    BIND_FUNCTION_PARAM(callback, 1);
 
-    // Execute
-    Nan::Callback *callback = new Nan::Callback(Nan::To<v8::Function>(info[1]).ToLocalChecked());
     Nan::AsyncQueueWorker(new InitWorker(callback, directory));
 }
 
@@ -99,49 +88,16 @@ class AddWorker : public Nan::AsyncWorker {
 
 
 NAN_METHOD(add) {
-    if (info.Length() != 4){
-        Nan::ThrowError("Invalid number of arguments");
-        return;
-    }
-    if (!info[0]->IsString()){
-        Nan::ThrowError("Argument 0 must be a string");
-        return;
-    }
-    if (!info[1]->IsArray()){
-        Nan::ThrowError("Argument 1 must be an array");
-        return;
-    }
-    if (!info[2]->IsObject()){
-        Nan::ThrowError("Argument 2 must be an object");
-        return;
-    }
-    if (!info[3]->IsFunction()){
-        Nan::ThrowError("Argument 3 must be a function");
-        return;
-    }
+    ASSERT_NUM_PARAMS(4);
 
-    std::string ddbPath = *Nan::Utf8String(info[0].As<v8::String>());
+    BIND_STRING_PARAM(ddbPath, 0);
+    BIND_STRING_ARRAY_PARAM(paths, 1);
 
-    // v8 array --> c++ std vector
-    auto p = info[1].As<v8::Array>();
-    auto ctx = info.GetIsolate()->GetCurrentContext();
-    std::vector<std::string> paths;
-    for (unsigned int i = 0; i < p->Length(); i++){
-        Nan::Utf8String str(p->Get(ctx, i).ToLocalChecked());
-        paths.push_back(std::string(*str));
-    }
+    BIND_OBJECT_PARAM(obj, 2);
+    BIND_OBJECT_VAR(obj, bool, recursive, false);
 
-    // Parse options
-    v8::Local<v8::String> k = Nan::New<v8::String>("recursive").ToLocalChecked();
-    v8::Local<v8::Object> obj = info[2].As<v8::Object>();
+    BIND_FUNCTION_PARAM(callback, 3);
 
-    bool recursive = false;
-    if (Nan::HasRealNamedProperty(obj, k).FromJust()){
-        recursive = Nan::To<bool>(Nan::GetRealNamedProperty(obj, k).ToLocalChecked()).FromJust();
-    }
-
-    // Execute
-    Nan::Callback *callback = new Nan::Callback(Nan::To<v8::Function>(info[3]).ToLocalChecked());
     Nan::AsyncQueueWorker(new AddWorker(callback, ddbPath, paths, recursive));
 }
 
@@ -179,43 +135,16 @@ class RemoveWorker : public Nan::AsyncWorker {
 
 
 NAN_METHOD(remove) {
-    if (info.Length() != 4){
-        Nan::ThrowError("Invalid number of arguments");
-        return;
-    }
-    if (!info[0]->IsString()){
-        Nan::ThrowError("Argument 0 must be a string");
-        return;
-    }
-    if (!info[1]->IsArray()){
-        Nan::ThrowError("Argument 1 must be an array");
-        return;
-    }
-    if (!info[2]->IsObject()){
-        Nan::ThrowError("Argument 2 must be an object");
-        return;
-    }
-    if (!info[3]->IsFunction()){
-        Nan::ThrowError("Argument 3 must be a function");
-        return;
-    }
+    ASSERT_NUM_PARAMS(4);
 
-    std::string ddbPath = *Nan::Utf8String(info[0].As<v8::String>());
+    BIND_STRING_PARAM(ddbPath, 0);
+    BIND_STRING_ARRAY_PARAM(paths, 1);
 
-    // v8 array --> c++ std vector
-    auto p = info[1].As<v8::Array>();
-    auto ctx = info.GetIsolate()->GetCurrentContext();
-    std::vector<std::string> paths;
-    for (unsigned int i = 0; i < p->Length(); i++){
-        Nan::Utf8String str(p->Get(ctx, i).ToLocalChecked());
-        paths.push_back(std::string(*str));
-    }
+    // TODO: this is not needed?
+    //BIND_OBJECT_PARAM(obj, 2);
 
-    // Parse options    
-    v8::Local<v8::Object> obj = info[2].As<v8::Object>();    
+    BIND_FUNCTION_PARAM(callback, 3);
 
-    // Execute
-    Nan::Callback *callback = new Nan::Callback(Nan::To<v8::Function>(info[3]).ToLocalChecked());
     Nan::AsyncQueueWorker(new RemoveWorker(callback, ddbPath, paths));
 }
 
@@ -262,54 +191,14 @@ class ListWorker : public Nan::AsyncWorker {
 };
 
 NAN_METHOD(list) {
-    if (info.Length() != 4){
-        Nan::ThrowError("Invalid number of arguments");
-        return;
-    }
-    if (!info[0]->IsString()){
-        Nan::ThrowError("Argument 0 must be a string");
-        return;
-    }
-    if (!info[1]->IsArray()){
-        Nan::ThrowError("Argument 1 must be an array");
-        return;
-    }
-    if (!info[2]->IsObject()){
-        Nan::ThrowError("Argument 2 must be a an object");
-        return;
-    }
-    if (!info[3]->IsFunction()){
-        Nan::ThrowError("Argument 3 must be a function");
-        return;
-    }
+    ASSERT_NUM_PARAMS(4);
 
-    std::string ddbPath = *Nan::Utf8String(info[0].As<v8::String>());
+    BIND_STRING_PARAM(ddbPath, 0);
+    BIND_STRING_ARRAY_PARAM(in, 1);
+    BIND_OBJECT_PARAM(obj, 2);
+    BIND_OBJECT_VAR(obj, bool, recursive, false);
+    BIND_OBJECT_VAR(obj, int, maxRecursionDepth, 0);
+    BIND_FUNCTION_PARAM(callback, 3);
 
-    // v8 array --> c++ std vector
-    auto paths = info[1].As<v8::Array>();
-    auto ctx = info.GetIsolate()->GetCurrentContext();
-    std::vector<std::string> in;
-    for (unsigned int i = 0; i < paths->Length(); i++){
-        Nan::Utf8String str(paths->Get(ctx, i).ToLocalChecked());
-        in.push_back(std::string(*str));
-    }
-
-    // Parse options
-    v8::Local<v8::Object> obj = info[2].As<v8::Object>();
-
-    bool recursive = false;
-    v8::Local<v8::String> k = Nan::New<v8::String>("recursive").ToLocalChecked();
-    if (Nan::HasRealNamedProperty(obj, k).FromJust()){
-        recursive = Nan::To<bool>(Nan::GetRealNamedProperty(obj, k).ToLocalChecked()).FromJust();
-    }
-
-    int maxRecursionDepth = 0;
-    k = Nan::New<v8::String>("maxRecursionDepth").ToLocalChecked();
-    if (Nan::HasRealNamedProperty(obj, k).FromJust()){
-        maxRecursionDepth = Nan::To<int>(Nan::GetRealNamedProperty(obj, k).ToLocalChecked()).FromJust();
-    }
-
-    // Execute
-    Nan::Callback *callback = new Nan::Callback(Nan::To<v8::Function>(info[3]).ToLocalChecked());
     Nan::AsyncQueueWorker(new ListWorker(callback, ddbPath, in, recursive, maxRecursionDepth));
 }
