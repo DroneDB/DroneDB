@@ -96,5 +96,9 @@ void string_replace(std::string& str, const std::string& from, const std::string
     }
 }
 
+void sleep(int msecs){
+    std::this_thread::sleep_for(std::chrono::milliseconds(msecs));
+}
+
 }
 }
