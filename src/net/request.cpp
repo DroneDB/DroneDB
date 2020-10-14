@@ -175,14 +175,14 @@ static int xferinfo(void *p,
 
 //  if((curTime - progress->lastRuntime) >= 10000) {
 //    progress->lastRuntime = curTime;
+  size_t totalBytes = dltotal + ultotal;
+  size_t txBytes = dlnow + ulnow;
 
-  float progValue = dltotal + ultotal > 0 ?
-                      static_cast<float>(dlnow + ulnow) / static_cast<float>(dltotal + ultotal) :
-                    0.0f;
-
-  if (!(*progress->cb)(progValue * 100.0f)){
-      // Handle cancel
-      return 1;
+  if (totalBytes > 0){
+      if (!(*progress->cb)(txBytes, totalBytes)){
+          // Handle cancel
+          return 1;
+      }
   }
 
 //}
@@ -216,10 +216,6 @@ void Request::perform(Response &res){
     }
 
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &res.statusCode);
-
-    if (cb != nullptr){
-        cb(100.0);
-    }
 }
 
 }

@@ -5,6 +5,7 @@ const n = require('bindings')('node-ddb.node');
 
 const ddb = {
     getVersion: n.getVersion,
+    getDefaultRegistry: n.getDefaultRegistry,
 
     thumbs: {
         supportedForType: function(entryType) {
@@ -101,6 +102,25 @@ const ddb = {
             n.remove(ddbPath, paths, options, err => {
                 if (err) reject(err);
                 else resolve(true);
+            });
+        });
+    },
+
+    share: async function(paths, tag, options = {}, progress = () => true){
+        return new Promise((resolve, reject) => {
+            if (typeof paths === "string") paths = [paths];
+            n.share(paths, tag, options, progress, (err, url) => {
+                if (err) reject(err);
+                else resolve(url);
+            });
+        });
+    },
+
+    login: async function(username, password, server = ""){
+        return new Promise((resolve, reject) => {
+            n.login(username, password, server, (err, token) => {
+                if (err) reject(err);
+                else resolve(token);
             });
         });
     }

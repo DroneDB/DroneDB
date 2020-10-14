@@ -3,6 +3,8 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "ne_functions.h"
 #include "ne_dbops.h"
+#include "ne_share.h"
+#include "ne_login.h"
 #include "ddb.h"
 
 using v8::FunctionTemplate;
@@ -11,7 +13,8 @@ using v8::FunctionTemplate;
 // C++ constructs that are exposed to javascript are exported here
 
 NAN_MODULE_INIT(InitAll) {
-	NAN_EXPORT(target, getVersion);
+    NAN_EXPORT(target, getVersion);
+    NAN_EXPORT(target, getDefaultRegistry);
 	NAN_EXPORT(target, typeToHuman);
     NAN_EXPORT(target, info);
 	NAN_EXPORT(target, _thumbs_getFromUserCache);
@@ -19,7 +22,9 @@ NAN_MODULE_INIT(InitAll) {
     NAN_EXPORT(target, init);
     NAN_EXPORT(target, add);
     NAN_EXPORT(target, remove);
+    NAN_EXPORT(target, share);
     NAN_EXPORT(target, list);
+    NAN_EXPORT(target, login);
 
 	DDBRegisterProcess();
 }

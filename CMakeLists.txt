@@ -10,8 +10,22 @@ project(ddb)
 file(READ "package.json" PACKAGE_JSON)
 string(REGEX MATCH "\"version\": \"[0-9]+\\.[0-9]+\\.[0-9]+" APP_VERSION ${PACKAGE_JSON})
 string(SUBSTRING ${APP_VERSION} 12 -1 APP_VERSION)
-message("DDB Version: ${APP_VERSION}")
-add_compile_options("-DAPP_VERSION=\"${APP_VERSION}\"")
+
+# Read git commit
+set(GIT_REV "")
+execute_process(COMMAND git rev-parse --short HEAD
+                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}" 
+                OUTPUT_VARIABLE GIT_REV 
+                ERROR_QUIET)
+string(REGEX REPLACE "\n$" "" GIT_REV "${GIT_REV}")
+if (NOT "${GIT_REV}" STREQUAL "")
+    set(DAPP_VERSION "${APP_VERSION} (git commit ${GIT_REV})")
+else()
+    set(DAPP_VERSION "${APP_VERSION}")
+endif()
+
+message("DDB Version: ${DAPP_VERSION}")
+add_compile_options("-DAPP_VERSION=\"${DAPP_VERSION}\"")
 
 # Disable MS warnings
 if (WIN32)

@@ -43,18 +43,46 @@ std::string ShareService::share(const std::vector<std::string> &input, const std
 
     // TODO: multithreaded share/upload
 
-    io::Path wd = io::Path(fs::path(cwd));
+    // Calculate cwd from paths or use the one provided?
+    io::Path wd;
+    if (cwd.empty()){
+        std::vector<fs::path> paths(input.begin(), input.end());
+        fs::path commonDir = io::commonDirPath(paths);
+        if (commonDir.empty()) throw InvalidArgsException("Cannot share files that don't have a common directory (are you trying to share files from different drives?)");
+        wd = io::Path(commonDir);
+    }else{
+        wd = io::Path(fs::path(cwd));
+    }
+
+    std::vector<ShareFileProgress *> files;
+    ShareFileProgress sfp;
+    files.push_back(&sfp);
+
+    // Calculate total size
+    size_t gTotalBytes = 0;
+    size_t gTxBytes = 0;
 
     for (auto &fp : filePaths){
+        gTotalBytes += io::Path(fp).getSize();
+    }
+
+    // Upload
+    for (auto &fp : filePaths){
         io::Path p = io::Path(fp);
+
+        std::string sha256 = Hash::fileSHA256(fp.string());
+        std::string filename = fp.filename().string();
+        size_t filesize = p.getSize();
+
+        sfp.filename = filename;
+        sfp.totalBytes = filesize;
+        sfp.txBytes = 0;
+
         if (p.isAbsolute() && !wd.isParentOf(p.get())){
             p = p.withoutRoot();
         }else{
             p = p.relativeTo(wd.get());
         }
-
-        std::string sha256 = Hash::fileSHA256(fp.string());
-        std::string filename = fp.filename().string();
 
         LOGD << "Uploading " << p.string();
 
@@ -62,9 +90,19 @@ std::string ShareService::share(const std::vector<std::string> &input, const std
                 .multiPartFormData({"file", fp.string()},
                                    {"path", p.generic()})
                 .authToken(authToken)
-                .progressCb([&cb, &filename](float progress){
+                .progressCb([&cb, &files, &sfp, &filesize, &gTotalBytes, &gTxBytes](size_t txBytes, size_t totalBytes){
                     if (cb == nullptr) return true;
-                    else return cb(filename, progress);
+                    else{
+                        // We cap the txBytes from CURL since it
+                        // includes data transferred from the request
+
+                        // CAUTION: this will require a lock if you use threads
+
+                        gTxBytes -= sfp.txBytes;
+                        sfp.txBytes = std::min(filesize, txBytes);
+                        gTxBytes += sfp.txBytes;
+                        return cb(files, gTxBytes, gTotalBytes);
+                    }
                 })
                 //.maximumUploadSpeed(1024*1024)
                 .send();
