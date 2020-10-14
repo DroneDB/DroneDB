@@ -47,7 +47,7 @@ namespace cmd {
 			const auto depthOpt = opts["depth"];
 			
 			// Take into consideration maxRecursionDepth only if the recursive flag is set and the option exists
-			const auto maxRecursionDepth = recursive ? ( depthOpt.count() > 0 ? depthOpt.as<int>() : -1) : -1;
+			const auto maxRecursionDepth = recursive ? ( depthOpt.count() > 0 ? depthOpt.as<int>() : 0) : 0;
 			
 			const auto db = ddb::open(std::string(ddbPath), true);
 
