@@ -104,5 +104,27 @@ namespace DDB.Bindings
             return JsonConvert.DeserializeObject<List<Entry>>(json); 
 
         }
+
+        [DllImport("ddb", EntryPoint = "DDBList")]
+        static extern DDBError _List([MarshalAs(UnmanagedType.LPArray, ArraySubType = UnmanagedType.LPStr)] string[] paths,
+                                   int numPaths,
+                                   out IntPtr output,
+                                   [MarshalAs(UnmanagedType.LPStr)] string format, 
+                                   bool recursive,
+                                   int maxRecursionDepth = 0);
+
+        public static List<Entry> List(string[] paths, bool recursive = false, int maxRecursionDepth = 0)
+        {
+            if (_List(paths, paths.Length, out var output, "json", recursive, maxRecursionDepth) !=
+                DDBError.DDBERR_NONE) throw new DDBException(GetLastError());
+
+            var json = Marshal.PtrToStringAnsi(output);
+
+            if (json == null)
+                throw new DDBException("Unable get list");
+
+            return JsonConvert.DeserializeObject<List<Entry>>(json); 
+
+        }
     }
 }

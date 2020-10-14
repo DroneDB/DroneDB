@@ -324,10 +324,9 @@ void removeFromIndex(Database *db, const std::vector<std::string> &paths) {
 }
 
 
-std::string sanitize_query_param(std::string str)
+std::string sanitize_query_param(const std::string& str)
 {
-
-    auto res(str);
+	std::string res(str);
 
 	// TAKES INTO ACCOUNT PATHS THAT CONTAINS EVERY SORT OF STUFF
     utils::string_replace(res, "/", "//");
@@ -340,7 +339,7 @@ std::string sanitize_query_param(std::string str)
     return res;
 
 }
-
+	
 int deleteFromIndex(Database* db, const std::string &query, bool isFolder)
 {
 
@@ -380,10 +379,6 @@ int deleteFromIndex(Database* db, const std::string &query, bool isFolder)
         q->bind(1, str);
         q->execute();
 
-        //if (db->changes() >= 1) {
-        //    std::cout << "D\t" << str << std::endl;
-        //}
-
         q->reset();
     } 
 
@@ -391,17 +386,36 @@ int deleteFromIndex(Database* db, const std::string &query, bool isFolder)
 }
 
 	
-std::vector<Entry> getMatchingEntries(Database* db, const fs::path path) {
+std::vector<Entry> getMatchingEntries(Database* db, const fs::path path, int maxRecursionDepth, bool isFolder) {
 
+	// -1 is ALL_DEPTHS
+	if (maxRecursionDepth < -1)
+        throw FSException("Max recursion depth cannot be negative");
+	
 	const auto query = path.string();
 
     LOGD << "Query: " << query;
 
-    const auto sanitized = sanitize_query_param(query);
+    auto sanitized = sanitize_query_param(query);
 
-    LOGD << "Sanitized: " << sanitized;
+    if (sanitized.length() == 0)
+        sanitized = "%";
+	
+	LOGD << "Sanitized: " << sanitized;
 
-    auto q = db->query("SELECT * FROM entries WHERE path LIKE ? ESCAPE '/'");
+    if (isFolder) {
+        sanitized += "//%";
+
+        LOGD << "Folder: " << sanitized;
+
+    }
+
+    std::string sql = "SELECT * FROM entries WHERE path LIKE ? ESCAPE '/'";
+
+    if (maxRecursionDepth != -1)
+        sql += " AND depth <= " + std::to_string(maxRecursionDepth);
+	
+    auto q = db->query(sql);
     	
     std::vector<Entry> entries;
 
