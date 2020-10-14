@@ -111,7 +111,7 @@ std::string ShareService::share(const std::vector<std::string> &input, const std
                                 return cb(files, gTxBytes, gTotalBytes);
                             }
                         })
-                        .maximumUploadSpeed(1024*1024)
+                        //.maximumUploadSpeed(1024*1024)
                         .send();
 
                 // Token expired?
