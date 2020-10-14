@@ -7,9 +7,9 @@
     <SignAssembly>false</SignAssembly>
     <PackageLicenseExpression>MPL-2.0</PackageLicenseExpression>
     <Description>DroneDB native bindings</Description>
-    <AssemblyVersion>1.0.2.0</AssemblyVersion>
-    <FileVersion>1.0.2.0</FileVersion>
-    <Version>1.0.2</Version>
+    <AssemblyVersion>1.0.3.0</AssemblyVersion>
+    <FileVersion>1.0.3.0</FileVersion>
+    <Version>1.0.3</Version>
     <RepositoryUrl>https://github.com/DroneDB/DroneDB</RepositoryUrl>
     <PackageProjectUrl>https://github.com/DroneDB/DroneDB</PackageProjectUrl>
   </PropertyGroup>
