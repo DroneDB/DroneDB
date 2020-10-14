@@ -129,7 +129,7 @@ std::string ShareService::share(const std::vector<std::string> &input, const std
                                                                 sha256 + ", got: " + j["hash"].get<std::string>() + ". Try again.");
                 break; // Done
             }catch(const NetException &e){
-                if (retryNum++ >= MAX_RETRIES) throw e;
+                if (++retryNum >= MAX_RETRIES) throw e;
                 else{
                     LOGD << e.what() << ", retrying upload of " << filename << " (attempt " << retryNum << ")";
                     utils::sleep(1000 * retryNum);
@@ -159,7 +159,7 @@ std::string ShareService::share(const std::vector<std::string> &input, const std
 
             return reg.getUrl(j["url"]); // Done
         }catch(const NetException &e){
-            if (retryNum++ >= MAX_RETRIES) throw e;
+            if (++retryNum >= MAX_RETRIES) throw e;
             else{
                 LOGD << e.what() << ", retrying commit (attempt " << retryNum << ")";
                 utils::sleep(1000 * retryNum);
