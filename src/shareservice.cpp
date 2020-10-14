@@ -7,6 +7,7 @@
 #include "fs.h"
 #include "mio.h"
 #include "dbops.h"
+#include "utils.h"
 #include "userprofile.h"
 
 namespace ddb{
@@ -67,6 +68,8 @@ std::string ShareService::share(const std::vector<std::string> &input, const std
     }
 
     // Upload
+    const int MAX_RETRIES = 10;
+
     for (auto &fp : filePaths){
         io::Path p = io::Path(fp);
 
@@ -86,47 +89,83 @@ std::string ShareService::share(const std::vector<std::string> &input, const std
 
         LOGD << "Uploading " << p.string();
 
-        net::Response res = net::POST(reg.getUrl("/share/upload/" + batchToken))
-                .multiPartFormData({"file", fp.string()},
-                                   {"path", p.generic()})
-                .authToken(authToken)
-                .progressCb([&cb, &files, &sfp, &filesize, &gTotalBytes, &gTxBytes](size_t txBytes, size_t totalBytes){
-                    if (cb == nullptr) return true;
-                    else{
-                        // We cap the txBytes from CURL since it
-                        // includes data transferred from the request
+        int retryNum = 0;
 
-                        // CAUTION: this will require a lock if you use threads
+        while(true){
+            try{
+                net::Response res = net::POST(reg.getUrl("/share/upload/" + batchToken))
+                        .multiPartFormData({"file", fp.string()},
+                                           {"path", p.generic()})
+                        .authToken(authToken)
+                        .progressCb([&cb, &files, &sfp, &filesize, &gTotalBytes, &gTxBytes](size_t txBytes, size_t totalBytes){
+                            if (cb == nullptr) return true;
+                            else{
+                                // We cap the txBytes from CURL since it
+                                // includes data transferred from the request
 
-                        gTxBytes -= sfp.txBytes;
-                        sfp.txBytes = std::min(filesize, txBytes);
-                        gTxBytes += sfp.txBytes;
-                        return cb(files, gTxBytes, gTotalBytes);
-                    }
-                })
-                //.maximumUploadSpeed(1024*1024)
-                .send();
+                                // CAUTION: this will require a lock if you use threads
 
-        if (res.status() != 200) handleError(res);
+                                gTxBytes -= sfp.txBytes;
+                                sfp.txBytes = std::min(filesize, txBytes);
+                                gTxBytes += sfp.txBytes;
+                                return cb(files, gTxBytes, gTotalBytes);
+                            }
+                        })
+                        .maximumUploadSpeed(1024*1024)
+                        .send();
 
-        // TODO: handle retries
+                // Token expired?
+                if (res.status() == 401){
+                    LOGD << "Token expired";
+                    authToken = reg.login(ac.username, ac.password);
+                    throw NetException("Unauthorized");
+                }
 
-        json j = res.getJSON();
-        if (!j.contains("hash")) handleError(res);
-        if (sha256 != j["hash"]) throw NetException(filename + " file got corrupted during upload (hash mismatch, expected: " +
-                                                    sha256 + ", got: " + j["hash"].get<std::string>() + ". Try again.");
+                if (res.status() != 200) handleError(res);
+
+                json j = res.getJSON();
+                if (!j.contains("hash")) handleError(res);
+                if (sha256 != j["hash"]) throw NetException(filename + " file got corrupted during upload (hash mismatch, expected: " +
+                                                                sha256 + ", got: " + j["hash"].get<std::string>() + ". Try again.");
+                break; // Done
+            }catch(const NetException &e){
+                if (retryNum++ >= MAX_RETRIES) throw e;
+                else{
+                    LOGD << e.what() << ", retrying upload of " << filename << " (attempt " << retryNum << ")";
+                    utils::sleep(1000 * retryNum);
+                }
+            }
+        }
     }
 
     // Commit
-    res = net::POST(reg.getUrl("/share/commit/" + batchToken))
-            .authToken(authToken)
-            .send();
-    if (res.status() != 200) handleError(res);
+    int retryNum = 0;
+    while (true){
+        try{
+            res = net::POST(reg.getUrl("/share/commit/" + batchToken))
+                    .authToken(authToken)
+                    .send();
 
-    j = res.getJSON();
-    if (!j.contains("url")) handleError(res);
+            if (res.status() == 401){
+                LOGD << "Token expired";
+                authToken = reg.login(ac.username, ac.password);
+                throw NetException("Unauthorized");
+            }
 
-    return reg.getUrl(j["url"]);
+            if (res.status() != 200) handleError(res);
+
+            j = res.getJSON();
+            if (!j.contains("url")) handleError(res);
+
+            return reg.getUrl(j["url"]); // Done
+        }catch(const NetException &e){
+            if (retryNum++ >= MAX_RETRIES) throw e;
+            else{
+                LOGD << e.what() << ", retrying commit (attempt " << retryNum << ")";
+                utils::sleep(1000 * retryNum);
+            }
+        }
+    }
 }
 
 void ShareService::handleError(net::Response &res){
