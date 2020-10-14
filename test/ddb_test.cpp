@@ -346,7 +346,7 @@ TEST(listIndex, fileExact) {
 
 }
 
-TEST(listIndex, fileWildcard) {
+TEST(listIndex, allFileWildcard) {
     TestArea ta(TEST_NAME);
 
     const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", "dbase.sqlite");
@@ -370,7 +370,8 @@ TEST(listIndex, fileWildcard) {
     listIndex(&db, toList, out, "text", false, -1);
 
     std::cout << out.str() << std::endl;
-    EXPECT_EQ(out.str(), "1JI_0064.JPG\n1JI_0065.JPG\npics\npics.JPG\npics2\n");
+    
+    EXPECT_EQ(out.str(), "1JI_0064.JPG\n1JI_0065.JPG\npics\npics.JPG\npics/IMG_20160826_181302.jpg\npics/IMG_20160826_181305.jpg\npics/IMG_20160826_181309.jpg\npics/IMG_20160826_181314.jpg\npics/IMG_20160826_181317.jpg\npics/pics2\npics2\npics2/IMG_20160826_181305.jpg\npics2/IMG_20160826_181309.jpg\npics2/pics\n");
 
     db.close();
 

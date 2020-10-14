@@ -324,10 +324,9 @@ void removeFromIndex(Database *db, const std::vector<std::string> &paths) {
 }
 
 
-std::string sanitize_query_param(std::string str)
+std::string sanitize_query_param(const std::string& str)
 {
-
-    auto res(str);
+	std::string res(str);
 
 	// TAKES INTO ACCOUNT PATHS THAT CONTAINS EVERY SORT OF STUFF
     utils::string_replace(res, "/", "//");
@@ -396,19 +395,20 @@ std::vector<Entry> getMatchingEntries(Database* db, const fs::path path, int max
 	const auto query = path.string();
 
     LOGD << "Query: " << query;
-    //std::cout << "Query: " << query << std::endl;
 
     auto sanitized = sanitize_query_param(query);
 
+    if (sanitized.length() == 0)
+        sanitized = "%";
+	
 	LOGD << "Sanitized: " << sanitized;
 
     if (isFolder) {
         sanitized += "//%";
 
         LOGD << "Folder: " << sanitized;
-    }
 
-	//std::cout << "Sanitized: " << sanitized << std::endl;
+    }
 
     std::string sql = "SELECT * FROM entries WHERE path LIKE ? ESCAPE '/'";
 
