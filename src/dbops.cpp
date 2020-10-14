@@ -388,8 +388,8 @@ int deleteFromIndex(Database* db, const std::string &query, bool isFolder)
 	
 std::vector<Entry> getMatchingEntries(Database* db, const fs::path path, int maxRecursionDepth, bool isFolder) {
 
-	// -1 is ALL_DEPTHS
-	if (maxRecursionDepth < -1)
+	// 0 is ALL_DEPTHS
+	if (maxRecursionDepth < 0)
         throw FSException("Max recursion depth cannot be negative");
 	
 	const auto query = path.string();
@@ -412,8 +412,8 @@ std::vector<Entry> getMatchingEntries(Database* db, const fs::path path, int max
 
     std::string sql = "SELECT * FROM entries WHERE path LIKE ? ESCAPE '/'";
 
-    if (maxRecursionDepth != -1)
-        sql += " AND depth <= " + std::to_string(maxRecursionDepth);
+    if (maxRecursionDepth > 0)
+        sql += " AND depth <= " + std::to_string(maxRecursionDepth - 1);
 	
     auto q = db->query(sql);
     	
