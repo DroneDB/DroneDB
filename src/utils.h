@@ -8,6 +8,7 @@
 #include <memory>
 #include <iostream>
 #include <chrono>
+#include <thread>
 #include <algorithm>
 #include <sstream>
 #include <cstdio>
@@ -126,6 +127,7 @@ time_t currentUnixTimestamp();
 // https://stackoverflow.com/questions/3418231/replace-part-of-a-string-with-another-string
 void string_replace(std::string& str, const std::string& from, const std::string& to);
 
+void sleep(int msecs);
 
 // Fix for removing macros
 #undef max

@@ -91,7 +91,7 @@ namespace ddb {
 
 			LOGD << "Depth: " << depth;
 
-			std::vector<Entry> matches = getMatchingEntries(db, relPath.generic(), depth);
+			std::vector<Entry> matches = getMatchingEntries(db, relPath.generic(), depth + 1);
 
 			baseEntries.insert(baseEntries.end(), matches.begin(), matches.end());
 
@@ -159,7 +159,6 @@ namespace ddb {
 
 		std::vector<Entry> outputEntries;
 
-		// Display files first
 		for (const Entry& entry : baseEntries) {
 			if (entry.type != Directory)
 				outputEntries.emplace_back(Entry(entry));
@@ -172,7 +171,7 @@ namespace ddb {
 					/*if (format == "text" && !isSingle && !recursive)
 						output << std::endl << entry.path << ":" << std::endl;*/
 
-					const auto depth = recursive ? maxRecursionDepth : entry.depth + 1;
+					const auto depth = recursive ? maxRecursionDepth : entry.depth + 2;
 
 					std::vector<Entry> entries = getMatchingEntries(db, entry.path, depth, true);
 
