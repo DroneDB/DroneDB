@@ -324,10 +324,9 @@ void removeFromIndex(Database *db, const std::vector<std::string> &paths) {
 }
 
 
-std::string sanitize_query_param(std::string str)
+std::string sanitize_query_param(const std::string& str)
 {
-
-    auto res(str);
+	std::string res(str);
 
 	// TAKES INTO ACCOUNT PATHS THAT CONTAINS EVERY SORT OF STUFF
     utils::string_replace(res, "/", "//");

@@ -142,7 +142,7 @@ namespace ddb {
 			// otherwise we should reset to root folder
 			// I.E: \home\tmp\ddb ls -w \home\img
 
-			pathList.emplace_back(root.isParentOf(fs::current_path()) ? io::Path(currentPath).generic() : directory);
+			pathList.emplace_back(root.isParentOf(fs::current_path()) ? io::Path(currentPath).generic() : directory.string());
 
 		}
 		else
