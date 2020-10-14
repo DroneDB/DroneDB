@@ -337,7 +337,7 @@ TEST(listIndex, fileExact) {
 
     std::ostringstream out; 
 
-    listIndex(&db, toList, out, "text", false, -1);
+    listIndex(&db, toList, out, "text");
 
     std::cout << out.str() << std::endl;
     EXPECT_EQ(out.str(), "1JI_0065.JPG\n");
@@ -367,7 +367,7 @@ TEST(listIndex, allFileWildcard) {
 
     std::ostringstream out; 
 
-    listIndex(&db, toList, out, "text", false, -1);
+    listIndex(&db, toList, out, "text");
 
     std::cout << out.str() << std::endl;
     
@@ -399,7 +399,7 @@ TEST(listIndex, rootPath) {
    
     std::ostringstream out; 
 
-    listIndex(&db, toList, out, "text", false, -1);
+    listIndex(&db, toList, out, "text");
 
     std::cout << out.str() << std::endl;
     EXPECT_EQ(out.str(), "1JI_0064.JPG\n1JI_0065.JPG\npics\npics.JPG\npics2\n");
@@ -434,7 +434,7 @@ TEST(listIndex, rootPath2) {
 
     Database *d = db.get();
 
-    listIndex(d, toList, out, "text", false, -1);
+    listIndex(d, toList, out, "text");
 
     std::cout << out.str() << std::endl;
     EXPECT_EQ(out.str(), "pics/IMG_20160826_181302.jpg\npics/IMG_20160826_181305.jpg\npics/IMG_20160826_181309.jpg\npics/IMG_20160826_181314.jpg\npics/IMG_20160826_181317.jpg\npics/pics2\n");
@@ -464,7 +464,7 @@ TEST(listIndex, folder) {
     
     std::ostringstream out; 
 
-    listIndex(&db, toList, out, "text", false, -1);
+    listIndex(&db, toList, out, "text");
 
     std::cout << out.str() << std::endl;
     EXPECT_EQ(out.str(), "pics/IMG_20160826_181302.jpg\npics/IMG_20160826_181305.jpg\npics/IMG_20160826_181309.jpg\npics/IMG_20160826_181314.jpg\npics/IMG_20160826_181317.jpg\npics/pics2\n");
@@ -494,7 +494,7 @@ TEST(listIndex, subFolder) {
     
     std::ostringstream out; 
 
-    listIndex(&db, toList, out, "text", false, -1);
+    listIndex(&db, toList, out, "text");
 
     std::cout << out.str() << std::endl;
     EXPECT_EQ(out.str(), "pics/pics2/IMG_20160826_181305.jpg\npics/pics2/IMG_20160826_181309.jpg\n");
@@ -524,7 +524,7 @@ TEST(listIndex, fileExactInSubfolder) {
     
     std::ostringstream out; 
 
-    listIndex(&db, toList, out, "text", false, -1);
+    listIndex(&db, toList, out, "text");
 
     std::cout << out.str() << std::endl;
     EXPECT_EQ(out.str(), "pics/IMG_20160826_181314.jpg\n");
@@ -554,7 +554,7 @@ TEST(listIndex, fileExactInSubfolderWithPathToResolve) {
     
     std::ostringstream out; 
 
-    listIndex(&db, toList, out, "text", false, -1);
+    listIndex(&db, toList, out, "text");
 
     std::cout << out.str() << std::endl;
     EXPECT_EQ(out.str(), "pics/IMG_20160826_181314.jpg\n");
@@ -584,7 +584,7 @@ TEST(listIndex, fileExactInSubfolderWithPathToResolve2) {
     
     std::ostringstream out; 
 
-    listIndex(&db, toList, out, "text", false, -1);
+    listIndex(&db, toList, out, "text");
 
     std::cout << out.str() << std::endl;
     EXPECT_EQ(out.str(), "pics/IMG_20160826_181314.jpg\n");
@@ -614,7 +614,7 @@ TEST(listIndex, allRecursive) {
     
     std::ostringstream out; 
 
-    listIndex(&db, toList, out, "text", true, -1);
+    listIndex(&db, toList, out, "text", true);
 
     std::cout << out.str() << std::endl;
     EXPECT_EQ(out.str(), "1JI_0064.JPG\n1JI_0065.JPG\npics\npics.JPG\npics/IMG_20160826_181302.jpg\npics/IMG_20160826_181305.jpg\npics/IMG_20160826_181309.jpg\npics/IMG_20160826_181314.jpg\npics/IMG_20160826_181317.jpg\npics/pics2\npics/pics2/IMG_20160826_181305.jpg\npics/pics2/IMG_20160826_181309.jpg\npics2\npics2/IMG_20160826_181305.jpg\npics2/IMG_20160826_181309.jpg\npics2/pics\npics2/pics/IMG_20160826_181302.jpg\npics2/pics/IMG_20160826_181305.jpg\npics2/pics/IMG_20160826_181309.jpg\npics2/pics/IMG_20160826_181314.jpg\npics2/pics/IMG_20160826_181317.jpg\npics2/pics/pics2\npics2/pics/pics2/IMG_20160826_181305.jpg\npics2/pics/pics2/IMG_20160826_181309.jpg\n");
@@ -644,7 +644,7 @@ TEST(listIndex, folderRecursive) {
     
     std::ostringstream out; 
 
-    listIndex(&db, toList, out, "text", true, -1);
+    listIndex(&db, toList, out, "text", true);
 
     std::cout << out.str() << std::endl;
     EXPECT_EQ(out.str(), "pics/IMG_20160826_181302.jpg\npics/IMG_20160826_181305.jpg\npics/IMG_20160826_181309.jpg\npics/IMG_20160826_181314.jpg\npics/IMG_20160826_181317.jpg\npics/pics2\npics/pics2/IMG_20160826_181305.jpg\npics/pics2/IMG_20160826_181309.jpg\n");
@@ -674,7 +674,7 @@ TEST(listIndex, folderRecursiveWithLimit) {
     
     std::ostringstream out; 
 
-    listIndex(&db, toList, out, "text", true, 1);
+    listIndex(&db, toList, out, "text", true, 2);
 
     std::cout << out.str() << std::endl;
     EXPECT_EQ(out.str(), "pics/IMG_20160826_181302.jpg\npics/IMG_20160826_181305.jpg\npics/IMG_20160826_181309.jpg\npics/IMG_20160826_181314.jpg\npics/IMG_20160826_181317.jpg\npics/pics2\n");
@@ -704,7 +704,7 @@ TEST(listIndex, wildcardRecursive) {
     
     std::ostringstream out; 
 
-    listIndex(&db, toList, out, "text", true, -1);
+    listIndex(&db, toList, out, "text", true);
 
     std::cout << out.str() << std::endl;
     EXPECT_EQ(out.str(), "pics\npics.JPG\npics/IMG_20160826_181302.jpg\npics/IMG_20160826_181305.jpg\npics/IMG_20160826_181309.jpg\npics/IMG_20160826_181314.jpg\npics/IMG_20160826_181317.jpg\npics/pics2\npics/pics2/IMG_20160826_181305.jpg\npics/pics2/IMG_20160826_181309.jpg\npics2\npics2/IMG_20160826_181305.jpg\npics2/IMG_20160826_181309.jpg\npics2/pics\npics2/pics/IMG_20160826_181302.jpg\npics2/pics/IMG_20160826_181305.jpg\npics2/pics/IMG_20160826_181309.jpg\npics2/pics/IMG_20160826_181314.jpg\npics2/pics/IMG_20160826_181317.jpg\npics2/pics/pics2\npics2/pics/pics2/IMG_20160826_181305.jpg\npics2/pics/pics2/IMG_20160826_181309.jpg\n");
@@ -734,7 +734,7 @@ TEST(listIndex, wildcardRecursiveWithLimit) {
     
     std::ostringstream out; 
 
-    listIndex(&db, toList, out, "text", true, 1);
+    listIndex(&db, toList, out, "text", true, 2);
 
     std::cout << out.str() << std::endl;
     EXPECT_EQ(out.str(), "pics\npics.JPG\npics/IMG_20160826_181302.jpg\npics/IMG_20160826_181305.jpg\npics/IMG_20160826_181309.jpg\npics/IMG_20160826_181314.jpg\npics/IMG_20160826_181317.jpg\npics/pics2\npics2\npics2/IMG_20160826_181305.jpg\npics2/IMG_20160826_181309.jpg\npics2/pics\n");
