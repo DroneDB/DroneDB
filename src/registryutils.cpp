@@ -14,7 +14,7 @@ TagComponents RegistryUtils::parseTag(const std::string &tag, bool useInsecureRe
     utils::toLower(t);
 
     size_t pos = t.rfind("/");
-    if (pos == std::string::npos) throw InvalidArgsException("Invalid tag: " + tag + " is missing dataset name");
+    if (pos == std::string::npos) throw InvalidArgsException("Invalid tag: " + tag + " must be in organization/dataset format");
 
     TagComponents res;
     res.dataset = t.substr(pos + 1, t.length() - 1);
@@ -41,6 +41,12 @@ TagComponents RegistryUtils::parseTag(const std::string &tag, bool useInsecureRe
         else res.registryUrl = (useInsecureRegistry ? "http://" : "https://") + t;
     }
 
+    // Check that we haven't parsed the server part into the
+    // organization name
+    if (res.organization.find("http://") == 0 || res.organization.find("https://") == 0){
+        throw InvalidArgsException("Invalid tag: " + tag + " missing dataset name");
+    }
+
     return res;
 }
 
@@ -50,7 +56,11 @@ Registry RegistryUtils::createFromTag(const std::string &tag, bool useInsecureRe
 }
 
 std::string TagComponents::tagWithoutUrl() const{
-    return organization + "/" + dataset;
+    if (!organization.empty() && !dataset.empty()){
+        return organization + "/" + dataset;
+    }else{
+        return "";
+    }
 }
 
 }

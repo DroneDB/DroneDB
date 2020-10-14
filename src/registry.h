@@ -6,6 +6,7 @@
 
 #include <string>
 #include <vector>
+#include "constants.h"
 #include "ddb_export.h"
 
 namespace ddb{
@@ -16,7 +17,7 @@ class Registry{
     // Last valid token
     std::string authToken;
 public:
-    DDB_DLL Registry(const std::string &url);
+    DDB_DLL Registry(const std::string &url = DEFAULT_REGISTRY);
 
     DDB_DLL std::string getUrl(const std::string &path = "") const;
 

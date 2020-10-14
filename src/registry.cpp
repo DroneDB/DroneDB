@@ -15,13 +15,16 @@ using homer6::Url;
 namespace ddb{
 
 Registry::Registry(const std::string &url){
+    std::string urlStr = url;
+    if (urlStr.empty()) urlStr = std::string(DEFAULT_REGISTRY);
+
     Url u;
 
     // Always append https if no protocol is specified
-    if (url.find("https://") != 0 && url.find("http://") != 0){
-        u.fromString("https://" + url);
+    if (urlStr.find("https://") != 0 && urlStr.find("http://") != 0){
+        u.fromString("https://" + urlStr);
     }else{
-        u.fromString(url);
+        u.fromString(urlStr);
     }
 
     // Validate and set URL

@@ -14,11 +14,11 @@ void Login::setOptions(cxxopts::Options &opts) {
     .positional_help("[args]")
     .custom_help("login")
     .add_options()
-    ("host", "Registry host to authenticate to", cxxopts::value<std::string>()->default_value("index.dronedb.app"))
+    ("server", "Registry server to authenticate to", cxxopts::value<std::string>()->default_value("index.dronedb.app"))
     ("u,username", "Username", cxxopts::value<std::string>())
     ("p,password", "Password", cxxopts::value<std::string>());
 
-    opts.parse_positional({"host"});
+    opts.parse_positional({"server"});
 }
 
 std::string Login::description() {
@@ -41,7 +41,7 @@ void Login::run(cxxopts::ParseResult &opts) {
         password = ddb::utils::getPass("Password: ");
     }
 
-    ddb::Registry reg(opts["host"].as<std::string>());
+    ddb::Registry reg(opts["server"].as<std::string>());
     std::string token = reg.login(username, password);
     if (token.length() > 0){
         std::cout << "Login succeeded for " << reg.getUrl() << std::endl;

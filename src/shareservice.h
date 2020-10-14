@@ -11,14 +11,19 @@
 
 namespace ddb{
 
-typedef std::function<bool(const std::string &filename, float progress)> ShareCallback;
+struct ShareFileProgress{
+    std::string filename = "";
+    size_t txBytes = 0;
+    size_t totalBytes = 0;
+};
+typedef std::function<bool(const std::vector<ShareFileProgress *> &files, size_t txBytes, size_t totalBytes)> ShareCallback;
 
 class ShareService{
     void handleError(net::Response &res);
 public:
     DDB_DLL ShareService();
     DDB_DLL std::string share(const std::vector<std::string> &input, const std::string &tag,
-                              const std::string &password, bool recursive, const std::string &cwd,
+                              const std::string &password, bool recursive, const std::string &cwd = "",
                               const ShareCallback &cb = nullptr);
 };
 
