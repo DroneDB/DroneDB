@@ -30,19 +30,19 @@ namespace DDB.Bindings
         }
 
         [DllImport("ddb", EntryPoint = "DDBInit")]
-        private static extern DDBError _Init([MarshalAs(UnmanagedType.LPStr)]string directory, out IntPtr outPath);
-        
+        private static extern DDBError _Init([MarshalAs(UnmanagedType.LPStr)] string directory, out IntPtr outPath);
+
         public static string Init(string directory)
         {
             if (_Init(directory, out var outPath) == DDBError.DDBERR_NONE)
                 return Marshal.PtrToStringAnsi(outPath);
-            
+
             throw new DDBException(GetLastError());
         }
 
         [DllImport("ddb", EntryPoint = "DDBAdd")]
-        static extern DDBError _Add([MarshalAs(UnmanagedType.LPStr)] string ddbPath, 
-                                  [MarshalAs(UnmanagedType.LPArray, ArraySubType=UnmanagedType.LPStr)] string[] paths, 
+        static extern DDBError _Add([MarshalAs(UnmanagedType.LPStr)] string ddbPath,
+                                  [MarshalAs(UnmanagedType.LPArray, ArraySubType = UnmanagedType.LPStr)] string[] paths,
                                   int numPaths, out IntPtr output, bool recursive);
 
         public static List<Entry> Add(string ddbPath, string path, bool recursive = false)
@@ -75,7 +75,7 @@ namespace DDB.Bindings
         {
             if (_Remove(ddbPath, paths, paths.Length) != DDBError.DDBERR_NONE)
                 throw new DDBException(GetLastError());
-            
+
         }
 
         [DllImport("ddb", EntryPoint = "DDBInfo")]
@@ -101,21 +101,27 @@ namespace DDB.Bindings
             if (json == null)
                 throw new DDBException("Unable get info");
 
-            return JsonConvert.DeserializeObject<List<Entry>>(json); 
+            return JsonConvert.DeserializeObject<List<Entry>>(json);
 
         }
 
         [DllImport("ddb", EntryPoint = "DDBList")]
-        static extern DDBError _List([MarshalAs(UnmanagedType.LPArray, ArraySubType = UnmanagedType.LPStr)] string[] paths,
-                                   int numPaths,
-                                   out IntPtr output,
-                                   [MarshalAs(UnmanagedType.LPStr)] string format, 
-                                   bool recursive,
-                                   int maxRecursionDepth = 0);
+        static extern DDBError _List([MarshalAs(UnmanagedType.LPStr)] string ddbPath,
+                                    [MarshalAs(UnmanagedType.LPArray, ArraySubType = UnmanagedType.LPStr)] string[] paths,
+                                    int numPaths,
+                                    out IntPtr output,
+                                    [MarshalAs(UnmanagedType.LPStr)] string format,
+                                    bool recursive,
+                                    int maxRecursionDepth = 0);
 
-        public static List<Entry> List(string[] paths, bool recursive = false, int maxRecursionDepth = 0)
+        public static List<Entry> List(string ddbPath, string path, bool recursive = false, int maxRecursionDepth = 0)
         {
-            if (_List(paths, paths.Length, out var output, "json", recursive, maxRecursionDepth) !=
+            return List(ddbPath, new[] { path }, recursive, maxRecursionDepth);
+        }
+
+        public static List<Entry> List(string ddbPath, string[] paths, bool recursive = false, int maxRecursionDepth = 0)
+        {
+            if (_List(ddbPath, paths, paths.Length, out var output, "json", recursive, maxRecursionDepth) !=
                 DDBError.DDBERR_NONE) throw new DDBException(GetLastError());
 
             var json = Marshal.PtrToStringAnsi(output);
@@ -123,7 +129,7 @@ namespace DDB.Bindings
             if (json == null)
                 throw new DDBException("Unable get list");
 
-            return JsonConvert.DeserializeObject<List<Entry>>(json); 
+            return JsonConvert.DeserializeObject<List<Entry>>(json);
 
         }
     }
