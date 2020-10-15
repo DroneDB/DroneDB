@@ -34,6 +34,9 @@ namespace DDB.Bindings
 
         public static string Init(string directory)
         {
+            if (string.IsNullOrWhiteSpace(directory))
+                throw new DDBException("Directory should not be null or empty");
+
             if (_Init(directory, out var outPath) == DDBError.DDBERR_NONE)
                 return Marshal.PtrToStringAnsi(outPath);
 
@@ -47,16 +50,27 @@ namespace DDB.Bindings
 
         public static List<Entry> Add(string ddbPath, string path, bool recursive = false)
         {
+
+            if (string.IsNullOrWhiteSpace(path))
+                throw new DDBException("Path should not be null or empty");
+            
             return Add(ddbPath, new[] { path }, recursive);
         }
         public static List<Entry> Add(string ddbPath, string[] paths, bool recursive = false)
         {
+
+            if (string.IsNullOrWhiteSpace(ddbPath))
+                throw new DDBException("DDB path should not be null or empty");
+
+            if (paths == null || paths.Any(string.IsNullOrWhiteSpace))
+                throw new DDBException("One of the provided paths is null or empty");
+            
             if (_Add(ddbPath, paths, paths.Length, out var output, recursive) != DDBError.DDBERR_NONE)
                 throw new DDBException(GetLastError());
 
             var json = Marshal.PtrToStringAnsi(output);
 
-            if (json == null)
+            if (string.IsNullOrWhiteSpace(json))
                 throw new DDBException("Unable to add");
 
             return JsonConvert.DeserializeObject<List<Entry>>(json);
@@ -69,10 +83,19 @@ namespace DDB.Bindings
 
         public static void Remove(string ddbPath, string path)
         {
+            if (string.IsNullOrWhiteSpace(path))
+                throw new DDBException("Path should not be null or empty");
+
             Remove(ddbPath, new[] { path });
         }
         public static void Remove(string ddbPath, string[] paths)
         {
+            if (string.IsNullOrWhiteSpace(ddbPath))
+                throw new DDBException("DDB path should not be null or empty");
+
+            if (paths == null || paths.Any(string.IsNullOrWhiteSpace))
+                throw new DDBException("One of the provided paths is null or empty");
+
             if (_Remove(ddbPath, paths, paths.Length) != DDBError.DDBERR_NONE)
                 throw new DDBException(GetLastError());
 
@@ -88,17 +111,24 @@ namespace DDB.Bindings
 
         public static List<Entry> Info(string path, bool recursive = false, int maxRecursionDepth = 0, bool withHash = false)
         {
+            if (string.IsNullOrWhiteSpace(path))
+                throw new DDBException("Path should not be null or empty");
+            
             return Info(new[] { path }, recursive, maxRecursionDepth, withHash);
         }
 
         public static List<Entry> Info(string[] paths, bool recursive = false, int maxRecursionDepth = 0, bool withHash = false)
         {
+
+            if (paths == null || paths.Any(string.IsNullOrWhiteSpace))
+                throw new DDBException("One of the provided paths is null or empty");
+            
             if (_Info(paths, paths.Length, out var output, "json", recursive, maxRecursionDepth, "auto", withHash) !=
                 DDBError.DDBERR_NONE) throw new DDBException(GetLastError());
 
             var json = Marshal.PtrToStringAnsi(output);
 
-            if (json == null)
+            if (string.IsNullOrWhiteSpace(json))
                 throw new DDBException("Unable get info");
 
             return JsonConvert.DeserializeObject<List<Entry>>(json);
@@ -116,17 +146,26 @@ namespace DDB.Bindings
 
         public static List<Entry> List(string ddbPath, string path, bool recursive = false, int maxRecursionDepth = 0)
         {
+            if (string.IsNullOrWhiteSpace(path))
+                throw new DDBException("Path should not be null or empty");
+
             return List(ddbPath, new[] { path }, recursive, maxRecursionDepth);
         }
 
         public static List<Entry> List(string ddbPath, string[] paths, bool recursive = false, int maxRecursionDepth = 0)
         {
+            if (string.IsNullOrWhiteSpace(ddbPath))
+                throw new DDBException("DDB path should not be null or empty");
+
+            if (paths == null || paths.Any(string.IsNullOrWhiteSpace))
+                throw new DDBException("One of the provided paths is null or empty");
+
             if (_List(ddbPath, paths, paths.Length, out var output, "json", recursive, maxRecursionDepth) !=
                 DDBError.DDBERR_NONE) throw new DDBException(GetLastError());
 
             var json = Marshal.PtrToStringAnsi(output);
 
-            if (json == null)
+            if (string.IsNullOrWhiteSpace(json))
                 throw new DDBException("Unable get list");
 
             return JsonConvert.DeserializeObject<List<Entry>>(json);
