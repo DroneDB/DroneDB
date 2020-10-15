@@ -1,6 +1,7 @@
 ﻿using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 
@@ -37,10 +38,21 @@ namespace DDB.Bindings
             if (string.IsNullOrWhiteSpace(directory))
                 throw new DDBException("Directory should not be null or empty");
 
-            if (_Init(directory, out var outPath) == DDBError.DDBERR_NONE)
-                return Marshal.PtrToStringAnsi(outPath);
+            try
+            {
+
+                if (_Init(directory, out var outPath) == DDBError.DDBERR_NONE)
+                    return Marshal.PtrToStringAnsi(outPath);
+
+            }
+            catch (Exception ex)
+            {
+                throw new DDBException($"Error in calling ddb lib. Last error: \"{GetLastError()}\", check inner exception for details", ex);
+            }
 
             throw new DDBException(GetLastError());
+
+
         }
 
         [DllImport("ddb", EntryPoint = "DDBAdd")]
@@ -53,8 +65,9 @@ namespace DDB.Bindings
 
             if (string.IsNullOrWhiteSpace(path))
                 throw new DDBException("Path should not be null or empty");
-            
+
             return Add(ddbPath, new[] { path }, recursive);
+
         }
         public static List<Entry> Add(string ddbPath, string[] paths, bool recursive = false)
         {
@@ -64,16 +77,24 @@ namespace DDB.Bindings
 
             if (paths == null || paths.Any(string.IsNullOrWhiteSpace))
                 throw new DDBException("One of the provided paths is null or empty");
-            
-            if (_Add(ddbPath, paths, paths.Length, out var output, recursive) != DDBError.DDBERR_NONE)
-                throw new DDBException(GetLastError());
 
-            var json = Marshal.PtrToStringAnsi(output);
+            try
+            {
+                if (_Add(ddbPath, paths, paths.Length, out var output, recursive) != DDBError.DDBERR_NONE)
+                    throw new DDBException(GetLastError());
 
-            if (string.IsNullOrWhiteSpace(json))
-                throw new DDBException("Unable to add");
+                var json = Marshal.PtrToStringAnsi(output);
 
-            return JsonConvert.DeserializeObject<List<Entry>>(json);
+                if (string.IsNullOrWhiteSpace(json))
+                    throw new DDBException("Unable to add");
+
+                return JsonConvert.DeserializeObject<List<Entry>>(json);
+            }
+            catch (Exception ex)
+            {
+                throw new DDBException($"Error in calling ddb lib. Last error: \"{GetLastError()}\", check inner exception for details", ex);
+            }
+
         }
 
         [DllImport("ddb", EntryPoint = "DDBRemove")]
@@ -96,9 +117,20 @@ namespace DDB.Bindings
             if (paths == null || paths.Any(string.IsNullOrWhiteSpace))
                 throw new DDBException("One of the provided paths is null or empty");
 
-            if (_Remove(ddbPath, paths, paths.Length) != DDBError.DDBERR_NONE)
-                throw new DDBException(GetLastError());
+            try
+            {
 
+                // If the paths are not absolute let's rebase them on ddbPath
+                paths = (from path in paths
+                    select Path.IsPathRooted(path) ? path : Path.Combine(ddbPath, path)).ToArray();
+
+                if (_Remove(ddbPath, paths, paths.Length) != DDBError.DDBERR_NONE)
+                    throw new DDBException(GetLastError());
+            }
+            catch (Exception ex)
+            {
+                throw new DDBException($"Error in calling ddb lib. Last error: \"{GetLastError()}\", check inner exception for details", ex);
+            }
         }
 
         [DllImport("ddb", EntryPoint = "DDBInfo")]
@@ -113,7 +145,7 @@ namespace DDB.Bindings
         {
             if (string.IsNullOrWhiteSpace(path))
                 throw new DDBException("Path should not be null or empty");
-            
+
             return Info(new[] { path }, recursive, maxRecursionDepth, withHash);
         }
 
@@ -122,17 +154,24 @@ namespace DDB.Bindings
 
             if (paths == null || paths.Any(string.IsNullOrWhiteSpace))
                 throw new DDBException("One of the provided paths is null or empty");
-            
-            if (_Info(paths, paths.Length, out var output, "json", recursive, maxRecursionDepth, "auto", withHash) !=
-                DDBError.DDBERR_NONE) throw new DDBException(GetLastError());
 
-            var json = Marshal.PtrToStringAnsi(output);
+            try
+            {
+                if (_Info(paths, paths.Length, out var output, "json", recursive, maxRecursionDepth, "auto", withHash) !=
+                    DDBError.DDBERR_NONE) throw new DDBException(GetLastError());
 
-            if (string.IsNullOrWhiteSpace(json))
-                throw new DDBException("Unable get info");
+                var json = Marshal.PtrToStringAnsi(output);
 
-            return JsonConvert.DeserializeObject<List<Entry>>(json);
+                if (string.IsNullOrWhiteSpace(json))
+                    throw new DDBException("Unable get info");
 
+                return JsonConvert.DeserializeObject<List<Entry>>(json);
+
+            }
+            catch (Exception ex)
+            {
+                throw new DDBException($"Error in calling ddb lib. Last error: \"{GetLastError()}\", check inner exception for details", ex);
+            }
         }
 
         [DllImport("ddb", EntryPoint = "DDBList")]
@@ -160,15 +199,28 @@ namespace DDB.Bindings
             if (paths == null || paths.Any(string.IsNullOrWhiteSpace))
                 throw new DDBException("One of the provided paths is null or empty");
 
-            if (_List(ddbPath, paths, paths.Length, out var output, "json", recursive, maxRecursionDepth) !=
-                DDBError.DDBERR_NONE) throw new DDBException(GetLastError());
+            try
+            {
 
-            var json = Marshal.PtrToStringAnsi(output);
+                // If the paths are not absolute let's rebase them on ddbPath
+                paths = (from path in paths
+                         select Path.IsPathRooted(path) ? path : Path.Combine(ddbPath, path)).ToArray();
 
-            if (string.IsNullOrWhiteSpace(json))
-                throw new DDBException("Unable get list");
+                if (_List(ddbPath, paths, paths.Length, out var output, "json", recursive, maxRecursionDepth) !=
+                    DDBError.DDBERR_NONE) throw new DDBException(GetLastError());
 
-            return JsonConvert.DeserializeObject<List<Entry>>(json);
+                var json = Marshal.PtrToStringAnsi(output);
+
+                if (string.IsNullOrWhiteSpace(json))
+                    throw new DDBException("Unable get list");
+
+                return JsonConvert.DeserializeObject<List<Entry>>(json);
+
+            }
+            catch (Exception ex)
+            {
+                throw new DDBException($"Error in calling ddb lib. Last error: \"{GetLastError()}\", check inner exception for details", ex);
+            }
 
         }
     }
