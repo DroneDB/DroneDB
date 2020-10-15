@@ -15,6 +15,11 @@ namespace DDB.Tests
 {
     public class DroneDBTests
     {
+        private const string BaseTestFolder = nameof(DroneDBTests);
+        private const string TestFileUrl =
+            "https://github.com/DroneDB/test_data/raw/master/test-datasets/drone_dataset_brighton_beach/DJI_0023.JPG";
+        private const string Test1ArchiveUrl = "https://github.com/DroneDB/test_data/raw/master/registry/DdbFactoryTest/testdb1.zip";
+
         [SetUp]
         public void Setup()
         {
@@ -77,14 +82,14 @@ namespace DDB.Tests
             Assert.Throws<DDBException>(() => DroneDB.Add(testFolder, "invalid"));
 
             var entry = DroneDB.Add(testFolder, Path.Join(testFolder, "file.txt"))[0];
-            Assert.AreEqual(entry.Path, "file.txt");
-            Assert.IsTrue(entry.Hash.Length > 0);
-            
-            var entries = DroneDB.Add(testFolder, new string[]{ Path.Join(testFolder, "file2.txt"), Path.Join(testFolder, "file3.txt")});
-            Assert.AreEqual(entries.Count, 2);
+            entry.Path.Should().Be("file.txt");
+            entry.Hash.Should().NotBeNullOrWhiteSpace();
 
-            DroneDB.Remove(testFolder, Path.Join(testFolder, "file.txt"));
-            
+            var entries = DroneDB.Add(testFolder, new[] { Path.Join(testFolder, "file2.txt"), Path.Join(testFolder, "file3.txt") });
+            entries.Should().HaveCount(2);
+
+            DroneDB.Remove(testFolder, "file.txt");
+
             Assert.Throws<DDBException>(() => DroneDB.Remove(testFolder, "invalid"));
         }
 
@@ -93,6 +98,10 @@ namespace DDB.Tests
         {
             Action act = () => DroneDB.Info("invalid");
             act.Should().Throw<DDBException>();
+
+            act = () => DroneDB.Info((string)null);
+            act.Should().Throw<DDBException>();
+
         }
 
         [Test]
@@ -109,27 +118,25 @@ namespace DDB.Tests
 
             var e = DroneDB.Info(Path.Join(testFolder, "file.txt"), withHash: true)[0];
             Assert.IsNotEmpty(e.Hash);
-            
+
             // TODO: troubleshoot this and use 
             var es = DroneDB.Info(testFolder, true);
             Assert.AreEqual(2, es.Count);
             Assert.AreEqual(EntryType.Generic, es[0].Type);
             Assert.IsTrue(es[0].Size > 0);
-            Assert.AreEqual(DateTime.Now.Year, es[0].ModifiedTime.Year); 
+            Assert.AreEqual(DateTime.Now.Year, es[0].ModifiedTime.Year);
         }
 
         [Test]
         public void Info_ImageFile_Details()
         {
-            const string testFileUrl =
-                "https://github.com/DroneDB/test_data/raw/master/test-datasets/drone_dataset_brighton_beach/DJI_0023.JPG";
 
             var expectedMeta = JsonConvert.DeserializeObject<Dictionary<string, string>>(
                 @"{""cameraPitch"":""-89.9000015258789"",""cameraRoll"":""0.0"",""cameraYaw"":""43.79999923706055"",""captureTime"":""1466699554000.0"",""focalLength"":""3.4222222222222225"",""focalLength35"":""20.0"",""height"":""2250"",""make"":""DJI"",""model"":""FC300S"",""orientation"":""1"",""sensor"":""dji fc300s"",""sensorHeight"":""3.4650000000000003"",""sensorWidth"":""6.16"",""width"":""4000""}");
 
-            using var tempFile = new TempFile(testFileUrl, nameof(DroneDBTests));
+            using var tempFile = new TempFile(TestFileUrl, BaseTestFolder);
 
-            var res = DroneDB.Info(tempFile.FilePath, withHash:true);
+            var res = DroneDB.Info(tempFile.FilePath, withHash: true);
 
             res.Should().NotBeNull();
             res.Should().HaveCount(1);
@@ -155,15 +162,78 @@ namespace DDB.Tests
 
             act = () => DroneDB.List(null, "wefrfwef");
             act.Should().Throw<DDBException>();
+        }
+
+        [Test]
+        public void List_ExistingFile_Ok()
+        {
+            using var test = new TestFS(Test1ArchiveUrl, BaseTestFolder);
+
+            var ddbPath = Path.Combine(test.TestFolder, "public", "default");
+
+            var res = DroneDB.List(ddbPath, "DJI_0027.JPG");
+
+            res.Should().HaveCount(1);
+            var entry = res.First();
+
+            entry.Should().BeEquivalentTo(JsonConvert.DeserializeObject<Entry>("{\"Path\":\"DJI_0027.JPG\",\"Hash\":\"3157958dd4f2562c8681867dfd6ee5bf70b6e9595b3e3b4b76bbda28342569ed\",\"Type\":3,\"Meta\":{\"cameraPitch\":\"-89.9000015258789\",\"cameraRoll\":\"0.0\",\"cameraYaw\":\"-131.3000030517578\",\"captureTime\":\"1466699584000.0\",\"focalLength\":\"3.4222222222222225\",\"focalLength35\":\"20.0\",\"height\":\"2250\",\"make\":\"DJI\",\"model\":\"FC300S\",\"orientation\":\"1\",\"sensor\":\"dji fc300s\",\"sensorHeight\":\"3.4650000000000003\",\"sensorWidth\":\"6.16\",\"width\":\"4000\"},\"mtime\":1491156087,\"Size\":3185449,\"Depth\":0,\"PointGeometry\":null,\"PolygonGeometry\":null}"));
 
         }
 
-        //[Test]
-        //public void testEntrySerialization()
-        //{
-        //    string json = "{'hash': 'abc', 'mtime': 5}";
-        //    Entry e = JsonConvert.DeserializeObject<Entry>(json);
-        //    Assert.IsTrue(e.ModifiedTime.Year == 1970);
-        //}
+        [Test]
+        public void List_AllFiles_Ok()
+        {
+            using var test = new TestFS(Test1ArchiveUrl, BaseTestFolder);
+
+            var ddbPath = Path.Combine(test.TestFolder, "public", "default");
+
+            var res = DroneDB.List(ddbPath, ".", true);
+
+            res.Should().HaveCount(26);
+
+        }
+
+
+        [Test]
+        public void Remove_Nonexistant_Exception()
+        {
+            Action act = () => DroneDB.Remove("invalid", "");
+            act.Should().Throw<DDBException>();
+
+            act = () => DroneDB.Remove("invalid", "wefrfwef");
+            act.Should().Throw<DDBException>();
+
+            act = () => DroneDB.Remove(null, "wefrfwef");
+            act.Should().Throw<DDBException>();
+
+        }
+
+
+        [Test]
+        public void Remove_ExistingFile_Ok()
+        {
+            using var test = new TestFS(Test1ArchiveUrl, BaseTestFolder);
+
+            const string fileName = "DJI_0027.JPG";
+
+            var ddbPath = Path.Combine(test.TestFolder, "public", "default");
+
+            var res = DroneDB.List(ddbPath, fileName);
+            res.Should().HaveCount(1);
+
+            DroneDB.Remove(ddbPath, "DJI_0027.JPG");
+
+            res = DroneDB.List(ddbPath, fileName);
+            res.Should().HaveCount(0);
+
+        }
+
+        [Test]
+        public void Entry_Deserialization_Ok()
+        {
+            string json = "{'hash': 'abc', 'mtime': 5}";
+            Entry e = JsonConvert.DeserializeObject<Entry>(json);
+            Assert.IsTrue(e.ModifiedTime.Year == 1970);
+        }
     }
 }
