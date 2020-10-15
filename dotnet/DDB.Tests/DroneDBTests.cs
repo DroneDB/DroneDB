@@ -221,11 +221,41 @@ namespace DDB.Tests
             var res = DroneDB.List(ddbPath, fileName);
             res.Should().HaveCount(1);
 
-            DroneDB.Remove(ddbPath, "DJI_0027.JPG");
+            DroneDB.Remove(ddbPath, fileName);
 
             res = DroneDB.List(ddbPath, fileName);
             res.Should().HaveCount(0);
 
+        }
+
+        [Test]
+        public void Remove_AllFiles_Ok()
+        {
+            using var test = new TestFS(Test1ArchiveUrl, BaseTestFolder);
+
+            const string fileName = ".";
+
+            var ddbPath = Path.Combine(test.TestFolder, "public", "default");
+            
+            DroneDB.Remove(ddbPath, fileName);
+
+            var res = DroneDB.List(ddbPath, ".", true);
+            res.Should().HaveCount(0);
+
+        }
+
+        [Test]
+        public void Remove_NonexistantFile_Exception()
+        {
+            using var test = new TestFS(Test1ArchiveUrl, BaseTestFolder);
+
+            const string fileName = "elaiuyhrfboeawuyirgfb";
+
+            var ddbPath = Path.Combine(test.TestFolder, "public", "default");
+
+            Action act = () => DroneDB.Remove(ddbPath, fileName);
+
+            act.Should().Throw<DDBException>();
         }
 
         [Test]
