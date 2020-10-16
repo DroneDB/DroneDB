@@ -48,8 +48,8 @@ struct Entry {
         this->mtime = (time_t)s.getInt(4);
         this->size = s.getInt64(5);
         this->depth = s.getInt(6);
-                       
-        // TODO by HeDo: I don't know how to parse these
+        
+        // TODO by HeDo: I don't know how to parse these. They are blobs, cannot use getText
         // this->point_geom = ?
         // this->polygon_geom = ?
     }

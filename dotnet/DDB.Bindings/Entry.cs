@@ -24,8 +24,10 @@ namespace DDB.Bindings
         public int Size { get; set; }
         public int Depth { get; set; }
 
+        [JsonProperty("point_geom")]
         public string PointGeometry { get; set; }
 
+        [JsonProperty("polygon_geom")]
         public string PolygonGeometry { get; set; }
     }
 
