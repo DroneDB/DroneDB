@@ -72,15 +72,9 @@ namespace DDB.Bindings
         public static List<Entry> Add(string ddbPath, string[] paths, bool recursive = false)
         {
 
-            if (string.IsNullOrWhiteSpace(ddbPath))
-                throw new DDBException("DDB path should not be null or empty");
-
-            if (paths == null || paths.Any(string.IsNullOrWhiteSpace))
-                throw new DDBException("One of the provided paths is null or empty");
-
             try
             {
-                if (_Add(ddbPath, paths, paths.Length, out var output, recursive) != DDBError.DDBERR_NONE)
+                if (_Add(ddbPath, paths, paths?.Length ?? 0, out var output, recursive) != DDBError.DDBERR_NONE)
                     throw new DDBException(GetLastError());
 
                 var json = Marshal.PtrToStringAnsi(output);
@@ -104,27 +98,13 @@ namespace DDB.Bindings
 
         public static void Remove(string ddbPath, string path)
         {
-            if (string.IsNullOrWhiteSpace(path))
-                throw new DDBException("Path should not be null or empty");
-
             Remove(ddbPath, new[] { path });
         }
         public static void Remove(string ddbPath, string[] paths)
         {
-            if (string.IsNullOrWhiteSpace(ddbPath))
-                throw new DDBException("DDB path should not be null or empty");
-
-            if (paths == null || paths.Any(string.IsNullOrWhiteSpace))
-                throw new DDBException("One of the provided paths is null or empty");
-
             try
             {
-
-                // If the paths are not absolute let's rebase them on ddbPath
-                paths = (from path in paths
-                    select Path.IsPathRooted(path) ? path : Path.Combine(ddbPath, path)).ToArray();
-
-                if (_Remove(ddbPath, paths, paths.Length) != DDBError.DDBERR_NONE)
+                if (_Remove(ddbPath, paths, paths?.Length ?? 0) != DDBError.DDBERR_NONE)
                     throw new DDBException(GetLastError());
             }
             catch (Exception ex)
@@ -143,21 +123,15 @@ namespace DDB.Bindings
 
         public static List<Entry> Info(string path, bool recursive = false, int maxRecursionDepth = 0, bool withHash = false)
         {
-            if (string.IsNullOrWhiteSpace(path))
-                throw new DDBException("Path should not be null or empty");
-
             return Info(new[] { path }, recursive, maxRecursionDepth, withHash);
         }
 
         public static List<Entry> Info(string[] paths, bool recursive = false, int maxRecursionDepth = 0, bool withHash = false)
         {
 
-            if (paths == null || paths.Any(string.IsNullOrWhiteSpace))
-                throw new DDBException("One of the provided paths is null or empty");
-
             try
             {
-                if (_Info(paths, paths.Length, out var output, "json", recursive, maxRecursionDepth, "auto", withHash) !=
+                if (_Info(paths, paths?.Length ?? 0, out var output, "json", recursive, maxRecursionDepth, "auto", withHash) !=
                     DDBError.DDBERR_NONE) throw new DDBException(GetLastError());
 
                 var json = Marshal.PtrToStringAnsi(output);
@@ -185,28 +159,15 @@ namespace DDB.Bindings
 
         public static List<Entry> List(string ddbPath, string path, bool recursive = false, int maxRecursionDepth = 0)
         {
-            if (string.IsNullOrWhiteSpace(path))
-                throw new DDBException("Path should not be null or empty");
-
             return List(ddbPath, new[] { path }, recursive, maxRecursionDepth);
         }
 
         public static List<Entry> List(string ddbPath, string[] paths, bool recursive = false, int maxRecursionDepth = 0)
         {
-            if (string.IsNullOrWhiteSpace(ddbPath))
-                throw new DDBException("DDB path should not be null or empty");
-
-            if (paths == null || paths.Any(string.IsNullOrWhiteSpace))
-                throw new DDBException("One of the provided paths is null or empty");
-
             try
             {
 
-                // If the paths are not absolute let's rebase them on ddbPath
-                paths = (from path in paths
-                         select Path.IsPathRooted(path) ? path : Path.Combine(ddbPath, path)).ToArray();
-
-                if (_List(ddbPath, paths, paths.Length, out var output, "json", recursive, maxRecursionDepth) !=
+                if (_List(ddbPath, paths, paths?.Length ?? 0, out var output, "json", recursive, maxRecursionDepth) !=
                     DDBError.DDBERR_NONE) throw new DDBException(GetLastError());
 
                 var json = Marshal.PtrToStringAnsi(output);
