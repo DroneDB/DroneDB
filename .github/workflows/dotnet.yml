@@ -24,7 +24,10 @@ jobs:
         - name: Test .NET bindings
           run: |
             cd dotnet
+            echo $PROJ_LIB
             dotnet test -c Release
+          env:
+              PROJ_LIB: $GITHUB_WORKSPACE\build
         - name: Publish .NET bindings
           run: |
             cd dotnet
@@ -51,4 +54,7 @@ jobs:
         - name: Test .NET bindings
           run: |
             cd dotnet
+            echo $PROJ_LIB
             dotnet test -c Release
+          env:
+              PROJ_LIB: $GITHUB_WORKSPACE\build
