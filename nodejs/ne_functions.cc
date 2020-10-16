@@ -20,14 +20,6 @@ NAN_METHOD(getDefaultRegistry){
     info.GetReturnValue().Set(Nan::New(DEFAULT_REGISTRY).ToLocalChecked());
 }
 
-NAN_METHOD(typeToHuman) {
-    ASSERT_NUM_PARAMS(1);
-    BIND_INT_PARAM(entryType, 0);
-
-    ddb::EntryType t = static_cast<ddb::EntryType>(entryType);
-    info.GetReturnValue().Set(Nan::New(ddb::typeToHuman(t)).ToLocalChecked());
-}
-
 class InfoWorker : public Nan::AsyncWorker {
  public:
   InfoWorker(Nan::Callback *callback, const std::vector<std::string> &input,
