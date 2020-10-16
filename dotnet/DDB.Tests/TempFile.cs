@@ -24,7 +24,9 @@ namespace DDB.Tests
 
             Debug.WriteLine("Temp file: " + FilePath);
 
-            if (!File.Exists(FilePath))
+            var info = new FileInfo(FilePath);
+
+            if (!info.Exists || info.Length == 0)
             {
 
                 Directory.CreateDirectory(folder);
@@ -38,6 +40,12 @@ namespace DDB.Tests
             {
                 Debug.WriteLine("File already existing, leveraging temp folder1");
             }
+        }
+
+        public static void CleanDomain(string domain)
+        {
+            var folder = Path.Combine(Path.GetTempPath(), domain);
+            Directory.Delete(folder, true);
         }
 
         public void Dispose()

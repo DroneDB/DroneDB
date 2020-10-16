@@ -15,7 +15,7 @@ namespace DDB.Bindings
         public EntryType Type { get; set; }
 
         // TODO: this might change in the future
-        public Dictionary<string,string> Meta { get; set; }
+        public Dictionary<string, string> Meta { get; set; }
 
         [JsonProperty("mtime")]
         [JsonConverter(typeof(SecondEpochConverter))]

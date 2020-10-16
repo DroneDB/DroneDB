@@ -281,5 +281,12 @@ namespace DDB.Tests
             Entry e = JsonConvert.DeserializeObject<Entry>(json);
             Assert.IsTrue(e.ModifiedTime.Year == 1970);
         }
+
+        [Test]
+        [Explicit("Clean test directory")]
+        public void Clean_Domain()
+        {
+            TempFile.CleanDomain(BaseTestFolder);
+        }
     }
 }
