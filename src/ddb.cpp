@@ -43,6 +43,13 @@ const char* DDBGetVersion(){
 
 DDBErr DDBInit(const char *directory, char **outPath){
 DDB_C_BEGIN
+
+    if (directory == NULL)
+        throw InvalidArgsException("No directory provided");
+
+    if (outPath == NULL)
+        throw InvalidArgsException("No output provided");
+
     fs::path dirPath = directory;
     if (!fs::exists(dirPath)) throw FSException("Invalid directory: " + dirPath.string()  + " (does not exist)");
 
@@ -90,6 +97,15 @@ void DDBSetLastError(const char *err){
 DDBErr DDBAdd(const char *ddbPath, const char **paths, int numPaths, char** output, bool recursive){
 DDB_C_BEGIN
 
+    if (ddbPath == NULL)
+        throw InvalidArgsException("No directory provided");
+
+    if (paths == NULL || numPaths == 0)
+        throw InvalidArgsException("No paths provided");
+
+    if (output == NULL)
+        throw InvalidArgsException("No output provided");
+
     auto db = ddb::open(std::string(ddbPath), true);
     std::vector<std::string> pathList(paths, paths + numPaths);
     json outJson = json::array();
@@ -108,6 +124,13 @@ DDB_C_END
 
 DDBErr DDBRemove(const char *ddbPath, const char **paths, int numPaths){
 DDB_C_BEGIN
+
+    if (ddbPath == NULL)
+        throw InvalidArgsException("No directory provided");
+
+    if (paths == NULL || numPaths == 0)
+        throw InvalidArgsException("No paths provided");
+
 	const auto db = ddb::open(std::string(ddbPath), true);
 	const std::vector<std::string> pathList(paths, paths + numPaths);
 
@@ -117,6 +140,19 @@ DDB_C_END
 
 DDBErr DDBInfo(const char **paths, int numPaths, char **output, const char *format, bool recursive, int maxRecursionDepth, const char *geometry, bool withHash, bool stopOnError){
 DDB_C_BEGIN
+
+    if (format == NULL || strlen(format) == 0)
+        throw InvalidArgsException("No format provided");
+
+    if (geometry == NULL || strlen(geometry) == 0)
+        throw InvalidArgsException("No format provided");
+
+    if (paths == NULL || numPaths == 0)
+        throw InvalidArgsException("No paths provided");
+
+    if (output == NULL)
+        throw InvalidArgsException("No output provided");
+
 	const std::vector<std::string> input(paths, paths + numPaths);
     std::ostringstream ss;
 	info(input, ss, format, recursive, maxRecursionDepth,
@@ -127,6 +163,19 @@ DDB_C_END
 
 DDBErr DDBList(const char *ddbPath, const char **paths, int numPaths, char **output, const char *format, bool recursive, int maxRecursionDepth){
 DDB_C_BEGIN
+
+    if (ddbPath == NULL)
+        throw InvalidArgsException("No ddb path provided");
+
+    if (format == NULL || strlen(format) == 0)
+        throw InvalidArgsException("No format provided");
+
+    if (paths == NULL || numPaths == 0)
+        throw InvalidArgsException("No paths provided");
+
+    if (output == NULL)
+        throw InvalidArgsException("No output provided");
+
 	const auto db = ddb::open(std::string(ddbPath), true);
 	const std::vector<std::string> pathList(paths, paths + numPaths);
 
