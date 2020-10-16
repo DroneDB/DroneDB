@@ -57,4 +57,4 @@ jobs:
             echo $PROJ_LIB
             dotnet test -c Release
           env:
-              PROJ_LIB: $GITHUB_WORKSPACE\build
+              PROJ_LIB: $GITHUB_WORKSPACE/build
