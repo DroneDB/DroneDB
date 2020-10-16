@@ -35,8 +35,6 @@ namespace DDB.Bindings
 
         public static string Init(string directory)
         {
-            if (string.IsNullOrWhiteSpace(directory))
-                throw new DDBException("Directory should not be null or empty");
 
             try
             {
@@ -62,13 +60,9 @@ namespace DDB.Bindings
 
         public static List<Entry> Add(string ddbPath, string path, bool recursive = false)
         {
-
-            if (string.IsNullOrWhiteSpace(path))
-                throw new DDBException("Path should not be null or empty");
-
-            return Add(ddbPath, new[] { path }, recursive);
-
+            return Add(ddbPath, path != null ? new[] { path } : null, recursive);
         }
+
         public static List<Entry> Add(string ddbPath, string[] paths, bool recursive = false)
         {
 
@@ -98,7 +92,7 @@ namespace DDB.Bindings
 
         public static void Remove(string ddbPath, string path)
         {
-            Remove(ddbPath, new[] { path });
+            Remove(ddbPath, path != null ? new[] { path } : null);
         }
         public static void Remove(string ddbPath, string[] paths)
         {
@@ -123,7 +117,7 @@ namespace DDB.Bindings
 
         public static List<Entry> Info(string path, bool recursive = false, int maxRecursionDepth = 0, bool withHash = false)
         {
-            return Info(new[] { path }, recursive, maxRecursionDepth, withHash);
+            return Info(path != null ? new[] { path } : null, recursive, maxRecursionDepth, withHash);
         }
 
         public static List<Entry> Info(string[] paths, bool recursive = false, int maxRecursionDepth = 0, bool withHash = false)
@@ -159,7 +153,7 @@ namespace DDB.Bindings
 
         public static List<Entry> List(string ddbPath, string path, bool recursive = false, int maxRecursionDepth = 0)
         {
-            return List(ddbPath, new[] { path }, recursive, maxRecursionDepth);
+            return List(ddbPath, path != null ? new[] { path } : null, recursive, maxRecursionDepth);
         }
 
         public static List<Entry> List(string ddbPath, string[] paths, bool recursive = false, int maxRecursionDepth = 0)

@@ -36,8 +36,11 @@ namespace DDB.Tests
         public void Init_NonExistant_Exception()
         {
             Action act = () => DroneDB.Init("nonexistant");
-
             act.Should().Throw<DDBException>();
+
+            act = () => DroneDB.Init(null);
+            act.Should().Throw<DDBException>();
+
         }
 
         [Test]
@@ -60,6 +63,12 @@ namespace DDB.Tests
             act.Should().Throw<DDBException>();
 
             act = () => DroneDB.Add("nonexistant", "test");
+            act.Should().Throw<DDBException>();
+
+            act = () => DroneDB.Add(null, "test");
+            act.Should().Throw<DDBException>();
+
+            act = () => DroneDB.Add("nonexistant", (string)null);
             act.Should().Throw<DDBException>();
 
         }
@@ -88,7 +97,7 @@ namespace DDB.Tests
             var entries = DroneDB.Add(testFolder, new[] { Path.Join(testFolder, "file2.txt"), Path.Join(testFolder, "file3.txt") });
             entries.Should().HaveCount(2);
 
-            DroneDB.Remove(testFolder, "file.txt");
+            DroneDB.Remove(testFolder, Path.Combine(testFolder, "file.txt"));
 
             Assert.Throws<DDBException>(() => DroneDB.Remove(testFolder, "invalid"));
         }
@@ -101,7 +110,6 @@ namespace DDB.Tests
 
             act = () => DroneDB.Info((string)null);
             act.Should().Throw<DDBException>();
-
         }
 
         [Test]
@@ -162,6 +170,10 @@ namespace DDB.Tests
 
             act = () => DroneDB.List(null, "wefrfwef");
             act.Should().Throw<DDBException>();
+
+            act = () => DroneDB.List("invalid", (string)null);
+            act.Should().Throw<DDBException>();
+
         }
 
         [Test]
@@ -171,7 +183,7 @@ namespace DDB.Tests
 
             var ddbPath = Path.Combine(test.TestFolder, "public", "default");
 
-            var res = DroneDB.List(ddbPath, "DJI_0027.JPG");
+            var res = DroneDB.List(ddbPath, Path.Combine(ddbPath, "DJI_0027.JPG"));
 
             res.Should().HaveCount(1);
             var entry = res.First();
@@ -187,7 +199,11 @@ namespace DDB.Tests
 
             var ddbPath = Path.Combine(test.TestFolder, "public", "default");
 
-            var res = DroneDB.List(ddbPath, ".", true);
+            var res = DroneDB.List(ddbPath, Path.Combine(ddbPath, "."), true);
+
+            res.Should().HaveCount(26);
+
+            res = DroneDB.List(ddbPath, ddbPath, true);
 
             res.Should().HaveCount(26);
 
@@ -218,10 +234,10 @@ namespace DDB.Tests
 
             var ddbPath = Path.Combine(test.TestFolder, "public", "default");
 
-            var res = DroneDB.List(ddbPath, fileName);
+            var res = DroneDB.List(ddbPath, Path.Combine(ddbPath, fileName));
             res.Should().HaveCount(1);
 
-            DroneDB.Remove(ddbPath, fileName);
+            DroneDB.Remove(ddbPath, Path.Combine(ddbPath, fileName));
 
             res = DroneDB.List(ddbPath, fileName);
             res.Should().HaveCount(0);
@@ -236,8 +252,8 @@ namespace DDB.Tests
             const string fileName = ".";
 
             var ddbPath = Path.Combine(test.TestFolder, "public", "default");
-            
-            DroneDB.Remove(ddbPath, fileName);
+
+            DroneDB.Remove(ddbPath, Path.Combine(ddbPath, fileName));
 
             var res = DroneDB.List(ddbPath, ".", true);
             res.Should().HaveCount(0);
@@ -253,7 +269,7 @@ namespace DDB.Tests
 
             var ddbPath = Path.Combine(test.TestFolder, "public", "default");
 
-            Action act = () => DroneDB.Remove(ddbPath, fileName);
+            Action act = () => DroneDB.Remove(ddbPath, Path.Combine(ddbPath, fileName));
 
             act.Should().Throw<DDBException>();
         }
