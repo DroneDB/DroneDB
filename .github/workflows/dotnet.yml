@@ -23,7 +23,7 @@ jobs:
             dir
         - name: Test .NET bindings
           run: |
-            echo ::set-env name=PROJ_LIB::$GITHUB_WORKSPACE\build
+            echo "PROJ_LIB=$GITHUB_WORKSPACE/build" >> $GITHUB_ENV
             dir $PROJ_LIB
             cd dotnet
             dotnet test -c Release
@@ -52,7 +52,7 @@ jobs:
           run: cd build && make -j$(nproc) ddb && sudo make install && sudo ldconfig
         - name: Test .NET bindings
           run: |
-            echo ::set-env name=PROJ_LIB::$GITHUB_WORKSPACE/build
+            echo "PROJ_LIB=$GITHUB_WORKSPACE/build" >> $GITHUB_ENV
             ls $PROJ_LIB
             cd dotnet            
             dotnet test -c Release         
