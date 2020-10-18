@@ -23,8 +23,7 @@ jobs:
             dir
         - name: Test .NET bindings
           run: |
-            echo "PROJ_LIB=.\build" >> $GITHUB_ENV
-            dir $PROJ_LIB
+            ./scripts/setup_windows_env.bat
             cd dotnet
             dotnet test -c Release
         - name: Publish .NET bindings
