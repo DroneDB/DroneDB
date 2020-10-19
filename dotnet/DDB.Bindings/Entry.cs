@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
+using Newtonsoft.Json.Linq;
 
 namespace DDB.Bindings
 {
@@ -25,10 +26,10 @@ namespace DDB.Bindings
         public int Depth { get; set; }
 
         [JsonProperty("point_geom")]
-        public string PointGeometry { get; set; }
+        public JObject PointGeometry { get; set; }
 
         [JsonProperty("polygon_geom")]
-        public string PolygonGeometry { get; set; }
+        public JObject PolygonGeometry { get; set; }
     }
 
     // Unix seconds, with decimal places for millisecond precision

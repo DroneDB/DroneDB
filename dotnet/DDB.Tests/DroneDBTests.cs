@@ -156,6 +156,8 @@ namespace DDB.Tests
             info.Type.Should().Be(EntryType.GeoImage);
             info.Size.Should().Be(3876862);
             info.Depth.Should().Be(0);
+            info.PointGeometry.Should().NotBeNull();
+            info.PolygonGeometry.Should().NotBeNull();
 
         }
 
