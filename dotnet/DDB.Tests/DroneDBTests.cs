@@ -136,6 +136,28 @@ namespace DDB.Tests
         }
 
         [Test]
+        public void Add_ImageFile_Ok()
+        {
+
+            using var test = new TestFS(Test1ArchiveUrl, BaseTestFolder);
+
+            var ddbPath = Path.Combine(test.TestFolder, "public", "default");
+
+            using var tempFile = new TempFile(TestFileUrl, BaseTestFolder);
+
+            DroneDB.Remove(ddbPath, Path.Combine(ddbPath, "DJI_0023.JPG"));
+
+            var destPath = Path.Combine(ddbPath, Path.GetFileName(tempFile.FilePath));
+
+            File.Move(tempFile.FilePath, destPath);
+
+            var res = DroneDB.Add(ddbPath, destPath);
+
+            res.Count.Should().Be(1);
+
+        }
+        
+        [Test]
         public void Info_ImageFile_Details()
         {
 
