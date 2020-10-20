@@ -28,8 +28,12 @@ void DDBRegisterProcess(bool verbose){
     std::string projPaths = io::getExeFolderPath().string() + ":/usr/share/proj";
     setenv("PROJ_LIB", projPaths.c_str(), 1);
 #endif
-    init_logger();
-    if (verbose) {
+
+    // Gets the environment variable to enable logging to file
+    auto logToFile = std::getenv(DDB_LOG_ENV) != NULL;
+
+    init_logger(logToFile);
+    if (verbose || logToFile) {
         set_logger_verbose();
     }
     Database::Initialize();
