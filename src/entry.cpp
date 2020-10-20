@@ -288,7 +288,7 @@ void Entry::toJSON(json &j) const{
     if (!this->meta.empty()) j["meta"] = this->meta;
     j["mtime"] = this->mtime;
     j["size"] = this->size;
-    //j["depth"] = this->depth;
+    j["depth"] = this->depth;
 
     if (!this->point_geom.empty()) j["point_geom"] = this->point_geom.toGeoJSON();
     if (!this->polygon_geom.empty()) j["polygon_geom"] = this->polygon_geom.toGeoJSON();
