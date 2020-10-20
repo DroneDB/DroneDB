@@ -503,6 +503,47 @@ TEST(listIndex, subFolder) {
 
 }
 
+TEST(listIndex, fileExactInSubFolderDetails) {
+
+    TestArea ta(TEST_NAME);
+
+    const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/registry/DdbFactoryTest/dbase.sqlite", "dbase.sqlite");
+
+    const auto testFolder = ta.getFolder("test");
+    create_directory(testFolder / ".ddb");
+    fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
+    const auto dbPath = testFolder / ".ddb" / "dbase.sqlite";
+    EXPECT_TRUE(fs::exists(dbPath));
+
+    Database db;
+
+    db.open(dbPath.string());
+
+    std::vector<std::string> toList;
+
+    toList.emplace_back((testFolder / "Sub" / "20200610_144436.jpg").string());
+    
+    std::ostringstream out; 
+
+    listIndex(&db, toList, out, "json");
+
+    auto j = json::parse(out.str());
+
+    std::cout << j.dump(4) << std::endl;
+
+    EXPECT_NE(j, json::value_t::discarded);
+
+    auto el = j[0];
+
+    EXPECT_EQ(el["depth"], 1);
+    EXPECT_EQ(el["size"], 8248241);
+    EXPECT_EQ(el["type"], 3);
+    EXPECT_EQ(el["path"], "Sub/20200610_144436.jpg");
+
+    db.close();
+
+}
+
 TEST(listIndex, fileExactInSubfolder) {
     TestArea ta(TEST_NAME);
 

@@ -10,6 +10,7 @@ using System.Linq;
 using FluentAssertions;
 using Microsoft.VisualStudio.TestPlatform.ObjectModel.Adapter;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace DDB.Tests
 {
@@ -23,7 +24,7 @@ namespace DDB.Tests
         [SetUp]
         public void Setup()
         {
-            DroneDB.RegisterProcess();
+            DroneDB.RegisterProcess(true);
         }
 
         [Test]
@@ -197,6 +198,47 @@ namespace DDB.Tests
 
             act = () => DroneDB.List("invalid", (string)null);
             act.Should().Throw<DDBException>();
+
+        }
+
+        [Test]
+        public void List_ExistingFileSubFolder_Ok()
+        {
+            using var fs = new TestFS(Test1ArchiveUrl, nameof(DroneDBTests));
+
+            const string fileName = "Sub/20200610_144436.jpg";
+            const int expectedDepth = 1;
+            const int expectedSize = 8248241;
+            const int expectedType = 3;
+            const string expectedHash = "f27ddc96daf9aeff3c026de8292681296c3e9d952b647235878c50f2b7b39e94";
+            var expectedModifiedTime = new DateTime(2020, 06, 10, 14, 44, 36);
+            var expectedMeta = JsonConvert.DeserializeObject<JObject>(
+                "{\"captureTime\":1591800276004.8,\"focalLength\":4.16,\"focalLength35\":26.0,\"height\":3024,\"make\":\"samsung\",\"model\":\"SM-G950F\",\"orientation\":1,\"sensor\":\"samsung sm-g950f\",\"sensorHeight\":4.32,\"sensorWidth\":5.76,\"width\":4032}");
+            //const double expectedLatitude = 45.50027;
+            //const double expectedLongitude = 10.60667;
+            //const double expectedAltitude = 141;
+
+
+            var ddbPath = Path.Combine(fs.TestFolder, "public", "default");
+
+            var res = DroneDB.List(ddbPath, Path.Combine(ddbPath, fileName));
+
+            res.Should().HaveCount(1);
+
+            var file = res.First();
+
+            file.Path.Should().Be(fileName);
+            // TODO: Handle different timezones
+            file.ModifiedTime.Should().BeCloseTo(expectedModifiedTime, new TimeSpan(6, 0, 0));
+            file.Hash.Should().Be(expectedHash);
+            file.Depth.Should().Be(expectedDepth);
+            file.Size.Should().Be(expectedSize);
+            file.Type.Should().Be(expectedType);
+            file.Meta.Should().BeEquivalentTo(expectedMeta);
+            file.PointGeometry.Should().NotBeNull();
+            //file.PointGeometry.Coordinates.Latitude.Should().BeApproximately(expectedLatitude, 0.00001);
+            //file.PointGeometry.Coordinates.Longitude.Should().BeApproximately(expectedLongitude, 0.00001);
+            //file.PointGeometry.Coordinates.Altitude.Should().Be(expectedAltitude);
 
         }
 
