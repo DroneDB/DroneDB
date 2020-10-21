@@ -22,8 +22,8 @@
 namespace ddb {
 
 
-    DDB_DLL void loadPointGeom(BasicPointGeometry *point_geom, std::string& text);
-    DDB_DLL void loadPolygonGeom(BasicPolygonGeometry *polygon_geom, std::string& text);
+    DDB_DLL void loadPointGeom(BasicPointGeometry *point_geom, const std::string& text);
+    DDB_DLL void loadPolygonGeom(BasicPolygonGeometry *polygon_geom, const std::string& text);
 
 struct Entry {
     std::string path = "";
@@ -43,8 +43,13 @@ struct Entry {
 
     Entry() { }
 
+    
     Entry(Statement& s) {
 
+        LOGD << "Columns: " << s.getColumnsCount();
+
+        // Expects a SELECT clause with: (order matters)
+        // path, hash, type, meta, mtime, size, depth, AsGeoJSON(point_geom), AsGeoJSON(polygon_geom)
         this->path = s.getText(0);
         this->hash = s.getText(1);
         this->type = (EntryType)s.getInt(2);
@@ -53,8 +58,22 @@ struct Entry {
         this->size = s.getInt64(5);
         this->depth = s.getInt(6);
         
-        //ddb::loadPointGeom(this->point_geom, s.getText(7));
-        //ddb::loadPolygonGeom(this->polygon_geom, s.getText(8));
+
+        if (s.getColumnsCount() == 9) {
+
+            const auto point_geom_raw = s.getText(7);
+
+            //LOGD << "point_geom: " << point_geom_raw;
+            if (!point_geom_raw.empty()) ddb::loadPointGeom(&this->point_geom, point_geom_raw);
+            //LOGD << "OK";
+
+            const auto polygon_geom_raw = s.getText(8);
+
+            //LOGD << "polygon_geom: " << polygon_geom_raw;
+            if (!polygon_geom_raw.empty()) ddb::loadPolygonGeom(&this->polygon_geom, polygon_geom_raw);
+            //LOGD << "OK";
+
+        }
     }
 
 };

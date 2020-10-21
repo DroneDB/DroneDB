@@ -381,7 +381,7 @@ void parsePoint(BasicGeometry* point_geom, nlohmann::basic_json<>::value_type co
 	point_geom->addPoint(x, y, z);
 }
 
-void loadPointGeom(BasicPointGeometry *point_geom, std::string& text)
+void loadPointGeom(BasicPointGeometry *point_geom, const std::string& text)
 {
     if (text.empty()) 
         throw DBException("text is empty");
@@ -408,7 +408,7 @@ void loadPointGeom(BasicPointGeometry *point_geom, std::string& text)
 
 }
 
-void loadPolygonGeom(BasicPolygonGeometry *polygon_geom, std::string& text)
+void loadPolygonGeom(BasicPolygonGeometry *polygon_geom, const std::string& text)
 {
 	/*
 	{

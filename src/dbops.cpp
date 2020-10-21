@@ -410,7 +410,7 @@ std::vector<Entry> getMatchingEntries(Database* db, const fs::path path, int max
 
     }
 
-    std::string sql = "SELECT * FROM entries WHERE path LIKE ? ESCAPE '/'";
+    std::string sql = "SELECT path, hash, type, meta, mtime, size, depth, AsGeoJSON(point_geom), AsGeoJSON(polygon_geom) FROM entries WHERE path LIKE ? ESCAPE '/'";
 
     if (maxRecursionDepth > 0)
         sql += " AND depth <= " + std::to_string(maxRecursionDepth - 1);
