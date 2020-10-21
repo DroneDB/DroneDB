@@ -99,6 +99,11 @@ double Statement::getDouble(int columnId){
     return sqlite3_column_double(stmt, columnId);
 }
 
+int Statement::getColumnsCount() const
+{
+    return sqlite3_column_count(stmt);
+}
+
 void Statement::reset() {
     assert(stmt != nullptr);
 
