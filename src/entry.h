@@ -21,6 +21,10 @@
 
 namespace ddb {
 
+
+    DDB_DLL void loadPointGeom(BasicPointGeometry *point_geom, std::string& text);
+    DDB_DLL void loadPolygonGeom(BasicPolygonGeometry *polygon_geom, std::string& text);
+
 struct Entry {
     std::string path = "";
     std::string hash = "";
@@ -49,15 +53,17 @@ struct Entry {
         this->size = s.getInt64(5);
         this->depth = s.getInt(6);
         
-        // TODO by HeDo: I don't know how to parse these. They are blobs, cannot use getText
-        // this->point_geom = ?
-        // this->polygon_geom = ?
+        //ddb::loadPointGeom(this->point_geom, s.getText(7));
+        //ddb::loadPolygonGeom(this->polygon_geom, s.getText(8));
     }
+
 };
 
 DDB_DLL bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entry, bool wishHash = true, bool stopOnError = true);
 DDB_DLL Geographic2D getRasterCoordinate(OGRCoordinateTransformationH hTransform, double *geotransform, double x, double y);
 DDB_DLL void calculateFootprint(const SensorSize &sensorSize, const GeoLocation &geo, const Focal &focal, const CameraOrientation &cameraOri, double relAltitude, BasicGeometry &geom);
+
+
 
 }
 

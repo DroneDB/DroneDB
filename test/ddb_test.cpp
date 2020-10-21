@@ -784,4 +784,59 @@ TEST(listIndex, wildcardRecursiveWithLimit) {
 
 }
 
+TEST(loadPointGeom, jsonOk)
+{
+	BasicPointGeometry point_geom;
+    std::string text = R"({"type":"Point","coordinates":[-91.99456000000001,46.842607,198.31]})";
+    	
+    loadPointGeom(&point_geom, text);
+
+    std::cout << point_geom.toWkt() << std::endl;
+    EXPECT_EQ(point_geom.toWkt(), "POINT Z (-91.994560 46.842607 198.310000)");
+}
+
+TEST(loadPointGeom, wrongType)
+{
+    BasicPointGeometry point_geom;
+    std::string text = R"({"type":"Polygon","coordinates":[-91.99456000000001,46.842607,198.31]})";
+
+    EXPECT_THROW(
+        loadPointGeom(&point_geom, text),
+        DBException);
+
+}
+
+TEST(loadPointGeom, wrongNumberOfCoordinates)
+{
+    BasicPointGeometry point_geom;
+    std::string text = R"({"type":"Point","coordinates":[-91.99456000000001,-91.99456000000001,46.842607,198.31]})";
+
+    EXPECT_THROW(
+        loadPointGeom(&point_geom, text),
+        DBException);
+
+}
+
+TEST(loadPointGeom, emptyJson)
+{
+    BasicPointGeometry point_geom;
+    std::string text = "";
+
+    EXPECT_THROW(
+        loadPointGeom(&point_geom, text),
+        DBException);
+
+}
+
+TEST(loadPointGeom, emptyJsonObj)
+{
+    BasicPointGeometry point_geom;
+    std::string text = "{}";
+
+    EXPECT_THROW(
+        loadPointGeom(&point_geom, text),
+        DBException);
+
+}
+
 }
