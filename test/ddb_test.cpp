@@ -787,7 +787,7 @@ TEST(listIndex, wildcardRecursiveWithLimit) {
 TEST(loadPointGeom, jsonOk)
 {
 	BasicPointGeometry point_geom;
-    std::string text = R"({"type":"Point","coordinates":[-91.99456000000001,46.842607,198.31]})";
+    std::string text = R"({"type":"Point","coordinates":[-91.994560,46.842607,198.31]})";
     	
     loadPointGeom(&point_geom, text);
 
@@ -798,7 +798,7 @@ TEST(loadPointGeom, jsonOk)
 TEST(loadPointGeom, wrongType)
 {
     BasicPointGeometry point_geom;
-    std::string text = R"({"type":"Polygon","coordinates":[-91.99456000000001,46.842607,198.31]})";
+    std::string text = R"({"type":"Polygon","coordinates":[-91.994560,46.842607,198.31]})";
 
     EXPECT_THROW(
         loadPointGeom(&point_geom, text),
@@ -809,7 +809,7 @@ TEST(loadPointGeom, wrongType)
 TEST(loadPointGeom, wrongNumberOfCoordinates)
 {
     BasicPointGeometry point_geom;
-    std::string text = R"({"type":"Point","coordinates":[-91.99456000000001,-91.99456000000001,46.842607,198.31]})";
+    std::string text = R"({"type":"Point","coordinates":[-91.994560,-91.994560,46.842607,198.31]})";
 
     EXPECT_THROW(
         loadPointGeom(&point_geom, text),
@@ -838,5 +838,61 @@ TEST(loadPointGeom, emptyJsonObj)
         DBException);
 
 }
+
+TEST(loadPolygonGeom, jsonOk)
+{
+    BasicPolygonGeometry point_geom;
+    std::string text = R"({"type":"Polygon","coordinates":[[[-91.99469773385999,46.84296499722999,158.5100007629],[-91.99507616866998,46.84271189348,158.5100007629],[-91.9944204067,46.84225026546,158.5100007629],[-91.99404197212,46.84250336707,158.5100007629],[-91.99469773385999,46.84296499722999,158.5100007629]]]})";
+
+    loadPolygonGeom(&point_geom, text);
+
+    std::cout << point_geom.toWkt() << std::endl;
+    EXPECT_EQ(point_geom.toWkt(), "POLYGONZ ((-91.99469773386 46.84296499723 158.5100007629, -91.99507616867 46.84271189348 158.5100007629, -91.9944204067 46.84225026546 158.5100007629, -91.99404197212 46.84250336707 158.5100007629, -91.99469773386 46.84296499723 158.5100007629))");
+}
+
+TEST(loadPolygonGeom, wrongType)
+{
+    BasicPolygonGeometry point_geom;
+    std::string text = R"({"type":"Point","coordinates":[-91.994560,46.842607,198.31]})";
+
+    EXPECT_THROW(
+        loadPolygonGeom(&point_geom, text),
+        DBException);
+
+}
+
+TEST(loadPolygonGeom, wrongNumberOfCoordinates)
+{
+    BasicPolygonGeometry point_geom;
+    std::string text = R"({"type":"Polygon","coordinates":[[[-91.99469773385999,46.84296499722999,46.84296499722999,158.5100007629],[-91.99507616866998,46.84271189348,158.5100007629],[-91.9944204067,46.84225026546,158.5100007629],[-91.99404197212,46.84250336707,158.5100007629],[-91.99469773385999,46.84296499722999,158.5100007629]]]})";
+
+    EXPECT_THROW(
+        loadPolygonGeom(&point_geom, text),
+        DBException);
+
+}
+
+TEST(loadPolygonGeom, emptyJson)
+{
+    BasicPolygonGeometry point_geom;
+    std::string text = "";
+
+    EXPECT_THROW(
+        loadPolygonGeom(&point_geom, text),
+        DBException);
+
+}
+
+TEST(loadPolygonGeom, emptyJsonObj)
+{
+    BasicPolygonGeometry point_geom;
+    std::string text = "{}";
+
+    EXPECT_THROW(
+        loadPolygonGeom(&point_geom, text),
+        DBException);
+
+}
+
 
 }
