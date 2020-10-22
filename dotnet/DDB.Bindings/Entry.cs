@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
+using Newtonsoft.Json.Linq;
 
 namespace DDB.Bindings
 {
@@ -15,7 +16,7 @@ namespace DDB.Bindings
         public EntryType Type { get; set; }
 
         // TODO: this might change in the future
-        public Dictionary<string,string> Meta { get; set; }
+        public Dictionary<string, string> Meta { get; set; }
 
         [JsonProperty("mtime")]
         [JsonConverter(typeof(SecondEpochConverter))]
@@ -24,9 +25,11 @@ namespace DDB.Bindings
         public int Size { get; set; }
         public int Depth { get; set; }
 
-        public string PointGeometry { get; set; }
+        [JsonProperty("point_geom")]
+        public JObject PointGeometry { get; set; }
 
-        public string PolygonGeometry { get; set; }
+        [JsonProperty("polygon_geom")]
+        public JObject PolygonGeometry { get; set; }
     }
 
     // Unix seconds, with decimal places for millisecond precision

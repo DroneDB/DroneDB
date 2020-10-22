@@ -90,10 +90,11 @@ static inline bool sameFloat(float a, float b){
 // https://stackoverflow.com/questions/2342162/stdstring-formatting-like-sprintf/25440014
 template<typename ... Args>
 std::string stringFormat( const std::string& format, Args ... args ) {
-    size_t size = snprintf( nullptr, 0, format.c_str(), args ... ) + 1; // Extra space for '\0'
-    std::unique_ptr<char[]> buf( new char[ size ] );
-    snprintf( buf.get(), size, format.c_str(), args ... );
-    return std::string( buf.get(), buf.get() + size - 1 ); // We don't want the '\0' inside
+    const size_t size = snprintf(nullptr, 0, format.c_str(), args ...) + 1; // Extra space for '\0'
+    if (size <= 0) { throw std::runtime_error("Error during formatting."); }
+    const std::unique_ptr<char[]> buf(new char[size]);
+    snprintf(buf.get(), size, format.c_str(), args ...);
+    return std::string(buf.get(), buf.get() + size - 1); // We don't want the '\0' inside
 }
 
 //https://stackoverflow.com/questions/16605967/set-precision-of-stdto-string-when-converting-floating-point-values
@@ -128,6 +129,7 @@ time_t currentUnixTimestamp();
 void string_replace(std::string& str, const std::string& from, const std::string& to);
 
 void sleep(int msecs);
+
 
 // Fix for removing macros
 #undef max

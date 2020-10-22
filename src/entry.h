@@ -21,6 +21,10 @@
 
 namespace ddb {
 
+
+    DDB_DLL void loadPointGeom(BasicPointGeometry *point_geom, const std::string& text);
+    DDB_DLL void loadPolygonGeom(BasicPolygonGeometry *polygon_geom, const std::string& text);
+
 struct Entry {
     std::string path = "";
     std::string hash = "";
@@ -39,8 +43,13 @@ struct Entry {
 
     Entry() { }
 
+    
     Entry(Statement& s) {
 
+        LOGD << "Columns: " << s.getColumnsCount();
+
+        // Expects a SELECT clause with: (order matters)
+        // path, hash, type, meta, mtime, size, depth, AsGeoJSON(point_geom), AsGeoJSON(polygon_geom)
         this->path = s.getText(0);
         this->hash = s.getText(1);
         this->type = (EntryType)s.getInt(2);
@@ -48,16 +57,32 @@ struct Entry {
         this->mtime = (time_t)s.getInt(4);
         this->size = s.getInt64(5);
         this->depth = s.getInt(6);
-                       
-        // TODO by HeDo: I don't know how to parse these
-        // this->point_geom = ?
-        // this->polygon_geom = ?
+        
+
+        if (s.getColumnsCount() == 9) {
+
+            const auto point_geom_raw = s.getText(7);
+
+            //LOGD << "point_geom: " << point_geom_raw;
+            if (!point_geom_raw.empty()) ddb::loadPointGeom(&this->point_geom, point_geom_raw);
+            //LOGD << "OK";
+
+            const auto polygon_geom_raw = s.getText(8);
+
+            //LOGD << "polygon_geom: " << polygon_geom_raw;
+            if (!polygon_geom_raw.empty()) ddb::loadPolygonGeom(&this->polygon_geom, polygon_geom_raw);
+            //LOGD << "OK";
+
+        }
     }
+
 };
 
 DDB_DLL bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entry, bool wishHash = true, bool stopOnError = true);
 DDB_DLL Geographic2D getRasterCoordinate(OGRCoordinateTransformationH hTransform, double *geotransform, double x, double y);
 DDB_DLL void calculateFootprint(const SensorSize &sensorSize, const GeoLocation &geo, const Focal &focal, const CameraOrientation &cameraOri, double relAltitude, BasicGeometry &geom);
+
+
 
 }
 

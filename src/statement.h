@@ -35,6 +35,8 @@ class Statement {
     DDB_DLL long long getInt64(int columnId);
     DDB_DLL std::string getText(int columnId);
     DDB_DLL double getDouble(int columnId);
+
+    DDB_DLL int getColumnsCount() const;
     // TODO: more
 
     DDB_DLL void reset();
