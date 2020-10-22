@@ -16,5 +16,10 @@ namespace DDB.Bindings
 
         }
 
+        public DDBException(string message, Exception innerException) : base(message, innerException)
+        {
+
+        }
+
     }
 }

@@ -91,12 +91,20 @@ long long Statement::getInt64(int columnId) {
 
 std::string Statement::getText(int columnId) {
     assert(stmt != nullptr);
-    return std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, columnId)));
+    const auto res = reinterpret_cast<const char*>(sqlite3_column_text(stmt, columnId));
+	// If the column is NULL this would go KabOOM without checking for nullptr
+    return res == nullptr ? std::string() : std::string(res);
 }
 
 double Statement::getDouble(int columnId){
     assert(stmt != nullptr);
     return sqlite3_column_double(stmt, columnId);
+}
+
+int Statement::getColumnsCount() const
+{
+    assert(stmt != nullptr);
+    return sqlite3_column_count(stmt);
 }
 
 void Statement::reset() {

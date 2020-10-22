@@ -4,9 +4,14 @@
 
 #include "logger.h"
 
-void init_logger() {
+void init_logger(bool logToFile) {
 	static plog::ConsoleAppender<plog::TxtFormatter> consoleAppender;
-    plog::init(plog::info, &consoleAppender);
+
+    if (logToFile) {
+        static plog::RollingFileAppender<plog::CsvFormatter> fileAppender(LOG_FILE_NAME, 32000, 5);
+        plog::init(plog::info, &consoleAppender).addAppender(&fileAppender);
+    } else
+        plog::init(plog::info, &consoleAppender);
 }
 
 void set_logger_verbose() {

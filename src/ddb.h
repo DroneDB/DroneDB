@@ -10,6 +10,8 @@
 extern "C" {
 #endif
 
+#define DDB_LOG_ENV "DDB_LOG"
+
 enum DDBErr {
     DDBERR_NONE = 0, // No error
     DDBERR_EXCEPTION = 1 // Generic app exception
