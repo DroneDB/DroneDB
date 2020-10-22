@@ -178,7 +178,8 @@ namespace DDB.Tests
             info.Hash.Should().Be("246fed68dec31b17dc6d885cee10a2c08f2f1c68901a8efa132c60bdb770e5ff");
             info.Type.Should().Be(EntryType.GeoImage);
             info.Size.Should().Be(3876862);
-            info.Depth.Should().Be(0);
+            // We can ignore this
+            // info.Depth.Should().Be(0);
             info.PointGeometry.Should().NotBeNull();
             info.PolygonGeometry.Should().NotBeNull();
 
@@ -212,7 +213,7 @@ namespace DDB.Tests
             const int expectedType = 3;
             const string expectedHash = "f27ddc96daf9aeff3c026de8292681296c3e9d952b647235878c50f2b7b39e94";
             var expectedModifiedTime = new DateTime(2020, 06, 10, 14, 44, 36);
-            var expectedMeta = JsonConvert.DeserializeObject<JObject>(
+            var expectedMeta = JsonConvert.DeserializeObject<Dictionary<string, string>>(
                 "{\"captureTime\":1591800276004.8,\"focalLength\":4.16,\"focalLength35\":26.0,\"height\":3024,\"make\":\"samsung\",\"model\":\"SM-G950F\",\"orientation\":1,\"sensor\":\"samsung sm-g950f\",\"sensorHeight\":4.32,\"sensorWidth\":5.76,\"width\":4032}");
             //const double expectedLatitude = 45.50027;
             //const double expectedLongitude = 10.60667;
@@ -254,7 +255,10 @@ namespace DDB.Tests
             res.Should().HaveCount(1);
             var entry = res.First();
 
-            entry.Should().BeEquivalentTo(JsonConvert.DeserializeObject<Entry>("{\"Path\":\"DJI_0027.JPG\",\"Hash\":\"3157958dd4f2562c8681867dfd6ee5bf70b6e9595b3e3b4b76bbda28342569ed\",\"Type\":3,\"Meta\":{\"cameraPitch\":\"-89.9000015258789\",\"cameraRoll\":\"0.0\",\"cameraYaw\":\"-131.3000030517578\",\"captureTime\":\"1466699584000.0\",\"focalLength\":\"3.4222222222222225\",\"focalLength35\":\"20.0\",\"height\":\"2250\",\"make\":\"DJI\",\"model\":\"FC300S\",\"orientation\":\"1\",\"sensor\":\"dji fc300s\",\"sensorHeight\":\"3.4650000000000003\",\"sensorWidth\":\"6.16\",\"width\":\"4000\"},\"mtime\":1491156087,\"Size\":3185449,\"Depth\":0,\"PointGeometry\":null,\"PolygonGeometry\":null}"));
+            Entry expectedEntry = JsonConvert.DeserializeObject<Entry>(
+                "{\"depth\":0,\"hash\":\"3157958dd4f2562c8681867dfd6ee5bf70b6e9595b3e3b4b76bbda28342569ed\",\"meta\":{\"cameraPitch\":-89.9000015258789,\"cameraRoll\":0.0,\"cameraYaw\":-131.3000030517578,\"captureTime\":1466699584000.0,\"focalLength\":3.4222222222222225,\"focalLength35\":20.0,\"height\":2250,\"make\":\"DJI\",\"model\":\"FC300S\",\"orientation\":1,\"sensor\":\"dji fc300s\",\"sensorHeight\":3.4650000000000003,\"sensorWidth\":6.16,\"width\":4000},\"mtime\":1491156087,\"path\":\"DJI_0027.JPG\",\"point_geom\":{\"crs\":{\"properties\":{\"name\":\"EPSG:4326\"},\"type\":\"name\"},\"geometry\":{\"coordinates\":[-91.99408299999999,46.84260499999999,198.5099999999999],\"type\":\"Point\"},\"properties\":{},\"type\":\"Feature\"},\"polygon_geom\":{\"crs\":{\"properties\":{\"name\":\"EPSG:4326\"},\"type\":\"name\"},\"geometry\":{\"coordinates\":[[[-91.99397836402999,46.8422402913,158.5099999999999],[-91.99357489543,46.84247729175999,158.5099999999999],[-91.99418894036,46.84296945989999,158.5099999999999],[-91.99459241001999,46.8427324573,158.5099999999999],[-91.99397836402999,46.8422402913,158.5099999999999]]],\"type\":\"Polygon\"},\"properties\":{},\"type\":\"Feature\"},\"size\":3185449,\"type\":3}");
+
+            entry.Should().BeEquivalentTo(expectedEntry);
 
         }
 
