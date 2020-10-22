@@ -20,6 +20,7 @@ using namespace ddb;
 
 char ddbLastError[255];
 
+// Could not be enough in a multi-threaded environment: check std::once_flag and std::call_once instead
 static bool initialized = false;
 
 void DDBRegisterProcess(bool verbose){
