@@ -20,8 +20,15 @@ using namespace ddb;
 
 char ddbLastError[255];
 
+static bool initialized = false;
+
 void DDBRegisterProcess(bool verbose){
 
+	// Prevent multiple initializations
+    if (initialized) {
+        LOGD << "Called DDBRegisterProcess when already initialized";
+    	return;
+    }
 #ifndef WIN32
     // Windows does not let us change env vars for some reason
     // so this works only on Unix
@@ -30,7 +37,7 @@ void DDBRegisterProcess(bool verbose){
 #endif
 
     // Gets the environment variable to enable logging to file
-    auto logToFile = std::getenv(DDB_LOG_ENV) != NULL;
+    const auto logToFile = std::getenv(DDB_LOG_ENV) != nullptr;
 
     init_logger(logToFile);
     if (verbose || logToFile) {
@@ -39,6 +46,8 @@ void DDBRegisterProcess(bool verbose){
     Database::Initialize();
     net::Initialize();
     GDALAllRegister();
+
+    initialized = true;
 }
 
 const char* DDBGetVersion(){
