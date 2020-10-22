@@ -386,7 +386,7 @@ int deleteFromIndex(Database* db, const std::string &query, bool isFolder)
 }
 
 	
-std::vector<Entry> getMatchingEntries(Database* db, const fs::path path, int maxRecursionDepth, bool isFolder) {
+std::vector<Entry> getMatchingEntries(Database* db, const fs::path& path, int maxRecursionDepth, bool isFolder) {
 
 	// 0 is ALL_DEPTHS
 	if (maxRecursionDepth < 0)
