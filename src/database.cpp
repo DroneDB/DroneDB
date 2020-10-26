@@ -14,6 +14,8 @@ void Database::Initialize() {
     spatialite_init (0);
 }
 
+// TODO: Add password table here
+
 Database &Database::createTables() {
     std::string sql = R"<<<(
   SELECT InitSpatialMetaData(1, 'NONE');
