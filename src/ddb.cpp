@@ -6,6 +6,7 @@
 #include "ddb.h"
 #include "dbops.h"
 #include "info.h"
+#include "status.h"
 #include "version.h"
 #include "mio.h"
 #include "logger.h"
