@@ -50,7 +50,7 @@ fs::path rootDirectory(Database *db) {
 // are includes in the result.
 // ".ddb" files/dirs are always ignored and skipped.
 // If a directory is in the input paths, they are included regardless of includeDirs
-std::vector<fs::path> getIndexPathList(fs::path rootDirectory, const std::vector<std::string> &paths, bool includeDirs) {
+std::vector<fs::path> getIndexPathList(fs::path rootDirectory, const std::vector<std::string> &paths, bool includeDirs, bool skipParentCheck) {
     std::vector<fs::path> result;
     std::unordered_map<std::string, bool> directories;
 
@@ -58,7 +58,7 @@ std::vector<fs::path> getIndexPathList(fs::path rootDirectory, const std::vector
         if (p.empty()) throw FSException("Some paths are empty");
     }
 
-    if (!io::Path(rootDirectory).hasChildren(paths)) {
+    if (!skipParentCheck && !io::Path(rootDirectory).hasChildren(paths)) {
         throw FSException("Some paths are not contained within: " + rootDirectory.string() + ". Did you run ddb init?");
     }
 
