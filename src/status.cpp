@@ -12,7 +12,7 @@
 namespace ddb
 {
 
-	void statusIndex(Database* db)
+	void statusIndex(Database* db, const FileStatusCallback& cb)
 	{
 
 		const fs::path directory = rootDirectory(db);
@@ -35,12 +35,12 @@ namespace ddb
 			{
 				if (checkUpdate(e, p, q->getInt64(1), q->getText(2)))
 				{
-					std::cout << "M\t" << relPath.string() << std::endl;
+					cb(Modified, relPath.generic());
 				}
 			}
 			else
 			{
-				std::cout << "-\t" << relPath.string() << std::endl;
+				cb(Deleted, relPath.generic());				
 			}
 		}
 
@@ -70,7 +70,8 @@ namespace ddb
 				continue;
 			}
 
-			std::cout << "+\t" << io::Path(p).relativeTo(directory).string() << std::endl;
+			cb(Added, io::Path(p).relativeTo(directory).generic());
+			
 		}
 		
 	}

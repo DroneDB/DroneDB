@@ -31,7 +31,38 @@ void Status::run(cxxopts::ParseResult &opts) {
    
     const auto db = ddb::open(workingDir, true);
 
-    statusIndex(db.get());
+    const auto cb = [](ddb::FileStatus status, const std::string& string)
+    {
+        switch(status)
+        {
+	        case ddb::Added: 
+
+                std::cout << "+\t";
+
+                break;
+        	
+	        case ddb::Deleted: 
+
+                std::cout << "-\t";
+
+                break;
+        	
+	        case ddb::Modified: 
+
+                std::cout << "M\t";
+
+                break;
+        	
+	        default:
+
+                std::cout << "?\t";
+                
+        }
+
+        std::cout << string << std::endl;
+    };
+	
+    statusIndex(db.get(), cb);
 }
 
 }

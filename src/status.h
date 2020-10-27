@@ -11,10 +11,16 @@
 
 namespace ddb {
 
+	enum FileStatus {
 
+		Added,
+		Deleted,
+		Modified
+	};
 
-DDB_DLL void statusIndex(Database *db);
+	typedef std::function<void(const FileStatus status, const std::string& file)> FileStatusCallback;
 
+	DDB_DLL void statusIndex(Database* db, const FileStatusCallback& cb);
 
 }
 
