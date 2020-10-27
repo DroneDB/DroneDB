@@ -201,3 +201,56 @@ DDB_C_BEGIN
 
 DDB_C_END
 }
+
+
+DDB_DLL DDBErr DDBStatus(const char* ddbPath, char** output) {
+DDB_C_BEGIN
+
+	if (ddbPath == nullptr)
+		throw InvalidArgsException("No ddb path provided");
+
+	if (output == nullptr)
+		throw InvalidArgsException("No output provided");
+
+    const auto db = ddb::open(std::string(ddbPath), true);
+
+    std::ostringstream ss;
+	
+    const auto cb = [&ss](ddb::FileStatus status, const std::string& string)
+    {
+        switch (status)
+        {
+        case ddb::Added:
+
+            ss << "+\t";
+
+            break;
+
+        case ddb::Deleted:
+
+            ss << "-\t";
+
+            break;
+
+        case ddb::Modified:
+
+            ss << "M\t";
+
+            break;
+
+        default:
+
+            ss << "?\t";
+
+        }
+
+        std::cout << string << std::endl;
+    };
+	
+    
+    statusIndex(db.get(), cb);
+
+    utils::copyToPtr(ss.str(), output);
+	
+DDB_C_END
+}

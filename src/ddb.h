@@ -75,6 +75,7 @@ DDB_DLL DDBErr DDBInfo(const char **paths, int numPaths, char** output, const ch
                        const char *geometry = "auto", bool withHash = false, bool stopOnError = true);
 
 /** List files inside index 
+ * @param ddbPath path to a DroneDB database (parent of ".ddb")
  * @param paths array of paths to parse
  * @param numPaths number of paths
  * @param output pointer to C-string where to store result
@@ -83,6 +84,13 @@ DDB_DLL DDBErr DDBInfo(const char **paths, int numPaths, char** output, const ch
  * @param maxRecursionDepth limit the depth of recursion
  * @return DDBERR_NONE on success, an error otherwise */
 DDB_DLL DDBErr DDBList(const char *ddbPath, const char **paths, int numPaths, char **output, const char *format, bool recursive = false, int maxRecursionDepth = 0);
+
+
+/** Show differences between index and filesystem
+ * @param ddbPath path to a DroneDB database (parent of ".ddb")
+ * @param output pointer to C-string where to store result
+ * @return DDBERR_NONE on success, an error otherwise */
+DDB_DLL DDBErr DDBStatus(const char* ddbPath, char **output);
 
 
 #ifdef __cplusplus
