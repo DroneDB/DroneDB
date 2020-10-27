@@ -10,10 +10,8 @@
 #include "dbops.h"
 
 namespace ddb {
-
 	enum FileStatus {
-
-		Added,
+        NotIndexed,
 		Deleted,
 		Modified
 	};

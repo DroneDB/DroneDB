@@ -218,33 +218,17 @@ DDB_C_BEGIN
 	
     const auto cb = [&ss](ddb::FileStatus status, const std::string& string)
     {
-        switch (status)
-        {
-        case ddb::Added:
-
-            ss << "+\t";
-
-            break;
-
-        case ddb::Deleted:
-
-            ss << "-\t";
-
-            break;
-
-        case ddb::Modified:
-
-            ss << "M\t";
-
-            break;
-
-        default:
-
+        switch (status){
+        case ddb::NotIndexed:
             ss << "?\t";
-
+            break;
+        case ddb::Deleted:
+            ss << "!\t";
+            break;
+        case ddb::Modified:
+            ss << "M\t";
+            break;
         }
-
-        std::cout << string << std::endl;
     };
 	
     

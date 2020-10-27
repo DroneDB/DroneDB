@@ -70,7 +70,7 @@ namespace ddb
 				continue;
 			}
 
-			cb(Added, io::Path(p).relativeTo(directory).generic());
+            cb(NotIndexed, io::Path(p).relativeTo(directory).generic());
 			
 		}
 		

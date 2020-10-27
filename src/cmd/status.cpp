@@ -22,7 +22,7 @@ void Status::setOptions(cxxopts::Options &opts) {
 }
 
 std::string Status::description() {
-    return "Show files and directories in the index with changes from the filesystem and vice-versa";
+    return "Show files and directories index status compared to the filesystem";
 }
 
 void Status::run(cxxopts::ParseResult &opts) {
@@ -35,15 +35,15 @@ void Status::run(cxxopts::ParseResult &opts) {
     {
         switch(status)
         {
-	        case ddb::Added: 
+	        case ddb::NotIndexed: 
 
-                std::cout << "+\t";
+                std::cout << "?\t";
 
                 break;
         	
 	        case ddb::Deleted: 
 
-                std::cout << "-\t";
+                std::cout << "!\t";
 
                 break;
         	
