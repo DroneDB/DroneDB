@@ -28,9 +28,7 @@ std::string Status::description() {
 void Status::run(cxxopts::ParseResult &opts) {
 
     const auto workingDir = opts["working-dir"].as<std::string>();
-
-    fs::current_path(workingDir);
-    
+   
     const auto db = ddb::open(workingDir, true);
         
     ddb::statusIndex(db.get());
