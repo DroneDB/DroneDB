@@ -12,66 +12,67 @@
 namespace ddb
 {
 
-    void statusIndex(Database *db)
-    {
+	void statusIndex(Database* db)
+	{
 
-        const fs::path directory = rootDirectory(db);
+		const fs::path directory = rootDirectory(db);
 
-        auto q = db->query("SELECT path,mtime,hash FROM entries");
+		auto q = db->query("SELECT path,mtime,hash FROM entries");
 
-        std::set<std::string> checkedPaths;
+		std::set<std::string> checkedPaths;
 
-        while (q->fetch())
-        {
-            io::Path relPath = fs::path(q->getText(0));
-            auto p = directory / relPath.get(); // TODO: does this work on Windows?
-            Entry e;
+		while (q->fetch())
+		{
+			io::Path relPath = fs::path(q->getText(0));
+			auto p = directory / relPath.get(); // TODO: does this work on Windows?
+			Entry e;
 
-            auto path = p.generic_string();
+			auto path = p.generic_string();
 
-            checkedPaths.insert(path);
+			checkedPaths.insert(path);
 
-            if (exists(p))
-            {
-                if (checkUpdate(e, p, q->getInt64(1), q->getText(2)))
-                {
-                    std::cout << "M\t" << relPath.string() << std::endl;
-                }
-            }
-            else
-            {
-                std::cout << "-\t" << relPath.string() << std::endl;
-            }
-        }
+			if (exists(p))
+			{
+				if (checkUpdate(e, p, q->getInt64(1), q->getText(2)))
+				{
+					std::cout << "M\t" << relPath.string() << std::endl;
+				}
+			}
+			else
+			{
+				std::cout << "-\t" << relPath.string() << std::endl;
+			}
+		}
 
-        auto tmp = std::vector<std::string>();
-        tmp.push_back(directory.string());
+		for (auto i = fs::recursive_directory_iterator(directory);
+			i != fs::recursive_directory_iterator();
+			++i) {
 
-        auto paths = getIndexPathList(directory, tmp, true, true);
+			auto path = i->path();
+			auto p = path.generic_string();
 
-        for (auto const &path : paths)
-        {
+			// Skips already checked folders
+			if (checkedPaths.count(p) == 1)
+				continue;
 
-            auto p = path.generic_string();
+			if (p == directory.generic_string())
+			{
+				LOGD << "Skipping parent folder";
+				continue;
+			}
 
-            // Skips already checked folders
-            if (checkedPaths.count(p) == 1)
-                continue;
+			// Skip .ddb
+			if (path.filename() == ".ddb") i.disable_recursion_pending();
+			
+			if (p.find(".ddb") != std::string::npos)
+			{
+				LOGD << "Skipping ddb folder";
+				continue;
+			}
 
-            if (p == directory.generic_string())
-            {
-                LOGD << "Skipping parent folder";
-                continue;
-            }
-
-            if (p.find(".ddb") != std::string::npos)
-            {
-                LOGD << "Skipping ddb folder";
-                continue;
-            }
-
-            std::cout << "+\t" << io::Path(p).relativeTo(directory).string() << std::endl;
-        }
-    }
+			std::cout << "+\t" << io::Path(p).relativeTo(directory).string() << std::endl;
+		}
+		
+	}
 
 } // namespace ddb

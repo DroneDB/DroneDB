@@ -30,8 +30,8 @@ void Status::run(cxxopts::ParseResult &opts) {
     const auto workingDir = opts["working-dir"].as<std::string>();
    
     const auto db = ddb::open(workingDir, true);
-        
-    ddb::statusIndex(db.get());
+
+    statusIndex(db.get());
 }
 
 }
