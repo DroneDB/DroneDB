@@ -12,13 +12,14 @@ namespace cmd {
 void Status::setOptions(cxxopts::Options &opts) {
     opts
     .positional_help("[args]")
-    .custom_help("status")
+    .custom_help("status [directory]")
     .add_options()
     ("w,working-dir", "Working directory", cxxopts::value<std::string>()->default_value("."));
     
     // Nice to have
     // ("g,group", "Group by status", cxxopts::value<std::string>())
     // ("f,filter", "Filter entries", cxxopts::value<std::string>());
+    opts.parse_positional({"working-dir"});
 }
 
 std::string Status::description() {
