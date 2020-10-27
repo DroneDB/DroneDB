@@ -20,6 +20,7 @@
 #include "tile.h"
 #include "share.h"
 #include "system.h"
+#include "status.h"
 
 namespace cmd {
 
@@ -38,7 +39,8 @@ std::map<std::string, Command*> commands = {
     {"logout", new Logout()},
     {"tile", new Tile()},
     {"share", new Share()},
-    {"system", new System()}
+    {"system", new System()},
+    {"status", new Status()}
 };
 
 std::map<std::string, std::string> aliases = {
