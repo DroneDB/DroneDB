@@ -35,12 +35,12 @@ namespace ddb
             {
                 if (checkUpdate(e, p, q->getInt64(1), q->getText(2)))
                 {
-                    std::cout << "Modified: " << path << std::endl;
+                    std::cout << "M\t" << relPath.string() << std::endl;
                 }
             }
             else
             {
-                std::cout << "Deleted: " << path << std::endl;
+                std::cout << "-\t" << relPath.string() << std::endl;
             }
         }
 
@@ -70,7 +70,7 @@ namespace ddb
                 continue;
             }
 
-            std::cout << "New: " << p << std::endl;
+            std::cout << "+\t" << io::Path(p).relativeTo(directory).string() << std::endl;
         }
     }
 
