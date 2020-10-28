@@ -33,6 +33,11 @@ Database &Database::createTables() {
   SELECT AddGeometryColumn("entries", "point_geom", 4326, "POINTZ", "XYZ");
   SELECT AddGeometryColumn("entries", "polygon_geom", 4326, "POLYGONZ", "XYZ");
 
+  CREATE TABLE IF NOT EXISTS passwords (
+      salt TEXT,
+      hash TEXT      
+  );
+
 )<<<";
 
     LOGD << "About to create tables...";
