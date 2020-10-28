@@ -13,9 +13,9 @@
 
 namespace {
 
-	using namespace ddb;
+    using namespace ddb;
 
-	TEST(passwordManager, append) {
+    TEST(passwordManager, appendVerifyOk) {
 
         TestArea ta(TEST_NAME);
 
@@ -28,10 +28,10 @@ namespace {
         EXPECT_TRUE(fs::exists(dbPath));
 
         Database db;
-        
+
         db.open(dbPath.string());
         db.createTables();
-		
+
         PasswordManager manager(&db);
 
         manager.append("testpassword");
@@ -39,6 +39,6 @@ namespace {
         EXPECT_TRUE(manager.verify("testpassword"));
         EXPECT_FALSE(manager.verify("wrongpassword"));
 
-	}
+    }
 
 }
