@@ -14,7 +14,7 @@
 #include "info.h"
 #include "list.h"
 #include "thumbs.h"
-#include "set.h"
+#include "setexif.h"
 #include "login.h"
 #include "logout.h"
 #include "tile.h"
@@ -33,7 +33,7 @@ std::map<std::string, Command*> commands = {
     {"info", new Info()},
     {"list", new List()},
     {"thumbs", new Thumbs()},
-    {"set", new Set()},
+    {"setexif", new SetExif()},
     {"login", new Login()},
     {"logout", new Logout()},
     {"tile", new Tile()},
