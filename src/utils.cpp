@@ -4,6 +4,8 @@
 
 #include "utils.h"
 
+#include <random>
+
 namespace ddb{
 namespace utils{
 
@@ -99,6 +101,19 @@ void string_replace(std::string& str, const std::string& from, const std::string
 void sleep(int msecs){
     std::this_thread::sleep_for(std::chrono::milliseconds(msecs));
 }
+
+	// https://stackoverflow.com/a/50556436
+	std::string generateRandomString(int length)
+	{
+		std::mt19937 generator{ std::random_device{}() };
+		const std::uniform_int_distribution<int> distribution{ '0', 'Z' };
+
+		std::string str(length, '\0');
+		for (auto& dis : str)
+			dis = distribution(generator);
+
+		return str;
+	}
 
 }
 }
