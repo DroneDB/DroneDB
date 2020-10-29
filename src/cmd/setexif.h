@@ -2,16 +2,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-#ifndef SET_CMD_H
-#define SET_CMD_H
+#ifndef SETEXIF_CMD_H
+#define SETEXIF_CMD_H
 
 #include "command.h"
 
 namespace cmd {
 
-class Set : public Command {
+class SetExif : public Command {
   public:
-    Set() {}
+    SetExif() {}
 
     virtual void run(cxxopts::ParseResult &opts) override;
     virtual void setOptions(cxxopts::Options &opts) override;
@@ -20,4 +20,4 @@ class Set : public Command {
 
 }
 
-#endif // SET_CMD_H
+#endif // SETEXIF_CMD_H

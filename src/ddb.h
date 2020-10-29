@@ -85,6 +85,22 @@ DDB_DLL DDBErr DDBInfo(const char **paths, int numPaths, char** output, const ch
  * @return DDBERR_NONE on success, an error otherwise */
 DDB_DLL DDBErr DDBList(const char *ddbPath, const char **paths, int numPaths, char **output, const char *format, bool recursive = false, int maxRecursionDepth = 0);
 
+/** Append password to database
+ * @param ddbPath path to a DroneDB database (parent of ".ddb")
+ * @param password password to append
+ * @return DDBERR_NONE on success, an error otherwise */
+DDB_DLL DDBErr DDBAppendPassword(const char* ddbPath, const char *password);
+
+/** Verify database password
+ * @param ddbPath path to a DroneDB database (parent of ".ddb")
+ * @param password password to verify
+ * @return DDBERR_NONE on success, an error otherwise */
+DDB_DLL DDBErr DDBVerifyPassword(const char* ddbPath, const char* password, bool *verified);
+
+/** Clear all database passwords
+ * @param ddbPath path to a DroneDB database (parent of ".ddb")
+ * @return DDBERR_NONE on success, an error otherwise */
+DDB_DLL DDBErr DDBClearPasswords(const char* ddbPath);
 
 /** Show differences between index and filesystem
  * @param ddbPath path to a DroneDB database (parent of ".ddb")
