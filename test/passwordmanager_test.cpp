@@ -34,6 +34,32 @@ namespace {
 
         PasswordManager manager(&db);
 
+        EXPECT_TRUE(manager.verify(""));
+
+        manager.append("testpassword");
+
+        EXPECT_TRUE(manager.verify("testpassword"));
+        EXPECT_FALSE(manager.verify("wrongpassword"));
+
+        manager.append("wrongpassword");
+        EXPECT_TRUE(manager.verify("wrongpassword"));
+
+        manager.append("testpassword1");
+        manager.append("testpassword2");
+        manager.append("testpassword3");
+        manager.append("testpassword4");
+
+        EXPECT_TRUE(manager.verify("testpassword4"));
+
+        manager.clearAll();
+
+        EXPECT_FALSE(manager.verify("wrongpassword"));
+        EXPECT_FALSE(manager.verify("testpassword"));
+        EXPECT_FALSE(manager.verify("testpassword1"));
+        EXPECT_FALSE(manager.verify("testpassword2"));
+        EXPECT_FALSE(manager.verify("testpassword3"));
+        EXPECT_FALSE(manager.verify("testpassword4"));
+
         manager.append("testpassword");
 
         EXPECT_TRUE(manager.verify("testpassword"));
