@@ -61,51 +61,50 @@ const char* DDBGetVersion() {
 DDBErr DDBInit(const char* directory, char** outPath) {
 	DDB_C_BEGIN
 
-	if (directory == NULL)
+	if (directory == nullptr)
 		throw InvalidArgsException("No directory provided");
 
-	if (outPath == NULL)
+	if (outPath == nullptr)
 		throw InvalidArgsException("No output provided");
 
-	fs::path dirPath = directory;
-	if (!fs::exists(dirPath)) throw FSException("Invalid directory: " + dirPath.string() + " (does not exist)");
+	const fs::path dirPath = directory;
+	if (!exists(dirPath)) throw FSException("Invalid directory: " + dirPath.string() + " (does not exist)");
 
-	fs::path ddbDirPath = dirPath / ".ddb";
+	auto ddbDirPath = dirPath / ".ddb";
 	if (std::string(directory) == ".") ddbDirPath = ".ddb"; // Nicer to the eye
-	fs::path dbasePath = ddbDirPath / "dbase.sqlite";
+	const auto dbasePath = ddbDirPath / "dbase.sqlite";
 
 	LOGD << "Checking if .ddb directory exists...";
-	if (fs::exists(ddbDirPath)) {
+	if (exists(ddbDirPath)) {
 		throw FSException("Cannot initialize database: " + ddbDirPath.string() + " already exists");
 	}
+	
+	if (create_directory(ddbDirPath)) {
+		LOGD << ddbDirPath.string() + " created";
+	}
 	else {
-		if (fs::create_directory(ddbDirPath)) {
-			LOGD << ddbDirPath.string() + " created";
-		}
-		else {
-			throw FSException("Cannot create directory: " + ddbDirPath.string() + ". Check that you have the proper permissions?");
-		}
+		throw FSException("Cannot create directory: " + ddbDirPath.string() + ". Check that you have the proper permissions?");
 	}
 
-	LOGD << "Checking if dbase exists...";
-	if (fs::exists(dbasePath)) {
+	LOGD << "Checking if database exists...";
+	if (exists(dbasePath))
+	{
 		throw FSException(ddbDirPath.string() + " already exists");
 	}
-	else {
-		LOGD << "Creating " << dbasePath.string();
+	LOGD << "Creating " << dbasePath.string();
 
-		// Create database
-		std::unique_ptr<Database> db = std::make_unique<Database>();
-		db->open(dbasePath.string());
-		db->createTables();
-		db->close();
+	// Create database
+	auto db = std::make_unique<Database>();
+	db->open(dbasePath.string());
+	db->createTables();
+	db->close();
 
-		utils::copyToPtr(ddbDirPath.string(), outPath);
-	}
+	utils::copyToPtr(ddbDirPath.string(), outPath);
 	DDB_C_END
 }
 
-const char* DDBGetLastError() {
+const char* DDBGetLastError()
+{
 	return ddbLastError;
 }
 
@@ -117,92 +116,93 @@ void DDBSetLastError(const char* err) {
 DDBErr DDBAdd(const char* ddbPath, const char** paths, int numPaths, char** output, bool recursive) {
 	DDB_C_BEGIN
 
-	if (ddbPath == NULL)
-		throw InvalidArgsException("No directory provided");
+		if (ddbPath == nullptr)
+			throw InvalidArgsException("No directory provided");
 
-	if (paths == NULL || numPaths == 0)
-		throw InvalidArgsException("No paths provided");
+		if (paths == nullptr || numPaths == 0)
+			throw InvalidArgsException("No paths provided");
 
-	if (output == NULL)
-		throw InvalidArgsException("No output provided");
+		if (output == nullptr)
+			throw InvalidArgsException("No output provided");
 
-	auto db = ddb::open(std::string(ddbPath), true);
-	std::vector<std::string> pathList(paths, paths + numPaths);
-	json outJson = json::array();
-	ddb::addToIndex(db.get(), ddb::expandPathList(pathList,
-		recursive,
-		0), [&outJson](const Entry& e, bool) {
-		json j;
-		e.toJSON(j);
-		outJson.push_back(j);
-		return true;
-	});
+		const auto db = ddb::open(std::string(ddbPath), true);
+		const std::vector<std::string> pathList(paths, paths + numPaths);
+		auto outJson = json::array();
+		ddb::addToIndex(db.get(), ddb::expandPathList(pathList,
+		                                              recursive,
+		                                              0), [&outJson](const Entry& e, bool)
+		{
+			json j;
+			e.toJSON(j);
+			outJson.push_back(j);
+			return true;
+		});
 
-	utils::copyToPtr(outJson.dump(), output);
+		utils::copyToPtr(outJson.dump(), output);
 	DDB_C_END
 }
 
 DDBErr DDBRemove(const char* ddbPath, const char** paths, int numPaths) {
 	DDB_C_BEGIN
 
-	if (ddbPath == NULL)
-		throw InvalidArgsException("No directory provided");
+		if (ddbPath == nullptr)
+			throw InvalidArgsException("No directory provided");
 
-	if (paths == NULL || numPaths == 0)
-		throw InvalidArgsException("No paths provided");
+		if (paths == nullptr || numPaths == 0)
+			throw InvalidArgsException("No paths provided");
 
-	const auto db = ddb::open(std::string(ddbPath), true);
-	const std::vector<std::string> pathList(paths, paths + numPaths);
+		const auto db = ddb::open(std::string(ddbPath), true);
+		const std::vector<std::string> pathList(paths, paths + numPaths);
 
-	removeFromIndex(db.get(), pathList);
+		removeFromIndex(db.get(), pathList);
 	DDB_C_END
 }
 
 DDBErr DDBInfo(const char** paths, int numPaths, char** output, const char* format, bool recursive, int maxRecursionDepth, const char* geometry, bool withHash, bool stopOnError) {
 	DDB_C_BEGIN
 
-	if (format == NULL || strlen(format) == 0)
-		throw InvalidArgsException("No format provided");
+		if (format == nullptr || strlen(format) == 0)
+			throw InvalidArgsException("No format provided");
 
-	if (geometry == NULL || strlen(geometry) == 0)
-		throw InvalidArgsException("No format provided");
+		if (geometry == nullptr || strlen(geometry) == 0)
+			throw InvalidArgsException("No format provided");
 
-	if (paths == NULL || numPaths == 0)
-		throw InvalidArgsException("No paths provided");
+		if (paths == nullptr || numPaths == 0)
+			throw InvalidArgsException("No paths provided");
 
-	if (output == NULL)
-		throw InvalidArgsException("No output provided");
+		if (output == nullptr)
+			throw InvalidArgsException("No output provided");
 
-	const std::vector<std::string> input(paths, paths + numPaths);
-	std::ostringstream ss;
-	info(input, ss, format, recursive, maxRecursionDepth,
-		geometry, withHash, stopOnError);
-	utils::copyToPtr(ss.str(), output);
+		const std::vector<std::string> input(paths, paths + numPaths);
+		std::ostringstream ss;
+		info(input, ss, format, recursive, maxRecursionDepth,
+		     geometry, withHash, stopOnError);
+		utils::copyToPtr(ss.str(), output);
 	DDB_C_END
 }
 
 DDBErr DDBList(const char* ddbPath, const char** paths, int numPaths, char** output, const char* format, bool recursive, int maxRecursionDepth) {
 	DDB_C_BEGIN
 
-	if (ddbPath == NULL)
-		throw InvalidArgsException("No ddb path provided");
+		if (ddbPath == nullptr)
+			throw InvalidArgsException("No ddb path provided");
 
-	if (format == NULL || strlen(format) == 0)
-		throw InvalidArgsException("No format provided");
+		if (format == nullptr || strlen(format) == 0)
+			throw InvalidArgsException("No format provided");
 
-	if (paths == NULL || numPaths == 0)
-		throw InvalidArgsException("No paths provided");
+		if (paths == nullptr || numPaths == 0)
+			throw InvalidArgsException("No paths provided");
 
-	if (output == NULL)
-		throw InvalidArgsException("No output provided");
+		if (output == nullptr)
+			throw InvalidArgsException("No output provided");
 
-	const auto db = ddb::open(std::string(ddbPath), true);
-	const std::vector<std::string> pathList(paths, paths + numPaths);
+		const auto db = ddb::open(std::string(ddbPath), true);
+		const std::vector<std::string> pathList(paths, paths + numPaths);
 
-	std::ostringstream ss;
-	listIndex(db.get(), pathList, ss, format, recursive, maxRecursionDepth);
+		std::ostringstream ss;
+		listIndex(db.get(), pathList, ss, format, recursive, maxRecursionDepth);
 
-	utils::copyToPtr(ss.str(), output);
+		utils::copyToPtr(ss.str(), output);
 
 	DDB_C_END
 }
@@ -210,17 +210,17 @@ DDBErr DDBList(const char* ddbPath, const char** paths, int numPaths, char** out
 DDBErr DDBAppendPassword(const char* ddbPath, const char* password) {
 	DDB_C_BEGIN
 
-	if (ddbPath == nullptr)
-		throw InvalidArgsException("No ddb path provided");
+		if (ddbPath == nullptr)
+			throw InvalidArgsException("No ddb path provided");
 
-	if (password == nullptr || strlen(password) == 0)
-		throw InvalidArgsException("No password provided");
+		if (password == nullptr || strlen(password) == 0)
+			throw InvalidArgsException("No password provided");
 
-	const auto db = ddb::open(std::string(ddbPath), true);
+		const auto db = ddb::open(std::string(ddbPath), true);
 
-	PasswordManager manager(db.get());
+		PasswordManager manager(db.get());
 
-	manager.append(std::string(password));
+		manager.append(std::string(password));
 	
 	DDB_C_END
 }
@@ -228,20 +228,20 @@ DDBErr DDBAppendPassword(const char* ddbPath, const char* password) {
 DDBErr DDBVerifyPassword(const char* ddbPath, const char* password, bool* verified) {
 	DDB_C_BEGIN
 
-	if (ddbPath == nullptr)
-		throw InvalidArgsException("No ddb path provided");
+		if (ddbPath == nullptr)
+			throw InvalidArgsException("No ddb path provided");
 
-	if (password == nullptr || strlen(password) == 0)
-		throw InvalidArgsException("No password provided");
+		if (password == nullptr || strlen(password) == 0)
+			throw InvalidArgsException("No password provided");
 
-	if (verified == nullptr)
-		throw InvalidArgsException("Output parameter pointer is null");
+		if (verified == nullptr)
+			throw InvalidArgsException("Output parameter pointer is null");
 
-	const auto db = ddb::open(std::string(ddbPath), true);
+		const auto db = ddb::open(std::string(ddbPath), true);
 
-	PasswordManager manager(db.get());
+		PasswordManager manager(db.get());
 
-	*verified = manager.verify(std::string(password));
+		*verified = manager.verify(std::string(password));
 	
 	DDB_C_END
 }
@@ -249,14 +249,14 @@ DDBErr DDBVerifyPassword(const char* ddbPath, const char* password, bool* verifi
 DDBErr DDBClearPasswords(const char* ddbPath) {
 	DDB_C_BEGIN
 
-	if (ddbPath == nullptr)
-		throw InvalidArgsException("No ddb path provided");
+		if (ddbPath == nullptr)
+			throw InvalidArgsException("No ddb path provided");
 
-	const auto db = ddb::open(std::string(ddbPath), true);
+		const auto db = ddb::open(std::string(ddbPath), true);
 
-	PasswordManager manager(db.get());
+		PasswordManager manager(db.get());
 
-	manager.clearAll();
+		manager.clearAll();
 
 	DDB_C_END
 }
