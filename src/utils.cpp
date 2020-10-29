@@ -106,8 +106,9 @@ namespace ddb {
 		// https://stackoverflow.com/a/50556436
 		std::string generateRandomString(int length)
 		{
-			std::mt19937 generator{ std::random_device{}() };
-			const std::uniform_int_distribution<int> distribution{ '0', 'Z' };
+			std::random_device rd;
+			std::mt19937 generator(rd());
+			std::uniform_int_distribution<int> distribution{ '0', 'Z' };
 
 			std::string str(length, '\0');
 			for (auto& dis : str)
