@@ -102,6 +102,13 @@ DDB_DLL DDBErr DDBVerifyPassword(const char* ddbPath, const char* password, bool
  * @return DDBERR_NONE on success, an error otherwise */
 DDB_DLL DDBErr DDBClearPasswords(const char* ddbPath);
 
+/** Show differences between index and filesystem
+ * @param ddbPath path to a DroneDB database (parent of ".ddb")
+ * @param output pointer to C-string where to store result
+ * @return DDBERR_NONE on success, an error otherwise */
+DDB_DLL DDBErr DDBStatus(const char* ddbPath, char **output);
+
+
 #ifdef __cplusplus
 }
 #endif

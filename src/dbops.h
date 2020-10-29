@@ -30,7 +30,6 @@ DDB_DLL void addToIndex(Database *db, const std::vector<std::string> &paths, Add
 DDB_DLL void removeFromIndex(Database *db, const std::vector<std::string> &paths);
 DDB_DLL void syncIndex(Database *db);
 
-
 }
 
 
