@@ -5,7 +5,7 @@
 #include <gdal_priv.h>
 #include "ddb.h"
 
-#include <passwordmanager.h>
+#include "passwordmanager.h"
 
 #include "dbops.h"
 #include "info.h"
