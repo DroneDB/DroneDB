@@ -30,7 +30,6 @@ namespace {
         Database db;
 
         db.open(dbPath.string());
-        db.createTables();
 
         PasswordManager manager(&db);
 
