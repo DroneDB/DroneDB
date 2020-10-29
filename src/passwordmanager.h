@@ -22,6 +22,9 @@ class PasswordManager {
 public:
     PasswordManager(ddb::Database* db) {
         this->db = db;
+
+        if (!db->tableExists("passwords"))
+            db->createTables();
     }
 
     DDB_DLL void append(const std::string& password);
