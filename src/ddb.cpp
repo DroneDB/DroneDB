@@ -231,7 +231,8 @@ DDBErr DDBVerifyPassword(const char* ddbPath, const char* password, bool* verifi
 		if (ddbPath == nullptr)
 			throw InvalidArgsException("No ddb path provided");
 
-		if (password == nullptr || strlen(password) == 0)
+		// We allow empty password verification
+		if (password == nullptr)
 			throw InvalidArgsException("No password provided");
 
 		if (verified == nullptr)
