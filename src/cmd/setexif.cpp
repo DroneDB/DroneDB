@@ -3,7 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include <iostream>
-#include "set.h"
+#include "setexif.h"
 #include "exifeditor.h"
 #include "exceptions.h"
 
@@ -11,10 +11,10 @@ namespace cmd {
 
 // TODO: should this be named "setexif" in the future?
 
-void Set::setOptions(cxxopts::Options &opts) {
+void SetExif::setOptions(cxxopts::Options &opts) {
     opts
     .positional_help("[args]")
-    .custom_help("set *.JPG")
+    .custom_help("setexif *.JPG")
     .add_options()
     ("i,input", "File(s) to modify", cxxopts::value<std::vector<std::string>>())
     ("gps-alt", "Set GPS Altitude (decimal degrees)", cxxopts::value<double>())
@@ -25,11 +25,11 @@ void Set::setOptions(cxxopts::Options &opts) {
     opts.parse_positional({"input"});
 }
 
-std::string Set::description() {
+std::string SetExif::description() {
     return "Modify EXIF values in files.";
 }
 
-void Set::run(cxxopts::ParseResult &opts) {
+void SetExif::run(cxxopts::ParseResult &opts) {
     if (!opts.count("input")) {
         printHelp();
     }

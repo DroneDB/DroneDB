@@ -43,6 +43,7 @@ void Command::run(int argc, char *argv[]) {
     }
 }
 
+// Proposal for SRP: rename to printHelpAndExit or remove exit call and refactor all commands
 void Command::printHelp() {
     std::cout << help;
     exit(0);

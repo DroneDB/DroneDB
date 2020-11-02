@@ -130,6 +130,8 @@ void string_replace(std::string& str, const std::string& from, const std::string
 
 void sleep(int msecs);
 
+std::string generateRandomString(int length);
+
 
 // Fix for removing macros
 #undef max
