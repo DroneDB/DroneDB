@@ -72,7 +72,8 @@ namespace cmd {
 				const auto res = manager.verify(argument);
 
 				std::cout << std::endl << (res ? "Password verification succeeded" : "Password verification failed") << std::endl;
-				
+                if (!res) exit(EXIT_FAILURE);
+
 			} else if (command == "c" || command == "clear")
 			{
 				manager.clearAll();
