@@ -1,0 +1,20 @@
+::
+
+    add - Add files and directories to an index.
+    build - Initialize and build an index. Shorthand for running an init,add,commit command sequence.
+    geoproj - Project images to georeferenced rasters
+    info - Retrieve information about files and directories
+    init - Initialize an index. If a directory is not specified, initializes the index in the current directory
+    list - List indexed files and directories
+    login - Authenticate with a registry.
+    logout - Logout from all registries. To logout from a single registry, use the --server option.
+    password - Manage database passwords
+    remove - Remove files and directories from an index. The filesystem is left unchanged (actual files and directories will not be removed)
+    setexif - Modify EXIF values in files.
+    share - Share files and folders to a registry
+    status - Show files and directories index status compared to the filesystem
+    sync - Sync files and directories in the index with changes from the filesystem
+    system - Manage ddb
+    thumbs - Generate thumbnails for images and rasters
+    tile - Generate tiles for GeoTIFFs
+
