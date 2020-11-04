@@ -10,12 +10,13 @@
 namespace cmd {
 
 void Init::setOptions(cxxopts::Options &opts) {
+    // clang-format off
     opts
     .positional_help("[args] [DIRECTORY]")
     .custom_help("init")
     .add_options()
     ("w,working-dir", "Working directory", cxxopts::value<std::string>()->default_value("."));
-
+    // clang-format on
     opts.parse_positional({"working-dir"});
 }
 

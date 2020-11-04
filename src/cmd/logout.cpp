@@ -10,12 +10,13 @@
 namespace cmd {
 
 void Logout::setOptions(cxxopts::Options &opts) {
+    // clang-format off
     opts
     .positional_help("[args]")
     .custom_help("logout")
     .add_options()
     ("server", "Registry server to logout from", cxxopts::value<std::string>()->default_value(DEFAULT_REGISTRY));
-
+    // clang-format on
     opts.parse_positional({"server"});
 }
 

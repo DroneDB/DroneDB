@@ -10,6 +10,7 @@
 namespace cmd {
 
 void Login::setOptions(cxxopts::Options &opts) {
+    // clang-format off
     opts
     .positional_help("[args]")
     .custom_help("login")
@@ -17,7 +18,7 @@ void Login::setOptions(cxxopts::Options &opts) {
     ("server", "Registry server to authenticate to", cxxopts::value<std::string>()->default_value("index.dronedb.app"))
     ("u,username", "Username", cxxopts::value<std::string>())
     ("p,password", "Password", cxxopts::value<std::string>());
-
+    // clang-format on
     opts.parse_positional({"server"});
 }
 

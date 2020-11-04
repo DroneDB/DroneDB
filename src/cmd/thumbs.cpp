@@ -10,6 +10,7 @@
 namespace cmd {
 
 void Thumbs::setOptions(cxxopts::Options &opts) {
+    // clang-format off
     opts
     .positional_help("[args]")
     .custom_help("thumbs output/ *.JPG")
@@ -18,7 +19,7 @@ void Thumbs::setOptions(cxxopts::Options &opts) {
     ("o,output", "Output directory where to store thumbnails", cxxopts::value<std::string>())
     ("s,size", "Size of the largest side of the images", cxxopts::value<int>()->default_value("512"))
     ("use-crc", "Use CRC for output filenames", cxxopts::value<bool>());
-
+    // clang-format on
     opts.parse_positional({"output", "input"});
 }
 

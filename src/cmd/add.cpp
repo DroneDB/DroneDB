@@ -10,6 +10,7 @@
 namespace cmd {
 
 void Add::setOptions(cxxopts::Options &opts) {
+    // clang-format off
     opts
     .positional_help("[args] [PATHS]")
     .custom_help("add *.JPG")
@@ -17,7 +18,7 @@ void Add::setOptions(cxxopts::Options &opts) {
     ("w,working-dir", "Working directory", cxxopts::value<std::string>()->default_value("."))
     ("r,recursive", "Recursively add subdirectories and files", cxxopts::value<bool>())
     ("p,paths", "Paths to add to index (files or directories)", cxxopts::value<std::vector<std::string>>());
-
+    // clang-format on
     opts.parse_positional({"paths"});
 }
 

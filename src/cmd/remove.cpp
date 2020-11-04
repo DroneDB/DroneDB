@@ -9,13 +9,14 @@
 namespace cmd {
 
 void Remove::setOptions(cxxopts::Options &opts) {
+    // clang-format off
     opts
     .positional_help("[args] [PATHS]")
     .custom_help("rm image1.JPG image2.JPG [...]")
     .add_options()
     ("w,working-dir", "Working directory", cxxopts::value<std::string>()->default_value("."))
     ("p,paths", "Paths to remove from index (files or directories)", cxxopts::value<std::vector<std::string>>());
-
+    // clang-format on
     opts.parse_positional({"paths"});
 }
 
