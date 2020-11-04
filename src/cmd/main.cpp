@@ -5,6 +5,7 @@
 #include <iostream>
 
 #include "cmd/cmdlist.h"
+#include "cmd/gendocs.h"
 #include "logger.h"
 #include "exceptions.h"
 #include "database.h"
@@ -45,6 +46,12 @@ bool hasParam(int argc, char *argv[], const char* param) {
 int main(int argc, char* argv[]) {
     memcpy(argv[0], "ddb\0", 4);
     DDBRegisterProcess(hasParam(argc, argv, "--debug"));
+
+    // Super secret command to generate docs
+    if (hasParam(argc, argv, "--gendocs")){
+        cmd::generateDocs(argc, argv);
+        return EXIT_SUCCESS;
+    }
 
     LOGV << "DDB v" << DDBGetVersion();
     LOGV << "SQLite version: " << sqlite3_libversion();

@@ -10,16 +10,18 @@ namespace cmd {
 
 class Command{
 private:
-    std::string help;
+    char *programName;
+
+    cxxopts::Options genOptions(const char *programName = "ddb");
 protected:
     virtual void run(cxxopts::ParseResult &opts) = 0;
     virtual void setOptions(cxxopts::Options &opts) = 0;
-    void printHelp();
 public:
     Command();
     void run(int argc, char* argv[]);
     virtual std::string description(){ return ""; }
     virtual std::string extendedDescription(){ return ""; }
+    void printHelp(std::ostream &out = std::cout, bool exitAfterPrint = true);
 };
 
 }

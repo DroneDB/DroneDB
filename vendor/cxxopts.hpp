@@ -2114,7 +2114,7 @@ inline
 std::string
 Options::help(const std::vector<std::string>& help_groups) const
 {
-  String result = m_help_string + "\nUsage:\n  " +
+  String result = m_help_string + "\n\nUsage:\n  " +
     toLocalString(m_program) + " " + toLocalString(m_custom_help);
 
   if (m_positional.size() > 0 && m_positional_help.size() > 0) {
