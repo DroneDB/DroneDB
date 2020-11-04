@@ -288,7 +288,7 @@ void Entry::toJSON(json &j) const{
     if (!this->meta.empty()) j["meta"] = this->meta;
     j["mtime"] = this->mtime;
     j["size"] = this->size;
-    //j["depth"] = this->depth;
+    j["depth"] = this->depth;
 
     if (!this->point_geom.empty()) j["point_geom"] = this->point_geom.toGeoJSON();
     if (!this->polygon_geom.empty()) j["polygon_geom"] = this->polygon_geom.toGeoJSON();
@@ -363,5 +363,117 @@ std::string Entry::toString(){
 
     return s.str();
 }
+
+void parsePoint(BasicGeometry* point_geom, nlohmann::basic_json<>::value_type coordinates)
+{
+	if (coordinates.empty())
+		throw DBException("Empty 'coordinates' field");
+
+	if (coordinates.size() != 3)
+		throw DBException(utils::stringFormat("Expected 3 coordinates but got ", coordinates.size()));
+
+	const auto x = coordinates[0].get<double>();
+	const auto y = coordinates[1].get<double>();
+	const auto z = coordinates[2].get<double>();
+
+	LOGD << "Parsed point: (" << x << "; " << y << "; " << z << ")";
+	
+	point_geom->addPoint(x, y, z);
+}
+
+void loadPointGeom(BasicPointGeometry *point_geom, const std::string& text)
+{
+    if (text.empty()) 
+        throw DBException("text is empty");
+	
+	if (point_geom == nullptr)
+        throw DBException("point_geom is null");
+	
+    const auto j = json::parse(text);
+	
+    // {"type":"Point","coordinates":[-91.99456000000001,46.842607,198.31]}
+
+	if (!j.contains("type"))
+        throw DBException("Missing 'type' field");
+    	
+	if (j["type"].get<std::string>() != "Point")
+        throw DBException(utils::stringFormat("Cannot parse point_geom field: expected Point type but got: %s", j["type"].dump()));
+
+    if (!j.contains("coordinates"))
+        throw DBException("Missing 'coordinates' field");
+
+	auto coordinates = j["coordinates"];
+
+	parsePoint(point_geom, coordinates);
+
+}
+
+void loadPolygonGeom(BasicPolygonGeometry *polygon_geom, const std::string& text)
+{
+	/*
+	{
+	    "type": "Polygon",
+	    "coordinates": [
+			[
+				[-91.99469773385999, 46.84296499722999, 158.5100007629],
+				[-91.99507616866998, 46.84271189348, 158.5100007629],
+				[-91.9944204067, 46.84225026546, 158.5100007629],
+				[-91.99404197212, 46.84250336707, 158.5100007629],
+				[-91.99469773385999, 46.84296499722999, 158.5100007629]
+			]
+		]
+	}	  
+	 */
+
+
+    if (text.empty())
+        throw DBException("text is empty");
+
+    if (polygon_geom == nullptr)
+        throw DBException("polygon_geom is null");
+
+    const auto j = json::parse(text);
+
+    if (!j.contains("type"))
+        throw DBException("Missing 'type' field");
+
+    if (j["type"].get<std::string>() != "Polygon")
+        throw DBException(utils::stringFormat("Cannot parse polygon_geom field: expected Polygon type but got: %s", j["type"].dump()));
+
+    if (!j.contains("coordinates"))
+        throw DBException("Missing 'coordinates' field");
+
+    auto coordinates = j["coordinates"];
+
+    if (coordinates.empty())
+        throw DBException("Empty 'coordinates' field");
+
+    if (coordinates.size() != 1)
+        throw DBException(utils::stringFormat("Expected 1 coordinates but got ", coordinates.size()));
+
+    coordinates = coordinates[0];
+
+    if (coordinates.size() == 0)
+        throw DBException("Expected coordinates but got 0");
+
+	for (const auto coord : coordinates)
+	{
+        parsePoint(polygon_geom, coord);
+	}
+	
+    //const auto x = coordinates[0].get<double>();
+    //const auto y = coordinates[1].get<double>();
+    //const auto z = coordinates[2].get<double>();
+
+    //LOGD << "Parsed point: (" << x << "; " << y << "; " << z << ")";
+
+    //
+
+
+	
+	
+}
+
+
 
 }

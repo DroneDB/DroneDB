@@ -14,43 +14,48 @@
 #include "info.h"
 #include "list.h"
 #include "thumbs.h"
-#include "set.h"
+#include "setexif.h"
 #include "login.h"
 #include "logout.h"
 #include "tile.h"
 #include "share.h"
 #include "system.h"
+#include "status.h"
+#include "password.h"
 
 namespace cmd {
 
-std::map<std::string, Command*> commands = {
-    {"build", new Build()},
-    {"init", new Init()},
-    {"add", new Add()},
-    {"remove", new Remove()},
-    {"sync", new Sync()},
-    {"geoproj", new GeoProj()},
-    {"info", new Info()},
-    {"list", new List()},
-    {"thumbs", new Thumbs()},
-    {"set", new Set()},
-    {"login", new Login()},
-    {"logout", new Logout()},
-    {"tile", new Tile()},
-    {"share", new Share()},
-    {"system", new System()}
-};
+  std::map<std::string, Command*> commands = {
+      {"build", new Build()},
+      {"init", new Init()},
+      {"add", new Add()},
+      {"remove", new Remove()},
+      {"sync", new Sync()},
+      {"geoproj", new GeoProj()},
+      {"info", new Info()},
+      {"list", new List()},
+      {"thumbs", new Thumbs()},
+      {"setexif", new SetExif()},
+      {"login", new Login()},
+      {"logout", new Logout()},
+      {"tile", new Tile()},
+      {"share", new Share()},
+      {"system", new System()},
+      {"status", new Status()},
+      {"password", new Password()}
+  };
 
-std::map<std::string, std::string> aliases = {
-    {"rm", "remove"},
-    {"r", "remove"},
-    {"a", "add"},
-    {"s", "sync"},
-    {"gp", "geoproj"},
-    {"i", "info"},
-    {"ls", "list"},
-    {"sh", "share"}
-};
+  std::map<std::string, std::string> aliases = {
+      {"rm", "remove"},
+      {"r", "remove"},
+      {"a", "add"},
+      {"s", "sync"},
+      {"gp", "geoproj"},
+      {"i", "info"},
+      {"ls", "list"},
+      {"sh", "share"},
+      {"psw", "password"}
+  };
 
 }
 
