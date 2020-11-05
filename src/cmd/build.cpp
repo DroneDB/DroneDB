@@ -10,12 +10,13 @@
 namespace cmd {
 
 void Build::setOptions(cxxopts::Options &opts) {
+    // clang-format off
     opts
     .positional_help("[args] [PATHS]")
     .custom_help("build")
     .add_options()
     ("paths", "Paths", cxxopts::value<std::vector<std::string>>());
-
+    // clang-format on
     opts.parse_positional({"paths"});
 }
 

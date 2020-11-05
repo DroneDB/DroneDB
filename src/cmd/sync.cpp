@@ -9,11 +9,13 @@
 namespace cmd {
 
 void Sync::setOptions(cxxopts::Options &opts) {
+    // clang-format off
     opts
     .positional_help("[args]")
     .custom_help("sync")
     .add_options()
     ("w,working-dir", "Working directory", cxxopts::value<std::string>()->default_value("."));
+    // clang-format on
 }
 
 std::string Sync::description() {

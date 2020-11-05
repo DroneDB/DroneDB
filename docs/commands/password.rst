@@ -1,17 +1,19 @@
-.. _init_command:
+.. _password_command:
 
 ********************************************************************************
-init
+password
 ********************************************************************************
 
 ::
 
-    Initialize an index. If a directory is not specified, initializes the index in the current directory
+    Manage database passwords
     
     Usage:
-      ddb init [args] [DIRECTORY]
+      ddb password [a,append|v,verify|c,clear] [password] [args]
     
       -w, --working-dir arg  Working directory (default: .)
+      -c, --command arg      Command to execute
+      -a, --argument arg     Command argument (default: )
       -h, --help             Print help
           --debug            Show debug output
 

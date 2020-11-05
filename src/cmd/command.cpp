@@ -10,8 +10,8 @@ namespace cmd {
 Command::Command() {
 }
 
-void Command::run(int argc, char *argv[]) {
-    cxxopts::Options opts(argv[0], description() + extendedDescription());
+cxxopts::Options Command::genOptions(const char *programName){
+    cxxopts::Options opts(programName, description() + extendedDescription());
     opts
     .show_positional_help();
 
@@ -19,7 +19,12 @@ void Command::run(int argc, char *argv[]) {
     opts.add_options()
     ("h,help", "Print help")
     ("debug", "Show debug output");
-    help = opts.help({""});
+
+    return opts;
+}
+
+void Command::run(int argc, char *argv[]) {
+    cxxopts::Options opts = genOptions(argv[0]);
 
     try{
         auto result = opts.parse(argc, argv);
@@ -43,10 +48,9 @@ void Command::run(int argc, char *argv[]) {
     }
 }
 
-// Proposal for SRP: rename to printHelpAndExit or remove exit call and refactor all commands
-void Command::printHelp() {
-    std::cout << help;
-    exit(0);
+void Command::printHelp(std::ostream &out, bool exitAfterPrint) {
+    out << genOptions().help({""});
+    if (exitAfterPrint) exit(0);
 }
 
 }

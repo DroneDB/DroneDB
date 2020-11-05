@@ -4,17 +4,21 @@
 system
 ********************************************************************************
 
-Manage ddb
-
 ::
 
-    $ ddb system COMMAND
-
-::
-
+    Manage ddb
+    
     Commands:
-        clean	Cleanup user cache files
+    	clean	Cleanup user cache files
+    
+    
+    Usage:
+      ddb system COMMAND
+    
+      -c, --command arg  Command (default: )
+      -h, --help         Print help
+          --debug        Show debug output
 
 .. toctree::
-   :maxdepth: 2
-   :glob:
+    :maxdepth: 2
+    :glob:

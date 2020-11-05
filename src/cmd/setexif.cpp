@@ -9,9 +9,8 @@
 
 namespace cmd {
 
-// TODO: should this be named "setexif" in the future?
-
 void SetExif::setOptions(cxxopts::Options &opts) {
+    // clang-format off
     opts
     .positional_help("[args]")
     .custom_help("setexif *.JPG")
@@ -21,7 +20,7 @@ void SetExif::setOptions(cxxopts::Options &opts) {
     ("gps-lon", "Set GPS Longitude (decimal degrees)", cxxopts::value<double>())
     ("gps-lat", "Set GPS Latitude (decimal degrees)", cxxopts::value<double>())
     ("gps", "Set GPS Latitude,Longitude,Altitude (decimal degrees, comma separated)", cxxopts::value<std::vector<double>>());
-
+    // clang-format on
     opts.parse_positional({"input"});
 }
 

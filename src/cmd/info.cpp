@@ -12,6 +12,7 @@
 namespace cmd {
 
 void Info::setOptions(cxxopts::Options &opts) {
+    // clang-format off
     opts
     .positional_help("[args]")
     .custom_help("info *.JPG")
@@ -23,6 +24,7 @@ void Info::setOptions(cxxopts::Options &opts) {
     ("d,depth", "Max recursion depth", cxxopts::value<int>()->default_value("0"))
     ("geometry", "Geometry to output (for geojson format only) (auto|point|polygon)", cxxopts::value<std::string>()->default_value("auto"))
     ("with-hash", "Compute SHA256 hashes", cxxopts::value<bool>());
+    // clang-format on
     opts.parse_positional({"input"});
 }
 

@@ -18,6 +18,7 @@
 namespace cmd {
 
 	void List::setOptions(cxxopts::Options& opts) {
+        // clang-format off
 		opts
 			.positional_help("[args]")
 			.custom_help("list *.JPG")
@@ -28,7 +29,7 @@ namespace cmd {
 			("r,recursive", "Recursively search in subdirectories", cxxopts::value<bool>())
 			("d,depth", "Max recursion depth", cxxopts::value<int>()->default_value("0"))
 			("f,format", "Output format (text|json)", cxxopts::value<std::string>()->default_value("text"));
-
+        // clang-format on
 		opts.parse_positional({ "input" });
 	}
 

@@ -10,12 +10,13 @@
 namespace cmd {
 
 void System::setOptions(cxxopts::Options &opts) {
+    // clang-format off
     opts
     .positional_help("COMMAND")
     .custom_help("system")
     .add_options()
     ("c,command", "Command", cxxopts::value<std::string>()->default_value(""));
-
+    // clang-format on
     opts.parse_positional({"command"});
 }
 

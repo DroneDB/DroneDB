@@ -1,19 +1,17 @@
-.. _geoproj_command:
+.. _logout_command:
 
 ********************************************************************************
-geoproj
+logout
 ********************************************************************************
 
 ::
 
-    Project images to georeferenced rasters
+    Logout from all registries. To logout from a single registry, use the --server option.
     
     Usage:
-      ddb geoproj output/ *.JPG [args]
+      ddb logout [args]
     
-      -o, --output arg  Output path (file or directory)
-      -i, --images arg  Images to project
-      -s, --size arg    Output image size (size[%]|0) (default: 100%)
+          --server arg  Registry server to logout from (default: hub.dronedb.app)
       -h, --help        Print help
           --debug       Show debug output
 

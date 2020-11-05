@@ -10,6 +10,7 @@
 namespace cmd {
 
 void Tile::setOptions(cxxopts::Options &opts) {
+    // clang-format off
     opts
     .positional_help("[args]")
     .custom_help("tile geo.tif [output directory]")
@@ -22,7 +23,7 @@ void Tile::setOptions(cxxopts::Options &opts) {
     ("y", "Generate a single tile with the specified coordinate (XYZ, unless --tms is used). Must be used with -x", cxxopts::value<std::string>()->default_value("auto"))
     ("s,size", "Tile size", cxxopts::value<int>()->default_value("256"))
     ("tms", "Generate TMS tiles instead of XYZ", cxxopts::value<bool>());
-
+    // clang-format on
     opts.parse_positional({"input", "output"});
 }
 

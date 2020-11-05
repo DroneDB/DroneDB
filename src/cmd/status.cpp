@@ -10,12 +10,14 @@
 namespace cmd {
 
 void Status::setOptions(cxxopts::Options &opts) {
+    // clang-format off
     opts
     .positional_help("[args]")
     .custom_help("status [directory]")
     .add_options()
     ("w,working-dir", "Working directory", cxxopts::value<std::string>()->default_value("."));
-    
+    // clang-format on
+
     // Nice to have
     // ("g,group", "Group by status", cxxopts::value<std::string>())
     // ("f,filter", "Filter entries", cxxopts::value<std::string>());

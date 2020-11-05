@@ -1,15 +1,15 @@
-.. _init_command:
+.. _status_command:
 
 ********************************************************************************
-init
+status
 ********************************************************************************
 
 ::
 
-    Initialize an index. If a directory is not specified, initializes the index in the current directory
+    Show files and directories index status compared to the filesystem
     
     Usage:
-      ddb init [args] [DIRECTORY]
+      ddb status [directory] [args]
     
       -w, --working-dir arg  Working directory (default: .)
       -h, --help             Print help

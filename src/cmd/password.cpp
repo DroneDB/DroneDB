@@ -18,6 +18,7 @@
 namespace cmd {
 
 	void Password::setOptions(cxxopts::Options& opts) {
+        // clang-format off
 		opts
 			.positional_help("[args]")
 			.custom_help("password [a,append|v,verify|c,clear] [password]")
@@ -25,6 +26,7 @@ namespace cmd {
 			("w,working-dir", "Working directory", cxxopts::value<std::string>()->default_value("."))
 			("c,command", "Command to execute", cxxopts::value<std::string>())
 			("a,argument", "Command argument", cxxopts::value<std::string>()->default_value(""));
+        // clang-format on
 
 		opts.parse_positional({ "command", "argument" });
 	}
