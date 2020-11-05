@@ -10,7 +10,7 @@
 namespace cmd {
 
 class System : public Command {
-  public:
+   public:
     System() {}
 
     virtual void run(cxxopts::ParseResult &opts) override;
@@ -19,6 +19,6 @@ class System : public Command {
     virtual std::string extendedDescription() override;
 };
 
-}
+}  // namespace cmd
 
-#endif // SYSTEM_CMD_H
+#endif  // SYSTEM_CMD_H

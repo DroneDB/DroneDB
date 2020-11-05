@@ -9,7 +9,7 @@
 namespace cmd {
 
 class Add : public Command {
-  public:
+   public:
     Add() {}
 
     virtual void run(cxxopts::ParseResult &opts) override;
@@ -17,6 +17,6 @@ class Add : public Command {
     virtual std::string description() override;
 };
 
-}
+}  // namespace cmd
 
-#endif // ADD_H
+#endif  // ADD_H

@@ -7,7 +7,7 @@
 namespace cmd {
 
 class Build : public Command {
-  public:
+   public:
     Build() {}
 
     virtual void run(cxxopts::ParseResult &opts) override;
@@ -15,4 +15,4 @@ class Build : public Command {
     virtual std::string description() override;
 };
 
-}
+}  // namespace cmd

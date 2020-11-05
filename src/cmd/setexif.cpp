@@ -2,10 +2,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-#include <iostream>
 #include "setexif.h"
-#include "exifeditor.h"
+
+#include <iostream>
+
 #include "exceptions.h"
+#include "exifeditor.h"
 
 namespace cmd {
 
@@ -24,18 +26,16 @@ void SetExif::setOptions(cxxopts::Options &opts) {
     opts.parse_positional({"input"});
 }
 
-std::string SetExif::description() {
-    return "Modify EXIF values in files.";
-}
+std::string SetExif::description() { return "Modify EXIF values in files."; }
 
 void SetExif::run(cxxopts::ParseResult &opts) {
     if (!opts.count("input")) {
         printHelp();
     }
 
-    if (opts.count("gps")){
+    if (opts.count("gps")) {
         auto gps = opts["gps"].as<std::vector<double>>();
-        if (gps.size() != 3){
+        if (gps.size() != 3) {
             printHelp();
         }
     }
@@ -43,28 +43,26 @@ void SetExif::run(cxxopts::ParseResult &opts) {
     auto input = opts["input"].as<std::vector<std::string>>();
     ddb::ExifEditor exifEditor(input);
 
-    if (!exifEditor.canEdit()){
+    if (!exifEditor.canEdit()) {
         exit(EXIT_FAILURE);
     }
 
-    if (opts.count("gps-alt")){
+    if (opts.count("gps-alt")) {
         exifEditor.SetGPSAltitude(opts["gps-alt"].as<double>());
     }
 
-    if (opts.count("gps-lat")){
+    if (opts.count("gps-lat")) {
         exifEditor.SetGPSLatitude(opts["gps-lat"].as<double>());
     }
 
-    if (opts.count("gps-lon")){
+    if (opts.count("gps-lon")) {
         exifEditor.SetGPSLongitude(opts["gps-lon"].as<double>());
     }
 
-    if (opts.count("gps")){
+    if (opts.count("gps")) {
         auto gps = opts["gps"].as<std::vector<double>>();
         exifEditor.SetGPS(gps[0], gps[1], gps[2]);
     }
 }
 
-}
-
-
+}  // namespace cmd

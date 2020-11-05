@@ -2,8 +2,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-#include <iostream>
 #include "remove.h"
+
+#include <iostream>
+
 #include "ddb.h"
 
 namespace cmd {
@@ -21,7 +23,8 @@ void Remove::setOptions(cxxopts::Options &opts) {
 }
 
 std::string Remove::description() {
-    return "Remove files and directories from an index. The filesystem is left unchanged (actual files and directories will not be removed)";
+    return "Remove files and directories from an index. The filesystem is left "
+           "unchanged (actual files and directories will not be removed)";
 }
 
 void Remove::run(cxxopts::ParseResult &opts) {
@@ -33,13 +36,13 @@ void Remove::run(cxxopts::ParseResult &opts) {
     auto paths = opts["paths"].as<std::vector<std::string>>();
 
     std::vector<const char *> cPaths(paths.size());
-    std::transform(paths.begin(), paths.end(), cPaths.begin(), [](const std::string& s) { return s.c_str(); });
+    std::transform(paths.begin(), paths.end(), cPaths.begin(),
+                   [](const std::string &s) { return s.c_str(); });
 
-    if (DDBRemove(ddbPath.c_str(), cPaths.data(), static_cast<int>(cPaths.size())) != DDBERR_NONE){
+    if (DDBRemove(ddbPath.c_str(), cPaths.data(),
+                  static_cast<int>(cPaths.size())) != DDBERR_NONE) {
         std::cerr << DDBGetLastError() << std::endl;
     }
 }
 
-}
-
-
+}  // namespace cmd

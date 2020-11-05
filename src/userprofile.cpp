@@ -3,21 +3,22 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "userprofile.h"
+
 #include "exceptions.h"
 
-namespace ddb{
+namespace ddb {
 
 UserProfile *UserProfile::instance = nullptr;
 
-UserProfile *UserProfile::get(){
-    if (!instance){
+UserProfile *UserProfile::get() {
+    if (!instance) {
         instance = new UserProfile();
     }
 
     return instance;
 }
 
-UserProfile::UserProfile(){
+UserProfile::UserProfile() {
     // Initialize directories
     createDir(getProfileDir());
 
@@ -25,20 +26,21 @@ UserProfile::UserProfile(){
     authManager = new AuthManager(getAuthFile());
 }
 
-void UserProfile::createDir(const fs::path &dir){
-    if (!fs::exists(dir)){
-        if (fs::create_directory(dir)){
+void UserProfile::createDir(const fs::path &dir) {
+    if (!fs::exists(dir)) {
+        if (fs::create_directory(dir)) {
             LOGD << "Created " << dir.string();
-        }else{
-            throw AppException("Cannot create profile directory: " + dir.string() + ". Check that you have permissions to write.");
+        } else {
+            throw AppException(
+                "Cannot create profile directory: " + dir.string() +
+                ". Check that you have permissions to write.");
         }
-    }else{
+    } else {
         LOGD << dir.string() << " exists";
     }
 }
 
-fs::path UserProfile::getHomeDir()
-{
+fs::path UserProfile::getHomeDir() {
     const char *home = std::getenv("HOME");
     if (home) return std::string(home);
 
@@ -48,47 +50,46 @@ fs::path UserProfile::getHomeDir()
     home = std::getenv("HOMEDRIVE");
     const char *homePath = std::getenv("HOMEPATH");
 
-    if (!home || !homePath){
-        throw AppException("Cannot find home directory. Make sure that either your HOME or USERPROFILE environment variable is set and points to the current user's home directory.");
+    if (!home || !homePath) {
+        throw AppException(
+            "Cannot find home directory. Make sure that either your HOME or "
+            "USERPROFILE environment variable is set and points to the current "
+            "user's home directory.");
     }
 
     return fs::path(std::string(home)) / fs::path(std::string(homePath));
 }
 
-fs::path UserProfile::getProfileDir(){
-    return getHomeDir() / ".ddb";
-}
+fs::path UserProfile::getProfileDir() { return getHomeDir() / ".ddb"; }
 
-fs::path UserProfile::getProfilePath(const fs::path &p, bool createIfNeeded = true){
+fs::path UserProfile::getProfilePath(const fs::path &p,
+                                     bool createIfNeeded = true) {
     const fs::path profilePath = getProfileDir() / p;
     if (createIfNeeded) createDir(profilePath);
     return profilePath;
 }
 
-fs::path UserProfile::getThumbsDir(){
+fs::path UserProfile::getThumbsDir() {
     const fs::path thumbsDir = getProfileDir() / fs::path("thumbs");
     createDir(thumbsDir);
     return thumbsDir;
 }
 
-fs::path UserProfile::getThumbsDir(int thumbSize){
-    const fs::path thumbsSizeDir = getThumbsDir() / fs::path(std::to_string(thumbSize));
+fs::path UserProfile::getThumbsDir(int thumbSize) {
+    const fs::path thumbsSizeDir =
+        getThumbsDir() / fs::path(std::to_string(thumbSize));
     createDir(thumbsSizeDir);
     return thumbsSizeDir;
 }
 
-fs::path UserProfile::getTilesDir(){
+fs::path UserProfile::getTilesDir() {
     const fs::path tilesDir = getProfileDir() / fs::path("tiles");
     createDir(tilesDir);
     return tilesDir;
 }
 
-fs::path UserProfile::getAuthFile(){
-    return getProfileDir() / "auth.json";
-}
+fs::path UserProfile::getAuthFile() { return getProfileDir() / "auth.json"; }
 
-AuthManager *UserProfile::getAuthManager(){
-    return authManager;
-}
+AuthManager *UserProfile::getAuthManager() { return authManager; }
 
-}
+}  // namespace ddb

@@ -9,7 +9,7 @@
 namespace cmd {
 
 class Share : public Command {
-  public:
+   public:
     Share() {}
 
     virtual void run(cxxopts::ParseResult &opts) override;
@@ -17,6 +17,6 @@ class Share : public Command {
     virtual std::string description() override;
 };
 
-}
+}  // namespace cmd
 
-#endif // SHARE_CMD_H
+#endif  // SHARE_CMD_H

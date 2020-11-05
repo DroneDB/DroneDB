@@ -2,41 +2,51 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-#include "dbops.h"
 #include "geoproject.h"
+
 #include <gdal_priv.h>
 #include <gdal_utils.h>
 
+#include "dbops.h"
+
 namespace ddb {
 
-void geoProject(const std::vector<std::string> &images, const std::string &output, const std::string &outsize){
+void geoProject(const std::vector<std::string>& images,
+                const std::string& output, const std::string& outsize) {
     bool isDirectory = fs::is_directory(output);
     bool outputToDir = images.size() > 1 || isDirectory;
-    if (outputToDir){
-        if (!isDirectory){
-            if (!fs::create_directories(output)){
-                throw FSException(output + " is not a valid directory (cannot create it).");
+    if (outputToDir) {
+        if (!isDirectory) {
+            if (!fs::create_directories(output)) {
+                throw FSException(
+                    output + " is not a valid directory (cannot create it).");
             }
         }
     }
 
-    for (const std::string &img : images){
+    for (const std::string& img : images) {
         fs::path p = img;
-        if (!fs::exists(p)){
-            throw FSException("Cannot project " + p.string() + " (does not exist)");
+        if (!fs::exists(p)) {
+            throw FSException("Cannot project " + p.string() +
+                              " (does not exist)");
         }
 
         Entry e;
-        if (!parseEntry(p, ".", e, false, true)){
+        if (!parseEntry(p, ".", e, false, true)) {
             throw FSException("Cannot parse file " + p.string());
         }
 
-        if (e.type != EntryType::GeoImage){
-            std::cerr << "Cannot reproject " << p.string() << ", not a GeoImage, skipping..." << std::endl;
+        if (e.type != EntryType::GeoImage) {
+            std::cerr << "Cannot reproject " << p.string()
+                      << ", not a GeoImage, skipping..." << std::endl;
             continue;
         }
-        if (e.polygon_geom.size() < 4 || e.meta.find("width") == e.meta.end() || e.meta.find("height") == e.meta.end()){
-            std::cerr << "Cannot project " << p.string() << ", the image does not have sufficient information: skipping" << std::endl;
+        if (e.polygon_geom.size() < 4 || e.meta.find("width") == e.meta.end() ||
+            e.meta.find("height") == e.meta.end()) {
+            std::cerr
+                << "Cannot project " << p.string()
+                << ", the image does not have sufficient information: skipping"
+                << std::endl;
             continue;
         }
 
@@ -44,9 +54,11 @@ void geoProject(const std::vector<std::string> &images, const std::string &outpu
         int height = e.meta["height"].get<int>();
 
         std::string outFile;
-        if (outputToDir){
-            outFile = (fs::path(output) / p.filename().replace_extension(".tif")).string();
-        }else{
+        if (outputToDir) {
+            outFile =
+                (fs::path(output) / p.filename().replace_extension(".tif"))
+                    .string();
+        } else {
             outFile = output;
         }
 
@@ -56,8 +68,9 @@ void geoProject(const std::vector<std::string> &images, const std::string &outpu
         Point ur = e.polygon_geom.getPoint(3);
 
         GDALDatasetH hSrcDataset = GDALOpen(p.string().c_str(), GA_ReadOnly);
-        if (!hSrcDataset){
-            std::cout << "Cannot project " << p.string() << ", cannot open raster: skipping" << std::endl;
+        if (!hSrcDataset) {
+            std::cout << "Cannot project " << p.string()
+                      << ", cannot open raster: skipping" << std::endl;
             continue;
         }
 
@@ -68,22 +81,23 @@ void geoProject(const std::vector<std::string> &images, const std::string &outpu
         int scaledWidth = width;
         int scaledHeight = height;
 
-
-        if (outsize.length() > 0){
+        if (outsize.length() > 0) {
             double ratio = 1.0;
 
             targs = CSLAddString(targs, "-outsize");
             targs = CSLAddString(targs, outsize.c_str());
-            if (outsize.back() == '%'){
+            if (outsize.back() == '%') {
                 targs = CSLAddString(targs, outsize.c_str());
                 ratio = std::stod(outsize) / 100.0;
-            }else{
+            } else {
                 ratio = std::stod(outsize) / width;
-                targs = CSLAddString(targs, utils::to_str(ratio * height).c_str());
+                targs =
+                    CSLAddString(targs, utils::to_str(ratio * height).c_str());
             }
 
             scaledWidth = static_cast<int>(static_cast<double>(width) * ratio);
-            scaledHeight = static_cast<int>(static_cast<double>(height) * ratio);
+            scaledHeight =
+                static_cast<int>(static_cast<double>(height) * ratio);
 
             LOGD << "Scaled width: " << scaledWidth;
             LOGD << "Scaled height: " << scaledHeight;
@@ -113,12 +127,11 @@ void geoProject(const std::vector<std::string> &images, const std::string &outpu
         targs = CSLAddString(targs, utils::to_str(ur.x, 13).c_str());
         targs = CSLAddString(targs, utils::to_str(ur.y, 13).c_str());
 
-        GDALTranslateOptions* psOptions = GDALTranslateOptionsNew(targs, nullptr);
+        GDALTranslateOptions* psOptions =
+            GDALTranslateOptionsNew(targs, nullptr);
         CSLDestroy(targs);
-        GDALDatasetH hDstDataset = GDALTranslate("/vsimem/translated.tif",
-                                                hSrcDataset,
-                                                psOptions,
-                                                nullptr);
+        GDALDatasetH hDstDataset = GDALTranslate(
+            "/vsimem/translated.tif", hSrcDataset, psOptions, nullptr);
         GDALTranslateOptionsFree(psOptions);
 
         // Run gdalwarp to add trasparency, apply GCPs
@@ -131,12 +144,8 @@ void geoProject(const std::vector<std::string> &images, const std::string &outpu
         GDALWarpAppOptions* waOptions = GDALWarpAppOptionsNew(wargs, nullptr);
         CSLDestroy(wargs);
 
-        GDALDatasetH hWrpDataset = GDALWarp(outFile.c_str(),
-                 nullptr,
-                 1,
-                 &hDstDataset,
-                 waOptions,
-                 nullptr);
+        GDALDatasetH hWrpDataset = GDALWarp(outFile.c_str(), nullptr, 1,
+                                            &hDstDataset, waOptions, nullptr);
         GDALWarpAppOptionsFree(waOptions);
 
         std::cout << "W\t" << outFile << std::endl;
@@ -147,4 +156,4 @@ void geoProject(const std::vector<std::string> &images, const std::string &outpu
     }
 }
 
-}
+}  // namespace ddb

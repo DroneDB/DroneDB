@@ -5,14 +5,15 @@
 #ifndef BASICGEOMETRY_H
 #define BASICGEOMETRY_H
 
-#include <string>
 #include <iomanip>
-#include "json.h"
+#include <string>
+
 #include "ddb_export.h"
+#include "json.h"
 
-namespace ddb{
+namespace ddb {
 
-struct Point{
+struct Point {
     double x;
     double y;
     double z;
@@ -20,15 +21,15 @@ struct Point{
     DDB_DLL Point(double x, double y) : x(x), y(y), z(0.0) {}
     DDB_DLL Point() : x(0.0), y(0.0), z(0.0) {}
 };
-inline std::ostream& operator<<(std::ostream& os, const Point& p){
-     os << "[" << p.x << ", " << p.y << ", " << p.z << "]";
+inline std::ostream& operator<<(std::ostream& os, const Point& p) {
+    os << "[" << p.x << ", " << p.y << ", " << p.z << "]";
     return os;
 }
 
-struct BasicGeometry{
+struct BasicGeometry {
     DDB_DLL BasicGeometry() {}
 
-    DDB_DLL void addPoint(const Point &p);
+    DDB_DLL void addPoint(const Point& p);
     DDB_DLL void addPoint(double x, double y, double z);
     DDB_DLL Point getPoint(int index);
     DDB_DLL bool empty() const;
@@ -38,35 +39,33 @@ struct BasicGeometry{
     DDB_DLL virtual json toGeoJSON() const = 0;
 
     std::vector<Point> points;
-protected:
-    void initGeoJsonBase(json &j) const;
+
+   protected:
+    void initGeoJsonBase(json& j) const;
 };
-inline std::ostream& operator<<(std::ostream& os, const BasicGeometry& g)
-{
+inline std::ostream& operator<<(std::ostream& os, const BasicGeometry& g) {
     os << "[";
-    for (auto &p : g.points){
+    for (auto& p : g.points) {
         os << std::setprecision(13) << p << " ";
     }
     os << "]";
     return os;
 }
 
-struct BasicPointGeometry : BasicGeometry{
+struct BasicPointGeometry : BasicGeometry {
     DDB_DLL virtual std::string toWkt() const override;
     DDB_DLL virtual json toGeoJSON() const override;
 };
 
-struct BasicPolygonGeometry : BasicGeometry{
+struct BasicPolygonGeometry : BasicGeometry {
     DDB_DLL virtual std::string toWkt() const override;
     DDB_DLL virtual json toGeoJSON() const override;
 };
 
-enum BasicGeometryType {
-    BGAuto, BGPoint, BGPolygon
-};
+enum BasicGeometryType { BGAuto, BGPoint, BGPolygon };
 
-DDB_DLL BasicGeometryType getBasicGeometryTypeFromName(const std::string &name);
+DDB_DLL BasicGeometryType getBasicGeometryTypeFromName(const std::string& name);
 
-}
+}  // namespace ddb
 
-#endif // BASICGEOMETRY_H
+#endif  // BASICGEOMETRY_H

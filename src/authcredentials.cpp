@@ -3,12 +3,12 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "authcredentials.h"
 
-AuthCredentials::AuthCredentials(){}
+AuthCredentials::AuthCredentials() {}
 
-AuthCredentials::AuthCredentials(const std::string &username, const std::string &password)
-    : username(username), password(password){}
+AuthCredentials::AuthCredentials(const std::string &username,
+                                 const std::string &password)
+    : username(username), password(password) {}
 
-bool AuthCredentials::empty() const{
+bool AuthCredentials::empty() const {
     return username.empty() && password.empty();
 }
-

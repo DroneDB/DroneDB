@@ -6,26 +6,30 @@
 
 #include <string>
 #include <vector>
+
 #include "constants.h"
 #include "ddb_export.h"
 
-namespace ddb{
+namespace ddb {
 
-class Registry{
+class Registry {
     std::string url;
 
     // Last valid token
     std::string authToken;
-public:
+
+   public:
     DDB_DLL Registry(const std::string &url = DEFAULT_REGISTRY);
 
     DDB_DLL std::string getUrl(const std::string &path = "") const;
 
-    DDB_DLL std::string getAuthToken(const std::string &username, const std::string &password) const;
-    DDB_DLL std::string login(const std::string &username, const std::string &password) const;
+    DDB_DLL std::string getAuthToken(const std::string &username,
+                                     const std::string &password) const;
+    DDB_DLL std::string login(const std::string &username,
+                              const std::string &password) const;
     DDB_DLL bool logout();
 };
 
-}
+}  // namespace ddb
 
-#endif // REGISTRY_H
+#endif  // REGISTRY_H

@@ -5,50 +5,55 @@
 #ifndef DSMSERVICE_H
 #define DSMSERVICE_H
 
-#include <string>
-#include <vector>
-#include <unordered_map>
-#include <filesystem>
+#include <cpl_conv.h>
 #include <gdal_priv.h>
 #include <ogr_spatialref.h>
-#include <cpl_conv.h>
-#include "userprofile.h"
-#include "geo.h"
+
+#include <filesystem>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
 #include "ddb_export.h"
+#include "geo.h"
+#include "userprofile.h"
 
 using namespace ddb;
 
-struct DSMCacheEntry{
+struct DSMCacheEntry {
     unsigned int width, height;
     int hasNodata;
     float nodata;
 
-	double geoTransform[6];
-	std::vector<float> data;
-	BoundingBox<Point2D> bbox;
+    double geoTransform[6];
+    std::vector<float> data;
+    BoundingBox<Point2D> bbox;
 
     DDB_DLL DSMCacheEntry() : width(0), height(0), hasNodata(0), nodata(0) {
-		memset(geoTransform, 0, sizeof(double)*6);
-	}
+        memset(geoTransform, 0, sizeof(double) * 6);
+    }
 
     DDB_DLL void loadData(GDALDataset *dataset);
     DDB_DLL float getElevation(double latitude, double longitude);
 };
 
-class DSMService{
-    std::unordered_map<std::string, DSMCacheEntry> cache; // filename --> cache entry
+class DSMService {
+    std::unordered_map<std::string, DSMCacheEntry>
+        cache;  // filename --> cache entry
     DSMService();
     ~DSMService();
     static DSMService *instance;
-public:
-    DDB_DLL static DSMService* get();
+
+   public:
+    DDB_DLL static DSMService *get();
 
     DDB_DLL float getAltitude(double latitude, double longitude);
 
     DDB_DLL bool loadDiskCache(double latitude, double longitude);
     DDB_DLL std::string loadFromNetwork(double latitude, double longitude);
-    DDB_DLL bool addGeoTIFFToCache(const fs::path &filePath, double latitude, double longitude);
+    DDB_DLL bool addGeoTIFFToCache(const fs::path &filePath, double latitude,
+                                   double longitude);
     DDB_DLL fs::path getCacheDir();
 };
 
-#endif // DSMSERVICE_H
+#endif  // DSMSERVICE_H

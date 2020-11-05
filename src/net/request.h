@@ -5,24 +5,25 @@
 #define NET_REQUEST_H
 
 #include <curl/curl.h>
+
 #include <string>
 #include <vector>
+
+#include "ddb_export.h"
 #include "reqtype.h"
 #include "response.h"
-#include "ddb_export.h"
 
-namespace ddb::net{
+namespace ddb::net {
 
 typedef std::function<bool(size_t txBytes, size_t totalBytes)> RequestCallback;
 
 struct RequestProgress {
-  curl_off_t lastRuntime;
-  CURL *curl;
-  RequestCallback *cb;
+    curl_off_t lastRuntime;
+    CURL *curl;
+    RequestCallback *cb;
 };
 
-
-class Request{
+class Request {
     std::string url;
     ReqType reqType;
     CURL *curl;
@@ -34,24 +35,26 @@ class Request{
 
     std::string urlEncode(const std::string &str);
     void perform(Response &res);
-public:
+
+   public:
     DDB_DLL Request(const std::string &url, ReqType reqType);
     DDB_DLL ~Request();
 
     DDB_DLL Response send();
     DDB_DLL Response downloadToFile(const std::string &outFile);
 
-    DDB_DLL Request& formData(std::vector<std::string> params);
-    DDB_DLL Request& multiPartFormData(std::vector<std::string> files, std::vector<std::string> params = {});
-    DDB_DLL Request& header(const std::string &header);
-    DDB_DLL Request& header(const std::string &name, const std::string &value);
-    DDB_DLL Request& verifySSL(bool flag);
-    DDB_DLL Request& authToken(const std::string &token);
+    DDB_DLL Request &formData(std::vector<std::string> params);
+    DDB_DLL Request &multiPartFormData(std::vector<std::string> files,
+                                       std::vector<std::string> params = {});
+    DDB_DLL Request &header(const std::string &header);
+    DDB_DLL Request &header(const std::string &name, const std::string &value);
+    DDB_DLL Request &verifySSL(bool flag);
+    DDB_DLL Request &authToken(const std::string &token);
 
-    DDB_DLL Request& progressCb(const RequestCallback &cb);
-    DDB_DLL Request& maximumUploadSpeed(unsigned long bytesPerSec);
+    DDB_DLL Request &progressCb(const RequestCallback &cb);
+    DDB_DLL Request &maximumUploadSpeed(unsigned long bytesPerSec);
 };
 
-}
+}  // namespace ddb::net
 
-#endif // NET_REQUEST_H
+#endif  // NET_REQUEST_H

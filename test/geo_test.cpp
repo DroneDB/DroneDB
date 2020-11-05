@@ -2,8 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-#include "gtest/gtest.h"
 #include "geo.h"
+
+#include "gtest/gtest.h"
 
 namespace {
 
@@ -25,4 +26,4 @@ TEST(testUTM, Normal) {
     EXPECT_NEAR(coords.longitude, longitude, 1E-10);
 }
 
-}
+}  // namespace

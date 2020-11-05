@@ -4,4 +4,4 @@
 #include "net/functions.h"
 #include "net/request.h"
 
-#endif // NET_H
+#endif  // NET_H

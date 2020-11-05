@@ -5,9 +5,9 @@
 #define DDB_EXPORT_H
 
 #ifdef _WIN32
-    #define DDB_DLL   __declspec(dllexport)
+#define DDB_DLL __declspec(dllexport)
 #else
-    #define DDB_DLL
-#endif // _WIN32
+#define DDB_DLL
+#endif  // _WIN32
 
-#endif // DDB_EXPORT_H
+#endif  // DDB_EXPORT_H

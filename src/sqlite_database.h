@@ -6,23 +6,24 @@
 
 // Spatialite includes
 #include <geos_c.h>
-#include <sqlite3.h>
-#include <spatialite/gaiageo.h>
 #include <spatialite.h>
+#include <spatialite/gaiageo.h>
+#include <sqlite3.h>
 
-#include <string>
 #include <memory>
+#include <string>
 
-#include "statement.h"
-#include "fs.h"
 #include "ddb_export.h"
+#include "fs.h"
+#include "statement.h"
 
-namespace ddb{
+namespace ddb {
 
 class SqliteDatabase {
     sqlite3 *db;
     std::string openFile;
-  public:
+
+   public:
     DDB_DLL SqliteDatabase();
     DDB_DLL SqliteDatabase &open(const std::string &file);
     DDB_DLL SqliteDatabase &close();
@@ -36,6 +37,6 @@ class SqliteDatabase {
     DDB_DLL ~SqliteDatabase();
 };
 
-}
+}  // namespace ddb
 
-#endif // SQLITEDATABASE_H
+#endif  // SQLITEDATABASE_H

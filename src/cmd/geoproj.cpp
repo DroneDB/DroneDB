@@ -2,11 +2,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-#include <iostream>
 #include "geoproj.h"
+
+#include <iostream>
+
 #include "dbops.h"
 #include "geoproject.h"
-
 
 namespace cmd {
 
@@ -39,6 +40,4 @@ void GeoProj::run(cxxopts::ParseResult &opts) {
     ddb::geoProject(images, output, outsize);
 }
 
-}
-
-
+}  // namespace cmd

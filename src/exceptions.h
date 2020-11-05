@@ -5,48 +5,47 @@
 #define EXCEPTIONS_H
 
 #include <stdexcept>
-namespace ddb{
+namespace ddb {
 
-class AppException : public std::runtime_error{
+class AppException : public std::runtime_error {
     using std::runtime_error::runtime_error;
 };
-class DBException : public AppException{
+class DBException : public AppException {
     using AppException::AppException;
 };
-class SQLException : public DBException{
+class SQLException : public DBException {
     using DBException::DBException;
 };
-class FSException : public AppException{
+class FSException : public AppException {
     using AppException::AppException;
 };
-class TimezoneException : public AppException{
+class TimezoneException : public AppException {
     using AppException::AppException;
 };
-class IndexException : public AppException{
+class IndexException : public AppException {
     using AppException::AppException;
 };
-class InvalidArgsException : public AppException{
+class InvalidArgsException : public AppException {
     using AppException::AppException;
 };
-class GDALException : public AppException{
+class GDALException : public AppException {
     using AppException::AppException;
 };
-class NetException : public AppException{
+class NetException : public AppException {
     using AppException::AppException;
 };
-class URLException : public AppException{
+class URLException : public AppException {
     using AppException::AppException;
 };
-class AuthException : public AppException{
+class AuthException : public AppException {
     using AppException::AppException;
 };
-class JSONException : public AppException{
+class JSONException : public AppException {
     using AppException::AppException;
 };
-class RegistryException : public AppException{
+class RegistryException : public AppException {
     using AppException::AppException;
 };
 
-
-}
-#endif // EXCEPTIONS_H
+}  // namespace ddb
+#endif  // EXCEPTIONS_H

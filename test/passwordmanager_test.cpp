@@ -5,65 +5,66 @@
 #include <database.h>
 #include <passwordmanager.h>
 
-
-#include "gtest/gtest.h"
 #include "entry.h"
+#include "gtest/gtest.h"
 #include "test.h"
 #include "testarea.h"
 
 namespace {
 
-    using namespace ddb;
+using namespace ddb;
 
-    TEST(passwordManager, appendVerifyOk) {
+TEST(passwordManager, appendVerifyOk) {
+    TestArea ta(TEST_NAME);
 
-        TestArea ta(TEST_NAME);
+    const auto sqlite = ta.downloadTestAsset(
+        "https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/"
+        "dbase.sqlite",
+        "dbase.sqlite");
 
-        const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", "dbase.sqlite");
+    const auto testFolder = ta.getFolder("test");
+    create_directory(testFolder / ".ddb");
+    fs::copy(sqlite.string(), testFolder / ".ddb",
+             fs::copy_options::overwrite_existing);
+    const auto dbPath = testFolder / ".ddb" / "dbase.sqlite";
+    EXPECT_TRUE(fs::exists(dbPath));
 
-        const auto testFolder = ta.getFolder("test");
-        create_directory(testFolder / ".ddb");
-        fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
-        const auto dbPath = testFolder / ".ddb" / "dbase.sqlite";
-        EXPECT_TRUE(fs::exists(dbPath));
+    Database db;
 
-        Database db;
+    db.open(dbPath.string());
 
-        db.open(dbPath.string());
+    PasswordManager manager(&db);
 
-        PasswordManager manager(&db);
+    EXPECT_TRUE(manager.verify(""));
 
-        EXPECT_TRUE(manager.verify(""));
+    manager.append("testpassword");
 
-        manager.append("testpassword");
+    EXPECT_TRUE(manager.verify("testpassword"));
+    EXPECT_FALSE(manager.verify("wrongpassword"));
 
-        EXPECT_TRUE(manager.verify("testpassword"));
-        EXPECT_FALSE(manager.verify("wrongpassword"));
+    manager.append("wrongpassword");
+    EXPECT_TRUE(manager.verify("wrongpassword"));
 
-        manager.append("wrongpassword");
-        EXPECT_TRUE(manager.verify("wrongpassword"));
+    manager.append("testpassword1");
+    manager.append("testpassword2");
+    manager.append("testpassword3");
+    manager.append("testpassword4");
 
-        manager.append("testpassword1");
-        manager.append("testpassword2");
-        manager.append("testpassword3");
-        manager.append("testpassword4");
+    EXPECT_TRUE(manager.verify("testpassword4"));
 
-        EXPECT_TRUE(manager.verify("testpassword4"));
+    manager.clearAll();
 
-        manager.clearAll();
+    EXPECT_FALSE(manager.verify("wrongpassword"));
+    EXPECT_FALSE(manager.verify("testpassword"));
+    EXPECT_FALSE(manager.verify("testpassword1"));
+    EXPECT_FALSE(manager.verify("testpassword2"));
+    EXPECT_FALSE(manager.verify("testpassword3"));
+    EXPECT_FALSE(manager.verify("testpassword4"));
 
-        EXPECT_FALSE(manager.verify("wrongpassword"));
-        EXPECT_FALSE(manager.verify("testpassword"));
-        EXPECT_FALSE(manager.verify("testpassword1"));
-        EXPECT_FALSE(manager.verify("testpassword2"));
-        EXPECT_FALSE(manager.verify("testpassword3"));
-        EXPECT_FALSE(manager.verify("testpassword4"));
+    manager.append("testpassword");
 
-        manager.append("testpassword");
-
-        EXPECT_TRUE(manager.verify("testpassword"));
-        EXPECT_FALSE(manager.verify("wrongpassword"));
-
-    }
-
+    EXPECT_TRUE(manager.verify("testpassword"));
+    EXPECT_FALSE(manager.verify("wrongpassword"));
 }
+
+}  // namespace

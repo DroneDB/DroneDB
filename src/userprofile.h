@@ -5,16 +5,16 @@
 #ifndef USERPROFILE_H
 #define USERPROFILE_H
 
-#include "fs.h"
-#include "logger.h"
 #include "authmanager.h"
 #include "ddb_export.h"
+#include "fs.h"
+#include "logger.h"
 
-namespace ddb{
+namespace ddb {
 
-class UserProfile{
-public:
-    DDB_DLL static UserProfile* get();
+class UserProfile {
+   public:
+    DDB_DLL static UserProfile *get();
 
     DDB_DLL fs::path getHomeDir();
     DDB_DLL fs::path getProfileDir();
@@ -26,7 +26,8 @@ public:
     DDB_DLL fs::path getAuthFile();
 
     DDB_DLL AuthManager *getAuthManager();
-private:
+
+   private:
     UserProfile();
 
     void createDir(const fs::path &p);
@@ -36,6 +37,6 @@ private:
     AuthManager *authManager;
 };
 
-}
+}  // namespace ddb
 
-#endif // USERPROFILE_H
+#endif  // USERPROFILE_H

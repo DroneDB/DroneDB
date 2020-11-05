@@ -6,13 +6,14 @@
 
 #include <map>
 #include <string>
+
 #include "command.h"
 
 namespace cmd {
 
-  extern std::map<std::string, Command*> commands;
-  extern std::map<std::string, std::string> aliases;
+extern std::map<std::string, Command*> commands;
+extern std::map<std::string, std::string> aliases;
 
-}
+}  // namespace cmd
 
-#endif // COMMAND_LIST_H
+#endif  // COMMAND_LIST_H

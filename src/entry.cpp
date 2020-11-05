@@ -1,15 +1,18 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
-#include <exiv2/exiv2.hpp>
 #include "entry.h"
+
+#include <exiv2/exiv2.hpp>
+
 #include "mio.h"
 #include "ogr_srs_api.h"
 
 namespace ddb {
 
-bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entry, bool withHash, bool stopOnError) {
-    if (!fs::exists(path)){
+bool parseEntry(const fs::path &path, const fs::path &rootDirectory,
+                Entry &entry, bool withHash, bool stopOnError) {
+    if (!fs::exists(path)) {
         if (stopOnError) throw FSException(path.string() + " does not exist");
         entry.type = EntryType::Undefined;
         return false;
@@ -29,18 +32,20 @@ bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
         entry.size = 0;
 
         // Check for DroneDB dir
-        try{
-            if (fs::exists(path / ".ddb" / "dbase.sqlite")){
+        try {
+            if (fs::exists(path / ".ddb" / "dbase.sqlite")) {
                 entry.type = EntryType::DroneDB;
             }
-        }catch(const fs::filesystem_error &e){
-            LOGD << "Cannot check " << path.string() << " .ddb presence: " << e.what();
+        } catch (const fs::filesystem_error &e) {
+            LOGD << "Cannot check " << path.string()
+                 << " .ddb presence: " << e.what();
         }
     } else {
-        if (entry.hash == "" && withHash) entry.hash = Hash::fileSHA256(path.string());
+        if (entry.hash == "" && withHash)
+            entry.hash = Hash::fileSHA256(path.string());
         entry.size = p.getSize();
 
-        entry.type = EntryType::Generic; // Default
+        entry.type = EntryType::Generic;  // Default
 
         bool jpg = p.checkExtension({"jpg", "jpeg"});
         bool tif = p.checkExtension({"tif", "tiff"});
@@ -48,17 +53,18 @@ bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
 
         bool georaster = false;
 
-        if (tif){
-            GDALDatasetH  hDataset;
-            hDataset = GDALOpen( p.string().c_str(), GA_ReadOnly );
-            if( hDataset != NULL ){
+        if (tif) {
+            GDALDatasetH hDataset;
+            hDataset = GDALOpen(p.string().c_str(), GA_ReadOnly);
+            if (hDataset != NULL) {
                 const char *proj = GDALGetProjectionRef(hDataset);
-                if (proj != NULL){
+                if (proj != NULL) {
                     georaster = std::string(proj) != "";
                 }
                 GDALClose(hDataset);
-            }else{
-                LOGW << "Cannot open " << p.string().c_str() << " for georaster test";
+            } else {
+                LOGW << "Cannot open " << p.string().c_str()
+                     << " for georaster test";
             }
         }
 
@@ -68,10 +74,10 @@ bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
             // A normal image by default (refined later)
             entry.type = EntryType::Image;
 
-            try{
-
+            try {
                 auto image = Exiv2::ImageFactory::open(path.string());
-                if (!image.get()) throw new IndexException("Cannot open " + path.string());
+                if (!image.get())
+                    throw new IndexException("Cannot open " + path.string());
 
                 image->readMetadata();
                 ExifParser e(image.get());
@@ -87,13 +93,13 @@ bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
                     entry.meta["sensor"] = e.extractSensor();
 
                     SensorSize sensorSize;
-                    if (e.extractSensorSize(sensorSize)){
+                    if (e.extractSensorSize(sensorSize)) {
                         entry.meta["sensorWidth"] = sensorSize.width;
                         entry.meta["sensorHeight"] = sensorSize.height;
                     }
 
                     Focal focal;
-                    if (e.computeFocal(focal)){
+                    if (e.computeFocal(focal)) {
                         entry.meta["focalLength"] = focal.length;
                         entry.meta["focalLength35"] = focal.length35;
                     }
@@ -110,16 +116,20 @@ bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
 
                     GeoLocation geo;
                     if (e.extractGeo(geo)) {
-                        entry.point_geom.addPoint(geo.longitude, geo.latitude, geo.altitude);
-                        LOGD << "POINT GEOM: "<< entry.point_geom.toWkt();
+                        entry.point_geom.addPoint(geo.longitude, geo.latitude,
+                                                  geo.altitude);
+                        LOGD << "POINT GEOM: " << entry.point_geom.toWkt();
 
-                        //e.printAllTags();
+                        // e.printAllTags();
 
                         // Estimate image footprint
                         double relAltitude = 0.0;
 
-                        if (hasCameraOri && e.extractRelAltitude(relAltitude) && sensorSize.width > 0.0 && focal.length > 0.0) {
-                            calculateFootprint(sensorSize, geo, focal, cameraOri, relAltitude, entry.polygon_geom);
+                        if (hasCameraOri && e.extractRelAltitude(relAltitude) &&
+                            sensorSize.width > 0.0 && focal.length > 0.0) {
+                            calculateFootprint(sensorSize, geo, focal,
+                                               cameraOri, relAltitude,
+                                               entry.polygon_geom);
                         }
 
                         entry.type = EntryType::GeoImage;
@@ -130,16 +140,18 @@ bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
                 } else {
                     LOGD << "No EXIF data found in " << path.string();
                 }
-            }catch(Exiv2::AnyError& e){
+            } catch (Exiv2::AnyError &e) {
                 LOGD << "Cannot read EXIF data: " << path.string();
-            	
-                if (stopOnError) throw FSException("Cannot read EXIF data: " + path.string() + " (" + e.what() + ")");
+
+                if (stopOnError)
+                    throw FSException("Cannot read EXIF data: " +
+                                      path.string() + " (" + e.what() + ")");
             }
-        }else if (georaster){
+        } else if (georaster) {
             entry.type = EntryType::GeoRaster;
 
-            GDALDatasetH  hDataset;
-            hDataset = GDALOpen( path.string().c_str(), GA_ReadOnly );
+            GDALDatasetH hDataset;
+            hDataset = GDALOpen(path.string().c_str(), GA_ReadOnly);
             int width = GDALGetRasterXSize(hDataset);
             int height = GDALGetRasterYSize(hDataset);
 
@@ -147,56 +159,75 @@ bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
             entry.meta["height"] = height;
 
             double geotransform[6];
-            if (GDALGetGeoTransform(hDataset, geotransform) == CE_None){
+            if (GDALGetGeoTransform(hDataset, geotransform) == CE_None) {
                 entry.meta["geotransform"] = json::array();
-                for (int i = 0; i < 6; i++) entry.meta["geotransform"].push_back(geotransform[i]);
+                for (int i = 0; i < 6; i++)
+                    entry.meta["geotransform"].push_back(geotransform[i]);
 
-                if (GDALGetProjectionRef(hDataset) != NULL){
+                if (GDALGetProjectionRef(hDataset) != NULL) {
                     std::string wkt = GDALGetProjectionRef(hDataset);
-                    if (!wkt.empty()){
+                    if (!wkt.empty()) {
                         // Set projection
                         entry.meta["projection"] = wkt;
 
                         // Get lat/lon extent of raster
                         char *wktp = const_cast<char *>(wkt.c_str());
-                        OGRSpatialReferenceH hSrs = OSRNewSpatialReference(nullptr);
-                        OGRSpatialReferenceH hWgs84 = OSRNewSpatialReference(nullptr);
+                        OGRSpatialReferenceH hSrs =
+                            OSRNewSpatialReference(nullptr);
+                        OGRSpatialReferenceH hWgs84 =
+                            OSRNewSpatialReference(nullptr);
 
-                        if (OSRImportFromWkt(hSrs, &wktp) != OGRERR_NONE){
-                            throw GDALException("Cannot read spatial reference system for " + path.string() + ". Is PROJ available?");
+                        if (OSRImportFromWkt(hSrs, &wktp) != OGRERR_NONE) {
+                            throw GDALException(
+                                "Cannot read spatial reference system for " +
+                                path.string() + ". Is PROJ available?");
                         }
                         OSRImportFromEPSG(hWgs84, 4326);
-                        OGRCoordinateTransformationH hTransform = OCTNewCoordinateTransformation(hSrs, hWgs84);
+                        OGRCoordinateTransformationH hTransform =
+                            OCTNewCoordinateTransformation(hSrs, hWgs84);
 
-                        auto ul = getRasterCoordinate(hTransform, geotransform, 0.0, 0.0);
-                        auto ur = getRasterCoordinate(hTransform, geotransform, width, 0);
-                        auto lr = getRasterCoordinate(hTransform, geotransform, width, height);
-                        auto ll = getRasterCoordinate(hTransform, geotransform, 0.0, height);
+                        auto ul = getRasterCoordinate(hTransform, geotransform,
+                                                      0.0, 0.0);
+                        auto ur = getRasterCoordinate(hTransform, geotransform,
+                                                      width, 0);
+                        auto lr = getRasterCoordinate(hTransform, geotransform,
+                                                      width, height);
+                        auto ll = getRasterCoordinate(hTransform, geotransform,
+                                                      0.0, height);
 
-                        entry.polygon_geom.addPoint(ul.longitude, ul.latitude, 0.0);
-                        entry.polygon_geom.addPoint(ur.longitude, ur.latitude, 0.0);
-                        entry.polygon_geom.addPoint(lr.longitude, lr.latitude, 0.0);
-                        entry.polygon_geom.addPoint(ll.longitude, ll.latitude, 0.0);
-                        entry.polygon_geom.addPoint(ul.longitude, ul.latitude, 0.0);
+                        entry.polygon_geom.addPoint(ul.longitude, ul.latitude,
+                                                    0.0);
+                        entry.polygon_geom.addPoint(ur.longitude, ur.latitude,
+                                                    0.0);
+                        entry.polygon_geom.addPoint(lr.longitude, lr.latitude,
+                                                    0.0);
+                        entry.polygon_geom.addPoint(ll.longitude, ll.latitude,
+                                                    0.0);
+                        entry.polygon_geom.addPoint(ul.longitude, ul.latitude,
+                                                    0.0);
 
-                        auto center = getRasterCoordinate(hTransform, geotransform, width / 2.0, height / 2.0);
-                        entry.point_geom.addPoint(center.longitude, center.latitude, 0.0);
+                        auto center =
+                            getRasterCoordinate(hTransform, geotransform,
+                                                width / 2.0, height / 2.0);
+                        entry.point_geom.addPoint(center.longitude,
+                                                  center.latitude, 0.0);
 
                         OCTDestroyCoordinateTransformation(hTransform);
                         OSRDestroySpatialReference(hWgs84);
                         OSRDestroySpatialReference(hSrs);
-                    }else{
+                    } else {
                         LOGD << "Projection is empty";
                     }
                 }
             }
 
             entry.meta["bands"] = json::array();
-            for (int i = 0; i < GDALGetRasterCount(hDataset); i++){
+            for (int i = 0; i < GDALGetRasterCount(hDataset); i++) {
                 GDALRasterBandH hBand = GDALGetRasterBand(hDataset, i + 1);
                 auto b = json::object();
                 b["type"] = GDALGetDataTypeName(GDALGetRasterDataType(hBand));
-                b["colorInterp"] = GDALGetColorInterpretationName(GDALGetRasterColorInterpretation(hBand));
+                b["colorInterp"] = GDALGetColorInterpretationName(
+                    GDALGetRasterColorInterpretation(hBand));
                 entry.meta["bands"].push_back(b);
             }
         }
@@ -205,22 +236,27 @@ bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
     return true;
 }
 
-Geographic2D getRasterCoordinate(OGRCoordinateTransformationH hTransform, double *geotransform, double x, double y){
+Geographic2D getRasterCoordinate(OGRCoordinateTransformationH hTransform,
+                                 double *geotransform, double x, double y) {
     double dfGeoX = geotransform[0] + geotransform[1] * x + geotransform[2] * y;
     double dfGeoY = geotransform[3] + geotransform[4] * x + geotransform[5] * y;
 
-    if (OCTTransform(hTransform, 1, &dfGeoX, &dfGeoY, nullptr)){
+    if (OCTTransform(hTransform, 1, &dfGeoX, &dfGeoY, nullptr)) {
         return Geographic2D(dfGeoY, dfGeoX);
-    }else{
-        throw GDALException("Cannot get raster coordinates of corner " + std::to_string(x) + "," + std::to_string(y));
+    } else {
+        throw GDALException("Cannot get raster coordinates of corner " +
+                            std::to_string(x) + "," + std::to_string(y));
     }
 }
 
 // Adapted from https://github.com/mountainunicycler/dronecamerafov/tree/master
-void calculateFootprint(const SensorSize &sensorSize, const GeoLocation &geo, const Focal &focal, const CameraOrientation &cameraOri, double relAltitude, BasicGeometry &geom) {
+void calculateFootprint(const SensorSize &sensorSize, const GeoLocation &geo,
+                        const Focal &focal, const CameraOrientation &cameraOri,
+                        double relAltitude, BasicGeometry &geom) {
     auto utmZone = getUTMZone(geo.latitude, geo.longitude);
     auto center = toUTM(geo.latitude, geo.longitude, utmZone);
-    double groundHeight = geo.altitude != 0.0 ? geo.altitude - relAltitude : relAltitude;
+    double groundHeight =
+        geo.altitude != 0.0 ? geo.altitude - relAltitude : relAltitude;
 
     // Field of view
 
@@ -232,24 +268,27 @@ void calculateFootprint(const SensorSize &sensorSize, const GeoLocation &geo, co
 
     // Cap pitch to 60 degrees
     double pitch = cameraOri.pitch;
-    if (pitch > -30){
+    if (pitch > -30) {
         LOGD << "Pitch cap exceeded (" << pitch << ") using nadir";
-        pitch = -90; // set to nadir
+        pitch = -90;  // set to nadir
     }
 
     // From drone to...
-    double bottom = relAltitude * tan(utils::deg2rad(90.0 + pitch) - 0.5 * yView);
+    double bottom =
+        relAltitude * tan(utils::deg2rad(90.0 + pitch) - 0.5 * yView);
     double top = relAltitude * tan(utils::deg2rad(90.0 + pitch) + 0.5 * yView);
-    double left = relAltitude * tan(utils::deg2rad(cameraOri.roll) - 0.5 * xView);
-    double right = relAltitude * tan(utils::deg2rad(cameraOri.roll) + 0.5 * xView);
+    double left =
+        relAltitude * tan(utils::deg2rad(cameraOri.roll) - 0.5 * xView);
+    double right =
+        relAltitude * tan(utils::deg2rad(cameraOri.roll) + 0.5 * xView);
     // ... of picture.
 
-//    LOGD << "xView: " << utils::rad2deg(xView);
-//    LOGD << "yView: " << utils::rad2deg(yView);
-//    LOGD << "bottom: " << bottom;
-//    LOGD << "top: " << top;
-//    LOGD << "left: " << left;
-//    LOGD << "right: " << right;
+    //    LOGD << "xView: " << utils::rad2deg(xView);
+    //    LOGD << "yView: " << utils::rad2deg(yView);
+    //    LOGD << "bottom: " << bottom;
+    //    LOGD << "top: " << top;
+    //    LOGD << "left: " << left;
+    //    LOGD << "right: " << right;
 
     // Corners aligned north
     auto upperLeft = Projected2D(center.x + left, center.y + top);
@@ -263,10 +302,10 @@ void calculateFootprint(const SensorSize &sensorSize, const GeoLocation &geo, co
     lowerLeft.rotate(center, -cameraOri.yaw);
     lowerRight.rotate(center, -cameraOri.yaw);
 
-//    LOGD << "UL: " << upperLeft;
-//    LOGD << "UR: " << upperRight;
-//    LOGD << "LL: " << lowerLeft;
-//    LOGD << "LR: " << lowerRight;
+    //    LOGD << "UL: " << upperLeft;
+    //    LOGD << "UR: " << upperRight;
+    //    LOGD << "LL: " << lowerLeft;
+    //    LOGD << "LR: " << lowerRight;
 
     // Convert to geographic
     auto ul = fromUTM(upperLeft, utmZone);
@@ -281,7 +320,7 @@ void calculateFootprint(const SensorSize &sensorSize, const GeoLocation &geo, co
     geom.addPoint(ul.longitude, ul.latitude, groundHeight);
 }
 
-void Entry::toJSON(json &j) const{
+void Entry::toJSON(json &j) const {
     j["path"] = this->path;
     if (this->hash != "") j["hash"] = this->hash;
     j["type"] = this->type;
@@ -290,15 +329,21 @@ void Entry::toJSON(json &j) const{
     j["size"] = this->size;
     j["depth"] = this->depth;
 
-    if (!this->point_geom.empty()) j["point_geom"] = this->point_geom.toGeoJSON();
-    if (!this->polygon_geom.empty()) j["polygon_geom"] = this->polygon_geom.toGeoJSON();
+    if (!this->point_geom.empty())
+        j["point_geom"] = this->point_geom.toGeoJSON();
+    if (!this->polygon_geom.empty())
+        j["polygon_geom"] = this->polygon_geom.toGeoJSON();
 }
 
-bool Entry::toGeoJSON(json &j, BasicGeometryType type){
+bool Entry::toGeoJSON(json &j, BasicGeometryType type) {
     // Only export entries that have valid geometries
     std::vector<BasicGeometry *> geoms;
-    if (!point_geom.empty() && (type == BasicGeometryType::BGAuto || type == BasicGeometryType::BGPoint)) geoms.push_back(&point_geom);
-    if (!polygon_geom.empty() && (type == BasicGeometryType::BGAuto || type == BasicGeometryType::BGPolygon)) geoms.push_back(&polygon_geom);
+    if (!point_geom.empty() && (type == BasicGeometryType::BGAuto ||
+                                type == BasicGeometryType::BGPoint))
+        geoms.push_back(&point_geom);
+    if (!polygon_geom.empty() && (type == BasicGeometryType::BGAuto ||
+                                  type == BasicGeometryType::BGPolygon))
+        geoms.push_back(&polygon_geom);
     if (geoms.size() == 0) return false;
 
     json p;
@@ -318,162 +363,160 @@ bool Entry::toGeoJSON(json &j, BasicGeometryType type){
     j = geoms[0]->toGeoJSON();
     j["properties"] = p;
 
-//  j["type"] = "Feature";
-//  j["geometry"] = json({});
-//  j["geometry"]["type"] = "GeometryCollection";
-//  j["geometry"]["geometries"] = json::array();
+    //  j["type"] = "Feature";
+    //  j["geometry"] = json({});
+    //  j["geometry"]["type"] = "GeometryCollection";
+    //  j["geometry"]["geometries"] = json::array();
 
-//  for (auto &g : geoms){
-//      j["geometry"]["geometries"] += g->toGeoJSON()["geometry"];
-//  }
+    //  for (auto &g : geoms){
+    //      j["geometry"]["geometries"] += g->toGeoJSON()["geometry"];
+    //  }
 
     return true;
 }
 
-std::string Entry::toString(){
+std::string Entry::toString() {
     std::ostringstream s;
     s << "Path: " << this->path << "\n";
     if (this->hash != "") s << "SHA256: " << this->hash << "\n";
-    s << "Type: " << typeToHuman(this->type) << " (" << this->type << ")" << "\n";
+    s << "Type: " << typeToHuman(this->type) << " (" << this->type << ")"
+      << "\n";
 
     for (json::iterator it = this->meta.begin(); it != this->meta.end(); ++it) {
         std::string k = it.key();
         if (k.length() > 0) k[0] = std::toupper(k[0]);
 
-        if (k == "Bands"){
+        if (k == "Bands") {
             s << k << ": " << it.value().size() << " [";
-            for (json::iterator b = it.value().begin(); b != it.value().end(); b++){
+            for (json::iterator b = it.value().begin(); b != it.value().end();
+                 b++) {
                 auto band = b.value();
-                s << band["colorInterp"].get<std::string>() << "(" << band["type"].get<std::string>() << ")";
+                s << band["colorInterp"].get<std::string>() << "("
+                  << band["type"].get<std::string>() << ")";
                 if (b + 1 != it.value().end()) s << ",";
             }
             s << "]\n";
-        }else{
-            s << k << ": " << (it.value().is_string() ?
-                                   it.value().get<std::string>() :
-                                   it.value().dump()) << "\n";
+        } else {
+            s << k << ": "
+              << (it.value().is_string() ? it.value().get<std::string>()
+                                         : it.value().dump())
+              << "\n";
         }
     }
 
     s << "Modified Time: " << this->mtime << "\n";
     s << "Size: " << io::bytesToHuman(this->size) << "\n";
-    //s << "Tree Depth: " << this->depth << "\n";
-    if (!this->point_geom.empty()) s << "Point Geometry: " << this->point_geom  << "\n";
-    if (!this->polygon_geom.empty()) s << "Polygon Geometry: " << this->polygon_geom << "\n";
+    // s << "Tree Depth: " << this->depth << "\n";
+    if (!this->point_geom.empty())
+        s << "Point Geometry: " << this->point_geom << "\n";
+    if (!this->polygon_geom.empty())
+        s << "Polygon Geometry: " << this->polygon_geom << "\n";
 
     return s.str();
 }
 
-void parsePoint(BasicGeometry* point_geom, nlohmann::basic_json<>::value_type coordinates)
-{
-	if (coordinates.empty())
-		throw DBException("Empty 'coordinates' field");
+void parsePoint(BasicGeometry *point_geom,
+                nlohmann::basic_json<>::value_type coordinates) {
+    if (coordinates.empty()) throw DBException("Empty 'coordinates' field");
 
-	if (coordinates.size() != 3)
-		throw DBException(utils::stringFormat("Expected 3 coordinates but got ", coordinates.size()));
+    if (coordinates.size() != 3)
+        throw DBException(utils::stringFormat("Expected 3 coordinates but got ",
+                                              coordinates.size()));
 
-	const auto x = coordinates[0].get<double>();
-	const auto y = coordinates[1].get<double>();
-	const auto z = coordinates[2].get<double>();
+    const auto x = coordinates[0].get<double>();
+    const auto y = coordinates[1].get<double>();
+    const auto z = coordinates[2].get<double>();
 
-	LOGD << "Parsed point: (" << x << "; " << y << "; " << z << ")";
-	
-	point_geom->addPoint(x, y, z);
+    LOGD << "Parsed point: (" << x << "; " << y << "; " << z << ")";
+
+    point_geom->addPoint(x, y, z);
 }
 
-void loadPointGeom(BasicPointGeometry *point_geom, const std::string& text)
-{
-    if (text.empty()) 
-        throw DBException("text is empty");
-	
-	if (point_geom == nullptr)
-        throw DBException("point_geom is null");
-	
+void loadPointGeom(BasicPointGeometry *point_geom, const std::string &text) {
+    if (text.empty()) throw DBException("text is empty");
+
+    if (point_geom == nullptr) throw DBException("point_geom is null");
+
     const auto j = json::parse(text);
-	
+
     // {"type":"Point","coordinates":[-91.99456000000001,46.842607,198.31]}
 
-	if (!j.contains("type"))
-        throw DBException("Missing 'type' field");
-    	
-	if (j["type"].get<std::string>() != "Point")
-        throw DBException(utils::stringFormat("Cannot parse point_geom field: expected Point type but got: %s", j["type"].dump()));
+    if (!j.contains("type")) throw DBException("Missing 'type' field");
 
-    if (!j.contains("coordinates"))
-        throw DBException("Missing 'coordinates' field");
-
-	auto coordinates = j["coordinates"];
-
-	parsePoint(point_geom, coordinates);
-
-}
-
-void loadPolygonGeom(BasicPolygonGeometry *polygon_geom, const std::string& text)
-{
-	/*
-	{
-	    "type": "Polygon",
-	    "coordinates": [
-			[
-				[-91.99469773385999, 46.84296499722999, 158.5100007629],
-				[-91.99507616866998, 46.84271189348, 158.5100007629],
-				[-91.9944204067, 46.84225026546, 158.5100007629],
-				[-91.99404197212, 46.84250336707, 158.5100007629],
-				[-91.99469773385999, 46.84296499722999, 158.5100007629]
-			]
-		]
-	}	  
-	 */
-
-
-    if (text.empty())
-        throw DBException("text is empty");
-
-    if (polygon_geom == nullptr)
-        throw DBException("polygon_geom is null");
-
-    const auto j = json::parse(text);
-
-    if (!j.contains("type"))
-        throw DBException("Missing 'type' field");
-
-    if (j["type"].get<std::string>() != "Polygon")
-        throw DBException(utils::stringFormat("Cannot parse polygon_geom field: expected Polygon type but got: %s", j["type"].dump()));
+    if (j["type"].get<std::string>() != "Point")
+        throw DBException(utils::stringFormat(
+            "Cannot parse point_geom field: expected Point type but got: %s",
+            j["type"].dump()));
 
     if (!j.contains("coordinates"))
         throw DBException("Missing 'coordinates' field");
 
     auto coordinates = j["coordinates"];
 
-    if (coordinates.empty())
-        throw DBException("Empty 'coordinates' field");
+    parsePoint(point_geom, coordinates);
+}
+
+void loadPolygonGeom(BasicPolygonGeometry *polygon_geom,
+                     const std::string &text) {
+    /*
+    {
+        "type": "Polygon",
+        "coordinates": [
+                    [
+                            [-91.99469773385999, 46.84296499722999,
+    158.5100007629],
+                            [-91.99507616866998, 46.84271189348,
+    158.5100007629],
+                            [-91.9944204067, 46.84225026546, 158.5100007629],
+                            [-91.99404197212, 46.84250336707, 158.5100007629],
+                            [-91.99469773385999, 46.84296499722999,
+    158.5100007629]
+                    ]
+            ]
+    }
+     */
+
+    if (text.empty()) throw DBException("text is empty");
+
+    if (polygon_geom == nullptr) throw DBException("polygon_geom is null");
+
+    const auto j = json::parse(text);
+
+    if (!j.contains("type")) throw DBException("Missing 'type' field");
+
+    if (j["type"].get<std::string>() != "Polygon")
+        throw DBException(
+            utils::stringFormat("Cannot parse polygon_geom field: expected "
+                                "Polygon type but got: %s",
+                                j["type"].dump()));
+
+    if (!j.contains("coordinates"))
+        throw DBException("Missing 'coordinates' field");
+
+    auto coordinates = j["coordinates"];
+
+    if (coordinates.empty()) throw DBException("Empty 'coordinates' field");
 
     if (coordinates.size() != 1)
-        throw DBException(utils::stringFormat("Expected 1 coordinates but got ", coordinates.size()));
+        throw DBException(utils::stringFormat("Expected 1 coordinates but got ",
+                                              coordinates.size()));
 
     coordinates = coordinates[0];
 
     if (coordinates.size() == 0)
         throw DBException("Expected coordinates but got 0");
 
-	for (const auto coord : coordinates)
-	{
+    for (const auto coord : coordinates) {
         parsePoint(polygon_geom, coord);
-	}
-	
-    //const auto x = coordinates[0].get<double>();
-    //const auto y = coordinates[1].get<double>();
-    //const auto z = coordinates[2].get<double>();
+    }
 
-    //LOGD << "Parsed point: (" << x << "; " << y << "; " << z << ")";
+    // const auto x = coordinates[0].get<double>();
+    // const auto y = coordinates[1].get<double>();
+    // const auto z = coordinates[2].get<double>();
+
+    // LOGD << "Parsed point: (" << x << "; " << y << "; " << z << ")";
 
     //
-
-
-	
-	
 }
 
-
-
-}
+}  // namespace ddb

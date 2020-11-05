@@ -5,19 +5,18 @@
 #include "logger.h"
 
 void init_logger(bool logToFile) {
-	static plog::ConsoleAppender<plog::TxtFormatter> consoleAppender;
+    static plog::ConsoleAppender<plog::TxtFormatter> consoleAppender;
 
     if (logToFile) {
-        static plog::RollingFileAppender<plog::CsvFormatter> fileAppender(LOG_FILE_NAME, 32000, 5);
+        static plog::RollingFileAppender<plog::CsvFormatter> fileAppender(
+            LOG_FILE_NAME, 32000, 5);
         plog::init(plog::info, &consoleAppender).addAppender(&fileAppender);
     } else
         plog::init(plog::info, &consoleAppender);
 }
 
-void set_logger_verbose() {
-    plog::get()->setMaxSeverity(plog::verbose);
-}
+void set_logger_verbose() { plog::get()->setMaxSeverity(plog::verbose); }
 
-bool is_logger_verbose(){
+bool is_logger_verbose() {
     return plog::get()->getMaxSeverity() == plog::verbose;
 }

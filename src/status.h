@@ -4,22 +4,18 @@
 #ifndef STATUS_H
 #define STATUS_H
 
-#include "entry.h"
-#include "ddb_export.h"
-
 #include "dbops.h"
+#include "ddb_export.h"
+#include "entry.h"
 
 namespace ddb {
-	enum FileStatus {
-        NotIndexed,
-		Deleted,
-		Modified
-	};
+enum FileStatus { NotIndexed, Deleted, Modified };
 
-	typedef std::function<void(const FileStatus status, const std::string& file)> FileStatusCallback;
+typedef std::function<void(const FileStatus status, const std::string& file)>
+    FileStatusCallback;
 
-	DDB_DLL void statusIndex(Database* db, const FileStatusCallback& cb);
+DDB_DLL void statusIndex(Database* db, const FileStatusCallback& cb);
 
-}
+}  // namespace ddb
 
-#endif // STATUS_H
+#endif  // STATUS_H

@@ -2,17 +2,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+#include "database.h"
+
 #include <string>
 
 #include "logger.h"
-#include "database.h"
 
-namespace ddb{
+namespace ddb {
 
 // Initialize spatialite
-void Database::Initialize() {
-    spatialite_init (0);
-}
+void Database::Initialize() { spatialite_init(0); }
 
 // TODO: Add password table here
 
@@ -47,4 +46,4 @@ Database &Database::createTables() {
     return *this;
 }
 
-}
+}  // namespace ddb

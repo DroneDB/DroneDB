@@ -10,7 +10,7 @@
 namespace cmd {
 
 class Status : public Command {
-  public:
+   public:
     Status() {}
 
     virtual void run(cxxopts::ParseResult &opts) override;
@@ -18,6 +18,6 @@ class Status : public Command {
     virtual std::string description() override;
 };
 
-}
+}  // namespace cmd
 
-#endif // STATUS_CMD_H
+#endif  // STATUS_CMD_H

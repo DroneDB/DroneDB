@@ -2,12 +2,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-#include "gtest/gtest.h"
-#include "registryutils.h"
 #include "constants.h"
 #include "exceptions.h"
+#include "gtest/gtest.h"
+#include "registryutils.h"
 
-namespace{
+namespace {
 
 using namespace ddb;
 
@@ -25,10 +25,7 @@ TEST(parseTag, Normal) {
     EXPECT_STREQ(s.organization.c_str(), "myorg");
     EXPECT_STREQ(s.dataset.c_str(), "myds");
 
-    EXPECT_THROW(
-        RegistryUtils::parseTag("myorg"),
-        InvalidArgsException
-    );
+    EXPECT_THROW(RegistryUtils::parseTag("myorg"), InvalidArgsException);
 }
 
-}
+}  // namespace

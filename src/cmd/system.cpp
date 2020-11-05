@@ -2,8 +2,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-#include <iostream>
 #include "system.h"
+
+#include <iostream>
+
 #include "../thumbs.h"
 #include "../tiler.h"
 
@@ -20,25 +22,21 @@ void System::setOptions(cxxopts::Options &opts) {
     opts.parse_positional({"command"});
 }
 
-std::string System::description() {
-    return "Manage ddb";
-}
+std::string System::description() { return "Manage ddb"; }
 
-std::string System::extendedDescription(){
+std::string System::extendedDescription() {
     return "\r\n\r\nCommands:\r\n"
            "\tclean\tCleanup user cache files\r\n";
 }
 
 void System::run(cxxopts::ParseResult &opts) {
     auto cmd = opts["command"].as<std::string>();
-    if (cmd == "clean"){
+    if (cmd == "clean") {
         ddb::TilerHelper::cleanupUserCache();
         ddb::cleanupThumbsUserCache();
-    }else{
+    } else {
         printHelp();
     }
 }
 
-}
-
-
+}  // namespace cmd

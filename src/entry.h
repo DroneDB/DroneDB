@@ -5,25 +5,27 @@
 #define ENTRY_H
 
 #include <gdal_priv.h>
-#include <ogrsf_frmts.h>
 #include <ogr_srs_api.h>
-#include "entry_types.h"
-#include "logger.h"
-#include "exceptions.h"
-#include "utils.h"
-#include "hash.h"
-#include "exif.h"
+#include <ogrsf_frmts.h>
+
 #include "basicgeometry.h"
-#include "geo.h"
-#include "json.h"
-#include "fs.h"
 #include "ddb_export.h"
+#include "entry_types.h"
+#include "exceptions.h"
+#include "exif.h"
+#include "fs.h"
+#include "geo.h"
+#include "hash.h"
+#include "json.h"
+#include "logger.h"
+#include "utils.h"
 
 namespace ddb {
 
-
-    DDB_DLL void loadPointGeom(BasicPointGeometry *point_geom, const std::string& text);
-    DDB_DLL void loadPolygonGeom(BasicPolygonGeometry *polygon_geom, const std::string& text);
+DDB_DLL void loadPointGeom(BasicPointGeometry *point_geom,
+                           const std::string &text);
+DDB_DLL void loadPolygonGeom(BasicPolygonGeometry *polygon_geom,
+                             const std::string &text);
 
 struct Entry {
     std::string path = "";
@@ -38,18 +40,18 @@ struct Entry {
     BasicPolygonGeometry polygon_geom;
 
     DDB_DLL void toJSON(json &j) const;
-    DDB_DLL bool toGeoJSON(json &j, BasicGeometryType type = BasicGeometryType::BGAuto);
+    DDB_DLL bool toGeoJSON(json &j,
+                           BasicGeometryType type = BasicGeometryType::BGAuto);
     DDB_DLL std::string toString();
 
-    Entry() { }
+    Entry() {}
 
-    
-    Entry(Statement& s) {
-
+    Entry(Statement &s) {
         LOGD << "Columns: " << s.getColumnsCount();
 
         // Expects a SELECT clause with: (order matters)
-        // path, hash, type, meta, mtime, size, depth, AsGeoJSON(point_geom), AsGeoJSON(polygon_geom)
+        // path, hash, type, meta, mtime, size, depth, AsGeoJSON(point_geom),
+        // AsGeoJSON(polygon_geom)
         this->path = s.getText(0);
         this->hash = s.getText(1);
         this->type = (EntryType)s.getInt(2);
@@ -57,33 +59,36 @@ struct Entry {
         this->mtime = (time_t)s.getInt(4);
         this->size = s.getInt64(5);
         this->depth = s.getInt(6);
-        
 
         if (s.getColumnsCount() == 9) {
-
             const auto point_geom_raw = s.getText(7);
 
-            //LOGD << "point_geom: " << point_geom_raw;
-            if (!point_geom_raw.empty()) ddb::loadPointGeom(&this->point_geom, point_geom_raw);
-            //LOGD << "OK";
+            // LOGD << "point_geom: " << point_geom_raw;
+            if (!point_geom_raw.empty())
+                ddb::loadPointGeom(&this->point_geom, point_geom_raw);
+            // LOGD << "OK";
 
             const auto polygon_geom_raw = s.getText(8);
 
-            //LOGD << "polygon_geom: " << polygon_geom_raw;
-            if (!polygon_geom_raw.empty()) ddb::loadPolygonGeom(&this->polygon_geom, polygon_geom_raw);
-            //LOGD << "OK";
-
+            // LOGD << "polygon_geom: " << polygon_geom_raw;
+            if (!polygon_geom_raw.empty())
+                ddb::loadPolygonGeom(&this->polygon_geom, polygon_geom_raw);
+            // LOGD << "OK";
         }
     }
-
 };
 
-DDB_DLL bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entry, bool wishHash = true, bool stopOnError = true);
-DDB_DLL Geographic2D getRasterCoordinate(OGRCoordinateTransformationH hTransform, double *geotransform, double x, double y);
-DDB_DLL void calculateFootprint(const SensorSize &sensorSize, const GeoLocation &geo, const Focal &focal, const CameraOrientation &cameraOri, double relAltitude, BasicGeometry &geom);
+DDB_DLL bool parseEntry(const fs::path &path, const fs::path &rootDirectory,
+                        Entry &entry, bool wishHash = true,
+                        bool stopOnError = true);
+DDB_DLL Geographic2D
+getRasterCoordinate(OGRCoordinateTransformationH hTransform,
+                    double *geotransform, double x, double y);
+DDB_DLL void calculateFootprint(const SensorSize &sensorSize,
+                                const GeoLocation &geo, const Focal &focal,
+                                const CameraOrientation &cameraOri,
+                                double relAltitude, BasicGeometry &geom);
 
+}  // namespace ddb
 
-
-}
-
-#endif // ENTRY_H
+#endif  // ENTRY_H

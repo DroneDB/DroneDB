@@ -3,56 +3,41 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "cmdlist.h"
-#include "build.h"
-#include "init.h"
+
 #include "add.h"
-#include "remove.h"
-#include "sync.h"
+#include "build.h"
 #include "geoproj.h"
 #include "info.h"
+#include "init.h"
 #include "list.h"
-#include "thumbs.h"
-#include "setexif.h"
 #include "login.h"
 #include "logout.h"
-#include "tile.h"
-#include "share.h"
-#include "system.h"
-#include "status.h"
 #include "password.h"
+#include "remove.h"
+#include "setexif.h"
+#include "share.h"
+#include "status.h"
+#include "sync.h"
+#include "system.h"
+#include "thumbs.h"
+#include "tile.h"
 
 namespace cmd {
 
-  std::map<std::string, Command*> commands = {
-      {"build", new Build()},
-      {"init", new Init()},
-      {"add", new Add()},
-      {"remove", new Remove()},
-      {"sync", new Sync()},
-      {"geoproj", new GeoProj()},
-      {"info", new Info()},
-      {"list", new List()},
-      {"thumbs", new Thumbs()},
-      {"setexif", new SetExif()},
-      {"login", new Login()},
-      {"logout", new Logout()},
-      {"tile", new Tile()},
-      {"share", new Share()},
-      {"system", new System()},
-      {"status", new Status()},
-      {"password", new Password()}
-  };
+std::map<std::string, Command*> commands = {
+    {"build", new Build()},      {"init", new Init()},
+    {"add", new Add()},          {"remove", new Remove()},
+    {"sync", new Sync()},        {"geoproj", new GeoProj()},
+    {"info", new Info()},        {"list", new List()},
+    {"thumbs", new Thumbs()},    {"setexif", new SetExif()},
+    {"login", new Login()},      {"logout", new Logout()},
+    {"tile", new Tile()},        {"share", new Share()},
+    {"system", new System()},    {"status", new Status()},
+    {"password", new Password()}};
 
-  std::map<std::string, std::string> aliases = {
-      {"rm", "remove"},
-      {"r", "remove"},
-      {"a", "add"},
-      {"s", "sync"},
-      {"gp", "geoproj"},
-      {"i", "info"},
-      {"ls", "list"},
-      {"sh", "share"},
-      {"psw", "password"}
-  };
+std::map<std::string, std::string> aliases = {
+    {"rm", "remove"}, {"r", "remove"},   {"a", "add"},
+    {"s", "sync"},    {"gp", "geoproj"}, {"i", "info"},
+    {"ls", "list"},   {"sh", "share"},   {"psw", "password"}};
 
-}
+}  // namespace cmd

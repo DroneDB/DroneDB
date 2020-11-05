@@ -9,7 +9,7 @@
 namespace cmd {
 
 class Init : public Command {
-  public:
+   public:
     Init() {}
 
     virtual void run(cxxopts::ParseResult &opts) override;
@@ -17,6 +17,6 @@ class Init : public Command {
     virtual std::string description() override;
 };
 
-}
+}  // namespace cmd
 
-#endif // INIT_H
+#endif  // INIT_H

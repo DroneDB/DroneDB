@@ -10,7 +10,7 @@
 namespace cmd {
 
 class GeoProj : public Command {
-  public:
+   public:
     GeoProj() {}
 
     virtual void run(cxxopts::ParseResult &opts) override;
@@ -18,6 +18,6 @@ class GeoProj : public Command {
     virtual std::string description() override;
 };
 
-}
+}  // namespace cmd
 
-#endif // GEOPROJECT_CMD_H
+#endif  // GEOPROJECT_CMD_H

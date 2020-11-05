@@ -1,12 +1,13 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
- 
+
 #ifndef HASH_H
 #define HASH_H
 
-#include <string>
 #include <fstream>
+#include <string>
+
 #include "../vendor/hash-library/sha256.h"
 
 static const uint64_t crc64_table[256] = {
@@ -140,8 +141,8 @@ static const uint64_t crc64_table[256] = {
     uint64_t(0x536fa08fdfd90e51), uint64_t(0x29b7d047efec8728),
 };
 
-class Hash{
-public:
+class Hash {
+   public:
     static std::string fileSHA256(const std::string &path);
     static std::string strSHA256(const std::string &str);
 
@@ -149,4 +150,4 @@ public:
     static std::string strCRC64(const char *str, uint64_t size);
 };
 
-#endif // HASH_H
+#endif  // HASH_H

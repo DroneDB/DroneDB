@@ -5,12 +5,13 @@
 #define REGISTRYUTILS_H
 
 #include <string>
-#include "registry.h"
+
 #include "ddb_export.h"
+#include "registry.h"
 
-namespace ddb{
+namespace ddb {
 
-struct TagComponents{
+struct TagComponents {
     std::string registryUrl;
     std::string organization;
     std::string dataset;
@@ -18,11 +19,13 @@ struct TagComponents{
     std::string tagWithoutUrl() const;
 };
 
-class RegistryUtils{
-public:
-    DDB_DLL static TagComponents parseTag(const std::string &tag, bool useInsecureRegistry = false);
-    DDB_DLL static Registry createFromTag(const std::string &tag, bool useInsecureRegistry = false);
+class RegistryUtils {
+   public:
+    DDB_DLL static TagComponents parseTag(const std::string &tag,
+                                          bool useInsecureRegistry = false);
+    DDB_DLL static Registry createFromTag(const std::string &tag,
+                                          bool useInsecureRegistry = false);
 };
 
-}
-#endif // REGISTRYUTILS_H
+}  // namespace ddb
+#endif  // REGISTRYUTILS_H

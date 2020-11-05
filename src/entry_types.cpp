@@ -3,10 +3,10 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "entry_types.h"
 
-namespace ddb{
+namespace ddb {
 
-std::string typeToHuman(EntryType t){
-    switch(t){
+std::string typeToHuman(EntryType t) {
+    switch (t) {
         case EntryType::Undefined:
             return "Undefined";
         case EntryType::Directory:
@@ -28,5 +28,4 @@ std::string typeToHuman(EntryType t){
     }
 }
 
-}
-
+}  // namespace ddb

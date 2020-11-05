@@ -10,7 +10,7 @@
 namespace cmd {
 
 class Sync : public Command {
-  public:
+   public:
     Sync() {}
 
     virtual void run(cxxopts::ParseResult &opts) override;
@@ -18,6 +18,6 @@ class Sync : public Command {
     virtual std::string description() override;
 };
 
-}
+}  // namespace cmd
 
-#endif // SYNC_H
+#endif  // SYNC_H
