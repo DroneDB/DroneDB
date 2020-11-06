@@ -85,7 +85,7 @@ NAN_METHOD(info) {
 }
 
 //(const fs::path &imagePath, time_t modifiedTime, int thumbSize, bool
-//forceRecreate)
+// forceRecreate)
 class GetThumbFromUserCacheWorker : public Nan::AsyncWorker {
    public:
     GetThumbFromUserCacheWorker(Nan::Callback *callback,
