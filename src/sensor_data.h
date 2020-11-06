@@ -5,23 +5,24 @@
 #define SENSORDATA_H
 
 #include <map>
-#include "sqlite_database.h"
+
 #include "ddb_export.h"
+#include "sqlite_database.h"
 
-namespace ddb{
+namespace ddb {
 
-class SensorData{
+class SensorData {
     static SqliteDatabase *db;
     static std::map<std::string, double> cacheHits;
     static std::map<std::string, bool> cacheMiss;
 
-public:
+   public:
     DDB_DLL static void checkDbInit();
     DDB_DLL static bool contains(const std::string &sensor);
     DDB_DLL static double getFocal(const std::string &sensor);
     DDB_DLL static void clearCache();
 };
 
-}
+}  // namespace ddb
 
 #endif

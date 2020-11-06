@@ -5,18 +5,21 @@
 #define NET_RESPONSE_H
 
 #include <curl/curl.h>
+
 #include <string>
-#include "json.h"
+
 #include "ddb_export.h"
+#include "json.h"
 
-namespace ddb::net{
+namespace ddb::net {
 
-class Response{
+class Response {
     long statusCode;
 
-    char *buf;
+    char* buf;
     size_t bufSize;
-public:
+
+   public:
     DDB_DLL Response();
     DDB_DLL Response(Response&& other) noexcept;
     DDB_DLL Response& operator=(Response&& other) noexcept;
@@ -29,13 +32,12 @@ public:
     DDB_DLL long status();
 
     // Use by curl to write result into memory
-    DDB_DLL static size_t WriteCallback(void *contents, size_t size, size_t nmemb, void *userp);
+    DDB_DLL static size_t WriteCallback(void* contents, size_t size,
+                                        size_t nmemb, void* userp);
 
     friend class Request;
 };
 
+}  // namespace ddb::net
 
-
-}
-
-#endif // NET_RESPONSE_H
+#endif  // NET_RESPONSE_H

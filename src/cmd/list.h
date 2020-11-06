@@ -10,7 +10,7 @@
 namespace cmd {
 
 class List : public Command {
-  public:
+   public:
     List() {}
 
     virtual void run(cxxopts::ParseResult &opts) override;
@@ -18,6 +18,6 @@ class List : public Command {
     virtual std::string description() override;
 };
 
-}
+}  // namespace cmd
 
-#endif // LIST_CMD_H
+#endif  // LIST_CMD_H

@@ -10,7 +10,7 @@
 namespace cmd {
 
 class Tile : public Command {
-  public:
+   public:
     Tile() {}
 
     virtual void run(cxxopts::ParseResult &opts) override;
@@ -18,6 +18,6 @@ class Tile : public Command {
     virtual std::string description() override;
 };
 
-}
+}  // namespace cmd
 
-#endif // TILE_CMD_H
+#endif  // TILE_CMD_H

@@ -9,7 +9,7 @@
 namespace cmd {
 
 class Login : public Command {
-  public:
+   public:
     Login() {}
 
     virtual void run(cxxopts::ParseResult &opts) override;
@@ -17,6 +17,6 @@ class Login : public Command {
     virtual std::string description() override;
 };
 
-}
+}  // namespace cmd
 
-#endif // LOGIN_H
+#endif  // LOGIN_H

@@ -8,4 +8,4 @@
 
 namespace fs = std::filesystem;
 
-#endif // FILESYSTEM_H
+#endif  // FILESYSTEM_H

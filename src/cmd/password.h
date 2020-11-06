@@ -10,7 +10,7 @@
 namespace cmd {
 
 class Password : public Command {
-  public:
+   public:
     Password() {}
 
     virtual void run(cxxopts::ParseResult &opts) override;
@@ -18,6 +18,6 @@ class Password : public Command {
     virtual std::string description() override;
 };
 
-}
+}  // namespace cmd
 
-#endif // PASSWORD_CMD_H
+#endif  // PASSWORD_CMD_H

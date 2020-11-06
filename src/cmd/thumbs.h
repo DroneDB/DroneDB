@@ -10,7 +10,7 @@
 namespace cmd {
 
 class Thumbs : public Command {
-  public:
+   public:
     Thumbs() {}
 
     virtual void run(cxxopts::ParseResult &opts) override;
@@ -18,6 +18,6 @@ class Thumbs : public Command {
     virtual std::string description() override;
 };
 
-}
+}  // namespace cmd
 
-#endif // THUMBS_CMD_H
+#endif  // THUMBS_CMD_H

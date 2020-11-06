@@ -8,5 +8,4 @@
 
 NAN_METHOD(share);
 
-
 #endif

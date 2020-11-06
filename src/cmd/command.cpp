@@ -2,26 +2,28 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "command.h"
-#include "logger.h"
+
 #include "exceptions.h"
+#include "logger.h"
 
 namespace cmd {
 
-Command::Command() {
+Command::Command() {}
+
+cxxopts::Options Command::genOptions(const char *programName) {
+    cxxopts::Options opts(programName, description() + extendedDescription());
+    opts.show_positional_help();
+
+    setOptions(opts);
+    opts.add_options()("h,help", "Print help")("debug", "Show debug output");
+
+    return opts;
 }
 
 void Command::run(int argc, char *argv[]) {
-    cxxopts::Options opts(argv[0], description() + extendedDescription());
-    opts
-    .show_positional_help();
+    cxxopts::Options opts = genOptions(argv[0]);
 
-    setOptions(opts);
-    opts.add_options()
-    ("h,help", "Print help")
-    ("debug", "Show debug output");
-    help = opts.help({""});
-
-    try{
+    try {
         auto result = opts.parse(argc, argv);
 
         if (result.count("help")) {
@@ -33,20 +35,19 @@ void Command::run(int argc, char *argv[]) {
         }
 
         run(result);
-    }catch(const cxxopts::option_not_exists_exception &){
+    } catch (const cxxopts::option_not_exists_exception &) {
         printHelp();
-    }catch(const cxxopts::argument_incorrect_type &){
+    } catch (const cxxopts::argument_incorrect_type &) {
         printHelp();
-    }catch(const ddb::AppException &e){
+    } catch (const ddb::AppException &e) {
         std::cerr << e.what() << std::endl;
         exit(EXIT_FAILURE);
     }
 }
 
-// Proposal for SRP: rename to printHelpAndExit or remove exit call and refactor all commands
-void Command::printHelp() {
-    std::cout << help;
-    exit(0);
+void Command::printHelp(std::ostream &out, bool exitAfterPrint) {
+    out << genOptions().help({""});
+    if (exitAfterPrint) exit(0);
 }
 
-}
+}  // namespace cmd

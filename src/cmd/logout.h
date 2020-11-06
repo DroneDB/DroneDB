@@ -9,7 +9,7 @@
 namespace cmd {
 
 class Logout : public Command {
-  public:
+   public:
     Logout() {}
 
     virtual void run(cxxopts::ParseResult &opts) override;
@@ -17,6 +17,6 @@ class Logout : public Command {
     virtual std::string description() override;
 };
 
-}
+}  // namespace cmd
 
-#endif // LOGOUT_H
+#endif  // LOGOUT_H

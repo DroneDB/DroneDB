@@ -4,17 +4,17 @@
 #ifndef DATABASE_H
 #define DATABASE_H
 
-#include "sqlite_database.h"
 #include "ddb_export.h"
+#include "sqlite_database.h"
 
-namespace ddb{
+namespace ddb {
 
 class Database : public SqliteDatabase {
-  public:
-      DDB_DLL static void Initialize();
-      DDB_DLL Database &createTables();
+   public:
+    DDB_DLL static void Initialize();
+    DDB_DLL Database &createTables();
 };
 
-}
+}  // namespace ddb
 
-#endif // DATABASE_H
+#endif  // DATABASE_H

@@ -9,7 +9,7 @@
 namespace cmd {
 
 class Remove : public Command {
-  public:
+   public:
     Remove() {}
 
     virtual void run(cxxopts::ParseResult &opts) override;
@@ -17,6 +17,6 @@ class Remove : public Command {
     virtual std::string description() override;
 };
 
-}
+}  // namespace cmd
 
-#endif // REMOVE_H
+#endif  // REMOVE_H

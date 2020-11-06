@@ -2,25 +2,29 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-#include <iostream>
-#include "fs.h"
 #include "build.h"
+
+#include <iostream>
+
 #include "dbops.h"
+#include "fs.h"
 
 namespace cmd {
 
 void Build::setOptions(cxxopts::Options &opts) {
+    // clang-format off
     opts
     .positional_help("[args] [PATHS]")
     .custom_help("build")
     .add_options()
     ("paths", "Paths", cxxopts::value<std::vector<std::string>>());
-
+    // clang-format on
     opts.parse_positional({"paths"});
 }
 
 std::string Build::description() {
-    return "Initialize and build an index. Shorthand for running an init,add,commit command sequence.";
+    return "Initialize and build an index. Shorthand for running an "
+           "init,add,commit command sequence.";
 }
 
 void Build::run(cxxopts::ParseResult &opts) {
@@ -33,6 +37,4 @@ void Build::run(cxxopts::ParseResult &opts) {
     exit(1);
 }
 
-}
-
-
+}  // namespace cmd

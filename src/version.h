@@ -5,4 +5,4 @@
 #define APP_VERSION "dev"
 #endif
 
-#endif // VERSION_H
+#endif  // VERSION_H

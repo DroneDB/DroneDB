@@ -9,8 +9,9 @@
 
 #include <algorithm>
 #include <limits>
-#include "fs.h"
+
 #include "ddb_export.h"
+#include "fs.h"
 
 #ifdef WIN32
 #define stat _stat
@@ -18,19 +19,20 @@
 
 namespace fs = std::filesystem;
 
-namespace ddb{
-namespace io{
+namespace ddb {
+namespace io {
 
-class Path{
+class Path {
     fs::path p;
 
-public:
-    DDB_DLL Path(){}
+   public:
+    DDB_DLL Path() {}
     DDB_DLL Path(const fs::path &p) : p(p) {}
 
     // Compares an extension with a list of extension strings
     // @return true if the extension matches one of those in the list
-    DDB_DLL bool checkExtension(const std::initializer_list<std::string>& matches);
+    DDB_DLL bool checkExtension(
+        const std::initializer_list<std::string> &matches);
 
     DDB_DLL time_t getModifiedTime();
     DDB_DLL std::uintmax_t getSize();
@@ -54,7 +56,7 @@ public:
     DDB_DLL std::string generic() const;
 
     DDB_DLL std::string string() const;
-    DDB_DLL fs::path get() const{ return p; }
+    DDB_DLL fs::path get() const { return p; }
 };
 
 DDB_DLL fs::path getExeFolderPath();
@@ -68,6 +70,6 @@ DDB_DLL std::string bytesToHuman(std::uintmax_t bytes);
 DDB_DLL fs::path commonDirPath(const std::vector<fs::path> &paths);
 size_t componentsCount(const fs::path &p);
 
-}
-}
-#endif // MIO_H
+}  // namespace io
+}  // namespace ddb
+#endif  // MIO_H

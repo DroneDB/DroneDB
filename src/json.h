@@ -4,8 +4,8 @@
 #ifndef JSON_H
 #define JSON_H
 
-#include <json_fwd.hpp>
 #include <json.hpp>
+#include <json_fwd.hpp>
 using json = nlohmann::json;
 
-#endif // JSON_H
+#endif  // JSON_H

@@ -1,64 +1,62 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
-#include <sstream>
 #include "ne_functions.h"
-#include "ne_helpers.h"
+
+#include <sstream>
+
 #include "constants.h"
-#include "ddb.h"
 #include "dbops.h"
-#include "info.h"
-#include "thumbs.h"
+#include "ddb.h"
 #include "entry.h"
+#include "info.h"
+#include "ne_helpers.h"
+#include "thumbs.h"
 #include "tiler.h"
 
 NAN_METHOD(getVersion) {
     info.GetReturnValue().Set(Nan::New(DDBGetVersion()).ToLocalChecked());
 }
 
-NAN_METHOD(getDefaultRegistry){
+NAN_METHOD(getDefaultRegistry) {
     info.GetReturnValue().Set(Nan::New(DEFAULT_REGISTRY).ToLocalChecked());
 }
 
-NAN_METHOD(typeToHuman) {
-    ASSERT_NUM_PARAMS(1);
-    BIND_INT_PARAM(entryType, 0);
-
-    ddb::EntryType t = static_cast<ddb::EntryType>(entryType);
-    info.GetReturnValue().Set(Nan::New(ddb::typeToHuman(t)).ToLocalChecked());
-}
-
 class InfoWorker : public Nan::AsyncWorker {
- public:
-  InfoWorker(Nan::Callback *callback, const std::vector<std::string> &input,
-             bool recursive, int maxRecursionDepth, bool withHash, bool stopOnError)
-    : AsyncWorker(callback, "nan:InfoWorker"),
-      input(input), recursive(recursive), maxRecursionDepth(maxRecursionDepth),
-      withHash(withHash), stopOnError(stopOnError){}
-  ~InfoWorker() {}
+   public:
+    InfoWorker(Nan::Callback *callback, const std::vector<std::string> &input,
+               bool recursive, int maxRecursionDepth, bool withHash,
+               bool stopOnError)
+        : AsyncWorker(callback, "nan:InfoWorker"),
+          input(input),
+          recursive(recursive),
+          maxRecursionDepth(maxRecursionDepth),
+          withHash(withHash),
+          stopOnError(stopOnError) {}
+    ~InfoWorker() {}
 
-  void Execute () {
-    try{
-        ddb::info(input, s, "json", recursive, maxRecursionDepth,
-                  "auto", withHash, stopOnError);
-    }catch(ddb::AppException &e){
-        SetErrorMessage(e.what());
+    void Execute() {
+        try {
+            ddb::info(input, s, "json", recursive, maxRecursionDepth, "auto",
+                      withHash, stopOnError);
+        } catch (ddb::AppException &e) {
+            SetErrorMessage(e.what());
+        }
     }
-  }
 
-  void HandleOKCallback () {
-     Nan::HandleScope scope;
+    void HandleOKCallback() {
+        Nan::HandleScope scope;
 
-     Nan::JSON json;
-     v8::Local<v8::Value> argv[] = {
-         Nan::Null(),
-         json.Parse(Nan::New<v8::String>(s.str()).ToLocalChecked()).ToLocalChecked()
-     };
+        Nan::JSON json;
+        v8::Local<v8::Value> argv[] = {
+            Nan::Null(),
+            json.Parse(Nan::New<v8::String>(s.str()).ToLocalChecked())
+                .ToLocalChecked()};
 
-     callback->Call(2, argv, async_resource);
-   }
+        callback->Call(2, argv, async_resource);
+    }
 
- private:
+   private:
     std::vector<std::string> input;
     std::ostringstream s;
 
@@ -67,7 +65,6 @@ class InfoWorker : public Nan::AsyncWorker {
     bool withHash;
     bool stopOnError;
 };
-
 
 NAN_METHOD(info) {
     ASSERT_NUM_PARAMS(3);
@@ -83,36 +80,42 @@ NAN_METHOD(info) {
     BIND_FUNCTION_PARAM(callback, 2);
 
     // Execute
-    Nan::AsyncQueueWorker(new InfoWorker(callback, in, recursive, maxRecursionDepth, withHash, stopOnError));
+    Nan::AsyncQueueWorker(new InfoWorker(
+        callback, in, recursive, maxRecursionDepth, withHash, stopOnError));
 }
 
-//(const fs::path &imagePath, time_t modifiedTime, int thumbSize, bool forceRecreate)
+//(const fs::path &imagePath, time_t modifiedTime, int thumbSize, bool
+//forceRecreate)
 class GetThumbFromUserCacheWorker : public Nan::AsyncWorker {
- public:
-  GetThumbFromUserCacheWorker(Nan::Callback *callback, const fs::path &imagePath, time_t modifiedTime, int thumbSize, bool forceRecreate)
-    : AsyncWorker(callback, "nan:GetThumbFromUserCacheWorker"),
-      imagePath(imagePath), modifiedTime(modifiedTime), thumbSize(thumbSize), forceRecreate(forceRecreate) {}
-  ~GetThumbFromUserCacheWorker() {}
+   public:
+    GetThumbFromUserCacheWorker(Nan::Callback *callback,
+                                const fs::path &imagePath, time_t modifiedTime,
+                                int thumbSize, bool forceRecreate)
+        : AsyncWorker(callback, "nan:GetThumbFromUserCacheWorker"),
+          imagePath(imagePath),
+          modifiedTime(modifiedTime),
+          thumbSize(thumbSize),
+          forceRecreate(forceRecreate) {}
+    ~GetThumbFromUserCacheWorker() {}
 
-  void Execute () {
-    try{
-        thumbPath = ddb::getThumbFromUserCache(imagePath, modifiedTime, thumbSize, forceRecreate);
-    }catch(ddb::AppException &e){
-        SetErrorMessage(e.what());
+    void Execute() {
+        try {
+            thumbPath = ddb::getThumbFromUserCache(imagePath, modifiedTime,
+                                                   thumbSize, forceRecreate);
+        } catch (ddb::AppException &e) {
+            SetErrorMessage(e.what());
+        }
     }
-  }
 
-  void HandleOKCallback () {
-     Nan::HandleScope scope;
+    void HandleOKCallback() {
+        Nan::HandleScope scope;
 
-     v8::Local<v8::Value> argv[] = {
-         Nan::Null(),
-         Nan::New(thumbPath.string()).ToLocalChecked()
-     };
-     callback->Call(2, argv, async_resource);
-   }
+        v8::Local<v8::Value> argv[] = {
+            Nan::Null(), Nan::New(thumbPath.string()).ToLocalChecked()};
+        callback->Call(2, argv, async_resource);
+    }
 
- private:
+   private:
     fs::path imagePath;
     time_t modifiedTime;
     int thumbSize;
@@ -120,7 +123,6 @@ class GetThumbFromUserCacheWorker : public Nan::AsyncWorker {
 
     fs::path thumbPath;
 };
-
 
 NAN_METHOD(_thumbs_getFromUserCache) {
     ASSERT_NUM_PARAMS(4);
@@ -134,35 +136,45 @@ NAN_METHOD(_thumbs_getFromUserCache) {
 
     BIND_FUNCTION_PARAM(callback, 3);
 
-    Nan::AsyncQueueWorker(new GetThumbFromUserCacheWorker(callback, static_cast<fs::path>(imagePath), static_cast<time_t>(modifiedTime), thumbSize, forceRecreate));
+    Nan::AsyncQueueWorker(new GetThumbFromUserCacheWorker(
+        callback, static_cast<fs::path>(imagePath),
+        static_cast<time_t>(modifiedTime), thumbSize, forceRecreate));
 }
 
 class GetTileFromUserCacheWorker : public Nan::AsyncWorker {
- public:
-  GetTileFromUserCacheWorker(Nan::Callback *callback, const fs::path &geotiffPath, int tz, int tx, int ty, int tileSize, bool tms, bool forceRecreate)
-    : AsyncWorker(callback, "nan:GetTileFromUserCacheWorker"),
-      geotiffPath(geotiffPath), tz(tz), tx(tx), ty(ty), tileSize(tileSize), tms(tms), forceRecreate(forceRecreate) {}
-  ~GetTileFromUserCacheWorker() {}
+   public:
+    GetTileFromUserCacheWorker(Nan::Callback *callback,
+                               const fs::path &geotiffPath, int tz, int tx,
+                               int ty, int tileSize, bool tms,
+                               bool forceRecreate)
+        : AsyncWorker(callback, "nan:GetTileFromUserCacheWorker"),
+          geotiffPath(geotiffPath),
+          tz(tz),
+          tx(tx),
+          ty(ty),
+          tileSize(tileSize),
+          tms(tms),
+          forceRecreate(forceRecreate) {}
+    ~GetTileFromUserCacheWorker() {}
 
-  void Execute () {
-    try{
-        tilePath = ddb::TilerHelper::getFromUserCache(geotiffPath, tz, tx, ty, tileSize, tms, forceRecreate);
-    }catch(ddb::AppException &e){
-        SetErrorMessage(e.what());
+    void Execute() {
+        try {
+            tilePath = ddb::TilerHelper::getFromUserCache(
+                geotiffPath, tz, tx, ty, tileSize, tms, forceRecreate);
+        } catch (ddb::AppException &e) {
+            SetErrorMessage(e.what());
+        }
     }
-  }
 
-  void HandleOKCallback () {
-     Nan::HandleScope scope;
+    void HandleOKCallback() {
+        Nan::HandleScope scope;
 
-     v8::Local<v8::Value> argv[] = {
-         Nan::Null(),
-         Nan::New(tilePath.string()).ToLocalChecked()
-     };
-     callback->Call(2, argv, async_resource);
-   }
+        v8::Local<v8::Value> argv[] = {
+            Nan::Null(), Nan::New(tilePath.string()).ToLocalChecked()};
+        callback->Call(2, argv, async_resource);
+    }
 
- private:
+   private:
     fs::path geotiffPath;
     int tx, ty, tz;
     int tileSize;
@@ -171,7 +183,6 @@ class GetTileFromUserCacheWorker : public Nan::AsyncWorker {
 
     fs::path tilePath;
 };
-
 
 NAN_METHOD(_tile_getFromUserCache) {
     ASSERT_NUM_PARAMS(6);
@@ -188,6 +199,6 @@ NAN_METHOD(_tile_getFromUserCache) {
 
     BIND_FUNCTION_PARAM(callback, 5);
 
-    Nan::AsyncQueueWorker(new GetTileFromUserCacheWorker(callback, geotiffPath, tz, tx, ty, tileSize, tms, forceRecreate));
+    Nan::AsyncQueueWorker(new GetTileFromUserCacheWorker(
+        callback, geotiffPath, tz, tx, ty, tileSize, tms, forceRecreate));
 }
-

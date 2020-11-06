@@ -1,0 +1,27 @@
+name: Run clang-format Linter
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+    - uses: DoozyX/clang-format-lint-action@v0.11
+      with:
+        source: './src ./nodejs ./test'
+        extensions: 'h,cpp,c,cc,hpp'
+        clangFormatVersion: 11
+        inplace: True
+    - uses: EndBug/add-and-commit@v4
+      with:
+        author_name: u4gbot
+        author_email: bot@uav4geo.com
+        message: '[Beep beep] clang-format changes'
+      env:
+        GITHUB_TOKEN: ${{ secrets.BOT_TOKEN }}
+

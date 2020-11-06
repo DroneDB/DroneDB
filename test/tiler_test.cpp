@@ -2,8 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-#include "test.h"
 #include "tiler.h"
+
+#include "test.h"
 #include "testarea.h"
 
 namespace {
@@ -12,8 +13,10 @@ using namespace ddb;
 
 TEST(testTiler, RGB) {
     TestArea ta(TEST_NAME);
-    fs::path ortho = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/brighton/odm_orthophoto.tif",
-                                          "ortho.tif");
+    fs::path ortho = ta.downloadTestAsset(
+        "https://github.com/DroneDB/test_data/raw/master/brighton/"
+        "odm_orthophoto.tif",
+        "ortho.tif");
     fs::path tileDir = ta.getFolder("tiles");
 
     Tiler t(ortho.string(), tileDir.string());
@@ -22,10 +25,11 @@ TEST(testTiler, RGB) {
     EXPECT_TRUE(fs::exists(tileDir / "19" / "128168" / "339545.png"));
 }
 
-TEST(testTiler, DSM){
+TEST(testTiler, DSM) {
     TestArea ta(TEST_NAME);
-    fs::path dsm = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/brighton/dsm.tif",
-                                          "dsm.tif");
+    fs::path dsm = ta.downloadTestAsset(
+        "https://github.com/DroneDB/test_data/raw/master/brighton/dsm.tif",
+        "dsm.tif");
     fs::path tileDir = ta.getFolder("tiles");
 
     Tiler t(dsm.string(), tileDir.string());
@@ -47,4 +51,4 @@ TEST(testTiler, DSM){
     //      - different tile sizes
 }
 
-}
+}  // namespace

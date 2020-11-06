@@ -5,19 +5,22 @@
 #define TESTAREA_H
 
 #include <string>
-#include "net.h"
+
 #include "fs.h"
+#include "net.h"
 
 using namespace ddb;
 
-class TestArea
-{
+class TestArea {
     std::string name;
-public:
+
+   public:
     TestArea(const std::string &name, bool recreateIfExists = false);
 
     fs::path getFolder(const fs::path &subfolder = "");
-    fs::path downloadTestAsset(const std::string &url, const std::string &filename, bool overwrite = false);
+    fs::path downloadTestAsset(const std::string &url,
+                               const std::string &filename,
+                               bool overwrite = false);
 };
 
-#endif // TESTAREA_H
+#endif  // TESTAREA_H

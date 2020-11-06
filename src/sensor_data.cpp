@@ -2,65 +2,70 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "sensor_data.h"
-#include "logger.h"
+
 #include "exceptions.h"
+#include "logger.h"
 #include "mio.h"
 
-namespace ddb{
+namespace ddb {
 
-SqliteDatabase* SensorData::db = nullptr;
+SqliteDatabase *SensorData::db = nullptr;
 std::map<std::string, double> SensorData::cacheHits;
 std::map<std::string, bool> SensorData::cacheMiss;
 
-void SensorData::checkDbInit(){
-    if (db == nullptr){
+void SensorData::checkDbInit() {
+    if (db == nullptr) {
         db = new SqliteDatabase();
         LOGD << "Initializing sensor database";
 
         fs::path dbPath = io::getDataPath("sensor_data.sqlite");
-        if (dbPath.empty()) throw DBException("Cannot find sensor database sensor_data.sqlite");
+        if (dbPath.empty())
+            throw DBException("Cannot find sensor database sensor_data.sqlite");
 
         db->open(dbPath.string());
     }
 }
 
-bool SensorData::contains(const std::string &sensor){
+bool SensorData::contains(const std::string &sensor) {
     if (cacheHits.count(sensor) > 0) return true;
     if (cacheMiss.count(sensor) > 0) return false;
 
     checkDbInit();
     auto q = db->query("SELECT focal FROM sensors WHERE id = ?");
     q->bind(1, sensor);
-    if (q->fetch()){
+    if (q->fetch()) {
         // Store in cache
         cacheHits[sensor] = q->getDouble(0);
         return true;
-    }else{
+    } else {
         cacheMiss[sensor] = true;
         return false;
     }
 }
 
-double SensorData::getFocal(const std::string &sensor){
+double SensorData::getFocal(const std::string &sensor) {
     if (cacheHits.count(sensor) > 0) return cacheHits.at(sensor);
-    if (cacheMiss.count(sensor) > 0) throw DBException("Cannot get focal value for " + sensor + ", no entry found");
+    if (cacheMiss.count(sensor) > 0)
+        throw DBException("Cannot get focal value for " + sensor +
+                          ", no entry found");
 
     checkDbInit();
     auto q = db->query("SELECT focal FROM sensors WHERE id = ?");
     q->bind(1, sensor);
-    if (q->fetch()){
+    if (q->fetch()) {
         // Store in cache
         cacheHits[sensor] = q->getDouble(0);
         return cacheHits[sensor];
-    }else{
+    } else {
         cacheMiss[sensor] = true;
-        throw DBException("Cannot get focal value for " + sensor + ", no entry found");
+        throw DBException("Cannot get focal value for " + sensor +
+                          ", no entry found");
     }
 }
 
-void SensorData::clearCache(){
+void SensorData::clearCache() {
     cacheHits.clear();
     cacheMiss.clear();
 }
 
-}
+}  // namespace ddb

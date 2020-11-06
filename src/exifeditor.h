@@ -5,15 +5,16 @@
 #define EXIFEDITOR_H
 
 #include <vector>
-#include "fs.h"
-#include "ddb_export.h"
 
-namespace ddb{
+#include "ddb_export.h"
+#include "fs.h"
+
+namespace ddb {
 
 class ExifEditor {
-  std::vector<fs::path> files;
+    std::vector<fs::path> files;
 
-  public:
+   public:
     DDB_DLL ExifEditor(const std::string &file);
     DDB_DLL ExifEditor(std::vector<std::string> &files);
 
@@ -23,13 +24,14 @@ class ExifEditor {
     DDB_DLL void SetGPSLatitude(double latitude);
     DDB_DLL void SetGPSLongitude(double longitude);
     DDB_DLL void SetGPS(double latitude, double longitude, double altitude);
-  protected:
-    template<typename Func>
+
+   protected:
+    template <typename Func>
     void eachFile(Func f);
 
     const std::string doubleToDMS(double d);
     const std::string doubleToFraction(double d, int precision);
 };
 
-}
-#endif // EXIFEDITOR_H
+}  // namespace ddb
+#endif  // EXIFEDITOR_H

@@ -5,37 +5,35 @@
 #define PASSWORDMANAGER_H
 
 #include <fstream>
+
+#include "database.h"
 #include "fs.h"
 #include "json.h"
-#include "database.h"
 
 namespace ddb {
 
 #define SALT_LENGTH 8
 
 class PasswordManager {
-
     Database* db;
 
     DDB_DLL int countPasswords();
 
-public:
+   public:
     PasswordManager(ddb::Database* db) {
         this->db = db;
 
-        if (!db->tableExists("passwords"))
-            db->createTables();
+        if (!db->tableExists("passwords")) db->createTables();
     }
 
     DDB_DLL void append(const std::string& password);
 
     // Nice to have
-    //void remove(const std::string& password);
+    // void remove(const std::string& password);
     DDB_DLL bool verify(const std::string& password);
     DDB_DLL void clearAll();
-
 };
 
-}
+}  // namespace ddb
 
-#endif // PASSWORDMANAGER_H
+#endif  // PASSWORDMANAGER_H

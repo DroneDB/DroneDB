@@ -2,49 +2,62 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+#include <curl/curl.h>
+#include <gdal_priv.h>
+
 #include <iostream>
 
 #include "cmd/cmdlist.h"
-#include "logger.h"
-#include "exceptions.h"
+#include "cmd/gendocs.h"
 #include "database.h"
-#include "exif.h"
-#include "ddb.h"
 #include "dbops.h"
+#include "ddb.h"
+#include "exceptions.h"
+#include "exif.h"
+#include "logger.h"
 #include "mio.h"
-#include <gdal_priv.h>
-#include <curl/curl.h>
 
 using namespace std;
 using namespace ddb;
 
-[[ noreturn ]] void printHelp(char *argv[]) {
-    std::cout << "DroneDB v" << DDBGetVersion() << " - Effortless aerial data management and sharing" << std::endl <<
-              "Usage:" << std::endl <<
-              "	" << argv[0] << " <command> [args] [PATHS]" << std::endl << std::endl <<
-              "Commands:" << std::endl;
-    for (auto &cmd : cmd::commands){
-        std::cout << "	" << cmd.first << " - " << cmd.second->description() << std::endl;
+[[noreturn]] void printHelp(char *argv[]) {
+    std::cout << "DroneDB v" << DDBGetVersion()
+              << " - Effortless aerial data management and sharing" << std::endl
+              << "Usage:" << std::endl
+              << "	" << argv[0] << " <command> [args] [PATHS]" << std::endl
+              << std::endl
+              << "Commands:" << std::endl;
+    for (auto &cmd : cmd::commands) {
+        std::cout << "	" << cmd.first << " - " << cmd.second->description()
+                  << std::endl;
     }
-    std::cout << std::endl <<
-              "	-h, --help		Print help" << std::endl <<
-              "	--version		Print version" << std::endl << std::endl <<
-              "For detailed command help use: " << argv[0] << " <command> --help " << std::endl <<
-              "See https://docs.dronedb.app for more information." << std::endl;
+    std::cout << std::endl
+              << "	-h, --help		Print help" << std::endl
+              << "	--version		Print version" << std::endl
+              << std::endl
+              << "For detailed command help use: " << argv[0]
+              << " <command> --help " << std::endl
+              << "See https://docs.dronedb.app for more information."
+              << std::endl;
     exit(0);
 }
 
-bool hasParam(int argc, char *argv[], const char* param) {
+bool hasParam(int argc, char *argv[], const char *param) {
     for (int i = 0; i < argc; i++) {
         if (strcmp(argv[i], param) == 0) return true;
     }
     return false;
 }
 
-
-int main(int argc, char* argv[]) {
+int main(int argc, char *argv[]) {
     memcpy(argv[0], "ddb\0", 4);
     DDBRegisterProcess(hasParam(argc, argv, "--debug"));
+
+    // Super secret command to generate docs
+    if (hasParam(argc, argv, "--gendocs")) {
+        cmd::generateDocs(argc, argv);
+        return EXIT_SUCCESS;
+    }
 
     LOGV << "DDB v" << DDBGetVersion();
     LOGV << "SQLite version: " << sqlite3_libversion();
@@ -52,7 +65,8 @@ int main(int argc, char* argv[]) {
     LOGV << "GDAL version: " << GDALVersionInfo("RELEASE_NAME");
     LOGV << "CURL version: " << curl_version();
 
-    if (argc <= 1) printHelp(argv);
+    if (argc <= 1)
+        printHelp(argv);
     else {
         std::string cmdKey = std::string(argv[1]);
 
@@ -88,5 +102,3 @@ int main(int argc, char* argv[]) {
 
     return 0;
 }
-
-

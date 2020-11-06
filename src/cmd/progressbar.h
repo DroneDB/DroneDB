@@ -4,32 +4,33 @@
 #ifndef PROGRESSBAR_H
 #define PROGRESSBAR_H
 
-#include <iostream>
 #include <chrono>
+#include <iostream>
 
-namespace cmd{
+namespace cmd {
 
 // TODO: support for multiple bars/tracks
 // TODO: read console width to adjust bar width
 class ProgressBar {
-private:
+   private:
     unsigned int ticks = 0;
 
     const unsigned int barWidth;
     const char completeChar = '#';
     const char incompleteChar = '-';
-    const std::chrono::steady_clock::time_point startTime = std::chrono::steady_clock::now();
+    const std::chrono::steady_clock::time_point startTime =
+        std::chrono::steady_clock::now();
 
     std::string lastLabel = "";
-public:
+
+   public:
     ProgressBar() : barWidth(40) {}
-    ProgressBar(unsigned int width) :
-                barWidth(width) {}
+    ProgressBar(unsigned int width) : barWidth(width) {}
 
     void update(const std::string &label, float progress);
     void done() const;
 };
 
-}
+}  // namespace cmd
 
-#endif // PROGRESSBAR_H
+#endif  // PROGRESSBAR_H

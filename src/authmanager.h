@@ -5,28 +5,31 @@
 #define AUTHMANAGER_H
 
 #include <fstream>
+
 #include "authcredentials.h"
 #include "fs.h"
 #include "json.h"
 
-namespace ddb{
+namespace ddb {
 
-class AuthManager{
+class AuthManager {
     json auth;
     fs::path authFile;
 
     void ReadFromDisk();
     void WriteToDisk();
-public:
+
+   public:
     DDB_DLL AuthManager(const fs::path &authFile);
 
-    DDB_DLL void saveCredentials(const std::string &url, const AuthCredentials &creds);
+    DDB_DLL void saveCredentials(const std::string &url,
+                                 const AuthCredentials &creds);
     DDB_DLL AuthCredentials loadCredentials(const std::string &url);
     DDB_DLL bool deleteCredentials(const std::string &url);
 
     DDB_DLL std::vector<std::string> getAuthenticatedRegistryUrls();
 };
 
-}
+}  // namespace ddb
 
-#endif // AUTHMANAGER_H
+#endif  // AUTHMANAGER_H

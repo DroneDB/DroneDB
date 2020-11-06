@@ -6,9 +6,11 @@
 #define STATEMENT_H
 
 #include <sqlite3.h>
+
 #include <string>
-#include "logger.h"
+
 #include "ddb_export.h"
+#include "logger.h"
 
 class Statement {
     sqlite3 *db;
@@ -21,7 +23,8 @@ class Statement {
 
     void bindCheck(int ret);
     Statement &step();
-  public:
+
+   public:
     DDB_DLL Statement(sqlite3 *db, const std::string &query);
     DDB_DLL ~Statement();
 
@@ -43,4 +46,4 @@ class Statement {
     DDB_DLL void execute();
 };
 
-#endif // STATEMENT_H
+#endif  // STATEMENT_H

@@ -2,15 +2,17 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-#include <iostream>
 #include "geoproj.h"
+
+#include <iostream>
+
 #include "dbops.h"
 #include "geoproject.h"
-
 
 namespace cmd {
 
 void GeoProj::setOptions(cxxopts::Options &opts) {
+    // clang-format off
     opts
     .positional_help("[args]")
     .custom_help("geoproj output/ *.JPG")
@@ -18,7 +20,7 @@ void GeoProj::setOptions(cxxopts::Options &opts) {
     ("o,output", "Output path (file or directory)", cxxopts::value<std::string>())
     ("i,images", "Images to project", cxxopts::value<std::vector<std::string>>())
     ("s,size", "Output image size (size[%]|0)", cxxopts::value<std::string>()->default_value("100%"));
-
+    // clang-format on
     opts.parse_positional({"output", "images"});
 }
 
@@ -38,6 +40,4 @@ void GeoProj::run(cxxopts::ParseResult &opts) {
     ddb::geoProject(images, output, outsize);
 }
 
-}
-
-
+}  // namespace cmd

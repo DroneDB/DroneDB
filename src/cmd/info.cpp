@@ -2,16 +2,19 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-#include <iostream>
-#include <fstream>
 #include "info.h"
+
+#include <fstream>
+#include <iostream>
+
 #include "../info.h"
-#include "exceptions.h"
 #include "basicgeometry.h"
+#include "exceptions.h"
 
 namespace cmd {
 
 void Info::setOptions(cxxopts::Options &opts) {
+    // clang-format off
     opts
     .positional_help("[args]")
     .custom_help("info *.JPG")
@@ -23,6 +26,7 @@ void Info::setOptions(cxxopts::Options &opts) {
     ("d,depth", "Max recursion depth", cxxopts::value<int>()->default_value("0"))
     ("geometry", "Geometry to output (for geojson format only) (auto|point|polygon)", cxxopts::value<std::string>()->default_value("auto"))
     ("with-hash", "Compute SHA256 hashes", cxxopts::value<bool>());
+    // clang-format on
     opts.parse_positional({"input"});
 }
 
@@ -37,30 +41,31 @@ void Info::run(cxxopts::ParseResult &opts) {
 
     auto input = opts["input"].as<std::vector<std::string>>();
 
-    try{
+    try {
         bool withHash = opts["with-hash"].count() > 0;
         auto format = opts["format"].as<std::string>();
         auto recursive = opts["recursive"].count() > 0;
         auto maxRecursionDepth = opts["depth"].as<int>();
         auto geometry = opts["geometry"].as<std::string>();
 
-        if (opts.count("output")){
+        if (opts.count("output")) {
             std::string filename = opts["output"].as<std::string>();
-            std::ofstream file(filename, std::ios::out | std::ios::trunc | std::ios::binary);
-            if (!file.is_open()) throw ddb::FSException("Cannot open " + filename);
+            std::ofstream file(
+                filename, std::ios::out | std::ios::trunc | std::ios::binary);
+            if (!file.is_open())
+                throw ddb::FSException("Cannot open " + filename);
 
             ddb::info(input, file, format, recursive, maxRecursionDepth,
                       geometry, withHash, true);
 
             file.close();
-        }else{
+        } else {
             ddb::info(input, std::cout, format, recursive, maxRecursionDepth,
                       geometry, withHash, true);
         }
-    }catch(ddb::InvalidArgsException){
+    } catch (ddb::InvalidArgsException) {
         printHelp();
     }
 }
 
-}
-
+}  // namespace cmd

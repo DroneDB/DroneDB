@@ -5,13 +5,13 @@
 #ifndef LOGGER_H
 #define LOGGER_H
 
-#include "../vendor/plog/Log.h"
-#include "../vendor/plog/Init.h"
 #include "../vendor/plog/Appenders/ConsoleAppender.h"
 #include "../vendor/plog/Appenders/RollingFileAppender.h"
-#include "../vendor/plog/Formatters/TxtFormatter.h"
 #include "../vendor/plog/Formatters/CsvFormatter.h"
 #include "../vendor/plog/Formatters/MessageOnlyFormatter.h"
+#include "../vendor/plog/Formatters/TxtFormatter.h"
+#include "../vendor/plog/Init.h"
+#include "../vendor/plog/Log.h"
 #include "ddb_export.h"
 
 #define LOG_FILE_NAME "ddb-log.csv"
@@ -20,4 +20,4 @@ DDB_DLL void init_logger(bool logToFile = false);
 DDB_DLL void set_logger_verbose();
 DDB_DLL bool is_logger_verbose();
 
-#endif // LOGGER_H
+#endif  // LOGGER_H

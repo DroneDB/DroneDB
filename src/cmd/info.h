@@ -10,7 +10,7 @@
 namespace cmd {
 
 class Info : public Command {
-  public:
+   public:
     Info() {}
 
     virtual void run(cxxopts::ParseResult &opts) override;
@@ -18,6 +18,6 @@ class Info : public Command {
     virtual std::string description() override;
 };
 
-}
+}  // namespace cmd
 
-#endif // INFO_CMD_H
+#endif  // INFO_CMD_H

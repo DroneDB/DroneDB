@@ -10,7 +10,7 @@
 namespace cmd {
 
 class SetExif : public Command {
-  public:
+   public:
     SetExif() {}
 
     virtual void run(cxxopts::ParseResult &opts) override;
@@ -18,6 +18,6 @@ class SetExif : public Command {
     virtual std::string description() override;
 };
 
-}
+}  // namespace cmd
 
-#endif // SETEXIF_CMD_H
+#endif  // SETEXIF_CMD_H

@@ -11,5 +11,4 @@ NAN_METHOD(add);
 NAN_METHOD(remove);
 NAN_METHOD(list);
 
-
 #endif

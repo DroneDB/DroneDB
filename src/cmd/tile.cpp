@@ -2,14 +2,17 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-#include <iostream>
 #include "tile.h"
-#include "tiler.h"
+
+#include <iostream>
+
 #include "exceptions.h"
+#include "tiler.h"
 
 namespace cmd {
 
 void Tile::setOptions(cxxopts::Options &opts) {
+    // clang-format off
     opts
     .positional_help("[args]")
     .custom_help("tile geo.tif [output directory]")
@@ -22,13 +25,11 @@ void Tile::setOptions(cxxopts::Options &opts) {
     ("y", "Generate a single tile with the specified coordinate (XYZ, unless --tms is used). Must be used with -x", cxxopts::value<std::string>()->default_value("auto"))
     ("s,size", "Tile size", cxxopts::value<int>()->default_value("256"))
     ("tms", "Generate TMS tiles instead of XYZ", cxxopts::value<bool>());
-
+    // clang-format on
     opts.parse_positional({"input", "output"});
 }
 
-std::string Tile::description() {
-    return "Generate tiles for GeoTIFFs";
-}
+std::string Tile::description() { return "Generate tiles for GeoTIFFs"; }
 
 void Tile::run(cxxopts::ParseResult &opts) {
     if (!opts.count("input")) {
@@ -37,7 +38,7 @@ void Tile::run(cxxopts::ParseResult &opts) {
 
     auto input = opts["input"].as<std::string>();
     auto output = opts["output"].as<std::string>();
-    if (!opts.count("output")){
+    if (!opts.count("output")) {
         // Set as filename_tiles
         output = fs::path(input).stem().string() + "_tiles";
     }
@@ -53,6 +54,4 @@ void Tile::run(cxxopts::ParseResult &opts) {
     ddb::TilerHelper::runTiler(tiler, std::cout, format, z, x, y);
 }
 
-}
-
-
+}  // namespace cmd

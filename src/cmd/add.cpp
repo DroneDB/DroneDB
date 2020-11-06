@@ -2,14 +2,17 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-#include <iostream>
-#include "fs.h"
 #include "add.h"
+
+#include <iostream>
+
 #include "dbops.h"
+#include "fs.h"
 
 namespace cmd {
 
 void Add::setOptions(cxxopts::Options &opts) {
+    // clang-format off
     opts
     .positional_help("[args] [PATHS]")
     .custom_help("add *.JPG")
@@ -17,7 +20,7 @@ void Add::setOptions(cxxopts::Options &opts) {
     ("w,working-dir", "Working directory", cxxopts::value<std::string>()->default_value("."))
     ("r,recursive", "Recursively add subdirectories and files", cxxopts::value<bool>())
     ("p,paths", "Paths to add to index (files or directories)", cxxopts::value<std::vector<std::string>>());
-
+    // clang-format on
     opts.parse_positional({"paths"});
 }
 
@@ -35,14 +38,12 @@ void Add::run(cxxopts::ParseResult &opts) {
     auto recursive = opts.count("recursive") > 0;
 
     auto db = ddb::open(std::string(ddbPath), true);
-    ddb::addToIndex(db.get(), ddb::expandPathList(paths,
-                                                  recursive,
-                                                  0), [](const ddb::Entry &e, bool updated){
-        std::cout << (updated ? "U\t" : "A\t") << e.path << std::endl;
-        return true;
-    });
+    ddb::addToIndex(db.get(), ddb::expandPathList(paths, recursive, 0),
+                    [](const ddb::Entry &e, bool updated) {
+                        std::cout << (updated ? "U\t" : "A\t") << e.path
+                                  << std::endl;
+                        return true;
+                    });
 }
 
-}
-
-
+}  // namespace cmd
