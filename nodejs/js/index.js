@@ -70,12 +70,14 @@ const ddb = {
             });
         };
 
-        this.list = async function(ddbPath, files, options = {}) {
+        this.list = async function(ddbPath, files = ".", options = {}) {
+            const path = require('path');
+            
             return new Promise((resolve, reject) => {
                 const isSingle = typeof files === "string";
                 if (isSingle) files = [files];
         
-                n.list(ddbPath, files, options, (err, result) => {
+                n.list(ddbPath, files.map(f => path.join(ddbPath, f)), options, (err, result) => {
                     if (err) reject(err);
                     else {
                         resolve(result);

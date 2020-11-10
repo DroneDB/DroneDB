@@ -44,6 +44,9 @@ void DDBRegisterProcess(bool verbose) {
 	// Gets the environment variable to enable logging to file
 	const auto logToFile = std::getenv(DDB_LOG_ENV) != nullptr;
 
+    // Enable logging if the environment variable is set
+    if (!verbose && std::getenv(DDB_DEBUG_ENV) != nullptr) verbose = true;
+
 	init_logger(logToFile);
 	if (verbose || logToFile) {
 		set_logger_verbose();
