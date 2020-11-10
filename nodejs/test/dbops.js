@@ -3,7 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 const ddb = require('../');
 const assert = require('assert');
-const { TestArea } = require('./utils');
+const { TestArea } = require('./helpers');
 const fs = require('fs');
 
 describe('ddbops', function() {

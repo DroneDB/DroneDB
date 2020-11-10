@@ -4,6 +4,7 @@
 const entry = require('./entry');
 const Tag = require('./tag');
 const Dataset = require('./dataset');
+const { parseUri } = require('./utils');
 
 const ddb = {
     Tag, Dataset,
@@ -15,6 +16,24 @@ const ddb = {
             return entryType === ddb.entry.type.GEOIMAGE ||
                 entryType === ddb.entry.type.GEORASTER ||
                 entryType === ddb.entry.type.IMAGE;
+        }
+    },
+
+    // Retrieves entry information from 
+    // local or remote sources
+    fetchEntries: async function(uri, options = {}){
+        if (uri.startsWith("ddb://") || uri.startsWith("ddb+unsafe://")){
+            const { registryUrl, organization, dataset, path } = parseUri(uri);
+            
+        }else if (uri.startsWith("file://")){
+            // Local file, use ddb.info (if available)
+            if (this.info){
+                return this.info(uri.substring("file://".length), options);
+            }else{
+                throw new Error("ddb.info is only available in NodeJS. Did you call registerNativeBindings?");
+            }
+        }else{
+            throw new Error(`Unsupported URI: ${uri}`);
         }
     },
 
