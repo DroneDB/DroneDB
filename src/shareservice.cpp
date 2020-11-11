@@ -3,6 +3,8 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "shareservice.h"
 
+#include <shareclient.h>
+
 #include "dbops.h"
 #include "fs.h"
 #include "mio.h"
@@ -35,20 +37,9 @@ std::string ShareService::share(const std::vector<std::string> &input,
     std::string authToken = reg.login(
         ac.username, ac.password);  // Will throw error on login failed
 
-    // Call init
-    net::Response res =
-        net::POST(reg.getUrl("/share/init"))
-            .formData({"tag", tc.tagWithoutUrl(), "password", password})
-            .authToken(authToken)
-            .send();
-    if (res.status() != 200) handleError(res);
+    ShareClient client(&reg);
 
-    json j = res.getJSON();
-    if (!j.contains("token")) handleError(res);
-    std::string batchToken = j["token"];
-
-    auto maxUploadSize = j["MaxUploadChunkSize"].get<size_t>();
-    LOGD << "MaxUploadChunkSize = " << maxUploadSize;
+    client.Init(tc.tagWithoutUrl(), password);
 
     // TODO: multithreaded share/upload
 
@@ -78,141 +69,49 @@ std::string ShareService::share(const std::vector<std::string> &input,
         gTotalBytes += io::Path(fp).getSize();
     }
 
-    // Upload
-    const int MAX_RETRIES = 10;
-
     for (auto &fp : filePaths) {
-        io::Path p = io::Path(fp);
-        size_t filesize = p.getSize();
 
-        // TODO: Extract methods
-        if (filesize > maxUploadSize) {
-            // Upload in chunks
-            /*
-             * 1) Split file in manageable chunks
-             * 2) Upload one chunk at time (https://github.com/DroneDB/Registry/pull/63#issuecomment-724361842) 
-             *
-             */
+        auto p = io::Path(fp);
+        auto filesize = p.getSize();
+        auto filename = fp.filename().string();
+
+        sfp.filename = filename;
+        sfp.totalBytes = filesize;
+        sfp.txBytes = 0;
+
+        if (p.isAbsolute() && !wd.isParentOf(p.get())) {
+            p = p.withoutRoot();
         } else {
-            std::string sha256 = Hash::fileSHA256(fp.string());
-            std::string filename = fp.filename().string();
-
-            sfp.filename = filename;
-            sfp.totalBytes = filesize;
-            sfp.txBytes = 0;
-
-            if (p.isAbsolute() && !wd.isParentOf(p.get())) {
-                p = p.withoutRoot();
-            } else {
-                p = p.relativeTo(wd.get());
-            }
-
-            LOGD << "Uploading " << p.string();
-
-            int retryNum = 0;
-
-            while (true) {
-                try {
-                    net::Response res =
-                        net::POST(reg.getUrl("/share/upload/" + batchToken))
-                            .multiPartFormData({"file", fp.string()},
-                                               {"path", p.generic()})
-                            .authToken(authToken)
-                            .progressCb(
-                                [&cb, &files, &sfp, &filesize, &gTotalBytes,
-                                 &gTxBytes](size_t txBytes, size_t totalBytes) {
-                                    if (cb == nullptr) return true;
-                                    // We cap the txBytes from CURL since it
-                                    // includes data transferred from the
-                                    // request
-
-                                    // CAUTION: this will require a lock if you
-                                    // use threads
-
-                                    gTxBytes -= sfp.txBytes;
-                                    sfp.txBytes = std::min(filesize, txBytes);
-                                    gTxBytes += sfp.txBytes;
-                                    return cb(files, gTxBytes, gTotalBytes);
-                                })
-                            //.maximumUploadSpeed(1024*1024)
-                            .send();
-
-                    // Token expired?
-                    if (res.status() == 401) {
-                        LOGD << "Token expired";
-                        authToken = reg.login(ac.username, ac.password);
-                        throw NetException("Unauthorized");
-                    }
-
-                    if (res.status() != 200) handleError(res);
-
-                    json j = res.getJSON();
-                    if (!j.contains("hash")) handleError(res);
-                    if (sha256 != j["hash"])
-                        throw NetException(
-                            filename +
-                            " file got corrupted during upload (hash mismatch, "
-                            "expected: " +
-                            sha256 + ", got: " + j["hash"].get<std::string>() +
-                            ". Try again.");
-                    break;  // Done
-                } catch (const NetException &e) {
-                    if (++retryNum >= MAX_RETRIES) throw e;
-
-                    LOGD << e.what() << ", retrying upload of " << filename
-                         << " (attempt " << retryNum << ")";
-                    utils::sleep(1000 * retryNum);
-                }
-            }
+            p = p.relativeTo(wd.get());
         }
+
+        LOGD << "Uploading " << p.string();
+
+        client.Upload(
+            p.generic(), fp,
+            [&cb, &files, &sfp, &filesize, &gTotalBytes, &gTxBytes](
+                std::string &fileName, size_t txBytes, size_t totalBytes) {
+                if (cb == nullptr) return true;
+
+                // We cap the txBytes from CURL since it
+                // includes data transferred from the
+                // request
+
+                // CAUTION: this will require a lock if you
+                // use threads
+
+                gTxBytes -= sfp.txBytes;
+                sfp.txBytes = std::min(filesize, txBytes);
+                gTxBytes += sfp.txBytes;
+                return cb(files, gTxBytes, gTotalBytes);
+            });        
     }
 
-    // Commit
-    int retryNum = 0;
-    while (true) {
-        try {
-            res = net::POST(reg.getUrl("/share/commit/" + batchToken))
-                      .authToken(authToken)
-                      .send();
+    auto resultUrl = client.Commit();
 
-            if (res.status() == 401) {
-                LOGD << "Token expired";
-                authToken = reg.login(ac.username, ac.password);
-                throw NetException("Unauthorized");
-            }
+    LOGD << "Result url " << resultUrl;
 
-            if (res.status() != 200) handleError(res);
-
-            j = res.getJSON();
-            if (!j.contains("url")) handleError(res);
-
-            return reg.getUrl(j["url"]);  // Done
-        } catch (const NetException &e) {
-            if (++retryNum >= MAX_RETRIES) throw e;
-            LOGD << e.what() << ", retrying commit (attempt " << retryNum
-                 << ")";
-            utils::sleep(1000 * retryNum);
-        }
-    }
-}
-
-void ShareService::handleError(net::Response &res) {
-    if (res.hasData()) {
-        LOGD << "Request error: " << res.getText();
-
-        auto j = res.getJSON();
-        if (j.contains("error"))
-            throw RegistryException("Error response from registry: " +
-                                    j["error"].get<std::string>());
-        throw RegistryException("Invalid response from registry: " +
-                                res.getText());
-    }
-
-    LOGD << "Request error: " << res.status();
-
-    throw RegistryException(
-        "Invalid response from registry. Returned status: " +
-        std::to_string(res.status()));
+    return resultUrl;
 }
 
 }  // namespace ddb

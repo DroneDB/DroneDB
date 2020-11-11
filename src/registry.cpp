@@ -75,4 +75,27 @@ bool Registry::logout() {
     return UserProfile::get()->getAuthManager()->deleteCredentials(url);
 }
 
+std::string Registry::getAuthToken() const {
+    return std::string(this->authToken);
+}
+
+void Registry::handleError(net::Response &res) {
+    if (res.hasData()) {
+        LOGD << "Request error: " << res.getText();
+
+        auto j = res.getJSON();
+        if (j.contains("error"))
+            throw RegistryException("Error response from registry: " +
+                                    j["error"].get<std::string>());
+        throw RegistryException("Invalid response from registry: " +
+                                res.getText());
+    }
+
+    LOGD << "Request error: " << res.status();
+
+    throw RegistryException(
+        "Invalid response from registry. Returned status: " +
+        std::to_string(res.status()));
+}
+
 }  // namespace ddb

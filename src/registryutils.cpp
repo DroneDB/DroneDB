@@ -58,9 +58,8 @@ Registry RegistryUtils::createFromTag(const std::string &tag, bool useInsecureRe
 std::string TagComponents::tagWithoutUrl() const{
     if (!organization.empty() && !dataset.empty()){
         return organization + "/" + dataset;
-    }else{
-        return "";
     }
+    return "";
 }
 
 }
