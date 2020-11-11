@@ -6,12 +6,15 @@ const localStorage = require('../polyfills/node/localStorage');
 const fetch = require('../polyfills/node/fetch');
 const FormData = require('../polyfills/node/FormData');
 
+let refreshTimers = {};
+
 module.exports = class Registry{
     constructor(url){
         this.url = url;
     }
 
     async login(username, password){
+        console.log("HERE!");
         const formData = new FormData();
         formData.append("username", username);
         formData.append("password", password);
@@ -24,6 +27,7 @@ module.exports = class Registry{
             
             if (res.token){
                 this.setCredentials(username, res.token, res.expires);
+                this.setAutoRefreshToken();
 
                 return res.token;
             }else{
@@ -32,6 +36,47 @@ module.exports = class Registry{
         }catch(e){
             throw new Error(`Cannot login: ${e.message}`);
         }
+    }
+
+    async refreshToken(){
+        if (this.isLoggedIn()){
+            const res = await fetch(`${this.url}/users/authenticate/refresh`, {
+                method: 'POST',
+                headers: {
+                    Authorization: `Bearer ${this.getAuthToken()}`
+                }
+            }).then(r => r.json());
+            
+            if (res.token){
+                console.log("REfreshed: " + res.token);
+                this.setCredentials(this.getUsername(), res.token, res.expires);
+            }else{
+                throw new Error(res.error || `Cannot refresh token: ${JSON.stringify(res)}`);
+            }
+        }else{
+            throw new Error("logged out");
+        }
+    }
+
+    setAutoRefreshToken(seconds = 3600){
+        if (refreshTimers[this.url]){
+            clearTimeout(refreshTimers[this.url]);
+            delete refreshTimers[this.url];
+        }
+
+        setTimeout(async () => {
+            try{
+                await this.refreshToken();
+                this.setAutoRefreshToken(seconds);
+            }catch(e){
+                console.error(e);
+                
+                // Try again later, unless we're logged out
+                if (e.message !== "logged out"){
+                    this.setAutoRefreshToken(seconds);
+                }
+            }
+        }, seconds * 1000);
     }
 
     logout(){
