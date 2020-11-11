@@ -34,6 +34,7 @@ void DDBRegisterProcess(bool verbose) {
 		LOGD << "Called DDBRegisterProcess when already initialized";
 		return;
 	}
+	
 #ifndef WIN32
 	// Windows does not let us change env vars for some reason
 	// so this works only on Unix
@@ -44,13 +45,14 @@ void DDBRegisterProcess(bool verbose) {
 	// Gets the environment variable to enable logging to file
 	const auto logToFile = std::getenv(DDB_LOG_ENV) != nullptr;
 
-    // Enable logging if the environment variable is set
-    if (!verbose && std::getenv(DDB_DEBUG_ENV) != nullptr) verbose = true;
+    // Enable verbose ogging if the environment variable is set
+	verbose = verbose || std::getenv(DDB_DEBUG_ENV) != nullptr;
 
 	init_logger(logToFile);
 	if (verbose || logToFile) {
 		set_logger_verbose();
 	}
+
 	Database::Initialize();
 	net::Initialize();
 	GDALAllRegister();
