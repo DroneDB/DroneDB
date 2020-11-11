@@ -3,6 +3,8 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 const n = require('bindings')('node-ddb.node');
 const ddb = require('./js/index');
+const ls = require('./polyfills/node/localStorage');
+ls.setItem("helo", "world");
 
 ddb.registerNativeBindings(n);
 

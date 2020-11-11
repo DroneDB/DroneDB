@@ -19,6 +19,6 @@ module.exports = {
             organization: groups.org,
             dataset: groups.ds,
             path: groups.path
-        }
+        };
     }
 }
