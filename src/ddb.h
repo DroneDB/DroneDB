@@ -11,6 +11,7 @@ extern "C" {
 #endif
 
 #define DDB_LOG_ENV "DDB_LOG"
+#define DDB_DEBUG_ENV "DDB_DEBUG"
 
 enum DDBErr {
     DDBERR_NONE = 0, // No error
