@@ -8,22 +8,22 @@ describe('utils', function() {
     it('should be able to parse ddb:// URIs', function() {
         assert.deepEqual(parseUri("ddb://hub.dronedb.app/test/abc/A.JPG"), {
             registryUrl: "https://hub.dronedb.app",
-            organization: "test",
-            dataset: "abc",
+            org: "test",
+            ds: "abc",
             path: "A.JPG"
         });
 
         assert.deepEqual(parseUri("ddb+unsafe://hub.dronedb.app/test/abc/A.JPG"), {
             registryUrl: "http://hub.dronedb.app",
-            organization: "test",
-            dataset: "abc",
+            org: "test",
+            ds: "abc",
             path: "A.JPG"
         });
 
         assert.deepEqual(parseUri("ddb://localhost/test/abc"), {
             registryUrl: "https://localhost",
-            organization: "test",
-            dataset: "abc",
+            org: "test",
+            ds: "abc",
             path: ""
         });
 

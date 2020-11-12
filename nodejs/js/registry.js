@@ -5,16 +5,30 @@
 const localStorage = require('../polyfills/node/localStorage');
 const fetch = require('../polyfills/node/fetch');
 const FormData = require('../polyfills/node/FormData');
+const Organization = require('./organization');
+const { DEFAULT_REGISTRY } = require('./constants');
 
 let refreshTimers = {};
 
 module.exports = class Registry{
-    constructor(url){
+    constructor(url = "https://" + DEFAULT_REGISTRY){
         this.url = url;
+    }
+    
+    get remote(){
+        return this.url.replace(/^https?:\/\//, "");
+    }
+
+    get tagUrl(){
+        // Drop the https prefix if it's secure (it's the default)
+        return this.secure ? this.remote : this.url;
+    }
+
+    get secure(){
+        return this.url.startsWith("https://");
     }
 
     async login(username, password){
-        console.log("HERE!");
         const formData = new FormData();
         formData.append("username", username);
         formData.append("password", password);
@@ -118,18 +132,38 @@ module.exports = class Registry{
         return this.getAuthToken() !== null && this.getAuthTokenExpiration() > new Date();
     }
 
-    async list(organization, dataset, path){
+    async makeRequest(endpoint, method="GET", body = null){
         const headers = {};
         const authToken = this.getAuthToken();
         if (authToken) headers.Authorization = `Bearer ${authToken}`;
-
-        const response = await fetch(`${this.url}/orgs/${organization}/ds/${dataset}/list`, { 
-            method: "POST",
-            body: { path },
+        const options = { 
+            method,
             headers
-        });
+        };
+
+        if (body){
+            const formData = new FormData();
+            for(let k in body){
+                formData.append(k, body[k]);
+            }
+            options.body = formData;
+        }
+
+        const response = await fetch(`${this.url}${endpoint}`, options);
         if (response.status == 200) return response.json();
         else if (response.status == 401) throw new Error("Unauthorized");
         else throw new Error(`Server responded with: ${response.text()}`);
+    }
+
+    async getRequest(endpoint){
+        return this.makeRequest(endpoint, "GET");
+    }
+
+    async postRequest(endpoint, body = {}){
+        return this.makeRequest(endpoint, "POST", body);
+    }
+
+    Organization(name){
+        return new Organization(this, name);
     }
 }

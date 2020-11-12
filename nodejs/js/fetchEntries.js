@@ -8,9 +8,9 @@ const Registry = require('./registry');
 // local or remote sources
 async function fetchEntries(uri, options = {}){
     if (uri.startsWith("ddb://") || uri.startsWith("ddb+unsafe://")){
-        const { registryUrl, organization, dataset, path } = parseUri(uri);
-        const reg = new Registry(registryUrl);
-        return reg.list(organization, dataset, path);
+        const { registryUrl, org, ds, path } = parseUri(uri);
+        const dataset = new Registry(registryUrl).Organization(org).Dataset(ds);
+        return dataset.list(path);
     }else if (uri.startsWith("file://")){
         // Local file, use ddb.info (if available)
         if (this.info){
