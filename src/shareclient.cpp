@@ -15,7 +15,7 @@ namespace ddb {
 
 const int MAX_RETRIES = 10;
 
-ShareClient::ShareClient(ddb::Registry *registry) : registry(registry) {
+ShareClient::ShareClient(ddb::Registry* registry) : registry(registry) {
     maxUploadSize = 0;
 }
 
@@ -41,13 +41,14 @@ void ShareClient::Init(const std::string& tag, const std::string& password,
     this->token = j["token"];
     LOGD << "Token = " << this->token;
 
-    this->maxUploadSize = j.contains("maxUploadChunkSize") ? j["maxUploadChunkSize"].get<size_t>() : static_cast<size_t>(LONG_MAX);
+    this->maxUploadSize = j.contains("maxUploadChunkSize")
+                              ? j["maxUploadChunkSize"].get<size_t>()
+                              : static_cast<size_t>(LONG_MAX);
     LOGD << "MaxUploadChunkSize = " << maxUploadSize;
 }
 
 void ShareClient::Upload(const std::string& path, const fs::path& filePath,
                          const UploadCallback& cb) {
-
     if (token.empty())
         throw InvalidArgsException("Missing token, call Init first");
 
@@ -67,7 +68,8 @@ void ShareClient::Upload(const std::string& path, const fs::path& filePath,
     while (true) {
         try {
             net::Response res =
-                net::POST(this->registry->getUrl("/share/upload/" + this->token))
+                net::POST(
+                    this->registry->getUrl("/share/upload/" + this->token))
                     .multiPartFormData({"file", filePath.string()},
                                        {"path", path})
                     .authToken(this->registry->getAuthToken())
@@ -109,19 +111,18 @@ void ShareClient::Upload(const std::string& path, const fs::path& filePath,
     }
 }
 
-
 std::string ShareClient::Commit() {
-
-    if (token.empty()) throw InvalidArgsException("Missing token, call Init first");
+    if (token.empty())
+        throw InvalidArgsException("Missing token, call Init first");
 
     // Commit
     int retryNum = 0;
     while (true) {
         try {
-            auto res =
-                net::POST(this->registry->getUrl("/share/commit/" + this->token))
+            auto res = net::POST(this->registry->getUrl("/share/commit/" +
+                                                        this->token))
                            .authToken(this->registry->getAuthToken())
-                    .send();
+                           .send();
 
             /*if (res.status() == 401) {
                 LOGD << "Token expired";
@@ -140,6 +141,96 @@ std::string ShareClient::Commit() {
         } catch (const NetException& e) {
             if (++retryNum >= MAX_RETRIES) throw e;
             LOGD << e.what() << ", retrying commit (attempt " << retryNum
+                 << ")";
+            utils::sleep(1000 * retryNum);
+        }
+    }
+}
+
+/*
+ * Add function to support streams (curl_mimepart)
+ * Reference: https://curl.se/libcurl/c/curl_mime_data_cb.html
+ *
+ */
+
+DDB_DLL int ShareClient::StartUploadSession(int chunks, size_t size) {
+    if (token.empty())
+        throw InvalidArgsException("Missing token, call Init first");
+
+    if (chunks < 1) throw InvalidArgsException("Chunks cannot be less than 1");
+    if (size <= 0) throw InvalidArgsException("Invalid size");
+
+    // Commit
+    int retryNum = 0;
+    while (true) {
+        try {
+            auto res =
+                net::POST(this->registry->getUrl("/share/upload/" +
+                                                 this->token + "/session"))
+                    .multiPartFormData({"chunks", std::to_string(chunks)},
+                                       {"size", std::to_string(size)})
+                    .authToken(this->registry->getAuthToken())
+                    .send();
+
+            if (res.status() != 200) this->registry->handleError(res);
+
+            auto j = res.getJSON();
+            if (!j.contains("sessionId")) this->registry->handleError(res);
+
+            return j["sessionId"].get<int>();
+
+        } catch (const NetException& e) {
+            if (++retryNum >= MAX_RETRIES) throw e;
+            LOGD << e.what() << ", retrying start upload session (attempt "
+                 << retryNum << ")";
+            utils::sleep(1000 * retryNum);
+        }
+    }
+}
+
+DDB_DLL void ShareClient::UploadToSession(int sessionId, int index,
+                                          std::istream input) {
+    return;
+}
+
+DDB_DLL void ShareClient::CloseUploadSession(int sessionId, std::string& path) {
+    if (token.empty())
+        throw InvalidArgsException("Missing token, call Init first");
+
+    if (path.empty()) throw InvalidArgsException("Missing path");
+
+    // Commit
+    int retryNum = 0;
+    while (true) {
+        try {
+            auto res =
+                net::POST(this->registry->getUrl(
+                              "/share/upload/" + this->token + "session/" +
+                              std::to_string(sessionId) + "/close"))
+                    .multiPartFormData({"path", path})
+                    .authToken(this->registry->getAuthToken())
+                    .send();
+
+            if (res.status() != 200) this->registry->handleError(res);
+
+            json j = res.getJSON();
+
+            if (!j.contains("hash")) this->registry->handleError(res);
+
+            // Find a way to include this check
+            /*if (sha256 != j["hash"])
+                throw NetException(
+                    filename +
+                    " file got corrupted during upload (hash mismatch, "
+                    "expected: " +
+                    sha256 + ", got: " + j["hash"].get<std::string>() +
+                    ". Try again.");*/
+            break;  // Done
+
+
+        } catch (const NetException& e) {
+            if (++retryNum >= MAX_RETRIES) throw e;
+            LOGD << e.what() << ", retrying close upload session (attempt " << retryNum
                  << ")";
             utils::sleep(1000 * retryNum);
         }
