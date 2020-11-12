@@ -41,7 +41,7 @@ void ShareClient::Init(const std::string& tag, const std::string& password,
     this->token = j["token"];
     LOGD << "Token = " << this->token;
 
-    this->maxUploadSize = j.contains("maxUploadChunkSize") ? j["maxUploadChunkSize"] : LONG_MAX;
+    this->maxUploadSize = j.contains("maxUploadChunkSize") ? j["maxUploadChunkSize"].get<size_t>() : static_cast<size_t>(LONG_MAX);
     LOGD << "MaxUploadChunkSize = " << maxUploadSize;
 }
 
