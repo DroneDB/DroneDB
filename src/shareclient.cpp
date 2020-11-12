@@ -27,6 +27,8 @@ void ShareClient::Init(const std::string& tag, const std::string& password,
     LOGD << "Init('" << tag << "', '" << password << "', '" << datasetName
          << "', '" << datasetDescription << "')";
 
+    LOGD << "Using auth token: " << this->registry->getAuthToken();
+
     net::Response res = net::POST(this->registry->getUrl("/share/init"))
                             .formData({"tag", tag, "password", password})
                             .authToken(this->registry->getAuthToken())
@@ -39,7 +41,7 @@ void ShareClient::Init(const std::string& tag, const std::string& password,
     this->token = j["token"];
     LOGD << "Token = " << this->token;
 
-    this->maxUploadSize = j["MaxUploadChunkSize"].get<size_t>();
+    this->maxUploadSize = j.contains("maxUploadChunkSize") ? j["maxUploadChunkSize"] : LONG_MAX;
     LOGD << "MaxUploadChunkSize = " << maxUploadSize;
 }
 

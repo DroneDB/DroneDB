@@ -24,8 +24,8 @@ class Registry{
 
     DDB_DLL std::string getUrl(const std::string &path = "") const;
 
-    DDB_DLL std::string getAuthToken() const;
-    DDB_DLL std::string login(const std::string &username, const std::string &password) const;
+    DDB_DLL std::string getAuthToken();
+    DDB_DLL std::string login(const std::string &username, const std::string &password);
     DDB_DLL bool logout();
 
     DDB_DLL void handleError(net::Response &res);
