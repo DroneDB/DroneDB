@@ -46,7 +46,7 @@ std::string Registry::getUrl(const std::string &path) const {
 }
 
 std::string Registry::login(const std::string &username,
-                            const std::string &password) const {
+                            const std::string &password) {
     net::Response res =
         net::POST(getUrl("/users/authenticate"))
             .formData({"username", username, "password", password})
@@ -60,6 +60,8 @@ std::string Registry::login(const std::string &username,
         // Save for next time
         UserProfile::get()->getAuthManager()->saveCredentials(
             url, AuthCredentials(username, password));
+
+        this->authToken = token;
 
         return token;
     }
@@ -75,7 +77,7 @@ bool Registry::logout() {
     return UserProfile::get()->getAuthManager()->deleteCredentials(url);
 }
 
-std::string Registry::getAuthToken() const {
+std::string Registry::getAuthToken() {
     return std::string(this->authToken);
 }
 
