@@ -18,7 +18,15 @@ module.exports = class Dataset{
         return `${proto}://${remote}/${this.org}/${this.ds}${p}`;
     }
 
+    get baseApi(){
+        return `/orgs/${this.org}/ds/${this.ds}`;
+    }
+
     async list(path){
-        return this.registry.postRequest(`/orgs/${this.org}/ds/${this.ds}/list`, { path });
+        return this.registry.postRequest(`${this.baseApi}/list`, { path });
+    }
+
+    async delete(){
+        return this.registry.deleteRequest(`${this.baseApi}`);
     }
  };

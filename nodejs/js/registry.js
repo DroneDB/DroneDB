@@ -150,8 +150,9 @@ module.exports = class Registry{
         }
 
         const response = await fetch(`${this.url}${endpoint}`, options);
-        if (response.status == 200) return response.json();
-        else if (response.status == 401) throw new Error("Unauthorized");
+        if (response.status === 200) return response.json();
+        else if (response.status === 204) return true;
+        else if (response.status === 401) throw new Error("Unauthorized");
         else throw new Error(`Server responded with: ${response.text()}`);
     }
 
@@ -161,6 +162,10 @@ module.exports = class Registry{
 
     async postRequest(endpoint, body = {}){
         return this.makeRequest(endpoint, "POST", body);
+    }
+
+    async deleteRequest(endpoint){
+        return this.makeRequest(endpoint, "DELETE");
     }
 
     Organization(name){
