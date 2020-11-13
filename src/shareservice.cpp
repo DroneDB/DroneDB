@@ -34,8 +34,7 @@ std::string ShareService::share(const std::vector<std::string> &input,
     if (ac.empty()) throw AuthException("No authentication credentials stored");
 
     Registry reg(tc.registryUrl);
-    std::string authToken = reg.login(
-        ac.username, ac.password);  // Will throw error on login failed
+    reg.login(ac.username, ac.password);  // Will throw error on login failed
 
     ShareClient client(&reg);
 

@@ -27,7 +27,7 @@ void ShareClient::Init(const std::string& tag, const std::string& password,
     LOGD << "Init('" << tag << "', '" << password << "', '" << datasetName
          << "', '" << datasetDescription << "')";
 
-    LOGD << "Using auth token: " << this->registry->getAuthToken();
+    this->registry->ensureTokenValidity();
 
     net::Response res = net::POST(this->registry->getUrl("/share/init"))
                             .formData({"tag", tag, "password", password})
@@ -67,6 +67,8 @@ void ShareClient::Upload(const std::string& path, const fs::path& filePath,
 
     while (true) {
         try {
+            this->registry->ensureTokenValidity();
+
             net::Response res =
                 net::POST(
                     this->registry->getUrl("/share/upload/" + this->token))
@@ -119,6 +121,8 @@ std::string ShareClient::Commit() {
     int retryNum = 0;
     while (true) {
         try {
+            this->registry->ensureTokenValidity();
+
             auto res = net::POST(this->registry->getUrl("/share/commit/" +
                                                         this->token))
                            .authToken(this->registry->getAuthToken())
@@ -164,6 +168,8 @@ DDB_DLL int ShareClient::StartUploadSession(int chunks, size_t size) {
     int retryNum = 0;
     while (true) {
         try {
+            this->registry->ensureTokenValidity();
+
             auto res =
                 net::POST(this->registry->getUrl("/share/upload/" +
                                                  this->token + "/session"))
@@ -203,6 +209,8 @@ DDB_DLL void ShareClient::CloseUploadSession(int sessionId, std::string& path) {
     int retryNum = 0;
     while (true) {
         try {
+            this->registry->ensureTokenValidity();
+
             auto res =
                 net::POST(this->registry->getUrl(
                               "/share/upload/" + this->token + "session/" +
@@ -227,11 +235,10 @@ DDB_DLL void ShareClient::CloseUploadSession(int sessionId, std::string& path) {
                     ". Try again.");*/
             break;  // Done
 
-
         } catch (const NetException& e) {
             if (++retryNum >= MAX_RETRIES) throw e;
-            LOGD << e.what() << ", retrying close upload session (attempt " << retryNum
-                 << ")";
+            LOGD << e.what() << ", retrying close upload session (attempt "
+                 << retryNum << ")";
             utils::sleep(1000 * retryNum);
         }
     }

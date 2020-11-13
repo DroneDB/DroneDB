@@ -45,6 +45,18 @@ std::string Registry::getUrl(const std::string &path) const {
     return url + path;
 }
 
+std::string Registry::login() {
+    const auto ac =
+        UserProfile::get()->getAuthManager()->loadCredentials(this->url);
+
+    if (ac.empty())
+        throw InvalidArgsException("No stored credentials for registry at '" +
+                                   this->url + "'");
+
+    return login(ac.username, ac.password);
+    
+}
+
 std::string Registry::login(const std::string &username,
                             const std::string &password) {
     net::Response res =
@@ -55,15 +67,20 @@ std::string Registry::login(const std::string &username,
     json j = res.getJSON();
 
     if (res.status() == 200 && j.contains("token")) {
-        auto token = j["token"].get<std::string>();
+        const auto token = j["token"].get<std::string>();
+        const auto expiration = j["expires"].get<time_t>();
 
         // Save for next time
         UserProfile::get()->getAuthManager()->saveCredentials(
             url, AuthCredentials(username, password));
 
         this->authToken = token;
+        this->tokenExpiration = expiration;
 
-        return token;
+        LOGD << "AuthToken = " << token;
+        LOGD << "Expiration = " << expiration;
+
+        return std::string(token);
     }
     if (j.contains("error")) {
         throw AuthException("Login failed: " + j["error"].get<std::string>());
@@ -73,13 +90,34 @@ std::string Registry::login(const std::string &username,
                         std::to_string(res.status()));
 }
 
+DDB_DLL void Registry::ensureTokenValidity() {
+    if (this->authToken.empty())
+        throw InvalidArgsException("No auth token is present");
+
+    const auto now = std::time(nullptr);
+
+    LOGD << "Now = " << now;
+    LOGD << "Expration = " << this->tokenExpiration;
+    LOGD << "Diff = " << (now - this->tokenExpiration);
+
+    // If the token is still valid we have nothing to do
+    if (now < this->tokenExpiration) {
+        LOGD << "Token still valid";
+        return;
+    }
+
+    LOGD << "Token expired: re-login";
+    // Otherwise login
+    this->login();
+}
+
 bool Registry::logout() {
     return UserProfile::get()->getAuthManager()->deleteCredentials(url);
 }
 
-std::string Registry::getAuthToken() {
-    return std::string(this->authToken);
-}
+std::string Registry::getAuthToken() { return std::string(this->authToken); }
+
+time_t Registry::getTokenExpiration() { return this->tokenExpiration; }
 
 void Registry::handleError(net::Response &res) {
     if (res.hasData()) {
