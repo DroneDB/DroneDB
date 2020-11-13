@@ -28,10 +28,6 @@ class ShareClient{
     DDB_DLL void Upload(const std::string& path, const fs::path& filePath, const UploadCallback &cb = nullptr);
     DDB_DLL std::string Commit();
 
-    DDB_DLL int StartUploadSession(int chunks, size_t size);
-    DDB_DLL void UploadToSession(int sessionId, int index, std::istream input);
-    DDB_DLL void CloseUploadSession(int sessionId, std::string& path);
-
     DDB_DLL std::string getToken() const;
     DDB_DLL std::string getResultUrl() const;
     DDB_DLL size_t getMaxUploadSize() const;
