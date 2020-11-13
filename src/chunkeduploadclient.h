@@ -27,8 +27,8 @@ public:
     DDB_DLL ChunkedUploadClient(ddb::Registry* registry, ddb::ShareClient *shareClient);
 
     DDB_DLL int StartSession(int chunks, size_t size);
-    DDB_DLL void UploadToSession(int index, std::istream input);
-    DDB_DLL void CloseSession(const fs::path& filePath, std::string& path);
+    DDB_DLL void UploadToSession(int index, std::istream* input);
+    DDB_DLL void CloseSession(const std::string& path, const fs::path& filePath);
 
     DDB_DLL int getSessionId() const;
 

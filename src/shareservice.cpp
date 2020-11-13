@@ -12,6 +12,7 @@
 #include "registryutils.h"
 #include "userprofile.h"
 #include "utils.h"
+#include "chunkeduploadclient.h"
 
 namespace ddb {
 
@@ -69,7 +70,6 @@ std::string ShareService::share(const std::vector<std::string> &input,
     }
 
     for (auto &fp : filePaths) {
-
         auto p = io::Path(fp);
         auto filesize = p.getSize();
         auto filename = fp.filename().string();
@@ -84,26 +84,65 @@ std::string ShareService::share(const std::vector<std::string> &input,
             p = p.relativeTo(wd.get());
         }
 
-        LOGD << "Uploading " << p.string();
+        const auto maxUploadSize = client.getMaxUploadSize();
 
-        client.Upload(
-            p.generic(), fp,
-            [&cb, &files, &sfp, &filesize, &gTotalBytes, &gTxBytes](
-                std::string &fileName, size_t txBytes, size_t totalBytes) {
-                if (cb == nullptr) return true;
+        if (filesize > maxUploadSize) {
+            LOGD << "Uploading chunked " << p.string();
 
-                // We cap the txBytes from CURL since it
-                // includes data transferred from the
-                // request
+            ChunkedUploadClient cuc(&reg, &client);
 
-                // CAUTION: this will require a lock if you
-                // use threads
+            const auto chunks = static_cast<size_t>(ceil(static_cast<double>(filesize) / maxUploadSize));
 
-                gTxBytes -= sfp.txBytes;
-                sfp.txBytes = std::min(filesize, txBytes);
-                gTxBytes += sfp.txBytes;
-                return cb(files, gTxBytes, gTotalBytes);
-            });        
+            LOGD << "Using " << chunks << " chunks";
+
+            auto sessionId = cuc.StartSession(chunks, filesize);
+
+            LOGD << "Started session with id " << sessionId;
+
+            for (auto n = 0; n < chunks; n++)
+            {
+                LOGD << "Uploading chunk " << n;
+
+                const auto pos = n * maxUploadSize;
+                std::ifstream stream(fp);
+                if (stream.is_open())
+                {
+                    stream.seekg(pos, std::ios::beg);                    
+                    cuc.UploadToSession(n, &stream);
+                    stream.close();
+                } else
+                    throw InvalidArgsException("Cannot open input file " +
+                                               filename);
+            }
+                        
+            LOGD << "All chunks uploaded, closing session";
+
+            cuc.CloseSession(p.generic(), fp);
+
+            LOGD << "Upload session closed";
+
+        } else {
+            LOGD << "Uploading " << p.string();
+
+            client.Upload(
+                p.generic(), fp,
+                [&cb, &files, &sfp, &filesize, &gTotalBytes, &gTxBytes](
+                    std::string &fileName, size_t txBytes, size_t totalBytes) {
+                    if (cb == nullptr) return true;
+
+                    // We cap the txBytes from CURL since it
+                    // includes data transferred from the
+                    // request
+
+                    // CAUTION: this will require a lock if you
+                    // use threads
+
+                    gTxBytes -= sfp.txBytes;
+                    sfp.txBytes = std::min(filesize, txBytes);
+                    gTxBytes += sfp.txBytes;
+                    return cb(files, gTxBytes, gTotalBytes);
+                });
+        }
     }
 
     auto resultUrl = client.Commit();
