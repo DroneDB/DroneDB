@@ -1,14 +1,16 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
-const entry = require('./entry');
 const Tag = require('./tag');
 const Dataset = require('./dataset');
-const { parseUri } = require('./utils');
+const Registry = require('./registry');
+const entry = require('./entry');
+const fetchEntries = require('./fetchEntries');
 
 const ddb = {
-    Tag, Dataset,
+    Tag, Dataset, Registry,
     entry,
+    fetchEntries,
 
     thumbs: {
         supportedForType: function(entryType) {
@@ -16,24 +18,6 @@ const ddb = {
             return entryType === ddb.entry.type.GEOIMAGE ||
                 entryType === ddb.entry.type.GEORASTER ||
                 entryType === ddb.entry.type.IMAGE;
-        }
-    },
-
-    // Retrieves entry information from 
-    // local or remote sources
-    fetchEntries: async function(uri, options = {}){
-        if (uri.startsWith("ddb://") || uri.startsWith("ddb+unsafe://")){
-            const { registryUrl, organization, dataset, path } = parseUri(uri);
-            
-        }else if (uri.startsWith("file://")){
-            // Local file, use ddb.info (if available)
-            if (this.info){
-                return this.info(uri.substring("file://".length), options);
-            }else{
-                throw new Error("ddb.info is only available in NodeJS. Did you call registerNativeBindings?");
-            }
-        }else{
-            throw new Error(`Unsupported URI: ${uri}`);
         }
     },
 

@@ -9,7 +9,7 @@ module.exports = class Tag {
         const parts = tag.split("/");
 
         if (parts.length === 2) {
-            if (!window || window.location.hostname === DEFAULT_REGISTRY) {
+            if (typeof window === "undefined" || window.location.hostname === DEFAULT_REGISTRY) {
                 this.registryUrl = ""; // default
             } else {
                 const proto = window.location.protocol === "https" ?

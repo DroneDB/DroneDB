@@ -16,9 +16,9 @@ module.exports = {
 
         return {
             registryUrl: `${proto}://${groups.remote}`,
-            organization: groups.org,
-            dataset: groups.ds,
+            org: groups.org,
+            ds: groups.ds,
             path: groups.path
-        }
+        };
     }
 }

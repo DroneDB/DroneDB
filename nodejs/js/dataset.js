@@ -2,27 +2,23 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-const Tag = require('./tag');
-const { DEFAULT_REGISTRY } = require('./constants');
-
- module.exports = class Dataset{
-    constructor(tag){
-        this.tag = new Tag(tag);
+module.exports = class Dataset{
+    constructor(registry, org, ds){
+        this.registry = registry;
+        this.org = org;
+        this.ds = ds;
     }
 
     remoteUri(path){
-        let remote = DEFAULT_REGISTRY;
-        let secure = true;
-        const { registryUrl, org, ds } = this.tag;
-
-        if (registryUrl){
-            if (registryUrl.startsWith("http://")) secure = false;
-            remote = registryUrl.replace(/^https?:\/\//, "");
-        }
+        const { remote, secure } = this.registry;
 
         const proto = secure ? "ddb" : "ddb+unsafe";
         const p = path ? `/${path}` : "";
         
-        return `${proto}://${remote}/${org}/${ds}${p}`;
+        return `${proto}://${remote}/${this.org}/${this.ds}${p}`;
+    }
+
+    async list(path){
+        return this.registry.postRequest(`/orgs/${this.org}/ds/${this.ds}/list`, { path });
     }
  };
