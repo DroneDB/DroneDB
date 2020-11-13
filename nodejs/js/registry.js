@@ -13,6 +13,7 @@ let refreshTimers = {};
 module.exports = class Registry{
     constructor(url = "https://" + DEFAULT_REGISTRY){
         this.url = url;
+        this.eventListeners = {};
     }
     
     get remote(){
@@ -42,6 +43,7 @@ module.exports = class Registry{
             if (res.token){
                 this.setCredentials(username, res.token, res.expires);
                 this.setAutoRefreshToken();
+                this.emit("login", username);
 
                 return res.token;
             }else{
@@ -62,7 +64,6 @@ module.exports = class Registry{
             }).then(r => r.json());
             
             if (res.token){
-                console.log("REfreshed: " + res.token);
                 this.setCredentials(this.getUsername(), res.token, res.expires);
             }else{
                 throw new Error(res.error || `Cannot refresh token: ${JSON.stringify(res)}`);
@@ -95,6 +96,7 @@ module.exports = class Registry{
 
     logout(){
         this.clearCredentials();
+        this.emit("logout");
     }
 
     setCredentials(username, token, expires){
@@ -170,5 +172,25 @@ module.exports = class Registry{
 
     Organization(name){
         return new Organization(this, name);
+    }
+
+    addEventListener(event, cb){
+        this.eventListeners[event] = this.eventListeners[event] || [];
+        if (!this.eventListeners[event].find(e => e === cb)){
+            this.eventListeners[event].push(cb);
+        }
+    }
+
+    removeEventListener(event, cb){
+        this.eventListeners[event] = this.eventListeners[event] || [];
+        this.eventListeners[event] = this.eventListeners[event].filter(e => e !== cb);
+    }
+
+    emit(event, ...params){
+        if (this.eventListeners[event]){
+            this.eventListeners[event].forEach(listener => {
+                listener(...params);
+            });
+        }
     }
 }
