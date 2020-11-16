@@ -90,7 +90,7 @@ Response Request::send() {
     Response res;
 
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, Response::WriteCallback);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&res);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, static_cast<void *>(&res));
 
     perform(res);
 
@@ -142,7 +142,7 @@ Request &Request::multiPartFormData(std::vector<std::string> files,
 }
 
 DDB_DLL Request &Request::multiPartFormData(const std::string &fileName,
-                                            std::istream &stream,
+                                            std::istream &stream, size_t size,
                                             std::vector<std::string> params) {
     if (params.size() % 2 != 0)
         throw NetException("Invalid number of multiPartFormData parameters");
@@ -153,28 +153,39 @@ DDB_DLL Request &Request::multiPartFormData(const std::string &fileName,
     // Expect: 100-continue is not wanted
     header("Expect:");
 
+    field = curl_mime_addpart(form);
+
+    LOGD << "curl_mime_addpart ok";
+
     curl_mime_name(field, fileName.c_str());
 
-    const curl_read_callback rcb = [](char *buffer, size_t size, size_t nitems, void *arg)
-    {
-        auto* p = static_cast<std::istream*>(arg);
-        p->read(buffer, size * nitems);
-        return static_cast<size_t>(0);
+    LOGD << "curl_mime_name ok";
+
+    const curl_read_callback rcb = [](char *buffer, size_t size, size_t nitems,
+                                      void *arg) {
+        LOGD << "curl_read_callback(" << size << ", " << nitems << ")";
+
+        const auto sz = size * nitems;
+
+        auto *p = static_cast<std::istream *>(arg);
+        p->read(buffer, sz);
+        return sz;
     };
-    const curl_seek_callback scb = [](void *arg, curl_off_t offset, int origin)
-    {
+    const curl_seek_callback scb = [](void *arg, curl_off_t offset,
+                                      int origin) {
+        LOGD << "curl_seek_callback(" << offset << ", " << origin << ")";
+
         auto *p = static_cast<std::istream *>(arg);
         p->seekg(offset, std::ios::beg);
         return CURL_SEEKFUNC_OK;
     };
 
     //// Let's start from the beginning
-    //stream.seekg(0, std::ios::beg);
+    // stream.seekg(0, std::ios::beg);
 
-    curl_mime_data_cb(
-        field, stream.tellg(),
-        rcb, scb,
-        nullptr, &stream);
+    curl_mime_data_cb(field, size, rcb, scb, nullptr, &stream);
+
+    LOGD << "curl_mime_data_cb ok";
 
     // Add parameters
     for (unsigned long i = 0; i < params.size(); i += 2) {
@@ -266,7 +277,7 @@ void Request::perform(Response &res) {
 
     CURLcode ret = curl_easy_perform(curl);
     if (ret != CURLE_OK) {
-        std::string err(curl_easy_strerror(ret));
+        const std::string err(curl_easy_strerror(ret));
         throw NetException(err + ": " + errorMsg);
     }
 
