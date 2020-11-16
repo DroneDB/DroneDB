@@ -16,9 +16,9 @@ namespace ddb {
 const int MAX_RETRIES = 10;
 
 ChunkedUploadClient::ChunkedUploadClient(ddb::Registry* registry,
-                                         ddb::ShareClient* shareClient) {
-    this->registry = registry;
-    this->shareClient = shareClient;
+                                         ddb::ShareClient* shareClient)
+    : sessionId(0), chunks(0), registry(registry), shareClient(shareClient) {
+    //
 }
 
 DDB_DLL int ChunkedUploadClient::StartSession(int chunks, size_t size) {
@@ -29,6 +29,10 @@ DDB_DLL int ChunkedUploadClient::StartSession(int chunks, size_t size) {
 
     if (chunks < 1) throw InvalidArgsException("Chunks cannot be less than 1");
     if (size <= 0) throw InvalidArgsException("Invalid size");
+
+    LOGD << "StartSession('" << chunks << "', '" << size << "')";
+
+    this->chunks = chunks;
 
     // Commit
     int retryNum = 0;
@@ -49,7 +53,11 @@ DDB_DLL int ChunkedUploadClient::StartSession(int chunks, size_t size) {
             auto j = res.getJSON();
             if (!j.contains("sessionId")) this->registry->handleError(res);
 
-            return j["sessionId"].get<int>();
+            const auto sessionId = j["sessionId"].get<int>();
+
+            LOGD << "Started session " << sessionId;
+
+            return sessionId;
 
         } catch (const NetException& e) {
             if (++retryNum >= MAX_RETRIES) throw e;
@@ -66,61 +74,49 @@ DDB_DLL int ChunkedUploadClient::StartSession(int chunks, size_t size) {
  *
  */
 DDB_DLL void ChunkedUploadClient::UploadToSession(int index,
-                                                  std::istream *input) {
+                                                  std::istream& input) {
+    const auto token = this->shareClient->getToken();
 
-    // Add method to Request that uses streams
-    throw NotImplementedException("Not implemented");
-    /*
-    
-     *
-    struct ctl {
-      char *buffer;
-      curl_off_t size;
-      curl_off_t position;
-    };
- 
-    size_t read_callback(char *buffer, size_t size, size_t nitems, void *arg) {
-        struct ctl *p = (struct ctl *)arg;
-        curl_off_t sz = p->size - p->position;
+    if (token.empty())
+        throw InvalidArgsException("Missing token, call Init first");
 
-        nitems *= size;
-        if (sz > nitems) sz = nitems;
-        if (sz) memcpy(buffer, p->buffer + p->position, sz);
-        p->position += sz;
-        return sz;
-    }
+    const auto indexStr = std::to_string(index);
 
-    int seek_callback(void *arg, curl_off_t offset, int origin) {
-        struct ctl *p = (struct ctl *)arg;
+    if (index < 0 || index > this->chunks - 1)
+        throw InvalidArgsException("Invalid chunk index " + indexStr);
 
-        switch (origin) {
-            case SEEK_END:
-                offset += p->size;
-                break;
-            case SEEK_CUR:
-                offset += p->position;
-                break;
+    LOGD << "UploadToSession(" << indexStr << ")";
+
+    int retryNum = 0;
+    while (true) {
+        try {
+            this->registry->ensureTokenValidity();
+
+            auto res =
+                net::POST(this->registry->getUrl(
+                              "/share/upload/" + token + "session/" +
+                              std::to_string(sessionId) + "/chunk/" + indexStr))
+                    .multiPartFormData("temp" + indexStr + ".tmp", input)
+                    .authToken(this->registry->getAuthToken())
+                    .send();
+
+            if (res.status() != 200) this->registry->handleError(res);
+
+            LOGD << "Chunked upload " + indexStr + " ok";
+
+            break;  // Done
+
+        } catch (const NetException& e) {
+            if (++retryNum >= MAX_RETRIES) throw e;
+            LOGD << e.what() << ", retrying upload to session (attempt "
+                 << retryNum << ")";
+            utils::sleep(1000 * retryNum);
         }
-
-        if (offset < 0) return CURL_SEEKFUNC_FAIL;
-        p->position = offset;
-        return CURL_SEEKFUNC_OK;
     }
-
-    curl_mimepart *part = curl_mime_addpart(mime);
-    struct ctl hugectl;
-     
-    hugectl.buffer = hugedata;
-    hugectl.size = sizeof hugedata;
-    hugectl.position = 0;
-    curl_mime_data_cb(part, hugectl.size, read_callback, seek_callback, NULL,
-                       &hugectl);
-    */
-
-    return;
 }
 
-DDB_DLL void ChunkedUploadClient::CloseSession(const std::string& path, const fs::path& filePath) {
+DDB_DLL void ChunkedUploadClient::CloseSession(const std::string& path,
+                                               const fs::path& filePath) {
     const auto token = this->shareClient->getToken();
 
     if (token.empty())
@@ -129,7 +125,8 @@ DDB_DLL void ChunkedUploadClient::CloseSession(const std::string& path, const fs
     if (path.empty()) throw InvalidArgsException("Missing path");
     if (filePath.empty()) throw InvalidArgsException("Missing file path");
 
-    // Commit
+    LOGD << "CloseSession('" << path << "', '" + filePath.string() << "')";
+
     int retryNum = 0;
     while (true) {
         try {
@@ -158,6 +155,8 @@ DDB_DLL void ChunkedUploadClient::CloseSession(const std::string& path, const fs
                     "expected: " +
                     sha256 + ", got: " + j["hash"].get<std::string>() +
                     ". Try again.");
+
+            LOGD << "Close session " << this->sessionId << " ok";
 
             break;  // Done
 
