@@ -91,7 +91,7 @@ std::string ShareService::share(const std::vector<std::string> &input,
 
             ChunkedUploadClient cuc(&reg, &client);
 
-            const auto chunks = static_cast<size_t>(ceil(static_cast<double>(filesize) / maxUploadSize));
+            const auto chunks = static_cast<int>(ceil(static_cast<double>(filesize) / maxUploadSize));
 
             LOGD << "Using " << chunks << " chunks";
 
@@ -104,15 +104,20 @@ std::string ShareService::share(const std::vector<std::string> &input,
                 LOGD << "Uploading chunk " << n;
 
                 const auto pos = n * maxUploadSize;
+                auto chunkSize = std::min(maxUploadSize, filesize - pos);
+
+                LOGD << "Pos = " << pos << ", chunkSize = " << chunkSize;
+
                 std::ifstream stream(fp);
                 if (stream.is_open())
                 {
                     stream.seekg(pos, std::ios::beg);                    
-                    cuc.UploadToSession(n, stream);
+                    cuc.UploadToSession(n, stream, chunkSize);
                     stream.close();
                 } else
                     throw InvalidArgsException("Cannot open input file " +
                                                filename);
+
             }
                         
             LOGD << "All chunks uploaded, closing session";
