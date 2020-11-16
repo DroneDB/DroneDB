@@ -30,7 +30,7 @@ DDB_DLL int ChunkedUploadClient::StartSession(int chunks, size_t size) {
     if (chunks < 1) throw InvalidArgsException("Chunks cannot be less than 1");
     if (size <= 0) throw InvalidArgsException("Invalid size");
 
-    LOGD << "StartSession('" << chunks << "', '" << size << "')";
+    LOGD << "StartSession(" << chunks << ", " << size << ")";
 
     this->chunks = chunks;
 
@@ -40,13 +40,12 @@ DDB_DLL int ChunkedUploadClient::StartSession(int chunks, size_t size) {
         try {
             this->registry->ensureTokenValidity();
 
-            auto res =
-                net::POST(this->registry->getUrl("/share/upload/" + token +
-                                                 "/session"))
-                    .multiPartFormData({"chunks", std::to_string(chunks)},
-                                       {"size", std::to_string(size)})
-                    .authToken(this->registry->getAuthToken())
-                    .send();
+            auto res = net::POST(this->registry->getUrl("/share/upload/" +
+                                                        token + "/session"))
+                           .formData({"chunks", std::to_string(chunks),
+                                               "size", std::to_string(size)})
+                           .authToken(this->registry->getAuthToken())
+                           .send();
 
             if (res.status() != 200) this->registry->handleError(res);
 
@@ -54,6 +53,8 @@ DDB_DLL int ChunkedUploadClient::StartSession(int chunks, size_t size) {
             if (!j.contains("sessionId")) this->registry->handleError(res);
 
             const auto sessionId = j["sessionId"].get<int>();
+
+            this->sessionId = sessionId;
 
             LOGD << "Started session " << sessionId;
 
@@ -74,7 +75,7 @@ DDB_DLL int ChunkedUploadClient::StartSession(int chunks, size_t size) {
  *
  */
 DDB_DLL void ChunkedUploadClient::UploadToSession(int index,
-                                                  std::istream& input) {
+                                                  std::istream& input, size_t chunkSize) {
     const auto token = this->shareClient->getToken();
 
     if (token.empty())
@@ -85,18 +86,22 @@ DDB_DLL void ChunkedUploadClient::UploadToSession(int index,
     if (index < 0 || index > this->chunks - 1)
         throw InvalidArgsException("Invalid chunk index " + indexStr);
 
-    LOGD << "UploadToSession(" << indexStr << ")";
+    LOGD << "UploadToSession(" << indexStr << ", " << chunkSize << ")";
 
     int retryNum = 0;
     while (true) {
         try {
             this->registry->ensureTokenValidity();
 
+            const auto url = this->registry->getUrl(
+                "/share/upload/" + token + "/session/" +
+                std::to_string(sessionId) + "/chunk/" + indexStr);
+
+            LOGD << "Url = " << url;
+
             auto res =
-                net::POST(this->registry->getUrl(
-                              "/share/upload/" + token + "session/" +
-                              std::to_string(sessionId) + "/chunk/" + indexStr))
-                    .multiPartFormData("temp" + indexStr + ".tmp", input)
+                net::POST(url)
+                    .multiPartFormData("file", input, chunkSize)
                     .authToken(this->registry->getAuthToken())
                     .send();
 
@@ -135,7 +140,7 @@ DDB_DLL void ChunkedUploadClient::CloseSession(const std::string& path,
             auto res = net::POST(this->registry->getUrl(
                                      "/share/upload/" + token + "session/" +
                                      std::to_string(sessionId) + "/close"))
-                           .multiPartFormData({"path", path})
+                           .formData({"path", path})
                            .authToken(this->registry->getAuthToken())
                            .send();
 
