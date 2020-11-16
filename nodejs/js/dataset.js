@@ -13,13 +13,18 @@ module.exports = class Dataset{
         const { remote, secure } = this.registry;
 
         const proto = secure ? "ddb" : "ddb+unsafe";
-        const p = path ? `/${path}` : "";
+        const p = (path && path !== ".") ? `/${path}` : "";
         
         return `${proto}://${remote}/${this.org}/${this.ds}${p}`;
     }
 
+    
     get baseApi(){
         return `/orgs/${this.org}/ds/${this.ds}`;
+    }
+
+    async info(){
+        return this.registry.getRequest(`${this.baseApi}`);
     }
 
     async list(path){
