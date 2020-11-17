@@ -74,6 +74,8 @@ std::string ShareService::share(const std::vector<std::string> &input,
         auto filesize = p.getSize();
         auto filename = fp.filename().string();
 
+        LOGD << "Current Path = " << fp;
+
         sfp.filename = filename;
         sfp.totalBytes = filesize;
         sfp.txBytes = 0;
@@ -108,16 +110,20 @@ std::string ShareService::share(const std::vector<std::string> &input,
 
                 LOGD << "Pos = " << pos << ", chunkSize = " << chunkSize;
 
-                std::ifstream stream(fp);
-                if (stream.is_open())
+                auto *stream =
+                    new std::ifstream(fp, std::ios::in | std::ios::binary);
+
+                if (stream->is_open())
                 {
-                    stream.seekg(pos, std::ios::beg);                    
+                    stream->seekg(pos, std::ios::beg);
+                    LOGD << "Moved to " << stream->tellg();
                     cuc.UploadToSession(n, stream, chunkSize);
-                    stream.close();
+                    stream->close();
                 } else
                     throw InvalidArgsException("Cannot open input file " +
                                                filename);
 
+                delete stream;
             }
                         
             LOGD << "All chunks uploaded, closing session";

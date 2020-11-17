@@ -17,7 +17,8 @@ Request::Request(const std::string &url, ReqType reqType)
       curl(nullptr),
       headers(nullptr),
       form(nullptr),
-      cb(nullptr) {
+      cb(nullptr),
+      mime_data_carrier(nullptr){
     try {
         curl = curl_easy_init();
         if (!curl) throw NetException("Cannot initialize CURL");
@@ -28,7 +29,7 @@ Request::Request(const std::string &url, ReqType reqType)
             curl_easy_setopt(curl, CURLOPT_VERBOSE, true);
         }
 
-        if (reqType == ReqType::HTTP_POST) {
+        if (reqType == HTTP_POST) {
             curl_easy_setopt(curl, CURLOPT_POST, true);
             curl_easy_setopt(curl, CURLOPT_POSTFIELDS, "");
         }
@@ -38,7 +39,7 @@ Request::Request(const std::string &url, ReqType reqType)
         curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, true);
     } catch (AppException &e) {
         if (curl) curl_easy_cleanup(curl);
-        throw e;
+        throw;
     }
 }
 
@@ -49,6 +50,8 @@ Request::~Request() {
     headers = nullptr;
     if (form) curl_mime_free(form);
     form = nullptr;
+    if (mime_data_carrier) delete mime_data_carrier;
+    mime_data_carrier = nullptr;
 }
 
 Request &Request::verifySSL(bool flag) {
@@ -73,7 +76,7 @@ Request &Request::progressCb(const RequestCallback &cb) {
 
 Request &Request::maximumUploadSpeed(unsigned long bytesPerSec) {
     curl_easy_setopt(curl, CURLOPT_MAX_SEND_SPEED_LARGE,
-                     (curl_off_t)bytesPerSec);
+                     static_cast<curl_off_t>(bytesPerSec));
     return *this;
 }
 
@@ -142,7 +145,7 @@ Request &Request::multiPartFormData(std::vector<std::string> files,
 }
 
 DDB_DLL Request &Request::multiPartFormData(const std::string &fileName,
-                                            std::istream &stream, size_t size,
+                                            std::istream* stream, size_t size,
                                             std::vector<std::string> params) {
     if (params.size() % 2 != 0)
         throw NetException("Invalid number of multiPartFormData parameters");
@@ -161,29 +164,46 @@ DDB_DLL Request &Request::multiPartFormData(const std::string &fileName,
 
     LOGD << "curl_mime_name ok";
 
-    const curl_read_callback rcb = [](char *buffer, size_t size, size_t nitems,
+    const curl_read_callback rcb = [](char *buffer, size_t itemSize, size_t nitems,
                                       void *arg) {
-        LOGD << "curl_read_callback(" << size << ", " << nitems << ")";
+        LOGD << "curl_read_callback(" << itemSize << ", " << nitems << ")";
 
-        const auto sz = size * nitems;
+        const auto sz = itemSize * nitems;
 
-        auto *p = static_cast<std::istream *>(arg);
-        p->read(buffer, sz);
-        return sz;
+        auto *p = static_cast<struct ctl *>(arg);
+
+        LOGD << "Index = " << p->index;
+        LOGD << "Current = " << p->stream->tellg();
+        LOGD << "Reading " << sz << " data";
+               
+        p->stream->read(buffer, sz);
+        const auto rd = p->stream->gcount();
+        
+        LOGD << "Read " << rd;
+        LOGD << "Current = " << p->stream->tellg();
+
+        return static_cast<size_t>(rd);
     };
     const curl_seek_callback scb = [](void *arg, curl_off_t offset,
                                       int origin) {
         LOGD << "curl_seek_callback(" << offset << ", " << origin << ")";
 
-        auto *p = static_cast<std::istream *>(arg);
-        p->seekg(offset, std::ios::beg);
+        auto *p = static_cast<struct ctl *>(arg);
+        LOGD << "Index = " << p->index;
+
+        p->stream->seekg(offset, std::ios::beg);
         return CURL_SEEKFUNC_OK;
     };
 
-    //// Let's start from the beginning
-    // stream.seekg(0, std::ios::beg);
+    this->mime_data_carrier = new ctl;
+    this->mime_data_carrier->index = 3;
+    this->mime_data_carrier->stream = stream;
 
-    curl_mime_data_cb(field, size, rcb, scb, nullptr, &stream);
+    LOGD << "Starting upload with total size " << size;
+
+    curl_mime_data_cb(field, size, rcb, scb, nullptr, this->mime_data_carrier);
+
+    //delete par;
 
     LOGD << "curl_mime_data_cb ok";
 

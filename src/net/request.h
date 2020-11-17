@@ -21,6 +21,10 @@ struct RequestProgress {
   RequestCallback *cb;
 };
 
+struct ctl {
+    std::istream *stream;
+    int index;
+};
 
 class Request{
     std::string url;
@@ -29,6 +33,7 @@ class Request{
     char errorMsg[CURL_ERROR_SIZE];
     struct curl_slist *headers;
     curl_mime *form;
+    ctl *mime_data_carrier;
 
     RequestCallback cb;
 
@@ -43,7 +48,7 @@ public:
 
     DDB_DLL Request& formData(std::vector<std::string> params);
     DDB_DLL Request& multiPartFormData(std::vector<std::string> files, std::vector<std::string> params = {});
-    DDB_DLL Request& multiPartFormData(const std::string& fileName, std::istream& stream, size_t size, std::vector<std::string> params = {});
+    DDB_DLL Request& multiPartFormData(const std::string& fileName, std::istream* stream, size_t size, std::vector<std::string> params = {});
     DDB_DLL Request& header(const std::string &header);
     DDB_DLL Request& header(const std::string &name, const std::string &value);
     DDB_DLL Request& verifySSL(bool flag);

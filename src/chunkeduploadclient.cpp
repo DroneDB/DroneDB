@@ -75,7 +75,7 @@ DDB_DLL int ChunkedUploadClient::StartSession(int chunks, size_t size) {
  *
  */
 DDB_DLL void ChunkedUploadClient::UploadToSession(int index,
-                                                  std::istream& input, size_t chunkSize) {
+                                                  std::istream* input, size_t chunkSize) {
     const auto token = this->shareClient->getToken();
 
     if (token.empty())
