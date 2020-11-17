@@ -96,9 +96,7 @@ DDB_DLL void Registry::ensureTokenValidity() {
 
     const auto now = std::time(nullptr);
 
-    LOGD << "Now = " << now;
-    LOGD << "Expration = " << this->tokenExpiration;
-    LOGD << "Diff = " << (now - this->tokenExpiration);
+    LOGD << "Now = " << now << ", expration = " << this->tokenExpiration << ", diff = " << now - this->tokenExpiration;
 
     // If the token is still valid we have nothing to do
     if (now < this->tokenExpiration) {
