@@ -6,10 +6,11 @@ const Dataset = require('./dataset');
 const Registry = require('./registry');
 const entry = require('./entry');
 const fetchEntries = require('./fetchEntries');
+const utils = require('./utils');
 
 const ddb = {
     Tag, Dataset, Registry,
-    entry,
+    entry, utils,
     fetchEntries,
 
     thumbs: {

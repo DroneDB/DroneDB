@@ -25,7 +25,7 @@ module.exports = class Dataset{
 
     downloadUrl(paths){
         let url = `${this.baseApi}/download`;
-        if (paths) url += paths.join(",");
+        if (paths) url += `?path=${paths.join(",")}`;
         return url;
     }
 
