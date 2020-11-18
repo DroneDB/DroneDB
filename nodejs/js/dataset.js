@@ -23,6 +23,12 @@ module.exports = class Dataset{
         return `/orgs/${this.org}/ds/${this.ds}`;
     }
 
+    downloadUrl(paths){
+        let url = `${this.baseApi}/download`;
+        if (paths) url += paths.join(",");
+        return url;
+    }
+
     async info(){
         return this.registry.getRequest(`${this.baseApi}`);
     }

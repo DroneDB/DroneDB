@@ -103,6 +103,13 @@ module.exports = class Registry{
         localStorage.setItem(`${this.url}_username`, username);
         localStorage.setItem(`${this.url}_jwt_token`, token);
         localStorage.setItem(`${this.url}_jwt_token_expires`, expires);
+
+        // Set cookie if the URL matches the current window
+        if (typeof window !== "undefined"){
+            if (window.location.origin === this.url){
+                document.cookie = `jwtToken=${token};${expires*1000};path=/`;
+            }
+        }
     }
 
     getAuthToken(){
@@ -128,6 +135,13 @@ module.exports = class Registry{
         localStorage.removeItem(`${this.url}_jwt_token`);
         localStorage.removeItem(`${this.url}_jwt_token_expires`);
         localStorage.removeItem(`${this.url}_username`);
+
+         // Clear cookie if the needed
+         if (typeof window !== "undefined"){
+            if (window.location.origin === this.url){
+                document.cookie = `jwtToken=;-1;path=/`;
+            }
+        }
     }
 
     isLoggedIn(){
