@@ -130,7 +130,7 @@ Request &Request::multiPartFormData(std::vector<std::string> files,
     // Add files
     for (unsigned long i = 0; i < files.size(); i += 2) {
         field = curl_mime_addpart(form);
-        curl_mime_name(field, files[i].c_str());
+        curl_mime_filename(field, files[i].c_str());
         curl_mime_filedata(field, files[i + 1].c_str());
     }
 
@@ -144,7 +144,7 @@ Request &Request::multiPartFormData(std::vector<std::string> files,
     return *this;
 }
 
-DDB_DLL Request &Request::multiPartFormData(const std::string &fileName,
+DDB_DLL Request &Request::multiPartFormData(const std::string &fileName, const std::string& fieldName,
                                             std::istream* stream, size_t size,
                                             std::vector<std::string> params) {
     if (params.size() % 2 != 0)
@@ -160,7 +160,8 @@ DDB_DLL Request &Request::multiPartFormData(const std::string &fileName,
 
     LOGD << "curl_mime_addpart ok";
 
-    curl_mime_name(field, fileName.c_str());
+    curl_mime_filename(field, fileName.c_str());
+    curl_mime_name(field, fieldName.c_str());
 
     LOGD << "curl_mime_name ok";
 

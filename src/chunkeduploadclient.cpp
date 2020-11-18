@@ -101,7 +101,7 @@ DDB_DLL void ChunkedUploadClient::UploadToSession(int index,
 
             auto res =
                 net::POST(url)
-                    .multiPartFormData("file", input, chunkSize)
+                    .multiPartFormData("file.tmp", "file", input, chunkSize)
                     .authToken(this->registry->getAuthToken())
                     .send();
 
