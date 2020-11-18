@@ -145,7 +145,9 @@ module.exports = class Registry{
     }
 
     isLoggedIn(){
-        return this.getAuthToken() !== null && this.getAuthTokenExpiration() > new Date();
+        const loggedIn = this.getAuthToken() !== null && this.getAuthTokenExpiration() > new Date();
+        if (!loggedIn) this.clearCredentials();
+        return loggedIn;
     }
 
     async makeRequest(endpoint, method="GET", body = null){
