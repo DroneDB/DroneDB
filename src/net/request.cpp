@@ -17,8 +17,8 @@ Request::Request(const std::string &url, ReqType reqType)
       curl(nullptr),
       headers(nullptr),
       form(nullptr),
-      cb(nullptr),
-      mime_data_carrier(nullptr){
+      mime_data_carrier(nullptr),
+      cb(nullptr){
     try {
         curl = curl_easy_init();
         if (!curl) throw NetException("Cannot initialize CURL");
@@ -144,9 +144,8 @@ Request &Request::multiPartFormData(std::vector<std::string> files,
     return *this;
 }
 
-DDB_DLL Request &Request::multiPartFormData(const std::string &fileName, const std::string& fieldName,
-                                            std::istream* stream, size_t size,
-                                            std::vector<std::string> params) {
+DDB_DLL Request &Request::multiPartFormData(const std::string& filename,
+                                            std::istream* stream, size_t offset, size_t size, std::vector<std::string> params) {
     if (params.size() % 2 != 0)
         throw NetException("Invalid number of multiPartFormData parameters");
 
@@ -160,44 +159,56 @@ DDB_DLL Request &Request::multiPartFormData(const std::string &fileName, const s
 
     LOGD << "curl_mime_addpart ok";
 
-    curl_mime_filename(field, fileName.c_str());
-    curl_mime_name(field, fieldName.c_str());
+    curl_mime_filename(field, filename.c_str());
+    curl_mime_name(field, filename.c_str());
 
     LOGD << "curl_mime_name ok";
 
-    const curl_read_callback rcb = [](char *buffer, size_t itemSize, size_t nitems,
+    const curl_read_callback rcb = [](char *buffer, size_t size, size_t nitems,
                                       void *arg) {
-        LOGD << "curl_read_callback(" << itemSize << ", " << nitems << ")";
-
-        const auto sz = itemSize * nitems;
-
+        LOGD << "curl_read_callback(" << size << ", " << nitems << ")";
         auto *p = static_cast<struct ctl *>(arg);
 
-        LOGD << "Index = " << p->index;
+        size_t sz = p->size - p->position;
+
         LOGD << "Current = " << p->stream->tellg();
         LOGD << "Reading " << sz << " data";
-               
-        p->stream->read(buffer, sz);
-        const auto rd = p->stream->gcount();
-        
-        LOGD << "Read " << rd;
-        LOGD << "Current = " << p->stream->tellg();
 
-        return static_cast<size_t>(rd);
+        nitems *= size;
+        if(sz > nitems) sz = nitems;
+        if(sz){
+            p->stream->seekg(p->position + p->offset, std::ios::beg);
+            if (!p->stream->read(buffer, sz)){
+                throw FSException("Cannot read from stream");
+            }
+        }
+
+        p->position += sz;
+
+        return sz;
     };
     const curl_seek_callback scb = [](void *arg, curl_off_t offset,
                                       int origin) {
-        LOGD << "curl_seek_callback(" << offset << ", " << origin << ")";
+        struct ctl *p = (struct ctl *) arg;
 
-        auto *p = static_cast<struct ctl *>(arg);
-        LOGD << "Index = " << p->index;
+        switch(origin) {
+        case SEEK_END:
+            offset += p->size;
+            break;
+        case SEEK_CUR:
+            offset += p->position;
+            break;
+        }
 
-        p->stream->seekg(offset, std::ios::beg);
+        if(offset < 0) return CURL_SEEKFUNC_FAIL;
+        p->position = offset;
         return CURL_SEEKFUNC_OK;
     };
 
     this->mime_data_carrier = new ctl;
-    this->mime_data_carrier->index = 3;
+    this->mime_data_carrier->size = size;
+    this->mime_data_carrier->position = 0;
+    this->mime_data_carrier->offset = offset;
     this->mime_data_carrier->stream = stream;
 
     LOGD << "Starting upload with total size " << size;

@@ -75,18 +75,18 @@ DDB_DLL int ChunkedUploadClient::StartSession(int chunks, size_t size) {
  *
  */
 DDB_DLL void ChunkedUploadClient::UploadToSession(int index,
-                                                  std::istream* input, size_t chunkSize) {
+                                                  std::istream* input, size_t byteOffset, size_t byteLength) {
     const auto token = this->shareClient->getToken();
 
     if (token.empty())
-        throw InvalidArgsException("Missing token, call Init first");
+        throw AppException("Missing token, call Init first");
 
     const auto indexStr = std::to_string(index);
 
     if (index < 0 || index > this->chunks - 1)
-        throw InvalidArgsException("Invalid chunk index " + indexStr);
+        throw AppException("Invalid chunk index " + indexStr);
 
-    LOGD << "UploadToSession(" << indexStr << ", " << chunkSize << ")";
+    LOGD << "UploadToSession(" << indexStr << ", " << byteLength << ")";
 
     int retryNum = 0;
     while (true) {
@@ -102,7 +102,7 @@ DDB_DLL void ChunkedUploadClient::UploadToSession(int index,
             auto res =
                 net::POST(url)
                     .authToken(this->registry->getAuthToken())
-                    .multiPartFormData("file.tmp", "file", input, chunkSize)                    
+                    .multiPartFormData("file", input, byteOffset, byteLength)
                     .send();
 
             if (res.status() != 200) this->registry->handleError(res);

@@ -115,9 +115,7 @@ std::string ShareService::share(const std::vector<std::string> &input,
 
                 if (stream->is_open())
                 {
-                    stream->seekg(pos, std::ios::beg);
-                    LOGD << "Moved to " << stream->tellg();
-                    cuc.UploadToSession(n, stream, chunkSize);
+                    cuc.UploadToSession(n, stream, pos, chunkSize);
                     stream->close();
                 } else
                     throw InvalidArgsException("Cannot open input file " +

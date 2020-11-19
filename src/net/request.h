@@ -23,7 +23,9 @@ struct RequestProgress {
 
 struct ctl {
     std::istream *stream;
-    int index;
+    curl_off_t size; // Total byte size
+    curl_off_t position; // Current position (relative to offset)
+    curl_off_t offset; // Offset to start reading from
 };
 
 class Request{
@@ -48,7 +50,7 @@ public:
 
     DDB_DLL Request& formData(std::vector<std::string> params);
     DDB_DLL Request& multiPartFormData(std::vector<std::string> files, std::vector<std::string> params = {});
-    DDB_DLL Request& multiPartFormData(const std::string& fileName, const std::string& fieldName, std::istream* stream, size_t size, std::vector<std::string> params = {});
+    DDB_DLL Request& multiPartFormData(const std::string& filename, std::istream* stream, size_t offset, size_t size, std::vector<std::string> params = {});
     DDB_DLL Request& header(const std::string &header);
     DDB_DLL Request& header(const std::string &name, const std::string &value);
     DDB_DLL Request& verifySSL(bool flag);

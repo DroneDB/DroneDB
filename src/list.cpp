@@ -78,9 +78,9 @@ namespace ddb {
 
 			LOGD << "Path: " << path;
 
-			io::Path relPath = io::Path(path).relativeTo(rootDirectory);
+            io::Path relPath = io::Path(path).relativeTo(rootDirectory);
 
-			auto pathStr = relPath.generic();
+            auto pathStr = relPath.generic();
 
 			LOGD << "Rel path: " << pathStr;
 
