@@ -138,7 +138,7 @@ DDB_DLL void ChunkedUploadClient::CloseSession(const std::string& path,
             this->registry->ensureTokenValidity();
 
             auto res = net::POST(this->registry->getUrl(
-                                     "/share/upload/" + token + "session/" +
+                                     "/share/upload/" + token + "/session/" +
                                      std::to_string(sessionId) + "/close"))
                            .formData({"path", path})
                            .authToken(this->registry->getAuthToken())
