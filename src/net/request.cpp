@@ -130,7 +130,7 @@ Request &Request::multiPartFormData(std::vector<std::string> files,
     // Add files
     for (unsigned long i = 0; i < files.size(); i += 2) {
         field = curl_mime_addpart(form);
-        curl_mime_filename(field, files[i].c_str());
+        curl_mime_name(field, files[i].c_str());
         curl_mime_filedata(field, files[i + 1].c_str());
     }
 
@@ -203,8 +203,6 @@ DDB_DLL Request &Request::multiPartFormData(const std::string &fileName, const s
     LOGD << "Starting upload with total size " << size;
 
     curl_mime_data_cb(field, size, rcb, scb, nullptr, this->mime_data_carrier);
-
-    //delete par;
 
     LOGD << "curl_mime_data_cb ok";
 

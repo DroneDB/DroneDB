@@ -74,8 +74,8 @@ long Response::status() { return statusCode; }
 
 size_t Response::WriteCallback(void *contents, size_t size, size_t nmemb,
                                void *userp) {
-    size_t realsize = size * nmemb;
-    Response *res = static_cast<Response *>(userp);
+    const size_t realsize = size * nmemb;
+    auto *res = static_cast<Response *>(userp);
 
     char *ptr;
     if (!res->buf) {
