@@ -29,6 +29,10 @@ module.exports = class Dataset{
         return url;
     }
 
+    async download(paths){
+        return this.registry.postRequest(`${this.baseApi}/download`, { path: paths });
+    }
+    
     async info(){
         return this.registry.getRequest(`${this.baseApi}`);
     }

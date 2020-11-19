@@ -162,7 +162,11 @@ module.exports = class Registry{
         if (body){
             const formData = new FormData();
             for(let k in body){
-                formData.append(k, body[k]);
+                if (Array.isArray(body[k])){
+                    body[k].forEach(v => formData.append(k, v));
+                }else{
+                    formData.append(k, body[k]);
+                }
             }
             options.body = formData;
         }
