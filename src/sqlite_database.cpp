@@ -76,7 +76,7 @@ int SqliteDatabase::changes(){
     return sqlite3_changes(db);
 }
 
-std::unique_ptr<Statement> SqliteDatabase::query(const std::string &query){
+std::unique_ptr<Statement> SqliteDatabase::query(const std::string &query) const{
     return std::make_unique<Statement>(db, query);
 }
 
