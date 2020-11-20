@@ -29,6 +29,12 @@ module.exports = class Dataset{
         return url;
     }
 
+    thumbUrl(path, size){
+        let url = `${this.baseApi}/thumb?path=${path}`;
+        if (size) url += `&size=${size}`;
+        return url;
+    }
+
     async download(paths){
         return this.registry.postRequest(`${this.baseApi}/download`, { path: paths });
     }

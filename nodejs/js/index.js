@@ -5,6 +5,7 @@ const Tag = require('./tag');
 const Dataset = require('./dataset');
 const Registry = require('./registry');
 const entry = require('./entry');
+const thumbs = require('./thumbs');
 const fetchEntries = require('./fetchEntries');
 const utils = require('./utils');
 
@@ -12,15 +13,7 @@ const ddb = {
     Tag, Dataset, Registry,
     entry, utils,
     fetchEntries,
-
-    thumbs: {
-        supportedForType: function(entryType) {
-            entryType = parseInt(entryType);
-            return entryType === ddb.entry.type.GEOIMAGE ||
-                entryType === ddb.entry.type.GEORASTER ||
-                entryType === ddb.entry.type.IMAGE;
-        }
-    },
+    thumbs,
 
     tile: {},
 
@@ -28,9 +21,9 @@ const ddb = {
         this.getVersion = n.getVersion;
         this.getDefaultRegistry = n.getDefaultRegistry;
 
-        this.thumbs.getFromUserCache = async function(imagePath, modifiedTime, options = {}) {
+        this.thumbs.getFromUserCache = async function(imagePath, options = {}) {
             return new Promise((resolve, reject) => {
-                n._thumbs_getFromUserCache(imagePath, modifiedTime, options, (err, result) => {
+                n._thumbs_getFromUserCache(imagePath, options, (err, result) => {
                     if (err) reject(err);
                     else resolve(result);
                 });

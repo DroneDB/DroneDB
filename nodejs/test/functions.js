@@ -48,7 +48,7 @@ describe('functions', function() {
   });
 
   it('should fail when thumbs.getFromUserCache() is called on bad files', async function(){
-    await assert.rejects(ddb.thumbs.getFromUserCache("nonexistant.jpg", 0, {thumbSize: 200}));
+    await assert.rejects(ddb.thumbs.getFromUserCache("nonexistant.jpg", {thumbSize: 200}));
   });
 
   it('should be able to generate thumbnails', async function(){
@@ -56,7 +56,7 @@ describe('functions', function() {
     const t = new TestArea("thumbs");
     const geotiffPath = await t.downloadTestAsset("https://raw.githubusercontent.com/DroneDB/test_data/master/brighton/odm_orthophoto.tif", 
                               "ortho.tif");
-    const thumb = await ddb.thumbs.getFromUserCache(geotiffPath, 0, {thumbSize: 256, forceRecreate: true});
+    const thumb = await ddb.thumbs.getFromUserCache(geotiffPath, {thumbSize: 256, forceRecreate: true});
     assert.ok(fs.existsSync(thumb));
   });
 
