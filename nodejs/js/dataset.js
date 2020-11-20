@@ -44,4 +44,9 @@ module.exports = class Dataset{
     async delete(){
         return this.registry.deleteRequest(`${this.baseApi}`);
     }
+
+    async rename(slug){
+        if (typeof slug !== "string") throw new Error(`Invalid slug ${slug}`);
+        return this.registry.postRequest(`${this.baseApi}/rename`, { slug });
+    }
  };

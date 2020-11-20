@@ -175,7 +175,16 @@ module.exports = class Registry{
         if (response.status === 200) return response.json();
         else if (response.status === 204) return true;
         else if (response.status === 401) throw new Error("Unauthorized");
-        else throw new Error(`Server responded with: ${response.text()}`);
+        else{
+            const contentType = response.headers.get("Content-Type");
+            if (contentType && contentType.indexOf("application/json") !== -1){
+                let json = await response.json();
+                if (json.error) throw new Error(json.error);
+                else throw new Error(`Server responded with: ${JSON.stringify(json)}`);
+            }else{
+                throw new Error(`Server responded with: ${await response.text()}`);
+            }
+        }
     }
 
     async getRequest(endpoint){
