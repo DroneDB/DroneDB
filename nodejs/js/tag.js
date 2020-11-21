@@ -5,6 +5,19 @@
 const { DEFAULT_REGISTRY } = require('./constants');
 
 module.exports = class Tag {
+    
+    /*
+    A tag name must be valid ASCII and may contain lowercase 
+    and uppercase letters, digits, underscores, periods and dashes.
+    A tag name may not start with a period or a dash and may contain 
+    a maximum of 128 characters.
+    */
+    static validComponent(tagComponent){
+        if (!tagComponent) return false;
+        
+        return /^[a-zA-Z0-9_][a-zA-Z0-9\.-_]{0,127}$/.test(tagComponent);
+    }
+
     constructor(tag) {
         const parts = tag.split("/");
 
@@ -18,10 +31,16 @@ module.exports = class Tag {
                 const port = (window.location.port ? ":" + window.location.port : "");
                 this.registryUrl = `${proto}${window.location.hostname}${port}`;
             }
+            if (!this.validComponent(parts[0])) throw new Error(`Invalid tag component: ${parts[0]}`);
+            if (!this.validComponent(parts[1])) throw new Error(`Invalid tag component: ${parts[1]}`);
+            
             this.org = parts[0];
             this.ds = parts[1];
         } else if (parts.length === 3) {
             this.registryUrl = parts[0];
+            if (!this.validComponent(parts[1])) throw new Error(`Invalid tag component: ${parts[1]}`);
+            if (!this.validComponent(parts[2])) throw new Error(`Invalid tag component: ${parts[2]}`);
+            
             this.org = parts[1];
             this.ds = parts[2];
         } else {

@@ -81,14 +81,14 @@ NAN_METHOD(info) {
 //(const fs::path &imagePath, time_t modifiedTime, int thumbSize, bool forceRecreate)
 class GetThumbFromUserCacheWorker : public Nan::AsyncWorker {
  public:
-  GetThumbFromUserCacheWorker(Nan::Callback *callback, const fs::path &imagePath, time_t modifiedTime, int thumbSize, bool forceRecreate)
+  GetThumbFromUserCacheWorker(Nan::Callback *callback, const fs::path &imagePath, int thumbSize, bool forceRecreate)
     : AsyncWorker(callback, "nan:GetThumbFromUserCacheWorker"),
-      imagePath(imagePath), modifiedTime(modifiedTime), thumbSize(thumbSize), forceRecreate(forceRecreate) {}
+      imagePath(imagePath), thumbSize(thumbSize), forceRecreate(forceRecreate) {}
   ~GetThumbFromUserCacheWorker() {}
 
   void Execute () {
     try{
-        thumbPath = ddb::getThumbFromUserCache(imagePath, modifiedTime, thumbSize, forceRecreate);
+        thumbPath = ddb::getThumbFromUserCache(imagePath, thumbSize, forceRecreate);
     }catch(ddb::AppException &e){
         SetErrorMessage(e.what());
     }
@@ -106,7 +106,6 @@ class GetThumbFromUserCacheWorker : public Nan::AsyncWorker {
 
  private:
     fs::path imagePath;
-    time_t modifiedTime;
     int thumbSize;
     bool forceRecreate;
 
@@ -115,18 +114,17 @@ class GetThumbFromUserCacheWorker : public Nan::AsyncWorker {
 
 
 NAN_METHOD(_thumbs_getFromUserCache) {
-    ASSERT_NUM_PARAMS(4);
+    ASSERT_NUM_PARAMS(3);
 
     BIND_STRING_PARAM(imagePath, 0);
-    BIND_UNSIGNED_INT_PARAM(modifiedTime, 1);
 
-    BIND_OBJECT_PARAM(obj, 2);
+    BIND_OBJECT_PARAM(obj, 1);
     BIND_OBJECT_VAR(obj, int, thumbSize, 512);
     BIND_OBJECT_VAR(obj, bool, forceRecreate, false);
 
-    BIND_FUNCTION_PARAM(callback, 3);
+    BIND_FUNCTION_PARAM(callback, 2);
 
-    Nan::AsyncQueueWorker(new GetThumbFromUserCacheWorker(callback, static_cast<fs::path>(imagePath), static_cast<time_t>(modifiedTime), thumbSize, forceRecreate));
+    Nan::AsyncQueueWorker(new GetThumbFromUserCacheWorker(callback, static_cast<fs::path>(imagePath), thumbSize, forceRecreate));
 }
 
 class GetTileFromUserCacheWorker : public Nan::AsyncWorker {

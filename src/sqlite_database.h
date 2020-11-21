@@ -31,7 +31,7 @@ class SqliteDatabase {
     DDB_DLL std::string getOpenFile();
     DDB_DLL int changes();
 
-    DDB_DLL std::unique_ptr<Statement> query(const std::string &query);
+    DDB_DLL std::unique_ptr<Statement> query(const std::string &query) const;
 
     DDB_DLL ~SqliteDatabase();
 };

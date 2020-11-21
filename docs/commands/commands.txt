@@ -2,6 +2,7 @@
 
     add - Add files and directories to an index.
     build - Initialize and build an index. Shorthand for running an init,add,commit command sequence.
+    chattr - Manage database attributes
     geoproj - Project images to georeferenced rasters
     info - Retrieve information about files and directories
     init - Initialize an index. If a directory is not specified, initializes the index in the current directory

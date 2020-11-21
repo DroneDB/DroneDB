@@ -6,6 +6,7 @@
 
 #include "logger.h"
 #include "database.h"
+#include "exceptions.h"
 
 namespace ddb{
 
@@ -14,15 +15,13 @@ void Database::Initialize() {
     spatialite_init (0);
 }
 
-// TODO: Add password table here
-
 Database &Database::createTables() {
     std::string sql = R"<<<(
   SELECT InitSpatialMetaData(1, 'NONE');
   SELECT InsertEpsgSrid(4326);
 
   CREATE TABLE IF NOT EXISTS entries (
-      path TEXT,
+      path TEXT PRIMARY KEY,
       hash TEXT,
       type INTEGER,
       meta TEXT,
@@ -38,6 +37,14 @@ Database &Database::createTables() {
       hash TEXT      
   );
 
+  CREATE TABLE IF NOT EXISTS attributes (
+      name TEXT NOT NULL PRIMARY KEY,
+      ivalue INTEGER,
+      rvalue REAL,
+      tvalue TEXT,
+      bvalue BLOB
+  );
+
 )<<<";
 
     LOGD << "About to create tables...";
@@ -45,6 +52,68 @@ Database &Database::createTables() {
     LOGD << "Created tables";
 
     return *this;
+}
+
+void Database::setPublic(bool isPublic){
+    this->setBoolAttribute("public", isPublic);
+}
+
+bool Database::isPublic() const{
+    if (this->hasAttribute("public")) return this->getBoolAttribute("public");
+    else return false;
+}
+
+json Database::getAttributes() const{
+    json j;
+    j["public"] = this->getBoolAttribute("public");
+    return j;
+}
+
+void Database::setBoolAttribute(const std::string &name, bool value){
+    this->setIntAttribute(name, value ? 1 : 0);
+}
+
+bool Database::getBoolAttribute(const std::string &name) const{
+    return this->getIntAttribute(name) == 1;
+}
+
+void Database::setIntAttribute(const std::string &name, int value){
+    const std::string sql = "INSERT OR REPLACE INTO attributes (name, ivalue) "
+                            "VALUES(?, ?)";
+
+    const auto q = this->query(sql);
+
+    q->bind(1, name);
+    q->bind(2, value);
+
+    q->execute();
+}
+
+int Database::getIntAttribute(const std::string &name) const{
+    const std::string sql = "SELECT ivalue FROM attributes WHERE name = ?";
+
+    const auto q = this->query(sql);
+    q->bind(1, name);
+    if (q->fetch()) return q->getInt(0);
+    else return 0;
+}
+
+bool Database::hasAttribute(const std::string &name) const{
+    const std::string sql = "SELECT COUNT(name) FROM attributes WHERE name = ?";
+
+    const auto q = this->query(sql);
+    q->bind(1, name);
+    q->fetch();
+
+    return q->getInt(0) == 1;
+}
+
+void Database::clearAttribute(const std::string &name){
+    const std::string sql = "DELETE FROM attributes WHERE name = ?";
+
+    const auto q = this->query(sql);
+    q->bind(1, name);
+    q->execute();
 }
 
 }

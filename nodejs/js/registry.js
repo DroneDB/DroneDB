@@ -13,6 +13,7 @@ let refreshTimers = {};
 module.exports = class Registry{
     constructor(url = "https://" + DEFAULT_REGISTRY){
         this.url = url;
+        this.eventListeners = {};
     }
     
     get remote(){
@@ -42,6 +43,7 @@ module.exports = class Registry{
             if (res.token){
                 this.setCredentials(username, res.token, res.expires);
                 this.setAutoRefreshToken();
+                this.emit("login", username);
 
                 return res.token;
             }else{
@@ -62,7 +64,6 @@ module.exports = class Registry{
             }).then(r => r.json());
             
             if (res.token){
-                console.log("REfreshed: " + res.token);
                 this.setCredentials(this.getUsername(), res.token, res.expires);
             }else{
                 throw new Error(res.error || `Cannot refresh token: ${JSON.stringify(res)}`);
@@ -95,12 +96,20 @@ module.exports = class Registry{
 
     logout(){
         this.clearCredentials();
+        this.emit("logout");
     }
 
     setCredentials(username, token, expires){
         localStorage.setItem(`${this.url}_username`, username);
         localStorage.setItem(`${this.url}_jwt_token`, token);
         localStorage.setItem(`${this.url}_jwt_token_expires`, expires);
+
+        // Set cookie if the URL matches the current window
+        if (typeof window !== "undefined"){
+            if (window.location.origin === this.url){
+                document.cookie = `jwtToken=${token};${expires*1000};path=/`;
+            }
+        }
     }
 
     getAuthToken(){
@@ -126,10 +135,19 @@ module.exports = class Registry{
         localStorage.removeItem(`${this.url}_jwt_token`);
         localStorage.removeItem(`${this.url}_jwt_token_expires`);
         localStorage.removeItem(`${this.url}_username`);
+
+         // Clear cookie if the needed
+         if (typeof window !== "undefined"){
+            if (window.location.origin === this.url){
+                document.cookie = `jwtToken=;-1;path=/`;
+            }
+        }
     }
 
     isLoggedIn(){
-        return this.getAuthToken() !== null && this.getAuthTokenExpiration() > new Date();
+        const loggedIn = this.getAuthToken() !== null && this.getAuthTokenExpiration() > new Date();
+        if (!loggedIn) this.clearCredentials();
+        return loggedIn;
     }
 
     async makeRequest(endpoint, method="GET", body = null){
@@ -144,15 +162,29 @@ module.exports = class Registry{
         if (body){
             const formData = new FormData();
             for(let k in body){
-                formData.append(k, body[k]);
+                if (Array.isArray(body[k])){
+                    body[k].forEach(v => formData.append(k, v));
+                }else{
+                    formData.append(k, body[k]);
+                }
             }
             options.body = formData;
         }
 
         const response = await fetch(`${this.url}${endpoint}`, options);
-        if (response.status == 200) return response.json();
-        else if (response.status == 401) throw new Error("Unauthorized");
-        else throw new Error(`Server responded with: ${response.text()}`);
+        if (response.status === 200) return response.json();
+        else if (response.status === 204) return true;
+        else if (response.status === 401) throw new Error("Unauthorized");
+        else{
+            const contentType = response.headers.get("Content-Type");
+            if (contentType && contentType.indexOf("application/json") !== -1){
+                let json = await response.json();
+                if (json.error) throw new Error(json.error);
+                else throw new Error(`Server responded with: ${JSON.stringify(json)}`);
+            }else{
+                throw new Error(`Server responded with: ${await response.text()}`);
+            }
+        }
     }
 
     async getRequest(endpoint){
@@ -163,7 +195,31 @@ module.exports = class Registry{
         return this.makeRequest(endpoint, "POST", body);
     }
 
+    async deleteRequest(endpoint){
+        return this.makeRequest(endpoint, "DELETE");
+    }
+
     Organization(name){
         return new Organization(this, name);
+    }
+
+    addEventListener(event, cb){
+        this.eventListeners[event] = this.eventListeners[event] || [];
+        if (!this.eventListeners[event].find(e => e === cb)){
+            this.eventListeners[event].push(cb);
+        }
+    }
+
+    removeEventListener(event, cb){
+        this.eventListeners[event] = this.eventListeners[event] || [];
+        this.eventListeners[event] = this.eventListeners[event].filter(e => e !== cb);
+    }
+
+    emit(event, ...params){
+        if (this.eventListeners[event]){
+            this.eventListeners[event].forEach(listener => {
+                listener(...params);
+            });
+        }
     }
 }

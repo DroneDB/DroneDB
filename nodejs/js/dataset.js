@@ -13,12 +13,46 @@ module.exports = class Dataset{
         const { remote, secure } = this.registry;
 
         const proto = secure ? "ddb" : "ddb+unsafe";
-        const p = path ? `/${path}` : "";
+        const p = (path && path !== ".") ? `/${path}` : "";
         
         return `${proto}://${remote}/${this.org}/${this.ds}${p}`;
     }
 
+    
+    get baseApi(){
+        return `/orgs/${this.org}/ds/${this.ds}`;
+    }
+
+    downloadUrl(paths){
+        let url = `${this.baseApi}/download`;
+        if (paths) url += `?path=${paths.join(",")}`;
+        return url;
+    }
+
+    thumbUrl(path, size){
+        let url = `${this.baseApi}/thumb?path=${path}`;
+        if (size) url += `&size=${size}`;
+        return url;
+    }
+
+    async download(paths){
+        return this.registry.postRequest(`${this.baseApi}/download`, { path: paths });
+    }
+    
+    async info(){
+        return this.registry.getRequest(`${this.baseApi}`);
+    }
+
     async list(path){
-        return this.registry.postRequest(`/orgs/${this.org}/ds/${this.ds}/list`, { path });
+        return this.registry.postRequest(`${this.baseApi}/list`, { path });
+    }
+
+    async delete(){
+        return this.registry.deleteRequest(`${this.baseApi}`);
+    }
+
+    async rename(slug){
+        if (typeof slug !== "string") throw new Error(`Invalid slug ${slug}`);
+        return this.registry.postRequest(`${this.baseApi}/rename`, { slug });
     }
  };
