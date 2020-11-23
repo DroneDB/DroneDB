@@ -1176,6 +1176,9 @@ namespace cxxopts
       return m_sequential;
     }
 
+    int argc;
+    char** argv;
+
     private:
 
     void
@@ -1543,6 +1546,8 @@ ParseResult::ParseResult
 , m_positional(std::move(positional))
 , m_next_positional(m_positional.begin())
 , m_allow_unrecognised(allow_unrecognised)
+, argc(argc)
+, argv(argv)
 {
   parse(argc, argv);
 }

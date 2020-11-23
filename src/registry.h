@@ -8,22 +8,34 @@
 #include <vector>
 #include "constants.h"
 #include "ddb_export.h"
+#include "net.h"
+#include <chrono>
 
 namespace ddb{
 
 class Registry{
     std::string url;
-
+    
     // Last valid token
     std::string authToken;
-public:
+    
+    time_t tokenExpiration;
+
+   public:
     DDB_DLL Registry(const std::string &url = DEFAULT_REGISTRY);
 
     DDB_DLL std::string getUrl(const std::string &path = "") const;
+    DDB_DLL std::string login();
 
-    DDB_DLL std::string getAuthToken(const std::string &username, const std::string &password) const;
-    DDB_DLL std::string login(const std::string &username, const std::string &password) const;
+    DDB_DLL std::string getAuthToken();
+    DDB_DLL std::string login(const std::string &username, const std::string &password);
+    DDB_DLL void ensureTokenValidity();
     DDB_DLL bool logout();
+
+    DDB_DLL void handleError(net::Response &res);
+
+    DDB_DLL time_t getTokenExpiration();
+
 };
 
 }

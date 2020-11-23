@@ -42,6 +42,8 @@ void Command::run(int argc, char *argv[]) {
         printHelp();
     }catch(const cxxopts::argument_incorrect_type &){
         printHelp();
+    }catch(const cxxopts::option_requires_argument_exception &){
+        printHelp();
     }catch(const ddb::AppException &e){
         std::cerr << e.what() << std::endl;
         exit(EXIT_FAILURE);

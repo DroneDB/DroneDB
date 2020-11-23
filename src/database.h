@@ -6,13 +6,32 @@
 
 #include "sqlite_database.h"
 #include "ddb_export.h"
+#include "json.h"
 
 namespace ddb{
 
 class Database : public SqliteDatabase {
+  protected:
+    void setIntAttribute(const std::string &name, int value);
+//    void setTextAttribute(const std::string &name, const std::string &value);
+//    void setFloatAttribute(const std::string &name, float value);
+    void setBoolAttribute(const std::string &name, bool value);
+
+    int getIntAttribute(const std::string &name) const;
+//    std::string getTextAttribute(const std::string &name) const;
+//    float getFloatAttribute(const std::string &name) const;
+    bool getBoolAttribute(const std::string &name) const;
+
+    bool hasAttribute(const std::string &name) const;
+    void clearAttribute(const std::string &name);
   public:
       DDB_DLL static void Initialize();
       DDB_DLL Database &createTables();
+
+      DDB_DLL void setPublic(bool isPublic);
+      DDB_DLL bool isPublic() const;
+
+      DDB_DLL json getAttributes() const;
 };
 
 }

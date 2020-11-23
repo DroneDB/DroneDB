@@ -16,11 +16,13 @@
 
 namespace ddb{
 
-fs::path getThumbFromUserCache(const fs::path &imagePath, time_t modifiedTime, int thumbSize, bool forceRecreate){
+fs::path getThumbFromUserCache(const fs::path &imagePath, int thumbSize, bool forceRecreate){
     if (std::rand() % 1000 == 0) cleanupThumbsUserCache();
+    if (!fs::exists(imagePath)) throw FSException(imagePath.string() + " does not exist");
 
     fs::path outdir = UserProfile::get()->getThumbsDir(thumbSize);
-    fs::path thumbPath = outdir / getThumbFilename(imagePath, modifiedTime, thumbSize);
+    io::Path p = imagePath;
+    fs::path thumbPath = outdir / getThumbFilename(imagePath, p.getModifiedTime(), thumbSize);
     return generateThumb(imagePath, thumbSize, thumbPath, forceRecreate);
 }
 

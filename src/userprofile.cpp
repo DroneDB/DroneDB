@@ -30,7 +30,9 @@ void UserProfile::createDir(const fs::path &dir){
         if (fs::create_directory(dir)){
             LOGD << "Created " << dir.string();
         }else{
-            throw AppException("Cannot create profile directory: " + dir.string() + ". Check that you have permissions to write.");
+            // Was it created by a competing process?
+            if (!fs::exists(dir)) throw AppException("Cannot create profile directory: " + dir.string() + ". Check that you have permissions to write.");
+            LOGD << "Dir was already created (by another process?): " << dir.string();
         }
     }else{
         LOGD << dir.string() << " exists";

@@ -1,19 +1,20 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+const Tag = require('./tag');
+const Dataset = require('./dataset');
+const Registry = require('./registry');
 const entry = require('./entry');
+const thumbs = require('./thumbs');
+const fetchEntries = require('./fetchEntries');
+const utils = require('./utils');
+const pathutils = require('./pathutils');
 
 const ddb = {
-    entry,
-
-    thumbs: {
-        supportedForType: function(entryType) {
-            entryType = parseInt(entryType);
-            return entryType === ddb.entry.type.GEOIMAGE ||
-                entryType === ddb.entry.type.GEORASTER ||
-                entryType === ddb.entry.type.IMAGE;
-        }
-    },
+    Tag, Dataset, Registry,
+    entry, utils, pathutils,
+    fetchEntries,
+    thumbs,
 
     tile: {},
 
@@ -21,9 +22,9 @@ const ddb = {
         this.getVersion = n.getVersion;
         this.getDefaultRegistry = n.getDefaultRegistry;
 
-        this.thumbs.getFromUserCache = async function(imagePath, modifiedTime, options = {}) {
+        this.thumbs.getFromUserCache = async function(imagePath, options = {}) {
             return new Promise((resolve, reject) => {
-                n._thumbs_getFromUserCache(imagePath, modifiedTime, options, (err, result) => {
+                n._thumbs_getFromUserCache(imagePath, options, (err, result) => {
                     if (err) reject(err);
                     else resolve(result);
                 });
@@ -39,11 +40,11 @@ const ddb = {
             });
         };
 
-        this.info = async function(files, options = {}) {
+        this.info = async function(paths, options = {}) {
             return new Promise((resolve, reject) => {
-                if (typeof files === "string") files = [files];
+                if (typeof paths === "string") paths = [paths];
         
-                n.info(files, options, (err, result) => {
+                n.info(paths, options, (err, result) => {
                     if (err) reject(err);
                     else resolve(result);
                 });
@@ -55,27 +56,27 @@ const ddb = {
                 n.init(directory, (err, result) => {
                     if (err) reject(err);
                     else resolve(result);
-                })
+                });
             });
         };
 
         this.add = async function(ddbPath, paths, options = {}) {
             return new Promise((resolve, reject) => {
                 if (typeof paths === "string") paths = [paths];
-        
-                n.add(ddbPath, paths, options, (err, entries) => {
+
+                n.add(ddbPath, this._resolvePaths(ddbPath, paths), options, (err, entries) => {
                     if (err) reject(err);
                     else return resolve(entries);
                 });
             });
         };
 
-        this.list = async function(ddbPath, files, options = {}) {
+        this.list = async function(ddbPath, paths = ".", options = {}) {
             return new Promise((resolve, reject) => {
-                const isSingle = typeof files === "string";
-                if (isSingle) files = [files];
+                const isSingle = typeof paths === "string";
+                if (isSingle) paths = [paths];
         
-                n.list(ddbPath, files, options, (err, result) => {
+                n.list(ddbPath, this._resolvePaths(ddbPath, paths), options, (err, result) => {
                     if (err) reject(err);
                     else {
                         resolve(result);
@@ -87,7 +88,7 @@ const ddb = {
         this.remove = async function(ddbPath, paths, options = {}) {
             return new Promise((resolve, reject) => {
                 if (typeof paths === "string") paths = [paths];
-                n.remove(ddbPath, paths, options, err => {
+                n.remove(ddbPath, this._resolvePaths(ddbPath, paths), options, err => {
                     if (err) reject(err);
                     else resolve(true);
                 });
@@ -112,6 +113,24 @@ const ddb = {
                 });
             });
         };
+
+        // Guarantees that paths are expressed with
+        // a ddbPath root or are absolute paths
+        this._resolvePaths = function(ddbPath, paths){
+            const path = require('path');
+            
+            return paths.map(p => {
+                if (path.isAbsolute(p)) return p;
+
+                const relative = path.relative(ddbPath, p);
+
+                // Is it relative? Good
+                if (relative && !relative.startsWith("..") && !path.isAbsolute(relative)) return p;
+                
+                // Combine
+                else return path.join(ddbPath, p);
+            });
+        }
     }
 };
 
