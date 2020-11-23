@@ -47,12 +47,17 @@ std::string ShareService::share(const std::vector<std::string> &input,
     io::Path wd;
     if (cwd.empty()) {
         std::vector<fs::path> paths(input.begin(), input.end());
-        fs::path commonDir = io::commonDirPath(paths);
-        if (commonDir.empty())
-            throw InvalidArgsException(
-                "Cannot share files that don't have a common directory (are "
-                "you trying to share files from different drives?)");
-        wd = io::Path(commonDir);
+
+        if (paths.size() == 1){
+            wd = io::Path(paths.front().parent_path());
+        }else{
+            fs::path commonDir = io::commonDirPath(paths);
+            if (commonDir.empty())
+                throw InvalidArgsException(
+                    "Cannot share files that don't have a common directory (are "
+                    "you trying to share files from different drives?)");
+            wd = io::Path(commonDir);
+        }
     } else {
         wd = io::Path(fs::path(cwd));
     }
