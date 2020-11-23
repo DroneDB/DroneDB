@@ -8,10 +8,11 @@ const entry = require('./entry');
 const thumbs = require('./thumbs');
 const fetchEntries = require('./fetchEntries');
 const utils = require('./utils');
+const pathutils = require('./pathutils');
 
 const ddb = {
     Tag, Dataset, Registry,
-    entry, utils,
+    entry, utils, pathutils,
     fetchEntries,
     thumbs,
 

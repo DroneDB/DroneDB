@@ -38,8 +38,8 @@ void info(const std::vector<std::string> &input, std::ostream &output,
         Entry e;
         if (parseEntry(fp, "/", e, withHash, stopOnError)){
             // We override e.path because it's relative
-            // But we want the absolute path (in the native path format)
-            e.path = "file://" + fs::absolute(fp).string();
+            // But we want the absolute path (in the unix path format)
+            e.path = "file://" + fs::absolute(fp).generic_string();
 
             if (format == "json"){
                 json j;
