@@ -3,5 +3,5 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
  module.exports = {
-    DEFAULT_REGISTRY: "hub.dronedb.app"
+    DEFAULT_REGISTRY: "testhub1.dronedb.app"
  };
