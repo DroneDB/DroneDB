@@ -435,7 +435,7 @@ void parseDroneDBEntry(const fs::path &ddbPath, Entry &entry){
             entry.size = q->getInt64(0);
         }
 
-        entry.meta["public"] = db->isPublic();
+        entry.meta = db->getAttributes();
     }catch(AppException &e){
         LOGD << e.what();
         entry.type = EntryType::Directory;
