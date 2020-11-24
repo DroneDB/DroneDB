@@ -9,7 +9,7 @@ const path = require('path');
 
 describe('ddbops', function() {
     it('should be able to call init(), add() and remove()', async function() {
-        this.timeout(4000);
+        this.timeout(8000);
         const t = new TestArea("init", true);
         const f = t.getFolder(".");
         const ddbPath = await ddb.init(f);
@@ -28,7 +28,7 @@ describe('ddbops', function() {
     });
 
     it ('should be able to call chattr()', async function(){
-        this.timeout(4000);
+        this.timeout(8000);
 
         const t = new TestArea("init", true);
         const f = t.getFolder(".");
