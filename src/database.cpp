@@ -75,7 +75,7 @@ void Database::chattr(json attrs){
 
 json Database::getAttributes() const{
     json j;
-    j["public"] = this->getBoolAttribute("public");
+    j["public"] = this->isPublic();
     return j;
 }
 
