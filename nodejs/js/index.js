@@ -116,9 +116,9 @@ const ddb = {
 
         this.chattr = async function(ddbPath, attrs = {}){
             return new Promise((resolve, reject) => {
-                n.chattr(ddbPath, attrs, err => {
+                n.chattr(ddbPath, attrs, (err, attrs) => {
                     if (err) reject(err);
-                    else resolve(true);
+                    else resolve(attrs);
                 });
             });
         };

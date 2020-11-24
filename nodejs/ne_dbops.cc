@@ -212,7 +212,7 @@ class ChattrWorker : public Nan::AsyncWorker {
   ~ChattrWorker() {}
 
   void Execute () {
-    if (DDBChattr(ddbPath.c_str(), attrsJson.c_str()) != DDBERR_NONE){
+    if (DDBChattr(ddbPath.c_str(), attrsJson.c_str(), &output) != DDBERR_NONE){
         SetErrorMessage(DDBGetLastError());
     }
   }
@@ -222,16 +222,18 @@ class ChattrWorker : public Nan::AsyncWorker {
 
      Nan::JSON json;
      v8::Local<v8::Value> argv[] = {
-         Nan::Null()
+         Nan::Null(),
+         json.Parse(Nan::New<v8::String>(output).ToLocalChecked()).ToLocalChecked()
      };
 
-     callback->Call(1, argv, async_resource);
+     callback->Call(2, argv, async_resource);
    }
 
  private:
     std::string ddbPath;
     std::string attrsJson;
 
+    char *output;
 };
 
 NAN_METHOD(chattr) {

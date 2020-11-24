@@ -37,7 +37,9 @@ describe('ddbops', function() {
         let info = await ddb.info(ddbPath);
         assert.equal(info[0].meta.public, false);
 
-        await ddb.chattr(ddbPath, { public: true });
+        const attrs = await ddb.chattr(ddbPath, { public: true });
+        assert.equal(attrs.public, true);
+
         info = await ddb.info(ddbPath);
         assert.equal(info[0].meta.public, true);
 
