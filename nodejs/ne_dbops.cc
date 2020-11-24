@@ -202,3 +202,56 @@ NAN_METHOD(list) {
 
     Nan::AsyncQueueWorker(new ListWorker(callback, ddbPath, in, recursive, maxRecursionDepth));
 }
+
+
+class ChattrWorker : public Nan::AsyncWorker {
+ public:
+  ChattrWorker(Nan::Callback *callback, const std::string &ddbPath, const std::string &attrsJson)
+    : AsyncWorker(callback, "nan:ChattrWorker"),
+      ddbPath(ddbPath), attrsJson(attrsJson){}
+  ~ChattrWorker() {}
+
+  void Execute () {
+    if (DDBChattr(ddbPath.c_str(), attrsJson.c_str(), &output) != DDBERR_NONE){
+        SetErrorMessage(DDBGetLastError());
+    }
+  }
+
+  void HandleOKCallback () {
+     Nan::HandleScope scope;
+
+     Nan::JSON json;
+     v8::Local<v8::Value> argv[] = {
+         Nan::Null(),
+         json.Parse(Nan::New<v8::String>(output).ToLocalChecked()).ToLocalChecked()
+     };
+
+     callback->Call(2, argv, async_resource);
+   }
+
+ private:
+    std::string ddbPath;
+    std::string attrsJson;
+
+    char *output;
+};
+
+NAN_METHOD(chattr) {
+    ASSERT_NUM_PARAMS(3);
+
+    BIND_STRING_PARAM(ddbPath, 0);
+    BIND_OBJECT_PARAM(attrs, 1);
+
+    Nan::JSON NanJSON;
+    Nan::MaybeLocal<v8::String> result = NanJSON.Stringify(attrs);
+    std::string attrsJson;
+
+    if (!result.IsEmpty()) {
+        Nan::Utf8String str(result.ToLocalChecked().As<v8::String>());
+        attrsJson = std::string(*str);
+    }
+
+    BIND_FUNCTION_PARAM(callback, 2);
+
+    Nan::AsyncQueueWorker(new ChattrWorker(callback, ddbPath, attrsJson));
+}

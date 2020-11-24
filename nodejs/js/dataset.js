@@ -55,4 +55,10 @@ module.exports = class Dataset{
         if (typeof slug !== "string") throw new Error(`Invalid slug ${slug}`);
         return this.registry.postRequest(`${this.baseApi}/rename`, { slug });
     }
+
+    async setPublic(flag){
+        return this.registry.postRequest(`${this.baseApi}/chattr`, { attrs: JSON.stringify(
+            { public: flag }
+        )});
+    }
  };

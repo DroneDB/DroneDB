@@ -303,3 +303,13 @@ DDB_DLL DDBErr DDBStatus(const char* ddbPath, char** output) {
   DDB_C_END
 
 }
+
+DDBErr DDBChattr(const char *ddbPath, const char *attrsJson, char **output){
+DDB_C_BEGIN
+    const auto db = ddb::open(std::string(ddbPath), true);
+    json j = json::parse(attrsJson);
+    db->chattr(j);
+    utils::copyToPtr(db->getAttributes().dump(), output);
+
+DDB_C_END
+}
