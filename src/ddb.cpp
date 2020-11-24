@@ -308,7 +308,6 @@ DDBErr DDBChattr(const char *ddbPath, const char *attrsJson){
 DDB_C_BEGIN
     const auto db = ddb::open(std::string(ddbPath), true);
     json j = json::parse(attrsJson);
-    std::cerr << "AH!";
     db->chattr(j);
 DDB_C_END
 }
