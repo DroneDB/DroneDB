@@ -427,7 +427,7 @@ void loadPolygonGeom(BasicPolygonGeometry *polygon_geom, const std::string& text
 
 void parseDroneDBEntry(const fs::path &ddbPath, Entry &entry){
     try{
-        const auto db = ddb::open(ddbPath, false);
+        const auto db = ddb::open(ddbPath.string(), false);
 
         // The size of the database is the sum of all entries' sizes
         auto q = db->query("SELECT SUM(size) FROM entries");
@@ -435,7 +435,7 @@ void parseDroneDBEntry(const fs::path &ddbPath, Entry &entry){
             entry.size = q->getInt64(0);
         }
 
-        entry.meta["public"] = db->isPublic();
+        entry.meta = db->getAttributes();
     }catch(AppException &e){
         LOGD << e.what();
         entry.type = EntryType::Directory;
