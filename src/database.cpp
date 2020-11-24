@@ -63,6 +63,16 @@ bool Database::isPublic() const{
     else return false;
 }
 
+void Database::chattr(json attrs){
+    for (auto& el : attrs.items()) {
+        if (el.key() == "public" && el.value().is_boolean()){
+            this->setBoolAttribute("public", el.value());
+        }else{
+            throw InvalidArgsException("Invalid attribute " + el.key());
+        }
+    }
+}
+
 json Database::getAttributes() const{
     json j;
     j["public"] = this->getBoolAttribute("public");

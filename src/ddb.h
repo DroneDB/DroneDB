@@ -109,6 +109,12 @@ DDB_DLL DDBErr DDBClearPasswords(const char* ddbPath);
  * @return DDBERR_NONE on success, an error otherwise */
 DDB_DLL DDBErr DDBStatus(const char* ddbPath, char **output);
 
+/** Show differences between index and filesystem
+ * @param ddbPath path to a DroneDB database (parent of ".ddb")
+ * @param attrsJson array of object attributes as a JSON string
+ * @return DDBERR_NONE on success, an error otherwise */
+DDB_DLL DDBErr DDBChattr(const char* ddbPath, const char *attrsJson);
+
 
 #ifdef __cplusplus
 }
