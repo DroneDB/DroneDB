@@ -57,6 +57,8 @@ module.exports = class Dataset{
     }
 
     async setPublic(flag){
-        return this.registry.postRequest(`${this.baseApi}/chattr`, { public: flag });
+        return this.registry.postRequest(`${this.baseApi}/chattr`, { attrs: JSON.stringify(
+            { public: flag }
+        )});
     }
  };
