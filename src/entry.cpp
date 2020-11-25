@@ -9,12 +9,10 @@
 
 namespace ddb {
 
-bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entry, bool withHash, bool stopOnError) {
-    if (!fs::exists(path)){
-        if (stopOnError) throw FSException(path.string() + " does not exist");
-        entry.type = EntryType::Undefined;
-        return false;
-    }
+void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entry, bool withHash) {
+    entry.type = EntryType::Undefined;
+
+    if (!fs::exists(path)) throw FSException(path.string() + " does not exist");
 
     // Parse file
     io::Path p = io::Path(path);
@@ -133,8 +131,6 @@ bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
                 }
             }catch(Exiv2::AnyError& e){
                 LOGD << "Cannot read EXIF data: " << path.string();
-            	
-                if (stopOnError) throw FSException("Cannot read EXIF data: " + path.string() + " (" + e.what() + ")");
             }
         }else if (georaster){
             entry.type = EntryType::GeoRaster;
@@ -202,8 +198,6 @@ bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
             }
         }
     }
-
-    return true;
 }
 
 Geographic2D getRasterCoordinate(OGRCoordinateTransformationH hTransform, double *geotransform, double x, double y){

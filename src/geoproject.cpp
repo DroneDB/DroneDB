@@ -27,9 +27,7 @@ void geoProject(const std::vector<std::string> &images, const std::string &outpu
         }
 
         Entry e;
-        if (!parseEntry(p, ".", e, false, true)){
-            throw FSException("Cannot parse file " + p.string());
-        }
+        parseEntry(p, ".", e, false);
 
         if (e.type != EntryType::GeoImage){
             std::cerr << "Cannot reproject " << p.string() << ", not a GeoImage, skipping..." << std::endl;

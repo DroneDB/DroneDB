@@ -69,29 +69,33 @@ std::vector<fs::path> getIndexPathList(fs::path rootDirectory, const std::vector
         if (p.filename() == ".ddb") continue;
 
         if (fs::is_directory(p)) {
-            for(auto i = fs::recursive_directory_iterator(p);
-                    i != fs::recursive_directory_iterator();
-                    ++i ) {
+            try{
+                for(auto i = fs::recursive_directory_iterator(p);
+                        i != fs::recursive_directory_iterator();
+                        ++i ) {
 
-                fs::path rp = i->path();
+                    fs::path rp = i->path();
 
-                // Skip .ddb
-                if(rp.filename() == ".ddb") i.disable_recursion_pending();
+                    // Skip .ddb
+                    if(rp.filename() == ".ddb") i.disable_recursion_pending();
 
-                if (fs::is_directory(rp) && includeDirs) {
-                    directories[rp.string()] = true;
-                } else {
-                    result.push_back(rp);
-                }
-
-                if (includeDirs) {
-                    while(rp.has_parent_path() &&
-                          rootDir.isParentOf(rp.parent_path()) &&
-                          rp.string() != rp.parent_path().string()) {
-                        rp = rp.parent_path();
+                    if (fs::is_directory(rp) && includeDirs) {
                         directories[rp.string()] = true;
+                    } else {
+                        result.push_back(rp);
+                    }
+
+                    if (includeDirs) {
+                        while(rp.has_parent_path() &&
+                              rootDir.isParentOf(rp.parent_path()) &&
+                              rp.string() != rp.parent_path().string()) {
+                            rp = rp.parent_path();
+                            directories[rp.string()] = true;
+                        }
                     }
                 }
+            }catch(const fs::filesystem_error &e){
+                throw FSException(e.what());
             }
 
             directories[p.string()] = true;
@@ -128,32 +132,36 @@ std::vector<fs::path> getPathList(const std::vector<std::string> &paths, bool in
         if (p.filename() == ".ddb") continue;
 
         if (fs::is_directory(p)) {
-            for(auto i = fs::recursive_directory_iterator(p);
-                    i != fs::recursive_directory_iterator();
-                    ++i ) {
+            try{
+                for(auto i = fs::recursive_directory_iterator(p);
+                        i != fs::recursive_directory_iterator();
+                        ++i ) {
 
-                fs::path rp = i->path();
+                    fs::path rp = i->path();
 
-                // Ignore system files on Windows
-                #ifdef WIN32
-                DWORD attrs = GetFileAttributes(rp.string().c_str());
-                if (attrs & FILE_ATTRIBUTE_HIDDEN || attrs & FILE_ATTRIBUTE_SYSTEM) {
-                    i.disable_recursion_pending();
-                    continue;
+                    // Ignore system files on Windows
+                    #ifdef WIN32
+                    DWORD attrs = GetFileAttributes(rp.string().c_str());
+                    if (attrs & FILE_ATTRIBUTE_HIDDEN || attrs & FILE_ATTRIBUTE_SYSTEM) {
+                        i.disable_recursion_pending();
+                        continue;
+                    }
+                    #endif
+
+                    // Skip .ddb recursion
+                    if(rp.filename() == ".ddb") i.disable_recursion_pending();
+
+                    // Max depth
+                    if (maxDepth > 0 && i.depth() >= (maxDepth - 1)) i.disable_recursion_pending();
+
+                    if (fs::is_directory(rp)) {
+                        if (includeDirs) result.push_back(rp);
+                    }else{
+                        result.push_back(rp);
+                    }
                 }
-                #endif
-
-                // Skip .ddb recursion
-                if(rp.filename() == ".ddb") i.disable_recursion_pending();
-
-                // Max depth
-                if (maxDepth > 0 && i.depth() >= (maxDepth - 1)) i.disable_recursion_pending();
-
-                if (fs::is_directory(rp)) {
-                    if (includeDirs) result.push_back(rp);
-                }else{
-                    result.push_back(rp);
-                }
+            }catch(const fs::filesystem_error &e){
+                throw FSException(e.what());
             }
         } else if (fs::exists(p)) {
             // File
@@ -251,7 +259,7 @@ void addToIndex(Database *db, const std::vector<std::string> &paths, AddCallback
         }
 
         if (add || update) {
-            parseEntry(p, directory, e, true, true);
+            parseEntry(p, directory, e, true);
 
             if (add) {
 
@@ -449,7 +457,7 @@ void syncIndex(Database *db) {
 
         if (fs::exists(p)) {
             if (checkUpdate(e, p, q->getInt64(1), q->getText(2))) {
-                parseEntry(p, directory, e, true, true);
+                parseEntry(p, directory, e, true);
                 doUpdate(updateQ.get(), e);
                 std::cout << "U\t" << e.path << std::endl;
             }
