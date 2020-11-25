@@ -12,7 +12,12 @@ namespace ddb {
 void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entry, bool withHash) {
     entry.type = EntryType::Undefined;
 
-    if (!fs::exists(path)) throw FSException(path.string() + " does not exist");
+    try {
+        if (!fs::exists(path)) throw FSException(path.string() + " does not exist");
+    } catch (const fs::filesystem_error &e) {
+        // Yes Windows will throw an exception in some cases :/
+        throw FSException(e.what());
+    }
 
     // Parse file
     io::Path p = io::Path(path);
@@ -129,7 +134,7 @@ void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
                 } else {
                     LOGD << "No EXIF data found in " << path.string();
                 }
-            }catch(Exiv2::AnyError& e){
+            }catch(Exiv2::AnyError&){
                 LOGD << "Cannot read EXIF data: " << path.string();
             }
         }else if (georaster){

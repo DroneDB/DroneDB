@@ -130,9 +130,9 @@ std::vector<fs::path> getPathList(const std::vector<std::string> &paths, bool in
     for (fs::path p : paths) {
         // fs::directory_options::skip_permission_denied
         if (p.filename() == ".ddb") continue;
-
-        if (fs::is_directory(p)) {
-            try{
+        
+        try {
+            if (fs::is_directory(p)) {
                 for(auto i = fs::recursive_directory_iterator(p);
                         i != fs::recursive_directory_iterator();
                         ++i ) {
@@ -160,14 +160,14 @@ std::vector<fs::path> getPathList(const std::vector<std::string> &paths, bool in
                         result.push_back(rp);
                     }
                 }
-            }catch(const fs::filesystem_error &e){
-                throw FSException(e.what());
+            } else if (fs::exists(p)) {
+                // File
+                result.push_back(p);
+            } else {
+                throw FSException("Path does not exist: " + p.string());
             }
-        } else if (fs::exists(p)) {
-            // File
-            result.push_back(p);
-        } else {
-            throw FSException("Path does not exist: " + p.string());
+        } catch (const fs::filesystem_error &e) {
+            throw FSException(e.what());
         }
     }
 

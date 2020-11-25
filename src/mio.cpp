@@ -275,7 +275,7 @@ std::string bytesToHuman(std::uintmax_t bytes){
     suffixes[6] = "EB";
     std::uintmax_t s = 0;
 
-    double count = bytes;
+    double count = static_cast<double>(bytes);
 
     while (count >= 1024 && s < 7){
         s++;
