@@ -44,35 +44,39 @@ namespace ddb
 			}
 		}
 
-		for (auto i = fs::recursive_directory_iterator(directory);
-			i != fs::recursive_directory_iterator();
-			++i) {
+        try{
+            for (auto i = fs::recursive_directory_iterator(directory);
+                i != fs::recursive_directory_iterator();
+                ++i) {
 
-			auto path = i->path();
-			auto p = path.generic_string();
+                auto path = i->path();
+                auto p = path.generic_string();
 
-			// Skips already checked folders
-			if (checkedPaths.count(p) == 1)
-				continue;
+                // Skips already checked folders
+                if (checkedPaths.count(p) == 1)
+                    continue;
 
-			if (p == directory.generic_string())
-			{
-				LOGD << "Skipping parent folder";
-				continue;
-			}
+                if (p == directory.generic_string())
+                {
+                    LOGD << "Skipping parent folder";
+                    continue;
+                }
 
-			// Skip .ddb
-			if (path.filename() == ".ddb") i.disable_recursion_pending();
-			
-			if (p.find(".ddb") != std::string::npos)
-			{
-				LOGD << "Skipping ddb folder";
-				continue;
-			}
+                // Skip .ddb
+                if (path.filename() == ".ddb") i.disable_recursion_pending();
 
-            cb(NotIndexed, io::Path(p).relativeTo(directory).generic());
-			
-		}
+                if (p.find(".ddb") != std::string::npos)
+                {
+                    LOGD << "Skipping ddb folder";
+                    continue;
+                }
+
+                cb(NotIndexed, io::Path(p).relativeTo(directory).generic());
+
+            }
+        }catch(const fs::filesystem_error &e){
+            throw FSException(e.what());
+        }
 		
 	}
 

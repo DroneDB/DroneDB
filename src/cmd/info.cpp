@@ -52,12 +52,12 @@ void Info::run(cxxopts::ParseResult &opts) {
             if (!file.is_open()) throw ddb::FSException("Cannot open " + filename);
 
             ddb::info(input, file, format, recursive, maxRecursionDepth,
-                      geometry, withHash, true);
+                      geometry, withHash, !recursive);
 
             file.close();
         }else{
             ddb::info(input, std::cout, format, recursive, maxRecursionDepth,
-                      geometry, withHash, true);
+                      geometry, withHash, !recursive);
         }
     }catch(ddb::InvalidArgsException){
         printHelp();

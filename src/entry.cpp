@@ -9,11 +9,14 @@
 
 namespace ddb {
 
-bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entry, bool withHash, bool stopOnError) {
-    if (!fs::exists(path)){
-        if (stopOnError) throw FSException(path.string() + " does not exist");
-        entry.type = EntryType::Undefined;
-        return false;
+void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entry, bool withHash) {
+    entry.type = EntryType::Undefined;
+
+    try {
+        if (!fs::exists(path)) throw FSException(path.string() + " does not exist");
+    } catch (const fs::filesystem_error &e) {
+        // Yes Windows will throw an exception in some cases :/
+        throw FSException(e.what());
     }
 
     // Parse file
@@ -131,10 +134,8 @@ bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
                 } else {
                     LOGD << "No EXIF data found in " << path.string();
                 }
-            }catch(Exiv2::AnyError& e){
+            }catch(Exiv2::AnyError&){
                 LOGD << "Cannot read EXIF data: " << path.string();
-            	
-                if (stopOnError) throw FSException("Cannot read EXIF data: " + path.string() + " (" + e.what() + ")");
             }
         }else if (georaster){
             entry.type = EntryType::GeoRaster;
@@ -202,8 +203,6 @@ bool parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
             }
         }
     }
-
-    return true;
 }
 
 Geographic2D getRasterCoordinate(OGRCoordinateTransformationH hTransform, double *geotransform, double x, double y){

@@ -39,21 +39,19 @@ void generateThumbs(const std::vector<std::string> &input, const fs::path &outpu
         LOGD << "Parsing entry " << fp.string();
 
         Entry e;
-        if (parseEntry(fp, "/", e, false, true)){
-            e.path = (fs::path("/") / fs::path(e.path)).string(); // TODO: does this work on Windows?
-            if (supportsThumbnails(e.type)){
-                fs::path outImagePath;
-                if (useCrc){
-                    outImagePath = output / getThumbFilename(e.path, e.mtime, thumbSize);
-                }else{
-                    outImagePath = output / fs::path(e.path).replace_extension(".jpg").filename();
-                }
-                std::cout << generateThumb(e.path, thumbSize, outImagePath, true).string() << std::endl;
+        parseEntry(fp, "/", e, false);
+
+        e.path = (fs::path("/") / fs::path(e.path)).string(); // TODO: does this work on Windows?
+        if (supportsThumbnails(e.type)){
+            fs::path outImagePath;
+            if (useCrc){
+                outImagePath = output / getThumbFilename(e.path, e.mtime, thumbSize);
             }else{
-                LOGD << "Skipping " << e.path;
+                outImagePath = output / fs::path(e.path).replace_extension(".jpg").filename();
             }
+            std::cout << generateThumb(e.path, thumbSize, outImagePath, true).string() << std::endl;
         }else{
-            throw FSException("Failed to parse " + fp.string());
+            LOGD << "Skipping " << e.path;
         }
     }
 }

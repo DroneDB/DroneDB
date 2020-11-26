@@ -87,7 +87,7 @@ namespace ddb {
 			// Let's expand only if we were asked to list a different folder
 			expandFolders = expandFolders || pathStr.length() > 0; //ourPath.generic() != pathStr;
 
-			const auto depth = count(pathStr.begin(), pathStr.end(), '/');
+			const auto depth = static_cast<int>(count(pathStr.begin(), pathStr.end(), '/'));
 
 			LOGD << "Depth: " << depth;
 
