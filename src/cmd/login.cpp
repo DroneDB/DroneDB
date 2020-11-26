@@ -15,7 +15,7 @@ void Login::setOptions(cxxopts::Options &opts) {
     .positional_help("[args]")
     .custom_help("login")
     .add_options()
-    ("server", "Registry server to authenticate to", cxxopts::value<std::string>()->default_value("index.dronedb.app"))
+    ("server", "Registry server to authenticate to", cxxopts::value<std::string>()->default_value(DEFAULT_REGISTRY))
     ("u,username", "Username", cxxopts::value<std::string>())
     ("p,password", "Password", cxxopts::value<std::string>());
     // clang-format on
