@@ -41,7 +41,10 @@ Request::Request(const std::string &url, ReqType reqType)
         curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, true);
 
         fs::path caBundlePath = io::getDataPath("curl-ca-bundle.crt");
-        curl_easy_setopt(curl, CURLOPT_CAINFO, caBundlePath.string());
+        if (!caBundlePath.empty()){
+            LOGD << "CA Bundle: " << caBundlePath.string();
+            curl_easy_setopt(curl, CURLOPT_CAINFO, caBundlePath.string().c_str());
+        }
     } catch (AppException &e) {
         if (curl) curl_easy_cleanup(curl);
         throw;
