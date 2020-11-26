@@ -264,7 +264,7 @@ if (WIN32)
 endif()
 
 set(OUTPUT_DIST_FILE "${PROJECT_NAME}-${APP_VERSION}-${PLATFORM_NAME}.${OUTPUT_DIST_EXT}")
-set(SUPPORT_FILES "proj.db" "sensor_data.sqlite" "timezone21.bin")
+set(SUPPORT_FILES "proj.db" "sensor_data.sqlite" "timezone21.bin" "curl-ca-bundle.crt")
 
 set(DIST_FILES "")
 
