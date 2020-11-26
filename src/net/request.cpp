@@ -9,6 +9,8 @@
 #include "exceptions.h"
 #include "logger.h"
 #include "version.h"
+#include "mio.h"
+
 namespace ddb::net {
 
 Request::Request(const std::string &url, ReqType reqType)
@@ -37,6 +39,12 @@ Request::Request(const std::string &url, ReqType reqType)
         curl_easy_setopt(curl, CURLOPT_USERAGENT, "dronedb-agent/" APP_VERSION);
         curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, errorMsg);
         curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, true);
+
+        fs::path caBundlePath = io::getDataPath("curl-ca-bundle.crt");
+        if (!caBundlePath.empty()){
+            LOGD << "CA Bundle: " << caBundlePath.string();
+            curl_easy_setopt(curl, CURLOPT_CAINFO, caBundlePath.string().c_str());
+        }
     } catch (AppException &e) {
         if (curl) curl_easy_cleanup(curl);
         throw;
