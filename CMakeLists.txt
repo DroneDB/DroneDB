@@ -276,7 +276,7 @@ if (WIN32)
     list(APPEND DIST_FILES "${CMAKE_BINARY_DIR}/ddb.bat")
 
     # These are added after build so they are not available with GLOB
-    list(APPEND DIST_FILES "${CMAKE_BINARY_DIR}/ddb.dll")
+    list(APPEND DIST_FILES "${CMAKE_BINARY_DIR}/ddb.dll" "${CMAKE_BINARY_DIR}/exiv2.dll")
 endif()
 
 foreach(F ${SUPPORT_FILES})
