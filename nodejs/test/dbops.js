@@ -5,10 +5,11 @@ const ddb = require('../');
 const assert = require('assert');
 const { TestArea } = require('./helpers');
 const fs = require('fs');
+const path = require('path');
 
 describe('ddbops', function() {
     it('should be able to call init(), add() and remove()', async function() {
-        this.timeout(4000);
+        this.timeout(8000);
         const t = new TestArea("init", true);
         const f = t.getFolder(".");
         const ddbPath = await ddb.init(f);
@@ -25,4 +26,23 @@ describe('ddbops', function() {
 
         assert.ok(await ddb.remove(f, imagePath));
     });
+
+    it ('should be able to call chattr()', async function(){
+        this.timeout(8000);
+
+        const t = new TestArea("init", true);
+        const f = t.getFolder(".");
+        const ddbPath = path.join(await ddb.init(f), "..");
+
+        let info = await ddb.info(ddbPath);
+        assert.equal(info[0].meta.public, false);
+
+        const attrs = await ddb.chattr(ddbPath, { public: true });
+        assert.equal(attrs.public, true);
+
+        info = await ddb.info(ddbPath);
+        assert.equal(info[0].meta.public, true);
+
+        await assert.rejects(ddb.chattr(ddbPath, { invalid: "123" }));        
+    })
 });

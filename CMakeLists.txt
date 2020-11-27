@@ -51,7 +51,7 @@ if(CCACHE_FOUND)
     set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK ccache)
 endif(CCACHE_FOUND)
 
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake" "${CMAKE_SOURCE_DIR}/vendor/exiv2/cmake")
 include(${CMAKE_ROOT}/Modules/ExternalProject.cmake)
 set(DOWNLOADS_DIR "${CMAKE_BINARY_DIR}/downloads")
 
@@ -264,7 +264,7 @@ if (WIN32)
 endif()
 
 set(OUTPUT_DIST_FILE "${PROJECT_NAME}-${APP_VERSION}-${PLATFORM_NAME}.${OUTPUT_DIST_EXT}")
-set(SUPPORT_FILES "proj.db" "sensor_data.sqlite" "timezone21.bin")
+set(SUPPORT_FILES "proj.db" "sensor_data.sqlite" "timezone21.bin" "curl-ca-bundle.crt")
 
 set(DIST_FILES "")
 
@@ -276,7 +276,7 @@ if (WIN32)
     list(APPEND DIST_FILES "${CMAKE_BINARY_DIR}/ddb.bat")
 
     # These are added after build so they are not available with GLOB
-    list(APPEND DIST_FILES "${CMAKE_BINARY_DIR}/ddb.dll")
+    list(APPEND DIST_FILES "${CMAKE_BINARY_DIR}/ddb.dll" "${CMAKE_BINARY_DIR}/exiv2.dll")
 endif()
 
 foreach(F ${SUPPORT_FILES})
@@ -304,7 +304,7 @@ endif()
 # Installation
 
 if (NOT WIN32)
-install(TARGETS ${PROJECT_NAME})
+install(TARGETS ${PROJECT_NAME} LIBRARY DESTINATION lib)
 install(PROGRAMS "${CMAKE_BINARY_DIR}/ddbcmd" DESTINATION bin RENAME ddb)
 install(FILES ${DIST_FILES} DESTINATION share/ddb)
 endif()

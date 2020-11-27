@@ -1,5 +1,10 @@
 #!/bin/bash
 
+hash add-apt-repository || not_found=true
+if [[ $not_found ]]; then
+    sudo apt install -y software-properties-common
+fi
+
 sudo apt update && sudo apt install -y --fix-missing --no-install-recommends build-essential
 sudo add-apt-repository ppa:ubuntugis/ubuntugis-unstable
 

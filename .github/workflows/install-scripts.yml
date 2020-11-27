@@ -16,7 +16,7 @@ jobs:
     - name: Commit files
       run: |
         git clone https://github.com/DroneDB/get.dronedb
-        cp scripts/linux_install_script.sh get.dronedb/
+        cp scripts/linux_install_script.sh get.dronedb/index.html
         cd get.dronedb
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"

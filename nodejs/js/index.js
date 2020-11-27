@@ -114,6 +114,15 @@ const ddb = {
             });
         };
 
+        this.chattr = async function(ddbPath, attrs = {}){
+            return new Promise((resolve, reject) => {
+                n.chattr(ddbPath, attrs, (err, attrs) => {
+                    if (err) reject(err);
+                    else resolve(attrs);
+                });
+            });
+        };
+
         // Guarantees that paths are expressed with
         // a ddbPath root or are absolute paths
         this._resolvePaths = function(ddbPath, paths){

@@ -83,24 +83,34 @@ std::uintmax_t Path::getSize() {
 }
 
 bool Path::hasChildren(const std::vector<std::string> &childPaths) {
-    std::string absP = fs::weakly_canonical(fs::absolute(p)).string();
-    if (absP.length() > 1 && absP.back() == fs::path::preferred_separator) absP.pop_back();
+    try{
+        std::string absP = fs::weakly_canonical(fs::absolute(p)).string();
+        if (absP.length() > 1 && absP.back() == fs::path::preferred_separator) absP.pop_back();
 
-    for (auto &cp : childPaths) {
-        std::string absC = fs::weakly_canonical(fs::absolute(cp)).string();
-        if (absC.length() > 1 && absC.back() == fs::path::preferred_separator) absC.pop_back();
-        if (absC.rfind(absP, 0) != 0 || absP == absC) return false;
+        for (auto &cp : childPaths) {
+            std::string absC = fs::weakly_canonical(fs::absolute(cp)).string();
+            if (absC.length() > 1 && absC.back() == fs::path::preferred_separator) absC.pop_back();
+            if (absC.rfind(absP, 0) != 0 || absP == absC) return false;
+        }
+
+        return true;
+    }catch(const fs::filesystem_error &e){
+        LOGD << e.what();
+        throw FSException(e.what());
     }
-
-    return true;
 }
 
 bool Path::isParentOf(const fs::path &childPath){
-    std::string absP = fs::weakly_canonical(fs::absolute(p)).string();
-    if (absP.length() > 1 && absP.back() == fs::path::preferred_separator) absP.pop_back();
-    std::string absC = fs::weakly_canonical(fs::absolute(childPath)).string();
-    if (absC.length() > 1 && absC.back() == fs::path::preferred_separator) absC.pop_back();
-    return absC.rfind(absP, 0) == 0 && absP != absC;
+    try{
+        std::string absP = fs::weakly_canonical(fs::absolute(p)).string();
+        if (absP.length() > 1 && absP.back() == fs::path::preferred_separator) absP.pop_back();
+        std::string absC = fs::weakly_canonical(fs::absolute(childPath)).string();
+        if (absC.length() > 1 && absC.back() == fs::path::preferred_separator) absC.pop_back();
+        return absC.rfind(absP, 0) == 0 && absP != absC;
+    }catch(const fs::filesystem_error &e){
+        LOGD << e.what();
+        throw FSException(e.what());
+    }
 }
 
 bool Path::isAbsolute() const{
@@ -126,23 +136,28 @@ int Path::depth() {
 }
 
 Path Path::relativeTo(const fs::path &parent){
-    // Special case where parent == path
-    if (weakly_canonical(absolute(p)) == weakly_canonical(absolute(parent))) {
-        return fs::path("");
-    }
+    try{
+        // Special case where parent == path
+        if (weakly_canonical(absolute(p)) == weakly_canonical(absolute(parent))) {
+            return fs::path("");
+        }
 
-    // Handle special cases where root is "/"
-    // in this case we return the relative canonical absolute path
-    if (parent == parent.root_path() || parent == "/"){
-        return fs::weakly_canonical(fs::absolute(p)).relative_path();
-    }
+        // Handle special cases where root is "/"
+        // in this case we return the relative canonical absolute path
+        if (parent == parent.root_path() || parent == "/"){
+            return fs::weakly_canonical(fs::absolute(p)).relative_path();
+        }
 
-    fs::path relPath = relative(weakly_canonical(absolute(p)), weakly_canonical(absolute(parent)));
-    if (relPath.generic_string() == "."){
-        return weakly_canonical(absolute(parent));
-    }
+        fs::path relPath = relative(weakly_canonical(absolute(p)), weakly_canonical(absolute(parent)));
+        if (relPath.generic_string() == "."){
+            return weakly_canonical(absolute(parent));
+        }
 
-	return relPath;
+        return relPath;
+    }catch(const fs::filesystem_error &e){
+        LOGD << e.what();
+        throw FSException(e.what());
+    }
 }
 
 
@@ -260,7 +275,7 @@ std::string bytesToHuman(std::uintmax_t bytes){
     suffixes[6] = "EB";
     std::uintmax_t s = 0;
 
-    double count = bytes;
+    double count = static_cast<double>(bytes);
 
     while (count >= 1024 && s < 7){
         s++;

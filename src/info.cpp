@@ -35,8 +35,9 @@ void info(const std::vector<std::string> &input, std::ostream &output,
     for (auto &fp : filePaths){
         LOGD << "Parsing entry " << fp.string();
 
-        Entry e;
-        if (parseEntry(fp, "/", e, withHash, stopOnError)){
+        try{
+            Entry e;
+            parseEntry(fp, "/", e, withHash);
             // We override e.path because it's relative
             // But we want the absolute path (in the unix path format)
             e.path = "file://" + fs::absolute(fp).generic_string();
@@ -60,8 +61,9 @@ void info(const std::vector<std::string> &input, std::ostream &output,
             }
 
             first = false;
-        }else{
-            LOGD << "Cannot parse " << fp.string() << ", skipping";
+        }catch(const AppException &e){
+            LOGD << "Cannot parse " << fp.string() << ", skipping: " << e.what();
+            if (stopOnError) throw e;
         }
     }
 

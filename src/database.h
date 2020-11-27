@@ -30,6 +30,7 @@ class Database : public SqliteDatabase {
 
       DDB_DLL void setPublic(bool isPublic);
       DDB_DLL bool isPublic() const;
+      DDB_DLL void chattr(json attrs);
 
       DDB_DLL json getAttributes() const;
 };
