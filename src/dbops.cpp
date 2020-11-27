@@ -1,6 +1,7 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+#include <codecvt>
 #include "dbops.h"
 #include "entry_types.h"
 #include "exif.h"
@@ -141,7 +142,7 @@ std::vector<fs::path> getPathList(const std::vector<std::string> &paths, bool in
 
                     // Ignore system files on Windows
                     #ifdef WIN32
-                    DWORD attrs = GetFileAttributes(rp.string().c_str());
+                    DWORD attrs = GetFileAttributesW(rp.wstring().c_str());
                     if (attrs & FILE_ATTRIBUTE_HIDDEN || attrs & FILE_ATTRIBUTE_SYSTEM) {
                         i.disable_recursion_pending();
                         continue;
