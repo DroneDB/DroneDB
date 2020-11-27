@@ -42,6 +42,19 @@ void DDBRegisterProcess(bool verbose) {
 	setenv("PROJ_LIB", projPaths.c_str(), 1);
 #endif
 
+#if !defined(WIN32) && !defined(MAC_OSX)
+    try {
+        std::locale("");  // Raises a runtime error if current locale is invalid
+    } catch (const std::runtime_error&) {
+        setenv("LC_ALL", "C", 1);
+    }
+#endif
+
+#ifdef WIN32
+	// Allow path.string() calls to work with Unicode filenames
+    std::setlocale(LC_CTYPE, "en_US.UTF8");
+#endif
+
 	// Gets the environment variable to enable logging to file
 	const auto logToFile = std::getenv(DDB_LOG_ENV) != nullptr;
 
