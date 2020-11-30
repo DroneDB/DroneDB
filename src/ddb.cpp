@@ -19,6 +19,7 @@
 #include "json.h"
 #include "exceptions.h"
 #include "utils.h"
+#include "thumbs.h"
 
 using namespace ddb;
 
@@ -325,4 +326,16 @@ DDB_C_BEGIN
     utils::copyToPtr(db->getAttributes().dump(), output);
 
 DDB_C_END
+}
+
+DDBErr DDBGenerateThumbnail(const char *filePath, int size, const char *destPath) {
+DDB_C_BEGIN
+
+	auto imagePath = fs::path(filePath);
+	auto thumbPath = fs::path(destPath);
+
+	ddb::generateThumb(imagePath, size, thumbPath, true);
+
+DDB_C_END
+
 }

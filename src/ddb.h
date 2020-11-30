@@ -109,12 +109,19 @@ DDB_DLL DDBErr DDBClearPasswords(const char* ddbPath);
  * @return DDBERR_NONE on success, an error otherwise */
 DDB_DLL DDBErr DDBStatus(const char* ddbPath, char **output);
 
-/** Show differences between index and filesystem
+/** Changes database attributes
  * @param ddbPath path to a DroneDB database (parent of ".ddb")
  * @param attrsJson array of object attributes as a JSON string
  * @param output pointer to C-string where to store output (JSON). Output contains the new DDB metadata.
  * @return DDBERR_NONE on success, an error otherwise */
 DDB_DLL DDBErr DDBChattr(const char* ddbPath, const char *attrsJson, char **output);
+
+/** Generate thumbnail
+ * @param filePath path of the input file
+ * @param destPath path of the destination file
+ * @param size size constraint of the thumbnail (width or height)
+ * @return DDBERR_NONE on success, an error otherwise */
+DDB_DLL DDBErr DDBGenerateThumbnail(const char *filePath, int size, const char *destPath);
 
 
 #ifdef __cplusplus
