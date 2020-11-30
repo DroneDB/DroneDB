@@ -141,7 +141,7 @@ std::vector<fs::path> getPathList(const std::vector<std::string> &paths, bool in
 
                     // Ignore system files on Windows
                     #ifdef WIN32
-                    DWORD attrs = GetFileAttributes(rp.string().c_str());
+                    DWORD attrs = GetFileAttributesW(rp.wstring().c_str());
                     if (attrs & FILE_ATTRIBUTE_HIDDEN || attrs & FILE_ATTRIBUTE_SYSTEM) {
                         i.disable_recursion_pending();
                         continue;
