@@ -118,8 +118,8 @@ DDB_DLL DDBErr DDBChattr(const char* ddbPath, const char *attrsJson, char **outp
 
 /** Generate thumbnail
  * @param filePath path of the input file
- * @param destPath path of the destination file
  * @param size size constraint of the thumbnail (width or height)
+ * @param destPath path of the destination file * 
  * @return DDBERR_NONE on success, an error otherwise */
 DDB_DLL DDBErr DDBGenerateThumbnail(const char *filePath, int size, const char *destPath);
 
