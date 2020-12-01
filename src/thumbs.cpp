@@ -76,21 +76,25 @@ fs::path generateThumb(const fs::path &imagePath, int thumbSize, const fs::path 
         return outImagePath;
     }
 
+    LOGD << "ImagePath = " << imagePath;
+    LOGD << "OutImagePath = " << outImagePath;
+    LOGD << "Size = " << thumbSize;
+
     // Compute image with GDAL otherwise
     GDALDatasetH hSrcDataset = GDALOpen(imagePath.string().c_str(), GA_ReadOnly);
-    if (!hSrcDataset){
+
+    if (!hSrcDataset)
         throw GDALException("Cannot open " + imagePath.string() + " for reading");
-
-    }
-
+  
     int width = GDALGetRasterXSize(hSrcDataset);
     int height = GDALGetRasterYSize(hSrcDataset);
     int targetWidth = 0;
     int targetHeight = 0;
+
     if (width > height){
         targetWidth = thumbSize;
         targetHeight = static_cast<int>((static_cast<float>(thumbSize) / static_cast<float>(width)) * static_cast<float>(height));
-    }else{
+    } else {
         targetHeight = thumbSize;
         targetWidth = static_cast<int>((static_cast<float>(thumbSize) / static_cast<float>(height)) * static_cast<float>(width));
     }
@@ -113,11 +117,14 @@ fs::path generateThumb(const fs::path &imagePath, int thumbSize, const fs::path 
 
     GDALTranslateOptions* psOptions = GDALTranslateOptionsNew(targs, nullptr);
     CSLDestroy(targs);
-    GDALTranslate(outImagePath.string().c_str(),
+    GDALDatasetH hNewDataset = GDALTranslate(outImagePath.string().c_str(),
                                     hSrcDataset,
                                     psOptions,
                                     nullptr);
     GDALTranslateOptionsFree(psOptions);
+
+    GDALClose(hNewDataset);
+    GDALClose(hSrcDataset);
 
     return outImagePath;
 }
