@@ -47,6 +47,7 @@ void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
         entry.type = EntryType::Generic; // Default
 
         bool jpg = p.checkExtension({"jpg", "jpeg"});
+        bool dng = p.checkExtension({"dng"});
         bool tif = p.checkExtension({"tif", "tiff"});
         bool nongeoImage = p.checkExtension({"png", "gif"});
 
@@ -66,7 +67,7 @@ void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
             }
         }
 
-        bool image = (jpg || tif || nongeoImage) && !georaster;
+        bool image = (jpg || tif || dng || nongeoImage) && !georaster;
 
         if (image) {
             // A normal image by default (refined later)
