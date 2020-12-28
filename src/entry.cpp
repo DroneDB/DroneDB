@@ -436,6 +436,7 @@ void parseDroneDBEntry(const fs::path &ddbPath, Entry &entry){
         }
 
         entry.meta = db->getAttributes();
+        entry.type = EntryType::DroneDB;
     }catch(AppException &e){
         LOGD << e.what();
         entry.type = EntryType::Directory;
