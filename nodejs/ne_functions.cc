@@ -10,7 +10,6 @@
 #include "info.h"
 #include "thumbs.h"
 #include "entry.h"
-#include "tiler.h"
 
 NAN_METHOD(getVersion) {
     info.GetReturnValue().Set(Nan::New(DDBGetVersion()).ToLocalChecked());
@@ -129,17 +128,19 @@ NAN_METHOD(_thumbs_getFromUserCache) {
 
 class GetTileFromUserCacheWorker : public Nan::AsyncWorker {
  public:
-  GetTileFromUserCacheWorker(Nan::Callback *callback, const fs::path &geotiffPath, int tz, int tx, int ty, int tileSize, bool tms, bool forceRecreate)
+  GetTileFromUserCacheWorker(Nan::Callback *callback, const std::string &geotiffPath, int tz, int tx, int ty, int tileSize, bool tms, bool forceRecreate)
     : AsyncWorker(callback, "nan:GetTileFromUserCacheWorker"),
       geotiffPath(geotiffPath), tz(tz), tx(tx), ty(ty), tileSize(tileSize), tms(tms), forceRecreate(forceRecreate) {}
   ~GetTileFromUserCacheWorker() {}
 
   void Execute () {
-    try{
-        tilePath = ddb::TilerHelper::getFromUserCache(geotiffPath, tz, tx, ty, tileSize, tms, forceRecreate);
-    }catch(ddb::AppException &e){
-        SetErrorMessage(e.what());
+    char *outputTilePath;
+
+    if (DDBTile(geotiffPath.c_str(), tz, tx, ty, &outputTilePath, tileSize, tms, forceRecreate) != DDBERR_NONE){
+      SetErrorMessage(DDBGetLastError());
     }
+
+    tilePath = std::string(outputTilePath);
   }
 
   void HandleOKCallback () {
@@ -147,19 +148,19 @@ class GetTileFromUserCacheWorker : public Nan::AsyncWorker {
 
      v8::Local<v8::Value> argv[] = {
          Nan::Null(),
-         Nan::New(tilePath.string()).ToLocalChecked()
+         Nan::New(tilePath).ToLocalChecked()
      };
      callback->Call(2, argv, async_resource);
    }
 
  private:
-    fs::path geotiffPath;
-    int tx, ty, tz;
+    std::string geotiffPath;
+    int tz, tx, ty;
     int tileSize;
     bool tms;
     bool forceRecreate;
 
-    fs::path tilePath;
+    std::string tilePath;
 };
 
 

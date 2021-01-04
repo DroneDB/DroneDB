@@ -123,6 +123,18 @@ DDB_DLL DDBErr DDBChattr(const char* ddbPath, const char *attrsJson, char **outp
  * @return DDBERR_NONE on success, an error otherwise */
 DDB_DLL DDBErr DDBGenerateThumbnail(const char *filePath, int size, const char *destPath);
 
+/** Generate orthophoto tiles
+ * @param geotiffPath path to the input geoTIFF
+ * @param tz zoom level
+ * @param tx X coordinates
+ * @param ty Y coordinates
+ * @param outputTilePath output pointer to C-String where to store output tile path.
+ * @param tileSize tile size in pixels
+ * @param tms Generate TMS-style tiles instead of XYZ
+ * @param forceRecreate ignore cache and always recreate the tile
+ * @return DDBERR_NONE on success, an error otherwise */
+DDB_DLL DDBErr DDBTile(const char *geotiffPath, int tz, int tx, int ty, char **outputTilePath, int tileSize = 256, bool tms = false, bool forceRecreate = false);
+
 
 #ifdef __cplusplus
 }

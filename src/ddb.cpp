@@ -20,6 +20,7 @@
 #include "exceptions.h"
 #include "utils.h"
 #include "thumbs.h"
+#include "tiler.h"
 
 using namespace ddb;
 
@@ -337,5 +338,11 @@ DDB_C_BEGIN
 	ddb::generateThumb(imagePath, size, thumbPath, true);
 
 DDB_C_END
+}
 
+DDB_DLL DDBErr DDBTile(const char *geotiffPath, int tz, int tx, int ty, char **outputTilePath, int tileSize, bool tms, bool forceRecreate){
+DDB_C_BEGIN
+    auto tilePath = ddb::TilerHelper::getFromUserCache(geotiffPath, tz, tx, ty, tileSize, tms, forceRecreate);
+    utils::copyToPtr(tilePath.string(), outputTilePath);
+DDB_C_END
 }
