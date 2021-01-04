@@ -148,19 +148,19 @@ class GetTileFromUserCacheWorker : public Nan::AsyncWorker {
 
      v8::Local<v8::Value> argv[] = {
          Nan::Null(),
-         Nan::New(tilePath.string()).ToLocalChecked()
+         Nan::New(tilePath).ToLocalChecked()
      };
      callback->Call(2, argv, async_resource);
    }
 
  private:
-    fs::path geotiffPath;
+    std::string geotiffPath;
     int tz, tx, ty;
     int tileSize;
     bool tms;
     bool forceRecreate;
 
-    fs::path tilePath;
+    std::string tilePath;
 };
 
 
