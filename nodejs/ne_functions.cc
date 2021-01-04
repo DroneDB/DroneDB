@@ -10,7 +10,6 @@
 #include "info.h"
 #include "thumbs.h"
 #include "entry.h"
-#include "tiler.h"
 
 NAN_METHOD(getVersion) {
     info.GetReturnValue().Set(Nan::New(DDBGetVersion()).ToLocalChecked());
@@ -135,11 +134,13 @@ class GetTileFromUserCacheWorker : public Nan::AsyncWorker {
   ~GetTileFromUserCacheWorker() {}
 
   void Execute () {
-    try{
-        tilePath = ddb::TilerHelper::getFromUserCache(geotiffPath, tz, tx, ty, tileSize, tms, forceRecreate);
-    }catch(ddb::AppException &e){
-        SetErrorMessage(e.what());
+    char *outputTilePath;
+
+    if (DDBTile(geotiffPath.c_str(), tz, tx, ty, &outputTilePath, tileSize, tms, forceRecreate) != DDBERR_NONE){
+      SetErrorMessage(DDBGetLastError());
     }
+
+    tilePath = std::string(outputTilePath);
   }
 
   void HandleOKCallback () {
