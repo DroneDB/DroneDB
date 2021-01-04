@@ -128,7 +128,7 @@ NAN_METHOD(_thumbs_getFromUserCache) {
 
 class GetTileFromUserCacheWorker : public Nan::AsyncWorker {
  public:
-  GetTileFromUserCacheWorker(Nan::Callback *callback, const fs::path &geotiffPath, int tz, int tx, int ty, int tileSize, bool tms, bool forceRecreate)
+  GetTileFromUserCacheWorker(Nan::Callback *callback, const std::string &geotiffPath, int tz, int tx, int ty, int tileSize, bool tms, bool forceRecreate)
     : AsyncWorker(callback, "nan:GetTileFromUserCacheWorker"),
       geotiffPath(geotiffPath), tz(tz), tx(tx), ty(ty), tileSize(tileSize), tms(tms), forceRecreate(forceRecreate) {}
   ~GetTileFromUserCacheWorker() {}
@@ -155,7 +155,7 @@ class GetTileFromUserCacheWorker : public Nan::AsyncWorker {
 
  private:
     fs::path geotiffPath;
-    int tx, ty, tz;
+    int tz, tx, ty;
     int tileSize;
     bool tms;
     bool forceRecreate;
