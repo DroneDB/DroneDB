@@ -13,7 +13,7 @@ void Tile::setOptions(cxxopts::Options &opts) {
     // clang-format off
     opts
     .positional_help("[args]")
-    .custom_help("tile geo.tif [output directory]")
+    .custom_help("tile [geo.tif | image.jpg] [output directory]")
     .add_options()
     ("i,input", "File to tile", cxxopts::value<std::string>())
     ("o,output", "Output directory where to store tiles", cxxopts::value<std::string>()->default_value("{filename}_tiles/"))
@@ -28,7 +28,7 @@ void Tile::setOptions(cxxopts::Options &opts) {
 }
 
 std::string Tile::description() {
-    return "Generate tiles for GeoTIFFs";
+    return "Generate tiles for GeoTIFFs and GeoImages";
 }
 
 void Tile::run(cxxopts::ParseResult &opts) {
@@ -50,8 +50,9 @@ void Tile::run(cxxopts::ParseResult &opts) {
     auto y = opts["y"].as<std::string>();
     auto tileSize = opts["size"].as<int>();
 
-    ddb::Tiler tiler(input, output, tileSize, tms);
-    ddb::TilerHelper::runTiler(tiler, std::cout, format, z, x, y);
+    fs::path geotiff = ddb::TilerHelper::toGeoTIFF(input, tileSize, true);
+    ddb::Tiler tiler(geotiff, output, tileSize, tms);
+    ddb::TilerHelper::runTiler(tiler, std::cout, format, z, x, y);    
 }
 
 }

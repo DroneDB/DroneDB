@@ -9,7 +9,7 @@
 
 namespace ddb {
 
-void geoProject(const std::vector<std::string> &images, const std::string &output, const std::string &outsize){
+void geoProject(const std::vector<std::string> &images, const std::string &output, const std::string &outsize, bool stopOnError){
     bool isDirectory = fs::is_directory(output);
     bool outputToDir = images.size() > 1 || isDirectory;
     if (outputToDir){
@@ -30,11 +30,13 @@ void geoProject(const std::vector<std::string> &images, const std::string &outpu
         parseEntry(p, ".", e, false);
 
         if (e.type != EntryType::GeoImage){
-            std::cerr << "Cannot reproject " << p.string() << ", not a GeoImage, skipping..." << std::endl;
+            if (stopOnError) throw FSException("Cannot geoproject " + p.string() + ", not a GeoImage");
+            else std::cerr << "Cannot geoproject " << p.string() << ", not a GeoImage, skipping..." << std::endl;
             continue;
         }
         if (e.polygon_geom.size() < 4 || e.meta.find("width") == e.meta.end() || e.meta.find("height") == e.meta.end()){
-            std::cerr << "Cannot project " << p.string() << ", the image does not have sufficient information: skipping" << std::endl;
+            if (stopOnError) throw FSException("Cannot geoproject " + p.string() + ", the image does not have sufficient information");
+            else std::cerr << "Cannot geoproject " << p.string() << ", the image does not have sufficient information: skipping" << std::endl;
             continue;
         }
 
@@ -55,7 +57,8 @@ void geoProject(const std::vector<std::string> &images, const std::string &outpu
 
         GDALDatasetH hSrcDataset = GDALOpen(p.string().c_str(), GA_ReadOnly);
         if (!hSrcDataset){
-            std::cout << "Cannot project " << p.string() << ", cannot open raster: skipping" << std::endl;
+            if (stopOnError) throw FSException("Cannot project " + p.string() + ", cannot open raster");
+            else std::cout << "Cannot project " << p.string() << ", cannot open raster: skipping" << std::endl;
             continue;
         }
 
