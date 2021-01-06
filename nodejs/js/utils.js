@@ -20,5 +20,9 @@ module.exports = {
             ds: groups.ds,
             path: groups.path
         };
+    },
+
+    isDDBUri: function(uri){
+        return uri.startsWith("ddb://") || uri.startsWith("ddb+unsafe://");
     }
 }

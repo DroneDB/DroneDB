@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 const entry = require('./entry');
-const { parseUri } = require('./utils');
+const { parseUri, isDDBUri } = require('./utils');
 const Registry = require('./registry');
 
 module.exports = {
@@ -14,7 +14,7 @@ module.exports = {
     },
 
     fetch: function(uri, thumbSize = 256){
-        if (uri.startsWith("ddb://") || uri.startsWith("ddb+unsafe://")){
+        if (isDDBUri(uri)){
             const { registryUrl, org, ds, path } = parseUri(uri);
             const dataset = new Registry(registryUrl).Organization(org).Dataset(ds);
             return dataset.thumbUrl(path, thumbSize);

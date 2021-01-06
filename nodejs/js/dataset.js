@@ -35,6 +35,14 @@ module.exports = class Dataset{
         return url;
     }
 
+    tileUrl(path, tz, tx, ty, options = {}){
+        let retina = "";
+        if (options.retina) retina = "@2x";
+
+        let url = `${this.baseApi}/tiles/${tz}/${tx}/${ty}${retina}.png?path=${path}`;
+        return url;
+    }
+
     async download(paths){
         return this.registry.postRequest(`${this.baseApi}/download`, { path: paths });
     }
