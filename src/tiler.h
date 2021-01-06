@@ -132,13 +132,17 @@ class TilerHelper{
     static BoundingBox<int> parseZRange(const std::string &zRange);
 
     // Where to store local cache tiles
-    static fs::path getCacheFolderName(const fs::path &geotiffPath, time_t modifiedTime, int tileSize);
+    static fs::path getCacheFolderName(const fs::path &tileablePath, time_t modifiedTime, int tileSize);
 
 public:
     DDB_DLL static void runTiler(Tiler &tiler, std::ostream &output = std::cout, const std::string &format = "text", const std::string &zRange = "auto", const std::string &x = "auto", const std::string &y = "auto");
 
     // Get a single tile from user cache
-    DDB_DLL static fs::path getFromUserCache(const fs::path &geotiffPath, int tz, int tx, int ty, int tileSize, bool tms, bool forceRecreate);
+    DDB_DLL static fs::path getFromUserCache(const fs::path &tileablePath, int tz, int tx, int ty, int tileSize, bool tms, bool forceRecreate);
+
+    // Prepare a tileable file for tiling (if needed)
+    // for example, geoimages that can be tiled are first geoprojected
+    DDB_DLL static fs::path toGeoTIFF(const fs::path &tileablePath, int tileSize, bool forceRecreate, const fs::path &outputGeotiff = "");
 
     DDB_DLL static void cleanupUserCache();
 };

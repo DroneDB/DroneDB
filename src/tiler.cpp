@@ -10,6 +10,8 @@
 #include "hash.h"
 #include "mio.h"
 #include "userprofile.h"
+#include "entry.h"
+#include "geoproject.h"
 
 namespace ddb{
 
@@ -341,18 +343,18 @@ BoundingBox<int> TilerHelper::parseZRange(const std::string &zRange){
     return r;
 }
 
-fs::path TilerHelper::getCacheFolderName(const fs::path &geotiffPath, time_t modifiedTime, int tileSize){
+fs::path TilerHelper::getCacheFolderName(const fs::path &tileablePath, time_t modifiedTime, int tileSize){
     std::ostringstream os;
-    os << geotiffPath.string() << "*" << modifiedTime << "*" << tileSize;
+    os << tileablePath.string() << "*" << modifiedTime << "*" << tileSize;
     return Hash::strCRC64(os.str());
 }
 
-fs::path TilerHelper::getFromUserCache(const fs::path &geotiffPath, int tz, int tx, int ty, int tileSize, bool tms, bool forceRecreate){
+fs::path TilerHelper::getFromUserCache(const fs::path &tileablePath, int tz, int tx, int ty, int tileSize, bool tms, bool forceRecreate){
     if (std::rand() % 1000 == 0) cleanupUserCache();
-    if (!fs::exists(geotiffPath)) throw FSException(geotiffPath.string() + " does not exist");
+    if (!fs::exists(tileablePath)) throw FSException(tileablePath.string() + " does not exist");
 
-    time_t modifiedTime = io::Path(geotiffPath).getModifiedTime();
-    fs::path tileCacheFolder = UserProfile::get()->getTilesDir() / getCacheFolderName(geotiffPath, modifiedTime, tileSize);
+    time_t modifiedTime = io::Path(tileablePath).getModifiedTime();
+    fs::path tileCacheFolder = UserProfile::get()->getTilesDir() / getCacheFolderName(tileablePath, modifiedTime, tileSize);
     fs::path outputFile = tileCacheFolder / std::to_string(tz) / std::to_string(tx) / (std::to_string(ty) + ".png");
 
     // Cache hit
@@ -360,8 +362,44 @@ fs::path TilerHelper::getFromUserCache(const fs::path &geotiffPath, int tz, int 
         return outputFile;
     }
 
-    Tiler t(geotiffPath.string(), tileCacheFolder.string(), tileSize, tms);
+    fs::path fileToTile = toGeoTIFF(tileablePath, tileSize, forceRecreate, (tileCacheFolder / "geoprojected.tif"));
+    Tiler t(fileToTile.string(), tileCacheFolder.string(), tileSize, tms);
     return t.tile(tz, tx, ty);
+}
+
+fs::path TilerHelper::toGeoTIFF(const fs::path &tileablePath, int tileSize, bool forceRecreate, const fs::path &outputGeotiff){
+    EntryType type = fingerprint(tileablePath);
+
+    if (type == EntryType::GeoRaster){
+        // Georasters can be tiled directly
+        return tileablePath;
+    }else{
+        fs::path outputPath = outputGeotiff;
+
+        if (outputGeotiff.empty()){
+            // Store in user cache if user doesn't specify a preference
+            if (std::rand() % 1000 == 0) cleanupUserCache();
+            time_t modifiedTime = io::Path(tileablePath).getModifiedTime();
+            fs::path tileCacheFolder = UserProfile::get()->getTilesDir() / getCacheFolderName(tileablePath, modifiedTime, tileSize);
+
+            if (!fs::exists(tileCacheFolder)){
+                // Try to create
+                if (!fs::create_directories(tileCacheFolder)){
+                    throw FSException(tileCacheFolder.string() + " is not a valid directory (cannot create it).");
+                }
+            }
+
+            outputPath = tileCacheFolder / "geoprojected.tif";
+        }
+
+
+        // We need to (attempt) to geoproject the file first
+        if (!fs::exists(outputPath) || forceRecreate){
+            ddb::geoProject({tileablePath.string()}, outputPath.string(), "100%", true);
+        }
+
+        return outputPath;
+    }
 }
 
 void TilerHelper::cleanupUserCache(){
