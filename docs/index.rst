@@ -7,13 +7,21 @@ DroneDB - Effortless Aerial Data Management and Sharing
     :alt: DroneDB
     :align: right
 
-DroneDB provides a standard command line application (``ddb``) for managing aerial data. With it you can extract and manipulate information from various types of aerial data (currently aerial images, orthophotos and DSM/DTM, but other data types coming soon).
+`DroneDB <https://dronedb.app>`_ is a set of tools and standards for managing and sharing aerial data. Think of it as Dropbox for aerial imagery. It works mainly with images, orthophotos and digital elevation models, for which metadata is extracted and visualized on a map, but it can be used to share all kinds of files.
 
-DroneDB can create an index for your data and sync it to a network server (work in progress) for highly scalable and flexible data management and sharing across an organization, the internet or for your own personal data-organizing enjoyment.
+.. image:: https://user-images.githubusercontent.com/1951843/103560016-13848180-4e85-11eb-8177-e711da942a4a.png
 
-It's also available as a library (``libddb`` for developers), for which Node.JS bindings exist (.NET and Python bindings coming soon).
+DroneDB can create an index for your data and sync it to a network hub (`Registry <https://github.com/DroneDB/Registry>`_) for highly scalable and flexible data management and sharing across an organization, the internet or for your own personal data-organizing enjoyment.
 
-We're also working toward an awesome cross-platform graphical user interface (GUI). `Sign up for updates <https://uav4geo.com/software/dronedb>`_.
+`DroneDB Desktop <https://dronedb.app/dashboard>`_ is a graphical user interface for browsing and sharing aerial data (currently Windows only, but Mac/Linux clients coming soon).
+
+`ddb <http://0.0.0.0:8000/download.html#installation>`_ provides a command line client for exploring and sharing aerial data, making the task of sharing images with others as simple as typing:
+
+::
+
+    ddb share *.JPG
+
+DroneDB is also available as a library (``libddb``), with bindings for `Node.JS <https://github.com/DroneDB/DroneDB/tree/master/nodejs>`_ and `.NET <https://github.com/DroneDB/DDB.Bindings>`_. Python bindings are coming soon.
 
 *DroneDB is in early development stages and is targeted at GIS geeks and early adopters. Try it out!*
 
