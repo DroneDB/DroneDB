@@ -381,13 +381,7 @@ fs::path TilerHelper::toGeoTIFF(const fs::path &tileablePath, int tileSize, bool
             if (std::rand() % 1000 == 0) cleanupUserCache();
             time_t modifiedTime = io::Path(tileablePath).getModifiedTime();
             fs::path tileCacheFolder = UserProfile::get()->getTilesDir() / getCacheFolderName(tileablePath, modifiedTime, tileSize);
-
-            if (!fs::exists(tileCacheFolder)){
-                // Try to create
-                if (!fs::create_directories(tileCacheFolder)){
-                    throw FSException(tileCacheFolder.string() + " is not a valid directory (cannot create it).");
-                }
-            }
+            io::assureFolderExists(tileCacheFolder);
 
             outputPath = tileCacheFolder / "geoprojected.tif";
         }
