@@ -51,7 +51,7 @@ void Tile::run(cxxopts::ParseResult &opts) {
     auto tileSize = opts["size"].as<int>();
 
     fs::path geotiff = ddb::TilerHelper::toGeoTIFF(input, tileSize, true);
-    ddb::Tiler tiler(geotiff, output, tileSize, tms);
+    ddb::Tiler tiler(geotiff.string(), output, tileSize, tms);
     ddb::TilerHelper::runTiler(tiler, std::cout, format, z, x, y);    
 }
 
