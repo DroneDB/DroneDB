@@ -76,13 +76,13 @@ std::string ShareService::share(const std::vector<std::string> &input,
 
     for (auto &fp : filePaths) {
         auto p = io::Path(fp);
-        auto filesize = p.getSize();
-        auto filename = fp.filename().string();
+        auto fileSize = p.getSize();
+        auto fileName = fp.filename().string();
 
         LOGD << "Current Path = " << fp;
 
-        sfp.filename = filename;
-        sfp.totalBytes = filesize;
+        sfp.filename = fileName;
+        sfp.totalBytes = fileSize;
         sfp.txBytes = 0;
 
         if (p.isAbsolute() && !wd.isParentOf(p.get())) {
@@ -93,16 +93,16 @@ std::string ShareService::share(const std::vector<std::string> &input,
 
         const auto maxUploadSize = client.getMaxUploadSize();
 
-        if (filesize > maxUploadSize) {
+        if (fileSize > maxUploadSize) {
             LOGD << "Uploading chunked " << p.string();
 
             ChunkedUploadClient cuc(&reg, &client);
 
-            const auto chunks = static_cast<int>(ceil(static_cast<double>(filesize) / maxUploadSize));
+            const auto chunks = static_cast<int>(ceil(static_cast<double>(fileSize) / maxUploadSize));
 
             LOGD << "Using " << chunks << " chunks";
 
-            auto sessionId = cuc.StartSession(chunks, filesize);
+            auto sessionId = cuc.StartSession(chunks, fileSize, fileName);
 
             LOGD << "Started session with id " << sessionId;
 
@@ -111,7 +111,7 @@ std::string ShareService::share(const std::vector<std::string> &input,
                 LOGD << "Uploading chunk " << n;
 
                 const auto pos = n * maxUploadSize;
-                auto chunkSize = std::min(maxUploadSize, filesize - pos);
+                auto chunkSize = std::min(maxUploadSize, fileSize - pos);
 
                 LOGD << "Pos = " << pos << ", chunkSize = " << chunkSize;
 
@@ -120,11 +120,27 @@ std::string ShareService::share(const std::vector<std::string> &input,
 
                 if (stream->is_open())
                 {
-                    cuc.UploadToSession(n, stream, pos, chunkSize);
+                    cuc.UploadToSession(n, stream, pos, chunkSize,
+                        [&cb, &files, &sfp, &fileSize, &gTotalBytes, &gTxBytes](
+                            std::string &fileName, size_t txBytes, size_t totalBytes) {
+                            if (cb == nullptr) return true;
+
+                            // We cap the txBytes from CURL since it
+                            // includes data transferred from the
+                            // request
+
+                            // CAUTION: this will require a lock if you
+                            // use threads
+                            sfp.txBytes = std::min(fileSize, txBytes);
+                            return cb(files, gTxBytes + sfp.txBytes, gTotalBytes);
+                        });
+
+                    gTxBytes += fileSize;
+
                     stream->close();
                 } else
                     throw InvalidArgsException("Cannot open input file " +
-                                               filename);
+                                               fileName);
 
                 delete stream;
             }
@@ -140,7 +156,7 @@ std::string ShareService::share(const std::vector<std::string> &input,
 
             client.Upload(
                 p.generic(), fp,
-                [&cb, &files, &sfp, &filesize, &gTotalBytes, &gTxBytes](
+                [&cb, &files, &sfp, &fileSize, &gTotalBytes, &gTxBytes](
                     std::string &fileName, size_t txBytes, size_t totalBytes) {
                     if (cb == nullptr) return true;
 
@@ -152,7 +168,7 @@ std::string ShareService::share(const std::vector<std::string> &input,
                     // use threads
 
                     gTxBytes -= sfp.txBytes;
-                    sfp.txBytes = std::min(filesize, txBytes);
+                    sfp.txBytes = std::min(fileSize, txBytes);
                     gTxBytes += sfp.txBytes;
                     return cb(files, gTxBytes, gTotalBytes);
                 });

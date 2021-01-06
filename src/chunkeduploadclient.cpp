@@ -17,11 +17,14 @@ const int MAX_RETRIES = 10;
 
 ChunkedUploadClient::ChunkedUploadClient(ddb::Registry* registry,
                                          ddb::ShareClient* shareClient)
-    : sessionId(0), chunks(0), registry(registry), shareClient(shareClient) {
+    : 
+      registry(registry),
+      shareClient(shareClient)
+{
     //
 }
 
-DDB_DLL int ChunkedUploadClient::StartSession(int chunks, size_t size) {
+DDB_DLL int ChunkedUploadClient::StartSession(int chunks, size_t size, const std::string& fileName) {
     const auto token = this->shareClient->getToken();
 
     if (token.empty())
@@ -33,6 +36,8 @@ DDB_DLL int ChunkedUploadClient::StartSession(int chunks, size_t size) {
     LOGD << "StartSession(" << chunks << ", " << size << ")";
 
     this->chunks = chunks;
+    this->fileName = fileName;
+    this->size = size;
 
     // Commit
     int retryNum = 0;
@@ -75,7 +80,8 @@ DDB_DLL int ChunkedUploadClient::StartSession(int chunks, size_t size) {
  *
  */
 DDB_DLL void ChunkedUploadClient::UploadToSession(int index,
-                                                  std::istream* input, size_t byteOffset, size_t byteLength) {
+                                                  std::istream* input, size_t byteOffset, size_t byteLength,
+                                                  const UploadCallback& cb) {
     const auto token = this->shareClient->getToken();
 
     if (token.empty())
@@ -88,7 +94,10 @@ DDB_DLL void ChunkedUploadClient::UploadToSession(int index,
 
     LOGD << "UploadToSession(" << indexStr << ", " << byteLength << ")";
 
+    LOGD << "byteOffset = " << byteOffset;
+    size_t gTxBytes = byteOffset;
     int retryNum = 0;
+
     while (true) {
         try {
             this->registry->ensureTokenValidity();
@@ -103,7 +112,16 @@ DDB_DLL void ChunkedUploadClient::UploadToSession(int index,
                 net::POST(url)
                     .authToken(this->registry->getAuthToken())
                     .multiPartFormData("file", input, byteOffset, byteLength)
-                    .send();
+                    .progressCb([&cb, &gTxBytes, this](size_t txBytes, size_t totalBytes) {
+                        if (cb == nullptr) return true;
+
+                        /*LOGD << this->fileName << ": " << gTxBytes + txBytes
+                             << " / " << totalBytes << " / "
+                             << this->size;*/
+
+                        return cb(this->fileName, gTxBytes + txBytes, this->size);
+                    })
+            .send();
 
             if (res.status() != 200) this->registry->handleError(res);
 
