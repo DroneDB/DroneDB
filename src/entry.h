@@ -78,11 +78,20 @@ struct Entry {
 
 };
 
+/** Parse an entry
+ * @param path path to file
+ * @param rootDirectory root directory from which to compute relative path
+ * @param entry reference to output Entry object
+ * @param withHash whether to compute the hash of the file (slow)
+ */
 DDB_DLL void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entry, bool wishHash = true);
 DDB_DLL Geographic2D getRasterCoordinate(OGRCoordinateTransformationH hTransform, double *geotransform, double x, double y);
 DDB_DLL void calculateFootprint(const SensorSize &sensorSize, const GeoLocation &geo, const Focal &focal, const CameraOrientation &cameraOri, double relAltitude, BasicGeometry &geom);
 DDB_DLL void parseDroneDBEntry(const fs::path &ddbPath, Entry &entry);
 
+/** Identify whether a file is an Image, GeoImage, Georaster or something else
+ * as quickly as possible. Does not fingerprint for other types. */
+DDB_DLL EntryType fingerprint(const fs::path &path);
 
 }
 

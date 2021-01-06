@@ -7,10 +7,19 @@ on:
 jobs:
   build-docs:
     runs-on: ubuntu-latest
-
     steps:
     - name: Checkout
-      uses: actions/checkout@v1
+      uses: actions/checkout@v2
+      with:
+        submodules: 'recursive'
+    - name: Install deps
+      run: scripts/ubuntu_deps.sh
+    - name: Run CMake
+      run: mkdir build && cd build && cmake -DBUILD_TESTING=OFF ..
+    - name: Build C++ lib/program and tests
+      run: cd build && make -j$(nproc) ddbcmd && make install
+    - name: Autogenerate command docs
+      run: ddb --gendocs --outdir docs/commands/
     - name: Sphinx Build
       uses: ammaraskar/sphinx-action@0.4
       with:

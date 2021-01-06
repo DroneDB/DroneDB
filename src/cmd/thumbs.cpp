@@ -13,14 +13,14 @@ void Thumbs::setOptions(cxxopts::Options &opts) {
     // clang-format off
     opts
     .positional_help("[args]")
-    .custom_help("thumbs output/ *.JPG")
+    .custom_help("thumbs [image.tif | *.JPG] -o [thumb.jpg | output/]")
     .add_options()
-    ("i,input", "Files to generate thumbnails of", cxxopts::value<std::vector<std::string>>())
-    ("o,output", "Output directory where to store thumbnails", cxxopts::value<std::string>())
+    ("i,input", "File(s) to process", cxxopts::value<std::vector<std::string>>())
+    ("o,output", "Output file or directory where to store thumbnail(s)", cxxopts::value<std::string>())
     ("s,size", "Size of the largest side of the images", cxxopts::value<int>()->default_value("512"))
     ("use-crc", "Use CRC for output filenames", cxxopts::value<bool>());
     // clang-format on
-    opts.parse_positional({"output", "input"});
+    opts.parse_positional({"input"});
 }
 
 std::string Thumbs::description() {
