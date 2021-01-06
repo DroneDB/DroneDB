@@ -396,7 +396,7 @@ fs::path TilerHelper::toGeoTIFF(const fs::path &tileablePath, int tileSize, bool
         // We need to (attempt) to geoproject the file first
         if (!fs::exists(outputPath) || forceRecreate){
             std::vector<std::string> input = { tileablePath };
-            ddb::geoProject(input, outputPath, "100%", true);
+            ddb::geoProject(input, outputPath.string(), "100%", true);
         }
 
         return outputPath;
