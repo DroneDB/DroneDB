@@ -31,27 +31,28 @@ bool supportsThumbnails(EntryType type){
 }
 
 void generateThumbs(const std::vector<std::string> &input, const fs::path &output, int thumbSize, bool useCrc){
-    if (!fs::is_directory(output)) throw FSException(output.string() + " is not a valid directory");
+    if (input.size() > 1) io::assureFolderExists(output);
+    bool outputIsFile = input.size() == 1 && io::Path(output).checkExtension({"jpg", "jpeg"});
 
     std::vector<fs::path> filePaths = std::vector<fs::path>(input.begin(), input.end());
 
     for (auto &fp : filePaths){
         LOGD << "Parsing entry " << fp.string();
 
-        Entry e;
-        parseEntry(fp, "/", e, false);
-
-        e.path = (fs::path("/") / fs::path(e.path)).string(); // TODO: does this work on Windows?
-        if (supportsThumbnails(e.type)){
+        EntryType type = fingerprint(fp);
+        io::Path p(fp);
+        if (supportsThumbnails(type)){
             fs::path outImagePath;
             if (useCrc){
-                outImagePath = output / getThumbFilename(e.path, e.mtime, thumbSize);
+                outImagePath = output / getThumbFilename(fp, p.getModifiedTime(), thumbSize);
+            }else if (outputIsFile){
+                outImagePath = output;
             }else{
-                outImagePath = output / fs::path(e.path).replace_extension(".jpg").filename();
+                outImagePath = output / fs::path(fp).replace_extension(".jpg").filename();
             }
-            std::cout << generateThumb(e.path, thumbSize, outImagePath, true).string() << std::endl;
+            std::cout << generateThumb(fp, thumbSize, outImagePath, true).string() << std::endl;
         }else{
-            LOGD << "Skipping " << e.path;
+            LOGD << "Skipping " << fp;
         }
     }
 }
@@ -111,6 +112,16 @@ fs::path generateThumb(const fs::path &imagePath, int thumbSize, const fs::path 
 
     targs = CSLAddString(targs, "-co");
     targs = CSLAddString(targs, "WRITE_EXIF_METADATA=NO");
+
+    // Max 3 bands + alpha
+    if (GDALGetRasterCount(hSrcDataset) > 4){
+        targs = CSLAddString(targs, "-b");
+        targs = CSLAddString(targs, "1");
+        targs = CSLAddString(targs, "-b");
+        targs = CSLAddString(targs, "2");
+        targs = CSLAddString(targs, "-b");
+        targs = CSLAddString(targs, "3");
+    }
 
     CPLSetConfigOption("GDAL_PAM_ENABLED", "NO"); // avoid aux files for PNG tiles
     CPLSetConfigOption("GDAL_ALLOW_LARGE_LIBJPEG_MEM_ALLOC", "YES"); // Avoids ERROR 6: Reading this image would require libjpeg to allocate at least 107811081 bytes

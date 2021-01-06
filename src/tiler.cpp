@@ -64,12 +64,7 @@ Tiler::Tiler(const std::string &geotiffPath, const std::string &outputFolder, in
     if (!fs::exists(geotiffPath)) throw FSException(geotiffPath + " does not exists");
     if (tileSize <= 0 || std::ceil(std::log2(tileSize) != std::floor(std::log2(tileSize)))) throw GDALException("Tile size must be a power of 2 greater than 0");
 
-    if (!fs::exists(outputFolder)){
-        // Try to create
-        if (!fs::create_directories(outputFolder)){
-            throw FSException(outputFolder + " is not a valid directory (cannot create it).");
-        }
-    }
+    io::assureFolderExists(outputFolder);
 
     pngDrv = GDALGetDriverByName( "PNG" );
     if (pngDrv == nullptr) throw GDALException("Cannot create PNG driver");
@@ -362,6 +357,36 @@ fs::path TilerHelper::getFromUserCache(const fs::path &geotiffPath, int tz, int 
 
     Tiler t(geotiffPath.string(), tileCacheFolder.string(), tileSize, tms);
     return t.tile(tz, tx, ty);
+}
+
+fs::path TilerHelper::toGeoTIFF(const fs::path &tileablePath, int tileSize, bool forceRecreate, const fs::path &outputGeotiff){
+    EntryType type = fingerprint(tileablePath);
+
+    if (type == EntryType::GeoRaster){
+        // Georasters can be tiled directly
+        return tileablePath;
+    }else{
+        fs::path outputPath = outputGeotiff;
+
+        if (outputGeotiff.empty()){
+            // Store in user cache if user doesn't specify a preference
+            if (std::rand() % 1000 == 0) cleanupUserCache();
+            time_t modifiedTime = io::Path(tileablePath).getModifiedTime();
+            fs::path tileCacheFolder = UserProfile::get()->getTilesDir() / getCacheFolderName(tileablePath, modifiedTime, tileSize);
+            io::assureFolderExists(tileCacheFolder);
+
+            outputPath = tileCacheFolder / "geoprojected.tif";
+        }
+
+
+        // We need to (attempt) to geoproject the file first
+        if (!fs::exists(outputPath) || forceRecreate){
+            std::vector<std::string> input = { tileablePath };
+            ddb::geoProject(input, outputPath.string(), "100%", true);
+        }
+
+        return outputPath;
+    }
 }
 
 void TilerHelper::cleanupUserCache(){
