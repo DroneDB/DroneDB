@@ -43,38 +43,10 @@ void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
     } else {
         if (entry.hash == "" && withHash) entry.hash = Hash::fileSHA256(path.string());
         entry.size = p.getSize();
+        entry.type = fingerprint(p.get());
 
-        entry.type = EntryType::Generic; // Default
-
-        bool jpg = p.checkExtension({"jpg", "jpeg"});
-        bool dng = p.checkExtension({"dng"});
-        bool tif = p.checkExtension({"tif", "tiff"});
-        bool nongeoImage = p.checkExtension({"png", "gif"});
-
-        bool georaster = false;
-
-        if (tif){
-            GDALDatasetH  hDataset;
-            hDataset = GDALOpen( p.string().c_str(), GA_ReadOnly );
-            if( hDataset != NULL ){
-                const char *proj = GDALGetProjectionRef(hDataset);
-                if (proj != NULL){
-                    georaster = std::string(proj) != "";
-                }
-                GDALClose(hDataset);
-            }else{
-                LOGW << "Cannot open " << p.string().c_str() << " for georaster test";
-            }
-        }
-
-        bool image = (jpg || tif || dng || nongeoImage) && !georaster;
-
-        if (image) {
-            // A normal image by default (refined later)
-            entry.type = EntryType::Image;
-
+        if (entry.type == EntryType::Image || entry.type == EntryType::GeoImage) {
             try{
-
                 auto image = Exiv2::ImageFactory::open(path.string());
                 if (!image.get()) throw new IndexException("Cannot open " + path.string());
 
@@ -126,11 +98,6 @@ void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
                         if (hasCameraOri && e.extractRelAltitude(relAltitude) && sensorSize.width > 0.0 && focal.length > 0.0) {
                             calculateFootprint(sensorSize, geo, focal, cameraOri, relAltitude, entry.polygon_geom);
                         }
-
-                        entry.type = EntryType::GeoImage;
-                    } else {
-                        // Not a georeferenced image, just a plain image
-                        // do nothing
                     }
                 } else {
                     LOGD << "No EXIF data found in " << path.string();
@@ -138,9 +105,7 @@ void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
             }catch(Exiv2::AnyError&){
                 LOGD << "Cannot read EXIF data: " << path.string();
             }
-        }else if (georaster){
-            entry.type = EntryType::GeoRaster;
-
+        }else if (entry.type == EntryType::GeoRaster){
             GDALDatasetH  hDataset;
             hDataset = GDALOpen( path.string().c_str(), GA_ReadOnly );
             int width = GDALGetRasterXSize(hDataset);
@@ -441,6 +406,64 @@ void parseDroneDBEntry(const fs::path &ddbPath, Entry &entry){
         LOGD << e.what();
         entry.type = EntryType::Directory;
     }
+}
+
+EntryType fingerprint(const fs::path &path){
+    EntryType type = EntryType::Generic;
+    io::Path p(path);
+
+    bool jpg = p.checkExtension({"jpg", "jpeg"});
+    bool dng = p.checkExtension({"dng"});
+    bool tif = p.checkExtension({"tif", "tiff"});
+    bool nongeoImage = p.checkExtension({"png", "gif"});
+
+    bool georaster = false;
+
+    if (tif){
+        GDALDatasetH  hDataset;
+        hDataset = GDALOpen( p.string().c_str(), GA_ReadOnly );
+        if( hDataset != NULL ){
+            const char *proj = GDALGetProjectionRef(hDataset);
+            if (proj != NULL){
+                georaster = std::string(proj) != "";
+            }
+            GDALClose(hDataset);
+        }else{
+            LOGW << "Cannot open " << p.string().c_str() << " for georaster test";
+        }
+    }
+
+    bool image = (jpg || tif || dng || nongeoImage) && !georaster;
+
+    if (image) {
+        // A normal image by default (refined later)
+        type = EntryType::Image;
+
+        try{
+            auto image = Exiv2::ImageFactory::open(path.string());
+            if (!image.get()) throw new IndexException("Cannot open " + path.string());
+
+            image->readMetadata();
+            ExifParser e(image.get());
+
+            if (e.hasExif()) {
+                GeoLocation geo;
+                if (e.extractGeo(geo)) {
+                    type = EntryType::GeoImage;
+                } else {
+                    // Not a georeferenced image, just a plain image
+                }
+            } else {
+                LOGD << "No EXIF data found in " << path.string();
+            }
+        }catch(Exiv2::AnyError&){
+            LOGD << "Cannot read EXIF data: " << path.string();
+        }
+    }else if (georaster){
+        type = EntryType::GeoRaster;
+    }
+
+    return type;
 }
 
 
