@@ -17,7 +17,7 @@ const int MAX_RETRIES = 10;
 
 ChunkedUploadClient::ChunkedUploadClient(ddb::Registry* registry,
                                          ddb::ShareClient* shareClient)
-    : 
+    : fileName(""),
       registry(registry),
       shareClient(shareClient)
 {

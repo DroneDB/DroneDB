@@ -20,7 +20,7 @@ class ChunkedUploadClient{
     int chunks = 0;
     size_t size = 0;
 
-    std::string& fileName = std::string("");
+    std::string fileName;
     ddb::Registry *registry;
     ddb::ShareClient *shareClient;
 
