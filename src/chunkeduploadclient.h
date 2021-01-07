@@ -16,8 +16,11 @@ namespace ddb{
 
 class ChunkedUploadClient{
 
-    int sessionId;
-    int chunks;
+    int sessionId = 0;
+    int chunks = 0;
+    size_t size = 0;
+
+    std::string fileName;
     ddb::Registry *registry;
     ddb::ShareClient *shareClient;
 
@@ -25,12 +28,14 @@ public:
     
     DDB_DLL ChunkedUploadClient(ddb::Registry* registry, ddb::ShareClient *shareClient);
 
-    DDB_DLL int StartSession(int chunks, size_t size);
-    DDB_DLL void UploadToSession(int index, std::istream* input, size_t byteOffset, size_t byteLength);
+    DDB_DLL int StartSession(int chunks, size_t size, const std::string& fileName);
+    DDB_DLL void UploadToSession(int index, std::istream* input,
+                                 size_t byteOffset, size_t byteLength,
+                                 const UploadCallback& cb);
     DDB_DLL void CloseSession(const std::string& path, const fs::path& filePath);
 
     DDB_DLL int getSessionId() const;
-
+    
 };
 
 }

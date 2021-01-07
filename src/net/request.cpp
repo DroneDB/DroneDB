@@ -174,13 +174,11 @@ DDB_DLL Request &Request::multiPartFormData(const std::string& filename,
 
     const curl_read_callback rcb = [](char *buffer, size_t size, size_t nitems,
                                       void *arg) {
-        LOGD << "curl_read_callback(" << size << ", " << nitems << ")";
         auto *p = static_cast<struct ctl *>(arg);
 
         size_t sz = p->size - p->position;
 
-        LOGD << "Current = " << p->stream->tellg();
-        LOGD << "Reading " << sz << " data";
+        LOGD << "curl_read_callback(" << size << ", " << nitems << ") cur = " << p->stream->tellg() << " reading " << sz << " data";
 
         nitems *= size;
         if(sz > nitems) sz = nitems;
