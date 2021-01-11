@@ -23,9 +23,22 @@ module.exports = class Dataset{
         return `/orgs/${this.org}/ds/${this.ds}`;
     }
 
-    downloadUrl(paths){
+    downloadUrl(paths, options = {}){
+        if (typeof paths === "string") paths = [paths];
+
         let url = `${this.baseApi}/download`;
-        if (paths) url += `?path=${paths.join(",")}`;
+
+        let q = {};
+
+        if (paths !== undefined){
+            if (paths.length > 1) q.path = paths.join(",");
+            else url += `/${paths[0]}`;
+        }
+
+        if (options.inline) q.inline = "1";
+        q = new URLSearchParams(q).toString();
+        if (q) url += `?${q}`;
+
         return url;
     }
 

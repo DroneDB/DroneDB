@@ -9,7 +9,7 @@
 
 namespace ddb {
 
-DDB_DLL void geoProject(const std::vector<std::string> &images, const std::string &output, const std::string &outsize = "", bool stopOnError = false);
+DDB_DLL std::string geoProject(const std::vector<std::string> &images, const std::string &output, const std::string &outsize = "", bool stopOnError = false);
 
 }
 

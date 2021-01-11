@@ -9,7 +9,7 @@
 
 namespace ddb {
 
-void geoProject(const std::vector<std::string> &images, const std::string &output, const std::string &outsize, bool stopOnError){
+std::string geoProject(const std::vector<std::string> &images, const std::string &output, const std::string &outsize, bool stopOnError){
     bool isDirectory = fs::is_directory(output);
     bool outputToDir = images.size() > 1 || isDirectory;
     if (outputToDir){
@@ -140,11 +140,11 @@ void geoProject(const std::vector<std::string> &images, const std::string &outpu
                  nullptr);
         GDALWarpAppOptionsFree(waOptions);
 
-        std::cout << "W\t" << outFile << std::endl;
-
         GDALClose(hSrcDataset);
         GDALClose(hDstDataset);
         GDALClose(hWrpDataset);
+
+        return outFile;
     }
 }
 

@@ -384,6 +384,9 @@ fs::path TilerHelper::toGeoTIFF(const fs::path &tileablePath, int tileSize, bool
             io::assureFolderExists(tileCacheFolder);
 
             outputPath = tileCacheFolder / "geoprojected.tif";
+        }else{
+            // Just make sure the parent path exists
+            io::assureFolderExists(outputGeotiff.parent_path());
         }
 
 
