@@ -83,6 +83,7 @@
         "xtree": "cpp",
         "string_view": "cpp",
         "xmemory0": "cpp",
-        "*.incl_cpp": "cpp"
+        "*.incl_cpp": "cpp",
+        "compare": "cpp"
     }
 }

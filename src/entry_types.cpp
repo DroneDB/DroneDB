@@ -3,29 +3,25 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "entry_types.h"
 
-namespace ddb{
+namespace ddb {
+
+std::map<EntryType, std::string> typeMapper {
+    { EntryType::Undefined, "Undefined"},
+    { EntryType::Directory, "Directory"},
+    { EntryType::Generic, "Generic"},
+    { EntryType::GeoImage, "GeoImage"},
+    { EntryType::GeoRaster, "GeoRaster"},
+    { EntryType::PointCloud, "PointCloud"},
+    { EntryType::Image, "Image"},
+    { EntryType::DroneDB, "DroneDB"},
+    { EntryType::Markdown, "Markdown"}
+};
 
 std::string typeToHuman(EntryType t){
-    switch(t){
-        case EntryType::Undefined:
-            return "Undefined";
-        case EntryType::Directory:
-            return "Directory";
-        case EntryType::Generic:
-            return "Generic";
-        case EntryType::GeoImage:
-            return "GeoImage";
-        case EntryType::GeoRaster:
-            return "GeoRaster";
-        case EntryType::PointCloud:
-            return "PointCloud";
-        case EntryType::Image:
-            return "Image";
-        case EntryType::DroneDB:
-            return "DroneDB";
-        default:
-            return "?";
-    }
+    
+    auto res = typeMapper.find(t);
+
+    return res != typeMapper.end() ? res->second : "?";
 }
 
 }

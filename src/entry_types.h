@@ -5,11 +5,22 @@
 #define ENTRYTYPES_H
 
 #include <string>
+#include <map>
 #include "ddb_export.h"
 
 namespace ddb{
 
-enum EntryType { Undefined = 0, Directory = 1, Generic, GeoImage, GeoRaster, PointCloud, Image, DroneDB };
+enum EntryType { 
+    Undefined = 0, 
+    Directory = 1, 
+    Generic = 2, 
+    GeoImage = 3, 
+    GeoRaster = 4, 
+    PointCloud = 5, 
+    Image = 6, 
+    DroneDB = 7,
+    Markdown = 8
+};
 
 DDB_DLL std::string typeToHuman(EntryType t);
 
