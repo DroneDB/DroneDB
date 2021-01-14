@@ -412,6 +412,11 @@ EntryType fingerprint(const fs::path &path){
     EntryType type = EntryType::Generic;
     io::Path p(path);
 
+    bool markdown = p.checkExtension({".md"});
+
+    if (markdown) 
+        return EntryType::Markdown;
+
     bool jpg = p.checkExtension({"jpg", "jpeg"});
     bool dng = p.checkExtension({"dng"});
     bool tif = p.checkExtension({"tif", "tiff"});

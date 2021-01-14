@@ -11,7 +11,8 @@ module.exports = {
 	    GEORASTER: 4,
 	    POINTCLOUD: 5,
 	    IMAGE: 6,
-	    DRONEDB: 7
+		DRONEDB: 7,
+		MARKDOWN: 8
 	},
 
 	typeToHuman: function(t){
@@ -31,7 +32,9 @@ module.exports = {
 	        case this.type.IMAGE:
 	            return "Image";
 	        case this.type.DRONEDB:
-	            return "DroneDB";
+				return "DroneDB";
+			case this.type.MARKDOWN:
+				return "Markdown";
 	        default:
 	            return "?";
 	    }
@@ -47,4 +50,4 @@ module.exports = {
         return entry.type === this.type.DIRECTORY ||
             entry.type === this.type.DRONEDB;
     }
-}
+};
