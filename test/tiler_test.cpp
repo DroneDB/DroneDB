@@ -17,9 +17,12 @@ TEST(testTiler, RGB) {
     fs::path tileDir = ta.getFolder("tiles");
 
     Tiler t(ortho.string(), tileDir.string());
+    
     t.tile(19, 128168, 339545);
 
     EXPECT_TRUE(fs::exists(tileDir / "19" / "128168" / "339545.png"));
+
+    fs::remove(ortho);
 }
 
 TEST(testTiler, DSM){
