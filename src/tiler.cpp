@@ -134,6 +134,7 @@ Tiler::Tiler(const std::string &geotiffPath, const std::string &outputFolder,
 
     // Check if we need to reproject
     if (!sameProjection(inputSrs, outputSrs)) {
+        origDataset = inputDataset;
         inputDataset = createWarpedVRT(inputDataset, outputSrs);
     }
 
@@ -182,6 +183,7 @@ Tiler::Tiler(const std::string &geotiffPath, const std::string &outputFolder,
 
 Tiler::~Tiler() {
     if (inputDataset) GDALClose(inputDataset);
+    if (origDataset) GDALClose(origDataset);
 }
 
 std::string Tiler::tile(int tz, int tx, int ty) {
@@ -551,8 +553,6 @@ GDALDatasetH Tiler::createWarpedVRT(const GDALDatasetH &src,
     const GDALDatasetH warpedVrt = GDALAutoCreateWarpedVRT(
         src, srcWkt, dstWkt, resampling, 0.001, nullptr);
     if (warpedVrt == nullptr) throw GDALException("Cannot create warped VRT");
-
-    GDALClose(src);
 
     return warpedVrt;
 }

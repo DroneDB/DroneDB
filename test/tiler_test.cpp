@@ -15,14 +15,13 @@ TEST(testTiler, RGB) {
     fs::path ortho = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/brighton/odm_orthophoto.tif",
                                           "ortho.tif");
     fs::path tileDir = ta.getFolder("tiles");
-
+    
     Tiler t(ortho.string(), tileDir.string());
     
     t.tile(19, 128168, 339545);
-
+    
     EXPECT_TRUE(fs::exists(tileDir / "19" / "128168" / "339545.png"));
 
-    fs::remove(ortho);
 }
 
 TEST(testTiler, DSM){

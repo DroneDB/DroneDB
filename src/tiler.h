@@ -81,6 +81,8 @@ class Tiler {
     GDALDriverH memDrv;
 
     GDALDatasetH inputDataset = nullptr;
+    GDALDatasetH origDataset = nullptr;
+    
     int rasterCount;
     int nBands;
 
