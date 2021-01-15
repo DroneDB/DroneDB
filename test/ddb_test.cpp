@@ -894,5 +894,19 @@ TEST(loadPolygonGeom, emptyJsonObj)
 
 }
 
+TEST(fingerprint, fileHandle) {
+    TestArea ta(TEST_NAME);
+    fs::path ortho = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/brighton/odm_orthophoto.tif",
+                                          "ortho.tif");
+
+    auto fp = ddb::fingerprint(ortho);
+
+    EXPECT_TRUE(fp == ddb::EntryType::GeoRaster);
+
+    // Test if keeps the file open
+    // fs::remove(ortho);
+
+}
+
 
 }
