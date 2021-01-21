@@ -59,6 +59,11 @@ module.exports = class Dataset{
     async download(paths){
         return this.registry.postRequest(`${this.baseApi}/download`, { path: paths });
     }
+
+    async getFileContents(path){
+        const url = this.downloadUrl(path, { inline: true });
+        return this.registry.getRequest(url);
+    }
     
     async info(){
         return this.registry.getRequest(`${this.baseApi}`);
