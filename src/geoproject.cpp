@@ -9,11 +9,15 @@
 
 namespace ddb {
 
-std::string geoProject(const std::vector<std::string> &images, const std::string &output, const std::string &outsize, bool stopOnError){
+void geoProject(const std::vector<std::string> &images, const std::string &output, const std::string &outsize, bool stopOnError, const GeoProjectCallback &callback){
     bool isDirectory = fs::is_directory(output);
     bool outputToDir = images.size() > 1 || isDirectory;
     if (outputToDir){
         if (!isDirectory){
+            // Bad input?
+            if (fs::is_regular_file(output)){
+                throw FSException(output + " is a file. (Did you switch the input and output parameters?)");
+            }
             if (!fs::create_directories(output)){
                 throw FSException(output + " is not a valid directory (cannot create it).");
             }
@@ -144,7 +148,9 @@ std::string geoProject(const std::vector<std::string> &images, const std::string
         GDALClose(hDstDataset);
         GDALClose(hWrpDataset);
 
-        return outFile;
+        if (callback){
+            if (!callback(outFile)) return;
+        }
     }
 }
 

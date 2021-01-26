@@ -36,7 +36,10 @@ void GeoProj::run(cxxopts::ParseResult &opts) {
     auto output = opts["output"].as<std::string>();
     auto outsize = opts["size"].as<std::string>();
 
-    std::cout << "W\t" << ddb::geoProject(images, output, outsize);
+    ddb::geoProject(images, output, outsize, false, [](const std::string &imageWritten){
+        std::cout << "W\t" << imageWritten << std::endl;
+        return true;
+    });
 }
 
 }

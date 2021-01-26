@@ -76,6 +76,20 @@ void Database::chattr(json attrs){
 json Database::getAttributes() const{
     json j;
     j["public"] = this->isPublic();
+
+    // See if we have a LICENSE.md and README.md in the index
+    const std::string sql = "SELECT path FROM entries WHERE path = 'LICENSE.md' OR path = 'README.md'";
+
+    const auto q = this->query(sql);
+    while (q->fetch()){
+        const std::string p = q->getText(0);
+        if (p == "README.md"){
+            j["readme"] = p;
+        }else if (p == "LICENSE.md"){
+            j["license"] = p;
+        }
+    }
+
     return j;
 }
 
