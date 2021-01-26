@@ -18,7 +18,7 @@ cd "${__dirname}"
 #
 # TODO: this needs to be updated automatically...
 
-LATEST_RELEASE="https://github.com/DroneDB/DroneDB/releases/download/v0.9.7/ddb-0.9.7-linux.tgz"
+LATEST_RELEASE="https://github.com/DroneDB/DroneDB/releases/download/v0.9.8/ddb-0.9.8-linux.tgz"
 
 command_exists() {
 	command -v "$@" > /dev/null 2>&1
