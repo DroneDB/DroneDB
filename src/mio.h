@@ -19,7 +19,8 @@
 
 #ifdef WIN32
 #else
-#include <semaphore.h>
+#include <fcntl.h>
+#include <sys/file.h>
 #endif
 
 namespace fs = std::filesystem;
@@ -64,8 +65,8 @@ public:
 };
 
 class FileLock{
-    sem_t *sem = nullptr;
-    std::string semName;
+    int fd;
+    std::string lockFile;
 public:
     FileLock(const fs::path &p);
     ~FileLock();

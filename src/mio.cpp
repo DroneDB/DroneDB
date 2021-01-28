@@ -354,35 +354,29 @@ fs::path assureFolderExists(const fs::path &d){
 }
 
 FileLock::FileLock(const fs::path &p){
-    semName = Hash::strCRC64(p.string());
+    lockFile = (p.parent_path() / p.filename()).string() + ".lock";
 
-    if ((sem = sem_open(semName.c_str(), O_CREAT, S_IRUSR | S_IWUSR, 1)) == SEM_FAILED){
-        throw ddb::AppException("Cannot acquire semaphore " + semName);
+    fd = open(lockFile.c_str(), O_CREAT, S_IRUSR | S_IWUSR);
+    if (fd == -1){
+        throw ddb::AppException("Cannot acquire lock " + lockFile);
     }
 
     // Block
-    LOGD << "Acquiring lock " << semName;
-    std::cout << "ACQUIRED LOCK!" << std::endl;
-    if (sem_wait(sem) != 0){
-        LOGD << "Cannot wait semaphore " + semName;
-    }
-    std::cout << "EXECUTING..." << std::endl;
+    LOGD << "Acquiring lock " << lockFile;
+    flock(fd, LOCK_EX);
 }
 
 FileLock::~FileLock(){
-    if (sem_post(sem) != 0){
-        LOGD << "Cannot post semaphore " + semName;
-    }
-    LOGD << "Freeing lock " + semName;
+    LOGD << "Freeing lock " + lockFile;
+    if (fd){
+        if (close(fd) != 0){
+            LOGD << "Cannot close lock " << lockFile;
+        }
 
-    if (sem_close(sem) != 0){
-        LOGD << "Cannot close semaphore " + semName;
+        if (unlink(lockFile.c_str()) != 0){
+            LOGD << "Cannot remove lock " << lockFile;
+        }
     }
-
-    if (sem_unlink(semName.c_str()) != 0){
-        LOGD << "Cannot unlink semaphore " + semName;
-    }
-
 }
 
 }

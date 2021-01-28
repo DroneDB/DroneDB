@@ -33,7 +33,6 @@ if (WIN32)
 endif()
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-set(THREADS_PREFER_PTHREAD_FLAG ON)
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "Release" CACHE STRING
@@ -95,15 +94,13 @@ find_package(GDAL REQUIRED)
 find_package(CURL REQUIRED)
 find_package(SpatiaLite REQUIRED)
 find_package(Sqlite3 REQUIRED)
-find_package(Threads REQUIRED)
 include_directories(${GDAL_INCLUDE_DIR})
 
 if (NOT WIN32)
     set(STDPPFS_LIBRARY stdc++fs)
-    set(THREADS_LIBRARY Threads::Threads)
 endif()
 
-set(LINK_LIBRARIES ${SPATIALITE_LIBRARY} ${SQLITE3_LIBRARY} ${STDPPFS_LIBRARY} exiv2lib ${GDAL_LIBRARY} ${CURL_LIBRARY} ${THREADS_LIBRARY})
+set(LINK_LIBRARIES ${SPATIALITE_LIBRARY} ${SQLITE3_LIBRARY} ${STDPPFS_LIBRARY} exiv2lib ${GDAL_LIBRARY} ${CURL_LIBRARY})
 set(CMD_SRC_LIST ${CMAKE_CURRENT_SOURCE_DIR}/src/cmd/main.cpp)
 
 add_subdirectory("src")

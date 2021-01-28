@@ -427,7 +427,12 @@ fs::path TilerHelper::toGeoTIFF(const fs::path &tileablePath, int tileSize,
 
         // We need to (attempt) to geoproject the file first
         if (!fs::exists(outputPath) || forceRecreate) {
+            // Multiple processes could be generating the geoprojected
+            // file at the same time, so we place a lock
             io::FileLock l(outputPath);
+
+            // Recheck is needed for other processes that might have generated
+            // the file
             if (!fs::exists(outputPath)){
                 ddb::geoProject({tileablePath.string()}, outputPath.string(),
                                 "100%", true);
