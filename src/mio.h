@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <fcntl.h>
 #include "fs.h"
 #include "ddb_export.h"
 #include "hash.h"
@@ -18,8 +19,10 @@
 #endif
 
 #ifdef WIN32
+#include <io.h> // _get_osfhandle
+#define	LOCK_EX	2
+#define LOCK_NB 4
 #else
-#include <fcntl.h>
 #include <sys/file.h>
 #endif
 
@@ -71,6 +74,11 @@ public:
     DDB_DLL FileLock(const fs::path &p);
     DDB_DLL ~FileLock();
 };
+
+#ifdef WIN32
+// emulate flock
+int flock (int fd, int operation);
+#endif
 
 DDB_DLL fs::path getExeFolderPath();
 DDB_DLL fs::path getDataPath(const fs::path &p);

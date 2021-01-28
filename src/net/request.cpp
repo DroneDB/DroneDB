@@ -45,7 +45,7 @@ Request::Request(const std::string &url, ReqType reqType)
             LOGD << "CA Bundle: " << caBundlePath.string();
             curl_easy_setopt(curl, CURLOPT_CAINFO, caBundlePath.string().c_str());
         }
-    } catch (AppException &e) {
+    } catch (AppException &) {
         if (curl) curl_easy_cleanup(curl);
         throw;
     }
