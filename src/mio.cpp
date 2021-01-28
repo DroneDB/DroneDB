@@ -342,14 +342,19 @@ size_t componentsCount(const fs::path &p){
 fs::path assureFolderExists(const fs::path &d){
     if (!fs::exists(d)){
         // Try to create
-        if (!fs::create_directories(d)){
-            throw FSException(d.string() + " is not a valid directory (cannot create it).");
-        }
+        createDirectories(d);
         return d;
     }else if (fs::is_directory(d)){
         return d;
     }else{
         throw FSException(d.string() + " is not a valid directory (there might be a file with the same name).");
+    }
+}
+
+void createDirectories(const fs::path &d){
+    std::error_code e;
+    if (!fs::create_directories(d, e)) {
+        throw FSException(d.string() + " is not a valid directory (error: " + e.message() + ").");
     }
 }
 

@@ -68,14 +68,15 @@ class FileLock{
     int fd;
     std::string lockFile;
 public:
-    FileLock(const fs::path &p);
-    ~FileLock();
+    DDB_DLL FileLock(const fs::path &p);
+    DDB_DLL ~FileLock();
 };
 
 DDB_DLL fs::path getExeFolderPath();
 DDB_DLL fs::path getDataPath(const fs::path &p);
 DDB_DLL fs::path getCwd();
 DDB_DLL fs::path assureFolderExists(const fs::path &d);
+DDB_DLL void createDirectories(const fs::path &d);
 
 // Prints to the provided buffer a nice number of bytes (KB, MB, GB, etc)
 DDB_DLL std::string bytesToHuman(std::uintmax_t bytes);

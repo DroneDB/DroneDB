@@ -57,8 +57,7 @@ std::string Tiler::getTilePath(int z, int x, int y, bool createIfNotExists) {
     // TODO: retina tiles support?
     const fs::path dir = outputFolder / std::to_string(z) / std::to_string(x);
     if (createIfNotExists && !fs::exists(dir)) {
-        if (!fs::create_directories(dir))
-            throw FSException("Cannot create " + dir.string());
+        io::createDirectories(dir);
     }
 
     fs::path p = dir / fs::path(std::to_string(y) + ".png");
@@ -80,10 +79,7 @@ Tiler::Tiler(const std::string &geotiffPath, const std::string &outputFolder,
 
     if (!fs::exists(outputFolder)) {
         // Try to create
-        if (!fs::create_directories(outputFolder)) {
-            throw FSException(outputFolder +
-                              " is not a valid directory (cannot create it).");
-        }
+        io::createDirectories(outputFolder);
     }
 
     pngDrv = GDALGetDriverByName("PNG");

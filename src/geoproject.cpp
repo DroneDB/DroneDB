@@ -4,6 +4,7 @@
 
 #include "dbops.h"
 #include "geoproject.h"
+#include "mio.h"
 #include <gdal_priv.h>
 #include <gdal_utils.h>
 
@@ -18,9 +19,7 @@ void geoProject(const std::vector<std::string> &images, const std::string &outpu
             if (fs::is_regular_file(output)){
                 throw FSException(output + " is a file. (Did you switch the input and output parameters?)");
             }
-            if (!fs::create_directories(output)){
-                throw FSException(output + " is not a valid directory (cannot create it).");
-            }
+            io::createDirectories(output);
         }
     }
 
