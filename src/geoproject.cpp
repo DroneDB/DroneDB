@@ -120,7 +120,11 @@ void geoProject(const std::vector<std::string> &images, const std::string &outpu
 
         GDALTranslateOptions* psOptions = GDALTranslateOptionsNew(targs, nullptr);
         CSLDestroy(targs);
-        GDALDatasetH hDstDataset = GDALTranslate("/vsimem/translated.tif",
+
+        std::string vsiFilename = "/vsimem/";
+        vsiFilename += p.filename().string() + "-" + std::to_string(rand()) + ".tif";
+
+        GDALDatasetH hDstDataset = GDALTranslate(vsiFilename.c_str(),
                                                 hSrcDataset,
                                                 psOptions,
                                                 nullptr);

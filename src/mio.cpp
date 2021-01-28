@@ -353,5 +353,37 @@ fs::path assureFolderExists(const fs::path &d){
     }
 }
 
+FileLock::FileLock(const fs::path &p){
+    semName = Hash::strCRC64(p.string());
+
+    if ((sem = sem_open(semName.c_str(), O_CREAT, S_IRUSR | S_IWUSR, 1)) == SEM_FAILED){
+        throw ddb::AppException("Cannot acquire semaphore " + semName);
+    }
+
+    // Block
+    LOGD << "Acquiring lock " << semName;
+    std::cout << "ACQUIRED LOCK!" << std::endl;
+    if (sem_wait(sem) != 0){
+        LOGD << "Cannot wait semaphore " + semName;
+    }
+    std::cout << "EXECUTING..." << std::endl;
+}
+
+FileLock::~FileLock(){
+    if (sem_post(sem) != 0){
+        LOGD << "Cannot post semaphore " + semName;
+    }
+    LOGD << "Freeing lock " + semName;
+
+    if (sem_close(sem) != 0){
+        LOGD << "Cannot close semaphore " + semName;
+    }
+
+    if (sem_unlink(semName.c_str()) != 0){
+        LOGD << "Cannot unlink semaphore " + semName;
+    }
+
+}
+
 }
 }

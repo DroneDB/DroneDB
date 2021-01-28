@@ -141,11 +141,6 @@ Tiler::Tiler(const std::string &geotiffPath, const std::string &outputFolder,
     OSRDestroySpatialReference(inputSrs);
     OSRDestroySpatialReference(outputSrs);
 
-    //    GDALDatasetH test = GDALCreateCopy(pngDrv,
-    //    "/data/drone/brighton2/test.png", inputDataset, FALSE, nullptr,
-    //    nullptr, nullptr); if (test == nullptr) throw GDALException("Cannot
-    //    create output dataset"); GDALClose(test); exit(1);
-
     // TODO: nodata?
     // if (inNodata.size() > 0){
     //        update_no_data_values
@@ -432,8 +427,11 @@ fs::path TilerHelper::toGeoTIFF(const fs::path &tileablePath, int tileSize,
 
         // We need to (attempt) to geoproject the file first
         if (!fs::exists(outputPath) || forceRecreate) {
-            ddb::geoProject({tileablePath.string()}, outputPath.string(),
-                            "100%", true);
+            io::FileLock l(outputPath);
+            if (!fs::exists(outputPath)){
+                ddb::geoProject({tileablePath.string()}, outputPath.string(),
+                                "100%", true);
+            }
         }
 
         return outputPath;

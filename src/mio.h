@@ -11,9 +11,15 @@
 #include <limits>
 #include "fs.h"
 #include "ddb_export.h"
+#include "hash.h"
 
 #ifdef WIN32
 #define stat _stat
+#endif
+
+#ifdef WIN32
+#else
+#include <semaphore.h>
 #endif
 
 namespace fs = std::filesystem;
@@ -55,6 +61,14 @@ public:
 
     DDB_DLL std::string string() const;
     DDB_DLL fs::path get() const{ return p; }
+};
+
+class FileLock{
+    sem_t *sem = nullptr;
+    std::string semName;
+public:
+    FileLock(const fs::path &p);
+    ~FileLock();
 };
 
 DDB_DLL fs::path getExeFolderPath();
