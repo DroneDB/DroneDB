@@ -354,7 +354,10 @@ fs::path assureFolderExists(const fs::path &d){
 void createDirectories(const fs::path &d){
     std::error_code e;
     if (!fs::create_directories(d, e)) {
-        throw FSException(d.string() + " is not a valid directory (error: " + e.message() + ").");
+        // For some reason sometimes this is zero (success)?
+        if (e.value() != 0){
+            throw FSException(d.string() + " is not a valid directory (error: " + e.message() + ").");
+        }
     }
 }
 
