@@ -20,10 +20,13 @@
 
 #ifdef WIN32
 #include <io.h> // _get_osfhandle
-#define	LOCK_EX	2
+#define LOCK_EX 2
 #define LOCK_NB 4
 #else
 #include <sys/file.h>
+#define _close close
+#define _unlink unlink
+#define _open open
 #endif
 
 namespace fs = std::filesystem;
