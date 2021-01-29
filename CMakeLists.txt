@@ -265,6 +265,10 @@ endif()
 
 set(OUTPUT_DIST_FILE "${PROJECT_NAME}-${APP_VERSION}-${PLATFORM_NAME}.${OUTPUT_DIST_EXT}")
 set(SUPPORT_FILES "proj.db" "sensor_data.sqlite" "timezone21.bin" "curl-ca-bundle.crt")
+if (WIN32)
+    # Linux usually comes with a zoneinfo database already
+    list(APPEND SUPPORT_FILES "zoneinfo")
+endif()
 
 set(DIST_FILES "")
 

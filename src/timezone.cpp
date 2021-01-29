@@ -1,6 +1,7 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+#include <mutex>
 #include "timezone.h"
 #include "logger.h"
 #include "mio.h"
@@ -10,6 +11,7 @@ using namespace ddb;
 
 bool Timezone::initialized = false;
 ZoneDetect *Timezone::db = nullptr;
+std::mutex timezoneMutex;
 
 [[ noreturn ]] void onError(int errZD, int errNative) {
     throw TimezoneException("Timezone error: " + std::string(ZDGetErrorString(errZD)) + " (" + std::to_string(errNative) + ")");
@@ -17,6 +19,7 @@ ZoneDetect *Timezone::db = nullptr;
 
 void Timezone::init() {
     if (initialized) return;
+    std::lock_guard<std::mutex> guard(timezoneMutex);
 
     ZDSetErrorHandler(onError);
     fs::path dbPath = io::getDataPath("timezone21.bin");
@@ -47,7 +50,7 @@ cctz::time_zone Timezone::lookupTimezone(double latitude, double longitude){
             std::string timezoneId = std::string(results[index].data[0]) + std::string(results[index].data[1]);
 
             if (!cctz::load_time_zone(timezoneId, &tz)) {
-                LOGD << "Cannot load timezone, defaulting to UTC: " << timezoneId;
+                LOGD << "Cannot load timezone " << timezoneId << ", defaulting to: " << tz.name();
             } else {
                 found = true;
                 break;

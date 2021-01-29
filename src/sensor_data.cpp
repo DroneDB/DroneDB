@@ -1,6 +1,7 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+#include <mutex>
 #include "sensor_data.h"
 #include "logger.h"
 #include "exceptions.h"
@@ -8,11 +9,14 @@
 
 namespace ddb{
 
+std::mutex dbInitMutex;
 SqliteDatabase* SensorData::db = nullptr;
 std::map<std::string, double> SensorData::cacheHits;
 std::map<std::string, bool> SensorData::cacheMiss;
 
 void SensorData::checkDbInit(){
+    std::lock_guard<std::mutex> guard(dbInitMutex);
+
     if (db == nullptr){
         db = new SqliteDatabase();
         LOGD << "Initializing sensor database";
