@@ -47,7 +47,7 @@ cctz::time_zone Timezone::lookupTimezone(double latitude, double longitude){
             std::string timezoneId = std::string(results[index].data[0]) + std::string(results[index].data[1]);
 
             if (!cctz::load_time_zone(timezoneId, &tz)) {
-                LOGD << "Cannot load timezone, defaulting to UTC: " << timezoneId;
+                LOGD << "Cannot load timezone " << timezoneId << ", defaulting to: " << tz.name();
             } else {
                 found = true;
                 break;

@@ -49,6 +49,10 @@
 #include "time_zone_fixed.h"
 #include "time_zone_posix.h"
 
+#ifdef WIN32
+#include "mio.h"
+#endif
+
 namespace cctz {
 
 namespace {
@@ -634,7 +638,11 @@ std::unique_ptr<ZoneInfoSource> FileZoneInfoSource::Open(
   // Map the time-zone name to a path name.
   std::string path;
   if (name.empty() || name[0] != '/') {
+    #ifdef WIN32
+    const char* tzdir = ddb::io::getDataPath("zoneinfo").string().c_str();
+    #else
     const char* tzdir = "/usr/share/zoneinfo";
+    #endif
     char* tzdir_env = nullptr;
 #if defined(_MSC_VER)
     _dupenv_s(&tzdir_env, nullptr, "TZDIR");
