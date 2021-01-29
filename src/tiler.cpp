@@ -4,6 +4,7 @@
 
 #include "tiler.h"
 
+#include <mutex>
 #include <memory>
 #include <vector>
 
@@ -395,6 +396,8 @@ fs::path TilerHelper::getFromUserCache(const fs::path &tileablePath, int tz,
     return t.tile(tz, tx, ty);
 }
 
+std::mutex geoprojectMutex;
+
 fs::path TilerHelper::toGeoTIFF(const fs::path &tileablePath, int tileSize,
                                 bool forceRecreate,
                                 const fs::path &outputGeotiff) {
@@ -425,7 +428,7 @@ fs::path TilerHelper::toGeoTIFF(const fs::path &tileablePath, int tileSize,
         if (!fs::exists(outputPath) || forceRecreate) {
             // Multiple processes could be generating the geoprojected
             // file at the same time, so we place a lock
-            io::FileLock l(outputPath);
+            std::lock_guard<std::mutex> guard(geoprojectMutex);
 
             // Recheck is needed for other processes that might have generated
             // the file

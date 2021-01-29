@@ -53,6 +53,8 @@ void geoProject(const std::vector<std::string> &images, const std::string &outpu
             outFile = output;
         }
 
+        std::string tmpOutFile = fs::path(outFile).replace_extension(".tif.tmp").string();
+
         Point ul = e.polygon_geom.getPoint(0);
         Point ll = e.polygon_geom.getPoint(1);
         Point lr = e.polygon_geom.getPoint(2);
@@ -122,7 +124,6 @@ void geoProject(const std::vector<std::string> &images, const std::string &outpu
 
         std::string vsiFilename = "/vsimem/";
         vsiFilename += p.filename().string() + "-" + std::to_string(rand()) + ".tif";
-
         GDALDatasetH hDstDataset = GDALTranslate(vsiFilename.c_str(),
                                                 hSrcDataset,
                                                 psOptions,
@@ -139,7 +140,7 @@ void geoProject(const std::vector<std::string> &images, const std::string &outpu
         GDALWarpAppOptions* waOptions = GDALWarpAppOptionsNew(wargs, nullptr);
         CSLDestroy(wargs);
 
-        GDALDatasetH hWrpDataset = GDALWarp(outFile.c_str(),
+        GDALDatasetH hWrpDataset = GDALWarp(tmpOutFile.c_str(),
                  nullptr,
                  1,
                  &hDstDataset,
@@ -150,6 +151,8 @@ void geoProject(const std::vector<std::string> &images, const std::string &outpu
         GDALClose(hSrcDataset);
         GDALClose(hDstDataset);
         GDALClose(hWrpDataset);
+
+        fs::rename(tmpOutFile, outFile);
 
         if (callback){
             if (!callback(outFile)) return;
