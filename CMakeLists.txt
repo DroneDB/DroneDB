@@ -20,12 +20,15 @@ execute_process(COMMAND git rev-parse --short HEAD
 string(REGEX REPLACE "\n$" "" GIT_REV "${GIT_REV}")
 if (NOT "${GIT_REV}" STREQUAL "")
     set(DAPP_VERSION "${APP_VERSION} (git commit ${GIT_REV})")
+    set(DAPP_REVISION "${GIT_REV}")
 else()
     set(DAPP_VERSION "${APP_VERSION}")
+    set(DAPP_REVISION "dev")
 endif()
 
 message("DDB Version: ${DAPP_VERSION}")
 add_compile_options("-DAPP_VERSION=\"${DAPP_VERSION}\"")
+add_compile_options("-DAPP_REVISION=\"${DAPP_REVISION}\"")
 
 # Disable MS warnings
 if (WIN32)
