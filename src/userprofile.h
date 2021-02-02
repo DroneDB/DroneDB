@@ -22,6 +22,7 @@ public:
     DDB_DLL fs::path getThumbsDir();
     DDB_DLL fs::path getThumbsDir(int thumbSize);
     DDB_DLL fs::path getTilesDir();
+    DDB_DLL fs::path getTemplatesDir();
 
     DDB_DLL fs::path getAuthFile();
 

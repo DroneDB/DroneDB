@@ -81,46 +81,14 @@ const char* DDBGetVersion() {
 
 DDBErr DDBInit(const char* directory, char** outPath) {
 	DDB_C_BEGIN
+    if (directory == nullptr)
+        throw InvalidArgsException("No directory provided");
 
-	if (directory == nullptr)
-		throw InvalidArgsException("No directory provided");
+    if (outPath == nullptr)
+        throw InvalidArgsException("No output provided");
 
-	if (outPath == nullptr)
-		throw InvalidArgsException("No output provided");
-
-	const fs::path dirPath = directory;
-	if (!exists(dirPath)) throw FSException("Invalid directory: " + dirPath.string() + " (does not exist)");
-
-	auto ddbDirPath = dirPath / ".ddb";
-	if (std::string(directory) == ".") ddbDirPath = ".ddb"; // Nicer to the eye
-	const auto dbasePath = ddbDirPath / "dbase.sqlite";
-
-	LOGD << "Checking if .ddb directory exists...";
-	if (exists(ddbDirPath)) {
-		throw FSException("Cannot initialize database: " + ddbDirPath.string() + " already exists");
-	}
-	
-	if (create_directory(ddbDirPath)) {
-		LOGD << ddbDirPath.string() + " created";
-	}
-	else {
-		throw FSException("Cannot create directory: " + ddbDirPath.string() + ". Check that you have the proper permissions?");
-	}
-
-	LOGD << "Checking if database exists...";
-	if (exists(dbasePath))
-	{
-		throw FSException(ddbDirPath.string() + " already exists");
-	}
-	LOGD << "Creating " << dbasePath.string();
-
-	// Create database
-	auto db = std::make_unique<Database>();
-	db->open(dbasePath.string());
-	db->createTables();
-	db->close();
-
-	utils::copyToPtr(ddbDirPath.string(), outPath);
+    std::string ddbDirPath = ddb::initIndex(directory);
+    utils::copyToPtr(ddbDirPath, outPath);
 	DDB_C_END
 }
 

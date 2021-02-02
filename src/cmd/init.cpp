@@ -5,7 +5,7 @@
 #include <iostream>
 #include "fs.h"
 #include "init.h"
-#include "ddb.h"
+#include "dbops.h"
 
 namespace cmd {
 
@@ -15,7 +15,8 @@ void Init::setOptions(cxxopts::Options &opts) {
     .positional_help("[args] [DIRECTORY]")
     .custom_help("init")
     .add_options()
-    ("w,working-dir", "Working directory", cxxopts::value<std::string>()->default_value("."));
+    ("w,working-dir", "Working directory", cxxopts::value<std::string>()->default_value("."))
+    ("from-scratch", "Create the index database from scratch instead of using a prebuilt one (slower)", cxxopts::value<bool>());
     // clang-format on
     opts.parse_positional({"working-dir"});
 }
@@ -26,12 +27,10 @@ std::string Init::description() {
 
 void Init::run(cxxopts::ParseResult &opts) {
     std::string p = opts["working-dir"].as<std::string>();
-    char *outPath;
-    if (DDBInit(p.c_str(), &outPath) == DDBERR_NONE){
-        std::cout << "Initialized empty database in " << outPath << std::endl;
-    }else{
-        std::cerr << DDBGetLastError() << std::endl;
-    }
+    bool fromScratch = opts["from-scratch"].count() > 0;
+
+    std::string outPath = ddb::initIndex(p, fromScratch);
+    std::cout << "Initialized empty database in " << outPath << std::endl;
 }
 
 }
