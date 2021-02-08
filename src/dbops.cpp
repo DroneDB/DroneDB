@@ -10,6 +10,8 @@
 #include "net.h"
 #include "logger.h"
 #include "mio.h"
+#include "version.h"
+#include "userprofile.h"
 #include <stdlib.h>
 
 namespace ddb {
@@ -470,6 +472,77 @@ void syncIndex(Database *db) {
     }
 
     db->exec("COMMIT");
+}
+
+std::string initIndex(const std::string &directory, bool fromScratch){
+    const fs::path dirPath = directory;
+    if (!exists(dirPath)) throw FSException("Invalid directory: " + dirPath.string() + " (does not exist)");
+
+    auto ddbDirPath = dirPath / ".ddb";
+    if (std::string(directory) == ".") ddbDirPath = ".ddb"; // Nicer to the eye
+    const auto dbasePath = ddbDirPath / "dbase.sqlite";
+
+    LOGD << "Checking if .ddb directory exists...";
+    if (exists(ddbDirPath)) {
+        throw FSException("Cannot initialize database: " + ddbDirPath.string() + " already exists");
+    }
+
+    if (create_directory(ddbDirPath)) {
+        LOGD << ddbDirPath.string() + " created";
+    }
+    else {
+        throw FSException("Cannot create directory: " + ddbDirPath.string() + ". Check that you have the proper permissions?");
+    }
+
+    LOGD << "Checking if database exists...";
+    if (exists(dbasePath))
+    {
+        throw FSException(ddbDirPath.string() + " already exists");
+    }
+
+    if (!fromScratch){
+        // "Fast" init by copying the pre-built empty database index
+        // this prevents the slow table generation process
+        fs::path emptyDbPath = UserProfile::get()->getTemplatesDir() / ("empty-dbase-" APP_REVISION ".sqlite");
+
+        // Need to create?
+        if (!fs::exists(emptyDbPath)){
+            LOGD << "Creating " << emptyDbPath.string();
+
+            // Create database
+            auto db = std::make_unique<Database>();
+            db->open(emptyDbPath.string());
+            db->createTables();
+            db->close();
+        }
+
+        if (fs::exists(emptyDbPath)){
+            // Copy
+            try{
+                fs::copy(emptyDbPath, dbasePath);
+            }catch(fs::filesystem_error &e){
+                throw FSException(e.what());
+            }
+
+            LOGD << "Copied " << emptyDbPath.string() << " to " << dbasePath.string();
+        }else{
+            // For some reason it's missing, generate from scratch
+            LOGD << "Cannot find empty-dbase.sqlite in data path, strange! Building from scratch instead";
+            fromScratch = true;
+        }
+    }
+
+    if (fromScratch){
+        LOGD << "Creating " << dbasePath.string();
+
+        // Create database
+        auto db = std::make_unique<Database>();
+        db->open(dbasePath.string());
+        db->createTables();
+        db->close();
+    }
+
+    return ddbDirPath.string();
 }
 
 }

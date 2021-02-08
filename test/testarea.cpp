@@ -4,6 +4,7 @@
 #include "testarea.h"
 #include "logger.h"
 #include "exceptions.h"
+#include "mio.h"
 
 TestArea::TestArea(const std::string &name, bool recreateIfExists)
     : name(name){
@@ -24,7 +25,7 @@ fs::path TestArea::getFolder(const fs::path &subfolder){
     if (!subfolder.empty()) dir = dir / subfolder;
 
     if (!fs::exists(dir)){
-        if (!fs::create_directories(dir)) throw FSException("Cannot create " + dir.string());
+        io::createDirectories(dir);
         LOGD << "Created test folder " << dir;
     }
     return dir;

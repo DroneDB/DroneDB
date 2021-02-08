@@ -85,6 +85,12 @@ fs::path UserProfile::getTilesDir(){
     return tilesDir;
 }
 
+fs::path UserProfile::getTemplatesDir(){
+    const fs::path tilesDir = getProfileDir() / fs::path("templates");
+    createDir(tilesDir);
+    return tilesDir;
+}
+
 fs::path UserProfile::getAuthFile(){
     return getProfileDir() / "auth.json";
 }

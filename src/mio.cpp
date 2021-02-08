@@ -342,9 +342,7 @@ size_t componentsCount(const fs::path &p){
 fs::path assureFolderExists(const fs::path &d){
     if (!fs::exists(d)){
         // Try to create
-        if (!fs::create_directories(d)){
-            throw FSException(d.string() + " is not a valid directory (cannot create it).");
-        }
+        createDirectories(d);
         return d;
     }else if (fs::is_directory(d)){
         return d;
@@ -352,6 +350,76 @@ fs::path assureFolderExists(const fs::path &d){
         throw FSException(d.string() + " is not a valid directory (there might be a file with the same name).");
     }
 }
+
+void createDirectories(const fs::path &d){
+    std::error_code e;
+    if (!fs::create_directories(d, e)) {
+        // For some reason sometimes this is zero (success)?
+        if (e.value() != 0){
+            throw FSException(d.string() + " is not a valid directory (error: " + e.message() + ").");
+        }
+    }
+}
+
+FileLock::FileLock(const fs::path &p){
+    lockFile = (p.parent_path() / p.filename()).string() + ".lock";
+
+    fd = _open(lockFile.c_str(), O_CREAT, 0644);
+    if (fd == -1){
+        throw ddb::AppException("Cannot acquire lock " + lockFile);
+    }
+
+    // Block
+    LOGD << "Acquiring lock " << lockFile;
+    flock(fd, LOCK_EX);
+}
+
+FileLock::~FileLock(){
+    LOGD << "Freeing lock " + lockFile;
+    if (fd){
+        if (_close(fd) != 0){
+            LOGD << "Cannot close lock " << lockFile;
+        }
+
+        if (_unlink(lockFile.c_str()) != 0){
+            LOGD << "Cannot remove lock " << lockFile;
+        }
+    }
+}
+
+#ifdef WIN32
+int flock (int fd, int operation){
+    HANDLE h = (HANDLE)_get_osfhandle (fd);
+
+    if (h == (HANDLE)-1) {
+      errno = EBADF;
+      return -1;
+    }
+
+    operation &= ~LOCK_NB;
+
+    // We implement just LOCK_EX
+    if (LOCK_EX){
+        DWORD lower, upper;
+        OVERLAPPED ol;
+
+        int flags = LOCKFILE_EXCLUSIVE_LOCK;
+        lower = GetFileSize(h, &upper);
+        if (lower == INVALID_FILE_SIZE){
+            errno = EBADF;
+            return -1;
+        }
+
+        // start offset = 0
+        memset(&ol, 0, sizeof ol);
+
+        return LockFileEx(h, flags, 0, lower, upper, &ol);
+    }else{
+        errno = EINVAL;
+        return -1;
+    }
+}
+#endif
 
 }
 }

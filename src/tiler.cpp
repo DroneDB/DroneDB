@@ -4,6 +4,7 @@
 
 #include "tiler.h"
 
+#include <mutex>
 #include <memory>
 #include <vector>
 
@@ -57,8 +58,7 @@ std::string Tiler::getTilePath(int z, int x, int y, bool createIfNotExists) {
     // TODO: retina tiles support?
     const fs::path dir = outputFolder / std::to_string(z) / std::to_string(x);
     if (createIfNotExists && !fs::exists(dir)) {
-        if (!fs::create_directories(dir))
-            throw FSException("Cannot create " + dir.string());
+        io::createDirectories(dir);
     }
 
     fs::path p = dir / fs::path(std::to_string(y) + ".png");
@@ -80,10 +80,7 @@ Tiler::Tiler(const std::string &geotiffPath, const std::string &outputFolder,
 
     if (!fs::exists(outputFolder)) {
         // Try to create
-        if (!fs::create_directories(outputFolder)) {
-            throw FSException(outputFolder +
-                              " is not a valid directory (cannot create it).");
-        }
+        io::createDirectories(outputFolder);
     }
 
     pngDrv = GDALGetDriverByName("PNG");
@@ -140,11 +137,6 @@ Tiler::Tiler(const std::string &geotiffPath, const std::string &outputFolder,
 
     OSRDestroySpatialReference(inputSrs);
     OSRDestroySpatialReference(outputSrs);
-
-    //    GDALDatasetH test = GDALCreateCopy(pngDrv,
-    //    "/data/drone/brighton2/test.png", inputDataset, FALSE, nullptr,
-    //    nullptr, nullptr); if (test == nullptr) throw GDALException("Cannot
-    //    create output dataset"); GDALClose(test); exit(1);
 
     // TODO: nodata?
     // if (inNodata.size() > 0){
@@ -404,6 +396,8 @@ fs::path TilerHelper::getFromUserCache(const fs::path &tileablePath, int tz,
     return t.tile(tz, tx, ty);
 }
 
+std::mutex geoprojectMutex;
+
 fs::path TilerHelper::toGeoTIFF(const fs::path &tileablePath, int tileSize,
                                 bool forceRecreate,
                                 const fs::path &outputGeotiff) {
@@ -432,8 +426,16 @@ fs::path TilerHelper::toGeoTIFF(const fs::path &tileablePath, int tileSize,
 
         // We need to (attempt) to geoproject the file first
         if (!fs::exists(outputPath) || forceRecreate) {
-            ddb::geoProject({tileablePath.string()}, outputPath.string(),
-                            "100%", true);
+            // Multiple processes could be generating the geoprojected
+            // file at the same time, so we place a lock
+            std::lock_guard<std::mutex> guard(geoprojectMutex);
+
+            // Recheck is needed for other processes that might have generated
+            // the file
+            if (!fs::exists(outputPath)){
+                ddb::geoProject({tileablePath.string()}, outputPath.string(),
+                                "100%", true);
+            }
         }
 
         return outputPath;

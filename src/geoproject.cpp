@@ -4,6 +4,7 @@
 
 #include "dbops.h"
 #include "geoproject.h"
+#include "mio.h"
 #include <gdal_priv.h>
 #include <gdal_utils.h>
 
@@ -18,9 +19,7 @@ void geoProject(const std::vector<std::string> &images, const std::string &outpu
             if (fs::is_regular_file(output)){
                 throw FSException(output + " is a file. (Did you switch the input and output parameters?)");
             }
-            if (!fs::create_directories(output)){
-                throw FSException(output + " is not a valid directory (cannot create it).");
-            }
+            io::createDirectories(output);
         }
     }
 
@@ -53,6 +52,8 @@ void geoProject(const std::vector<std::string> &images, const std::string &outpu
         }else{
             outFile = output;
         }
+
+        std::string tmpOutFile = fs::path(outFile).replace_extension(".tif.tmp").string();
 
         Point ul = e.polygon_geom.getPoint(0);
         Point ll = e.polygon_geom.getPoint(1);
@@ -120,7 +121,10 @@ void geoProject(const std::vector<std::string> &images, const std::string &outpu
 
         GDALTranslateOptions* psOptions = GDALTranslateOptionsNew(targs, nullptr);
         CSLDestroy(targs);
-        GDALDatasetH hDstDataset = GDALTranslate("/vsimem/translated.tif",
+
+        std::string vsiFilename = "/vsimem/";
+        vsiFilename += p.filename().string() + "-" + std::to_string(rand()) + ".tif";
+        GDALDatasetH hDstDataset = GDALTranslate(vsiFilename.c_str(),
                                                 hSrcDataset,
                                                 psOptions,
                                                 nullptr);
@@ -136,7 +140,7 @@ void geoProject(const std::vector<std::string> &images, const std::string &outpu
         GDALWarpAppOptions* waOptions = GDALWarpAppOptionsNew(wargs, nullptr);
         CSLDestroy(wargs);
 
-        GDALDatasetH hWrpDataset = GDALWarp(outFile.c_str(),
+        GDALDatasetH hWrpDataset = GDALWarp(tmpOutFile.c_str(),
                  nullptr,
                  1,
                  &hDstDataset,
@@ -147,6 +151,8 @@ void geoProject(const std::vector<std::string> &images, const std::string &outpu
         GDALClose(hSrcDataset);
         GDALClose(hDstDataset);
         GDALClose(hWrpDataset);
+
+        fs::rename(tmpOutFile, outFile);
 
         if (callback){
             if (!callback(outFile)) return;
