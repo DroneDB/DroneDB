@@ -6,8 +6,11 @@
 
 #include <iostream>
 
+
 #include "ddb_export.h"
+#include "dbops.h"
 #include "utils.h"
+
 
 namespace ddb {
 
@@ -69,9 +72,14 @@ struct AddAction {
     }
 };
 
-DDB_DLL void deltaList(std::vector<ddb::SimpleEntry> source,
-                       std::vector<ddb::SimpleEntry> destination,
-                       std::ostream& output, const std::string& format);
+struct Delta {
+    std::vector<AddAction> adds;
+    std::vector<RemoveAction> removes;
+    std::vector<CopyAction> copies;
+};
+
+DDB_DLL Delta getDelta(std::vector<ddb::SimpleEntry> source,
+                       std::vector<ddb::SimpleEntry> destination);
 
 }  // namespace ddb
 

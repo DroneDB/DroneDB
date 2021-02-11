@@ -52,15 +52,37 @@ void to_json(json& j, const AddAction& e) {
 
 void delta(Database* sourceDb, Database* targetDb, std::ostream& output,
            const std::string& format) {
-    auto source = getAllSimpleEntries(sourceDb);
-    auto destination = getAllSimpleEntries(targetDb);
 
-    deltaList(source, destination, output, format);
+    const auto source = getAllSimpleEntries(sourceDb);
+    const auto destination = getAllSimpleEntries(targetDb);
+
+    auto delta = getDelta(source, destination);
+
+    if (format == "json") {
+        json j = {{"adds", delta.adds},
+                  {"removes", delta.removes},
+                  {"copies", delta.copies}};
+        output << j.dump();
+    } else if (format == "text") {
+        const auto pos = output.tellp();
+
+        for (const CopyAction& cpy : delta.copies)
+            output << cpy.source << " => " << cpy.destination;
+
+        for (const AddAction& add : delta.adds)
+            output << " + [" << typeToHuman(add.type) << "] " << add.path;
+
+        for (const RemoveAction& rem : delta.removes)
+            output << " - [" << typeToHuman(rem.type) << "] " << rem.path;
+
+        if (pos == output.tellp()) {
+            output << "No changes" << std::endl;
+        }
+    }
 }
 
-void deltaList(std::vector<SimpleEntry> source,
-               std::vector<SimpleEntry> destination, std::ostream& output,
-               const std::string& format) {
+Delta getDelta(std::vector<SimpleEntry> source,
+               std::vector<SimpleEntry> destination) {
     std::vector<CopyAction> copies;
     std::vector<RemoveAction> removes;
     std::vector<AddAction> adds;
@@ -126,25 +148,12 @@ void deltaList(std::vector<SimpleEntry> source,
         }
     }
 
-    if (format == "json") {
-        json j = {{"adds", adds}, {"removes", removes}, {"copies", copies}};
-        output << j.dump();
-    } else if (format == "text") {
-        const auto pos = output.tellp();
+    Delta d;
+    d.copies = copies;
+    d.removes = removes;
+    d.adds = adds;
 
-        for (const CopyAction& cpy : copies)
-            output << cpy.source << " => " << cpy.destination;
-
-        for (const AddAction& add : adds)
-            output << " + [" << typeToHuman(add.type) << "] " << add.path;
-
-        for (const RemoveAction& rem : removes)
-            output << " - [" << typeToHuman(rem.type) << "] " << rem.path;
-
-        if (pos == output.tellp()) {
-            output << "No changes" << std::endl;
-        }
-    }
+    return d;
 }
 
 }  // namespace ddb
