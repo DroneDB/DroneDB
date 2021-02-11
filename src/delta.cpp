@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+
 #include <mio.h>
 
 #include <algorithm>
@@ -11,67 +12,10 @@
 
 #include "dbops.h"
 #include "exceptions.h"
+#include "delta.h"
+
 
 namespace ddb {
-    
-struct SimpleEntry {
-    std::string path;
-    std::string hash;
-    EntryType type;
-
-    std::string toString() const {
-        return path + " - " + hash + " (" + typeToHuman(type) + ")";    }
-
-    SimpleEntry(std::string path, std::string hash, EntryType type) {
-        this->path = std::move(path);
-        this->hash = std::move(hash);
-        this->type = type;
-    }
-};
-
-struct CopyAction {
-    std::string source;
-    std::string destination;
-
-    CopyAction(std::string source, std::string destination) {
-        this->source = std::move(source);
-        this->destination = std::move(destination);
-    }
-
-    std::string toString() const {
-        return "CPY -> " + source + " TO " + destination;
-    }
-};
-
-struct RemoveAction {
-    std::string path;
-    EntryType type;
-
-    RemoveAction(std::string path, ddb::EntryType type) {
-        this->path = std::move(path);
-        this->type = type;
-    }
-
-    std::string toString() const {
-        return "DEL -> [" + typeToHuman(type) + "] " +
-               path;
-    }
-};
-
-struct AddAction {
-    std::string path;
-    EntryType type;
-
-    AddAction(std::string path, ddb::EntryType type) {
-        this->path = std::move(path);
-        this->type = type;
-    }
-
-    std::string toString() const {
-        return "ADD -> [" + typeToHuman(type) + "] " +
-               path;
-    }
-};
 
 std::vector<SimpleEntry> getAllSimpleEntries(Database* db) {
     auto q = db->query("SELECT path, hash, type FROM entries");
@@ -108,10 +52,15 @@ void to_json(json& j, const AddAction& e) {
 
 void delta(Database* sourceDb, Database* targetDb, std::ostream& output,
            const std::string& format) {
-
     auto source = getAllSimpleEntries(sourceDb);
     auto destination = getAllSimpleEntries(targetDb);
 
+    deltaList(source, destination, output, format);
+}
+
+void deltaList(std::vector<SimpleEntry> source,
+               std::vector<SimpleEntry> destination, std::ostream& output,
+               const std::string& format) {
     std::vector<CopyAction> copies;
     std::vector<RemoveAction> removes;
     std::vector<AddAction> adds;
@@ -129,7 +78,6 @@ void delta(Database* sourceDb, Database* targetDb, std::ostream& output,
               });
 
     for (const SimpleEntry& entry : source) {
-        
         const auto inDestWithSameHashAndPath =
             std::find_if(destination.begin(), destination.end(),
                          [&entry](const SimpleEntry& e) {
@@ -154,7 +102,7 @@ void delta(Database* sourceDb, Database* targetDb, std::ostream& output,
             adds.emplace_back(AddAction(entry.path, entry.type));
             continue;
         }
-        
+
         if (inDestWithSameHashEntry->type != Directory) {
             LOGD << "COPY -> " << inDestWithSameHashEntry->toString() << " =>"
                  << entry.toString();
@@ -182,20 +130,18 @@ void delta(Database* sourceDb, Database* targetDb, std::ostream& output,
         json j = {{"adds", adds}, {"removes", removes}, {"copies", copies}};
         output << j.dump();
     } else if (format == "text") {
-
         const auto pos = output.tellp();
 
-        for (const CopyAction& cpy : copies)       
+        for (const CopyAction& cpy : copies)
             output << cpy.source << " => " << cpy.destination;
-                
-        for (const AddAction& add : adds) 
+
+        for (const AddAction& add : adds)
             output << " + [" << typeToHuman(add.type) << "] " << add.path;
-        
-        for (const RemoveAction& rem : removes) 
+
+        for (const RemoveAction& rem : removes)
             output << " - [" << typeToHuman(rem.type) << "] " << rem.path;
 
-        if (pos == output.tellp())
-        {
+        if (pos == output.tellp()) {
             output << "No changes" << std::endl;
         }
     }
