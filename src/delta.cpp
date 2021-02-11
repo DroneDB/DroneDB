@@ -83,6 +83,7 @@ void delta(Database* sourceDb, Database* targetDb, std::ostream& output,
 
 Delta getDelta(std::vector<SimpleEntry> source,
                std::vector<SimpleEntry> destination) {
+                   
     std::vector<CopyAction> copies;
     std::vector<RemoveAction> removes;
     std::vector<AddAction> adds;
