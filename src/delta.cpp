@@ -13,16 +13,14 @@
 #include "exceptions.h"
 
 namespace ddb {
-
+    
 struct SimpleEntry {
     std::string path;
     std::string hash;
     EntryType type;
 
     std::string toString() const {
-        return path + " - " + hash + " (" +
-               std::to_string(static_cast<int>(type)) + ")";
-    }
+        return path + " - " + hash + " (" + typeToHuman(type) + ")";    }
 
     SimpleEntry(std::string path, std::string hash, EntryType type) {
         this->path = std::move(path);
@@ -55,7 +53,7 @@ struct RemoveAction {
     }
 
     std::string toString() const {
-        return "DEL -> [" + std::to_string(static_cast<int>(type)) + "] " +
+        return "DEL -> [" + typeToHuman(type) + "] " +
                path;
     }
 };
@@ -70,7 +68,7 @@ struct AddAction {
     }
 
     std::string toString() const {
-        return "ADD -> [" + std::to_string(static_cast<int>(type)) + "] " +
+        return "ADD -> [" + typeToHuman(type) + "] " +
                path;
     }
 };
@@ -110,6 +108,7 @@ void to_json(json& j, const AddAction& e) {
 
 void delta(Database* sourceDb, Database* targetDb, std::ostream& output,
            const std::string& format) {
+
     auto source = getAllSimpleEntries(sourceDb);
     auto destination = getAllSimpleEntries(targetDb);
 
@@ -183,7 +182,22 @@ void delta(Database* sourceDb, Database* targetDb, std::ostream& output,
         json j = {{"adds", adds}, {"removes", removes}, {"copies", copies}};
         output << j.dump();
     } else if (format == "text") {
-        // todo
+
+        const auto pos = output.tellp();
+
+        for (const CopyAction& cpy : copies)       
+            output << cpy.source << " => " << cpy.destination;
+                
+        for (const AddAction& add : adds) 
+            output << " + [" << typeToHuman(add.type) << "] " << add.path;
+        
+        for (const RemoveAction& rem : removes) 
+            output << " - [" << typeToHuman(rem.type) << "] " << rem.path;
+
+        if (pos == output.tellp())
+        {
+            output << "No changes" << std::endl;
+        }
     }
 }
 
