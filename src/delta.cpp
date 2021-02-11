@@ -137,7 +137,7 @@ void delta(Database* sourceDb, Database* targetDb, std::ostream& output,
                              return e.hash == entry.hash &&
                                     e.type == entry.type &&
                                     e.path == entry.path;
-                         }) == destination.end();
+                         }) != destination.end();
 
         if (inDestWithSameHashAndPath) {
             LOGD << "SKIP -> " << entry.toString();
