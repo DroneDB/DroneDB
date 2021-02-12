@@ -34,22 +34,6 @@ std::vector<SimpleEntry> getAllSimpleEntries(Database* db) {
     return entries;
 }
 
-void to_json(json& j, const SimpleEntry& e) {
-    j = json{{"path", e.path}, {"hash", e.hash}, {"type", e.type}};
-}
-
-void to_json(json& j, const CopyAction& e) {
-    j = json::array({e.source, e.destination});
-}
-
-void to_json(json& j, const RemoveAction& e) {
-    j = json{{"path", e.path}, {"type", e.type}};
-}
-
-void to_json(json& j, const AddAction& e) {
-    j = json{{"path", e.path}, {"type", e.type}};
-}
-
 void delta(Database* sourceDb, Database* targetDb, std::ostream& output,
            const std::string& format) {
 
@@ -59,9 +43,8 @@ void delta(Database* sourceDb, Database* targetDb, std::ostream& output,
     auto delta = getDelta(source, destination);
 
     if (format == "json") {
-        json j = {{"adds", delta.adds},
-                  {"removes", delta.removes},
-                  {"copies", delta.copies}};
+        json j = delta;
+        //to_json(j, delta);
         output << j.dump();
     } else if (format == "text") {
         const auto pos = output.tellp();
@@ -148,6 +131,13 @@ Delta getDelta(std::vector<SimpleEntry> source,
             removes.emplace_back(RemoveAction(entry.path, entry.type));
         }
     }
+
+    // Sort removes by path descending
+    std::sort(removes.begin(), removes.end(),
+              [](const RemoveAction& l, const RemoveAction& r) {
+                  return l.path > r.path;
+              });
+
 
     Delta d;
     d.copies = copies;

@@ -6,11 +6,9 @@
 
 #include <iostream>
 
-
-#include "ddb_export.h"
 #include "dbops.h"
+#include "ddb_export.h"
 #include "utils.h"
-
 
 namespace ddb {
 
@@ -27,6 +25,17 @@ struct SimpleEntry {
         this->path = std::move(path);
         this->hash = std::move(hash);
         this->type = type;
+    }
+
+    SimpleEntry(std::string path, std::string hash) {
+        this->path = std::move(path);
+        this->hash = std::move(hash);
+        this->type = Generic;
+    }
+
+    SimpleEntry(std::string path) {
+        this->path = std::move(path);
+        this->type = Directory;
     }
 };
 
@@ -77,6 +86,26 @@ struct Delta {
     std::vector<RemoveAction> removes;
     std::vector<CopyAction> copies;
 };
+
+void to_json(json& j, const SimpleEntry& e) {
+    j = json{{"path", e.path}, {"hash", e.hash}, {"type", e.type}};
+}
+
+void to_json(json& j, const CopyAction& e) {
+    j = json::array({e.source, e.destination});
+}
+
+void to_json(json& j, const RemoveAction& e) {
+    j = json{{"path", e.path}, {"type", e.type}};
+}
+
+void to_json(json& j, const AddAction& e) {
+    j = json{{"path", e.path}, {"type", e.type}};
+}
+
+void to_json(json& j, const Delta& d) {
+    j = {{"adds", d.adds}, {"removes", d.removes}, {"copies", d.copies}};
+}
 
 DDB_DLL Delta getDelta(std::vector<ddb::SimpleEntry> source,
                        std::vector<ddb::SimpleEntry> destination);
