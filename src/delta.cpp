@@ -43,24 +43,29 @@ void delta(Database* sourceDb, Database* targetDb, std::ostream& output,
     auto delta = getDelta(source, destination);
 
     if (format == "json") {
+
         json j = delta;
-        //to_json(j, delta);
+        
         output << j.dump();
+
     } else if (format == "text") {
-        const auto pos = output.tellp();
+        
+        bool noChanges = delta.copies.size() + delta.adds.size() + delta.removes.size();
+
+        if (noChanges) {
+            output << "No changes" << std::endl;
+            return;
+        }
 
         for (const CopyAction& cpy : delta.copies)
-            output << cpy.source << " => " << cpy.destination;
+            output << cpy.source << " => " << cpy.destination << std::endl;
 
         for (const AddAction& add : delta.adds)
-            output << " + [" << typeToHuman(add.type) << "] " << add.path;
+            output << " + [" << typeToHuman(add.type) << "] " << add.path << std::endl;
 
         for (const RemoveAction& rem : delta.removes)
-            output << " - [" << typeToHuman(rem.type) << "] " << rem.path;
+            output << " - [" << typeToHuman(rem.type) << "] " << rem.path << std::endl;
 
-        if (pos == output.tellp()) {
-            output << "No changes" << std::endl;
-        }
     }
 }
 
