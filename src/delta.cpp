@@ -49,14 +49,6 @@ void delta(Database* sourceDb, Database* targetDb, std::ostream& output,
         output << j.dump();
 
     } else if (format == "text") {
-        
-        bool noChanges = delta.copies.size() + delta.adds.size() + delta.removes.size();
-
-        if (noChanges) {
-            output << "No changes" << std::endl;
-            return;
-        }
-
         for (const CopyAction& cpy : delta.copies)
             output << "C\t" << cpy.source << " => " << cpy.destination << std::endl;
 
