@@ -47,20 +47,14 @@ void delta(Database* sourceDb, Database* targetDb, std::ostream& output,
         //to_json(j, delta);
         output << j.dump();
     } else if (format == "text") {
-        const auto pos = output.tellp();
-
         for (const CopyAction& cpy : delta.copies)
-            output << cpy.source << " => " << cpy.destination;
+            output << "C\t" << cpy.source << " => " << cpy.destination << std::endl;
 
         for (const AddAction& add : delta.adds)
-            output << " + [" << typeToHuman(add.type) << "] " << add.path;
+            output << "A\t" << add.path << (add.type == EntryType::Directory ? " (D)" : "") << std::endl;
 
         for (const RemoveAction& rem : delta.removes)
-            output << " - [" << typeToHuman(rem.type) << "] " << rem.path;
-
-        if (pos == output.tellp()) {
-            output << "No changes" << std::endl;
-        }
+            output << "D\t" << rem.path << (rem.type == EntryType::Directory ? " (D)" : "") << std::endl;
     }
 }
 
