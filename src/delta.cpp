@@ -58,13 +58,13 @@ void delta(Database* sourceDb, Database* targetDb, std::ostream& output,
         }
 
         for (const CopyAction& cpy : delta.copies)
-            output << cpy.source << " => " << cpy.destination << std::endl;
+            output << "C\t" << cpy.source << " => " << cpy.destination << std::endl;
 
         for (const AddAction& add : delta.adds)
-            output << " + [" << typeToHuman(add.type) << "] " << add.path << std::endl;
+            output << "A\t" << add.path << (add.type == EntryType::Directory ? " (D)" : "") << std::endl;
 
         for (const RemoveAction& rem : delta.removes)
-            output << " - [" << typeToHuman(rem.type) << "] " << rem.path << std::endl;
+            output << "D\t" << rem.path << (rem.type == EntryType::Directory ? " (D)" : "") << std::endl;
 
     }
 }
