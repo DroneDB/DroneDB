@@ -29,10 +29,12 @@ module.exports = class Registry{
         return this.url.startsWith("https://");
     }
 
-    async login(username, password){
+    // Login 
+    async login(username, password, xAuthToken = null){
         const formData = new FormData();
-        formData.append("username", username);
-        formData.append("password", password);
+        if (username) formData.append("username", username);
+        if (password) formData.append("password", password);
+        if (xAuthToken) formData.append("token", xAuthToken);
 
         try{
             const res = await fetch(`${this.url}/users/authenticate`, {
@@ -41,9 +43,9 @@ module.exports = class Registry{
             }).then(r => r.json());
             
             if (res.token){
-                this.setCredentials(username, res.token, res.expires);
+                this.setCredentials(res.username, res.token, res.expires);
                 this.setAutoRefreshToken();
-                this.emit("login", username);
+                this.emit("login", res.username);
 
                 return res.token;
             }else{
