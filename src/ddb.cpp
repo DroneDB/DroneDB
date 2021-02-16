@@ -314,3 +314,30 @@ DDB_C_BEGIN
     utils::copyToPtr(tilePath.string(), outputTilePath);
 DDB_C_END
 }
+
+
+DDBErr DDBDelta(const char* ddbSource, const char* ddbTarget, char** output, const char* format) {
+	DDB_C_BEGIN
+
+		if (ddbSource == nullptr)
+			throw InvalidArgsException("No ddb source path provided");
+
+		if (ddbTarget == nullptr)
+			throw InvalidArgsException("No ddb path provided");
+
+		if (format == nullptr || strlen(format) == 0)
+			throw InvalidArgsException("No format provided");
+
+		if (output == nullptr)
+			throw InvalidArgsException("No output provided");
+
+		const auto sourceDb = ddb::open(std::string(ddbSource), true);
+		const auto targetDb = ddb::open(std::string(ddbTarget), true);
+
+		std::ostringstream ss;
+		delta(sourceDb.get(), targetDb.get(), ss, format);
+
+		utils::copyToPtr(ss.str(), output);
+
+	DDB_C_END
+}

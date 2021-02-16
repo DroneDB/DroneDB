@@ -21,6 +21,7 @@
 #include "status.h"
 #include "password.h"
 #include "chattr.h"
+#include "delta.h"
 
 namespace cmd {
 
@@ -42,7 +43,8 @@ namespace cmd {
       {"system", new System()},
       {"status", new Status()},
       {"password", new Password()},
-      {"chattr", new Chattr()}
+      {"chattr", new Chattr()},
+      {"delta", new Delta()}
   };
 
   std::map<std::string, std::string> aliases = {
@@ -56,7 +58,8 @@ namespace cmd {
       {"sh", "share"},
       {"psw", "password"},
       {"attrib", "chattr"},
-      {"attr", "chattr"}
+      {"attr", "chattr"},
+      {"diff", "delta"}
   };
 
 }

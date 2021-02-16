@@ -135,6 +135,14 @@ DDB_DLL DDBErr DDBGenerateThumbnail(const char *filePath, int size, const char *
  * @return DDBERR_NONE on success, an error otherwise */
 DDB_DLL DDBErr DDBTile(const char *geotiffPath, int tz, int tx, int ty, char **outputTilePath, int tileSize = 256, bool tms = false, bool forceRecreate = false);
 
+/** Generate delta between two ddbs 
+ * @param ddbSource path to the source DroneDB database (parent of ".ddb")
+ * @param ddbTarget path to the target DroneDB database (parent of ".ddb")
+ * @param output pointer to C-string where to store result
+ * @param format output format. One of: ["text", "json"]
+ * @return DDBERR_NONE on success, an error otherwise */
+DDB_DLL DDBErr DDBDelta(const char *ddbSource, const char *ddbTarget, char **output, const char *format);
+
 
 #ifdef __cplusplus
 }

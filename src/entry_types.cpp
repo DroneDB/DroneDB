@@ -18,8 +18,7 @@ std::map<EntryType, std::string> typeMapper {
 };
 
 std::string typeToHuman(EntryType t){
-    
-    auto res = typeMapper.find(t);
+    const auto res = typeMapper.find(t);
 
     return res != typeMapper.end() ? res->second : "?";
 }
