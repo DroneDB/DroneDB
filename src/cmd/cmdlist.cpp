@@ -58,7 +58,8 @@ namespace cmd {
       {"sh", "share"},
       {"psw", "password"},
       {"attrib", "chattr"},
-      {"attr", "chattr"}
+      {"attr", "chattr"},
+      {"diff", "delta"}
   };
 
 }

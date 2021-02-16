@@ -50,8 +50,8 @@ namespace cmd {
             LOGD << "Target: " << targetDdbPath;
             LOGD << "Format: " << format;
 
-            const auto source = ddb::open(sourceDdbPath, true);
-            const auto target = ddb::open(targetDdbPath, true);
+            const auto source = ddb::open(sourceDdbPath, false);
+            const auto target = ddb::open(targetDdbPath, false);
 
             delta(source.get(), target.get(), std::cout, format);            
 			
