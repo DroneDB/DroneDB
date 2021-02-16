@@ -331,8 +331,8 @@ DDBErr DDBDelta(const char* ddbSource, const char* ddbTarget, char** output, con
 		if (output == nullptr)
 			throw InvalidArgsException("No output provided");
 
-		const auto sourceDb = ddb::open(std::string(ddbSource), true);
-		const auto targetDb = ddb::open(std::string(ddbTarget), true);
+		const auto sourceDb = ddb::open(std::string(ddbSource), false);
+		const auto targetDb = ddb::open(std::string(ddbTarget), false);
 
 		std::ostringstream ss;
 		delta(sourceDb.get(), targetDb.get(), ss, format);
