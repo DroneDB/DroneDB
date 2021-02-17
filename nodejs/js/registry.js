@@ -47,7 +47,7 @@ module.exports = class Registry{
                 this.setAutoRefreshToken();
                 this.emit("login", res.username);
 
-                return res.token;
+                return res;
             }else{
                 throw new Error(res.error || `Cannot login: ${JSON.stringify(res)}`);
             }
