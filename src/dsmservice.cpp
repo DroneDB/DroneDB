@@ -105,7 +105,7 @@ std::string DSMService::loadFromNetwork(double latitude, double longitude){
                            std::to_string(std::chrono::system_clock::now().time_since_epoch().count()) + ".tif";
     std::string filePath = (getCacheDir() / filename).string();
 
-    std::cout << "Downloading DSM from " << url << " ..." << std::endl;
+    LOGD << "Downloading DSM from " << url << " ...";
     net::Request r = net::GET(url);
 	r.verifySSL(false); // Risk is tolerable, we're just fetching altitude
     r.downloadToFile(filePath);
