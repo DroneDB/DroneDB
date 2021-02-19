@@ -47,9 +47,6 @@ SqliteDatabase &SqliteDatabase::close() {
     return *this;
 }
 
-//    // Activate WAL2 mode
- 
-
 SqliteDatabase &SqliteDatabase::exec(const std::string &sql) {
     if (db == nullptr) throw DBException("Can't execute SQL: " + sql + ", db is not open");
 
