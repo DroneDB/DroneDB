@@ -13,8 +13,8 @@ module.exports = {
         IMAGE: 6,
         DRONEDB: 7,
         MARKDOWN: 8,
-        Video: 9,
-        GeoVideo: 10
+        VIDEO: 9,
+        GEOVIDEO: 10
     },
 
     typeToHuman: function(t){
