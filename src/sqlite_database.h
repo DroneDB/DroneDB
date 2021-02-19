@@ -20,6 +20,7 @@
 namespace ddb{
 
 class SqliteDatabase {
+  protected:
     sqlite3 *db;
     std::string openFile;
   public:
