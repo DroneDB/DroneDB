@@ -26,6 +26,7 @@ class Database : public SqliteDatabase {
     void clearAttribute(const std::string &name);
   public:
       DDB_DLL static void Initialize();
+      DDB_DLL void afterOpen() override;
       DDB_DLL Database &createTables();
 
       DDB_DLL void setPublic(bool isPublic);

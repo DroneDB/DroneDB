@@ -25,11 +25,13 @@ class SqliteDatabase {
   public:
     DDB_DLL SqliteDatabase();
     DDB_DLL SqliteDatabase &open(const std::string &file);
+    DDB_DLL virtual void afterOpen();
     DDB_DLL SqliteDatabase &close();
     DDB_DLL SqliteDatabase &exec(const std::string &sql);
     DDB_DLL bool tableExists(const std::string &table);
     DDB_DLL std::string getOpenFile();
     DDB_DLL int changes();
+    DDB_DLL void setJournalMode(const std::string &mode);
 
     DDB_DLL std::unique_ptr<Statement> query(const std::string &query) const;
 

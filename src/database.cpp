@@ -15,6 +15,10 @@ void Database::Initialize() {
     spatialite_init (0);
 }
 
+void Database::afterOpen(){
+  this->setJournalMode("wal");
+}
+
 Database &Database::createTables() {
     std::string sql = R"<<<(
   SELECT InitSpatialMetaData(1, 'NONE');

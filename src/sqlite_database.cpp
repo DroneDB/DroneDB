@@ -28,8 +28,13 @@ SqliteDatabase &SqliteDatabase::open(const std::string &file) {
 //    }
 
     this->openFile = file;
+    this->afterOpen();
 
     return *this;
+}
+
+void SqliteDatabase::afterOpen(){
+    // Nothing
 }
 
 SqliteDatabase &SqliteDatabase::close() {
@@ -41,6 +46,9 @@ SqliteDatabase &SqliteDatabase::close() {
 
     return *this;
 }
+
+//    // Activate WAL2 mode
+ 
 
 SqliteDatabase &SqliteDatabase::exec(const std::string &sql) {
     if (db == nullptr) throw DBException("Can't execute SQL: " + sql + ", db is not open");
@@ -74,6 +82,10 @@ std::string SqliteDatabase::getOpenFile(){
 // most recently completed INSERT, UPDATE or DELETE statement
 int SqliteDatabase::changes(){
     return sqlite3_changes(db);
+}
+
+void SqliteDatabase::setJournalMode(const std::string &mode){
+   this->exec("PRAGMA journal_mode=" + mode + ";");
 }
 
 std::unique_ptr<Statement> SqliteDatabase::query(const std::string &query) const{
