@@ -247,7 +247,7 @@ void addToIndex(Database *db, const std::vector<std::string> &paths, AddCallback
     for (auto &p : pathList) {
         io::Path relPath = io::Path(p).relativeTo(directory);
         q->bind(1, relPath.generic());
-          	
+
         bool update = false;
         bool add = false;
         Entry e;

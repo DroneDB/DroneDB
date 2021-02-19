@@ -17,6 +17,11 @@ void Database::Initialize() {
 
 void Database::afterOpen(){
   this->setJournalMode("wal");
+  
+  // If table is locked, sleep up to 30 seconds
+  if (sqlite3_busy_timeout(db, 30000) != SQLITE_OK){
+    LOGD << "Cannot set busy timeout";
+  }
 }
 
 Database &Database::createTables() {
