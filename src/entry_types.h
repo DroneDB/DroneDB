@@ -19,7 +19,9 @@ enum EntryType {
     PointCloud = 5, 
     Image = 6, 
     DroneDB = 7,
-    Markdown = 8
+    Markdown = 8,
+    Video = 9,
+    GeoVideo = 10
 };
 
 DDB_DLL std::string typeToHuman(EntryType t);
