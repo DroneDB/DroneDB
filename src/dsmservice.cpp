@@ -8,6 +8,7 @@
 #include "exceptions.h"
 #include "utils.h"
 #include "net.h"
+#include "mio.h"
 #include "constants.h"
 
 #pragma clang diagnostic ignored "-Wdisabled-macro-expansion"
@@ -44,14 +45,20 @@ float DSMService::getAltitude(double latitude, double longitude){
         }
     }
 
-    // Load existing DSMs in cache until we find a matching one
-    if (loadDiskCache(latitude, longitude)){
-        return getAltitude(latitude, longitude);
-    }
+    // TODO: we can probably optimize this
+    // to lock based on the bounding box of the point
+    {
+        io::FileLock(getCacheDir() / "write.lock");
 
-    // Attempt to load from the network and recurse
-    if (addGeoTIFFToCache(loadFromNetwork(latitude, longitude), latitude, longitude)){
-        return getAltitude(latitude, longitude);
+        // Load existing DSMs in cache until we find a matching one
+        if (loadDiskCache(latitude, longitude)){
+            return getAltitude(latitude, longitude);
+        }
+
+        // Attempt to load from the network and recurse
+        if (addGeoTIFFToCache(loadFromNetwork(latitude, longitude), latitude, longitude)){
+            return getAltitude(latitude, longitude);
+        }
     }
 
     LOGW << "Cannot get elevation from DSM service";
