@@ -48,7 +48,7 @@ float DSMService::getAltitude(double latitude, double longitude){
     // TODO: we can probably optimize this
     // to lock based on the bounding box of the point
     {
-        io::FileLock(getCacheDir() / "write.lock");
+        io::FileLock lock(getCacheDir() / ".." / "dsm_service");
 
         // Load existing DSMs in cache until we find a matching one
         if (loadDiskCache(latitude, longitude)){
@@ -132,7 +132,7 @@ bool DSMService::addGeoTIFFToCache(const fs::path &filePath, double latitude, do
 
     std::string wkt = GDALGetProjectionRef(dataset);
     if (wkt.empty()) throw GDALException("Cannot get projection ref for " + filePath.string());
-    char *wktp = const_cast<char *>(wkt.c_str());
+//    char *wktp = const_cast<char *>(wkt.c_str());
     //OGRSpatialReference *srs = new OGRSpatialReference();
     //if (srs->importFromWkt(&wktp) != OGRERR_NONE) throw GDALException("Cannot read spatial reference system for " + filePath.string() + ". Is PROJ installed?");
 
