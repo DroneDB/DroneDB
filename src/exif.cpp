@@ -47,9 +47,20 @@ ImageSize ExifParser::extractImageSize() {
 
     if (imgWidth != exifData.end() && imgHeight != exifData.end()) {
         return ImageSize(static_cast<int>(imgWidth->toLong()), static_cast<int>(imgHeight->toLong()));
-    } else {
-        return ImageSize(0, 0);
     }
+
+    auto xmpWidth = findXmpKey({"Xmp.video.Width"});
+    auto xmpHeight = findXmpKey({"Xmp.video.Height"});
+    if (xmpWidth != xmpData.end() && xmpHeight != xmpData.end()){
+        try{
+            return ImageSize(std::stoi(xmpWidth->toString()), std::stoi(xmpHeight->toString()));
+        }catch(const std::invalid_argument& ia){
+            LOGD << "Cannot parse XMP video width/height";
+            return ImageSize(0, 0);
+        }
+    }
+
+    return ImageSize(0, 0);
 }
 
 std::string ExifParser::extractMake() {
@@ -176,27 +187,77 @@ bool ExifParser::extractGeo(GeoLocation &geo) {
     auto longitude = findExifKey({"Exif.GPSInfo.GPSLongitude"});
     auto longitudeRef = findExifKey({"Exif.GPSInfo.GPSLongitudeRef"});
 
-    if (latitude == exifData.end() || longitude == exifData.end()) return false;
+    if (latitude != exifData.end() && longitude != exifData.end()){
+        geo.latitude = geoToDecimal(latitude, latitudeRef);
+        geo.longitude = geoToDecimal(longitude, longitudeRef);
 
-    geo.latitude = geoToDecimal(latitude, latitudeRef);
-    geo.longitude = geoToDecimal(longitude, longitudeRef);
+        auto altitude = findExifKey({"Exif.GPSInfo.GPSAltitude"});
+        if (altitude != exifData.end()) {
+            geo.altitude = evalFrac(altitude->toRational());
 
-    auto altitude = findExifKey({"Exif.GPSInfo.GPSAltitude"});
-    if (altitude != exifData.end()) {
-        geo.altitude = evalFrac(altitude->toRational());
-
-        auto altitudeRef = findExifKey({"Exif.GPSInfo.GPSAltitudeRef"});
-        if (altitudeRef != exifData.end()) {
-            geo.altitude *= altitudeRef->toLong() == 1 ? -1 : 1;
+            auto altitudeRef = findExifKey({"Exif.GPSInfo.GPSAltitudeRef"});
+            if (altitudeRef != exifData.end()) {
+                geo.altitude *= altitudeRef->toLong() == 1 ? -1 : 1;
+            }
         }
+
+        auto xmpAltitude = findXmpKey({"Xmp.drone-dji.AbsoluteAltitude"});
+        if (xmpAltitude != xmpData.end()) {
+            geo.altitude = evalFrac(xmpAltitude->toRational());
+        }
+        return true;
     }
 
-    auto xmpAltitude = findXmpKey({"Xmp.drone-dji.AbsoluteAltitude"});
-    if (xmpAltitude != xmpData.end()) {
-        geo.altitude = evalFrac(xmpAltitude->toRational());
+    auto gpsCoordinates = findXmpKey({"Xmp.video.GPSCoordinates"});
+    if (gpsCoordinates != xmpData.end()){
+        // Xmp.video.GPSCoordinates +46.839139-91.999828+25.700
+        // [+-]lat[+-]lon[+-]alt
+        std::string gps = gpsCoordinates->toString();
+        if (gps.length() < 1){
+            LOGD << "Invalid GPS coordinates (empty)";
+            return false;
+        }
+        if (gps[0] != '+' && gps[0] != '-'){
+            LOGD << "Invalid GPS coordinates (" << gps << " doesn't start with +-)";
+            return false;
+        }
+
+        int component = 0;
+        std::string buf = "";
+        buf += gps[0];
+        gps = gps + "$";
+
+        for (unsigned long i = 1; i < gps.length(); i++){
+            if (std::isdigit(gps[i]) || gps[i] == ',' || gps[i] == '.'){
+                buf += gps[i];
+            }else if (gps[i] == '+' || gps[i] == '-' || gps[i] == '$'){
+                try{
+                    double val = std::stod(buf);
+                    if (component == 0){
+                        geo.latitude = val;
+                    }else if (component == 1){
+                        geo.longitude = val;
+                    }else if (component == 2){
+                        geo.altitude = val;
+                    }else{
+                        LOGD << "Ignoring additional GPS coordinates " << gps;
+                    }
+                }catch(const std::invalid_argument& ia){
+                    LOGD << "Cannot parse GPS coordinates " << gps;
+                    return false;
+                }
+
+                component++;
+                buf = gps[i];
+            }
+        }
+
+        LOGD << "Parsed " << component << " GPS components";
+
+        return component >= 2;
     }
 
-    return true;
+    return false;
 }
 
 bool ExifParser::extractRelAltitude(double &relAltitude) {
@@ -249,6 +310,23 @@ double ExifParser::evalFrac(const Exiv2::Rational &rational) {
 
 // Extracts timestamp (seconds from Jan 1st 1970)
 double ExifParser::extractCaptureTime() {
+    auto xmpDate = findXmpKey({"Xmp.video.DateUTC", "Xmp.video.MediaCreateDate"});
+    if (xmpDate != xmpData.end()){
+        try{
+            // Number of seconds between Jan 1st 1904 and Jan 1st 1970
+            const long TO_UNIX_EPOCH = 2082844800;
+            const long d = xmpDate->toLong();
+            double captureTime = (d - TO_UNIX_EPOCH) * 1000.0;
+            if (captureTime > 0){
+                return captureTime;
+            }else{
+                LOGD << "Cannot use XMP capture time (negative?)";
+            }
+        }catch(const std::invalid_argument& ia){
+            LOGD << "Cannot parse XMP capture time " << xmpDate->toString();
+        }
+    }
+
     auto time = findExifKey({"Exif.Photo.DateTimeOriginal",
                              "Exif.Photo.DateTimeDigitized",
                              "Exif.Image.DateTime"});
@@ -333,6 +411,14 @@ void ExifParser::printAllTags() {
                   << " | " << tn
                   << std::endl;
     }
+    Exiv2::XmpData::const_iterator xend = xmpData.end();
+    for (Exiv2::XmpData::const_iterator i = xmpData.begin(); i != xend; ++i) {
+        const char* tn = i->typeName();
+        std::cout << i->key() << " "
+                  << i->value()
+                  << " | " << tn
+                  << std::endl;
+    }
 }
 
 bool ExifParser::hasExif() {
@@ -341,6 +427,10 @@ bool ExifParser::hasExif() {
 
 bool ExifParser::hasXmp() {
     return !xmpData.empty();
+}
+
+bool ExifParser::hasTags(){
+    return this->hasExif() || this->hasXmp();
 }
 
 }

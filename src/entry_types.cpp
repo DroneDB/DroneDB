@@ -14,7 +14,9 @@ std::map<EntryType, std::string> typeMapper {
     { EntryType::PointCloud, "PointCloud"},
     { EntryType::Image, "Image"},
     { EntryType::DroneDB, "DroneDB"},
-    { EntryType::Markdown, "Markdown"}
+    { EntryType::Markdown, "Markdown"},
+    { EntryType::Video, "Video"},
+    { EntryType::GeoVideo, "GeoVideo"}
 };
 
 std::string typeToHuman(EntryType t){

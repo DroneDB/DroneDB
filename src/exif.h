@@ -91,6 +91,7 @@ class ExifParser {
 
     DDB_DLL bool hasExif();
     DDB_DLL bool hasXmp();
+    DDB_DLL bool hasTags();
 };
 
 }
