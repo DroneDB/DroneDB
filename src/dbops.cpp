@@ -242,12 +242,12 @@ void addToIndex(Database *db, const std::vector<std::string> &paths, AddCallback
     auto insertQ = db->query("INSERT INTO entries (path, hash, type, meta, mtime, size, depth, point_geom, polygon_geom) "
                              "VALUES (?, ?, ?, ?, ?, ?, ?, GeomFromText(?, 4326), GeomFromText(?, 4326))");
     auto updateQ = db->query(UPDATE_QUERY);
-    db->exec("BEGIN TRANSACTION");
+    db->exec("BEGIN EXCLUSIVE TRANSACTION");
 
     for (auto &p : pathList) {
         io::Path relPath = io::Path(p).relativeTo(directory);
         q->bind(1, relPath.generic());
-          	
+
         bool update = false;
         bool add = false;
         Entry e;
@@ -450,7 +450,7 @@ void syncIndex(Database *db) {
     auto deleteQ = db->query("DELETE FROM entries WHERE path = ?");
     auto updateQ = db->query(UPDATE_QUERY);
 
-    db->exec("BEGIN TRANSACTION");
+    db->exec("BEGIN EXCLUSIVE TRANSACTION");
 
     while(q->fetch()) {
         io::Path relPath = fs::path(q->getText(0));
