@@ -33,6 +33,8 @@ DDB_DLL void delta(Database* sourceDb, Database* targetDb, std::ostream& out, co
 
 DDB_DLL std::string initIndex(const std::string &directory, bool fromScratch = false);
 
+DDB_DLL void clone(const std::string& target, const std::string& folder);
+
 }
 
 
