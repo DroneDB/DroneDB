@@ -16,7 +16,7 @@
 namespace ddb {
 
 
-void  clone(const std::string& target, const std::string& folder) {
+void clone(const std::string& target, const std::string& folder) {
 
     std::cout << "Target = " << target << std::endl;
     std::cout << "Folder = " << folder << std::endl;
