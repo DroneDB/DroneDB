@@ -9,11 +9,11 @@
 namespace ddb{
 
 TagComponents RegistryUtils::parseTag(const std::string &tag, bool useInsecureRegistry){
-    std::string t = tag;
+    auto t = tag;
     utils::trim(t);
     utils::toLower(t);
 
-    size_t pos = t.rfind("/");
+    auto pos = t.rfind("/");
     if (pos == std::string::npos) throw InvalidArgsException("Invalid tag: " + tag + " must be in organization/dataset format");
 
     TagComponents res;
@@ -21,7 +21,7 @@ TagComponents RegistryUtils::parseTag(const std::string &tag, bool useInsecureRe
     t = t.substr(0, t.length() - res.dataset.length() - 1);
 
     pos = t.rfind("/");
-    bool useDefaultRegistry = false;
+    auto useDefaultRegistry = false;
 
     if (pos == std::string::npos){
         res.organization = t;
@@ -35,8 +35,8 @@ TagComponents RegistryUtils::parseTag(const std::string &tag, bool useInsecureRe
         // Use default registry URL
         res.registryUrl = std::string(useInsecureRegistry ? "http://" : "https://") + DEFAULT_REGISTRY;
     }else{
-        // TODO: should we validate the URL more throughly?
-        bool hasProto = (t.find("http://") == 0 || t.find("https://") == 0) ;
+        // TODO: should we validate the URL more thoroughly?
+        const bool hasProto = t.find("http://") == 0 || t.find("https://") == 0 ;
         if (hasProto) res.registryUrl = t;
         else res.registryUrl = (useInsecureRegistry ? "http://" : "https://") + t;
     }
@@ -51,7 +51,7 @@ TagComponents RegistryUtils::parseTag(const std::string &tag, bool useInsecureRe
 }
 
 Registry RegistryUtils::createFromTag(const std::string &tag, bool useInsecureRegistry){
-    auto tc = parseTag(tag, useInsecureRegistry);
+    const auto tc = parseTag(tag, useInsecureRegistry);
     return Registry(tc.registryUrl);
 }
 

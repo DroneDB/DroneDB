@@ -2,8 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-
 #include <mio.h>
+#include <registryutils.h>
 
 #include <algorithm>
 #include <optional>
@@ -16,21 +16,32 @@
 namespace ddb {
 
 
-void clone(const std::string& target, const std::string& folder) {
-
-    std::cout << "Target = " << target << std::endl;
+void clone(const TagComponents& tag, const std::string& folder) {
+    std::cout << "Registry = " << tag.registryUrl << std::endl;
+    std::cout << "Dataset = " << tag.dataset << std::endl;
+    std::cout << "Organization = " << tag.organization << std::endl;
     std::cout << "Folder = " << folder << std::endl;
 
-    // Workflow
-    // 1) Generate download url
-    // 1.1) If full url was not provided, generate it starting from tag (default remote is DEFAULT_REGISTRY)
-    // 2) Download zip in temp folder
-    // 3) Create target folder
-    // 3.1) If target folder already exists throw error
-    // 4) Unzip in target folder
-    // 5) Remove temp zip
-    // 6) Update sync information
-}
+    auto reg = Registry(tag.registryUrl);
+
+    try {
+        reg.clone(tag.organization, tag.dataset, folder);
+    } catch (const ddb::AuthException&) {
+        // Try logging-in
+        const auto username = utils::getPrompt("Username: ");
+        const auto password = utils::getPass("Password: ");
+
+        if (reg.login(username, password).length() > 0) {
+            reg.clone(tag.organization, tag.dataset, folder);
+            
+        } else {
+            throw AuthException("Cannot authenticate with " +
+                                reg.getUrl());
+        }
+    } catch (const AppException& e) {
+        throw e;
+    }
 
 }
 
+}  // namespace ddb
