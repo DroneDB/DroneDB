@@ -162,7 +162,7 @@ DDB_DLL void Registry::clone(const std::string &organization,
 
     std::filesystem::remove(tempFile);
 
-    std::cout << "Removed temp file" << std::endl
+    std::cout << "Removed temp file" << std::endl;
 
 }
 

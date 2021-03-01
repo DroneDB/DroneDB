@@ -9,16 +9,7 @@
 
 namespace cmd {
 
-struct TargetInfo {
-  std::string url;
-  std::string folder;
-  std::string organization;
-  std::string dataset;
-};
-
 class Clone : public Command {
-
-  TargetInfo getCloneTarget(std::string& target);
 
   public:
     Clone() {}
