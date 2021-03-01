@@ -77,6 +77,11 @@ Request &Request::authToken(const std::string &token) {
     return *this;
 }
 
+Request &Request::authCookie(const std::string &token) {
+    header("Cookie", "jwtToken=" + token);
+    return *this;
+}
+
 Request &Request::progressCb(const RequestCallback &cb) {
     this->cb = cb;
     return *this;

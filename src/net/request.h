@@ -55,6 +55,7 @@ public:
     DDB_DLL Request& header(const std::string &name, const std::string &value);
     DDB_DLL Request& verifySSL(bool flag);
     DDB_DLL Request& authToken(const std::string &token);
+    DDB_DLL Request& authCookie(const std::string &token);
 
     DDB_DLL Request& progressCb(const RequestCallback &cb);
     DDB_DLL Request& maximumUploadSpeed(unsigned long bytesPerSec);
