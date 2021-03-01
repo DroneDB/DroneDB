@@ -127,12 +127,16 @@ DDB_DLL void Registry::clone(const std::string &organization,
     // 5) Remove temp zip
     // 6) Update sync information
 
-    const auto downloadUrl =
-        this->url + "/orgs/" + organization + "/ds/" + dataset + "/download";
+    this->ensureTokenValidity();
 
-    std::cout << "Downloading dataset '" << dataset << "' of organization '"
-              << organization << "'" << std::endl;
-    std::cout << "To folder: " << folder << std::endl;
+    const Url url(this->url);
+
+    const auto downloadUrl = url.getHost() + "/orgs/" + organization + "/ds/" +
+                             dataset + "/download";
+
+    LOGD << "Downloading dataset '" << dataset << "' of organization '"
+              << organization << "'";
+    LOGD << "To folder: " << folder;
 
     LOGD << "Download url = " << downloadUrl;
 
@@ -144,13 +148,13 @@ DDB_DLL void Registry::clone(const std::string &organization,
     LOGD << "Temp file = " << tempFile;
 
     auto res = net::GET(downloadUrl)
-                   .authToken(this->authToken)
+                   .authCookie(this->authToken)
                    .verifySSL(false)
                    .downloadToFile(tempFile);
 
     if (res.status() != 200) this->handleError(res);
 
-    std::cout << "Dataset downloaded, now extracting it" << std::endl;
+    LOGD << "Dataset downloaded, now extracting it";
     std::filesystem::create_directory(folder);
 
     miniz_cpp::zip_file file;
@@ -158,12 +162,11 @@ DDB_DLL void Registry::clone(const std::string &organization,
     file.load(tempFile);
     file.extractall(folder);
 
-    std::cout << "Extracted to destination folder" << std::endl;
+    LOGD << "Extracted to destination folder";
 
     std::filesystem::remove(tempFile);
 
-    std::cout << "Removed temp file" << std::endl;
-
+    LOGD << "Removed temp file";
 }
 
 std::string Registry::getAuthToken() { return std::string(this->authToken); }
