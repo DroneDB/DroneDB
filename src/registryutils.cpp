@@ -2,6 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "registryutils.h"
+
+#include <url/Url.h>
+
 #include "exceptions.h"
 #include "constants.h"
 #include "utils.h"
@@ -13,14 +16,14 @@ TagComponents RegistryUtils::parseTag(const std::string &tag, bool useInsecureRe
     utils::trim(t);
     utils::toLower(t);
 
-    auto pos = t.rfind("/");
+    auto pos = t.rfind('/');
     if (pos == std::string::npos) throw InvalidArgsException("Invalid tag: " + tag + " must be in organization/dataset format");
 
     TagComponents res;
     res.dataset = t.substr(pos + 1, t.length() - 1);
     t = t.substr(0, t.length() - res.dataset.length() - 1);
 
-    pos = t.rfind("/");
+    pos = t.rfind('/');
     auto useDefaultRegistry = false;
 
     if (pos == std::string::npos){
@@ -46,6 +49,9 @@ TagComponents RegistryUtils::parseTag(const std::string &tag, bool useInsecureRe
     if (res.organization.find("http://") == 0 || res.organization.find("https://") == 0){
         throw InvalidArgsException("Invalid tag: " + tag + " missing dataset name");
     }
+
+    const homer6::Url url(res.registryUrl);
+    res.registryHost = url.getHost();
 
     return res;
 }
