@@ -150,6 +150,10 @@ DDB_DLL void Registry::clone(const std::string &organization,
     auto res = net::GET(downloadUrl)
                    .authCookie(this->authToken)
                    .verifySSL(false)
+                   .progressCb([](size_t txBytes, size_t totalBytes) {
+                       LOGD << txBytes << "/" << totalBytes;
+                       return true;
+                   })
                    .downloadToFile(tempFile);
 
     if (res.status() != 200) this->handleError(res);

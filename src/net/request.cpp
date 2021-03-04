@@ -259,7 +259,7 @@ Response Request::downloadToFile(const std::string &outFile) {
     f = fopen(outFile.c_str(), "wb");
     if (!f) throw FSException("Cannot open " + outFile + " for writing");
 
-    curl_easy_setopt(curl, CURLOPT_NOPROGRESS, true);
+    //curl_easy_setopt(curl, CURLOPT_NOPROGRESS, false);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_data);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, f);
 
@@ -316,7 +316,7 @@ void Request::perform(Response &res) {
         curl_easy_setopt(curl, CURLOPT_NOPROGRESS, false);
     }
 
-    CURLcode ret = curl_easy_perform(curl);
+    const CURLcode ret = curl_easy_perform(curl);
     if (ret != CURLE_OK) {
         const std::string err(curl_easy_strerror(ret));
         throw NetException(err + ": " + errorMsg);
