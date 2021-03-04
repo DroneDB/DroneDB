@@ -135,7 +135,7 @@ DDB_DLL void Registry::clone(const std::string &organization,
                              dataset + "/download";
 
     LOGD << "Downloading dataset '" << dataset << "' of organization '"
-              << organization << "'";
+         << organization << "'";
     LOGD << "To folder: " << folder;
 
     LOGD << "Download url = " << downloadUrl;
