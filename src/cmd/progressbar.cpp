@@ -12,10 +12,10 @@ namespace cmd{
 void ProgressBar::update(const std::string &label, float progress){
     ++ticks;
     unsigned int w = label.empty() ? barWidth : std::max<unsigned int>(3, barWidth - label.length() - 1);
-    unsigned int pos = (int) (w * progress / 100.0f);
+    const unsigned int pos = static_cast<int>(w * progress / 100.0f);
 
-    std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
-    auto time_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - startTime).count();
+    const std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
+    const auto time_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - startTime).count();
 
     // Print label
     if (!label.empty()){
