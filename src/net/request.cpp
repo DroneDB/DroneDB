@@ -8,8 +8,8 @@
 
 #include "exceptions.h"
 #include "logger.h"
-#include "version.h"
 #include "mio.h"
+#include "version.h"
 
 namespace ddb::net {
 
@@ -20,7 +20,7 @@ Request::Request(const std::string &url, ReqType reqType)
       headers(nullptr),
       form(nullptr),
       mime_data_carrier(nullptr),
-      cb(nullptr){
+      cb(nullptr) {
     try {
         curl = curl_easy_init();
         if (!curl) throw NetException("Cannot initialize CURL");
@@ -41,9 +41,10 @@ Request::Request(const std::string &url, ReqType reqType)
         curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, true);
 
         fs::path caBundlePath = io::getDataPath("curl-ca-bundle.crt");
-        if (!caBundlePath.empty()){
+        if (!caBundlePath.empty()) {
             LOGD << "CA Bundle: " << caBundlePath.string();
-            curl_easy_setopt(curl, CURLOPT_CAINFO, caBundlePath.string().c_str());
+            curl_easy_setopt(curl, CURLOPT_CAINFO,
+                             caBundlePath.string().c_str());
         }
     } catch (AppException &) {
         if (curl) curl_easy_cleanup(curl);
@@ -157,8 +158,10 @@ Request &Request::multiPartFormData(std::vector<std::string> files,
     return *this;
 }
 
-DDB_DLL Request &Request::multiPartFormData(const std::string& filename,
-                                            std::istream* stream, size_t offset, size_t size, std::vector<std::string> params) {
+DDB_DLL Request &Request::multiPartFormData(const std::string &filename,
+                                            std::istream *stream, size_t offset,
+                                            size_t size,
+                                            std::vector<std::string> params) {
     if (params.size() % 2 != 0)
         throw NetException("Invalid number of multiPartFormData parameters");
 
@@ -183,13 +186,15 @@ DDB_DLL Request &Request::multiPartFormData(const std::string& filename,
 
         size_t sz = p->size - p->position;
 
-        LOGD << "curl_read_callback(" << size << ", " << nitems << ") cur = " << p->stream->tellg() << " reading " << sz << " data";
+        LOGD << "curl_read_callback(" << size << ", " << nitems
+             << ") cur = " << p->stream->tellg() << " reading " << sz
+             << " data";
 
         nitems *= size;
-        if(sz > nitems) sz = nitems;
-        if(sz){
+        if (sz > nitems) sz = nitems;
+        if (sz) {
             p->stream->seekg(p->position + p->offset, std::ios::beg);
-            if (!p->stream->read(buffer, sz)){
+            if (!p->stream->read(buffer, sz)) {
                 throw FSException("Cannot read from stream");
             }
         }
@@ -200,18 +205,18 @@ DDB_DLL Request &Request::multiPartFormData(const std::string& filename,
     };
     const curl_seek_callback scb = [](void *arg, curl_off_t offset,
                                       int origin) {
-        struct ctl *p = (struct ctl *) arg;
+        struct ctl *p = (struct ctl *)arg;
 
-        switch(origin) {
-        case SEEK_END:
-            offset += p->size;
-            break;
-        case SEEK_CUR:
-            offset += p->position;
-            break;
+        switch (origin) {
+            case SEEK_END:
+                offset += p->size;
+                break;
+            case SEEK_CUR:
+                offset += p->position;
+                break;
         }
 
-        if(offset < 0) return CURL_SEEKFUNC_FAIL;
+        if (offset < 0) return CURL_SEEKFUNC_FAIL;
         p->position = offset;
         return CURL_SEEKFUNC_OK;
     };
@@ -259,7 +264,7 @@ Response Request::downloadToFile(const std::string &outFile) {
     f = fopen(outFile.c_str(), "wb");
     if (!f) throw FSException("Cannot open " + outFile + " for writing");
 
-    //curl_easy_setopt(curl, CURLOPT_NOPROGRESS, false);
+    curl_easy_setopt(curl, CURLOPT_NOPROGRESS, false);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_data);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, f);
 
@@ -272,7 +277,7 @@ Response Request::downloadToFile(const std::string &outFile) {
 
 static int xferinfo(void *p, curl_off_t dltotal, curl_off_t dlnow,
                     curl_off_t ultotal, curl_off_t ulnow) {
-    struct RequestProgress *progress = static_cast<struct RequestProgress *>(p);
+    const auto progress = static_cast<struct RequestProgress *>(p);
 
     //  CURL *curl = static_cast<CURL *>(progress->curl);
 
@@ -285,12 +290,11 @@ static int xferinfo(void *p, curl_off_t dltotal, curl_off_t dlnow,
     const size_t totalBytes = dltotal + ultotal;
     const size_t txBytes = dlnow + ulnow;
 
-    if (totalBytes > 0) {
-        if (!(*progress->cb)(txBytes, totalBytes)) {
-            // Handle cancel
-            return 1;
-        }
+    // if (totalBytes > 0) {
+    if (!(*progress->cb)(txBytes, totalBytes)) {
+        return 1;
     }
+    //}
 
     //}
 
