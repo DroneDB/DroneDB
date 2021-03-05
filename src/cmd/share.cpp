@@ -60,9 +60,6 @@ void Share::run(cxxopts::ParseResult &opts) {
                               static_cast<float>(f->totalBytes) * 100.0f
                         : 0.0f;
 
-                //LOGD << f->filename << " (" << f->txBytes << "/" << f->totalBytes
-                //     << ") -> " << progress;
-
                 // TODO: support for parallel progress updates
                 pb.update(f->filename, progress);
             }
