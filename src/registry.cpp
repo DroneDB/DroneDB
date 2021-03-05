@@ -116,9 +116,28 @@ bool Registry::logout() {
     return UserProfile::get()->getAuthManager()->deleteCredentials(url);
 }
 
+void smartDisplay(std::ostream& stream, double number) {
+
+    stream << std::setprecision(4);
+
+    if (number < 1024) {
+        //
+        stream << number << " bytes";
+    } else if (number < 1048576)
+    {
+        number /= 1024;
+        stream << number << " KB";
+    } else if (number < 1073741824)
+    {
+        number /= 1048576;
+        stream << number << " MB";
+    }
+}
+
 DDB_DLL void Registry::clone(const std::string &organization,
                              const std::string &dataset,
-                             const std::string &folder) {
+                             const std::string &folder,
+                             std::ostream& out) {
     // Workflow
     // 2) Download zip in temp folder
     // 3) Create target folder
@@ -147,18 +166,48 @@ DDB_DLL void Registry::clone(const std::string &organization,
 
     LOGD << "Temp file = " << tempFile;
 
+    auto start = std::chrono::system_clock::now();
+    size_t prevBytes = 0;
+
     auto res = net::GET(downloadUrl)
                    .authCookie(this->authToken)
                    .verifySSL(false)
-                   .progressCb([](size_t txBytes, size_t totalBytes) {
-                       LOGD << txBytes << "/" << totalBytes;
-                       return true;
-                   })
+                   .progressCb(
+                       [&start, &prevBytes, &out](size_t txBytes, size_t totalBytes) {
+                           if (txBytes == prevBytes) return true;
+
+                           const auto now = std::chrono::system_clock::now();
+
+                           const std::chrono::duration<double> dT = now - start;
+
+                           if (dT.count() < 1) return true;
+
+                           const auto dData = txBytes - prevBytes;
+                           const auto speed =
+                               static_cast<double>(dData) / dT.count();
+
+                           out << "Downloading: ";
+                           smartDisplay(out, static_cast<double>(txBytes));
+                           out << " @ ";
+
+                           smartDisplay(out, speed);
+                           out << "/s";
+                           out << "\t\t\r";
+                           out.flush();
+
+                           prevBytes = txBytes;
+                           start = now;
+
+                           return true;
+                       })
                    .downloadToFile(tempFile);
 
     if (res.status() != 200) this->handleError(res);
 
-    LOGD << "Dataset downloaded, now extracting it";
+    out << "Dataset downloaded (";
+    smartDisplay(out, static_cast<double>(prevBytes));
+    out << ")" << std::endl;
+
     std::filesystem::create_directory(folder);
 
     miniz_cpp::zip_file file;
@@ -166,11 +215,11 @@ DDB_DLL void Registry::clone(const std::string &organization,
     file.load(tempFile);
     file.extractall(folder);
 
-    LOGD << "Extracted to destination folder";
+    out << "Extracted to destination folder" << std::endl;
 
     std::filesystem::remove(tempFile);
 
-    LOGD << "Removed temp file";
+    out << "Done" << std::endl;
 }
 
 std::string Registry::getAuthToken() { return std::string(this->authToken); }

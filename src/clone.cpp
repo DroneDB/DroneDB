@@ -51,7 +51,7 @@ void clone(const TagComponents& tag, const std::string& folder) {
             throw AuthException("Cannot authenticate with " + reg.getUrl());
         }
 
-        reg.clone(tag.organization, tag.dataset, folder);
+        reg.clone(tag.organization, tag.dataset, folder, std::cout);
 
     } catch (const AuthException&) {
         const auto username = utils::getPrompt("Username: ");
@@ -61,7 +61,8 @@ void clone(const TagComponents& tag, const std::string& folder) {
             UserProfile::get()->getAuthManager()->saveCredentials(
                 tag.registryHost, AuthCredentials(username, password));
 
-            reg.clone(tag.organization, tag.dataset, folder);
+            reg.clone(tag.organization, tag.dataset, folder, std::cout);
+
 
         } else {
             throw AuthException("Cannot authenticate with " + reg.getUrl());
