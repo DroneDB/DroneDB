@@ -116,24 +116,6 @@ bool Registry::logout() {
     return UserProfile::get()->getAuthManager()->deleteCredentials(url);
 }
 
-void smartDisplay(std::ostream& stream, double number) {
-
-    stream << std::setprecision(4);
-
-    if (number < 1024) {
-        //
-        stream << number << " bytes";
-    } else if (number < 1048576)
-    {
-        number /= 1024;
-        stream << number << " KB";
-    } else if (number < 1073741824)
-    {
-        number /= 1048576;
-        stream << number << " MB";
-    }
-}
-
 DDB_DLL void Registry::clone(const std::string &organization,
                              const std::string &dataset,
                              const std::string &folder,
@@ -183,16 +165,9 @@ DDB_DLL void Registry::clone(const std::string &organization,
                            if (dT.count() < 1) return true;
 
                            const auto dData = txBytes - prevBytes;
-                           const auto speed =
-                               static_cast<double>(dData) / dT.count();
+                           const auto speed = dData / dT.count();
 
-                           out << "Downloading: ";
-                           smartDisplay(out, static_cast<double>(txBytes));
-                           out << " @ ";
-
-                           smartDisplay(out, speed);
-                           out << "/s";
-                           out << "\t\t\r";
+                           out << "Downloading: " << io::bytesToHuman(txBytes) << " @ " << io::bytesToHuman(speed) << "/s\t\t\r";
                            out.flush();
 
                            prevBytes = txBytes;
@@ -204,9 +179,7 @@ DDB_DLL void Registry::clone(const std::string &organization,
 
     if (res.status() != 200) this->handleError(res);
 
-    out << "Dataset downloaded (";
-    smartDisplay(out, static_cast<double>(prevBytes));
-    out << ")" << std::endl;
+    out << "Dataset downloaded (" << io::bytesToHuman(prevBytes) << ")\t\t" << std::endl;
 
     std::filesystem::create_directory(folder);
 
