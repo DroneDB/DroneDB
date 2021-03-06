@@ -56,6 +56,10 @@ TagComponents RegistryUtils::parseTag(const std::string &tag, bool useInsecureRe
     // Get rid of path
     res.registryUrl = url.getScheme() + "://" + url.getHost();
 
+    // Add port if needed
+    if ((url.getScheme() == "http" && url.getPort() != 80) || (url.getScheme() == "https" && url.getPort() != 443)) 
+        res.registryUrl += ":" + std::to_string(url.getPort());
+
     return res;
 }
 
