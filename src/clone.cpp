@@ -18,7 +18,6 @@
 namespace ddb {
 
 void clone(const TagComponents& tag, const std::string& folder) {
-
     if (fs::exists(folder)) {
         std::cout << "Cannot clone in folder '" + folder +
                          "' because it already exists";
@@ -26,43 +25,46 @@ void clone(const TagComponents& tag, const std::string& folder) {
     }
 
     std::cout << "Cloning dataset '" << tag.organization << "/" << tag.dataset
-              << "' from registry '" << tag.registryHost << "' to folder '"
+              << "' from registry '" << tag.registryUrl << "' to folder '"
               << folder << "'" << std::endl;
 
     const AuthCredentials ac =
-        UserProfile::get()->getAuthManager()->loadCredentials(tag.registryHost);
+        UserProfile::get()->getAuthManager()->loadCredentials(tag.registryUrl);
 
     Registry reg(tag.registryHost);
 
-    if (ac.empty()) {
-        const auto username = utils::getPrompt("Username: ");
-        const auto password = utils::getPass("Password: ");
-
-        if (reg.login(username, password).length() <= 0) {
-            throw AuthException("Cannot authenticate with " + reg.getUrl());
-        }
-
-        UserProfile::get()->getAuthManager()->saveCredentials(
-            tag.registryHost, AuthCredentials(username, password));
-    }
-
     try {
-        if (reg.login(ac.username, ac.password).length() <= 0) {
-            throw AuthException("Cannot authenticate with " + reg.getUrl());
-        }
+        if (ac.empty()) {
 
-        reg.clone(tag.organization, tag.dataset, folder, std::cout);
+            const auto username = utils::getPrompt("Username: ");
+            const auto password = utils::getPass("Password: ");
+
+            if (reg.login(username, password).length() <= 0) 
+                throw AuthException("Cannot authenticate with " + reg.getUrl());
+            
+            UserProfile::get()->getAuthManager()->saveCredentials(
+                tag.registryUrl, AuthCredentials(username, password));
+
+            reg.clone(tag.organization, tag.dataset, folder, std::cout);
+
+        } else {
+
+            if (reg.login(ac.username, ac.password).length() <= 0) 
+                throw AuthException("Cannot authenticate with " + reg.getUrl());
+            
+            reg.clone(tag.organization, tag.dataset, folder, std::cout);
+        }
 
     } catch (const AuthException&) {
         const auto username = utils::getPrompt("Username: ");
         const auto password = utils::getPass("Password: ");
 
         if (reg.login(username, password).length() > 0) {
+
             UserProfile::get()->getAuthManager()->saveCredentials(
-                tag.registryHost, AuthCredentials(username, password));
+                tag.registryUrl, AuthCredentials(username, password));
 
             reg.clone(tag.organization, tag.dataset, folder, std::cout);
-
 
         } else {
             throw AuthException("Cannot authenticate with " + reg.getUrl());
