@@ -5,6 +5,8 @@
 #include "dbops.h"
 #include "status.h"
 
+
+#include <ddb.h>
 #include <mio.h>
 
 #include "exceptions.h"
@@ -63,9 +65,10 @@ namespace ddb
                 }
 
                 // Skip .ddb
-                if (path.filename() == ".ddb") i.disable_recursion_pending();
+                if (path.filename() == DDB_FOLDER)
+                    i.disable_recursion_pending();
 
-                if (p.find(".ddb") != std::string::npos)
+                if (p.find(DDB_FOLDER) != std::string::npos)
                 {
                     LOGD << "Skipping ddb folder";
                     continue;

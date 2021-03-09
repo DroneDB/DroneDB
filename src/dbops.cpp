@@ -2,6 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "dbops.h"
+
+#include <ddb.h>
+
 #include "entry_types.h"
 #include "exif.h"
 #include "hash.h"
@@ -20,7 +23,7 @@ namespace ddb {
 
 std::unique_ptr<Database> open(const std::string &directory, bool traverseUp = false) {
     fs::path dirPath = fs::absolute(directory);
-    fs::path ddbDirPath = dirPath / ".ddb";
+    fs::path ddbDirPath = dirPath / DDB_FOLDER;
     fs::path dbasePath = ddbDirPath / "dbase.sqlite";
 
     if (fs::exists(dbasePath)) {
@@ -68,7 +71,7 @@ std::vector<fs::path> getIndexPathList(fs::path rootDirectory, const std::vector
 
     for (fs::path p : paths) {
         // fs::directory_options::skip_permission_denied
-        if (p.filename() == ".ddb") continue;
+        if (p.filename() == DDB_FOLDER) continue;
 
         if (fs::is_directory(p)) {
             try{
@@ -79,7 +82,8 @@ std::vector<fs::path> getIndexPathList(fs::path rootDirectory, const std::vector
                     fs::path rp = i->path();
 
                     // Skip .ddb
-                    if(rp.filename() == ".ddb") i.disable_recursion_pending();
+                    if (rp.filename() == DDB_FOLDER)
+                        i.disable_recursion_pending();
 
                     if (fs::is_directory(rp) && includeDirs) {
                         directories[rp.string()] = true;
@@ -131,7 +135,7 @@ std::vector<fs::path> getPathList(const std::vector<std::string> &paths, bool in
 
     for (fs::path p : paths) {
         // fs::directory_options::skip_permission_denied
-        if (p.filename() == ".ddb") continue;
+        if (p.filename() == DDB_FOLDER) continue;
         
         try {
             if (fs::is_directory(p)) {
@@ -151,7 +155,8 @@ std::vector<fs::path> getPathList(const std::vector<std::string> &paths, bool in
                     #endif
 
                     // Skip .ddb recursion
-                    if(rp.filename() == ".ddb") i.disable_recursion_pending();
+                    if (rp.filename() == DDB_FOLDER)
+                        i.disable_recursion_pending();
 
                     // Max depth
                     if (maxDepth > 0 && i.depth() >= (maxDepth - 1)) i.disable_recursion_pending();
@@ -478,8 +483,9 @@ std::string initIndex(const std::string &directory, bool fromScratch){
     const fs::path dirPath = directory;
     if (!exists(dirPath)) throw FSException("Invalid directory: " + dirPath.string() + " (does not exist)");
 
-    auto ddbDirPath = dirPath / ".ddb";
-    if (std::string(directory) == ".") ddbDirPath = ".ddb"; // Nicer to the eye
+    auto ddbDirPath = dirPath / DDB_FOLDER;
+    if (std::string(directory) == ".")
+        ddbDirPath = DDB_FOLDER;  // Nicer to the eye
     const auto dbasePath = ddbDirPath / "dbase.sqlite";
 
     LOGD << "Checking if .ddb directory exists...";

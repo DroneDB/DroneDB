@@ -4,6 +4,9 @@
 #include <exiv2/exiv2.hpp>
 #include "dbops.h"
 #include "entry.h"
+
+#include <ddb.h>
+
 #include "mio.h"
 #include "ogr_srs_api.h"
 
@@ -34,7 +37,7 @@ void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
 
         // Check for DroneDB dir
         try{
-            if (fs::exists(path / ".ddb" / "dbase.sqlite")){
+            if (fs::exists(path / DDB_FOLDER / "dbase.sqlite")) {
                 parseDroneDBEntry(path, entry);
             }
         }catch(const fs::filesystem_error &e){
