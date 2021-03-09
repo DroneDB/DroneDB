@@ -31,6 +31,8 @@ class Registry{
     DDB_DLL std::string login(const std::string &username, const std::string &password);
     DDB_DLL void ensureTokenValidity();
     DDB_DLL bool logout();
+    DDB_DLL void clone(const std::string &organization, const std::string &dataset,
+                       const std::string &folder, std::ostream& out);
 
     DDB_DLL void handleError(net::Response &res);
 

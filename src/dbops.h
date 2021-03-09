@@ -9,6 +9,7 @@
 #include "entry.h"
 #include "fs.h"
 #include "ddb_export.h"
+#include "registryutils.h"
 
 namespace ddb {
 
@@ -32,6 +33,8 @@ DDB_DLL void syncIndex(Database *db);
 DDB_DLL void delta(Database* sourceDb, Database* targetDb, std::ostream& out, const std::string& format);
 
 DDB_DLL std::string initIndex(const std::string &directory, bool fromScratch = false);
+
+DDB_DLL void clone(const ddb::TagComponents& tag, const std::string& folder);
 
 }
 

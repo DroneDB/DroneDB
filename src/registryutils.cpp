@@ -2,6 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "registryutils.h"
+
+#include <url/Url.h>
+
 #include "exceptions.h"
 #include "constants.h"
 #include "utils.h"
@@ -9,19 +12,19 @@
 namespace ddb{
 
 TagComponents RegistryUtils::parseTag(const std::string &tag, bool useInsecureRegistry){
-    std::string t = tag;
+    auto t = tag;
     utils::trim(t);
     utils::toLower(t);
 
-    size_t pos = t.rfind("/");
+    auto pos = t.rfind('/');
     if (pos == std::string::npos) throw InvalidArgsException("Invalid tag: " + tag + " must be in organization/dataset format");
 
     TagComponents res;
     res.dataset = t.substr(pos + 1, t.length() - 1);
     t = t.substr(0, t.length() - res.dataset.length() - 1);
 
-    pos = t.rfind("/");
-    bool useDefaultRegistry = false;
+    pos = t.rfind('/');
+    auto useDefaultRegistry = false;
 
     if (pos == std::string::npos){
         res.organization = t;
@@ -35,8 +38,8 @@ TagComponents RegistryUtils::parseTag(const std::string &tag, bool useInsecureRe
         // Use default registry URL
         res.registryUrl = std::string(useInsecureRegistry ? "http://" : "https://") + DEFAULT_REGISTRY;
     }else{
-        // TODO: should we validate the URL more throughly?
-        bool hasProto = (t.find("http://") == 0 || t.find("https://") == 0) ;
+        // TODO: should we validate the URL more thoroughly?
+        const bool hasProto = t.find("http://") == 0 || t.find("https://") == 0 ;
         if (hasProto) res.registryUrl = t;
         else res.registryUrl = (useInsecureRegistry ? "http://" : "https://") + t;
     }
@@ -47,11 +50,20 @@ TagComponents RegistryUtils::parseTag(const std::string &tag, bool useInsecureRe
         throw InvalidArgsException("Invalid tag: " + tag + " missing dataset name");
     }
 
+    const homer6::Url url(res.registryUrl);
+
+    // Get rid of path
+    res.registryUrl = url.getScheme() + "://" + url.getHost();
+
+    // Add port if needed
+    if ((url.getScheme() == "http" && url.getPort() != 80) || (url.getScheme() == "https" && url.getPort() != 443)) 
+        res.registryUrl += ":" + std::to_string(url.getPort());
+
     return res;
 }
 
 Registry RegistryUtils::createFromTag(const std::string &tag, bool useInsecureRegistry){
-    auto tc = parseTag(tag, useInsecureRegistry);
+    const auto tc = parseTag(tag, useInsecureRegistry);
     return Registry(tc.registryUrl);
 }
 

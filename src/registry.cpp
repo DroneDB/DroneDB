@@ -4,6 +4,9 @@
 
 #include "registry.h"
 
+#include <mio.h>
+
+#include "../vendor/miniz-cpp/zip_file.hpp"
 #include "exceptions.h"
 #include "json.h"
 #include "net.h"
@@ -17,6 +20,7 @@ namespace ddb {
 
 Registry::Registry(const std::string &url) {
     std::string urlStr = url;
+
     if (urlStr.empty()) urlStr = std::string(DEFAULT_REGISTRY);
 
     Url u;
@@ -54,7 +58,6 @@ std::string Registry::login() {
                                    this->url + "'");
 
     return login(ac.username, ac.password);
-    
 }
 
 std::string Registry::login(const std::string &username,
@@ -96,7 +99,8 @@ DDB_DLL void Registry::ensureTokenValidity() {
 
     const auto now = std::time(nullptr);
 
-    LOGD << "Now = " << now << ", expration = " << this->tokenExpiration << ", diff = " << now - this->tokenExpiration;
+    LOGD << "Now = " << now << ", expration = " << this->tokenExpiration
+         << ", diff = " << now - this->tokenExpiration;
 
     // If the token is still valid we have nothing to do
     if (now < this->tokenExpiration) {
@@ -111,6 +115,87 @@ DDB_DLL void Registry::ensureTokenValidity() {
 
 bool Registry::logout() {
     return UserProfile::get()->getAuthManager()->deleteCredentials(url);
+}
+
+DDB_DLL void Registry::clone(const std::string &organization,
+                             const std::string &dataset,
+                             const std::string &folder,
+                             std::ostream& out) {
+    // Workflow
+    // 2) Download zip in temp folder
+    // 3) Create target folder
+    // 3.1) If target folder already exists throw error
+    // 4) Unzip in target folder
+    // 5) Remove temp zip
+    // 6) Update sync information
+
+    this->ensureTokenValidity();
+
+    const auto downloadUrl = url + "/orgs/" + organization + "/ds/" +
+                             dataset + "/download";
+
+    LOGD << "Downloading dataset '" << dataset << "' of organization '"
+         << organization << "'";
+    LOGD << "To folder: " << folder;
+
+    LOGD << "Download url = " << downloadUrl;
+
+    const auto tempFile =
+        io::Path(fs::temp_directory_path() / std::to_string(time(nullptr)))
+            .string() +
+        ".tmp";
+
+    LOGD << "Temp file = " << tempFile;
+
+    auto start = std::chrono::system_clock::now();
+    size_t prevBytes = 0;
+
+    auto res = net::GET(downloadUrl)
+                   .authCookie(this->authToken)
+                   .verifySSL(false)
+                   .progressCb(
+                       [&start, &prevBytes, &out](size_t txBytes, size_t totalBytes) {
+                           if (txBytes == prevBytes) return true;
+
+                           const auto now = std::chrono::system_clock::now();
+
+                           const std::chrono::duration<double> dT = now - start;
+
+                           if (dT.count() < 1) return true;
+
+                           const auto dData = txBytes - prevBytes;
+                           const auto speed = dData / dT.count();
+
+                           out << "Downloading: " << io::bytesToHuman(txBytes) << " @ " << io::bytesToHuman(speed) << "/s\t\t\r";
+                           out.flush();
+
+                           prevBytes = txBytes;
+                           start = now;
+
+                           return true;
+                       })
+                   .downloadToFile(tempFile);
+
+    if (res.status() != 200) this->handleError(res);
+
+    out << "Dataset downloaded (" << io::bytesToHuman(prevBytes) << ")\t\t" << std::endl;
+    out << "Extracting to destination folder (this could take a while)" << std::endl;
+
+    io::createDirectories(folder);
+
+    try{
+        miniz_cpp::zip_file file;
+
+        file.load(tempFile);
+        file.extractall(folder);
+    }catch(const std::runtime_error &e){
+        LOGD << "Error extracting zip file";
+        throw AppException(e.what());
+    }
+
+    std::filesystem::remove(tempFile);
+
+    out << "Done" << std::endl;
 }
 
 std::string Registry::getAuthToken() { return std::string(this->authToken); }
