@@ -20,6 +20,7 @@ namespace ddb {
 
 Registry::Registry(const std::string &url) {
     std::string urlStr = url;
+
     if (urlStr.empty()) urlStr = std::string(DEFAULT_REGISTRY);
 
     Url u;
@@ -130,9 +131,7 @@ DDB_DLL void Registry::clone(const std::string &organization,
 
     this->ensureTokenValidity();
 
-    const Url url(this->url);
-
-    const auto downloadUrl = url.getHost() + "/orgs/" + organization + "/ds/" +
+    const auto downloadUrl = url + "/orgs/" + organization + "/ds/" +
                              dataset + "/download";
 
     LOGD << "Downloading dataset '" << dataset << "' of organization '"
@@ -180,6 +179,7 @@ DDB_DLL void Registry::clone(const std::string &organization,
     if (res.status() != 200) this->handleError(res);
 
     out << "Dataset downloaded (" << io::bytesToHuman(prevBytes) << ")\t\t" << std::endl;
+    out << "Extracting to destination folder..." << std::endl;
 
     std::filesystem::create_directory(folder);
 
@@ -188,7 +188,7 @@ DDB_DLL void Registry::clone(const std::string &organization,
     file.load(tempFile);
     file.extractall(folder);
 
-    out << "Extracted to destination folder" << std::endl;
+
 
     std::filesystem::remove(tempFile);
 

@@ -51,7 +51,6 @@ TagComponents RegistryUtils::parseTag(const std::string &tag, bool useInsecureRe
     }
 
     const homer6::Url url(res.registryUrl);
-    res.registryHost = url.getHost();
 
     // Get rid of path
     res.registryUrl = url.getScheme() + "://" + url.getHost();

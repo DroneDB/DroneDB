@@ -20,7 +20,7 @@ namespace ddb {
 void clone(const TagComponents& tag, const std::string& folder) {
     if (fs::exists(folder)) {
         std::cout << "Cannot clone in folder '" + folder +
-                         "' because it already exists";
+                         "' because it already exists" << std::endl;
         return;
     }
 
@@ -31,7 +31,7 @@ void clone(const TagComponents& tag, const std::string& folder) {
     const AuthCredentials ac =
         UserProfile::get()->getAuthManager()->loadCredentials(tag.registryUrl);
 
-    Registry reg(tag.registryHost);
+    Registry reg(tag.registryUrl);
 
     try {
         if (ac.empty()) {

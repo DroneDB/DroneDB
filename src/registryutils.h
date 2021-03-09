@@ -14,7 +14,6 @@ struct TagComponents{
     std::string registryUrl;
     std::string organization;
     std::string dataset;
-    std::string registryHost;
 
     std::string tagWithoutUrl() const;
 };
