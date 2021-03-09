@@ -179,16 +179,19 @@ DDB_DLL void Registry::clone(const std::string &organization,
     if (res.status() != 200) this->handleError(res);
 
     out << "Dataset downloaded (" << io::bytesToHuman(prevBytes) << ")\t\t" << std::endl;
-    out << "Extracting to destination folder..." << std::endl;
+    out << "Extracting to destination folder (this could take a while)" << std::endl;
 
-    std::filesystem::create_directory(folder);
+    io::createDirectories(folder);
 
-    miniz_cpp::zip_file file;
+    try{
+        miniz_cpp::zip_file file;
 
-    file.load(tempFile);
-    file.extractall(folder);
-
-
+        file.load(tempFile);
+        file.extractall(folder);
+    }catch(const std::runtime_error &e){
+        LOGD << "Error extracting zip file";
+        throw AppException(e.what());
+    }
 
     std::filesystem::remove(tempFile);
 
