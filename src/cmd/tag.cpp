@@ -35,13 +35,13 @@ void Tag::run(cxxopts::ParseResult &opts) {
 
     const auto currentPath = std::filesystem::current_path();
 
-    if (registry.length() == 0) registry = DEFAULT_REGISTRY;
+    if (registry.length() == 0) registry = DEFAULT_REGISTRY_URL;
 
     ddb::TagManager manager(currentPath);
 
     if (tag.length() > 0) {
-        manager.setTag(tag, registry);
-        std::cout << "[" << registry << "] " << tag;
+        manager.setTag(tag);
+        std::cout << tag;
 
     } else {
         const auto res = manager.getTag(registry);
