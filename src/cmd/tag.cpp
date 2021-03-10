@@ -2,11 +2,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-#include <iostream>
-#include "fs.h"
 #include "tag.h"
+
+#include <iostream>
+
 #include "../tagmanager.h"
 #include "dbops.h"
+#include "fs.h"
 
 namespace cmd {
 
@@ -23,29 +25,30 @@ void Tag::setOptions(cxxopts::Options &opts) {
 }
 
 std::string Tag::description() {
-    return "Shows or sets the tag.\nShow: ddb tag.\nSet: ddb tag <org>/<dataset>\nor: ddb tag <server>/<org>/<dataset>";
+    return "Shows or sets the tag.\nShow: ddb tag.\nSet: ddb tag "
+           "<org>/<dataset>\nor: ddb tag <server>/<org>/<dataset>";
 }
 
 void Tag::run(cxxopts::ParseResult &opts) {
     const auto tag = opts["tag"].as<std::string>();
-    const auto registry = opts["registry"].as<std::string>();
+    auto registry = opts["registry"].as<std::string>();
 
     const auto currentPath = std::filesystem::current_path();
 
+    if (registry.length() == 0) registry = DEFAULT_REGISTRY;
+
     ddb::TagManager manager(currentPath);
 
-    if (tag.length() > 0)
-    {
+    if (tag.length() > 0) {
         manager.setTag(tag, registry);
-    }
-    else {
+        std::cout << "[" << registry << "] " << tag;
+
+    } else {
         const auto res = manager.getTag(registry);
-        std::cout << "Tag: " << res << std::endl;
+        std::cout << "[" << registry << "] " << res;
+
     }
 
-    
 }
 
-}
-
-
+}  // namespace cmd
