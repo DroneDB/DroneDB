@@ -10,7 +10,7 @@
 
 namespace ddb {
 
-    #define TAGSFILE "tags.json"
+#define TAGSFILE "tags.json"
 
 class TagManager {
     fs::path ddbFolder;
@@ -20,11 +20,8 @@ class TagManager {
         //
     }
 
-    DDB_DLL std::string getTag(
-        const std::string& registry = std::string(DEFAULT_REGISTRY));
-    DDB_DLL void setTag(
-        const std::string& tag,
-        const std::string& registry = std::string(DEFAULT_REGISTRY));
+    DDB_DLL std::string getTag(const std::string& registry = std::string(DEFAULT_REGISTRY_URL));
+    DDB_DLL void setTag(const std::string& tag);
 };
 
 }  // namespace ddb

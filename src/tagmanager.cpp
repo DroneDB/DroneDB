@@ -14,7 +14,7 @@ namespace ddb {
 
 std::string TagManager::getTag(const std::string& registry) {
     const auto path = this->ddbFolder / DDB_FOLDER / TAGSFILE;
-
+    
     LOGD << "Path = " << path;
     LOGD << "Getting tag of registry " << registry;
 
@@ -33,19 +33,27 @@ std::string TagManager::getTag(const std::string& registry) {
 
     LOGD << "Contents: " << j.dump();
 
-    if (!j.contains(registry)) return "";
+    auto registryFixed = std::string(registry);
+    std::transform(registryFixed.begin(), registryFixed.end(),
+                   registryFixed.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
 
-    const auto reg = j[registry];
+    if (!j.contains(registryFixed)) return "";
+
+    const auto reg = j[registryFixed];
 
     if (j.is_null()) return "";
 
     return reg["tag"];
 }
-void TagManager::setTag(const std::string& tag, const std::string& registry) {
+void TagManager::setTag(const std::string& tag) {
     const auto path = this->ddbFolder / DDB_FOLDER / TAGSFILE;
 
+    const auto tg = RegistryUtils::parseTag(tag);
+
     LOGD << "Path = " << path;
-    LOGD << "Setting tag '" << tag << "' of registry " << registry;
+    LOGD << "Setting tag '" << tg.tagWithoutUrl() << "' of registry '"
+         << tg.registryUrl << "'";
 
     if (!exists(path)) {
         std::ofstream out(path, std::ios_base::out);
@@ -60,10 +68,14 @@ void TagManager::setTag(const std::string& tag, const std::string& registry) {
 
     LOGD << "Contents: " << j.dump();
 
-    // if (reg.is_null()) {
-    j[registry] = {{"tag", tag},
-                   {"mtime", std::chrono::system_clock::to_time_t(
-                                 std::chrono::system_clock::now())}};
+    auto registryFixed = std::string(tg.registryUrl);
+    std::transform(registryFixed.begin(), registryFixed.end(),
+                   registryFixed.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+
+    j[registryFixed] = {{"tag", tg.tagWithoutUrl()},
+                        {"mtime", std::chrono::system_clock::to_time_t(
+                                      std::chrono::system_clock::now())}};
 
     if (exists(path)) {
         fs::remove(path);
