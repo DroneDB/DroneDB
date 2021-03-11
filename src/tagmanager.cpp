@@ -43,7 +43,7 @@ void TagManager::setTag(const std::string& tag) {
     const auto tg = RegistryUtils::parseTag(tag);
 
     LOGD << "Path = " << path;
-    LOGD << "Setting tag '" << tg.tagWithoutUrl();
+    LOGD << "Setting tag '" << tg.fullTag();
 
     if (!exists(path)) {
         std::ofstream out(path, std::ios_base::out);
@@ -58,7 +58,7 @@ void TagManager::setTag(const std::string& tag) {
 
     LOGD << "Contents: " << j.dump();
 
-    j["tag"] = tg.tagWithoutUrl();
+    j["tag"] = tg.fullTag();
 
     if (exists(path)) {
         fs::remove(path);
