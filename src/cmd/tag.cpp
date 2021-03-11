@@ -25,8 +25,7 @@ void Tag::setOptions(cxxopts::Options &opts) {
 }
 
 std::string Tag::description() {
-    return "Shows or sets the tag.\nShow: ddb tag.\nSet: ddb tag "
-           "<org>/<dataset>\nor: ddb tag <server>/<org>/<dataset>";
+    return "Gets or sets the dataset tag.";
 }
 
 void Tag::run(cxxopts::ParseResult &opts) {
@@ -35,20 +34,22 @@ void Tag::run(cxxopts::ParseResult &opts) {
 
     const auto currentPath = std::filesystem::current_path();
 
-    if (registry.length() == 0) registry = DEFAULT_REGISTRY_URL;
+    if (registry.length() == 0) registry = DEFAULT_REGISTRY;
 
     ddb::TagManager manager(currentPath);
 
     if (tag.length() > 0) {
         manager.setTag(tag);
-        std::cout << tag;
-
+        std::cout << "Tag set: " << tag << std::endl;
     } else {
         const auto res = manager.getTag(registry);
-        std::cout << "[" << registry << "] " << res;
 
+        if (res.length() == 0) {
+            std::cout << "No tag set" << std::endl;
+        } else {
+            std::cout << registry << "/" << res << std::endl;
+        }
     }
-
 }
 
 }  // namespace cmd
