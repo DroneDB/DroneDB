@@ -41,7 +41,7 @@ std::string ShareService::share(const std::vector<std::string> &input,
 
     client.Init(tc.tagWithoutUrl(), password);
 
-    // TODO: multithreaded share/upload
+    // TODO: multi threaded share/upload
 
     // Calculate cwd from paths or use the one provided?
     io::Path wd;
