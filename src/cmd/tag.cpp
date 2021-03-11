@@ -18,8 +18,7 @@ void Tag::setOptions(cxxopts::Options &opts) {
     .positional_help("[args]")
     .custom_help("tag [tag]")
     .add_options()
-    ("t,tag", "New tag", cxxopts::value<std::string>()->default_value(""))
-    ("r,registry", "Registry", cxxopts::value<std::string>()->default_value(""));
+    ("t,tag", "New tag", cxxopts::value<std::string>()->default_value(""));
     // clang-format on
     opts.parse_positional({"tag"});
 }
@@ -30,11 +29,8 @@ std::string Tag::description() {
 
 void Tag::run(cxxopts::ParseResult &opts) {
     const auto tag = opts["tag"].as<std::string>();
-    auto registry = opts["registry"].as<std::string>();
 
     const auto currentPath = std::filesystem::current_path();
-
-    if (registry.length() == 0) registry = DEFAULT_REGISTRY_URL;
 
     ddb::TagManager manager(currentPath);
 
@@ -42,12 +38,12 @@ void Tag::run(cxxopts::ParseResult &opts) {
         manager.setTag(tag);
         std::cout << "Tag set: " << tag << std::endl;
     } else {
-        const auto res = manager.getTag(registry);
+        const auto res = manager.getTag();
 
         if (res.length() == 0) {
             std::cout << "No tag set" << std::endl;
         } else {
-            std::cout << registry << "/" << res << std::endl;
+            std::cout << res << std::endl;
         }
     }
 }

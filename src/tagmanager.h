@@ -20,7 +20,7 @@ class TagManager {
         //
     }
 
-    DDB_DLL std::string getTag(const std::string& registry = std::string(DEFAULT_REGISTRY_URL));
+    DDB_DLL std::string getTag();
     DDB_DLL void setTag(const std::string& tag);
 };
 

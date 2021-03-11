@@ -12,11 +12,10 @@
 
 namespace ddb {
 
-std::string TagManager::getTag(const std::string& registry) {
+std::string TagManager::getTag() {
     const auto path = this->ddbFolder / DDB_FOLDER / TAGSFILE;
     
     LOGD << "Path = " << path;
-    LOGD << "Getting tag of registry " << registry;
 
     if (!exists(path)) {
         LOGD << "Path does not exist, creating empty file";
@@ -33,18 +32,10 @@ std::string TagManager::getTag(const std::string& registry) {
 
     LOGD << "Contents: " << j.dump();
 
-    auto registryFixed = std::string(registry);
-    std::transform(registryFixed.begin(), registryFixed.end(),
-                   registryFixed.begin(),
-                   [](unsigned char c) { return std::tolower(c); });
+    if (!j.contains("tag")) return "";
 
-    if (!j.contains(registryFixed)) return "";
+    return j["tag"];
 
-    const auto reg = j[registryFixed];
-
-    if (j.is_null()) return "";
-
-    return reg["tag"];
 }
 void TagManager::setTag(const std::string& tag) {
     const auto path = this->ddbFolder / DDB_FOLDER / TAGSFILE;
@@ -52,8 +43,7 @@ void TagManager::setTag(const std::string& tag) {
     const auto tg = RegistryUtils::parseTag(tag);
 
     LOGD << "Path = " << path;
-    LOGD << "Setting tag '" << tg.tagWithoutUrl() << "' of registry '"
-         << tg.registryUrl << "'";
+    LOGD << "Setting tag '" << tg.tagWithoutUrl();
 
     if (!exists(path)) {
         std::ofstream out(path, std::ios_base::out);
@@ -68,14 +58,7 @@ void TagManager::setTag(const std::string& tag) {
 
     LOGD << "Contents: " << j.dump();
 
-    auto registryFixed = std::string(tg.registryUrl);
-    std::transform(registryFixed.begin(), registryFixed.end(),
-                   registryFixed.begin(),
-                   [](unsigned char c) { return std::tolower(c); });
-
-    j[registryFixed] = {{"tag", tg.tagWithoutUrl()},
-                        {"mtime", std::chrono::system_clock::to_time_t(
-                                      std::chrono::system_clock::now())}};
+    j["tag"] = tg.tagWithoutUrl();
 
     if (exists(path)) {
         fs::remove(path);

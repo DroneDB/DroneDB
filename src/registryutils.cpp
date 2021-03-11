@@ -86,4 +86,16 @@ std::string TagComponents::tagWithoutUrl() const {
     return "";
 }
 
+std::string TagComponents::fullTag() const {
+    std::string tmp;
+
+    if (!registryUrl.empty())
+        tmp += registryUrl + "/";
+
+    if (organization.empty() && dataset.empty())
+        return "";
+
+    return tmp + organization + "/" + dataset;
+}
+
 }  // namespace ddb
