@@ -53,7 +53,7 @@ void TagManager::setTag(const std::string& tag) {
 
     LOGD << "Path = " << path;
     LOGD << "Setting tag '" << tg.tagWithoutUrl() << "' of registry '"
-         << tg.registryHost << "'";
+         << tg.registryUrl << "'";
 
     if (!exists(path)) {
         std::ofstream out(path, std::ios_base::out);
@@ -68,7 +68,7 @@ void TagManager::setTag(const std::string& tag) {
 
     LOGD << "Contents: " << j.dump();
 
-    auto registryFixed = std::string(tg.registryHost);
+    auto registryFixed = std::string(tg.registryUrl);
     std::transform(registryFixed.begin(), registryFixed.end(),
                    registryFixed.begin(),
                    [](unsigned char c) { return std::tolower(c); });
