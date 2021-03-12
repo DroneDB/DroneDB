@@ -3,6 +3,9 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "userprofile.h"
+
+#include <ddb.h>
+
 #include "exceptions.h"
 
 namespace ddb{
@@ -57,9 +60,7 @@ fs::path UserProfile::getHomeDir()
     return fs::path(std::string(home)) / fs::path(std::string(homePath));
 }
 
-fs::path UserProfile::getProfileDir(){
-    return getHomeDir() / ".ddb";
-}
+fs::path UserProfile::getProfileDir(){ return getHomeDir() / DDB_FOLDER; }
 
 fs::path UserProfile::getProfilePath(const fs::path &p, bool createIfNeeded = true){
     const fs::path profilePath = getProfileDir() / p;

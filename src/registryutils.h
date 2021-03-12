@@ -16,6 +16,8 @@ struct TagComponents{
     std::string dataset;
 
     std::string tagWithoutUrl() const;
+    std::string fullTag() const;
+    std::string tag() const;
 };
 
 class RegistryUtils{
