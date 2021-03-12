@@ -13,7 +13,7 @@
 namespace ddb {
 
 std::string TagManager::getTag() {
-    const auto path = this->ddbFolder / DDB_FOLDER / TAGSFILE;
+    const auto path = this->ddbFolder / TAGSFILE;
     
     LOGD << "Path = " << path;
 
@@ -38,7 +38,7 @@ std::string TagManager::getTag() {
 
 }
 void TagManager::setTag(const std::string& tag) {
-    const auto path = this->ddbFolder / DDB_FOLDER / TAGSFILE;
+    const auto path = this->ddbFolder / TAGSFILE;
 
     const auto tg = RegistryUtils::parseTag(tag);
 

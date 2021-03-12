@@ -32,7 +32,9 @@ void Tag::run(cxxopts::ParseResult &opts) {
 
     const auto currentPath = std::filesystem::current_path();
 
-    ddb::TagManager manager(currentPath);
+    const auto db = ddb::open(currentPath.string(), true);
+
+    ddb::TagManager manager(fs::path(db->getOpenFile()).parent_path());
 
     if (tag.length() > 0) {
         manager.setTag(tag);
