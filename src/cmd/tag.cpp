@@ -38,13 +38,11 @@ void Tag::run(cxxopts::ParseResult &opts) {
 
     if (tag.length() > 0) {
         manager.setTag(tag);
-        std::cout << "Tag set: " << tag << std::endl;
+        std::cout << manager.getTag() << std::endl;
     } else {
         const auto res = manager.getTag();
 
-        if (res.length() == 0) {
-            std::cout << "No tag set" << std::endl;
-        } else {
+        if (res.length() != 0) {
             std::cout << res << std::endl;
         }
     }
