@@ -86,11 +86,30 @@ std::string TagComponents::tagWithoutUrl() const {
     return "";
 }
 
+// Tag that always include explicit protocol/server information
+// e.g. https://server/org/ds
 std::string TagComponents::fullTag() const {
     std::string tmp;
 
     if (!registryUrl.empty())
         tmp += registryUrl + "/";
+
+    if (organization.empty() && dataset.empty())
+        return "";
+
+    return tmp + organization + "/" + dataset;
+}
+
+std::string TagComponents::tag() const {
+    std::string tmp;
+
+    if (!registryUrl.empty())
+        tmp += registryUrl + "/";
+
+    // Implicit
+    if (tmp == "https://" DEFAULT_REGISTRY "/"){
+        tmp = "";
+    }
 
     if (organization.empty() && dataset.empty())
         return "";

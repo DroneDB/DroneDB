@@ -9,6 +9,7 @@
 
 #include "dbops.h"
 #include "exceptions.h"
+#include "registryutils.h"
 
 namespace ddb {
 
@@ -34,8 +35,8 @@ std::string TagManager::getTag() {
 
     if (!j.contains("tag")) return "";
 
-    return j["tag"];
-
+    TagComponents t = RegistryUtils::parseTag(j["tag"]);
+    return t.tag();
 }
 void TagManager::setTag(const std::string& tag) {
     const auto path = this->ddbFolder / TAGSFILE;
