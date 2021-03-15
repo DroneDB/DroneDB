@@ -24,6 +24,8 @@
 #include "delta.h"
 #include "clone.h"
 #include "tag.h"
+#include "push.h"
+#include "pull.h"
 
 namespace cmd {
 
@@ -48,7 +50,9 @@ namespace cmd {
       {"chattr", new Chattr()},
       {"delta", new Delta()},
       {"clone", new Clone()},
-      {"tag", new Tag()}
+      {"tag", new Tag()},
+      {"push", new Push()},
+      {"pull", new Pull()}
   };
 
   std::map<std::string, std::string> aliases = {
