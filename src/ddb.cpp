@@ -11,6 +11,7 @@
 #include "info.h"
 #include "status.h"
 #include "tagmanager.h"
+#include "syncmanager.h"
 #include "version.h"
 #include "mio.h"
 #include "logger.h"
