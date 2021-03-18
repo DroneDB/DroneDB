@@ -15,16 +15,16 @@
 #include "mio.h"
 #include "version.h"
 #include "userprofile.h"
-#include <stdlib.h>
+#include <cstdlib>
 
 namespace ddb {
 
 #define UPDATE_QUERY "UPDATE entries SET hash=?, type=?, meta=?, mtime=?, size=?, depth=?, point_geom=GeomFromText(?, 4326), polygon_geom=GeomFromText(?, 4326) WHERE path=?"
 
 std::unique_ptr<Database> open(const std::string &directory, bool traverseUp = false) {
-    fs::path dirPath = fs::absolute(directory);
-    fs::path ddbDirPath = dirPath / DDB_FOLDER;
-    fs::path dbasePath = ddbDirPath / "dbase.sqlite";
+    const fs::path dirPath = fs::absolute(directory);
+    const fs::path ddbDirPath = dirPath / DDB_FOLDER;
+    const fs::path dbasePath = ddbDirPath / "dbase.sqlite";
 
     if (fs::exists(dbasePath)) {
         LOGD << dbasePath.string() + " exists";
@@ -122,8 +122,8 @@ std::vector<fs::path> getIndexPathList(fs::path rootDirectory, const std::vector
         }
     }
 
-    for (auto it : directories) {
-        result.push_back(it.first);
+    for (auto [fst, snd] : directories) {
+        result.emplace_back(fst);
     }
 
     return result;
@@ -147,7 +147,7 @@ std::vector<fs::path> getPathList(const std::vector<std::string> &paths, bool in
 
                     // Ignore system files on Windows
                     #ifdef WIN32
-                    DWORD attrs = GetFileAttributesW(rp.wstring().c_str());
+                    const DWORD attrs = GetFileAttributesW(rp.wstring().c_str());
                     if (attrs & FILE_ATTRIBUTE_HIDDEN || attrs & FILE_ATTRIBUTE_SYSTEM) {
                         i.disable_recursion_pending();
                         continue;
@@ -196,7 +196,7 @@ std::vector<std::string> expandPathList(const std::vector<std::string> &paths, b
 
 
 bool checkUpdate(Entry &e, const fs::path &p, long long dbMtime, const std::string &dbHash) {
-    bool folder = fs::is_directory(p);
+    const bool folder = fs::is_directory(p);
 
     // Did it change?
     e.mtime = io::Path(p).getModifiedTime();
@@ -239,14 +239,14 @@ void doUpdate(Statement *updateQ, const Entry &e) {
 
 
 void addToIndex(Database *db, const std::vector<std::string> &paths, AddCallback callback) {
-    if (paths.size() == 0) return; // Nothing to do
-    fs::path directory = rootDirectory(db);
+    if (paths.empty()) return; // Nothing to do
+    const fs::path directory = rootDirectory(db);
     auto pathList = getIndexPathList(directory, paths, true);
 
     auto q = db->query("SELECT mtime,hash FROM entries WHERE path=?");
     auto insertQ = db->query("INSERT INTO entries (path, hash, type, meta, mtime, size, depth, point_geom, polygon_geom) "
                              "VALUES (?, ?, ?, ?, ?, ?, ?, GeomFromText(?, 4326), GeomFromText(?, 4326))");
-    auto updateQ = db->query(UPDATE_QUERY);
+    const auto updateQ = db->query(UPDATE_QUERY);
     db->exec("BEGIN EXCLUSIVE TRANSACTION");
 
     for (auto &p : pathList) {
@@ -449,11 +449,11 @@ std::vector<Entry> getMatchingEntries(Database* db, const fs::path& path, int ma
 }
 
 void syncIndex(Database *db) {
-    fs::path directory = rootDirectory(db);
+    const fs::path directory = rootDirectory(db);
 
     auto q = db->query("SELECT path,mtime,hash FROM entries");
     auto deleteQ = db->query("DELETE FROM entries WHERE path = ?");
-    auto updateQ = db->query(UPDATE_QUERY);
+    const auto updateQ = db->query(UPDATE_QUERY);
 
     db->exec("BEGIN EXCLUSIVE TRANSACTION");
 
@@ -509,7 +509,7 @@ std::string initIndex(const std::string &directory, bool fromScratch){
     if (!fromScratch){
         // "Fast" init by copying the pre-built empty database index
         // this prevents the slow table generation process
-        fs::path emptyDbPath = UserProfile::get()->getTemplatesDir() / ("empty-dbase-" APP_REVISION ".sqlite");
+        const fs::path emptyDbPath = UserProfile::get()->getTemplatesDir() / ("empty-dbase-" APP_REVISION ".sqlite");
 
         // Need to create?
         if (!fs::exists(emptyDbPath)){
