@@ -22,21 +22,31 @@ class Registry{
     time_t tokenExpiration;
 
    public:
-    DDB_DLL Registry(const std::string &url = DEFAULT_REGISTRY);
+    DDB_DLL Registry(const std::string& url = DEFAULT_REGISTRY);
 
-    DDB_DLL std::string getUrl(const std::string &path = "") const;
+    DDB_DLL std::string getUrl(const std::string& path = "") const;
     DDB_DLL std::string login();
 
     DDB_DLL std::string getAuthToken();
-    DDB_DLL std::string login(const std::string &username, const std::string &password);
+    DDB_DLL std::string login(const std::string& username, const std::string& password);
     DDB_DLL void ensureTokenValidity();
     DDB_DLL bool logout();
-    DDB_DLL void clone(const std::string &organization, const std::string &dataset,
-                       const std::string &folder, std::ostream& out);
+    DDB_DLL void clone(const std::string& organization, const std::string& dataset,
+                       const std::string& folder, std::ostream& out);
 
-    DDB_DLL void handleError(net::Response &res);
+    DDB_DLL void handleError(net::Response& res);
 
     DDB_DLL time_t getTokenExpiration();
+
+    DDB_DLL time_t getLastModifiedTime(const std::string& organization, const std::string& dataset);
+
+    DDB_DLL void downloadDdb(const std::string& organization, const std::string& dataset, const std::string& folder);
+
+    DDB_DLL void downloadFiles(const std::string& organization, const std::string& dataset,
+                               const std::vector<std::string>& files,
+                               const std::string& folder);
+
+
 
 };
 

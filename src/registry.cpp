@@ -119,8 +119,7 @@ bool Registry::logout() {
 
 DDB_DLL void Registry::clone(const std::string &organization,
                              const std::string &dataset,
-                             const std::string &folder,
-                             std::ostream& out) {
+                             const std::string &folder, std::ostream &out) {
     // Workflow
     // 2) Download zip in temp folder
     // 3) Create target folder
@@ -131,8 +130,8 @@ DDB_DLL void Registry::clone(const std::string &organization,
 
     this->ensureTokenValidity();
 
-    const auto downloadUrl = url + "/orgs/" + organization + "/ds/" +
-                             dataset + "/download";
+    const auto downloadUrl =
+        url + "/orgs/" + organization + "/ds/" + dataset + "/download";
 
     LOGD << "Downloading dataset '" << dataset << "' of organization '"
          << organization << "'";
@@ -153,42 +152,45 @@ DDB_DLL void Registry::clone(const std::string &organization,
     auto res = net::GET(downloadUrl)
                    .authCookie(this->authToken)
                    .verifySSL(false)
-                   .progressCb(
-                       [&start, &prevBytes, &out](size_t txBytes, size_t totalBytes) {
-                           if (txBytes == prevBytes) return true;
+                   .progressCb([&start, &prevBytes, &out](size_t txBytes,
+                                                          size_t totalBytes) {
+                       if (txBytes == prevBytes) return true;
 
-                           const auto now = std::chrono::system_clock::now();
+                       const auto now = std::chrono::system_clock::now();
 
-                           const std::chrono::duration<double> dT = now - start;
+                       const std::chrono::duration<double> dT = now - start;
 
-                           if (dT.count() < 1) return true;
+                       if (dT.count() < 1) return true;
 
-                           const auto dData = txBytes - prevBytes;
-                           const auto speed = dData / dT.count();
+                       const auto dData = txBytes - prevBytes;
+                       const auto speed = dData / dT.count();
 
-                           out << "Downloading: " << io::bytesToHuman(txBytes) << " @ " << io::bytesToHuman(speed) << "/s\t\t\r";
-                           out.flush();
+                       out << "Downloading: " << io::bytesToHuman(txBytes)
+                           << " @ " << io::bytesToHuman(speed) << "/s\t\t\r";
+                       out.flush();
 
-                           prevBytes = txBytes;
-                           start = now;
+                       prevBytes = txBytes;
+                       start = now;
 
-                           return true;
-                       })
+                       return true;
+                   })
                    .downloadToFile(tempFile);
 
     if (res.status() != 200) this->handleError(res);
 
-    out << "Dataset downloaded (" << io::bytesToHuman(prevBytes) << ")\t\t" << std::endl;
-    out << "Extracting to destination folder (this could take a while)" << std::endl;
+    out << "Dataset downloaded (" << io::bytesToHuman(prevBytes) << ")\t\t"
+        << std::endl;
+    out << "Extracting to destination folder (this could take a while)"
+        << std::endl;
 
     io::createDirectories(folder);
 
-    try{
+    try {
         miniz_cpp::zip_file file;
 
         file.load(tempFile);
         file.extractall(folder);
-    }catch(const std::runtime_error &e){
+    } catch (const std::runtime_error &e) {
         LOGD << "Error extracting zip file";
         throw AppException(e.what());
     }
@@ -201,6 +203,24 @@ DDB_DLL void Registry::clone(const std::string &organization,
 std::string Registry::getAuthToken() { return std::string(this->authToken); }
 
 time_t Registry::getTokenExpiration() { return this->tokenExpiration; }
+
+DDB_DLL time_t Registry::getLastModifiedTime(const std::string &organization,
+                                             const std::string &dataset) {
+    throw NotImplementedException("Not implemented yet");
+}
+
+DDB_DLL void Registry::downloadDdb(const std::string &organization,
+                                   const std::string &dataset,
+                                   const std::string &folder) {
+    throw NotImplementedException("Not implemented yet");
+}
+
+DDB_DLL void Registry::downloadFiles(const std::string &organization,
+                                     const std::string &dataset,
+                                     const std::vector<std::string> &files,
+                                     const std::string &folder) {
+    throw NotImplementedException("Not implemented yet");
+}
 
 void Registry::handleError(net::Response &res) {
     if (res.hasData()) {
