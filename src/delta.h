@@ -110,6 +110,10 @@ void to_json(json& j, const Delta& d) {
 DDB_DLL Delta getDelta(std::vector<ddb::SimpleEntry> source,
                        std::vector<ddb::SimpleEntry> destination);
 
+DDB_DLL Delta getDelta(Database* sourceDb, Database* targetDb);
+    
+
+
 }  // namespace ddb
 
 #endif  // DELTA_H
