@@ -34,13 +34,18 @@ std::vector<SimpleEntry> getAllSimpleEntries(Database* db) {
     return entries;
 }
 
-void delta(Database* sourceDb, Database* targetDb, std::ostream& output,
-           const std::string& format) {
 
+Delta getDelta(Database* sourceDb, Database* targetDb) {
     const auto source = getAllSimpleEntries(sourceDb);
     const auto destination = getAllSimpleEntries(targetDb);
 
-    auto delta = getDelta(source, destination);
+    return getDelta(source, destination);
+}
+
+void delta(Database* sourceDb, Database* targetDb, std::ostream& output,
+           const std::string& format) {
+
+    auto delta = getDelta(sourceDb, targetDb);
 
     if (format == "json") {
 
@@ -53,13 +58,14 @@ void delta(Database* sourceDb, Database* targetDb, std::ostream& output,
             output << "C\t" << cpy.source << " => " << cpy.destination << std::endl;
 
         for (const AddAction& add : delta.adds)
-            output << "A\t" << add.path << (add.type == EntryType::Directory ? " (D)" : "") << std::endl;
+            output << "A\t" << add.path << (add.type == Directory ? " (D)" : "") << std::endl;
 
         for (const RemoveAction& rem : delta.removes)
-            output << "D\t" << rem.path << (rem.type == EntryType::Directory ? " (D)" : "") << std::endl;
+            output << "D\t" << rem.path << (rem.type == Directory ? " (D)" : "") << std::endl;
 
     }
 }
+
 
 Delta getDelta(std::vector<SimpleEntry> source,
                std::vector<SimpleEntry> destination) {
