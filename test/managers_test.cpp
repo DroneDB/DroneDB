@@ -23,7 +23,7 @@ TEST(syncManager, happyPath) {
 
     manager.setLastSync("testhub.dronedb.app", t);
 
-    auto newt = manager.getLastSync("testhub.dronedb.app");
+    const auto newt = manager.getLastSync("testhub.dronedb.app");
 
     EXPECT_EQ(t, newt);
 
