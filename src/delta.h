@@ -87,25 +87,11 @@ struct Delta {
     std::vector<CopyAction> copies;
 };
 
-void to_json(json& j, const SimpleEntry& e) {
-    j = json{{"path", e.path}, {"hash", e.hash}, {"type", e.type}};
-}
-
-void to_json(json& j, const CopyAction& e) {
-    j = json::array({e.source, e.destination});
-}
-
-void to_json(json& j, const RemoveAction& e) {
-    j = json{{"path", e.path}, {"type", e.type}};
-}
-
-void to_json(json& j, const AddAction& e) {
-    j = json{{"path", e.path}, {"type", e.type}};
-}
-
-void to_json(json& j, const Delta& d) {
-    j = {{"adds", d.adds}, {"removes", d.removes}, {"copies", d.copies}};
-}
+DDB_DLL void to_json(json& j, const SimpleEntry& e);
+DDB_DLL void to_json(json& j, const CopyAction& e);
+DDB_DLL void to_json(json& j, const RemoveAction& e);
+DDB_DLL void to_json(json& j, const AddAction& e);
+DDB_DLL void to_json(json& j, const Delta& d);
 
 DDB_DLL Delta getDelta(std::vector<ddb::SimpleEntry> source,
                        std::vector<ddb::SimpleEntry> destination);

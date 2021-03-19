@@ -81,9 +81,8 @@ void pull(const std::string& registry, const bool force) {
     Registry r(tagInfo.registryUrl);
 
     // 3) Get dataset mtime
-    const auto mtime =
-        r.getLastModifiedTime(tagInfo.organization, tagInfo.dataset);
-
+    const auto mtime = r.getDatasetInfo(tagInfo.organization, tagInfo.dataset).mtime;
+    
     LOGD << "Dataset mtime = " << mtime;
     
     // 4) Alert if dataset_mtime < last_sync (it means we have more recent changes

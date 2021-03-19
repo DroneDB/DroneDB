@@ -17,6 +17,26 @@
 
 namespace ddb {
 
+void to_json(json& j, const SimpleEntry& e) {
+    j = json{{"path", e.path}, {"hash", e.hash}, {"type", e.type}};
+}
+
+void to_json(json& j, const CopyAction& e) {
+    j = json::array({e.source, e.destination});
+}
+
+void to_json(json& j, const RemoveAction& e) {
+    j = json{{"path", e.path}, {"type", e.type}};
+}
+
+void to_json(json& j, const AddAction& e) {
+    j = json{{"path", e.path}, {"type", e.type}};
+}
+
+void to_json(json& j, const Delta& d) {
+    j = {{"adds", d.adds}, {"removes", d.removes}, {"copies", d.copies}};
+}
+
 std::vector<SimpleEntry> getAllSimpleEntries(Database* db) {
     auto q = db->query("SELECT path, hash, type FROM entries");
 

@@ -204,9 +204,43 @@ std::string Registry::getAuthToken() { return std::string(this->authToken); }
 
 time_t Registry::getTokenExpiration() { return this->tokenExpiration; }
 
-DDB_DLL time_t Registry::getLastModifiedTime(const std::string &organization,
+
+void to_json(json &j, const DatasetInfo &p) {
+    j = json{
+        {"path", p.path}, {"hash", p.hash},   {"type", p.type},
+        {"size", p.size}, {"depth", p.depth}, {"mtime", p.mtime},
+        {"meta", p.meta}
+    };
+}
+
+void from_json(const json &j, DatasetInfo &p) {
+    j.at("path").get_to(p.type);
+    j.at("hash").get_to(p.hash);
+    j.at("type").get_to(p.type);
+    j.at("size").get_to(p.size);
+    j.at("depth").get_to(p.depth);
+    j.at("mtime").get_to(p.mtime);
+    // TODO: Fix
+    //j.at("meta").get_to(p.meta);
+}
+
+DDB_DLL DatasetInfo Registry::getDatasetInfo(const std::string &organization,
                                              const std::string &dataset) {
-    throw NotImplementedException("Not implemented yet");
+    this->ensureTokenValidity();
+
+    const auto getUrl =
+        url + "/orgs/" + organization + "/ds/" + dataset;
+
+    LOGD << "Getting info dataset '" << dataset << "' of organization '"
+         << organization << "'";
+
+    auto res = net::GET(getUrl).authCookie(this->authToken).verifySSL(false).send();
+
+    const auto j = res.getJSON();
+
+    // TODO: Catch errors
+    return j.get<DatasetInfo>();
+
 }
 
 DDB_DLL void Registry::downloadDdb(const std::string &organization,
