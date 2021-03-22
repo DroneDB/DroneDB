@@ -204,13 +204,10 @@ std::string Registry::getAuthToken() { return std::string(this->authToken); }
 
 time_t Registry::getTokenExpiration() { return this->tokenExpiration; }
 
-
 void to_json(json &j, const DatasetInfo &p) {
-    j = json{
-        {"path", p.path}, {"hash", p.hash},   {"type", p.type},
-        {"size", p.size}, {"depth", p.depth}, {"mtime", p.mtime},
-        {"meta", p.meta}
-    };
+    j = json{{"path", p.path}, {"hash", p.hash},   {"type", p.type},
+             {"size", p.size}, {"depth", p.depth}, {"mtime", p.mtime},
+             {"meta", p.meta}};
 }
 
 void from_json(const json &j, DatasetInfo &p) {
@@ -221,39 +218,118 @@ void from_json(const json &j, DatasetInfo &p) {
     j.at("depth").get_to(p.depth);
     j.at("mtime").get_to(p.mtime);
     // TODO: Fix
-    //j.at("meta").get_to(p.meta);
+    // j.at("meta").get_to(p.meta);
 }
 
 DDB_DLL DatasetInfo Registry::getDatasetInfo(const std::string &organization,
                                              const std::string &dataset) {
     this->ensureTokenValidity();
 
-    const auto getUrl =
-        url + "/orgs/" + organization + "/ds/" + dataset;
+    const auto getUrl = url + "/orgs/" + organization + "/ds/" + dataset;
 
     LOGD << "Getting info dataset '" << dataset << "' of organization '"
          << organization << "'";
 
-    auto res = net::GET(getUrl).authCookie(this->authToken).verifySSL(false).send();
+    auto res =
+        net::GET(getUrl).authCookie(this->authToken).verifySSL(false).send();
 
     const auto j = res.getJSON();
 
     // TODO: Catch errors
     return j.get<DatasetInfo>();
-
 }
 
 DDB_DLL void Registry::downloadDdb(const std::string &organization,
                                    const std::string &dataset,
                                    const std::string &folder) {
-    throw NotImplementedException("Not implemented yet");
+    this->ensureTokenValidity();
+
+    const auto downloadUrl =
+        url + "/orgs/" + organization + "/ds/" + dataset + "/ddb";
+
+    LOGD << "Download url = " << downloadUrl;
+
+    const auto tempFile =
+        io::Path(fs::temp_directory_path() / std::to_string(time(nullptr)))
+            .string() +
+        ".tmp";
+
+    LOGD << "Temp file = " << tempFile;
+
+    auto res = net::GET(downloadUrl)
+                   .authCookie(this->authToken)
+                   .verifySSL(false)
+                   .downloadToFile(tempFile);
+
+    if (res.status() != 200) this->handleError(res);
+
+    try {
+        miniz_cpp::zip_file file;
+
+        file.load(tempFile);
+        file.extractall(folder);
+    } catch (const std::runtime_error &e) {
+        LOGD << "Error extracting zip file";
+        throw AppException(e.what());
+    }
+
+    std::filesystem::remove(tempFile);
+
+    LOGD << "Done";
+
 }
 
 DDB_DLL void Registry::downloadFiles(const std::string &organization,
                                      const std::string &dataset,
                                      const std::vector<std::string> &files,
                                      const std::string &folder) {
-    throw NotImplementedException("Not implemented yet");
+
+    this->ensureTokenValidity();
+
+    const auto downloadUrl =
+        url + "/orgs/" + organization + "/ds/" + dataset + "/download";
+
+    LOGD << "Download url = " << downloadUrl;
+
+    const auto tempFile =
+        io::Path(fs::temp_directory_path() / std::to_string(time(nullptr)))
+            .string() +
+        ".tmp";
+
+    LOGD << "Temp file = " << tempFile;
+
+    std::stringstream ss;
+    for (const auto& file : files)
+        ss << file << ',';
+    
+    auto paths = ss.str();
+
+    // Remove last comma
+    paths.pop_back();
+
+    LOGD << "Paths = " << paths;
+
+    auto res = net::GET(downloadUrl)
+                   .authCookie(this->authToken)
+                   .verifySSL(false)
+            .multiPartFormData({"path", paths})
+            .downloadToFile(tempFile);
+
+    if (res.status() != 200) this->handleError(res);
+
+    try {
+        miniz_cpp::zip_file file;
+
+        file.load(tempFile);
+        file.extractall(folder);
+    } catch (const std::runtime_error &e) {
+        LOGD << "Error extracting zip file";
+        throw AppException(e.what());
+    }
+
+    std::filesystem::remove(tempFile);
+
+    LOGD << "Done";
 }
 
 void Registry::handleError(net::Response &res) {
