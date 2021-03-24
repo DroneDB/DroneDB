@@ -102,7 +102,7 @@ void applyDelta(const Delta& res, const fs::path& destPath,
         if (add.type != Directory) {
             LOGD << "Applying add by copying from source to dest";
             copy_file(source, dest,
-                          std::filesystem::copy_options::overwrite_existing);
+                      std::filesystem::copy_options::overwrite_existing);
         } else {
             create_directories(dest);
         }
@@ -241,24 +241,38 @@ void pull(const std::string& registry, const bool force) {
     const auto tempNewFolder = fs::temp_directory_path() / "ddb_new_folder" /
                                (tagInfo.organization + "-" + tagInfo.dataset);
 
-    LOGD << "Temp new folder = " << tempNewFolder;
+    // Let's download only if we have anything to download
+    if (!delta.adds.empty()) {
+        LOGD << "Temp new folder = " << tempNewFolder;
 
-    const auto filesToDownload =
-        boolinq::from(delta.adds)
-            .where([](const AddAction& add) { return add.type != Directory; })
-            .select([](const AddAction& add) { return add.path; })
-            .toStdVector();
+        const auto filesToDownload =
+            boolinq::from(delta.adds)
+                .where(
+                    [](const AddAction& add) { return add.type != Directory; })
+                .select([](const AddAction& add) { return add.path; })
+                .toStdVector();
 
-    LOGD << "Files to download:";
-    j = filesToDownload;
-    LOGD << j.dump();
+        LOGD << "Files to download:";
+        j = filesToDownload;
+        LOGD << j.dump();
 
-    // 7) Download all the missing files
-    r.downloadFiles(tagInfo.organization, tagInfo.dataset, filesToDownload,
-                    tempNewFolder.string());
+        // 7) Download all the missing files
+        r.downloadFiles(tagInfo.organization, tagInfo.dataset, filesToDownload,
+                        tempNewFolder.string());
 
-    LOGD << "Files downloaded, applying delta";
+        LOGD << "Files downloaded, applying delta";
+    } else
+    {
+        LOGD << "No files to download";
 
+        // Check if we have anything to do
+        if (delta.copies.empty() && delta.removes.empty())
+        {
+            LOGD << "No changes to perform, pull done";
+            return;
+        }
+    }
+    
     // 8) Apply changes to local files
     applyDelta(delta, ddbPath.parent_path(), tempNewFolder);
 
