@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "fs.h"
 #include "constants.h"
 #include "ddb_export.h"
 #include "net.h"
@@ -17,6 +18,8 @@
 namespace ddb {
 
 class DatasetInfo;
+struct Delta;
+struct CopyAction;
 
 class Registry {
     std::string url;
@@ -41,6 +44,8 @@ class Registry {
                        const std::string& dataset, const std::string& folder,
                        std::ostream& out);
 
+    DDB_DLL void pull(const std::string& path, const bool force, std::ostream& out);
+
     DDB_DLL void handleError(net::Response& res);
 
     DDB_DLL time_t getTokenExpiration();
@@ -60,6 +65,13 @@ class Registry {
 
 void to_json(json& j, const DatasetInfo& p);
 void from_json(const json& j, DatasetInfo& p);
+
+DDB_DLL void applyDelta(const Delta& res, const fs::path& destPath,
+                        const fs::path& sourcePath);
+DDB_DLL void moveCopiesToTemp(const std::vector<CopyAction>& copies,
+                      const fs::path& baseFolder,
+                      const std::string& tempFolderName);
+DDB_DLL void ensureParentFolderExists(const fs::path& folder);
 
 class DatasetInfo {
    public:
