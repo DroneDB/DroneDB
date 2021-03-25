@@ -17,7 +17,7 @@ class SyncManager {
 
    public:
     SyncManager(const fs::path& ddbFolder) : ddbFolder(ddbFolder) {
-        //
+        
     }
 
     DDB_DLL std::time_t getLastSync(const std::string& registry = DEFAULT_REGISTRY);
