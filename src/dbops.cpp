@@ -26,7 +26,7 @@ std::unique_ptr<Database> open(const std::string &directory, bool traverseUp = f
     const fs::path ddbDirPath = dirPath / DDB_FOLDER;
     const fs::path dbasePath = ddbDirPath / "dbase.sqlite";
 
-    if (fs::exists(dbasePath)) {
+    if (exists(dbasePath)) {
         LOGD << dbasePath.string() + " exists";
 
         std::unique_ptr<Database> db = std::make_unique<Database>();
@@ -35,11 +35,13 @@ std::unique_ptr<Database> open(const std::string &directory, bool traverseUp = f
             throw DBException("Table 'entries' not found (not a valid database: " + dbasePath.string() + ")");
         }
         return db;
-    } else if (traverseUp && dirPath.parent_path() != dirPath) {
-        return open(dirPath.parent_path().string(), true);
-    } else {
-        throw FSException("Not a valid DroneDB directory, .ddb does not exist. Did you run ddb init?");
     }
+
+    if (traverseUp && dirPath.parent_path() != dirPath) {
+        return open(dirPath.parent_path().string(), true);
+    }
+
+    throw FSException("Not a valid DroneDB directory, .ddb does not exist. Did you run ddb init?");
 }
 
 fs::path rootDirectory(Database *db) {
@@ -55,7 +57,7 @@ fs::path rootDirectory(Database *db) {
 // are includes in the result.
 // ".ddb" files/dirs are always ignored and skipped.
 // If a directory is in the input paths, they are included regardless of includeDirs
-std::vector<fs::path> getIndexPathList(fs::path rootDirectory, const std::vector<std::string> &paths, bool includeDirs) {
+std::vector<fs::path> getIndexPathList(const fs::path& rootDirectory, const std::vector<std::string> &paths, bool includeDirs) {
     std::vector<fs::path> result;
     std::unordered_map<std::string, bool> directories;
 
