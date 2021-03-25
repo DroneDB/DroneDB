@@ -14,7 +14,15 @@
 #include <set>
 #include <unordered_set>
 
-//
+// Fix
+#ifdef max 
+#undef max
+#endif
+
+#ifdef min
+#undef min
+#endif
+
 
 namespace boolinq {
 
