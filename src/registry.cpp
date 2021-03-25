@@ -4,13 +4,12 @@
 
 #include "registry.h"
 
-
+#include <boolinq/boolinq.h>
+#include <ddb.h>
 #include <delta.h>
 #include <mio.h>
 #include <syncmanager.h>
 #include <tagmanager.h>
-#include <boolinq/boolinq.h>
-
 
 #include "../vendor/miniz-cpp/zip_file.hpp"
 #include "exceptions.h"
@@ -137,7 +136,7 @@ DDB_DLL void Registry::clone(const std::string &organization,
     this->ensureTokenValidity();
 
     const auto downloadUrl =
-        url + "/orgs/" + organization + "/ds/" + dataset + "/download";
+        this->url + "/orgs/" + organization + "/ds/" + dataset + "/download";
 
     LOGD << "Downloading dataset '" << dataset << "' of organization '"
          << organization << "'";
@@ -203,12 +202,14 @@ DDB_DLL void Registry::clone(const std::string &organization,
 
     std::filesystem::remove(tempFile);
 
-    SyncManager syncManager(folder);
-    TagManager tagManager(folder);
+    const auto ddbFolder = fs::path(folder) / DDB_FOLDER;
+
+    SyncManager syncManager(ddbFolder);
+    TagManager tagManager(ddbFolder);
 
     syncManager.setLastSync(this->url);
-    tagManager.setTag(organization + "/" + dataset);
-    
+    tagManager.setTag(this->url + "/" + organization + "/" + dataset);
+
     out << "Done" << std::endl;
 }
 
@@ -223,13 +224,17 @@ void to_json(json &j, const DatasetInfo &p) {
 }
 
 void from_json(const json &j, DatasetInfo &p) {
-    j.at("path").get_to(p.type);
-    j.at("hash").get_to(p.hash);
+    j.at("path").get_to(p.path);
+
+    if (!j.at("hash").is_null())
+        j.at("hash").get_to(p.hash);
+
     j.at("type").get_to(p.type);
     j.at("size").get_to(p.size);
     j.at("depth").get_to(p.depth);
     j.at("mtime").get_to(p.mtime);
-    // TODO: Fix
+
+    // TODO: Add
     // j.at("meta").get_to(p.meta);
 }
 
@@ -239,16 +244,31 @@ DDB_DLL DatasetInfo Registry::getDatasetInfo(const std::string &organization,
 
     const auto getUrl = url + "/orgs/" + organization + "/ds/" + dataset;
 
-    LOGD << "Getting info dataset '" << dataset << "' of organization '"
-         << organization << "'";
+    LOGD << "Getting info of tag " << dataset << "/" << organization;
 
     auto res =
         net::GET(getUrl).authCookie(this->authToken).verifySSL(false).send();
 
+    if (res.status() != 200) this->handleError(res);
+
+    LOGD << "Data: " << res.getText();
+
     const auto j = res.getJSON();
 
+    // try {
     // TODO: Catch errors
-    return j.get<DatasetInfo>();
+    const auto resArr = j.get<std::vector<DatasetInfo>>();
+
+    if (resArr.empty())
+        throw RegistryException("Invalid empty response from registry");
+
+    return resArr[0];
+
+    //} catch (std::runtime_error ex) {
+
+    //    LOGD << "Exception: " << ex.what();
+
+    //}
 }
 
 DDB_DLL void Registry::downloadDdb(const std::string &organization,
@@ -288,14 +308,12 @@ DDB_DLL void Registry::downloadDdb(const std::string &organization,
     std::filesystem::remove(tempFile);
 
     LOGD << "Done";
-
 }
 
 DDB_DLL void Registry::downloadFiles(const std::string &organization,
                                      const std::string &dataset,
                                      const std::vector<std::string> &files,
                                      const std::string &folder) {
-
     this->ensureTokenValidity();
 
     const auto downloadUrl =
@@ -311,9 +329,8 @@ DDB_DLL void Registry::downloadFiles(const std::string &organization,
     LOGD << "Temp file = " << tempFile;
 
     std::stringstream ss;
-    for (const auto& file : files)
-        ss << file << ',';
-    
+    for (const auto &file : files) ss << file << ',';
+
     auto paths = ss.str();
 
     // Remove last comma
@@ -321,11 +338,13 @@ DDB_DLL void Registry::downloadFiles(const std::string &organization,
 
     LOGD << "Paths = " << paths;
 
+    // This line is wrong, we should use querystring, not body data
+
     auto res = net::GET(downloadUrl)
                    .authCookie(this->authToken)
                    .verifySSL(false)
-            .multiPartFormData({"path", paths})
-            .downloadToFile(tempFile);
+                   .multiPartFormData({"path", paths})
+                   .downloadToFile(tempFile);
 
     if (res.status() != 200) this->handleError(res);
 
@@ -352,8 +371,8 @@ DDB_DLL void ensureParentFolderExists(const fs::path &folder) {
 }
 
 DDB_DLL void moveCopiesToTemp(const std::vector<CopyAction> &copies,
-                      const fs::path &baseFolder,
-                      const std::string &tempFolderName) {
+                              const fs::path &baseFolder,
+                              const std::string &tempFolderName) {
     LOGD << "Moving copies to temp folder";
 
     for (auto copy : copies) {
@@ -378,13 +397,11 @@ DDB_DLL void moveCopiesToTemp(const std::vector<CopyAction> &copies,
     }
 }
 
-
 const char *tmpFolderName = ".tmp";
 const char *replaceSuffix = ".replace";
 
-
 DDB_DLL void applyDelta(const Delta &res, const fs::path &destPath,
-                const fs::path &sourcePath) {
+                        const fs::path &sourcePath) {
     const auto tempPath = destPath / tmpFolderName;
     create_directories(tempPath);
 
@@ -477,7 +494,8 @@ DDB_DLL void applyDelta(const Delta &res, const fs::path &destPath,
     if (exists(tempPath)) remove_all(tempPath);
 }
 
-DDB_DLL void Registry::pull(const std::string& path, const bool force, std::ostream &out) {
+DDB_DLL void Registry::pull(const std::string &path, const bool force,
+                            std::ostream &out) {
     /*
 
     -- Pull Workflow --
@@ -506,7 +524,7 @@ DDB_DLL void Registry::pull(const std::string& path, const bool force, std::ostr
 
     // 2) Get our last sync time for that specific registry using syncmanager
 
-    //const auto currentPath = std::filesystem::current_path();
+    // const auto currentPath = std::filesystem::current_path();
     auto db = open(path, true);
     const auto ddbPath = fs::path(db->getOpenFile()).parent_path();
 
@@ -527,15 +545,15 @@ DDB_DLL void Registry::pull(const std::string& path, const bool force, std::ostr
     const auto tagInfo = RegistryUtils::parseTag(tag);
 
     // 3) Get dataset mtime
-    const auto mtime =
-        this->getDatasetInfo(tagInfo.organization, tagInfo.dataset).mtime;
+    const auto dsInfo =
+        this->getDatasetInfo(tagInfo.organization, tagInfo.dataset);
 
-    LOGD << "Dataset mtime = " << mtime;
+    LOGD << "Dataset mtime = " << dsInfo.mtime;
 
     // 4) Alert if dataset_mtime < last_sync (it means we have more recent
     // changes
     //    than server, so the pull is pointless or potentially dangerous)
-    if (mtime < lastSync && !force)
+    if (dsInfo.mtime < lastSync && !force)
         throw AppException(
             "Cannot pull if dataset changes are older than ours. Use force "
             "parameter to override (CAUTION)");
@@ -547,7 +565,7 @@ DDB_DLL void Registry::pull(const std::string& path, const bool force, std::ostr
 
     // 5) Get ddb from registry
     this->downloadDdb(tagInfo.organization, tagInfo.dataset,
-                  tempDdbFolder.string());
+                      tempDdbFolder.string());
 
     LOGD << "Remote ddb downloaded";
 
@@ -580,8 +598,8 @@ DDB_DLL void Registry::pull(const std::string& path, const bool force, std::ostr
         LOGD << j.dump();
 
         // 7) Download all the missing files
-        this->downloadFiles(tagInfo.organization, tagInfo.dataset, filesToDownload,
-                        tempNewFolder.string());
+        this->downloadFiles(tagInfo.organization, tagInfo.dataset,
+                            filesToDownload, tempNewFolder.string());
 
         LOGD << "Files downloaded, applying delta";
     } else {
@@ -609,6 +627,7 @@ DDB_DLL void Registry::pull(const std::string& path, const bool force, std::ostr
     tagManager.setTag(tag);
 
     LOGD << "Pull done";
+    
 }
 
 void Registry::handleError(net::Response &res) {
