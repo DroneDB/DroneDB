@@ -226,8 +226,7 @@ void to_json(json &j, const DatasetInfo &p) {
 void from_json(const json &j, DatasetInfo &p) {
     j.at("path").get_to(p.path);
 
-    if (!j.at("hash").is_null())
-        j.at("hash").get_to(p.hash);
+    if (!j.at("hash").is_null()) j.at("hash").get_to(p.hash);
 
     j.at("type").get_to(p.type);
     j.at("size").get_to(p.size);
@@ -316,7 +315,7 @@ DDB_DLL void Registry::downloadFiles(const std::string &organization,
                                      const std::string &folder) {
     this->ensureTokenValidity();
 
-    const auto downloadUrl =
+    auto downloadUrl =
         url + "/orgs/" + organization + "/ds/" + dataset + "/download";
 
     LOGD << "Download url = " << downloadUrl;
@@ -335,32 +334,35 @@ DDB_DLL void Registry::downloadFiles(const std::string &organization,
 
     // Remove last comma
     paths.pop_back();
+    downloadUrl += "?path=" + paths;
 
     LOGD << "Paths = " << paths;
-
-    // This line is wrong, we should use querystring, not body data
 
     auto res = net::GET(downloadUrl)
                    .authCookie(this->authToken)
                    .verifySSL(false)
-                   .multiPartFormData({"path", paths})
+                   //.multiPartFormData({"path", paths})
                    .downloadToFile(tempFile);
 
     if (res.status() != 200) this->handleError(res);
+
+    LOGD << "Files archive downloaded, extracting";
 
     try {
         miniz_cpp::zip_file file;
 
         file.load(tempFile);
         file.extractall(folder);
+
+        LOGD << "Archive extracted in " << folder;
+
+        std::filesystem::remove(tempFile);
+
+        LOGD << "Done";
     } catch (const std::runtime_error &e) {
         LOGD << "Error extracting zip file";
         throw AppException(e.what());
     }
-
-    std::filesystem::remove(tempFile);
-
-    LOGD << "Done";
 }
 
 DDB_DLL void ensureParentFolderExists(const fs::path &folder) {
@@ -555,7 +557,7 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
     //    than server, so the pull is pointless or potentially dangerous)
     if (dsInfo.mtime < lastSync && !force)
         throw AppException(
-            "Cannot pull if dataset changes are older than ours. Use force "
+            "Cannot pull if dataset changes are not newer than ours. Use force "
             "parameter to override (CAUTION)");
 
     const auto tempDdbFolder = fs::temp_directory_path() / "ddb_temp_folder" /
@@ -627,7 +629,6 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
     tagManager.setTag(tag);
 
     LOGD << "Pull done";
-    
 }
 
 void Registry::handleError(net::Response &res) {
