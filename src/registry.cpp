@@ -522,6 +522,7 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
 
     */
 
+    out << "Pull from " << this->url << std::endl;
     LOGD << "Pull from " << this->url;
 
     // 2) Get our last sync time for that specific registry using syncmanager
@@ -552,12 +553,13 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
 
     LOGD << "Dataset mtime = " << dsInfo.mtime;
 
+    out << "Using tag '" << tag << "', last sync " << lastSync << ", dataset mtime " << dsInfo.mtime << std::endl;
+    
     // 4) Alert if dataset_mtime < last_sync (it means we have more recent
-    // changes
-    //    than server, so the pull is pointless or potentially dangerous)
+    // changes than server, so the pull is pointless or potentially dangerous)
     if (dsInfo.mtime < lastSync && !force)
         throw AppException(
-            "Cannot pull if dataset changes are not newer than ours. Use force "
+            "Can pull only if dataset changes are newer than ours. Use force "
             "parameter to override (CAUTION)");
 
     const auto tempDdbFolder = fs::temp_directory_path() / "ddb_temp_folder" /
@@ -568,6 +570,8 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
     // 5) Get ddb from registry
     this->downloadDdb(tagInfo.organization, tagInfo.dataset,
                       tempDdbFolder.string());
+
+    out << "Remote ddb downloaded";
 
     LOGD << "Remote ddb downloaded";
 
@@ -581,6 +585,8 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
     json j = delta;
     LOGD << j.dump();
 
+    out << "Delta result: " << delta.adds.size() << " adds, " << delta.copies.size() << " copies" << delta.removes.size() << " removes";
+    
     const auto tempNewFolder = fs::temp_directory_path() / "ddb_new_folder" /
                                (tagInfo.organization + "-" + tagInfo.dataset);
 
@@ -594,6 +600,8 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
                     [](const AddAction &add) { return add.type != Directory; })
                 .select([](const AddAction &add) { return add.path; })
                 .toStdVector();
+
+        out << "Downloading missing files (this could take a while)";
 
         LOGD << "Files to download:";
         j = filesToDownload;
@@ -610,6 +618,9 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
         // Check if we have anything to do
         if (delta.copies.empty() && delta.removes.empty()) {
             LOGD << "No changes to perform, pull done";
+            out << "No changes, nothing to do here";
+            // NOTE: Should be update lastsync?
+
             return;
         }
     }
@@ -617,16 +628,22 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
     // 8) Apply changes to local files
     applyDelta(delta, ddbPath.parent_path(), tempNewFolder);
 
+    out << "Delta applied";
+
     LOGD << "Replacing ddb folder";
 
     // 9) Replace ddb database
     copy(tempDdbFolder, ddbPath);
+
+    out << "DDB replaced";
 
     LOGD << "Updating syncmanager and tagmanager";
 
     // 10) Update last sync time
     syncManager.setLastSync(this->url);
     tagManager.setTag(tag);
+
+    out << "Updated last sync time, pull done";
 
     LOGD << "Pull done";
 }
