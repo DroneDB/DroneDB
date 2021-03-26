@@ -313,6 +313,11 @@ DDB_DLL void Registry::downloadFiles(const std::string &organization,
                                      const std::string &dataset,
                                      const std::vector<std::string> &files,
                                      const std::string &folder) {
+    if (files.empty()) {
+        LOGD << "Asked to download an empty list of files... wtf?";
+        return;
+    }
+
     this->ensureTokenValidity();
 
     auto downloadUrl =
@@ -320,48 +325,66 @@ DDB_DLL void Registry::downloadFiles(const std::string &organization,
 
     LOGD << "Download url = " << downloadUrl;
 
-    const auto tempFile =
-        io::Path(fs::temp_directory_path() / std::to_string(time(nullptr)))
-            .string() +
-        ".tmp";
+    if (files.size() == 1) {
+        downloadUrl += "?path=" + files[0];
 
-    LOGD << "Temp file = " << tempFile;
+        const auto destPath = fs::path(folder) / files[0];
 
-    std::stringstream ss;
-    for (const auto &file : files) ss << file << ',';
+        create_directories(destPath.parent_path());
 
-    auto paths = ss.str();
+        auto res = net::GET(downloadUrl)
+                       .authCookie(this->authToken)
+                       .verifySSL(false)
+                       .downloadToFile(destPath.string());
 
-    // Remove last comma
-    paths.pop_back();
-    downloadUrl += "?path=" + paths;
+        if (res.status() != 200) this->handleError(res);
 
-    LOGD << "Paths = " << paths;
+        LOGD << "File downloaded";
 
-    auto res = net::GET(downloadUrl)
-                   .authCookie(this->authToken)
-                   .verifySSL(false)
-                   //.multiPartFormData({"path", paths})
-                   .downloadToFile(tempFile);
+    } else {
+        const auto tempFile =
+            io::Path(fs::temp_directory_path() / std::to_string(time(nullptr)))
+                .string() +
+            ".tmp";
 
-    if (res.status() != 200) this->handleError(res);
+        LOGD << "Temp file = " << tempFile;
 
-    LOGD << "Files archive downloaded, extracting";
+        std::stringstream ss;
+        for (const auto &file : files) ss << file << ',';
 
-    try {
-        miniz_cpp::zip_file file;
+        auto paths = ss.str();
 
-        file.load(tempFile);
-        file.extractall(folder);
+        // Remove last comma
+        paths.pop_back();
+        // downloadUrl += "?path=" + paths;
 
-        LOGD << "Archive extracted in " << folder;
+        LOGD << "Paths = " << paths;
 
-        std::filesystem::remove(tempFile);
+        auto res = net::POST(downloadUrl)
+                       .authCookie(this->authToken)
+                       .verifySSL(false)
+                       .formData({"path", paths})
+                       .downloadToFile(tempFile);
 
-        LOGD << "Done";
-    } catch (const std::runtime_error &e) {
-        LOGD << "Error extracting zip file";
-        throw AppException(e.what());
+        if (res.status() != 200) this->handleError(res);
+
+        LOGD << "Files archive downloaded, extracting";
+
+        try {
+            miniz_cpp::zip_file file;
+
+            file.load(tempFile);
+            file.extractall(folder);
+
+            LOGD << "Archive extracted in " << folder;
+
+            std::filesystem::remove(tempFile);
+
+            LOGD << "Done";
+        } catch (const std::runtime_error &e) {
+            LOGD << "Error extracting zip file";
+            throw AppException(e.what());
+        }
     }
 }
 
@@ -375,6 +398,11 @@ DDB_DLL void ensureParentFolderExists(const fs::path &folder) {
 DDB_DLL void moveCopiesToTemp(const std::vector<CopyAction> &copies,
                               const fs::path &baseFolder,
                               const std::string &tempFolderName) {
+    if (copies.empty()) {
+        LOGD << "No copies to move to temp folder";
+        return;
+    }
+
     LOGD << "Moving copies to temp folder";
 
     for (auto copy : copies) {
@@ -404,96 +432,127 @@ const char *replaceSuffix = ".replace";
 
 DDB_DLL void applyDelta(const Delta &res, const fs::path &destPath,
                         const fs::path &sourcePath) {
-    const auto tempPath = destPath / tmpFolderName;
-    create_directories(tempPath);
+    try {
+        const auto tempPath = destPath / tmpFolderName;
+        create_directories(tempPath);
 
-    moveCopiesToTemp(res.copies, destPath, tmpFolderName);
+        moveCopiesToTemp(res.copies, destPath, tmpFolderName);
 
-    LOGD << "Working on removes";
+        if (res.removes.empty()) {
+            LOGD << "No removes in delta";
+        } else {
+            LOGD << "Working on removes";
 
-    for (const auto &rem : res.removes) {
-        LOGD << rem.toString();
+            for (const auto &rem : res.removes) {
+                LOGD << rem.toString();
 
-        const auto dest = destPath / rem.path;
+                const auto dest = destPath / rem.path;
 
-        LOGD << "Dest = " << dest;
+                LOGD << "Dest = " << dest;
 
-        if (rem.type != Directory) {
-            if (exists(dest)) {
-                LOGD << "File exists in dest, deleting it";
-                fs::remove(dest);
-            } else {
-                LOGD << "File does not exist in dest, nothing to do";
+                if (rem.type != Directory) {
+                    if (exists(dest)) {
+                        LOGD << "File exists in dest, deleting it";
+                        fs::remove(dest);
+                    } else {
+                        LOGD << "File does not exist in dest, nothing to do";
+                    }
+                } else {
+                    if (exists(dest)) {
+                        LOGD << "Directory exists in dest, deleting it";
+                        remove_all(dest);
+                    } else {
+                        LOGD << "Directory does not exist in dest, nothing to "
+                                "do";
+                    }
+                }
             }
+        }
+
+        if (res.adds.empty()) {
+            LOGD << "No adds in delta";
+
         } else {
-            if (exists(dest)) {
-                LOGD << "Directory exists in dest, deleting it";
-                remove_all(dest);
-            } else {
-                LOGD << "Directory does not exist in dest, nothing to do";
+            LOGD << "Working on adds";
+
+            for (const auto &add : res.adds) {
+                LOGD << add.toString();
+
+                const auto source = sourcePath / add.path;
+                const auto dest = destPath / add.path;
+
+                if (add.type != Directory) {
+                    LOGD << "Applying add by copying from '" << source
+                         << "' to '" << dest << "'";
+
+                    copy_file(
+                        source, dest,
+                        std::filesystem::copy_options::overwrite_existing);
+
+                } else {
+                    create_directories(dest);
+                }
             }
         }
-    }
 
-    LOGD << "Working on adds";
+        if (res.copies.empty()) {
+            LOGD << "No copies in delta";
 
-    for (const auto &add : res.adds) {
-        LOGD << add.toString();
-
-        const auto source = sourcePath / add.path;
-        const auto dest = destPath / add.path;
-
-        if (add.type != Directory) {
-            LOGD << "Applying add by copying from source to dest";
-            copy_file(source, dest,
-                      std::filesystem::copy_options::overwrite_existing);
         } else {
-            create_directories(dest);
+            LOGD << "Working on direct copies";
+
+            for (const auto &copy : res.copies) {
+                LOGD << copy.toString();
+
+                const auto source = destPath / copy.source;
+                const auto dest = destPath / copy.destination;
+
+                if (dest.has_parent_path()) {
+                    const auto destFolder = dest.parent_path();
+                    create_directories(destFolder);
+                }
+
+                if (exists(dest)) {
+                    const auto newPath =
+                        fs::path(dest.string() + replaceSuffix);
+                    LOGD << "Dest file exists, writing shadow";
+                    copy_file(source, newPath);
+                } else {
+                    LOGD << "Dest file does not exist, performing copy";
+                    copy_file(source, dest);
+                }
+            }
+
+            LOGD << "Working on shadow copies";
+
+            for (const auto &copy : res.copies) {
+                const auto dest = destPath / copy.destination;
+                const auto destShadow = fs::path(dest.string() + ".replace");
+
+                if (exists(destShadow)) {
+                    LOGD << copy.toString();
+                    LOGD << "Shadow file exists, replacing original one";
+
+                    // Why don't we have fs::move??
+                    std::filesystem::copy(
+                        destShadow, dest,
+                        std::filesystem::copy_options::overwrite_existing);
+                    std::filesystem::remove(destShadow);
+                }
+            }
         }
+
+        if (exists(tempPath)) {
+            LOGD << "Removing temp path";
+            remove_all(tempPath);
+        }
+    } catch (fs::filesystem_error& err) {
+
+        LOGD << "Exception: " << err.what() << " ('" << err.path1() << "', '"
+             << err.path2() << "')";
+
+        throw AppException(err.what());
     }
-
-    LOGD << "Working on direct copies";
-
-    for (const auto &copy : res.copies) {
-        LOGD << copy.toString();
-
-        const auto source = destPath / copy.source;
-        const auto dest = destPath / copy.destination;
-
-        if (dest.has_parent_path()) {
-            const auto destFolder = dest.parent_path();
-            create_directories(destFolder);
-        }
-
-        if (exists(dest)) {
-            const auto newPath = fs::path(dest.string() + replaceSuffix);
-            LOGD << "Dest file exists, writing shadow";
-            copy_file(source, newPath);
-        } else {
-            LOGD << "Dest file does not exist, performing copy";
-            copy_file(source, dest);
-        }
-    }
-
-    LOGD << "Working on shadow copies";
-
-    for (const auto &copy : res.copies) {
-        const auto dest = destPath / copy.destination;
-        const auto destShadow = fs::path(dest.string() + ".replace");
-
-        if (exists(destShadow)) {
-            LOGD << copy.toString();
-            LOGD << "Shadow file exists, replacing original one";
-
-            // Why don't we have fs::move??
-            std::filesystem::copy(
-                destShadow, dest,
-                std::filesystem::copy_options::overwrite_existing);
-            std::filesystem::remove(destShadow);
-        }
-    }
-
-    if (exists(tempPath)) remove_all(tempPath);
 }
 
 DDB_DLL void Registry::pull(const std::string &path, const bool force,
@@ -553,8 +612,9 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
 
     LOGD << "Dataset mtime = " << dsInfo.mtime;
 
-    out << "Using tag '" << tag << "', last sync " << lastSync << ", dataset mtime " << dsInfo.mtime << std::endl;
-    
+    out << "Using tag '" << tag << "', last sync " << lastSync
+        << ", dataset mtime " << dsInfo.mtime << std::endl;
+
     // 4) Alert if dataset_mtime < last_sync (it means we have more recent
     // changes than server, so the pull is pointless or potentially dangerous)
     if (dsInfo.mtime < lastSync && !force)
@@ -571,7 +631,7 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
     this->downloadDdb(tagInfo.organization, tagInfo.dataset,
                       tempDdbFolder.string());
 
-    out << "Remote ddb downloaded";
+    out << "Remote ddb downloaded" << std::endl;
 
     LOGD << "Remote ddb downloaded";
 
@@ -585,10 +645,13 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
     json j = delta;
     LOGD << j.dump();
 
-    out << "Delta result: " << delta.adds.size() << " adds, " << delta.copies.size() << " copies" << delta.removes.size() << " removes";
-    
+    out << "Delta result: " << delta.adds.size() << " adds, "
+        << delta.copies.size() << " copies" << delta.removes.size()
+        << " removes" << std::endl;
+
     const auto tempNewFolder = fs::temp_directory_path() / "ddb_new_folder" /
-                               (tagInfo.organization + "-" + tagInfo.dataset);
+                               (tagInfo.organization + "-" + tagInfo.dataset) /
+                               std::to_string(time(nullptr));
 
     // Let's download only if we have anything to download
     if (!delta.adds.empty()) {
@@ -601,7 +664,8 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
                 .select([](const AddAction &add) { return add.path; })
                 .toStdVector();
 
-        out << "Downloading missing files (this could take a while)";
+        out << "Downloading missing files (this could take a while)"
+            << std::endl;
 
         LOGD << "Files to download:";
         j = filesToDownload;
@@ -618,7 +682,7 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
         // Check if we have anything to do
         if (delta.copies.empty() && delta.removes.empty()) {
             LOGD << "No changes to perform, pull done";
-            out << "No changes, nothing to do here";
+            out << "No changes, nothing to do here" << std::endl;
             // NOTE: Should be update lastsync?
 
             return;
@@ -628,14 +692,17 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
     // 8) Apply changes to local files
     applyDelta(delta, ddbPath.parent_path(), tempNewFolder);
 
-    out << "Delta applied";
+    out << "Delta applied" << std::endl;
+
+    LOGD << "Removing temp new files folder";
+    remove_all(tempNewFolder);
 
     LOGD << "Replacing ddb folder";
 
     // 9) Replace ddb database
     copy(tempDdbFolder, ddbPath);
 
-    out << "DDB replaced";
+    out << "DDB replaced" << std::endl;
 
     LOGD << "Updating syncmanager and tagmanager";
 
@@ -643,7 +710,7 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
     syncManager.setLastSync(this->url);
     tagManager.setTag(tag);
 
-    out << "Updated last sync time, pull done";
+    out << "Updated last sync time, pull done" << std::endl;
 
     LOGD << "Pull done";
 }
