@@ -17,7 +17,7 @@ namespace ddb {
 DDB_DLL void pull(const std::string& registry, const bool force) {
     const auto currentPath = fs::current_path().string();
 
-    const auto db = ddb::open(currentPath, true);
+    const auto db = open(currentPath, true);
 
     TagManager manager(fs::path(db->getOpenFile()).parent_path());
     

@@ -299,12 +299,12 @@ DDB_DLL void Registry::downloadDdb(const std::string &organization,
 
         file.load(tempFile);
         file.extractall(folder);
+        std::filesystem::remove(tempFile);
+
     } catch (const std::runtime_error &e) {
-        LOGD << "Error extracting zip file";
+        LOGD << "Error extracting zip file or temp remove";
         throw AppException(e.what());
     }
-
-    std::filesystem::remove(tempFile);
 
     LOGD << "Done";
 }
@@ -349,14 +349,8 @@ DDB_DLL void Registry::downloadFiles(const std::string &organization,
 
         LOGD << "Temp file = " << tempFile;
 
-        std::stringstream ss;
-        for (const auto &file : files) ss << file << ',';
-
-        auto paths = ss.str();
-
-        // Remove last comma
-        paths.pop_back();
-        // downloadUrl += "?path=" + paths;
+        // Joins path list
+        const auto paths = utils::join(files);
 
         LOGD << "Paths = " << paths;
 
@@ -382,7 +376,7 @@ DDB_DLL void Registry::downloadFiles(const std::string &organization,
 
             LOGD << "Done";
         } catch (const std::runtime_error &e) {
-            LOGD << "Error extracting zip file";
+            LOGD << "Error extracting zip file or deleting temp";
             throw AppException(e.what());
         }
     }
@@ -586,7 +580,6 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
 
     // 2) Get our last sync time for that specific registry using syncmanager
 
-    // const auto currentPath = std::filesystem::current_path();
     auto db = open(path, true);
     const auto ddbPath = fs::path(db->getOpenFile()).parent_path();
 
@@ -616,7 +609,7 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
         << ", dataset mtime " << dsInfo.mtime << std::endl;
 
     // 4) Alert if dataset_mtime < last_sync (it means we have more recent
-    // changes than server, so the pull is pointless or potentially dangerous)
+    //    changes than server, so the pull is pointless or potentially dangerous)
     if (dsInfo.mtime < lastSync && !force)
         throw AppException(
             "Can pull only if dataset changes are newer than ours. Use force "
