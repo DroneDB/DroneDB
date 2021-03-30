@@ -335,7 +335,7 @@ DDB_DLL void Registry::downloadFiles(const std::string &organization,
         auto res = net::GET(downloadUrl)
                        .authCookie(this->authToken)
                        .verifySSL(false)
-                       .downloadToFile(destPath.string());
+                       .downloadToFile(destPath.generic_string());
 
         if (res.status() != 200) this->handleError(res);
 
@@ -405,19 +405,18 @@ DDB_DLL void moveCopiesToTemp(const std::vector<CopyAction> &copies,
         const auto source = baseFolder / copy.source;
         const auto dest = baseFolder / tempFolderName / copy.source;
 
-        LOGD << "SourcePath = " << source;
-        LOGD << "DestPath = " << dest;
-
         ensureParentFolderExists(dest);
 
         const auto newPath = fs::path(tempFolderName) / copy.source;
 
         LOGD << "Changed copy path from " << copy.source << " to " << newPath;
 
+        LOGD << "Copying '" << source << "' to '" << dest << "', newPath = '" << newPath << "'";
+
         fs::copy(source, dest,
                  std::filesystem::copy_options::overwrite_existing);
 
-        copy.source = newPath.string();
+        copy.source = newPath.generic_string();
     }
 }
 
@@ -508,7 +507,7 @@ DDB_DLL void applyDelta(const Delta &res, const fs::path &destPath,
 
                 if (exists(dest)) {
                     const auto newPath =
-                        fs::path(dest.string() + replaceSuffix);
+                        fs::path(dest.generic_string() + replaceSuffix);
                     LOGD << "Dest file exists, writing shadow";
                     copy_file(source, newPath);
                 } else {
@@ -521,7 +520,7 @@ DDB_DLL void applyDelta(const Delta &res, const fs::path &destPath,
 
             for (const auto &copy : res.copies) {
                 const auto dest = destPath / copy.destination;
-                const auto destShadow = fs::path(dest.string() + ".replace");
+                const auto destShadow = fs::path(dest.generic_string() + ".replace");
 
                 if (exists(destShadow)) {
                     LOGD << copy.toString();
@@ -575,7 +574,6 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
 
     */
 
-    out << "Pull from " << this->url << std::endl;
     LOGD << "Pull from " << this->url;
 
     // 2) Get our last sync time for that specific registry using syncmanager
@@ -605,7 +603,7 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
 
     LOGD << "Dataset mtime = " << dsInfo.mtime;
 
-    out << "Using tag '" << tag << "', last sync " << lastSync
+    out << "Pull using tag '" << tag << "', last sync " << lastSync
         << ", dataset mtime " << dsInfo.mtime << std::endl;
 
     // 4) Alert if dataset_mtime < last_sync (it means we have more recent
@@ -622,13 +620,13 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
 
     // 5) Get ddb from registry
     this->downloadDdb(tagInfo.organization, tagInfo.dataset,
-                      tempDdbFolder.string());
+                      tempDdbFolder.generic_string());
 
     out << "Remote ddb downloaded" << std::endl;
 
     LOGD << "Remote ddb downloaded";
 
-    auto source = open(tempDdbFolder.string(), true);
+    auto source = open(tempDdbFolder.generic_string(), true);
 
     // 6) Perform local diff using delta method
     const auto delta = getDelta(source.get(), db.get());
@@ -639,7 +637,7 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
     LOGD << j.dump();
 
     out << "Delta result: " << delta.adds.size() << " adds, "
-        << delta.copies.size() << " copies" << delta.removes.size()
+        << delta.copies.size() << " copies, " << delta.removes.size()
         << " removes" << std::endl;
 
     const auto tempNewFolder = fs::temp_directory_path() / "ddb_new_folder" /
@@ -666,7 +664,7 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
 
         // 7) Download all the missing files
         this->downloadFiles(tagInfo.organization, tagInfo.dataset,
-                            filesToDownload, tempNewFolder.string());
+                            filesToDownload, tempNewFolder.generic_string());
 
         LOGD << "Files downloaded, applying delta";
     } else {

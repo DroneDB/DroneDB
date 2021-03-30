@@ -23,9 +23,6 @@ DDB_DLL void pull(const std::string& registry, const bool force) {
     
     auto tag = RegistryUtils::parseTag(manager.getTag());
 
-    std::cout << "Pulling dataset '" << tag.organization << "/" << tag.dataset
-              << "' from registry '" << tag.registryUrl << std::endl;
-
     const AuthCredentials ac =
         UserProfile::get()->getAuthManager()->loadCredentials(
             tag.registryUrl);
