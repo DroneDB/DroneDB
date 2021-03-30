@@ -37,6 +37,16 @@ struct SimpleEntry {
         this->path = std::move(path);
         this->type = Directory;
     }
+
+    bool operator==(const SimpleEntry& rhs) const { 
+
+        return this->hash == rhs.hash && this->path == rhs.path &&
+               this->type == rhs.type;
+
+    }
+    bool operator!=(const SimpleEntry& rhs) const {
+        return !(*this == rhs);
+    }
 };
 
 struct CopyAction {
