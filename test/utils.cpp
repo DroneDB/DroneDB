@@ -12,7 +12,7 @@ void fileWriteAllText(const fs::path& path, const std::string& content) {
     out << path;
 }
 
-fs::path makeTree(std::vector<ddb::SimpleEntry>& entries) {
+fs::path makeTree(const std::vector<ddb::SimpleEntry>& entries) {
     const auto tempFolder =
         fs::temp_directory_path() / "diff_test" / std::to_string(time(nullptr));
 

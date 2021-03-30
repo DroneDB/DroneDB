@@ -12,7 +12,7 @@
 
 void fileWriteAllText(const fs::path& path, const std::string& content);
 
-fs::path makeTree(std::vector<ddb::SimpleEntry>& entries);
+fs::path makeTree(const std::vector<ddb::SimpleEntry>& entries);
 bool compareTree(std::filesystem::path& sourceFolder,
                  std::filesystem::path& destFolder);
 void printTree(fs::path& folder);
