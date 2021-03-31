@@ -111,7 +111,7 @@ DDB_DLL std::string generateRandomString(int length) {
     std::random_device rd;
     std::mt19937 generator(rd());
     const int len = static_cast<int>(strlen(charset));
-    const std::uniform_int_distribution<int> distribution{0, len - 1};
+    std::uniform_int_distribution<int> distribution{0, len - 1};
 
     std::string str(length, '\0');
     for (auto& dis : str) 
