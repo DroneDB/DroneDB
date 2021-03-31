@@ -144,8 +144,8 @@ DDB_DLL void Registry::clone(const std::string &organization,
 
     LOGD << "Download url = " << downloadUrl;
 
-    const auto tempFile =
-        io::Path(fs::temp_directory_path() / std::to_string(time(nullptr)))
+    const auto tempFile = io::Path(fs::temp_directory_path() /
+                                   utils::generateRandomString(8))
             .string() +
         ".tmp";
 
@@ -280,8 +280,8 @@ DDB_DLL void Registry::downloadDdb(const std::string &organization,
 
     LOGD << "Download url = " << downloadUrl;
 
-    const auto tempFile =
-        io::Path(fs::temp_directory_path() / std::to_string(time(nullptr)))
+    const auto tempFile = io::Path(fs::temp_directory_path() /
+                                   utils::generateRandomString(8))
             .string() +
         ".tmp";
 
@@ -342,8 +342,8 @@ DDB_DLL void Registry::downloadFiles(const std::string &organization,
         LOGD << "File downloaded";
 
     } else {
-        const auto tempFile =
-            io::Path(fs::temp_directory_path() / std::to_string(time(nullptr)))
+        const auto tempFile = io::Path(fs::temp_directory_path() /
+                                       utils::generateRandomString(8))
                 .string() +
             ".tmp";
 
@@ -389,17 +389,21 @@ DDB_DLL void ensureParentFolderExists(const fs::path &folder) {
     }
 }
 
-DDB_DLL void moveCopiesToTemp(const std::vector<CopyAction> &copies,
+DDB_DLL std::vector<CopyAction> moveCopiesToTemp(const std::vector<CopyAction> &copies,
                               const fs::path &baseFolder,
                               const std::string &tempFolderName) {
+
     if (copies.empty()) {
         LOGD << "No copies to move to temp folder";
-        return;
+        return copies;
     }
 
     LOGD << "Moving copies to temp folder";
 
-    for (auto copy : copies) {
+    std::vector<CopyAction> res;
+
+    for (const auto& copy : copies)
+    {
         LOGD << copy.toString();
 
         const auto source = baseFolder / copy.source;
@@ -416,8 +420,10 @@ DDB_DLL void moveCopiesToTemp(const std::vector<CopyAction> &copies,
         fs::copy(source, dest,
                  std::filesystem::copy_options::overwrite_existing);
 
-        copy.source = newPath.generic_string();
+        res.emplace_back(newPath.generic_string(), copy.destination);
     }
+
+    return res;
 }
 
 const char *tmpFolderName = ".tmp";
@@ -429,7 +435,7 @@ DDB_DLL void applyDelta(const Delta &res, const fs::path &destPath,
         const auto tempPath = destPath / tmpFolderName;
         create_directories(tempPath);
 
-        moveCopiesToTemp(res.copies, destPath, tmpFolderName);
+        const auto newCopies = moveCopiesToTemp(res.copies, destPath, tmpFolderName);
 
         if (res.removes.empty()) {
             LOGD << "No removes in delta";
@@ -488,13 +494,13 @@ DDB_DLL void applyDelta(const Delta &res, const fs::path &destPath,
             }
         }
 
-        if (res.copies.empty()) {
+        if (newCopies.empty()) {
             LOGD << "No copies in delta";
 
         } else {
             LOGD << "Working on direct copies";
 
-            for (const auto &copy : res.copies) {
+            for (const auto &copy : newCopies) {
                 LOGD << copy.toString();
 
                 const auto source = destPath / copy.source;
@@ -518,7 +524,7 @@ DDB_DLL void applyDelta(const Delta &res, const fs::path &destPath,
 
             LOGD << "Working on shadow copies";
 
-            for (const auto &copy : res.copies) {
+            for (const auto &copy : newCopies) {
                 const auto dest = destPath / copy.destination;
                 const auto destShadow = fs::path(dest.generic_string() + ".replace");
 

@@ -68,7 +68,7 @@ void from_json(const json& j, DatasetInfo& p);
 
 DDB_DLL void applyDelta(const Delta& res, const fs::path& destPath,
                         const fs::path& sourcePath);
-DDB_DLL void moveCopiesToTemp(const std::vector<CopyAction>& copies,
+DDB_DLL std::vector<CopyAction> moveCopiesToTemp(const std::vector<CopyAction>& copies,
                       const fs::path& baseFolder,
                       const std::string& tempFolderName);
 DDB_DLL void ensureParentFolderExists(const fs::path& folder);
