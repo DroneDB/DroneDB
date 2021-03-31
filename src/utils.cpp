@@ -104,14 +104,17 @@ void sleep(int msecs) {
     std::this_thread::sleep_for(std::chrono::milliseconds(msecs));
 }
 
+const char* charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUWXYZ0123456789";
+
 // https://stackoverflow.com/a/50556436
-std::string generateRandomString(int length) {
+DDB_DLL std::string generateRandomString(int length) {
     std::random_device rd;
     std::mt19937 generator(rd());
-    std::uniform_int_distribution<int> distribution{'0', 'Z'};
+    const int len = static_cast<int>(strlen(charset));
+    const std::uniform_int_distribution<int> distribution{0, len - 1};
 
     std::string str(length, '\0');
-    for (auto& dis : str) dis = static_cast<char>(distribution(generator));
+    for (auto& dis : str) dis = static_cast<char>(charset[distribution(generator)]);
 
     return str;
 }

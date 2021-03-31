@@ -130,7 +130,7 @@ void string_replace(std::string& str, const std::string& from, const std::string
 
 void sleep(int msecs);
 
-std::string generateRandomString(int length);
+DDB_DLL std::string generateRandomString(int length);
 std::string join(const std::vector<std::string> &vec, char separator = ',');
 
 // Fix for removing macros
