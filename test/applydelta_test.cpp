@@ -15,19 +15,17 @@ namespace {
 
 using namespace ddb;
 
-TEST(applyDeltaTest, simpleAdd) {
-    const std::vector<SimpleEntry> dest{
-        SimpleEntry("a"),
-        SimpleEntry("a/.ddb"),
-        SimpleEntry("a/.ddb/dbase.sqlite", "BBB"),
-        SimpleEntry("a/a.txt", "AAA"),
-        SimpleEntry("a/b"),
-        SimpleEntry("a/b/c.txt", "AAA")};
+TEST(utilsTest, generateRandomString) {
+    for (auto n = 0; n < 1000; n++) {
+        auto str = utils::generateRandomString(100);
+        // Uncomment for the WALL OF RANDOM
+        // std::cout << str << std::endl;
+        EXPECT_TRUE(str.length() == 100);
+    }
+}
 
-    const std::vector<SimpleEntry> source{
-        SimpleEntry("1.jpg", "AAA"), SimpleEntry("2.jpg", "BBB"),
-        SimpleEntry("3.jpg", "CCC"), SimpleEntry("4.jpg", "DDD")};
-
+void performDeltaTest(const std::vector<SimpleEntry> dest,
+                      const std::vector<SimpleEntry> source) {
     bool equal = false;
 
     fs::path sourceFolder;
@@ -62,52 +60,7 @@ TEST(applyDeltaTest, simpleAdd) {
     EXPECT_TRUE(equal);
 }
 
-/*
-TEST(deltaList, simpleRemove) {
-    const std::vector<SimpleEntry> dest{SimpleEntry("1.jpg", "AAA"),
-                                        SimpleEntry("2.jpg", "BBB"),
-                                        SimpleEntry("3.jpg", "CCC")};
-
-    const std::vector<SimpleEntry> source{
-        SimpleEntry("1.jpg", "AAA"),
-        SimpleEntry("2.jpg", "BBB"),
-    };
-
-    const auto delta = getDelta(source, dest);
-
-    EXPECT_EQ(delta.copies.size(), 0);
-    EXPECT_EQ(delta.adds.size(), 0);
-    EXPECT_EQ(delta.removes.size(), 1);
-
-    EXPECT_EQ(delta.removes[0].path, "3.jpg");
-    EXPECT_EQ(delta.removes[0].type, Generic);
-}
-
-TEST(deltaList, simpleCopy) {
-    const std::vector<SimpleEntry> dest{SimpleEntry("1.jpg", "AAA"),
-                                        SimpleEntry("2.jpg", "BBB"),
-                                        SimpleEntry("3.jpg", "CCC")};
-
-    const std::vector<SimpleEntry> source{
-        SimpleEntry("1.jpg", "AAA"),
-        SimpleEntry("2.jpg", "BBB"),
-        SimpleEntry("3-new.jpg", "CCC"),
-    };
-
-    const auto delta = getDelta(source, dest);
-
-    EXPECT_EQ(delta.copies.size(), 1);
-    EXPECT_EQ(delta.adds.size(), 0);
-    EXPECT_EQ(delta.removes.size(), 1);
-
-    EXPECT_EQ(delta.copies[0].source, "3.jpg");
-    EXPECT_EQ(delta.copies[0].destination, "3-new.jpg");
-
-    EXPECT_EQ(delta.removes[0].path, "3.jpg");
-}
-
-TEST(deltaList, edgeCase1) {
-
+TEST(applyDeltaTest, simpleAdd) {
     const std::vector<SimpleEntry> dest{
         SimpleEntry("a"),
         SimpleEntry("a/.ddb"),
@@ -117,90 +70,43 @@ TEST(deltaList, edgeCase1) {
         SimpleEntry("a/b/c.txt", "AAA")};
 
     const std::vector<SimpleEntry> source{
-        SimpleEntry("a"),
-        SimpleEntry("a/.ddb"),
-        SimpleEntry("a/.ddb/dbase.sqlite", "BBB"),
-        SimpleEntry("a/a.txt", "AAA"),
-        SimpleEntry("a/b"),
-        SimpleEntry("a/b/c.txt", "AAA")};
+        SimpleEntry("1.txt", "AAA"), SimpleEntry("2.txt", "BBB"),
+        SimpleEntry("3.txt", "CCC"), SimpleEntry("4.txt", "DDD")};
 
-    const auto delta = getDelta(source, dest);
-
-    EXPECT_EQ(delta.copies.size(), 0);
-    EXPECT_EQ(delta.adds.size(), 0);
-    EXPECT_EQ(delta.removes.size(), 0);
-
+    performDeltaTest(dest, source);
 }
 
-TEST(deltaList, complexTree1) {
+TEST(applyDeltaTest, simpleRename) {
+    const std::vector<SimpleEntry> dest = {SimpleEntry("1.jpg", "AAA"),
+                                           SimpleEntry("2.jpg", "BBB"),
+                                           SimpleEntry("5.jpg", "GGG")};
 
-    const std::vector<SimpleEntry> dest{
-        SimpleEntry("1.jpg", "AAA"),
-        SimpleEntry("2.jpg", "BBB"),
-        SimpleEntry("3.jpg", "CCC"),
-        SimpleEntry("img"),
-        SimpleEntry("img/1.jpg", "AAA"),
-        SimpleEntry("img/2.jpg", "BBB"),
-        SimpleEntry("img/3.jpg", "CCC")};
+    const std::vector<SimpleEntry> source = {
+        SimpleEntry("1.jpg", "EEE"), SimpleEntry("2.jpg", "FFF"),
+        SimpleEntry("3.jpg", "AAA"), SimpleEntry("4.jpg", "BBB")};
 
-    const std::vector<SimpleEntry> source{
-        SimpleEntry("1.jpg", "CCC"),
-        SimpleEntry("2.jpg", "AAA"),
-        SimpleEntry("3.jpg", "BBB"),
-        SimpleEntry("cov"),
-        SimpleEntry("cov/1.jpg", "BBB"),
-        SimpleEntry("cov/2.jpg", "CCC"),
-        SimpleEntry("cov/3.jpg", "AAA")};
-
-    const auto delta = getDelta(source, dest);
-
-    const auto expected = R"(
-    {
-  "adds": [
-    {
-      "path": "cov",
-      "type": 1
-    }
-  ],
-  "copies": [
-    ["3.jpg", "1.jpg"
-    ],
-    ["1.jpg", "2.jpg"
-    ],
-    ["2.jpg", "3.jpg"
-    ],
-    ["2.jpg", "cov/1.jpg"
-    ],
-    ["3.jpg", "cov/2.jpg"
-    ],
-    ["1.jpg", "cov/3.jpg"
-    ]
-  ],
-  "removes": [
-    {
-      "path": "img/3.jpg",
-      "type": 2
-    },
-    {
-      "path": "img/2.jpg",
-      "type": 2
-    },
-    {
-      "path": "img/1.jpg",
-      "type": 2
-    },
-    {
-      "path": "img",
-      "type": 1
-    }
-  ]
+    performDeltaTest(dest, source);
 }
-    )"_json;
 
-    const json j = delta;
+TEST(applyDeltaTest, complexTree2) {
+    const std::vector<SimpleEntry> dest = {
+        SimpleEntry("ciao.txt", "CIAO"), SimpleEntry("pippo.txt", "PIPPO"),
+        SimpleEntry("test"), SimpleEntry("test/a.txt", "AAA"),
+        SimpleEntry("test/b.txt", "BBB")};
 
-    EXPECT_EQ(j, expected);
+    const std::vector<SimpleEntry> source = {SimpleEntry("lol.txt", "COPIA"),
+                                             SimpleEntry("plutone.txt", "CIAO"),
+                                             SimpleEntry("pippo.txt", "PIPPO"),
+                                             SimpleEntry("tast"),
+                                             SimpleEntry("tast/a.txt", "AAA"),
+                                             SimpleEntry("tast/b.txt", "BBB"),
+                                             SimpleEntry("tast/c.txt", "AAA"),
+                                             SimpleEntry("tast/d.txt", "DDD"),
+                                             SimpleEntry("test"),
+                                             SimpleEntry("test/a.txt", "AAA"),
+                                             SimpleEntry("test/b.txt", "BBB")};
 
+    performDeltaTest(dest, source);
 }
-*/
+
 }  // namespace

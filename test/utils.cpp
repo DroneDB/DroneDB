@@ -9,12 +9,12 @@ void fileWriteAllText(const fs::path& path, const std::string& content) {
     if (exists(path)) fs::remove(path);
 
     std::ofstream out(path, std::ofstream::out);
-    out << path;
+    out << content;
 }
 
 fs::path makeTree(const std::vector<ddb::SimpleEntry>& entries) {
     const auto tempFolder =
-        fs::temp_directory_path() / "diff_test" / std::to_string(time(nullptr));
+        fs::temp_directory_path() / "diff_test" / ddb::utils::generateRandomString(8);
 
     create_directories(tempFolder);
 
@@ -62,39 +62,37 @@ bool compareTree(fs::path& sourceFolder, fs::path& destFolder) {
     return true;*/
 }
 void printTree(fs::path& folder) {
-    std::vector<std::filesystem::directory_entry> entries;
+    std::vector<fs::path> entries;
+     
+    std::cout << "PrintTree: " << folder << std::endl;
 
     for (const auto item : fs::recursive_directory_iterator(folder)) {
-        entries.push_back(item);
+        entries.push_back(item.path());
     }
-
     const auto sortedEntries =
         boolinq::from(entries)
-            .orderBy([](const std::filesystem::directory_entry& entry) {
-                return entry.path().generic_string();
+            .orderBy([](const fs::path& entry) {
+                return entry.generic_string();
             })
             .toStdVector();
 
-    for (const auto& entry : sortedEntries) {
+    for (const auto& path : sortedEntries) {
 
-        const auto& path = entry.path();
-
-        const auto rel = fs::relative(folder, path);
+        const auto rel = relative(path, folder);
 
         const auto relString = rel.generic_string();
 
         const auto depth = std::count(
             relString.begin(), relString.end(),
-            std::filesystem::path::preferred_separator);
+            '/');
 
         for (auto n = 0; n < depth; n++) std::cout << "\t";
 
         std::cout << rel.filename();
 
-        if (!is_directory(rel))        
+        if (fs::is_regular_file(relString))        
             std::cout << " (" << calculateHash(path) << ")";
         
-
         std::cout << std::endl;
 
     }
