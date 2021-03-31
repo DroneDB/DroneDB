@@ -28,24 +28,38 @@ TEST(applyDeltaTest, simpleAdd) {
         SimpleEntry("1.jpg", "AAA"), SimpleEntry("2.jpg", "BBB"),
         SimpleEntry("3.jpg", "CCC"), SimpleEntry("4.jpg", "DDD")};
 
-    auto sourceFolder = makeTree(source);
-    auto destFolder = makeTree(dest);
+    bool equal = false;
 
-    auto res = getDelta(source, dest);
+    fs::path sourceFolder;
+    fs::path destFolder;
 
-    const json j = res;
+    try {
+        sourceFolder = makeTree(source);
+        destFolder = makeTree(dest);
 
-    std::cout << j;
+        std::cout << "SourceTree = " << sourceFolder << std::endl;
+        std::cout << "DestTree = " << destFolder << std::endl;
 
-    applyDelta(res, destFolder, sourceFolder);
+        auto res = getDelta(source, dest);
 
-    const auto equal = compareTree(sourceFolder, destFolder);
+        const json j = res;
 
-    remove_all(sourceFolder);
-    remove_all(destFolder);
+        std::cout << std::endl << "Delta:" << std::endl;
+        std::cout << j.dump(4);
+
+        applyDelta(res, destFolder, sourceFolder);
+
+        equal = compareTree(sourceFolder, destFolder);
+
+        std::cout << "Equal? " << equal << std::endl;
+    } catch (std::runtime_error& e) {
+        std::cout << "Exception: " << e.what() << std::endl;
+    }
+
+    if (!sourceFolder.empty() && exists(sourceFolder)) remove_all(sourceFolder);
+    if (!destFolder.empty() && exists(destFolder)) remove_all(destFolder);
 
     EXPECT_TRUE(equal);
-
 }
 
 /*

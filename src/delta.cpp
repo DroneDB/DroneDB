@@ -133,7 +133,7 @@ Delta getDelta(std::vector<SimpleEntry> source,
         }
 
         if (inDestWithSameHashEntry->type != Directory) {
-            LOGD << "COPY -> " << inDestWithSameHashEntry->toString() << " =>"
+            LOGD << "COPY -> " << inDestWithSameHashEntry->toString() << " => "
                  << entry.toString();
             copies.emplace_back(
                 CopyAction(inDestWithSameHashEntry->path, entry.path));
