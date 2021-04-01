@@ -13,7 +13,7 @@
 
 namespace ddb {
 
-std::time_t SyncManager::getLastSync(const std::string& registry) {
+time_t SyncManager::getLastSync(const std::string& registry) {
     const auto path = this->ddbFolder / SYNCFILE;
 
     LOGD << "Path = " << path;
@@ -45,8 +45,9 @@ std::time_t SyncManager::getLastSync(const std::string& registry) {
     return t;
 }
 
-void SyncManager::setLastSync(const std::string& registry,
-                              const std::time_t t) {
+void SyncManager::setLastSync(
+    const time_t t, const std::string& registry
+                              ) {
     const auto path = this->ddbFolder / SYNCFILE;
 
     LOGD << "Path = " << path;
