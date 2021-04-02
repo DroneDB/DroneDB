@@ -39,10 +39,9 @@ std::string Pull::description() {
 
 void Pull::run(cxxopts::ParseResult& opts) {
     try {
+        
         const auto force = opts["force"].as<bool>();
-
         auto remote = opts["remote"].as<std::string>();
-        remote = remote.length() > 0 ? remote : DEFAULT_REGISTRY;
 
         ddb::pull(remote, force);
 

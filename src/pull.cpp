@@ -18,16 +18,20 @@ DDB_DLL void pull(const std::string& registry, const bool force) {
     const auto currentPath = fs::current_path().string();
 
     const auto db = open(currentPath, true);
+   
+    std::string registryUrl = registry;
 
-    TagManager manager(fs::path(db->getOpenFile()).parent_path());
-    
-    auto tag = RegistryUtils::parseTag(manager.getTag());
+    if (registry.empty()) {
+        TagManager manager(fs::path(db->getOpenFile()).parent_path());
+        auto tag = RegistryUtils::parseTag(manager.getTag());
+        registryUrl = tag.registryUrl;
+    } 
 
     const AuthCredentials ac =
         UserProfile::get()->getAuthManager()->loadCredentials(
-            tag.registryUrl);
+            registryUrl);
 
-    Registry reg(tag.registryUrl);
+    Registry reg(registryUrl);
 
     try {
         if (ac.empty()) {
@@ -39,7 +43,7 @@ DDB_DLL void pull(const std::string& registry, const bool force) {
                                          reg.getUrl());
 
             UserProfile::get()->getAuthManager()->saveCredentials(
-                tag.registryUrl, AuthCredentials(username, password));
+                registryUrl, AuthCredentials(username, password));
 
             reg.pull(currentPath, force, std::cout);
 
@@ -57,7 +61,7 @@ DDB_DLL void pull(const std::string& registry, const bool force) {
 
         if (reg.login(username, password).length() > 0) {
             UserProfile::get()->getAuthManager()->saveCredentials(
-                tag.registryUrl, AuthCredentials(username, password));
+                registryUrl, AuthCredentials(username, password));
 
             reg.pull(currentPath, force, std::cout);
 
