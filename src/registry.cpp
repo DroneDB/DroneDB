@@ -563,8 +563,6 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
     1) Get our tag using tagmanager
     2) Get our last sync time for that specific registry using syncmanager
     3) Get dataset mtime
-        3.1) Authenticate if not
-        3.2) Call endpoint
     4) Alert if dataset_mtime < last_sync (it means we have more recent changes
     than server, so the pull is pointless or potentially dangerous)
     5) Get ddb from registry
@@ -714,6 +712,59 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
 
 DDB_DLL void Registry::push(const std::string &path, const bool force,
                             std::ostream &out) {
+
+    /*
+
+    -- Push Workflow --
+
+    1) Get our tag using tagmanager
+    2) Get our last sync time for that specific registry using syncmanager
+    3) Get dataset mtime
+    4) Alert if dataset_mtime > last_sync (it means we have less recent changes
+    than server, so the push is pointless or potentially dangerous)
+    5) Initialize server push
+        5.1) Zip our ddb folder
+        5.1) Call POST endpoint passing zip
+        5.2) The server answers with the needed files list
+    6) Foreach of the needed files call POST endpoint
+    7) When done call commit endpoint
+    
+    */
+
+    auto db = open(path, true);
+    const auto ddbPath = fs::path(db->getOpenFile()).parent_path();
+
+    LOGD << "Ddb folder = " << ddbPath;
+
+    TagManager tagManager(ddbPath);
+    SyncManager syncManager(ddbPath);
+
+    // 1) Get our tag using tagmanager
+    const auto tag = tagManager.getTag();
+
+    // 2) Get our last sync time for that specific registry using syncmanager
+    const auto lastSync = syncManager.getLastSync(this->url);
+
+    LOGD << "Tag = " << tag;
+    LOGD << "LastSync = " << lastSync;
+
+    const auto tagInfo = RegistryUtils::parseTag(tag);
+
+    // 3) Get dataset mtime
+    const auto dsInfo =
+        this->getDatasetInfo(tagInfo.organization, tagInfo.dataset);
+
+    LOGD << "Dataset mtime = " << dsInfo.mtime;
+
+    out << "Push using tag '" << tag << "', last sync " << lastSync
+        << ", dataset mtime " << dsInfo.mtime << std::endl;
+
+    // 4) Alert if dataset_mtime > last_sync (it means we have less recent changes
+    //    than server, so the push is pointless or potentially dangerous)
+    if (dsInfo.mtime > lastSync && !force)
+        throw AppException(
+            "Can push only if dataset changes are older than ours. Use force "
+            "parameter to override (CAUTION)");
 
     throw NotImplementedException("Not implemented yet");
 }
