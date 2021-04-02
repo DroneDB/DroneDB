@@ -207,7 +207,7 @@ DDB_DLL void Registry::clone(const std::string &organization,
     SyncManager syncManager(ddbFolder);
     TagManager tagManager(ddbFolder);
 
-    syncManager.setLastSync(this->url);
+    syncManager.setLastSync(time(nullptr), this->url);
     tagManager.setTag(this->url + "/" + organization + "/" + dataset);
 
     out << "Done" << std::endl;
@@ -702,7 +702,7 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
     LOGD << "Updating syncmanager and tagmanager";
 
     // 10) Update last sync time
-    syncManager.setLastSync(this->url);
+    syncManager.setLastSync(time(nullptr), this->url);
     tagManager.setTag(tag);
 
     out << "Updated last sync time, pull done" << std::endl;

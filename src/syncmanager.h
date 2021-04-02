@@ -20,8 +20,9 @@ class SyncManager {
         
     }
 
-    DDB_DLL std::time_t getLastSync(const std::string& registry = DEFAULT_REGISTRY);
-    DDB_DLL void setLastSync(const std::string& registry = DEFAULT_REGISTRY, const std::time_t time = 0);
+    DDB_DLL time_t getLastSync(const std::string& registry = DEFAULT_REGISTRY);
+    DDB_DLL void setLastSync(const time_t time = 0,
+                             const std::string& registry = DEFAULT_REGISTRY);
 };
 
 }  // namespace ddb

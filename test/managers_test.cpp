@@ -19,9 +19,9 @@ TEST(syncManager, happyPath) {
 
     SyncManager manager(ta.getFolder().string());
 
-    auto t = time(nullptr);
+    const auto t = time(nullptr);
 
-    manager.setLastSync("testhub.dronedb.app", t);
+    manager.setLastSync(t, "testhub.dronedb.app");
 
     const auto newt = manager.getLastSync("testhub.dronedb.app");
 
