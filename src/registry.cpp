@@ -712,6 +712,12 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
     LOGD << "Pull done";
 }
 
+DDB_DLL void Registry::push(const std::string &path, const bool force,
+                            std::ostream &out) {
+
+    throw NotImplementedException("Not implemented yet");
+}
+
 void Registry::handleError(net::Response &res) {
     if (res.hasData()) {
         LOGD << "Request error: " << res.getText();

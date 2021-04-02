@@ -45,6 +45,7 @@ class Registry {
                        std::ostream& out);
 
     DDB_DLL void pull(const std::string& path, const bool force, std::ostream& out);
+    DDB_DLL void push(const std::string& path, const bool force, std::ostream& out);
 
     DDB_DLL void handleError(net::Response& res);
 

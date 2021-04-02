@@ -36,7 +36,7 @@ DDB_DLL std::string initIndex(const std::string &directory, bool fromScratch = f
 
 DDB_DLL void clone(const ddb::TagComponents& tag, const std::string& folder);
 
-DDB_DLL void push(const std::string &registry);
+DDB_DLL void push(const std::string &registry, const bool force = false);
 DDB_DLL void pull(const std::string &registry, const bool force = false);
 
 
