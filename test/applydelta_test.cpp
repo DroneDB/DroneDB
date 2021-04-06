@@ -15,15 +15,6 @@ namespace {
 
 using namespace ddb;
 
-TEST(utilsTest, generateRandomString) {
-    for (auto n = 0; n < 1000; n++) {
-        auto str = utils::generateRandomString(100);
-        // Uncomment for the WALL OF RANDOM
-        // std::cout << str << std::endl;
-        EXPECT_TRUE(str.length() == 100);
-    }
-}
-
 void performDeltaTest(const std::vector<SimpleEntry> dest,
                       const std::vector<SimpleEntry> source) {
     bool equal = false;
