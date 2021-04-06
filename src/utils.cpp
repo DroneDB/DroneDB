@@ -6,8 +6,8 @@
 
 #include <random>
 
-namespace ddb {
-namespace utils {
+namespace ddb::utils
+{
 
 std::string getPass(const std::string& prompt) {
 #ifdef _WIN32
@@ -104,7 +104,8 @@ void sleep(int msecs) {
     std::this_thread::sleep_for(std::chrono::milliseconds(msecs));
 }
 
-const char* charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUWXYZ0123456789";
+const char* charset =
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUWXYZ0123456789";
 
 // https://stackoverflow.com/a/50556436
 DDB_DLL std::string generateRandomString(int length) {
@@ -114,8 +115,7 @@ DDB_DLL std::string generateRandomString(int length) {
     std::uniform_int_distribution<int> distribution{0, len - 1};
 
     std::string str(length, '\0');
-    for (auto& dis : str) 
-        dis = charset[distribution(generator)];
+    for (auto& dis : str) dis = charset[distribution(generator)];
 
     return str;
 }
@@ -138,5 +138,4 @@ std::string join(const std::vector<std::string>& vec, char separator) {
     return paths;
 }
 
-}  // namespace utils
-}  // namespace ddb
+} // namespace ddb
