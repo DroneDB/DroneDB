@@ -8,6 +8,7 @@
 #include <ddb.h>
 #include <delta.h>
 #include <mio.h>
+#include <pushmanager.h>
 #include <syncmanager.h>
 #include <tagmanager.h>
 
@@ -710,6 +711,15 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
     LOGD << "Pull done";
 }
 
+void zipFolder(const fs::path &folder, const fs::path &archive) {
+    miniz_cpp::zip_file file;
+
+    for (const auto &entry : fs::recursive_directory_iterator(folder))
+        file.write(entry.path().generic_string());
+
+    file.save(archive.generic_string());
+}
+
 DDB_DLL void Registry::push(const std::string &path, const bool force,
                             std::ostream &out) {
 
@@ -766,7 +776,47 @@ DDB_DLL void Registry::push(const std::string &path, const bool force,
             "Can push only if dataset changes are older than ours. Use force "
             "parameter to override (CAUTION)");
 
-    throw NotImplementedException("Not implemented yet");
+    // 5) Initialize server push
+    LOGD << "Initializing server push";
+    
+    // 5.1) Zip our ddb folder
+    const fs::path tempArchive =
+        fs::temp_directory_path() / (utils::generateRandomString(8) +
+                                     ".zip");
+
+    out << "Zipping ddb folder" << std::endl;
+
+    zipFolder(ddbPath, tempArchive);
+
+    // 5.1) Call POST endpoint passing zip
+    PushManager pushManager(this, tagInfo.organization, tagInfo.dataset);
+
+    out << "Initializing push" << std::endl;
+
+    // 5.2) The server answers with the needed files list
+    const auto filesList = pushManager.init(tempArchive);
+
+    const auto basePath = ddbPath.parent_path();
+
+    for (const auto& file : filesList)
+    {
+        const auto fullPath = basePath / file;
+
+        out << "Transfering '" << file << "'" << std::endl;
+
+        // 6) Foreach of the needed files call POST endpoint
+        pushManager.upload(fullPath.generic_string());
+    }
+
+    out << "Transfers done" << std::endl;
+    
+    // 7) When done call commit endpoint
+    pushManager.commit();
+
+    // Cleanup
+    fs::remove(tempArchive);
+
+    out << "Push complete" << std::endl;
 }
 
 void Registry::handleError(net::Response &res) {
