@@ -12,11 +12,9 @@
 #include "utils.h"
 
 namespace ddb {
-    
 
 DDB_DLL std::vector<std::string> PushManager::init(
     const fs::path& ddbPathArchive) {
-
     this->registry->ensureTokenValidity();
 
     net::Response res =
@@ -27,25 +25,28 @@ DDB_DLL std::vector<std::string> PushManager::init(
             .send();
 
     if (res.status() != 200) this->registry->handleError(res);
+
+    json j = res.getJSON();
+
+    if (!j.contains("neededFiles")) this->registry->handleError(res);
+
+    return j["neededFiles"].get<std::vector<std::string>>();
 }
 
-DDB_DLL void PushManager::upload(const std::string& file) { 
-
-
+DDB_DLL void PushManager::upload(const std::string& file) {
     this->registry->ensureTokenValidity();
 
     net::Response res =
-        net::POST(this->registry->getUrl("/org/" + this->organization + "/ds/" + this->dataset + "/push/upload"))
+        net::POST(this->registry->getUrl("/org/" + this->organization + "/ds/" +
+                                         this->dataset + "/push/upload"))
             .multiPartFormData({"file", file})
             .authToken(this->registry->getAuthToken())
             .send();
 
     if (res.status() != 200) this->registry->handleError(res);
-        
 }
 
-DDB_DLL void PushManager::commit()
-{
+DDB_DLL void PushManager::commit() {
     this->registry->ensureTokenValidity();
 
     net::Response res =
