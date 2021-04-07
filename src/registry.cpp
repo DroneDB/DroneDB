@@ -796,6 +796,8 @@ DDB_DLL void Registry::push(const std::string &path, const bool force,
     // 5.2) The server answers with the needed files list
     const auto filesList = pushManager.init(tempArchive);
 
+    LOGD << "Push initialized";
+
     const auto basePath = ddbPath.parent_path();
 
     for (const auto& file : filesList)
@@ -803,6 +805,8 @@ DDB_DLL void Registry::push(const std::string &path, const bool force,
         const auto fullPath = basePath / file;
 
         out << "Transfering '" << file << "'" << std::endl;
+
+        LOGD << "Upload: " << fullPath;
 
         // 6) Foreach of the needed files call POST endpoint
         pushManager.upload(fullPath.generic_string());
@@ -812,6 +816,8 @@ DDB_DLL void Registry::push(const std::string &path, const bool force,
     
     // 7) When done call commit endpoint
     pushManager.commit();
+
+    LOGD << "Push committed";
 
     // Cleanup
     fs::remove(tempArchive);
