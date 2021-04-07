@@ -17,17 +17,44 @@ namespace ddb {
 DDB_DLL std::vector<std::string> PushManager::init(
     const fs::path& ddbPathArchive) {
 
-    throw NotImplementedException("Not implemented");
+    this->registry->ensureTokenValidity();
 
+    net::Response res =
+        net::POST(this->registry->getUrl("/org/" + this->organization + "/ds/" +
+                                         this->dataset + "/push/init"))
+            .multiPartFormData({"file", ddbPathArchive.string()})
+            .authToken(this->registry->getAuthToken())
+            .send();
+
+    if (res.status() != 200) this->registry->handleError(res);
 }
 
 DDB_DLL void PushManager::upload(const std::string& file) { 
-    throw NotImplementedException("Not implemented");
+
+
+    this->registry->ensureTokenValidity();
+
+    net::Response res =
+        net::POST(this->registry->getUrl("/org/" + this->organization + "/ds/" + this->dataset + "/push/upload"))
+            .multiPartFormData({"file", file})
+            .authToken(this->registry->getAuthToken())
+            .send();
+
+    if (res.status() != 200) this->registry->handleError(res);
+        
 }
 
 DDB_DLL void PushManager::commit()
 {
-    throw NotImplementedException("Not implemented");
+    this->registry->ensureTokenValidity();
+
+    net::Response res =
+        net::POST(this->registry->getUrl("/org/" + this->organization + "/ds/" +
+                                         this->dataset + "/push/commit"))
+            .authToken(this->registry->getAuthToken())
+            .send();
+
+    if (res.status() != 200) this->registry->handleError(res);
 }
 
 }  // namespace ddb
