@@ -7,6 +7,7 @@
 
 #include <string>
 #include <fstream>
+#include "ddb_export.h"
 #include "../vendor/hash-library/sha256.h"
 
 static const uint64_t crc64_table[256] = {
@@ -142,11 +143,11 @@ static const uint64_t crc64_table[256] = {
 
 class Hash{
 public:
-    static std::string fileSHA256(const std::string &path);
-    static std::string strSHA256(const std::string &str);
+    DDB_DLL static std::string fileSHA256(const std::string &path);
+    DDB_DLL static std::string strSHA256(const std::string &str);
 
-    static std::string strCRC64(const std::string &str);
-    static std::string strCRC64(const char *str, uint64_t size);
+    DDB_DLL static std::string strCRC64(const std::string &str);
+    DDB_DLL static std::string strCRC64(const char *str, uint64_t size);
 };
 
 #endif // HASH_H
