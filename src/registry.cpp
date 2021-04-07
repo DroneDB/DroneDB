@@ -809,7 +809,7 @@ DDB_DLL void Registry::push(const std::string &path, const bool force,
         LOGD << "Upload: " << fullPath;
 
         // 6) Foreach of the needed files call POST endpoint
-        pushManager.upload(fullPath.generic_string());
+        pushManager.upload(fullPath.generic_string(), file);
     }
 
     out << "Transfers done" << std::endl;

@@ -33,13 +33,13 @@ DDB_DLL std::vector<std::string> PushManager::init(
     return j["neededFiles"].get<std::vector<std::string>>();
 }
 
-DDB_DLL void PushManager::upload(const std::string& file) {
+DDB_DLL void PushManager::upload(const std::string& fullPath, const std::string& file) {
     this->registry->ensureTokenValidity();
 
     net::Response res =
         net::POST(this->registry->getUrl("/org/" + this->organization + "/ds/" +
                                          this->dataset + "/push/upload"))
-            .multiPartFormData({"file", file})
+            .multiPartFormData({"file", fullPath}, {"path", file})
             .authToken(this->registry->getAuthToken())
             .send();
 
