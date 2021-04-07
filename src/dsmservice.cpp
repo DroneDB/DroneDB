@@ -8,6 +8,7 @@
 #include "exceptions.h"
 #include "utils.h"
 #include "net.h"
+#include "mio.h"
 #include "constants.h"
 
 #pragma clang diagnostic ignored "-Wdisabled-macro-expansion"
@@ -44,14 +45,20 @@ float DSMService::getAltitude(double latitude, double longitude){
         }
     }
 
-    // Load existing DSMs in cache until we find a matching one
-    if (loadDiskCache(latitude, longitude)){
-        return getAltitude(latitude, longitude);
-    }
+    // TODO: we can probably optimize this
+    // to lock based on the bounding box of the point
+    {
+        io::FileLock lock(getCacheDir() / ".." / "dsm_service");
 
-    // Attempt to load from the network and recurse
-    if (addGeoTIFFToCache(loadFromNetwork(latitude, longitude), latitude, longitude)){
-        return getAltitude(latitude, longitude);
+        // Load existing DSMs in cache until we find a matching one
+        if (loadDiskCache(latitude, longitude)){
+            return getAltitude(latitude, longitude);
+        }
+
+        // Attempt to load from the network and recurse
+        if (addGeoTIFFToCache(loadFromNetwork(latitude, longitude), latitude, longitude)){
+            return getAltitude(latitude, longitude);
+        }
     }
 
     LOGW << "Cannot get elevation from DSM service";
@@ -105,7 +112,7 @@ std::string DSMService::loadFromNetwork(double latitude, double longitude){
                            std::to_string(std::chrono::system_clock::now().time_since_epoch().count()) + ".tif";
     std::string filePath = (getCacheDir() / filename).string();
 
-    std::cout << "Downloading DSM from " << url << " ..." << std::endl;
+    LOGD << "Downloading DSM from " << url << " ...";
     net::Request r = net::GET(url);
 	r.verifySSL(false); // Risk is tolerable, we're just fetching altitude
     r.downloadToFile(filePath);
@@ -125,7 +132,7 @@ bool DSMService::addGeoTIFFToCache(const fs::path &filePath, double latitude, do
 
     std::string wkt = GDALGetProjectionRef(dataset);
     if (wkt.empty()) throw GDALException("Cannot get projection ref for " + filePath.string());
-    char *wktp = const_cast<char *>(wkt.c_str());
+//    char *wktp = const_cast<char *>(wkt.c_str());
     //OGRSpatialReference *srs = new OGRSpatialReference();
     //if (srs->importFromWkt(&wktp) != OGRERR_NONE) throw GDALException("Cannot read spatial reference system for " + filePath.string() + ". Is PROJ installed?");
 

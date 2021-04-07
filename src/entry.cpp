@@ -4,6 +4,9 @@
 #include <exiv2/exiv2.hpp>
 #include "dbops.h"
 #include "entry.h"
+
+#include <ddb.h>
+
 #include "mio.h"
 #include "ogr_srs_api.h"
 
@@ -34,7 +37,7 @@ void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
 
         // Check for DroneDB dir
         try{
-            if (fs::exists(path / ".ddb" / "dbase.sqlite")){
+            if (fs::exists(path / DDB_FOLDER / "dbase.sqlite")) {
                 parseDroneDBEntry(path, entry);
             }
         }catch(const fs::filesystem_error &e){
@@ -45,44 +48,51 @@ void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
         entry.size = p.getSize();
         entry.type = fingerprint(p.get());
 
-        if (entry.type == EntryType::Image || entry.type == EntryType::GeoImage) {
+        bool image = entry.type == EntryType::Image || entry.type == EntryType::GeoImage;
+        bool video = entry.type == EntryType::Video || entry.type == EntryType::GeoVideo;
+
+        if (image || video) {
             try{
-                auto image = Exiv2::ImageFactory::open(path.string());
-                if (!image.get()) throw new IndexException("Cannot open " + path.string());
+                auto exivImage = Exiv2::ImageFactory::open(path.string());
+                if (!exivImage.get()) throw new IndexException("Cannot open " + path.string());
 
-                image->readMetadata();
-                ExifParser e(image.get());
+                exivImage->readMetadata();
+                ExifParser e(exivImage.get());
 
-                if (e.hasExif()) {
+                if (e.hasTags()) {
+                    SensorSize sensorSize;
+                    Focal focal;
+                    CameraOrientation cameraOri;
+                    bool hasCameraOri = false;
+
                     auto imageSize = e.extractImageSize();
                     entry.meta["width"] = imageSize.width;
                     entry.meta["height"] = imageSize.height;
-                    entry.meta["orientation"] = e.extractImageOrientation();
-
-                    entry.meta["make"] = e.extractMake();
-                    entry.meta["model"] = e.extractModel();
-                    entry.meta["sensor"] = e.extractSensor();
-
-                    SensorSize sensorSize;
-                    if (e.extractSensorSize(sensorSize)){
-                        entry.meta["sensorWidth"] = sensorSize.width;
-                        entry.meta["sensorHeight"] = sensorSize.height;
-                    }
-
-                    Focal focal;
-                    if (e.computeFocal(focal)){
-                        entry.meta["focalLength"] = focal.length;
-                        entry.meta["focalLength35"] = focal.length35;
-                    }
                     entry.meta["captureTime"] = e.extractCaptureTime();
 
-                    CameraOrientation cameraOri;
-                    bool hasCameraOri = e.extractCameraOrientation(cameraOri);
-                    if (hasCameraOri) {
-                        entry.meta["cameraYaw"] = cameraOri.yaw;
-                        entry.meta["cameraPitch"] = cameraOri.pitch;
-                        entry.meta["cameraRoll"] = cameraOri.roll;
-                        LOGD << "Camera Orientation: " << cameraOri;
+                    if (image){
+                        entry.meta["orientation"] = e.extractImageOrientation();
+                        entry.meta["make"] = e.extractMake();
+                        entry.meta["model"] = e.extractModel();
+                        entry.meta["sensor"] = e.extractSensor();
+
+                        if (e.extractSensorSize(sensorSize)){
+                            entry.meta["sensorWidth"] = sensorSize.width;
+                            entry.meta["sensorHeight"] = sensorSize.height;
+                        }
+
+                        if (e.computeFocal(focal)){
+                            entry.meta["focalLength"] = focal.length;
+                            entry.meta["focalLength35"] = focal.length35;
+                        }
+
+                        hasCameraOri = e.extractCameraOrientation(cameraOri);
+                        if (hasCameraOri) {
+                            entry.meta["cameraYaw"] = cameraOri.yaw;
+                            entry.meta["cameraPitch"] = cameraOri.pitch;
+                            entry.meta["cameraRoll"] = cameraOri.roll;
+                            LOGD << "Camera Orientation: " << cameraOri;
+                        }
                     }
 
                     GeoLocation geo;
@@ -93,14 +103,16 @@ void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
                         //e.printAllTags();
 
                         // Estimate image footprint
-                        double relAltitude = 0.0;
+                        if (image){
+                            double relAltitude = 0.0;
 
-                        if (hasCameraOri && e.extractRelAltitude(relAltitude) && sensorSize.width > 0.0 && focal.length > 0.0) {
-                            calculateFootprint(sensorSize, geo, focal, cameraOri, relAltitude, entry.polygon_geom);
+                            if (hasCameraOri && e.extractRelAltitude(relAltitude) && sensorSize.width > 0.0 && focal.length > 0.0) {
+                                calculateFootprint(sensorSize, geo, focal, cameraOri, relAltitude, entry.polygon_geom);
+                            }
                         }
                     }
                 } else {
-                    LOGD << "No EXIF data found in " << path.string();
+                    LOGD << "No XMP/EXIF data found in " << path.string();
                 }
             }catch(Exiv2::AnyError&){
                 LOGD << "Cannot read EXIF data: " << path.string();
@@ -421,6 +433,7 @@ EntryType fingerprint(const fs::path &path){
     bool dng = p.checkExtension({"dng"});
     bool tif = p.checkExtension({"tif", "tiff"});
     bool nongeoImage = p.checkExtension({"png", "gif"});
+    bool video = p.checkExtension({"mp4", "mov"});
 
     bool georaster = false;
 
@@ -440,9 +453,9 @@ EntryType fingerprint(const fs::path &path){
 
     bool image = (jpg || tif || dng || nongeoImage) && !georaster;
 
-    if (image) {
-        // A normal image by default (refined later)
-        type = EntryType::Image;
+    if (image || video) {
+        // A normal image or video by default (refined later)
+        type = image ? EntryType::Image : EntryType::Video;
 
         try{
             auto image = Exiv2::ImageFactory::open(path.string());
@@ -451,15 +464,16 @@ EntryType fingerprint(const fs::path &path){
             image->readMetadata();
             ExifParser e(image.get());
 
-            if (e.hasExif()) {
+            if (e.hasTags()) {
                 GeoLocation geo;
                 if (e.extractGeo(geo)) {
-                    type = EntryType::GeoImage;
+                    if (type == EntryType::Image) type = EntryType::GeoImage;
+                    else if (type == EntryType::Video) type = EntryType::GeoVideo;
                 } else {
                     // Not a georeferenced image, just a plain image
                 }
             } else {
-                LOGD << "No EXIF data found in " << path.string();
+                LOGD << "No XMP/EXIF data found in " << path.string();
             }
         }catch(Exiv2::AnyError&){
             LOGD << "Cannot read EXIF data: " << path.string();

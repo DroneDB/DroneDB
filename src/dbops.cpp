@@ -2,6 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "dbops.h"
+
+#include <ddb.h>
+
 #include "entry_types.h"
 #include "exif.h"
 #include "hash.h"
@@ -12,18 +15,18 @@
 #include "mio.h"
 #include "version.h"
 #include "userprofile.h"
-#include <stdlib.h>
+#include <cstdlib>
 
 namespace ddb {
 
 #define UPDATE_QUERY "UPDATE entries SET hash=?, type=?, meta=?, mtime=?, size=?, depth=?, point_geom=GeomFromText(?, 4326), polygon_geom=GeomFromText(?, 4326) WHERE path=?"
 
 std::unique_ptr<Database> open(const std::string &directory, bool traverseUp = false) {
-    fs::path dirPath = fs::absolute(directory);
-    fs::path ddbDirPath = dirPath / ".ddb";
-    fs::path dbasePath = ddbDirPath / "dbase.sqlite";
+    const fs::path dirPath = fs::absolute(directory);
+    const fs::path ddbDirPath = dirPath / DDB_FOLDER;
+    const fs::path dbasePath = ddbDirPath / "dbase.sqlite";
 
-    if (fs::exists(dbasePath)) {
+    if (exists(dbasePath)) {
         LOGD << dbasePath.string() + " exists";
 
         std::unique_ptr<Database> db = std::make_unique<Database>();
@@ -32,11 +35,13 @@ std::unique_ptr<Database> open(const std::string &directory, bool traverseUp = f
             throw DBException("Table 'entries' not found (not a valid database: " + dbasePath.string() + ")");
         }
         return db;
-    } else if (traverseUp && dirPath.parent_path() != dirPath) {
-        return open(dirPath.parent_path().string(), true);
-    } else {
-        throw FSException("Not a valid DroneDB directory, .ddb does not exist. Did you run ddb init?");
     }
+
+    if (traverseUp && dirPath.parent_path() != dirPath) {
+        return open(dirPath.parent_path().string(), true);
+    }
+
+    throw FSException("Not a valid DroneDB directory, .ddb does not exist. Did you run ddb init?");
 }
 
 fs::path rootDirectory(Database *db) {
@@ -52,7 +57,7 @@ fs::path rootDirectory(Database *db) {
 // are includes in the result.
 // ".ddb" files/dirs are always ignored and skipped.
 // If a directory is in the input paths, they are included regardless of includeDirs
-std::vector<fs::path> getIndexPathList(fs::path rootDirectory, const std::vector<std::string> &paths, bool includeDirs) {
+std::vector<fs::path> getIndexPathList(const fs::path& rootDirectory, const std::vector<std::string> &paths, bool includeDirs) {
     std::vector<fs::path> result;
     std::unordered_map<std::string, bool> directories;
 
@@ -68,7 +73,7 @@ std::vector<fs::path> getIndexPathList(fs::path rootDirectory, const std::vector
 
     for (fs::path p : paths) {
         // fs::directory_options::skip_permission_denied
-        if (p.filename() == ".ddb") continue;
+        if (p.filename() == DDB_FOLDER) continue;
 
         if (fs::is_directory(p)) {
             try{
@@ -79,7 +84,8 @@ std::vector<fs::path> getIndexPathList(fs::path rootDirectory, const std::vector
                     fs::path rp = i->path();
 
                     // Skip .ddb
-                    if(rp.filename() == ".ddb") i.disable_recursion_pending();
+                    if (rp.filename() == DDB_FOLDER)
+                        i.disable_recursion_pending();
 
                     if (fs::is_directory(rp) && includeDirs) {
                         directories[rp.string()] = true;
@@ -118,8 +124,8 @@ std::vector<fs::path> getIndexPathList(fs::path rootDirectory, const std::vector
         }
     }
 
-    for (auto it : directories) {
-        result.push_back(it.first);
+    for (auto [fst, snd] : directories) {
+        result.emplace_back(fst);
     }
 
     return result;
@@ -131,7 +137,7 @@ std::vector<fs::path> getPathList(const std::vector<std::string> &paths, bool in
 
     for (fs::path p : paths) {
         // fs::directory_options::skip_permission_denied
-        if (p.filename() == ".ddb") continue;
+        if (p.filename() == DDB_FOLDER) continue;
         
         try {
             if (fs::is_directory(p)) {
@@ -143,7 +149,7 @@ std::vector<fs::path> getPathList(const std::vector<std::string> &paths, bool in
 
                     // Ignore system files on Windows
                     #ifdef WIN32
-                    DWORD attrs = GetFileAttributesW(rp.wstring().c_str());
+                    const DWORD attrs = GetFileAttributesW(rp.wstring().c_str());
                     if (attrs & FILE_ATTRIBUTE_HIDDEN || attrs & FILE_ATTRIBUTE_SYSTEM) {
                         i.disable_recursion_pending();
                         continue;
@@ -151,7 +157,8 @@ std::vector<fs::path> getPathList(const std::vector<std::string> &paths, bool in
                     #endif
 
                     // Skip .ddb recursion
-                    if(rp.filename() == ".ddb") i.disable_recursion_pending();
+                    if (rp.filename() == DDB_FOLDER)
+                        i.disable_recursion_pending();
 
                     // Max depth
                     if (maxDepth > 0 && i.depth() >= (maxDepth - 1)) i.disable_recursion_pending();
@@ -191,7 +198,7 @@ std::vector<std::string> expandPathList(const std::vector<std::string> &paths, b
 
 
 bool checkUpdate(Entry &e, const fs::path &p, long long dbMtime, const std::string &dbHash) {
-    bool folder = fs::is_directory(p);
+    const bool folder = fs::is_directory(p);
 
     // Did it change?
     e.mtime = io::Path(p).getModifiedTime();
@@ -234,20 +241,20 @@ void doUpdate(Statement *updateQ, const Entry &e) {
 
 
 void addToIndex(Database *db, const std::vector<std::string> &paths, AddCallback callback) {
-    if (paths.size() == 0) return; // Nothing to do
-    fs::path directory = rootDirectory(db);
+    if (paths.empty()) return; // Nothing to do
+    const fs::path directory = rootDirectory(db);
     auto pathList = getIndexPathList(directory, paths, true);
 
     auto q = db->query("SELECT mtime,hash FROM entries WHERE path=?");
     auto insertQ = db->query("INSERT INTO entries (path, hash, type, meta, mtime, size, depth, point_geom, polygon_geom) "
                              "VALUES (?, ?, ?, ?, ?, ?, ?, GeomFromText(?, 4326), GeomFromText(?, 4326))");
-    auto updateQ = db->query(UPDATE_QUERY);
-    db->exec("BEGIN TRANSACTION");
+    const auto updateQ = db->query(UPDATE_QUERY);
+    db->exec("BEGIN EXCLUSIVE TRANSACTION");
 
     for (auto &p : pathList) {
         io::Path relPath = io::Path(p).relativeTo(directory);
         q->bind(1, relPath.generic());
-          	
+
         bool update = false;
         bool add = false;
         Entry e;
@@ -444,13 +451,13 @@ std::vector<Entry> getMatchingEntries(Database* db, const fs::path& path, int ma
 }
 
 void syncIndex(Database *db) {
-    fs::path directory = rootDirectory(db);
+    const fs::path directory = rootDirectory(db);
 
     auto q = db->query("SELECT path,mtime,hash FROM entries");
     auto deleteQ = db->query("DELETE FROM entries WHERE path = ?");
-    auto updateQ = db->query(UPDATE_QUERY);
+    const auto updateQ = db->query(UPDATE_QUERY);
 
-    db->exec("BEGIN TRANSACTION");
+    db->exec("BEGIN EXCLUSIVE TRANSACTION");
 
     while(q->fetch()) {
         io::Path relPath = fs::path(q->getText(0));
@@ -478,8 +485,9 @@ std::string initIndex(const std::string &directory, bool fromScratch){
     const fs::path dirPath = directory;
     if (!exists(dirPath)) throw FSException("Invalid directory: " + dirPath.string() + " (does not exist)");
 
-    auto ddbDirPath = dirPath / ".ddb";
-    if (std::string(directory) == ".") ddbDirPath = ".ddb"; // Nicer to the eye
+    auto ddbDirPath = dirPath / DDB_FOLDER;
+    if (std::string(directory) == ".")
+        ddbDirPath = DDB_FOLDER;  // Nicer to the eye
     const auto dbasePath = ddbDirPath / "dbase.sqlite";
 
     LOGD << "Checking if .ddb directory exists...";
@@ -503,7 +511,7 @@ std::string initIndex(const std::string &directory, bool fromScratch){
     if (!fromScratch){
         // "Fast" init by copying the pre-built empty database index
         // this prevents the slow table generation process
-        fs::path emptyDbPath = UserProfile::get()->getTemplatesDir() / ("empty-dbase-" APP_REVISION ".sqlite");
+        const fs::path emptyDbPath = UserProfile::get()->getTemplatesDir() / ("empty-dbase-" APP_REVISION ".sqlite");
 
         // Need to create?
         if (!fs::exists(emptyDbPath)){

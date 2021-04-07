@@ -13,6 +13,8 @@ extern "C" {
 #define DDB_LOG_ENV "DDB_LOG"
 #define DDB_DEBUG_ENV "DDB_DEBUG"
 
+#define DDB_FOLDER ".ddb"
+
 enum DDBErr {
     DDBERR_NONE = 0, // No error
     DDBERR_EXCEPTION = 1 // Generic app exception
@@ -43,7 +45,7 @@ DDB_DLL const char* DDBGetVersion();
 /** Initialize a DroneDB database
  * @param directory Path to directory where to initialize the database
  * @return DDBERR_NONE on success, an error otherwise */
-DDB_DLL DDBErr DDBInit(const char *directory, char **outPath = NULL);
+DDB_DLL DDBErr DDBInit(const char *directory, char **outPath);
 
 /** Add one or more files to a DroneDB database
  * @param ddbPath path to a DroneDB database (parent of ".ddb")
@@ -135,6 +137,39 @@ DDB_DLL DDBErr DDBGenerateThumbnail(const char *filePath, int size, const char *
  * @return DDBERR_NONE on success, an error otherwise */
 DDB_DLL DDBErr DDBTile(const char *geotiffPath, int tz, int tx, int ty, char **outputTilePath, int tileSize = 256, bool tms = false, bool forceRecreate = false);
 
+/** Generate delta between two ddbs 
+ * @param ddbSource path to the source DroneDB database (parent of ".ddb")
+ * @param ddbTarget path to the target DroneDB database (parent of ".ddb")
+ * @param output pointer to C-string where to store result
+ * @param format output format. One of: ["text", "json"]
+ * @return DDBERR_NONE on success, an error otherwise */
+DDB_DLL DDBErr DDBDelta(const char *ddbSource, const char *ddbTarget, char **output, const char *format);
+
+/** Sets dataset tag
+ * @param ddbPath path to the source DroneDB database (parent of ".ddb")
+ * @param newTag the dataset tag to set
+ * @return DDBERR_NONE on success, an error otherwise */
+DDB_DLL DDBErr DDBSetTag(const char *ddbPath, const char *newTag);
+
+/** Gets dataset tag
+ * @param ddbPath path to the source DroneDB database (parent of ".ddb")
+ * @param outTag output pointer to C-String where to store dataset tag
+ * @return DDBERR_NONE on success, an error otherwise */
+DDB_DLL DDBErr DDBGetTag(const char *ddbPath, char **outTag);
+
+/** Gets dataset tag
+ * @param ddbPath path to the source DroneDB database (parent of ".ddb")
+ * @param registry registry url
+ * @param lastSync output pointer to time_t where to store last sync time
+ * @return DDBERR_NONE on success, an error otherwise */
+DDB_DLL DDBErr DDBGetLastSync(const char *ddbPath, const char *registry, long long *lastSync);
+
+/** Sets dataset tag
+ * @param ddbPath path to the source DroneDB database (parent of ".ddb")
+ * @param registry registry url
+ * @param lastSync time_t last sync time
+ * @return DDBERR_NONE on success, an error otherwise */
+DDB_DLL DDBErr DDBSetLastSync(const char *ddbPath, const char *registry, const long long lastSync);
 
 #ifdef __cplusplus
 }

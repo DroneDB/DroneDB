@@ -8,7 +8,7 @@
 
 TestArea::TestArea(const std::string &name, bool recreateIfExists)
     : name(name){
-    fs::path root = getFolder();
+    const auto root = getFolder();
     if (name.find("..") != std::string::npos) throw FSException("Cannot use .. in name");
 
     if (recreateIfExists){
@@ -20,8 +20,8 @@ TestArea::TestArea(const std::string &name, bool recreateIfExists)
 }
 
 fs::path TestArea::getFolder(const fs::path &subfolder){
-    fs::path root = fs::temp_directory_path() / "ddb_test_areas" / fs::path(name);
-    fs::path dir = root;
+    const fs::path root = fs::temp_directory_path() / "ddb_test_areas" / fs::path(name);
+    auto dir = root;
     if (!subfolder.empty()) dir = dir / subfolder;
 
     if (!fs::exists(dir)){

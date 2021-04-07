@@ -55,7 +55,6 @@ void ShareClient::Upload(const std::string& path, const fs::path& filePath,
     io::Path p = io::Path(filePath);
     size_t filesize = p.getSize();
 
-    std::string sha256 = Hash::fileSHA256(filePath.string());
     std::string filename = filePath.filename().string();
 
     size_t gTotalBytes = p.getSize();
@@ -95,13 +94,6 @@ void ShareClient::Upload(const std::string& path, const fs::path& filePath,
 
             if (!j.contains("hash")) this->registry->handleError(res);
 
-            if (sha256 != j["hash"])
-                throw NetException(
-                    filename +
-                    " file got corrupted during upload (hash mismatch, "
-                    "expected: " +
-                    sha256 + ", got: " + j["hash"].get<std::string>() +
-                    ". Try again.");
             break;  // Done
         } catch (const NetException& e) {
             if (++retryNum >= MAX_RETRIES) throw e;
