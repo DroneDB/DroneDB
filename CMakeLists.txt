@@ -35,6 +35,11 @@ if (WIN32)
     add_compile_options("-D_CRT_SECURE_NO_WARNINGS=1")
 endif()
 
+# Disable GNU warnings (for exiv2)
+if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    add_compile_options("-Wno-deprecated-declarations")
+endif()
+
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 if(NOT CMAKE_BUILD_TYPE)
@@ -97,13 +102,14 @@ find_package(GDAL REQUIRED)
 find_package(CURL REQUIRED)
 find_package(SpatiaLite REQUIRED)
 find_package(Sqlite3 REQUIRED)
+find_package(PDAL REQUIRED)
 include_directories(${GDAL_INCLUDE_DIR})
 
 if (NOT WIN32)
     set(STDPPFS_LIBRARY stdc++fs)
 endif()
 
-set(LINK_LIBRARIES ${SPATIALITE_LIBRARY} ${SQLITE3_LIBRARY} ${STDPPFS_LIBRARY} exiv2lib ${GDAL_LIBRARY} ${CURL_LIBRARY})
+set(LINK_LIBRARIES ${SPATIALITE_LIBRARY} ${SQLITE3_LIBRARY} ${STDPPFS_LIBRARY} exiv2lib ${GDAL_LIBRARY} ${CURL_LIBRARY} ${PDAL_LIBRARY})
 set(CMD_SRC_LIST ${CMAKE_CURRENT_SOURCE_DIR}/src/cmd/main.cpp)
 
 add_subdirectory("src")
