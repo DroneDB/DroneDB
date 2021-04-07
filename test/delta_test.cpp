@@ -125,7 +125,7 @@ TEST(deltaList, complexTree1) {
 
     const auto delta = getDelta(source, dest);
 
-    auto expected = R"(
+    const auto expected = R"(
     {
   "adds": [
     {
@@ -168,7 +168,7 @@ TEST(deltaList, complexTree1) {
 }
     )"_json;
 
-    json j = delta;
+    const json j = delta;
     
     EXPECT_EQ(j, expected);
    
