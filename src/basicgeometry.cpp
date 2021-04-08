@@ -80,6 +80,10 @@ bool BasicGeometry::empty() const{
     return points.empty();
 }
 
+void BasicGeometry::clear(){
+    points.clear();
+}
+
 int BasicGeometry::size() const{
     return static_cast<int>(points.size());
 }

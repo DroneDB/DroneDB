@@ -32,6 +32,7 @@ struct BasicGeometry{
     DDB_DLL void addPoint(double x, double y, double z);
     DDB_DLL Point getPoint(int index);
     DDB_DLL bool empty() const;
+    DDB_DLL void clear();
     DDB_DLL int size() const;
 
     DDB_DLL virtual std::string toWkt() const = 0;

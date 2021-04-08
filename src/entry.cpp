@@ -184,6 +184,8 @@ void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
             PointCloudInfo info;
             if (getPointCloudInfo(path.string(), info)){
                 entry.meta = info.toJSON();
+                entry.polygon_geom = info.polyBounds;
+                entry.point_geom = info.centroid;
             }
         }
     }

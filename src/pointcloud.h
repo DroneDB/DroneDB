@@ -6,13 +6,23 @@
 
 #include <string>
 #include "json.h"
+#include "basicgeometry.h"
+
+namespace ddb{
 
 struct PointCloudInfo{
     size_t pointCount;
+    std::string wktProjection;
+    std::vector<std::string> dimensions;
+    std::vector<double> bounds;
+    BasicPointGeometry centroid;
+    BasicPolygonGeometry polyBounds;
 
     json toJSON();
 };
 
 bool getPointCloudInfo(const std::string &filename, PointCloudInfo &info);
+
+}
 
 #endif // POINTCLOUD_H
