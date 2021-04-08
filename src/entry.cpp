@@ -8,6 +8,7 @@
 #include <ddb.h>
 
 #include "mio.h"
+#include "pointcloud.h"
 #include "ogr_srs_api.h"
 
 namespace ddb {
@@ -178,6 +179,11 @@ void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
                 b["type"] = GDALGetDataTypeName(GDALGetRasterDataType(hBand));
                 b["colorInterp"] = GDALGetColorInterpretationName(GDALGetRasterColorInterpretation(hBand));
                 entry.meta["bands"].push_back(b);
+            }
+        }else if (entry.type == EntryType::PointCloud){
+            PointCloudInfo info;
+            if (getPointCloudInfo(path.string(), info)){
+                entry.meta = info.toJSON();
             }
         }
     }
@@ -428,6 +434,11 @@ EntryType fingerprint(const fs::path &path){
 
     if (markdown)
         return EntryType::Markdown;
+
+    bool pointCloud = p.checkExtension({"laz", "las", "ply"}); // TODO: more?
+
+    if (pointCloud)
+        return EntryType::PointCloud;
 
     bool jpg = p.checkExtension({"jpg", "jpeg"});
     bool dng = p.checkExtension({"dng"});
