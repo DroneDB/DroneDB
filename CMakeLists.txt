@@ -102,7 +102,7 @@ if (WIN32)
     set(CURL_DIR "\"${DOWNLOADS_DIR}/gdal\"")
     set(PDAL_LIBRARIES "${DOWNLOADS_DIR}/pdal/lib/pdalcpp.lib" "${DOWNLOADS_DIR}/pdal/lib/pdal_util.lib" "${DOWNLOADS_DIR}/pdal/lib/libpdal_plugin_kernel_fauxplugin.lib")
     set(PDAL_INCLUDE_DIR "${DOWNLOADS_DIR}/pdal/include")
-message("${PDAL_LIBRARIES}")
+
     # Fix: auto_ptr is not a member of std
     add_compile_definitions(_HAS_AUTO_PTR_ETC=1)
 endif()
@@ -113,6 +113,7 @@ find_package(SpatiaLite REQUIRED)
 find_package(Sqlite3 REQUIRED)
 find_package(PDAL REQUIRED)
 include_directories(${GDAL_INCLUDE_DIR})
+include_directories(${PDAL_INCLUDE_DIR})
 
 if (NOT WIN32)
     set(STDPPFS_LIBRARY stdc++fs)
