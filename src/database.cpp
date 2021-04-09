@@ -24,8 +24,7 @@ void Database::afterOpen() {
     }
 }
 
-Database &Database::createTables() {
-    const std::string sql = R"<<<(
+const char *entriesTableDdl = R"<<<(
   SELECT InitSpatialMetaData(1, 'NONE');
   SELECT InsertEpsgSrid(4326);
 
@@ -40,11 +39,16 @@ Database &Database::createTables() {
   );
   SELECT AddGeometryColumn("entries", "point_geom", 4326, "POINTZ", "XYZ");
   SELECT AddGeometryColumn("entries", "polygon_geom", 4326, "POLYGONZ", "XYZ");
+)<<<";
 
+const char *passwordsTableDdl = R"<<<(
   CREATE TABLE IF NOT EXISTS passwords (
       salt TEXT,
       hash TEXT      
   );
+)<<<";
+
+const char *attributesTableDdl = R"<<<(
 
   CREATE TABLE IF NOT EXISTS attributes (
       name TEXT NOT NULL PRIMARY KEY,
@@ -53,14 +57,40 @@ Database &Database::createTables() {
       tvalue TEXT,
       bvalue BLOB
   );
-
 )<<<";
+
+Database &Database::createTables() {
+    const std::string sql = std::string(entriesTableDdl) + '\n' +
+                            passwordsTableDdl + '\n' + attributesTableDdl;
 
     LOGD << "About to create tables...";
     this->exec(sql);
     LOGD << "Created tables";
 
     return *this;
+}
+
+DDB_DLL void Database::ensureSchemaConsistency() {
+
+    LOGD << "Ensuring schema consistency";
+
+    if (!this->tableExists("entries")) {
+        LOGD << "Entries table does not exist, creating it";
+        this->exec(entriesTableDdl);
+        LOGD << "Entries table created";
+    }
+
+    if (!this->tableExists("passwords")) {
+        LOGD << "Passwords table does not exist, creating it";
+        this->exec(passwordsTableDdl);
+        LOGD << "Passwords table created";
+    }
+
+    if (!this->tableExists("attributes")) {
+        LOGD << "Attributes table does not exist, creating it";
+        this->exec(attributesTableDdl);
+        LOGD << "Attributes table created";
+    }
 }
 
 void Database::setPublic(bool isPublic) {

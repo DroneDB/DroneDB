@@ -26,6 +26,7 @@ class Database : public SqliteDatabase {
       DDB_DLL static void Initialize();
       DDB_DLL void afterOpen() override;
       DDB_DLL Database &createTables();
+      DDB_DLL void ensureSchemaConsistency();
 
       DDB_DLL void setPublic(bool isPublic);
       DDB_DLL bool isPublic() const;
