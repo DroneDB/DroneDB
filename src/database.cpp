@@ -4,7 +4,6 @@
 
 #include "database.h"
 
-
 #include <fstream>
 #include <string>
 
@@ -26,7 +25,7 @@ void Database::afterOpen() {
 }
 
 Database &Database::createTables() {
-    std::string sql = R"<<<(
+    const std::string sql = R"<<<(
   SELECT InitSpatialMetaData(1, 'NONE');
   SELECT InsertEpsgSrid(4326);
 
@@ -69,25 +68,39 @@ void Database::setPublic(bool isPublic) {
 }
 
 bool Database::isPublic() const {
-    if (this->hasAttribute("public"))
-        return this->getBoolAttribute("public");
-    else
-        return false;
+    return this->hasAttribute("public") ? this->getBoolAttribute("public")
+                                        : false;
+}
+
+time_t Database::getLastUpdate() const {
+    return static_cast<time_t>(this->getIntAttribute("mtime"));
+}
+
+void Database::setLastUpdate(const time_t mtime) {
+    this->setIntAttribute("mtime", mtime);
 }
 
 void Database::chattr(json attrs) {
     for (auto &el : attrs.items()) {
         if (el.key() == "public" && el.value().is_boolean()) {
             this->setBoolAttribute("public", el.value());
-        } else {
-            throw InvalidArgsException("Invalid attribute " + el.key());
+            continue;
         }
+
+        if (el.key() == "mtime" && el.value().is_number_integer()) {
+            this->setIntAttribute("mtime", el.value());
+            continue;
+        }
+
+        throw InvalidArgsException("Invalid attribute " + el.key());
     }
 }
 
 json Database::getAttributes() const {
     json j;
+
     j["public"] = this->isPublic();
+    j["mtime"] = this->getLastUpdate();
 
     // See if we have a LICENSE.md and README.md in the index
     const std::string sql =
@@ -115,7 +128,7 @@ bool Database::getBoolAttribute(const std::string &name) const {
     return this->getIntAttribute(name) == 1;
 }
 
-void Database::setIntAttribute(const std::string &name, int value) {
+void Database::setIntAttribute(const std::string &name, long value) {
     const std::string sql =
         "INSERT OR REPLACE INTO attributes (name, ivalue) "
         "VALUES(?, ?)";
@@ -133,10 +146,7 @@ int Database::getIntAttribute(const std::string &name) const {
 
     const auto q = this->query(sql);
     q->bind(1, name);
-    if (q->fetch())
-        return q->getInt(0);
-    else
-        return 0;
+    return q->fetch() ? q->getInt(0) : 0;
 }
 
 bool Database::hasAttribute(const std::string &name) const {
