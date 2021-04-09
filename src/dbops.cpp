@@ -514,7 +514,7 @@ std::string initIndex(const std::string &directory, bool fromScratch){
         const fs::path emptyDbPath = UserProfile::get()->getTemplatesDir() / ("empty-dbase-" APP_REVISION ".sqlite");
 
         // Need to create?
-        if (!fs::exists(emptyDbPath)){
+        if (!exists(emptyDbPath)){
             LOGD << "Creating " << emptyDbPath.string();
 
             // Create database
@@ -524,10 +524,10 @@ std::string initIndex(const std::string &directory, bool fromScratch){
             db->close();
         }
 
-        if (fs::exists(emptyDbPath)){
+        if (exists(emptyDbPath)){
             // Copy
             try{
-                fs::copy(emptyDbPath, dbasePath);
+                copy(emptyDbPath, dbasePath);
             }catch(fs::filesystem_error &e){
                 throw FSException(e.what());
             }
@@ -549,6 +549,10 @@ std::string initIndex(const std::string &directory, bool fromScratch){
         db->createTables();
         db->close();
     }
+
+    // Update last edit
+    const auto db = open(ddbDirPath.string(), true);
+    db->setLastUpdate();
 
     return ddbDirPath.string();
 }
