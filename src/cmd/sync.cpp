@@ -23,12 +23,11 @@ std::string Sync::description() {
 }
 
 void Sync::run(cxxopts::ParseResult &opts) {
-
-    auto workingDir = opts["working-dir"].as<std::string>();
+    const auto workingDir = opts["working-dir"].as<std::string>();
 
     fs::current_path(workingDir);
-    
-    auto db = ddb::open(workingDir, true);
+
+    const auto db = ddb::open(workingDir, true);
     ddb::syncIndex(db.get());
 }
 
