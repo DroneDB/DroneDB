@@ -6,4 +6,4 @@
 	url = https://github.com/DroneDB/exiv2
 [submodule "vendor/untwine"]
 	path = vendor/untwine
-	url = https://github.com/hobu/untwine/
+	url = https://github.com/pierotofy/untwine/
