@@ -22,12 +22,14 @@ FIND_PATH(PDAL_INCLUDE_DIR pdal/pdal.hpp
   "$ENV{LIB_DIR}/include"
   "/usr/include"
   c:/msys/local/include
+  "${PDAL_INCLUDE_DIR}"
   NO_DEFAULT_PATH
   )
 FIND_PATH(PDAL_INCLUDE_DIR pdal/pdal.hpp)
 
 FIND_LIBRARY(PDAL_CPP_LIBRARY NAMES pdalcpp libpdalcpp PATHS
   "$ENV{LIB_DIR}/lib"
+  "${PDAL_INCLUDE_DIR}/../lib"
   c:/msys/local/lib
   NO_DEFAULT_PATH
   )
@@ -36,12 +38,14 @@ FIND_LIBRARY(PDAL_CPP_LIBRARY NAMES pdalcpp libpdalcpp)
 FIND_LIBRARY(PDAL_UTIL_LIBRARY NAMES pdal_util libpdal_util PATHS
   "$ENV{LIB_DIR}/lib"
   c:/msys/local/lib
+  "${PDAL_INCLUDE_DIR}/../lib"
   NO_DEFAULT_PATH
   )
 FIND_LIBRARY(PDAL_UTIL_LIBRARY NAMES pdal_util libpdal_util)
 
 FIND_PROGRAM(PDAL_BIN pdal
     $ENV{LIB_DIR}/bin
+    "${PDAL_INCLUDE_DIR}/../bin"
     /usr/local/bin/
     /usr/bin/
     NO_DEFAULT_PATH
