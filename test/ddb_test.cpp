@@ -73,22 +73,16 @@ TEST(deleteFromIndex, simplePath) {
     const auto testFolder = ta.getFolder("test");
     create_directory(testFolder / ".ddb");
     fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
-    const auto dbPath = testFolder / ".ddb" / "dbase.sqlite";
-    EXPECT_TRUE(fs::exists(dbPath));
 
-    Database db;
-
-    db.open(dbPath.string());
+    auto db = ddb::open(testFolder.string(), false);
 
     std::vector<std::string> toRemove;
     toRemove.emplace_back((testFolder / "pics.jpg").string());
 
-	removeFromIndex(&db, toRemove);
+	removeFromIndex(db.get(), toRemove);
 
-    EXPECT_EQ(countEntries(&db, "pics.jpg"), 0);
-        
-    db.close();	
-	
+    EXPECT_EQ(countEntries(db.get(), "pics.jpg"), 0);
+
 }
 
 TEST(deleteFromIndex, folderPath) {
@@ -99,23 +93,17 @@ TEST(deleteFromIndex, folderPath) {
     const auto testFolder = ta.getFolder("test");
     create_directory(testFolder / ".ddb");
     fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
-    const auto dbPath = testFolder / ".ddb" / "dbase.sqlite";
-    EXPECT_TRUE(fs::exists(dbPath));
 
-    Database db;
-
-    db.open(dbPath.string());
+    auto db = ddb::open(testFolder.string(), false);
 
     std::vector<std::string> toRemove;
 
 	// 9
     toRemove.emplace_back((testFolder / "pics").string());
 
-    removeFromIndex(&db, toRemove);
-    auto cnt = countEntries(&db);
+    removeFromIndex(db.get(), toRemove);
+    auto cnt = countEntries(db.get());
     EXPECT_EQ(cnt, 15);
-
-    db.close();
 
 }
 
@@ -127,22 +115,16 @@ TEST(deleteFromIndex, subFolderPath) {
     const auto testFolder = ta.getFolder("test");
     create_directory(testFolder / ".ddb");
     fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
-    const auto dbPath = testFolder / ".ddb" / "dbase.sqlite";
-    EXPECT_TRUE(fs::exists(dbPath));
 
-    Database db;
-
-    db.open(dbPath.string());
+    auto db = ddb::open(testFolder.string(), false);
 
     std::vector<std::string> toRemove;
     // 3
     toRemove.emplace_back((testFolder / "pics" / "pics2").string());
 
-    removeFromIndex(&db, toRemove);
+    removeFromIndex(db.get(), toRemove);
 
-    EXPECT_EQ(countEntries(&db), 21);
-
-    db.close();
+    EXPECT_EQ(countEntries(db.get()), 21);
 
 }
 
@@ -154,22 +136,16 @@ TEST(deleteFromIndex, fileExact) {
     const auto testFolder = ta.getFolder("test");
     create_directory(testFolder / ".ddb");
     fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
-    const auto dbPath = testFolder / ".ddb" / "dbase.sqlite";
-    EXPECT_TRUE(fs::exists(dbPath));
 
-    Database db;
-
-    db.open(dbPath.string());
+    auto db = ddb::open(testFolder.string(), false);
 
     std::vector<std::string> toRemove;
     // 1
     toRemove.emplace_back((testFolder / "1JI_0065.JPG").string());
 
-    removeFromIndex(&db, toRemove);
+    removeFromIndex(db.get(), toRemove);
 
-    EXPECT_EQ(countEntries(&db, "1JI_0065.JPG"), 0);
-
-    db.close();
+    EXPECT_EQ(countEntries(db.get(), "1JI_0065.JPG"), 0);
 
 }
 
@@ -182,22 +158,16 @@ TEST(deleteFromIndex, fileExactInFolder) {
     const auto testFolder = ta.getFolder("test");
     create_directory(testFolder / ".ddb");
     fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
-    const auto dbPath = testFolder / ".ddb" / "dbase.sqlite";
-    EXPECT_TRUE(fs::exists(dbPath));
 
-    Database db;
-
-    db.open(dbPath.string());
+    auto db = ddb::open(testFolder.string(), false);
 
     std::vector<std::string> toRemove;
     // 1
     toRemove.emplace_back((testFolder / "pics" / "IMG_20160826_181309.jpg").string());
 
-    removeFromIndex(&db, toRemove);
+    removeFromIndex(db.get(), toRemove);
 
-    EXPECT_EQ(countEntries(&db, "pics/1JI_0065.JPG"), 0);
-
-    db.close();
+    EXPECT_EQ(countEntries(db.get(), "pics/1JI_0065.JPG"), 0);
 
 }
 
@@ -209,22 +179,16 @@ TEST(deleteFromIndex, fileWildcard) {
     const auto testFolder = ta.getFolder("test");
     create_directory(testFolder / ".ddb");
     fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
-    const auto dbPath = testFolder / ".ddb" / "dbase.sqlite";
-    EXPECT_TRUE(fs::exists(dbPath));
 
-    Database db;
-
-    db.open(dbPath.string());
+    auto db = ddb::open(testFolder.string(), false);
 
     std::vector<std::string> toRemove;
     // 2
     toRemove.emplace_back((testFolder / "1JI*").string());
 
-    removeFromIndex(&db, toRemove);
+    removeFromIndex(db.get(), toRemove);
 
-    EXPECT_EQ(countEntries(&db), 22);
-
-    db.close();
+    EXPECT_EQ(countEntries(db.get()), 22);
 
 }
 
@@ -237,28 +201,22 @@ TEST(deleteFromIndex, fileInFolderWildcard) {
     const auto testFolder = ta.getFolder("test");
     create_directory(testFolder / ".ddb");
     fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
-    const auto dbPath = testFolder / ".ddb" / "dbase.sqlite";
-    EXPECT_TRUE(fs::exists(dbPath));
 
-    Database db;
-
-    db.open(dbPath.string());
+    auto db = ddb::open(testFolder.string(), false);
 
     std::vector<std::string> toRemove;
     // 5
     toRemove.emplace_back((testFolder / "pics" / "IMG*").string());
 
-    removeFromIndex(&db, toRemove);
+    removeFromIndex(db.get(), toRemove);
 
-    EXPECT_EQ(countEntries(&db), 19);
+    EXPECT_EQ(countEntries(db.get()), 19);
 
-	EXPECT_EQ(countEntries(&db, "pics/IMG_20160826_181302.jpg"), 0);
-    EXPECT_EQ(countEntries(&db, "pics/IMG_20160826_181305.jpg"), 0);
-    EXPECT_EQ(countEntries(&db, "pics/IMG_20160826_181309.jpg"), 0);
-    EXPECT_EQ(countEntries(&db, "pics/IMG_20160826_181314.jpg"), 0);
-    EXPECT_EQ(countEntries(&db, "pics/IMG_20160826_181317.jpg"), 0);
-
-    db.close();
+	EXPECT_EQ(countEntries(db.get(), "pics/IMG_20160826_181302.jpg"), 0);
+    EXPECT_EQ(countEntries(db.get(), "pics/IMG_20160826_181305.jpg"), 0);
+    EXPECT_EQ(countEntries(db.get(), "pics/IMG_20160826_181309.jpg"), 0);
+    EXPECT_EQ(countEntries(db.get(), "pics/IMG_20160826_181314.jpg"), 0);
+    EXPECT_EQ(countEntries(db.get(), "pics/IMG_20160826_181317.jpg"), 0);
 
 }
 
@@ -270,22 +228,16 @@ TEST(deleteFromIndex, fileExactDirtyDot) {
     const auto testFolder = ta.getFolder("test");
     create_directory(testFolder / ".ddb");
     fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
-    const auto dbPath = testFolder / ".ddb" / "dbase.sqlite";
-    EXPECT_TRUE(fs::exists(dbPath));
 
-    Database db;
-
-    db.open(dbPath.string());
+    auto db = ddb::open(testFolder.string(), false);
 
     std::vector<std::string> toRemove;
     // 1
     toRemove.emplace_back((testFolder / "." / "1JI_0065.JPG").string());
 
-    removeFromIndex(&db, toRemove);
+    removeFromIndex(db.get(), toRemove);
 
-    EXPECT_EQ(countEntries(&db, "1JI_0065.JPG"), 0);
-
-    db.close();
+    EXPECT_EQ(countEntries(db.get(), "1JI_0065.JPG"), 0);
 
 }
 
@@ -297,22 +249,16 @@ TEST(deleteFromIndex, fileExactDirtyDotDot) {
     const auto testFolder = ta.getFolder("test");
     create_directory(testFolder / ".ddb");
     fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
-    const auto dbPath = testFolder / ".ddb" / "dbase.sqlite";
-    EXPECT_TRUE(fs::exists(dbPath));
 
-    Database db;
-
-    db.open(dbPath.string());
+    auto db = ddb::open(testFolder.string(), false);
 
     std::vector<std::string> toRemove;
     // 1
     toRemove.emplace_back((testFolder / "pics" / ".." / "1JI_0065.JPG").string());
 
-    removeFromIndex(&db, toRemove);
+    removeFromIndex(db.get(), toRemove);
 
-    EXPECT_EQ(countEntries(&db, "1JI_0065.JPG"), 0);
-
-    db.close();
+    EXPECT_EQ(countEntries(db.get(), "1JI_0065.JPG"), 0);
 
 }
 
@@ -324,12 +270,8 @@ TEST(listIndex, fileExact) {
     const auto testFolder = ta.getFolder("test");
     create_directory(testFolder / ".ddb");
     fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
-    const auto dbPath = testFolder / ".ddb" / "dbase.sqlite";
-    EXPECT_TRUE(fs::exists(dbPath));
 
-    Database db;
-
-    db.open(dbPath.string());
+    auto db = ddb::open(testFolder.string(), false);
 
     std::vector<std::string> toList;
     
@@ -337,13 +279,10 @@ TEST(listIndex, fileExact) {
 
     std::ostringstream out; 
 
-    listIndex(&db, toList, out, "text");
+    listIndex(db.get(), toList, out, "text");
 
     std::cout << out.str() << std::endl;
     EXPECT_EQ(out.str(), "1JI_0065.JPG\n");
-
-    db.close();
-
 }
 
 TEST(listIndex, allFileWildcard) {
@@ -354,12 +293,8 @@ TEST(listIndex, allFileWildcard) {
     const auto testFolder = ta.getFolder("test");
     create_directory(testFolder / ".ddb");
     fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
-    const auto dbPath = testFolder / ".ddb" / "dbase.sqlite";
-    EXPECT_TRUE(fs::exists(dbPath));
 
-    Database db;
-
-    db.open(dbPath.string());
+    auto db = ddb::open(testFolder.string(), false);
 
     std::vector<std::string> toList;
     
@@ -367,13 +302,11 @@ TEST(listIndex, allFileWildcard) {
 
     std::ostringstream out; 
 
-    listIndex(&db, toList, out, "text");
+    listIndex(db.get(), toList, out, "text");
 
     std::cout << out.str() << std::endl;
     
     EXPECT_EQ(out.str(), "1JI_0064.JPG\n1JI_0065.JPG\npics\npics.JPG\npics/IMG_20160826_181302.jpg\npics/IMG_20160826_181305.jpg\npics/IMG_20160826_181309.jpg\npics/IMG_20160826_181314.jpg\npics/IMG_20160826_181317.jpg\npics/pics2\npics2\npics2/IMG_20160826_181305.jpg\npics2/IMG_20160826_181309.jpg\npics2/pics\n");
-
-    db.close();
 
 }
 
@@ -386,12 +319,8 @@ TEST(listIndex, rootPath) {
     const auto testFolder = ta.getFolder("test");
     create_directory(testFolder / ".ddb");
     fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
-    const auto dbPath = testFolder / ".ddb" / "dbase.sqlite";
-    EXPECT_TRUE(fs::exists(dbPath));
 
-    Database db;
-
-    db.open(dbPath.string());
+    auto db = ddb::open(testFolder.string(), false);
 
     std::vector<std::string> toList;
 
@@ -399,12 +328,10 @@ TEST(listIndex, rootPath) {
    
     std::ostringstream out; 
 
-    listIndex(&db, toList, out, "text");
+    listIndex(db.get(), toList, out, "text");
 
     std::cout << out.str() << std::endl;
     EXPECT_EQ(out.str(), "1JI_0064.JPG\n1JI_0065.JPG\npics\npics.JPG\npics2\n");
-
-    db.close();
 
 }
 
@@ -416,15 +343,10 @@ TEST(listIndex, rootPath2) {
     const auto testFolder = ta.getFolder("test");
     create_directory(testFolder / ".ddb");
     fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
-    const auto dbPath = testFolder / ".ddb" / "dbase.sqlite";
-    EXPECT_TRUE(fs::exists(dbPath));
-
+    
     std::cout << "Test folder: " << testFolder << std::endl;
 
     const auto db = ddb::open((testFolder / "pics").string(), true);
-
-    //db.open((testFolder / "pics").string());
-    //db.open(dbPath.string());
 
     std::vector<std::string> toList;
 
@@ -432,14 +354,10 @@ TEST(listIndex, rootPath2) {
    
     std::ostringstream out; 
 
-    Database *d = db.get();
-
-    listIndex(d, toList, out, "text");
+    listIndex(db.get(), toList, out, "text");
 
     std::cout << out.str() << std::endl;
     EXPECT_EQ(out.str(), "pics/IMG_20160826_181302.jpg\npics/IMG_20160826_181305.jpg\npics/IMG_20160826_181309.jpg\npics/IMG_20160826_181314.jpg\npics/IMG_20160826_181317.jpg\npics/pics2\n");
-
-    d->close();
 
 }
 
@@ -451,12 +369,8 @@ TEST(listIndex, folder) {
     const auto testFolder = ta.getFolder("test");
     create_directory(testFolder / ".ddb");
     fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
-    const auto dbPath = testFolder / ".ddb" / "dbase.sqlite";
-    EXPECT_TRUE(fs::exists(dbPath));
-
-    Database db;
-
-    db.open(dbPath.string());
+    
+    auto db = ddb::open(testFolder.string(), false);
 
     std::vector<std::string> toList;
 
@@ -464,12 +378,10 @@ TEST(listIndex, folder) {
     
     std::ostringstream out; 
 
-    listIndex(&db, toList, out, "text");
+    listIndex(db.get(), toList, out, "text");
 
     std::cout << out.str() << std::endl;
     EXPECT_EQ(out.str(), "pics/IMG_20160826_181302.jpg\npics/IMG_20160826_181305.jpg\npics/IMG_20160826_181309.jpg\npics/IMG_20160826_181314.jpg\npics/IMG_20160826_181317.jpg\npics/pics2\n");
-
-    db.close();
 
 }
 
@@ -481,12 +393,8 @@ TEST(listIndex, subFolder) {
     const auto testFolder = ta.getFolder("test");
     create_directory(testFolder / ".ddb");
     fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
-    const auto dbPath = testFolder / ".ddb" / "dbase.sqlite";
-    EXPECT_TRUE(fs::exists(dbPath));
 
-    Database db;
-
-    db.open(dbPath.string());
+    auto db = ddb::open(testFolder.string(), false);
 
     std::vector<std::string> toList;
 
@@ -494,12 +402,10 @@ TEST(listIndex, subFolder) {
     
     std::ostringstream out; 
 
-    listIndex(&db, toList, out, "text");
+    listIndex(db.get(), toList, out, "text");
 
     std::cout << out.str() << std::endl;
     EXPECT_EQ(out.str(), "pics/pics2/IMG_20160826_181305.jpg\npics/pics2/IMG_20160826_181309.jpg\n");
-
-    db.close();
 
 }
 
@@ -512,12 +418,8 @@ TEST(listIndex, fileExactInSubFolderDetails) {
     const auto testFolder = ta.getFolder("test");
     create_directory(testFolder / ".ddb");
     fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
-    const auto dbPath = testFolder / ".ddb" / "dbase.sqlite";
-    EXPECT_TRUE(fs::exists(dbPath));
-
-    Database db;
-
-    db.open(dbPath.string());
+    
+    auto db = ddb::open(testFolder.string(), false);
 
     std::vector<std::string> toList;
 
@@ -525,7 +427,7 @@ TEST(listIndex, fileExactInSubFolderDetails) {
     
     std::ostringstream out; 
 
-    listIndex(&db, toList, out, "json");
+    listIndex(db.get(), toList, out, "json");
 
     auto j = json::parse(out.str());
 
@@ -540,8 +442,6 @@ TEST(listIndex, fileExactInSubFolderDetails) {
     EXPECT_EQ(el["type"], 3);
     EXPECT_EQ(el["path"], "Sub/20200610_144436.jpg");
 
-    db.close();
-
 }
 
 TEST(listIndex, fileExactInSubfolder) {
@@ -552,12 +452,8 @@ TEST(listIndex, fileExactInSubfolder) {
     const auto testFolder = ta.getFolder("test");
     create_directory(testFolder / ".ddb");
     fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
-    const auto dbPath = testFolder / ".ddb" / "dbase.sqlite";
-    EXPECT_TRUE(fs::exists(dbPath));
-
-    Database db;
-
-    db.open(dbPath.string());
+    
+    auto db = ddb::open(testFolder.string(), false);
 
     std::vector<std::string> toList;
 
@@ -565,12 +461,10 @@ TEST(listIndex, fileExactInSubfolder) {
     
     std::ostringstream out; 
 
-    listIndex(&db, toList, out, "text");
+    listIndex(db.get(), toList, out, "text");
 
     std::cout << out.str() << std::endl;
     EXPECT_EQ(out.str(), "pics/IMG_20160826_181314.jpg\n");
-
-    db.close();
 
 }
 
@@ -582,12 +476,8 @@ TEST(listIndex, fileExactInSubfolderWithPathToResolve) {
     const auto testFolder = ta.getFolder("test");
     create_directory(testFolder / ".ddb");
     fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
-    const auto dbPath = testFolder / ".ddb" / "dbase.sqlite";
-    EXPECT_TRUE(fs::exists(dbPath));
-
-    Database db;
-
-    db.open(dbPath.string());
+    
+    auto db = ddb::open(testFolder.string(), false);
 
     std::vector<std::string> toList;
 
@@ -595,12 +485,10 @@ TEST(listIndex, fileExactInSubfolderWithPathToResolve) {
     
     std::ostringstream out; 
 
-    listIndex(&db, toList, out, "text");
+    listIndex(db.get(), toList, out, "text");
 
     std::cout << out.str() << std::endl;
     EXPECT_EQ(out.str(), "pics/IMG_20160826_181314.jpg\n");
-
-    db.close();
 
 }
 
@@ -612,12 +500,8 @@ TEST(listIndex, fileExactInSubfolderWithPathToResolve2) {
     const auto testFolder = ta.getFolder("test");
     create_directory(testFolder / ".ddb");
     fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
-    const auto dbPath = testFolder / ".ddb" / "dbase.sqlite";
-    EXPECT_TRUE(fs::exists(dbPath));
-
-    Database db;
-
-    db.open(dbPath.string());
+    
+    auto db = ddb::open(testFolder.string(), false);
 
     std::vector<std::string> toList;
 
@@ -625,12 +509,10 @@ TEST(listIndex, fileExactInSubfolderWithPathToResolve2) {
     
     std::ostringstream out; 
 
-    listIndex(&db, toList, out, "text");
+    listIndex(db.get(), toList, out, "text");
 
     std::cout << out.str() << std::endl;
     EXPECT_EQ(out.str(), "pics/IMG_20160826_181314.jpg\n");
-
-    db.close();
 
 }
 
@@ -642,12 +524,8 @@ TEST(listIndex, allRecursive) {
     const auto testFolder = ta.getFolder("test");
     create_directory(testFolder / ".ddb");
     fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
-    const auto dbPath = testFolder / ".ddb" / "dbase.sqlite";
-    EXPECT_TRUE(fs::exists(dbPath));
-
-    Database db;
-
-    db.open(dbPath.string());
+    
+    auto db = ddb::open(testFolder.string(), false);
 
     std::vector<std::string> toList;
 
@@ -655,12 +533,10 @@ TEST(listIndex, allRecursive) {
     
     std::ostringstream out; 
 
-    listIndex(&db, toList, out, "text", true);
+    listIndex(db.get(), toList, out, "text", true);
 
     std::cout << out.str() << std::endl;
     EXPECT_EQ(out.str(), "1JI_0064.JPG\n1JI_0065.JPG\npics\npics.JPG\npics/IMG_20160826_181302.jpg\npics/IMG_20160826_181305.jpg\npics/IMG_20160826_181309.jpg\npics/IMG_20160826_181314.jpg\npics/IMG_20160826_181317.jpg\npics/pics2\npics/pics2/IMG_20160826_181305.jpg\npics/pics2/IMG_20160826_181309.jpg\npics2\npics2/IMG_20160826_181305.jpg\npics2/IMG_20160826_181309.jpg\npics2/pics\npics2/pics/IMG_20160826_181302.jpg\npics2/pics/IMG_20160826_181305.jpg\npics2/pics/IMG_20160826_181309.jpg\npics2/pics/IMG_20160826_181314.jpg\npics2/pics/IMG_20160826_181317.jpg\npics2/pics/pics2\npics2/pics/pics2/IMG_20160826_181305.jpg\npics2/pics/pics2/IMG_20160826_181309.jpg\n");
-
-    db.close();
 
 }
 
@@ -672,12 +548,8 @@ TEST(listIndex, folderRecursive) {
     const auto testFolder = ta.getFolder("test");
     create_directory(testFolder / ".ddb");
     fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
-    const auto dbPath = testFolder / ".ddb" / "dbase.sqlite";
-    EXPECT_TRUE(fs::exists(dbPath));
 
-    Database db;
-
-    db.open(dbPath.string());
+    auto db = ddb::open(testFolder.string(), false);
 
     std::vector<std::string> toList;
 
@@ -685,12 +557,10 @@ TEST(listIndex, folderRecursive) {
     
     std::ostringstream out; 
 
-    listIndex(&db, toList, out, "text", true);
+    listIndex(db.get(), toList, out, "text", true);
 
     std::cout << out.str() << std::endl;
     EXPECT_EQ(out.str(), "pics/IMG_20160826_181302.jpg\npics/IMG_20160826_181305.jpg\npics/IMG_20160826_181309.jpg\npics/IMG_20160826_181314.jpg\npics/IMG_20160826_181317.jpg\npics/pics2\npics/pics2/IMG_20160826_181305.jpg\npics/pics2/IMG_20160826_181309.jpg\n");
-
-    db.close();
 
 }
 
@@ -702,12 +572,8 @@ TEST(listIndex, folderRecursiveWithLimit) {
     const auto testFolder = ta.getFolder("test");
     create_directory(testFolder / ".ddb");
     fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
-    const auto dbPath = testFolder / ".ddb" / "dbase.sqlite";
-    EXPECT_TRUE(fs::exists(dbPath));
 
-    Database db;
-
-    db.open(dbPath.string());
+    auto db = ddb::open(testFolder.string(), false);
 
     std::vector<std::string> toList;
 
@@ -715,12 +581,10 @@ TEST(listIndex, folderRecursiveWithLimit) {
     
     std::ostringstream out; 
 
-    listIndex(&db, toList, out, "text", true, 2);
+    listIndex(db.get(), toList, out, "text", true, 2);
 
     std::cout << out.str() << std::endl;
     EXPECT_EQ(out.str(), "pics/IMG_20160826_181302.jpg\npics/IMG_20160826_181305.jpg\npics/IMG_20160826_181309.jpg\npics/IMG_20160826_181314.jpg\npics/IMG_20160826_181317.jpg\npics/pics2\n");
-
-    db.close();
 
 }
 
@@ -732,12 +596,8 @@ TEST(listIndex, wildcardRecursive) {
     const auto testFolder = ta.getFolder("test");
     create_directory(testFolder / ".ddb");
     fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
-    const auto dbPath = testFolder / ".ddb" / "dbase.sqlite";
-    EXPECT_TRUE(fs::exists(dbPath));
-
-    Database db;
-
-    db.open(dbPath.string());
+    
+    auto db = ddb::open(testFolder.string(), false);
 
     std::vector<std::string> toList;
 
@@ -745,12 +605,10 @@ TEST(listIndex, wildcardRecursive) {
     
     std::ostringstream out; 
 
-    listIndex(&db, toList, out, "text", true);
+    listIndex(db.get(), toList, out, "text", true);
 
     std::cout << out.str() << std::endl;
     EXPECT_EQ(out.str(), "pics\npics.JPG\npics/IMG_20160826_181302.jpg\npics/IMG_20160826_181305.jpg\npics/IMG_20160826_181309.jpg\npics/IMG_20160826_181314.jpg\npics/IMG_20160826_181317.jpg\npics/pics2\npics/pics2/IMG_20160826_181305.jpg\npics/pics2/IMG_20160826_181309.jpg\npics2\npics2/IMG_20160826_181305.jpg\npics2/IMG_20160826_181309.jpg\npics2/pics\npics2/pics/IMG_20160826_181302.jpg\npics2/pics/IMG_20160826_181305.jpg\npics2/pics/IMG_20160826_181309.jpg\npics2/pics/IMG_20160826_181314.jpg\npics2/pics/IMG_20160826_181317.jpg\npics2/pics/pics2\npics2/pics/pics2/IMG_20160826_181305.jpg\npics2/pics/pics2/IMG_20160826_181309.jpg\n");
-
-    db.close();
 
 }
 
@@ -762,12 +620,8 @@ TEST(listIndex, wildcardRecursiveWithLimit) {
     const auto testFolder = ta.getFolder("test");
     create_directory(testFolder / ".ddb");
     fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
-    const auto dbPath = testFolder / ".ddb" / "dbase.sqlite";
-    EXPECT_TRUE(fs::exists(dbPath));
-
-    Database db;
-
-    db.open(dbPath.string());
+    
+    auto db = ddb::open(testFolder.string(), false);
 
     std::vector<std::string> toList;
 
@@ -775,12 +629,10 @@ TEST(listIndex, wildcardRecursiveWithLimit) {
     
     std::ostringstream out; 
 
-    listIndex(&db, toList, out, "text", true, 2);
+    listIndex(db.get(), toList, out, "text", true, 2);
 
     std::cout << out.str() << std::endl;
     EXPECT_EQ(out.str(), "pics\npics.JPG\npics/IMG_20160826_181302.jpg\npics/IMG_20160826_181305.jpg\npics/IMG_20160826_181309.jpg\npics/IMG_20160826_181314.jpg\npics/IMG_20160826_181317.jpg\npics/pics2\npics2\npics2/IMG_20160826_181305.jpg\npics2/IMG_20160826_181309.jpg\npics2/pics\n");
-
-    db.close();
 
 }
 
