@@ -278,7 +278,7 @@ DDB_DLL DDBErr DDBStatus(const char* ddbPath, char** output) {
 DDBErr DDBChattr(const char* ddbPath, const char* attrsJson, char** output) {
     DDB_C_BEGIN
     const auto db = ddb::open(std::string(ddbPath), true);
-    json j = json::parse(attrsJson);
+    const json j = json::parse(attrsJson);
     db->chattr(j);
     utils::copyToPtr(db->getAttributes().dump(), output);
 
