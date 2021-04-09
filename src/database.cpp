@@ -166,7 +166,7 @@ void Database::setIntAttribute(const std::string &name, long value) {
     const auto q = this->query(sql);
 
     q->bind(1, name);
-    q->bind(2, value);
+    q->bind(2, static_cast<long long>(value));
 
     q->execute();
 }
