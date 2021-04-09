@@ -5,6 +5,7 @@
 #define POINTCLOUD_H
 
 #include <string>
+#include "ddb_export.h"
 #include "json.h"
 #include "basicgeometry.h"
 
@@ -21,7 +22,7 @@ struct PointCloudInfo{
     json toJSON();
 };
 
-bool getPointCloudInfo(const std::string &filename, PointCloudInfo &info);
+DDB_DLL bool getPointCloudInfo(const std::string &filename, PointCloudInfo &info);
 
 }
 
