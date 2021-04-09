@@ -157,6 +157,7 @@ void buildEpt(const std::vector<std::string> &filenames, const std::string &outd
         builder.run(options, progress);
 
         io::assureIsRemoved(tmpDir);
+        io::assureIsRemoved(dest / "temp");
     }catch (const std::exception &e){
         throw UntwineException(e.what());
     }

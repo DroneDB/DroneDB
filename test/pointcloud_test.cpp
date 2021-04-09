@@ -25,5 +25,14 @@ TEST(pointcloud, parse) {
     EXPECT_EQ(i.pointCount, 24503);
 }
 
+TEST(pointcloud, ept){
+    TestArea ta(TEST_NAME);
+    fs::path pc = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/brighton/point_cloud.laz",
+                                          "point_cloud.laz");
+
+    ddb::buildEpt({ pc.string() }, ta.getFolder("ept").string());
+    EXPECT_TRUE(fs::exists(ta.getFolder("ept") / "ept.json"));
+}
+
 
 }
