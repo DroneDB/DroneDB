@@ -4,11 +4,24 @@
 #include <pdal/StageFactory.hpp>
 #include <gdal_priv.h>
 #include <ogr_srs_api.h>
+#include <untwine/untwine/Common.hpp>
+#include <untwine/untwine/ProgressWriter.hpp>
+#include <untwine/epf/Epf.hpp>
+#include <untwine/bu/BuPyramid.hpp>
 
 #include "pointcloud.h"
 #include "exceptions.h"
+#include "mio.h"
 #include "geo.h"
 #include "logger.h"
+
+namespace untwine{
+
+void fatal(const std::string& err){
+    throw ddb::UntwineException("Untwine fatal error: " + err);
+}
+
+}
 
 namespace ddb{
 
@@ -105,6 +118,48 @@ bool getPointCloudInfo(const std::string &filename, PointCloudInfo &info){
     }
 
     return true;
+}
+
+void buildEpt(const std::vector<std::string> &filenames, const std::string &outdir){
+    fs::path dest = outdir;
+    fs::path tmpDir = dest / "tmp";
+
+    untwine::Options options;
+    for (const std::string &f : filenames){
+        if (!fs::exists(f)) throw FSException(f + " does not exist");
+        options.inputFiles.push_back(f);
+    }
+    options.tempDir = tmpDir.string();
+    options.outputDir = dest.string();
+    options.fileLimit = 10000000;
+    options.progressFd = -1;
+    options.stats = false;
+    options.level = -1;
+
+    io::assureFolderExists(dest);
+    io::assureFolderExists(tmpDir);
+    io::assureIsRemoved(dest / "ept.json");
+    io::assureIsRemoved(dest / "ept-data");
+    io::assureIsRemoved(dest / "ept-hierarchy");
+    io::assureFolderExists(dest / "ept-data");
+    io::assureFolderExists(dest / "ept-hierarchy");
+
+
+    untwine::ProgressWriter progress(options.progressFd);
+
+    try{
+        untwine::BaseInfo common;
+
+        untwine::epf::Epf preflight(common);
+        preflight.run(options, progress);
+
+        untwine::bu::BuPyramid builder(common);
+        builder.run(options, progress);
+
+        io::assureIsRemoved(tmpDir);
+    }catch (const std::exception &e){
+        throw UntwineException(e.what());
+    }
 }
 
 
