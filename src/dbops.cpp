@@ -31,26 +31,28 @@ std::unique_ptr<Database> open(const std::string &directory,
     const fs::path ddbDirPath = dirPath / DDB_FOLDER;
     const fs::path dbasePath = ddbDirPath / "dbase.sqlite";
 
-    if (exists(dbasePath)) {
-        LOGD << dbasePath.string() + " exists";
+    if (!exists(dbasePath)) {
+        if (!traverseUp || dirPath.parent_path() == dirPath)
+            throw FSException(
+                "Not a valid DroneDB directory, .ddb does not exist. Did you "
+                "run ddb init?");
 
-        std::unique_ptr<Database> db = std::make_unique<Database>();
-        db->open(dbasePath.string());
-        if (!db->tableExists("entries")) {
-            throw DBException(
-                "Table 'entries' not found (not a valid database: " +
-                dbasePath.string() + ")");
-        }
-        return db;
-    }
-
-    if (traverseUp && dirPath.parent_path() != dirPath) {
         return open(dirPath.parent_path().string(), true);
     }
 
-    throw FSException(
-        "Not a valid DroneDB directory, .ddb does not exist. Did you run ddb "
-        "init?");
+    LOGD << dbasePath.string() + " exists";
+
+    auto db = std::make_unique<Database>();
+
+    db->open(dbasePath.string());
+
+    if (!db->tableExists("entries")) 
+        throw DBException("Table 'entries' not found (not a valid database: " +
+                          dbasePath.string() + ")");
+
+    db->ensureSchemaConsistency();
+    
+    return db;
 }
 
 fs::path rootDirectory(Database *db) {
@@ -157,7 +159,7 @@ std::vector<fs::path> getPathList(const std::vector<std::string> &paths,
                      i != fs::recursive_directory_iterator(); ++i) {
                     fs::path rp = i->path();
 
-// Ignore system files on Windows
+                    // Ignore system files on Windows
 #ifdef WIN32
                     const DWORD attrs =
                         GetFileAttributesW(rp.wstring().c_str());

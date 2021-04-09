@@ -28,7 +28,7 @@ void Sync::run(cxxopts::ParseResult &opts) {
     fs::current_path(workingDir);
 
     const auto db = ddb::open(workingDir, true);
-    ddb::syncIndex(db.get());
+    syncIndex(db.get());
 }
 
 }
