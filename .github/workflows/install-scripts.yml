@@ -35,5 +35,5 @@ jobs:
       with:
         directory: "get.dronedb"
         repository: "DroneDB/get.dronedb"
-        github_token: ${{ secrets.GITHUB_TOKEN }}
+        github_token: ${{ secrets.BOT_TOKEN }}
 
