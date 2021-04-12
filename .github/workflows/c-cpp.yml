@@ -33,13 +33,14 @@ jobs:
               with:
                 name: Compiled Binaries
                 path: build/dist/*.tgz
-            - name: Release
-              uses: softprops/action-gh-release@v1
-              if: startsWith(github.ref, 'refs/tags/')
+            - name: Upload Binaries to Release
+              uses: svenstaro/upload-release-action@v2
               with:
-                files: build/dist/*.tgz
-              env:
-                GITHUB_TOKEN: ${{ secrets.BOT_TOKEN }}
+                repo_token: ${{ secrets.BOT_TOKEN }}
+                file: build/dist/*.tgz
+                file_glob: true
+                tag: ${{ github.ref }}
+                overwrite: true
     build_windows:
         name: Build/Test on Windows
         runs-on: windows-latest
@@ -71,10 +72,11 @@ jobs:
               with:
                 name: Compiled Binaries
                 path: build\dist\*.zip
-            - name: Release
-              uses: softprops/action-gh-release@v1
-              if: startsWith(github.ref, 'refs/tags/')
+            - name: Upload Binaries to Release
+              uses: svenstaro/upload-release-action@v2
               with:
-                files: build\dist\*.zip
-              env:
-                GITHUB_TOKEN: ${{ secrets.BOT_TOKEN }}
+                repo_token: ${{ secrets.BOT_TOKEN }}
+                file: build\dist\*.zip
+                file_glob: true
+                tag: ${{ github.ref }}
+                overwrite: true
