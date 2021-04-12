@@ -5,6 +5,7 @@
 #define POINTCLOUD_H
 
 #include <string>
+#include <vector>
 #include "ddb_export.h"
 #include "json.h"
 #include "basicgeometry.h"
@@ -23,6 +24,7 @@ struct PointCloudInfo{
 };
 
 DDB_DLL bool getPointCloudInfo(const std::string &filename, PointCloudInfo &info);
+DDB_DLL void buildEpt(const std::vector<std::string> &filenames, const std::string &outdir);
 
 }
 

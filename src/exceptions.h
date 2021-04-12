@@ -31,6 +31,9 @@ class InvalidArgsException : public AppException{
 class GDALException : public AppException{
     using AppException::AppException;
 };
+class UntwineException : public AppException{
+    using AppException::AppException;
+};
 class NetException : public AppException{
     using AppException::AppException;
 };

@@ -361,6 +361,17 @@ void createDirectories(const fs::path &d){
     }
 }
 
+void assureIsRemoved(const fs::path p){
+    if (!fs::exists(p)) return;
+
+    std::error_code e;
+
+    fs::remove_all(p, e);
+    if (e.value() != 0){
+        throw FSException(p.string() + " cannot be removed");
+    }
+}
+
 FileLock::FileLock(const fs::path &p){
     lockFile = (p.parent_path() / p.filename()).string() + ".lock";
 
