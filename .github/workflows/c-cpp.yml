@@ -35,6 +35,7 @@ jobs:
                 path: build/dist/*.tgz
             - name: Upload Binaries to Release
               uses: svenstaro/upload-release-action@v2
+              if: startsWith(github.ref, 'refs/tags/')
               with:
                 repo_token: ${{ secrets.GITHUB_TOKEN }}
                 file: build/dist/*.tgz
@@ -74,6 +75,7 @@ jobs:
                 path: build\dist\*.zip
             - name: Upload Binaries to Release
               uses: svenstaro/upload-release-action@v2
+              if: startsWith(github.ref, 'refs/tags/')
               with:
                 repo_token: ${{ secrets.GITHUB_TOKEN }}
                 file: build\dist\*.zip
