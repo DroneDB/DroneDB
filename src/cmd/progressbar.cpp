@@ -11,7 +11,7 @@ namespace cmd{
 
 void ProgressBar::update(const std::string &label, float progress){
     ++ticks;
-    unsigned int w = label.empty() ? barWidth : std::max<unsigned int>(3, barWidth - label.length() - 1);
+    unsigned int w = std::max<int>(0, label.empty() ? barWidth : std::max<unsigned int>(3, barWidth - label.length() - 1));
     const unsigned int pos = static_cast<int>(w * progress / 100.0f);
 
     const std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
