@@ -18,7 +18,7 @@ DDB_DLL std::vector<std::string> PushManager::init(
     this->registry->ensureTokenValidity();
 
     net::Response res =
-        net::POST(this->registry->getUrl("/org/" + this->organization + "/ds/" +
+        net::POST(this->registry->getUrl("/orgs/" + this->organization + "/ds/" +
                                          this->dataset + "/push/init"))
             .multiPartFormData({"file", ddbPathArchive.string()})
             .authToken(this->registry->getAuthToken())
@@ -37,7 +37,7 @@ DDB_DLL void PushManager::upload(const std::string& fullPath, const std::string&
     this->registry->ensureTokenValidity();
 
     net::Response res =
-        net::POST(this->registry->getUrl("/org/" + this->organization + "/ds/" +
+        net::POST(this->registry->getUrl("/orgs/" + this->organization + "/ds/" +
                                          this->dataset + "/push/upload"))
             .multiPartFormData({"file", fullPath}, {"path", file})
             .authToken(this->registry->getAuthToken())
@@ -50,7 +50,7 @@ DDB_DLL void PushManager::commit() {
     this->registry->ensureTokenValidity();
 
     net::Response res =
-        net::POST(this->registry->getUrl("/org/" + this->organization + "/ds/" +
+        net::POST(this->registry->getUrl("/orgs/" + this->organization + "/ds/" +
                                          this->dataset + "/push/commit"))
             .authToken(this->registry->getAuthToken())
             .send();
