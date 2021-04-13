@@ -70,6 +70,9 @@ std::string ShareService::share(const std::vector<std::string> &input,
     size_t gTotalBytes = 0;
     size_t gTxBytes = 0;
 
+    auto lastProgressUpdate = std::chrono::system_clock::now();
+    auto t100ms = std::chrono::milliseconds(100);
+
     for (auto &fp : filePaths) {
         gTotalBytes += io::Path(fp).getSize();
     }
@@ -121,7 +124,7 @@ std::string ShareService::share(const std::vector<std::string> &input,
                 if (stream->is_open())
                 {
                     cuc.UploadToSession(n, stream, pos, chunkSize,
-                        [&cb, &files, &sfp, &fileSize, &gTotalBytes, &gTxBytes](
+                        [&cb, &files, &sfp, &fileSize, &gTotalBytes, &gTxBytes, &lastProgressUpdate, t100ms](
                             std::string &fileName, size_t txBytes, size_t totalBytes) {
                             if (cb == nullptr) return true;
 
@@ -132,7 +135,12 @@ std::string ShareService::share(const std::vector<std::string> &input,
                             // CAUTION: this will require a lock if you
                             // use threads
                             sfp.txBytes = std::min(fileSize, txBytes);
-                            return cb(files, gTxBytes + sfp.txBytes, gTotalBytes);
+
+                            auto now = std::chrono::system_clock::now();
+                            if (lastProgressUpdate + t100ms < now){
+                                lastProgressUpdate = now;
+                                return cb(files, gTxBytes + sfp.txBytes, gTotalBytes);
+                            }else return true;
                         });
 
                     gTxBytes += fileSize;
@@ -156,7 +164,7 @@ std::string ShareService::share(const std::vector<std::string> &input,
 
             client.Upload(
                 p.generic(), fp,
-                [&cb, &files, &sfp, &fileSize, &gTotalBytes, &gTxBytes](
+                [&cb, &files, &sfp, &fileSize, &gTotalBytes, &gTxBytes, &lastProgressUpdate, t100ms](
                     std::string &fileName, size_t txBytes, size_t totalBytes) {
                     if (cb == nullptr) return true;
 
@@ -170,7 +178,12 @@ std::string ShareService::share(const std::vector<std::string> &input,
                     gTxBytes -= sfp.txBytes;
                     sfp.txBytes = std::min(fileSize, txBytes);
                     gTxBytes += sfp.txBytes;
-                    return cb(files, gTxBytes, gTotalBytes);
+
+                    auto now = std::chrono::system_clock::now();
+                    if (lastProgressUpdate + t100ms < now){
+                        lastProgressUpdate = now;
+                        return cb(files, gTxBytes, gTotalBytes);
+                    }else return true;
                 });
         }
     }
