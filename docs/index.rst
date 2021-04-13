@@ -7,15 +7,15 @@ DroneDB - Effortless Aerial Data Management and Sharing
     :alt: DroneDB
     :align: right
 
-`DroneDB <https://dronedb.app>`_ is a set of tools and standards for managing and sharing aerial data. Think of it as Dropbox for aerial imagery. It works mainly with images, orthophotos and digital elevation models, for which metadata is extracted and visualized on a map, but it can be used to share all kinds of files.
+`DroneDB <https://dronedb.app>`_ is a set of tools and standards designed to make the process of sharing and managing images, orthophotos, digital elevation models and point clouds effortless. Think of it as Dropbox for aerial imagery!
 
 .. image:: https://user-images.githubusercontent.com/1951843/103560016-13848180-4e85-11eb-8177-e711da942a4a.png
 
-DroneDB can create an index for your data and sync it to a network hub (`Registry <https://github.com/DroneDB/Registry>`_) for highly scalable and flexible data management and sharing across an organization, the internet or for your own personal data-organizing enjoyment.
+At its core, DroneDB can create an index for your data and sync it to a network hub (`Registry <https://github.com/DroneDB/Registry>`_). The network hub provides a user interface and API to interact with the data.
 
-`DroneDB Desktop <https://dronedb.app/dashboard>`_ is a graphical user interface for browsing and sharing aerial data (currently Windows only, but Mac/Linux clients coming soon).
+`DroneDB Desktop <https://dronedb.app/dashboard>`_ is a graphical user interface for browsing and sharing aerial data (currently Windows only, but Mac/Linux clients coming soon). It builds a DroneDB index in "real time" while you browse local files on your computer.
 
-`ddb <http://0.0.0.0:8000/download.html#installation>`_ provides a command line client for exploring and sharing aerial data, making the task of sharing images with others as simple as typing:
+`ddb <http://0.0.0.0:8000/download.html#installation>`_ provides a command line client for exploring and sharing aerial data, exposing all of the function of DroneDB. To share images with a Registry, for example you can type:
 
 ::
 
