@@ -714,8 +714,10 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
 void zipFolder(const fs::path &folder, const fs::path &archive) {
     miniz_cpp::zip_file file;
 
-    for (const auto &entry : fs::recursive_directory_iterator(folder))
-        file.write(entry.path().generic_string());
+    for (const auto &entry : fs::recursive_directory_iterator(folder)) {
+        const auto relPath = io::Path(entry.path()).relativeTo(folder);
+        file.write(entry.path().generic_string(), relPath.string());
+    }
 
     file.save(archive.generic_string());
 }
