@@ -264,7 +264,7 @@ Response Request::downloadToFile(const std::string &outFile) {
     f = fopen(outFile.c_str(), "wb");
     if (!f) throw FSException("Cannot open " + outFile + " for writing");
 
-    curl_easy_setopt(curl, CURLOPT_NOPROGRESS, false);
+    curl_easy_setopt(curl, CURLOPT_NOPROGRESS, true);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_data);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, f);
 
