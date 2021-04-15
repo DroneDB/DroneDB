@@ -703,8 +703,8 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
     LOGD << "Updating syncmanager and tagmanager";
 
     // 10) Update last sync time
-    syncManager.setLastSync(time(nullptr), this->url);
-    tagManager.setTag(tag);
+    syncManager.setLastSync(dsInfo.mtime, this->url);
+    //tagManager.setTag(tag);
 
     out << "Updated last sync time, pull done" << std::endl;
 
@@ -740,7 +740,7 @@ DDB_DLL void Registry::push(const std::string &path, const bool force,
         5.2) The server answers with the needed files list
     6) Foreach of the needed files call POST endpoint
     7) When done call commit endpoint
-    
+    8) Update last sync
     */
 
     auto db = open(path, true);
@@ -762,21 +762,28 @@ DDB_DLL void Registry::push(const std::string &path, const bool force,
 
     const auto tagInfo = RegistryUtils::parseTag(tag);
 
+    // 3) Get local mtime
+    const auto lastUpdate = db->getLastUpdate();
+
     // 3) Get dataset mtime
-    const auto dsInfo =
-        this->getDatasetInfo(tagInfo.organization, tagInfo.dataset);
+    /*const auto dsInfo =
+    //    this->getDatasetInfo(tagInfo.organization, tagInfo.dataset);
 
     LOGD << "Dataset mtime = " << dsInfo.mtime;
 
     out << "Push using tag '" << tag << "', last sync " << lastSync
         << ", dataset mtime " << dsInfo.mtime << std::endl;
+    */
+
+    out << "Push using tag '" << tag << "'" << std::endl; 
+    out << "Last sync " << lastSync << ", dataset mtime " << lastUpdate << std::endl;
 
     // 4) Alert if dataset_mtime > last_sync (it means we have less recent changes
     //    than server, so the push is pointless or potentially dangerous)
-    if (dsInfo.mtime > lastSync && !force)
+    if (lastUpdate <= lastSync && !force)
         throw AppException(
-            "Can push only if dataset changes are older than ours. Use force "
-            "parameter to override (CAUTION)");
+            "Can push only if remote changes are older than ours. Use --force "
+            "parameter to skip this check (CAUTION)");
 
     // 5) Initialize server push
     LOGD << "Initializing server push";
@@ -820,6 +827,10 @@ DDB_DLL void Registry::push(const std::string &path, const bool force,
     pushManager.commit();
 
     LOGD << "Push committed";
+
+    // 8) Update last sync
+    LOGD << "Setting last sync to " << lastUpdate << " for tag " << this->url;
+    syncManager.setLastSync(lastUpdate, this->url);
 
     // Cleanup
     fs::remove(tempArchive);
