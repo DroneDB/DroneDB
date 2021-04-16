@@ -589,16 +589,14 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
     LOGD << "Ddb folder = " << ddbPath;
 
     TagManager tagManager(ddbPath);
-    SyncManager syncManager(ddbPath);
 
     // 1) Get our tag using tagmanager
     const auto tag = tagManager.getTag();
 
     // 2) Get our last sync time for that specific registry using syncmanager
-    const auto lastSync = syncManager.getLastSync(this->url);
+    const auto lastUpdate = db->getLastUpdate();
 
     LOGD << "Tag = " << tag;
-    LOGD << "LastSync = " << lastSync;
 
     const auto tagInfo = RegistryUtils::parseTag(tag);
 
@@ -608,15 +606,14 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
 
     LOGD << "Dataset mtime = " << dsInfo.mtime;
 
-    out << "Pull using tag '" << tag << "', last sync " << lastSync
-        << ", dataset mtime " << dsInfo.mtime << std::endl;
+    out << "Pull using tag '" << tag << "'" << std::endl;
+    out << "Local mtime " << lastUpdate << ", remote mtime " << dsInfo.mtime << std::endl;
 
-    // 4) Alert if dataset_mtime < last_sync (it means we have more recent
-    //    changes than server, so the pull is pointless or potentially dangerous)
-    if (dsInfo.mtime < lastSync && !force)
+    // 4) Check if we have more recent changes than server, so the pull is pointless or potentially dangerous)
+    if (lastUpdate >= dsInfo.mtime && !force)
         throw AppException(
-            "Can pull only if dataset changes are newer than ours. Use force "
-            "parameter to override (CAUTION)");
+            "Can pull only if dataset changes are newer than ours.\nUse --force "
+            "parameter to override (CAUTION).");
 
     const auto tempDdbFolder = fs::temp_directory_path() / "ddb_temp_folder" /
                                (tagInfo.organization + "-" + tagInfo.dataset);
@@ -628,8 +625,6 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
                       tempDdbFolder.generic_string());
 
     out << "Remote ddb downloaded" << std::endl;
-
-    LOGD << "Remote ddb downloaded";
 
     auto source = open(tempDdbFolder.generic_string(), true);
 
@@ -679,7 +674,7 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
         if (delta.copies.empty() && delta.removes.empty()) {
             LOGD << "No changes to perform, pull done";
             out << "No changes, nothing to do here" << std::endl;
-            // NOTE: Should be update lastsync?
+            db->setLastUpdate(dsInfo.mtime);
 
             return;
         }
@@ -693,20 +688,13 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
     LOGD << "Removing temp new files folder";
     remove_all(tempNewFolder);
 
-    LOGD << "Replacing ddb folder";
+    LOGD << "Replacing ddb folder (copy from '" << tempDdbFolder << "' to '" << ddbPath << "')";
 
     // 9) Replace ddb database
     copy(tempDdbFolder, ddbPath);
 
     out << "DDB replaced" << std::endl;
-
-    LOGD << "Updating syncmanager and tagmanager";
-
-    // 10) Update last sync time
-    syncManager.setLastSync(dsInfo.mtime, this->url);
-    //tagManager.setTag(tag);
-
-    out << "Updated last sync time, pull done" << std::endl;
+    out << "Pull done" << std::endl;
 
     LOGD << "Pull done";
 }
@@ -749,41 +737,34 @@ DDB_DLL void Registry::push(const std::string &path, const bool force,
     LOGD << "Ddb folder = " << ddbPath;
 
     TagManager tagManager(ddbPath);
-    SyncManager syncManager(ddbPath);
+    //SyncManager syncManager(ddbPath);
 
     // 1) Get our tag using tagmanager
     const auto tag = tagManager.getTag();
 
-    // 2) Get our last sync time for that specific registry using syncmanager
-    const auto lastSync = syncManager.getLastSync(this->url);
-
-    LOGD << "Tag = " << tag;
-    LOGD << "LastSync = " << lastSync;
-
-    const auto tagInfo = RegistryUtils::parseTag(tag);
-
     // 3) Get local mtime
     const auto lastUpdate = db->getLastUpdate();
 
+    LOGD << "Tag = " << tag;
+    LOGD << "LastUpdate = " << lastUpdate;
+
+    const auto tagInfo = RegistryUtils::parseTag(tag);
+
     // 3) Get dataset mtime
-    /*const auto dsInfo =
-    //    this->getDatasetInfo(tagInfo.organization, tagInfo.dataset);
+    const auto dsInfo =
+        this->getDatasetInfo(tagInfo.organization, tagInfo.dataset);
 
     LOGD << "Dataset mtime = " << dsInfo.mtime;
 
-    out << "Push using tag '" << tag << "', last sync " << lastSync
-        << ", dataset mtime " << dsInfo.mtime << std::endl;
-    */
-
-    out << "Push using tag '" << tag << "'" << std::endl; 
-    out << "Last sync " << lastSync << ", dataset mtime " << lastUpdate << std::endl;
+    out << "Push using tag '" << tag << "'" << std::endl;
+    out << "Local mtime " << lastUpdate << ", remote mtime " << dsInfo.mtime << std::endl;
 
     // 4) Alert if dataset_mtime > last_sync (it means we have less recent changes
     //    than server, so the push is pointless or potentially dangerous)
-    if (lastUpdate <= lastSync && !force)
+    if (dsInfo.mtime >= lastUpdate && !force)
         throw AppException(
-            "Can push only if remote changes are older than ours. Use --force "
-            "parameter to skip this check (CAUTION)");
+            "Can push only if remote changes are older than ours.\nUse --force "
+            "parameter to skip this check (CAUTION).");
 
     // 5) Initialize server push
     LOGD << "Initializing server push";
@@ -826,11 +807,7 @@ DDB_DLL void Registry::push(const std::string &path, const bool force,
     // 7) When done call commit endpoint
     pushManager.commit();
 
-    LOGD << "Push committed";
-
-    // 8) Update last sync
-    LOGD << "Setting last sync to " << lastUpdate << " for tag " << this->url;
-    syncManager.setLastSync(lastUpdate, this->url);
+    LOGD << "Push committed, cleaning up";
 
     // Cleanup
     fs::remove(tempArchive);
