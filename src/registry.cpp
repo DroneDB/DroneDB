@@ -621,7 +621,7 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
             "your local changes might be overwritten. Use --force "
             "to continue.");
 
-    const auto tempDdbFolder = fs::temp_directory_path() / "ddb_temp_folder" /
+    const auto tempDdbFolder = UserProfile::get()->getProfilePath("temp", true) /
                                (tagInfo.organization + "-" + tagInfo.dataset);
 
     LOGD << "Temp ddb folder = " << tempDdbFolder;
@@ -632,7 +632,7 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
 
     out << "Remote ddb downloaded" << std::endl;
 
-    auto source = open(tempDdbFolder.generic_string(), true);
+    auto source = open(tempDdbFolder.generic_string(), false);
 
     // 6) Perform local diff using delta method
     const auto delta = getDelta(source.get(), db.get());
@@ -646,7 +646,7 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
         << delta.copies.size() << " copies, " << delta.removes.size()
         << " removes" << std::endl;
 
-    const auto tempNewFolder = fs::temp_directory_path() / "ddb_new_folder" /
+    const auto tempNewFolder = UserProfile::get()->getProfilePath("temp", false) /
                                (tagInfo.organization + "-" + tagInfo.dataset) /
                                std::to_string(time(nullptr));
 
@@ -661,8 +661,7 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
                 .select([](const AddAction &add) { return add.path; })
                 .toStdVector();
 
-        out << "Downloading missing files (this could take a while)"
-            << std::endl;
+        LOGD << "Downloading missing files (this could take a while)";
 
         LOGD << "Files to download:";
         j = filesToDownload;
@@ -679,7 +678,7 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
         // Check if we have anything to do
         if (delta.copies.empty() && delta.removes.empty()) {
             LOGD << "No changes to perform, pull done";
-            out << "No changes, nothing to do here" << std::endl;
+            out << "Already up to date." << std::endl;
             db->setLastUpdate(dsInfo.mtime);
 
             return;
@@ -689,20 +688,25 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
     // 8) Apply changes to local files
     applyDelta(delta, ddbPath.parent_path(), tempNewFolder);
 
-    out << "Delta applied" << std::endl;
-
     LOGD << "Removing temp new files folder";
+
     remove_all(tempNewFolder);
 
-    LOGD << "Replacing ddb folder (copy from '" << tempDdbFolder << "' to '" << ddbPath << "')";
+    LOGD << "Replacing DDB index (copy from '" << tempDdbFolder << "' to '" << ddbPath << "')";
 
     // 9) Replace ddb database
-    copy(tempDdbFolder, ddbPath);
+    db->close();
+    source->close();
 
-    out << "DDB replaced" << std::endl;
-    out << "Pull done" << std::endl;
+    std::error_code e;
+    io::copy(tempDdbFolder / DDB_FOLDER / "dbase.sqlite", ddbPath / "dbase.sqlite");
 
     LOGD << "Pull done";
+
+    // Cleanup
+    io::assureIsRemoved(tempDdbFolder);
+    io::assureIsRemoved(tempNewFolder);
+
 }
 
 void zipFolder(const fs::path &folder, const fs::path &archive) {
