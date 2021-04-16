@@ -606,14 +606,20 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
 
     LOGD << "Dataset mtime = " << dsInfo.mtime;
 
-    out << "Pull using tag '" << tag << "'" << std::endl;
-    out << "Local mtime " << lastUpdate << ", remote mtime " << dsInfo.mtime << std::endl;
+    out << "Pulling '" << tag << "'" << std::endl;
+    LOGD  << "Local mtime " << lastUpdate << ", remote mtime " << dsInfo.mtime;
 
     // 4) Check if we have more recent changes than server, so the pull is pointless or potentially dangerous)
-    if (lastUpdate >= dsInfo.mtime && !force)
+    if (lastUpdate == dsInfo.mtime){
+        // Nothing to do, datasets should be in sync
+        out << "Already up to date." << std::endl;
+        return;
+    }else if (lastUpdate > dsInfo.mtime && !force)
         throw AppException(
-            "Can pull only if dataset changes are newer than ours.\nUse --force "
-            "parameter to override (CAUTION).");
+            "[Warning] Your dataset has local changes, but you haven't "
+            "pushed these changes to the remote registry. If you pull now, "
+            "your local changes might be overwritten. Use --force "
+            "to continue.");
 
     const auto tempDdbFolder = fs::temp_directory_path() / "ddb_temp_folder" /
                                (tagInfo.organization + "-" + tagInfo.dataset);
@@ -756,15 +762,21 @@ DDB_DLL void Registry::push(const std::string &path, const bool force,
 
     LOGD << "Dataset mtime = " << dsInfo.mtime;
 
-    out << "Push using tag '" << tag << "'" << std::endl;
-    out << "Local mtime " << lastUpdate << ", remote mtime " << dsInfo.mtime << std::endl;
+    out << "Pushing '" << tag << "'" << std::endl;
+    LOGD << "Local mtime " << lastUpdate << ", remote mtime " << dsInfo.mtime;
 
     // 4) Alert if dataset_mtime > last_sync (it means we have less recent changes
     //    than server, so the push is pointless or potentially dangerous)
-    if (dsInfo.mtime >= lastUpdate && !force)
+    if (lastUpdate == dsInfo.mtime){
+        // Nothing to do, datasets should be in sync
+        out << "Already up to date." << std::endl;
+        return;
+    }else if (dsInfo.mtime > lastUpdate && !force)
         throw AppException(
-            "Can push only if remote changes are older than ours.\nUse --force "
-            "parameter to skip this check (CAUTION).");
+            "[Warning] The remote dataset has newer changes, but you haven't "
+            "pulled those changes from the remote registry. If you push now, "
+            "the remote dataset might be overwritten. Use --force "
+            "to continue.");
 
     // 5) Initialize server push
     LOGD << "Initializing server push";

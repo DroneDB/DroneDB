@@ -34,7 +34,7 @@ void Pull::setOptions(cxxopts::Options& opts) {
 }
 
 std::string Pull::description() {
-    return "Pulls changes from remote repository.";
+    return "Pulls changes from a remote repository.";
 }
 
 void Pull::run(cxxopts::ParseResult& opts) {

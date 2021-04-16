@@ -32,7 +32,7 @@ void Push::setOptions(cxxopts::Options& opts) {
 }
 
 std::string Push::description() {
-    return "Pushes local changes to remote repository.";
+    return "Pushes changes to a remote repository.";
 }
 
 void Push::run(cxxopts::ParseResult& opts) {
