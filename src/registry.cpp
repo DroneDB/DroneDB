@@ -606,7 +606,7 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
 
     LOGD << "Dataset mtime = " << dsInfo.mtime;
 
-    out << "Pulling '" << tag << "'" << std::endl;
+    out << "Pulling from '" << tag << "'" << std::endl;
     LOGD  << "Local mtime " << lastUpdate << ", remote mtime " << dsInfo.mtime;
 
     // 4) Check if we have more recent changes than server, so the pull is pointless or potentially dangerous)
@@ -762,7 +762,7 @@ DDB_DLL void Registry::push(const std::string &path, const bool force,
 
     LOGD << "Dataset mtime = " << dsInfo.mtime;
 
-    out << "Pushing '" << tag << "'" << std::endl;
+    out << "Pushing to '" << tag << "'" << std::endl;
     LOGD << "Local mtime " << lastUpdate << ", remote mtime " << dsInfo.mtime;
 
     // 4) Alert if dataset_mtime > last_sync (it means we have less recent changes
