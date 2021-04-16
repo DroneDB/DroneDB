@@ -621,7 +621,7 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
             "your local changes might be overwritten. Use --force "
             "to continue.");
 
-    const auto tempDdbFolder = UserProfile::get()->getProfilePath("temp", true) /
+    const auto tempDdbFolder = UserProfile::get()->getProfilePath("pull_cache", true) /
                                (tagInfo.organization + "-" + tagInfo.dataset);
 
     LOGD << "Temp ddb folder = " << tempDdbFolder;
@@ -646,7 +646,7 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
         << delta.copies.size() << " copies, " << delta.removes.size()
         << " removes" << std::endl;
 
-    const auto tempNewFolder = UserProfile::get()->getProfilePath("temp", false) /
+    const auto tempNewFolder = UserProfile::get()->getProfilePath("pull_cache", false) /
                                (tagInfo.organization + "-" + tagInfo.dataset) /
                                std::to_string(time(nullptr));
 
