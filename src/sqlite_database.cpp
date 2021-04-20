@@ -52,7 +52,7 @@ SqliteDatabase &SqliteDatabase::exec(const std::string &sql) {
 
     char *errMsg;
     if (sqlite3_exec(db, sql.c_str(), nullptr, nullptr, &errMsg) != SQLITE_OK ) {
-        std::string error(errMsg);
+        const std::string error(errMsg);
         sqlite3_free(errMsg);
         throw SQLException(error);
     }

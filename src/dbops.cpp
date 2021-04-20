@@ -5,43 +5,54 @@
 
 #include <ddb.h>
 
+#include <cstdlib>
+
 #include "entry_types.h"
+#include "exceptions.h"
 #include "exif.h"
 #include "hash.h"
-#include "exceptions.h"
-#include "utils.h"
-#include "net.h"
 #include "logger.h"
 #include "mio.h"
-#include "version.h"
+#include "net.h"
 #include "userprofile.h"
-#include <cstdlib>
+#include "utils.h"
+#include "version.h"
 
 namespace ddb {
 
-#define UPDATE_QUERY "UPDATE entries SET hash=?, type=?, meta=?, mtime=?, size=?, depth=?, point_geom=GeomFromText(?, 4326), polygon_geom=GeomFromText(?, 4326) WHERE path=?"
+#define UPDATE_QUERY                                                        \
+    "UPDATE entries SET hash=?, type=?, meta=?, mtime=?, size=?, depth=?, " \
+    "point_geom=GeomFromText(?, 4326), polygon_geom=GeomFromText(?, 4326) " \
+    "WHERE path=?"
 
-std::unique_ptr<Database> open(const std::string &directory, bool traverseUp = false) {
+std::unique_ptr<Database> open(const std::string &directory,
+                               bool traverseUp = false) {
     const fs::path dirPath = fs::absolute(directory);
     const fs::path ddbDirPath = dirPath / DDB_FOLDER;
     const fs::path dbasePath = ddbDirPath / "dbase.sqlite";
 
-    if (exists(dbasePath)) {
-        LOGD << dbasePath.string() + " exists";
+    if (!exists(dbasePath)) {
+        if (!traverseUp || dirPath.parent_path() == dirPath)
+            throw FSException(
+                "Not a valid DroneDB directory, .ddb does not exist. Did you "
+                "run ddb init?");
 
-        std::unique_ptr<Database> db = std::make_unique<Database>();
-        db->open(dbasePath.string());
-        if (!db->tableExists("entries")) {
-            throw DBException("Table 'entries' not found (not a valid database: " + dbasePath.string() + ")");
-        }
-        return db;
-    }
-
-    if (traverseUp && dirPath.parent_path() != dirPath) {
         return open(dirPath.parent_path().string(), true);
     }
 
-    throw FSException("Not a valid DroneDB directory, .ddb does not exist. Did you run ddb init?");
+    LOGD << dbasePath.string() + " exists";
+
+    auto db = std::make_unique<Database>();
+
+    db->open(dbasePath.string());
+
+    if (!db->tableExists("entries")) 
+        throw DBException("Table 'entries' not found (not a valid database: " +
+                          dbasePath.string() + ")");
+
+    db->ensureSchemaConsistency();
+    
+    return db;
 }
 
 fs::path rootDirectory(Database *db) {
@@ -52,21 +63,25 @@ fs::path rootDirectory(Database *db) {
 // Computes a list of paths inside rootDirectory
 // all paths must be subfolders/files within rootDirectory
 // or an exception is thrown
-// If includeDirs is true and the list includes paths to directories that are in paths
-// eg. if path/to/file is in paths, both "path/" and "path/to"
-// are includes in the result.
+// If includeDirs is true and the list includes paths to directories that are in
+// paths eg. if path/to/file is in paths, both "path/" and "path/to" are
+// includes in the result.
 // ".ddb" files/dirs are always ignored and skipped.
-// If a directory is in the input paths, they are included regardless of includeDirs
-std::vector<fs::path> getIndexPathList(const fs::path& rootDirectory, const std::vector<std::string> &paths, bool includeDirs) {
+// If a directory is in the input paths, they are included regardless of
+// includeDirs
+std::vector<fs::path> getIndexPathList(const fs::path &rootDirectory,
+                                       const std::vector<std::string> &paths,
+                                       bool includeDirs) {
     std::vector<fs::path> result;
     std::unordered_map<std::string, bool> directories;
 
-    for (const std::string &p : paths){
+    for (const std::string &p : paths) {
         if (p.empty()) throw FSException("Some paths are empty");
     }
 
     if (!io::Path(rootDirectory).hasChildren(paths)) {
-        throw FSException("Some paths are not contained within: " + rootDirectory.string() + ". Did you run ddb init?");
+        throw FSException("Some paths are not contained within: " +
+                          rootDirectory.string() + ". Did you run ddb init?");
     }
 
     io::Path rootDir = rootDirectory;
@@ -76,11 +91,9 @@ std::vector<fs::path> getIndexPathList(const fs::path& rootDirectory, const std:
         if (p.filename() == DDB_FOLDER) continue;
 
         if (fs::is_directory(p)) {
-            try{
-                for(auto i = fs::recursive_directory_iterator(p);
-                        i != fs::recursive_directory_iterator();
-                        ++i ) {
-
+            try {
+                for (auto i = fs::recursive_directory_iterator(p);
+                     i != fs::recursive_directory_iterator(); ++i) {
                     fs::path rp = i->path();
 
                     // Skip .ddb
@@ -94,15 +107,15 @@ std::vector<fs::path> getIndexPathList(const fs::path& rootDirectory, const std:
                     }
 
                     if (includeDirs) {
-                        while(rp.has_parent_path() &&
-                              rootDir.isParentOf(rp.parent_path()) &&
-                              rp.string() != rp.parent_path().string()) {
+                        while (rp.has_parent_path() &&
+                               rootDir.isParentOf(rp.parent_path()) &&
+                               rp.string() != rp.parent_path().string()) {
                             rp = rp.parent_path();
                             directories[rp.string()] = true;
                         }
                     }
                 }
-            }catch(const fs::filesystem_error &e){
+            } catch (const fs::filesystem_error &e) {
                 throw FSException(e.what());
             }
 
@@ -112,9 +125,9 @@ std::vector<fs::path> getIndexPathList(const fs::path& rootDirectory, const std:
             result.push_back(p);
 
             if (includeDirs) {
-                while(p.has_parent_path() &&
-                      rootDir.isParentOf(p.parent_path()) &&
-                      p.string() != p.parent_path().string()) {
+                while (p.has_parent_path() &&
+                       rootDir.isParentOf(p.parent_path()) &&
+                       p.string() != p.parent_path().string()) {
                     p = p.parent_path();
                     directories[p.string()] = true;
                 }
@@ -131,41 +144,43 @@ std::vector<fs::path> getIndexPathList(const fs::path& rootDirectory, const std:
     return result;
 }
 
-std::vector<fs::path> getPathList(const std::vector<std::string> &paths, bool includeDirs, int maxDepth) {
+std::vector<fs::path> getPathList(const std::vector<std::string> &paths,
+                                  bool includeDirs, int maxDepth) {
     std::vector<fs::path> result;
     std::unordered_map<std::string, bool> directories;
 
     for (fs::path p : paths) {
         // fs::directory_options::skip_permission_denied
         if (p.filename() == DDB_FOLDER) continue;
-        
+
         try {
             if (fs::is_directory(p)) {
-                for(auto i = fs::recursive_directory_iterator(p);
-                        i != fs::recursive_directory_iterator();
-                        ++i ) {
-
+                for (auto i = fs::recursive_directory_iterator(p);
+                     i != fs::recursive_directory_iterator(); ++i) {
                     fs::path rp = i->path();
 
                     // Ignore system files on Windows
-                    #ifdef WIN32
-                    const DWORD attrs = GetFileAttributesW(rp.wstring().c_str());
-                    if (attrs & FILE_ATTRIBUTE_HIDDEN || attrs & FILE_ATTRIBUTE_SYSTEM) {
+#ifdef WIN32
+                    const DWORD attrs =
+                        GetFileAttributesW(rp.wstring().c_str());
+                    if (attrs & FILE_ATTRIBUTE_HIDDEN ||
+                        attrs & FILE_ATTRIBUTE_SYSTEM) {
                         i.disable_recursion_pending();
                         continue;
                     }
-                    #endif
+#endif
 
                     // Skip .ddb recursion
                     if (rp.filename() == DDB_FOLDER)
                         i.disable_recursion_pending();
 
                     // Max depth
-                    if (maxDepth > 0 && i.depth() >= (maxDepth - 1)) i.disable_recursion_pending();
+                    if (maxDepth > 0 && i.depth() >= (maxDepth - 1))
+                        i.disable_recursion_pending();
 
                     if (fs::is_directory(rp)) {
                         if (includeDirs) result.push_back(rp);
-                    }else{
+                    } else {
                         result.push_back(rp);
                     }
                 }
@@ -183,28 +198,28 @@ std::vector<fs::path> getPathList(const std::vector<std::string> &paths, bool in
     return result;
 }
 
+std::vector<std::string> expandPathList(const std::vector<std::string> &paths,
+                                        bool recursive, int maxRecursionDepth) {
+    if (!recursive) return paths;
 
-std::vector<std::string> expandPathList(const std::vector<std::string> &paths, bool recursive, int maxRecursionDepth) {
-
-	if (!recursive) return paths;
-    	
     std::vector<std::string> result;
     auto pl = getPathList(paths, true, maxRecursionDepth);
-    for (auto& p : pl) {
-	    result.push_back(p.string());
+    for (auto &p : pl) {
+        result.push_back(p.string());
     }
     return result;
 }
 
-
-bool checkUpdate(Entry &e, const fs::path &p, long long dbMtime, const std::string &dbHash) {
+bool checkUpdate(Entry &e, const fs::path &p, long long dbMtime,
+                 const std::string &dbHash) {
     const bool folder = fs::is_directory(p);
 
     // Did it change?
     e.mtime = io::Path(p).getModifiedTime();
 
     if (e.mtime != dbMtime) {
-        LOGD << p.string() << " modified time ( " << dbMtime << " ) differs from file value: " << e.mtime;
+        LOGD << p.string() << " modified time ( " << dbMtime
+             << " ) differs from file value: " << e.mtime;
 
         if (folder) {
             // Don't check hashes for folders
@@ -213,7 +228,8 @@ bool checkUpdate(Entry &e, const fs::path &p, long long dbMtime, const std::stri
             e.hash = Hash::fileSHA256(p.string());
 
             if (dbHash != e.hash) {
-                LOGD << p.string() << " hash differs (old: " << dbHash << " | new: " << e.hash << ")";
+                LOGD << p.string() << " hash differs (old: " << dbHash
+                     << " | new: " << e.hash << ")";
                 return true;
             }
         }
@@ -239,15 +255,18 @@ void doUpdate(Statement *updateQ, const Entry &e) {
     updateQ->execute();
 }
 
-
-void addToIndex(Database *db, const std::vector<std::string> &paths, AddCallback callback) {
-    if (paths.empty()) return; // Nothing to do
+void addToIndex(Database *db, const std::vector<std::string> &paths,
+                AddCallback callback) {
+    if (paths.empty()) return;  // Nothing to do
     const fs::path directory = rootDirectory(db);
     auto pathList = getIndexPathList(directory, paths, true);
 
     auto q = db->query("SELECT mtime,hash FROM entries WHERE path=?");
-    auto insertQ = db->query("INSERT INTO entries (path, hash, type, meta, mtime, size, depth, point_geom, polygon_geom) "
-                             "VALUES (?, ?, ?, ?, ?, ?, ?, GeomFromText(?, 4326), GeomFromText(?, 4326))");
+    auto insertQ = db->query(
+        "INSERT INTO entries (path, hash, type, meta, mtime, size, depth, "
+        "point_geom, polygon_geom) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, GeomFromText(?, 4326), GeomFromText(?, "
+        "4326))");
     const auto updateQ = db->query(UPDATE_QUERY);
     db->exec("BEGIN EXCLUSIVE TRANSACTION");
 
@@ -271,7 +290,6 @@ void addToIndex(Database *db, const std::vector<std::string> &paths, AddCallback
             parseEntry(p, directory, e, true);
 
             if (add) {
-
                 insertQ->bind(1, e.path);
                 insertQ->bind(2, e.hash);
                 insertQ->bind(3, e.type);
@@ -287,30 +305,31 @@ void addToIndex(Database *db, const std::vector<std::string> &paths, AddCallback
                 doUpdate(updateQ.get(), e);
             }
 
-            if (callback != nullptr) if (!callback(e, !add)) return; // cancel
+            if (callback != nullptr)
+                if (!callback(e, !add)) return;  // cancel
         }
 
         q->reset();
     }
 
     db->exec("COMMIT");
+
+    // Update last edit
+    db->setLastUpdate();
 }
 
 void removeFromIndex(Database *db, const std::vector<std::string> &paths) {
-
-    if (paths.empty())
-    {
-    	// Nothing to do
+    if (paths.empty()) {
+        // Nothing to do
         LOGD << "No paths provided";
-	    return;
+        return;
     }
-	
+
     const fs::path directory = rootDirectory(db);
 
-    auto pathList = std::vector<fs::path>(paths.begin(), paths.end()); 
+    auto pathList = std::vector<fs::path>(paths.begin(), paths.end());
 
     for (auto &p : pathList) {
-
         LOGD << "Deleting path: " << p;
 
         auto relPath = io::Path(p).relativeTo(directory);
@@ -318,48 +337,42 @@ void removeFromIndex(Database *db, const std::vector<std::string> &paths) {
         LOGD << "Rel path: " << relPath.generic();
 
         auto entryMatches = getMatchingEntries(db, relPath.generic());
-    	
+
         int tot = 0;
 
-    	for (auto &e : entryMatches)
-    	{
+        for (auto &e : entryMatches) {
             auto cnt = deleteFromIndex(db, e.path);
 
-    		if (e.type == Directory)    		
-                cnt += deleteFromIndex(db, e.path, true);
+            if (e.type == Directory) cnt += deleteFromIndex(db, e.path, true);
 
-            // if (!cnt)            
+            // if (!cnt)
             //     std::cout << "No matching entries" << std::endl;
 
             tot += cnt;
-            
-    	}
+        }
 
-        if (!tot)
-            throw FSException("No matching entries");
+        if (!tot) throw FSException("No matching entries");
     }
+
+    // Update last edit
+    db->setLastUpdate();
 }
 
+std::string sanitize_query_param(const std::string &str) {
+    std::string res(str);
 
-std::string sanitize_query_param(const std::string& str)
-{
-	std::string res(str);
-
-	// TAKES INTO ACCOUNT PATHS THAT CONTAINS EVERY SORT OF STUFF
+    // TAKES INTO ACCOUNT PATHS THAT CONTAINS EVERY SORT OF STUFF
     utils::string_replace(res, "/", "//");
     utils::string_replace(res, "%", "/%");
     utils::string_replace(res, "_", "/_");
-    //utils::string_replace(res, "?", "/?");
-    //utils::string_replace(res, "*", "/*");
+    // utils::string_replace(res, "?", "/?");
+    // utils::string_replace(res, "*", "/*");
     utils::string_replace(res, "*", "%");
 
     return res;
-
 }
-	
-int deleteFromIndex(Database* db, const std::string &query, bool isFolder)
-{
 
+int deleteFromIndex(Database *db, const std::string &query, bool isFolder) {
     int count = 0;
 
     LOGD << "Query: " << query;
@@ -368,26 +381,26 @@ int deleteFromIndex(Database* db, const std::string &query, bool isFolder)
 
     LOGD << "Sanitized: " << str;
 
-	if (isFolder) {
-		str += "//%";
+    if (isFolder) {
+        str += "//%";
 
         LOGD << "Folder: " << str;
     }
-		
-    auto q = db->query("SELECT path, type FROM entries WHERE path LIKE ? ESCAPE '/'");
+
+    auto q = db->query(
+        "SELECT path, type FROM entries WHERE path LIKE ? ESCAPE '/'");
 
     q->bind(1, str);
 
     bool res = false;
 
-	while(q->fetch())
-	{
+    while (q->fetch()) {
         res = true;
-                
+
         std::cout << "D\t" << q->getText(0) << std::endl;
-        count++;        
-	}
-	
+        count++;
+    }
+
     q->reset();
 
     if (res) {
@@ -397,57 +410,55 @@ int deleteFromIndex(Database* db, const std::string &query, bool isFolder)
         q->execute();
 
         q->reset();
-    } 
+    }
 
     return count;
 }
 
-	
-std::vector<Entry> getMatchingEntries(Database* db, const fs::path& path, int maxRecursionDepth, bool isFolder) {
-
-	// 0 is ALL_DEPTHS
-	if (maxRecursionDepth < 0)
+std::vector<Entry> getMatchingEntries(Database *db, const fs::path &path,
+                                      int maxRecursionDepth, bool isFolder) {
+    // 0 is ALL_DEPTHS
+    if (maxRecursionDepth < 0)
         throw FSException("Max recursion depth cannot be negative");
-	
-	const auto query = path.string();
+
+    const auto query = path.string();
 
     LOGD << "Query: " << query;
 
     auto sanitized = sanitize_query_param(query);
 
-    if (sanitized.length() == 0)
-        sanitized = "%";
-	
-	LOGD << "Sanitized: " << sanitized;
+    if (sanitized.length() == 0) sanitized = "%";
+
+    LOGD << "Sanitized: " << sanitized;
 
     if (isFolder) {
         sanitized += "//%";
 
         LOGD << "Folder: " << sanitized;
-
     }
 
-    std::string sql = "SELECT path, hash, type, meta, mtime, size, depth, AsGeoJSON(point_geom), AsGeoJSON(polygon_geom) FROM entries WHERE path LIKE ? ESCAPE '/'";
+    std::string sql =
+        "SELECT path, hash, type, meta, mtime, size, depth, "
+        "AsGeoJSON(point_geom), AsGeoJSON(polygon_geom) FROM entries WHERE "
+        "path LIKE ? ESCAPE '/'";
 
     if (maxRecursionDepth > 0)
         sql += " AND depth <= " + std::to_string(maxRecursionDepth - 1);
-	
+
     auto q = db->query(sql);
-    	
+
     std::vector<Entry> entries;
 
     q->bind(1, sanitized);
 
-	while(q->fetch())
-	{
-		Entry e(*q);		
-        entries.push_back(e);		
+    while (q->fetch()) {
+        Entry e(*q);
+        entries.push_back(e);
     }
 
     q->reset();
 
     return entries;
-
 }
 
 void syncIndex(Database *db) {
@@ -459,31 +470,41 @@ void syncIndex(Database *db) {
 
     db->exec("BEGIN EXCLUSIVE TRANSACTION");
 
-    while(q->fetch()) {
+    bool changed = false;
+
+    while (q->fetch()) {
         io::Path relPath = fs::path(q->getText(0));
-        fs::path p = directory / relPath.get(); // TODO: does this work on Windows?
+        fs::path p =
+            directory / relPath.get();  // TODO: does this work on Windows?
         Entry e;
 
-        if (fs::exists(p)) {
+        if (exists(p)) {
             if (checkUpdate(e, p, q->getInt64(1), q->getText(2))) {
                 parseEntry(p, directory, e, true);
                 doUpdate(updateQ.get(), e);
                 std::cout << "U\t" << e.path << std::endl;
+                changed = true;
             }
         } else {
             // Removed
             deleteQ->bind(1, relPath.generic());
             deleteQ->execute();
             std::cout << "D\t" << relPath.generic() << std::endl;
+            changed = true;
         }
     }
 
     db->exec("COMMIT");
+
+    // Update last edit only if something is changed
+    if (changed) db->setLastUpdate();
 }
 
-std::string initIndex(const std::string &directory, bool fromScratch){
+std::string initIndex(const std::string &directory, bool fromScratch) {
     const fs::path dirPath = directory;
-    if (!exists(dirPath)) throw FSException("Invalid directory: " + dirPath.string() + " (does not exist)");
+    if (!exists(dirPath))
+        throw FSException("Invalid directory: " + dirPath.string() +
+                          " (does not exist)");
 
     auto ddbDirPath = dirPath / DDB_FOLDER;
     if (std::string(directory) == ".")
@@ -492,29 +513,30 @@ std::string initIndex(const std::string &directory, bool fromScratch){
 
     LOGD << "Checking if .ddb directory exists...";
     if (exists(ddbDirPath)) {
-        throw FSException("Cannot initialize database: " + ddbDirPath.string() + " already exists");
+        throw FSException("Cannot initialize database: " + ddbDirPath.string() +
+                          " already exists");
     }
 
     if (create_directory(ddbDirPath)) {
         LOGD << ddbDirPath.string() + " created";
-    }
-    else {
-        throw FSException("Cannot create directory: " + ddbDirPath.string() + ". Check that you have the proper permissions?");
+    } else {
+        throw FSException("Cannot create directory: " + ddbDirPath.string() +
+                          ". Check that you have the proper permissions?");
     }
 
     LOGD << "Checking if database exists...";
-    if (exists(dbasePath))
-    {
+    if (exists(dbasePath)) {
         throw FSException(ddbDirPath.string() + " already exists");
     }
 
-    if (!fromScratch){
+    if (!fromScratch) {
         // "Fast" init by copying the pre-built empty database index
         // this prevents the slow table generation process
-        const fs::path emptyDbPath = UserProfile::get()->getTemplatesDir() / ("empty-dbase-" APP_REVISION ".sqlite");
+        const fs::path emptyDbPath = UserProfile::get()->getTemplatesDir() /
+                                     ("empty-dbase-" APP_REVISION ".sqlite");
 
         // Need to create?
-        if (!fs::exists(emptyDbPath)){
+        if (!exists(emptyDbPath)) {
             LOGD << "Creating " << emptyDbPath.string();
 
             // Create database
@@ -524,23 +546,25 @@ std::string initIndex(const std::string &directory, bool fromScratch){
             db->close();
         }
 
-        if (fs::exists(emptyDbPath)){
+        if (exists(emptyDbPath)) {
             // Copy
-            try{
-                fs::copy(emptyDbPath, dbasePath);
-            }catch(fs::filesystem_error &e){
+            try {
+                copy(emptyDbPath, dbasePath);
+            } catch (fs::filesystem_error &e) {
                 throw FSException(e.what());
             }
 
-            LOGD << "Copied " << emptyDbPath.string() << " to " << dbasePath.string();
-        }else{
+            LOGD << "Copied " << emptyDbPath.string() << " to "
+                 << dbasePath.string();
+        } else {
             // For some reason it's missing, generate from scratch
-            LOGD << "Cannot find empty-dbase.sqlite in data path, strange! Building from scratch instead";
+            LOGD << "Cannot find empty-dbase.sqlite in data path, strange! "
+                    "Building from scratch instead";
             fromScratch = true;
         }
     }
 
-    if (fromScratch){
+    if (fromScratch) {
         LOGD << "Creating " << dbasePath.string();
 
         // Create database
@@ -550,8 +574,11 @@ std::string initIndex(const std::string &directory, bool fromScratch){
         db->close();
     }
 
+    // Update last edit
+    const auto db = open(ddbDirPath.string(), true);
+    db->setLastUpdate();
+
     return ddbDirPath.string();
 }
 
-}
-
+}  // namespace ddb

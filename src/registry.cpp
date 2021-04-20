@@ -589,16 +589,14 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
     LOGD << "Ddb folder = " << ddbPath;
 
     TagManager tagManager(ddbPath);
-    SyncManager syncManager(ddbPath);
 
     // 1) Get our tag using tagmanager
     const auto tag = tagManager.getTag();
 
     // 2) Get our last sync time for that specific registry using syncmanager
-    const auto lastSync = syncManager.getLastSync(this->url);
+    const auto lastUpdate = db->getLastUpdate();
 
     LOGD << "Tag = " << tag;
-    LOGD << "LastSync = " << lastSync;
 
     const auto tagInfo = RegistryUtils::parseTag(tag);
 
@@ -608,17 +606,22 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
 
     LOGD << "Dataset mtime = " << dsInfo.mtime;
 
-    out << "Pull using tag '" << tag << "', last sync " << lastSync
-        << ", dataset mtime " << dsInfo.mtime << std::endl;
+    out << "Pulling from '" << tag << "'" << std::endl;
+    LOGD  << "Local mtime " << lastUpdate << ", remote mtime " << dsInfo.mtime;
 
-    // 4) Alert if dataset_mtime < last_sync (it means we have more recent
-    //    changes than server, so the pull is pointless or potentially dangerous)
-    if (dsInfo.mtime < lastSync && !force)
+    // 4) Check if we have more recent changes than server, so the pull is pointless or potentially dangerous)
+    if (lastUpdate == dsInfo.mtime){
+        // Nothing to do, datasets should be in sync
+        out << "Already up to date." << std::endl;
+        return;
+    }else if (lastUpdate > dsInfo.mtime && !force)
         throw AppException(
-            "Can pull only if dataset changes are newer than ours. Use force "
-            "parameter to override (CAUTION)");
+            "[Warning] Your dataset has local changes, but you haven't "
+            "pushed these changes to the remote registry. If you pull now, "
+            "your local changes might be overwritten. Use --force "
+            "to continue.");
 
-    const auto tempDdbFolder = fs::temp_directory_path() / "ddb_temp_folder" /
+    const auto tempDdbFolder = UserProfile::get()->getProfilePath("pull_cache", true) /
                                (tagInfo.organization + "-" + tagInfo.dataset);
 
     LOGD << "Temp ddb folder = " << tempDdbFolder;
@@ -629,9 +632,7 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
 
     out << "Remote ddb downloaded" << std::endl;
 
-    LOGD << "Remote ddb downloaded";
-
-    auto source = open(tempDdbFolder.generic_string(), true);
+    auto source = open(tempDdbFolder.generic_string(), false);
 
     // 6) Perform local diff using delta method
     const auto delta = getDelta(source.get(), db.get());
@@ -645,7 +646,7 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
         << delta.copies.size() << " copies, " << delta.removes.size()
         << " removes" << std::endl;
 
-    const auto tempNewFolder = fs::temp_directory_path() / "ddb_new_folder" /
+    const auto tempNewFolder = UserProfile::get()->getProfilePath("pull_cache", false) /
                                (tagInfo.organization + "-" + tagInfo.dataset) /
                                std::to_string(time(nullptr));
 
@@ -660,8 +661,7 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
                 .select([](const AddAction &add) { return add.path; })
                 .toStdVector();
 
-        out << "Downloading missing files (this could take a while)"
-            << std::endl;
+        LOGD << "Downloading missing files (this could take a while)";
 
         LOGD << "Files to download:";
         j = filesToDownload;
@@ -678,8 +678,8 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
         // Check if we have anything to do
         if (delta.copies.empty() && delta.removes.empty()) {
             LOGD << "No changes to perform, pull done";
-            out << "No changes, nothing to do here" << std::endl;
-            // NOTE: Should be update lastsync?
+            out << "Already up to date." << std::endl;
+            db->setLastUpdate(dsInfo.mtime);
 
             return;
         }
@@ -688,34 +688,34 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
     // 8) Apply changes to local files
     applyDelta(delta, ddbPath.parent_path(), tempNewFolder);
 
-    out << "Delta applied" << std::endl;
-
     LOGD << "Removing temp new files folder";
+
     remove_all(tempNewFolder);
 
-    LOGD << "Replacing ddb folder";
+    LOGD << "Replacing DDB index (copy from '" << tempDdbFolder << "' to '" << ddbPath << "')";
 
     // 9) Replace ddb database
-    copy(tempDdbFolder, ddbPath);
+    db->close();
+    source->close();
 
-    out << "DDB replaced" << std::endl;
-
-    LOGD << "Updating syncmanager and tagmanager";
-
-    // 10) Update last sync time
-    syncManager.setLastSync(time(nullptr), this->url);
-    tagManager.setTag(tag);
-
-    out << "Updated last sync time, pull done" << std::endl;
+    std::error_code e;
+    io::copy(tempDdbFolder / DDB_FOLDER / "dbase.sqlite", ddbPath / "dbase.sqlite");
 
     LOGD << "Pull done";
+
+    // Cleanup
+    io::assureIsRemoved(tempDdbFolder);
+    io::assureIsRemoved(tempNewFolder);
+
 }
 
 void zipFolder(const fs::path &folder, const fs::path &archive) {
     miniz_cpp::zip_file file;
 
-    for (const auto &entry : fs::recursive_directory_iterator(folder))
-        file.write(entry.path().generic_string());
+    for (const auto &entry : fs::recursive_directory_iterator(folder)) {
+        const auto relPath = io::Path(entry.path()).relativeTo(folder);
+        file.write(entry.path().generic_string(), relPath.string());
+    }
 
     file.save(archive.generic_string());
 }
@@ -738,7 +738,7 @@ DDB_DLL void Registry::push(const std::string &path, const bool force,
         5.2) The server answers with the needed files list
     6) Foreach of the needed files call POST endpoint
     7) When done call commit endpoint
-    
+    8) Update last sync
     */
 
     auto db = open(path, true);
@@ -747,16 +747,16 @@ DDB_DLL void Registry::push(const std::string &path, const bool force,
     LOGD << "Ddb folder = " << ddbPath;
 
     TagManager tagManager(ddbPath);
-    SyncManager syncManager(ddbPath);
+    //SyncManager syncManager(ddbPath);
 
     // 1) Get our tag using tagmanager
     const auto tag = tagManager.getTag();
 
-    // 2) Get our last sync time for that specific registry using syncmanager
-    const auto lastSync = syncManager.getLastSync(this->url);
+    // 3) Get local mtime
+    const auto lastUpdate = db->getLastUpdate();
 
     LOGD << "Tag = " << tag;
-    LOGD << "LastSync = " << lastSync;
+    LOGD << "LastUpdate = " << lastUpdate;
 
     const auto tagInfo = RegistryUtils::parseTag(tag);
 
@@ -766,15 +766,21 @@ DDB_DLL void Registry::push(const std::string &path, const bool force,
 
     LOGD << "Dataset mtime = " << dsInfo.mtime;
 
-    out << "Push using tag '" << tag << "', last sync " << lastSync
-        << ", dataset mtime " << dsInfo.mtime << std::endl;
+    out << "Pushing to '" << tag << "'" << std::endl;
+    LOGD << "Local mtime " << lastUpdate << ", remote mtime " << dsInfo.mtime;
 
     // 4) Alert if dataset_mtime > last_sync (it means we have less recent changes
     //    than server, so the push is pointless or potentially dangerous)
-    if (dsInfo.mtime > lastSync && !force)
+    if (lastUpdate == dsInfo.mtime){
+        // Nothing to do, datasets should be in sync
+        out << "Already up to date." << std::endl;
+        return;
+    }else if (dsInfo.mtime > lastUpdate && !force)
         throw AppException(
-            "Can push only if dataset changes are older than ours. Use force "
-            "parameter to override (CAUTION)");
+            "[Warning] The remote dataset has newer changes, but you haven't "
+            "pulled those changes from the remote registry. If you push now, "
+            "the remote dataset might be overwritten. Use --force "
+            "to continue.");
 
     // 5) Initialize server push
     LOGD << "Initializing server push";
@@ -796,6 +802,8 @@ DDB_DLL void Registry::push(const std::string &path, const bool force,
     // 5.2) The server answers with the needed files list
     const auto filesList = pushManager.init(tempArchive);
 
+    LOGD << "Push initialized";
+
     const auto basePath = ddbPath.parent_path();
 
     for (const auto& file : filesList)
@@ -804,14 +812,18 @@ DDB_DLL void Registry::push(const std::string &path, const bool force,
 
         out << "Transfering '" << file << "'" << std::endl;
 
+        LOGD << "Upload: " << fullPath;
+
         // 6) Foreach of the needed files call POST endpoint
-        pushManager.upload(fullPath.generic_string());
+        pushManager.upload(fullPath.generic_string(), file);
     }
 
     out << "Transfers done" << std::endl;
     
     // 7) When done call commit endpoint
     pushManager.commit();
+
+    LOGD << "Push committed, cleaning up";
 
     // Cleanup
     fs::remove(tempArchive);

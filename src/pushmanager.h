@@ -30,7 +30,7 @@ class PushManager {
     }
 
     DDB_DLL std::vector<std::string> init(const fs::path& ddbPathArchive);
-    DDB_DLL void upload(const std::string& file);
+    DDB_DLL void upload(const std::string& fullPath, const std::string& file);
     DDB_DLL void commit();
 
     DDB_DLL std::string getOrganization() { return this->organization; }

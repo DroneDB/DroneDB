@@ -372,6 +372,16 @@ void assureIsRemoved(const fs::path p){
     }
 }
 
+void copy(const fs::path &from, const fs::path &to){
+    std::error_code e;
+
+    fs::copy(from, to, fs::copy_options::overwrite_existing, e);
+    if (e.value() != 0){
+        throw FSException("Cannot copy " + from.string() + " --> " + to.string() +
+                          " (" + e.message() + ")");
+    }
+}
+
 FileLock::FileLock(const fs::path &p){
     lockFile = (p.parent_path() / p.filename()).string() + ".lock";
 
