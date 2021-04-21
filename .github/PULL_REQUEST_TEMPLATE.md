@@ -1,0 +1,4 @@
+ - [ ] Compiles on Windows and Linux
+ - [ ] Manual tests on both Windows and Linux to confirm the functionality/command works
+ - [ ] Manual tests on commands/functionality that might have been affected by these changes.
+ - [ ] There are no styling changes to unrelated code.
