@@ -2,65 +2,77 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+#include "dbops.h"
 #include "status.h"
+
 
 #include <ddb.h>
 #include <mio.h>
 
-#include "dbops.h"
 #include "exceptions.h"
 
-namespace ddb {
+namespace ddb
+{
 
-void statusIndex(Database* db, const FileStatusCallback& cb) {
-    const fs::path directory = rootDirectory(db);
+	void statusIndex(Database* db, const FileStatusCallback& cb)
+	{
 
-    auto q = db->query("SELECT path,mtime,hash FROM entries");
+		const fs::path directory = rootDirectory(db);
 
-    std::set<std::string> checkedPaths;
+		auto q = db->query("SELECT path,mtime,hash FROM entries");
 
-    while (q->fetch()) {
-        io::Path relPath = fs::path(q->getText(0));
-        auto p = directory / relPath.get();  // TODO: does this work on Windows?
-        Entry e;
+		std::set<std::string> checkedPaths;
 
-        auto path = p.generic_string();
+		while (q->fetch())
+		{
+			io::Path relPath = fs::path(q->getText(0));
+			auto p = directory / relPath.get(); // TODO: does this work on Windows?
+			Entry e;
 
-        checkedPaths.insert(path);
+			auto path = p.generic_string();
 
-        const auto status = checkUpdate(e, p, q->getInt64(1), q->getText(2));
+			checkedPaths.insert(path);
 
-        cb(status, relPath.generic());
-                
-    }
+        	const auto status = checkUpdate(e, p, q->getInt64(1), q->getText(2));
 
-    try {
-        for (auto i = fs::recursive_directory_iterator(directory);
-             i != fs::recursive_directory_iterator(); ++i) {
-            auto path = i->path();
-            auto p = path.generic_string();
+        	cb(status, relPath.generic());
+		}
 
-            // Skips already checked folders
-            if (checkedPaths.count(p) == 1) continue;
+        try{
+            for (auto i = fs::recursive_directory_iterator(directory);
+                i != fs::recursive_directory_iterator();
+                ++i) {
 
-            if (p == directory.generic_string()) {
-                LOGD << "Skipping parent folder";
-                continue;
+                auto path = i->path();
+                auto p = path.generic_string();
+
+                // Skips already checked folders
+                if (checkedPaths.count(p) == 1)
+                    continue;
+
+                if (p == directory.generic_string())
+                {
+                    LOGD << "Skipping parent folder";
+                    continue;
+                }
+
+                // Skip .ddb
+                if (path.filename() == DDB_FOLDER)
+                    i.disable_recursion_pending();
+
+                if (p.find(DDB_FOLDER) != std::string::npos)
+                {
+                    LOGD << "Skipping ddb folder";
+                    continue;
+                }
+
+                cb(NotIndexed, io::Path(p).relativeTo(directory).generic());
+
             }
-
-            // Skip .ddb
-            if (path.filename() == DDB_FOLDER) i.disable_recursion_pending();
-
-            if (p.find(DDB_FOLDER) != std::string::npos) {
-                LOGD << "Skipping ddb folder";
-                continue;
-            }
-
-            cb(NotIndexed, io::Path(p).relativeTo(directory).generic());
+        }catch(const fs::filesystem_error &e){
+            throw FSException(e.what());
         }
-    } catch (const fs::filesystem_error& e) {
-        throw FSException(e.what());
-    }
-}
+		
+	}
 
-}  // namespace ddb
+} // namespace ddb
