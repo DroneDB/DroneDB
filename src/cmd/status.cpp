@@ -2,10 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-#include "status.h"
-
 #include <iostream>
-
+#include "status.h"
 #include "../status.h"
 #include "dbops.h"
 
@@ -31,25 +29,28 @@ std::string Status::description() {
 }
 
 void Status::run(cxxopts::ParseResult &opts) {
-    const auto workingDir = opts["working-dir"].as<std::string>();
 
+    const auto workingDir = opts["working-dir"].as<std::string>();
+   
     const auto db = ddb::open(workingDir, true);
 
-    const auto cb = [](ddb::FileStatus status, const std::string &string) {
-        switch (status) {
-            case ddb::NotIndexed:
+    const auto cb = [](ddb::FileStatus status, const std::string& string)
+    {
+        switch(status)
+        {
+	        case ddb::NotIndexed: 
 
                 std::cout << "?\t";
 
                 break;
-
-            case ddb::Deleted:
+        	
+	        case ddb::Deleted: 
 
                 std::cout << "!\t";
 
                 break;
-
-            case ddb::Modified:
+        	
+	        case ddb::Modified: 
 
                 std::cout << "M\t";
 
@@ -60,16 +61,18 @@ void Status::run(cxxopts::ParseResult &opts) {
                 // Don't print anything
 
                 break;
-
-            default:
+        	
+	        default:
 
                 std::cout << "?\t";
+                
         }
 
         std::cout << string << std::endl;
     };
-
+	
     statusIndex(db.get(), cb);
 }
 
-}  // namespace cmd
+}
+
