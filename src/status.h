@@ -17,6 +17,8 @@ namespace ddb {
 		NotModified
 	};
 
+	DDB_DLL FileStatus checkUpdate(Entry &e, const fs::path &p, long long dbMtime, const std::string &dbHash);
+
 	typedef std::function<void(const FileStatus status, const std::string& file)> FileStatusCallback;
 
 	DDB_DLL void statusIndex(Database* db, const FileStatusCallback& cb);
