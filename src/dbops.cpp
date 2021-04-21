@@ -4,6 +4,8 @@
 #include "dbops.h"
 
 #include <ddb.h>
+#include <status.h>
+
 
 #include <cstdlib>
 
@@ -210,9 +212,15 @@ std::vector<std::string> expandPathList(const std::vector<std::string> &paths,
     return result;
 }
 
-bool checkUpdate(Entry &e, const fs::path &p, long long dbMtime,
+FileStatus checkUpdate(Entry &e, const fs::path &p, long long dbMtime,
                  const std::string &dbHash) {
+
+    if (!exists(p))
+        return Deleted;
+
     const bool folder = fs::is_directory(p);
+
+    if (folder) return NotModified;
 
     // Did it change?
     e.mtime = io::Path(p).getModifiedTime();
@@ -220,22 +228,18 @@ bool checkUpdate(Entry &e, const fs::path &p, long long dbMtime,
     if (e.mtime != dbMtime) {
         LOGD << p.string() << " modified time ( " << dbMtime
              << " ) differs from file value: " << e.mtime;
+        
+        e.hash = Hash::fileSHA256(p.string());
 
-        if (folder) {
-            // Don't check hashes for folders
-            return true;
-        } else {
-            e.hash = Hash::fileSHA256(p.string());
-
-            if (dbHash != e.hash) {
-                LOGD << p.string() << " hash differs (old: " << dbHash
-                     << " | new: " << e.hash << ")";
-                return true;
-            }
+        if (dbHash != e.hash) {
+            LOGD << p.string() << " hash differs (old: " << dbHash
+                    << " | new: " << e.hash << ")";
+            return Modified;
         }
+        
     }
 
-    return false;
+    return NotModified;
 }
 
 void doUpdate(Statement *updateQ, const Entry &e) {

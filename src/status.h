@@ -13,7 +13,8 @@ namespace ddb {
 	enum FileStatus {
         NotIndexed,
 		Deleted,
-		Modified
+		Modified,
+		NotModified
 	};
 
 	typedef std::function<void(const FileStatus status, const std::string& file)> FileStatusCallback;
