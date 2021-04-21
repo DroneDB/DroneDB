@@ -2,7 +2,8 @@ name: Install Scripts
 
 on:
   push:
-    branches: [ master ]
+    tags:
+      - 'v*.*.*'
 
 jobs:
   publish-install-script:
@@ -13,10 +14,15 @@ jobs:
     steps:
     - name: Checkout
       uses: actions/checkout@v1
+    - name: Set env
+      run: |
+        echo "RELEASE_TAG=${GITHUB_REF#refs/*/}" >> $GITHUB_ENV
     - name: Commit files
       run: |
         git clone https://github.com/DroneDB/get.dronedb
         cp scripts/linux_install_script.sh get.dronedb/index.html
+        sed -i "s/###RELEASE_TAG###/$RELEASE_TAG/g" get.dronedb/index.html
+        sed -i "s/###RELEASE_VERSION###/${RELEASE_TAG:1}/g" get.dronedb/index.html
         cd get.dronedb
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"

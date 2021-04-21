@@ -3,6 +3,8 @@ name: C/C++ CI
 on:
     push:
         branches: [master]
+        tags:
+          - 'v*.*.*'
     pull_request:
         branches: [master]
 
@@ -31,6 +33,15 @@ jobs:
               with:
                 name: Compiled Binaries
                 path: build/dist/*.tgz
+            - name: Upload Binaries to Release
+              uses: svenstaro/upload-release-action@v2
+              if: startsWith(github.ref, 'refs/tags/')
+              with:
+                repo_token: ${{ secrets.GITHUB_TOKEN }}
+                file: build/dist/*.tgz
+                file_glob: true
+                tag: ${{ github.ref }}
+                overwrite: true
     build_windows:
         name: Build/Test on Windows
         runs-on: windows-latest
@@ -62,3 +73,12 @@ jobs:
               with:
                 name: Compiled Binaries
                 path: build\dist\*.zip
+            - name: Upload Binaries to Release
+              uses: svenstaro/upload-release-action@v2
+              if: startsWith(github.ref, 'refs/tags/')
+              with:
+                repo_token: ${{ secrets.GITHUB_TOKEN }}
+                file: build\dist\*.zip
+                file_glob: true
+                tag: ${{ github.ref }}
+                overwrite: true

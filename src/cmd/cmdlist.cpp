@@ -24,6 +24,7 @@
 #include "delta.h"
 #include "clone.h"
 #include "tag.h"
+#include "ept.h"
 #include "push.h"
 #include "pull.h"
 
@@ -51,6 +52,7 @@ namespace cmd {
       {"delta", new Delta()},
       {"clone", new Clone()},
       {"tag", new Tag()},
+      {"ept", new Ept()},
       {"push", new Push()},
       {"pull", new Pull()}
   };
@@ -68,7 +70,9 @@ namespace cmd {
       {"attrib", "chattr"},
       {"attr", "chattr"},
       {"diff", "delta"},
-      {"c","clone"}
+      {"c","clone"},
+      {"checkout", "clone"},
+      {"co", "clone"}
   };
 
 }

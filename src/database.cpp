@@ -4,7 +4,6 @@
 
 #include "database.h"
 
-
 #include <fstream>
 #include <string>
 
@@ -25,8 +24,7 @@ void Database::afterOpen() {
     }
 }
 
-Database &Database::createTables() {
-    std::string sql = R"<<<(
+const char *entriesTableDdl = R"<<<(
   SELECT InitSpatialMetaData(1, 'NONE');
   SELECT InsertEpsgSrid(4326);
 
@@ -41,11 +39,16 @@ Database &Database::createTables() {
   );
   SELECT AddGeometryColumn("entries", "point_geom", 4326, "POINTZ", "XYZ");
   SELECT AddGeometryColumn("entries", "polygon_geom", 4326, "POLYGONZ", "XYZ");
+)<<<";
 
+const char *passwordsTableDdl = R"<<<(
   CREATE TABLE IF NOT EXISTS passwords (
       salt TEXT,
       hash TEXT      
   );
+)<<<";
+
+const char *attributesTableDdl = R"<<<(
 
   CREATE TABLE IF NOT EXISTS attributes (
       name TEXT NOT NULL PRIMARY KEY,
@@ -54,8 +57,11 @@ Database &Database::createTables() {
       tvalue TEXT,
       bvalue BLOB
   );
-
 )<<<";
+
+Database &Database::createTables() {
+    const std::string sql = std::string(entriesTableDdl) + '\n' +
+                            passwordsTableDdl + '\n' + attributesTableDdl;
 
     LOGD << "About to create tables...";
     this->exec(sql);
@@ -64,30 +70,67 @@ Database &Database::createTables() {
     return *this;
 }
 
+DDB_DLL void Database::ensureSchemaConsistency() {
+
+    LOGD << "Ensuring schema consistency";
+
+    if (!this->tableExists("entries")) {
+        LOGD << "Entries table does not exist, creating it";
+        this->exec(entriesTableDdl);
+        LOGD << "Entries table created";
+    }
+
+    if (!this->tableExists("passwords")) {
+        LOGD << "Passwords table does not exist, creating it";
+        this->exec(passwordsTableDdl);
+        LOGD << "Passwords table created";
+    }
+
+    if (!this->tableExists("attributes")) {
+        LOGD << "Attributes table does not exist, creating it";
+        this->exec(attributesTableDdl);
+        LOGD << "Attributes table created";
+    }
+}
+
 void Database::setPublic(bool isPublic) {
     this->setBoolAttribute("public", isPublic);
 }
 
 bool Database::isPublic() const {
-    if (this->hasAttribute("public"))
-        return this->getBoolAttribute("public");
-    else
-        return false;
+    return this->hasAttribute("public") ? this->getBoolAttribute("public")
+                                        : false;
+}
+
+time_t Database::getLastUpdate() const {
+    return static_cast<time_t>(this->getIntAttribute("mtime"));
+}
+
+void Database::setLastUpdate(const time_t mtime) {
+    this->setIntAttribute("mtime", mtime);
 }
 
 void Database::chattr(json attrs) {
     for (auto &el : attrs.items()) {
         if (el.key() == "public" && el.value().is_boolean()) {
             this->setBoolAttribute("public", el.value());
-        } else {
-            throw InvalidArgsException("Invalid attribute " + el.key());
+            continue;
         }
+
+        if (el.key() == "mtime" && el.value().is_number_integer()) {
+            this->setIntAttribute("mtime", el.value());
+            continue;
+        }
+
+        throw InvalidArgsException("Invalid attribute " + el.key());
     }
 }
 
 json Database::getAttributes() const {
     json j;
+
     j["public"] = this->isPublic();
+    j["mtime"] = this->getLastUpdate();
 
     // See if we have a LICENSE.md and README.md in the index
     const std::string sql =
@@ -115,7 +158,7 @@ bool Database::getBoolAttribute(const std::string &name) const {
     return this->getIntAttribute(name) == 1;
 }
 
-void Database::setIntAttribute(const std::string &name, int value) {
+void Database::setIntAttribute(const std::string &name, long value) {
     const std::string sql =
         "INSERT OR REPLACE INTO attributes (name, ivalue) "
         "VALUES(?, ?)";
@@ -123,7 +166,7 @@ void Database::setIntAttribute(const std::string &name, int value) {
     const auto q = this->query(sql);
 
     q->bind(1, name);
-    q->bind(2, value);
+    q->bind(2, static_cast<long long>(value));
 
     q->execute();
 }
@@ -133,10 +176,7 @@ int Database::getIntAttribute(const std::string &name) const {
 
     const auto q = this->query(sql);
     q->bind(1, name);
-    if (q->fetch())
-        return q->getInt(0);
-    else
-        return 0;
+    return q->fetch() ? q->getInt(0) : 0;
 }
 
 bool Database::hasAttribute(const std::string &name) const {

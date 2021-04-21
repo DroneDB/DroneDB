@@ -13,7 +13,7 @@ namespace ddb{
 
 class Database : public SqliteDatabase {
   protected:
-    void setIntAttribute(const std::string &name, int value);
+    void setIntAttribute(const std::string &name, long value);
     void setBoolAttribute(const std::string &name, bool value);
 
     int getIntAttribute(const std::string &name) const;
@@ -26,9 +26,13 @@ class Database : public SqliteDatabase {
       DDB_DLL static void Initialize();
       DDB_DLL void afterOpen() override;
       DDB_DLL Database &createTables();
+      DDB_DLL void ensureSchemaConsistency();
 
       DDB_DLL void setPublic(bool isPublic);
       DDB_DLL bool isPublic() const;
+
+      DDB_DLL void setLastUpdate(time_t lastUpdate = time(nullptr));
+      DDB_DLL time_t getLastUpdate() const;
       DDB_DLL void chattr(json attrs);
 
       DDB_DLL json getAttributes() const;

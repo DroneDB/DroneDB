@@ -27,9 +27,9 @@ std::string Init::description() {
 
 void Init::run(cxxopts::ParseResult &opts) {
     std::string p = opts["working-dir"].as<std::string>();
-    bool fromScratch = opts["from-scratch"].count() > 0;
+    const bool fromScratch = opts["from-scratch"].count() > 0;
 
-    std::string outPath = ddb::initIndex(p, fromScratch);
+    const std::string outPath = ddb::initIndex(p, fromScratch);
     std::cout << "Initialized empty database in " << outPath << std::endl;
 }
 

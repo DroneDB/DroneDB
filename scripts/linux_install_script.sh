@@ -16,9 +16,8 @@ cd "${__dirname}"
 #       located at https://github.com/DroneDB/DroneDB/scripts/linux_install_script.sh
 #       before executing.
 #
-# TODO: this needs to be updated automatically...
 
-LATEST_RELEASE="https://github.com/DroneDB/DroneDB/releases/download/v0.9.8/ddb-0.9.8-linux.tgz"
+LATEST_RELEASE="https://github.com/DroneDB/DroneDB/releases/download/###RELEASE_TAG###/ddb-###RELEASE_VERSION###-linux.tgz"
 
 command_exists() {
 	command -v "$@" > /dev/null 2>&1

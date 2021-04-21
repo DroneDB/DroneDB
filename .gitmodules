@@ -4,3 +4,6 @@
 [submodule "vendor/exiv2"]
 	path = vendor/exiv2
 	url = https://github.com/DroneDB/exiv2
+[submodule "vendor/untwine"]
+	path = vendor/untwine
+	url = https://github.com/pierotofy/untwine/
