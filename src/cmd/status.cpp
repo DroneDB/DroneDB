@@ -60,7 +60,7 @@ void Status::run(cxxopts::ParseResult &opts) {
 
                 // Don't print anything
 
-                break;
+                return;
         	
 	        default:
 
