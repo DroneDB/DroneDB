@@ -10,12 +10,12 @@
 #include "dbops.h"
 
 namespace ddb {
-	enum FileStatus {
+        enum FileStatus {
                 NotIndexed,
-		Deleted,
-		Modified,
-		NotModified
-	};
+                Deleted,
+                Modified,
+                NotModified
+        };
 
 	DDB_DLL FileStatus checkUpdate(Entry &e, const fs::path &p, long long dbMtime, const std::string &dbHash);
 	
