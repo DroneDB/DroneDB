@@ -67,9 +67,23 @@ void Chattr::run(cxxopts::ParseResult& opts) {
             LOGD << "Setting attributes";
 
             if (attribute == "+public" || attribute == "+p") {
-                db->setPublic(true);
+
+                if (!db->isPublic()) {
+
+                    db->setPublic(true);
+
+                    // Update last edit
+                    db->setLastUpdate();
+                }
             } else if (attribute == "-public" || attribute == "-p") {
-                db->setPublic(false);
+
+                if (db->isPublic()) {
+                    
+                    db->setPublic(false);
+
+                    // Update last edit
+                    db->setLastUpdate();
+                }
             } else {
                 throw ddb::InvalidArgsException("Attribute not valid");
             }
