@@ -612,10 +612,10 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
     // 4) Check if we have more recent changes than server, so the pull is pointless or potentially dangerous)
 
     if (force) {
-        out << "Forcing pull" << std::endl;
+        out << "Forcing pull." << std::endl;
     } else {
         if (lastUpdate == dsInfo.mtime) {
-            
+
             // Nothing to do, datasets should be in sync
             out << "Already up to date." << std::endl;
             return;
