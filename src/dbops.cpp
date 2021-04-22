@@ -497,7 +497,6 @@ void syncIndex(Database *db) {
             break;
 
             case Modified:
-            case NotIndexed:
 
                 parseEntry(p, directory, e, true);
                 doUpdate(updateQ.get(), e);
@@ -505,6 +504,9 @@ void syncIndex(Database *db) {
                 changed = true;
 
             break;
+
+            default:
+                ; // Do nothing
 
         }
     }

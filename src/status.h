@@ -11,7 +11,7 @@
 
 namespace ddb {
 	enum FileStatus {
-        NotIndexed,
+                NotIndexed,
 		Deleted,
 		Modified,
 		NotModified
