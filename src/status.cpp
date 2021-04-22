@@ -33,17 +33,9 @@ namespace ddb
 
 			checkedPaths.insert(path);
 
-			if (exists(p))
-			{
-				if (checkUpdate(e, p, q->getInt64(1), q->getText(2)))
-				{
-					cb(Modified, relPath.generic());
-				}
-			}
-			else
-			{
-				cb(Deleted, relPath.generic());				
-			}
+        	const auto status = checkUpdate(e, p, q->getInt64(1), q->getText(2));
+
+        	cb(status, relPath.generic());
 		}
 
         try{

@@ -23,7 +23,6 @@ DDB_DLL std::vector<std::string> expandPathList(const std::vector<std::string> &
 DDB_DLL std::vector<Entry> getMatchingEntries(Database* db, const fs::path& path, int maxRecursionDepth = 0, bool isFolder = false);
 DDB_DLL int deleteFromIndex(Database* db, const std::string &query, bool isFolder = false);
 
-DDB_DLL bool checkUpdate(Entry &e, const fs::path &p, long long dbMtime, const std::string &dbHash);
 DDB_DLL void doUpdate(Statement *updateQ, const Entry &e);
 
 DDB_DLL void listIndex(Database* db, const std::vector<std::string> &paths, std::ostream& out, const std::string& format, bool recursive = false, int maxRecursionDepth = 0);

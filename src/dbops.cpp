@@ -4,6 +4,8 @@
 #include "dbops.h"
 
 #include <ddb.h>
+#include <status.h>
+
 
 #include <cstdlib>
 
@@ -210,9 +212,15 @@ std::vector<std::string> expandPathList(const std::vector<std::string> &paths,
     return result;
 }
 
-bool checkUpdate(Entry &e, const fs::path &p, long long dbMtime,
+FileStatus checkUpdate(Entry &e, const fs::path &p, long long dbMtime,
                  const std::string &dbHash) {
+
+    if (!exists(p))
+        return Deleted;
+
     const bool folder = fs::is_directory(p);
+
+    if (folder) return NotModified;
 
     // Did it change?
     e.mtime = io::Path(p).getModifiedTime();
@@ -220,22 +228,18 @@ bool checkUpdate(Entry &e, const fs::path &p, long long dbMtime,
     if (e.mtime != dbMtime) {
         LOGD << p.string() << " modified time ( " << dbMtime
              << " ) differs from file value: " << e.mtime;
+        
+        e.hash = Hash::fileSHA256(p.string());
 
-        if (folder) {
-            // Don't check hashes for folders
-            return true;
-        } else {
-            e.hash = Hash::fileSHA256(p.string());
-
-            if (dbHash != e.hash) {
-                LOGD << p.string() << " hash differs (old: " << dbHash
-                     << " | new: " << e.hash << ")";
-                return true;
-            }
+        if (dbHash != e.hash) {
+            LOGD << p.string() << " hash differs (old: " << dbHash
+                    << " | new: " << e.hash << ")";
+            return Modified;
         }
+        
     }
 
-    return false;
+    return NotModified;
 }
 
 void doUpdate(Statement *updateQ, const Entry &e) {
@@ -279,8 +283,11 @@ void addToIndex(Database *db, const std::vector<std::string> &paths,
         Entry e;
 
         if (q->fetch()) {
+
+            const auto status = checkUpdate(e, p, q->getInt64(0), q->getText(1));
+
             // Entry exist, update if necessary
-            update = checkUpdate(e, p, q->getInt64(0), q->getText(1));
+            update = status != FileStatus::NotModified;
         } else {
             // Brand new, add
             add = true;
@@ -474,23 +481,33 @@ void syncIndex(Database *db) {
 
     while (q->fetch()) {
         io::Path relPath = fs::path(q->getText(0));
-        fs::path p =
-            directory / relPath.get();  // TODO: does this work on Windows?
+        fs::path p = directory / relPath.get();
         Entry e;
 
-        if (exists(p)) {
-            if (checkUpdate(e, p, q->getInt64(1), q->getText(2))) {
+        const auto status = checkUpdate(e, p, q->getInt64(1), q->getText(2));
+
+        switch(status) {
+
+            case Deleted:
+                // Removed
+                deleteQ->bind(1, relPath.generic());
+                deleteQ->execute();
+                std::cout << "D\t" << relPath.generic() << std::endl;
+                changed = true;
+            break;
+
+            case Modified:
+
                 parseEntry(p, directory, e, true);
                 doUpdate(updateQ.get(), e);
                 std::cout << "U\t" << e.path << std::endl;
                 changed = true;
-            }
-        } else {
-            // Removed
-            deleteQ->bind(1, relPath.generic());
-            deleteQ->execute();
-            std::cout << "D\t" << relPath.generic() << std::endl;
-            changed = true;
+
+            break;
+
+            default:
+                ; // Do nothing
+
         }
     }
 
