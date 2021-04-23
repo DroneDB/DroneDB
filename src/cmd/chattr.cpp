@@ -30,8 +30,7 @@ std::string Chattr::description() { return "Manage database attributes"; }
 
 std::string Chattr::extendedDescription() {
     return "\r\n\r\nAttributes:\r\n"
-           "\tpublic\tmark database as publicly accessible\r\n\mtime "
-           "gets last database update";
+           "\tpublic\tmark database as publicly accessible\r\n";
 }
 
 void Chattr::run(cxxopts::ParseResult& opts) {
