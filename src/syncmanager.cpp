@@ -25,7 +25,7 @@ time_t SyncManager::getLastSync(const std::string& registry) {
 
     if (!exists(path)) {
         LOGD << "Path does not exist, creating empty file";
-
+        io::assureFolderExists(this->ddbFolder);
         std::ofstream out(path, std::ios_base::out);
         out << "{}";
         out.close();
@@ -58,6 +58,7 @@ void SyncManager::setLastSync(
         throw InvalidArgsException("Registry cannot be null");
     
     if (!exists(path)) {
+        io::assureFolderExists(this->ddbFolder);
         std::ofstream out(path, std::ios_base::out);
         out << "{}";
         out.close();
