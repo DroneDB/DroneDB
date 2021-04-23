@@ -94,7 +94,12 @@ DDB_DLL void Database::ensureSchemaConsistency() {
 }
 
 void Database::setPublic(bool isPublic) {
+
+    if (this->hasAttribute("public") && 
+        this->getBoolAttribute("public") == isPublic) return;
+
     this->setBoolAttribute("public", isPublic);
+    this->setLastUpdate();
 }
 
 bool Database::isPublic() const {
