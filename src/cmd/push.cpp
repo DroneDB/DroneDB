@@ -43,7 +43,10 @@ void Push::run(cxxopts::ParseResult& opts) {
 
         ddb::push(remote, force);
 
-    } catch (ddb::InvalidArgsException) {
+    } catch(ddb::IndexException& e) {        
+        std::cout << e.what() << std::endl;
+    } catch (ddb::InvalidArgsException& ex) {
+        std::cout << ex.what() << std::endl;
         printHelp();
     }
 }
