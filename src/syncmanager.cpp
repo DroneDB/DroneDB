@@ -14,6 +14,7 @@
 namespace ddb {
 
 time_t SyncManager::getLastSync(const std::string& registry) {
+    if (!exists(this->ddbFolder)) throw FSException("Cannot get last sync: " + this->ddbFolder.string() + " does not exists");
     const auto path = this->ddbFolder / SYNCFILE;
 
     LOGD << "Path = " << path;
@@ -25,7 +26,6 @@ time_t SyncManager::getLastSync(const std::string& registry) {
 
     if (!exists(path)) {
         LOGD << "Path does not exist, creating empty file";
-        io::assureFolderExists(this->ddbFolder);
         std::ofstream out(path, std::ios_base::out);
         out << "{}";
         out.close();
@@ -45,9 +45,8 @@ time_t SyncManager::getLastSync(const std::string& registry) {
     return t;
 }
 
-void SyncManager::setLastSync(
-    const time_t t, const std::string& registry
-                              ) {
+void SyncManager::setLastSync(const time_t t, const std::string& registry) {
+    if (!exists(this->ddbFolder)) throw FSException("Cannot set last sync: " + this->ddbFolder.string() + " does not exists");
     const auto path = this->ddbFolder / SYNCFILE;
 
     LOGD << "Path = " << path;
@@ -58,7 +57,6 @@ void SyncManager::setLastSync(
         throw InvalidArgsException("Registry cannot be null");
     
     if (!exists(path)) {
-        io::assureFolderExists(this->ddbFolder);
         std::ofstream out(path, std::ios_base::out);
         out << "{}";
         out.close();
