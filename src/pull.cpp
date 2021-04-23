@@ -23,7 +23,14 @@ DDB_DLL void pull(const std::string& registry, const bool force) {
 
     if (registry.empty()) {
         TagManager manager(fs::path(db->getOpenFile()).parent_path());
-        auto tag = RegistryUtils::parseTag(manager.getTag());
+
+        const auto autoTagRaw = manager.getTag();
+
+        if (autoTagRaw.empty()) 
+            throw IndexException("Cannot pull if no tag is specified");
+        
+        auto tag = RegistryUtils::parseTag(autoTagRaw);
+
         registryUrl = tag.registryUrl;
     } 
 

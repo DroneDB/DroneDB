@@ -593,6 +593,9 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
     // 1) Get our tag using tagmanager
     const auto tag = tagManager.getTag();
 
+    if (tag.empty()) 
+        throw IndexException("Cannot pull if no tag is specified");
+
     // 2) Get our last sync time for that specific registry using syncmanager
     const auto lastUpdate = db->getLastUpdate();
 
@@ -759,6 +762,9 @@ DDB_DLL void Registry::push(const std::string &path, const bool force,
 
     // 1) Get our tag using tagmanager
     const auto tag = tagManager.getTag();
+
+    if (tag.empty()) 
+        throw IndexException("Cannot push if no tag is specified");
 
     // 3) Get local mtime
     const auto lastUpdate = db->getLastUpdate();

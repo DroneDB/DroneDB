@@ -45,7 +45,9 @@ void Pull::run(cxxopts::ParseResult& opts) {
 
         ddb::pull(remote, force);
 
-    } catch (ddb::InvalidArgsException ex) {
+    } catch(ddb::IndexException& e) {        
+        std::cout << e.what() << std::endl;
+    } catch (ddb::InvalidArgsException& ex) {
         std::cout << ex.what() << std::endl;
         printHelp();
     }
