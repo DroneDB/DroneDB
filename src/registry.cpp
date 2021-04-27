@@ -683,26 +683,25 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
                             filesToDownload, tempNewFolder.generic_string());
 
         LOGD << "Files downloaded, applying delta";
+
+        // 8) Apply changes to local files
+        applyDelta(delta, ddbPath.parent_path(), tempNewFolder);
+
+        LOGD << "Removing temp new files folder";
+
+        remove_all(tempNewFolder);
+
     } else {
         LOGD << "No files to download";
 
         // Check if we have anything to do
         if (delta.copies.empty() && delta.removes.empty()) {
-            LOGD << "No changes to perform, pull done";
-            out << "Already up to date." << std::endl;
-            db->setLastUpdate(dsInfo.mtime);
 
-            return;
+            out << "Already up to date." << std::endl;
+
         }
     }
-
-    // 8) Apply changes to local files
-    applyDelta(delta, ddbPath.parent_path(), tempNewFolder);
-
-    LOGD << "Removing temp new files folder";
-
-    remove_all(tempNewFolder);
-
+    
     LOGD << "Replacing DDB index (copy from '" << tempDdbFolder << "' to '" << ddbPath << "')";
 
     // 9) Replace ddb database
