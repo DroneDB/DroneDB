@@ -55,6 +55,12 @@ void Status::run(cxxopts::ParseResult &opts) {
                 std::cout << "M\t";
 
                 break;
+
+            case ddb::NotModified:
+
+                // Don't print anything
+
+                return;
         	
 	        default:
 
@@ -69,5 +75,4 @@ void Status::run(cxxopts::ParseResult &opts) {
 }
 
 }
-
 

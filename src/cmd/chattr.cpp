@@ -30,8 +30,7 @@ std::string Chattr::description() { return "Manage database attributes"; }
 
 std::string Chattr::extendedDescription() {
     return "\r\n\r\nAttributes:\r\n"
-           "\tpublic\tmark database as publicly accessible\r\n\mtime "
-           "gets last database update";
+           "\tpublic\tmark database as publicly accessible\r\n";
 }
 
 void Chattr::run(cxxopts::ParseResult& opts) {
@@ -67,9 +66,13 @@ void Chattr::run(cxxopts::ParseResult& opts) {
             LOGD << "Setting attributes";
 
             if (attribute == "+public" || attribute == "+p") {
+
                 db->setPublic(true);
+
             } else if (attribute == "-public" || attribute == "-p") {
+
                 db->setPublic(false);
+
             } else {
                 throw ddb::InvalidArgsException("Attribute not valid");
             }
