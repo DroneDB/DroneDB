@@ -249,13 +249,15 @@ DDB_DLL DatasetInfo Registry::getDatasetInfo(const std::string &organization,
     auto res =
         net::GET(getUrl).authCookie(this->authToken).verifySSL(false).send();
 
+    if (res.status() == 404)
+        throw RegistryNotFoundException("Dataset not found");
+
     if (res.status() != 200) this->handleError(res);
 
     LOGD << "Data: " << res.getText();
 
     const auto j = res.getJSON();
 
-    // try {
     // TODO: Catch errors
     const auto resArr = j.get<std::vector<DatasetInfo>>();
 
@@ -264,11 +266,6 @@ DDB_DLL DatasetInfo Registry::getDatasetInfo(const std::string &organization,
 
     return resArr[0];
 
-    //} catch (std::runtime_error ex) {
-
-    //    LOGD << "Exception: " << ex.what();
-
-    //}
 }
 
 DDB_DLL void Registry::downloadDdb(const std::string &organization,
@@ -757,7 +754,6 @@ DDB_DLL void Registry::push(const std::string &path, const bool force,
     LOGD << "Ddb folder = " << ddbPath;
 
     TagManager tagManager(ddbPath);
-    //SyncManager syncManager(ddbPath);
 
     // 1) Get our tag using tagmanager
     const auto tag = tagManager.getTag();
@@ -773,34 +769,43 @@ DDB_DLL void Registry::push(const std::string &path, const bool force,
 
     const auto tagInfo = RegistryUtils::parseTag(tag);
 
-    // 3) Get dataset mtime
-    const auto dsInfo =
-        this->getDatasetInfo(tagInfo.organization, tagInfo.dataset);
+    try {
+        // 3) Get dataset mtime
+        const auto dsInfo =
+            this->getDatasetInfo(tagInfo.organization, tagInfo.dataset);
 
-    LOGD << "Dataset mtime = " << dsInfo.mtime;
+        LOGD << "Dataset mtime = " << dsInfo.mtime;
 
-    out << "Pushing to '" << tag << "'" << std::endl;
-    LOGD << "Local mtime " << lastUpdate << ", remote mtime " << dsInfo.mtime;
+        out << "Pushing to '" << tag << "'" << std::endl;
+        LOGD << "Local mtime " << lastUpdate << ", remote mtime " << dsInfo.mtime;
 
-    // 4) Alert if dataset_mtime > last_sync (it means we have less recent changes
-    //    than server, so the push is pointless or potentially dangerous)
-    
-    if (force) {
-        out << "Forcing push." << std::endl;
-    } else {
+        // 4) Alert if dataset_mtime > last_sync (it means we have less recent changes
+        //    than server, so the push is pointless or potentially dangerous)
+        
+        if (force) {
+            out << "Forcing push." << std::endl;
+        } else {
 
-        if (lastUpdate == dsInfo.mtime){
-            // Nothing to do, datasets should be in sync
-            out << "Already up to date." << std::endl;
-            return;
-        } else if (dsInfo.mtime > lastUpdate) {
-            throw AppException(
-                "[Warning] The remote dataset has newer changes, but you haven't "
-                "pulled those changes from the remote registry. If you push now, "
-                "the remote dataset might be overwritten. Use --force "
-                "to continue.");
+            if (lastUpdate == dsInfo.mtime){
+                // Nothing to do, datasets should be in sync
+                out << "Already up to date." << std::endl;
+                return;
+            }
+
+            if (dsInfo.mtime > lastUpdate) {
+                throw AppException(
+                    "[Warning] The remote dataset has newer changes, but you haven't "
+                    "pulled those changes from the remote registry. If you push now, "
+                    "the remote dataset might be overwritten. Use --force "
+                    "to continue.");
+            }
         }
-    }    
+    } catch (RegistryNotFoundException &ex)
+    {
+        LOGD << "Dataset not found: " << ex.what();
+
+        out << "Pushing to new '" << tag << "'" << std::endl; 
+    }
 
     // 5) Initialize server push
     LOGD << "Initializing server push";

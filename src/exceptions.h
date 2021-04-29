@@ -49,6 +49,9 @@ class JSONException : public AppException{
 class RegistryException : public AppException{
     using AppException::AppException;
 };
+class RegistryNotFoundException : public RegistryException{
+    using RegistryException::RegistryException; 
+};
 class NotImplementedException : public AppException {
     using AppException::AppException;
 };
