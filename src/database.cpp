@@ -159,8 +159,7 @@ json Database::getAttributes() const {
         const std::string sql = "SELECT COUNT(1) FROM entries";
         const auto q = this->query(sql);
         while (q->fetch()) {
-            const int count = q->getInt(0);
-            j["entries"] = count;
+            j["entries"] = q->getInt(0);
         }
     }
 
