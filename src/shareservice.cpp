@@ -12,7 +12,6 @@
 #include "registryutils.h"
 #include "userprofile.h"
 #include "utils.h"
-#include "chunkeduploadclient.h"
 
 namespace ddb {
 
