@@ -276,6 +276,18 @@ void addToIndex(Database *db, const std::vector<std::string> &paths,
 
     for (auto &p : pathList) {
         io::Path relPath = io::Path(p).relativeTo(directory);
+
+        if (p.has_filename()) {
+            const auto fileName = p.filename().generic_string();
+            if (fileName.find("\\") != std::string::npos) {
+                
+                LOGD << "Skipping '" << p << "'";
+
+                // Skip file
+                continue;
+            }
+        }
+
         q->bind(1, relPath.generic());
 
         bool update = false;

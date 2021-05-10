@@ -17,7 +17,6 @@ class ShareClient{
 
     std::string token;
     ddb::Registry *registry;
-    size_t maxUploadSize;
     std::string resultUrl;
 
    public:
@@ -30,7 +29,6 @@ class ShareClient{
 
     DDB_DLL std::string getToken() const;
     DDB_DLL std::string getResultUrl() const;
-    DDB_DLL size_t getMaxUploadSize() const;
 
 };
 

@@ -16,7 +16,6 @@ namespace ddb {
 const int MAX_RETRIES = 10;
 
 ShareClient::ShareClient(ddb::Registry* registry) : registry(registry) {
-    maxUploadSize = 0;
 }
 
 void ShareClient::Init(const std::string& tag, const std::string& password,
@@ -40,11 +39,7 @@ void ShareClient::Init(const std::string& tag, const std::string& password,
     if (!j.contains("token")) this->registry->handleError(res);
     this->token = j["token"];
     LOGD << "Token = " << this->token;
-
-    this->maxUploadSize = j.contains("maxUploadChunkSize")
-                              ? j["maxUploadChunkSize"].get<size_t>()
-                              : static_cast<size_t>(LONG_MAX);
-    LOGD << "MaxUploadChunkSize = " << maxUploadSize;
+    
 }
 
 void ShareClient::Upload(const std::string& path, const fs::path& filePath,
@@ -141,6 +136,5 @@ std::string ShareClient::getToken() const { return std::string(this->token); }
 std::string ShareClient::getResultUrl() const {
     return std::string(this->resultUrl);
 }
-size_t ShareClient::getMaxUploadSize() const { return this->maxUploadSize; }
 
 }  // namespace ddb
