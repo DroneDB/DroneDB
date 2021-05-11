@@ -108,11 +108,11 @@ bool Database::isPublic() const {
 }
 
 time_t Database::getLastUpdate() const {
-    return static_cast<time_t>(this->getIntAttribute("mtime"));
+    return static_cast<time_t>(this->getLongAttribute("mtime"));
 }
 
 void Database::setLastUpdate(const time_t mtime) {
-    this->setIntAttribute("mtime", mtime);
+    this->setLongAttribute("mtime", mtime);
 }
 
 void Database::chattr(json attrs) {
@@ -162,7 +162,7 @@ json Database::getAttributes() const {
             j["entries"] = q->getInt(0);
         }
     }
-
+    
     return j;
 }
 
@@ -172,6 +172,19 @@ void Database::setBoolAttribute(const std::string &name, bool value) {
 
 bool Database::getBoolAttribute(const std::string &name) const {
     return this->getIntAttribute(name) == 1;
+}
+
+void Database::setLongAttribute(const std::string &name, long long value) {
+    const std::string sql =
+        "INSERT OR REPLACE INTO attributes (name, ivalue) "
+        "VALUES(?, ?)";
+
+    const auto q = this->query(sql);
+
+    q->bind(1, name);
+    q->bind(2, value);
+
+    q->execute();
 }
 
 void Database::setIntAttribute(const std::string &name, long value) {
@@ -193,6 +206,14 @@ int Database::getIntAttribute(const std::string &name) const {
     const auto q = this->query(sql);
     q->bind(1, name);
     return q->fetch() ? q->getInt(0) : 0;
+}
+
+long long Database::getLongAttribute(const std::string &name) const {
+    const std::string sql = "SELECT ivalue FROM attributes WHERE name = ?";
+
+    const auto q = this->query(sql);
+    q->bind(1, name);
+    return q->fetch() ? q->getInt64(0) : 0;
 }
 
 bool Database::hasAttribute(const std::string &name) const {
