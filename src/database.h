@@ -14,9 +14,12 @@ namespace ddb{
 class Database : public SqliteDatabase {
   protected:
     void setIntAttribute(const std::string &name, long value);
+    void setLongAttribute(const std::string &name, long long value);
+
     void setBoolAttribute(const std::string &name, bool value);
 
     int getIntAttribute(const std::string &name) const;
+    long long getLongAttribute(const std::string &name) const;
     bool getBoolAttribute(const std::string &name) const;
 
     bool hasAttribute(const std::string &name) const;
