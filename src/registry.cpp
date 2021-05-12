@@ -696,6 +696,10 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
 
             out << "Already up to date." << std::endl;
 
+        } else {
+
+            // 8) Apply changes to local files (mostly deletes)
+            applyDelta(delta, ddbPath.parent_path(), tempNewFolder);
         }
     }
     
