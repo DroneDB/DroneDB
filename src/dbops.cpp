@@ -610,4 +610,35 @@ std::string initIndex(const std::string &directory, bool fromScratch) {
     return ddbDirPath.string();
 }
 
+void ddb::moveEntry(Database* db, const std::string& source, const std::string& dest) {
+
+    const fs::path directory = rootDirectory(db);
+
+    db->exec("BEGIN EXCLUSIVE TRANSACTION");
+
+    auto q = db->query("SELECT path FROM entries WHERE path LIKE ?");
+
+    q->bind(1, source + "%");
+
+    while (q->fetch()) {
+        const auto path = q->getText(0);
+
+        std::string newPath = std::string(path);
+
+        newPath.replace(0, dest.length(), dest);
+
+        LOGD << "Replacing '" << path << "' to '" << newPath << "'";
+
+        auto update = db->query("UPDATE entries SET path = ? WHERE path = ?");
+        update->bind(1, newPath);
+        update->bind(2, path);
+        update->execute();
+
+    }
+
+
+    db->exec("COMMIT");
+
+}
+
 }  // namespace ddb
