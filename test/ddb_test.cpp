@@ -761,4 +761,60 @@ TEST(fingerprint, fileHandle) {
 }
 
 
+TEST(moveEntry, happyPath) {
+    TestArea ta(TEST_NAME);
+
+    const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", "dbase.sqlite");
+
+    const auto testFolder = ta.getFolder("test");
+    create_directory(testFolder / ".ddb");
+    fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
+
+    auto db = ddb::open(testFolder.string(), false);
+
+    moveEntry(db.get(), "pics.JPG", "pics2/pics/asd.jpg");//"pacs.jpg");
+
+/*
+    std::vector<std::string> toList;
+
+    toList.emplace_back((testFolder / "pics").string());
+    
+    std::ostringstream out; 
+
+    listIndex(db.get(), toList, out, "text", true);
+
+    std::cout << out.str() << std::endl;
+    EXPECT_EQ(out.str(), "pics/IMG_20160826_181302.jpg\npics/IMG_20160826_181305.jpg\npics/IMG_20160826_181309.jpg\npics/IMG_20160826_181314.jpg\npics/IMG_20160826_181317.jpg\npics/pics2\npics/pics2/IMG_20160826_181305.jpg\npics/pics2/IMG_20160826_181309.jpg\n");
+*/
+}
+
+TEST(moveEntry, happyPath2) {
+    TestArea ta(TEST_NAME);
+
+    const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", "dbase.sqlite");
+
+    const auto testFolder = ta.getFolder("test");
+    create_directory(testFolder / ".ddb");
+    fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
+
+    auto db = ddb::open(testFolder.string(), false);
+
+    moveEntry(db.get(), "pics2", "pics3");//"pacs.jpg");
+
+/*
+    std::vector<std::string> toList;
+
+    toList.emplace_back((testFolder / "pics").string());
+    
+    std::ostringstream out; 
+
+    listIndex(db.get(), toList, out, "text", true);
+
+    std::cout << out.str() << std::endl;
+    EXPECT_EQ(out.str(), "pics/IMG_20160826_181302.jpg\npics/IMG_20160826_181305.jpg\npics/IMG_20160826_181309.jpg\npics/IMG_20160826_181314.jpg\npics/IMG_20160826_181317.jpg\npics/pics2\npics/pics2/IMG_20160826_181305.jpg\npics/pics2/IMG_20160826_181309.jpg\n");
+*/
+}
+
+
+
 }
