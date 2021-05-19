@@ -610,7 +610,7 @@ std::string initIndex(const std::string &directory, bool fromScratch) {
     return ddbDirPath.string();
 }
 
-void ddb::moveEntry(Database* db, const std::string& source, const std::string& dest) {
+void moveEntry(Database* db, const std::string& source, const std::string& dest) {
 
     const fs::path directory = rootDirectory(db);
 
