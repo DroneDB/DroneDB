@@ -610,7 +610,20 @@ std::string initIndex(const std::string &directory, bool fromScratch) {
     return ddbDirPath.string();
 }
 
+void deleteEntry(Database* db, const std::string path) {
+
+    auto f = db->query("DELETE FROM entries WHERE path LIKE ?");
+    f->bind(1, path);
+    f->execute();
+}
+
 void moveEntry(Database* db, const std::string& source, const std::string& dest) {
+
+    if (source[source.length() -1 ] == '/' || source[source.length() -1 ] == '\\')
+        throw InvalidArgsException("source cannot end with path separator");
+
+    if (dest[dest.length() -1 ] == '/' || dest[dest.length() -1 ] == '\\')
+        throw InvalidArgsException("dest cannot end with path separator");
 
     const fs::path directory = rootDirectory(db);
 
@@ -623,15 +636,18 @@ void moveEntry(Database* db, const std::string& source, const std::string& dest)
     while (q->fetch()) {
         const auto path = q->getText(0);
 
-        std::string newPath = std::string(path);
-
-        newPath.replace(0, dest.length(), dest);
+        auto newPath = dest + std::string(path).substr(source.length(), std::string::npos);
 
         LOGD << "Replacing '" << path << "' to '" << newPath << "'";
 
-        auto update = db->query("UPDATE entries SET path = ? WHERE path = ?");
+        auto depth = io::Path(newPath).depth();
+
+        deleteEntry(db, newPath);
+
+        auto update = db->query("UPDATE entries SET path = ?, depth = ? WHERE path = ?");
         update->bind(1, newPath);
-        update->bind(2, path);
+        update->bind(2, depth);
+        update->bind(3, path);
         update->execute();
 
     }
