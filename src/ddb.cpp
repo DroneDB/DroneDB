@@ -394,3 +394,19 @@ DDB_DLL DDBErr DDBSetLastSync(const char* ddbPath, const char* registry,
 
     DDB_C_END
 }
+
+DDB_DLL DDBErr DDBMoveEntry(const char *ddbPath, const char *source, const char *dest) {
+
+    DDB_C_BEGIN
+
+    if (ddbPath == nullptr) throw InvalidArgsException("No ddb path provided");
+    if (source == nullptr) throw InvalidArgsException("No source path provided");
+    if (dest == nullptr) throw InvalidArgsException("No dest path provided");
+
+    const auto ddb = ddb::open(std::string(ddbPath), false);
+
+    ddb::moveEntry(ddb.get(), std::string(source), std::string(dest));
+
+    DDB_C_END
+
+}
