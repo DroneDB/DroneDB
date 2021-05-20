@@ -625,6 +625,9 @@ void moveEntry(Database* db, const std::string& source, const std::string& dest)
     if (dest[dest.length() -1 ] == '/' || dest[dest.length() -1 ] == '\\')
         throw InvalidArgsException("dest cannot end with path separator");
 
+    // Nothing to do
+    if (source == dest) return;
+
     const fs::path directory = rootDirectory(db);
 
     db->exec("BEGIN EXCLUSIVE TRANSACTION");
