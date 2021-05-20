@@ -760,5 +760,119 @@ TEST(fingerprint, fileHandle) {
 
 }
 
+std::string showList(Database* db, const std::filesystem::path& testFolder) {
+    std::vector<std::string> toList;
+    toList.emplace_back((testFolder / "*").string());
+    std::ostringstream out;
+    listIndex(db, toList, out, "text", true);
+    const auto str = out.str();
+    std::cout << str << std::endl;
+    return str;
+}
+
+TEST(moveEntry, happyPath) {
+    TestArea ta(TEST_NAME);
+
+    const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", "dbase.sqlite");
+
+    const auto testFolder = ta.getFolder("test");
+    create_directory(testFolder / ".ddb");
+    fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
+
+    auto db = ddb::open(testFolder.string(), false);
+
+    showList(db.get(), testFolder);
+
+    moveEntry(db.get(), "pics.JPG", "pics2/pics/asd.jpg");//"pacs.jpg");
+    
+    auto str = showList(db.get(), testFolder);    
+    
+    EXPECT_EQ(str, "1JI_0064.JPG\n1JI_0065.JPG\npics\npics/IMG_20160826_181302.jpg\npics/IMG_20160826_181305.jpg\npics/IMG_20160826_181309.jpg\npics/IMG_20160826_181314.jpg\npics/IMG_20160826_181317.jpg\npics/pics2\npics/pics2/IMG_20160826_181305.jpg\npics/pics2/IMG_20160826_181309.jpg\npics2\npics2/IMG_20160826_181305.jpg\npics2/IMG_20160826_181309.jpg\npics2/pics\npics2/pics/IMG_20160826_181302.jpg\npics2/pics/IMG_20160826_181305.jpg\npics2/pics/IMG_20160826_181309.jpg\npics2/pics/IMG_20160826_181314.jpg\npics2/pics/IMG_20160826_181317.jpg\npics2/pics/asd.jpg\npics2/pics/pics2\npics2/pics/pics2/IMG_20160826_181305.jpg\npics2/pics/pics2/IMG_20160826_181309.jpg\n");
+
+}
+
+TEST(moveEntry, happyPath2) {
+    TestArea ta(TEST_NAME);
+
+    const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", "dbase.sqlite");
+
+    const auto testFolder = ta.getFolder("test");
+    create_directory(testFolder / ".ddb");
+    fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
+
+    auto db = ddb::open(testFolder.string(), false);
+
+    showList(db.get(), testFolder);
+
+    moveEntry(db.get(), "pics2", "pics3");//"pacs.jpg");
+
+    auto str = showList(db.get(), testFolder);
+    
+    EXPECT_EQ(str, "1JI_0064.JPG\n1JI_0065.JPG\npics\npics.JPG\npics/IMG_20160826_181302.jpg\npics/IMG_20160826_181305.jpg\npics/IMG_20160826_181309.jpg\npics/IMG_20160826_181314.jpg\npics/IMG_20160826_181317.jpg\npics/pics2\npics/pics2/IMG_20160826_181305.jpg\npics/pics2/IMG_20160826_181309.jpg\npics3\npics3/IMG_20160826_181305.jpg\npics3/IMG_20160826_181309.jpg\npics3/pics\npics3/pics/IMG_20160826_181302.jpg\npics3/pics/IMG_20160826_181305.jpg\npics3/pics/IMG_20160826_181309.jpg\npics3/pics/IMG_20160826_181314.jpg\npics3/pics/IMG_20160826_181317.jpg\npics3/pics/pics2\npics3/pics/pics2/IMG_20160826_181305.jpg\npics3/pics/pics2/IMG_20160826_181309.jpg\n");
+
+}
+
+TEST(moveEntry, happyPath3) {
+    TestArea ta(TEST_NAME);
+
+    const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", "dbase.sqlite");
+
+    const auto testFolder = ta.getFolder("test");
+    create_directory(testFolder / ".ddb");
+    fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
+
+    auto db = ddb::open(testFolder.string(), false);
+
+    showList(db.get(), testFolder);
+
+    moveEntry(db.get(), "pics2/pics", "pics3");//"pacs.jpg");
+
+    auto str = showList(db.get(), testFolder);
+   
+    EXPECT_EQ(str, "1JI_0064.JPG\n1JI_0065.JPG\npics\npics.JPG\npics/IMG_20160826_181302.jpg\npics/IMG_20160826_181305.jpg\npics/IMG_20160826_181309.jpg\npics/IMG_20160826_181314.jpg\npics/IMG_20160826_181317.jpg\npics/pics2\npics/pics2/IMG_20160826_181305.jpg\npics/pics2/IMG_20160826_181309.jpg\npics2\npics2/IMG_20160826_181305.jpg\npics2/IMG_20160826_181309.jpg\npics3\npics3/IMG_20160826_181302.jpg\npics3/IMG_20160826_181305.jpg\npics3/IMG_20160826_181309.jpg\npics3/IMG_20160826_181314.jpg\npics3/IMG_20160826_181317.jpg\npics3/pics2\npics3/pics2/IMG_20160826_181305.jpg\npics3/pics2/IMG_20160826_181309.jpg\n");
+
+}
+
+TEST(moveEntry, conflict) {
+    TestArea ta(TEST_NAME);
+
+    const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", "dbase.sqlite");
+
+    const auto testFolder = ta.getFolder("test");
+    create_directory(testFolder / ".ddb");
+    fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
+
+    auto db = ddb::open(testFolder.string(), false);
+
+    showList(db.get(), testFolder);
+
+    moveEntry(db.get(), "pics2/pics", "pics2");//"pacs.jpg");
+
+    auto str = showList(db.get(), testFolder);
+   
+    EXPECT_EQ(str, "1JI_0064.JPG\n1JI_0065.JPG\npics\npics.JPG\npics/IMG_20160826_181302.jpg\npics/IMG_20160826_181305.jpg\npics/IMG_20160826_181309.jpg\npics/IMG_20160826_181314.jpg\npics/IMG_20160826_181317.jpg\npics/pics2\npics/pics2/IMG_20160826_181305.jpg\npics/pics2/IMG_20160826_181309.jpg\npics2\npics2/IMG_20160826_181302.jpg\npics2/IMG_20160826_181305.jpg\npics2/IMG_20160826_181309.jpg\npics2/IMG_20160826_181314.jpg\npics2/IMG_20160826_181317.jpg\npics2/pics2\npics2/pics2/IMG_20160826_181305.jpg\npics2/pics2/IMG_20160826_181309.jpg\n");
+
+}
+
+TEST(moveEntry, badParameters) {
+    TestArea ta(TEST_NAME);
+
+    const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", "dbase.sqlite");
+
+    const auto testFolder = ta.getFolder("test");
+    create_directory(testFolder / ".ddb");
+    fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
+
+    auto db = ddb::open(testFolder.string(), false);
+    
+    ASSERT_THROW(moveEntry(db.get(), "pics2/pics/", "pics2"), InvalidArgsException);
+    ASSERT_THROW(moveEntry(db.get(), "pics2/pics", "pics2/"), InvalidArgsException);
+
+    auto str = showList(db.get(), testFolder);
+   
+
+}
+
+
 
 }
