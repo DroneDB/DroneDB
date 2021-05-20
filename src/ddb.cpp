@@ -403,7 +403,7 @@ DDB_DLL DDBErr DDBMoveEntry(const char *ddbPath, const char *source, const char 
     if (source == nullptr) throw InvalidArgsException("No source path provided");
     if (dest == nullptr) throw InvalidArgsException("No dest path provided");
 
-    const auto ddb = ddb::open(std::string(ddbPath), false);
+    const auto ddb = ddb::open(std::string(ddbPath), true);
 
     ddb::moveEntry(ddb.get(), std::string(source), std::string(dest));
 
