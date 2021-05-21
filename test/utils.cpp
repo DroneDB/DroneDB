@@ -49,17 +49,8 @@ bool compareTree(fs::path& sourceFolder, fs::path& destFolder) {
 
     std::cout << std::endl;
 
-    //return false;
     return source == dest;
-    /*
-    if (source.size() != dest.size()) return false;
 
-    for (auto n = 0; n < source.size(); n++)
-    {
-        if (source[n] != dest[n]) return false;
-    }
-
-    return true;*/
 }
 void printTree(fs::path& folder) {
     std::vector<fs::path> entries;

@@ -622,8 +622,14 @@ void moveEntry(Database* db, const std::string& source, const std::string& dest)
     if (source[source.length() -1 ] == '/' || source[source.length() -1 ] == '\\')
         throw InvalidArgsException("source cannot end with path separator");
 
+    if (utils::hasDotNotation(source))
+        throw InvalidArgsException("source path cannot contain any dot notations");
+
     if (dest[dest.length() -1 ] == '/' || dest[dest.length() -1 ] == '\\')
         throw InvalidArgsException("dest cannot end with path separator");
+
+    if (utils::hasDotNotation(dest))
+        throw InvalidArgsException("dest path cannot contain any dot notations");
 
     // Nothing to do
     if (source == dest) return;

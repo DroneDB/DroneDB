@@ -133,6 +133,8 @@ void sleep(int msecs);
 DDB_DLL std::string generateRandomString(int length);
 std::string join(const std::vector<std::string> &vec, char separator = ',');
 
+DDB_DLL bool hasDotNotation(const std::string& path);
+
 // Fix for removing macros
 #undef max
 #undef min
