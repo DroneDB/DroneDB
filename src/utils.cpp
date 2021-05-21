@@ -138,4 +138,16 @@ std::string join(const std::vector<std::string>& vec, char separator) {
     return paths;
 }
 
+// Checks if path contains . or ..
+DDB_DLL bool hasDotNotation(const std::string& path) {
+    
+    std::stringstream stream(path);
+    std::string seg;
+      
+    while(getline(stream, seg, '/'))
+        if (seg == ".." || seg == ".") return true;    
+    
+    return false;
+}
+
 } // namespace ddb

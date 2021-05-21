@@ -22,4 +22,17 @@ TEST(utilsTest, generateRandomString) {
     }
 }
 
+TEST(utilsTest, hasDotNotation) {
+    
+    EXPECT_FALSE(utils::hasDotNotation("ciao/ciao"));
+    EXPECT_FALSE(utils::hasDotNotation("/ciao/"));
+    EXPECT_FALSE(utils::hasDotNotation("ciao/.a/a/tutti"));
+    EXPECT_TRUE(utils::hasDotNotation("ciao/./ciao"));
+    EXPECT_TRUE(utils::hasDotNotation("./ciao/./ciao"));
+    EXPECT_TRUE(utils::hasDotNotation("ciao/./ciao"));
+    EXPECT_TRUE(utils::hasDotNotation("ciao/../ciao"));
+    EXPECT_TRUE(utils::hasDotNotation("../ciao/.a./ciao"));
+
+}
+
 }
