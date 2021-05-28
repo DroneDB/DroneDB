@@ -202,6 +202,10 @@ module.exports = class Registry{
         return this.makeRequest(endpoint, "POST", body);
     }
 
+    async putRequest(endpoint, body = {}){
+        return this.makeRequest(endpoint, "PUT", body);
+    }
+
     async deleteRequest(endpoint, body = {}){
         return this.makeRequest(endpoint, "DELETE", body);
     }
