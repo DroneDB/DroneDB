@@ -202,8 +202,8 @@ module.exports = class Registry{
         return this.makeRequest(endpoint, "POST", body);
     }
 
-    async deleteRequest(endpoint){
-        return this.makeRequest(endpoint, "DELETE");
+    async deleteRequest(endpoint, body = {}){
+        return this.makeRequest(endpoint, "DELETE", body);
     }
 
     Organization(name){
