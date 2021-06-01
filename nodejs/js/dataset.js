@@ -85,6 +85,10 @@ module.exports = class Dataset{
         return this.registry.putRequest(`${this.baseApi}/obj`, { source, dest });
     }
 
+    async writeObj(path, content) {
+        return this.registry.postRequest(`${this.baseApi}/obj`, { path, file: content });
+    }
+
     async rename(slug){
         if (typeof slug !== "string") throw new Error(`Invalid slug ${slug}`);
         return this.registry.postRequest(`${this.baseApi}/rename`, { slug });
