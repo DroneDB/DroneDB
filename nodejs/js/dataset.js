@@ -86,7 +86,7 @@ module.exports = class Dataset{
     }
 
     async writeObj(path, content) {
-        return this.registry.postRequest(`${this.baseApi}/obj`, { path, file: content });
+        return this.registry.postRequest(`${this.baseApi}/obj`, { path, file: new Blob([content]) });
     }
 
     async rename(slug){
