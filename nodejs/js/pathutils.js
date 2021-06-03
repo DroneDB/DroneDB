@@ -13,5 +13,15 @@ module.exports = {
             if (p[p.length - 1] === "/") return p.slice(0, p.length - 1);
             else return p;
         }).join("/");
+    },
+
+    getParentFolder: function(path) {
+        if (typeof path === 'undefined' || path == null) 
+            throw "Path is required";
+
+        var idx = path.lastIndexOf('/');
+        if (idx == -1) return null;
+
+        return path.substr(0, idx);
     }
 }
