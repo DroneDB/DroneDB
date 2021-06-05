@@ -210,7 +210,7 @@ bool ExifParser::extractGeo(GeoLocation &geo) {
         // certain models (e.g. Mavic Air) do not have sufficient
         // precision in the EXIF coordinates
         auto xmpLatitude = findXmpKey({"Xmp.drone-dji.Latitude"});
-        if (xmpAltitude != xmpData.end()) {
+        if (xmpLatitude != xmpData.end()) {
             geo.latitude = xmpLatitude->toFloat();
         }
         auto xmpLongitude = findXmpKey({"Xmp.drone-dji.Longitude"});
