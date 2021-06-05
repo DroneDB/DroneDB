@@ -205,6 +205,19 @@ bool ExifParser::extractGeo(GeoLocation &geo) {
         if (xmpAltitude != xmpData.end()) {
             geo.altitude = evalFrac(xmpAltitude->toRational());
         }
+
+        // Use DJI's XMP tags for lat/lon, if available
+        // certain models (e.g. Mavic Air) do not have sufficient
+        // precision in the EXIF coordinates
+        auto xmpLatitude = findXmpKey({"Xmp.drone-dji.Latitude"});
+        if (xmpAltitude != xmpData.end()) {
+            geo.latitude = xmpLatitude->toFloat();
+        }
+        auto xmpLongitude = findXmpKey({"Xmp.drone-dji.Longitude"});
+        if (xmpLongitude != xmpData.end()) {
+            geo.longitude = xmpLongitude->toFloat();
+        }
+
         return true;
     }
 
