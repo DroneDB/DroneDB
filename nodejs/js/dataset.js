@@ -89,6 +89,10 @@ module.exports = class Dataset{
         return this.registry.postRequest(`${this.baseApi}/obj`, { path, file: new Blob([content]) });
     }
 
+    async createFolder(path) {
+        return this.registry.postRequest(`${this.baseApi}/obj`, { path });
+    }
+
     async rename(slug){
         if (typeof slug !== "string") throw new Error(`Invalid slug ${slug}`);
         return this.registry.postRequest(`${this.baseApi}/rename`, { slug });
