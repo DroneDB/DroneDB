@@ -743,6 +743,8 @@ void moveEntry(Database* db, const std::string& source, const std::string& dest)
 
     db->exec("COMMIT");
 
+    // Update last edit
+    db->setLastUpdate();
 }
 
 }  // namespace ddb
