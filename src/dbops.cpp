@@ -772,6 +772,7 @@ void moveEntry(Database* db, const std::string& source, const std::string& dest)
         } 
 
         createMissingFolders(db);        
+
     }  
 
     db->exec("COMMIT");
