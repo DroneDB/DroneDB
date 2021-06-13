@@ -610,7 +610,7 @@ std::string initIndex(const std::string &directory, bool fromScratch) {
     return ddbDirPath.string();
 }
 
-void deleteEntry(Database* db, const std::string path) {
+void deleteEntry(Database* db, const std::string& path) {
 
     auto f = db->query("DELETE FROM entries WHERE path = ?");
     f->bind(1, path);
@@ -648,6 +648,65 @@ void createMissingFolders(Database* db) {
 
 }
 
+bool pathExists(Database* db, const std::string& path) {
+    auto q = db->query("SELECT COUNT(path) FROM entries WHERE path = ?");
+    q->bind(1, path);
+    q->fetch();
+    return q->getInt(0) > 0;
+}
+
+Entry *getEntry(Database* db, const std::string& path, Entry* entry) {
+
+    std::string sql =
+        "SELECT path, hash, type, meta, mtime, size, depth, "
+        "AsGeoJSON(point_geom), AsGeoJSON(polygon_geom) FROM entries WHERE "
+        "path = ?";
+
+    auto q = db->query(sql);
+
+    q->bind(1, path);
+
+    if (!q->fetch()) 
+        return nullptr;  
+
+    *entry = Entry(*q);
+    return entry;
+    
+}
+
+std::vector<std::string> listFolderPaths(Database *db, const std::string& path) {
+
+    std::vector<std::string> res;
+
+    auto q = db->query("SELECT path FROM entries WHERE path LIKE ? OR path = ?");
+
+    q->bind(1, path + "/%");
+    q->bind(2, path);
+    
+    while (q->fetch()) {
+
+        const auto p = q->getText(0);
+
+        res.push_back(p);
+    }
+
+    return res;
+
+}
+
+void replacePath(Database* db, const std::string& source, const std::string& dest) {
+    
+    LOGD << "Replacing '" << source << "' to '" << dest << "'";
+
+    auto depth = io::Path(dest).depth();
+
+    auto update = db->query("UPDATE entries SET path = ?, depth = ? WHERE path = ?");
+    update->bind(1, dest);
+    update->bind(2, depth);
+    update->bind(3, source);
+    update->execute();
+}
+
 void moveEntry(Database* db, const std::string& source, const std::string& dest) {
 
     if (source[source.length() -1 ] == '/' || source[source.length() -1 ] == '\\')
@@ -665,37 +724,60 @@ void moveEntry(Database* db, const std::string& source, const std::string& dest)
     // Nothing to do
     if (source == dest) return;
 
+    Entry sourceEntry, destEntry;
+    bool sourceExists = getEntry(db, source, &sourceEntry) == nullptr;
+    bool destExists = getEntry(db, dest, &destEntry) != nullptr;
+    
+    // Ensure entry consistency: cannot move file on folder and vice-versa
+    if (sourceExists)
+        throw InvalidArgsException("source path not found");
+    
+    // If dest exists
+    if (destExists) {
+
+        // If source is a folder we cannot move it on anything that exists (only new path)
+        if (sourceEntry.type == EntryType::Directory) {
+            if (destEntry.type != EntryType::Directory)
+                throw InvalidArgsException("Cannot move a folder on a file");
+            else 
+                throw InvalidArgsException("Cannot move a directory on another directory");
+        // If source is a file we cannot move it on a folder
+        } else         
+            if (destEntry.type == EntryType::Directory)
+                throw InvalidArgsException("Cannot move a file on a directory");
+    }
+
     const fs::path directory = rootDirectory(db);
 
     db->exec("BEGIN EXCLUSIVE TRANSACTION");
 
-    auto q = db->query("SELECT path FROM entries WHERE path LIKE ?");
+    // If we are moving a file
+    if (sourceEntry.type != EntryType::Directory) {
+        
+        if (destExists) deleteEntry(db, dest);
+        
+        replacePath(db, source, dest);
+        
+    } else {
 
-    q->bind(1, source + "%");
+        const auto paths = listFolderPaths(db, source);
 
-    while (q->fetch()) {
-        const auto path = q->getText(0);
+        for (const std::string& path : paths) {
 
-        auto newPath = dest + std::string(path).substr(source.length(), std::string::npos);
+            auto newPath = dest + std::string(path).substr(source.length(), std::string::npos);
 
-        LOGD << "Replacing '" << path << "' to '" << newPath << "'";
+            deleteEntry(db, newPath);
+            replacePath(db, path, newPath);
+            
+        } 
 
-        auto depth = io::Path(newPath).depth();
-
-        deleteEntry(db, newPath);
-
-        auto update = db->query("UPDATE entries SET path = ?, depth = ? WHERE path = ?");
-        update->bind(1, newPath);
-        update->bind(2, depth);
-        update->bind(3, path);
-        update->execute();
-
-    }
-
-    createMissingFolders(db);
+        createMissingFolders(db);        
+    }  
 
     db->exec("COMMIT");
 
+    // Update last edit
+    db->setLastUpdate();
 }
 
 }  // namespace ddb
