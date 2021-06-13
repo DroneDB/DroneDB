@@ -846,11 +846,27 @@ TEST(moveEntry, conflict) {
 
     showList(db.get(), testFolder);
 
-    moveEntry(db.get(), "pics2/pics", "pics2");//"pacs.jpg");
+    ASSERT_THROW(moveEntry(db.get(), "pics2/pics", "pics2"), InvalidArgsException);
+    
+}
 
-    auto str = showList(db.get(), testFolder);
-   
-    EXPECT_EQ(str, "1JI_0064.JPG\n1JI_0065.JPG\npics\npics.JPG\npics/IMG_20160826_181302.jpg\npics/IMG_20160826_181305.jpg\npics/IMG_20160826_181309.jpg\npics/IMG_20160826_181314.jpg\npics/IMG_20160826_181317.jpg\npics/pics2\npics/pics2/IMG_20160826_181305.jpg\npics/pics2/IMG_20160826_181309.jpg\npics2\npics2/IMG_20160826_181302.jpg\npics2/IMG_20160826_181305.jpg\npics2/IMG_20160826_181309.jpg\npics2/IMG_20160826_181314.jpg\npics2/IMG_20160826_181317.jpg\npics2/pics2\npics2/pics2/IMG_20160826_181305.jpg\npics2/pics2/IMG_20160826_181309.jpg\n");
+TEST(moveEntry, folderOnFile) {
+    TestArea ta(TEST_NAME);
+
+    const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", "dbase.sqlite");
+
+    const auto testFolder = ta.getFolder("test");
+    create_directory(testFolder / ".ddb");
+    fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
+
+    auto db = ddb::open(testFolder.string(), false);
+    
+    ASSERT_THROW(moveEntry(db.get(), "pics2", "pics.JPG"), InvalidArgsException);
+    ASSERT_THROW(moveEntry(db.get(), "pics2/pics", "pics/pics2/IMG_20160826_181305.jpg"), InvalidArgsException);
+    ASSERT_THROW(moveEntry(db.get(), "pics2/pics/pics2/IMG_20160826_181309.jpg", "pics2"), InvalidArgsException);
+    ASSERT_THROW(moveEntry(db.get(), "pics/IMG_20160826_181314.jpg", "pics2/pics"), InvalidArgsException);
+
+    auto str = showList(db.get(), testFolder);   
 
 }
 
