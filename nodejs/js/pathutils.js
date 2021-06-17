@@ -23,5 +23,16 @@ module.exports = {
         if (idx == -1) return null;
 
         return path.substr(0, idx);
+    },
+
+    getTree: function(path) {
+        var folders = [];
+        var f = path;
+        do {
+            folders.push(f);
+            f = this.getParentFolder(f);
+        } while(f != null);
+
+        return folders.reverse();
     }
 }
