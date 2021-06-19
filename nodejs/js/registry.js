@@ -182,11 +182,11 @@ module.exports = class Registry{
                 let json = await response.json();
                 if (json.error) throw new Error(json.error);
 
-                if (response.status === 200) return json;
+                if (response.status === 200 || response.status === 201) return json;
                 else throw new Error(`Server responded with: ${JSON.stringify(json)}`);
             }else if (contentType && contentType.indexOf("text/") !== -1){
                 let text = await response.text();
-                if (response.status === 200) return text;
+                if (response.status === 200 || response.status === 201) return text;
                 else throw new Error(`Server responded with: ${text}`);
             }else{
                 throw new Error(`Server responded with: ${await response.text()}`);
@@ -202,8 +202,12 @@ module.exports = class Registry{
         return this.makeRequest(endpoint, "POST", body);
     }
 
-    async deleteRequest(endpoint){
-        return this.makeRequest(endpoint, "DELETE");
+    async putRequest(endpoint, body = {}){
+        return this.makeRequest(endpoint, "PUT", body);
+    }
+
+    async deleteRequest(endpoint, body = {}){
+        return this.makeRequest(endpoint, "DELETE", body);
     }
 
     Organization(name){

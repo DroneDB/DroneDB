@@ -612,9 +612,40 @@ std::string initIndex(const std::string &directory, bool fromScratch) {
 
 void deleteEntry(Database* db, const std::string& path) {
 
-    auto f = db->query("DELETE FROM entries WHERE path LIKE ?");
+    auto f = db->query("DELETE FROM entries WHERE path = ?");
     f->bind(1, path);
     f->execute();
+}
+
+#define FOLDER_CONSISTENCY_QUERY "SELECT B.folder FROM ( \
+	SELECT A.path, TRIM(A.folder, '/') AS folder FROM ( \
+		SELECT path, replace(path, replace(path, rtrim(path, replace(path, '/', '')), ''), '') AS folder FROM entries WHERE type != 1) AS A \
+		WHERE length(A.folder) > 0) AS B WHERE folder NOT IN (SELECT path FROM entries WHERE type = 1)"
+
+#define CREATE_FOLDER_QUERY "INSERT INTO entries (path, type, meta, mtime, size, depth) VALUES (?, 1, 'null', ?, 0, ?)"
+
+void addFolder(Database *db, const std::string path, const time_t mtime) {
+    const auto q = db->query(CREATE_FOLDER_QUERY);
+    q->bind(1, path);
+    q->bind(2, static_cast<long long>(mtime));
+    q->bind(3, ddb::io::Path(path).depth());
+    q->execute();
+}
+
+void createMissingFolders(Database* db) {
+
+    const auto q = db->query(FOLDER_CONSISTENCY_QUERY);
+
+    while(q->fetch()) {
+
+        const auto folder = q->getText(0);
+
+        LOGD << "Creating missing folder '" << folder << "'";
+
+        addFolder(db, folder, time(NULL));
+
+    }
+
 }
 
 bool pathExists(Database* db, const std::string& path) {
@@ -738,7 +769,10 @@ void moveEntry(Database* db, const std::string& source, const std::string& dest)
             deleteEntry(db, newPath);
             replacePath(db, path, newPath);
             
-        }         
+        } 
+
+        createMissingFolders(db);        
+
     }  
 
     db->exec("COMMIT");
