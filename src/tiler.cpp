@@ -336,9 +336,11 @@ BoundingBox<Projected2Di> Tiler::getMinMaxCoordsForZ(int tz) const {
     BoundingBox<Projected2Di> b(mercator.metersToTile(oMinX, oMinY, tz),
                                 mercator.metersToTile(oMaxX, oMaxY, tz));
 
+    LOGD << "MinMaxCoordsForZ(" << tz << ") = (" << b.min.x << ", " << b.min.y << "), (" << b.max.x << ", " << b.max.y << ")";
+
     // Crop tiles extending world limits (+-180,+-90)
     b.min.x = std::max<int>(0, b.min.x);
-    b.max.x = std::min<int>(static_cast<int>(std::pow(2, tz - 1)), b.max.x);
+    b.max.x = std::min<int>(static_cast<int>(std::pow(2, tz) - 1), b.max.x);
 
     // TODO: figure this out (TMS vs. XYZ)
     //    b.min.y = std::max<double>(0, b.min.y);
