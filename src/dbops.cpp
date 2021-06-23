@@ -531,8 +531,8 @@ void syncIndex(Database *db) {
 
 // Sets the modified times of files in the filesystem
 // to match that of the database. Optionally,
-// if a delta is specified, limits the scope of the synchronization
-// to files that need to be added or copied
+// if a whitelist of files is specified, limits the scope of the synchronization
+// to those files only. An empty set of files indicates to update all files.
 void syncLocalMTimes(Database *db, const std::vector<std::string> &files) {
     const fs::path directory = rootDirectory(db);
     std::string sql = "SELECT path,mtime FROM entries WHERE (type != ? AND type != ?)";
