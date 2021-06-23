@@ -43,7 +43,7 @@ module.exports = class Dataset{
     }
 
     thumbUrl(path, size){
-        let url = `${this.baseApi}/thumb?path=${path}`;
+        let url = `${this.baseApi}/thumb?path=${encodeURIComponent(path)}`;
         if (size) url += `&size=${size}`;
         return url;
     }
