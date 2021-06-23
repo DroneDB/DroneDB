@@ -57,6 +57,68 @@ time_t Path::getModifiedTime() {
 #endif
 }
 
+bool Path::setModifiedTime(time_t mtime) {
+#ifdef WIN32
+    if (getModifiedTime() != mtime) {
+        HANDLE hFile;
+        FILETIME ftModified;
+        FILETIME ftCreated;
+        FILETIME ftAccessed;
+        hFile = CreateFileW(p.wstring().c_str(), GENERIC_WRITE, FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_WRITE_ATTRIBUTES, NULL);
+        if (hFile == INVALID_HANDLE_VALUE) {
+            throw FSException("Cannot stat (open) " + p.string() +
+                              " (errcode: " + std::to_string(GetLastError()) +
+                              ")");
+        }
+
+        if (!GetFileTime(hFile, &ftCreated, &ftAccessed, &ftModified)) {
+            CloseHandle(hFile);
+            throw FSException("Cannot stat mtime (set time) " + p.string());
+        }
+
+        const int64_t UNIX_TIME_START =
+            0x019DB1DED53E8000;  // January 1, 1970 (start of Unix epoch) in
+                                 // "ticks"
+        const int64_t TICKS_PER_SECOND = 10000000;  // a tick is 100ns
+
+        // Change only mtime
+        LARGE_INTEGER li;
+        li.QuadPart = (mtime * TICKS_PER_SECOND) + UNIX_TIME_START;
+
+        ftModified.dwLowDateTime = li.LowPart;
+        ftModified.dwHighDateTime = li.HighPart;
+
+        if (!SetFileTime(hFile, &ftCreated, &ftAccessed, &ftModified)) {
+            CloseHandle(hFile);
+            throw FSException("Cannot set mtime " + p.string());
+        }
+
+        CloseHandle(hFile);
+
+        return true;
+    } else {
+        return false;
+    }
+#else
+    struct stat sres;
+    if(stat(p.string().c_str(), &sres) != 0) {
+        throw FSException("Cannot stat " + p.string());
+    }
+
+    if (sres.st_mtime != mtime){
+        struct utimbuf t;
+        t.modtime = mtime;
+        t.actime = sres.st_atime;
+        if (utime(p.string().c_str(), &t) != 0){
+            throw FSException("Cannot set mtime " + p.string());
+        }
+        return true;
+    }else{
+        return false;
+    }
+#endif
+}
+
 std::uintmax_t Path::getSize() {
 #ifdef WIN32
     HANDLE hFile;

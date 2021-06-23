@@ -95,6 +95,14 @@ struct Delta {
     std::vector<AddAction> adds;
     std::vector<RemoveAction> removes;
     std::vector<CopyAction> copies;
+
+    DDB_DLL std::vector<std::string> modifiedPathList() const{
+        std::vector<std::string> result;
+        for (unsigned long i = 0; i < adds.size(); i++) result.push_back(adds[i].path);
+        for (unsigned long i = 0; i < removes.size(); i++) result.push_back(removes[i].path);
+        for (unsigned long i = 0; i < copies.size(); i++) result.push_back(copies[i].destination);
+        return result;
+    }
 };
 
 DDB_DLL void to_json(json& j, const SimpleEntry& e);

@@ -24,6 +24,7 @@
 #define LOCK_NB 4
 #else
 #include <sys/file.h>
+#include <utime.h>
 #define _close close
 #define _unlink unlink
 #define _open open
@@ -46,6 +47,7 @@ public:
     DDB_DLL bool checkExtension(const std::initializer_list<std::string>& matches);
 
     DDB_DLL time_t getModifiedTime();
+    DDB_DLL bool setModifiedTime(time_t mtime);
     DDB_DLL std::uintmax_t getSize();
     DDB_DLL bool hasChildren(const std::vector<std::string> &childPaths);
     DDB_DLL bool isParentOf(const fs::path &childPath);
