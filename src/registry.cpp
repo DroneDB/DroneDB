@@ -717,7 +717,9 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
     io::copy(tempDdbFolder / DDB_FOLDER / "dbase.sqlite", ddbPath / "dbase.sqlite");
 
     db->open(dbOpenFile);
-    syncLocalMTimes(db.get(), delta.modifiedPathList());
+
+    auto mPathList = delta.modifiedPathList();
+    if (mPathList.size() > 0) syncLocalMTimes(db.get(), mPathList);
 
     LOGD << "Pull done";
 

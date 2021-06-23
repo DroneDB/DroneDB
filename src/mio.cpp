@@ -64,9 +64,7 @@ bool Path::setModifiedTime(time_t mtime) {
         FILETIME ftModified;
         FILETIME ftCreated;
         FILETIME ftAccessed;
-        hFile = CreateFileW(
-            p.wstring().c_str(), 0, FILE_SHARE_READ, NULL, OPEN_EXISTING,
-            FILE_ATTRIBUTE_NORMAL | FILE_FLAG_BACKUP_SEMANTICS, NULL);
+        hFile = CreateFileW(p.wstring().c_str(), GENERIC_WRITE, FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_WRITE_ATTRIBUTES, NULL);
         if (hFile == INVALID_HANDLE_VALUE) {
             throw FSException("Cannot stat (open) " + p.string() +
                               " (errcode: " + std::to_string(GetLastError()) +
@@ -75,7 +73,7 @@ bool Path::setModifiedTime(time_t mtime) {
 
         if (!GetFileTime(hFile, &ftCreated, &ftAccessed, &ftModified)) {
             CloseHandle(hFile);
-            throw FSException("Cannot stat mtime (get time) " + p.string());
+            throw FSException("Cannot stat mtime (set time) " + p.string());
         }
 
         const int64_t UNIX_TIME_START =
