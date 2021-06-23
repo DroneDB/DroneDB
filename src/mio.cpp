@@ -59,7 +59,48 @@ time_t Path::getModifiedTime() {
 
 bool Path::setModifiedTime(time_t mtime) {
 #ifdef WIN32
-    // TODO!
+    if (getModifiedTime() != mtime) {
+        HANDLE hFile;
+        FILETIME ftModified;
+        FILETIME ftCreated;
+        FILETIME ftAccessed;
+        hFile = CreateFileW(
+            p.wstring().c_str(), 0, FILE_SHARE_READ, NULL, OPEN_EXISTING,
+            FILE_ATTRIBUTE_NORMAL | FILE_FLAG_BACKUP_SEMANTICS, NULL);
+        if (hFile == INVALID_HANDLE_VALUE) {
+            throw FSException("Cannot stat (open) " + p.string() +
+                              " (errcode: " + std::to_string(GetLastError()) +
+                              ")");
+        }
+
+        if (!GetFileTime(hFile, &ftCreated, &ftAccessed, &ftModified)) {
+            CloseHandle(hFile);
+            throw FSException("Cannot stat mtime (get time) " + p.string());
+        }
+
+        const int64_t UNIX_TIME_START =
+            0x019DB1DED53E8000;  // January 1, 1970 (start of Unix epoch) in
+                                 // "ticks"
+        const int64_t TICKS_PER_SECOND = 10000000;  // a tick is 100ns
+
+        // Change only mtime
+        LARGE_INTEGER li;
+        li.QuadPart = (mtime * TICKS_PER_SECOND) + UNIX_TIME_START;
+
+        ftModified.dwLowDateTime = li.LowPart;
+        ftModified.dwHighDateTime = li.HighPart;
+
+        if (!SetFileTime(hFile, &ftCreated, &ftAccessed, &ftModified)) {
+            CloseHandle(hFile);
+            throw FSException("Cannot set mtime " + p.string());
+        }
+
+        CloseHandle(hFile);
+
+        return true;
+    } else {
+        return false;
+    }
 #else
     struct stat sres;
     if(stat(p.string().c_str(), &sres) != 0) {
