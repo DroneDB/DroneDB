@@ -211,6 +211,9 @@ DDB_DLL void Registry::clone(const std::string &organization,
     syncManager.setLastSync(time(nullptr), this->url);
     tagManager.setTag(this->url + "/" + organization + "/" + dataset);
 
+    const auto db = ddb::open(std::string(folder), false);
+    syncLocalMTimes(db.get());
+
     out << "Done" << std::endl;
 }
 
@@ -581,7 +584,8 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
     // 2) Get our last sync time for that specific registry using syncmanager
 
     auto db = open(path, true);
-    const auto ddbPath = fs::path(db->getOpenFile()).parent_path();
+    std::string dbOpenFile = db->getOpenFile();
+    const auto ddbPath = fs::path(dbOpenFile).parent_path();
 
     LOGD << "Ddb folder = " << ddbPath;
 
@@ -711,6 +715,9 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
 
     std::error_code e;
     io::copy(tempDdbFolder / DDB_FOLDER / "dbase.sqlite", ddbPath / "dbase.sqlite");
+
+    db->open(dbOpenFile);
+    syncLocalMTimes(db.get(), delta.modifiedPathList());
 
     LOGD << "Pull done";
 

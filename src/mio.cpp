@@ -57,6 +57,29 @@ time_t Path::getModifiedTime() {
 #endif
 }
 
+bool Path::setModifiedTime(time_t mtime) {
+#ifdef WIN32
+    // TODO!
+#else
+    struct stat sres;
+    if(stat(p.string().c_str(), &sres) != 0) {
+        throw FSException("Cannot stat " + p.string());
+    }
+
+    if (sres.st_mtime != mtime){
+        struct utimbuf t;
+        t.modtime = mtime;
+        t.actime = sres.st_atime;
+        if (utime(p.string().c_str(), &t) != 0){
+            throw FSException("Cannot set mtime " + p.string());
+        }
+        return true;
+    }else{
+        return false;
+    }
+#endif
+}
+
 std::uintmax_t Path::getSize() {
 #ifdef WIN32
     HANDLE hFile;

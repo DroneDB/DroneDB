@@ -529,6 +529,34 @@ void syncIndex(Database *db) {
     if (changed) db->setLastUpdate();
 }
 
+// Sets the modified times of files in the filesystem
+// to match that of the database. Optionally,
+// if a delta is specified, limits the scope of the synchronization
+// to files that need to be added or copied
+void syncLocalMTimes(Database *db, const std::vector<std::string> &files) {
+    const fs::path directory = rootDirectory(db);
+    std::string sql = "SELECT path,mtime FROM entries WHERE (type != ? AND type != ?)";
+    if (files.size() > 0){
+        sql += " AND path in (";
+        for (unsigned long i = 0; i < files.size() - 1; i++) sql += "?,";
+        sql += "?)";
+    }
+
+    auto q = db->query(sql);
+    q->bind(1, EntryType::Directory);
+    q->bind(2, EntryType::DroneDB);
+    for (unsigned long i = 0; i < files.size(); i++){
+        q->bind(3 + i, files[i]);
+    }
+
+    while (q->fetch()) {
+        io::Path fullPath = directory / fs::path(q->getText(0));
+        if (fullPath.setModifiedTime(static_cast<time_t>(q->getInt64(1)))){
+            LOGD << "Updated mtime for " << fullPath.string();
+        }
+    }
+}
+
 std::string initIndex(const std::string &directory, bool fromScratch) {
     const fs::path dirPath = directory;
     if (!exists(dirPath))
