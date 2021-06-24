@@ -7,6 +7,9 @@
 #include <iostream>
 
 #include "../build.h"
+
+#include <ddb.h>
+
 #include "dbops.h"
 #include "fs.h"
 
@@ -18,8 +21,10 @@ void Build::setOptions(cxxopts::Options &opts) {
         .positional_help("[args]")
         .custom_help("build path/to/file.laz --output out_dir/")
         .add_options()
-        ("o,output", "Output folder", cxxopts::value<std::string>()->default_value(DEFAULT_BUILD_PATH))
-        ("p,path", "File to process", cxxopts::value<std::string>());
+        ("o,output", "Output folder", cxxopts::value<std::string>()->default_value((fs::path(DDB_FOLDER) / DEFAULT_BUILD_PATH).generic_string()))
+        ("p,path", "File to process", cxxopts::value<std::string>())
+    	("w,working-dir", "Working directory", cxxopts::value<std::string>()->default_value("."))
+    	("f,force", "Force rebuild", cxxopts::value<bool>()->default_value("false"));
 ;
     // clang-format on
     opts.parse_positional({"path"});
@@ -32,12 +37,16 @@ std::string Build::description() {
 
 void Build::run(cxxopts::ParseResult &opts) {
     const auto output = opts["output"].as<std::string>();
+    const auto ddbPath = opts["working-dir"].as<std::string>();
+    const auto force = opts["force"].as<bool>();
 
+    const auto db = ddb::open(ddbPath, true);
+    
     if (!opts.count("path")) {
-        ddb::build_all(output);
+        build_all(db.get(), output, std::cout, force);
     } else {
         const auto path = opts["path"].as<std::string>();
-        ddb::build(path, output);
+        build(db.get(), path, output, std::cout, force);
     }
 }
 

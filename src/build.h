@@ -6,13 +6,19 @@
 
 //#include "entry.h"
 #include "ddb_export.h"
+#include "dbops.h"
 
 namespace ddb {
 
 #define DEFAULT_BUILD_PATH "out_dir"
 
-DDB_DLL void build_all(const std::string& output);
-DDB_DLL void build(const std::string& path, const std::string& output);
+// We should add here the new buildable file types
+#define ENTRY_MATCHER_QUERY "SELECT path, hash, type, meta, mtime, size, depth, AsGeoJSON(point_geom), AsGeoJSON(polygon_geom) FROM entries WHERE path LIKE '%.laz'"
+
+DDB_DLL void build_all(Database* db, const std::string& outputPath,
+                       std::ostream& output, bool force = false);
+DDB_DLL void build(Database* db, const std::string& path,
+                   const std::string& outputPath, std::ostream& output, bool force = false);
 
 }
 
