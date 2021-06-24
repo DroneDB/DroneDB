@@ -684,8 +684,7 @@ bool pathExists(Database* db, const std::string& path) {
 }
 
 Entry *getEntry(Database* db, const std::string& path, Entry* entry) {
-
-    std::string sql =
+    const std::string sql =
         "SELECT path, hash, type, meta, mtime, size, depth, "
         "AsGeoJSON(point_geom), AsGeoJSON(polygon_geom) FROM entries WHERE "
         "path = ?";
