@@ -696,19 +696,15 @@ Entry *getEntry(Database* db, const std::string& path, Entry* entry) {
 
     if (entry == nullptr)
         throw InvalidArgsException("Entry pointer should not be null");
-
-    const std::string sql =
-        "SELECT path, hash, type, meta, mtime, size, depth, "
-        "AsGeoJSON(point_geom), AsGeoJSON(polygon_geom) FROM entries WHERE "
-        "path = ?";
-
-    auto q = db->query(sql);
+    
+    auto q = db->query("SELECT path, hash, type, meta, mtime, size, depth, "
+        "AsGeoJSON(point_geom), AsGeoJSON(polygon_geom) FROM entries WHERE path = ? LIMIT 1");
 
     q->bind(1, path);
 
-    if (!q->fetch()) 
-        return nullptr;  
-
+    if (!q->fetch())
+        return nullptr;
+  
     *entry = Entry(*q);
     return entry;
     
@@ -765,11 +761,11 @@ void moveEntry(Database* db, const std::string& source, const std::string& dest)
     if (source == dest) return;
 
     Entry sourceEntry, destEntry;
-    bool sourceExists = getEntry(db, source, &sourceEntry) == nullptr;
+    bool sourceExists = getEntry(db, source, &sourceEntry) != nullptr;
     bool destExists = getEntry(db, dest, &destEntry) != nullptr;
     
     // Ensure entry consistency: cannot move file on folder and vice-versa
-    if (sourceExists)
+    if (!sourceExists)
         throw InvalidArgsException("source path not found");
     
     // If dest exists

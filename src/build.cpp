@@ -92,7 +92,7 @@ void build(Database* db, const std::string& path, const std::string& outputPath,
 
     Entry e;
 
-    const bool entryExists = getEntry(db, path, &e) == nullptr;
+    const bool entryExists = getEntry(db, path, &e) != nullptr;
     if (!entryExists) throw InvalidArgsException("Entry does not exist");
 
     const auto res = build_internal(db, e, outputPath, output, force);
