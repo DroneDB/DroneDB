@@ -391,8 +391,11 @@ std::string sanitize_query_param(const std::string &str) {
     return res;
 }
 
+void deleteBuildFiles(Database *db, const std::string& path) {
+    LOGD << "Deleting build files of '" << path << "'";
+}
+
 int deleteFromIndex(Database *db, const std::string &query, bool isFolder) {
-    int count = 0;
 
     LOGD << "Query: " << query;
 
@@ -411,18 +414,24 @@ int deleteFromIndex(Database *db, const std::string &query, bool isFolder) {
 
     q->bind(1, str);
 
-    bool res = false;
+    int count = 0;
 
     while (q->fetch()) {
-        res = true;
 
-        std::cout << "D\t" << q->getText(0) << std::endl;
+        const auto path = q->getText(0);
+        const auto type = q->getInt(1);
+
+        // Folders are not 'buildable' (so far)
+        if (type != Directory)
+            deleteBuildFiles(db, path);
+        
+        std::cout << "D\t" << path << std::endl;
         count++;
     }
 
     q->reset();
 
-    if (res) {
+    if (count > 0) {
         q = db->query("DELETE FROM entries WHERE path LIKE ? ESCAPE '/'");
 
         q->bind(1, str);
@@ -684,6 +693,10 @@ bool pathExists(Database* db, const std::string& path) {
 }
 
 Entry *getEntry(Database* db, const std::string& path, Entry* entry) {
+
+    if (entry == nullptr)
+        throw InvalidArgsException("Entry pointer should not be null");
+
     const std::string sql =
         "SELECT path, hash, type, meta, mtime, size, depth, "
         "AsGeoJSON(point_geom), AsGeoJSON(polygon_geom) FROM entries WHERE "
@@ -725,7 +738,7 @@ void replacePath(Database* db, const std::string& source, const std::string& des
     
     LOGD << "Replacing '" << source << "' to '" << dest << "'";
 
-    auto depth = io::Path(dest).depth();
+    const auto depth = io::Path(dest).depth();
 
     auto update = db->query("UPDATE entries SET path = ?, depth = ? WHERE path = ?");
     update->bind(1, dest);
@@ -763,15 +776,16 @@ void moveEntry(Database* db, const std::string& source, const std::string& dest)
     if (destExists) {
 
         // If source is a folder we cannot move it on anything that exists (only new path)
-        if (sourceEntry.type == EntryType::Directory) {
-            if (destEntry.type != EntryType::Directory)
+        if (sourceEntry.type == Directory) {
+            if (destEntry.type != Directory)
                 throw InvalidArgsException("Cannot move a folder on a file");
-            else 
-                throw InvalidArgsException("Cannot move a directory on another directory");
-        // If source is a file we cannot move it on a folder
-        } else         
-            if (destEntry.type == EntryType::Directory)
-                throw InvalidArgsException("Cannot move a file on a directory");
+
+            throw InvalidArgsException("Cannot move a directory on another directory");
+            // If source is a file we cannot move it on a folder
+        }
+
+        if (destEntry.type == Directory)
+            throw InvalidArgsException("Cannot move a file on a directory");
     }
 
     const fs::path directory = rootDirectory(db);
@@ -779,7 +793,7 @@ void moveEntry(Database* db, const std::string& source, const std::string& dest)
     db->exec("BEGIN EXCLUSIVE TRANSACTION");
 
     // If we are moving a file
-    if (sourceEntry.type != EntryType::Directory) {
+    if (sourceEntry.type != Directory) {
         
         if (destExists) deleteEntry(db, dest);
         
