@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "dbops.h"
 
+#include <build.h>
 #include <ddb.h>
 #include <status.h>
 
@@ -393,7 +394,26 @@ std::string sanitize_query_param(const std::string &str) {
 }
 
 void deleteBuildFiles(Database *db, const std::string& path) {
+
     LOGD << "Deleting build files of '" << path << "'";
+
+    Entry e;
+
+    if (!getEntry(db, path, &e))
+        throw InvalidArgsException("Path '" + path + "' does not exist in index");
+
+    const auto buildFolder =
+        fs::path(db->getOpenFile()).parent_path() / DEFAULT_BUILD_PATH / e.hash;
+
+    LOGD << "Checking path " << buildFolder;
+
+    if (exists(buildFolder)) {
+
+        LOGD << "Removing build files";
+        remove_all(buildFolder);
+
+    }
+
 }
 
 int deleteFromIndex(Database *db, const std::string &query, bool isFolder, RemoveCallback callback) {
@@ -423,6 +443,8 @@ int deleteFromIndex(Database *db, const std::string &query, bool isFolder, Remov
         const auto type = q->getInt(1);
 
         // Folders are not 'buildable' (so far)
+        // We could optimize it with a function that can filter which files are buildable and which are not
+        // It could be an early optimization but if the deletion gets slow that's one of the culprits
         if (type != Directory)
             deleteBuildFiles(db, path);
         
