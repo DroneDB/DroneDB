@@ -4,6 +4,9 @@
 
 #include <iostream>
 #include "remove.h"
+
+#include <dbops.h>
+
 #include "ddb.h"
 
 namespace cmd {
@@ -30,14 +33,15 @@ void Remove::run(cxxopts::ParseResult &opts) {
     }
 
     const auto ddbPath = opts["working-dir"].as<std::string>();
-    auto paths = opts["paths"].as<std::vector<std::string>>();
+    const auto paths = opts["paths"].as<std::vector<std::string>>();
 
-    std::vector<const char *> cPaths(paths.size());
-    std::transform(paths.begin(), paths.end(), cPaths.begin(), [](const std::string& s) { return s.c_str(); });
+    const auto db = ddb::open(std::string(ddbPath), true);
 
-    if (DDBRemove(ddbPath.c_str(), cPaths.data(), static_cast<int>(cPaths.size())) != DDBERR_NONE){
-        std::cerr << DDBGetLastError() << std::endl;
-    }
+    removeFromIndex(db.get(), paths, [](const std::string& path)
+    {
+        std::cout << "D\t" << path << std::endl;
+    });
+
 }
 
 }

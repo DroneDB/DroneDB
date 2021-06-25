@@ -279,7 +279,7 @@ void addToIndex(Database *db, const std::vector<std::string> &paths,
 
         if (p.has_filename()) {
             const auto fileName = p.filename().generic_string();
-            if (fileName.find("\\") != std::string::npos) {
+            if (fileName.find('\\') != std::string::npos) {
                 
                 LOGD << "Skipping '" << p << "'";
 
@@ -337,7 +337,7 @@ void addToIndex(Database *db, const std::vector<std::string> &paths,
     db->setLastUpdate();
 }
 
-void removeFromIndex(Database *db, const std::vector<std::string> &paths) {
+void removeFromIndex(Database *db, const std::vector<std::string> &paths, RemoveCallback callback) {
     if (paths.empty()) {
         // Nothing to do
         LOGD << "No paths provided";
@@ -360,9 +360,10 @@ void removeFromIndex(Database *db, const std::vector<std::string> &paths) {
         int tot = 0;
 
         for (auto &e : entryMatches) {
-            auto cnt = deleteFromIndex(db, e.path);
+            auto cnt = deleteFromIndex(db, e.path, false, callback);
 
-            if (e.type == Directory) cnt += deleteFromIndex(db, e.path, true);
+            if (e.type == Directory) 
+                cnt += deleteFromIndex(db, e.path, true, callback);
 
             // if (!cnt)
             //     std::cout << "No matching entries" << std::endl;
@@ -395,7 +396,7 @@ void deleteBuildFiles(Database *db, const std::string& path) {
     LOGD << "Deleting build files of '" << path << "'";
 }
 
-int deleteFromIndex(Database *db, const std::string &query, bool isFolder) {
+int deleteFromIndex(Database *db, const std::string &query, bool isFolder, RemoveCallback callback) {
 
     LOGD << "Query: " << query;
 
@@ -425,7 +426,9 @@ int deleteFromIndex(Database *db, const std::string &query, bool isFolder) {
         if (type != Directory)
             deleteBuildFiles(db, path);
         
-        std::cout << "D\t" << path << std::endl;
+        if (callback != nullptr) 
+            callback(path);
+
         count++;
     }
 
