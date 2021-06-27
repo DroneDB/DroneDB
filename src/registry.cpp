@@ -5,6 +5,7 @@
 #include "registry.h"
 
 #include <boolinq/boolinq.h>
+#include <build.h>
 #include <ddb.h>
 #include <delta.h>
 #include <mio.h>
@@ -145,8 +146,8 @@ DDB_DLL void Registry::clone(const std::string &organization,
 
     LOGD << "Download url = " << downloadUrl;
 
-    const auto tempFile = io::Path(fs::temp_directory_path() /
-                                   utils::generateRandomString(8))
+    const auto tempFile =
+        io::Path(fs::temp_directory_path() / utils::generateRandomString(8))
             .string() +
         ".tmp";
 
@@ -268,7 +269,6 @@ DDB_DLL DatasetInfo Registry::getDatasetInfo(const std::string &organization,
         throw RegistryException("Invalid empty response from registry");
 
     return resArr[0];
-
 }
 
 DDB_DLL void Registry::downloadDdb(const std::string &organization,
@@ -281,8 +281,8 @@ DDB_DLL void Registry::downloadDdb(const std::string &organization,
 
     LOGD << "Download url = " << downloadUrl;
 
-    const auto tempFile = io::Path(fs::temp_directory_path() /
-                                   utils::generateRandomString(8))
+    const auto tempFile =
+        io::Path(fs::temp_directory_path() / utils::generateRandomString(8))
             .string() +
         ".tmp";
 
@@ -343,8 +343,8 @@ DDB_DLL void Registry::downloadFiles(const std::string &organization,
         LOGD << "File downloaded";
 
     } else {
-        const auto tempFile = io::Path(fs::temp_directory_path() /
-                                       utils::generateRandomString(8))
+        const auto tempFile =
+            io::Path(fs::temp_directory_path() / utils::generateRandomString(8))
                 .string() +
             ".tmp";
 
@@ -390,10 +390,9 @@ DDB_DLL void ensureParentFolderExists(const fs::path &folder) {
     }
 }
 
-DDB_DLL std::vector<CopyAction> moveCopiesToTemp(const std::vector<CopyAction> &copies,
-                              const fs::path &baseFolder,
-                              const std::string &tempFolderName) {
-
+DDB_DLL std::vector<CopyAction> moveCopiesToTemp(
+    const std::vector<CopyAction> &copies, const fs::path &baseFolder,
+    const std::string &tempFolderName) {
     if (copies.empty()) {
         LOGD << "No copies to move to temp folder";
         return copies;
@@ -403,8 +402,7 @@ DDB_DLL std::vector<CopyAction> moveCopiesToTemp(const std::vector<CopyAction> &
 
     std::vector<CopyAction> res;
 
-    for (const auto& copy : copies)
-    {
+    for (const auto &copy : copies) {
         LOGD << copy.toString();
 
         const auto source = baseFolder / copy.source;
@@ -416,7 +414,8 @@ DDB_DLL std::vector<CopyAction> moveCopiesToTemp(const std::vector<CopyAction> &
 
         LOGD << "Changed copy path from " << copy.source << " to " << newPath;
 
-        LOGD << "Copying '" << source << "' to '" << dest << "', newPath = '" << newPath << "'";
+        LOGD << "Copying '" << source << "' to '" << dest << "', newPath = '"
+             << newPath << "'";
 
         fs::copy(source, dest,
                  std::filesystem::copy_options::overwrite_existing);
@@ -436,7 +435,8 @@ DDB_DLL void applyDelta(const Delta &res, const fs::path &destPath,
         const auto tempPath = destPath / tmpFolderName;
         create_directories(tempPath);
 
-        const auto newCopies = moveCopiesToTemp(res.copies, destPath, tmpFolderName);
+        const auto newCopies =
+            moveCopiesToTemp(res.copies, destPath, tmpFolderName);
 
         if (res.removes.empty()) {
             LOGD << "No removes in delta";
@@ -527,7 +527,8 @@ DDB_DLL void applyDelta(const Delta &res, const fs::path &destPath,
 
             for (const auto &copy : newCopies) {
                 const auto dest = destPath / copy.destination;
-                const auto destShadow = fs::path(dest.generic_string() + ".replace");
+                const auto destShadow =
+                    fs::path(dest.generic_string() + ".replace");
 
                 if (exists(destShadow)) {
                     LOGD << copy.toString();
@@ -546,8 +547,7 @@ DDB_DLL void applyDelta(const Delta &res, const fs::path &destPath,
             LOGD << "Removing temp path";
             remove_all(tempPath);
         }
-    } catch (fs::filesystem_error& err) {
-
+    } catch (fs::filesystem_error &err) {
         LOGD << "Exception: " << err.what() << " ('" << err.path1() << "', '"
              << err.path2() << "')";
 
@@ -594,8 +594,7 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
     // 1) Get our tag using tagmanager
     const auto tag = tagManager.getTag();
 
-    if (tag.empty()) 
-        throw IndexException("Cannot pull if no tag is specified");
+    if (tag.empty()) throw IndexException("Cannot pull if no tag is specified");
 
     // 2) Get our last sync time for that specific registry using syncmanager
     const auto lastUpdate = db->getLastUpdate();
@@ -611,15 +610,15 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
     LOGD << "Dataset mtime = " << dsInfo.mtime;
 
     out << "Pulling from '" << tag << "'" << std::endl;
-    LOGD  << "Local mtime " << lastUpdate << ", remote mtime " << dsInfo.mtime;
+    LOGD << "Local mtime " << lastUpdate << ", remote mtime " << dsInfo.mtime;
 
-    // 4) Check if we have more recent changes than server, so the pull is pointless or potentially dangerous)
+    // 4) Check if we have more recent changes than server, so the pull is
+    // pointless or potentially dangerous)
 
     if (force) {
         out << "Forcing pull." << std::endl;
     } else {
         if (lastUpdate == dsInfo.mtime) {
-
             // Nothing to do, datasets should be in sync
             out << "Already up to date." << std::endl;
             return;
@@ -631,10 +630,11 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
                 "your local changes might be overwritten. Use --force "
                 "to continue.");
         }
-    }    
+    }
 
-    const auto tempDdbFolder = UserProfile::get()->getProfilePath("pull_cache", true) /
-                               (tagInfo.organization + "-" + tagInfo.dataset);
+    const auto tempDdbFolder =
+        UserProfile::get()->getProfilePath("pull_cache", true) /
+        (tagInfo.organization + "-" + tagInfo.dataset);
 
     LOGD << "Temp ddb folder = " << tempDdbFolder;
 
@@ -658,9 +658,10 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
         << delta.copies.size() << " copies, " << delta.removes.size()
         << " removes" << std::endl;
 
-    const auto tempNewFolder = UserProfile::get()->getProfilePath("pull_cache", false) /
-                               (tagInfo.organization + "-" + tagInfo.dataset) /
-                               std::to_string(time(nullptr));
+    const auto tempNewFolder =
+        UserProfile::get()->getProfilePath("pull_cache", false) /
+        (tagInfo.organization + "-" + tagInfo.dataset) /
+        std::to_string(time(nullptr));
 
     // Let's download only if we have anything to download
     if (!delta.adds.empty()) {
@@ -697,24 +698,24 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
 
         // Check if we have anything to do
         if (delta.copies.empty() && delta.removes.empty()) {
-
             out << "Already up to date." << std::endl;
 
         } else {
-
             // 8) Apply changes to local files (mostly deletes)
             applyDelta(delta, ddbPath.parent_path(), tempNewFolder);
         }
     }
-    
-    LOGD << "Replacing DDB index (copy from '" << tempDdbFolder << "' to '" << ddbPath << "')";
+
+    LOGD << "Replacing DDB index (copy from '" << tempDdbFolder << "' to '"
+         << ddbPath << "')";
 
     // 9) Replace ddb database
     db->close();
     source->close();
 
     std::error_code e;
-    io::copy(tempDdbFolder / DDB_FOLDER / "dbase.sqlite", ddbPath / "dbase.sqlite");
+    io::copy(tempDdbFolder / DDB_FOLDER / "dbase.sqlite",
+             ddbPath / "dbase.sqlite");
 
     db->open(dbOpenFile);
 
@@ -726,29 +727,57 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
     // Cleanup
     io::assureIsRemoved(tempDdbFolder);
     io::assureIsRemoved(tempNewFolder);
-
 }
 
-void zipFolder(const fs::path &folder, const fs::path &archive) {
+void zipFolder(const fs::path &folder, const fs::path &archive,
+               const std::vector<std::string> &excludes) {
+
     miniz_cpp::zip_file file;
 
-    for (const auto &entry : fs::recursive_directory_iterator(folder)) {
-        const auto relPath = io::Path(entry.path()).relativeTo(folder);
-        file.write(entry.path().generic_string(), relPath.string());
+    for (auto i = fs::recursive_directory_iterator(folder);
+         i != fs::recursive_directory_iterator(); ++i) {
+
+        const auto relPath = io::Path(i->path()).relativeTo(folder);
+        
+        bool exclude = false;
+
+        for (const auto &excl : excludes) {
+            exclude = false;
+
+            // If it's a folder we exclude this path and all the descendants
+            if (excl[excl.length() - 1] == '/') {
+                const auto folderName = excl.substr(0, excl.length() - 1);
+                if (relPath.generic().find(folderName) == 0) {
+                    exclude = true;
+                    i.disable_recursion_pending();
+                    break;
+                }
+            } else {
+                if (relPath.generic() == excl) {
+                    exclude = true;
+                    break;
+                }
+            }
+        }
+        if (!exclude) {
+            std::cout << "Adding: '" << relPath.generic() << "'" << std::endl;
+
+            file.write(i->path().generic_string(), relPath.string());
+        }
     }
 
     file.save(archive.generic_string());
+
 }
 
 DDB_DLL void Registry::push(const std::string &path, const bool force,
                             std::ostream &out) {
-
     /*
 
     -- Push Workflow --
 
     1) Get our tag using tagmanager
-    2) Get our last sync time for that specific registry using syncmanager
+    2) Get local mtime
     3) Get dataset mtime
     4) Alert if dataset_mtime > last_sync (it means we have less recent changes
     than server, so the push is pointless or potentially dangerous)
@@ -771,10 +800,9 @@ DDB_DLL void Registry::push(const std::string &path, const bool force,
     // 1) Get our tag using tagmanager
     const auto tag = tagManager.getTag();
 
-    if (tag.empty()) 
-        throw IndexException("Cannot push if no tag is specified");
+    if (tag.empty()) throw IndexException("Cannot push if no tag is specified");
 
-    // 3) Get local mtime
+    // 2) Get local mtime
     const auto lastUpdate = db->getLastUpdate();
 
     LOGD << "Tag = " << tag;
@@ -790,16 +818,17 @@ DDB_DLL void Registry::push(const std::string &path, const bool force,
         LOGD << "Dataset mtime = " << dsInfo.mtime;
 
         out << "Pushing to '" << tag << "'" << std::endl;
-        LOGD << "Local mtime " << lastUpdate << ", remote mtime " << dsInfo.mtime;
+        LOGD << "Local mtime " << lastUpdate << ", remote mtime "
+             << dsInfo.mtime;
 
-        // 4) Alert if dataset_mtime > last_sync (it means we have less recent changes
+        // 4) Alert if dataset_mtime > last_sync (it means we have less recent
+        // changes
         //    than server, so the push is pointless or potentially dangerous)
-        
+
         if (force) {
             out << "Forcing push." << std::endl;
         } else {
-
-            if (lastUpdate == dsInfo.mtime){
+            if (lastUpdate == dsInfo.mtime) {
                 // Nothing to do, datasets should be in sync
                 out << "Already up to date." << std::endl;
                 return;
@@ -807,30 +836,30 @@ DDB_DLL void Registry::push(const std::string &path, const bool force,
 
             if (dsInfo.mtime > lastUpdate) {
                 throw AppException(
-                    "[Warning] The remote dataset has newer changes, but you haven't "
-                    "pulled those changes from the remote registry. If you push now, "
+                    "[Warning] The remote dataset has newer changes, but you "
+                    "haven't "
+                    "pulled those changes from the remote registry. If you "
+                    "push now, "
                     "the remote dataset might be overwritten. Use --force "
                     "to continue.");
             }
         }
-    } catch (RegistryNotFoundException &ex)
-    {
+    } catch (RegistryNotFoundException &ex) {
         LOGD << "Dataset not found: " << ex.what();
 
-        out << "Pushing to new '" << tag << "'" << std::endl; 
+        out << "Pushing to new '" << tag << "'" << std::endl;
     }
 
     // 5) Initialize server push
     LOGD << "Initializing server push";
-    
+
     // 5.1) Zip our ddb folder
     const fs::path tempArchive =
-        fs::temp_directory_path() / (utils::generateRandomString(8) +
-                                     ".zip");
+        fs::temp_directory_path() / (utils::generateRandomString(8) + ".zip");
 
     out << "Zipping ddb folder" << std::endl;
 
-    zipFolder(ddbPath, tempArchive);
+    zipFolder(ddbPath, tempArchive, {std::string(DEFAULT_BUILD_PATH) + '/'});
 
     // 5.1) Call POST endpoint passing zip
     PushManager pushManager(this, tagInfo.organization, tagInfo.dataset);
@@ -844,8 +873,7 @@ DDB_DLL void Registry::push(const std::string &path, const bool force,
 
     const auto basePath = ddbPath.parent_path();
 
-    for (const auto& file : filesList)
-    {
+    for (const auto &file : filesList) {
         const auto fullPath = basePath / file;
 
         out << "Transfering '" << file << "'" << std::endl;
@@ -857,7 +885,7 @@ DDB_DLL void Registry::push(const std::string &path, const bool force,
     }
 
     out << "Transfers done" << std::endl;
-    
+
     // 7) When done call commit endpoint
     pushManager.commit();
 
