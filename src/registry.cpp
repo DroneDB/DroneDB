@@ -760,7 +760,7 @@ void zipFolder(const fs::path &folder, const fs::path &archive,
             }
         }
         if (!exclude) {
-            std::cout << "Adding: '" << relPath.generic() << "'" << std::endl;
+            LOGD << "Adding: '" << relPath.generic() << "'";
 
             file.write(i->path().generic_string(), relPath.string());
         }
