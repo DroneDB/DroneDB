@@ -36,17 +36,27 @@ std::string Build::description() {
 }
 
 void Build::run(cxxopts::ParseResult &opts) {
-    const auto output = opts["output"].as<std::string>();
-    const auto ddbPath = opts["working-dir"].as<std::string>();
-    const auto force = opts["force"].as<bool>();
 
-    const auto db = ddb::open(ddbPath, true);
-    
-    if (!opts.count("path")) {
-        build_all(db.get(), output, std::cout, force);
-    } else {
-        const auto path = opts["path"].as<std::string>();
-        build(db.get(), path, output, std::cout, force);
+    try {
+
+        const auto output = opts["output"].as<std::string>();
+        const auto ddbPath = opts["working-dir"].as<std::string>();
+        const auto force = opts["force"].as<bool>();
+
+        if (output.length() == 0)
+            printHelp();
+
+        const auto db = ddb::open(ddbPath, true);
+        
+        if (!opts.count("path")) {
+            build_all(db.get(), output, std::cout, force);
+        } else {
+            const auto path = opts["path"].as<std::string>();
+            build(db.get(), path, output, std::cout, force);
+        }
+
+    } catch (ddb::InvalidArgsException) {
+        printHelp();
     }
 }
 
