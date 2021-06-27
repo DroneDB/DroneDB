@@ -3,13 +3,9 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "build.h"
-
 #include <iostream>
-
 #include "../build.h"
-
 #include <ddb.h>
-
 #include "dbops.h"
 #include "fs.h"
 
@@ -31,8 +27,8 @@ void Build::setOptions(cxxopts::Options &opts) {
 }
 
 std::string Build::description() {
-    return "Build all buildable files inside the index. Only LAZ files are "
-           "supported so far.";
+    return "Build all buildable files inside the index (only LAZ files are "
+           "supported so far).";
 }
 
 void Build::run(cxxopts::ParseResult &opts) {

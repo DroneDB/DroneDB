@@ -17,6 +17,7 @@ enum BuildResult { Built, Skipped, Unknown };
 BuildResult build_internal(Database* db, const Entry& e,
                            const std::string& outputPath, std::ostream& output,
                            bool force) {
+                               
     LOGD << "Building entry " << e.path << " type " << e.type;
 
     // We could vectorize this logic, but it's an overkill by now
@@ -50,6 +51,7 @@ BuildResult build_internal(Database* db, const Entry& e,
 
 void build_all(Database* db, const std::string& outputPath,
                std::ostream& output, bool force) {
+
     LOGD << "In build_all('" << outputPath << "')";
 
     output << "Searching for buildable files" << std::endl;
@@ -63,7 +65,7 @@ void build_all(Database* db, const std::string& outputPath,
     while (q->fetch()) {
         Entry e(*q);
 
-        // Call build on every of them
+        // Call build on each of them
         const auto res = build_internal(db, e, outputPath, output, force);
 
         switch (res) {
@@ -80,14 +82,16 @@ void build_all(Database* db, const std::string& outputPath,
     }
 
     if (cnt + skipped + unknown == 0)
-        output << "No buildable files found" << std::endl;
+        output << std::endl << "No buildable files found" << std::endl;
     else
-        output << cnt << " file(s) built, " << skipped << " file(s) skipped, "
+        output << std::endl << cnt << " file(s) built, " << skipped << " file(s) skipped, "
                << unknown << " file(s) unknown" << std::endl;
+
 }
 
 void build(Database* db, const std::string& path, const std::string& outputPath,
            std::ostream& output, bool force) {
+
     LOGD << "In build('" << path << "','" << outputPath << "')";
 
     Entry e;
@@ -96,6 +100,8 @@ void build(Database* db, const std::string& path, const std::string& outputPath,
     if (!entryExists) throw InvalidArgsException("Entry does not exist");
 
     const auto res = build_internal(db, e, outputPath, output, force);
+
+    output << std::endl;
 
     switch (res) {
         case Built:
