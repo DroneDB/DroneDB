@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "dbops.h"
 
+#include <build.h>
 #include <ddb.h>
 #include <status.h>
 
@@ -279,7 +280,7 @@ void addToIndex(Database *db, const std::vector<std::string> &paths,
 
         if (p.has_filename()) {
             const auto fileName = p.filename().generic_string();
-            if (fileName.find("\\") != std::string::npos) {
+            if (fileName.find('\\') != std::string::npos) {
                 
                 LOGD << "Skipping '" << p << "'";
 
@@ -337,7 +338,7 @@ void addToIndex(Database *db, const std::vector<std::string> &paths,
     db->setLastUpdate();
 }
 
-void removeFromIndex(Database *db, const std::vector<std::string> &paths) {
+void removeFromIndex(Database *db, const std::vector<std::string> &paths, RemoveCallback callback) {
     if (paths.empty()) {
         // Nothing to do
         LOGD << "No paths provided";
@@ -360,9 +361,10 @@ void removeFromIndex(Database *db, const std::vector<std::string> &paths) {
         int tot = 0;
 
         for (auto &e : entryMatches) {
-            auto cnt = deleteFromIndex(db, e.path);
+            auto cnt = deleteFromIndex(db, e.path, false, callback);
 
-            if (e.type == Directory) cnt += deleteFromIndex(db, e.path, true);
+            if (e.type == Directory) 
+                cnt += deleteFromIndex(db, e.path, true, callback);
 
             // if (!cnt)
             //     std::cout << "No matching entries" << std::endl;
@@ -391,8 +393,19 @@ std::string sanitize_query_param(const std::string &str) {
     return res;
 }
 
-int deleteFromIndex(Database *db, const std::string &query, bool isFolder) {
-    int count = 0;
+void checkDeleteBuild(Database *db, std::string hash){
+    if (!hash.empty()){
+        const auto buildFolder =
+            fs::path(db->getOpenFile()).parent_path() / DDB_BUILD_PATH / hash;
+
+        if (fs::exists(buildFolder)) {
+            LOGD << "Removing " << (buildFolder).string();
+            io::assureIsRemoved(buildFolder);
+        }
+    }
+}
+
+int deleteFromIndex(Database *db, const std::string &query, bool isFolder, RemoveCallback callback) {
 
     LOGD << "Query: " << query;
 
@@ -402,27 +415,33 @@ int deleteFromIndex(Database *db, const std::string &query, bool isFolder) {
 
     if (isFolder) {
         str += "//%";
-
         LOGD << "Folder: " << str;
     }
 
     auto q = db->query(
-        "SELECT path, type FROM entries WHERE path LIKE ? ESCAPE '/'");
+        "SELECT path, hash FROM entries WHERE path LIKE ? ESCAPE '/'");
 
     q->bind(1, str);
 
-    bool res = false;
+    int count = 0;
 
     while (q->fetch()) {
-        res = true;
 
-        std::cout << "D\t" << q->getText(0) << std::endl;
+        const auto path = q->getText(0);
+        const auto hash = q->getText(1);
+
+        // Check for build folders to be removed
+        checkDeleteBuild(db, hash);
+
+        if (callback != nullptr) 
+            callback(path);
+
         count++;
     }
 
     q->reset();
 
-    if (res) {
+    if (count > 0) {
         q = db->query("DELETE FROM entries WHERE path LIKE ? ESCAPE '/'");
 
         q->bind(1, str);
@@ -495,8 +514,9 @@ void syncIndex(Database *db) {
         io::Path relPath = fs::path(q->getText(0));
         fs::path p = directory / relPath.get();
         Entry e;
-
-        const auto status = checkUpdate(e, p, q->getInt64(1), q->getText(2));
+        const auto mtime = q->getInt64(1);
+        const auto hash = q->getText(2);
+        const auto status = checkUpdate(e, p, mtime, hash);
 
         switch(status) {
 
@@ -504,6 +524,7 @@ void syncIndex(Database *db) {
                 // Removed
                 deleteQ->bind(1, relPath.generic());
                 deleteQ->execute();
+                checkDeleteBuild(db, hash);
                 std::cout << "D\t" << relPath.generic() << std::endl;
                 changed = true;
             break;
@@ -685,18 +706,17 @@ bool pathExists(Database* db, const std::string& path) {
 
 Entry *getEntry(Database* db, const std::string& path, Entry* entry) {
 
-    std::string sql =
-        "SELECT path, hash, type, meta, mtime, size, depth, "
-        "AsGeoJSON(point_geom), AsGeoJSON(polygon_geom) FROM entries WHERE "
-        "path = ?";
-
-    auto q = db->query(sql);
+    if (entry == nullptr)
+        throw InvalidArgsException("Entry pointer should not be null");
+    
+    auto q = db->query("SELECT path, hash, type, meta, mtime, size, depth, "
+        "AsGeoJSON(point_geom), AsGeoJSON(polygon_geom) FROM entries WHERE path = ? LIMIT 1");
 
     q->bind(1, path);
 
-    if (!q->fetch()) 
-        return nullptr;  
-
+    if (!q->fetch())
+        return nullptr;
+  
     *entry = Entry(*q);
     return entry;
     
@@ -726,7 +746,7 @@ void replacePath(Database* db, const std::string& source, const std::string& des
     
     LOGD << "Replacing '" << source << "' to '" << dest << "'";
 
-    auto depth = io::Path(dest).depth();
+    const auto depth = io::Path(dest).depth();
 
     auto update = db->query("UPDATE entries SET path = ?, depth = ? WHERE path = ?");
     update->bind(1, dest);
@@ -753,26 +773,27 @@ void moveEntry(Database* db, const std::string& source, const std::string& dest)
     if (source == dest) return;
 
     Entry sourceEntry, destEntry;
-    bool sourceExists = getEntry(db, source, &sourceEntry) == nullptr;
+    bool sourceExists = getEntry(db, source, &sourceEntry) != nullptr;
     bool destExists = getEntry(db, dest, &destEntry) != nullptr;
     
     // Ensure entry consistency: cannot move file on folder and vice-versa
-    if (sourceExists)
+    if (!sourceExists)
         throw InvalidArgsException("source path not found");
     
     // If dest exists
     if (destExists) {
 
         // If source is a folder we cannot move it on anything that exists (only new path)
-        if (sourceEntry.type == EntryType::Directory) {
-            if (destEntry.type != EntryType::Directory)
+        if (sourceEntry.type == Directory) {
+            if (destEntry.type != Directory)
                 throw InvalidArgsException("Cannot move a folder on a file");
-            else 
-                throw InvalidArgsException("Cannot move a directory on another directory");
-        // If source is a file we cannot move it on a folder
-        } else         
-            if (destEntry.type == EntryType::Directory)
-                throw InvalidArgsException("Cannot move a file on a directory");
+
+            throw InvalidArgsException("Cannot move a directory on another directory");
+            // If source is a file we cannot move it on a folder
+        }
+
+        if (destEntry.type == Directory)
+            throw InvalidArgsException("Cannot move a file on a directory");
     }
 
     const fs::path directory = rootDirectory(db);
@@ -780,7 +801,7 @@ void moveEntry(Database* db, const std::string& source, const std::string& dest)
     db->exec("BEGIN EXCLUSIVE TRANSACTION");
 
     // If we are moving a file
-    if (sourceEntry.type != EntryType::Directory) {
+    if (sourceEntry.type != Directory) {
         
         if (destExists) deleteEntry(db, dest);
         

@@ -12,6 +12,7 @@
 #include "entry.h"
 #include "exceptions.h"
 #include "info.h"
+#include "build.h"
 #include "json.h"
 #include "logger.h"
 #include "mio.h"

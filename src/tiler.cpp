@@ -457,11 +457,8 @@ void TilerHelper::cleanupUserCache() {
         fs::path dir = d->path();
         if (fs::is_directory(dir)) {
             if (io::Path(dir).getModifiedTime() < threshold) {
-                if (fs::remove_all(dir))
-                    LOGD << "Cleaned " << dir.string();
-                else
-                    LOGD << "Cannot clean " << dir.string();
-            }
+                io::assureIsRemoved(dir);
+             }
         }
     }
 }

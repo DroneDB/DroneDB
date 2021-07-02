@@ -72,7 +72,8 @@ namespace cmd {
       {"diff", "delta"},
       {"c","clone"},
       {"checkout", "clone"},
-      {"co", "clone"}
+      {"co", "clone"},
+      {"b", "build"}
   };
 
 }

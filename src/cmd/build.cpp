@@ -2,38 +2,57 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-#include <iostream>
-#include "fs.h"
 #include "build.h"
+#include <iostream>
+#include "../build.h"
+#include <ddb.h>
 #include "dbops.h"
+#include "fs.h"
 
 namespace cmd {
 
 void Build::setOptions(cxxopts::Options &opts) {
     // clang-format off
     opts
-    .positional_help("[args] [PATHS]")
-    .custom_help("build")
-    .add_options()
-    ("paths", "Paths", cxxopts::value<std::vector<std::string>>());
+        .positional_help("[args]")
+        .custom_help("build [-p path/to/file.laz] [--output out_dir]")
+        .add_options()
+        ("o,output", "Output folder", cxxopts::value<std::string>()->default_value((fs::path(DDB_FOLDER) / DDB_BUILD_PATH).generic_string()))
+        ("p,path", "File to process", cxxopts::value<std::string>())
+    	("w,working-dir", "Working directory", cxxopts::value<std::string>()->default_value("."))
+    	("f,force", "Force rebuild", cxxopts::value<bool>()->default_value("false"));
+;
     // clang-format on
-    opts.parse_positional({"paths"});
+    opts.parse_positional({"path"});
 }
 
 std::string Build::description() {
-    return "Initialize and build an index. Shorthand for running an init,add,commit command sequence.";
+    return "Build DroneDB files for efficient streaming over a network.";
 }
 
 void Build::run(cxxopts::ParseResult &opts) {
-    if (!opts.count("paths")) {
+
+    try {
+
+        const auto output = opts["output"].as<std::string>();
+        const auto ddbPath = opts["working-dir"].as<std::string>();
+        const auto force = opts["force"].as<bool>();
+
+        if (output.length() == 0)
+            printHelp();
+
+        const auto db = ddb::open(ddbPath, true);
+        
+        if (!opts.count("path")) {
+            build_all(db.get(), output, std::cout, force);
+        } else {
+            const auto path = opts["path"].as<std::string>();
+            build(db.get(), path, output, std::cout, force);
+        }
+
+    } catch (ddb::InvalidArgsException) {
         printHelp();
     }
-
-    std::cerr << "TODO: THIS MODULE IS A WORK IN PROGRESS!";
-
-    exit(1);
 }
 
-}
-
-
+}  // namespace cmd
