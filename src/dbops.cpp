@@ -393,27 +393,16 @@ std::string sanitize_query_param(const std::string &str) {
     return res;
 }
 
-void deleteBuildFiles(Database *db, const std::string& path) {
+void checkDeleteBuild(Database *db, std::string hash){
+    if (!hash.empty()){
+        const auto buildFolder =
+            fs::path(db->getOpenFile()).parent_path() / DDB_BUILD_PATH / hash;
 
-    LOGD << "Deleting build files of '" << path << "'";
-
-    Entry e;
-
-    if (!getEntry(db, path, &e))
-        throw InvalidArgsException("Path '" + path + "' does not exist in index");
-
-    const auto buildFolder =
-        fs::path(db->getOpenFile()).parent_path() / DEFAULT_BUILD_PATH / e.hash;
-
-    LOGD << "Checking path " << buildFolder;
-
-    if (exists(buildFolder)) {
-
-        LOGD << "Removing build files";
-        remove_all(buildFolder);
-
+        if (fs::exists(buildFolder)) {
+            LOGD << "Removing " << (buildFolder).string();
+            io::assureIsRemoved(buildFolder);
+        }
     }
-
 }
 
 int deleteFromIndex(Database *db, const std::string &query, bool isFolder, RemoveCallback callback) {
@@ -426,12 +415,11 @@ int deleteFromIndex(Database *db, const std::string &query, bool isFolder, Remov
 
     if (isFolder) {
         str += "//%";
-
         LOGD << "Folder: " << str;
     }
 
     auto q = db->query(
-        "SELECT path, type FROM entries WHERE path LIKE ? ESCAPE '/'");
+        "SELECT path, hash FROM entries WHERE path LIKE ? ESCAPE '/'");
 
     q->bind(1, str);
 
@@ -440,14 +428,11 @@ int deleteFromIndex(Database *db, const std::string &query, bool isFolder, Remov
     while (q->fetch()) {
 
         const auto path = q->getText(0);
-        const auto type = q->getInt(1);
+        const auto hash = q->getText(1);
 
-        // Folders are not 'buildable' (so far)
-        // We could optimize it with a function that can filter which files are buildable and which are not
-        // It could be an early optimization but if the deletion gets slow that's one of the culprits
-        if (type != Directory)
-            deleteBuildFiles(db, path);
-        
+        // Check for build folders to be removed
+        checkDeleteBuild(db, hash);
+
         if (callback != nullptr) 
             callback(path);
 
@@ -529,8 +514,9 @@ void syncIndex(Database *db) {
         io::Path relPath = fs::path(q->getText(0));
         fs::path p = directory / relPath.get();
         Entry e;
-
-        const auto status = checkUpdate(e, p, q->getInt64(1), q->getText(2));
+        const auto mtime = q->getInt64(1);
+        const auto hash = q->getText(2);
+        const auto status = checkUpdate(e, p, mtime, hash);
 
         switch(status) {
 
@@ -538,6 +524,7 @@ void syncIndex(Database *db) {
                 // Removed
                 deleteQ->bind(1, relPath.generic());
                 deleteQ->execute();
+                checkDeleteBuild(db, hash);
                 std::cout << "D\t" << relPath.generic() << std::endl;
                 changed = true;
             break;

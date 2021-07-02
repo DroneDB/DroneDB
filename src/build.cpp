@@ -12,9 +12,7 @@
 
 namespace ddb {
 
-enum BuildResult { Built, Skipped, Unknown };
-
-BuildResult build_internal(Database* db, const Entry& e,
+void build_internal(Database* db, const Entry& e,
                            const std::string& outputPath, std::ostream& output,
                            bool force) {
                                
@@ -25,9 +23,7 @@ BuildResult build_internal(Database* db, const Entry& e,
         const auto o = (fs::path(outputPath) / e.hash).generic_string();
 
         if (fs::exists(o) && !force) {
-            output << "Skipping point cloud '" << e.path << "' because folder '"
-                   << o << "' already exists" << std::endl;
-            return Skipped;
+            return;
         }
 
         const auto relativePath =
@@ -38,15 +34,10 @@ BuildResult build_internal(Database* db, const Entry& e,
 
         const std::vector vec = {relativePath};
 
-        output << "Building point cloud '" << e.path << "' in folder '" << o
-               << "'" << std::endl;
-
         buildEpt(vec, o);
 
-        return Built;
+        output << o << std::endl;
     }
-
-    return Unknown;
 }
 
 void build_all(Database* db, const std::string& outputPath,
@@ -54,39 +45,16 @@ void build_all(Database* db, const std::string& outputPath,
 
     LOGD << "In build_all('" << outputPath << "')";
 
-    output << "Searching for buildable files" << std::endl;
-    int cnt = 0;
-    int skipped = 0;
-    int unknown = 0;
-
     // List all matching files in DB
-    auto q = db->query(ENTRY_MATCHER_QUERY);
+    auto q = db->query("SELECT path, hash, type, meta, mtime, size, depth FROM entries WHERE type = ?");
+    q->bind(1, EntryType::PointCloud);
 
     while (q->fetch()) {
         Entry e(*q);
 
         // Call build on each of them
-        const auto res = build_internal(db, e, outputPath, output, force);
-
-        switch (res) {
-            case Built:
-                cnt++;
-                break;
-            case Skipped:
-                skipped++;
-                break;
-            case Unknown:
-                unknown++;
-                break;
-        }
+        build_internal(db, e, outputPath, output, force);
     }
-
-    if (cnt + skipped + unknown == 0)
-        output << std::endl << "No buildable files found" << std::endl;
-    else
-        output << std::endl << cnt << " file(s) built, " << skipped << " file(s) skipped, "
-               << unknown << " file(s) unknown" << std::endl;
-
 }
 
 void build(Database* db, const std::string& path, const std::string& outputPath,
@@ -97,23 +65,9 @@ void build(Database* db, const std::string& path, const std::string& outputPath,
     Entry e;
 
     const bool entryExists = getEntry(db, path, &e) != nullptr;
-    if (!entryExists) throw InvalidArgsException("Entry does not exist");
+    if (!entryExists) throw InvalidArgsException(path + " is not a valid path in the database.");
 
-    const auto res = build_internal(db, e, outputPath, output, force);
-
-    output << std::endl;
-
-    switch (res) {
-        case Built:
-            output << "File built" << std::endl;
-            break;
-        case Skipped:
-            output << "File skipped (already existing)" << std::endl;
-            break;
-        case Unknown:
-            output << "File unknown" << std::endl;
-            break;
-    }
+    build_internal(db, e, outputPath, output, force);
 }
 
 }  // namespace ddb

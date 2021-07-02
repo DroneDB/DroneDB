@@ -10,10 +10,7 @@
 
 namespace ddb {
 
-#define DEFAULT_BUILD_PATH "out_dir"
-
-// We should add here the new buildable file types
-#define ENTRY_MATCHER_QUERY "SELECT path, hash, type, meta, mtime, size, depth, AsGeoJSON(point_geom), AsGeoJSON(polygon_geom) FROM entries WHERE path LIKE '%.laz'"
+#define DDB_BUILD_PATH "build"
 
 DDB_DLL void build_all(Database* db, const std::string& outputPath,
                        std::ostream& output, bool force = false);

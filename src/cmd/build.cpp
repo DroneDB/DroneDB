@@ -15,9 +15,9 @@ void Build::setOptions(cxxopts::Options &opts) {
     // clang-format off
     opts
         .positional_help("[args]")
-        .custom_help("build path/to/file.laz --output out_dir/")
+        .custom_help("build [-p path/to/file.laz] [--output out_dir]")
         .add_options()
-        ("o,output", "Output folder", cxxopts::value<std::string>()->default_value((fs::path(DDB_FOLDER) / DEFAULT_BUILD_PATH).generic_string()))
+        ("o,output", "Output folder", cxxopts::value<std::string>()->default_value((fs::path(DDB_FOLDER) / DDB_BUILD_PATH).generic_string()))
         ("p,path", "File to process", cxxopts::value<std::string>())
     	("w,working-dir", "Working directory", cxxopts::value<std::string>()->default_value("."))
     	("f,force", "Force rebuild", cxxopts::value<bool>()->default_value("false"));
@@ -27,8 +27,7 @@ void Build::setOptions(cxxopts::Options &opts) {
 }
 
 std::string Build::description() {
-    return "Build all buildable files inside the index (only LAZ files are "
-           "supported so far).";
+    return "Build DroneDB files for efficient streaming over a network.";
 }
 
 void Build::run(cxxopts::ParseResult &opts) {

@@ -460,7 +460,7 @@ DDB_DLL void applyDelta(const Delta &res, const fs::path &destPath,
                 } else {
                     if (exists(dest)) {
                         LOGD << "Directory exists in dest, deleting it";
-                        remove_all(dest);
+                        io::assureIsRemoved(dest);
                     } else {
                         LOGD << "Directory does not exist in dest, nothing to "
                                 "do";
@@ -545,7 +545,7 @@ DDB_DLL void applyDelta(const Delta &res, const fs::path &destPath,
 
         if (exists(tempPath)) {
             LOGD << "Removing temp path";
-            remove_all(tempPath);
+            io::assureIsRemoved(tempPath);
         }
     } catch (fs::filesystem_error &err) {
         LOGD << "Exception: " << err.what() << " ('" << err.path1() << "', '"
@@ -691,7 +691,7 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
 
         LOGD << "Removing temp new files folder";
 
-        remove_all(tempNewFolder);
+        io::assureIsRemoved(tempNewFolder);
 
     } else {
         LOGD << "No files to download";
@@ -859,7 +859,7 @@ DDB_DLL void Registry::push(const std::string &path, const bool force,
 
     out << "Zipping ddb folder" << std::endl;
 
-    zipFolder(ddbPath, tempArchive, {std::string(DEFAULT_BUILD_PATH) + '/'});
+    zipFolder(ddbPath, tempArchive, {std::string(DDB_BUILD_PATH) + '/'});
 
     // 5.1) Call POST endpoint passing zip
     PushManager pushManager(this, tagInfo.organization, tagInfo.dataset);
