@@ -444,6 +444,15 @@ void copy(const fs::path &from, const fs::path &to){
     }
 }
 
+void hardlink(const fs::path &target, const fs::path &linkName){
+    std::error_code e;
+    fs::create_hard_link(target, linkName, e);
+    if (e.value() != 0){
+        throw FSException("Cannot create hard link " + target.string() + " --> " + linkName.string() +
+                          " (" + e.message() + ")");
+    }
+}
+
 FileLock::FileLock(const fs::path &p){
     lockFile = (p.parent_path() / p.filename()).string() + ".lock";
 
