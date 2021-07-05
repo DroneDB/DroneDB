@@ -35,7 +35,6 @@ void build_internal(Database* db, const Entry& e,
 
     LOGD << "Relative path " << relativePath;
 
-    //
     try{
         io::hardlink(relativePath, hardlink);
         LOGD << "Linked " << relativePath << " --> " << hardlink;
