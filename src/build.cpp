@@ -25,6 +25,7 @@ void build_internal(Database* db, const Entry& e,
         return;
     }
 
+    io::assureFolderExists(outputPath);
     const auto hardlink = o + "_link" + fs::path(e.path).extension().string();
     io::assureIsRemoved(hardlink);
 
