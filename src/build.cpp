@@ -9,6 +9,7 @@
 
 #include "dbops.h"
 #include "exceptions.h"
+#include "mio.h"
 
 namespace ddb {
 
@@ -18,25 +19,46 @@ void build_internal(Database* db, const Entry& e,
                                
     LOGD << "Building entry " << e.path << " type " << e.type;
 
-    // We could vectorize this logic, but it's an overkill by now
-    if (e.type == PointCloud) {
-        const auto o = (fs::path(outputPath) / e.hash).generic_string();
+    const auto o = (fs::path(outputPath) / e.hash).string();
 
-        if (fs::exists(o) && !force) {
-            return;
+    if (fs::exists(o) && !force) {
+        return;
+    }
+
+    io::assureFolderExists(outputPath);
+    const auto hardlink = o + "_link" + fs::path(e.path).extension().string();
+    io::assureIsRemoved(hardlink);
+
+    auto relativePath =
+        (fs::path(db->getOpenFile()).parent_path().parent_path() / e.path)
+            .string();
+
+    LOGD << "Relative path " << relativePath;
+
+    try{
+        io::hardlink(relativePath, hardlink);
+        LOGD << "Linked " << relativePath << " --> " << hardlink;
+        relativePath = hardlink;
+    }catch(const FSException &e){
+        LOGD << e.what();
+        // Will build directly from path
+    }
+
+
+    // We could vectorize this logic, but it's an overkill by now
+    try{
+        if (e.type == PointCloud) {
+            const std::vector vec = {relativePath};
+
+            buildEpt(vec, o);
+
+            output << o << std::endl;
         }
 
-        const auto relativePath =
-            (fs::path(db->getOpenFile()).parent_path().parent_path() / e.path)
-                .generic_string();
-
-        LOGD << "Relative path " << relativePath;
-
-        const std::vector vec = {relativePath};
-
-        buildEpt(vec, o);
-
-        output << o << std::endl;
+        io::assureIsRemoved(hardlink);
+    }catch(...){
+        io::assureIsRemoved(hardlink);
+        throw;
     }
 }
 
