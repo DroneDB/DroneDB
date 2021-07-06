@@ -437,7 +437,7 @@ EntryType fingerprint(const fs::path &path){
     if (markdown)
         return EntryType::Markdown;
 
-    bool pointCloud = p.checkExtension({"laz", "las", "ply"}); // TODO: more?
+    bool pointCloud = p.checkExtension({"laz", "las"}); // TODO: more?
 
     if (pointCloud)
         return EntryType::PointCloud;

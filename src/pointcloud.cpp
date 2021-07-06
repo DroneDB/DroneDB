@@ -10,6 +10,7 @@
 #include <untwine/bu/BuPyramid.hpp>
 
 #include "pointcloud.h"
+#include "entry.h"
 #include "exceptions.h"
 #include "mio.h"
 #include "geo.h"
@@ -127,6 +128,10 @@ void buildEpt(const std::vector<std::string> &filenames, const std::string &outd
     untwine::Options options;
     for (const std::string &f : filenames){
         if (!fs::exists(f)) throw FSException(f + " does not exist");
+
+        const EntryType type = fingerprint(f);
+        if (type != EntryType::PointCloud) throw InvalidArgsException(f + " is not a supported point cloud file");
+
         options.inputFiles.push_back(f);
     }
     options.tempDir = tmpDir.string();
