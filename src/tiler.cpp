@@ -349,23 +349,6 @@ BoundingBox<Projected2Di> Tiler::getMinMaxCoordsForZ(int tz) const {
     return b;
 }
 
-BoundingBox<int> TilerHelper::parseZRange(const std::string &zRange) {
-    BoundingBox<int> r;
-
-    const std::size_t dashPos = zRange.find('-');
-    if (dashPos != std::string::npos) {
-        r.min = std::stoi(zRange.substr(0, dashPos));
-        r.max = std::stoi(zRange.substr(dashPos + 1, zRange.length() - 1));
-        if (r.min > r.max) {
-            std::swap(r.min, r.max);
-        }
-    } else {
-        r.min = r.max = std::stoi(zRange);
-    }
-
-    return r;
-}
-
 fs::path TilerHelper::getCacheFolderName(const fs::path &tileablePath,
                                          time_t modifiedTime, int tileSize) {
     std::ostringstream os;

@@ -26,7 +26,7 @@ void fatal(const std::string& err){
 
 namespace ddb{
 
-bool getPointCloudInfo(const std::string &filename, PointCloudInfo &info){
+bool getPointCloudInfo(const std::string &filename, PointCloudInfo &info, int polyBoundsSrs){
     pdal::StageFactory factory;
     std::string driver = factory.inferReaderDriver(filename);
     if (driver.empty()){
@@ -68,17 +68,17 @@ bool getPointCloudInfo(const std::string &filename, PointCloudInfo &info){
 
         pdal::BOX3D bbox = qi.m_bounds;
 
-        // We need to convert the bbox to EPSG:4326
+        // We need to convert the bbox to EPSG:<polyboundsSrs>
         if (qi.m_srs.valid()){
             OGRSpatialReferenceH hSrs = OSRNewSpatialReference(nullptr);
-            OGRSpatialReferenceH hWgs84 = OSRNewSpatialReference(nullptr);
+            OGRSpatialReferenceH hTgt = OSRNewSpatialReference(nullptr);
 
             std::string proj = qi.m_srs.getProj4();
             if (OSRImportFromProj4(hSrs, proj.c_str()) != OGRERR_NONE){
                 throw GDALException("Cannot import spatial reference system " + proj + ". Is PROJ available?");
             }
-            OSRImportFromEPSG(hWgs84, 4326);
-            OGRCoordinateTransformationH hTransform = OCTNewCoordinateTransformation(hSrs, hWgs84);
+            OSRImportFromEPSG(hTgt, polyBoundsSrs);
+            OGRCoordinateTransformationH hTransform = OCTNewCoordinateTransformation(hSrs, hTgt);
 
             double geoMinX = bbox.minx;
             double geoMinY = bbox.miny;
@@ -113,12 +113,117 @@ bool getPointCloudInfo(const std::string &filename, PointCloudInfo &info){
             }
 
             OCTDestroyCoordinateTransformation(hTransform);
-            OSRDestroySpatialReference(hWgs84);
+            OSRDestroySpatialReference(hTgt);
             OSRDestroySpatialReference(hSrs);
         }
     }
 
     return true;
+}
+
+bool getEptInfo(const std::string &eptJson, PointCloudInfo &info, int polyBoundsSrs){
+    if (!fs::exists(eptJson)){
+        LOGD << eptJson << " does not exist";
+        return false;
+    }
+
+    std::ifstream i(eptJson);
+    json j;
+    try{
+        i >> j;
+    }catch(json::exception &e){
+        LOGD << e.what();
+        return false;
+    }
+
+    if (j.contains("bounds") &&
+        j.contains("points") &&
+        j.contains("srs") &&
+        j.contains("schema")){
+
+        info.pointCount = j["points"];
+
+        if (j["srs"].contains("wkt")){
+            info.wktProjection = j["srs"]["wkt"];
+        }else{
+            info.wktProjection = "";
+        }
+
+        info.dimensions.clear();
+        for (auto &dim : j["schema"]){
+            if (dim.contains("name")){
+                info.dimensions.push_back(dim["name"]);
+            }
+        }
+
+        double minx = j["bounds"][0];
+        double miny = j["bounds"][1];
+        double minz = j["bounds"][2];
+        double maxx = j["bounds"][3];
+        double maxy = j["bounds"][4];
+        double maxz = j["bounds"][5];
+
+        info.bounds.clear();
+        info.bounds.push_back(maxx);
+        info.bounds.push_back(maxy);
+        info.bounds.push_back(maxz);
+        info.bounds.push_back(minx);
+        info.bounds.push_back(miny);
+        info.bounds.push_back(minz);
+
+        if (!info.wktProjection.empty()){
+            OGRSpatialReferenceH hSrs = OSRNewSpatialReference(nullptr);
+            OGRSpatialReferenceH hTgt = OSRNewSpatialReference(nullptr);
+
+            char *wkt = strdup(info.wktProjection.c_str());
+            if (OSRImportFromWkt(hSrs, &wkt) != OGRERR_NONE){
+                throw GDALException("Cannot import spatial reference system " + info.wktProjection + ". Is PROJ available?");
+            }
+            OSRImportFromEPSG(hTgt, polyBoundsSrs);
+            OGRCoordinateTransformationH hTransform = OCTNewCoordinateTransformation(hSrs, hTgt);
+
+            double geoMinX = minx;
+            double geoMinY = miny;
+            double geoMinZ = minz;
+            double geoMaxX = maxx;
+            double geoMaxY = maxy;
+            double geoMaxZ = maxz;
+
+            bool minSuccess = OCTTransform(hTransform, 1, &geoMinX, &geoMinY, &geoMinZ);
+            bool maxSuccess = OCTTransform(hTransform, 1, &geoMaxX, &geoMaxY, &geoMaxZ);
+
+            if (!minSuccess || !maxSuccess){
+                throw GDALException("Cannot transform coordinates " + info.wktProjection + " to EPSG:" + std::to_string(polyBoundsSrs));
+            }
+
+            info.polyBounds.clear();
+            info.polyBounds.addPoint(geoMinY, geoMinX, geoMinZ);
+            info.polyBounds.addPoint(geoMinY, geoMaxX, geoMinZ);
+            info.polyBounds.addPoint(geoMaxY, geoMaxX, geoMinZ);
+            info.polyBounds.addPoint(geoMaxY, geoMinX, geoMinZ);
+            info.polyBounds.addPoint(geoMinY, geoMinX, geoMinZ);
+
+            double centroidX = (minx + maxx) / 2.0;
+            double centroidY = (miny + maxy) / 2.0;
+            double centroidZ = minz;
+
+            if (OCTTransform(hTransform, 1, &centroidX, &centroidY, &centroidZ)){
+                info.centroid.clear();
+                info.centroid.addPoint(centroidY, centroidX, centroidZ);
+            }else{
+                throw GDALException("Cannot transform coordinates " + std::to_string(centroidX) + ", " + std::to_string(centroidY) + " to EPSG:" + std::to_string(polyBoundsSrs));
+            }
+
+            OCTDestroyCoordinateTransformation(hTransform);
+            OSRDestroySpatialReference(hTgt);
+            OSRDestroySpatialReference(hSrs);
+        }
+
+        return true;
+    }else{
+        LOGD << "Invalid EPT: " << eptJson;
+        return false;
+    }
 }
 
 void buildEpt(const std::vector<std::string> &filenames, const std::string &outdir){

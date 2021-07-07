@@ -5,6 +5,7 @@
 #include <iostream>
 #include "tile.h"
 #include "tiler.h"
+#include "epttiler.h"
 #include "exceptions.h"
 
 namespace cmd {
@@ -49,6 +50,14 @@ void Tile::run(cxxopts::ParseResult &opts) {
     auto x = opts["x"].as<std::string>();
     auto y = opts["y"].as<std::string>();
     auto tileSize = opts["size"].as<int>();
+
+    // TODO: fix this
+
+    if (input == "/data/drone/brighton2/entwine_pointcloud/ept.json"){
+        ddb::EptTiler eptTiler("/data/drone/brighton2/entwine_pointcloud/ept.json", output, tileSize, tms);
+        eptTiler.tile(std::stoi(z), std::stoi(x), std::stoi(y));
+        return;
+    }
 
     fs::path geotiff = ddb::TilerHelper::toGeoTIFF(input, tileSize, true);
     ddb::Tiler tiler(geotiff.string(), output, tileSize, tms);
