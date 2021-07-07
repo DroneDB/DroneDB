@@ -115,6 +115,7 @@ find_package(PDAL REQUIRED)
 find_package(Threads REQUIRED)
 include_directories(${GDAL_INCLUDE_DIR})
 include_directories(${PDAL_INCLUDE_DIR})
+include_directories(${PDAL_INCLUDE_DIR}/pdal)
 
 if (NOT WIN32)
     set(STDPPFS_LIBRARY stdc++fs)

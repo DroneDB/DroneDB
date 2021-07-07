@@ -11,11 +11,11 @@
 #include <pdal/Options.hpp>
 #include <pdal/PointTable.hpp>
 #include <pdal/io/EptReader.hpp>
-#include <pdal/filters/ReprojectionFilter.hpp>
+#include <pdal/filters/ColorinterpFilter.hpp>
 
 #include "entry.h"
 #include "exceptions.h"
-#include "geoproject.h"
+#include "coordstransformer.h"
 #include "hash.h"
 #include "logger.h"
 #include "mio.h"
@@ -41,6 +41,7 @@ EptTiler::EptTiler(const std::string &eptPath, const std::string &outputFolder,
       outputFolder(outputFolder),
       tileSize(tileSize),
       tms(tms),
+      wSize(tileSize * tileSize),
       mercator(GlobalMercator(tileSize)) {
     if (!fs::exists(eptPath))
         throw FSException(eptPath + " does not exists");
@@ -93,115 +94,99 @@ std::string EptTiler::tile(int tz, int tx, int ty) {
     BoundingBox<Projected2Di> tMinMax = getMinMaxCoordsForZ(tz);
     if (!tMinMax.contains(tx, ty)) throw GDALException("Out of bounds");
 
-    pdal::Options eptOpts;
-    eptOpts.add("filename", eptPath);
+    bool hasColors = std::find(eptInfo.dimensions.begin(), eptInfo.dimensions.end(), "Red") != eptInfo.dimensions.end() &&
+                std::find(eptInfo.dimensions.begin(), eptInfo.dimensions.end(), "Green") != eptInfo.dimensions.end() &&
+                std::find(eptInfo.dimensions.begin(), eptInfo.dimensions.end(), "Blue") != eptInfo.dimensions.end();
+    LOGD << "Has colors: " << (hasColors ? "true" : "false");
 
     // Get bounds of tile (3857), convert to EPT CRS
     auto tileBounds = mercator.tileBounds(tx, ty, tz);
     auto bounds = tileBounds;
 
-    OGRSpatialReferenceH hSrs = OSRNewSpatialReference(nullptr);
-    OGRSpatialReferenceH hTgt = OSRNewSpatialReference(nullptr);
+    // Expand by a few meters, so that we have sufficient
+    // overlap with other tiles
+    const int boundsBufSize = 5; // meters
+    bounds.min.x -= boundsBufSize;
+    bounds.max.x += boundsBufSize;
+    bounds.min.y -= boundsBufSize;
+    bounds.max.y += boundsBufSize;
 
-    char *wkt = strdup(eptInfo.wktProjection.c_str());
-    if (OSRImportFromWkt(hTgt, &wkt) != OGRERR_NONE){
-        throw GDALException("Cannot import spatial reference system " + eptInfo.wktProjection + ". Is PROJ available?");
-    }
-    OSRImportFromEPSG(hSrs, 3857);
-    OGRCoordinateTransformationH hTransform = OCTNewCoordinateTransformation(hSrs, hTgt);
+    CoordsTransformer ct(3857, eptInfo.wktProjection);
+    ct.transform(&bounds.min.x, &bounds.min.y);
+    ct.transform(&bounds.max.x, &bounds.max.y);
 
-    double none = 0.0;
-    if (!OCTTransform(hTransform, 1, &bounds.min.x, &bounds.min.y, &none) ||
-        !OCTTransform(hTransform, 1, &bounds.max.x, &bounds.max.y, &none)){
-        throw GDALException("Reprojection of bounds failed");
-    }
-
-    OCTDestroyCoordinateTransformation(hTransform);
-    OSRDestroySpatialReference(hTgt);
-    OSRDestroySpatialReference(hSrs);
-
+    pdal::Options eptOpts;
+    eptOpts.add("filename", eptPath);
     std::stringstream ss;
-    ss << std::setprecision(14) << "([" << bounds.min.x << "," << bounds.min.y <<
-                   "], [" << bounds.max.x << "," << bounds.max.y << "])";
+    ss << std::setprecision(14) << "([" << bounds.min.x << "," << bounds.min.y << "], " <<
+                                    "[" << bounds.max.x << "," << bounds.max.y << "])";
     eptOpts.add("bounds", ss.str());
-    eptOpts.add("resolution", mercator.resolution(tz - 2)); // TODO! change
+    eptOpts.add("resolution", mercator.resolution(tz - 1)); // TODO! change
 
     pdal::EptReader eptReader;
+    pdal::Stage *main = &eptReader;
     eptReader.setOptions(eptOpts);
 
-    pdal::Options reOpts;
-    reOpts.add("out_srs", "EPSG:3857");
-    pdal::ReprojectionFilter reFilter;
-    reFilter.setOptions(reOpts);
-    reFilter.setInput(eptReader);
+    pdal::ColorinterpFilter colorFilter;
+    if (!hasColors || true){
+        // Add ramp filter
+        LOGD << "Adding ramp filter (" << eptInfo.bounds[2] << ", " << eptInfo.bounds[5] << ")";
+
+        pdal::Options cfOpts;
+        cfOpts.add("ramp", "pestel_shades");
+        cfOpts.add("minimum", eptInfo.bounds[2]);
+        cfOpts.add("maximum", eptInfo.bounds[5]);
+        colorFilter.setOptions(cfOpts);
+        colorFilter.setInput(eptReader);
+        main = &colorFilter;
+    }
 
     pdal::PointTable table;
-    reFilter.prepare(table);
-    pdal::PointViewSet point_view_set = reFilter.execute(table);
+    main->prepare(table);
+    pdal::PointViewSet point_view_set = main->execute(table);
     pdal::PointViewPtr point_view = *point_view_set.begin();
     pdal::Dimension::IdList dims = point_view->dims();
 
-    // TODO: what if RGB colors are missing? elevation min/max
-    int nBands = 3;
-    int wSize = tileSize * tileSize;
-    int bufSize = GDALGetDataTypeSizeBytes(GDT_Byte) * wSize;
-    uint8_t *buffer = new uint8_t[bufSize * nBands];
-    memset(buffer, 0, bufSize * nBands);
-    uint8_t *alphaBuffer = new uint8_t[bufSize];
-    memset(alphaBuffer, 255, bufSize);
+    const int nBands = 3;
+    const int bufSize = GDALGetDataTypeSizeBytes(GDT_Byte) * wSize;
+    std::unique_ptr<uint8_t> buffer(new uint8_t[bufSize * nBands]);
+    std::unique_ptr<uint8_t> alphaBuffer(new uint8_t[bufSize]);
+    std::unique_ptr<float> zBuffer(new float[bufSize]);
 
-    bool hasColors = false;
+    memset(buffer.get(), 0, bufSize * nBands);
+    memset(alphaBuffer.get(), 255, bufSize);
+    memset(zBuffer.get(), std::numeric_limits<float>::min(), bufSize);
+
     LOGD << "Fetched " << point_view->size() << " points";
 
-    if (point_view->size() > 0){
-        auto p = point_view->point(0);
-        hasColors = p.hasDim(pdal::Dimension::Id::Red) &&
-                    p.hasDim(pdal::Dimension::Id::Green) &&
-                    p.hasDim(pdal::Dimension::Id::Blue);
-    }
-
-    double tileScaleW = (tileBounds.max.x - tileBounds.min.x) / 255.0;
-    double tileScaleH = (tileBounds.max.y - tileBounds.min.y) / 255.0;
+    const double tileScaleW = tileSize / (tileBounds.max.x - tileBounds.min.x);
+    const double tileScaleH = tileSize / (tileBounds.max.y - tileBounds.min.y);
+    CoordsTransformer ict(eptInfo.wktProjection, 3857);
 
     for (pdal::PointId idx = 0; idx < point_view->size(); ++idx) {
         auto p = point_view->point(idx);
         double x = p.getFieldAs<double>(pdal::Dimension::Id::X);
         double y = p.getFieldAs<double>(pdal::Dimension::Id::Y);
         double z = p.getFieldAs<double>(pdal::Dimension::Id::Z);
-//        std::cout << std::setprecision(14) << x << " " << y << " " << z << std::endl;
+
+        ict.transform(&x, &y);
 
         // Map projected coordinates to local PNG coordinates
         int px = std::round((x - tileBounds.min.x) * tileScaleW);
-        int py = std::round((y - tileBounds.min.y) * tileScaleH);
+        int py = tileSize - 1 - std::round((y - tileBounds.min.y) * tileScaleH);
 
-        std::cout << px << " " << py << std::endl;
-
-        if (px >= 0 && px <= 255 && py >= 0 && py <= 255){
+        if (px >= 0 && px < tileSize && py >= 0 && py < tileSize){
             // Within bounds
-            if (hasColors){
-                uint8_t red = p.getFieldAs<uint8_t>(pdal::Dimension::Id::Red);
-                uint8_t green = p.getFieldAs<uint8_t>(pdal::Dimension::Id::Green);
-                uint8_t blue = p.getFieldAs<uint8_t>(pdal::Dimension::Id::Blue);
+            uint8_t red = p.getFieldAs<uint8_t>(pdal::Dimension::Id::Red);
+            uint8_t green = p.getFieldAs<uint8_t>(pdal::Dimension::Id::Green);
+            uint8_t blue = p.getFieldAs<uint8_t>(pdal::Dimension::Id::Blue);
 
-                buffer[py * tileSize + px + wSize * 0] = red;
-                buffer[py * tileSize + px + wSize * 1] = green;
-                buffer[py * tileSize + px + wSize * 2] = blue;
-
-                // TODO: zbuffer
-            }else{
-                // TODO
-                throw AppException("No colors");
+            if (zBuffer.get()[py * tileSize + px] < z){
+                zBuffer.get()[py * tileSize + px] = z;
+                drawCircle(buffer.get(), px, py, 2, red, green, blue);
             }
         }
     }
-
-//    for (int i = 0; i < tileSize; i++){
-//        for (int j = 0; j < tileSize; j++){
-//            buffer[i * tileSize + j + wSize * 0] = 255;
-//            buffer[i * tileSize + j + wSize * 1] = 0;
-//            buffer[i * tileSize + j + wSize * 2] = 0;
-//        }
-//    }
 
     GDALDriverH memDrv = GDALGetDriverByName("MEM");
     if (memDrv == nullptr) throw GDALException("Cannot create MEM driver");
@@ -214,13 +199,8 @@ std::string EptTiler::tile(int tz, int tx, int ty) {
                                            GDT_Byte, nullptr);
     if (dsTile == nullptr) throw GDALException("Cannot create dsTile");
 
-    int x = 0;
-    int y = 0;
-    int xsize = tileSize;
-    int ysize = tileSize;
-
-    if (GDALDatasetRasterIO(dsTile, GF_Write, x, y, xsize,
-                            ysize, buffer, xsize, ysize,
+    if (GDALDatasetRasterIO(dsTile, GF_Write, 0, 0, tileSize,
+                            tileSize, buffer.get(), tileSize, tileSize,
                             GDT_Byte, nBands, nullptr, 0, 0,
                             0) != CE_None) {
         throw GDALException("Cannot write tile data");
@@ -230,14 +210,12 @@ std::string EptTiler::tile(int tz, int tx, int ty) {
         GDALGetRasterBand(dsTile, nBands + 1);
     GDALSetRasterColorInterpretation(tileAlphaBand, GCI_AlphaBand);
 
-    if (GDALRasterIO(tileAlphaBand, GF_Write, x, y, xsize,
-                     ysize, alphaBuffer, xsize, ysize,
+    if (GDALRasterIO(tileAlphaBand, GF_Write, 0, 0, tileSize,
+                     tileSize, alphaBuffer.get(), tileSize, tileSize,
                      GDT_Byte, 0, 0) != CE_None) {
         throw GDALException("Cannot write tile alpha data");
     }
 
-
-    std::cout << point_view->size() << std::endl;
 
     const GDALDatasetH outDs = GDALCreateCopy(pngDrv, tilePath.c_str(), dsTile, FALSE,
                                               nullptr, nullptr, nullptr);
@@ -302,104 +280,32 @@ BoundingBox<int> TilerHelper::parseZRange(const std::string &zRange) {
     return r;
 }
 
-
-GDALDatasetH EptTiler::createWarpedVRT(const GDALDatasetH &src,
-                                    const OGRSpatialReferenceH &srs,
-                                    GDALResampleAlg resampling) {
-    // GDALDriverH vrtDrv = GDALGetDriverByName( "VRT" );
-    // if (vrtDrv == nullptr) throw GDALException("Cannot create VRT driver");
-
-    // std::string vrtFilename = "/vsimem/" + uuidv4() + ".vrt";
-    // GDALDatasetH vrt = GDALCreateCopy(vrtDrv, vrtFilename.c_str(), src,
-    // FALSE, nullptr, nullptr, nullptr);
-
-    char *dstWkt;
-    if (OSRExportToWkt(srs, &dstWkt) != OGRERR_NONE)
-        throw GDALException("Cannot export dst WKT " + eptPath +
-                            ". Is PROJ available?");
-    const char *srcWkt = GDALGetProjectionRef(src);
-
-    const GDALDatasetH warpedVrt = GDALAutoCreateWarpedVRT(
-        src, srcWkt, dstWkt, resampling, 0.001, nullptr);
-    if (warpedVrt == nullptr) throw GDALException("Cannot create warped VRT");
-
-    return warpedVrt;
-}
-
-GQResult EptTiler::geoQuery(GDALDatasetH ds, double ulx, double uly, double lrx,
-                         double lry, int querySize) {
-    GQResult o;
-    double geo[6];
-    if (GDALGetGeoTransform(ds, geo) != CE_None)
-        throw GDALException("Cannot fetch geotransform geo");
-
-    o.r.x = static_cast<int>((ulx - geo[0]) / geo[1] + 0.001);
-    o.r.y = static_cast<int>((uly - geo[3]) / geo[5] + 0.001);
-    o.r.xsize = static_cast<int>((lrx - ulx) / geo[1] + 0.5);
-    o.r.ysize = static_cast<int>((lry - uly) / geo[5] + 0.5);
-
-    if (querySize == 0) {
-        o.w.xsize = o.r.xsize;
-        o.w.ysize = o.r.ysize;
-    } else {
-        o.w.xsize = querySize;
-        o.w.ysize = querySize;
-    }
-
-    o.w.x = 0;
-    if (o.r.x < 0) {
-        const int rxShift = std::abs(o.r.x);
-        o.w.x = static_cast<int>(o.w.xsize * (static_cast<double>(rxShift) /
-                                              static_cast<double>(o.r.xsize)));
-        o.w.xsize = o.w.xsize - o.w.x;
-        o.r.xsize =
-            o.r.xsize -
-            static_cast<int>(o.r.xsize * (static_cast<double>(rxShift) /
-                                          static_cast<double>(o.r.xsize)));
-        o.r.x = 0;
-    }
-
-    const int rasterXSize = GDALGetRasterXSize(ds);
-    const int rasterYSize = GDALGetRasterYSize(ds);
-
-    if (o.r.x + o.r.xsize > rasterXSize) {
-        o.w.xsize = static_cast<int>(
-            o.w.xsize *
-            (static_cast<double>(rasterXSize) - static_cast<double>(o.r.x)) /
-            static_cast<double>(o.r.xsize));
-        o.r.xsize = rasterXSize - o.r.x;
-    }
-
-    o.w.y = 0;
-    if (o.r.y < 0) {
-        const int ryShift = std::abs(o.r.y);
-        o.w.y = static_cast<int>(o.w.ysize * (static_cast<double>(ryShift) /
-                                              static_cast<double>(o.r.ysize)));
-        o.w.ysize = o.w.ysize - o.w.y;
-        o.r.ysize =
-            o.r.ysize -
-            static_cast<int>(o.r.ysize * (static_cast<double>(ryShift) /
-                                          static_cast<double>(o.r.ysize)));
-        o.r.y = 0;
-    }
-
-    if (o.r.y + o.r.ysize > rasterYSize) {
-        o.w.ysize = static_cast<int>(
-            o.w.ysize *
-            (static_cast<double>(rasterYSize) - static_cast<double>(o.r.y)) /
-            static_cast<double>(o.r.ysize));
-        o.r.ysize = rasterYSize - o.r.y;
-    }
-
-    return o;
-}
-
 int EptTiler::tmsToXYZ(int ty, int tz) const {
     return static_cast<int>((std::pow(2, tz) - 1)) - ty;
 }
 
 int EptTiler::xyzToTMS(int ty, int tz) const {
     return static_cast<int>((std::pow(2, tz) - 1)) - ty;  // The same!
+}
+
+void EptTiler::drawCircle(uint8_t *buffer, int px, int py, int radius, uint8_t r, uint8_t g, uint8_t b){
+    int r2 = radius * radius;
+    int area = r2 << 2;
+    int rr = radius << 1;
+
+    for (int i = 0; i < area; i++){
+        int tx = (i % rr) - radius;
+        int ty = (i / rr) - radius;
+        if (tx * tx + ty * ty <= r2){
+            int dx = px + tx;
+            int dy = py + ty;
+            if (dx >= 0 && dx < tileSize && dy >= 0 && dy < tileSize){
+                buffer[dy * tileSize + dx + wSize * 0] = r;
+                buffer[dy * tileSize + dx + wSize * 1] = g;
+                buffer[dy * tileSize + dx + wSize * 2] = b;
+            }
+        }
+    }
 }
 
 

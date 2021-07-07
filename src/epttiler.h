@@ -25,6 +25,7 @@ class EptTiler {
     int tileSize;
     bool tms;
 
+    int wSize;
 //    GDALDriverH pngDrv;
 //    GDALDriverH memDrv;
 
@@ -35,22 +36,13 @@ class EptTiler {
     int tMaxZ;
     int tMinZ;
 
-    GDALDatasetH createWarpedVRT(
-        const GDALDatasetH &src, const OGRSpatialReferenceH &srs,
-        GDALResampleAlg resampling = GRA_NearestNeighbour);
-
-    // Returns parameters reading raster data.
-    // (coordinates and x/y shifts for border tiles).
-    // If the querysize is not given, the
-    // extent is returned in the native resolution of dataset ds.
-    GQResult geoQuery(GDALDatasetH ds, double ulx, double uly, double lrx,
-                      double lry, int querySize = 0);
-
     // Convert from TMS to XYZ
     int tmsToXYZ(int ty, int tz) const;
 
     // Convert from XYZ to TMS
     int xyzToTMS(int ty, int tz) const;
+
+    void drawCircle(uint8_t *buffer, int px, int py, int radius, uint8_t r, uint8_t g, uint8_t b);
 
    public:
     DDB_DLL EptTiler(const std::string &eptPath,

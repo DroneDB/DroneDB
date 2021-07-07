@@ -59,12 +59,12 @@ bool getPointCloudInfo(const std::string &filename, PointCloudInfo &info, int po
 
     info.bounds.clear();
     if (qi.m_bounds.valid()){
-        info.bounds.push_back(qi.m_bounds.maxx);
-        info.bounds.push_back(qi.m_bounds.maxy);
-        info.bounds.push_back(qi.m_bounds.maxz);
         info.bounds.push_back(qi.m_bounds.minx);
         info.bounds.push_back(qi.m_bounds.miny);
         info.bounds.push_back(qi.m_bounds.minz);
+        info.bounds.push_back(qi.m_bounds.maxx);
+        info.bounds.push_back(qi.m_bounds.maxy);
+        info.bounds.push_back(qi.m_bounds.maxz);
 
         pdal::BOX3D bbox = qi.m_bounds;
 
@@ -136,7 +136,7 @@ bool getEptInfo(const std::string &eptJson, PointCloudInfo &info, int polyBounds
         return false;
     }
 
-    if (j.contains("bounds") &&
+    if (j.contains("boundsConforming") &&
         j.contains("points") &&
         j.contains("srs") &&
         j.contains("schema")){
@@ -156,20 +156,20 @@ bool getEptInfo(const std::string &eptJson, PointCloudInfo &info, int polyBounds
             }
         }
 
-        double minx = j["bounds"][0];
-        double miny = j["bounds"][1];
-        double minz = j["bounds"][2];
-        double maxx = j["bounds"][3];
-        double maxy = j["bounds"][4];
-        double maxz = j["bounds"][5];
+        double minx = j["boundsConforming"][0];
+        double miny = j["boundsConforming"][1];
+        double minz = j["boundsConforming"][2];
+        double maxx = j["boundsConforming"][3];
+        double maxy = j["boundsConforming"][4];
+        double maxz = j["boundsConforming"][5];
 
         info.bounds.clear();
-        info.bounds.push_back(maxx);
-        info.bounds.push_back(maxy);
-        info.bounds.push_back(maxz);
         info.bounds.push_back(minx);
         info.bounds.push_back(miny);
         info.bounds.push_back(minz);
+        info.bounds.push_back(maxx);
+        info.bounds.push_back(maxy);
+        info.bounds.push_back(maxz);
 
         if (!info.wktProjection.empty()){
             OGRSpatialReferenceH hSrs = OSRNewSpatialReference(nullptr);
