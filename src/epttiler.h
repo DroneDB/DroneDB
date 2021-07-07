@@ -15,6 +15,7 @@
 #include "fs.h"
 #include "geo.h"
 #include "tiler.h"
+#include "pointcloud.h"
 
 namespace ddb {
 
@@ -26,6 +27,8 @@ class EptTiler {
 
 //    GDALDriverH pngDrv;
 //    GDALDriverH memDrv;
+
+    PointCloudInfo eptInfo;
 
     double oMinX, oMaxX, oMaxY, oMinY;
     GlobalMercator mercator;

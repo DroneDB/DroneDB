@@ -8,6 +8,11 @@
 #include <memory>
 #include <vector>
 
+#include <pdal/Options.hpp>
+#include <pdal/PointTable.hpp>
+#include <pdal/io/EptReader.hpp>
+#include <pdal/filters/ReprojectionFilter.hpp>
+
 #include "entry.h"
 #include "exceptions.h"
 #include "geoproject.h"
@@ -15,7 +20,6 @@
 #include "logger.h"
 #include "mio.h"
 #include "userprofile.h"
-#include "pointcloud.h"
 
 namespace ddb {
 
@@ -50,19 +54,18 @@ EptTiler::EptTiler(const std::string &eptPath, const std::string &outputFolder,
     }
 
     // Open EPT
-    PointCloudInfo info;
-    if (!getEptInfo(eptPath, info, 3857)){
+    if (!getEptInfo(eptPath, eptInfo, 3857)){
         throw InvalidArgsException("Cannot get EPT info for " + eptPath);
     }
 
-    if (info.wktProjection.empty()){
+    if (eptInfo.wktProjection.empty()){
         throw InvalidArgsException("EPT file has no WKT SRS: " + eptPath);
     }
 
-    oMinX = info.polyBounds.getPoint(0).y;
-    oMaxX = info.polyBounds.getPoint(2).y;
-    oMaxY = info.polyBounds.getPoint(2).x;
-    oMinY = info.polyBounds.getPoint(0).x;
+    oMinX = eptInfo.polyBounds.getPoint(0).y;
+    oMaxX = eptInfo.polyBounds.getPoint(2).y;
+    oMaxY = eptInfo.polyBounds.getPoint(2).x;
+    oMinY = eptInfo.polyBounds.getPoint(0).x;
 
     LOGD << "Bounds (output SRS): " << oMinX << "," << oMinY << "," << oMaxX
          << "," << oMaxY;
@@ -90,7 +93,161 @@ std::string EptTiler::tile(int tz, int tx, int ty) {
     BoundingBox<Projected2Di> tMinMax = getMinMaxCoordsForZ(tz);
     if (!tMinMax.contains(tx, ty)) throw GDALException("Out of bounds");
 
-    return "TODO";
+    pdal::Options eptOpts;
+    eptOpts.add("filename", eptPath);
+
+    // Get bounds of tile (3857), convert to EPT CRS
+    auto tileBounds = mercator.tileBounds(tx, ty, tz);
+    auto bounds = tileBounds;
+
+    OGRSpatialReferenceH hSrs = OSRNewSpatialReference(nullptr);
+    OGRSpatialReferenceH hTgt = OSRNewSpatialReference(nullptr);
+
+    char *wkt = strdup(eptInfo.wktProjection.c_str());
+    if (OSRImportFromWkt(hTgt, &wkt) != OGRERR_NONE){
+        throw GDALException("Cannot import spatial reference system " + eptInfo.wktProjection + ". Is PROJ available?");
+    }
+    OSRImportFromEPSG(hSrs, 3857);
+    OGRCoordinateTransformationH hTransform = OCTNewCoordinateTransformation(hSrs, hTgt);
+
+    double none = 0.0;
+    if (!OCTTransform(hTransform, 1, &bounds.min.x, &bounds.min.y, &none) ||
+        !OCTTransform(hTransform, 1, &bounds.max.x, &bounds.max.y, &none)){
+        throw GDALException("Reprojection of bounds failed");
+    }
+
+    OCTDestroyCoordinateTransformation(hTransform);
+    OSRDestroySpatialReference(hTgt);
+    OSRDestroySpatialReference(hSrs);
+
+    std::stringstream ss;
+    ss << std::setprecision(14) << "([" << bounds.min.x << "," << bounds.min.y <<
+                   "], [" << bounds.max.x << "," << bounds.max.y << "])";
+    eptOpts.add("bounds", ss.str());
+    eptOpts.add("resolution", mercator.resolution(tz - 2)); // TODO! change
+
+    pdal::EptReader eptReader;
+    eptReader.setOptions(eptOpts);
+
+    pdal::Options reOpts;
+    reOpts.add("out_srs", "EPSG:3857");
+    pdal::ReprojectionFilter reFilter;
+    reFilter.setOptions(reOpts);
+    reFilter.setInput(eptReader);
+
+    pdal::PointTable table;
+    reFilter.prepare(table);
+    pdal::PointViewSet point_view_set = reFilter.execute(table);
+    pdal::PointViewPtr point_view = *point_view_set.begin();
+    pdal::Dimension::IdList dims = point_view->dims();
+
+    // TODO: what if RGB colors are missing? elevation min/max
+    int nBands = 3;
+    int wSize = tileSize * tileSize;
+    int bufSize = GDALGetDataTypeSizeBytes(GDT_Byte) * wSize;
+    uint8_t *buffer = new uint8_t[bufSize * nBands];
+    memset(buffer, 0, bufSize * nBands);
+    uint8_t *alphaBuffer = new uint8_t[bufSize];
+    memset(alphaBuffer, 255, bufSize);
+
+    bool hasColors = false;
+    LOGD << "Fetched " << point_view->size() << " points";
+
+    if (point_view->size() > 0){
+        auto p = point_view->point(0);
+        hasColors = p.hasDim(pdal::Dimension::Id::Red) &&
+                    p.hasDim(pdal::Dimension::Id::Green) &&
+                    p.hasDim(pdal::Dimension::Id::Blue);
+    }
+
+    double tileScaleW = (tileBounds.max.x - tileBounds.min.x) / 255.0;
+    double tileScaleH = (tileBounds.max.y - tileBounds.min.y) / 255.0;
+
+    for (pdal::PointId idx = 0; idx < point_view->size(); ++idx) {
+        auto p = point_view->point(idx);
+        double x = p.getFieldAs<double>(pdal::Dimension::Id::X);
+        double y = p.getFieldAs<double>(pdal::Dimension::Id::Y);
+        double z = p.getFieldAs<double>(pdal::Dimension::Id::Z);
+//        std::cout << std::setprecision(14) << x << " " << y << " " << z << std::endl;
+
+        // Map projected coordinates to local PNG coordinates
+        int px = std::round((x - tileBounds.min.x) * tileScaleW);
+        int py = std::round((y - tileBounds.min.y) * tileScaleH);
+
+        std::cout << px << " " << py << std::endl;
+
+        if (px >= 0 && px <= 255 && py >= 0 && py <= 255){
+            // Within bounds
+            if (hasColors){
+                uint8_t red = p.getFieldAs<uint8_t>(pdal::Dimension::Id::Red);
+                uint8_t green = p.getFieldAs<uint8_t>(pdal::Dimension::Id::Green);
+                uint8_t blue = p.getFieldAs<uint8_t>(pdal::Dimension::Id::Blue);
+
+                buffer[py * tileSize + px + wSize * 0] = red;
+                buffer[py * tileSize + px + wSize * 1] = green;
+                buffer[py * tileSize + px + wSize * 2] = blue;
+
+                // TODO: zbuffer
+            }else{
+                // TODO
+                throw AppException("No colors");
+            }
+        }
+    }
+
+//    for (int i = 0; i < tileSize; i++){
+//        for (int j = 0; j < tileSize; j++){
+//            buffer[i * tileSize + j + wSize * 0] = 255;
+//            buffer[i * tileSize + j + wSize * 1] = 0;
+//            buffer[i * tileSize + j + wSize * 2] = 0;
+//        }
+//    }
+
+    GDALDriverH memDrv = GDALGetDriverByName("MEM");
+    if (memDrv == nullptr) throw GDALException("Cannot create MEM driver");
+    GDALDriverH pngDrv = GDALGetDriverByName("PNG");
+    if (pngDrv == nullptr) throw GDALException("Cannot create PNG driver");
+
+    // Need to create in-memory dataset
+    // (PNG driver does not have Create() method)
+    const GDALDatasetH dsTile = GDALCreate(memDrv, "", tileSize, tileSize, nBands + 1,
+                                           GDT_Byte, nullptr);
+    if (dsTile == nullptr) throw GDALException("Cannot create dsTile");
+
+    int x = 0;
+    int y = 0;
+    int xsize = tileSize;
+    int ysize = tileSize;
+
+    if (GDALDatasetRasterIO(dsTile, GF_Write, x, y, xsize,
+                            ysize, buffer, xsize, ysize,
+                            GDT_Byte, nBands, nullptr, 0, 0,
+                            0) != CE_None) {
+        throw GDALException("Cannot write tile data");
+    }
+
+    const GDALRasterBandH tileAlphaBand =
+        GDALGetRasterBand(dsTile, nBands + 1);
+    GDALSetRasterColorInterpretation(tileAlphaBand, GCI_AlphaBand);
+
+    if (GDALRasterIO(tileAlphaBand, GF_Write, x, y, xsize,
+                     ysize, alphaBuffer, xsize, ysize,
+                     GDT_Byte, 0, 0) != CE_None) {
+        throw GDALException("Cannot write tile alpha data");
+    }
+
+
+    std::cout << point_view->size() << std::endl;
+
+    const GDALDatasetH outDs = GDALCreateCopy(pngDrv, tilePath.c_str(), dsTile, FALSE,
+                                              nullptr, nullptr, nullptr);
+    if (outDs == nullptr)
+        throw GDALException("Cannot create output dataset " + tilePath);
+
+    GDALClose(dsTile);
+    GDALClose(outDs);
+
+    return tilePath;
 }
 
 std::string EptTiler::tile(const TileInfo &t) { return tile(t.tz, t.tx, t.ty); }
