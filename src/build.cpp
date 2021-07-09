@@ -19,14 +19,21 @@ void build_internal(Database* db, const Entry& e,
                                
     LOGD << "Building entry " << e.path << " type " << e.type;
 
-    const auto o = (fs::path(outputPath) / e.hash).string();
+    const auto baseOutputPath = fs::path(outputPath) / e.hash;
+    std::string o;
+
+    if (e.type == PointCloud) {
+        o = (baseOutputPath / "ept").string();
+    }else{
+        return; // No build needed
+    }
 
     if (fs::exists(o) && !force) {
         return;
     }
 
-    io::assureFolderExists(outputPath);
-    const auto hardlink = o + "_link" + fs::path(e.path).extension().string();
+    io::assureFolderExists(o);
+    const auto hardlink = baseOutputPath.string() + "_link" + fs::path(e.path).extension().string();
     io::assureIsRemoved(hardlink);
 
     auto relativePath =
