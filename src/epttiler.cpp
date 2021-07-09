@@ -23,44 +23,19 @@
 
 namespace ddb {
 
-
-std::string EptTiler::getTilePath(int z, int x, int y, bool createIfNotExists) {
-    // TODO: retina tiles support?
-    const fs::path dir = outputFolder / std::to_string(z) / std::to_string(x);
-    if (createIfNotExists && !fs::exists(dir)) {
-        io::createDirectories(dir);
-    }
-
-    fs::path p = dir / fs::path(std::to_string(y) + ".png");
-    return p.string();
-}
-
-EptTiler::EptTiler(const std::string &eptPath, const std::string &outputFolder,
+EptTiler::EptTiler(const std::string &inputPath, const std::string &outputFolder,
              int tileSize, bool tms)
-    : eptPath(eptPath),
-      outputFolder(outputFolder),
-      tileSize(tileSize),
-      tms(tms),
-      wSize(tileSize * tileSize),
-      mercator(GlobalMercator(tileSize)) {
-    if (!fs::exists(eptPath))
-        throw FSException(eptPath + " does not exists");
-    if (tileSize <= 0 ||
-        std::ceil(std::log2(tileSize) != std::floor(std::log2(tileSize))))
-        throw GDALException("Tile size must be a power of 2 greater than 0");
-
-    if (!fs::exists(outputFolder)) {
-        // Try to create
-        io::createDirectories(outputFolder);
-    }
+    : Tiler(inputPath, outputFolder, tileSize, tms),
+      wSize(tileSize * tileSize) {
 
     // Open EPT
-    if (!getEptInfo(eptPath, eptInfo, 3857)){
-        throw InvalidArgsException("Cannot get EPT info for " + eptPath);
+    int span;
+    if (!getEptInfo(inputPath, eptInfo, 3857, &span)){
+        throw InvalidArgsException("Cannot get EPT info for " + inputPath);
     }
 
     if (eptInfo.wktProjection.empty()){
-        throw InvalidArgsException("EPT file has no WKT SRS: " + eptPath);
+        throw InvalidArgsException("EPT file has no WKT SRS: " + inputPath);
     }
 
     oMinX = eptInfo.polyBounds.getPoint(0).y;
@@ -72,8 +47,8 @@ EptTiler::EptTiler(const std::string &eptPath, const std::string &outputFolder,
          << "," << oMaxY;
 
     // Max/min zoom level
-    tMaxZ = mercator.zoomForPixelSize(0.05); // TODO: better heuristic?
-    tMinZ = mercator.zoomForPixelSize(1); // TODO: better heuristic?
+    tMinZ = mercator.zoomForLength(std::max(oMaxX - oMinX, oMaxY - oMinY));
+    tMaxZ = tMinZ + static_cast<int>(std::round(std::log(static_cast<double>(span) / 16.0) / std::log(2)));
 
     LOGD << "MinZ: " << tMinZ;
     LOGD << "MaxZ: " << tMaxZ;
@@ -116,7 +91,7 @@ std::string EptTiler::tile(int tz, int tx, int ty) {
     ct.transform(&bounds.max.x, &bounds.max.y);
 
     pdal::Options eptOpts;
-    eptOpts.add("filename", eptPath);
+    eptOpts.add("filename", inputPath);
     std::stringstream ss;
     ss << std::setprecision(14) << "([" << bounds.min.x << "," << bounds.min.y << "], " <<
                                     "[" << bounds.max.x << "," << bounds.max.y << "])";
@@ -226,66 +201,6 @@ std::string EptTiler::tile(int tz, int tx, int ty) {
     GDALClose(outDs);
 
     return tilePath;
-}
-
-std::string EptTiler::tile(const TileInfo &t) { return tile(t.tz, t.tx, t.ty); }
-
-std::vector<TileInfo> EptTiler::getTilesForZoomLevel(int tz) const {
-    std::vector<TileInfo> result;
-    const BoundingBox<Projected2Di> bounds = getMinMaxCoordsForZ(tz);
-
-    for (int ty = bounds.min.y; ty < bounds.max.y + 1; ty++) {
-        for (int tx = bounds.min.x; tx < bounds.max.x + 1; tx++) {
-            LOGD << tx << " " << ty << " " << tz;
-            result.emplace_back(tx, tms ? xyzToTMS(ty, tz) : ty, tz);
-        }
-    }
-
-    return result;
-}
-
-BoundingBox<int> EptTiler::getMinMaxZ() const { return BoundingBox(tMinZ, tMaxZ); }
-
-BoundingBox<Projected2Di> EptTiler::getMinMaxCoordsForZ(int tz) const {
-    BoundingBox<Projected2Di> b(mercator.metersToTile(oMinX, oMinY, tz),
-                                mercator.metersToTile(oMaxX, oMaxY, tz));
-
-    LOGD << "MinMaxCoordsForZ(" << tz << ") = (" << b.min.x << ", " << b.min.y << "), (" << b.max.x << ", " << b.max.y << ")";
-
-    // Crop tiles extending world limits (+-180,+-90)
-    b.min.x = std::max<int>(0, b.min.x);
-    b.max.x = std::min<int>(static_cast<int>(std::pow(2, tz) - 1), b.max.x);
-
-    // TODO: figure this out (TMS vs. XYZ)
-    //    b.min.y = std::max<double>(0, b.min.y);
-    //    b.max.y = std::min<double>(std::pow(2, tz - 1), b.max.y);
-
-    return b;
-}
-
-BoundingBox<int> TilerHelper::parseZRange(const std::string &zRange) {
-    BoundingBox<int> r;
-
-    const std::size_t dashPos = zRange.find('-');
-    if (dashPos != std::string::npos) {
-        r.min = std::stoi(zRange.substr(0, dashPos));
-        r.max = std::stoi(zRange.substr(dashPos + 1, zRange.length() - 1));
-        if (r.min > r.max) {
-            std::swap(r.min, r.max);
-        }
-    } else {
-        r.min = r.max = std::stoi(zRange);
-    }
-
-    return r;
-}
-
-int EptTiler::tmsToXYZ(int ty, int tz) const {
-    return static_cast<int>((std::pow(2, tz) - 1)) - ty;
-}
-
-int EptTiler::xyzToTMS(int ty, int tz) const {
-    return static_cast<int>((std::pow(2, tz) - 1)) - ty;  // The same!
 }
 
 void EptTiler::drawCircle(uint8_t *buffer, int px, int py, int radius, uint8_t r, uint8_t g, uint8_t b){

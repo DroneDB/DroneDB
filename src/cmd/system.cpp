@@ -5,7 +5,7 @@
 #include <iostream>
 #include "system.h"
 #include "../thumbs.h"
-#include "../tiler.h"
+#include "../tilerhelper.h"
 
 namespace cmd {
 

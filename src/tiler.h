@@ -50,20 +50,11 @@ class GlobalMercator {
     // Resolution (meters/pixel) for given zoom level (measured at Equator)
     double resolution(int zoom) const;
 
+    // Minimum zoom level that can fully contains a line of meterLength
+    int zoomForLength(double meterLength) const;
+
     // Maximal scaledown zoom of the pyramid closest to the pixelSize.
     int zoomForPixelSize(double pixelSize) const;
-};
-
-struct GeoExtent {
-    int x;
-    int y;
-    int xsize;
-    int ysize;
-};
-
-struct GQResult {
-    GeoExtent r;
-    GeoExtent w;
 };
 
 struct TileInfo {
@@ -72,40 +63,16 @@ struct TileInfo {
 };
 
 class Tiler {
-    std::string geotiffPath;
+protected:
+    std::string inputPath;
     fs::path outputFolder;
     int tileSize;
     bool tms;
-
-    GDALDriverH pngDrv;
-    GDALDriverH memDrv;
-
-    GDALDatasetH inputDataset = nullptr;
-    GDALDatasetH origDataset = nullptr;
-    
-    int rasterCount;
     int nBands;
-
     double oMinX, oMaxX, oMaxY, oMinY;
     GlobalMercator mercator;
     int tMaxZ;
     int tMinZ;
-
-    bool hasGeoreference(const GDALDatasetH &dataset);
-    bool sameProjection(const OGRSpatialReferenceH &a,
-                        const OGRSpatialReferenceH &b);
-
-    int dataBandsCount(const GDALDatasetH &dataset);
-    GDALDatasetH createWarpedVRT(
-        const GDALDatasetH &src, const OGRSpatialReferenceH &srs,
-        GDALResampleAlg resampling = GRA_NearestNeighbour);
-
-    // Returns parameters reading raster data.
-    // (coordinates and x/y shifts for border tiles).
-    // If the querysize is not given, the
-    // extent is returned in the native resolution of dataset ds.
-    GQResult geoQuery(GDALDatasetH ds, double ulx, double uly, double lrx,
-                      double lry, int querySize = 0);
 
     // Convert from TMS to XYZ
     int tmsToXYZ(int ty, int tz) const;
@@ -125,7 +92,7 @@ class Tiler {
     DDB_DLL std::string getTilePath(int z, int x, int y,
                                     bool createIfNotExists);
 
-    DDB_DLL std::string tile(int tz, int tx, int ty);
+    DDB_DLL virtual std::string tile(int tz, int tx, int ty) = 0;
     DDB_DLL std::string tile(const TileInfo &tile);
 
     DDB_DLL std::vector<TileInfo> getTilesForZoomLevel(int tz) const;
@@ -135,36 +102,6 @@ class Tiler {
     DDB_DLL BoundingBox<Projected2Di> getMinMaxCoordsForZ(int tz) const;
 };
 
-class TilerHelper {
-    // Parses a string (either "N" or "min-max") and returns
-    // two ints (min,max)
-    static BoundingBox<int> parseZRange(const std::string &zRange);
-
-    // Where to store local cache tiles
-    static fs::path getCacheFolderName(const fs::path &tileablePath,
-                                       time_t modifiedTime, int tileSize);
-
-   public:
-    DDB_DLL static void runTiler(Tiler &tiler, std::ostream &output = std::cout,
-                                 const std::string &format = "text",
-                                 const std::string &zRange = "auto",
-                                 const std::string &x = "auto",
-                                 const std::string &y = "auto");
-
-    // Get a single tile from user cache
-    DDB_DLL static fs::path getFromUserCache(const fs::path &tileablePath,
-                                             int tz, int tx, int ty,
-                                             int tileSize, bool tms,
-                                             bool forceRecreate);
-
-    // Prepare a tileable file for tiling (if needed)
-    // for example, geoimages that can be tiled are first geoprojected
-    DDB_DLL static fs::path toGeoTIFF(const fs::path &tileablePath,
-                                      int tileSize, bool forceRecreate,
-                                      const fs::path &outputGeotiff = "");
-
-    DDB_DLL static void cleanupUserCache();
-};
 
 }  // namespace ddb
 

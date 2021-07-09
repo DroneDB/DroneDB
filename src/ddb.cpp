@@ -21,7 +21,7 @@
 #include "syncmanager.h"
 #include "tagmanager.h"
 #include "thumbs.h"
-#include "tiler.h"
+#include "tilerhelper.h"
 #include "utils.h"
 #include "version.h"
 
@@ -265,6 +265,8 @@ DDB_DLL DDBErr DDBStatus(const char* ddbPath, char** output) {
                 break;
             case Modified:
                 ss << "M\t";
+                break;
+            case NotModified:
                 break;
         }
     };

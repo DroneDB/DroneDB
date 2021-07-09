@@ -19,28 +19,9 @@
 
 namespace ddb {
 
-class EptTiler {
-    std::string eptPath;
-    fs::path outputFolder;
-    int tileSize;
-    bool tms;
-
+class EptTiler : public Tiler {
     int wSize;
-//    GDALDriverH pngDrv;
-//    GDALDriverH memDrv;
-
     PointCloudInfo eptInfo;
-
-    double oMinX, oMaxX, oMaxY, oMinY;
-    GlobalMercator mercator;
-    int tMaxZ;
-    int tMinZ;
-
-    // Convert from TMS to XYZ
-    int tmsToXYZ(int ty, int tz) const;
-
-    // Convert from XYZ to TMS
-    int xyzToTMS(int ty, int tz) const;
 
     void drawCircle(uint8_t *buffer, int px, int py, int radius, uint8_t r, uint8_t g, uint8_t b);
 
@@ -50,17 +31,7 @@ class EptTiler {
                   bool tms = false);
     DDB_DLL ~EptTiler();
 
-    DDB_DLL std::string getTilePath(int z, int x, int y,
-                                    bool createIfNotExists);
-
-    DDB_DLL std::string tile(int tz, int tx, int ty);
-    DDB_DLL std::string tile(const TileInfo &tile);
-
-    DDB_DLL std::vector<TileInfo> getTilesForZoomLevel(int tz) const;
-    DDB_DLL BoundingBox<int> getMinMaxZ() const;
-
-    // Min max tile coordinates for specified zoom level
-    DDB_DLL BoundingBox<Projected2Di> getMinMaxCoordsForZ(int tz) const;
+    DDB_DLL std::string tile(int tz, int tx, int ty) override;
 };
 
 }  // namespace ddb

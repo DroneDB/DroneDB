@@ -121,7 +121,7 @@ bool getPointCloudInfo(const std::string &filename, PointCloudInfo &info, int po
     return true;
 }
 
-bool getEptInfo(const std::string &eptJson, PointCloudInfo &info, int polyBoundsSrs){
+bool getEptInfo(const std::string &eptJson, PointCloudInfo &info, int polyBoundsSrs, int *span){
     if (!fs::exists(eptJson)){
         LOGD << eptJson << " does not exist";
         return false;
@@ -139,7 +139,8 @@ bool getEptInfo(const std::string &eptJson, PointCloudInfo &info, int polyBounds
     if (j.contains("boundsConforming") &&
         j.contains("points") &&
         j.contains("srs") &&
-        j.contains("schema")){
+        j.contains("schema") &&
+        j.contains("span")){
 
         info.pointCount = j["points"];
 
@@ -154,6 +155,10 @@ bool getEptInfo(const std::string &eptJson, PointCloudInfo &info, int polyBounds
             if (dim.contains("name")){
                 info.dimensions.push_back(dim["name"]);
             }
+        }
+
+        if (span != nullptr){
+            *span = j["span"];
         }
 
         double minx = j["boundsConforming"][0];
