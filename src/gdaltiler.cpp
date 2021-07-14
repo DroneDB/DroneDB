@@ -290,8 +290,8 @@ std::string GDALTiler::tile(int tz, int tx, int ty){
     if (outDs == nullptr)
         throw GDALException("Cannot create output dataset " + tilePath);
 
-    GDALClose(dsTile);
     GDALClose(outDs);
+    GDALClose(dsTile);
 
     return tilePath;
 }

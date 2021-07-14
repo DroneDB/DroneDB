@@ -47,12 +47,16 @@ EptTiler::EptTiler(const std::string &inputPath, const std::string &outputFolder
          << "," << oMaxY;
 
     // Max/min zoom level
-    tMinZ = mercator.zoomForLength(std::max(oMaxX - oMinX, oMaxY - oMinY));
+    tMinZ = mercator.zoomForLength(std::min(oMaxX - oMinX, oMaxY - oMinY));
     tMaxZ = tMinZ + static_cast<int>(std::round(std::log(static_cast<double>(span) / 16.0) / std::log(2)));
 
     LOGD << "MinZ: " << tMinZ;
     LOGD << "MaxZ: " << tMaxZ;
 
+    hasColors = std::find(eptInfo.dimensions.begin(), eptInfo.dimensions.end(), "Red") != eptInfo.dimensions.end() &&
+                    std::find(eptInfo.dimensions.begin(), eptInfo.dimensions.end(), "Green") != eptInfo.dimensions.end() &&
+                    std::find(eptInfo.dimensions.begin(), eptInfo.dimensions.end(), "Blue") != eptInfo.dimensions.end();
+    LOGD << "Has colors: " << (hasColors ? "true" : "false");
 }
 
 EptTiler::~EptTiler() {
@@ -68,11 +72,6 @@ std::string EptTiler::tile(int tz, int tx, int ty) {
 
     BoundingBox<Projected2Di> tMinMax = getMinMaxCoordsForZ(tz);
     if (!tMinMax.contains(tx, ty)) throw GDALException("Out of bounds");
-
-    bool hasColors = std::find(eptInfo.dimensions.begin(), eptInfo.dimensions.end(), "Red") != eptInfo.dimensions.end() &&
-                std::find(eptInfo.dimensions.begin(), eptInfo.dimensions.end(), "Green") != eptInfo.dimensions.end() &&
-                std::find(eptInfo.dimensions.begin(), eptInfo.dimensions.end(), "Blue") != eptInfo.dimensions.end();
-    LOGD << "Has colors: " << (hasColors ? "true" : "false");
 
     // Get bounds of tile (3857), convert to EPT CRS
     auto tileBounds = mercator.tileBounds(tx, ty, tz);
@@ -103,7 +102,7 @@ std::string EptTiler::tile(int tz, int tx, int ty) {
     eptReader.setOptions(eptOpts);
 
     pdal::ColorinterpFilter colorFilter;
-    if (!hasColors || true){
+    if (!hasColors){
         // Add ramp filter
         LOGD << "Adding ramp filter (" << eptInfo.bounds[2] << ", " << eptInfo.bounds[5] << ")";
 
@@ -129,7 +128,7 @@ std::string EptTiler::tile(int tz, int tx, int ty) {
     std::unique_ptr<float> zBuffer(new float[bufSize]);
 
     memset(buffer.get(), 0, bufSize * nBands);
-    memset(alphaBuffer.get(), 255, bufSize);
+    memset(alphaBuffer.get(), 0, bufSize);
     memset(zBuffer.get(), std::numeric_limits<float>::min(), bufSize);
 
     LOGD << "Fetched " << point_view->size() << " points";
@@ -158,7 +157,7 @@ std::string EptTiler::tile(int tz, int tx, int ty) {
 
             if (zBuffer.get()[py * tileSize + px] < z){
                 zBuffer.get()[py * tileSize + px] = z;
-                drawCircle(buffer.get(), px, py, 2, red, green, blue);
+                drawCircle(buffer.get(), alphaBuffer.get(), px, py, 2, red, green, blue);
             }
         }
     }
@@ -191,19 +190,20 @@ std::string EptTiler::tile(int tz, int tx, int ty) {
         throw GDALException("Cannot write tile alpha data");
     }
 
-
     const GDALDatasetH outDs = GDALCreateCopy(pngDrv, tilePath.c_str(), dsTile, FALSE,
                                               nullptr, nullptr, nullptr);
     if (outDs == nullptr)
         throw GDALException("Cannot create output dataset " + tilePath);
 
-    GDALClose(dsTile);
     GDALClose(outDs);
+    GDALClose(dsTile);
+
+    // TODO: some sort of race condition is not flushing PNG data
 
     return tilePath;
 }
 
-void EptTiler::drawCircle(uint8_t *buffer, int px, int py, int radius, uint8_t r, uint8_t g, uint8_t b){
+void EptTiler::drawCircle(uint8_t *buffer, uint8_t *alpha, int px, int py, int radius, uint8_t r, uint8_t g, uint8_t b){
     int r2 = radius * radius;
     int area = r2 << 2;
     int rr = radius << 1;
@@ -218,6 +218,7 @@ void EptTiler::drawCircle(uint8_t *buffer, int px, int py, int radius, uint8_t r
                 buffer[dy * tileSize + dx + wSize * 0] = r;
                 buffer[dy * tileSize + dx + wSize * 1] = g;
                 buffer[dy * tileSize + dx + wSize * 2] = b;
+                alpha[dy * tileSize + dx] = 255;
             }
         }
     }

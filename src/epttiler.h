@@ -22,8 +22,9 @@ namespace ddb {
 class EptTiler : public Tiler {
     int wSize;
     PointCloudInfo eptInfo;
+    bool hasColors;
 
-    void drawCircle(uint8_t *buffer, int px, int py, int radius, uint8_t r, uint8_t g, uint8_t b);
+    void drawCircle(uint8_t *buffer, uint8_t *alpha, int px, int py, int radius, uint8_t r, uint8_t g, uint8_t b);
 
    public:
     DDB_DLL EptTiler(const std::string &eptPath,
