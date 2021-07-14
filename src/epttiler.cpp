@@ -97,7 +97,7 @@ std::string EptTiler::tile(int tz, int tx, int ty) {
     eptOpts.add("bounds", ss.str());
     LOGD << "EPT bounds: " << ss.str();
 
-    double resolution = mercator.resolution(tz - 1);
+    double resolution = mercator.resolution(tz - 2);
     eptOpts.add("resolution", resolution);
     LOGD << "EPT resolution: " << resolution;
 
