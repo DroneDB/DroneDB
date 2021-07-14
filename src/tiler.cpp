@@ -36,7 +36,7 @@ Tiler::Tiler(const std::string &inputPath, const std::string &outputFolder,
       tileSize(tileSize),
       tms(tms),
       mercator(GlobalMercator(tileSize)) {
-    if (!fs::exists(inputPath))
+    if (!fs::exists(inputPath) && !(inputPath.find("http://") == 0 || inputPath.find("https://") == 0))
         throw FSException(inputPath + " does not exists");
     if (tileSize <= 0 ||
         std::ceil(std::log2(tileSize) != std::floor(std::log2(tileSize))))

@@ -15,6 +15,7 @@
 #include "mio.h"
 #include "geo.h"
 #include "logger.h"
+#include "net/functions.h"
 
 namespace untwine{
 
@@ -122,16 +123,16 @@ bool getPointCloudInfo(const std::string &filename, PointCloudInfo &info, int po
 }
 
 bool getEptInfo(const std::string &eptJson, PointCloudInfo &info, int polyBoundsSrs, int *span){
-    if (!fs::exists(eptJson)){
-        LOGD << eptJson << " does not exist";
-        return false;
-    }
-
-    std::ifstream i(eptJson);
     json j;
     try{
-        i >> j;
+        j = json::parse(net::readFile(eptJson));
     }catch(json::exception &e){
+        LOGD << e.what();
+        return false;
+    }catch(const FSException &e){
+        LOGD << e.what();
+        return false;
+    }catch(const NetException &e){
         LOGD << e.what();
         return false;
     }

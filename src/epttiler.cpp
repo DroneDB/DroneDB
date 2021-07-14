@@ -79,7 +79,7 @@ std::string EptTiler::tile(int tz, int tx, int ty) {
 
     // Expand by a few meters, so that we have sufficient
     // overlap with other tiles
-    const int boundsBufSize = 5; // meters
+    const int boundsBufSize = mercator.resolution(tz) * 20; // meters
     bounds.min.x -= boundsBufSize;
     bounds.max.x += boundsBufSize;
     bounds.min.y -= boundsBufSize;
@@ -95,7 +95,7 @@ std::string EptTiler::tile(int tz, int tx, int ty) {
     ss << std::setprecision(14) << "([" << bounds.min.x << "," << bounds.min.y << "], " <<
                                     "[" << bounds.max.x << "," << bounds.max.y << "])";
     eptOpts.add("bounds", ss.str());
-    eptOpts.add("resolution", mercator.resolution(tz - 1)); // TODO! change
+    eptOpts.add("resolution", mercator.resolution(tz - 1));
 
     pdal::EptReader eptReader;
     pdal::Stage *main = &eptReader;
@@ -117,7 +117,14 @@ std::string EptTiler::tile(int tz, int tx, int ty) {
 
     pdal::PointTable table;
     main->prepare(table);
-    pdal::PointViewSet point_view_set = main->execute(table);
+    pdal::PointViewSet point_view_set;
+
+    try{
+        point_view_set = main->execute(table);
+    }catch(const pdal::pdal_error &e){
+        throw PDALException(e.what());
+    }
+
     pdal::PointViewPtr point_view = *point_view_set.begin();
     pdal::Dimension::IdList dims = point_view->dims();
 

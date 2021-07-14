@@ -84,7 +84,7 @@ protected:
     void rescale(GDALRasterBandH hBand, char *buffer, size_t bufsize);
 
    public:
-    DDB_DLL Tiler(const std::string &geotiffPath,
+    DDB_DLL Tiler(const std::string &inputPath,
                   const std::string &outputFolder, int tileSize = 256,
                   bool tms = false);
     DDB_DLL ~Tiler();

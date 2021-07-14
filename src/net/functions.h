@@ -11,6 +11,8 @@ DDB_DLL void Initialize();
 DDB_DLL Request GET(const std::string &url);
 DDB_DLL Request POST(const std::string &url);
 
+DDB_DLL std::string readFile(const std::string &url);
+
 
 }
 
