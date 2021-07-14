@@ -95,7 +95,11 @@ std::string EptTiler::tile(int tz, int tx, int ty) {
     ss << std::setprecision(14) << "([" << bounds.min.x << "," << bounds.min.y << "], " <<
                                     "[" << bounds.max.x << "," << bounds.max.y << "])";
     eptOpts.add("bounds", ss.str());
-    eptOpts.add("resolution", mercator.resolution(tz - 1));
+    LOGD << "EPT bounds: " << ss.str();
+
+    double resolution = mercator.resolution(tz - 1);
+    eptOpts.add("resolution", resolution);
+    LOGD << "EPT resolution: " << resolution;
 
     pdal::EptReader eptReader;
     pdal::Stage *main = &eptReader;
