@@ -48,7 +48,7 @@ EptTiler::EptTiler(const std::string &inputPath, const std::string &outputFolder
 
     // Max/min zoom level
     tMinZ = mercator.zoomForLength(std::min(oMaxX - oMinX, oMaxY - oMinY));
-    tMaxZ = tMinZ + static_cast<int>(std::round(std::log(static_cast<double>(span) / 16.0) / std::log(2)));
+    tMaxZ = tMinZ + static_cast<int>(std::round(std::log(static_cast<double>(span) / 4.0) / std::log(2)));
 
     LOGD << "MinZ: " << tMinZ;
     LOGD << "MaxZ: " << tMaxZ;
@@ -136,7 +136,10 @@ std::string EptTiler::tile(int tz, int tx, int ty) {
 
     memset(buffer.get(), 0, bufSize * nBands);
     memset(alphaBuffer.get(), 0, bufSize);
-    memset(zBuffer.get(), std::numeric_limits<float>::min(), bufSize);
+
+    for (int i = 0; i < wSize; i++){
+        zBuffer.get()[i] = -99999.0;
+    }
 
     LOGD << "Fetched " << point_view->size() << " points";
 
@@ -155,7 +158,6 @@ std::string EptTiler::tile(int tz, int tx, int ty) {
         // Map projected coordinates to local PNG coordinates
         int px = std::round((x - tileBounds.min.x) * tileScaleW);
         int py = tileSize - 1 - std::round((y - tileBounds.min.y) * tileScaleH);
-        //std::cout << px << " " << py << std::endl;
 
         if (px >= 0 && px < tileSize && py >= 0 && py < tileSize){
             // Within bounds

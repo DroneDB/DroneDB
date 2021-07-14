@@ -141,15 +141,15 @@ void TilerHelper::runTiler(const fs::path &input,
                            std::ostream &os,
                            const std::string &format, const std::string &zRange,
                            const std::string &x, const std::string &y) {
-    std::unique_ptr<Tiler> tiler;
+    Tiler *tiler;
 
     if (io::Path(input).checkExtension({"json"})){
         // Assume EPT
-        tiler = std::make_unique<EptTiler>(EptTiler(input.string(), output, tileSize, tms));
+        tiler = new EptTiler(input.string(), output, tileSize, tms);
     }else{
         // Assume image/geotiff
         fs::path geotiff = ddb::TilerHelper::toGeoTIFF(input, tileSize, true);
-        tiler = std::make_unique<GDALTiler>(GDALTiler(geotiff.string(), output, tileSize, tms));
+        tiler = new GDALTiler(geotiff.string(), output, tileSize, tms);
     }
 
     BoundingBox<int> zb;
@@ -196,6 +196,8 @@ void TilerHelper::runTiler(const fs::path &input,
     if (json) {
         os << "]";
     }
+
+    delete tiler;
 }
 
 }  // namespace ddb

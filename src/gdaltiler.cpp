@@ -123,13 +123,6 @@ GDALTiler::GDALTiler(const std::string &inputPath, const std::string &outputFold
     if (GDALGetGeoTransform(inputDataset, outGt) != CE_None)
         throw GDALException("Cannot fetch geotransform outGt");
 
-    std::cout << outGt[0] << " " <<
-                           outGt[1] << " " <<
-                           outGt[2] << " " <<
-                           outGt[3] << " " <<
-                           outGt[4] << " " <<
-                           outGt[5] << " " << std::endl;
-
     oMinX = outGt[0];
     oMaxX = outGt[0] + GDALGetRasterXSize(inputDataset) * outGt[1];
     oMaxY = outGt[3];

@@ -87,7 +87,7 @@ protected:
     DDB_DLL Tiler(const std::string &inputPath,
                   const std::string &outputFolder, int tileSize = 256,
                   bool tms = false);
-    DDB_DLL ~Tiler();
+    DDB_DLL virtual ~Tiler();
 
     DDB_DLL std::string getTilePath(int z, int x, int y,
                                     bool createIfNotExists);
