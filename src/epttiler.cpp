@@ -155,6 +155,7 @@ std::string EptTiler::tile(int tz, int tx, int ty) {
         // Map projected coordinates to local PNG coordinates
         int px = std::round((x - tileBounds.min.x) * tileScaleW);
         int py = tileSize - 1 - std::round((y - tileBounds.min.y) * tileScaleH);
+        //std::cout << px << " " << py << std::endl;
 
         if (px >= 0 && px < tileSize && py >= 0 && py < tileSize){
             // Within bounds
@@ -204,8 +205,6 @@ std::string EptTiler::tile(int tz, int tx, int ty) {
 
     GDALClose(outDs);
     GDALClose(dsTile);
-
-    // TODO: some sort of race condition is not flushing PNG data
 
     return tilePath;
 }

@@ -54,16 +54,6 @@ int GDALTiler::dataBandsCount(const GDALDatasetH &dataset) {
 GDALTiler::GDALTiler(const std::string &inputPath, const std::string &outputFolder,
              int tileSize, bool tms)
     : Tiler(inputPath, outputFolder, tileSize, tms) {
-    if (!fs::exists(inputPath))
-        throw FSException(inputPath + " does not exists");
-    if (tileSize <= 0 ||
-        std::ceil(std::log2(tileSize) != std::floor(std::log2(tileSize))))
-        throw GDALException("Tile size must be a power of 2 greater than 0");
-
-    if (!fs::exists(outputFolder)) {
-        // Try to create
-        io::createDirectories(outputFolder);
-    }
 
     pngDrv = GDALGetDriverByName("PNG");
     if (pngDrv == nullptr) throw GDALException("Cannot create PNG driver");
@@ -133,6 +123,13 @@ GDALTiler::GDALTiler(const std::string &inputPath, const std::string &outputFold
     if (GDALGetGeoTransform(inputDataset, outGt) != CE_None)
         throw GDALException("Cannot fetch geotransform outGt");
 
+    std::cout << outGt[0] << " " <<
+                           outGt[1] << " " <<
+                           outGt[2] << " " <<
+                           outGt[3] << " " <<
+                           outGt[4] << " " <<
+                           outGt[5] << " " << std::endl;
+
     oMinX = outGt[0];
     oMaxX = outGt[0] + GDALGetRasterXSize(inputDataset) * outGt[1];
     oMaxY = outGt[3];
@@ -143,11 +140,10 @@ GDALTiler::GDALTiler(const std::string &inputPath, const std::string &outputFold
 
     // Max/min zoom level
     tMaxZ = mercator.zoomForPixelSize(outGt[1]);
-    tMinZ =
-        mercator.zoomForPixelSize(outGt[1] *
+    tMinZ = mercator.zoomForPixelSize(outGt[1] *
                                   std::max(GDALGetRasterXSize(inputDataset),
                                            GDALGetRasterYSize(inputDataset)) /
-                                  256.0);
+                                  tileSize);
 
     LOGD << "MinZ: " << tMinZ;
     LOGD << "MaxZ: " << tMaxZ;
@@ -322,13 +318,6 @@ void GDALTiler::rescale(GDALRasterBandH hBand, char *buffer, size_t bufsize) {
 GDALDatasetH GDALTiler::createWarpedVRT(const GDALDatasetH &src,
                                     const OGRSpatialReferenceH &srs,
                                     GDALResampleAlg resampling) {
-    // GDALDriverH vrtDrv = GDALGetDriverByName( "VRT" );
-    // if (vrtDrv == nullptr) throw GDALException("Cannot create VRT driver");
-
-    // std::string vrtFilename = "/vsimem/" + uuidv4() + ".vrt";
-    // GDALDatasetH vrt = GDALCreateCopy(vrtDrv, vrtFilename.c_str(), src,
-    // FALSE, nullptr, nullptr, nullptr);
-
     char *dstWkt;
     if (OSRExportToWkt(srs, &dstWkt) != OGRERR_NONE)
         throw GDALException("Cannot export dst WKT " + inputPath +
