@@ -145,11 +145,11 @@ void TilerHelper::runTiler(const fs::path &input,
 
     if (io::Path(input).checkExtension({"json"})){
         // Assume EPT
-        tiler = new EptTiler(input.string(), output, tileSize, tms);
+        tiler = new EptTiler(input.string(), output.string(), tileSize, tms);
     }else{
         // Assume image/geotiff
         fs::path geotiff = ddb::TilerHelper::toGeoTIFF(input, tileSize, true);
-        tiler = new GDALTiler(geotiff.string(), output, tileSize, tms);
+        tiler = new GDALTiler(geotiff.string(), output.string(), tileSize, tms);
     }
 
     BoundingBox<int> zb;
