@@ -60,13 +60,22 @@ GDALTiler::GDALTiler(const std::string &inputPath, const std::string &outputFold
     memDrv = GDALGetDriverByName("MEM");
     if (memDrv == nullptr) throw GDALException("Cannot create MEM driver");
 
-    inputDataset = GDALOpen(inputPath.c_str(), GA_ReadOnly);
+    std::string openPath = inputPath;
+    if (isNetworkPath(openPath)){
+        CPLSetConfigOption("GDAL_DISABLE_READDIR_ON_OPEN", "YES");
+        CPLSetConfigOption("CPL_VSIL_CURL_ALLOWED_EXTENSIONS", "tif");
+        //CPLSetConfigOption("CPL_DEBUG", "ON");
+
+        openPath = "/vsicurl/" + openPath;
+    }
+
+    inputDataset = GDALOpen(openPath.c_str(), GA_ReadOnly);
     if (inputDataset == nullptr)
-        throw GDALException("Cannot open " + inputPath);
+        throw GDALException("Cannot open " + openPath);
 
     rasterCount = GDALGetRasterCount(inputDataset);
     if (rasterCount == 0)
-        throw GDALException("No raster bands found in " + inputPath);
+        throw GDALException("No raster bands found in " + openPath);
 
     // Extract no data values
     //    std::vector<double> inNodata;
@@ -85,13 +94,13 @@ GDALTiler::GDALTiler(const std::string &inputPath, const std::string &outputFold
     } else if (GDALGetGCPCount(inputDataset) > 0) {
         inputSrsWkt = GDALGetGCPProjection(inputDataset);
     } else {
-        throw GDALException("No projection found in " + inputPath);
+        throw GDALException("No projection found in " + openPath);
     }
 
     char *wktp = const_cast<char *>(inputSrsWkt.c_str());
     if (OSRImportFromWkt(inputSrs, &wktp) != OGRERR_NONE) {
         throw GDALException("Cannot read spatial reference system for " +
-                            inputPath + ". Is PROJ available?");
+                            openPath + ". Is PROJ available?");
     }
 
     // Setup output SRS
@@ -99,7 +108,7 @@ GDALTiler::GDALTiler(const std::string &inputPath, const std::string &outputFold
     OSRImportFromEPSG(outputSrs, 3857);  // TODO: support for geodetic?
 
     if (!hasGeoreference(inputDataset))
-        throw GDALException(inputPath + " is not georeferenced.");
+        throw GDALException(openPath + " is not georeferenced.");
 
     // Check if we need to reproject
     if (!sameProjection(inputSrs, outputSrs)) {

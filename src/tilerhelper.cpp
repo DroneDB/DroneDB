@@ -63,11 +63,16 @@ fs::path TilerHelper::getFromUserCache(const fs::path &tileablePath, int tz,
         return outputFile;
     }
 
-    const fs::path fileToTile = toGeoTIFF(tileablePath, tileSize, forceRecreate,
-                                          (tileCacheFolder / "geoprojected.tif"));
-    GDALTiler t(fileToTile.string(), tileCacheFolder.string(), tileSize, tms);
-    // TODO: support for EPT
-    return t.tile(tz, tx, ty);
+    if (io::Path(tileablePath).checkExtension({"json"})){
+        // Assume EPT
+        EptTiler t(tileablePath.string(), tileCacheFolder.string(), tileSize, tms);
+        return t.tile(tz, tx, ty);
+    }else{
+        const fs::path fileToTile = toGeoTIFF(tileablePath, tileSize, forceRecreate,
+                                              (tileCacheFolder / "geoprojected.tif"));
+        GDALTiler t(fileToTile.string(), tileCacheFolder.string(), tileSize, tms);
+        return t.tile(tz, tx, ty);
+    }
 }
 
 std::mutex geoprojectMutex;

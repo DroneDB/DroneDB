@@ -99,6 +99,7 @@ std::string EptTiler::tile(int tz, int tx, int ty) {
 
     double resolution = mercator.resolution(tz - 2);
     eptOpts.add("resolution", resolution);
+    eptOpts.add("log", "/data/drone/brighton2/odm_orthophoto/test.log");
     LOGD << "EPT resolution: " << resolution;
 
     pdal::EptReader eptReader;
@@ -122,6 +123,7 @@ std::string EptTiler::tile(int tz, int tx, int ty) {
     pdal::PointTable table;
     main->prepare(table);
     pdal::PointViewSet point_view_set;
+    eptReader.log()->setLevel(pdal::LogLevel::Debug);
 
     try{
         point_view_set = main->execute(table);
