@@ -178,6 +178,14 @@ DDB_DLL DDBErr DDBSetLastSync(const char *ddbPath, const char *registry, const l
  * @return DDBERR_NONE on success, an error otherwise */
 DDB_DLL DDBErr DDBMoveEntry(const char *ddbPath, const char *source, const char *dest);
 
+/** Build
+ * @param ddbPath path to the source DroneDB database (parent of ".ddb")
+ * @param source source entry path (optional, if not specified: build all)
+ * @param dest dest filesystem path (optional, if not specified: default path)
+ * @param force rebuild if already existing (default false)
+ * @return DDBERR_NONE on success, an error otherwise */
+DDB_DLL DDBErr DDBBuild(const char *ddbPath, const char *source = nullptr, const char *dest = nullptr, bool force = false);
+
 
 #ifdef __cplusplus
 }

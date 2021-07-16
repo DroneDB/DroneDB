@@ -406,8 +406,35 @@ DDB_DLL DDBErr DDBMoveEntry(const char *ddbPath, const char *source, const char 
 
     const auto ddb = ddb::open(std::string(ddbPath), true);
 
-    ddb::moveEntry(ddb.get(), std::string(source), std::string(dest));
+    moveEntry(ddb.get(), std::string(source), std::string(dest));
 
     DDB_C_END
 
+}
+
+DDB_DLL DDBErr DDBBuild(const char *ddbPath, const char *source, const char *dest, bool force) {
+
+    DDB_C_BEGIN
+
+    if (ddbPath == nullptr) throw InvalidArgsException("No ddb path provided");
+
+    const auto ddb = ddb::open(std::string(ddbPath), true);
+
+    const auto destPath =
+        dest == nullptr
+            ? (fs::path(DDB_FOLDER) / DDB_BUILD_PATH).generic_string()
+            : std::string(dest);
+
+    // We dont use this at the moment
+    std::ostringstream ss;
+
+    if (source == nullptr)
+    {
+        build_all(ddb.get(), destPath, ss, force);
+    } else {
+        build(ddb.get(), std::string(source), destPath, ss, force);
+    }
+    
+    DDB_C_END
+   
 }
