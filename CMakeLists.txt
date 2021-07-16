@@ -83,7 +83,7 @@ if (WIN32)
     download_dependency("gdal_bins.zip" "https://github.com/DroneDB/ddb_data/releases/download/v0.9.2/release-1911-x64-gdal-3-0-4-mapserver-7-4-3.zip")
     download_dependency("laszip.zip" "https://github.com/DroneDB/ddb_data/releases/download/v0.9.2/laszip-3-4-3.zip")
     download_dependency("geotiff.zip" "https://github.com/DroneDB/ddb_data/releases/download/v0.9.2/release-1911-x64-gdal-3-0-4-mapserver-7-4-3-geotiff.zip")
-    download_dependency("pdal.zip" "https://github.com/DroneDB/ddb_data/releases/download/v0.9.2/release-1911-x64-gdal-3-0-4-mapserver-7-4-3-pdal-2-2-0.zip")
+    download_dependency("pdal.zip" "https://github.com/DroneDB/ddb_data/releases/download/v0.9.2/release-1911-x64-gdal-3-0-4-mapserver-7-4-3-pdal-2-3-0.zip")
     download_dependency("zlib.zip" "https://github.com/DroneDB/ddb_data/releases/download/v0.9.2/zlib-1-2-11.zip")
 
     extract_dependency("gdal_libs.zip" "gdal/include" "gdal")
