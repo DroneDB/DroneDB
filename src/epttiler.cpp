@@ -57,6 +57,18 @@ EptTiler::EptTiler(const std::string &inputPath, const std::string &outputFolder
                     std::find(eptInfo.dimensions.begin(), eptInfo.dimensions.end(), "Green") != eptInfo.dimensions.end() &&
                     std::find(eptInfo.dimensions.begin(), eptInfo.dimensions.end(), "Blue") != eptInfo.dimensions.end();
     LOGD << "Has colors: " << (hasColors ? "true" : "false");
+
+#ifdef _WIN32
+    fs::path caBundlePath = io::getDataPath("curl-ca-bundle.crt");
+    if (!caBundlePath.empty()) {
+        LOGD << "ARBITRER CA Bundle: " << caBundlePath.string();
+        std::stringstream ss;
+        ss << "ARBITER_CA_INFO=" << caBundlePath.string();
+        if (_putenv(ss.str().c_str()) != 0) {
+            LOGD << "Cannot set ARBITER_CA_INFO";
+        }
+    }
+#endif
 }
 
 EptTiler::~EptTiler() {
@@ -101,12 +113,14 @@ std::string EptTiler::tile(int tz, int tx, int ty) {
     eptOpts.add("resolution", resolution);
     LOGD << "EPT resolution: " << resolution;
 
-    pdal::EptReader eptReader;
-    pdal::Stage *main = &eptReader;
-    eptReader.setOptions(eptOpts);
+    std::unique_ptr<pdal::EptReader> eptReader = std::make_unique<pdal::EptReader>();
+    pdal::Stage *main = eptReader.get();
+    eptReader->setOptions(eptOpts);
 
-    pdal::ColorinterpFilter colorFilter;
+    std::unique_ptr<pdal::ColorinterpFilter> colorFilter;
     if (!hasColors){
+        colorFilter.reset(new pdal::ColorinterpFilter());
+
         // Add ramp filter
         LOGD << "Adding ramp filter (" << eptInfo.bounds[2] << ", " << eptInfo.bounds[5] << ")";
 
@@ -114,9 +128,9 @@ std::string EptTiler::tile(int tz, int tx, int ty) {
         cfOpts.add("ramp", "pestel_shades");
         cfOpts.add("minimum", eptInfo.bounds[2]);
         cfOpts.add("maximum", eptInfo.bounds[5]);
-        colorFilter.setOptions(cfOpts);
-        colorFilter.setInput(eptReader);
-        main = &colorFilter;
+        colorFilter->setOptions(cfOpts);
+        colorFilter->setInput(*eptReader);
+        main = colorFilter.get();
     }
 
     pdal::PointTable table;
