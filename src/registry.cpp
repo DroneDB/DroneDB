@@ -185,16 +185,14 @@ DDB_DLL void Registry::clone(const std::string &organization,
 
     if (res.status() != 200) this->handleError(res);
 
-    out << "Dataset downloaded (" << io::bytesToHuman(prevBytes) << ")\t\t"
-        << std::endl;
-    out << "Extracting to destination folder (this could take a while)"
+    out << std::endl;
+    out << "Extracting (this could take a while)"
         << std::endl;
 
     io::createDirectories(folder);
 
     try {
         miniz_cpp::zip_file file;
-
         file.load(tempFile);
         file.extractall(folder);
     } catch (const std::runtime_error &e) {
@@ -202,7 +200,8 @@ DDB_DLL void Registry::clone(const std::string &organization,
         throw AppException(e.what());
     }
 
-    std::filesystem::remove(tempFile);
+    //io::assureIsRemoved(tempFile);
+    std::cout << tempFile << std::endl;
 
     const auto ddbFolder = fs::path(folder) / DDB_FOLDER;
 
@@ -214,8 +213,6 @@ DDB_DLL void Registry::clone(const std::string &organization,
 
     const auto db = ddb::open(std::string(folder), false);
     syncLocalMTimes(db.get());
-
-    out << "Done" << std::endl;
 }
 
 std::string Registry::getAuthToken() { return std::string(this->authToken); }
