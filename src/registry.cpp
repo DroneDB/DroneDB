@@ -200,8 +200,7 @@ DDB_DLL void Registry::clone(const std::string &organization,
         throw AppException(e.what());
     }
 
-    //io::assureIsRemoved(tempFile);
-    std::cout << tempFile << std::endl;
+    io::assureIsRemoved(tempFile);
 
     const auto ddbFolder = fs::path(folder) / DDB_FOLDER;
 
