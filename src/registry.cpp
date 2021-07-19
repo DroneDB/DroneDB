@@ -790,7 +790,7 @@ DDB_DLL void Registry::push(const std::string &path, const bool force,
 
     out << "Zipping ddb folder" << std::endl;
 
-    zip::zipFolder(ddbPath, tempArchive, {std::string(DDB_BUILD_PATH) + '/'});
+    zip::zipFolder(ddbPath.string(), tempArchive.string(), {std::string(DDB_BUILD_PATH) + '/'});
 
     // 5.1) Call POST endpoint passing zip
     PushManager pushManager(this, tagInfo.organization, tagInfo.dataset);
