@@ -13,7 +13,7 @@ namespace ddb::zip {
 #define COPY_BUF_SIZE 4096
 #define ERR_SIZE 256
 
-void extractAll(const std::string &zipFile, const std::string &outdir){
+void extractAll(const std::string &zipFile, const std::string &outdir, std::ostream *progressOut){
     io::createDirectories(outdir);
 
     struct zip_file* pFile = nullptr;
@@ -81,6 +81,11 @@ void extractAll(const std::string &zipFile, const std::string &outdir){
             zip_fclose(pFile);
             pFile = nullptr;
             of.close();
+
+            if (progressOut != nullptr){
+                (*progressOut) << "Extracted (" << (eId + 1) << "/" << nEntries << ")\t\t\r";
+                progressOut->flush();
+            }
         }
 
         if(zip_close(pZip)) {
@@ -93,6 +98,8 @@ void extractAll(const std::string &zipFile, const std::string &outdir){
         if (pZip != nullptr) zip_close(pZip);
         throw;
     }
+
+    if (progressOut != nullptr) (*progressOut) << std::endl;
 }
 
 void zipFolder(const std::string &folder, const std::string &zipFile, const std::vector<std::string> &excludes){

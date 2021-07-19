@@ -12,7 +12,7 @@
 
 namespace ddb::zip{
 
-DDB_DLL void extractAll(const std::string &zipFile, const std::string &outdir);
+DDB_DLL void extractAll(const std::string &zipFile, const std::string &outdir, std::ostream *out = nullptr);
 DDB_DLL void zipFolder(const std::string &folder, const std::string &zipFile, const std::vector<std::string> &excludes);
 }
 

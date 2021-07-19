@@ -172,7 +172,7 @@ DDB_DLL void Registry::clone(const std::string &organization,
                        const auto dData = txBytes - prevBytes;
                        const auto speed = dData / dT.count();
 
-                       out << "Downloading: " << io::bytesToHuman(txBytes)
+                       out << "Downloading " << io::bytesToHuman(txBytes)
                            << " @ " << io::bytesToHuman(speed) << "/s\t\t\r";
                        out.flush();
 
@@ -185,7 +185,9 @@ DDB_DLL void Registry::clone(const std::string &organization,
 
     if (res.status() != 200) this->handleError(res);
 
-    zip::extractAll(tempFile, folder);
+    out << std::endl;
+
+    zip::extractAll(tempFile, folder, &out);
 
     io::assureIsRemoved(tempFile);
 
