@@ -21,7 +21,7 @@
 #include "syncmanager.h"
 #include "tagmanager.h"
 #include "thumbs.h"
-#include "tiler.h"
+#include "tilerhelper.h"
 #include "utils.h"
 #include "version.h"
 
@@ -266,6 +266,8 @@ DDB_DLL DDBErr DDBStatus(const char* ddbPath, char** output) {
             case Modified:
                 ss << "M\t";
                 break;
+            case NotModified:
+                break;
         }
     };
 
@@ -298,12 +300,12 @@ DDBErr DDBGenerateThumbnail(const char* filePath, int size,
     DDB_C_END
 }
 
-DDB_DLL DDBErr DDBTile(const char* geotiffPath, int tz, int tx, int ty,
+DDB_DLL DDBErr DDBTile(const char* inputPath, int tz, int tx, int ty,
                        char** outputTilePath, int tileSize, bool tms,
                        bool forceRecreate) {
     DDB_C_BEGIN
     const auto tilePath = ddb::TilerHelper::getFromUserCache(
-        geotiffPath, tz, tx, ty, tileSize, tms, forceRecreate);
+        inputPath, tz, tx, ty, tileSize, tms, forceRecreate);
     utils::copyToPtr(tilePath.string(), outputTilePath);
     DDB_C_END
 }

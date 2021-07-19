@@ -125,8 +125,8 @@ DDB_DLL DDBErr DDBChattr(const char* ddbPath, const char *attrsJson, char **outp
  * @return DDBERR_NONE on success, an error otherwise */
 DDB_DLL DDBErr DDBGenerateThumbnail(const char *filePath, int size, const char *destPath);
 
-/** Generate orthophoto tiles
- * @param geotiffPath path to the input geoTIFF
+/** Generate orthophoto/EPT tiles
+ * @param inputPath path to the input geoTIFF/EPT
  * @param tz zoom level
  * @param tx X coordinates
  * @param ty Y coordinates
@@ -135,7 +135,7 @@ DDB_DLL DDBErr DDBGenerateThumbnail(const char *filePath, int size, const char *
  * @param tms Generate TMS-style tiles instead of XYZ
  * @param forceRecreate ignore cache and always recreate the tile
  * @return DDBERR_NONE on success, an error otherwise */
-DDB_DLL DDBErr DDBTile(const char *geotiffPath, int tz, int tx, int ty, char **outputTilePath, int tileSize = 256, bool tms = false, bool forceRecreate = false);
+DDB_DLL DDBErr DDBTile(const char *inputPath, int tz, int tx, int ty, char **outputTilePath, int tileSize = 256, bool tms = false, bool forceRecreate = false);
 
 /** Generate delta between two ddbs 
  * @param ddbSource path to the source DroneDB database (parent of ".ddb")

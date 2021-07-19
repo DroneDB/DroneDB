@@ -23,7 +23,8 @@ struct PointCloudInfo{
     json toJSON();
 };
 
-DDB_DLL bool getPointCloudInfo(const std::string &filename, PointCloudInfo &info);
+DDB_DLL bool getPointCloudInfo(const std::string &filename, PointCloudInfo &info, int polyboundsSrs = 4326);
+DDB_DLL bool getEptInfo(const std::string &eptJson, PointCloudInfo &info, int polyboundsSrs = 4326, int *span = nullptr);
 DDB_DLL void buildEpt(const std::vector<std::string> &filenames, const std::string &outdir);
 
 }

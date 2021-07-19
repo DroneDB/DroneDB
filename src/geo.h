@@ -102,6 +102,7 @@ DDB_DLL Projected2D toUTM(double latitude, double longitude, const UTMZone &zone
 DDB_DLL Geographic2D fromUTM(const Projected2D &p, const UTMZone &zone);
 DDB_DLL Geographic2D fromUTM(double x, double y, const UTMZone &zone);
 
+
 }
 
 #endif // GEO_H

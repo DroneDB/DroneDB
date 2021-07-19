@@ -3,7 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "test.h"
-#include "tiler.h"
+#include "gdaltiler.h"
 #include "testarea.h"
 
 namespace {
@@ -16,7 +16,7 @@ TEST(testTiler, RGB) {
                                           "ortho.tif");
     fs::path tileDir = ta.getFolder("tiles");
     
-    Tiler t(ortho.string(), tileDir.string());
+    GDALTiler t(ortho.string(), tileDir.string());
     
     t.tile(19, 128168, 339545);
     
@@ -30,7 +30,7 @@ TEST(testTiler, DSM){
                                           "dsm.tif");
     fs::path tileDir = ta.getFolder("tiles");
 
-    Tiler t(dsm.string(), tileDir.string());
+    GDALTiler t(dsm.string(), tileDir.string());
     t.tile(21, 512674, 1358189);
     t.tile(20, 256337, 679094);
 
@@ -38,7 +38,7 @@ TEST(testTiler, DSM){
     EXPECT_TRUE(fs::exists(tileDir / "20" / "256337" / "679094.png"));
 
     fs::path tmsTileDir = ta.getFolder("tmsTiles");
-    Tiler tms(dsm.string(), tmsTileDir.string(), 256, true);
+    GDALTiler tms(dsm.string(), tmsTileDir.string(), 256, true);
     tms.tile(20, 256337, 369481);
 
     EXPECT_TRUE(fs::exists(tmsTileDir / "20" / "256337" / "369481.png"));

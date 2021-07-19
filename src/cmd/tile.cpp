@@ -4,7 +4,8 @@
 
 #include <iostream>
 #include "tile.h"
-#include "tiler.h"
+#include "tilerhelper.h"
+#include "epttiler.h"
 #include "exceptions.h"
 
 namespace cmd {
@@ -13,9 +14,9 @@ void Tile::setOptions(cxxopts::Options &opts) {
     // clang-format off
     opts
     .positional_help("[args]")
-    .custom_help("tile [geo.tif | image.jpg] [output directory]")
+    .custom_help("tile [geo.tif | image.jpg | ept.json | https://host.com/cog.tif | https://host.com/ept.json] [output directory]")
     .add_options()
-    ("i,input", "File to tile", cxxopts::value<std::string>())
+    ("i,input", "Path or URL to file to tile", cxxopts::value<std::string>())
     ("o,output", "Output directory where to store tiles", cxxopts::value<std::string>()->default_value("{filename}_tiles/"))
     ("f,format", "Output format (text|json)", cxxopts::value<std::string>()->default_value("text"))
     ("z", "Zoom levels, either a single zoom level \"N\" or a range \"min-max\" or \"auto\" to generate all zoom levels", cxxopts::value<std::string>()->default_value("auto"))
@@ -28,7 +29,7 @@ void Tile::setOptions(cxxopts::Options &opts) {
 }
 
 std::string Tile::description() {
-    return "Generate tiles for GeoTIFFs and GeoImages";
+    return "Generate tiles for GeoTIFFs, GeoImages and EPT";
 }
 
 void Tile::run(cxxopts::ParseResult &opts) {
@@ -50,9 +51,7 @@ void Tile::run(cxxopts::ParseResult &opts) {
     auto y = opts["y"].as<std::string>();
     auto tileSize = opts["size"].as<int>();
 
-    fs::path geotiff = ddb::TilerHelper::toGeoTIFF(input, tileSize, true);
-    ddb::Tiler tiler(geotiff.string(), output, tileSize, tms);
-    ddb::TilerHelper::runTiler(tiler, std::cout, format, z, x, y);    
+    ddb::TilerHelper::runTiler(input, output, tileSize, tms, std::cout, format, z, x, y);
 }
 
 }
