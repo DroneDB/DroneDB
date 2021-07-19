@@ -15,7 +15,10 @@ RUN apt update && apt install  -y --fix-missing --no-install-recommends\
     exiv2 \
     libexiv2-dev \
     libgeos-dev \
-    libgdal-dev
+    libgdal-dev \
+    libpdal-dev \
+    pdal \
+    libzip-dev
 
 RUN apt-get clean
 

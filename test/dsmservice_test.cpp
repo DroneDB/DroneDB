@@ -9,7 +9,6 @@ namespace {
 
 TEST(dsmServiceAltitude, Normal) {
     float altitude = DSMService::get()->getAltitude(46.84260708333, -91.99455988889); // brighton beach
-    std::cerr << altitude;
 
     EXPECT_NEAR(altitude, 191, 2);
 }
