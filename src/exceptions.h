@@ -19,6 +19,9 @@ class SQLException : public DBException{
 class FSException : public AppException{
     using AppException::AppException;
 };
+class ZipException : public AppException{
+    using AppException::AppException;
+};
 class TimezoneException : public AppException{
     using AppException::AppException;
 };

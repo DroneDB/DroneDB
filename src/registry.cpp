@@ -13,7 +13,7 @@
 #include <syncmanager.h>
 #include <tagmanager.h>
 
-#include "../vendor/miniz-cpp/zip_file.hpp"
+#include "mzip.h"
 #include "exceptions.h"
 #include "json.h"
 #include "net.h"
@@ -185,20 +185,7 @@ DDB_DLL void Registry::clone(const std::string &organization,
 
     if (res.status() != 200) this->handleError(res);
 
-    out << std::endl;
-    out << "Extracting (this could take a while)"
-        << std::endl;
-
-    io::createDirectories(folder);
-
-    try {
-        miniz_cpp::zip_file file;
-        file.load(tempFile);
-        file.extractall(folder);
-    } catch (const std::runtime_error &e) {
-        LOGD << "Error extracting zip file";
-        throw AppException(e.what());
-    }
+    zip::extractAll(tempFile, folder);
 
     io::assureIsRemoved(tempFile);
 
@@ -291,17 +278,9 @@ DDB_DLL void Registry::downloadDdb(const std::string &organization,
 
     if (res.status() != 200) this->handleError(res);
 
-    try {
-        miniz_cpp::zip_file file;
+    zip::extractAll(tempFile, folder);
 
-        file.load(tempFile);
-        file.extractall(folder);
-        std::filesystem::remove(tempFile);
-
-    } catch (const std::runtime_error &e) {
-        LOGD << "Error extracting zip file or temp remove";
-        throw AppException(e.what());
-    }
+    io::assureIsRemoved(tempFile);
 
     LOGD << "Done";
 }
@@ -362,14 +341,11 @@ DDB_DLL void Registry::downloadFiles(const std::string &organization,
         LOGD << "Files archive downloaded, extracting";
 
         try {
-            miniz_cpp::zip_file file;
-
-            file.load(tempFile);
-            file.extractall(folder);
+            zip::extractAll(tempFile, folder);
 
             LOGD << "Archive extracted in " << folder;
 
-            std::filesystem::remove(tempFile);
+            io::assureIsRemoved(tempFile);
 
             LOGD << "Done";
         } catch (const std::runtime_error &e) {
@@ -725,47 +701,6 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
     io::assureIsRemoved(tempNewFolder);
 }
 
-void zipFolder(const fs::path &folder, const fs::path &archive,
-               const std::vector<std::string> &excludes) {
-
-    miniz_cpp::zip_file file;
-
-    for (auto i = fs::recursive_directory_iterator(folder);
-         i != fs::recursive_directory_iterator(); ++i) {
-
-        const auto relPath = io::Path(i->path()).relativeTo(folder);
-        
-        bool exclude = false;
-
-        for (const auto &excl : excludes) {
-            exclude = false;
-
-            // If it's a folder we exclude this path and all the descendants
-            if (excl[excl.length() - 1] == '/') {
-                const auto folderName = excl.substr(0, excl.length() - 1);
-                if (relPath.generic().find(folderName) == 0) {
-                    exclude = true;
-                    i.disable_recursion_pending();
-                    break;
-                }
-            } else {
-                if (relPath.generic() == excl) {
-                    exclude = true;
-                    break;
-                }
-            }
-        }
-        if (!exclude) {
-            LOGD << "Adding: '" << relPath.generic() << "'";
-
-            file.write(i->path().generic_string(), relPath.string());
-        }
-    }
-
-    file.save(archive.generic_string());
-
-}
-
 DDB_DLL void Registry::push(const std::string &path, const bool force,
                             std::ostream &out) {
     /*
@@ -855,7 +790,7 @@ DDB_DLL void Registry::push(const std::string &path, const bool force,
 
     out << "Zipping ddb folder" << std::endl;
 
-    zipFolder(ddbPath, tempArchive, {std::string(DDB_BUILD_PATH) + '/'});
+    zip::zipFolder(ddbPath, tempArchive, {std::string(DDB_BUILD_PATH) + '/'});
 
     // 5.1) Call POST endpoint passing zip
     PushManager pushManager(this, tagInfo.organization, tagInfo.dataset);

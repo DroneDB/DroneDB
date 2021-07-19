@@ -113,15 +113,17 @@ find_package(SpatiaLite REQUIRED)
 find_package(Sqlite3 REQUIRED)
 find_package(PDAL REQUIRED)
 find_package(Threads REQUIRED)
+find_package(Zip REQUIRED)
 include_directories(${GDAL_INCLUDE_DIR})
 include_directories(${PDAL_INCLUDE_DIR})
 include_directories(${PDAL_INCLUDE_DIR}/pdal)
+include_directories(${Zip_INCLUDE_DIRS})
 
 if (NOT WIN32)
     set(STDPPFS_LIBRARY stdc++fs)
 endif()
 
-set(LINK_LIBRARIES ${SPATIALITE_LIBRARY} ${SQLITE3_LIBRARY} ${STDPPFS_LIBRARY} exiv2lib ${GDAL_LIBRARY} ${CURL_LIBRARY} ${PDAL_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT})
+set(LINK_LIBRARIES ${SPATIALITE_LIBRARY} ${SQLITE3_LIBRARY} ${STDPPFS_LIBRARY} exiv2lib ${GDAL_LIBRARY} ${CURL_LIBRARY} ${PDAL_LIBRARIES} ${Zip_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT})
 set(CMD_SRC_LIST ${CMAKE_CURRENT_SOURCE_DIR}/src/cmd/main.cpp)
 
 add_subdirectory("src")
