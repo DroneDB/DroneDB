@@ -29,8 +29,6 @@ namespace ddb{
 
 bool getPointCloudInfo(const std::string &filename, PointCloudInfo &info, int polyBoundsSrs){
     
-    LOGD << "In getPointCloudInfo(" << filename << ")";
-
     try {
 
         pdal::StageFactory factory;
@@ -82,10 +80,9 @@ bool getPointCloudInfo(const std::string &filename, PointCloudInfo &info, int po
 
                 std::string proj = qi.m_srs.getProj4();
                 if (OSRImportFromProj4(hSrs, proj.c_str()) != OGRERR_NONE){
-                    LOGD << "Cannot import spatial reference system " + proj + ". Is PROJ available?";
-
                     throw GDALException("Cannot import spatial reference system " + proj + ". Is PROJ available?");
                 }
+
                 OSRImportFromEPSG(hTgt, polyBoundsSrs);
                 OGRCoordinateTransformationH hTransform = OCTNewCoordinateTransformation(hSrs, hTgt);
 
@@ -100,7 +97,6 @@ bool getPointCloudInfo(const std::string &filename, PointCloudInfo &info, int po
                 bool maxSuccess = OCTTransform(hTransform, 1, &geoMaxX, &geoMaxY, &geoMaxZ);
 
                 if (!minSuccess || !maxSuccess){
-                    LOGD << "Cannot transform coordinates";
                     throw GDALException("Cannot transform coordinates " + bbox.toWKT() + " to " + proj);
                 }
 
@@ -128,11 +124,9 @@ bool getPointCloudInfo(const std::string &filename, PointCloudInfo &info, int po
             }
         }
 
-    } catch(GDALException& e) {
-        throw;
-    } catch(std::runtime_error& e) {
-        LOGD << "Exception: " << e.what();
-        return false;
+    } catch(pdal::pdal_error& e) {
+        LOGD << "PDAL Error: " << e.what();
+        throw PDALException(e.what());        
     }
 
     return true;
