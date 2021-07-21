@@ -420,11 +420,13 @@ DDB_DLL DDBErr DDBBuild(const char *ddbPath, const char *source, const char *des
 
     if (ddbPath == nullptr) throw InvalidArgsException("No ddb path provided");
 
-    const auto ddb = ddb::open(std::string(ddbPath), true);
+    const auto ddbPathStr = std::string(ddbPath);
+
+    const auto ddb = ddb::open(ddbPathStr, true);
 
     const auto destPath =
         dest == nullptr
-            ? (fs::path(DDB_FOLDER) / DDB_BUILD_PATH).generic_string()
+            ? (fs::path(ddbPathStr) / DDB_FOLDER / DDB_BUILD_PATH).generic_string()
             : std::string(dest);
 
     // We dont use this at the moment
