@@ -11,6 +11,8 @@ CoordsTransformer::CoordsTransformer(int epsgFrom, int epsgTo){
     if (OSRImportFromEPSG(hSrc, epsgFrom) != OGRERR_NONE){
         throw GDALException("Cannot import spatial reference system " + std::to_string(epsgFrom) + ". Is PROJ available?");
     }
+    OSRSetAxisMappingStrategy(hSrc, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
+
     if (OSRImportFromEPSG(hTgt, epsgTo) != OGRERR_NONE){
         throw GDALException("Cannot import spatial reference system " + std::to_string(epsgTo) + ". Is PROJ available?");
     }

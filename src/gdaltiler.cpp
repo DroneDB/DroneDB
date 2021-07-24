@@ -102,6 +102,7 @@ GDALTiler::GDALTiler(const std::string &inputPath, const std::string &outputFold
         throw GDALException("Cannot read spatial reference system for " +
                             openPath + ". Is PROJ available?");
     }
+    OSRSetAxisMappingStrategy(inputSrs, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
 
     // Setup output SRS
     const OGRSpatialReferenceH outputSrs = OSRNewSpatialReference(nullptr);

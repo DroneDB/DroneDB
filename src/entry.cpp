@@ -146,6 +146,8 @@ void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
                         if (OSRImportFromWkt(hSrs, &wktp) != OGRERR_NONE){
                             throw GDALException("Cannot read spatial reference system for " + path.string() + ". Is PROJ available?");
                         }
+                        OSRSetAxisMappingStrategy(hSrs, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
+
                         OSRImportFromEPSG(hWgs84, 4326);
                         OGRCoordinateTransformationH hTransform = OCTNewCoordinateTransformation(hSrs, hWgs84);
 
