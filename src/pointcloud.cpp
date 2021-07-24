@@ -78,6 +78,8 @@ bool getPointCloudInfo(const std::string &filename, PointCloudInfo &info, int po
             if (OSRImportFromProj4(hSrs, proj.c_str()) != OGRERR_NONE){
                 throw GDALException("Cannot import spatial reference system " + proj + ". Is PROJ available?");
             }
+            OSRSetAxisMappingStrategy(hSrs, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
+
             OSRImportFromEPSG(hTgt, polyBoundsSrs);
             OGRCoordinateTransformationH hTransform = OCTNewCoordinateTransformation(hSrs, hTgt);
 
@@ -185,6 +187,8 @@ bool getEptInfo(const std::string &eptJson, PointCloudInfo &info, int polyBounds
             if (OSRImportFromWkt(hSrs, &wkt) != OGRERR_NONE){
                 throw GDALException("Cannot import spatial reference system " + info.wktProjection + ". Is PROJ available?");
             }
+            OSRSetAxisMappingStrategy(hSrs, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
+
             OSRImportFromEPSG(hTgt, polyBoundsSrs);
             OGRCoordinateTransformationH hTransform = OCTNewCoordinateTransformation(hSrs, hTgt);
 
