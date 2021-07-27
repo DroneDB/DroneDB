@@ -27,6 +27,6 @@
   },
   "dependencies": {
     "bindings": "^1.5.0",
-    "ddb-js": "file:nodejs/ddb-js"
+    "ddb-js": "file:nodejs/js"
   }
 }
