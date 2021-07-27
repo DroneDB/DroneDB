@@ -7,3 +7,6 @@
 [submodule "vendor/untwine"]
 	path = vendor/untwine
 	url = https://github.com/pierotofy/untwine/
+[submodule "nodejs/js"]
+	path = nodejs/js
+	url = https://github.com/DroneDB/DDB.js
