@@ -71,7 +71,7 @@ DDB_DLL void push(const std::string& registry, const bool force) {
             UserProfile::get()->getAuthManager()->saveCredentials(
                 registryUrl, AuthCredentials(username, password));
 
-            reg.pull(currentPath, force, std::cout);
+            reg.push(currentPath, force, std::cout);
 
         } else {
             throw AuthException("Cannot authenticate with " + reg.getUrl());
