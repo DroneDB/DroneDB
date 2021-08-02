@@ -186,6 +186,13 @@ DDB_DLL DDBErr DDBMoveEntry(const char *ddbPath, const char *source, const char 
  * @return DDBERR_NONE on success, an error otherwise */
 DDB_DLL DDBErr DDBBuild(const char *ddbPath, const char *source = nullptr, const char *dest = nullptr, bool force = false);
 
+/** IsBuildable
+ * @param ddbPath path to the source DroneDB database (parent of ".ddb")
+ * @param path Entry path
+ * @param isBuildable if the entry is buildable
+ * @return DDBERR_NONE on success, an error otherwise */
+DDB_DLL DDBErr DDBIsBuildable(const char *ddbPath, const char *path, bool *isBuildable);
+
 
 #ifdef __cplusplus
 }

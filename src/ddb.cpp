@@ -442,3 +442,23 @@ DDB_DLL DDBErr DDBBuild(const char *ddbPath, const char *source, const char *des
     DDB_C_END
    
 }
+
+DDB_DLL DDBErr DDBIsBuildable(const char *ddbPath, const char *path, bool *isBuildable) {
+
+    DDB_C_BEGIN
+
+    if (ddbPath == nullptr) throw InvalidArgsException("No ddb path provided");
+    if (path == nullptr) throw InvalidArgsException("No path provided");
+    if (isBuildable == nullptr) throw InvalidArgsException("Buildable parameter is null");
+
+    const auto ddbPathStr = std::string(ddbPath);
+
+    const auto ddb = ddb::open(ddbPathStr, true);
+
+    std::string subfolder;
+
+    *isBuildable = is_buildable(ddb.get(), std::string(path), subfolder);
+    
+    DDB_C_END
+   
+}

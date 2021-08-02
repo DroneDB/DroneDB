@@ -13,6 +13,27 @@
 
 namespace ddb {
 
+bool is_buildable_internal(const Entry& e, std::string& subfolder) {
+
+    if (e.type == PointCloud) {
+        subfolder = "ept";
+        return true;
+    }
+
+    return false;
+
+}
+
+bool is_buildable(Database* db, const std::string& path, std::string& subfolder) {
+    
+    Entry e;
+
+    const bool entryExists = getEntry(db, path, &e) != nullptr;
+    if (!entryExists) throw InvalidArgsException(path + " is not a valid path in the database.");
+
+    return is_buildable_internal(e, subfolder);
+}
+
 void build_internal(Database* db, const Entry& e,
                            const std::string& outputPath, std::ostream& output,
                            bool force) {
@@ -21,10 +42,12 @@ void build_internal(Database* db, const Entry& e,
 
     const auto baseOutputPath = fs::path(outputPath) / e.hash;
     std::string o;
+    std::string subfolder;
 
-    if (e.type == PointCloud) {
-        o = (baseOutputPath / "ept").string();
+    if (is_buildable_internal(e, subfolder)) {
+        o = (baseOutputPath / subfolder).string();
     }else{
+        LOGD << "No build needed";
         return; // No build needed
     }
 
@@ -74,10 +97,9 @@ void build_all(Database* db, const std::string& outputPath,
 
     LOGD << "In build_all('" << outputPath << "')";
 
-    // List all matching files in DB
-    auto q = db->query("SELECT path, hash, type, meta, mtime, size, depth FROM entries WHERE type = ?");
-    q->bind(1, EntryType::PointCloud);
-
+    // List all files in DB
+    auto q = db->query("SELECT path, hash, type, meta, mtime, size, depth FROM entries");
+    
     while (q->fetch()) {
         Entry e(*q);
 
