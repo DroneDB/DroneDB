@@ -44,7 +44,7 @@ void Build::run(cxxopts::ParseResult &opts) {
         const auto db = ddb::open(ddbPath, true);
         
         if (!opts.count("path")) {
-            build_all(db.get(), output, std::cout, force);
+            buildAll(db.get(), output, std::cout, force);
         } else {
             const auto path = opts["path"].as<std::string>();
             build(db.get(), path, output, std::cout, force);

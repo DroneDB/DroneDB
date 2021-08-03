@@ -12,7 +12,9 @@ namespace ddb {
 
 #define DDB_BUILD_PATH "build"
 
-DDB_DLL void build_all(Database* db, const std::string& outputPath,
+DDB_DLL bool isBuildable(Database* db, const std::string& path, std::string& subfolder);
+
+DDB_DLL void buildAll(Database* db, const std::string& outputPath,
                        std::ostream& output, bool force = false);
 DDB_DLL void build(Database* db, const std::string& path,
                    const std::string& outputPath, std::ostream& output, bool force = false);
