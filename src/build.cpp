@@ -13,7 +13,7 @@
 
 namespace ddb {
 
-bool is_buildable_internal(const Entry& e, std::string& subfolder) {
+bool isBuildableInternal(const Entry& e, std::string& subfolder) {
 
     if (e.type == PointCloud) {
         subfolder = "ept";
@@ -24,17 +24,17 @@ bool is_buildable_internal(const Entry& e, std::string& subfolder) {
 
 }
 
-bool is_buildable(Database* db, const std::string& path, std::string& subfolder) {
+bool isBuildable(Database* db, const std::string& path, std::string& subfolder) {
     
     Entry e;
 
     const bool entryExists = getEntry(db, path, &e) != nullptr;
     if (!entryExists) throw InvalidArgsException(path + " is not a valid path in the database.");
 
-    return is_buildable_internal(e, subfolder);
+    return isBuildableInternal(e, subfolder);
 }
 
-void build_internal(Database* db, const Entry& e,
+void buildInternal(Database* db, const Entry& e,
                            const std::string& outputPath, std::ostream& output,
                            bool force) {
                                
@@ -44,7 +44,7 @@ void build_internal(Database* db, const Entry& e,
     std::string o;
     std::string subfolder;
 
-    if (is_buildable_internal(e, subfolder)) {
+    if (isBuildableInternal(e, subfolder)) {
         o = (baseOutputPath / subfolder).string();
     }else{
         LOGD << "No build needed";
@@ -92,10 +92,10 @@ void build_internal(Database* db, const Entry& e,
     }
 }
 
-void build_all(Database* db, const std::string& outputPath,
+void buildAll(Database* db, const std::string& outputPath,
                std::ostream& output, bool force) {
 
-    LOGD << "In build_all('" << outputPath << "')";
+    LOGD << "In buildAll('" << outputPath << "')";
 
     // List all files in DB
     auto q = db->query("SELECT path, hash, type, meta, mtime, size, depth FROM entries");
@@ -104,7 +104,7 @@ void build_all(Database* db, const std::string& outputPath,
         Entry e(*q);
 
         // Call build on each of them
-        build_internal(db, e, outputPath, output, force);
+        buildInternal(db, e, outputPath, output, force);
     }
 }
 
@@ -118,7 +118,7 @@ void build(Database* db, const std::string& path, const std::string& outputPath,
     const bool entryExists = getEntry(db, path, &e) != nullptr;
     if (!entryExists) throw InvalidArgsException(path + " is not a valid path in the database.");
 
-    build_internal(db, e, outputPath, output, force);
+    buildInternal(db, e, outputPath, output, force);
 }
 
 }  // namespace ddb

@@ -434,7 +434,7 @@ DDB_DLL DDBErr DDBBuild(const char *ddbPath, const char *source, const char *des
 
     if (source == nullptr)
     {
-        build_all(ddb.get(), destPath, ss, force);
+        buildAll(ddb.get(), destPath, ss, force);
     } else {
         build(ddb.get(), std::string(source), destPath, ss, force);
     }
@@ -457,7 +457,7 @@ DDB_DLL DDBErr DDBIsBuildable(const char *ddbPath, const char *path, bool *isBui
 
     std::string subfolder;
 
-    *isBuildable = is_buildable(ddb.get(), std::string(path), subfolder);
+    *isBuildable = ddb::isBuildable(ddb.get(), std::string(path), subfolder);
     
     DDB_C_END
    
