@@ -41,21 +41,26 @@ void buildInternal(Database* db, const Entry& e,
     LOGD << "Building entry " << e.path << " type " << e.type;
 
     const auto baseOutputPath = fs::path(outputPath) / e.hash;
-    std::string o;
+    std::string outputFolder;
     std::string subfolder;
 
     if (isBuildableInternal(e, subfolder)) {
-        o = (baseOutputPath / subfolder).string();
+        outputFolder = (baseOutputPath / subfolder).string();
     }else{
         LOGD << "No build needed";
         return; // No build needed
     }
 
-    if (fs::exists(o) && !force) {
+    if (fs::exists(outputFolder) && !force) {
+        LOGD << "Output folder already existing and no force parameter provided: no build needed";
         return;
     }
 
-    io::assureFolderExists(o);
+    const auto tempFolder = outputFolder + "-temp"; 
+
+    LOGD << "Temp folder " << tempFolder;
+
+    io::assureFolderExists(tempFolder);
     const auto hardlink = baseOutputPath.string() + "_link" + fs::path(e.path).extension().string();
     io::assureIsRemoved(hardlink);
 
@@ -65,29 +70,51 @@ void buildInternal(Database* db, const Entry& e,
 
     LOGD << "Relative path " << relativePath;
 
-    try{
+    try {
         io::hardlink(relativePath, hardlink);
         LOGD << "Linked " << relativePath << " --> " << hardlink;
         relativePath = hardlink;
-    }catch(const FSException &e){
+    } catch(const FSException &e){
         LOGD << e.what();
         // Will build directly from path
     }
 
-
     // We could vectorize this logic, but it's an overkill by now
-    try{
+    try {
         if (e.type == PointCloud) {
             const std::vector vec = {relativePath};
 
-            buildEpt(vec, o);
+            buildEpt(vec, tempFolder);
 
-            output << o << std::endl;
+            LOGD << "Build complete, moving temp folder to " << outputFolder;
+            io::assureFolderExists(fs::path(outputFolder).parent_path());
+            std::filesystem::rename(tempFolder, outputFolder);
+
+            LOGD << "Temp folder moved";
+
+            output << outputFolder << std::endl;
         }
 
+        io::assureIsRemoved(tempFolder);
         io::assureIsRemoved(hardlink);
-    }catch(...){
+    
+    // Catch block is now detailed because we want to keep track of the exception
+    // catches pdal, gdal, filesystem_error, etc...
+    } catch(const std::exception& ex){
+
+        LOGD << ex.what();
+
+        io::assureIsRemoved(tempFolder);
         io::assureIsRemoved(hardlink);
+
+        throw;
+
+    // This way we are sure that all the exceptions are caught
+    } catch(...){
+
+        io::assureIsRemoved(tempFolder);
+        io::assureIsRemoved(hardlink);
+
         throw;
     }
 }
