@@ -83,7 +83,12 @@ std::string EptTiler::tile(int tz, int tx, int ty) {
     }
 
     BoundingBox<Projected2Di> tMinMax = getMinMaxCoordsForZ(tz);
-    if (!tMinMax.contains(tx, ty)) throw GDALException("Out of bounds");
+    if (!tMinMax.contains(tx, ty)) 
+        throw GDALException(std::string("Out of bounds [(") + 
+            std::to_string(tMinMax.min.x) + "; " + 
+            std::to_string(tMinMax.min.y) + ") - (" + 
+            std::to_string(tMinMax.max.x) + "; " + 
+            std::to_string(tMinMax.max.y) + ")]");
 
     // Get bounds of tile (3857), convert to EPT CRS
     auto tileBounds = mercator.tileBounds(tx, ty, tz);
@@ -116,6 +121,7 @@ std::string EptTiler::tile(int tz, int tx, int ty) {
     std::unique_ptr<pdal::EptReader> eptReader = std::make_unique<pdal::EptReader>();
     pdal::Stage *main = eptReader.get();
     eptReader->setOptions(eptOpts);
+    LOGD << "Options set";
 
     std::unique_ptr<pdal::ColorinterpFilter> colorFilter;
     if (!hasColors){
@@ -136,6 +142,8 @@ std::string EptTiler::tile(int tz, int tx, int ty) {
     pdal::PointTable table;
     main->prepare(table);
     pdal::PointViewSet point_view_set;
+
+    LOGD << "PointTable prepared";
 
     try{
         point_view_set = main->execute(table);
