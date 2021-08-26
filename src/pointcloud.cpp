@@ -32,7 +32,7 @@ bool getPointCloudInfo(const std::string &filename, PointCloudInfo &info, int po
     try {
 
         pdal::StageFactory factory;
-        std::string driver = factory.inferReaderDriver(filename);
+        std::string driver = pdal::StageFactory::inferReaderDriver(filename);
         if (driver.empty()){
             LOGD << "Can't infer point cloud reader from " << filename;
             return false;

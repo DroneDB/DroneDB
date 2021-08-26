@@ -21,7 +21,7 @@ namespace ddb {
 std::string Tiler::getTilePath(int z, int x, int y, bool createIfNotExists) {
     // TODO: retina tiles support?
     const fs::path dir = outputFolder / std::to_string(z) / std::to_string(x);
-    if (createIfNotExists && !fs::exists(dir)) {
+    if (createIfNotExists && !exists(dir)) {
         io::createDirectories(dir);
     }
 
@@ -70,7 +70,7 @@ std::vector<TileInfo> Tiler::getTilesForZoomLevel(int tz) const {
 BoundingBox<int> Tiler::getMinMaxZ() const { return BoundingBox(tMinZ, tMaxZ); }
 
 BoundingBox<Projected2Di> Tiler::getMinMaxCoordsForZ(int tz) const {
-    BoundingBox<Projected2Di> b(mercator.metersToTile(oMinX, oMinY, tz),
+    BoundingBox b(mercator.metersToTile(oMinX, oMinY, tz),
                                 mercator.metersToTile(oMaxX, oMaxY, tz));
 
     LOGD << "MinMaxCoordsForZ(" << tz << ") = (" << b.min.x << ", " << b.min.y << "), (" << b.max.x << ", " << b.max.y << ")";

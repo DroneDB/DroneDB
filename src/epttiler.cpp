@@ -43,8 +43,8 @@ EptTiler::EptTiler(const std::string &inputPath, const std::string &outputFolder
     oMaxY = eptInfo.polyBounds.getPoint(2).x;
     oMinY = eptInfo.polyBounds.getPoint(0).x;
 
-    LOGD << "Bounds (output SRS): " << oMinX << "," << oMinY << "," << oMaxX
-         << "," << oMaxY;
+    LOGD << "Bounds (output SRS): (" << oMinX << "; " << oMinY << ") - ("
+         << oMaxX << "; " << oMaxY << ")";
 
     // Max/min zoom level
     tMinZ = mercator.zoomForLength(std::min(oMaxX - oMinX, oMaxY - oMinY));
