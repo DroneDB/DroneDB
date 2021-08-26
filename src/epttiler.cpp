@@ -108,7 +108,7 @@ std::string EptTiler::tile(int tz, int tx, int ty) {
 
     pdal::Options eptOpts;
     fs::path path(inputPath);
-    eptOpts.add("filename", path.is_relative() ? "./" + inputPath : inputPath);
+    eptOpts.add("filename", (!isNetworkPath(inputPath) && path.is_relative()) ? "./" + inputPath : inputPath);
 
     std::stringstream ss;
     ss << std::setprecision(14) << "([" << bounds.min.x << "," << bounds.min.y << "], " <<
