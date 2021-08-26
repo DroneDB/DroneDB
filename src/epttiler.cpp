@@ -59,7 +59,7 @@ EptTiler::EptTiler(const std::string &inputPath, const std::string &outputFolder
     LOGD << "Has colors: " << (hasColors ? "true" : "false");
 
 #ifdef _WIN32
-    fs::path caBundlePath = io::getDataPath("curl-ca-bundle.crt");
+    const fs::path caBundlePath = io::getDataPath("curl-ca-bundle.crt");
     if (!caBundlePath.empty()) {
         LOGD << "ARBITRER CA Bundle: " << caBundlePath.string();
         std::stringstream ss;
@@ -108,7 +108,7 @@ std::string EptTiler::tile(int tz, int tx, int ty) {
 
     pdal::Options eptOpts;
     fs::path path(inputPath);
-    eptOpts.add("filename", (!isNetworkPath(inputPath) && path.is_relative()) ? "./" + inputPath : inputPath);
+    eptOpts.add("filename", (!isNetworkPath(inputPath) && path.is_relative()) ? ("." / path).string() : inputPath);
 
     std::stringstream ss;
     ss << std::setprecision(14) << "([" << bounds.min.x << "," << bounds.min.y << "], " <<
