@@ -27,7 +27,7 @@ fs::path getThumbFromUserCache(const fs::path &imagePath, int thumbSize, bool fo
 }
 
 bool supportsThumbnails(EntryType type){
-    return type == Image || type == GeoImage || type == GeoRaster || type == PointCloud;
+    return type == Image || type == GeoImage || type == GeoRaster;
 }
 
 void generateThumbs(const std::vector<std::string> &input, const fs::path &output, int thumbSize, bool useCrc){
@@ -66,20 +66,7 @@ fs::path getThumbFilename(const fs::path &imagePath, time_t modifiedTime, int th
     return fs::path(Hash::strCRC64(os.str()) + ".jpg");
 }
 
-
-// imagePath can be either absolute or relative and it's up to the user to
-// invoke the function properly as to avoid conflicts with relative paths
-fs::path generateThumb(const fs::path &imagePath, int thumbSize, const fs::path &outImagePath, bool forceRecreate){
-    if (!exists(imagePath)) throw FSException(imagePath.string() + " does not exist");
-
-    // Check existance of thumbnail, return if exists
-    if (exists(outImagePath) && !forceRecreate){
-        return outImagePath;
-    }
-
-    LOGD << "ImagePath = " << imagePath;
-    LOGD << "OutImagePath = " << outImagePath;
-    LOGD << "Size = " << thumbSize;
+void generateImageThumb(const fs::path& imagePath, int thumbSize, const fs::path& outImagePath) {
 
     // Compute image with GDAL otherwise
     GDALDatasetH hSrcDataset = GDALOpen(imagePath.string().c_str(), GA_ReadOnly);
@@ -129,13 +116,31 @@ fs::path generateThumb(const fs::path &imagePath, int thumbSize, const fs::path 
     GDALTranslateOptions* psOptions = GDALTranslateOptionsNew(targs, nullptr);
     CSLDestroy(targs);
     GDALDatasetH hNewDataset = GDALTranslate(outImagePath.string().c_str(),
-                                                   hSrcDataset,
-                                                   psOptions,
-                                                   nullptr);
+                                             hSrcDataset,
+                                             psOptions,
+                                             nullptr);
     GDALTranslateOptionsFree(psOptions);
 
     GDALClose(hNewDataset);
     GDALClose(hSrcDataset);
+
+}
+
+// imagePath can be either absolute or relative and it's up to the user to
+// invoke the function properly as to avoid conflicts with relative paths
+fs::path generateThumb(const fs::path &imagePath, int thumbSize, const fs::path &outImagePath, bool forceRecreate){
+    if (!exists(imagePath)) throw FSException(imagePath.string() + " does not exist");
+
+    // Check existance of thumbnail, return if exists
+    if (exists(outImagePath) && !forceRecreate){
+        return outImagePath;
+    }
+
+    LOGD << "ImagePath = " << imagePath;
+    LOGD << "OutImagePath = " << outImagePath;
+    LOGD << "Size = " << thumbSize;
+
+    generateImageThumb(imagePath, thumbSize, outImagePath);
 
     return outImagePath;
 }
