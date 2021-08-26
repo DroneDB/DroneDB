@@ -135,114 +135,113 @@ bool getPointCloudInfo(const std::string &filename, PointCloudInfo &info, int po
 
 bool getEptInfo(const std::string &eptJson, PointCloudInfo &info, int polyBoundsSrs, int *span){
     json j;
-    try{
+    try {
         j = json::parse(net::readFile(eptJson));
-    }catch(json::exception &e){
+    } catch(json::exception &e){
         LOGD << e.what();
         return false;
-    }catch(const FSException &e){
+    } catch(const FSException &e){
         LOGD << e.what();
         return false;
-    }catch(const NetException &e){
+    } catch(const NetException &e){
         LOGD << e.what();
         return false;
     }
 
-    if (j.contains("boundsConforming") &&
-        j.contains("points") &&
-        j.contains("srs") &&
-        j.contains("schema") &&
-        j.contains("span")){
-
-        info.pointCount = j["points"];
-
-        if (j["srs"].contains("wkt")){
-            info.wktProjection = j["srs"]["wkt"];
-        }else{
-            info.wktProjection = "";
-        }
-
-        info.dimensions.clear();
-        for (auto &dim : j["schema"]){
-            if (dim.contains("name")){
-                info.dimensions.push_back(dim["name"]);
-            }
-        }
-
-        if (span != nullptr){
-            *span = j["span"];
-        }
-
-        double minx = j["boundsConforming"][0];
-        double miny = j["boundsConforming"][1];
-        double minz = j["boundsConforming"][2];
-        double maxx = j["boundsConforming"][3];
-        double maxy = j["boundsConforming"][4];
-        double maxz = j["boundsConforming"][5];
-
-        info.bounds.clear();
-        info.bounds.push_back(minx);
-        info.bounds.push_back(miny);
-        info.bounds.push_back(minz);
-        info.bounds.push_back(maxx);
-        info.bounds.push_back(maxy);
-        info.bounds.push_back(maxz);
-
-        if (!info.wktProjection.empty()){
-            OGRSpatialReferenceH hSrs = OSRNewSpatialReference(nullptr);
-            OGRSpatialReferenceH hTgt = OSRNewSpatialReference(nullptr);
-
-            char *wkt = strdup(info.wktProjection.c_str());
-            if (OSRImportFromWkt(hSrs, &wkt) != OGRERR_NONE){
-                throw GDALException("Cannot import spatial reference system " + info.wktProjection + ". Is PROJ available?");
-            }
-            OSRSetAxisMappingStrategy(hSrs, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
-
-            OSRImportFromEPSG(hTgt, polyBoundsSrs);
-            OGRCoordinateTransformationH hTransform = OCTNewCoordinateTransformation(hSrs, hTgt);
-
-            double geoMinX = minx;
-            double geoMinY = miny;
-            double geoMinZ = minz;
-            double geoMaxX = maxx;
-            double geoMaxY = maxy;
-            double geoMaxZ = maxz;
-
-            bool minSuccess = OCTTransform(hTransform, 1, &geoMinX, &geoMinY, &geoMinZ);
-            bool maxSuccess = OCTTransform(hTransform, 1, &geoMaxX, &geoMaxY, &geoMaxZ);
-
-            if (!minSuccess || !maxSuccess){
-                throw GDALException("Cannot transform coordinates " + info.wktProjection + " to EPSG:" + std::to_string(polyBoundsSrs));
-            }
-
-            info.polyBounds.clear();
-            info.polyBounds.addPoint(geoMinY, geoMinX, geoMinZ);
-            info.polyBounds.addPoint(geoMinY, geoMaxX, geoMinZ);
-            info.polyBounds.addPoint(geoMaxY, geoMaxX, geoMinZ);
-            info.polyBounds.addPoint(geoMaxY, geoMinX, geoMinZ);
-            info.polyBounds.addPoint(geoMinY, geoMinX, geoMinZ);
-
-            double centroidX = (minx + maxx) / 2.0;
-            double centroidY = (miny + maxy) / 2.0;
-            double centroidZ = minz;
-
-            if (OCTTransform(hTransform, 1, &centroidX, &centroidY, &centroidZ)){
-                info.centroid.clear();
-                info.centroid.addPoint(centroidY, centroidX, centroidZ);
-            }else{
-                throw GDALException("Cannot transform coordinates " + std::to_string(centroidX) + ", " + std::to_string(centroidY) + " to EPSG:" + std::to_string(polyBoundsSrs));
-            }
-
-            OCTDestroyCoordinateTransformation(hTransform);
-            OSRDestroySpatialReference(hTgt);
-            OSRDestroySpatialReference(hSrs);
-        }
-
-        return true;
-    }else{
+    if (!j.contains("boundsConforming") || !j.contains("points") || !j.contains("srs") || !j.contains("schema") || !j.contains("span")) {
         LOGD << "Invalid EPT: " << eptJson;
         return false;
     }
+
+    info.pointCount = j["points"];
+
+    if (j["srs"].contains("wkt")){
+        info.wktProjection = j["srs"]["wkt"];
+    }else{
+        info.wktProjection = "";
+    }
+
+    info.dimensions.clear();
+    for (auto &dim : j["schema"]){
+        if (dim.contains("name")){
+            info.dimensions.push_back(dim["name"]);
+        }
+    }
+
+    if (span != nullptr){
+        *span = j["span"];
+    }
+
+    const double minx = j["boundsConforming"][0];
+    const double miny = j["boundsConforming"][1];
+    const double minz = j["boundsConforming"][2];
+    const double maxx = j["boundsConforming"][3];
+    const double maxy = j["boundsConforming"][4];
+    const double maxz = j["boundsConforming"][5];
+
+    info.bounds.clear();
+    info.bounds.push_back(minx);
+    info.bounds.push_back(miny);
+    info.bounds.push_back(minz);
+    info.bounds.push_back(maxx);
+    info.bounds.push_back(maxy);
+    info.bounds.push_back(maxz);
+
+    if (info.wktProjection.empty()) {
+        // Nothing else to do
+        return true;
+    }
+
+    OGRSpatialReferenceH hSrs = OSRNewSpatialReference(nullptr);
+    OGRSpatialReferenceH hTgt = OSRNewSpatialReference(nullptr);
+
+    char *wkt = _strdup(info.wktProjection.c_str());
+    if (OSRImportFromWkt(hSrs, &wkt) != OGRERR_NONE){
+        throw GDALException("Cannot import spatial reference system " + info.wktProjection + ". Is PROJ available?");
+    }
+    OSRSetAxisMappingStrategy(hSrs, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
+
+    OSRImportFromEPSG(hTgt, polyBoundsSrs);
+    OGRCoordinateTransformationH hTransform = OCTNewCoordinateTransformation(hSrs, hTgt);
+
+    double geoMinX = minx;
+    double geoMinY = miny;
+    double geoMinZ = minz;
+    double geoMaxX = maxx;
+    double geoMaxY = maxy;
+    double geoMaxZ = maxz;
+
+    const bool minSuccess = OCTTransform(hTransform, 1, &geoMinX, &geoMinY, &geoMinZ);
+    const bool maxSuccess = OCTTransform(hTransform, 1, &geoMaxX, &geoMaxY, &geoMaxZ);
+
+    if (!minSuccess || !maxSuccess){
+        throw GDALException("Cannot transform coordinates " + info.wktProjection + " to EPSG:" + std::to_string(polyBoundsSrs));
+    }
+
+    info.polyBounds.clear();
+    info.polyBounds.addPoint(geoMinY, geoMinX, geoMinZ);
+    info.polyBounds.addPoint(geoMinY, geoMaxX, geoMinZ);
+    info.polyBounds.addPoint(geoMaxY, geoMaxX, geoMinZ);
+    info.polyBounds.addPoint(geoMaxY, geoMinX, geoMinZ);
+    info.polyBounds.addPoint(geoMinY, geoMinX, geoMinZ);
+
+    double centroidX = (minx + maxx) / 2.0;
+    double centroidY = (miny + maxy) / 2.0;
+    double centroidZ = minz;
+
+    if (OCTTransform(hTransform, 1, &centroidX, &centroidY, &centroidZ)){
+        info.centroid.clear();
+        info.centroid.addPoint(centroidY, centroidX, centroidZ);
+    }else{
+        throw GDALException("Cannot transform coordinates " + std::to_string(centroidX) + ", " + std::to_string(centroidY) + " to EPSG:" + std::to_string(polyBoundsSrs));
+    }
+
+    OCTDestroyCoordinateTransformation(hTransform);
+    OSRDestroySpatialReference(hTgt);
+    OSRDestroySpatialReference(hSrs);
+
+    return true;
+
 }
 
 void buildEpt(const std::vector<std::string> &filenames, const std::string &outdir){
@@ -254,7 +253,7 @@ void buildEpt(const std::vector<std::string> &filenames, const std::string &outd
         if (!fs::exists(f)) throw FSException(f + " does not exist");
 
         const EntryType type = fingerprint(f);
-        if (type != EntryType::PointCloud) throw InvalidArgsException(f + " is not a supported point cloud file");
+        if (type != PointCloud) throw InvalidArgsException(f + " is not a supported point cloud file");
 
         options.inputFiles.push_back(f);
     }
@@ -276,7 +275,7 @@ void buildEpt(const std::vector<std::string> &filenames, const std::string &outd
 
     untwine::ProgressWriter progress(options.progressFd);
 
-    try{
+    try {
         untwine::BaseInfo common;
 
         untwine::epf::Epf preflight(common);
@@ -287,7 +286,7 @@ void buildEpt(const std::vector<std::string> &filenames, const std::string &outd
 
         io::assureIsRemoved(tmpDir);
         io::assureIsRemoved(dest / "temp");
-    }catch (const std::exception &e){
+    } catch (const std::exception &e){
         throw UntwineException(e.what());
     }
 }
