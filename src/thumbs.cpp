@@ -41,7 +41,9 @@ void generateThumbs(const std::vector<std::string> &input, const fs::path &outpu
 
         const EntryType type = fingerprint(fp);
         io::Path p(fp);
-        if (supportsThumbnails(type)){
+
+        // NOTE: This check is looking pretty ugly, maybe move "ept.json" in a const?
+        if (supportsThumbnails(type) || fp.filename() == "ept.json") {
             fs::path outImagePath;
             if (useCrc){
                 outImagePath = output / getThumbFilename(fp, p.getModifiedTime(), thumbSize);
@@ -126,6 +128,13 @@ void generateImageThumb(const fs::path& imagePath, int thumbSize, const fs::path
 
 }
 
+void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
+                        const fs::path &outImagePath) {
+
+    LOGD << "Generating point cloud thumb";
+
+}
+
 // imagePath can be either absolute or relative and it's up to the user to
 // invoke the function properly as to avoid conflicts with relative paths
 fs::path generateThumb(const fs::path &imagePath, int thumbSize, const fs::path &outImagePath, bool forceRecreate){
@@ -140,7 +149,10 @@ fs::path generateThumb(const fs::path &imagePath, int thumbSize, const fs::path 
     LOGD << "OutImagePath = " << outImagePath;
     LOGD << "Size = " << thumbSize;
 
-    generateImageThumb(imagePath, thumbSize, outImagePath);
+    if (imagePath.filename() == "ept.json")
+        generatePointCloudThumb(imagePath, thumbSize, outImagePath);
+    else
+        generateImageThumb(imagePath, thumbSize, outImagePath);
 
     return outImagePath;
 }
