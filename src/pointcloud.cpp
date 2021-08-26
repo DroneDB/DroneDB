@@ -195,7 +195,7 @@ bool getEptInfo(const std::string &eptJson, PointCloudInfo &info, int polyBounds
     OGRSpatialReferenceH hSrs = OSRNewSpatialReference(nullptr);
     OGRSpatialReferenceH hTgt = OSRNewSpatialReference(nullptr);
 
-    char *wkt = _strdup(info.wktProjection.c_str());
+    char *wkt = strdup(info.wktProjection.c_str());
     if (OSRImportFromWkt(hSrs, &wkt) != OGRERR_NONE){
         throw GDALException("Cannot import spatial reference system " + info.wktProjection + ". Is PROJ available?");
     }
