@@ -7,6 +7,11 @@
 #include <gdal_utils.h>
 
 #include "thumbs.h"
+
+#include <epttiler.h>
+#include <pointcloud.h>
+#include <tiler.h>
+
 #include "exceptions.h"
 #include "hash.h"
 #include "utils.h"
@@ -132,6 +137,23 @@ void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
                         const fs::path &outImagePath) {
 
     LOGD << "Generating point cloud thumb";
+
+    EptTiler tiler(eptPath.string(), outImagePath.string(), thumbSize);
+
+    const auto box = tiler.getMinMaxZ();
+
+    LOGD << "Box [" << box.min << "; " << box.max; 
+
+    const int z = 20;
+
+    const auto coords = tiler.getMinMaxCoordsForZ(z);
+
+    LOGD << "Coords Max (" << coords.max.x << "; " << coords.max.y << ")"; 
+    LOGD << "Coords Min (" << coords.min.x << "; " << coords.min.y << ")"; 
+        
+    const auto res = tiler.tile(z, (coords.min.x + coords.max.x) / 2, (coords.min.y + coords.max.y) / 2);
+
+    LOGD << "Res = " << res;
 
 }
 
