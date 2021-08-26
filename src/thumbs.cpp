@@ -27,7 +27,7 @@ fs::path getThumbFromUserCache(const fs::path &imagePath, int thumbSize, bool fo
 }
 
 bool supportsThumbnails(EntryType type){
-    return type == Image || type == GeoImage || type == GeoRaster;
+    return type == Image || type == GeoImage || type == GeoRaster || type == PointCloud;
 }
 
 void generateThumbs(const std::vector<std::string> &input, const fs::path &output, int thumbSize, bool useCrc){
@@ -70,10 +70,10 @@ fs::path getThumbFilename(const fs::path &imagePath, time_t modifiedTime, int th
 // imagePath can be either absolute or relative and it's up to the user to
 // invoke the function properly as to avoid conflicts with relative paths
 fs::path generateThumb(const fs::path &imagePath, int thumbSize, const fs::path &outImagePath, bool forceRecreate){
-    if (!fs::exists(imagePath)) throw FSException(imagePath.string() + " does not exist");
+    if (!exists(imagePath)) throw FSException(imagePath.string() + " does not exist");
 
     // Check existance of thumbnail, return if exists
-    if (fs::exists(outImagePath) && !forceRecreate){
+    if (exists(outImagePath) && !forceRecreate){
         return outImagePath;
     }
 
@@ -89,8 +89,8 @@ fs::path generateThumb(const fs::path &imagePath, int thumbSize, const fs::path 
 
     const int width = GDALGetRasterXSize(hSrcDataset);
     const int height = GDALGetRasterYSize(hSrcDataset);
-    int targetWidth = 0;
-    int targetHeight = 0;
+    int targetWidth;
+    int targetHeight;
 
     if (width > height){
         targetWidth = thumbSize;
