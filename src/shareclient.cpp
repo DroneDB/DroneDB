@@ -91,7 +91,8 @@ void ShareClient::Upload(const std::string& path, const fs::path& filePath,
 
             break;  // Done
         } catch (const NetException& e) {
-            if (++retryNum >= MAX_RETRIES) throw e;
+            if (std::string(e.what()).find("Callback aborted") != std::string::npos) throw;
+            if (++retryNum >= MAX_RETRIES) throw;
 
             LOGD << e.what() << ", retrying upload of " << filename
                  << " (attempt " << retryNum << ")";
