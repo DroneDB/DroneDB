@@ -107,7 +107,9 @@ std::string EptTiler::tile(int tz, int tx, int ty) {
     ct.transform(&bounds.max.x, &bounds.max.y);
 
     pdal::Options eptOpts;
-    eptOpts.add("filename", inputPath);
+    fs::path path(inputPath);
+    eptOpts.add("filename", path.is_relative() ? "./" + inputPath : inputPath);
+
     std::stringstream ss;
     ss << std::setprecision(14) << "([" << bounds.min.x << "," << bounds.min.y << "], " <<
                                     "[" << bounds.max.x << "," << bounds.max.y << "])";
