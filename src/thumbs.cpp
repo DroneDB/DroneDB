@@ -20,26 +20,26 @@ fs::path getThumbFromUserCache(const fs::path &imagePath, int thumbSize, bool fo
     if (std::rand() % 1000 == 0) cleanupThumbsUserCache();
     if (!fs::exists(imagePath)) throw FSException(imagePath.string() + " does not exist");
 
-    fs::path outdir = UserProfile::get()->getThumbsDir(thumbSize);
+    const fs::path outdir = UserProfile::get()->getThumbsDir(thumbSize);
     io::Path p = imagePath;
-    fs::path thumbPath = outdir / getThumbFilename(imagePath, p.getModifiedTime(), thumbSize);
+    const fs::path thumbPath = outdir / getThumbFilename(imagePath, p.getModifiedTime(), thumbSize);
     return generateThumb(imagePath, thumbSize, thumbPath, forceRecreate);
 }
 
 bool supportsThumbnails(EntryType type){
-    return type == EntryType::Image || type == EntryType::GeoImage || type == EntryType::GeoRaster;
+    return type == Image || type == GeoImage || type == GeoRaster;
 }
 
 void generateThumbs(const std::vector<std::string> &input, const fs::path &output, int thumbSize, bool useCrc){
     if (input.size() > 1) io::assureFolderExists(output);
-    bool outputIsFile = input.size() == 1 && io::Path(output).checkExtension({"jpg", "jpeg"});
+    const bool outputIsFile = input.size() == 1 && io::Path(output).checkExtension({"jpg", "jpeg"});
 
-    std::vector<fs::path> filePaths = std::vector<fs::path>(input.begin(), input.end());
+    const std::vector<fs::path> filePaths = std::vector<fs::path>(input.begin(), input.end());
 
     for (auto &fp : filePaths){
         LOGD << "Parsing entry " << fp.string();
 
-        EntryType type = fingerprint(fp);
+        const EntryType type = fingerprint(fp);
         io::Path p(fp);
         if (supportsThumbnails(type)){
             fs::path outImagePath;
@@ -86,9 +86,9 @@ fs::path generateThumb(const fs::path &imagePath, int thumbSize, const fs::path 
 
     if (!hSrcDataset)
         throw GDALException("Cannot open " + imagePath.string() + " for reading");
-  
-    int width = GDALGetRasterXSize(hSrcDataset);
-    int height = GDALGetRasterYSize(hSrcDataset);
+
+    const int width = GDALGetRasterXSize(hSrcDataset);
+    const int height = GDALGetRasterYSize(hSrcDataset);
     int targetWidth = 0;
     int targetHeight = 0;
 
@@ -129,9 +129,9 @@ fs::path generateThumb(const fs::path &imagePath, int thumbSize, const fs::path 
     GDALTranslateOptions* psOptions = GDALTranslateOptionsNew(targs, nullptr);
     CSLDestroy(targs);
     GDALDatasetH hNewDataset = GDALTranslate(outImagePath.string().c_str(),
-                                    hSrcDataset,
-                                    psOptions,
-                                    nullptr);
+                                                   hSrcDataset,
+                                                   psOptions,
+                                                   nullptr);
     GDALTranslateOptionsFree(psOptions);
 
     GDALClose(hNewDataset);
@@ -143,8 +143,8 @@ fs::path generateThumb(const fs::path &imagePath, int thumbSize, const fs::path 
 void cleanupThumbsUserCache(){
     LOGD << "Cleaning up thumbs user cache";
 
-    time_t threshold = utils::currentUnixTimestamp() - 60 * 60 * 24 * 5; // 5 days
-    fs::path thumbsDir = UserProfile::get()->getThumbsDir();
+    const time_t threshold = utils::currentUnixTimestamp() - 60 * 60 * 24 * 5; // 5 days
+    const fs::path thumbsDir = UserProfile::get()->getThumbsDir();
     std::vector<fs::path> cleanupDirs;
 
     // Iterate size directories
@@ -152,7 +152,7 @@ void cleanupThumbsUserCache(){
             sd != fs::recursive_directory_iterator();
             ++sd ){
         fs::path sizeDir = sd->path();
-        if (fs::is_directory(sizeDir)){
+        if (is_directory(sizeDir)){
             for(auto t = fs::recursive_directory_iterator(sizeDir);
                     t != fs::recursive_directory_iterator();
                     ++t ){
@@ -163,7 +163,7 @@ void cleanupThumbsUserCache(){
                 }
             }
 
-            if (fs::is_empty(sizeDir)){
+            if (is_empty(sizeDir)){
                 // Remove directory too
                 cleanupDirs.push_back(sizeDir);
             }
