@@ -8,9 +8,14 @@
 
 #include "thumbs.h"
 
+#include <coordstransformer.h>
 #include <epttiler.h>
 #include <pointcloud.h>
 #include <tiler.h>
+
+#include <Options.hpp>
+#include <filters/ColorinterpFilter.hpp>
+#include <io/EptReader.hpp>
 
 #include "exceptions.h"
 #include "hash.h"
@@ -133,27 +138,241 @@ void generateImageThumb(const fs::path& imagePath, int thumbSize, const fs::path
 
 }
 
+void drawCircle(uint8_t *buffer, uint8_t *alpha, int px, int py,
+                          int radius, uint8_t r, uint8_t g, uint8_t b, int tileSize, int wSize) {
+    int r2 = radius * radius;
+    int area = r2 << 2;
+    int rr = radius << 1;
+
+    for (int i = 0; i < area; i++) {
+        int tx = (i % rr) - radius;
+        int ty = (i / rr) - radius;
+        if (tx * tx + ty * ty <= r2) {
+            int dx = px + tx;
+            int dy = py + ty;
+            if (dx >= 0 && dx < tileSize && dy >= 0 && dy < tileSize) {
+                buffer[dy * tileSize + dx + wSize * 0] = r;
+                buffer[dy * tileSize + dx + wSize * 1] = g;
+                buffer[dy * tileSize + dx + wSize * 2] = b;
+                alpha[dy * tileSize + dx] = 255;
+            }
+        }
+    }
+}
+
 void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
                         const fs::path &outImagePath) {
 
     LOGD << "Generating point cloud thumb";
 
-    EptTiler tiler(eptPath.string(), outImagePath.string(), thumbSize);
+    try {
 
-    const auto box = tiler.getMinMaxZ();
-
-    LOGD << "Box [" << box.min << "; " << box.max; 
-
-    const int z = 20;
-
-    const auto coords = tiler.getMinMaxCoordsForZ(z);
-
-    LOGD << "Coords Max (" << coords.max.x << "; " << coords.max.y << ")"; 
-    LOGD << "Coords Min (" << coords.min.x << "; " << coords.min.y << ")"; 
+        PointCloudInfo eptInfo;
         
-    const auto res = tiler.tile(z, (coords.min.x + coords.max.x) / 2, (coords.min.y + coords.max.y) / 2);
+        // Open EPT
+        int span;
+        if (!getEptInfo(eptPath.string(), eptInfo, 3857, &span)){
+            throw InvalidArgsException("Cannot get EPT info for " +
+                                    eptPath.string());
+        }
 
-    LOGD << "Res = " << res;
+        const auto oMinX = eptInfo.polyBounds.getPoint(0).y;
+        const auto oMaxX = eptInfo.polyBounds.getPoint(2).y;
+        const auto oMaxY = eptInfo.polyBounds.getPoint(2).x;
+        const auto oMinY = eptInfo.polyBounds.getPoint(0).x;
+
+        LOGD << "Bounds (output SRS): (" << oMinX << "; " << oMinY << ") - ("
+            << oMaxX << "; " << oMaxY << ")";
+
+        const auto tileSize = thumbSize;
+
+        GlobalMercator mercator(tileSize);
+
+        // Max/min zoom level
+        const auto tMinZ = mercator.zoomForLength(std::min(oMaxX - oMinX, oMaxY - oMinY));
+        const auto tMaxZ = tMinZ + static_cast<int>(std::round(std::log(static_cast<double>(span) / 4.0) / std::log(2)));
+
+        LOGD << "MinZ: " << tMinZ;
+        LOGD << "MaxZ: " << tMaxZ;
+
+        const auto hasColors = std::find(eptInfo.dimensions.begin(), eptInfo.dimensions.end(), "Red") != eptInfo.dimensions.end() &&
+                        std::find(eptInfo.dimensions.begin(), eptInfo.dimensions.end(), "Green") != eptInfo.dimensions.end() &&
+                        std::find(eptInfo.dimensions.begin(), eptInfo.dimensions.end(), "Blue") != eptInfo.dimensions.end();
+        LOGD << "Has colors: " << (hasColors ? "true" : "false");
+
+    #ifdef _WIN32
+        const fs::path caBundlePath = io::getDataPath("curl-ca-bundle.crt");
+        if (!caBundlePath.empty()) {
+            LOGD << "ARBITRER CA Bundle: " << caBundlePath.string();
+            std::stringstream ss;
+            ss << "ARBITER_CA_INFO=" << caBundlePath.string();
+            if (_putenv(ss.str().c_str()) != 0) {
+                LOGD << "Cannot set ARBITER_CA_INFO";
+            }
+        }
+    #endif
+
+        const auto tz = tMinZ;
+
+        // -----------------------------------------------
+
+        BoundingBox b(mercator.metersToTile(oMinX, oMinY, tz),
+                    mercator.metersToTile(oMaxX, oMaxY, tz));
+
+        // Crop tiles extending world limits (+-180,+-90)
+        b.min.x = std::max<int>(0, b.min.x);
+        b.max.x = std::min<int>(static_cast<int>(std::pow(2, tz) - 1), b.max.x);
+
+        LOGD << "MinMaxCoordsForZ(" << tz << ") = (" << b.min.x << ", "
+            << b.min.y << "), (" << b.max.x << ", " << b.max.y << ")";
+
+        // Get bounds of tile (3857), convert to EPT CRS
+        auto tileBounds = mercator.tileBounds(oMinX, oMinY, tz);
+        auto bounds = tileBounds;
+
+        // -----------------------------------------------
+
+        pdal::Options eptOpts;
+        eptOpts.add("filename", eptPath);
+
+        std::stringstream ss;
+        ss << std::setprecision(14) << "([" << b.min.x << "," << b.min.y
+        << "], "
+        << "[" << b.max.x << "," << b.max.y << "])";
+        eptOpts.add("bounds", ss.str());
+        LOGD << "EPT bounds: " << ss.str();
+
+        double resolution = mercator.resolution(tz - 2);
+        eptOpts.add("resolution", resolution);
+        LOGD << "EPT resolution: " << resolution;
+
+        std::unique_ptr<pdal::EptReader> eptReader =
+            std::make_unique<pdal::EptReader>();
+        pdal::Stage *main = eptReader.get();
+        eptReader->setOptions(eptOpts);
+        LOGD << "Options set";
+
+        // -----------------------------------------------------------------
+
+        std::unique_ptr<pdal::ColorinterpFilter> colorFilter;
+        if (!hasColors) {
+            colorFilter.reset(new pdal::ColorinterpFilter());
+
+            // Add ramp filter
+            LOGD << "Adding ramp filter (" << eptInfo.bounds[2] << ", "
+                << eptInfo.bounds[5] << ")";
+
+            pdal::Options cfOpts;
+            cfOpts.add("ramp", "pestel_shades");
+            cfOpts.add("minimum", eptInfo.bounds[2]);
+            cfOpts.add("maximum", eptInfo.bounds[5]);
+            colorFilter->setOptions(cfOpts);
+            colorFilter->setInput(*eptReader);
+            main = colorFilter.get();
+        }
+
+        pdal::PointTable table;
+        main->prepare(table);
+        pdal::PointViewSet point_view_set;
+
+        LOGD << "PointTable prepared";
+
+        try {
+            point_view_set = main->execute(table);
+        } catch (const pdal::pdal_error &e) {
+            throw PDALException(e.what());
+        }
+
+        pdal::PointViewPtr point_view = *point_view_set.begin();
+        pdal::Dimension::IdList dims = point_view->dims();
+
+        const auto wSize = tileSize * tileSize;
+
+        const int nBands = 3;
+        const int bufSize = GDALGetDataTypeSizeBytes(GDT_Byte) * wSize;
+        std::unique_ptr<uint8_t> buffer(new uint8_t[bufSize * nBands]);
+        std::unique_ptr<uint8_t> alphaBuffer(new uint8_t[bufSize]);
+        std::unique_ptr<float> zBuffer(new float[bufSize]);
+
+        memset(buffer.get(), 0, bufSize * nBands);
+        memset(alphaBuffer.get(), 0, bufSize);
+
+        for (int i = 0; i < wSize; i++) {
+            zBuffer.get()[i] = -99999.0;
+        }
+
+        LOGD << "Fetched " << point_view->size() << " points";
+
+        const double tileScaleW = tileSize / (tileBounds.max.x - tileBounds.min.x);
+        const double tileScaleH = tileSize / (tileBounds.max.y - tileBounds.min.y);
+        CoordsTransformer ict(eptInfo.wktProjection, 3857);
+
+        for (pdal::PointId idx = 0; idx < point_view->size(); ++idx) {
+            auto p = point_view->point(idx);
+            double x = p.getFieldAs<double>(pdal::Dimension::Id::X);
+            double y = p.getFieldAs<double>(pdal::Dimension::Id::Y);
+            double z = p.getFieldAs<double>(pdal::Dimension::Id::Z);
+
+            ict.transform(&x, &y);
+
+            // Map projected coordinates to local PNG coordinates
+            int px = std::round((x - tileBounds.min.x) * tileScaleW);
+            int py = tileSize - 1 - std::round((y - tileBounds.min.y) * tileScaleH);
+
+            if (px >= 0 && px < tileSize && py >= 0 && py < tileSize) {
+                // Within bounds
+                uint8_t red = p.getFieldAs<uint8_t>(pdal::Dimension::Id::Red);
+                uint8_t green = p.getFieldAs<uint8_t>(pdal::Dimension::Id::Green);
+                uint8_t blue = p.getFieldAs<uint8_t>(pdal::Dimension::Id::Blue);
+
+                if (zBuffer.get()[py * tileSize + px] < z) {
+                    zBuffer.get()[py * tileSize + px] = z;
+                    drawCircle(buffer.get(), alphaBuffer.get(), px, py, 2, red,
+                            green, blue, tileSize, wSize);
+                }
+            }
+        }
+
+        GDALDriverH memDrv = GDALGetDriverByName("MEM");
+        if (memDrv == nullptr) throw GDALException("Cannot create MEM driver");
+        GDALDriverH pngDrv = GDALGetDriverByName("PNG");
+        if (pngDrv == nullptr) throw GDALException("Cannot create PNG driver");
+
+        // Need to create in-memory dataset
+        // (PNG driver does not have Create() method)
+        const GDALDatasetH dsTile = GDALCreate(memDrv, "", tileSize, tileSize,
+                                            nBands + 1, GDT_Byte, nullptr);
+        if (dsTile == nullptr) throw GDALException("Cannot create dsTile");
+
+        if (GDALDatasetRasterIO(dsTile, GF_Write, 0, 0, tileSize, tileSize,
+                                buffer.get(), tileSize, tileSize, GDT_Byte, nBands,
+                                nullptr, 0, 0, 0) != CE_None) {
+            throw GDALException("Cannot write tile data");
+        }
+
+        const GDALRasterBandH tileAlphaBand = GDALGetRasterBand(dsTile, nBands + 1);
+        GDALSetRasterColorInterpretation(tileAlphaBand, GCI_AlphaBand);
+
+        if (GDALRasterIO(tileAlphaBand, GF_Write, 0, 0, tileSize, tileSize,
+                        alphaBuffer.get(), tileSize, tileSize, GDT_Byte, 0,
+                        0) != CE_None) {
+            throw GDALException("Cannot write tile alpha data");
+        }
+
+        const GDALDatasetH outDs = GDALCreateCopy(pngDrv, outImagePath.string().c_str(), dsTile,
+                                                FALSE, nullptr, nullptr, nullptr);
+        if (outDs == nullptr)
+            throw GDALException("Cannot create output dataset " +
+                                outImagePath.string());
+
+        GDALClose(outDs);
+        GDALClose(dsTile);
+
+    } catch(const std::exception& e) {
+        LOGD << e.what();
+    } catch(const std::string& e) {
+        LOGD << e;
+    }
 
 }
 
