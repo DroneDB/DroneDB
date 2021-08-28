@@ -214,31 +214,16 @@ void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
 
         const auto tz = tMinZ;
 
-        // -----------------------------------------------
-
-        BoundingBox b(mercator.metersToTile(oMinX, oMinY, tz),
-                    mercator.metersToTile(oMaxX, oMaxY, tz));
-
-        // Crop tiles extending world limits (+-180,+-90)
-        b.min.x = std::max<int>(0, b.min.x);
-        b.max.x = std::min<int>(static_cast<int>(std::pow(2, tz) - 1), b.max.x);
-
-        LOGD << "MinMaxCoordsForZ(" << tz << ") = (" << b.min.x << ", "
-            << b.min.y << "), (" << b.max.x << ", " << b.max.y << ")";
-
-        // Get bounds of tile (3857), convert to EPT CRS
-        auto tileBounds = mercator.tileBounds(oMinX, oMinY, tz);
-        auto bounds = tileBounds;
 
         // -----------------------------------------------
 
         pdal::Options eptOpts;
-        eptOpts.add("filename", eptPath);
+        eptOpts.add("filename", ("." / eptPath).string());
 
         std::stringstream ss;
-        ss << std::setprecision(14) << "([" << b.min.x << "," << b.min.y
+        ss << std::setprecision(14) << "([" << oMinX << "," << oMinY
         << "], "
-        << "[" << b.max.x << "," << b.max.y << "])";
+        << "[" << oMaxX << "," << oMaxY << "])";
         eptOpts.add("bounds", ss.str());
         LOGD << "EPT bounds: " << ss.str();
 
@@ -246,8 +231,7 @@ void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
         eptOpts.add("resolution", resolution);
         LOGD << "EPT resolution: " << resolution;
 
-        std::unique_ptr<pdal::EptReader> eptReader =
-            std::make_unique<pdal::EptReader>();
+        std::unique_ptr<pdal::EptReader> eptReader = std::make_unique<pdal::EptReader>();
         pdal::Stage *main = eptReader.get();
         eptReader->setOptions(eptOpts);
         LOGD << "Options set";
@@ -270,6 +254,8 @@ void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
             colorFilter->setInput(*eptReader);
             main = colorFilter.get();
         }
+
+        LOGD << "Before prepare";
 
         pdal::PointTable table;
         main->prepare(table);
@@ -303,27 +289,24 @@ void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
 
         LOGD << "Fetched " << point_view->size() << " points";
 
-        const double tileScaleW = tileSize / (tileBounds.max.x - tileBounds.min.x);
-        const double tileScaleH = tileSize / (tileBounds.max.y - tileBounds.min.y);
-        CoordsTransformer ict(eptInfo.wktProjection, 3857);
+        const double tileScaleW = tileSize / (oMaxX - oMinX);
+        const double tileScaleH = tileSize / (oMaxY - oMinY);
 
         for (pdal::PointId idx = 0; idx < point_view->size(); ++idx) {
             auto p = point_view->point(idx);
-            double x = p.getFieldAs<double>(pdal::Dimension::Id::X);
-            double y = p.getFieldAs<double>(pdal::Dimension::Id::Y);
-            double z = p.getFieldAs<double>(pdal::Dimension::Id::Z);
-
-            ict.transform(&x, &y);
+            const auto x = p.getFieldAs<double>(pdal::Dimension::Id::X);
+            const auto y = p.getFieldAs<double>(pdal::Dimension::Id::Y);
+            const auto z = p.getFieldAs<double>(pdal::Dimension::Id::Z);
 
             // Map projected coordinates to local PNG coordinates
-            int px = std::round((x - tileBounds.min.x) * tileScaleW);
-            int py = tileSize - 1 - std::round((y - tileBounds.min.y) * tileScaleH);
+            int px = std::round((x - oMinX) * tileScaleW);
+            int py = tileSize - 1 - std::round((y - oMinY) * tileScaleH);
 
             if (px >= 0 && px < tileSize && py >= 0 && py < tileSize) {
                 // Within bounds
-                uint8_t red = p.getFieldAs<uint8_t>(pdal::Dimension::Id::Red);
-                uint8_t green = p.getFieldAs<uint8_t>(pdal::Dimension::Id::Green);
-                uint8_t blue = p.getFieldAs<uint8_t>(pdal::Dimension::Id::Blue);
+                const auto red = p.getFieldAs<uint8_t>(pdal::Dimension::Id::Red);
+                const auto green = p.getFieldAs<uint8_t>(pdal::Dimension::Id::Green);
+                const auto blue = p.getFieldAs<uint8_t>(pdal::Dimension::Id::Blue);
 
                 if (zBuffer.get()[py * tileSize + px] < z) {
                     zBuffer.get()[py * tileSize + px] = z;
@@ -332,7 +315,7 @@ void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
                 }
             }
         }
-
+/*
         GDALDriverH memDrv = GDALGetDriverByName("MEM");
         if (memDrv == nullptr) throw GDALException("Cannot create MEM driver");
         GDALDriverH pngDrv = GDALGetDriverByName("PNG");
@@ -367,6 +350,7 @@ void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
 
         GDALClose(outDs);
         GDALClose(dsTile);
+        */
 
     } catch(const std::exception& e) {
         LOGD << e.what();
