@@ -125,7 +125,7 @@ void buildAll(Database* db, const std::string& outputPath,
     LOGD << "In buildAll('" << outputPath << "')";
 
     // List all files in DB
-    auto q = db->query("SELECT path, hash, type, meta, mtime, size, depth FROM entries");
+    auto q = db->query("SELECT path, hash, type, properties, mtime, size, depth FROM entries");
     
     while (q->fetch()) {
         Entry e(*q);

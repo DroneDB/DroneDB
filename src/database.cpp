@@ -32,7 +32,7 @@ const char *entriesTableDdl = R"<<<(
       path TEXT PRIMARY KEY,
       hash TEXT,
       type INTEGER,
-      meta TEXT,
+      properties TEXT,
       mtime INTEGER,
       size  INTEGER,
       depth INTEGER
@@ -91,6 +91,11 @@ DDB_DLL void Database::ensureSchemaConsistency() {
         this->exec(attributesTableDdl);
         LOGD << "Attributes table created";
     }
+
+    // Migration from 0.9.11 to 0.9.12 (can be removed in the near future)
+    // where we renamed "entries.meta" --> "entries.properties"
+    // TODO: remove me in 2022
+    this->renameColumnIfExists("entries", "meta TEXT", "properties TEXT");
 }
 
 void Database::setPublic(bool isPublic) {

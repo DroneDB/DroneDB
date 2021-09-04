@@ -12,6 +12,7 @@
 
 #include "fs.h"
 #include "constants.h"
+#include "entry.h"
 #include "ddb_export.h"
 #include "net.h"
 
@@ -51,7 +52,7 @@ class Registry {
 
     DDB_DLL time_t getTokenExpiration();
 
-    DDB_DLL DatasetInfo getDatasetInfo(const std::string& organization,
+    DDB_DLL Entry getDatasetInfo(const std::string& organization,
                                        const std::string& dataset);
 
     DDB_DLL void downloadDdb(const std::string& organization,
@@ -64,26 +65,12 @@ class Registry {
                                const std::string& folder);
 };
 
-void to_json(json& j, const DatasetInfo& p);
-void from_json(const json& j, DatasetInfo& p);
-
 DDB_DLL void applyDelta(const Delta& res, const fs::path& destPath,
                         const fs::path& sourcePath);
 DDB_DLL std::vector<CopyAction> moveCopiesToTemp(const std::vector<CopyAction>& copies,
                       const fs::path& baseFolder,
                       const std::string& tempFolderName);
 DDB_DLL void ensureParentFolderExists(const fs::path& folder);
-
-class DatasetInfo {
-   public:
-    std::string path;
-    std::string hash;
-    EntryType type;
-    size_t size;
-    int depth;
-    time_t mtime;
-    json meta;
-};
 
 }  // namespace ddb
 

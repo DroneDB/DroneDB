@@ -67,31 +67,31 @@ void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
                     bool hasCameraOri = false;
 
                     auto imageSize = e.extractImageSize();
-                    entry.meta["width"] = imageSize.width;
-                    entry.meta["height"] = imageSize.height;
-                    entry.meta["captureTime"] = e.extractCaptureTime();
+                    entry.properties["width"] = imageSize.width;
+                    entry.properties["height"] = imageSize.height;
+                    entry.properties["captureTime"] = e.extractCaptureTime();
 
                     if (image){
-                        entry.meta["orientation"] = e.extractImageOrientation();
-                        entry.meta["make"] = e.extractMake();
-                        entry.meta["model"] = e.extractModel();
-                        entry.meta["sensor"] = e.extractSensor();
+                        entry.properties["orientation"] = e.extractImageOrientation();
+                        entry.properties["make"] = e.extractMake();
+                        entry.properties["model"] = e.extractModel();
+                        entry.properties["sensor"] = e.extractSensor();
 
                         if (e.extractSensorSize(sensorSize)){
-                            entry.meta["sensorWidth"] = sensorSize.width;
-                            entry.meta["sensorHeight"] = sensorSize.height;
+                            entry.properties["sensorWidth"] = sensorSize.width;
+                            entry.properties["sensorHeight"] = sensorSize.height;
                         }
 
                         if (e.computeFocal(focal)){
-                            entry.meta["focalLength"] = focal.length;
-                            entry.meta["focalLength35"] = focal.length35;
+                            entry.properties["focalLength"] = focal.length;
+                            entry.properties["focalLength35"] = focal.length35;
                         }
 
                         hasCameraOri = e.extractCameraOrientation(cameraOri);
                         if (hasCameraOri) {
-                            entry.meta["cameraYaw"] = cameraOri.yaw;
-                            entry.meta["cameraPitch"] = cameraOri.pitch;
-                            entry.meta["cameraRoll"] = cameraOri.roll;
+                            entry.properties["cameraYaw"] = cameraOri.yaw;
+                            entry.properties["cameraPitch"] = cameraOri.pitch;
+                            entry.properties["cameraRoll"] = cameraOri.roll;
                             LOGD << "Camera Orientation: " << cameraOri;
                         }
                     }
@@ -124,19 +124,19 @@ void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
             int width = GDALGetRasterXSize(hDataset);
             int height = GDALGetRasterYSize(hDataset);
 
-            entry.meta["width"] = width;
-            entry.meta["height"] = height;
+            entry.properties["width"] = width;
+            entry.properties["height"] = height;
 
             double geotransform[6];
             if (GDALGetGeoTransform(hDataset, geotransform) == CE_None){
-                entry.meta["geotransform"] = json::array();
-                for (int i = 0; i < 6; i++) entry.meta["geotransform"].push_back(geotransform[i]);
+                entry.properties["geotransform"] = json::array();
+                for (int i = 0; i < 6; i++) entry.properties["geotransform"].push_back(geotransform[i]);
 
                 if (GDALGetProjectionRef(hDataset) != NULL){
                     std::string wkt = GDALGetProjectionRef(hDataset);
                     if (!wkt.empty()){
                         // Set projection
-                        entry.meta["projection"] = wkt;
+                        entry.properties["projection"] = wkt;
 
                         // Get lat/lon extent of raster
                         char *wktp = const_cast<char *>(wkt.c_str());
@@ -174,18 +174,18 @@ void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
                 }
             }
 
-            entry.meta["bands"] = json::array();
+            entry.properties["bands"] = json::array();
             for (int i = 0; i < GDALGetRasterCount(hDataset); i++){
                 GDALRasterBandH hBand = GDALGetRasterBand(hDataset, i + 1);
                 auto b = json::object();
                 b["type"] = GDALGetDataTypeName(GDALGetRasterDataType(hBand));
                 b["colorInterp"] = GDALGetColorInterpretationName(GDALGetRasterColorInterpretation(hBand));
-                entry.meta["bands"].push_back(b);
+                entry.properties["bands"].push_back(b);
             }
         }else if (entry.type == EntryType::PointCloud){
             PointCloudInfo info;
             if (getPointCloudInfo(path.string(), info)){
-                entry.meta = info.toJSON();
+                entry.properties = info.toJSON();
                 entry.polygon_geom = info.polyBounds;
                 entry.point_geom = info.centroid;
             }
@@ -273,13 +273,25 @@ void Entry::toJSON(json &j) const{
     j["path"] = this->path;
     if (this->hash != "") j["hash"] = this->hash;
     j["type"] = this->type;
-    if (!this->meta.empty()) j["meta"] = this->meta;
+    if (!this->properties.empty()) j["properties"] = this->properties;
     j["mtime"] = this->mtime;
     j["size"] = this->size;
     j["depth"] = this->depth;
 
     if (!this->point_geom.empty()) j["point_geom"] = this->point_geom.toGeoJSON();
     if (!this->polygon_geom.empty()) j["polygon_geom"] = this->polygon_geom.toGeoJSON();
+}
+
+void Entry::fromJSON(const json &j){
+    j.at("path").get_to(this->path);
+    if (!j.at("hash").is_null()) j.at("hash").get_to(this->hash);
+    j.at("type").get_to(this->type);
+    j.at("size").get_to(this->size);
+    j.at("depth").get_to(this->depth);
+    j.at("mtime").get_to(this->mtime);
+
+    // TODO: Add
+    // j.at("properties").get_to(e.properties);
 }
 
 bool Entry::toGeoJSON(json &j, BasicGeometryType type){
@@ -297,7 +309,7 @@ bool Entry::toGeoJSON(json &j, BasicGeometryType type){
     p["size"] = this->size;
 
     // Populate meta
-    for (json::iterator it = this->meta.begin(); it != this->meta.end(); ++it) {
+    for (json::iterator it = this->properties.begin(); it != this->properties.end(); ++it) {
         p[it.key()] = it.value();
     }
 
@@ -324,7 +336,7 @@ std::string Entry::toString(){
     if (this->hash != "") s << "SHA256: " << this->hash << "\n";
     s << "Type: " << typeToHuman(this->type) << " (" << this->type << ")" << "\n";
 
-    for (json::iterator it = this->meta.begin(); it != this->meta.end(); ++it) {
+    for (json::iterator it = this->properties.begin(); it != this->properties.end(); ++it) {
         std::string k = it.key();
         if (k.length() > 0) k[0] = std::toupper(k[0]);
 
@@ -422,7 +434,7 @@ void parseDroneDBEntry(const fs::path &ddbPath, Entry &entry){
             entry.size = q->getInt64(0);
         }
 
-        entry.meta = db->getAttributes();
+        entry.properties = db->getAttributes();
         entry.type = EntryType::DroneDB;
     }catch(AppException &e){
         LOGD << e.what();

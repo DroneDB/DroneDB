@@ -33,6 +33,8 @@ class SqliteDatabase {
     DDB_DLL std::string getOpenFile();
     DDB_DLL int changes();
     DDB_DLL void setJournalMode(const std::string &mode);
+    DDB_DLL void setWritableSchema(bool enabled);
+    DDB_DLL void renameColumnIfExists(const std::string &table, const std::string &columnNameBefore, const std::string &columnNameAfter);
 
     DDB_DLL std::unique_ptr<Statement> query(const std::string &query) const;
 
