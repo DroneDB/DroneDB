@@ -47,6 +47,11 @@ SqliteDatabase &SqliteDatabase::close() {
     return *this;
 }
 
+SqliteDatabase &SqliteDatabase::reopen(){
+    if (openFile.empty() || db == nullptr) throw DBException("Cannot reopen unopened database");
+    return this->close().open(openFile);
+}
+
 SqliteDatabase &SqliteDatabase::exec(const std::string &sql) {
     if (db == nullptr) throw DBException("Can't execute SQL: " + sql + ", db is not open");
 
@@ -89,7 +94,7 @@ void SqliteDatabase::setWritableSchema(bool enabled){
     this->exec(std::string("PRAGMA writable_schema=") + (enabled ? "on" : "off") + ";");
 }
 
-void SqliteDatabase::renameColumnIfExists(const std::string &table, const std::string &columnDefBefore, const std::string &columnDefAfter){
+bool SqliteDatabase::renameColumnIfExists(const std::string &table, const std::string &columnDefBefore, const std::string &columnDefAfter){
     auto q = this->query("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?");
     q->bind(1, table);
 
@@ -107,8 +112,11 @@ void SqliteDatabase::renameColumnIfExists(const std::string &table, const std::s
             q->execute();
             this->setWritableSchema(false);
             LOGD << "Updated " << table << " schema definition: " << sqlDef;
+            return true;
         }
     }
+
+    return false;
 }
 
 

@@ -95,7 +95,9 @@ DDB_DLL void Database::ensureSchemaConsistency() {
     // Migration from 0.9.11 to 0.9.12 (can be removed in the near future)
     // where we renamed "entries.meta" --> "entries.properties"
     // TODO: remove me in 2022
-    this->renameColumnIfExists("entries", "meta TEXT", "properties TEXT");
+    if (this->renameColumnIfExists("entries", "meta TEXT", "properties TEXT")){
+        this->reopen();
+    }
 }
 
 void Database::setPublic(bool isPublic) {
