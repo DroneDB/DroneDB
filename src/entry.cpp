@@ -308,7 +308,7 @@ bool Entry::toGeoJSON(json &j, BasicGeometryType type){
     p["mtime"] = this->mtime;
     p["size"] = this->size;
 
-    // Populate meta
+    // Populate properties
     for (json::iterator it = this->properties.begin(); it != this->properties.end(); ++it) {
         p[it.key()] = it.value();
     }
