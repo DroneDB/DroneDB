@@ -192,10 +192,8 @@ void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
 
         // Max/min zoom level
         const auto tMinZ = mercator.zoomForLength(std::min(oMaxX - oMinX, oMaxY - oMinY));
-        const auto tMaxZ = tMinZ + static_cast<int>(std::round(std::log(static_cast<double>(span) / 4.0) / std::log(2)));
 
         LOGD << "MinZ: " << tMinZ;
-        LOGD << "MaxZ: " << tMaxZ;
 
         const auto hasColors = std::find(eptInfo.dimensions.begin(), eptInfo.dimensions.end(), "Red") != eptInfo.dimensions.end() &&
                         std::find(eptInfo.dimensions.begin(), eptInfo.dimensions.end(), "Green") != eptInfo.dimensions.end() &&
@@ -215,7 +213,6 @@ void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
     #endif
 
         const auto tz = tMinZ;
-
 
         // -----------------------------------------------
 
@@ -316,7 +313,7 @@ void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
             if (px >= 0 && px < tileSize && py >= 0 && py < tileSize) {
 
                 // Within bounds
-                 const auto red = p.getFieldAs<uint8_t>(pdal::Dimension::Id::Red);
+                const auto red = p.getFieldAs<uint8_t>(pdal::Dimension::Id::Red);
                 const auto green = p.getFieldAs<uint8_t>(pdal::Dimension::Id::Green);
                 const auto blue = p.getFieldAs<uint8_t>(pdal::Dimension::Id::Blue);
 
