@@ -29,7 +29,14 @@ json MetaManager::getMetaJson(Statement *q) const{
     if (q->fetch()){
         json j;
         j["id"] = q->getText(0);
-        j["data"] = q->getText(1);
+
+        try{
+            j["data"] = json::parse(q->getText(1));
+        }catch (const json::parse_error &e) {
+            LOGD << "Warning, corrupted metadata: " << q->getText(1);
+            j["data"] = "";
+        }
+
         j["mtime"] = q->getInt64(2);
         return j;
     }else throw DBException("Cannot fetch meta with query: " + q->getQuery());
@@ -39,30 +46,37 @@ json MetaManager::getMetaJson(const std::string &q) const{
     return getMetaJson(db->query(q).get());
 }
 
-void MetaManager::validateJson(const std::string &json) const{
+std::string MetaManager::validateData(const std::string &data) const{
     try {
-        json::parse(json).is_null();
-    } catch (const json::parse_error &) {
-        throw JSONException("Invalid JSON: " + json);
+        return json::parse(data).dump();
+    } catch (const json::parse_error &e) {
+        try{
+            // Try with quotes since this is probably a string
+            return json::parse("\"" + data + "\"").dump();
+        } catch (const json::parse_error &e) {
+            throw JSONException("Invalid JSON (" + std::string(e.what()) + "): " + data);
+        }
     }
 }
 
-json MetaManager::add(const std::string &key, const std::string &json, const std::string &path){
+json MetaManager::add(const std::string &key, const std::string &data, const std::string &path){
     std::string ePath = entryPath(path);
     std::string eKey = getKey(key, true);
-    validateJson(json);
+    std::string eData = validateData(data);
     long long eMtime = utils::currentUnixTimestamp();
 
     auto q = db->query("INSERT INTO entries_meta (path, key, data, mtime) VALUES (?, ?, ?, ?)");
     q->bind(1, ePath);
     q->bind(2, eKey);
-    q->bind(3, json);
+    q->bind(3, eData);
     q->bind(4, eMtime);
     q->execute();
 
+    json result = getMetaJson("SELECT id, data, mtime FROM entries_meta WHERE rowid = last_insert_rowid()");
+
     db->setLastUpdate();
 
-    return getMetaJson("SELECT id, data, mtime FROM entries_meta WHERE rowid = last_insert_rowid()");
+    return result;
 }
 
 	

@@ -17,12 +17,12 @@ class MetaManager {
     std::string getKey(const std::string &key, bool isList) const;
     json getMetaJson(Statement *q) const;
     json getMetaJson(const std::string &q) const;
-    void validateJson(const std::string &json) const;
+    std::string validateData(const std::string &data) const;
 public:
     MetaManager(ddb::Database* db) : db(db) {}
 
 
-    DDB_DLL json add(const std::string& key, const std::string &json, const std::string &path = "");
+    DDB_DLL json add(const std::string& key, const std::string &data, const std::string &path = "");
 };
 
 }
