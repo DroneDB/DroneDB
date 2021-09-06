@@ -186,6 +186,8 @@ void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
 
         const auto tileSize = thumbSize;
 
+        LOGD << "TileSize = " << tileSize;
+
         GlobalMercator mercator(tileSize);
 
         // Max/min zoom level
@@ -292,19 +294,29 @@ void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
         const double tileScaleW = tileSize / (oMaxX - oMinX);
         const double tileScaleH = tileSize / (oMaxY - oMinY);
 
+        LOGD << "TileScaleW = " << tileScaleW;
+        LOGD << "TileScaleH = " << tileScaleH;
+        LOGD << "oMinX = " << oMinX;
+        LOGD << "oMinY = " << oMinY;
+
+        CoordsTransformer ict(eptInfo.wktProjection, 3857);
+
         for (pdal::PointId idx = 0; idx < point_view->size(); ++idx) {
             auto p = point_view->point(idx);
-            const auto x = p.getFieldAs<double>(pdal::Dimension::Id::X);
-            const auto y = p.getFieldAs<double>(pdal::Dimension::Id::Y);
-            const auto z = p.getFieldAs<double>(pdal::Dimension::Id::Z);
+            double x = p.getFieldAs<double>(pdal::Dimension::Id::X);
+            double y = p.getFieldAs<double>(pdal::Dimension::Id::Y);
+            double z = p.getFieldAs<double>(pdal::Dimension::Id::Z);
+
+            ict.transform(&x, &y);
 
             // Map projected coordinates to local PNG coordinates
             int px = std::round((x - oMinX) * tileScaleW);
             int py = tileSize - 1 - std::round((y - oMinY) * tileScaleH);
-
+          
             if (px >= 0 && px < tileSize && py >= 0 && py < tileSize) {
+
                 // Within bounds
-                const auto red = p.getFieldAs<uint8_t>(pdal::Dimension::Id::Red);
+                 const auto red = p.getFieldAs<uint8_t>(pdal::Dimension::Id::Red);
                 const auto green = p.getFieldAs<uint8_t>(pdal::Dimension::Id::Green);
                 const auto blue = p.getFieldAs<uint8_t>(pdal::Dimension::Id::Blue);
 
@@ -315,7 +327,9 @@ void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
                 }
             }
         }
-/*
+
+        LOGD << "Done drawing";
+
         GDALDriverH memDrv = GDALGetDriverByName("MEM");
         if (memDrv == nullptr) throw GDALException("Cannot create MEM driver");
         GDALDriverH pngDrv = GDALGetDriverByName("PNG");
@@ -349,8 +363,7 @@ void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
                                 outImagePath.string());
 
         GDALClose(outDs);
-        GDALClose(dsTile);
-        */
+        GDALClose(dsTile);        
 
     } catch(const std::exception& e) {
         LOGD << e.what();

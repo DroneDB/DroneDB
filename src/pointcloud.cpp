@@ -189,9 +189,10 @@ bool getEptInfo(const std::string &eptJson, PointCloudInfo &info, int polyBounds
 
     if (info.wktProjection.empty()) {
         // Nothing else to do
+        LOGD << "WKT projection is empty";
         return true;
     }
-
+    
     OGRSpatialReferenceH hSrs = OSRNewSpatialReference(nullptr);
     OGRSpatialReferenceH hTgt = OSRNewSpatialReference(nullptr);
 
