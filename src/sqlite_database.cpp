@@ -76,7 +76,7 @@ bool SqliteDatabase::tableExists(const std::string &table){
     return false;
 }
 
-std::string SqliteDatabase::getOpenFile(){
+std::string SqliteDatabase::getOpenFile() const{
     return openFile;
 }
 

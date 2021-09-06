@@ -49,18 +49,13 @@ std::unique_ptr<Database> open(const std::string &directory,
 
     db->open(dbasePath.string());
 
-    if (!db->tableExists("entries")) 
+    if (!db->tableExists("entries"))
         throw DBException("Table 'entries' not found (not a valid database: " +
                           dbasePath.string() + ")");
 
     db->ensureSchemaConsistency();
-    
-    return db;
-}
 
-fs::path rootDirectory(Database *db) {
-    assert(db != nullptr);
-    return fs::path(db->getOpenFile()).parent_path().parent_path();
+    return db;
 }
 
 // Computes a list of paths inside rootDirectory
@@ -123,6 +118,14 @@ std::vector<fs::path> getIndexPathList(const fs::path &rootDirectory,
             }
 
             directories[p.string()] = true;
+            if (includeDirs) {
+                while (p.has_parent_path() &&
+                       rootDir.isParentOf(p.parent_path()) &&
+                       p.string() != p.parent_path().string()) {
+                    p = p.parent_path();
+                    directories[p.string()] = true;
+                }
+            }
         } else if (fs::exists(p)) {
             // File
             result.push_back(p);
@@ -229,7 +232,7 @@ FileStatus checkUpdate(Entry &e, const fs::path &p, long long dbMtime,
     if (e.mtime != dbMtime) {
         LOGD << p.string() << " modified time ( " << dbMtime
              << " ) differs from file value: " << e.mtime;
-        
+
         e.hash = Hash::fileSHA256(p.string());
 
         if (dbHash != e.hash) {
@@ -237,7 +240,7 @@ FileStatus checkUpdate(Entry &e, const fs::path &p, long long dbMtime,
                     << " | new: " << e.hash << ")";
             return Modified;
         }
-        
+
     }
 
     return NotModified;
@@ -263,7 +266,7 @@ void doUpdate(Statement *updateQ, const Entry &e) {
 void addToIndex(Database *db, const std::vector<std::string> &paths,
                 AddCallback callback) {
     if (paths.empty()) return;  // Nothing to do
-    const fs::path directory = rootDirectory(db);
+    const fs::path directory = db->rootDirectory();
     auto pathList = getIndexPathList(directory, paths, true);
 
     auto q = db->query("SELECT mtime,hash FROM entries WHERE path=?");
@@ -281,7 +284,7 @@ void addToIndex(Database *db, const std::vector<std::string> &paths,
         if (p.has_filename()) {
             const auto fileName = p.filename().generic_string();
             if (fileName.find('\\') != std::string::npos) {
-                
+
                 LOGD << "Skipping '" << p << "'";
 
                 // Skip file
@@ -345,7 +348,7 @@ void removeFromIndex(Database *db, const std::vector<std::string> &paths, Remove
         return;
     }
 
-    const fs::path directory = rootDirectory(db);
+    const fs::path directory = db->rootDirectory();
 
     auto pathList = std::vector<fs::path>(paths.begin(), paths.end());
 
@@ -363,7 +366,7 @@ void removeFromIndex(Database *db, const std::vector<std::string> &paths, Remove
         for (auto &e : entryMatches) {
             auto cnt = deleteFromIndex(db, e.path, false, callback);
 
-            if (e.type == Directory) 
+            if (e.type == Directory)
                 cnt += deleteFromIndex(db, e.path, true, callback);
 
             // if (!cnt)
@@ -433,7 +436,7 @@ int deleteFromIndex(Database *db, const std::string &query, bool isFolder, Remov
         // Check for build folders to be removed
         checkDeleteBuild(db, hash);
 
-        if (callback != nullptr) 
+        if (callback != nullptr)
             callback(path);
 
         count++;
@@ -500,7 +503,7 @@ std::vector<Entry> getMatchingEntries(Database *db, const fs::path &path,
 }
 
 void syncIndex(Database *db) {
-    const fs::path directory = rootDirectory(db);
+    const fs::path directory = db->rootDirectory();
 
     auto q = db->query("SELECT path,mtime,hash FROM entries");
     auto deleteQ = db->query("DELETE FROM entries WHERE path = ?");
@@ -555,7 +558,7 @@ void syncIndex(Database *db) {
 // if a whitelist of files is specified, limits the scope of the synchronization
 // to those files only. An empty set of files indicates to update all files.
 void syncLocalMTimes(Database *db, const std::vector<std::string> &files) {
-    const fs::path directory = rootDirectory(db);
+    const fs::path directory = db->rootDirectory();
     std::string sql = "SELECT path,mtime FROM entries WHERE (type != ? AND type != ?)";
     if (files.size() > 0){
         sql += " AND path in (";
@@ -667,9 +670,9 @@ void deleteEntry(Database* db, const std::string& path) {
 }
 
 #define FOLDER_CONSISTENCY_QUERY "SELECT B.folder FROM ( \
-	SELECT A.path, TRIM(A.folder, '/') AS folder FROM ( \
-		SELECT path, replace(path, replace(path, rtrim(path, replace(path, '/', '')), ''), '') AS folder FROM entries WHERE type != 1) AS A \
-		WHERE length(A.folder) > 0) AS B WHERE folder NOT IN (SELECT path FROM entries WHERE type = 1)"
+    SELECT A.path, TRIM(A.folder, '/') AS folder FROM ( \
+        SELECT path, replace(path, replace(path, rtrim(path, replace(path, '/', '')), ''), '') AS folder FROM entries WHERE type != 1) AS A \
+        WHERE length(A.folder) > 0) AS B WHERE folder NOT IN (SELECT path FROM entries WHERE type = 1)"
 
 #define CREATE_FOLDER_QUERY "INSERT INTO entries (path, type, properties, mtime, size, depth) VALUES (?, 1, 'null', ?, 0, ?)"
 
@@ -708,7 +711,7 @@ Entry *getEntry(Database* db, const std::string& path, Entry* entry) {
 
     if (entry == nullptr)
         throw InvalidArgsException("Entry pointer should not be null");
-    
+
     auto q = db->query("SELECT path, hash, type, properties, mtime, size, depth, "
         "AsGeoJSON(point_geom), AsGeoJSON(polygon_geom) FROM entries WHERE path = ? LIMIT 1");
 
@@ -716,10 +719,10 @@ Entry *getEntry(Database* db, const std::string& path, Entry* entry) {
 
     if (!q->fetch())
         return nullptr;
-  
+
     *entry = Entry(*q);
     return entry;
-    
+
 }
 
 std::vector<std::string> listFolderPaths(Database *db, const std::string& path) {
@@ -730,7 +733,7 @@ std::vector<std::string> listFolderPaths(Database *db, const std::string& path) 
 
     q->bind(1, path + "/%");
     q->bind(2, path);
-    
+
     while (q->fetch()) {
 
         const auto p = q->getText(0);
@@ -743,7 +746,7 @@ std::vector<std::string> listFolderPaths(Database *db, const std::string& path) 
 }
 
 void replacePath(Database* db, const std::string& source, const std::string& dest) {
-    
+
     LOGD << "Replacing '" << source << "' to '" << dest << "'";
 
     const auto depth = io::Path(dest).depth();
@@ -775,11 +778,11 @@ void moveEntry(Database* db, const std::string& source, const std::string& dest)
     Entry sourceEntry, destEntry;
     bool sourceExists = getEntry(db, source, &sourceEntry) != nullptr;
     bool destExists = getEntry(db, dest, &destEntry) != nullptr;
-    
+
     // Ensure entry consistency: cannot move file on folder and vice-versa
     if (!sourceExists)
         throw InvalidArgsException("source path not found");
-    
+
     // If dest exists
     if (destExists) {
 
@@ -796,17 +799,17 @@ void moveEntry(Database* db, const std::string& source, const std::string& dest)
             throw InvalidArgsException("Cannot move a file on a directory");
     }
 
-    const fs::path directory = rootDirectory(db);
+    const fs::path directory = db->rootDirectory();
 
     db->exec("BEGIN EXCLUSIVE TRANSACTION");
 
     // If we are moving a file
     if (sourceEntry.type != Directory) {
-        
+
         if (destExists) deleteEntry(db, dest);
-        
+
         replacePath(db, source, dest);
-        
+
     } else {
 
         const auto paths = listFolderPaths(db, source);
@@ -817,12 +820,12 @@ void moveEntry(Database* db, const std::string& source, const std::string& dest)
 
             deleteEntry(db, newPath);
             replacePath(db, path, newPath);
-            
-        } 
 
-        createMissingFolders(db);        
+        }
 
-    }  
+        createMissingFolders(db);
+
+    }
 
     db->exec("COMMIT");
 

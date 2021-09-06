@@ -120,7 +120,7 @@ namespace ddb {
 		if (format != "json" && format != "text")
 			throw InvalidArgsException("Invalid format " + format);
 
-		const fs::path directory = rootDirectory(db);
+        const fs::path directory = db->rootDirectory();
 
 		LOGD << "Root: " << directory;
 		LOGD << "Max depth: " << maxRecursionDepth;

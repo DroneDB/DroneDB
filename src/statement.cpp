@@ -126,3 +126,7 @@ void Statement::execute() {
     fetch();
     reset();
 }
+
+std::string Statement::getQuery() const{
+    return query;
+}

@@ -17,7 +17,7 @@ namespace ddb
 	void statusIndex(Database* db, const FileStatusCallback& cb)
 	{
 
-		const fs::path directory = rootDirectory(db);
+        const fs::path directory = db->rootDirectory();
 
 		auto q = db->query("SELECT path,mtime,hash FROM entries");
 

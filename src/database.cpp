@@ -39,6 +39,9 @@ const char *entriesTableDdl = R"<<<(
   );
   SELECT AddGeometryColumn("entries", "point_geom", 4326, "POINTZ", "XYZ");
   SELECT AddGeometryColumn("entries", "polygon_geom", 4326, "POLYGONZ", "XYZ");
+
+  CREATE INDEX IF NOT EXISTS ix_entries_type
+  ON entries (type);
 )<<<";
 
 const char *passwordsTableDdl = R"<<<(
@@ -57,6 +60,31 @@ const char *attributesTableDdl = R"<<<(
       tvalue TEXT,
       bvalue BLOB
   );
+)<<<";
+
+const char *entriesMetaTableDdl = R"<<<(
+  CREATE TABLE IF NOT EXISTS entries_meta (
+      id TEXT PRIMARY KEY,
+      path TEXT NOT NULL,
+      key TEXT NOT NULL,
+      data TEXT NOT NULL,
+      mtime INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS ix_entries_meta_path
+  ON entries_meta (path);
+  CREATE INDEX IF NOT EXISTS ix_entries_meta_key
+  ON entries_meta (key);
+
+CREATE TRIGGER tg_entries_meta_autouuid
+AFTER INSERT ON entries_meta
+FOR EACH ROW
+WHEN (NEW.id IS NULL)
+BEGIN
+   UPDATE entries_meta SET id = (select lower(hex( randomblob(4)) || '-' || hex( randomblob(2))
+             || '-' || '4' || substr( hex( randomblob(2)), 2) || '-'
+             || substr('AB89', 1 + (abs(random()) % 4) , 1)  ||
+             substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))) ) WHERE rowid = NEW.rowid;
+END;
 )<<<";
 
 Database &Database::createTables() {
@@ -90,6 +118,12 @@ DDB_DLL void Database::ensureSchemaConsistency() {
         LOGD << "Attributes table does not exist, creating it";
         this->exec(attributesTableDdl);
         LOGD << "Attributes table created";
+    }
+
+    if (!this->tableExists("entries_meta")){
+        LOGD << "Entries meta table does not exist, creating it";
+        this->exec(entriesMetaTableDdl);
+        LOGD << "Entries meta table created";
     }
 
     // Migration from 0.9.11 to 0.9.12 (can be removed in the near future)
@@ -171,6 +205,10 @@ json Database::getAttributes() const {
     }
     
     return j;
+}
+
+fs::path Database::rootDirectory() const{
+   return fs::path(this->getOpenFile()).parent_path().parent_path();
 }
 
 void Database::setBoolAttribute(const std::string &name, bool value) {

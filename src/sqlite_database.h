@@ -31,7 +31,7 @@ class SqliteDatabase {
     DDB_DLL SqliteDatabase &reopen();
     DDB_DLL SqliteDatabase &exec(const std::string &sql);
     DDB_DLL bool tableExists(const std::string &table);
-    DDB_DLL std::string getOpenFile();
+    DDB_DLL std::string getOpenFile() const;
     DDB_DLL int changes();
     DDB_DLL void setJournalMode(const std::string &mode);
     DDB_DLL void setWritableSchema(bool enabled);

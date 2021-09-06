@@ -17,7 +17,6 @@ typedef std::function<bool(const Entry &e, bool updated)> AddCallback;
 typedef std::function<void(const std::string& path)> RemoveCallback;
 
 DDB_DLL std::unique_ptr<Database> open(const std::string &directory, bool traverseUp);
-DDB_DLL fs::path rootDirectory(Database *db);
 DDB_DLL std::vector<fs::path> getIndexPathList(const fs::path& rootDirectory, const std::vector<std::string> &paths, bool includeDirs);
 DDB_DLL std::vector<fs::path> getPathList(const std::vector<std::string> &paths, bool includeDirs, int maxDepth);
 DDB_DLL std::vector<std::string> expandPathList(const std::vector<std::string> &paths, bool recursive, int maxRecursionDepth);
