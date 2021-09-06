@@ -85,6 +85,8 @@ std::vector<fs::path> getIndexPathList(const fs::path &rootDirectory,
     io::Path rootDir = rootDirectory;
 
     for (fs::path p : paths) {
+        p = fs::absolute(p);
+
         // fs::directory_options::skip_permission_denied
         if (p.filename() == DDB_FOLDER) continue;
 
