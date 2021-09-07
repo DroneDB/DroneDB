@@ -1,28 +1,27 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
-#include <sstream>
-#include <cstdlib>
-#include <gdal_priv.h>
-#include <gdal_utils.h>
-
 #include "thumbs.h"
 
 #include <coordstransformer.h>
 #include <epttiler.h>
+#include <gdal_priv.h>
+#include <gdal_utils.h>
 #include <pointcloud.h>
 #include <tiler.h>
 
 #include <Options.hpp>
+#include <cstdlib>
 #include <filters/ColorinterpFilter.hpp>
 #include <io/EptReader.hpp>
+#include <sstream>
 
+#include "dbops.h"
 #include "exceptions.h"
 #include "hash.h"
-#include "utils.h"
-#include "userprofile.h"
-#include "dbops.h"
 #include "mio.h"
+#include "userprofile.h"
+#include "utils.h"
 
 namespace ddb{
 
@@ -161,28 +160,48 @@ void drawCircle(uint8_t *buffer, uint8_t *alpha, int px, int py,
 }
 
 void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
-                        const fs::path &outImagePath) {
-
+                             const fs::path &outImagePath) {
     LOGD << "Generating point cloud thumb";
 
     try {
-
         PointCloudInfo eptInfo;
-        
+
         // Open EPT
         int span;
-        if (!getEptInfo(eptPath.string(), eptInfo, 3857, &span)){
+        if (!getEptInfo(eptPath.string(), eptInfo, 3857, &span)) {
             throw InvalidArgsException("Cannot get EPT info for " +
-                                    eptPath.string());
+                                       eptPath.string());
         }
 
-        const auto oMinX = eptInfo.polyBounds.getPoint(0).y;
-        const auto oMaxX = eptInfo.polyBounds.getPoint(2).y;
-        const auto oMaxY = eptInfo.polyBounds.getPoint(2).x;
-        const auto oMinY = eptInfo.polyBounds.getPoint(0).x;
+        LOGD << "Bounds: " << eptInfo.bounds.size();
+        LOGD << "PolyBounds: " << eptInfo.polyBounds.size();
+        LOGD << "WktProjection: " << eptInfo.wktProjection;
 
-        LOGD << "Bounds (output SRS): (" << oMinX << "; " << oMinY << ") - ("
-            << oMaxX << "; " << oMaxY << ")";
+        double oMinX;
+        double oMaxX;
+        double oMaxY;
+        double oMinY;
+
+        const bool hasSpatialSystem = !eptInfo.wktProjection.empty();
+
+        if (!eptInfo.polyBounds.empty()) {
+            oMinX = eptInfo.polyBounds.getPoint(0).y;
+            oMaxX = eptInfo.polyBounds.getPoint(2).y;
+            oMaxY = eptInfo.polyBounds.getPoint(2).x;
+            oMinY = eptInfo.polyBounds.getPoint(0).x;
+
+            LOGD << "Bounds (output SRS): (" << oMinX << "; " << oMinY
+                 << ") - (" << oMaxX << "; " << oMaxY << ")";
+        } else {
+            oMinX = eptInfo.bounds[0];
+            oMaxX = eptInfo.bounds[3];
+
+            oMaxY = eptInfo.bounds[4];
+            oMinY = eptInfo.bounds[1];
+
+            LOGD << "Bounds (output ?): (" << oMinX << "; " << oMinY << ") - ("
+                 << oMaxX << "; " << oMaxY << ")";
+        }
 
         const auto tileSize = thumbSize;
 
@@ -198,9 +217,10 @@ void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
         const auto hasColors = std::find(eptInfo.dimensions.begin(), eptInfo.dimensions.end(), "Red") != eptInfo.dimensions.end() &&
                         std::find(eptInfo.dimensions.begin(), eptInfo.dimensions.end(), "Green") != eptInfo.dimensions.end() &&
                         std::find(eptInfo.dimensions.begin(), eptInfo.dimensions.end(), "Blue") != eptInfo.dimensions.end();
+
         LOGD << "Has colors: " << (hasColors ? "true" : "false");
 
-    #ifdef _WIN32
+#ifdef _WIN32
         const fs::path caBundlePath = io::getDataPath("curl-ca-bundle.crt");
         if (!caBundlePath.empty()) {
             LOGD << "ARBITRER CA Bundle: " << caBundlePath.string();
@@ -210,7 +230,7 @@ void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
                 LOGD << "Cannot set ARBITER_CA_INFO";
             }
         }
-    #endif
+#endif
 
         const auto tz = tMinZ;
 
@@ -220,9 +240,8 @@ void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
         eptOpts.add("filename", ("." / eptPath).string());
 
         std::stringstream ss;
-        ss << std::setprecision(14) << "([" << oMinX << "," << oMinY
-        << "], "
-        << "[" << oMaxX << "," << oMaxY << "])";
+        ss << std::setprecision(14) << "([" << oMinX << "," << oMinY << "], "
+           << "[" << oMaxX << "," << oMaxY << "])";
         eptOpts.add("bounds", ss.str());
         LOGD << "EPT bounds: " << ss.str();
 
@@ -243,7 +262,7 @@ void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
 
             // Add ramp filter
             LOGD << "Adding ramp filter (" << eptInfo.bounds[2] << ", "
-                << eptInfo.bounds[5] << ")";
+                 << eptInfo.bounds[5] << ")";
 
             pdal::Options cfOpts;
             cfOpts.add("ramp", "pestel_shades");
@@ -269,6 +288,14 @@ void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
         }
 
         pdal::PointViewPtr point_view = *point_view_set.begin();
+
+        LOGD << "Fetched " << point_view->size() << " points";
+
+        if (point_view->empty()) {
+            throw GDALException(
+                "No points fetched from cloud, check zoom level");
+        }
+
         pdal::Dimension::IdList dims = point_view->dims();
 
         const auto wSize = tileSize * tileSize;
@@ -286,41 +313,69 @@ void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
             zBuffer.get()[i] = -99999.0;
         }
 
-        LOGD << "Fetched " << point_view->size() << " points";
-
         const double tileScaleW = tileSize / (oMaxX - oMinX);
         const double tileScaleH = tileSize / (oMaxY - oMinY);
 
         LOGD << "TileScaleW = " << tileScaleW;
         LOGD << "TileScaleH = " << tileScaleH;
-        LOGD << "oMinX = " << oMinX;
-        LOGD << "oMinY = " << oMinY;
 
-        CoordsTransformer ict(eptInfo.wktProjection, 3857);
+        if (hasSpatialSystem) {
+            CoordsTransformer ict(eptInfo.wktProjection, 3857);
 
-        for (pdal::PointId idx = 0; idx < point_view->size(); ++idx) {
-            auto p = point_view->point(idx);
-            double x = p.getFieldAs<double>(pdal::Dimension::Id::X);
-            double y = p.getFieldAs<double>(pdal::Dimension::Id::Y);
-            double z = p.getFieldAs<double>(pdal::Dimension::Id::Z);
+            for (pdal::PointId idx = 0; idx < point_view->size(); ++idx) {
+                auto p = point_view->point(idx);
+                double x = p.getFieldAs<double>(pdal::Dimension::Id::X);
+                double y = p.getFieldAs<double>(pdal::Dimension::Id::Y);
+                double z = p.getFieldAs<double>(pdal::Dimension::Id::Z);
 
-            ict.transform(&x, &y);
+                ict.transform(&x, &y);
 
-            // Map projected coordinates to local PNG coordinates
-            int px = std::round((x - oMinX) * tileScaleW);
-            int py = tileSize - 1 - std::round((y - oMinY) * tileScaleH);
-          
-            if (px >= 0 && px < tileSize && py >= 0 && py < tileSize) {
+                // Map projected coordinates to local PNG coordinates
+                int px = std::round((x - oMinX) * tileScaleW);
+                int py = tileSize - 1 - std::round((y - oMinY) * tileScaleH);
 
-                // Within bounds
-                const auto red = p.getFieldAs<uint8_t>(pdal::Dimension::Id::Red);
-                const auto green = p.getFieldAs<uint8_t>(pdal::Dimension::Id::Green);
-                const auto blue = p.getFieldAs<uint8_t>(pdal::Dimension::Id::Blue);
+                if (px >= 0 && px < tileSize && py >= 0 && py < tileSize) {
+                    // Within bounds
+                    const auto red =
+                        p.getFieldAs<uint8_t>(pdal::Dimension::Id::Red);
+                    const auto green =
+                        p.getFieldAs<uint8_t>(pdal::Dimension::Id::Green);
+                    const auto blue =
+                        p.getFieldAs<uint8_t>(pdal::Dimension::Id::Blue);
 
-                if (zBuffer.get()[py * tileSize + px] < z) {
-                    zBuffer.get()[py * tileSize + px] = z;
-                    drawCircle(buffer.get(), alphaBuffer.get(), px, py, 2, red,
-                            green, blue, tileSize, wSize);
+                    if (zBuffer.get()[py * tileSize + px] < z) {
+                        zBuffer.get()[py * tileSize + px] = z;
+                        drawCircle(buffer.get(), alphaBuffer.get(), px, py, 2,
+                                   red, green, blue, tileSize, wSize);
+                    }
+                }
+            }
+
+        } else {
+            for (pdal::PointId idx = 0; idx < point_view->size(); ++idx) {
+                auto p = point_view->point(idx);
+                double x = p.getFieldAs<double>(pdal::Dimension::Id::X);
+                double y = p.getFieldAs<double>(pdal::Dimension::Id::Y);
+                double z = p.getFieldAs<double>(pdal::Dimension::Id::Z);
+
+                // Map projected coordinates to local PNG coordinates
+                int px = std::round((x - oMinX) * tileScaleW);
+                int py = tileSize - 1 - std::round((y - oMinY) * tileScaleH);
+
+                if (px >= 0 && px < tileSize && py >= 0 && py < tileSize) {
+                    // Within bounds
+                    const auto red =
+                        p.getFieldAs<uint8_t>(pdal::Dimension::Id::Red);
+                    const auto green =
+                        p.getFieldAs<uint8_t>(pdal::Dimension::Id::Green);
+                    const auto blue =
+                        p.getFieldAs<uint8_t>(pdal::Dimension::Id::Blue);
+
+                    if (zBuffer.get()[py * tileSize + px] < z) {
+                        zBuffer.get()[py * tileSize + px] = z;
+                        drawCircle(buffer.get(), alphaBuffer.get(), px, py, 2,
+                                   red, green, blue, tileSize, wSize);
+                    }
                 }
             }
         }
@@ -367,7 +422,6 @@ void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
     } catch(const std::string& e) {
         LOGD << e;
     }
-
 }
 
 // imagePath can be either absolute or relative and it's up to the user to
