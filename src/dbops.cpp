@@ -63,7 +63,7 @@ std::unique_ptr<Database> open(const std::string &directory,
 // or an exception is thrown
 // If includeDirs is true and the list includes paths to directories that are in
 // paths eg. if path/to/file is in paths, both "path/" and "path/to" are
-// includes in the result.
+// included in the result.
 // ".ddb" files/dirs are always ignored and skipped.
 // If a directory is in the input paths, they are included regardless of
 // includeDirs
@@ -85,8 +85,6 @@ std::vector<fs::path> getIndexPathList(const fs::path &rootDirectory,
     io::Path rootDir = rootDirectory;
 
     for (fs::path p : paths) {
-        p = fs::absolute(p);
-
         // fs::directory_options::skip_permission_denied
         if (p.filename() == DDB_FOLDER) continue;
 
@@ -208,13 +206,19 @@ std::vector<fs::path> getPathList(const std::vector<std::string> &paths,
 
 std::vector<std::string> expandPathList(const std::vector<std::string> &paths,
                                         bool recursive, int maxRecursionDepth) {
-    if (!recursive) return paths;
-
     std::vector<std::string> result;
-    auto pl = getPathList(paths, true, maxRecursionDepth);
-    for (auto &p : pl) {
-        result.push_back(p.string());
+
+    if (!recursive){
+        for (auto &p : paths){
+            result.push_back(fs::absolute(p).string());
+        }
+    }else{
+        auto pl = getPathList(paths, true, maxRecursionDepth);
+        for (auto &p : pl) {
+            result.push_back(fs::absolute(p).string());
+        }
     }
+
     return result;
 }
 
