@@ -19,6 +19,7 @@ class MetaManager {
     json metaStmtToJson(Statement *q) const;
     json getMetaJson(const std::string &q) const;
     std::string validateData(const std::string &data) const;
+    bool isList(const std::string &key) const;
 public:
     MetaManager(ddb::Database* db) : db(db) {}
 
@@ -27,7 +28,8 @@ public:
     DDB_DLL json set(const std::string& key, const std::string &data, const std::string &path = "");
     DDB_DLL json remove(const std::string& key);
     DDB_DLL json get(const std::string& key, const std::string &path = "");
-
+    DDB_DLL json unset(const std::string& key, const std::string &path = "");
+    DDB_DLL json list(const std::string &path = "") const;
 };
 
 }

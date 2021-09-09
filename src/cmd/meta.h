@@ -5,12 +5,16 @@
 #ifndef META_CMD_H
 #define META_CMD_H
 
+#include <iostream>
 #include "command.h"
+#include "json.h"
 
 namespace cmd {
 
 class Meta : public Command {
-  public:
+    void output(std::ostream &out, const json &j, const std::string &format);
+    void printJsonToText(std::ostream &out, const json &j);
+public:
     Meta() {}
 
     virtual void run(cxxopts::ParseResult &opts) override;

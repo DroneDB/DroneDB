@@ -63,6 +63,10 @@ std::string MetaManager::validateData(const std::string &data) const{
     }
 }
 
+bool MetaManager::isList(const std::string &key) const{
+    return key.length() > 0 && key[key.length() - 1] == 's';
+}
+
 json MetaManager::add(const std::string &key, const std::string &data, const std::string &path){
     std::string ePath = entryPath(path);
     std::string eKey = getKey(key, true);
@@ -125,20 +129,14 @@ json MetaManager::remove(const std::string &id){
     auto q = db->query("DELETE FROM entries_meta WHERE id = ?");
     q->bind(1, id);
     q->execute();
-    if (db->changes() > 0){
-        json j;
-        j["id"] = id;
-        return j;
-    }else{
-        return json::object();
-    }
+    json j;
+    j["removed"] = db->changes();
+    return j;
 }
 
 json MetaManager::get(const std::string &key, const std::string &path){
     if (key.empty()) throw InvalidArgsException("Invalid empty metadata key");
     std::string ePath = entryPath(path);
-    bool isList = key.length() > 0 && key[key.length() - 1] == 's';
-
     json result = json::array();
 
     auto q = db->query("SELECT id, data, mtime FROM entries_meta WHERE key = ? AND path = ?");
@@ -149,11 +147,43 @@ json MetaManager::get(const std::string &key, const std::string &path){
         result.push_back(metaStmtToJson(q.get()));
     }
 
-    if (isList){
+    if (isList(key)){
         return result;
     }else{
         return result[0].empty() ? json::object() : result[0];
     }
+}
+
+json MetaManager::unset(const std::string &key, const std::string &path){
+    if (key.empty()) throw InvalidArgsException("Invalid empty metadata key");
+    std::string ePath = entryPath(path);
+    auto q = db->query("DELETE FROM entries_meta WHERE key = ? AND path = ?");
+    q->bind(1, key);
+    q->bind(2, ePath);
+    q->execute();
+
+    json j;
+    j["deleted"] = db->changes();
+    return j;
+}
+
+json MetaManager::list(const std::string &path) const{
+    std::string sql;
+    std::string ePath = entryPath(path);
+
+    if (ePath.empty()) sql = "SELECT key, path, COUNT(id) as 'count' FROM entries_meta GROUP BY path, key";
+    else sql = "SELECT key, path, COUNT(id) as 'count' FROM entries_meta WHERE path = ? GROUP BY path, key";
+
+    auto q = db->query(sql);
+    if (!ePath.empty()) q->bind(1, ePath);
+
+    json result = json::array();
+    while(q->fetch()){
+        result.push_back(json::object({{"key", q->getText(0)},
+                                       {"path", q->getText(1)},
+                                       {"count", q->getInt(2)}}));
+    }
+    return result;
 }
 	
 
