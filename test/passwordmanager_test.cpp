@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-#include <database.h>
+#include <dbops.h>
 #include <passwordmanager.h>
 
 
@@ -27,11 +27,8 @@ namespace {
         const auto dbPath = testFolder / ".ddb" / "dbase.sqlite";
         EXPECT_TRUE(fs::exists(dbPath));
 
-        Database db;
-
-        db.open(dbPath.string());
-
-        PasswordManager manager(&db);
+        auto db = ddb::open(testFolder, false);
+        PasswordManager manager(db.get());
 
         EXPECT_TRUE(manager.verify(""));
 

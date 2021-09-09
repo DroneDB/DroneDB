@@ -23,6 +23,7 @@ public:
 
 
     DDB_DLL json add(const std::string& key, const std::string &data, const std::string &path = "");
+    DDB_DLL json set(const std::string& key, const std::string &data, const std::string &path = "");
 };
 
 }

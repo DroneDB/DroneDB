@@ -20,8 +20,8 @@ std::string MetaManager::entryPath(const std::string &path) const{
 
 std::string MetaManager::getKey(const std::string &key, bool isList) const{
     if (key.empty()) throw InvalidArgsException("Invalid empty metadata key");
-    if (isList && key[key.length() - 1] != 's') return key + "s";
-    else if (!isList && key[key.length() - 1] == 's') return key.substr(0, key.length() - 1);
+    if (isList && key[key.length() - 1] != 's') throw InvalidArgsException("Invalid metadata key (must be plural, for example: " + key + "s)");
+    else if (!isList && key[key.length() - 1] == 's') throw InvalidArgsException("Invalid metadata key (must be singular, for example: " + key.substr(0, key.length() - 1) + ")");
     else return key;
 }
 
@@ -73,6 +73,43 @@ json MetaManager::add(const std::string &key, const std::string &data, const std
     q->execute();
 
     json result = getMetaJson("SELECT id, data, mtime FROM entries_meta WHERE rowid = last_insert_rowid()");
+
+    db->setLastUpdate();
+
+    return result;
+}
+
+json MetaManager::set(const std::string &key, const std::string &data, const std::string &path){
+    std::string ePath = entryPath(path);
+    std::string eKey = getKey(key, false);
+    std::string eData = validateData(data);
+    long long eMtime = utils::currentUnixTimestamp();
+    json result;
+
+    auto q = db->query("SELECT id FROM entries_meta WHERE path = ? and key = ?");
+    q->bind(1, ePath);
+    q->bind(2, eKey);
+    if (q->fetch()){
+        // Entry exists, update
+        std::string id = q->getText(0);
+        auto uq = db->query("UPDATE entries_meta SET data = ?, mtime = ? WHERE id = ?");
+        uq->bind(1, eData);
+        uq->bind(2, eMtime);
+        uq->bind(3, id);
+        uq->execute();
+        result["id"] = id;
+        result["data"] = eData;
+        result["mtime"] = eMtime;
+    }else{
+        // Insert
+        auto iq = db->query("INSERT OR REPLACE INTO entries_meta (path, key, data, mtime) VALUES (?, ?, ?, ?)");
+        iq->bind(1, ePath);
+        iq->bind(2, eKey);
+        iq->bind(3, eData);
+        iq->bind(4, eMtime);
+        iq->execute();
+        result = getMetaJson("SELECT id, data, mtime FROM entries_meta WHERE rowid = last_insert_rowid()");
+    }
 
     db->setLastUpdate();
 
