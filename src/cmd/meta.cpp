@@ -44,7 +44,7 @@ void Meta::run(cxxopts::ParseResult &opts) {
     const auto db = ddb::open(ddbPath, true);
     auto metaManager = ddb::MetaManager(db.get());
 
-    if (command == "add"){
+    if (command == "add" || command == "a"){
         // Little help for singular keys (annotation --> annotations)
         // This should not be in the API, it's just a convenience
         if (key.length() > 0 && key[key.length() - 1] != 's') {
@@ -52,8 +52,12 @@ void Meta::run(cxxopts::ParseResult &opts) {
             std::cerr << "Note: saving metadata as \"" << key << "\" (plural)" << std::endl;
         }
         std::cout << metaManager.add(key, data, path) << std::endl;
-    }else if (command == "set"){
+    }else if (command == "set" || command == "s"){
         std::cout << metaManager.set(key, data, path) << std::endl;
+    }else if (command == "rm" || command == "r" || command == "remove"){
+        std::cout << metaManager.remove(key) << std::endl;
+    }else if (command == "g" || command == "get"){
+        std::cout << metaManager.get(key, path) << std::endl;
     }
 }
 

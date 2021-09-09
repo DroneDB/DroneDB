@@ -27,19 +27,23 @@ std::string MetaManager::getKey(const std::string &key, bool isList) const{
 
 json MetaManager::getMetaJson(Statement *q) const{
     if (q->fetch()){
-        json j;
-        j["id"] = q->getText(0);
-
-        try{
-            j["data"] = json::parse(q->getText(1));
-        }catch (const json::parse_error &e) {
-            LOGD << "Warning, corrupted metadata: " << q->getText(1);
-            j["data"] = "";
-        }
-
-        j["mtime"] = q->getInt64(2);
-        return j;
+        return metaStmtToJson(q);
     }else throw DBException("Cannot fetch meta with query: " + q->getQuery());
+}
+
+json MetaManager::metaStmtToJson(Statement *q) const{
+    json j;
+    j["id"] = q->getText(0);
+
+    try{
+        j["data"] = json::parse(q->getText(1));
+    }catch (const json::parse_error &e) {
+        LOGD << "Warning, corrupted metadata: " << q->getText(1);
+        j["data"] = "";
+    }
+
+    j["mtime"] = q->getInt64(2);
+    return j;
 }
 
 json MetaManager::getMetaJson(const std::string &q) const{
@@ -102,7 +106,7 @@ json MetaManager::set(const std::string &key, const std::string &data, const std
         result["mtime"] = eMtime;
     }else{
         // Insert
-        auto iq = db->query("INSERT OR REPLACE INTO entries_meta (path, key, data, mtime) VALUES (?, ?, ?, ?)");
+        auto iq = db->query("INSERT INTO entries_meta (path, key, data, mtime) VALUES (?, ?, ?, ?)");
         iq->bind(1, ePath);
         iq->bind(2, eKey);
         iq->bind(3, eData);
@@ -116,6 +120,41 @@ json MetaManager::set(const std::string &key, const std::string &data, const std
     return result;
 }
 
+json MetaManager::remove(const std::string &id){
+    if (id.empty()) throw InvalidArgsException("Invalid metadata id empty");
+    auto q = db->query("DELETE FROM entries_meta WHERE id = ?");
+    q->bind(1, id);
+    q->execute();
+    if (db->changes() > 0){
+        json j;
+        j["id"] = id;
+        return j;
+    }else{
+        return json::object();
+    }
+}
+
+json MetaManager::get(const std::string &key, const std::string &path){
+    if (key.empty()) throw InvalidArgsException("Invalid empty metadata key");
+    std::string ePath = entryPath(path);
+    bool isList = key.length() > 0 && key[key.length() - 1] == 's';
+
+    json result = json::array();
+
+    auto q = db->query("SELECT id, data, mtime FROM entries_meta WHERE key = ? AND path = ?");
+    q->bind(1, key);
+    q->bind(2, ePath);
+
+    while (q->fetch()){
+        result.push_back(metaStmtToJson(q.get()));
+    }
+
+    if (isList){
+        return result;
+    }else{
+        return result[0].empty() ? json::object() : result[0];
+    }
+}
 	
 
 }

@@ -27,7 +27,7 @@ namespace {
         const auto dbPath = testFolder / ".ddb" / "dbase.sqlite";
         EXPECT_TRUE(fs::exists(dbPath));
 
-        auto db = ddb::open(testFolder, false);
+        auto db = ddb::open(testFolder.string(), false);
         PasswordManager manager(db.get());
 
         EXPECT_TRUE(manager.verify(""));
