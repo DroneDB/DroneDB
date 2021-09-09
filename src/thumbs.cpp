@@ -159,8 +159,69 @@ void drawCircle(uint8_t *buffer, uint8_t *alpha, int px, int py,
     }
 }
 
+void addColorFilter(PointCloudInfo eptInfo, const bool hasColors, pdal::EptReader *eptReader, pdal::Stage*& main) {
+    std::unique_ptr<pdal::ColorinterpFilter> colorFilter;
+    if (!hasColors) {
+        colorFilter.reset(new pdal::ColorinterpFilter());
+
+        // Add ramp filter
+        LOGD << "Adding ramp filter (" << eptInfo.bounds[2] << ", "
+                 << eptInfo.bounds[5] << ")";
+
+        pdal::Options cfOpts;
+        cfOpts.add("ramp", "pestel_shades");
+        cfOpts.add("minimum", eptInfo.bounds[2]);
+        cfOpts.add("maximum", eptInfo.bounds[5]);
+        colorFilter->setOptions(cfOpts);
+        colorFilter->setInput(*eptReader);
+        main = colorFilter.get();
+    }
+}
+
+void RenderImage(const fs::path& outImagePath, const int tileSize, const int nBands, uint8_t* buffer, uint8_t* alphaBuffer) {
+
+    GDALDriverH memDrv = GDALGetDriverByName("MEM");
+    if (memDrv == nullptr) throw GDALException("Cannot create MEM driver");
+
+    GDALDriverH pngDrv = GDALGetDriverByName("PNG");
+    if (pngDrv == nullptr) throw GDALException("Cannot create PNG driver");
+
+    // Need to create in-memory dataset
+    // (PNG driver does not have Create() method)
+    const GDALDatasetH dsTile = GDALCreate(memDrv, "", tileSize, tileSize,
+                                           nBands + 1, GDT_Byte, nullptr);
+    if (dsTile == nullptr) throw GDALException("Cannot create dsTile");
+
+    if (GDALDatasetRasterIO(dsTile, GF_Write, 0, 0, tileSize, tileSize,
+                            buffer, tileSize, tileSize, GDT_Byte, nBands,
+                            nullptr, 0, 0, 0) != CE_None) {
+        throw GDALException("Cannot write tile data");
+    }
+
+    const GDALRasterBandH tileAlphaBand = GDALGetRasterBand(dsTile, nBands + 1);
+    GDALSetRasterColorInterpretation(tileAlphaBand, GCI_AlphaBand);
+
+    if (GDALRasterIO(tileAlphaBand, GF_Write, 0, 0, tileSize, tileSize,
+                     alphaBuffer, tileSize, tileSize, GDT_Byte, 0,
+                     0) != CE_None) {
+        throw GDALException("Cannot write tile alpha data");
+    }
+
+    const GDALDatasetH outDs = GDALCreateCopy(pngDrv, outImagePath.string().c_str(), dsTile,
+                                              FALSE, nullptr, nullptr, nullptr);
+    if (outDs == nullptr)
+        throw GDALException("Cannot create output dataset " +
+                            outImagePath.string());
+
+    GDALClose(outDs);
+    GDALClose(dsTile);
+
+    LOGD << "Done drawing";
+}
+
 void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
                              const fs::path &outImagePath) {
+
     LOGD << "Generating point cloud thumb";
 
     try {
@@ -173,6 +234,13 @@ void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
                                        eptPath.string());
         }
 
+        const auto tileSize = thumbSize;
+
+        LOGD << "TileSize = " << tileSize;
+
+        GlobalMercator mercator(tileSize);
+
+
         LOGD << "Bounds: " << eptInfo.bounds.size();
         LOGD << "PolyBounds: " << eptInfo.polyBounds.size();
         LOGD << "WktProjection: " << eptInfo.wktProjection;
@@ -182,9 +250,9 @@ void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
         double oMaxY;
         double oMinY;
 
-        const bool hasSpatialSystem = !eptInfo.wktProjection.empty();
+        bool hasSpatialSystem = !eptInfo.wktProjection.empty();
 
-        if (!eptInfo.polyBounds.empty()) {
+        if (hasSpatialSystem) {
             oMinX = eptInfo.polyBounds.getPoint(0).y;
             oMaxX = eptInfo.polyBounds.getPoint(2).y;
             oMaxY = eptInfo.polyBounds.getPoint(2).x;
@@ -199,18 +267,47 @@ void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
             oMaxY = eptInfo.bounds[4];
             oMinY = eptInfo.bounds[1];
 
-            LOGD << "Bounds (output ?): (" << oMinX << "; " << oMinY << ") - ("
+            LOGD << "Bounds: (" << oMinX << "; " << oMinY << ") - ("
                  << oMaxX << "; " << oMaxY << ")";
         }
 
-        const auto tileSize = thumbSize;
 
-        LOGD << "TileSize = " << tileSize;
+        auto length =
+            std::min(std::abs(oMaxX - oMinX), std::abs(oMaxY - oMinY));
 
-        GlobalMercator mercator(tileSize);
+        LOGD << "Length: " << length;
+
+        if (length == 0) {
+
+            LOGD << "Cannot properly calculate length, trying with bounds "
+                    "instead";
+
+            oMinX = eptInfo.bounds[0];
+            oMaxX = eptInfo.bounds[3];
+
+            oMaxY = eptInfo.bounds[4];
+            oMinY = eptInfo.bounds[1];
+
+            LOGD << "Bounds: (" << oMinX << "; " << oMinY << ") - (" << oMaxX
+                 << "; " << oMaxY << ")";
+
+            length = std::min(std::abs(oMaxX - oMinX), std::abs(oMaxY - oMinY));
+
+            LOGD << "New Length: " << length;
+
+            if (length < 0) {
+                throw GDALException(
+                    "Cannot calculate length: spatial system not supported");
+            }
+
+            LOGD << "Length OK, proceeding without spatial system";
+
+            hasSpatialSystem = false;
+        }
+
 
         // Max/min zoom level
-        const auto tMinZ = mercator.zoomForLength(std::min(oMaxX - oMinX, oMaxY - oMinY));
+        const auto tMinZ = mercator.zoomForLength(length);
 
         LOGD << "MinZ: " << tMinZ;
 
@@ -234,21 +331,14 @@ void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
 
         const auto tz = tMinZ;
 
-        // -----------------------------------------------
-
         pdal::Options eptOpts;
         eptOpts.add("filename", ("." / eptPath).string());
 
-        std::stringstream ss;
-        ss << std::setprecision(14) << "([" << oMinX << "," << oMinY << "], "
-           << "[" << oMaxX << "," << oMaxY << "])";
-        eptOpts.add("bounds", ss.str());
-        LOGD << "EPT bounds: " << ss.str();
-
-        double resolution = mercator.resolution(tz - 2);
+        // We could reduce the resolution but this would leave empty gaps in the rasterized output
+        double resolution = tz < 0 ? 1 : mercator.resolution(tz);
         eptOpts.add("resolution", resolution);
         LOGD << "EPT resolution: " << resolution;
-
+        
         std::unique_ptr<pdal::EptReader> eptReader = std::make_unique<pdal::EptReader>();
         pdal::Stage *main = eptReader.get();
         eptReader->setOptions(eptOpts);
@@ -256,22 +346,7 @@ void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
 
         // -----------------------------------------------------------------
 
-        std::unique_ptr<pdal::ColorinterpFilter> colorFilter;
-        if (!hasColors) {
-            colorFilter.reset(new pdal::ColorinterpFilter());
-
-            // Add ramp filter
-            LOGD << "Adding ramp filter (" << eptInfo.bounds[2] << ", "
-                 << eptInfo.bounds[5] << ")";
-
-            pdal::Options cfOpts;
-            cfOpts.add("ramp", "pestel_shades");
-            cfOpts.add("minimum", eptInfo.bounds[2]);
-            cfOpts.add("maximum", eptInfo.bounds[5]);
-            colorFilter->setOptions(cfOpts);
-            colorFilter->setInput(*eptReader);
-            main = colorFilter.get();
-        }
+        addColorFilter(eptInfo, hasColors, eptReader.get(), main);
 
         LOGD << "Before prepare";
 
@@ -292,15 +367,14 @@ void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
         LOGD << "Fetched " << point_view->size() << " points";
 
         if (point_view->empty()) {
-            throw GDALException(
-                "No points fetched from cloud, check zoom level");
+            throw GDALException("No points fetched from cloud, check zoom level");
         }
 
         pdal::Dimension::IdList dims = point_view->dims();
 
         const auto wSize = tileSize * tileSize;
 
-        const int nBands = 3;
+        constexpr int nBands = 3;
         const int bufSize = GDALGetDataTypeSizeBytes(GDT_Byte) * wSize;
         std::unique_ptr<uint8_t> buffer(new uint8_t[bufSize * nBands]);
         std::unique_ptr<uint8_t> alphaBuffer(new uint8_t[bufSize]);
@@ -324,9 +398,9 @@ void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
 
             for (pdal::PointId idx = 0; idx < point_view->size(); ++idx) {
                 auto p = point_view->point(idx);
-                double x = p.getFieldAs<double>(pdal::Dimension::Id::X);
-                double y = p.getFieldAs<double>(pdal::Dimension::Id::Y);
-                double z = p.getFieldAs<double>(pdal::Dimension::Id::Z);
+                auto x = p.getFieldAs<double>(pdal::Dimension::Id::X);
+                auto y = p.getFieldAs<double>(pdal::Dimension::Id::Y);
+                auto z = p.getFieldAs<double>(pdal::Dimension::Id::Z);
 
                 ict.transform(&x, &y);
 
@@ -336,12 +410,9 @@ void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
 
                 if (px >= 0 && px < tileSize && py >= 0 && py < tileSize) {
                     // Within bounds
-                    const auto red =
-                        p.getFieldAs<uint8_t>(pdal::Dimension::Id::Red);
-                    const auto green =
-                        p.getFieldAs<uint8_t>(pdal::Dimension::Id::Green);
-                    const auto blue =
-                        p.getFieldAs<uint8_t>(pdal::Dimension::Id::Blue);
+                    const auto red = p.getFieldAs<uint8_t>(pdal::Dimension::Id::Red);
+                    const auto green = p.getFieldAs<uint8_t>(pdal::Dimension::Id::Green);
+                    const auto blue = p.getFieldAs<uint8_t>(pdal::Dimension::Id::Blue);
 
                     if (zBuffer.get()[py * tileSize + px] < z) {
                         zBuffer.get()[py * tileSize + px] = z;
@@ -354,22 +425,20 @@ void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
         } else {
             for (pdal::PointId idx = 0; idx < point_view->size(); ++idx) {
                 auto p = point_view->point(idx);
-                double x = p.getFieldAs<double>(pdal::Dimension::Id::X);
-                double y = p.getFieldAs<double>(pdal::Dimension::Id::Y);
-                double z = p.getFieldAs<double>(pdal::Dimension::Id::Z);
+                auto x = p.getFieldAs<double>(pdal::Dimension::Id::X);
+                auto y = p.getFieldAs<double>(pdal::Dimension::Id::Y);
+                auto z = p.getFieldAs<double>(pdal::Dimension::Id::Z);
 
                 // Map projected coordinates to local PNG coordinates
                 int px = std::round((x - oMinX) * tileScaleW);
                 int py = tileSize - 1 - std::round((y - oMinY) * tileScaleH);
 
                 if (px >= 0 && px < tileSize && py >= 0 && py < tileSize) {
-                    // Within bounds
-                    const auto red =
-                        p.getFieldAs<uint8_t>(pdal::Dimension::Id::Red);
-                    const auto green =
-                        p.getFieldAs<uint8_t>(pdal::Dimension::Id::Green);
-                    const auto blue =
-                        p.getFieldAs<uint8_t>(pdal::Dimension::Id::Blue);
+
+                    // Within bounds (shift to uint8_t)
+                    const uint8_t red = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Red) >> 8;
+                    const uint8_t green = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Green) >> 8;
+                    const uint8_t blue = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Blue) >> 8;
 
                     if (zBuffer.get()[py * tileSize + px] < z) {
                         zBuffer.get()[py * tileSize + px] = z;
@@ -380,42 +449,7 @@ void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
             }
         }
 
-        LOGD << "Done drawing";
-
-        GDALDriverH memDrv = GDALGetDriverByName("MEM");
-        if (memDrv == nullptr) throw GDALException("Cannot create MEM driver");
-        GDALDriverH pngDrv = GDALGetDriverByName("PNG");
-        if (pngDrv == nullptr) throw GDALException("Cannot create PNG driver");
-
-        // Need to create in-memory dataset
-        // (PNG driver does not have Create() method)
-        const GDALDatasetH dsTile = GDALCreate(memDrv, "", tileSize, tileSize,
-                                            nBands + 1, GDT_Byte, nullptr);
-        if (dsTile == nullptr) throw GDALException("Cannot create dsTile");
-
-        if (GDALDatasetRasterIO(dsTile, GF_Write, 0, 0, tileSize, tileSize,
-                                buffer.get(), tileSize, tileSize, GDT_Byte, nBands,
-                                nullptr, 0, 0, 0) != CE_None) {
-            throw GDALException("Cannot write tile data");
-        }
-
-        const GDALRasterBandH tileAlphaBand = GDALGetRasterBand(dsTile, nBands + 1);
-        GDALSetRasterColorInterpretation(tileAlphaBand, GCI_AlphaBand);
-
-        if (GDALRasterIO(tileAlphaBand, GF_Write, 0, 0, tileSize, tileSize,
-                        alphaBuffer.get(), tileSize, tileSize, GDT_Byte, 0,
-                        0) != CE_None) {
-            throw GDALException("Cannot write tile alpha data");
-        }
-
-        const GDALDatasetH outDs = GDALCreateCopy(pngDrv, outImagePath.string().c_str(), dsTile,
-                                                FALSE, nullptr, nullptr, nullptr);
-        if (outDs == nullptr)
-            throw GDALException("Cannot create output dataset " +
-                                outImagePath.string());
-
-        GDALClose(outDs);
-        GDALClose(dsTile);        
+        RenderImage(outImagePath, tileSize, nBands, buffer.get(), alphaBuffer.get());        
 
     } catch(const std::exception& e) {
         LOGD << e.what();
