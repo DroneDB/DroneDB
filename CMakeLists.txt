@@ -84,7 +84,7 @@ if (WIN32)
 
     # Download GDAL/CURL/sqlite3/spatialite/PDAL and supporting libraries
     download_dependency("gdal_libs.zip" "https://github.com/DroneDB/ddb_data/releases/download/v0.9.2/release-1911-x64-gdal-3-0-4-mapserver-7-4-3-libs.zip")
-    download_dependency("gdal_bins.zip" "https://github.com/DroneDB/ddb_data/releases/download/v0.9.2/release-1911-x64-gdal-3-0-4-mapserver-7-4-3.zip")
+    download_dependency("gdal_bins.zip" "https://github.com/DroneDB/ddb_data/releases/download/v0.9.2/release-1911-x64-gdal-3-0-4-mapserver-7-4-3-sans-sqlite3.zip")
     download_dependency("laszip.zip" "https://github.com/DroneDB/ddb_data/releases/download/v0.9.2/laszip-3-4-3.zip")
     download_dependency("geotiff.zip" "https://github.com/DroneDB/ddb_data/releases/download/v0.9.2/release-1911-x64-gdal-3-0-4-mapserver-7-4-3-geotiff.zip")
     download_dependency("pdal.zip" "https://github.com/DroneDB/ddb_data/releases/download/v0.9.2/release-1911-x64-gdal-3-0-4-mapserver-7-4-3-pdal-2-3-0.zip")
