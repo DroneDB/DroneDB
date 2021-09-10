@@ -392,12 +392,10 @@ std::string sanitize_query_param(const std::string &str) {
     std::string res(str);
 
     // TAKES INTO ACCOUNT PATHS THAT CONTAINS EVERY SORT OF STUFF
-    utils::string_replace(res, "/", "//");
-    utils::string_replace(res, "%", "/%");
-    utils::string_replace(res, "_", "/_");
-    // utils::string_replace(res, "?", "/?");
-    // utils::string_replace(res, "*", "/*");
-    utils::string_replace(res, "*", "%");
+    utils::stringReplace(res, "/", "//");
+    utils::stringReplace(res, "%", "/%");
+    utils::stringReplace(res, "_", "/_");
+    utils::stringReplace(res, "*", "%");
 
     return res;
 }
