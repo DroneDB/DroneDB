@@ -119,7 +119,6 @@ bool SqliteDatabase::renameColumnIfExists(const std::string &table, const std::s
     return false;
 }
 
-
 std::unique_ptr<Statement> SqliteDatabase::query(const std::string &query) const{
     return std::make_unique<Statement>(db, query);
 }
