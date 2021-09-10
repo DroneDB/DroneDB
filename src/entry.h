@@ -21,10 +21,6 @@
 
 namespace ddb {
 
-
-    DDB_DLL void loadPointGeom(BasicPointGeometry *point_geom, const std::string& text);
-    DDB_DLL void loadPolygonGeom(BasicPolygonGeometry *polygon_geom, const std::string& text);
-
 struct Entry {
     std::string path = "";
     std::string hash = "";
@@ -45,11 +41,79 @@ struct Entry {
     Entry() { }
 
     Entry(const std::string &path, const std::string &hash,
-          EntryType type, const std::string &propertiesJson,
-          long long mtime, std::uintmax_t size, int depth) :
-        path(path), hash(hash), type(type), properties(json::parse(propertiesJson, nullptr, false)),
-        mtime(mtime), size(size), depth(depth){
+          int type, const std::string &propertiesJson,
+          long long mtime, std::uintmax_t size, int depth,
+          const std::string &pointCoordinatesJson = "", const std::string &polyCoordinatesJson = ""){
+        parseFields(path, hash, type, propertiesJson, mtime, size, depth, pointCoordinatesJson, polyCoordinatesJson);
+    }
 
+    void parseFields(const std::string &path, const std::string &hash,
+                     int type, const std::string &propertiesJson,
+                     long long mtime, std::uintmax_t size, int depth,
+                     const std::string &pointCoordinatesJson = "", const std::string &polyCoordinatesJson = ""){
+        this->path = path;
+        this->hash = hash;
+        this->type = static_cast<EntryType>(type);
+        try{
+            this->properties = json::parse(propertiesJson, nullptr, false);
+        }catch(json::exception &e){
+            LOGD << "Invalid entry JSON: " << e.what();
+        }
+        this->mtime = static_cast<time_t>(mtime);
+        this->size = size;
+        this->depth = depth;
+
+        this->parsePointGeometry(pointCoordinatesJson);
+        this->parsePolygonGeometry(polyCoordinatesJson);
+    }
+
+    void parsePointGeometry(const std::string &coordinatesJson){
+        point_geom.clear();
+        if (coordinatesJson.empty()) return;
+
+        json j;
+        try{
+            j = json::parse(coordinatesJson);
+        }catch(json::exception &e){
+            throw JSONException(e.what());
+        }
+
+        if (!j.is_array() || j.size() < 2){
+            LOGD << "Invalid coordinatesJson: " << coordinatesJson;
+            return;
+        }
+
+        if (j.size() == 2){
+            point_geom.addPoint(j[0].get<double>(), j[1].get<double>(), 0);
+        }else if (j.size() >= 3){
+            point_geom.addPoint(j[0].get<double>(), j[1].get<double>(), j[2].get<double>());
+        }
+    }
+
+    void parsePolygonGeometry(const std::string &coordinatesJson){
+        polygon_geom.clear();
+        if (coordinatesJson.empty()) return;
+
+        json j;
+        try{
+            j = json::parse(coordinatesJson);
+        }catch(json::exception &e){
+            throw JSONException(e.what());
+        }
+
+        if (!j.is_array() || j.size() != 1){
+            LOGD << "Invalid coordinatesJson: " << coordinatesJson;
+            return;
+        }
+
+        json ring = j[0];
+        for (auto &coord : ring){
+            if (coord.size() == 2){
+                polygon_geom.addPoint(coord[0].get<double>(), coord[1].get<double>(), 0);
+            }else if (coord.size() >= 3){
+                polygon_geom.addPoint(coord[0].get<double>(), coord[1].get<double>(), coord[2].get<double>());
+            }
+        }
     }
     
 //    Entry(Statement& s) {

@@ -28,7 +28,7 @@ bool isBuildable(Database* db, const std::string& path, std::string& subfolder) 
     
     Entry e;
 
-    const bool entryExists = getEntry(db, path, &e) != nullptr;
+    const bool entryExists = getEntry(db, path, e);
     if (!entryExists) throw InvalidArgsException(path + " is not a valid path in the database.");
 
     return isBuildableInternal(e, subfolder);
@@ -128,7 +128,8 @@ void buildAll(Database* db, const std::string& outputPath,
     auto q = db->query("SELECT path, hash, type, properties, mtime, size, depth FROM entries");
     
     while (q->fetch()) {
-        Entry e(*q);
+        Entry e(q->getText(0), q->getText(1), q->getInt(2), q->getText(3),
+                q->getInt64(4), q->getInt64(5), q->getInt(6));
 
         // Call build on each of them
         buildInternal(db, e, outputPath, output, force);
@@ -142,7 +143,7 @@ void build(Database* db, const std::string& path, const std::string& outputPath,
 
     Entry e;
 
-    const bool entryExists = getEntry(db, path, &e) != nullptr;
+    const bool entryExists = getEntry(db, path, e);
     if (!entryExists) throw InvalidArgsException(path + " is not a valid path in the database.");
 
     buildInternal(db, e, outputPath, output, force);

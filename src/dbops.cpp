@@ -501,7 +501,7 @@ std::vector<Entry> getMatchingEntries(Database *db, const fs::path &path,
 
     std::string sql =
         "SELECT path, hash, type, properties, mtime, size, depth, "
-        "AsGeoJSON(point_geom), AsGeoJSON(polygon_geom) FROM entries WHERE "
+        "json_extract(AsGeoJSON(point_geom), '$.coordinates'), json_extract(AsGeoJSON(polygon_geom), '$.coordinates') FROM entries WHERE "
         "path LIKE ? ESCAPE '/'";
 
     if (maxRecursionDepth > 0)
@@ -514,7 +514,9 @@ std::vector<Entry> getMatchingEntries(Database *db, const fs::path &path,
     q->bind(1, sanitized);
 
     while (q->fetch()) {
-        Entry e(*q);
+        Entry e(q->getText(0), q->getText(1), q->getInt(2), q->getText(3),
+                q->getInt64(4), q->getInt64(5), q->getInt(6),
+                q->getText(7), q->getText(8));
         entries.push_back(e);
     }
 
@@ -731,21 +733,19 @@ bool pathExists(Database* db, const std::string& path) {
     return q->getInt(0) > 0;
 }
 
-Entry *getEntry(Database* db, const std::string& path, Entry* entry) {
-
-    if (entry == nullptr)
-        throw InvalidArgsException("Entry pointer should not be null");
-
+bool getEntry(Database* db, const std::string& path, Entry &entry) {
     auto q = db->query("SELECT path, hash, type, properties, mtime, size, depth, "
-        "AsGeoJSON(point_geom), AsGeoJSON(polygon_geom) FROM entries WHERE path = ? LIMIT 1");
+        "json_extract(AsGeoJSON(point_geom), '$.coordinates'), json_extract(AsGeoJSON(polygon_geom), '$.coordinates') FROM entries WHERE path = ? LIMIT 1");
 
     q->bind(1, path);
 
     if (!q->fetch())
-        return nullptr;
+        return false;
 
-    *entry = Entry(*q);
-    return entry;
+    entry.parseFields(q->getText(0), q->getText(1), q->getInt(2), q->getText(3),
+                   q->getInt64(4), q->getInt64(5), q->getInt(6),
+                   q->getText(7), q->getText(8));
+    return true;
 
 }
 
@@ -806,8 +806,8 @@ void moveEntry(Database* db, const std::string& source, const std::string& dest)
     if (source == dest) return;
 
     Entry sourceEntry, destEntry;
-    bool sourceExists = getEntry(db, source, &sourceEntry) != nullptr;
-    bool destExists = getEntry(db, dest, &destEntry) != nullptr;
+    bool sourceExists = getEntry(db, source, sourceEntry);
+    bool destExists = getEntry(db, dest, destEntry);
 
     // Ensure entry consistency: cannot move file on folder and vice-versa
     if (!sourceExists)
