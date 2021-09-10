@@ -280,6 +280,8 @@ void Entry::toJSON(json &j) const{
 
     if (!this->point_geom.empty()) j["point_geom"] = this->point_geom.toGeoJSON();
     if (!this->polygon_geom.empty()) j["polygon_geom"] = this->polygon_geom.toGeoJSON();
+
+    if (!this->meta.empty()) j["meta"] = this->meta;
 }
 
 void Entry::fromJSON(const json &j){
@@ -317,15 +319,7 @@ bool Entry::toGeoJSON(json &j, BasicGeometryType type){
     // available geometry
     j = geoms[0]->toGeoJSON();
     j["properties"] = p;
-
-//  j["type"] = "Feature";
-//  j["geometry"] = json({});
-//  j["geometry"]["type"] = "GeometryCollection";
-//  j["geometry"]["geometries"] = json::array();
-
-//  for (auto &g : geoms){
-//      j["geometry"]["geometries"] += g->toGeoJSON()["geometry"];
-//  }
+    if (!this->meta.empty()) j["properties"]["meta"] = this->meta;
 
     return true;
 }
@@ -360,7 +354,7 @@ std::string Entry::toString(){
     //s << "Tree Depth: " << this->depth << "\n";
     if (!this->point_geom.empty()) s << "Point Geometry: " << this->point_geom  << "\n";
     if (!this->polygon_geom.empty()) s << "Polygon Geometry: " << this->polygon_geom << "\n";
-
+    if (!this->meta.empty()) s << "Meta: " << this->meta.dump(4) << "\n";
     return s.str();
 }
 

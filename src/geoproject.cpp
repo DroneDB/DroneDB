@@ -85,7 +85,7 @@ void geoProject(const std::vector<std::string> &images, const std::string &outpu
                 ratio = std::stod(outsize) / 100.0;
             }else{
                 ratio = std::stod(outsize) / width;
-                targs = CSLAddString(targs, utils::to_str(ratio * height).c_str());
+                targs = CSLAddString(targs, utils::toStr(ratio * height).c_str());
             }
 
             scaledWidth = static_cast<int>(static_cast<double>(width) * ratio);
@@ -98,26 +98,26 @@ void geoProject(const std::vector<std::string> &images, const std::string &outpu
         targs = CSLAddString(targs, "-gcp");
         targs = CSLAddString(targs, "0");
         targs = CSLAddString(targs, "0");
-        targs = CSLAddString(targs, utils::to_str(ul.x, 13).c_str());
-        targs = CSLAddString(targs, utils::to_str(ul.y, 13).c_str());
+        targs = CSLAddString(targs, utils::toStr(ul.x, 13).c_str());
+        targs = CSLAddString(targs, utils::toStr(ul.y, 13).c_str());
 
         targs = CSLAddString(targs, "-gcp");
         targs = CSLAddString(targs, "0");
         targs = CSLAddString(targs, std::to_string(scaledHeight).c_str());
-        targs = CSLAddString(targs, utils::to_str(ll.x, 13).c_str());
-        targs = CSLAddString(targs, utils::to_str(ll.y, 13).c_str());
+        targs = CSLAddString(targs, utils::toStr(ll.x, 13).c_str());
+        targs = CSLAddString(targs, utils::toStr(ll.y, 13).c_str());
 
         targs = CSLAddString(targs, "-gcp");
         targs = CSLAddString(targs, std::to_string(scaledWidth).c_str());
         targs = CSLAddString(targs, std::to_string(scaledHeight).c_str());
-        targs = CSLAddString(targs, utils::to_str(lr.x, 13).c_str());
-        targs = CSLAddString(targs, utils::to_str(lr.y, 13).c_str());
+        targs = CSLAddString(targs, utils::toStr(lr.x, 13).c_str());
+        targs = CSLAddString(targs, utils::toStr(lr.y, 13).c_str());
 
         targs = CSLAddString(targs, "-gcp");
         targs = CSLAddString(targs, std::to_string(scaledWidth).c_str());
         targs = CSLAddString(targs, "0");
-        targs = CSLAddString(targs, utils::to_str(ur.x, 13).c_str());
-        targs = CSLAddString(targs, utils::to_str(ur.y, 13).c_str());
+        targs = CSLAddString(targs, utils::toStr(ur.x, 13).c_str());
+        targs = CSLAddString(targs, utils::toStr(ur.y, 13).c_str());
 
         GDALTranslateOptions* psOptions = GDALTranslateOptionsNew(targs, nullptr);
         CSLDestroy(targs);

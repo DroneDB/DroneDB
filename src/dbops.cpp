@@ -499,13 +499,33 @@ std::vector<Entry> getMatchingEntries(Database *db, const fs::path &path,
         LOGD << "Folder: " << sanitized;
     }
 
-    std::string sql =
-        "SELECT path, hash, type, properties, mtime, size, depth, "
-        "json_extract(AsGeoJSON(point_geom), '$.coordinates'), json_extract(AsGeoJSON(polygon_geom), '$.coordinates') FROM entries WHERE "
-        "path LIKE ? ESCAPE '/'";
+    std::string sql = R"<<<(
+        SELECT e.path, e.hash, e.type, e.properties, e.mtime, e.size, e.depth,
+        json_extract(AsGeoJSON(e.point_geom), '$.coordinates'), json_extract(AsGeoJSON(e.polygon_geom), '$.coordinates'),
+        CASE
+            WHEN em.id IS NULL THEN NULL
+            WHEN em.id IS NOT NULL THEN (
+                SELECT json_group_object(key, meta)
+                FROM (
+                    SELECT key, IIF(substr(key, -1, 1) = 's',
+                                    json_group_array(json_object('id', emi.id, 'data', json(emi.data), 'mtime', emi.mtime)),
+                                    json_object('id', emi.id, 'data', json(emi.data), 'mtime', emi.mtime)
+                                ) AS meta
+                    FROM entries_meta emi
+                    WHERE path = e.path
+                    GROUP BY key
+                )
+            )
+        END AS meta
+        FROM entries e
+        LEFT JOIN entries_meta em
+        ON e.path = em.path
+        WHERE
+        e.path LIKE ? ESCAPE '/';
+    )<<<";
 
     if (maxRecursionDepth > 0)
-        sql += " AND depth <= " + std::to_string(maxRecursionDepth - 1);
+        sql += " AND e.depth <= " + std::to_string(maxRecursionDepth - 1);
 
     auto q = db->query(sql);
 
@@ -516,7 +536,8 @@ std::vector<Entry> getMatchingEntries(Database *db, const fs::path &path,
     while (q->fetch()) {
         Entry e(q->getText(0), q->getText(1), q->getInt(2), q->getText(3),
                 q->getInt64(4), q->getInt64(5), q->getInt(6),
-                q->getText(7), q->getText(8));
+                q->getText(7), q->getText(8),
+                q->getText(9));
         entries.push_back(e);
     }
 

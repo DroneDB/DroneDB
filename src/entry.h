@@ -33,6 +33,8 @@ struct Entry {
     BasicPointGeometry point_geom;
     BasicPolygonGeometry polygon_geom;
 
+    json meta;
+
     DDB_DLL void toJSON(json &j) const;
     DDB_DLL void fromJSON(const json &j);
     DDB_DLL bool toGeoJSON(json &j, BasicGeometryType type = BasicGeometryType::BGAuto);
@@ -43,14 +45,14 @@ struct Entry {
     Entry(const std::string &path, const std::string &hash,
           int type, const std::string &propertiesJson,
           long long mtime, std::uintmax_t size, int depth,
-          const std::string &pointCoordinatesJson = "", const std::string &polyCoordinatesJson = ""){
-        parseFields(path, hash, type, propertiesJson, mtime, size, depth, pointCoordinatesJson, polyCoordinatesJson);
+          const std::string &pointCoordinatesJson = "", const std::string &polyCoordinatesJson = "", const std::string &metaJson = ""){
+        parseFields(path, hash, type, propertiesJson, mtime, size, depth, pointCoordinatesJson, polyCoordinatesJson, metaJson);
     }
 
     void parseFields(const std::string &path, const std::string &hash,
                      int type, const std::string &propertiesJson,
                      long long mtime, std::uintmax_t size, int depth,
-                     const std::string &pointCoordinatesJson = "", const std::string &polyCoordinatesJson = ""){
+                     const std::string &pointCoordinatesJson = "", const std::string &polyCoordinatesJson = "", const std::string &metaJson = ""){
         this->path = path;
         this->hash = hash;
         this->type = static_cast<EntryType>(type);
@@ -65,6 +67,7 @@ struct Entry {
 
         this->parsePointGeometry(pointCoordinatesJson);
         this->parsePolygonGeometry(polyCoordinatesJson);
+        this->parseMeta(metaJson);
     }
 
     void parsePointGeometry(const std::string &coordinatesJson){
@@ -115,39 +118,18 @@ struct Entry {
             }
         }
     }
-    
-//    Entry(Statement& s) {
 
-//        LOGD << "Columns: " << s.getColumnsCount();
+    void parseMeta(const std::string &metaJson){
+        meta.clear();
+        if (metaJson.empty()) return;
 
-//        // Expects a SELECT clause with: (order matters)
-//        // path, hash, type, properties, mtime, size, depth, AsGeoJSON(point_geom), AsGeoJSON(polygon_geom)
-//        this->path = s.getText(0);
-//        this->hash = s.getText(1);
-//        this->type = (EntryType)s.getInt(2);
-//        this->properties = json::parse(s.getText(3), nullptr, false);
-//        this->mtime = (time_t)s.getInt(4);
-//        this->size = s.getInt64(5);
-//        this->depth = s.getInt(6);
-        
-
-//        if (s.getColumnsCount() == 9) {
-
-//            const auto point_geom_raw = s.getText(7);
-
-//            //LOGD << "point_geom: " << point_geom_raw;
-//            if (!point_geom_raw.empty()) ddb::loadPointGeom(&this->point_geom, point_geom_raw);
-//            //LOGD << "OK";
-
-//            const auto polygon_geom_raw = s.getText(8);
-
-//            //LOGD << "polygon_geom: " << polygon_geom_raw;
-//            if (!polygon_geom_raw.empty()) ddb::loadPolygonGeom(&this->polygon_geom, polygon_geom_raw);
-//            //LOGD << "OK";
-
-//        }
-//    }
-
+        try{
+            meta = json::parse(metaJson);
+        }catch(json::exception &e){
+            LOGD << "Corrupted meta: " << metaJson;
+            return;
+        }
+    }
 };
 
 /** Parse an entry

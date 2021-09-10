@@ -103,7 +103,7 @@ bool SqliteDatabase::renameColumnIfExists(const std::string &table, const std::s
 
         if (sqlDef.size() > 0 && sqlDef.find(columnDefBefore + ",") != std::string::npos){
             // Old definition
-            utils::string_replace(sqlDef, columnDefBefore, columnDefAfter);
+            utils::stringReplace(sqlDef, columnDefBefore, columnDefAfter);
 
             this->setWritableSchema(true);
             q = this->query("UPDATE sqlite_master SET sql = ? WHERE type = 'table' and name = ?");

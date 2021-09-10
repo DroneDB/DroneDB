@@ -20,6 +20,8 @@ std::string MetaManager::entryPath(const std::string &path) const{
 
 std::string MetaManager::getKey(const std::string &key, bool isList) const{
     if (key.empty()) throw InvalidArgsException("Invalid empty metadata key");
+    if (!utils::isLowerCase(key)) throw InvalidArgsException("Metadata key must be lowercase");
+
     if (isList && key[key.length() - 1] != 's') throw InvalidArgsException("Invalid metadata key (must be plural, for example: " + key + "s)");
     else if (!isList && key[key.length() - 1] == 's') throw InvalidArgsException("Invalid metadata key (must be singular, for example: " + key.substr(0, key.length() - 1) + ")");
     else return key;
