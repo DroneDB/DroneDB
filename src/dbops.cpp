@@ -402,7 +402,7 @@ std::string sanitize_query_param(const std::string &str) {
     return res;
 }
 
-void checkDeleteBuild(Database *db, std::string hash){
+void checkDeleteBuild(Database *db, const std::string &hash){
     if (!hash.empty()){
         const auto buildFolder =
             fs::path(db->getOpenFile()).parent_path() / DDB_BUILD_PATH / hash;
@@ -411,6 +411,14 @@ void checkDeleteBuild(Database *db, std::string hash){
             LOGD << "Removing " << (buildFolder).string();
             io::assureIsRemoved(buildFolder);
         }
+    }
+}
+
+void checkDeleteMeta(Database *db, const std::string &path){
+    if (!path.empty()){
+        auto q = db->query("DELETE FROM entries_meta WHERE path = ?");
+        q->bind(1, path);
+        q->execute();
     }
 }
 
@@ -427,6 +435,8 @@ int deleteFromIndex(Database *db, const std::string &query, bool isFolder, Remov
         LOGD << "Folder: " << str;
     }
 
+    db->exec("BEGIN EXCLUSIVE TRANSACTION");
+
     auto q = db->query(
         "SELECT path, hash FROM entries WHERE path LIKE ? ESCAPE '/'");
 
@@ -441,6 +451,9 @@ int deleteFromIndex(Database *db, const std::string &query, bool isFolder, Remov
 
         // Check for build folders to be removed
         checkDeleteBuild(db, hash);
+
+        // Check for meta info to be removed
+        checkDeleteMeta(db, path);
 
         if (callback != nullptr)
             callback(path);
@@ -458,6 +471,8 @@ int deleteFromIndex(Database *db, const std::string &query, bool isFolder, Remov
 
         q->reset();
     }
+
+    db->exec("COMMIT");
 
     return count;
 }
@@ -534,6 +549,7 @@ void syncIndex(Database *db) {
                 deleteQ->bind(1, relPath.generic());
                 deleteQ->execute();
                 checkDeleteBuild(db, hash);
+                checkDeleteMeta(db, relPath.generic());
                 std::cout << "D\t" << relPath.generic() << std::endl;
                 changed = true;
             break;
@@ -673,6 +689,8 @@ void deleteEntry(Database* db, const std::string& path) {
     auto f = db->query("DELETE FROM entries WHERE path = ?");
     f->bind(1, path);
     f->execute();
+
+    checkDeleteMeta(db, path);
 }
 
 #define FOLDER_CONSISTENCY_QUERY "SELECT B.folder FROM ( \
@@ -762,6 +780,12 @@ void replacePath(Database* db, const std::string& source, const std::string& des
     update->bind(2, depth);
     update->bind(3, source);
     update->execute();
+
+    // Move meta
+    auto mq = db->query("UPDATE entries_meta SET path = ? WHERE path = ?");
+    mq->bind(1, dest);
+    mq->bind(2, source);
+    mq->execute();
 }
 
 void moveEntry(Database* db, const std::string& source, const std::string& dest) {

@@ -44,38 +44,45 @@ struct Entry {
 
     Entry() { }
 
+    Entry(const std::string &path, const std::string &hash,
+          EntryType type, const std::string &propertiesJson,
+          long long mtime, std::uintmax_t size, int depth) :
+        path(path), hash(hash), type(type), properties(json::parse(propertiesJson, nullptr, false)),
+        mtime(mtime), size(size), depth(depth){
+
+    }
     
-    Entry(Statement& s) {
+//    Entry(Statement& s) {
 
-        LOGD << "Columns: " << s.getColumnsCount();
+//        LOGD << "Columns: " << s.getColumnsCount();
 
-        // Expects a SELECT clause with: (order matters)
-        // path, hash, type, properties, mtime, size, depth, AsGeoJSON(point_geom), AsGeoJSON(polygon_geom)
-        this->path = s.getText(0);
-        this->hash = s.getText(1);
-        this->type = (EntryType)s.getInt(2);
-        this->properties = json::parse(s.getText(3), nullptr, false);
-        this->mtime = (time_t)s.getInt(4);
-        this->size = s.getInt64(5);
-        this->depth = s.getInt(6);
+//        // Expects a SELECT clause with: (order matters)
+//        // path, hash, type, properties, mtime, size, depth, AsGeoJSON(point_geom), AsGeoJSON(polygon_geom)
+//        this->path = s.getText(0);
+//        this->hash = s.getText(1);
+//        this->type = (EntryType)s.getInt(2);
+//        this->properties = json::parse(s.getText(3), nullptr, false);
+//        this->mtime = (time_t)s.getInt(4);
+//        this->size = s.getInt64(5);
+//        this->depth = s.getInt(6);
         
 
-        if (s.getColumnsCount() == 9) {
+//        if (s.getColumnsCount() == 9) {
 
-            const auto point_geom_raw = s.getText(7);
+//            const auto point_geom_raw = s.getText(7);
 
-            //LOGD << "point_geom: " << point_geom_raw;
-            if (!point_geom_raw.empty()) ddb::loadPointGeom(&this->point_geom, point_geom_raw);
-            //LOGD << "OK";
+//            //LOGD << "point_geom: " << point_geom_raw;
+//            if (!point_geom_raw.empty()) ddb::loadPointGeom(&this->point_geom, point_geom_raw);
+//            //LOGD << "OK";
 
-            const auto polygon_geom_raw = s.getText(8);
+//            const auto polygon_geom_raw = s.getText(8);
 
-            //LOGD << "polygon_geom: " << polygon_geom_raw;
-            if (!polygon_geom_raw.empty()) ddb::loadPolygonGeom(&this->polygon_geom, polygon_geom_raw);
-            //LOGD << "OK";
+//            //LOGD << "polygon_geom: " << polygon_geom_raw;
+//            if (!polygon_geom_raw.empty()) ddb::loadPolygonGeom(&this->polygon_geom, polygon_geom_raw);
+//            //LOGD << "OK";
 
-        }
-    }
+//        }
+//    }
 
 };
 
