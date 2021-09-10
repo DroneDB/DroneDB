@@ -505,10 +505,10 @@ std::vector<Entry> getMatchingEntries(Database *db, const fs::path &path,
             WHEN em.id IS NOT NULL THEN (
                 SELECT json_group_object(key, meta)
                 FROM (
-                    SELECT key, IIF(substr(key, -1, 1) = 's',
-                                    json_group_array(json_object('id', emi.id, 'data', json(emi.data), 'mtime', emi.mtime)),
-                                    json_object('id', emi.id, 'data', json(emi.data), 'mtime', emi.mtime)
-                                ) AS meta
+                    SELECT key, CASE WHEN substr(key, -1, 1) = 's'
+                                    THEN json_group_array(json_object('id', emi.id, 'data', json(emi.data), 'mtime', emi.mtime))
+                                    ELSE json_object('id', emi.id, 'data', json(emi.data), 'mtime', emi.mtime)
+                                END AS meta
                     FROM entries_meta emi
                     WHERE path = e.path
                     GROUP BY key
@@ -519,7 +519,7 @@ std::vector<Entry> getMatchingEntries(Database *db, const fs::path &path,
         LEFT JOIN entries_meta em
         ON e.path = em.path
         WHERE
-        e.path LIKE ? ESCAPE '/';
+        e.path LIKE ? ESCAPE '/'
     )<<<";
 
     if (maxRecursionDepth > 0)
