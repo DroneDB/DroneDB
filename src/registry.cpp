@@ -207,27 +207,7 @@ std::string Registry::getAuthToken() { return std::string(this->authToken); }
 
 time_t Registry::getTokenExpiration() { return this->tokenExpiration; }
 
-void to_json(json &j, const DatasetInfo &p) {
-    j = json{{"path", p.path}, {"hash", p.hash},   {"type", p.type},
-             {"size", p.size}, {"depth", p.depth}, {"mtime", p.mtime},
-             {"meta", p.meta}};
-}
-
-void from_json(const json &j, DatasetInfo &p) {
-    j.at("path").get_to(p.path);
-
-    if (!j.at("hash").is_null()) j.at("hash").get_to(p.hash);
-
-    j.at("type").get_to(p.type);
-    j.at("size").get_to(p.size);
-    j.at("depth").get_to(p.depth);
-    j.at("mtime").get_to(p.mtime);
-
-    // TODO: Add
-    // j.at("meta").get_to(p.meta);
-}
-
-DDB_DLL DatasetInfo Registry::getDatasetInfo(const std::string &organization,
+DDB_DLL Entry Registry::getDatasetInfo(const std::string &organization,
                                              const std::string &dataset) {
     this->ensureTokenValidity();
 
@@ -248,12 +228,13 @@ DDB_DLL DatasetInfo Registry::getDatasetInfo(const std::string &organization,
     const auto j = res.getJSON();
 
     // TODO: Catch errors
-    const auto resArr = j.get<std::vector<DatasetInfo>>();
 
-    if (resArr.empty())
+    if (j.empty())
         throw RegistryException("Invalid empty response from registry");
 
-    return resArr[0];
+    Entry e;
+    e.fromJSON(j[0]);
+    return e;
 }
 
 DDB_DLL void Registry::downloadDdb(const std::string &organization,

@@ -29,7 +29,7 @@ struct Entry {
     std::string path = "";
     std::string hash = "";
     EntryType type = EntryType::Undefined;
-    json meta;
+    json properties;
     time_t mtime = 0;
     std::uintmax_t size = 0;
     int depth = 0;
@@ -38,6 +38,7 @@ struct Entry {
     BasicPolygonGeometry polygon_geom;
 
     DDB_DLL void toJSON(json &j) const;
+    DDB_DLL void fromJSON(const json &j);
     DDB_DLL bool toGeoJSON(json &j, BasicGeometryType type = BasicGeometryType::BGAuto);
     DDB_DLL std::string toString();
 
@@ -49,11 +50,11 @@ struct Entry {
         LOGD << "Columns: " << s.getColumnsCount();
 
         // Expects a SELECT clause with: (order matters)
-        // path, hash, type, meta, mtime, size, depth, AsGeoJSON(point_geom), AsGeoJSON(polygon_geom)
+        // path, hash, type, properties, mtime, size, depth, AsGeoJSON(point_geom), AsGeoJSON(polygon_geom)
         this->path = s.getText(0);
         this->hash = s.getText(1);
         this->type = (EntryType)s.getInt(2);
-        this->meta = json::parse(s.getText(3), nullptr, false);
+        this->properties = json::parse(s.getText(3), nullptr, false);
         this->mtime = (time_t)s.getInt(4);
         this->size = s.getInt64(5);
         this->depth = s.getInt(6);

@@ -24,7 +24,7 @@
 namespace ddb {
 
 #define UPDATE_QUERY                                                        \
-    "UPDATE entries SET hash=?, type=?, meta=?, mtime=?, size=?, depth=?, " \
+    "UPDATE entries SET hash=?, type=?, properties=?, mtime=?, size=?, depth=?, " \
     "point_geom=GeomFromText(?, 4326), polygon_geom=GeomFromText(?, 4326) " \
     "WHERE path=?"
 
@@ -247,7 +247,7 @@ void doUpdate(Statement *updateQ, const Entry &e) {
     // Fields
     updateQ->bind(1, e.hash);
     updateQ->bind(2, e.type);
-    updateQ->bind(3, e.meta.dump());
+    updateQ->bind(3, e.properties.dump());
     updateQ->bind(4, static_cast<long long>(e.mtime));
     updateQ->bind(5, static_cast<long long>(e.size));
     updateQ->bind(6, e.depth);
@@ -268,7 +268,7 @@ void addToIndex(Database *db, const std::vector<std::string> &paths,
 
     auto q = db->query("SELECT mtime,hash FROM entries WHERE path=?");
     auto insertQ = db->query(
-        "INSERT INTO entries (path, hash, type, meta, mtime, size, depth, "
+        "INSERT INTO entries (path, hash, type, properties, mtime, size, depth, "
         "point_geom, polygon_geom) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, GeomFromText(?, 4326), GeomFromText(?, "
         "4326))");
@@ -313,7 +313,7 @@ void addToIndex(Database *db, const std::vector<std::string> &paths,
                 insertQ->bind(1, e.path);
                 insertQ->bind(2, e.hash);
                 insertQ->bind(3, e.type);
-                insertQ->bind(4, e.meta.dump());
+                insertQ->bind(4, e.properties.dump());
                 insertQ->bind(5, static_cast<long long>(e.mtime));
                 insertQ->bind(6, static_cast<long long>(e.size));
                 insertQ->bind(7, e.depth);
@@ -476,7 +476,7 @@ std::vector<Entry> getMatchingEntries(Database *db, const fs::path &path,
     }
 
     std::string sql =
-        "SELECT path, hash, type, meta, mtime, size, depth, "
+        "SELECT path, hash, type, properties, mtime, size, depth, "
         "AsGeoJSON(point_geom), AsGeoJSON(polygon_geom) FROM entries WHERE "
         "path LIKE ? ESCAPE '/'";
 
@@ -671,7 +671,7 @@ void deleteEntry(Database* db, const std::string& path) {
 		SELECT path, replace(path, replace(path, rtrim(path, replace(path, '/', '')), ''), '') AS folder FROM entries WHERE type != 1) AS A \
 		WHERE length(A.folder) > 0) AS B WHERE folder NOT IN (SELECT path FROM entries WHERE type = 1)"
 
-#define CREATE_FOLDER_QUERY "INSERT INTO entries (path, type, meta, mtime, size, depth) VALUES (?, 1, 'null', ?, 0, ?)"
+#define CREATE_FOLDER_QUERY "INSERT INTO entries (path, type, properties, mtime, size, depth) VALUES (?, 1, 'null', ?, 0, ?)"
 
 void addFolder(Database *db, const std::string path, const time_t mtime) {
     const auto q = db->query(CREATE_FOLDER_QUERY);
@@ -709,7 +709,7 @@ Entry *getEntry(Database* db, const std::string& path, Entry* entry) {
     if (entry == nullptr)
         throw InvalidArgsException("Entry pointer should not be null");
     
-    auto q = db->query("SELECT path, hash, type, meta, mtime, size, depth, "
+    auto q = db->query("SELECT path, hash, type, properties, mtime, size, depth, "
         "AsGeoJSON(point_geom), AsGeoJSON(polygon_geom) FROM entries WHERE path = ? LIMIT 1");
 
     q->bind(1, path);

@@ -37,14 +37,14 @@ void geoProject(const std::vector<std::string> &images, const std::string &outpu
             else std::cerr << "Cannot geoproject " << p.string() << ", not a GeoImage, skipping..." << std::endl;
             continue;
         }
-        if (e.polygon_geom.size() < 4 || e.meta.find("width") == e.meta.end() || e.meta.find("height") == e.meta.end()){
+        if (e.polygon_geom.size() < 4 || e.properties.find("width") == e.properties.end() || e.properties.find("height") == e.properties.end()){
             if (stopOnError) throw FSException("Cannot geoproject " + p.string() + ", the image does not have sufficient information");
             else std::cerr << "Cannot geoproject " << p.string() << ", the image does not have sufficient information: skipping" << std::endl;
             continue;
         }
 
-        int width = e.meta["width"].get<int>();
-        int height = e.meta["height"].get<int>();
+        int width = e.properties["width"].get<int>();
+        int height = e.properties["height"].get<int>();
 
         std::string outFile;
         if (outputToDir){
