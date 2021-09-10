@@ -195,7 +195,7 @@ std::string EptTiler::tile(int tz, int tx, int ty) {
 
             if (zBuffer.get()[py * tileSize + px] < z){
                 zBuffer.get()[py * tileSize + px] = z;
-                drawCircle(buffer.get(), alphaBuffer.get(), px, py, 2, red, green, blue);
+                drawCircle(buffer.get(), alphaBuffer.get(), px, py, 2, red, green, blue, tileSize, wSize);
             }
         }
     }
@@ -239,18 +239,20 @@ std::string EptTiler::tile(int tz, int tx, int ty) {
     return tilePath;
 }
 
-void EptTiler::drawCircle(uint8_t *buffer, uint8_t *alpha, int px, int py, int radius, uint8_t r, uint8_t g, uint8_t b){
-    int r2 = radius * radius;
-    int area = r2 << 2;
-    int rr = radius << 1;
 
-    for (int i = 0; i < area; i++){
-        int tx = (i % rr) - radius;
-        int ty = (i / rr) - radius;
-        if (tx * tx + ty * ty <= r2){
-            int dx = px + tx;
-            int dy = py + ty;
-            if (dx >= 0 && dx < tileSize && dy >= 0 && dy < tileSize){
+void drawCircle(uint8_t *buffer, uint8_t *alpha, int px, int py, int radius,
+                uint8_t r, uint8_t g, uint8_t b, int tileSize, int wSize) {
+    const int r2 = radius * radius;
+    const int area = r2 << 2;
+    const int rr = radius << 1;
+
+    for (int i = 0; i < area; i++) {
+        const int tx = (i % rr) - radius;
+        const int ty = (i / rr) - radius;
+        if (tx * tx + ty * ty <= r2) {
+            const int dx = px + tx;
+            const int dy = py + ty;
+            if (dx >= 0 && dx < tileSize && dy >= 0 && dy < tileSize) {
                 buffer[dy * tileSize + dx + wSize * 0] = r;
                 buffer[dy * tileSize + dx + wSize * 1] = g;
                 buffer[dy * tileSize + dx + wSize * 2] = b;
@@ -259,6 +261,5 @@ void EptTiler::drawCircle(uint8_t *buffer, uint8_t *alpha, int px, int py, int r
         }
     }
 }
-
 
 }  // namespace ddb

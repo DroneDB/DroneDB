@@ -137,45 +137,23 @@ void generateImageThumb(const fs::path& imagePath, int thumbSize, const fs::path
 
 }
 
-void drawCircle(uint8_t *buffer, uint8_t *alpha, int px, int py,
-                          int radius, uint8_t r, uint8_t g, uint8_t b, int tileSize, int wSize) {
-    int r2 = radius * radius;
-    int area = r2 << 2;
-    int rr = radius << 1;
-
-    for (int i = 0; i < area; i++) {
-        int tx = (i % rr) - radius;
-        int ty = (i / rr) - radius;
-        if (tx * tx + ty * ty <= r2) {
-            int dx = px + tx;
-            int dy = py + ty;
-            if (dx >= 0 && dx < tileSize && dy >= 0 && dy < tileSize) {
-                buffer[dy * tileSize + dx + wSize * 0] = r;
-                buffer[dy * tileSize + dx + wSize * 1] = g;
-                buffer[dy * tileSize + dx + wSize * 2] = b;
-                alpha[dy * tileSize + dx] = 255;
-            }
-        }
-    }
-}
-
-void addColorFilter(PointCloudInfo eptInfo, const bool hasColors, pdal::EptReader *eptReader, pdal::Stage*& main) {
+void addColorFilter(PointCloudInfo eptInfo, pdal::EptReader *eptReader, pdal::Stage*& main) {
     std::unique_ptr<pdal::ColorinterpFilter> colorFilter;
-    if (!hasColors) {
-        colorFilter.reset(new pdal::ColorinterpFilter());
 
-        // Add ramp filter
-        LOGD << "Adding ramp filter (" << eptInfo.bounds[2] << ", "
-                 << eptInfo.bounds[5] << ")";
+    colorFilter.reset(new pdal::ColorinterpFilter());
 
-        pdal::Options cfOpts;
-        cfOpts.add("ramp", "pestel_shades");
-        cfOpts.add("minimum", eptInfo.bounds[2]);
-        cfOpts.add("maximum", eptInfo.bounds[5]);
-        colorFilter->setOptions(cfOpts);
-        colorFilter->setInput(*eptReader);
-        main = colorFilter.get();
-    }
+    // Add ramp filter
+    LOGD << "Adding ramp filter (" << eptInfo.bounds[2] << ", "
+             << eptInfo.bounds[5] << ")";
+
+    pdal::Options cfOpts;
+    cfOpts.add("ramp", "pestel_shades");
+    cfOpts.add("minimum", eptInfo.bounds[2]);
+    cfOpts.add("maximum", eptInfo.bounds[5]);
+    colorFilter->setOptions(cfOpts);
+    colorFilter->setInput(*eptReader);
+    main = colorFilter.get();
+    
 }
 
 void RenderImage(const fs::path& outImagePath, const int tileSize, const int nBands, uint8_t* buffer, uint8_t* alphaBuffer) {
@@ -351,7 +329,8 @@ void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
 
         // -----------------------------------------------------------------
 
-        addColorFilter(eptInfo, hasColors, eptReader.get(), main);
+        if (!hasColors)
+            addColorFilter(eptInfo, eptReader.get(), main);
 
         LOGD << "Before prepare";
 
