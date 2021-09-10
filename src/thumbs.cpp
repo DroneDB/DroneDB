@@ -243,7 +243,6 @@ void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
 
         LOGD << "Bounds: " << eptInfo.bounds.size();
         LOGD << "PolyBounds: " << eptInfo.polyBounds.size();
-        LOGD << "WktProjection: " << eptInfo.wktProjection;
 
         double oMinX;
         double oMaxX;
@@ -251,6 +250,12 @@ void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
         double oMinY;
 
         bool hasSpatialSystem = !eptInfo.wktProjection.empty();
+
+        if (hasSpatialSystem) {
+            LOGD << "WktProjection: " << eptInfo.wktProjection;
+        } else {
+            LOGD << "No spatial system";
+        }
 
         if (hasSpatialSystem) {
             oMinX = eptInfo.polyBounds.getPoint(0).y;
@@ -262,10 +267,10 @@ void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
                  << ") - (" << oMaxX << "; " << oMaxY << ")";
         } else {
             oMinX = eptInfo.bounds[0];
-            oMaxX = eptInfo.bounds[3];
-
-            oMaxY = eptInfo.bounds[4];
             oMinY = eptInfo.bounds[1];
+
+            oMaxX = eptInfo.bounds[3];
+            oMaxY = eptInfo.bounds[4];
 
             LOGD << "Bounds: (" << oMinX << "; " << oMinY << ") - ("
                  << oMaxX << "; " << oMaxY << ")";
