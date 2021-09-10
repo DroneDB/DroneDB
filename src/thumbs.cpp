@@ -10,10 +10,9 @@
 #include <pointcloud.h>
 #include <tiler.h>
 
-#include <Options.hpp>
 #include <cstdlib>
-#include <filters/ColorinterpFilter.hpp>
-#include <io/EptReader.hpp>
+#include <pdal/filters/ColorinterpFilter.hpp>
+#include <pdal/io/EptReader.hpp>
 #include <sstream>
 
 #include "dbops.h"
