@@ -99,7 +99,7 @@ if (WIN32)
     extract_dependency("pdal.zip" "pdal/include" "pdal")
     extract_dependency("zlib.zip" "zlib/include" "zlib")
     extract_dependency("libzip.zip" "libzip/include" "libzip")
-    extract_dependency("sqlite3.zip", "sqlite3/bin", "sqlite3")
+    extract_dependency("sqlite3.zip", "sqlite3", "sqlite3")
     
     set(GDAL_LIBRARY "${DOWNLOADS_DIR}/gdal/lib/gdal_i.lib")
     set(GDAL_INCLUDE_DIR "${DOWNLOADS_DIR}/gdal/include")
