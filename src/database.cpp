@@ -203,6 +203,34 @@ json Database::getAttributes() const {
             j["entries"] = q->getInt(0);
         }
     }
+
+    // Find meta
+    {
+        const std::string sql = R"<<<(SELECT CASE
+                WHEN key IS NULL THEN NULL
+                ELSE json_group_object(key, meta)
+            END AS meta
+                    FROM (
+                        SELECT key, CASE WHEN substr(key, -1, 1) = 's'
+                            THEN json_group_array(json_object('id', emi.id, 'data', json(emi.data), 'mtime', emi.mtime))
+                            ELSE json_object('id', emi.id, 'data', json(emi.data), 'mtime', emi.mtime)
+                        END AS meta
+                        FROM entries_meta emi
+                        WHERE path = ""
+                        GROUP BY key
+                    )
+            )<<<";
+        const auto q = this->query(sql);
+        if (q->fetch()){
+            const std::string metaJson = q->getText(0);
+            try{
+                json meta = json::parse(metaJson);
+                if (!meta.empty()) j["meta"] = meta;
+            }catch(json::exception){
+                LOGD << "Malformed database meta: " << metaJson;
+            }
+        }
+    }
     
     return j;
 }
