@@ -196,6 +196,30 @@ void RenderImage(const fs::path& outImagePath, const int tileSize, const int nBa
     LOGD << "Done drawing";
 }
 
+int calculateColorShift(const pdal::PointViewPtr& point_view) {
+
+    for (pdal::PointId idx = 0; idx < point_view->size(); ++idx) {
+        auto p = point_view->point(idx);
+
+        const auto red = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Red);
+        const auto green = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Green);
+        const auto blue = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Blue);
+
+        if (red) 
+            return red >> 8 ? 8 : 0;        
+        
+        if (green) 
+            return red >> 8 ? 8 : 0;
+        
+        if (blue) 
+            return red >> 8 ? 8 : 0;
+
+    }
+
+    return 0;
+ 
+}
+
 void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
                              const fs::path &outImagePath) {
 
@@ -370,11 +394,42 @@ void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
             zBuffer.get()[i] = -99999.0;
         }
 
-        const double tileScaleW = tileSize / (oMaxX - oMinX);
-        const double tileScaleH = tileSize / (oMaxY - oMinY);
+        const double width = oMaxX - oMinX;
+        const double height = oMaxY - oMinY;
 
-        LOGD << "TileScaleW = " << tileScaleW;
-        LOGD << "TileScaleH = " << tileScaleH;
+        const double tileScaleW = tileSize / width;
+        const double tileScaleH = tileSize / height;
+
+        // Scaling factor
+        double tileScale;
+
+        // After scaling we need to center the image
+        double offsetX;
+        double offsetY;
+
+        // Taller than wider
+        if (tileScaleW > tileScaleH) {
+            tileScale = tileScaleH;
+
+            offsetY = 0;
+            offsetX = (tileSize - width * tileScaleH) / 2;
+
+        // Wider than taller
+        } else {
+            tileScale = tileScaleW;
+
+            offsetX = 0;
+            offsetY = (tileSize - height * tileScaleW) / 2;
+        }
+
+        LOGD << "OffsetX = " << offsetX;
+        LOGD << "OffsetY = " << offsetY;
+
+        LOGD << "TileScale = " << tileScale;
+
+        int colorShift = calculateColorShift(point_view);
+
+        LOGD << "ColorShift = " << colorShift;
 
         if (hasSpatialSystem) {
             CoordsTransformer ict(eptInfo.wktProjection, 3857);
@@ -388,14 +443,14 @@ void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
                 ict.transform(&x, &y);
 
                 // Map projected coordinates to local PNG coordinates
-                int px = std::round((x - oMinX) * tileScaleW);
-                int py = tileSize - 1 - std::round((y - oMinY) * tileScaleH);
+                int px = std::round((x - oMinX) * tileScale + offsetX);
+                int py = tileSize - 1 - std::round((y - oMinY) * tileScale + offsetY);
 
                 if (px >= 0 && px < tileSize && py >= 0 && py < tileSize) {
                     // Within bounds
-                    const auto red = p.getFieldAs<uint8_t>(pdal::Dimension::Id::Red);
-                    const auto green = p.getFieldAs<uint8_t>(pdal::Dimension::Id::Green);
-                    const auto blue = p.getFieldAs<uint8_t>(pdal::Dimension::Id::Blue);
+                    const auto red = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Red) >> colorShift;
+                    const auto green = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Green) >> colorShift;
+                    const auto blue = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Blue) >> colorShift;
 
                     if (zBuffer.get()[py * tileSize + px] < z) {
                         zBuffer.get()[py * tileSize + px] = z;
@@ -413,15 +468,15 @@ void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
                 auto z = p.getFieldAs<double>(pdal::Dimension::Id::Z);
 
                 // Map projected coordinates to local PNG coordinates
-                int px = std::round((x - oMinX) * tileScaleW);
-                int py = tileSize - 1 - std::round((y - oMinY) * tileScaleH);
+                int px = std::round((x - oMinX) * tileScale + offsetX);
+                int py = tileSize - 1 - std::round((y - oMinY) * tileScale + offsetY);
 
                 if (px >= 0 && px < tileSize && py >= 0 && py < tileSize) {
 
                     // Within bounds (shift to uint8_t)
-                    const uint8_t red = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Red) >> 8;
-                    const uint8_t green = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Green) >> 8;
-                    const uint8_t blue = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Blue) >> 8;
+                    const uint8_t red = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Red) >> colorShift;
+                    const uint8_t green = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Green) >> colorShift;
+                    const uint8_t blue = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Blue) >> colorShift;
 
                     if (zBuffer.get()[py * tileSize + px] < z) {
                         zBuffer.get()[py * tileSize + px] = z;
