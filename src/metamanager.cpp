@@ -166,7 +166,7 @@ json MetaManager::unset(const std::string &key, const std::string &path){
     q->execute();
 
     json j;
-    j["deleted"] = db->changes();
+    j["removed"] = db->changes();
     return j;
 }
 
