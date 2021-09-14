@@ -1,4 +1,5 @@
 #include "metamanager.h"
+#include "database.h"
 #include "mio.h"
 #include "exceptions.h"
 #include "utils.h"

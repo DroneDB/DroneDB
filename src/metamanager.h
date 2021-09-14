@@ -4,10 +4,13 @@
 #ifndef METAMANAGER_H
 #define METAMANAGER_H
 
-#include "database.h"
 #include "json.h"
+#include "ddb_export.h"
+#include "statement.h"
 
 namespace ddb {
+
+class Database;
 
 class MetaManager {
     Database* db;

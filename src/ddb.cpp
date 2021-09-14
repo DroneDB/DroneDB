@@ -462,3 +462,35 @@ DDB_DLL DDBErr DDBIsBuildable(const char *ddbPath, const char *path, bool *isBui
     DDB_C_END
    
 }
+
+DDBErr DDBMetaAdd(const char *ddbPath, const char *path, const char *key, const char *data, char **output){
+    DDB_C_BEGIN
+
+    if (ddbPath == nullptr) throw InvalidArgsException("No ddb path provided");
+    if (path == nullptr) throw InvalidArgsException("No path provided");
+    if (key == nullptr) throw InvalidArgsException("No key provided");
+    if (data == nullptr) throw InvalidArgsException("No data provided");
+
+    const auto ddb = ddb::open(std::string(ddbPath), true);
+    auto json = ddb->getMetaManager()->add(std::string(key), std::string(data), std::string(path));
+
+    utils::copyToPtr(json.dump(), output);
+
+    DDB_C_END
+}
+
+DDBErr DDBMetaSet(const char *ddbPath, const char *path, const char *key, const char *data, char **output){
+    DDB_C_BEGIN
+
+    if (ddbPath == nullptr) throw InvalidArgsException("No ddb path provided");
+    if (path == nullptr) throw InvalidArgsException("No path provided");
+    if (key == nullptr) throw InvalidArgsException("No key provided");
+    if (data == nullptr) throw InvalidArgsException("No data provided");
+
+    const auto ddb = ddb::open(std::string(ddbPath), true);
+    auto json = ddb->getMetaManager()->set(std::string(key), std::string(data), std::string(path));
+
+    utils::copyToPtr(json.dump(), output);
+
+    DDB_C_END
+}

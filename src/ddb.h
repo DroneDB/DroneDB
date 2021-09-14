@@ -193,6 +193,22 @@ DDB_DLL DDBErr DDBBuild(const char *ddbPath, const char *source = nullptr, const
  * @return DDBERR_NONE on success, an error otherwise */
 DDB_DLL DDBErr DDBIsBuildable(const char *ddbPath, const char *path, bool *isBuildable);
 
+/** Add metadata
+ *  @param ddbPath path to the source DroneDB database (parent of ".ddb")
+ *  @param path Entry path to associate metadata with (or "" to add metadata to the DroneDB database itself)
+ *  @param key Metadata key
+ *  @param data Metadata data (JSON)
+ *  @param output pointer to C-string where to store result (JSON) */
+DDB_DLL DDBErr DDBMetaAdd(const char *ddbPath, const char *path, const char *key, const char *data, char **output);
+
+/** Set metadata
+ *  @param ddbPath path to the source DroneDB database (parent of ".ddb")
+ *  @param path Entry path to associate metadata with (or "" to add metadata to the DroneDB database itself)
+ *  @param key Metadata key
+ *  @param data Metadata data (JSON)
+ *  @param output pointer to C-string where to store result (JSON) */
+DDB_DLL DDBErr DDBMetaSet(const char *ddbPath, const char *path, const char *key, const char *data, char **output);
+
 
 #ifdef __cplusplus
 }

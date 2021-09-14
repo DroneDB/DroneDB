@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "database.h"
+#include "metamanager.h"
 
 #include <fstream>
 #include <string>
@@ -236,7 +237,14 @@ json Database::getAttributes() const {
 }
 
 fs::path Database::rootDirectory() const{
-   return fs::path(this->getOpenFile()).parent_path().parent_path();
+    return fs::path(this->getOpenFile()).parent_path().parent_path();
+}
+
+MetaManager *Database::getMetaManager(){
+    if (metaManager == nullptr){
+        metaManager = new MetaManager(this);
+    }
+    return metaManager;
 }
 
 void Database::setBoolAttribute(const std::string &name, bool value) {
@@ -305,6 +313,13 @@ void Database::clearAttribute(const std::string &name) {
     const auto q = this->query(sql);
     q->bind(1, name);
     q->execute();
+}
+
+Database::~Database(){
+    if (metaManager != nullptr){
+        delete metaManager;
+        metaManager = nullptr;
+    }
 }
 
 }  // namespace ddb
