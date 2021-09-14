@@ -108,9 +108,7 @@ json MetaManager::set(const std::string &key, const std::string &data, const std
         uq->bind(2, eMtime);
         uq->bind(3, id);
         uq->execute();
-        result["id"] = id;
-        result["data"] = eData;
-        result["mtime"] = eMtime;
+        result = getMetaJson("SELECT id, data, mtime FROM entries_meta WHERE id = '" + id + "'");
     }else{
         // Insert
         auto iq = db->query("INSERT INTO entries_meta (path, key, data, mtime) VALUES (?, ?, ?, ?)");
