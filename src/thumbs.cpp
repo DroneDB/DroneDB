@@ -465,10 +465,10 @@ void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
 // imagePath can be either absolute or relative or a network URL and it's up to the user to
 // invoke the function properly as to avoid conflicts with relative paths
 fs::path generateThumb(const fs::path &imagePath, int thumbSize, const fs::path &outImagePath, bool forceRecreate){
-    if (!utils::isNetworkPath(imagePath) && !exists(imagePath)) throw FSException(imagePath.string() + " does not exist");
+    if (!utils::isNetworkPath(imagePath.string()) && !exists(imagePath)) throw FSException(imagePath.string() + " does not exist");
 
     // Check existance of thumbnail, return if exists
-    if (!utils::isNetworkPath(imagePath) && exists(outImagePath) && !forceRecreate){
+    if (!utils::isNetworkPath(imagePath.string()) && exists(outImagePath) && !forceRecreate){
         return outImagePath;
     }
 
