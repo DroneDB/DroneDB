@@ -82,8 +82,6 @@ protected:
 
     template <typename T>
     void rescale(GDALRasterBandH hBand, char *buffer, size_t bufsize);
-
-    bool isNetworkPath(const std::string &inputPath) const;
    public:
     DDB_DLL Tiler(const std::string &inputPath,
                   const std::string &outputFolder, int tileSize = 256,

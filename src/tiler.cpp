@@ -36,7 +36,7 @@ Tiler::Tiler(const std::string &inputPath, const std::string &outputFolder,
       tileSize(tileSize),
       tms(tms),
       mercator(GlobalMercator(tileSize)) {
-    if (!fs::exists(inputPath) && !isNetworkPath(inputPath))
+    if (!fs::exists(inputPath) && !utils::isNetworkPath(inputPath))
         throw FSException(inputPath + " does not exists");
     if (tileSize <= 0 ||
         std::ceil(std::log2(tileSize) != std::floor(std::log2(tileSize))))
@@ -115,10 +115,6 @@ int Tiler::tmsToXYZ(int ty, int tz) const {
 
 int Tiler::xyzToTMS(int ty, int tz) const {
     return static_cast<int>((std::pow(2, tz) - 1)) - ty;  // The same!
-}
-
-bool Tiler::isNetworkPath(const std::string &inputPath) const{
-    return inputPath.find("http://") == 0 || inputPath.find("https://") == 0;
 }
 
 GlobalMercator::GlobalMercator(int tileSize) : tileSize(tileSize) {

@@ -338,7 +338,7 @@ void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
         const auto tz = tMinZ;
 
         pdal::Options eptOpts;
-        eptOpts.add("filename", ("." / eptPath).string());
+        eptOpts.add("filename", (!utils::isNetworkPath(eptPath.string()) && eptPath.is_relative()) ? ("." / eptPath).string() : eptPath.string());
 
         // We could reduce the resolution but this would leave empty gaps in the rasterized output
         double resolution = tz < 0 ? 1 : mercator.resolution(tz);
@@ -496,13 +496,13 @@ void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
     }
 }
 
-// imagePath can be either absolute or relative and it's up to the user to
+// imagePath can be either absolute or relative or a network URL and it's up to the user to
 // invoke the function properly as to avoid conflicts with relative paths
 fs::path generateThumb(const fs::path &imagePath, int thumbSize, const fs::path &outImagePath, bool forceRecreate){
-    if (!exists(imagePath)) throw FSException(imagePath.string() + " does not exist");
+    if (!utils::isNetworkPath(imagePath) && !exists(imagePath)) throw FSException(imagePath.string() + " does not exist");
 
     // Check existance of thumbnail, return if exists
-    if (exists(outImagePath) && !forceRecreate){
+    if (!utils::isNetworkPath(imagePath) && exists(outImagePath) && !forceRecreate){
         return outImagePath;
     }
 

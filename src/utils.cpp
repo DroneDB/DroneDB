@@ -157,4 +157,8 @@ DDB_DLL bool isLowerCase(const std::string &str){
     return true;
 }
 
+DDB_DLL bool isNetworkPath(const std::string &path){
+    return path.find("http://") == 0 || path.find("https://") == 0;
+}
+
 } // namespace ddb

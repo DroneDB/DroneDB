@@ -137,6 +137,8 @@ DDB_DLL bool hasDotNotation(const std::string& path);
 
 DDB_DLL bool isLowerCase(const std::string &str);
 
+DDB_DLL bool isNetworkPath(const std::string &path);
+
 // Fix for removing macros
 #undef max
 #undef min
