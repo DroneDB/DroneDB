@@ -1,4 +1,5 @@
 #include "metamanager.h"
+#include "database.h"
 #include "mio.h"
 #include "exceptions.h"
 #include "utils.h"
@@ -7,13 +8,13 @@
 namespace ddb {
 
 std::string MetaManager::entryPath(const std::string &path) const{
-    if (path.empty() || path == ".") return "";
+    if (path.empty()) return "";
 
     std::string relPath = io::Path(path).relativeTo(db->rootDirectory()).generic();
 
     auto q = db->query("SELECT 1 FROM entries WHERE path = ?");
     q->bind(1, relPath);
-    if (!q->fetch()) throw InvalidArgsException("Path " + path + " not available in index");
+    if (!q->fetch()) throw InvalidArgsException("Path " + relPath + " not available in index");
 
     return relPath;
 }
@@ -107,9 +108,7 @@ json MetaManager::set(const std::string &key, const std::string &data, const std
         uq->bind(2, eMtime);
         uq->bind(3, id);
         uq->execute();
-        result["id"] = id;
-        result["data"] = eData;
-        result["mtime"] = eMtime;
+        result = getMetaJson("SELECT id, data, mtime FROM entries_meta WHERE id = '" + id + "'");
     }else{
         // Insert
         auto iq = db->query("INSERT INTO entries_meta (path, key, data, mtime) VALUES (?, ?, ?, ?)");
@@ -149,6 +148,8 @@ json MetaManager::get(const std::string &key, const std::string &path){
         result.push_back(metaStmtToJson(q.get()));
     }
 
+    if (result.empty()) throw InvalidArgsException("No metadata found for key " + key + (path.empty() ? "" : " and path " + path));
+
     if (isList(key)){
         return result;
     }else{
@@ -165,7 +166,7 @@ json MetaManager::unset(const std::string &key, const std::string &path){
     q->execute();
 
     json j;
-    j["deleted"] = db->changes();
+    j["removed"] = db->changes();
     return j;
 }
 

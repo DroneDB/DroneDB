@@ -4,6 +4,7 @@
 #ifndef DATABASE_H
 #define DATABASE_H
 
+#include "metamanager.h"
 #include "sqlite_database.h"
 #include "ddb_export.h"
 #include "json.h"
@@ -12,6 +13,8 @@
 namespace ddb{
 
 class Database : public SqliteDatabase {
+  private:
+    MetaManager *metaManager = nullptr;
   protected:
     void setIntAttribute(const std::string &name, long value);
     void setLongAttribute(const std::string &name, long long value);
@@ -26,6 +29,7 @@ class Database : public SqliteDatabase {
     void clearAttribute(const std::string &name);
 
   public:
+      DDB_DLL ~Database();
       DDB_DLL static void Initialize();
       DDB_DLL void afterOpen() override;
       DDB_DLL Database &createTables();
@@ -42,6 +46,7 @@ class Database : public SqliteDatabase {
 
       DDB_DLL fs::path rootDirectory() const;
 
+      DDB_DLL MetaManager* getMetaManager();
 };
 
 }
