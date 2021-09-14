@@ -10,7 +10,7 @@ using namespace ddb;
 Statement::Statement(sqlite3 *db, const std::string &query)
     : db(db), query(query), hasRow(false), done(false) {
     if (sqlite3_prepare_v2(db, query.c_str(), static_cast<int>(query.length()), &stmt, nullptr) != SQLITE_OK) {
-        throw SQLException("Cannot prepare SQL statement: " + query);
+        throw SQLException("Cannot prepare SQL statement: " + query + ": " + std::string(sqlite3_errmsg(db)));
     }
 
     LOGD << "Statement: " + query;
@@ -125,4 +125,8 @@ void Statement::reset() {
 void Statement::execute() {
     fetch();
     reset();
+}
+
+std::string Statement::getQuery() const{
+    return query;
 }

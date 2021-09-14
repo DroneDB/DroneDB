@@ -17,12 +17,12 @@ typedef std::function<bool(const Entry &e, bool updated)> AddCallback;
 typedef std::function<void(const std::string& path)> RemoveCallback;
 
 DDB_DLL std::unique_ptr<Database> open(const std::string &directory, bool traverseUp);
-DDB_DLL fs::path rootDirectory(Database *db);
 DDB_DLL std::vector<fs::path> getIndexPathList(const fs::path& rootDirectory, const std::vector<std::string> &paths, bool includeDirs);
 DDB_DLL std::vector<fs::path> getPathList(const std::vector<std::string> &paths, bool includeDirs, int maxDepth);
 DDB_DLL std::vector<std::string> expandPathList(const std::vector<std::string> &paths, bool recursive, int maxRecursionDepth);
 DDB_DLL std::vector<Entry> getMatchingEntries(Database* db, const fs::path& path, int maxRecursionDepth = 0, bool isFolder = false);
-DDB_DLL void checkDeleteBuild(Database *db, std::string hash);
+DDB_DLL void checkDeleteBuild(Database *db, const std::string &hash);
+DDB_DLL void checkDeleteMeta(Database *db, const std::string &path);
 DDB_DLL int deleteFromIndex(Database* db, const std::string &query, bool isFolder = false, RemoveCallback callback = nullptr);
 
 DDB_DLL void doUpdate(Statement *updateQ, const Entry &e);
@@ -34,7 +34,7 @@ DDB_DLL void syncIndex(Database *db);
 DDB_DLL void syncLocalMTimes(Database *db, const std::vector<std::string> &files = {});
 DDB_DLL void delta(Database* sourceDb, Database* targetDb, std::ostream& out, const std::string& format);
 DDB_DLL void moveEntry(Database* db, const std::string& source, const std::string& dest);
-DDB_DLL Entry *getEntry(Database* db, const std::string& path, Entry* entry);
+DDB_DLL bool getEntry(Database* db, const std::string& path, Entry &entry);
 DDB_DLL bool pathExists(Database* db, const std::string& path);
 
 DDB_DLL std::string initIndex(const std::string &directory, bool fromScratch = false);

@@ -99,7 +99,7 @@ std::string stringFormat( const std::string& format, Args ... args ) {
 
 //https://stackoverflow.com/questions/16605967/set-precision-of-stdto-string-when-converting-floating-point-values
 template <typename T>
-std::string to_str(const T value, const int n = 6)
+std::string toStr(const T value, const int n = 6)
 {
     std::ostringstream out;
     out.precision(n);
@@ -126,7 +126,7 @@ DDB_DLL std::string getPass(const std::string &prompt = "Password: ");
 time_t currentUnixTimestamp();
 
 // https://stackoverflow.com/questions/3418231/replace-part-of-a-string-with-another-string
-void string_replace(std::string& str, const std::string& from, const std::string& to);
+void stringReplace(std::string& str, const std::string& from, const std::string& to);
 
 void sleep(int msecs);
 
@@ -134,6 +134,8 @@ DDB_DLL std::string generateRandomString(int length);
 std::string join(const std::vector<std::string> &vec, char separator = ',');
 
 DDB_DLL bool hasDotNotation(const std::string& path);
+
+DDB_DLL bool isLowerCase(const std::string &str);
 
 // Fix for removing macros
 #undef max

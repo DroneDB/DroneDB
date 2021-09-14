@@ -32,7 +32,7 @@ std::string readFile(const std::string &url){
         return GET(url).send().getText();
     }else{
         std::string path = url;
-        utils::string_replace(path, "file://", "");
+        utils::stringReplace(path, "file://", "");
         if (!fs::exists(path)) throw FSException(path + " does not exist");
 
         std::ifstream i(path);

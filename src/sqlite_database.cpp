@@ -76,7 +76,7 @@ bool SqliteDatabase::tableExists(const std::string &table){
     return false;
 }
 
-std::string SqliteDatabase::getOpenFile(){
+std::string SqliteDatabase::getOpenFile() const{
     return openFile;
 }
 
@@ -103,7 +103,7 @@ bool SqliteDatabase::renameColumnIfExists(const std::string &table, const std::s
 
         if (sqlDef.size() > 0 && sqlDef.find(columnDefBefore + ",") != std::string::npos){
             // Old definition
-            utils::string_replace(sqlDef, columnDefBefore, columnDefAfter);
+            utils::stringReplace(sqlDef, columnDefBefore, columnDefAfter);
 
             this->setWritableSchema(true);
             q = this->query("UPDATE sqlite_master SET sql = ? WHERE type = 'table' and name = ?");
@@ -118,7 +118,6 @@ bool SqliteDatabase::renameColumnIfExists(const std::string &table, const std::s
 
     return false;
 }
-
 
 std::unique_ptr<Statement> SqliteDatabase::query(const std::string &query) const{
     return std::make_unique<Statement>(db, query);

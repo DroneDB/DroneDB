@@ -89,7 +89,7 @@ time_t currentUnixTimestamp() {
         .count();
 }
 
-void string_replace(std::string& str, const std::string& from,
+void stringReplace(std::string& str, const std::string& from,
                     const std::string& to) {
     if (from.empty()) return;
     size_t start_pos = 0;
@@ -148,6 +148,13 @@ DDB_DLL bool hasDotNotation(const std::string& path) {
         if (seg == ".." || seg == ".") return true;    
     
     return false;
+}
+
+DDB_DLL bool isLowerCase(const std::string &str){
+    for (size_t i = 0; i < str.length(); i++){
+        if (std::isupper(str[i])) return false;
+    }
+    return true;
 }
 
 } // namespace ddb

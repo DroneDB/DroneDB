@@ -21,4 +21,13 @@ TEST(calculateFootprint, Normal) {
 	EXPECT_STREQ(geom.toWkt().c_str(), "POLYGONZ ((-91.994308101 46.84345864217 98.31, -91.99431905836 46.84287152156 98.31, -91.99300336858 46.84285995357 98.31, -91.99299239689 46.84344707395 98.31, -91.994308101 46.84345864217 98.31))");
 }
 
+TEST(parseJsonGeometries, Normal){
+    Entry e;
+    e.parsePointGeometry("[1, 2, 3]");
+    EXPECT_EQ(e.point_geom.size(), 1);
+
+    e.parsePolygonGeometry("[[[1, 2], [3,4]]]");
+    EXPECT_EQ(e.polygon_geom.size(), 2);
+}
+
 }
