@@ -196,30 +196,6 @@ void RenderImage(const fs::path& outImagePath, const int tileSize, const int nBa
     LOGD << "Done drawing";
 }
 
-int calculateColorShift(const pdal::PointViewPtr& point_view) {
-
-    for (pdal::PointId idx = 0; idx < point_view->size(); ++idx) {
-        auto p = point_view->point(idx);
-
-        const auto red = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Red);
-        const auto green = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Green);
-        const auto blue = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Blue);
-
-        if (red) 
-            return red >> 8 ? 8 : 0;        
-        
-        if (green) 
-            return red >> 8 ? 8 : 0;
-        
-        if (blue) 
-            return red >> 8 ? 8 : 0;
-
-    }
-
-    return 0;
- 
-}
-
 void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
                              const fs::path &outImagePath) {
 
@@ -426,10 +402,7 @@ void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
         LOGD << "OffsetY = " << offsetY;
 
         LOGD << "TileScale = " << tileScale;
-
-        int colorShift = calculateColorShift(point_view);
-
-        LOGD << "ColorShift = " << colorShift;
+        std::vector<PointColor> colors = normalizeColors(point_view);
 
         if (hasSpatialSystem) {
             CoordsTransformer ict(eptInfo.wktProjection, 3857);
@@ -448,14 +421,11 @@ void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
 
                 if (px >= 0 && px < tileSize && py >= 0 && py < tileSize) {
                     // Within bounds
-                    const auto red = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Red) >> colorShift;
-                    const auto green = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Green) >> colorShift;
-                    const auto blue = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Blue) >> colorShift;
 
                     if (zBuffer.get()[py * tileSize + px] < z) {
                         zBuffer.get()[py * tileSize + px] = z;
                         drawCircle(buffer.get(), alphaBuffer.get(), px, py, 2,
-                                   red, green, blue, tileSize, wSize);
+                                   colors[idx].r, colors[idx].g, colors[idx].b, tileSize, wSize);
                     }
                 }
             }
@@ -472,16 +442,12 @@ void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
                 int py = tileSize - 1 - std::round((y - oMinY) * tileScale + offsetY);
 
                 if (px >= 0 && px < tileSize && py >= 0 && py < tileSize) {
-
-                    // Within bounds (shift to uint8_t)
-                    const uint8_t red = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Red) >> colorShift;
-                    const uint8_t green = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Green) >> colorShift;
-                    const uint8_t blue = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Blue) >> colorShift;
+                    // Within bounds
 
                     if (zBuffer.get()[py * tileSize + px] < z) {
                         zBuffer.get()[py * tileSize + px] = z;
                         drawCircle(buffer.get(), alphaBuffer.get(), px, py, 2,
-                                   red, green, blue, tileSize, wSize);
+                                   colors[idx].r, colors[idx].g, colors[idx].b, tileSize, wSize);
                     }
                 }
             }

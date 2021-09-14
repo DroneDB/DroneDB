@@ -9,6 +9,7 @@
 #include "ddb_export.h"
 #include "json.h"
 #include "basicgeometry.h"
+#include <pdal/PointView.hpp>
 
 namespace ddb{
 
@@ -23,10 +24,17 @@ struct PointCloudInfo{
     json toJSON();
 };
 
+struct PointColor{
+    uint8_t r;
+    uint8_t g;
+    uint8_t b;
+    uint8_t a = 0;
+};
+
 DDB_DLL bool getPointCloudInfo(const std::string &filename, PointCloudInfo &info, int polyboundsSrs = 4326);
 DDB_DLL bool getEptInfo(const std::string &eptJson, PointCloudInfo &info, int polyboundsSrs = 4326, int *span = nullptr);
 DDB_DLL void buildEpt(const std::vector<std::string> &filenames, const std::string &outdir);
-
+DDB_DLL std::vector<PointColor> normalizeColors(pdal::PointViewPtr point_view);
 }
 
 #endif // POINTCLOUD_H

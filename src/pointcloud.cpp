@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include <pdal/StageFactory.hpp>
+#include <pdal/PointRef.hpp>
 #include <gdal_priv.h>
 #include <ogr_srs_api.h>
 #include <untwine/untwine/Common.hpp>
@@ -300,6 +301,46 @@ json PointCloudInfo::toJSON(){
     j["dimensions"] = dimensions;
 
     return j;
+}
+
+// Iterates a point view and returns an array with normalized 8bit colors
+std::vector<PointColor> normalizeColors(pdal::PointViewPtr point_view){
+    std::vector<PointColor> result;
+
+    bool normalize = false;
+    for (pdal::PointId idx = 0; idx < point_view->size(); ++idx) {
+        auto p = point_view->point(idx);
+        uint16_t red = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Red);
+        uint16_t green = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Green);
+        uint16_t blue = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Blue);
+
+        if (red > 255 || green > 255 || blue > 255){
+            normalize = true;
+            break;
+        }
+    }
+
+    for (pdal::PointId idx = 0; idx < point_view->size(); ++idx) {
+        auto p = point_view->point(idx);
+        uint16_t red = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Red);
+        uint16_t green = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Green);
+        uint16_t blue = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Blue);
+        PointColor color;
+
+        if (normalize){
+            color.r = red >> 8;
+            color.g = green >> 8;
+            color.b = blue >> 8;
+        }else{
+            color.r = static_cast<uint8_t>(red);
+            color.g = static_cast<uint8_t>(green);
+            color.b = static_cast<uint8_t>(blue);
+        }
+
+        result.push_back(color);
+    }
+
+    return result;
 }
 
 }
