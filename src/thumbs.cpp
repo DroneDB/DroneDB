@@ -40,7 +40,7 @@ bool supportsThumbnails(EntryType type){
 
 void generateThumbs(const std::vector<std::string> &input, const fs::path &output, int thumbSize, bool useCrc){
     if (input.size() > 1) io::assureFolderExists(output);
-    const bool outputIsFile = input.size() == 1 && io::Path(output).checkExtension({"jpg", "jpeg"});
+    const bool outputIsFile = input.size() == 1 && io::Path(output).checkExtension({"jpg", "jpeg", "png", "json"});
 
     const std::vector<fs::path> filePaths = std::vector<fs::path>(input.begin(), input.end());
 
