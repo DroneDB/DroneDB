@@ -209,6 +209,32 @@ DDB_DLL DDBErr DDBMetaAdd(const char *ddbPath, const char *path, const char *key
  *  @param output pointer to C-string where to store result (JSON) */
 DDB_DLL DDBErr DDBMetaSet(const char *ddbPath, const char *path, const char *key, const char *data, char **output);
 
+/** Remove metadata
+ *  @param ddbPath path to the source DroneDB database (parent of ".ddb")
+ *  @param id UUID of the metadata item to remove
+ *  @param output pointer to C-string where to store result (JSON) */
+DDB_DLL DDBErr DDBMetaRemove(const char *ddbPath, const char *id, char **output);
+
+/** Get metadata
+ *  @param ddbPath path to the source DroneDB database (parent of ".ddb")
+ *  @param path Entry path to retrieve metadata from (or "" to get metadata from the DroneDB database itself)
+ *  @param key Metadata key
+ *  @param output pointer to C-string where to store result (JSON) */
+DDB_DLL DDBErr DDBMetaGet(const char *ddbPath, const char *path, const char *key, char **output);
+
+/** Unset metadata
+ *  @param ddbPath path to the source DroneDB database (parent of ".ddb")
+ *  @param path Entry path to unset metadata for (or "" to unset metadata for the DroneDB database itself)
+ *  @param key Metadata key
+ *  @param output pointer to C-string where to store result (JSON) */
+DDB_DLL DDBErr DDBMetaUnset(const char *ddbPath, const char *path, const char *key, char **output);
+
+/** List metadata
+ *  @param ddbPath path to the source DroneDB database (parent of ".ddb")
+ *  @param path Entry path to list metadata for (or "" to list metadata for the DroneDB database itself)
+ *  @param output pointer to C-string where to store result (JSON) */
+DDB_DLL DDBErr DDBMetaList(const char *ddbPath, const char *path, char **output);
+
 
 #ifdef __cplusplus
 }
