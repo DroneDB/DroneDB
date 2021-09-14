@@ -304,7 +304,7 @@ json PointCloudInfo::toJSON(){
 }
 
 // Iterates a point view and returns an array with normalized 8bit colors
-std::vector<PointColor> normalizeColors(pdal::PointViewPtr point_view){
+std::vector<PointColor> normalizeColors(std::shared_ptr<pdal::PointView> point_view) {
     std::vector<PointColor> result;
 
     bool normalize = false;
