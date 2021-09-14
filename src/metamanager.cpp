@@ -148,6 +148,8 @@ json MetaManager::get(const std::string &key, const std::string &path){
         result.push_back(metaStmtToJson(q.get()));
     }
 
+    if (result.empty()) throw InvalidArgsException("No metadata found for key " + key + (path.empty() ? "" : " and path " + path));
+
     if (isList(key)){
         return result;
     }else{
