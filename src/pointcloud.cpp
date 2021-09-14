@@ -149,14 +149,14 @@ bool getEptInfo(const std::string &eptJson, PointCloudInfo &info, int polyBounds
         return false;
     }
 
-    if (!j.contains("boundsConforming") || !j.contains("points") || !j.contains("srs") || !j.contains("schema") || !j.contains("span")) {
+    if (!j.contains("boundsConforming") || !j.contains("points") || !j.contains("schema") || !j.contains("span")) {
         LOGD << "Invalid EPT: " << eptJson;
         return false;
     }
 
     info.pointCount = j["points"];
 
-    if (j["srs"].contains("wkt")){
+    if (j.contains("srs") && j["srs"].contains("wkt")){
         info.wktProjection = j["srs"]["wkt"];
     }else{
         info.wktProjection = "";
