@@ -14,7 +14,7 @@ void Meta::setOptions(cxxopts::Options &opts) {
     // clang-format off
     opts
     .positional_help("[args]")
-    .custom_help("meta [add|set|rm|get|unset|ls] [args]")
+    .custom_help("meta [add|set|rm|get|unset|ls] [key|ID] [data] [-p path]")
     .add_options()
     ("c,command", "Command", cxxopts::value<std::string>())
     ("k,key", "Metadata key/ID", cxxopts::value<std::string>()->default_value(""))
