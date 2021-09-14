@@ -24,8 +24,6 @@ class EptTiler : public Tiler {
     PointCloudInfo eptInfo;
     bool hasColors;
 
-    void drawCircle(uint8_t *buffer, uint8_t *alpha, int px, int py, int radius, uint8_t r, uint8_t g, uint8_t b);
-
    public:
     DDB_DLL EptTiler(const std::string &eptPath,
                   const std::string &outputFolder, int tileSize = 256,
@@ -34,6 +32,9 @@ class EptTiler : public Tiler {
 
     DDB_DLL std::string tile(int tz, int tx, int ty) override;
 };
+
+DDB_DLL void drawCircle(uint8_t *buffer, uint8_t *alpha, int px, int py, int radius,
+                uint8_t r, uint8_t g, uint8_t b, int tileSize, int wSize);
 
 }  // namespace ddb
 

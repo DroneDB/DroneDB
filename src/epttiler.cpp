@@ -43,8 +43,8 @@ EptTiler::EptTiler(const std::string &inputPath, const std::string &outputFolder
     oMaxY = eptInfo.polyBounds.getPoint(2).x;
     oMinY = eptInfo.polyBounds.getPoint(0).x;
 
-    LOGD << "Bounds (output SRS): " << oMinX << "," << oMinY << "," << oMaxX
-         << "," << oMaxY;
+    LOGD << "Bounds (output SRS): (" << oMinX << "; " << oMinY << ") - ("
+         << oMaxX << "; " << oMaxY << ")";
 
     // Max/min zoom level
     tMinZ = mercator.zoomForLength(std::min(oMaxX - oMinX, oMaxY - oMinY));
@@ -59,7 +59,7 @@ EptTiler::EptTiler(const std::string &inputPath, const std::string &outputFolder
     LOGD << "Has colors: " << (hasColors ? "true" : "false");
 
 #ifdef _WIN32
-    fs::path caBundlePath = io::getDataPath("curl-ca-bundle.crt");
+    const fs::path caBundlePath = io::getDataPath("curl-ca-bundle.crt");
     if (!caBundlePath.empty()) {
         LOGD << "ARBITRER CA Bundle: " << caBundlePath.string();
         std::stringstream ss;
@@ -83,7 +83,12 @@ std::string EptTiler::tile(int tz, int tx, int ty) {
     }
 
     BoundingBox<Projected2Di> tMinMax = getMinMaxCoordsForZ(tz);
-    if (!tMinMax.contains(tx, ty)) throw GDALException("Out of bounds");
+    if (!tMinMax.contains(tx, ty)) 
+        throw GDALException(std::string("Out of bounds [(") + 
+            std::to_string(tMinMax.min.x) + "; " + 
+            std::to_string(tMinMax.min.y) + ") - (" + 
+            std::to_string(tMinMax.max.x) + "; " + 
+            std::to_string(tMinMax.max.y) + ")]");
 
     // Get bounds of tile (3857), convert to EPT CRS
     auto tileBounds = mercator.tileBounds(tx, ty, tz);
@@ -102,7 +107,9 @@ std::string EptTiler::tile(int tz, int tx, int ty) {
     ct.transform(&bounds.max.x, &bounds.max.y);
 
     pdal::Options eptOpts;
-    eptOpts.add("filename", inputPath);
+    fs::path path(inputPath);
+    eptOpts.add("filename", (!utils::isNetworkPath(inputPath) && path.is_relative()) ? ("." / path).string() : inputPath);
+
     std::stringstream ss;
     ss << std::setprecision(14) << "([" << bounds.min.x << "," << bounds.min.y << "], " <<
                                     "[" << bounds.max.x << "," << bounds.max.y << "])";
@@ -116,6 +123,7 @@ std::string EptTiler::tile(int tz, int tx, int ty) {
     std::unique_ptr<pdal::EptReader> eptReader = std::make_unique<pdal::EptReader>();
     pdal::Stage *main = eptReader.get();
     eptReader->setOptions(eptOpts);
+    LOGD << "Options set";
 
     std::unique_ptr<pdal::ColorinterpFilter> colorFilter;
     if (!hasColors){
@@ -136,6 +144,8 @@ std::string EptTiler::tile(int tz, int tx, int ty) {
     pdal::PointTable table;
     main->prepare(table);
     pdal::PointViewSet point_view_set;
+
+    LOGD << "PointTable prepared";
 
     try{
         point_view_set = main->execute(table);
@@ -185,7 +195,7 @@ std::string EptTiler::tile(int tz, int tx, int ty) {
 
             if (zBuffer.get()[py * tileSize + px] < z){
                 zBuffer.get()[py * tileSize + px] = z;
-                drawCircle(buffer.get(), alphaBuffer.get(), px, py, 2, red, green, blue);
+                drawCircle(buffer.get(), alphaBuffer.get(), px, py, 2, red, green, blue, tileSize, wSize);
             }
         }
     }
@@ -229,18 +239,20 @@ std::string EptTiler::tile(int tz, int tx, int ty) {
     return tilePath;
 }
 
-void EptTiler::drawCircle(uint8_t *buffer, uint8_t *alpha, int px, int py, int radius, uint8_t r, uint8_t g, uint8_t b){
-    int r2 = radius * radius;
-    int area = r2 << 2;
-    int rr = radius << 1;
 
-    for (int i = 0; i < area; i++){
-        int tx = (i % rr) - radius;
-        int ty = (i / rr) - radius;
-        if (tx * tx + ty * ty <= r2){
-            int dx = px + tx;
-            int dy = py + ty;
-            if (dx >= 0 && dx < tileSize && dy >= 0 && dy < tileSize){
+void drawCircle(uint8_t *buffer, uint8_t *alpha, int px, int py, int radius,
+                uint8_t r, uint8_t g, uint8_t b, int tileSize, int wSize) {
+    const int r2 = radius * radius;
+    const int area = r2 << 2;
+    const int rr = radius << 1;
+
+    for (int i = 0; i < area; i++) {
+        const int tx = (i % rr) - radius;
+        const int ty = (i / rr) - radius;
+        if (tx * tx + ty * ty <= r2) {
+            const int dx = px + tx;
+            const int dy = py + ty;
+            if (dx >= 0 && dx < tileSize && dy >= 0 && dy < tileSize) {
                 buffer[dy * tileSize + dx + wSize * 0] = r;
                 buffer[dy * tileSize + dx + wSize * 1] = g;
                 buffer[dy * tileSize + dx + wSize * 2] = b;
@@ -249,6 +261,5 @@ void EptTiler::drawCircle(uint8_t *buffer, uint8_t *alpha, int px, int py, int r
         }
     }
 }
-
 
 }  // namespace ddb

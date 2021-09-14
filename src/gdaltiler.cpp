@@ -61,7 +61,7 @@ GDALTiler::GDALTiler(const std::string &inputPath, const std::string &outputFold
     if (memDrv == nullptr) throw GDALException("Cannot create MEM driver");
 
     std::string openPath = inputPath;
-    if (isNetworkPath(openPath)){
+    if (utils::isNetworkPath(openPath)){
         CPLSetConfigOption("GDAL_DISABLE_READDIR_ON_OPEN", "YES");
         CPLSetConfigOption("CPL_VSIL_CURL_ALLOWED_EXTENSIONS", "tif");
         //CPLSetConfigOption("CPL_DEBUG", "ON");

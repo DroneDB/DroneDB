@@ -32,10 +32,10 @@ void Thumbs::run(cxxopts::ParseResult &opts) {
         printHelp();
     }
 
-    auto input = opts["input"].as<std::vector<std::string>>();
-    auto output = opts["output"].as<std::string>();
-    auto thumbSize = opts["size"].as<int>();
-    auto useCrc = opts["use-crc"].count();
+    const auto input = opts["input"].as<std::vector<std::string>>();
+    const auto output = opts["output"].as<std::string>();
+    const auto thumbSize = opts["size"].as<int>();
+    const auto useCrc = opts["use-crc"].count();
 
     ddb::generateThumbs(input, output, thumbSize, useCrc);
 }

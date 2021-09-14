@@ -21,7 +21,7 @@ namespace ddb {
 std::string Tiler::getTilePath(int z, int x, int y, bool createIfNotExists) {
     // TODO: retina tiles support?
     const fs::path dir = outputFolder / std::to_string(z) / std::to_string(x);
-    if (createIfNotExists && !fs::exists(dir)) {
+    if (createIfNotExists && !exists(dir)) {
         io::createDirectories(dir);
     }
 
@@ -36,7 +36,7 @@ Tiler::Tiler(const std::string &inputPath, const std::string &outputFolder,
       tileSize(tileSize),
       tms(tms),
       mercator(GlobalMercator(tileSize)) {
-    if (!fs::exists(inputPath) && !isNetworkPath(inputPath))
+    if (!fs::exists(inputPath) && !utils::isNetworkPath(inputPath))
         throw FSException(inputPath + " does not exists");
     if (tileSize <= 0 ||
         std::ceil(std::log2(tileSize) != std::floor(std::log2(tileSize))))
@@ -70,7 +70,7 @@ std::vector<TileInfo> Tiler::getTilesForZoomLevel(int tz) const {
 BoundingBox<int> Tiler::getMinMaxZ() const { return BoundingBox(tMinZ, tMaxZ); }
 
 BoundingBox<Projected2Di> Tiler::getMinMaxCoordsForZ(int tz) const {
-    BoundingBox<Projected2Di> b(mercator.metersToTile(oMinX, oMinY, tz),
+    BoundingBox b(mercator.metersToTile(oMinX, oMinY, tz),
                                 mercator.metersToTile(oMaxX, oMaxY, tz));
 
     LOGD << "MinMaxCoordsForZ(" << tz << ") = (" << b.min.x << ", " << b.min.y << "), (" << b.max.x << ", " << b.max.y << ")";
@@ -115,10 +115,6 @@ int Tiler::tmsToXYZ(int ty, int tz) const {
 
 int Tiler::xyzToTMS(int ty, int tz) const {
     return static_cast<int>((std::pow(2, tz) - 1)) - ty;  // The same!
-}
-
-bool Tiler::isNetworkPath(const std::string &inputPath) const{
-    return inputPath.find("http://") == 0 || inputPath.find("https://") == 0;
 }
 
 GlobalMercator::GlobalMercator(int tileSize) : tileSize(tileSize) {
