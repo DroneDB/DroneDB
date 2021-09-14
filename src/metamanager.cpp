@@ -8,13 +8,13 @@
 namespace ddb {
 
 std::string MetaManager::entryPath(const std::string &path) const{
-    if (path.empty() || path == ".") return "";
+    if (path.empty()) return "";
 
     std::string relPath = io::Path(path).relativeTo(db->rootDirectory()).generic();
 
     auto q = db->query("SELECT 1 FROM entries WHERE path = ?");
     q->bind(1, relPath);
-    if (!q->fetch()) throw InvalidArgsException("Path " + path + " not available in index");
+    if (!q->fetch()) throw InvalidArgsException("Path " + relPath + " not available in index");
 
     return relPath;
 }
