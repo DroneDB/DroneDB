@@ -18,7 +18,7 @@ void Meta::setOptions(cxxopts::Options &opts) {
     .add_options()
     ("c,command", "Command", cxxopts::value<std::string>())
     ("k,key", "Metadata key/ID", cxxopts::value<std::string>()->default_value(""))
-    ("p,path", "Path to associate metadata with", cxxopts::value<std::string>()->default_value("."))
+    ("p,path", "Path to associate metadata with", cxxopts::value<std::string>()->default_value(""))
     ("d,data", "Data string|number|JSON to set", cxxopts::value<std::string>()->default_value(""))
     ("w,working-dir", "Working directory", cxxopts::value<std::string>()->default_value("."))
     ("f,format", "Output format (text|json)", cxxopts::value<std::string>()->default_value("text"));
