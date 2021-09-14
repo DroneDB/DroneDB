@@ -7,7 +7,7 @@
 #include "ddb.h"
 
 int main(int argc, char **argv) {
-    DDBRegisterProcess(true);
+    DDBRegisterProcess(false);
 
     // TODO: ability to clean previous TestAreas
 

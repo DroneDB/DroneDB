@@ -21,15 +21,11 @@
 
 namespace ddb {
 
-
-    DDB_DLL void loadPointGeom(BasicPointGeometry *point_geom, const std::string& text);
-    DDB_DLL void loadPolygonGeom(BasicPolygonGeometry *polygon_geom, const std::string& text);
-
 struct Entry {
     std::string path = "";
     std::string hash = "";
     EntryType type = EntryType::Undefined;
-    json meta;
+    json properties;
     time_t mtime = 0;
     std::uintmax_t size = 0;
     int depth = 0;
@@ -37,45 +33,103 @@ struct Entry {
     BasicPointGeometry point_geom;
     BasicPolygonGeometry polygon_geom;
 
+    json meta;
+
     DDB_DLL void toJSON(json &j) const;
+    DDB_DLL void fromJSON(const json &j);
     DDB_DLL bool toGeoJSON(json &j, BasicGeometryType type = BasicGeometryType::BGAuto);
     DDB_DLL std::string toString();
 
     Entry() { }
 
-    
-    Entry(Statement& s) {
+    Entry(const std::string &path, const std::string &hash,
+          int type, const std::string &propertiesJson,
+          long long mtime, std::uintmax_t size, int depth,
+          const std::string &pointCoordinatesJson = "", const std::string &polyCoordinatesJson = "", const std::string &metaJson = ""){
+        parseFields(path, hash, type, propertiesJson, mtime, size, depth, pointCoordinatesJson, polyCoordinatesJson, metaJson);
+    }
 
-        LOGD << "Columns: " << s.getColumnsCount();
+    void parseFields(const std::string &path, const std::string &hash,
+                     int type, const std::string &propertiesJson,
+                     long long mtime, std::uintmax_t size, int depth,
+                     const std::string &pointCoordinatesJson = "", const std::string &polyCoordinatesJson = "", const std::string &metaJson = ""){
+        this->path = path;
+        this->hash = hash;
+        this->type = static_cast<EntryType>(type);
+        try{
+            this->properties = json::parse(propertiesJson, nullptr, false);
+        }catch(json::exception &e){
+            LOGD << "Invalid entry JSON: " << e.what();
+        }
+        this->mtime = static_cast<time_t>(mtime);
+        this->size = size;
+        this->depth = depth;
 
-        // Expects a SELECT clause with: (order matters)
-        // path, hash, type, meta, mtime, size, depth, AsGeoJSON(point_geom), AsGeoJSON(polygon_geom)
-        this->path = s.getText(0);
-        this->hash = s.getText(1);
-        this->type = (EntryType)s.getInt(2);
-        this->meta = json::parse(s.getText(3), nullptr, false);
-        this->mtime = (time_t)s.getInt(4);
-        this->size = s.getInt64(5);
-        this->depth = s.getInt(6);
-        
+        this->parsePointGeometry(pointCoordinatesJson);
+        this->parsePolygonGeometry(polyCoordinatesJson);
+        this->parseMeta(metaJson);
+    }
 
-        if (s.getColumnsCount() == 9) {
+    void parsePointGeometry(const std::string &coordinatesJson){
+        point_geom.clear();
+        if (coordinatesJson.empty()) return;
 
-            const auto point_geom_raw = s.getText(7);
+        json j;
+        try{
+            j = json::parse(coordinatesJson);
+        }catch(json::exception &e){
+            throw JSONException(e.what());
+        }
 
-            //LOGD << "point_geom: " << point_geom_raw;
-            if (!point_geom_raw.empty()) ddb::loadPointGeom(&this->point_geom, point_geom_raw);
-            //LOGD << "OK";
+        if (!j.is_array() || j.size() < 2){
+            LOGD << "Invalid coordinatesJson: " << coordinatesJson;
+            return;
+        }
 
-            const auto polygon_geom_raw = s.getText(8);
-
-            //LOGD << "polygon_geom: " << polygon_geom_raw;
-            if (!polygon_geom_raw.empty()) ddb::loadPolygonGeom(&this->polygon_geom, polygon_geom_raw);
-            //LOGD << "OK";
-
+        if (j.size() == 2){
+            point_geom.addPoint(j[0].get<double>(), j[1].get<double>(), 0);
+        }else if (j.size() >= 3){
+            point_geom.addPoint(j[0].get<double>(), j[1].get<double>(), j[2].get<double>());
         }
     }
 
+    void parsePolygonGeometry(const std::string &coordinatesJson){
+        polygon_geom.clear();
+        if (coordinatesJson.empty()) return;
+
+        json j;
+        try{
+            j = json::parse(coordinatesJson);
+        }catch(json::exception &e){
+            throw JSONException(e.what());
+        }
+
+        if (!j.is_array() || j.size() != 1){
+            LOGD << "Invalid coordinatesJson: " << coordinatesJson;
+            return;
+        }
+
+        json ring = j[0];
+        for (auto &coord : ring){
+            if (coord.size() == 2){
+                polygon_geom.addPoint(coord[0].get<double>(), coord[1].get<double>(), 0);
+            }else if (coord.size() >= 3){
+                polygon_geom.addPoint(coord[0].get<double>(), coord[1].get<double>(), coord[2].get<double>());
+            }
+        }
+    }
+
+    void parseMeta(const std::string &metaJson){
+        meta.clear();
+        if (metaJson.empty()) return;
+
+        try{
+            meta = json::parse(metaJson);
+        }catch(json::exception &e){
+            LOGD << "Corrupted meta: " << metaJson;
+            return;
+        }
+    }
 };
 
 /** Parse an entry

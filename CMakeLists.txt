@@ -71,7 +71,8 @@ if (WIN32)
     function (download_dependency target_zip url)
         if (NOT EXISTS "${DOWNLOADS_DIR}/${target_zip}")
             message("Downloading ${target_zip}...")
-            file(DOWNLOAD "${url}" "${DOWNLOADS_DIR}/${target_zip}")
+            file(DOWNLOAD "${url}" "${DOWNLOADS_DIR}/${target_zip}" STATUS result)
+            message("Download result: ${result}")
         endif()
     endfunction()
 
@@ -84,13 +85,14 @@ if (WIN32)
 
     # Download GDAL/CURL/sqlite3/spatialite/PDAL and supporting libraries
     download_dependency("gdal_libs.zip" "https://github.com/DroneDB/ddb_data/releases/download/v0.9.2/release-1911-x64-gdal-3-0-4-mapserver-7-4-3-libs.zip")
-    download_dependency("gdal_bins.zip" "https://github.com/DroneDB/ddb_data/releases/download/v0.9.2/release-1911-x64-gdal-3-0-4-mapserver-7-4-3.zip")
+    download_dependency("gdal_bins.zip" "https://github.com/DroneDB/ddb_data/releases/download/v0.9.2/release-1911-x64-gdal-3-0-4-mapserver-7-4-3-sans-sqlite3.zip")
     download_dependency("laszip.zip" "https://github.com/DroneDB/ddb_data/releases/download/v0.9.2/laszip-3-4-3.zip")
     download_dependency("geotiff.zip" "https://github.com/DroneDB/ddb_data/releases/download/v0.9.2/release-1911-x64-gdal-3-0-4-mapserver-7-4-3-geotiff.zip")
     download_dependency("pdal.zip" "https://github.com/DroneDB/ddb_data/releases/download/v0.9.2/release-1911-x64-gdal-3-0-4-mapserver-7-4-3-pdal-2-3-0.zip")
     download_dependency("zlib.zip" "https://github.com/DroneDB/ddb_data/releases/download/v0.9.2/zlib-1-2-11.zip")
     download_dependency("libzip.zip" "https://github.com/DroneDB/ddb_data/releases/download/v0.9.2/zlib-1-2-11-libzip-1-8-0.zip")
-
+    download_dependency("sqlite3.zip" "https://github.com/DroneDB/ddb_data/releases/download/v0.9.2/sqlite-dll-win64-x64-3360000.zip")
+    
     extract_dependency("gdal_libs.zip" "gdal/include" "gdal")
     extract_dependency("gdal_bins.zip" "gdal/bin" "gdal")
     extract_dependency("laszip.zip" "laszip/include" "laszip")
@@ -98,6 +100,7 @@ if (WIN32)
     extract_dependency("pdal.zip" "pdal/include" "pdal")
     extract_dependency("zlib.zip" "zlib/include" "zlib")
     extract_dependency("libzip.zip" "libzip/include" "libzip")
+    extract_dependency("sqlite3.zip", "sqlite3", "sqlite3")
     
     set(GDAL_LIBRARY "${DOWNLOADS_DIR}/gdal/lib/gdal_i.lib")
     set(GDAL_INCLUDE_DIR "${DOWNLOADS_DIR}/gdal/include")
@@ -181,7 +184,7 @@ if (WIN32)
     copy_dlls("pdal/bin/*.dll")
     copy_dlls("zlib/bin/*.dll")
     copy_dlls("libzip/bin/*.dll")
-    
+    copy_dlls("sqlite3/bin/*.dll")    
 
     file(COPY "${DOWNLOADS_DIR}/gdal/bin/proj6/share/proj.db" DESTINATION ${CMAKE_BINARY_DIR})
 

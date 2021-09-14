@@ -32,13 +32,16 @@ const char *entriesTableDdl = R"<<<(
       path TEXT PRIMARY KEY,
       hash TEXT,
       type INTEGER,
-      meta TEXT,
+      properties TEXT,
       mtime INTEGER,
       size  INTEGER,
       depth INTEGER
   );
   SELECT AddGeometryColumn("entries", "point_geom", 4326, "POINTZ", "XYZ");
   SELECT AddGeometryColumn("entries", "polygon_geom", 4326, "POLYGONZ", "XYZ");
+
+  CREATE INDEX IF NOT EXISTS ix_entries_type
+  ON entries (type);
 )<<<";
 
 const char *passwordsTableDdl = R"<<<(
@@ -57,6 +60,31 @@ const char *attributesTableDdl = R"<<<(
       tvalue TEXT,
       bvalue BLOB
   );
+)<<<";
+
+const char *entriesMetaTableDdl = R"<<<(
+  CREATE TABLE IF NOT EXISTS entries_meta (
+      id TEXT PRIMARY KEY,
+      path TEXT NOT NULL,
+      key TEXT NOT NULL,
+      data TEXT NOT NULL,
+      mtime INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS ix_entries_meta_path
+  ON entries_meta (path);
+  CREATE INDEX IF NOT EXISTS ix_entries_meta_key
+  ON entries_meta (key);
+
+CREATE TRIGGER tg_entries_meta_autouuid
+AFTER INSERT ON entries_meta
+FOR EACH ROW
+WHEN (NEW.id IS NULL)
+BEGIN
+   UPDATE entries_meta SET id = (select lower(hex( randomblob(4)) || '-' || hex( randomblob(2))
+             || '-' || '4' || substr( hex( randomblob(2)), 2) || '-'
+             || substr('AB89', 1 + (abs(random()) % 4) , 1)  ||
+             substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))) ) WHERE rowid = NEW.rowid;
+END;
 )<<<";
 
 Database &Database::createTables() {
@@ -90,6 +118,19 @@ DDB_DLL void Database::ensureSchemaConsistency() {
         LOGD << "Attributes table does not exist, creating it";
         this->exec(attributesTableDdl);
         LOGD << "Attributes table created";
+    }
+
+    if (!this->tableExists("entries_meta")){
+        LOGD << "Entries meta table does not exist, creating it";
+        this->exec(entriesMetaTableDdl);
+        LOGD << "Entries meta table created";
+    }
+
+    // Migration from 0.9.11 to 0.9.12 (can be removed in the near future)
+    // where we renamed "entries.meta" --> "entries.properties"
+    // TODO: remove me in 2022
+    if (this->renameColumnIfExists("entries", "meta TEXT", "properties TEXT")){
+        this->reopen();
     }
 }
 
@@ -162,8 +203,40 @@ json Database::getAttributes() const {
             j["entries"] = q->getInt(0);
         }
     }
+
+    // Find meta
+    {
+        const std::string sql = R"<<<(SELECT CASE
+                WHEN key IS NULL THEN NULL
+                ELSE json_group_object(key, meta)
+            END AS meta
+                    FROM (
+                        SELECT key, CASE WHEN substr(key, -1, 1) = 's'
+                            THEN json_group_array(json_object('id', emi.id, 'data', json(emi.data), 'mtime', emi.mtime))
+                            ELSE json_object('id', emi.id, 'data', json(emi.data), 'mtime', emi.mtime)
+                        END AS meta
+                        FROM entries_meta emi
+                        WHERE path = ""
+                        GROUP BY key
+                    )
+            )<<<";
+        const auto q = this->query(sql);
+        if (q->fetch()){
+            const std::string metaJson = q->getText(0);
+            try{
+                json meta = json::parse(metaJson);
+                if (!meta.empty()) j["meta"] = meta;
+            }catch(json::exception){
+                LOGD << "Malformed database meta: " << metaJson;
+            }
+        }
+    }
     
     return j;
+}
+
+fs::path Database::rootDirectory() const{
+   return fs::path(this->getOpenFile()).parent_path().parent_path();
 }
 
 void Database::setBoolAttribute(const std::string &name, bool value) {

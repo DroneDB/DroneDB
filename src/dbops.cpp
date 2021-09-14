@@ -24,7 +24,7 @@
 namespace ddb {
 
 #define UPDATE_QUERY                                                        \
-    "UPDATE entries SET hash=?, type=?, meta=?, mtime=?, size=?, depth=?, " \
+    "UPDATE entries SET hash=?, type=?, properties=?, mtime=?, size=?, depth=?, " \
     "point_geom=GeomFromText(?, 4326), polygon_geom=GeomFromText(?, 4326) " \
     "WHERE path=?"
 
@@ -49,18 +49,13 @@ std::unique_ptr<Database> open(const std::string &directory,
 
     db->open(dbasePath.string());
 
-    if (!db->tableExists("entries")) 
+    if (!db->tableExists("entries"))
         throw DBException("Table 'entries' not found (not a valid database: " +
                           dbasePath.string() + ")");
 
     db->ensureSchemaConsistency();
-    
-    return db;
-}
 
-fs::path rootDirectory(Database *db) {
-    assert(db != nullptr);
-    return fs::path(db->getOpenFile()).parent_path().parent_path();
+    return db;
 }
 
 // Computes a list of paths inside rootDirectory
@@ -68,7 +63,7 @@ fs::path rootDirectory(Database *db) {
 // or an exception is thrown
 // If includeDirs is true and the list includes paths to directories that are in
 // paths eg. if path/to/file is in paths, both "path/" and "path/to" are
-// includes in the result.
+// included in the result.
 // ".ddb" files/dirs are always ignored and skipped.
 // If a directory is in the input paths, they are included regardless of
 // includeDirs
@@ -123,6 +118,14 @@ std::vector<fs::path> getIndexPathList(const fs::path &rootDirectory,
             }
 
             directories[p.string()] = true;
+            if (includeDirs) {
+                while (p.has_parent_path() &&
+                       rootDir.isParentOf(p.parent_path()) &&
+                       p.string() != p.parent_path().string()) {
+                    p = p.parent_path();
+                    directories[p.string()] = true;
+                }
+            }
         } else if (fs::exists(p)) {
             // File
             result.push_back(p);
@@ -203,13 +206,19 @@ std::vector<fs::path> getPathList(const std::vector<std::string> &paths,
 
 std::vector<std::string> expandPathList(const std::vector<std::string> &paths,
                                         bool recursive, int maxRecursionDepth) {
-    if (!recursive) return paths;
-
     std::vector<std::string> result;
-    auto pl = getPathList(paths, true, maxRecursionDepth);
-    for (auto &p : pl) {
-        result.push_back(p.string());
+
+    if (!recursive){
+        for (auto &p : paths){
+            result.push_back(fs::absolute(p).string());
+        }
+    }else{
+        auto pl = getPathList(paths, true, maxRecursionDepth);
+        for (auto &p : pl) {
+            result.push_back(fs::absolute(p).string());
+        }
     }
+
     return result;
 }
 
@@ -229,7 +238,7 @@ FileStatus checkUpdate(Entry &e, const fs::path &p, long long dbMtime,
     if (e.mtime != dbMtime) {
         LOGD << p.string() << " modified time ( " << dbMtime
              << " ) differs from file value: " << e.mtime;
-        
+
         e.hash = Hash::fileSHA256(p.string());
 
         if (dbHash != e.hash) {
@@ -237,7 +246,7 @@ FileStatus checkUpdate(Entry &e, const fs::path &p, long long dbMtime,
                     << " | new: " << e.hash << ")";
             return Modified;
         }
-        
+
     }
 
     return NotModified;
@@ -247,7 +256,7 @@ void doUpdate(Statement *updateQ, const Entry &e) {
     // Fields
     updateQ->bind(1, e.hash);
     updateQ->bind(2, e.type);
-    updateQ->bind(3, e.meta.dump());
+    updateQ->bind(3, e.properties.dump());
     updateQ->bind(4, static_cast<long long>(e.mtime));
     updateQ->bind(5, static_cast<long long>(e.size));
     updateQ->bind(6, e.depth);
@@ -263,12 +272,12 @@ void doUpdate(Statement *updateQ, const Entry &e) {
 void addToIndex(Database *db, const std::vector<std::string> &paths,
                 AddCallback callback) {
     if (paths.empty()) return;  // Nothing to do
-    const fs::path directory = rootDirectory(db);
+    const fs::path directory = db->rootDirectory();
     auto pathList = getIndexPathList(directory, paths, true);
 
     auto q = db->query("SELECT mtime,hash FROM entries WHERE path=?");
     auto insertQ = db->query(
-        "INSERT INTO entries (path, hash, type, meta, mtime, size, depth, "
+        "INSERT INTO entries (path, hash, type, properties, mtime, size, depth, "
         "point_geom, polygon_geom) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, GeomFromText(?, 4326), GeomFromText(?, "
         "4326))");
@@ -281,7 +290,7 @@ void addToIndex(Database *db, const std::vector<std::string> &paths,
         if (p.has_filename()) {
             const auto fileName = p.filename().generic_string();
             if (fileName.find('\\') != std::string::npos) {
-                
+
                 LOGD << "Skipping '" << p << "'";
 
                 // Skip file
@@ -313,7 +322,7 @@ void addToIndex(Database *db, const std::vector<std::string> &paths,
                 insertQ->bind(1, e.path);
                 insertQ->bind(2, e.hash);
                 insertQ->bind(3, e.type);
-                insertQ->bind(4, e.meta.dump());
+                insertQ->bind(4, e.properties.dump());
                 insertQ->bind(5, static_cast<long long>(e.mtime));
                 insertQ->bind(6, static_cast<long long>(e.size));
                 insertQ->bind(7, e.depth);
@@ -345,7 +354,7 @@ void removeFromIndex(Database *db, const std::vector<std::string> &paths, Remove
         return;
     }
 
-    const fs::path directory = rootDirectory(db);
+    const fs::path directory = db->rootDirectory();
 
     auto pathList = std::vector<fs::path>(paths.begin(), paths.end());
 
@@ -363,7 +372,7 @@ void removeFromIndex(Database *db, const std::vector<std::string> &paths, Remove
         for (auto &e : entryMatches) {
             auto cnt = deleteFromIndex(db, e.path, false, callback);
 
-            if (e.type == Directory) 
+            if (e.type == Directory)
                 cnt += deleteFromIndex(db, e.path, true, callback);
 
             // if (!cnt)
@@ -383,17 +392,15 @@ std::string sanitize_query_param(const std::string &str) {
     std::string res(str);
 
     // TAKES INTO ACCOUNT PATHS THAT CONTAINS EVERY SORT OF STUFF
-    utils::string_replace(res, "/", "//");
-    utils::string_replace(res, "%", "/%");
-    utils::string_replace(res, "_", "/_");
-    // utils::string_replace(res, "?", "/?");
-    // utils::string_replace(res, "*", "/*");
-    utils::string_replace(res, "*", "%");
+    utils::stringReplace(res, "/", "//");
+    utils::stringReplace(res, "%", "/%");
+    utils::stringReplace(res, "_", "/_");
+    utils::stringReplace(res, "*", "%");
 
     return res;
 }
 
-void checkDeleteBuild(Database *db, std::string hash){
+void checkDeleteBuild(Database *db, const std::string &hash){
     if (!hash.empty()){
         const auto buildFolder =
             fs::path(db->getOpenFile()).parent_path() / DDB_BUILD_PATH / hash;
@@ -402,6 +409,14 @@ void checkDeleteBuild(Database *db, std::string hash){
             LOGD << "Removing " << (buildFolder).string();
             io::assureIsRemoved(buildFolder);
         }
+    }
+}
+
+void checkDeleteMeta(Database *db, const std::string &path){
+    if (!path.empty()){
+        auto q = db->query("DELETE FROM entries_meta WHERE path = ?");
+        q->bind(1, path);
+        q->execute();
     }
 }
 
@@ -418,6 +433,8 @@ int deleteFromIndex(Database *db, const std::string &query, bool isFolder, Remov
         LOGD << "Folder: " << str;
     }
 
+    db->exec("BEGIN EXCLUSIVE TRANSACTION");
+
     auto q = db->query(
         "SELECT path, hash FROM entries WHERE path LIKE ? ESCAPE '/'");
 
@@ -433,7 +450,10 @@ int deleteFromIndex(Database *db, const std::string &query, bool isFolder, Remov
         // Check for build folders to be removed
         checkDeleteBuild(db, hash);
 
-        if (callback != nullptr) 
+        // Check for meta info to be removed
+        checkDeleteMeta(db, path);
+
+        if (callback != nullptr)
             callback(path);
 
         count++;
@@ -449,6 +469,8 @@ int deleteFromIndex(Database *db, const std::string &query, bool isFolder, Remov
 
         q->reset();
     }
+
+    db->exec("COMMIT");
 
     return count;
 }
@@ -475,13 +497,33 @@ std::vector<Entry> getMatchingEntries(Database *db, const fs::path &path,
         LOGD << "Folder: " << sanitized;
     }
 
-    std::string sql =
-        "SELECT path, hash, type, meta, mtime, size, depth, "
-        "AsGeoJSON(point_geom), AsGeoJSON(polygon_geom) FROM entries WHERE "
-        "path LIKE ? ESCAPE '/'";
+    std::string sql = R"<<<(
+        SELECT e.path, e.hash, e.type, e.properties, e.mtime, e.size, e.depth,
+        json_extract(AsGeoJSON(e.point_geom), '$.coordinates'), json_extract(AsGeoJSON(e.polygon_geom), '$.coordinates'),
+        CASE
+            WHEN em.id IS NULL THEN NULL
+            WHEN em.id IS NOT NULL THEN (
+                SELECT json_group_object(key, meta)
+                FROM (
+                    SELECT key, CASE WHEN substr(key, -1, 1) = 's'
+                                    THEN json_group_array(json_object('id', emi.id, 'data', json(emi.data), 'mtime', emi.mtime))
+                                    ELSE json_object('id', emi.id, 'data', json(emi.data), 'mtime', emi.mtime)
+                                END AS meta
+                    FROM entries_meta emi
+                    WHERE path = e.path
+                    GROUP BY key
+                )
+            )
+        END AS meta
+        FROM entries e
+        LEFT JOIN entries_meta em
+        ON e.path = em.path
+        WHERE
+        e.path LIKE ? ESCAPE '/'
+    )<<<";
 
     if (maxRecursionDepth > 0)
-        sql += " AND depth <= " + std::to_string(maxRecursionDepth - 1);
+        sql += " AND e.depth <= " + std::to_string(maxRecursionDepth - 1);
 
     auto q = db->query(sql);
 
@@ -490,7 +532,10 @@ std::vector<Entry> getMatchingEntries(Database *db, const fs::path &path,
     q->bind(1, sanitized);
 
     while (q->fetch()) {
-        Entry e(*q);
+        Entry e(q->getText(0), q->getText(1), q->getInt(2), q->getText(3),
+                q->getInt64(4), q->getInt64(5), q->getInt(6),
+                q->getText(7), q->getText(8),
+                q->getText(9));
         entries.push_back(e);
     }
 
@@ -500,7 +545,7 @@ std::vector<Entry> getMatchingEntries(Database *db, const fs::path &path,
 }
 
 void syncIndex(Database *db) {
-    const fs::path directory = rootDirectory(db);
+    const fs::path directory = db->rootDirectory();
 
     auto q = db->query("SELECT path,mtime,hash FROM entries");
     auto deleteQ = db->query("DELETE FROM entries WHERE path = ?");
@@ -525,6 +570,7 @@ void syncIndex(Database *db) {
                 deleteQ->bind(1, relPath.generic());
                 deleteQ->execute();
                 checkDeleteBuild(db, hash);
+                checkDeleteMeta(db, relPath.generic());
                 std::cout << "D\t" << relPath.generic() << std::endl;
                 changed = true;
             break;
@@ -555,7 +601,7 @@ void syncIndex(Database *db) {
 // if a whitelist of files is specified, limits the scope of the synchronization
 // to those files only. An empty set of files indicates to update all files.
 void syncLocalMTimes(Database *db, const std::vector<std::string> &files) {
-    const fs::path directory = rootDirectory(db);
+    const fs::path directory = db->rootDirectory();
     std::string sql = "SELECT path,mtime FROM entries WHERE (type != ? AND type != ?)";
     if (files.size() > 0){
         sql += " AND path in (";
@@ -664,14 +710,16 @@ void deleteEntry(Database* db, const std::string& path) {
     auto f = db->query("DELETE FROM entries WHERE path = ?");
     f->bind(1, path);
     f->execute();
+
+    checkDeleteMeta(db, path);
 }
 
 #define FOLDER_CONSISTENCY_QUERY "SELECT B.folder FROM ( \
-	SELECT A.path, TRIM(A.folder, '/') AS folder FROM ( \
-		SELECT path, replace(path, replace(path, rtrim(path, replace(path, '/', '')), ''), '') AS folder FROM entries WHERE type != 1) AS A \
-		WHERE length(A.folder) > 0) AS B WHERE folder NOT IN (SELECT path FROM entries WHERE type = 1)"
+    SELECT A.path, TRIM(A.folder, '/') AS folder FROM ( \
+        SELECT path, replace(path, replace(path, rtrim(path, replace(path, '/', '')), ''), '') AS folder FROM entries WHERE type != 1) AS A \
+        WHERE length(A.folder) > 0) AS B WHERE folder NOT IN (SELECT path FROM entries WHERE type = 1)"
 
-#define CREATE_FOLDER_QUERY "INSERT INTO entries (path, type, meta, mtime, size, depth) VALUES (?, 1, 'null', ?, 0, ?)"
+#define CREATE_FOLDER_QUERY "INSERT INTO entries (path, type, properties, mtime, size, depth) VALUES (?, 1, 'null', ?, 0, ?)"
 
 void addFolder(Database *db, const std::string path, const time_t mtime) {
     const auto q = db->query(CREATE_FOLDER_QUERY);
@@ -704,22 +752,20 @@ bool pathExists(Database* db, const std::string& path) {
     return q->getInt(0) > 0;
 }
 
-Entry *getEntry(Database* db, const std::string& path, Entry* entry) {
-
-    if (entry == nullptr)
-        throw InvalidArgsException("Entry pointer should not be null");
-    
-    auto q = db->query("SELECT path, hash, type, meta, mtime, size, depth, "
-        "AsGeoJSON(point_geom), AsGeoJSON(polygon_geom) FROM entries WHERE path = ? LIMIT 1");
+bool getEntry(Database* db, const std::string& path, Entry &entry) {
+    auto q = db->query("SELECT path, hash, type, properties, mtime, size, depth, "
+        "json_extract(AsGeoJSON(point_geom), '$.coordinates'), json_extract(AsGeoJSON(polygon_geom), '$.coordinates') FROM entries WHERE path = ? LIMIT 1");
 
     q->bind(1, path);
 
     if (!q->fetch())
-        return nullptr;
-  
-    *entry = Entry(*q);
-    return entry;
-    
+        return false;
+
+    entry.parseFields(q->getText(0), q->getText(1), q->getInt(2), q->getText(3),
+                   q->getInt64(4), q->getInt64(5), q->getInt(6),
+                   q->getText(7), q->getText(8));
+    return true;
+
 }
 
 std::vector<std::string> listFolderPaths(Database *db, const std::string& path) {
@@ -730,7 +776,7 @@ std::vector<std::string> listFolderPaths(Database *db, const std::string& path) 
 
     q->bind(1, path + "/%");
     q->bind(2, path);
-    
+
     while (q->fetch()) {
 
         const auto p = q->getText(0);
@@ -743,7 +789,7 @@ std::vector<std::string> listFolderPaths(Database *db, const std::string& path) 
 }
 
 void replacePath(Database* db, const std::string& source, const std::string& dest) {
-    
+
     LOGD << "Replacing '" << source << "' to '" << dest << "'";
 
     const auto depth = io::Path(dest).depth();
@@ -753,6 +799,12 @@ void replacePath(Database* db, const std::string& source, const std::string& des
     update->bind(2, depth);
     update->bind(3, source);
     update->execute();
+
+    // Move meta
+    auto mq = db->query("UPDATE entries_meta SET path = ? WHERE path = ?");
+    mq->bind(1, dest);
+    mq->bind(2, source);
+    mq->execute();
 }
 
 void moveEntry(Database* db, const std::string& source, const std::string& dest) {
@@ -773,13 +825,13 @@ void moveEntry(Database* db, const std::string& source, const std::string& dest)
     if (source == dest) return;
 
     Entry sourceEntry, destEntry;
-    bool sourceExists = getEntry(db, source, &sourceEntry) != nullptr;
-    bool destExists = getEntry(db, dest, &destEntry) != nullptr;
-    
+    bool sourceExists = getEntry(db, source, sourceEntry);
+    bool destExists = getEntry(db, dest, destEntry);
+
     // Ensure entry consistency: cannot move file on folder and vice-versa
     if (!sourceExists)
         throw InvalidArgsException("source path not found");
-    
+
     // If dest exists
     if (destExists) {
 
@@ -796,17 +848,17 @@ void moveEntry(Database* db, const std::string& source, const std::string& dest)
             throw InvalidArgsException("Cannot move a file on a directory");
     }
 
-    const fs::path directory = rootDirectory(db);
+    const fs::path directory = db->rootDirectory();
 
     db->exec("BEGIN EXCLUSIVE TRANSACTION");
 
     // If we are moving a file
     if (sourceEntry.type != Directory) {
-        
+
         if (destExists) deleteEntry(db, dest);
-        
+
         replacePath(db, source, dest);
-        
+
     } else {
 
         const auto paths = listFolderPaths(db, source);
@@ -817,12 +869,12 @@ void moveEntry(Database* db, const std::string& source, const std::string& dest)
 
             deleteEntry(db, newPath);
             replacePath(db, path, newPath);
-            
-        } 
 
-        createMissingFolders(db);        
+        }
 
-    }  
+        createMissingFolders(db);
+
+    }
 
     db->exec("COMMIT");
 

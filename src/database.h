@@ -40,6 +40,8 @@ class Database : public SqliteDatabase {
 
       DDB_DLL json getAttributes() const;
 
+      DDB_DLL fs::path rootDirectory() const;
+
 };
 
 }

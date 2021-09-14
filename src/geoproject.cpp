@@ -37,14 +37,14 @@ void geoProject(const std::vector<std::string> &images, const std::string &outpu
             else std::cerr << "Cannot geoproject " << p.string() << ", not a GeoImage, skipping..." << std::endl;
             continue;
         }
-        if (e.polygon_geom.size() < 4 || e.meta.find("width") == e.meta.end() || e.meta.find("height") == e.meta.end()){
+        if (e.polygon_geom.size() < 4 || e.properties.find("width") == e.properties.end() || e.properties.find("height") == e.properties.end()){
             if (stopOnError) throw FSException("Cannot geoproject " + p.string() + ", the image does not have sufficient information");
             else std::cerr << "Cannot geoproject " << p.string() << ", the image does not have sufficient information: skipping" << std::endl;
             continue;
         }
 
-        int width = e.meta["width"].get<int>();
-        int height = e.meta["height"].get<int>();
+        int width = e.properties["width"].get<int>();
+        int height = e.properties["height"].get<int>();
 
         std::string outFile;
         if (outputToDir){
@@ -85,7 +85,7 @@ void geoProject(const std::vector<std::string> &images, const std::string &outpu
                 ratio = std::stod(outsize) / 100.0;
             }else{
                 ratio = std::stod(outsize) / width;
-                targs = CSLAddString(targs, utils::to_str(ratio * height).c_str());
+                targs = CSLAddString(targs, utils::toStr(ratio * height).c_str());
             }
 
             scaledWidth = static_cast<int>(static_cast<double>(width) * ratio);
@@ -98,26 +98,26 @@ void geoProject(const std::vector<std::string> &images, const std::string &outpu
         targs = CSLAddString(targs, "-gcp");
         targs = CSLAddString(targs, "0");
         targs = CSLAddString(targs, "0");
-        targs = CSLAddString(targs, utils::to_str(ul.x, 13).c_str());
-        targs = CSLAddString(targs, utils::to_str(ul.y, 13).c_str());
+        targs = CSLAddString(targs, utils::toStr(ul.x, 13).c_str());
+        targs = CSLAddString(targs, utils::toStr(ul.y, 13).c_str());
 
         targs = CSLAddString(targs, "-gcp");
         targs = CSLAddString(targs, "0");
         targs = CSLAddString(targs, std::to_string(scaledHeight).c_str());
-        targs = CSLAddString(targs, utils::to_str(ll.x, 13).c_str());
-        targs = CSLAddString(targs, utils::to_str(ll.y, 13).c_str());
+        targs = CSLAddString(targs, utils::toStr(ll.x, 13).c_str());
+        targs = CSLAddString(targs, utils::toStr(ll.y, 13).c_str());
 
         targs = CSLAddString(targs, "-gcp");
         targs = CSLAddString(targs, std::to_string(scaledWidth).c_str());
         targs = CSLAddString(targs, std::to_string(scaledHeight).c_str());
-        targs = CSLAddString(targs, utils::to_str(lr.x, 13).c_str());
-        targs = CSLAddString(targs, utils::to_str(lr.y, 13).c_str());
+        targs = CSLAddString(targs, utils::toStr(lr.x, 13).c_str());
+        targs = CSLAddString(targs, utils::toStr(lr.y, 13).c_str());
 
         targs = CSLAddString(targs, "-gcp");
         targs = CSLAddString(targs, std::to_string(scaledWidth).c_str());
         targs = CSLAddString(targs, "0");
-        targs = CSLAddString(targs, utils::to_str(ur.x, 13).c_str());
-        targs = CSLAddString(targs, utils::to_str(ur.y, 13).c_str());
+        targs = CSLAddString(targs, utils::toStr(ur.x, 13).c_str());
+        targs = CSLAddString(targs, utils::toStr(ur.y, 13).c_str());
 
         GDALTranslateOptions* psOptions = GDALTranslateOptionsNew(targs, nullptr);
         CSLDestroy(targs);

@@ -41,6 +41,8 @@ class Statement {
 
     DDB_DLL void reset();
     DDB_DLL void execute();
+
+    DDB_DLL std::string getQuery() const;
 };
 
 #endif // STATEMENT_H
