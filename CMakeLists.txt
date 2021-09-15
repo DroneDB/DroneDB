@@ -207,35 +207,33 @@ endif()
 file(GLOB PLATFORM_FILES "${CMAKE_CURRENT_SOURCE_DIR}/platform/${PLATFORM}/*")
 file(COPY ${PLATFORM_FILES} DESTINATION "${CMAKE_BINARY_DIR}")
 
-if (NOT CMAKE_JS_VERSION)
-    add_executable("${PROJECT_NAME}cmd" ${CMD_SRC_LIST})
-    set_target_properties("${PROJECT_NAME}cmd" PROPERTIES CXX_STANDARD 17)
-    target_link_libraries("${PROJECT_NAME}cmd" ${PROJECT_NAME} ${LINK_LIBRARIES})
+add_executable("${PROJECT_NAME}cmd" ${CMD_SRC_LIST})
+set_target_properties("${PROJECT_NAME}cmd" PROPERTIES CXX_STANDARD 17)
+target_link_libraries("${PROJECT_NAME}cmd" ${PROJECT_NAME} ${LINK_LIBRARIES})
 
-    if (WIN32)
-        # Enable globbing/path expansion
-        SET_TARGET_PROPERTIES("${PROJECT_NAME}cmd" PROPERTIES LINK_FLAGS "/link setargv.obj")
-    endif()
-
-    # set PLOG to PLOG_GLOBAL/PLOG_IMPORT to share instances across modules (and import on Windows)
-    if(WIN32)
-        target_compile_definitions("${PROJECT_NAME}cmd" PRIVATE PLOG_IMPORT)
-    else()
-        target_compile_definitions("${PROJECT_NAME}cmd" PRIVATE PLOG_GLOBAL)
-    endif()
-
-    # On Unix, rename ddbcmd --> ddb
-    # On Windows, keep ddbcmd since we'll use ddb.bat to launch it
-    set(DDBCMD_OUTFILE "ddb")
-    if (WIN32)
-        set(DDBCMD_OUTFILE "ddbcmd.exe")
-    endif()
-
-    add_custom_command(TARGET "${PROJECT_NAME}cmd" POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:ddbcmd> ${CMAKE_BINARY_DIR}/${DDBCMD_OUTFILE}
-        COMMENT "Created ${CMAKE_BINARY_DIR}/${DDBCMD_OUTFILE}"
-    )
+if (WIN32)
+    # Enable globbing/path expansion
+    SET_TARGET_PROPERTIES("${PROJECT_NAME}cmd" PROPERTIES LINK_FLAGS "/link setargv.obj")
 endif()
+
+# set PLOG to PLOG_GLOBAL/PLOG_IMPORT to share instances across modules (and import on Windows)
+if(WIN32)
+    target_compile_definitions("${PROJECT_NAME}cmd" PRIVATE PLOG_IMPORT)
+else()
+    target_compile_definitions("${PROJECT_NAME}cmd" PRIVATE PLOG_GLOBAL)
+endif()
+
+# On Unix, rename ddbcmd --> ddb
+# On Windows, keep ddbcmd since we'll use ddb.bat to launch it
+set(DDBCMD_OUTFILE "ddb")
+if (WIN32)
+    set(DDBCMD_OUTFILE "ddbcmd.exe")
+endif()
+
+add_custom_command(TARGET "${PROJECT_NAME}cmd" POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:ddbcmd> ${CMAKE_BINARY_DIR}/${DDBCMD_OUTFILE}
+    COMMENT "Created ${CMAKE_BINARY_DIR}/${DDBCMD_OUTFILE}"
+)
 
 # Nodejs bindings
 if (CMAKE_JS_VERSION)
