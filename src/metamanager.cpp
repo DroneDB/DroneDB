@@ -7,10 +7,13 @@
 
 namespace ddb {
 
-std::string MetaManager::entryPath(const std::string &path) const{
+std::string MetaManager::entryPath(const std::string &path, const std::string &cwd) const{
     if (path.empty()) return "";
 
-    std::string relPath = io::Path(path).relativeTo(db->rootDirectory()).generic();
+    auto p = io::Path(path);
+    if (!cwd.empty() && p.isRelative()) p = io::Path(fs::path(cwd) / fs::path(path));
+
+    std::string relPath = p.relativeTo(db->rootDirectory()).generic();
 
     auto q = db->query("SELECT 1 FROM entries WHERE path = ?");
     q->bind(1, relPath);
@@ -70,8 +73,8 @@ bool MetaManager::isList(const std::string &key) const{
     return key.length() > 0 && key[key.length() - 1] == 's';
 }
 
-json MetaManager::add(const std::string &key, const std::string &data, const std::string &path){
-    std::string ePath = entryPath(path);
+json MetaManager::add(const std::string &key, const std::string &data, const std::string &path, const std::string &cwd){
+    std::string ePath = entryPath(path, cwd);
     std::string eKey = getKey(key, true);
     std::string eData = validateData(data);
     long long eMtime = utils::currentUnixTimestamp();
@@ -90,8 +93,8 @@ json MetaManager::add(const std::string &key, const std::string &data, const std
     return result;
 }
 
-json MetaManager::set(const std::string &key, const std::string &data, const std::string &path){
-    std::string ePath = entryPath(path);
+json MetaManager::set(const std::string &key, const std::string &data, const std::string &path, const std::string &cwd){
+    std::string ePath = entryPath(path, cwd);
     std::string eKey = getKey(key, false);
     std::string eData = validateData(data);
     long long eMtime = utils::currentUnixTimestamp();
@@ -135,9 +138,9 @@ json MetaManager::remove(const std::string &id){
     return j;
 }
 
-json MetaManager::get(const std::string &key, const std::string &path){
+json MetaManager::get(const std::string &key, const std::string &path, const std::string &cwd){
     if (key.empty()) throw InvalidArgsException("Invalid empty metadata key");
-    std::string ePath = entryPath(path);
+    std::string ePath = entryPath(path, cwd);
     json result = json::array();
 
     auto q = db->query("SELECT id, data, mtime FROM entries_meta WHERE key = ? AND path = ?");
@@ -157,9 +160,9 @@ json MetaManager::get(const std::string &key, const std::string &path){
     }
 }
 
-json MetaManager::unset(const std::string &key, const std::string &path){
+json MetaManager::unset(const std::string &key, const std::string &path, const std::string &cwd){
     if (key.empty()) throw InvalidArgsException("Invalid empty metadata key");
-    std::string ePath = entryPath(path);
+    std::string ePath = entryPath(path, cwd);
     auto q = db->query("DELETE FROM entries_meta WHERE key = ? AND path = ?");
     q->bind(1, key);
     q->bind(2, ePath);
@@ -170,9 +173,9 @@ json MetaManager::unset(const std::string &key, const std::string &path){
     return j;
 }
 
-json MetaManager::list(const std::string &path) const{
+json MetaManager::list(const std::string &path, const std::string &cwd) const{
     std::string sql;
-    std::string ePath = entryPath(path);
+    std::string ePath = entryPath(path, cwd);
 
     if (ePath.empty()) sql = "SELECT key, path, COUNT(id) as 'count' FROM entries_meta GROUP BY path, key";
     else sql = "SELECT key, path, COUNT(id) as 'count' FROM entries_meta WHERE path = ? GROUP BY path, key";
