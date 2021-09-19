@@ -26,6 +26,9 @@ TEST(zip, createExtract) {
     // Create
     std::string zipFile = (ta.getFolder(".") / "archive.zip").string();
 
+    // Cleanup if it already exists
+    fs::remove(zipFile);
+
     zip::zipFolder(dir.string(),
                    zipFile,
                    {"subdir/exclude.txt", "exclude/"});

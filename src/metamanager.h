@@ -15,7 +15,7 @@ class Database;
 class MetaManager {
     Database* db;
 
-    std::string entryPath(const std::string &path) const;
+    std::string entryPath(const std::string &path, const std::string &cwd = "") const;
 
     std::string getKey(const std::string &key, bool isList) const;
     json getMetaJson(Statement *q) const;
@@ -27,12 +27,12 @@ public:
     MetaManager(ddb::Database* db) : db(db) {}
 
 
-    DDB_DLL json add(const std::string& key, const std::string &data, const std::string &path = "");
-    DDB_DLL json set(const std::string& key, const std::string &data, const std::string &path = "");
-    DDB_DLL json remove(const std::string& key);
-    DDB_DLL json get(const std::string& key, const std::string &path = "");
-    DDB_DLL json unset(const std::string& key, const std::string &path = "");
-    DDB_DLL json list(const std::string &path = "") const;
+    DDB_DLL json add(const std::string& key, const std::string &data, const std::string &path = "", const std::string &cwd = "");
+    DDB_DLL json set(const std::string& key, const std::string &data, const std::string &path = "", const std::string &cwd = "");
+    DDB_DLL json remove(const std::string& id);
+    DDB_DLL json get(const std::string& key, const std::string &path = "", const std::string &cwd = "");
+    DDB_DLL json unset(const std::string& key, const std::string &path = "", const std::string &cwd = "");
+    DDB_DLL json list(const std::string &path = "", const std::string &cwd = "") const;
 };
 
 }
