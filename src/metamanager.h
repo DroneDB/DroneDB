@@ -29,7 +29,7 @@ public:
 
     DDB_DLL json add(const std::string& key, const std::string &data, const std::string &path = "", const std::string &cwd = "");
     DDB_DLL json set(const std::string& key, const std::string &data, const std::string &path = "", const std::string &cwd = "");
-    DDB_DLL json remove(const std::string& key);
+    DDB_DLL json remove(const std::string& id);
     DDB_DLL json get(const std::string& key, const std::string &path = "", const std::string &cwd = "");
     DDB_DLL json unset(const std::string& key, const std::string &path = "", const std::string &cwd = "");
     DDB_DLL json list(const std::string &path = "", const std::string &cwd = "") const;
