@@ -92,15 +92,15 @@ void Meta::run(cxxopts::ParseResult &opts) {
             std::cerr << "Note: saving metadata as \"" << key << "\" (plural)" << std::endl;
         }
         output(std::cout, metaManager.add(key, data, path), format);
-    }else if (command == "set" || command == "s"){
+    } else if (command == "set" || command == "s"){
         output(std::cout, metaManager.set(key, data, path) , format);
-    }else if (command == "rm" || command == "r" || command == "remove"){
+    } else if (command == "rm" || command == "r" || command == "remove"){
         output(std::cout, metaManager.remove(key), format);
-    }else if (command == "get" || command == "g"){
+    } else if (command == "get" || command == "g"){
         output(std::cout, metaManager.get(key, path), format);
-    }else if (command == "unset" || command == "u"){
+    } else if (command == "unset" || command == "u"){
         output(std::cout, metaManager.unset(key, path), format);
-    }else if (command == "list" || command == "ls" || command == "l"){
+    } else if (command == "list" || command == "ls" || command == "l"){
         output(std::cout, metaManager.list(path), format);
     }
 }

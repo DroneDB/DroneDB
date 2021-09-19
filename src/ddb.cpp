@@ -471,8 +471,10 @@ DDBErr DDBMetaAdd(const char *ddbPath, const char *path, const char *key, const 
     if (key == nullptr) throw InvalidArgsException("No key provided");
     if (data == nullptr) throw InvalidArgsException("No data provided");
 
-    const auto ddb = ddb::open(std::string(ddbPath), true);
-    auto json = ddb->getMetaManager()->add(std::string(key), std::string(data), std::string(path), std::string(ddbPath));
+    const auto ddbPathStr = std::string(ddbPath);
+
+    const auto ddb = ddb::open(ddbPathStr, true);
+    auto json = ddb->getMetaManager()->add(std::string(key), std::string(data), std::string(path), ddbPathStr);
 
     utils::copyToPtr(json.dump(), output);
 
@@ -487,8 +489,10 @@ DDBErr DDBMetaSet(const char *ddbPath, const char *path, const char *key, const 
     if (key == nullptr) throw InvalidArgsException("No key provided");
     if (data == nullptr) throw InvalidArgsException("No data provided");
 
-    const auto ddb = ddb::open(std::string(ddbPath), true);
-    auto json = ddb->getMetaManager()->set(std::string(key), std::string(data), std::string(path), std::string(ddbPath));
+    const auto ddbPathStr = std::string(ddbPath);
+
+    const auto ddb = ddb::open(ddbPathStr, true);
+    auto json = ddb->getMetaManager()->set(std::string(key), std::string(data), std::string(path), ddbPathStr);
 
     utils::copyToPtr(json.dump(), output);
 
@@ -516,8 +520,10 @@ DDB_DLL DDBErr DDBMetaGet(const char *ddbPath, const char *path, const char *key
     if (path == nullptr) throw InvalidArgsException("No path provided");
     if (key == nullptr) throw InvalidArgsException("No key provided");
 
-    const auto ddb = ddb::open(std::string(ddbPath), true);
-    auto json = ddb->getMetaManager()->get(std::string(key), std::string(path), std::string(ddbPath));
+    const auto ddbPathStr = std::string(ddbPath);
+
+    const auto ddb = ddb::open(ddbPathStr, true);
+    auto json = ddb->getMetaManager()->get(std::string(key), std::string(path), ddbPathStr);
 
     utils::copyToPtr(json.dump(), output);
 
@@ -545,8 +551,10 @@ DDB_DLL DDBErr DDBMetaList(const char *ddbPath, const char *path, char **output)
     if (ddbPath == nullptr) throw InvalidArgsException("No ddb path provided");
     if (path == nullptr) throw InvalidArgsException("No path provided");
 
-    const auto ddb = ddb::open(std::string(ddbPath), true);
-    auto json = ddb->getMetaManager()->list(std::string(path), std::string(ddbPath));
+    const auto ddbPathStr = std::string(ddbPath);
+
+    const auto ddb = ddb::open(ddbPathStr, true);
+    auto json = ddb->getMetaManager()->list(std::string(path), ddbPathStr);
 
     utils::copyToPtr(json.dump(), output);
 
