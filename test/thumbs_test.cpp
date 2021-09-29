@@ -25,7 +25,7 @@ TEST(thumbnail, ortho) {
 
 
     uint8_t *buffer;
-    unsigned long long bufSize;
+    int bufSize;
     ddb::generateThumb(ortho.string(), 256, "", true, &buffer, &bufSize);
 
     EXPECT_TRUE(bufSize > 0);
@@ -48,7 +48,7 @@ TEST(thumbnail, ept) {
     fs::path pc = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/brighton/point_cloud.laz",
                                           "point_cloud.laz");
 
-    ddb::buildEpt({ pc.string() }, ta.getFolder("ept"));
+    ddb::buildEpt({ pc.string() }, ta.getFolder("ept").string());
 
     fs::path outFile = ta.getPath("output.jpg");
     fs::path eptPath = ta.getPath(fs::path("ept") / "ept.json");
@@ -56,7 +56,7 @@ TEST(thumbnail, ept) {
     ddb::generateThumb(eptPath, 256, outFile, true);
 
     uint8_t *buffer;
-    unsigned long long bufSize;
+    int bufSize;
     ddb::generateThumb(eptPath, 256, "", true, &buffer, &bufSize);
 
     EXPECT_TRUE(bufSize > 0);
