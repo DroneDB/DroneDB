@@ -300,6 +300,25 @@ DDBErr DDBGenerateThumbnail(const char* filePath, int size,
     DDB_C_END
 }
 
+DDB_DLL DDBErr DDBGenerateMemoryThumbnail(const char *filePath,
+                                          int size,
+                                          uint8_t **outBuffer,
+                                          int *outBufferSize){
+    DDB_C_BEGIN
+
+    const auto imagePath = fs::path(filePath);
+
+    generateThumb(imagePath, size, "", true, outBuffer, outBufferSize);
+
+    DDB_C_END
+}
+
+DDBErr DDBVSIFree(uint8_t *buffer){
+    DDB_C_BEGIN
+    VSIFree(buffer);
+    DDB_C_END
+}
+
 DDB_DLL DDBErr DDBTile(const char* inputPath, int tz, int tx, int ty,
                        char** outputTilePath, int tileSize, bool tms,
                        bool forceRecreate) {
