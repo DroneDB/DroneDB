@@ -76,7 +76,7 @@ fs::path getThumbFilename(const fs::path &imagePath, time_t modifiedTime, int th
     return fs::path(Hash::strCRC64(os.str()) + ".jpg");
 }
 
-void generateImageThumb(const fs::path& imagePath, int thumbSize, const fs::path& outImagePath) {
+void generateImageThumb(const fs::path& imagePath, int thumbSize, const fs::path& outImagePath, uint8_t **outBuffer, int *outBufferSize) {
 
     // Compute image with GDAL otherwise
     GDALDatasetH hSrcDataset = GDALOpen(imagePath.string().c_str(), GA_ReadOnly);
@@ -125,15 +125,33 @@ void generateImageThumb(const fs::path& imagePath, int thumbSize, const fs::path
 
     GDALTranslateOptions* psOptions = GDALTranslateOptionsNew(targs, nullptr);
     CSLDestroy(targs);
-    GDALDatasetH hNewDataset = GDALTranslate(outImagePath.string().c_str(),
-                                             hSrcDataset,
-                                             psOptions,
-                                             nullptr);
+    bool writeToMemory = outImagePath.empty() && outBuffer != nullptr;
+
+    if (writeToMemory){
+        // Write to memory via vsimem (assume JPG driver)
+        std::string vsiPath = "/vsimem/" + utils::generateRandomString(32) + ".jpg";
+        GDALDatasetH hNewDataset = GDALTranslate(vsiPath.c_str(),
+                                         hSrcDataset,
+                                         psOptions,
+                                         nullptr);
+        GDALClose(hNewDataset);
+
+        // Read memory to buffer
+        vsi_l_offset bufSize;
+        *outBuffer = VSIGetMemFileBuffer(vsiPath.c_str(), &bufSize, TRUE);
+        if (bufSize > std::numeric_limits<int>::max()) throw GDALException("Exceeded max buf size");
+        *outBufferSize = bufSize;
+    }else{
+        // Write directly to file
+        GDALDatasetH hNewDataset = GDALTranslate(outImagePath.string().c_str(),
+                                                 hSrcDataset,
+                                                 psOptions,
+                                                 nullptr);
+        GDALClose(hNewDataset);
+    }
+
     GDALTranslateOptionsFree(psOptions);
-
-    GDALClose(hNewDataset);
     GDALClose(hSrcDataset);
-
 }
 
 void addColorFilter(PointCloudInfo eptInfo, pdal::EptReader *eptReader, pdal::Stage*& main) {
@@ -155,7 +173,7 @@ void addColorFilter(PointCloudInfo eptInfo, pdal::EptReader *eptReader, pdal::St
     
 }
 
-void RenderImage(const fs::path& outImagePath, const int tileSize, const int nBands, uint8_t* buffer, uint8_t* alphaBuffer) {
+void RenderImage(const fs::path& outImagePath, const int tileSize, const int nBands, uint8_t* buffer, uint8_t* alphaBuffer, uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr) {
 
     GDALDriverH memDrv = GDALGetDriverByName("MEM");
     if (memDrv == nullptr) throw GDALException("Cannot create MEM driver");
@@ -165,17 +183,17 @@ void RenderImage(const fs::path& outImagePath, const int tileSize, const int nBa
 
     // Need to create in-memory dataset
     // (PNG driver does not have Create() method)
-    const GDALDatasetH dsTile = GDALCreate(memDrv, "", tileSize, tileSize,
+    const GDALDatasetH hDataset = GDALCreate(memDrv, "", tileSize, tileSize,
                                            nBands + 1, GDT_Byte, nullptr);
-    if (dsTile == nullptr) throw GDALException("Cannot create dsTile");
+    if (hDataset == nullptr) throw GDALException("Cannot create GDAL dataset");
 
-    if (GDALDatasetRasterIO(dsTile, GF_Write, 0, 0, tileSize, tileSize,
+    if (GDALDatasetRasterIO(hDataset, GF_Write, 0, 0, tileSize, tileSize,
                             buffer, tileSize, tileSize, GDT_Byte, nBands,
                             nullptr, 0, 0, 0) != CE_None) {
         throw GDALException("Cannot write tile data");
     }
 
-    const GDALRasterBandH tileAlphaBand = GDALGetRasterBand(dsTile, nBands + 1);
+    const GDALRasterBandH tileAlphaBand = GDALGetRasterBand(hDataset, nBands + 1);
     GDALSetRasterColorInterpretation(tileAlphaBand, GCI_AlphaBand);
 
     if (GDALRasterIO(tileAlphaBand, GF_Write, 0, 0, tileSize, tileSize,
@@ -184,20 +202,38 @@ void RenderImage(const fs::path& outImagePath, const int tileSize, const int nBa
         throw GDALException("Cannot write tile alpha data");
     }
 
-    const GDALDatasetH outDs = GDALCreateCopy(pngDrv, outImagePath.string().c_str(), dsTile,
-                                              FALSE, nullptr, nullptr, nullptr);
-    if (outDs == nullptr)
-        throw GDALException("Cannot create output dataset " +
-                            outImagePath.string());
+    bool writeToMemory = outImagePath.empty() && outBuffer != nullptr;
+    if (writeToMemory){
+        // Write to memory via vsimem
+        std::string vsiPath = "/vsimem/" + utils::generateRandomString(32) + ".png";
+        const GDALDatasetH outDs = GDALCreateCopy(pngDrv, vsiPath.c_str(), hDataset,
+                                                  FALSE, nullptr, nullptr, nullptr);
+        if (outDs == nullptr)
+            throw GDALException("Cannot create output dataset " +
+                                outImagePath.string());
+        GDALClose(outDs);
 
-    GDALClose(outDs);
-    GDALClose(dsTile);
+        // Read memory to buffer
+        vsi_l_offset bufSize;
+        *outBuffer = VSIGetMemFileBuffer(vsiPath.c_str(), &bufSize, TRUE);
+        if (bufSize > std::numeric_limits<int>::max()) throw GDALException("Exceeded max buf size");
+        *outBufferSize = bufSize;
+    }else{
+        const GDALDatasetH outDs = GDALCreateCopy(pngDrv, outImagePath.string().c_str(), hDataset,
+                                                  FALSE, nullptr, nullptr, nullptr);
+        if (outDs == nullptr)
+            throw GDALException("Cannot create output dataset " +
+                                outImagePath.string());
 
-    LOGD << "Done drawing";
+        GDALClose(outDs);
+    }
+
+    GDALClose(hDataset);
 }
 
 void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
-                             const fs::path &outImagePath) {
+                             const fs::path &outImagePath,
+                             uint8_t **outBuffer, int *outBufferSize) {
 
     LOGD << "Generating point cloud thumb";
 
@@ -452,27 +488,27 @@ void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
         }
     }
 
-    RenderImage(outImagePath, tileSize, nBands, buffer.get(), alphaBuffer.get());
+    RenderImage(outImagePath, tileSize, nBands, buffer.get(), alphaBuffer.get(), outBuffer, outBufferSize);
 }
 
 // imagePath can be either absolute or relative or a network URL and it's up to the user to
 // invoke the function properly as to avoid conflicts with relative paths
-fs::path generateThumb(const fs::path &imagePath, int thumbSize, const fs::path &outImagePath, bool forceRecreate){
-    if (!utils::isNetworkPath(imagePath.string()) && !exists(imagePath)) throw FSException(imagePath.string() + " does not exist");
+fs::path generateThumb(const fs::path &inputPath, int thumbSize, const fs::path &outImagePath, bool forceRecreate, uint8_t **outBuffer, int *outBufferSize){
+    if (!utils::isNetworkPath(inputPath.string()) && !exists(inputPath)) throw FSException(inputPath.string() + " does not exist");
 
     // Check existance of thumbnail, return if exists
-    if (!utils::isNetworkPath(imagePath.string()) && exists(outImagePath) && !forceRecreate){
+    if (!utils::isNetworkPath(inputPath.string()) && exists(outImagePath) && !forceRecreate){
         return outImagePath;
     }
 
-    LOGD << "ImagePath = " << imagePath;
+    LOGD << "ImagePath = " << inputPath;
     LOGD << "OutImagePath = " << outImagePath;
     LOGD << "Size = " << thumbSize;
 
-    if (imagePath.filename() == "ept.json")
-        generatePointCloudThumb(imagePath, thumbSize, outImagePath);
+    if (inputPath.filename() == "ept.json")
+        generatePointCloudThumb(inputPath, thumbSize, outImagePath, outBuffer, outBufferSize);
     else
-        generateImageThumb(imagePath, thumbSize, outImagePath);
+        generateImageThumb(inputPath, thumbSize, outImagePath, outBuffer, outBufferSize);
 
     return outImagePath;
 }

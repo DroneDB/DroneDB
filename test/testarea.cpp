@@ -19,6 +19,10 @@ TestArea::TestArea(const std::string &name, bool recreateIfExists)
     }
 }
 
+fs::path TestArea::getPath(const fs::path &p){
+    return fs::temp_directory_path() / "ddb_test_areas" / fs::path(name) / p;
+}
+
 fs::path TestArea::getFolder(const fs::path &subfolder){
     const fs::path root = fs::temp_directory_path() / "ddb_test_areas" / fs::path(name);
     auto dir = root;

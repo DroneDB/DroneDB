@@ -5,6 +5,7 @@
 #define DDB_H
 
 #include "ddb_export.h"
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -124,6 +125,19 @@ DDB_DLL DDBErr DDBChattr(const char* ddbPath, const char *attrsJson, char **outp
  * @param destPath path of the destination file * 
  * @return DDBERR_NONE on success, an error otherwise */
 DDB_DLL DDBErr DDBGenerateThumbnail(const char *filePath, int size, const char *destPath);
+
+/** Generate memory thumbnail.
+ * @param filePath path of the input file
+ * @param size size constraint of the thumbnail (width or height)
+ * @param outBuffer pointer to output buffer. The caller is responsible for destroying the buffer with DDBVSIFree.
+ * @param outBufferSize output buffer size.
+ * @return DDBERR_NONE on success, an error otherwise */
+DDB_DLL DDBErr DDBGenerateMemoryThumbnail(const char *filePath, int size, uint8_t **outBuffer, int *outBufferSize);
+
+/** Free a buffer allocated by DDB
+ * @param buffer pointer to buffer to be freed
+ * @return DDBERR_NONE on success, an error otherwise */
+DDB_DLL DDBErr DDBVSIFree(uint8_t *buffer);
 
 /** Generate orthophoto/EPT tiles
  * @param inputPath path to the input geoTIFF/EPT
