@@ -79,7 +79,7 @@ if (WIN32)
     function(extract_dependency target_zip path_check dest_dir )
         if (NOT EXISTS "${DOWNLOADS_DIR}/${path_check}")
             message("Extracting ${dest_dir}...")
-            execute_process(COMMAND powershell Expand-Archive "\"${DOWNLOADS_DIR}/${target_zip}\"" "\"${DOWNLOADS_DIR}/${dest_dir}\"")
+            execute_process(COMMAND powershell Expand-Archive "\"${DOWNLOADS_DIR}/${target_zip}\"" "\"${DOWNLOADS_DIR}/${dest_dir}\" -Force")
         endif()
     endfunction()
 
