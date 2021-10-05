@@ -49,7 +49,8 @@ class TilerHelper {
     // for example, geoimages that can be tiled are first geoprojected
     DDB_DLL static fs::path toGeoTIFF(const fs::path &tileablePath,
                                       int tileSize, bool forceRecreate,
-                                      const fs::path &outputGeotiff = "");
+                                      const fs::path &outputGeotiff = "",
+                                      const std::string &tileablePathHash = "");
 
     DDB_DLL static void cleanupUserCache();
 };

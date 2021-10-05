@@ -453,7 +453,19 @@ void hardlink(const fs::path &target, const fs::path &linkName){
     }
 }
 
+FileLock::FileLock(){
+}
+
 FileLock::FileLock(const fs::path &p){
+    lock(p);
+}
+
+FileLock::~FileLock(){
+    unlock();
+}
+
+void FileLock::lock(const fs::path &p){
+    if (!lockFile.empty()) throw ddb::AppException("lock() already called");
     lockFile = (p.parent_path() / p.filename()).string() + ".lock";
 
     fd = _open(lockFile.c_str(), O_CREAT, 0644);
@@ -466,9 +478,10 @@ FileLock::FileLock(const fs::path &p){
     flock(fd, LOCK_EX);
 }
 
-FileLock::~FileLock(){
-    LOGD << "Freeing lock " + lockFile;
+void FileLock::unlock(){
     if (fd){
+        LOGD << "Freeing lock " + lockFile;
+
         if (_close(fd) != 0){
             LOGD << "Cannot close lock " << lockFile;
         }
@@ -476,6 +489,8 @@ FileLock::~FileLock(){
         if (_unlink(lockFile.c_str()) != 0){
             LOGD << "Cannot remove lock " << lockFile;
         }
+
+        fd = 0;
     }
 }
 

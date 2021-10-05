@@ -159,7 +159,7 @@ GDALTiler::~GDALTiler() {
     if (origDataset) GDALClose(origDataset);
 }
 
-std::string GDALTiler::tile(int tz, int tx, int ty){
+std::string GDALTiler::tile(int tz, int tx, int ty, uint8_t **outBuffer, int *outBufferSize){
     std::string tilePath = getTilePath(tz, tx, ty, true);
 
     if (tms) {
@@ -292,7 +292,16 @@ std::string GDALTiler::tile(int tz, int tx, int ty){
     GDALClose(outDs);
     GDALClose(dsTile);
 
-    return tilePath;
+    if (outBuffer != nullptr){
+        vsi_l_offset bufSize;
+        *outBuffer = VSIGetMemFileBuffer(tilePath.c_str(), &bufSize, TRUE);
+        if (bufSize > std::numeric_limits<int>::max()) throw GDALException("Exceeded max buf size");
+        *outBufferSize = bufSize;
+        return "";
+    }else{
+        return tilePath;
+    }
+
 }
 
 template <typename T>

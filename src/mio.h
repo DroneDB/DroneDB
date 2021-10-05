@@ -76,8 +76,12 @@ class FileLock{
     int fd;
     std::string lockFile;
 public:
+    DDB_DLL FileLock();
     DDB_DLL FileLock(const fs::path &p);
     DDB_DLL ~FileLock();
+
+    DDB_DLL void lock(const fs::path &p);
+    DDB_DLL void unlock();
 };
 
 #ifdef WIN32

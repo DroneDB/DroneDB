@@ -60,7 +60,7 @@ class GDALTiler : public Tiler {
                   bool tms = false);
     DDB_DLL ~GDALTiler();
 
-    DDB_DLL std::string tile(int tz, int tx, int ty) override;
+    DDB_DLL std::string tile(int tz, int tx, int ty, uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr) override;
 };
 
 }  // namespace ddb

@@ -15,6 +15,7 @@
 #include "geoproject.h"
 #include "hash.h"
 #include "logger.h"
+#include "net/functions.h"
 #include "mio.h"
 #include "userprofile.h"
 
@@ -75,26 +76,63 @@ fs::path TilerHelper::getFromUserCache(const fs::path &tileablePath, int tz,
     }
 }
 
-std::mutex geoprojectMutex;
-
 fs::path TilerHelper::toGeoTIFF(const fs::path &tileablePath, int tileSize,
                                 bool forceRecreate,
-                                const fs::path &outputGeotiff) {
-    const EntryType type = fingerprint(tileablePath);
+                                const fs::path &outputGeotiff,
+                                const std::string &tileablePathHash) {
+    fs::path localTileablePath;
+    io::FileLock downloadLock;
+
+    if (utils::isNetworkPath(tileablePath)){
+        // Download file to user cache
+        const std::string ext = fs::path(tileablePath).extension().string();
+
+        // If we know a priori the hash of the remote resource,
+        // we use that value to search our local cache (to avoid
+        // downloading things twice)
+        bool alwaysDownload = false;
+        if (!tileablePathHash.empty()){
+            localTileablePath = UserProfile::get()->getTilesDir() /
+                                fs::path(tileablePathHash + ext);
+
+            // Download only if not exists
+            alwaysDownload = false;
+        }else{
+            std::string crc = Hash::strCRC64(tileablePath);
+            localTileablePath = UserProfile::get()->getTilesDir() / fs::path(crc + ext);
+            alwaysDownload = true; // always download, content could have changed
+        }
+
+        // One process at a time
+        downloadLock.lock(localTileablePath);
+        bool download = alwaysDownload || !fs::exists(localTileablePath);
+        if (download){
+            net::Request r = net::GET(tileablePath);
+            LOGD << "Downloading " << tileablePath.string();
+            r.downloadToFile(localTileablePath.string());
+        }
+
+        // If we don't always download, we can release this early
+        if (!alwaysDownload) downloadLock.unlock();
+    }else{
+        localTileablePath = tileablePath;
+    }
+
+    const EntryType type = fingerprint(localTileablePath);
 
     if (type == EntryType::GeoRaster) {
         // Georasters can be tiled directly
-        return tileablePath;
+        return localTileablePath;
     } else {
         fs::path outputPath = outputGeotiff;
 
         if (outputGeotiff.empty()) {
             // Store in user cache if user doesn't specify a preference
             if (std::rand() % 1000 == 0) cleanupUserCache();
-            const time_t modifiedTime = io::Path(tileablePath).getModifiedTime();
+            const time_t modifiedTime = io::Path(localTileablePath).getModifiedTime();
             const fs::path tileCacheFolder =
                 UserProfile::get()->getTilesDir() /
-                getCacheFolderName(tileablePath, modifiedTime, tileSize);
+                getCacheFolderName(localTileablePath, modifiedTime, tileSize);
             io::assureFolderExists(tileCacheFolder);
 
             outputPath = tileCacheFolder / "geoprojected.tif";
@@ -107,12 +145,12 @@ fs::path TilerHelper::toGeoTIFF(const fs::path &tileablePath, int tileSize,
         if (!fs::exists(outputPath) || forceRecreate) {
             // Multiple processes could be generating the geoprojected
             // file at the same time, so we place a lock
-            std::lock_guard<std::mutex> guard(geoprojectMutex);
+            io::FileLock lock(outputPath);
 
             // Recheck is needed for other processes that might have generated
             // the file
             if (!fs::exists(outputPath)){
-                ddb::geoProject({tileablePath.string()}, outputPath.string(),
+                ddb::geoProject({localTileablePath.string()}, outputPath.string(),
                                 "100%", true);
             }
         }
