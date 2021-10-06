@@ -83,7 +83,7 @@ fs::path TilerHelper::toGeoTIFF(const fs::path &tileablePath, int tileSize,
     fs::path localTileablePath;
     io::FileLock downloadLock;
 
-    if (utils::isNetworkPath(tileablePath)){
+    if (utils::isNetworkPath(tileablePath.string())){
         // Download file to user cache
         const std::string ext = fs::path(tileablePath).extension().string();
 
@@ -98,7 +98,7 @@ fs::path TilerHelper::toGeoTIFF(const fs::path &tileablePath, int tileSize,
             // Download only if not exists
             alwaysDownload = false;
         }else{
-            std::string crc = Hash::strCRC64(tileablePath);
+            std::string crc = Hash::strCRC64(tileablePath.string());
             localTileablePath = UserProfile::get()->getTilesDir() / fs::path(crc + ext);
             alwaysDownload = true; // always download, content could have changed
         }
@@ -107,8 +107,7 @@ fs::path TilerHelper::toGeoTIFF(const fs::path &tileablePath, int tileSize,
         downloadLock.lock(localTileablePath);
         bool download = alwaysDownload || !fs::exists(localTileablePath);
         if (download){
-            net::Request r = net::GET(tileablePath);
-            LOGD << "Downloading " << tileablePath.string();
+            net::Request r = net::GET(tileablePath.string());
             r.downloadToFile(localTileablePath.string());
         }
 
