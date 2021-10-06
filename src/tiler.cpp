@@ -46,7 +46,7 @@ Tiler::Tiler(const std::string &inputPath, const std::string &outputFolder,
         std::ceil(std::log2(tileSize) != std::floor(std::log2(tileSize))))
         throw GDALException("Tile size must be a power of 2 greater than 0");
 
-    if (!fs::exists(outputFolder)) {
+    if (!outputFolder.empty() && !fs::exists(outputFolder)) {
         // Try to create
         io::createDirectories(outputFolder);
     }

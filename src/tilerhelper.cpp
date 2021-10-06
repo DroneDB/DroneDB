@@ -47,7 +47,8 @@ fs::path TilerHelper::getCacheFolderName(const fs::path &tileablePath,
 
 fs::path TilerHelper::getFromUserCache(const fs::path &tileablePath, int tz,
                                        int tx, int ty, int tileSize, bool tms,
-                                       bool forceRecreate) {
+                                       bool forceRecreate,
+                                       const std::string &tileablePathHash) {
     if (std::rand() % 1000 == 0) cleanupUserCache();
     if (!fs::exists(tileablePath))
         throw FSException(tileablePath.string() + " does not exist");
@@ -64,15 +65,18 @@ fs::path TilerHelper::getFromUserCache(const fs::path &tileablePath, int tz,
         return outputFile;
     }
 
+    return TilerHelper::getTile(tileablePath, tz, tx, ty, tileSize, tms, forceRecreate, tileCacheFolder, nullptr, nullptr, tileablePathHash);
+}
+
+fs::path TilerHelper::getTile(const fs::path &tileablePath, int tz, int tx, int ty, int tileSize, bool tms, bool forceRecreate, const fs::path &outputFolder, uint8_t **outBuffer, int *outBufferSize, const std::string &tileablePathHash){
     if (io::Path(tileablePath).checkExtension({"json"})){
         // Assume EPT
-        EptTiler t(tileablePath.string(), tileCacheFolder.string(), tileSize, tms);
-        return t.tile(tz, tx, ty);
+        EptTiler t(tileablePath.string(), outputFolder.string(), tileSize, tms);
+        return t.tile(tz, tx, ty, outBuffer, outBufferSize);
     }else{
-        const fs::path fileToTile = toGeoTIFF(tileablePath, tileSize, forceRecreate,
-                                              (tileCacheFolder / "geoprojected.tif"));
-        GDALTiler t(fileToTile.string(), tileCacheFolder.string(), tileSize, tms);
-        return t.tile(tz, tx, ty);
+        const fs::path fileToTile = toGeoTIFF(tileablePath, tileSize, forceRecreate, "", tileablePathHash);
+        GDALTiler t(fileToTile.string(), outputFolder.string(), tileSize, tms);
+        return t.tile(tz, tx, ty, outBuffer, outBufferSize);
     }
 }
 

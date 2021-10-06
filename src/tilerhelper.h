@@ -43,7 +43,17 @@ class TilerHelper {
     DDB_DLL static fs::path getFromUserCache(const fs::path &tileablePath,
                                              int tz, int tx, int ty,
                                              int tileSize, bool tms,
-                                             bool forceRecreate);
+                                             bool forceRecreate,
+                                             const std::string &tileablePathHash = "");
+
+    // Get a single tile
+    DDB_DLL static fs::path getTile(const fs::path &tileablePath,
+                                int tz, int tx, int ty,
+                                int tileSize, bool tms,
+                                bool forceRecreate,
+                                const fs::path &outputFolder,
+                                uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr,
+                                const std::string &tileablePathHash = "");
 
     // Prepare a tileable file for tiling (if needed)
     // for example, geoimages that can be tiled are first geoprojected
