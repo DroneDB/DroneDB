@@ -38,5 +38,5 @@ jobs:
               run: npm install
               shell: cmd
             - name: Test Node.js bindings
-              run: .\scripts\setup_windows_env.bat && npm test
+              run: .\scripts\setup_windows_env.bat && cd node_modules/.bin/ && mocha ../../nodejs/test/*.js
               shell: cmd
