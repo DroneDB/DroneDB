@@ -174,7 +174,7 @@ void addColorFilter(PointCloudInfo eptInfo, pdal::EptReader *eptReader, pdal::St
     
 }
 
-void RenderImage(const fs::path& outImagePath, const int tileSize, const int nBands, uint8_t* buffer, uint8_t* alphaBuffer, uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr) {
+void RenderImage(const fs::path& outImagePath, const int tileSize, const int nBands, uint8_t* buffer, uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr) {
 
     GDALDriverH memDrv = GDALGetDriverByName("MEM");
     if (memDrv == nullptr) throw GDALException("Cannot create MEM driver");
@@ -185,22 +185,13 @@ void RenderImage(const fs::path& outImagePath, const int tileSize, const int nBa
     // Need to create in-memory dataset
     // (JPG driver does not have Create() method)
     const GDALDatasetH hDataset = GDALCreate(memDrv, "", tileSize, tileSize,
-                                           nBands + 1, GDT_Byte, nullptr);
+                                           nBands, GDT_Byte, nullptr);
     if (hDataset == nullptr) throw GDALException("Cannot create GDAL dataset");
 
     if (GDALDatasetRasterIO(hDataset, GF_Write, 0, 0, tileSize, tileSize,
                             buffer, tileSize, tileSize, GDT_Byte, nBands,
                             nullptr, 0, 0, 0) != CE_None) {
         throw GDALException("Cannot write tile data");
-    }
-
-    const GDALRasterBandH tileAlphaBand = GDALGetRasterBand(hDataset, nBands + 1);
-    GDALSetRasterColorInterpretation(tileAlphaBand, GCI_AlphaBand);
-
-    if (GDALRasterIO(tileAlphaBand, GF_Write, 0, 0, tileSize, tileSize,
-                     alphaBuffer, tileSize, tileSize, GDT_Byte, 0,
-                     0) != CE_None) {
-        throw GDALException("Cannot write tile alpha data");
     }
 
     bool writeToMemory = outImagePath.empty() && outBuffer != nullptr;
@@ -490,7 +481,19 @@ void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
         }
     }
 
-    RenderImage(outImagePath, tileSize, nBands, buffer.get(), alphaBuffer.get(), outBuffer, outBufferSize);
+    // Write white background
+    for (int x = 0; x < tileSize; x++) {
+        for (int y = 0; y < tileSize; y++) {
+            if (alphaBuffer.get()[y * tileSize + x] == 0) {
+                buffer.get()[y * tileSize + x + wSize * 0] = 255;
+                buffer.get()[y * tileSize + x + wSize * 1] = 255;
+                buffer.get()[y * tileSize + x + wSize * 2] = 255;
+                alphaBuffer.get()[y * tileSize + x] = 255;
+            }
+        }
+    }
+
+    RenderImage(outImagePath, tileSize, nBands, buffer.get(), outBuffer, outBufferSize);
 }
 
 // imagePath can be either absolute or relative or a network URL and it's up to the user to
