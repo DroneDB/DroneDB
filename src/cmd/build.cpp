@@ -17,11 +17,11 @@ void Build::setOptions(cxxopts::Options &opts) {
         .positional_help("[args]")
         .custom_help("build [-p path/to/file.laz] [--output out_dir]")
         .add_options()
-        ("o,output", "Output folder", cxxopts::value<std::string>()->default_value((fs::path(DDB_FOLDER) / DDB_BUILD_PATH).generic_string()))
+        ("o,output", "Output folder", cxxopts::value<std::string>()->default_value((fs::path(DDB_FOLDER) / DDB_BUILD_PATH).string()))
         ("p,path", "File to process", cxxopts::value<std::string>())
     	("w,working-dir", "Working directory", cxxopts::value<std::string>()->default_value("."))
     	("f,force", "Force rebuild", cxxopts::value<bool>()->default_value("false"));
-;
+
     // clang-format on
     opts.parse_positional({"path"});
 }
