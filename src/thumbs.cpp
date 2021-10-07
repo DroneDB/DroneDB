@@ -184,10 +184,8 @@ void RenderImage(const fs::path& outImagePath, const int tileSize, const int nBa
 
     // Need to create in-memory dataset
     // (JPG driver does not have Create() method)
-    CPLStringList opts;
-    opts.AddNameValue("GDAL_JPEG_TO_RGB", "NO");
     const GDALDatasetH hDataset = GDALCreate(memDrv, "", tileSize, tileSize,
-                                           nBands + 1, GDT_Byte, opts);
+                                           nBands + 1, GDT_Byte, nullptr);
     if (hDataset == nullptr) throw GDALException("Cannot create GDAL dataset");
 
     if (GDALDatasetRasterIO(hDataset, GF_Write, 0, 0, tileSize, tileSize,
