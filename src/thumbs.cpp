@@ -110,8 +110,8 @@ void generateImageThumb(const fs::path& imagePath, int thumbSize, const fs::path
     targs = CSLAddString(targs, "-co");
     targs = CSLAddString(targs, "WRITE_EXIF_METADATA=NO");
 
-    // Max 3 bands + alpha
-    if (GDALGetRasterCount(hSrcDataset) > 4){
+    // Max 3 bands
+    if (GDALGetRasterCount(hSrcDataset) > 3){
         targs = CSLAddString(targs, "-b");
         targs = CSLAddString(targs, "1");
         targs = CSLAddString(targs, "-b");
@@ -120,7 +120,7 @@ void generateImageThumb(const fs::path& imagePath, int thumbSize, const fs::path
         targs = CSLAddString(targs, "3");
     }
 
-    CPLSetConfigOption("GDAL_PAM_ENABLED", "NO"); // avoid aux files for PNG tiles
+    CPLSetConfigOption("GDAL_PAM_ENABLED", "NO"); // avoid aux files
     CPLSetConfigOption("GDAL_ALLOW_LARGE_LIBJPEG_MEM_ALLOC", "YES"); // Avoids ERROR 6: Reading this image would require libjpeg to allocate at least 107811081 bytes
 
     GDALTranslateOptions* psOptions = GDALTranslateOptionsNew(targs, nullptr);
@@ -179,13 +179,15 @@ void RenderImage(const fs::path& outImagePath, const int tileSize, const int nBa
     GDALDriverH memDrv = GDALGetDriverByName("MEM");
     if (memDrv == nullptr) throw GDALException("Cannot create MEM driver");
 
-    GDALDriverH pngDrv = GDALGetDriverByName("PNG");
-    if (pngDrv == nullptr) throw GDALException("Cannot create PNG driver");
+    GDALDriverH jpgDrv = GDALGetDriverByName("JPEG");
+    if (jpgDrv == nullptr) throw GDALException("Cannot create JPEG driver");
 
     // Need to create in-memory dataset
-    // (PNG driver does not have Create() method)
+    // (JPG driver does not have Create() method)
+    CPLStringList opts;
+    opts.AddNameValue("GDAL_JPEG_TO_RGB", "NO");
     const GDALDatasetH hDataset = GDALCreate(memDrv, "", tileSize, tileSize,
-                                           nBands + 1, GDT_Byte, nullptr);
+                                           nBands + 1, GDT_Byte, opts);
     if (hDataset == nullptr) throw GDALException("Cannot create GDAL dataset");
 
     if (GDALDatasetRasterIO(hDataset, GF_Write, 0, 0, tileSize, tileSize,
@@ -206,8 +208,8 @@ void RenderImage(const fs::path& outImagePath, const int tileSize, const int nBa
     bool writeToMemory = outImagePath.empty() && outBuffer != nullptr;
     if (writeToMemory){
         // Write to memory via vsimem
-        std::string vsiPath = "/vsimem/" + utils::generateRandomString(32) + ".png";
-        const GDALDatasetH outDs = GDALCreateCopy(pngDrv, vsiPath.c_str(), hDataset,
+        std::string vsiPath = "/vsimem/" + utils::generateRandomString(32) + ".jpg";
+        const GDALDatasetH outDs = GDALCreateCopy(jpgDrv, vsiPath.c_str(), hDataset,
                                                   FALSE, nullptr, nullptr, nullptr);
         if (outDs == nullptr)
             throw GDALException("Cannot create output dataset " +
@@ -221,7 +223,7 @@ void RenderImage(const fs::path& outImagePath, const int tileSize, const int nBa
         if (bufSize > std::numeric_limits<int>::max()) throw GDALException("Exceeded max buf size");
         *outBufferSize = bufSize;
     }else{
-        const GDALDatasetH outDs = GDALCreateCopy(pngDrv, outImagePath.string().c_str(), hDataset,
+        const GDALDatasetH outDs = GDALCreateCopy(jpgDrv, outImagePath.string().c_str(), hDataset,
                                                   FALSE, nullptr, nullptr, nullptr);
         if (outDs == nullptr)
             throw GDALException("Cannot create output dataset " +
