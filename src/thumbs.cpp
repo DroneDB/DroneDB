@@ -97,6 +97,17 @@ void generateImageThumb(const fs::path& imagePath, int thumbSize, const fs::path
         targetWidth = static_cast<int>((static_cast<float>(thumbSize) / static_cast<float>(height)) * static_cast<float>(width));
     }
 
+    //int usageErr;
+    //CPLStringList vrtArgv;
+    //vrtArgv.AddString("-hidenodata");
+    //vrtArgv.AddString("-vrtnodata");
+    //vrtArgv.AddString("255");
+
+    //GDALBuildVRTOptions *vrtOpts = GDALBuildVRTOptionsNew(vrtArgv.List(), nullptr);
+    //GDALDatasetH hSrcVrt = GDALBuildVRT("/vsimem/test.vrt", 1, &hSrcDataset,
+    //                                    nullptr, vrtOpts, &usageErr);
+    //GDALBuildVRTOptionsFree(vrtOpts);
+
     char** targs = nullptr;
     targs = CSLAddString(targs, "-outsize");
     targs = CSLAddString(targs, std::to_string(targetWidth).c_str());
@@ -130,7 +141,7 @@ void generateImageThumb(const fs::path& imagePath, int thumbSize, const fs::path
     if (writeToMemory){
         // Write to memory via vsimem (assume JPG driver)
         std::string vsiPath = "/vsimem/" + utils::generateRandomString(32) + ".jpg";
-        GDALDatasetH hNewDataset = GDALTranslate(vsiPath.c_str(),
+        GDALDatasetH hNewDataset = GDALTranslate(vsiPath.c_str(), 
                                          hSrcDataset,
                                          psOptions,
                                          nullptr);
@@ -152,6 +163,7 @@ void generateImageThumb(const fs::path& imagePath, int thumbSize, const fs::path
     }
 
     GDALTranslateOptionsFree(psOptions);
+    //GDALClose(hSrcVrt);
     GDALClose(hSrcDataset);
 }
 
