@@ -134,6 +134,7 @@ void generateImageThumb(const fs::path& imagePath, int thumbSize, const fs::path
                                          hSrcDataset,
                                          psOptions,
                                          nullptr);
+        GDALFlushCache(hNewDataset);
         GDALClose(hNewDataset);
 
         // Read memory to buffer
@@ -211,6 +212,7 @@ void RenderImage(const fs::path& outImagePath, const int tileSize, const int nBa
         if (outDs == nullptr)
             throw GDALException("Cannot create output dataset " +
                                 outImagePath.string());
+        GDALFlushCache(outDs);
         GDALClose(outDs);
 
         // Read memory to buffer

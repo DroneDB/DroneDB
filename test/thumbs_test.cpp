@@ -23,7 +23,6 @@ TEST(thumbnail, ortho) {
     fs::path outFile = ta.getPath("output.jpg");
     ddb::generateThumb(ortho.string(), 256, outFile, true);
 
-
     uint8_t *buffer;
     int bufSize;
     ddb::generateThumb(ortho.string(), 256, "", true, &buffer, &bufSize);
