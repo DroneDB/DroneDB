@@ -479,7 +479,7 @@ void FileLock::lock(const fs::path &p){
 }
 
 void FileLock::unlock(){
-    if (fd){
+    if (fd != -1){
         LOGD << "Freeing lock " + lockFile;
 
         if (_close(fd) != 0){
@@ -490,7 +490,7 @@ void FileLock::unlock(){
             LOGD << "Cannot remove lock " << lockFile;
         }
 
-        fd = 0;
+        fd = -1;
     }
 }
 

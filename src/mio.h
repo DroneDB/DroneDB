@@ -73,7 +73,7 @@ public:
 };
 
 class FileLock{
-    int fd;
+    int fd = -1;
     std::string lockFile;
 public:
     DDB_DLL FileLock();
