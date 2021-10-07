@@ -139,7 +139,7 @@ DDB_DLL DDBErr DDBGenerateMemoryThumbnail(const char *filePath, int size, uint8_
  * @return DDBERR_NONE on success, an error otherwise */
 DDB_DLL DDBErr DDBVSIFree(uint8_t *buffer);
 
-/** Generate orthophoto/EPT tiles
+/** Generate image/orthophoto/EPT tiles
  * @param inputPath path to the input geoTIFF/EPT
  * @param tz zoom level
  * @param tx X coordinates
@@ -150,6 +150,20 @@ DDB_DLL DDBErr DDBVSIFree(uint8_t *buffer);
  * @param forceRecreate ignore cache and always recreate the tile
  * @return DDBERR_NONE on success, an error otherwise */
 DDB_DLL DDBErr DDBTile(const char *inputPath, int tz, int tx, int ty, char **outputTilePath, int tileSize = 256, bool tms = false, bool forceRecreate = false);
+
+/** Generate image/orthophoto/EPT tiles in memory
+ * @param inputPath path to the input geoTIFF/EPT
+ * @param tz zoom level
+ * @param tx X coordinates
+ * @param ty Y coordinates
+ * @param outBuffer pointer to output buffer. The caller is responsible for destroying the buffer with DDBVSIFree.
+ * @param outBufferSize output buffer size.
+ * @param tileSize tile size in pixels
+ * @param tms Generate TMS-style tiles instead of XYZ
+ * @param forceRecreate ignore cache and always recreate the tile
+ * @param inputPathHash Optional hash of the resource to tile (if available), allowing smarter decisions about file downloads for certain resource types.
+ * @return DDBERR_NONE on success, an error otherwise */
+DDB_DLL DDBErr DDBMemoryTile(const char *inputPath, int tz, int tx, int ty, uint8_t **outBuffer, int *outBufferSize, int tileSize = 256, bool tms = false, bool forceRecreate = false, const char *inputPathHash = "");
 
 /** Generate delta between two ddbs 
  * @param ddbSource path to the source DroneDB database (parent of ".ddb")

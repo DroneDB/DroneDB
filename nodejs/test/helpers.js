@@ -14,7 +14,7 @@ class TestArea{
         const root = this.getFolder();
         if (recreateIfExists){
             if (fs.existsSync(root)){
-                fs.rmdirSync(root, { recursive: true });
+                fs.rmSync(root, { recursive: true });
             }
         }
     }

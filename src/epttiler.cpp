@@ -74,7 +74,7 @@ EptTiler::EptTiler(const std::string &inputPath, const std::string &outputFolder
 EptTiler::~EptTiler() {
 }
 
-std::string EptTiler::tile(int tz, int tx, int ty) {
+std::string EptTiler::tile(int tz, int tx, int ty, uint8_t **outBuffer, int *outBufferSize) {
     std::string tilePath = getTilePath(tz, tx, ty, true);
 
     if (tms) {
@@ -233,10 +233,19 @@ std::string EptTiler::tile(int tz, int tx, int ty) {
     if (outDs == nullptr)
         throw GDALException("Cannot create output dataset " + tilePath);
 
+    GDALFlushCache(outDs);
     GDALClose(outDs);
     GDALClose(dsTile);
 
-    return tilePath;
+    if (outBuffer != nullptr){
+        vsi_l_offset bufSize;
+        *outBuffer = VSIGetMemFileBuffer(tilePath.c_str(), &bufSize, TRUE);
+        if (bufSize > std::numeric_limits<int>::max()) throw GDALException("Exceeded max buf size");
+        *outBufferSize = bufSize;
+        return "";
+    }else{
+        return tilePath;
+    }
 }
 
 

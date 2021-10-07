@@ -400,8 +400,12 @@ bool ExifParser::extractCameraOrientation(CameraOrientation &cameraOri) {
     auto yk = findXmpKey({"Xmp.drone-dji.GimbalYawDegree", "Xmp.Camera.Yaw"});
     auto rk = findXmpKey({"Xmp.drone-dji.GimbalRollDegree", "Xmp.Camera.Roll"});
 
-    if (pk == xmpData.end() || yk == xmpData.end() || rk == xmpData.end()) return false;
-
+    if (pk == xmpData.end() || yk == xmpData.end() || rk == xmpData.end()){
+        cameraOri.pitch = -90;
+        cameraOri.yaw = 0;
+        cameraOri.roll = 0;
+        return false;
+    }
     cameraOri.pitch = static_cast<double>(pk->toFloat());
     cameraOri.yaw = static_cast<double>(yk->toFloat());
     cameraOri.roll = static_cast<double>(rk->toFloat());

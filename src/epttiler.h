@@ -30,7 +30,7 @@ class EptTiler : public Tiler {
                   bool tms = false);
     DDB_DLL ~EptTiler();
 
-    DDB_DLL std::string tile(int tz, int tx, int ty) override;
+    DDB_DLL std::string tile(int tz, int tx, int ty, uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr) override;
 };
 
 DDB_DLL void drawCircle(uint8_t *buffer, uint8_t *alpha, int px, int py, int radius,

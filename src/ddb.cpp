@@ -329,6 +329,14 @@ DDB_DLL DDBErr DDBTile(const char* inputPath, int tz, int tx, int ty,
     DDB_C_END
 }
 
+DDBErr DDBMemoryTile(const char *inputPath, int tz, int tx, int ty, uint8_t **outBuffer, int *outBufferSize, int tileSize, bool tms, bool forceRecreate, const char *inputPathHash){
+    DDB_C_BEGIN
+    ddb::TilerHelper::getTile(
+        inputPath, tz, tx, ty, tileSize, tms, forceRecreate, "", outBuffer, outBufferSize, std::string(inputPathHash));
+    DDB_C_END
+}
+
+
 DDBErr DDBDelta(const char* ddbSource, const char* ddbTarget, char** output,
                 const char* format) {
     DDB_C_BEGIN
@@ -579,3 +587,4 @@ DDB_DLL DDBErr DDBMetaList(const char *ddbPath, const char *path, char **output)
 
     DDB_C_END
 }
+

@@ -97,6 +97,17 @@ void generateImageThumb(const fs::path& imagePath, int thumbSize, const fs::path
         targetWidth = static_cast<int>((static_cast<float>(thumbSize) / static_cast<float>(height)) * static_cast<float>(width));
     }
 
+    //int usageErr;
+    //CPLStringList vrtArgv;
+    //vrtArgv.AddString("-hidenodata");
+    //vrtArgv.AddString("-vrtnodata");
+    //vrtArgv.AddString("255");
+
+    //GDALBuildVRTOptions *vrtOpts = GDALBuildVRTOptionsNew(vrtArgv.List(), nullptr);
+    //GDALDatasetH hSrcVrt = GDALBuildVRT("/vsimem/test.vrt", 1, &hSrcDataset,
+    //                                    nullptr, vrtOpts, &usageErr);
+    //GDALBuildVRTOptionsFree(vrtOpts);
+
     char** targs = nullptr;
     targs = CSLAddString(targs, "-outsize");
     targs = CSLAddString(targs, std::to_string(targetWidth).c_str());
@@ -110,8 +121,8 @@ void generateImageThumb(const fs::path& imagePath, int thumbSize, const fs::path
     targs = CSLAddString(targs, "-co");
     targs = CSLAddString(targs, "WRITE_EXIF_METADATA=NO");
 
-    // Max 3 bands + alpha
-    if (GDALGetRasterCount(hSrcDataset) > 4){
+    // Max 3 bands
+    if (GDALGetRasterCount(hSrcDataset) > 3){
         targs = CSLAddString(targs, "-b");
         targs = CSLAddString(targs, "1");
         targs = CSLAddString(targs, "-b");
@@ -120,7 +131,7 @@ void generateImageThumb(const fs::path& imagePath, int thumbSize, const fs::path
         targs = CSLAddString(targs, "3");
     }
 
-    CPLSetConfigOption("GDAL_PAM_ENABLED", "NO"); // avoid aux files for PNG tiles
+    CPLSetConfigOption("GDAL_PAM_ENABLED", "NO"); // avoid aux files
     CPLSetConfigOption("GDAL_ALLOW_LARGE_LIBJPEG_MEM_ALLOC", "YES"); // Avoids ERROR 6: Reading this image would require libjpeg to allocate at least 107811081 bytes
 
     GDALTranslateOptions* psOptions = GDALTranslateOptionsNew(targs, nullptr);
@@ -130,10 +141,11 @@ void generateImageThumb(const fs::path& imagePath, int thumbSize, const fs::path
     if (writeToMemory){
         // Write to memory via vsimem (assume JPG driver)
         std::string vsiPath = "/vsimem/" + utils::generateRandomString(32) + ".jpg";
-        GDALDatasetH hNewDataset = GDALTranslate(vsiPath.c_str(),
+        GDALDatasetH hNewDataset = GDALTranslate(vsiPath.c_str(), 
                                          hSrcDataset,
                                          psOptions,
                                          nullptr);
+        GDALFlushCache(hNewDataset);
         GDALClose(hNewDataset);
 
         // Read memory to buffer
@@ -151,6 +163,7 @@ void generateImageThumb(const fs::path& imagePath, int thumbSize, const fs::path
     }
 
     GDALTranslateOptionsFree(psOptions);
+    //GDALClose(hSrcVrt);
     GDALClose(hSrcDataset);
 }
 
@@ -173,18 +186,18 @@ void addColorFilter(PointCloudInfo eptInfo, pdal::EptReader *eptReader, pdal::St
     
 }
 
-void RenderImage(const fs::path& outImagePath, const int tileSize, const int nBands, uint8_t* buffer, uint8_t* alphaBuffer, uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr) {
+void RenderImage(const fs::path& outImagePath, const int tileSize, const int nBands, uint8_t* buffer, uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr) {
 
     GDALDriverH memDrv = GDALGetDriverByName("MEM");
     if (memDrv == nullptr) throw GDALException("Cannot create MEM driver");
 
-    GDALDriverH pngDrv = GDALGetDriverByName("PNG");
-    if (pngDrv == nullptr) throw GDALException("Cannot create PNG driver");
+    GDALDriverH jpgDrv = GDALGetDriverByName("JPEG");
+    if (jpgDrv == nullptr) throw GDALException("Cannot create JPEG driver");
 
     // Need to create in-memory dataset
-    // (PNG driver does not have Create() method)
+    // (JPG driver does not have Create() method)
     const GDALDatasetH hDataset = GDALCreate(memDrv, "", tileSize, tileSize,
-                                           nBands + 1, GDT_Byte, nullptr);
+                                           nBands, GDT_Byte, nullptr);
     if (hDataset == nullptr) throw GDALException("Cannot create GDAL dataset");
 
     if (GDALDatasetRasterIO(hDataset, GF_Write, 0, 0, tileSize, tileSize,
@@ -193,24 +206,16 @@ void RenderImage(const fs::path& outImagePath, const int tileSize, const int nBa
         throw GDALException("Cannot write tile data");
     }
 
-    const GDALRasterBandH tileAlphaBand = GDALGetRasterBand(hDataset, nBands + 1);
-    GDALSetRasterColorInterpretation(tileAlphaBand, GCI_AlphaBand);
-
-    if (GDALRasterIO(tileAlphaBand, GF_Write, 0, 0, tileSize, tileSize,
-                     alphaBuffer, tileSize, tileSize, GDT_Byte, 0,
-                     0) != CE_None) {
-        throw GDALException("Cannot write tile alpha data");
-    }
-
     bool writeToMemory = outImagePath.empty() && outBuffer != nullptr;
     if (writeToMemory){
         // Write to memory via vsimem
-        std::string vsiPath = "/vsimem/" + utils::generateRandomString(32) + ".png";
-        const GDALDatasetH outDs = GDALCreateCopy(pngDrv, vsiPath.c_str(), hDataset,
+        std::string vsiPath = "/vsimem/" + utils::generateRandomString(32) + ".jpg";
+        const GDALDatasetH outDs = GDALCreateCopy(jpgDrv, vsiPath.c_str(), hDataset,
                                                   FALSE, nullptr, nullptr, nullptr);
         if (outDs == nullptr)
             throw GDALException("Cannot create output dataset " +
                                 outImagePath.string());
+        GDALFlushCache(outDs);
         GDALClose(outDs);
 
         // Read memory to buffer
@@ -219,7 +224,7 @@ void RenderImage(const fs::path& outImagePath, const int tileSize, const int nBa
         if (bufSize > std::numeric_limits<int>::max()) throw GDALException("Exceeded max buf size");
         *outBufferSize = bufSize;
     }else{
-        const GDALDatasetH outDs = GDALCreateCopy(pngDrv, outImagePath.string().c_str(), hDataset,
+        const GDALDatasetH outDs = GDALCreateCopy(jpgDrv, outImagePath.string().c_str(), hDataset,
                                                   FALSE, nullptr, nullptr, nullptr);
         if (outDs == nullptr)
             throw GDALException("Cannot create output dataset " +
@@ -488,7 +493,19 @@ void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
         }
     }
 
-    RenderImage(outImagePath, tileSize, nBands, buffer.get(), alphaBuffer.get(), outBuffer, outBufferSize);
+    // Write white background
+    for (int x = 0; x < tileSize; x++) {
+        for (int y = 0; y < tileSize; y++) {
+            if (alphaBuffer.get()[y * tileSize + x] == 0) {
+                buffer.get()[y * tileSize + x + wSize * 0] = 255;
+                buffer.get()[y * tileSize + x + wSize * 1] = 255;
+                buffer.get()[y * tileSize + x + wSize * 2] = 255;
+                alphaBuffer.get()[y * tileSize + x] = 255;
+            }
+        }
+    }
+
+    RenderImage(outImagePath, tileSize, nBands, buffer.get(), outBuffer, outBufferSize);
 }
 
 // imagePath can be either absolute or relative or a network URL and it's up to the user to

@@ -91,7 +91,7 @@ protected:
     DDB_DLL std::string getTilePath(int z, int x, int y,
                                     bool createIfNotExists);
 
-    DDB_DLL virtual std::string tile(int tz, int tx, int ty) = 0;
+    DDB_DLL virtual std::string tile(int tz, int tx, int ty, uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr) = 0;
     DDB_DLL std::string tile(const TileInfo &tile);
 
     DDB_DLL std::vector<TileInfo> getTilesForZoomLevel(int tz) const;

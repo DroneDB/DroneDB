@@ -64,7 +64,6 @@ void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
                     SensorSize sensorSize;
                     Focal focal;
                     CameraOrientation cameraOri;
-                    bool hasCameraOri = false;
 
                     auto imageSize = e.extractImageSize();
                     entry.properties["width"] = imageSize.width;
@@ -87,13 +86,11 @@ void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
                             entry.properties["focalLength35"] = focal.length35;
                         }
 
-                        hasCameraOri = e.extractCameraOrientation(cameraOri);
-                        if (hasCameraOri) {
-                            entry.properties["cameraYaw"] = cameraOri.yaw;
-                            entry.properties["cameraPitch"] = cameraOri.pitch;
-                            entry.properties["cameraRoll"] = cameraOri.roll;
-                            LOGD << "Camera Orientation: " << cameraOri;
-                        }
+                        e.extractCameraOrientation(cameraOri);
+                        entry.properties["cameraYaw"] = cameraOri.yaw;
+                        entry.properties["cameraPitch"] = cameraOri.pitch;
+                        entry.properties["cameraRoll"] = cameraOri.roll;
+                        LOGD << "Camera Orientation: " << cameraOri;
                     }
 
                     GeoLocation geo;
@@ -107,7 +104,7 @@ void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
                         if (image){
                             double relAltitude = 0.0;
 
-                            if (hasCameraOri && e.extractRelAltitude(relAltitude) && sensorSize.width > 0.0 && focal.length > 0.0) {
+                            if (e.extractRelAltitude(relAltitude) && sensorSize.width > 0.0 && focal.length > 0.0) {
                                 calculateFootprint(sensorSize, geo, focal, cameraOri, relAltitude, entry.polygon_geom);
                             }
                         }

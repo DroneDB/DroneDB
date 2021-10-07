@@ -14,7 +14,7 @@ void Tile::setOptions(cxxopts::Options &opts) {
     // clang-format off
     opts
     .positional_help("[args]")
-    .custom_help("tile [geo.tif | image.jpg | ept.json | https://host.com/cog.tif | https://host.com/ept.json] [output directory]")
+    .custom_help("tile [geo.tif | image.jpg | ept.json | https://host.com/cog.tif | https://host.com/image.jpg | https://host.com/ept.json] [output directory]")
     .add_options()
     ("i,input", "Path or URL to file to tile", cxxopts::value<std::string>())
     ("o,output", "Output directory where to store tiles", cxxopts::value<std::string>()->default_value("{filename}_tiles/"))

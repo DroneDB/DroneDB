@@ -19,14 +19,18 @@
 namespace ddb {
 
 std::string Tiler::getTilePath(int z, int x, int y, bool createIfNotExists) {
-    // TODO: retina tiles support?
-    const fs::path dir = outputFolder / std::to_string(z) / std::to_string(x);
-    if (createIfNotExists && !exists(dir)) {
-        io::createDirectories(dir);
-    }
+    if (outputFolder.empty()){
+        return "/vsimem/" + utils::generateRandomString(16) + "-" + std::to_string(z) + "-" + std::to_string(x) + "-" + std::to_string(y) + ".png";
+    }else{
+        // TODO: retina tiles support?
+        const fs::path dir = outputFolder / std::to_string(z) / std::to_string(x);
+        if (createIfNotExists && !exists(dir)) {
+            io::createDirectories(dir);
+        }
 
-    fs::path p = dir / fs::path(std::to_string(y) + ".png");
-    return p.string();
+        fs::path p = dir / fs::path(std::to_string(y) + ".png");
+        return p.string();
+    }
 }
 
 Tiler::Tiler(const std::string &inputPath, const std::string &outputFolder,
@@ -42,7 +46,7 @@ Tiler::Tiler(const std::string &inputPath, const std::string &outputFolder,
         std::ceil(std::log2(tileSize) != std::floor(std::log2(tileSize))))
         throw GDALException("Tile size must be a power of 2 greater than 0");
 
-    if (!fs::exists(outputFolder)) {
+    if (!outputFolder.empty() && !fs::exists(outputFolder)) {
         // Try to create
         io::createDirectories(outputFolder);
     }
