@@ -56,8 +56,12 @@ float DSMService::getAltitude(double latitude, double longitude){
         }
 
         // Attempt to load from the network and recurse
-        if (addGeoTIFFToCache(loadFromNetwork(latitude, longitude), latitude, longitude)){
-            return getAltitude(latitude, longitude);
+        try{
+            if (addGeoTIFFToCache(loadFromNetwork(latitude, longitude), latitude, longitude)){
+                return getAltitude(latitude, longitude);
+            }
+        }catch(const NetException &e){
+            LOGW << e.what();
         }
     }
 
@@ -115,7 +119,7 @@ std::string DSMService::loadFromNetwork(double latitude, double longitude){
     LOGD << "Downloading DSM from " << url << " ...";
     net::Request r = net::GET(url);
 	r.verifySSL(false); // Risk is tolerable, we're just fetching altitude
-    r.downloadToFile(filePath);
+    r.downloadToFile(filePath, true);
 
     return filePath;
 }

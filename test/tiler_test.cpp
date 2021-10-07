@@ -81,4 +81,14 @@ TEST(testTiler, image){
     VSIFree(buffer);
 }
 
+TEST(testTiler, userCache){
+    TestArea ta(TEST_NAME);
+    fs::path image = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/test-datasets/drone_dataset_brighton_beach/DJI_0018.JPG",
+                                          "DJI_0032.JPG");
+    fs::path tileDir = ta.getFolder("tiles");
+    fs::path tile = TilerHelper::getFromUserCache(image, 20, 256335, 369483, 512, true, true, "");
+
+    EXPECT_TRUE(io::Path(tile).getSize() > 0);
+}
+
 }

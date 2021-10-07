@@ -258,7 +258,7 @@ size_t write_data(void *ptr, size_t size, size_t nmemb, FILE *stream) {
     return written;
 }
 
-Response Request::downloadToFile(const std::string &outFile) {
+Response Request::downloadToFile(const std::string &outFile, bool throwOnError) {
     FILE *f = nullptr;
 
     f = fopen(outFile.c_str(), "wb");
@@ -271,6 +271,10 @@ Response Request::downloadToFile(const std::string &outFile) {
     Response res;
     perform(res);
     fclose(f);
+
+    if (throwOnError and res.statusCode != 200){
+        throw NetException("Download of " + url + " returned code: " + std::to_string(res.statusCode));
+    }
 
     return res;
 }

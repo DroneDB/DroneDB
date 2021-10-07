@@ -46,7 +46,7 @@ public:
     DDB_DLL ~Request();
 
     DDB_DLL Response send();
-    DDB_DLL Response downloadToFile(const std::string &outFile);
+    DDB_DLL Response downloadToFile(const std::string &outFile, bool throwOnError = false);
 
     DDB_DLL Request& formData(std::vector<std::string> params);
     DDB_DLL Request& multiPartFormData(std::vector<std::string> files, std::vector<std::string> params = {});
