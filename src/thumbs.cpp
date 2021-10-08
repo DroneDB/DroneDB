@@ -3,18 +3,16 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "thumbs.h"
 
-#include <coordstransformer.h>
-#include <epttiler.h>
-#include <gdal_priv.h>
-#include <gdal_utils.h>
-#include <pointcloud.h>
-#include <tiler.h>
-
 #include <cstdlib>
 #include <pdal/filters/ColorinterpFilter.hpp>
 #include <pdal/io/EptReader.hpp>
 #include <sstream>
 
+#include "coordstransformer.h"
+#include "epttiler.h"
+#include "gdal_inc.h"
+#include "pointcloud.h"
+#include "tiler.h"
 #include "dbops.h"
 #include "exceptions.h"
 #include "hash.h"

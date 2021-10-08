@@ -4,7 +4,7 @@
 #ifndef NET_REQUEST_H
 #define NET_REQUEST_H
 
-#include <curl/curl.h>
+#include "curl_inc.h"
 #include <string>
 #include <vector>
 #include "reqtype.h"

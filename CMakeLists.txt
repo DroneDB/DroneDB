@@ -84,11 +84,11 @@ if (WIN32)
     endfunction()
 
     # Download GDAL/CURL/sqlite3/spatialite/PDAL and supporting libraries
-    download_dependency("gdal_libs.zip" "https://github.com/DroneDB/ddb_data/releases/download/v0.9.2/release-1911-x64-gdal-3-0-4-mapserver-7-4-3-libs.zip")
-    download_dependency("gdal_bins.zip" "https://github.com/DroneDB/ddb_data/releases/download/v0.9.2/release-1911-x64-gdal-3-0-4-mapserver-7-4-3-sans-sqlite3.zip")
+    download_dependency("gdal_libs.zip" "https://github.com/DroneDB/DroneDB/releases/download/v0.9.13/release-1928-x64-gdal-3-3-2-mapserver-7-6-4-libs.zip")
+    download_dependency("gdal_bins.zip" "https://github.com/DroneDB/DroneDB/releases/download/v0.9.13/release-1928-x64-gdal-3-3-2-mapserver-7-6-4-sans-sqlite3.zip")
     download_dependency("laszip.zip" "https://github.com/DroneDB/ddb_data/releases/download/v0.9.2/laszip-3-4-3.zip")
-    download_dependency("geotiff.zip" "https://github.com/DroneDB/ddb_data/releases/download/v0.9.2/release-1911-x64-gdal-3-0-4-mapserver-7-4-3-geotiff.zip")
-    download_dependency("pdal.zip" "https://github.com/DroneDB/ddb_data/releases/download/v0.9.2/release-1911-x64-gdal-3-0-4-mapserver-7-4-3-pdal-2-3-0.zip")
+    download_dependency("geotiff.zip" "https://github.com/DroneDB/DroneDB/releases/download/v0.9.13/release-1928-x64-gdal-3-3-2-mapserver-7-6-4-geotiff.zip")
+    download_dependency("pdal.zip" "https://github.com/DroneDB/DroneDB/releases/download/v0.9.13/release-1928-x64-gdal-3-3-2-mapserver-7-6-4-pdal-2-3-0.zip")
     download_dependency("zlib.zip" "https://github.com/DroneDB/ddb_data/releases/download/v0.9.2/zlib-1-2-11.zip")
     download_dependency("libzip.zip" "https://github.com/DroneDB/ddb_data/releases/download/v0.9.2/zlib-1-2-11-libzip-1-8-0.zip")
     download_dependency("sqlite3.zip" "https://github.com/DroneDB/ddb_data/releases/download/v0.9.2/sqlite-dll-win64-x64-3360000.zip")
@@ -186,7 +186,7 @@ if (WIN32)
     copy_dlls("libzip/bin/*.dll")
     copy_dlls("sqlite3/bin/*.dll")    
 
-    file(COPY "${DOWNLOADS_DIR}/gdal/bin/proj6/share/proj.db" DESTINATION ${CMAKE_BINARY_DIR})
+    file(COPY "${DOWNLOADS_DIR}/gdal/bin/proj7/share/proj.db" DESTINATION ${CMAKE_BINARY_DIR})
 
     # Fix linking
     target_link_libraries("${PROJECT_NAME}" ${LINK_LIBRARIES})

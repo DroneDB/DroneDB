@@ -1,4 +1,4 @@
-#include <curl/curl.h>
+#include "curl_inc.h"
 #include <fstream>
 #include "functions.h"
 #include "exceptions.h"

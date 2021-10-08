@@ -5,8 +5,8 @@
 #include "dbops.h"
 #include "geoproject.h"
 #include "mio.h"
-#include <gdal_priv.h>
-#include <gdal_utils.h>
+#include "gdal_inc.h"
+
 
 namespace ddb {
 

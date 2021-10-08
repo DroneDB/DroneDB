@@ -4,9 +4,7 @@
 #ifndef TILERHELPER_H
 #define TILERHELPER_H
 
-#include <gdal_priv.h>
-#include <gdalwarper.h>
-#include <ogr_srs_api.h>
+#include "gdal_inc.h"
 
 #include <sstream>
 #include <string>

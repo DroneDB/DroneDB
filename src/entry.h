@@ -4,9 +4,7 @@
 #ifndef ENTRY_H
 #define ENTRY_H
 
-#include <gdal_priv.h>
-#include <ogrsf_frmts.h>
-#include <ogr_srs_api.h>
+#include "gdal_inc.h"
 #include "entry_types.h"
 #include "logger.h"
 #include "exceptions.h"
@@ -125,7 +123,7 @@ struct Entry {
 
         try{
             meta = json::parse(metaJson);
-        }catch(json::exception &e){
+        }catch(json::exception &){
             LOGD << "Corrupted meta: " << metaJson;
             return;
         }
