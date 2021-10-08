@@ -77,12 +77,17 @@ fs::path getThumbFilename(const fs::path &imagePath, time_t modifiedTime, int th
 }
 
 void generateImageThumb(const fs::path& imagePath, int thumbSize, const fs::path& outImagePath, uint8_t **outBuffer, int *outBufferSize) {
+    std::string openPath = imagePath.string();
+    if (utils::isNetworkPath(openPath)){
+        CPLSetConfigOption("GDAL_DISABLE_READDIR_ON_OPEN", "YES");
+        openPath = "/vsicurl/" + openPath;
+    }
 
     // Compute image with GDAL otherwise
-    GDALDatasetH hSrcDataset = GDALOpen(imagePath.string().c_str(), GA_ReadOnly);
+    GDALDatasetH hSrcDataset = GDALOpen(openPath.c_str(), GA_ReadOnly);
 
     if (!hSrcDataset)
-        throw GDALException("Cannot open " + imagePath.string() + " for reading");
+        throw GDALException("Cannot open " + openPath + " for reading");
 
     const int width = GDALGetRasterXSize(hSrcDataset);
     const int height = GDALGetRasterYSize(hSrcDataset);
