@@ -97,7 +97,7 @@ std::string EptTiler::tile(int tz, int tx, int ty, uint8_t **outBuffer, int *out
     // Expand by a few meters, so that we have sufficient
     // overlap with other tiles
     double tileResolution = mercator.resolution(tz);
-    const int boundsBufSize = tileResolution * std::ceil(static_cast<float>(tileSize) / 20.0); // resolution (m / px) * border (px) --> buffer (m)
+    const int boundsBufSize = tileResolution * std::ceil(static_cast<float>(tileSize) / 40.0); // resolution (m / px) * border (px) --> buffer (m)
     bounds.min.x -= boundsBufSize;
     bounds.max.x += boundsBufSize;
     bounds.min.y -= boundsBufSize;
