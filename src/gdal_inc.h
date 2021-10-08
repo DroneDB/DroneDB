@@ -4,12 +4,6 @@
 #ifndef GDAL_INC_H
 #define GDAL_INC_H
 
-#ifdef _WIN32
-#ifndef _WINSOCKAPI_
-#define _WINSOCKAPI_
-#endif
-#endif
-
 #include <gdal_priv.h>
 #include <gdalwarper.h>
 #include <ogr_srs_api.h>

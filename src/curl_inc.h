@@ -4,10 +4,6 @@
 #ifndef CURL_INC_H
 #define CURL_INC_H
 
-#ifdef _WIN32
-#include <winsock2.h>
-#endif
-
 #include <curl/curl.h>
 
 #endif
