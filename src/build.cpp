@@ -4,9 +4,9 @@
 
 #include "build.h"
 
-#include <ddb.h>
-#include <pointcloud.h>
-
+#include "ddb.h"
+#include "pointcloud.h"
+#include "cog.h"
 #include "dbops.h"
 #include "exceptions.h"
 #include "mio.h"
@@ -17,6 +17,9 @@ bool isBuildableInternal(const Entry& e, std::string& subfolder) {
 
     if (e.type == PointCloud) {
         subfolder = "ept";
+        return true;
+    }else if (e.type == GeoRaster){
+        subfolder = "cog";
         return true;
     }
 
@@ -48,7 +51,7 @@ void buildInternal(Database* db, const Entry& e,
         outputFolder = (baseOutputPath / subfolder).string();
     }else{
         LOGD << "No build needed";
-        return; // No build needed
+        return;
     }
 
     if (fs::exists(outputFolder) && !force) {
@@ -81,16 +84,21 @@ void buildInternal(Database* db, const Entry& e,
 
     // We could vectorize this logic, but it's an overkill by now
     try {
+        bool built = false;
+
         if (e.type == PointCloud) {
             const std::vector vec = {relativePath};
-
             buildEpt(vec, tempFolder);
+            built = true;
+        }else if (e.type == GeoRaster){
+            buildCog(relativePath, (fs::path(tempFolder) / "cog.tif").string());
+            built = true;
+        }
 
+        if (built){
             LOGD << "Build complete, moving temp folder to " << outputFolder;
             io::assureFolderExists(fs::path(outputFolder).parent_path());
             std::filesystem::rename(tempFolder, outputFolder);
-
-            LOGD << "Temp folder moved";
 
             output << outputFolder << std::endl;
         }
@@ -124,9 +132,11 @@ void buildAll(Database* db, const std::string& outputPath,
 
     LOGD << "In buildAll('" << outputPath << "')";
 
-    // List all files in DB
-    auto q = db->query("SELECT path, hash, type, properties, mtime, size, depth FROM entries");
-    
+    // List all buildable files in DB
+    auto q = db->query("SELECT path, hash, type, properties, mtime, size, depth FROM entries WHERE type = ? OR type = ?");
+    q->bind(1, PointCloud);
+    q->bind(2, GeoRaster);
+
     while (q->fetch()) {
         Entry e(q->getText(0), q->getText(1), q->getInt(2), q->getText(3),
                 q->getInt64(4), q->getInt64(5), q->getInt(6));

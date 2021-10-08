@@ -3,6 +3,8 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include <iostream>
+#include "gdal_inc.h"
+#include "curl_inc.h"
 
 #include "cmd/cmdlist.h"
 #include "cmd/gendocs.h"
@@ -13,8 +15,6 @@
 #include "ddb.h"
 #include "dbops.h"
 #include "mio.h"
-#include <gdal_priv.h>
-#include <curl/curl.h>
 
 using namespace std;
 using namespace ddb;

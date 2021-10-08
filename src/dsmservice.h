@@ -9,9 +9,7 @@
 #include <vector>
 #include <unordered_map>
 #include <filesystem>
-#include <gdal_priv.h>
-#include <ogr_spatialref.h>
-#include <cpl_conv.h>
+#include "gdal_inc.h"
 #include "userprofile.h"
 #include "geo.h"
 #include "ddb_export.h"

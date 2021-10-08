@@ -4,7 +4,7 @@
 #ifndef NET_RESPONSE_H
 #define NET_RESPONSE_H
 
-#include <curl/curl.h>
+#include "curl_inc.h"
 #include <string>
 #include "json.h"
 #include "ddb_export.h"

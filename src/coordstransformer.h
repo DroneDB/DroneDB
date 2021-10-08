@@ -4,8 +4,7 @@
 #ifndef COORDSTRANSFORMER_H
 #define COORDSTRANSFORMER_H
 
-#include <gdal_priv.h>
-#include <ogr_srs_api.h>
+#include "gdal_inc.h"
 #include "ddb_export.h"
 
 namespace ddb{

@@ -3,8 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include <pdal/StageFactory.hpp>
 #include <pdal/PointRef.hpp>
-#include <gdal_priv.h>
-#include <ogr_srs_api.h>
+#include "gdal_inc.h"
 #include <untwine/untwine/Common.hpp>
 #include <untwine/untwine/ProgressWriter.hpp>
 #include <untwine/epf/Epf.hpp>
