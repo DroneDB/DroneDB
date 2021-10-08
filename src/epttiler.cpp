@@ -96,7 +96,8 @@ std::string EptTiler::tile(int tz, int tx, int ty, uint8_t **outBuffer, int *out
 
     // Expand by a few meters, so that we have sufficient
     // overlap with other tiles
-    const int boundsBufSize = mercator.resolution(tz) * 20; // meters
+    double tileResolution = mercator.resolution(tz);
+    const int boundsBufSize = tileResolution * std::ceil(static_cast<float>(tileSize) / 20.0); // resolution (m / px) * border (px) --> buffer (m)
     bounds.min.x -= boundsBufSize;
     bounds.max.x += boundsBufSize;
     bounds.min.y -= boundsBufSize;
@@ -116,9 +117,9 @@ std::string EptTiler::tile(int tz, int tx, int ty, uint8_t **outBuffer, int *out
     eptOpts.add("bounds", ss.str());
     LOGD << "EPT bounds: " << ss.str();
 
-    double resolution = mercator.resolution(tz - 2);
-    eptOpts.add("resolution", resolution);
-    LOGD << "EPT resolution: " << resolution;
+    double eptResolution = mercator.resolution(tz - 2);
+    eptOpts.add("resolution", eptResolution);
+    LOGD << "EPT resolution: " << eptResolution;
 
     std::unique_ptr<pdal::EptReader> eptReader = std::make_unique<pdal::EptReader>();
     pdal::Stage *main = eptReader.get();
@@ -158,14 +159,21 @@ std::string EptTiler::tile(int tz, int tx, int ty, uint8_t **outBuffer, int *out
 
     const int nBands = 3;
     const int bufSize = GDALGetDataTypeSizeBytes(GDT_Byte) * wSize;
+
+    const int pointRadius = 2;
+    const double pointRadiusMeters = pointRadius * tileResolution;
+    const int paddedTileSize = tileSize + pointRadius * 2;
+    const int paddedWSize = paddedTileSize * paddedTileSize;
+    const int paddedBufSize = GDALGetDataTypeSizeBytes(GDT_Byte) * paddedWSize;
+
     std::unique_ptr<uint8_t> buffer(new uint8_t[bufSize * nBands]);
     std::unique_ptr<uint8_t> alphaBuffer(new uint8_t[bufSize]);
-    std::unique_ptr<float> zBuffer(new float[bufSize]);
+    std::unique_ptr<float> zBuffer(new float[paddedBufSize]);
 
     memset(buffer.get(), 0, bufSize * nBands);
     memset(alphaBuffer.get(), 0, bufSize);
 
-    for (int i = 0; i < wSize; i++){
+    for (int i = 0; i < paddedWSize; i++) {
         zBuffer.get()[i] = -99999.0;
     }
 
@@ -173,6 +181,9 @@ std::string EptTiler::tile(int tz, int tx, int ty, uint8_t **outBuffer, int *out
 
     const double tileScaleW = tileSize / (tileBounds.max.x - tileBounds.min.x);
     const double tileScaleH = tileSize / (tileBounds.max.y - tileBounds.min.y);
+    const double paddedTileScaleW = paddedTileSize / (tileBounds.max.x - tileBounds.min.x + pointRadiusMeters * 2.0);
+    const double paddedTileScaleH = paddedTileSize / (tileBounds.max.y - tileBounds.min.y + pointRadiusMeters * 2.0);
+
     CoordsTransformer ict(eptInfo.wktProjection, 3857);
 
     for (pdal::PointId idx = 0; idx < point_view->size(); ++idx) {
@@ -184,18 +195,22 @@ std::string EptTiler::tile(int tz, int tx, int ty, uint8_t **outBuffer, int *out
         ict.transform(&x, &y);
 
         // Map projected coordinates to local PNG coordinates
-        int px = std::round((x - tileBounds.min.x) * tileScaleW);
-        int py = tileSize - 1 - std::round((y - tileBounds.min.y) * tileScaleH);
-
-        if (px >= 0 && px < tileSize && py >= 0 && py < tileSize){
+        int px = std::round((x - tileBounds.min.x - pointRadiusMeters) * paddedTileScaleW);
+        int py = paddedTileSize - 1 - std::round((y - tileBounds.min.y + pointRadiusMeters) * paddedTileScaleH);
+        
+        if (px >= 0 && px < paddedTileSize && py >= 0 && py < paddedTileSize) {
             // Within bounds
             uint8_t red = p.getFieldAs<uint8_t>(pdal::Dimension::Id::Red);
             uint8_t green = p.getFieldAs<uint8_t>(pdal::Dimension::Id::Green);
             uint8_t blue = p.getFieldAs<uint8_t>(pdal::Dimension::Id::Blue);
 
-            if (zBuffer.get()[py * tileSize + px] < z){
-                zBuffer.get()[py * tileSize + px] = z;
-                drawCircle(buffer.get(), alphaBuffer.get(), px, py, 2, red, green, blue, tileSize, wSize);
+            int off_px = px - pointRadius;
+            int off_py = py - pointRadius;
+
+            if (zBuffer.get()[py * paddedTileSize + px] < z) {
+                zBuffer.get()[py * paddedTileSize + px] = z;
+                drawCircle(buffer.get(), alphaBuffer.get(), off_px, off_py,
+                           pointRadius, red, green, blue, tileSize, wSize);
             }
         }
     }
@@ -211,8 +226,9 @@ std::string EptTiler::tile(int tz, int tx, int ty, uint8_t **outBuffer, int *out
                                            GDT_Byte, nullptr);
     if (dsTile == nullptr) throw GDALException("Cannot create dsTile");
 
-    if (GDALDatasetRasterIO(dsTile, GF_Write, 0, 0, tileSize,
-                            tileSize, buffer.get(), tileSize, tileSize,
+    if (GDALDatasetRasterIO(dsTile, GF_Write, 0, 0,
+                            tileSize, tileSize,
+                            buffer.get(), tileSize, tileSize,
                             GDT_Byte, nBands, nullptr, 0, 0,
                             0) != CE_None) {
         throw GDALException("Cannot write tile data");
@@ -222,8 +238,8 @@ std::string EptTiler::tile(int tz, int tx, int ty, uint8_t **outBuffer, int *out
         GDALGetRasterBand(dsTile, nBands + 1);
     GDALSetRasterColorInterpretation(tileAlphaBand, GCI_AlphaBand);
 
-    if (GDALRasterIO(tileAlphaBand, GF_Write, 0, 0, tileSize,
-                     tileSize, alphaBuffer.get(), tileSize, tileSize,
+    if (GDALRasterIO(tileAlphaBand, GF_Write, 0, 0, tileSize, tileSize,
+                     alphaBuffer.get(), tileSize, tileSize,
                      GDT_Byte, 0, 0) != CE_None) {
         throw GDALException("Cannot write tile alpha data");
     }
