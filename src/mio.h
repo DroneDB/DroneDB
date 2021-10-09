@@ -75,7 +75,7 @@ public:
 class FileLock{
     int fd = -1;
     std::string lockFile;
-public:
+   public:
     DDB_DLL FileLock();
     DDB_DLL FileLock(const fs::path &p);
     DDB_DLL ~FileLock();

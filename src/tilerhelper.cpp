@@ -5,8 +5,8 @@
 #include "tilerhelper.h"
 #include "gdaltiler.h"
 #include "epttiler.h"
+#include "threadlock.h"
 
-#include <mutex>
 #include <memory>
 #include <vector>
 
@@ -85,7 +85,6 @@ fs::path TilerHelper::toGeoTIFF(const fs::path &tileablePath, int tileSize,
                                 const fs::path &outputGeotiff,
                                 const std::string &tileablePathHash) {
     fs::path localTileablePath;
-    io::FileLock downloadLock;
 
     if (utils::isNetworkPath(tileablePath.string())){
         // Download file to user cache
@@ -107,16 +106,16 @@ fs::path TilerHelper::toGeoTIFF(const fs::path &tileablePath, int tileSize,
             alwaysDownload = true; // always download, content could have changed
         }
 
-        // One process at a time
-        downloadLock.lock(localTileablePath);
-        bool download = alwaysDownload || !fs::exists(localTileablePath);
-        if (download){
-            net::Request r = net::GET(tileablePath.string());
-            r.downloadToFile(localTileablePath.string());
-        }
+        // One thread at a time
+        {
+            ThreadLock lock(localTileablePath.string());
 
-        // If we don't always download, we can release this early
-        if (!alwaysDownload) downloadLock.unlock();
+            bool download = alwaysDownload || !fs::exists(localTileablePath);
+            if (download) {
+                net::Request r = net::GET(tileablePath.string());
+                r.downloadToFile(localTileablePath.string());
+            }
+        }
     }else{
         localTileablePath = tileablePath;
     }
@@ -146,15 +145,17 @@ fs::path TilerHelper::toGeoTIFF(const fs::path &tileablePath, int tileSize,
 
         // We need to (attempt) to geoproject the file first
         if (!fs::exists(outputPath) || forceRecreate) {
-            // Multiple processes could be generating the geoprojected
+            // Multiple threads could be generating the geoprojected
             // file at the same time, so we place a lock
-            io::FileLock lock(outputPath);
+            {
+                ThreadLock lock(outputPath.string());
 
-            // Recheck is needed for other processes that might have generated
-            // the file
-            if (!fs::exists(outputPath)){
-                ddb::geoProject({localTileablePath.string()}, outputPath.string(),
-                                "100%", true);
+                // Recheck is needed for other processes that might have generated
+                // the file
+                if (!fs::exists(outputPath)){
+                    ddb::geoProject({localTileablePath.string()}, outputPath.string(),
+                                    "100%", true);
+                }
             }
         }
 

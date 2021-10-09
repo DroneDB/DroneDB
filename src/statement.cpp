@@ -12,8 +12,6 @@ Statement::Statement(sqlite3 *db, const std::string &query)
     if (sqlite3_prepare_v2(db, query.c_str(), static_cast<int>(query.length()), &stmt, nullptr) != SQLITE_OK) {
         throw SQLException("Cannot prepare SQL statement: " + query + ": " + std::string(sqlite3_errmsg(db)));
     }
-
-    LOGD << "Statement: " + query;
 }
 
 void Statement::bindCheck(int ret) {
@@ -24,7 +22,6 @@ void Statement::bindCheck(int ret) {
 
 Statement::~Statement() {
     if (stmt != nullptr) {
-        LOGD << "Destroying statement: " << stmt;
         sqlite3_finalize(stmt);
         stmt = nullptr;
     }
@@ -32,21 +29,18 @@ Statement::~Statement() {
 
 Statement &Statement::bind(int paramNum, const std::string &value) {
     assert(stmt != nullptr && db != nullptr);
-    LOGD << "Bind \"" << value << "\" as param " << paramNum;
     bindCheck(sqlite3_bind_text(stmt, paramNum, value.c_str(), static_cast<int>(value.length()), SQLITE_TRANSIENT));
     return *this;
 }
 
 Statement &Statement::bind(int paramNum, int value) {
     assert(stmt != nullptr && db != nullptr);
-    LOGD << "Bind " << value << " as param " << paramNum;
     bindCheck(sqlite3_bind_int(stmt, paramNum, value));
     return *this;
 }
 
 Statement &Statement::bind(int paramNum, long long value) {
     assert(stmt != nullptr && db != nullptr);
-    LOGD << "Bind " << value << " as param " << paramNum;
     bindCheck(sqlite3_bind_int64(stmt, paramNum, value));
     return *this;
 }
