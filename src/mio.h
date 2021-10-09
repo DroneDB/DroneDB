@@ -97,6 +97,7 @@ DDB_DLL void createDirectories(const fs::path &d);
 DDB_DLL void assureIsRemoved(const fs::path p);
 DDB_DLL void copy(const fs::path &from, const fs::path &to);
 DDB_DLL void hardlink(const fs::path &target, const fs::path &linkName);
+DDB_DLL void rename(const fs::path &from, const fs::path &to);
 
 // Prints to the provided buffer a nice number of bytes (KB, MB, GB, etc)
 DDB_DLL std::string bytesToHuman(std::uintmax_t bytes);

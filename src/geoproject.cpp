@@ -150,9 +150,10 @@ void geoProject(const std::vector<std::string> &images, const std::string &outpu
 
         GDALClose(hSrcDataset);
         GDALClose(hDstDataset);
+        GDALFlushCache(hWrpDataset);
         GDALClose(hWrpDataset);
 
-        fs::rename(tmpOutFile, outFile);
+        io::rename(tmpOutFile, outFile);
 
         if (callback){
             if (!callback(outFile)) return;

@@ -490,10 +490,7 @@ DDB_DLL void applyDelta(const Delta &res, const fs::path &destPath,
                     LOGD << "Shadow file exists, replacing original one";
 
                     // Why don't we have fs::move??
-                    std::filesystem::copy(
-                        destShadow, dest,
-                        std::filesystem::copy_options::overwrite_existing);
-                    std::filesystem::remove(destShadow);
+                    io::rename(destShadow, dest);
                 }
             }
         }

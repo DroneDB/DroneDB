@@ -184,8 +184,6 @@ bool Path::isRelative() const{
 }
 
 
-
-
 // Counts the number of path components
 // it does NOT normalize the path to account for ".." and "." folders
 int Path::depth() {
@@ -449,6 +447,15 @@ void hardlink(const fs::path &target, const fs::path &linkName){
     fs::create_hard_link(target, linkName, e);
     if (e.value() != 0){
         throw FSException("Cannot create hard link " + target.string() + " --> " + linkName.string() +
+                          " (" + e.message() + ")");
+    }
+}
+
+void rename(const fs::path &from, const fs::path &to){
+    std::error_code e;
+    fs::rename(from, to, e);
+    if (e.value() != 0){
+        throw FSException("Cannot move " + from.string() + " --> " + to.string() +
                           " (" + e.message() + ")");
     }
 }
