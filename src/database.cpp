@@ -224,11 +224,13 @@ json Database::getAttributes() const {
         const auto q = this->query(sql);
         if (q->fetch()){
             const std::string metaJson = q->getText(0);
-            try{
-                json meta = json::parse(metaJson);
-                if (!meta.empty()) j["meta"] = meta;
-            }catch(json::exception){
-                LOGD << "Malformed database meta: " << metaJson;
+            if (!metaJson.empty()){
+                try{
+                    json meta = json::parse(metaJson);
+                    if (!meta.empty()) j["meta"] = meta;
+                }catch(json::exception){
+                    LOGD << "Malformed database meta: " << metaJson;
+                }
             }
         }
     }
