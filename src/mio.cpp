@@ -469,7 +469,7 @@ void FileLock::lock(const fs::path &p){
     lockFile = (p.parent_path() / p.filename()).string() + ".lock";
 
     fd = _open(lockFile.c_str(), O_CREAT, 0644);
-    if (fd == -1){
+    if (fd == -1) {
         throw ddb::AppException("Cannot acquire lock " + lockFile);
     }
 

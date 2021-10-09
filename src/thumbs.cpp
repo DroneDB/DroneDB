@@ -76,16 +76,27 @@ fs::path getThumbFilename(const fs::path &imagePath, time_t modifiedTime, int th
 
 void generateImageThumb(const fs::path& imagePath, int thumbSize, const fs::path& outImagePath, uint8_t **outBuffer, int *outBufferSize) {
     std::string openPath = imagePath.string();
-    if (utils::isNetworkPath(openPath)){
+    bool tryReopen = false;
+
+    if (utils::isNetworkPath(openPath) && io::Path(openPath).checkExtension({"tif", "tiff"})){
         CPLSetConfigOption("GDAL_DISABLE_READDIR_ON_OPEN", "YES");
+        CPLSetConfigOption("CPL_VSIL_CURL_ALLOWED_EXTENSIONS", ".tif,.tiff");
         openPath = "/vsicurl/" + openPath;
+
+        // With some files / servers, vsicurl fails
+        tryReopen = true;
     }
 
-    // Compute image with GDAL otherwise
     GDALDatasetH hSrcDataset = GDALOpen(openPath.c_str(), GA_ReadOnly);
 
-    if (!hSrcDataset)
+    if (!hSrcDataset && tryReopen) {
+        openPath = imagePath.string();
+        hSrcDataset = GDALOpen(openPath.c_str(), GA_ReadOnly);
+    }
+
+    if (!hSrcDataset) {
         throw GDALException("Cannot open " + openPath + " for reading");
+    }
 
     const int width = GDALGetRasterXSize(hSrcDataset);
     const int height = GDALGetRasterYSize(hSrcDataset);
