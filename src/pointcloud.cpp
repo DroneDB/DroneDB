@@ -102,21 +102,27 @@ bool getPointCloudInfo(const std::string &filename, PointCloudInfo &info, int po
                 }
 
                 info.polyBounds.clear();
-                info.polyBounds.addPoint(geoMinY, geoMinX, geoMinZ);
-                info.polyBounds.addPoint(geoMinY, geoMaxX, geoMinZ);
-                info.polyBounds.addPoint(geoMaxY, geoMaxX, geoMinZ);
-                info.polyBounds.addPoint(geoMaxY, geoMinX, geoMinZ);
-                info.polyBounds.addPoint(geoMinY, geoMinX, geoMinZ);
 
-                double centroidX = (bbox.minx + bbox.maxx) / 2.0;
-                double centroidY = (bbox.miny + bbox.maxy) / 2.0;
-                double centroidZ = bbox.minz;
-
-                if (OCTTransform(hTransform, 1, &centroidX, &centroidY, &centroidZ)){
-                    info.centroid.clear();
-                    info.centroid.addPoint(centroidY, centroidX, centroidZ);
+                if (geoMinZ < -30000 || geoMaxZ > 30000 || (geoMinX == -90 && geoMaxX == 90)){
+                    LOGD << "Strange point cloud bounds [[" << geoMinX << ", " << geoMaxX << "], [" << geoMinY << ", " << geoMaxY << "], [" << geoMinZ << ", " << geoMaxZ << "]]";
+                    info.bounds.clear();
                 }else{
-                    throw GDALException("Cannot transform coordinates " + std::to_string(centroidX) + ", " + std::to_string(centroidY) + " to " + proj);
+                    info.polyBounds.addPoint(geoMinY, geoMinX, geoMinZ);
+                    info.polyBounds.addPoint(geoMinY, geoMaxX, geoMinZ);
+                    info.polyBounds.addPoint(geoMaxY, geoMaxX, geoMinZ);
+                    info.polyBounds.addPoint(geoMaxY, geoMinX, geoMinZ);
+                    info.polyBounds.addPoint(geoMinY, geoMinX, geoMinZ);
+
+                    double centroidX = (bbox.minx + bbox.maxx) / 2.0;
+                    double centroidY = (bbox.miny + bbox.maxy) / 2.0;
+                    double centroidZ = bbox.minz;
+
+                    if (OCTTransform(hTransform, 1, &centroidX, &centroidY, &centroidZ)){
+                        info.centroid.clear();
+                        info.centroid.addPoint(centroidY, centroidX, centroidZ);
+                    }else{
+                        throw GDALException("Cannot transform coordinates " + std::to_string(centroidX) + ", " + std::to_string(centroidY) + " to " + proj);
+                    }
                 }
 
                 OCTDestroyCoordinateTransformation(hTransform);
