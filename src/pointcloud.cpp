@@ -220,28 +220,29 @@ bool getEptInfo(const std::string &eptJson, PointCloudInfo &info, int polyBounds
 
     const bool minSuccess = OCTTransform(hTransform, 1, &geoMinX, &geoMinY, &geoMinZ);
     const bool maxSuccess = OCTTransform(hTransform, 1, &geoMaxX, &geoMaxY, &geoMaxZ);
+    info.polyBounds.clear();
 
     if (!minSuccess || !maxSuccess){
-        throw GDALException("Cannot transform coordinates " + info.wktProjection + " to EPSG:" + std::to_string(polyBoundsSrs));
+        LOGD << "Cannot transform coordinates " << info.wktProjection << " to EPSG:" << std::to_string(polyBoundsSrs);
+    } else {
+        info.polyBounds.addPoint(geoMinY, geoMinX, geoMinZ);
+        info.polyBounds.addPoint(geoMinY, geoMaxX, geoMinZ);
+        info.polyBounds.addPoint(geoMaxY, geoMaxX, geoMinZ);
+        info.polyBounds.addPoint(geoMaxY, geoMinX, geoMinZ);
+        info.polyBounds.addPoint(geoMinY, geoMinX, geoMinZ);
+
+        double centroidX = (minx + maxx) / 2.0;
+        double centroidY = (miny + maxy) / 2.0;
+        double centroidZ = minz;
+
+        if (OCTTransform(hTransform, 1, &centroidX, &centroidY, &centroidZ)){
+            info.centroid.clear();
+            info.centroid.addPoint(centroidY, centroidX, centroidZ);
+        }else{
+            throw GDALException("Cannot transform coordinates " + std::to_string(centroidX) + ", " + std::to_string(centroidY) + " to EPSG:" + std::to_string(polyBoundsSrs));
+        }
     }
 
-    info.polyBounds.clear();
-    info.polyBounds.addPoint(geoMinY, geoMinX, geoMinZ);
-    info.polyBounds.addPoint(geoMinY, geoMaxX, geoMinZ);
-    info.polyBounds.addPoint(geoMaxY, geoMaxX, geoMinZ);
-    info.polyBounds.addPoint(geoMaxY, geoMinX, geoMinZ);
-    info.polyBounds.addPoint(geoMinY, geoMinX, geoMinZ);
-
-    double centroidX = (minx + maxx) / 2.0;
-    double centroidY = (miny + maxy) / 2.0;
-    double centroidZ = minz;
-
-    if (OCTTransform(hTransform, 1, &centroidX, &centroidY, &centroidZ)){
-        info.centroid.clear();
-        info.centroid.addPoint(centroidY, centroidX, centroidZ);
-    }else{
-        throw GDALException("Cannot transform coordinates " + std::to_string(centroidX) + ", " + std::to_string(centroidY) + " to EPSG:" + std::to_string(polyBoundsSrs));
-    }
 
     OCTDestroyCoordinateTransformation(hTransform);
     OSRDestroySpatialReference(hTgt);
