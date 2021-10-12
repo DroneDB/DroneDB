@@ -280,7 +280,7 @@ void generatePointCloudThumb(const fs::path &eptPath, int thumbSize,
     double oMaxY;
     double oMinY;
 
-    bool hasSpatialSystem = !eptInfo.wktProjection.empty();
+    bool hasSpatialSystem = !eptInfo.wktProjection.empty() && !eptInfo.polyBounds.empty();
 
     if (hasSpatialSystem) {
         LOGD << "WktProjection: " << eptInfo.wktProjection;
