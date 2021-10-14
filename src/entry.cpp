@@ -9,6 +9,7 @@
 
 #include "mio.h"
 #include "pointcloud.h"
+#include "ply.h"
 #include "ogr_srs_api.h"
 
 namespace ddb {
@@ -382,10 +383,15 @@ EntryType fingerprint(const fs::path &path){
     if (markdown)
         return EntryType::Markdown;
 
-    bool pointCloud = p.checkExtension({"laz", "las"}); // TODO: more?
+    bool pointCloud = p.checkExtension({"laz", "las"});
 
     if (pointCloud)
         return EntryType::PointCloud;
+
+    if (p.checkExtension({"ply"})){
+        // Could be a mesh or a point cloud
+        return identifyPly(path);
+    }
 
     bool jpg = p.checkExtension({"jpg", "jpeg"});
     bool dng = p.checkExtension({"dng"});
