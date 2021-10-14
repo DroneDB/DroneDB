@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include <pdal/StageFactory.hpp>
 #include <pdal/PointRef.hpp>
+#include <pdal/io/LasWriter.hpp>
 #include "gdal_inc.h"
 #include <untwine/untwine/Common.hpp>
 #include <untwine/untwine/ProgressWriter.hpp>
@@ -15,6 +16,7 @@
 #include "mio.h"
 #include "geo.h"
 #include "logger.h"
+#include "ply.h"
 #include "net/functions.h"
 
 namespace untwine{
@@ -28,7 +30,20 @@ void fatal(const std::string& err){
 namespace ddb{
 
 bool getPointCloudInfo(const std::string &filename, PointCloudInfo &info, int polyBoundsSrs){
-    
+    if (io::Path(filename).checkExtension({"ply"})){
+        PlyInfo plyInfo;
+        if (!getPlyInfo(filename, plyInfo)) return false;
+        else{
+            info.bounds.clear();
+            info.polyBounds.clear();
+            info.pointCount = plyInfo.vertexCount;
+            info.dimensions = plyInfo.dimensions;
+            return true;
+        }
+    }
+
+
+    // Las/Laz
     try {
 
         pdal::StageFactory factory;
@@ -255,6 +270,7 @@ bool getEptInfo(const std::string &eptJson, PointCloudInfo &info, int polyBounds
 void buildEpt(const std::vector<std::string> &filenames, const std::string &outdir){
     fs::path dest = outdir;
     fs::path tmpDir = dest / "tmp";
+    io::assureFolderExists(tmpDir);
 
     untwine::Options options;
     for (const std::string &f : filenames){
@@ -263,8 +279,26 @@ void buildEpt(const std::vector<std::string> &filenames, const std::string &outd
         const EntryType type = fingerprint(f);
         if (type != PointCloud) throw InvalidArgsException(f + " is not a supported point cloud file");
 
-        options.inputFiles.push_back(f);
     }
+
+    std::vector<std::string> inputFiles;
+
+    // Make sure these are LAS/LAZ. If it's PLY, we first need to convert
+    // to LAS
+    for (const auto &f : filenames){
+        auto p = io::Path(f);
+        if (p.checkExtension({"ply"})){
+            std::string lasF = (tmpDir / Hash::strCRC64(f)).string() + ".las";
+            LOGD << "Converting " << f << " to " << lasF;
+            translateToLas(f, lasF);
+            inputFiles.push_back(lasF);
+        }else{
+            inputFiles.push_back(f);
+        }
+    }
+
+    for (const auto &f : inputFiles) options.inputFiles.push_back(f);
+
     options.tempDir = tmpDir.string();
     options.outputDir = dest.string();
     options.fileLimit = 10000000;
@@ -273,7 +307,6 @@ void buildEpt(const std::vector<std::string> &filenames, const std::string &outd
     options.level = -1;
 
     io::assureFolderExists(dest);
-    io::assureFolderExists(tmpDir);
     io::assureIsRemoved(dest / "ept.json");
     io::assureIsRemoved(dest / "ept-data");
     io::assureIsRemoved(dest / "ept-hierarchy");
@@ -295,6 +328,9 @@ void buildEpt(const std::vector<std::string> &filenames, const std::string &outd
         io::assureIsRemoved(tmpDir);
         io::assureIsRemoved(dest / "temp");
     } catch (const std::exception &e){
+        io::assureIsRemoved(tmpDir);
+        io::assureIsRemoved(dest / "temp");
+
         throw UntwineException(e.what());
     }
 }
@@ -347,6 +383,36 @@ std::vector<PointColor> normalizeColors(std::shared_ptr<pdal::PointView> point_v
     }
 
     return result;
+}
+
+void translateToLas(const std::string &input, const std::string &outputLas){
+    if (!fs::exists(input)) throw FSException(input + " does not exist");
+
+
+    std::string driver = pdal::StageFactory::inferReaderDriver(input);
+    if (driver.empty()){
+        throw PDALException("Cannot infer reader driver for " + input);
+    }
+
+    try{
+        pdal::StageFactory factory;
+        pdal::Stage *reader = factory.createStage(driver);
+        pdal::Options inOpts;
+        inOpts.add("filename", input);
+        reader->setOptions(inOpts);
+
+        pdal::PointTable table;
+        pdal::Options outLasOpts;
+        outLasOpts.add("filename", outputLas);
+
+        pdal::LasWriter writer;
+        writer.setOptions(outLasOpts);
+        writer.setInput(*reader);
+        writer.prepare(table);
+        writer.execute(table);
+   }catch(pdal::pdal_error &e){
+        throw PDALException(e.what());
+   }
 }
 
 }

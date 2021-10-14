@@ -114,6 +114,8 @@ if (WIN32)
     set(Zip_LIBRARIES "${DOWNLOADS_DIR}/libzip/lib/zip.lib")
     set(Zip_INCLUDE_DIRS "${DOWNLOADS_DIR}/libzip/include")
 
+    include_directories("${DOWNLOADS_DIR}/laszip/include")
+
     # Fix: auto_ptr is not a member of std
     add_compile_definitions(_HAS_AUTO_PTR_ETC=1)
 endif()
@@ -184,7 +186,7 @@ if (WIN32)
     copy_dlls("pdal/bin/*.dll")
     copy_dlls("zlib/bin/*.dll")
     copy_dlls("libzip/bin/*.dll")
-    copy_dlls("sqlite3/bin/*.dll")    
+    copy_dlls("sqlite3/bin/*.dll")
 
     file(COPY "${DOWNLOADS_DIR}/gdal/bin/proj7/share/proj.db" DESTINATION ${CMAKE_BINARY_DIR})
 

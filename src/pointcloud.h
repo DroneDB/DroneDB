@@ -38,6 +38,8 @@ DDB_DLL bool getPointCloudInfo(const std::string &filename, PointCloudInfo &info
 DDB_DLL bool getEptInfo(const std::string &eptJson, PointCloudInfo &info, int polyboundsSrs = 4326, int *span = nullptr);
 DDB_DLL void buildEpt(const std::vector<std::string> &filenames, const std::string &outdir);
 DDB_DLL std::vector<PointColor> normalizeColors(std::shared_ptr<pdal::PointView> point_view);
+DDB_DLL void translateToLas(const std::string &input, const std::string &outputLas);
+
 }
 
 #endif // POINTCLOUD_H
