@@ -44,6 +44,9 @@ void UserProfile::createDir(const fs::path &dir){
 
 fs::path UserProfile::getHomeDir()
 {
+    const char *ddb_home = std::getenv("DDB_HOME");
+    if (ddb_home) return std::string(ddb_home);
+
     const char *home = std::getenv("HOME");
     if (home) return std::string(home);
 
