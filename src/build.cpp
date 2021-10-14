@@ -118,8 +118,7 @@ void buildInternal(Database* db, const Entry& e,
         throw;
 
     // This way we are sure that all the exceptions are caught
-    }
-    catch(...){
+    } catch(...){
 
         io::assureIsRemoved(tempFolder);
         io::assureIsRemoved(hardlink);
