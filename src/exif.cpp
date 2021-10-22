@@ -352,7 +352,7 @@ double ExifParser::extractCaptureTime() {
         auto subsec = findExifKey({"Exif.Photo.SubSecTimeOriginal",
                                  "Exif.Photo.SubSecTimeDigitized",
                                  "Exif.Photo.SubSecTime"});
-        if (subsec != exifData.end()){
+        if (subsec != exifData.end() && subsec->count() > 0){
             double ss = static_cast<double>(subsec->toLong());
             size_t numDigits = subsec->toString().length();
 
