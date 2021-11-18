@@ -27,7 +27,7 @@ DDB_DLL void push(const std::string& registry, const bool force) {
     std::string registryUrl = registry;
 
     if (registry.empty()) {
-        TagManager manager(fs::path(db->getOpenFile()).parent_path());
+        TagManager manager(db.get());
 
         const auto autoTagRaw = manager.getTag();
 

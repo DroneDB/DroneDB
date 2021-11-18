@@ -342,9 +342,6 @@ void addToIndex(Database *db, const std::vector<std::string> &paths,
     }
 
     db->exec("COMMIT");
-
-    // Update last edit
-    db->setLastUpdate();
 }
 
 void removeFromIndex(Database *db, const std::vector<std::string> &paths, RemoveCallback callback) {
@@ -383,9 +380,6 @@ void removeFromIndex(Database *db, const std::vector<std::string> &paths, Remove
 
         if (!tot) throw FSException("No matching entries");
     }
-
-    // Update last edit
-    db->setLastUpdate();
 }
 
 std::string sanitize_query_param(const std::string &str) {
@@ -553,8 +547,6 @@ void syncIndex(Database *db) {
 
     db->exec("BEGIN EXCLUSIVE TRANSACTION");
 
-    bool changed = false;
-
     while (q->fetch()) {
         io::Path relPath = fs::path(q->getText(0));
         fs::path p = directory / relPath.get();
@@ -572,7 +564,6 @@ void syncIndex(Database *db) {
                 checkDeleteBuild(db, hash);
                 checkDeleteMeta(db, relPath.generic());
                 std::cout << "D\t" << relPath.generic() << std::endl;
-                changed = true;
             break;
 
             case Modified:
@@ -580,8 +571,6 @@ void syncIndex(Database *db) {
                 parseEntry(p, directory, e, true);
                 doUpdate(updateQ.get(), e);
                 std::cout << "U\t" << e.path << std::endl;
-                changed = true;
-
             break;
 
             default:
@@ -591,9 +580,6 @@ void syncIndex(Database *db) {
     }
 
     db->exec("COMMIT");
-
-    // Update last edit only if something is changed
-    if (changed) db->setLastUpdate();
 }
 
 // Sets the modified times of files in the filesystem
@@ -697,10 +683,6 @@ std::string initIndex(const std::string &directory, bool fromScratch) {
         db->createTables();
         db->close();
     }
-
-    // Update last edit
-    const auto db = open(ddbDirPath.string(), true);
-    db->setLastUpdate();
 
     return ddbDirPath.string();
 }
@@ -877,9 +859,6 @@ void moveEntry(Database* db, const std::string& source, const std::string& dest)
     }
 
     db->exec("COMMIT");
-
-    // Update last edit
-    db->setLastUpdate();
 }
 
 }  // namespace ddb

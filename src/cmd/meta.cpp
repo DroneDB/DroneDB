@@ -31,40 +31,6 @@ std::string Meta::description() {
     return "Manage database metadata";
 }
 
-void Meta::output(std::ostream &out, const json &j, const std::string &format){
-    if (format == "json") out << j << std::endl;
-    else if (format == "text") printJsonToText(out, j);
-    else throw ddb::InvalidArgsException("Invalid format " + format);
-}
-
-void Meta::printJsonToText(std::ostream &out, const json &j)
-{
-    if (j.is_array()){
-        size_t count = 0;
-
-        for (const auto &it : j){
-            for (const auto &item : it.items()){
-                std::string k = item.key();
-                if (k.length() > 0) k[0] = std::toupper(k[0]);
-                std::string v = item.value().dump();
-                if (item.value().is_string()) v = item.value().get<std::string>();
-
-                out << k << ": " << v << std::endl;
-            }
-            if (++count < j.size()) out << "--------" << std::endl;
-        }
-    }else{
-        for (const auto &item : j.items()){
-            std::string k = item.key();
-            if (k.length() > 0) k[0] = std::toupper(k[0]);
-            std::string v = item.value().dump();
-            if (item.value().is_string()) v = item.value().get<std::string>();
-
-            out << k << ": " << v << std::endl;
-        }
-    }
-}
-
 void Meta::run(cxxopts::ParseResult &opts) {
     if (!opts.count("command")) {
         printHelp();

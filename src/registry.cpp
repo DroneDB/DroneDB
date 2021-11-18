@@ -127,6 +127,12 @@ bool Registry::logout() {
 DDB_DLL void Registry::clone(const std::string &organization,
                              const std::string &dataset,
                              const std::string &folder, std::ostream &out) {
+    if (fs::exists(folder)){
+        throw FSException(folder + " already exists");
+    }
+
+    io::assureFolderExists(folder);
+
     // Workflow
     // 2) Download zip in temp folder
     // 3) Create target folder
@@ -147,7 +153,7 @@ DDB_DLL void Registry::clone(const std::string &organization,
     LOGD << "Download url = " << downloadUrl;
 
     const auto tempFile =
-        io::Path(fs::temp_directory_path() / utils::generateRandomString(8))
+        io::Path(fs::path(folder) / utils::generateRandomString(8))
             .string() +
         ".tmp";
 
@@ -191,16 +197,14 @@ DDB_DLL void Registry::clone(const std::string &organization,
 
     io::assureIsRemoved(tempFile);
 
-    const auto ddbFolder = fs::path(folder) / DDB_FOLDER;
-
-    SyncManager syncManager(ddbFolder);
-    TagManager tagManager(ddbFolder);
-
-    syncManager.setLastSync(time(nullptr), this->url);
-    tagManager.setTag(this->url + "/" + organization + "/" + dataset);
-
     const auto db = ddb::open(std::string(folder), false);
     syncLocalMTimes(db.get());
+
+    SyncManager syncManager(db.get());
+    TagManager tagManager(db.get());
+
+    syncManager.setLastStamp(this->url);
+    tagManager.setTag(this->url + "/" + organization + "/" + dataset);
 }
 
 std::string Registry::getAuthToken() { return std::string(this->authToken); }
@@ -247,23 +251,17 @@ DDB_DLL void Registry::downloadDdb(const std::string &organization,
 
     LOGD << "Download url = " << downloadUrl;
 
-    const auto tempFile =
-        io::Path(fs::temp_directory_path() / utils::generateRandomString(8))
-            .string() +
-        ".tmp";
-
-    LOGD << "Temp file = " << tempFile;
+    char *buffer;
+    size_t length;
 
     auto res = net::GET(downloadUrl)
                    .authCookie(this->authToken)
-                   .verifySSL(false)
-                   .downloadToFile(tempFile);
+                   .downloadToBuffer(&buffer, &length);
 
     if (res.status() != 200) this->handleError(res);
 
-    zip::extractAll(tempFile, folder);
-
-    io::assureIsRemoved(tempFile);
+    zip::extractAllFromBuffer(buffer, length, folder);
+    free(buffer);
 
     LOGD << "Done";
 }
@@ -273,7 +271,7 @@ DDB_DLL void Registry::downloadFiles(const std::string &organization,
                                      const std::vector<std::string> &files,
                                      const std::string &folder) {
     if (files.empty()) {
-        LOGD << "Asked to download an empty list of files... wtf?";
+        LOGD << "Asked to download an empty list of files...";
         return;
     }
 
@@ -405,7 +403,7 @@ DDB_DLL void applyDelta(const Delta &res, const fs::path &destPath,
 
                 LOGD << "Dest = " << dest;
 
-                if (rem.type != Directory) {
+                if (!rem.directory) {
                     if (exists(dest)) {
                         LOGD << "File exists in dest, deleting it";
                         fs::remove(dest);
@@ -436,7 +434,7 @@ DDB_DLL void applyDelta(const Delta &res, const fs::path &destPath,
                 const auto source = sourcePath / add.path;
                 const auto dest = destPath / add.path;
 
-                if (add.type != Directory) {
+                if (!add.directory) {
                     LOGD << "Applying add by copying from '" << source
                          << "' to '" << dest << "'";
 
@@ -514,13 +512,9 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
     -- Pull Workflow --
 
     1) Get our tag using tagmanager
-    2) Get our last sync time for that specific registry using syncmanager
-    3) Get dataset mtime
-    4) Alert if dataset_mtime < last_sync (it means we have more recent changes
-    than server, so the pull is pointless or potentially dangerous)
-    5) Get ddb from registry
-        5.1) Call endpoint
-        5.2) Unzip archive in temp folder
+    2) Get ddb from registry
+        2.1) Call endpoint
+        2.2) Unzip archive in temp folder
     6) Perform local diff using delta method
     7) Download all the missing files
         7.1) Call download endpoint with file list (to test)
@@ -533,74 +527,41 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
 
     LOGD << "Pull from " << this->url;
 
-    // 2) Get our last sync time for that specific registry using syncmanager
-
     auto db = open(path, true);
-    std::string dbOpenFile = db->getOpenFile();
-    const auto ddbPath = fs::path(dbOpenFile).parent_path();
-
-    LOGD << "Ddb folder = " << ddbPath;
-
-    TagManager tagManager(ddbPath);
+    TagManager tagManager(db.get());
 
     // 1) Get our tag using tagmanager
     const auto tag = tagManager.getTag();
 
     if (tag.empty()) throw IndexException("Cannot pull if no tag is specified");
 
-    // 2) Get our last sync time for that specific registry using syncmanager
-    const auto lastUpdate = db->getLastUpdate();
-
     LOGD << "Tag = " << tag;
 
     const auto tagInfo = RegistryUtils::parseTag(tag);
 
-    // 3) Get dataset mtime
-    const auto dsInfo =
-        this->getDatasetInfo(tagInfo.organization, tagInfo.dataset);
-
-    LOGD << "Dataset mtime = " << dsInfo.mtime;
-
     out << "Pulling from '" << tag << "'" << std::endl;
-    LOGD << "Local mtime " << lastUpdate << ", remote mtime " << dsInfo.mtime;
 
-    // 4) Check if we have more recent changes than server, so the pull is
-    // pointless or potentially dangerous)
+//    if (force) {
+//        out << "Forcing pull." << std::endl;
+//        // TODO?
+//    }
 
-    if (force) {
-        out << "Forcing pull." << std::endl;
-    } else {
-        if (lastUpdate == dsInfo.mtime) {
-            // Nothing to do, datasets should be in sync
-            out << "Already up to date." << std::endl;
-            return;
-
-        } else if (lastUpdate > dsInfo.mtime) {
-            throw AppException(
-                "[Warning] Your dataset has local changes, but you haven't "
-                "pushed these changes to the remote registry. If you pull now, "
-                "your local changes might be overwritten. Use --force "
-                "to continue.");
-        }
-    }
-
-    const auto tempDdbFolder =
-        UserProfile::get()->getProfilePath("pull_cache", true) /
+    const auto tempDdbFolder = db->rootDirectory() / ".pull_cache" /
         (tagInfo.organization + "-" + tagInfo.dataset);
 
-    LOGD << "Temp ddb folder = " << tempDdbFolder;
+    if (fs::exists(tempDdbFolder)){
+        // TODO: there might be ways to resume downloads if a user CTRL+Cs
+        io::assureIsRemoved(tempDdbFolder);
+    }
 
     // 5) Get ddb from registry
-    this->downloadDdb(tagInfo.organization, tagInfo.dataset,
-                      tempDdbFolder.generic_string());
+    this->downloadDdb(tagInfo.organization, tagInfo.dataset, tempDdbFolder.string());
 
-    out << "Remote ddb downloaded" << std::endl;
+    auto source = open(tempDdbFolder.string(), false);
 
-    auto source = open(tempDdbFolder.generic_string(), false);
-
-    // 6) Perform local diff using delta method
-    const auto delta = getDelta(source.get(), db.get());
-
+    // 6) Perform local diff using delta method using last stamp
+    SyncManager sm(db.get());
+    const auto delta = getDelta(source.get(), sm.getLastStampEntries(tagInfo.registryUrl));
     LOGD << "Delta:";
 
     json j = delta;
@@ -622,7 +583,7 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
         const auto filesToDownload =
             boolinq::from(delta.adds)
                 .where(
-                    [](const AddAction &add) { return add.type != Directory; })
+                    [](const AddAction &add) { return !add.directory; })
                 .select([](const AddAction &add) { return add.path; })
                 .toStdVector();
 
@@ -639,7 +600,7 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
         LOGD << "Files downloaded, applying delta";
 
         // 8) Apply changes to local files
-        applyDelta(delta, ddbPath.parent_path(), tempNewFolder);
+        applyDelta(delta, db->rootDirectory(), tempNewFolder);
 
         LOGD << "Removing temp new files folder";
 
@@ -654,27 +615,26 @@ DDB_DLL void Registry::pull(const std::string &path, const bool force,
 
         } else {
             // 8) Apply changes to local files (mostly deletes)
-            applyDelta(delta, ddbPath.parent_path(), tempNewFolder);
+            applyDelta(delta, db->rootDirectory(), tempNewFolder);
         }
     }
-
-    LOGD << "Replacing DDB index (copy from '" << tempDdbFolder << "' to '"
-         << ddbPath << "')";
 
     // 9) Replace ddb database
     db->close();
     source->close();
 
-    std::error_code e;
-    io::copy(tempDdbFolder / DDB_FOLDER / "dbase.sqlite",
-             ddbPath / "dbase.sqlite");
+    throw InvalidArgsException("CHANGE THIS!!");
 
-    db->open(dbOpenFile);
+//    std::error_code e;
+//    io::copy(tempDdbFolder / DDB_FOLDER / "dbase.sqlite",
+//             ddbPath / "dbase.sqlite");
 
-    auto mPathList = delta.modifiedPathList();
-    if (mPathList.size() > 0) syncLocalMTimes(db.get(), mPathList);
+//    db->open(dbOpenFile);
 
-    LOGD << "Pull done";
+//    auto mPathList = delta.modifiedPathList();
+//    if (mPathList.size() > 0) syncLocalMTimes(db.get(), mPathList);
+
+//    LOGD << "Pull done";
 
     // Cleanup
     io::assureIsRemoved(tempDdbFolder);
@@ -701,12 +661,10 @@ DDB_DLL void Registry::push(const std::string &path, const bool force,
     8) Update last sync
     */
 
+    /* TODO: fix this
     auto db = open(path, true);
-    const auto ddbPath = fs::path(db->getOpenFile()).parent_path();
 
-    LOGD << "Ddb folder = " << ddbPath;
-
-    TagManager tagManager(ddbPath);
+    TagManager tagManager(db.get());
 
     // 1) Get our tag using tagmanager
     const auto tag = tagManager.getTag();
@@ -805,7 +763,7 @@ DDB_DLL void Registry::push(const std::string &path, const bool force,
     // Cleanup
     fs::remove(tempArchive);
 
-    out << "Push complete" << std::endl;
+    out << "Push complete" << std::endl; */
 }
 
 void Registry::handleError(net::Response &res) {

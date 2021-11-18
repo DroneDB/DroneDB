@@ -18,7 +18,7 @@
 namespace ddb {
 
 void to_json(json& j, const SimpleEntry& e) {
-    j = json{{"path", e.path}, {"hash", e.hash}, {"type", e.type}};
+    j = json{{"path", e.path}, {"hash", e.hash}};
 }
 
 void to_json(json& j, const CopyAction& e) {
@@ -26,11 +26,11 @@ void to_json(json& j, const CopyAction& e) {
 }
 
 void to_json(json& j, const RemoveAction& e) {
-    j = json{{"path", e.path}, {"type", e.type}};
+    j = json{{"path", e.path}, {"directory", e.directory}};
 }
 
 void to_json(json& j, const AddAction& e) {
-    j = json{{"path", e.path}, {"type", e.type}};
+    j = json{{"path", e.path}, {"directory", e.directory}};
 }
 
 void to_json(json& j, const Delta& d) {
@@ -38,14 +38,12 @@ void to_json(json& j, const Delta& d) {
 }
 
 std::vector<SimpleEntry> getAllSimpleEntries(Database* db) {
-    auto q = db->query("SELECT path, hash, type FROM entries");
+    auto q = db->query("SELECT path, hash FROM entries");
 
     std::vector<SimpleEntry> entries;
 
     while (q->fetch()) {
-        SimpleEntry e(q->getText(0), q->getText(1),
-                      static_cast<EntryType>(q->getInt(2)));
-
+        SimpleEntry e(q->getText(0), q->getText(1));
         entries.push_back(e);
     }
 
@@ -60,6 +58,10 @@ Delta getDelta(Database* sourceDb, Database* targetDb) {
     const auto destination = getAllSimpleEntries(targetDb);
 
     return getDelta(source, destination);
+}
+
+Delta getDelta(Database *sourceDb, std::vector<ddb::SimpleEntry> destination){
+    return getDelta(getAllSimpleEntries(sourceDb), destination);
 }
 
 void delta(Database* sourceDb, Database* targetDb, std::ostream& output,
@@ -78,10 +80,10 @@ void delta(Database* sourceDb, Database* targetDb, std::ostream& output,
             output << "C\t" << cpy.source << " => " << cpy.destination << std::endl;
 
         for (const AddAction& add : delta.adds)
-            output << "A\t" << add.path << (add.type == Directory ? " (D)" : "") << std::endl;
+            output << "A\t" << add.path << (add.directory ? " (D)" : "") << std::endl;
 
         for (const RemoveAction& rem : delta.removes)
-            output << "D\t" << rem.path << (rem.type == Directory ? " (D)" : "") << std::endl;
+            output << "D\t" << rem.path << (rem.directory ? " (D)" : "") << std::endl;
 
     }
 }
@@ -111,7 +113,6 @@ Delta getDelta(std::vector<SimpleEntry> source,
             std::find_if(destination.begin(), destination.end(),
                          [&entry](const SimpleEntry& e) {
                              return e.hash == entry.hash &&
-                                    e.type == entry.type &&
                                     e.path == entry.path;
                          }) != destination.end();
 
@@ -123,35 +124,35 @@ Delta getDelta(std::vector<SimpleEntry> source,
         const auto inDestWithSameHashEntry = std::find_if(
             destination.begin(), destination.end(),
             [&entry](const SimpleEntry& e) {
-                return e.hash == entry.hash && e.type == entry.type;
+                return e.hash == entry.hash;
             });
 
         if (inDestWithSameHashEntry == destination.end()) {
             LOGD << "ADD  -> " << entry.toString();
-            adds.emplace_back(AddAction(entry.path, entry.type));
+            adds.emplace_back(AddAction(entry.path, entry.isDirectory()));
             continue;
         }
 
-        if (inDestWithSameHashEntry->type != Directory) {
+        if (!inDestWithSameHashEntry->isDirectory()) {
             LOGD << "COPY -> " << inDestWithSameHashEntry->toString() << " => "
                  << entry.toString();
             copies.emplace_back(
                 CopyAction(inDestWithSameHashEntry->path, entry.path));
         } else {
             LOGD << "ADD FOLDER -> " << entry.toString();
-            adds.emplace_back(AddAction(entry.path, entry.type));
+            adds.emplace_back(AddAction(entry.path, true));
         }
     }
 
     for (const SimpleEntry& entry : destination) {
         const auto notInSourceWithSamePath = std::find_if(
             source.begin(), source.end(), [&entry](const SimpleEntry& e) {
-                return e.path == entry.path && e.type == entry.type;
+                return e.path == entry.path && e.isDirectory() == entry.isDirectory();
             });
 
         if (notInSourceWithSamePath == source.end()) {
             LOGD << "DEL  -> " << entry.toString();
-            removes.emplace_back(RemoveAction(entry.path, entry.type));
+            removes.emplace_back(RemoveAction(entry.path, entry.isDirectory()));
         }
     }
 

@@ -1,18 +1,16 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+#ifndef STAMP_H
+#define STAMP_H
 
-#ifndef META_CMD_H
-#define META_CMD_H
-
-#include <iostream>
 #include "command.h"
 
 namespace cmd {
 
-class Meta : public Command {
-public:
-    Meta() {}
+class Stamp : public Command {
+  public:
+    Stamp() {}
 
     virtual void run(cxxopts::ParseResult &opts) override;
     virtual void setOptions(cxxopts::Options &opts) override;
@@ -21,4 +19,4 @@ public:
 
 }
 
-#endif // META_CMD_H
+#endif // STAMP_H

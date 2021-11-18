@@ -9,45 +9,9 @@
 #include "dbops.h"
 #include "ddb_export.h"
 #include "utils.h"
+#include "simpleentry.h"
 
 namespace ddb {
-
-struct SimpleEntry {
-    std::string path;
-    std::string hash;
-    EntryType type;
-
-    std::string toString() const {
-        return path + " - " + hash + " (" + typeToHuman(type) + ")";
-    }
-
-    SimpleEntry(std::string path, std::string hash, EntryType type) {
-        this->path = std::move(path);
-        this->hash = std::move(hash);
-        this->type = type;
-    }
-
-    SimpleEntry(std::string path, std::string hash) {
-        this->path = std::move(path);
-        this->hash = std::move(hash);
-        this->type = Generic;
-    }
-
-    SimpleEntry(std::string path) {
-        this->path = std::move(path);
-        this->type = Directory;
-    }
-
-    bool operator==(const SimpleEntry& rhs) const { 
-
-        return this->hash == rhs.hash && this->path == rhs.path &&
-               this->type == rhs.type;
-
-    }
-    bool operator!=(const SimpleEntry& rhs) const {
-        return !(*this == rhs);
-    }
-};
 
 struct CopyAction {
     std::string source;
@@ -65,29 +29,29 @@ struct CopyAction {
 
 struct RemoveAction {
     std::string path;
-    EntryType type;
+    bool directory;
 
-    RemoveAction(std::string path, ddb::EntryType type) {
+    RemoveAction(std::string path, bool directory) {
         this->path = std::move(path);
-        this->type = type;
+        this->directory = directory;
     }
 
     std::string toString() const {
-        return "DEL -> [" + typeToHuman(type) + "] " + path;
+        return std::string("DEL -> [") + (directory ? "D" : "F") + "] " + path;
     }
 };
 
 struct AddAction {
     std::string path;
-    EntryType type;
+    bool directory;
 
-    AddAction(std::string path, ddb::EntryType type) {
+    AddAction(std::string path, bool directory) {
         this->path = std::move(path);
-        this->type = type;
+        this->directory = directory;
     }
 
     std::string toString() const {
-        return "ADD -> [" + typeToHuman(type) + "] " + path;
+        return std::string("ADD -> [") + (directory ? "D" : "F") + "] " + path;
     }
 };
 
@@ -115,6 +79,8 @@ DDB_DLL Delta getDelta(std::vector<ddb::SimpleEntry> source,
                        std::vector<ddb::SimpleEntry> destination);
 
 DDB_DLL Delta getDelta(Database* sourceDb, Database* targetDb);
+
+DDB_DLL Delta getDelta(Database *sourceDb, std::vector<ddb::SimpleEntry> destination);
     
 
 

@@ -38,13 +38,14 @@ class Database : public SqliteDatabase {
       DDB_DLL void setPublic(bool isPublic);
       DDB_DLL bool isPublic() const;
 
-      DDB_DLL void setLastUpdate(time_t lastUpdate = time(nullptr));
-      DDB_DLL time_t getLastUpdate() const;
       DDB_DLL void chattr(json attrs);
 
       DDB_DLL json getAttributes() const;
+      DDB_DLL json getStamp() const;
 
       DDB_DLL fs::path rootDirectory() const;
+      DDB_DLL fs::path ddbDirectory() const;
+      DDB_DLL fs::path tmpDirectory() const;
 
       DDB_DLL MetaManager* getMetaManager();
 };

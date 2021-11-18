@@ -13,9 +13,8 @@
 
 namespace ddb {
 
-time_t SyncManager::getLastSync(const std::string& registry) {
-    if (!exists(this->ddbFolder)) throw FSException("Cannot get last sync: " + this->ddbFolder.string() + " does not exists");
-    const auto path = this->ddbFolder / SYNCFILE;
+json SyncManager::getLastStamp(const std::string &registry) {
+    const auto path = this->db->ddbDirectory() / SYNCFILE;
 
     LOGD << "Path = " << path;
     LOGD << "Registry = " << registry;
@@ -29,28 +28,21 @@ time_t SyncManager::getLastSync(const std::string& registry) {
         std::ofstream out(path, std::ios_base::out);
         out << "{}";
         out.close();
-        return 0;
     }
 
     std::ifstream i(path);
     json j;
     i >> j;
 
-    LOGD << "Contents: " << j.dump();
+    if (!j.contains(registry)) throw AppException("Tried to get last stamp for registry " + registry + " but found none");
 
-    if (!j.contains(registry)) return 0;
-
-    std::time_t t = j[registry];
-
-    return t;
+    return j[registry];
 }
 
-void SyncManager::setLastSync(const time_t t, const std::string& registry) {
-    if (!exists(this->ddbFolder)) throw FSException("Cannot set last sync: " + this->ddbFolder.string() + " does not exists");
-    const auto path = this->ddbFolder / SYNCFILE;
+void SyncManager::setLastStamp(const std::string& registry) {
+    const auto path = this->db->ddbDirectory() / SYNCFILE;
 
     LOGD << "Path = " << path;
-    LOGD << "Time = " << t;
     LOGD << "Registry = " << registry;
 
     if (registry.length() == 0) 
@@ -67,16 +59,23 @@ void SyncManager::setLastSync(const time_t t, const std::string& registry) {
     i >> j;
     i.close();
 
-    LOGD << "Contents: " << j.dump();
+    j[registry] = db->getStamp();
 
-    j[registry] = t != 0 ? t : time(nullptr);
-
-    if (exists(path)) {
-        fs::remove(path);
-    }
-
-    std::ofstream out(path, std::ios_base::out);
-    out << std::setw(4) << j;
+    std::ofstream out(path, std::ios_base::out | std::ios_base::trunc);
+    out << j.dump(4);
     out.close();
 }
+
+std::vector<SimpleEntry> SyncManager::getLastStampEntries(const std::string &registry){
+    json j = getLastStamp(registry);
+    std::vector<SimpleEntry> result;
+
+    for (auto &i : j["entries"]){
+        auto obj = i.begin();
+        result.push_back(SimpleEntry(obj.key(), obj.value()));
+    }
+
+    return result;
+}
+
 }  // namespace ddb

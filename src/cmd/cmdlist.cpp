@@ -28,6 +28,7 @@
 #include "push.h"
 #include "pull.h"
 #include "meta.h"
+#include "stamp.h"
 
 namespace cmd {
 
@@ -56,7 +57,8 @@ namespace cmd {
       {"ept", new Ept()},
       {"push", new Push()},
       {"pull", new Pull()},
-      {"meta", new Meta()}
+      {"meta", new Meta()},
+      {"stamp", new Stamp()}
   };
 
   std::map<std::string, std::string> aliases = {
@@ -75,7 +77,8 @@ namespace cmd {
       {"c","clone"},
       {"checkout", "clone"},
       {"co", "clone"},
-      {"b", "build"}
+      {"b", "build"},
+      {"rev", "stamp"}
   };
 
 }

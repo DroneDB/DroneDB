@@ -15,17 +15,17 @@ namespace {
 using namespace ddb;
 
 TEST(syncManager, happyPath) {
-    TestArea ta(TEST_NAME);
+//    TestArea ta(TEST_NAME);
 
-    SyncManager manager(ta.getFolder().string());
+//    SyncManager manager(ta.getFolder().string());
 
-    const auto t = time(nullptr);
+//    const auto t = time(nullptr);
 
-    manager.setLastSync(t, "testhub.dronedb.app");
+//    manager.setLastSync(t, "testhub.dronedb.app");
 
-    const auto newt = manager.getLastSync("testhub.dronedb.app");
+//    const auto newt = manager.getLastSync("testhub.dronedb.app");
 
-    EXPECT_EQ(t, newt);
-
+//    EXPECT_EQ(t, newt);
+    // TODO!!!
 }
 }  // namespace

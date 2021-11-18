@@ -97,8 +97,6 @@ json MetaManager::add(const std::string &key, const std::string &data, const std
 
     auto result = getMetaJson("SELECT id, data, mtime FROM entries_meta WHERE rowid = last_insert_rowid()");
 
-    db->setLastUpdate();
-
     return result;
 }
 
@@ -131,8 +129,6 @@ json MetaManager::set(const std::string &key, const std::string &data, const std
         iq->execute();
         result = getMetaJson("SELECT id, data, mtime FROM entries_meta WHERE rowid = last_insert_rowid()");
     }
-
-    db->setLastUpdate();
 
     return result;
 }
