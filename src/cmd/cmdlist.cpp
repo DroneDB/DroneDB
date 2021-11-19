@@ -77,8 +77,7 @@ namespace cmd {
       {"c","clone"},
       {"checkout", "clone"},
       {"co", "clone"},
-      {"b", "build"},
-      {"rev", "stamp"}
+      {"b", "build"}
   };
 
 }

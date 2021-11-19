@@ -451,6 +451,25 @@ void hardlink(const fs::path &target, const fs::path &linkName){
     }
 }
 
+void hardlinkSafe(const fs::path &target, const fs::path &linkName){
+    if (fs::exists(linkName)) io::remove(linkName);
+
+    try{
+        io::hardlink(target, linkName);
+    }catch(const FSException &){
+        LOGD << "Falling back hard link to copy for " + target.string() + " --> " + linkName.string();
+        io::copy(target, linkName);
+    }
+}
+
+void remove(const fs::path p){
+    std::error_code e;
+    fs::remove(p, e);
+    if (e.value() != 0){
+        throw FSException("Cannot remove " + p.string() + " (" + e.message() + ")");
+    }
+}
+
 void rename(const fs::path &from, const fs::path &to){
     std::error_code e;
     fs::rename(from, to, e);

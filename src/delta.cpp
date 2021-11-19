@@ -21,24 +21,20 @@ void to_json(json& j, const SimpleEntry& e) {
     j = json{{"path", e.path}, {"hash", e.hash}};
 }
 
-void to_json(json& j, const CopyAction& e) {
-    j = json::array({e.source, e.destination});
-}
-
 void to_json(json& j, const RemoveAction& e) {
-    j = json{{"path", e.path}, {"directory", e.directory}};
+    j = json{{"path", e.path}, {"hash", e.hash}};
 }
 
 void to_json(json& j, const AddAction& e) {
-    j = json{{"path", e.path}, {"directory", e.directory}};
+    j = json{{"path", e.path}, {"hash", e.hash}};
 }
 
 void to_json(json& j, const Delta& d) {
-    j = {{"adds", d.adds}, {"removes", d.removes}, {"copies", d.copies}};
+    j = {{"adds", d.adds}, {"removes", d.removes}};
 }
 
 std::vector<SimpleEntry> getAllSimpleEntries(Database* db) {
-    auto q = db->query("SELECT path, hash FROM entries");
+    auto q = db->query("SELECT path, hash FROM entries ORDER BY path ASC");
 
     std::vector<SimpleEntry> entries;
 
@@ -76,14 +72,11 @@ void delta(Database* sourceDb, Database* targetDb, std::ostream& output,
         output << j.dump();
 
     } else if (format == "text") {
-        for (const CopyAction& cpy : delta.copies)
-            output << "C\t" << cpy.source << " => " << cpy.destination << std::endl;
-
         for (const AddAction& add : delta.adds)
-            output << "A\t" << add.path << (add.directory ? " (D)" : "") << std::endl;
+            output << "A\t" << add.path << (add.isDirectory() ? " (D)" : "") << std::endl;
 
         for (const RemoveAction& rem : delta.removes)
-            output << "D\t" << rem.path << (rem.directory ? " (D)" : "") << std::endl;
+            output << "D\t" << rem.path << (rem.isDirectory() ? " (D)" : "") << std::endl;
 
     }
 }
@@ -91,8 +84,6 @@ void delta(Database* sourceDb, Database* targetDb, std::ostream& output,
 
 Delta getDelta(std::vector<SimpleEntry> source,
                std::vector<SimpleEntry> destination) {
-                   
-    std::vector<CopyAction> copies;
     std::vector<RemoveAction> removes;
     std::vector<AddAction> adds;
 
@@ -121,27 +112,8 @@ Delta getDelta(std::vector<SimpleEntry> source,
             continue;
         }
 
-        const auto inDestWithSameHashEntry = std::find_if(
-            destination.begin(), destination.end(),
-            [&entry](const SimpleEntry& e) {
-                return e.hash == entry.hash;
-            });
-
-        if (inDestWithSameHashEntry == destination.end()) {
-            LOGD << "ADD  -> " << entry.toString();
-            adds.emplace_back(AddAction(entry.path, entry.isDirectory()));
-            continue;
-        }
-
-        if (!inDestWithSameHashEntry->isDirectory()) {
-            LOGD << "COPY -> " << inDestWithSameHashEntry->toString() << " => "
-                 << entry.toString();
-            copies.emplace_back(
-                CopyAction(inDestWithSameHashEntry->path, entry.path));
-        } else {
-            LOGD << "ADD FOLDER -> " << entry.toString();
-            adds.emplace_back(AddAction(entry.path, true));
-        }
+        LOGD << "ADD  -> " << entry.toString();
+        adds.emplace_back(AddAction(entry.path, entry.hash));
     }
 
     for (const SimpleEntry& entry : destination) {
@@ -152,7 +124,7 @@ Delta getDelta(std::vector<SimpleEntry> source,
 
         if (notInSourceWithSamePath == source.end()) {
             LOGD << "DEL  -> " << entry.toString();
-            removes.emplace_back(RemoveAction(entry.path, entry.isDirectory()));
+            removes.emplace_back(RemoveAction(entry.path, entry.hash));
         }
     }
 
@@ -164,7 +136,6 @@ Delta getDelta(std::vector<SimpleEntry> source,
 
 
     Delta d;
-    d.copies = copies;
     d.removes = removes;
     d.adds = adds;
 

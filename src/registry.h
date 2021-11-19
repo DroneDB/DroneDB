@@ -15,12 +15,40 @@
 #include "entry.h"
 #include "ddb_export.h"
 #include "net.h"
+#include "database.h"
 
 namespace ddb {
 
 class DatasetInfo;
 struct Delta;
-struct CopyAction;
+
+enum MergeStrategy{
+    DontMerge = 0,
+    KeepTheirs = 1,
+    KeepOurs = 2
+};
+
+enum ConflictType{
+    RemoteDeleteLocalModified = 0,
+    BothModified = 1
+};
+
+struct Conflict{
+    std::string path;
+    ConflictType type;
+
+    Conflict(const std::string &path, ConflictType type) :
+        path(path), type(type) {}
+
+    std::string description(){
+        switch(type){
+        case ConflictType::RemoteDeleteLocalModified:
+            return "deleted on remote but modified locally";
+        case ConflictType::BothModified:
+            return "both modified";
+        }
+    }
+};
 
 class Registry {
     std::string url;
@@ -65,12 +93,15 @@ class Registry {
                                const std::string& folder);
 };
 
-DDB_DLL void applyDelta(const Delta& res, const fs::path& destPath,
-                        const fs::path& sourcePath);
-DDB_DLL std::vector<CopyAction> moveCopiesToTemp(const std::vector<CopyAction>& copies,
-                      const fs::path& baseFolder,
-                      const std::string& tempFolderName);
+DDB_DLL void applyDelta(const Delta& d, const fs::path& sourcePath, Database *destination, MergeStrategy mergeStrategy, std::ostream& out = std::cout);
 DDB_DLL void ensureParentFolderExists(const fs::path& folder);
+
+class MergeException : public AppException{
+    std::vector<Conflict> conflicts;
+public:
+    MergeException(const std::vector<Conflict> &conflicts) : AppException("Merge exception"), conflicts(conflicts) {}
+    std::vector<Conflict > getConflicts() const { return conflicts; }
+};
 
 }  // namespace ddb
 

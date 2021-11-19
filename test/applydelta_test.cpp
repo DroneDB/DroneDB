@@ -36,7 +36,7 @@ void performDeltaTest(const std::vector<SimpleEntry> dest,
         std::cout << std::endl << "Delta:" << std::endl;
         std::cout << j.dump(4);
 
-        applyDelta(res, destFolder, sourceFolder);
+        applyDelta(res, sourceFolder, destFolder, MergeStrategy::DontMerge, std::cout);
 
         equal = compareTree(sourceFolder, destFolder);
 
