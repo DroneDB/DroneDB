@@ -39,7 +39,7 @@ json SyncManager::getLastStamp(const std::string &registry) {
     return j[registry];
 }
 
-void SyncManager::setLastStamp(const std::string& registry) {
+void SyncManager::setLastStamp(const std::string& registry, Database *sourceDb) {
     const auto path = this->db->ddbDirectory() / SYNCFILE;
 
     LOGD << "Path = " << path;
@@ -59,7 +59,8 @@ void SyncManager::setLastStamp(const std::string& registry) {
     i >> j;
     i.close();
 
-    j[registry] = db->getStamp();
+    if (sourceDb != nullptr) j[registry] = sourceDb->getStamp();
+    else j[registry] = db->getStamp();
 
     std::ofstream out(path, std::ios_base::out | std::ios_base::trunc);
     out << j.dump(4);

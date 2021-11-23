@@ -332,7 +332,7 @@ void ensureParentFolderExists(const fs::path &folder) {
     }
 }
 
-void applyDelta(const Delta &d, const fs::path &sourcePath, Database *destination, MergeStrategy mergeStrategy, std::ostream& out) {
+void applyDelta(const Delta &d, const fs::path &sourcePath, Database *destination, const MergeStrategy mergeStrategy, std::ostream& out) {
     std::vector<Conflict> conflicts;
 
     fs::path destPath = destination->rootDirectory();
@@ -439,7 +439,7 @@ void applyDelta(const Delta &d, const fs::path &sourcePath, Database *destinatio
                         return true;
                     });
             }else{
-                out << "A\t" << dest << std::endl;
+                out << "A\t" << add.path << std::endl;
             }
         }
     }
@@ -453,7 +453,7 @@ void applyDelta(const Delta &d, const fs::path &sourcePath, Database *destinatio
     }
 }
 
-void Registry::pull(const std::string &path, const bool force,
+void Registry::pull(const std::string &path, const MergeStrategy mergeStrategy,
                             std::ostream &out) {
     LOGD << "Pull from " << this->url;
 
@@ -529,16 +529,16 @@ void Registry::pull(const std::string &path, const bool force,
 
     // Apply changes to local files
     try{
-        applyDelta(delta, tempNewFolder, db.get(), MergeStrategy::DontMerge, out);
+        applyDelta(delta, tempNewFolder, db.get(), mergeStrategy, out);
         io::assureIsRemoved(tempNewFolder);
 
         auto mPathList = delta.modifiedPathList();
         if (mPathList.size() > 0) syncLocalMTimes(db.get(), mPathList);
 
         // No errors? Update stamp
-        sm.setLastStamp(tagInfo.registryUrl);
+        sm.setLastStamp(tagInfo.registryUrl, source.get());
     }catch(const MergeException &e){
-        out << "Conflicts, make a copy of the conflicting entries and use --keep-theirs or --keep-ours to finish the pull:" << std::endl << std::endl;
+        out << "Found conflicts, but don't worry! Make a copy of the conflicting entries and use --keep-theirs or --keep-ours to finish the pull:" << std::endl << std::endl;
 
         for (auto &c : e.getConflicts()){
             out << "C\t" << c.path << " (" << c.description() << ")" <<  std::endl;

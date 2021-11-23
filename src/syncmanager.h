@@ -20,7 +20,7 @@ class SyncManager {
     SyncManager(Database *db) : db(db) {}
 
     DDB_DLL json getLastStamp(const std::string& registry = DEFAULT_REGISTRY);
-    DDB_DLL void setLastStamp(const std::string& registry = DEFAULT_REGISTRY);
+    DDB_DLL void setLastStamp(const std::string& registry = DEFAULT_REGISTRY, Database *sourceDb = nullptr);
 
     DDB_DLL std::vector<SimpleEntry> getLastStampEntries(const std::string& registry = DEFAULT_REGISTRY);
 };

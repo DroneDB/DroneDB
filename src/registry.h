@@ -46,6 +46,8 @@ struct Conflict{
             return "deleted on remote but modified locally";
         case ConflictType::BothModified:
             return "both modified";
+        default:
+            return "should not have happend";
         }
     }
 };
@@ -73,7 +75,7 @@ class Registry {
                        const std::string& dataset, const std::string& folder,
                        std::ostream& out);
 
-    DDB_DLL void pull(const std::string& path, const bool force, std::ostream& out);
+    DDB_DLL void pull(const std::string& path, const MergeStrategy mergeStrategy, std::ostream& out);
     DDB_DLL void push(const std::string& path, const bool force, std::ostream& out);
 
     DDB_DLL void handleError(net::Response& res);
@@ -93,7 +95,7 @@ class Registry {
                                const std::string& folder);
 };
 
-DDB_DLL void applyDelta(const Delta& d, const fs::path& sourcePath, Database *destination, MergeStrategy mergeStrategy, std::ostream& out = std::cout);
+DDB_DLL void applyDelta(const Delta& d, const fs::path& sourcePath, Database *destination, const MergeStrategy mergeStrategy, std::ostream& out = std::cout);
 DDB_DLL void ensureParentFolderExists(const fs::path& folder);
 
 class MergeException : public AppException{
