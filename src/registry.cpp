@@ -406,8 +406,6 @@ void applyDelta(const Delta &d, const fs::path &sourcePath, Database *destinatio
 
             // Check if the database has a modified entry
             // for the same paths we are adding
-            bool indexed = true;
-
             if (getEntry(destination, add.path, e)){
                 if (add.hash != e.hash){
                     if (mergeStrategy == MergeStrategy::DontMerge){
@@ -419,8 +417,6 @@ void applyDelta(const Delta &d, const fs::path &sourcePath, Database *destinatio
                         // Continue as normal
                     }
                 }
-            }else{
-                indexed = false;
             }
 
             if (add.isDirectory()) {
@@ -429,18 +425,14 @@ void applyDelta(const Delta &d, const fs::path &sourcePath, Database *destinatio
                 io::copy(source, dest);
             }
 
-            if (indexed){
-                // TODO: this could be made faster for large files
-                // by passing the already known hash instead
-                // of computing it
-                addToIndex(destination, { dest },
-                    [&out](const Entry& e, bool add) {
-                        out << (add ? "A" : "U") << "\t" << e.path << std::endl;
-                        return true;
-                    });
-            }else{
-                out << "A\t" << add.path << std::endl;
-            }
+            // TODO: this could be made faster for large files
+            // by passing the already known hash instead
+            // of computing it
+            addToIndex(destination, { dest },
+                [&out](const Entry& e, bool updated) {
+                    out << (updated ? "U" : "A") << "\t" << e.path << std::endl;
+                    return true;
+                });
         }
     }
 

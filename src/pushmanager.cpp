@@ -28,7 +28,7 @@ DDB_DLL std::vector<std::string> PushManager::init(const std::string &registrySt
 
     json j = res.getJSON();
 
-    if (j.contains("pullRequired") && j["pullRequired"].get<bool>()) throw PullRequiredException("The remote has new changes. Type \"ddb pull\" to get the latest changes before pushing.");
+    if (j.contains("pullRequired") && j["pullRequired"].get<bool>()) throw PullRequiredException("The remote has new changes. Use \"ddb pull\" to get the latest changes before pushing.");
     if (!j.contains("neededFiles")) this->registry->handleError(res);
 
     return j["neededFiles"].get<std::vector<std::string>>();
