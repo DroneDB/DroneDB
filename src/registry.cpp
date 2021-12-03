@@ -307,14 +307,14 @@ void Registry::downloadFiles(const std::string &organization,
         auto res = net::POST(downloadUrl)
                        .authCookie(this->authToken)
                        .formData({"path", paths})
-                       .downloadToFile(tempFile);
+                       .downloadToFile(tempFile.string());
 
         if (res.status() != 200) this->handleError(res);
 
         LOGD << "Files archive downloaded, extracting";
 
         try {
-            zip::extractAll(tempFile, folder);
+            zip::extractAll(tempFile.string(), folder);
             io::assureIsRemoved(tempFile);
 
             LOGD << "Done";
@@ -336,7 +336,7 @@ void applyDelta(const Delta &d, const fs::path &sourcePath, Database *destinatio
     std::vector<Conflict> conflicts;
 
     fs::path destPath = destination->rootDirectory();
-    const std::string tmpFolderName = fs::path(DDB_FOLDER) / "tmp" / utils::generateRandomString(8);
+    const std::string tmpFolderName = (fs::path(DDB_FOLDER) / "tmp" / utils::generateRandomString(8)).string();
 
     const auto tempPath = destPath / tmpFolderName;
 
@@ -386,7 +386,7 @@ void applyDelta(const Delta &d, const fs::path &sourcePath, Database *destinatio
             }
 
             if (fs::exists(dest)) {
-                if (indexed) removeFromIndex(destination, { dest });
+                if (indexed) removeFromIndex(destination, { dest.string() });
                 io::assureIsRemoved(dest);
                 out << "D\t" << dest << std::endl;
             }
@@ -428,7 +428,7 @@ void applyDelta(const Delta &d, const fs::path &sourcePath, Database *destinatio
             // TODO: this could be made faster for large files
             // by passing the already known hash instead
             // of computing it
-            addToIndex(destination, { dest },
+            addToIndex(destination, { dest.string() },
                 [&out](const Entry& e, bool updated) {
                     out << (updated ? "U" : "A") << "\t" << e.path << std::endl;
                     return true;
