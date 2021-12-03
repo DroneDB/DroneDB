@@ -34,7 +34,7 @@ json SyncManager::getLastStamp(const std::string &registry) {
     json j;
     i >> j;
 
-    if (!j.contains(registry)) throw AppException("Tried to get last stamp for registry " + registry + " but found none");
+    if (!j.contains(registry)) throw NoStampException("Tried to get last stamp for registry " + registry + " but found none");
 
     return j[registry];
 }

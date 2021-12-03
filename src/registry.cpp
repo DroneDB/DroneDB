@@ -560,7 +560,6 @@ void Registry::push(const std::string &path, const bool force,
     -- Push Workflow --
 
     1) Get our tag using tagmanager
-    2) Get local mtime
     3) Get dataset mtime
     4) Alert if dataset_mtime > last_sync (it means we have less recent changes
     than server, so the push is pointless or potentially dangerous)
@@ -573,58 +572,25 @@ void Registry::push(const std::string &path, const bool force,
     8) Update last sync
     */
 
-    /* TODO: fix this
     auto db = open(path, true);
 
     TagManager tagManager(db.get());
+    SyncManager syncManager(db.get());
 
     // 1) Get our tag using tagmanager
     const auto tag = tagManager.getTag();
 
     if (tag.empty()) throw IndexException("Cannot push if no tag is specified");
 
-    // 2) Get local mtime
-    const auto lastUpdate = db->getLastUpdate();
-
     LOGD << "Tag = " << tag;
-    LOGD << "LastUpdate = " << lastUpdate;
 
     const auto tagInfo = RegistryUtils::parseTag(tag);
 
     try {
-        // 3) Get dataset mtime
-        const auto dsInfo =
-            this->getDatasetInfo(tagInfo.organization, tagInfo.dataset);
-
-        LOGD << "Dataset mtime = " << dsInfo.mtime;
+        // 3) Get dataset info
+        const auto dsInfo = this->getDatasetInfo(tagInfo.organization, tagInfo.dataset);
 
         out << "Pushing to '" << tag << "'" << std::endl;
-        LOGD << "Local mtime " << lastUpdate << ", remote mtime "
-             << dsInfo.mtime;
-
-        // 4) Alert if dataset_mtime > last_sync (it means we have less recent
-        // changes
-        //    than server, so the push is pointless or potentially dangerous)
-
-        if (force) {
-            out << "Forcing push." << std::endl;
-        } else {
-            if (lastUpdate == dsInfo.mtime) {
-                // Nothing to do, datasets should be in sync
-                out << "Already up to date." << std::endl;
-                return;
-            }td::string
-
-            if (dsInfo.mtime > lastUpdate) {
-                throw AppException(
-                    "[Warning] The remote dataset has newer changes, but you "
-                    "haven't "
-                    "pulled those changes from the remote registry. If you "
-                    "push now, "
-                    "the remote dataset might be overwritten. Use --force "
-                    "to continue.");
-            }
-        }
     } catch (RegistryNotFoundException &ex) {
         LOGD << "Dataset not found: " << ex.what();
 
@@ -634,24 +600,22 @@ void Registry::push(const std::string &path, const bool force,
     // 5) Initialize server push
     LOGD << "Initializing server push";
 
-    // 5.1) Zip our ddb folder
-    const fs::path tempArchive =
-        fs::temp_directory_path() / (utils::generateRandomString(8) + ".zip");
-
-    out << "Zipping ddb folder" << std::endl;
-
-    zip::zipFolder(ddbPath.string(), tempArchive.string(), {std::string(DDB_BUILD_PATH) + '/'});
-
-    // 5.1) Call POST endpoint passing zip
+    // 5.1) Call POST endpoint passing database stamp
     PushManager pushManager(this, tagInfo.organization, tagInfo.dataset);
 
-    out << "Initializing push" << std::endl;
-
     // 5.2) The server answers with the needed files list
-    const auto filesList = pushManager.init(tempArchive);
+    std::string registryStampChecksum = "";
+    try{
+        const auto regStamp = syncManager.getLastStamp(tagInfo.registryUrl);
+        registryStampChecksum = regStamp["checksum"];
+    }catch(const NoStampException &){
+        // Nothing, this is the first time we push
+    }
+
+    const auto filesList = pushManager.init(registryStampChecksum, db->getStamp());
 
     LOGD << "Push initialized";
-
+/*
     const auto basePath = ddbPath.parent_path();
 
     for (const auto &file : filesList) {

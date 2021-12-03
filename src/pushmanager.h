@@ -12,6 +12,7 @@
 #include "net.h"
 #include "registry.h"
 #include "shareclient.h"
+#include "json.h"
 
 namespace ddb {
 
@@ -29,7 +30,7 @@ class PushManager {
         this->dataset = dataset;
     }
 
-    DDB_DLL std::vector<std::string> init(const fs::path& ddbPathArchive);
+    DDB_DLL std::vector<std::string> init(const std::string &registryStampChecksum, const json &dbStamp);
     DDB_DLL void upload(const std::string& fullPath, const std::string& file);
     DDB_DLL void commit();
 

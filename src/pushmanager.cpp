@@ -13,14 +13,14 @@
 
 namespace ddb {
 
-DDB_DLL std::vector<std::string> PushManager::init(
-    const fs::path& ddbPathArchive) {
+DDB_DLL std::vector<std::string> PushManager::init(const std::string &registryStampChecksum, const json &dbStamp) {
     this->registry->ensureTokenValidity();
 
     net::Response res =
         net::POST(this->registry->getUrl("/orgs/" + this->organization + "/ds/" +
                                          this->dataset + "/push/init"))
-            .multiPartFormData({"file", ddbPathArchive.string()})
+            .formData({"checksum", registryStampChecksum,
+                       "stamp", dbStamp.dump()})
             .authToken(this->registry->getAuthToken())
             .send();
 
@@ -28,6 +28,7 @@ DDB_DLL std::vector<std::string> PushManager::init(
 
     json j = res.getJSON();
 
+    if (j.contains("pullRequired") && j["pullRequired"].get<bool>()) throw PullRequiredException("The remote has new changes. Type \"ddb pull\" to get the latest changes before pushing.");
     if (!j.contains("neededFiles")) this->registry->handleError(res);
 
     return j["neededFiles"].get<std::vector<std::string>>();

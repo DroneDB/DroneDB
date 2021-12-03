@@ -366,14 +366,12 @@ DDBErr DDBDelta(const char* ddbSource, const char* ddbTarget, char** output,
 DDB_DLL DDBErr DDBSetTag(const char* ddbPath, const char* newTag) {
     DDB_C_BEGIN
 
-    throw InvalidArgsException("TODO AND CHECK DDBPATH!");
-//    if (ddbPath == nullptr) throw InvalidArgsException("No ddb path provided");
+    if (ddbPath == nullptr) throw InvalidArgsException("No ddb path provided");
+    if (newTag == nullptr) throw InvalidArgsException("No tag provided");
 
-//    TagManager manager(ddbPath);
-
-//    manager.setTag(newTag);
-
-//    if (newTag == nullptr) throw InvalidArgsException("No tag provided");
+    const auto ddb = ddb::open(std::string(ddbPath), true);
+    TagManager manager(ddb.get());
+    manager.setTag(newTag);
 
     DDB_C_END
 }
@@ -381,50 +379,26 @@ DDB_DLL DDBErr DDBSetTag(const char* ddbPath, const char* newTag) {
 DDB_DLL DDBErr DDBGetTag(const char* ddbPath, char** outTag) {
     DDB_C_BEGIN
 
-    throw InvalidArgsException("TODO AND CHECK DDBPATH");
+    if (ddbPath == nullptr) throw InvalidArgsException("No ddb path provided");
+    if (outTag == nullptr) throw InvalidArgsException("No tag provided");
 
-//    if (ddbPath == nullptr) throw InvalidArgsException("No ddb path provided");
-//    if (outTag == nullptr) throw InvalidArgsException("No tag provided");
+    const auto ddb = ddb::open(std::string(ddbPath), true);
+    TagManager manager(ddb.get());
+    const auto tag = manager.getTag();
 
-//    TagManager manager(ddbPath);
-
-//    const auto tag = manager.getTag();
-
-//    utils::copyToPtr(tag, outTag);
+    utils::copyToPtr(tag, outTag);
 
     DDB_C_END
 }
 
-DDB_DLL DDBErr DDBGetLastSync(const char* ddbPath, const char* registry,
-                              long long* lastSync) {
+DDB_DLL DDBErr DDBGetStamp(const char* ddbPath, char** output) {
     DDB_C_BEGIN
 
-    throw InvalidArgsException("TODO!!");
-//    if (ddbPath == nullptr) throw InvalidArgsException("No ddb path provided");
-//    if (lastSync == nullptr)
-//        throw InvalidArgsException("No last sync provided");
+    if (ddbPath == nullptr) throw InvalidArgsException("No ddb path provided");
+    if (output == nullptr) throw InvalidArgsException("No output provided");
 
-//    SyncManager manager(ddbPath);
-
-//    *lastSync = registry == nullptr || !strlen(registry)
-//                    ? manager.getLastSync()
-//                    : manager.getLastSync(registry);
-
-    DDB_C_END
-}
-
-DDB_DLL DDBErr DDBSetLastSync(const char* ddbPath, const char* registry,
-                              const long long lastSync) {
-    DDB_C_BEGIN
-    throw InvalidArgsException("TODO!!!");
-//    if (ddbPath == nullptr) throw InvalidArgsException("No ddb path provided");
-
-//    SyncManager manager(ddbPath);
-
-//    if (registry == nullptr || !strlen(registry))
-//        manager.setLastSync(lastSync);
-//    else
-//        manager.setLastSync(lastSync, registry);
+    const auto ddb = ddb::open(std::string(ddbPath), true);
+    utils::copyToPtr(ddb->getStamp().dump(), output);
 
     DDB_C_END
 }

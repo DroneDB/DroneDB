@@ -185,19 +185,11 @@ DDB_DLL DDBErr DDBSetTag(const char *ddbPath, const char *newTag);
  * @return DDBERR_NONE on success, an error otherwise */
 DDB_DLL DDBErr DDBGetTag(const char *ddbPath, char **outTag);
 
-/** Gets dataset tag
+/** Get the current database's stamp
  * @param ddbPath path to the source DroneDB database (parent of ".ddb")
- * @param registry registry url
- * @param lastSync output pointer to time_t where to store last sync time
+ *  *  @param output pointer to C-string where to store result (JSON)
  * @return DDBERR_NONE on success, an error otherwise */
-DDB_DLL DDBErr DDBGetLastSync(const char *ddbPath, const char *registry, long long *lastSync);
-
-/** Sets dataset tag
- * @param ddbPath path to the source DroneDB database (parent of ".ddb")
- * @param registry registry url
- * @param lastSync time_t last sync time
- * @return DDBERR_NONE on success, an error otherwise */
-DDB_DLL DDBErr DDBSetLastSync(const char *ddbPath, const char *registry, const long long lastSync);
+DDB_DLL DDBErr DDBGetStamp(const char *ddbPath, char **output);
 
 /** Move entry
  * @param ddbPath path to the source DroneDB database (parent of ".ddb")
