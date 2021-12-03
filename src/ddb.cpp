@@ -9,6 +9,7 @@
 
 #include "database.h"
 #include "dbops.h"
+#include "delta.h"
 #include "entry.h"
 #include "exceptions.h"
 #include "info.h"
@@ -255,7 +256,7 @@ DDB_DLL DDBErr DDBStatus(const char* ddbPath, char** output) {
 
     std::ostringstream ss;
 
-    const auto cb = [&ss](ddb::FileStatus status, const std::string& string) {
+    const auto cb = [&ss](ddb::FileStatus status, const std::string&) {
         switch (status) {
             case NotIndexed:
                 ss << "?\t";
@@ -281,10 +282,13 @@ DDB_DLL DDBErr DDBStatus(const char* ddbPath, char** output) {
 DDBErr DDBChattr(const char* ddbPath, const char* attrsJson, char** output) {
     DDB_C_BEGIN
     const auto db = ddb::open(std::string(ddbPath), true);
-    const json j = json::parse(attrsJson);
-    db->chattr(j);
-    utils::copyToPtr(db->getAttributes().dump(), output);
-
+    try{
+        const json j = json::parse(attrsJson);
+        db->chattr(j);
+        utils::copyToPtr(db->getAttributes().dump(), output);
+    } catch (const json::parse_error &e) {
+        throw InvalidArgsException(e.what());
+    }
     DDB_C_END
 }
 
@@ -337,14 +341,14 @@ DDBErr DDBMemoryTile(const char *inputPath, int tz, int tx, int ty, uint8_t **ou
 }
 
 
-DDBErr DDBDelta(const char* ddbSource, const char* ddbTarget, char** output,
+DDBErr DDBDelta(const char* ddbSourceStamp, const char* ddbTargetStamp, char** output,
                 const char* format) {
     DDB_C_BEGIN
 
-    if (ddbSource == nullptr)
+    if (ddbSourceStamp == nullptr)
         throw InvalidArgsException("No ddb source path provided");
 
-    if (ddbTarget == nullptr)
+    if (ddbTargetStamp == nullptr)
         throw InvalidArgsException("No ddb path provided");
 
     if (format == nullptr || strlen(format) == 0)
@@ -352,13 +356,18 @@ DDBErr DDBDelta(const char* ddbSource, const char* ddbTarget, char** output,
 
     if (output == nullptr) throw InvalidArgsException("No output provided");
 
-    const auto sourceDb = ddb::open(std::string(ddbSource), false);
-    const auto targetDb = ddb::open(std::string(ddbTarget), false);
-
     std::ostringstream ss;
-    delta(sourceDb.get(), targetDb.get(), ss, format);
 
-    utils::copyToPtr(ss.str(), output);
+    try{
+        const json source = json::parse(ddbSourceStamp);
+        const json dest = json::parse(ddbTargetStamp);
+
+        delta(source, dest, ss, format);
+
+        utils::copyToPtr(ss.str(), output);
+    }catch (const json::parse_error &e) {
+        throw InvalidArgsException(e.what());
+    }
 
     DDB_C_END
 }

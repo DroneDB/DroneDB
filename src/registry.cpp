@@ -478,7 +478,7 @@ void Registry::pull(const std::string &path, const MergeStrategy mergeStrategy,
 
     // Perform local diff using delta method using last stamp
     SyncManager sm(db.get());
-    const auto delta = getDelta(source.get(), sm.getLastStampEntries(tagInfo.registryUrl));
+    const auto delta = getDelta(source->getStamp(), sm.getLastStamp(tagInfo.registryUrl));
     LOGD << "Delta:";
 
     out << "Delta result: " << delta.adds.size() << " adds, "

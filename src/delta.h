@@ -66,13 +66,15 @@ DDB_DLL void to_json(json& j, const RemoveAction& e);
 DDB_DLL void to_json(json& j, const AddAction& e);
 DDB_DLL void to_json(json& j, const Delta& d);
 
-DDB_DLL Delta getDelta(std::vector<ddb::SimpleEntry> source,
-                       std::vector<ddb::SimpleEntry> destination);
+DDB_DLL Delta getDelta(const json &sourceDbStamp,
+                       const json &destinationDbStamp);
 
 DDB_DLL Delta getDelta(Database* sourceDb, Database* targetDb);
 
-DDB_DLL Delta getDelta(Database *sourceDb, std::vector<ddb::SimpleEntry> destination);
-    
+DDB_DLL void delta(Database* sourceDb, Database* targetDb, std::ostream& output, const std::string& format);
+DDB_DLL void delta(const json &sourceDbStamp, const json &targetDbStamp, std::ostream& output, const std::string& format);
+
+DDB_DLL std::vector<SimpleEntry> parseStampEntries(const json &stamp);
 
 
 }  // namespace ddb

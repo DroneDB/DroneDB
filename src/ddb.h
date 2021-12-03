@@ -166,12 +166,12 @@ DDB_DLL DDBErr DDBTile(const char *inputPath, int tz, int tx, int ty, char **out
 DDB_DLL DDBErr DDBMemoryTile(const char *inputPath, int tz, int tx, int ty, uint8_t **outBuffer, int *outBufferSize, int tileSize = 256, bool tms = false, bool forceRecreate = false, const char *inputPathHash = "");
 
 /** Generate delta between two ddbs 
- * @param ddbSource path to the source DroneDB database (parent of ".ddb")
- * @param ddbTarget path to the target DroneDB database (parent of ".ddb")
+ * @param ddbSourceStamp JSON stamp of the source DroneDB database
+ * @param ddbTargetStamp JSON stamp of the target DroneDB database
  * @param output pointer to C-string where to store result
  * @param format output format. One of: ["text", "json"]
  * @return DDBERR_NONE on success, an error otherwise */
-DDB_DLL DDBErr DDBDelta(const char *ddbSource, const char *ddbTarget, char **output, const char *format);
+DDB_DLL DDBErr DDBDelta(const char *ddbSourceStamp, const char *ddbTargetStamp, char **output, const char *format);
 
 /** Sets dataset tag
  * @param ddbPath path to the source DroneDB database (parent of ".ddb")

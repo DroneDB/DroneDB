@@ -33,42 +33,21 @@ void to_json(json& j, const Delta& d) {
     j = {{"adds", d.adds}, {"removes", d.removes}};
 }
 
-std::vector<SimpleEntry> getAllSimpleEntries(Database* db) {
-    auto q = db->query("SELECT path, hash FROM entries ORDER BY path ASC");
-
-    std::vector<SimpleEntry> entries;
-
-    while (q->fetch()) {
-        SimpleEntry e(q->getText(0), q->getText(1));
-        entries.push_back(e);
-    }
-
-    q->reset();
-
-    return entries;
-}
-
-
 Delta getDelta(Database* sourceDb, Database* targetDb) {
-    const auto source = getAllSimpleEntries(sourceDb);
-    const auto destination = getAllSimpleEntries(targetDb);
-
-    return getDelta(source, destination);
+    return getDelta(sourceDb->getStamp(), targetDb->getStamp());
 }
 
-Delta getDelta(Database *sourceDb, std::vector<ddb::SimpleEntry> destination){
-    return getDelta(getAllSimpleEntries(sourceDb), destination);
+void delta(Database* sourceDb, Database* targetDb, std::ostream& output, const std::string& format) {
+    delta(sourceDb->getStamp(), targetDb->getStamp(), output, format);
 }
 
-void delta(Database* sourceDb, Database* targetDb, std::ostream& output,
-           const std::string& format) {
-
-    auto delta = getDelta(sourceDb, targetDb);
+void delta(const json &sourceDbStamp, const json &targetDbStamp, std::ostream& output, const std::string& format){
+    auto delta = getDelta(sourceDbStamp, targetDbStamp);
 
     if (format == "json") {
 
         json j = delta;
-        
+
         output << j.dump();
 
     } else if (format == "text") {
@@ -81,9 +60,13 @@ void delta(Database* sourceDb, Database* targetDb, std::ostream& output,
     }
 }
 
+Delta getDelta(const json &sourceDbStamp,
+               const json &destinationDbStamp) {
+    if (!destinationDbStamp.contains("entries")) throw InvalidArgsException("Destination db stamp entries not found");
 
-Delta getDelta(std::vector<SimpleEntry> source,
-               std::vector<SimpleEntry> destination) {
+    std::vector<SimpleEntry> source = parseStampEntries(sourceDbStamp);
+    std::vector<SimpleEntry> destination = parseStampEntries(destinationDbStamp);
+
     std::vector<RemoveAction> removes;
     std::vector<AddAction> adds;
 
@@ -140,6 +123,19 @@ Delta getDelta(std::vector<SimpleEntry> source,
     d.adds = adds;
 
     return d;
+}
+
+std::vector<SimpleEntry> parseStampEntries(const json &stamp){
+    std::vector<SimpleEntry> result;
+
+    if (!stamp.contains("entries")) throw InvalidArgsException("Stamp entries not found");
+
+    for (auto &i : stamp["entries"]){
+        auto obj = i.begin();
+        result.push_back(SimpleEntry(obj.key(), obj.value()));
+    }
+
+    return result;
 }
 
 }  // namespace ddb

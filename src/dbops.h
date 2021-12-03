@@ -32,7 +32,6 @@ DDB_DLL void addToIndex(Database *db, const std::vector<std::string> &paths, Add
 DDB_DLL void removeFromIndex(Database *db, const std::vector<std::string> &paths, RemoveCallback callback = nullptr);
 DDB_DLL void syncIndex(Database *db);
 DDB_DLL void syncLocalMTimes(Database *db, const std::vector<std::string> &files = {});
-DDB_DLL void delta(Database* sourceDb, Database* targetDb, std::ostream& out, const std::string& format);
 DDB_DLL void moveEntry(Database* db, const std::string& source, const std::string& dest);
 DDB_DLL bool getEntry(Database* db, const std::string& path, Entry &entry);
 DDB_DLL bool pathExists(Database* db, const std::string& path);

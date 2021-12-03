@@ -67,16 +67,4 @@ void SyncManager::setLastStamp(const std::string& registry, Database *sourceDb) 
     out.close();
 }
 
-std::vector<SimpleEntry> SyncManager::getLastStampEntries(const std::string &registry){
-    json j = getLastStamp(registry);
-    std::vector<SimpleEntry> result;
-
-    for (auto &i : j["entries"]){
-        auto obj = i.begin();
-        result.push_back(SimpleEntry(obj.key(), obj.value()));
-    }
-
-    return result;
-}
-
 }  // namespace ddb

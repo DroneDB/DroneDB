@@ -9,6 +9,7 @@
 #include <ddb.h>
 
 #include "dbops.h"
+#include "../delta.h"
 #include "exceptions.h"
 
 namespace cmd {
@@ -53,7 +54,7 @@ namespace cmd {
             const auto source = ddb::open(sourceDdbPath, false);
             const auto target = ddb::open(targetDdbPath, false);
 
-            delta(source.get(), target.get(), std::cout, format);            
+            ddb::delta(source.get(), target.get(), std::cout, format);
 			
 		}
         catch (ddb::InvalidArgsException) {
