@@ -18,7 +18,7 @@
 
 namespace ddb {
 
-DDB_DLL void push(const std::string& registry, const bool force) {
+DDB_DLL void push(const std::string& registry) {
 
     const auto currentPath = fs::current_path().string();
 
@@ -54,13 +54,13 @@ DDB_DLL void push(const std::string& registry, const bool force) {
             UserProfile::get()->getAuthManager()->saveCredentials(
                 registryUrl, AuthCredentials(username, password));
 
-            reg.push(currentPath, force, std::cout);
+            reg.push(currentPath, std::cout);
 
         } else {
             if (reg.login(ac.username, ac.password).length() <= 0)
                 throw AuthException("Cannot authenticate with " + reg.getUrl());
 
-            reg.push(currentPath, force, std::cout);
+            reg.push(currentPath, std::cout);
         }
 
     } catch (const AuthException&) {
@@ -71,7 +71,7 @@ DDB_DLL void push(const std::string& registry, const bool force) {
             UserProfile::get()->getAuthManager()->saveCredentials(
                 registryUrl, AuthCredentials(username, password));
 
-            reg.push(currentPath, force, std::cout);
+            reg.push(currentPath, std::cout);
 
         } else {
             throw AuthException("Cannot authenticate with " + reg.getUrl());

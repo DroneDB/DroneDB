@@ -258,6 +258,25 @@ void Registry::downloadDdb(const std::string &organization,
     LOGD << "Done";
 }
 
+json Registry::getStamp(const std::string &organization, const std::string &dataset){
+    this->ensureTokenValidity();
+    const auto stampUrl = url + "/orgs/" + organization + "/ds/" + dataset + "/stamp";
+
+    auto res = net::GET(stampUrl)
+               .authCookie(this->authToken)
+               .send();
+    if (res.status() != 200) this->handleError(res);
+
+    json stamp = res.getJSON();
+
+    // Quick sanity check
+    if (stamp.contains("checksum")){
+        return stamp;
+    }else{
+        throw RegistryException("Invalid stamp: " + stamp.dump());
+    }
+}
+
 void Registry::downloadFiles(const std::string &organization,
                                      const std::string &dataset,
                                      const std::vector<std::string> &files,
@@ -466,14 +485,12 @@ void Registry::pull(const std::string &path, const MergeStrategy mergeStrategy,
         io::assureIsRemoved(tempDdbFolder);
     }
 
-    // Get ddb from registry
-    this->downloadDdb(tagInfo.organization, tagInfo.dataset, tempDdbFolder.string());
-
-    auto source = open(tempDdbFolder.string(), false);
+    // Get stamp from registry
+    json remoteStamp = this->getStamp(tagInfo.organization, tagInfo.dataset);
 
     // Perform local diff using delta method using last stamp
     SyncManager sm(db.get());
-    const auto delta = getDelta(source->getStamp(), sm.getLastStamp(tagInfo.registryUrl));
+    const auto delta = getDelta(remoteStamp, sm.getLastStamp(tagInfo.registryUrl));
     LOGD << "Delta:";
 
     out << "Delta result: " << delta.adds.size() << " adds, "
@@ -483,7 +500,6 @@ void Registry::pull(const std::string &path, const MergeStrategy mergeStrategy,
     if (delta.adds.empty() && delta.removes.empty()){
         out << "Already up to date." << std::endl;
         db->close();
-        source->close();
         io::assureIsRemoved(tempDdbFolder);
         return;
     }
@@ -523,7 +539,7 @@ void Registry::pull(const std::string &path, const MergeStrategy mergeStrategy,
 
     if (conflicts.size() == 0){
         // No errors? Update stamp
-        sm.setLastStamp(tagInfo.registryUrl, source.get());
+        sm.setLastStamp(tagInfo.registryUrl);
     }else{
         out << "Found conflicts, but don't worry! Make a copy of the conflicting entries and use --keep-theirs or --keep-ours to finish the pull:" << std::endl << std::endl;
 
@@ -533,14 +549,13 @@ void Registry::pull(const std::string &path, const MergeStrategy mergeStrategy,
     }
 
     db->close();
-    source->close();
 
     // Cleanup
     io::assureIsRemoved(tempDdbFolder);
     io::assureIsRemoved(tempNewFolder);
 }
 
-void Registry::push(const std::string &path, const bool force, std::ostream &out) {
+void Registry::push(const std::string &path, std::ostream &out) {
     auto db = open(path, true);
 
     TagManager tagManager(db.get());
@@ -600,6 +615,9 @@ void Registry::push(const std::string &path, const bool force, std::ostream &out
 
     // When done call commit endpoint
     pushManager.commit(pir.token);
+
+    // Update stamp
+    syncManager.setLastStamp(tagInfo.registryUrl, db.get());
 
     out << "Push complete" << std::endl;
 }

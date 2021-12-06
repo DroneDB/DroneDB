@@ -76,7 +76,7 @@ class Registry {
                        std::ostream& out);
 
     DDB_DLL void pull(const std::string& path, const MergeStrategy mergeStrategy, std::ostream& out);
-    DDB_DLL void push(const std::string& path, const bool force, std::ostream& out);
+    DDB_DLL void push(const std::string& path, std::ostream& out);
 
     DDB_DLL void handleError(net::Response& res);
 
@@ -88,6 +88,9 @@ class Registry {
     DDB_DLL void downloadDdb(const std::string& organization,
                              const std::string& dataset,
                              const std::string& folder);
+
+    DDB_DLL json getStamp(const std::string& organization,
+                               const std::string& dataset);
 
     DDB_DLL void downloadFiles(const std::string& organization,
                                const std::string& dataset,

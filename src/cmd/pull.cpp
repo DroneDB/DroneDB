@@ -29,7 +29,6 @@ void Pull::setOptions(cxxopts::Options& opts) {
             ("r,remote", "The remote Registry", cxxopts::value<std::string>()->default_value(""))
             ("t,keep-theirs", "Keep changes from remote registry and override local ones", cxxopts::value<bool>()->default_value("false"))
             ("o,keep-ours", "Keep local changes override remote ones", cxxopts::value<bool>()->default_value("false"));
-            //("f,force", "Forces the operation", cxxopts::value<bool>()->default_value("false"));
 
     // clang-format on
     //opts.parse_positional({"remote"});

@@ -23,8 +23,7 @@ void Push::setOptions(cxxopts::Options& opts) {
             .positional_help("[args]")
             .custom_help("push [remote]")
             .add_options()
-                ("r,remote", "The remote Registry", cxxopts::value<std::string>()->default_value(""))
-                ("f,force", "Forces the operation", cxxopts::value<bool>()->default_value("false"));
+                ("r,remote", "The remote Registry", cxxopts::value<std::string>()->default_value(""));
 
 
     // clang-format on
@@ -37,11 +36,9 @@ std::string Push::description() {
 
 void Push::run(cxxopts::ParseResult& opts) {
     try {
-
-        const auto force = opts["force"].as<bool>();
         const auto remote = opts["remote"].as<std::string>();
 
-        ddb::push(remote, force);
+        ddb::push(remote);
 
     } catch(ddb::IndexException& e) {        
         std::cout << e.what() << std::endl;
