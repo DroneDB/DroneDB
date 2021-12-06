@@ -241,7 +241,7 @@ json Database::getStamp() const{
         const std::string p = q->getText(0);
         const std::string h = q->getText(1);
         checksum.add(p.c_str(), p.length());
-        checksum.add(h.c_str(), p.length());
+        checksum.add(h.c_str(), h.length());
 
         j["entries"].push_back(json::object({{p, h}}));
     }

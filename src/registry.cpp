@@ -547,29 +547,12 @@ void Registry::pull(const std::string &path, const MergeStrategy mergeStrategy,
 
 void Registry::push(const std::string &path, const bool force,
                             std::ostream &out) {
-    /*
-
-    -- Push Workflow --
-
-    1) Get our tag using tagmanager
-    3) Get dataset mtime
-    4) Alert if dataset_mtime > last_sync (it means we have less recent changes
-    than server, so the push is pointless or potentially dangerous)
-    5) Initialize server push
-        5.1) Zip our ddb folder
-        5.1) Call POST endpoint passing zip
-        5.2) The server answers with the needed files list
-    6) Foreach of the needed files call POST endpoint
-    7) When done call commit endpoint
-    8) Update last sync
-    */
-
     auto db = open(path, true);
 
     TagManager tagManager(db.get());
     SyncManager syncManager(db.get());
 
-    // 1) Get our tag using tagmanager
+    // Get our tag using tagmanager
     const auto tag = tagManager.getTag();
 
     if (tag.empty()) throw IndexException("Cannot push if no tag is specified");
@@ -589,13 +572,13 @@ void Registry::push(const std::string &path, const bool force,
         out << "Pushing to new '" << tag << "'" << std::endl;
     }
 
-    // 5) Initialize server push
+    // Initialize server push
     LOGD << "Initializing server push";
 
-    // 5.1) Call POST endpoint passing database stamp
+    // Call POST endpoint passing database stamp
     PushManager pushManager(this, tagInfo.organization, tagInfo.dataset);
 
-    // 5.2) The server answers with the needed files list
+    // The server answers with the needed files list
     std::string registryStampChecksum = "";
     try{
         const auto regStamp = syncManager.getLastStamp(tagInfo.registryUrl);
@@ -604,8 +587,8 @@ void Registry::push(const std::string &path, const bool force,
         // Nothing, this is the first time we push
     }
 
-    const auto filesList = pushManager.init(registryStampChecksum, db->getStamp());
-
+    const auto pir = pushManager.init(registryStampChecksum, db->getStamp());
+    std::cout << pir.token << std::endl;
     LOGD << "Push initialized";
 /*
     const auto basePath = ddbPath.parent_path();

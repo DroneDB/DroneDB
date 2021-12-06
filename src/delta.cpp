@@ -62,8 +62,6 @@ void delta(const json &sourceDbStamp, const json &targetDbStamp, std::ostream& o
 
 Delta getDelta(const json &sourceDbStamp,
                const json &destinationDbStamp) {
-    if (!destinationDbStamp.contains("entries")) throw InvalidArgsException("Destination db stamp entries not found");
-
     std::vector<SimpleEntry> source = parseStampEntries(sourceDbStamp);
     std::vector<SimpleEntry> destination = parseStampEntries(destinationDbStamp);
 

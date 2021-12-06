@@ -13,7 +13,7 @@
 
 namespace ddb {
 
-DDB_DLL std::vector<std::string> PushManager::init(const std::string &registryStampChecksum, const json &dbStamp) {
+DDB_DLL PushInitResponse PushManager::init(const std::string &registryStampChecksum, const json &dbStamp) {
     this->registry->ensureTokenValidity();
 
     net::Response res =
@@ -29,9 +29,12 @@ DDB_DLL std::vector<std::string> PushManager::init(const std::string &registrySt
     json j = res.getJSON();
 
     if (j.contains("pullRequired") && j["pullRequired"].get<bool>()) throw PullRequiredException("The remote has new changes. Use \"ddb pull\" to get the latest changes before pushing.");
-    if (!j.contains("neededFiles")) this->registry->handleError(res);
+    if (!j.contains("neededFiles") || !j.contains("token")) this->registry->handleError(res);
 
-    return j["neededFiles"].get<std::vector<std::string>>();
+    PushInitResponse pir;
+    pir.filesList = j["neededFiles"].get<std::vector<std::string>>();
+    pir.token = j["token"].get<std::string>();
+    return pir;
 }
 
 DDB_DLL void PushManager::upload(const std::string& fullPath, const std::string& file) {
