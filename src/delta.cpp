@@ -33,6 +33,22 @@ void to_json(json& j, const Delta& d) {
     j = {{"adds", d.adds}, {"removes", d.removes}};
 }
 
+void from_json(const json &j, Delta &d){
+    d.adds.clear();
+    d.removes.clear();
+
+    if (j.contains("adds")){
+        for (auto &add : j["adds"]){
+            d.adds.push_back(AddAction(add["path"], add["hash"]));
+        }
+    }
+    if (j.contains("removes")){
+        for (auto &remove : j["removes"]){
+            d.removes.push_back(RemoveAction(remove["path"], remove["hash"]));
+        }
+    }
+}
+
 Delta getDelta(Database* sourceDb, Database* targetDb) {
     return getDelta(sourceDb->getStamp(), targetDb->getStamp());
 }

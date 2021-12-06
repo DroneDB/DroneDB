@@ -66,6 +66,8 @@ DDB_DLL void to_json(json& j, const RemoveAction& e);
 DDB_DLL void to_json(json& j, const AddAction& e);
 DDB_DLL void to_json(json& j, const Delta& d);
 
+DDB_DLL void from_json(const json &j, Delta &d);
+
 DDB_DLL Delta getDelta(const json &sourceDbStamp,
                        const json &destinationDbStamp);
 

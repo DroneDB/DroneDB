@@ -134,14 +134,6 @@ void Registry::clone(const std::string &organization,
 
     io::assureFolderExists(folder);
 
-    // Workflow
-    // 2) Download zip in temp folder
-    // 3) Create target folder
-    // 3.1) If target folder already exists throw error
-    // 4) Unzip in target folder
-    // 5) Remove temp zip
-    // 6) Update sync information
-
     this->ensureTokenValidity();
 
     const auto downloadUrl =
@@ -332,7 +324,7 @@ void ensureParentFolderExists(const fs::path &folder) {
     }
 }
 
-void applyDelta(const Delta &d, const fs::path &sourcePath, Database *destination, const MergeStrategy mergeStrategy, std::ostream& out) {
+std::vector<Conflict> applyDelta(const Delta &d, const fs::path &sourcePath, Database *destination, const MergeStrategy mergeStrategy, std::ostream& out) {
     std::vector<Conflict> conflicts;
 
     fs::path destPath = destination->rootDirectory();
@@ -440,9 +432,12 @@ void applyDelta(const Delta &d, const fs::path &sourcePath, Database *destinatio
         io::assureIsRemoved(tempPath);
     }
 
-    if (conflicts.size() > 0){
-        throw MergeException(conflicts);
+    if (conflicts.size() == 0){
+        auto mPathList = d.modifiedPathList();
+        if (mPathList.size() > 0) syncLocalMTimes(destination, mPathList);
     }
+
+    return conflicts;
 }
 
 void Registry::pull(const std::string &path, const MergeStrategy mergeStrategy,
@@ -519,20 +514,20 @@ void Registry::pull(const std::string &path, const MergeStrategy mergeStrategy,
         LOGD << "No files to download";
     }
 
+    // TODO: speedup: we should be able to check for conflicts
+    // before we download the files
+
     // Apply changes to local files
-    try{
-        applyDelta(delta, tempNewFolder, db.get(), mergeStrategy, out);
-        io::assureIsRemoved(tempNewFolder);
+    auto conflicts = applyDelta(delta, tempNewFolder, db.get(), mergeStrategy, out);
+    io::assureIsRemoved(tempNewFolder);
 
-        auto mPathList = delta.modifiedPathList();
-        if (mPathList.size() > 0) syncLocalMTimes(db.get(), mPathList);
-
+    if (conflicts.size() == 0){
         // No errors? Update stamp
         sm.setLastStamp(tagInfo.registryUrl, source.get());
-    }catch(const MergeException &e){
+    }else{
         out << "Found conflicts, but don't worry! Make a copy of the conflicting entries and use --keep-theirs or --keep-ours to finish the pull:" << std::endl << std::endl;
 
-        for (auto &c : e.getConflicts()){
+        for (auto &c : conflicts){
             out << "C\t" << c.path << " (" << c.description() << ")" <<  std::endl;
         }
     }
@@ -545,8 +540,7 @@ void Registry::pull(const std::string &path, const MergeStrategy mergeStrategy,
     io::assureIsRemoved(tempNewFolder);
 }
 
-void Registry::push(const std::string &path, const bool force,
-                            std::ostream &out) {
+void Registry::push(const std::string &path, const bool force, std::ostream &out) {
     auto db = open(path, true);
 
     TagManager tagManager(db.get());
@@ -588,33 +582,26 @@ void Registry::push(const std::string &path, const bool force,
     }
 
     const auto pir = pushManager.init(registryStampChecksum, db->getStamp());
-    std::cout << pir.token << std::endl;
-    LOGD << "Push initialized";
-/*
-    const auto basePath = ddbPath.parent_path();
 
-    for (const auto &file : filesList) {
+    LOGD << "Push initialized";
+
+    const auto basePath = db->rootDirectory();
+
+    for (const auto &file : pir.filesList) {
         const auto fullPath = basePath / file;
 
         out << "Transfering '" << file << "'" << std::endl;
 
-        LOGD << "Upload: " << fullPath;
-
-        // 6) Foreach of the needed files call POST endpoint
-        pushManager.upload(fullPath.generic_string(), file);
+        // Foreach of the needed files call POST endpoint
+        pushManager.upload(fullPath.generic_string(), file, pir.token);
     }
 
     out << "Transfers done" << std::endl;
 
-    // 7) When done call commit endpoint
-    pushManager.commit();
+    // When done call commit endpoint
+    pushManager.commit(pir.token);
 
-    LOGD << "Push committed, cleaning up";
-
-    // Cleanup
-    fs::remove(tempArchive);
-
-    out << "Push complete" << std::endl; */
+    out << "Push complete" << std::endl;
 }
 
 void Registry::handleError(net::Response &res) {
@@ -633,7 +620,7 @@ void Registry::handleError(net::Response &res) {
 
     throw RegistryException(
         "Invalid response from registry. Returned status: " +
-        std::to_string(res.status()));
+                std::to_string(res.status()));
 }
 
 }  // namespace ddb

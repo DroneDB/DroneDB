@@ -95,15 +95,8 @@ class Registry {
                                const std::string& folder);
 };
 
-DDB_DLL void applyDelta(const Delta& d, const fs::path& sourcePath, Database *destination, const MergeStrategy mergeStrategy, std::ostream& out = std::cout);
+DDB_DLL std::vector<Conflict> applyDelta(const Delta& d, const fs::path& sourcePath, Database *destination, const MergeStrategy mergeStrategy, std::ostream& out = std::cout);
 DDB_DLL void ensureParentFolderExists(const fs::path& folder);
-
-class MergeException : public AppException{
-    std::vector<Conflict> conflicts;
-public:
-    MergeException(const std::vector<Conflict> &conflicts) : AppException("Merge exception"), conflicts(conflicts) {}
-    std::vector<Conflict > getConflicts() const { return conflicts; }
-};
 
 }  // namespace ddb
 

@@ -37,25 +37,26 @@ DDB_DLL PushInitResponse PushManager::init(const std::string &registryStampCheck
     return pir;
 }
 
-DDB_DLL void PushManager::upload(const std::string& fullPath, const std::string& file) {
+DDB_DLL void PushManager::upload(const std::string& fullPath, const std::string& file, const std::string &token) {
     this->registry->ensureTokenValidity();
 
     net::Response res =
         net::POST(this->registry->getUrl("/orgs/" + this->organization + "/ds/" +
                                          this->dataset + "/push/upload"))
-            .multiPartFormData({"file", fullPath}, {"path", file})
+            .multiPartFormData({"file", fullPath}, {"path", file, "token", token})
             .authToken(this->registry->getAuthToken())
             .send();
 
     if (res.status() != 200) this->registry->handleError(res);
 }
 
-DDB_DLL void PushManager::commit() {
+DDB_DLL void PushManager::commit(const std::string &token) {
     this->registry->ensureTokenValidity();
 
     net::Response res =
         net::POST(this->registry->getUrl("/orgs/" + this->organization + "/ds/" +
                                          this->dataset + "/push/commit"))
+            .formData({"token", token})
             .authToken(this->registry->getAuthToken())
             .send();
 

@@ -173,6 +173,15 @@ DDB_DLL DDBErr DDBMemoryTile(const char *inputPath, int tz, int tx, int ty, uint
  * @return DDBERR_NONE on success, an error otherwise */
 DDB_DLL DDBErr DDBDelta(const char *ddbSourceStamp, const char *ddbTargetStamp, char **output, const char *format);
 
+/** Apply a delta on a database
+ * @param delta JSON delta between databases
+ * @param sourcePath path to source database (or path to partial files to be added)
+ * @param ddbPath path to DroneDB database to which the delta should be applied
+ * @param mergeStrategy merge strategy to use
+ * @param conflicts pointer to C-string where to store list of conflicts (if any) in JSON
+ * @return DDBERR_NONE on success, an error otherwise */
+DDB_DLL DDBErr DDBApplyDelta(const char *delta, const char *sourcePath, char *ddbPath, int mergeStrategy, char **conflicts);
+
 /** Sets dataset tag
  * @param ddbPath path to the source DroneDB database (parent of ".ddb")
  * @param newTag the dataset tag to set

@@ -36,8 +36,8 @@ class PushManager {
     }
 
     DDB_DLL PushInitResponse init(const std::string &registryStampChecksum, const json &dbStamp);
-    DDB_DLL void upload(const std::string& fullPath, const std::string& file);
-    DDB_DLL void commit();
+    DDB_DLL void upload(const std::string& fullPath, const std::string& file, const std::string &token);
+    DDB_DLL void commit(const std::string &token);
 
     DDB_DLL std::string getOrganization() { return this->organization; }
     DDB_DLL std::string getDataset() { return this->dataset; }

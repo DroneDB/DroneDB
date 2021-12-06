@@ -372,6 +372,27 @@ DDBErr DDBDelta(const char* ddbSourceStamp, const char* ddbTargetStamp, char** o
     DDB_C_END
 }
 
+DDB_DLL DDBErr DDBApplyDelta(const char *delta, const char *sourcePath, char *ddbPath, int mergeStrategy, char **conflicts){
+    DDB_C_BEGIN
+
+    Delta d;
+    try{
+        d = json::parse(delta);
+    }catch (const json::parse_error &e) {
+        throw InvalidArgsException(e.what());
+    }
+
+    const auto ddb = ddb::open(std::string(ddbPath), false);
+    std::stringstream ss;
+    const auto adc = applyDelta(d, fs::path(std::string(sourcePath)), ddb.get(), static_cast<MergeStrategy>(mergeStrategy), ss);
+
+    json j = json::array();
+    for (auto &c : adc) j.push_back(c.path);
+    utils::copyToPtr(j.dump(), conflicts);
+
+    DDB_C_END
+}
+
 DDB_DLL DDBErr DDBSetTag(const char* ddbPath, const char* newTag) {
     DDB_C_BEGIN
 
