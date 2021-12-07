@@ -23,11 +23,11 @@ void buildCog(const std::string &inputGTiff, const std::string &outputCog){
     const int numBands = GDALGetRasterCount(hSrcDataset);
     if (numBands == 3 || numBands == 4){
         bool all8Bit = true;
+
         for (int n = 0; n < numBands; n++){
             GDALRasterBandH b = GDALGetRasterBand(hSrcDataset, n + 1);
             if (GDALGetRasterDataType(b) != GDT_Byte){
                 all8Bit = false;
-                break;
             }
         }
         if (all8Bit){
