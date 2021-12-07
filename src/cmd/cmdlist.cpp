@@ -28,6 +28,7 @@
 #include "push.h"
 #include "pull.h"
 #include "meta.h"
+#include "cog.h"
 
 namespace cmd {
 
@@ -56,7 +57,8 @@ namespace cmd {
       {"ept", new Ept()},
       {"push", new Push()},
       {"pull", new Pull()},
-      {"meta", new Meta()}
+      {"meta", new Meta()},
+      {"cog", new Cog()}
   };
 
   std::map<std::string, std::string> aliases = {

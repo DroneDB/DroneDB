@@ -127,7 +127,6 @@ GDALTiler::GDALTiler(const std::string &inputPath, const std::string &outputFold
 
     // warped_input_dataset = inputDataset
     nBands = dataBandsCount(inputDataset);
-    //    bool hasAlpha = nBands < GDALGetRasterCount(inputDataset);
 
     double outGt[6];
     if (GDALGetGeoTransform(inputDataset, outGt) != CE_None)
@@ -337,9 +336,28 @@ GDALDatasetH GDALTiler::createWarpedVRT(const GDALDatasetH &src,
                             ". Is PROJ available?");
     const char *srcWkt = GDALGetProjectionRef(src);
 
+    GDALWarpOptions *opts = GDALCreateWarpOptions();
+
+    // If the dataset does not have alpha, add it
+    bool hasAlpha = false;
+    const int numBands = GDALGetRasterCount(src);
+    for (int n = 0; n < numBands; n++){
+        GDALRasterBandH b = GDALGetRasterBand(src, n + 1);
+        if (GDALGetRasterColorInterpretation(b) == GCI_AlphaBand){
+            hasAlpha = true;
+            break;
+        }
+    }
+
+    if (!hasAlpha){
+        opts->nDstAlphaBand = GDALGetRasterCount(src) + 1;
+    }
+
     const GDALDatasetH warpedVrt = GDALAutoCreateWarpedVRT(
-        src, srcWkt, dstWkt, resampling, 0.001, nullptr);
+        src, srcWkt, dstWkt, resampling, 0.001, opts);
     if (warpedVrt == nullptr) throw GDALException("Cannot create warped VRT");
+
+    GDALDestroyWarpOptions(opts);
 
     return warpedVrt;
 }
