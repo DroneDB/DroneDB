@@ -119,6 +119,9 @@ void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
         }else if (entry.type == EntryType::GeoRaster){
             GDALDatasetH  hDataset;
             hDataset = GDALOpen( path.string().c_str(), GA_ReadOnly );
+            if (!hDataset)
+                throw GDALException("Cannot open " + path.string() + " for reading");
+
             int width = GDALGetRasterXSize(hDataset);
             int height = GDALGetRasterYSize(hDataset);
 
@@ -180,6 +183,8 @@ void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
                 b["colorInterp"] = GDALGetColorInterpretationName(GDALGetRasterColorInterpretation(hBand));
                 entry.properties["bands"].push_back(b);
             }
+
+            GDALClose(hDataset);
         }else if (entry.type == EntryType::PointCloud){
             PointCloudInfo info;
             if (getPointCloudInfo(path.string(), info)){
