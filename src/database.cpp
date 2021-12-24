@@ -170,7 +170,6 @@ json Database::getAttributes() const {
     json j;
 
     j["public"] = this->isPublic();
-    j["mtime"] = io::Path(this->getOpenFile()).getModifiedTime();
 
     // See if we have a LICENSE.md and README.md in the index
     {
