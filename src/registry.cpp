@@ -399,7 +399,7 @@ std::vector<Conflict> applyDelta(const Delta &d, const fs::path &sourcePath, Dat
             if (fs::exists(dest)) {
                 if (indexed) removeFromIndex(destination, { dest.string() });
                 io::assureIsRemoved(dest);
-                out << "D\t" << dest << std::endl;
+                out << "D\t" << rem.path << std::endl;
             }
         }
     }
@@ -539,7 +539,7 @@ void Registry::pull(const std::string &path, const MergeStrategy mergeStrategy,
 
     if (conflicts.size() == 0){
         // No errors? Update stamp
-        sm.setLastStamp(tagInfo.registryUrl);
+        sm.setLastStamp(tagInfo.registryUrl, remoteStamp);
     }else{
         out << "Found conflicts, but don't worry! Make a copy of the conflicting entries and use --keep-theirs or --keep-ours to finish the pull:" << std::endl << std::endl;
 

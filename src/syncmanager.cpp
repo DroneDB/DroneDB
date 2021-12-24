@@ -40,14 +40,22 @@ json SyncManager::getLastStamp(const std::string &registry) {
 }
 
 void SyncManager::setLastStamp(const std::string& registry, Database *sourceDb) {
+    if (sourceDb != nullptr){
+        setLastStamp(registry, sourceDb->getStamp());
+    }else{
+        setLastStamp(registry, db->getStamp());
+    }
+}
+
+void SyncManager::setLastStamp(const std::string &registry, const json &stamp){
     const auto path = this->db->ddbDirectory() / SYNCFILE;
 
     LOGD << "Path = " << path;
     LOGD << "Registry = " << registry;
 
-    if (registry.length() == 0) 
+    if (registry.length() == 0)
         throw InvalidArgsException("Registry cannot be null");
-    
+
     if (!exists(path)) {
         std::ofstream out(path, std::ios_base::out);
         out << "{}";
@@ -59,8 +67,7 @@ void SyncManager::setLastStamp(const std::string& registry, Database *sourceDb) 
     i >> j;
     i.close();
 
-    if (sourceDb != nullptr) j[registry] = sourceDb->getStamp();
-    else j[registry] = db->getStamp();
+    j[registry] = stamp;
 
     std::ofstream out(path, std::ios_base::out | std::ios_base::trunc);
     out << j.dump(4);
