@@ -105,32 +105,21 @@ json MetaManager::set(const std::string &key, const std::string &data, const std
     const auto eKey = getKey(key, false);
     const auto eData = validateData(data);
     const long long eMtime = utils::currentUnixTimestamp();
-    json result;
 
-    const auto q = db->query("SELECT id FROM entries_meta WHERE path = ? and key = ?");
+    // Delete previous meta first (we need to generate a new ID)
+    const auto q = db->query("DELETE FROM entries_meta WHERE path = ? and key = ?");
     q->bind(1, ePath);
     q->bind(2, eKey);
-    if (q->fetch()){
-        // Entry exists, update
-        const auto id = q->getText(0);
-        const auto uq = db->query("UPDATE entries_meta SET data = ?, mtime = ? WHERE id = ?");
-        uq->bind(1, eData);
-        uq->bind(2, eMtime);
-        uq->bind(3, id);
-        uq->execute();
-        result = getMetaJson("SELECT id, data, mtime FROM entries_meta WHERE id = '" + id + "'");
-    }else{
-        // Insert
-        const auto iq = db->query("INSERT INTO entries_meta (path, key, data, mtime) VALUES (?, ?, ?, ?)");
-        iq->bind(1, ePath);
-        iq->bind(2, eKey);
-        iq->bind(3, eData);
-        iq->bind(4, eMtime);
-        iq->execute();
-        result = getMetaJson("SELECT id, data, mtime FROM entries_meta WHERE rowid = last_insert_rowid()");
-    }
+    q->execute();
 
-    return result;
+    // Insert
+    const auto iq = db->query("INSERT INTO entries_meta (path, key, data, mtime) VALUES (?, ?, ?, ?)");
+    iq->bind(1, ePath);
+    iq->bind(2, eKey);
+    iq->bind(3, eData);
+    iq->bind(4, eMtime);
+    iq->execute();
+    return getMetaJson("SELECT id, data, mtime FROM entries_meta WHERE rowid = last_insert_rowid()");
 }
 
 json MetaManager::remove(const std::string &id){
