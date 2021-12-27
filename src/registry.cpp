@@ -603,6 +603,8 @@ void Registry::pull(const std::string &path, const MergeStrategy mergeStrategy,
     // Inform user if nothing was needed
     if (delta.empty()){
         out << "Everything up-to-date" << std::endl;
+    }else{
+        out << "Pull completed" << std::endl;
     }
 }
 
@@ -652,7 +654,7 @@ void Registry::push(const std::string &path, std::ostream &out) {
 
     // Push meta
     if (pir.neededMeta.size() > 0){
-        out << "Transferring " << pir.neededMeta.size() << " metadata" << std::endl;
+        out << "Transferring metadata (" << pir.neededMeta.size() << ")" << std::endl;
         pushManager.meta(db->getMetaManager()->dump(pir.neededMeta), pir.token);
     }
 
@@ -666,8 +668,6 @@ void Registry::push(const std::string &path, std::ostream &out) {
         // Foreach of the needed files call POST endpoint
         pushManager.upload(fullPath.generic_string(), file, pir.token);
     }
-
-    if (pir.neededFiles.size() > 0 || pir.neededMeta.size() > 0) out << "Transfers done" << std::endl;
 
     // When done call commit endpoint
     pushManager.commit(pir.token);
