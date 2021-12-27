@@ -14,7 +14,7 @@ void Meta::setOptions(cxxopts::Options &opts) {
     // clang-format off
     opts
     .positional_help("[args]")
-    .custom_help("meta [add|set|rm|get|unset|ls] [key|ID] [data] [-p path]")
+    .custom_help("meta [add|set|rm|get|unset|ls|dump|restore] [key|ID] [data] [-p path]")
     .add_options()
     ("c,command", "Command", cxxopts::value<std::string>())
     ("k,key", "Metadata key/ID", cxxopts::value<std::string>()->default_value(""))
@@ -37,7 +37,10 @@ void Meta::run(cxxopts::ParseResult &opts) {
     }
     const auto command = opts["command"].as<std::string>();
 
-    if (command != "ls" && command != "list" && command != "l" && !opts.count("key")){
+    if (command != "ls" && command != "list" && command != "l" &&
+        command != "dump" && command != "d" &&
+        command != "restore" &&
+        !opts.count("key")){
         printHelp();
     }
 
@@ -68,6 +71,15 @@ void Meta::run(cxxopts::ParseResult &opts) {
         output(std::cout, metaManager.unset(key, path), format);
     } else if (command == "list" || command == "ls" || command == "l"){
         output(std::cout, metaManager.list(path), format);
+    } else if (command == "dump" || command == "d"){
+        output(std::cout, metaManager.dump(), format);
+    } else if (command == "restore"){
+        try{
+            json dump = json::parse(std::cin);
+            metaManager.restore(dump);
+        }catch (const json::parse_error &e) {
+            throw ddb::InvalidArgsException(e.what());
+        }
     }
 }
 

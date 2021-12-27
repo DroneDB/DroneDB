@@ -244,7 +244,14 @@ json Database::getStamp() const{
 
         j["entries"].push_back(json::object({{p, h}}));
     }
-    // TODO: metadata UUIDs
+
+    q = this->query("SELECT id FROM entries_meta ORDER BY id ASC");
+    j["meta"] = json::array();
+    while (q->fetch()){
+        const std::string id = q->getText(0);
+        checksum.add(id.c_str(), id.length());
+        j["meta"].push_back(id);
+    }
 
     j["checksum"] = checksum.getHash();
     return j;

@@ -264,6 +264,17 @@ DDB_DLL DDBErr DDBMetaUnset(const char *ddbPath, const char *path, const char *k
  *  @param output pointer to C-string where to store result (JSON) */
 DDB_DLL DDBErr DDBMetaList(const char *ddbPath, const char *path, char **output);
 
+/** Dump metadata
+ *  @param ddbPath path to the source DroneDB database (parent of ".ddb")
+ *  @param ids List of IDs to include in the dump (JSON array of strings) or "[]" to dump all
+ *  @param output pointer to C-string where to store result (JSON) */
+DDB_DLL DDBErr DDBMetaDump(const char *ddbPath, const char *ids, char **output);
+
+/** Restore metadata
+ *  @param ddbPath path to the source DroneDB database (parent of ".ddb")
+ *  @param dump JSON dump generated with DDBMetaDump */
+DDB_DLL DDBErr DDBMetaRestore(const char *ddbPath, const char *dump);
+
 
 #ifdef __cplusplus
 }

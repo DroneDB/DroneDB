@@ -194,6 +194,69 @@ json MetaManager::list(const std::string &path, const std::string &cwd) const{
     }
     return result;
 }
+
+json MetaManager::dump(const json &ids){
+    if (!ids.is_array()) throw InvalidArgsException("ids must be an array");
+
+    json result = json::array();
+    std::string sql = "SELECT id,path,key,data,mtime FROM entries_meta ORDER by id ASC";
+    if (ids.size() > 0){
+        sql += " WHERE id IN (";
+        for (unsigned long i = 0; i < ids.size(); i++){
+            sql += "?";
+            if (i < ids.size() - 1) sql += ",";
+        }
+        sql += ")";
+    }
+
+    const auto q = db->query(sql);
+
+    if (ids.size() > 0){
+        unsigned long i = 1;
+        for (auto &id : ids){
+            q->bind(i, id.is_string() ? id.get<std::string>() : "");
+            i++;
+        }
+    }
+
+    while(q->fetch()){
+        result.push_back(json::object({{"id", q->getText(0)},
+                                       {"path", q->getText(1)},
+                                       {"key", q->getText(2)},
+                                       {"data", q->getText(3)},
+                                       {"mtime", q->getInt64(4)},
+                                      }));
+    }
+    return result;
+}
+
+void MetaManager::restore(const json &metaDump){
+    if (!metaDump.is_array()) throw InvalidArgsException("metaDump must be an array");
+
+    db->exec("BEGIN EXCLUSIVE TRANSACTION");
+
+    const auto q = db->query("INSERT OR REPLACE INTO entries_meta(id, path, key, data, mtime) VALUES (?, ?, ?, ?, ?)");
+
+    for (auto &meta : metaDump){
+        // Quick validation
+        if (!meta.contains("id") ||
+                !meta.contains("path") ||
+                !meta.contains("key") ||
+                !meta.contains("data") ||
+                !meta.contains("mtime")){
+            throw InvalidArgsException("Invalid meta: " + meta.dump());
+        }
+
+        q->bind(1, meta["id"].get<std::string>());
+        q->bind(2, meta["path"].get<std::string>());
+        q->bind(3, meta["key"].get<std::string>());
+        q->bind(4, meta["data"].get<std::string>());
+        q->bind(5, meta["mtime"].get<long long>());
+        q->execute();
+    }
+
+    db->exec("COMMIT");
+}
 	
 
 }

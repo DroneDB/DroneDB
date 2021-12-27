@@ -596,3 +596,42 @@ DDB_DLL DDBErr DDBMetaList(const char *ddbPath, const char *path, char **output)
     DDB_C_END
 }
 
+DDB_DLL DDBErr DDBMetaDump(const char *ddbPath, const char *ids, char **output){
+    DDB_C_BEGIN
+
+    if (ddbPath == nullptr) throw InvalidArgsException("No ddb path provided");
+    if (ids == nullptr) throw InvalidArgsException("No ids provided");
+
+    json jIds;
+    try{
+        jIds = json::parse(ids);
+    }catch (const json::parse_error &e) {
+        throw InvalidArgsException(e.what());
+    }
+
+    const auto ddb = ddb::open(std::string(ddbPath), true);
+    auto json = ddb->getMetaManager()->dump(jIds);
+
+    utils::copyToPtr(json.dump(), output);
+
+    DDB_C_END
+}
+
+DDB_DLL DDBErr DDBMetaRestore(const char *ddbPath, const char *dump){
+    DDB_C_BEGIN
+
+    if (ddbPath == nullptr) throw InvalidArgsException("No ddb path provided");
+    if (dump == nullptr) throw InvalidArgsException("No dump provided");
+
+    json jDump;
+    try{
+        jDump = json::parse(dump);
+    }catch (const json::parse_error &e) {
+        throw InvalidArgsException(e.what());
+    }
+
+    const auto ddb = ddb::open(std::string(ddbPath), true);
+    ddb->getMetaManager()->restore(jDump);
+
+    DDB_C_END
+}
