@@ -178,9 +178,10 @@ DDB_DLL DDBErr DDBDelta(const char *ddbSourceStamp, const char *ddbTargetStamp, 
  * @param sourcePath path to source database (or path to partial files to be added)
  * @param ddbPath path to DroneDB database to which the delta should be applied
  * @param mergeStrategy merge strategy to use
+ * @param sourceMetaDump meta dump (JSON) of source database (extracted with DDBMetaDump)
  * @param conflicts pointer to C-string where to store list of conflicts (if any) in JSON
  * @return DDBERR_NONE on success, an error otherwise */
-DDB_DLL DDBErr DDBApplyDelta(const char *delta, const char *sourcePath, char *ddbPath, int mergeStrategy, char **conflicts);
+DDB_DLL DDBErr DDBApplyDelta(const char *delta, const char *sourcePath, char *ddbPath, int mergeStrategy, char *sourceMetaDump, char **conflicts);
 
 /** Sets dataset tag
  * @param ddbPath path to the source DroneDB database (parent of ".ddb")
@@ -274,7 +275,7 @@ DDB_DLL DDBErr DDBMetaDump(const char *ddbPath, const char *ids, char **output);
  *  @param ddbPath path to the source DroneDB database (parent of ".ddb")
  *  @param dump JSON dump generated with DDBMetaDump
  *  @param output pointer to C-string where to store result (JSON) */
-DDB_DLL DDBErr DDBMetaRestore(const char *ddbPath, const char *dump);
+DDB_DLL DDBErr DDBMetaRestore(const char *ddbPath, const char *dump, char **output);
 
 
 #ifdef __cplusplus

@@ -536,12 +536,12 @@ void Registry::pull(const std::string &path, const MergeStrategy mergeStrategy,
     // Perform local diff using delta method using last stamp
     SyncManager sm(db.get());
     const auto delta = getDelta(remoteStamp, sm.getLastStamp(tagInfo.registryUrl));
-    LOGD << "Delta:";
 
-    out << "Delta result: " << delta.adds.size() << " adds, "
-        << delta.removes.size() << " removes, meta (+"
-        << delta.metaAdds.size() << ", -" << delta.metaRemoves.size() << ")"
-        <<  std::endl;
+    if (!delta.empty()){
+        out << "Delta: files (+" << delta.adds.size() << ",-" << delta.removes.size() << "), meta (+"
+            << delta.metaAdds.size() << ",-" << delta.metaRemoves.size() << ")"
+            <<  std::endl;
+    }
 
     json remoteMetaDump = json::array();
 
