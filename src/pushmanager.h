@@ -17,7 +17,8 @@
 namespace ddb {
 
 struct PushInitResponse{
-    std::vector<std::string> filesList;
+    std::vector<std::string> neededFiles;
+    std::vector<std::string> neededMeta;
     std::string token;
 };
 
@@ -37,6 +38,7 @@ class PushManager {
 
     DDB_DLL PushInitResponse init(const std::string &registryStampChecksum, const json &dbStamp);
     DDB_DLL void upload(const std::string& fullPath, const std::string& file, const std::string &token);
+    DDB_DLL void meta(const json& metaDump, const std::string &token);
     DDB_DLL void commit(const std::string &token);
 
     DDB_DLL std::string getOrganization() { return this->organization; }

@@ -29,10 +29,11 @@ DDB_DLL PushInitResponse PushManager::init(const std::string &registryStampCheck
     json j = res.getJSON();
 
     if (j.contains("pullRequired") && j["pullRequired"].get<bool>()) throw PullRequiredException("The remote has new changes. Use \"ddb pull\" to get the latest changes before pushing.");
-    if (!j.contains("neededFiles") || !j.contains("token")) this->registry->handleError(res);
+    if (!j.contains("neededFiles") || !j.contains("token") || !j.contains("neededMeta")) this->registry->handleError(res);
 
     PushInitResponse pir;
-    pir.filesList = j["neededFiles"].get<std::vector<std::string>>();
+    pir.neededFiles = j["neededFiles"].get<std::vector<std::string>>();
+    pir.neededMeta = j["neededMeta"].get<std::vector<std::string>>();
     pir.token = j["token"].get<std::string>();
     return pir;
 }
@@ -44,6 +45,17 @@ DDB_DLL void PushManager::upload(const std::string& fullPath, const std::string&
         net::POST(this->registry->getUrl("/orgs/" + this->organization + "/ds/" +
                                          this->dataset + "/push/upload"))
             .multiPartFormData({"file", fullPath}, {"path", file, "token", token})
+            .authToken(this->registry->getAuthToken())
+            .send();
+
+    if (res.status() != 200) this->registry->handleError(res);
+}
+
+void PushManager::meta(const json &metaDump, const std::string &token){
+    net::Response res =
+        net::POST(this->registry->getUrl("/orgs/" + this->organization + "/ds/" +
+                                         this->dataset + "/push/meta"))
+            .formData({"meta", metaDump.dump(), "token", token})
             .authToken(this->registry->getAuthToken())
             .send();
 

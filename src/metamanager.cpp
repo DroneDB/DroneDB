@@ -230,13 +230,14 @@ json MetaManager::dump(const json &ids){
     return result;
 }
 
-void MetaManager::restore(const json &metaDump){
+json MetaManager::restore(const json &metaDump){
     if (!metaDump.is_array()) throw InvalidArgsException("metaDump must be an array");
 
     db->exec("BEGIN EXCLUSIVE TRANSACTION");
 
     const auto q = db->query("INSERT OR REPLACE INTO entries_meta(id, path, key, data, mtime) VALUES (?, ?, ?, ?, ?)");
 
+    int i = 0;
     for (auto &meta : metaDump){
         // Quick validation
         if (!meta.contains("id") ||
@@ -253,9 +254,32 @@ void MetaManager::restore(const json &metaDump){
         q->bind(4, meta["data"].get<std::string>());
         q->bind(5, meta["mtime"].get<long long>());
         q->execute();
+        i++;
     }
 
     db->exec("COMMIT");
+    json j;
+    j["restored"] = i;
+    return j;
+}
+
+DDB_DLL json MetaManager::bulkRemove(const std::vector<std::string> &ids){
+    const auto q = db->query("DELETE FROM entries_meta WHERE id = ?");
+
+    db->exec("BEGIN EXCLUSIVE TRANSACTION");
+
+    int i = 0;
+    for (auto &id : ids){
+        q->bind(1, id);
+        q->execute();
+        i++;
+    }
+
+    db->exec("COMMIT");
+
+    json j;
+    j["removed"] = i;
+    return j;
 }
 	
 

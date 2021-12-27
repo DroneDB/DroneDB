@@ -372,19 +372,21 @@ DDBErr DDBDelta(const char* ddbSourceStamp, const char* ddbTargetStamp, char** o
     DDB_C_END
 }
 
-DDB_DLL DDBErr DDBApplyDelta(const char *delta, const char *sourcePath, char *ddbPath, int mergeStrategy, char **conflicts){
+DDB_DLL DDBErr DDBApplyDelta(const char *delta, const char *sourcePath, char *ddbPath, int mergeStrategy, char *sourceMetaDump, char **conflicts){
     DDB_C_BEGIN
 
     Delta d;
+    json metaDump;
     try{
         d = json::parse(delta);
+        metaDump = json::parse(sourceMetaDump);
     }catch (const json::parse_error &e) {
         throw InvalidArgsException(e.what());
     }
 
     const auto ddb = ddb::open(std::string(ddbPath), false);
     std::stringstream ss;
-    const auto adc = applyDelta(d, fs::path(std::string(sourcePath)), ddb.get(), static_cast<MergeStrategy>(mergeStrategy), ss);
+    const auto adc = applyDelta(d, fs::path(std::string(sourcePath)), ddb.get(), static_cast<MergeStrategy>(mergeStrategy), metaDump, ss);
 
     json j = json::array();
     for (auto &c : adc) j.push_back(c.path);
@@ -617,7 +619,7 @@ DDB_DLL DDBErr DDBMetaDump(const char *ddbPath, const char *ids, char **output){
     DDB_C_END
 }
 
-DDB_DLL DDBErr DDBMetaRestore(const char *ddbPath, const char *dump){
+DDB_DLL DDBErr DDBMetaRestore(const char *ddbPath, const char *dump, char **output){
     DDB_C_BEGIN
 
     if (ddbPath == nullptr) throw InvalidArgsException("No ddb path provided");
@@ -631,7 +633,9 @@ DDB_DLL DDBErr DDBMetaRestore(const char *ddbPath, const char *dump){
     }
 
     const auto ddb = ddb::open(std::string(ddbPath), true);
-    ddb->getMetaManager()->restore(jDump);
+    auto json = ddb->getMetaManager()->restore(jDump);
+
+    utils::copyToPtr(json.dump(), output);
 
     DDB_C_END
 }

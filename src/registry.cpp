@@ -336,6 +336,26 @@ void Registry::downloadFiles(const std::string &organization,
     }
 }
 
+json Registry::getMetaDump(const std::string &organization, const std::string &dataset, const std::vector<std::string> &ids){
+    this->ensureTokenValidity();
+    const auto metaDumpUrl = url + "/orgs/" + organization + "/ds/" + dataset + "/meta/dump";
+
+    auto res = net::POST(metaDumpUrl)
+               .authCookie(this->authToken)
+               .formData({"ids", json(ids).dump()})
+               .send();
+    if (res.status() != 200) this->handleError(res);
+
+    json metaDump = res.getJSON();
+
+    // Quick sanity check
+    if (metaDump.is_array()){
+        return metaDump;
+    }else{
+        throw RegistryException("Invalid meta dump: " + metaDump.dump());
+    }
+}
+
 void ensureParentFolderExists(const fs::path &folder) {
     if (folder.has_parent_path()) {
         const auto parentPath = folder.parent_path();
@@ -343,117 +363,142 @@ void ensureParentFolderExists(const fs::path &folder) {
     }
 }
 
-std::vector<Conflict> applyDelta(const Delta &d, const fs::path &sourcePath, Database *destination, const MergeStrategy mergeStrategy, std::ostream& out) {
+std::vector<Conflict> applyDelta(const Delta &d, const fs::path &sourcePath, Database *destination, const MergeStrategy mergeStrategy, const json &sourceMetaDump, std::ostream& out) {
     std::vector<Conflict> conflicts;
 
-    fs::path destPath = destination->rootDirectory();
-    const std::string tmpFolderName = (fs::path(DDB_FOLDER) / "tmp" / utils::generateRandomString(8)).string();
+    // File operations
+    if (d.adds.size() > 0 || d.removes.size() > 0){
+        fs::path destPath = destination->rootDirectory();
+        const std::string tmpFolderName = (fs::path(DDB_FOLDER) / "tmp" / utils::generateRandomString(8)).string();
 
-    const auto tempPath = destPath / tmpFolderName;
+        const auto tempPath = destPath / tmpFolderName;
 
-    if (fs::exists(tempPath)){
-        io::assureIsRemoved(tempPath);
-    }
-    io::assureFolderExists(tempPath);
+        if (fs::exists(tempPath)){
+            io::assureIsRemoved(tempPath);
+        }
+        io::assureFolderExists(tempPath);
 
-    Entry e;
+        Entry e;
 
-    json debug = d;
-    LOGD << debug.dump(4);
+        json debug = d;
+        LOGD << debug.dump(4);
 
-    if (d.removes.empty()) {
-        LOGD << "No removes in delta";
-    } else {
-        LOGD << "Working on removes";
+        if (d.removes.empty()) {
+            LOGD << "No removes in delta";
+        } else {
+            LOGD << "Working on removes";
 
-        for (const auto &rem : d.removes) {
-            LOGD << rem.toString();
+            for (const auto &rem : d.removes) {
+                LOGD << rem.toString();
 
-            const auto dest = destPath / rem.path;
+                const auto dest = destPath / rem.path;
 
-            LOGD << "Dest = " << dest;
+                LOGD << "Dest = " << dest;
 
-            // Check if database has modified the entry to be deleted
-            // if so, warn user and exit, unless a merge strategy
-            // has been specified.
+                // Check if database has modified the entry to be deleted
+                // if so, warn user and exit, unless a merge strategy
+                // has been specified.
 
-            // Currently we don't check if the file has been
-            // modified on the FS, perhaps we should?
-            bool indexed = true;
+                // Currently we don't check if the file has been
+                // modified on the FS, perhaps we should?
+                bool indexed = true;
 
-            if (getEntry(destination, rem.path, e)){
-                if (rem.hash != e.hash){
-                    if (mergeStrategy == MergeStrategy::DontMerge){
-                        conflicts.push_back(Conflict(rem.path, ConflictType::RemoteDeleteLocalModified));
-                        continue; // Skip
-                    }else if (mergeStrategy == MergeStrategy::KeepOurs){
-                        continue; // Skip
-                    }else if (mergeStrategy == MergeStrategy::KeepTheirs){
-                        // Continue as normal
+                if (getEntry(destination, rem.path, e)){
+                    if (rem.hash != e.hash){
+                        if (mergeStrategy == MergeStrategy::DontMerge){
+                            conflicts.push_back(Conflict(rem.path, ConflictType::RemoteDeleteLocalModified));
+                            continue; // Skip
+                        }else if (mergeStrategy == MergeStrategy::KeepOurs){
+                            continue; // Skip
+                        }else if (mergeStrategy == MergeStrategy::KeepTheirs){
+                            // Continue as normal
+                        }
+                    }
+                }else{
+                    indexed = false;
+                }
+
+                if (fs::exists(dest)) {
+                    if (indexed) removeFromIndex(destination, { dest.string() });
+                    io::assureIsRemoved(dest);
+                    out << "D\t" << rem.path << std::endl;
+                }
+            }
+        }
+
+        if (d.adds.empty()) {
+            LOGD << "No adds in delta";
+        } else {
+            LOGD << "Working on adds";
+
+            for (const auto &add : d.adds) {
+                LOGD << add.toString();
+
+                const auto source = sourcePath / add.path;
+                const auto dest = destPath / add.path;
+
+                // Check if the database has a modified entry
+                // for the same paths we are adding
+                if (getEntry(destination, add.path, e)){
+                    if (add.hash != e.hash){
+                        if (mergeStrategy == MergeStrategy::DontMerge){
+                            conflicts.push_back(Conflict(add.path, ConflictType::BothModified));
+                            continue; // Skip
+                        }else if (mergeStrategy == MergeStrategy::KeepOurs){
+                            continue; // Skip
+                        }else if (mergeStrategy == MergeStrategy::KeepTheirs){
+                            // Continue as normal
+                        }
                     }
                 }
-            }else{
-                indexed = false;
-            }
 
-            if (fs::exists(dest)) {
-                if (indexed) removeFromIndex(destination, { dest.string() });
-                io::assureIsRemoved(dest);
-                out << "D\t" << rem.path << std::endl;
+                if (add.isDirectory()) {
+                    io::createDirectories(dest);
+                } else {
+                    io::copy(source, dest);
+                }
+
+                // TODO: this could be made faster for large files
+                // by passing the already known hash instead
+                // of computing it
+                addToIndex(destination, { dest.string() },
+                    [&out](const Entry& e, bool updated) {
+                        out << (updated ? "U" : "A") << "\t" << e.path << std::endl;
+                        return true;
+                    });
             }
+        }
+
+        if (fs::exists(tempPath)) {
+            io::assureIsRemoved(tempPath);
+        }
+
+        if (conflicts.size() == 0){
+            auto mPathList = d.modifiedPathList();
+            if (mPathList.size() > 0) syncLocalMTimes(destination, mPathList);
         }
     }
 
-    if (d.adds.empty()) {
-        LOGD << "No adds in delta";
-    } else {
-        LOGD << "Working on adds";
+    // Early exit in case of conflicts
+    if (conflicts.size() > 0) return conflicts;
 
-        for (const auto &add : d.adds) {
-            LOGD << add.toString();
+    // Meta operations
+    if (d.metaAdds.size() > 0){
+        json metaRestore = json::array();
 
-            const auto source = sourcePath / add.path;
-            const auto dest = destPath / add.path;
+        std::unordered_map<std::string, bool> metaIds;
+        for (auto &id : d.metaAdds) metaIds[id] = true;
 
-            // Check if the database has a modified entry
-            // for the same paths we are adding
-            if (getEntry(destination, add.path, e)){
-                if (add.hash != e.hash){
-                    if (mergeStrategy == MergeStrategy::DontMerge){
-                        conflicts.push_back(Conflict(add.path, ConflictType::BothModified));
-                        continue; // Skip
-                    }else if (mergeStrategy == MergeStrategy::KeepOurs){
-                        continue; // Skip
-                    }else if (mergeStrategy == MergeStrategy::KeepTheirs){
-                        // Continue as normal
-                    }
-                }
-            }
-
-            if (add.isDirectory()) {
-                io::createDirectories(dest);
-            } else {
-                io::copy(source, dest);
-            }
-
-            // TODO: this could be made faster for large files
-            // by passing the already known hash instead
-            // of computing it
-            addToIndex(destination, { dest.string() },
-                [&out](const Entry& e, bool updated) {
-                    out << (updated ? "U" : "A") << "\t" << e.path << std::endl;
-                    return true;
-                });
+        for (auto &meta : sourceMetaDump){
+            if (!meta.contains("id")) throw InvalidArgsException("Invalid meta element: " + meta.dump());
+            if (metaIds.find(meta["id"]) != metaIds.end()) metaRestore.push_back(meta);
         }
+
+        destination->getMetaManager()->restore(metaRestore);
     }
 
-    if (fs::exists(tempPath)) {
-        io::assureIsRemoved(tempPath);
-    }
-
-    if (conflicts.size() == 0){
-        auto mPathList = d.modifiedPathList();
-        if (mPathList.size() > 0) syncLocalMTimes(destination, mPathList);
+    if (d.metaRemoves.size() > 0){
+        destination->getMetaManager()->bulkRemove(d.metaRemoves);
     }
 
     return conflicts;
@@ -494,14 +539,15 @@ void Registry::pull(const std::string &path, const MergeStrategy mergeStrategy,
     LOGD << "Delta:";
 
     out << "Delta result: " << delta.adds.size() << " adds, "
-        << delta.removes.size() << " removes" << std::endl;
+        << delta.removes.size() << " removes, meta (+"
+        << delta.metaAdds.size() << ", -" << delta.metaRemoves.size() << ")"
+        <<  std::endl;
 
-    // Nothing to do? Early exit
-    if (delta.adds.empty() && delta.removes.empty()){
-        out << "Already up to date." << std::endl;
-        db->close();
-        io::assureIsRemoved(tempDdbFolder);
-        return;
+    json remoteMetaDump = json::array();
+
+    if (delta.metaAdds.size() > 0){
+        // Get meta dump
+        remoteMetaDump = this->getMetaDump(tagInfo.organization, tagInfo.dataset, delta.metaAdds);
     }
 
     const auto tempNewFolder = tempDdbFolder / std::to_string(time(nullptr));
@@ -534,7 +580,7 @@ void Registry::pull(const std::string &path, const MergeStrategy mergeStrategy,
     // before we download the files
 
     // Apply changes to local files
-    auto conflicts = applyDelta(delta, tempNewFolder, db.get(), mergeStrategy, out);
+    auto conflicts = applyDelta(delta, tempNewFolder, db.get(), mergeStrategy, remoteMetaDump, out);
     io::assureIsRemoved(tempNewFolder);
 
     if (conflicts.size() == 0){
@@ -553,6 +599,11 @@ void Registry::pull(const std::string &path, const MergeStrategy mergeStrategy,
     // Cleanup
     io::assureIsRemoved(tempDdbFolder);
     io::assureIsRemoved(tempNewFolder);
+
+    // Inform user if nothing was needed
+    if (delta.empty()){
+        out << "Already up to date." << std::endl;
+    }
 }
 
 void Registry::push(const std::string &path, std::ostream &out) {
@@ -587,7 +638,6 @@ void Registry::push(const std::string &path, std::ostream &out) {
     // Call POST endpoint passing database stamp
     PushManager pushManager(this, tagInfo.organization, tagInfo.dataset);
 
-    // The server answers with the needed files list
     std::string registryStampChecksum = "";
     try{
         const auto regStamp = syncManager.getLastStamp(tagInfo.registryUrl);
@@ -600,9 +650,15 @@ void Registry::push(const std::string &path, std::ostream &out) {
 
     LOGD << "Push initialized";
 
+    // Push meta
+    if (pir.neededMeta.size() > 0){
+        out << "Transferring " << pir.neededMeta.size() << " metadata" << std::endl;
+        pushManager.meta(db->getMetaManager()->dump(pir.neededMeta), pir.token);
+    }
+
     const auto basePath = db->rootDirectory();
 
-    for (const auto &file : pir.filesList) {
+    for (const auto &file : pir.neededFiles) {
         const auto fullPath = basePath / file;
 
         out << "Transfering '" << file << "'" << std::endl;

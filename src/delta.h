@@ -53,11 +53,19 @@ struct Delta {
     std::vector<AddAction> adds;
     std::vector<RemoveAction> removes;
 
+    std::vector<std::string> metaAdds;
+    std::vector<std::string> metaRemoves;
+
     DDB_DLL std::vector<std::string> modifiedPathList() const{
         std::vector<std::string> result;
         for (unsigned long i = 0; i < adds.size(); i++) result.push_back(adds[i].path);
         for (unsigned long i = 0; i < removes.size(); i++) result.push_back(removes[i].path);
         return result;
+    }
+
+    DDB_DLL bool empty() const{
+        return adds.empty() && removes.empty() &&
+                metaAdds.empty() && metaRemoves.empty();
     }
 };
 

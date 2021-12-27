@@ -76,7 +76,7 @@ void Meta::run(cxxopts::ParseResult &opts) {
     } else if (command == "restore"){
         try{
             json dump = json::parse(std::cin);
-            metaManager.restore(dump);
+            output(std::cout, metaManager.restore(dump), format);
         }catch (const json::parse_error &e) {
             throw ddb::InvalidArgsException(e.what());
         }

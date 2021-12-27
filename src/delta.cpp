@@ -30,7 +30,8 @@ void to_json(json& j, const AddAction& e) {
 }
 
 void to_json(json& j, const Delta& d) {
-    j = {{"adds", d.adds}, {"removes", d.removes}};
+    j = {{"adds", d.adds}, {"removes", d.removes},
+         {"metaAdds", d.metaAdds}, {"metaRemoves", d.metaRemoves}};
 }
 
 void from_json(const json &j, Delta &d){
@@ -84,6 +85,9 @@ Delta getDelta(const json &sourceDbStamp,
     std::vector<RemoveAction> removes;
     std::vector<AddAction> adds;
 
+    std::vector<std::string> metaAdds;
+    std::vector<std::string> metaRemoves;
+
     // Sort by path
     std::sort(source.begin(), source.end(),
               [](const SimpleEntry& l, const SimpleEntry& r) {
@@ -131,10 +135,31 @@ Delta getDelta(const json &sourceDbStamp,
                   return l.path > r.path;
               });
 
+    // Compute meta adds/removes
+    if (!sourceDbStamp.contains("meta")) throw InvalidArgsException("Stamp meta not found");
+    if (!destinationDbStamp.contains("meta")) throw InvalidArgsException("Stamp meta not found");
+
+    // Find meta IDs in source that are not in destination
+    std::unordered_map<std::string, bool> metaIds;
+    std::vector<std::string> sourceMetaIds = sourceDbStamp["meta"].get<std::vector<std::string>>();
+    std::vector<std::string> destinationMetaIds = destinationDbStamp["meta"].get<std::vector<std::string>>();
+
+    for (auto &id: sourceMetaIds) metaIds[id] = true;
+    for (auto &id: destinationMetaIds) metaIds.erase(id);
+    for (auto &it : metaIds) metaAdds.push_back(it.first);
+
+    metaIds.clear();
+
+    // Find meta IDs in destination that are not in source
+    for (auto &id: destinationMetaIds) metaIds[id] = true;
+    for (auto &id: sourceMetaIds) metaIds.erase(id);
+    for (auto &it : metaIds) metaRemoves.push_back(it.first);
 
     Delta d;
     d.removes = removes;
     d.adds = adds;
+    d.metaAdds = metaAdds;
+    d.metaRemoves = metaRemoves;
 
     return d;
 }

@@ -96,9 +96,12 @@ class Registry {
                                const std::string& dataset,
                                const std::vector<std::string>& files,
                                const std::string& folder);
+    DDB_DLL json getMetaDump(const std::string& organization,
+                               const std::string& dataset,
+                               const std::vector<std::string>& ids);
 };
 
-DDB_DLL std::vector<Conflict> applyDelta(const Delta& d, const fs::path& sourcePath, Database *destination, const MergeStrategy mergeStrategy, std::ostream& out = std::cout);
+DDB_DLL std::vector<Conflict> applyDelta(const Delta& d, const fs::path& sourcePath, Database *destination, const MergeStrategy mergeStrategy, const json& sourceMetaDump, std::ostream& out = std::cout);
 DDB_DLL void ensureParentFolderExists(const fs::path& folder);
 
 }  // namespace ddb
