@@ -199,7 +199,7 @@ json MetaManager::dump(const json &ids){
     if (!ids.is_array()) throw InvalidArgsException("ids must be an array");
 
     json result = json::array();
-    std::string sql = "SELECT id,path,key,data,mtime FROM entries_meta ORDER by id ASC";
+    std::string sql = "SELECT id,path,key,data,mtime FROM entries_meta";
     if (ids.size() > 0){
         sql += " WHERE id IN (";
         for (unsigned long i = 0; i < ids.size(); i++){
@@ -208,6 +208,7 @@ json MetaManager::dump(const json &ids){
         }
         sql += ")";
     }
+    sql += " ORDER by id ASC";
 
     const auto q = db->query(sql);
 

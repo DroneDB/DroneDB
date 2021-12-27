@@ -602,7 +602,7 @@ void Registry::pull(const std::string &path, const MergeStrategy mergeStrategy,
 
     // Inform user if nothing was needed
     if (delta.empty()){
-        out << "Already up to date." << std::endl;
+        out << "Everything up-to-date" << std::endl;
     }
 }
 
@@ -667,7 +667,7 @@ void Registry::push(const std::string &path, std::ostream &out) {
         pushManager.upload(fullPath.generic_string(), file, pir.token);
     }
 
-    out << "Transfers done" << std::endl;
+    if (pir.neededFiles.size() > 0 || pir.neededMeta.size() > 0) out << "Transfers done" << std::endl;
 
     // When done call commit endpoint
     pushManager.commit(pir.token);
@@ -675,7 +675,8 @@ void Registry::push(const std::string &path, std::ostream &out) {
     // Update stamp
     syncManager.setLastStamp(tagInfo.registryUrl, db.get());
 
-    out << "Push complete" << std::endl;
+    if (pir.neededFiles.empty() && pir.neededMeta.empty()) out << "Everything up-to-date" << std::endl;
+    else out << "Push completed" << std::endl;
 }
 
 void Registry::handleError(net::Response &res) {
