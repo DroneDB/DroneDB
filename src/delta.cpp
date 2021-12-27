@@ -48,6 +48,16 @@ void from_json(const json &j, Delta &d){
             d.removes.push_back(RemoveAction(remove["path"], remove["hash"]));
         }
     }
+    if (j.contains("metaAdds")){
+        for (auto &id : j["metaAdds"]){
+            d.metaAdds.push_back(id);
+        }
+    }
+    if (j.contains("metaRemoves")){
+        for (auto &id : j["metaRemoves"]){
+            d.metaRemoves.push_back(id);
+        }
+    }
 }
 
 Delta getDelta(Database* sourceDb, Database* targetDb) {
