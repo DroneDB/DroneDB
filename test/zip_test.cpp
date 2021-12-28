@@ -29,13 +29,13 @@ TEST(zip, createExtract) {
     // Cleanup if it already exists
     fs::remove(zipFile);
 
-    zip::zipFolder(dir.string(),
+    ddb::zip::zipFolder(dir.string(),
                    zipFile,
                    {"subdir/exclude.txt", "exclude/"});
 
     // Extract
     fs::path outdir = ta.getFolder("zipOutput");
-    zip::extractAll(zipFile, outdir.string());
+    ddb::zip::extractAll(zipFile, outdir.string());
 
     EXPECT_TRUE(fs::is_regular_file(outdir / "a.txt"));
     EXPECT_TRUE(fs::is_directory(outdir / "subdir"));
