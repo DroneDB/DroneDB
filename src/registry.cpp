@@ -642,6 +642,7 @@ std::unordered_map<std::string, bool> computeDeltaLocals(Delta d, Database *db, 
                 localMap[add.hash] = true;
             }
         }
+        q->reset();
     }
 
     return localMap;
