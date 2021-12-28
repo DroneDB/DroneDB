@@ -226,6 +226,7 @@ json MetaManager::restore(const json &metaDump){
     db->exec("BEGIN EXCLUSIVE TRANSACTION");
 
     const auto q = db->query("INSERT OR REPLACE INTO entries_meta(id, path, key, data, mtime) VALUES (?, ?, ?, ?, ?)");
+    const auto singularDupQ = db->query("SELECT id,mtime FROM entries_meta WHERE path = ? AND key = ?");
 
     int i = 0;
     for (auto &meta : metaDump){
@@ -238,11 +239,39 @@ json MetaManager::restore(const json &metaDump){
             throw InvalidArgsException("Invalid meta: " + meta.dump());
         }
 
+        // Singular entries should be unique
+        // (do not allow duplicates, keep latest by mtime)
+        const auto key = meta["key"].get<std::string>();
+        const auto path = meta["path"].get<std::string>();
+        const auto mtime = meta["mtime"].get<long long>();
+
+        // Singular key?
+        if (key[key.length() - 1] != 'S' && key[key.length() -1] != 's'){
+            bool newerMetaExists = false;
+
+            singularDupQ->bind(1, path);
+            singularDupQ->bind(2, key);
+
+            while (singularDupQ->fetch()){
+                const auto exId = singularDupQ->getText(0);
+                const auto exMtime = singularDupQ->getInt64(1);
+                if (exMtime < mtime){
+                    remove(exId);
+                }else{
+                    newerMetaExists = true;
+                }
+            }
+
+            singularDupQ->reset();
+
+            if (newerMetaExists) continue; // Do not add ours
+        }
+
         q->bind(1, meta["id"].get<std::string>());
-        q->bind(2, meta["path"].get<std::string>());
-        q->bind(3, meta["key"].get<std::string>());
+        q->bind(2, path);
+        q->bind(3, key);
         q->bind(4, meta["data"].get<std::string>());
-        q->bind(5, meta["mtime"].get<long long>());
+        q->bind(5, mtime);
         q->execute();
         i++;
     }
