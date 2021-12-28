@@ -25,7 +25,7 @@ fs::path makeTree(const std::vector<ddb::SimpleEntry>& entries) {
 
     for (const auto& entry : sortedEntries) {
         const auto relPath = tempFolder / entry.path;
-        if (entry.type != ddb::Directory) {
+        if (!entry.isDirectory()) {
             fileWriteAllText(relPath, entry.hash);
         } else {
             create_directories(relPath);
@@ -57,7 +57,7 @@ void printTree(fs::path& folder) {
      
     std::cout << "PrintTree: " << folder << std::endl;
 
-    for (const auto item : fs::recursive_directory_iterator(folder)) {
+    for (const auto &item : fs::recursive_directory_iterator(folder)) {
         entries.push_back(item.path());
     }
     const auto sortedEntries =
