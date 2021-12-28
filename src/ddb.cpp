@@ -395,6 +395,25 @@ DDB_DLL DDBErr DDBApplyDelta(const char *delta, const char *sourcePath, char *dd
     DDB_C_END
 }
 
+
+DDBErr DDBComputeDeltaLocals(const char *delta, const char *ddbPath, const char *hlDestFolder, char **output){
+    DDB_C_BEGIN
+    Delta d;
+    try{
+        d = json::parse(delta);
+    }catch (const json::parse_error &e) {
+        throw InvalidArgsException(e.what());
+    }
+    const auto ddb = ddb::open(std::string(ddbPath), false);
+
+    auto cdl = computeDeltaLocals(d, ddb.get(), std::string(hlDestFolder));
+    json j = json::object();
+    for (auto &el : cdl) j[el.first] = el.second;
+    utils::copyToPtr(j.dump(), output);
+
+    DDB_C_END
+}
+
 DDB_DLL DDBErr DDBSetTag(const char* ddbPath, const char* newTag) {
     DDB_C_BEGIN
 
@@ -639,3 +658,4 @@ DDB_DLL DDBErr DDBMetaRestore(const char *ddbPath, const char *dump, char **outp
 
     DDB_C_END
 }
+

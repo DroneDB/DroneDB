@@ -556,20 +556,18 @@ void Registry::pull(const std::string &path, const MergeStrategy mergeStrategy,
     if (!delta.adds.empty()) {
         LOGD << "Temp new folder = " << tempNewFolder;
 
+        auto localMap = computeDeltaLocals(delta, db.get(), tempNewFolder.string());
+
         const auto filesToDownload =
             boolinq::from(delta.adds)
                 .where(
-                    [](const AddAction &add) { return !add.isDirectory(); })
+                    [&localMap](const AddAction &add) { return !add.isDirectory() && localMap.find(add.hash) == localMap.end(); })
                 .select([](const AddAction &add) { return add.path; })
                 .toStdVector();
 
         // Download all the missing files
         this->downloadFiles(tagInfo.organization, tagInfo.dataset,
                             filesToDownload, tempNewFolder.string());
-
-        // TODO: check current index to see if we already have
-        // these files on disk (both path and hash) to avoid
-        // downloading
 
         LOGD << "Files downloaded";
     } else {
@@ -606,6 +604,47 @@ void Registry::pull(const std::string &path, const MergeStrategy mergeStrategy,
     }else{
         out << "Pull completed" << std::endl;
     }
+}
+
+
+std::unordered_map<std::string, bool> computeDeltaLocals(Delta d, Database *db, const std::string &hlDestFolder){
+    // Do we have files locally? If so we don't need to
+    // download them, we just create hard links to it after
+    // validating that they are indeed the same
+    // This function creates hard links only if hlDestFolder is set
+    // Otherwise it just returns the map of valid local hashes
+    const auto q = db->query("SELECT path,mtime FROM entries WHERE hash = ?");
+    std::unordered_map<std::string, bool> localMap;
+
+    for (auto &add : d.adds){
+        if (add.hash.empty()) continue;
+
+        q->bind(1, add.hash);
+        if (q->fetch()){
+            auto ePath = q->getText(0);
+            // Check the filesystem to make sure this hasn't been modified
+            io::Path p(db->rootDirectory() / ePath);
+            long long eMtime = q->getInt64(1);
+            bool valid = false;
+            if (p.getModifiedTime() == eMtime){
+                valid = true;
+            }else{
+                // Actually compute hash
+                valid = Hash::fileSHA256(p.get().string()) == add.hash;
+            }
+
+            if (valid){
+                if (!hlDestFolder.empty()){
+                    const auto destPath = fs::path(hlDestFolder) / add.path;
+                    io::createDirectories(destPath.parent_path());
+                    io::hardlinkSafe(p.get(), destPath);
+                }
+                localMap[add.hash] = true;
+            }
+        }
+    }
+
+    return localMap;
 }
 
 void Registry::push(const std::string &path, std::ostream &out) {

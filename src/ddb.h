@@ -183,6 +183,14 @@ DDB_DLL DDBErr DDBDelta(const char *ddbSourceStamp, const char *ddbTargetStamp, 
  * @return DDBERR_NONE on success, an error otherwise */
 DDB_DLL DDBErr DDBApplyDelta(const char *delta, const char *sourcePath, char *ddbPath, int mergeStrategy, char *sourceMetaDump, char **conflicts);
 
+/** Compute map of local files that are available for delta adds operations
+ * @param delta JSON delta between databases
+ * @param ddbPath path to DroneDB database to which the delta should be applied
+ * @param hlDestFolder path to folder where to create hard links for available files (or "" to not create hard links)
+ * @param output pointer to C-string where to store map of hashes (JSON)
+ * @return DDBERR_NONE on success, an error otherwise */
+DDB_DLL DDBErr DDBComputeDeltaLocals(const char *delta, const char *ddbPath, const char *hlDestFolder, char **output);
+
 /** Sets dataset tag
  * @param ddbPath path to the source DroneDB database (parent of ".ddb")
  * @param newTag the dataset tag to set

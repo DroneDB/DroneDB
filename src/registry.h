@@ -103,6 +103,7 @@ class Registry {
 
 DDB_DLL std::vector<Conflict> applyDelta(const Delta& d, const fs::path& sourcePath, Database *destination, const MergeStrategy mergeStrategy, const json& sourceMetaDump, std::ostream& out = std::cout);
 DDB_DLL void ensureParentFolderExists(const fs::path& folder);
+DDB_DLL std::unordered_map<std::string, bool> computeDeltaLocals(Delta d, Database *destination, const std::string &hlDestFolder);
 
 }  // namespace ddb
 
