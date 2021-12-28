@@ -714,8 +714,7 @@ void Registry::push(const std::string &path, std::ostream &out) {
     // Update stamp
     syncManager.setLastStamp(tagInfo.registryUrl, db.get());
 
-    if (pir.neededFiles.empty() && pir.neededMeta.empty()) out << "Everything up-to-date" << std::endl;
-    else out << "Push completed" << std::endl;
+    out << "Push completed" << std::endl;
 }
 
 void Registry::handleError(net::Response &res) {
