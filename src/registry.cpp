@@ -223,8 +223,6 @@ Entry Registry::getDatasetInfo(const std::string &organization,
 
     const auto j = res.getJSON();
 
-    // TODO: Catch errors
-
     if (j.empty())
         throw RegistryException("Invalid empty response from registry");
 
@@ -609,12 +607,18 @@ void Registry::pull(const std::string &path, const MergeStrategy mergeStrategy,
 
 std::unordered_map<std::string, bool> computeDeltaLocals(Delta d, Database *db, const std::string &hlDestFolder){
     // Do we have files locally? If so we don't need to
-    // download them, we just create hard links to it after
+    // download them, we just create hard links (or copies) to it after
     // validating that they are indeed the same
     // This function creates hard links only if hlDestFolder is set
     // Otherwise it just returns the map of valid local hashes
     const auto q = db->query("SELECT path,mtime FROM entries WHERE hash = ?");
     std::unordered_map<std::string, bool> localMap;
+
+    std::unordered_map<std::string, bool> addsMap;
+    for (auto &add : d.adds){
+        if (add.hash.empty()) continue;
+        addsMap[add.path] = true;
+    }
 
     for (auto &add : d.adds){
         if (add.hash.empty()) continue;
@@ -637,7 +641,13 @@ std::unordered_map<std::string, bool> computeDeltaLocals(Delta d, Database *db, 
                 if (!hlDestFolder.empty()){
                     const auto destPath = fs::path(hlDestFolder) / add.path;
                     io::createDirectories(destPath.parent_path());
-                    io::hardlinkSafe(p.get(), destPath);
+
+                    // We can leverage hard links ONLY
+                    // if the path we are linking is not itself
+                    // part of an add operation (otherwise it could be
+                    // overwritten)
+                    if (addsMap.find(ePath) == addsMap.end()) io::hardlinkSafe(p.get(), destPath);
+                    else io::copy(p.get(), destPath);
                 }
                 localMap[add.hash] = true;
             }
