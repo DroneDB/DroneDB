@@ -97,8 +97,6 @@ json MetaManager::add(const std::string &key, const std::string &data, const std
 
     auto result = getMetaJson("SELECT id, data, mtime FROM entries_meta WHERE rowid = last_insert_rowid()");
 
-    db->setLastUpdate();
-
     return result;
 }
 
@@ -107,34 +105,21 @@ json MetaManager::set(const std::string &key, const std::string &data, const std
     const auto eKey = getKey(key, false);
     const auto eData = validateData(data);
     const long long eMtime = utils::currentUnixTimestamp();
-    json result;
 
-    const auto q = db->query("SELECT id FROM entries_meta WHERE path = ? and key = ?");
+    // Delete previous meta first (we need to generate a new ID)
+    const auto q = db->query("DELETE FROM entries_meta WHERE path = ? and key = ?");
     q->bind(1, ePath);
     q->bind(2, eKey);
-    if (q->fetch()){
-        // Entry exists, update
-        const auto id = q->getText(0);
-        const auto uq = db->query("UPDATE entries_meta SET data = ?, mtime = ? WHERE id = ?");
-        uq->bind(1, eData);
-        uq->bind(2, eMtime);
-        uq->bind(3, id);
-        uq->execute();
-        result = getMetaJson("SELECT id, data, mtime FROM entries_meta WHERE id = '" + id + "'");
-    }else{
-        // Insert
-        const auto iq = db->query("INSERT INTO entries_meta (path, key, data, mtime) VALUES (?, ?, ?, ?)");
-        iq->bind(1, ePath);
-        iq->bind(2, eKey);
-        iq->bind(3, eData);
-        iq->bind(4, eMtime);
-        iq->execute();
-        result = getMetaJson("SELECT id, data, mtime FROM entries_meta WHERE rowid = last_insert_rowid()");
-    }
+    q->execute();
 
-    db->setLastUpdate();
-
-    return result;
+    // Insert
+    const auto iq = db->query("INSERT INTO entries_meta (path, key, data, mtime) VALUES (?, ?, ?, ?)");
+    iq->bind(1, ePath);
+    iq->bind(2, eKey);
+    iq->bind(3, eData);
+    iq->bind(4, eMtime);
+    iq->execute();
+    return getMetaJson("SELECT id, data, mtime FROM entries_meta WHERE rowid = last_insert_rowid()");
 }
 
 json MetaManager::remove(const std::string &id){
@@ -197,6 +182,123 @@ json MetaManager::list(const std::string &path, const std::string &cwd) const{
                                        {"count", q->getInt(2)}}));
     }
     return result;
+}
+
+json MetaManager::dump(const json &ids){
+    if (!ids.is_array()) throw InvalidArgsException("ids must be an array");
+
+    json result = json::array();
+    std::string sql = "SELECT id,path,key,data,mtime FROM entries_meta";
+    if (ids.size() > 0){
+        sql += " WHERE id IN (";
+        for (unsigned long i = 0; i < ids.size(); i++){
+            sql += "?";
+            if (i < ids.size() - 1) sql += ",";
+        }
+        sql += ")";
+    }
+    sql += " ORDER by id ASC";
+
+    const auto q = db->query(sql);
+
+    if (ids.size() > 0){
+        unsigned long i = 1;
+        for (auto &id : ids){
+            q->bind(i, id.is_string() ? id.get<std::string>() : "");
+            i++;
+        }
+    }
+
+    while(q->fetch()){
+        result.push_back(json::object({{"id", q->getText(0)},
+                                       {"path", q->getText(1)},
+                                       {"key", q->getText(2)},
+                                       {"data", q->getText(3)},
+                                       {"mtime", q->getInt64(4)},
+                                      }));
+    }
+    return result;
+}
+
+json MetaManager::restore(const json &metaDump){
+    if (!metaDump.is_array()) throw InvalidArgsException("metaDump must be an array");
+
+    db->exec("BEGIN EXCLUSIVE TRANSACTION");
+
+    const auto q = db->query("INSERT OR REPLACE INTO entries_meta(id, path, key, data, mtime) VALUES (?, ?, ?, ?, ?)");
+    const auto singularDupQ = db->query("SELECT id,mtime FROM entries_meta WHERE path = ? AND key = ?");
+
+    int i = 0;
+    for (auto &meta : metaDump){
+        // Quick validation
+        if (!meta.contains("id") ||
+                !meta.contains("path") ||
+                !meta.contains("key") ||
+                !meta.contains("data") ||
+                !meta.contains("mtime")){
+            throw InvalidArgsException("Invalid meta: " + meta.dump());
+        }
+
+        // Singular entries should be unique
+        // (do not allow duplicates, keep latest by mtime)
+        const auto key = meta["key"].get<std::string>();
+        const auto path = meta["path"].get<std::string>();
+        const auto mtime = meta["mtime"].get<long long>();
+
+        // Singular key?
+        if (key[key.length() - 1] != 'S' && key[key.length() -1] != 's'){
+            bool newerMetaExists = false;
+
+            singularDupQ->bind(1, path);
+            singularDupQ->bind(2, key);
+
+            while (singularDupQ->fetch()){
+                const auto exId = singularDupQ->getText(0);
+                const auto exMtime = singularDupQ->getInt64(1);
+                if (exMtime < mtime){
+                    remove(exId);
+                }else{
+                    newerMetaExists = true;
+                }
+            }
+
+            singularDupQ->reset();
+
+            if (newerMetaExists) continue; // Do not add ours
+        }
+
+        q->bind(1, meta["id"].get<std::string>());
+        q->bind(2, path);
+        q->bind(3, key);
+        q->bind(4, meta["data"].get<std::string>());
+        q->bind(5, mtime);
+        q->execute();
+        i++;
+    }
+
+    db->exec("COMMIT");
+    json j;
+    j["restored"] = i;
+    return j;
+}
+
+DDB_DLL json MetaManager::bulkRemove(const std::vector<std::string> &ids){
+    const auto q = db->query("DELETE FROM entries_meta WHERE id = ?");
+
+    db->exec("BEGIN EXCLUSIVE TRANSACTION");
+
+    int i = 0;
+    for (auto &id : ids){
+        q->bind(1, id);
+        q->execute();
+        i++;
+    }
+
+    db->exec("COMMIT");
+
+    json j;
+    j["removed"] = i;
+    return j;
 }
 	
 

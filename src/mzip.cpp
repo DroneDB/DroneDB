@@ -1,7 +1,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
-#include <zip.h>
 
 #include "mzip.h"
 #include "mio.h"
@@ -13,21 +12,42 @@ namespace ddb::zip {
 #define COPY_BUF_SIZE 4096
 #define ERR_SIZE 256
 
+void extractAllFromBuffer(char *zipBuffer, size_t length, const std::string &outdir, std::ostream *progressOut){
+    zip_error_t error;
+    zip_source_t *buf = zip_source_buffer_create(zipBuffer, length, 0, &error);
+    if (buf == nullptr){
+        zip_error_init_with_code(&error, errno);
+        throw ZipException("Cannot initialize zip file from buffer: " + std::string(zip_error_strerror(&error)));
+    }
+
+    zip_t *pZip = zip_open_from_source(buf, ZIP_RDONLY, &error);
+    if (pZip == nullptr){
+        zip_error_init_with_code(&error, errno);
+        throw ZipException("Cannot open zip file from buffer: " + std::string(zip_error_strerror(&error)));
+    }
+
+    _extractAll(pZip, outdir, progressOut);
+}
+
 void extractAll(const std::string &zipFile, const std::string &outdir, std::ostream *progressOut){
-    io::createDirectories(outdir);
-
-    struct zip_file* pFile = nullptr;
-    int bytesRead;
-    char buf[COPY_BUF_SIZE];
-
     int error;
     char errstr[ERR_SIZE];
 
-    zip_t* pZip = zip_open(zipFile.c_str(), 0, &error);
+    zip_t* pZip = zip_open(zipFile.c_str(), ZIP_RDONLY, &error);
     if (pZip == nullptr) {
         zip_error_to_str(errstr, ERR_SIZE, error, errno);
         throw ZipException("Cannot open zip file " + zipFile + " (" + std::string(errstr) + ")");
     }
+
+    _extractAll(pZip, outdir, progressOut);
+}
+
+void _extractAll(zip_t *pZip, const std::string &outdir, std::ostream *progressOut){
+    struct zip_file* pFile = nullptr;
+    int bytesRead;
+    char buf[COPY_BUF_SIZE];
+
+    io::createDirectories(outdir);
 
     zip_int64_t nEntries = zip_get_num_entries(pZip, 0);
 

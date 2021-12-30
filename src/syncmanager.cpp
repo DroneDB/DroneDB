@@ -13,9 +13,8 @@
 
 namespace ddb {
 
-time_t SyncManager::getLastSync(const std::string& registry) {
-    if (!exists(this->ddbFolder)) throw FSException("Cannot get last sync: " + this->ddbFolder.string() + " does not exists");
-    const auto path = this->ddbFolder / SYNCFILE;
+json SyncManager::getLastStamp(const std::string &registry) {
+    const auto path = this->db->ddbDirectory() / SYNCFILE;
 
     LOGD << "Path = " << path;
     LOGD << "Registry = " << registry;
@@ -29,33 +28,34 @@ time_t SyncManager::getLastSync(const std::string& registry) {
         std::ofstream out(path, std::ios_base::out);
         out << "{}";
         out.close();
-        return 0;
     }
 
     std::ifstream i(path);
     json j;
     i >> j;
 
-    LOGD << "Contents: " << j.dump();
+    if (!j.contains(registry)) throw NoStampException("Tried to get last stamp for registry " + registry + " but found none");
 
-    if (!j.contains(registry)) return 0;
-
-    std::time_t t = j[registry];
-
-    return t;
+    return j[registry];
 }
 
-void SyncManager::setLastSync(const time_t t, const std::string& registry) {
-    if (!exists(this->ddbFolder)) throw FSException("Cannot set last sync: " + this->ddbFolder.string() + " does not exists");
-    const auto path = this->ddbFolder / SYNCFILE;
+void SyncManager::setLastStamp(const std::string& registry, Database *sourceDb) {
+    if (sourceDb != nullptr){
+        setLastStamp(registry, sourceDb->getStamp());
+    }else{
+        setLastStamp(registry, db->getStamp());
+    }
+}
+
+void SyncManager::setLastStamp(const std::string &registry, const json &stamp){
+    const auto path = this->db->ddbDirectory() / SYNCFILE;
 
     LOGD << "Path = " << path;
-    LOGD << "Time = " << t;
     LOGD << "Registry = " << registry;
 
-    if (registry.length() == 0) 
+    if (registry.length() == 0)
         throw InvalidArgsException("Registry cannot be null");
-    
+
     if (!exists(path)) {
         std::ofstream out(path, std::ios_base::out);
         out << "{}";
@@ -67,16 +67,11 @@ void SyncManager::setLastSync(const time_t t, const std::string& registry) {
     i >> j;
     i.close();
 
-    LOGD << "Contents: " << j.dump();
+    j[registry] = stamp;
 
-    j[registry] = t != 0 ? t : time(nullptr);
-
-    if (exists(path)) {
-        fs::remove(path);
-    }
-
-    std::ofstream out(path, std::ios_base::out);
-    out << std::setw(4) << j;
+    std::ofstream out(path, std::ios_base::out | std::ios_base::trunc);
+    out << j.dump(4);
     out.close();
 }
+
 }  // namespace ddb

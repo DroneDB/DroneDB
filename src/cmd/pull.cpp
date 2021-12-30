@@ -27,7 +27,8 @@ void Pull::setOptions(cxxopts::Options& opts) {
             .custom_help("pull")
             .add_options()
             ("r,remote", "The remote Registry", cxxopts::value<std::string>()->default_value(""))
-            ("f,force", "Forces the operation", cxxopts::value<bool>()->default_value("false"));
+            ("t,keep-theirs", "Keep changes from remote registry and override local ones", cxxopts::value<bool>()->default_value("false"))
+            ("o,keep-ours", "Keep local changes override remote ones", cxxopts::value<bool>()->default_value("false"));
 
     // clang-format on
     //opts.parse_positional({"remote"});
@@ -39,11 +40,17 @@ std::string Pull::description() {
 
 void Pull::run(cxxopts::ParseResult& opts) {
     try {
-        
-        const auto force = opts["force"].as<bool>();
+        //const auto force = opts["force"].as<bool>();
+        const auto keepTheirs = opts["keep-theirs"].as<bool>();
+        const auto keepOurs = opts["keep-ours"].as<bool>();
+
         auto remote = opts["remote"].as<std::string>();
 
-        ddb::pull(remote, force);
+        ddb::MergeStrategy mergeStrategy = ddb::MergeStrategy::DontMerge;
+        if (keepTheirs) mergeStrategy = ddb::MergeStrategy::KeepTheirs;
+        else if (keepOurs) mergeStrategy = ddb::MergeStrategy::KeepOurs;
+
+        ddb::pull(remote, mergeStrategy);
 
     } catch(ddb::IndexException& e) {        
         std::cout << e.what() << std::endl;

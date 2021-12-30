@@ -28,6 +28,7 @@
 #include "push.h"
 #include "pull.h"
 #include "meta.h"
+#include "stamp.h"
 #include "cog.h"
 
 namespace cmd {
@@ -58,6 +59,7 @@ namespace cmd {
       {"push", new Push()},
       {"pull", new Pull()},
       {"meta", new Meta()},
+      {"stamp", new Stamp()},
       {"cog", new Cog()}
   };
 

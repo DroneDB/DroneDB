@@ -2,16 +2,17 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+#include <boolinq/boolinq.h>
+
 #include "registry.h"
 
-#include <boolinq/boolinq.h>
-#include <build.h>
-#include <ddb.h>
-#include <delta.h>
-#include <mio.h>
-#include <pushmanager.h>
-#include <syncmanager.h>
-#include <tagmanager.h>
+#include "build.h"
+#include "ddb.h"
+#include "delta.h"
+#include "mio.h"
+#include "pushmanager.h"
+#include "syncmanager.h"
+#include "tagmanager.h"
 
 #include "mzip.h"
 #include "exceptions.h"
@@ -100,7 +101,7 @@ std::string Registry::login(const std::string &username,
                         std::to_string(res.status()));
 }
 
-DDB_DLL void Registry::ensureTokenValidity() {
+void Registry::ensureTokenValidity() {
     if (this->authToken.empty())
         throw InvalidArgsException("No auth token is present");
 
@@ -124,16 +125,14 @@ bool Registry::logout() {
     return UserProfile::get()->getAuthManager()->deleteCredentials(url);
 }
 
-DDB_DLL void Registry::clone(const std::string &organization,
+void Registry::clone(const std::string &organization,
                              const std::string &dataset,
                              const std::string &folder, std::ostream &out) {
-    // Workflow
-    // 2) Download zip in temp folder
-    // 3) Create target folder
-    // 3.1) If target folder already exists throw error
-    // 4) Unzip in target folder
-    // 5) Remove temp zip
-    // 6) Update sync information
+    if (fs::exists(folder)){
+        throw FSException(folder + " already exists");
+    }
+
+    io::assureFolderExists(folder);
 
     this->ensureTokenValidity();
 
@@ -147,7 +146,7 @@ DDB_DLL void Registry::clone(const std::string &organization,
     LOGD << "Download url = " << downloadUrl;
 
     const auto tempFile =
-        io::Path(fs::temp_directory_path() / utils::generateRandomString(8))
+        io::Path(fs::path(folder) / utils::generateRandomString(8))
             .string() +
         ".tmp";
 
@@ -158,7 +157,6 @@ DDB_DLL void Registry::clone(const std::string &organization,
 
     auto res = net::GET(downloadUrl)
                    .authCookie(this->authToken)
-                   .verifySSL(false)
                    .progressCb([&start, &prevBytes, &out](size_t txBytes,
                                                           size_t totalBytes) {
                        if (txBytes == prevBytes) return true;
@@ -191,23 +189,21 @@ DDB_DLL void Registry::clone(const std::string &organization,
 
     io::assureIsRemoved(tempFile);
 
-    const auto ddbFolder = fs::path(folder) / DDB_FOLDER;
-
-    SyncManager syncManager(ddbFolder);
-    TagManager tagManager(ddbFolder);
-
-    syncManager.setLastSync(time(nullptr), this->url);
-    tagManager.setTag(this->url + "/" + organization + "/" + dataset);
-
     const auto db = ddb::open(std::string(folder), false);
     syncLocalMTimes(db.get());
+
+    SyncManager syncManager(db.get());
+    TagManager tagManager(db.get());
+
+    syncManager.setLastStamp(this->url);
+    tagManager.setTag(this->url + "/" + organization + "/" + dataset);
 }
 
 std::string Registry::getAuthToken() { return std::string(this->authToken); }
 
 time_t Registry::getTokenExpiration() { return this->tokenExpiration; }
 
-DDB_DLL Entry Registry::getDatasetInfo(const std::string &organization,
+Entry Registry::getDatasetInfo(const std::string &organization,
                                              const std::string &dataset) {
     this->ensureTokenValidity();
 
@@ -216,7 +212,7 @@ DDB_DLL Entry Registry::getDatasetInfo(const std::string &organization,
     LOGD << "Getting info of tag " << dataset << "/" << organization;
 
     auto res =
-        net::GET(getUrl).authCookie(this->authToken).verifySSL(false).send();
+        net::GET(getUrl).authCookie(this->authToken).send();
 
     if (res.status() == 404)
         throw RegistryNotFoundException("Dataset not found");
@@ -227,8 +223,6 @@ DDB_DLL Entry Registry::getDatasetInfo(const std::string &organization,
 
     const auto j = res.getJSON();
 
-    // TODO: Catch errors
-
     if (j.empty())
         throw RegistryException("Invalid empty response from registry");
 
@@ -237,7 +231,7 @@ DDB_DLL Entry Registry::getDatasetInfo(const std::string &organization,
     return e;
 }
 
-DDB_DLL void Registry::downloadDdb(const std::string &organization,
+void Registry::downloadDdb(const std::string &organization,
                                    const std::string &dataset,
                                    const std::string &folder) {
     this->ensureTokenValidity();
@@ -247,33 +241,46 @@ DDB_DLL void Registry::downloadDdb(const std::string &organization,
 
     LOGD << "Download url = " << downloadUrl;
 
-    const auto tempFile =
-        io::Path(fs::temp_directory_path() / utils::generateRandomString(8))
-            .string() +
-        ".tmp";
-
-    LOGD << "Temp file = " << tempFile;
+    char *buffer;
+    size_t length;
 
     auto res = net::GET(downloadUrl)
                    .authCookie(this->authToken)
-                   .verifySSL(false)
-                   .downloadToFile(tempFile);
+                   .downloadToBuffer(&buffer, &length);
 
     if (res.status() != 200) this->handleError(res);
 
-    zip::extractAll(tempFile, folder);
-
-    io::assureIsRemoved(tempFile);
+    zip::extractAllFromBuffer(buffer, length, folder);
+    free(buffer);
 
     LOGD << "Done";
 }
 
-DDB_DLL void Registry::downloadFiles(const std::string &organization,
+json Registry::getStamp(const std::string &organization, const std::string &dataset){
+    this->ensureTokenValidity();
+    const auto stampUrl = url + "/orgs/" + organization + "/ds/" + dataset + "/stamp";
+
+    auto res = net::GET(stampUrl)
+               .authCookie(this->authToken)
+               .send();
+    if (res.status() != 200) this->handleError(res);
+
+    json stamp = res.getJSON();
+
+    // Quick sanity check
+    if (stamp.contains("checksum")){
+        return stamp;
+    }else{
+        throw RegistryException("Invalid stamp: " + stamp.dump());
+    }
+}
+
+void Registry::downloadFiles(const std::string &organization,
                                      const std::string &dataset,
                                      const std::vector<std::string> &files,
                                      const std::string &folder) {
     if (files.empty()) {
-        LOGD << "Asked to download an empty list of files... wtf?";
+        LOGD << "Asked to download an empty list of files...";
         return;
     }
 
@@ -289,24 +296,17 @@ DDB_DLL void Registry::downloadFiles(const std::string &organization,
 
         const auto destPath = fs::path(folder) / files[0];
 
-        create_directories(destPath.parent_path());
+        io::createDirectories(destPath.parent_path());
 
         auto res = net::GET(downloadUrl)
                        .authCookie(this->authToken)
-                       .verifySSL(false)
                        .downloadToFile(destPath.generic_string());
 
         if (res.status() != 200) this->handleError(res);
 
-        LOGD << "File downloaded";
-
     } else {
-        const auto tempFile =
-            io::Path(fs::temp_directory_path() / utils::generateRandomString(8))
-                .string() +
-            ".tmp";
-
-        LOGD << "Temp file = " << tempFile;
+        const auto tempFile = (fs::path(folder) / (utils::generateRandomString(8) + ".tmp"));
+        io::assureFolderExists(tempFile.parent_path());
 
         // Joins path list
         const auto paths = utils::join(files);
@@ -315,497 +315,417 @@ DDB_DLL void Registry::downloadFiles(const std::string &organization,
 
         auto res = net::POST(downloadUrl)
                        .authCookie(this->authToken)
-                       .verifySSL(false)
                        .formData({"path", paths})
-                       .downloadToFile(tempFile);
+                       .downloadToFile(tempFile.string());
 
         if (res.status() != 200) this->handleError(res);
 
         LOGD << "Files archive downloaded, extracting";
 
         try {
-            zip::extractAll(tempFile, folder);
-
-            LOGD << "Archive extracted in " << folder;
-
+            zip::extractAll(tempFile.string(), folder);
             io::assureIsRemoved(tempFile);
 
             LOGD << "Done";
         } catch (const std::runtime_error &e) {
-            LOGD << "Error extracting zip file or deleting temp";
+            io::assureIsRemoved(tempFile);
             throw AppException(e.what());
         }
     }
 }
 
-DDB_DLL void ensureParentFolderExists(const fs::path &folder) {
+json Registry::getMetaDump(const std::string &organization, const std::string &dataset, const std::vector<std::string> &ids){
+    this->ensureTokenValidity();
+    const auto metaDumpUrl = url + "/orgs/" + organization + "/ds/" + dataset + "/meta/dump";
+
+    auto res = net::POST(metaDumpUrl)
+               .authCookie(this->authToken)
+               .formData({"ids", json(ids).dump()})
+               .send();
+    if (res.status() != 200) this->handleError(res);
+
+    json metaDump = res.getJSON();
+
+    // Quick sanity check
+    if (metaDump.is_array()){
+        return metaDump;
+    }else{
+        throw RegistryException("Invalid meta dump: " + metaDump.dump());
+    }
+}
+
+void ensureParentFolderExists(const fs::path &folder) {
     if (folder.has_parent_path()) {
         const auto parentPath = folder.parent_path();
-        create_directories(parentPath);
+        io::assureFolderExists(parentPath);
     }
 }
 
-DDB_DLL std::vector<CopyAction> moveCopiesToTemp(
-    const std::vector<CopyAction> &copies, const fs::path &baseFolder,
-    const std::string &tempFolderName) {
-    if (copies.empty()) {
-        LOGD << "No copies to move to temp folder";
-        return copies;
-    }
+std::vector<Conflict> applyDelta(const Delta &d, const fs::path &sourcePath, Database *destination, const MergeStrategy mergeStrategy, const json &sourceMetaDump, std::ostream& out) {
+    std::vector<Conflict> conflicts;
 
-    LOGD << "Moving copies to temp folder";
+    // File operations
+    if (d.adds.size() > 0 || d.removes.size() > 0){
+        fs::path destPath = destination->rootDirectory();
+        const std::string tmpFolderName = (fs::path(DDB_FOLDER) / "tmp" / utils::generateRandomString(8)).string();
 
-    std::vector<CopyAction> res;
-
-    for (const auto &copy : copies) {
-        LOGD << copy.toString();
-
-        const auto source = baseFolder / copy.source;
-        const auto dest = baseFolder / tempFolderName / copy.source;
-
-        ensureParentFolderExists(dest);
-
-        const auto newPath = fs::path(tempFolderName) / copy.source;
-
-        LOGD << "Changed copy path from " << copy.source << " to " << newPath;
-
-        LOGD << "Copying '" << source << "' to '" << dest << "', newPath = '"
-             << newPath << "'";
-
-        fs::copy(source, dest,
-                 std::filesystem::copy_options::overwrite_existing);
-
-        res.emplace_back(newPath.generic_string(), copy.destination);
-    }
-
-    return res;
-}
-
-const char *tmpFolderName = ".tmp";
-const char *replaceSuffix = ".replace";
-
-DDB_DLL void applyDelta(const Delta &res, const fs::path &destPath,
-                        const fs::path &sourcePath) {
-    try {
         const auto tempPath = destPath / tmpFolderName;
-        create_directories(tempPath);
 
-        const auto newCopies =
-            moveCopiesToTemp(res.copies, destPath, tmpFolderName);
+        if (fs::exists(tempPath)){
+            io::assureIsRemoved(tempPath);
+        }
+        io::assureFolderExists(tempPath);
 
-        if (res.removes.empty()) {
+        Entry e;
+
+        json debug = d;
+        LOGD << debug.dump(4);
+
+        if (d.removes.empty()) {
             LOGD << "No removes in delta";
         } else {
             LOGD << "Working on removes";
 
-            for (const auto &rem : res.removes) {
+            for (const auto &rem : d.removes) {
                 LOGD << rem.toString();
 
                 const auto dest = destPath / rem.path;
 
                 LOGD << "Dest = " << dest;
 
-                if (rem.type != Directory) {
-                    if (exists(dest)) {
-                        LOGD << "File exists in dest, deleting it";
-                        fs::remove(dest);
-                    } else {
-                        LOGD << "File does not exist in dest, nothing to do";
+                // Check if database has modified the entry to be deleted
+                // if so, warn user and exit, unless a merge strategy
+                // has been specified.
+
+                // Currently we don't check if the file has been
+                // modified on the FS, perhaps we should?
+                bool indexed = true;
+
+                if (getEntry(destination, rem.path, e)){
+                    if (rem.hash != e.hash){
+                        if (mergeStrategy == MergeStrategy::DontMerge){
+                            conflicts.push_back(Conflict(rem.path, ConflictType::RemoteDeleteLocalModified));
+                            continue; // Skip
+                        }else if (mergeStrategy == MergeStrategy::KeepOurs){
+                            continue; // Skip
+                        }else if (mergeStrategy == MergeStrategy::KeepTheirs){
+                            // Continue as normal
+                        }
                     }
-                } else {
-                    if (exists(dest)) {
-                        LOGD << "Directory exists in dest, deleting it";
-                        io::assureIsRemoved(dest);
-                    } else {
-                        LOGD << "Directory does not exist in dest, nothing to "
-                                "do";
-                    }
+                }else{
+                    indexed = false;
+                }
+
+                if (fs::exists(dest)) {
+                    if (indexed) removeFromIndex(destination, { dest.string() });
+                    io::assureIsRemoved(dest);
+                    out << "D\t" << rem.path << std::endl;
                 }
             }
         }
 
-        if (res.adds.empty()) {
+        if (d.adds.empty()) {
             LOGD << "No adds in delta";
-
         } else {
             LOGD << "Working on adds";
 
-            for (const auto &add : res.adds) {
+            for (const auto &add : d.adds) {
                 LOGD << add.toString();
 
                 const auto source = sourcePath / add.path;
                 const auto dest = destPath / add.path;
 
-                if (add.type != Directory) {
-                    LOGD << "Applying add by copying from '" << source
-                         << "' to '" << dest << "'";
-
-                    copy_file(
-                        source, dest,
-                        std::filesystem::copy_options::overwrite_existing);
-
-                } else {
-                    create_directories(dest);
+                // Check if the database has a modified entry
+                // for the same paths we are adding
+                if (getEntry(destination, add.path, e)){
+                    if (add.hash != e.hash){
+                        if (mergeStrategy == MergeStrategy::DontMerge){
+                            conflicts.push_back(Conflict(add.path, ConflictType::BothModified));
+                            continue; // Skip
+                        }else if (mergeStrategy == MergeStrategy::KeepOurs){
+                            continue; // Skip
+                        }else if (mergeStrategy == MergeStrategy::KeepTheirs){
+                            // Continue as normal
+                        }
+                    }
                 }
+
+                if (add.isDirectory()) {
+                    io::createDirectories(dest);
+                } else {
+                    io::copy(source, dest);
+                }
+
+                // TODO: this could be made faster for large files
+                // by passing the already known hash instead
+                // of computing it
+                addToIndex(destination, { dest.string() },
+                    [&out](const Entry& e, bool updated) {
+                        out << (updated ? "U" : "A") << "\t" << e.path << std::endl;
+                        return true;
+                    });
             }
         }
 
-        if (newCopies.empty()) {
-            LOGD << "No copies in delta";
-
-        } else {
-            LOGD << "Working on direct copies";
-
-            for (const auto &copy : newCopies) {
-                LOGD << copy.toString();
-
-                const auto source = destPath / copy.source;
-                const auto dest = destPath / copy.destination;
-
-                if (dest.has_parent_path()) {
-                    const auto destFolder = dest.parent_path();
-                    create_directories(destFolder);
-                }
-
-                if (exists(dest)) {
-                    const auto newPath =
-                        fs::path(dest.generic_string() + replaceSuffix);
-                    LOGD << "Dest file exists, writing shadow";
-                    copy_file(source, newPath);
-                } else {
-                    LOGD << "Dest file does not exist, performing copy";
-                    copy_file(source, dest);
-                }
-            }
-
-            LOGD << "Working on shadow copies";
-
-            for (const auto &copy : newCopies) {
-                const auto dest = destPath / copy.destination;
-                const auto destShadow =
-                    fs::path(dest.generic_string() + ".replace");
-
-                if (exists(destShadow)) {
-                    LOGD << copy.toString();
-                    LOGD << "Shadow file exists, replacing original one";
-
-                    // Why don't we have fs::move??
-                    io::rename(destShadow, dest);
-                }
-            }
-        }
-
-        if (exists(tempPath)) {
-            LOGD << "Removing temp path";
+        if (fs::exists(tempPath)) {
             io::assureIsRemoved(tempPath);
         }
-    } catch (fs::filesystem_error &err) {
-        LOGD << "Exception: " << err.what() << " ('" << err.path1() << "', '"
-             << err.path2() << "')";
 
-        throw AppException(err.what());
+        if (conflicts.size() == 0){
+            auto mPathList = d.modifiedPathList();
+            if (mPathList.size() > 0) syncLocalMTimes(destination, mPathList);
+        }
     }
+
+    // Early exit in case of conflicts
+    if (conflicts.size() > 0) return conflicts;
+
+    // Meta operations
+    if (d.metaAdds.size() > 0){
+        json metaRestore = json::array();
+
+        std::unordered_map<std::string, bool> metaIds;
+        for (auto &id : d.metaAdds) metaIds[id] = true;
+
+        for (auto &meta : sourceMetaDump){
+            if (!meta.contains("id")) throw InvalidArgsException("Invalid meta element: " + meta.dump());
+            if (metaIds.find(meta["id"]) != metaIds.end()) metaRestore.push_back(meta);
+        }
+
+        destination->getMetaManager()->restore(metaRestore);
+    }
+
+    if (d.metaRemoves.size() > 0){
+        destination->getMetaManager()->bulkRemove(d.metaRemoves);
+    }
+
+    return conflicts;
 }
 
-DDB_DLL void Registry::pull(const std::string &path, const bool force,
+void Registry::pull(const std::string &path, const MergeStrategy mergeStrategy,
                             std::ostream &out) {
-    /*
-
-    -- Pull Workflow --
-
-    1) Get our tag using tagmanager
-    2) Get our last sync time for that specific registry using syncmanager
-    3) Get dataset mtime
-    4) Alert if dataset_mtime < last_sync (it means we have more recent changes
-    than server, so the pull is pointless or potentially dangerous)
-    5) Get ddb from registry
-        5.1) Call endpoint
-        5.2) Unzip archive in temp folder
-    6) Perform local diff using delta method
-    7) Download all the missing files
-        7.1) Call download endpoint with file list (to test)
-        7.2) Unzip archive in temp folder
-    8) Apply changes to local files
-    9) Replace ddb database
-    10) Update last sync time
-
-    */
-
     LOGD << "Pull from " << this->url;
 
-    // 2) Get our last sync time for that specific registry using syncmanager
-
     auto db = open(path, true);
-    std::string dbOpenFile = db->getOpenFile();
-    const auto ddbPath = fs::path(dbOpenFile).parent_path();
+    TagManager tagManager(db.get());
 
-    LOGD << "Ddb folder = " << ddbPath;
-
-    TagManager tagManager(ddbPath);
-
-    // 1) Get our tag using tagmanager
+    // Get our tag using tagmanager
     const auto tag = tagManager.getTag();
 
     if (tag.empty()) throw IndexException("Cannot pull if no tag is specified");
-
-    // 2) Get our last sync time for that specific registry using syncmanager
-    const auto lastUpdate = db->getLastUpdate();
 
     LOGD << "Tag = " << tag;
 
     const auto tagInfo = RegistryUtils::parseTag(tag);
 
-    // 3) Get dataset mtime
-    const auto dsInfo =
-        this->getDatasetInfo(tagInfo.organization, tagInfo.dataset);
-
-    LOGD << "Dataset mtime = " << dsInfo.mtime;
-
     out << "Pulling from '" << tag << "'" << std::endl;
-    LOGD << "Local mtime " << lastUpdate << ", remote mtime " << dsInfo.mtime;
 
-    // 4) Check if we have more recent changes than server, so the pull is
-    // pointless or potentially dangerous)
-
-    if (force) {
-        out << "Forcing pull." << std::endl;
-    } else {
-        if (lastUpdate == dsInfo.mtime) {
-            // Nothing to do, datasets should be in sync
-            out << "Already up to date." << std::endl;
-            return;
-
-        } else if (lastUpdate > dsInfo.mtime) {
-            throw AppException(
-                "[Warning] Your dataset has local changes, but you haven't "
-                "pushed these changes to the remote registry. If you pull now, "
-                "your local changes might be overwritten. Use --force "
-                "to continue.");
-        }
-    }
-
-    const auto tempDdbFolder =
-        UserProfile::get()->getProfilePath("pull_cache", true) /
+    const auto tempDdbFolder = db->ddbDirectory() / "tmp" / "pull_cache" /
         (tagInfo.organization + "-" + tagInfo.dataset);
 
-    LOGD << "Temp ddb folder = " << tempDdbFolder;
+    if (fs::exists(tempDdbFolder)){
+        // TODO: there might be ways to resume downloads if a user CTRL+Cs
+        io::assureIsRemoved(tempDdbFolder);
+    }
 
-    // 5) Get ddb from registry
-    this->downloadDdb(tagInfo.organization, tagInfo.dataset,
-                      tempDdbFolder.generic_string());
+    // Get stamp from registry
+    json remoteStamp = this->getStamp(tagInfo.organization, tagInfo.dataset);
 
-    out << "Remote ddb downloaded" << std::endl;
+    // Perform local diff using delta method using last stamp
+    SyncManager sm(db.get());
+    const auto delta = getDelta(remoteStamp, sm.getLastStamp(tagInfo.registryUrl));
 
-    auto source = open(tempDdbFolder.generic_string(), false);
+    if (!delta.empty()){
+        out << "Delta: files (+" << delta.adds.size() << ",-" << delta.removes.size() << "), meta (+"
+            << delta.metaAdds.size() << ",-" << delta.metaRemoves.size() << ")"
+            <<  std::endl;
+    }
 
-    // 6) Perform local diff using delta method
-    const auto delta = getDelta(source.get(), db.get());
+    json remoteMetaDump = json::array();
 
-    LOGD << "Delta:";
+    if (delta.metaAdds.size() > 0){
+        // Get meta dump
+        remoteMetaDump = this->getMetaDump(tagInfo.organization, tagInfo.dataset, delta.metaAdds);
+    }
 
-    json j = delta;
-    LOGD << j.dump();
-
-    out << "Delta result: " << delta.adds.size() << " adds, "
-        << delta.copies.size() << " copies, " << delta.removes.size()
-        << " removes" << std::endl;
-
-    const auto tempNewFolder =
-        UserProfile::get()->getProfilePath("pull_cache", false) /
-        (tagInfo.organization + "-" + tagInfo.dataset) /
-        std::to_string(time(nullptr));
+    const auto tempNewFolder = tempDdbFolder / std::to_string(time(nullptr));
 
     // Let's download only if we have anything to download
     if (!delta.adds.empty()) {
         LOGD << "Temp new folder = " << tempNewFolder;
 
+        auto localMap = computeDeltaLocals(delta, db.get(), tempNewFolder.string());
+
         const auto filesToDownload =
             boolinq::from(delta.adds)
                 .where(
-                    [](const AddAction &add) { return add.type != Directory; })
+                    [&localMap](const AddAction &add) { return !add.isDirectory() && localMap.find(add.hash) == localMap.end(); })
                 .select([](const AddAction &add) { return add.path; })
                 .toStdVector();
 
-        LOGD << "Downloading missing files (this could take a while)";
-
-        LOGD << "Files to download:";
-        j = filesToDownload;
-        LOGD << j.dump();
-
-        // 7) Download all the missing files
+        // Download all the missing files
         this->downloadFiles(tagInfo.organization, tagInfo.dataset,
-                            filesToDownload, tempNewFolder.generic_string());
+                            filesToDownload, tempNewFolder.string());
 
-        LOGD << "Files downloaded, applying delta";
-
-        // 8) Apply changes to local files
-        applyDelta(delta, ddbPath.parent_path(), tempNewFolder);
-
-        LOGD << "Removing temp new files folder";
-
-        io::assureIsRemoved(tempNewFolder);
-
+        LOGD << "Files downloaded";
     } else {
         LOGD << "No files to download";
+    }
 
-        // Check if we have anything to do
-        if (delta.copies.empty() && delta.removes.empty()) {
-            out << "Already up to date." << std::endl;
+    // TODO: speedup: we should be able to check for conflicts
+    // before we download the files
 
-        } else {
-            // 8) Apply changes to local files (mostly deletes)
-            applyDelta(delta, ddbPath.parent_path(), tempNewFolder);
+    // Apply changes to local files
+    auto conflicts = applyDelta(delta, tempNewFolder, db.get(), mergeStrategy, remoteMetaDump, out);
+    io::assureIsRemoved(tempNewFolder);
+
+    if (conflicts.size() == 0){
+        // No errors? Update stamp
+        sm.setLastStamp(tagInfo.registryUrl, remoteStamp);
+    }else{
+        out << "Found conflicts, but don't worry! Make a copy of the conflicting entries and use --keep-theirs or --keep-ours to finish the pull:" << std::endl << std::endl;
+
+        for (auto &c : conflicts){
+            out << "C\t" << c.path << " (" << c.description() << ")" <<  std::endl;
         }
     }
 
-    LOGD << "Replacing DDB index (copy from '" << tempDdbFolder << "' to '"
-         << ddbPath << "')";
-
-    // 9) Replace ddb database
     db->close();
-    source->close();
-
-    std::error_code e;
-    io::copy(tempDdbFolder / DDB_FOLDER / "dbase.sqlite",
-             ddbPath / "dbase.sqlite");
-
-    db->open(dbOpenFile);
-
-    auto mPathList = delta.modifiedPathList();
-    if (mPathList.size() > 0) syncLocalMTimes(db.get(), mPathList);
-
-    LOGD << "Pull done";
 
     // Cleanup
     io::assureIsRemoved(tempDdbFolder);
     io::assureIsRemoved(tempNewFolder);
+
+    // Inform user if nothing was needed
+    if (delta.empty()){
+        out << "Everything up-to-date" << std::endl;
+    }else{
+        out << "Pull completed" << std::endl;
+    }
 }
 
-DDB_DLL void Registry::push(const std::string &path, const bool force,
-                            std::ostream &out) {
-    /*
 
-    -- Push Workflow --
+std::unordered_map<std::string, bool> computeDeltaLocals(Delta d, Database *db, const std::string &hlDestFolder){
+    // Do we have files locally? If so we don't need to
+    // download them, we just create hard links (or copies) to it after
+    // validating that they are indeed the same
+    // This function creates hard links only if hlDestFolder is set
+    // Otherwise it just returns the map of valid local hashes
+    const auto q = db->query("SELECT path,mtime FROM entries WHERE hash = ?");
+    std::unordered_map<std::string, bool> localMap;
 
-    1) Get our tag using tagmanager
-    2) Get local mtime
-    3) Get dataset mtime
-    4) Alert if dataset_mtime > last_sync (it means we have less recent changes
-    than server, so the push is pointless or potentially dangerous)
-    5) Initialize server push
-        5.1) Zip our ddb folder
-        5.1) Call POST endpoint passing zip
-        5.2) The server answers with the needed files list
-    6) Foreach of the needed files call POST endpoint
-    7) When done call commit endpoint
-    8) Update last sync
-    */
+    std::unordered_map<std::string, bool> addsMap;
+    for (auto &add : d.adds){
+        if (add.hash.empty()) continue;
+        addsMap[add.path] = true;
+    }
 
+    for (auto &add : d.adds){
+        if (add.hash.empty()) continue;
+
+        q->bind(1, add.hash);
+        if (q->fetch()){
+            auto ePath = q->getText(0);
+            // Check the filesystem to make sure this hasn't been modified
+            io::Path p(db->rootDirectory() / ePath);
+            long long eMtime = q->getInt64(1);
+            bool valid = false;
+            if (p.getModifiedTime() == eMtime){
+                valid = true;
+            }else{
+                // Actually compute hash
+                valid = Hash::fileSHA256(p.get().string()) == add.hash;
+            }
+
+            if (valid){
+                if (!hlDestFolder.empty()){
+                    const auto destPath = fs::path(hlDestFolder) / add.path;
+                    io::createDirectories(destPath.parent_path());
+
+                    // We can leverage hard links ONLY
+                    // if the path we are linking is not itself
+                    // part of an add operation (otherwise it could be
+                    // overwritten)
+                    if (addsMap.find(ePath) == addsMap.end()) io::hardlinkSafe(p.get(), destPath);
+                    else io::copy(p.get(), destPath);
+                }
+                localMap[add.hash] = true;
+            }
+        }
+        q->reset();
+    }
+
+    return localMap;
+}
+
+void Registry::push(const std::string &path, std::ostream &out) {
     auto db = open(path, true);
-    const auto ddbPath = fs::path(db->getOpenFile()).parent_path();
 
-    LOGD << "Ddb folder = " << ddbPath;
+    TagManager tagManager(db.get());
+    SyncManager syncManager(db.get());
 
-    TagManager tagManager(ddbPath);
-
-    // 1) Get our tag using tagmanager
+    // Get our tag using tagmanager
     const auto tag = tagManager.getTag();
 
     if (tag.empty()) throw IndexException("Cannot push if no tag is specified");
 
-    // 2) Get local mtime
-    const auto lastUpdate = db->getLastUpdate();
-
     LOGD << "Tag = " << tag;
-    LOGD << "LastUpdate = " << lastUpdate;
 
     const auto tagInfo = RegistryUtils::parseTag(tag);
 
     try {
-        // 3) Get dataset mtime
-        const auto dsInfo =
-            this->getDatasetInfo(tagInfo.organization, tagInfo.dataset);
-
-        LOGD << "Dataset mtime = " << dsInfo.mtime;
+        // 3) Get dataset info
+        const auto dsInfo = this->getDatasetInfo(tagInfo.organization, tagInfo.dataset);
 
         out << "Pushing to '" << tag << "'" << std::endl;
-        LOGD << "Local mtime " << lastUpdate << ", remote mtime "
-             << dsInfo.mtime;
-
-        // 4) Alert if dataset_mtime > last_sync (it means we have less recent
-        // changes
-        //    than server, so the push is pointless or potentially dangerous)
-
-        if (force) {
-            out << "Forcing push." << std::endl;
-        } else {
-            if (lastUpdate == dsInfo.mtime) {
-                // Nothing to do, datasets should be in sync
-                out << "Already up to date." << std::endl;
-                return;
-            }
-
-            if (dsInfo.mtime > lastUpdate) {
-                throw AppException(
-                    "[Warning] The remote dataset has newer changes, but you "
-                    "haven't "
-                    "pulled those changes from the remote registry. If you "
-                    "push now, "
-                    "the remote dataset might be overwritten. Use --force "
-                    "to continue.");
-            }
-        }
     } catch (RegistryNotFoundException &ex) {
         LOGD << "Dataset not found: " << ex.what();
 
         out << "Pushing to new '" << tag << "'" << std::endl;
     }
 
-    // 5) Initialize server push
+    // Initialize server push
     LOGD << "Initializing server push";
 
-    // 5.1) Zip our ddb folder
-    const fs::path tempArchive =
-        fs::temp_directory_path() / (utils::generateRandomString(8) + ".zip");
-
-    out << "Zipping ddb folder" << std::endl;
-
-    zip::zipFolder(ddbPath.string(), tempArchive.string(), {std::string(DDB_BUILD_PATH) + '/'});
-
-    // 5.1) Call POST endpoint passing zip
+    // Call POST endpoint passing database stamp
     PushManager pushManager(this, tagInfo.organization, tagInfo.dataset);
 
-    out << "Initializing push" << std::endl;
+    std::string registryStampChecksum = "";
+    try{
+        const auto regStamp = syncManager.getLastStamp(tagInfo.registryUrl);
+        registryStampChecksum = regStamp["checksum"];
+    }catch(const NoStampException &){
+        // Nothing, this is the first time we push
+    }
 
-    // 5.2) The server answers with the needed files list
-    const auto filesList = pushManager.init(tempArchive);
+    const auto pir = pushManager.init(registryStampChecksum, db->getStamp());
 
     LOGD << "Push initialized";
 
-    const auto basePath = ddbPath.parent_path();
+    // Push meta
+    if (pir.neededMeta.size() > 0){
+        out << "Transferring metadata (" << pir.neededMeta.size() << ")" << std::endl;
+        pushManager.meta(db->getMetaManager()->dump(pir.neededMeta), pir.token);
+    }
 
-    for (const auto &file : filesList) {
+    const auto basePath = db->rootDirectory();
+
+    for (const auto &file : pir.neededFiles) {
         const auto fullPath = basePath / file;
 
         out << "Transfering '" << file << "'" << std::endl;
 
-        LOGD << "Upload: " << fullPath;
-
-        // 6) Foreach of the needed files call POST endpoint
-        pushManager.upload(fullPath.generic_string(), file);
+        // Foreach of the needed files call POST endpoint
+        pushManager.upload(fullPath.generic_string(), file, pir.token);
     }
 
-    out << "Transfers done" << std::endl;
+    // When done call commit endpoint
+    pushManager.commit(pir.token);
 
-    // 7) When done call commit endpoint
-    pushManager.commit();
+    // Update stamp
+    syncManager.setLastStamp(tagInfo.registryUrl, db.get());
 
-    LOGD << "Push committed, cleaning up";
-
-    // Cleanup
-    fs::remove(tempArchive);
-
-    out << "Push complete" << std::endl;
+    out << "Push completed" << std::endl;
 }
 
 void Registry::handleError(net::Response &res) {
@@ -824,7 +744,7 @@ void Registry::handleError(net::Response &res) {
 
     throw RegistryException(
         "Invalid response from registry. Returned status: " +
-        std::to_string(res.status()));
+                std::to_string(res.status()));
 }
 
 }  // namespace ddb

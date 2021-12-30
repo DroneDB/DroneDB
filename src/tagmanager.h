@@ -13,12 +13,10 @@ namespace ddb {
 #define TAGSFILE "tags.json"
 
 class TagManager {
-    fs::path ddbFolder;
+    Database *db;
 
    public:
-    TagManager(const fs::path& ddbFolder) : ddbFolder(ddbFolder) {
-        //
-    }
+    TagManager(Database *db) : db(db) {}
 
     DDB_DLL std::string getTag();
     DDB_DLL void setTag(const std::string& tag);

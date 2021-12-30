@@ -279,6 +279,47 @@ Response Request::downloadToFile(const std::string &outFile, bool throwOnError) 
     return res;
 }
 
+static size_t write_memory(void *contents, size_t size, size_t nmemb, void *userp)
+{
+  size_t realsize = size * nmemb;
+  struct MemoryStruct *mem = (struct MemoryStruct *)userp;
+
+  char *ptr = static_cast<char *>(realloc(mem->memory, mem->size + realsize + 1));
+  if(!ptr) {
+    throw NetException("not enough memory (realloc returned NULL)\n");
+  }
+
+  mem->memory = ptr;
+  memcpy(&(mem->memory[mem->size]), contents, realsize);
+  mem->size += realsize;
+  mem->memory[mem->size] = 0;
+
+  return realsize;
+}
+
+Response Request::downloadToBuffer(char **buffer, size_t *length, bool throwOnError){
+    struct MemoryStruct chunk;
+
+    chunk.memory = static_cast<char *>(malloc(1));  /* will be grown as needed by the realloc above */
+    chunk.size = 0;    /* no data at this point */
+
+    curl_easy_setopt(curl, CURLOPT_NOPROGRESS, true);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_memory);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&chunk);
+
+    Response res;
+    perform(res);
+
+    if (throwOnError and res.statusCode != 200){
+        throw NetException("Download of " + url + " returned code: " + std::to_string(res.statusCode));
+    }
+
+    *buffer = chunk.memory;
+    *length = chunk.size;
+
+    return res;
+}
+
 static int xferinfo(void *p, curl_off_t dltotal, curl_off_t dlnow,
                     curl_off_t ultotal, curl_off_t ulnow) {
     const auto progress = static_cast<struct RequestProgress *>(p);

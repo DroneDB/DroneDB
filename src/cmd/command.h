@@ -5,6 +5,7 @@
 #define COMMAND_H
 
 #include "../vendor/cxxopts.hpp"
+#include "json.h"
 
 namespace cmd {
 
@@ -16,6 +17,9 @@ private:
 protected:
     virtual void run(cxxopts::ParseResult &opts) = 0;
     virtual void setOptions(cxxopts::Options &opts) = 0;
+
+    void output(std::ostream &out, const json &j, const std::string &format);
+    void printJsonToText(std::ostream &out, const json &j);
 public:
     Command();
     void run(int argc, char* argv[]);

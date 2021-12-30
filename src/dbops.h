@@ -32,7 +32,6 @@ DDB_DLL void addToIndex(Database *db, const std::vector<std::string> &paths, Add
 DDB_DLL void removeFromIndex(Database *db, const std::vector<std::string> &paths, RemoveCallback callback = nullptr);
 DDB_DLL void syncIndex(Database *db);
 DDB_DLL void syncLocalMTimes(Database *db, const std::vector<std::string> &files = {});
-DDB_DLL void delta(Database* sourceDb, Database* targetDb, std::ostream& out, const std::string& format);
 DDB_DLL void moveEntry(Database* db, const std::string& source, const std::string& dest);
 DDB_DLL bool getEntry(Database* db, const std::string& path, Entry &entry);
 DDB_DLL bool pathExists(Database* db, const std::string& path);
@@ -41,8 +40,8 @@ DDB_DLL std::string initIndex(const std::string &directory, bool fromScratch = f
 
 DDB_DLL void clone(const ddb::TagComponents& tag, const std::string& folder);
 
-DDB_DLL void push(const std::string &registry, const bool force = false);
-DDB_DLL void pull(const std::string &registry, const bool force = false);
+DDB_DLL void push(const std::string &registry);
+DDB_DLL void pull(const std::string &registry, MergeStrategy mergeStrategy);
 
 
 }

@@ -7,22 +7,21 @@
 #include "dbops.h"
 #include "ddb_export.h"
 #include "entry.h"
+#include "simpleentry.h"
 
 namespace ddb {
 
 #define SYNCFILE "sync.json"
 
 class SyncManager {
-    fs::path ddbFolder;
+    Database *db;
 
    public:
-    SyncManager(const fs::path& ddbFolder) : ddbFolder(ddbFolder) {
-        
-    }
+    SyncManager(Database *db) : db(db) {}
 
-    DDB_DLL time_t getLastSync(const std::string& registry = DEFAULT_REGISTRY);
-    DDB_DLL void setLastSync(const time_t time = 0,
-                             const std::string& registry = DEFAULT_REGISTRY);
+    DDB_DLL json getLastStamp(const std::string& registry = DEFAULT_REGISTRY);
+    DDB_DLL void setLastStamp(const std::string& registry = DEFAULT_REGISTRY, Database *sourceDb = nullptr);
+    DDB_DLL void setLastStamp(const std::string& registry, const json &stamp);
 };
 
 }  // namespace ddb

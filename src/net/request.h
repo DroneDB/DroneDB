@@ -28,6 +28,11 @@ struct ctl {
     curl_off_t offset; // Offset to start reading from
 };
 
+struct MemoryStruct {
+  char *memory;
+  size_t size;
+};
+
 class Request{
     std::string url;
     ReqType reqType;
@@ -47,6 +52,9 @@ public:
 
     DDB_DLL Response send();
     DDB_DLL Response downloadToFile(const std::string &outFile, bool throwOnError = false);
+
+    // Buffer should be deallocated with free(buffer) by caller
+    DDB_DLL Response downloadToBuffer(char **buffer, size_t *length, bool throwOnError = false);
 
     DDB_DLL Request& formData(std::vector<std::string> params);
     DDB_DLL Request& multiPartFormData(std::vector<std::string> files, std::vector<std::string> params = {});

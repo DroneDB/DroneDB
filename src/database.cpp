@@ -9,7 +9,9 @@
 #include <string>
 
 #include "exceptions.h"
+#include "hash.h"
 #include "logger.h"
+#include "mio.h"
 
 namespace ddb {
 
@@ -141,20 +143,11 @@ void Database::setPublic(bool isPublic) {
         this->getBoolAttribute("public") == isPublic) return;
 
     this->setBoolAttribute("public", isPublic);
-    this->setLastUpdate();
 }
 
 bool Database::isPublic() const {
     return this->hasAttribute("public") ? this->getBoolAttribute("public")
                                         : false;
-}
-
-time_t Database::getLastUpdate() const {
-    return static_cast<time_t>(this->getLongAttribute("mtime"));
-}
-
-void Database::setLastUpdate(const time_t mtime) {
-    this->setLongAttribute("mtime", mtime);
 }
 
 void Database::chattr(json attrs) {
@@ -177,7 +170,6 @@ json Database::getAttributes() const {
     json j;
 
     j["public"] = this->isPublic();
-    j["mtime"] = this->getLastUpdate();
 
     // See if we have a LICENSE.md and README.md in the index
     {
@@ -238,8 +230,39 @@ json Database::getAttributes() const {
     return j;
 }
 
+json Database::getStamp() const{
+    json j;
+    SHA256 checksum;
+
+    auto q = this->query("SELECT path,hash FROM entries ORDER BY path ASC");
+    j["entries"] = json::array();
+    while (q->fetch()){
+        const std::string p = q->getText(0);
+        const std::string h = q->getText(1);
+        checksum.add(p.c_str(), p.length());
+        checksum.add(h.c_str(), h.length());
+
+        j["entries"].push_back(json::object({{p, h}}));
+    }
+
+    q = this->query("SELECT id FROM entries_meta ORDER BY id ASC");
+    j["meta"] = json::array();
+    while (q->fetch()){
+        const std::string id = q->getText(0);
+        checksum.add(id.c_str(), id.length());
+        j["meta"].push_back(id);
+    }
+
+    j["checksum"] = checksum.getHash();
+    return j;
+}
+
 fs::path Database::rootDirectory() const{
     return fs::path(this->getOpenFile()).parent_path().parent_path();
+}
+
+fs::path Database::ddbDirectory() const{
+    return fs::path(this->getOpenFile()).parent_path();
 }
 
 MetaManager *Database::getMetaManager(){

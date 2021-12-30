@@ -9,113 +9,82 @@
 #include "dbops.h"
 #include "ddb_export.h"
 #include "utils.h"
+#include "simpleentry.h"
 
 namespace ddb {
 
-struct SimpleEntry {
-    std::string path;
-    std::string hash;
-    EntryType type;
-
-    std::string toString() const {
-        return path + " - " + hash + " (" + typeToHuman(type) + ")";
-    }
-
-    SimpleEntry(std::string path, std::string hash, EntryType type) {
-        this->path = std::move(path);
-        this->hash = std::move(hash);
-        this->type = type;
-    }
-
-    SimpleEntry(std::string path, std::string hash) {
-        this->path = std::move(path);
-        this->hash = std::move(hash);
-        this->type = Generic;
-    }
-
-    SimpleEntry(std::string path) {
-        this->path = std::move(path);
-        this->type = Directory;
-    }
-
-    bool operator==(const SimpleEntry& rhs) const { 
-
-        return this->hash == rhs.hash && this->path == rhs.path &&
-               this->type == rhs.type;
-
-    }
-    bool operator!=(const SimpleEntry& rhs) const {
-        return !(*this == rhs);
-    }
-};
-
-struct CopyAction {
-    std::string source;
-    std::string destination;
-
-    CopyAction(std::string source, std::string destination) {
-        this->source = std::move(source);
-        this->destination = std::move(destination);
-    }
-
-    std::string toString() const {
-        return "CPY -> " + source + " TO " + destination;
-    }
-};
-
 struct RemoveAction {
     std::string path;
-    EntryType type;
+    std::string hash;
 
-    RemoveAction(std::string path, ddb::EntryType type) {
-        this->path = std::move(path);
-        this->type = type;
+    RemoveAction(const std::string &path, const std::string &hash) {
+        this->path = path;
+        this->hash = hash;
     }
 
     std::string toString() const {
-        return "DEL -> [" + typeToHuman(type) + "] " + path;
+        return std::string("DEL -> [") + (isDirectory() ? "D" : "F") + "] " + path;
+    }
+
+    bool isDirectory() const {
+        return this->hash.empty();
     }
 };
 
 struct AddAction {
     std::string path;
-    EntryType type;
+    std::string hash;
 
-    AddAction(std::string path, ddb::EntryType type) {
-        this->path = std::move(path);
-        this->type = type;
+    AddAction(const std::string &path, const std::string &hash) {
+        this->path = path;
+        this->hash = hash;
     }
 
     std::string toString() const {
-        return "ADD -> [" + typeToHuman(type) + "] " + path;
+        return std::string("ADD -> [") + (isDirectory() ? "D" : "F") + "] " + path;
+    }
+
+    bool isDirectory() const {
+        return this->hash.empty();
     }
 };
 
 struct Delta {
     std::vector<AddAction> adds;
     std::vector<RemoveAction> removes;
-    std::vector<CopyAction> copies;
+
+    std::vector<std::string> metaAdds;
+    std::vector<std::string> metaRemoves;
 
     DDB_DLL std::vector<std::string> modifiedPathList() const{
         std::vector<std::string> result;
         for (unsigned long i = 0; i < adds.size(); i++) result.push_back(adds[i].path);
         for (unsigned long i = 0; i < removes.size(); i++) result.push_back(removes[i].path);
-        for (unsigned long i = 0; i < copies.size(); i++) result.push_back(copies[i].destination);
         return result;
+    }
+
+    DDB_DLL bool empty() const{
+        return adds.empty() && removes.empty() &&
+                metaAdds.empty() && metaRemoves.empty();
     }
 };
 
 DDB_DLL void to_json(json& j, const SimpleEntry& e);
-DDB_DLL void to_json(json& j, const CopyAction& e);
 DDB_DLL void to_json(json& j, const RemoveAction& e);
 DDB_DLL void to_json(json& j, const AddAction& e);
 DDB_DLL void to_json(json& j, const Delta& d);
 
-DDB_DLL Delta getDelta(std::vector<ddb::SimpleEntry> source,
-                       std::vector<ddb::SimpleEntry> destination);
+DDB_DLL void from_json(const json &j, Delta &d);
+
+DDB_DLL Delta getDelta(const json &sourceDbStamp,
+                       const json &destinationDbStamp);
 
 DDB_DLL Delta getDelta(Database* sourceDb, Database* targetDb);
-    
+
+DDB_DLL void delta(Database* sourceDb, Database* targetDb, std::ostream& output, const std::string& format);
+DDB_DLL void delta(const json &sourceDbStamp, const json &targetDbStamp, std::ostream& output, const std::string& format);
+
+DDB_DLL std::vector<SimpleEntry> parseStampEntries(const json &stamp);
 
 
 }  // namespace ddb

@@ -34,7 +34,7 @@ void Tag::run(cxxopts::ParseResult &opts) {
 
     const auto db = ddb::open(currentPath.string(), true);
 
-    ddb::TagManager manager(fs::path(db->getOpenFile()).parent_path());
+    ddb::TagManager manager(db.get());
 
     if (tag.length() > 0) {
         manager.setTag(tag);

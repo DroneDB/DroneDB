@@ -166,12 +166,30 @@ DDB_DLL DDBErr DDBTile(const char *inputPath, int tz, int tx, int ty, char **out
 DDB_DLL DDBErr DDBMemoryTile(const char *inputPath, int tz, int tx, int ty, uint8_t **outBuffer, int *outBufferSize, int tileSize = 256, bool tms = false, bool forceRecreate = false, const char *inputPathHash = "");
 
 /** Generate delta between two ddbs 
- * @param ddbSource path to the source DroneDB database (parent of ".ddb")
- * @param ddbTarget path to the target DroneDB database (parent of ".ddb")
+ * @param ddbSourceStamp JSON stamp of the source DroneDB database
+ * @param ddbTargetStamp JSON stamp of the target DroneDB database
  * @param output pointer to C-string where to store result
  * @param format output format. One of: ["text", "json"]
  * @return DDBERR_NONE on success, an error otherwise */
-DDB_DLL DDBErr DDBDelta(const char *ddbSource, const char *ddbTarget, char **output, const char *format);
+DDB_DLL DDBErr DDBDelta(const char *ddbSourceStamp, const char *ddbTargetStamp, char **output, const char *format);
+
+/** Apply a delta on a database
+ * @param delta JSON delta between databases
+ * @param sourcePath path to source database (or path to partial files to be added)
+ * @param ddbPath path to DroneDB database to which the delta should be applied
+ * @param mergeStrategy merge strategy to use
+ * @param sourceMetaDump meta dump (JSON) of source database (extracted with DDBMetaDump)
+ * @param conflicts pointer to C-string where to store list of conflicts (if any) in JSON
+ * @return DDBERR_NONE on success, an error otherwise */
+DDB_DLL DDBErr DDBApplyDelta(const char *delta, const char *sourcePath, char *ddbPath, int mergeStrategy, char *sourceMetaDump, char **conflicts);
+
+/** Compute map of local files that are available for delta adds operations
+ * @param delta JSON delta between databases
+ * @param ddbPath path to DroneDB database to which the delta should be applied
+ * @param hlDestFolder path to folder where to create hard links for available files (or "" to not create hard links)
+ * @param output pointer to C-string where to store map of hashes (JSON)
+ * @return DDBERR_NONE on success, an error otherwise */
+DDB_DLL DDBErr DDBComputeDeltaLocals(const char *delta, const char *ddbPath, const char *hlDestFolder, char **output);
 
 /** Sets dataset tag
  * @param ddbPath path to the source DroneDB database (parent of ".ddb")
@@ -185,19 +203,11 @@ DDB_DLL DDBErr DDBSetTag(const char *ddbPath, const char *newTag);
  * @return DDBERR_NONE on success, an error otherwise */
 DDB_DLL DDBErr DDBGetTag(const char *ddbPath, char **outTag);
 
-/** Gets dataset tag
+/** Get the current database's stamp
  * @param ddbPath path to the source DroneDB database (parent of ".ddb")
- * @param registry registry url
- * @param lastSync output pointer to time_t where to store last sync time
+ *  *  @param output pointer to C-string where to store result (JSON)
  * @return DDBERR_NONE on success, an error otherwise */
-DDB_DLL DDBErr DDBGetLastSync(const char *ddbPath, const char *registry, long long *lastSync);
-
-/** Sets dataset tag
- * @param ddbPath path to the source DroneDB database (parent of ".ddb")
- * @param registry registry url
- * @param lastSync time_t last sync time
- * @return DDBERR_NONE on success, an error otherwise */
-DDB_DLL DDBErr DDBSetLastSync(const char *ddbPath, const char *registry, const long long lastSync);
+DDB_DLL DDBErr DDBGetStamp(const char *ddbPath, char **output);
 
 /** Move entry
  * @param ddbPath path to the source DroneDB database (parent of ".ddb")
@@ -262,6 +272,18 @@ DDB_DLL DDBErr DDBMetaUnset(const char *ddbPath, const char *path, const char *k
  *  @param path Entry path to list metadata for (or "" to list metadata for the DroneDB database itself)
  *  @param output pointer to C-string where to store result (JSON) */
 DDB_DLL DDBErr DDBMetaList(const char *ddbPath, const char *path, char **output);
+
+/** Dump metadata
+ *  @param ddbPath path to the source DroneDB database (parent of ".ddb")
+ *  @param ids List of IDs to include in the dump (JSON array of strings) or "[]" to dump all
+ *  @param output pointer to C-string where to store result (JSON) */
+DDB_DLL DDBErr DDBMetaDump(const char *ddbPath, const char *ids, char **output);
+
+/** Restore metadata
+ *  @param ddbPath path to the source DroneDB database (parent of ".ddb")
+ *  @param dump JSON dump generated with DDBMetaDump
+ *  @param output pointer to C-string where to store result (JSON) */
+DDB_DLL DDBErr DDBMetaRestore(const char *ddbPath, const char *dump, char **output);
 
 
 #ifdef __cplusplus

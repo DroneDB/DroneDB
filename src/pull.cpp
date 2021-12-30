@@ -14,7 +14,7 @@
 
 namespace ddb {
 
-DDB_DLL void pull(const std::string& registry, const bool force) {
+DDB_DLL void pull(const std::string& registry, MergeStrategy mergeStrategy) {
     const auto currentPath = fs::current_path().string();
 
     const auto db = open(currentPath, true);
@@ -22,7 +22,7 @@ DDB_DLL void pull(const std::string& registry, const bool force) {
     std::string registryUrl = registry;
 
     if (registry.empty()) {
-        TagManager manager(fs::path(db->getOpenFile()).parent_path());
+        TagManager manager(db.get());
 
         const auto autoTagRaw = manager.getTag();
 
@@ -52,14 +52,14 @@ DDB_DLL void pull(const std::string& registry, const bool force) {
             UserProfile::get()->getAuthManager()->saveCredentials(
                 registryUrl, AuthCredentials(username, password));
 
-            reg.pull(currentPath, force, std::cout);
+            reg.pull(currentPath, mergeStrategy, std::cout);
 
         } else {
             if (reg.login(ac.username, ac.password).length() <= 0)
                 throw AuthException("Cannot authenticate with " +
                                          reg.getUrl());
 
-            reg.pull(currentPath, force, std::cout);
+            reg.pull(currentPath, mergeStrategy, std::cout);
         }
 
     } catch (const AuthException&) {
@@ -70,7 +70,7 @@ DDB_DLL void pull(const std::string& registry, const bool force) {
             UserProfile::get()->getAuthManager()->saveCredentials(
                 registryUrl, AuthCredentials(username, password));
 
-            reg.pull(currentPath, force, std::cout);
+            reg.pull(currentPath, mergeStrategy, std::cout);
 
         } else {
             throw AuthException("Cannot authenticate with " +

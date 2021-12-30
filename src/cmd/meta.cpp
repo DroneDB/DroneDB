@@ -14,7 +14,7 @@ void Meta::setOptions(cxxopts::Options &opts) {
     // clang-format off
     opts
     .positional_help("[args]")
-    .custom_help("meta [add|set|rm|get|unset|ls] [key|ID] [data] [-p path]")
+    .custom_help("meta [add|set|rm|get|unset|ls|dump|restore] [key|ID] [data] [-p path]")
     .add_options()
     ("c,command", "Command", cxxopts::value<std::string>())
     ("k,key", "Metadata key/ID", cxxopts::value<std::string>()->default_value(""))
@@ -31,47 +31,16 @@ std::string Meta::description() {
     return "Manage database metadata";
 }
 
-void Meta::output(std::ostream &out, const json &j, const std::string &format){
-    if (format == "json") out << j << std::endl;
-    else if (format == "text") printJsonToText(out, j);
-    else throw ddb::InvalidArgsException("Invalid format " + format);
-}
-
-void Meta::printJsonToText(std::ostream &out, const json &j)
-{
-    if (j.is_array()){
-        size_t count = 0;
-
-        for (const auto &it : j){
-            for (const auto &item : it.items()){
-                std::string k = item.key();
-                if (k.length() > 0) k[0] = std::toupper(k[0]);
-                std::string v = item.value().dump();
-                if (item.value().is_string()) v = item.value().get<std::string>();
-
-                out << k << ": " << v << std::endl;
-            }
-            if (++count < j.size()) out << "--------" << std::endl;
-        }
-    }else{
-        for (const auto &item : j.items()){
-            std::string k = item.key();
-            if (k.length() > 0) k[0] = std::toupper(k[0]);
-            std::string v = item.value().dump();
-            if (item.value().is_string()) v = item.value().get<std::string>();
-
-            out << k << ": " << v << std::endl;
-        }
-    }
-}
-
 void Meta::run(cxxopts::ParseResult &opts) {
     if (!opts.count("command")) {
         printHelp();
     }
     const auto command = opts["command"].as<std::string>();
 
-    if (command != "ls" && command != "list" && command != "l" && !opts.count("key")){
+    if (command != "ls" && command != "list" && command != "l" &&
+        command != "dump" && command != "d" &&
+        command != "restore" &&
+        !opts.count("key")){
         printHelp();
     }
 
@@ -102,6 +71,15 @@ void Meta::run(cxxopts::ParseResult &opts) {
         output(std::cout, metaManager.unset(key, path), format);
     } else if (command == "list" || command == "ls" || command == "l"){
         output(std::cout, metaManager.list(path), format);
+    } else if (command == "dump" || command == "d"){
+        output(std::cout, metaManager.dump(), format);
+    } else if (command == "restore"){
+        try{
+            json dump = json::parse(std::cin);
+            output(std::cout, metaManager.restore(dump), format);
+        }catch (const json::parse_error &e) {
+            throw ddb::InvalidArgsException(e.what());
+        }
     }
 }
 

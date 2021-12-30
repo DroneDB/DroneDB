@@ -11,7 +11,7 @@ sudo add-apt-repository ppa:ubuntugis/ubuntugis-unstable
 # Check if node is installed
 hash node 2>/dev/null || not_found=true 
 if [[ $not_found ]]; then
-    curl -sL https://deb.nodesource.com/setup_14.x | sudo -E bash -
+    curl -sL https://deb.nodesource.com/setup_16.x | sudo -E bash -
     sudo apt install -y nodejs
 fi
 

@@ -15,12 +15,42 @@
 #include "entry.h"
 #include "ddb_export.h"
 #include "net.h"
+#include "database.h"
 
 namespace ddb {
 
 class DatasetInfo;
 struct Delta;
-struct CopyAction;
+
+enum MergeStrategy{
+    DontMerge = 0,
+    KeepTheirs = 1,
+    KeepOurs = 2
+};
+
+enum ConflictType{
+    RemoteDeleteLocalModified = 0,
+    BothModified = 1
+};
+
+struct Conflict{
+    std::string path;
+    ConflictType type;
+
+    Conflict(const std::string &path, ConflictType type) :
+        path(path), type(type) {}
+
+    std::string description(){
+        switch(type){
+        case ConflictType::RemoteDeleteLocalModified:
+            return "deleted on remote but modified locally";
+        case ConflictType::BothModified:
+            return "both modified";
+        default:
+            return "should not have happend";
+        }
+    }
+};
 
 class Registry {
     std::string url;
@@ -45,8 +75,8 @@ class Registry {
                        const std::string& dataset, const std::string& folder,
                        std::ostream& out);
 
-    DDB_DLL void pull(const std::string& path, const bool force, std::ostream& out);
-    DDB_DLL void push(const std::string& path, const bool force, std::ostream& out);
+    DDB_DLL void pull(const std::string& path, const MergeStrategy mergeStrategy, std::ostream& out);
+    DDB_DLL void push(const std::string& path, std::ostream& out);
 
     DDB_DLL void handleError(net::Response& res);
 
@@ -59,18 +89,21 @@ class Registry {
                              const std::string& dataset,
                              const std::string& folder);
 
+    DDB_DLL json getStamp(const std::string& organization,
+                               const std::string& dataset);
+
     DDB_DLL void downloadFiles(const std::string& organization,
                                const std::string& dataset,
                                const std::vector<std::string>& files,
                                const std::string& folder);
+    DDB_DLL json getMetaDump(const std::string& organization,
+                               const std::string& dataset,
+                               const std::vector<std::string>& ids);
 };
 
-DDB_DLL void applyDelta(const Delta& res, const fs::path& destPath,
-                        const fs::path& sourcePath);
-DDB_DLL std::vector<CopyAction> moveCopiesToTemp(const std::vector<CopyAction>& copies,
-                      const fs::path& baseFolder,
-                      const std::string& tempFolderName);
+DDB_DLL std::vector<Conflict> applyDelta(const Delta& d, const fs::path& sourcePath, Database *destination, const MergeStrategy mergeStrategy, const json& sourceMetaDump, std::ostream& out = std::cout);
 DDB_DLL void ensureParentFolderExists(const fs::path& folder);
+DDB_DLL std::unordered_map<std::string, bool> computeDeltaLocals(Delta d, Database *destination, const std::string &hlDestFolder);
 
 }  // namespace ddb
 

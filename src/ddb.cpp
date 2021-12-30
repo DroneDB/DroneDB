@@ -9,6 +9,7 @@
 
 #include "database.h"
 #include "dbops.h"
+#include "delta.h"
 #include "entry.h"
 #include "exceptions.h"
 #include "info.h"
@@ -255,7 +256,7 @@ DDB_DLL DDBErr DDBStatus(const char* ddbPath, char** output) {
 
     std::ostringstream ss;
 
-    const auto cb = [&ss](ddb::FileStatus status, const std::string& string) {
+    const auto cb = [&ss](ddb::FileStatus status, const std::string&) {
         switch (status) {
             case NotIndexed:
                 ss << "?\t";
@@ -281,10 +282,13 @@ DDB_DLL DDBErr DDBStatus(const char* ddbPath, char** output) {
 DDBErr DDBChattr(const char* ddbPath, const char* attrsJson, char** output) {
     DDB_C_BEGIN
     const auto db = ddb::open(std::string(ddbPath), true);
-    const json j = json::parse(attrsJson);
-    db->chattr(j);
-    utils::copyToPtr(db->getAttributes().dump(), output);
-
+    try{
+        const json j = json::parse(attrsJson);
+        db->chattr(j);
+        utils::copyToPtr(db->getAttributes().dump(), output);
+    } catch (const json::parse_error &e) {
+        throw InvalidArgsException(e.what());
+    }
     DDB_C_END
 }
 
@@ -337,14 +341,14 @@ DDBErr DDBMemoryTile(const char *inputPath, int tz, int tx, int ty, uint8_t **ou
 }
 
 
-DDBErr DDBDelta(const char* ddbSource, const char* ddbTarget, char** output,
+DDBErr DDBDelta(const char* ddbSourceStamp, const char* ddbTargetStamp, char** output,
                 const char* format) {
     DDB_C_BEGIN
 
-    if (ddbSource == nullptr)
+    if (ddbSourceStamp == nullptr)
         throw InvalidArgsException("No ddb source path provided");
 
-    if (ddbTarget == nullptr)
+    if (ddbTargetStamp == nullptr)
         throw InvalidArgsException("No ddb path provided");
 
     if (format == nullptr || strlen(format) == 0)
@@ -352,13 +356,60 @@ DDBErr DDBDelta(const char* ddbSource, const char* ddbTarget, char** output,
 
     if (output == nullptr) throw InvalidArgsException("No output provided");
 
-    const auto sourceDb = ddb::open(std::string(ddbSource), false);
-    const auto targetDb = ddb::open(std::string(ddbTarget), false);
-
     std::ostringstream ss;
-    delta(sourceDb.get(), targetDb.get(), ss, format);
 
-    utils::copyToPtr(ss.str(), output);
+    try{
+        const json source = json::parse(ddbSourceStamp);
+        const json dest = json::parse(ddbTargetStamp);
+
+        delta(source, dest, ss, format);
+
+        utils::copyToPtr(ss.str(), output);
+    }catch (const json::parse_error &e) {
+        throw InvalidArgsException(e.what());
+    }
+
+    DDB_C_END
+}
+
+DDB_DLL DDBErr DDBApplyDelta(const char *delta, const char *sourcePath, char *ddbPath, int mergeStrategy, char *sourceMetaDump, char **conflicts){
+    DDB_C_BEGIN
+
+    Delta d;
+    json metaDump;
+    try{
+        d = json::parse(delta);
+        metaDump = json::parse(sourceMetaDump);
+    }catch (const json::parse_error &e) {
+        throw InvalidArgsException(e.what());
+    }
+
+    const auto ddb = ddb::open(std::string(ddbPath), false);
+    std::stringstream ss;
+    const auto adc = applyDelta(d, fs::path(std::string(sourcePath)), ddb.get(), static_cast<MergeStrategy>(mergeStrategy), metaDump, ss);
+
+    json j = json::array();
+    for (auto &c : adc) j.push_back(c.path);
+    utils::copyToPtr(j.dump(), conflicts);
+
+    DDB_C_END
+}
+
+
+DDBErr DDBComputeDeltaLocals(const char *delta, const char *ddbPath, const char *hlDestFolder, char **output){
+    DDB_C_BEGIN
+    Delta d;
+    try{
+        d = json::parse(delta);
+    }catch (const json::parse_error &e) {
+        throw InvalidArgsException(e.what());
+    }
+    const auto ddb = ddb::open(std::string(ddbPath), false);
+
+    auto cdl = computeDeltaLocals(d, ddb.get(), std::string(hlDestFolder));
+    json j = json::object();
+    for (auto &el : cdl) j[el.first] = el.second;
+    utils::copyToPtr(j.dump(), output);
 
     DDB_C_END
 }
@@ -367,12 +418,11 @@ DDB_DLL DDBErr DDBSetTag(const char* ddbPath, const char* newTag) {
     DDB_C_BEGIN
 
     if (ddbPath == nullptr) throw InvalidArgsException("No ddb path provided");
-
-    TagManager manager(ddbPath);
-
-    manager.setTag(newTag);
-
     if (newTag == nullptr) throw InvalidArgsException("No tag provided");
+
+    const auto ddb = ddb::open(std::string(ddbPath), true);
+    TagManager manager(ddb.get());
+    manager.setTag(newTag);
 
     DDB_C_END
 }
@@ -383,8 +433,8 @@ DDB_DLL DDBErr DDBGetTag(const char* ddbPath, char** outTag) {
     if (ddbPath == nullptr) throw InvalidArgsException("No ddb path provided");
     if (outTag == nullptr) throw InvalidArgsException("No tag provided");
 
-    TagManager manager(ddbPath);
-
+    const auto ddb = ddb::open(std::string(ddbPath), true);
+    TagManager manager(ddb.get());
     const auto tag = manager.getTag();
 
     utils::copyToPtr(tag, outTag);
@@ -392,35 +442,14 @@ DDB_DLL DDBErr DDBGetTag(const char* ddbPath, char** outTag) {
     DDB_C_END
 }
 
-DDB_DLL DDBErr DDBGetLastSync(const char* ddbPath, const char* registry,
-                              long long* lastSync) {
+DDB_DLL DDBErr DDBGetStamp(const char* ddbPath, char** output) {
     DDB_C_BEGIN
 
     if (ddbPath == nullptr) throw InvalidArgsException("No ddb path provided");
-    if (lastSync == nullptr)
-        throw InvalidArgsException("No last sync provided");
+    if (output == nullptr) throw InvalidArgsException("No output provided");
 
-    SyncManager manager(ddbPath);
-
-    *lastSync = registry == nullptr || !strlen(registry)
-                    ? manager.getLastSync()
-                    : manager.getLastSync(registry);
-
-    DDB_C_END
-}
-
-DDB_DLL DDBErr DDBSetLastSync(const char* ddbPath, const char* registry,
-                              const long long lastSync) {
-    DDB_C_BEGIN
-
-    if (ddbPath == nullptr) throw InvalidArgsException("No ddb path provided");
-
-    SyncManager manager(ddbPath);
-
-    if (registry == nullptr || !strlen(registry))
-        manager.setLastSync(lastSync);
-    else
-        manager.setLastSync(lastSync, registry);
+    const auto ddb = ddb::open(std::string(ddbPath), true);
+    utils::copyToPtr(ddb->getStamp().dump(), output);
 
     DDB_C_END
 }
@@ -582,6 +611,48 @@ DDB_DLL DDBErr DDBMetaList(const char *ddbPath, const char *path, char **output)
 
     const auto ddb = ddb::open(ddbPathStr, true);
     auto json = ddb->getMetaManager()->list(std::string(path), ddbPathStr);
+
+    utils::copyToPtr(json.dump(), output);
+
+    DDB_C_END
+}
+
+DDB_DLL DDBErr DDBMetaDump(const char *ddbPath, const char *ids, char **output){
+    DDB_C_BEGIN
+
+    if (ddbPath == nullptr) throw InvalidArgsException("No ddb path provided");
+    if (ids == nullptr) throw InvalidArgsException("No ids provided");
+
+    json jIds;
+    try{
+        jIds = json::parse(ids);
+    }catch (const json::parse_error &e) {
+        throw InvalidArgsException(e.what());
+    }
+
+    const auto ddb = ddb::open(std::string(ddbPath), true);
+    auto json = ddb->getMetaManager()->dump(jIds);
+
+    utils::copyToPtr(json.dump(), output);
+
+    DDB_C_END
+}
+
+DDB_DLL DDBErr DDBMetaRestore(const char *ddbPath, const char *dump, char **output){
+    DDB_C_BEGIN
+
+    if (ddbPath == nullptr) throw InvalidArgsException("No ddb path provided");
+    if (dump == nullptr) throw InvalidArgsException("No dump provided");
+
+    json jDump;
+    try{
+        jDump = json::parse(dump);
+    }catch (const json::parse_error &e) {
+        throw InvalidArgsException(e.what());
+    }
+
+    const auto ddb = ddb::open(std::string(ddbPath), true);
+    auto json = ddb->getMetaManager()->restore(jDump);
 
     utils::copyToPtr(json.dump(), output);
 

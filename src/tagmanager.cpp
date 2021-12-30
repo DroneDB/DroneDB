@@ -14,7 +14,7 @@
 namespace ddb {
 
 std::string TagManager::getTag() {
-    const auto path = this->ddbFolder / TAGSFILE;
+    const auto path = db->ddbDirectory() / TAGSFILE;
     
     LOGD << "Path = " << path;
 
@@ -31,15 +31,13 @@ std::string TagManager::getTag() {
     json j;
     i >> j;
 
-    LOGD << "Contents: " << j.dump();
-
     if (!j.contains("tag")) return "";
 
     TagComponents t = RegistryUtils::parseTag(j["tag"]);
     return t.tag();
 }
 void TagManager::setTag(const std::string& tag) {
-    const auto path = this->ddbFolder / TAGSFILE;
+    const auto path = db->ddbDirectory() / TAGSFILE;
 
     const auto tg = RegistryUtils::parseTag(tag);
 
@@ -57,16 +55,10 @@ void TagManager::setTag(const std::string& tag) {
     i >> j;
     i.close();
 
-    LOGD << "Contents: " << j.dump();
-
     j["tag"] = tg.fullTag();
 
-    if (exists(path)) {
-        fs::remove(path);
-    }
-
-    std::ofstream out(path, std::ios_base::out);
-    out << std::setw(4) << j;
+    std::ofstream out(path, std::ios_base::out | std::ios_base::trunc);
+    out << j.dump(4);
     out.close();
 }
 }  // namespace ddb

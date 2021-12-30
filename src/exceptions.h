@@ -58,6 +58,13 @@ class RegistryException : public AppException{
 class RegistryNotFoundException : public RegistryException{
     using RegistryException::RegistryException; 
 };
+class NoStampException : public RegistryException{
+    using RegistryException::RegistryException;
+};
+class PullRequiredException : public RegistryException{
+    using RegistryException::RegistryException;
+};
+
 class NotImplementedException : public AppException {
     using AppException::AppException;
 };
