@@ -4,7 +4,7 @@
 Tutorials
 ******************************************************************************
 
-You can do all sort of useful tasks related to aerial data management with DroneDB. Here are some examples:
+You can do all sort operations with DroneDB. We recommend to check out the list of `Commands </commands/index.html>`_. Here are some (non-exhaustive) examples:
 
 Sharing datasets
 -----------------------------------------------------------------------------
@@ -15,23 +15,14 @@ From a directory with images, simply type:
 
     ddb share *.JPG
 
-By default the images are shared with DroneDB's Hub. You will need to `register an account <https://dronedb.app>`_ to get a username and password. But you can also run your own Registry, on your own infrastructure. We have two implementations available:
+By default the images are shared with DroneDB's Hub. You will need to `register an account <https://dronedb.app>`_ to get a username and password. But you can also self-host your own `Registry <https://github.com/DroneDB/Registry>`_.
 
- - https://github.com/DroneDB/Registry
- - https://github.com/DroneDB/MiniReg
-
-You can then select a different Registry by typing:
+You can select a different Registry by typing:
 
 ::
 
     ddb share *.JPG -s http://localhost:5000
-
-
-At the end of the process, you will get a URL back:
-
-::
-
-    https://testhub1.dronedb.app/r/pierotofy/193514313aba4949ab5578b28ba1dd5b
+    --> https://localhost:5000/r/admin/193514313aba4949ab5578b28ba1dd5b
 
 Because we didn't set a ``tag``, DroneDB generated a random one for you. You can change the tag by visiting the URL. You can also explicitly set a tag, like so:
 
@@ -54,30 +45,38 @@ With the server component being optional.
 Editing datasets
 -----------------------------------------------------------------------------
 
-In DroneDB you can ``clone`` (download, or checkout) an existing dataset from a Registry, make modifications locally (offline), then sync back your changes.
+Using the Web UI provided by Registry is the easiest way to make changes.
 
-Let's use this dataset: https://testhub1.dronedb.app/r/pierotofy/brighton
+In DroneDB you can also ``clone`` (download) an existing dataset from a Registry for offline use, make modifications, then sync back your changes.
+
+Let's use this dataset: https://hub.dronedb.app/r/pierotofy/brighton-beach
 
 You can clone it via:
 
 ::
 
-    ddb clone testhub1.dronedb.app/pierotofy/brighton
+    ddb clone pierotofy/brighton-beach
 
-Let's add a ``README.md`` file that describes the dataset:
+Let's add a ``README.md`` file that describes the dataset. Create a ``README.md`` file using `Markdown <https://www.markdownguide.org/cheat-sheet/>`_ syntax and save it in the ``brighton-beach`` directory. Afterwards:
 
 ::
 
-    cd brighton/
+    cd brighton-beach/
     ddb add README.md
 
 Great! We are now ready to push the changes.
 
-(Currently this functionality is being built, so it's probably not going to work):
-
 ::
 
     ddb push
+
+Uuups! This will trigger an error, since we don't have permission to make modifications to this dataset (it belongs to ``pierotofy``). Let's make our own copy:
+
+::
+
+    ddb tag myuser/brighton-copy
+    ddb push
+
 
 Adding a README/LICENSE
 -----------------------------------------------------------------------------
@@ -90,7 +89,28 @@ If a dataset contains a ``README.md`` and/or a ``LICENSE.md`` file, they will be
 
 The files can contain valid `Markdown <https://www.markdownguide.org/basic-syntax/>`_ syntax, including images, links, tables, etc.
 
-https://testhub1.dronedb.app/r/pierotofy/license
+
+Metadata Entries
+-----------------------------------------------------------------------------
+
+DroneDB supports the addition of metadata to any file or directory within the index. This can be used to store information of any kind in JSON format:
+
+::
+
+    ddb meta set pilot '{"name": "John Smith"}'
+    ddb meta get pilot --format json
+    --> {"data":{"name":"John S."},"id":"ff4f0f26-8741-4423-bde5-b445750937bb","mtime":1640985850}
+
+::
+
+    ddb add photo.JPG
+    ddb meta add comments '{"text": "Nice one!", "author": "John S."}' -p photo.JPG
+    ddb meta get comments -p photo.JPG --format json
+    --> [{"data":{"author":"John S.","text":"Nice one!"},"id":"550d0b5c-108b-4996-b7e8-467b4cb87937","mtime":1640986217}]
+
+Singular and plural metadata keys are supported. Plural keys (ending with ``s``) are treated as lists, whereas singular keys are objects. 
+
+Metadata entries are synced on push/pull and people working on the same dataset while offline can later sync back online without conflicts.
 
 Projecting an image onto a map
 -----------------------------------------------------------------------------
