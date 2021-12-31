@@ -6,7 +6,7 @@ DroneDB is free and open source software for aerial data storage. It provides a 
 
 ![image](https://user-images.githubusercontent.com/1951843/147839499-0c263b47-4e51-437c-adbb-cc0bea50d29f.png)
 
-**Example Dataset**: https://hub.dronedb.app/r/pierotofy/brighton-beach
+See it in action: https://hub.dronedb.app/r/pierotofy/brighton-beach
 
 ## Documentation
 
