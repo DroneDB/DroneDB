@@ -7,13 +7,13 @@ DroneDB - Effortless Aerial Data Management and Sharing
     :alt: DroneDB
     :align: right
 
-`DroneDB <https://dronedb.app>`_ is free and open source software for aerial data storage. It provides a convenient location to store images, orthophotos, digital elevation models, point clouds and any other file.
+`DroneDB <https://dronedb.app>`_ is free and open source software for aerial data storage. It provides a convenient location to store images, orthophotos, digital elevation models, point clouds or any other file.
 
 .. image:: https://user-images.githubusercontent.com/1951843/103560016-13848180-4e85-11eb-8177-e711da942a4a.png
 
 Brighton Beach: `Example Dataset <https://hub.dronedb.app/r/pierotofy/brighton-beach>`_
 
-DroneDB creates an index of your aerial files and exposes them via a network hub (`Registry <https://github.com/DroneDB/Registry>`_). Registry is free and open source software and provides a user interface and REST API. The DroneDB developers manage a cloud instance of Registry at https://hub.dronedb.app for people to use. You will need to `register an account <https://dronedb.app/register>`_ to use the cloud instance.
+DroneDB creates an index of your aerial files and exposes them via a network hub (`Registry <https://github.com/DroneDB/Registry>`_). Registry provides a user interface and REST API. The DroneDB developers manage a cloud instance of Registry at https://hub.dronedb.app for people to use. You will need to `register an account <https://dronedb.app/register>`_ to use the cloud instance.
 
 The index parses the information of your aerial data automatically:
 
