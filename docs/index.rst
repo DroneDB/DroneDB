@@ -21,7 +21,6 @@ The index parses the information of your aerial data automatically:
  * GeoTIFFs/LAS/LAZ are displayed on the map
  * LAS/LAZ/PLY are displayed on the 3D view
  * Clicking an image location on the map displays it (via geoprojection)
- * Various properties are made available
 
 The data is completely portable and syncable between different instances of Registry. For example one can make a copy a dataset from one Registry to another:
 
