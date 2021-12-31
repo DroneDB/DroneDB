@@ -4,7 +4,7 @@
 #ifndef CONSTANTS_H
 #define CONSTANTS_H
 
-#define DEFAULT_REGISTRY "testhub.dronedb.app"
+#define DEFAULT_REGISTRY "hub.dronedb.app"
 #define DEFAULT_DSM_SERVICE_URL "https://portal.opentopography.org/API/globaldem?demtype=AW3D30&west={west}&south={south}&east={east}&north={north}&outputFormat=GTiff"
 
 #endif // CONSTANTS_H
