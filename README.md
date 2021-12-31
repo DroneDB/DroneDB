@@ -2,11 +2,15 @@
 
 ![license](https://img.shields.io/github/license/DroneDB/DroneDB) ![commits](https://img.shields.io/github/commit-activity/m/DroneDB/DroneDB) ![languages](https://img.shields.io/github/languages/top/DroneDB/DroneDB) ![Docs](https://github.com/DroneDB/DroneDB/workflows/Docs/badge.svg) ![C/C++ CI](https://github.com/DroneDB/DroneDB/workflows/C/C++%20CI/badge.svg) ![NodeJS CI](https://github.com/DroneDB/DroneDB/workflows/NodeJS%20CI/badge.svg) ![.NET CI](https://github.com/DroneDB/DroneDB/workflows/.NET%20CI/badge.svg)
 
-DroneDB is a set of tools and standards designed to make the process of sharing and managing images, orthophotos, digital elevation models and point clouds effortless. Think of it as Dropbox for aerial imagery!
+DroneDB is free and open source software for aerial data storage. It provides a convenient location to store images, orthophotos, digital elevation models, point clouds and any other file.
+
+![image](https://user-images.githubusercontent.com/1951843/147839499-0c263b47-4e51-437c-adbb-cc0bea50d29f.png)
+
+**Example Dataset**: https://hub.dronedb.app/r/pierotofy/brighton-beach
 
 ## Documentation
 
-For usage, tutorials and references see https://docs.dronedb.app
+https://docs.dronedb.app
 
 ## Building
 
