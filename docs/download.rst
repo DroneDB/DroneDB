@@ -3,10 +3,10 @@
 Download
 =============================================================================
 
-Installation
+Client
 -----------------------------------------------------------------------------
 
-On Windows simply download the installer from https://github.com/DroneDB/ddb-desktop/releases/.
+On Windows simply download the installer from https://github.com/DroneDB/ddb-desktop/releases/. It installs both the graphical interface (``DroneDB Desktop``) as well as the ``ddb`` command line tool.
 
 On Linux simply run:
 
@@ -19,14 +19,11 @@ On Linux simply run:
 
 MacOS support coming soon (help us and contribute a pull request?)
 
-Build From Sources
+Server
 -----------------------------------------------------------------------------
 
-DroneDB currently compiles on Windows and Linux.
-
-You can compile DroneDB by following the instructions available on https://github.com/uav4geo/DroneDB
-
-MacOS support coming soon (help us and contribute a pull request?)
+ * Cloud instance managed by DroneDB developers: https://hub.dronedb.app
+ * Self-host: https://github.com/DroneDB/Registry/
 
 .. toctree::
    :maxdepth: 2
