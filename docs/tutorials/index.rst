@@ -70,11 +70,11 @@ Great! We are now ready to push the changes.
 
     ddb push
 
-Uuups! This will trigger an error, since we don't have permission to make modifications to this dataset (it belongs to ``pierotofy``). Let's make our own copy:
+Uuups! This will trigger an error, since we don't have permission to make modifications to this dataset (it belongs to ``pierotofy``). Let's make our own copy to a different Registry server and user:
 
 ::
 
-    ddb tag myuser/brighton-copy
+    ddb tag http://localhost:5000/admin/brighton-copy
     ddb push
 
 
