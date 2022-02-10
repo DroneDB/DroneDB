@@ -33,11 +33,55 @@ Getting started
 To get started, you need to install the following applications (if they
 are not installed already):
 
--  `Git <https://git-scm.com/downloads>`__
 -  `Docker <https://www.docker.com/>`__
 -  `Docker-compose <https://docs.docker.com/compose/install/>`__
 
-Clone the repo and initialize submodules:
+Single command startup:
+
+**Linux**
+
+.. code:: bash
+
+   mkdir ddb-registry && cd ddb-registry && \ 
+     curl -O docker-compose.yml https://raw.githubusercontent.com/DroneDB/Registry/master/docker/testing/docker-compose.yml && \
+     curl -O appsettings-testing.json https://raw.githubusercontent.com/DroneDB/Registry/master/docker/testing/appsettings-testing.json && \
+     curl -O initialize.sql https://raw.githubusercontent.com/DroneDB/Registry/master/docker/testing/initialize.sql && \
+     docker-compose up
+
+**Windows**
+
+.. code:: powershell
+
+   mkdir ddb-registry; cd ddb-registry; `
+   curl -O docker-compose.yml https://raw.githubusercontent.com/DroneDB/Registry/master/docker/testing/docker-compose.yml; `
+   curl -O appsettings-testing.json https://raw.githubusercontent.com/DroneDB/Registry/master/docker/testing/appsettings-testing.json; `
+   curl -O initialize.sql https://raw.githubusercontent.com/DroneDB/Registry/master/docker/testing/initialize.sql; `
+   docker-compose up -d
+
+This command will start a new stack composed by
+
+-  MariaDB database
+-  PHPMyAdmin, exposed on port `8080 <http://localhost:8080>`__
+-  Registry, exposed on port `5000 <http://localhost:5000>`__
+
+Default username and password are ``admin`` and ``password``. After
+logging in you can check the health of the application by visiting
+`http://localhost:5000/status <http://localhost:5000/health>`__.
+
+Registry supports Swagger API documentation on
+`http://localhost:5000/swagger/ <http://localhost:5000/swagger/>`__ and
+Hangfire as task runner on
+`http://localhost:5000/hangfire/ <http://localhost:5000/hangfire/>`__.
+
+   **NOTE:** This configuration is for local testing only: **DO NOT USE
+   IT IN PRODUCTION**. If you want to use the application in production
+   check the following section.
+
+Running in production
+---------------------
+
+You will need `Git <https://git-scm.com/downloads>`__. Clone the repo
+and initialize submodules:
 
 .. code:: bash
 
