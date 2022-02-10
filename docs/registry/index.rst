@@ -272,6 +272,7 @@ CachePath
 
 CacheProvider
    The additional cache provider, supported values:
+   
       - ``InMemory``: In-memory cache provider. Example value:
          
          .. code:: json
@@ -294,14 +295,85 @@ CacheProvider
          The default value is ``null`` (``InMemory`` is used).
 
 ClearCacheInterval
+   The interval to clear the file cache (TimeSpan).
+
+   .. note::
+
+         The default value is ``01:00:00`` (1 hour).
+
 DefaultAdmin
+   The default admin user.
+
+   .. note::
+
+         The default value is:
+
+         .. code:: json
+
+            {
+               "Email": "admin@example.com",
+               "UserName": "admin",
+               "Password": "password"
+            },
+
 EnableStorageLimiter
+   Enable the storage limiter. Registry will limit the storage usage of the user based on its metadata (``maxStorageMB`` key).   
+
+   .. note::
+
+         The default value is ``false``.
+
 ExternalAuthUrl
+   The URL of the external authentication provider.
+
+   .. note::
+
+         The default value is ``null``.
+
 ExternalUrlOverride
+   The external URL of Registry. This is used when the application is behind a reverse proxy.
+
+   .. note::
+
+         The default value is ``null``.
+
 HangfireProvider
+   The Hangfire provider, supported values:
+
+      - ``InMemory``: In-memory provider. Example value:  
+      - ``Mysql``: MySQL or MariaDB
+
+   .. note::
+
+         The default value is ``InMemory``
+  
+   The ``HangfireConnection`` connection string should be changed accordingly
+
 MaxRequestBodySize
+   The maximum request body size. It sets the ``MultipartBodyLengthLimit`` of the kestrel ``FormOptions``.
+
+   .. note::
+
+         The default value is ``null`` (default).
+
 RandomDatasetNameLength
+   The length of the random dataset name, generated when calling the share endpoint.
+
+   .. note::
+
+      The default value is ``16``.
+
 RegistryProvider
+   The Registry database provider, supported values:
+      - ``Sqlite``: SQLite database
+      - ``Mysql``: MySQL or MariaDB, (`compatibility <https://github.com/PomeloFoundation/Pomelo.EntityFrameworkCore.MySql#supported-database-servers-and-versions>`__)
+      - ``Mssql``: Microsoft SQL Server
+
+   .. note::
+
+         The default value is ``Sqlite``
+  
+   The ``RegistryConnection`` connection string should be changed accordingly
 
 RevokedTokens
    The list of revoked JWT tokens.
@@ -310,9 +382,26 @@ Secret
   The secret used as key to generate the JWT tokens.
 
 StoragePath
-ThumbnailsCacheExpiration
-TilesCacheExpiration
+   The path to the storage folder. This is used to store all the uploaded datasets.
 
+   .. note::
+
+         The default value is ``./App_Data/datasets``
+
+ThumbnailsCacheExpiration
+   The expiration time of the thumbnails cache (TimeSpan).
+
+   .. note::
+
+         The default value is ``00:30:00`` (30 minutes).
+
+TilesCacheExpiration
+   The expiration time of the tiles cache (TimeSpan).
+
+   .. note::
+
+         The default value is ``00:30:00`` (30 minutes).
+         
 TokenExpirationInDays
    The number of days after which the JWT tokens will expire.
 
@@ -321,23 +410,18 @@ TokenExpirationInDays
          The default value is 30 days.
 
 UploadBatchTimeout
+   The timeout for the share upload endpoint. It is the maximum time allowed between the uploads.
+
+   .. note::
+
+         The default value is ``01:00:00`` (1 hour).
+         
 WorkerThreads
+   The number of worker threads used by the application.
 
+   .. note::
 
-
-
-
-
-
-
-
-how
-  The term is a one-line phrase, and the
-  definition is one or more paragraphs or
-  body elements, indented relative to the
-  term. Blank lines are not allowed
-  between term and definition.
-
+      The default value is ``0`` (default)
 
 Note
 ----
