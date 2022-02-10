@@ -48,5 +48,6 @@ We welcome contributions! To contribute to the project, please see the `contribu
    download
    tutorials/index
    commands/index
+   registry/index
    copyright
 
