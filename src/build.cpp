@@ -28,7 +28,7 @@ bool isBuildableInternal(const Entry& e, std::string& subfolder) {
 }
 
 bool isBuildable(Database* db, const std::string& path, std::string& subfolder) {
-    
+
     Entry e;
 
     const bool entryExists = getEntry(db, path, e);
@@ -40,7 +40,7 @@ bool isBuildable(Database* db, const std::string& path, std::string& subfolder) 
 void buildInternal(Database* db, const Entry& e,
                            const std::string& outputPath, std::ostream& output,
                            bool force) {
-                               
+
     LOGD << "Building entry " << e.path << " type " << e.type;
 
     const auto baseOutputPath = fs::path(outputPath) / e.hash;
@@ -54,9 +54,8 @@ void buildInternal(Database* db, const Entry& e,
         return;
     }
 
-    if (fs::exists(outputFolder)) {
-        if (!force) return;
-        else io::assureIsRemoved(outputFolder);
+    if (fs::exists(outputFolder) && !force) {
+        return;
     }
 
     const auto tempFolder = outputFolder + "-temp-" + utils::generateRandomString(16);
@@ -93,6 +92,8 @@ void buildInternal(Database* db, const Entry& e,
 
         if (built){
             LOGD << "Build complete, moving temp folder to " << outputFolder;
+            if (fs::exists(outputFolder)) io::assureIsRemoved(outputFolder);
+
             io::assureFolderExists(fs::path(outputFolder).parent_path());
             io::rename(tempFolder, outputFolder);
 
@@ -101,9 +102,14 @@ void buildInternal(Database* db, const Entry& e,
 
         io::assureIsRemoved(tempFolder);
         io::assureIsRemoved(hardlink);
-    
+
     // Catch block is now detailed because we want to keep track of the exception
     // catches pdal, gdal, filesystem_error, etc...
+    } catch(const AppException &e){
+        io::assureIsRemoved(tempFolder);
+        io::assureIsRemoved(hardlink);
+
+        throw e;
     } catch(...){
 
         io::assureIsRemoved(tempFolder);
