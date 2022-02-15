@@ -54,8 +54,9 @@ void buildInternal(Database* db, const Entry& e,
         return;
     }
 
-    if (fs::exists(outputFolder) && !force) {
-        return;
+    if (fs::exists(outputFolder)) {
+        if (!force) return;
+        else io::assureIsRemoved(outputFolder);
     }
 
     const auto tempFolder = outputFolder + "-temp-" + utils::generateRandomString(16);
