@@ -18,6 +18,11 @@ void buildCog(const std::string &inputGTiff, const std::string &outputCog){
     char** targs = nullptr;
     targs = CSLAddString(targs, "-of");
     targs = CSLAddString(targs, "COG");
+    targs = CSLAddString(targs, "-t_srs");
+    targs = CSLAddString(targs, "EPSG:3857");
+    targs = CSLAddString(targs, "-multi");
+    targs = CSLAddString(targs, "-wo");
+    targs = CSLAddString(targs, "NUM_THREADS=ALL_CPUS");
 
     // We can compress to JPG if these are 8bit bands (3 or 4)
     const int numBands = GDALGetRasterCount(hSrcDataset);
@@ -42,13 +47,15 @@ void buildCog(const std::string &inputGTiff, const std::string &outputCog){
         targs = CSLAddString(targs, "COMPRESS=LZW");
     }
 
-    GDALTranslateOptions* psOptions = GDALTranslateOptionsNew(targs, nullptr);
+    GDALWarpAppOptions* psOptions = GDALWarpAppOptionsNew(targs, nullptr);
     CSLDestroy(targs);
-    GDALDatasetH hNewDataset = GDALTranslate(outputCog.c_str(),
-                                     hSrcDataset,
+    GDALDatasetH hNewDataset = GDALWarp(outputCog.c_str(),
+                                     nullptr,
+                                     1,
+                                     &hSrcDataset,
                                      psOptions,
                                      nullptr);
-    GDALTranslateOptionsFree(psOptions);
+    GDALWarpAppOptionsFree(psOptions);
     GDALClose(hNewDataset);
     GDALClose(hSrcDataset);
 }

@@ -55,13 +55,10 @@ void buildInternal(Database* db, const Entry& e,
     }
 
     if (fs::exists(outputFolder) && !force) {
-        LOGD << "Output folder already existing and no force parameter provided: no build needed";
         return;
     }
 
-    const auto tempFolder = outputFolder + "-temp"; 
-
-    LOGD << "Temp folder " << tempFolder;
+    const auto tempFolder = outputFolder + "-temp-" + utils::generateRandomString(16);
 
     io::assureFolderExists(tempFolder);
     const auto hardlink = baseOutputPath.string() + "_link" + fs::path(e.path).extension().string();
@@ -70,8 +67,6 @@ void buildInternal(Database* db, const Entry& e,
     auto relativePath =
         (fs::path(db->getOpenFile()).parent_path().parent_path() / e.path)
             .string();
-
-    LOGD << "Relative path " << relativePath;
 
     try {
         io::hardlink(relativePath, hardlink);
@@ -98,7 +93,7 @@ void buildInternal(Database* db, const Entry& e,
         if (built){
             LOGD << "Build complete, moving temp folder to " << outputFolder;
             io::assureFolderExists(fs::path(outputFolder).parent_path());
-            std::filesystem::rename(tempFolder, outputFolder);
+            io::rename(tempFolder, outputFolder);
 
             output << outputFolder << std::endl;
         }
@@ -108,22 +103,12 @@ void buildInternal(Database* db, const Entry& e,
     
     // Catch block is now detailed because we want to keep track of the exception
     // catches pdal, gdal, filesystem_error, etc...
-    } catch(const std::exception& ex){
-
-        LOGD << ex.what();
-
-        io::assureIsRemoved(tempFolder);
-        io::assureIsRemoved(hardlink);
-
-        throw;
-
-    // This way we are sure that all the exceptions are caught
     } catch(...){
 
         io::assureIsRemoved(tempFolder);
         io::assureIsRemoved(hardlink);
 
-        throw;
+        throw AppException("Unknown build error failure for " + e.path + " (" + baseOutputPath.string() + ")");
     }
 }
 
