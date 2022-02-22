@@ -491,7 +491,7 @@ DDB_DLL DDBErr DDBBuild(const char *ddbPath, const char *source, const char *des
     if (source == nullptr){
         if (pendingOnly) buildPending(ddb.get(), destPath, ss, force);
         else buildAll(ddb.get(), destPath, ss, force);
-    } else {
+    }else{
         build(ddb.get(), std::string(source), destPath, ss, force);
     }
     
