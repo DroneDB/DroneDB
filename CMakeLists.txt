@@ -123,16 +123,18 @@ find_package(Sqlite3 REQUIRED)
 find_package(PDAL REQUIRED)
 find_package(Threads REQUIRED)
 find_package(Zip REQUIRED)
+find_package(NXS REQUIRED)
 include_directories(${Zip_INCLUDE_DIRS})
 include_directories(${GDAL_INCLUDE_DIR})
 include_directories(${PDAL_INCLUDE_DIR})
 include_directories(${PDAL_INCLUDE_DIR}/pdal)
+include_directories(${NXS_INCLUDE_DIR})
 
 if (NOT WIN32)
     set(STDPPFS_LIBRARY stdc++fs)
 endif()
 
-set(LINK_LIBRARIES ${SPATIALITE_LIBRARY} ${SQLITE3_LIBRARY} ${STDPPFS_LIBRARY} exiv2lib ${GDAL_LIBRARY} ${CURL_LIBRARY} ${PDAL_LIBRARIES} ${Zip_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT})
+set(LINK_LIBRARIES ${SPATIALITE_LIBRARY} ${SQLITE3_LIBRARY} ${STDPPFS_LIBRARY} exiv2lib ${GDAL_LIBRARY} ${CURL_LIBRARY} ${PDAL_LIBRARIES} ${Zip_LIBRARIES} ${NXS_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT})
 set(CMD_SRC_LIST ${CMAKE_CURRENT_SOURCE_DIR}/src/cmd/main.cpp)
 
 add_subdirectory("src")
@@ -150,7 +152,7 @@ add_dependencies(${PROJECT_NAME} exiv2lib)
 
 if(NOT WIN32)
     # Tell the linker how to resolve library names
-    target_link_libraries(${PROJECT_NAME} PRIVATE "-lspatialite -lsqlite3 -lgdal -lcurl -lexiv2 -lpdalcpp -L\"${CMAKE_BINARY_DIR}/lib\"")
+    target_link_libraries(${PROJECT_NAME} PRIVATE "-lspatialite -lsqlite3 -lgdal -lcurl -lexiv2 -lpdalcpp -lnxs -L\"${CMAKE_BINARY_DIR}/lib\"")
 endif()
 
 # set PLOG to PLOG_GLOBAL/PLOG_EXPORT to share instances across modules (and export on Windows)
