@@ -470,7 +470,7 @@ DDB_DLL DDBErr DDBMoveEntry(const char *ddbPath, const char *source, const char 
 
 }
 
-DDB_DLL DDBErr DDBBuild(const char *ddbPath, const char *source, const char *dest, bool force) {
+DDB_DLL DDBErr DDBBuild(const char *ddbPath, const char *source, const char *dest, bool force, bool pendingOnly) {
 
     DDB_C_BEGIN
 
@@ -488,9 +488,9 @@ DDB_DLL DDBErr DDBBuild(const char *ddbPath, const char *source, const char *des
     // We dont use this at the moment
     std::ostringstream ss;
 
-    if (source == nullptr)
-    {
-        buildAll(ddb.get(), destPath, ss, force);
+    if (source == nullptr){
+        if (pendingOnly) buildPending(ddb.get(), destPath, ss, force);
+        else buildAll(ddb.get(), destPath, ss, force);
     } else {
         build(ddb.get(), std::string(source), destPath, ss, force);
     }
@@ -517,6 +517,20 @@ DDB_DLL DDBErr DDBIsBuildable(const char *ddbPath, const char *path, bool *isBui
     
     DDB_C_END
    
+}
+
+DDB_DLL DDBErr DDBIsBuildPending(const char *ddbPath, bool *isBuildPending) {
+
+    DDB_C_BEGIN
+
+    if (ddbPath == nullptr) throw InvalidArgsException("No ddb path provided");
+    if (isBuildPending == nullptr) throw InvalidArgsException("isBuildPending parameter is null");
+
+    const auto ddb = ddb::open(std::string(ddbPath), true);
+    *isBuildPending = ddb::isBuildPending(ddb.get());
+
+    DDB_C_END
+
 }
 
 DDBErr DDBMetaAdd(const char *ddbPath, const char *path, const char *key, const char *data, char **output){

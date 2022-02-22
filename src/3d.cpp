@@ -5,10 +5,11 @@
 #include "logger.h"
 #include "mio.h"
 #include "exceptions.h"
+#include "utils.h"
 
 namespace ddb{
 
-std::string buildObj(const std::string &inputObj, const std::string &outputNxs, bool overwrite){
+std::string buildNexus(const std::string &inputObj, const std::string &outputNxs, bool overwrite){
     std::string outFile;
 
     if (outputNxs.empty()){
@@ -23,15 +24,66 @@ std::string buildObj(const std::string &inputObj, const std::string &outputNxs, 
         else throw AppException("File " + outFile + " already exists (delete it first)");
     }
 
+    // Check that this file's dependencies are present
+    auto deps = getObjDependencies(inputObj);
+    for (auto &d : deps){
+        if (!fs::exists(d)){
+            throw BuildDepMissingException(d + " is referenced by " + inputObj + " but it's missing");
+        }
+    }
+
     NXSErr err = nexusBuild(inputObj.c_str(), outFile.c_str());
     if (err == NXSERR_EXCEPTION){
         throw AppException("Could not build nexus file for " + inputObj);
     }
 
-    // TODO: identify when files are missing
-
     return outFile;
 
+}
+
+std::vector<std::string> getObjDependencies(const std::string &obj){
+    std::vector<std::string> deps;
+    if (!fs::exists(obj)) throw FSException(obj + " does not exist");
+
+    // Parse OBJ
+    std::ifstream fin(obj);
+
+    std::string line;
+    while(std::getline(fin, line)){
+        size_t mtllibPos = line.find("mtllib");
+        if (mtllibPos == 0){
+            std::string mtlFilesLine = line.substr(std::string("mtllib").length(), std::string::npos);
+            utils::trim(mtlFilesLine);
+
+            auto mtlFiles = utils::split(mtlFilesLine, " ");
+            for (auto &mtlFile : mtlFiles){
+                deps.push_back(mtlFile);
+
+                if (fs::exists(mtlFile)){
+                    // Parse MTL
+                    std::string mtlLine;
+                    std::ifstream mtlFin(mtlFile);
+                    while(std::getline(mtlFin, mtlLine)){
+                        if (mtlLine.find("map_") == 0){
+                            auto tokens = utils::split(mtlLine, " ");
+                            if (tokens.size() > 0){
+                                auto mapFname = tokens[tokens.size() - 1];
+                                if (mapFname.rfind(".") != std::string::npos){
+                                    deps.push_back(mapFname);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (line.rfind("v") == 0 || line.rfind("vn") == 0 || line.rfind("f") == 0){
+            break;
+        }
+    }
+
+    return deps;
 }
 
 }

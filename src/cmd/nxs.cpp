@@ -36,7 +36,7 @@ void Nxs::run(cxxopts::ParseResult &opts) {
     std::string output = "";
     if (opts.count("output")) output = opts["output"].as<std::string>();
 
-    std::cout << ddb::buildObj(input, output, opts["overwrite"].as<bool>()) << std::endl;
+    std::cout << ddb::buildNexus(input, output, opts["overwrite"].as<bool>()) << std::endl;
 }
 
 }  // namespace cmd

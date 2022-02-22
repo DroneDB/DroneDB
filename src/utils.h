@@ -87,6 +87,21 @@ static inline bool sameFloat(float a, float b){
     return fabs(a - b) < F_EPSILON;
 }
 
+static inline std::vector<std::string> split(const std::string &s, const std::string &delimiter){
+    size_t posStart = 0, posEnd, delimLen = delimiter.length();
+    std::string token;
+    std::vector<std::string> res;
+
+    while ((posEnd = s.find(delimiter, posStart)) != std::string::npos) {
+        token = s.substr(posStart, posEnd - posStart);
+        posStart = posEnd + delimLen;
+        res.push_back(token);
+    }
+
+    res.push_back(s.substr(posStart));
+    return res;
+}
+
 // https://stackoverflow.com/questions/2342162/stdstring-formatting-like-sprintf/25440014
 template<typename ... Args>
 std::string stringFormat( const std::string& format, Args ... args ) {

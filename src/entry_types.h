@@ -21,7 +21,8 @@ enum EntryType {
     DroneDB = 7,
     Markdown = 8,
     Video = 9,
-    GeoVideo = 10
+    GeoVideo = 10,
+    Model = 11
 };
 
 DDB_DLL std::string typeToHuman(EntryType t);

@@ -56,7 +56,7 @@ DDB_DLL bool getPlyInfo(const fs::path &plyFile, PlyInfo &info){
 EntryType identifyPly(const fs::path &plyFile){
     PlyInfo info;
     if (getPlyInfo(plyFile, info)){
-        return info.isMesh ? Generic : PointCloud;
+        return info.isMesh ? Model : PointCloud;
     }else return Generic;
 }
 

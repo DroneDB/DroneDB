@@ -221,8 +221,9 @@ DDB_DLL DDBErr DDBMoveEntry(const char *ddbPath, const char *source, const char 
  * @param source source entry path (optional, if not specified: build all)
  * @param dest dest filesystem path (optional, if not specified: default path)
  * @param force rebuild if already existing (default false)
+ * @param pendingOnly build only pending files (default false)
  * @return DDBERR_NONE on success, an error otherwise */
-DDB_DLL DDBErr DDBBuild(const char *ddbPath, const char *source = nullptr, const char *dest = nullptr, bool force = false);
+DDB_DLL DDBErr DDBBuild(const char *ddbPath, const char *source = nullptr, const char *dest = nullptr, bool force = false, bool pendingOnly = false);
 
 /** IsBuildable
  * @param ddbPath path to the source DroneDB database (parent of ".ddb")
@@ -230,6 +231,13 @@ DDB_DLL DDBErr DDBBuild(const char *ddbPath, const char *source = nullptr, const
  * @param isBuildable if the entry is buildable
  * @return DDBERR_NONE on success, an error otherwise */
 DDB_DLL DDBErr DDBIsBuildable(const char *ddbPath, const char *path, bool *isBuildable);
+
+/** IsBuildPending
+ * @param ddbPath path to the source DroneDB database (parent of ".ddb")
+ * @param isBuildable if the entry is buildable
+ * @return DDBERR_NONE on success, an error otherwise */
+DDB_DLL DDBErr DDBIsBuildPending(const char *ddbPath, bool *isBuildPending);
+
 
 /** Add metadata
  *  @param ddbPath path to the source DroneDB database (parent of ".ddb")

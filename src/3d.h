@@ -7,10 +7,12 @@
 #include <string>
 #include "ddb_export.h"
 #include <nxs.h>
+#include <vector>
 
 namespace ddb{
 
-DDB_DLL std::string buildObj(const std::string &inputObj, const std::string &outputNxs, bool overwrite = false);
+DDB_DLL std::string buildNexus(const std::string &inputObj, const std::string &outputNxs, bool overwrite = false);
+DDB_DLL std::vector<std::string> getObjDependencies(const std::string &obj);
 
 }
 #endif // _3D_H

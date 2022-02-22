@@ -64,7 +64,9 @@ class NoStampException : public RegistryException{
 class PullRequiredException : public RegistryException{
     using RegistryException::RegistryException;
 };
-
+class BuildDepMissingException : public AppException{
+    using AppException::AppException;
+};
 class NotImplementedException : public AppException {
     using AppException::AppException;
 };
