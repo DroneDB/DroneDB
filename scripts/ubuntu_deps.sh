@@ -36,7 +36,7 @@ fi
 
 if [[ ! -f /usr/lib/libnxs.so ]]; then
     curl -L https://github.com/DroneDB/libnexus/releases/download/v1.0.0/nxs-ubuntu-$UBUNTU_VERSION-amd64.deb --output /tmp/nxs-ubuntu-$UBUNTU_VERSION-amd64.deb
-    dpkg-deb -x /tmp/nxs-ubuntu-$UBUNTU_VERSION-amd64.deb /usr
+    sudo dpkg-deb -x /tmp/nxs-ubuntu-$UBUNTU_VERSION-amd64.deb /usr
     rm /tmp/nxs-ubuntu-$UBUNTU_VERSION-amd64.deb
 fi
 
