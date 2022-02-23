@@ -265,6 +265,10 @@ fs::path Database::ddbDirectory() const{
     return fs::path(this->getOpenFile()).parent_path();
 }
 
+fs::path Database::buildDirectory() const{
+    return ddbDirectory() / DDB_BUILD_PATH;
+}
+
 MetaManager *Database::getMetaManager(){
     if (metaManager == nullptr){
         metaManager = new MetaManager(this);

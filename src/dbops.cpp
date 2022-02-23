@@ -396,8 +396,7 @@ std::string sanitize_query_param(const std::string &str) {
 
 void checkDeleteBuild(Database *db, const std::string &hash){
     if (!hash.empty()){
-        const auto buildFolder =
-            fs::path(db->getOpenFile()).parent_path() / DDB_BUILD_PATH / hash;
+        const auto buildFolder = db->buildDirectory() / hash;
 
         if (fs::exists(buildFolder)) {
             LOGD << "Removing " << (buildFolder).string();

@@ -383,9 +383,7 @@ EntryType fingerprint(const fs::path &path){
     EntryType type = EntryType::Generic;
     io::Path p(path);
 
-    bool markdown = p.checkExtension({"md"});
-
-    if (markdown)
+    if (p.checkExtension({"md"}))
         return EntryType::Markdown;
 
     bool pointCloud = p.checkExtension({"laz", "las"});
@@ -397,6 +395,9 @@ EntryType fingerprint(const fs::path &path){
         // Could be a mesh or a point cloud
         return identifyPly(path);
     }
+
+    if (p.checkExtension({"obj"}))
+        return EntryType::Model;
 
     bool jpg = p.checkExtension({"jpg", "jpeg"});
     bool dng = p.checkExtension({"dng"});

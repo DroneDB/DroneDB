@@ -7,6 +7,7 @@
 #include "ddb.h"
 #include "pointcloud.h"
 #include "cog.h"
+#include "3d.h"
 #include "dbops.h"
 #include "exceptions.h"
 #include "mio.h"
@@ -20,6 +21,9 @@ bool isBuildableInternal(const Entry& e, std::string& subfolder) {
         return true;
     }else if (e.type == GeoRaster){
         subfolder = "cog";
+        return true;
+    }else if (e.type == Model){
+        subfolder = "nxs";
         return true;
     }
 
@@ -61,21 +65,13 @@ void buildInternal(Database* db, const Entry& e,
     const auto tempFolder = outputFolder + "-temp-" + utils::generateRandomString(16);
 
     io::assureFolderExists(tempFolder);
-    const auto hardlink = baseOutputPath.string() + "_link" + fs::path(e.path).extension().string();
-    io::assureIsRemoved(hardlink);
 
     auto relativePath =
         (fs::path(db->getOpenFile()).parent_path().parent_path() / e.path)
             .string();
 
-    try {
-        io::hardlink(relativePath, hardlink);
-        LOGD << "Linked " << relativePath << " --> " << hardlink;
-        relativePath = hardlink;
-    } catch(const FSException &e){
-        LOGD << e.what();
-        // Will build directly from path
-    }
+    std::string pendFile = baseOutputPath.string() + ".pending";
+    io::assureIsRemoved(pendFile);
 
     // We could vectorize this logic, but it's an overkill by now
     try {
@@ -87,6 +83,9 @@ void buildInternal(Database* db, const Entry& e,
             built = true;
         }else if (e.type == GeoRaster){
             buildCog(relativePath, (fs::path(tempFolder) / "cog.tif").string());
+            built = true;
+        }else if (e.type == Model){
+            buildNexus(relativePath, (fs::path(tempFolder) / "model.nxz").string());
             built = true;
         }
 
@@ -101,19 +100,28 @@ void buildInternal(Database* db, const Entry& e,
         }
 
         io::assureIsRemoved(tempFolder);
-        io::assureIsRemoved(hardlink);
+    } catch(const BuildDepMissingException &e){
 
-    // Catch block is now detailed because we want to keep track of the exception
-    // catches pdal, gdal, filesystem_error, etc...
+        // Create pending file
+        std::ofstream pf(pendFile);
+        if (pf){
+            pf << utils::currentUnixTimestamp() << std::endl;
+            pf.close();
+        }else{
+            LOGD << "Error! Cannot create pending file " << baseOutputPath.string() << ".pending";
+        }
+
+        io::assureIsRemoved(tempFolder);
+
+        throw e;
     } catch(const AppException &e){
         io::assureIsRemoved(tempFolder);
-        io::assureIsRemoved(hardlink);
 
         throw e;
     } catch(...){
-
+        // Since we use third party libraries, some exceptions might not
+        // get caught otherwise
         io::assureIsRemoved(tempFolder);
-        io::assureIsRemoved(hardlink);
 
         throw AppException("Unknown build error failure for " + e.path + " (" + baseOutputPath.string() + ")");
     }
@@ -125,9 +133,10 @@ void buildAll(Database* db, const std::string& outputPath,
     LOGD << "In buildAll('" << outputPath << "')";
 
     // List all buildable files in DB
-    auto q = db->query("SELECT path, hash, type, properties, mtime, size, depth FROM entries WHERE type = ? OR type = ?");
+    auto q = db->query("SELECT path, hash, type, properties, mtime, size, depth FROM entries WHERE type = ? OR type = ? OR type = ?");
     q->bind(1, PointCloud);
     q->bind(2, GeoRaster);
+    q->bind(3, Model);
 
     while (q->fetch()) {
         Entry e(q->getText(0), q->getText(1), q->getInt(2), q->getText(3),
@@ -149,6 +158,52 @@ void build(Database* db, const std::string& path, const std::string& outputPath,
     if (!entryExists) throw InvalidArgsException(path + " is not a valid path in the database.");
 
     buildInternal(db, e, outputPath, output, force);
+}
+
+void buildPending(Database *db, const std::string &outputPath, std::ostream &output, bool force){
+    auto buildDir = db->buildDirectory();
+    if (!fs::exists(buildDir)) return;
+
+    for (auto i = fs::recursive_directory_iterator(buildDir);
+         i != fs::recursive_directory_iterator(); ++i) {
+        if (i->path().extension() == ".pending"){
+            auto hash = i->path().filename().replace_extension("").string();
+
+            // Check if file still exists in our index
+            auto q = db->query("SELECT path, hash, type, properties, mtime, size, depth FROM entries WHERE hash = ?");
+            q->bind(1, hash);
+            bool found = false;
+
+            while (q->fetch()) {
+                found = true;
+                Entry e(q->getText(0), q->getText(1), q->getInt(2), q->getText(3),
+                        q->getInt64(4), q->getInt64(5), q->getInt(6));
+
+                io::assureIsRemoved(i->path());
+
+                // Call build
+                buildInternal(db, e, outputPath, output, force);
+            }
+
+            if (!found){
+                io::assureIsRemoved(i->path());
+            }
+        }
+    }
+}
+
+bool isBuildPending(Database *db){
+    auto buildDir = db->buildDirectory();
+    if (!fs::exists(buildDir)) return false;
+
+    for (auto i = fs::recursive_directory_iterator(buildDir);
+         i != fs::recursive_directory_iterator(); ++i) {
+        if (i->path().extension() == ".pending"){
+            return true;
+        }
+    }
+
+    return false;
 }
 
 }  // namespace ddb

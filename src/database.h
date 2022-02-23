@@ -4,6 +4,8 @@
 #ifndef DATABASE_H
 #define DATABASE_H
 
+#define DDB_BUILD_PATH "build"
+
 #include "metamanager.h"
 #include "sqlite_database.h"
 #include "ddb_export.h"
@@ -46,6 +48,7 @@ class Database : public SqliteDatabase {
       DDB_DLL fs::path rootDirectory() const;
       DDB_DLL fs::path ddbDirectory() const;
       DDB_DLL fs::path tmpDirectory() const;
+      DDB_DLL fs::path buildDirectory() const;
 
       DDB_DLL MetaManager* getMetaManager();
 };
