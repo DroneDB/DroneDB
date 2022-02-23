@@ -11,9 +11,10 @@ namespace ddb{
 
 std::string buildNexus(const std::string &inputObj, const std::string &outputNxs, bool overwrite){
     std::string outFile;
+    fs::path p(inputObj);
 
     if (outputNxs.empty()){
-        fs::path p(inputObj);
+        
         outFile = p.replace_filename(p.filename().replace_extension(".nxz")).string();
     }else{
         outFile = outputNxs;
@@ -27,7 +28,8 @@ std::string buildNexus(const std::string &inputObj, const std::string &outputNxs
     // Check that this file's dependencies are present
     auto deps = getObjDependencies(inputObj);
     for (auto &d : deps){
-        if (!fs::exists(d)){
+        fs::path relPath = p.parent_path() / d;
+        if (!fs::exists(relPath)) {
             throw BuildDepMissingException(d + " is referenced by " + inputObj + " but it's missing");
         }
     }
@@ -47,6 +49,7 @@ std::vector<std::string> getObjDependencies(const std::string &obj){
 
     // Parse OBJ
     std::ifstream fin(obj);
+    fs::path p(obj);
 
     std::string line;
     while(std::getline(fin, line)){
@@ -58,11 +61,12 @@ std::vector<std::string> getObjDependencies(const std::string &obj){
             auto mtlFiles = utils::split(mtlFilesLine, " ");
             for (auto &mtlFile : mtlFiles){
                 deps.push_back(mtlFile);
+                fs::path mtlRelPath = p.parent_path() / mtlFile;
 
-                if (fs::exists(mtlFile)){
+                if (fs::exists(mtlRelPath)) {
                     // Parse MTL
                     std::string mtlLine;
-                    std::ifstream mtlFin(mtlFile);
+                    std::ifstream mtlFin(mtlRelPath.string());
                     while(std::getline(mtlFin, mtlLine)){
                         if (mtlLine.find("map_") == 0){
                             auto tokens = utils::split(mtlLine, " ");

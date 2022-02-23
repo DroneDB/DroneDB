@@ -18,7 +18,8 @@ extern "C" {
 
 enum DDBErr {
     DDBERR_NONE = 0, // No error
-    DDBERR_EXCEPTION = 1 // Generic app exception
+    DDBERR_EXCEPTION = 1, // Generic app exception
+    DDBERR_BUILDDEPMISSING = 2
 };
 
 #define DDB_C_BEGIN try {
