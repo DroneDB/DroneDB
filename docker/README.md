@@ -28,7 +28,7 @@ Navigate to the root of a directory tree holding your imagery - for example if y
 
 To get starteed, run DroneDB like:
 
-`docker run -it -v $(pwd):/dronedb-data dronedb/build init`
+`docker run -it -v ${pwd}:/dronedb-data dronedb/build init`
 
 ...to initialise a database. `/dronedb-data` is mapped as a working directory inside the container. You should now see a `.ddb` directory in your `/drone-images` directory:
 
@@ -36,10 +36,7 @@ To get starteed, run DroneDB like:
 
 To add imagery to the database, run:
 
-`docker run -it -v $(pwd):/dronedb-data dronedb/build add mission1/imagery/*.JPG`
+`docker run -it -v ${pwd}:/dronedb-data dronedb/build add mission1/imagery/*.JPG`
 
 ...you should see the sqlite file inside `.ddb` grow in size, and some output (one line per image) on your terminal.
 
-## Caveats
-
-This docker build may have unexpected misbehaviour - feel free to fix wonky things via pull requests!
