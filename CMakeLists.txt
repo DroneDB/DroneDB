@@ -88,6 +88,7 @@ if (WIN32)
     download_dependency("zlib.zip" "https://github.com/DroneDB/ddb_data/releases/download/v0.9.2/zlib-1-2-11.zip")
     download_dependency("libzip.zip" "https://github.com/DroneDB/ddb_data/releases/download/v0.9.2/zlib-1-2-11-libzip-1-8-0.zip")
     download_dependency("sqlite3.zip" "https://github.com/DroneDB/ddb_data/releases/download/v0.9.2/sqlite-dll-win64-x64-3360000.zip")
+    download_dependency("nxs.zip" "https://github.com/DroneDB/libnexus/releases/download/v1.0.0/nxs-windows-64bit.zip")
     
     extract_dependency("gdal_libs.zip" "gdal/include" "gdal")
     extract_dependency("gdal_bins.zip" "gdal/bin" "gdal")
@@ -97,6 +98,7 @@ if (WIN32)
     extract_dependency("zlib.zip" "zlib/include" "zlib")
     extract_dependency("libzip.zip" "libzip/include" "libzip")
     extract_dependency("sqlite3.zip" "sqlite3" "sqlite3")
+    extract_dependency("nxs.zip" "nxs" "nxs")
     
     set(GDAL_LIBRARY "${DOWNLOADS_DIR}/gdal/lib/gdal_i.lib")
     set(GDAL_INCLUDE_DIR "${DOWNLOADS_DIR}/gdal/include")
@@ -109,6 +111,9 @@ if (WIN32)
     set(PDAL_INCLUDE_DIR "${DOWNLOADS_DIR}/pdal/include")
     set(Zip_LIBRARIES "${DOWNLOADS_DIR}/libzip/lib/zip.lib")
     set(Zip_INCLUDE_DIRS "${DOWNLOADS_DIR}/libzip/include")
+    set(NXS_LIBRARIES "${DOWNLOADS_DIR}/nxs/lib/nxs.lib")
+    set(NXS_INCLUDE_DIR "${DOWNLOADS_DIR}/nxs/include")
+    set(NXS_DIR "${DOWNLOADS_DIR}/nxs/share/cmake/nxs")
 
     include_directories("${DOWNLOADS_DIR}/laszip/include")
 
@@ -185,6 +190,7 @@ if (WIN32)
     copy_dlls("zlib/bin/*.dll")
     copy_dlls("libzip/bin/*.dll")
     copy_dlls("sqlite3/bin/*.dll")
+    copy_dlls("nxs/lib/*.dll")
 
     file(COPY "${DOWNLOADS_DIR}/gdal/bin/proj7/share/proj.db" DESTINATION ${CMAKE_BINARY_DIR})
 
