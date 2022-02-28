@@ -39,7 +39,7 @@ float DSMService::getAltitude(double latitude, double longitude){
             if (!it.second.hasNodata || !utils::sameFloat(elevation, it.second.nodata)){
                 return elevation;
             }else{
-                LOGW << "DSM does not have a value for " << point;
+                LOGD << "DSM does not have a value for " << point;
                 return 0.0;
             }
         }
@@ -61,11 +61,11 @@ float DSMService::getAltitude(double latitude, double longitude){
                 return getAltitude(latitude, longitude);
             }
         }catch(const NetException &e){
-            LOGW << e.what();
+            LOGD << e.what();
         }
     }
 
-    LOGW << "Cannot get elevation from DSM service";
+    LOGD << "Cannot get elevation from DSM service";
     return 0;
 }
 

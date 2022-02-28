@@ -189,7 +189,7 @@ int GlobalMercator::zoomForPixelSize(double pixelSize) const {
             return i - 1;
         }
     }
-    LOGW << "Exceeded max zoom level";
+    LOGD << "Exceeded max zoom level";
     return 0;
 }
 

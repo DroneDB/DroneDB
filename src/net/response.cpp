@@ -87,7 +87,7 @@ size_t Response::WriteCallback(void *contents, size_t size, size_t nmemb,
     }
     if (!ptr) {
         /* out of memory! */
-        LOGW << "not enough memory (realloc returned NULL)\n";
+        LOGD << "not enough memory (realloc returned NULL)\n";
         return 0;
     }
 

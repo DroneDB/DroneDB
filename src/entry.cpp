@@ -417,7 +417,7 @@ EntryType fingerprint(const fs::path &path){
             }
             GDALClose(hDataset);
         }else{
-            LOGW << "Cannot open " << p.string().c_str() << " for georaster test";
+            LOGD << "Cannot open " << p.string().c_str() << " for georaster test";
         }
     }
 
