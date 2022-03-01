@@ -23,6 +23,7 @@ We welcome feedback from the community to decide what to implement or prioritize
  - [ ] User management UI
  - [ ] Logo/brand customizations
  - [ ] Organizational accounts
+ - [ ] Improve Documentation
  - [ ] Processing (ability to perform operations on point clouds, orthophotos, images, etc.)
  - [ ] Plugins framework
 
