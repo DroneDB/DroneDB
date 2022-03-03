@@ -186,6 +186,19 @@ std::string EptTiler::tile(int tz, int tx, int ty, uint8_t **outBuffer, int *out
 
     CoordsTransformer ict(eptInfo.wktProjection, 3857);
 
+    bool normalize = false;
+    for (pdal::PointId idx = 0; idx < point_view->size(); ++idx) {
+        auto p = point_view->point(idx);
+        uint16_t red = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Red);
+        uint16_t green = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Green);
+        uint16_t blue = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Blue);
+
+        if (red > 255 || green > 255 || blue > 255){
+            normalize = true;
+            break;
+        }
+    }
+
     for (pdal::PointId idx = 0; idx < point_view->size(); ++idx) {
         auto p = point_view->point(idx);
         double x = p.getFieldAs<double>(pdal::Dimension::Id::X);
@@ -200,9 +213,20 @@ std::string EptTiler::tile(int tz, int tx, int ty, uint8_t **outBuffer, int *out
         
         if (px >= 0 && px < paddedTileSize && py >= 0 && py < paddedTileSize) {
             // Within bounds
-            uint8_t red = p.getFieldAs<uint8_t>(pdal::Dimension::Id::Red);
-            uint8_t green = p.getFieldAs<uint8_t>(pdal::Dimension::Id::Green);
-            uint8_t blue = p.getFieldAs<uint8_t>(pdal::Dimension::Id::Blue);
+            PointColor color;
+            uint16_t red = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Red);
+            uint16_t green = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Green);
+            uint16_t blue = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Blue);
+
+            if (normalize){
+                color.r = red >> 8;
+                color.g = green >> 8;
+                color.b = blue >> 8;
+            }else{
+                color.r = static_cast<uint8_t>(red);
+                color.g = static_cast<uint8_t>(green);
+                color.b = static_cast<uint8_t>(blue);
+            }
 
             int off_px = px - pointRadius;
             int off_py = py - pointRadius;
@@ -210,7 +234,7 @@ std::string EptTiler::tile(int tz, int tx, int ty, uint8_t **outBuffer, int *out
             if (zBuffer.get()[py * paddedTileSize + px] < z) {
                 zBuffer.get()[py * paddedTileSize + px] = z;
                 drawCircle(buffer.get(), alphaBuffer.get(), off_px, off_py,
-                           pointRadius, red, green, blue, tileSize, wSize);
+                           pointRadius, color.r, color.g, color.b, tileSize, wSize);
             }
         }
     }
