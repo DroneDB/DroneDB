@@ -5,6 +5,6 @@
 #define CONSTANTS_H
 
 #define DEFAULT_REGISTRY "hub.dronedb.app"
-#define DEFAULT_DSM_SERVICE_URL "https://portal.opentopography.org/API/globaldem?demtype=AW3D30&west={west}&south={south}&east={east}&north={north}&outputFormat=GTiff"
+#define DEFAULT_DSM_SERVICE_URL "https://portal.opentopography.org/API/globaldem?demtype=AW3D30&west={west}&south={south}&east={east}&north={north}&outputFormat=GTiff&API_Key=4c26970bb73539ee757dcb3fbc72363c"
 
 #endif // CONSTANTS_H
