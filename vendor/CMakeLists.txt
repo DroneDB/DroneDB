@@ -5,6 +5,7 @@ add_subdirectory("hash-library")
 add_subdirectory("googletest")
 add_subdirectory("base64")
 add_subdirectory("url")
+add_subdirectory("segvcatch")
 
 file(GLOB UNTWINE_SRCS
     ${CMAKE_CURRENT_SOURCE_DIR}/untwine/epf/*.cpp

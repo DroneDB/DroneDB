@@ -25,6 +25,7 @@
 #include "tilerhelper.h"
 #include "utils.h"
 #include "version.h"
+#include "../vendor/segvcatch/segvcatch.h"
 
 using namespace ddb;
 
@@ -33,6 +34,16 @@ char ddbLastError[255];
 // Could not be enough in a multi-threaded environment: check std::once_flag and
 // std::call_once instead
 static bool initialized = false;
+
+void handleSegv()
+{
+    throw ddb::AppException("Application encoutered a segfault");
+}
+
+void handleFpe()
+{
+    throw ddb::AppException("Application encountered a floating point exception");
+}
 
 void DDBRegisterProcess(bool verbose) {
     // Prevent multiple initializations
@@ -76,6 +87,11 @@ void DDBRegisterProcess(bool verbose) {
     Database::Initialize();
     net::Initialize();
     GDALAllRegister();
+
+    // Black magic to catch segfaults/fpes and throw
+    // C++ exceptions instead
+    segvcatch::init_segv(&handleSegv);
+    segvcatch::init_fpe(&handleFpe);
 
     initialized = true;
 }
