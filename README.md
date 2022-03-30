@@ -23,7 +23,8 @@ We welcome feedback from the community to decide what to implement or prioritize
  - [ ] 1.0 release on Registry (expected mid 2022)
  - [ ] User management UI
  - [ ] Logo/brand customizations
- - [ ] Organizational accounts
+ - [X] Organizational accounts
+ - [ ] STAC catalog generation
  - [ ] Improve Documentation
  - [ ] Processing (ability to perform operations on point clouds, orthophotos, images, etc.)
  - [ ] Plugins framework
