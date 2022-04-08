@@ -10,8 +10,13 @@ namespace ddb{
 void AuthManager::ReadFromDisk(){
     if (fs::exists(authFile)){
         std::ifstream fin(authFile);
-        fin >> auth;
-        LOGD << "Read " << authFile;
+        try{
+            LOGD << "Read " << authFile.string();
+            fin >> auth;
+        }catch(const json::exception &e){
+            LOGD << "Error reading " << authFile.string() << ": " << e.what();
+        }
+
     }
 }
 
