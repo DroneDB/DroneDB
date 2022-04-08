@@ -17,6 +17,10 @@ namespace ddb {
 bool isBuildableInternal(const Entry& e, std::string& subfolder) {
 
     if (e.type == PointCloud) {
+        // Special case: do not build if this entry is in a "ept-data" folder
+        // as it indicates an EPT dataset file
+        if (fs::path(e.path).parent_path().filename().string() == "ept-data") return false;
+
         subfolder = "ept";
         return true;
     }else if (e.type == GeoRaster){
