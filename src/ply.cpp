@@ -20,6 +20,7 @@ DDB_DLL bool getPlyInfo(const fs::path &plyFile, PlyInfo &info){
     if (line != "ply") return false;
 
     info.isMesh = false; // Assumed
+    info.hasTextures = false; // Assumed
     info.dimensions.clear();
     info.vertexCount = 0;
 
@@ -38,6 +39,8 @@ DDB_DLL bool getPlyInfo(const fs::path &plyFile, PlyInfo &info){
                 auto propName = line.substr(propNamePos + 1, std::string::npos);
                 info.dimensions.push_back(propName);
             }
+        }else if (auto p = line.find("comment TextureFile ") != std::string::npos){
+            info.hasTextures = true;
         }else if (auto p = line.find("element face ") != std::string::npos){
             info.isMesh = true;
         }else if (line == "end_header"){
@@ -56,7 +59,13 @@ DDB_DLL bool getPlyInfo(const fs::path &plyFile, PlyInfo &info){
 EntryType identifyPly(const fs::path &plyFile){
     PlyInfo info;
     if (getPlyInfo(plyFile, info)){
-        return info.isMesh ? Model : PointCloud;
+        if (info.isMesh){
+            // We do not support textured PLY models
+            // (nexus has trouble building some of them?)
+            return info.hasTextures ? Generic : Model;
+        }else{
+            return PointCloud;
+        }
     }else return Generic;
 }
 

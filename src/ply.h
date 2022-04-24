@@ -15,6 +15,7 @@ namespace ddb{
 struct PlyInfo{
     unsigned long vertexCount;
     bool isMesh;
+    bool hasTextures;
     std::vector<std::string> dimensions;
 };
 

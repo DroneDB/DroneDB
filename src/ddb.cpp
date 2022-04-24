@@ -35,13 +35,11 @@ char ddbLastError[255];
 // std::call_once instead
 static bool initialized = false;
 
-void handleSegv()
-{
+void handleSegv(){
     throw ddb::AppException("Application encoutered a segfault");
 }
 
-void handleFpe()
-{
+void handleFpe(){
     throw ddb::AppException("Application encountered a floating point exception");
 }
 
