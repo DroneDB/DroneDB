@@ -50,7 +50,8 @@ void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
         entry.size = p.getSize();
         entry.type = fingerprint(p.get());
 
-        bool image = entry.type == EntryType::Image || entry.type == EntryType::GeoImage;
+        bool pano = entry.type == EntryType::Panorama || entry.type == EntryType::GeoPanorama;
+        bool image = entry.type == EntryType::Image || entry.type == EntryType::GeoImage || pano;
         bool video = entry.type == EntryType::Video || entry.type == EntryType::GeoVideo;
 
         if (image || video) {
@@ -66,7 +67,10 @@ void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
                     Focal focal;
                     CameraOrientation cameraOri;
 
-                    auto imageSize = e.extractImageSize();
+                    ImageSize imageSize(0, 0);
+                    if (image) imageSize = e.extractImageSize();
+                    else if (video) imageSize = e.extractVideoSize();
+
                     entry.properties["width"] = imageSize.width;
                     entry.properties["height"] = imageSize.height;
                     entry.properties["captureTime"] = e.extractCaptureTime();
@@ -102,12 +106,26 @@ void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
                         //e.printAllTags();
 
                         // Estimate image footprint
-                        if (image){
+                        if (image && !pano){
                             double relAltitude = 0.0;
 
                             if (e.extractRelAltitude(relAltitude) && sensorSize.width > 0.0 && focal.length > 0.0) {
                                 calculateFootprint(sensorSize, geo, focal, cameraOri, relAltitude, entry.polygon_geom);
                             }
+                        }
+                    }
+
+                    if (pano){
+                        PanoramaInfo pInfo;
+                        if (e.extractPanoramaInfo(pInfo)){
+                            entry.properties["projectionType"] = pInfo.projectionType;
+                            entry.properties["croppedWidth"] = pInfo.croppedWidth;
+                            entry.properties["croppedHeight"] = pInfo.croppedHeight;
+                            entry.properties["croppedX"] = pInfo.croppedX;
+                            entry.properties["croppedY"] = pInfo.croppedY;
+                            entry.properties["poseHeading"] = pInfo.poseHeading;
+                            entry.properties["posePitch"] = pInfo.posePitch;
+                            entry.properties["poseRoll"] = pInfo.poseRoll;
                         }
                     }
                 } else {
@@ -434,11 +452,17 @@ EntryType fingerprint(const fs::path &path){
             image->readMetadata();
             ExifParser e(image.get());
 
+            if (type == EntryType::Image){
+                // Panorama?
+                if (image->pixelWidth() / image->pixelHeight() >= 2) type = EntryType::Panorama;
+            }
+
             if (e.hasTags()) {
                 GeoLocation geo;
                 if (e.extractGeo(geo)) {
                     if (type == EntryType::Image) type = EntryType::GeoImage;
                     else if (type == EntryType::Video) type = EntryType::GeoVideo;
+                    else if (type == EntryType::Panorama) type = EntryType::GeoPanorama;
                 } else {
                     // Not a georeferenced image, just a plain image
                 }

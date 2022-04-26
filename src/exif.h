@@ -41,6 +41,17 @@ struct GeoLocation {
     DDB_DLL GeoLocation(double latitude, double longitude, double altitude) : latitude(latitude), longitude(longitude), altitude(altitude) {};
 };
 
+struct PanoramaInfo{
+    std::string projectionType;
+    int croppedWidth;
+    int croppedHeight;
+    int croppedX;
+    int croppedY;
+    float poseHeading; // 0 to 360
+    float posePitch; // -90 to 90
+    float poseRoll; // -180 to 180
+};
+
 struct CameraOrientation {
     double pitch; // degrees. -90 = nadir, 0 = front straight
     double yaw; // degress. 0 = magnetic north, 90 = east, -90 = west, 180 = south
@@ -58,11 +69,11 @@ inline std::ostream& operator<<(std::ostream& os, const CameraOrientation& c)
 
 
 class ExifParser {
+    Exiv2::Image *image;
     Exiv2::ExifData exifData;
     Exiv2::XmpData xmpData;
   public:
-    DDB_DLL ExifParser(const Exiv2::Image *image) : exifData(image->exifData()), xmpData(image->xmpData()) {};
-    DDB_DLL ExifParser(const Exiv2::ExifData &exifData, const Exiv2::XmpData &xmpData) : exifData(exifData), xmpData(xmpData) {};
+    DDB_DLL ExifParser(Exiv2::Image *image) : image(image), exifData(image->exifData()), xmpData(image->xmpData()) {};
 
     DDB_DLL Exiv2::ExifData::const_iterator findExifKey(const std::string &key);
     DDB_DLL Exiv2::ExifData::const_iterator findExifKey(const std::initializer_list<std::string>& keys);
@@ -70,6 +81,7 @@ class ExifParser {
     DDB_DLL Exiv2::XmpData::const_iterator findXmpKey(const std::initializer_list<std::string>& keys);
 
     DDB_DLL ImageSize extractImageSize();
+    DDB_DLL ImageSize extractVideoSize();
     DDB_DLL std::string extractMake();
     DDB_DLL std::string extractModel();
     DDB_DLL std::string extractSensor();
@@ -86,6 +98,7 @@ class ExifParser {
     DDB_DLL int extractImageOrientation();
 
     DDB_DLL bool extractCameraOrientation(CameraOrientation &cameraOri);
+    DDB_DLL bool extractPanoramaInfo(PanoramaInfo &info);
 
     DDB_DLL void printAllTags();
 

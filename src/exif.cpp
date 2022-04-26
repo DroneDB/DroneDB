@@ -43,12 +43,14 @@ ImageSize ExifParser::extractImageSize() {
     auto imgWidth = findExifKey({"Exif.Photo.PixelXDimension", "Exif.Image.ImageWidth"});
     auto imgHeight = findExifKey({"Exif.Photo.PixelYDimension", "Exif.Image.ImageLength"});
 
-    // TODO: fallback on actual image size
-
     if (imgWidth != exifData.end() && imgHeight != exifData.end()) {
         return ImageSize(static_cast<int>(imgWidth->toLong()), static_cast<int>(imgHeight->toLong()));
     }
 
+    return ImageSize(image->pixelWidth(), image->pixelHeight());
+}
+
+ImageSize ExifParser::extractVideoSize() {
     auto xmpWidth = findXmpKey({"Xmp.video.Width"});
     auto xmpHeight = findXmpKey({"Xmp.video.Height"});
     if (xmpWidth != xmpData.end() && xmpHeight != xmpData.end()){
@@ -415,6 +417,42 @@ bool ExifParser::extractCameraOrientation(CameraOrientation &cameraOri) {
         cameraOri.pitch += -90;
         cameraOri.roll *= -1;
     }
+
+    return true;
+}
+
+bool ExifParser::extractPanoramaInfo(PanoramaInfo &info){
+    auto imSize = extractImageSize();
+
+    // Defaults
+    info.projectionType = "equirectangular";
+    info.croppedWidth = imSize.width;
+    info.croppedHeight = imSize.height;
+    info.croppedX = 0;
+    info.croppedY = 0;
+    info.poseHeading = 0.0f;
+    info.posePitch = 0.0f;
+    info.poseRoll = 0.0f;
+
+    auto projectionType = findXmpKey({"Xmp.GPano.ProjectionType"});
+    auto croppedWidth = findXmpKey({"Xmp.GPano.CroppedAreaImageWidthPixels"});
+    auto croppedHeight = findXmpKey({"Xmp.GPano.CroppedAreaImageHeightPixels"});
+    auto croppedX = findXmpKey({"Xmp.GPano.CroppedAreaLeftPixels"});
+    auto croppedY = findXmpKey({"Xmp.GPano.CroppedAreaTopPixels"});
+    auto poseHeading = findXmpKey({"Xmp.GPano.PoseHeadingDegrees"});
+    auto posePitch = findXmpKey({"Xmp.GPano.PosePitchDegrees"});
+    auto poseRoll = findXmpKey({"Xmp.GPano.PoseRollDegrees"});
+
+    if (projectionType != xmpData.end()) info.projectionType = projectionType->toString();
+    if (croppedWidth != xmpData.end() && croppedHeight != xmpData.end()){
+        info.croppedWidth = croppedWidth->toLong();
+        info.croppedHeight = croppedHeight->toLong();
+    }
+    if (croppedX != xmpData.end()) info.croppedX = croppedX->toLong();
+    if (croppedY != xmpData.end()) info.croppedY = croppedY->toLong();
+    if (poseHeading != xmpData.end()) info.poseHeading = poseHeading->toFloat();
+    if (posePitch != xmpData.end()) info.posePitch = posePitch->toFloat();
+    if (poseRoll != xmpData.end()) info.poseRoll = poseRoll->toFloat();
 
     return true;
 }
