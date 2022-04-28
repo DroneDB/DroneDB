@@ -40,12 +40,12 @@ Exiv2::XmpData::const_iterator ExifParser::findXmpKey(const std::initializer_lis
 }
 
 ImageSize ExifParser::extractImageSize() {
-    auto imgWidth = findExifKey({"Exif.Photo.PixelXDimension", "Exif.Image.ImageWidth"});
-    auto imgHeight = findExifKey({"Exif.Photo.PixelYDimension", "Exif.Image.ImageLength"});
+//    auto imgWidth = findExifKey({"Exif.Photo.PixelXDimension", "Exif.Image.ImageWidth"});
+//    auto imgHeight = findExifKey({"Exif.Photo.PixelYDimension", "Exif.Image.ImageLength"});
 
-    if (imgWidth != exifData.end() && imgHeight != exifData.end()) {
-        return ImageSize(static_cast<int>(imgWidth->toLong()), static_cast<int>(imgHeight->toLong()));
-    }
+//    if (imgWidth != exifData.end() && imgHeight != exifData.end()) {
+//        return ImageSize(static_cast<int>(imgWidth->toLong()), static_cast<int>(imgHeight->toLong()));
+//    }
 
     return ImageSize(image->pixelWidth(), image->pixelHeight());
 }
