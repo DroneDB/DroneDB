@@ -806,7 +806,7 @@ ZoneDetect *ZDOpenDatabase(const char *path)
         memset(library, 0, sizeof(*library));
 
 #if defined(_MSC_VER) || defined(__MINGW32__)
-        library->fd = CreateFile(path, GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+        library->fd = CreateFile(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
         if (library->fd == INVALID_HANDLE_VALUE) {
             zdError(ZD_E_DB_OPEN, (int)GetLastError());
             goto fail;
