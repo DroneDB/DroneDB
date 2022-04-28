@@ -16,7 +16,7 @@ https://docs.dronedb.app
 
 We welcome feedback from the community to decide what to implement or prioritize next. Here's the current list of features that are going to be implemented soon:
 
- - [ ] Support for parsing/display of 360/180 panoramic images
+ - [X] Support for parsing/display of 360/180 panoramic images
  - [ ] Support for adding annotations to maps
  - [ ] Persistent annotations/measurements on point clouds
  - [ ] Support for adding measurements to maps
