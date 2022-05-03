@@ -11,6 +11,6 @@ NAN_METHOD(add);
 NAN_METHOD(remove);
 NAN_METHOD(list);
 NAN_METHOD(chattr);
-
+NAN_METHOD(get);
 
 #endif

@@ -181,6 +181,27 @@ DDBErr DDBInfo(const char** paths, int numPaths, char** output,
     DDB_C_END
 }
 
+DDBErr DDBGet(const char *ddbPath, const char *path, char **output){
+    DDB_C_BEGIN
+    if (ddbPath == nullptr) throw InvalidArgsException("No ddb path provided");
+    if (path == nullptr) throw InvalidArgsException("No path provided");
+    const auto db = ddb::open(std::string(ddbPath), false);
+
+    auto entries = ddb::getMatchingEntries(db.get(), std::string(path));
+    std::string entryJson;
+    if (entries.size() == 1){
+        entryJson = entries[0].toJSONString();
+    }else if (entries.size() > 1){
+        throw InvalidArgsException("Multiple entries were returned for " + std::string(path));
+    }else{
+        throw InvalidArgsException("No entry " + std::string(path));
+    }
+    utils::copyToPtr(entryJson, output);
+
+    DDB_C_END
+}
+
+
 DDBErr DDBList(const char* ddbPath, const char** paths, int numPaths,
                char** output, const char* format, bool recursive,
                int maxRecursionDepth) {

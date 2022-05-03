@@ -79,6 +79,13 @@ DDB_DLL DDBErr DDBRemove(const char *ddbPath, const char **paths, int numPaths);
 DDB_DLL DDBErr DDBInfo(const char **paths, int numPaths, char** output, const char *format = "text", bool recursive = false, int maxRecursionDepth = 0,
                        const char *geometry = "auto", bool withHash = false, bool stopOnError = true);
 
+/** Retrieve a single entry from the index
+ * @param ddbPath path to a DroneDB database (parent of ".ddb")
+ * @param path path of the entry
+ * @param output pointer to C-string where to store result (JSON)
+ * @return DDBERR_NONE on success, an error otherwise */
+DDB_DLL DDBErr DDBGet(const char *ddbPath, const char *path, char **output);
+
 /** List files inside index 
  * @param ddbPath path to a DroneDB database (parent of ".ddb")
  * @param paths array of paths to parse

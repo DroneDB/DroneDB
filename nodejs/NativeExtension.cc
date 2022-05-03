@@ -25,6 +25,7 @@ NAN_MODULE_INIT(InitAll) {
     NAN_EXPORT(target, list);
     NAN_EXPORT(target, login);
     NAN_EXPORT(target, chattr);
+    NAN_EXPORT(target, get);
 
 	DDBRegisterProcess();
 }

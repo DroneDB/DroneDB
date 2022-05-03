@@ -255,3 +255,47 @@ NAN_METHOD(chattr) {
 
     Nan::AsyncQueueWorker(new ChattrWorker(callback, ddbPath, attrsJson));
 }
+
+class GetWorker : public Nan::AsyncWorker {
+ public:
+  GetWorker(Nan::Callback *callback, const std::string &ddbPath, const std::string &path)
+    : AsyncWorker(callback, "nan:GetWorker"),
+      ddbPath(ddbPath), path(path) {}
+  ~GetWorker() {}
+
+  void Execute () {
+    if (DDBGet(ddbPath.c_str(), path.c_str(), &output) != DDBERR_NONE){
+        SetErrorMessage(DDBGetLastError());
+    }
+  }
+
+  void HandleOKCallback () {
+     Nan::HandleScope scope;
+
+     Nan::JSON json;
+     v8::Local<v8::Value> argv[] = {
+         Nan::Null(),
+         json.Parse(Nan::New<v8::String>(output).ToLocalChecked()).ToLocalChecked()
+     };
+
+     delete output; // TODO: is this a leak if the call fails? How do we de-allocate on failure?
+     callback->Call(2, argv, async_resource);
+   }
+
+ private:
+    std::string ddbPath;
+    std::string path;
+ 
+    char *output;
+
+};
+
+NAN_METHOD(get) {
+    ASSERT_NUM_PARAMS(3);
+
+    BIND_STRING_PARAM(ddbPath, 0);
+    BIND_STRING_PARAM(path, 1);
+    BIND_FUNCTION_PARAM(callback, 2);
+
+    Nan::AsyncQueueWorker(new GetWorker(callback, ddbPath, path));
+}
