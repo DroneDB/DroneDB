@@ -136,67 +136,12 @@ void Registry::clone(const std::string &organization,
 
     this->ensureTokenValidity();
 
-    const auto downloadUrl =
-        this->url + "/orgs/" + organization + "/ds/" + dataset + "/download";
+    initIndex(folder);
+    const auto db = ddb::open(folder, false);
 
-    LOGD << "Downloading dataset '" << dataset << "' of organization '"
-         << organization << "'";
-    LOGD << "To folder: " << folder;
-
-    LOGD << "Download url = " << downloadUrl;
-
-    const auto tempFile =
-        io::Path(fs::path(folder) / utils::generateRandomString(8))
-            .string() +
-        ".tmp";
-
-    LOGD << "Temp file = " << tempFile;
-
-    auto start = std::chrono::system_clock::now();
-    size_t prevBytes = 0;
-
-    auto res = net::GET(downloadUrl)
-                   .authCookie(this->authToken)
-                   .progressCb([&start, &prevBytes, &out](size_t txBytes,
-                                                          size_t totalBytes) {
-                       if (txBytes == prevBytes) return true;
-
-                       const auto now = std::chrono::system_clock::now();
-
-                       const std::chrono::duration<double> dT = now - start;
-
-                       if (dT.count() < 1) return true;
-
-                       const auto dData = txBytes - prevBytes;
-                       const auto speed = dData / dT.count();
-
-                       out << "Downloading " << io::bytesToHuman(txBytes)
-                           << " @ " << io::bytesToHuman(speed) << "/s\t\t\r";
-                       out.flush();
-
-                       prevBytes = txBytes;
-                       start = now;
-
-                       return true;
-                   })
-                   .downloadToFile(tempFile);
-
-    if (res.status() != 200) this->handleError(res);
-
-    out << std::endl;
-
-    zip::extractAll(tempFile, folder, &out);
-
-    io::assureIsRemoved(tempFile);
-
-    const auto db = ddb::open(std::string(folder), false);
-    syncLocalMTimes(db.get());
-
-    SyncManager syncManager(db.get());
     TagManager tagManager(db.get());
-
-    syncManager.setLastStamp(this->url);
     tagManager.setTag(this->url + "/" + organization + "/" + dataset);
+    this->pull(folder, MergeStrategy::KeepTheirs, out);
 }
 
 std::string Registry::getAuthToken() { return std::string(this->authToken); }
@@ -599,8 +544,6 @@ void Registry::pull(const std::string &path, const MergeStrategy mergeStrategy,
     // Inform user if nothing was needed
     if (delta.empty()){
         out << "Everything up-to-date" << std::endl;
-    }else{
-        out << "Pull completed" << std::endl;
     }
 }
 

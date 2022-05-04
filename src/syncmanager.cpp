@@ -34,9 +34,14 @@ json SyncManager::getLastStamp(const std::string &registry) {
     json j;
     i >> j;
 
-    if (!j.contains(registry)) throw NoStampException("Tried to get last stamp for registry " + registry + " but found none");
-
-    return j[registry];
+    //if (!j.contains(registry)) throw NoStampException("Tried to get last stamp for registry " + registry + " but found none");
+    if (!j.contains(registry)){
+        // Initialize
+        setLastStamp(registry, this->db);
+        return getLastStamp(registry);
+    }else{
+        return j[registry];
+    }
 }
 
 void SyncManager::setLastStamp(const std::string& registry, Database *sourceDb) {
