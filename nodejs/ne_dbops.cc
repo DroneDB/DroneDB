@@ -203,6 +203,48 @@ NAN_METHOD(list) {
     Nan::AsyncQueueWorker(new ListWorker(callback, ddbPath, in, recursive, maxRecursionDepth));
 }
 
+class SearchWorker : public Nan::AsyncWorker {
+ public:
+  SearchWorker(Nan::Callback *callback, const std::string &ddbPath, const std::string &query)
+    : AsyncWorker(callback, "nan:SearchWorker"),
+      ddbPath(ddbPath), query(query) {}
+  ~SearchWorker() {}
+
+  void Execute () {
+    if (DDBSearch(ddbPath.c_str(), query.c_str(), &output, "json") != DDBERR_NONE){
+        SetErrorMessage(DDBGetLastError());
+    }
+  }
+
+  void HandleOKCallback () {
+     Nan::HandleScope scope;
+
+     Nan::JSON json;
+     v8::Local<v8::Value> argv[] = {
+         Nan::Null(),
+         json.Parse(Nan::New<v8::String>(output).ToLocalChecked()).ToLocalChecked()
+     };
+
+     delete output;
+     callback->Call(2, argv, async_resource);
+  }
+
+ private:
+    std::string ddbPath;
+    std::string query;
+    char *output;
+};
+
+NAN_METHOD(search) {
+    ASSERT_NUM_PARAMS(3);
+
+    BIND_STRING_PARAM(ddbPath, 0);
+    BIND_STRING_PARAM(query, 1);
+    BIND_FUNCTION_PARAM(callback, 2);
+
+    Nan::AsyncQueueWorker(new SearchWorker(callback, ddbPath, query));
+}
+
 
 class ChattrWorker : public Nan::AsyncWorker {
  public:

@@ -97,6 +97,14 @@ DDB_DLL DDBErr DDBGet(const char *ddbPath, const char *path, char **output);
  * @return DDBERR_NONE on success, an error otherwise */
 DDB_DLL DDBErr DDBList(const char *ddbPath, const char **paths, int numPaths, char **output, const char *format, bool recursive = false, int maxRecursionDepth = 0);
 
+/** Search files inside index
+ * @param ddbPath path to a DroneDB database (parent of ".ddb")
+ * @param query search string
+ * @param output pointer to C-string where to store result
+ * @param format output format. One of: ["text", "json"]
+ * @return DDBERR_NONE on success, an error otherwise */
+DDB_DLL DDBErr DDBSearch(const char *ddbPath, const char *query, char **output, const char *format);
+
 /** Append password to database
  * @param ddbPath path to a DroneDB database (parent of ".ddb")
  * @param password password to append

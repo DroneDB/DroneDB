@@ -28,6 +28,7 @@ DDB_DLL int deleteFromIndex(Database* db, const std::string &query, bool isFolde
 DDB_DLL void doUpdate(Statement *updateQ, const Entry &e);
 
 DDB_DLL void listIndex(Database* db, const std::vector<std::string> &paths, std::ostream& out, const std::string& format, bool recursive = false, int maxRecursionDepth = 0);
+DDB_DLL void searchIndex(Database* db, const std::string &query, std::ostream& out, const std::string& format);
 DDB_DLL void addToIndex(Database *db, const std::vector<std::string> &paths, AddCallback callback = nullptr);
 DDB_DLL void removeFromIndex(Database *db, const std::vector<std::string> &paths, RemoveCallback callback = nullptr);
 DDB_DLL void syncIndex(Database *db);

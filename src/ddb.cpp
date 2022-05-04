@@ -228,6 +228,26 @@ DDBErr DDBList(const char* ddbPath, const char** paths, int numPaths,
     DDB_C_END
 }
 
+DDBErr DDBSearch(const char *ddbPath, const char *query, char **output, const char *format){
+    DDB_C_BEGIN
+
+    if (ddbPath == nullptr) throw InvalidArgsException("No ddb path provided");
+    if (query == nullptr) throw InvalidArgsException("No query provided");
+    if (format == nullptr || strlen(format) == 0) throw InvalidArgsException("No format provided");
+
+    if (output == nullptr) throw InvalidArgsException("No output provided");
+
+    const auto db = ddb::open(std::string(ddbPath), false);
+
+    std::ostringstream ss;
+    searchIndex(db.get(), query, ss, format);
+
+    utils::copyToPtr(ss.str(), output);
+
+    DDB_C_END
+}
+
+
 DDBErr DDBAppendPassword(const char* ddbPath, const char* password) {
     DDB_C_BEGIN
 
