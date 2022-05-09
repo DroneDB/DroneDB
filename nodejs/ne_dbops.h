@@ -9,6 +9,7 @@
 NAN_METHOD(init);
 NAN_METHOD(add);
 NAN_METHOD(remove);
+NAN_METHOD(move);
 NAN_METHOD(list);
 NAN_METHOD(search);
 NAN_METHOD(chattr);

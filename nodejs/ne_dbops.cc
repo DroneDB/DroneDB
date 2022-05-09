@@ -148,6 +148,47 @@ NAN_METHOD(remove) {
     Nan::AsyncQueueWorker(new RemoveWorker(callback, ddbPath, paths));
 }
 
+class MoveWorker : public Nan::AsyncWorker {
+ public:
+  MoveWorker(Nan::Callback *callback, const std::string &ddbPath, const std::string &source, const std::string &dest)
+    : AsyncWorker(callback, "nan:MoveWorker"),
+      ddbPath(ddbPath), source(source), dest(dest) {}
+  ~MoveWorker() {}
+
+  void Execute () {
+      if (DDBMoveEntry(ddbPath.c_str(), source.c_str(), dest.c_str()) != DDBERR_NONE){
+          SetErrorMessage(DDBGetLastError());
+      }
+  }
+
+  void HandleOKCallback () {
+     Nan::HandleScope scope;
+
+     v8::Local<v8::Value> argv[] = {
+         Nan::Null(),
+         Nan::True()
+     };
+     callback->Call(2, argv, async_resource);
+   }
+
+ private:
+    std::string ddbPath;
+    std::string source;
+    std::string dest;
+};
+
+
+NAN_METHOD(move) {
+    ASSERT_NUM_PARAMS(4);
+
+    BIND_STRING_PARAM(ddbPath, 0);
+    BIND_STRING_PARAM(source, 1);
+    BIND_STRING_PARAM(dest, 2);
+    BIND_FUNCTION_PARAM(callback, 3);
+
+    Nan::AsyncQueueWorker(new MoveWorker(callback, ddbPath, source, dest));
+}
+
 class ListWorker : public Nan::AsyncWorker {
  public:
   ListWorker(Nan::Callback *callback, const std::string &ddbPath, const std::vector<std::string> &paths, 

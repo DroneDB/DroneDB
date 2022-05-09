@@ -22,6 +22,7 @@ NAN_MODULE_INIT(InitAll) {
     NAN_EXPORT(target, init);
     NAN_EXPORT(target, add);
     NAN_EXPORT(target, remove);
+    NAN_EXPORT(target, move);
     NAN_EXPORT(target, share);
     NAN_EXPORT(target, list);
     NAN_EXPORT(target, login);
