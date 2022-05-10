@@ -14,5 +14,7 @@ NAN_METHOD(list);
 NAN_METHOD(search);
 NAN_METHOD(chattr);
 NAN_METHOD(get);
+NAN_METHOD(getStamp);
+
 
 #endif

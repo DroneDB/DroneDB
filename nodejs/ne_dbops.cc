@@ -382,3 +382,44 @@ NAN_METHOD(get) {
 
     Nan::AsyncQueueWorker(new GetWorker(callback, ddbPath, path));
 }
+
+class GetStampWorker : public Nan::AsyncWorker {
+ public:
+  GetStampWorker(Nan::Callback *callback, const std::string &ddbPath)
+    : AsyncWorker(callback, "nan:GetStampWorker"),
+      ddbPath(ddbPath) {}
+  ~GetStampWorker() {}
+
+  void Execute () {
+    if (DDBGetStamp(ddbPath.c_str(), &output) != DDBERR_NONE){
+        SetErrorMessage(DDBGetLastError());
+    }
+  }
+
+  void HandleOKCallback () {
+     Nan::HandleScope scope;
+
+     Nan::JSON json;
+     v8::Local<v8::Value> argv[] = {
+         Nan::Null(),
+         json.Parse(Nan::New<v8::String>(output).ToLocalChecked()).ToLocalChecked()
+     };
+
+     delete output; // TODO: is this a leak if the call fails? How do we de-allocate on failure?
+     callback->Call(2, argv, async_resource);
+   }
+
+ private:
+    std::string ddbPath;
+    char *output;
+
+};
+
+NAN_METHOD(getStamp) {
+    ASSERT_NUM_PARAMS(2);
+
+    BIND_STRING_PARAM(ddbPath, 0);
+    BIND_FUNCTION_PARAM(callback, 1);
+
+    Nan::AsyncQueueWorker(new GetStampWorker(callback, ddbPath));
+}
