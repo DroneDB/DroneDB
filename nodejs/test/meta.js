@@ -21,6 +21,8 @@ describe('meta', function() {
         assert.ok(await ddb.meta.set(ddbPath, "", "test", true));
         assert.ok(await ddb.meta.unset(ddbPath, "", "test"));
         assert.ok(await ddb.meta.list(ddbPath, ""));
+        assert.ok(await ddb.meta.dump(ddbPath, ""));
         assert.ok(await ddb.meta.remove(ddbPath, meta[0].id));
+
     });
 });

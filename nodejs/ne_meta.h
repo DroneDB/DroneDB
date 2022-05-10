@@ -12,5 +12,7 @@ NAN_METHOD(metaRemove);
 NAN_METHOD(metaGet);
 NAN_METHOD(metaUnset);
 NAN_METHOD(metaList);
+NAN_METHOD(metaDump);
+
 
 #endif

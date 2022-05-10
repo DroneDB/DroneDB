@@ -36,6 +36,7 @@ NAN_MODULE_INIT(InitAll) {
     NAN_EXPORT(target, metaGet);
     NAN_EXPORT(target, metaUnset);
     NAN_EXPORT(target, metaList);
+    NAN_EXPORT(target, metaDump);
 
 	DDBRegisterProcess();
 }
