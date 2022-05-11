@@ -52,6 +52,7 @@ void Pull::run(cxxopts::ParseResult& opts) {
 
         ddb::pull(remote, mergeStrategy);
 
+        std::cout << "Pull completed" << std::endl;
     } catch(ddb::IndexException& e) {        
         std::cout << e.what() << std::endl;
     } catch (ddb::InvalidArgsException& ex) {

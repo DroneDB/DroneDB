@@ -15,6 +15,10 @@ NAN_METHOD(search);
 NAN_METHOD(chattr);
 NAN_METHOD(get);
 NAN_METHOD(getStamp);
+NAN_METHOD(delta);
+NAN_METHOD(computeDeltaLocals);
+NAN_METHOD(applyDelta);
+
 
 
 #endif

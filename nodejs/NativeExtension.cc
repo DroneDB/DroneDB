@@ -30,6 +30,9 @@ NAN_MODULE_INIT(InitAll) {
     NAN_EXPORT(target, chattr);
     NAN_EXPORT(target, get);
     NAN_EXPORT(target, getStamp);
+    NAN_EXPORT(target, delta);
+    NAN_EXPORT(target, computeDeltaLocals);
+    NAN_EXPORT(target, applyDelta);
     NAN_EXPORT(target, metaAdd);
     NAN_EXPORT(target, metaSet);
     NAN_EXPORT(target, metaRemove);

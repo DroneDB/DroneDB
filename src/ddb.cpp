@@ -427,7 +427,7 @@ DDBErr DDBDelta(const char* ddbSourceStamp, const char* ddbTargetStamp, char** o
     DDB_C_END
 }
 
-DDB_DLL DDBErr DDBApplyDelta(const char *delta, const char *sourcePath, char *ddbPath, int mergeStrategy, char *sourceMetaDump, char **conflicts){
+DDB_DLL DDBErr DDBApplyDelta(const char *delta, const char *sourcePath, const char *ddbPath, int mergeStrategy, const char *sourceMetaDump, char **conflicts){
     DDB_C_BEGIN
 
     Delta d;

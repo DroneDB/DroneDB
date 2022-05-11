@@ -40,6 +40,7 @@ void Push::run(cxxopts::ParseResult& opts) {
 
         ddb::push(remote);
 
+        std::cout << "Push completed" << std::endl;
     } catch(ddb::IndexException& e) {        
         std::cout << e.what() << std::endl;
     } catch (ddb::InvalidArgsException& ex) {

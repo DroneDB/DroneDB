@@ -423,3 +423,145 @@ NAN_METHOD(getStamp) {
 
     Nan::AsyncQueueWorker(new GetStampWorker(callback, ddbPath));
 }
+
+class DeltaWorker : public Nan::AsyncWorker {
+ public:
+  DeltaWorker(Nan::Callback *callback, const std::string &sourceStamp, const std::string &targetStamp)
+    : AsyncWorker(callback, "nan:DeltaWorker"),
+      sourceStamp(sourceStamp), targetStamp(targetStamp) {}
+  ~DeltaWorker() {}
+
+  void Execute () {
+    if (DDBDelta(sourceStamp.c_str(), targetStamp.c_str(), &output, "json") != DDBERR_NONE){
+        SetErrorMessage(DDBGetLastError());
+    }
+  }
+
+  void HandleOKCallback () {
+     Nan::HandleScope scope;
+
+     Nan::JSON json;
+     v8::Local<v8::Value> argv[] = {
+         Nan::Null(),
+         json.Parse(Nan::New<v8::String>(output).ToLocalChecked()).ToLocalChecked()
+     };
+
+     delete output; // TODO: is this a leak if the call fails? How do we de-allocate on failure?
+     callback->Call(2, argv, async_resource);
+   }
+
+ private:
+    std::string sourceStamp;
+    std::string targetStamp;
+    char *output;
+
+};
+
+NAN_METHOD(delta) {
+    ASSERT_NUM_PARAMS(3);
+
+    BIND_STRING_PARAM(sourceStamp, 0);
+    BIND_STRING_PARAM(targetStamp, 1);
+    
+    BIND_FUNCTION_PARAM(callback, 2);
+
+    Nan::AsyncQueueWorker(new DeltaWorker(callback, sourceStamp, targetStamp));
+}
+
+class ComputeDeltaLocalsWorker : public Nan::AsyncWorker {
+ public:
+  ComputeDeltaLocalsWorker(Nan::Callback *callback, const std::string &ddbPath, const std::string &delta, const std::string &hlDestFolder)
+    : AsyncWorker(callback, "nan:ComputeDeltaLocalsWorker"),
+      ddbPath(ddbPath), delta(delta), hlDestFolder(hlDestFolder) {}
+  ~ComputeDeltaLocalsWorker() {}
+
+  void Execute () {
+    if (DDBComputeDeltaLocals(delta.c_str(), ddbPath.c_str(), hlDestFolder.c_str(), &output) != DDBERR_NONE){
+        SetErrorMessage(DDBGetLastError());
+    }
+  }
+
+  void HandleOKCallback () {
+     Nan::HandleScope scope;
+
+     Nan::JSON json;
+     v8::Local<v8::Value> argv[] = {
+         Nan::Null(),
+         json.Parse(Nan::New<v8::String>(output).ToLocalChecked()).ToLocalChecked()
+     };
+
+     delete output; // TODO: is this a leak if the call fails? How do we de-allocate on failure?
+     callback->Call(2, argv, async_resource);
+   }
+
+ private:
+    std::string ddbPath;
+    std::string delta;
+    std::string hlDestFolder;
+    char *output;
+
+};
+
+NAN_METHOD(computeDeltaLocals) {
+    ASSERT_NUM_PARAMS(4);
+
+    BIND_STRING_PARAM(ddbPath, 0);
+    BIND_STRING_PARAM(delta, 1);
+    BIND_STRING_PARAM(hlDestFolder, 2);
+    
+    BIND_FUNCTION_PARAM(callback, 3);
+
+    Nan::AsyncQueueWorker(new ComputeDeltaLocalsWorker(callback, ddbPath, delta, hlDestFolder));
+}
+
+class ApplyDeltaWorker : public Nan::AsyncWorker {
+ public:
+  ApplyDeltaWorker(Nan::Callback *callback, const std::string &delta, const std::string &sourcePath, const std::string &ddbPath,
+  int mergeStrategy, const std::string &sourceMetaDump)
+    : AsyncWorker(callback, "nan:ApplyDeltaWorker"),
+      delta(delta), sourcePath(sourcePath), ddbPath(ddbPath), mergeStrategy(mergeStrategy), sourceMetaDump(sourceMetaDump) {}
+  ~ApplyDeltaWorker() {}
+
+  void Execute () {
+    if (DDBApplyDelta(delta.c_str(), sourcePath.c_str(), ddbPath.c_str(), mergeStrategy, sourceMetaDump.c_str(), &output) != DDBERR_NONE){
+        SetErrorMessage(DDBGetLastError());
+    }
+  }
+
+  void HandleOKCallback () {
+     Nan::HandleScope scope;
+
+     Nan::JSON json;
+     v8::Local<v8::Value> argv[] = {
+         Nan::Null(),
+         json.Parse(Nan::New<v8::String>(output).ToLocalChecked()).ToLocalChecked()
+     };
+
+     delete output;
+     callback->Call(2, argv, async_resource);
+   }
+
+ private:
+    std::string delta;
+    std::string sourcePath;
+    std::string ddbPath;
+    int mergeStrategy;
+    std::string sourceMetaDump;
+    char *output;
+
+};
+
+NAN_METHOD(applyDelta) {
+    ASSERT_NUM_PARAMS(6);
+
+    BIND_STRING_PARAM(delta, 0);
+    BIND_STRING_PARAM(sourcePath, 1);
+    BIND_STRING_PARAM(ddbPath, 2);
+    BIND_STRING_PARAM(sourceMetaDump, 3);
+    BIND_OBJECT_PARAM(obj, 4);
+    BIND_OBJECT_VAR(obj, int, mergeStrategy, 0);
+    
+    BIND_FUNCTION_PARAM(callback, 5);
+
+    Nan::AsyncQueueWorker(new ApplyDeltaWorker(callback, delta, sourcePath, ddbPath, mergeStrategy, sourceMetaDump));
+}

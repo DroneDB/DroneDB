@@ -223,7 +223,8 @@ json Registry::getStamp(const std::string &organization, const std::string &data
 void Registry::downloadFiles(const std::string &organization,
                                      const std::string &dataset,
                                      const std::vector<std::string> &files,
-                                     const std::string &folder) {
+                                     const std::string &folder,
+                                     std::ostream &out) {
     if (files.empty()) {
         LOGD << "Asked to download an empty list of files...";
         return;
@@ -236,6 +237,32 @@ void Registry::downloadFiles(const std::string &organization,
 
     LOGD << "Download url = " << downloadUrl;
 
+    auto start = std::chrono::system_clock::now();
+    size_t prevBytes = 0;
+
+    auto progressCb = ([&start, &prevBytes, &out](size_t txBytes,
+                                           size_t totalBytes) {
+        if (txBytes == prevBytes) return true;
+
+        const auto now = std::chrono::system_clock::now();
+
+        const std::chrono::duration<double> dT = now - start;
+
+        if (dT.count() < 1) return true;
+
+        const auto dData = txBytes - prevBytes;
+        const auto speed = dData / dT.count();
+
+        out << "Downloading " << io::bytesToHuman(txBytes)
+            << " @ " << io::bytesToHuman(speed) << "/s\t\t\r";
+        out.flush();
+
+        prevBytes = txBytes;
+        start = now;
+
+        return true;
+    });
+
     if (files.size() == 1) {
         downloadUrl += "?path=" + files[0];
 
@@ -245,6 +272,7 @@ void Registry::downloadFiles(const std::string &organization,
 
         auto res = net::GET(downloadUrl)
                        .authCookie(this->authToken)
+                       .progressCb(progressCb)
                        .downloadToFile(destPath.generic_string());
 
         if (res.status() != 200) this->handleError(res);
@@ -260,6 +288,7 @@ void Registry::downloadFiles(const std::string &organization,
 
         auto res = net::POST(downloadUrl)
                        .authCookie(this->authToken)
+                       .progressCb(progressCb)
                        .formData({"path", paths})
                        .downloadToFile(tempFile.string());
 
@@ -510,7 +539,7 @@ void Registry::pull(const std::string &path, const MergeStrategy mergeStrategy,
 
         // Download all the missing files
         this->downloadFiles(tagInfo.organization, tagInfo.dataset,
-                            filesToDownload, tempNewFolder.string());
+                            filesToDownload, tempNewFolder.string(), out);
 
         LOGD << "Files downloaded";
     } else {
@@ -667,8 +696,6 @@ void Registry::push(const std::string &path, std::ostream &out) {
 
     // Update stamp
     syncManager.setLastStamp(tagInfo.registryUrl, db.get());
-
-    out << "Push completed" << std::endl;
 }
 
 void Registry::handleError(net::Response &res) {

@@ -197,7 +197,7 @@ DDB_DLL DDBErr DDBDelta(const char *ddbSourceStamp, const char *ddbTargetStamp, 
  * @param sourceMetaDump meta dump (JSON) of source database (extracted with DDBMetaDump)
  * @param conflicts pointer to C-string where to store list of conflicts (if any) in JSON
  * @return DDBERR_NONE on success, an error otherwise */
-DDB_DLL DDBErr DDBApplyDelta(const char *delta, const char *sourcePath, char *ddbPath, int mergeStrategy, char *sourceMetaDump, char **conflicts);
+DDB_DLL DDBErr DDBApplyDelta(const char *delta, const char *sourcePath, const char *ddbPath, int mergeStrategy, const char *sourceMetaDump, char **conflicts);
 
 /** Compute map of local files that are available for delta adds operations
  * @param delta JSON delta between databases
