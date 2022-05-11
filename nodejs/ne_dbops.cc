@@ -4,6 +4,7 @@
 #include <iostream>
 #include <sstream>
 #include "ddb.h"
+#include "dbops.h"
 #include "ne_dbops.h"
 #include "ne_helpers.h"
 
@@ -50,19 +51,51 @@ NAN_METHOD(init) {
 }
 
 
-class AddWorker : public Nan::AsyncWorker {
+class AddWorker : public Nan::AsyncProgressWorker {
  public:
-  AddWorker(Nan::Callback *callback, const std::string &ddbPath, const std::vector<std::string> &paths, bool recursive)
-    : AsyncWorker(callback, "nan:AddWorker"),
-      ddbPath(ddbPath), paths(paths), recursive(recursive) {}
-  ~AddWorker() {}
+  AddWorker(Nan::Callback *callback, Nan::Callback *progress, const std::string &ddbPath, const std::vector<std::string> &paths, bool recursive)
+    : Nan::AsyncProgressWorker(callback, "nan:AddWorker"),
+      progress(progress),
+      ddbPath(ddbPath), paths(paths), recursive(recursive),
+      cancel(false) {}
+  ~AddWorker() {
+      delete progress;
+  }
 
-  void Execute () {
-      std::vector<const char *> cPaths(paths.size());
-      std::transform(paths.begin(), paths.end(), cPaths.begin(), [](const std::string& s) { return s.c_str(); });
+  void Execute (const Nan::AsyncProgressWorker::ExecutionProgress& progress) {
+      try{
+        auto outJson = json::array();
+        const auto db = ddb::open(ddbPath, true);
+        ddb::addToIndex(db.get(), ddb::expandPathList(paths, recursive, 0),
+                [&](const ddb::Entry& e, bool updated) {
+                    json j;
+                    e.toJSON(j);
+                    j["updated"] = updated;
+                    outJson.push_back(j);
 
-      if (DDBAdd(ddbPath.c_str(), cPaths.data(), static_cast<int>(cPaths.size()), &output, recursive) != DDBERR_NONE){
-          SetErrorMessage(DDBGetLastError());
+                    std::string serialized = j.dump();
+                    progress.Send(serialized.c_str(), sizeof(char) * serialized.length());
+                    return !cancel;
+                });
+        output = outJson.dump();
+      }catch(const ddb::AppException &e){
+        SetErrorMessage(e.what());
+      }
+  }
+
+  void HandleProgressCallback(const char *data, size_t count) {
+      Nan::HandleScope scope;
+      Nan::JSON json;
+
+      std::string str(data, count);
+
+      v8::Local<v8::Value> argv[] = {
+          json.Parse(Nan::New<v8::String>(str).ToLocalChecked()).ToLocalChecked()
+      };
+
+      auto ret = progress->Call(1, argv, async_resource).ToLocalChecked();
+      if (!ret->IsUndefined()){
+          cancel = !Nan::To<bool>(ret).FromJust();
       }
   }
 
@@ -72,23 +105,26 @@ class AddWorker : public Nan::AsyncWorker {
      Nan::JSON json;
      v8::Local<v8::Value> argv[] = {
          Nan::Null(),
-         json.Parse(Nan::New<v8::String>(output).ToLocalChecked()).ToLocalChecked()
+         json.Parse(Nan::New<v8::String>(output.c_str()).ToLocalChecked()).ToLocalChecked()
      };
-     delete output; // TODO: is this a leak if the call fails? How do we de-allocate on failure?
+
      callback->Call(2, argv, async_resource);
    }
 
  private:
-    char *output;
+    Nan::Callback *progress;
+    std::string output;
 
     std::string ddbPath;
     std::vector<std::string> paths;
     bool recursive;
+
+    bool cancel;
 };
 
 
 NAN_METHOD(add) {
-    ASSERT_NUM_PARAMS(4);
+    ASSERT_NUM_PARAMS(5);
 
     BIND_STRING_PARAM(ddbPath, 0);
     BIND_STRING_ARRAY_PARAM(paths, 1);
@@ -96,9 +132,10 @@ NAN_METHOD(add) {
     BIND_OBJECT_PARAM(obj, 2);
     BIND_OBJECT_VAR(obj, bool, recursive, false);
 
-    BIND_FUNCTION_PARAM(callback, 3);
+    BIND_FUNCTION_PARAM(progress, 3);
+    BIND_FUNCTION_PARAM(callback, 4);
 
-    Nan::AsyncQueueWorker(new AddWorker(callback, ddbPath, paths, recursive));
+    Nan::AsyncQueueWorker(new AddWorker(callback, progress, ddbPath, paths, recursive));
 }
 
 
