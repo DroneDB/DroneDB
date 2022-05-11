@@ -44,10 +44,14 @@ void Build::run(cxxopts::ParseResult &opts) {
         const auto db = ddb::open(ddbPath, true);
         
         if (!opts.count("path")) {
-            buildAll(db.get(), output, std::cout, force);
+            buildAll(db.get(), output, force, [](const std::string &path){
+                std::cout << path << std::endl;
+            });
         } else {
             const auto path = opts["path"].as<std::string>();
-            build(db.get(), path, output, std::cout, force);
+            build(db.get(), path, output, force, [](const std::string &path){
+                std::cout << path << std::endl;
+            });
         }
 
     } catch (ddb::InvalidArgsException) {

@@ -11,12 +11,10 @@ namespace ddb {
 
 DDB_DLL bool isBuildable(Database* db, const std::string& path, std::string& subfolder);
 
-DDB_DLL void buildAll(Database* db, const std::string& outputPath,
-                       std::ostream& output, bool force = false);
-DDB_DLL void build(Database* db, const std::string& path,
-                   const std::string& outputPath, std::ostream& output, bool force = false);
+DDB_DLL void buildAll(Database* db, const std::string& outputPath, bool force = false, BuildCallback callback = nullptr);
+DDB_DLL void build(Database* db, const std::string& path, const std::string& outputPath, bool force = false, BuildCallback callback = nullptr);
 
-DDB_DLL void buildPending(Database *db, const std::string &outputPath, std::ostream &output, bool force = false);
+DDB_DLL void buildPending(Database *db, const std::string &outputPath, bool force = false, BuildCallback callback = nullptr);
 DDB_DLL bool isBuildPending(Database *db);
 
 }

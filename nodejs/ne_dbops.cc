@@ -281,13 +281,40 @@ NAN_METHOD(list) {
     Nan::AsyncQueueWorker(new ListWorker(callback, ddbPath, in, recursive, maxRecursionDepth));
 }
 
-class BuildWorker : public Nan::AsyncWorker {
+class BuildWorker : public Nan::AsyncProgressWorker {
  public:
-  BuildWorker(Nan::Callback *callback, const std::string &ddbPath, const std::string &path,
+  BuildWorker(Nan::Callback *callback, Nan::Callback *progress, const std::string &ddbPath, const std::string &path,
     bool force, bool pendingOnly)
-    : AsyncWorker(callback, "nan:BuildWorker"),
-      ddbPath(ddbPath), path(path), force(force), pendingOnly(pendingOnly) {}
-  ~BuildWorker() {}
+    : Nan::AsyncProgressWorker(callback, "nan:BuildWorker"),
+      progress(progress),
+      ddbPath(ddbPath), path(path), force(force), pendingOnly(pendingOnly),
+      cancel(false) {}
+  ~BuildWorker() {
+      delete progress;
+  }
+
+  void Execute (const Nan::AsyncProgressWorker::ExecutionProgress& progress) {
+      try{
+        std::string path;
+        
+        const auto db = ddb::open(ddbPath, true);
+
+
+        // TODO: finish adding callback, progress
+
+        
+        if (path.empty()) {
+            if (pendingOnly) ddb::buildPending(db.get(), "", force);
+            else ddb::buildAll(db.get(), "", force);
+        } else {
+            ddb::build(db.get(), path, "", force);
+        }
+
+        output = outJson.dump();
+      }catch(const ddb::AppException &e){
+        SetErrorMessage(e.what());
+      }
+  }
 
   void Execute () {
     if (DDBBuild(ddbPath.c_str(), path.c_str(), nullptr, force, pendingOnly) != DDBERR_NONE){
@@ -306,10 +333,13 @@ class BuildWorker : public Nan::AsyncWorker {
    }
 
  private:
+    Nan::Callback *progress; 
     std::string ddbPath;
     std::string path;
     bool force;
     bool pendingOnly;
+
+    bool cancel;
 };
 
 NAN_METHOD(build) {

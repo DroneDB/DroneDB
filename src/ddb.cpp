@@ -535,23 +535,17 @@ DDB_DLL DDBErr DDBBuild(const char *ddbPath, const char *source, const char *des
 
     const auto ddb = ddb::open(ddbPathStr, true);
 
-    const auto destPath =
-        dest == nullptr
-            ? (fs::path(ddbPathStr) / DDB_FOLDER / DDB_BUILD_PATH).generic_string()
-            : std::string(dest);
-
-    // We dont use this at the moment
-    std::ostringstream ss;
+    const auto destPath = dest != nullptr ? std::string(dest) : "";
 
     std::string path;
     if (source != nullptr) path = std::string(source);
 
     try {
         if (path.empty()) {
-            if (pendingOnly) buildPending(ddb.get(), destPath, ss, force);
-            else buildAll(ddb.get(), destPath, ss, force);
+            if (pendingOnly) buildPending(ddb.get(), destPath, force);
+            else buildAll(ddb.get(), destPath, force);
         } else {
-            build(ddb.get(), path, destPath, ss, force);
+            build(ddb.get(), path, destPath, force);
         }
     } catch (const ddb::BuildDepMissingException &e) {
         return DDBERR_BUILDDEPMISSING;
