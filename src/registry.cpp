@@ -573,6 +573,8 @@ void Registry::pull(const std::string &path, const MergeStrategy mergeStrategy,
     // Inform user if nothing was needed
     if (delta.empty()){
         out << "Everything up-to-date" << std::endl;
+    }else{
+        out << "Pull completed" << std::endl;
     }
 }
 
@@ -696,6 +698,8 @@ void Registry::push(const std::string &path, std::ostream &out) {
 
     // Update stamp
     syncManager.setLastStamp(tagInfo.registryUrl, db.get());
+
+    out << "Push completed" << std::endl;
 }
 
 void Registry::handleError(net::Response &res) {

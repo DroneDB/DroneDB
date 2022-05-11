@@ -543,12 +543,15 @@ DDB_DLL DDBErr DDBBuild(const char *ddbPath, const char *source, const char *des
     // We dont use this at the moment
     std::ostringstream ss;
 
+    std::string path;
+    if (source != nullptr) path = std::string(source);
+
     try {
-        if (source == nullptr) {
+        if (path.empty()) {
             if (pendingOnly) buildPending(ddb.get(), destPath, ss, force);
             else buildAll(ddb.get(), destPath, ss, force);
         } else {
-            build(ddb.get(), std::string(source), destPath, ss, force);
+            build(ddb.get(), path, destPath, ss, force);
         }
     } catch (const ddb::BuildDepMissingException &e) {
         return DDBERR_BUILDDEPMISSING;

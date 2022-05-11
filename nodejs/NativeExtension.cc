@@ -25,6 +25,7 @@ NAN_MODULE_INIT(InitAll) {
     NAN_EXPORT(target, move);
     NAN_EXPORT(target, share);
     NAN_EXPORT(target, list);
+    NAN_EXPORT(target, build);
     NAN_EXPORT(target, login);
     NAN_EXPORT(target, search);
     NAN_EXPORT(target, chattr);

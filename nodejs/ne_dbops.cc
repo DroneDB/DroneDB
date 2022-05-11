@@ -244,6 +244,52 @@ NAN_METHOD(list) {
     Nan::AsyncQueueWorker(new ListWorker(callback, ddbPath, in, recursive, maxRecursionDepth));
 }
 
+class BuildWorker : public Nan::AsyncWorker {
+ public:
+  BuildWorker(Nan::Callback *callback, const std::string &ddbPath, const std::string &path,
+    bool force, bool pendingOnly)
+    : AsyncWorker(callback, "nan:BuildWorker"),
+      ddbPath(ddbPath), path(path), force(force), pendingOnly(pendingOnly) {}
+  ~BuildWorker() {}
+
+  void Execute () {
+    if (DDBBuild(ddbPath.c_str(), path.c_str(), nullptr, force, pendingOnly) != DDBERR_NONE){
+      SetErrorMessage(DDBGetLastError());
+    }
+  }
+
+  void HandleOKCallback () {
+     Nan::HandleScope scope;
+
+     v8::Local<v8::Value> argv[] = {
+         Nan::Null(),
+         Nan::True()
+     };
+     callback->Call(2, argv, async_resource);
+   }
+
+ private:
+    std::string ddbPath;
+    std::string path;
+    bool force;
+    bool pendingOnly;
+};
+
+NAN_METHOD(build) {
+    ASSERT_NUM_PARAMS(3);
+
+    BIND_STRING_PARAM(ddbPath, 0);
+    BIND_OBJECT_PARAM(obj, 1);
+
+    BIND_OBJECT_STRING(obj, path, "");
+    BIND_OBJECT_VAR(obj, bool, force, false);
+    BIND_OBJECT_VAR(obj, bool, pendingOnly, false);
+
+    BIND_FUNCTION_PARAM(callback, 2);
+
+    Nan::AsyncQueueWorker(new BuildWorker(callback, ddbPath, path, force, pendingOnly));
+}
+
 class SearchWorker : public Nan::AsyncWorker {
  public:
   SearchWorker(Nan::Callback *callback, const std::string &ddbPath, const std::string &query)
