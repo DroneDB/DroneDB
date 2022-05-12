@@ -65,76 +65,72 @@ void buildInternal(Database* db, const Entry& e,
         return;
     }
 
-    {
-        ThreadLock lock("build-" + (db->rootDirectory() / e.hash).string());
+    ThreadLock lock("build-" + (db->rootDirectory() / e.hash).string());
 
-        if (fs::exists(outputFolder) && !force) {
-            return;
+    if (fs::exists(outputFolder) && !force) {
+        return;
+    }
+
+    const auto tempFolder = outputFolder + "-temp-" + utils::generateRandomString(16);
+
+    io::assureFolderExists(tempFolder);
+
+    auto relativePath = (db->rootDirectory() / e.path).string();
+
+    std::string pendFile = baseOutputPath.string() + ".pending";
+    io::assureIsRemoved(pendFile);
+
+    // We could vectorize this logic, but it's an overkill by now
+    try {
+        bool built = false;
+
+        if (e.type == PointCloud) {
+            const std::vector vec = {relativePath};
+            buildEpt(vec, tempFolder);
+            built = true;
+        }else if (e.type == GeoRaster){
+            buildCog(relativePath, (fs::path(tempFolder) / "cog.tif").string());
+            built = true;
+        }else if (e.type == Model){
+            buildNexus(relativePath, (fs::path(tempFolder) / "model.nxz").string());
+            built = true;
         }
 
-        const auto tempFolder = outputFolder + "-temp-" + utils::generateRandomString(16);
+        if (built){
+            LOGD << "Build complete, moving temp folder to " << outputFolder;
+            if (fs::exists(outputFolder)) io::assureIsRemoved(outputFolder);
 
-        io::assureFolderExists(tempFolder);
+            io::assureFolderExists(fs::path(outputFolder).parent_path());
+            io::rename(tempFolder, outputFolder);
 
-        auto relativePath =
-            (fs::path(db->getOpenFile()).parent_path().parent_path() / e.path)
-                .string();
-
-        std::string pendFile = baseOutputPath.string() + ".pending";
-        io::assureIsRemoved(pendFile);
-
-        // We could vectorize this logic, but it's an overkill by now
-        try {
-            bool built = false;
-
-            if (e.type == PointCloud) {
-                const std::vector vec = {relativePath};
-                buildEpt(vec, tempFolder);
-                built = true;
-            }else if (e.type == GeoRaster){
-                buildCog(relativePath, (fs::path(tempFolder) / "cog.tif").string());
-                built = true;
-            }else if (e.type == Model){
-                buildNexus(relativePath, (fs::path(tempFolder) / "model.nxz").string());
-                built = true;
-            }
-
-            if (built){
-                LOGD << "Build complete, moving temp folder to " << outputFolder;
-                if (fs::exists(outputFolder)) io::assureIsRemoved(outputFolder);
-
-                io::assureFolderExists(fs::path(outputFolder).parent_path());
-                io::rename(tempFolder, outputFolder);
-
-                if (callback != nullptr) callback(outputFolder);
-            }
-
-            io::assureIsRemoved(tempFolder);
-        } catch(const BuildDepMissingException &e){
-
-            // Create pending file
-            std::ofstream pf(pendFile);
-            if (pf){
-                pf << utils::currentUnixTimestamp() << std::endl;
-                pf.close();
-            }else{
-                LOGD << "Error! Cannot create pending file " << baseOutputPath.string() << ".pending";
-            }
-
-            io::assureIsRemoved(tempFolder);
-
-            throw e;
-        } catch(const AppException &e){
-            io::assureIsRemoved(tempFolder);
-
-            throw e;
-        } catch(...){
-            // Since we use third party libraries, some exceptions might not
-            // get caught otherwise
-            io::assureIsRemoved(tempFolder);
-
-            throw AppException("Unknown build error failure for " + e.path + " (" + baseOutputPath.string() + ")");
+            if (callback != nullptr) callback(outputFolder);
         }
+
+        io::assureIsRemoved(tempFolder);
+    } catch(const BuildDepMissingException &e){
+
+        // Create pending file
+        std::ofstream pf(pendFile);
+        if (pf){
+            pf << utils::currentUnixTimestamp() << std::endl;
+            pf.close();
+        }else{
+            LOGD << "Error! Cannot create pending file " << baseOutputPath.string() << ".pending";
+        }
+
+        io::assureIsRemoved(tempFolder);
+
+        throw e;
+    } catch(const AppException &e){
+        io::assureIsRemoved(tempFolder);
+
+        throw e;
+    } catch(...){
+        // Since we use third party libraries, some exceptions might not
+        // get caught otherwise
+        io::assureIsRemoved(tempFolder);
+
+        throw AppException("Unknown build error failure for " + e.path + " (" + baseOutputPath.string() + ")");
     }
 }
 

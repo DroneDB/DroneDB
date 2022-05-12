@@ -382,8 +382,9 @@ DDB_DLL DDBErr DDBTile(const char* inputPath, int tz, int tx, int ty,
                        char** outputTilePath, int tileSize, bool tms,
                        bool forceRecreate) {
     DDB_C_BEGIN
+    utils::copyToPtr("", outputTilePath);
     const auto tilePath = ddb::TilerHelper::getFromUserCache(
-        inputPath, tz, tx, ty, tileSize, tms, forceRecreate);
+        std::string(inputPath), tz, tx, ty, tileSize, tms, forceRecreate);
     utils::copyToPtr(tilePath.string(), outputTilePath);
     DDB_C_END
 }
@@ -391,7 +392,7 @@ DDB_DLL DDBErr DDBTile(const char* inputPath, int tz, int tx, int ty,
 DDBErr DDBMemoryTile(const char *inputPath, int tz, int tx, int ty, uint8_t **outBuffer, int *outBufferSize, int tileSize, bool tms, bool forceRecreate, const char *inputPathHash){
     DDB_C_BEGIN
     ddb::TilerHelper::getTile(
-        inputPath, tz, tx, ty, tileSize, tms, forceRecreate, "", outBuffer, outBufferSize, std::string(inputPathHash));
+        std::string(inputPath), tz, tx, ty, tileSize, tms, forceRecreate, "", outBuffer, outBufferSize, std::string(inputPathHash));
     DDB_C_END
 }
 

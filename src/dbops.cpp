@@ -508,7 +508,7 @@ std::string sanitize_query_param(const std::string &str) {
     // TAKES INTO ACCOUNT PATHS THAT CONTAINS EVERY SORT OF STUFF
     utils::stringReplace(res, "/", "//");
     utils::stringReplace(res, "%", "/%");
-    utils::stringReplace(res, "_", "/_");
+    //utils::stringReplace(res, "_", "/_");
     utils::stringReplace(res, "*", "%");
 
     return res;

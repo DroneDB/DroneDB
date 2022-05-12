@@ -51,9 +51,9 @@ fs::path TilerHelper::getFromUserCache(const fs::path &tileablePath, int tz,
                                        int tx, int ty, int tileSize, bool tms,
                                        bool forceRecreate,
                                        const std::string &tileablePathHash) {
-    if (std::rand() % 1000 == 0) cleanupUserCache();
     if (!fs::exists(tileablePath))
         throw FSException(tileablePath.string() + " does not exist");
+    if (std::rand() % 1000 == 0) cleanupUserCache();
 
     const time_t modifiedTime = io::Path(tileablePath).getModifiedTime();
     const fs::path tileCacheFolder =
