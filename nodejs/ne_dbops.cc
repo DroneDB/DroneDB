@@ -5,6 +5,7 @@
 #include <sstream>
 #include "ddb.h"
 #include "dbops.h"
+#include "build.h"
 #include "ne_dbops.h"
 #include "ne_helpers.h"
 
@@ -287,8 +288,7 @@ class BuildWorker : public Nan::AsyncProgressWorker {
     bool force, bool pendingOnly)
     : Nan::AsyncProgressWorker(callback, "nan:BuildWorker"),
       progress(progress),
-      ddbPath(ddbPath), path(path), force(force), pendingOnly(pendingOnly),
-      cancel(false) {}
+      ddbPath(ddbPath), path(path), force(force), pendingOnly(pendingOnly) {}
   ~BuildWorker() {
       delete progress;
   }
@@ -299,27 +299,31 @@ class BuildWorker : public Nan::AsyncProgressWorker {
         
         const auto db = ddb::open(ddbPath, true);
 
+        ddb::BuildCallback showProgress = [&](const std::string &built){
+            progress.Send(built.c_str(), sizeof(char) * built.length());
+        };
 
-        // TODO: finish adding callback, progress
-
-        
         if (path.empty()) {
-            if (pendingOnly) ddb::buildPending(db.get(), "", force);
-            else ddb::buildAll(db.get(), "", force);
+            if (pendingOnly) ddb::buildPending(db.get(), "", force, showProgress);
+            else ddb::buildAll(db.get(), "", force, showProgress);
         } else {
-            ddb::build(db.get(), path, "", force);
+            ddb::build(db.get(), path, "", force, showProgress);
         }
-
-        output = outJson.dump();
       }catch(const ddb::AppException &e){
         SetErrorMessage(e.what());
       }
   }
 
-  void Execute () {
-    if (DDBBuild(ddbPath.c_str(), path.c_str(), nullptr, force, pendingOnly) != DDBERR_NONE){
-      SetErrorMessage(DDBGetLastError());
-    }
+  void HandleProgressCallback(const char *data, size_t count) {
+      Nan::HandleScope scope;
+
+      std::string str(data, count);
+
+      v8::Local<v8::Value> argv[] = {
+          Nan::New<v8::String>(str).ToLocalChecked()
+      };
+
+      progress->Call(1, argv, async_resource).ToLocalChecked();
   }
 
   void HandleOKCallback () {
@@ -338,12 +342,10 @@ class BuildWorker : public Nan::AsyncProgressWorker {
     std::string path;
     bool force;
     bool pendingOnly;
-
-    bool cancel;
 };
 
 NAN_METHOD(build) {
-    ASSERT_NUM_PARAMS(3);
+    ASSERT_NUM_PARAMS(4);
 
     BIND_STRING_PARAM(ddbPath, 0);
     BIND_OBJECT_PARAM(obj, 1);
@@ -352,9 +354,10 @@ NAN_METHOD(build) {
     BIND_OBJECT_VAR(obj, bool, force, false);
     BIND_OBJECT_VAR(obj, bool, pendingOnly, false);
 
-    BIND_FUNCTION_PARAM(callback, 2);
+    BIND_FUNCTION_PARAM(progress, 2);
+    BIND_FUNCTION_PARAM(callback, 3);
 
-    Nan::AsyncQueueWorker(new BuildWorker(callback, ddbPath, path, force, pendingOnly));
+    Nan::AsyncQueueWorker(new BuildWorker(callback, progress, ddbPath, path, force, pendingOnly));
 }
 
 class SearchWorker : public Nan::AsyncWorker {
