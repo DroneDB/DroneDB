@@ -41,7 +41,7 @@ Tiler::Tiler(const std::string &inputPath, const std::string &outputFolder,
       tms(tms),
       mercator(GlobalMercator(tileSize)) {
     if (!fs::exists(inputPath) && !utils::isNetworkPath(inputPath))
-        throw FSException(inputPath + " does not exists");
+        throw FSException(inputPath + " does not exist");
     if (tileSize <= 0 ||
         std::ceil(std::log2(tileSize) != std::floor(std::log2(tileSize))))
         throw GDALException("Tile size must be a power of 2 greater than 0");
