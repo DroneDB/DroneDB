@@ -306,7 +306,7 @@ TEST(listIndex, allFileWildcard) {
 
     std::cout << out.str() << std::endl;
     
-    EXPECT_EQ(out.str(), "1JI_0064.JPG\n1JI_0065.JPG\npics\npics.JPG\npics2");
+    EXPECT_EQ(out.str(), "1JI_0064.JPG\n1JI_0065.JPG\npics\npics.JPG\npics2\n");
 
 }
 
