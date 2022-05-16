@@ -50,7 +50,7 @@ void buildInternal(Database* db, const Entry& e,
                            const std::string& outputPath,
                            bool force, BuildCallback callback) {
     std::string outPath = outputPath;
-    if (outPath.empty()) outPath = db->buildDirectory();
+    if (outPath.empty()) outPath = db->buildDirectory().string();
 
     LOGD << "Building entry " << e.path << " type " << e.type;
 
@@ -136,7 +136,7 @@ void buildInternal(Database* db, const Entry& e,
 
 void buildAll(Database* db, const std::string& outputPath, bool force, BuildCallback callback) {
     std::string outPath = outputPath;
-    if (outPath.empty()) outPath = db->buildDirectory();
+    if (outPath.empty()) outPath = db->buildDirectory().string();
 
     LOGD << "In buildAll('" << outputPath << "')";
 
@@ -172,7 +172,7 @@ void buildPending(Database *db, const std::string &outputPath, bool force, Build
     if (!fs::exists(buildDir)) return;
 
     std::string outPath = outputPath;
-    if (outPath.empty()) outPath = buildDir;
+    if (outPath.empty()) outPath = buildDir.string();
 
     for (auto i = fs::recursive_directory_iterator(buildDir);
          i != fs::recursive_directory_iterator(); ++i) {
