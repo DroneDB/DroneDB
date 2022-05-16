@@ -95,7 +95,8 @@ class Registry {
     DDB_DLL void downloadFiles(const std::string& organization,
                                const std::string& dataset,
                                const std::vector<std::string>& files,
-                               const std::string& folder);
+                               const std::string& folder,
+                               std::ostream &out);
     DDB_DLL json getMetaDump(const std::string& organization,
                                const std::string& dataset,
                                const std::vector<std::string>& ids);

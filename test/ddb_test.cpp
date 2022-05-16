@@ -306,7 +306,7 @@ TEST(listIndex, allFileWildcard) {
 
     std::cout << out.str() << std::endl;
     
-    EXPECT_EQ(out.str(), "1JI_0064.JPG\n1JI_0065.JPG\npics\npics.JPG\npics/IMG_20160826_181302.jpg\npics/IMG_20160826_181305.jpg\npics/IMG_20160826_181309.jpg\npics/IMG_20160826_181314.jpg\npics/IMG_20160826_181317.jpg\npics/pics2\npics2\npics2/IMG_20160826_181305.jpg\npics2/IMG_20160826_181309.jpg\npics2/pics\n");
+    EXPECT_EQ(out.str(), "1JI_0064.JPG\n1JI_0065.JPG\npics\npics.JPG\npics2\n");
 
 }
 
@@ -357,7 +357,7 @@ TEST(listIndex, rootPath2) {
     listIndex(db.get(), toList, out, "text");
 
     std::cout << out.str() << std::endl;
-    EXPECT_EQ(out.str(), "pics/IMG_20160826_181302.jpg\npics/IMG_20160826_181305.jpg\npics/IMG_20160826_181309.jpg\npics/IMG_20160826_181314.jpg\npics/IMG_20160826_181317.jpg\npics/pics2\n");
+    EXPECT_EQ(out.str(), "pics\n");
 
 }
 
@@ -381,7 +381,7 @@ TEST(listIndex, folder) {
     listIndex(db.get(), toList, out, "text");
 
     std::cout << out.str() << std::endl;
-    EXPECT_EQ(out.str(), "pics/IMG_20160826_181302.jpg\npics/IMG_20160826_181305.jpg\npics/IMG_20160826_181309.jpg\npics/IMG_20160826_181314.jpg\npics/IMG_20160826_181317.jpg\npics/pics2\n");
+    EXPECT_EQ(out.str(), "pics\n");
 
 }
 
@@ -405,7 +405,7 @@ TEST(listIndex, subFolder) {
     listIndex(db.get(), toList, out, "text");
 
     std::cout << out.str() << std::endl;
-    EXPECT_EQ(out.str(), "pics/pics2/IMG_20160826_181305.jpg\npics/pics2/IMG_20160826_181309.jpg\n");
+    EXPECT_EQ(out.str(), "pics/pics2\n");
 
 }
 

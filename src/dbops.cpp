@@ -269,6 +269,128 @@ void doUpdate(Statement *updateQ, const Entry &e) {
     updateQ->execute();
 }
 
+void listIndex(Database* db, const std::vector<std::string>& paths, std::ostream& output, const std::string& format, bool recursive, int maxRecursionDepth) {
+    if (format != "json" && format != "text") throw InvalidArgsException("Invalid format " + format);
+
+    const fs::path directory = db->rootDirectory();
+    std::vector<fs::path> pathList;
+
+    if (paths.empty()) {
+        const auto currentPath = fs::current_path();
+        auto root = io::Path(directory);
+
+        // If we are inside ddb folder we can use our current path
+        // otherwise we should reset to root folder
+        // I.E: \home\tmp\ddb ls -w \home\img
+
+        pathList.emplace_back(root.isParentOf(fs::current_path()) ? io::Path(currentPath).generic() : directory.string());
+    }else pathList = std::vector<fs::path>(paths.begin(), paths.end());
+
+    std::vector<Entry> baseEntries;
+    bool expandFolders = recursive;
+
+    for (const fs::path& path : pathList) {
+        io::Path relPath = io::Path(path).relativeTo(directory);
+
+        auto pathStr = relPath.generic();
+
+        // Let's expand only if we were asked to list a different folder
+        expandFolders = expandFolders || pathStr.length() > 0;
+
+        const auto depth = static_cast<int>(count(pathStr.begin(), pathStr.end(), '/'));
+        std::vector<Entry> matches = getMatchingEntries(db, relPath.generic(), depth + 1);
+        baseEntries.insert(baseEntries.end(), matches.begin(), matches.end());
+    }
+
+    // Remove duplicates
+    sort(baseEntries.begin(), baseEntries.end(), [](const Entry& l, const Entry& r)
+        {
+            return l.path < r.path;
+        });
+    baseEntries.erase(unique(baseEntries.begin(), baseEntries.end(), [](const Entry& l, const Entry& r)
+        {
+            return l.path == r.path;
+        }), baseEntries.end());
+
+    // Sort by type
+    sort(baseEntries.begin(), baseEntries.end(), [](const Entry& l, const Entry& r)
+        {
+            return l.type < r.type;
+        });
+
+    const bool isSingle = pathList.size() == baseEntries.size();
+
+    std::vector<Entry> outputEntries;
+
+    for (const Entry& entry : baseEntries) {
+        if (entry.type != Directory) outputEntries.emplace_back(Entry(entry));
+        else {
+            if (!isSingle || !recursive)
+                outputEntries.emplace_back(Entry(entry));
+
+            if (recursive) {
+                const auto depth = recursive ? maxRecursionDepth : entry.depth + 2;
+                std::vector<Entry> entries = getMatchingEntries(db, entry.path, depth, true);
+                for (const Entry& e : entries) outputEntries.emplace_back(Entry(e));
+            }
+        }
+    }
+
+    // Sort by path
+    std::sort(outputEntries.begin(), outputEntries.end(), [](const Entry& l, const Entry& r)
+        {
+            return l.path < r.path;
+        });
+
+    if (format == "text"){
+        for (auto& e : outputEntries){
+            output << e.path << std::endl;
+        }
+    }else if (format == "json"){
+        output << "[";
+        bool first = true;
+
+        for (auto& e : outputEntries){
+
+            json j;
+            e.toJSON(j);
+            if (!first) output << ",";
+            output << j.dump();
+
+            first = false;
+        }
+
+        output << "]";
+    }else{
+        throw InvalidArgsException("Unsupported format '" + format + "'");
+    }
+}
+
+
+void searchIndex(Database* db, const std::string &query, std::ostream& out, const std::string& format){
+    auto entries = getMatchingEntries(db, query, 0, false);
+    std::sort(entries.begin(), entries.end(), [](const Entry& l, const Entry& r)
+        {
+            return l.path < r.path;
+        });
+
+    if (format == "text"){
+        for (auto& e : entries) out << e.path << std::endl;
+    }else if (format == "json"){
+        out << "[";
+        bool first = true;
+        for (auto& e : entries){
+            json j;
+            e.toJSON(j);
+            if (!first) out << ",";
+            out << j.dump();
+            first = false;
+        }
+        out << "]";
+    }
+}
+
+
 void addToIndex(Database *db, const std::vector<std::string> &paths,
                 AddCallback callback) {
     if (paths.empty()) return;  // Nothing to do
@@ -388,7 +510,7 @@ std::string sanitize_query_param(const std::string &str) {
     // TAKES INTO ACCOUNT PATHS THAT CONTAINS EVERY SORT OF STUFF
     utils::stringReplace(res, "/", "//");
     utils::stringReplace(res, "%", "/%");
-    utils::stringReplace(res, "_", "/_");
+    //utils::stringReplace(res, "_", "/_");
     utils::stringReplace(res, "*", "%");
 
     return res;

@@ -181,6 +181,27 @@ DDBErr DDBInfo(const char** paths, int numPaths, char** output,
     DDB_C_END
 }
 
+DDBErr DDBGet(const char *ddbPath, const char *path, char **output){
+    DDB_C_BEGIN
+    if (ddbPath == nullptr) throw InvalidArgsException("No ddb path provided");
+    if (path == nullptr) throw InvalidArgsException("No path provided");
+    const auto db = ddb::open(std::string(ddbPath), false);
+
+    auto entries = ddb::getMatchingEntries(db.get(), std::string(path));
+    std::string entryJson;
+    if (entries.size() == 1){
+        entryJson = entries[0].toJSONString();
+    }else if (entries.size() > 1){
+        throw InvalidArgsException("Multiple entries were returned for " + std::string(path));
+    }else{
+        throw InvalidArgsException("No entry " + std::string(path));
+    }
+    utils::copyToPtr(entryJson, output);
+
+    DDB_C_END
+}
+
+
 DDBErr DDBList(const char* ddbPath, const char** paths, int numPaths,
                char** output, const char* format, bool recursive,
                int maxRecursionDepth) {
@@ -206,6 +227,26 @@ DDBErr DDBList(const char* ddbPath, const char** paths, int numPaths,
 
     DDB_C_END
 }
+
+DDBErr DDBSearch(const char *ddbPath, const char *query, char **output, const char *format){
+    DDB_C_BEGIN
+
+    if (ddbPath == nullptr) throw InvalidArgsException("No ddb path provided");
+    if (query == nullptr) throw InvalidArgsException("No query provided");
+    if (format == nullptr || strlen(format) == 0) throw InvalidArgsException("No format provided");
+
+    if (output == nullptr) throw InvalidArgsException("No output provided");
+
+    const auto db = ddb::open(std::string(ddbPath), false);
+
+    std::ostringstream ss;
+    searchIndex(db.get(), query, ss, format);
+
+    utils::copyToPtr(ss.str(), output);
+
+    DDB_C_END
+}
+
 
 DDBErr DDBAppendPassword(const char* ddbPath, const char* password) {
     DDB_C_BEGIN
@@ -341,8 +382,9 @@ DDB_DLL DDBErr DDBTile(const char* inputPath, int tz, int tx, int ty,
                        char** outputTilePath, int tileSize, bool tms,
                        bool forceRecreate) {
     DDB_C_BEGIN
+    utils::copyToPtr("", outputTilePath);
     const auto tilePath = ddb::TilerHelper::getFromUserCache(
-        inputPath, tz, tx, ty, tileSize, tms, forceRecreate);
+        std::string(inputPath), tz, tx, ty, tileSize, tms, forceRecreate);
     utils::copyToPtr(tilePath.string(), outputTilePath);
     DDB_C_END
 }
@@ -350,7 +392,7 @@ DDB_DLL DDBErr DDBTile(const char* inputPath, int tz, int tx, int ty,
 DDBErr DDBMemoryTile(const char *inputPath, int tz, int tx, int ty, uint8_t **outBuffer, int *outBufferSize, int tileSize, bool tms, bool forceRecreate, const char *inputPathHash){
     DDB_C_BEGIN
     ddb::TilerHelper::getTile(
-        inputPath, tz, tx, ty, tileSize, tms, forceRecreate, "", outBuffer, outBufferSize, std::string(inputPathHash));
+        std::string(inputPath), tz, tx, ty, tileSize, tms, forceRecreate, "", outBuffer, outBufferSize, std::string(inputPathHash));
     DDB_C_END
 }
 
@@ -386,7 +428,7 @@ DDBErr DDBDelta(const char* ddbSourceStamp, const char* ddbTargetStamp, char** o
     DDB_C_END
 }
 
-DDB_DLL DDBErr DDBApplyDelta(const char *delta, const char *sourcePath, char *ddbPath, int mergeStrategy, char *sourceMetaDump, char **conflicts){
+DDB_DLL DDBErr DDBApplyDelta(const char *delta, const char *sourcePath, const char *ddbPath, int mergeStrategy, const char *sourceMetaDump, char **conflicts){
     DDB_C_BEGIN
 
     Delta d;
@@ -494,20 +536,17 @@ DDB_DLL DDBErr DDBBuild(const char *ddbPath, const char *source, const char *des
 
     const auto ddb = ddb::open(ddbPathStr, true);
 
-    const auto destPath =
-        dest == nullptr
-            ? (fs::path(ddbPathStr) / DDB_FOLDER / DDB_BUILD_PATH).generic_string()
-            : std::string(dest);
+    const auto destPath = dest != nullptr ? std::string(dest) : "";
 
-    // We dont use this at the moment
-    std::ostringstream ss;
+    std::string path;
+    if (source != nullptr) path = std::string(source);
 
     try {
-        if (source == nullptr) {
-            if (pendingOnly) buildPending(ddb.get(), destPath, ss, force);
-            else buildAll(ddb.get(), destPath, ss, force);
+        if (path.empty()) {
+            if (pendingOnly) buildPending(ddb.get(), destPath, force);
+            else buildAll(ddb.get(), destPath, force);
         } else {
-            build(ddb.get(), std::string(source), destPath, ss, force);
+            build(ddb.get(), path, destPath, force);
         }
     } catch (const ddb::BuildDepMissingException &e) {
         return DDBERR_BUILDDEPMISSING;

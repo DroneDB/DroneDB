@@ -79,6 +79,13 @@ DDB_DLL DDBErr DDBRemove(const char *ddbPath, const char **paths, int numPaths);
 DDB_DLL DDBErr DDBInfo(const char **paths, int numPaths, char** output, const char *format = "text", bool recursive = false, int maxRecursionDepth = 0,
                        const char *geometry = "auto", bool withHash = false, bool stopOnError = true);
 
+/** Retrieve a single entry from the index
+ * @param ddbPath path to a DroneDB database (parent of ".ddb")
+ * @param path path of the entry
+ * @param output pointer to C-string where to store result (JSON)
+ * @return DDBERR_NONE on success, an error otherwise */
+DDB_DLL DDBErr DDBGet(const char *ddbPath, const char *path, char **output);
+
 /** List files inside index 
  * @param ddbPath path to a DroneDB database (parent of ".ddb")
  * @param paths array of paths to parse
@@ -89,6 +96,14 @@ DDB_DLL DDBErr DDBInfo(const char **paths, int numPaths, char** output, const ch
  * @param maxRecursionDepth limit the depth of recursion
  * @return DDBERR_NONE on success, an error otherwise */
 DDB_DLL DDBErr DDBList(const char *ddbPath, const char **paths, int numPaths, char **output, const char *format, bool recursive = false, int maxRecursionDepth = 0);
+
+/** Search files inside index
+ * @param ddbPath path to a DroneDB database (parent of ".ddb")
+ * @param query search string
+ * @param output pointer to C-string where to store result
+ * @param format output format. One of: ["text", "json"]
+ * @return DDBERR_NONE on success, an error otherwise */
+DDB_DLL DDBErr DDBSearch(const char *ddbPath, const char *query, char **output, const char *format);
 
 /** Append password to database
  * @param ddbPath path to a DroneDB database (parent of ".ddb")
@@ -182,7 +197,7 @@ DDB_DLL DDBErr DDBDelta(const char *ddbSourceStamp, const char *ddbTargetStamp, 
  * @param sourceMetaDump meta dump (JSON) of source database (extracted with DDBMetaDump)
  * @param conflicts pointer to C-string where to store list of conflicts (if any) in JSON
  * @return DDBERR_NONE on success, an error otherwise */
-DDB_DLL DDBErr DDBApplyDelta(const char *delta, const char *sourcePath, char *ddbPath, int mergeStrategy, char *sourceMetaDump, char **conflicts);
+DDB_DLL DDBErr DDBApplyDelta(const char *delta, const char *sourcePath, const char *ddbPath, int mergeStrategy, const char *sourceMetaDump, char **conflicts);
 
 /** Compute map of local files that are available for delta adds operations
  * @param delta JSON delta between databases

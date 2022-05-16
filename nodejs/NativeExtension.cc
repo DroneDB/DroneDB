@@ -5,6 +5,7 @@
 #include "ne_dbops.h"
 #include "ne_share.h"
 #include "ne_login.h"
+#include "ne_meta.h"
 #include "ddb.h"
 
 using v8::FunctionTemplate;
@@ -21,10 +22,25 @@ NAN_MODULE_INIT(InitAll) {
     NAN_EXPORT(target, init);
     NAN_EXPORT(target, add);
     NAN_EXPORT(target, remove);
+    NAN_EXPORT(target, move);
     NAN_EXPORT(target, share);
     NAN_EXPORT(target, list);
+    NAN_EXPORT(target, build);
     NAN_EXPORT(target, login);
+    NAN_EXPORT(target, search);
     NAN_EXPORT(target, chattr);
+    NAN_EXPORT(target, get);
+    NAN_EXPORT(target, getStamp);
+    NAN_EXPORT(target, delta);
+    NAN_EXPORT(target, computeDeltaLocals);
+    NAN_EXPORT(target, applyDelta);
+    NAN_EXPORT(target, metaAdd);
+    NAN_EXPORT(target, metaSet);
+    NAN_EXPORT(target, metaRemove);
+    NAN_EXPORT(target, metaGet);
+    NAN_EXPORT(target, metaUnset);
+    NAN_EXPORT(target, metaList);
+    NAN_EXPORT(target, metaDump);
 
 	DDBRegisterProcess();
 }

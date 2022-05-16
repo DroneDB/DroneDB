@@ -34,6 +34,7 @@ struct Entry {
     json meta;
 
     DDB_DLL void toJSON(json &j) const;
+    DDB_DLL std::string toJSONString() const;
     DDB_DLL void fromJSON(const json &j);
     DDB_DLL bool toGeoJSON(json &j, BasicGeometryType type = BasicGeometryType::BGAuto);
     DDB_DLL std::string toString();

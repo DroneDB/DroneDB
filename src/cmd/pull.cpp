@@ -51,7 +51,6 @@ void Pull::run(cxxopts::ParseResult& opts) {
         else if (keepOurs) mergeStrategy = ddb::MergeStrategy::KeepOurs;
 
         ddb::pull(remote, mergeStrategy);
-
     } catch(ddb::IndexException& e) {        
         std::cout << e.what() << std::endl;
     } catch (ddb::InvalidArgsException& ex) {

@@ -31,6 +31,7 @@
 #include "stamp.h"
 #include "cog.h"
 #include "nxs.h"
+#include "search.h"
 
 namespace cmd {
 
@@ -62,7 +63,8 @@ namespace cmd {
       {"meta", new Meta()},
       {"stamp", new Stamp()},
       {"cog", new Cog()},
-      {"nxs", new Nxs()}
+      {"nxs", new Nxs()},
+      {"search", new Search()}
   };
 
   std::map<std::string, std::string> aliases = {

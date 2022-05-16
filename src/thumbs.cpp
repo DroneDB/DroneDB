@@ -24,7 +24,7 @@ namespace ddb{
 
 fs::path getThumbFromUserCache(const fs::path &imagePath, int thumbSize, bool forceRecreate){
     if (std::rand() % 1000 == 0) cleanupThumbsUserCache();
-    if (!fs::exists(imagePath)) throw FSException(imagePath.string() + " does not exist");
+    if (!fs::exists(imagePath)) throw FSException(imagePath.filename().string() + " does not exist");
 
     const fs::path outdir = UserProfile::get()->getThumbsDir(thumbSize);
     io::Path p = imagePath;

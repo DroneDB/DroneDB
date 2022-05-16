@@ -305,9 +305,17 @@ void Entry::toJSON(json &j) const{
     if (!this->meta.empty()) j["meta"] = this->meta;
 }
 
+std::string Entry::toJSONString() const{
+    json j;
+    toJSON(j);
+    std::stringstream s;
+    s << j;
+    return s.str();
+}
+
 void Entry::fromJSON(const json &j){
     j.at("path").get_to(this->path);
-    if (!j.at("hash").is_null()) j.at("hash").get_to(this->hash);
+    if (j.contains("hash") && !j.at("hash").is_null()) j.at("hash").get_to(this->hash);
     j.at("type").get_to(this->type);
     j.at("size").get_to(this->size);
     j.at("depth").get_to(this->depth);

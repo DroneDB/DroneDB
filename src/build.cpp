@@ -11,6 +11,7 @@
 #include "dbops.h"
 #include "exceptions.h"
 #include "mio.h"
+#include "threadlock.h"
 
 namespace ddb {
 
@@ -46,12 +47,14 @@ bool isBuildable(Database* db, const std::string& path, std::string& subfolder) 
 }
 
 void buildInternal(Database* db, const Entry& e,
-                           const std::string& outputPath, std::ostream& output,
-                           bool force) {
+                           const std::string& outputPath,
+                           bool force, BuildCallback callback) {
+    std::string outPath = outputPath;
+    if (outPath.empty()) outPath = db->buildDirectory().string();
 
     LOGD << "Building entry " << e.path << " type " << e.type;
 
-    const auto baseOutputPath = fs::path(outputPath) / e.hash;
+    const auto baseOutputPath = fs::path(outPath) / e.hash;
     std::string outputFolder;
     std::string subfolder;
 
@@ -62,6 +65,8 @@ void buildInternal(Database* db, const Entry& e,
         return;
     }
 
+    ThreadLock lock("build-" + (db->rootDirectory() / e.hash).string());
+
     if (fs::exists(outputFolder) && !force) {
         return;
     }
@@ -70,9 +75,7 @@ void buildInternal(Database* db, const Entry& e,
 
     io::assureFolderExists(tempFolder);
 
-    auto relativePath =
-        (fs::path(db->getOpenFile()).parent_path().parent_path() / e.path)
-            .string();
+    auto relativePath = (db->rootDirectory() / e.path).string();
 
     std::string pendFile = baseOutputPath.string() + ".pending";
     io::assureIsRemoved(pendFile);
@@ -100,7 +103,7 @@ void buildInternal(Database* db, const Entry& e,
             io::assureFolderExists(fs::path(outputFolder).parent_path());
             io::rename(tempFolder, outputFolder);
 
-            output << outputFolder << std::endl;
+            if (callback != nullptr) callback(outputFolder);
         }
 
         io::assureIsRemoved(tempFolder);
@@ -131,8 +134,9 @@ void buildInternal(Database* db, const Entry& e,
     }
 }
 
-void buildAll(Database* db, const std::string& outputPath,
-               std::ostream& output, bool force) {
+void buildAll(Database* db, const std::string& outputPath, bool force, BuildCallback callback) {
+    std::string outPath = outputPath;
+    if (outPath.empty()) outPath = db->buildDirectory().string();
 
     LOGD << "In buildAll('" << outputPath << "')";
 
@@ -147,12 +151,11 @@ void buildAll(Database* db, const std::string& outputPath,
                 q->getInt64(4), q->getInt64(5), q->getInt(6));
 
         // Call build on each of them
-        buildInternal(db, e, outputPath, output, force);
+        buildInternal(db, e, outPath, force, callback);
     }
 }
 
-void build(Database* db, const std::string& path, const std::string& outputPath,
-           std::ostream& output, bool force) {
+void build(Database* db, const std::string& path, const std::string& outputPath, bool force, BuildCallback callback) {
 
     LOGD << "In build('" << path << "','" << outputPath << "')";
 
@@ -161,12 +164,15 @@ void build(Database* db, const std::string& path, const std::string& outputPath,
     const bool entryExists = getEntry(db, path, e);
     if (!entryExists) throw InvalidArgsException(path + " is not a valid path in the database.");
 
-    buildInternal(db, e, outputPath, output, force);
+    buildInternal(db, e, outputPath, force, callback);
 }
 
-void buildPending(Database *db, const std::string &outputPath, std::ostream &output, bool force){
+void buildPending(Database *db, const std::string &outputPath, bool force, BuildCallback callback){
     auto buildDir = db->buildDirectory();
     if (!fs::exists(buildDir)) return;
+
+    std::string outPath = outputPath;
+    if (outPath.empty()) outPath = buildDir.string();
 
     for (auto i = fs::recursive_directory_iterator(buildDir);
          i != fs::recursive_directory_iterator(); ++i) {
@@ -186,7 +192,7 @@ void buildPending(Database *db, const std::string &outputPath, std::ostream &out
                 io::assureIsRemoved(i->path());
 
                 // Call build
-                buildInternal(db, e, outputPath, output, force);
+                buildInternal(db, e, outPath, force, callback);
             }
 
             if (!found){

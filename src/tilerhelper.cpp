@@ -9,6 +9,8 @@
 
 #include <memory>
 #include <vector>
+#include <chrono>
+#include <thread>
 
 #include "entry.h"
 #include "exceptions.h"
@@ -49,9 +51,9 @@ fs::path TilerHelper::getFromUserCache(const fs::path &tileablePath, int tz,
                                        int tx, int ty, int tileSize, bool tms,
                                        bool forceRecreate,
                                        const std::string &tileablePathHash) {
-    if (std::rand() % 1000 == 0) cleanupUserCache();
     if (!fs::exists(tileablePath))
         throw FSException(tileablePath.string() + " does not exist");
+    if (std::rand() % 1000 == 0) cleanupUserCache();
 
     const time_t modifiedTime = io::Path(tileablePath).getModifiedTime();
     const fs::path tileCacheFolder =
@@ -152,9 +154,14 @@ fs::path TilerHelper::toGeoTIFF(const fs::path &tileablePath, int tileSize,
 
                 // Recheck is needed for other processes that might have generated
                 // the file
+
                 if (!fs::exists(outputPath)){
                     ddb::geoProject({localTileablePath.string()}, outputPath.string(),
                                     "100%", true);
+
+                    // Helps making sure that output path is available in the filesystem before
+                    // releasing the thread lock
+                    std::this_thread::sleep_for(std::chrono::milliseconds(5));
                 }
             }
         }

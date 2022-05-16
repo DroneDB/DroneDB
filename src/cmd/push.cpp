@@ -39,8 +39,7 @@ void Push::run(cxxopts::ParseResult& opts) {
         const auto remote = opts["remote"].as<std::string>();
 
         ddb::push(remote);
-
-    } catch(ddb::IndexException& e) {        
+    } catch(ddb::IndexException& e) {
         std::cout << e.what() << std::endl;
     } catch (ddb::InvalidArgsException& ex) {
         std::cout << ex.what() << std::endl;
