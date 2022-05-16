@@ -287,13 +287,15 @@ void listIndex(Database* db, const std::vector<std::string>& paths, std::ostream
     }else pathList = std::vector<fs::path>(paths.begin(), paths.end());
 
     std::vector<Entry> baseEntries;
+    bool expandFolders = recursive;
+
     for (const fs::path& path : pathList) {
         io::Path relPath = io::Path(path).relativeTo(directory);
 
         auto pathStr = relPath.generic();
 
         // Let's expand only if we were asked to list a different folder
-        recursive = recursive || pathStr.length() > 0;
+        expandFolders = expandFolders || pathStr.length() > 0;
 
         const auto depth = static_cast<int>(count(pathStr.begin(), pathStr.end(), '/'));
         std::vector<Entry> matches = getMatchingEntries(db, relPath.generic(), depth + 1);
