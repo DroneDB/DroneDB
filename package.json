@@ -8,7 +8,7 @@
   },
   "scripts": {
     "test": "./node_modules/.bin/mocha nodejs/test/*.js",
-    "install": "cmake-js compile --prefer-make",
+    "install": "CMAKE_BUILD_PARALLEL_LEVEL=4 cmake-js compile --prefer-make",
     "cmake": "cmake-js configure --prefer-make"
   },
   "repository": {
