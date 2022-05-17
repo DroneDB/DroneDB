@@ -27,7 +27,7 @@ std::string buildNexus(const std::string &inputObj, const std::string &outputNxs
 
     // Check that this file's dependencies are present
     auto deps = getObjDependencies(inputObj);
-    for (auto &d : deps){
+    for (const std::string &d : deps){
         fs::path relPath = p.parent_path() / d;
         if (!fs::exists(relPath)) {
             throw BuildDepMissingException(d + " is referenced by " + inputObj + " but it's missing");
@@ -60,6 +60,7 @@ std::vector<std::string> getObjDependencies(const std::string &obj){
 
             auto mtlFiles = utils::split(mtlFilesLine, " ");
             for (auto &mtlFile : mtlFiles){
+                utils::trim(mtlFile);
                 deps.push_back(mtlFile);
                 fs::path mtlRelPath = p.parent_path() / mtlFile;
 
@@ -73,6 +74,7 @@ std::vector<std::string> getObjDependencies(const std::string &obj){
                             if (tokens.size() > 0){
                                 auto mapFname = tokens[tokens.size() - 1];
                                 if (mapFname.rfind(".") != std::string::npos){
+                                    utils::trim(mapFname);
                                     deps.push_back(mapFname);
                                 }
                             }
