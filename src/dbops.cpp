@@ -325,10 +325,10 @@ void listIndex(Database* db, const std::vector<std::string>& paths, std::ostream
     for (const Entry& entry : baseEntries) {
         if (entry.type != Directory) outputEntries.emplace_back(Entry(entry));
         else {
-            if (!isSingle || !recursive)
+            if (!isSingle || !expandFolders)
                 outputEntries.emplace_back(Entry(entry));
 
-            if (recursive) {
+            if (expandFolders) {
                 const auto depth = recursive ? maxRecursionDepth : entry.depth + 2;
                 std::vector<Entry> entries = getMatchingEntries(db, entry.path, depth, true);
                 for (const Entry& e : entries) outputEntries.emplace_back(Entry(e));
