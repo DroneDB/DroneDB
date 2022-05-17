@@ -27,7 +27,6 @@
     "nan": "^2.14.0"
   },
   "dependencies": {
-    "bindings": "^1.5.0",
-    "ddb-js": "file:nodejs/js"
+    "bindings": "^1.5.0"
   }
 }
