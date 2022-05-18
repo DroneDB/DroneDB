@@ -151,7 +151,11 @@ void buildAll(Database* db, const std::string& outputPath, bool force, BuildCall
                 q->getInt64(4), q->getInt64(5), q->getInt(6));
 
         // Call build on each of them
-        buildInternal(db, e, outPath, force, callback);
+        try{
+            buildInternal(db, e, outPath, force, callback);
+        }catch(const AppException &err){
+            LOGD << "Cannot build " << e.path << ": " << err.what();
+        }
     }
 }
 
@@ -192,7 +196,11 @@ void buildPending(Database *db, const std::string &outputPath, bool force, Build
                 io::assureIsRemoved(i->path());
 
                 // Call build
-                buildInternal(db, e, outPath, force, callback);
+                try{
+                    buildInternal(db, e, outPath, force, callback);
+                }catch(const AppException &err){
+                    LOGD << "Cannot build " << e.path << ": " << err.what();
+                }
             }
 
             if (!found){
