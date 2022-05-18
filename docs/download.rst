@@ -23,7 +23,17 @@ Server
 -----------------------------------------------------------------------------
 
  * Cloud instance managed by DroneDB developers: https://hub.dronedb.app
- * Self-host: https://github.com/DroneDB/Registry/
+ * Self-host: https://github.com/DroneDB/Server and https://github.com/DroneDB/Registry/
+
+On Linux simply run:
+
+::
+
+    $ curl -fsSL https://raw.githubusercontent.com/DroneDB/Server/master/ddb-server.sh -o ddb-server.sh
+    $ chmod +x ddb-server.sh
+    $ ./ddb-server.sh
+
+You will need to install docker.
 
 .. toctree::
    :maxdepth: 2
