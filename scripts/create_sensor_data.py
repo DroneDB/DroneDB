@@ -37,12 +37,14 @@ print("Reading %s ..." % SENSOR_DATA_AV)
 with urllib.request.urlopen(SENSOR_DATA_AV) as response:
     text = response.read().decode('utf-8')
     lines = map(lambda l: l.strip().lower().split(";")[:3], text.split('\n'))
-    
     for line in lines:
         if len(line) != 3:
             continue
         make, model, focal = line
-        focal = float(focal)
+        try:
+            focal = float(focal)
+        except ValueError:
+            print("Warning: skipped malformed line: %s" % line)
 
         if model.startswith(make):
             makemodel = model
