@@ -7,5 +7,8 @@
 #include <nan.h>
 
 NAN_METHOD(_shell_SHFileOperation);
+NAN_METHOD(_shell_AltPress);
+NAN_METHOD(_shell_AltRelease);
+
 
 #endif

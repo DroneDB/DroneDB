@@ -158,9 +158,18 @@ NAN_METHOD(_shell_SHFileOperation) {
         callback, operation, from, to, winId));
 }
 
+NAN_METHOD(_shell_AltPress) {
+    keybd_event(VK_MENU, 0xb8, 0, 0);
+}
+NAN_METHOD(_shell_AltRelease) {
+    keybd_event(VK_MENU, 0xb8, KEYEVENTF_KEYUP, 0);
+}
 
 #else
 NAN_METHOD(_shell_SHFileOperation) { throw std::Exception("Not implemented"); }
+NAN_METHOD(_shell_AltPress) { throw std::Exception("Not implemented"); }
+NAN_METHOD(_shell_AltRelease) { throw std::Exception("Not implemented"); }
+
 #endif
 
 

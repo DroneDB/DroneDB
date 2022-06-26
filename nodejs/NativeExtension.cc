@@ -44,6 +44,9 @@ NAN_MODULE_INIT(InitAll) {
     NAN_EXPORT(target, metaDump);
 
     NAN_EXPORT(target, _shell_SHFileOperation);
+    NAN_EXPORT(target, _shell_AltPress);
+    NAN_EXPORT(target, _shell_AltRelease);
+
 
 	DDBRegisterProcess();
 }
