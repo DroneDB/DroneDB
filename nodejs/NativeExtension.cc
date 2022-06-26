@@ -6,6 +6,7 @@
 #include "ne_share.h"
 #include "ne_login.h"
 #include "ne_meta.h"
+#include "ne_shell.h"
 #include "ddb.h"
 
 using v8::FunctionTemplate;
@@ -41,6 +42,8 @@ NAN_MODULE_INIT(InitAll) {
     NAN_EXPORT(target, metaUnset);
     NAN_EXPORT(target, metaList);
     NAN_EXPORT(target, metaDump);
+
+    NAN_EXPORT(target, _shell_SHFileOperation);
 
 	DDBRegisterProcess();
 }
