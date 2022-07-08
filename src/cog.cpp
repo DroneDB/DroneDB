@@ -47,6 +47,10 @@ void buildCog(const std::string &inputGTiff, const std::string &outputCog){
         targs = CSLAddString(targs, "COMPRESS=LZW");
     }
 
+    // BigTIFF
+    targs = CSLAddString(targs, "-co");
+    targs = CSLAddString(targs, "BIGTIFF=IF_SAFER");
+
     GDALWarpAppOptions* psOptions = GDALWarpAppOptionsNew(targs, nullptr);
     CSLDestroy(targs);
     GDALDatasetH hNewDataset = GDALWarp(outputCog.c_str(),
