@@ -1,45 +1,45 @@
-name: Docs
+# name: Docs
 
-on:
-  push:
-    branches: [ master ]
+# on:
+#   push:
+#     branches: [ master ]
 
-jobs:
-  build-docs:
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout
-      uses: actions/checkout@v2
-      with:
-        submodules: 'recursive'
-    - name: Install deps
-      run: scripts/ubuntu_deps.sh
-    - name: Run CMake
-      run: mkdir build && cd build && cmake -DBUILD_TESTING=OFF ..
-    - name: Build C++ lib/program and tests
-      run: cd build && make -j$(nproc) ddbcmd
-    - name: Autogenerate command docs
-      run: ./build/ddb --gendocs --outdir docs/commands/
-    - name: Sphinx Build
-      uses: ammaraskar/sphinx-action@0.4
-      with:
-        build-command: "sphinx-build -b html . _build"
-        docs-folder: "docs/"
-    - name: Commit files
-      run: |
-        git clone https://github.com/DroneDB/docs.dronedb
-        cp -r docs/_build/* docs.dronedb/
-        cd docs.dronedb
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
-        git add .
-        git commit -m "Update documentation" -a || true
-        # The above command will fail if no changes were present, so we ignore
-        # the return code.
-    - name: Push changes
-      uses: ad-m/github-push-action@master
-      with:
-        directory: "docs.dronedb"
-        repository: "DroneDB/docs.dronedb"
-        github_token: ${{ secrets.BOT_TOKEN }}
+# jobs:
+#   build-docs:
+#     runs-on: ubuntu-latest
+#     steps:
+#     - name: Checkout
+#       uses: actions/checkout@v2
+#       with:
+#         submodules: 'recursive'
+#     - name: Install deps
+#       run: scripts/ubuntu_deps.sh
+#     - name: Run CMake
+#       run: mkdir build && cd build && cmake -DBUILD_TESTING=OFF ..
+#     - name: Build C++ lib/program and tests
+#       run: cd build && make -j$(nproc) ddbcmd
+#     - name: Autogenerate command docs
+#       run: ./build/ddb --gendocs --outdir docs/commands/
+#     - name: Sphinx Build
+#       uses: ammaraskar/sphinx-action@0.4
+#       with:
+#         build-command: "sphinx-build -b html . _build"
+#         docs-folder: "docs/"
+#     - name: Commit files
+#       run: |
+#         git clone https://github.com/DroneDB/docs.dronedb
+#         cp -r docs/_build/* docs.dronedb/
+#         cd docs.dronedb
+#         git config --local user.email "action@github.com"
+#         git config --local user.name "GitHub Action"
+#         git add .
+#         git commit -m "Update documentation" -a || true
+#         # The above command will fail if no changes were present, so we ignore
+#         # the return code.
+#     - name: Push changes
+#       uses: ad-m/github-push-action@master
+#       with:
+#         directory: "docs.dronedb"
+#         repository: "DroneDB/docs.dronedb"
+#         github_token: ${{ secrets.BOT_TOKEN }}
 
