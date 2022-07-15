@@ -17,7 +17,6 @@ const bindings = (mod) => {
         try{
             return require(attempt);
         }catch(e){
-            console.log(e);
             tries.push(attempt);
         }
     }
