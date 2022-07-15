@@ -166,9 +166,9 @@ NAN_METHOD(_shell_AltRelease) {
 }
 
 #else
-NAN_METHOD(_shell_SHFileOperation) { throw std::Exception("Not implemented"); }
-NAN_METHOD(_shell_AltPress) { throw std::Exception("Not implemented"); }
-NAN_METHOD(_shell_AltRelease) { throw std::Exception("Not implemented"); }
+NAN_METHOD(_shell_SHFileOperation) { throw ddb::AppException("Not implemented"); }
+NAN_METHOD(_shell_AltPress) { throw ddb::AppException("Not implemented"); }
+NAN_METHOD(_shell_AltRelease) { throw ddb::AppException("Not implemented"); }
 
 #endif
 
