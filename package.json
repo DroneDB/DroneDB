@@ -23,10 +23,9 @@
   },
   "homepage": "https://github.com/DroneDB/DroneDB#readme",
   "devDependencies": {
-    "mocha": "^7.0.1", 
+    "mocha": "^7.0.1",
     "cmake-js": "^6.3.0",
     "nan": "^2.14.0"
   },
-  "dependencies": {
-  }
+  "dependencies": {}
 }

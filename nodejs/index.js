@@ -6,7 +6,8 @@ const path = require("path");
 const bindings = (mod) => {
     let paths = [
         path.join(__dirname, '..', 'build'),
-        path.join(__dirname, '..', '..', '..', 'build')
+        path.join(__dirname, '..', 'build', 'Release'),
+        path.join(__dirname, '..', '..', '..', 'build'),
     ];
     const tries = [];
 
