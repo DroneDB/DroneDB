@@ -399,7 +399,7 @@ int ExifParser::extractImageOrientation() {
 
 bool ExifParser::extractCameraOrientation(CameraOrientation &cameraOri) {
     auto pk = findXmpKey({"Xmp.drone-dji.GimbalPitchDegree", "Xmp.Camera.Pitch"});
-    auto yk = findXmpKey({"Xmp.drone-dji.FlightYawDegree", "Xmp.Camera.Yaw"});
+    auto yk = findXmpKey({"Xmp.drone-dji.GimbalYawDegree", "Xmp.drone-dji.FlightYawDegree", "Xmp.Camera.Yaw"});
     auto rk = findXmpKey({"Xmp.drone-dji.GimbalRollDegree", "Xmp.Camera.Roll"});
 
     if (pk == xmpData.end() || yk == xmpData.end() || rk == xmpData.end()){
