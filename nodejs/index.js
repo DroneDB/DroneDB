@@ -8,6 +8,9 @@ const bindings = (mod) => {
         path.join(__dirname, '..', 'build'),
         path.join(__dirname, '..', 'build', 'Release'),
         path.join(__dirname, '..', '..', '..', 'build'),
+        path.join(__dirname, '..', 'ddb'),
+        path.join(__dirname, '..', 'ddb', 'Release'),
+        path.join(__dirname, '..', 'ddb', '..', '..')
     ];
     const tries = [];
 
