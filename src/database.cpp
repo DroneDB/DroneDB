@@ -124,16 +124,19 @@ DDB_DLL void Database::ensureSchemaConsistency() {
     // TODO: remove me in 2023
     if (this->tableExists("attributes")){
         // Port public attr info to visibility meta
-        const auto q = this->query("SELECT ivalue FROM attributes WHERE name = 'public'");
-        if (q->fetch()){
-            if (q->getInt(0) == 1){
-                LOGD << "Migrated attributes.public to entries_meta.visibility";
-                this->getMetaManager()->set("visibility", "1");
+        {
+            const auto q = this->query("SELECT ivalue FROM attributes WHERE name = 'public'");
+            if (q->fetch()){
+                if (q->getInt(0) == 1){
+                    this->getMetaManager()->set("visibility", "1");
+                    LOGD << "Migrated attributes.public to entries_meta.visibility";
+                }
             }
         }
 
         // Drop table
         this->exec("DROP TABLE attributes");
+        LOGD << "Dropped attributes table";
     }
 
 }
