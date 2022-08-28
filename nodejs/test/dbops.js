@@ -26,23 +26,4 @@ describe('ddbops', function() {
 
         assert.ok(await ddb.remove(f, imagePath));
     });
-
-    it ('should be able to call chattr()', async function(){
-        this.timeout(8000);
-
-        const t = new TestArea("init", true);
-        const f = t.getFolder(".");
-        const ddbPath = path.join(await ddb.init(f), "..");
-
-        let info = await ddb.info(ddbPath);
-        assert.equal(info[0].properties.public, false);
-
-        const attrs = await ddb.chattr(ddbPath, { public: true });
-        assert.equal(attrs.public, true);
-
-        info = await ddb.info(ddbPath);
-        assert.equal(info[0].properties.public, true);
-
-        await assert.rejects(ddb.chattr(ddbPath, { invalid: "123" }));        
-    })
 });
