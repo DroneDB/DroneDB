@@ -51,9 +51,13 @@ if [[ $not_found ]]; then
 fi
 
 if [[ ! -f /usr/lib/libnxs.so ]]; then
-    curl -L https://github.com/DroneDB/libnexus/releases/download/v1.0.0/nxs-ubuntu-$UBUNTU_VERSION-$(arch).deb --output /tmp/nxs-ubuntu-$UBUNTU_VERSION-$(arch).deb
-    sudo dpkg-deb -x /tmp/nxs-ubuntu-$UBUNTU_VERSION-$(arch).deb /usr
-    rm /tmp/nxs-ubuntu-$UBUNTU_VERSION-$(arch).deb
+    ARCH=$(arch)
+    if [[ "$ARCH" = "x86_64" ]]; then
+      ARCH="amd64"
+    fi
+    curl -L https://github.com/DroneDB/libnexus/releases/download/v1.0.0/nxs-ubuntu-$UBUNTU_VERSION-$ARCH.deb --output /tmp/nxs-ubuntu-$UBUNTU_VERSION-$ARCH.deb
+    sudo dpkg-deb -x /tmp/nxs-ubuntu-$UBUNTU_VERSION-$ARCH.deb /usr
+    rm /tmp/nxs-ubuntu-$UBUNTU_VERSION-$ARCH.deb
 fi
 
 sudo apt install -y --fix-missing --no-install-recommends ca-certificates cmake git sqlite3 spatialite-bin libgeos-dev libgdal-dev g++-10 gcc-10 libpdal-dev pdal libzip-dev
