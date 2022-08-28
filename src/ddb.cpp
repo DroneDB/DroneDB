@@ -334,13 +334,22 @@ DDB_DLL DDBErr DDBStatus(const char* ddbPath, char** output) {
     DDB_C_END
 }
 
+// @deprecated
 DDBErr DDBChattr(const char* ddbPath, const char* attrsJson, char** output) {
     DDB_C_BEGIN
+    LOGD << "Deprecated DDBChattr call: please use DDBMetaSet instead as DDBChattr will be removed in the near future.";
+    
     const auto db = ddb::open(std::string(ddbPath), true);
     try{
         const json j = json::parse(attrsJson);
-        db->chattr(j);
-        utils::copyToPtr(db->getAttributes().dump(), output);
+        for (auto &el : j.items()) {
+            if (el.key() == "public" && el.value().is_boolean()) {
+                db->getMetaManager()->set("visibility", el.value() ? "1" : "0");
+            }else{
+                throw InvalidArgsException("Invalid attribute " + el.key());
+            }
+        }
+        utils::copyToPtr(db->getProperties().dump(), output);
     } catch (const json::parse_error &e) {
         throw InvalidArgsException(e.what());
     }

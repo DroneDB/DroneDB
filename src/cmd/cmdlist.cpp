@@ -20,7 +20,6 @@
 #include "system.h"
 #include "status.h"
 #include "password.h"
-#include "chattr.h"
 #include "delta.h"
 #include "clone.h"
 #include "tag.h"
@@ -53,7 +52,6 @@ namespace cmd {
       {"system", new System()},
       {"status", new Status()},
       {"password", new Password()},
-      {"chattr", new Chattr()},
       {"delta", new Delta()},
       {"clone", new Clone()},
       {"tag", new Tag()},

@@ -1,6 +1,6 @@
 {
   "name": "ddb",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "Effortless aerial data management and sharing",
   "main": "index.js",
   "directories": {
@@ -23,9 +23,8 @@
   },
   "homepage": "https://github.com/DroneDB/DroneDB#readme",
   "devDependencies": {
-    "mocha": "^7.0.1",
     "cmake-js": "^6.3.0",
-    "nan": "^2.14.0"
-  },
-  "dependencies": {}
+    "mocha": "^7.2.0",
+    "nan": "^2.16.0"
+  }
 }
