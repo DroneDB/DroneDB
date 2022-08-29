@@ -397,7 +397,7 @@ void parseDroneDBEntry(const fs::path &ddbPath, Entry &entry){
             entry.size = q->getInt64(0);
         }
 
-        entry.properties = db->getAttributes();
+        entry.properties = db->getProperties();
         entry.type = EntryType::DroneDB;
     }catch(AppException &e){
         LOGD << e.what();

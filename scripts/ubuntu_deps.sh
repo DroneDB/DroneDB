@@ -10,13 +10,29 @@ else
   exit 1
 fi
 
-hash add-apt-repository || not_found=true
+hash sudo || not_found=true
 if [[ $not_found ]]; then
-    sudo apt install -y software-properties-common
+  apt install -y sudo
+fi
+unset not_found
+
+hash curl || not_found=true
+if [[ $not_found ]]; then
+  apt install -y curl
+fi
+unset not_found
+
+if [[ "$UBUNTU_VERSION" = "20.04" ]]; then
+  hash add-apt-repository || not_found=true
+  if [[ $not_found ]]; then
+      sudo apt install -y software-properties-common
+  fi
+
+  sudo add-apt-repository ppa:ubuntugis/ubuntugis-unstable
 fi
 
+
 sudo apt update && sudo apt install -y --fix-missing --no-install-recommends build-essential
-sudo add-apt-repository ppa:ubuntugis/ubuntugis-unstable
 
 # Check if node is installed
 hash node 2>/dev/null || not_found=true 
@@ -35,9 +51,13 @@ if [[ $not_found ]]; then
 fi
 
 if [[ ! -f /usr/lib/libnxs.so ]]; then
-    curl -L https://github.com/DroneDB/libnexus/releases/download/v1.0.0/nxs-ubuntu-$UBUNTU_VERSION-amd64.deb --output /tmp/nxs-ubuntu-$UBUNTU_VERSION-amd64.deb
-    sudo dpkg-deb -x /tmp/nxs-ubuntu-$UBUNTU_VERSION-amd64.deb /usr
-    rm /tmp/nxs-ubuntu-$UBUNTU_VERSION-amd64.deb
+    ARCH=$(arch)
+    if [[ "$ARCH" = "x86_64" ]]; then
+      ARCH="amd64"
+    fi
+    curl -L https://github.com/DroneDB/libnexus/releases/download/v1.0.0/nxs-ubuntu-$UBUNTU_VERSION-$ARCH.deb --output /tmp/nxs-ubuntu-$UBUNTU_VERSION-$ARCH.deb
+    sudo dpkg-deb -x /tmp/nxs-ubuntu-$UBUNTU_VERSION-$ARCH.deb /usr
+    rm /tmp/nxs-ubuntu-$UBUNTU_VERSION-$ARCH.deb
 fi
 
 sudo apt install -y --fix-missing --no-install-recommends ca-certificates cmake git sqlite3 spatialite-bin libgeos-dev libgdal-dev g++-10 gcc-10 libpdal-dev pdal libzip-dev

@@ -19,14 +19,6 @@ SqliteDatabase &SqliteDatabase::open(const std::string &file) {
     LOGD << "Opening connection to " << file;
     if( sqlite3_open(file.c_str(), &db) != SQLITE_OK ) throw DBException("Can't open database: " + file);
 
-//    if( sqlite3_enable_load_extension(db, 1) != SQLITE_OK ) throw DBException("Cannot enable load extension");
-//    char *errMsg;
-//    if( sqlite3_load_extension(db, (getExeFolderPath() / "json1").c_str(), nullptr, &errMsg) == SQLITE_ERROR ) {
-//        std::string error(errMsg);
-//        sqlite3_free(errMsg);
-//        throw DBException("Error during extension loading: " + error);
-//    }
-
     this->openFile = file;
     this->afterOpen();
 

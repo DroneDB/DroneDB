@@ -54,17 +54,6 @@ const char *passwordsTableDdl = R"<<<(
   );
 )<<<";
 
-const char *attributesTableDdl = R"<<<(
-
-  CREATE TABLE IF NOT EXISTS attributes (
-      name TEXT NOT NULL PRIMARY KEY,
-      ivalue INTEGER,
-      rvalue REAL,
-      tvalue TEXT,
-      bvalue BLOB
-  );
-)<<<";
-
 const char *entriesMetaTableDdl = R"<<<(
   CREATE TABLE IF NOT EXISTS entries_meta (
       id TEXT PRIMARY KEY,
@@ -92,7 +81,7 @@ END;
 
 Database &Database::createTables() {
     const std::string sql = std::string(entriesTableDdl) + '\n' +
-                            passwordsTableDdl + '\n' + attributesTableDdl;
+                            passwordsTableDdl;
 
     LOGD << "About to create tables...";
     this->exec(sql);
@@ -117,12 +106,6 @@ DDB_DLL void Database::ensureSchemaConsistency() {
         LOGD << "Passwords table created";
     }
 
-    if (!this->tableExists("attributes")) {
-        LOGD << "Attributes table does not exist, creating it";
-        this->exec(attributesTableDdl);
-        LOGD << "Attributes table created";
-    }
-
     if (!this->tableExists("entries_meta")){
         LOGD << "Entries meta table does not exist, creating it";
         this->exec(entriesMetaTableDdl);
@@ -135,41 +118,31 @@ DDB_DLL void Database::ensureSchemaConsistency() {
     if (this->renameColumnIfExists("entries", "meta TEXT", "properties TEXT")){
         this->reopen();
     }
-}
 
-void Database::setPublic(bool isPublic) {
-
-    if (this->hasAttribute("public") && 
-        this->getBoolAttribute("public") == isPublic) return;
-
-    this->setBoolAttribute("public", isPublic);
-}
-
-bool Database::isPublic() const {
-    return this->hasAttribute("public") ? this->getBoolAttribute("public")
-                                        : false;
-}
-
-void Database::chattr(json attrs) {
-    for (auto &el : attrs.items()) {
-        if (el.key() == "public" && el.value().is_boolean()) {
-            this->setBoolAttribute("public", el.value());
-            continue;
+    // Migration from 1.0.7 --> 1.0.8 (can be removed in the near future)
+    // we removed the attributes table (use entries_meta instead)
+    // TODO: remove me in 2023
+    if (this->tableExists("attributes")){
+        // Port public attr info to visibility meta
+        {
+            const auto q = this->query("SELECT ivalue FROM attributes WHERE name = 'public'");
+            if (q->fetch()){
+                if (q->getInt(0) == 1){
+                    this->getMetaManager()->set("visibility", "1");
+                    LOGD << "Migrated attributes.public to entries_meta.visibility";
+                }
+            }
         }
 
-        if (el.key() == "mtime" && el.value().is_number_integer()) {
-            this->setIntAttribute("mtime", el.value());
-            continue;
-        }
-
-        throw InvalidArgsException("Invalid attribute " + el.key());
+        // Drop table
+        this->exec("DROP TABLE attributes");
+        LOGD << "Dropped attributes table";
     }
+
 }
 
-json Database::getAttributes() const {
+json Database::getProperties() const {
     json j;
-
-    j["public"] = this->isPublic();
 
     // See if we have a LICENSE.md and README.md in the index
     {
@@ -274,74 +247,6 @@ MetaManager *Database::getMetaManager(){
         metaManager = new MetaManager(this);
     }
     return metaManager;
-}
-
-void Database::setBoolAttribute(const std::string &name, bool value) {
-    this->setIntAttribute(name, value ? 1 : 0);
-}
-
-bool Database::getBoolAttribute(const std::string &name) const {
-    return this->getIntAttribute(name) == 1;
-}
-
-void Database::setLongAttribute(const std::string &name, long long value) {
-    const std::string sql =
-        "INSERT OR REPLACE INTO attributes (name, ivalue) "
-        "VALUES(?, ?)";
-
-    const auto q = this->query(sql);
-
-    q->bind(1, name);
-    q->bind(2, value);
-
-    q->execute();
-}
-
-void Database::setIntAttribute(const std::string &name, long value) {
-    const std::string sql =
-        "INSERT OR REPLACE INTO attributes (name, ivalue) "
-        "VALUES(?, ?)";
-
-    const auto q = this->query(sql);
-
-    q->bind(1, name);
-    q->bind(2, static_cast<long long>(value));
-
-    q->execute();
-}
-
-int Database::getIntAttribute(const std::string &name) const {
-    const std::string sql = "SELECT ivalue FROM attributes WHERE name = ?";
-
-    const auto q = this->query(sql);
-    q->bind(1, name);
-    return q->fetch() ? q->getInt(0) : 0;
-}
-
-long long Database::getLongAttribute(const std::string &name) const {
-    const std::string sql = "SELECT ivalue FROM attributes WHERE name = ?";
-
-    const auto q = this->query(sql);
-    q->bind(1, name);
-    return q->fetch() ? q->getInt64(0) : 0;
-}
-
-bool Database::hasAttribute(const std::string &name) const {
-    const std::string sql = "SELECT COUNT(name) FROM attributes WHERE name = ?";
-
-    const auto q = this->query(sql);
-    q->bind(1, name);
-    q->fetch();
-
-    return q->getInt(0) == 1;
-}
-
-void Database::clearAttribute(const std::string &name) {
-    const std::string sql = "DELETE FROM attributes WHERE name = ?";
-
-    const auto q = this->query(sql);
-    q->bind(1, name);
-    q->execute();
 }
 
 Database::~Database(){
