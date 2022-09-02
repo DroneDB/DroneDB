@@ -28,10 +28,6 @@ std::string Stac::description() {
 }
 
 void Stac::run(cxxopts::ParseResult &opts) {
-    if (!opts.count("paths")) {
-        printHelp();
-    }
-
     const auto paths = opts["paths"].as<std::vector<std::string>>();
     const auto matchExpr = opts["match"].as<std::string>();
     const bool recursive = opts["recursive"].as<bool>();

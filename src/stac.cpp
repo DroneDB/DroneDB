@@ -25,7 +25,7 @@ std::string generateStac(const std::vector<std::string> &paths,
 
     if (ddbPaths.size() == 0){
         // Search
-        const auto pathList = getPathList(paths, true, maxRecursionDepth false);
+        const auto pathList = getPathList(paths, true, maxRecursionDepth, false);
         for (const fs::path &p : pathList){
             if (fs::exists(p / DDB_FOLDER / "dbase.sqlite")){
                 ddbPaths.push_back(p.string());
@@ -33,9 +33,18 @@ std::string generateStac(const std::vector<std::string> &paths,
         }
     }
 
+    // Remove duplicates
+    ddbPaths.erase(unique(ddbPaths.begin(), ddbPaths.end(), [](const std::string& l, const std::string& r)
+        {
+            return l == r;
+        }), ddbPaths.end());
+
+
     for (const auto &s : ddbPaths){
         std::cout << s << std::endl;
     }
+
+    return "";
 }
 
 
