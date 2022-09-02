@@ -26,7 +26,7 @@ class MetaManager {
 public:
     MetaManager(ddb::Database* db) : db(db) {}
 
-
+    // Core
     DDB_DLL json add(const std::string& key, const std::string &data, const std::string &path = "", const std::string &cwd = "");
     DDB_DLL json set(const std::string& key, const std::string &data, const std::string &path = "", const std::string &cwd = "");
     DDB_DLL json remove(const std::string& id);
@@ -36,6 +36,9 @@ public:
     DDB_DLL json dump(const json &ids = json::array());
     DDB_DLL json restore(const json &metaDump);
     DDB_DLL json bulkRemove(const std::vector<std::string> &ids);
+
+    // Helpers
+    DDB_DLL std::string getString(const std::string& key, const std::string &path = "", const std::string &cwd = "", const std::string &defaultValue = "");
 };
 
 }

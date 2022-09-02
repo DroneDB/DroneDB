@@ -300,6 +300,16 @@ DDB_DLL json MetaManager::bulkRemove(const std::vector<std::string> &ids){
     j["removed"] = i;
     return j;
 }
+
+DDB_DLL std::string MetaManager::getString(const std::string& key, const std::string &path, const std::string &cwd, const std::string &defaultValue){
+    try{
+        auto m = this->get(key, path, cwd);
+        return m["data"].dump();
+    }catch(const InvalidArgsException &e){
+        return defaultValue;
+    }
+}
+
 	
 
 }

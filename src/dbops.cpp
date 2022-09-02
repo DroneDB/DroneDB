@@ -183,6 +183,8 @@ std::vector<fs::path> getPathList(const std::vector<std::string> &paths,
                     // Max depth
                     if (maxDepth > 0 && i.depth() >= (maxDepth - 1))
                         i.disable_recursion_pending();
+                    else if (maxDepth == -1)
+                        i.disable_recursion_pending();
 
                     if (fs::is_directory(rp)) {
                         if (includeDirs) result.push_back(rp);
