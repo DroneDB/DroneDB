@@ -32,6 +32,9 @@ class Database : public SqliteDatabase {
       DDB_DLL fs::path tmpDirectory() const;
       DDB_DLL fs::path buildDirectory() const;
 
+      DDB_DLL std::string getReadme() const;
+      DDB_DLL json getExtent() const;
+
       DDB_DLL MetaManager* getMetaManager();
 };
 

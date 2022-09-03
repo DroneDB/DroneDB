@@ -43,7 +43,7 @@ std::string generateStac(const std::vector<std::string> &paths,
         }), ddbPaths.end());
 
     if (ddbPaths.size() == 0) throw AppException("No DroneDB dataset found for generating STAC");
-    LOGD << "HERE";
+
     json j;
     j["stac_version"] = "1.0.0";
     //j["stac_extensions"] = json::array();
@@ -60,13 +60,13 @@ std::string generateStac(const std::vector<std::string> &paths,
         j["type"] = "Collection";
         j["title"] = db->getMetaManager()->getString("name", "", "", j["id"]);
 
-        // TODO: populate with README.md content if indexed
-        j["description"] = db->getMetaManager()->getString("name", "", "", j["id"]);
+        std::string readme = db->getReadme();
+        j["description"] = !readme.empty() ? readme : j["title"].get<std::string>();
 
         j["license"] = db->getMetaManager()->getString("license", "", "", "proprietary");
 
         //j["links"]
-        //j["extent"]
+        j["extent"] = db->getExtent();
 
         //j["assets"] ? (optional)
     }else if (ddbPaths.size() > 1 && entry.empty()){

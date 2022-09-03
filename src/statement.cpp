@@ -90,6 +90,11 @@ std::string Statement::getText(int columnId) {
     return res == nullptr ? std::string() : std::string(res);
 }
 
+const void* Statement::getBlob(int columnId){
+    assert(stmt != nullptr);
+    return sqlite3_column_blob(stmt, columnId);
+}
+
 double Statement::getDouble(int columnId){
     assert(stmt != nullptr);
     return sqlite3_column_double(stmt, columnId);
