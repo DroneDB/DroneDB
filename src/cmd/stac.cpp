@@ -19,7 +19,8 @@ void Stac::setOptions(cxxopts::Options &opts) {
     ("m,match", "Metadata expression to match for a DroneDB dataset to be included in STAC catalog (in the form: key=value)", cxxopts::value<std::string>()->default_value(""))
     ("r,recursive", "Recursively scan for DroneDB datasets in path", cxxopts::value<bool>())
     ("d,depth", "Max recursion depth", cxxopts::value<int>()->default_value("2"))
-    ("endpoint", "Endpoint URL for STAC links", cxxopts::value<std::string>()->default_value("./stac"))
+    ("stac-endpoint", "STAC Endpoint URL for STAC links", cxxopts::value<std::string>()->default_value("./stac"))
+    ("download-endpoint", "STAC Download Endpoint URL for STAC assets", cxxopts::value<std::string>()->default_value("./download"))
     ("id", "Set STAC entry id explicitely", cxxopts::value<std::string>()->default_value(""));
     // clang-format on
     opts.parse_positional({"paths"});
@@ -35,10 +36,12 @@ void Stac::run(cxxopts::ParseResult &opts) {
     const auto matchExpr = opts["match"].as<std::string>();
     const bool recursive = opts["recursive"].as<bool>();
     const int maxRecursionDepth = opts["depth"].as<int>();
-    const auto endpoint = opts["endpoint"].as<std::string>();
+    const auto stacEndpoint = opts["stac-endpoint"].as<std::string>();
+    const auto downloadEndpoint = opts["download-endpoint"].as<std::string>();
+
     const auto id = opts["id"].as<std::string>();
 
-    std::cout << ddb::generateStac(paths, entry, matchExpr, recursive, maxRecursionDepth, endpoint, id) << std::endl;
+    std::cout << ddb::generateStac(paths, entry, matchExpr, recursive, maxRecursionDepth, stacEndpoint, downloadEndpoint, id) << std::endl;
 }
 
 }  // namespace cmd

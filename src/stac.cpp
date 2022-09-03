@@ -5,7 +5,7 @@
 #include "logger.h"
 #include "exceptions.h"
 #include "mio.h"
-
+#include "curl_inc.h"
 #include "ddb.h"
 
 namespace ddb{
@@ -15,7 +15,8 @@ std::string generateStac(const std::vector<std::string> &paths,
                          const std::string &matchExpr,
                          bool recursive,
                          int maxRecursionDepth,
-                         const std::string &endpoint,
+                         const std::string &stacEndpoint,
+                         const std::string &downloadEndpoint,
                          const std::string &id){
     std::vector<std::string> ddbPaths;
 
@@ -52,6 +53,7 @@ std::string generateStac(const std::vector<std::string> &paths,
 
     if (ddbPaths.size() == 1 && !entry.empty()){
         // STAC Item
+
     }else if (ddbPaths.size() == 1 && entry.empty()){
         auto db = open(ddbPaths.front(), false);
 
@@ -65,10 +67,60 @@ std::string generateStac(const std::vector<std::string> &paths,
 
         j["license"] = db->getMetaManager()->getString("license", "", "", "proprietary");
 
-        //j["links"]
+        json links = json::array();
+
+        // Root
+        links.push_back({ {"rel", "root"},
+                          {"href", stacEndpoint},
+                          {"type", "application/json"},
+                          {"title", j["title"]}
+                        });
+        CURL *curl = curl_easy_init();
+        if(!curl) throw AppException("Cannot initialize CURL");
+
+        // Items
+        {
+            const auto q = db->query("SELECT path FROM entries WHERE point_geom IS NOT NULL OR polygon_geom IS NOT NULL ORDER BY path");
+            while (q->fetch()){
+                const std::string path = q->getText(0);
+
+                char *escapedPath = curl_easy_escape(curl, path.c_str(), path.size());
+                if(escapedPath) {
+                    links.push_back({ {"rel", "item"},
+                                      {"href", stacEndpoint + "?p=" + std::string(escapedPath)},
+                                      {"type", "application/geo+json"},
+                                      {"title", path}
+                                    });
+                    curl_free(escapedPath);
+                }
+            }
+        }
+
+        // Self? It's strongly recommended, but then we need to use absolute URLs..
+
+        j["links"] = links;
         j["extent"] = db->getExtent();
 
-        //j["assets"] ? (optional)
+        j["assets"] = json::object();
+
+        // Assets
+        {
+            const auto q = db->query("SELECT path FROM entries WHERE point_geom IS NULL AND polygon_geom IS NULL "
+                                     "AND type != 1 AND type != 7 ORDER BY path");
+            while (q->fetch()){
+                const std::string path = q->getText(0);
+
+                char *escapedPath = curl_easy_escape(curl, path.c_str(), path.size());
+                if(escapedPath) {
+                    j["assets"][path] = { {"href", downloadEndpoint + "?p=" + std::string(escapedPath)},
+                                      {"title", path}
+                                    };
+                    curl_free(escapedPath);
+                }
+            }
+        }
+
+        curl_easy_cleanup(curl);
     }else if (ddbPaths.size() > 1 && entry.empty()){
         // Stac Catalog
     }else{
