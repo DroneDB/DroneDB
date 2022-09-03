@@ -16,6 +16,7 @@ DDB_DLL std::string generateStac(const std::vector<std::string> &paths,
                                  const std::string &matchExpr = "",
                                  bool recursive = false,
                                  int maxRecursionDepth = 2,
+                                 const std::string &stacRoot = ".",
                                  const std::string &stacEndpoint = "./stac",
                                  const std::string &downloadEndpoint = "./download",
                                  const std::string &id = "");

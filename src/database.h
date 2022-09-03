@@ -38,6 +38,8 @@ class Database : public SqliteDatabase {
       DDB_DLL MetaManager* getMetaManager();
 };
 
+DDB_DLL json wktBboxCoordinates(const std::string &wktBbox);
+
 }
 
 #endif // DATABASE_H

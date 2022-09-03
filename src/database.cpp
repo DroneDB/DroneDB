@@ -265,27 +265,9 @@ json Database::getExtent() const{
     const auto sql = "SELECT AsWKT(Extent(GUnion(polygon_geom, ConvexHull(point_geom)))) AS bbox FROM entries";
     const auto q = this->query(sql);
     if (q->fetch()){
-        std::string bbox = q->getText(0);
-        if (!bbox.empty() && bbox.size() > 9){
-            // Extract bbox coordinates
-            bbox.erase(0, std::string("POLYGON((").size());
-            std::istringstream ss(bbox);
-            std::vector<double> values;
-            double d;
-            char c;
-            int i = 0;
-
-            while(ss >> d){
-                values.push_back(d);
-                if (++i % 2 == 0) ss >> c; // skip ','
-            }
-
-            if (values.size() == 10){
-                j["spatial"] = json::array({json::array({
-                                            values[0],  values[1],
-                                            values[4], values[5]
-                                        })});
-            }
+        const auto bbox = wktBboxCoordinates(q->getText(0));
+        if (bbox.size() > 0){
+            j["spatial"] = json::array({bbox});
         }
     }
 
@@ -322,6 +304,38 @@ Database::~Database(){
         delete metaManager;
         metaManager = nullptr;
     }
+}
+
+json wktBboxCoordinates(const std::string &wktBbox){
+    std::vector<double> values;
+    std::string bbox = wktBbox;
+
+    if (!bbox.empty() && bbox.size() > 9){
+        // Extract bbox coordinates
+
+        bbox.erase(0, std::string("POLYGON((").size());
+        std::istringstream ss(bbox);
+
+        double d;
+        char c;
+        int i = 0;
+
+        while(ss >> d){
+            values.push_back(d);
+            if (++i % 2 == 0) ss >> c; // skip ','
+        }
+    }
+
+    json ret = json::array();
+
+    if (values.size() == 10){
+        ret.push_back(values[0]);
+        ret.push_back(values[1]);
+        ret.push_back(values[4]);
+        ret.push_back(values[5]);
+    }
+
+    return ret;
 }
 
 }  // namespace ddb
