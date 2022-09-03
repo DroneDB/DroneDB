@@ -11,20 +11,16 @@ namespace cmd {
 void Stac::setOptions(cxxopts::Options &opts) {
     // clang-format off
     opts
-    .positional_help("[args] [PATHS]")
+    .positional_help("[args]")
     .custom_help("stac")
     .add_options()
-    ("p,paths", "DroneDB datasets to generate a STAC catalog for", cxxopts::value<std::vector<std::string>>()->default_value("."))
-    ("e,entry", "Entry path to generate a STAC item for (which must be part of the DroneDB index)", cxxopts::value<std::string>()->default_value(""))
-    ("m,match", "Metadata expression to match for a DroneDB dataset to be included in STAC catalog (in the form: key=value)", cxxopts::value<std::string>()->default_value(""))
-    ("r,recursive", "Recursively scan for DroneDB datasets in path", cxxopts::value<bool>())
-    ("d,depth", "Max recursion depth", cxxopts::value<int>()->default_value("2"))
+    ("w,working-dir", "Working directory", cxxopts::value<std::string>()->default_value("."))
+    ("p,path", "Entry path to generate a STAC item for (which must be part of the DroneDB index)", cxxopts::value<std::string>()->default_value(""))
     ("stac-endpoint", "STAC Endpoint URL for STAC links", cxxopts::value<std::string>()->default_value("/stac"))
     ("download-endpoint", "STAC Download Endpoint URL for STAC assets", cxxopts::value<std::string>()->default_value("/download"))
     ("stac-root", "STAC absolute URL", cxxopts::value<std::string>()->default_value("."))
-    ("id", "Set STAC entry id explicitely", cxxopts::value<std::string>()->default_value(""));
+    ("id", "Set STAC id explicitely instead of using the directory name", cxxopts::value<std::string>()->default_value(""));
     // clang-format on
-    opts.parse_positional({"paths"});
 }
 
 std::string Stac::description() {
@@ -32,18 +28,15 @@ std::string Stac::description() {
 }
 
 void Stac::run(cxxopts::ParseResult &opts) {
-    const auto paths = opts["paths"].as<std::vector<std::string>>();
-    const auto entry = opts["entry"].as<std::string>();
-    const auto matchExpr = opts["match"].as<std::string>();
-    const bool recursive = opts["recursive"].as<bool>();
-    const int maxRecursionDepth = opts["depth"].as<int>();
+    const auto ddbPath = opts["working-dir"].as<std::string>();
+    const auto entry = opts["path"].as<std::string>();
     const auto stacEndpoint = opts["stac-endpoint"].as<std::string>();
     const auto downloadEndpoint = opts["download-endpoint"].as<std::string>();
     const auto stacRoot = opts["stac-root"].as<std::string>();
 
     const auto id = opts["id"].as<std::string>();
 
-    std::cout << ddb::generateStac(paths, entry, matchExpr, recursive, maxRecursionDepth, stacRoot, stacEndpoint, downloadEndpoint, id) << std::endl;
+    std::cout << ddb::generateStac(ddbPath, entry, stacRoot, stacEndpoint, downloadEndpoint, id) << std::endl;
 }
 
 }  // namespace cmd
