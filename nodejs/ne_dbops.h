@@ -19,7 +19,7 @@ NAN_METHOD(getStamp);
 NAN_METHOD(delta);
 NAN_METHOD(computeDeltaLocals);
 NAN_METHOD(applyDelta);
-
+NAN_METHOD(stac);
 
 
 #endif

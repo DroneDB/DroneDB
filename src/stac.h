@@ -11,7 +11,7 @@
 
 namespace ddb{
 
-DDB_DLL std::string generateStac(const std::string &ddbPath,
+DDB_DLL json generateStac(const std::string &ddbPath,
                                  const std::string &entry = "",
                                  const std::string &stacRoot = ".",
                                  const std::string &stacEndpoint = "./stac",

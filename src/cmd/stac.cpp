@@ -36,7 +36,7 @@ void Stac::run(cxxopts::ParseResult &opts) {
 
     const auto id = opts["id"].as<std::string>();
 
-    std::cout << ddb::generateStac(ddbPath, entry, stacRoot, stacEndpoint, downloadEndpoint, id) << std::endl;
+    std::cout << ddb::generateStac(ddbPath, entry, stacRoot, stacEndpoint, downloadEndpoint, id).dump(4) << std::endl;
 }
 
 }  // namespace cmd

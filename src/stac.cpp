@@ -10,7 +10,7 @@
 
 namespace ddb{
 
-std::string generateStac(const std::string &ddbPath,
+json generateStac(const std::string &ddbPath,
                          const std::string &entry,
                          const std::string &stacRoot,
                          const std::string &stacEndpoint,
@@ -150,7 +150,7 @@ std::string generateStac(const std::string &ddbPath,
         }
     }
 
-    return j.dump(4);
+    return j;
 }
 
 }
