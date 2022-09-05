@@ -267,16 +267,17 @@ json Database::getExtent() const{
     if (q->fetch()){
         const auto bbox = wktBboxCoordinates(q->getText(0));
         if (bbox.size() > 0){
-            j["spatial"] = json::array({bbox});
+            j["spatial"] = {{"bbox", json::array({bbox}) }};
         }
     }
 
     if (!j.contains("spatial")){
-        j["spatial"] = json::array({
+        j["spatial"] = {{"bbox", json::array({
                                    json::array({
                                        0, 0, 0, 0, 0, 0
                                    })
-                               });
+                               })
+                        }};
     }
 
     // No reliable temporal information is available
