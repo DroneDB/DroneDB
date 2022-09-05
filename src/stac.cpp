@@ -7,6 +7,7 @@
 #include "mio.h"
 #include "curl_inc.h"
 #include "ddb.h"
+#include "thumbs.h"
 #include <base64/base64.h>
 
 namespace ddb{
@@ -14,12 +15,14 @@ namespace ddb{
 json generateStac(const std::string &ddbPath,
                          const std::string &entry,
                          const std::string &stacCollectionRoot,
-                         const std::string &stacEndpoint,
-                         const std::string &downloadEndpoint,
                          const std::string &id,
                          const std::string &stacCatalogRoot){
     // Collection -> Dataset STAC
     // Catalog -> Entry point STAC / root (index of multiple Collection)
+
+    const std::string stacEndpoint = "/stac";
+    const std::string downloadEndpoint = "/download";
+    const std::string thumbEndpoint = "/thumb";
 
     if (ddbPath.empty()) throw AppException("No ddbPath is set for generating STAC");
 
@@ -43,7 +46,8 @@ json generateStac(const std::string &ddbPath,
                                 WHEN point_geom IS NOT NULL THEN AsGeoJSON(point_geom)
                                 ELSE NULL
                            END AS geom,
-                           AsWKT(Extent(GUnion(polygon_geom, ConvexHull(point_geom)))) AS bbox
+                           AsWKT(Extent(GUnion(polygon_geom, ConvexHull(point_geom)))) AS bbox,
+                           type
                     FROM entries WHERE path = ?
                 )<<<");
         q->bind(1, entry);
@@ -102,6 +106,13 @@ json generateStac(const std::string &ddbPath,
             j["assets"][path] = {{"href", stacCollectionRoot + downloadEndpoint + "/" + Base64::encode(path)},
                                     {"title", path}};
 
+            EntryType t = static_cast<EntryType>(q->getInt(4));
+            if (supportsThumbnails(t) || t == PointCloud){
+                j["assets"]["thumbnail"] = {{"title", "Thumbnail"},
+                                            {"type", "image/jpeg"},
+                                            {"roles", json::array({"thumbnail"})},
+                                            {"href", stacCollectionRoot + thumbEndpoint + "?path=" + curl.urlEncode(path) + "&size=512"}};
+            }
             j["links"] = links;
 
         }else{
@@ -148,12 +159,11 @@ json generateStac(const std::string &ddbPath,
                 const std::string path = q->getText(0);
                 links.push_back({ {"rel", "item"},
                                   {"href", stacCollectionRoot + stacEndpoint + "/" + Base64::encode(path)},
-                                  {"type", "application/geo+json"}
+                                  {"type", "application/geo+json"},
+                                  {"title", path}
                                 });
             }
         }
-
-        // Self? It's strongly recommended, but then we need to use absolute URLs..
 
         j["links"] = links;
         j["extent"] = db->getExtent();

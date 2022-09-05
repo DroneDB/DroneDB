@@ -745,7 +745,7 @@ DDB_DLL DDBErr DDBStac(const char *ddbPath, const char *entry, const char *stacC
     DDB_C_BEGIN
 
     const auto ddb = ddb::open(std::string(ddbPath), false);
-    auto json = ddb::generateStac(std::string(ddbPath), std::string(entry), std::string(stacCollectionRoot), std::string(stacEndpoint), std::string(downloadEndpoint), std::string(id), std::string(stacCatalogRoot));
+    auto json = ddb::generateStac(std::string(ddbPath), std::string(entry), std::string(stacCollectionRoot), std::string(id), std::string(stacCatalogRoot));
 
     utils::copyToPtr(json.dump(), output);
 
