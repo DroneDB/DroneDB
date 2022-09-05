@@ -313,12 +313,13 @@ DDB_DLL DDBErr DDBMetaRestore(const char *ddbPath, const char *dump, char **outp
 /** Generate STAC
  *  @param ddbPath path to the source DroneDB database (parent of ".ddb")
  *  @param entry path of entry in DroneDB database to generate a STAC item for (can be empty)
- *  @param stacRoot Absolute URL of the STAC catalog
+ *  @param stacCollectionRoot Absolute URL of the STAC collection
  *  @param stacEndpoint Endpoint appended to stacRoot to access the STAC endpoint
  *  @param downloadEndpoint Download endpoint appended to stacRoot for downloading/streaming STAC items/assets
  *  @param id STAC asset ID to use instead of folder name (must be unique for entire catalog)
+ *  @param stacCatalogRoot Absolute URL of the STAC catalog
  *  @param output pointer to C-string where to store result (JSON) */
-DDB_DLL DDBErr DDBStac(const char *ddbPath, const char *entry, const char *stacRoot, const char *stacEndpoint, const char *downloadEndpoint, const char *id, char **output);
+DDB_DLL DDBErr DDBStac(const char *ddbPath, const char *entry, const char *stacCollectionRoot, const char *stacEndpoint, const char *downloadEndpoint, const char *id, const char *stacCatalogRoot, char **output);
 
 
 #ifdef __cplusplus

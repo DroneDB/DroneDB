@@ -18,7 +18,8 @@ void Stac::setOptions(cxxopts::Options &opts) {
     ("p,path", "Entry path to generate a STAC item for (which must be part of the DroneDB index)", cxxopts::value<std::string>()->default_value(""))
     ("stac-endpoint", "STAC Endpoint URL for STAC links", cxxopts::value<std::string>()->default_value("/stac"))
     ("download-endpoint", "STAC Download Endpoint URL for STAC assets", cxxopts::value<std::string>()->default_value("/download"))
-    ("stac-root", "STAC absolute URL", cxxopts::value<std::string>()->default_value("."))
+    ("stac-catalog-root", "STAC Catalog absolute URL", cxxopts::value<std::string>()->default_value(""))
+    ("stac-collection-root", "STAC Collection absolute URL", cxxopts::value<std::string>()->default_value("."))
     ("id", "Set STAC id explicitely instead of using the directory name", cxxopts::value<std::string>()->default_value(""));
     // clang-format on
 }
@@ -32,11 +33,12 @@ void Stac::run(cxxopts::ParseResult &opts) {
     const auto entry = opts["path"].as<std::string>();
     const auto stacEndpoint = opts["stac-endpoint"].as<std::string>();
     const auto downloadEndpoint = opts["download-endpoint"].as<std::string>();
-    const auto stacRoot = opts["stac-root"].as<std::string>();
+    const auto stacCollectionRoot = opts["stac-collection-root"].as<std::string>();
+    const auto stacCatalogRoot = opts["stac-catalog-root"].as<std::string>();
 
     const auto id = opts["id"].as<std::string>();
 
-    std::cout << ddb::generateStac(ddbPath, entry, stacRoot, stacEndpoint, downloadEndpoint, id).dump(4) << std::endl;
+    std::cout << ddb::generateStac(ddbPath, entry, stacCollectionRoot, stacEndpoint, downloadEndpoint, id, stacCatalogRoot).dump(4) << std::endl;
 }
 
 }  // namespace cmd

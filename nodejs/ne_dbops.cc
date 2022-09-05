@@ -686,16 +686,18 @@ class StacWorker : public Nan::AsyncWorker {
  public:
   StacWorker(Nan::Callback *callback, const std::string &ddbPath,
              const std::string &entry,
-             const std::string &stacRoot,
+             const std::string &stacCollectionRoot,
              const std::string &stacEndpoint,
              const std::string &downloadEndpoint,
-             const std::string &id)
+             const std::string &id,
+             const std::string &stacCatalogRoot)
     : AsyncWorker(callback, "nan:StacWorker"),
-      ddbPath(ddbPath), entry(entry), stacRoot(stacRoot), stacEndpoint(stacEndpoint), downloadEndpoint(downloadEndpoint), id(id) {}
+      ddbPath(ddbPath), entry(entry), stacCollectionRoot(stacCollectionRoot), stacEndpoint(stacEndpoint),
+      downloadEndpoint(downloadEndpoint), id(id), stacCatalogRoot(stacCatalogRoot) {}
   ~StacWorker() {}
 
   void Execute () {
-    if (DDBStac(ddbPath.c_str(), entry.c_str(), stacRoot.c_str(), stacEndpoint.c_str(), downloadEndpoint.c_str(), id.c_str(), &output) != DDBERR_NONE){
+    if (DDBStac(ddbPath.c_str(), entry.c_str(), stacCollectionRoot.c_str(), stacEndpoint.c_str(), downloadEndpoint.c_str(), id.c_str(), stacCatalogRoot.c_str(), &output) != DDBERR_NONE){
         SetErrorMessage(DDBGetLastError());
     }
   }
@@ -716,10 +718,11 @@ class StacWorker : public Nan::AsyncWorker {
  private:
    std::string ddbPath;
    std::string entry;
-   std::string stacRoot;
+   std::string stacCollectionRoot;
    std::string stacEndpoint;
    std::string downloadEndpoint;
    std::string id;
+   std::string stacCatalogRoot;
 
    char *output;
 };
@@ -731,12 +734,13 @@ NAN_METHOD(stac) {
     BIND_OBJECT_PARAM(obj, 1);
 
     BIND_OBJECT_STRING(obj, entry, "");
-    BIND_OBJECT_STRING(obj, stacRoot, ".");
+    BIND_OBJECT_STRING(obj, stacCollectionRoot, ".");
+    BIND_OBJECT_STRING(obj, stacCatalogRoot, "");
     BIND_OBJECT_STRING(obj, stacEndpoint, "/stac");
     BIND_OBJECT_STRING(obj, downloadEndpoint, "/download");
     BIND_OBJECT_STRING(obj, id, "");
 
     BIND_FUNCTION_PARAM(callback, 2);
 
-    Nan::AsyncQueueWorker(new StacWorker(callback, ddbPath, entry, stacRoot, stacEndpoint, downloadEndpoint, id));
+    Nan::AsyncQueueWorker(new StacWorker(callback, ddbPath, entry, stacCollectionRoot, stacEndpoint, downloadEndpoint, id, stacCatalogRoot));
 }

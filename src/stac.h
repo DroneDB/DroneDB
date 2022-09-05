@@ -13,10 +13,11 @@ namespace ddb{
 
 DDB_DLL json generateStac(const std::string &ddbPath,
                                  const std::string &entry = "",
-                                 const std::string &stacRoot = ".",
+                                 const std::string &stacCollectionRoot = ".",
                                  const std::string &stacEndpoint = "./stac",
                                  const std::string &downloadEndpoint = "./download",
-                                 const std::string &id = "");
+                                 const std::string &id = "",
+                                 const std::string &stacCatalogRoot = "");
 
 }
 

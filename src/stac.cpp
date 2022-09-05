@@ -7,21 +7,26 @@
 #include "mio.h"
 #include "curl_inc.h"
 #include "ddb.h"
+#include <base64/base64.h>
 
 namespace ddb{
 
 json generateStac(const std::string &ddbPath,
                          const std::string &entry,
-                         const std::string &stacRoot,
+                         const std::string &stacCollectionRoot,
                          const std::string &stacEndpoint,
                          const std::string &downloadEndpoint,
-                         const std::string &id){
+                         const std::string &id,
+                         const std::string &stacCatalogRoot){
+    // Collection -> Dataset STAC
+    // Catalog -> Entry point STAC / root (index of multiple Collection)
+
     if (ddbPath.empty()) throw AppException("No ddbPath is set for generating STAC");
 
     json j;
     j["stac_version"] = "1.0.0";
 
-    CURLInstance curl; // for escapeURL
+    CURLInstance curl; // for urlEncode
 
     // What kind of STAC element are we generating?
     auto db = open(ddbPath, false);
@@ -65,23 +70,36 @@ json generateStac(const std::string &ddbPath,
             json links = json::array();
 
             // Root
-            links.push_back({ {"rel", "root"},
-                              {"href", stacRoot + stacEndpoint},
-                              {"type", "application/json"},
-                              {"title", rootTitle}
-                            });
+            if (!stacCatalogRoot.empty()){
+                links.push_back({ {"rel", "root"},
+                                  {"href", stacCatalogRoot + stacEndpoint},
+                                  {"type", "application/json"}
+                                });
+            }
 
-            // Self
-            if (stacRoot != "."){
+
+            if (stacCollectionRoot != "."){
+                // Parent
+                links.push_back({ {"rel", "parent"},
+                                  {"href", stacCollectionRoot + stacEndpoint},
+                                  {"type", "application/json"}
+                                });
+
+                // CollectionstacCollectionRoot
+                links.push_back({ {"rel", "collection"},
+                                  {"href", stacCollectionRoot + stacEndpoint},
+                                  {"type", "application/json"}
+                                });
+
+                // Self
                 links.push_back({ {"rel", "self"},
-                                  {"href", stacRoot + stacEndpoint + "?path=" + curl.urlEncode(path)},
-                                  {"type", "application/geo+json"},
-                                  {"title", path}
+                                  {"href", stacCollectionRoot + stacEndpoint + "/" + Base64::encode(path)},
+                                  {"type", "application/geo+json"}
                                 });
             }
 
             j["assets"] = json::object();
-            j["assets"][path] = {{"href", stacRoot + downloadEndpoint + "?path=" + curl.urlEncode(path)},
+            j["assets"][path] = {{"href", stacCollectionRoot + downloadEndpoint + "/" + Base64::encode(path)},
                                     {"title", path}};
 
             j["links"] = links;
@@ -103,18 +121,23 @@ json generateStac(const std::string &ddbPath,
         json links = json::array();
 
         // Root
-        links.push_back({ {"rel", "root"},
-                          {"href", stacRoot + stacEndpoint},
-                          {"type", "application/json"},
-                          {"title", j["title"]}
-                        });
+        if (!stacCatalogRoot.empty()){
+            links.push_back({ {"rel", "root"},
+                              {"href", stacCatalogRoot + stacEndpoint},
+                              {"type", "application/json"}
+                            });
+            // Parent
+            links.push_back({ {"rel", "parent"},
+                              {"href", stacCatalogRoot + stacEndpoint},
+                              {"type", "application/json"}
+                            });
+        }
 
-        // Self
-        if (stacRoot != "."){
+        if (stacCollectionRoot != "."){
+            // Self
             links.push_back({ {"rel", "self"},
-                              {"href", stacRoot + stacEndpoint},
-                              {"type", "application/json"},
-                              {"title", j["title"]}
+                              {"href", stacCollectionRoot + stacEndpoint},
+                              {"type", "application/json"}
                             });
         }
 
@@ -124,9 +147,8 @@ json generateStac(const std::string &ddbPath,
             while (q->fetch()){
                 const std::string path = q->getText(0);
                 links.push_back({ {"rel", "item"},
-                                  {"href", stacRoot + stacEndpoint + "?path=" + curl.urlEncode(path)},
-                                  {"type", "application/geo+json"},
-                                  {"title", path}
+                                  {"href", stacCollectionRoot + stacEndpoint + "/" + Base64::encode(path)},
+                                  {"type", "application/geo+json"}
                                 });
             }
         }
@@ -144,7 +166,7 @@ json generateStac(const std::string &ddbPath,
                                      "AND type != 1 AND type != 7 ORDER BY path");
             while (q->fetch()){
                 const std::string path = q->getText(0);
-                j["assets"][path] = { {"href", stacRoot + downloadEndpoint + "?path=" + curl.urlEncode(path)},
+                j["assets"][path] = { {"href", stacCollectionRoot + downloadEndpoint + "?path=" + curl.urlEncode(path)},
                                       {"title", path} };
             }
         }
