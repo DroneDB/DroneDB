@@ -151,7 +151,7 @@ std::vector<fs::path> getIndexPathList(const fs::path &rootDirectory,
 }
 
 std::vector<fs::path> getPathList(const std::vector<std::string> &paths,
-                                  bool includeDirs, int maxDepth) {
+                                  bool includeDirs, int maxDepth, bool includeFiles) {
     std::vector<fs::path> result;
     std::unordered_map<std::string, bool> directories;
 
@@ -183,14 +183,16 @@ std::vector<fs::path> getPathList(const std::vector<std::string> &paths,
                     // Max depth
                     if (maxDepth > 0 && i.depth() >= (maxDepth - 1))
                         i.disable_recursion_pending();
+                    else if (maxDepth == -1)
+                        i.disable_recursion_pending();
 
                     if (fs::is_directory(rp)) {
                         if (includeDirs) result.push_back(rp);
                     } else {
-                        result.push_back(rp);
+                        if (includeFiles) result.push_back(rp);
                     }
                 }
-            } else if (fs::exists(p)) {
+            } else if (fs::exists(p) && includeFiles) {
                 // File
                 result.push_back(p);
             } else {

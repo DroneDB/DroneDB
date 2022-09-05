@@ -681,3 +681,60 @@ NAN_METHOD(applyDelta) {
 
     Nan::AsyncQueueWorker(new ApplyDeltaWorker(callback, delta, sourcePath, ddbPath, mergeStrategy, sourceMetaDump));
 }
+
+class StacWorker : public Nan::AsyncWorker {
+ public:
+  StacWorker(Nan::Callback *callback, const std::string &ddbPath,
+             const std::string &entry,
+             const std::string &stacCollectionRoot,
+             const std::string &id,
+             const std::string &stacCatalogRoot)
+    : AsyncWorker(callback, "nan:StacWorker"),
+      ddbPath(ddbPath), entry(entry), stacCollectionRoot(stacCollectionRoot),
+      id(id), stacCatalogRoot(stacCatalogRoot) {}
+  ~StacWorker() {}
+
+  void Execute () {
+    if (DDBStac(ddbPath.c_str(), entry.c_str(), stacCollectionRoot.c_str(), id.c_str(), stacCatalogRoot.c_str(), &output) != DDBERR_NONE){
+        SetErrorMessage(DDBGetLastError());
+    }
+  }
+
+  void HandleOKCallback () {
+     Nan::HandleScope scope;
+
+     Nan::JSON json;
+     v8::Local<v8::Value> argv[] = {
+         Nan::Null(),
+         json.Parse(Nan::New<v8::String>(output).ToLocalChecked()).ToLocalChecked()
+     };
+
+     delete output;
+     callback->Call(2, argv, async_resource);
+   }
+
+ private:
+   std::string ddbPath;
+   std::string entry;
+   std::string stacCollectionRoot;
+   std::string id;
+   std::string stacCatalogRoot;
+
+   char *output;
+};
+
+NAN_METHOD(stac) {
+    ASSERT_NUM_PARAMS(3);
+
+    BIND_STRING_PARAM(ddbPath, 0);
+    BIND_OBJECT_PARAM(obj, 1);
+
+    BIND_OBJECT_STRING(obj, entry, "");
+    BIND_OBJECT_STRING(obj, stacCollectionRoot, ".");
+    BIND_OBJECT_STRING(obj, stacCatalogRoot, "");
+    BIND_OBJECT_STRING(obj, id, "");
+
+    BIND_FUNCTION_PARAM(callback, 2);
+
+    Nan::AsyncQueueWorker(new StacWorker(callback, ddbPath, entry, stacCollectionRoot, id, stacCatalogRoot));
+}

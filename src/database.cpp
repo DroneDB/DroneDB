@@ -144,10 +144,10 @@ DDB_DLL void Database::ensureSchemaConsistency() {
 json Database::getProperties() const {
     json j;
 
-    // See if we have a LICENSE.md and README.md in the index
+    // See if we have a README.md in the index
     {
         const std::string sql =
-            "SELECT path FROM entries WHERE path = 'LICENSE.md' OR path = "
+            "SELECT path FROM entries WHERE path = "
             "'README.md'";
 
         const auto q = this->query(sql);
@@ -155,8 +155,6 @@ json Database::getProperties() const {
             const std::string p = q->getText(0);
             if (p == "README.md") {
                 j["readme"] = p;
-            } else if (p == "LICENSE.md") {
-                j["license"] = p;
             }
         }
     }
@@ -242,6 +240,59 @@ fs::path Database::buildDirectory() const{
     return ddbDirectory() / DDB_BUILD_PATH;
 }
 
+std::string Database::getReadme() const{
+    const std::string sql = "SELECT path FROM entries WHERE path = 'README.md'";
+
+    const auto q = this->query(sql);
+    if (q->fetch()) {
+        const std::string p = q->getText(0);
+        if (p == "README.md") {
+            std::ifstream f((this->rootDirectory() / p).string());
+            if (f.is_open()){
+                std::stringstream buffer;
+                buffer << f.rdbuf();
+                return buffer.str();
+            }
+        }
+    }
+    return "";
+}
+
+json Database::getExtent() const{
+    json j;
+    json j_null;
+
+    const auto sql = "SELECT AsWKT(Extent(GUnion(polygon_geom, ConvexHull(point_geom)))) AS bbox FROM entries";
+    const auto q = this->query(sql);
+    if (q->fetch()){
+        const auto bbox = wktBboxCoordinates(q->getText(0));
+        if (bbox.size() > 0){
+            j["spatial"] = {{"bbox", json::array({bbox}) }};
+        }
+    }
+
+    if (!j.contains("spatial")){
+        j["spatial"] = {{"bbox", json::array({
+                                   json::array({
+                                       0, 0, 0, 0, 0, 0
+                                   })
+                               })
+                        }};
+    }
+
+    // No reliable temporal information is available
+    // TODO: some assets (geoimages) have temporal information
+    // perhaps there might be use in the future to populate it here
+    // Other ideas include using creation date / modification date, but
+    // these do not reflect the actual time of the assets
+    j["temporal"] = {{"interval", json::array({
+                                      json::array({j_null, j_null})
+                                  })
+                    }};
+
+    return j;
+}
+
 MetaManager *Database::getMetaManager(){
     if (metaManager == nullptr){
         metaManager = new MetaManager(this);
@@ -254,6 +305,38 @@ Database::~Database(){
         delete metaManager;
         metaManager = nullptr;
     }
+}
+
+json wktBboxCoordinates(const std::string &wktBbox){
+    std::vector<double> values;
+    std::string bbox = wktBbox;
+
+    if (!bbox.empty() && bbox.size() > 9){
+        // Extract bbox coordinates
+
+        bbox.erase(0, std::string("POLYGON((").size());
+        std::istringstream ss(bbox);
+
+        double d;
+        char c;
+        int i = 0;
+
+        while(ss >> d){
+            values.push_back(d);
+            if (++i % 2 == 0) ss >> c; // skip ','
+        }
+    }
+
+    json ret = json::array();
+
+    if (values.size() == 10){
+        ret.push_back(values[0]);
+        ret.push_back(values[1]);
+        ret.push_back(values[4]);
+        ret.push_back(values[5]);
+    }
+
+    return ret;
 }
 
 }  // namespace ddb

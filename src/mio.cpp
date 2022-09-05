@@ -470,6 +470,15 @@ void remove(const fs::path p){
     }
 }
 
+bool exists(const fs::path p){
+    std::error_code e;
+    bool val = fs::exists(p, e);
+    if (e.value() != 0){
+        return false;
+    }
+    return val;
+}
+
 void rename(const fs::path &from, const fs::path &to){
     std::error_code e;
     fs::rename(from, to, e);
