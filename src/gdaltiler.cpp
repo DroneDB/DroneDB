@@ -172,8 +172,8 @@ std::string GDALTiler::tile(int tz, int tx, int ty, uint8_t **outBuffer, int *ou
 
     // Need to create in-memory dataset
     // (PNG driver does not have Create() method)
-    int cappedNbands = std::min(3, nBands); // PNG driver supports at most 4 bands (rgba)
-    const GDALDatasetH dsTile = GDALCreate(memDrv, "", tileSize, tileSize, cappedNbands + 1,
+    int cappedBands = std::min(3, nBands); // PNG driver supports at most 4 bands (rgba)
+    const GDALDatasetH dsTile = GDALCreate(memDrv, "", tileSize, tileSize, cappedBands + 1,
                                            GDT_Byte, nullptr);
     if (dsTile == nullptr) throw GDALException("Cannot create dsTile");
 
@@ -194,12 +194,12 @@ std::string GDALTiler::tile(int tz, int tx, int ty, uint8_t **outBuffer, int *ou
             GDALGetRasterDataType(GDALGetRasterBand(inputDataset, 1));
 
         const size_t wSize = g.w.xsize * g.w.ysize;
-        char *buffer =
-            new char[GDALGetDataTypeSizeBytes(type) * cappedNbands * wSize];
+        uint8_t *buffer =
+            new uint8_t[GDALGetDataTypeSizeBytes(type) * cappedBands * wSize];
 
         if (GDALDatasetRasterIO(inputDataset, GF_Read, g.r.x, g.r.y, g.r.xsize,
                                 g.r.ysize, buffer, g.w.xsize, g.w.ysize, type,
-                                cappedNbands, nullptr, 0, 0, 0) != CE_None) {
+                                cappedBands, nullptr, 0, 0, 0) != CE_None) {
             throw GDALException("Cannot read input dataset window");
         }
 
@@ -208,43 +208,71 @@ std::string GDALTiler::tile(int tz, int tx, int ty, uint8_t **outBuffer, int *ou
         // TODO: allow people to specify rescale values
 
         if (type != GDT_Byte && type != GDT_Unknown) {
-            for (int i = 0; i < cappedNbands; i++) {
-                const GDALRasterBandH hBand = GDALGetRasterBand(inputDataset, i + 1);
-                char *wBuf = (buffer + wSize * i);
+            uint8_t *scaledBuffer = new uint8_t[GDALGetDataTypeSizeBytes(GDT_Byte) * cappedBands * wSize];
+            size_t bufSize = wSize * cappedBands;
 
-                switch (type) {
-                    case GDT_Byte:
-                        rescale<uint8_t>(hBand, wBuf, wSize);
-                        break;
-                    case GDT_UInt16:
-                        rescale<uint16_t>(hBand, wBuf, wSize);
-                        break;
-                    case GDT_Int16:
-                        rescale<int16_t>(hBand, wBuf, wSize);
-                        break;
-                    case GDT_UInt32:
-                        rescale<uint32_t>(hBand, wBuf, wSize);
-                        break;
-                    case GDT_Int32:
-                        rescale<int32_t>(hBand, wBuf, wSize);
-                        break;
-                    case GDT_Float32:
-                        rescale<float>(hBand, wBuf, wSize);
-                        break;
-                    case GDT_Float64:
-                        rescale<double>(hBand, wBuf, wSize);
-                        break;
-                    default:
-                        break;
+            double globalMin = std::numeric_limits<double>::max(),
+                    globalMax = std::numeric_limits<double>::min();
+
+            for (int i = 0; i < cappedBands; i++){
+                double bMin, bMax;
+
+                GDALDatasetH ds = origDataset != nullptr ? origDataset : inputDataset; // Use the actual dataset, not the VRT
+                GDALDatasetH hBand = GDALGetRasterBand(ds, i + 1);
+
+                CPLErr statsRes = GDALGetRasterStatistics(hBand, TRUE, FALSE, &bMin, &bMax, nullptr, nullptr);
+                if (statsRes == CE_Warning){
+                    double bMean, bStdDev;
+                    if (GDALGetRasterStatistics(hBand, TRUE, TRUE, &bMin, &bMax, &bMean, &bStdDev) != CE_None)
+                        throw GDALException("Cannot compute band statistics (forced)");
+                    if (GDALSetRasterStatistics(hBand, bMin, bMax, bMean, bStdDev) != CE_None)
+                        throw GDALException("Cannot cache band statistics");
+
+                    LOGD << "Cached band " << i << " statistics (" << bMin << ", " << bMax << ")";
+                }else if (statsRes == CE_Failure){
+                    throw GDALException("Cannot compute band statistics");
                 }
+
+                globalMin = std::min(globalMin, bMin);
+                globalMax = std::max(globalMax, bMax);
             }
+
+            switch (type) {
+                case GDT_Byte:
+                    rescale<uint8_t>(buffer, scaledBuffer, bufSize, globalMin, globalMax);
+                    break;
+                case GDT_UInt16:
+                    rescale<uint16_t>(buffer, scaledBuffer, bufSize, globalMin, globalMax);
+                    break;
+                case GDT_Int16:
+                    rescale<int16_t>(buffer, scaledBuffer, bufSize, globalMin, globalMax);
+                    break;
+                case GDT_UInt32:
+                    rescale<uint32_t>(buffer, scaledBuffer, bufSize, globalMin, globalMax);
+                    break;
+                case GDT_Int32:
+                    rescale<int32_t>(buffer, scaledBuffer, bufSize, globalMin, globalMax);
+                    break;
+                case GDT_Float32:
+                    rescale<float>(buffer, scaledBuffer, bufSize, globalMin, globalMax);
+                    break;
+                case GDT_Float64:
+                    rescale<double>(buffer, scaledBuffer, bufSize, globalMin, globalMax);
+                    break;
+                default:
+                    break;
+            }
+
+            delete[] buffer;
+            buffer = scaledBuffer;
         }
 
         const GDALRasterBandH raster = GDALGetRasterBand(inputDataset, 1);
-        const GDALRasterBandH alphaBand = GDALGetMaskBand(raster);
+        GDALRasterBandH alphaBand = FindAlphaBand(inputDataset);
+        if (alphaBand == nullptr) alphaBand = GDALGetMaskBand(raster);
 
-        char *alphaBuffer =
-            new char[GDALGetDataTypeSizeBytes(GDT_Byte) * wSize];
+        uint8_t *alphaBuffer =
+            new uint8_t[GDALGetDataTypeSizeBytes(GDT_Byte) * wSize];
         if (GDALRasterIO(alphaBand, GF_Read, g.r.x, g.r.y, g.r.xsize, g.r.ysize,
                          alphaBuffer, g.w.xsize, g.w.ysize, GDT_Byte, 0,
                          0) != CE_None) {
@@ -256,7 +284,7 @@ std::string GDALTiler::tile(int tz, int tx, int ty, uint8_t **outBuffer, int *ou
         if (tileSize == querySize) {
             if (GDALDatasetRasterIO(dsTile, GF_Write, g.w.x, g.w.y, g.w.xsize,
                                     g.w.ysize, buffer, g.w.xsize, g.w.ysize,
-                                    type, cappedNbands, nullptr, 0, 0,
+                                    GDT_Byte, cappedBands, nullptr, 0, 0,
                                     0) != CE_None) {
                 throw GDALException("Cannot write tile data");
             }
@@ -264,7 +292,7 @@ std::string GDALTiler::tile(int tz, int tx, int ty, uint8_t **outBuffer, int *ou
             LOGD << "Wrote tile data";
 
             const GDALRasterBandH tileAlphaBand =
-                GDALGetRasterBand(dsTile, cappedNbands + 1);
+                GDALGetRasterBand(dsTile, cappedBands + 1);
             GDALSetRasterColorInterpretation(tileAlphaBand, GCI_AlphaBand);
 
             if (GDALRasterIO(tileAlphaBand, GF_Write, g.w.x, g.w.y, g.w.xsize,
@@ -307,25 +335,24 @@ std::string GDALTiler::tile(int tz, int tx, int ty, uint8_t **outBuffer, int *ou
 }
 
 template <typename T>
-void GDALTiler::rescale(GDALRasterBandH hBand, char *buffer, size_t bufsize) {
-    double minmax[2];
-    GDALComputeRasterMinMax(hBand, TRUE, minmax);
+void GDALTiler::rescale(uint8_t *buffer, uint8_t *dstBuffer, size_t bufsize, double bMin, double bMax) {
+    T *ptr = reinterpret_cast<T *>(buffer);
 
     // Avoid divide by zero
-    if (minmax[0] == minmax[1]) minmax[1] += 0.1;
+    if (bMin == bMax) bMax += 0.1;
 
-    LOGD << "Min: " << minmax[0] << " | Max: " << minmax[1];
+    LOGD << "Min: " << bMin << " | Max: " << bMax;
 
     // Can still happen according to GDAL for very large values
-    if (minmax[0] == minmax[1])
+    if (bMin == bMax)
         throw GDALException(
             "Cannot scale values due to source min/max being equal");
 
-    double deltamm = minmax[1] - minmax[0];
-    T *ptr = reinterpret_cast<T *>(buffer);
+    double deltamm = bMax - bMin;
 
     for (size_t i = 0; i < bufsize; i++) {
-        ptr[i] = static_cast<T>(((ptr[i] - minmax[0]) / deltamm) * 255.0);
+        double v = std::max(bMin, std::min(bMax, static_cast<double>(ptr[i])));
+        dstBuffer[i] = static_cast<uint8_t>(255.0 * (v - bMin) / deltamm);
     }
 }
 
@@ -341,16 +368,7 @@ GDALDatasetH GDALTiler::createWarpedVRT(const GDALDatasetH &src,
     GDALWarpOptions *opts = GDALCreateWarpOptions();
 
     // If the dataset does not have alpha, add it
-    bool hasAlpha = false;
-    const int numBands = GDALGetRasterCount(src);
-    for (int n = 0; n < numBands; n++){
-        GDALRasterBandH b = GDALGetRasterBand(src, n + 1);
-        if (GDALGetRasterColorInterpretation(b) == GCI_AlphaBand){
-            hasAlpha = true;
-            break;
-        }
-    }
-
+    bool hasAlpha = FindAlphaBand(src) != nullptr;
     if (!hasAlpha){
         opts->nDstAlphaBand = GDALGetRasterCount(src) + 1;
     }
@@ -430,6 +448,19 @@ GQResult GDALTiler::geoQuery(GDALDatasetH ds, double ulx, double uly, double lrx
     }
 
     return o;
+}
+
+GDALRasterBandH GDALTiler::FindAlphaBand(const GDALDatasetH &dataset){
+    // If the dataset does not have alpha, add it
+    const int numBands = GDALGetRasterCount(dataset);
+    for (int n = 0; n < numBands; n++){
+        GDALRasterBandH b = GDALGetRasterBand(dataset, n + 1);
+        if (GDALGetRasterColorInterpretation(b) == GCI_AlphaBand){
+            return b;
+            break;
+        }
+    }
+    return nullptr;
 }
 
 
