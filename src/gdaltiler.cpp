@@ -42,9 +42,10 @@ int GDALTiler::dataBandsCount(const GDALDatasetH &dataset) {
     const GDALRasterBandH raster = GDALGetRasterBand(dataset, 1);
     const GDALRasterBandH alphaBand = GDALGetMaskBand(raster);
     const int bandsCount = GDALGetRasterCount(dataset);
+    const GDALRasterBandH lastBand = GDALGetRasterBand(dataset, bandsCount);
 
     if (GDALGetMaskFlags(alphaBand) & GMF_ALPHA || bandsCount == 4 ||
-        bandsCount == 2) {
+        bandsCount == 2 || GDALGetRasterColorInterpretation(lastBand) == GCI_AlphaBand) {
         return bandsCount - 1;
     }
 
@@ -171,7 +172,8 @@ std::string GDALTiler::tile(int tz, int tx, int ty, uint8_t **outBuffer, int *ou
 
     // Need to create in-memory dataset
     // (PNG driver does not have Create() method)
-    const GDALDatasetH dsTile = GDALCreate(memDrv, "", tileSize, tileSize, nBands + 1,
+    int cappedNbands = std::min(3, nBands); // PNG driver supports at most 4 bands (rgba)
+    const GDALDatasetH dsTile = GDALCreate(memDrv, "", tileSize, tileSize, cappedNbands + 1,
                                            GDT_Byte, nullptr);
     if (dsTile == nullptr) throw GDALException("Cannot create dsTile");
 
@@ -193,11 +195,11 @@ std::string GDALTiler::tile(int tz, int tx, int ty, uint8_t **outBuffer, int *ou
 
         const size_t wSize = g.w.xsize * g.w.ysize;
         char *buffer =
-            new char[GDALGetDataTypeSizeBytes(type) * nBands * wSize];
+            new char[GDALGetDataTypeSizeBytes(type) * cappedNbands * wSize];
 
         if (GDALDatasetRasterIO(inputDataset, GF_Read, g.r.x, g.r.y, g.r.xsize,
                                 g.r.ysize, buffer, g.w.xsize, g.w.ysize, type,
-                                nBands, nullptr, 0, 0, 0) != CE_None) {
+                                cappedNbands, nullptr, 0, 0, 0) != CE_None) {
             throw GDALException("Cannot read input dataset window");
         }
 
@@ -206,7 +208,7 @@ std::string GDALTiler::tile(int tz, int tx, int ty, uint8_t **outBuffer, int *ou
         // TODO: allow people to specify rescale values
 
         if (type != GDT_Byte && type != GDT_Unknown) {
-            for (int i = 0; i < nBands; i++) {
+            for (int i = 0; i < cappedNbands; i++) {
                 const GDALRasterBandH hBand = GDALGetRasterBand(inputDataset, i + 1);
                 char *wBuf = (buffer + wSize * i);
 
@@ -254,7 +256,7 @@ std::string GDALTiler::tile(int tz, int tx, int ty, uint8_t **outBuffer, int *ou
         if (tileSize == querySize) {
             if (GDALDatasetRasterIO(dsTile, GF_Write, g.w.x, g.w.y, g.w.xsize,
                                     g.w.ysize, buffer, g.w.xsize, g.w.ysize,
-                                    type, nBands, nullptr, 0, 0,
+                                    type, cappedNbands, nullptr, 0, 0,
                                     0) != CE_None) {
                 throw GDALException("Cannot write tile data");
             }
@@ -262,7 +264,7 @@ std::string GDALTiler::tile(int tz, int tx, int ty, uint8_t **outBuffer, int *ou
             LOGD << "Wrote tile data";
 
             const GDALRasterBandH tileAlphaBand =
-                GDALGetRasterBand(dsTile, nBands + 1);
+                GDALGetRasterBand(dsTile, cappedNbands + 1);
             GDALSetRasterColorInterpretation(tileAlphaBand, GCI_AlphaBand);
 
             if (GDALRasterIO(tileAlphaBand, GF_Write, g.w.x, g.w.y, g.w.xsize,
