@@ -51,7 +51,9 @@ class GDALTiler : public Tiler {
                       double lry, int querySize = 0);
 
     template <typename T>
-    void rescale(GDALRasterBandH hBand, char *buffer, size_t bufsize);
+    void rescale(uint8_t *buffer, uint8_t *dstBuffer, size_t bufsize, double bMin, double bMax);
+
+    GDALRasterBandH FindAlphaBand(const GDALDatasetH &dataset);
    public:
     DDB_DLL GDALTiler(const std::string &geotiffPath,
                   const std::string &outputFolder, int tileSize = 256,
