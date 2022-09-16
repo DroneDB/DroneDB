@@ -103,7 +103,7 @@ json generateStac(const std::string &ddbPath,
             }
 
             j["assets"] = json::object();
-            j["assets"][path] = {{"href", stacCollectionRoot + downloadEndpoint + "/" + Base64::encode(path)},
+            j["assets"][path] = {{"href", stacCollectionRoot + downloadEndpoint + "/" + path},
                                     {"title", path}};
 
             EntryType t = static_cast<EntryType>(q->getInt(4));
