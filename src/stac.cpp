@@ -67,8 +67,6 @@ json generateStac(const std::string &ddbPath,
             const auto bbox = wktBboxCoordinates(q->getText(3));
             if (bbox.size() > 0){
                 j["bbox"] = json::array({bbox});
-            }else{
-                throw AppException("Cannot compute bbox for STAC item " + entry);
             }
 
             json links = json::array();
