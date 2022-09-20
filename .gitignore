@@ -76,3 +76,4 @@ node_modules/
 .vscode/launch.json
 .vscode/tasks.json
 package-lock.json
+.vscode/

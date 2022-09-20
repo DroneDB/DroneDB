@@ -4,6 +4,10 @@
 #include "mio.h"
 #include "utils.h"
 
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
+
 namespace ddb{
 namespace io{
 
@@ -244,6 +248,13 @@ fs::path getExeFolderPath() {
     wchar_t path[MAX_PATH] = { 0 };
     GetModuleFileNameW(NULL, path, MAX_PATH);
     return fs::path(path).parent_path();
+#elif __APPLE__
+    char result[PATH_MAX];
+    uint32_t size = sizeof(result);
+    if (_NSGetExecutablePath(result, &size) == 0){
+        return fs::path(result).parent_path();
+    }
+    return fs::path("");
 #else
     char result[PATH_MAX];
     ssize_t count = readlink("/proc/self/exe", result, PATH_MAX);

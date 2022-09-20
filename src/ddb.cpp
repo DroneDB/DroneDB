@@ -54,12 +54,16 @@ void DDBRegisterProcess(bool verbose) {
 #ifndef WIN32
     // Windows does not let us change env vars for some reason
     // so this works only on Unix
-    std::string projPaths =
-        io::getExeFolderPath().string() + ":/usr/share/proj";
+    #ifdef __APPLE__
+        std::string projPaths = io::getExeFolderPath().string(); // + ":/opt/homebrew/share/proj:/usr/local/share/proj";
+    #else
+        std::string projPaths = io::getExeFolderPath().string() + ":/usr/share/proj";
+    #endif
+
     setenv("PROJ_LIB", projPaths.c_str(), 1);
 #endif
 
-#if !defined(WIN32) && !defined(MAC_OSX)
+#if !defined(WIN32) && !defined(__APPLE__)
     try {
         std::locale("");  // Raises a runtime error if current locale is invalid
     } catch (const std::runtime_error&) {
@@ -83,7 +87,6 @@ void DDBRegisterProcess(bool verbose) {
         set_logger_verbose();
     }
 
-    Database::Initialize();
     net::Initialize();
     GDALAllRegister();
 
