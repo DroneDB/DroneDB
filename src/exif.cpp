@@ -32,7 +32,7 @@ Exiv2::XmpData::const_iterator ExifParser::findXmpKey(const std::initializer_lis
         try{
             auto it = xmpData.findKey(Exiv2::XmpKey(k));
             if (it != xmpData.end()) return it;
-        }catch(Exiv2::AnyError&){
+        }catch(Exiv2::Error&){
             // Do nothing
         }
     }
@@ -44,7 +44,7 @@ ImageSize ExifParser::extractImageSize() {
 //    auto imgHeight = findExifKey({"Exif.Photo.PixelYDimension", "Exif.Image.ImageLength"});
 
 //    if (imgWidth != exifData.end() && imgHeight != exifData.end()) {
-//        return ImageSize(static_cast<int>(imgWidth->toLong()), static_cast<int>(imgHeight->toLong()));
+//        return ImageSize(static_cast<int>(imgWidth->toInt64()), static_cast<int>(imgHeight->toInt64()));
 //    }
 
     return ImageSize(image->pixelWidth(), image->pixelHeight());
@@ -136,7 +136,7 @@ bool ExifParser::extractSensorSize(SensorSize &r) {
     auto fYRes = findExifKey("Exif.Photo.FocalPlaneYResolution");
 
     if (fUnit != exifData.end() && fXRes != exifData.end() && fYRes != exifData.end()) {
-        long resolutionUnit = fUnit->toLong();
+        long resolutionUnit = fUnit->toInt64();
         double mmPerUnit = getMmPerUnit(resolutionUnit);
         if (mmPerUnit != 0.0) {
             auto imsize = extractImageSize();
@@ -199,7 +199,7 @@ bool ExifParser::extractGeo(GeoLocation &geo) {
 
             auto altitudeRef = findExifKey({"Exif.GPSInfo.GPSAltitudeRef"});
             if (altitudeRef != exifData.end()) {
-                geo.altitude *= altitudeRef->toLong() == 1 ? -1 : 1;
+                geo.altitude *= altitudeRef->toInt64() == 1 ? -1 : 1;
             }
         }
 
@@ -330,7 +330,7 @@ double ExifParser::extractCaptureTime() {
         try{
             // Number of seconds between Jan 1st 1904 and Jan 1st 1970
             const long TO_UNIX_EPOCH = 2082844800;
-            const long d = xmpDate->toLong();
+            const long d = xmpDate->toInt64();
             double captureTime = (d - TO_UNIX_EPOCH) * 1000.0;
             if (captureTime > 0){
                 return captureTime;
@@ -355,7 +355,7 @@ double ExifParser::extractCaptureTime() {
                                  "Exif.Photo.SubSecTimeDigitized",
                                  "Exif.Photo.SubSecTime"});
         if (subsec != exifData.end() && subsec->count() > 0){
-            double ss = static_cast<double>(subsec->toLong());
+            double ss = static_cast<double>(subsec->toInt64());
             size_t numDigits = subsec->toString().length();
 
             // ."1" --> "100"
@@ -391,7 +391,7 @@ double ExifParser::extractCaptureTime() {
 int ExifParser::extractImageOrientation() {
     auto k = findExifKey({"Exif.Image.Orientation"});
     if (k != exifData.end()) {
-        return static_cast<int>(k->toLong());
+        return static_cast<int>(k->toInt64());
     }
 
     return 1;
@@ -445,11 +445,11 @@ bool ExifParser::extractPanoramaInfo(PanoramaInfo &info){
 
     if (projectionType != xmpData.end()) info.projectionType = projectionType->toString();
     if (croppedWidth != xmpData.end() && croppedHeight != xmpData.end()){
-        info.croppedWidth = croppedWidth->toLong();
-        info.croppedHeight = croppedHeight->toLong();
+        info.croppedWidth = croppedWidth->toInt64();
+        info.croppedHeight = croppedHeight->toInt64();
     }
-    if (croppedX != xmpData.end()) info.croppedX = croppedX->toLong();
-    if (croppedY != xmpData.end()) info.croppedY = croppedY->toLong();
+    if (croppedX != xmpData.end()) info.croppedX = croppedX->toInt64();
+    if (croppedY != xmpData.end()) info.croppedY = croppedY->toInt64();
     if (poseHeading != xmpData.end()) info.poseHeading = poseHeading->toFloat();
     if (posePitch != xmpData.end()) info.posePitch = posePitch->toFloat();
     if (poseRoll != xmpData.end()) info.poseRoll = poseRoll->toFloat();

@@ -6,7 +6,9 @@
 
 #include <string>
 #include "ddb_export.h"
+#ifndef NO_NEXUS
 #include <nxs.h>
+#endif
 #include <vector>
 
 namespace ddb{

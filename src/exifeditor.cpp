@@ -31,7 +31,7 @@ bool ExifEditor::canEdit(){
         }catch(const FSException &e){
             std::cerr << file.string() << ": " << e.what() << std::endl;
             rejectCount++;
-        }catch(const Exiv2::AnyError &e){
+        }catch(const Exiv2::Error &e){
             std::cerr << file.string() << ": " << e.what() << std::endl;
             rejectCount++;
         }
@@ -136,7 +136,7 @@ void ExifEditor::eachFile(Func f){
         try{
             image->writeMetadata();
             //std::cout << "U\t" << file.string() << std::endl;
-        }catch(const Exiv2::AnyError &){
+        }catch(const Exiv2::Error &){
             std::cerr << "Cannot write metadata to " + file.string();
         }
     }

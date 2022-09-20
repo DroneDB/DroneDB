@@ -42,6 +42,24 @@ endif()
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+if (APPLE)
+    find_program(HOMEBREW_EXECUTABLE brew)
+    mark_as_advanced(FORCE HOMEBREW_EXECUTABLE)
+    if (HOMEBREW_EXECUTABLE)
+        # Detected a Homebrew install, query for its install prefix.
+        execute_process(COMMAND ${HOMEBREW_EXECUTABLE} --prefix
+            OUTPUT_VARIABLE HOMEBREW_INSTALL_PREFIX
+            OUTPUT_STRIP_TRAILING_WHITESPACE)
+        message(STATUS "Detected Homebrew with install prefix: "
+            "${HOMEBREW_INSTALL_PREFIX}, adding to CMake search paths.")
+        list(APPEND CMAKE_PREFIX_PATH "${HOMEBREW_INSTALL_PREFIX}")
+        link_directories(${HOMEBREW_INSTALL_PREFIX}/lib)
+    endif()
+
+    # For cctz
+    find_library(CoreFoundation CoreFoundation)
+endif()
+
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "Release" CACHE STRING
       "Choose the type of build, options are: Debug Release
@@ -128,14 +146,14 @@ find_package(Sqlite3 REQUIRED)
 find_package(PDAL REQUIRED)
 find_package(Threads REQUIRED)
 find_package(Zip REQUIRED)
-find_package(NXS REQUIRED)
+find_package(NXS)
 include_directories(${Zip_INCLUDE_DIRS})
 include_directories(${GDAL_INCLUDE_DIR})
 include_directories(${PDAL_INCLUDE_DIR})
 include_directories(${PDAL_INCLUDE_DIR}/pdal)
 include_directories(${NXS_INCLUDE_DIR})
 
-if (NOT WIN32)
+if (NOT WIN32 AND NOT APPLE)
     set(STDPPFS_LIBRARY stdc++fs)
 endif()
 
@@ -144,6 +162,9 @@ set(CMD_SRC_LIST ${CMAKE_CURRENT_SOURCE_DIR}/src/cmd/main.cpp)
 
 add_subdirectory("src")
 add_subdirectory("vendor")
+
+set_target_properties(exiv2lib PROPERTIES CXX_STANDARD 17)
+
 
 include_directories("src")
 include_directories("${CMAKE_BINARY_DIR}")
@@ -155,12 +176,26 @@ add_library(${PROJECT_NAME} SHARED ${SRC_LIST})
 set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 17)
 add_dependencies(${PROJECT_NAME} exiv2lib)
 
+if (NOT NXS_FOUND)
+    message(WARNING "Nexus support will not be built")
+    add_definitions(-DNO_NEXUS=1)
+endif()
+
 if(NOT WIN32)
     # Tell the linker how to resolve library names
-    target_link_libraries(${PROJECT_NAME} PRIVATE "-lspatialite -lsqlite3 -lgdal -lcurl -lexiv2 -lpdalcpp -lnxs -L\"${CMAKE_BINARY_DIR}/lib\"")
+    set(LINKER_LIBS "-lspatialite -lsqlite3 -lgdal -lcurl -lexiv2 -lpdalcpp -lzip")
+    if (NXS_FOUND)
+        set(LINKER_LIBS "${LINKER_LIBS} -lnxs")
+    endif()
+    target_link_libraries(${PROJECT_NAME} PRIVATE "${LINKER_LIBS} -L\"${CMAKE_BINARY_DIR}/lib\"")
 
     # Add segvcatch flags
     target_compile_options(${PROJECT_NAME} PRIVATE -fexceptions -fnon-call-exceptions)
+
+    # cctz
+    if (APPLE)
+        target_link_libraries(${PROJECT_NAME} PUBLIC ${CoreFoundation}) 
+    endif()
 endif()
 
 # set PLOG to PLOG_GLOBAL/PLOG_EXPORT to share instances across modules (and export on Windows)
@@ -199,6 +234,8 @@ if (WIN32)
 
     # Fix linking
     target_link_libraries("${PROJECT_NAME}" ${LINK_LIBRARIES})
+elseif(APPLE)
+    file(COPY "${HOMEBREW_INSTALL_PREFIX}/share/proj/proj.db" DESTINATION ${CMAKE_BINARY_DIR})
 else()
     # Copy proj.db into build directory
     file(COPY "/usr/share/proj/proj.db" DESTINATION ${CMAKE_BINARY_DIR})
