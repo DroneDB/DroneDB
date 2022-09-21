@@ -24,7 +24,7 @@ We welcome feedback from the community to decide what to implement or prioritize
  - [ ] User management UI
  - [X] Logo/brand customizations
  - [X] Organizational accounts
- - [ ] STAC catalog generation
+ - [X] STAC catalog generation
  - [ ] Improve Documentation
  - [ ] Processing (ability to perform operations on point clouds, orthophotos, images, etc.)
  - [ ] Plugins framework
