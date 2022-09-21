@@ -15,10 +15,10 @@
 
 namespace ddb {
 
-// Initialize spatialite
-void Database::Initialize() { spatialite_init(0); }
-
 void Database::afterOpen() {
+    spatialiteCache = spatialite_alloc_connection();
+    spatialite_init_ex(db, spatialiteCache, 0);
+    
     this->setJournalMode("wal");
 
     // If table is locked, sleep up to 30 seconds
@@ -304,6 +304,10 @@ Database::~Database(){
     if (metaManager != nullptr){
         delete metaManager;
         metaManager = nullptr;
+    }
+    if (spatialiteCache != nullptr){
+        spatialite_cleanup_ex(spatialiteCache);
+        spatialiteCache = nullptr;
     }
 }
 

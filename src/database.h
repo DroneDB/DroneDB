@@ -17,9 +17,9 @@ namespace ddb{
 class Database : public SqliteDatabase {
   private:
     MetaManager *metaManager = nullptr;   
+    void *spatialiteCache = nullptr;
   public:
       DDB_DLL ~Database();
-      DDB_DLL static void Initialize();
       DDB_DLL void afterOpen() override;
       DDB_DLL Database &createTables();
       DDB_DLL void ensureSchemaConsistency();

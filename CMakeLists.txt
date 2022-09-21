@@ -56,6 +56,7 @@ if (APPLE)
         link_directories(${HOMEBREW_INSTALL_PREFIX}/lib)
     endif()
 
+    set(SQLITE3_LIBRARY "${HOMEBREW_INSTALL_PREFIX}/opt/sqlite3/lib/libsqlite3.dylib")
     # For cctz
     find_library(CoreFoundation CoreFoundation)
 endif()
@@ -172,7 +173,13 @@ include_directories("${CMAKE_CURRENT_SOURCE_DIR}/vendor")
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}/vendor/cctz/include")
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}/vendor/exiv2/include")
 
-add_library(${PROJECT_NAME} SHARED ${SRC_LIST})
+if (APPLE)
+    # Some weird stuff happens with libspatialite
+    # if we build this as a shared library
+    add_library(${PROJECT_NAME} STATIC ${SRC_LIST})
+else()
+    add_library(${PROJECT_NAME} SHARED ${SRC_LIST})
+endif()
 set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 17)
 add_dependencies(${PROJECT_NAME} exiv2lib)
 
