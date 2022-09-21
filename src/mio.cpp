@@ -318,6 +318,14 @@ fs::path getDataPath(const fs::path &p){
     if (fs::exists(usrShare / p)){
         return usrShare / p;
     }
+
+    #if __APPLE__
+    fs::path hbShare = fs::path("/opt/homebrew/share/ddb");
+    if (fs::exists(hbShare / p)){
+        return hbShare / p;
+    }
+    #endif
+    
     #endif
 
     return "";
