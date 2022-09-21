@@ -55,7 +55,7 @@ void DDBRegisterProcess(bool verbose) {
     // Windows does not let us change env vars for some reason
     // so this works only on Unix
     #ifdef __APPLE__
-        std::string projPaths = io::getExeFolderPath().string(); // + ":/opt/homebrew/share/proj:/usr/local/share/proj";
+        std::string projPaths = io::getExeFolderPath().string() + ":/opt/homebrew/share/proj:/usr/local/share/proj";
     #else
         std::string projPaths = io::getExeFolderPath().string() + ":/usr/share/proj";
     #endif
