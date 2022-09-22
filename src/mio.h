@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <limits>
 #include <fcntl.h>
+#include <vector>
 #include "fs.h"
 #include "ddb_export.h"
 #include "hash.h"

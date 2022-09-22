@@ -34,10 +34,14 @@ std::string buildNexus(const std::string &inputObj, const std::string &outputNxs
         }
     }
 
+#ifndef NO_NEXUS
     NXSErr err = nexusBuild(inputObj.c_str(), outFile.c_str());
     if (err == NXSERR_EXCEPTION){
         throw AppException("Could not build nexus file for " + inputObj);
     }
+#else
+    throw AppException("This version of ddb does not have the ability to generate Nexus files");
+#endif
 
     return outFile;
 

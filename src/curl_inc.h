@@ -5,6 +5,7 @@
 #define CURL_INC_H
 
 #include <curl/curl.h>
+#include <string>
 #include "exceptions.h"
 
 class CURLInstance{

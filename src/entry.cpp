@@ -131,7 +131,7 @@ void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entr
                 } else {
                     LOGD << "No XMP/EXIF data found in " << path.string();
                 }
-            }catch(Exiv2::AnyError&){
+            }catch(Exiv2::Error&){
                 LOGD << "Cannot read EXIF data: " << path.string();
             }
         }else if (entry.type == EntryType::GeoRaster){
@@ -477,7 +477,7 @@ EntryType fingerprint(const fs::path &path){
             } else {
                 LOGD << "No XMP/EXIF data found in " << path.string();
             }
-        }catch(Exiv2::AnyError&){
+        }catch(Exiv2::Error&){
             LOGD << "Cannot read EXIF data: " << path.string();
         }
     }else if (georaster){

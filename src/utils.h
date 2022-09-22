@@ -31,8 +31,6 @@
 #ifdef WIN32
 	#include <windows.h>    //GetModuleFileNameW
 	#include <direct.h> // _getcwd
-    // Avoid defining min / max macros
-    #define NOMINMAX
 #else
     #include <limits.h>
     #include <termios.h>

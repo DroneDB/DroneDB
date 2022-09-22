@@ -69,6 +69,9 @@ TEST(pathRelativeTo, Normal) {
 #ifdef _WIN32
     EXPECT_EQ(io::Path("D:/home/test/aaa").relativeTo("/").generic(),
               io::Path("home/test/aaa").generic());
+#elif __APPLE__
+    EXPECT_EQ(io::Path("/Users/test/aaa").relativeTo("/").generic(),
+              io::Path("Users/test/aaa").generic());
 #else
     EXPECT_EQ(io::Path("/home/test/aaa").relativeTo("/").generic(),
               io::Path("home/test/aaa").generic());
@@ -85,6 +88,9 @@ TEST(pathRelativeTo, Normal) {
         io::Path("home/test").generic());
     EXPECT_EQ(io::Path("D:/home/test").relativeTo("D:\\").generic(),
         io::Path("home/test").generic());
+#elif __APPLE__
+    EXPECT_EQ(io::Path("/Users/test").relativeTo("/").generic(),
+            io::Path("Users/test").generic());
 #else
 	EXPECT_EQ(io::Path("/home/test").relativeTo("/").generic(),
 		io::Path("home/test").generic());
