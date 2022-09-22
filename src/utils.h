@@ -29,11 +29,8 @@
 #define F_EPSILON 0.000001
 
 #ifdef WIN32
-    #define NOMINMAX
 	#include <windows.h>    //GetModuleFileNameW
-    #undef NOMINMAX
 	#include <direct.h> // _getcwd
-    // Avoid defining min / max macros
 #else
     #include <limits.h>
     #include <termios.h>

@@ -30,9 +30,11 @@ message("DDB Version: ${DAPP_VERSION}")
 add_compile_options("-DAPP_VERSION=\"${DAPP_VERSION}\"")
 add_compile_options("-DAPP_REVISION=\"${DAPP_REVISION}\"")
 
-# Disable MS warnings
 if (WIN32)
+    # Disable MS warnings
     add_compile_options("-D_CRT_SECURE_NO_WARNINGS=1")
+
+    add_definitions(-DNOMINMAX)
 endif()
 
 # Disable GNU warnings (for exiv2)

@@ -82,3 +82,20 @@ jobs:
                 file_glob: true
                 tag: ${{ github.ref }}
                 overwrite: true
+    build_macos:
+        name: Build/Test on MacOS
+        runs-on: macos-latest
+        steps:
+            - uses: actions/checkout@v2
+              with:
+                submodules: 'recursive'
+            - name: Install deps
+              run: brew install cmake gdal libspatialite libzip pdal
+            - name: Run CMake
+              run: mkdir build && cd build && cmake -DBUILD_TESTING=ON ..
+            - name: Build C++ lib/program and tests
+              run: cd build && make -j$(sysctl -n hw.physicalcpu) test ddbcmd
+            - name: Run C++ Tests
+              run: cd build && ./test.run
+            - name: Run Program Smoke Test
+              run: cd build && ./ddb --debug
