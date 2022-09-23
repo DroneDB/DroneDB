@@ -58,9 +58,9 @@ if (UNIX)
         link_directories(${HOMEBREW_INSTALL_PREFIX}/lib)
     endif()
 
-    set(SQLITE3_LIBRARY "${HOMEBREW_INSTALL_PREFIX}/opt/sqlite3/lib/libsqlite3.dylib")
-    
     if (APPLE)
+        set(SQLITE3_LIBRARY "${HOMEBREW_INSTALL_PREFIX}/opt/sqlite3/lib/libsqlite3.dylib")
+
         # For cctz
         find_library(CoreFoundation CoreFoundation)
     endif()
