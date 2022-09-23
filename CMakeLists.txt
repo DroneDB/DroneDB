@@ -44,7 +44,7 @@ endif()
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-if (APPLE)
+if (UNIX)
     find_program(HOMEBREW_EXECUTABLE brew)
     mark_as_advanced(FORCE HOMEBREW_EXECUTABLE)
     if (HOMEBREW_EXECUTABLE)
@@ -59,8 +59,11 @@ if (APPLE)
     endif()
 
     set(SQLITE3_LIBRARY "${HOMEBREW_INSTALL_PREFIX}/opt/sqlite3/lib/libsqlite3.dylib")
-    # For cctz
-    find_library(CoreFoundation CoreFoundation)
+    
+    if (APPLE)
+        # For cctz
+        find_library(CoreFoundation CoreFoundation)
+    endif()
 endif()
 
 if(NOT CMAKE_BUILD_TYPE)
@@ -175,8 +178,8 @@ include_directories("${CMAKE_CURRENT_SOURCE_DIR}/vendor")
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}/vendor/cctz/include")
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}/vendor/exiv2/include")
 
-if (APPLE)
-    # Some weird stuff happens with libspatialite
+if (HOMEBREW_INSTALL_PREFIX)
+    # Some weird stuff happens with libspatialite on macOS
     # if we build this as a shared library
     add_library(${PROJECT_NAME} STATIC ${SRC_LIST})
 else()
@@ -243,7 +246,7 @@ if (WIN32)
 
     # Fix linking
     target_link_libraries("${PROJECT_NAME}" ${LINK_LIBRARIES})
-elseif(APPLE)
+elseif(HOMEBREW_INSTALL_PREFIX)
     file(COPY "${HOMEBREW_INSTALL_PREFIX}/share/proj/proj.db" DESTINATION ${CMAKE_BINARY_DIR})
 else()
     # Copy proj.db into build directory
