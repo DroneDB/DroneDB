@@ -18,7 +18,7 @@
 namespace ddb {
 
 void clone(const TagComponents& tag, const std::string& folder) {
-    if (fs::exists(folder)) {
+    if (fs::exists(folder) && !fs::is_empty(folder)) {
         std::cout << "Cannot clone in folder '" + folder +
                          "' because it already exists" << std::endl;
         return;
@@ -34,28 +34,9 @@ void clone(const TagComponents& tag, const std::string& folder) {
     Registry reg(tag.registryUrl);
 
     try {
-        if (ac.empty()) {
-
-            const auto username = utils::getPrompt("Username: ");
-            const auto password = utils::getPass("Password: ");
-
-            if (reg.login(username, password).length() <= 0) 
-                throw AuthException("Cannot authenticate with " + reg.getUrl());
-            
-            UserProfile::get()->getAuthManager()->saveCredentials(
-                tag.registryUrl, AuthCredentials(username, password));
-
-            reg.clone(tag.organization, tag.dataset, folder, std::cout);
-
-        } else {
-
-            if (reg.login(ac.username, ac.password).length() <= 0) 
-                throw AuthException("Cannot authenticate with " + reg.getUrl());
-            
-            reg.clone(tag.organization, tag.dataset, folder, std::cout);
-        }
-
+        reg.clone(tag.organization, tag.dataset, folder, std::cout);
     } catch (const AuthException&) {
+        io::assureIsRemoved(folder);
         const auto username = utils::getPrompt("Username: ");
         const auto password = utils::getPass("Password: ");
 

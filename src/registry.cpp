@@ -102,8 +102,7 @@ std::string Registry::login(const std::string &username,
 }
 
 void Registry::ensureTokenValidity() {
-    if (this->authToken.empty())
-        throw InvalidArgsException("No auth token is present");
+    if (this->authToken.empty()) return; // No credentials saved
 
     const auto now = std::time(nullptr);
 
@@ -128,7 +127,7 @@ bool Registry::logout() {
 void Registry::clone(const std::string &organization,
                              const std::string &dataset,
                              const std::string &folder, std::ostream &out) {
-    if (fs::exists(folder)){
+    if (fs::exists(folder) && !fs::is_empty(folder)){
         throw FSException(folder + " already exists");
     }
 
@@ -703,6 +702,7 @@ void Registry::push(const std::string &path, std::ostream &out) {
 }
 
 void Registry::handleError(net::Response &res) {
+    if (res.status() == 401) throw AuthException("Unauthorized");
     if (res.hasData()) {
         LOGD << "Request error: " << res.getText();
 

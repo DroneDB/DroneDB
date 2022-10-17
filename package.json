@@ -1,6 +1,6 @@
 {
   "name": "ddb",
-  "version": "1.0.11",
+  "version": "1.0.12",
   "description": "Effortless aerial data management and sharing",
   "main": "index.js",
   "directories": {
