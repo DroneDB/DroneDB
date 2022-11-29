@@ -7,6 +7,7 @@ import os
 
 SENSOR_DATA_OSFM='https://raw.githubusercontent.com/mapillary/OpenSfM/master/opensfm/data/sensor_data.json'
 SENSOR_DATA_AV='https://raw.githubusercontent.com/alicevision/AliceVision/develop/src/aliceVision/sensorDB/cameraSensors.db'
+SENSOR_DATA_DDB='ddb_sensor_data.json'
 db_file = os.path.join(os.path.dirname(__file__), '../ddb_data/sensor_data.sqlite')
 
 CREATE_SENSORS_TABLE = """CREATE TABLE IF NOT EXISTS sensors (
@@ -51,6 +52,16 @@ with urllib.request.urlopen(SENSOR_DATA_AV) as response:
         else:            
             makemodel = "%s %s" % (make, model)
 
+        if not makemodel in sensors:
+            sensors[makemodel] = focal
+
+print("Reading %s ..." % SENSOR_DATA_DDB)
+with open(SENSOR_DATA_DDB) as f:
+    d = json.loads(f.read())
+
+    for k in d:
+        focal = d[k]
+        makemodel = k.lower()
         if not makemodel in sensors:
             sensors[makemodel] = focal
 
