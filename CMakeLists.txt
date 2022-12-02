@@ -195,11 +195,12 @@ endif()
 
 if(NOT WIN32)
     # Tell the linker how to resolve library names
-    set(LINKER_LIBS "-lspatialite -lsqlite3 -lgdal -lcurl -lexiv2 -lpdalcpp -lzip")
+    set(LINKER_LIBS "-lspatialite -lsqlite3 -lgdal -lcurl -lpdalcpp -lzip")
     if (NXS_FOUND)
         set(LINKER_LIBS "${LINKER_LIBS} -lnxs")
     endif()
     target_link_libraries(${PROJECT_NAME} PRIVATE "${LINKER_LIBS} -L\"${CMAKE_BINARY_DIR}/lib\"")
+    target_link_libraries(${PROJECT_NAME} PRIVATE exiv2)
 
     # Add segvcatch flags
     target_compile_options(${PROJECT_NAME} PRIVATE -fexceptions -fnon-call-exceptions)
