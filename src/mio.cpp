@@ -192,7 +192,7 @@ bool Path::isRelative() const{
 // it does NOT normalize the path to account for ".." and "." folders
 int Path::depth() {
     int count = 0;
-    for (auto &it : p) {
+    for (auto const &it : p) {
         if (it.c_str()[0] != fs::path::preferred_separator &&
             it.string() != fs::current_path().root_name()) count++;
     }
