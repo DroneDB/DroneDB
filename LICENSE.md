@@ -13,7 +13,7 @@ The MPL-2.0 applies only to non-profit entities, homelab users, and private indi
 For more details, read the full license in the [LICENSE_MPL.md](LICENSE_MPL.md) file.
 
 ## 2. Commercial License for For-Profit Entities
-For-profit entities are excluded from using this Software under the MPL-2.0. If you are a for-profit entity, you must request and obtain a commercial license by contacting [Your Company Name] at [email address/contact details].
+For-profit entities are excluded from using this Software under the MPL-2.0. If you are a for-profit entity, you must request and obtain a commercial license by contacting Digipa S.R.L. at [support@dronedb.app](mailto:support@dronedb.app).
 
 ### Overview
  - **Annual Fee**: The commercial license includes an annual fee that covers updates, bug fixes, and commercial support.
