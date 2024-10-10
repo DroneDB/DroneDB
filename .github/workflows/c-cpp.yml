@@ -29,7 +29,7 @@ jobs:
             - name: Build Distribution
               run: cd build && make -j$(nproc) dist
             - name: Upload Distribution Files
-              uses: actions/upload-artifact@v2
+              uses: actions/upload-artifact@v3
               with:
                 name: Compiled Binaries
                 path: build/dist/*.tgz
@@ -52,7 +52,7 @@ jobs:
             - name: Build C++ lib/program and tests
               run: |
                 mkdir build
-                cd build           
+                cd build
                 cmake .. -DBUILD_TESTING=ON
                 cmake --build . --config Release --target ALL_BUILD -- /maxcpucount:14
                 dir
@@ -69,7 +69,7 @@ jobs:
                 cmake --build . --config Release --target dist -- /maxcpucount:14
                 dir
             - name: Upload Distribution Files
-              uses: actions/upload-artifact@v2
+              uses: actions/upload-artifact@v3
               with:
                 name: Compiled Binaries
                 path: build\dist\*.zip
