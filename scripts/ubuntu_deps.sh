@@ -35,19 +35,19 @@ fi
 sudo apt update && sudo apt install -y --fix-missing --no-install-recommends build-essential
 
 # Check if node is installed
-hash node 2>/dev/null || not_found=true 
+hash node 2>/dev/null || not_found=true
 if [[ $not_found ]]; then
     curl -sL https://deb.nodesource.com/setup_16.x | sudo -E bash -
     sudo apt install -y nodejs
 fi
 
 # Check if cmake-js is installed
-hash cmake-js 2>/dev/null || not_found=true 
+hash cmake-js 2>/dev/null || not_found=true
 if [[ $not_found ]]; then
     sudo npm install -g cmake-js
 
     # For building bindings and tests
-    sudo npm install nan mocha
+    sudo npm install -g nan mocha
 fi
 
 if [[ ! -f /usr/lib/libnxs.so ]]; then
