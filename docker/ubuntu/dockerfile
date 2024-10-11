@@ -26,6 +26,9 @@ RUN cd /DroneDB/build && checkinstall --install=no --pkgname DroneDB --default
 # ---> Run stage
 FROM ubuntu:focal as runner
 
+ENV TZ=Europe/Rome
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
 RUN apt update && apt install -y --fix-missing --no-install-recommends gnupg2 ca-certificates && \
     echo "deb https://ppa.launchpadcontent.net/ubuntugis/ubuntugis-unstable/ubuntu focal main" >> /etc/apt/sources.list && \
     echo "deb-src https://ppa.launchpadcontent.net/ubuntugis/ubuntugis-unstable/ubuntu focal main" >> /etc/apt/sources.list && \
