@@ -40,7 +40,7 @@ time_t Path::getModifiedTime() {
     }
 
     CloseHandle(hFile);
-    
+
     //Get the number of seconds since January 1, 1970 12:00am UTC
     LARGE_INTEGER li;
     li.LowPart = ftModified.dwLowDateTime;
@@ -130,7 +130,7 @@ std::uintmax_t Path::getSize() {
     if (hFile == INVALID_HANDLE_VALUE) {
         throw FSException("Cannot stat size (open) " + p.string() + " (errcode: " + std::to_string(GetLastError()));
     }
-    
+
     LARGE_INTEGER size;
     if (!GetFileSizeEx(hFile, &size)){
         CloseHandle(hFile);
@@ -289,7 +289,7 @@ fs::path getDataPath(const fs::path &p){
     char dllPath[MAX_PATH];
     HMODULE hm = NULL;
 
-    if (GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | 
+    if (GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
             GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
             (LPCSTR) &getDataPath, &hm) == 0){
         int ret = GetLastError();
@@ -325,7 +325,7 @@ fs::path getDataPath(const fs::path &p){
         return hbShare / p;
     }
     #endif
-    
+
     #endif
 
     return "";
@@ -440,16 +440,36 @@ void createDirectories(const fs::path &d){
     }
 }
 
-void assureIsRemoved(const fs::path p){
+const int RETRIES = 3;
+const int RETRY_DELAY = 100;
+
+void assureIsRemoved(const fs::path p) {
     if (!fs::exists(p)) return;
 
     std::error_code e;
-
     fs::remove_all(p, e);
-    if (e.value() != 0){
-        throw FSException(p.string() + " cannot be removed");
+
+    int retries = RETRIES;
+
+    while (e.value() && retries > 0) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(RETRY_DELAY));
+        fs::remove_all(p, e);
+
+        if (!e.value()) break;
+        retries--;
+    }
+
+    if (e.value()) {
+        throw FSException(p.string() + " cannot be removed, error: " + e.message());
+    }
+
+    if (fs::exists(p)) {
+        throw FSException(p.string() + " cannot be removed after multiple attempts");
     }
 }
+
+
+
 
 void copy(const fs::path &from, const fs::path &to){
     std::error_code e;
