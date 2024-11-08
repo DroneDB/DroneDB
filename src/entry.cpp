@@ -409,48 +409,55 @@ EntryType fingerprint(const fs::path &path){
     EntryType type = EntryType::Generic;
     io::Path p(path);
 
+    // Check for markdown files
     if (p.checkExtension({"md"}))
         return EntryType::Markdown;
 
+    // Check for point cloud files
     bool pointCloud = p.checkExtension({"laz", "las"});
-
     if (pointCloud)
         return EntryType::PointCloud;
 
+    // Check for PLY files which could be a mesh or a point cloud
     if (p.checkExtension({"ply"})){
-        // Could be a mesh or a point cloud
         return identifyPly(path);
     }
 
+    // Check for 3D model files
     if (p.checkExtension({"obj"}))
         return EntryType::Model;
 
+    // Check for vector files (geojson, dxf, dwg, shp, shz)
+    if (p.checkExtension({"geojson", "dxf", "dwg", "shp", "shz"}))
+        return EntryType::Vector;
+
+    // Check for image or video files
     bool jpg = p.checkExtension({"jpg", "jpeg"});
     bool dng = p.checkExtension({"dng"});
     bool tif = p.checkExtension({"tif", "tiff"});
     bool nongeoImage = p.checkExtension({"png", "gif"});
-    bool video = p.checkExtension({"mp4", "mov"});
+    bool video = p.checkExtension({"mp4", "mov", "avi", "mkv", "webm"});
 
+    // Check if the file is a georeferenced raster (GeoTIFF)
     bool georaster = false;
-
     if (tif){
-        GDALDatasetH  hDataset;
-        hDataset = GDALOpen( p.string().c_str(), GA_ReadOnly );
-        if( hDataset != NULL ){
+        GDALDatasetH hDataset = GDALOpen(p.string().c_str(), GA_ReadOnly);
+        if(hDataset != NULL){
             const char *proj = GDALGetProjectionRef(hDataset);
             if (proj != NULL){
                 georaster = std::string(proj) != "";
             }
             GDALClose(hDataset);
-        }else{
+        } else {
             LOGD << "Cannot open " << p.string().c_str() << " for georaster test";
         }
     }
 
+    // Determine if it's a regular image or a video
     bool image = (jpg || tif || dng || nongeoImage) && !georaster;
 
     if (image || video) {
-        // A normal image or video by default (refined later)
+        // Set as Image or Video type by default
         type = image ? EntryType::Image : EntryType::Video;
 
         try{
@@ -461,18 +468,18 @@ EntryType fingerprint(const fs::path &path){
             ExifParser e(image.get());
 
             if (type == EntryType::Image){
-                // Panorama?
-                if (image->pixelWidth() / image->pixelHeight() >= 2) type = EntryType::Panorama;
+                // Check if it's a panorama
+                if (image->pixelWidth() / image->pixelHeight() >= 2)
+                    type = EntryType::Panorama;
             }
 
+            // Check for georeferencing tags
             if (e.hasTags()) {
                 GeoLocation geo;
                 if (e.extractGeo(geo)) {
                     if (type == EntryType::Image) type = EntryType::GeoImage;
                     else if (type == EntryType::Video) type = EntryType::GeoVideo;
                     else if (type == EntryType::Panorama) type = EntryType::GeoPanorama;
-                } else {
-                    // Not a georeferenced image, just a plain image
                 }
             } else {
                 LOGD << "No XMP/EXIF data found in " << path.string();
@@ -480,7 +487,7 @@ EntryType fingerprint(const fs::path &path){
         }catch(Exiv2::Error&){
             LOGD << "Cannot read EXIF data: " << path.string();
         }
-    }else if (georaster){
+    } else if (georaster) {
         type = EntryType::GeoRaster;
     }
 

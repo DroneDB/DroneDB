@@ -17,18 +17,26 @@ namespace ddb {
 
 bool isBuildableInternal(const Entry& e, std::string& subfolder) {
 
-    if (e.type == PointCloud) {
+    if (e.type == EntryType::PointCloud) {
         // Special case: do not build if this entry is in a "ept-data" folder
         // as it indicates an EPT dataset file
         if (fs::path(e.path).parent_path().filename().string() == "ept-data") return false;
 
         subfolder = "ept";
         return true;
-    }else if (e.type == GeoRaster){
+    }else if (e.type == EntryType::GeoRaster){
         subfolder = "cog";
         return true;
-    }else if (e.type == Model){
+    }else if (e.type == EntryType::Model){
         subfolder = "nxs";
+        return true;
+    } else if (e.type == EntryType::Vector){
+
+        // It's buildable only if the file is not a geojson file (already in the right format)
+        // other vector files need to be converted to geojson
+        if (fs::path(e.path).extension().string() == ".geojson") return false;
+
+        subfolder = "vec";
         return true;
     }
 
@@ -84,17 +92,20 @@ void buildInternal(Database* db, const Entry& e,
     try {
         bool built = false;
 
-        if (e.type == PointCloud) {
+        if (e.type == EntryType::PointCloud) {
             const std::vector vec = {relativePath};
             buildEpt(vec, tempFolder);
             built = true;
-        }else if (e.type == GeoRaster){
+        } else if (e.type == EntryType::GeoRaster){
             buildCog(relativePath, (fs::path(tempFolder) / "cog.tif").string());
             built = true;
-        }else if (e.type == Model){
+        } else if (e.type == EntryType::Model){
             buildNexus(relativePath, (fs::path(tempFolder) / "model.nxz").string());
             built = true;
-        }
+        } /*else if (e.type == EntryType::Vector){
+            buildVector(relativePath, (fs::path(tempFolder) / "vector.geojson").string());
+            built = true;
+        }*/
 
         if (built){
             LOGD << "Build complete, moving temp folder to " << outputFolder;
