@@ -12,6 +12,7 @@
 #include "exceptions.h"
 #include "mio.h"
 #include "threadlock.h"
+#include "vector.h"
 
 namespace ddb {
 
@@ -24,13 +25,13 @@ bool isBuildableInternal(const Entry& e, std::string& subfolder) {
 
         subfolder = "ept";
         return true;
-    }else if (e.type == EntryType::GeoRaster){
+    }else if (e.type == EntryType::GeoRaster) {
         subfolder = "cog";
         return true;
-    }else if (e.type == EntryType::Model){
+    }else if (e.type == EntryType::Model) {
         subfolder = "nxs";
         return true;
-    } else if (e.type == EntryType::Vector){
+    } else if (e.type == EntryType::Vector) {
 
         // It's buildable only if the file is not a geojson file (already in the right format)
         // other vector files need to be converted to geojson
@@ -102,10 +103,10 @@ void buildInternal(Database* db, const Entry& e,
         } else if (e.type == EntryType::Model){
             buildNexus(relativePath, (fs::path(tempFolder) / "model.nxz").string());
             built = true;
-        } /*else if (e.type == EntryType::Vector){
+        } else if (e.type == EntryType::Vector){
             buildVector(relativePath, (fs::path(tempFolder) / "vector.geojson").string());
             built = true;
-        }*/
+        }
 
         if (built){
             LOGD << "Build complete, moving temp folder to " << outputFolder;
