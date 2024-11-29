@@ -13,96 +13,102 @@ void buildVector(const std::string &input, const std::string &outputVector){
 
     LOGD << "Building vector " << input << " to " << outputVector;
 
-    if (!convertToGeoJSON(input, outputVector))
-        throw AppException("Cannot convert " + input + " to GeoJSON");
+    if (!convertToFlatGeobuf(input, outputVector))
+        throw AppException("Cannot convert " + input + " to FlatGeobuf");
 
 }
 
-bool convertToGeoJSON(const std::string& input, const std::string& output) {
+bool convertToFlatGeobuf(const std::string &input, const std::string &output)
+{
+    try
+    {
+        // Check if input and output strings are not empty
+        if (input.empty())
+        {
+            LOGD << "Input filename is empty.";
+            return false;
+        }
+        if (output.empty())
+        {
+            LOGD << "Output filename is empty.";
+            return false;
+        }
 
-    LOGD << "Converting " << input << " to GeoJSON";
+        // Check if input file exists
+        if (!std::filesystem::exists(input))
+        {
+            LOGD << "Input file does not exist.";
+            return false;
+        }
 
-    // Open the input dataset
-    GDALDataset *inputDataset = (GDALDataset*) GDALOpenEx(input.c_str(), GDAL_OF_VECTOR, nullptr, nullptr, nullptr);
-    if (inputDataset == nullptr) {
-        LOGD << "Failed to open input file: " << input;
+        // Open the source dataset
+        GDALDatasetH hSrcDS = GDALOpenEx(
+            input.c_str(),
+            GDAL_OF_VECTOR | GDAL_OF_READONLY,
+            nullptr, nullptr, nullptr);
+        if (hSrcDS == nullptr)
+        {
+            LOGD << "Failed to open input dataset.";
+            return false;
+        }
+
+        LOGD << "Input dataset opened successfully.";
+
+        // Prepare GDALVectorTranslate options
+        char *argv[] = {
+            const_cast<char *>("-f"), const_cast<char *>("FlatGeobuf"),
+            const_cast<char *>("-mapFieldType"), const_cast<char *>("StringList=String"),
+            nullptr // Ensure null termination
+        };
+
+        // Parse options
+        GDALVectorTranslateOptions *psOptions = GDALVectorTranslateOptionsNew(argv, nullptr);
+        if (psOptions == nullptr)
+        {
+            LOGD << "Failed to create GDAL vector translate options.";
+            GDALClose(hSrcDS);
+            return false;
+        }
+
+        // Perform the translation
+        int pbUsageError = 0;
+        GDALDatasetH hDstDS = GDALVectorTranslate(
+            output.c_str(),
+            nullptr,
+            1,
+            &hSrcDS,
+            psOptions,
+            &pbUsageError);
+
+        LOGD << "Translation completed.";
+
+        if (hDstDS == nullptr || pbUsageError)
+        {
+            LOGD << "GDALVectorTranslate failed.";
+            GDALVectorTranslateOptionsFree(psOptions);
+            GDALClose(hSrcDS);
+            return false;
+        }
+
+        LOGD << "Output dataset created successfully.";
+
+        // Clean up
+        GDALVectorTranslateOptionsFree(psOptions);
+        GDALClose(hDstDS);
+        GDALClose(hSrcDS);
+
+        return true;
+    }
+    catch (const std::exception &e)
+    {
+        LOGD << "Exception occurred during conversion to FlatGeobuf: " << e.what();
         return false;
     }
-
-    // Define the GeoJSON driver
-    GDALDriver *geoJsonDriver = GetGDALDriverManager()->GetDriverByName("GeoJSON");
-    if (geoJsonDriver == nullptr) {
-        LOGD << "GeoJSON driver not available";
-        GDALClose(inputDataset);
+    catch (...)
+    {
+        LOGD << "An unknown exception occurred.";
         return false;
     }
-
-    // Create the output GeoJSON dataset
-    GDALDataset *outputDataset = geoJsonDriver->Create(output.c_str(), 0, 0, 0, GDT_Unknown, nullptr);
-    if (outputDataset == nullptr) {
-        LOGD << "Failed to create output file: " << output;
-        GDALClose(inputDataset);
-        return false;
-    }
-
-    int layers = inputDataset->GetLayerCount();
-
-    LOGD << "Found " << layers << " layers in input file";
-
-    // Loop through layers in the input dataset and copy them to the output dataset
-    for (int i = 0; i < layers; i++) {
-        OGRLayer *inputLayer = inputDataset->GetLayer(i);
-        if (inputLayer == nullptr) {
-            LOGD << "Failed to retrieve layer " << i << " from input file";
-            continue;
-        }
-
-        LOGD << "Processing layer " << i << ": " << inputLayer->GetName();
-
-        // Create a new layer in the output dataset with the same name and geometry type
-        OGRLayer *outputLayer = outputDataset->CreateLayer(inputLayer->GetName(), nullptr, inputLayer->GetGeomType(), nullptr);
-        if (outputLayer == nullptr) {
-            LOGD << "Failed to create layer " << inputLayer->GetName() << " in output file";
-            continue;
-        }
-
-        // Copy layer fields
-        OGRFeatureDefn *inputLayerDefn = inputLayer->GetLayerDefn();
-        for (int j = 0; j < inputLayerDefn->GetFieldCount(); j++) {
-            OGRFieldDefn *fieldDefn = inputLayerDefn->GetFieldDefn(j);
-            if (outputLayer->CreateField(fieldDefn) != OGRERR_NONE) {
-                LOGD << "Failed to create field " << fieldDefn->GetNameRef() << " in output file";
-            }
-        }
-
-        int features = inputLayer->GetFeatureCount();
-
-        LOGD << "Found " << features << " features in layer";
-
-        // Copy features
-        OGRFeature *inputFeature;
-        while ((inputFeature = inputLayer->GetNextFeature()) != nullptr) {
-            OGRFeature *outputFeature = OGRFeature::CreateFeature(outputLayer->GetLayerDefn());
-            if (outputFeature->SetGeometry(inputFeature->GetGeometryRef()) != OGRERR_NONE) {
-                LOGD << "Failed to set geometry for feature in output file." << std::endl;
-            }
-            if (outputFeature->SetFrom(inputFeature) != OGRERR_NONE) {
-                LOGD << "Failed to copy feature attributes." << std::endl;
-            }
-            if (outputLayer->CreateFeature(outputFeature) != OGRERR_NONE) {
-                LOGD << "Failed to write feature to output file." << std::endl;
-            }
-            OGRFeature::DestroyFeature(outputFeature);
-            OGRFeature::DestroyFeature(inputFeature);
-        }
-    }
-
-    // Close datasets
-    GDALClose(inputDataset);
-    GDALClose(outputDataset);
-
-    LOGD << "Conversion to GeoJSON completed: " << output << std::endl;
-    return true;
 }
 
 }

@@ -13,7 +13,7 @@ namespace ddb{
 
 DDB_DLL void buildVector(const std::string &input, const std::string &outputVector);
 
-DDB_DLL bool convertToGeoJSON(const std::string& input, const std::string& output);
+DDB_DLL bool convertToFlatGeobuf(const std::string& input, const std::string& output);
 
 }
 

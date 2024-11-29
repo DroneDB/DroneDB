@@ -32,11 +32,6 @@ bool isBuildableInternal(const Entry& e, std::string& subfolder) {
         subfolder = "nxs";
         return true;
     } else if (e.type == EntryType::Vector) {
-
-        // It's buildable only if the file is not a geojson file (already in the right format)
-        // other vector files need to be converted to geojson
-        if (fs::path(e.path).extension().string() == ".geojson") return false;
-
         subfolder = "vec";
         return true;
     }
@@ -77,6 +72,7 @@ void buildInternal(Database* db, const Entry& e,
     ThreadLock lock("build-" + (db->rootDirectory() / e.hash).string());
 
     if (fs::exists(outputFolder) && !force) {
+        LOGD << "Output folder " << outputFolder << " already exists, skipping";
         return;
     }
 
@@ -104,7 +100,7 @@ void buildInternal(Database* db, const Entry& e,
             buildNexus(relativePath, (fs::path(tempFolder) / "model.nxz").string());
             built = true;
         } else if (e.type == EntryType::Vector){
-            buildVector(relativePath, (fs::path(tempFolder) / "vector.geojson").string());
+            buildVector(relativePath, (fs::path(tempFolder) / "vector.fgb").string());
             built = true;
         }
 

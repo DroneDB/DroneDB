@@ -427,8 +427,8 @@ EntryType fingerprint(const fs::path &path){
     if (p.checkExtension({"obj"}))
         return EntryType::Model;
 
-    // Check for vector files (geojson, dxf, dwg, shp, shz)
-    if (p.checkExtension({"geojson", "dxf", "dwg", "shp", "shz"}))
+    // Check for vector files (geojson, dxf, dwg, shp, shz, fgb, topojson, kml, kmz, gpkg)
+    if (p.checkExtension({"geojson", "dxf", "dwg", "shp", "shz", "fgb", "topojson", "kml", "kmz", "gpkg"}))
         return EntryType::Vector;
 
     // Check for image or video files
