@@ -7,3 +7,6 @@
 [submodule "libnexus"]
 	path = vendor/libnexus
 	url = https://github.com/DroneDB/libnexus.git
+[submodule "vendor/zonedetect"]
+	path = vendor/zonedetect
+	url = https://github.com/BertoldVdb/ZoneDetect.git
