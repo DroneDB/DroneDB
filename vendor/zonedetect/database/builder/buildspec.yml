@@ -1,0 +1,14 @@
+version: 0.2
+
+phases:
+  build:
+    commands:
+       - apt update
+       - apt install -y libshp-dev
+       - cd database/builder
+       - ./makedb.sh
+
+artifacts:
+  files:
+    - database/builder/db.zip
+  discard-paths: yes

@@ -1,0 +1,80 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Lambda function for doing timezone lookup
+  
+Parameters: 
+  CertificateARN: 
+    Type: String
+  DomainName: 
+    Type: String
+    Default: timezone.bertold.org
+  LogBucket:
+    Type: String
+    Default: bertold-logs.s3.amazonaws.com
+  LambdaBucket:
+    Type: String
+    Default: codepipeline-eu-central-1-880956203813
+  LambdaSource:
+    Type: String
+    Default: ZoneDetectLambda/BuildArtif/lho3Dev
+  
+Resources:
+  AWSApiGateway:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: Timezone API Gateway
+      StageName: prod
+      EndpointConfiguration: regional
+      
+  TimezoneFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: 
+        Bucket: !Ref LambdaBucket
+        Key: !Ref LambdaSource
+      MemorySize: 128
+      Timeout: 5
+      Description: Looks up timezone based on coordinates
+      Runtime: provided
+      Handler: index.handler
+      Events:
+        HelloWorldApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AWSApiGateway
+            Path: /timezone
+            Method: GET
+
+  Distribution:
+    Type: 'AWS::CloudFront::Distribution'
+    Properties:
+      DistributionConfig:
+        Origins:
+        - DomainName: !Sub '${AWSApiGateway}.execute-api.${AWS::Region}.amazonaws.com'
+          Id: apiOrigin
+          OriginPath: /prod
+          CustomOriginConfig:
+            OriginProtocolPolicy: https-only
+        Enabled: 'true'
+        Comment: Timezone API distrubition
+        Logging:
+          Bucket: 
+            Ref: LogBucket
+          Prefix: cf-timezone-logs
+        Aliases:
+          - Ref: DomainName
+        DefaultCacheBehavior:
+          TargetOriginId: apiOrigin
+          SmoothStreaming: 'false'
+          ForwardedValues:
+            QueryString: 'true'
+            Cookies:
+              Forward: none
+          ViewerProtocolPolicy: allow-all
+        PriceClass: PriceClass_100
+        IPV6Enabled: 'true'
+        ViewerCertificate:
+          MinimumProtocolVersion: TLSv1.1_2016
+          AcmCertificateArn: 
+            Ref: CertificateARN
+          SslSupportMethod: sni-only

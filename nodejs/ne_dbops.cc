@@ -1,42 +1,40 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+#include "ne_dbops.h"
+
 #include <iostream>
 #include <sstream>
-#include "ddb.h"
-#include "dbops.h"
+
 #include "build.h"
-#include "ne_dbops.h"
+#include "dbops.h"
+#include "ddb.h"
 #include "ne_helpers.h"
 
 class InitWorker : public Nan::AsyncWorker {
- public:
-  InitWorker(Nan::Callback *callback, const std::string &directory)
-    : AsyncWorker(callback, "nan:InitWorker"),
-      directory(directory) {}
-  ~InitWorker() {}
+public:
+    InitWorker(Nan::Callback* callback, const std::string& directory)
+        : AsyncWorker(callback, "nan:InitWorker"), directory(directory) {}
+    ~InitWorker() {}
 
-  void Execute () {
-    char *outPath;
+    void Execute() {
+        char* outPath;
 
-    if (DDBInit(directory.c_str(), &outPath) != DDBERR_NONE){
-      SetErrorMessage(DDBGetLastError());
+        if (DDBInit(directory.c_str(), &outPath) != DDBERR_NONE) {
+            SetErrorMessage(DDBGetLastError());
+        }
+
+        ddbPath = std::string(outPath);
     }
 
-    ddbPath = std::string(outPath);
-  }
+    void HandleOKCallback() {
+        Nan::HandleScope scope;
 
-  void HandleOKCallback () {
-     Nan::HandleScope scope;
+        v8::Local<v8::Value> argv[] = {Nan::Null(), Nan::New(ddbPath).ToLocalChecked()};
+        callback->Call(2, argv, async_resource);
+    }
 
-     v8::Local<v8::Value> argv[] = {
-         Nan::Null(),
-         Nan::New(ddbPath).ToLocalChecked()
-     };
-     callback->Call(2, argv, async_resource);
-   }
-
- private:
+private:
     std::string directory;
     std::string ddbPath;
 };
@@ -53,67 +51,71 @@ NAN_METHOD(init) {
 
 
 class AddWorker : public Nan::AsyncProgressWorker {
- public:
-  AddWorker(Nan::Callback *callback, Nan::Callback *progress, const std::string &ddbPath, const std::vector<std::string> &paths, bool recursive)
-    : Nan::AsyncProgressWorker(callback, "nan:AddWorker"),
-      progress(progress),
-      ddbPath(ddbPath), paths(paths), recursive(recursive),
-      cancel(false) {}
-  ~AddWorker() {
-      delete progress;
-  }
+public:
+    AddWorker(Nan::Callback* callback,
+              Nan::Callback* progress,
+              const std::string& ddbPath,
+              const std::vector<std::string>& paths,
+              bool recursive)
+        : Nan::AsyncProgressWorker(callback, "nan:AddWorker"),
+          progress(progress),
+          ddbPath(ddbPath),
+          paths(paths),
+          recursive(recursive),
+          cancel(false) {}
+    ~AddWorker() { delete progress; }
 
-  void Execute (const Nan::AsyncProgressWorker::ExecutionProgress& progress) {
-      try{
-        auto outJson = json::array();
-        const auto db = ddb::open(ddbPath, true);
-        ddb::addToIndex(db.get(), ddb::expandPathList(paths, recursive, 0),
-                [&](const ddb::Entry& e, bool updated) {
-                    json j;
-                    e.toJSON(j);
-                    j["updated"] = updated;
-                    outJson.push_back(j);
+    void Execute(const Nan::AsyncProgressWorker::ExecutionProgress& progress) {
+        try {
+            auto outJson = json::array();
+            const auto db = ddb::open(ddbPath, true);
+            ddb::addToIndex(db.get(),
+                            ddb::expandPathList(paths, recursive, 0),
+                            [&](const ddb::Entry& e, bool updated) {
+                                json j;
+                                e.toJSON(j);
+                                j["updated"] = updated;
+                                outJson.push_back(j);
 
-                    std::string serialized = j.dump();
-                    progress.Send(serialized.c_str(), sizeof(char) * serialized.length());
-                    return !cancel;
-                });
-        output = outJson.dump();
-      }catch(const ddb::AppException &e){
-        SetErrorMessage(e.what());
-      }
-  }
+                                std::string serialized = j.dump();
+                                progress.Send(serialized.c_str(),
+                                              sizeof(char) * serialized.length());
+                                return !cancel;
+                            });
+            output = outJson.dump();
+        } catch (const ddb::AppException& e) {
+            SetErrorMessage(e.what());
+        }
+    }
 
-  void HandleProgressCallback(const char *data, size_t count) {
-      Nan::HandleScope scope;
-      Nan::JSON json;
+    void HandleProgressCallback(const char* data, size_t count) {
+        Nan::HandleScope scope;
+        Nan::JSON json;
 
-      std::string str(data, count);
+        std::string str(data, count);
 
-      v8::Local<v8::Value> argv[] = {
-          json.Parse(Nan::New<v8::String>(str).ToLocalChecked()).ToLocalChecked()
-      };
+        v8::Local<v8::Value> argv[] = {
+            json.Parse(Nan::New<v8::String>(str).ToLocalChecked()).ToLocalChecked()};
 
-      auto ret = progress->Call(1, argv, async_resource).ToLocalChecked();
-      if (!ret->IsUndefined()){
-          cancel = !Nan::To<bool>(ret).FromJust();
-      }
-  }
+        auto ret = progress->Call(1, argv, async_resource).ToLocalChecked();
+        if (!ret->IsUndefined()) {
+            cancel = !Nan::To<bool>(ret).FromJust();
+        }
+    }
 
-  void HandleOKCallback () {
-     Nan::HandleScope scope;
+    void HandleOKCallback() {
+        Nan::HandleScope scope;
 
-     Nan::JSON json;
-     v8::Local<v8::Value> argv[] = {
-         Nan::Null(),
-         json.Parse(Nan::New<v8::String>(output.c_str()).ToLocalChecked()).ToLocalChecked()
-     };
+        Nan::JSON json;
+        v8::Local<v8::Value> argv[] = {
+            Nan::Null(),
+            json.Parse(Nan::New<v8::String>(output.c_str()).ToLocalChecked()).ToLocalChecked()};
 
-     callback->Call(2, argv, async_resource);
-   }
+        callback->Call(2, argv, async_resource);
+    }
 
- private:
-    Nan::Callback *progress;
+private:
+    Nan::Callback* progress;
     std::string output;
 
     std::string ddbPath;
@@ -141,34 +143,35 @@ NAN_METHOD(add) {
 
 
 class RemoveWorker : public Nan::AsyncWorker {
- public:
-  RemoveWorker(Nan::Callback *callback, const std::string &ddbPath, const std::vector<std::string> &paths)
-    : AsyncWorker(callback, "nan:RemoveWorker"),
-      ddbPath(ddbPath), paths(paths) {}
-  ~RemoveWorker() {}
+public:
+    RemoveWorker(Nan::Callback* callback,
+                 const std::string& ddbPath,
+                 const std::vector<std::string>& paths)
+        : AsyncWorker(callback, "nan:RemoveWorker"), ddbPath(ddbPath), paths(paths) {}
+    ~RemoveWorker() {}
 
-  void Execute () {
-      std::vector<const char *> cPaths(paths.size());
-      std::transform(paths.begin(), paths.end(), cPaths.begin(), [](const std::string& s) { return s.c_str(); });
+    void Execute() {
+        std::vector<const char*> cPaths(paths.size());
+        std::transform(paths.begin(), paths.end(), cPaths.begin(), [](const std::string& s) {
+            return s.c_str();
+        });
 
-      if (DDBRemove(ddbPath.c_str(), cPaths.data(), static_cast<int>(cPaths.size())) != DDBERR_NONE){
-          SetErrorMessage(DDBGetLastError());
-      }
-  }
+        if (DDBRemove(ddbPath.c_str(), cPaths.data(), static_cast<int>(cPaths.size())) !=
+            DDBERR_NONE) {
+            SetErrorMessage(DDBGetLastError());
+        }
+    }
 
-  void HandleOKCallback () {
-     Nan::HandleScope scope;
+    void HandleOKCallback() {
+        Nan::HandleScope scope;
 
-     v8::Local<v8::Value> argv[] = {
-         Nan::Null(),
-         Nan::True()
-     };
-     callback->Call(2, argv, async_resource);
-   }
+        v8::Local<v8::Value> argv[] = {Nan::Null(), Nan::True()};
+        callback->Call(2, argv, async_resource);
+    }
 
- private:
+private:
     std::string ddbPath;
-    std::vector<std::string> paths;    
+    std::vector<std::string> paths;
 };
 
 
@@ -179,7 +182,7 @@ NAN_METHOD(remove) {
     BIND_STRING_ARRAY_PARAM(paths, 1);
 
     // TODO: this is not needed?
-    //BIND_OBJECT_PARAM(obj, 2);
+    // BIND_OBJECT_PARAM(obj, 2);
 
     BIND_FUNCTION_PARAM(callback, 3);
 
@@ -187,29 +190,28 @@ NAN_METHOD(remove) {
 }
 
 class MoveWorker : public Nan::AsyncWorker {
- public:
-  MoveWorker(Nan::Callback *callback, const std::string &ddbPath, const std::string &source, const std::string &dest)
-    : AsyncWorker(callback, "nan:MoveWorker"),
-      ddbPath(ddbPath), source(source), dest(dest) {}
-  ~MoveWorker() {}
+public:
+    MoveWorker(Nan::Callback* callback,
+               const std::string& ddbPath,
+               const std::string& source,
+               const std::string& dest)
+        : AsyncWorker(callback, "nan:MoveWorker"), ddbPath(ddbPath), source(source), dest(dest) {}
+    ~MoveWorker() {}
 
-  void Execute () {
-      if (DDBMoveEntry(ddbPath.c_str(), source.c_str(), dest.c_str()) != DDBERR_NONE){
-          SetErrorMessage(DDBGetLastError());
-      }
-  }
+    void Execute() {
+        if (DDBMoveEntry(ddbPath.c_str(), source.c_str(), dest.c_str()) != DDBERR_NONE) {
+            SetErrorMessage(DDBGetLastError());
+        }
+    }
 
-  void HandleOKCallback () {
-     Nan::HandleScope scope;
+    void HandleOKCallback() {
+        Nan::HandleScope scope;
 
-     v8::Local<v8::Value> argv[] = {
-         Nan::Null(),
-         Nan::True()
-     };
-     callback->Call(2, argv, async_resource);
-   }
+        v8::Local<v8::Value> argv[] = {Nan::Null(), Nan::True()};
+        callback->Call(2, argv, async_resource);
+    }
 
- private:
+private:
     std::string ddbPath;
     std::string source;
     std::string dest;
@@ -228,45 +230,55 @@ NAN_METHOD(move) {
 }
 
 class ListWorker : public Nan::AsyncWorker {
- public:
-  ListWorker(Nan::Callback *callback, const std::string &ddbPath, const std::vector<std::string> &paths, 
-     bool recursive, int maxRecursionDepth)
-    : AsyncWorker(callback, "nan:ListWorker"),
-      ddbPath(ddbPath), paths(paths), recursive(recursive), maxRecursionDepth(maxRecursionDepth) {}
-  ~ListWorker() {}
+public:
+    ListWorker(Nan::Callback* callback,
+               const std::string& ddbPath,
+               const std::vector<std::string>& paths,
+               bool recursive,
+               int maxRecursionDepth)
+        : AsyncWorker(callback, "nan:ListWorker"),
+          ddbPath(ddbPath),
+          paths(paths),
+          recursive(recursive),
+          maxRecursionDepth(maxRecursionDepth) {}
+    ~ListWorker() {}
 
-  void Execute () {
-         
-    std::vector<const char *> cPaths(paths.size());
-    std::transform(paths.begin(), paths.end(), cPaths.begin(), [](const std::string& s) { return s.c_str(); });
+    void Execute() {
+        std::vector<const char*> cPaths(paths.size());
+        std::transform(paths.begin(), paths.end(), cPaths.begin(), [](const std::string& s) {
+            return s.c_str();
+        });
 
-    if (DDBList(ddbPath.c_str(), cPaths.data(), static_cast<int>(cPaths.size()), &output, "json", recursive, maxRecursionDepth) != DDBERR_NONE){
-        SetErrorMessage(DDBGetLastError());
+        if (DDBList(ddbPath.c_str(),
+                    cPaths.data(),
+                    static_cast<int>(cPaths.size()),
+                    &output,
+                    "json",
+                    recursive,
+                    maxRecursionDepth) != DDBERR_NONE) {
+            SetErrorMessage(DDBGetLastError());
+        }
     }
 
-  }
+    void HandleOKCallback() {
+        Nan::HandleScope scope;
 
-  void HandleOKCallback () {
-     Nan::HandleScope scope;
+        Nan::JSON json;
+        v8::Local<v8::Value> argv[] = {
+            Nan::Null(),
+            json.Parse(Nan::New<v8::String>(output).ToLocalChecked()).ToLocalChecked()};
 
-     Nan::JSON json;
-     v8::Local<v8::Value> argv[] = {
-         Nan::Null(),
-         json.Parse(Nan::New<v8::String>(output).ToLocalChecked()).ToLocalChecked()
-     };
+        delete output;  // TODO: is this a leak if the call fails? How do we de-allocate on failure?
+        callback->Call(2, argv, async_resource);
+    }
 
-     delete output; // TODO: is this a leak if the call fails? How do we de-allocate on failure?
-     callback->Call(2, argv, async_resource);
-   }
-
- private:
+private:
     std::string ddbPath;
     std::vector<std::string> paths;
 
     bool recursive;
-    int maxRecursionDepth;   
-    char *output;
-
+    int maxRecursionDepth;
+    char* output;
 };
 
 NAN_METHOD(list) {
@@ -283,61 +295,63 @@ NAN_METHOD(list) {
 }
 
 class BuildWorker : public Nan::AsyncProgressWorker {
- public:
-  BuildWorker(Nan::Callback *callback, Nan::Callback *progress, const std::string &ddbPath, const std::string &path,
-    bool force, bool pendingOnly)
-    : Nan::AsyncProgressWorker(callback, "nan:BuildWorker"),
-      progress(progress),
-      ddbPath(ddbPath), path(path), force(force), pendingOnly(pendingOnly) {}
-  ~BuildWorker() {
-      delete progress;
-  }
+public:
+    BuildWorker(Nan::Callback* callback,
+                Nan::Callback* progress,
+                const std::string& ddbPath,
+                const std::string& path,
+                bool force,
+                bool pendingOnly)
+        : Nan::AsyncProgressWorker(callback, "nan:BuildWorker"),
+          progress(progress),
+          ddbPath(ddbPath),
+          path(path),
+          force(force),
+          pendingOnly(pendingOnly) {}
+    ~BuildWorker() { delete progress; }
 
-  void Execute (const Nan::AsyncProgressWorker::ExecutionProgress& progress) {
-      try{
-        std::string path;
-        
-        const auto db = ddb::open(ddbPath, true);
+    void Execute(const Nan::AsyncProgressWorker::ExecutionProgress& progress) {
+        try {
+            std::string path;
 
-        ddb::BuildCallback showProgress = [&](const std::string &built){
-            progress.Send(built.c_str(), sizeof(char) * built.length());
-        };
+            const auto db = ddb::open(ddbPath, true);
 
-        if (path.empty()) {
-            if (pendingOnly) ddb::buildPending(db.get(), "", force, showProgress);
-            else ddb::buildAll(db.get(), "", force, showProgress);
-        } else {
-            ddb::build(db.get(), path, "", force, showProgress);
+            ddb::BuildCallback showProgress = [&](const std::string& built) {
+                progress.Send(built.c_str(), sizeof(char) * built.length());
+            };
+
+            if (path.empty()) {
+                if (pendingOnly)
+                    ddb::buildPending(db.get(), "", force, showProgress);
+                else
+                    ddb::buildAll(db.get(), "", force, showProgress);
+            } else {
+                ddb::build(db.get(), path, "", force, showProgress);
+            }
+        } catch (const ddb::AppException& e) {
+            SetErrorMessage(e.what());
         }
-      }catch(const ddb::AppException &e){
-        SetErrorMessage(e.what());
-      }
-  }
+    }
 
-  void HandleProgressCallback(const char *data, size_t count) {
-      Nan::HandleScope scope;
+    void HandleProgressCallback(const char* data, size_t count) {
+        Nan::HandleScope scope;
 
-      std::string str(data, count);
+        std::string str(data, count);
 
-      v8::Local<v8::Value> argv[] = {
-          Nan::New<v8::String>(str).ToLocalChecked()
-      };
+        v8::Local<v8::Value> argv[] = {Nan::New<v8::String>(str).ToLocalChecked()};
 
-      progress->Call(1, argv, async_resource).ToLocalChecked();
-  }
+        progress->Call(1, argv, async_resource).ToLocalChecked();
+    }
 
-  void HandleOKCallback () {
-     Nan::HandleScope scope;
+    void HandleOKCallback() {
+        Nan::HandleScope scope;
 
-     v8::Local<v8::Value> argv[] = {
-         Nan::Null(),
-         Nan::True()
-     };
-     callback->Call(2, argv, async_resource);
-   }
+        v8::Local<v8::Value> argv[] = {Nan::Null(), Nan::True()};
+        callback->Call(2, argv, async_resource);
+    }
 
- private:
-    Nan::Callback *progress; 
+private:
+    Nan::Callback* progress;
     std::string ddbPath;
     std::string path;
     bool force;
@@ -361,35 +375,33 @@ NAN_METHOD(build) {
 }
 
 class SearchWorker : public Nan::AsyncWorker {
- public:
-  SearchWorker(Nan::Callback *callback, const std::string &ddbPath, const std::string &query)
-    : AsyncWorker(callback, "nan:SearchWorker"),
-      ddbPath(ddbPath), query(query) {}
-  ~SearchWorker() {}
+public:
+    SearchWorker(Nan::Callback* callback, const std::string& ddbPath, const std::string& query)
+        : AsyncWorker(callback, "nan:SearchWorker"), ddbPath(ddbPath), query(query) {}
+    ~SearchWorker() {}
 
-  void Execute () {
-    if (DDBSearch(ddbPath.c_str(), query.c_str(), &output, "json") != DDBERR_NONE){
-        SetErrorMessage(DDBGetLastError());
+    void Execute() {
+        if (DDBSearch(ddbPath.c_str(), query.c_str(), &output, "json") != DDBERR_NONE) {
+            SetErrorMessage(DDBGetLastError());
+        }
     }
-  }
 
-  void HandleOKCallback () {
-     Nan::HandleScope scope;
+    void HandleOKCallback() {
+        Nan::HandleScope scope;
 
-     Nan::JSON json;
-     v8::Local<v8::Value> argv[] = {
-         Nan::Null(),
-         json.Parse(Nan::New<v8::String>(output).ToLocalChecked()).ToLocalChecked()
-     };
+        Nan::JSON json;
+        v8::Local<v8::Value> argv[] = {
+            Nan::Null(),
+            json.Parse(Nan::New<v8::String>(output).ToLocalChecked()).ToLocalChecked()};
 
-     delete output;
-     callback->Call(2, argv, async_resource);
-  }
+        delete output;
+        callback->Call(2, argv, async_resource);
+    }
 
- private:
+private:
     std::string ddbPath;
     std::string query;
-    char *output;
+    char* output;
 };
 
 NAN_METHOD(search) {
@@ -404,35 +416,33 @@ NAN_METHOD(search) {
 
 
 class ChattrWorker : public Nan::AsyncWorker {
- public:
-  ChattrWorker(Nan::Callback *callback, const std::string &ddbPath, const std::string &attrsJson)
-    : AsyncWorker(callback, "nan:ChattrWorker"),
-      ddbPath(ddbPath), attrsJson(attrsJson){}
-  ~ChattrWorker() {}
+public:
+    ChattrWorker(Nan::Callback* callback, const std::string& ddbPath, const std::string& attrsJson)
+        : AsyncWorker(callback, "nan:ChattrWorker"), ddbPath(ddbPath), attrsJson(attrsJson) {}
+    ~ChattrWorker() {}
 
-  void Execute () {
-    if (DDBChattr(ddbPath.c_str(), attrsJson.c_str(), &output) != DDBERR_NONE){
-        SetErrorMessage(DDBGetLastError());
+    void Execute() {
+        if (DDBChattr(ddbPath.c_str(), attrsJson.c_str(), &output) != DDBERR_NONE) {
+            SetErrorMessage(DDBGetLastError());
+        }
     }
-  }
 
-  void HandleOKCallback () {
-     Nan::HandleScope scope;
+    void HandleOKCallback() {
+        Nan::HandleScope scope;
 
-     Nan::JSON json;
-     v8::Local<v8::Value> argv[] = {
-         Nan::Null(),
-         json.Parse(Nan::New<v8::String>(output).ToLocalChecked()).ToLocalChecked()
-     };
+        Nan::JSON json;
+        v8::Local<v8::Value> argv[] = {
+            Nan::Null(),
+            json.Parse(Nan::New<v8::String>(output).ToLocalChecked()).ToLocalChecked()};
 
-     callback->Call(2, argv, async_resource);
-   }
+        callback->Call(2, argv, async_resource);
+    }
 
- private:
+private:
     std::string ddbPath;
     std::string attrsJson;
 
-    char *output;
+    char* output;
 };
 
 NAN_METHOD(chattr) {
@@ -456,37 +466,34 @@ NAN_METHOD(chattr) {
 }
 
 class GetWorker : public Nan::AsyncWorker {
- public:
-  GetWorker(Nan::Callback *callback, const std::string &ddbPath, const std::string &path)
-    : AsyncWorker(callback, "nan:GetWorker"),
-      ddbPath(ddbPath), path(path) {}
-  ~GetWorker() {}
+public:
+    GetWorker(Nan::Callback* callback, const std::string& ddbPath, const std::string& path)
+        : AsyncWorker(callback, "nan:GetWorker"), ddbPath(ddbPath), path(path) {}
+    ~GetWorker() {}
 
-  void Execute () {
-    if (DDBGet(ddbPath.c_str(), path.c_str(), &output) != DDBERR_NONE){
-        SetErrorMessage(DDBGetLastError());
+    void Execute() {
+        if (DDBGet(ddbPath.c_str(), path.c_str(), &output) != DDBERR_NONE) {
+            SetErrorMessage(DDBGetLastError());
+        }
     }
-  }
 
-  void HandleOKCallback () {
-     Nan::HandleScope scope;
+    void HandleOKCallback() {
+        Nan::HandleScope scope;
 
-     Nan::JSON json;
-     v8::Local<v8::Value> argv[] = {
-         Nan::Null(),
-         json.Parse(Nan::New<v8::String>(output).ToLocalChecked()).ToLocalChecked()
-     };
+        Nan::JSON json;
+        v8::Local<v8::Value> argv[] = {
+            Nan::Null(),
+            json.Parse(Nan::New<v8::String>(output).ToLocalChecked()).ToLocalChecked()};
 
-     delete output; // TODO: is this a leak if the call fails? How do we de-allocate on failure?
-     callback->Call(2, argv, async_resource);
-   }
+        delete output;  // TODO: is this a leak if the call fails? How do we de-allocate on failure?
+        callback->Call(2, argv, async_resource);
+    }
 
- private:
+private:
     std::string ddbPath;
     std::string path;
- 
-    char *output;
 
+    char* output;
 };
 
 NAN_METHOD(get) {
@@ -500,35 +507,32 @@ NAN_METHOD(get) {
 }
 
 class GetStampWorker : public Nan::AsyncWorker {
- public:
-  GetStampWorker(Nan::Callback *callback, const std::string &ddbPath)
-    : AsyncWorker(callback, "nan:GetStampWorker"),
-      ddbPath(ddbPath) {}
-  ~GetStampWorker() {}
+public:
+    GetStampWorker(Nan::Callback* callback, const std::string& ddbPath)
+        : AsyncWorker(callback, "nan:GetStampWorker"), ddbPath(ddbPath) {}
+    ~GetStampWorker() {}
 
-  void Execute () {
-    if (DDBGetStamp(ddbPath.c_str(), &output) != DDBERR_NONE){
-        SetErrorMessage(DDBGetLastError());
+    void Execute() {
+        if (DDBGetStamp(ddbPath.c_str(), &output) != DDBERR_NONE) {
+            SetErrorMessage(DDBGetLastError());
+        }
     }
-  }
 
-  void HandleOKCallback () {
-     Nan::HandleScope scope;
+    void HandleOKCallback() {
+        Nan::HandleScope scope;
 
-     Nan::JSON json;
-     v8::Local<v8::Value> argv[] = {
-         Nan::Null(),
-         json.Parse(Nan::New<v8::String>(output).ToLocalChecked()).ToLocalChecked()
-     };
+        Nan::JSON json;
+        v8::Local<v8::Value> argv[] = {
+            Nan::Null(),
+            json.Parse(Nan::New<v8::String>(output).ToLocalChecked()).ToLocalChecked()};
 
-     delete output; // TODO: is this a leak if the call fails? How do we de-allocate on failure?
-     callback->Call(2, argv, async_resource);
-   }
+        delete output;  // TODO: is this a leak if the call fails? How do we de-allocate on failure?
+        callback->Call(2, argv, async_resource);
+    }
 
- private:
+private:
     std::string ddbPath;
-    char *output;
-
+    char* output;
 };
 
 NAN_METHOD(getStamp) {
@@ -541,36 +545,37 @@ NAN_METHOD(getStamp) {
 }
 
 class DeltaWorker : public Nan::AsyncWorker {
- public:
-  DeltaWorker(Nan::Callback *callback, const std::string &sourceStamp, const std::string &targetStamp)
-    : AsyncWorker(callback, "nan:DeltaWorker"),
-      sourceStamp(sourceStamp), targetStamp(targetStamp) {}
-  ~DeltaWorker() {}
+public:
+    DeltaWorker(Nan::Callback* callback,
+                const std::string& sourceStamp,
+                const std::string& targetStamp)
+        : AsyncWorker(callback, "nan:DeltaWorker"),
+          sourceStamp(sourceStamp),
+          targetStamp(targetStamp) {}
+    ~DeltaWorker() {}
 
-  void Execute () {
-    if (DDBDelta(sourceStamp.c_str(), targetStamp.c_str(), &output, "json") != DDBERR_NONE){
-        SetErrorMessage(DDBGetLastError());
+    void Execute() {
+        if (DDBDelta(sourceStamp.c_str(), targetStamp.c_str(), &output, "json") != DDBERR_NONE) {
+            SetErrorMessage(DDBGetLastError());
+        }
     }
-  }
 
-  void HandleOKCallback () {
-     Nan::HandleScope scope;
+    void HandleOKCallback() {
+        Nan::HandleScope scope;
 
-     Nan::JSON json;
-     v8::Local<v8::Value> argv[] = {
-         Nan::Null(),
-         json.Parse(Nan::New<v8::String>(output).ToLocalChecked()).ToLocalChecked()
-     };
+        Nan::JSON json;
+        v8::Local<v8::Value> argv[] = {
+            Nan::Null(),
+            json.Parse(Nan::New<v8::String>(output).ToLocalChecked()).ToLocalChecked()};
 
-     delete output; // TODO: is this a leak if the call fails? How do we de-allocate on failure?
-     callback->Call(2, argv, async_resource);
-   }
+        delete output;  // TODO: is this a leak if the call fails? How do we de-allocate on failure?
+        callback->Call(2, argv, async_resource);
+    }
 
- private:
+private:
     std::string sourceStamp;
     std::string targetStamp;
-    char *output;
-
+    char* output;
 };
 
 NAN_METHOD(delta) {
@@ -578,44 +583,48 @@ NAN_METHOD(delta) {
 
     BIND_STRING_PARAM(sourceStamp, 0);
     BIND_STRING_PARAM(targetStamp, 1);
-    
+
     BIND_FUNCTION_PARAM(callback, 2);
 
     Nan::AsyncQueueWorker(new DeltaWorker(callback, sourceStamp, targetStamp));
 }
 
 class ComputeDeltaLocalsWorker : public Nan::AsyncWorker {
- public:
-  ComputeDeltaLocalsWorker(Nan::Callback *callback, const std::string &ddbPath, const std::string &delta, const std::string &hlDestFolder)
-    : AsyncWorker(callback, "nan:ComputeDeltaLocalsWorker"),
-      ddbPath(ddbPath), delta(delta), hlDestFolder(hlDestFolder) {}
-  ~ComputeDeltaLocalsWorker() {}
+public:
+    ComputeDeltaLocalsWorker(Nan::Callback* callback,
+                             const std::string& ddbPath,
+                             const std::string& delta,
+                             const std::string& hlDestFolder)
+        : AsyncWorker(callback, "nan:ComputeDeltaLocalsWorker"),
+          ddbPath(ddbPath),
+          delta(delta),
+          hlDestFolder(hlDestFolder) {}
+    ~ComputeDeltaLocalsWorker() {}
 
-  void Execute () {
-    if (DDBComputeDeltaLocals(delta.c_str(), ddbPath.c_str(), hlDestFolder.c_str(), &output) != DDBERR_NONE){
-        SetErrorMessage(DDBGetLastError());
+    void Execute() {
+        if (DDBComputeDeltaLocals(delta.c_str(), ddbPath.c_str(), hlDestFolder.c_str(), &output) !=
+            DDBERR_NONE) {
+            SetErrorMessage(DDBGetLastError());
+        }
     }
-  }
 
-  void HandleOKCallback () {
-     Nan::HandleScope scope;
+    void HandleOKCallback() {
+        Nan::HandleScope scope;
 
-     Nan::JSON json;
-     v8::Local<v8::Value> argv[] = {
-         Nan::Null(),
-         json.Parse(Nan::New<v8::String>(output).ToLocalChecked()).ToLocalChecked()
-     };
+        Nan::JSON json;
+        v8::Local<v8::Value> argv[] = {
+            Nan::Null(),
+            json.Parse(Nan::New<v8::String>(output).ToLocalChecked()).ToLocalChecked()};
 
-     delete output; // TODO: is this a leak if the call fails? How do we de-allocate on failure?
-     callback->Call(2, argv, async_resource);
-   }
+        delete output;  // TODO: is this a leak if the call fails? How do we de-allocate on failure?
+        callback->Call(2, argv, async_resource);
+    }
 
- private:
+private:
     std::string ddbPath;
     std::string delta;
     std::string hlDestFolder;
-    char *output;
-
+    char* output;
 };
 
 NAN_METHOD(computeDeltaLocals) {
@@ -624,47 +633,58 @@ NAN_METHOD(computeDeltaLocals) {
     BIND_STRING_PARAM(ddbPath, 0);
     BIND_STRING_PARAM(delta, 1);
     BIND_STRING_PARAM(hlDestFolder, 2);
-    
+
     BIND_FUNCTION_PARAM(callback, 3);
 
     Nan::AsyncQueueWorker(new ComputeDeltaLocalsWorker(callback, ddbPath, delta, hlDestFolder));
 }
 
 class ApplyDeltaWorker : public Nan::AsyncWorker {
- public:
-  ApplyDeltaWorker(Nan::Callback *callback, const std::string &delta, const std::string &sourcePath, const std::string &ddbPath,
-  int mergeStrategy, const std::string &sourceMetaDump)
-    : AsyncWorker(callback, "nan:ApplyDeltaWorker"),
-      delta(delta), sourcePath(sourcePath), ddbPath(ddbPath), mergeStrategy(mergeStrategy), sourceMetaDump(sourceMetaDump) {}
-  ~ApplyDeltaWorker() {}
+public:
+    ApplyDeltaWorker(Nan::Callback* callback,
+                     const std::string& delta,
+                     const std::string& sourcePath,
+                     const std::string& ddbPath,
+                     int mergeStrategy,
+                     const std::string& sourceMetaDump)
+        : AsyncWorker(callback, "nan:ApplyDeltaWorker"),
+          delta(delta),
+          sourcePath(sourcePath),
+          ddbPath(ddbPath),
+          mergeStrategy(mergeStrategy),
+          sourceMetaDump(sourceMetaDump) {}
+    ~ApplyDeltaWorker() {}
 
-  void Execute () {
-    if (DDBApplyDelta(delta.c_str(), sourcePath.c_str(), ddbPath.c_str(), mergeStrategy, sourceMetaDump.c_str(), &output) != DDBERR_NONE){
-        SetErrorMessage(DDBGetLastError());
+    void Execute() {
+        if (DDBApplyDelta(delta.c_str(),
+                          sourcePath.c_str(),
+                          ddbPath.c_str(),
+                          mergeStrategy,
+                          sourceMetaDump.c_str(),
+                          &output) != DDBERR_NONE) {
+            SetErrorMessage(DDBGetLastError());
+        }
     }
-  }
 
-  void HandleOKCallback () {
-     Nan::HandleScope scope;
+    void HandleOKCallback() {
+        Nan::HandleScope scope;
 
-     Nan::JSON json;
-     v8::Local<v8::Value> argv[] = {
-         Nan::Null(),
-         json.Parse(Nan::New<v8::String>(output).ToLocalChecked()).ToLocalChecked()
-     };
+        Nan::JSON json;
+        v8::Local<v8::Value> argv[] = {
+            Nan::Null(),
+            json.Parse(Nan::New<v8::String>(output).ToLocalChecked()).ToLocalChecked()};
 
-     delete output;
-     callback->Call(2, argv, async_resource);
-   }
+        delete output;
+        callback->Call(2, argv, async_resource);
+    }
 
- private:
+private:
     std::string delta;
     std::string sourcePath;
     std::string ddbPath;
     int mergeStrategy;
     std::string sourceMetaDump;
-    char *output;
-
+    char* output;
 };
 
 NAN_METHOD(applyDelta) {
@@ -676,51 +696,60 @@ NAN_METHOD(applyDelta) {
     BIND_STRING_PARAM(sourceMetaDump, 3);
     BIND_OBJECT_PARAM(obj, 4);
     BIND_OBJECT_VAR(obj, int, mergeStrategy, 0);
-    
+
     BIND_FUNCTION_PARAM(callback, 5);
 
-    Nan::AsyncQueueWorker(new ApplyDeltaWorker(callback, delta, sourcePath, ddbPath, mergeStrategy, sourceMetaDump));
+    Nan::AsyncQueueWorker(
+        new ApplyDeltaWorker(callback, delta, sourcePath, ddbPath, mergeStrategy, sourceMetaDump));
 }
 
 class StacWorker : public Nan::AsyncWorker {
- public:
-  StacWorker(Nan::Callback *callback, const std::string &ddbPath,
-             const std::string &entry,
-             const std::string &stacCollectionRoot,
-             const std::string &id,
-             const std::string &stacCatalogRoot)
-    : AsyncWorker(callback, "nan:StacWorker"),
-      ddbPath(ddbPath), entry(entry), stacCollectionRoot(stacCollectionRoot),
-      id(id), stacCatalogRoot(stacCatalogRoot) {}
-  ~StacWorker() {}
+public:
+    StacWorker(Nan::Callback* callback,
+               const std::string& ddbPath,
+               const std::string& entry,
+               const std::string& stacCollectionRoot,
+               const std::string& id,
+               const std::string& stacCatalogRoot)
+        : AsyncWorker(callback, "nan:StacWorker"),
+          ddbPath(ddbPath),
+          entry(entry),
+          stacCollectionRoot(stacCollectionRoot),
+          id(id),
+          stacCatalogRoot(stacCatalogRoot) {}
+    ~StacWorker() {}
 
-  void Execute () {
-    if (DDBStac(ddbPath.c_str(), entry.c_str(), stacCollectionRoot.c_str(), id.c_str(), stacCatalogRoot.c_str(), &output) != DDBERR_NONE){
-        SetErrorMessage(DDBGetLastError());
+    void Execute() {
+        if (DDBStac(ddbPath.c_str(),
+                    entry.c_str(),
+                    stacCollectionRoot.c_str(),
+                    id.c_str(),
+                    stacCatalogRoot.c_str(),
+                    &output) != DDBERR_NONE) {
+            SetErrorMessage(DDBGetLastError());
+        }
     }
-  }
 
-  void HandleOKCallback () {
-     Nan::HandleScope scope;
+    void HandleOKCallback() {
+        Nan::HandleScope scope;
 
-     Nan::JSON json;
-     v8::Local<v8::Value> argv[] = {
-         Nan::Null(),
-         json.Parse(Nan::New<v8::String>(output).ToLocalChecked()).ToLocalChecked()
-     };
+        Nan::JSON json;
+        v8::Local<v8::Value> argv[] = {
+            Nan::Null(),
+            json.Parse(Nan::New<v8::String>(output).ToLocalChecked()).ToLocalChecked()};
 
-     delete output;
-     callback->Call(2, argv, async_resource);
-   }
+        delete output;
+        callback->Call(2, argv, async_resource);
+    }
 
- private:
-   std::string ddbPath;
-   std::string entry;
-   std::string stacCollectionRoot;
-   std::string id;
-   std::string stacCatalogRoot;
+private:
+    std::string ddbPath;
+    std::string entry;
+    std::string stacCollectionRoot;
+    std::string id;
+    std::string stacCatalogRoot;
 
-   char *output;
+    char* output;
 };
 
 NAN_METHOD(stac) {
@@ -736,5 +765,6 @@ NAN_METHOD(stac) {
 
     BIND_FUNCTION_PARAM(callback, 2);
 
-    Nan::AsyncQueueWorker(new StacWorker(callback, ddbPath, entry, stacCollectionRoot, id, stacCatalogRoot));
+    Nan::AsyncQueueWorker(
+        new StacWorker(callback, ddbPath, entry, stacCollectionRoot, id, stacCatalogRoot));
 }

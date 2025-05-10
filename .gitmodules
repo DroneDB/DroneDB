@@ -1,12 +1,9 @@
-[submodule "ddb_data"]
-	path = ddb_data
-	url = https://github.com/DroneDB/ddb_data
-[submodule "vendor/exiv2"]
-	path = vendor/exiv2
-	url = https://github.com/DroneDB/exiv2
-[submodule "vendor/untwine"]
+[submodule "untwine"]
 	path = vendor/untwine
-	url = https://github.com/pierotofy/untwine/
-[submodule "nodejs/js"]
-	path = nodejs/js
-	url = https://github.com/DroneDB/DDB.js
+	url = https://github.com/DroneDB/untwine.git
+[submodule "zonedetect"]
+	path = vendor/zonedetect
+	url = https://github.com/BertoldVdb/ZoneDetect.git
+[submodule "libnexus"]
+	path = vendor/libnexus
+	url = https://github.com/DroneDB/libnexus.git

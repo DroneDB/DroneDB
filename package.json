@@ -1,6 +1,6 @@
 {
   "name": "ddb",
-  "version": "1.0.13",
+  "version": "1.1.0",
   "description": "Effortless aerial data management and sharing",
   "main": "index.js",
   "directories": {
@@ -8,9 +8,9 @@
   },
   "scripts": {
     "test": "./node_modules/.bin/mocha nodejs/test/*.js",
-    "install": "cmake-js compile --prefer-make",
-    "parallel_install": "CMAKE_BUILD_PARALLEL_LEVEL=4 cmake-js compile --prefer-make",
-    "cmake": "cmake-js configure --prefer-make"
+    "install": "cmake-js compile --prefer-make -- -DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%/scripts/buildsystems/vcpkg.cmake",
+    "parallel_install": "CMAKE_BUILD_PARALLEL_LEVEL=4 cmake-js compile --prefer-make -- -DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%/scripts/buildsystems/vcpkg.cmake",
+    "cmake": "cmake-js configure --prefer-make -- -DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%/scripts/buildsystems/vcpkg.cmake"
   },
   "repository": {
     "type": "git",

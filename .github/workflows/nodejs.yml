@@ -1,42 +1,42 @@
 # name: NodeJS CI
 
-# on:
-#     push:
-#         branches: [master]
-#     pull_request:
-#         branches: [master]
+on:
+    push:
+        branches: [master]
+    pull_request:
+        branches: [master]
 
-# jobs:
-#     ubuntu:
-#         name: Build/Test on Ubuntu
-#         runs-on: ubuntu-latest
-#         steps:
-#             - uses: actions/checkout@v2
-#               with:
-#                   submodules: 'recursive'
-#             - name: Install deps
-#               run: scripts/ubuntu_deps.sh
-#             - name: Build Node.js bindings
-#               run: npm install
-#             - name: Test Node.js bindings
-#               run: npm test
+jobs:
+    ubuntu:
+        name: Build/Test on Ubuntu
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v2
+              with:
+                  submodules: 'recursive'
+            - name: Install deps
+              run: scripts/ubuntu_deps.sh
+            - name: Build Node.js bindings
+              run: npm install
+            - name: Test Node.js bindings
+              run: npm test
 
-#     windows:
-#         name: Build/Test on Windows
-#         runs-on: windows-latest
-#         steps:
-#             - uses: actions/checkout@v2
-#               with:
-#                   submodules: 'recursive'
-#             - uses: actions/setup-node@v2-beta
-#               with:
-#                 node-version: '14'
-#             - name: Install deps
-#               run: .\scripts\windows_deps.bat
-#               shell: cmd
-#             - name: Build Node.js bindings
-#               run: npm install
-#               shell: cmd
-#             - name: Test Node.js bindings
-#               run: .\scripts\setup_windows_env.bat && cd node_modules/.bin/ && mocha ../../nodejs/test/*.js
-#               shell: cmd
+    windows:
+        name: Build/Test on Windows
+        runs-on: windows-latest
+        steps:
+            - uses: actions/checkout@v2
+              with:
+                  submodules: 'recursive'
+            - uses: actions/setup-node@v2-beta
+              with:
+                node-version: '14'
+            - name: Install deps
+              run: .\scripts\windows_deps.bat
+              shell: cmd
+            - name: Build Node.js bindings
+              run: npm install
+              shell: cmd
+            - name: Test Node.js bindings
+              run: .\scripts\setup_windows_env.bat && cd node_modules/.bin/ && mocha ../../nodejs/test/*.js
+              shell: cmd
