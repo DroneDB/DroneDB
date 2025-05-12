@@ -19,27 +19,69 @@ DroneDB is designed to efficiently manage, process, and share aerial and geospat
 - **Core Library**: A C++ library that handles file processing, metadata extraction, and database operations
 - **Command-Line Interface**: A powerful CLI tool to interact with DroneDB repositories
 - **Plugins System**: Extensible architecture for adding custom functionality
-- **API**: Programmatic access to DroneDB functionality
 
-### Key Features
+## Building with vcpkg
 
-- Storage and indexing of various aerial data formats
-- Automatic extraction of metadata and geospatial information
-- Support for common formats including images, point clouds, orthophotos, vector files, and DEMs
-- Multi-platform support (Windows, Linux, macOS)
-- Integration with other tools in the GIS ecosystem
+DroneDB now uses vcpkg for dependency management. This simplifies the build process and ensures consistent dependency versions.
 
-## Project Structure
+### Prerequisites
 
-```
-├── apps/                  # Main application code and CLI interface
-├── cmake/                 # Custom CMake modules
-├── data/                  # Sample data and resources
-├── docker/                # Docker build configurations
-├── src/                   # Core library source code
-├── tests/                 # Unit and integration tests
-└── vendor/                # Third-party dependencies
-```
+- CMake 3.16.3 or higher
+- C++17 compatible compiler
+- Git
+- vcpkg
+
+### Building on Linux
+
+1. Clone the vcpkg repository:
+   ```bash
+   git clone https://github.com/microsoft/vcpkg.git
+   cd vcpkg
+   ./bootstrap-vcpkg.sh
+   export VCPKG_ROOT=$(pwd)
+   ```
+
+2. Clone the DroneDB repository and build:
+   ```bash
+   git clone https://github.com/DroneDB/DroneDB.git
+   cd DroneDB
+   ./full-build-linux.sh
+   ```
+
+### Building on Windows
+
+1. Clone the vcpkg repository:
+   ```powershell
+   git clone https://github.com/microsoft/vcpkg.git
+   cd vcpkg
+   .\bootstrap-vcpkg.bat
+   $env:VCPKG_ROOT = $(Get-Location).Path
+   ```
+
+2. Clone the DroneDB repository and build:
+   ```powershell
+   git clone https://github.com/DroneDB/DroneDB.git
+   cd DroneDB
+   .\full-build-win.ps1
+   ```
+
+### Using Docker
+
+We provide Docker images for both development and production use:
+
+1. Build the Docker images:
+   ```bash
+   # On Linux
+   ./build-docker.sh
+   
+   # On Windows
+   .\build-docker.ps1
+   ```
+
+2. Run DroneDB in a container:
+   ```bash
+   docker run --rm -it -v $(pwd):/data ddb/app:latest
+   ```
 
 ## Requirements
 
