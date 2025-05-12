@@ -1,0 +1,33 @@
+version: '3'
+
+services:
+  # Builder image for Ubuntu 22.04
+  builder-22.04:
+    build:
+      context: ./builders
+      dockerfile: Dockerfile-builder-22.04
+    image: ddb/builder:22.04
+    volumes:
+      - vcpkg-data-22.04:/vcpkg
+
+  # Builder image for Ubuntu 24.04
+  builder-24.04:
+    build:
+      context: ./builders
+      dockerfile: Dockerfile-builder-24.04
+    image: ddb/builder:24.04
+    volumes:
+      - vcpkg-data-24.04:/vcpkg
+
+  # Main application using the builder
+  ddb:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: ddb/app:latest
+    volumes:
+      - ../:/data
+
+volumes:
+  vcpkg-data-22.04:
+  vcpkg-data-24.04:
