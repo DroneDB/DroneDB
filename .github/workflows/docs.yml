@@ -12,14 +12,24 @@ jobs:
       uses: actions/checkout@v2
       with:
         submodules: 'recursive'
-    - name: Install deps
-      run: scripts/ubuntu_deps.sh
+    - name: Setup vcpkg
+      uses: lukka/run-vcpkg@v11
+      with:
+        vcpkgGitCommitId: acd65983f2e668c0bc44a117575e6073681fa8e3
+    - name: Install Linux dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential flex bison pkg-config '^libxcb.*-dev' libx11-xcb-dev libgl1-mesa-dev libxrender-dev libxi-dev libxkbcommon-dev libxkbcommon-x11-dev libxtst-dev
+        pip install sphinx sphinx_rtd_theme breathe exhale
     - name: Run CMake
-      run: mkdir build && cd build && cmake -DBUILD_TESTING=OFF ..
+      run: |
+        mkdir build
+        cd build
+        cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake ..
     - name: Build C++ lib/program and tests
-      run: cd build && make -j$(nproc) ddbcmd
+      run: cd build && cmake --build . -- -j$(nproc)
     - name: Autogenerate command docs
-      run: ./build/ddb --gendocs --outdir docs/commands/
+      run: ./build/ddbcmd --gendocs --outdir docs/commands/
     - name: Sphinx Build
       uses: ammaraskar/sphinx-action@0.4
       with:

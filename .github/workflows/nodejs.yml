@@ -14,10 +14,24 @@ jobs:
             - uses: actions/checkout@v2
               with:
                   submodules: 'recursive'
-            - name: Install deps
-              run: scripts/ubuntu_deps.sh
+            - name: Setup vcpkg
+              uses: lukka/run-vcpkg@v11
+              with:
+                vcpkgGitCommitId: acd65983f2e668c0bc44a117575e6073681fa8e3
+            - name: Install Linux dependencies
+              run: |
+                sudo apt-get update
+                sudo apt-get install -y build-essential flex bison pkg-config '^libxcb.*-dev' libx11-xcb-dev libgl1-mesa-dev libxrender-dev libxi-dev libxkbcommon-dev libxkbcommon-x11-dev libxtst-dev
+            - name: Setup Node.js
+              uses: actions/setup-node@v3
+              with:
+                node-version: '18'
             - name: Build Node.js bindings
-              run: npm install
+              run: |
+                export CMAKE_JS_PLATFORM=linux
+                export CMAKE_JS_ARCH=x64
+                export VCPKG_ROOT=${GITHUB_WORKSPACE}/vcpkg
+                npm install
             - name: Test Node.js bindings
               run: npm test
 
@@ -28,15 +42,21 @@ jobs:
             - uses: actions/checkout@v2
               with:
                   submodules: 'recursive'
-            - uses: actions/setup-node@v2-beta
+            - name: Setup vcpkg
+              uses: lukka/run-vcpkg@v11
               with:
-                node-version: '14'
-            - name: Install deps
-              run: .\scripts\windows_deps.bat
-              shell: cmd
+                vcpkgGitCommitId: acd65983f2e668c0bc44a117575e6073681fa8e3
+            - name: Setup Node.js
+              uses: actions/setup-node@v3
+              with:
+                node-version: '18'
             - name: Build Node.js bindings
-              run: npm install
-              shell: cmd
+              shell: pwsh
+              run: |
+                $env:CMAKE_JS_PLATFORM = "win32"
+                $env:CMAKE_JS_ARCH = "x64"
+                $env:VCPKG_ROOT = "$env:GITHUB_WORKSPACE\vcpkg"
+                npm install
             - name: Test Node.js bindings
-              run: .\scripts\setup_windows_env.bat && cd node_modules/.bin/ && mocha ../../nodejs/test/*.js
-              shell: cmd
+              shell: pwsh
+              run: npm test
