@@ -157,6 +157,9 @@ namespace ddb
 
         targs = CSLAddString(targs, "-co");
         targs = CSLAddString(targs, "WRITE_EXIF_METADATA=NO");
+        
+        targs = CSLAddString(targs, "-co");
+        targs = CSLAddString(targs, "QUALITY=95");
 
         // Max 3 bands
         if (GDALGetRasterCount(hSrcDataset) > 3)
@@ -201,6 +204,7 @@ namespace ddb
                                                      hSrcDataset,
                                                      psOptions,
                                                      nullptr);
+            GDALFlushCache(hNewDataset);
             GDALClose(hNewDataset);
         }
 
@@ -253,13 +257,18 @@ namespace ddb
             throw GDALException("Cannot write tile data");
         }
 
+        // Define consistent JPEG creation options
+        char **jpegOpts = nullptr;
+        jpegOpts = CSLAddString(jpegOpts, "QUALITY=95");
+        jpegOpts = CSLAddString(jpegOpts, "WRITE_EXIF_METADATA=NO");
+
         bool writeToMemory = outImagePath.empty() && outBuffer != nullptr;
         if (writeToMemory)
         {
             // Write to memory via vsimem
             std::string vsiPath = "/vsimem/" + utils::generateRandomString(32) + ".jpg";
             const GDALDatasetH outDs = GDALCreateCopy(jpgDrv, vsiPath.c_str(), hDataset,
-                                                      FALSE, nullptr, nullptr, nullptr);
+                                                      FALSE, jpegOpts, nullptr, nullptr);
             if (outDs == nullptr)
                 throw GDALException("Cannot create output dataset " +
                                     outImagePath.string());
@@ -276,14 +285,15 @@ namespace ddb
         else
         {
             const GDALDatasetH outDs = GDALCreateCopy(jpgDrv, outImagePath.string().c_str(), hDataset,
-                                                      FALSE, nullptr, nullptr, nullptr);
+                                                      FALSE, jpegOpts, nullptr, nullptr);
             if (outDs == nullptr)
                 throw GDALException("Cannot create output dataset " +
                                     outImagePath.string());
-
+            GDALFlushCache(outDs);
             GDALClose(outDs);
         }
 
+        CSLDestroy(jpegOpts);
         GDALClose(hDataset);
     }
 
@@ -595,9 +605,7 @@ namespace ddb
 
         // Check existance of thumbnail, return if exists
         if (!utils::isNetworkPath(inputPath.string()) && exists(outImagePath) && !forceRecreate)
-        {
-            return outImagePath;
-        }
+            return outImagePath;        
 
         LOGD << "ImagePath = " << inputPath;
         LOGD << "OutImagePath = " << outImagePath;

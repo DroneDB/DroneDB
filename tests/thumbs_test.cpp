@@ -2,83 +2,98 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-#include <fstream>
-#include "gtest/gtest.h"
 #include "thumbs.h"
+
+#include <fstream>
+
+#include "ddb.h"
+#include "gtest/gtest.h"
 #include "hash.h"
 #include "mio.h"
 #include "pointcloud.h"
 #include "test.h"
 #include "testarea.h"
-#include "ddb.h"
 
-namespace
-{
+namespace {
 
-    using namespace ddb;
+using namespace ddb;
 
-    TEST(thumbnail, ortho)
-    {
-        TestArea ta(TEST_NAME);
-        fs::path ortho = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/brighton/odm_orthophoto.tif",
-                                              "odm_orthophoto.tif");
+TEST(thumbnail, ortho) {
+    TestArea ta(TEST_NAME);
+    fs::path ortho = ta.downloadTestAsset(
+        "https://github.com/DroneDB/test_data/raw/master/brighton/odm_orthophoto.tif",
+        "odm_orthophoto.tif");
 
-        fs::path outFile = ta.getPath("output.jpg");
-        ddb::generateThumb(ortho.string(), 256, outFile, true);
+    fs::path outFile = ta.getPath("output.jpg");
+    ddb::generateThumb(ortho.string(), 256, outFile, true);
 
-        uint8_t *buffer;
-        int bufSize;
-        ddb::generateThumb(ortho.string(), 256, "", true, &buffer, &bufSize);
+    uint8_t* buffer;
+    int bufSize;
+    ddb::generateThumb(ortho.string(), 256, "", true, &buffer, &bufSize);
 
-        EXPECT_TRUE(bufSize > 0);
-        EXPECT_EQ(io::Path(outFile).getSize(), bufSize);
+    EXPECT_TRUE(bufSize > 0);
+    EXPECT_EQ(io::Path(outFile).getSize(), bufSize);
 
-        fs::path outMemoryFile = ta.getPath("output-memory.jpg");
+    fs::path outMemoryFile = ta.getPath("output-memory.jpg");
 
-        std::ofstream of(outMemoryFile.string(), std::ios::out | std::ios::binary | std::ios::trunc);
-        of.write(reinterpret_cast<char *>(buffer), bufSize);
-        of.close();
+    std::ofstream of(outMemoryFile.string(), std::ios::out | std::ios::binary | std::ios::trunc);
+    of.write(reinterpret_cast<char*>(buffer), bufSize);
+    of.close();
 
-        EXPECT_EQ(Hash::fileSHA256(outMemoryFile.string()),
-                  Hash::fileSHA256(outFile.string()));
+    EXPECT_EQ(Hash::fileSHA256(outMemoryFile.string()), Hash::fileSHA256(outFile.string()));
 
-        DDBVSIFree(buffer);
-    }
-
-    TEST(thumbnail, ept)
-    {
-        TestArea ta(TEST_NAME);
-        fs::path pc = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/brighton/point_cloud.laz",
-                                           "point_cloud.laz");
-
-        ddb::buildEpt({pc.string()}, ta.getFolder("ept").string());
-
-        fs::path outFile = ta.getPath("output.jpg");
-        fs::path eptPath = ta.getPath(fs::path("ept") / "ept.json");
-
-        ddb::generateThumb(eptPath, 256, outFile, true);
-
-        uint8_t *buffer;
-        int bufSize;
-        ddb::generateThumb(eptPath, 256, "", true, &buffer, &bufSize);
-
-        EXPECT_TRUE(bufSize > 0);
-        EXPECT_EQ(io::Path(outFile).getSize(), bufSize);
-
-        fs::path outMemoryFile = ta.getPath("output-memory.jpg");
-
-        if (io::Path(outFile).getSize() != bufSize) {
-            fs::copy_file(outMemoryFile, "C:\\Users\\IT 2\\Documents\\output-memory.jpg", fs::copy_options::overwrite_existing);
-            fs::copy_file(outFile, "C:\\Users\\IT 2\\Documents\\output.jpg", fs::copy_options::overwrite_existing);
-        }
-        std::ofstream of(outMemoryFile.string(), std::ios::out | std::ios::binary | std::ios::trunc);
-        of.write(reinterpret_cast<char *>(buffer), bufSize);
-        of.close();
-
-        EXPECT_EQ(Hash::fileSHA256(outMemoryFile.string()),
-                  Hash::fileSHA256(outFile.string()));
-
-        DDBVSIFree(buffer);
-    }
-
+    DDBVSIFree(buffer);
 }
+
+TEST(thumbnail, ept) {
+    TestArea ta(TEST_NAME);
+    fs::path pc = ta.downloadTestAsset(
+        "https://github.com/DroneDB/test_data/raw/master/brighton/point_cloud.laz",
+        "point_cloud.laz");
+
+    ddb::buildEpt({pc.string()}, ta.getFolder("ept").string());
+
+    fs::path outFile = ta.getPath("output.jpg");
+    fs::path eptPath = ta.getPath(fs::path("ept") / "ept.json");
+
+    ddb::generateThumb(eptPath, 256, outFile, true);
+
+    uint8_t* buffer;
+    int bufSize;
+    ddb::generateThumb(eptPath, 256, "", true, &buffer, &bufSize);
+
+    EXPECT_TRUE(bufSize > 0);
+    EXPECT_EQ(io::Path(outFile).getSize(), bufSize);
+
+    fs::path outMemoryFile = ta.getPath("output-memory.jpg");
+
+    std::ofstream of(outMemoryFile.string(), std::ios::out | std::ios::binary | std::ios::trunc);
+    of.write(reinterpret_cast<char*>(buffer), bufSize);
+    of.close();
+
+    const auto memoryFileHash = Hash::fileSHA256(outMemoryFile.string());
+    const auto fileHash = Hash::fileSHA256(outFile.string());
+
+    if (memoryFileHash != fileHash) {
+        // Print exadecimal content of memory file and file
+        std::ifstream inMemoryFile(outMemoryFile.string(), std::ios::binary);
+        std::ifstream inFile(outFile.string(), std::ios::binary);
+        std::ostringstream ossMemory;
+        std::ostringstream ossFile;
+        ossMemory << inMemoryFile.rdbuf();
+        ossFile << inFile.rdbuf();
+        std::string hexMemory = ossMemory.str();
+        std::string hexFile = ossFile.str();
+        std::cout << "Memory file hex: " << hexMemory << std::endl;
+        std::cout << "File hex: " << hexFile << std::endl;
+        std::cout << "Memory file size: " << io::Path(outMemoryFile).getSize() << std::endl;
+        std::cout << "File size: " << io::Path(outFile).getSize() << std::endl;
+
+    }
+
+    EXPECT_EQ(memoryFileHash, fileHash);
+
+    DDBVSIFree(buffer);
+}
+
+}  // namespace
