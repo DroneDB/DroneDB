@@ -9,9 +9,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout
-      uses: actions/checkout@v2
+      uses: actions/checkout@v4
       with:
         submodules: 'recursive'
+        fetch-depth: 0
     - name: Setup vcpkg
       uses: lukka/run-vcpkg@v11
       with:
@@ -52,4 +53,3 @@ jobs:
         directory: "docs.dronedb"
         repository: "DroneDB/docs.dronedb"
         github_token: ${{ secrets.BOT_TOKEN }}
-

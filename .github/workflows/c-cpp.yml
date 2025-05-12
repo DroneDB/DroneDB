@@ -13,9 +13,10 @@ jobs:
         name: Build/Test on Ubuntu
         runs-on: ubuntu-latest
         steps:
-            - uses: actions/checkout@v2
+            - uses: actions/checkout@v4
               with:
                 submodules: 'recursive'
+                fetch-depth: 0
             - name: Setup vcpkg
               uses: lukka/run-vcpkg@v11
               with:
@@ -39,10 +40,11 @@ jobs:
             - name: Build Distribution
               run: cd build && cmake --build . --target exodus_package
             - name: Upload Distribution Files
-              uses: actions/upload-artifact@v3
+              uses: actions/upload-artifact@v4
               with:
-                name: Linux Binaries
+                name: Linux-Binaries
                 path: build/dist/*.tgz
+                retention-days: 90
             - name: Upload Binaries to Release
               uses: svenstaro/upload-release-action@v2
               if: startsWith(github.ref, 'refs/tags/')
@@ -57,7 +59,7 @@ jobs:
         name: Build/Test on Windows
         runs-on: windows-latest
         steps:
-            - uses: actions/checkout@v2
+            - uses: actions/checkout@v4
               with:
                 submodules: 'recursive'
             - name: Setup vcpkg
@@ -84,7 +86,7 @@ jobs:
                 cmake --build . --config Release --target windows_package -- /maxcpucount:14
                 dir
             - name: Upload Distribution Files
-              uses: actions/upload-artifact@v3
+              uses: actions/upload-artifact@v4
               with:
                 name: Windows Binaries
                 path: build\dist\*.zip
@@ -102,7 +104,7 @@ jobs:
         name: Build/Test on MacOS
         runs-on: macos-latest
         steps:
-            - uses: actions/checkout@v2
+            - uses: actions/checkout@v4
               with:
                 submodules: 'recursive'
             - name: Setup vcpkg
@@ -125,7 +127,7 @@ jobs:
             - name: Create Distribution Package
               run: cd build && cmake --build . --target exodus_package
             - name: Upload Distribution Files
-              uses: actions/upload-artifact@v3
+              uses: actions/upload-artifact@v4
               with:
                 name: MacOS Binaries
                 path: build/dist/*.tgz

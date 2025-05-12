@@ -11,9 +11,10 @@ jobs:
         name: Build/Test on Ubuntu
         runs-on: ubuntu-latest
         steps:
-            - uses: actions/checkout@v2
+            - uses: actions/checkout@v4
               with:
                   submodules: 'recursive'
+                  fetch-depth: 0
             - name: Setup vcpkg
               uses: lukka/run-vcpkg@v11
               with:
@@ -23,9 +24,10 @@ jobs:
                 sudo apt-get update
                 sudo apt-get install -y build-essential flex bison pkg-config '^libxcb.*-dev' libx11-xcb-dev libgl1-mesa-dev libxrender-dev libxi-dev libxkbcommon-dev libxkbcommon-x11-dev libxtst-dev
             - name: Setup Node.js
-              uses: actions/setup-node@v3
+              uses: actions/setup-node@v4
               with:
                 node-version: '18'
+                cache: 'npm'
             - name: Build Node.js bindings
               run: |
                 export CMAKE_JS_PLATFORM=linux
@@ -39,7 +41,7 @@ jobs:
         name: Build/Test on Windows
         runs-on: windows-latest
         steps:
-            - uses: actions/checkout@v2
+            - uses: actions/checkout@v4
               with:
                   submodules: 'recursive'
             - name: Setup vcpkg
@@ -47,7 +49,7 @@ jobs:
               with:
                 vcpkgGitCommitId: acd65983f2e668c0bc44a117575e6073681fa8e3
             - name: Setup Node.js
-              uses: actions/setup-node@v3
+              uses: actions/setup-node@v4
               with:
                 node-version: '18'
             - name: Build Node.js bindings
