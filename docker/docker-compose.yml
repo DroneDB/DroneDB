@@ -6,7 +6,7 @@ services:
     build:
       context: ./builders
       dockerfile: Dockerfile-builder-22.04
-    image: ddb/builder:22.04
+    image: dronedb/builder:22.04
     volumes:
       - vcpkg-data-22.04:/vcpkg
 
@@ -15,7 +15,7 @@ services:
     build:
       context: ./builders
       dockerfile: Dockerfile-builder-24.04
-    image: ddb/builder:24.04
+    image: dronedb/builder:24.04
     volumes:
       - vcpkg-data-24.04:/vcpkg
 
@@ -24,7 +24,7 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    image: ddb/app:latest
+    image: dronedb/app:latest
     volumes:
       - ../:/data
 

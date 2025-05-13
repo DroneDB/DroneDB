@@ -1,4 +1,4 @@
-FROM ddb/builder:24.04
+FROM dronedb/builder:24.04
 
 # Set environment variables
 ENV CMAKE_BUILD_TYPE=Release \
