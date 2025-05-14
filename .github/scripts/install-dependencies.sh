@@ -9,7 +9,7 @@ install_ubuntu_packages() {
     sudo apt-get update
     sudo apt-get install -y \
         apt-utils git cmake unzip tar build-essential flex zip curl \
-        bison pkg-config python3 python3-jinja2 python3-setuptools autoconf automake libtool \
+        bison pkg-config python3 python3-jinja2 python3-setuptools libsqlite3-dev autoconf automake libtool \
         libreadline-dev libssl-dev lbzip2 libbz2-dev zlib1g-dev libffi-dev liblzma-dev \
         '^libxcb.*-dev' libx11-xcb-dev libgl1-mesa-dev libxrender-dev \
         libxi-dev libxkbcommon-dev libxkbcommon-x11-dev libxtst-dev libltdl-dev
