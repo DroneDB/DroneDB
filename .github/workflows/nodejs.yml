@@ -10,6 +10,12 @@ jobs:
     ubuntu:
         name: Build/Test on Ubuntu
         runs-on: ubuntu-24.04
+        env:
+            VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+            VCPKG_DEFAULT_TRIPLET: x64-linux
+            VCPKG_BUILD_TYPE: release
+            CMAKE_JS_PLATFORM: linux
+            CMAKE_JS_ARCH: x64
         steps:
             - name: Free Disk Space
               uses: ShubhamTatvamasi/free-disk-space-action@master
@@ -32,8 +38,6 @@ jobs:
               uses: lukka/run-vcpkg@v11
               with:
                 vcpkgDirectory: '${{ github.workspace }}/vcpkg'
-                runVcpkgInstall: true
-                doNotCache: false
                 vcpkgJsonGlob: vcpkg.json
             - name: Setup Node.js
               uses: actions/setup-node@v4
@@ -42,9 +46,6 @@ jobs:
                 cache: 'npm'
             - name: Build Node.js bindings
               run: |
-                export CMAKE_JS_PLATFORM=linux
-                export CMAKE_JS_ARCH=x64
-                export VCPKG_ROOT=${GITHUB_WORKSPACE}/vcpkg
                 npm install
             - name: Test Node.js bindings
               run: npm test
@@ -52,6 +53,12 @@ jobs:
     windows:
         name: Build/Test on Windows
         runs-on: windows-latest
+        env:
+            VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+            VCPKG_DEFAULT_TRIPLET: x64-windows
+            VCPKG_BUILD_TYPE: release
+            CMAKE_JS_PLATFORM: win32
+            CMAKE_JS_ARCH: x64
         steps:
             - uses: actions/checkout@v4
               with:
@@ -67,8 +74,7 @@ jobs:
               uses: lukka/run-vcpkg@v11
               with:
                 vcpkgDirectory: '${{ github.workspace }}/vcpkg'
-                runVcpkgInstall: false
-                doNotCache: false
+                vcpkgJsonGlob: vcpkg.json
             - name: Setup Node.js
               uses: actions/setup-node@v4
               with:
@@ -76,9 +82,6 @@ jobs:
             - name: Build Node.js bindings
               shell: pwsh
               run: |
-                $env:CMAKE_JS_PLATFORM = "win32"
-                $env:CMAKE_JS_ARCH = "x64"
-                $env:VCPKG_ROOT = "$env:GITHUB_WORKSPACE\vcpkg"
                 npm install
             - name: Test Node.js bindings
               shell: pwsh

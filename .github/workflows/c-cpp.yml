@@ -12,6 +12,10 @@ jobs:
     build_ubuntu:
         name: Build/Test on Ubuntu
         runs-on: ubuntu-24.04
+        env:
+            VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+            VCPKG_DEFAULT_TRIPLET: x64-linux
+            VCPKG_BUILD_TYPE: release
         steps:
             - name: Free Disk Space
               uses: ShubhamTatvamasi/free-disk-space-action@master
@@ -21,14 +25,14 @@ jobs:
                 fetch-depth: 0
             - name: Info
               run: |
+                pwd
                 echo "GITHUB_WORKSPACE=${GITHUB_WORKSPACE}"
                 echo "GITHUB_REF=${GITHUB_REF}"
                 echo "GITHUB_REPOSITORY=${GITHUB_REPOSITORY}"
                 echo "GITHUB_RUN_ID=${GITHUB_RUN_ID}"
                 echo "GITHUB_RUN_NUMBER=${GITHUB_RUN_NUMBER}"
                 echo "GITHUB_SHA=${GITHUB_SHA}"
-                ls -la
-                pwd
+                ls -la                
             - name: Cache vcpkg
               uses: actions/cache@v4
               with:
@@ -44,8 +48,6 @@ jobs:
               uses: lukka/run-vcpkg@v11
               with:
                 vcpkgDirectory: '${{ github.workspace }}/vcpkg'
-                runVcpkgInstall: true
-                doNotCache: false
                 vcpkgJsonGlob: vcpkg.json
             - name: Run CMake
               run: |
@@ -79,6 +81,10 @@ jobs:
     build_windows:
         name: Build/Test on Windows
         runs-on: windows-latest
+        env:
+            VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+            VCPKG_DEFAULT_TRIPLET: x64-windows
+            VCPKG_BUILD_TYPE: release
         steps:
             - uses: actions/checkout@v4
               with:
@@ -95,15 +101,13 @@ jobs:
               uses: lukka/run-vcpkg@v11
               with:
                 vcpkgDirectory: '${{ github.workspace }}/vcpkg'
-                runVcpkgInstall: true
-                doNotCache: false
                 vcpkgJsonGlob: vcpkg.json
             - name: Build C++ lib/program and tests
               run: |
                 mkdir build
                 cd build
                 cmake .. -DBUILD_TESTING=ON -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake"
-                cmake --build . --config Release --target ALL_BUILD -- /maxcpucount:14
+                cmake --build . --config Release --target ALL_BUILD -- /maxcpucount:$env:NUMBER_OF_PROCESSORS
                 dir
             - name: Run C++ Tests
               run: cd build && ctest -C Release
@@ -115,7 +119,7 @@ jobs:
               shell: pwsh
               run: |
                 cd build
-                cmake --build . --config Release --target windows_package -- /maxcpucount:14
+                cmake --build . --config Release --target windows_package -- /maxcpucount:$env:NUMBER_OF_PROCESSORS
                 dir
             - name: Upload Distribution Files
               uses: actions/upload-artifact@v4
