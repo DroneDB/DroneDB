@@ -27,6 +27,13 @@ jobs:
                 echo "GITHUB_SHA=${GITHUB_SHA}"
                 ls -la
                 pwd
+            - name: Cache vcpkg
+              uses: actions/cache@v4
+              with:
+                path: ${{ github.workspace }}/vcpkg
+                key: ${{ runner.os }}-vcpkg-${{ hashFiles('**/vcpkg.json') }}
+                restore-keys: |
+                  ${{ runner.os }}-vcpkg-
             - name: Install Linux dependencies
               run: |
                 chmod +x .github/scripts/install-dependencies.sh
@@ -74,6 +81,14 @@ jobs:
             - uses: actions/checkout@v4
               with:
                 submodules: 'recursive'
+                fetch-depth: 0
+            - name: Cache vcpkg
+              uses: actions/cache@v4
+              with:
+                path: ${{ github.workspace }}/vcpkg
+                key: ${{ runner.os }}-vcpkg-${{ hashFiles('**/vcpkg.json') }}
+                restore-keys: |
+                  ${{ runner.os }}-vcpkg-
             - name: Setup vcpkg
               uses: lukka/run-vcpkg@v11
               with:
