@@ -23,9 +23,8 @@ jobs:
                 vcpkgGitCommitId: acd65983f2e668c0bc44a117575e6073681fa8e3
             - name: Install Linux dependencies
               run: |
-                sudo apt-get update
-                sudo apt-get install -y build-essential flex bison pkg-config '^libxcb.*-dev' libx11-xcb-dev libgl1-mesa-dev libxrender-dev libxi-dev libxkbcommon-dev libxkbcommon-x11-dev libxtst-dev
-                pip install exodus-bundler
+                chmod +x .github/scripts/install-dependencies.sh
+                .github/scripts/install-dependencies.sh
             - name: Run CMake
               run: |
                 mkdir build
@@ -113,7 +112,8 @@ jobs:
                 vcpkgGitCommitId: acd65983f2e668c0bc44a117575e6073681fa8e3
             - name: Install MacOS dependencies
               run: |
-                brew install flex bison autoconf
+                chmod +x .github/scripts/install-dependencies.sh
+                .github/scripts/install-dependencies.sh
             - name: Run CMake
               run: |
                 mkdir build
