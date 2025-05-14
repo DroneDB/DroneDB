@@ -23,6 +23,7 @@ jobs:
         vcpkgGitCommitId: acd65983f2e668c0bc44a117575e6073681fa8e3
         vcpkgDirectory: '${{ github.workspace }}/vcpkg'
         runVcpkgInstall: true
+        doNotCache: false
     - name: Run CMake
       run: |
         mkdir build
