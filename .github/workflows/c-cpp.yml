@@ -77,7 +77,7 @@ jobs:
               uses: lukka/run-vcpkg@v11
               with:
                 vcpkgDirectory: '${{ github.workspace }}/vcpkg'
-                runVcpkgInstall: true
+                runVcpkgInstall: false
                 doNotCache: false
             - name: Build C++ lib/program and tests
               run: |
