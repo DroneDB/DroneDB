@@ -9,20 +9,22 @@ on:
 jobs:
     ubuntu:
         name: Build/Test on Ubuntu
-        runs-on: ubuntu-latest
+        runs-on: ubuntu-24.04
         steps:
             - uses: actions/checkout@v4
               with:
                   submodules: 'recursive'
                   fetch-depth: 0
+            - name: Install Linux dependencies
+              run: |
+                chmod +x .github/scripts/install-dependencies.sh
+                .github/scripts/install-dependencies.sh docs
             - name: Setup vcpkg
               uses: lukka/run-vcpkg@v11
               with:
                 vcpkgGitCommitId: acd65983f2e668c0bc44a117575e6073681fa8e3
-            - name: Install Linux dependencies
-              run: |
-                chmod +x .github/scripts/install-dependencies.sh
-                .github/scripts/install-dependencies.sh
+                vcpkgDirectory: '${{ github.workspace }}/vcpkg'
+                runVcpkgInstall: true
             - name: Setup Node.js
               uses: actions/setup-node@v4
               with:
@@ -48,6 +50,8 @@ jobs:
               uses: lukka/run-vcpkg@v11
               with:
                 vcpkgGitCommitId: acd65983f2e668c0bc44a117575e6073681fa8e3
+                vcpkgDirectory: '${{ github.workspace }}/vcpkg'
+                runVcpkgInstall: true
             - name: Setup Node.js
               uses: actions/setup-node@v4
               with:

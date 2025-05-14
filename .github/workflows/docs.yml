@@ -6,26 +6,28 @@ on:
 
 jobs:
   build-docs:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
     - name: Checkout
       uses: actions/checkout@v4
       with:
         submodules: 'recursive'
         fetch-depth: 0
-    - name: Setup vcpkg
-      uses: lukka/run-vcpkg@v11
-      with:
-        vcpkgGitCommitId: acd65983f2e668c0bc44a117575e6073681fa8e3
     - name: Install Linux dependencies
       run: |
         chmod +x .github/scripts/install-dependencies.sh
         .github/scripts/install-dependencies.sh docs
+    - name: Setup vcpkg
+      uses: lukka/run-vcpkg@v11
+      with:
+        vcpkgGitCommitId: acd65983f2e668c0bc44a117575e6073681fa8e3
+        vcpkgDirectory: '${{ github.workspace }}/vcpkg'
+        runVcpkgInstall: true
     - name: Run CMake
       run: |
         mkdir build
         cd build
-        cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake ..
+        cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake ..
     - name: Build C++ lib/program and tests
       run: cd build && cmake --build . -- -j$(nproc)
     - name: Autogenerate command docs

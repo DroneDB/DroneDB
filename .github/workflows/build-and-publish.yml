@@ -11,7 +11,7 @@ on:
 jobs:
   build_builders:
     name: Build Builder Images
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       matrix:
         version: ['22.04', '24.04']
@@ -49,7 +49,7 @@ jobs:
 
   build_app:
     name: Build Application Image
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: build_builders
     steps:
     - name: Checkout

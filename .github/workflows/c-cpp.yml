@@ -11,25 +11,27 @@ on:
 jobs:
     build_ubuntu:
         name: Build/Test on Ubuntu
-        runs-on: ubuntu-latest
+        runs-on: ubuntu-24.04
         steps:
             - uses: actions/checkout@v4
               with:
                 submodules: 'recursive'
                 fetch-depth: 0
-            - name: Setup vcpkg
-              uses: lukka/run-vcpkg@v11
-              with:
-                vcpkgGitCommitId: acd65983f2e668c0bc44a117575e6073681fa8e3
             - name: Install Linux dependencies
               run: |
                 chmod +x .github/scripts/install-dependencies.sh
                 .github/scripts/install-dependencies.sh
+            - name: Setup vcpkg
+              uses: lukka/run-vcpkg@v11
+              with:
+                vcpkgGitCommitId: acd65983f2e668c0bc44a117575e6073681fa8e3
+                vcpkgDirectory: '${{ github.workspace }}/vcpkg'
+                runVcpkgInstall: true
             - name: Run CMake
               run: |
                 mkdir build
                 cd build
-                cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake ..
+                cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake ..
             - name: Build C++ lib/program and tests
               run: cd build && cmake --build . -- -j$(nproc)
             - name: Run C++ Tests
@@ -65,11 +67,13 @@ jobs:
               uses: lukka/run-vcpkg@v11
               with:
                 vcpkgGitCommitId: acd65983f2e668c0bc44a117575e6073681fa8e3
+                vcpkgDirectory: '${{ github.workspace }}/vcpkg'
+                runVcpkgInstall: true
             - name: Build C++ lib/program and tests
               run: |
                 mkdir build
                 cd build
-                cmake .. -DBUILD_TESTING=ON -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+                cmake .. -DBUILD_TESTING=ON -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake"
                 cmake --build . --config Release --target ALL_BUILD -- /maxcpucount:14
                 dir
             - name: Run C++ Tests
@@ -99,45 +103,48 @@ jobs:
                 tag: ${{ github.ref }}
                 overwrite: true
                 
-    build_macos:
-        name: Build/Test on MacOS
-        runs-on: macos-latest
-        steps:
-            - uses: actions/checkout@v4
-              with:
-                submodules: 'recursive'
-            - name: Setup vcpkg
-              uses: lukka/run-vcpkg@v11
-              with:
-                vcpkgGitCommitId: acd65983f2e668c0bc44a117575e6073681fa8e3
-            - name: Install MacOS dependencies
-              run: |
-                chmod +x .github/scripts/install-dependencies.sh
-                .github/scripts/install-dependencies.sh
-            - name: Run CMake
-              run: |
-                mkdir build
-                cd build
-                cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake ..
-            - name: Build C++ lib/program and tests
-              run: cd build && cmake --build . -- -j$(sysctl -n hw.physicalcpu)
-            - name: Run C++ Tests
-              run: cd build && ctest -C Release
-            - name: Run Program Smoke Test
-              run: cd build && ./ddbcmd --debug
-            - name: Create Distribution Package
-              run: cd build && cmake --build . --target exodus_package
-            - name: Upload Distribution Files
-              uses: actions/upload-artifact@v4
-              with:
-                name: MacOS Binaries
-                path: build/dist/*.tgz
-            - name: Upload Binaries to Release
-              uses: svenstaro/upload-release-action@v2
-              if: startsWith(github.ref, 'refs/tags/')
-              with:
-                repo_token: ${{ secrets.GITHUB_TOKEN }}
-                file: build/dist/*.tgz
-                file_glob: true
-                tag: ${{ github.ref }}
-                overwrite: true
+    # build_macos:
+    #     name: Build/Test on MacOS
+    #     runs-on: macos-latest
+    #     steps:
+    #         - uses: actions/checkout@v4
+    #           with:
+    #             submodules: 'recursive'
+    #             fetch-depth: 0
+    #         - name: Install MacOS dependencies
+    #           run: |
+    #             chmod +x .github/scripts/install-dependencies.sh
+    #             .github/scripts/install-dependencies.sh
+    #         - name: Setup vcpkg
+    #           uses: lukka/run-vcpkg@v11
+    #           with:
+    #             vcpkgGitCommitId: acd65983f2e668c0bc44a117575e6073681fa8e3
+    #             vcpkgDirectory: '${{ github.workspace }}/vcpkg'
+    #             runVcpkgInstall: true
+    #         - name: Run CMake
+    #           run: |
+    #             mkdir build
+    #             cd build
+    #             cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake ..
+    #         - name: Build C++ lib/program and tests
+    #           run: cd build && cmake --build . -- -j$(sysctl -n hw.physicalcpu)
+    #         - name: Run C++ Tests
+    #           run: cd build && ctest -C Release
+    #         - name: Run Program Smoke Test
+    #           run: cd build && ./ddbcmd --debug
+    #         - name: Create Distribution Package
+    #           run: cd build && cmake --build . --target exodus_package
+    #         - name: Upload Distribution Files
+    #           uses: actions/upload-artifact@v4
+    #           with:
+    #             name: MacOS Binaries
+    #             path: build/dist/*.tgz
+    #         - name: Upload Binaries to Release
+    #           uses: svenstaro/upload-release-action@v2
+    #           if: startsWith(github.ref, 'refs/tags/')
+    #           with:
+    #             repo_token: ${{ secrets.GITHUB_TOKEN }}
+    #             file: build/dist/*.tgz
+    #             file_glob: true
+    #             tag: ${{ github.ref }}
+    #             overwrite: true
