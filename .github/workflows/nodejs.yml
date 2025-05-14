@@ -11,6 +11,8 @@ jobs:
         name: Build/Test on Ubuntu
         runs-on: ubuntu-24.04
         steps:
+            - name: Free Disk Space
+              uses: ShubhamTatvamasi/free-disk-space-action@master
             - uses: actions/checkout@v4
               with:
                   submodules: 'recursive'
