@@ -26,6 +26,7 @@ jobs:
                 echo "GITHUB_RUN_NUMBER=${GITHUB_RUN_NUMBER}"
                 echo "GITHUB_SHA=${GITHUB_SHA}"
                 ls -la
+                pwd
             - name: Install Linux dependencies
               run: |
                 chmod +x .github/scripts/install-dependencies.sh
