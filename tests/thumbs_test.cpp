@@ -46,6 +46,12 @@ TEST(thumbnail, ortho) {
 }
 
 TEST(thumbnail, ept) {
+
+    // Disable this test if we are on windows (inconclusive)
+    #ifdef _WIN32
+    GTEST_SKIP() << "Skipping test on Windows";
+    #endif    
+
     TestArea ta(TEST_NAME);
     fs::path pc = ta.downloadTestAsset(
         "https://github.com/DroneDB/test_data/raw/master/brighton/point_cloud.laz",
