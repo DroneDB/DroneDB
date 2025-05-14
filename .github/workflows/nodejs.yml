@@ -23,8 +23,9 @@ jobs:
               uses: lukka/run-vcpkg@v11
               with:
                 vcpkgDirectory: '${{ github.workspace }}/vcpkg'
-                runVcpkgInstall: false
+                runVcpkgInstall: true
                 doNotCache: false
+                vcpkgJsonGlob: vcpkg.json
             - name: Setup Node.js
               uses: actions/setup-node@v4
               with:
