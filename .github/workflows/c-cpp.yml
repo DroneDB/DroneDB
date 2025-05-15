@@ -108,7 +108,7 @@ jobs:
                 cmake --build . --config Release --target ALL_BUILD -- /maxcpucount:$env:NUMBER_OF_PROCESSORS
                 dir
             - name: Run C++ Tests
-              run: cd build && ctest -C Release
+              run: cd build && .\ddbtest.exe --gtest_repeat=3 --gtest_shuffle
               shell: pwsh
             - name: Run Program Smoke Test
               run: cd build && .\ddbcmd.exe --debug
