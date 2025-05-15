@@ -53,7 +53,7 @@ jobs:
               run: |
                 mkdir build
                 cd build
-                cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake ..
+                cmake -DVCPKG_OVERLAY_TRIPLETS=${{ github.workspace }}/vcpkg-triplets -DVCPKG_HOST_TRIPLET=x64-linux-release -DVCPKG_TARGET_TRIPLET=x64-linux-release -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake ..
             - name: Build C++ lib/program and tests
               run: cd build && cmake --build . -- -j$(nproc)
             - name: Run C++ Tests
@@ -61,7 +61,7 @@ jobs:
             - name: Run Program Smoke Test
               run: cd build && ./ddbcmd --debug
             - name: Build Distribution
-              run: cd build && cmake --build . --target exodus_package
+              run: cd build && cmake --build . --target exodus_package -- -j$(nproc)
             - name: Upload Distribution Files
               uses: actions/upload-artifact@v4
               with:
@@ -106,7 +106,7 @@ jobs:
               run: |
                 mkdir build
                 cd build
-                cmake .. -DBUILD_TESTING=ON -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake"
+                cmake .. -DVCPKG_HOST_TRIPLET=x64-windows-release -DVCPKG_TARGET_TRIPLET=x64-windows-release -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake"
                 cmake --build . --config Release --target ALL_BUILD -- /maxcpucount:$env:NUMBER_OF_PROCESSORS
                 dir
             - name: Run C++ Tests

@@ -209,43 +209,93 @@ if (WIN32)
 endif()
 
 function(exodus_pack exodus_exe_path output_file exe_file dist_files working_dir)
-    set(DEPS_PARAMS "")
-    foreach(F ${dist_files})
-        list(APPEND DEPS_PARAMS "-a")
-        list(APPEND DEPS_PARAMS "${F}")
+    # Convert the list to a string with semicolons
+    set(DEPS_ARGS "")
+    
+    # Add the executable path as the first argument
+    set(CMD_ARGS "${exe_file}")
+    
+    # Add common arguments
+    list(APPEND CMD_ARGS "-t" "-o" "${output_file}")
+    
+    # Add each file that exists as an attachment
+    foreach(FILE_PATH IN LISTS dist_files)
+        if(EXISTS "${FILE_PATH}")
+            list(APPEND CMD_ARGS "-a" "${FILE_PATH}")
+        else()
+            message(WARNING "Exodus packaging: File not found: ${FILE_PATH}")
+        endif()
     endforeach()
-
+    
+    # Create output directory
     get_filename_component(DIST_DIRECTORY ${output_file} DIRECTORY)
     file(MAKE_DIRECTORY ${DIST_DIRECTORY})
-
+    
+    # Use string(JOIN) to create a readable message for debugging
+    string(JOIN " " CMD_STRING ${exodus_exe_path} ${CMD_ARGS})
+    message(STATUS "Exodus command: ${CMD_STRING}")
+    
+    # Create the custom command
     add_custom_command(
-        COMMAND ${exodus_exe_path} "${exe_file}" "-t" "-o" "${output_file}" ${DEPS_PARAMS}
+        COMMAND ${exodus_exe_path} ${CMD_ARGS}
         WORKING_DIRECTORY "${working_dir}"
-        OUTPUT  "${output_file}"
-        DEPENDS ${dist_files} ${exe_file}
+        OUTPUT "${output_file}"
+        DEPENDS ${exe_file}
         COMMENT "Packing to ${output_file}."
     )
 endfunction()
 
 # Create exodus package
 find_program(EXODUS exodus "$ENV{HOME}/.local/bin/" "/usr/local/bin")
+
 if (EXODUS)
 
-    list(APPEND DIST_FILES "${CMAKE_BINARY_DIR}/${PROJECT_NAME}cmd")
-    list(APPEND DIST_FILES "${CMAKE_BINARY_DIR}/lib${PROJECT_NAME}.so")
-    list(APPEND DIST_FILES "${CMAKE_BINARY_DIR}/libnxs.so")
+    message(STATUS "Exodus found: ${EXODUS}")
 
+    # Clear DIST_FILES and create a fresh list for exodus packaging
+    set(EXODUS_DIST_FILES "")
+    
+    # Add binary files
+    list(APPEND EXODUS_DIST_FILES "${CMAKE_BINARY_DIR}/${PROJECT_NAME}cmd")
+    list(APPEND EXODUS_DIST_FILES "${CMAKE_BINARY_DIR}/lib${PROJECT_NAME}.so")
+    list(APPEND EXODUS_DIST_FILES "${CMAKE_BINARY_DIR}/libnxs.so")
+    
+    # Check if support files exist and add them to the list
+    foreach(F ${SUPPORT_FILES})
+        if(EXISTS "${CMAKE_BINARY_DIR}/${F}")
+            list(APPEND EXODUS_DIST_FILES "${CMAKE_BINARY_DIR}/${F}")
+        else()
+            message(WARNING "Support file not found: ${CMAKE_BINARY_DIR}/${F}")
+        endif()
+    endforeach()
+    
     set(OUTPUT_DIST_FILE "${CMAKE_BINARY_DIR}/dist/${PROJECT_NAME}-${APP_VERSION}-${CMAKE_SYSTEM_NAME}.tgz")
-
+    
+    # Create the params for exodus
     set(DEPS_PARAMS "")
-    foreach(F ${DIST_FILES})
+    foreach(F ${EXODUS_DIST_FILES})
         list(APPEND DEPS_PARAMS "-a")
         list(APPEND DEPS_PARAMS "${F}")
     endforeach()
-
-    exodus_pack(${EXODUS} ${OUTPUT_DIST_FILE} "${CMAKE_BINARY_DIR}/${PROJECT_NAME}" ${DIST_FILES} ${CMAKE_BINARY_DIR})
-
-    add_custom_target(exodus_package ALL DEPENDS ${OUTPUT_DIST_FILE} ${PROJECT_NAME} ${PROJECT_NAME}cmd)
+      # Create dist directory if it doesn't exist
+    file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/dist")
+    
+    # Debugging output
+    message(STATUS "Executable for exodus: ${CMAKE_BINARY_DIR}/${PROJECT_NAME}cmd")
+    foreach(F ${EXODUS_DIST_FILES})
+        message(STATUS "File for exodus: ${F}")
+    endforeach()
+    
+    # Call exodus_pack with a properly formatted list
+    exodus_pack(
+        ${EXODUS} 
+        ${OUTPUT_DIST_FILE} 
+        ${CMAKE_BINARY_DIR}/${PROJECT_NAME}cmd 
+        "${EXODUS_DIST_FILES}"
+        ${CMAKE_BINARY_DIR}
+    )
+    
+    add_custom_target(exodus_package ALL DEPENDS ${OUTPUT_DIST_FILE} ${PROJECT_NAME}cmd)
 else()
     message(WARNING "Exodus not found. Install it via: pip install --user exodus to enable Exodus packaging.")
 endif()
