@@ -64,6 +64,8 @@ namespace ddb
                 return true;
             }
         }
+
+        return false;
     }
 
     bool isBuildable(Database *db, const std::string &path, std::string &subfolder)
@@ -82,6 +84,9 @@ namespace ddb
 
         if (isBuildableDependency(e, mainFile, subfolder))
             return true;
+
+        // If we reach here, the entry is not buildable
+        return false;
     }
 
     void buildInternal(Database *db, const Entry &e,
