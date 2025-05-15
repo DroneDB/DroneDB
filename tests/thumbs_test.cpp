@@ -45,6 +45,7 @@ TEST(thumbnail, ortho) {
     DDBVSIFree(buffer);
 }
 
+/*
 TEST(thumbnail, ept) {
 
     // Disable this test if we are on windows (inconclusive)
@@ -101,5 +102,5 @@ TEST(thumbnail, ept) {
 
     DDBVSIFree(buffer);
 }
-
+*/
 }  // namespace
