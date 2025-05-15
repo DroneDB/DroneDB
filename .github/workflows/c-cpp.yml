@@ -55,13 +55,11 @@ jobs:
                 cd build
                 cmake -DVCPKG_OVERLAY_TRIPLETS=${{ github.workspace }}/vcpkg-triplets -DVCPKG_HOST_TRIPLET=x64-linux-release -DVCPKG_TARGET_TRIPLET=x64-linux-release -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake ..
             - name: Build C++ lib/program and tests
-              run: cd build && cmake --build . -- -j$(nproc)
+              run: cd build && make -j$(nproc)
             - name: Run C++ Tests
-              run: cd build && ctest -C Release
+              run: cd build && ./ddbtest --gtest_repeat=3 --gtest_shuffle
             - name: Run Program Smoke Test
               run: cd build && ./ddbcmd --debug
-            - name: Build Distribution
-              run: cd build && cmake --build . --target exodus_package -- -j$(nproc)
             - name: Upload Distribution Files
               uses: actions/upload-artifact@v4
               with:
