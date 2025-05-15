@@ -1,4 +1,7 @@
 if(BUILD_TESTING)
+
+    message(STATUS "BUILD_TESTING is ON")
+
     find_package(GTest CONFIG REQUIRED)
     find_package(cpr CONFIG REQUIRED)
     find_package(GDAL CONFIG REQUIRED)
