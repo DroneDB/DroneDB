@@ -12,7 +12,7 @@ jobs:
         runs-on: ubuntu-24.04
         env:
             VCPKG_ROOT: ${{ github.workspace }}/vcpkg
-            VCPKG_DEFAULT_TRIPLET: x64-linux
+            VCPKG_DEFAULT_TRIPLET: x64-linux-release
             VCPKG_BUILD_TYPE: release
             CMAKE_JS_PLATFORM: linux
             CMAKE_JS_ARCH: x64
@@ -55,7 +55,7 @@ jobs:
         runs-on: windows-latest
         env:
             VCPKG_ROOT: ${{ github.workspace }}/vcpkg
-            VCPKG_DEFAULT_TRIPLET: x64-windows
+            VCPKG_DEFAULT_TRIPLET: x64-windows-release
             VCPKG_BUILD_TYPE: release
             CMAKE_JS_PLATFORM: win32
             CMAKE_JS_ARCH: x64

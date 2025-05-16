@@ -14,7 +14,7 @@ jobs:
         runs-on: ubuntu-24.04
         env:
             VCPKG_ROOT: ${{ github.workspace }}/vcpkg
-            VCPKG_DEFAULT_TRIPLET: x64-linux
+            VCPKG_DEFAULT_TRIPLET: x64-linux-release
             VCPKG_BUILD_TYPE: release
         steps:
             - name: Free Disk Space
@@ -81,7 +81,7 @@ jobs:
         runs-on: windows-latest
         env:
             VCPKG_ROOT: ${{ github.workspace }}/vcpkg
-            VCPKG_DEFAULT_TRIPLET: x64-windows
+            VCPKG_DEFAULT_TRIPLET: x64-windows-release
             VCPKG_BUILD_TYPE: release
         steps:
             - uses: actions/checkout@v4

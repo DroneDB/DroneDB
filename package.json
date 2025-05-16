@@ -8,9 +8,8 @@
   },
   "scripts": {
     "test": "./node_modules/.bin/mocha nodejs/test/*.js",
-    "install": "cmake-js compile --prefer-make -- -DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%/scripts/buildsystems/vcpkg.cmake",
-    "parallel_install": "CMAKE_BUILD_PARALLEL_LEVEL=4 cmake-js compile --prefer-make -- -DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%/scripts/buildsystems/vcpkg.cmake",
-    "cmake": "cmake-js configure --prefer-make -- -DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%/scripts/buildsystems/vcpkg.cmake"
+    "install": "cmake-js compile --prefer-make --CDVCPKG_HOST_TRIPLET=x64-windows-release --CDVCPKG_TARGET_TRIPLET=x64-windows-release --CDCMAKE_BUILD_TYPE=Release --CDBUILD_TESTING=ON --CDCMAKE_TOOLCHAIN_FILE=./vcpkg/scripts/buildsystems/vcpkg.cmake",
+    "parallel_install": "CMAKE_BUILD_PARALLEL_LEVEL=4 cmake-js compile --prefer-make --CDVCPKG_HOST_TRIPLET=x64-windows-release --CDVCPKG_TARGET_TRIPLET=x64-windows-release --CDCMAKE_BUILD_TYPE=Release --CDBUILD_TESTING=ON --CDCMAKE_TOOLCHAIN_FILE=./vcpkg/scripts/buildsystems/vcpkg.cmake"
   },
   "repository": {
     "type": "git",

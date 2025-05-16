@@ -17,6 +17,18 @@ else()
     message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 endif()
 
+# Define the output directory depending on platform and build type
+if(WIN32 AND CMAKE_JS_VERSION)
+    set(OUTPUT_DIR "${CMAKE_BINARY_DIR}/${CMAKE_BUILD_TYPE}")
+else()
+    set(OUTPUT_DIR "${CMAKE_BINARY_DIR}")
+endif()
+message(STATUS "Using output directory: ${OUTPUT_DIR}")
+
+# Define support files directory (these are typically in the main build directory)
+set(SUPPORT_DIR "${CMAKE_BINARY_DIR}")
+message(STATUS "Using support directory: ${SUPPORT_DIR}")
+
 # Use vcpkg manifest mode
 if(DEFINED ENV{VCPKG_ROOT})
     file(TO_CMAKE_PATH "$ENV{VCPKG_ROOT}" VCPKG_ROOT)
@@ -173,39 +185,79 @@ endif()
 set(DIST_FILES "")
 
 foreach(F ${SUPPORT_FILES})
-    list(APPEND DIST_FILES "${CMAKE_BINARY_DIR}/${F}")
+    list(APPEND DIST_FILES "${SUPPORT_DIR}/${F}")
 endforeach()
 
 # Create Windows ZIP package
 if (WIN32)
+    # Create a staging directory for the package contents
+    set(PACKAGE_STAGING_DIR "${CMAKE_BINARY_DIR}/package_staging")
+    file(MAKE_DIRECTORY ${PACKAGE_STAGING_DIR})
 
-    # Add DLLs (added at cmake build time)
-    file(GLOB DIST_FILES_WIN "${CMAKE_BINARY_DIR}/*.dll")
-
-    # Add DIST_FILES_WIN TO DIST_FILES
-    foreach(F ${DIST_FILES_WIN})
-        list(APPEND DIST_FILES "${F}")
+    # Get executables and DLLs from the output directory
+    set(EXECUTABLE_FILES "${PROJECT_NAME}cmd.exe")
+    foreach(F ${EXECUTABLE_FILES})
+        add_custom_command(
+            OUTPUT "${PACKAGE_STAGING_DIR}/${F}"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${OUTPUT_DIR}/${F}" "${PACKAGE_STAGING_DIR}/${F}"
+            DEPENDS ${PROJECT_NAME}cmd
+            COMMENT "Copying ${F} to staging directory"
+        )
+        list(APPEND STAGED_FILES "${PACKAGE_STAGING_DIR}/${F}")
     endforeach()
 
-    list(APPEND DIST_FILES "${CMAKE_BINARY_DIR}/ddb.bat")
-    list(APPEND DIST_FILES "${CMAKE_BINARY_DIR}/${PROJECT_NAME}cmd.exe")
+    # Copy DLLs to the staging directory
+    file(GLOB DLL_FILES "${OUTPUT_DIR}/*.dll")
+    foreach(F ${DLL_FILES})
+        get_filename_component(FILENAME ${F} NAME)
+        add_custom_command(
+            OUTPUT "${PACKAGE_STAGING_DIR}/${FILENAME}"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${F}" "${PACKAGE_STAGING_DIR}/${FILENAME}"
+            DEPENDS ${F}
+            COMMENT "Copying ${FILENAME} to staging directory"
+        )
+        list(APPEND STAGED_FILES "${PACKAGE_STAGING_DIR}/${FILENAME}")
+    endforeach()
 
-    # Show DIST_FILES
-    message(STATUS "DIST_FILES: ${DIST_FILES}")
+    # Copy support files to staging directory
+    foreach(F ${SUPPORT_FILES})
+        if(EXISTS "${SUPPORT_DIR}/${F}")
+            add_custom_command(
+                OUTPUT "${PACKAGE_STAGING_DIR}/${F}"
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different "${SUPPORT_DIR}/${F}" "${PACKAGE_STAGING_DIR}/${F}"
+                DEPENDS "${SUPPORT_DIR}/${F}"
+                COMMENT "Copying ${F} to staging directory"
+            )
+            list(APPEND STAGED_FILES "${PACKAGE_STAGING_DIR}/${F}")
+        endif()
+    endforeach()
+
+    # Copy batch file to staging directory
+    if(EXISTS "${SUPPORT_DIR}/ddb.bat")
+        add_custom_command(
+            OUTPUT "${PACKAGE_STAGING_DIR}/ddb.bat"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${SUPPORT_DIR}/ddb.bat" "${PACKAGE_STAGING_DIR}/ddb.bat"
+            DEPENDS "${SUPPORT_DIR}/ddb.bat"
+            COMMENT "Copying ddb.bat to staging directory"
+        )
+        list(APPEND STAGED_FILES "${PACKAGE_STAGING_DIR}/ddb.bat")
+    endif()
+
+    # Show the files that will be included in the package
+    message(STATUS "Files for Windows package: ${STAGED_FILES}")
 
     set(OUTPUT_ZIP_FILE "${CMAKE_BINARY_DIR}/dist/${PROJECT_NAME}-${APP_VERSION}-${CMAKE_SYSTEM_NAME}.zip")
 
+    # Create the ZIP package from the staging directory
     add_custom_command(
         OUTPUT ${OUTPUT_ZIP_FILE}
-        COMMAND ${CMAKE_COMMAND} -E tar "cf" ${OUTPUT_ZIP_FILE} --format=zip ${DIST_FILES}
-        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+        COMMAND ${CMAKE_COMMAND} -E tar "cf" ${OUTPUT_ZIP_FILE} --format=zip .
+        WORKING_DIRECTORY ${PACKAGE_STAGING_DIR}
         COMMENT "Creating ZIP package: ${OUTPUT_ZIP_FILE}"
-        # Only after successful build
-        DEPENDS ${PROJECT_NAME} ${PROJECT_NAME}cmd ${DIST_FILES}
+        DEPENDS ${STAGED_FILES}
     )
 
-    add_custom_target(windows_package ALL DEPENDS ${OUTPUT_ZIP_FILE} ${PROJECT_NAME} ${PROJECT_NAME}cmd)
-
+    add_custom_target(windows_package ALL DEPENDS ${OUTPUT_ZIP_FILE})
 endif()
 
 function(exodus_pack exodus_exe_path output_file exe_file dist_files working_dir)
@@ -218,13 +270,10 @@ function(exodus_pack exodus_exe_path output_file exe_file dist_files working_dir
     # Add common arguments
     list(APPEND CMD_ARGS "-t" "-o" "${output_file}")
     
-    # Add each file that exists as an attachment
+    # Add each file as an attachment regardless of existence
+    # We'll ensure they exist by setting proper dependencies
     foreach(FILE_PATH IN LISTS dist_files)
-        if(EXISTS "${FILE_PATH}")
-            list(APPEND CMD_ARGS "-a" "${FILE_PATH}")
-        else()
-            message(WARNING "Exodus packaging: File not found: ${FILE_PATH}")
-        endif()
+        list(APPEND CMD_ARGS "-a" "${FILE_PATH}")
     endforeach()
     
     # Create output directory
@@ -256,32 +305,23 @@ if (EXODUS)
     set(EXODUS_DIST_FILES "")
     
     # Add binary files
-    list(APPEND EXODUS_DIST_FILES "${CMAKE_BINARY_DIR}/${PROJECT_NAME}cmd")
-    list(APPEND EXODUS_DIST_FILES "${CMAKE_BINARY_DIR}/lib${PROJECT_NAME}.so")
-    list(APPEND EXODUS_DIST_FILES "${CMAKE_BINARY_DIR}/libnxs.so")
+    list(APPEND EXODUS_DIST_FILES "${OUTPUT_DIR}/${PROJECT_NAME}cmd")
+    list(APPEND EXODUS_DIST_FILES "${OUTPUT_DIR}/lib${PROJECT_NAME}.so")
+    list(APPEND EXODUS_DIST_FILES "${OUTPUT_DIR}/libnxs.so")
     
-    # Check if support files exist and add them to the list
+    # Add support files regardless of existence
+    # We'll ensure they exist by setting proper dependencies
     foreach(F ${SUPPORT_FILES})
-        if(EXISTS "${CMAKE_BINARY_DIR}/${F}")
-            list(APPEND EXODUS_DIST_FILES "${CMAKE_BINARY_DIR}/${F}")
-        else()
-            message(WARNING "Support file not found: ${CMAKE_BINARY_DIR}/${F}")
-        endif()
+        list(APPEND EXODUS_DIST_FILES "${SUPPORT_DIR}/${F}")
     endforeach()
     
     set(OUTPUT_DIST_FILE "${CMAKE_BINARY_DIR}/dist/${PROJECT_NAME}-${APP_VERSION}-${CMAKE_SYSTEM_NAME}.tgz")
     
-    # Create the params for exodus
-    set(DEPS_PARAMS "")
-    foreach(F ${EXODUS_DIST_FILES})
-        list(APPEND DEPS_PARAMS "-a")
-        list(APPEND DEPS_PARAMS "${F}")
-    endforeach()
-      # Create dist directory if it doesn't exist
+    # Create dist directory if it doesn't exist
     file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/dist")
     
     # Debugging output
-    message(STATUS "Executable for exodus: ${CMAKE_BINARY_DIR}/${PROJECT_NAME}cmd")
+    message(STATUS "Executable for exodus: ${OUTPUT_DIR}/${PROJECT_NAME}cmd")
     foreach(F ${EXODUS_DIST_FILES})
         message(STATUS "File for exodus: ${F}")
     endforeach()
@@ -290,12 +330,20 @@ if (EXODUS)
     exodus_pack(
         ${EXODUS} 
         ${OUTPUT_DIST_FILE} 
-        ${CMAKE_BINARY_DIR}/${PROJECT_NAME}cmd 
+        ${OUTPUT_DIR}/${PROJECT_NAME}cmd 
         "${EXODUS_DIST_FILES}"
-        ${CMAKE_BINARY_DIR}
+        ${OUTPUT_DIR}
     )
     
-    add_custom_target(exodus_package ALL DEPENDS ${OUTPUT_DIST_FILE} ${PROJECT_NAME}cmd)
+    # Create exodus_package target that depends on all necessary targets
+    add_custom_target(exodus_package ALL 
+        DEPENDS 
+            ${OUTPUT_DIST_FILE} 
+            ${PROJECT_NAME}cmd 
+            ${PROJECT_NAME}
+            download_ca_bundle 
+            update_sensor_data
+    )
 else()
     message(WARNING "Exodus not found. Install it via: pip install --user exodus to enable Exodus packaging.")
 endif()

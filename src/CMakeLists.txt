@@ -125,6 +125,11 @@ message(STATUS "Build target 'update_sensor_data' is ready.")
 
 if (WIN32)
     set(PROJ_DIR "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/share/proj")
+else()
+    set(PROJ_DIR "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/share/proj4")
+    if(NOT EXISTS "${PROJ_DIR}/proj.db")
+        set(PROJ_DIR "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/share/proj")
+    endif()
 endif()
 
 if (WIN32)
@@ -175,6 +180,9 @@ add_custom_target(
     download_ca_bundle ALL
     DEPENDS ${CURL_CA_BUNDLE}
 )
+
+# Make sure the library target depends on the CA bundle
+add_dependencies(${PROJECT_NAME} download_ca_bundle)
 
 add_custom_target(
     clean_temp
