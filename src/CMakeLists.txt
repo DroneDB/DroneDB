@@ -124,7 +124,7 @@ add_custom_target(
 message(STATUS "Build target 'update_sensor_data' is ready.")
 
 if (WIN32)
-    set(PROJ_DIR "${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/share/proj")
+    set(PROJ_DIR "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/share/proj")
 endif()
 
 if (WIN32)
