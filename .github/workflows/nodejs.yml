@@ -13,6 +13,7 @@ jobs:
         env:
             VCPKG_ROOT: ${{ github.workspace }}/vcpkg
             VCPKG_DEFAULT_TRIPLET: x64-linux-release
+            VCPKG_TRIPLET: x64-linux-release
             VCPKG_BUILD_TYPE: release
             CMAKE_JS_PLATFORM: linux
             CMAKE_JS_ARCH: x64
@@ -56,6 +57,7 @@ jobs:
         env:
             VCPKG_ROOT: ${{ github.workspace }}/vcpkg
             VCPKG_DEFAULT_TRIPLET: x64-windows-release
+            VCPKG_TRIPLET: x64-windows-release
             VCPKG_BUILD_TYPE: release
             CMAKE_JS_PLATFORM: win32
             CMAKE_JS_ARCH: x64
@@ -63,6 +65,7 @@ jobs:
             - uses: actions/checkout@v4
               with:
                   submodules: 'recursive'
+                  fetch-depth: 0
             - name: Cache vcpkg
               uses: actions/cache@v4
               with:
