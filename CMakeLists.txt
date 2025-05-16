@@ -17,13 +17,7 @@ else()
     message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 endif()
 
-# Define the output directory depending on platform and build type
-if(WIN32 AND CMAKE_JS_VERSION)
-    set(OUTPUT_DIR "${CMAKE_BINARY_DIR}/${CMAKE_BUILD_TYPE}")
-else()
-    set(OUTPUT_DIR "${CMAKE_BINARY_DIR}")
-endif()
-message(STATUS "Using output directory: ${OUTPUT_DIR}")
+set(OUTPUT_DIR "${CMAKE_BINARY_DIR}")
 
 # Define support files directory (these are typically in the main build directory)
 set(SUPPORT_DIR "${CMAKE_BINARY_DIR}")
