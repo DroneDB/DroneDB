@@ -14,12 +14,12 @@ const bindings = (mod) => {
     ];
     const tries = [];
 
-    for (let i = 0; i < paths.length; i++){
+    for (let i = 0; i < paths.length; i++) {
         const attempt = path.join(paths[i], mod);
 
-        try{
+        try {
             return require(attempt);
-        }catch(e){
+        } catch (e) {
             tries.push(attempt);
         }
     }

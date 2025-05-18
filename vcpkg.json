@@ -1,0 +1,51 @@
+{
+  "name": "ddb",
+  "version": "1.1.0",
+  "builtin-baseline": "acd65983f2e668c0bc44a117575e6073681fa8e3",
+  "dependencies": [
+    "boolinq",
+    "cctz",
+    {
+      "name": "cpr",
+      "features": [
+        "ssl"
+      ]
+    },
+    "cxxopts",
+    {
+      "name": "exiv2",
+      "features": [
+        "bmff",
+        "png",
+        "xmp"
+      ]
+    },
+    {
+      "name": "gdal",
+      "features": [
+        "libkml"
+      ]
+    },
+    "gtest",
+    "hash-library",
+    "laszip",
+    "libgeotiff",
+    "libspatialite",
+    "libzip",
+    {
+      "name": "nlohmann-json",
+      "version>=": "3.11.3"
+    },
+    "pdal",
+    "plog",
+    {
+      "name": "qt5",
+      "default-features": false,
+      "features": [
+        "imageformats"
+      ]
+    },
+    "sqlite3",
+    "zlib"
+  ]
+}

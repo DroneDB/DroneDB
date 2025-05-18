@@ -4,40 +4,73 @@ on:
   push:
     branches:
     - master
-    pull_request:
-    - master
     tags:
     - v*
   workflow_dispatch:
+    inputs:
+      push_to_registry:
+        description: 'Push images to DockerHub registry'
+        required: true
+        default: 'false'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+  build_builders:
+    name: Build Builder Image (24.04)
+    runs-on: ubuntu-24.04
     steps:
     - name: Checkout
-      uses: actions/checkout@v2
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v1
+      uses: docker/setup-buildx-action@v3
     - name: Login to DockerHub
-      uses: docker/login-action@v1 
+      uses: docker/login-action@v3
       with:
         username: ${{ secrets.DOCKERHUB_USERNAME }}
         password: ${{ secrets.DOCKERHUB_TOKEN }}
-    - name: Docker meta
-      id: docker_meta
-      uses: crazy-max/ghaction-docker-meta@v1
+    - name: Build and push Docker builder image (24.04)
+      id: docker_builder_build
+      uses: docker/build-push-action@v6
       with:
-        images: dronedb/dronedb
-        tag-semver: |
-          {{version}}
-    - name: Build and push Docker image
-      id: docker_build
-      uses: docker/build-push-action@v2
-      with:
-        file: ./docker/ubuntu/dockerfile
-        push: true
-        tags: |
-          ${{ steps.docker_meta.outputs.tags }}
-          dronedb/dronedb:latest
+        context: ./docker/builders
+        file: ./docker/builders/Dockerfile-builder-24.04
+        push: ${{ github.event_name != 'pull_request' && (github.event.inputs.push_to_registry != 'false' || github.event_name != 'workflow_dispatch') }}
+        tags: dronedb/builder:latest
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
     - name: Image digest
-      run: echo ${{ steps.docker_build.outputs.digest }}
+      run: echo ${{ steps.docker_builder_build.outputs.digest }}
+      
+  build_app:
+    name: Build Application Image
+    runs-on: ubuntu-24.04
+    needs: build_builders
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    - name: Login to DockerHub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+    - name: Build and push Docker application image
+      id: docker_app_build
+      uses: docker/build-push-action@v6
+      with:
+        context: .
+        file: ./docker/Dockerfile
+        push: ${{ github.event_name != 'pull_request' && (github.event.inputs.push_to_registry != 'false' || github.event_name != 'workflow_dispatch') }}
+        tags: dronedb/app:latest
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+    - name: Image digest
+      run: echo ${{ steps.docker_app_build.outputs.digest }}

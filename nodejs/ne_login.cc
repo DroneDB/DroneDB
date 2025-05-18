@@ -1,56 +1,56 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
-#include <iostream>
-#include "registry.h"
-#include "exceptions.h"
 #include "ne_login.h"
+
+#include <iostream>
+
+#include "exceptions.h"
 #include "ne_helpers.h"
+#include "registry.h"
 
 
 class LoginWorker : public Nan::AsyncWorker {
- public:
-  LoginWorker(Nan::Callback *callback, const std::string &username,
-              const std::string &password,
-              const std::string &server)
-    : AsyncWorker(callback, "nan:LoginWorker"),
-      username(username), password(password), server(server){}
-  ~LoginWorker() {}
+public:
+    LoginWorker(Nan::Callback* callback,
+                const std::string& username,
+                const std::string& password,
+                const std::string& server)
+        : AsyncWorker(callback, "nan:LoginWorker"),
+          username(username),
+          password(password),
+          server(server) {}
+    ~LoginWorker() {}
 
-  void Execute () {
-    try{
-        ddb::Registry reg(server);
-        token = reg.login(username, password);
+    void Execute() {
+        try {
+            ddb::Registry reg(server);
+            token = reg.login(username, password);
 
-        if (token.length() == 0){
-            SetErrorMessage("Unauthorized");
+            if (token.length() == 0) {
+                SetErrorMessage("Unauthorized");
+            }
+        } catch (ddb::AppException& e) {
+            SetErrorMessage(e.what());
         }
-    }catch(ddb::AppException &e){
-        SetErrorMessage(e.what());
     }
-  }
 
-  void HandleOKCallback () {
-     Nan::HandleScope scope;
+    void HandleOKCallback() {
+        Nan::HandleScope scope;
 
-     Nan::JSON json;
-     v8::Local<v8::Value> argv[] = {
-         Nan::Null(),
-         Nan::New<v8::String>(token).ToLocalChecked()
-     };
+        Nan::JSON json;
+        v8::Local<v8::Value> argv[] = {Nan::Null(), Nan::New<v8::String>(token).ToLocalChecked()};
 
-     callback->Call(2, argv, async_resource);
-   }
+        callback->Call(2, argv, async_resource);
+    }
 
- private:
+private:
     std::string token = "";
 
     std::string username;
     std::string password;
     std::string server;
-
 };
-
 
 
 NAN_METHOD(login) {

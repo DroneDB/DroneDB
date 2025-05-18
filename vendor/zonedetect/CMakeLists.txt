@@ -1,5 +1,0 @@
-set(SRC_LIST
-   ${SRC_LIST}
-   ${CMAKE_CURRENT_SOURCE_DIR}/zonedetect.c
-   PARENT_SCOPE
-)

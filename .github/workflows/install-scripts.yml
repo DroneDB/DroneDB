@@ -8,12 +8,14 @@ on:
 jobs:
   publish-install-script:
     # The type of runner that the job will run on
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
     - name: Checkout
-      uses: actions/checkout@v1
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
     - name: Set env
       run: |
         echo "RELEASE_TAG=${GITHUB_REF#refs/*/}" >> $GITHUB_ENV
@@ -36,4 +38,3 @@ jobs:
         directory: "get.dronedb"
         repository: "DroneDB/get.dronedb"
         github_token: ${{ secrets.BOT_TOKEN }}
-
