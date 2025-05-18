@@ -1,11 +1,6 @@
 # Build Docker images for DroneDB using vcpkg
-
-# Build the builder images
-Write-Host "Building Ubuntu 22.04 builder image..." -ForegroundColor Green
-docker build -t dronedb/builder:22.04 -f docker/builders/Dockerfile-builder-22.04 docker/builders
-
 Write-Host "Building Ubuntu 24.04 builder image..." -ForegroundColor Green
-docker build -t dronedb/builder:24.04 -f docker/builders/Dockerfile-builder-24.04 docker/builders
+docker build -t dronedb/builder -f docker/builders/Dockerfile-builder-24.04 docker/builders
 
 # Build the main application image
 Write-Host "Building main DroneDB application image..." -ForegroundColor Green

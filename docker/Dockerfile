@@ -1,4 +1,4 @@
-FROM dronedb/builder:24.04
+FROM dronedb/builder
 
 # Set environment variables
 ENV CMAKE_BUILD_TYPE=Release \
@@ -7,13 +7,13 @@ ENV CMAKE_BUILD_TYPE=Release \
 # Copy the source code
 COPY . /workspace
 
-# Build the project
-RUN cd /workspace && \
-    chmod +x ./full-build-linux.sh && \
-    ./full-build-linux.sh && \
+RUN cd /workspace && mkdir -p build && \
     cd build && \
-    # Create distributable package
-    cmake --build . --target exodus_package
+    cmake -DVCPKG_OVERLAY_TRIPLETS=/workspace/vcpkg-triplets -DVCPKG_HOST_TRIPLET=x64-linux-release -DVCPKG_TARGET_TRIPLET=x64-linux-release -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=/workspace/vcpkg/scripts/buildsystems/vcpkg.cmake ..
+
+# Build the project
+RUN cd /workspace/build && \
+    make -j$(nproc) exodus_package
 
 # Create a smaller runtime image
 FROM ubuntu:24.04
@@ -31,7 +31,7 @@ COPY --from=0 /workspace/build/dist/ddb-*.tgz /app/ddb.tgz
 RUN cd /app && \
     tar -xzvf ddb.tgz && \
     rm ddb.tgz && \
-    ln -s /app/ddb /usr/local/bin/
+    ln -s /app/exodus/bin/ddbcmd /usr/local/bin/ddb
 
 # Set the working directory
 WORKDIR /data

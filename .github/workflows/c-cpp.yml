@@ -57,7 +57,7 @@ jobs:
             - name: Build C++ lib/program and tests
               run: cd build && make -j$(nproc)
             - name: Run C++ Tests
-              run: cd build && ./ddbtest --gtest_repeat=3 --gtest_shuffle
+              run: cd build && ./ddbtest --gtest_shuffle
             - name: Run Program Smoke Test
               run: cd build && ./ddbcmd --debug
             - name: Upload Distribution Files
@@ -108,7 +108,7 @@ jobs:
                 cmake --build . --config Release --target ALL_BUILD -- /maxcpucount:$env:NUMBER_OF_PROCESSORS
                 dir
             - name: Run C++ Tests
-              run: cd build && .\ddbtest.exe --gtest_repeat=3 --gtest_shuffle
+              run: cd build && .\ddbtest.exe --gtest_shuffle
               shell: pwsh
             - name: Run Program Smoke Test
               run: cd build && .\ddbcmd.exe --debug

@@ -3,12 +3,8 @@
 
 set -e
 
-# Build the builder images
-echo "Building Ubuntu 22.04 builder image..."
-docker build -t dronedb/builder:22.04 -f docker/builders/Dockerfile-builder-22.04 docker/builders
-
 echo "Building Ubuntu 24.04 builder image..."
-docker build -t dronedb/builder:24.04 -f docker/builders/Dockerfile-builder-24.04 docker/builders
+docker build -t dronedb/builder -f docker/builders/Dockerfile-builder-24.04 docker/builders
 
 # Build the main application image
 echo "Building main DroneDB application image..."

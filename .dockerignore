@@ -1,0 +1,40 @@
+# Version control
+#.git
+.gitignore
+.gitattributes
+.gitmodules
+
+# Build artifacts
+build/
+dist/
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Temporary and cache files
+*.tmp
+*.log
+*~
+.DS_Store
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Dependencies that will be rebuilt
+vcpkg/downloads/
+vcpkg/buildtrees/
+vcpkg/installed/
+
+vcpkg_installed/
+
+# Node.js
+node_modules/
