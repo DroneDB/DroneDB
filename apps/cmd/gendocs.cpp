@@ -22,6 +22,14 @@ namespace cmd
         std::cout << "===============================" << std::endl;
 
         std::cout << "W\t" << outfile.string() << std::endl;
+
+        // Ensure path exists and create it if not
+        if (!fs::exists(outfile.parent_path()))
+        {
+            std::cout << "Creating directory " << outfile.parent_path().string() << std::endl;
+            fs::create_directories(outfile.parent_path());
+        }
+
         std::ofstream f(outfile.string(), std::ios::out | std::ios::trunc);
 
         for (auto &cmd : commands)

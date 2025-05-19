@@ -3,3 +3,4 @@ vcpkg_installed
 node_modules
 win-build
 linux-build
+debian

@@ -8,6 +8,16 @@ DroneDB is free and open source software for aerial data storage. It provides a 
 
 See it in action: [https://hub.dronedb.app/r/odm/waterbury](https://hub.dronedb.app/r/odm/waterbury)
 
+## Installation
+
+### Debian/Ubuntu
+```bash
+# Install from the latest release
+sudo apt install ./ddb_X.Y.Z_amd64.deb
+```
+
+See [Debian Package Documentation](docs/debian-package.md) for more details.
+
 ## Documentation
 
 https://docs.dronedb.app
