@@ -4,7 +4,7 @@ docker build -t dronedb/builder -f docker/builders/Dockerfile-builder-24.04 dock
 
 # Build the main application image
 Write-Host "Building main DroneDB application image..." -ForegroundColor Green
-docker build -t dronedb/app:latest -f docker/Dockerfile .
+docker build -t dronedb/dronedb:latest -f docker/Dockerfile .
 
 Write-Host "All images built successfully!" -ForegroundColor Green
-Write-Host "You can run the DroneDB application with: docker run --rm -it dronedb/app:latest" -ForegroundColor Cyan
+Write-Host "You can run the DroneDB application with: docker run --rm -it dronedb/dronedb:latest" -ForegroundColor Cyan

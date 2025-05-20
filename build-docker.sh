@@ -8,7 +8,7 @@ docker build -t dronedb/builder -f docker/builders/Dockerfile-builder-24.04 dock
 
 # Build the main application image
 echo "Building main DroneDB application image..."
-docker build -t dronedb/app:latest -f docker/Dockerfile .
+docker build -t dronedb/dronedb:latest -f docker/Dockerfile .
 
 echo "All images built successfully!"
-echo "You can run the DroneDB application with: docker run --rm -it dronedb/app:latest"
+echo "You can run the DroneDB application with: docker run --rm -it dronedb/dronedb:latest"

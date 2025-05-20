@@ -75,7 +75,7 @@ jobs:
         context: .
         file: ./docker/Dockerfile
         push: ${{ github.event_name != 'pull_request' && (github.event.inputs.push_to_registry != 'false' || github.event_name != 'workflow_dispatch') }}
-        tags: dronedb/app:latest
+        tags: dronedb/dronedb:latest
         cache-from: type=gha
         cache-to: type=gha,mode=max
     - name: Image digest
