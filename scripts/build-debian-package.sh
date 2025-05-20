@@ -3,6 +3,7 @@ set -e
 
 # This script builds a Debian package for DroneDB
 # It's designed to run as part of the CI pipeline
+# Assumes the application is already built in the build folder
 
 # Set necessary environment variables
 echo "Setting up environment variables..."
@@ -19,17 +20,10 @@ echo "Building DroneDB Debian package version: $DDB_VERSION"
 export DDB_VERSION
 export DEBIAN_FRONTEND=noninteractive
 
-# Ensure git submodules are initialized
-echo "Ensuring git submodules are initialized..."
-git submodule update --init --recursive
-
 # Install Debian packaging tools
 echo "Installing Debian packaging tools..."
 sudo apt-get update
-sudo apt-get install -y build-essential cmake debhelper devscripts fakeroot lintian
-
-# Install requirements
-sudo apt-get install -y libgdal-dev libspatialite-dev libexiv2-dev libzip-dev libpng-dev zlib1g-dev libssl-dev libcurl4-openssl-dev
+sudo apt-get install -y debhelper devscripts fakeroot lintian
 
 # Create debian packaging structure
 echo "Creating debian packaging structure..."
@@ -42,19 +36,13 @@ Source: ddb
 Section: science
 Priority: optional
 Maintainer: DroneDB Team <support@dronedb.app>
-Build-Depends: debhelper-compat (= 13), cmake, build-essential, 
-               libgdal-dev, libsqlite3-dev, libspatialite-dev, 
-               libexiv2-dev, libzip-dev, libpng-dev, zlib1g-dev,
-               libssl-dev, libcurl4-openssl-dev
+Build-Depends: debhelper-compat (= 13)
 Standards-Version: 4.5.0
 Homepage: https://github.com/DroneDB/DroneDB
 
 Package: ddb
 Architecture: any
-Depends: \${shlibs:Depends}, \${misc:Depends},
-         libgdal30, libsqlite3-0, libspatialite7, 
-         libexiv2-27, libzip4, libpng16-16, zlib1g,
-         libssl3, libcurl4
+Depends: \${shlibs:Depends}, \${misc:Depends}
 Description: Effortless aerial data management and sharing
  DroneDB is a toolset for effortlessly managing and sharing aerial datasets.
  It can extract metadata from aerial images such as GPS location, altitude,
@@ -75,6 +63,49 @@ Copyright: $(date +%Y) DroneDB Team
 License: ISC License
 EOF
 
+# Create postinst script for environment setup
+echo "Creating postinst script..."
+cat > debian/postinst << EOF
+#!/bin/sh
+set -e
+
+# Create symbolic links if needed
+ldconfig
+
+# Set environment variables by creating a config file
+cat > /etc/profile.d/ddb.sh << EOS
+export DDB_PROJ_PATH=/usr/share/ddb/proj.db
+export DDB_TIMEZONE_PATH=/usr/share/ddb/timezone21.bin
+export DDB_SENSOR_DATA_PATH=/usr/share/ddb/sensor_data.sqlite
+export CURL_CA_BUNDLE_PATH=/usr/share/ddb/curl-ca-bundle.crt
+EOS
+
+chmod 644 /etc/profile.d/ddb.sh
+
+#DEBHELPER#
+exit 0
+EOF
+
+# Make postinst executable
+chmod +x debian/postinst
+
+# Create prerm script for cleanup
+echo "Creating prerm script..."
+cat > debian/prerm << EOF
+#!/bin/sh
+set -e
+
+if [ -f /etc/profile.d/ddb.sh ]; then
+    rm -f /etc/profile.d/ddb.sh
+fi
+
+#DEBHELPER#
+exit 0
+EOF
+
+# Make prerm executable
+chmod +x debian/prerm
+
 # Create changelog
 echo "Creating changelog file..."
 cat > debian/changelog << EOF
@@ -85,7 +116,7 @@ ddb (${DDB_VERSION}) unstable; urgency=medium
  -- DroneDB Team <support@dronedb.app>  $(date -R)
 EOF
 
-# Create rules file with vcpkg integration (using existing submodule)
+# Create rules file that skips the build step
 echo "Creating rules file..."
 cat > debian/rules << EOF
 #!/usr/bin/make -f
@@ -93,27 +124,39 @@ cat > debian/rules << EOF
 %:
 	dh \$@
 
+# Skip the configure step since we're using pre-built binaries
 override_dh_auto_configure:
-	# Ensure vcpkg submodule is initialized and bootstrap is run
-	if [ ! -f \$(CURDIR)/vcpkg/vcpkg ]; then \
-		echo "Bootstrapping vcpkg..."; \
-		\$(CURDIR)/vcpkg/bootstrap-vcpkg.sh -disableMetrics; \
-	fi
-	export VCPKG_ROOT=\$(CURDIR)/vcpkg && \
-	dh_auto_configure -- -DVCPKG_OVERLAY_TRIPLETS=\$(CURDIR)/vcpkg-triplets -DVCPKG_HOST_TRIPLET=x64-linux-release -DVCPKG_TARGET_TRIPLET=x64-linux-release -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=\$(CURDIR)/vcpkg/scripts/buildsystems/vcpkg.cmake
+	# Do nothing, skip configure
+
+# Skip the build step since we're using pre-built binaries
+override_dh_auto_build:
+	# Do nothing, skip build
+
+# Skip the test step
+override_dh_auto_test:
+	# Do nothing, skip tests
 
 override_dh_shlibdeps:
 	dh_shlibdeps --dpkg-shlibdeps-params=--ignore-missing-info
 
 override_dh_auto_install:
-	dh_auto_install
 	# Create directory structure for installed files
 	mkdir -p debian/ddb/usr/bin
 	mkdir -p debian/ddb/usr/lib
-	# Copy binary and libs
+	mkdir -p debian/ddb/usr/share/ddb
+	
+	# Copy binary and libs from build directory directly
 	cp \$(CURDIR)/build/ddbcmd debian/ddb/usr/bin/ddb
-	cp \$(CURDIR)/build/*.so* debian/ddb/usr/lib/ || true
-	cp \$(CURDIR)/build/*.dll debian/ddb/usr/lib/ || true
+	cp \$(CURDIR)/build/libddb.so debian/ddb/usr/lib/
+	cp \$(CURDIR)/build/libnxs.so debian/ddb/usr/lib/
+	
+	# Copy data files from build directory directly
+	cp \$(CURDIR)/build/proj.db debian/ddb/usr/share/ddb/
+	cp \$(CURDIR)/build/timezone21.bin debian/ddb/usr/share/ddb/
+	cp \$(CURDIR)/build/sensor_data.sqlite debian/ddb/usr/share/ddb/
+	cp \$(CURDIR)/build/curl-ca-bundle.crt debian/ddb/usr/share/ddb/
+	
+	# Set permissions
 	chmod +x debian/ddb/usr/bin/ddb
 EOF
 

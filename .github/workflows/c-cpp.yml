@@ -1,213 +1,223 @@
 name: C/C++ CI
 
 on:
-    push:
-        branches: [master]
-        tags:
-          - 'v*.*.*'
-    pull_request:
-        branches: [master]
+  push:
+    branches: [master]
+    tags:
+      - 'v*.*.*'
+  pull_request:
+    branches: [master]
 
 jobs:
-    build_ubuntu:
-        name: Build/Test on Ubuntu
-        runs-on: ubuntu-24.04
-        env:
-            VCPKG_ROOT: ${{ github.workspace }}/vcpkg
-            VCPKG_DEFAULT_TRIPLET: x64-linux-release
-            VCPKG_BUILD_TYPE: release
-        steps:
-            - name: Free Disk Space
-              uses: ShubhamTatvamasi/free-disk-space-action@master
-            - uses: actions/checkout@v4
-              with:
-                submodules: 'recursive'
-                fetch-depth: 0
-            - name: Info
-              run: |
-                pwd
-                echo "GITHUB_WORKSPACE=${GITHUB_WORKSPACE}"
-                echo "GITHUB_REF=${GITHUB_REF}"
-                echo "GITHUB_REPOSITORY=${GITHUB_REPOSITORY}"
-                echo "GITHUB_RUN_ID=${GITHUB_RUN_ID}"
-                echo "GITHUB_RUN_NUMBER=${GITHUB_RUN_NUMBER}"
-                echo "GITHUB_SHA=${GITHUB_SHA}"
-                ls -la                
-            - name: Cache vcpkg
-              uses: actions/cache@v4
-              with:
-                path: ${{ github.workspace }}/vcpkg
-                key: ${{ runner.os }}-vcpkg-${{ hashFiles('**/vcpkg.json') }}
-                restore-keys: |
-                  ${{ runner.os }}-vcpkg-
-            - name: Install Linux dependencies
-              run: |
-                chmod +x ./scripts/install-dependencies.sh
-                ./scripts/install-dependencies.sh
-            - name: Setup vcpkg
-              uses: lukka/run-vcpkg@v11
-              with:
-                vcpkgDirectory: '${{ github.workspace }}/vcpkg'
-                vcpkgJsonGlob: vcpkg.json
-            - name: Run CMake
-              run: |
-                mkdir build
-                cd build
-                cmake -DVCPKG_OVERLAY_TRIPLETS=${{ github.workspace }}/vcpkg-triplets -DVCPKG_HOST_TRIPLET=x64-linux-release -DVCPKG_TARGET_TRIPLET=x64-linux-release -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake ..
-            - name: Build C++ lib/program and tests
-              run: cd build && make -j$(nproc)
-            - name: Run C++ Tests
-              run: cd build && ./ddbtest --gtest_shuffle
-            - name: Run Program Smoke Test
-              run: cd build && ./ddbcmd --debug
-              
-            - name: Build Debian Package
-              run: |
-                if [ -n "${{ startsWith(github.ref, 'refs/tags/') }}" ] || [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-                  # Set DDB_VERSION env var for the package
-                  if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-                    echo "DDB_VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
-                  else
-                    # Use commit hash for non-tag builds
-                    echo "DDB_VERSION=$(git describe --always)" >> $GITHUB_ENV
-                  fi
-                  
-                  # Execute the build script
-                  chmod +x scripts/build-debian-package.sh
-                  ./scripts/build-debian-package.sh
-                else
-                  echo "Skipping Debian package build for non-tag push or PR"
-                fi
-              
-            - name: Upload Distribution Files
-              uses: actions/upload-artifact@v4
-              with:
-                name: Linux-Binaries
-                path: |
-                  build/dist/*.tgz
-                  build/package/*.deb
-                retention-days: 90
-                
-            - name: Upload Binaries to Release
-              uses: svenstaro/upload-release-action@v2
-              if: startsWith(github.ref, 'refs/tags/')
-              with:
-                repo_token: ${{ secrets.GITHUB_TOKEN }}
-                file: build/dist/*.tgz
-                file_glob: true
-                tag: ${{ github.ref }}
-                overwrite: true
-                
-            - name: Upload Debian Package to Release
-              uses: svenstaro/upload-release-action@v2
-              if: startsWith(github.ref, 'refs/tags/')
-              with:
-                repo_token: ${{ secrets.GITHUB_TOKEN }}
-                file: build/package/*.deb
-                file_glob: true
-                tag: ${{ github.ref }}
-                overwrite: true
+  build_ubuntu:
+    name: Build/Test on Ubuntu
+    runs-on: ubuntu-24.04
+    env:
+      VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+      VCPKG_DEFAULT_TRIPLET: x64-linux-release
+      VCPKG_BUILD_TYPE: release
+    steps:
+      - name: Free Disk Space
+        uses: ShubhamTatvamasi/free-disk-space-action@master
+      - uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+          fetch-depth: 0
+      - name: Info
+        run: |
+          pwd
+          echo "GITHUB_WORKSPACE=${GITHUB_WORKSPACE}"
+          echo "GITHUB_REF=${GITHUB_REF}"
+          echo "GITHUB_REPOSITORY=${GITHUB_REPOSITORY}"
+          echo "GITHUB_RUN_ID=${GITHUB_RUN_ID}"
+          echo "GITHUB_RUN_NUMBER=${GITHUB_RUN_NUMBER}"
+          echo "GITHUB_SHA=${GITHUB_SHA}"
+          ls -la
+      - name: Cache vcpkg
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/vcpkg
+          key: ${{ runner.os }}-vcpkg-${{ hashFiles('**/vcpkg.json') }}
+          restore-keys: |
+            ${{ runner.os }}-vcpkg-
+      - name: Install Linux dependencies
+        run: |
+          chmod +x ./scripts/install-dependencies.sh
+          ./scripts/install-dependencies.sh
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgDirectory: '${{ github.workspace }}/vcpkg'
+          vcpkgJsonGlob: vcpkg.json
+      - name: Run CMake
+        run: |
+          mkdir build
+          cd build
+          cmake -DVCPKG_OVERLAY_TRIPLETS=${{ github.workspace }}/vcpkg-triplets -DVCPKG_HOST_TRIPLET=x64-linux-release -DVCPKG_TARGET_TRIPLET=x64-linux-release -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake ..
+      - name: Build C++ lib/program and tests
+        run: cd build && make -j$(nproc)
+      - name: Run C++ Tests
+        run: cd build && ./ddbtest --gtest_shuffle
+      - name: Run Program Smoke Test
+        run: cd build && ./ddbcmd --debug      - name: Build Debian Package
+        run: |
+          if [ -n "${{ startsWith(github.ref, 'refs/tags/') }}" ] || [ "${{ github.event_name }}" == "workflow_dispatch" ] || [ "${{ github.event_name }}" == "push" ]; then
+            # Set DDB_VERSION env var for the package
+            if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+              echo "DDB_VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
+            else
+              # Use commit hash for non-tag builds
+              echo "DDB_VERSION=$(git describe --always)" >> $GITHUB_ENV
+            fi
+            
+            # Verify required files exist in build directory
+            for file in ddbcmd libddb.so libnxs.so proj.db timezone21.bin sensor_data.sqlite curl-ca-bundle.crt; do
+              if [ ! -f "build/$file" ]; then
+                echo "Error: Required file $file not found in build directory!"
+                exit 1
+              fi
+            done
+            
+            # Create distribution directory
+            mkdir -p build/package
+            
+            # Execute the build script
+            chmod +x scripts/build-debian-package.sh
+            ./scripts/build-debian-package.sh
+            
+            # Test linting of Debian package
+            echo "Running lintian on Debian package..."
+            lintian ../ddb_*.deb || echo "Lintian reported issues, but continuing..."
+          else
+            echo "Skipping Debian package build for PR"
+          fi
+      - name: Upload Distribution Files
+        uses: actions/upload-artifact@v4
+        with:
+          name: Linux-Binaries
+          path: |
+            build/dist/*.tgz
+            build/package/*.deb
+          retention-days: 90
+      - name: Upload Binaries to Release
+        uses: svenstaro/upload-release-action@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: build/dist/*.tgz
+          file_glob: true
+          tag: ${{ github.ref }}
+          overwrite: true
+      - name: Upload Debian Package to Release
+        uses: svenstaro/upload-release-action@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: build/package/*.deb
+          file_glob: true
+          tag: ${{ github.ref }}
+          overwrite: true
 
-    build_windows:
-        name: Build/Test on Windows
-        runs-on: windows-latest
-        env:
-            VCPKG_ROOT: ${{ github.workspace }}/vcpkg
-            VCPKG_DEFAULT_TRIPLET: x64-windows-release
-            VCPKG_BUILD_TYPE: release
-        steps:
-            - uses: actions/checkout@v4
-              with:
-                submodules: 'recursive'
-                fetch-depth: 0
-            - name: Cache vcpkg
-              uses: actions/cache@v4
-              with:
-                path: ${{ github.workspace }}/vcpkg
-                key: ${{ runner.os }}-vcpkg-${{ hashFiles('**/vcpkg.json') }}
-                restore-keys: |
-                  ${{ runner.os }}-vcpkg-
-            - name: Setup vcpkg
-              uses: lukka/run-vcpkg@v11
-              with:
-                vcpkgDirectory: '${{ github.workspace }}/vcpkg'
-                vcpkgJsonGlob: vcpkg.json
-            - name: Build C++ lib/program and tests
-              run: |
-                mkdir build
-                cd build
-                cmake .. -DVCPKG_HOST_TRIPLET=x64-windows-release -DVCPKG_TARGET_TRIPLET=x64-windows-release -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake"
-                cmake --build . --config Release --target ALL_BUILD -- /maxcpucount:$env:NUMBER_OF_PROCESSORS
-                dir
-            - name: Run C++ Tests
-              run: cd build && .\ddbtest.exe --gtest_shuffle
-              shell: pwsh
-            - name: Run Program Smoke Test
-              run: cd build && .\ddbcmd.exe --debug
-              shell: pwsh
-            - name: Create Distribution Files
-              shell: pwsh
-              run: |
-                cd build
-                cmake --build . --config Release --target windows_package -- /maxcpucount:$env:NUMBER_OF_PROCESSORS
-                dir
-            - name: Upload Distribution Files
-              uses: actions/upload-artifact@v4
-              with:
-                name: Windows Binaries
-                path: build\dist\*.zip
-            - name: Upload Binaries to Release
-              uses: svenstaro/upload-release-action@v2
-              if: startsWith(github.ref, 'refs/tags/')
-              with:
-                repo_token: ${{ secrets.GITHUB_TOKEN }}
-                file: build\dist\*.zip
-                file_glob: true
-                tag: ${{ github.ref }}
-                overwrite: true
-                
-    # build_macos:
-    #     name: Build/Test on MacOS
-    #     runs-on: macos-latest
-    #     steps:
-    #         - uses: actions/checkout@v4
-    #           with:
-    #             submodules: 'recursive'
-    #             fetch-depth: 0
-    #         - name: Install MacOS dependencies
-    #           run: |
-    #             chmod +x ./scripts/install-dependencies.sh
-    #             ./scripts/install-dependencies.sh
-    #         - name: Setup vcpkg
-    #           uses: lukka/run-vcpkg@v11
-    #           with:
-    #             vcpkgGitCommitId: acd65983f2e668c0bc44a117575e6073681fa8e3
-    #             vcpkgDirectory: '${{ github.workspace }}/vcpkg'
-    #             runVcpkgInstall: true
-    #         - name: Run CMake
-    #           run: |
-    #             mkdir build
-    #             cd build
-    #             cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake ..
-    #         - name: Build C++ lib/program and tests
-    #           run: cd build && cmake --build . -- -j$(sysctl -n hw.physicalcpu)
-    #         - name: Run C++ Tests
-    #           run: cd build && ctest -C Release
-    #         - name: Run Program Smoke Test
-    #           run: cd build && ./ddbcmd --debug
-    #         - name: Create Distribution Package
-    #           run: cd build && cmake --build . --target exodus_package
-    #         - name: Upload Distribution Files
-    #           uses: actions/upload-artifact@v4
-    #           with:
-    #             name: MacOS Binaries
-    #             path: build/dist/*.tgz
-    #         - name: Upload Binaries to Release
-    #           uses: svenstaro/upload-release-action@v2
-    #           if: startsWith(github.ref, 'refs/tags/')
-    #           with:
-    #             repo_token: ${{ secrets.GITHUB_TOKEN }}
-    #             file: build/dist/*.tgz
-    #             file_glob: true
-    #             tag: ${{ github.ref }}
-    #             overwrite: true
+  build_windows:
+    name: Build/Test on Windows
+    runs-on: windows-latest
+    env:
+      VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+      VCPKG_DEFAULT_TRIPLET: x64-windows-release
+      VCPKG_BUILD_TYPE: release
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+          fetch-depth: 0
+      - name: Cache vcpkg
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/vcpkg
+          key: ${{ runner.os }}-vcpkg-${{ hashFiles('**/vcpkg.json') }}
+          restore-keys: |
+            ${{ runner.os }}-vcpkg-
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgDirectory: '${{ github.workspace }}/vcpkg'
+          vcpkgJsonGlob: vcpkg.json
+      - name: Build C++ lib/program and tests
+        run: |
+          mkdir build
+          cd build
+          cmake .. -DVCPKG_HOST_TRIPLET=x64-windows-release -DVCPKG_TARGET_TRIPLET=x64-windows-release -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake"
+          cmake --build . --config Release --target ALL_BUILD -- /maxcpucount:$env:NUMBER_OF_PROCESSORS
+          dir
+      - name: Run C++ Tests
+        run: cd build && .\ddbtest.exe --gtest_shuffle
+        shell: pwsh
+      - name: Run Program Smoke Test
+        run: cd build && .\ddbcmd.exe --debug
+        shell: pwsh
+      - name: Create Distribution Files
+        shell: pwsh
+        run: |
+          cd build
+          cmake --build . --config Release --target windows_package -- /maxcpucount:$env:NUMBER_OF_PROCESSORS
+          dir
+      - name: Upload Distribution Files
+        uses: actions/upload-artifact@v4
+        with:
+          name: Windows Binaries
+          path: build\dist\*.zip
+      - name: Upload Binaries to Release
+        uses: svenstaro/upload-release-action@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: build\dist\*.zip
+          file_glob: true
+          tag: ${{ github.ref }}
+          overwrite: true
+          
+  # build_macos:
+  #     name: Build/Test on MacOS
+  #     runs-on: macos-latest
+  #     steps:
+  #         - uses: actions/checkout@v4
+  #           with:
+  #             submodules: 'recursive'
+  #             fetch-depth: 0
+  #         - name: Install MacOS dependencies
+  #           run: |
+  #             chmod +x ./scripts/install-dependencies.sh
+  #             ./scripts/install-dependencies.sh
+  #         - name: Setup vcpkg
+  #           uses: lukka/run-vcpkg@v11
+  #           with:
+  #             vcpkgGitCommitId: acd65983f2e668c0bc44a117575e6073681fa8e3
+  #             vcpkgDirectory: '${{ github.workspace }}/vcpkg'
+  #             runVcpkgInstall: true
+  #         - name: Run CMake
+  #           run: |
+  #             mkdir build
+  #             cd build
+  #             cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake ..
+  #         - name: Build C++ lib/program and tests
+  #           run: cd build && cmake --build . -- -j$(sysctl -n hw.physicalcpu)
+  #         - name: Run C++ Tests
+  #           run: cd build && ctest -C Release
+  #         - name: Run Program Smoke Test
+  #           run: cd build && ./ddbcmd --debug
+  #         - name: Create Distribution Package
+  #           run: cd build && cmake --build . --target exodus_package
+  #         - name: Upload Distribution Files
+  #           uses: actions/upload-artifact@v4
+  #           with:
+  #             name: MacOS Binaries
+  #             path: build/dist/*.tgz
+  #         - name: Upload Binaries to Release
+  #           uses: svenstaro/upload-release-action@v2
+  #           if: startsWith(github.ref, 'refs/tags/')
+  #           with:
+  #             repo_token: ${{ secrets.GITHUB_TOKEN }}
+  #             file: build/dist/*.tgz
+  #             file_glob: true
+  #             tag: ${{ github.ref }}
+  #             overwrite: true
