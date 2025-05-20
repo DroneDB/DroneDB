@@ -13,14 +13,9 @@ install_ubuntu_packages() {
         libreadline-dev libssl-dev lbzip2 libbz2-dev zlib1g-dev libffi-dev liblzma-dev \
         '^libxcb.*-dev' libx11-xcb-dev libgl1-mesa-dev libxrender-dev \
         libxi-dev libxkbcommon-dev libxkbcommon-x11-dev libxtst-dev libltdl-dev
-
-    # Try to get rid of the Clock skew error
-    sudo timedatectl set-ntp true    
-
+       
     sudo dpkg-reconfigure -f noninteractive tzdata
 
-    # Set timezone to UTC
-    sudo timedatectl set-timezone UTC
 }
 
 # Install Python packages needed for builds
