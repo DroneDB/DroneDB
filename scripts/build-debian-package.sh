@@ -19,6 +19,10 @@ echo "Building DroneDB Debian package version: $DDB_VERSION"
 export DDB_VERSION
 export DEBIAN_FRONTEND=noninteractive
 
+# Ensure git submodules are initialized
+echo "Ensuring git submodules are initialized..."
+git submodule update --init --recursive
+
 # Install Debian packaging tools
 echo "Installing Debian packaging tools..."
 sudo apt-get update
@@ -81,7 +85,7 @@ ddb (${DDB_VERSION}) unstable; urgency=medium
  -- DroneDB Team <support@dronedb.app>  $(date -R)
 EOF
 
-# Create rules file with vcpkg integration
+# Create rules file with vcpkg integration (using existing submodule)
 echo "Creating rules file..."
 cat > debian/rules << EOF
 #!/usr/bin/make -f
@@ -90,9 +94,9 @@ cat > debian/rules << EOF
 	dh \$@
 
 override_dh_auto_configure:
-	mkdir -p \$(CURDIR)/vcpkg
-	if [ ! -d \$(CURDIR)/vcpkg/.git ]; then \
-		git clone https://github.com/microsoft/vcpkg.git \$(CURDIR)/vcpkg; \
+	# Ensure vcpkg submodule is initialized and bootstrap is run
+	if [ ! -f \$(CURDIR)/vcpkg/vcpkg ]; then \
+		echo "Bootstrapping vcpkg..."; \
 		\$(CURDIR)/vcpkg/bootstrap-vcpkg.sh -disableMetrics; \
 	fi
 	export VCPKG_ROOT=\$(CURDIR)/vcpkg && \
