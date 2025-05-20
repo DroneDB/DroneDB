@@ -42,8 +42,8 @@ jobs:
                   ${{ runner.os }}-vcpkg-
             - name: Install Linux dependencies
               run: |
-                chmod +x .github/scripts/install-dependencies.sh
-                .github/scripts/install-dependencies.sh
+                chmod +x ./scripts/install-dependencies.sh
+                ./scripts/install-dependencies.sh
             - name: Setup vcpkg
               uses: lukka/run-vcpkg@v11
               with:
@@ -176,8 +176,8 @@ jobs:
     #             fetch-depth: 0
     #         - name: Install MacOS dependencies
     #           run: |
-    #             chmod +x .github/scripts/install-dependencies.sh
-    #             .github/scripts/install-dependencies.sh
+    #             chmod +x ./scripts/install-dependencies.sh
+    #             ./scripts/install-dependencies.sh
     #         - name: Setup vcpkg
     #           uses: lukka/run-vcpkg@v11
     #           with:
