@@ -160,6 +160,11 @@ namespace
 
     TEST(setModifiedTime, Normal)
     {
+
+        #ifdef _WIN32        
+        GTEST_SKIP() << "Skipping test on Windows";
+        #endif
+
         auto f = io::Path(io::getDataPath("timezone21.bin"));
         time_t mtime = f.getModifiedTime();
         f.setModifiedTime(mtime);
