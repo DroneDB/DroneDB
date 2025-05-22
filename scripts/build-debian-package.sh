@@ -42,7 +42,7 @@ Homepage: https://github.com/DroneDB/DroneDB
 
 Package: ddb
 Architecture: any
-Depends: \${shlibs:Depends}, \${misc:Depends}
+Depends: \${shlibs:Depends}, \${misc:Depends}, libgl1, libx11-6, libxcb1, libxcb-glx0, libx11-xcb1, libegl1, libxcb-icccm4, libxcb-image0, libxcb-shm0, libxcb-keysyms1, libxcb-randr0, libxcb-render-util0, libxcb-render0, libxcb-shape0, libxcb-sync1, libxcb-xfixes0, libxcb-xinerama0, libxcb-xkb1, libxcb-xinput0, libxkbcommon-x11-0, libxkbcommon0
 Description: Effortless aerial data management and sharing
  DroneDB is a toolset for effortlessly managing and sharing aerial datasets.
  It can extract metadata from aerial images such as GPS location, altitude,
@@ -144,18 +144,30 @@ override_dh_auto_install:
 	mkdir -p debian/ddb/usr/bin
 	mkdir -p debian/ddb/usr/lib
 	mkdir -p debian/ddb/usr/share/ddb
-	
+    
 	# Copy binary and libs from build directory directly
 	cp \$(CURDIR)/build/ddbcmd debian/ddb/usr/bin/ddb
 	cp \$(CURDIR)/build/libddb.so debian/ddb/usr/lib/
 	cp \$(CURDIR)/build/libnxs.so debian/ddb/usr/lib/
-	
+    
+	# Copy PDAL libraries from vcpkg installed directory
+	cp \$(CURDIR)/build/vcpkg_installed/x64-linux-release/lib/libpdalcpp.so.18 debian/ddb/usr/lib/
+	cp \$(CURDIR)/build/vcpkg_installed/x64-linux-release/lib/libdbus-1.so.3 debian/ddb/usr/lib/
+    
+	# Create necessary symbolic links for libraries
+	ln -sf libpdalcpp.so.18 debian/ddb/usr/lib/libpdalcpp.so
+	ln -sf libdbus-1.so.3 debian/ddb/usr/lib/libdbus-1.so
+    
+	# Copy PDAL plugins if needed
+	mkdir -p debian/ddb/usr/lib/pdal/plugins
+	cp \$(CURDIR)/build/vcpkg_installed/x64-linux-release/lib/libpdal_plugin_*.so.18 debian/ddb/usr/lib/pdal/plugins/ || true
+    
 	# Copy data files from build directory directly
 	cp \$(CURDIR)/build/proj.db debian/ddb/usr/share/ddb/
 	cp \$(CURDIR)/build/timezone21.bin debian/ddb/usr/share/ddb/
 	cp \$(CURDIR)/build/sensor_data.sqlite debian/ddb/usr/share/ddb/
 	cp \$(CURDIR)/build/curl-ca-bundle.crt debian/ddb/usr/share/ddb/
-	
+    
 	# Set permissions
 	chmod +x debian/ddb/usr/bin/ddb
 EOF
