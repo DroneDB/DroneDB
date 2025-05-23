@@ -8,6 +8,7 @@
 #include <sqlite3.h>
 #include <spatialite.h>
 #include <gdal_inc.h>
+#include <pdal/pdal_features.hpp>
 
 namespace ddb::utils
 {
@@ -258,6 +259,8 @@ namespace ddb::utils
         subsystems["SpatiaLite"] = spatialite_version();
         subsystems["GDAL"] = GDALVersionInfo("RELEASE_NAME");
         subsystems["CURL"] = curl_version();
+        subsystems["PDAL"] = pdal::pdalVersion;
+
         return subsystems;
     }
 
