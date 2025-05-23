@@ -182,6 +182,9 @@ namespace ddb
 
         DDB_DLL std::map<std::string, std::string> getSubsystems();
 
+        DDB_DLL bool isNullOrEmptyOrWhitespace(const char *str, size_t maxLength = 0);
+        DDB_DLL bool isNullOrEmptyOrWhitespace(const char **strlist, int count, size_t maxLength = 0);
+
 // Fix for removing macros
 #undef max
 #undef min

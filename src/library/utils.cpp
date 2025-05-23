@@ -264,4 +264,44 @@ namespace ddb::utils
         return subsystems;
     }
 
+    DDB_DLL bool isNullOrEmptyOrWhitespace(const char *str, size_t maxLength)
+    {
+        if (str == nullptr)
+            return true;
+
+        // Determine length to check (either the actual string length or maxLength)
+        size_t len = 0;
+        if (maxLength > 0) {
+            while (str[len] != '\0' && len < maxLength) 
+                len++;            
+        } else 
+            len = strlen(str);
+        
+
+        if (len == 0)
+            return true;
+
+        for (auto i = 0; i < len; i++)        
+            if (!isspace(str[i]))
+                return false;        
+
+        return true;
+    }
+
+    DDB_DLL bool isNullOrEmptyOrWhitespace(const char **strlist, int count, size_t maxLength)
+    {
+        if (strlist == nullptr)
+            return true;
+
+        if (count == 0)
+            return true;
+            
+        for (auto strIdx = 0; strIdx < count; strIdx++) {
+            if (isNullOrEmptyOrWhitespace(strlist[strIdx], maxLength)) 
+                return true;             
+        }
+        
+        return false;
+    }
+
 } // namespace ddb::utils
