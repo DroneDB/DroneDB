@@ -13,7 +13,7 @@ New-Item -ItemType Directory -Path "./build" | Out-Null
 Set-Location "./build"
 
 # Run CMake configure step
-cmake .. -A x64 -DCMAKE_TOOLCHAIN_FILE="C:\vcpkg\scripts\buildsystems\vcpkg.cmake"
+cmake .. -A x64 -DCMAKE_TOOLCHAIN_FILE="..\vcpkg\scripts\buildsystems\vcpkg.cmake"
 
 # Build with detected CPU cores
 cmake --build . --config Release --target ALL_BUILD -- "/maxcpucount:$cpuCores"
