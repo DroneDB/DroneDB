@@ -5,8 +5,8 @@
 #include "utils.h"
 
 #include <gdal_inc.h>
-#include <spatialite.h>
 #include <sqlite3.h>
+#include <spatialite.h>
 
 #include <pdal/pdal_features.hpp>
 #include <random>
@@ -272,5 +272,38 @@ DDB_DLL bool isNullOrEmptyOrWhitespace(const char** strlist, int count, size_t m
 
     return false;
 }
+
+// Validate that no string in an array is null
+DDB_DLL bool hasNullStringInArray(const char** strlist, int count) {
+    if (strlist == nullptr)
+        return true;
+    if (count < 0)
+        return true;
+
+    for (int i = 0; i < count; i++) {
+        if (strlist[i] == nullptr)
+            return true;
+    }
+    return false;
+}
+
+DDB_DLL bool isValidArrayParam(const char** array, int count) {
+    if (array == nullptr && count > 0)
+        return false;
+    if (count < 0)
+        return false;
+    return true;
+}
+
+// Validate string parameter allowing empty but not null
+DDB_DLL bool isValidStringParam(const char* str) {
+    return str != nullptr;
+}
+
+// Validate string parameter requiring non-empty
+DDB_DLL bool isValidNonEmptyStringParam(const char* str) {
+    return str != nullptr && strlen(str) > 0;
+}
+
 
 }  // namespace ddb::utils

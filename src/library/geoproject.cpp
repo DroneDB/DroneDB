@@ -96,17 +96,42 @@ namespace ddb
             {
                 double ratio = 1.0;
 
-                targs = CSLAddString(targs, "-outsize");
-                targs = CSLAddString(targs, outsize.c_str());
-                if (outsize.back() == '%')
-                {
-                    targs = CSLAddString(targs, outsize.c_str());
-                    ratio = std::stod(outsize) / 100.0;
-                }
-                else
-                {
-                    ratio = std::stod(outsize) / width;
-                    targs = CSLAddString(targs, utils::toStr(ratio * height).c_str());
+                targs = CSLAddString(targs, "-outsize");                targs = CSLAddString(targs, outsize.c_str());
+                try {
+                    if (outsize.back() == '%')
+                    {
+                        targs = CSLAddString(targs, outsize.c_str());
+                        
+                        // Validate percentage format before conversion
+                        std::string percentValue = outsize.substr(0, outsize.length() - 1);
+                        for (char c : percentValue)
+                            if (!std::isdigit(c) && c != '.' && c != '-' && c != '+')
+                                throw InvalidArgsException("Invalid percentage format: " + outsize);
+                        
+                        double value = std::stod(percentValue);
+                        if (value <= 0)
+                            throw InvalidArgsException("Percentage must be positive: " + outsize);
+                        
+                        ratio = value / 100.0;
+                    }
+                    else
+                    {
+                        // Validate numeric format before conversion
+                        for (char c : outsize)
+                            if (!std::isdigit(c) && c != '.' && c != '-' && c != '+')
+                                throw InvalidArgsException("Invalid numeric format: " + outsize);
+                        
+                        double value = std::stod(outsize);
+                        if (value <= 0)
+                            throw InvalidArgsException("Size must be positive: " + outsize);
+                        
+                        ratio = value / width;
+                        targs = CSLAddString(targs, utils::toStr(ratio * height).c_str());
+                    }
+                } catch (const std::invalid_argument& e) {
+                    throw InvalidArgsException("Invalid size format: " + outsize);
+                } catch (const std::out_of_range& e) {
+                    throw InvalidArgsException("Size value out of range: " + outsize);
                 }
 
                 scaledWidth = static_cast<int>(static_cast<double>(width) * ratio);

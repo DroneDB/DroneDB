@@ -135,11 +135,17 @@ DDBErr DDBAdd(const char* ddbPath,
     if (utils::isNullOrEmptyOrWhitespace(ddbPath))
         throw InvalidArgsException("No directory provided");
 
+    if (!utils::isValidArrayParam(paths, numPaths))
+        throw InvalidArgsException("Invalid paths array parameter");
+
     if (utils::isNullOrEmptyOrWhitespace(paths, numPaths))
         throw InvalidArgsException("No paths provided");
 
+    if (utils::hasNullStringInArray(paths, numPaths))
+        throw InvalidArgsException("Path array contains null elements");
+
     if (output == nullptr)
-        throw InvalidArgsException("No output provided");
+        throw InvalidArgsException("Output pointer is null");
 
     const auto db = ddb::open(std::string(ddbPath), true);
     const std::vector<std::string> pathList(paths, paths + numPaths);
@@ -163,8 +169,14 @@ DDBErr DDBRemove(const char* ddbPath, const char** paths, int numPaths) {
     if (utils::isNullOrEmptyOrWhitespace(ddbPath))
         throw InvalidArgsException("No directory provided");
 
+    if (!utils::isValidArrayParam(paths, numPaths))
+        throw InvalidArgsException("Invalid paths array parameter");
+
     if (utils::isNullOrEmptyOrWhitespace(paths, numPaths))
         throw InvalidArgsException("No paths provided");
+
+    if (utils::hasNullStringInArray(paths, numPaths))
+        throw InvalidArgsException("Path array contains null elements");
 
     const auto db = ddb::open(std::string(ddbPath), true);
     const std::vector<std::string> pathList(paths, paths + numPaths);
@@ -184,17 +196,26 @@ DDBErr DDBInfo(const char** paths,
                bool stopOnError) {
     DDB_C_BEGIN
 
-    if (format == nullptr || strlen(format) == 0)
+    if (!utils::isValidNonEmptyStringParam(format))
         throw InvalidArgsException("No format provided");
 
-    if (geometry == nullptr || strlen(geometry) == 0)
-        throw InvalidArgsException("No format provided");
+    if (!utils::isValidNonEmptyStringParam(geometry))
+        throw InvalidArgsException("No geometry provided");
+
+    if (!utils::isValidArrayParam(paths, numPaths))
+        throw InvalidArgsException("Invalid paths array parameter");
 
     if (utils::isNullOrEmptyOrWhitespace(paths, numPaths))
         throw InvalidArgsException("No paths provided");
 
+    if (utils::hasNullStringInArray(paths, numPaths))
+        throw InvalidArgsException("Path array contains null elements");
+
     if (output == nullptr)
-        throw InvalidArgsException("No output provided");
+        throw InvalidArgsException("Output pointer is null");
+
+    if (maxRecursionDepth < 0)
+        throw InvalidArgsException("Invalid max recursion depth");
 
     const std::vector<std::string> input(paths, paths + numPaths);
     std::ostringstream ss;
@@ -240,14 +261,23 @@ DDBErr DDBList(const char* ddbPath,
     if (utils::isNullOrEmptyOrWhitespace(ddbPath))
         throw InvalidArgsException("No directory provided");
 
-    if (format == nullptr || strlen(format) == 0)
+    if (!utils::isValidNonEmptyStringParam(format))
         throw InvalidArgsException("No format provided");
 
-    if (paths == nullptr || numPaths == 0)
+    if (!utils::isValidArrayParam(paths, numPaths))
+        throw InvalidArgsException("Invalid paths array parameter");
+
+    if (utils::isNullOrEmptyOrWhitespace(paths, numPaths))
         throw InvalidArgsException("No paths provided");
 
+    if (utils::hasNullStringInArray(paths, numPaths))
+        throw InvalidArgsException("Path array contains null elements");
+
     if (output == nullptr)
-        throw InvalidArgsException("No output provided");
+        throw InvalidArgsException("Output pointer is null");
+
+    if (maxRecursionDepth < 0)
+        throw InvalidArgsException("Invalid max recursion depth");
 
     const auto db = ddb::open(std::string(ddbPath), true);
     const std::vector<std::string> pathList(paths, paths + numPaths);
@@ -266,13 +296,14 @@ DDBErr DDBSearch(const char* ddbPath, const char* query, char** output, const ch
     if (utils::isNullOrEmptyOrWhitespace(ddbPath))
         throw InvalidArgsException("No directory provided");
 
-    if (query == nullptr)
+    if (!utils::isValidStringParam(query))
         throw InvalidArgsException("No query provided");
-    if (format == nullptr || strlen(format) == 0)
+
+    if (!utils::isValidNonEmptyStringParam(format))
         throw InvalidArgsException("No format provided");
 
     if (output == nullptr)
-        throw InvalidArgsException("No output provided");
+        throw InvalidArgsException("Output pointer is null");
 
     const auto db = ddb::open(std::string(ddbPath), false);
 
@@ -290,7 +321,7 @@ DDBErr DDBAppendPassword(const char* ddbPath, const char* password) {
     if (utils::isNullOrEmptyOrWhitespace(ddbPath))
         throw InvalidArgsException("No directory provided");
 
-    if (password == nullptr || strlen(password) == 0)
+    if (!utils::isValidNonEmptyStringParam(password))
         throw InvalidArgsException("No password provided");
 
     const auto db = ddb::open(std::string(ddbPath), true);
@@ -376,11 +407,18 @@ DDB_DLL DDBErr DDBStatus(const char* ddbPath, char** output) {
 }
 
 // @deprecated
+// @deprecated
 DDBErr DDBChattr(const char* ddbPath, const char* attrsJson, char** output) {
     DDB_C_BEGIN
 
     if (utils::isNullOrEmptyOrWhitespace(ddbPath))
         throw InvalidArgsException("No directory provided");
+
+    if (!utils::isValidStringParam(attrsJson))
+        throw InvalidArgsException("No attributes JSON provided");
+
+    if (output == nullptr)
+        throw InvalidArgsException("Output pointer is null");
 
     LOGD << "Deprecated DDBChattr call: please use DDBMetaSet instead as DDBChattr will be removed "
             "in the near future.";
@@ -405,6 +443,15 @@ DDBErr DDBChattr(const char* ddbPath, const char* attrsJson, char** output) {
 DDBErr DDBGenerateThumbnail(const char* filePath, int size, const char* destPath) {
     DDB_C_BEGIN
 
+    if (utils::isNullOrEmptyOrWhitespace(filePath))
+        throw InvalidArgsException("No file path provided");
+
+    if (utils::isNullOrEmptyOrWhitespace(destPath))
+        throw InvalidArgsException("No destination path provided");
+
+    if (size < 0)
+        throw InvalidArgsException("Invalid size parameter");
+
     const auto imagePath = fs::path(filePath);
     const auto thumbPath = fs::path(destPath);
 
@@ -419,6 +466,18 @@ DDB_DLL DDBErr DDBGenerateMemoryThumbnail(const char* filePath,
                                           int* outBufferSize) {
     DDB_C_BEGIN
 
+    if (utils::isNullOrEmptyOrWhitespace(filePath))
+        throw InvalidArgsException("No file path provided");
+
+    if (size < 0)
+        throw InvalidArgsException("Invalid size parameter");
+
+    if (outBuffer == nullptr)
+        throw InvalidArgsException("Output buffer pointer is null");
+
+    if (outBufferSize == nullptr)
+        throw InvalidArgsException("Output buffer size pointer is null");
+
     const auto imagePath = fs::path(filePath);
 
     generateThumb(imagePath, size, "", true, outBuffer, outBufferSize);
@@ -428,6 +487,10 @@ DDB_DLL DDBErr DDBGenerateMemoryThumbnail(const char* filePath,
 
 DDBErr DDBVSIFree(uint8_t* buffer) {
     DDB_C_BEGIN
+    
+    if (buffer == nullptr)
+        throw InvalidArgsException("Buffer pointer is null");
+
     VSIFree(buffer);
     DDB_C_END
 }
@@ -441,6 +504,19 @@ DDB_DLL DDBErr DDBTile(const char* inputPath,
                        bool tms,
                        bool forceRecreate) {
     DDB_C_BEGIN
+
+    if (utils::isNullOrEmptyOrWhitespace(inputPath))
+        throw InvalidArgsException("No input path provided");
+
+    if (outputTilePath == nullptr)
+        throw InvalidArgsException("Output tile path pointer is null");
+
+    if (tileSize < 0)
+        throw InvalidArgsException("Invalid tile size parameter");
+
+    if (tz < 0 || tx < 0 || ty < 0)
+        throw InvalidArgsException("Invalid tile coordinates");
+
     utils::copyToPtr("", outputTilePath);
     const auto tilePath = ddb::TilerHelper::getFromUserCache(std::string(inputPath),
                                                              tz,
@@ -464,6 +540,25 @@ DDBErr DDBMemoryTile(const char* inputPath,
                      bool forceRecreate,
                      const char* inputPathHash) {
     DDB_C_BEGIN
+
+    if (utils::isNullOrEmptyOrWhitespace(inputPath))
+        throw InvalidArgsException("No input path provided");
+
+    if (outBuffer == nullptr)
+        throw InvalidArgsException("Output buffer pointer is null");
+
+    if (outBufferSize == nullptr)
+        throw InvalidArgsException("Output buffer size pointer is null");
+
+    if (tileSize < 0)
+        throw InvalidArgsException("Invalid tile size parameter");
+
+    if (tz < 0 || tx < 0 || ty < 0)
+        throw InvalidArgsException("Invalid tile coordinates");
+
+    // inputPathHash can be null or empty, it's optional
+    const std::string hashStr = inputPathHash ? std::string(inputPathHash) : "";
+
     ddb::TilerHelper::getTile(std::string(inputPath),
                               tz,
                               tx,
@@ -474,7 +569,7 @@ DDBErr DDBMemoryTile(const char* inputPath,
                               "",
                               outBuffer,
                               outBufferSize,
-                              std::string(inputPathHash));
+                              hashStr);
     DDB_C_END
 }
 
@@ -520,6 +615,24 @@ DDB_DLL DDBErr DDBApplyDelta(const char* delta,
                              char** conflicts) {
     DDB_C_BEGIN
 
+    if (utils::isNullOrEmptyOrWhitespace(delta))
+        throw InvalidArgsException("No delta provided");
+
+    if (utils::isNullOrEmptyOrWhitespace(sourcePath))
+        throw InvalidArgsException("No source path provided");
+
+    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
+        throw InvalidArgsException("No ddb path provided");
+
+    if (utils::isNullOrEmptyOrWhitespace(sourceMetaDump))
+        throw InvalidArgsException("No source meta dump provided");
+
+    if (conflicts == nullptr)
+        throw InvalidArgsException("Conflicts output pointer is null");
+
+    if (mergeStrategy < 0)
+        throw InvalidArgsException("Invalid merge strategy");
+
     Delta d;
     json metaDump;
     try {
@@ -552,8 +665,18 @@ DDBErr DDBComputeDeltaLocals(const char* delta,
                              char** output) {
     DDB_C_BEGIN
 
+    if (utils::isNullOrEmptyOrWhitespace(delta))
+        throw InvalidArgsException("No delta provided");
+
     if (utils::isNullOrEmptyOrWhitespace(ddbPath))
         throw InvalidArgsException("No directory provided");
+
+    if (output == nullptr)
+        throw InvalidArgsException("Output pointer is null");
+
+    // hlDestFolder can be empty string, but not null
+    if (hlDestFolder == nullptr)
+        throw InvalidArgsException("Destination folder parameter is null");
 
     Delta d;
     try {
@@ -575,9 +698,10 @@ DDBErr DDBComputeDeltaLocals(const char* delta,
 DDB_DLL DDBErr DDBSetTag(const char* ddbPath, const char* newTag) {
     DDB_C_BEGIN
 
-    if (ddbPath == nullptr)
+    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
         throw InvalidArgsException("No ddb path provided");
-    if (newTag == nullptr)
+    
+    if (!utils::isValidStringParam(newTag))
         throw InvalidArgsException("No tag provided");
 
     const auto ddb = ddb::open(std::string(ddbPath), true);
@@ -594,7 +718,7 @@ DDB_DLL DDBErr DDBGetTag(const char* ddbPath, char** outTag) {
         throw InvalidArgsException("No directory provided");
 
     if (outTag == nullptr)
-        throw InvalidArgsException("No tag provided");
+        throw InvalidArgsException("Output tag pointer is null");
 
     const auto ddb = ddb::open(std::string(ddbPath), true);
     TagManager manager(ddb.get());
@@ -642,16 +766,15 @@ DDB_DLL DDBErr
 DDBBuild(const char* ddbPath, const char* source, const char* dest, bool force, bool pendingOnly) {
     DDB_C_BEGIN
 
-    if (ddbPath == nullptr)
-        throw InvalidArgsException("No ddb path provided");
-
     if (utils::isNullOrEmptyOrWhitespace(ddbPath))
-        throw InvalidArgsException("No directory provided");
+        throw InvalidArgsException("No ddb path provided");
 
     const auto ddb = ddb::open(std::string(ddbPath), true);
 
+    // dest can be null (optional parameter)
     const auto destPath = dest != nullptr ? std::string(dest) : "";
 
+    // source can be null (optional parameter)
     std::string path;
     if (source != nullptr)
         path = std::string(source);
@@ -677,8 +800,10 @@ DDB_DLL DDBErr DDBIsBuildable(const char* ddbPath, const char* path, bool* isBui
 
     if (utils::isNullOrEmptyOrWhitespace(ddbPath))
         throw InvalidArgsException("No directory provided");
-    if (path == nullptr)
+    
+    if (!utils::isValidStringParam(path))
         throw InvalidArgsException("No path provided");
+
     if (isBuildable == nullptr)
         throw InvalidArgsException("Buildable parameter is null");
 
@@ -698,6 +823,7 @@ DDB_DLL DDBErr DDBIsBuildPending(const char* ddbPath, bool* isBuildPending) {
 
     if (utils::isNullOrEmptyOrWhitespace(ddbPath))
         throw InvalidArgsException("No directory provided");
+    
     if (isBuildPending == nullptr)
         throw InvalidArgsException("isBuildPending parameter is null");
 
@@ -716,12 +842,18 @@ DDBErr DDBMetaAdd(const char* ddbPath,
 
     if (utils::isNullOrEmptyOrWhitespace(ddbPath))
         throw InvalidArgsException("No directory provided");
-    if (path == nullptr)
+    
+    if (!utils::isValidStringParam(path))
         throw InvalidArgsException("No path provided");
-    if (key == nullptr)
+    
+    if (!utils::isValidStringParam(key))
         throw InvalidArgsException("No key provided");
-    if (data == nullptr)
+    
+    if (!utils::isValidStringParam(data))
         throw InvalidArgsException("No data provided");
+
+    if (output == nullptr)
+        throw InvalidArgsException("Output pointer is null");
 
     const auto ddbPathStr = std::string(ddbPath);
 
@@ -745,12 +877,18 @@ DDBErr DDBMetaSet(const char* ddbPath,
 
     if (utils::isNullOrEmptyOrWhitespace(ddbPath))
         throw InvalidArgsException("No directory provided");
-    if (path == nullptr)
+    
+    if (!utils::isValidStringParam(path))
         throw InvalidArgsException("No path provided");
-    if (key == nullptr)
+    
+    if (!utils::isValidStringParam(key))
         throw InvalidArgsException("No key provided");
-    if (data == nullptr)
+    
+    if (!utils::isValidStringParam(data))
         throw InvalidArgsException("No data provided");
+
+    if (output == nullptr)
+        throw InvalidArgsException("Output pointer is null");
 
     const auto ddbPathStr = std::string(ddbPath);
 
@@ -770,8 +908,12 @@ DDBErr DDBMetaRemove(const char* ddbPath, const char* id, char** output) {
 
     if (utils::isNullOrEmptyOrWhitespace(ddbPath))
         throw InvalidArgsException("No directory provided");
-    if (id == nullptr)
+    
+    if (!utils::isValidStringParam(id))
         throw InvalidArgsException("No id provided");
+
+    if (output == nullptr)
+        throw InvalidArgsException("Output pointer is null");
 
     const auto ddb = ddb::open(std::string(ddbPath), true);
     auto json = ddb->getMetaManager()->remove(std::string(id));
@@ -786,10 +928,15 @@ DDB_DLL DDBErr DDBMetaGet(const char* ddbPath, const char* path, const char* key
 
     if (utils::isNullOrEmptyOrWhitespace(ddbPath))
         throw InvalidArgsException("No directory provided");
-    if (path == nullptr)
+    
+    if (!utils::isValidStringParam(path))
         throw InvalidArgsException("No path provided");
-    if (key == nullptr)
+    
+    if (!utils::isValidStringParam(key))
         throw InvalidArgsException("No key provided");
+
+    if (output == nullptr)
+        throw InvalidArgsException("Output pointer is null");
 
     const auto ddbPathStr = std::string(ddbPath);
 
@@ -806,10 +953,15 @@ DDB_DLL DDBErr DDBMetaUnset(const char* ddbPath, const char* path, const char* k
 
     if (utils::isNullOrEmptyOrWhitespace(ddbPath))
         throw InvalidArgsException("No directory provided");
-    if (path == nullptr)
+    
+    if (!utils::isValidStringParam(path))
         throw InvalidArgsException("No path provided");
-    if (key == nullptr)
+    
+    if (!utils::isValidStringParam(key))
         throw InvalidArgsException("No key provided");
+
+    if (output == nullptr)
+        throw InvalidArgsException("Output pointer is null");
 
     const auto ddb = ddb::open(std::string(ddbPath), true);
     auto json =
@@ -825,8 +977,12 @@ DDB_DLL DDBErr DDBMetaList(const char* ddbPath, const char* path, char** output)
 
     if (utils::isNullOrEmptyOrWhitespace(ddbPath))
         throw InvalidArgsException("No directory provided");
-    if (path == nullptr)
+    
+    if (!utils::isValidStringParam(path))
         throw InvalidArgsException("No path provided");
+
+    if (output == nullptr)
+        throw InvalidArgsException("Output pointer is null");
 
     const auto ddbPathStr = std::string(ddbPath);
 
@@ -843,8 +999,12 @@ DDB_DLL DDBErr DDBMetaDump(const char* ddbPath, const char* ids, char** output) 
 
     if (utils::isNullOrEmptyOrWhitespace(ddbPath))
         throw InvalidArgsException("No directory provided");
-    if (ids == nullptr)
+    
+    if (!utils::isValidStringParam(ids))
         throw InvalidArgsException("No ids provided");
+
+    if (output == nullptr)
+        throw InvalidArgsException("Output pointer is null");
 
     json jIds;
     try {
@@ -866,8 +1026,12 @@ DDB_DLL DDBErr DDBMetaRestore(const char* ddbPath, const char* dump, char** outp
 
     if (utils::isNullOrEmptyOrWhitespace(ddbPath))
         throw InvalidArgsException("No directory provided");
-    if (dump == nullptr)
+    
+    if (!utils::isValidStringParam(dump))
         throw InvalidArgsException("No dump provided");
+
+    if (output == nullptr)
+        throw InvalidArgsException("Output pointer is null");
 
     json jDump;
     try {
@@ -895,12 +1059,21 @@ DDB_DLL DDBErr DDBStac(const char* ddbPath,
     if (utils::isNullOrEmptyOrWhitespace(ddbPath))
         throw InvalidArgsException("No directory provided");
 
+    if (output == nullptr)
+        throw InvalidArgsException("Output pointer is null");
+
+    // entry, stacCollectionRoot, id, stacCatalogRoot can be null/empty - they are optional parameters
+    const std::string entryStr = entry ? std::string(entry) : "";
+    const std::string stacCollectionRootStr = stacCollectionRoot ? std::string(stacCollectionRoot) : "";
+    const std::string idStr = id ? std::string(id) : "";
+    const std::string stacCatalogRootStr = stacCatalogRoot ? std::string(stacCatalogRoot) : "";
+
     const auto ddb = ddb::open(std::string(ddbPath), false);
     auto json = ddb::generateStac(std::string(ddbPath),
-                                  std::string(entry),
-                                  std::string(stacCollectionRoot),
-                                  std::string(id),
-                                  std::string(stacCatalogRoot));
+                                  entryStr,
+                                  stacCollectionRootStr,
+                                  idStr,
+                                  stacCatalogRootStr);
 
     utils::copyToPtr(json.dump(), output);
 

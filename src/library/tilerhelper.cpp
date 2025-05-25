@@ -34,9 +34,9 @@ namespace ddb
             r.min = std::stoi(zRange.substr(0, dashPos));
             r.max = std::stoi(zRange.substr(dashPos + 1, zRange.length() - 1));
             if (r.min > r.max)
-            {
+            
                 std::swap(r.min, r.max);
-            }
+            
         }
         else
         {

@@ -34,6 +34,21 @@ extern "C"
         DDBSetLastError(e.what()); \
         return DDBERR_EXCEPTION;   \
     }                              \
+    catch (const std::bad_alloc &e) \
+    {                              \
+        DDBSetLastError("Out of memory"); \
+        return DDBERR_EXCEPTION;   \
+    }                              \
+    catch (const std::exception &e) \
+    {                              \
+        DDBSetLastError(e.what()); \
+        return DDBERR_EXCEPTION;   \
+    }                              \
+    catch (...)                    \
+    {                              \
+        DDBSetLastError("Unknown error occurred"); \
+        return DDBERR_EXCEPTION;   \
+    }                              \
     return DDBERR_NONE;
 
     extern char ddbLastError[255];

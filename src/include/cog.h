@@ -5,15 +5,15 @@
 #define COG_H
 
 #include <string>
+
+#include "basicgeometry.h"
 #include "ddb_export.h"
 #include "json.h"
-#include "basicgeometry.h"
 
-namespace ddb
-{
+namespace ddb {
 
-    DDB_DLL void buildCog(const std::string &inputGTiff, const std::string &outputCog);
+DDB_DLL void buildCog(const std::string& inputGTiff, const std::string& outputCog);
 
 }
 
-#endif // COG_H
+#endif  // COG_H

@@ -29,17 +29,32 @@ namespace ddb
         info.vertexCount = 0;
 
         while (std::getline(in, line))
-        {
-
-            if (auto p = line.find("element vertex ") != std::string::npos)
+        {            if (auto p = line.find("element vertex ") != std::string::npos)
             {
                 try
                 {
-                    info.vertexCount = std::stoul(line.substr(p + 14, std::string::npos));
+                    std::string vertexCountStr = line.substr(p + 14, std::string::npos);
+                    // Validate format before conversion
+                    for (char c : vertexCountStr)
+                        if (!std::isdigit(c))
+                            throw std::invalid_argument("Non-digit character in vertex count: " + vertexCountStr);
+                    
+                    info.vertexCount = std::stoul(vertexCountStr);
+                    
+                    // Basic validation
+                    if (info.vertexCount == 0)
+                        LOGW << "PLY file contains zero vertices";
+                    if (info.vertexCount > 1000000000) // 1 billion vertices seems excessive
+                        LOGW << "PLY file reports extremely large vertex count: " << info.vertexCount;
                 }
-                catch (std::invalid_argument)
+                catch (const std::invalid_argument& e)
                 {
-                    LOGD << "Malformed PLY: " << line;
+                    LOGD << "Malformed PLY vertex count: " << line << " - " << e.what();
+                    return false;
+                }
+                catch (const std::out_of_range& e)
+                {
+                    LOGD << "PLY vertex count out of range: " << line << " - " << e.what();
                     return false;
                 }
             }

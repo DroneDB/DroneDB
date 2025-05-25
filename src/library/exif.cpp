@@ -66,16 +66,43 @@ namespace ddb
     ImageSize ExifParser::extractVideoSize()
     {
         auto xmpWidth = findXmpKey({"Xmp.video.Width"});
-        auto xmpHeight = findXmpKey({"Xmp.video.Height"});
-        if (xmpWidth != xmpData.end() && xmpHeight != xmpData.end())
+        auto xmpHeight = findXmpKey({"Xmp.video.Height"});        if (xmpWidth != xmpData.end() && xmpHeight != xmpData.end())
         {
             try
             {
-                return ImageSize(std::stoi(xmpWidth->toString()), std::stoi(xmpHeight->toString()));
+                // Convert XMP width and height to integers
+                std::string widthStr = xmpWidth->toString();
+                std::string heightStr = xmpHeight->toString();
+                
+                // Validate that strings contain valid integer format
+                for (char c : widthStr)
+                    if (!std::isdigit(c) && c != '-' && c != '+')
+                        throw std::invalid_argument("Width is not a valid integer: " + widthStr);
+                
+                for (char c : heightStr)
+                    if (!std::isdigit(c) && c != '-' && c != '+')
+                        throw std::invalid_argument("Height is not a valid integer: " + heightStr);
+                
+                int width = std::stoi(widthStr);
+                int height = std::stoi(heightStr);
+                
+                // Additional validation of reasonable values
+                if (width <= 0 || height <= 0)
+                    throw std::invalid_argument("Width or height is not positive");
+                
+                if (width > 100000 || height > 100000) // Arbitrary large limit
+                    throw std::invalid_argument("Width or height exceeds reasonable limits");
+                
+                return ImageSize(width, height);
             }
             catch (const std::invalid_argument &ia)
             {
-                LOGD << "Cannot parse XMP video width/height";
+                LOGD << "Cannot parse XMP video width/height: " << ia.what();
+                return ImageSize(0, 0);
+            }
+            catch (const std::out_of_range &oor)
+            {
+                LOGD << "XMP video width/height out of range";
                 return ImageSize(0, 0);
             }
         }
