@@ -71,6 +71,9 @@ jobs:
               echo "DDB_VERSION=$(git describe --always)" >> $GITHUB_ENV
             fi
             
+            # Set VCPKG_HOST_TRIPLET for the build script
+            echo "VCPKG_HOST_TRIPLET=${VCPKG_DEFAULT_TRIPLET}" >> $GITHUB_ENV
+            
             # Verify required files exist in build directory
             for file in ddbcmd libddb.so libnxs.so proj.db timezone21.bin sensor_data.sqlite curl-ca-bundle.crt; do
               if [ ! -f "build/$file" ]; then

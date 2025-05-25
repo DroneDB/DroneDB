@@ -16,8 +16,15 @@ if [ -z "$DDB_VERSION" ]; then
   fi
 fi
 
+# Set VCPKG triplet (can be overridden by environment variable)
+if [ -z "$VCPKG_HOST_TRIPLET" ]; then
+  VCPKG_HOST_TRIPLET="x64-linux-release"
+fi
+
 echo "Building DroneDB Debian package version: $DDB_VERSION"
+echo "Using VCPKG host triplet: $VCPKG_HOST_TRIPLET"
 export DDB_VERSION
+export VCPKG_HOST_TRIPLET
 export DEBIAN_FRONTEND=noninteractive
 
 # Install Debian packaging tools
@@ -42,7 +49,7 @@ Homepage: https://github.com/DroneDB/DroneDB
 
 Package: ddb
 Architecture: any
-Depends: \${shlibs:Depends}, \${misc:Depends}, libgl1, libx11-6, libxcb1, libxcb-glx0, libx11-xcb1, libegl1, libxcb-icccm4, libxcb-image0, libxcb-shm0, libxcb-keysyms1, libxcb-randr0, libxcb-render-util0, libxcb-render0, libxcb-shape0, libxcb-sync1, libxcb-xfixes0, libxcb-xinerama0, libxcb-xkb1, libxcb-xinput0, libxkbcommon-x11-0, libxkbcommon0
+Depends: \${shlibs:Depends}, \${misc:Depends}, libgl1, libx11-6, libxcb1, libxcb-glx0, libx11-xcb1, libegl1, libxcb-icccm4, libxcb-image0, libxcb-shm0, libxcb-keysyms1, libxcb-randr0, libxcb-render-util0, libxcb-render0, libxcb-shape0, libxcb-sync1, libxcb-xfixes0, libxcb-xinerama0, libxcb-xkb1, libxcb-xinput0, libxkbcommon-x11-0, libxkbcommon0, gdal-data
 Description: Effortless aerial data management and sharing
  DroneDB is a toolset for effortlessly managing and sharing aerial datasets.
  It can extract metadata from aerial images such as GPS location, altitude,
@@ -74,10 +81,8 @@ ldconfig
 
 # Set environment variables by creating a config file
 cat > /etc/profile.d/ddb.sh << EOS
-export DDB_PROJ_PATH=/usr/share/ddb/proj.db
-export DDB_TIMEZONE_PATH=/usr/share/ddb/timezone21.bin
-export DDB_SENSOR_DATA_PATH=/usr/share/ddb/sensor_data.sqlite
-export CURL_CA_BUNDLE_PATH=/usr/share/ddb/curl-ca-bundle.crt
+export GDAL_DATA=/usr/share/gdal
+export PROJ_LIB=/usr/share/ddb/proj.db
 EOS
 
 chmod 644 /etc/profile.d/ddb.sh
@@ -151,8 +156,8 @@ override_dh_auto_install:
 	cp \$(CURDIR)/build/libnxs.so debian/ddb/usr/lib/
     
 	# Copy PDAL libraries from vcpkg installed directory
-	cp \$(CURDIR)/build/vcpkg_installed/x64-linux-release/lib/libpdalcpp.so.18 debian/ddb/usr/lib/
-	cp \$(CURDIR)/build/vcpkg_installed/x64-linux-release/lib/libdbus-1.so.3 debian/ddb/usr/lib/
+	cp \$(CURDIR)/build/vcpkg_installed/${VCPKG_HOST_TRIPLET}/lib/libpdalcpp.so.18 debian/ddb/usr/lib/
+	cp \$(CURDIR)/build/vcpkg_installed/${VCPKG_HOST_TRIPLET}/lib/libdbus-1.so.3 debian/ddb/usr/lib/
     
 	# Create necessary symbolic links for libraries
 	ln -sf libpdalcpp.so.18 debian/ddb/usr/lib/libpdalcpp.so
@@ -160,7 +165,7 @@ override_dh_auto_install:
     
 	# Copy PDAL plugins if needed
 	mkdir -p debian/ddb/usr/lib/pdal/plugins
-	cp \$(CURDIR)/build/vcpkg_installed/x64-linux-release/lib/libpdal_plugin_*.so.18 debian/ddb/usr/lib/pdal/plugins/ || true
+	cp \$(CURDIR)/build/vcpkg_installed/${VCPKG_HOST_TRIPLET}/lib/libpdal_plugin_*.so.18 debian/ddb/usr/lib/pdal/plugins/ || true
     
 	# Copy data files from build directory directly
 	cp \$(CURDIR)/build/proj.db debian/ddb/usr/share/ddb/
