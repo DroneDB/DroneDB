@@ -1,5 +1,6 @@
 {
     "files.associations": {
+        "*.embeddedhtml": "html",
         "algorithm": "cpp",
         "any": "cpp",
         "array": "cpp",
@@ -102,6 +103,18 @@
         "xutility": "cpp",
         "bitset": "cpp",
         "hash_map": "cpp",
-        "*.ipp": "cpp"
+        "*.ipp": "cpp",
+        "barrier": "cpp",
+        "latch": "cpp",
+        "semaphore": "cpp",
+        "csetjmp": "cpp",
+        "expected": "cpp",
+        "generator": "cpp",
+        "mdspan": "cpp",
+        "numbers": "cpp",
+        "print": "cpp",
+        "spanstream": "cpp",
+        "stacktrace": "cpp",
+        "syncstream": "cpp"
     }
 }
