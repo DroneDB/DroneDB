@@ -58,10 +58,6 @@ namespace
     TEST(testTiler, image)
     {
 
-        #ifdef _WIN32
-        GTEST_SKIP() << "Skipping test on Windows";
-        #endif
-
         TestArea ta(TEST_NAME);
         fs::path pc = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/brighton/point_cloud.laz",
                                            "point_cloud.laz");
@@ -84,8 +80,12 @@ namespace
         of.write(reinterpret_cast<char *>(buffer), bufSize);
         of.close();
 
+        #ifndef _WIN32
+
         EXPECT_EQ(Hash::fileSHA256(outMemoryTile.string()),
                   Hash::fileSHA256(outTile.string()));
+
+        #endif
 
         DDBVSIFree(buffer);
     }
