@@ -43,6 +43,7 @@ if(BUILD_TESTING)
     include(GoogleTest)
     gtest_discover_tests(ddbtest
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+        DISCOVERY_TIMEOUT 60
     )
 
 endif()
