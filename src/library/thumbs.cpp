@@ -153,13 +153,33 @@ namespace ddb
         targs = CSLAddString(targs, "-ot");
         targs = CSLAddString(targs, "Byte");
 
+        // Using average resampling method
+        targs = CSLAddString(targs, "-r");
+        targs = CSLAddString(targs, "average");
+
         targs = CSLAddString(targs, "-scale");
+
+        // Using nodata value of 0
+        targs = CSLAddString(targs, "-a_nodata");
+        targs = CSLAddString(targs, "0");
+
+        // Using JPEG driver
+        targs = CSLAddString(targs, "-of");
+        targs = CSLAddString(targs, "JPEG");
 
         targs = CSLAddString(targs, "-co");
         targs = CSLAddString(targs, "WRITE_EXIF_METADATA=NO");
-        
+
         targs = CSLAddString(targs, "-co");
         targs = CSLAddString(targs, "QUALITY=95");
+
+        // Using progressive JPEG
+        targs = CSLAddString(targs, "-co");
+        targs = CSLAddString(targs, "PROGRESSIVE=YES");
+
+        // Remove SRS
+        targs = CSLAddString(targs, "-a_srs");
+        targs = CSLAddString(targs, "");
 
         // Max 3 bands
         if (GDALGetRasterCount(hSrcDataset) > 3)
@@ -605,7 +625,7 @@ namespace ddb
 
         // Check existance of thumbnail, return if exists
         if (!utils::isNetworkPath(inputPath.string()) && exists(outImagePath) && !forceRecreate)
-            return outImagePath;        
+            return outImagePath;
 
         LOGD << "ImagePath = " << inputPath;
         LOGD << "OutImagePath = " << outImagePath;
