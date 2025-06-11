@@ -71,7 +71,6 @@ cctz::time_zone Timezone::lookupTimezone(double latitude, double longitude) {
             if (!cctz::load_time_zone(timezoneId, &tz)) {
                 LOGD << "Cannot load timezone " << timezoneId << ", defaulting to: " << tz.name();
 
-                // Try some common alternatives for Windows
                 std::vector<std::string> alternatives = {
                     "UTC",
                     "CET",            // Central European Time
