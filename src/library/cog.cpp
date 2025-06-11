@@ -8,14 +8,16 @@
 #include "exceptions.h"
 
 namespace ddb
-{
-
-    void buildCog(const std::string &inputGTiff, const std::string &outputCog)
+{    void buildCog(const std::string &inputGTiff, const std::string &outputCog)
     {
         GDALDatasetH hSrcDataset = GDALOpen(inputGTiff.c_str(), GA_ReadOnly);
 
         if (!hSrcDataset)
             throw GDALException("Cannot open " + inputGTiff + " for reading");
+
+        // Detect and preserve nodata from source
+        int hasNoData;
+        double srcNoData = GDALGetRasterNoDataValue(GDALGetRasterBand(hSrcDataset, 1), &hasNoData);
 
         char **targs = nullptr;
         targs = CSLAddString(targs, "-of");
@@ -26,9 +28,19 @@ namespace ddb
         targs = CSLAddString(targs, "-wo");
         targs = CSLAddString(targs, "NUM_THREADS=ALL_CPUS");
 
-        // We can compress to JPG if these are 8bit bands (3 or 4)
-        const int numBands = GDALGetRasterCount(hSrcDataset);
-        if (numBands == 3 || numBands == 4)
+        // Preserve nodata values for transparency
+        if (hasNoData) {
+            targs = CSLAddString(targs, "-wo");
+            targs = CSLAddString(targs, "UNIFIED_SRC_NODATA=YES");
+            targs = CSLAddString(targs, "-dstnodata");
+            std::ostringstream oss;
+            oss << std::fixed << std::setprecision(0) << srcNoData;
+            targs = CSLAddString(targs, oss.str().c_str());
+        }
+
+        // We can compress to JPG if these are 8bit bands (3 or 4) and no nodata
+        const int numBands = GDALGetRasterCount(hSrcDataset);        // We can compress to JPG if these are 8bit bands (3 or 4) and no nodata
+        if ((numBands == 3 || numBands == 4) && !hasNoData)
         {
             bool all8Bit = true;
 
@@ -47,10 +59,16 @@ namespace ddb
                 targs = CSLAddString(targs, "-co");
                 targs = CSLAddString(targs, "QUALITY=90");
             }
+            else
+            {
+                // LZW by default for non-8bit data
+                targs = CSLAddString(targs, "-co");
+                targs = CSLAddString(targs, "COMPRESS=LZW");
+            }
         }
         else
         {
-            // LZW by default
+            // LZW by default for data with nodata values or other band counts
             targs = CSLAddString(targs, "-co");
             targs = CSLAddString(targs, "COMPRESS=LZW");
         }

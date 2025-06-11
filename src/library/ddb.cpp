@@ -450,12 +450,10 @@ DDBErr DDBGenerateThumbnail(const char* filePath, int size, const char* destPath
         throw InvalidArgsException("No destination path provided");
 
     if (size < 0)
-        throw InvalidArgsException("Invalid size parameter");
-
-    const auto imagePath = fs::path(filePath);
+        throw InvalidArgsException("Invalid size parameter");    const auto imagePath = fs::path(filePath);
     const auto thumbPath = fs::path(destPath);
 
-    generateThumb(imagePath, size, thumbPath, true);
+    generateThumb(imagePath, size, thumbPath, true, nullptr, nullptr);
 
     DDB_C_END
 }
@@ -487,7 +485,7 @@ DDB_DLL DDBErr DDBGenerateMemoryThumbnail(const char* filePath,
 
 DDBErr DDBVSIFree(uint8_t* buffer) {
     DDB_C_BEGIN
-    
+
     if (buffer == nullptr)
         throw InvalidArgsException("Buffer pointer is null");
 
@@ -700,7 +698,7 @@ DDB_DLL DDBErr DDBSetTag(const char* ddbPath, const char* newTag) {
 
     if (utils::isNullOrEmptyOrWhitespace(ddbPath))
         throw InvalidArgsException("No ddb path provided");
-    
+
     if (!utils::isValidStringParam(newTag))
         throw InvalidArgsException("No tag provided");
 
@@ -800,7 +798,7 @@ DDB_DLL DDBErr DDBIsBuildable(const char* ddbPath, const char* path, bool* isBui
 
     if (utils::isNullOrEmptyOrWhitespace(ddbPath))
         throw InvalidArgsException("No directory provided");
-    
+
     if (!utils::isValidStringParam(path))
         throw InvalidArgsException("No path provided");
 
@@ -823,7 +821,7 @@ DDB_DLL DDBErr DDBIsBuildPending(const char* ddbPath, bool* isBuildPending) {
 
     if (utils::isNullOrEmptyOrWhitespace(ddbPath))
         throw InvalidArgsException("No directory provided");
-    
+
     if (isBuildPending == nullptr)
         throw InvalidArgsException("isBuildPending parameter is null");
 
@@ -842,13 +840,13 @@ DDBErr DDBMetaAdd(const char* ddbPath,
 
     if (utils::isNullOrEmptyOrWhitespace(ddbPath))
         throw InvalidArgsException("No directory provided");
-    
+
     if (!utils::isValidStringParam(path))
         throw InvalidArgsException("No path provided");
-    
+
     if (!utils::isValidStringParam(key))
         throw InvalidArgsException("No key provided");
-    
+
     if (!utils::isValidStringParam(data))
         throw InvalidArgsException("No data provided");
 
@@ -877,13 +875,13 @@ DDBErr DDBMetaSet(const char* ddbPath,
 
     if (utils::isNullOrEmptyOrWhitespace(ddbPath))
         throw InvalidArgsException("No directory provided");
-    
+
     if (!utils::isValidStringParam(path))
         throw InvalidArgsException("No path provided");
-    
+
     if (!utils::isValidStringParam(key))
         throw InvalidArgsException("No key provided");
-    
+
     if (!utils::isValidStringParam(data))
         throw InvalidArgsException("No data provided");
 
@@ -908,7 +906,7 @@ DDBErr DDBMetaRemove(const char* ddbPath, const char* id, char** output) {
 
     if (utils::isNullOrEmptyOrWhitespace(ddbPath))
         throw InvalidArgsException("No directory provided");
-    
+
     if (!utils::isValidStringParam(id))
         throw InvalidArgsException("No id provided");
 
@@ -928,10 +926,10 @@ DDB_DLL DDBErr DDBMetaGet(const char* ddbPath, const char* path, const char* key
 
     if (utils::isNullOrEmptyOrWhitespace(ddbPath))
         throw InvalidArgsException("No directory provided");
-    
+
     if (!utils::isValidStringParam(path))
         throw InvalidArgsException("No path provided");
-    
+
     if (!utils::isValidStringParam(key))
         throw InvalidArgsException("No key provided");
 
@@ -953,10 +951,10 @@ DDB_DLL DDBErr DDBMetaUnset(const char* ddbPath, const char* path, const char* k
 
     if (utils::isNullOrEmptyOrWhitespace(ddbPath))
         throw InvalidArgsException("No directory provided");
-    
+
     if (!utils::isValidStringParam(path))
         throw InvalidArgsException("No path provided");
-    
+
     if (!utils::isValidStringParam(key))
         throw InvalidArgsException("No key provided");
 
@@ -977,7 +975,7 @@ DDB_DLL DDBErr DDBMetaList(const char* ddbPath, const char* path, char** output)
 
     if (utils::isNullOrEmptyOrWhitespace(ddbPath))
         throw InvalidArgsException("No directory provided");
-    
+
     if (!utils::isValidStringParam(path))
         throw InvalidArgsException("No path provided");
 
@@ -999,7 +997,7 @@ DDB_DLL DDBErr DDBMetaDump(const char* ddbPath, const char* ids, char** output) 
 
     if (utils::isNullOrEmptyOrWhitespace(ddbPath))
         throw InvalidArgsException("No directory provided");
-    
+
     if (!utils::isValidStringParam(ids))
         throw InvalidArgsException("No ids provided");
 
@@ -1026,7 +1024,7 @@ DDB_DLL DDBErr DDBMetaRestore(const char* ddbPath, const char* dump, char** outp
 
     if (utils::isNullOrEmptyOrWhitespace(ddbPath))
         throw InvalidArgsException("No directory provided");
-    
+
     if (!utils::isValidStringParam(dump))
         throw InvalidArgsException("No dump provided");
 
