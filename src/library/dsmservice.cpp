@@ -141,7 +141,12 @@ std::string DSMService::loadFromNetwork(double latitude, double longitude)
 
     LOGD << "Downloading DSM from " << url << " ...";
 
-    utils::downloadToFile(url, filePath, true);
+    auto response = utils::downloadToFile(url, filePath, true);
+
+    // Verify the downloaded file exists and has content
+    if (!fs::exists(filePath) || fs::file_size(filePath) == 0) {
+        throw NetException("Downloaded DSM file is empty or does not exist: " + filePath);
+    }
 
     return filePath;
 }

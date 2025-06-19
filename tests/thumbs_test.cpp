@@ -22,9 +22,7 @@ TEST(thumbnail, ortho) {
     TestArea ta(TEST_NAME);
     fs::path ortho = ta.downloadTestAsset(
         "https://github.com/DroneDB/test_data/raw/master/brighton/odm_orthophoto.tif",
-        "odm_orthophoto.tif");
-
-    fs::path outFile = ta.getPath("output.jpg");
+        "odm_orthophoto.tif");    fs::path outFile = ta.getPath("output.webp");
     ddb::generateThumb(ortho.string(), 256, outFile, true);
 
     uint8_t* buffer;
@@ -34,7 +32,7 @@ TEST(thumbnail, ortho) {
     EXPECT_TRUE(bufSize > 0);
     EXPECT_EQ(io::Path(outFile).getSize(), bufSize);
 
-    fs::path outMemoryFile = ta.getPath("output-memory.jpg");
+    fs::path outMemoryFile = ta.getPath("output-memory.webp");
 
     std::ofstream of(outMemoryFile.string(), std::ios::out | std::ios::binary | std::ios::trunc);
     of.write(reinterpret_cast<char*>(buffer), bufSize);
@@ -51,7 +49,7 @@ TEST(thumbnail, ept) {
     // Disable this test if we are on windows (inconclusive)
     #ifdef _WIN32
     GTEST_SKIP() << "Skipping test on Windows";
-    #endif    
+    #endif
 
     TestArea ta(TEST_NAME);
     fs::path pc = ta.downloadTestAsset(

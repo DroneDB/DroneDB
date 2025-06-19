@@ -176,7 +176,7 @@ cpr::Response downloadToFile(const std::string& url,
     auto session = cpr::Session();
     session.SetUrl(cpr::Url{url});
     session.SetVerifySsl(verifySsl);
-    session.SetTimeout(10000);
+    session.SetTimeout(15000);
     session.SetHeader(cpr::Header{{"Accept-Encoding", "gzip"}});
 
     if (fs::exists(filePath))
@@ -185,9 +185,16 @@ cpr::Response downloadToFile(const std::string& url,
     std::ofstream out(filePath, std::ios::binary);
 
     auto response = session.Download(out);
+    out.close(); // Ensure file is closed before checking size
 
-    if (response.status_code != 200 && throwOnError) {
-        throw ddb::NetException("Failed to fetch data from " + url);
+    // Check if download was successful and file has content
+    if (response.status_code != 200 || !fs::exists(filePath) || fs::file_size(filePath) == 0) {
+        // Remove empty or failed download file
+        if (fs::exists(filePath))
+            fs::remove(filePath);
+
+        if (throwOnError)
+            throw ddb::NetException("Failed to fetch data from " + url + " (status: " + std::to_string(response.status_code) + ")");
     }
 
     return response;
