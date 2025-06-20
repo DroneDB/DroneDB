@@ -185,20 +185,32 @@ END;
 
         // Find meta
         {
-            const std::string sql = R"<<<(SELECT CASE
-                WHEN key IS NULL THEN NULL
-                ELSE json_group_object(key, meta)
-            END AS meta
-                    FROM (
-                        SELECT key, CASE WHEN substr(key, -1, 1) = 's'
-                            THEN json_group_array(json_object('id', emi.id, 'data', json(emi.data), 'mtime', emi.mtime))
-                            ELSE json_object('id', emi.id, 'data', json(emi.data), 'mtime', emi.mtime)
-                        END AS meta
-                        FROM entries_meta emi
-                        WHERE path = ""
-                        GROUP BY key
-                    )
-            )<<<";
+            const std::string sql = R"<<<(
+                SELECT json_group_object(key, json(meta)) AS meta
+                FROM (
+                  SELECT
+                    key,
+                    CASE
+                      WHEN substr(key, -1, 1) = 's' THEN
+                        json_group_array(
+                          json_object(
+                            'id',    id,
+                            'data',  json(data),
+                            'mtime', mtime
+                          )
+                        )
+                      ELSE
+                        json_object(
+                          'id',    id,
+                          'data',  json(data),
+                          'mtime', mtime
+                        )
+                    END AS meta
+                  FROM entries_meta
+                  WHERE path = ''
+                  GROUP BY key
+                )
+                )<<<";
             const auto q = this->query(sql);
             if (q->fetch())
             {
