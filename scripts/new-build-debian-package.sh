@@ -93,7 +93,8 @@ set -e
 ldconfig
 cat > /etc/profile.d/ddb.sh <<EOP
 export GDAL_DATA=/usr/share/gdal
-export PROJ_LIB=/usr/share/ddb/proj.db
+export PROJ_LIB=/usr/share/ddb
+export PROJ_DATA=/usr/share/ddb
 EOP
 chmod 644 /etc/profile.d/ddb.sh
 #DEBHELPER#

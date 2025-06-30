@@ -53,7 +53,7 @@ Depends: \${shlibs:Depends}, \${misc:Depends}, libgl1, libx11-6, libxcb1, libxcb
 Description: Effortless aerial data management and sharing
  DroneDB is a toolset for effortlessly managing and sharing aerial datasets.
  It can extract metadata from aerial images such as GPS location, altitude,
- gimbal orientation parameters and more. It can also efficiently share data 
+ gimbal orientation parameters and more. It can also efficiently share data
  over the network.
 EOF
 
@@ -82,7 +82,8 @@ ldconfig
 # Set environment variables by creating a config file
 cat > /etc/profile.d/ddb.sh << EOS
 export GDAL_DATA=/usr/share/gdal
-export PROJ_LIB=/usr/share/ddb/proj.db
+export PROJ_LIB=/usr/share/ddb
+export PROJ_DATA=/usr/share/ddb
 EOS
 
 chmod 644 /etc/profile.d/ddb.sh
@@ -149,30 +150,30 @@ override_dh_auto_install:
 	mkdir -p debian/ddb/usr/bin
 	mkdir -p debian/ddb/usr/lib
 	mkdir -p debian/ddb/usr/share/ddb
-    
+
 	# Copy binary and libs from build directory directly
 	cp \$(CURDIR)/build/ddbcmd debian/ddb/usr/bin/ddb
 	cp \$(CURDIR)/build/libddb.so debian/ddb/usr/lib/
 	cp \$(CURDIR)/build/libnxs.so debian/ddb/usr/lib/
-    
+
 	# Copy PDAL libraries from vcpkg installed directory
 	cp \$(CURDIR)/build/vcpkg_installed/${VCPKG_HOST_TRIPLET}/lib/libpdalcpp.so.18 debian/ddb/usr/lib/
 	cp \$(CURDIR)/build/vcpkg_installed/${VCPKG_HOST_TRIPLET}/lib/libdbus-1.so.3 debian/ddb/usr/lib/
-    
+
 	# Create necessary symbolic links for libraries
 	ln -sf libpdalcpp.so.18 debian/ddb/usr/lib/libpdalcpp.so
 	ln -sf libdbus-1.so.3 debian/ddb/usr/lib/libdbus-1.so
-    
+
 	# Copy PDAL plugins if needed
 	mkdir -p debian/ddb/usr/lib/pdal/plugins
 	cp \$(CURDIR)/build/vcpkg_installed/${VCPKG_HOST_TRIPLET}/lib/libpdal_plugin_*.so.18 debian/ddb/usr/lib/pdal/plugins/ || true
-    
+
 	# Copy data files from build directory directly
 	cp \$(CURDIR)/build/proj.db debian/ddb/usr/share/ddb/
 	cp \$(CURDIR)/build/timezone21.bin debian/ddb/usr/share/ddb/
 	cp \$(CURDIR)/build/sensor_data.sqlite debian/ddb/usr/share/ddb/
 	cp \$(CURDIR)/build/curl-ca-bundle.crt debian/ddb/usr/share/ddb/
-    
+
 	# Set permissions
 	chmod +x debian/ddb/usr/bin/ddb
 EOF

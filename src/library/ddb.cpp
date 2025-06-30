@@ -58,10 +58,11 @@ void DDBRegisterProcess(bool verbose) {
     std::string projPaths =
         io::getExeFolderPath().string() + ":/opt/homebrew/share/proj:/usr/local/share/proj";
 #else
-    std::string projPaths = io::getExeFolderPath().string() + ":/usr/share/proj";
+    std::string projPaths = io::getExeFolderPath().string() + ":/usr/share/ddb";
 #endif
 
     setenv("PROJ_LIB", projPaths.c_str(), 1);
+    setenv("PROJ_DATA", projPaths.c_str(), 1);
 #endif
 
 #if !defined(WIN32) && !defined(__APPLE__)
