@@ -5,6 +5,7 @@
 #include "ddb.h"
 
 #include <cpr/cpr.h>
+#include <mutex>
 
 #include "../../vendor/segvcatch/segvcatch.h"
 #include "build.h"
@@ -32,12 +33,11 @@ using namespace ddb;
 
 char ddbLastError[255];
 
-// Could not be enough in a multi-threaded environment: check std::once_flag and
-// std::call_once instead
-static bool initialized = false;
+// Thread-safe initialization using std::once_flag
+static std::once_flag initialization_flag;
 
 void handleSegv() {
-    throw ddb::AppException("Application encoutered a segfault");
+    throw ddb::AppException("Application encountered a segfault");
 }
 
 void handleFpe() {
@@ -45,58 +45,68 @@ void handleFpe() {
 }
 
 void DDBRegisterProcess(bool verbose) {
-    // Prevent multiple initializations
-    if (initialized) {
-        LOGD << "Called DDBRegisterProcess when already initialized";
-        return;
-    }
+    // Thread-safe initialization using std::call_once
+    std::call_once(initialization_flag, [verbose]() {
+        LOGD << "Initializing DDB process";
 
 #ifndef WIN32
 // Windows does not let us change env vars for some reason
 // so this works only on Unix
+
+        const auto exeFolder = io::getExeFolderPath().string();
+
 #ifdef __APPLE__
-    std::string projPaths =
-        io::getExeFolderPath().string() + ":/opt/homebrew/share/proj:/usr/local/share/proj";
+        std::string projPaths =
+            exeFolder + ":/opt/homebrew/share/proj:/usr/local/share/proj";
+        std::string gdalDataPath = exeFolder + ":/opt/homebrew/share/gdal:/usr/local/share/gdal";
 #else
-    std::string projPaths = io::getExeFolderPath().string() + ":/usr/share/ddb";
+        std::string projPaths = exeFolder + ":/usr/share/ddb";
+        std::string gdalDataPath = exeFolder + ":/usr/share/gdal";
 #endif
 
-    setenv("PROJ_LIB", projPaths.c_str(), 1);
-    setenv("PROJ_DATA", projPaths.c_str(), 1);
+        // If they are not set, set them to the default paths
+        if (std::getenv("PROJ_LIB") == nullptr)
+            setenv("PROJ_LIB", projPaths.c_str(), 1);
+
+        if (std::getenv("PROJ_DATA") == nullptr)
+            setenv("PROJ_DATA", projPaths.c_str(), 1);
+
+        if (std::getenv("GDAL_DATA") == nullptr)
+            setenv("GDAL_DATA", gdalDataPath.c_str(), 1);
+
 #endif
 
 #if !defined(WIN32) && !defined(__APPLE__)
-    try {
-        std::locale("");  // Raises a runtime error if current locale is invalid
-    } catch (const std::runtime_error&) {
-        setenv("LC_ALL", "C", 1);
-    }
+        try {
+            std::locale("");  // Raises a runtime error if current locale is invalid
+        } catch (const std::runtime_error&) {
+            setenv("LC_ALL", "C", 1);
+        }
 #endif
 
 #ifdef WIN32
-    // Allow path.string() calls to work with Unicode filenames
-    std::setlocale(LC_CTYPE, "en_US.UTF8");
+        // Allow path.string() calls to work with Unicode filenames
+        std::setlocale(LC_CTYPE, "en_US.UTF8");
 #endif
 
-    // Gets the environment variable to enable logging to file
-    const auto logToFile = std::getenv(DDB_LOG_ENV) != nullptr;
+        // Gets the environment variable to enable logging to file
+        const auto logToFile = std::getenv(DDB_LOG_ENV) != nullptr;
 
-    // Enable verbose logging if the environment variable is set
-    verbose = verbose || std::getenv(DDB_DEBUG_ENV) != nullptr;
+        // Enable verbose logging if the environment variable is set
+        bool enableVerbose = verbose || std::getenv(DDB_DEBUG_ENV) != nullptr;
 
-    init_logger(logToFile);
-    if (verbose || logToFile) {
-        set_logger_verbose();
-    }
+        init_logger(logToFile);
+        if (enableVerbose || logToFile) {
+            set_logger_verbose();
+        }
 
-    GDALAllRegister();
+        GDALAllRegister();
 
-    // Black magic to catch segfaults/fpes and throw
-    // C++ exceptions instead
-    segvcatch::init_segv(&handleSegv);
-    segvcatch::init_fpe(&handleFpe);
-
-    initialized = true;
+        // Setup signal handlers to catch segfaults/fpes and throw
+        // C++ exceptions instead
+        segvcatch::init_segv(&handleSegv);
+        segvcatch::init_fpe(&handleFpe);
+    });
 }
 
 const char* DDBGetVersion() {
@@ -451,7 +461,9 @@ DDBErr DDBGenerateThumbnail(const char* filePath, int size, const char* destPath
         throw InvalidArgsException("No destination path provided");
 
     if (size < 0)
-        throw InvalidArgsException("Invalid size parameter");    const auto imagePath = fs::path(filePath);
+        throw InvalidArgsException("Invalid size parameter");
+
+    const auto imagePath = fs::path(filePath);
     const auto thumbPath = fs::path(destPath);
 
     generateThumb(imagePath, size, thumbPath, true, nullptr, nullptr);
