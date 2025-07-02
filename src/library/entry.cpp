@@ -170,29 +170,52 @@ namespace ddb
             }
             else if (entry.type == EntryType::GeoRaster)
             {
+                LOGV << "Processing GeoRaster file: " << path.string();
+
                 GDALDatasetH hDataset;
                 hDataset = GDALOpen(path.string().c_str(), GA_ReadOnly);
                 if (!hDataset)
+                {
+                    LOGV << "GDAL failed to open dataset: " << path.string();
                     throw GDALException("Cannot open " + path.string() + " for reading");
+                }
+
+                LOGV << "GDAL successfully opened dataset";
 
                 int width = GDALGetRasterXSize(hDataset);
                 int height = GDALGetRasterYSize(hDataset);
+
+                LOGV << "Raster dimensions - Width: " << width << ", Height: " << height;
 
                 entry.properties["width"] = width;
                 entry.properties["height"] = height;
 
                 double geotransform[6];
-                if (GDALGetGeoTransform(hDataset, geotransform) == CE_None)
+                CPLErr geoTransformResult = GDALGetGeoTransform(hDataset, geotransform);
+                LOGV << "GDALGetGeoTransform result: " << (geoTransformResult == CE_None ? "Success" : "Failed");
+
+                if (geoTransformResult == CE_None)
                 {
+                    LOGV << "Geotransform values: ["
+                         << geotransform[0] << ", " << geotransform[1] << ", " << geotransform[2] << ", "
+                         << geotransform[3] << ", " << geotransform[4] << ", " << geotransform[5] << "]";
+
                     entry.properties["geotransform"] = json::array();
                     for (int i = 0; i < 6; i++)
                         entry.properties["geotransform"].push_back(geotransform[i]);
 
-                    if (GDALGetProjectionRef(hDataset) != NULL)
+                    const char* projectionRef = GDALGetProjectionRef(hDataset);
+                    LOGV << "GDALGetProjectionRef result: " << (projectionRef != NULL ? "Found" : "NULL");
+
+                    if (projectionRef != NULL)
                     {
-                        std::string wkt = GDALGetProjectionRef(hDataset);
+                        std::string wkt = projectionRef;
+                        LOGV << "WKT string length: " << wkt.length();
+                        LOGV << "WKT content (first 200 chars): " << wkt.substr(0, 200);
+
                         if (!wkt.empty())
                         {
+                            LOGV << "Setting projection property";
                             // Set projection
                             entry.properties["projection"] = wkt;
 
@@ -201,51 +224,115 @@ namespace ddb
                             OGRSpatialReferenceH hSrs = OSRNewSpatialReference(nullptr);
                             OGRSpatialReferenceH hWgs84 = OSRNewSpatialReference(nullptr);
 
-                            if (OSRImportFromWkt(hSrs, &wktp) != OGRERR_NONE)
+                            LOGV << "Created spatial reference objects";
+
+                            OGRErr importResult = OSRImportFromWkt(hSrs, &wktp);
+                            LOGV << "OSRImportFromWkt result: " << (importResult == OGRERR_NONE ? "Success" : "Failed");
+
+                            if (importResult != OGRERR_NONE)
                             {
+                                LOGV << "Failed to import WKT, cleaning up spatial references";
+                                OSRDestroySpatialReference(hWgs84);
+                                OSRDestroySpatialReference(hSrs);
                                 throw GDALException("Cannot read spatial reference system for " + path.string() + ". Is PROJ available?");
                             }
-                            OSRSetAxisMappingStrategy(hSrs, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
+                            //OSRSetAxisMappingStrategy(hSrs, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
+                            //LOGV << "Set axis mapping strategy";
 
-                            OSRImportFromEPSG(hWgs84, 4326);
+                            OGRErr epsgResult = OSRImportFromEPSG(hWgs84, 4326);
+                            LOGV << "OSRImportFromEPSG result: " << (epsgResult == OGRERR_NONE ? "Success" : "Failed");
+
                             OGRCoordinateTransformationH hTransform = OCTNewCoordinateTransformation(hSrs, hWgs84);
+                            LOGV << "Created coordinate transformation: " << (hTransform != nullptr ? "Success" : "Failed");
 
-                            auto ul = getRasterCoordinate(hTransform, geotransform, 0.0, 0.0);
-                            auto ur = getRasterCoordinate(hTransform, geotransform, width, 0);
-                            auto lr = getRasterCoordinate(hTransform, geotransform, width, height);
-                            auto ll = getRasterCoordinate(hTransform, geotransform, 0.0, height);
+                            if (hTransform != nullptr)
+                            {
+                                LOGV << "Computing corner coordinates";
 
-                            entry.polygon_geom.addPoint(ul.longitude, ul.latitude, 0.0);
-                            entry.polygon_geom.addPoint(ur.longitude, ur.latitude, 0.0);
-                            entry.polygon_geom.addPoint(lr.longitude, lr.latitude, 0.0);
-                            entry.polygon_geom.addPoint(ll.longitude, ll.latitude, 0.0);
-                            entry.polygon_geom.addPoint(ul.longitude, ul.latitude, 0.0);
+                                auto ul = getRasterCoordinate(hTransform, geotransform, 0.0, 0.0);
+                                LOGV << "Upper Left: " << ul.latitude << ", " << ul.longitude;
 
-                            auto center = getRasterCoordinate(hTransform, geotransform, width / 2.0, height / 2.0);
-                            entry.point_geom.addPoint(center.longitude, center.latitude, 0.0);
+                                auto ur = getRasterCoordinate(hTransform, geotransform, width, 0);
+                                LOGV << "Upper Right: " << ur.latitude << ", " << ur.longitude;
 
-                            OCTDestroyCoordinateTransformation(hTransform);
+                                auto lr = getRasterCoordinate(hTransform, geotransform, width, height);
+                                LOGV << "Lower Right: " << lr.latitude << ", " << lr.longitude;
+
+                                auto ll = getRasterCoordinate(hTransform, geotransform, 0.0, height);
+                                LOGV << "Lower Left: " << ll.latitude << ", " << ll.longitude;
+
+                                LOGV << "Adding points to polygon geometry";
+                                entry.polygon_geom.addPoint(ul.longitude, ul.latitude, 0.0);
+                                entry.polygon_geom.addPoint(ur.longitude, ur.latitude, 0.0);
+                                entry.polygon_geom.addPoint(lr.longitude, lr.latitude, 0.0);
+                                entry.polygon_geom.addPoint(ll.longitude, ll.latitude, 0.0);
+                                entry.polygon_geom.addPoint(ul.longitude, ul.latitude, 0.0);
+
+                                auto center = getRasterCoordinate(hTransform, geotransform, width / 2.0, height / 2.0);
+                                LOGV << "Center point: " << center.latitude << ", " << center.longitude;
+                                entry.point_geom.addPoint(center.longitude, center.latitude, 0.0);
+
+                                OCTDestroyCoordinateTransformation(hTransform);
+                                LOGV << "Destroyed coordinate transformation";
+                            }
+                            else
+                            {
+                                LOGV << "Failed to create coordinate transformation";
+                            }
+
                             OSRDestroySpatialReference(hWgs84);
                             OSRDestroySpatialReference(hSrs);
+                            LOGV << "Cleaned up spatial reference objects";
                         }
                         else
                         {
                             LOGD << "Projection is empty";
                         }
                     }
+                    else
+                    {
+                        LOGV << "No projection reference found in dataset";
+                    }
                 }
+                else
+                {
+                    LOGV << "No geotransform found in dataset";
+                }
+
+                int bandCount = GDALGetRasterCount(hDataset);
+                LOGV << "Number of raster bands: " << bandCount;
 
                 entry.properties["bands"] = json::array();
-                for (int i = 0; i < GDALGetRasterCount(hDataset); i++)
+                for (int i = 0; i < bandCount; i++)
                 {
+                    LOGV << "Processing band " << (i + 1) << " of " << bandCount;
+
                     GDALRasterBandH hBand = GDALGetRasterBand(hDataset, i + 1);
-                    auto b = json::object();
-                    b["type"] = GDALGetDataTypeName(GDALGetRasterDataType(hBand));
-                    b["colorInterp"] = GDALGetColorInterpretationName(GDALGetRasterColorInterpretation(hBand));
-                    entry.properties["bands"].push_back(b);
+                    if (hBand != nullptr)
+                    {
+                        auto b = json::object();
+
+                        GDALDataType dataType = GDALGetRasterDataType(hBand);
+                        const char* dataTypeName = GDALGetDataTypeName(dataType);
+                        LOGV << "Band " << (i + 1) << " data type: " << dataTypeName;
+                        b["type"] = dataTypeName;
+
+                        GDALColorInterp colorInterp = GDALGetRasterColorInterpretation(hBand);
+                        const char* colorInterpName = GDALGetColorInterpretationName(colorInterp);
+                        LOGV << "Band " << (i + 1) << " color interpretation: " << colorInterpName;
+                        b["colorInterp"] = colorInterpName;
+
+                        entry.properties["bands"].push_back(b);
+                    }
+                    else
+                    {
+                        LOGV << "Failed to get band " << (i + 1);
+                    }
                 }
 
+                LOGV << "Closing GDAL dataset";
                 GDALClose(hDataset);
+                LOGV << "GeoRaster processing completed successfully";
             }
             else if (entry.type == EntryType::PointCloud)
             {
