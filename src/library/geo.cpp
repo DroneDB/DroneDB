@@ -85,15 +85,20 @@ namespace ddb
         OGRSpatialReferenceH hWgs84 = OSRNewSpatialReference(nullptr);
 
         std::string proj = getProjForUTM(zone);
+
         if (OSRImportFromProj4(hSrs, proj.c_str()) != OGRERR_NONE)
         {
+            OSRDestroySpatialReference(hWgs84);
+            OSRDestroySpatialReference(hSrs);
             throw GDALException("Cannot import spatial reference system " + proj + ". Is PROJ available?");
         }
+
         OSRImportFromEPSG(hWgs84, 4326);
         OGRCoordinateTransformationH hTransform = OCTNewCoordinateTransformation(hWgs84, hSrs);
 
         double geoX = latitude;
         double geoY = longitude;
+
         if (OCTTransform(hTransform, 1, &geoX, &geoY, nullptr))
         {
             OCTDestroyCoordinateTransformation(hTransform);
@@ -104,6 +109,9 @@ namespace ddb
         }
         else
         {
+            OCTDestroyCoordinateTransformation(hTransform);
+            OSRDestroySpatialReference(hWgs84);
+            OSRDestroySpatialReference(hSrs);
             throw GDALException("Cannot transform coordinates to UTM " + std::to_string(latitude) + "," + std::to_string(longitude));
         }
     }
@@ -121,6 +129,8 @@ namespace ddb
         std::string proj = getProjForUTM(zone);
         if (OSRImportFromProj4(hSrs, proj.c_str()) != OGRERR_NONE)
         {
+            OSRDestroySpatialReference(hWgs84);
+            OSRDestroySpatialReference(hSrs);
             throw GDALException("Cannot import spatial reference system " + proj + ". Is PROJ available?");
         }
         OSRImportFromEPSG(hWgs84, 4326);
@@ -138,7 +148,10 @@ namespace ddb
         }
         else
         {
-            throw GDALException("Cannot transform coordinates to UTM " + std::to_string(x) + "," + std::to_string(y));
+            OCTDestroyCoordinateTransformation(hTransform);
+            OSRDestroySpatialReference(hWgs84);
+            OSRDestroySpatialReference(hSrs);
+            throw GDALException("Cannot transform coordinates from UTM " + std::to_string(x) + "," + std::to_string(y));
         }
     }
 
