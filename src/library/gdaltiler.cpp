@@ -36,9 +36,15 @@ namespace ddb
         if (OSRExportToProj4(a, &aProj) != CE_None)
             throw GDALException("Cannot export proj4");
         if (OSRExportToProj4(b, &bProj) != CE_None)
+        {
+            CPLFree(aProj);
             throw GDALException("Cannot export proj4");
+        }
 
-        return std::string(aProj) == std::string(bProj);
+        bool result = std::string(aProj) == std::string(bProj);
+        CPLFree(aProj);
+        CPLFree(bProj);
+        return result;
     }
 
     int GDALTiler::dataBandsCount(const GDALDatasetH &dataset)
@@ -220,21 +226,20 @@ namespace ddb
             uint8_t *buffer =
                 new uint8_t[GDALGetDataTypeSizeBytes(type) * cappedBands * wSize];
 
-            if (GDALDatasetRasterIO(inputDataset, GF_Read, g.r.x, g.r.y, g.r.xsize,
-                                    g.r.ysize, buffer, g.w.xsize, g.w.ysize, type,
-                                    cappedBands, nullptr, 0, 0, 0) != CE_None)
+            try
             {
-                throw GDALException("Cannot read input dataset window");
-            }
+                if (GDALDatasetRasterIO(inputDataset, GF_Read, g.r.x, g.r.y, g.r.xsize,
+                                        g.r.ysize, buffer, g.w.xsize, g.w.ysize, type,
+                                        cappedBands, nullptr, 0, 0, 0) != CE_None)
+                {
+                    delete[] buffer;
+                    throw GDALException("Cannot read input dataset window");
+                }
 
-            // Rescale if needed
-            // We currently don't rescale byte datasets
-            // TODO: allow people to specify rescale values
-
-            if (type != GDT_Byte && type != GDT_Unknown)
-            {
-                uint8_t *scaledBuffer = new uint8_t[GDALGetDataTypeSizeBytes(GDT_Byte) * cappedBands * wSize];
-                size_t bufSize = wSize * cappedBands;
+                if (type != GDT_Byte && type != GDT_Unknown)
+                {
+                    uint8_t *scaledBuffer = new uint8_t[GDALGetDataTypeSizeBytes(GDT_Byte) * cappedBands * wSize];
+                    size_t bufSize = wSize * cappedBands;
 
                 double globalMin = std::numeric_limits<double>::max(),
                        globalMax = std::numeric_limits<double>::min();
@@ -302,24 +307,26 @@ namespace ddb
             if (alphaBand == nullptr)
                 alphaBand = GDALGetMaskBand(raster);
 
-            uint8_t *alphaBuffer =
-                new uint8_t[GDALGetDataTypeSizeBytes(GDT_Byte) * wSize];
-            if (GDALRasterIO(alphaBand, GF_Read, g.r.x, g.r.y, g.r.xsize, g.r.ysize,
-                             alphaBuffer, g.w.xsize, g.w.ysize, GDT_Byte, 0,
-                             0) != CE_None)
-            {
-                throw GDALException("Cannot read input dataset alpha window");
-            }
+                uint8_t *alphaBuffer =
+                    new uint8_t[GDALGetDataTypeSizeBytes(GDT_Byte) * wSize];
+                if (GDALRasterIO(alphaBand, GF_Read, g.r.x, g.r.y, g.r.xsize, g.r.ysize,
+                                 alphaBuffer, g.w.xsize, g.w.ysize, GDT_Byte, 0,
+                                 0) != CE_None)
+                {
+                    delete[] buffer;
+                    delete[] alphaBuffer;
+                    throw GDALException("Cannot read input dataset alpha window");
+                }
 
             // Write data
 
-            if (tileSize == querySize)
-            {
                 if (GDALDatasetRasterIO(dsTile, GF_Write, g.w.x, g.w.y, g.w.xsize,
                                         g.w.ysize, buffer, g.w.xsize, g.w.ysize,
                                         GDT_Byte, cappedBands, nullptr, 0, 0,
                                         0) != CE_None)
                 {
+                    delete[] buffer;
+                    delete[] alphaBuffer;
                     throw GDALException("Cannot write tile data");
                 }
 
@@ -333,6 +340,8 @@ namespace ddb
                                  g.w.ysize, alphaBuffer, g.w.xsize, g.w.ysize,
                                  GDT_Byte, 0, 0) != CE_None)
                 {
+                    delete[] buffer;
+                    delete[] alphaBuffer;
                     throw GDALException("Cannot write tile alpha data");
                 }
 
@@ -341,11 +350,19 @@ namespace ddb
             else
             {
                 // TODO: readraster query in memory scaled to tilesize
+                delete[] buffer;
+                delete[] alphaBuffer;
                 throw GDALException("Not implemented");
             }
 
             delete[] buffer;
             delete[] alphaBuffer;
+        }
+        catch (...)
+        {
+            delete[] buffer;
+            throw;
+        }
         }
         else
         {
@@ -423,9 +440,14 @@ namespace ddb
         const GDALDatasetH warpedVrt = GDALAutoCreateWarpedVRT(
             src, srcWkt, dstWkt, resampling, 0.001, opts);
         if (warpedVrt == nullptr)
+        {
+            GDALDestroyWarpOptions(opts);
+            CPLFree(dstWkt);
             throw GDALException("Cannot create warped VRT");
+        }
 
         GDALDestroyWarpOptions(opts);
+        CPLFree(dstWkt);
 
         return warpedVrt;
     }
