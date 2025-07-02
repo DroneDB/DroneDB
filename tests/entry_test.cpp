@@ -69,7 +69,7 @@ Polygon Geometry: [[-41.06584339802, 175.4029416126, 0] [-41.06581965903, 175.40
 
     }
 
-        TEST(parseNZGD2000, Normal)
+    TEST(parseWGS84 , Normal)
     {
         TestArea ta(TEST_NAME);
         fs::path pc = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/refs/heads/master/ortho/wro.tif",
