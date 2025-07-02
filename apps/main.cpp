@@ -69,6 +69,10 @@ int main(int argc, char *argv[])
         LOGV << subsystem.first << " version: " << subsystem.second;
     }
 
+    LOGV << "PROJ_LIB = " << getenv("PROJ_LIB");
+    LOGV << "GDAL_DATA = " << getenv("GDAL_DATA");
+    LOGV << "PROJ_DATA = " << getenv("PROJ_DATA");
+
     if (argc <= 1)
         printHelp(argv);
     else
