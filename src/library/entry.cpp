@@ -75,7 +75,7 @@ namespace ddb
                 {
                     auto exivImage = Exiv2::ImageFactory::open(path.string());
                     if (!exivImage.get())
-                        throw new IndexException("Cannot open " + path.string());
+                        throw IndexException("Cannot open " + path.string());
 
                     exivImage->readMetadata();
                     ExifParser e(exivImage.get());
@@ -639,7 +639,7 @@ namespace ddb
             {
                 auto image = Exiv2::ImageFactory::open(path.string());
                 if (!image.get())
-                    throw new IndexException("Cannot open " + path.string());
+                    throw IndexException("Cannot open " + path.string());
 
                 image->readMetadata();
                 ExifParser e(image.get());

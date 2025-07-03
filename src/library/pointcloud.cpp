@@ -262,10 +262,17 @@ namespace ddb
         OGRSpatialReferenceH hTgt = OSRNewSpatialReference(nullptr);
 
         char *wkt = strdup(info.wktProjection.c_str());
-        if (OSRImportFromWkt(hSrs, &wkt) != OGRERR_NONE)
+
+        char* wktPointer = wkt;
+
+        if (OSRImportFromWkt(hSrs, &wktPointer) != OGRERR_NONE)
         {
+            free(wkt);
+            OSRDestroySpatialReference(hTgt);
+            OSRDestroySpatialReference(hSrs);
             throw GDALException("Cannot import spatial reference system " + info.wktProjection + ". Is PROJ available?");
         }
+        free(wkt);
         OSRSetAxisMappingStrategy(hSrs, OAMS_TRADITIONAL_GIS_ORDER);
 
         OSRImportFromEPSG(hTgt, polyBoundsSrs);

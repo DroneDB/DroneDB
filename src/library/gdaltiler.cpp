@@ -30,15 +30,23 @@ namespace ddb
     bool GDALTiler::sameProjection(const OGRSpatialReferenceH &a,
                                    const OGRSpatialReferenceH &b)
     {
-        char *aProj;
-        char *bProj;
+        char *aProj = nullptr;
+        char *bProj = nullptr;
 
         if (OSRExportToProj4(a, &aProj) != CE_None)
             throw GDALException("Cannot export proj4");
         if (OSRExportToProj4(b, &bProj) != CE_None)
+        {
+            CPLFree(aProj);
             throw GDALException("Cannot export proj4");
+        }
 
-        return std::string(aProj) == std::string(bProj);
+        bool result = std::string(aProj) == std::string(bProj);
+
+        CPLFree(aProj);
+        CPLFree(bProj);
+
+        return result;
     }
 
     int GDALTiler::dataBandsCount(const GDALDatasetH &dataset)
@@ -149,6 +157,13 @@ namespace ddb
         if (GDALGetGeoTransform(inputDataset, outGt) != CE_None)
             throw GDALException("Cannot fetch geotransform outGt");
 
+        // Validate geotransform values
+        if (std::abs(outGt[1]) < std::numeric_limits<double>::epsilon() ||
+            std::abs(outGt[5]) < std::numeric_limits<double>::epsilon())
+        {
+            throw GDALException("Invalid geotransform: pixel size is zero");
+        }
+
         oMinX = outGt[0];
         oMaxX = outGt[0] + GDALGetRasterXSize(inputDataset) * outGt[1];
         oMaxY = outGt[3];
@@ -171,7 +186,7 @@ namespace ddb
 
     GDALTiler::~GDALTiler()
     {
-        if (inputDataset)
+        if (inputDataset && inputDataset != origDataset)
             GDALClose(inputDataset);
         if (origDataset)
             GDALClose(origDataset);
@@ -201,11 +216,9 @@ namespace ddb
 
         BoundingBox<Projected2D> b = mercator.tileBounds(tx, ty, tz);
 
-        GQResult g = geoQuery(inputDataset, b.min.x, b.max.y, b.max.x, b.min.y);
-        // int nativeSize = g.w.x + g.w.xsize;
         const int querySize = tileSize; // TODO: you will need to change this for
                                         // interpolations other than NN
-        g = geoQuery(inputDataset, b.min.x, b.max.y, b.max.x, b.min.y, querySize);
+        GQResult g = geoQuery(inputDataset, b.min.x, b.max.y, b.max.x, b.min.y, querySize);
 
         LOGD << "GeoQuery: " << g.r.x << "," << g.r.y << "|" << g.r.xsize << "x"
              << g.r.ysize << "|" << g.w.x << "," << g.w.y << "|" << g.w.xsize << "x"
@@ -217,11 +230,11 @@ namespace ddb
                 GDALGetRasterDataType(GDALGetRasterBand(inputDataset, 1));
 
             const size_t wSize = g.w.xsize * g.w.ysize;
-            uint8_t *buffer =
-                new uint8_t[GDALGetDataTypeSizeBytes(type) * cappedBands * wSize];
+            std::unique_ptr<uint8_t[]> buffer(
+                new uint8_t[GDALGetDataTypeSizeBytes(type) * cappedBands * wSize]);
 
             if (GDALDatasetRasterIO(inputDataset, GF_Read, g.r.x, g.r.y, g.r.xsize,
-                                    g.r.ysize, buffer, g.w.xsize, g.w.ysize, type,
+                                    g.r.ysize, buffer.get(), g.w.xsize, g.w.ysize, type,
                                     cappedBands, nullptr, 0, 0, 0) != CE_None)
             {
                 throw GDALException("Cannot read input dataset window");
@@ -233,7 +246,7 @@ namespace ddb
 
             if (type != GDT_Byte && type != GDT_Unknown)
             {
-                uint8_t *scaledBuffer = new uint8_t[GDALGetDataTypeSizeBytes(GDT_Byte) * cappedBands * wSize];
+                std::unique_ptr<uint8_t[]> scaledBuffer(new uint8_t[GDALGetDataTypeSizeBytes(GDT_Byte) * cappedBands * wSize]);
                 size_t bufSize = wSize * cappedBands;
 
                 double globalMin = std::numeric_limits<double>::max(),
@@ -269,32 +282,31 @@ namespace ddb
                 switch (type)
                 {
                 case GDT_Byte:
-                    rescale<uint8_t>(buffer, scaledBuffer, bufSize, globalMin, globalMax);
+                    rescale<uint8_t>(buffer.get(), scaledBuffer.get(), bufSize, globalMin, globalMax);
                     break;
                 case GDT_UInt16:
-                    rescale<uint16_t>(buffer, scaledBuffer, bufSize, globalMin, globalMax);
+                    rescale<uint16_t>(buffer.get(), scaledBuffer.get(), bufSize, globalMin, globalMax);
                     break;
                 case GDT_Int16:
-                    rescale<int16_t>(buffer, scaledBuffer, bufSize, globalMin, globalMax);
+                    rescale<int16_t>(buffer.get(), scaledBuffer.get(), bufSize, globalMin, globalMax);
                     break;
                 case GDT_UInt32:
-                    rescale<uint32_t>(buffer, scaledBuffer, bufSize, globalMin, globalMax);
+                    rescale<uint32_t>(buffer.get(), scaledBuffer.get(), bufSize, globalMin, globalMax);
                     break;
                 case GDT_Int32:
-                    rescale<int32_t>(buffer, scaledBuffer, bufSize, globalMin, globalMax);
+                    rescale<int32_t>(buffer.get(), scaledBuffer.get(), bufSize, globalMin, globalMax);
                     break;
                 case GDT_Float32:
-                    rescale<float>(buffer, scaledBuffer, bufSize, globalMin, globalMax);
+                    rescale<float>(buffer.get(), scaledBuffer.get(), bufSize, globalMin, globalMax);
                     break;
                 case GDT_Float64:
-                    rescale<double>(buffer, scaledBuffer, bufSize, globalMin, globalMax);
+                    rescale<double>(buffer.get(), scaledBuffer.get(), bufSize, globalMin, globalMax);
                     break;
                 default:
                     break;
                 }
 
-                delete[] buffer;
-                buffer = scaledBuffer;
+                buffer = std::move(scaledBuffer);
             }
 
             const GDALRasterBandH raster = GDALGetRasterBand(inputDataset, 1);
@@ -302,10 +314,10 @@ namespace ddb
             if (alphaBand == nullptr)
                 alphaBand = GDALGetMaskBand(raster);
 
-            uint8_t *alphaBuffer =
-                new uint8_t[GDALGetDataTypeSizeBytes(GDT_Byte) * wSize];
+            std::unique_ptr<uint8_t[]> alphaBuffer(
+                new uint8_t[GDALGetDataTypeSizeBytes(GDT_Byte) * wSize]);
             if (GDALRasterIO(alphaBand, GF_Read, g.r.x, g.r.y, g.r.xsize, g.r.ysize,
-                             alphaBuffer, g.w.xsize, g.w.ysize, GDT_Byte, 0,
+                             alphaBuffer.get(), g.w.xsize, g.w.ysize, GDT_Byte, 0,
                              0) != CE_None)
             {
                 throw GDALException("Cannot read input dataset alpha window");
@@ -316,7 +328,7 @@ namespace ddb
             if (tileSize == querySize)
             {
                 if (GDALDatasetRasterIO(dsTile, GF_Write, g.w.x, g.w.y, g.w.xsize,
-                                        g.w.ysize, buffer, g.w.xsize, g.w.ysize,
+                                        g.w.ysize, buffer.get(), g.w.xsize, g.w.ysize,
                                         GDT_Byte, cappedBands, nullptr, 0, 0,
                                         0) != CE_None)
                 {
@@ -330,7 +342,7 @@ namespace ddb
                 GDALSetRasterColorInterpretation(tileAlphaBand, GCI_AlphaBand);
 
                 if (GDALRasterIO(tileAlphaBand, GF_Write, g.w.x, g.w.y, g.w.xsize,
-                                 g.w.ysize, alphaBuffer, g.w.xsize, g.w.ysize,
+                                 g.w.ysize, alphaBuffer.get(), g.w.xsize, g.w.ysize,
                                  GDT_Byte, 0, 0) != CE_None)
                 {
                     throw GDALException("Cannot write tile alpha data");
@@ -343,9 +355,6 @@ namespace ddb
                 // TODO: readraster query in memory scaled to tilesize
                 throw GDALException("Not implemented");
             }
-
-            delete[] buffer;
-            delete[] alphaBuffer;
         }
         else
         {
@@ -405,7 +414,7 @@ namespace ddb
                                             const OGRSpatialReferenceH &srs,
                                             GDALResampleAlg resampling)
     {
-        char *dstWkt;
+        char *dstWkt = nullptr;
         if (OSRExportToWkt(srs, &dstWkt) != OGRERR_NONE)
             throw GDALException("Cannot export dst WKT " + inputPath +
                                 ". Is PROJ available?");
@@ -422,8 +431,14 @@ namespace ddb
 
         const GDALDatasetH warpedVrt = GDALAutoCreateWarpedVRT(
             src, srcWkt, dstWkt, resampling, 0.001, opts);
+
+        CPLFree(dstWkt);
+
         if (warpedVrt == nullptr)
+        {
+            GDALDestroyWarpOptions(opts);
             throw GDALException("Cannot create warped VRT");
+        }
 
         GDALDestroyWarpOptions(opts);
 
@@ -437,6 +452,13 @@ namespace ddb
         double geo[6];
         if (GDALGetGeoTransform(ds, geo) != CE_None)
             throw GDALException("Cannot fetch geotransform geo");
+
+        // Check for division by zero
+        if (std::abs(geo[1]) < std::numeric_limits<double>::epsilon() ||
+            std::abs(geo[5]) < std::numeric_limits<double>::epsilon())
+        {
+            throw GDALException("Invalid geotransform: pixel size is zero");
+        }
 
         o.r.x = static_cast<int>((ulx - geo[0]) / geo[1] + 0.001);
         o.r.y = static_cast<int>((uly - geo[3]) / geo[5] + 0.001);
@@ -458,13 +480,16 @@ namespace ddb
         if (o.r.x < 0)
         {
             const int rxShift = std::abs(o.r.x);
-            o.w.x = static_cast<int>(o.w.xsize * (static_cast<double>(rxShift) /
+            if (o.r.xsize > 0)
+            {
+                o.w.x = static_cast<int>(o.w.xsize * (static_cast<double>(rxShift) /
+                                                      static_cast<double>(o.r.xsize)));
+                o.w.xsize = o.w.xsize - o.w.x;
+                o.r.xsize =
+                    o.r.xsize -
+                    static_cast<int>(o.r.xsize * (static_cast<double>(rxShift) /
                                                   static_cast<double>(o.r.xsize)));
-            o.w.xsize = o.w.xsize - o.w.x;
-            o.r.xsize =
-                o.r.xsize -
-                static_cast<int>(o.r.xsize * (static_cast<double>(rxShift) /
-                                              static_cast<double>(o.r.xsize)));
+            }
             o.r.x = 0;
         }
 
@@ -473,10 +498,13 @@ namespace ddb
 
         if (o.r.x + o.r.xsize > rasterXSize)
         {
-            o.w.xsize = static_cast<int>(
-                o.w.xsize *
-                (static_cast<double>(rasterXSize) - static_cast<double>(o.r.x)) /
-                static_cast<double>(o.r.xsize));
+            if (o.r.xsize > 0)
+            {
+                o.w.xsize = static_cast<int>(
+                    o.w.xsize *
+                    (static_cast<double>(rasterXSize) - static_cast<double>(o.r.x)) /
+                    static_cast<double>(o.r.xsize));
+            }
             o.r.xsize = rasterXSize - o.r.x;
         }
 
@@ -484,22 +512,28 @@ namespace ddb
         if (o.r.y < 0)
         {
             const int ryShift = std::abs(o.r.y);
-            o.w.y = static_cast<int>(o.w.ysize * (static_cast<double>(ryShift) /
+            if (o.r.ysize > 0)
+            {
+                o.w.y = static_cast<int>(o.w.ysize * (static_cast<double>(ryShift) /
+                                                      static_cast<double>(o.r.ysize)));
+                o.w.ysize = o.w.ysize - o.w.y;
+                o.r.ysize =
+                    o.r.ysize -
+                    static_cast<int>(o.r.ysize * (static_cast<double>(ryShift) /
                                                   static_cast<double>(o.r.ysize)));
-            o.w.ysize = o.w.ysize - o.w.y;
-            o.r.ysize =
-                o.r.ysize -
-                static_cast<int>(o.r.ysize * (static_cast<double>(ryShift) /
-                                              static_cast<double>(o.r.ysize)));
+            }
             o.r.y = 0;
         }
 
         if (o.r.y + o.r.ysize > rasterYSize)
         {
-            o.w.ysize = static_cast<int>(
-                o.w.ysize *
-                (static_cast<double>(rasterYSize) - static_cast<double>(o.r.y)) /
-                static_cast<double>(o.r.ysize));
+            if (o.r.ysize > 0)
+            {
+                o.w.ysize = static_cast<int>(
+                    o.w.ysize *
+                    (static_cast<double>(rasterYSize) - static_cast<double>(o.r.y)) /
+                    static_cast<double>(o.r.ysize));
+            }
             o.r.ysize = rasterYSize - o.r.y;
         }
 
@@ -516,7 +550,6 @@ namespace ddb
             if (GDALGetRasterColorInterpretation(b) == GCI_AlphaBand)
             {
                 return b;
-                break;
             }
         }
         return nullptr;

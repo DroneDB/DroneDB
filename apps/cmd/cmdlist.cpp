@@ -36,6 +36,21 @@
 namespace cmd
 {
 
+  // Funzione di cleanup per rilasciare tutti i Command* allocati
+  void cleanupCommands() {
+    for (auto& pair : commands) {
+      delete pair.second;
+      pair.second = nullptr;
+    }
+    commands.clear();
+  }
+
+  // Registra la funzione di cleanup per essere chiamata all'uscita
+  static bool cleanupRegistered = []() {
+    std::atexit(cleanupCommands);
+    return true;
+  }();
+
   std::map<std::string, Command *> commands = {
       {"build", new Build()},
       {"init", new Init()},
