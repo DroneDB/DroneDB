@@ -103,5 +103,39 @@ Polygon Geometry: [[-119.8804248213, 34.40867109444, 0] [-119.8799862706, 34.408
 
     }
 
+    TEST(parseEntry, EPSG4326)
+    {
+        TestArea ta(TEST_NAME);
+        fs::path pc = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/refs/heads/master/ortho/mygla.tif",
+                                           "mygla.tif");
+
+        Entry e;
+
+        parseEntry(pc, ta.getFolder(), e, false);
+
+        /* Expected values
+
+Point Geometry: [[18.87316389147, 49.59384747285, 0] ]
+Polygon Geometry: [[18.87265311725, 49.59426247208, 0] [18.87363777003, 49.59428057246, 0] [18.87367465697, 49.59343247122, 0] [18.87269002125, 49.59341437138, 0] [18.87265311725, 49.59426247208, 0] ]
+
+        */
+
+        EXPECT_EQ(e.point_geom.size(), 1);
+        EXPECT_EQ(e.polygon_geom.size(), 5);
+        EXPECT_NEAR(e.point_geom.getPoint(0).x, 18.87316389147, 1e-9);
+        EXPECT_NEAR(e.point_geom.getPoint(0).y, 49.59384747285, 1e-9);
+        EXPECT_NEAR(e.polygon_geom.getPoint(0).x, 18.87265311725, 1e-9);
+        EXPECT_NEAR(e.polygon_geom.getPoint(0).y, 49.59426247208, 1e-9);
+        EXPECT_NEAR(e.polygon_geom.getPoint(1).x, 18.87363777003, 1e-9);
+        EXPECT_NEAR(e.polygon_geom.getPoint(1).y, 49.59428057246, 1e-9);
+        EXPECT_NEAR(e.polygon_geom.getPoint(2).x, 18.87367465697, 1e-9);
+        EXPECT_NEAR(e.polygon_geom.getPoint(2).y, 49.59343247122, 1e-9);
+        EXPECT_NEAR(e.polygon_geom.getPoint(3).x, 18.87269002125, 1e-9);
+        EXPECT_NEAR(e.polygon_geom.getPoint(3).y, 49.59341437138, 1e-9);
+        EXPECT_NEAR(e.polygon_geom.getPoint(4).x, 18.87265311725, 1e-9);
+        EXPECT_NEAR(e.polygon_geom.getPoint(4).y, 49.59426247208, 1e-9);
+
+    }
+
 
 }
