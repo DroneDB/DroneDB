@@ -10,7 +10,10 @@
 #include "mio.h"
 #include "pointcloud.h"
 #include "ply.h"
-#include "ogr_srs_api.h"
+#include "gdal_priv.h"
+#include "cpl_conv.h"
+#include "ogr_spatialref.h"
+#include "ogr_api.h"
 
 namespace ddb
 {
@@ -237,11 +240,22 @@ namespace ddb
                                 throw GDALException("Cannot read spatial reference system for " + path.string() + ". Is PROJ available?");
                             }
 
-                            OSRSetAxisMappingStrategy(hSrs, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
-                            LOGV << "Set axis mapping strategy";
+                            OSRSetAxisMappingStrategy(hSrs, OSRAxisMappingStrategy::OAMS_AUTHORITY_COMPLIANT);
+                            LOGV << "Set source axis mapping strategy";
 
                             OGRErr epsgResult = OSRImportFromEPSG(hWgs84, 4326);
                             LOGV << "OSRImportFromEPSG result: " << (epsgResult == OGRERR_NONE ? "Success" : "Failed");
+
+                            OSRSetAxisMappingStrategy(hWgs84, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
+                            LOGV << "Set dest axis mapping strategy";
+
+                            if (epsgResult != OGRERR_NONE)
+                            {
+                                LOGV << "Failed to import WGS84 EPSG, cleaning up spatial references";
+                                OSRDestroySpatialReference(hWgs84);
+                                OSRDestroySpatialReference(hSrs);
+                                throw GDALException("Cannot read WGS84 spatial reference system for " + path.string() + ". Is PROJ available?");
+                            }
 
                             OGRCoordinateTransformationH hTransform = OCTNewCoordinateTransformation(hSrs, hWgs84);
                             LOGV << "Created coordinate transformation: " << (hTransform != nullptr ? "Success" : "Failed");
@@ -270,7 +284,7 @@ namespace ddb
                                 entry.polygon_geom.addPoint(ul.longitude, ul.latitude, 0.0);
 
                                 auto center = getRasterCoordinate(hTransform, geotransform, width / 2.0, height / 2.0);
-                                LOGV << "Center point: " << center.latitude << ", " << center.longitude;
+                                LOGV << "Center point: " << center.longitude << ", " << center.latitude;
                                 entry.point_geom.addPoint(center.longitude, center.latitude, 0.0);
 
                                 OCTDestroyCoordinateTransformation(hTransform);
@@ -355,7 +369,35 @@ namespace ddb
 
         if (OCTTransform(hTransform, 1, &dfGeoX, &dfGeoY, nullptr))
         {
-            return Geographic2D(dfGeoY, dfGeoX);
+            /*
+            // Get the target coordinate system to check axis order
+            OGRSpatialReferenceH hTargetSRS = OCTGetTargetCS(hTransform);
+
+            // Check if we need to swap coordinates based on axis order
+            bool needSwap = false;
+            if (hTargetSRS != nullptr && OSRIsGeographic(hTargetSRS)) {
+                // For geographic CRS, check if first axis is latitude (north)
+                OGRAxisOrientation eOrientation;
+                OSRGetAxis(hTargetSRS, nullptr, 0, &eOrientation);
+
+                if (eOrientation == OAO_North) {
+
+                    LOGD << "First axis is latitude, swapping coordinates";
+                    // First axis is latitude, so transform returned (lat, lon)
+                    // but we need (lon, lat) for Geographic2D
+                    needSwap = true;
+                }
+            }
+
+            if (needSwap) {
+                // Transform returned (lat, lon) but we need (lon, lat)
+                return Geographic2D(dfGeoY, dfGeoX);
+            } else {
+                // Transform returned (lon, lat) - correct order
+                return Geographic2D(dfGeoX, dfGeoY);
+            }*/
+
+            return Geographic2D(dfGeoX, dfGeoY);
         }
         else
         {
