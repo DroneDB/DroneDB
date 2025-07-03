@@ -236,8 +236,9 @@ namespace ddb
                                 OSRDestroySpatialReference(hSrs);
                                 throw GDALException("Cannot read spatial reference system for " + path.string() + ". Is PROJ available?");
                             }
-                            //OSRSetAxisMappingStrategy(hSrs, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
-                            //LOGV << "Set axis mapping strategy";
+
+                            OSRSetAxisMappingStrategy(hSrs, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
+                            LOGV << "Set axis mapping strategy";
 
                             OGRErr epsgResult = OSRImportFromEPSG(hWgs84, 4326);
                             LOGV << "OSRImportFromEPSG result: " << (epsgResult == OGRERR_NONE ? "Success" : "Failed");
@@ -354,7 +355,7 @@ namespace ddb
 
         if (OCTTransform(hTransform, 1, &dfGeoX, &dfGeoY, nullptr))
         {
-            return Geographic2D(dfGeoY, dfGeoX);
+            return Geographic2D(dfGeoX, dfGeoY);
         }
         else
         {
