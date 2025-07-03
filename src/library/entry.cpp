@@ -355,7 +355,7 @@ namespace ddb
 
         if (OCTTransform(hTransform, 1, &dfGeoX, &dfGeoY, nullptr))
         {
-            return Geographic2D(dfGeoX, dfGeoY);
+            return Geographic2D(dfGeoY, dfGeoX);
         }
         else
         {
