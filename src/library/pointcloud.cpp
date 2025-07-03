@@ -262,7 +262,10 @@ namespace ddb
         OGRSpatialReferenceH hTgt = OSRNewSpatialReference(nullptr);
 
         char *wkt = strdup(info.wktProjection.c_str());
-        if (OSRImportFromWkt(hSrs, &wkt) != OGRERR_NONE)
+
+        char* wktPointer = wkt;
+
+        if (OSRImportFromWkt(hSrs, &wktPointer) != OGRERR_NONE)
         {
             free(wkt);
             OSRDestroySpatialReference(hTgt);
