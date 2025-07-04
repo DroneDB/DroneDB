@@ -225,7 +225,14 @@ namespace ddb
                             // Get lat/lon extent of raster
                             char *wktp = const_cast<char *>(wkt.c_str());
                             OGRSpatialReferenceH hSrs = OSRNewSpatialReference(nullptr);
+
+                            OSRSetAxisMappingStrategy(hSrs, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
+                            LOGV << "Set source axis mapping strategy";
+
                             OGRSpatialReferenceH hWgs84 = OSRNewSpatialReference(nullptr);
+
+                            OSRSetAxisMappingStrategy(hWgs84, OSRAxisMappingStrategy::OAMS_AUTHORITY_COMPLIANT);
+                            LOGV << "Set dest axis mapping strategy";
 
                             LOGV << "Created spatial reference objects";
 
@@ -240,14 +247,8 @@ namespace ddb
                                 throw GDALException("Cannot read spatial reference system for " + path.string() + ". Is PROJ available?");
                             }
 
-                            OSRSetAxisMappingStrategy(hSrs, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
-                            LOGV << "Set source axis mapping strategy";
-
                             OGRErr epsgResult = OSRImportFromEPSG(hWgs84, 4326);
                             LOGV << "OSRImportFromEPSG result: " << (epsgResult == OGRERR_NONE ? "Success" : "Failed");
-
-                            OSRSetAxisMappingStrategy(hWgs84, OSRAxisMappingStrategy::OAMS_AUTHORITY_COMPLIANT);
-                            LOGV << "Set dest axis mapping strategy";
 
                             if (epsgResult != OGRERR_NONE)
                             {

@@ -82,7 +82,16 @@ namespace ddb
         Projected2D result;
 
         OGRSpatialReferenceH hSrs = OSRNewSpatialReference(nullptr);
+
+
+        OSRSetAxisMappingStrategy(hSrs, OSRAxisMappingStrategy::OAMS_AUTHORITY_COMPLIANT);
+        LOGV << "Set dest axis mapping strategy";
+
         OGRSpatialReferenceH hWgs84 = OSRNewSpatialReference(nullptr);
+
+
+        OSRSetAxisMappingStrategy(hWgs84, OSRAxisMappingStrategy::OAMS_AUTHORITY_COMPLIANT);
+        LOGV << "Set dest axis mapping strategy";
 
         std::string proj = getProjForUTM(zone);
 
@@ -124,7 +133,14 @@ namespace ddb
     Geographic2D fromUTM(double x, double y, const UTMZone &zone)
     {
         OGRSpatialReferenceH hSrs = OSRNewSpatialReference(nullptr);
+
+        OSRSetAxisMappingStrategy(hSrs, OSRAxisMappingStrategy::OAMS_AUTHORITY_COMPLIANT);
+        LOGV << "Set dest axis mapping strategy";
+
         OGRSpatialReferenceH hWgs84 = OSRNewSpatialReference(nullptr);
+
+        OSRSetAxisMappingStrategy(hWgs84, OSRAxisMappingStrategy::OAMS_AUTHORITY_COMPLIANT);
+        LOGV << "Set dest axis mapping strategy";
 
         std::string proj = getProjForUTM(zone);
         if (OSRImportFromProj4(hSrs, proj.c_str()) != OGRERR_NONE)

@@ -107,7 +107,13 @@ namespace ddb
                 if (qi.m_srs.valid())
                 {
                     OGRSpatialReferenceH hSrs = OSRNewSpatialReference(nullptr);
+                    OSRSetAxisMappingStrategy(hSrs, OSRAxisMappingStrategy::OAMS_AUTHORITY_COMPLIANT);
+                    LOGV << "Set dest axis mapping strategy";
+
                     OGRSpatialReferenceH hTgt = OSRNewSpatialReference(nullptr);
+
+                    OSRSetAxisMappingStrategy(hTgt, OSRAxisMappingStrategy::OAMS_AUTHORITY_COMPLIANT);
+                    LOGV << "Set dest axis mapping strategy";
 
                     std::string proj = qi.m_srs.getProj4();
                     if (OSRImportFromProj4(hSrs, proj.c_str()) != OGRERR_NONE)
@@ -259,7 +265,14 @@ namespace ddb
         }
 
         OGRSpatialReferenceH hSrs = OSRNewSpatialReference(nullptr);
+
+        OSRSetAxisMappingStrategy(hSrs, OSRAxisMappingStrategy::OAMS_AUTHORITY_COMPLIANT);
+        LOGV << "Set dest axis mapping strategy";
+
         OGRSpatialReferenceH hTgt = OSRNewSpatialReference(nullptr);
+
+        OSRSetAxisMappingStrategy(hTgt, OSRAxisMappingStrategy::OAMS_AUTHORITY_COMPLIANT);
+        LOGV << "Set dest axis mapping strategy";
 
         char *wkt = strdup(info.wktProjection.c_str());
 
