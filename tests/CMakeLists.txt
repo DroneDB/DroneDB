@@ -44,6 +44,7 @@ if(BUILD_TESTING)
     gtest_discover_tests(ddbtest
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
         DISCOVERY_TIMEOUT 60
+        DISCOVERY_MODE PRE_TEST
     )
 
 endif()
