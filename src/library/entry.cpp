@@ -20,7 +20,6 @@ namespace ddb
 
     void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entry, bool withHash)
     {
-
         entry.type = EntryType::Undefined;
 
         try
@@ -174,6 +173,7 @@ namespace ddb
             }
             else if (entry.type == EntryType::GeoRaster)
             {
+
                 LOGV << "Processing GeoRaster file: " << path.string();
 
                 GDALDatasetH hDataset;
@@ -232,6 +232,9 @@ namespace ddb
                             OGRErr importResult = OSRImportFromWkt(hSrs, &wktp);
                             LOGV << "OSRImportFromWkt result: " << (importResult == OGRERR_NONE ? "Success" : "Failed");
 
+                            OSRSetAxisMappingStrategy(hSrs, OSRAxisMappingStrategy::OAMS_AUTHORITY_COMPLIANT);
+                            LOGV << "Set source axis mapping strategy";
+
                             if (importResult != OGRERR_NONE)
                             {
                                 LOGV << "Failed to import WKT, cleaning up spatial references";
@@ -240,9 +243,7 @@ namespace ddb
                                 throw GDALException("Cannot read spatial reference system for " + path.string() + ". Is PROJ available?");
                             }
 
-                            OGRErr epsgResult = OSRImportFromEPSG(hWgs84, 4326);
-
-                            if (epsgResult != OGRERR_NONE)
+                            if (OSRImportFromEPSG(hWgs84, 4326) != OGRERR_NONE)
                             {
                                 LOGV << "Failed to import WGS84 EPSG, cleaning up spatial references";
                                 OSRDestroySpatialReference(hWgs84);
@@ -251,6 +252,9 @@ namespace ddb
                             }
 
                             LOGV << "OSRImportFromEPSG result: Success";
+
+                            OSRSetAxisMappingStrategy(hWgs84, OSRAxisMappingStrategy::OAMS_AUTHORITY_COMPLIANT);
+                            LOGV << "Set dest axis mapping strategy";
 
                             OGRCoordinateTransformationH hTransform = OCTNewCoordinateTransformation(hSrs, hWgs84);
                             LOGV << "Created coordinate transformation: " << (hTransform != nullptr ? "Success" : "Failed");
@@ -364,66 +368,8 @@ namespace ddb
 
         if (OCTTransform(hTransform, 1, &dfGeoX, &dfGeoY, nullptr))
         {
-            // Get the target spatial reference to determine axis order
-            OGRSpatialReferenceH hTargetSRS = OCTGetTargetCS(hTransform);
 
-            if (hTargetSRS && OSRIsGeographic(hTargetSRS)) {
-                // Use GDAL's axis information combined with geographic reasoning
-                double longitude, latitude;
-
-                // First, use geographic coordinate ranges to determine the most likely assignment
-                // Longitude: -180 to +180, Latitude: -90 to +90
-                bool xCouldBeLon = (dfGeoX >= -180.0 && dfGeoX <= 180.0);
-                bool xCouldBeLat = (dfGeoX >= -90.0 && dfGeoX <= 90.0);
-                bool yCouldBeLon = (dfGeoY >= -180.0 && dfGeoY <= 180.0);
-                bool yCouldBeLat = (dfGeoY >= -90.0 && dfGeoY <= 90.0);
-
-                // Determine order based on coordinate ranges
-                if (!xCouldBeLat && xCouldBeLon && yCouldBeLat) {
-                    // X can only be longitude, Y can be latitude
-                    longitude = dfGeoX;
-                    latitude = dfGeoY;
-                } else if (!yCouldBeLat && yCouldBeLon && xCouldBeLat) {
-                    // Y can only be longitude, X can be latitude
-                    longitude = dfGeoY;
-                    latitude = dfGeoX;
-                } else if (xCouldBeLon && xCouldBeLat && yCouldBeLon && yCouldBeLat) {
-                    // Both coordinates are in ambiguous ranges, use geographic heuristics
-
-                    // For European coordinates (common case), longitude is typically smaller in absolute value
-                    // Europe: longitude ~[-10, 40], latitude ~[35, 70]
-                    bool xIsEuropeanLon = (dfGeoX >= -10.0 && dfGeoX <= 40.0);
-                    bool yIsEuropeanLat = (dfGeoY >= 35.0 && dfGeoY <= 70.0);
-                    bool yIsEuropeanLon = (dfGeoY >= -10.0 && dfGeoY <= 40.0);
-                    bool xIsEuropeanLat = (dfGeoX >= 35.0 && dfGeoX <= 70.0);
-
-                    if (xIsEuropeanLon && yIsEuropeanLat) {
-                        longitude = dfGeoX;
-                        latitude = dfGeoY;
-                    } else if (yIsEuropeanLon && xIsEuropeanLat) {
-                        longitude = dfGeoY;
-                        latitude = dfGeoX;
-                    } else {
-                        // General heuristic: longitude typically has smaller absolute value in temperate regions
-                        if (std::abs(dfGeoX) < std::abs(dfGeoY)) {
-                            longitude = dfGeoX;
-                            latitude = dfGeoY;
-                        } else {
-                            longitude = dfGeoY;
-                            latitude = dfGeoX;
-                        }
-                    }
-                } else {
-                    // Default assumption when ranges don't help
-                    longitude = dfGeoX;
-                    latitude = dfGeoY;
-                }
-
-                return Geographic2D(longitude, latitude);
-            } else {
-                // For projected coordinate systems, return as-is
-                return Geographic2D(dfGeoX, dfGeoY);
-            }
+            return Geographic2D(dfGeoY, dfGeoX);
         }
         else
         {
@@ -435,7 +381,9 @@ namespace ddb
     void calculateFootprint(const SensorSize &sensorSize, const GeoLocation &geo, const Focal &focal, const CameraOrientation &cameraOri, double relAltitude, BasicGeometry &geom)
     {
         auto utmZone = getUTMZone(geo.latitude, geo.longitude);
+
         auto center = toUTM(geo.latitude, geo.longitude, utmZone);
+
         double groundHeight = geo.altitude != 0.0 ? geo.altitude - relAltitude : relAltitude;
 
         // Field of view
