@@ -604,9 +604,7 @@ namespace ddb
             // The size of the database is the sum of all entries' sizes
             auto q = db->query("SELECT SUM(size) FROM entries");
             if (q->fetch())
-            {
                 entry.size = q->getInt64(0);
-            }
 
             entry.properties = db->getProperties();
             entry.type = EntryType::DroneDB;

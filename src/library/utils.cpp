@@ -231,15 +231,33 @@ cpr::Header authCookie(const std::string& token) {
     return cpr::Header{{"Cookie", "jwtToken=" + token}};
 }
 
-DDB_DLL std::map<std::string, std::string> getSubsystems() {
-    std::map<std::string, std::string> subsystems;
+DDB_DLL void printVersions() {
+
+    std::map<std::string, std::string> libraries;
+
+    ddb::utils::getLibrariesVersion(libraries);
+
+    LOGV << "DDB v" << APP_VERSION;
+
+    for (const auto& library : libraries) {
+        LOGV << library.first << " version: " << library.second;
+    }
+
+    LOGV << "PROJ_LIB = " << getenv("PROJ_LIB");
+    LOGV << "GDAL_DATA = " << getenv("GDAL_DATA");
+    LOGV << "PROJ_DATA = " << getenv("PROJ_DATA");
+
+}
+
+
+// Alternative safer ABI approach
+DDB_DLL void getLibrariesVersion(std::map<std::string, std::string>& subsystems) {
+    subsystems.clear();
     subsystems["SQLite"] = sqlite3_libversion();
     subsystems["SpatiaLite"] = spatialite_version();
     subsystems["GDAL"] = GDALVersionInfo("RELEASE_NAME");
     subsystems["CURL"] = curl_version();
     subsystems["PDAL"] = pdal::pdalVersion;
-
-    return subsystems;
 }
 
 DDB_DLL bool isNullOrEmptyOrWhitespace(const char* str, size_t maxLength) {

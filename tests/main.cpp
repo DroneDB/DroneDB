@@ -5,12 +5,15 @@
 #include <gtest/gtest.h>
 #include "logger.h"
 #include "ddb.h"
+#include "utils.h"
 #include <fstream>
 
 int main(int argc, char **argv)
 {
 
     DDBRegisterProcess(true);
+
+    ddb::utils::printVersions();
 
     // TODO: ability to clean previous TestAreas
 
