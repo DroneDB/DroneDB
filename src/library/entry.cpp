@@ -246,8 +246,8 @@ namespace ddb
                             OGRErr epsgResult = OSRImportFromEPSG(hWgs84, 4326);
                             LOGV << "OSRImportFromEPSG result: " << (epsgResult == OGRERR_NONE ? "Success" : "Failed");
 
-                            //OSRSetAxisMappingStrategy(hWgs84, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
-                            //LOGV << "Set dest axis mapping strategy";
+                            OSRSetAxisMappingStrategy(hWgs84, OSRAxisMappingStrategy::OAMS_AUTHORITY_COMPLIANT);
+                            LOGV << "Set dest axis mapping strategy";
 
                             if (epsgResult != OGRERR_NONE)
                             {
