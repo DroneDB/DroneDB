@@ -225,19 +225,14 @@ namespace ddb
                             // Get lat/lon extent of raster
                             char *wktp = const_cast<char *>(wkt.c_str());
                             OGRSpatialReferenceH hSrs = OSRNewSpatialReference(nullptr);
-
-                            OSRSetAxisMappingStrategy(hSrs, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
-                            LOGV << "Set source axis mapping strategy";
-
                             OGRSpatialReferenceH hWgs84 = OSRNewSpatialReference(nullptr);
-
-                            OSRSetAxisMappingStrategy(hWgs84, OSRAxisMappingStrategy::OAMS_AUTHORITY_COMPLIANT);
-                            LOGV << "Set dest axis mapping strategy";
-
                             LOGV << "Created spatial reference objects";
 
                             OGRErr importResult = OSRImportFromWkt(hSrs, &wktp);
                             LOGV << "OSRImportFromWkt result: " << (importResult == OGRERR_NONE ? "Success" : "Failed");
+
+                            OSRSetAxisMappingStrategy(hSrs, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
+                            LOGV << "Set source axis mapping strategy";
 
                             if (importResult != OGRERR_NONE)
                             {
@@ -248,7 +243,6 @@ namespace ddb
                             }
 
                             OGRErr epsgResult = OSRImportFromEPSG(hWgs84, 4326);
-                            LOGV << "OSRImportFromEPSG result: " << (epsgResult == OGRERR_NONE ? "Success" : "Failed");
 
                             if (epsgResult != OGRERR_NONE)
                             {
@@ -257,6 +251,11 @@ namespace ddb
                                 OSRDestroySpatialReference(hSrs);
                                 throw GDALException("Cannot read WGS84 spatial reference system for " + path.string() + ". Is PROJ available?");
                             }
+
+                            LOGV << "OSRImportFromEPSG result: Success";
+
+                            // OSRSetAxisMappingStrategy(hWgs84, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
+                            // LOGV << "Set dest axis mapping strategy";
 
                             OGRCoordinateTransformationH hTransform = OCTNewCoordinateTransformation(hSrs, hWgs84);
                             LOGV << "Created coordinate transformation: " << (hTransform != nullptr ? "Success" : "Failed");

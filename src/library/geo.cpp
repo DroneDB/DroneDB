@@ -82,16 +82,7 @@ namespace ddb
         Projected2D result;
 
         OGRSpatialReferenceH hSrs = OSRNewSpatialReference(nullptr);
-
-
-        OSRSetAxisMappingStrategy(hSrs, OSRAxisMappingStrategy::OAMS_AUTHORITY_COMPLIANT);
-        LOGV << "Set dest axis mapping strategy";
-
         OGRSpatialReferenceH hWgs84 = OSRNewSpatialReference(nullptr);
-
-
-        OSRSetAxisMappingStrategy(hWgs84, OSRAxisMappingStrategy::OAMS_AUTHORITY_COMPLIANT);
-        LOGV << "Set dest axis mapping strategy";
 
         std::string proj = getProjForUTM(zone);
 
@@ -102,27 +93,29 @@ namespace ddb
             throw GDALException("Cannot import spatial reference system " + proj + ". Is PROJ available?");
         }
 
+        //OSRSetAxisMappingStrategy(hSrs, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
+        //LOGV << "Set dest axis mapping strategy";
+
         OSRImportFromEPSG(hWgs84, 4326);
+
+        //OSRSetAxisMappingStrategy(hWgs84, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
+        //LOGV << "Set dest axis mapping strategy";
+
         OGRCoordinateTransformationH hTransform = OCTNewCoordinateTransformation(hWgs84, hSrs);
 
         double geoX = latitude;
         double geoY = longitude;
 
-        if (OCTTransform(hTransform, 1, &geoX, &geoY, nullptr))
-        {
-            OCTDestroyCoordinateTransformation(hTransform);
-            OSRDestroySpatialReference(hWgs84);
-            OSRDestroySpatialReference(hSrs);
+        const auto success = OCTTransform(hTransform, 1, &geoX, &geoY, nullptr) == TRUE;
 
-            return Projected2D(geoX, geoY);
-        }
-        else
-        {
-            OCTDestroyCoordinateTransformation(hTransform);
-            OSRDestroySpatialReference(hWgs84);
-            OSRDestroySpatialReference(hSrs);
+        OCTDestroyCoordinateTransformation(hTransform);
+        OSRDestroySpatialReference(hWgs84);
+        OSRDestroySpatialReference(hSrs);
+
+        if (!success)
             throw GDALException("Cannot transform coordinates to UTM " + std::to_string(latitude) + "," + std::to_string(longitude));
-        }
+
+        return Projected2D(geoX, geoY);
     }
 
     Geographic2D fromUTM(const Projected2D &p, const UTMZone &zone)
@@ -133,14 +126,7 @@ namespace ddb
     Geographic2D fromUTM(double x, double y, const UTMZone &zone)
     {
         OGRSpatialReferenceH hSrs = OSRNewSpatialReference(nullptr);
-
-        OSRSetAxisMappingStrategy(hSrs, OSRAxisMappingStrategy::OAMS_AUTHORITY_COMPLIANT);
-        LOGV << "Set dest axis mapping strategy";
-
         OGRSpatialReferenceH hWgs84 = OSRNewSpatialReference(nullptr);
-
-        OSRSetAxisMappingStrategy(hWgs84, OSRAxisMappingStrategy::OAMS_AUTHORITY_COMPLIANT);
-        LOGV << "Set dest axis mapping strategy";
 
         std::string proj = getProjForUTM(zone);
         if (OSRImportFromProj4(hSrs, proj.c_str()) != OGRERR_NONE)
@@ -149,26 +135,31 @@ namespace ddb
             OSRDestroySpatialReference(hSrs);
             throw GDALException("Cannot import spatial reference system " + proj + ". Is PROJ available?");
         }
+
+        //OSRSetAxisMappingStrategy(hSrs, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
+        //LOGV << "Set dest axis mapping strategy";
+
         OSRImportFromEPSG(hWgs84, 4326);
+
+        //OSRSetAxisMappingStrategy(hWgs84, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
+        //LOGV << "Set dest axis mapping strategy";
+
         OGRCoordinateTransformationH hTransform = OCTNewCoordinateTransformation(hSrs, hWgs84);
 
         double geoX = x;
         double geoY = y;
-        if (OCTTransform(hTransform, 1, &geoX, &geoY, nullptr))
-        {
-            OCTDestroyCoordinateTransformation(hTransform);
-            OSRDestroySpatialReference(hWgs84);
-            OSRDestroySpatialReference(hSrs);
 
-            return Geographic2D(geoY, geoX);
-        }
-        else
-        {
-            OCTDestroyCoordinateTransformation(hTransform);
-            OSRDestroySpatialReference(hWgs84);
-            OSRDestroySpatialReference(hSrs);
+        const auto success = OCTTransform(hTransform, 1, &geoX, &geoY, nullptr) == TRUE;
+
+        OCTDestroyCoordinateTransformation(hTransform);
+        OSRDestroySpatialReference(hWgs84);
+        OSRDestroySpatialReference(hSrs);
+
+        if (!success)
             throw GDALException("Cannot transform coordinates from UTM " + std::to_string(x) + "," + std::to_string(y));
-        }
+
+        return Geographic2D(geoY, geoX);
+
     }
 
 }
