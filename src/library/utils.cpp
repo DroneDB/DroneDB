@@ -7,6 +7,7 @@
 #include <gdal_inc.h>
 #include <sqlite3.h>
 #include <spatialite.h>
+#include <proj.h>
 
 #include <pdal/pdal_features.hpp>
 #include <random>
@@ -251,13 +252,18 @@ DDB_DLL void printVersions() {
 
 
 // Alternative safer ABI approach
-DDB_DLL void getLibrariesVersion(std::map<std::string, std::string>& subsystems) {
-    subsystems.clear();
-    subsystems["SQLite"] = sqlite3_libversion();
-    subsystems["SpatiaLite"] = spatialite_version();
-    subsystems["GDAL"] = GDALVersionInfo("RELEASE_NAME");
-    subsystems["CURL"] = curl_version();
-    subsystems["PDAL"] = pdal::pdalVersion;
+DDB_DLL void getLibrariesVersion(std::map<std::string, std::string>& versions) {
+    versions.clear();
+    versions["SQLite"] = sqlite3_libversion();
+    versions["SpatiaLite"] = spatialite_version();
+    versions["GDAL"] = GDALVersionInfo("RELEASE_NAME");
+    versions["CURL"] = curl_version();
+    versions["PDAL"] = pdal::pdalVersion;
+
+    auto pj_info = proj_info();
+
+    versions["PROJ"] = std::string(pj_info.release) + " (search path: " + pj_info.searchpath + ")";
+
 }
 
 DDB_DLL bool isNullOrEmptyOrWhitespace(const char* str, size_t maxLength) {
