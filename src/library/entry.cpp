@@ -20,6 +20,7 @@ namespace ddb
 
     void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entry, bool withHash)
     {
+
         entry.type = EntryType::Undefined;
 
         try
@@ -231,9 +232,6 @@ namespace ddb
                             OGRErr importResult = OSRImportFromWkt(hSrs, &wktp);
                             LOGV << "OSRImportFromWkt result: " << (importResult == OGRERR_NONE ? "Success" : "Failed");
 
-                            //OSRSetAxisMappingStrategy(hSrs, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
-                            //LOGV << "Set source axis mapping strategy";
-
                             if (importResult != OGRERR_NONE)
                             {
                                 LOGV << "Failed to import WKT, cleaning up spatial references";
@@ -253,9 +251,6 @@ namespace ddb
                             }
 
                             LOGV << "OSRImportFromEPSG result: Success";
-
-                             //OSRSetAxisMappingStrategy(hWgs84, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
-                             //LOGV << "Set dest axis mapping strategy";
 
                             OGRCoordinateTransformationH hTransform = OCTNewCoordinateTransformation(hSrs, hWgs84);
                             LOGV << "Created coordinate transformation: " << (hTransform != nullptr ? "Success" : "Failed");
@@ -369,35 +364,66 @@ namespace ddb
 
         if (OCTTransform(hTransform, 1, &dfGeoX, &dfGeoY, nullptr))
         {
-            /*
-            // Get the target coordinate system to check axis order
+            // Get the target spatial reference to determine axis order
             OGRSpatialReferenceH hTargetSRS = OCTGetTargetCS(hTransform);
 
-            // Check if we need to swap coordinates based on axis order
-            bool needSwap = false;
-            if (hTargetSRS != nullptr && OSRIsGeographic(hTargetSRS)) {
-                // For geographic CRS, check if first axis is latitude (north)
-                OGRAxisOrientation eOrientation;
-                OSRGetAxis(hTargetSRS, nullptr, 0, &eOrientation);
+            if (hTargetSRS && OSRIsGeographic(hTargetSRS)) {
+                // Use GDAL's axis information combined with geographic reasoning
+                double longitude, latitude;
 
-                if (eOrientation == OAO_North) {
+                // First, use geographic coordinate ranges to determine the most likely assignment
+                // Longitude: -180 to +180, Latitude: -90 to +90
+                bool xCouldBeLon = (dfGeoX >= -180.0 && dfGeoX <= 180.0);
+                bool xCouldBeLat = (dfGeoX >= -90.0 && dfGeoX <= 90.0);
+                bool yCouldBeLon = (dfGeoY >= -180.0 && dfGeoY <= 180.0);
+                bool yCouldBeLat = (dfGeoY >= -90.0 && dfGeoY <= 90.0);
 
-                    LOGD << "First axis is latitude, swapping coordinates";
-                    // First axis is latitude, so transform returned (lat, lon)
-                    // but we need (lon, lat) for Geographic2D
-                    needSwap = true;
+                // Determine order based on coordinate ranges
+                if (!xCouldBeLat && xCouldBeLon && yCouldBeLat) {
+                    // X can only be longitude, Y can be latitude
+                    longitude = dfGeoX;
+                    latitude = dfGeoY;
+                } else if (!yCouldBeLat && yCouldBeLon && xCouldBeLat) {
+                    // Y can only be longitude, X can be latitude
+                    longitude = dfGeoY;
+                    latitude = dfGeoX;
+                } else if (xCouldBeLon && xCouldBeLat && yCouldBeLon && yCouldBeLat) {
+                    // Both coordinates are in ambiguous ranges, use geographic heuristics
+
+                    // For European coordinates (common case), longitude is typically smaller in absolute value
+                    // Europe: longitude ~[-10, 40], latitude ~[35, 70]
+                    bool xIsEuropeanLon = (dfGeoX >= -10.0 && dfGeoX <= 40.0);
+                    bool yIsEuropeanLat = (dfGeoY >= 35.0 && dfGeoY <= 70.0);
+                    bool yIsEuropeanLon = (dfGeoY >= -10.0 && dfGeoY <= 40.0);
+                    bool xIsEuropeanLat = (dfGeoX >= 35.0 && dfGeoX <= 70.0);
+
+                    if (xIsEuropeanLon && yIsEuropeanLat) {
+                        longitude = dfGeoX;
+                        latitude = dfGeoY;
+                    } else if (yIsEuropeanLon && xIsEuropeanLat) {
+                        longitude = dfGeoY;
+                        latitude = dfGeoX;
+                    } else {
+                        // General heuristic: longitude typically has smaller absolute value in temperate regions
+                        if (std::abs(dfGeoX) < std::abs(dfGeoY)) {
+                            longitude = dfGeoX;
+                            latitude = dfGeoY;
+                        } else {
+                            longitude = dfGeoY;
+                            latitude = dfGeoX;
+                        }
+                    }
+                } else {
+                    // Default assumption when ranges don't help
+                    longitude = dfGeoX;
+                    latitude = dfGeoY;
                 }
-            }
 
-            if (needSwap) {
-                // Transform returned (lat, lon) but we need (lon, lat)
-                return Geographic2D(dfGeoY, dfGeoX);
+                return Geographic2D(longitude, latitude);
             } else {
-                // Transform returned (lon, lat) - correct order
+                // For projected coordinate systems, return as-is
                 return Geographic2D(dfGeoX, dfGeoY);
-            }*/
-
-            return Geographic2D(dfGeoY, dfGeoX);
+            }
         }
         else
         {
