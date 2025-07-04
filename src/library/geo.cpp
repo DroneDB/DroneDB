@@ -82,21 +82,37 @@ namespace ddb
         Projected2D result;
 
         OGRSpatialReferenceH hSrs = OSRNewSpatialReference(nullptr);
-        OGRSpatialReferenceH hWgs84 = OSRNewSpatialReference(nullptr);
+
+        if (hSrs == nullptr)
+            throw GDALException("Cannot create spatial reference system for UTM zone " + std::to_string(zone.zone) + (zone.north ? "N" : "S"));
 
         std::string proj = getProjForUTM(zone);
 
+
         if (OSRImportFromProj4(hSrs, proj.c_str()) != OGRERR_NONE)
         {
-            OSRDestroySpatialReference(hWgs84);
             OSRDestroySpatialReference(hSrs);
             throw GDALException("Cannot import spatial reference system " + proj + ". Is PROJ available?");
         }
 
+
+
         //OSRSetAxisMappingStrategy(hSrs, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
         //LOGV << "Set dest axis mapping strategy";
+        OGRSpatialReferenceH hWgs84 = OSRNewSpatialReference(nullptr);
 
-        OSRImportFromEPSG(hWgs84, 4326);
+        if (hWgs84 == nullptr)
+        {
+            OSRDestroySpatialReference(hSrs);
+            throw GDALException("Cannot create WGS84 spatial reference system for UTM zone " + std::to_string(zone.zone) + (zone.north ? "N" : "S"));
+        }
+
+        if (OSRImportFromEPSG(hWgs84, 4326) != OGRERR_NONE)
+        {
+            OSRDestroySpatialReference(hWgs84);
+            OSRDestroySpatialReference(hSrs);
+            throw GDALException("Cannot import EPSG:4326 spatial reference system. Is PROJ available?");
+        }
 
         //OSRSetAxisMappingStrategy(hWgs84, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
         //LOGV << "Set dest axis mapping strategy";
@@ -139,7 +155,12 @@ namespace ddb
         //OSRSetAxisMappingStrategy(hSrs, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
         //LOGV << "Set dest axis mapping strategy";
 
-        OSRImportFromEPSG(hWgs84, 4326);
+        if (OSRImportFromEPSG(hWgs84, 4326) != OGRERR_NONE)
+        {
+            OSRDestroySpatialReference(hWgs84);
+            OSRDestroySpatialReference(hSrs);
+            throw GDALException("Cannot import EPSG:4326 spatial reference system. Is PROJ available?");
+        }
 
         //OSRSetAxisMappingStrategy(hWgs84, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
         //LOGV << "Set dest axis mapping strategy";
