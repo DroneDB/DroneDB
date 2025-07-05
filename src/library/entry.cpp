@@ -215,7 +215,7 @@ namespace ddb
                     {
                         std::string wkt = projectionRef;
                         LOGV << "WKT string length: " << wkt.length();
-                        LOGV << "WKT content (first 200 chars): " << wkt.substr(0, 200);
+                        LOGV << "WKT content: " << wkt;
 
                         if (!wkt.empty())
                         {
@@ -232,7 +232,7 @@ namespace ddb
                             OGRErr importResult = OSRImportFromWkt(hSrs, &wktp);
                             LOGV << "OSRImportFromWkt result: " << (importResult == OGRERR_NONE ? "Success" : "Failed");
 
-                            OSRSetAxisMappingStrategy(hSrs, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
+                            OSRSetAxisMappingStrategy(hSrs, OSRAxisMappingStrategy::OAMS_AUTHORITY_COMPLIANT);
                             LOGV << "Set source axis mapping strategy";
 
                             if (importResult != OGRERR_NONE)
