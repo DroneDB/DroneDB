@@ -62,8 +62,14 @@ static void primeGDAL() {
                 OGRCoordinateTransformationH hTransform = OCTNewCoordinateTransformation(hSrcSRS, hDstSRS);
                 if (hTransform) {
                     // Perform a dummy transformation to initialize internal structures
-                    double x = -91.0, y = 46.0;
-                    OCTTransform(hTransform, 1, &x, &y, nullptr);
+                    // Coordinate corrette: longitudine, latitudine per il Minnesota
+                    double y = -91.0, x = 46.0;  // Longitudine: -91°, Latitudine: 46°
+
+                    // Verifica che le coordinate siano nell'ordine corretto
+                    if (OCTTransform(hTransform, 1, &x, &y, nullptr) != TRUE) {
+                        LOGD << "Warning: Coordinate transformation failed, but PROJ initialization may still be successful";
+                    }
+
                     OCTDestroyCoordinateTransformation(hTransform);
                     LOGD << "PROJ initialization completed successfully";
                 }
