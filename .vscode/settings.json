@@ -116,6 +116,7 @@
         "spanstream": "cpp",
         "stacktrace": "cpp",
         "syncstream": "cpp",
-        "string_view": "cpp"
+        "string_view": "cpp",
+        "slist": "cpp"
     }
 }

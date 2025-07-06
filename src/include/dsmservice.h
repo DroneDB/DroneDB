@@ -42,6 +42,8 @@ class DSMService
     ~DSMService();
     static DSMService *instance;
 
+    static void cleanup();
+
 public:
     DDB_DLL static DSMService *get();
 

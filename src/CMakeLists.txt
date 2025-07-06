@@ -22,6 +22,7 @@ find_package(CCTZ CONFIG REQUIRED)
 find_package(exiv2 CONFIG REQUIRED)
 find_package(GDAL CONFIG REQUIRED)
 find_package(PDAL CONFIG REQUIRED)
+find_package(PROJ CONFIG REQUIRED)
 find_package(GeoTIFF CONFIG REQUIRED)
 find_package(LibZip CONFIG REQUIRED)
 find_package(plog CONFIG REQUIRED)
@@ -41,6 +42,7 @@ set(COMMON_LIBS
     Exiv2::exiv2lib
     GDAL::GDAL
     $<TARGET_NAME:pdalcpp>
+    PROJ::proj
     libzip::zip
     plog::plog
     cpr::cpr

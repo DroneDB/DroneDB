@@ -8,7 +8,8 @@
 #include "exceptions.h"
 
 namespace ddb
-{    void buildCog(const std::string &inputGTiff, const std::string &outputCog)
+{
+    void buildCog(const std::string &inputGTiff, const std::string &outputCog)
     {
         GDALDatasetH hSrcDataset = GDALOpen(inputGTiff.c_str(), GA_ReadOnly);
 

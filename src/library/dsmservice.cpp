@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include <regex>
+#include <cstdlib>
 #include <ogrsf_frmts.h>
 #include "dsmservice.h"
 #include "exceptions.h"
@@ -20,9 +21,17 @@ DSMService *DSMService::get()
     if (!instance)
     {
         instance = new DSMService();
+        // Register cleanup at program exit
+        std::atexit(cleanup);
     }
 
     return instance;
+}
+
+void DSMService::cleanup()
+{
+    delete instance;
+    instance = nullptr;
 }
 
 DSMService::DSMService()

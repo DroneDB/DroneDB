@@ -134,23 +134,32 @@ void getGeoTiffInfo(const std::string &filepath, int &width, int &height, double
         throw std::runtime_error("Failed to open GeoTIFF file: " + filepath);
     }
 
-    width = poDataset->GetRasterXSize();
-    height = poDataset->GetRasterYSize();
-
-    double adfGeoTransform[6];
-    if (poDataset->GetGeoTransform(adfGeoTransform) == CE_None)
+    try
     {
-        xOrigin = adfGeoTransform[0];
-        yOrigin = adfGeoTransform[3];
-        pixelWidth = adfGeoTransform[1];
-        pixelHeight = adfGeoTransform[5];
-    }
-    else
-    {
-        throw std::runtime_error("Failed to read GeoTransform from GeoTIFF file: " + filepath);
-    }
+        width = poDataset->GetRasterXSize();
+        height = poDataset->GetRasterYSize();
 
-    GDALClose(poDataset);
+        double adfGeoTransform[6];
+        if (poDataset->GetGeoTransform(adfGeoTransform) == CE_None)
+        {
+            xOrigin = adfGeoTransform[0];
+            yOrigin = adfGeoTransform[3];
+            pixelWidth = adfGeoTransform[1];
+            pixelHeight = adfGeoTransform[5];
+        }
+        else
+        {
+            GDALClose(poDataset);
+            throw std::runtime_error("Failed to read GeoTransform from GeoTIFF file: " + filepath);
+        }
+
+        GDALClose(poDataset);
+    }
+    catch (...)
+    {
+        GDALClose(poDataset);
+        throw;
+    }
 }
 
 long getPointCloudNumberOfPoints(const std::string& filepath) {
