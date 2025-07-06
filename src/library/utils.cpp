@@ -7,6 +7,7 @@
 #include <gdal_inc.h>
 #include <sqlite3.h>
 #include <spatialite.h>
+#include <proj.h>
 
 #include <pdal/pdal_features.hpp>
 #include <random>
@@ -231,15 +232,37 @@ cpr::Header authCookie(const std::string& token) {
     return cpr::Header{{"Cookie", "jwtToken=" + token}};
 }
 
-DDB_DLL std::map<std::string, std::string> getSubsystems() {
-    std::map<std::string, std::string> subsystems;
-    subsystems["SQLite"] = sqlite3_libversion();
-    subsystems["SpatiaLite"] = spatialite_version();
-    subsystems["GDAL"] = GDALVersionInfo("RELEASE_NAME");
-    subsystems["CURL"] = curl_version();
-    subsystems["PDAL"] = pdal::pdalVersion;
+DDB_DLL void printVersions() {
 
-    return subsystems;
+    std::map<std::string, std::string> libraries;
+
+    ddb::utils::getLibrariesVersion(libraries);
+
+    LOGV << "DDB v" << APP_VERSION;
+
+    for (const auto& library : libraries) {
+        LOGV << library.first << ": " << library.second;
+    }
+
+    LOGV << "PROJ_LIB = " << getenv("PROJ_LIB");
+    LOGV << "GDAL_DATA = " << getenv("GDAL_DATA");
+    LOGV << "PROJ_DATA = " << getenv("PROJ_DATA");
+}
+
+
+// Alternative safer ABI approach
+DDB_DLL void getLibrariesVersion(std::map<std::string, std::string>& versions) {
+    versions.clear();
+    versions["SQLite"] = sqlite3_libversion();
+    versions["SpatiaLite"] = spatialite_version();
+    versions["GDAL"] = GDALVersionInfo("RELEASE_NAME");
+    versions["CURL"] = curl_version();
+    versions["PDAL"] = pdal::pdalVersion;
+
+    auto pj_info = proj_info();
+
+    versions["PROJ"] = std::string(pj_info.release) + " (search path: " + pj_info.searchpath + ")";
+
 }
 
 DDB_DLL bool isNullOrEmptyOrWhitespace(const char* str, size_t maxLength) {

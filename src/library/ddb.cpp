@@ -44,6 +44,42 @@ void handleFpe() {
     throw ddb::AppException("Application encountered a floating point exception");
 }
 
+static void primeGDAL() {
+    // Initialize PROJ structures to prevent axis mapping issues
+    // This ensures PROJ database and axis mapping strategies are properly initialized
+    LOGD << "Initializing PROJ coordinate transformation system";
+
+    // Create a simple coordinate transformation to initialize PROJ internal structures
+    OGRSpatialReferenceH hSrcSRS = OSRNewSpatialReference(nullptr);
+    OGRSpatialReferenceH hDstSRS = OSRNewSpatialReference(nullptr);
+
+    if (hSrcSRS && hDstSRS) {
+        // Import EPSG:4326 (WGS84)
+        if (OSRImportFromEPSG(hSrcSRS, 4326) == OGRERR_NONE) {
+            // Import a UTM zone (example: UTM Zone 15N)
+            if (OSRImportFromProj4(hDstSRS, "+proj=utm +zone=15 +datum=WGS84 +units=m +no_defs") == OGRERR_NONE) {
+                // Create transformation to force PROJ initialization
+                OGRCoordinateTransformationH hTransform = OCTNewCoordinateTransformation(hSrcSRS, hDstSRS);
+                if (hTransform) {
+                    // Perform a dummy transformation to initialize internal structures
+                    // Coordinate corrette: longitudine, latitudine per il Minnesota
+                    double y = -91.0, x = 46.0;  // Longitudine: -91°, Latitudine: 46°
+
+                    // Verifica che le coordinate siano nell'ordine corretto
+                    if (OCTTransform(hTransform, 1, &x, &y, nullptr) != TRUE) {
+                        LOGD << "Warning: Coordinate transformation failed, but PROJ initialization may still be successful";
+                    }
+
+                    OCTDestroyCoordinateTransformation(hTransform);
+                    LOGD << "PROJ initialization completed successfully";
+                }
+            }
+        }
+        OSRDestroySpatialReference(hSrcSRS);
+        OSRDestroySpatialReference(hDstSRS);
+    }
+}
+
 void DDBRegisterProcess(bool verbose) {
     // Thread-safe initialization using std::call_once
     std::call_once(initialization_flag, [verbose]() {
@@ -101,6 +137,8 @@ void DDBRegisterProcess(bool verbose) {
         }
 
         GDALAllRegister();
+
+        primeGDAL();
 
         // Setup signal handlers to catch segfaults/fpes and throw
         // C++ exceptions instead

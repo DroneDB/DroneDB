@@ -111,12 +111,16 @@ namespace ddb
 
                     std::string proj = qi.m_srs.getProj4();
                     if (OSRImportFromProj4(hSrs, proj.c_str()) != OGRERR_NONE)
-                    {
                         throw GDALException("Cannot import spatial reference system " + proj + ". Is PROJ available?");
-                    }
+
                     OSRSetAxisMappingStrategy(hSrs, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
+                    LOGV << "Set dest axis mapping strategy";
 
                     OSRImportFromEPSG(hTgt, polyBoundsSrs);
+
+                    OSRSetAxisMappingStrategy(hTgt, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
+                    LOGV << "Set dest axis mapping strategy";
+
                     OGRCoordinateTransformationH hTransform = OCTNewCoordinateTransformation(hSrs, hTgt);
 
                     double geoMinX = bbox.minx;
@@ -130,9 +134,7 @@ namespace ddb
                     bool maxSuccess = OCTTransform(hTransform, 1, &geoMaxX, &geoMaxY, &geoMaxZ);
 
                     if (!minSuccess || !maxSuccess)
-                    {
                         throw GDALException("Cannot transform coordinates " + bbox.toWKT() + " to " + proj);
-                    }
 
                     info.polyBounds.clear();
 
@@ -159,9 +161,8 @@ namespace ddb
                             info.centroid.addPoint(centroidY, centroidX, centroidZ);
                         }
                         else
-                        {
                             throw GDALException("Cannot transform coordinates " + std::to_string(centroidX) + ", " + std::to_string(centroidY) + " to " + proj);
-                        }
+
                     }
 
                     OCTDestroyCoordinateTransformation(hTransform);
@@ -262,13 +263,26 @@ namespace ddb
         OGRSpatialReferenceH hTgt = OSRNewSpatialReference(nullptr);
 
         char *wkt = strdup(info.wktProjection.c_str());
-        if (OSRImportFromWkt(hSrs, &wkt) != OGRERR_NONE)
+
+        char* wktPointer = wkt;
+
+        if (OSRImportFromWkt(hSrs, &wktPointer) != OGRERR_NONE)
         {
+            free(wkt);
+            OSRDestroySpatialReference(hTgt);
+            OSRDestroySpatialReference(hSrs);
             throw GDALException("Cannot import spatial reference system " + info.wktProjection + ". Is PROJ available?");
         }
-        OSRSetAxisMappingStrategy(hSrs, OAMS_TRADITIONAL_GIS_ORDER);
+        free(wkt);
+
+        OSRSetAxisMappingStrategy(hSrs, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
+        LOGV << "Set dest axis mapping strategy";
 
         OSRImportFromEPSG(hTgt, polyBoundsSrs);
+
+        OSRSetAxisMappingStrategy(hTgt, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
+        LOGV << "Set dest axis mapping strategy";
+
         OGRCoordinateTransformationH hTransform = OCTNewCoordinateTransformation(hSrs, hTgt);
 
         double geoMinX = minx;

@@ -15,6 +15,8 @@ jobs:
     env:
       VCPKG_ROOT: ${{ github.workspace }}/vcpkg
       VCPKG_DEFAULT_TRIPLET: x64-linux-release
+      PROJ_LIB: ${{ github.workspace }}/build
+      PROJ_DATA: ${{ github.workspace }}/build
       VCPKG_BUILD_TYPE: release
     steps:
       - name: Free Disk Space
@@ -59,7 +61,7 @@ jobs:
       - name: Run C++ Tests
         run: cd build && ./ddbtest --gtest_shuffle
       - name: Run Program Smoke Test
-        run: cd build && ./ddbcmd --debug      
+        run: cd build && ./ddbcmd --debug
       - name: Build Debian Package
         run: |
           if [ -n "${{ startsWith(github.ref, 'refs/tags/') }}" ] || [ "${{ github.event_name }}" == "workflow_dispatch" ] || [ "${{ github.event_name }}" == "push" ]; then
@@ -70,10 +72,10 @@ jobs:
               # Use commit hash for non-tag builds
               echo "DDB_VERSION=$(git describe --always)" >> $GITHUB_ENV
             fi
-            
+
             # Set VCPKG_HOST_TRIPLET for the build script
             echo "VCPKG_HOST_TRIPLET=${VCPKG_DEFAULT_TRIPLET}" >> $GITHUB_ENV
-            
+
             # Verify required files exist in build directory
             for file in ddbcmd libddb.so libnxs.so proj.db timezone21.bin sensor_data.sqlite curl-ca-bundle.crt; do
               if [ ! -f "build/$file" ]; then
@@ -81,14 +83,14 @@ jobs:
                 exit 1
               fi
             done
-            
+
             # Create distribution directory
             mkdir -p build/package
-            
+
             # Execute the build script
             chmod +x scripts/build-debian-package.sh
             ./scripts/build-debian-package.sh
-            
+
             # Test linting of Debian package
             echo "Running lintian on Debian package..."
             lintian ../ddb_*.deb || echo "Lintian reported issues, but continuing..."
@@ -129,6 +131,8 @@ jobs:
       VCPKG_ROOT: ${{ github.workspace }}/vcpkg
       VCPKG_DEFAULT_TRIPLET: x64-windows-release
       VCPKG_BUILD_TYPE: release
+      PROJ_LIB: ${{ github.workspace }}/build
+      PROJ_DATA: ${{ github.workspace }}/build
     steps:
       - uses: actions/checkout@v4
         with:
@@ -157,7 +161,7 @@ jobs:
         run: cd build && .\ddbtest.exe --gtest_shuffle
         shell: pwsh
       - name: Run Program Smoke Test
-        run: cd build && .\ddbcmd.exe --debug
+        run: cd build && .\ddbcmd.exe --version --debug
         shell: pwsh
       - name: Create Distribution Files
         shell: pwsh
@@ -179,7 +183,7 @@ jobs:
           file_glob: true
           tag: ${{ github.ref }}
           overwrite: true
-          
+
   # build_macos:
   #     name: Build/Test on MacOS
   #     runs-on: macos-latest

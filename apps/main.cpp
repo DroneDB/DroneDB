@@ -60,14 +60,7 @@ int main(int argc, char *argv[])
         return EXIT_SUCCESS;
     }
 
-    const auto subsystems = ddb::utils::getSubsystems();
-
-    LOGV << "DDB v" << DDBGetVersion();
-
-    for (const auto &subsystem : subsystems)
-    {
-        LOGV << subsystem.first << " version: " << subsystem.second;
-    }
+    ddb::utils::printVersions();
 
     if (argc <= 1)
         printHelp(argv);

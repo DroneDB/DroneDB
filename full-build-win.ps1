@@ -16,7 +16,7 @@ Set-Location "./build"
 $env:VCPKG_ROOT = "..\vcpkg"
 
 # Run CMake configure step
-cmake .. -A x64 -DCMAKE_TOOLCHAIN_FILE="..\vcpkg\scripts\buildsystems\vcpkg.cmake"
+cmake .. -A x64 -DCMAKE_TOOLCHAIN_FILE="..\vcpkg\scripts\buildsystems\vcpkg.cmake" -DCMAKE_BUILD_TESTING=ON
 
 # Build with detected CPU cores
 cmake --build . --config Release --target ALL_BUILD -- "/maxcpucount:$cpuCores"
