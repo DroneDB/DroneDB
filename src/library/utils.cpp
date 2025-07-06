@@ -241,13 +241,12 @@ DDB_DLL void printVersions() {
     LOGV << "DDB v" << APP_VERSION;
 
     for (const auto& library : libraries) {
-        LOGV << library.first << " version: " << library.second;
+        LOGV << library.first << ": " << library.second;
     }
 
     LOGV << "PROJ_LIB = " << getenv("PROJ_LIB");
     LOGV << "GDAL_DATA = " << getenv("GDAL_DATA");
     LOGV << "PROJ_DATA = " << getenv("PROJ_DATA");
-
 }
 
 
