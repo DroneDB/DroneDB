@@ -7,6 +7,10 @@
 #include <cpr/cpr.h>
 #include <mutex>
 
+#ifdef WIN32
+#include <windows.h>
+#endif
+
 #include "../../vendor/segvcatch/segvcatch.h"
 #include "build.h"
 #include "database.h"
@@ -85,12 +89,32 @@ void DDBRegisterProcess(bool verbose) {
     std::call_once(initialization_flag, [verbose]() {
         LOGD << "Initializing DDB process";
 
-#ifndef WIN32
-// Windows does not let us change env vars for some reason
-// so this works only on Unix
-
         const auto exeFolder = io::getExeFolderPath().string();
 
+#ifdef WIN32
+        // Windows paths with semicolon separator
+        std::string projPaths = exeFolder;
+        std::string gdalDataPath = exeFolder;
+
+        // Set environment variables using Windows API
+        if (GetEnvironmentVariableA("PROJ_LIB", nullptr, 0) == 0) {
+            SetEnvironmentVariableA("PROJ_LIB", projPaths.c_str());
+        }
+
+        if (GetEnvironmentVariableA("PROJ_DATA", nullptr, 0) == 0) {
+            SetEnvironmentVariableA("PROJ_DATA", projPaths.c_str());
+        }
+
+        if (GetEnvironmentVariableA("GDAL_DATA", nullptr, 0) == 0) {
+            SetEnvironmentVariableA("GDAL_DATA", gdalDataPath.c_str());
+        }
+
+        // Set OSR axis mapping strategy for Windows
+        //if (GetEnvironmentVariableA("OSR_DEFAULT_AXIS_MAPPING_STRATEGY", nullptr, 0) == 0) {
+        //    SetEnvironmentVariableA("OSR_DEFAULT_AXIS_MAPPING_STRATEGY", "TRADITIONAL_GIS_ORDER");
+        //}
+#else
+        // Unix/Linux paths with colon separator
 #ifdef __APPLE__
         std::string projPaths =
             exeFolder + ":/opt/homebrew/share/proj:/usr/local/share/proj";
@@ -110,6 +134,9 @@ void DDBRegisterProcess(bool verbose) {
         if (std::getenv("GDAL_DATA") == nullptr)
             setenv("GDAL_DATA", gdalDataPath.c_str(), 1);
 
+        // Set OSR axis mapping strategy for Unix/Linux
+        //if (std::getenv("OSR_DEFAULT_AXIS_MAPPING_STRATEGY") == nullptr)
+        //    setenv("OSR_DEFAULT_AXIS_MAPPING_STRATEGY", "TRADITIONAL_GIS_ORDER", 1);
 #endif
 
 #if !defined(WIN32) && !defined(__APPLE__)
@@ -123,6 +150,11 @@ void DDBRegisterProcess(bool verbose) {
 #ifdef WIN32
         // Allow path.string() calls to work with Unicode filenames
         std::setlocale(LC_CTYPE, "en_US.UTF8");
+
+        // Set LC_ALL on Windows if needed
+        if (GetEnvironmentVariableA("LC_ALL", nullptr, 0) == 0) {
+            SetEnvironmentVariableA("LC_ALL", "C");
+        }
 #endif
 
         // Gets the environment variable to enable logging to file
@@ -135,6 +167,8 @@ void DDBRegisterProcess(bool verbose) {
         if (enableVerbose || logToFile) {
             set_logger_verbose();
         }
+
+
 
         GDALAllRegister();
 
