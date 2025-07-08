@@ -19,6 +19,7 @@
 #include "entry.h"
 #include "exceptions.h"
 #include "gdal_inc.h"
+#include "hash.h"
 #include "info.h"
 #include "json.h"
 #include "logger.h"
@@ -173,6 +174,19 @@ void DDBRegisterProcess(bool verbose) {
         GDALAllRegister();
 
         primeGDAL();
+
+        // Debug: Print proj.db hash
+        try {
+            const std::string projDbPath = exeFolder + "/proj.db";
+            if (fs::exists(projDbPath)) {
+                const std::string projDbHash = Hash::fileSHA256(projDbPath);
+                LOGD << "proj.db hash: " << projDbHash << " (path: " << projDbPath << ")";
+            } else {
+                LOGD << "proj.db not found at: " << projDbPath;
+            }
+        } catch (const std::exception& e) {
+            LOGD << "Error computing proj.db hash: " << e.what();
+        }
 
         // Setup signal handlers to catch segfaults/fpes and throw
         // C++ exceptions instead
