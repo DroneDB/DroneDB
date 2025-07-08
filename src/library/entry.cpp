@@ -232,7 +232,7 @@ namespace ddb
                             OGRErr importResult = OSRImportFromWkt(hSrs, &wktp);
                             LOGV << "OSRImportFromWkt result: " << (importResult == OGRERR_NONE ? "Success" : "Failed");
 
-                            OSRSetAxisMappingStrategy(hSrs, OSRAxisMappingStrategy::OAMS_AUTHORITY_COMPLIANT);
+                            OSRSetAxisMappingStrategy(hSrs, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
                             LOGV << "Set source axis mapping strategy";
 
                             if (importResult != OGRERR_NONE)
