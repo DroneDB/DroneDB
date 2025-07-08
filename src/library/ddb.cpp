@@ -5,6 +5,7 @@
 #include "ddb.h"
 
 #include <cpr/cpr.h>
+
 #include <mutex>
 
 #ifdef WIN32
@@ -41,14 +42,6 @@ char ddbLastError[255];
 // Thread-safe initialization using std::once_flag
 static std::once_flag initialization_flag;
 
-void handleSegv() {
-    throw ddb::AppException("Application encountered a segfault");
-}
-
-void handleFpe() {
-    throw ddb::AppException("Application encountered a floating point exception");
-}
-
 static void primeGDAL() {
     // Initialize PROJ structures to prevent axis mapping issues
     // This ensures PROJ database and axis mapping strategies are properly initialized
@@ -62,9 +55,11 @@ static void primeGDAL() {
         // Import EPSG:4326 (WGS84)
         if (OSRImportFromEPSG(hSrcSRS, 4326) == OGRERR_NONE) {
             // Import a UTM zone (example: UTM Zone 15N)
-            if (OSRImportFromProj4(hDstSRS, "+proj=utm +zone=15 +datum=WGS84 +units=m +no_defs") == OGRERR_NONE) {
+            if (OSRImportFromProj4(hDstSRS, "+proj=utm +zone=15 +datum=WGS84 +units=m +no_defs") ==
+                OGRERR_NONE) {
                 // Create transformation to force PROJ initialization
-                OGRCoordinateTransformationH hTransform = OCTNewCoordinateTransformation(hSrcSRS, hDstSRS);
+                OGRCoordinateTransformationH hTransform =
+                    OCTNewCoordinateTransformation(hSrcSRS, hDstSRS);
                 if (hTransform) {
                     // Perform a dummy transformation to initialize internal structures
                     // Coordinate corrette: longitudine, latitudine per il Minnesota
@@ -72,7 +67,8 @@ static void primeGDAL() {
 
                     // Verifica che le coordinate siano nell'ordine corretto
                     if (OCTTransform(hTransform, 1, &x, &y, nullptr) != TRUE) {
-                        LOGD << "Warning: Coordinate transformation failed, but PROJ initialization may still be successful";
+                        LOGD << "Warning: Coordinate transformation failed, but PROJ "
+                                "initialization may still be successful";
                     }
 
                     OCTDestroyCoordinateTransformation(hTransform);
@@ -85,79 +81,162 @@ static void primeGDAL() {
     }
 }
 
-void DDBRegisterProcess(bool verbose) {
-    // Thread-safe initialization using std::call_once
-    std::call_once(initialization_flag, [verbose]() {
-        LOGD << "Initializing DDB process";
 
-        const auto exeFolder = io::getExeFolderPath().string();
+void setupEnvironmentVariables(const std::string& exeFolder) {
+    // Setup percorsi PROJ (uniformi per entrambe le piattaforme)
+    const auto projDataPath = (fs::path(exeFolder) / "proj").string();
 
-#ifdef WIN32
-        // Windows paths with semicolon separator
-        std::string projPaths = exeFolder;
-        std::string gdalDataPath = exeFolder;
+    // Verifica esistenza di proj.db
+    const auto projDbPath = fs::path(projDataPath) / "proj.db";
+    if (!fs::exists(projDbPath)) {
+        LOGW << "PROJ database not found at: " << projDbPath.string();
+        LOGW << "Coordinate transformations may fail";
+    } else {
+        LOGD << "PROJ database found at: " << projDbPath.string();
 
-        // Set environment variables using Windows API
-        if (GetEnvironmentVariableA("PROJ_LIB", nullptr, 0) == 0) {
-            SetEnvironmentVariableA("PROJ_LIB", projPaths.c_str());
-        }
-
-        if (GetEnvironmentVariableA("PROJ_DATA", nullptr, 0) == 0) {
-            SetEnvironmentVariableA("PROJ_DATA", projPaths.c_str());
-        }
-
-        if (GetEnvironmentVariableA("GDAL_DATA", nullptr, 0) == 0) {
-            SetEnvironmentVariableA("GDAL_DATA", gdalDataPath.c_str());
-        }
-
-        // Set OSR axis mapping strategy for Windows
-        //if (GetEnvironmentVariableA("OSR_DEFAULT_AXIS_MAPPING_STRATEGY", nullptr, 0) == 0) {
-        //    SetEnvironmentVariableA("OSR_DEFAULT_AXIS_MAPPING_STRATEGY", "TRADITIONAL_GIS_ORDER");
-        //}
-#else
-        // Unix/Linux paths with colon separator
-#ifdef __APPLE__
-        std::string projPaths =
-            exeFolder + ":/opt/homebrew/share/proj:/usr/local/share/proj";
-        std::string gdalDataPath = exeFolder + ":/opt/homebrew/share/gdal:/usr/local/share/gdal";
-#else
-        std::string projPaths = exeFolder + ":/usr/share/ddb";
-        std::string gdalDataPath = exeFolder + ":/usr/share/gdal";
-#endif
-
-        // If they are not set, set them to the default paths
-        if (std::getenv("PROJ_LIB") == nullptr)
-            setenv("PROJ_LIB", projPaths.c_str(), 1);
-
-        if (std::getenv("PROJ_DATA") == nullptr)
-            setenv("PROJ_DATA", projPaths.c_str(), 1);
-
-        if (std::getenv("GDAL_DATA") == nullptr)
-            setenv("GDAL_DATA", gdalDataPath.c_str(), 1);
-
-        // Set OSR axis mapping strategy for Unix/Linux
-        //if (std::getenv("OSR_DEFAULT_AXIS_MAPPING_STRATEGY") == nullptr)
-        //    setenv("OSR_DEFAULT_AXIS_MAPPING_STRATEGY", "TRADITIONAL_GIS_ORDER", 1);
-#endif
-
-#if !defined(WIN32) && !defined(__APPLE__)
+        // Debug: Print proj.db hash
         try {
-            std::locale("");  // Raises a runtime error if current locale is invalid
-        } catch (const std::runtime_error&) {
-            setenv("LC_ALL", "C", 1);
+
+            const std::string projDbHash = Hash::fileSHA256(projDbPath.string());
+            LOGD << "proj.db hash: " << projDbHash << " (path: " << projDbPath.string() << ")";
+
+        } catch (const std::exception& e) {
+            LOGD << "Error computing proj.db hash: " << e.what();
         }
-#endif
+
+    }
 
 #ifdef WIN32
-        // Allow path.string() calls to work with Unicode filenames
-        std::setlocale(LC_CTYPE, "en_US.UTF8");
+    // Windows: usa _putenv_s per sincronizzazione CRT
 
-        // Set LC_ALL on Windows if needed
-        if (GetEnvironmentVariableA("LC_ALL", nullptr, 0) == 0) {
-            SetEnvironmentVariableA("LC_ALL", "C");
-        }
+    // PROJ_DATA è la variabile preferita (moderna)
+    if (GetEnvironmentVariableA("PROJ_DATA", nullptr, 0) == 0) {
+        _putenv_s("PROJ_DATA", projDataPath.c_str());
+        LOGD << "Set PROJ_DATA: " << projDataPath;
+    }
+
+    // PROJ_LIB solo come fallback legacy se PROJ_DATA non è presente
+    if (GetEnvironmentVariableA("PROJ_LIB", nullptr, 0) == 0 &&
+        GetEnvironmentVariableA("PROJ_DATA", nullptr, 0) == 0) {
+        _putenv_s("PROJ_LIB", projDataPath.c_str());
+        LOGD << "Set PROJ_LIB (fallback): " << projDataPath;
+    }
+
+#else
+    // Unix: usa setenv standard
+
+    // PROJ_DATA è la variabile preferita (moderna)
+    if (std::getenv("PROJ_DATA") == nullptr) {
+        setenv("PROJ_DATA", projDataPath.c_str(), 1);
+        LOGD << "Set PROJ_DATA: " << projDataPath;
+    }
+
+    // PROJ_LIB solo come fallback legacy se PROJ_DATA non è presente
+    if (std::getenv("PROJ_LIB") == nullptr && std::getenv("PROJ_DATA") == nullptr) {
+        setenv("PROJ_LIB", projDataPath.c_str(), 1);
+        LOGD << "Set PROJ_LIB (fallback): " << projDataPath;
+    }
 #endif
 
+    // NOTA: Non impostiamo più GDAL_DATA perché i dati sono embedded
+    LOGD << "GDAL_DATA not set - using embedded data";
+}
+
+void setupLocaleUnified() {
+    // Comportamento unificato per Windows e Linux
+    // Strategia: LC_ALL=C per stabilità, LC_CTYPE=UTF-8 per Unicode
+
+#ifdef WIN32
+    // Windows: sincronizza CRT e Win32 API
+    try {
+        // Imposta LC_ALL=C per stabilità e compatibilità con processi figli
+        _putenv_s("LC_ALL", "C");
+        std::setlocale(LC_ALL, "C");
+
+        // Poi sovrascrivi solo LC_CTYPE per supporto UTF-8
+        std::setlocale(LC_CTYPE, "en_US.UTF-8");
+
+        LOGD << "Windows locale set: LC_ALL=C, LC_CTYPE=UTF-8";
+
+    } catch (const std::exception& e) {
+        LOGW << "Locale setup failed on Windows: " << e.what();
+        // Fallback minimale
+        std::setlocale(LC_ALL, "C");
+        LOGW << "Using minimal C locale";
+    }
+
+#else
+    // Unix/Linux: comportamento analogo
+    try {
+        // Imposta LC_ALL=C per stabilità
+        setenv("LC_ALL", "C", 1);
+        std::setlocale(LC_ALL, "C");
+
+        // Poi sovrascrivi solo LC_CTYPE per supporto UTF-8
+        // Prova diverse varianti UTF-8 comuni
+        const char* utf8_locales[] = {"en_US.UTF-8", "C.UTF-8", "en_US.utf8", nullptr};
+
+        bool utf8_set = false;
+        for (const char** locale_name = utf8_locales; *locale_name; ++locale_name) {
+            if (std::setlocale(LC_CTYPE, *locale_name) != nullptr) {
+                LOGD << "Unix locale set: LC_ALL=C, LC_CTYPE=" << *locale_name;
+                utf8_set = true;
+                break;
+            }
+        }
+
+        if (!utf8_set) {
+            LOGW << "Could not set UTF-8 locale for LC_CTYPE, using C";
+        }
+
+    } catch (const std::exception& e) {
+        LOGW << "Locale setup failed on Unix: " << e.what();
+        // Fallback minimale
+        setenv("LC_ALL", "C", 1);
+        std::setlocale(LC_ALL, "C");
+        LOGW << "Using minimal C locale";
+    }
+#endif
+}
+
+void logEnvironmentDiagnostics() {
+    // Locale information
+    LOGD << "Current locale (LC_ALL): " << std::setlocale(LC_ALL, nullptr);
+    LOGD << "Current locale (LC_CTYPE): " << std::setlocale(LC_CTYPE, nullptr);
+    LOGD << "LC_ALL env var: " << std::getenv("LC_ALL");
+
+    // PROJ information
+    LOGD << "PROJ_DATA: " << std::getenv("PROJ_DATA");
+    LOGD << "PROJ_LIB: " << std::getenv("PROJ_LIB");
+    // GDAL information
+    LOGD << "GDAL_DATA: " << std::getenv("GDAL_DATA");
+
+    // Verify PROJ database accessibility
+    verifyProjDatabase();
+
+    // Test UTF-8 handling
+    testUnicodeHandling();
+}
+
+void verifyProjDatabase() {
+    const char* projData = std::getenv("PROJ_DATA");
+    if (!projData) {
+        projData = std::getenv("PROJ_LIB");  // fallback legacy
+    }
+
+    if (projData) {
+        fs::path projDbPath = fs::path(projData) / "proj.db";
+        if (fs::exists(projDbPath)) {
+            LOGD << "✓ PROJ database accessible at: " << projDbPath.string();
+        } else
+            LOGW << "✗ PROJ database NOT found at: " << projDbPath.string();
+    } else
+        LOGW << "✗ Neither PROJ_DATA nor PROJ_LIB environment variables are set";
+}
+
+void setupLogging(bool verbose) {
+    try {
+        // Configura il livello di logging basato sul parametro verbose
         // Gets the environment variable to enable logging to file
         const auto logToFile = std::getenv(DDB_LOG_ENV) != nullptr;
 
@@ -169,29 +248,205 @@ void DDBRegisterProcess(bool verbose) {
             set_logger_verbose();
         }
 
-
-
         GDALAllRegister();
 
         primeGDAL();
 
-        // Debug: Print proj.db hash
-        try {
-            const std::string projDbPath = exeFolder + "/proj.db";
-            if (fs::exists(projDbPath)) {
-                const std::string projDbHash = Hash::fileSHA256(projDbPath);
-                LOGD << "proj.db hash: " << projDbHash << " (path: " << projDbPath << ")";
-            } else {
-                LOGD << "proj.db not found at: " << projDbPath;
-            }
-        } catch (const std::exception& e) {
-            LOGD << "Error computing proj.db hash: " << e.what();
+        // Configura il formato del log per includere informazioni di processo
+        LOGD << "Logging initialized for DDB process";
+        LOGD << "DDB Version: " << APP_VERSION;
+        LOGD << "Build info: " << getBuildInfo();
+
+#ifdef WIN32
+        LOGD << "Platform: Windows";
+#else
+        LOGD << "Platform: Unix/Linux";
+#endif
+
+        // Log delle capacità GDAL/PROJ
+        LOGD << "GDAL Version: " << GDALVersionInfo("RELEASE_NAME");
+
+        // Verifica se PROJ è disponibile
+        OGRSpatialReferenceH hSRS = OSRNewSpatialReference(nullptr);
+        if (hSRS) {
+            OSRDestroySpatialReference(hSRS);
+            LOGD << "PROJ integration: Available";
+        } else {
+            LOGW << "PROJ integration: Issues detected";
         }
 
-        // Setup signal handlers to catch segfaults/fpes and throw
-        // C++ exceptions instead
+    } catch (const std::exception& e) {
+        // Se il logging fallisce, almeno proviamo a scrivere su stderr
+        std::cerr << "Failed to initialize logging: " << e.what() << std::endl;
+    }
+}
+
+void testUnicodeHandling() {
+    try {
+        // Test path con caratteri Unicode
+        const std::string testUnicode = "test_åäö_🦀.txt";
+        const fs::path testPath(testUnicode);
+
+        LOGD << "✓ Unicode path test: " << testPath.string();
+
+        // Test conversione string
+        const std::string converted = testPath.string();
+        if (converted == testUnicode) {
+            LOGD << "✓ Unicode string conversion successful";
+        } else {
+            LOGW << "⚠ Unicode string conversion may have issues";
+        }
+
+    } catch (const std::exception& e) {
+        LOGW << "✗ Unicode handling test failed: " << e.what();
+    }
+}
+
+void setupSignalHandlers() {
+    try {
+        // Setup signal handlers per catturare crash e gestirli gracefully
+        LOGD << "Setting up signal handlers";
+
+#ifdef WIN32
+        // Windows: Setup structured exception handling
+
+        // Configura il gestore per violazioni di accesso
+        SetUnhandledExceptionFilter([](EXCEPTION_POINTERS* exceptionInfo) -> LONG {
+            LOGE << "Unhandled exception detected in DDB process";
+            LOGE << "Exception code: 0x" << std::hex
+                 << exceptionInfo->ExceptionRecord->ExceptionCode;
+
+            // Cleanup critico prima del crash
+            try {
+                LOGD << "Attempting graceful cleanup before crash";
+                // Qui potresti aggiungere cleanup specifico se necessario
+            } catch (...) {
+                // Ignora errori durante cleanup pre-crash
+            }
+
+            return EXCEPTION_EXECUTE_HANDLER;
+        });
+
+        LOGD << "Windows exception handler installed";
+
+#else
+        // Unix/Linux: Setup signal handlers tradizionali
+
+        // SIGSEGV handler
+        signal(SIGSEGV, [](int sig) {
+            LOGE << "Segmentation fault detected (SIGSEGV)";
+            handleSegv();
+        });
+
+        // SIGFPE handler
+        signal(SIGFPE, [](int sig) {
+            LOGE << "Floating point exception detected (SIGFPE)";
+            handleFpe();
+        });
+
+        // SIGTERM handler per shutdown graceful
+        signal(SIGTERM, [](int sig) {
+            LOGD << "Termination signal received (SIGTERM)";
+            // Qui potresti aggiungere cleanup specifico
+            exit(0);
+        });
+
+        // SIGINT handler (Ctrl+C)
+        signal(SIGINT, [](int sig) {
+            LOGD << "Interrupt signal received (SIGINT)";
+            // Qui potresti aggiungere cleanup specifico
+            exit(0);
+        });
+
+        LOGD << "Unix signal handlers installed";
+
+#endif
+
+        // Installa i gestori segvcatch esistenti (cross-platform)
         segvcatch::init_segv(&handleSegv);
         segvcatch::init_fpe(&handleFpe);
+
+        LOGD << "Cross-platform crash handlers installed";
+
+    } catch (const std::exception& e) {
+        LOGW << "Failed to setup some signal handlers: " << e.what();
+        LOGW << "Process may not handle crashes gracefully";
+    }
+}
+
+// Funzioni di supporto per gestione crash (già presenti nel codice)
+void handleSegv() {
+    LOGE << "=== SEGMENTATION FAULT DETECTED ===";
+    LOGE << "DDB Process: " << io::getExeFolderPath().string();
+    LOGE << "Version: " << APP_VERSION;
+
+    // Log dello stato del processo prima del crash
+    try {
+        LOGE << "Current working directory: " << fs::current_path().string();
+    } catch (...) {
+        LOGE << "Could not determine current directory";
+    }
+
+    throw ddb::AppException("Application encountered a segfault");
+}
+
+void handleFpe() {
+    LOGE << "=== FLOATING POINT EXCEPTION DETECTED ===";
+    LOGE << "DDB Process: " << io::getExeFolderPath().string();
+    LOGE << "Version: " << APP_VERSION;
+
+    throw ddb::AppException("Application encountered a floating point exception");
+}
+
+// Funzione helper per ottenere build info (se non già presente)
+std::string getBuildInfo() {
+    std::ostringstream ss;
+
+#ifdef DEBUG
+    ss << "Debug";
+#else
+    ss << "Release";
+#endif
+
+    ss << " build";
+
+#ifdef __GNUC__
+    ss << " (GCC " << __GNUC__ << "." << __GNUC_MINOR__ << ")";
+#elif defined(_MSC_VER)
+    ss << " (MSVC " << _MSC_VER << ")";
+#endif
+
+    ss << " compiled " << __DATE__ << " " << __TIME__;
+
+    return ss.str();
+}
+
+
+void DDBRegisterProcess(bool verbose) {
+    std::call_once(initialization_flag, [verbose]() {
+        LOGD << "Initializing DDB process";
+
+        // 1. PRIMA: Setup paths
+        const auto exeFolder = io::getExeFolderPath().string();
+
+        // 2. SETUP ENVIRONMENT VARIABLES (ordine critico!)
+        setupEnvironmentVariables(exeFolder);
+
+        // 3. SETUP LOCALE (dopo environment, prima di GDAL)
+        setupLocaleUnified();
+
+        // 4. SETUP LOGGING
+        setupLogging(verbose);
+
+        // 5. GDAL/PROJ INITIALIZATION (dopo tutto il setup)
+        GDALAllRegister();
+        primeGDAL();
+
+        // 6. DIAGNOSTICS
+        logEnvironmentDiagnostics();
+
+        // 7. SIGNAL HANDLERS (ultimo)
+        setupSignalHandlers();
     });
 }
 
@@ -1159,9 +1414,11 @@ DDB_DLL DDBErr DDBStac(const char* ddbPath,
     if (output == nullptr)
         throw InvalidArgsException("Output pointer is null");
 
-    // entry, stacCollectionRoot, id, stacCatalogRoot can be null/empty - they are optional parameters
+    // entry, stacCollectionRoot, id, stacCatalogRoot can be null/empty - they are optional
+    // parameters
     const std::string entryStr = entry ? std::string(entry) : "";
-    const std::string stacCollectionRootStr = stacCollectionRoot ? std::string(stacCollectionRoot) : "";
+    const std::string stacCollectionRootStr =
+        stacCollectionRoot ? std::string(stacCollectionRoot) : "";
     const std::string idStr = id ? std::string(id) : "";
     const std::string stacCatalogRootStr = stacCatalogRoot ? std::string(stacCatalogRoot) : "";
 
