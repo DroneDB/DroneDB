@@ -7,6 +7,7 @@
 #include <cpr/cpr.h>
 
 #include <mutex>
+#include <csignal>
 
 #ifdef WIN32
 #include <windows.h>
@@ -38,6 +39,17 @@
 using namespace ddb;
 
 char ddbLastError[255];
+
+// Forward declarations
+void verifyProjDatabase();
+void testUnicodeHandling();
+std::string getBuildInfo();
+void handleSegv();
+void handleFpe();
+void setupSignalHandlers();
+void logEnvironmentDiagnostics();
+void setupLogging(bool verbose);
+static void primeGDAL();
 
 // Thread-safe initialization using std::once_flag
 static std::once_flag initialization_flag;
