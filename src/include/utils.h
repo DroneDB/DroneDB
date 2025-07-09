@@ -166,7 +166,6 @@ cpr::Header authHeader(const std::string& token);
 
 cpr::Header authCookie(const std::string& token);
 
-DDB_DLL void getLibrariesVersion(std::map<std::string, std::string>& subsystems);
 DDB_DLL void printVersions();
 
 DDB_DLL bool isNullOrEmptyOrWhitespace(const char* str, size_t maxLength = 0);

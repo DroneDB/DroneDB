@@ -13,8 +13,6 @@ int main(int argc, char **argv)
 
     DDBRegisterProcess(true);
 
-    ddb::utils::printVersions();
-
     // TODO: ability to clean previous TestAreas
 
     ::testing::InitGoogleTest(&argc, argv);
