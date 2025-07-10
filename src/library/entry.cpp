@@ -253,7 +253,7 @@ namespace ddb
 
                             LOGV << "OSRImportFromEPSG result: Success";
 
-                            OSRSetAxisMappingStrategy(hWgs84, OSRAxisMappingStrategy::OAMS_AUTHORITY_COMPLIANT);
+                            OSRSetAxisMappingStrategy(hWgs84, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
                             LOGV << "Set dest axis mapping strategy";
 
                             OGRCoordinateTransformationH hTransform = OCTNewCoordinateTransformation(hSrs, hWgs84);
@@ -264,16 +264,16 @@ namespace ddb
                                 LOGV << "Computing corner coordinates";
 
                                 auto ul = getRasterCoordinate(hTransform, geotransform, 0.0, 0.0);
-                                LOGV << "Upper Left: " << ul.latitude << ", " << ul.longitude;
+                                LOGV << "Upper Left: " << ul.longitude << ", " << ul.latitude;
 
                                 auto ur = getRasterCoordinate(hTransform, geotransform, width, 0);
-                                LOGV << "Upper Right: " << ur.latitude << ", " << ur.longitude;
+                                LOGV << "Upper Right: " << ur.longitude << ", " << ur.latitude;
 
                                 auto lr = getRasterCoordinate(hTransform, geotransform, width, height);
-                                LOGV << "Lower Right: " << lr.latitude << ", " << lr.longitude;
+                                LOGV << "Lower Right: " << lr.longitude << ", " << lr.latitude;
 
                                 auto ll = getRasterCoordinate(hTransform, geotransform, 0.0, height);
-                                LOGV << "Lower Left: " << ll.latitude << ", " << ll.longitude;
+                                LOGV << "Lower Left: " << ll.longitude << ", " << ll.latitude;
 
                                 LOGV << "Adding points to polygon geometry";
                                 entry.polygon_geom.addPoint(ul.longitude, ul.latitude, 0.0);
@@ -369,7 +369,7 @@ namespace ddb
         if (OCTTransform(hTransform, 1, &dfGeoX, &dfGeoY, nullptr))
         {
 
-            return Geographic2D(dfGeoY, dfGeoX);
+            return Geographic2D(dfGeoX, dfGeoY);
         }
         else
         {

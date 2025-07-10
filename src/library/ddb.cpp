@@ -328,7 +328,9 @@ void initializeGDALandPROJ() {
     LOGD << "Initializing GDAL and PROJ libraries";
 
     GDALAllRegister();
-    primeGDAL();
+    //primeGDAL();
+
+    CPLSetConfigOption("OGR_CT_FORCE_TRADITIONAL_GIS_ORDER", "YES");
 
     LOGD << "GDAL and PROJ initialization completed";
 
