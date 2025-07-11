@@ -20,5 +20,6 @@ std::string calculateHash(const fs::path &file);
 
 void createFile(const fs::path& filePath);
 bool createTestTree(const fs::path& root);
+std::string toHumanReadableTime(long long timeMs);
 
 #endif // TEST_UTILS_H
