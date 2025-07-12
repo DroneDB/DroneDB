@@ -60,8 +60,6 @@ int main(int argc, char *argv[])
         return EXIT_SUCCESS;
     }
 
-    ddb::utils::printVersions();
-
     if (argc <= 1)
         printHelp(argv);
     else

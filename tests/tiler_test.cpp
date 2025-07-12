@@ -105,4 +105,41 @@ namespace
         EXPECT_TRUE(io::Path(tile).getSize() > 0);
     }
 
+    TEST(testTiler, MultipleZoomLevels)
+    {
+        TestArea ta(TEST_NAME);
+        fs::path ortho = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/refs/heads/master/ortho/wro.tif",
+                                              "wro.tif");
+        fs::path tileDir = ta.getFolder("tiles");
+
+        GDALTiler t(ortho.string(), tileDir.string(), 256, true);
+
+        // Test tiles from the provided table
+        struct TileTest {
+            int z, x, y;
+            int tileSize;
+        };
+
+        std::vector<TileTest> testTiles = {
+            {14, 16174, 10245, 256},
+            {18, 258796, 163923, 256},
+            {18, 258797, 163923, 256},
+            {18, 258796, 163922, 256},
+            {18, 258797, 163922, 256},
+            {19, 517593, 327846, 256},
+            {20, 1035186, 655693, 256},
+            {20, 1035187, 655693, 256},
+            {20, 1035186, 655694, 256}
+        };
+
+        for (const auto& tile : testTiles) {
+            t.tile(tile.z, tile.x, tile.y);
+
+            fs::path expectedTile = tileDir / std::to_string(tile.z) / std::to_string(tile.x) /
+                                   (std::to_string(tile.y) + ".png");
+
+            EXPECT_TRUE(fs::exists(expectedTile)) << "Tile " << tile.z << "/" << tile.x << "/" << tile.y << " not found";
+        }
+    }
+
 }

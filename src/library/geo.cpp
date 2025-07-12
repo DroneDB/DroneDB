@@ -119,8 +119,8 @@ namespace ddb
 
         OGRCoordinateTransformationH hTransform = OCTNewCoordinateTransformation(hWgs84, hSrs);
 
-        double geoX = latitude;
-        double geoY = longitude;
+        double geoX = longitude;
+        double geoY = latitude;
 
         const auto success = OCTTransform(hTransform, 1, &geoX, &geoY, nullptr) == TRUE;
 
@@ -179,7 +179,7 @@ namespace ddb
         if (!success)
             throw GDALException("Cannot transform coordinates from UTM " + std::to_string(x) + "," + std::to_string(y));
 
-        return Geographic2D(geoY, geoX);
+        return Geographic2D(geoX, geoY);
 
     }
 

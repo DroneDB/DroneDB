@@ -232,36 +232,49 @@ cpr::Header authCookie(const std::string& token) {
     return cpr::Header{{"Cookie", "jwtToken=" + token}};
 }
 
+std::string getBuildInfo() {
+    std::ostringstream ss;
+
+#ifdef DEBUG
+    ss << "Debug";
+#else
+    ss << "Release";
+#endif
+
+    ss << " build";
+
+#ifdef __GNUC__
+    ss << " (GCC " << __GNUC__ << "." << __GNUC_MINOR__ << ")";
+#elif defined(_MSC_VER)
+    ss << " (MSVC " << _MSC_VER << ")";
+#endif
+
+    ss << " compiled " << __DATE__ << " " << __TIME__;
+
+    return ss.str();
+}
+
 DDB_DLL void printVersions() {
 
-    std::map<std::string, std::string> libraries;
-
-    ddb::utils::getLibrariesVersion(libraries);
-
     LOGV << "DDB v" << APP_VERSION;
+    LOGD << "Build info: " << getBuildInfo();
 
-    for (const auto& library : libraries) {
-        LOGV << library.first << ": " << library.second;
-    }
+    LOGV << "SQLite: " << sqlite3_libversion();
+    LOGV << "SpatiaLite: " << spatialite_version();
+    LOGV << "GDAL: " << GDALVersionInfo("RELEASE_NAME");
+    LOGV << "CURL: " << curl_version();
+    LOGV << "PDAL: " << pdal::pdalVersion;
+
+    auto pj_info = proj_info();
+    LOGV << "PROJ: " << std::string(pj_info.release) + " (search path: " + pj_info.searchpath + ")";
 
     LOGV << "PROJ_LIB = " << getenv("PROJ_LIB");
     LOGV << "GDAL_DATA = " << getenv("GDAL_DATA");
     LOGV << "PROJ_DATA = " << getenv("PROJ_DATA");
-}
 
-
-// Alternative safer ABI approach
-DDB_DLL void getLibrariesVersion(std::map<std::string, std::string>& versions) {
-    versions.clear();
-    versions["SQLite"] = sqlite3_libversion();
-    versions["SpatiaLite"] = spatialite_version();
-    versions["GDAL"] = GDALVersionInfo("RELEASE_NAME");
-    versions["CURL"] = curl_version();
-    versions["PDAL"] = pdal::pdalVersion;
-
-    auto pj_info = proj_info();
-
-    versions["PROJ"] = std::string(pj_info.release) + " (search path: " + pj_info.searchpath + ")";
+    LOGD << "Current locale (LC_ALL): " << std::setlocale(LC_ALL, nullptr);
+    LOGD << "Current locale (LC_CTYPE): " << std::setlocale(LC_CTYPE, nullptr);
+    LOGD << "LC_ALL env var: " << std::getenv("LC_ALL");
 
 }
 

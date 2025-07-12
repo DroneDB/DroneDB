@@ -13,11 +13,19 @@ int main(int argc, char **argv)
 
     DDBRegisterProcess(true);
 
-    ddb::utils::printVersions();
-
     // TODO: ability to clean previous TestAreas
 
+    auto time = std::chrono::system_clock::now();
+
     ::testing::InitGoogleTest(&argc, argv);
-    return RUN_ALL_TESTS();
+    auto res =  RUN_ALL_TESTS();
+
+    auto endTime = std::chrono::system_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - time).count();
+
+    std::cout << "Tests finished in " << toHumanReadableTime(duration) << std::endl;
+
+    return res;
+
 }
 
