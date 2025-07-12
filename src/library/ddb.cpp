@@ -92,7 +92,7 @@ static void primeGDAL() {
 
 void setupEnvironmentVariables(const std::string& exeFolder) {
     // Setup percorsi PROJ (uniformi per entrambe le piattaforme)
-    const auto projDataPath = (fs::path(exeFolder) / "proj").string();
+    const auto projDataPath = fs::path(exeFolder).string();
 
     // Verifica esistenza di proj.db
     const auto projDbPath = fs::path(projDataPath) / "proj.db";
