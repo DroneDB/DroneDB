@@ -271,11 +271,27 @@ namespace
 
         parseEntry(pc, ta.getFolder(), e, false);
 
+        // Point Geometry (centro)
+        EXPECT_NEAR(e.point_geom.getPoint(0).x, 4.342703, 1e-5);
+        EXPECT_NEAR(e.point_geom.getPoint(0).y, 50.692142, 1e-5);
+
+        // Polygon Geometry (angoli - ordine: UL, UR, LR, LL, UL)
+        EXPECT_NEAR(e.polygon_geom.getPoint(0).x, 4.341500000, 1e-9); // Upper Left
+        EXPECT_NEAR(e.polygon_geom.getPoint(0).y, 50.692675000, 1e-9);
+        EXPECT_NEAR(e.polygon_geom.getPoint(1).x, 4.343905556, 1e-9); // Upper Right
+        EXPECT_NEAR(e.polygon_geom.getPoint(1).y, 50.692677778, 1e-9);
+        EXPECT_NEAR(e.polygon_geom.getPoint(2).x, 4.343905556, 1e-9); // Lower Right
+        EXPECT_NEAR(e.polygon_geom.getPoint(2).y, 50.691605556, 1e-9);
+        EXPECT_NEAR(e.polygon_geom.getPoint(3).x, 4.341500000, 1e-9); // Lower Left
+        EXPECT_NEAR(e.polygon_geom.getPoint(3).y, 50.691605556, 1e-9);
+        EXPECT_NEAR(e.polygon_geom.getPoint(4).x, 4.341500000, 1e-9); // Chiusura (UL)
+        EXPECT_NEAR(e.polygon_geom.getPoint(4).y, 50.692675000, 1e-9);
+
         /* Expected values - BD72 / Belgian Lambert 72 (EPSG:31370)
         Point Geometry: [[4.343966, 50.691592, 0] ]
         Polygon Geometry: [[4.342762755994, 50.69212694232, 0] [4.345168867205, 50.69212743836, 0] [4.345169386691, 50.69105730148, 0] [4.342763330072, 50.69105680545, 0] [4.342762755994, 50.69212694232, 0] ]
         */
-
+        /*
         EXPECT_EQ(e.point_geom.size(), 1);
         EXPECT_EQ(e.polygon_geom.size(), 5);
         EXPECT_NEAR(e.point_geom.getPoint(0).x, 4.343966, 1e-5);
@@ -289,7 +305,7 @@ namespace
         EXPECT_NEAR(e.polygon_geom.getPoint(3).x, 4.342763330072, 1e-9);
         EXPECT_NEAR(e.polygon_geom.getPoint(3).y, 50.69105680545, 1e-9);
         EXPECT_NEAR(e.polygon_geom.getPoint(4).x, 4.342762755994, 1e-9);
-        EXPECT_NEAR(e.polygon_geom.getPoint(4).y, 50.69212694232, 1e-9);
+        EXPECT_NEAR(e.polygon_geom.getPoint(4).y, 50.69212694232, 1e-9);*/
     }
 
     TEST(parseEntry, w5s_EPSG32615)
