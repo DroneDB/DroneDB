@@ -95,10 +95,9 @@ namespace ddb
             throw GDALException("Cannot import spatial reference system " + proj + ". Is PROJ available?");
         }
 
-
-
         //OSRSetAxisMappingStrategy(hSrs, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
-        //LOGV << "Set dest axis mapping strategy";
+        //LOGV << "Set source axis mapping strategy";
+
         OGRSpatialReferenceH hWgs84 = OSRNewSpatialReference(nullptr);
 
         if (hWgs84 == nullptr)
@@ -142,7 +141,16 @@ namespace ddb
     Geographic2D fromUTM(double x, double y, const UTMZone &zone)
     {
         OGRSpatialReferenceH hSrs = OSRNewSpatialReference(nullptr);
+        if (hSrs == nullptr)
+            throw GDALException("Cannot create spatial reference system for UTM zone " + std::to_string(zone.zone) + (zone.north ? "N" : "S"));
+
         OGRSpatialReferenceH hWgs84 = OSRNewSpatialReference(nullptr);
+
+        if (hWgs84 == nullptr)
+        {
+            OSRDestroySpatialReference(hSrs);
+            throw GDALException("Cannot create WGS84 spatial reference system for UTM zone " + std::to_string(zone.zone) + (zone.north ? "N" : "S"));
+        }
 
         std::string proj = getProjForUTM(zone);
         if (OSRImportFromProj4(hSrs, proj.c_str()) != OGRERR_NONE)
@@ -153,7 +161,7 @@ namespace ddb
         }
 
         //OSRSetAxisMappingStrategy(hSrs, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
-        //LOGV << "Set dest axis mapping strategy";
+        //LOGV << "Set source axis mapping strategy";
 
         if (OSRImportFromEPSG(hWgs84, 4326) != OGRERR_NONE)
         {
