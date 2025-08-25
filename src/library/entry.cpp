@@ -253,8 +253,8 @@ namespace ddb
 
                             LOGV << "OSRImportFromEPSG result: Success";
 
-                            //OSRSetAxisMappingStrategy(hWgs84, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
-                            //LOGV << "Set dest axis mapping strategy";
+                            OSRSetAxisMappingStrategy(hWgs84, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
+                            LOGV << "Set dest axis mapping strategy";
 
                             OGRCoordinateTransformationH hTransform = OCTNewCoordinateTransformation(hSrs, hWgs84);
                             LOGV << "Created coordinate transformation: " << (hTransform != nullptr ? "Success" : "Failed");
