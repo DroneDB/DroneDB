@@ -139,11 +139,11 @@ override_dh_auto_install:
 	ln -sfr libddb.so.0 debian/ddb/usr/lib/libddb.so
 	install -Dm644 $(CURDIR)/build/libnxs.so \
 		debian/ddb/usr/lib/libnxs.so
-	install -Dm644 $(CURDIR)/build/vcpkg_installed/${VCPKG_HOST_TRIPLET}/lib/libpdalcpp.so.18 \
-		debian/ddb/usr/lib/libpdalcpp.so.18
-	ln -sfr libpdalcpp.so.18 debian/ddb/usr/lib/libpdalcpp.so
+	install -Dm644 $(CURDIR)/build/vcpkg_installed/${VCPKG_HOST_TRIPLET}/lib/libpdalcpp.so.19 \
+		debian/ddb/usr/lib/libpdalcpp.so.19
+	ln -sfr libpdalcpp.so.19 debian/ddb/usr/lib/libpdalcpp.so
 	install -d debian/ddb/usr/lib/pdal/plugins
-	install -m644 $(CURDIR)/build/vcpkg_installed/${VCPKG_HOST_TRIPLET}/lib/libpdal_plugin_*.so.18 \
+	install -m644 $(CURDIR)/build/vcpkg_installed/${VCPKG_HOST_TRIPLET}/lib/libpdal_plugin_*.so.19 \
 		debian/ddb/usr/lib/pdal/plugins/ || true
 
 	# ---- data -----------------------------------------------------------
@@ -164,7 +164,7 @@ override_dh_auto_install:
 
 # libpdalcpp shipped privately - ignore for shlibdeps.
 override_dh_shlibdeps:
-	dh_shlibdeps -- -xlibpdalcpp.so.18
+	dh_shlibdeps -- -xlibpdalcpp.so.19
 EOF
 chmod +x debian/rules
 
