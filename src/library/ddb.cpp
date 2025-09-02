@@ -90,8 +90,7 @@ static void primeGDAL() {
 }
 
 
-void setupEnvironmentVariables(const std::string& exeFolder) {
-    // Setup percorsi PROJ (uniformi per entrambe le piattaforme)
+    // Setup PROJ paths (uniform for both platforms)
     const auto projDataPath = fs::path(exeFolder).string();
 
     // Verifica esistenza di proj.db
@@ -150,7 +149,7 @@ void setupEnvironmentVariables(const std::string& exeFolder) {
 
 void setupLocaleUnified() {
 
-    // Strategy: LC_ALL=C per stability, LC_CTYPE=UTF-8 for Unicode
+    // Strategy: LC_ALL=C for stability, LC_CTYPE=UTF-8 for Unicode
 
 #ifdef WIN32
 
@@ -237,9 +236,7 @@ void testUnicodeHandling() {
     }
 }
 
-void setupSignalHandlers() {
-    try {
-        // Setup signal handlers per catturare crash e gestirli gracefully
+        // Setup signal handlers to catch crashes and handle them gracefully
         LOGD << "Setting up signal handlers";
 
 #ifdef WIN32
@@ -366,7 +363,6 @@ void DDBRegisterProcess(bool verbose) {
         setupLocaleUnified();
         setupLogging(verbose);
         initializeGDALandPROJ();
-        //logEnvironmentDiagnostics();
         setupSignalHandlers();
 
         // Test UTF-8 handling
