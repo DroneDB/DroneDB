@@ -6,8 +6,8 @@
 
 #include <cpr/cpr.h>
 
-#include <mutex>
 #include <csignal>
+#include <mutex>
 
 #ifdef WIN32
 #include <windows.h>
@@ -41,7 +41,6 @@ using namespace ddb;
 char ddbLastError[255];
 
 // Forward declarations
-void testUnicodeHandling();
 std::string getBuildInfo();
 void handleSegv();
 void handleFpe();
@@ -53,47 +52,11 @@ void initializeGDALandPROJ();
 // Thread-safe initialization using std::once_flag
 static std::once_flag initialization_flag;
 
-static void primeGDAL() {
-    // Initialize PROJ structures to prevent axis mapping issues
-    // This ensures PROJ database and axis mapping strategies are properly initialized
-    LOGD << "Initializing PROJ coordinate transformation system";
-
-    // Create a simple coordinate transformation to initialize PROJ internal structures
-    OGRSpatialReferenceH hSrcSRS = OSRNewSpatialReference(nullptr);
-    OGRSpatialReferenceH hDstSRS = OSRNewSpatialReference(nullptr);
-
-    if (hSrcSRS && hDstSRS) {
-        // Import EPSG:4326 (WGS84)
-        if (OSRImportFromEPSG(hSrcSRS, 4326) == OGRERR_NONE) {
-            // Import a UTM zone (example: UTM Zone 15N)
-            if (OSRImportFromProj4(hDstSRS, "+proj=utm +zone=15 +datum=WGS84 +units=m +no_defs") ==
-                OGRERR_NONE) {
-                // Create transformation to force PROJ initialization
-                OGRCoordinateTransformationH hTransform = OCTNewCoordinateTransformation(hSrcSRS, hDstSRS);
-                if (hTransform) {
-                    // Perform a dummy transformation to initialize internal structures
-                    double y = -91.0, x = 46.0;
-
-                    if (OCTTransform(hTransform, 1, &x, &y, nullptr) != TRUE) {
-                        LOGD << "Warning: Coordinate transformation failed, but PROJ "
-                                "initialization may still be successful";
-                    }
-
-                    OCTDestroyCoordinateTransformation(hTransform);
-                    LOGD << "PROJ initialization completed successfully";
-                }
-            }
-        }
-        OSRDestroySpatialReference(hSrcSRS);
-        OSRDestroySpatialReference(hDstSRS);
-    }
-}
-
-
+void setupEnvironmentVariables(const std::string& exeFolder) {
     // Setup PROJ paths (uniform for both platforms)
     const auto projDataPath = fs::path(exeFolder).string();
 
-    // Verifica esistenza di proj.db
+    // Check for existence of proj.db
     const auto projDbPath = fs::path(projDataPath) / "proj.db";
     if (!fs::exists(projDbPath)) {
         LOGW << "PROJ database not found at: " << projDbPath.string();
@@ -103,26 +66,24 @@ static void primeGDAL() {
 
         // Debug: Print proj.db hash
         try {
-
             const std::string projDbHash = Hash::fileSHA256(projDbPath.string());
             LOGD << "proj.db hash: " << projDbHash << " (path: " << projDbPath.string() << ")";
 
         } catch (const std::exception& e) {
             LOGD << "Error computing proj.db hash: " << e.what();
         }
-
     }
 
 #ifdef WIN32
-    // Windows: usa _putenv_s per sincronizzazione CRT
+    // Windows: uses _putenv_s for CRT synchronization
 
-    // PROJ_DATA è la variabile preferita (moderna)
+    // PROJ_DATA is the preferred (modern) variable
     if (GetEnvironmentVariableA("PROJ_DATA", nullptr, 0) == 0) {
         _putenv_s("PROJ_DATA", projDataPath.c_str());
         LOGD << "Set PROJ_DATA: " << projDataPath;
     }
 
-    // PROJ_LIB solo come fallback legacy se PROJ_DATA non è presente
+    // PROJ_LIB is only a legacy fallback if PROJ_DATA is not present
     if (GetEnvironmentVariableA("PROJ_LIB", nullptr, 0) == 0 &&
         GetEnvironmentVariableA("PROJ_DATA", nullptr, 0) == 0) {
         _putenv_s("PROJ_LIB", projDataPath.c_str());
@@ -130,31 +91,28 @@ static void primeGDAL() {
     }
 
 #else
-    // Unix: usa setenv standard
+    // Unix: uses setenv standard
 
-    // PROJ_DATA è la variabile preferita (moderna)
+    // PROJ_DATA is the preferred (modern) variable
     if (std::getenv("PROJ_DATA") == nullptr) {
         setenv("PROJ_DATA", projDataPath.c_str(), 1);
         LOGD << "Set PROJ_DATA: " << projDataPath;
     }
 
-    // PROJ_LIB solo come fallback legacy se PROJ_DATA non è presente
+    // PROJ_LIB is only a legacy fallback if PROJ_DATA is not present
     if (std::getenv("PROJ_LIB") == nullptr && std::getenv("PROJ_DATA") == nullptr) {
         setenv("PROJ_LIB", projDataPath.c_str(), 1);
         LOGD << "Set PROJ_LIB (fallback): " << projDataPath;
     }
 #endif
-
 }
 
 void setupLocaleUnified() {
-
     // Strategy: LC_ALL=C for stability, LC_CTYPE=UTF-8 for Unicode
 
 #ifdef WIN32
 
     try {
-
         _putenv_s("LC_ALL", "C");
         std::setlocale(LC_ALL, "C");
 
@@ -172,7 +130,6 @@ void setupLocaleUnified() {
 #else
 
     try {
-
         setenv("LC_ALL", "C", 1);
         std::setlocale(LC_ALL, "C");
 
@@ -205,7 +162,6 @@ void setupLocaleUnified() {
 
 void setupLogging(bool verbose) {
     try {
-
         const auto logToFile = std::getenv(DDB_LOG_ENV) != nullptr;
 
         // Enable verbose logging if the environment variable is set
@@ -221,21 +177,8 @@ void setupLogging(bool verbose) {
     }
 }
 
-void testUnicodeHandling() {
+void setupSignalHandlers() {
     try {
-        const std::string testUnicode = "test_åäö_🦀.txt";
-        const fs::path testPath(testUnicode);
-
-        const std::string converted = testPath.string();
-        if (converted != testUnicode)
-            LOGW << "Unicode string conversion may have issues";
-
-
-    } catch (const std::exception& e) {
-        LOGW << "Unicode handling test failed: " << e.what();
-    }
-}
-
         // Setup signal handlers to catch crashes and handle them gracefully
         LOGD << "Setting up signal handlers";
 
@@ -320,7 +263,6 @@ void handleFpe() {
 }
 
 void initializeGDALandPROJ() {
-
     // Initialize GDAL and PROJ
     LOGD << "Initializing GDAL and PROJ libraries";
 
@@ -364,9 +306,6 @@ void DDBRegisterProcess(bool verbose) {
         setupLogging(verbose);
         initializeGDALandPROJ();
         setupSignalHandlers();
-
-        // Test UTF-8 handling
-        testUnicodeHandling();
 
         ddb::utils::printVersions();
     });
