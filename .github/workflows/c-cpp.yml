@@ -18,6 +18,8 @@ jobs:
       PROJ_LIB: ${{ github.workspace }}/build
       PROJ_DATA: ${{ github.workspace }}/build
       VCPKG_BUILD_TYPE: release
+      VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+      VCPKG_FEATURE_FLAGS: "binarycaching,manifests,versions"
     steps:
       - name: Free Disk Space
         uses: ShubhamTatvamasi/free-disk-space-action@master
@@ -35,13 +37,37 @@ jobs:
           echo "GITHUB_RUN_NUMBER=${GITHUB_RUN_NUMBER}"
           echo "GITHUB_SHA=${GITHUB_SHA}"
           ls -la
+      - name: Cache vcpkg packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ github.workspace }}/vcpkg/installed
+            ${{ github.workspace }}/vcpkg/packages
+          key: ${{ runner.os }}-vcpkg-packages-${{ hashFiles('**/vcpkg.json', '**/vcpkg-triplets/**', '.gitmodules') }}-${{ hashFiles('vcpkg/.git/HEAD', 'vcpkg/.git/modules/*/HEAD') }}
+          restore-keys: |
+            ${{ runner.os }}-vcpkg-packages-${{ hashFiles('**/vcpkg.json', '**/vcpkg-triplets/**', '.gitmodules') }}-
+            ${{ runner.os }}-vcpkg-packages-
       - name: Cache vcpkg
         uses: actions/cache@v4
         with:
-          path: ${{ github.workspace }}/vcpkg
-          key: ${{ runner.os }}-vcpkg-${{ hashFiles('**/vcpkg.json') }}
+          path: |
+            ${{ github.workspace }}/vcpkg
+            !${{ github.workspace }}/vcpkg/buildtrees
+            !${{ github.workspace }}/vcpkg/downloads
+            !${{ github.workspace }}/vcpkg/installed
+            !${{ github.workspace }}/vcpkg/packages
+          key: ${{ runner.os }}-vcpkg-${{ hashFiles('**/vcpkg.json', '**/vcpkg-triplets/**', '.gitmodules') }}-${{ hashFiles('vcpkg/.git/HEAD', 'vcpkg/.git/modules/*/HEAD') }}
           restore-keys: |
+            ${{ runner.os }}-vcpkg-${{ hashFiles('**/vcpkg.json', '**/vcpkg-triplets/**', '.gitmodules') }}-
             ${{ runner.os }}-vcpkg-
+      - name: Cache CMake build
+        uses: actions/cache@v4
+        with:
+          path: build
+          key: ${{ runner.os }}-cmake-${{ hashFiles('**/CMakeLists.txt', '**/vcpkg.json') }}-${{ hashFiles('vcpkg/.git/HEAD') }}
+          restore-keys: |
+            ${{ runner.os }}-cmake-${{ hashFiles('**/CMakeLists.txt', '**/vcpkg.json') }}-
+            ${{ runner.os }}-cmake-
       - name: Install Linux dependencies
         run: |
           chmod +x ./scripts/install-dependencies.sh
@@ -133,18 +159,44 @@ jobs:
       VCPKG_BUILD_TYPE: release
       PROJ_LIB: ${{ github.workspace }}/build
       PROJ_DATA: ${{ github.workspace }}/build
+      VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+      VCPKG_FEATURE_FLAGS: "binarycaching,manifests,versions"
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: 'recursive'
           fetch-depth: 0
+      - name: Cache vcpkg packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ github.workspace }}/vcpkg/installed
+            ${{ github.workspace }}/vcpkg/packages
+          key: ${{ runner.os }}-vcpkg-packages-${{ hashFiles('**/vcpkg.json', '**/vcpkg-triplets/**', '.gitmodules') }}-${{ hashFiles('vcpkg/.git/HEAD', 'vcpkg/.git/modules/*/HEAD') }}
+          restore-keys: |
+            ${{ runner.os }}-vcpkg-packages-${{ hashFiles('**/vcpkg.json', '**/vcpkg-triplets/**', '.gitmodules') }}-
+            ${{ runner.os }}-vcpkg-packages-
       - name: Cache vcpkg
         uses: actions/cache@v4
         with:
-          path: ${{ github.workspace }}/vcpkg
-          key: ${{ runner.os }}-vcpkg-${{ hashFiles('**/vcpkg.json') }}
+          path: |
+            ${{ github.workspace }}/vcpkg
+            !${{ github.workspace }}/vcpkg/buildtrees
+            !${{ github.workspace }}/vcpkg/downloads
+            !${{ github.workspace }}/vcpkg/installed
+            !${{ github.workspace }}/vcpkg/packages
+          key: ${{ runner.os }}-vcpkg-${{ hashFiles('**/vcpkg.json', '**/vcpkg-triplets/**', '.gitmodules') }}-${{ hashFiles('vcpkg/.git/HEAD', 'vcpkg/.git/modules/*/HEAD') }}
           restore-keys: |
+            ${{ runner.os }}-vcpkg-${{ hashFiles('**/vcpkg.json', '**/vcpkg-triplets/**', '.gitmodules') }}-
             ${{ runner.os }}-vcpkg-
+      - name: Cache CMake build
+        uses: actions/cache@v4
+        with:
+          path: build
+          key: ${{ runner.os }}-cmake-${{ hashFiles('**/CMakeLists.txt', '**/vcpkg.json') }}-${{ hashFiles('vcpkg/.git/HEAD') }}
+          restore-keys: |
+            ${{ runner.os }}-cmake-${{ hashFiles('**/CMakeLists.txt', '**/vcpkg.json') }}-
+            ${{ runner.os }}-cmake-
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@v11
         with:
