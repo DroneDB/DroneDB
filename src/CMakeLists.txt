@@ -33,16 +33,20 @@ find_package(unofficial-sqlite3 CONFIG REQUIRED)
 find_package(SpatiaLite REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 
+# Link PDAL libraries directly
+#target_link_libraries(${PROJECT_NAME} PRIVATE pdalcpp)
+
 find_path(BOOLINQ_INCLUDE_DIRS "boolinq/boolinq.h")
 
 # Common libraries
 set(COMMON_LIBS
+    pdalcpp
     Threads::Threads
     cctz::cctz
     Exiv2::exiv2lib
     GDAL::GDAL
-    $<TARGET_NAME:pdalcpp>
     PROJ::proj
+    ${GEOTIFF_LIBRARIES}
     libzip::zip
     plog::plog
     cpr::cpr
@@ -55,6 +59,9 @@ set(COMMON_LIBS
 )
 
 target_link_libraries(${PROJECT_NAME} PRIVATE ${COMMON_LIBS})
+
+# Include GeoTIFF directories
+target_include_directories(${PROJECT_NAME} PRIVATE ${GEOTIFF_INCLUDE_DIR})
 
 # Include directories (public for external use)
 target_include_directories(${PROJECT_NAME} PUBLIC
@@ -144,16 +151,39 @@ endif()
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E echo "Copying necessary files to the binary directory..."
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${SRC_RELEASE_DIR}" "${OUTPUT_DIR}"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${PROJ_DIR}/proj.db" "${OUTPUT_DIR}"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/data/sensor_data.sqlite" "${OUTPUT_DIR}"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/data/timezone21.bin" "${OUTPUT_DIR}"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/data/zoneinfo" "${OUTPUT_DIR}/zoneinfo"
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${LIBNEXUS_OUTPUT_DIR}" "${OUTPUT_DIR}"
 )
 
+# Copy PROJ data if available
+if(PROJ_DATA_DIR AND EXISTS "${PROJ_DATA_DIR}/proj.db")
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E echo "Copying PROJ data from ${PROJ_DATA_DIR}..."
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${PROJ_DATA_DIR}/proj.db" "${OUTPUT_DIR}/proj.db"
+        COMMENT "Copying PROJ database"
+    )
+endif()
+
+# Copy other support files
+add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/data/sensor_data.sqlite" "${OUTPUT_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/data/timezone21.bin" "${OUTPUT_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/data/zoneinfo" "${OUTPUT_DIR}/zoneinfo"
+)
+
+# Windows-specific files
 if (WIN32)
     add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/data/ddb.bat" "${OUTPUT_DIR}"
+    )
+
+    # Automatic copy of ALL required DLLs next to the executable (MSVC only).
+    # Avoids endless manual chasing after gdal/proj/curl/zlib/etc.
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E echo "Staging runtime DLLs for ${PROJECT_NAME}..."
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                $<TARGET_RUNTIME_DLLS:${PROJECT_NAME}>
+                $<TARGET_FILE_DIR:${PROJECT_NAME}>
+        COMMAND_EXPAND_LISTS
     )
 endif()
 

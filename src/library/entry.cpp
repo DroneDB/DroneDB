@@ -232,8 +232,8 @@ namespace ddb
                             OGRErr importResult = OSRImportFromWkt(hSrs, &wktp);
                             LOGV << "OSRImportFromWkt result: " << (importResult == OGRERR_NONE ? "Success" : "Failed");
 
-                            OSRSetAxisMappingStrategy(hSrs, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
-                            LOGV << "Set source axis mapping strategy";
+                            // OSRSetAxisMappingStrategy(hSrs, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
+                            // LOGV << "Set source axis mapping strategy";
 
                             if (importResult != OGRERR_NONE)
                             {
@@ -253,8 +253,8 @@ namespace ddb
 
                             LOGV << "OSRImportFromEPSG result: Success";
 
-                            OSRSetAxisMappingStrategy(hWgs84, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
-                            LOGV << "Set dest axis mapping strategy";
+                            // OSRSetAxisMappingStrategy(hWgs84, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
+                            // LOGV << "Set dest axis mapping strategy";
 
                             OGRCoordinateTransformationH hTransform = OCTNewCoordinateTransformation(hSrs, hWgs84);
                             LOGV << "Created coordinate transformation: " << (hTransform != nullptr ? "Success" : "Failed");
