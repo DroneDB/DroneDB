@@ -1,7 +1,7 @@
 {
   "name": "ddb",
-  "version": "1.1.6",
-  "builtin-baseline": "acd65983f2e668c0bc44a117575e6073681fa8e3",
+  "version": "1.2.0",
+  "builtin-baseline": "b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01",
   "dependencies": [
     "boolinq",
     "cctz",
@@ -38,7 +38,12 @@
     },
     "pdal",
     "plog",
-    "proj",
+    {
+      "name": "proj",
+      "features": [
+        "tiff"
+      ]
+    },
     {
       "name": "qt5",
       "default-features": false,

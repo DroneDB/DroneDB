@@ -24,12 +24,6 @@ set(SUPPORT_DIR "${CMAKE_BINARY_DIR}")
 message(STATUS "Using support directory: ${SUPPORT_DIR}")
 
 # Use vcpkg manifest mode
-if(DEFINED ENV{VCPKG_ROOT})
-    file(TO_CMAKE_PATH "$ENV{VCPKG_ROOT}" VCPKG_ROOT)
-    set(CMAKE_TOOLCHAIN_FILE "${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" CACHE STRING "")
-else()
-    message(FATAL_ERROR "Please set VCPKG_ROOT environment variable to use vcpkg")
-endif()
 
 # Determine platform-specific triplet if not already set
 if(NOT DEFINED VCPKG_TARGET_TRIPLET)
@@ -78,6 +72,23 @@ message("DDB Version: ${DAPP_VERSION}")
 add_compile_options("-DAPP_VERSION=\"${DAPP_VERSION}\"")
 add_compile_options("-DAPP_REVISION=\"${DAPP_REVISION}\"")
 
+# Find PROJ data folder (vcpkg: share/proj or share/proj4)
+find_path(PROJ_DATA_DIR
+  NAMES proj.db
+  HINTS
+    "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/share/proj"
+    "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/share/proj4"
+    "${CMAKE_CURRENT_SOURCE_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/share/proj"
+    "${CMAKE_CURRENT_SOURCE_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/share/proj4"
+  PATH_SUFFIXES share/proj share/proj4
+)
+
+if(PROJ_DATA_DIR)
+    message(STATUS "Found PROJ data directory: ${PROJ_DATA_DIR}")
+else()
+    message(WARNING "PROJ data directory not found - proj.db may not be available")
+endif()
+
 # Add custom CMake modules
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 
@@ -114,26 +125,26 @@ if (CMAKE_JS_VERSION)
     include_directories(${CMAKE_JS_INC})
 
     # Find all Node.js source files
-    file(GLOB NODE_SOURCE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/nodejs/*.cc" 
+    file(GLOB NODE_SOURCE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/nodejs/*.cc"
                                "${CMAKE_CURRENT_SOURCE_DIR}/nodejs/*.h")
-    
+
     # Create Node.js addon library
     add_library("node-${PROJECT_NAME}" SHARED ${NODE_SOURCE_FILES} ${CMAKE_JS_SRC})
-    
+
     # Configure output properties for the Node.js addon
-    set_target_properties("node-${PROJECT_NAME}" PROPERTIES 
-                         PREFIX "" 
+    set_target_properties("node-${PROJECT_NAME}" PROPERTIES
+                         PREFIX ""
                          SUFFIX ${CMAKE_SHARED_LIBRARY_SUFFIX}
                          CXX_STANDARD 17
                          CXX_STANDARD_REQUIRED ON)
-    
+
     # Link against required libraries
     target_link_libraries("node-${PROJECT_NAME}" ${CMAKE_JS_LIB} ${PROJECT_NAME})
 
     # Copy the Node.js addon to the build directory with the correct name
     add_custom_command(TARGET "node-${PROJECT_NAME}" POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different 
-                $<TARGET_FILE:node-${PROJECT_NAME}> 
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_FILE:node-${PROJECT_NAME}>
                 ${CMAKE_BINARY_DIR}/node-${PROJECT_NAME}${CMAKE_SHARED_LIBRARY_SUFFIX}
         COMMENT "Created ${CMAKE_BINARY_DIR}/node-${PROJECT_NAME}${CMAKE_SHARED_LIBRARY_SUFFIX}")
 endif()
@@ -257,27 +268,27 @@ endif()
 function(exodus_pack exodus_exe_path output_file exe_file dist_files working_dir)
     # Convert the list to a string with semicolons
     set(DEPS_ARGS "")
-    
+
     # Add the executable path as the first argument
     set(CMD_ARGS "${exe_file}")
-    
+
     # Add common arguments
     list(APPEND CMD_ARGS "-t" "-o" "${output_file}")
-    
+
     # Add each file as an attachment regardless of existence
     # We'll ensure they exist by setting proper dependencies
     foreach(FILE_PATH IN LISTS dist_files)
         list(APPEND CMD_ARGS "-a" "${FILE_PATH}")
     endforeach()
-    
+
     # Create output directory
     get_filename_component(DIST_DIRECTORY ${output_file} DIRECTORY)
     file(MAKE_DIRECTORY ${DIST_DIRECTORY})
-    
+
     # Use string(JOIN) to create a readable message for debugging
     string(JOIN " " CMD_STRING ${exodus_exe_path} ${CMD_ARGS})
     message(STATUS "Exodus command: ${CMD_STRING}")
-    
+
     # Create the custom command
     add_custom_command(
         COMMAND ${exodus_exe_path} ${CMD_ARGS}
@@ -297,45 +308,45 @@ if (EXODUS)
 
     # Clear DIST_FILES and create a fresh list for exodus packaging
     set(EXODUS_DIST_FILES "")
-    
+
     # Add binary files
     list(APPEND EXODUS_DIST_FILES "${OUTPUT_DIR}/${PROJECT_NAME}cmd")
     list(APPEND EXODUS_DIST_FILES "${OUTPUT_DIR}/lib${PROJECT_NAME}.so")
     list(APPEND EXODUS_DIST_FILES "${OUTPUT_DIR}/libnxs.so")
-    
+
     # Add support files regardless of existence
     # We'll ensure they exist by setting proper dependencies
     foreach(F ${SUPPORT_FILES})
         list(APPEND EXODUS_DIST_FILES "${SUPPORT_DIR}/${F}")
     endforeach()
-    
+
     set(OUTPUT_DIST_FILE "${CMAKE_BINARY_DIR}/dist/${PROJECT_NAME}-${APP_VERSION}-${CMAKE_SYSTEM_NAME}.tgz")
-    
+
     # Create dist directory if it doesn't exist
     file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/dist")
-    
+
     # Debugging output
     message(STATUS "Executable for exodus: ${OUTPUT_DIR}/${PROJECT_NAME}cmd")
     foreach(F ${EXODUS_DIST_FILES})
         message(STATUS "File for exodus: ${F}")
     endforeach()
-    
+
     # Call exodus_pack with a properly formatted list
     exodus_pack(
-        ${EXODUS} 
-        ${OUTPUT_DIST_FILE} 
-        ${OUTPUT_DIR}/${PROJECT_NAME}cmd 
+        ${EXODUS}
+        ${OUTPUT_DIST_FILE}
+        ${OUTPUT_DIR}/${PROJECT_NAME}cmd
         "${EXODUS_DIST_FILES}"
         ${OUTPUT_DIR}
     )
-    
+
     # Create exodus_package target that depends on all necessary targets
-    add_custom_target(exodus_package ALL 
-        DEPENDS 
-            ${OUTPUT_DIST_FILE} 
-            ${PROJECT_NAME}cmd 
+    add_custom_target(exodus_package ALL
+        DEPENDS
+            ${OUTPUT_DIST_FILE}
+            ${PROJECT_NAME}cmd
             ${PROJECT_NAME}
-            download_ca_bundle 
+            download_ca_bundle
             update_sensor_data
     )
 else()

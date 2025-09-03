@@ -159,3 +159,18 @@ bool createTestTree(const fs::path& root) {
     return true;
 
 }
+
+std::string toHumanReadableTime(long long timeMs) {
+
+    long long minutes = timeMs / 60000;
+    long long seconds = (timeMs % 60000) / 1000;
+    long long milliseconds = timeMs % 1000;
+
+    std::string result;
+    if (minutes > 0) result += std::to_string(minutes) + "m ";
+    if (seconds > 0 || minutes > 0) result += std::to_string(seconds) + "s ";
+    result += std::to_string(milliseconds) + "ms";
+
+    return result;
+
+}

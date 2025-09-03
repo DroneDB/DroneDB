@@ -116,7 +116,7 @@ namespace ddb
                     j["assets"]["thumbnail"] = {{"title", "Thumbnail"},
                                                 {"type", "image/jpeg"},
                                                 {"roles", json::array({"thumbnail"})},
-                                                {"href", stacCollectionRoot + thumbEndpoint + "?path=" + cpr::util::urlEncode(path) + "&size=512"}};
+                                                {"href", stacCollectionRoot + thumbEndpoint + "?path=" + std::string(cpr::util::urlEncode(path)) + "&size=512"}};
                 }
                 j["links"] = links;
             }
@@ -184,7 +184,8 @@ namespace ddb
                 while (q->fetch())
                 {
                     const std::string path = q->getText(0);
-                    j["assets"][path] = {{"href", stacCollectionRoot + downloadEndpoint + "?path=" + cpr::util::urlEncode(path)},
+                    const auto href = stacCollectionRoot + downloadEndpoint + "?path=" + std::string(cpr::util::urlEncode(path));
+                    j["assets"][path] = {{"href", href},
                                          {"title", path}};
                 }
             }

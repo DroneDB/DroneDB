@@ -28,6 +28,14 @@ namespace ddb
         targs = CSLAddString(targs, "-multi");
         targs = CSLAddString(targs, "-wo");
         targs = CSLAddString(targs, "NUM_THREADS=ALL_CPUS");
+        targs = CSLAddString(targs, "-co");
+        targs = CSLAddString(targs, "NUM_THREADS=ALL_CPUS");
+        targs = CSLAddString(targs, "-r");
+        targs = CSLAddString(targs, "bilinear");
+        targs = CSLAddString(targs, "-co");
+        targs = CSLAddString(targs, "TILING_SCHEME=GoogleMapsCompatible");
+        targs = CSLAddString(targs, "-co");
+        targs = CSLAddString(targs, "PREDICTOR=YES");
 
         // Preserve nodata values for transparency
         if (hasNoData) {

@@ -18,6 +18,8 @@ jobs:
       PROJ_LIB: ${{ github.workspace }}/build
       PROJ_DATA: ${{ github.workspace }}/build
       VCPKG_BUILD_TYPE: release
+      VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+      VCPKG_FEATURE_FLAGS: "binarycaching,manifests,versions"
     steps:
       - name: Free Disk Space
         uses: ShubhamTatvamasi/free-disk-space-action@master
@@ -35,13 +37,37 @@ jobs:
           echo "GITHUB_RUN_NUMBER=${GITHUB_RUN_NUMBER}"
           echo "GITHUB_SHA=${GITHUB_SHA}"
           ls -la
+      - name: Cache vcpkg packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ github.workspace }}/vcpkg/installed
+            ${{ github.workspace }}/vcpkg/packages
+          key: ${{ runner.os }}-vcpkg-packages-${{ hashFiles('**/vcpkg.json', '**/vcpkg-triplets/**', '.gitmodules') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-vcpkg-packages-${{ hashFiles('**/vcpkg.json', '**/vcpkg-triplets/**', '.gitmodules') }}-
+            ${{ runner.os }}-vcpkg-packages-
       - name: Cache vcpkg
         uses: actions/cache@v4
         with:
-          path: ${{ github.workspace }}/vcpkg
-          key: ${{ runner.os }}-vcpkg-${{ hashFiles('**/vcpkg.json') }}
+          path: |
+            ${{ github.workspace }}/vcpkg
+            !${{ github.workspace }}/vcpkg/buildtrees
+            !${{ github.workspace }}/vcpkg/downloads
+            !${{ github.workspace }}/vcpkg/installed
+            !${{ github.workspace }}/vcpkg/packages
+          key: ${{ runner.os }}-vcpkg-${{ hashFiles('**/vcpkg.json', '**/vcpkg-triplets/**', '.gitmodules') }}-${{ github.sha }}
           restore-keys: |
+            ${{ runner.os }}-vcpkg-${{ hashFiles('**/vcpkg.json', '**/vcpkg-triplets/**', '.gitmodules') }}-
             ${{ runner.os }}-vcpkg-
+      - name: Cache CMake build
+        uses: actions/cache@v4
+        with:
+          path: build
+          key: ${{ runner.os }}-cmake-${{ hashFiles('**/CMakeLists.txt', '**/vcpkg.json') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-cmake-${{ hashFiles('**/CMakeLists.txt', '**/vcpkg.json') }}-
+            ${{ runner.os }}-cmake-
       - name: Install Linux dependencies
         run: |
           chmod +x ./scripts/install-dependencies.sh
@@ -53,8 +79,11 @@ jobs:
           vcpkgJsonGlob: vcpkg.json
       - name: Run CMake
         run: |
-          mkdir build
+          mkdir -p build
           cd build
+          # Clean dist directory to avoid including old artifacts
+          rm -rf dist/*.tgz
+          mkdir -p dist
           cmake -DVCPKG_OVERLAY_TRIPLETS=${{ github.workspace }}/vcpkg-triplets -DVCPKG_HOST_TRIPLET=x64-linux-release -DVCPKG_TARGET_TRIPLET=x64-linux-release -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake ..
       - name: Build C++ lib/program and tests
         run: cd build && make -j$(nproc)
@@ -76,6 +105,10 @@ jobs:
             # Set VCPKG_HOST_TRIPLET for the build script
             echo "VCPKG_HOST_TRIPLET=${VCPKG_DEFAULT_TRIPLET}" >> $GITHUB_ENV
 
+            # Clean dist and package directories to avoid including old artifacts
+            rm -rf build/dist/*.tgz build/package/*.deb
+            mkdir -p build/dist build/package
+
             # Verify required files exist in build directory
             for file in ddbcmd libddb.so libnxs.so proj.db timezone21.bin sensor_data.sqlite curl-ca-bundle.crt; do
               if [ ! -f "build/$file" ]; then
@@ -83,9 +116,6 @@ jobs:
                 exit 1
               fi
             done
-
-            # Create distribution directory
-            mkdir -p build/package
 
             # Execute the build script
             chmod +x scripts/build-debian-package.sh
@@ -133,26 +163,53 @@ jobs:
       VCPKG_BUILD_TYPE: release
       PROJ_LIB: ${{ github.workspace }}/build
       PROJ_DATA: ${{ github.workspace }}/build
+      VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+      VCPKG_FEATURE_FLAGS: "binarycaching,manifests,versions"
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: 'recursive'
           fetch-depth: 0
+      - name: Cache vcpkg packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ github.workspace }}/vcpkg/installed
+            ${{ github.workspace }}/vcpkg/packages
+          key: ${{ runner.os }}-vcpkg-packages-${{ hashFiles('**/vcpkg.json', '**/vcpkg-triplets/**', '.gitmodules') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-vcpkg-packages-${{ hashFiles('**/vcpkg.json', '**/vcpkg-triplets/**', '.gitmodules') }}-
+            ${{ runner.os }}-vcpkg-packages-
       - name: Cache vcpkg
         uses: actions/cache@v4
         with:
-          path: ${{ github.workspace }}/vcpkg
-          key: ${{ runner.os }}-vcpkg-${{ hashFiles('**/vcpkg.json') }}
+          path: |
+            ${{ github.workspace }}/vcpkg
+            !${{ github.workspace }}/vcpkg/buildtrees
+            !${{ github.workspace }}/vcpkg/downloads
+            !${{ github.workspace }}/vcpkg/installed
+            !${{ github.workspace }}/vcpkg/packages
+          key: ${{ runner.os }}-vcpkg-${{ hashFiles('**/vcpkg.json', '**/vcpkg-triplets/**', '.gitmodules') }}-${{ github.sha }}
           restore-keys: |
+            ${{ runner.os }}-vcpkg-${{ hashFiles('**/vcpkg.json', '**/vcpkg-triplets/**', '.gitmodules') }}-
             ${{ runner.os }}-vcpkg-
+      - name: Cache CMake build
+        uses: actions/cache@v4
+        with:
+          path: build
+          key: ${{ runner.os }}-cmake-${{ hashFiles('**/CMakeLists.txt', '**/vcpkg.json') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-cmake-${{ hashFiles('**/CMakeLists.txt', '**/vcpkg.json') }}-
+            ${{ runner.os }}-cmake-
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@v11
         with:
           vcpkgDirectory: '${{ github.workspace }}/vcpkg'
           vcpkgJsonGlob: vcpkg.json
       - name: Build C++ lib/program and tests
+        shell: pwsh
         run: |
-          mkdir build
+          if (!(Test-Path build)) { New-Item -ItemType Directory -Path build }
           cd build
           cmake .. -DVCPKG_HOST_TRIPLET=x64-windows-release -DVCPKG_TARGET_TRIPLET=x64-windows-release -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake"
           cmake --build . --config Release --target ALL_BUILD -- /maxcpucount:$env:NUMBER_OF_PROCESSORS
@@ -167,6 +224,9 @@ jobs:
         shell: pwsh
         run: |
           cd build
+          # Clean dist directory to avoid including old artifacts
+          if (Test-Path "dist") { Remove-Item -Recurse -Force "dist" }
+          New-Item -ItemType Directory -Path "dist" -Force
           cmake --build . --config Release --target windows_package -- /maxcpucount:$env:NUMBER_OF_PROCESSORS
           dir
       - name: Upload Distribution Files
@@ -204,7 +264,7 @@ jobs:
   #             runVcpkgInstall: true
   #         - name: Run CMake
   #           run: |
-  #             mkdir build
+  #             mkdir -p build
   #             cd build
   #             cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake ..
   #         - name: Build C++ lib/program and tests

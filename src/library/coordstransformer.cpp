@@ -13,12 +13,8 @@ namespace ddb
         if (OSRImportFromEPSG(hSrc, epsgFrom) != OGRERR_NONE)
             throw GDALException("Cannot import spatial reference system " + std::to_string(epsgFrom) + ". Is PROJ available?");
 
-        OSRSetAxisMappingStrategy(hSrc, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
-
         if (OSRImportFromEPSG(hTgt, epsgTo) != OGRERR_NONE)
             throw GDALException("Cannot import spatial reference system " + std::to_string(epsgTo) + ". Is PROJ available?");
-
-        // OSRSetAxisMappingStrategy(hTgt, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
 
         hTransform = OCTNewCoordinateTransformation(hSrc, hTgt);
     }
@@ -32,9 +28,6 @@ namespace ddb
         if (OSRImportFromEPSG(hTgt, epsgTo) != OGRERR_NONE)
             throw GDALException("Cannot import spatial reference system " + std::to_string(epsgTo) + ". Is PROJ available?");
 
-        // OSRSetAxisMappingStrategy(hSrc, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
-        // OSRSetAxisMappingStrategy(hTgt, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
-
         hTransform = OCTNewCoordinateTransformation(hSrc, hTgt);
     }
 
@@ -43,13 +36,9 @@ namespace ddb
         if (OSRImportFromEPSG(hSrc, epsgFrom) != OGRERR_NONE)
             throw GDALException("Cannot import spatial reference system " + std::to_string(epsgFrom) + ". Is PROJ available?");
 
-        // OSRSetAxisMappingStrategy(hSrc, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
-
         char *wkt = strdup(wktTo.c_str());
         if (OSRImportFromWkt(hTgt, &wkt) != OGRERR_NONE)
             throw GDALException("Cannot import spatial reference system " + wktTo + ". Is PROJ available?");
-
-        // OSRSetAxisMappingStrategy(hTgt, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
 
         hTransform = OCTNewCoordinateTransformation(hSrc, hTgt);
     }

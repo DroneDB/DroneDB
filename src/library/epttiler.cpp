@@ -178,9 +178,9 @@ namespace ddb
         const int paddedWSize = paddedTileSize * paddedTileSize;
         const int paddedBufSize = GDALGetDataTypeSizeBytes(GDT_Byte) * paddedWSize;
 
-        std::unique_ptr<uint8_t> buffer(new uint8_t[bufSize * nBands]);
-        std::unique_ptr<uint8_t> alphaBuffer(new uint8_t[bufSize]);
-        std::unique_ptr<float> zBuffer(new float[paddedBufSize]);
+        std::unique_ptr<uint8_t[]> buffer(new uint8_t[bufSize * nBands]);
+        std::unique_ptr<uint8_t[]> alphaBuffer(new uint8_t[bufSize]);
+        std::unique_ptr<float[]> zBuffer(new float[paddedBufSize]);
 
         memset(buffer.get(), 0, bufSize * nBands);
         memset(alphaBuffer.get(), 0, bufSize);

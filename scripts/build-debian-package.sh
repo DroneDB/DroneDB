@@ -156,16 +156,16 @@ override_dh_auto_install:
 	cp \$(CURDIR)/build/libnxs.so debian/ddb/usr/lib/
 
 	# Copy PDAL libraries from vcpkg installed directory
-	cp \$(CURDIR)/build/vcpkg_installed/${VCPKG_HOST_TRIPLET}/lib/libpdalcpp.so.18 debian/ddb/usr/lib/
+	cp \$(CURDIR)/build/vcpkg_installed/${VCPKG_HOST_TRIPLET}/lib/libpdalcpp.so.19 debian/ddb/usr/lib/
 	cp \$(CURDIR)/build/vcpkg_installed/${VCPKG_HOST_TRIPLET}/lib/libdbus-1.so.3 debian/ddb/usr/lib/
 
 	# Create necessary symbolic links for libraries
-	ln -sf libpdalcpp.so.18 debian/ddb/usr/lib/libpdalcpp.so
+	ln -sf libpdalcpp.so.19 debian/ddb/usr/lib/libpdalcpp.so
 	ln -sf libdbus-1.so.3 debian/ddb/usr/lib/libdbus-1.so
 
 	# Copy PDAL plugins if needed
 	mkdir -p debian/ddb/usr/lib/pdal/plugins
-	cp \$(CURDIR)/build/vcpkg_installed/${VCPKG_HOST_TRIPLET}/lib/libpdal_plugin_*.so.18 debian/ddb/usr/lib/pdal/plugins/ || true
+	cp \$(CURDIR)/build/vcpkg_installed/${VCPKG_HOST_TRIPLET}/lib/libpdal_plugin_*.so.19 debian/ddb/usr/lib/pdal/plugins/ || true
 
 	# Copy data files from build directory directly
 	cp \$(CURDIR)/build/proj.db debian/ddb/usr/share/ddb/
