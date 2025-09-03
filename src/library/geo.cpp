@@ -95,9 +95,6 @@ namespace ddb
             throw GDALException("Cannot import spatial reference system " + proj + ". Is PROJ available?");
         }
 
-        //OSRSetAxisMappingStrategy(hSrs, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
-        //LOGV << "Set source axis mapping strategy";
-
         OGRSpatialReferenceH hWgs84 = OSRNewSpatialReference(nullptr);
 
         if (hWgs84 == nullptr)
@@ -112,9 +109,6 @@ namespace ddb
             OSRDestroySpatialReference(hSrs);
             throw GDALException("Cannot import EPSG:4326 spatial reference system. Is PROJ available?");
         }
-
-        //OSRSetAxisMappingStrategy(hWgs84, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
-        //LOGV << "Set dest axis mapping strategy";
 
         OGRCoordinateTransformationH hTransform = OCTNewCoordinateTransformation(hWgs84, hSrs);
 
@@ -160,18 +154,12 @@ namespace ddb
             throw GDALException("Cannot import spatial reference system " + proj + ". Is PROJ available?");
         }
 
-        //OSRSetAxisMappingStrategy(hSrs, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
-        //LOGV << "Set source axis mapping strategy";
-
         if (OSRImportFromEPSG(hWgs84, 4326) != OGRERR_NONE)
         {
             OSRDestroySpatialReference(hWgs84);
             OSRDestroySpatialReference(hSrs);
             throw GDALException("Cannot import EPSG:4326 spatial reference system. Is PROJ available?");
         }
-
-        //OSRSetAxisMappingStrategy(hWgs84, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
-        //LOGV << "Set dest axis mapping strategy";
 
         OGRCoordinateTransformationH hTransform = OCTNewCoordinateTransformation(hSrs, hWgs84);
 

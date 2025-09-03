@@ -124,15 +124,9 @@ namespace ddb
         if (OSRImportFromWkt(inputSrs, &wktp) != OGRERR_NONE)
             throw GDALException("Cannot read spatial reference system for " + openPath + ". Is PROJ available?");
 
-        // OSRSetAxisMappingStrategy(inputSrs, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
-        // LOGV << "Set source axis mapping strategy";
-
         // Setup output SRS
         const OGRSpatialReferenceH outputSrs = OSRNewSpatialReference(nullptr);
         OSRImportFromEPSG(outputSrs, 3857); // TODO: support for geodetic?
-
-        //OSRSetAxisMappingStrategy(outputSrs, OSRAxisMappingStrategy::OAMS_TRADITIONAL_GIS_ORDER);
-        //LOGV << "Set dest axis mapping strategy";
 
         if (!hasGeoreference(inputDataset))
             throw GDALException(openPath + " is not georeferenced.");
