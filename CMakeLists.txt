@@ -169,7 +169,7 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/include/
 
 # Packaging
 include(CPack)
-set(CPACK_GENERATOR "DEB;ZIP")
+set(CPACK_GENERATOR "ZIP")
 set(CPACK_PACKAGE_NAME ${PROJECT_NAME})
 set(CPACK_PACKAGE_VERSION ${APP_VERSION})
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "DroneDB client")
@@ -180,7 +180,7 @@ set(CPACK_PACKAGE_FILE_NAME "${PROJECT_NAME}-${APP_VERSION}-${CMAKE_SYSTEM_NAME}
 set(CPACK_DEBIAN_PACKAGE_SECTION "utils")
 set(CPACK_DEBIAN_PACKAGE_DEPENDS "libstdc++6, libc6")
 
-
+# Windows packaging support files
 set(SUPPORT_FILES "proj.db" "sensor_data.sqlite" "timezone21.bin" "curl-ca-bundle.crt")
 if (WIN32)
     # Linux usually comes with a zoneinfo database already
@@ -267,4 +267,4 @@ endif()
 
 
 # Final message
-message(STATUS "CMake setup complete. Use 'make package' to create DEB packages or 'make windows_package' for Windows ZIP package.")
+message(STATUS "CMake setup complete")
