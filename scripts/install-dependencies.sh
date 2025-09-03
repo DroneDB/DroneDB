@@ -13,16 +13,14 @@ install_ubuntu_packages() {
         libreadline-dev libssl-dev lbzip2 libbz2-dev zlib1g-dev libffi-dev liblzma-dev \
         '^libxcb.*-dev' libx11-xcb-dev libgl1-mesa-dev libxrender-dev \
         libxi-dev libxkbcommon-dev libxkbcommon-x11-dev libxtst-dev libltdl-dev
-       
+
     sudo dpkg-reconfigure -f noninteractive tzdata
 
 }
 
 # Install Python packages needed for builds
 install_python_packages() {
-    pip install exodus-bundler --break-system-packages
-    
-    # Add other common Python packages needed across workflows
+    # Add common Python packages needed across workflows
     if [ "$1" = "docs" ]; then
         sudo apt-get install -y python3-sphinx python3-breathe python3-exhale
         pip install sphinx_rtd_theme --break-system-packages

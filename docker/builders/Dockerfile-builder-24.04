@@ -29,7 +29,7 @@ RUN if [ ! -d "$VCPKG_ROOT/.git" ]; then \
     fi && \
     echo "export PATH=\"$VCPKG_ROOT:$PATH\"" >> /etc/profile
 
-# Install pyenv and Python 3.9.18 to build the Exodus bundler
+# Install pyenv and Python 3.9.18 for build dependencies
 RUN curl https://pyenv.run | bash && \
     echo 'export PYENV_ROOT="/root/.pyenv"' >> /root/.bashrc && \
     echo 'export PATH="$PYENV_ROOT/bin:$PATH"' >> /root/.bashrc && \
@@ -37,7 +37,7 @@ RUN curl https://pyenv.run | bash && \
     echo 'eval "$(pyenv init -)"' >> /root/.bashrc && \
     /root/.pyenv/bin/pyenv install 3.9.18 && \
     /root/.pyenv/bin/pyenv global 3.9.18 && \
-    /root/.pyenv/shims/pip install --upgrade pip setuptools wheel exodus-bundler jinja2 && \
+    /root/.pyenv/shims/pip install --upgrade pip setuptools wheel jinja2 && \
     pip3 install jinja2
 
 # Set the PATH for vcpkg

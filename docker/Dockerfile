@@ -13,7 +13,7 @@ RUN cd /workspace && mkdir -p build && \
 
 # Build the project
 RUN cd /workspace/build && \
-    make -j$(nproc) exodus_package
+    make -j$(nproc) package
 
 # Create a smaller runtime image
 FROM ubuntu:24.04
@@ -25,17 +25,15 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy the built executable and dependencies from builder
-COPY --from=0 /workspace/build/dist/ddb-*.tgz /app/ddb.tgz
+COPY --from=0 /workspace/build/package/*.deb /app/ddb.deb
 
-# Extract the exodus package
-RUN cd /app && \
-    tar -xzvf ddb.tgz && \
-    rm ddb.tgz && \
-    ln -s /app/exodus/bin/ddbcmd /usr/local/bin/ddb
+# Install the DEB package
+RUN dpkg -i /app/ddb.deb || apt-get install -f -y && \
+    rm /app/ddb.deb
 
 # Set the working directory
 WORKDIR /data
 
 # Set the entrypoint
-ENTRYPOINT ["/usr/local/bin/ddb"]
+ENTRYPOINT ["/usr/bin/ddb"]
 CMD ["--help"]

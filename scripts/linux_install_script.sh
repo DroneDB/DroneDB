@@ -17,7 +17,7 @@ cd "${__dirname}"
 #       before executing.
 #
 
-LATEST_RELEASE="https://github.com/DroneDB/DroneDB/releases/download/###RELEASE_TAG###/ddb-###RELEASE_VERSION###-linux.tgz"
+LATEST_RELEASE="https://github.com/DroneDB/DroneDB/releases/download/###RELEASE_TAG###/ddb_###RELEASE_VERSION###_amd64.deb"
 
 command_exists() {
 	command -v "$@" > /dev/null 2>&1
@@ -27,41 +27,19 @@ do_install() {
 	echo "# Executing DroneDB install script"
 
     echo "# Downloading $LATEST_RELEASE..."
-    curl -fsSL $LATEST_RELEASE -o /tmp/ddb.tgz
+    curl -fsSL $LATEST_RELEASE -o /tmp/ddb.deb
 
-    if [ ! -e ~/.local ]; then
-        mkdir -p ~/.local
-    fi
-
-    echo "# Extracting..."
-    tar -zxf /tmp/ddb.tgz -C ~/.local
-
-    echo "# Setting up..."
-    if [ -e ~/.local/exodus ]; then
-
-        echo "# Removing previous version of ddb..."
-        if [ -e ~/.local/ddb ]; then
-            rm -r ~/.local/ddb
-        fi
-
-        mv ~/.local/exodus ~/.local/ddb
-
-        if [ -e ~/.bashrc ]; then
-            if test ! $(command_exists ddb); then
-                echo "# Adding ~/.local/ddb/bin to PATH in .bashrc"
-                echo "export PATH=\$PATH:\$HOME/.local/ddb/bin" >> ~/.bashrc
-            fi
-        else
-            echo "# Program installed in $HOME/.local/ddb/bin. Make sure to add this path to your PATH environment variable."
-        fi
+    echo "# Installing DEB package..."
+    if command_exists sudo; then
+        sudo dpkg -i /tmp/ddb.deb || sudo apt-get install -f -y
     else
-        echo "! Cannot install DroneDB: ~/.local/exodus not found. This might be a bug. Please open an issue on https://github.com/DroneDB/DroneDB/issues"
+        echo "Error: sudo is required to install the DEB package"
         exit 1
     fi
 
     echo "# Cleaning up..."
-    if [ -e /tmp/ddb.tgz ]; then
-        rm /tmp/ddb.tgz
+    if [ -e /tmp/ddb.deb ]; then
+        rm /tmp/ddb.deb
     fi
 
     echo ""
@@ -73,16 +51,6 @@ do_install() {
     echo "                                           "
     echo "Type: ddb --help or visit https://docs.dronedb.app to get started!"
     echo ""
-
-    if [ -z "$SHELL" ] && [ -e /bin/bash ]; then
-        export SHELL=/bin/bash
-    fi
-
-    if [ -e $SHELL ] && [ -e ~/.bashrc ]; then
-        $SHELL
-    else
-        echo "Important! Manually update your PATH to include $HOME/.local/ddb/bin"
-    fi
 }
 
 # wrapped up in a function so that we have some protection against only getting

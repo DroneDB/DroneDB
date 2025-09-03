@@ -274,7 +274,7 @@ jobs:
   #         - name: Run Program Smoke Test
   #           run: cd build && ./ddbcmd --debug
   #         - name: Create Distribution Package
-  #           run: cd build && cmake --build . --target exodus_package
+  #           run: cd build && make package
   #         - name: Upload Distribution Files
   #           uses: actions/upload-artifact@v4
   #           with:
