@@ -8,7 +8,7 @@ CPU_CORES=$(nproc)
 rm -rf build
 
 # Create build directory
-mkdir build
+mkdir -p build
 
 # Change to build directory
 cd build
