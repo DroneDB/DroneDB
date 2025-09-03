@@ -303,7 +303,7 @@ void buildEpt(const std::vector<std::string>& filenames, const std::string& outd
     fs::path tmpDir = dest / "tmp";
     io::assureFolderExists(tmpDir);
 
-    untwine::Options options;
+    untwine::Options options{};
     for (const std::string& f : filenames) {
         if (!fs::exists(f))
             throw FSException(f + " does not exist");
