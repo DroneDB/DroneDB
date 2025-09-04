@@ -5,6 +5,17 @@ set -e
 # It's designed to run as part of the CI pipeline
 # Assumes the application is already built in the build folder
 
+# Function to run commands with or without sudo based on current user privileges
+run_with_privilege() {
+    if [ "$EUID" -eq 0 ] || ! command -v sudo >/dev/null 2>&1; then
+        # Already root or sudo not available, run directly
+        "$@"
+    else
+        # Not root and sudo is available, use sudo
+        sudo "$@"
+    fi
+}
+
 # Set necessary environment variables
 echo "Setting up environment variables..."
 if [ -z "$DDB_VERSION" ]; then
@@ -29,8 +40,8 @@ export DEBIAN_FRONTEND=noninteractive
 
 # Install Debian packaging tools
 echo "Installing Debian packaging tools..."
-sudo apt-get update
-sudo apt-get install -y debhelper devscripts fakeroot lintian
+run_with_privilege apt-get update
+run_with_privilege apt-get install -y debhelper devscripts fakeroot lintian
 
 # Create debian packaging structure
 echo "Creating debian packaging structure..."
