@@ -13,7 +13,12 @@ RUN cd /workspace && mkdir -p build && \
 
 # Build the project
 RUN cd /workspace/build && \
-    make -j$(nproc) package
+    make -j$(nproc)
+
+# Build the Debian package
+RUN cd /workspace && \
+    chmod +x scripts/build-debian-package.sh && \
+    ./scripts/build-debian-package.sh
 
 # Create a smaller runtime image
 FROM ubuntu:24.04
