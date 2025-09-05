@@ -94,6 +94,36 @@ namespace
         */
     }
 
+    TEST(testTiler, toledoPointCloud)
+    {
+
+        TestArea ta(TEST_NAME);
+        fs::path pc = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/refs/heads/master/point-clouds/toledo.laz",
+                                           "point_cloud.laz");
+
+        ddb::buildEpt({pc.string()}, ta.getFolder("ept").string());
+        fs::path eptPath = ta.getPath(fs::path("ept") / "ept.json");
+
+        // Test tiles from Toledo dataset coordinates
+        struct ToledoTileTest {
+            int z, x, y;
+        };
+
+        std::vector<ToledoTileTest> testTiles = {
+            {18, 70123, 97753},
+            {20, 280496, 391011},
+            {22, 1121992, 1564041}
+        };
+
+        for (const auto& tile : testTiles) {
+            fs::path outTile = TilerHelper::getTile(eptPath, tile.z, tile.x, tile.y, 256, true, true, ta.getFolder());
+
+            EXPECT_TRUE(fs::exists(outTile)) << "Tile " << tile.z << "/" << tile.x << "/" << tile.y << " not found";
+            EXPECT_GT(io::Path(outTile).getSize(), 0) << "Tile " << tile.z << "/" << tile.x << "/" << tile.y << " is empty";
+        }
+
+    }
+
     TEST(testTiler, userCache)
     {
         TestArea ta(TEST_NAME);
