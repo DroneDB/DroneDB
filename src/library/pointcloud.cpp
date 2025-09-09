@@ -110,8 +110,7 @@ bool getPointCloudInfo(const std::string& filename, PointCloudInfo& info, int po
                                         ". Is PROJ available?");
                 }
 
-                OGRCoordinateTransformationH hTransform =
-                    OCTNewCoordinateTransformation(hSrs, hTgt);
+                OGRCoordinateTransformationH hTransform = OCTNewCoordinateTransformation(hSrs, hTgt);
 
                 double geoMinX = bbox.minx;
                 double geoMinY = bbox.miny;
@@ -135,11 +134,11 @@ bool getPointCloudInfo(const std::string& filename, PointCloudInfo& info, int po
                          << "]]";
                     info.bounds.clear();
                 } else {
-                    info.polyBounds.addPoint(geoMinY, geoMinX, geoMinZ);
-                    info.polyBounds.addPoint(geoMinY, geoMaxX, geoMinZ);
-                    info.polyBounds.addPoint(geoMaxY, geoMaxX, geoMinZ);
-                    info.polyBounds.addPoint(geoMaxY, geoMinX, geoMinZ);
-                    info.polyBounds.addPoint(geoMinY, geoMinX, geoMinZ);
+                    info.polyBounds.addPoint(geoMinX, geoMinY, geoMinZ);
+                    info.polyBounds.addPoint(geoMaxX, geoMinY, geoMinZ);
+                    info.polyBounds.addPoint(geoMaxX, geoMaxY, geoMinZ);
+                    info.polyBounds.addPoint(geoMinX, geoMaxY, geoMinZ);
+                    info.polyBounds.addPoint(geoMinX, geoMinY, geoMinZ);
 
                     double centroidX = (bbox.minx + bbox.maxx) / 2.0;
                     double centroidY = (bbox.miny + bbox.maxy) / 2.0;
@@ -147,7 +146,7 @@ bool getPointCloudInfo(const std::string& filename, PointCloudInfo& info, int po
 
                     if (OCTTransform(hTransform, 1, &centroidX, &centroidY, &centroidZ)) {
                         info.centroid.clear();
-                        info.centroid.addPoint(centroidY, centroidX, centroidZ);
+                        info.centroid.addPoint(centroidX, centroidY, centroidZ);
                     } else
                         throw GDALException("Cannot transform coordinates " +
                                             std::to_string(centroidX) + ", " +
@@ -271,11 +270,11 @@ bool getEptInfo(const std::string& eptJson, PointCloudInfo& info, int polyBounds
         LOGD << "Cannot transform coordinates " << info.wktProjection
              << " to EPSG:" << std::to_string(polyBoundsSrs);
     } else {
-        info.polyBounds.addPoint(geoMinY, geoMinX, geoMinZ);
-        info.polyBounds.addPoint(geoMinY, geoMaxX, geoMinZ);
-        info.polyBounds.addPoint(geoMaxY, geoMaxX, geoMinZ);
-        info.polyBounds.addPoint(geoMaxY, geoMinX, geoMinZ);
-        info.polyBounds.addPoint(geoMinY, geoMinX, geoMinZ);
+        info.polyBounds.addPoint(geoMinX, geoMinY, geoMinZ);
+        info.polyBounds.addPoint(geoMaxX, geoMinY, geoMinZ);
+        info.polyBounds.addPoint(geoMaxX, geoMaxY, geoMinZ);
+        info.polyBounds.addPoint(geoMinX, geoMaxY, geoMinZ);
+        info.polyBounds.addPoint(geoMinX, geoMinY, geoMinZ);
 
         double centroidX = (minx + maxx) / 2.0;
         double centroidY = (miny + maxy) / 2.0;
@@ -283,7 +282,7 @@ bool getEptInfo(const std::string& eptJson, PointCloudInfo& info, int polyBounds
 
         if (OCTTransform(hTransform, 1, &centroidX, &centroidY, &centroidZ)) {
             info.centroid.clear();
-            info.centroid.addPoint(centroidY, centroidX, centroidZ);
+            info.centroid.addPoint(centroidX, centroidY, centroidZ);
         } else {
             throw GDALException("Cannot transform coordinates " + std::to_string(centroidX) + ", " +
                                 std::to_string(centroidY) +

@@ -29,7 +29,8 @@ namespace ddb
         info.vertexCount = 0;
 
         while (std::getline(in, line))
-        {            if (auto p = line.find("element vertex ") != std::string::npos)
+        {
+            if (auto p = line.find("element vertex ") != std::string::npos)
             {
                 try
                 {
@@ -38,9 +39,9 @@ namespace ddb
                     for (char c : vertexCountStr)
                         if (!std::isdigit(c))
                             throw std::invalid_argument("Non-digit character in vertex count: " + vertexCountStr);
-                    
+
                     info.vertexCount = std::stoul(vertexCountStr);
-                    
+
                     // Basic validation
                     if (info.vertexCount == 0)
                         LOGW << "PLY file contains zero vertices";
