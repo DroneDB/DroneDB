@@ -8,6 +8,7 @@
 
 namespace ddb
 {
+    using WktPtr = std::unique_ptr<char, void(*)(void*)>;
 
     CoordsTransformer::CoordsTransformer(int epsgFrom, int epsgTo)
     {
@@ -25,7 +26,7 @@ namespace ddb
     CoordsTransformer::CoordsTransformer(const std::string &wktFrom, int epsgTo)
     {
 
-        std::unique_ptr<char, void(*)(void*)> wktOwner(strdup(wktFrom.c_str()), std::free);
+        WktPtr wktOwner(strdup(wktFrom.c_str()), std::free);
 
         char* wktPtr = wktOwner.get();
         if (OSRImportFromWkt(hSrc, &wktPtr) != OGRERR_NONE)
@@ -44,7 +45,7 @@ namespace ddb
         if (OSRImportFromEPSG(hSrc, epsgFrom) != OGRERR_NONE)
             throw GDALException("Cannot import spatial reference system " + std::to_string(epsgFrom) + ". Is PROJ available?");
 
-        std::unique_ptr<char, void(*)(void*)> wktOwner(strdup(wktTo.c_str()), std::free);
+        WktPtr wktOwner(strdup(wktTo.c_str()), std::free);
 
         char* wktPtr = wktOwner.get();
         if (OSRImportFromWkt(hTgt, &wktPtr) != OGRERR_NONE)
