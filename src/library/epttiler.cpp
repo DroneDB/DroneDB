@@ -283,8 +283,7 @@ namespace ddb
             throw GDALException("Cannot write tile data");
         }
 
-        const GDALRasterBandH tileAlphaBand =
-            GDALGetRasterBand(dsTile, nBands + 1);
+        const GDALRasterBandH tileAlphaBand = GDALGetRasterBand(dsTile, nBands + 1);
         GDALSetRasterColorInterpretation(tileAlphaBand, GCI_AlphaBand);
 
         if (GDALRasterIO(tileAlphaBand, GF_Write, 0, 0, tileSize, tileSize,

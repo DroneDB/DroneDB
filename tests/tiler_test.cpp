@@ -122,7 +122,7 @@ TEST(testTiler, toledoPointCloud) {
     }
 }
 
-MANUAL_TEST(tilerBenchmark, toledo) {
+MANUAL_TEST(tilerBenchmark, lewis) {
     TestArea ta(TEST_NAME);
     fs::path pc = ta.downloadTestAsset(
         "https://github.com/DroneDB/test_data/raw/refs/heads/master/point-clouds/lewis.laz",
