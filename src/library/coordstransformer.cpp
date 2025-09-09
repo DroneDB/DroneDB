@@ -18,6 +18,8 @@ namespace ddb
             throw GDALException("Cannot import spatial reference system " + std::to_string(epsgTo) + ". Is PROJ available?");
 
         hTransform = OCTNewCoordinateTransformation(hSrc, hTgt);
+        if (!hTransform)
+            throw GDALException("Failed to create coordinate transformation");
     }
 
     CoordsTransformer::CoordsTransformer(const std::string &wktFrom, int epsgTo)
