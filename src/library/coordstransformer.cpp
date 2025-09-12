@@ -2,11 +2,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include <sstream>
+#include <memory>
 #include "coordstransformer.h"
 #include "exceptions.h"
 
 namespace ddb
 {
+    using WktPtr = std::unique_ptr<char, void(*)(void*)>;
 
     CoordsTransformer::CoordsTransformer(int epsgFrom, int epsgTo)
     {
@@ -17,18 +19,25 @@ namespace ddb
             throw GDALException("Cannot import spatial reference system " + std::to_string(epsgTo) + ". Is PROJ available?");
 
         hTransform = OCTNewCoordinateTransformation(hSrc, hTgt);
+        if (!hTransform)
+            throw GDALException("Failed to create coordinate transformation");
     }
 
     CoordsTransformer::CoordsTransformer(const std::string &wktFrom, int epsgTo)
     {
-        char *wkt = strdup(wktFrom.c_str());
-        if (OSRImportFromWkt(hSrc, &wkt) != OGRERR_NONE)
+
+        WktPtr wktOwner(strdup(wktFrom.c_str()), std::free);
+
+        char* wktPtr = wktOwner.get();
+        if (OSRImportFromWkt(hSrc, &wktPtr) != OGRERR_NONE)
             throw GDALException("Cannot import spatial reference system " + wktFrom + ". Is PROJ available?");
 
         if (OSRImportFromEPSG(hTgt, epsgTo) != OGRERR_NONE)
             throw GDALException("Cannot import spatial reference system " + std::to_string(epsgTo) + ". Is PROJ available?");
 
         hTransform = OCTNewCoordinateTransformation(hSrc, hTgt);
+        if (!hTransform)
+            throw GDALException("Failed to create coordinate transformation");
     }
 
     CoordsTransformer::CoordsTransformer(int epsgFrom, const std::string &wktTo)
@@ -36,11 +45,15 @@ namespace ddb
         if (OSRImportFromEPSG(hSrc, epsgFrom) != OGRERR_NONE)
             throw GDALException("Cannot import spatial reference system " + std::to_string(epsgFrom) + ". Is PROJ available?");
 
-        char *wkt = strdup(wktTo.c_str());
-        if (OSRImportFromWkt(hTgt, &wkt) != OGRERR_NONE)
+        WktPtr wktOwner(strdup(wktTo.c_str()), std::free);
+
+        char* wktPtr = wktOwner.get();
+        if (OSRImportFromWkt(hTgt, &wktPtr) != OGRERR_NONE)
             throw GDALException("Cannot import spatial reference system " + wktTo + ". Is PROJ available?");
 
         hTransform = OCTNewCoordinateTransformation(hSrc, hTgt);
+        if (!hTransform)
+            throw GDALException("Failed to create coordinate transformation");
     }
 
     CoordsTransformer::~CoordsTransformer()

@@ -17,6 +17,11 @@ public:
     fs::path getPath(const fs::path &p = "");
     fs::path getFolder(const fs::path &subfolder = "");
     fs::path downloadTestAsset(const std::string &url, const std::string &filename, bool overwrite = false);
+
+    /**
+     * @brief Clears all test areas by deleting the entire ddb_test_areas folder.
+     */
+    static void clearAll();
 };
 
 #endif // TESTAREA_H

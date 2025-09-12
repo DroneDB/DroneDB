@@ -6,4 +6,7 @@
                    "-" +                                                                                    \
                    std::string(testing::UnitTest::GetInstance()->current_test_info()->name()))
 
+
+#define MANUAL_TEST(test_suite_name, test_name) TEST(test_suite_name, DISABLED_##test_name)
+
 #endif // TEST_H
