@@ -42,10 +42,10 @@ namespace ddb
             throw InvalidArgsException("EPT file has no WKT SRS: " + inputPath);
         }
 
-        oMinX = eptInfo.polyBounds.getPoint(0).y;
-        oMaxX = eptInfo.polyBounds.getPoint(2).y;
-        oMaxY = eptInfo.polyBounds.getPoint(2).x;
-        oMinY = eptInfo.polyBounds.getPoint(0).x;
+        oMinX = eptInfo.polyBounds.getPoint(0).x;
+        oMaxX = eptInfo.polyBounds.getPoint(2).x;
+        oMaxY = eptInfo.polyBounds.getPoint(2).y;
+        oMinY = eptInfo.polyBounds.getPoint(0).y;
 
         LOGD << "Bounds (output SRS): (" << oMinX << "; " << oMinY << ") - ("
              << oMaxX << "; " << oMaxY << ")";
