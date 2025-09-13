@@ -393,10 +393,10 @@ void generatePointCloudThumb(const fs::path& eptPath,
     }
 
     if (hasSpatialSystem) {
-        oMinX = eptInfo.polyBounds.getPoint(0).y;
-        oMaxX = eptInfo.polyBounds.getPoint(2).y;
-        oMaxY = eptInfo.polyBounds.getPoint(2).x;
-        oMinY = eptInfo.polyBounds.getPoint(0).x;
+        oMinX = eptInfo.polyBounds.getPoint(0).x;
+        oMaxX = eptInfo.polyBounds.getPoint(2).x;
+        oMaxY = eptInfo.polyBounds.getPoint(2).y;
+        oMinY = eptInfo.polyBounds.getPoint(0).y;
 
         LOGD << "Bounds (output SRS): (" << oMinX << "; " << oMinY << ") - (" << oMaxX << "; "
              << oMaxY << ")";
@@ -562,6 +562,8 @@ void generatePointCloudThumb(const fs::path& eptPath,
     LOGD << "TileScale = " << tileScale;
     std::vector<PointColor> colors = normalizeColors(point_view);
 
+    int pointsRendered = 0;
+
     if (hasSpatialSystem) {
         CoordsTransformer ict(eptInfo.wktProjection, 3857);
 
@@ -592,6 +594,7 @@ void generatePointCloudThumb(const fs::path& eptPath,
                                colors[idx].b,
                                tileSize,
                                wSize);
+                    pointsRendered++;
                 }
             }
         }
@@ -621,11 +624,14 @@ void generatePointCloudThumb(const fs::path& eptPath,
                                colors[idx].b,
                                tileSize,
                                wSize);
+                    pointsRendered++;
                 }
             }
         }
     }  // Per avere sfondo trasparente, non scriviamo lo sfondo bianco
     // I pixel con alphaBuffer[i] == 0 rimarranno trasparenti
+
+    LOGD << "Points rendered: " << pointsRendered << " out of " << point_view->size();
 
     RenderImage(outImagePath,
                 tileSize,
