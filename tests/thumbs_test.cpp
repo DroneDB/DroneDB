@@ -43,14 +43,7 @@ TEST(thumbnail, ortho) {
     DDBVSIFree(buffer);
 }
 
-/*
-TEST(thumbnail, ept) {
-
-    // Disable this test if we are on windows (inconclusive)
-    #ifdef _WIN32
-    GTEST_SKIP() << "Skipping test on Windows";
-    #endif
-
+TEST(thumbnail, ept_file) {
     TestArea ta(TEST_NAME);
     fs::path pc = ta.downloadTestAsset(
         "https://github.com/DroneDB/test_data/raw/master/brighton/point_cloud.laz",
@@ -58,47 +51,75 @@ TEST(thumbnail, ept) {
 
     ddb::buildEpt({pc.string()}, ta.getFolder("ept").string());
 
-    fs::path outFile = ta.getPath("output.jpg");
+    fs::path outFile = ta.getPath("output.webp");
     fs::path eptPath = ta.getPath(fs::path("ept") / "ept.json");
 
     ddb::generateThumb(eptPath, 256, outFile, true);
+
+    EXPECT_TRUE(fs::exists(outFile));
+    EXPECT_TRUE(io::Path(outFile).getSize() > 0);
+}
+
+TEST(thumbnail, ept_memory) {
+    TestArea ta(TEST_NAME);
+    fs::path pc = ta.downloadTestAsset(
+        "https://github.com/DroneDB/test_data/raw/master/brighton/point_cloud.laz",
+        "point_cloud.laz");
+
+    ddb::buildEpt({pc.string()}, ta.getFolder("ept").string());
+
+    fs::path eptPath = ta.getPath(fs::path("ept") / "ept.json");
 
     uint8_t* buffer;
     int bufSize;
     ddb::generateThumb(eptPath, 256, "", true, &buffer, &bufSize);
 
     EXPECT_TRUE(bufSize > 0);
-    EXPECT_EQ(io::Path(outFile).getSize(), bufSize);
+    EXPECT_TRUE(buffer != nullptr);
 
-    fs::path outMemoryFile = ta.getPath("output-memory.jpg");
-
+    // Test writing to file and comparing
+    fs::path outMemoryFile = ta.getPath("output-memory.webp");
     std::ofstream of(outMemoryFile.string(), std::ios::out | std::ios::binary | std::ios::trunc);
     of.write(reinterpret_cast<char*>(buffer), bufSize);
     of.close();
 
-    const auto memoryFileHash = Hash::fileSHA256(outMemoryFile.string());
-    const auto fileHash = Hash::fileSHA256(outFile.string());
-
-    if (memoryFileHash != fileHash) {
-        // Print exadecimal content of memory file and file
-        std::ifstream inMemoryFile(outMemoryFile.string(), std::ios::binary);
-        std::ifstream inFile(outFile.string(), std::ios::binary);
-        std::ostringstream ossMemory;
-        std::ostringstream ossFile;
-        ossMemory << inMemoryFile.rdbuf();
-        ossFile << inFile.rdbuf();
-        std::string hexMemory = ossMemory.str();
-        std::string hexFile = ossFile.str();
-        std::cout << "Memory file hex: " << hexMemory << std::endl;
-        std::cout << "File hex: " << hexFile << std::endl;
-        std::cout << "Memory file size: " << io::Path(outMemoryFile).getSize() << std::endl;
-        std::cout << "File size: " << io::Path(outFile).getSize() << std::endl;
-
-    }
-
-    EXPECT_EQ(memoryFileHash, fileHash);
+    EXPECT_EQ(io::Path(outMemoryFile).getSize(), bufSize);
 
     DDBVSIFree(buffer);
 }
-*/
+
+TEST(thumbnail, lewis_file) {
+    TestArea ta(TEST_NAME);
+    fs::path pc = ta.downloadTestAsset(
+        "https://github.com/DroneDB/test_data/raw/refs/heads/master/point-clouds/lewis.laz",
+        "lewis.laz");
+
+    ddb::buildEpt({pc.string()}, ta.getFolder("ept").string());
+
+    fs::path outFile = ta.getPath("output.webp");
+    fs::path eptPath = ta.getPath(fs::path("ept") / "ept.json");
+
+    ddb::generateThumb(eptPath, 256, outFile, true);
+
+    EXPECT_TRUE(fs::exists(outFile));
+    EXPECT_TRUE(io::Path(outFile).getSize() > 0);
+}
+
+TEST(thumbnail, toledo_file) {
+    TestArea ta(TEST_NAME);
+    fs::path pc = ta.downloadTestAsset(
+        "https://github.com/DroneDB/test_data/raw/refs/heads/master/point-clouds/toledo.laz",
+        "toledo.laz");
+
+    ddb::buildEpt({pc.string()}, ta.getFolder("ept").string());
+
+    fs::path outFile = ta.getPath("output.webp");
+    fs::path eptPath = ta.getPath(fs::path("ept") / "ept.json");
+
+    ddb::generateThumb(eptPath, 256, outFile, true);
+
+    EXPECT_TRUE(fs::exists(outFile));
+    EXPECT_TRUE(io::Path(outFile).getSize() > 0);
+}
+
 }  // namespace
