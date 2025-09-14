@@ -185,22 +185,29 @@ namespace ddb
         memset(buffer.get(), 0, bufSize * nBands);
         memset(alphaBuffer.get(), 0, bufSize);
 
-        for (int i = 0; i < paddedWSize; i++)
-        {
-            zBuffer.get()[i] = -99999.0;
-        }
+        // Optimized: use memset for better cache efficiency
+        std::fill_n(zBuffer.get(), paddedWSize, -99999.0f);
 
         LOGD << "Fetched " << point_view->size() << " points";
 
+        // Pre-compute scaling factors
         const double tileScaleW = tileSize / (tileBounds.max.x - tileBounds.min.x);
         const double tileScaleH = tileSize / (tileBounds.max.y - tileBounds.min.y);
         const double paddedTileScaleW = paddedTileSize / (tileBounds.max.x - tileBounds.min.x + pointRadiusMeters * 2.0);
         const double paddedTileScaleH = paddedTileSize / (tileBounds.max.y - tileBounds.min.y + pointRadiusMeters * 2.0);
 
+        // Pre-compute transform bounds for early rejection
+        const double minX = tileBounds.min.x - pointRadiusMeters;
+        const double minY = tileBounds.min.y - pointRadiusMeters;
+        const double maxX = tileBounds.max.x + pointRadiusMeters;
+        const double maxY = tileBounds.max.y + pointRadiusMeters;
+
         CoordsTransformer ict(eptInfo.wktProjection, 3857);
 
+        // Optimized: check normalization in first few points only for efficiency
         bool normalize = false;
-        for (pdal::PointId idx = 0; idx < point_view->size(); ++idx)
+        const pdal::PointId checkLimit = std::min(static_cast<pdal::PointId>(100), point_view->size());
+        for (pdal::PointId idx = 0; idx < checkLimit; ++idx)
         {
             auto p = point_view->point(idx);
             uint16_t red = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Red);
@@ -214,50 +221,67 @@ namespace ddb
             }
         }
 
-        for (pdal::PointId idx = 0; idx < point_view->size(); ++idx)
+        // PDAL Optimized Data Access (avoid point object creation overhead)
+        float* zBuf = zBuffer.get();
+        const double paddedTileSizeD = static_cast<double>(paddedTileSize);
+        const pdal::PointId numPoints = point_view->size();
+
+        // Get dimension IDs once (avoid repeated lookups)
+        const pdal::Dimension::Id dimX = pdal::Dimension::Id::X;
+        const pdal::Dimension::Id dimY = pdal::Dimension::Id::Y;
+        const pdal::Dimension::Id dimZ = pdal::Dimension::Id::Z;
+        const pdal::Dimension::Id dimRed = pdal::Dimension::Id::Red;
+        const pdal::Dimension::Id dimGreen = pdal::Dimension::Id::Green;
+        const pdal::Dimension::Id dimBlue = pdal::Dimension::Id::Blue;
+
+        // Process each point efficiently with optimized memory access
+        for (pdal::PointId idx = 0; idx < numPoints; ++idx)
         {
-            auto p = point_view->point(idx);
-            double x = p.getFieldAs<double>(pdal::Dimension::Id::X);
-            double y = p.getFieldAs<double>(pdal::Dimension::Id::Y);
-            double z = p.getFieldAs<double>(pdal::Dimension::Id::Z);
+            // Extract coordinates and transform (avoid point object creation)
+            double x = point_view->getFieldAs<double>(dimX, idx);
+            double y = point_view->getFieldAs<double>(dimY, idx);
+            double z = point_view->getFieldAs<double>(dimZ, idx);
 
             ict.transform(&x, &y);
 
-            // Map projected coordinates to local PNG coordinates
-            int px = std::round((x - tileBounds.min.x - pointRadiusMeters) * paddedTileScaleW);
-            int py = paddedTileSize - 1 - std::round((y - tileBounds.min.y + pointRadiusMeters) * paddedTileScaleH);
+            // Early rejection: check if point is within expanded bounds
+            if (x < minX || x >= maxX || y < minY || y >= maxY) continue;
 
-            if (px >= 0 && px < paddedTileSize && py >= 0 && py < paddedTileSize)
-            {
-                // Within bounds
-                PointColor color;
-                uint16_t red = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Red);
-                uint16_t green = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Green);
-                uint16_t blue = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Blue);
+            // Map coordinates to padded tile coordinates
+            const int px = static_cast<int>((x - minX) * paddedTileScaleW);
+            const int py = paddedTileSize - 1 - static_cast<int>((y - minY) * paddedTileScaleH);
 
-                if (normalize)
-                {
-                    color.r = red >> 8;
-                    color.g = green >> 8;
-                    color.b = blue >> 8;
-                }
-                else
-                {
-                    color.r = static_cast<uint8_t>(red);
-                    color.g = static_cast<uint8_t>(green);
-                    color.b = static_cast<uint8_t>(blue);
-                }
+            // Clamp to padded tile bounds
+            if (px < 0 || px >= paddedTileSize || py < 0 || py >= paddedTileSize) continue;
 
-                int off_px = px - pointRadius;
-                int off_py = py - pointRadius;
+            // Optimized Z-buffer check with pointer arithmetic
+            const int zIndex = py * paddedTileSize + px;
+            if (zBuf[zIndex] >= z) continue; // Skip if not closer
 
-                if (zBuffer.get()[py * paddedTileSize + px] < z)
-                {
-                    zBuffer.get()[py * paddedTileSize + px] = z;
-                    drawCircle(buffer.get(), alphaBuffer.get(), off_px, off_py,
-                               pointRadius, color.r, color.g, color.b, tileSize, wSize);
-                }
+            zBuf[zIndex] = static_cast<float>(z);
+
+            // Extract color components (optimized direct field access)
+            uint16_t red = point_view->getFieldAs<uint16_t>(dimRed, idx);
+            uint16_t green = point_view->getFieldAs<uint16_t>(dimGreen, idx);
+            uint16_t blue = point_view->getFieldAs<uint16_t>(dimBlue, idx);
+
+            // Normalize colors if needed
+            uint8_t r, g, b;
+            if (normalize) {
+                r = static_cast<uint8_t>(red >> 8);
+                g = static_cast<uint8_t>(green >> 8);
+                b = static_cast<uint8_t>(blue >> 8);
+            } else {
+                r = static_cast<uint8_t>(red);
+                g = static_cast<uint8_t>(green);
+                b = static_cast<uint8_t>(blue);
             }
+
+            const int off_px = px - pointRadius;
+            const int off_py = py - pointRadius;
+
+            drawCircle(buffer.get(), alphaBuffer.get(), off_px, off_py,
+                       pointRadius, r, g, b, tileSize, wSize);
         }
 
         GDALDriverH memDrv = GDALGetDriverByName("MEM");
@@ -320,24 +344,59 @@ namespace ddb
     void drawCircle(uint8_t *buffer, uint8_t *alpha, int px, int py, int radius,
                     uint8_t r, uint8_t g, uint8_t b, int tileSize, int wSize)
     {
-        const int r2 = radius * radius;
-        const int area = r2 << 2;
-        const int rr = radius << 1;
+        // Pre-compute constants for the circle
+        const int radiusSquared = radius * radius;
+        const int maxX = std::min(px + radius, tileSize - 1);
+        const int maxY = std::min(py + radius, tileSize - 1);
+        const int minX = std::max(0, px - radius);
+        const int minY = std::max(0, py - radius);
 
-        for (int i = 0; i < area; i++)
-        {
-            const int tx = (i % rr) - radius;
-            const int ty = (i / rr) - radius;
-            if (tx * tx + ty * ty <= r2)
-            {
-                const int dx = px + tx;
-                const int dy = py + ty;
-                if (dx >= 0 && dx < tileSize && dy >= 0 && dy < tileSize)
-                {
-                    buffer[dy * tileSize + dx + wSize * 0] = r;
-                    buffer[dy * tileSize + dx + wSize * 1] = g;
-                    buffer[dy * tileSize + dx + wSize * 2] = b;
-                    alpha[dy * tileSize + dx] = 255;
+        // Optimized for radius = 2 (most common case)
+        if (radius == 2) {
+            const int offsets[] = {
+                -2*tileSize-2, -2*tileSize-1, -2*tileSize, -2*tileSize+1, -2*tileSize+2,
+                -tileSize-2, -tileSize-1, -tileSize, -tileSize+1, -tileSize+2,
+                -2, -1, 0, 1, 2,
+                tileSize-2, tileSize-1, tileSize, tileSize+1, tileSize+2,
+                2*tileSize-2, 2*tileSize-1, 2*tileSize, 2*tileSize+1, 2*tileSize+2
+            };
+
+            const int centerIdx = py * tileSize + px;
+
+            if (px >= 2 && px < tileSize - 2 && py >= 2 && py < tileSize - 2) {
+                // Fast path: no bounds checking needed
+                for (int offset : offsets) {
+                    const int pixelIdx = centerIdx + offset;
+                    const int dx = offset % tileSize;
+                    const int dy = offset / tileSize;
+
+                    if (dx*dx + dy*dy <= radiusSquared) {
+                        buffer[pixelIdx + wSize * 0] = r;
+                        buffer[pixelIdx + wSize * 1] = g;
+                        buffer[pixelIdx + wSize * 2] = b;
+                        alpha[pixelIdx] = 255;
+                    }
+                }
+                return;
+            }
+        }
+
+        // General case with bounds checking
+        for (int dy = minY; dy <= maxY; dy++) {
+            const int deltaY = dy - py;
+            const int deltaYSquared = deltaY * deltaY;
+            const int rowOffset = dy * tileSize;
+
+            for (int dx = minX; dx <= maxX; dx++) {
+                const int deltaX = dx - px;
+                const int distanceSquared = deltaX * deltaX + deltaYSquared;
+
+                if (distanceSquared <= radiusSquared) {
+                    const int pixelIdx = rowOffset + dx;
+                    buffer[pixelIdx + wSize * 0] = r;
+                    buffer[pixelIdx + wSize * 1] = g;
+                    buffer[pixelIdx + wSize * 2] = b;
+                    alpha[pixelIdx] = 255;
                 }
             }
         }
