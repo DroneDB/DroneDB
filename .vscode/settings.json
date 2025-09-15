@@ -117,6 +117,7 @@
         "stacktrace": "cpp",
         "syncstream": "cpp",
         "string_view": "cpp",
-        "slist": "cpp"
+        "slist": "cpp",
+        "*.inc": "cpp"
     }
 }
