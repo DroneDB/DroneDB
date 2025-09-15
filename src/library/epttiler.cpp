@@ -172,7 +172,7 @@ namespace ddb
         const int nBands = 3;
         const int bufSize = GDALGetDataTypeSizeBytes(GDT_Byte) * wSize;
 
-        const int pointRadius = 2;
+        const int pointRadius = 4;
         const double pointRadiusMeters = pointRadius * tileResolution;
         const int paddedTileSize = tileSize + pointRadius * 2;
         const int paddedWSize = paddedTileSize * paddedTileSize;
