@@ -104,6 +104,9 @@ TEST(thumbnail, ept) {
 }
 */
 
+const size_t WEBP_MIN_HEADER_SIZE = 26;
+const size_t MIN_THUMBNAIL_SIZE = 1024;
+
 // Helper function to check if WebP image is not empty (not all transparent/white)
 bool isWebPImageNonEmpty(const fs::path& webpPath) {
     // Check if file exists and has content
@@ -118,7 +121,7 @@ bool isWebPImageNonEmpty(const fs::path& webpPath) {
 
     // WebP files must be at least 26 bytes (minimal header size)
     // A realistic thumbnail should be much larger (at least 1KB)
-    if (fileSize < 26) {
+    if (fileSize < WEBP_MIN_HEADER_SIZE) {
         return false;
     }
 
@@ -150,7 +153,7 @@ bool isWebPImageNonEmpty(const fs::path& webpPath) {
 
     // For thumbnail testing purposes, expect at least 1KB for a meaningful image
     // This helps distinguish between minimal valid WebP files and actual thumbnails
-    return fileSize >= 1024;
+    return fileSize >= MIN_THUMBNAIL_SIZE;
 }
 
 TEST(thumbnail, brightonsLazEpt) {
