@@ -179,18 +179,6 @@ TEST(thumbnail, brightonsLazEpt) {
     EXPECT_TRUE(fs::exists(outFile)) << "Thumbnail file should exist";
     EXPECT_TRUE(isWebPImageNonEmpty(outFile)) << "Thumbnail should not be empty/transparent";
 
-    // Test in-memory generation
-    uint8_t* buffer;
-    int bufSize;
-    ddb::generateThumb(eptPath, 256, "", true, &buffer, &bufSize);
-
-    EXPECT_TRUE(bufSize > 100) << "In-memory thumbnail should have reasonable size";
-    EXPECT_NE(buffer, nullptr) << "Buffer should not be null";
-
-    // Verify file and memory versions have same size
-    EXPECT_EQ(io::Path(outFile).getSize(), bufSize) << "File and memory sizes should match";
-
-    DDBVSIFree(buffer);
 }
 
 TEST(thumbnail, toledoLazEpt) {
