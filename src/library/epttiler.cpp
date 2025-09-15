@@ -172,7 +172,7 @@ namespace ddb
         const int nBands = 3;
         const int bufSize = GDALGetDataTypeSizeBytes(GDT_Byte) * wSize;
 
-        const int pointRadius = 4;
+        const int pointRadius = 3;
         const double pointRadiusMeters = pointRadius * tileResolution;
         const int paddedTileSize = tileSize + pointRadius * 2;
         const int paddedWSize = paddedTileSize * paddedTileSize;
@@ -193,14 +193,25 @@ namespace ddb
         // Pre-compute scaling factors
         const double tileScaleW = tileSize / (tileBounds.max.x - tileBounds.min.x);
         const double tileScaleH = tileSize / (tileBounds.max.y - tileBounds.min.y);
-        const double paddedTileScaleW = paddedTileSize / (tileBounds.max.x - tileBounds.min.x + pointRadiusMeters * 2.0);
-        const double paddedTileScaleH = paddedTileSize / (tileBounds.max.y - tileBounds.min.y + pointRadiusMeters * 2.0);
+
+        // Fixed: Use expanded bounds for both scaling and coordinate mapping
+        const double expandedMinX = tileBounds.min.x - pointRadiusMeters;
+        const double expandedMinY = tileBounds.min.y - pointRadiusMeters;
+        const double expandedMaxX = tileBounds.max.x + pointRadiusMeters;
+        const double expandedMaxY = tileBounds.max.y + pointRadiusMeters;
+
+        const double paddedTileScaleW = paddedTileSize / (expandedMaxX - expandedMinX);
+        const double paddedTileScaleH = paddedTileSize / (expandedMaxY - expandedMinY);
 
         // Pre-compute transform bounds for early rejection
-        const double minX = tileBounds.min.x - pointRadiusMeters;
-        const double minY = tileBounds.min.y - pointRadiusMeters;
-        const double maxX = tileBounds.max.x + pointRadiusMeters;
-        const double maxY = tileBounds.max.y + pointRadiusMeters;
+        const double minX = expandedMinX;
+        const double minY = expandedMinY;
+        const double maxX = expandedMaxX;
+        const double maxY = expandedMaxY;
+
+        LOGD << "Tile bounds: (" << tileBounds.min.x << "," << tileBounds.min.y << ") - (" << tileBounds.max.x << "," << tileBounds.max.y << ")";
+        LOGD << "Expanded bounds: (" << minX << "," << minY << ") - (" << maxX << "," << maxY << ")";
+        LOGD << "Padded tile scale: " << paddedTileScaleW << " x " << paddedTileScaleH;
 
         CoordsTransformer ict(eptInfo.wktProjection, 3857);
 
@@ -235,6 +246,10 @@ namespace ddb
         const pdal::Dimension::Id dimBlue = pdal::Dimension::Id::Blue;
 
         // Process each point efficiently with optimized memory access
+        int pointsProcessed = 0;
+        int pointsInBounds = 0;
+        int pointsDrawn = 0;
+
         for (pdal::PointId idx = 0; idx < numPoints; ++idx)
         {
             // Extract coordinates and transform (avoid point object creation)
@@ -243,13 +258,20 @@ namespace ddb
             double z = point_view->getFieldAs<double>(dimZ, idx);
 
             ict.transform(&x, &y);
+            pointsProcessed++;
 
             // Early rejection: check if point is within expanded bounds
-            if (x < minX || x >= maxX || y < minY || y >= maxY) continue;
+            if (x < minX || x > maxX || y < minY || y > maxY) continue;
+            pointsInBounds++;
 
             // Map coordinates to padded tile coordinates
-            const int px = static_cast<int>((x - minX) * paddedTileScaleW);
-            const int py = paddedTileSize - 1 - static_cast<int>((y - minY) * paddedTileScaleH);
+            const int px = static_cast<int>(std::round((x - minX) * paddedTileScaleW));
+            const int py = static_cast<int>(std::round((maxY - y) * paddedTileScaleH));
+
+            // Debug logging for first few points and edge cases
+            if (pointsInBounds <= 5 || px < 5 || py < 5) {
+                LOGD << "Point " << pointsInBounds << ": world(" << x << "," << y << ") -> pixel(" << px << "," << py << ")";
+            }
 
             // Clamp to padded tile bounds
             if (px < 0 || px >= paddedTileSize || py < 0 || py >= paddedTileSize) continue;
@@ -280,9 +302,16 @@ namespace ddb
             const int off_px = px - pointRadius;
             const int off_py = py - pointRadius;
 
-            drawCircle(buffer.get(), alphaBuffer.get(), off_px, off_py,
-                       pointRadius, r, g, b, tileSize, wSize);
+            // Ensure we're drawing within the actual tile bounds (not padded)
+            if (off_px + pointRadius * 2 >= 0 && off_px < tileSize &&
+                off_py + pointRadius * 2 >= 0 && off_py < tileSize) {
+                drawCircle(buffer.get(), alphaBuffer.get(), off_px, off_py,
+                           pointRadius, r, g, b, tileSize, wSize);
+                pointsDrawn++;
+            }
         }
+
+        LOGD << "Points processed: " << pointsProcessed << ", in bounds: " << pointsInBounds << ", drawn: " << pointsDrawn;
 
         GDALDriverH memDrv = GDALGetDriverByName("MEM");
         if (memDrv == nullptr)
