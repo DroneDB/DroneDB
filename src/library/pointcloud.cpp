@@ -338,6 +338,12 @@ void buildEpt(const std::vector<std::string>& filenames, const std::string& outd
     options.stats = false;
     options.level = -1;
 
+    // Add dimension filtering to handle complex LAZ files with problematic custom dimensions
+    // Only include standard dimensions that are commonly supported
+    options.dimNames = {"X", "Y", "Z", "Red", "Green", "Blue", "Intensity", "ReturnNumber",
+                       "NumberOfReturns", "Classification", "ScanAngleRank", "UserData",
+                       "PointSourceId", "GpsTime"};
+
     io::assureFolderExists(dest);
     io::assureIsRemoved(dest / "ept.json");
     io::assureIsRemoved(dest / "ept-data");
