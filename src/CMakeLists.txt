@@ -195,8 +195,9 @@ file(MAKE_DIRECTORY ${TEMP_DIR})
 # Add custom command to download the file using curl in the temporary directory
 add_custom_command(
     OUTPUT ${TEMP_DIR}/cacert.pem
-    COMMAND curl --etag-compare ${TEMP_DIR}/etag.txt --etag-save ${TEMP_DIR}/etag.txt --remote-name https://curl.se/ca/cacert.pem
-    COMMENT "Downloading updated CA certificate if modified"
+    COMMAND curl --etag-compare ${TEMP_DIR}/etag.txt --etag-save ${TEMP_DIR}/etag.txt --output ${TEMP_DIR}/cacert.pem.tmp https://curl.se/ca/cacert.pem
+    COMMAND ${CMAKE_COMMAND} -E rename ${TEMP_DIR}/cacert.pem.tmp ${TEMP_DIR}/cacert.pem
+    COMMENT "Downloading updated CA certificate if modified (atomic download)"
     WORKING_DIRECTORY ${TEMP_DIR}
 )
 
