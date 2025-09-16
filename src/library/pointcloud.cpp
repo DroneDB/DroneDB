@@ -379,40 +379,115 @@ json PointCloudInfo::toJSON() {
 std::vector<PointColor> normalizeColors(std::shared_ptr<pdal::PointView> point_view) {
     std::vector<PointColor> result;
 
-    bool normalize = false;
-    for (pdal::PointId idx = 0; idx < point_view->size(); ++idx) {
-        auto p = point_view->point(idx);
-        uint16_t red = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Red);
-        uint16_t green = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Green);
-        uint16_t blue = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Blue);
+    // Check if color dimensions exist in the point cloud
+    pdal::Dimension::IdList dims = point_view->dims();
+    bool hasRed = std::find(dims.begin(), dims.end(), pdal::Dimension::Id::Red) != dims.end();
+    bool hasGreen = std::find(dims.begin(), dims.end(), pdal::Dimension::Id::Green) != dims.end();
+    bool hasBlue = std::find(dims.begin(), dims.end(), pdal::Dimension::Id::Blue) != dims.end();
 
-        if (red > 255 || green > 255 || blue > 255) {
-            normalize = true;
-            break;
+    // If color dimensions don't exist, return default gray colors
+    if (!hasRed || !hasGreen || !hasBlue) {
+        for (pdal::PointId idx = 0; idx < point_view->size(); ++idx) {
+            PointColor color;
+            color.r = 128; // Default gray color
+            color.g = 128;
+            color.b = 128;
+            result.push_back(color);
         }
+        return result;
     }
 
-    for (pdal::PointId idx = 0; idx < point_view->size(); ++idx) {
-        auto p = point_view->point(idx);
-        uint16_t red = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Red);
-        uint16_t green = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Green);
-        uint16_t blue = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Blue);
-        PointColor color;
+    bool normalize = false;
+    try {
+        for (pdal::PointId idx = 0; idx < point_view->size(); ++idx) {
+            auto p = point_view->point(idx);
+            uint16_t red = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Red);
+            uint16_t green = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Green);
+            uint16_t blue = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Blue);
 
-        if (normalize) {
-            color.r = red >> 8;
-            color.g = green >> 8;
-            color.b = blue >> 8;
-        } else {
-            color.r = static_cast<uint8_t>(red);
-            color.g = static_cast<uint8_t>(green);
-            color.b = static_cast<uint8_t>(blue);
+            if (red > 255 || green > 255 || blue > 255) {
+                normalize = true;
+                break;
+            }
         }
+    } catch (const std::exception& e) {
+        LOGD << "Exception in normalizeColors first pass: " << e.what();
+        // Return default colors if there's an error accessing color fields
+        for (pdal::PointId idx = 0; idx < point_view->size(); ++idx) {
+            PointColor color;
+            color.r = 128;
+            color.g = 128;
+            color.b = 128;
+            result.push_back(color);
+        }
+        return result;
+    }
 
-        result.push_back(color);
+    try {
+        for (pdal::PointId idx = 0; idx < point_view->size(); ++idx) {
+            auto p = point_view->point(idx);
+            uint16_t red = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Red);
+            uint16_t green = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Green);
+            uint16_t blue = p.getFieldAs<uint16_t>(pdal::Dimension::Id::Blue);
+            PointColor color;
+
+            if (normalize) {
+                color.r = red >> 8;
+                color.g = green >> 8;
+                color.b = blue >> 8;
+            } else {
+                color.r = static_cast<uint8_t>(red);
+                color.g = static_cast<uint8_t>(green);
+                color.b = static_cast<uint8_t>(blue);
+            }
+
+            result.push_back(color);
+        }
+    } catch (const std::exception& e) {
+        LOGD << "Exception in normalizeColors second pass: " << e.what();
+        // Return default colors if there's an error accessing color fields
+        result.clear();
+        for (pdal::PointId idx = 0; idx < point_view->size(); ++idx) {
+            PointColor color;
+            color.r = 128;
+            color.g = 128;
+            color.b = 128;
+            result.push_back(color);
+        }
     }
 
     return result;
+}
+
+std::vector<PointColor> generateZBasedColors(std::shared_ptr<pdal::PointView> point_view, double minZ, double maxZ) {
+    std::vector<PointColor> colors;
+    colors.reserve(point_view->size());
+
+    double zRange = maxZ - minZ;
+
+    for (pdal::PointId idx = 0; idx < point_view->size(); ++idx) {
+        auto p = point_view->point(idx);
+        auto z = p.getFieldAs<double>(pdal::Dimension::Id::Z);
+
+        PointColor color;
+        if (zRange > 0) {
+            // Normalize Z to 0-1 range
+            double normalizedZ = (z - minZ) / zRange;
+            // Simple grayscale mapping: lower Z = darker, higher Z = lighter
+            uint8_t intensity = static_cast<uint8_t>(normalizedZ * 255);
+            color.r = intensity;
+            color.g = intensity;
+            color.b = intensity;
+        } else {
+            // All points at same Z level, use gray
+            color.r = 128;
+            color.g = 128;
+            color.b = 128;
+        }
+        colors.push_back(color);
+    }
+
+    return colors;
 }
 
 void translateToLas(const std::string& input, const std::string& outputLas) {
