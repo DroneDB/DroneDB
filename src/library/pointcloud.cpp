@@ -465,7 +465,7 @@ std::vector<PointColor> normalizeColors(std::shared_ptr<pdal::PointView> point_v
     return result;
 }
 
-std::vector<PointColor> generateZBasedColors(std::shared_ptr<pdal::PointView> point_view, double minZ, double maxZ) {
+std::vector<PointColor> generateZBasedColors(const std::shared_ptr<pdal::PointView>& point_view, double minZ, double maxZ) {
     std::vector<PointColor> colors;
     colors.reserve(point_view->size());
 
