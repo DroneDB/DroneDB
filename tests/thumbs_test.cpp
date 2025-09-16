@@ -255,4 +255,26 @@ TEST(thumbnail, pointCloudScalarField) {
 
 }
 
+TEST(thumbnail, pointCloudComplex) {
+    TestArea ta(TEST_NAME);
+    fs::path pc = ta.downloadTestAsset(
+        "https://github.com/DroneDB/test_data/raw/master/point-clouds/point-cloud-complex.laz",
+        "point_cloud.laz");
+
+    // Build EPT from LAZ file
+    ddb::buildEpt({pc.string()}, ta.getFolder("ept").string());
+
+    fs::path eptPath = ta.getPath(fs::path("ept") / "ept.json");
+    EXPECT_TRUE(fs::exists(eptPath)) << "EPT file should exist after buildEpt";
+
+    // Generate WebP thumbnail
+    fs::path outFile = ta.getPath("point-cloud-complex.webp");
+    ddb::generateThumb(eptPath, 256, outFile, true);
+
+    // Verify thumbnail exists and is not empty
+    EXPECT_TRUE(fs::exists(outFile)) << "Thumbnail file should exist";
+    EXPECT_TRUE(isWebPImageNonEmpty(outFile)) << "Thumbnail should not be empty/transparent";
+
+}
+
 }  // namespace
