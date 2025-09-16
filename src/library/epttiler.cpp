@@ -152,10 +152,6 @@ namespace ddb
                 colorFilter->setOptions(cfOpts);
                 colorFilter->setInput(*eptReader);
                 main = colorFilter.get();
-
-                // Test if the filter can prepare successfully
-                pdal::PointTable testTable;
-                main->prepare(testTable);
             }
             catch (const pdal::pdal_error &e)
             {
