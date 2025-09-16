@@ -135,20 +135,31 @@ namespace ddb
         LOGD << "Options set";
 
         std::unique_ptr<pdal::ColorinterpFilter> colorFilter;
+        bool colorFilterFailed = false;
         if (!hasColors)
         {
-            colorFilter.reset(new pdal::ColorinterpFilter());
+            try
+            {
+                colorFilter.reset(new pdal::ColorinterpFilter());
 
-            // Add ramp filter
-            LOGD << "Adding ramp filter (" << eptInfo.bounds[2] << ", " << eptInfo.bounds[5] << ")";
+                // Add ramp filter
+                LOGD << "Adding ramp filter (" << eptInfo.bounds[2] << ", " << eptInfo.bounds[5] << ")";
 
-            pdal::Options cfOpts;
-            cfOpts.add("ramp", "pestel_shades");
-            cfOpts.add("minimum", eptInfo.bounds[2]);
-            cfOpts.add("maximum", eptInfo.bounds[5]);
-            colorFilter->setOptions(cfOpts);
-            colorFilter->setInput(*eptReader);
-            main = colorFilter.get();
+                pdal::Options cfOpts;
+                cfOpts.add("ramp", "pestel_shades");
+                cfOpts.add("minimum", eptInfo.bounds[2]);
+                cfOpts.add("maximum", eptInfo.bounds[5]);
+                colorFilter->setOptions(cfOpts);
+                colorFilter->setInput(*eptReader);
+                main = colorFilter.get();
+            }
+            catch (const pdal::pdal_error &e)
+            {
+                LOGD << "ColorinterpFilter failed: " << e.what() << ". Proceeding without color filter.";
+                colorFilterFailed = true;
+                colorFilter.reset();
+                main = eptReader.get();
+            }
         }
 
         pdal::PointTable table;

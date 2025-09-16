@@ -355,217 +355,25 @@ void RenderImage(const fs::path& outImagePath,
     GDALClose(hDataset);
 }
 
-void generatePointCloudThumb(const fs::path& eptPath,
-                             int thumbSize,
-                             const fs::path& outImagePath,
-                             uint8_t** outBuffer,
-                             int* outBufferSize) {
-    LOGD << "Generating point cloud thumb";
-
-    PointCloudInfo eptInfo;
-
-    // Open EPT
-    int span;
-    if (!getEptInfo(eptPath.string(), eptInfo, 3857, &span)) {
-        throw InvalidArgsException("Cannot get EPT info for " + eptPath.string());
-    }
-
-    const auto tileSize = thumbSize;
-
-    LOGD << "TileSize = " << tileSize;
-
-    GlobalMercator mercator(tileSize);
-
-    LOGD << "Bounds: " << eptInfo.bounds.size();
-    LOGD << "PolyBounds: " << eptInfo.polyBounds.size();
-
-    double oMinX;
-    double oMaxX;
-    double oMaxY;
-    double oMinY;
-
-    bool hasSpatialSystem = !eptInfo.wktProjection.empty() && !eptInfo.polyBounds.empty();
-
-    if (hasSpatialSystem) {
-        LOGD << "WktProjection: " << eptInfo.wktProjection;
-    } else {
-        LOGD << "No spatial system";
-    }
-
-    if (hasSpatialSystem) {
-        oMinX = eptInfo.polyBounds.getPoint(0).x;
-        oMaxX = eptInfo.polyBounds.getPoint(2).x;
-        oMaxY = eptInfo.polyBounds.getPoint(2).y;
-        oMinY = eptInfo.polyBounds.getPoint(0).y;
-
-        LOGD << "Bounds (output SRS): (" << oMinX << "; " << oMinY << ") - (" << oMaxX << "; "
-             << oMaxY << ")";
-    } else {
-        oMinX = eptInfo.bounds[0];
-        oMinY = eptInfo.bounds[1];
-
-        oMaxX = eptInfo.bounds[3];
-        oMaxY = eptInfo.bounds[4];
-
-        LOGD << "Bounds: (" << oMinX << "; " << oMinY << ") - (" << oMaxX << "; " << oMaxY << ")";
-    }
-
-    auto length = std::min(std::abs(oMaxX - oMinX), std::abs(oMaxY - oMinY));
-
-    LOGD << "Length: " << length;
-
-    if (length == 0) {
-        LOGD << "Cannot properly calculate length, trying with bounds "
-                "instead";
-
-        oMinX = eptInfo.bounds[0];
-        oMaxX = eptInfo.bounds[3];
-
-        oMaxY = eptInfo.bounds[4];
-        oMinY = eptInfo.bounds[1];
-
-        LOGD << "Bounds: (" << oMinX << "; " << oMinY << ") - (" << oMaxX << "; " << oMaxY << ")";
-
-        length = std::min(std::abs(oMaxX - oMinX), std::abs(oMaxY - oMinY));
-
-        LOGD << "New Length: " << length;
-
-        if (length < 0) {
-            throw GDALException("Cannot calculate length: spatial system not supported");
-        }
-
-        LOGD << "Length OK, proceeding without spatial system";
-
-        hasSpatialSystem = false;
-    }
-
-    // Max/min zoom level
-    const auto tMinZ = mercator.zoomForLength(length);
-
-    LOGD << "MinZ: " << tMinZ;
-
-    const auto hasColors =
-        std::find(eptInfo.dimensions.begin(), eptInfo.dimensions.end(), "Red") !=
-            eptInfo.dimensions.end() &&
-        std::find(eptInfo.dimensions.begin(), eptInfo.dimensions.end(), "Green") !=
-            eptInfo.dimensions.end() &&
-        std::find(eptInfo.dimensions.begin(), eptInfo.dimensions.end(), "Blue") !=
-            eptInfo.dimensions.end();
-
-    LOGD << "Has colors: " << (hasColors ? "true" : "false");
-
-#ifdef _WIN32
-    const fs::path caBundlePath = io::getDataPath("curl-ca-bundle.crt");
-    if (!caBundlePath.empty()) {
-        LOGD << "ARBITRER CA Bundle: " << caBundlePath.string();
-        std::stringstream ss;
-        ss << "ARBITER_CA_INFO=" << caBundlePath.string();
-        if (_putenv(ss.str().c_str()) != 0) {
-            LOGD << "Cannot set ARBITER_CA_INFO";
-        }
-    }
-#endif
-
-    const auto tz = tMinZ;
-
-    pdal::Options eptOpts;
-    eptOpts.add("filename",
-                (!utils::isNetworkPath(eptPath.string()) && eptPath.is_relative())
-                    ? ("." / eptPath).string()
-                    : eptPath.string());
-
-    // We could reduce the resolution but this would leave empty gaps in the rasterized output
-    double resolution = tz < 0 ? 1 : mercator.resolution(tz);
-    eptOpts.add("resolution", resolution);
-    LOGD << "EPT resolution: " << resolution;
-
-    std::unique_ptr<pdal::EptReader> eptReader = std::make_unique<pdal::EptReader>();
-    pdal::Stage* main = eptReader.get();
-    eptReader->setOptions(eptOpts);
-    LOGD << "Options set";
-
-    // -----------------------------------------------------------------
-
-    if (!hasColors)
-        addColorFilter(eptInfo, eptReader.get(), main);
-
-    LOGD << "Before prepare";
-
-    pdal::PointTable table;
-    main->prepare(table);
-    pdal::PointViewSet point_view_set;
-
-    LOGD << "PointTable prepared";
-
-    try {
-        point_view_set = main->execute(table);
-    } catch (const pdal::pdal_error& e) {
-        throw PDALException(e.what());
-    }
-
-    pdal::PointViewPtr point_view = *point_view_set.begin();
-
-    LOGD << "Fetched " << point_view->size() << " points";
-
-    if (point_view->empty()) {
-        throw GDALException("No points fetched from cloud, check zoom level");
-    }
-
-    pdal::Dimension::IdList dims = point_view->dims();
-
+// Helper function to render points with optional coordinate transformation
+int renderPoints(pdal::PointViewPtr point_view,
+                const std::vector<PointColor>& colors,
+                bool hasSpatialSystem,
+                const std::string& wktProjection,
+                uint8_t* buffer,
+                uint8_t* alphaBuffer,
+                float* zBuffer,
+                int tileSize,
+                double tileScale,
+                double offsetX,
+                double offsetY,
+                double oMinX,
+                double oMinY) {
+    int pointsRendered = 0;
     const auto wSize = tileSize * tileSize;
 
-    constexpr int nBands = 3;
-    const int bufSize = GDALGetDataTypeSizeBytes(GDT_Byte) * wSize;
-    std::unique_ptr<uint8_t> buffer(new uint8_t[bufSize * nBands]);
-    std::unique_ptr<uint8_t> alphaBuffer(new uint8_t[bufSize]);
-    std::unique_ptr<float> zBuffer(new float[bufSize]);
-
-    memset(buffer.get(), 0, bufSize * nBands);
-    memset(alphaBuffer.get(), 0, bufSize);
-
-    for (int i = 0; i < wSize; i++) {
-        zBuffer.get()[i] = -99999.0;
-    }
-
-    const double width = oMaxX - oMinX;
-    const double height = oMaxY - oMinY;
-
-    const double tileScaleW = tileSize / width;
-    const double tileScaleH = tileSize / height;
-
-    // Scaling factor
-    double tileScale;
-
-    // After scaling we need to center the image
-    double offsetX;
-    double offsetY;
-
-    // Taller than wider
-    if (tileScaleW > tileScaleH) {
-        tileScale = tileScaleH;
-
-        offsetY = 0;
-        offsetX = (tileSize - width * tileScaleH) / 2;
-
-        // Wider than taller
-    } else {
-        tileScale = tileScaleW;
-
-        offsetX = 0;
-        offsetY = (tileSize - height * tileScaleW) / 2;
-    }
-
-    LOGD << "OffsetX = " << offsetX;
-    LOGD << "OffsetY = " << offsetY;
-
-    LOGD << "TileScale = " << tileScale;
-    std::vector<PointColor> colors = normalizeColors(point_view);
-
-    int pointsRendered = 0;
-
     if (hasSpatialSystem) {
-        CoordsTransformer ict(eptInfo.wktProjection, 3857);
+        CoordsTransformer ict(wktProjection, 3857);
 
         for (pdal::PointId idx = 0; idx < point_view->size(); ++idx) {
             auto p = point_view->point(idx);
@@ -579,23 +387,13 @@ void generatePointCloudThumb(const fs::path& eptPath,
             int px = std::round((x - oMinX) * tileScale + offsetX);
             int py = tileSize - 1 - std::round((y - oMinY) * tileScale + offsetY);
 
-            if (px >= 0 && px < tileSize && py >= 0 && py < tileSize) {
-                // Within bounds
-
-                if (zBuffer.get()[py * tileSize + px] < z) {
-                    zBuffer.get()[py * tileSize + px] = z;
-                    drawCircle(buffer.get(),
-                               alphaBuffer.get(),
-                               px,
-                               py,
-                               2,
-                               colors[idx].r,
-                               colors[idx].g,
-                               colors[idx].b,
-                               tileSize,
-                               wSize);
-                    pointsRendered++;
-                }
+            if (px >= 0 && px < tileSize && py >= 0 && py < tileSize &&
+                zBuffer[py * tileSize + px] < z) {
+                zBuffer[py * tileSize + px] = z;
+                drawCircle(buffer, alphaBuffer, px, py, 2,
+                          colors[idx].r, colors[idx].g, colors[idx].b,
+                          tileSize, wSize);
+                pointsRendered++;
             }
         }
     } else {
@@ -605,33 +403,176 @@ void generatePointCloudThumb(const fs::path& eptPath,
             auto y = p.getFieldAs<double>(pdal::Dimension::Id::Y);
             auto z = p.getFieldAs<double>(pdal::Dimension::Id::Z);
 
-            // Map projected coordinates to local PNG coordinates
+            // Map coordinates to local PNG coordinates
             int px = std::round((x - oMinX) * tileScale + offsetX);
             int py = tileSize - 1 - std::round((y - oMinY) * tileScale + offsetY);
 
-            if (px >= 0 && px < tileSize && py >= 0 && py < tileSize) {
-                // Within bounds
-
-                if (zBuffer.get()[py * tileSize + px] < z) {
-                    zBuffer.get()[py * tileSize + px] = z;
-                    drawCircle(buffer.get(),
-                               alphaBuffer.get(),
-                               px,
-                               py,
-                               2,
-                               colors[idx].r,
-                               colors[idx].g,
-                               colors[idx].b,
-                               tileSize,
-                               wSize);
-                    pointsRendered++;
-                }
+            if (px >= 0 && px < tileSize && py >= 0 && py < tileSize &&
+                zBuffer[py * tileSize + px] < z) {
+                zBuffer[py * tileSize + px] = z;
+                drawCircle(buffer, alphaBuffer, px, py, 2,
+                          colors[idx].r, colors[idx].g, colors[idx].b,
+                          tileSize, wSize);
+                pointsRendered++;
             }
         }
-    }  // Per avere sfondo trasparente, non scriviamo lo sfondo bianco
-    // I pixel con alphaBuffer[i] == 0 rimarranno trasparenti
+    }
 
-    LOGD << "Points rendered: " << pointsRendered << " out of " << point_view->size();
+    return pointsRendered;
+}
+
+void generatePointCloudThumb(const fs::path& eptPath,
+                             int thumbSize,
+                             const fs::path& outImagePath,
+                             uint8_t** outBuffer,
+                             int* outBufferSize) {
+    PointCloudInfo eptInfo;
+
+    // Load EPT information
+    int span;
+    if (!getEptInfo(eptPath.string(), eptInfo, 3857, &span)) {
+        throw InvalidArgsException("Cannot get EPT info for " + eptPath.string());
+    }
+
+    const auto tileSize = thumbSize;
+    GlobalMercator mercator(tileSize);
+
+    // Calculate bounds based on spatial reference system
+    double oMinX, oMaxX, oMaxY, oMinY;
+    bool hasSpatialSystem = !eptInfo.wktProjection.empty() && !eptInfo.polyBounds.empty();
+
+    if (hasSpatialSystem) {
+        oMinX = eptInfo.polyBounds.getPoint(0).x;
+        oMaxX = eptInfo.polyBounds.getPoint(2).x;
+        oMaxY = eptInfo.polyBounds.getPoint(2).y;
+        oMinY = eptInfo.polyBounds.getPoint(0).y;
+    } else {
+        oMinX = eptInfo.bounds[0];
+        oMinY = eptInfo.bounds[1];
+        oMaxX = eptInfo.bounds[3];
+        oMaxY = eptInfo.bounds[4];
+    }
+
+    // Calculate length for zoom level determination
+    auto length = std::min(std::abs(oMaxX - oMinX), std::abs(oMaxY - oMinY));
+
+    if (length == 0) {
+        // Fallback to raw bounds if transformed bounds are invalid
+        oMinX = eptInfo.bounds[0];
+        oMaxX = eptInfo.bounds[3];
+        oMaxY = eptInfo.bounds[4];
+        oMinY = eptInfo.bounds[1];
+
+        length = std::min(std::abs(oMaxX - oMinX), std::abs(oMaxY - oMinY));
+
+        if (length < 0) {
+            throw GDALException("Cannot calculate length: spatial system not supported");
+        }
+
+        hasSpatialSystem = false;
+    }
+
+    // Determine zoom level and check for color dimensions
+    const auto tMinZ = mercator.zoomForLength(length);
+    const auto hasColors =
+        std::find(eptInfo.dimensions.begin(), eptInfo.dimensions.end(), "Red") !=
+            eptInfo.dimensions.end() &&
+        std::find(eptInfo.dimensions.begin(), eptInfo.dimensions.end(), "Green") !=
+            eptInfo.dimensions.end() &&
+        std::find(eptInfo.dimensions.begin(), eptInfo.dimensions.end(), "Blue") !=
+            eptInfo.dimensions.end();
+
+#ifdef _WIN32
+    const fs::path caBundlePath = io::getDataPath("curl-ca-bundle.crt");
+    if (!caBundlePath.empty()) {
+        LOGD << "ARBITRER CA Bundle: " << caBundlePath.string();
+        std::stringstream ss;
+        ss << "ARBITER_CA_INFO=" << caBundlePath.string();
+        if (_putenv(ss.str().c_str()) != 0) {
+            LOGD << "Cannot set ARBITER_CA_INFO";
+        }
+    }
+#endif
+
+    // Configure EPT reader options
+    const auto tz = tMinZ;
+    double resolution = tz < 0 ? 1 : mercator.resolution(tz);
+
+    pdal::Options eptOpts;
+    eptOpts.add("filename",
+                (!utils::isNetworkPath(eptPath.string()) && eptPath.is_relative())
+                    ? ("." / eptPath).string()
+                    : eptPath.string());
+    eptOpts.add("resolution", resolution);
+
+    std::unique_ptr<pdal::EptReader> eptReader = std::make_unique<pdal::EptReader>();
+    pdal::Stage* main = eptReader.get();
+    eptReader->setOptions(eptOpts);
+
+    // Execute PDAL pipeline with comprehensive error handling
+    pdal::PointTable table;
+    pdal::PointViewSet point_view_set;
+    pdal::PointViewPtr point_view;
+
+    try {
+        main->prepare(table);
+        point_view_set = main->execute(table);
+        point_view = *point_view_set.begin();
+
+        if (point_view->empty()) {
+            throw GDALException("No points fetched from cloud, check zoom level");
+        }
+    } catch (const pdal::pdal_error& e) {
+        throw PDALException("PDAL error: " + std::string(e.what()));
+    } catch (const std::exception& e) {
+        throw PDALException("Failed to process point cloud pipeline: " + std::string(e.what()));
+    }
+
+    // Initialize rendering buffers
+    const auto wSize = tileSize * tileSize;
+    constexpr int nBands = 3;
+    const int bufSize = GDALGetDataTypeSizeBytes(GDT_Byte) * wSize;
+
+    std::unique_ptr<uint8_t> buffer(new uint8_t[bufSize * nBands]);
+    std::unique_ptr<uint8_t> alphaBuffer(new uint8_t[bufSize]);
+    std::unique_ptr<float> zBuffer(new float[bufSize]);
+
+    memset(buffer.get(), 0, bufSize * nBands);
+    memset(alphaBuffer.get(), 0, bufSize);
+    std::fill_n(zBuffer.get(), wSize, -99999.0f);
+
+    // Calculate scaling and offset for centering
+    const double width = oMaxX - oMinX;
+    const double height = oMaxY - oMinY;
+    const double tileScaleW = tileSize / width;
+    const double tileScaleH = tileSize / height;
+
+    double tileScale, offsetX, offsetY;
+    if (tileScaleW > tileScaleH) {
+        // Taller than wider
+        tileScale = tileScaleH;
+        offsetY = 0;
+        offsetX = (tileSize - width * tileScaleH) / 2;
+    } else {
+        // Wider than taller
+        tileScale = tileScaleW;
+        offsetX = 0;
+        offsetY = (tileSize - height * tileScaleW) / 2;
+    }
+
+    // Generate colors based on available data
+    if (eptInfo.bounds.size() < 6) {
+        throw std::runtime_error("EPT bounds array does not contain at least 6 elements (minZ/maxZ required)");
+    }
+    std::vector<PointColor> colors = hasColors ?
+        normalizeColors(point_view) :
+        generateZBasedColors(point_view, eptInfo.bounds[2], eptInfo.bounds[5]);
+
+    // Render points using appropriate coordinate transformation
+    int pointsRendered = renderPoints(point_view, colors, hasSpatialSystem,
+                                     eptInfo.wktProjection, buffer.get(), alphaBuffer.get(),
+                                     zBuffer.get(), tileSize, tileScale, offsetX, offsetY,
+                                     oMinX, oMinY);
 
     RenderImage(outImagePath,
                 tileSize,
