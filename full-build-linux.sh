@@ -4,9 +4,6 @@ set -e
 # Detect CPU cores
 CPU_CORES=$(nproc)
 
-# Remove the build directory if it exists
-rm -rf build
-
 # Create build directory
 mkdir -p build
 

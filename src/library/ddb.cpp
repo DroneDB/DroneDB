@@ -46,7 +46,6 @@ void handleSegv();
 void handleFpe();
 void setupSignalHandlers();
 void setupLogging(bool verbose);
-static void primeGDAL();
 void initializeGDALandPROJ();
 
 // Thread-safe initialization using std::once_flag
@@ -272,19 +271,6 @@ void initializeGDALandPROJ() {
     CPLSetConfigOption("PROJ_NETWORK", "ON");
 
     LOGD << "GDAL and PROJ initialization completed";
-
-    const char* projData = std::getenv("PROJ_DATA");
-    if (!projData)
-        projData = std::getenv("PROJ_LIB");
-
-    if (projData) {
-        fs::path projDbPath = fs::path(projData) / "proj.db";
-        if (fs::exists(projDbPath))
-            LOGD << "PROJ database accessible at: " << projDbPath.string();
-        else
-            LOGW << "PROJ database NOT found at: " << projDbPath.string();
-    } else
-        LOGW << "Neither PROJ_DATA nor PROJ_LIB environment variables are set";
 
     // Check PROJ availability
     OGRSpatialReferenceH hSRS = OSRNewSpatialReference(nullptr);

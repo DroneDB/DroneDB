@@ -39,6 +39,7 @@ DroneDB is a free, open-source aerial data management platform built in C++ with
 - Cross-platform CMake configuration
 - Support for Windows, Linux, macOS
 - Automatic dependency resolution for GDAL, PROJ, PDAL, etc.
+- To build on Windows, take inspiration from `full-build-win.ps1` script and to build on Linux take inspiration from `full-build-linux.sh` script (skip the cmake part if the build directory already exists)
 
 #### 4. **3D Visualization (`vendor/libnexus/`)**
 - Nexus format for efficient 3D mesh streaming

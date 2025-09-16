@@ -1,13 +1,10 @@
 # Detect CPU cores
 $cpuCores = [System.Environment]::ProcessorCount
 
-# Remove the build directory if it exists
-if (Test-Path -Path "./build") {
-    Remove-Item -Recurse -Force "./build"
+# Create build directory if it doesn't exist
+if (-Not (Test-Path -Path "./build")) {
+    New-Item -ItemType Directory -Path "./build" | Out-Null
 }
-
-# Create build directory
-New-Item -ItemType Directory -Path "./build" | Out-Null
 
 # Change to build directory
 Set-Location "./build"

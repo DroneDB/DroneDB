@@ -9,6 +9,7 @@
 #include "test.h"
 #include "testarea.h"
 #include "tilerhelper.h"
+#include <chrono>
 
 namespace {
 
@@ -128,8 +129,14 @@ MANUAL_TEST(tilerBenchmark, lewis) {
         "https://github.com/DroneDB/test_data/raw/refs/heads/master/point-clouds/lewis.laz",
         "point_cloud.laz");
 
+    std::chrono::high_resolution_clock::time_point start = std::chrono::high_resolution_clock::now();
+
     ddb::buildEpt({pc.string()}, ta.getFolder("ept").string());
     fs::path eptPath = ta.getPath(fs::path("ept") / "ept.json");
+
+    std::chrono::high_resolution_clock::time_point end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> timeElapsed = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+    std::cout << "EPT build time: " << timeElapsed.count() << " seconds" << std::endl;
 
     // Test tiles from Toledo dataset coordinates
     struct LewisTileTest {
@@ -155,6 +162,8 @@ MANUAL_TEST(tilerBenchmark, lewis) {
         {20, 285762, 391590}, {20, 285761, 391590}, {20, 285762, 391586}, {20, 285761, 391586},
         {20, 285763, 391590}, {20, 285760, 391590}, {20, 285763, 391586}, {20, 285760, 391586}};
 
+    start = std::chrono::high_resolution_clock::now();
+
     for (const auto& tile : testTiles) {
         fs::path outTile =
             TilerHelper::getTile(eptPath, tile.z, tile.x, tile.y, 256, true, true, ta.getFolder());
@@ -164,6 +173,10 @@ MANUAL_TEST(tilerBenchmark, lewis) {
         EXPECT_GT(io::Path(outTile).getSize(), 0)
             << "Tile " << tile.z << "/" << tile.x << "/" << tile.y << " is empty";
     }
+
+    end = std::chrono::high_resolution_clock::now();
+    timeElapsed = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+    std::cout << "Tile generation time: " << timeElapsed.count() << " seconds" << std::endl;
 }
 
 TEST(testTiler, userCache) {
