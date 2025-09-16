@@ -561,6 +561,9 @@ void generatePointCloudThumb(const fs::path& eptPath,
     }
 
     // Generate colors based on available data
+    if (eptInfo.bounds.size() < 6) {
+        throw std::runtime_error("EPT bounds array does not contain at least 6 elements (minZ/maxZ required)");
+    }
     std::vector<PointColor> colors = hasColors ?
         normalizeColors(point_view) :
         generateZBasedColors(point_view, eptInfo.bounds[2], eptInfo.bounds[5]);
