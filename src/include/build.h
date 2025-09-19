@@ -18,6 +18,8 @@ namespace ddb
     DDB_DLL void buildPending(Database *db, const std::string &outputPath, bool force = false, BuildCallback callback = nullptr);
     DDB_DLL bool isBuildPending(Database *db);
 
+    DDB_DLL bool isBuildActive(Database *db, const std::string &path);
+
 }
 
 #endif // BUILD_H

@@ -5,6 +5,7 @@
 #include "build.h"
 
 #include "3d.h"
+#include "buildlock.h"
 #include "cog.h"
 #include "dbops.h"
 #include "ddb.h"
@@ -117,9 +118,17 @@ void buildInternal(Database* db,
         }
     }
 
-    ThreadLock lock("build-" + (db->rootDirectory() / e.hash).string());
+    // Acquire inter-process lock to prevent race conditions between different processes
+    // This must come BEFORE the ThreadLock to ensure proper ordering of lock acquisition
+    LOGD << "Acquiring inter-process build lock for: " << outputFolder;
+    BuildLock processLock(outputFolder);
 
+    // Acquire intra-process lock to coordinate between threads of the same process
+    ThreadLock threadLock("build-" + (db->rootDirectory() / e.hash).string());
+
+    // Check again if output exists after acquiring locks (another process might have completed the build)
     if (fs::exists(outputFolder) && !force) {
+        LOGD << "Build output already exists after acquiring lock, skipping: " << outputFolder;
         return;
     }
 
@@ -384,6 +393,42 @@ bool isBuildPending(Database* db) {
     }
 
     return false;
+}
+
+bool isBuildActive(Database* db, const std::string& path) {
+    Entry e;
+    const bool entryExists = getEntry(db, path, e);
+    if (!entryExists)
+        return false;
+
+    std::string subfolder;
+    if (!isBuildableInternal(e, subfolder)) {
+        std::string mainFile;
+        if (!isBuildableDependency(e, mainFile, subfolder)) {
+            return false;
+        }
+
+        // For dependencies, check if main file exists and use its hash
+        Entry mainEntry;
+        if (!getEntry(db, mainFile, mainEntry)) {
+            return false;
+        }
+        e = mainEntry;
+    }
+
+    // Construct the output folder path
+    std::string outPath = db->buildDirectory().string();
+    fs::path baseOutputPath = fs::path(outPath) / e.hash;
+    std::string outputFolder = (baseOutputPath / subfolder).string();
+
+    // Try to create a BuildLock without waiting
+    // If it fails immediately, another process is actively building
+    try {
+        BuildLock testLock(outputFolder, false); // false = don't wait for lock
+        return false; // Lock acquired successfully, no active build
+    } catch (const AppException&) {
+        return true; // Lock acquisition failed, build is active
+    }
 }
 
 }  // namespace ddb
