@@ -276,6 +276,13 @@ extern "C"
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBIsBuildPending(const char *ddbPath, bool *isBuildPending);
 
+    /** IsBuildActive
+     * @param ddbPath path to the source DroneDB database (parent of ".ddb")
+     * @param path Entry path to check if build is active for this entry
+     * @param isBuildActive if a build is currently active for this entry
+     * @return DDBERR_NONE on success, an error otherwise */
+    DDB_DLL DDBErr DDBIsBuildActive(const char *ddbPath, const char *path, bool *isBuildActive);
+
     /** Add metadata
      *  @param ddbPath path to the source DroneDB database (parent of ".ddb")
      *  @param path Entry path to associate metadata with (or "" to add metadata to the DroneDB database itself)
