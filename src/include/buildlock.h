@@ -98,6 +98,16 @@ private:
      */
     std::string getCurrentTimestamp();
 
+    /**
+     * @brief Acquire the build lock with specified wait behavior
+     *
+     * @param waitForLock If true, use blocking behavior (CREATE_ALWAYS on Windows).
+     *                    If false, fail immediately if lock exists (CREATE_NEW on Windows)
+     *
+     * @throws AppException If the lock cannot be acquired
+     */
+    void acquireLock(bool waitForLock);
+
 public:
     /**
      * @brief Construct a BuildLock for the specified output path

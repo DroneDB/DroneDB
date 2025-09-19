@@ -32,88 +32,7 @@ BuildLock::BuildLock(const std::string& outputPath)
     , fileDescriptor(-1)
 #endif
 {
-    LOGD << "Attempting to acquire build lock: " << lockFilePath;
-
-#ifdef WIN32
-    // Windows implementation using CreateFile with exclusive access
-    // FILE_FLAG_DELETE_ON_CLOSE ensures automatic cleanup even if process crashes
-    fileHandle = CreateFileA(
-        lockFilePath.c_str(),
-        GENERIC_WRITE,              // We need write access to write PID info
-        0,                          // No sharing - this is the key for exclusivity
-        nullptr,                    // Default security attributes
-        CREATE_ALWAYS,              // Always create new file (overwrites existing)
-        FILE_ATTRIBUTE_TEMPORARY |  // Hint that this is a temporary file
-        FILE_FLAG_DELETE_ON_CLOSE,  // Automatic cleanup on process termination
-        nullptr                     // No template file
-    );
-
-    if (fileHandle == INVALID_HANDLE_VALUE) {
-        DWORD error = GetLastError();
-
-        if (error == ERROR_SHARING_VIOLATION) {
-            // This is the expected error when another process holds the lock
-            throw AppException("Build in progress by another process");
-        } else if (error == ERROR_ACCESS_DENIED) {
-            throw AppException("Insufficient permissions to create build lock file: " + lockFilePath);
-        } else if (error == ERROR_DISK_FULL) {
-            throw AppException("Disk full - cannot create build lock file: " + lockFilePath);
-        } else if (error == ERROR_PATH_NOT_FOUND) {
-            throw AppException("Lock file directory does not exist: " + lockFilePath);
-        } else {
-            // Generic error with Windows error code for debugging
-            std::ostringstream ss;
-            ss << "Failed to acquire build lock (Windows error " << error << "): " << lockFilePath;
-            throw AppException(ss.str());
-        }
-    }
-
-    isLocked = true;
-    LOGD << "Build lock acquired successfully: " << lockFilePath;
-
-#else
-    // Unix implementation using open() with O_EXCL for atomic creation
-    // O_EXCL ensures that open() fails if the file already exists
-    fileDescriptor = open(
-        lockFilePath.c_str(),
-        O_CREAT | O_EXCL | O_WRONLY,  // Create exclusively, write-only
-        S_IRUSR | S_IWUSR | S_IRGRP   // Permissions: rw-r-----
-    );
-
-    if (fileDescriptor == -1) {
-        int error = errno;
-
-        if (error == EEXIST) {
-            // File already exists - another process is building
-            throw AppException("Build in progress by another process");
-        } else if (error == EACCES) {
-            throw AppException("Insufficient permissions to create build lock file: " + lockFilePath);
-        } else if (error == ENOSPC) {
-            throw AppException("Disk full - cannot create build lock file: " + lockFilePath);
-        } else if (error == ENOENT) {
-            throw AppException("Lock file directory does not exist: " + lockFilePath);
-        } else if (error == ENAMETOOLONG) {
-            throw AppException("Lock file path too long: " + lockFilePath);
-        } else {
-            // Generic error with errno for debugging
-            std::ostringstream ss;
-            ss << "Failed to acquire build lock (" << strerror(error) << "): " << lockFilePath;
-            throw AppException(ss.str());
-        }
-    }
-
-    isLocked = true;
-    LOGD << "Build lock acquired successfully: " << lockFilePath;
-
-#endif
-
-    // Write diagnostic information to the lock file
-    try {
-        writeLockInfo();
-    } catch (const std::exception& e) {
-        // Non-fatal error - lock is still valid even if we can't write info
-        LOGW << "Failed to write lock info to " << lockFilePath << ": " << e.what();
-    }
+    acquireLock(true);  // Use waiting behavior (original constructor behavior)
 }
 
 BuildLock::BuildLock(const std::string& outputPath, bool wait)
@@ -125,95 +44,7 @@ BuildLock::BuildLock(const std::string& outputPath, bool wait)
     , fileDescriptor(-1)
 #endif
 {
-    if (wait) {
-        // Use the original constructor behavior - wait for lock
-        BuildLock temp(outputPath);
-        *this = std::move(temp);
-        return;
-    }
-
-    // Non-waiting implementation - fail immediately if lock is held
-    LOGD << "Attempting to acquire build lock (no wait): " << lockFilePath;
-
-#ifdef WIN32
-    // Windows implementation - try to create file, fail immediately if it exists
-    fileHandle = CreateFileA(
-        lockFilePath.c_str(),
-        GENERIC_WRITE,              // We need write access to write PID info
-        0,                          // No sharing - this is the key for exclusivity
-        nullptr,                    // Default security attributes
-        CREATE_NEW,                 // CREATE_NEW fails if file exists (vs CREATE_ALWAYS)
-        FILE_ATTRIBUTE_TEMPORARY |  // Hint that this is a temporary file
-        FILE_FLAG_DELETE_ON_CLOSE,  // Automatic cleanup on process termination
-        nullptr                     // No template file
-    );
-
-    if (fileHandle == INVALID_HANDLE_VALUE) {
-        DWORD error = GetLastError();
-
-        if (error == ERROR_FILE_EXISTS || error == ERROR_ALREADY_EXISTS) {
-            // File exists - another process is building
-            throw AppException("Build in progress by another process");
-        } else if (error == ERROR_ACCESS_DENIED) {
-            throw AppException("Insufficient permissions to create build lock file: " + lockFilePath);
-        } else if (error == ERROR_DISK_FULL) {
-            throw AppException("Disk full - cannot create build lock file: " + lockFilePath);
-        } else if (error == ERROR_PATH_NOT_FOUND) {
-            throw AppException("Lock file directory does not exist: " + lockFilePath);
-        } else {
-            // Generic error with Windows error code for debugging
-            std::ostringstream ss;
-            ss << "Failed to acquire build lock (Windows error " << error << "): " << lockFilePath;
-            throw AppException(ss.str());
-        }
-    }
-
-    isLocked = true;
-    LOGD << "Build lock acquired successfully (no wait): " << lockFilePath;
-
-#else
-    // Unix implementation using open() with O_EXCL for atomic creation
-    // O_EXCL ensures that open() fails if the file already exists
-    fileDescriptor = open(
-        lockFilePath.c_str(),
-        O_CREAT | O_EXCL | O_WRONLY,  // Create exclusively, write-only
-        S_IRUSR | S_IWUSR | S_IRGRP   // Permissions: rw-r-----
-    );
-
-    if (fileDescriptor == -1) {
-        int error = errno;
-
-        if (error == EEXIST) {
-            // File already exists - another process is building
-            throw AppException("Build in progress by another process");
-        } else if (error == EACCES) {
-            throw AppException("Insufficient permissions to create build lock file: " + lockFilePath);
-        } else if (error == ENOSPC) {
-            throw AppException("Disk full - cannot create build lock file: " + lockFilePath);
-        } else if (error == ENOENT) {
-            throw AppException("Lock file directory does not exist: " + lockFilePath);
-        } else if (error == ENAMETOOLONG) {
-            throw AppException("Lock file path too long: " + lockFilePath);
-        } else {
-            // Generic error with errno for debugging
-            std::ostringstream ss;
-            ss << "Failed to acquire build lock (" << strerror(error) << "): " << lockFilePath;
-            throw AppException(ss.str());
-        }
-    }
-
-    isLocked = true;
-    LOGD << "Build lock acquired successfully (no wait): " << lockFilePath;
-
-#endif
-
-    // Write diagnostic information to the lock file
-    try {
-        writeLockInfo();
-    } catch (const std::exception& e) {
-        // Non-fatal error - lock is still valid even if we can't write info
-        LOGW << "Failed to write lock info to " << lockFilePath << ": " << e.what();
-    }
+    acquireLock(wait);  // Use the common logic with the wait parameter
 }
 
 BuildLock::~BuildLock() {
@@ -354,11 +185,107 @@ BuildLock& BuildLock::operator=(BuildLock&& other) noexcept {
     return *this;
 }
 
+void BuildLock::acquireLock(bool waitForLock) {
+    LOGD << "Attempting to acquire build lock" << (waitForLock ? "" : " (no wait)") << ": " << lockFilePath;
+
+#ifdef WIN32
+    // Windows implementation using CreateFile with exclusive access
+    // FILE_FLAG_DELETE_ON_CLOSE ensures automatic cleanup even if process crashes
+    fileHandle = CreateFileA(
+        lockFilePath.c_str(),
+        GENERIC_WRITE,              // We need write access to write PID info
+        0,                          // No sharing - this is the key for exclusivity
+        nullptr,                    // Default security attributes
+        waitForLock ? CREATE_ALWAYS : CREATE_NEW,  // CREATE_ALWAYS overwrites, CREATE_NEW fails if exists
+        FILE_ATTRIBUTE_TEMPORARY |  // Hint that this is a temporary file
+        FILE_FLAG_DELETE_ON_CLOSE,  // Automatic cleanup on process termination
+        nullptr                     // No template file
+    );
+
+    if (fileHandle == INVALID_HANDLE_VALUE) {
+        DWORD error = GetLastError();
+
+        if (error == ERROR_SHARING_VIOLATION || error == ERROR_FILE_EXISTS || error == ERROR_ALREADY_EXISTS) {
+            // This is the expected error when another process holds the lock
+            throw AppException("Build in progress by another process");
+        } else if (error == ERROR_ACCESS_DENIED) {
+            throw AppException("Insufficient permissions to create build lock file: " + lockFilePath);
+        } else if (error == ERROR_DISK_FULL) {
+            throw AppException("Disk full - cannot create build lock file: " + lockFilePath);
+        } else if (error == ERROR_PATH_NOT_FOUND) {
+            throw AppException("Lock file directory does not exist: " + lockFilePath);
+        } else {
+            // Generic error with Windows error code for debugging
+            std::ostringstream ss;
+            ss << "Failed to acquire build lock (Windows error " << error << "): " << lockFilePath;
+            throw AppException(ss.str());
+        }
+    }
+
+    isLocked = true;
+    LOGD << "Build lock acquired successfully" << (waitForLock ? "" : " (no wait)") << ": " << lockFilePath;
+
+#else
+    // Unix implementation using open() with O_EXCL for atomic creation
+    // O_EXCL ensures that open() fails if the file already exists
+    fileDescriptor = open(
+        lockFilePath.c_str(),
+        O_CREAT | O_EXCL | O_WRONLY,  // Create exclusively, write-only
+        S_IRUSR | S_IWUSR | S_IRGRP   // Permissions: rw-r-----
+    );
+
+    if (fileDescriptor == -1) {
+        int error = errno;
+
+        if (error == EEXIST) {
+            // File already exists - another process is building
+            throw AppException("Build in progress by another process");
+        } else if (error == EACCES) {
+            throw AppException("Insufficient permissions to create build lock file: " + lockFilePath);
+        } else if (error == ENOSPC) {
+            throw AppException("Disk full - cannot create build lock file: " + lockFilePath);
+        } else if (error == ENOENT) {
+            throw AppException("Lock file directory does not exist: " + lockFilePath);
+        } else if (error == ENAMETOOLONG) {
+            throw AppException("Lock file path too long: " + lockFilePath);
+        } else {
+            // Generic error with errno for debugging
+            std::ostringstream ss;
+            ss << "Failed to acquire build lock (" << strerror(error) << "): " << lockFilePath;
+            throw AppException(ss.str());
+        }
+    }
+
+    isLocked = true;
+    LOGD << "Build lock acquired successfully" << (waitForLock ? "" : " (no wait)") << ": " << lockFilePath;
+
+#endif
+
+    // Write diagnostic information to the lock file
+    try {
+        writeLockInfo();
+    } catch (const std::exception& e) {
+        // Non-fatal error - lock is still valid even if we can't write info
+        LOGW << "Failed to write lock info to " << lockFilePath << ": " << e.what();
+    }
+}
+
 // Helper function to get current timestamp for lock info
 std::string BuildLock::getCurrentTimestamp() {
     auto now = std::chrono::system_clock::now();
     auto time_t = std::chrono::system_clock::to_time_t(now);
-    auto tm = *std::localtime(&time_t);
+
+    std::tm tm = {};
+#ifdef WIN32
+    // Use localtime_s for thread safety on Windows
+    if (localtime_s(&tm, &time_t) != 0)
+        return "unknown";
+#else
+    // Use localtime_r for thread safety on Unix
+    if (localtime_r(&time_t, &tm) == nullptr)
+        return "unknown";
+
+#endif
 
     std::ostringstream ss;
     ss << std::put_time(&tm, "%Y-%m-%d %H:%M:%S");
