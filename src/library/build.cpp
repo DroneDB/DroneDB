@@ -79,8 +79,7 @@ bool isBuildable(Database* db, const std::string& path, std::string& subfolder) 
 void buildInternal(Database* db,
                    const Entry& e,
                    const std::string& outputPath,
-                   bool force,
-                   BuildCallback callback) {
+                   bool force) {
     std::string outPath = outputPath;
     if (outPath.empty())
         outPath = db->buildDirectory().string();
@@ -167,9 +166,6 @@ void buildInternal(Database* db,
 
             io::assureFolderExists(fs::path(outputFolder).parent_path());
             io::rename(tempFolder, outputFolder);
-
-            if (callback != nullptr)
-                callback(outputFolder);
         }
 
         io::assureIsRemoved(tempFolder);
@@ -208,7 +204,7 @@ void buildInternal(Database* db,
     }
 }
 
-void buildAll(Database* db, const std::string& outputPath, bool force, BuildCallback callback) {
+void buildAll(Database* db, const std::string& outputPath, bool force) {
     std::string outPath = outputPath;
     if (outPath.empty())
         outPath = db->buildDirectory().string();
@@ -234,7 +230,7 @@ void buildAll(Database* db, const std::string& outputPath, bool force, BuildCall
 
         // Call build on each of them
         try {
-            buildInternal(db, e, outPath, force, callback);
+            buildInternal(db, e, outPath, force);
         } catch (const AppException& err) {
             LOGD << "Cannot build " << e.path << ": " << err.what();
         }
@@ -244,8 +240,7 @@ void buildAll(Database* db, const std::string& outputPath, bool force, BuildCall
 void build(Database* db,
            const std::string& path,
            const std::string& outputPath,
-           bool force,
-           BuildCallback callback) {
+           bool force) {
     LOGD << "In build('" << path << "','" << outputPath << "')";
 
     Entry e;
@@ -254,10 +249,10 @@ void build(Database* db,
     if (!entryExists)
         throw InvalidArgsException(path + " is not a valid path in the database.");
 
-    buildInternal(db, e, outputPath, force, callback);
+    buildInternal(db, e, outputPath, force);
 }
 
-void buildPending(Database* db, const std::string& outputPath, bool force, BuildCallback callback) {
+void buildPending(Database* db, const std::string& outputPath, bool force) {
     auto buildDir = db->buildDirectory();
     if (!fs::exists(buildDir))
         return;
@@ -368,7 +363,7 @@ void buildPending(Database* db, const std::string& outputPath, bool force, Build
                 try {
                     LOGD << "Attempting build for " << e.path
                          << " (all dependencies now available)";
-                    buildInternal(db, e, outPath, force, callback);
+                    buildInternal(db, e, outPath, force);
                 } catch (const AppException& err) {
                     LOGD << "Cannot build " << e.path << ": " << err.what();
                 }

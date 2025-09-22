@@ -50,14 +50,12 @@ namespace cmd
 
             if (!opts.count("path"))
             {
-                buildAll(db.get(), output, force, [](const std::string &path)
-                         { std::cout << path << std::endl; });
+                buildAll(db.get(), output, force);
             }
             else
             {
                 const auto path = opts["path"].as<std::string>();
-                build(db.get(), path, output, force, [](const std::string &path)
-                      { std::cout << path << std::endl; });
+                build(db.get(), path, output, force);
             }
         }
         catch (ddb::InvalidArgsException)

@@ -316,17 +316,13 @@ public:
 
             const auto db = ddb::open(ddbPath, true);
 
-            ddb::BuildCallback showProgress = [&](const std::string& built) {
-                progress.Send(built.c_str(), sizeof(char) * built.length());
-            };
-
             if (path.empty()) {
                 if (pendingOnly)
-                    ddb::buildPending(db.get(), "", force, showProgress);
+                    ddb::buildPending(db.get(), "", force);
                 else
-                    ddb::buildAll(db.get(), "", force, showProgress);
+                    ddb::buildAll(db.get(), "", force);
             } else {
-                ddb::build(db.get(), path, "", force, showProgress);
+                ddb::build(db.get(), path, "", force);
             }
         } catch (const ddb::AppException& e) {
             SetErrorMessage(e.what());
