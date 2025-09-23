@@ -16,7 +16,6 @@ namespace ddb
 
     typedef std::function<bool(const Entry &e, bool updated)> AddCallback;
     typedef std::function<void(const std::string &path)> RemoveCallback;
-    typedef std::function<void(const std::string &path)> BuildCallback;
 
     DDB_DLL std::unique_ptr<Database> open(const std::string &directory, bool traverseUp);
     DDB_DLL std::vector<fs::path> getIndexPathList(const fs::path &rootDirectory, const std::vector<std::string> &paths, bool includeDirs);

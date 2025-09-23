@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "gdal_inc.h"
 #include "cog.h"
+#include "cog_utils.h"
 #include "logger.h"
 #include "mio.h"
 #include "exceptions.h"
@@ -11,6 +12,39 @@ namespace ddb
 {
     void buildCog(const std::string &inputGTiff, const std::string &outputCog)
     {
+        // Check if input is already an optimized COG
+        if (isOptimizedCog(inputGTiff)) {
+            LOGD << "Input file " << inputGTiff << " is already an optimized COG, copying instead of rebuilding";
+
+            // Simply copy the file instead of rebuilding
+            try {
+                std::ifstream src(inputGTiff, std::ios::binary);
+                std::ofstream dst(outputCog, std::ios::binary);
+
+                if (!src.is_open()) {
+                    throw AppException("Cannot open source file for reading: " + inputGTiff);
+                }
+                if (!dst.is_open()) {
+                    throw AppException("Cannot open destination file for writing: " + outputCog);
+                }
+
+                dst << src.rdbuf();
+
+                if (src.bad() || dst.bad()) {
+                    throw AppException("Error occurred during file copy");
+                }
+
+                LOGD << "Successfully copied optimized COG from " << inputGTiff << " to " << outputCog;
+                return;
+            } catch (const std::exception& e) {
+                LOGW << "Failed to copy COG file: " << e.what() << ". Falling back to rebuild.";
+                // Fall through to normal rebuild process
+            }
+        }
+
+        // Normal rebuild process for files that need optimization
+        LOGD << "Building COG from " << inputGTiff << " (requires optimization)";
+
         GDALDatasetH hSrcDataset = GDALOpen(inputGTiff.c_str(), GA_ReadOnly);
 
         if (!hSrcDataset)
@@ -48,7 +82,9 @@ namespace ddb
         }
 
         // We can compress to JPG if these are 8bit bands (3 or 4) and no nodata
-        const int numBands = GDALGetRasterCount(hSrcDataset);        // We can compress to JPG if these are 8bit bands (3 or 4) and no nodata
+        const int numBands = GDALGetRasterCount(hSrcDataset);
+
+        // We can compress to JPG if these are 8bit bands (3 or 4) and no nodata
         if ((numBands == 3 || numBands == 4) && !hasNoData)
         {
             bool all8Bit = true;

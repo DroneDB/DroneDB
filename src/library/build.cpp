@@ -5,6 +5,7 @@
 #include "build.h"
 
 #include "3d.h"
+#include "buildlock.h"
 #include "cog.h"
 #include "dbops.h"
 #include "ddb.h"
@@ -78,8 +79,7 @@ bool isBuildable(Database* db, const std::string& path, std::string& subfolder) 
 void buildInternal(Database* db,
                    const Entry& e,
                    const std::string& outputPath,
-                   bool force,
-                   BuildCallback callback) {
+                   bool force) {
     std::string outPath = outputPath;
     if (outPath.empty())
         outPath = db->buildDirectory().string();
@@ -117,9 +117,21 @@ void buildInternal(Database* db,
         }
     }
 
-    ThreadLock lock("build-" + (db->rootDirectory() / e.hash).string());
+    // Ensure the output directory structure exists before attempting to acquire the lock
+    // This prevents BuildLockDirectoryException when multiple processes race to build
+    io::assureFolderExists(baseOutputPath);
 
+    // Acquire inter-process lock to prevent race conditions between different processes
+    // This must come BEFORE the ThreadLock to ensure proper ordering of lock acquisition
+    LOGD << "Acquiring inter-process build lock for: " << outputFolder;
+    BuildLock processLock(outputFolder);
+
+    // Acquire intra-process lock to coordinate between threads of the same process
+    ThreadLock threadLock("build-" + (db->rootDirectory() / e.hash).string());
+
+    // Check again if output exists after acquiring locks (another process might have completed the build)
     if (fs::exists(outputFolder) && !force) {
+        LOGD << "Build output already exists after acquiring lock, skipping: " << outputFolder;
         return;
     }
 
@@ -158,9 +170,6 @@ void buildInternal(Database* db,
 
             io::assureFolderExists(fs::path(outputFolder).parent_path());
             io::rename(tempFolder, outputFolder);
-
-            if (callback != nullptr)
-                callback(outputFolder);
         }
 
         io::assureIsRemoved(tempFolder);
@@ -199,7 +208,7 @@ void buildInternal(Database* db,
     }
 }
 
-void buildAll(Database* db, const std::string& outputPath, bool force, BuildCallback callback) {
+void buildAll(Database* db, const std::string& outputPath, bool force) {
     std::string outPath = outputPath;
     if (outPath.empty())
         outPath = db->buildDirectory().string();
@@ -225,7 +234,7 @@ void buildAll(Database* db, const std::string& outputPath, bool force, BuildCall
 
         // Call build on each of them
         try {
-            buildInternal(db, e, outPath, force, callback);
+            buildInternal(db, e, outPath, force);
         } catch (const AppException& err) {
             LOGD << "Cannot build " << e.path << ": " << err.what();
         }
@@ -235,8 +244,7 @@ void buildAll(Database* db, const std::string& outputPath, bool force, BuildCall
 void build(Database* db,
            const std::string& path,
            const std::string& outputPath,
-           bool force,
-           BuildCallback callback) {
+           bool force) {
     LOGD << "In build('" << path << "','" << outputPath << "')";
 
     Entry e;
@@ -245,10 +253,10 @@ void build(Database* db,
     if (!entryExists)
         throw InvalidArgsException(path + " is not a valid path in the database.");
 
-    buildInternal(db, e, outputPath, force, callback);
+    buildInternal(db, e, outputPath, force);
 }
 
-void buildPending(Database* db, const std::string& outputPath, bool force, BuildCallback callback) {
+void buildPending(Database* db, const std::string& outputPath, bool force) {
     auto buildDir = db->buildDirectory();
     if (!fs::exists(buildDir))
         return;
@@ -359,7 +367,7 @@ void buildPending(Database* db, const std::string& outputPath, bool force, Build
                 try {
                     LOGD << "Attempting build for " << e.path
                          << " (all dependencies now available)";
-                    buildInternal(db, e, outPath, force, callback);
+                    buildInternal(db, e, outPath, force);
                 } catch (const AppException& err) {
                     LOGD << "Cannot build " << e.path << ": " << err.what();
                 }
@@ -384,6 +392,55 @@ bool isBuildPending(Database* db) {
     }
 
     return false;
+}
+
+bool isBuildActive(Database* db, const std::string& path) {
+    Entry e;
+    const bool entryExists = getEntry(db, path, e);
+    if (!entryExists)
+        return false;
+
+    std::string subfolder;
+    if (!isBuildableInternal(e, subfolder)) {
+        std::string mainFile;
+        if (!isBuildableDependency(e, mainFile, subfolder))
+            return false;
+
+        // For dependencies, check if main file exists and use its hash
+        Entry mainEntry;
+        if (!getEntry(db, mainFile, mainEntry))
+            return false;
+
+        e = mainEntry;
+    }
+
+    // Construct the output folder path
+    std::string outPath = db->buildDirectory().string();
+    fs::path baseOutputPath = fs::path(outPath) / e.hash;
+    std::string outputFolder = (baseOutputPath / subfolder).string();
+
+    LOGD << "Checking for active build in: " << outputFolder;
+
+    // Try to create a BuildLock without waiting
+    // If it fails immediately, another process is actively building
+    try {
+        BuildLock testLock(outputFolder, false); // false = don't wait for lock
+        LOGD << "No active build detected, lock acquired successfully";
+        return false; // Lock acquired successfully, no active build
+    } catch (const BuildInProgressException& e) {
+        // Another process is actively building
+        LOGD << "Active build detected: " << e.what();
+        return true;
+    } catch (const BuildLockException& e) {
+        // For any other build lock error, assume no active build
+        // This includes permission errors, disk full, etc.
+        LOGD << "No active build detected (build lock error): " << e.what();
+        return false;
+    } catch (const AppException& e) {
+        // Catch any other unexpected exceptions
+        LOGD << "No active build detected (other error): " << e.what();
+        return false;
+    }
 }
 
 }  // namespace ddb

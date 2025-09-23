@@ -90,27 +90,49 @@ namespace ddb
     class BuildDepMissingException : public AppException
     {
     public:
-        explicit BuildDepMissingException(const std::string &message) : 
+        explicit BuildDepMissingException(const std::string &message) :
             AppException(message) {}
-        
-        BuildDepMissingException(const std::string &message, const std::string &missingDep) : 
+
+        BuildDepMissingException(const std::string &message, const std::string &missingDep) :
             AppException(message) {
             missingDependencies.push_back(missingDep);
         }
-        
-        BuildDepMissingException(const std::string &message, const std::vector<std::string> &missingDeps) : 
+
+        BuildDepMissingException(const std::string &message, const std::vector<std::string> &missingDeps) :
             AppException(message), missingDependencies(missingDeps) {}
-            
+
         const std::vector<std::string>& getMissingDependencies() const {
             return missingDependencies;
         }
-        
+
     private:
         std::vector<std::string> missingDependencies;
     };
     class NotImplementedException : public AppException
     {
         using AppException::AppException;
+    };
+
+    // Build lock specific exceptions
+    class BuildLockException : public AppException
+    {
+        using AppException::AppException;
+    };
+    class BuildInProgressException : public BuildLockException
+    {
+        using BuildLockException::BuildLockException;
+    };
+    class BuildLockPermissionException : public BuildLockException
+    {
+        using BuildLockException::BuildLockException;
+    };
+    class BuildLockDiskFullException : public BuildLockException
+    {
+        using BuildLockException::BuildLockException;
+    };
+    class BuildLockDirectoryException : public BuildLockException
+    {
+        using BuildLockException::BuildLockException;
     };
 
 }
