@@ -399,15 +399,14 @@ bool isBuildActive(Database* db, const std::string& path) {
     std::string subfolder;
     if (!isBuildableInternal(e, subfolder)) {
         std::string mainFile;
-        if (!isBuildableDependency(e, mainFile, subfolder)) {
+        if (!isBuildableDependency(e, mainFile, subfolder))
             return false;
-        }
 
         // For dependencies, check if main file exists and use its hash
         Entry mainEntry;
-        if (!getEntry(db, mainFile, mainEntry)) {
+        if (!getEntry(db, mainFile, mainEntry))
             return false;
-        }
+
         e = mainEntry;
     }
 
@@ -416,13 +415,27 @@ bool isBuildActive(Database* db, const std::string& path) {
     fs::path baseOutputPath = fs::path(outPath) / e.hash;
     std::string outputFolder = (baseOutputPath / subfolder).string();
 
+    LOGD << "Checking for active build in: " << outputFolder;
+
     // Try to create a BuildLock without waiting
     // If it fails immediately, another process is actively building
     try {
         BuildLock testLock(outputFolder, false); // false = don't wait for lock
+        LOGD << "No active build detected, lock acquired successfully";
         return false; // Lock acquired successfully, no active build
-    } catch (const AppException&) {
-        return true; // Lock acquisition failed, build is active
+    } catch (const BuildInProgressException& e) {
+        // Another process is actively building
+        LOGD << "Active build detected: " << e.what();
+        return true;
+    } catch (const BuildLockException& e) {
+        // For any other build lock error, assume no active build
+        // This includes permission errors, disk full, etc.
+        LOGD << "No active build detected (build lock error): " << e.what();
+        return false;
+    } catch (const AppException& e) {
+        // Catch any other unexpected exceptions
+        LOGD << "No active build detected (other error): " << e.what();
+        return false;
     }
 }
 

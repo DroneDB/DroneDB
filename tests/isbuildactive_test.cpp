@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "build.h"
+#include "buildlock.h"
 #include "dbops.h"
 #include "exceptions.h"
 #include "gtest/gtest.h"
@@ -12,6 +13,8 @@
 
 #include <chrono>
 #include <fstream>
+#include <thread>
+#include <atomic>
 
 namespace {
 
@@ -29,15 +32,21 @@ protected:
         ddb::initIndex(dbPath.string());
         db = ddb::open(dbPath.string(), true);
 
-        // Create test files for testing
-        testImagePath = testArea->getPath("test_image.jpg");
-        testRasterPath = testArea->getPath("test_raster.tif");
-        testNonBuildablePath = testArea->getPath("test_text.txt");
+        // Download real test files
+        orthoPath = testArea->downloadTestAsset(
+            "https://github.com/DroneDB/test_data/raw/master/brighton/odm_orthophoto.tif",
+            "ortho.tif");
 
-        // Create actual test files
-        std::ofstream(testImagePath).close();
-        std::ofstream(testRasterPath).close();
+        pointCloudPath = testArea->downloadTestAsset(
+            "https://github.com/DroneDB/test_data/raw/master/brighton/point_cloud.laz",
+            "point_cloud.laz");
+
+        // Create a non-buildable test file
+        testNonBuildablePath = testArea->getPath("test_text.txt");
         std::ofstream(testNonBuildablePath) << "test content";
+
+        // Add real files to the database index
+        ddb::addToIndex(db.get(), {orthoPath.string(), pointCloudPath.string()});
     }
 
     void TearDown() override {
@@ -48,8 +57,8 @@ protected:
     std::unique_ptr<TestArea> testArea;
     fs::path dbPath;
     std::unique_ptr<Database> db;
-    fs::path testImagePath;
-    fs::path testRasterPath;
+    fs::path orthoPath;
+    fs::path pointCloudPath;
     fs::path testNonBuildablePath;
 };
 
@@ -69,18 +78,155 @@ TEST_F(IsBuildActiveTest, NonBuildableFile) {
 }
 
 TEST_F(IsBuildActiveTest, BuildableFileNoBuildActive) {
-    // Test with a buildable file but no active build
-    EXPECT_FALSE(ddb::isBuildActive(db.get(), testRasterPath.string()));
+    // Test with a buildable ortho file but no active build
+    EXPECT_FALSE(ddb::isBuildActive(db.get(), orthoPath.string()));
+
+    // Test with a buildable point cloud file but no active build
+    EXPECT_FALSE(ddb::isBuildActive(db.get(), pointCloudPath.string()));
 }
 
-TEST_F(IsBuildActiveTest, BuildableFileWithActiveBuild) {
-    // Test with a buildable file that has an active build
+TEST_F(IsBuildActiveTest, OrthoFileWithActiveBuild) {
+    // Test with an ortho file that has an active build
+    Entry orthoEntry;
+    fs::path relativePath = fs::relative(orthoPath, dbPath);
+    EXPECT_TRUE(ddb::getEntry(db.get(), relativePath.string(), orthoEntry));
 
-    // First we need to add the file to the database and make it buildable
-    // This would typically be done through the normal DDB workflow
+    // Construct build path for ortho COG (Cloud Optimized GeoTIFF) - ensure directory exists
+    std::string buildPath = db->buildDirectory().string();
+    fs::path orthoOutputPath = fs::path(buildPath) / orthoEntry.hash / "cog";
+    fs::create_directories(orthoOutputPath.parent_path());
 
-    // For now, just test that the function doesn't crash with a valid path
-    EXPECT_NO_THROW(ddb::isBuildActive(db.get(), testRasterPath.string()));
+    // Create a build lock to simulate active build
+    {
+        BuildLock activeBuild(orthoOutputPath.string());
+        EXPECT_TRUE(activeBuild.isHolding());
+
+        // Now isBuildActive should return true
+        EXPECT_TRUE(ddb::isBuildActive(db.get(), relativePath.string()));
+    }
+
+    // After lock is released, should return false
+    EXPECT_FALSE(ddb::isBuildActive(db.get(), relativePath.string()));
+}
+
+TEST_F(IsBuildActiveTest, PointCloudFileWithActiveBuild) {
+    // Test with a point cloud file that has an active build
+    Entry pcEntry;
+    fs::path relativePath = fs::relative(pointCloudPath, dbPath);
+    EXPECT_TRUE(ddb::getEntry(db.get(), relativePath.string(), pcEntry));
+
+    // Construct build path for point cloud (EPT) - ensure directory exists
+    std::string buildPath = db->buildDirectory().string();
+    fs::path pcOutputPath = fs::path(buildPath) / pcEntry.hash / "ept";
+    fs::create_directories(pcOutputPath.parent_path());
+
+    // Create a build lock to simulate active build
+    {
+        BuildLock activeBuild(pcOutputPath.string());
+        EXPECT_TRUE(activeBuild.isHolding());
+
+        // Now isBuildActive should return true
+        EXPECT_TRUE(ddb::isBuildActive(db.get(), relativePath.string()));
+    }
+
+    // After lock is released, should return false
+    EXPECT_FALSE(ddb::isBuildActive(db.get(), relativePath.string()));
+}
+
+TEST_F(IsBuildActiveTest, SimpleLockTest) {
+    // Simple test to verify build lock mechanism works with real files
+    fs::path testOutputPath = testArea->getPath("test_build");
+
+    // Test that no build is active initially
+    {
+        BuildLock testLock(testOutputPath.string(), false); // Try without waiting
+        EXPECT_TRUE(testLock.isHolding());
+        testLock.release();
+    }
+
+    // Test concurrent access is blocked
+    {
+        BuildLock firstLock(testOutputPath.string());
+        EXPECT_TRUE(firstLock.isHolding());
+
+        EXPECT_THROW({
+            BuildLock secondLock(testOutputPath.string(), false);
+        }, AppException);
+    }
+}
+
+TEST_F(IsBuildActiveTest, RealBuildInThread) {
+    // Test with a real build running in a separate thread
+    Entry orthoEntry;
+    fs::path relativePath = fs::relative(orthoPath, dbPath);
+    EXPECT_TRUE(ddb::getEntry(db.get(), relativePath.string(), orthoEntry));
+
+    // Initially no build should be active
+    EXPECT_FALSE(ddb::isBuildActive(db.get(), relativePath.string()));
+
+    // Create output directory for the build - use the database build directory
+    fs::path buildOutputPath = db->buildDirectory();
+    fs::create_directories(buildOutputPath);
+
+    // Flag to control and monitor the build thread
+    std::atomic<bool> buildStarted{false};
+    std::atomic<bool> buildCompleted{false};
+    std::exception_ptr buildException = nullptr;
+
+    // Start build in a separate thread
+    std::thread buildThread([&]() {
+        try {
+            buildStarted = true;
+
+            // Add a small delay to ensure the build is detected
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+            // Run the actual build - this will create the build lock internally
+            ddb::build(db.get(), relativePath.string(), buildOutputPath.string());
+
+            buildCompleted = true;
+        } catch (...) {
+            buildException = std::current_exception();
+            buildCompleted = true;
+        }
+    });
+
+    // Wait for build to start
+    while (!buildStarted) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    // Give the build some time to acquire the lock and start processing
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+
+    // Now isBuildActive should return true (build is running)
+    bool isActive = ddb::isBuildActive(db.get(), relativePath.string());
+
+    EXPECT_TRUE(isActive || buildCompleted) << "Build should be active or already completed";
+
+    // Wait for build to complete
+    buildThread.join();
+
+    // Check if there was an exception in the build thread
+    if (buildException) {
+        try {
+            std::rethrow_exception(buildException);
+        } catch (const std::exception& e) {
+            // Build might fail for various reasons (missing dependencies, etc.)
+            // but we can still test if isBuildActive detected it correctly
+            GTEST_LOG_(INFO) << "Build failed with: " << e.what();
+        }
+    }
+
+    // Wait a bit more to ensure lock is released
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+    // After build completes, isBuildActive should return false
+    EXPECT_FALSE(ddb::isBuildActive(db.get(), relativePath.string()));
+
+    // The key test is that we detected the build while it was running
+    // Even if the build failed, we should have detected it was active
+    EXPECT_TRUE(isActive) << "isBuildActive should have detected the running build";
 }
 
 } // anonymous namespace

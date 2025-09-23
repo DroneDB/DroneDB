@@ -5,6 +5,7 @@
 #include "buildlock.h"
 #include "exceptions.h"
 #include "logger.h"
+#include "fs.h"
 
 #include <sstream>
 #include <fstream>
@@ -188,6 +189,19 @@ BuildLock& BuildLock::operator=(BuildLock&& other) noexcept {
 void BuildLock::acquireLock(bool waitForLock) {
     LOGD << "Attempting to acquire build lock" << (waitForLock ? "" : " (no wait)") << ": " << lockFilePath;
 
+    // Create parent directory if it doesn't exist
+    // This ensures that lock acquisition won't fail due to missing directories
+    std::string parentDir = lockFilePath.substr(0, lockFilePath.find_last_of("/\\"));
+    if (!parentDir.empty()) {
+        LOGD << "Ensuring parent directory exists: " << parentDir;
+        try {
+            fs::create_directories(parentDir);
+        } catch (const std::exception& e) {
+            LOGW << "Failed to create parent directory " << parentDir << ": " << e.what();
+            // Continue anyway - the lock operation itself will catch directory errors
+        }
+    }
+
 #ifdef WIN32
     // Windows implementation using CreateFile with exclusive access
     // FILE_FLAG_DELETE_ON_CLOSE ensures automatic cleanup even if process crashes
@@ -207,18 +221,18 @@ void BuildLock::acquireLock(bool waitForLock) {
 
         if (error == ERROR_SHARING_VIOLATION || error == ERROR_FILE_EXISTS || error == ERROR_ALREADY_EXISTS) {
             // This is the expected error when another process holds the lock
-            throw AppException("Build in progress by another process");
+            throw BuildInProgressException("Build in progress by another process");
         } else if (error == ERROR_ACCESS_DENIED) {
-            throw AppException("Insufficient permissions to create build lock file: " + lockFilePath);
+            throw BuildLockPermissionException("Insufficient permissions to create build lock file: " + lockFilePath);
         } else if (error == ERROR_DISK_FULL) {
-            throw AppException("Disk full - cannot create build lock file: " + lockFilePath);
+            throw BuildLockDiskFullException("Disk full - cannot create build lock file: " + lockFilePath);
         } else if (error == ERROR_PATH_NOT_FOUND) {
-            throw AppException("Lock file directory does not exist: " + lockFilePath);
+            throw BuildLockDirectoryException("Lock file directory does not exist: " + lockFilePath);
         } else {
             // Generic error with Windows error code for debugging
             std::ostringstream ss;
             ss << "Failed to acquire build lock (Windows error " << error << "): " << lockFilePath;
-            throw AppException(ss.str());
+            throw BuildLockException(ss.str());
         }
     }
 
@@ -239,20 +253,20 @@ void BuildLock::acquireLock(bool waitForLock) {
 
         if (error == EEXIST) {
             // File already exists - another process is building
-            throw AppException("Build in progress by another process");
+            throw BuildInProgressException("Build in progress by another process");
         } else if (error == EACCES) {
-            throw AppException("Insufficient permissions to create build lock file: " + lockFilePath);
+            throw BuildLockPermissionException("Insufficient permissions to create build lock file: " + lockFilePath);
         } else if (error == ENOSPC) {
-            throw AppException("Disk full - cannot create build lock file: " + lockFilePath);
+            throw BuildLockDiskFullException("Disk full - cannot create build lock file: " + lockFilePath);
         } else if (error == ENOENT) {
-            throw AppException("Lock file directory does not exist: " + lockFilePath);
+            throw BuildLockDirectoryException("Lock file directory does not exist: " + lockFilePath);
         } else if (error == ENAMETOOLONG) {
-            throw AppException("Lock file path too long: " + lockFilePath);
+            throw BuildLockException("Lock file path too long: " + lockFilePath);
         } else {
             // Generic error with errno for debugging
             std::ostringstream ss;
             ss << "Failed to acquire build lock (" << strerror(error) << "): " << lockFilePath;
-            throw AppException(ss.str());
+            throw BuildLockException(ss.str());
         }
     }
 
