@@ -117,6 +117,10 @@ void buildInternal(Database* db,
         }
     }
 
+    // Ensure the output directory structure exists before attempting to acquire the lock
+    // This prevents BuildLockDirectoryException when multiple processes race to build
+    io::assureFolderExists(baseOutputPath);
+
     // Acquire inter-process lock to prevent race conditions between different processes
     // This must come BEFORE the ThreadLock to ensure proper ordering of lock acquisition
     LOGD << "Acquiring inter-process build lock for: " << outputFolder;
