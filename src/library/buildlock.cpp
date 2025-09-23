@@ -189,18 +189,11 @@ BuildLock& BuildLock::operator=(BuildLock&& other) noexcept {
 void BuildLock::acquireLock(bool waitForLock) {
     LOGD << "Attempting to acquire build lock" << (waitForLock ? "" : " (no wait)") << ": " << lockFilePath;
 
-    // Create parent directory if it doesn't exist
-    // This ensures that lock acquisition won't fail due to missing directories
-    std::string parentDir = lockFilePath.substr(0, lockFilePath.find_last_of("/\\"));
-    if (!parentDir.empty()) {
-        LOGD << "Ensuring parent directory exists: " << parentDir;
-        try {
-            fs::create_directories(parentDir);
-        } catch (const std::exception& e) {
-            LOGW << "Failed to create parent directory " << parentDir << ": " << e.what();
-            // Continue anyway - the lock operation itself will catch directory errors
-        }
-    }
+    // Check if containing folder exists
+    fs::path lockPath(lockFilePath);
+    if (!fs::exists(lockPath.parent_path()))
+        throw BuildLockDirectoryException("Lock file directory does not exist: " + lockPath.parent_path().string());
+
 
 #ifdef WIN32
     // Windows implementation using CreateFile with exclusive access
