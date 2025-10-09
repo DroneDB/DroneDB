@@ -136,6 +136,7 @@ DroneDB is a free, open-source aerial data management platform built in C++ with
 - **Document API changes** with clear examples
 - **Explain architectural decisions** for future maintainers
 - **Keep README and docs updated** with significant changes
+- **Do not** create new documentation files or guides without explicit instructions to do so
 
 ## Quality Assurance
 - **Run full test suite** before proposing changes
