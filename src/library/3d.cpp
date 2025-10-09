@@ -24,8 +24,8 @@ namespace ddb
                 io::assureIsRemoved(outFile);
             else
                 throw AppException("File " + outFile + " already exists (delete it first)");
-        } 
-        
+        }
+
         // Check that this file's dependencies are present
         auto deps = getObjDependencies(inputObj);
         std::vector<std::string> missingDeps;
@@ -53,11 +53,21 @@ namespace ddb
         }
 
 #ifndef NO_NEXUS
-        NXSErr err = nexusBuild(inputObj.c_str(), outFile.c_str());
+
+        LOGD << "Building nexus file " << outFile << " from " << inputObj;
+
+        char errorMsg[2048] = {0};
+        auto err = nexusBuild(inputObj.c_str(), outFile.c_str(), errorMsg, sizeof(errorMsg));
+
         if (err == NXSERR_EXCEPTION)
         {
-            throw AppException("Could not build nexus file for " + inputObj);
+            std::string errorMessage = "Could not build nexus file for " + inputObj;
+            if (errorMsg[0] != '\0') {
+                errorMessage += ": " + std::string(errorMsg);
+            }
+            throw AppException(errorMessage);
         }
+
 #else
         throw AppException("This version of ddb does not have the ability to generate Nexus files");
 #endif
