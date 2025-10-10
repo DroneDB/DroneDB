@@ -4,6 +4,10 @@
 
 #include "build.h"
 
+#include <algorithm>
+#include <fstream>
+#include <sstream>
+
 #include "3d.h"
 #include "buildlock.h"
 #include "cog.h"
@@ -15,14 +19,12 @@
 #include "threadlock.h"
 #include "vector.h"
 
-#include <fstream>
-#include <sstream>
-
 #ifdef WIN32
-#include <windows.h>
 #include <tlhelp32.h>
+#include <windows.h>
 #else
 #include <signal.h>
+
 #include <cerrno>
 #endif
 
@@ -87,10 +89,7 @@ bool isBuildable(Database* db, const std::string& path, std::string& subfolder) 
     return false;
 }
 
-void buildInternal(Database* db,
-                   const Entry& e,
-                   const std::string& outputPath,
-                   bool force) {
+void buildInternal(Database* db, const Entry& e, const std::string& outputPath, bool force) {
     std::string outPath = outputPath;
     if (outPath.empty())
         outPath = db->buildDirectory().string();
@@ -140,7 +139,8 @@ void buildInternal(Database* db,
     // Acquire intra-process lock to coordinate between threads of the same process
     ThreadLock threadLock("build-" + (db->rootDirectory() / e.hash).string());
 
-    // Check again if output exists after acquiring locks (another process might have completed the build)
+    // Check again if output exists after acquiring locks (another process might have completed the
+    // build)
     if (fs::exists(outputFolder) && !force) {
         LOGD << "Build output already exists after acquiring lock, skipping: " << outputFolder;
         return;
@@ -252,10 +252,7 @@ void buildAll(Database* db, const std::string& outputPath, bool force) {
     }
 }
 
-void build(Database* db,
-           const std::string& path,
-           const std::string& outputPath,
-           bool force) {
+void build(Database* db, const std::string& path, const std::string& outputPath, bool force) {
     LOGD << "In build('" << path << "','" << outputPath << "')";
 
     Entry e;
@@ -477,14 +474,19 @@ static long readPidFromLockFile(const std::string& lockFilePath) {
                 try {
                     std::string pidStr = line.substr(pidPrefix.length());
                     // Remove any trailing whitespace or newlines
-                    pidStr.erase(pidStr.find_last_not_of(" \t\r\n") + 1);
+                    size_t lastNonWS = pidStr.find_last_not_of(" \t\r\n");
+                    if (lastNonWS != std::string::npos) {
+                        pidStr.erase(lastNonWS + 1);
+                    } else {
+                        pidStr.clear();  // All whitespace, clear the string
+                    }
 
                     // Validate that the string contains only digits
-                    for (char c : pidStr) {
-                        if (!std::isdigit(static_cast<unsigned char>(c))) {
-                            LOGD << "Invalid PID format in lock file (non-digit character): " << pidStr;
-                            return -1;
-                        }
+                    if (!std::all_of(pidStr.begin(), pidStr.end(), [](unsigned char c) {
+                            return std::isdigit(c);
+                        })) {
+                        LOGD << "Invalid PID format in lock file (non-digit character): " << pidStr;
+                        return -1;
                     }
 
                     long pid = std::stol(pidStr);
@@ -517,7 +519,8 @@ static long readPidFromLockFile(const std::string& lockFilePath) {
 /**
  * @brief Check if a build lock file is stale (process no longer running)
  * @param lockFilePath Path to the .building lock file
- * @return true if lock is stale and can be safely removed, false if lock is valid or status is uncertain
+ * @return true if lock is stale and can be safely removed, false if lock is valid or status is
+ * uncertain
  */
 static bool isLockFileStale(const std::string& lockFilePath) {
     // Safety check: if file doesn't exist, it's not stale (it's gone)
@@ -581,9 +584,9 @@ bool isBuildActive(Database* db, const std::string& path) {
     // Try to create a BuildLock without waiting
     // If it fails immediately, another process might be actively building
     try {
-        BuildLock testLock(outputFolder, false); // false = don't wait for lock
+        BuildLock testLock(outputFolder, false);  // false = don't wait for lock
         LOGD << "No active build detected, lock acquired successfully";
-        return false; // Lock acquired successfully, no active build
+        return false;  // Lock acquired successfully, no active build
     } catch (const BuildInProgressException& e) {
         // Lock file exists - check if it's stale before assuming build is active
         LOGD << "Lock file exists, checking if stale: " << lockFilePath;
@@ -599,7 +602,7 @@ bool isBuildActive(Database* db, const std::string& path) {
                 // Verify the file was actually removed
                 if (!fs::exists(lockFilePath)) {
                     LOGD << "Stale lock file removed successfully, no active build";
-                    return false; // Stale lock removed, no active build
+                    return false;  // Stale lock removed, no active build
                 } else {
                     LOGW << "Failed to verify removal of stale lock file";
                     // Fall through to return true (conservative approach)
