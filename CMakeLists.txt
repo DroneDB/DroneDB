@@ -237,6 +237,18 @@ if (WIN32)
         endif()
     endforeach()
 
+    # Copy Qt5 plugins directory to staging directory
+    if(EXISTS "${OUTPUT_DIR}/plugins")
+        add_custom_command(
+            OUTPUT "${PACKAGE_STAGING_DIR}/plugins/.copied"
+            COMMAND ${CMAKE_COMMAND} -E copy_directory "${OUTPUT_DIR}/plugins" "${PACKAGE_STAGING_DIR}/plugins"
+            COMMAND ${CMAKE_COMMAND} -E touch "${PACKAGE_STAGING_DIR}/plugins/.copied"
+            DEPENDS "${OUTPUT_DIR}/plugins"
+            COMMENT "Copying Qt5 plugins directory to staging directory"
+        )
+        list(APPEND STAGED_FILES "${PACKAGE_STAGING_DIR}/plugins/.copied")
+    endif()
+
     # Copy batch file to staging directory
     if(EXISTS "${SUPPORT_DIR}/ddb.bat")
         add_custom_command(
