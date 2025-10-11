@@ -167,7 +167,8 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/include/
     DESTINATION include
 )
 
-# Packaging
+# Packaging configuration
+
 include(CPack)
 set(CPACK_GENERATOR "ZIP")
 set(CPACK_PACKAGE_NAME ${PROJECT_NAME})
@@ -179,104 +180,6 @@ set(CPACK_PACKAGE_CONTACT "support@dronedb.app")
 set(CPACK_PACKAGE_FILE_NAME "${PROJECT_NAME}-${APP_VERSION}-${CMAKE_SYSTEM_NAME}")
 set(CPACK_DEBIAN_PACKAGE_SECTION "utils")
 set(CPACK_DEBIAN_PACKAGE_DEPENDS "libstdc++6, libc6")
-
-# Windows packaging support files
-set(SUPPORT_FILES "proj.db" "sensor_data.sqlite" "timezone21.bin" "curl-ca-bundle.crt")
-if (WIN32)
-    # Linux usually comes with a zoneinfo database already
-    list(APPEND SUPPORT_FILES "zoneinfo")
-endif()
-
-set(DIST_FILES "")
-
-foreach(F ${SUPPORT_FILES})
-    list(APPEND DIST_FILES "${SUPPORT_DIR}/${F}")
-endforeach()
-
-# Create Windows ZIP package
-if (WIN32)
-    # Create a staging directory for the package contents
-    set(PACKAGE_STAGING_DIR "${CMAKE_BINARY_DIR}/package_staging")
-    file(MAKE_DIRECTORY ${PACKAGE_STAGING_DIR})
-
-    # Get executables and DLLs from the output directory
-    set(EXECUTABLE_FILES "${PROJECT_NAME}cmd.exe")
-    foreach(F ${EXECUTABLE_FILES})
-        add_custom_command(
-            OUTPUT "${PACKAGE_STAGING_DIR}/${F}"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${OUTPUT_DIR}/${F}" "${PACKAGE_STAGING_DIR}/${F}"
-            DEPENDS ${PROJECT_NAME}cmd
-            COMMENT "Copying ${F} to staging directory"
-        )
-        list(APPEND STAGED_FILES "${PACKAGE_STAGING_DIR}/${F}")
-    endforeach()
-
-    # Copy DLLs to the staging directory
-    file(GLOB DLL_FILES "${OUTPUT_DIR}/*.dll")
-    foreach(F ${DLL_FILES})
-        get_filename_component(FILENAME ${F} NAME)
-        add_custom_command(
-            OUTPUT "${PACKAGE_STAGING_DIR}/${FILENAME}"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${F}" "${PACKAGE_STAGING_DIR}/${FILENAME}"
-            DEPENDS ${F}
-            COMMENT "Copying ${FILENAME} to staging directory"
-        )
-        list(APPEND STAGED_FILES "${PACKAGE_STAGING_DIR}/${FILENAME}")
-    endforeach()
-
-    # Copy support files to staging directory
-    foreach(F ${SUPPORT_FILES})
-        if(EXISTS "${SUPPORT_DIR}/${F}")
-            add_custom_command(
-                OUTPUT "${PACKAGE_STAGING_DIR}/${F}"
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different "${SUPPORT_DIR}/${F}" "${PACKAGE_STAGING_DIR}/${F}"
-                DEPENDS "${SUPPORT_DIR}/${F}"
-                COMMENT "Copying ${F} to staging directory"
-            )
-            list(APPEND STAGED_FILES "${PACKAGE_STAGING_DIR}/${F}")
-        endif()
-    endforeach()
-
-    # Copy Qt5 plugins directory to staging directory
-    if(EXISTS "${OUTPUT_DIR}/plugins")
-        add_custom_command(
-            OUTPUT "${PACKAGE_STAGING_DIR}/plugins/.copied"
-            COMMAND ${CMAKE_COMMAND} -E copy_directory "${OUTPUT_DIR}/plugins" "${PACKAGE_STAGING_DIR}/plugins"
-            COMMAND ${CMAKE_COMMAND} -E touch "${PACKAGE_STAGING_DIR}/plugins/.copied"
-            DEPENDS "${OUTPUT_DIR}/plugins"
-            COMMENT "Copying Qt5 plugins directory to staging directory"
-        )
-        list(APPEND STAGED_FILES "${PACKAGE_STAGING_DIR}/plugins/.copied")
-    endif()
-
-    # Copy batch file to staging directory
-    if(EXISTS "${SUPPORT_DIR}/ddb.bat")
-        add_custom_command(
-            OUTPUT "${PACKAGE_STAGING_DIR}/ddb.bat"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${SUPPORT_DIR}/ddb.bat" "${PACKAGE_STAGING_DIR}/ddb.bat"
-            DEPENDS "${SUPPORT_DIR}/ddb.bat"
-            COMMENT "Copying ddb.bat to staging directory"
-        )
-        list(APPEND STAGED_FILES "${PACKAGE_STAGING_DIR}/ddb.bat")
-    endif()
-
-    # Show the files that will be included in the package
-    message(STATUS "Files for Windows package: ${STAGED_FILES}")
-
-    set(OUTPUT_ZIP_FILE "${CMAKE_BINARY_DIR}/dist/${PROJECT_NAME}-${APP_VERSION}-${CMAKE_SYSTEM_NAME}.zip")
-
-    # Create the ZIP package from the staging directory
-    add_custom_command(
-        OUTPUT ${OUTPUT_ZIP_FILE}
-        COMMAND ${CMAKE_COMMAND} -E tar "cf" ${OUTPUT_ZIP_FILE} --format=zip .
-        WORKING_DIRECTORY ${PACKAGE_STAGING_DIR}
-        COMMENT "Creating ZIP package: ${OUTPUT_ZIP_FILE}"
-        DEPENDS ${STAGED_FILES}
-    )
-
-    add_custom_target(windows_package ALL DEPENDS ${OUTPUT_ZIP_FILE})
-endif()
-
 
 # Final message
 message(STATUS "CMake setup complete")

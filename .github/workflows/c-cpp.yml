@@ -213,12 +213,22 @@ jobs:
       - name: Create Distribution Files
         shell: pwsh
         run: |
-          cd build
+          # Extract version from package.json
+          $packageJson = Get-Content package.json -Raw | ConvertFrom-Json
+          $version = $packageJson.version
+          Write-Host "Creating Windows package for version: $version"
+
           # Clean dist directory to avoid including old artifacts
-          if (Test-Path "dist") { Remove-Item -Recurse -Force "dist" }
-          New-Item -ItemType Directory -Path "dist" -Force
-          cmake --build . --config Release --target windows_package -- /maxcpucount:$env:NUMBER_OF_PROCESSORS
-          dir
+          if (Test-Path "build/dist") { Remove-Item -Recurse -Force "build/dist" }
+
+          # Run the packaging script
+          .\scripts\build-windows-package.ps1 -BuildDir "build" -Version $version
+
+          # Verify package was created
+          Write-Host "`nVerifying package:"
+          Get-ChildItem build/dist/*.zip | ForEach-Object {
+            Write-Host "  Package: $($_.Name) ($([Math]::Round($_.Length / 1MB, 2)) MB)"
+          }
       - name: Upload Distribution Files
         uses: actions/upload-artifact@v4
         with:
