@@ -16,6 +16,7 @@
 
 #include "3d.h"
 #include "logger.h"
+#include "exceptions.h"
 
 // libktx + stb_image_write for KTX2->PNG conversion
 #include <ktx.h>
@@ -30,30 +31,9 @@
 
 namespace fs = std::filesystem;
 
-namespace nxconv {
+namespace ddb {
 
-//========== Options / Result ===================================================
-
-struct ConvertOptions {
-    bool forcePLY = false;
-    bool preferPLYIfNoUV = true;  // prefer PLY if no UVs and vertex colors present
-    bool makeNXZ = true;
-    bool preTransformVertices = true;  // bake transforms (flatten hierarchy)
-    bool genNormalsIfMissing = true;
-    bool calcTangentsIfUV = true;
-    bool keepIntermediates = false;  // if false, cleanup generated OBJ/PLY files
-};
-
-struct ConvertResult {
-    bool ok = false;
-    std::string geomPath;  // generated OBJ or PLY
-    std::string mtlPath;
-    std::string nxsOrNxz;  // final requested path
-    std::string nxsPath;
-};
-
-//========== Scene Helpers =========================================================
-
+/// Check if the scene contains UV texture coordinates
 static bool sceneHasUVs(const aiScene* s) {
     if (!s)
         return false;
@@ -64,6 +44,7 @@ static bool sceneHasUVs(const aiScene* s) {
     return false;
 }
 
+/// Check if the scene contains vertex color data
 static bool sceneHasVertexColors(const aiScene* s) {
     if (!s)
         return false;
@@ -74,18 +55,20 @@ static bool sceneHasVertexColors(const aiScene* s) {
     return false;
 }
 
-//========== KTX2 -> PNG ===========================================================
 
-static bool convertKtx2ToPng(const fs::path& ktxPath, const fs::path& pngPath) {
-    PLOGI << "[ktx2->png] " << ktxPath << " -> " << pngPath;
+/// Convert a KTX2 texture file to PNG format
+/// @param ktxPath Path to the input KTX2 file
+/// @param pngPath Path to the output PNG file
+/// @throws AppException if conversion fails
+static void convertKtx2ToPng(const fs::path& ktxPath, const fs::path& pngPath) {
+    LOGD << "[ktx2->png] " << ktxPath << " -> " << pngPath;
 
     ktxTexture* base = nullptr;
     KTX_error_code rc = ktxTexture_CreateFromNamedFile(ktxPath.string().c_str(),
                                                        KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT,
                                                        &base);
     if (rc != KTX_SUCCESS || !base) {
-        PLOGE << "ktxTexture_CreateFromNamedFile failed";
-        return false;
+        throw AppException("ktxTexture_CreateFromNamedFile failed for " + ktxPath.string());
     }
 
     // If KTX2 (BasisU), transcode to RGBA8
@@ -94,9 +77,8 @@ static bool convertKtx2ToPng(const fs::path& ktxPath, const fs::path& pngPath) {
         if (ktxTexture2_NeedsTranscoding(tex2)) {
             rc = ktxTexture2_TranscodeBasis(tex2, KTX_TTF_RGBA32, KTX_TF_HIGH_QUALITY);
             if (rc != KTX_SUCCESS) {
-                PLOGE << "ktxTexture2_TranscodeBasis failed";
                 ktxTexture_Destroy(base);
-                return false;
+                throw AppException("ktxTexture2_TranscodeBasis failed for " + ktxPath.string());
             }
         }
     }
@@ -105,9 +87,8 @@ static bool convertKtx2ToPng(const fs::path& ktxPath, const fs::path& pngPath) {
     ktx_size_t offset = 0;
     rc = ktxTexture_GetImageOffset(base, /*level*/ 0, /*layer*/ 0, /*faceSlice*/ 0, &offset);
     if (rc != KTX_SUCCESS) {
-        PLOGE << "ktxTexture_GetImageOffset failed";
         ktxTexture_Destroy(base);
-        return false;
+        throw AppException("ktxTexture_GetImageOffset failed for " + ktxPath.string());
     }
 
     const uint8_t* img = static_cast<const uint8_t*>(base->pData) + offset;
@@ -123,21 +104,20 @@ static bool convertKtx2ToPng(const fs::path& ktxPath, const fs::path& pngPath) {
     ktxTexture_Destroy(base);
 
     if (!ok) {
-        PLOGE << "stbi_write_png failed";
-        return false;
+        throw AppException("stbi_write_png failed for " + pngPath.string());
     }
-    return true;
 }
 
-// Replace all *.ktx2 references in .mtl files with *.png (converting files)
-static bool patchMtlKtx2ToPng(const fs::path& mtlPath) {
+/// Replace all *.ktx2 references in .mtl files with *.png (converting files)
+/// @param mtlPath Path to the MTL file to patch
+/// @throws FSException if file operations fail
+static void patchMtlKtx2ToPng(const fs::path& mtlPath) {
     if (!fs::exists(mtlPath))
-        return true;
+        return;
 
     std::ifstream in(mtlPath);
     if (!in) {
-        PLOGE << "Cannot open MTL: " << mtlPath;
-        return false;
+        throw FSException("Cannot open MTL file: " + mtlPath.string());
     }
     std::stringstream ss;
     ss << in.rdbuf();
@@ -173,14 +153,16 @@ static bool patchMtlKtx2ToPng(const fs::path& mtlPath) {
                     fs::path ktxPath = mtlDir / fs::path(value).lexically_normal();
                     fs::path pngPath = ktxPath;
                     pngPath.replace_extension(".png");
-                    if (convertKtx2ToPng(ktxPath, pngPath)) {
+                    try {
+                        convertKtx2ToPng(ktxPath, pngPath);
                         std::string newLine = std::string(key) + " " + pngPath.filename().string();
                         out << newLine << "\n";
-                        PLOGI << "MTL patch: " << key << " -> " << pngPath.filename().string();
+                        LOGD << "MTL patch: " << key << " -> " << pngPath.filename().string();
                         changed = true;
                         handled = true;
-                    } else {
-                        PLOGW << "KTX2 conversion failed, keeping original reference: " << ktxPath;
+                    } catch (const AppException& e) {
+                        LOGW << "KTX2 conversion failed, keeping original reference: " << ktxPath
+                             << " (" << e.what() << ")";
                     }
                 }
                 break;
@@ -192,15 +174,25 @@ static bool patchMtlKtx2ToPng(const fs::path& mtlPath) {
 
     if (changed) {
         std::ofstream o(mtlPath, std::ios::trunc);
+        if (!o) {
+            throw FSException("Cannot write MTL file: " + mtlPath.string());
+        }
         o << out.str();
         o.close();
     }
-    return true;
 }
 
-//========== Assimp Export (OBJ/PLY) ===============================================
 
-static bool exportWithAssimp(const aiScene* scene,
+/// Export a scene to OBJ or PLY format using Assimp
+/// @param scene The Assimp scene to export
+/// @param outBaseNoExt Base output path without extension
+/// @param forcePLY Force PLY format even if UVs are present
+/// @param preferPLYIfNoUV Prefer PLY if no UVs and vertex colors are present
+/// @param hasUVs Whether the scene has UV coordinates
+/// @param outGeomPath Output parameter for the generated geometry file path
+/// @param outMtlPath Output parameter for the generated MTL file path (OBJ only)
+/// @throws AppException if export fails
+static void exportWithAssimp(const aiScene* scene,
                              const fs::path& outBaseNoExt,
                              bool forcePLY,
                              bool preferPLYIfNoUV,
@@ -218,8 +210,7 @@ static bool exportWithAssimp(const aiScene* scene,
 
     auto r = exporter.Export(scene, fmt, geomPath.string());
     if (r != AI_SUCCESS) {
-        PLOGE << "Assimp Export failed: " << exporter.GetErrorString();
-        return false;
+        throw AppException("Assimp export failed: " + std::string(exporter.GetErrorString()));
     }
 
     outGeomPath = geomPath.string();
@@ -237,99 +228,65 @@ static bool exportWithAssimp(const aiScene* scene,
             outMtlPath = mtl.string();
     }
 
-    PLOGI << "Exported " << (usePLY ? "PLY: " : "OBJ: ") << outGeomPath;
+    LOGD << "Exported " << (usePLY ? "PLY: " : "OBJ: ") << outGeomPath;
     if (!outMtlPath.empty())
-        PLOGI << "MTL: " << outMtlPath;
-    return true;
+        LOGD << "MTL: " << outMtlPath;
 }
 
-//========== Public Function =====================================================
 
-ConvertResult ConvertGltfGlbToNexus(const std::string& inputGltf,
-                                    const std::string& outputNxsOrNxz,
-                                    const ConvertOptions& opt = {},
-                                    std::string* errMsgOut = nullptr) {
-    ConvertResult R;
-    R.nxsOrNxz = outputNxsOrNxz;
+/// Convert glTF/GLB file to OBJ or PLY format
+/// @param inputGltf Path to the input glTF or GLB file
+/// @param outputBasePath Base path for output files (without extension)
+/// @param outGeomPath Output parameter for the generated geometry file path
+/// @param outMtlPath Output parameter for the generated MTL file path (OBJ only)
+/// @param forcePLY Force PLY format output even if UVs are present
+/// @param preferPLYIfNoUV Prefer PLY format if no UVs and vertex colors are present
+/// @throws AppException if conversion fails
+void convertGltfTo3dModel(const std::string& inputGltf,
+                          const std::string& outputBasePath,
+                          std::string& outGeomPath,
+                          std::string& outMtlPath,
+                          bool forcePLY,
+                          bool preferPLYIfNoUV) {
 
-    // Import glTF/GLB
+    // Import glTF/GLB with standard postprocessing flags
     unsigned pp = aiProcess_Triangulate | aiProcess_JoinIdenticalVertices |
-                  aiProcess_ImproveCacheLocality | aiProcess_SortByPType;
-
-    if (opt.preTransformVertices)
-        pp |= aiProcess_PreTransformVertices;
-    if (opt.genNormalsIfMissing)
-        pp |= aiProcess_GenSmoothNormals;
-    if (opt.calcTangentsIfUV)
-        pp |= aiProcess_CalcTangentSpace;
+                  aiProcess_ImproveCacheLocality | aiProcess_SortByPType |
+                  aiProcess_PreTransformVertices | aiProcess_GenSmoothNormals |
+                  aiProcess_CalcTangentSpace;
 
     Assimp::Importer importer;
     const aiScene* scene = importer.ReadFile(inputGltf, pp);
     if (!scene) {
-        std::string msg = std::string("Assimp import failed: ") + importer.GetErrorString();
-        PLOGE << msg;
-        if (errMsgOut)
-            *errMsgOut = msg;
-        return R;
+        throw AppException("Assimp import failed: " + std::string(importer.GetErrorString()));
     }
 
     bool hasUV = sceneHasUVs(scene);
     bool hasVC = sceneHasVertexColors(scene);
-    PLOGI << "[assimp] meshes=" << scene->mNumMeshes << " UV=" << (hasUV ? "Y" : "N")
-          << " VCols=" << (hasVC ? "Y" : "N");
+    LOGD << "[assimp] meshes=" << scene->mNumMeshes << " UV=" << (hasUV ? "Y" : "N")
+         << " VCols=" << (hasVC ? "Y" : "N");
 
     // Export geometry
-    fs::path outPath(outputNxsOrNxz);
-    fs::path outBase = outPath;
-    outBase.replace_extension("");  // base path without extension
+    fs::path outBase(outputBasePath);
 
-    if (!exportWithAssimp(scene,
-                          outBase,
-                          opt.forcePLY,
-                          opt.preferPLYIfNoUV,
-                          hasUV,
-                          R.geomPath,
-                          R.mtlPath)) {
-        if (errMsgOut)
-            *errMsgOut = "Geometry export failed";
-        return R;
-    }
+    exportWithAssimp(scene,
+                     outBase,
+                     forcePLY,
+                     preferPLYIfNoUV,
+                     hasUV,
+                     outGeomPath,
+                     outMtlPath);
 
     // For OBJ: patch MTL for KTX2 -> PNG
-    if (!R.mtlPath.empty()) {
-        if (!patchMtlKtx2ToPng(R.mtlPath)) {
-            PLOGW << "MTL patch failed (continuing anyway)";
-        }
-    }
-
-    // Nexus build/compress in-process
-    char nerr[2048] = {0};
-    PLOGI << "Running nexusBuild: input=" << R.geomPath << " output=" << outputNxsOrNxz;
-    NXSErr rc = nexusBuild(R.geomPath.c_str(), outputNxsOrNxz.c_str(), nerr, sizeof(nerr));
-    if (rc != NXSERR_NONE) {
-        std::string msg =
-            std::string("nexusBuild failed (code=") + std::to_string((int)rc) + "): " + nerr;
-        PLOGE << msg;
-        if (errMsgOut)
-            *errMsgOut = msg;
-        return R;
-    }
-
-    // Cleanup intermediates if requested
-    if (!opt.keepIntermediates) {
+    if (!outMtlPath.empty()) {
         try {
-            if (!R.mtlPath.empty() && fs::exists(R.mtlPath))
-                fs::remove(R.mtlPath);
-            if (!R.geomPath.empty() && fs::exists(R.geomPath))
-                fs::remove(R.geomPath);
-        } catch (...) {
-            PLOGW << "Intermediate cleanup failed (ignoring).";
+            patchMtlKtx2ToPng(outMtlPath);
+        } catch (const AppException& e) {
+            LOGW << "MTL patch failed (continuing anyway): " << e.what();
         }
     }
 
-    R.ok = true;
-    PLOGI << "Conversion completed: " << outputNxsOrNxz;
-    return R;
+    LOGD << "glTF/GLB conversion completed: " << outGeomPath;
 }
 
-}  // namespace nxconv
+}  // namespace ddb
