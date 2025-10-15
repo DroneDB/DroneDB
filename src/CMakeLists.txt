@@ -32,9 +32,9 @@ find_package(unofficial-hash-library CONFIG REQUIRED)
 find_package(unofficial-sqlite3 CONFIG REQUIRED)
 find_package(SpatiaLite REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
-
-# Link PDAL libraries directly
-#target_link_libraries(${PROJECT_NAME} PRIVATE pdalcpp)
+find_package(assimp CONFIG REQUIRED)
+find_package(Ktx CONFIG REQUIRED)
+find_package(Stb REQUIRED)
 
 find_path(BOOLINQ_INCLUDE_DIRS "boolinq/boolinq.h")
 
@@ -56,12 +56,14 @@ set(COMMON_LIBS
     unofficial::sqlite3::sqlite3
     spatialite::spatialite
     nxs
+    assimp::assimp
+    KTX::ktx
 )
 
 target_link_libraries(${PROJECT_NAME} PRIVATE ${COMMON_LIBS})
 
-# Include GeoTIFF directories
 target_include_directories(${PROJECT_NAME} PRIVATE ${GEOTIFF_INCLUDE_DIR})
+target_include_directories(${PROJECT_NAME} PRIVATE ${Stb_INCLUDE_DIR})
 
 # Include directories (public for external use)
 target_include_directories(${PROJECT_NAME} PUBLIC
