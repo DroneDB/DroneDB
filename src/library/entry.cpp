@@ -603,7 +603,7 @@ namespace ddb
             return identifyPly(path);
         }
 
-        if (p.checkExtension({"obj"}))
+        if (p.checkExtension({"obj", "gltf", "glb"}))
             return EntryType::Model;
 
         // Check for vector files
