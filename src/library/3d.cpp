@@ -3,9 +3,11 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "3d.h"
 
+#include <fstream>
 #include <regex>
 
 #include "exceptions.h"
+#include "json.h"
 #include "logger.h"
 #include "mio.h"
 #include "utils.h"
@@ -38,6 +40,177 @@ bool isGltfFile(const fs::path& filePath) {
     std::string ext = filePath.extension().string();
     utils::toLower(ext);
     return ext == ".gltf" || ext == ".glb";
+}
+
+// Check if file extension is GLB (binary format with embedded resources)
+bool isGlbFile(const fs::path& filePath) {
+    std::string ext = filePath.extension().string();
+    utils::toLower(ext);
+    return ext == ".glb";
+}
+
+// Helper to check if a URI is a data URI (embedded base64 content)
+bool isDataUri(const std::string& uri) {
+    return uri.find("data:") == 0;
+}
+
+// Helper to check if a URI is absolute (external resource)
+bool isAbsoluteUri(const std::string& uri) {
+    return uri.find("http://") == 0 || uri.find("https://") == 0 || uri.find("file://") == 0;
+}
+
+// Helper to validate and sanitize a relative path (prevent path traversal attacks)
+bool isSafePath(const std::string& path, const fs::path& parentPath) {
+    try {
+        // Resolve the path relative to parent
+        fs::path resolvedPath = (parentPath / path).lexically_normal();
+        fs::path canonicalParent = parentPath.lexically_normal();
+
+        // Check if resolved path is within parent directory
+        // This prevents path traversal like "../../../etc/passwd"
+        auto [rootEnd, nothing] = std::mismatch(
+            canonicalParent.begin(), canonicalParent.end(),
+            resolvedPath.begin(), resolvedPath.end()
+        );
+
+        return rootEnd == canonicalParent.end();
+    } catch (...) {
+        return false;
+    }
+}
+
+// Parse GLTF JSON and extract dependencies (buffers and images)
+std::vector<std::string> parseGltfJson(const json& gltfJson, const fs::path& parentPath) {
+    std::vector<std::string> deps;
+
+    try {
+        // Extract buffer URIs
+        if (gltfJson.contains("buffers") && gltfJson["buffers"].is_array()) {
+            for (const auto& buffer : gltfJson["buffers"]) {
+                if (buffer.contains("uri") && buffer["uri"].is_string()) {
+                    std::string uri = buffer["uri"];
+
+                    // Skip data URIs and absolute URIs
+                    if (isDataUri(uri) || isAbsoluteUri(uri))
+                        continue;
+
+                    // Validate path safety
+                    if (!isSafePath(uri, parentPath)) {
+                        LOGW << "Skipping unsafe buffer path: " << uri;
+                        continue;
+                    }
+
+                    deps.push_back(uri);
+                }
+            }
+        }
+
+        // Extract image URIs
+        if (gltfJson.contains("images") && gltfJson["images"].is_array()) {
+            for (const auto& image : gltfJson["images"]) {
+                if (image.contains("uri") && image["uri"].is_string()) {
+                    std::string uri = image["uri"];
+
+                    // Skip data URIs and absolute URIs
+                    if (isDataUri(uri) || isAbsoluteUri(uri))
+                        continue;
+
+                    // Validate path safety
+                    if (!isSafePath(uri, parentPath)) {
+                        LOGW << "Skipping unsafe image path: " << uri;
+                        continue;
+                    }
+
+                    deps.push_back(uri);
+                }
+            }
+        }
+    } catch (const json::exception& e) {
+        throw AppException("Error parsing GLTF JSON: " + std::string(e.what()));
+    }
+
+    return deps;
+}
+
+// Read and parse GLB file to extract JSON chunk
+json readGlbJson(const std::string& glbPath) {
+    std::ifstream file(glbPath, std::ios::binary);
+    if (!file.is_open())
+        throw FSException("Cannot open GLB file: " + glbPath);
+
+    // GLB Header structure (12 bytes)
+    struct GLBHeader {
+        uint32_t magic;    // 0x46546C67 ("glTF")
+        uint32_t version;  // 2
+        uint32_t length;   // Total file length
+    } header;
+
+    file.read(reinterpret_cast<char*>(&header), sizeof(header));
+    if (!file.good())
+        throw AppException("Invalid GLB file: cannot read header");
+
+    // Verify magic number (0x46546C67 = "glTF" in ASCII)
+    if (header.magic != 0x46546C67)
+        throw AppException("Invalid GLB file: incorrect magic number");
+
+    // Verify version (should be 2)
+    if (header.version != 2)
+        throw AppException("Unsupported GLB version: " + std::to_string(header.version));
+
+    // GLB Chunk structure
+    struct GLBChunk {
+        uint32_t chunkLength;
+        uint32_t chunkType;
+    } chunk;
+
+    file.read(reinterpret_cast<char*>(&chunk), sizeof(chunk));
+    if (!file.good())
+        throw AppException("Invalid GLB file: cannot read chunk header");
+
+    // First chunk should be JSON (type 0x4E4F534A)
+    if (chunk.chunkType != 0x4E4F534A)
+        throw AppException("Invalid GLB file: first chunk is not JSON");
+
+    // Read JSON data
+    std::vector<char> jsonData(chunk.chunkLength);
+    file.read(jsonData.data(), chunk.chunkLength);
+    if (!file.good())
+        throw AppException("Invalid GLB file: cannot read JSON chunk");
+
+    // Parse JSON
+    try {
+        return json::parse(jsonData.begin(), jsonData.end());
+    } catch (const json::exception& e) {
+        throw AppException("Invalid GLB file: JSON parse error: " + std::string(e.what()));
+    }
+}
+
+// Validate GLTF dependencies
+void validateGltfDependencies(const std::string& gltfFile, const fs::path& parentPath) {
+    // GLB files have everything embedded, skip validation
+    if (isGlbFile(gltfFile)) {
+        LOGD << "GLB file detected, skipping dependency validation (embedded resources)";
+        return;
+    }
+
+    auto deps = getGltfDependencies(gltfFile);
+    std::vector<std::string> missingDeps;
+
+    for (const std::string& d : deps) {
+        fs::path relPath = parentPath / d;
+        if (!fs::exists(relPath))
+            missingDeps.push_back(d);
+    }
+
+    if (!missingDeps.empty()) {
+        std::string errorMessage = "Dependencies missing for " + gltfFile + ": ";
+        for (size_t i = 0; i < missingDeps.size(); i++) {
+            if (i > 0)
+                errorMessage += ", ";
+            errorMessage += missingDeps[i];
+        }
+        throw BuildDepMissingException(errorMessage, missingDeps);
+    }
 }
 
 // Convert GLTF/GLB to OBJ in a temporary directory
@@ -110,6 +283,9 @@ std::string buildNexus(const std::string& inputObj, const std::string& outputNxs
 
     // Convert GLTF/GLB to OBJ if needed
     if (isGltfFile(inputPath)) {
+        // Validate GLTF dependencies before conversion
+        validateGltfDependencies(inputObj, inputPath.parent_path());
+
         actualInputObj = convertGltfToObj(inputObj, tempGuard);
         inputPath = fs::path(actualInputObj);
     }
@@ -128,7 +304,7 @@ std::string buildNexus(const std::string& inputObj, const std::string& outputNxs
             throw AppException("File " + outFile + " already exists (delete it first)");
     }
 
-    // Validate dependencies
+    // Validate dependencies (for OBJ files or converted GLTF)
     validateDependencies(actualInputObj, inputPath.parent_path());
 
     // Build the nexus file
@@ -220,6 +396,53 @@ std::vector<std::string> getObjDependencies(const std::string& obj) {
     }
 
     return deps;
+}
+
+std::vector<std::string> getGltfDependencies(const std::string& gltf) {
+    if (!fs::exists(gltf))
+        throw FSException(gltf + " does not exist");
+
+    fs::path p(gltf);
+    fs::path parentPath = p.parent_path();
+
+    // Determine if GLTF (text JSON) or GLB (binary)
+    std::string ext = p.extension().string();
+    utils::toLower(ext);
+
+    json gltfJson;
+
+    try {
+        if (ext == ".gltf") {
+            // Read as text JSON file
+            std::ifstream file(gltf);
+            if (!file.is_open())
+                throw FSException("Cannot open GLTF file: " + gltf);
+
+            try {
+                file >> gltfJson;
+            } catch (const json::exception& e) {
+                throw AppException("Invalid GLTF file: JSON parse error: " + std::string(e.what()));
+            }
+        } else if (ext == ".glb") {
+            // Read binary GLB and extract JSON chunk
+            gltfJson = readGlbJson(gltf);
+        } else {
+            throw AppException("File is not a GLTF or GLB: " + gltf);
+        }
+
+        // Validate basic GLTF structure
+        if (!gltfJson.contains("asset")) {
+            throw AppException("Invalid GLTF file: missing 'asset' property");
+        }
+
+        // Parse and extract dependencies
+        return parseGltfJson(gltfJson, parentPath);
+
+    } catch (const AppException&) {
+        throw;  // Re-throw our exceptions
+    } catch (const std::exception& e) {
+        throw AppException("Error reading GLTF file: " + std::string(e.what()));
+    }
 }
 
 }  // namespace ddb

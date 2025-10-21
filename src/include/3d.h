@@ -16,6 +16,7 @@ namespace ddb
 
     DDB_DLL std::string buildNexus(const std::string &inputObj, const std::string &outputNxs, bool overwrite = false);
     DDB_DLL std::vector<std::string> getObjDependencies(const std::string &obj);
+    DDB_DLL std::vector<std::string> getGltfDependencies(const std::string &gltf);
 
     /// Convert glTF/GLB to OBJ or PLY format
     /// @param inputGltf Path to the input glTF or GLB file
