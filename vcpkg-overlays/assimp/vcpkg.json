@@ -1,0 +1,20 @@
+{
+  "name": "assimp",
+  "version": "6.0.2",
+  "port-version": 0,
+  "description": "The Open Asset import library",
+  "homepage": "https://github.com/assimp/assimp",
+  "dependencies": [
+    "zlib",
+    "minizip",
+    "pugixml",
+    "rapidjson",
+    "utfcpp",
+    "polyclipping",
+    "jhasse-poly2tri",
+    "stb",
+    "draco",
+    "vcpkg-cmake",
+    "vcpkg-cmake-config"
+  ]
+}

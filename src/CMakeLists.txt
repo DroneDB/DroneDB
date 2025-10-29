@@ -62,6 +62,17 @@ set(COMMON_LIBS
 
 target_link_libraries(${PROJECT_NAME} PRIVATE ${COMMON_LIBS})
 
+# Exclude kubazip to avoid symbol conflicts with libzip
+# assimp depends on kubazip, but we already link libzip directly
+set_target_properties(${PROJECT_NAME} PROPERTIES
+    LINK_INTERFACE_LIBRARIES ""
+)
+get_target_property(ASSIMP_LINK_LIBRARIES assimp::assimp INTERFACE_LINK_LIBRARIES)
+if(ASSIMP_LINK_LIBRARIES)
+    list(REMOVE_ITEM ASSIMP_LINK_LIBRARIES "kubazip::kubazip")
+    set_target_properties(assimp::assimp PROPERTIES INTERFACE_LINK_LIBRARIES "${ASSIMP_LINK_LIBRARIES}")
+endif()
+
 target_include_directories(${PROJECT_NAME} PRIVATE ${GEOTIFF_INCLUDE_DIR})
 target_include_directories(${PROJECT_NAME} PRIVATE ${Stb_INCLUDE_DIR})
 

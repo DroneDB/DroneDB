@@ -1,0 +1,54 @@
+diff --git a/code/CMakeLists.txt b/code/CMakeLists.txt
+index 8728188..14096af 100644
+--- a/code/CMakeLists.txt
++++ b/code/CMakeLists.txt
+@@ -1186,28 +1186,9 @@ ELSE()
+ ENDIF()
+
+ # zip (https://github.com/kuba--/zip)
+-separate_arguments(ASSIMP_EXPORTERS_LIST UNIX_COMMAND ${ASSIMP_EXPORTERS_ENABLED})
+-IF(3MF IN_LIST ASSIMP_EXPORTERS_LIST)
+-  IF(ASSIMP_HUNTER_ENABLED)
+-    hunter_add_package(zip)
+-    find_package(zip CONFIG REQUIRED)
+-  ELSE()
+-    SET( ziplib_SRCS
+-      ../contrib/zip/src/miniz.h
+-      ../contrib/zip/src/zip.c
+-      ../contrib/zip/src/zip.h
+-    )
+-
+-    # TODO if cmake required version has been updated to >3.12.0, collapse this to the second case only
+-    if(${CMAKE_VERSION} VERSION_LESS "3.12.0")
+-      add_definitions(-DMINIZ_USE_UNALIGNED_LOADS_AND_STORES=0)
+-    else()
+-      add_compile_definitions(MINIZ_USE_UNALIGNED_LOADS_AND_STORES=0)
+-    endif()
+-
+-    SOURCE_GROUP( ziplib FILES ${ziplib_SRCS} )
+-  ENDIF()
+-ENDIF()
++# zip (https://github.com/kuba--/zip) - DISABLED for vcpkg overlay
++# 3MF support is disabled to avoid kubazip dependency
++SET( ziplib_SRCS )
+
+ # openddlparser
+ IF(ASSIMP_HUNTER_ENABLED)
+@@ -1366,7 +1347,6 @@ SET( assimp_src
+   ${Clipper_SRCS}
+   ${openddl_parser_SRCS}
+   ${open3dgc_SRCS}
+-  ${ziplib_SRCS}
+   ${Meshlab_SRCS}
+   ${Tinyusdz_SRCS}
+   ${Tinyusdz_DEP_SOURCES}
+@@ -1496,9 +1476,6 @@ IF(ASSIMP_HUNTER_ENABLED)
+       pugixml
+       stb::stb
+   )
+-  if(TARGET zip::zip)
+-    target_link_libraries(assimp PUBLIC zip::zip)
+-  endif()
+
+   if (ASSIMP_BUILD_DRACO)
+     target_link_libraries(assimp PRIVATE ${draco_LIBRARIES})
