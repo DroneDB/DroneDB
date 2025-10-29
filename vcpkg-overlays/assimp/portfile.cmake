@@ -12,6 +12,23 @@ file(REMOVE_RECURSE
     "${SOURCE_PATH}/contrib/draco"
 )
 
+# Fix MSVC compiler flag conflict on Windows: /utf-8 and /source-charset:utf-8 cannot be used together
+if(VCPKG_TARGET_IS_WINDOWS)
+    vcpkg_replace_string("${SOURCE_PATH}/CMakeLists.txt"
+        "ADD_COMPILE_OPTIONS(/source-charset:utf-8)"
+        ""
+    )
+endif()
+
+# Platform-specific options
+set(PLATFORM_OPTIONS "")
+if(VCPKG_TARGET_IS_WINDOWS)
+    # On Windows, we need to explicitly use the system zlib
+    list(APPEND PLATFORM_OPTIONS
+        -DZLIB_ROOT=${CURRENT_INSTALLED_DIR}
+    )
+endif()
+
 vcpkg_cmake_configure(
     SOURCE_PATH ${SOURCE_PATH}
     OPTIONS
@@ -39,6 +56,8 @@ vcpkg_cmake_configure(
         -DASSIMP_BUILD_ASSIMP_TOOLS=OFF
         -DASSIMP_WARNINGS_AS_ERRORS=OFF
         -DASSIMP_IGNORE_GIT_HASH=ON
+
+        ${PLATFORM_OPTIONS}
 )
 
 vcpkg_cmake_install()
