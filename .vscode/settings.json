@@ -119,5 +119,20 @@
         "string_view": "cpp",
         "slist": "cpp",
         "*.inc": "cpp"
-    }
+    },
+    "C_Cpp.files.exclude": {
+    "**/vcpkg/**": true,
+    "**/vcpkg_installed/**": true,
+    "**/installed/**": true,
+    "**/packages/**": true,
+    "**/build/**": true,
+    "**/build*/**": true
+  },
+  "files.watcherExclude": {
+    "**/vcpkg/**": true,
+    "**/vcpkg_installed/**": true,
+    "**/build/**": true,
+    "**/build*/**": true
+  },
+  "C_Cpp.default.browse.limitSymbolsToIncludedHeaders": true
 }
