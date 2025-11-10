@@ -368,7 +368,7 @@ std::vector<std::string> getObjDependencies(const std::string& obj) {
         utils::trim(mtlFile);
 
         // Remove double quotes if present
-        if (mtlFile[0] == '"' && mtlFile[mtlFile.size() - 1] == '"')
+        if (mtlFile.size() >= 2 && mtlFile[0] == '"' && mtlFile[mtlFile.size() - 1] == '"')
             mtlFile = mtlFile.substr(1, mtlFile.size() - 2);
 
         deps.push_back(mtlFile);
