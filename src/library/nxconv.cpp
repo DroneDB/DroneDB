@@ -17,6 +17,7 @@
 #include "3d.h"
 #include "logger.h"
 #include "exceptions.h"
+#include "utils.h"
 
 // libktx + stb_image_write for KTX2->PNG conversion
 #include <ktx.h>
@@ -128,9 +129,7 @@ static void patchMtlKtx2ToPng(const fs::path& mtlPath) {
         if (s.size() < 5)
             return false;
         std::string low = s;
-        std::transform(low.begin(), low.end(), low.begin(), [](unsigned char c) {
-            return static_cast<char>(std::tolower(c));
-        });
+        utils::toLower(low);
         return low.rfind(".ktx2") == low.size() - 5;
     };
 
@@ -149,6 +148,7 @@ static void patchMtlKtx2ToPng(const fs::path& mtlPath) {
             if (line.rfind(key, 0) == 0) {
                 size_t pos = line.find_first_of(" \t");
                 std::string value = (pos == std::string::npos) ? "" : line.substr(pos + 1);
+                utils::trim(value);
                 if (!value.empty() && endsWithKtx2(value)) {
                     fs::path ktxPath = mtlDir / fs::path(value).lexically_normal();
                     fs::path pngPath = ktxPath;
