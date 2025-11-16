@@ -146,9 +146,9 @@ void generateImageThumb(const fs::path& imagePath,
     int hasNoData;
     double srcNoData = GDALGetRasterNoDataValue(
         GDALGetRasterBand(hSrcDataset, 1),
-        &hasNoData);  // Gestione delle bande: WebP supporta solo 3 (RGB) o 4 (RGBA) bande
+        &hasNoData);  // Band handling: WebP supports only 3 (RGB) or 4 (RGBA) bands
     if (hasNoData) {
-        // Con nodata, usiamo 4 bande (RGBA) per la trasparenza
+        // With nodata, use 4 bands (RGBA) for transparency
         if (bandCount >= 3) {
             targs = CSLAddString(targs, "-b");
             targs = CSLAddString(targs, "1");
@@ -158,16 +158,16 @@ void generateImageThumb(const fs::path& imagePath,
             targs = CSLAddString(targs, "3");
         }
 
-        // Imposta il valore nodata sul dataset di destinazione
+        // Set nodata value on destination dataset
         targs = CSLAddString(targs, "-a_nodata");
         std::ostringstream oss;
         oss << std::fixed << std::setprecision(0) << srcNoData;
         targs = CSLAddString(targs, oss.str().c_str());
 
-        // Crea canale alpha dai valori nodata per trasparenza
+        // Create alpha channel from nodata values for transparency
         targs = CSLAddString(targs, "-dstalpha");
     } else {
-        // Senza nodata, usiamo solo 3 bande (RGB)
+        // Without nodata, use only 3 bands (RGB)
         if (bandCount > 3) {
             targs = CSLAddString(targs, "-b");
             targs = CSLAddString(targs, "1");
@@ -264,8 +264,8 @@ void RenderImage(const fs::path& outImagePath,
 
     GDALDriverH webpDrv = GDALGetDriverByName("WEBP");
     if (webpDrv == nullptr)
-        throw GDALException("Cannot create WEBP driver");  // Determina il numero di bande effettive
-                                                           // (3 RGB + eventualmente 1 Alpha)
+        throw GDALException("Cannot create WEBP driver");  // Determine the effective number of bands
+                                                           // (3 RGB + optionally 1 Alpha)
     int effectiveBands = nBands;
     if (alphaBuffer != nullptr) {
         effectiveBands = 4;  // RGB + Alpha
@@ -277,7 +277,7 @@ void RenderImage(const fs::path& outImagePath,
     if (hDataset == nullptr)
         throw GDALException("Cannot create GDAL dataset");
 
-    // Scrivi i dati RGB
+    // Write RGB data
     if (GDALDatasetRasterIO(hDataset,
                             GF_Write,
                             0,
@@ -296,7 +296,7 @@ void RenderImage(const fs::path& outImagePath,
         throw GDALException("Cannot write tile data");
     }
 
-    // Se abbiamo alphaBuffer, scriviamo anche il canale alpha
+    // If we have alphaBuffer, also write the alpha channel
     if (alphaBuffer != nullptr) {
         GDALRasterBandH alphaBand = GDALGetRasterBand(hDataset, 4);
         if (GDALRasterIO(alphaBand,
