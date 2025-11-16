@@ -31,7 +31,7 @@ struct DSMCacheEntry
         memset(geoTransform, 0, sizeof(double) * 6);
     }
 
-    DDB_DLL void loadData(GDALDataset *dataset);
+    DDB_DLL void loadData(GDALDatasetH hDataset);
     DDB_DLL float getElevation(double latitude, double longitude);
 };
 
