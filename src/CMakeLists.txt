@@ -35,6 +35,7 @@ find_package(nlohmann_json CONFIG REQUIRED)
 find_package(assimp CONFIG REQUIRED)
 find_package(Ktx CONFIG REQUIRED)
 find_package(Stb REQUIRED)
+find_package(tinyobjloader CONFIG REQUIRED)
 
 find_path(BOOLINQ_INCLUDE_DIRS "boolinq/boolinq.h")
 
@@ -58,7 +59,9 @@ set(COMMON_LIBS
     nxs
     assimp::assimp
     KTX::ktx
+    tinyobjloader::tinyobjloader
 )
+
 
 target_link_libraries(${PROJECT_NAME} PRIVATE ${COMMON_LIBS})
 

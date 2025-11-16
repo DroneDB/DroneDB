@@ -55,6 +55,7 @@
     "zlib",
     "assimp",
     "ktx",
-    "stb"
+    "stb",
+    "tinyobjloader"
   ]
 }
