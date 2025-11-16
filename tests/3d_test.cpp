@@ -5,11 +5,74 @@
 #include "gtest/gtest.h"
 #include "3d.h"
 #include "testfs.h"
+#include <cpr/cpr.h>
+#include <fstream>
+#include <filesystem>
+#include "exceptions.h"
+#include <tiny_obj_loader.h>
 
 namespace
 {
 
     using namespace ddb;
+
+    // Helper function to verify OBJ file content and MTL texture references using tinyobj
+    void verifyObjAndTextures(const std::string& outGeomPath, const std::string& outMtlPath) {
+        // Verify OBJ file is readable and has valid content
+        std::ifstream objFile(outGeomPath);
+        ASSERT_TRUE(objFile.is_open()) << "Failed to open OBJ file: " << outGeomPath;
+        std::string line;
+        bool hasVertices = false;
+        bool hasFaces = false;
+        while (std::getline(objFile, line)) {
+            if (line.rfind("v ", 0) == 0) hasVertices = true;
+            if (line.rfind("f ", 0) == 0) hasFaces = true;
+        }
+        objFile.close();
+        ASSERT_TRUE(hasVertices) << "OBJ file has no vertices";
+        ASSERT_TRUE(hasFaces) << "OBJ file has no faces";
+
+        // If MTL exists, verify it's readable and check for texture references using tinyobj
+        if (!outMtlPath.empty()) {
+            tinyobj::ObjReader reader;
+            tinyobj::ObjReaderConfig config;
+            config.mtl_search_path = fs::path(outGeomPath).parent_path().string();
+
+            ASSERT_TRUE(reader.ParseFromFile(outGeomPath, config))
+                << "Failed to parse OBJ with tinyobj: " << reader.Error();
+
+            const auto& materials = reader.GetMaterials();
+            fs::path mtlDir = fs::path(outMtlPath).parent_path();
+
+            for (const auto& material : materials) {
+                // Check all texture maps
+                std::vector<std::string> textureMaps = {
+                    material.diffuse_texname,
+                    material.specular_texname,
+                    material.bump_texname,
+                    material.displacement_texname,
+                    material.alpha_texname,
+                    material.reflection_texname,
+                    material.roughness_texname,
+                    material.metallic_texname,
+                    material.sheen_texname,
+                    material.emissive_texname,
+                    material.normal_texname
+                };
+
+                for (const auto& texturePath : textureMaps) {
+                    if (!texturePath.empty()) {
+                        fs::path fullTexturePath = mtlDir / texturePath;
+                        ASSERT_TRUE(fs::exists(fullTexturePath))
+                            << "Texture file not found: " << fullTexturePath.string()
+                            << " referenced in MTL: " << outMtlPath
+                            << " for material: " << material.name;
+                        std::cout << "  Verified texture: " << texturePath << std::endl;
+                    }
+                }
+            }
+        }
+    }
 
     TEST(file3d, odmGetDependencies)
     {
@@ -145,6 +208,328 @@ namespace
             ASSERT_EQ(dependencies.size(), 2);
             ASSERT_EQ(dependencies[0], "brighton beach.mtl");
             ASSERT_EQ(dependencies[1], "brighton beach.jpg");
+
+        }
+        catch (const std::exception &e)
+        {
+            std::cerr << "Error: " << e.what() << std::endl;
+            FAIL();
+        }
+    }
+
+    TEST(file3d, convertGltfToObjTest)
+    {
+        try
+        {
+            // URL of the test archive containing model.gltf and model.bin
+            std::string archiveUrl = "https://github.com/DroneDB/test_data/raw/refs/heads/master/3d/model-gltf.zip";
+
+            // Create an instance of TestFS
+            TestFS testFS(archiveUrl, "model-gltf", true);
+
+            // Output paths
+            std::string outGeomPath;
+            std::string outMtlPath;
+
+            // Create absolute path for output
+            fs::path outputBasePath = fs::path(testFS.testFolder) / "output_model";
+
+            // Convert GLTF to 3D model (OBJ/PLY)
+            convertGltfTo3dModel("model.gltf", outputBasePath.string(), outGeomPath, outMtlPath, false, true);
+
+            // Verify that output files were created
+            ASSERT_FALSE(outGeomPath.empty());
+            ASSERT_TRUE(fs::exists(outGeomPath));
+
+            // If MTL was created (OBJ format), verify it exists
+            if (!outMtlPath.empty()) {
+                ASSERT_TRUE(fs::exists(outMtlPath));
+            }
+
+            std::cout << "Generated geometry file: " << outGeomPath << std::endl;
+            if (!outMtlPath.empty()) {
+                std::cout << "Generated MTL file: " << outMtlPath << std::endl;
+            }
+
+            verifyObjAndTextures(outGeomPath, outMtlPath);
+
+            std::cout << "All files verified successfully!" << std::endl;
+
+        }
+        catch (const std::exception &e)
+        {
+            std::cerr << "Error: " << e.what() << std::endl;
+            FAIL();
+        }
+    }
+
+    TEST(file3d, convertGlbToObjTest)
+    {
+        try
+        {
+            // URL of the test GLB file
+            std::string glbUrl = "https://github.com/DroneDB/test_data/raw/refs/heads/master/3d/model.glb";
+
+            // Download GLB file directly (not a zip)
+            auto tempPath = std::filesystem::temp_directory_path() / "model-glb";
+            std::filesystem::create_directories(tempPath);
+            auto glbFile = tempPath / "model.glb";
+
+            // Download if not cached
+            if (!std::filesystem::exists(glbFile)) {
+                std::cout << "Downloading GLB file..." << std::endl;
+                cpr::Response r = cpr::Get(cpr::Url{glbUrl});
+                if (r.status_code != 200) {
+                    throw ddb::AppException("Failed to download GLB file: " + std::to_string(r.status_code));
+                }
+                std::ofstream out(glbFile, std::ios::binary);
+                out.write(r.text.data(), r.text.size());
+                out.close();
+            } else {
+                std::cout << "Using cached GLB file..." << std::endl;
+            }
+
+            // Set working directory to temp path
+            auto oldCwd = std::filesystem::current_path();
+            std::filesystem::current_path(tempPath);
+
+            // Output paths
+            std::string outGeomPath;
+            std::string outMtlPath;
+
+            // Create absolute path for output
+            fs::path outputBasePath = tempPath / "output_model_glb";
+
+            // Convert GLB to 3D model (OBJ/PLY)
+            convertGltfTo3dModel(glbFile.string(), outputBasePath.string(), outGeomPath, outMtlPath, false, true);
+
+            // Verify that output files were created
+            ASSERT_FALSE(outGeomPath.empty());
+            ASSERT_TRUE(fs::exists(outGeomPath));
+
+            // If MTL was created (OBJ format), verify it exists
+            if (!outMtlPath.empty()) {
+                ASSERT_TRUE(fs::exists(outMtlPath));
+            }
+
+            std::cout << "Generated geometry file: " << outGeomPath << std::endl;
+            if (!outMtlPath.empty()) {
+                std::cout << "Generated MTL file: " << outMtlPath << std::endl;
+            }
+
+            verifyObjAndTextures(outGeomPath, outMtlPath);
+
+            std::cout << "All files verified successfully!" << std::endl;
+
+            // Restore working directory
+            std::filesystem::current_path(oldCwd);
+
+        }
+        catch (const std::exception &e)
+        {
+            std::cerr << "Error: " << e.what() << std::endl;
+            FAIL();
+        }
+    }
+
+    TEST(file3d, convertSunglassesGlbTest)
+    {
+        try
+        {
+            // URL of the test GLB file
+            std::string glbUrl = "https://github.com/DroneDB/test_data/raw/refs/heads/master/3d/SunglassesKhronos.glb";
+
+            // Download GLB file directly (not a zip)
+            auto tempPath = std::filesystem::temp_directory_path() / "sunglasses-glb";
+            std::filesystem::create_directories(tempPath);
+            auto glbFile = tempPath / "SunglassesKhronos.glb";
+
+            // Download if not cached
+            if (!std::filesystem::exists(glbFile)) {
+                std::cout << "Downloading GLB file..." << std::endl;
+                cpr::Response r = cpr::Get(cpr::Url{glbUrl});
+                if (r.status_code != 200) {
+                    throw ddb::AppException("Failed to download GLB file: " + std::to_string(r.status_code));
+                }
+                std::ofstream out(glbFile, std::ios::binary);
+                out.write(r.text.data(), r.text.size());
+                out.close();
+            } else {
+                std::cout << "Using cached GLB file..." << std::endl;
+            }
+
+            // Set working directory to temp path
+            auto oldCwd = std::filesystem::current_path();
+            std::filesystem::current_path(tempPath);
+
+            // Output paths
+            std::string outGeomPath;
+            std::string outMtlPath;
+
+            // Create absolute path for output
+            fs::path outputBasePath = tempPath / "output_sunglasses";
+
+            // Convert GLB to 3D model (OBJ/PLY)
+            convertGltfTo3dModel(glbFile.string(), outputBasePath.string(), outGeomPath, outMtlPath, false, true);
+
+            // Verify that output files were created
+            ASSERT_FALSE(outGeomPath.empty());
+            ASSERT_TRUE(fs::exists(outGeomPath));
+
+            // If MTL was created (OBJ format), verify it exists
+            if (!outMtlPath.empty()) {
+                ASSERT_TRUE(fs::exists(outMtlPath));
+            }
+
+            std::cout << "Generated geometry file: " << outGeomPath << std::endl;
+            if (!outMtlPath.empty()) {
+                std::cout << "Generated MTL file: " << outMtlPath << std::endl;
+            }
+
+            verifyObjAndTextures(outGeomPath, outMtlPath);
+
+            std::cout << "All files verified successfully!" << std::endl;
+
+            // Restore working directory
+            std::filesystem::current_path(oldCwd);
+
+        }
+        catch (const std::exception &e)
+        {
+            std::cerr << "Error: " << e.what() << std::endl;
+            FAIL();
+        }
+    }
+
+    TEST(file3d, convertIridescentDishGlbTest)
+    {
+        try
+        {
+            // URL of the test GLB file
+            std::string glbUrl = "https://github.com/DroneDB/test_data/raw/refs/heads/master/3d/IridescentDishWithOlives.glb";
+
+            // Download GLB file directly (not a zip)
+            auto tempPath = std::filesystem::temp_directory_path() / "dish-glb";
+            std::filesystem::create_directories(tempPath);
+            auto glbFile = tempPath / "IridescentDishWithOlives.glb";
+
+            // Download if not cached
+            if (!std::filesystem::exists(glbFile)) {
+                std::cout << "Downloading GLB file..." << std::endl;
+                cpr::Response r = cpr::Get(cpr::Url{glbUrl});
+                if (r.status_code != 200) {
+                    throw ddb::AppException("Failed to download GLB file: " + std::to_string(r.status_code));
+                }
+                std::ofstream out(glbFile, std::ios::binary);
+                out.write(r.text.data(), r.text.size());
+                out.close();
+            } else {
+                std::cout << "Using cached GLB file..." << std::endl;
+            }
+
+            // Set working directory to temp path
+            auto oldCwd = std::filesystem::current_path();
+            std::filesystem::current_path(tempPath);
+
+            // Output paths
+            std::string outGeomPath;
+            std::string outMtlPath;
+
+            // Create absolute path for output
+            fs::path outputBasePath = tempPath / "output_dish";
+
+            // Convert GLB to 3D model (OBJ/PLY)
+            convertGltfTo3dModel(glbFile.string(), outputBasePath.string(), outGeomPath, outMtlPath, false, true);
+
+            // Verify that output files were created
+            ASSERT_FALSE(outGeomPath.empty());
+            ASSERT_TRUE(fs::exists(outGeomPath));
+
+            // If MTL was created (OBJ format), verify it exists
+            if (!outMtlPath.empty()) {
+                ASSERT_TRUE(fs::exists(outMtlPath));
+            }
+
+            std::cout << "Generated geometry file: " << outGeomPath << std::endl;
+            if (!outMtlPath.empty()) {
+                std::cout << "Generated MTL file: " << outMtlPath << std::endl;
+            }
+
+            verifyObjAndTextures(outGeomPath, outMtlPath);
+
+            std::cout << "All files verified successfully!" << std::endl;
+
+            // Restore working directory
+            std::filesystem::current_path(oldCwd);
+
+        }
+        catch (const std::exception &e)
+        {
+            std::cerr << "Error: " << e.what() << std::endl;
+            FAIL();
+        }
+    }
+
+    TEST(file3d, convertToyCarGlbTest)
+    {
+        try
+        {
+            // URL of the test GLB file
+            std::string glbUrl = "https://github.com/DroneDB/test_data/raw/refs/heads/master/3d/ToyCar.glb";
+
+            // Download GLB file directly (not a zip)
+            auto tempPath = std::filesystem::temp_directory_path() / "toycar-glb";
+            std::filesystem::create_directories(tempPath);
+            auto glbFile = tempPath / "ToyCar.glb";
+
+            // Download if not cached
+            if (!std::filesystem::exists(glbFile)) {
+                std::cout << "Downloading GLB file..." << std::endl;
+                cpr::Response r = cpr::Get(cpr::Url{glbUrl});
+                if (r.status_code != 200) {
+                    throw ddb::AppException("Failed to download GLB file: " + std::to_string(r.status_code));
+                }
+                std::ofstream out(glbFile, std::ios::binary);
+                out.write(r.text.data(), r.text.size());
+                out.close();
+            } else {
+                std::cout << "Using cached GLB file..." << std::endl;
+            }
+
+            // Set working directory to temp path
+            auto oldCwd = std::filesystem::current_path();
+            std::filesystem::current_path(tempPath);
+
+            // Output paths
+            std::string outGeomPath;
+            std::string outMtlPath;
+
+            // Create absolute path for output
+            fs::path outputBasePath = tempPath / "output_toycar";
+
+            // Convert GLB to 3D model (OBJ/PLY)
+            convertGltfTo3dModel(glbFile.string(), outputBasePath.string(), outGeomPath, outMtlPath, false, true);
+
+            // Verify that output files were created
+            ASSERT_FALSE(outGeomPath.empty());
+            ASSERT_TRUE(fs::exists(outGeomPath));
+
+            // If MTL was created (OBJ format), verify it exists
+            if (!outMtlPath.empty()) {
+                ASSERT_TRUE(fs::exists(outMtlPath));
+            }
+
+            std::cout << "Generated geometry file: " << outGeomPath << std::endl;
+            if (!outMtlPath.empty()) {
+                std::cout << "Generated MTL file: " << outMtlPath << std::endl;
+            }
+
+            verifyObjAndTextures(outGeomPath, outMtlPath);
+
+            std::cout << "All files verified successfully!" << std::endl;
+
+            // Restore working directory
+            std::filesystem::current_path(oldCwd);
 
         }
         catch (const std::exception &e)

@@ -56,6 +56,81 @@ static bool sceneHasVertexColors(const aiScene* s) {
     return false;
 }
 
+/// Extract embedded textures from the scene and save them to disk
+/// @param scene The Assimp scene containing embedded textures
+/// @param outputDir Directory where textures will be saved
+/// @param textureMap Output map from texture index to saved filename
+static void extractEmbeddedTextures(const aiScene* scene,
+                                    const fs::path& outputDir,
+                                    std::map<int, std::string>& textureMap) {
+    if (!scene || !scene->HasTextures())
+        return;
+
+    LOGD << "Extracting embedded textures to " << outputDir.string();
+
+    fs::create_directories(outputDir);
+
+    for (unsigned int i = 0; i < scene->mNumTextures; ++i) {
+        const aiTexture* tex = scene->mTextures[i];
+        if (!tex)
+            continue;
+
+        // Generate output filename
+        std::string filename;
+        if (tex->mHeight == 0) {
+            // Compressed texture, use format hint as extension
+            std::string formatHint = tex->achFormatHint;
+            if (formatHint.empty())
+                formatHint = "png";
+            filename = "texture_" + std::to_string(i) + "." + formatHint;
+        } else {
+            // Uncompressed ARGB texture, save as PNG
+            filename = "texture_" + std::to_string(i) + ".png";
+        }
+
+        fs::path texturePath = outputDir / filename;
+
+        try {
+            if (tex->mHeight == 0) {
+                // Compressed format - write directly
+                std::ofstream out(texturePath, std::ios::binary);
+                if (!out) {
+                    LOGW << "Failed to write texture: " << texturePath.string();
+                    continue;
+                }
+                out.write(reinterpret_cast<const char*>(tex->pcData), tex->mWidth);
+                out.close();
+                LOGD << "Extracted compressed texture: " << filename << " (" << tex->mWidth << " bytes)";
+            } else {
+                // Uncompressed ARGB8888 format - convert to PNG
+                std::vector<unsigned char> rgba(tex->mWidth * tex->mHeight * 4);
+                for (unsigned int y = 0; y < tex->mHeight; ++y) {
+                    for (unsigned int x = 0; x < tex->mWidth; ++x) {
+                        const aiTexel& texel = tex->pcData[y * tex->mWidth + x];
+                        size_t idx = (y * tex->mWidth + x) * 4;
+                        rgba[idx + 0] = texel.r;
+                        rgba[idx + 1] = texel.g;
+                        rgba[idx + 2] = texel.b;
+                        rgba[idx + 3] = texel.a;
+                    }
+                }
+
+                if (!stbi_write_png(texturePath.string().c_str(), tex->mWidth, tex->mHeight,
+                                   4, rgba.data(), tex->mWidth * 4)) {
+                    LOGW << "Failed to write PNG texture: " << texturePath.string();
+                    continue;
+                }
+                LOGD << "Extracted uncompressed texture: " << filename
+                     << " (" << tex->mWidth << "x" << tex->mHeight << ")";
+            }
+
+            textureMap[i] = filename;
+        } catch (const std::exception& e) {
+            LOGW << "Exception extracting texture " << i << ": " << e.what();
+        }
+    }
+}
+
 
 /// Convert a KTX2 texture file to PNG format
 /// @param ktxPath Path to the input KTX2 file
@@ -202,6 +277,12 @@ static void exportWithAssimp(const aiScene* scene,
     Assimp::Exporter exporter;
     fs::create_directories(outBaseNoExt.parent_path());
 
+    // Extract embedded textures before exporting
+    std::map<int, std::string> textureMap;
+    if (scene->HasTextures()) {
+        extractEmbeddedTextures(scene, outBaseNoExt.parent_path(), textureMap);
+    }
+
     bool usePLY = forcePLY || (!hasUVs && preferPLYIfNoUV);
     const char* fmt = usePLY ? "ply" : "obj";
 
@@ -224,8 +305,74 @@ static void exportWithAssimp(const aiScene* scene,
             mtl = geomPath;
             mtl.replace_extension(".mtl");
         }
-        if (fs::exists(mtl))
+        if (fs::exists(mtl)) {
             outMtlPath = mtl.string();
+
+            // Fix embedded texture references in MTL file (e.g., "*0", "*1")
+            if (!textureMap.empty()) {
+                try {
+                    std::ifstream in(mtl);
+                    if (in) {
+                        std::stringstream ss;
+                        ss << in.rdbuf();
+                        in.close();
+
+                        std::string content = ss.str();
+                        std::istringstream lines(content);
+                        std::ostringstream out;
+                        std::string line;
+                        bool changed = false;
+
+                        const char* keys[] = {"map_Kd", "map_Ks", "map_Bump", "map_d",
+                                             "map_Pr", "map_Pm", "map_Ps", "map_Ke",
+                                             "map_Ka", "bump", "map_bump"};
+
+                        while (std::getline(lines, line)) {
+                            bool handled = false;
+                            for (auto* key : keys) {
+                                if (line.rfind(key, 0) == 0) {
+                                    size_t pos = line.find_first_of(" \t");
+                                    if (pos != std::string::npos) {
+                                        std::string value = line.substr(pos + 1);
+                                        utils::trim(value);
+
+                                        // Check if it's an embedded texture reference (e.g., "*0")
+                                        if (!value.empty() && value[0] == '*') {
+                                            try {
+                                                int texIndex = std::stoi(value.substr(1));
+                                                auto it = textureMap.find(texIndex);
+                                                if (it != textureMap.end()) {
+                                                    std::string newLine = std::string(key) + " " + it->second;
+                                                    out << newLine << "\n";
+                                                    LOGD << "MTL fix: " << key << " " << value << " -> " << it->second;
+                                                    changed = true;
+                                                    handled = true;
+                                                }
+                                            } catch (...) {
+                                                // Not a valid index, keep original
+                                            }
+                                        }
+                                    }
+                                    break;
+                                }
+                            }
+                            if (!handled)
+                                out << line << "\n";
+                        }
+
+                        if (changed) {
+                            std::ofstream outFile(mtl, std::ios::trunc);
+                            if (outFile) {
+                                outFile << out.str();
+                                outFile.close();
+                            }
+                        }
+                    }
+                } catch (const std::exception& e) {
+                    LOGW << "Failed to fix MTL embedded texture references: " << e.what();
+                }
+            }
+        }
     }
 
     LOGD << "Exported " << (usePLY ? "PLY: " : "OBJ: ") << outGeomPath;
