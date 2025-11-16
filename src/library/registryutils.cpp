@@ -8,9 +8,24 @@
 #include "constants.h"
 #include "exceptions.h"
 #include "utils.h"
+#include <regex>
 
 namespace ddb
 {
+    // Regex for validating organization and dataset names
+    // Must start with lowercase letter or digit, then lowercase letters, digits, underscores or dashes
+    // Total length: 2-129 characters
+    static const std::regex tagComponentRegex("^[a-z0-9][a-z0-9_-]{1,128}$");
+
+    static void validateTagComponent(const std::string &component, const std::string &componentType, const std::string &originalTag) {
+        if (component.empty()) {
+            throw InvalidArgsException("Invalid tag: " + originalTag + " - " + componentType + " is empty");
+        }
+        if (!std::regex_match(component, tagComponentRegex)) {
+            throw InvalidArgsException("Invalid tag: " + originalTag + " - " + componentType + " '" + component +
+                                       "' must start with a lowercase letter or digit, contain only lowercase letters, digits, underscores or dashes, and be 2-129 characters long");
+        }
+    }
 
     TagComponents RegistryUtils::parseTag(const std::string &tag,
                                           bool useInsecureRegistry)
@@ -68,6 +83,10 @@ namespace ddb
             throw InvalidArgsException("Invalid tag: " + tag +
                                        " missing dataset name");
         }
+
+        // Validate organization and dataset components
+        validateTagComponent(res.organization, "organization", tag);
+        validateTagComponent(res.dataset, "dataset", tag);
 
         const homer6::Url url(res.registryUrl);
 
