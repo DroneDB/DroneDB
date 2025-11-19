@@ -127,10 +127,9 @@ std::filesystem::path TestFS::downloadTestAsset(const std::string &url, const st
 
     std::ofstream ofs(destPath.string(), std::ios::binary);
     auto request = cpr::Download(ofs, cpr::Url{url}, cpr::VerifySsl(false));
+
     if (request.error)
-    {
         throw std::runtime_error("Failed to download " + url + " to " + destPath.string());
-    }
 
     return destPath;
 }

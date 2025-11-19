@@ -5,6 +5,7 @@
 #include "gtest/gtest.h"
 #include "3d.h"
 #include "testfs.h"
+#include "testarea.h"
 #include <cpr/cpr.h>
 #include <fstream>
 #include <filesystem>
@@ -270,35 +271,16 @@ namespace
             // URL of the test GLB file
             std::string glbUrl = "https://github.com/DroneDB/test_data/raw/refs/heads/master/3d/model.glb";
 
-            // Download GLB file directly (not a zip)
-            auto tempPath = std::filesystem::temp_directory_path() / "model-glb";
-            std::filesystem::create_directories(tempPath);
-            auto glbFile = tempPath / "model.glb";
-
-            // Download if not cached
-            if (!std::filesystem::exists(glbFile)) {
-                std::cout << "Downloading GLB file..." << std::endl;
-                cpr::Response r = cpr::Get(cpr::Url{glbUrl});
-                if (r.status_code != 200) {
-                    throw ddb::AppException("Failed to download GLB file: " + std::to_string(r.status_code));
-                }
-                std::ofstream out(glbFile, std::ios::binary);
-                out.write(r.text.data(), r.text.size());
-                out.close();
-            } else {
-                std::cout << "Using cached GLB file..." << std::endl;
-            }
-
-            // Set working directory to temp path
-            auto oldCwd = std::filesystem::current_path();
-            std::filesystem::current_path(tempPath);
+            // Create an instance of TestArea
+            TestArea testArea("model-glb");
+            auto glbFile = testArea.downloadTestAsset(glbUrl, "model.glb");
 
             // Output paths
             std::string outGeomPath;
             std::string outMtlPath;
 
             // Create absolute path for output
-            fs::path outputBasePath = tempPath / "output_model_glb";
+            fs::path outputBasePath = testArea.getPath("output_model_glb");
 
             // Convert GLB to 3D model (OBJ/PLY)
             convertGltfTo3dModel(glbFile.string(), outputBasePath.string(), outGeomPath, outMtlPath, false, true);
@@ -320,9 +302,6 @@ namespace
             verifyObjAndTextures(outGeomPath, outMtlPath);
 
             std::cout << "All files verified successfully!" << std::endl;
-
-            // Restore working directory
-            std::filesystem::current_path(oldCwd);
 
         }
         catch (const std::exception &e)
@@ -339,35 +318,16 @@ namespace
             // URL of the test GLB file
             std::string glbUrl = "https://github.com/DroneDB/test_data/raw/refs/heads/master/3d/SunglassesKhronos.glb";
 
-            // Download GLB file directly (not a zip)
-            auto tempPath = std::filesystem::temp_directory_path() / "sunglasses-glb";
-            std::filesystem::create_directories(tempPath);
-            auto glbFile = tempPath / "SunglassesKhronos.glb";
-
-            // Download if not cached
-            if (!std::filesystem::exists(glbFile)) {
-                std::cout << "Downloading GLB file..." << std::endl;
-                cpr::Response r = cpr::Get(cpr::Url{glbUrl});
-                if (r.status_code != 200) {
-                    throw ddb::AppException("Failed to download GLB file: " + std::to_string(r.status_code));
-                }
-                std::ofstream out(glbFile, std::ios::binary);
-                out.write(r.text.data(), r.text.size());
-                out.close();
-            } else {
-                std::cout << "Using cached GLB file..." << std::endl;
-            }
-
-            // Set working directory to temp path
-            auto oldCwd = std::filesystem::current_path();
-            std::filesystem::current_path(tempPath);
+            // Create an instance of TestArea
+            TestArea testArea("sunglasses-glb");
+            auto glbFile = testArea.downloadTestAsset(glbUrl, "SunglassesKhronos.glb");
 
             // Output paths
             std::string outGeomPath;
             std::string outMtlPath;
 
             // Create absolute path for output
-            fs::path outputBasePath = tempPath / "output_sunglasses";
+            fs::path outputBasePath = testArea.getPath("output_sunglasses");
 
             // Convert GLB to 3D model (OBJ/PLY)
             convertGltfTo3dModel(glbFile.string(), outputBasePath.string(), outGeomPath, outMtlPath, false, true);
@@ -389,9 +349,6 @@ namespace
             verifyObjAndTextures(outGeomPath, outMtlPath);
 
             std::cout << "All files verified successfully!" << std::endl;
-
-            // Restore working directory
-            std::filesystem::current_path(oldCwd);
 
         }
         catch (const std::exception &e)
@@ -408,35 +365,16 @@ namespace
             // URL of the test GLB file
             std::string glbUrl = "https://github.com/DroneDB/test_data/raw/refs/heads/master/3d/IridescentDishWithOlives.glb";
 
-            // Download GLB file directly (not a zip)
-            auto tempPath = std::filesystem::temp_directory_path() / "dish-glb";
-            std::filesystem::create_directories(tempPath);
-            auto glbFile = tempPath / "IridescentDishWithOlives.glb";
-
-            // Download if not cached
-            if (!std::filesystem::exists(glbFile)) {
-                std::cout << "Downloading GLB file..." << std::endl;
-                cpr::Response r = cpr::Get(cpr::Url{glbUrl});
-                if (r.status_code != 200) {
-                    throw ddb::AppException("Failed to download GLB file: " + std::to_string(r.status_code));
-                }
-                std::ofstream out(glbFile, std::ios::binary);
-                out.write(r.text.data(), r.text.size());
-                out.close();
-            } else {
-                std::cout << "Using cached GLB file..." << std::endl;
-            }
-
-            // Set working directory to temp path
-            auto oldCwd = std::filesystem::current_path();
-            std::filesystem::current_path(tempPath);
+            // Create an instance of TestArea
+            TestArea testArea("dish-glb");
+            auto glbFile = testArea.downloadTestAsset(glbUrl, "IridescentDishWithOlives.glb");
 
             // Output paths
             std::string outGeomPath;
             std::string outMtlPath;
 
             // Create absolute path for output
-            fs::path outputBasePath = tempPath / "output_dish";
+            fs::path outputBasePath = testArea.getPath("output_dish");
 
             // Convert GLB to 3D model (OBJ/PLY)
             convertGltfTo3dModel(glbFile.string(), outputBasePath.string(), outGeomPath, outMtlPath, false, true);
@@ -458,9 +396,6 @@ namespace
             verifyObjAndTextures(outGeomPath, outMtlPath);
 
             std::cout << "All files verified successfully!" << std::endl;
-
-            // Restore working directory
-            std::filesystem::current_path(oldCwd);
 
         }
         catch (const std::exception &e)
@@ -477,35 +412,16 @@ namespace
             // URL of the test GLB file
             std::string glbUrl = "https://github.com/DroneDB/test_data/raw/refs/heads/master/3d/ToyCar.glb";
 
-            // Download GLB file directly (not a zip)
-            auto tempPath = std::filesystem::temp_directory_path() / "toycar-glb";
-            std::filesystem::create_directories(tempPath);
-            auto glbFile = tempPath / "ToyCar.glb";
-
-            // Download if not cached
-            if (!std::filesystem::exists(glbFile)) {
-                std::cout << "Downloading GLB file..." << std::endl;
-                cpr::Response r = cpr::Get(cpr::Url{glbUrl});
-                if (r.status_code != 200) {
-                    throw ddb::AppException("Failed to download GLB file: " + std::to_string(r.status_code));
-                }
-                std::ofstream out(glbFile, std::ios::binary);
-                out.write(r.text.data(), r.text.size());
-                out.close();
-            } else {
-                std::cout << "Using cached GLB file..." << std::endl;
-            }
-
-            // Set working directory to temp path
-            auto oldCwd = std::filesystem::current_path();
-            std::filesystem::current_path(tempPath);
+            // Create an instance of TestArea
+            TestArea testArea("toycar-glb");
+            auto glbFile = testArea.downloadTestAsset(glbUrl, "ToyCar.glb");
 
             // Output paths
             std::string outGeomPath;
             std::string outMtlPath;
 
             // Create absolute path for output
-            fs::path outputBasePath = tempPath / "output_toycar";
+            fs::path outputBasePath = testArea.getPath("output_toycar");
 
             // Convert GLB to 3D model (OBJ/PLY)
             convertGltfTo3dModel(glbFile.string(), outputBasePath.string(), outGeomPath, outMtlPath, false, true);
@@ -527,9 +443,6 @@ namespace
             verifyObjAndTextures(outGeomPath, outMtlPath);
 
             std::cout << "All files verified successfully!" << std::endl;
-
-            // Restore working directory
-            std::filesystem::current_path(oldCwd);
 
         }
         catch (const std::exception &e)
