@@ -256,6 +256,18 @@ namespace
 
             std::cout << "All files verified successfully!" << std::endl;
 
+            // Test nexus conversion from the converted OBJ
+            fs::path nexusOutput = fs::path(testFS.testFolder) / "model_from_gltf.nxz";
+            std::string nexusPath = buildNexus(outGeomPath, nexusOutput.string(), true);
+
+            // Verify nexus file was created
+            ASSERT_FALSE(nexusPath.empty());
+            ASSERT_TRUE(fs::exists(nexusPath));
+            ASSERT_GT(fs::file_size(nexusPath), 0);
+
+            std::cout << "Successfully created nexus file: " << nexusPath << std::endl;
+            std::cout << "Nexus file size: " << fs::file_size(nexusPath) << " bytes" << std::endl;
+
         }
         catch (const std::exception &e)
         {
@@ -302,6 +314,18 @@ namespace
             verifyObjAndTextures(outGeomPath, outMtlPath);
 
             std::cout << "All files verified successfully!" << std::endl;
+
+            // Test nexus conversion from the converted OBJ
+            fs::path nexusOutput = testArea.getPath("model_from_glb.nxz");
+            std::string nexusPath = buildNexus(outGeomPath, nexusOutput.string(), true);
+
+            // Verify nexus file was created
+            ASSERT_FALSE(nexusPath.empty());
+            ASSERT_TRUE(fs::exists(nexusPath));
+            ASSERT_GT(fs::file_size(nexusPath), 0);
+
+            std::cout << "Successfully created nexus file: " << nexusPath << std::endl;
+            std::cout << "Nexus file size: " << fs::file_size(nexusPath) << " bytes" << std::endl;
 
         }
         catch (const std::exception &e)
@@ -350,6 +374,18 @@ namespace
 
             std::cout << "All files verified successfully!" << std::endl;
 
+            // Test nexus conversion from the converted OBJ
+            fs::path nexusOutput = testArea.getPath("sunglasses.nxz");
+            std::string nexusPath = buildNexus(outGeomPath, nexusOutput.string(), true);
+
+            // Verify nexus file was created
+            ASSERT_FALSE(nexusPath.empty());
+            ASSERT_TRUE(fs::exists(nexusPath));
+            ASSERT_GT(fs::file_size(nexusPath), 0);
+
+            std::cout << "Successfully created nexus file: " << nexusPath << std::endl;
+            std::cout << "Nexus file size: " << fs::file_size(nexusPath) << " bytes" << std::endl;
+
         }
         catch (const std::exception &e)
         {
@@ -397,6 +433,18 @@ namespace
 
             std::cout << "All files verified successfully!" << std::endl;
 
+            // Test nexus conversion from the converted OBJ
+            fs::path nexusOutput = testArea.getPath("dish.nxz");
+            std::string nexusPath = buildNexus(outGeomPath, nexusOutput.string(), true);
+
+            // Verify nexus file was created
+            ASSERT_FALSE(nexusPath.empty());
+            ASSERT_TRUE(fs::exists(nexusPath));
+            ASSERT_GT(fs::file_size(nexusPath), 0);
+
+            std::cout << "Successfully created nexus file: " << nexusPath << std::endl;
+            std::cout << "Nexus file size: " << fs::file_size(nexusPath) << " bytes" << std::endl;
+
         }
         catch (const std::exception &e)
         {
@@ -443,6 +491,18 @@ namespace
             verifyObjAndTextures(outGeomPath, outMtlPath);
 
             std::cout << "All files verified successfully!" << std::endl;
+
+            // Test nexus conversion from the converted OBJ
+            fs::path nexusOutput = testArea.getPath("toycar.nxz");
+            std::string nexusPath = buildNexus(outGeomPath, nexusOutput.string(), true);
+
+            // Verify nexus file was created
+            ASSERT_FALSE(nexusPath.empty());
+            ASSERT_TRUE(fs::exists(nexusPath));
+            ASSERT_GT(fs::file_size(nexusPath), 0);
+
+            std::cout << "Successfully created nexus file: " << nexusPath << std::endl;
+            std::cout << "Nexus file size: " << fs::file_size(nexusPath) << " bytes" << std::endl;
 
         }
         catch (const std::exception &e)
