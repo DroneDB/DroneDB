@@ -32,9 +32,10 @@ find_package(unofficial-hash-library CONFIG REQUIRED)
 find_package(unofficial-sqlite3 CONFIG REQUIRED)
 find_package(SpatiaLite REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
-
-# Link PDAL libraries directly
-#target_link_libraries(${PROJECT_NAME} PRIVATE pdalcpp)
+find_package(assimp CONFIG REQUIRED)
+find_package(Ktx CONFIG REQUIRED)
+find_package(Stb REQUIRED)
+find_package(tinyobjloader CONFIG REQUIRED)
 
 find_path(BOOLINQ_INCLUDE_DIRS "boolinq/boolinq.h")
 
@@ -56,12 +57,27 @@ set(COMMON_LIBS
     unofficial::sqlite3::sqlite3
     spatialite::spatialite
     nxs
+    assimp::assimp
+    KTX::ktx
+    tinyobjloader::tinyobjloader
 )
+
 
 target_link_libraries(${PROJECT_NAME} PRIVATE ${COMMON_LIBS})
 
-# Include GeoTIFF directories
+# Exclude kubazip to avoid symbol conflicts with libzip
+# assimp depends on kubazip, but we already link libzip directly
+set_target_properties(${PROJECT_NAME} PROPERTIES
+    LINK_INTERFACE_LIBRARIES ""
+)
+get_target_property(ASSIMP_LINK_LIBRARIES assimp::assimp INTERFACE_LINK_LIBRARIES)
+if(ASSIMP_LINK_LIBRARIES)
+    list(REMOVE_ITEM ASSIMP_LINK_LIBRARIES "kubazip::kubazip")
+    set_target_properties(assimp::assimp PROPERTIES INTERFACE_LINK_LIBRARIES "${ASSIMP_LINK_LIBRARIES}")
+endif()
+
 target_include_directories(${PROJECT_NAME} PRIVATE ${GEOTIFF_INCLUDE_DIR})
+target_include_directories(${PROJECT_NAME} PRIVATE ${Stb_INCLUDE_DIR})
 
 # Include directories (public for external use)
 target_include_directories(${PROJECT_NAME} PUBLIC

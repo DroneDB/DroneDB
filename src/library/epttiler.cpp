@@ -33,14 +33,10 @@ namespace ddb
         // Open EPT
         int span;
         if (!getEptInfo(inputPath, eptInfo, 3857, &span))
-        {
             throw InvalidArgsException("Cannot get EPT info for " + inputPath);
-        }
 
         if (eptInfo.wktProjection.empty())
-        {
             throw InvalidArgsException("EPT file has no WKT SRS: " + inputPath);
-        }
 
         oMinX = eptInfo.polyBounds.getPoint(0).x;
         oMaxX = eptInfo.polyBounds.getPoint(2).x;

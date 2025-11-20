@@ -57,9 +57,8 @@ int main(int argc, char **argv)
 
         // If only cleaning was requested (no other arguments), exit
         if (argc == 1)
-        {
             return 0;
-        }
+
     }
 
     auto time = std::chrono::system_clock::now();

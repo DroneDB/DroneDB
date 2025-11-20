@@ -162,18 +162,18 @@ std::string DSMService::loadFromNetwork(double latitude, double longitude)
 
 bool DSMService::addGeoTIFFToCache(const fs::path &filePath, double latitude, double longitude)
 {
-    GDALDataset *dataset = static_cast<GDALDataset *>(GDALOpen(filePath.string().c_str(), GA_ReadOnly));
-    if (dataset == nullptr)
+    GDALDatasetH hDataset = GDALOpen(filePath.string().c_str(), GA_ReadOnly);
+    if (hDataset == nullptr)
         throw GDALException("Cannot open " + filePath.string());
 
     DSMCacheEntry e;
-    e.width = static_cast<unsigned int>(dataset->GetRasterXSize());
-    e.height = static_cast<unsigned int>(dataset->GetRasterYSize());
+    e.width = static_cast<unsigned int>(GDALGetRasterXSize(hDataset));
+    e.height = static_cast<unsigned int>(GDALGetRasterYSize(hDataset));
 
-    if (dataset->GetGeoTransform(e.geoTransform) != CE_None)
+    if (GDALGetGeoTransform(hDataset, e.geoTransform) != CE_None)
         throw GDALException("Cannot get geotransform for " + filePath.string());
 
-    std::string wkt = GDALGetProjectionRef(dataset);
+    std::string wkt = GDALGetProjectionRef(hDataset);
     if (wkt.empty())
         throw GDALException("Cannot get projection ref for " + filePath.string());
     //    char *wktp = const_cast<char *>(wkt.c_str());
@@ -185,10 +185,11 @@ bool DSMService::addGeoTIFFToCache(const fs::path &filePath, double latitude, do
 
     // TODO: support for DSM with EPSG different than 4326
     // if (!srs->IsSame(compare)) throw GDALException("Cannot read DSM values from raster: " + filePath.string() + " (EPSG != 4326)");
-    if (dataset->GetRasterCount() != 1)
+    if (GDALGetRasterCount(hDataset) != 1)
         throw GDALException("More than 1 raster band found in elevation raster: " + filePath.string());
 
-    e.nodata = static_cast<float>(dataset->GetRasterBand(1)->GetNoDataValue(&e.hasNodata));
+    GDALRasterBandH hBand = GDALGetRasterBand(hDataset, 1);
+    e.nodata = static_cast<float>(GDALGetRasterNoDataValue(hBand, &e.hasNodata));
 
     Point2D min(0, e.height);
     Point2D max(e.width, 0);
@@ -204,11 +205,11 @@ bool DSMService::addGeoTIFFToCache(const fs::path &filePath, double latitude, do
     {
         // Inside the boundaries, load data
         LOGD << position << " inside raster boundary, loading data from " << filePath.string();
-        e.loadData(dataset);
+        e.loadData(hDataset);
     }
 
     cache[filePath.filename().string()] = e;
-    GDALClose(dataset);
+    GDALClose(hDataset);
     // delete srs;
     // delete compare;
 
@@ -220,17 +221,17 @@ fs::path DSMService::getCacheDir()
     return UserProfile::get()->getProfilePath("dsm_service_cache", true);
 }
 
-void DSMCacheEntry::loadData(GDALDataset *dataset)
+void DSMCacheEntry::loadData(GDALDatasetH hDataset)
 {
-    GDALRasterBand *band = dataset->GetRasterBand(1);
+    GDALRasterBandH hBand = GDALGetRasterBand(hDataset, 1);
     data.clear();
     data.assign(width * height, 0.0f);
-    if (band->RasterIO(GF_Read, 0, 0, static_cast<int>(width),
-                       static_cast<int>(height),
-                       &data[0],
-                       static_cast<int>(width),
-                       static_cast<int>(height),
-                       GDT_Float32, 0, 0) != CE_None)
+    if (GDALRasterIO(hBand, GF_Read, 0, 0, static_cast<int>(width),
+                     static_cast<int>(height),
+                     &data[0],
+                     static_cast<int>(width),
+                     static_cast<int>(height),
+                     GDT_Float32, 0, 0) != CE_None)
     {
         throw GDALException("Cannot read raster data");
     }
