@@ -27,8 +27,9 @@ using homer6::Url;
 namespace ddb
 {
 
-    Registry::Registry(const std::string &url)
+    Registry::Registry(const std::string &url, bool sslVerify)
     {
+        this->sslVerify = sslVerify;
         std::string urlStr = url;
 
         if (urlStr.empty())
@@ -82,7 +83,8 @@ namespace ddb
     {
 
         auto res = cpr::Post(cpr::Url(this->getUrl("/users/authenticate")),
-                             cpr::Payload{{"username", username}, {"password", password}});
+                             cpr::Payload{{"username", username}, {"password", password}},
+                             cpr::VerifySsl(this->sslVerify));
 
         json j = res.text;
 
@@ -173,7 +175,8 @@ namespace ddb
 
         // LOGD << "Getting info of tag " << dataset << "/" << organization;
 
-        auto res = cpr::Get(cpr::Url(getUrl), utils::authCookie(this->authToken));
+        auto res = cpr::Get(cpr::Url(getUrl), utils::authCookie(this->authToken),
+                            cpr::VerifySsl(this->sslVerify));
 
         if (res.status_code == 404)
             throw RegistryNotFoundException("Dataset not found");
@@ -207,7 +210,8 @@ namespace ddb
         // char *buffer;
         size_t length;
 
-        auto res = cpr::Get(cpr::Url(downloadUrl), utils::authCookie(this->authToken));
+        auto res = cpr::Get(cpr::Url(downloadUrl), utils::authCookie(this->authToken),
+                            cpr::VerifySsl(this->sslVerify));
 
         if (res.status_code != 200)
             this->handleError(res);
@@ -222,7 +226,8 @@ namespace ddb
         this->ensureTokenValidity();
         const auto stampUrl = url + "/orgs/" + organization + "/ds/" + dataset + "/stamp";
 
-        auto res = cpr::Get(cpr::Url(stampUrl), utils::authCookie(this->authToken));
+        auto res = cpr::Get(cpr::Url(stampUrl), utils::authCookie(this->authToken),
+                            cpr::VerifySsl(this->sslVerify));
 
         if (res.status_code != 200)
             this->handleError(res);
@@ -293,7 +298,8 @@ namespace ddb
             io::createDirectories(destPath.parent_path());
 
             std::ofstream of(destPath, std::ios::binary);
-            auto res = cpr::Download(of, cpr::Url(downloadUrl), utils::authCookie(this->authToken), cpr::ProgressCallback(progressCb));
+            auto res = cpr::Download(of, cpr::Url(downloadUrl), utils::authCookie(this->authToken),
+                                     cpr::ProgressCallback(progressCb), cpr::VerifySsl(this->sslVerify));
 
             if (res.status_code != 200)
                 this->handleError(res);
@@ -316,7 +322,8 @@ namespace ddb
                                  cpr::WriteCallback([&of](const std::string_view& data, intptr_t) -> bool {
                                     of.write(data.data(), data.size());
                                     return true;
-                                 }));
+                                 }),
+                                 cpr::VerifySsl(this->sslVerify));
 
             of.close();
 
@@ -346,7 +353,8 @@ namespace ddb
         const auto metaDumpUrl = url + "/orgs/" + organization + "/ds/" + dataset + "/meta/dump";
 
         auto res = cpr::Post(cpr::Url(metaDumpUrl),
-                             utils::authCookie(this->authToken), cpr::Payload{{"ids", json(ids).dump()}});
+                             utils::authCookie(this->authToken), cpr::Payload{{"ids", json(ids).dump()}},
+                             cpr::VerifySsl(this->sslVerify));
 
         if (res.status_code != 200)
             this->handleError(res);

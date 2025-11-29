@@ -22,7 +22,8 @@ namespace ddb
                                     const std::string &tag,
                                     const std::string &password, bool recursive,
                                     const std::string &cwd,
-                                    const ShareCallback &cb)
+                                    const ShareCallback &cb,
+                                    bool sslVerify)
     {
         if (input.empty())
             throw InvalidArgsException("No files to share");
@@ -37,7 +38,7 @@ namespace ddb
         if (ac.empty())
             throw AuthException("No authentication credentials stored");
 
-        Registry reg(tc.registryUrl);
+        Registry reg(tc.registryUrl, sslVerify);
         reg.login(ac.username, ac.password); // Will throw error on login failed
 
         ShareClient client(&reg);
