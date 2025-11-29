@@ -86,7 +86,7 @@ namespace ddb
                              cpr::Payload{{"username", username}, {"password", password}},
                              cpr::VerifySsl(this->sslVerify));
 
-        json j = res.text;
+        json j = json::parse(res.text);
 
         if (res.status_code == 200)
         {
@@ -186,7 +186,7 @@ namespace ddb
 
         // LOGD << "Data: " << res.text;
 
-        const json j = res.text;
+        const json j = json::parse(res.text);
 
         if (j.empty())
             throw RegistryException("Invalid empty response from registry");
@@ -840,7 +840,7 @@ namespace ddb
         {
             // LOGD << "Request error: " << res.text;
 
-            json j = res.text;
+            json j = json::parse(res.text);
             if (j.contains("error"))
                 throw RegistryException("Error response from registry: " +
                                         j["error"].get<std::string>());

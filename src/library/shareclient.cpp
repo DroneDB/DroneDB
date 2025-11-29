@@ -40,7 +40,7 @@ namespace ddb
         if (res.status_code != 200)
             this->registry->handleError(res);
 
-        json j = res.text;
+        json j = json::parse(res.text);
         if (!j.contains("token"))
             this->registry->handleError(res);
         this->token = j["token"];
@@ -85,7 +85,7 @@ namespace ddb
                 if (res.status_code != 200)
                     this->registry->handleError(res);
 
-                json j = res.text;
+                json j = json::parse(res.text);
 
                 if (!j.contains("hash"))
                     this->registry->handleError(res);
@@ -127,7 +127,7 @@ namespace ddb
                 if (res.status_code != 200)
                     this->registry->handleError(res);
 
-                json j = res.text;
+                json j = json::parse(res.text);
                 if (!j.contains("url"))
                     this->registry->handleError(res);
 

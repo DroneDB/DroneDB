@@ -29,7 +29,7 @@ namespace ddb
         if (res.status_code != 200)
             this->registry->handleError(res);
 
-        json j = res.text;
+        json j = json::parse(res.text);
 
         if (j.contains("pullRequired") && j["pullRequired"].get<bool>())
             throw PullRequiredException("The remote has new changes. Use \"ddb pull\" to get the latest changes before pushing.");
