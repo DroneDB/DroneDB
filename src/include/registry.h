@@ -66,10 +66,15 @@ namespace ddb
 
         time_t tokenExpiration;
 
+        // SSL verification flag (default: true)
+        bool sslVerify = true;
+
     public:
-        DDB_DLL Registry(const std::string &url = DEFAULT_REGISTRY);
+        DDB_DLL Registry(const std::string &url = DEFAULT_REGISTRY, bool sslVerify = true);
 
         DDB_DLL std::string getUrl(const std::string &path = "") const;
+        DDB_DLL bool getSslVerify() const { return sslVerify; }
+        DDB_DLL void setSslVerify(bool verify) { sslVerify = verify; }
         DDB_DLL std::string login();
 
         DDB_DLL std::string getAuthToken();

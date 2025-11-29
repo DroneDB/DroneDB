@@ -18,7 +18,7 @@
 namespace ddb
 {
 
-    void clone(const TagComponents &tag, const std::string &folder)
+    void clone(const TagComponents &tag, const std::string &folder, bool sslVerify)
     {
         if (fs::exists(folder) && !fs::is_empty(folder))
         {
@@ -35,7 +35,7 @@ namespace ddb
         const AuthCredentials ac =
             UserProfile::get()->getAuthManager()->loadCredentials(tag.registryUrl);
 
-        Registry reg(tag.registryUrl);
+        Registry reg(tag.registryUrl, sslVerify);
 
         try
         {

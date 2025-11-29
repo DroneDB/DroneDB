@@ -23,12 +23,13 @@ namespace ddb
                                                              this->dataset + "/push/init")),
                              cpr::Payload{{"checksum", registryStampChecksum},
                                           {"stamp", dbStamp.dump()}},
-                             utils::authHeader(this->registry->getAuthToken()));
+                             utils::authHeader(this->registry->getAuthToken()),
+                             cpr::VerifySsl(this->registry->getSslVerify()));
 
         if (res.status_code != 200)
             this->registry->handleError(res);
 
-        json j = res.text;
+        json j = json::parse(res.text);
 
         if (j.contains("pullRequired") && j["pullRequired"].get<bool>())
             throw PullRequiredException("The remote has new changes. Use \"ddb pull\" to get the latest changes before pushing.");
@@ -51,7 +52,8 @@ namespace ddb
                              cpr::Multipart{{"file", cpr::File{fullPath}},
                                             {"path", file},
                                             {"token", token}},
-                             utils::authHeader(this->registry->getAuthToken()));
+                             utils::authHeader(this->registry->getAuthToken()),
+                             cpr::VerifySsl(this->registry->getSslVerify()));
 
         if (res.status_code != 200)
             this->registry->handleError(res);
@@ -63,7 +65,8 @@ namespace ddb
                                                              this->dataset + "/push/meta")),
                              cpr::Payload{{"meta", metaDump.dump()},
                                           {"token", token}},
-                             utils::authHeader(this->registry->getAuthToken()));
+                             utils::authHeader(this->registry->getAuthToken()),
+                             cpr::VerifySsl(this->registry->getSslVerify()));
 
         if (res.status_code != 200)
             this->registry->handleError(res);
@@ -76,7 +79,8 @@ namespace ddb
         auto res = cpr::Post(cpr::Url(this->registry->getUrl("/orgs/" + this->organization + "/ds/" +
                                                              this->dataset + "/push/commit")),
                              cpr::Payload{{"token", token}},
-                             utils::authHeader(this->registry->getAuthToken()));
+                             utils::authHeader(this->registry->getAuthToken()),
+                             cpr::VerifySsl(this->registry->getSslVerify()));
 
         if (res.status_code != 200)
             this->registry->handleError(res);

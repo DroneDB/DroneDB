@@ -15,7 +15,7 @@
 namespace ddb
 {
 
-    DDB_DLL void pull(const std::string &registry, MergeStrategy mergeStrategy)
+    DDB_DLL void pull(const std::string &registry, MergeStrategy mergeStrategy, bool sslVerify)
     {
         const auto currentPath = fs::current_path().string();
 
@@ -41,7 +41,7 @@ namespace ddb
             UserProfile::get()->getAuthManager()->loadCredentials(
                 registryUrl);
 
-        Registry reg(registryUrl);
+        Registry reg(registryUrl, sslVerify);
 
         try
         {

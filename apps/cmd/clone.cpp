@@ -26,7 +26,8 @@ namespace cmd
             .custom_help("clone (tag|url) folder")
             .add_options()
             ("t,target", "Repository tag or full url", cxxopts::value<std::string>())
-            ("f,folder", "Target folder", cxxopts::value<std::string>()->default_value(""));
+            ("f,folder", "Target folder", cxxopts::value<std::string>()->default_value(""))
+            ("k,insecure", "Disable SSL certificate verification", cxxopts::value<bool>());
 
         // clang-format on
         opts.parse_positional({"target", "folder"});
@@ -59,9 +60,11 @@ namespace cmd
 
             const auto folder = fs::absolute(folderRaw.length() > 0 ? folderRaw : tag.dataset);
 
+            auto sslVerify = opts["insecure"].count() == 0;
+
             LOGD << "Normalized folder = " << folder.generic_string();
 
-            clone(tag, folder.generic_string());
+            clone(tag, folder.generic_string(), sslVerify);
         }
         catch (ddb::InvalidArgsException)
         {

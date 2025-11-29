@@ -10,9 +10,6 @@
 [submodule "vendor/zonedetect"]
 	path = vendor/zonedetect
 	url = https://github.com/BertoldVdb/ZoneDetect.git
-[submodule "nodejs/js"]
-	path = nodejs/js
-	url = https://github.com/DroneDB/DDB.js
 [submodule "vcpkg"]
 	path = vcpkg
 	url = https://github.com/microsoft/vcpkg.git

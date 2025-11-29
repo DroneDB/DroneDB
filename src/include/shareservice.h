@@ -31,7 +31,8 @@ namespace ddb
                                   const std::string &tag,
                                   const std::string &password, bool recursive,
                                   const std::string &cwd = "",
-                                  const ShareCallback &cb = nullptr);
+                                  const ShareCallback &cb = nullptr,
+                                  bool sslVerify = true);
     };
 
 } // namespace ddb

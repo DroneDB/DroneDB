@@ -30,7 +30,8 @@ namespace cmd
             .add_options()
             ("r,remote", "The remote Registry", cxxopts::value<std::string>()->default_value(""))
             ("t,keep-theirs", "Keep changes from remote registry and override local ones", cxxopts::value<bool>()->default_value("false"))
-            ("o,keep-ours", "Keep local changes override remote ones", cxxopts::value<bool>()->default_value("false"));
+            ("o,keep-ours", "Keep local changes override remote ones", cxxopts::value<bool>()->default_value("false"))
+            ("k,insecure", "Disable SSL certificate verification", cxxopts::value<bool>());
 
         // clang-format on
         // opts.parse_positional({"remote"});
@@ -50,6 +51,7 @@ namespace cmd
             const auto keepOurs = opts["keep-ours"].as<bool>();
 
             auto remote = opts["remote"].as<std::string>();
+            auto sslVerify = opts["insecure"].count() == 0;
 
             ddb::MergeStrategy mergeStrategy = ddb::MergeStrategy::DontMerge;
             if (keepTheirs)
@@ -57,7 +59,7 @@ namespace cmd
             else if (keepOurs)
                 mergeStrategy = ddb::MergeStrategy::KeepOurs;
 
-            ddb::pull(remote, mergeStrategy);
+            ddb::pull(remote, mergeStrategy, sslVerify);
         }
         catch (ddb::IndexException &e)
         {

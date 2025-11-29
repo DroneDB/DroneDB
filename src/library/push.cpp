@@ -19,7 +19,7 @@
 namespace ddb
 {
 
-    DDB_DLL void push(const std::string &registry)
+    DDB_DLL void push(const std::string &registry, bool sslVerify)
     {
 
         const auto currentPath = fs::current_path().string();
@@ -44,7 +44,7 @@ namespace ddb
         const AuthCredentials ac =
             UserProfile::get()->getAuthManager()->loadCredentials(registryUrl);
 
-        Registry reg(registryUrl);
+        Registry reg(registryUrl, sslVerify);
 
         try
         {
