@@ -34,14 +34,18 @@ namespace ddb
         utils::trim(t);
         utils::toLower(t);
 
+        // Remove trailing slashes
+        while (!t.empty() && t.back() == '/')
+            t.pop_back();
+
         auto pos = t.rfind('/');
         if (pos == std::string::npos)
             throw InvalidArgsException("Invalid tag: " + tag +
                                        " must be in organization/dataset format");
 
         TagComponents res;
-        res.dataset = t.substr(pos + 1, t.length() - 1);
-        t = t.substr(0, t.length() - res.dataset.length() - 1);
+        res.dataset = t.substr(pos + 1);
+        t = t.substr(0, pos);
 
         pos = t.rfind('/');
         auto useDefaultRegistry = false;
@@ -53,7 +57,7 @@ namespace ddb
         }
         else
         {
-            res.organization = t.substr(pos + 1, t.length() - 1);
+            res.organization = t.substr(pos + 1);
         }
         t = t.substr(0, t.length() - res.organization.length() - 1);
 
@@ -102,10 +106,11 @@ namespace ddb
     }
 
     Registry RegistryUtils::createFromTag(const std::string &tag,
-                                          bool useInsecureRegistry)
+                                          bool useInsecureRegistry,
+                                          bool sslVerify)
     {
         const auto tc = parseTag(tag, useInsecureRegistry);
-        return Registry(tc.registryUrl);
+        return Registry(tc.registryUrl, sslVerify);
     }
 
     std::string TagComponents::tagWithoutUrl() const

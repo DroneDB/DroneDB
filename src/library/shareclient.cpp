@@ -34,12 +34,13 @@ namespace ddb
 
         cpr::Response res = cpr::Post(cpr::Url(this->registry->getUrl("/share/init")),
                                       utils::authHeader(this->registry->getAuthToken()),
-                                      cpr::Payload{{"tag", tag}, {"password", password}});
+                                      cpr::Payload{{"tag", tag}, {"password", password}},
+                                      cpr::VerifySsl(this->registry->getSslVerify()));
 
         if (res.status_code != 200)
             this->registry->handleError(res);
 
-        json j = res.text;
+        json j = json::parse(res.text);
         if (!j.contains("token"))
             this->registry->handleError(res);
         this->token = j["token"];
@@ -77,13 +78,14 @@ namespace ddb
                                      cpr::ProgressCallback([&cb, &filename](size_t, size_t, size_t uploadTotal, size_t uploadNow, intptr_t) -> bool
                                                            {
                         if (cb == nullptr) return true;
-                        return cb(filename, uploadNow, uploadTotal); }));
+                        return cb(filename, uploadNow, uploadTotal); }),
+                                     cpr::VerifySsl(this->registry->getSslVerify()));
 
 
                 if (res.status_code != 200)
                     this->registry->handleError(res);
 
-                json j = res.text;
+                json j = json::parse(res.text);
 
                 if (!j.contains("hash"))
                     this->registry->handleError(res);
@@ -119,12 +121,13 @@ namespace ddb
                 this->registry->ensureTokenValidity();
 
                 auto res = cpr::Post(cpr::Url(this->registry->getUrl("/share/commit/" + this->token)),
-                                     utils::authHeader(this->registry->getAuthToken()));
+                                     utils::authHeader(this->registry->getAuthToken()),
+                                     cpr::VerifySsl(this->registry->getSslVerify()));
 
                 if (res.status_code != 200)
                     this->registry->handleError(res);
 
-                json j = res.text;
+                json j = json::parse(res.text);
                 if (!j.contains("url"))
                     this->registry->handleError(res);
 

@@ -25,7 +25,8 @@ namespace cmd
             .positional_help("[args]")
             .custom_help("push [remote]")
             .add_options()
-                ("r,remote", "The remote Registry", cxxopts::value<std::string>()->default_value(""));
+                ("r,remote", "The remote Registry", cxxopts::value<std::string>()->default_value(""))
+                ("k,insecure", "Disable SSL certificate verification", cxxopts::value<bool>());
 
         // clang-format on
         opts.parse_positional({"remote"});
@@ -41,8 +42,9 @@ namespace cmd
         try
         {
             const auto remote = opts["remote"].as<std::string>();
+            auto sslVerify = opts["insecure"].count() == 0;
 
-            ddb::push(remote);
+            ddb::push(remote, sslVerify);
         }
         catch (ddb::IndexException &e)
         {

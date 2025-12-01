@@ -40,10 +40,10 @@ namespace ddb
 
     DDB_DLL std::string initIndex(const std::string &directory, bool fromScratch = false);
 
-    DDB_DLL void clone(const ddb::TagComponents &tag, const std::string &folder);
+    DDB_DLL void clone(const ddb::TagComponents &tag, const std::string &folder, bool sslVerify = true);
 
-    DDB_DLL void push(const std::string &registry);
-    DDB_DLL void pull(const std::string &registry, MergeStrategy mergeStrategy);
+    DDB_DLL void push(const std::string &registry, bool sslVerify = true);
+    DDB_DLL void pull(const std::string &registry, MergeStrategy mergeStrategy, bool sslVerify = true);
 
 }
 

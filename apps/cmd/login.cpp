@@ -19,7 +19,8 @@ namespace cmd
     .add_options()
     ("server", "Registry server to authenticate to", cxxopts::value<std::string>()->default_value(DEFAULT_REGISTRY))
     ("u,username", "Username", cxxopts::value<std::string>())
-    ("p,password", "Password", cxxopts::value<std::string>());
+    ("p,password", "Password", cxxopts::value<std::string>())
+    ("k,insecure", "Disable SSL certificate verification", cxxopts::value<bool>());
         // clang-format on
         opts.parse_positional({"server"});
     }
@@ -52,7 +53,9 @@ namespace cmd
             password = ddb::utils::getPass("Password: ");
         }
 
-        ddb::Registry reg(opts["server"].as<std::string>());
+        auto sslVerify = opts["insecure"].count() == 0;
+
+        ddb::Registry reg(opts["server"].as<std::string>(), sslVerify);
         std::string token = reg.login(username, password);
         if (token.length() > 0)
         {

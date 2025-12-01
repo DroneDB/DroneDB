@@ -26,7 +26,7 @@ namespace ddb
     {
     public:
         DDB_DLL static TagComponents parseTag(const std::string &tag, bool useInsecureRegistry = false);
-        DDB_DLL static Registry createFromTag(const std::string &tag, bool useInsecureRegistry = false);
+        DDB_DLL static Registry createFromTag(const std::string &tag, bool useInsecureRegistry = false, bool sslVerify = true);
     };
 
 }

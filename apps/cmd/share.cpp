@@ -25,7 +25,8 @@ namespace cmd
             ("t,tag", "Tag to use (organization/dataset or server[:port]/organization/dataset)", cxxopts::value<std::string>()->default_value(DEFAULT_REGISTRY "//"))
             ("p,password", "Optional password to protect dataset", cxxopts::value<std::string>()->default_value(""))
             ("s,server", "Registry server to share dataset with (alias of: -t <server>//)", cxxopts::value<std::string>())
-            ("q,quiet", "Do not display progress", cxxopts::value<bool>());
+            ("q,quiet", "Do not display progress", cxxopts::value<bool>())
+            ("k,insecure", "Disable SSL certificate verification", cxxopts::value<bool>());
 
         opts.parse_positional({"input"});
     }
@@ -51,6 +52,7 @@ namespace cmd
         auto password = opts["password"].as<std::string>();
         auto recursive = opts["recursive"].count() > 0;
         auto quiet = opts["quiet"].count() > 0;
+        auto sslVerify = opts["insecure"].count() == 0;
         auto cwd = ddb::io::getCwd().string();
 
         ProgressBar pb;
@@ -81,7 +83,7 @@ namespace cmd
         auto share = [&]()
         {
             const std::string url =
-                ss.share(input, tag, password, recursive, cwd, showProgress);
+                ss.share(input, tag, password, recursive, cwd, showProgress, sslVerify);
             if (!quiet)
                 pb.done();
             std::cout << url << std::endl;
@@ -97,7 +99,7 @@ namespace cmd
             auto username = ddb::utils::getPrompt("Username: ");
             auto password = ddb::utils::getPass("Password: ");
 
-            ddb::Registry reg = ddb::RegistryUtils::createFromTag(tag);
+            ddb::Registry reg = ddb::RegistryUtils::createFromTag(tag, false, sslVerify);
             if (reg.login(username, password).length() > 0)
             {
                 // Retry
