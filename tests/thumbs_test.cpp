@@ -277,4 +277,37 @@ TEST(thumbnail, pointCloudComplex) {
 
 }
 
+// Test for images with palette (indexed color) - these require special handling
+// as GDAL opens them as 1-band images but WebP requires 3 or 4 bands.
+// This test ensures that palette images are correctly expanded to RGB/RGBA
+// before conversion to WebP format.
+TEST(thumbnail, paletteImage) {
+    TestArea ta(TEST_NAME);
+    fs::path img = ta.downloadTestAsset(
+        "https://github.com/DroneDB/test_data/raw/refs/heads/master/images/img-palette.png",
+        "img-palette.png");
+
+    // Generate WebP thumbnail to file
+    fs::path outFile = ta.getPath("palette-thumb.webp");
+    ddb::generateThumb(img, 256, outFile, true);
+
+    // Verify thumbnail exists and is valid
+    EXPECT_TRUE(fs::exists(outFile)) << "Palette image thumbnail file should exist";
+    EXPECT_TRUE(isWebPImageNonEmpty(outFile)) << "Palette image thumbnail should not be empty";
+
+    // Test in-memory generation
+    uint8_t* buffer;
+    int bufSize;
+    ddb::generateThumb(img, 256, "", true, &buffer, &bufSize);
+
+    EXPECT_TRUE(bufSize > 0) << "In-memory palette thumbnail should have content";
+    EXPECT_NE(buffer, nullptr) << "In-memory buffer should not be null";
+
+    // Verify the in-memory result matches the file
+    EXPECT_EQ(io::Path(outFile).getSize(), bufSize)
+        << "File and memory thumbnail sizes should match";
+
+    DDBVSIFree(buffer);
+}
+
 }  // namespace

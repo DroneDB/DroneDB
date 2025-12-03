@@ -113,6 +113,27 @@ void generateImageThumb(const fs::path& imagePath,
     const int height = GDALGetRasterYSize(hSrcDataset);
     const int bandCount = GDALGetRasterCount(hSrcDataset);
 
+    // Check if image has a color table (palette/indexed color)
+    GDALRasterBandH hBand = GDALGetRasterBand(hSrcDataset, 1);
+    GDALColorTableH hColorTable = GDALGetRasterColorTable(hBand);
+    const bool hasPalette = (hColorTable != nullptr);
+
+    // Check for nodata
+    int hasNoData = 0;
+    double srcNoData = GDALGetRasterNoDataValue(hBand, &hasNoData);
+
+    // Check if palette has transparency (RGBA entries)
+    bool paletteHasAlpha = false;
+    if (hasPalette) {
+        const int colorCount = GDALGetColorEntryCount(hColorTable);
+        for (int i = 0; i < colorCount && !paletteHasAlpha; i++) {
+            const GDALColorEntry* entry = GDALGetColorEntry(hColorTable, i);
+            if (entry && entry->c4 < 255) {
+                paletteHasAlpha = true;
+            }
+        }
+    }
+
     int targetWidth;
     int targetHeight;
 
@@ -135,46 +156,77 @@ void generateImageThumb(const fs::path& imagePath,
     targs = CSLAddString(targs, "-ot");
     targs = CSLAddString(targs, "Byte");
 
-    // Using average resampling method
+    // Using average resampling method (but use nearest for palette to avoid color artifacts)
     targs = CSLAddString(targs, "-r");
-    targs = CSLAddString(targs, "average");
+    targs = CSLAddString(targs, hasPalette ? "nearest" : "average");
 
-    // Auto-scale values to 0-255 range
-    targs = CSLAddString(targs, "-scale");
+    // WebP driver supports only 3 (RGB) or 4 (RGBA) bands
+    // Handle different image types:
+    // - Palette images (1 band + color table): expand to RGB or RGBA
+    // - Grayscale (1 band, no color table): expand to RGB
+    // - Grayscale + Alpha (2 bands): expand to RGBA
+    // - RGB (3 bands): keep as is
+    // - RGBA or more (4+ bands): select first 3 or 4 bands
 
-    // Detect and preserve nodata from source
-    int hasNoData;
-    double srcNoData = GDALGetRasterNoDataValue(
-        GDALGetRasterBand(hSrcDataset, 1),
-        &hasNoData);  // Band handling: WebP supports only 3 (RGB) or 4 (RGBA) bands
-    if (hasNoData) {
-        // With nodata, use 4 bands (RGBA) for transparency
-        if (bandCount >= 3) {
+    if (hasPalette) {
+        // Palette/indexed color image: expand to RGB or RGBA
+        // Use -expand to convert palette to actual RGB(A) values
+        targs = CSLAddString(targs, "-expand");
+        targs = CSLAddString(targs, paletteHasAlpha ? "rgba" : "rgb");
+        LOGD << "Expanding palette image to " << (paletteHasAlpha ? "RGBA" : "RGB");
+    } else if (bandCount == 1) {
+        // Single band grayscale image: expand to RGB
+        targs = CSLAddString(targs, "-expand");
+        targs = CSLAddString(targs, "rgb");
+        // Auto-scale values to 0-255 range for grayscale
+        targs = CSLAddString(targs, "-scale");
+        LOGD << "Expanding grayscale image to RGB";
+    } else if (bandCount == 2) {
+        // Grayscale + Alpha: expand to RGBA
+        targs = CSLAddString(targs, "-expand");
+        targs = CSLAddString(targs, "rgba");
+        targs = CSLAddString(targs, "-scale");
+        LOGD << "Expanding grayscale+alpha image to RGBA";
+    } else if (bandCount >= 3) {
+        // RGB or more bands: scale and select bands
+        targs = CSLAddString(targs, "-scale");
+
+        if (hasNoData) {
+            // With nodata, use 4 bands (RGBA) for transparency
             targs = CSLAddString(targs, "-b");
             targs = CSLAddString(targs, "1");
             targs = CSLAddString(targs, "-b");
             targs = CSLAddString(targs, "2");
             targs = CSLAddString(targs, "-b");
             targs = CSLAddString(targs, "3");
-        }
 
-        // Set nodata value on destination dataset
-        targs = CSLAddString(targs, "-a_nodata");
-        std::ostringstream oss;
-        oss << std::fixed << std::setprecision(0) << srcNoData;
-        targs = CSLAddString(targs, oss.str().c_str());
+            // Set nodata value on destination dataset
+            targs = CSLAddString(targs, "-a_nodata");
+            std::ostringstream oss;
+            oss << std::fixed << std::setprecision(0) << srcNoData;
+            targs = CSLAddString(targs, oss.str().c_str());
 
-        // Create alpha channel from nodata values for transparency
-        targs = CSLAddString(targs, "-dstalpha");
-    } else {
-        // Without nodata, use only 3 bands (RGB)
-        if (bandCount > 3) {
+            // Create alpha channel from nodata values for transparency
+            targs = CSLAddString(targs, "-dstalpha");
+            LOGD << "Using RGB + alpha from nodata";
+        } else if (bandCount > 3) {
+            // More than 3 bands without nodata: use first 3 (RGB) or 4 (RGBA)
             targs = CSLAddString(targs, "-b");
             targs = CSLAddString(targs, "1");
             targs = CSLAddString(targs, "-b");
             targs = CSLAddString(targs, "2");
             targs = CSLAddString(targs, "-b");
             targs = CSLAddString(targs, "3");
+            if (bandCount >= 4) {
+                // Include alpha channel if available
+                targs = CSLAddString(targs, "-b");
+                targs = CSLAddString(targs, "4");
+                LOGD << "Using RGBA (4 bands)";
+            } else {
+                LOGD << "Using RGB (3 bands from " << bandCount << ")";
+            }
+        } else {
+            LOGD << "Using RGB (3 bands)";
         }
     }
 
@@ -190,47 +242,64 @@ void generateImageThumb(const fs::path& imagePath,
     // Remove SRS
     targs = CSLAddString(targs, "-a_srs");
     targs = CSLAddString(targs, "");
-    /*
-        // Max 3 bands
-        if (GDALGetRasterCount(hSrcDataset) > 3) {
-            targs = CSLAddString(targs, "-b");
-            targs = CSLAddString(targs, "1");
-            targs = CSLAddString(targs, "-b");
-            targs = CSLAddString(targs, "2");
-            targs = CSLAddString(targs, "-b");
-            targs = CSLAddString(targs, "3");
-        }*/
 
     CPLSetConfigOption("GDAL_PAM_ENABLED", "NO");  // avoid aux files
-    // CPLSetConfigOption("GDAL_ALLOW_LARGE_LIBJPEG_MEM_ALLOC", "YES"); // Avoids ERROR 6: Reading
-    // this image would require libjpeg to allocate at least 107811081 bytes
 
     GDALTranslateOptions* psOptions = GDALTranslateOptionsNew(targs, nullptr);
     CSLDestroy(targs);
+
+    if (!psOptions) {
+        GDALClose(hSrcDataset);
+        throw GDALException("Failed to create GDAL translate options for " + openPath);
+    }
+
     bool writeToMemory = outImagePath.empty() && outBuffer != nullptr;
     if (writeToMemory) {
         // Write to memory via vsimem (assume WebP driver)
         std::string vsiPath = "/vsimem/" + utils::generateRandomString(32) + ".webp";
         GDALDatasetH hNewDataset = GDALTranslate(vsiPath.c_str(), hSrcDataset, psOptions, nullptr);
+
+        if (!hNewDataset) {
+            GDALTranslateOptionsFree(psOptions);
+            GDALClose(hSrcDataset);
+            throw GDALException("Failed to generate thumbnail for " + openPath +
+                                " (GDALTranslate returned null)");
+        }
+
         GDALFlushCache(hNewDataset);
         GDALClose(hNewDataset);
 
         // Read memory to buffer
         vsi_l_offset bufSize;
         *outBuffer = VSIGetMemFileBuffer(vsiPath.c_str(), &bufSize, TRUE);
-        if (bufSize > std::numeric_limits<int>::max())
+        if (*outBuffer == nullptr) {
+            GDALTranslateOptionsFree(psOptions);
+            GDALClose(hSrcDataset);
+            throw GDALException("Failed to read thumbnail from memory for " + openPath);
+        }
+        if (bufSize > std::numeric_limits<int>::max()) {
+            GDALTranslateOptionsFree(psOptions);
+            GDALClose(hSrcDataset);
             throw GDALException("Exceeded max buf size");
-        *outBufferSize = bufSize;
+        }
+        *outBufferSize = static_cast<int>(bufSize);
     } else {
         // Write directly to file
         GDALDatasetH hNewDataset =
             GDALTranslate(outImagePath.string().c_str(), hSrcDataset, psOptions, nullptr);
+
+        if (!hNewDataset) {
+            GDALTranslateOptionsFree(psOptions);
+            GDALClose(hSrcDataset);
+            throw GDALException("Failed to generate thumbnail for " + openPath +
+                                " (GDALTranslate returned null)");
+        }
+
         GDALFlushCache(hNewDataset);
         GDALClose(hNewDataset);
     }
 
     GDALTranslateOptionsFree(psOptions);
-    // GDALClose(hSrcVrt);
     GDALClose(hSrcDataset);
 }
 
