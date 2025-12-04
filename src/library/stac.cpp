@@ -65,6 +65,8 @@ namespace ddb
                 try
                 {
                     j["properties"] = json::parse(q->getText(1), nullptr, false);
+                    // Add title to properties for better display in STAC browsers
+                    j["properties"]["title"] = path;
                     j["geometry"] = json::parse(q->getText(2), nullptr, false);
                 }
                 catch (json::exception &e)
