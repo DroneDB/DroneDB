@@ -4,9 +4,12 @@
 
 #include "thumbs.h"
 
+#include <chrono>
 #include <fstream>
+#include <thread>
 
 #include "ddb.h"
+#include "exceptions.h"
 #include "gtest/gtest.h"
 #include "hash.h"
 #include "mio.h"
@@ -308,6 +311,172 @@ TEST(thumbnail, paletteImage) {
         << "File and memory thumbnail sizes should match";
 
     DDBVSIFree(buffer);
+}
+
+// =============================================================================
+// Edge Cases Tests
+// =============================================================================
+
+// Test that invalid thumbSize values are rejected
+TEST(thumbnail, invalidThumbSize) {
+    TestArea ta(TEST_NAME);
+    fs::path ortho = ta.downloadTestAsset(
+        "https://github.com/DroneDB/test_data/raw/master/brighton/odm_orthophoto.tif",
+        "odm_orthophoto.tif");
+
+    fs::path outFile = ta.getPath("output.webp");
+
+    // thumbSize = 0 should throw
+    EXPECT_THROW(ddb::generateThumb(ortho.string(), 0, outFile, true), ddb::InvalidArgsException)
+        << "thumbSize = 0 should throw InvalidArgsException";
+
+    // thumbSize = -1 should throw
+    EXPECT_THROW(ddb::generateThumb(ortho.string(), -1, outFile, true), ddb::InvalidArgsException)
+        << "thumbSize = -1 should throw InvalidArgsException";
+
+    // thumbSize = -100 should throw
+    EXPECT_THROW(ddb::generateThumb(ortho.string(), -100, outFile, true), ddb::InvalidArgsException)
+        << "Negative thumbSize should throw InvalidArgsException";
+}
+
+// Test that non-existent input file throws appropriate exception
+TEST(thumbnail, nonExistentFile) {
+    TestArea ta(TEST_NAME);
+    fs::path nonExistent = ta.getPath("this_file_does_not_exist.tif");
+    fs::path outFile = ta.getPath("output.webp");
+
+    EXPECT_THROW(ddb::generateThumb(nonExistent.string(), 256, outFile, true), ddb::FSException)
+        << "Non-existent file should throw FSException";
+}
+
+// Test that corrupted/invalid image file throws appropriate exception
+TEST(thumbnail, corruptedFile) {
+    TestArea ta(TEST_NAME);
+
+    // Create a corrupted "image" file (just random bytes)
+    fs::path corruptedFile = ta.getPath("corrupted.tif");
+    std::ofstream ofs(corruptedFile.string(), std::ios::binary);
+    ofs << "This is not a valid TIFF file content - just garbage data!";
+    ofs.close();
+
+    fs::path outFile = ta.getPath("output.webp");
+
+    // Should throw GDALException when trying to open invalid file
+    EXPECT_THROW(ddb::generateThumb(corruptedFile.string(), 256, outFile, true), ddb::GDALException)
+        << "Corrupted file should throw GDALException";
+}
+
+// Test that empty file throws appropriate exception
+TEST(thumbnail, emptyFile) {
+    TestArea ta(TEST_NAME);
+
+    // Create an empty file
+    fs::path emptyFile = ta.getPath("empty.tif");
+    std::ofstream ofs(emptyFile.string(), std::ios::binary);
+    ofs.close();  // Close immediately, creating 0-byte file
+
+    fs::path outFile = ta.getPath("output.webp");
+
+    // Should throw GDALException when trying to open empty file
+    EXPECT_THROW(ddb::generateThumb(emptyFile.string(), 256, outFile, true), ddb::GDALException)
+        << "Empty file should throw GDALException";
+}
+
+// Test thumbnail generation with very small thumbSize (edge case)
+TEST(thumbnail, verySmallThumbSize) {
+    TestArea ta(TEST_NAME);
+    fs::path ortho = ta.downloadTestAsset(
+        "https://github.com/DroneDB/test_data/raw/master/brighton/odm_orthophoto.tif",
+        "odm_orthophoto.tif");
+
+    // Test with minimum valid size (1 pixel)
+    fs::path outFile1 = ta.getPath("tiny_thumb_1.webp");
+    EXPECT_NO_THROW(ddb::generateThumb(ortho.string(), 1, outFile1, true))
+        << "thumbSize = 1 should be valid";
+    EXPECT_TRUE(fs::exists(outFile1)) << "1px thumbnail should be created";
+    EXPECT_GT(io::Path(outFile1).getSize(), 0) << "1px thumbnail should have some content";
+
+    // Test with very small size (2 pixels)
+    fs::path outFile2 = ta.getPath("tiny_thumb_2.webp");
+    EXPECT_NO_THROW(ddb::generateThumb(ortho.string(), 2, outFile2, true))
+        << "thumbSize = 2 should be valid";
+    EXPECT_TRUE(fs::exists(outFile2)) << "2px thumbnail should be created";
+
+    // Test with small size (32 pixels) - should have valid WebP content
+    fs::path outFile32 = ta.getPath("small_thumb_32.webp");
+    EXPECT_NO_THROW(ddb::generateThumb(ortho.string(), 32, outFile32, true))
+        << "thumbSize = 32 should be valid";
+    EXPECT_TRUE(fs::exists(outFile32)) << "32px thumbnail should be created";
+    // Small thumbnails may not reach 1KB threshold, just check file exists and has content
+    EXPECT_GT(io::Path(outFile32).getSize(), WEBP_MIN_HEADER_SIZE) << "32px thumbnail should be valid WebP";
+}
+
+// Test thumbnail generation with very large thumbSize
+TEST(thumbnail, veryLargeThumbSize) {
+    TestArea ta(TEST_NAME);
+    fs::path ortho = ta.downloadTestAsset(
+        "https://github.com/DroneDB/test_data/raw/master/brighton/odm_orthophoto.tif",
+        "odm_orthophoto.tif");
+
+    // Test with large size (4096 pixels) - larger than most source images
+    fs::path outFile = ta.getPath("large_thumb.webp");
+    EXPECT_NO_THROW(ddb::generateThumb(ortho.string(), 4096, outFile, true))
+        << "thumbSize = 4096 should be valid";
+    EXPECT_TRUE(fs::exists(outFile)) << "Large thumbnail should be created";
+    EXPECT_TRUE(isWebPImageNonEmpty(outFile)) << "Large thumbnail should have content";
+}
+
+// Test forceRecreate flag behavior
+TEST(thumbnail, forceRecreateFlag) {
+    TestArea ta(TEST_NAME);
+    fs::path ortho = ta.downloadTestAsset(
+        "https://github.com/DroneDB/test_data/raw/master/brighton/odm_orthophoto.tif",
+        "odm_orthophoto.tif");
+
+    fs::path outFile = ta.getPath("recreate_test.webp");
+
+    // First generation
+    ddb::generateThumb(ortho.string(), 256, outFile, true);
+    EXPECT_TRUE(fs::exists(outFile)) << "First thumbnail should be created";
+
+    auto firstModTime = fs::last_write_time(outFile);
+    auto firstSize = io::Path(outFile).getSize();
+
+    // Wait a tiny bit to ensure different modification time
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    // Generate again with forceRecreate = false (should not recreate)
+    ddb::generateThumb(ortho.string(), 256, outFile, false);
+    auto secondModTime = fs::last_write_time(outFile);
+    EXPECT_EQ(firstModTime, secondModTime) << "Thumbnail should not be recreated when forceRecreate=false";
+
+    // Generate again with forceRecreate = true (should recreate)
+    ddb::generateThumb(ortho.string(), 256, outFile, true);
+    // File should still exist and be valid
+    EXPECT_TRUE(fs::exists(outFile)) << "Thumbnail should exist after forceRecreate";
+    EXPECT_EQ(firstSize, io::Path(outFile).getSize()) << "Recreated thumbnail should have same size";
+}
+
+// Test in-memory generation with null buffer pointer edge cases
+TEST(thumbnail, inMemoryNullPointers) {
+    TestArea ta(TEST_NAME);
+    fs::path ortho = ta.downloadTestAsset(
+        "https://github.com/DroneDB/test_data/raw/master/brighton/odm_orthophoto.tif",
+        "odm_orthophoto.tif");
+
+    // When outImagePath is empty but outBuffer is nullptr, it should still work
+    // (writing to empty path with null buffer - edge case)
+    uint8_t* buffer = nullptr;
+    int bufSize = 0;
+
+    // This should generate to memory successfully
+    ddb::generateThumb(ortho.string(), 256, "", true, &buffer, &bufSize);
+    EXPECT_NE(buffer, nullptr) << "Buffer should be allocated";
+    EXPECT_GT(bufSize, 0) << "Buffer size should be positive";
+
+    if (buffer != nullptr) {
+        DDBVSIFree(buffer);
+    }
 }
 
 }  // namespace
