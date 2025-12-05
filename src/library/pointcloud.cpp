@@ -4,6 +4,7 @@
 #include "pointcloud.h"
 
 #include <cpr/cpr.h>
+#include <limits>
 
 #include <bu/BuPyramid.hpp>
 #include <epf/Epf.hpp>
@@ -303,6 +304,18 @@ void buildEpt(const std::vector<std::string>& filenames, const std::string& outd
     io::assureFolderExists(tmpDir);
 
     untwine::Options options{};
+
+    // Minimum epsilon for extent validation (in the point cloud's native units)
+    // This prevents division-by-zero in untwine for degenerate point clouds
+    constexpr double MIN_EXTENT_EPSILON = 1e-10;
+    constexpr size_t MIN_POINT_COUNT = 2;
+
+    size_t totalPointCount = 0;
+    double globalMinX = std::numeric_limits<double>::max();
+    double globalMinY = std::numeric_limits<double>::max();
+    double globalMaxX = std::numeric_limits<double>::lowest();
+    double globalMaxY = std::numeric_limits<double>::lowest();
+
     for (const std::string& f : filenames) {
         if (!fs::exists(f))
             throw FSException(f + " does not exist");
@@ -310,6 +323,37 @@ void buildEpt(const std::vector<std::string>& filenames, const std::string& outd
         const EntryType type = fingerprint(f);
         if (type != PointCloud)
             throw InvalidArgsException(f + " is not a supported point cloud file");
+
+        // Get point cloud info for validation
+        PointCloudInfo pcInfo;
+        if (getPointCloudInfo(f, pcInfo)) {
+            totalPointCount += pcInfo.pointCount;
+
+            // Update global bounds if available (bounds: [minx, miny, minz, maxx, maxy, maxz])
+            if (pcInfo.bounds.size() >= 6) {
+                globalMinX = std::min(globalMinX, pcInfo.bounds[0]);
+                globalMinY = std::min(globalMinY, pcInfo.bounds[1]);
+                globalMaxX = std::max(globalMaxX, pcInfo.bounds[3]);
+                globalMaxY = std::max(globalMaxY, pcInfo.bounds[4]);
+            }
+        }
+    }
+
+    // Validate point count - untwine may crash with FPE for single-point clouds
+    if (totalPointCount < MIN_POINT_COUNT) {
+        throw InvalidArgsException("Point cloud has insufficient points (" +
+                                   std::to_string(totalPointCount) +
+                                   "). At least " + std::to_string(MIN_POINT_COUNT) +
+                                   " points are required for EPT generation.");
+    }
+
+    // Validate extent - untwine may crash with FPE for zero-extent point clouds
+    double extentX = globalMaxX - globalMinX;
+    double extentY = globalMaxY - globalMinY;
+    if (extentX < MIN_EXTENT_EPSILON || extentY < MIN_EXTENT_EPSILON) {
+        throw InvalidArgsException("Point cloud has zero or near-zero extent (X: " +
+                                   std::to_string(extentX) + ", Y: " + std::to_string(extentY) +
+                                   "). Point cloud must have spatial extent for EPT generation.");
     }
 
     std::vector<std::string> inputFiles;
