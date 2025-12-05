@@ -270,6 +270,13 @@ void initializeGDALandPROJ() {
     CPLSetConfigOption("OGR_CT_FORCE_TRADITIONAL_GIS_ORDER", "YES");
     CPLSetConfigOption("PROJ_NETWORK", "ON");
 
+    // Disable PAM (.aux.xml) files globally - we don't need sidecar files
+    CPLSetConfigOption("GDAL_PAM_ENABLED", "NO");
+
+    // Optimize vsicurl for remote file access
+    CPLSetConfigOption("GDAL_DISABLE_READDIR_ON_OPEN", "YES");
+    CPLSetConfigOption("CPL_VSIL_CURL_ALLOWED_EXTENSIONS", ".tif,.tiff,.vrt,.ovr,.msk");
+
     LOGD << "GDAL and PROJ initialization completed";
 
     // Check PROJ availability

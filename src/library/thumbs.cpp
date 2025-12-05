@@ -90,8 +90,6 @@ void generateImageThumb(const fs::path& imagePath,
     bool tryReopen = false;
 
     if (utils::isNetworkPath(openPath) && io::Path(openPath).checkExtension({"tif", "tiff"})) {
-        CPLSetConfigOption("GDAL_DISABLE_READDIR_ON_OPEN", "YES");
-        CPLSetConfigOption("CPL_VSIL_CURL_ALLOWED_EXTENSIONS", ".tif,.tiff");
         openPath = "/vsicurl/" + openPath;
 
         // With some files / servers, vsicurl fails
@@ -148,6 +146,10 @@ void generateImageThumb(const fs::path& imagePath,
             static_cast<int>((static_cast<float>(thumbSize) / static_cast<float>(height)) *
                              static_cast<float>(width));
     }
+
+    // Ensure minimum dimensions of 1 pixel to avoid WebP driver errors
+    if (targetWidth < 1) targetWidth = 1;
+    if (targetHeight < 1) targetHeight = 1;
 
     char** targs = nullptr;
     targs = CSLAddString(targs, "-outsize");
@@ -218,12 +220,17 @@ void generateImageThumb(const fs::path& imagePath,
             targs = CSLAddString(targs, "-b");
             targs = CSLAddString(targs, "3");
             if (bandCount >= 4) {
-                // Include alpha channel if available
-                targs = CSLAddString(targs, "-b");
-                targs = CSLAddString(targs, "4");
-                LOGD << "Using RGBA (4 bands)";
+                // Check if band 4 is actually an alpha band
+                GDALRasterBandH hBand4 = GDALGetRasterBand(hSrcDataset, 4);
+                if (hBand4 && GDALGetRasterColorInterpretation(hBand4) == GCI_AlphaBand) {
+                    targs = CSLAddString(targs, "-b");
+                    targs = CSLAddString(targs, "4");
+                    LOGD << "Using RGBA (4 bands, band 4 is alpha)";
+                } else {
+                    LOGD << "Using RGB (3 bands from " << bandCount << "), band 4 is not alpha";
+                }
             } else {
-                LOGD << "Using RGB (3 bands from " << bandCount << ")";
+                LOGD << "Using RGB (3 bands from " << bandCount << " total)";
             }
         } else {
             LOGD << "Using RGB (3 bands)";
@@ -243,8 +250,6 @@ void generateImageThumb(const fs::path& imagePath,
     targs = CSLAddString(targs, "-a_srs");
     targs = CSLAddString(targs, "");
 
-    CPLSetConfigOption("GDAL_PAM_ENABLED", "NO");  // avoid aux files
-
     GDALTranslateOptions* psOptions = GDALTranslateOptionsNew(targs, nullptr);
     CSLDestroy(targs);
 
@@ -260,10 +265,12 @@ void generateImageThumb(const fs::path& imagePath,
         GDALDatasetH hNewDataset = GDALTranslate(vsiPath.c_str(), hSrcDataset, psOptions, nullptr);
 
         if (!hNewDataset) {
+            VSIUnlink(vsiPath.c_str());  // Clean up potential partial vsimem file
             GDALTranslateOptionsFree(psOptions);
             GDALClose(hSrcDataset);
             throw GDALException("Failed to generate thumbnail for " + openPath +
-                                " (GDALTranslate returned null)");
+                                " (GDALTranslate returned null): " +
+                                CPLGetLastErrorMsg());
         }
 
         GDALFlushCache(hNewDataset);
@@ -292,7 +299,8 @@ void generateImageThumb(const fs::path& imagePath,
             GDALTranslateOptionsFree(psOptions);
             GDALClose(hSrcDataset);
             throw GDALException("Failed to generate thumbnail for " + openPath +
-                                " (GDALTranslate returned null)");
+                                " (GDALTranslate returned null): " +
+                                CPLGetLastErrorMsg());
         }
 
         GDALFlushCache(hNewDataset);
@@ -301,23 +309,6 @@ void generateImageThumb(const fs::path& imagePath,
 
     GDALTranslateOptionsFree(psOptions);
     GDALClose(hSrcDataset);
-}
-
-void addColorFilter(PointCloudInfo eptInfo, pdal::EptReader* eptReader, pdal::Stage*& main) {
-    std::unique_ptr<pdal::ColorinterpFilter> colorFilter;
-
-    colorFilter.reset(new pdal::ColorinterpFilter());
-
-    // Add ramp filter
-    LOGD << "Adding ramp filter (" << eptInfo.bounds[2] << ", " << eptInfo.bounds[5] << ")";
-
-    pdal::Options cfOpts;
-    cfOpts.add("ramp", "pestel_shades");
-    cfOpts.add("minimum", eptInfo.bounds[2]);
-    cfOpts.add("maximum", eptInfo.bounds[5]);
-    colorFilter->setOptions(cfOpts);
-    colorFilter->setInput(*eptReader);
-    main = colorFilter.get();
 }
 
 void RenderImage(const fs::path& outImagePath,
@@ -415,7 +406,7 @@ void RenderImage(const fs::path& outImagePath,
                                                   nullptr,
                                                   nullptr);
         if (outDs == nullptr)
-            throw GDALException("Cannot create output dataset " + outImagePath.string());
+            throw GDALException("Cannot create output dataset " + outImagePath.string() + ": " + CPLGetLastErrorMsg());
         GDALFlushCache(outDs);
         GDALClose(outDs);
     }
@@ -503,6 +494,11 @@ void generatePointCloudThumb(const fs::path& eptPath,
         throw InvalidArgsException("Cannot get EPT info for " + eptPath.string());
     }
 
+    // Validate bounds array has required elements (minX, minY, minZ, maxX, maxY, maxZ)
+    if (eptInfo.bounds.size() < 6) {
+        throw InvalidArgsException("EPT bounds array does not contain at least 6 elements (minX, minY, minZ, maxX, maxY, maxZ required)");
+    }
+
     const auto tileSize = thumbSize;
     GlobalMercator mercator(tileSize);
 
@@ -534,8 +530,8 @@ void generatePointCloudThumb(const fs::path& eptPath,
 
         length = std::min(std::abs(oMaxX - oMinX), std::abs(oMaxY - oMinY));
 
-        if (length < 0) {
-            throw GDALException("Cannot calculate length: spatial system not supported");
+        if (length == 0) {
+            throw GDALException("Cannot calculate length: point cloud has zero extent");
         }
 
         hasSpatialSystem = false;
@@ -630,9 +626,6 @@ void generatePointCloudThumb(const fs::path& eptPath,
     }
 
     // Generate colors based on available data
-    if (eptInfo.bounds.size() < 6) {
-        throw std::runtime_error("EPT bounds array does not contain at least 6 elements (minZ/maxZ required)");
-    }
     std::vector<PointColor> colors = hasColors ?
         normalizeColors(point_view) :
         generateZBasedColors(point_view, eptInfo.bounds[2], eptInfo.bounds[5]);
@@ -660,6 +653,9 @@ fs::path generateThumb(const fs::path& inputPath,
                        bool forceRecreate,
                        uint8_t** outBuffer,
                        int* outBufferSize) {
+    if (thumbSize <= 0)
+        throw InvalidArgsException("thumbSize must be greater than 0");
+
     if (!utils::isNetworkPath(inputPath.string()) && !exists(inputPath))
         throw FSException(inputPath.string() + " does not exist");
 
