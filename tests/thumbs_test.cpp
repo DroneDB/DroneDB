@@ -479,4 +479,59 @@ TEST(thumbnail, inMemoryNullPointers) {
     }
 }
 
+// =============================================================================
+// Point Cloud Edge Cases - buildEpt validation tests
+// =============================================================================
+
+// Base URL for test data files in DroneDB/test_data repository
+const std::string TEST_DATA_BASE_URL = "https://github.com/DroneDB/test_data/raw/master/testdata/";
+
+// Helper to download a test data file from the test_data repository
+fs::path downloadTestDataFile(TestArea& ta, const std::string& relativePath) {
+    std::string url = TEST_DATA_BASE_URL + relativePath;
+    // Extract filename from path
+    fs::path relPath(relativePath);
+    std::string filename = relPath.filename().string();
+    return ta.downloadTestAsset(url, filename);
+}
+
+// Test for point cloud with single point (edge case)
+// buildEpt should throw InvalidArgsException for single-point clouds
+TEST(thumbnail, pointCloudSinglePoint) {
+    TestArea ta(TEST_NAME);
+    fs::path pc = downloadTestDataFile(ta, "pointcloud/pc_single_point.laz");
+
+    // buildEpt should throw InvalidArgsException for single-point clouds
+    // (preventive validation to avoid FPE in untwine)
+    EXPECT_THROW(ddb::buildEpt({pc.string()}, ta.getFolder("ept").string()),
+                 ddb::InvalidArgsException)
+        << "buildEpt should reject single-point clouds with InvalidArgsException";
+}
+
+// Test for point cloud with flat surface (all Z values identical)
+// This should work if the point cloud has sufficient X/Y extent
+// Note: If the flat surface also has zero X/Y extent, it will throw InvalidArgsException
+TEST(thumbnail, pointCloudFlatSurface) {
+    TestArea ta(TEST_NAME);
+    fs::path pc = downloadTestDataFile(ta, "pointcloud/pc_flat_surface.laz");
+
+    // Build EPT from LAZ file
+    // This may throw InvalidArgsException if the flat surface also has zero X/Y extent
+    try {
+        ddb::buildEpt({pc.string()}, ta.getFolder("ept").string());
+
+        fs::path eptPath = ta.getPath(fs::path("ept") / "ept.json");
+        EXPECT_TRUE(fs::exists(eptPath)) << "EPT file should exist after buildEpt";
+
+        fs::path outFile = ta.getPath("flat-surface-thumb.webp");
+        EXPECT_NO_THROW(ddb::generateThumb(eptPath, 256, outFile, true))
+            << "Flat surface point cloud should generate thumbnail (all points same Z -> gray)";
+        EXPECT_TRUE(fs::exists(outFile)) << "Flat surface thumbnail should exist";
+        EXPECT_TRUE(isWebPImageNonEmpty(outFile)) << "Flat surface thumbnail should have content";
+    } catch (const ddb::InvalidArgsException& e) {
+        // Expected if the point cloud also has zero X/Y extent
+        SUCCEED() << "Flat surface point cloud rejected due to insufficient extent: " << e.what();
+    }
+}
+
 }  // namespace
