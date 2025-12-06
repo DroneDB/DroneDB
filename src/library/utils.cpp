@@ -351,8 +351,8 @@ DDB_DLL bool isValidNonEmptyStringParam(const char* str) {
     return str != nullptr && strlen(str) > 0;
 }
 
-DDB_DLL std::vector<EntryType> parseEntryTypeList(const char* types) {
-    std::vector<EntryType> typeFilter;
+DDB_DLL std::vector<ddb::EntryType> parseEntryTypeList(const char* types) {
+    std::vector<ddb::EntryType> typeFilter;
 
     if (types == nullptr || strlen(types) == 0)
         return typeFilter;
@@ -363,10 +363,10 @@ DDB_DLL std::vector<EntryType> parseEntryTypeList(const char* types) {
         trim(item);
 
         // Convert string to EntryType
-        EntryType t = typeFromHuman(item);
-        if (t == EntryType::Undefined)
+        ddb::EntryType t = ddb::typeFromHuman(item);
+        if (t == ddb::EntryType::Undefined)
             throw InvalidArgsException("Unknown entry type: " + item);
-        if (t == EntryType::Directory)
+        if (t == ddb::EntryType::Directory)
             throw InvalidArgsException("Cannot rescan directories");
         typeFilter.push_back(t);
     }

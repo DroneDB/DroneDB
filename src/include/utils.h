@@ -21,6 +21,7 @@
 #include <thread>
 
 #include "ddb_export.h"
+#include "entry_types.h"
 #include "exceptions.h"
 #include "fs.h"
 #include "logger.h"
@@ -182,13 +183,10 @@ DDB_DLL bool isValidStringParam(const char* str);
 // Validate string parameter requiring non-empty
 DDB_DLL bool isValidNonEmptyStringParam(const char* str);
 
-// Forward declaration
-enum EntryType;
-
 // Parse a comma-separated list of entry type names into a vector of EntryType
 // Returns an empty vector if types is null or empty
 // Throws InvalidArgsException if an unknown type is found or if Directory type is specified
-DDB_DLL std::vector<EntryType> parseEntryTypeList(const char* types);
+DDB_DLL std::vector<ddb::EntryType> parseEntryTypeList(const char* types);
 
 // Fix for removing macros
 #undef max
