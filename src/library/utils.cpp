@@ -11,6 +11,9 @@
 
 #include <pdal/pdal_features.hpp>
 #include <random>
+#include <sstream>
+
+#include "entry_types.h"
 
 namespace ddb::utils {
 
@@ -346,6 +349,29 @@ DDB_DLL bool isValidStringParam(const char* str) {
 // Validate string parameter requiring non-empty
 DDB_DLL bool isValidNonEmptyStringParam(const char* str) {
     return str != nullptr && strlen(str) > 0;
+}
+
+DDB_DLL std::vector<EntryType> parseEntryTypeList(const char* types) {
+    std::vector<EntryType> typeFilter;
+
+    if (types == nullptr || strlen(types) == 0)
+        return typeFilter;
+
+    std::stringstream ss(types);
+    std::string item;
+    while (std::getline(ss, item, ',')) {
+        trim(item);
+
+        // Convert string to EntryType
+        EntryType t = typeFromHuman(item);
+        if (t == EntryType::Undefined)
+            throw InvalidArgsException("Unknown entry type: " + item);
+        if (t == EntryType::Directory)
+            throw InvalidArgsException("Cannot rescan directories");
+        typeFilter.push_back(t);
+    }
+
+    return typeFilter;
 }
 
 

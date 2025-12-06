@@ -962,28 +962,7 @@ DDB_DLL DDBErr DDBRescan(const char* ddbPath, char** output, const char* types, 
         throw InvalidArgsException("Output pointer is null");
 
     // Parse types string into vector
-    std::vector<EntryType> typeFilter;
-    if (types != nullptr && strlen(types) > 0)
-    {
-        std::stringstream ss(types);
-        std::string item;
-        while (std::getline(ss, item, ','))
-        {
-            // Trim whitespace
-            size_t start = item.find_first_not_of(" \t");
-            size_t end = item.find_last_not_of(" \t");
-            if (start != std::string::npos && end != std::string::npos)
-                item = item.substr(start, end - start + 1);
-
-            // Convert string to EntryType
-            EntryType t = typeFromHuman(item);
-            if (t == EntryType::Undefined)
-                throw InvalidArgsException("Unknown entry type: " + item);
-            if (t == EntryType::Directory)
-                throw InvalidArgsException("Cannot rescan directories");
-            typeFilter.push_back(t);
-        }
-    }
+    const std::vector<EntryType> typeFilter = utils::parseEntryTypeList(types);
 
     const auto db = ddb::open(std::string(ddbPath), true);
     auto outJson = json::array();

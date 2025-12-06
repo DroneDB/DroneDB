@@ -3,10 +3,10 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include <iostream>
-#include <sstream>
 #include "include/rescan.h"
 #include "dbops.h"
 #include "entry_types.h"
+#include "utils.h"
 
 namespace cmd
 {
@@ -55,31 +55,12 @@ namespace cmd
 
         // Parse types
         std::vector<ddb::EntryType> types;
-        if (!typesStr.empty())
-        {
-            std::stringstream ss(typesStr);
-            std::string item;
-            while (std::getline(ss, item, ','))
-            {
-                // Trim whitespace
-                size_t start = item.find_first_not_of(" \t");
-                size_t end = item.find_last_not_of(" \t");
-                if (start != std::string::npos && end != std::string::npos)
-                    item = item.substr(start, end - start + 1);
-
-                auto t = ddb::typeFromHuman(item);
-                if (t == ddb::EntryType::Undefined)
-                {
-                    std::cerr << "Unknown type: " << item << std::endl;
-                    printHelp();
-                }
-                if (t == ddb::EntryType::Directory)
-                {
-                    std::cerr << "Cannot rescan directories" << std::endl;
-                    printHelp();
-                }
-                types.push_back(t);
-            }
+        try {
+            types = ddb::utils::parseEntryTypeList(typesStr.c_str());
+        } catch (const ddb::InvalidArgsException& e) {
+            std::cerr << e.what() << std::endl;
+            printHelp();
+            return;
         }
 
         const auto db = ddb::open(ddbPath, true);

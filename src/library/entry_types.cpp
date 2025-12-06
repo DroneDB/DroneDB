@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "entry_types.h"
 #include <algorithm>
+#include <cctype>
 #include <vector>
 
 namespace ddb
@@ -35,12 +36,14 @@ namespace ddb
     EntryType typeFromHuman(const std::string &s)
     {
         std::string lower = s;
-        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+        std::transform(lower.begin(), lower.end(), lower.begin(),
+                       [](unsigned char c) { return std::tolower(c); });
 
         for (const auto &pair : typeMapper)
         {
             std::string typeName = pair.second;
-            std::transform(typeName.begin(), typeName.end(), typeName.begin(), ::tolower);
+            std::transform(typeName.begin(), typeName.end(), typeName.begin(),
+                           [](unsigned char c) { return std::tolower(c); });
             if (typeName == lower)
                 return pair.first;
         }
@@ -56,7 +59,8 @@ namespace ddb
             if (pair.first != EntryType::Directory && pair.first != EntryType::Undefined)
             {
                 std::string name = pair.second;
-                std::transform(name.begin(), name.end(), name.begin(), ::tolower);
+                std::transform(name.begin(), name.end(), name.begin(),
+                               [](unsigned char c) { return std::tolower(c); });
                 names.push_back(name);
             }
         }

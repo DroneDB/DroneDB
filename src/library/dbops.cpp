@@ -828,7 +828,10 @@ namespace ddb
         }
 
         auto q = db->query(sql);
-        q->bind(1, EntryType::Directory); // Always exclude directories
+        // Always exclude directories from rescan because they do not contain file metadata
+        // that can be re-parsed. This check is defensive and prevents potential issues
+        // even if validation fails at higher layers (C API, CLI).
+        q->bind(1, EntryType::Directory);
 
         // Bind types if specified
         for (size_t i = 0; i < types.size(); i++)

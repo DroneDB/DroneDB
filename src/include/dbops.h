@@ -35,6 +35,31 @@ namespace ddb
     DDB_DLL void addToIndex(Database *db, const std::vector<std::string> &paths, AddCallback callback = nullptr);
     DDB_DLL void removeFromIndex(Database *db, const std::vector<std::string> &paths, RemoveCallback callback = nullptr);
     DDB_DLL void syncIndex(Database *db);
+
+    /**
+     * Rescans entries in the index, updating their metadata and status.
+     *
+     * @param db           Pointer to the Database to operate on. Must be valid and open.
+     * @param types        Optional list of EntryType values to restrict which entries are rescanned.
+     *                     If empty, all entry types are rescanned.
+     * @param stopOnError  If true, the function throws an exception (AppException) on the first error encountered.
+     *                     If false, errors are reported via the callback and rescanning continues.
+     * @param callback     Optional callback function called for each entry processed.
+     *                     Signature: bool(const Entry &e, bool success, const std::string &error)
+     *                     - e: The entry being rescanned.
+     *                     - success: True if the rescan succeeded, false otherwise.
+     *                     - error: Error message if success is false, empty otherwise.
+     *                     The callback's return value:
+     *                     - true: Continue rescanning.
+     *                     - false: Cancel the operation immediately.
+     *                     If callback is nullptr, no per-entry notification is performed.
+     *
+     * Exceptions:
+     *   - Throws AppException if stopOnError is true and an error occurs.
+     *
+     * Thread Safety:
+     *   - Uses database transactions internally; not safe for concurrent modification of the same database.
+     */
     DDB_DLL void rescanIndex(Database *db, const std::vector<EntryType> &types = {}, bool stopOnError = true, RescanCallback callback = nullptr);
     DDB_DLL void syncLocalMTimes(Database *db, const std::vector<std::string> &files = {});
     DDB_DLL void moveEntry(Database *db, const std::string &source, const std::string &dest);
