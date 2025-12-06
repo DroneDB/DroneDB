@@ -7,6 +7,7 @@
 #include "database.h"
 #include "statement.h"
 #include "entry.h"
+#include "entry_types.h"
 #include "fs.h"
 #include "ddb_export.h"
 #include "registryutils.h"
@@ -16,6 +17,7 @@ namespace ddb
 
     typedef std::function<bool(const Entry &e, bool updated)> AddCallback;
     typedef std::function<void(const std::string &path)> RemoveCallback;
+    typedef std::function<bool(const Entry &e, bool success, const std::string &error)> RescanCallback;
 
     DDB_DLL std::unique_ptr<Database> open(const std::string &directory, bool traverseUp);
     DDB_DLL std::vector<fs::path> getIndexPathList(const fs::path &rootDirectory, const std::vector<std::string> &paths, bool includeDirs);
@@ -33,6 +35,7 @@ namespace ddb
     DDB_DLL void addToIndex(Database *db, const std::vector<std::string> &paths, AddCallback callback = nullptr);
     DDB_DLL void removeFromIndex(Database *db, const std::vector<std::string> &paths, RemoveCallback callback = nullptr);
     DDB_DLL void syncIndex(Database *db);
+    DDB_DLL void rescanIndex(Database *db, const std::vector<EntryType> &types = {}, bool stopOnError = true, RescanCallback callback = nullptr);
     DDB_DLL void syncLocalMTimes(Database *db, const std::vector<std::string> &files = {});
     DDB_DLL void moveEntry(Database *db, const std::string &source, const std::string &dest);
     DDB_DLL bool getEntry(Database *db, const std::string &path, Entry &entry);

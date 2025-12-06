@@ -4,26 +4,47 @@
 #include "testarea.h"
 
 #include <cpr/cpr.h>
+#include <thread>
+#include <chrono>
 
 #include "exceptions.h"
 #include "logger.h"
 #include "mio.h"
 
 TestArea::TestArea(const std::string& name, bool recreateIfExists) : name(name) {
-    const auto root = getFolder();
     if (name.find("..") != std::string::npos)
         throw ddb::FSException("Cannot use .. in name");
+
+    // Calculate root path without creating the directory
+    const fs::path root = fs::temp_directory_path() / "ddb_test_areas" / fs::path(name);
 
     if (recreateIfExists) {
         if (fs::exists(root)) {
             LOGD << "Removing " << root;
-            LOGD << "Removed " << fs::remove_all(root) << " files/folders";
+            std::error_code ec;
+            auto removed = fs::remove_all(root, ec);
+            if (ec) {
+                LOGD << "Error removing " << root << ": " << ec.message();
+                // Try again with a small delay (Windows file locking issues)
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                removed = fs::remove_all(root, ec);
+                if (ec) {
+                    LOGD << "Second attempt failed: " << ec.message();
+                }
+            }
+            LOGD << "Removed " << removed << " files/folders";
         }
     }
 }
 
 fs::path TestArea::getPath(const fs::path& p) {
-    return fs::temp_directory_path() / "ddb_test_areas" / fs::path(name) / p;
+    const fs::path root = fs::temp_directory_path() / "ddb_test_areas" / fs::path(name);
+    // Ensure the root directory exists
+    if (!fs::exists(root)) {
+        ddb::io::createDirectories(root);
+        LOGD << "Created test folder " << root;
+    }
+    return root / p;
 }
 
 fs::path TestArea::getFolder(const fs::path& subfolder) {

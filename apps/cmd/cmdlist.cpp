@@ -8,6 +8,7 @@
 #include "include/add.h"
 #include "include/remove.h"
 #include "include/sync.h"
+#include "include/rescan.h"
 #include "include/geoproj.h"
 #include "include/info.h"
 #include "include/list.h"
@@ -42,6 +43,7 @@ namespace cmd
       {"add", new Add()},
       {"remove", new Remove()},
       {"sync", new Sync()},
+      {"rescan", new Rescan()},
       {"geoproj", new GeoProj()},
       {"info", new Info()},
       {"list", new List()},
@@ -72,6 +74,7 @@ namespace cmd
       {"r", "remove"},
       {"a", "add"},
       {"s", "sync"},
+      {"rs", "rescan"},
       {"gp", "geoproj"},
       {"i", "info"},
       {"ls", "list"},
