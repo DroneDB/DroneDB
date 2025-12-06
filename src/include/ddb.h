@@ -247,6 +247,15 @@ extern "C"
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBGetStamp(const char *ddbPath, char **output);
 
+    /** Rescan all files in the index to update metadata
+     * @param ddbPath path to a DroneDB database (parent of ".ddb")
+     * @param output pointer to C-string where to store output (JSON array of results)
+     * @param types comma-separated list of entry types to rescan (e.g., "image,geoimage,pointcloud"), or empty for all.
+     *              Valid types: generic, geoimage, georaster, pointcloud, image, dronedb, markdown, video, geovideo, model, panorama, geopanorama, vector
+     * @param stopOnError whether to stop processing on first error (default true)
+     * @return DDBERR_NONE on success, an error otherwise */
+    DDB_DLL DDBErr DDBRescan(const char *ddbPath, char **output, const char *types = "", bool stopOnError = true);
+
     /** Move entry
      * @param ddbPath path to the source DroneDB database (parent of ".ddb")
      * @param source source entry path

@@ -808,6 +808,111 @@ namespace ddb
         db->exec("COMMIT");
     }
 
+    void rescanIndex(Database *db, const std::vector<EntryType> &types, bool stopOnError, RescanCallback callback)
+    {
+        const fs::path directory = db->rootDirectory();
+
+        // Build query based on requested types
+        std::string sql = "SELECT path FROM entries WHERE type != ?";
+
+        if (!types.empty())
+        {
+            sql += " AND type IN (";
+            for (size_t i = 0; i < types.size(); i++)
+            {
+                if (i > 0)
+                    sql += ",";
+                sql += "?";
+            }
+            sql += ")";
+        }
+
+        auto q = db->query(sql);
+        q->bind(1, EntryType::Directory); // Always exclude directories
+
+        // Bind types if specified
+        for (size_t i = 0; i < types.size(); i++)
+        {
+            q->bind(2 + static_cast<int>(i), static_cast<int>(types[i]));
+        }
+
+        const auto updateQ = db->query(UPDATE_QUERY);
+
+        db->exec("BEGIN EXCLUSIVE TRANSACTION");
+
+        while (q->fetch())
+        {
+            io::Path relPath = fs::path(q->getText(0));
+            fs::path fullPath = directory / relPath.get();
+
+            // Check if file still exists (outside try-catch to handle stopOnError correctly)
+            if (!fs::exists(fullPath))
+            {
+                std::string error = "File not found: " + fullPath.string();
+                LOGD << error;
+
+                if (callback != nullptr)
+                {
+                    Entry e;
+                    e.path = relPath.generic();
+                    if (!callback(e, false, error))
+                    {
+                        db->exec("ROLLBACK");
+                        return;
+                    }
+                }
+
+                if (stopOnError)
+                {
+                    db->exec("ROLLBACK");
+                    throw FSException(error);
+                }
+
+                continue;
+            }
+
+            try
+            {
+                Entry e;
+                parseEntry(fullPath, directory, e, true);
+                doUpdate(updateQ.get(), e);
+
+                if (callback != nullptr)
+                {
+                    if (!callback(e, true, ""))
+                    {
+                        db->exec("ROLLBACK");
+                        return;
+                    }
+                }
+            }
+            catch (const std::exception &ex)
+            {
+                std::string error = ex.what();
+                LOGD << "Error processing " << fullPath << ": " << error;
+
+                if (callback != nullptr)
+                {
+                    Entry e;
+                    e.path = relPath.generic();
+                    if (!callback(e, false, error))
+                    {
+                        db->exec("ROLLBACK");
+                        return;
+                    }
+                }
+
+                if (stopOnError)
+                {
+                    db->exec("ROLLBACK");
+                    throw;
+                }
+            }
+        }
+
+        db->exec("COMMIT");
+    }
+
     // Sets the modified times of files in the filesystem
     // to match that of the database. Optionally,
     // if a whitelist of files is specified, limits the scope of the synchronization
