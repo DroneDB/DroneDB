@@ -6,6 +6,7 @@
 
 #include <string>
 #include <map>
+#include <vector>
 #include "ddb_export.h"
 
 namespace ddb
@@ -31,6 +32,8 @@ namespace ddb
     };
 
     DDB_DLL std::string typeToHuman(EntryType t);
+    DDB_DLL EntryType typeFromHuman(const std::string &s);
+    DDB_DLL std::vector<std::string> getEntryTypeNames();
 
 }
 
