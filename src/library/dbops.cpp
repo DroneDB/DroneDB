@@ -8,6 +8,7 @@
 #include "status.h"
 
 #include <cstdlib>
+#include <mutex>
 
 #include "entry_types.h"
 #include "exceptions.h"
@@ -22,6 +23,10 @@
 
 namespace ddb
 {
+
+// Global mutex to protect database open/close operations
+// Spatialite/GEOS is not thread-safe when initializing multiple connections concurrently
+static std::mutex g_dbOpenMutex;
 
 #define UPDATE_QUERY                                                              \
     "UPDATE entries SET hash=?, type=?, properties=?, mtime=?, size=?, depth=?, " \
@@ -49,13 +54,17 @@ namespace ddb
 
         auto db = std::make_unique<Database>();
 
-        db->open(dbasePath.string());
+        // Lock to protect Spatialite/GEOS initialization which is not thread-safe
+        {
+            std::lock_guard<std::mutex> lock(g_dbOpenMutex);
+            db->open(dbasePath.string());
 
-        if (!db->tableExists("entries"))
-            throw DBException("Table 'entries' not found (not a valid database: " +
-                              dbasePath.string() + ")");
+            if (!db->tableExists("entries"))
+                throw DBException("Table 'entries' not found (not a valid database: " +
+                                  dbasePath.string() + ")");
 
-        db->ensureSchemaConsistency();
+            db->ensureSchemaConsistency();
+        }
 
         return db;
     }
@@ -999,8 +1008,11 @@ namespace ddb
 
                 // Create database
                 auto db = std::make_unique<Database>();
-                db->open(emptyDbPath.string());
-                db->createTables();
+                {
+                    std::lock_guard<std::mutex> lock(g_dbOpenMutex);
+                    db->open(emptyDbPath.string());
+                    db->createTables();
+                }
                 db->close();
             }
 
@@ -1034,8 +1046,11 @@ namespace ddb
 
             // Create database
             auto db = std::make_unique<Database>();
-            db->open(dbasePath.string());
-            db->createTables();
+            {
+                std::lock_guard<std::mutex> lock(g_dbOpenMutex);
+                db->open(dbasePath.string());
+                db->createTables();
+            }
             db->close();
         }
 
