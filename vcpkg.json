@@ -1,6 +1,6 @@
 {
   "name": "ddb",
-  "version": "1.3.1",
+  "version": "1.3.3",
   "builtin-baseline": "78f02edb6a078b54cb4e284a5b7b5a18458c539a",
   "dependencies": [
     "boolinq",
