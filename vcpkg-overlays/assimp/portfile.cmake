@@ -9,7 +9,7 @@ vcpkg_from_github(
 file(REMOVE_RECURSE
     "${SOURCE_PATH}/contrib/zlib"
     "${SOURCE_PATH}/contrib/zip"
-    "${SOURCE_PATH}/contrib/draco"
+    #"${SOURCE_PATH}/contrib/draco"
 )
 
 # Fix MSVC compiler flag conflict on Windows: /utf-8 and /source-charset:utf-8 cannot be used together
@@ -48,7 +48,7 @@ vcpkg_cmake_configure(
         -DASSIMP_BUILD_3MF_IMPORTER=OFF
         -DASSIMP_BUILD_3MF_EXPORTER=OFF
         -DASSIMP_BUILD_ZLIB=OFF
-        -DASSIMP_BUILD_DRACO=OFF
+        -DASSIMP_BUILD_DRACO=ON
 
         # Variants
         -DASSIMP_BUILD_TESTS=OFF
