@@ -44,11 +44,16 @@ vcpkg_cmake_configure(
         -DASSIMP_BUILD_PLY_IMPORTER=ON
         -DASSIMP_BUILD_PLY_EXPORTER=ON
 
-        # Make sure to NOT bring along zip/zlib/draco stuff
+        # Make sure to NOT bring along zip/zlib stuff
         -DASSIMP_BUILD_3MF_IMPORTER=OFF
         -DASSIMP_BUILD_3MF_EXPORTER=OFF
         -DASSIMP_BUILD_ZLIB=OFF
+
+        # Enable Draco support (for glTF compression)
+        # ASSIMP_BUILD_DRACO_STATIC is required when building static libraries
+        # to avoid the bug where assimp looks for non-existent draco_shared target
         -DASSIMP_BUILD_DRACO=ON
+        -DASSIMP_BUILD_DRACO_STATIC=ON
 
         # Variants
         -DASSIMP_BUILD_TESTS=OFF
