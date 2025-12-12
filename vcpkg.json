@@ -61,6 +61,7 @@
     "assimp",
     "ktx",
     "stb",
-    "tinyobjloader"
+    "tinyobjloader",
+    "draco"
   ]
 }

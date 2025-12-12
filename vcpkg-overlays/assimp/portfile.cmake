@@ -6,7 +6,7 @@ vcpkg_from_github(
 )
 
 # Remove third-party internals that you do NOT want to use
-# NOTE: Keep contrib/draco for Draco mesh compression support in GLTF
+# NOTE: Keep contrib/draco - we need its headers, but we'll use external draco library
 file(REMOVE_RECURSE
     "${SOURCE_PATH}/contrib/zlib"
     "${SOURCE_PATH}/contrib/zip"
@@ -19,6 +19,63 @@ if(VCPKG_TARGET_IS_WINDOWS)
         ""
     )
 endif()
+
+# Patch Assimp to use external/system draco library instead of building its own
+# This avoids symbol conflicts when linking statically with other libraries that also use draco (e.g., PDAL)
+# Replace the ELSE() block that builds internal draco with find_package(draco)
+vcpkg_replace_string("${SOURCE_PATH}/CMakeLists.txt"
+[[    IF(ASSIMP_HUNTER_ENABLED)
+      hunter_add_package(draco)
+      find_package(draco CONFIG REQUIRED)
+      SET(draco_LIBRARIES draco::draco)
+    ELSE()]]
+[[    IF(ASSIMP_HUNTER_ENABLED)
+      hunter_add_package(draco)
+    ENDIF()
+    # Use external/system draco library (e.g., from vcpkg) to avoid symbol conflicts
+    find_package(draco CONFIG REQUIRED)
+    SET(draco_LIBRARIES draco::draco)
+    get_target_property(draco_INCLUDE_DIRS draco::draco INTERFACE_INCLUDE_DIRECTORIES)
+    IF(FALSE) # Disabled: we use external draco]]
+)
+
+# Close the IF(FALSE) block - find the end of the internal draco build section
+vcpkg_replace_string("${SOURCE_PATH}/CMakeLists.txt"
+[[      SET(draco_INCLUDE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/contrib/draco/src")
+
+      # This is probably wrong
+      IF (ASSIMP_INSTALL)
+        INSTALL( TARGETS ${draco_LIBRARIES}
+          EXPORT "${TARGETS_EXPORT_NAME}"
+          LIBRARY DESTINATION ${ASSIMP_LIB_INSTALL_DIR}
+          ARCHIVE DESTINATION ${ASSIMP_LIB_INSTALL_DIR}
+          RUNTIME DESTINATION ${ASSIMP_BIN_INSTALL_DIR}
+          FRAMEWORK DESTINATION ${ASSIMP_LIB_INSTALL_DIR}
+          COMPONENT ${LIBASSIMP_COMPONENT}
+          INCLUDES DESTINATION include
+        )
+      ENDIF()
+    ENDIF()
+  ENDIF()
+ENDIF()]]
+[[      SET(draco_INCLUDE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/contrib/draco/src")
+
+      # This is probably wrong
+      IF (ASSIMP_INSTALL)
+        INSTALL( TARGETS ${draco_LIBRARIES}
+          EXPORT "${TARGETS_EXPORT_NAME}"
+          LIBRARY DESTINATION ${ASSIMP_LIB_INSTALL_DIR}
+          ARCHIVE DESTINATION ${ASSIMP_LIB_INSTALL_DIR}
+          RUNTIME DESTINATION ${ASSIMP_BIN_INSTALL_DIR}
+          FRAMEWORK DESTINATION ${ASSIMP_LIB_INSTALL_DIR}
+          COMPONENT ${LIBASSIMP_COMPONENT}
+          INCLUDES DESTINATION include
+        )
+      ENDIF()
+    ENDIF() # End of IF(FALSE) block for internal draco
+  ENDIF()
+ENDIF()]]
+)
 
 # Platform-specific options
 set(PLATFORM_OPTIONS "")
@@ -49,9 +106,8 @@ vcpkg_cmake_configure(
         -DASSIMP_BUILD_3MF_EXPORTER=OFF
         -DASSIMP_BUILD_ZLIB=OFF
 
-        # Enable Draco for GLTF compression support
+        # Enable Draco for GLTF compression support (uses external draco from vcpkg)
         -DASSIMP_BUILD_DRACO=ON
-        -DASSIMP_BUILD_DRACO_STATIC=ON
 
         # Variants
         -DASSIMP_BUILD_TESTS=OFF
