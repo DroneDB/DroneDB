@@ -512,4 +512,63 @@ namespace
         }
     }
 
+    TEST(file3d, convertDracoGlbTest)
+    {
+        try
+        {
+            // URL of the test GLB file with Draco mesh compression
+            std::string glbUrl = "https://raw.githubusercontent.com/DroneDB/test_data/refs/heads/master/3d/draco_model.glb";
+
+            // Create an instance of TestArea
+            TestArea testArea("draco-glb");
+            auto glbFile = testArea.downloadTestAsset(glbUrl, "draco_model.glb");
+
+            // Output paths
+            std::string outGeomPath;
+            std::string outMtlPath;
+
+            // Create absolute path for output
+            fs::path outputBasePath = testArea.getPath("output_draco");
+
+            // Convert GLB with Draco compression to 3D model (OBJ/PLY)
+            convertGltfTo3dModel(glbFile.string(), outputBasePath.string(), outGeomPath, outMtlPath, false, true);
+
+            // Verify that output files were created
+            ASSERT_FALSE(outGeomPath.empty());
+            ASSERT_TRUE(fs::exists(outGeomPath));
+
+            // If MTL was created (OBJ format), verify it exists
+            if (!outMtlPath.empty()) {
+                ASSERT_TRUE(fs::exists(outMtlPath));
+            }
+
+            std::cout << "Generated geometry file: " << outGeomPath << std::endl;
+            if (!outMtlPath.empty()) {
+                std::cout << "Generated MTL file: " << outMtlPath << std::endl;
+            }
+
+            verifyObjAndTextures(outGeomPath, outMtlPath);
+
+            std::cout << "All files verified successfully!" << std::endl;
+
+            // Test nexus conversion from the converted OBJ
+            fs::path nexusOutput = testArea.getPath("draco_model.nxz");
+            std::string nexusPath = buildNexus(outGeomPath, nexusOutput.string(), true);
+
+            // Verify nexus file was created
+            ASSERT_FALSE(nexusPath.empty());
+            ASSERT_TRUE(fs::exists(nexusPath));
+            ASSERT_GT(fs::file_size(nexusPath), 0);
+
+            std::cout << "Successfully created nexus file: " << nexusPath << std::endl;
+            std::cout << "Nexus file size: " << fs::file_size(nexusPath) << " bytes" << std::endl;
+
+        }
+        catch (const std::exception &e)
+        {
+            std::cerr << "Error: " << e.what() << std::endl;
+            FAIL();
+        }
+    }
+
 }
