@@ -51,6 +51,7 @@ vcpkg_cmake_configure(
 
         # Enable Draco for GLTF compression support
         -DASSIMP_BUILD_DRACO=ON
+        -DASSIMP_BUILD_DRACO_STATIC=ON
 
         # Variants
         -DASSIMP_BUILD_TESTS=OFF

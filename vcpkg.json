@@ -36,7 +36,12 @@
       "name": "nlohmann-json",
       "version>=": "3.11.3"
     },
-    "pdal",
+    {
+      "name": "pdal",
+      "features": [
+        "zstd"
+      ]
+    },
     "plog",
     {
       "name": "proj",
