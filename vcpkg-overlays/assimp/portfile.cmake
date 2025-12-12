@@ -6,10 +6,10 @@ vcpkg_from_github(
 )
 
 # Remove third-party internals that you do NOT want to use
+# NOTE: Keep contrib/draco for Draco mesh compression support in GLTF
 file(REMOVE_RECURSE
     "${SOURCE_PATH}/contrib/zlib"
     "${SOURCE_PATH}/contrib/zip"
-    #"${SOURCE_PATH}/contrib/draco"
 )
 
 # Fix MSVC compiler flag conflict on Windows: /utf-8 and /source-charset:utf-8 cannot be used together
@@ -49,11 +49,8 @@ vcpkg_cmake_configure(
         -DASSIMP_BUILD_3MF_EXPORTER=OFF
         -DASSIMP_BUILD_ZLIB=OFF
 
-        # Enable Draco support (for glTF compression)
-        # ASSIMP_BUILD_DRACO_STATIC is required when building static libraries
-        # to avoid the bug where assimp looks for non-existent draco_shared target
+        # Enable Draco for GLTF compression support
         -DASSIMP_BUILD_DRACO=ON
-        -DASSIMP_BUILD_DRACO_STATIC=ON
 
         # Variants
         -DASSIMP_BUILD_TESTS=OFF
