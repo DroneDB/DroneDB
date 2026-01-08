@@ -113,7 +113,7 @@ DroneDB uses **vcpkg** for dependency management.
 
 ### Prerequisites
 
-- CMake 3.16+
+- CMake 3.21+
 - C++17 compiler (GCC 9+, Visual Studio 2019+)
 - Git
 - vcpkg
