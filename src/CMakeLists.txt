@@ -168,8 +168,10 @@ endif()
 # Copy the necessary files to the binary directory after build
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E echo "Copying necessary files to the binary directory..."
-    # For multi-config generators (VS), copy from config-specific directory
-    # For single-config generators (Ninja), files are already in the right place
+    # TARGET_FILE_DIR resolves to the appropriate output directory:
+    # - config-specific directory for multi-config generators (e.g. VS)
+    # - single output directory for single-config generators (e.g. Ninja)
+    # The copy_directory command is executed for all generator types.
     COMMAND ${CMAKE_COMMAND} -E copy_directory "$<TARGET_FILE_DIR:${PROJECT_NAME}>" "${OUTPUT_DIR}"
     # Copy libnexus dll from its output directory
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE_DIR:nxs>/$<TARGET_FILE_NAME:nxs>" "${OUTPUT_DIR}/"
@@ -216,7 +218,7 @@ if (WIN32)
         COMMAND "${CMAKE_COMMAND}" -E echo "Copying vcpkg DLLs to output directory..."
         COMMAND "${CMAKE_COMMAND}"
             -DSOURCE_DIR=$<IF:$<CONFIG:Debug>,${VCPKG_DEBUG_BIN_DIR},${VCPKG_BIN_DIR}>
-            -DFALLBACK_DIR=$<IF:$<CONFIG:Debug>,${VCPKG_BIN_DIR},>
+            $<$<CONFIG:Debug>:-DFALLBACK_DIR=${VCPKG_BIN_DIR}>
             -DDEST_DIR=${OUTPUT_DIR}
             -P "${CMAKE_SOURCE_DIR}/cmake/CopyDlls.cmake"
         COMMENT "Copying vcpkg DLLs"
