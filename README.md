@@ -4,7 +4,7 @@
 [![GitHub commits](https://img.shields.io/github/commit-activity/m/DroneDB/DroneDB)](https://github.com/DroneDB/DroneDB/commits)
 [![C/C++ CI](https://github.com/DroneDB/DroneDB/actions/workflows/c-cpp.yml/badge.svg)](https://github.com/DroneDB/DroneDB/actions/workflows/c-cpp.yml)
 
-**DroneDB** is a free, open-source platform for efficient aerial data management and sharing. Store, index, process, and share images, orthophotos, digital elevation models, point clouds, and vector files with ease.
+**DroneDB** is a free, open-source platform for modern geospatial data management. Store, visualize and share your geospatial data in the cloud. Orthophotos, point clouds, 3D models, geotagged files: all in one place.
 
 ![DroneDB Screenshot](https://user-images.githubusercontent.com/1951843/147839499-0c263b47-4e51-437c-adbb-cc0bea50d29f.png)
 
@@ -15,11 +15,11 @@
 ## Key Features
 
 - **Smart Indexing** - Automatic metadata extraction from images (EXIF), raster data (GDAL), point clouds (PDAL), and vector files
-- **Geospatial Support** - Built-in coordinate transformations (UTM, WGS84), spatial queries with SpatiaLite
-- **Thumbnails & Tiles** - Generate previews and map tiles from your data
+- **Interactive Visualization** - Web-based viewers for orthophotos, 3D point clouds, textured models, and 360° panoramas
+- **Geospatial Analysis** - Flight path visualization, EXIF metadata extraction, dataset partitioning, and STAC catalog support
+- **Multiple Sharing Options** - Direct links, embed codes, TMS tiles, Cloud-Optimized GeoTIFFs (COG), and Entwine Point Tiles (EPT)
 - **Cloud Sync** - Push and pull datasets to/from DroneDB Hub for collaboration
-- **STAC Catalog** - Export datasets as SpatioTemporal Asset Catalogs
-- **Password Protection** - Secure your datasets with encrypted passwords
+- **Format Support** - Orthophotos (GeoTIFF, COG), point clouds (LAZ/LAS, PLY), 3D models (OBJ, glTF/GLB), vector files (GeoJSON, SHP, KML, DWG, GPKG), and 360° panoramas
 - **Cross-Platform** - Works on Windows and Linux
 
 ---
