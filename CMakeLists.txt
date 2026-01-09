@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.16.3)
+cmake_minimum_required(VERSION 3.21)
 project(ddb LANGUAGES CXX C)
 
 # Enable C++17 standard

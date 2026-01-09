@@ -27,17 +27,23 @@ if(BUILD_TESTING)
 
     target_include_directories(ddbtest PRIVATE ${CUSTOM_INCLUDE_DIRS})
 
+    # Copy only the test executable to build directory (not the entire folder)
+    # This fixes the issue where copy_directory overwrites cmake_install.cmake
+    add_custom_command(TARGET ddbtest POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:ddbtest>"
+            "${CMAKE_BINARY_DIR}"
+        COMMENT "Copying ddbtest to build directory"
+    )
+
+    # On Windows, also copy runtime DLLs
     if (WIN32)
         add_custom_command(TARGET ddbtest POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_directory
-                "${CMAKE_BINARY_DIR}/tests/$<CONFIG>"
+            COMMAND ${CMAKE_COMMAND} -E echo "Staging runtime DLLs for ddbtest..."
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_RUNTIME_DLLS:ddbtest>
                 "${CMAKE_BINARY_DIR}"
-        )
-    else()
-        add_custom_command(TARGET ddbtest POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_directory
-                "${CMAKE_BINARY_DIR}/tests"
-                "${CMAKE_BINARY_DIR}"
+            COMMAND_EXPAND_LISTS
         )
     endif()
 
