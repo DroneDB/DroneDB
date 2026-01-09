@@ -168,8 +168,11 @@ endif()
 # Copy the necessary files to the binary directory after build
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E echo "Copying necessary files to the binary directory..."
-    COMMAND ${CMAKE_COMMAND} -E copy_directory "${SRC_RELEASE_DIR}" "${OUTPUT_DIR}"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory "${LIBNEXUS_OUTPUT_DIR}" "${OUTPUT_DIR}"
+    # For multi-config generators (VS), copy from config-specific directory
+    # For single-config generators (Ninja), files are already in the right place
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "$<TARGET_FILE_DIR:${PROJECT_NAME}>" "${OUTPUT_DIR}"
+    # Copy libnexus dll from its output directory
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE_DIR:nxs>/$<TARGET_FILE_NAME:nxs>" "${OUTPUT_DIR}/"
 )
 
 # Copy PROJ data if available
