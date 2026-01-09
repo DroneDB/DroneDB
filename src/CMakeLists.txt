@@ -206,6 +206,21 @@ if (WIN32)
                 $<TARGET_FILE_DIR:${PROJECT_NAME}>
         COMMAND_EXPAND_LISTS
     )
+
+    # Copy ALL DLLs from vcpkg bin directories to ensure transitive dependencies are included
+    # TARGET_RUNTIME_DLLS only copies direct dependencies, not transitive ones like Qt5's harfbuzz, pcre2, etc.
+    set(VCPKG_BIN_DIR "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/bin")
+    set(VCPKG_DEBUG_BIN_DIR "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/debug/bin")
+
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E echo "Copying vcpkg DLLs to output directory..."
+        COMMAND "${CMAKE_COMMAND}"
+            -DSOURCE_DIR=$<IF:$<CONFIG:Debug>,${VCPKG_DEBUG_BIN_DIR},${VCPKG_BIN_DIR}>
+            -DFALLBACK_DIR=$<IF:$<CONFIG:Debug>,${VCPKG_BIN_DIR},>
+            -DDEST_DIR=${OUTPUT_DIR}
+            -P "${CMAKE_SOURCE_DIR}/cmake/CopyDlls.cmake"
+        COMMENT "Copying vcpkg DLLs"
+    )
 endif()
 
 
