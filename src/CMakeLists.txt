@@ -177,6 +177,13 @@ add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE_DIR:nxs>/$<TARGET_FILE_NAME:nxs>" "${OUTPUT_DIR}/"
 )
 
+# Copy Qt plugins (imageformats, platforms, etc.) for libnexus - required for WebP support on Windows
+if(WIN32)
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "$<TARGET_FILE_DIR:nxs>/plugins" "${OUTPUT_DIR}/plugins"
+    )
+endif()
+
 # Copy PROJ data if available
 if(PROJ_DATA_DIR AND EXISTS "${PROJ_DATA_DIR}/proj.db")
     add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
