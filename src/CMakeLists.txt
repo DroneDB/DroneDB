@@ -168,9 +168,21 @@ endif()
 # Copy the necessary files to the binary directory after build
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E echo "Copying necessary files to the binary directory..."
-    COMMAND ${CMAKE_COMMAND} -E copy_directory "${SRC_RELEASE_DIR}" "${OUTPUT_DIR}"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory "${LIBNEXUS_OUTPUT_DIR}" "${OUTPUT_DIR}"
+    # TARGET_FILE_DIR resolves to the appropriate output directory:
+    # - config-specific directory for multi-config generators (e.g. VS)
+    # - single output directory for single-config generators (e.g. Ninja)
+    # The copy_directory command is executed for all generator types.
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "$<TARGET_FILE_DIR:${PROJECT_NAME}>" "${OUTPUT_DIR}"
+    # Copy libnexus dll from its output directory
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE_DIR:nxs>/$<TARGET_FILE_NAME:nxs>" "${OUTPUT_DIR}/"
 )
+
+# Copy Qt plugins (imageformats, platforms, etc.) for libnexus - required for WebP support on Windows
+if(WIN32)
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "$<TARGET_FILE_DIR:nxs>/plugins" "${OUTPUT_DIR}/plugins"
+    )
+endif()
 
 # Copy PROJ data if available
 if(PROJ_DATA_DIR AND EXISTS "${PROJ_DATA_DIR}/proj.db")
@@ -202,6 +214,21 @@ if (WIN32)
                 $<TARGET_RUNTIME_DLLS:${PROJECT_NAME}>
                 $<TARGET_FILE_DIR:${PROJECT_NAME}>
         COMMAND_EXPAND_LISTS
+    )
+
+    # Copy ALL DLLs from vcpkg bin directories to ensure transitive dependencies are included
+    # TARGET_RUNTIME_DLLS only copies direct dependencies, not transitive ones like Qt5's harfbuzz, pcre2, etc.
+    set(VCPKG_BIN_DIR "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/bin")
+    set(VCPKG_DEBUG_BIN_DIR "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/debug/bin")
+
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E echo "Copying vcpkg DLLs to output directory..."
+        COMMAND "${CMAKE_COMMAND}"
+            -DSOURCE_DIR=$<IF:$<CONFIG:Debug>,${VCPKG_DEBUG_BIN_DIR},${VCPKG_BIN_DIR}>
+            $<$<CONFIG:Debug>:-DFALLBACK_DIR=${VCPKG_BIN_DIR}>
+            -DDEST_DIR=${OUTPUT_DIR}
+            -P "${CMAKE_SOURCE_DIR}/cmake/CopyDlls.cmake"
+        COMMENT "Copying vcpkg DLLs"
     )
 endif()
 

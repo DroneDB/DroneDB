@@ -4,7 +4,7 @@
 [![GitHub commits](https://img.shields.io/github/commit-activity/m/DroneDB/DroneDB)](https://github.com/DroneDB/DroneDB/commits)
 [![C/C++ CI](https://github.com/DroneDB/DroneDB/actions/workflows/c-cpp.yml/badge.svg)](https://github.com/DroneDB/DroneDB/actions/workflows/c-cpp.yml)
 
-**DroneDB** is a free, open-source platform for efficient aerial data management and sharing. Store, index, process, and share images, orthophotos, digital elevation models, point clouds, and vector files with ease.
+**DroneDB** is a free, open-source platform for modern geospatial data management. Store, visualize and share your geospatial data in the cloud. Orthophotos, point clouds, 3D models, geotagged files: all in one place.
 
 ![DroneDB Screenshot](https://user-images.githubusercontent.com/1951843/147839499-0c263b47-4e51-437c-adbb-cc0bea50d29f.png)
 
@@ -15,11 +15,11 @@
 ## Key Features
 
 - **Smart Indexing** - Automatic metadata extraction from images (EXIF), raster data (GDAL), point clouds (PDAL), and vector files
-- **Geospatial Support** - Built-in coordinate transformations (UTM, WGS84), spatial queries with SpatiaLite
-- **Thumbnails & Tiles** - Generate previews and map tiles from your data
+- **Interactive Visualization** - Web-based viewers for orthophotos, 3D point clouds, textured models, and 360° panoramas
+- **Geospatial Analysis** - Flight path visualization, EXIF metadata extraction, dataset partitioning, and STAC catalog support
+- **Multiple Sharing Options** - Direct links, embed codes, TMS tiles, Cloud-Optimized GeoTIFFs (COG), and Entwine Point Tiles (EPT)
 - **Cloud Sync** - Push and pull datasets to/from DroneDB Hub for collaboration
-- **STAC Catalog** - Export datasets as SpatioTemporal Asset Catalogs
-- **Password Protection** - Secure your datasets with encrypted passwords
+- **Format Support** - Orthophotos (GeoTIFF, COG), point clouds (LAZ/LAS, PLY), 3D models (OBJ, glTF/GLB), vector files (GeoJSON, SHP, KML, DWG, GPKG), and 360° panoramas
 - **Cross-Platform** - Works on Windows and Linux
 
 ---
@@ -109,24 +109,17 @@ DroneDB consists of:
 
 ## Building from Source
 
-DroneDB uses **vcpkg** for dependency management.
+DroneDB uses **vcpkg** for dependency management and CMake for building.
 
 ### Prerequisites
 
-- CMake 3.21+
-- C++17 compiler (GCC 9+, Visual Studio 2019+)
-- Git
-- vcpkg
+- **C++17 compiler** (GCC 9+, Clang 9+, MSVC 2019+)
+- **CMake 3.21+**
+- **Python 3.x**
+- **Git**
+- **Visual Studio 2019+** (Windows only, with C++ desktop development workload)
 
 ### Quick Build
-
-**Linux:**
-```bash
-git clone https://github.com/microsoft/vcpkg.git && cd vcpkg && ./bootstrap-vcpkg.sh
-export VCPKG_ROOT=$(pwd)
-cd .. && git clone https://github.com/DroneDB/DroneDB.git && cd DroneDB
-./full-build-linux.sh
-```
 
 **Windows (PowerShell):**
 ```powershell
@@ -136,7 +129,67 @@ cd ..; git clone https://github.com/DroneDB/DroneDB.git; cd DroneDB
 .\full-build-win.ps1
 ```
 
-### Docker
+**Linux:**
+```bash
+git clone https://github.com/microsoft/vcpkg.git && cd vcpkg && ./bootstrap-vcpkg.sh
+export VCPKG_ROOT=$(pwd)
+cd .. && git clone https://github.com/DroneDB/DroneDB.git && cd DroneDB
+./full-build-linux.sh
+```
+
+### Windows Build Script
+
+DroneDB provides a robust PowerShell build script that automatically detects Visual Studio, configures CMake, and builds using Ninja.
+
+#### Basic Usage
+
+```powershell
+# Debug build (default)
+.\full-build-win.ps1
+
+# Release build
+.\full-build-win.ps1 -BuildType Release
+
+# Clean build
+.\full-build-win.ps1 -Clean
+
+# Custom configuration
+.\full-build-win.ps1 -BuildType Release -Clean -Jobs 8
+```
+
+#### Script Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `-BuildType` | String | `Debug` | Build configuration: `Debug`, `Release`, `RelWithDebInfo`, or `MinSizeRel` |
+| `-Clean` | Switch | `false` | Remove CMake cache and build artifacts before building |
+| `-SkipTests` | Switch | `false` | Disable test compilation |
+| `-Jobs` | Int | CPU cores | Number of parallel build jobs |
+
+#### Build Output
+
+After successful build, find executables in the `build/` directory:
+- **ddbcmd.exe** - Command-line tool
+- **ddb.dll** - Core library
+- **ddbtest.exe** - Test suite
+
+#### Troubleshooting
+
+**Visual Studio Not Found**
+- The script automatically searches for VS 2019-2025 using `vswhere.exe`
+- Install Visual Studio with "Desktop development with C++" workload
+- Or set `VSINSTALLDIR` environment variable
+
+**CMake Not Found**
+- Install from [cmake.org/download](https://cmake.org/download/)
+- Or via Visual Studio Installer (Individual Components → CMake)
+
+**Build Failures**
+- Try a clean build: `.\full-build-win.ps1 -Clean`
+- Manually bootstrap vcpkg: `cd vcpkg; .\bootstrap-vcpkg.bat`
+- Check prerequisites are installed and in PATH
+
+### Docker Build
 
 ```bash
 ./build-docker.sh
@@ -146,7 +199,7 @@ docker run --rm -it -v $(pwd):/data ddb/app:latest
 ### Manual Build Steps
 
 <details>
-<summary>Click to expand detailed build instructions</summary>
+<summary>Click to expand manual build instructions</summary>
 
 #### Set VCPKG_ROOT
 
@@ -158,7 +211,7 @@ export VCPKG_ROOT=/path/to/vcpkg
 $env:VCPKG_ROOT = "C:\path\to\vcpkg"
 ```
 
-#### Clone and Build
+#### Build Commands
 
 ```bash
 git clone https://github.com/DroneDB/DroneDB.git
@@ -173,6 +226,14 @@ cmake --build build --config Release -j$(nproc)  # Linux
 cmake --build build --config Release -- /maxcpucount:14  # Windows
 ```
 
+#### Windows Manual Build (Visual Studio Developer Command Prompt)
+
+```powershell
+mkdir build && cd build
+cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="..\vcpkg\scripts\buildsystems\vcpkg.cmake"
+cmake --build . -- -j16
+```
+
 #### Run Tests
 
 ```bash
@@ -180,7 +241,7 @@ cmake --build build --config Release -- /maxcpucount:14  # Windows
 cd build && ./ddbtest --gtest_shuffle
 
 # Windows
-cd build && .\Release\ddbtest.exe --gtest_shuffle
+cd build && .\ddbtest.exe --gtest_shuffle
 ```
 
 </details>
