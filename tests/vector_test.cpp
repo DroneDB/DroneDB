@@ -30,6 +30,30 @@ namespace
         // Check layer count
         EXPECT_EQ(GDALDatasetGetLayerCount(hDS), layers);
 
+        // Verify that all layers are in WGS84 (EPSG:4326)
+        for (int i = 0; i < GDALDatasetGetLayerCount(hDS); i++)
+        {
+            OGRLayerH hLayer = GDALDatasetGetLayer(hDS, i);
+            EXPECT_NE(hLayer, nullptr);
+
+            OGRSpatialReferenceH hSRS = OGR_L_GetSpatialRef(hLayer);
+            if (hSRS != nullptr)
+            {
+                // Check that the CRS is WGS84 (EPSG:4326)
+                int isWGS84 = OSRIsGeographic(hSRS) && OSRGetAuthorityCode(hSRS, nullptr) != nullptr;
+                if (isWGS84)
+                {
+                    const char* authCode = OSRGetAuthorityCode(hSRS, nullptr);
+                    const char* authName = OSRGetAuthorityName(hSRS, nullptr);
+                    if (authCode != nullptr && authName != nullptr)
+                    {
+                        EXPECT_STREQ(authName, "EPSG");
+                        EXPECT_STREQ(authCode, "4326");
+                    }
+                }
+            }
+        }
+
         // Close
         GDALClose(hDS);
     }
@@ -363,6 +387,60 @@ namespace
         buildVector(input.string(), output.string());
 
         VerifyVector(output);
+    }
+
+    TEST(testVector, bigShapefileMilan)
+    {
+
+        // URL of the test archive
+        // This shapefile is in EPSG:6707 (RDN2008 / UTM zone 32N with N-E axis order)
+        // It tests that the conversion properly reprojects to WGS84 (EPSG:4326)
+        const auto archiveUrl = "https://github.com/DroneDB/test_data/raw/refs/heads/master/vector/A010101.zip";
+
+        // Create an instance of TestFS
+        TestFS testFS(archiveUrl, "A010101", true);
+
+        const std::string vector = "A010101.shp";
+        const std::string output = "A010101.fgb";
+
+        LOGD << "Building vector " << vector << " to " << output;
+
+        buildVector(vector, output);
+
+        VerifyVector(output);
+
+        // Additional verification: check that coordinates are in WGS84 range (degrees, not meters)
+        GDALDatasetH hDS = GDALOpenEx(output.c_str(), GDAL_OF_VECTOR, nullptr, nullptr, nullptr);
+        ASSERT_NE(hDS, nullptr);
+
+        OGRLayerH hLayer = GDALDatasetGetLayer(hDS, 0);
+        ASSERT_NE(hLayer, nullptr);
+
+        // Get the extent and verify it's in WGS84 range (approximately Milan area: lon 9, lat 45)
+        OGREnvelope extent;
+        if (OGR_L_GetExtent(hLayer, &extent, TRUE) == OGRERR_NONE)
+        {
+            // WGS84 coordinates for Milan area should be roughly:
+            // Longitude: 8.5 to 10 degrees
+            // Latitude: 45 to 46 degrees
+            // If coordinates are still in UTM, they would be around 500000, 5000000 (meters)
+            LOGD << "Extent: MinX=" << extent.MinX << ", MinY=" << extent.MinY
+                 << ", MaxX=" << extent.MaxX << ", MaxY=" << extent.MaxY;
+
+            // Verify coordinates are in degrees (WGS84) not meters (UTM)
+            EXPECT_GT(extent.MinX, -180.0);
+            EXPECT_LT(extent.MaxX, 180.0);
+            EXPECT_GT(extent.MinY, -90.0);
+            EXPECT_LT(extent.MaxY, 90.0);
+
+            // More specific check for Milan area (lon ~9, lat ~45)
+            EXPECT_GT(extent.MinX, 8.0);   // West of Milan
+            EXPECT_LT(extent.MaxX, 10.0);  // East of Milan
+            EXPECT_GT(extent.MinY, 44.0);  // South of Milan
+            EXPECT_LT(extent.MaxY, 47.0);  // North of Milan
+        }
+
+        GDALClose(hDS);
     }
 
 }

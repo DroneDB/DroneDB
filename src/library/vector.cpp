@@ -49,11 +49,11 @@ namespace ddb
             fs::copy_file(input, outputVector);
 
             return;
-        }        
-        
+        }
+
         const auto deps = getVectorDependencies(input);
         std::vector<std::string> missingDeps;
-        
+
         // Collect all missing dependencies
         for (const std::string &d : deps)
         {
@@ -63,7 +63,7 @@ namespace ddb
                 missingDeps.push_back(d);
             }
         }
-        
+
         // If there are missing dependencies, throw exception with the complete list
         if (!missingDeps.empty())
         {
@@ -105,7 +105,7 @@ namespace ddb
 
     /**
  * Apre un dataset GDAL da un file di input.
- * 
+ *
  * @param input Path del file di input
  * @return Puntatore al dataset GDAL o nullptr in caso di errore
  */
@@ -133,7 +133,7 @@ GDALDatasetH openInputDataset(const char *input) {
  */
 bool performDirectConversion(GDALDatasetH hSrcDS, const char *output, GDALVectorTranslateOptions *psOptions) {
     LOGD << "Using direct conversion";
-    
+
     // Perform the translation directly
     int pbUsageError = 0;
     GDALDatasetH hDstDS = GDALVectorTranslate(
@@ -143,12 +143,12 @@ bool performDirectConversion(GDALDatasetH hSrcDS, const char *output, GDALVector
         &hSrcDS,
         psOptions,
         &pbUsageError);
-        
+
     LOGD << "Direct translation completed.";
-    
+
     if (hDstDS == nullptr || pbUsageError) {
         LOGD << "GDALVectorTranslate failed.";
-        
+
         // Get last error
         const char *err = CPLGetLastErrorMsg();
         if (err != nullptr) {
@@ -156,10 +156,10 @@ bool performDirectConversion(GDALDatasetH hSrcDS, const char *output, GDALVector
             const auto type = CPLGetLastErrorType();
             LOGD << "Error " << num << " of type " << type << ": " << err;
         }
-        
+
         return false;
     }
-    
+
     LOGD << "Output dataset created successfully.";
     GDALClose(hDstDS);
     return true;
@@ -176,7 +176,7 @@ GDALDatasetH createTemporaryDataset() {
         LOGD << "Memory driver not available.";
         return nullptr;
     }
-    
+
     GDALDatasetH hTempDS = GDALCreate(hDriver, "temp", 0, 0, 0, GDT_Unknown, nullptr);
     if (hTempDS == nullptr) {
         LOGD << "Failed to create temporary memory dataset.";
@@ -198,18 +198,18 @@ OGRLayerH createMergedLayer(GDALDatasetH hTempDS) {
         LOGD << "Failed to create merged layer.";
         return nullptr;
     }
-    
+
     // Add source_layer field to store the original layer name
     OGRFieldDefnH layerNameField = OGR_Fld_Create("source_layer", OFTString);
     OGR_L_CreateField(mergedLayer, layerNameField, FALSE);
     OGR_Fld_Destroy(layerNameField);
-    
+
     return mergedLayer;
 }
 
 /**
  * Copia un singolo campo da una feature a un'altra, gestendo i diversi tipi di dati.
- * 
+ *
  * @param feature Feature sorgente
  * @param newFeature Feature di destinazione
  * @param fieldDefn Definizione del campo da copiare
@@ -255,15 +255,15 @@ void copyFeatureField(OGRFeatureH feature, OGRFeatureH newFeature, OGRFieldDefnH
 int copyFieldDefinitions(GDALDatasetH hSrcDS, int layerCount, OGRLayerH mergedLayer) {
     // Add all fields from all layers (collect unique fields)
     std::set<std::string> uniqueFields;
-    
+
     // First pass: collect all unique field names
     for (int i = 0; i < layerCount; i++) {
         OGRLayerH srcLayer = GDALDatasetGetLayer(hSrcDS, i);
         if (!srcLayer) continue;
-        
+
         OGRFeatureDefnH defn = OGR_L_GetLayerDefn(srcLayer);
         int fieldCount = OGR_FD_GetFieldCount(defn);
-        
+
         for (int j = 0; j < fieldCount; j++) {
             OGRFieldDefnH fieldDefn = OGR_FD_GetFieldDefn(defn, j);
             std::string fieldName = OGR_Fld_GetNameRef(fieldDefn);
@@ -274,7 +274,7 @@ int copyFieldDefinitions(GDALDatasetH hSrcDS, int layerCount, OGRLayerH mergedLa
             }
         }
     }
-    
+
     LOGD << "Created merged layer with " << uniqueFields.size() << " unique fields";
     return uniqueFields.size();
 }
@@ -291,23 +291,23 @@ void copyFeaturesToMergedLayer(GDALDatasetH hSrcDS, int layerCount, OGRLayerH me
     for (int i = 0; i < layerCount; i++) {
         OGRLayerH srcLayer = GDALDatasetGetLayer(hSrcDS, i);
         if (!srcLayer) continue;
-        
+
         const char* layerName = OGR_L_GetName(srcLayer);
         LOGD << "Merging features from layer: " << layerName;
-        
+
         // Get merged layer definition for creating new features
         OGRFeatureDefnH mergedDefn = OGR_L_GetLayerDefn(mergedLayer);
-        
+
         // Copy all features
         OGR_L_ResetReading(srcLayer);
         OGRFeatureH feature;
         while ((feature = OGR_L_GetNextFeature(srcLayer)) != nullptr) {
             // Create new feature in merged layer
             OGRFeatureH newFeature = OGR_F_Create(mergedDefn);
-            
+
             // Set the source layer name
             OGR_F_SetFieldString(newFeature, OGR_FD_GetFieldIndex(mergedDefn, "source_layer"), layerName);
-            
+
             // Copy geometry
             OGRGeometryH geom = OGR_F_GetGeometryRef(feature);
             if (geom) {
@@ -315,20 +315,20 @@ void copyFeaturesToMergedLayer(GDALDatasetH hSrcDS, int layerCount, OGRLayerH me
                 OGR_F_SetGeometry(newFeature, geomCopy);
                 OGR_G_DestroyGeometry(geomCopy);
             }
-            
+
             // Copy all field values for fields that exist in both layers
             OGRFeatureDefnH srcDefn = OGR_L_GetLayerDefn(srcLayer);
             int fieldCount = OGR_FD_GetFieldCount(srcDefn);
             for (int j = 0; j < fieldCount; j++) {
                 OGRFieldDefnH fieldDefn = OGR_FD_GetFieldDefn(srcDefn, j);
                 const char* fieldName = OGR_Fld_GetNameRef(fieldDefn);
-                
+
                 int targetIdx = OGR_FD_GetFieldIndex(mergedDefn, fieldName);
                 if (targetIdx >= 0 && OGR_F_IsFieldSetAndNotNull(feature, j)) {
                     copyFeatureField(feature, newFeature, fieldDefn, j, targetIdx);
                 }
             }
-            
+
             // Add feature to merged layer
             OGR_L_CreateFeature(mergedLayer, newFeature);
             OGR_F_Destroy(newFeature);
@@ -348,26 +348,26 @@ void copyFeaturesToMergedLayer(GDALDatasetH hSrcDS, int layerCount, OGRLayerH me
  */
 bool mergeLayersAndConvert(GDALDatasetH hSrcDS, int layerCount, const char *output, GDALVectorTranslateOptions *psOptions) {
     LOGD << "Source has multiple layers (" << layerCount << "), merging them into a single layer";
-    
+
     // Create temporary dataset
     GDALDatasetH hTempDS = createTemporaryDataset();
     if (hTempDS == nullptr) {
         return false;
     }
-    
+
     // Create merged layer
     OGRLayerH mergedLayer = createMergedLayer(hTempDS);
     if (mergedLayer == nullptr) {
         GDALClose(hTempDS);
         return false;
     }
-    
+
     // Copy field definitions
     copyFieldDefinitions(hSrcDS, layerCount, mergedLayer);
-    
+
     // Copy features
     copyFeaturesToMergedLayer(hSrcDS, layerCount, mergedLayer);
-    
+
     // Now perform the translation from the temporary merged layer dataset to FlatGeobuf
     int pbUsageError = 0;
     GDALDatasetH hDstDS = GDALVectorTranslate(
@@ -403,7 +403,7 @@ bool mergeLayersAndConvert(GDALDatasetH hSrcDS, int layerCount, const char *outp
 
 /**
  * Funzione interna per la conversione di un file vettoriale a FlatGeobuf.
- * 
+ *
  * @param input Path del file di input
  * @param output Path del file di output
  * @param argv Opzioni per GDAL VectorTranslate
@@ -419,7 +419,7 @@ bool convertToFlatGeobufInternal(const char *input, const char *output, char **a
     // Get layer count from source dataset
     int layerCount = GDALDatasetGetLayerCount(hSrcDS);
     LOGD << "Source dataset has " << layerCount << " layers";
-    
+
     // Parse options
     GDALVectorTranslateOptions *psOptions = GDALVectorTranslateOptionsNew(argv, nullptr);
     if (psOptions == nullptr) {
@@ -427,9 +427,9 @@ bool convertToFlatGeobufInternal(const char *input, const char *output, char **a
         GDALClose(hSrcDS);
         return false;
     }
-    
+
     bool result = false;
-    
+
     // Convert based on layer count
     if (layerCount == 1) {
         // For single layer, use direct conversion
@@ -438,13 +438,40 @@ bool convertToFlatGeobufInternal(const char *input, const char *output, char **a
         // For multiple layers, merge them first
         result = mergeLayersAndConvert(hSrcDS, layerCount, output, psOptions);
     }
-    
+
     // Clean up
     GDALVectorTranslateOptionsFree(psOptions);
     GDALClose(hSrcDS);
-    
+
     return result;
 }
+
+    /**
+     * Check if the input dataset has a defined spatial reference system (CRS).
+     * Returns true if at least one layer has a CRS defined.
+     */
+    bool hasDefinedCRS(const std::string &input) {
+        GDALDatasetH hDS = GDALOpenEx(input.c_str(), GDAL_OF_VECTOR | GDAL_OF_READONLY, nullptr, nullptr, nullptr);
+        if (hDS == nullptr) {
+            return false;
+        }
+
+        bool hasCRS = false;
+        int layerCount = GDALDatasetGetLayerCount(hDS);
+        for (int i = 0; i < layerCount && !hasCRS; i++) {
+            OGRLayerH hLayer = GDALDatasetGetLayer(hDS, i);
+            if (hLayer != nullptr) {
+                OGRSpatialReferenceH hSRS = OGR_L_GetSpatialRef(hLayer);
+                if (hSRS != nullptr) {
+                    hasCRS = true;
+                    LOGD << "Layer " << i << " has CRS defined";
+                }
+            }
+        }
+
+        GDALClose(hDS);
+        return hasCRS;
+    }
 
     bool convertToFlatGeobuf(const std::string &input, const std::string &output)
     {
@@ -467,30 +494,61 @@ bool convertToFlatGeobufInternal(const char *input, const char *output, char **a
             {
                 LOGD << "Input file does not exist.";
                 return false;
-            }            // Prepare GDALVectorTranslate options
-            char *argv[] = {
-                const_cast<char *>("-f"), const_cast<char *>("FlatGeobuf"),
-                const_cast<char *>("-mapFieldType"), const_cast<char *>("StringList=String"),
-                //const_cast<char *>("-skipfailures"), // Skip layers that cause failures
-                nullptr // Ensure null termination
-            };
+            }
 
-            if (!convertToFlatGeobufInternal(input.c_str(), output.c_str(), argv)) {
-                LOGD << "Failed to convert to FlatGeobuf, let's try with multipoligon";                char *argv[] = {
+            // Check if source has a defined CRS - only reproject if it does
+            // Files without CRS are assumed to be already in WGS84 or have no georeferencing
+            bool needsReprojection = hasDefinedCRS(input);
+            LOGD << "Source has CRS: " << (needsReprojection ? "yes, will reproject to EPSG:4326" : "no, skipping reprojection");
+
+            if (needsReprojection) {
+                // Prepare GDALVectorTranslate options with reprojection to WGS84
+                // -t_srs EPSG:4326 ensures all output FGB files are in WGS84 coordinate system
+                // This is required for proper display in web maps (OpenLayers, Leaflet, etc.)
+                // -lco SPATIAL_INDEX=YES creates an R-tree index for efficient spatial queries via HTTP Range requests
+                char *argv[] = {
                     const_cast<char *>("-f"), const_cast<char *>("FlatGeobuf"),
+                    const_cast<char *>("-t_srs"), const_cast<char *>("EPSG:4326"),
                     const_cast<char *>("-mapFieldType"), const_cast<char *>("StringList=String"),
-                    /*
-                        PROMOTE_TO_MULTI can be used to automatically promote layers that mix polygon or multipolygons to multipolygons,
-                        and layers that mix linestrings or multilinestrings to multilinestrings. Can be useful when converting shapefiles
-                        to PostGIS and other target drivers that implement strict checks for geometry types.
-                    */
-                    const_cast<char *>("-nlt"), const_cast<char *>("PROMOTE_TO_MULTI"),
-                    //const_cast<char *>("-skipfailures"), // Skip layers that cause failures
+                    const_cast<char *>("-lco"), const_cast<char *>("SPATIAL_INDEX=YES"),
                     nullptr // Ensure null termination
                 };
 
-                return convertToFlatGeobufInternal(input.c_str(), output.c_str(), argv);
+                if (!convertToFlatGeobufInternal(input.c_str(), output.c_str(), argv)) {
+                    LOGD << "Failed to convert to FlatGeobuf, let's try with multipoligon";
+                    char *argv[] = {
+                        const_cast<char *>("-f"), const_cast<char *>("FlatGeobuf"),
+                        const_cast<char *>("-t_srs"), const_cast<char *>("EPSG:4326"),
+                        const_cast<char *>("-mapFieldType"), const_cast<char *>("StringList=String"),
+                        const_cast<char *>("-lco"), const_cast<char *>("SPATIAL_INDEX=YES"),
+                        const_cast<char *>("-nlt"), const_cast<char *>("PROMOTE_TO_MULTI"),
+                        nullptr // Ensure null termination
+                    };
 
+                    return convertToFlatGeobufInternal(input.c_str(), output.c_str(), argv);
+                }
+            } else {
+                // No CRS defined - convert without reprojection
+                // -lco SPATIAL_INDEX=YES creates an R-tree index for efficient spatial queries via HTTP Range requests
+                char *argv[] = {
+                    const_cast<char *>("-f"), const_cast<char *>("FlatGeobuf"),
+                    const_cast<char *>("-mapFieldType"), const_cast<char *>("StringList=String"),
+                    const_cast<char *>("-lco"), const_cast<char *>("SPATIAL_INDEX=YES"),
+                    nullptr // Ensure null termination
+                };
+
+                if (!convertToFlatGeobufInternal(input.c_str(), output.c_str(), argv)) {
+                    LOGD << "Failed to convert to FlatGeobuf, let's try with multipoligon";
+                    char *argv[] = {
+                        const_cast<char *>("-f"), const_cast<char *>("FlatGeobuf"),
+                        const_cast<char *>("-mapFieldType"), const_cast<char *>("StringList=String"),
+                        const_cast<char *>("-lco"), const_cast<char *>("SPATIAL_INDEX=YES"),
+                        const_cast<char *>("-nlt"), const_cast<char *>("PROMOTE_TO_MULTI"),
+                        nullptr // Ensure null termination
+                    };
+
+                    return convertToFlatGeobufInternal(input.c_str(), output.c_str(), argv);
+                }
             }
 
             return true;
