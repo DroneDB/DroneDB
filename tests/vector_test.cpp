@@ -39,18 +39,19 @@ namespace
             OGRSpatialReferenceH hSRS = OGR_L_GetSpatialRef(hLayer);
             if (hSRS != nullptr)
             {
-                // Check that the CRS is WGS84 (EPSG:4326)
-                int isWGS84 = OSRIsGeographic(hSRS) && OSRGetAuthorityCode(hSRS, nullptr) != nullptr;
-                if (isWGS84)
-                {
-                    const char* authCode = OSRGetAuthorityCode(hSRS, nullptr);
-                    const char* authName = OSRGetAuthorityName(hSRS, nullptr);
-                    if (authCode != nullptr && authName != nullptr)
-                    {
-                        EXPECT_STREQ(authName, "EPSG");
-                        EXPECT_STREQ(authCode, "4326");
-                    }
-                }
+                // Verify CRS is geographic (not projected) and is specifically EPSG:4326
+                EXPECT_TRUE(OSRIsGeographic(hSRS)) << "Layer " << i << " CRS is not geographic";
+
+                const char* authCode = OSRGetAuthorityCode(hSRS, nullptr);
+                const char* authName = OSRGetAuthorityName(hSRS, nullptr);
+
+                // Both authority name and code must be present
+                ASSERT_NE(authName, nullptr) << "Layer " << i << " has no authority name";
+                ASSERT_NE(authCode, nullptr) << "Layer " << i << " has no authority code";
+
+                // Verify it's exactly EPSG:4326 (WGS84)
+                EXPECT_STREQ(authName, "EPSG") << "Layer " << i << " authority is not EPSG";
+                EXPECT_STREQ(authCode, "4326") << "Layer " << i << " is not EPSG:4326";
             }
         }
 
@@ -416,29 +417,28 @@ namespace
         OGRLayerH hLayer = GDALDatasetGetLayer(hDS, 0);
         ASSERT_NE(hLayer, nullptr);
 
-        // Get the extent and verify it's in WGS84 range (approximately Milan area: lon 9, lat 45)
+        // Get the extent - this MUST succeed, otherwise the test should fail
         OGREnvelope extent;
-        if (OGR_L_GetExtent(hLayer, &extent, TRUE) == OGRERR_NONE)
-        {
-            // WGS84 coordinates for Milan area should be roughly:
-            // Longitude: 8.5 to 10 degrees
-            // Latitude: 45 to 46 degrees
-            // If coordinates are still in UTM, they would be around 500000, 5000000 (meters)
-            LOGD << "Extent: MinX=" << extent.MinX << ", MinY=" << extent.MinY
-                 << ", MaxX=" << extent.MaxX << ", MaxY=" << extent.MaxY;
+        ASSERT_EQ(OGR_L_GetExtent(hLayer, &extent, TRUE), OGRERR_NONE) << "Failed to get extent from layer";
 
-            // Verify coordinates are in degrees (WGS84) not meters (UTM)
-            EXPECT_GT(extent.MinX, -180.0);
-            EXPECT_LT(extent.MaxX, 180.0);
-            EXPECT_GT(extent.MinY, -90.0);
-            EXPECT_LT(extent.MaxY, 90.0);
+        // WGS84 coordinates for Milan area should be roughly:
+        // Longitude: 8.5 to 10 degrees
+        // Latitude: 45 to 46 degrees
+        // If coordinates are still in UTM, they would be around 500000, 5000000 (meters)
+        LOGD << "Extent: MinX=" << extent.MinX << ", MinY=" << extent.MinY
+             << ", MaxX=" << extent.MaxX << ", MaxY=" << extent.MaxY;
 
-            // More specific check for Milan area (lon ~9, lat ~45)
-            EXPECT_GT(extent.MinX, 8.0);   // West of Milan
-            EXPECT_LT(extent.MaxX, 10.0);  // East of Milan
-            EXPECT_GT(extent.MinY, 44.0);  // South of Milan
-            EXPECT_LT(extent.MaxY, 47.0);  // North of Milan
-        }
+        // Verify coordinates are in degrees (WGS84) not meters (UTM)
+        EXPECT_GT(extent.MinX, -180.0);
+        EXPECT_LT(extent.MaxX, 180.0);
+        EXPECT_GT(extent.MinY, -90.0);
+        EXPECT_LT(extent.MaxY, 90.0);
+
+        // More specific check for Milan area (lon ~9, lat ~45)
+        EXPECT_GT(extent.MinX, 8.0);   // West of Milan
+        EXPECT_LT(extent.MaxX, 10.0);  // East of Milan
+        EXPECT_GT(extent.MinY, 44.0);  // South of Milan
+        EXPECT_LT(extent.MaxY, 47.0);  // North of Milan
 
         GDALClose(hDS);
     }
