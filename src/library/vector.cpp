@@ -446,32 +446,64 @@ bool convertToFlatGeobufInternal(const char *input, const char *output, char **a
     return result;
 }
 
-    /**
-     * Check if the input dataset has a defined spatial reference system (CRS).
-     * Returns true if at least one layer has a CRS defined.
-     */
-    bool hasDefinedCRS(const std::string &input) {
-        GDALDatasetH hDS = GDALOpenEx(input.c_str(), GDAL_OF_VECTOR | GDAL_OF_READONLY, nullptr, nullptr, nullptr);
-        if (hDS == nullptr) {
-            return false;
-        }
+/**
+ * @brief Check if a GDAL dataset has a defined spatial reference system (CRS).
+ *
+ * Iterates through all layers in the dataset and checks if at least one
+ * has a spatial reference system defined. This is useful to determine
+ * whether reprojection is needed during format conversion.
+ *
+ * @param hDS Handle to an already opened GDAL dataset. Must not be nullptr.
+ * @return true if at least one layer has a CRS defined, false otherwise.
+ *
+ * @note This overload does NOT close the dataset - caller retains ownership.
+ * @see hasDefinedCRS(const std::string&) for file path version that manages dataset lifecycle.
+ */
+bool hasDefinedCRS(GDALDatasetH hDS) {
+    if (hDS == nullptr) {
+        return false;
+    }
 
-        bool hasCRS = false;
-        int layerCount = GDALDatasetGetLayerCount(hDS);
-        for (int i = 0; i < layerCount && !hasCRS; i++) {
-            OGRLayerH hLayer = GDALDatasetGetLayer(hDS, i);
-            if (hLayer != nullptr) {
-                OGRSpatialReferenceH hSRS = OGR_L_GetSpatialRef(hLayer);
-                if (hSRS != nullptr) {
-                    hasCRS = true;
-                    LOGD << "Layer " << i << " has CRS defined";
-                }
+    bool hasCRS = false;
+    int layerCount = GDALDatasetGetLayerCount(hDS);
+    for (int i = 0; i < layerCount && !hasCRS; i++) {
+        OGRLayerH hLayer = GDALDatasetGetLayer(hDS, i);
+        if (hLayer != nullptr) {
+            OGRSpatialReferenceH hSRS = OGR_L_GetSpatialRef(hLayer);
+            if (hSRS != nullptr) {
+                hasCRS = true;
+                LOGD << "Layer " << i << " has CRS defined";
             }
         }
-
-        GDALClose(hDS);
-        return hasCRS;
     }
+
+    return hasCRS;
+}
+
+/**
+ * @brief Check if a vector file has a defined spatial reference system (CRS).
+ *
+ * Opens the specified vector file and checks if at least one layer has a
+ * spatial reference system defined. Files without a CRS are typically
+ * assumed to be in WGS84 or have no georeferencing.
+ *
+ * @param input Path to the input vector file (e.g., SHP, GeoJSON, DXF).
+ * @return true if at least one layer has a CRS defined, false if no CRS
+ *         is found or if the file cannot be opened.
+ *
+ * @note This function opens and closes the dataset internally.
+ * @see hasDefinedCRS(GDALDatasetH) for version that works with already opened datasets.
+ */
+bool hasDefinedCRS(const std::string &input) {
+    GDALDatasetH hDS = GDALOpenEx(input.c_str(), GDAL_OF_VECTOR | GDAL_OF_READONLY, nullptr, nullptr, nullptr);
+    if (hDS == nullptr) {
+        return false;
+    }
+
+    bool result = hasDefinedCRS(hDS);
+    GDALClose(hDS);
+    return result;
+}
 
     bool convertToFlatGeobuf(const std::string &input, const std::string &output)
     {
@@ -501,53 +533,55 @@ bool convertToFlatGeobufInternal(const char *input, const char *output, char **a
             bool needsReprojection = hasDefinedCRS(input);
             LOGD << "Source has CRS: " << (needsReprojection ? "yes, will reproject to EPSG:4326" : "no, skipping reprojection");
 
+            // GDAL VectorTranslate options explanation:
+            // -f FlatGeobuf: Output format
+            // -t_srs EPSG:4326: Reproject to WGS84 (only when source has CRS defined)
+            //                   Required for proper display in web maps (OpenLayers, Leaflet, etc.)
+            // -mapFieldType StringList=String: Convert string lists to simple strings for compatibility
+            // -lco SPATIAL_INDEX=YES: Create R-tree index for efficient spatial queries via HTTP Range requests
+            // -nlt PROMOTE_TO_MULTI: Promote geometries to multi-type (fallback for mixed geometry types)
+
             if (needsReprojection) {
-                // Prepare GDALVectorTranslate options with reprojection to WGS84
-                // -t_srs EPSG:4326 ensures all output FGB files are in WGS84 coordinate system
-                // This is required for proper display in web maps (OpenLayers, Leaflet, etc.)
-                // -lco SPATIAL_INDEX=YES creates an R-tree index for efficient spatial queries via HTTP Range requests
                 char *argv[] = {
                     const_cast<char *>("-f"), const_cast<char *>("FlatGeobuf"),
                     const_cast<char *>("-t_srs"), const_cast<char *>("EPSG:4326"),
                     const_cast<char *>("-mapFieldType"), const_cast<char *>("StringList=String"),
                     const_cast<char *>("-lco"), const_cast<char *>("SPATIAL_INDEX=YES"),
-                    nullptr // Ensure null termination
+                    nullptr
                 };
 
                 if (!convertToFlatGeobufInternal(input.c_str(), output.c_str(), argv)) {
-                    LOGD << "Failed to convert to FlatGeobuf, let's try with multipoligon";
-                    char *argv[] = {
+                    LOGD << "Failed to convert to FlatGeobuf, retrying with PROMOTE_TO_MULTI";
+                    char *argvMulti[] = {
                         const_cast<char *>("-f"), const_cast<char *>("FlatGeobuf"),
                         const_cast<char *>("-t_srs"), const_cast<char *>("EPSG:4326"),
                         const_cast<char *>("-mapFieldType"), const_cast<char *>("StringList=String"),
                         const_cast<char *>("-lco"), const_cast<char *>("SPATIAL_INDEX=YES"),
                         const_cast<char *>("-nlt"), const_cast<char *>("PROMOTE_TO_MULTI"),
-                        nullptr // Ensure null termination
+                        nullptr
                     };
 
-                    return convertToFlatGeobufInternal(input.c_str(), output.c_str(), argv);
+                    return convertToFlatGeobufInternal(input.c_str(), output.c_str(), argvMulti);
                 }
             } else {
-                // No CRS defined - convert without reprojection
-                // -lco SPATIAL_INDEX=YES creates an R-tree index for efficient spatial queries via HTTP Range requests
                 char *argv[] = {
                     const_cast<char *>("-f"), const_cast<char *>("FlatGeobuf"),
                     const_cast<char *>("-mapFieldType"), const_cast<char *>("StringList=String"),
                     const_cast<char *>("-lco"), const_cast<char *>("SPATIAL_INDEX=YES"),
-                    nullptr // Ensure null termination
+                    nullptr
                 };
 
                 if (!convertToFlatGeobufInternal(input.c_str(), output.c_str(), argv)) {
-                    LOGD << "Failed to convert to FlatGeobuf, let's try with multipoligon";
-                    char *argv[] = {
+                    LOGD << "Failed to convert to FlatGeobuf, retrying with PROMOTE_TO_MULTI";
+                    char *argvMulti[] = {
                         const_cast<char *>("-f"), const_cast<char *>("FlatGeobuf"),
                         const_cast<char *>("-mapFieldType"), const_cast<char *>("StringList=String"),
                         const_cast<char *>("-lco"), const_cast<char *>("SPATIAL_INDEX=YES"),
                         const_cast<char *>("-nlt"), const_cast<char *>("PROMOTE_TO_MULTI"),
-                        nullptr // Ensure null termination
+                        nullptr
                     };
 
-                    return convertToFlatGeobufInternal(input.c_str(), output.c_str(), argv);
+                    return convertToFlatGeobufInternal(input.c_str(), output.c_str(), argvMulti);
                 }
             }
 
