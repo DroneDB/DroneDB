@@ -1,6 +1,6 @@
 {
   "name": "ddb",
-  "version": "1.3.3",
+  "version": "1.3.4",
   "description": "Effortless aerial data management and sharing",
   "main": "index.js",
   "directories": {
@@ -14,7 +14,7 @@
     "type": "git",
     "url": "git+https://github.com/DroneDB/DroneDB.git"
   },
-  "author": "",
+  "author": "DroneDB Contributors",
   "license": "ISC",
   "bugs": {
     "url": "https://github.com/DroneDB/DroneDB/issues"
