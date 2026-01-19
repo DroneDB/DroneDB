@@ -11,12 +11,6 @@
 namespace ddb
 {
 
-    /*
-    TODO: Scrivere test per il build degli shapefile e di tutti gli altri
-    Testare il nuovo sistema delle dipendenze
-    Testare le interazioni con il sistema dei pending files
-     */
-
     void buildVector(const std::string &input, const std::string &outputVector, bool overwrite)
     {
         fs::path p(input);
