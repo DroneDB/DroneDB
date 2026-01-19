@@ -466,8 +466,6 @@ namespace
         VerifyVector(output);
 
         // Verify spatial index is present
-        ASSERT_TRUE(fs::exists(output)) << "FGB file should exist";
-
         GDALDatasetH hDS = GDALOpenEx(output.string().c_str(), GDAL_OF_VECTOR, nullptr, nullptr, nullptr);
         ASSERT_NE(hDS, nullptr) << "Should be able to open FGB file";
 

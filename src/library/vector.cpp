@@ -104,10 +104,10 @@ namespace ddb
     }
 
     /**
- * Apre un dataset GDAL da un file di input.
+ * Opens a GDAL dataset from an input file.
  *
- * @param input Path del file di input
- * @return Puntatore al dataset GDAL o nullptr in caso di errore
+ * @param input Path to the input file
+ * @return Pointer to the GDAL dataset or nullptr on error
  */
 GDALDatasetH openInputDataset(const char *input) {
     // Open the source dataset
@@ -124,12 +124,12 @@ GDALDatasetH openInputDataset(const char *input) {
 }
 
 /**
- * Esegue la conversione diretta di un dataset GDAL a FlatGeobuf.
+ * Performs direct conversion of a GDAL dataset to FlatGeobuf.
  *
- * @param hSrcDS Dataset sorgente da convertire
- * @param output Path del file di output
- * @param psOptions Opzioni per la conversione
- * @return true se la conversione è avvenuta con successo, false altrimenti
+ * @param hSrcDS Source dataset to convert
+ * @param output Path to the output file
+ * @param psOptions Conversion options
+ * @return true if conversion succeeded, false otherwise
  */
 bool performDirectConversion(GDALDatasetH hSrcDS, const char *output, GDALVectorTranslateOptions *psOptions) {
     LOGD << "Using direct conversion";
@@ -166,9 +166,9 @@ bool performDirectConversion(GDALDatasetH hSrcDS, const char *output, GDALVector
 }
 
 /**
- * Crea un dataset temporaneo in memoria per la fusione dei layer.
+ * Creates a temporary in-memory dataset for layer merging.
  *
- * @return Puntatore al dataset temporaneo o nullptr in caso di errore
+ * @return Pointer to the temporary dataset or nullptr on error
  */
 GDALDatasetH createTemporaryDataset() {
     GDALDriverH hDriver = GDALGetDriverByName("Memory");
@@ -185,10 +185,10 @@ GDALDatasetH createTemporaryDataset() {
 }
 
 /**
- * Crea un layer unificato nel dataset temporaneo.
+ * Creates a unified layer in the temporary dataset.
  *
- * @param hTempDS Dataset temporaneo
- * @return Puntatore al layer creato o nullptr in caso di errore
+ * @param hTempDS Temporary dataset
+ * @return Pointer to the created layer or nullptr on error
  */
 OGRLayerH createMergedLayer(GDALDatasetH hTempDS) {
     // Create a single layer that will contain all features from all source layers
@@ -208,13 +208,13 @@ OGRLayerH createMergedLayer(GDALDatasetH hTempDS) {
 }
 
 /**
- * Copia un singolo campo da una feature a un'altra, gestendo i diversi tipi di dati.
+ * Copies a single field from one feature to another, handling different data types.
  *
- * @param feature Feature sorgente
- * @param newFeature Feature di destinazione
- * @param fieldDefn Definizione del campo da copiare
- * @param srcIdx Indice del campo nella feature sorgente
- * @param targetIdx Indice del campo nella feature di destinazione
+ * @param feature Source feature
+ * @param newFeature Destination feature
+ * @param fieldDefn Field definition to copy
+ * @param srcIdx Field index in the source feature
+ * @param targetIdx Field index in the destination feature
  */
 void copyFeatureField(OGRFeatureH feature, OGRFeatureH newFeature, OGRFieldDefnH fieldDefn, int srcIdx, int targetIdx) {
     // Copy field value based on its type
@@ -245,12 +245,12 @@ void copyFeatureField(OGRFeatureH feature, OGRFeatureH newFeature, OGRFieldDefnH
 }
 
 /**
- * Copia le definizioni dei campi da tutti i layer sorgenti al layer unificato.
+ * Copies field definitions from all source layers to the unified layer.
  *
- * @param hSrcDS Dataset sorgente
- * @param layerCount Numero di layer nel dataset sorgente
- * @param mergedLayer Layer unificato di destinazione
- * @return Numero di campi unici aggiunti
+ * @param hSrcDS Source dataset
+ * @param layerCount Number of layers in the source dataset
+ * @param mergedLayer Destination unified layer
+ * @return Number of unique fields added
  */
 int copyFieldDefinitions(GDALDatasetH hSrcDS, int layerCount, OGRLayerH mergedLayer) {
     // Add all fields from all layers (collect unique fields)
@@ -280,11 +280,11 @@ int copyFieldDefinitions(GDALDatasetH hSrcDS, int layerCount, OGRLayerH mergedLa
 }
 
 /**
- * Copia tutte le feature da tutti i layer sorgenti al layer unificato.
+ * Copies all features from all source layers to the unified layer.
  *
- * @param hSrcDS Dataset sorgente
- * @param layerCount Numero di layer nel dataset sorgente
- * @param mergedLayer Layer unificato di destinazione
+ * @param hSrcDS Source dataset
+ * @param layerCount Number of layers in the source dataset
+ * @param mergedLayer Destination unified layer
  */
 void copyFeaturesToMergedLayer(GDALDatasetH hSrcDS, int layerCount, OGRLayerH mergedLayer) {
     // Second pass: copy all features from all layers
@@ -338,13 +338,13 @@ void copyFeaturesToMergedLayer(GDALDatasetH hSrcDS, int layerCount, OGRLayerH me
 }
 
 /**
- * Crea dataset unificato dai layer multipli e lo converte in FlatGeobuf.
+ * Creates a unified dataset from multiple layers and converts it to FlatGeobuf.
  *
- * @param hSrcDS Dataset sorgente
- * @param layerCount Numero di layer nel dataset sorgente
- * @param output Path del file di output
- * @param psOptions Opzioni per la conversione
- * @return true se la conversione è avvenuta con successo, false altrimenti
+ * @param hSrcDS Source dataset
+ * @param layerCount Number of layers in the source dataset
+ * @param output Path to the output file
+ * @param psOptions Conversion options
+ * @return true if conversion succeeded, false otherwise
  */
 bool mergeLayersAndConvert(GDALDatasetH hSrcDS, int layerCount, const char *output, GDALVectorTranslateOptions *psOptions) {
     LOGD << "Source has multiple layers (" << layerCount << "), merging them into a single layer";
@@ -402,17 +402,16 @@ bool mergeLayersAndConvert(GDALDatasetH hSrcDS, int layerCount, const char *outp
 }
 
 /**
- * Funzione interna per la conversione di un file vettoriale a FlatGeobuf.
+ * Internal function for converting a vector file to FlatGeobuf.
  *
- * @param input Path del file di input
- * @param output Path del file di output
- * @param argv Opzioni per GDAL VectorTranslate
- * @return true se la conversione è avvenuta con successo, false altrimenti
+ * @param hSrcDS Already opened GDAL dataset (caller retains ownership, this function does NOT close it)
+ * @param output Path to the output file
+ * @param argv Options for GDAL VectorTranslate
+ * @return true if conversion succeeded, false otherwise
  */
-bool convertToFlatGeobufInternal(const char *input, const char *output, char **argv) {
-    // Open the source dataset
-    GDALDatasetH hSrcDS = openInputDataset(input);
+bool convertToFlatGeobufInternal(GDALDatasetH hSrcDS, const char *output, char **argv) {
     if (hSrcDS == nullptr) {
+        LOGD << "Source dataset is null.";
         return false;
     }
 
@@ -424,7 +423,6 @@ bool convertToFlatGeobufInternal(const char *input, const char *output, char **a
     GDALVectorTranslateOptions *psOptions = GDALVectorTranslateOptionsNew(argv, nullptr);
     if (psOptions == nullptr) {
         LOGD << "Failed to create GDAL vector translate options.";
-        GDALClose(hSrcDS);
         return false;
     }
 
@@ -439,11 +437,72 @@ bool convertToFlatGeobufInternal(const char *input, const char *output, char **a
         result = mergeLayersAndConvert(hSrcDS, layerCount, output, psOptions);
     }
 
-    // Clean up
+    // Clean up options (dataset is managed by caller)
     GDALVectorTranslateOptionsFree(psOptions);
-    GDALClose(hSrcDS);
 
     return result;
+}
+
+/**
+ * Attempts to convert a dataset to FlatGeobuf with automatic retry using PROMOTE_TO_MULTI on failure.
+ *
+ * @param hSrcDS Already opened GDAL dataset (caller retains ownership)
+ * @param output Path to the output file
+ * @param reproject If true, reproject to EPSG:4326
+ * @param withSpatialIndex If true, create spatial index (SPATIAL_INDEX=YES)
+ * @return true if conversion succeeded, false otherwise
+ */
+bool tryConvertWithFallback(GDALDatasetH hSrcDS, const char *output, bool reproject, bool withSpatialIndex) {
+    // Build base arguments
+    std::vector<char*> args;
+    args.push_back(const_cast<char*>("-f"));
+    args.push_back(const_cast<char*>("FlatGeobuf"));
+
+    if (reproject) {
+        args.push_back(const_cast<char*>("-t_srs"));
+        args.push_back(const_cast<char*>("EPSG:4326"));
+    }
+
+    args.push_back(const_cast<char*>("-mapFieldType"));
+    args.push_back(const_cast<char*>("StringList=String"));
+
+    if (withSpatialIndex) {
+        args.push_back(const_cast<char*>("-lco"));
+        args.push_back(const_cast<char*>("SPATIAL_INDEX=YES"));
+    }
+
+    args.push_back(nullptr);
+
+    // Try first conversion
+    if (convertToFlatGeobufInternal(hSrcDS, output, args.data())) {
+        return true;
+    }
+
+    LOGD << "Failed to convert to FlatGeobuf, retrying with PROMOTE_TO_MULTI";
+
+    // Build retry arguments with PROMOTE_TO_MULTI
+    std::vector<char*> argsMulti;
+    argsMulti.push_back(const_cast<char*>("-f"));
+    argsMulti.push_back(const_cast<char*>("FlatGeobuf"));
+
+    if (reproject) {
+        argsMulti.push_back(const_cast<char*>("-t_srs"));
+        argsMulti.push_back(const_cast<char*>("EPSG:4326"));
+    }
+
+    argsMulti.push_back(const_cast<char*>("-mapFieldType"));
+    argsMulti.push_back(const_cast<char*>("StringList=String"));
+
+    if (withSpatialIndex) {
+        argsMulti.push_back(const_cast<char*>("-lco"));
+        argsMulti.push_back(const_cast<char*>("SPATIAL_INDEX=YES"));
+    }
+
+    argsMulti.push_back(const_cast<char*>("-nlt"));
+    argsMulti.push_back(const_cast<char*>("PROMOTE_TO_MULTI"));
+    argsMulti.push_back(nullptr);
+
+    return convertToFlatGeobufInternal(hSrcDS, output, argsMulti.data());
 }
 
 /**
@@ -528,9 +587,16 @@ bool hasDefinedCRS(const std::string &input) {
                 return false;
             }
 
+            // Open dataset once and reuse for both CRS check and conversion
+            GDALDatasetH hSrcDS = openInputDataset(input.c_str());
+            if (hSrcDS == nullptr) {
+                LOGD << "Failed to open input dataset.";
+                return false;
+            }
+
             // Check if source has a defined CRS - only reproject if it does
             // Files without CRS are assumed to be already in WGS84 or have no georeferencing
-            bool needsReprojection = hasDefinedCRS(input);
+            bool needsReprojection = hasDefinedCRS(hSrcDS);
             LOGD << "Source has CRS: " << (needsReprojection ? "yes, will reproject to EPSG:4326" : "no, skipping reprojection");
 
             // GDAL VectorTranslate options explanation:
@@ -541,52 +607,12 @@ bool hasDefinedCRS(const std::string &input) {
             // -lco SPATIAL_INDEX=YES: Create R-tree index for efficient spatial queries via HTTP Range requests
             // -nlt PROMOTE_TO_MULTI: Promote geometries to multi-type (fallback for mixed geometry types)
 
-            if (needsReprojection) {
-                char *argv[] = {
-                    const_cast<char *>("-f"), const_cast<char *>("FlatGeobuf"),
-                    const_cast<char *>("-t_srs"), const_cast<char *>("EPSG:4326"),
-                    const_cast<char *>("-mapFieldType"), const_cast<char *>("StringList=String"),
-                    const_cast<char *>("-lco"), const_cast<char *>("SPATIAL_INDEX=YES"),
-                    nullptr
-                };
+            bool result = tryConvertWithFallback(hSrcDS, output.c_str(), needsReprojection, true);
 
-                if (!convertToFlatGeobufInternal(input.c_str(), output.c_str(), argv)) {
-                    LOGD << "Failed to convert to FlatGeobuf, retrying with PROMOTE_TO_MULTI";
-                    char *argvMulti[] = {
-                        const_cast<char *>("-f"), const_cast<char *>("FlatGeobuf"),
-                        const_cast<char *>("-t_srs"), const_cast<char *>("EPSG:4326"),
-                        const_cast<char *>("-mapFieldType"), const_cast<char *>("StringList=String"),
-                        const_cast<char *>("-lco"), const_cast<char *>("SPATIAL_INDEX=YES"),
-                        const_cast<char *>("-nlt"), const_cast<char *>("PROMOTE_TO_MULTI"),
-                        nullptr
-                    };
+            // Clean up dataset
+            GDALClose(hSrcDS);
 
-                    return convertToFlatGeobufInternal(input.c_str(), output.c_str(), argvMulti);
-                }
-            } else {
-                char *argv[] = {
-                    const_cast<char *>("-f"), const_cast<char *>("FlatGeobuf"),
-                    const_cast<char *>("-mapFieldType"), const_cast<char *>("StringList=String"),
-                    const_cast<char *>("-lco"), const_cast<char *>("SPATIAL_INDEX=YES"),
-                    nullptr
-                };
-
-                if (!convertToFlatGeobufInternal(input.c_str(), output.c_str(), argv)) {
-                    LOGD << "Failed to convert to FlatGeobuf, retrying with PROMOTE_TO_MULTI";
-                    char *argvMulti[] = {
-                        const_cast<char *>("-f"), const_cast<char *>("FlatGeobuf"),
-                        const_cast<char *>("-mapFieldType"), const_cast<char *>("StringList=String"),
-                        const_cast<char *>("-lco"), const_cast<char *>("SPATIAL_INDEX=YES"),
-                        const_cast<char *>("-nlt"), const_cast<char *>("PROMOTE_TO_MULTI"),
-                        nullptr
-                    };
-
-                    return convertToFlatGeobufInternal(input.c_str(), output.c_str(), argvMulti);
-                }
-            }
-
-            return true;
-
+            return result;
         }
         catch (const std::exception &e)
         {
