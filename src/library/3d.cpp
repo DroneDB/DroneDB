@@ -49,6 +49,13 @@ bool isGlbFile(const fs::path& filePath) {
     return ext == ".glb";
 }
 
+// Check if file extension is PLY
+bool isPlyFile(const fs::path& filePath) {
+    std::string ext = filePath.extension().string();
+    utils::toLower(ext);
+    return ext == ".ply";
+}
+
 // Helper to check if a URI is a data URI (embedded base64 content)
 bool isDataUri(const std::string& uri) {
     return uri.find("data:") == 0;

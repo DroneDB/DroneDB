@@ -347,15 +347,6 @@ void buildEpt(const std::vector<std::string>& filenames, const std::string& outd
                                    " points are required for EPT generation.");
     }
 
-    // Validate extent - untwine may crash with FPE for zero-extent point clouds
-    double extentX = globalMaxX - globalMinX;
-    double extentY = globalMaxY - globalMinY;
-    if (extentX < MIN_EXTENT_EPSILON || extentY < MIN_EXTENT_EPSILON) {
-        throw InvalidArgsException("Point cloud has zero or near-zero extent (X: " +
-                                   std::to_string(extentX) + ", Y: " + std::to_string(extentY) +
-                                   "). Point cloud must have spatial extent for EPT generation.");
-    }
-
     std::vector<std::string> inputFiles;
 
     // Make sure these are LAS/LAZ. If it's PLY, we first need to convert
@@ -367,9 +358,32 @@ void buildEpt(const std::vector<std::string>& filenames, const std::string& outd
             LOGD << "Converting " << f << " to " << lasF;
             translateToLas(f, lasF);
             inputFiles.push_back(lasF);
+
+            // PLY files don't have bounds in their metadata, so we need to read them
+            // from the converted LAS file using PDAL QuickInfo
+            PointCloudInfo lasInfo;
+            if (getPointCloudInfo(lasF, lasInfo) && lasInfo.bounds.size() >= 6) {
+                globalMinX = std::min(globalMinX, lasInfo.bounds[0]);
+                globalMinY = std::min(globalMinY, lasInfo.bounds[1]);
+                globalMaxX = std::max(globalMaxX, lasInfo.bounds[3]);
+                globalMaxY = std::max(globalMaxY, lasInfo.bounds[4]);
+                LOGD << "Updated bounds from converted LAS: [" << lasInfo.bounds[0] << ", "
+                     << lasInfo.bounds[1] << "] - [" << lasInfo.bounds[3] << ", " << lasInfo.bounds[4] << "]";
+            }
         } else {
             inputFiles.push_back(f);
         }
+    }
+
+    // Validate extent - untwine may crash with FPE for zero-extent point clouds
+    // This validation must happen AFTER PLY->LAS conversion because PLY files
+    // don't have bounds in their metadata
+    double extentX = globalMaxX - globalMinX;
+    double extentY = globalMaxY - globalMinY;
+    if (extentX < MIN_EXTENT_EPSILON || extentY < MIN_EXTENT_EPSILON) {
+        throw InvalidArgsException("Point cloud has zero or near-zero extent (X: " +
+                                   std::to_string(extentX) + ", Y: " + std::to_string(extentY) +
+                                   "). Point cloud must have spatial extent for EPT generation.");
     }
 
     for (const auto& f : inputFiles)
