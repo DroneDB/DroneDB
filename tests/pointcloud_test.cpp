@@ -4,7 +4,6 @@
 
 #include "pointcloud.h"
 #include "3d.h"
-#include "exceptions.h"
 
 #include "dbops.h"
 #include "gtest/gtest.h"
@@ -101,8 +100,8 @@ TEST(pointcloud, nexusFromPlyMesh) {
     ASSERT_TRUE(fs::exists(nexusPath));
     ASSERT_GT(fs::file_size(nexusPath), 0);
 
-    std::cout << "Successfully created nexus file: " << nexusPath << std::endl;
-    std::cout << "Nexus file size: " << fs::file_size(nexusPath) << " bytes" << std::endl;
+    LOGD << "Successfully created nexus file: " << nexusPath;
+    LOGD << "Nexus file size: " << fs::file_size(nexusPath) << " bytes";
 
 }
 

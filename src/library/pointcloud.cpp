@@ -298,6 +298,18 @@ bool getEptInfo(const std::string& eptJson, PointCloudInfo& info, int polyBounds
     return true;
 }
 
+// Helper function to update global bounds from point cloud info
+inline void updateGlobalBounds(const PointCloudInfo& info,
+                               double& globalMinX, double& globalMinY,
+                               double& globalMaxX, double& globalMaxY) {
+    if (info.bounds.size() >= 6) {
+        globalMinX = std::min(globalMinX, info.bounds[0]);
+        globalMinY = std::min(globalMinY, info.bounds[1]);
+        globalMaxX = std::max(globalMaxX, info.bounds[3]);
+        globalMaxY = std::max(globalMaxY, info.bounds[4]);
+    }
+}
+
 void buildEpt(const std::vector<std::string>& filenames, const std::string& outdir) {
     fs::path dest = outdir;
     fs::path tmpDir = dest / "tmp";
@@ -329,13 +341,8 @@ void buildEpt(const std::vector<std::string>& filenames, const std::string& outd
         if (getPointCloudInfo(f, pcInfo)) {
             totalPointCount += pcInfo.pointCount;
 
-            // Update global bounds if available (bounds: [minx, miny, minz, maxx, maxy, maxz])
-            if (pcInfo.bounds.size() >= 6) {
-                globalMinX = std::min(globalMinX, pcInfo.bounds[0]);
-                globalMinY = std::min(globalMinY, pcInfo.bounds[1]);
-                globalMaxX = std::max(globalMaxX, pcInfo.bounds[3]);
-                globalMaxY = std::max(globalMaxY, pcInfo.bounds[4]);
-            }
+            // Update global bounds if available
+            updateGlobalBounds(pcInfo, globalMinX, globalMinY, globalMaxX, globalMaxY);
         }
     }
 
@@ -362,13 +369,12 @@ void buildEpt(const std::vector<std::string>& filenames, const std::string& outd
             // PLY files don't have bounds in their metadata, so we need to read them
             // from the converted LAS file using PDAL QuickInfo
             PointCloudInfo lasInfo;
-            if (getPointCloudInfo(lasF, lasInfo) && lasInfo.bounds.size() >= 6) {
-                globalMinX = std::min(globalMinX, lasInfo.bounds[0]);
-                globalMinY = std::min(globalMinY, lasInfo.bounds[1]);
-                globalMaxX = std::max(globalMaxX, lasInfo.bounds[3]);
-                globalMaxY = std::max(globalMaxY, lasInfo.bounds[4]);
-                LOGD << "Updated bounds from converted LAS: [" << lasInfo.bounds[0] << ", "
-                     << lasInfo.bounds[1] << "] - [" << lasInfo.bounds[3] << ", " << lasInfo.bounds[4] << "]";
+            if (getPointCloudInfo(lasF, lasInfo)) {
+                updateGlobalBounds(lasInfo, globalMinX, globalMinY, globalMaxX, globalMaxY);
+                if (lasInfo.bounds.size() >= 6) {
+                    LOGD << "Updated bounds from converted LAS: [" << lasInfo.bounds[0] << ", "
+                         << lasInfo.bounds[1] << "] - [" << lasInfo.bounds[3] << ", " << lasInfo.bounds[4] << "]";
+                }
             }
         } else {
             inputFiles.push_back(f);
