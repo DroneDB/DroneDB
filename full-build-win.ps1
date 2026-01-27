@@ -36,6 +36,58 @@ function Write-ErrorMsg {
     Write-Host "ERROR: $Message" -ForegroundColor Red
 }
 
+function Test-DdbFilesInUse {
+    Write-Info "Checking if DroneDB files are in use..."
+
+    $buildDir = Join-Path $PSScriptRoot "build"
+
+    # List of critical files that would be locked if ddb is in use
+    $criticalFiles = @(
+        "ddb.dll",
+        "ddbcmd.exe",
+        "ddbtest.exe"
+    )
+
+    $filesInUse = @()
+
+    foreach ($fileName in $criticalFiles) {
+        $filePath = Join-Path $buildDir $fileName
+        if (Test-Path $filePath) {
+            try {
+                # Try to open the file with exclusive access
+                $fileStream = [System.IO.File]::Open($filePath, 'Open', 'ReadWrite', 'None')
+                $fileStream.Close()
+                $fileStream.Dispose()
+            } catch {
+                # File is locked
+                $filesInUse += $fileName
+
+                # Try to find the process locking the file
+                $lockingProcess = Get-Process | Where-Object {
+                    try {
+                        $_.Modules | Where-Object { $_.FileName -eq $filePath }
+                    } catch {
+                        $false
+                    }
+                } | Select-Object -First 1
+
+                if ($lockingProcess) {
+                    Write-Host "  - $fileName is locked by: $($lockingProcess.ProcessName) (PID: $($lockingProcess.Id))" -ForegroundColor Yellow
+                } else {
+                    Write-Host "  - $fileName is locked by another process" -ForegroundColor Yellow
+                }
+            }
+        }
+    }
+
+    if ($filesInUse.Count -gt 0) {
+        return $filesInUse
+    }
+
+    Write-Success "No DroneDB files are in use."
+    return $null
+}
+
 function Find-VisualStudio {
     Write-Info "Searching for Visual Studio installation..."
 
@@ -170,6 +222,22 @@ try {
     # Check prerequisites
     $vcvarsPath = Test-Prerequisites
     if (-not $vcvarsPath) {
+        exit 1
+    }
+
+    # Check if DroneDB files are in use (e.g., by a running Registry instance)
+    $filesInUse = Test-DdbFilesInUse
+    if ($filesInUse) {
+        Write-Host ""
+        Write-ErrorMsg "Cannot proceed with build: DroneDB files are currently in use!"
+        Write-Host ""
+        Write-Host "The following files are locked:" -ForegroundColor Yellow
+        foreach ($file in $filesInUse) {
+            Write-Host "  - $file" -ForegroundColor Yellow
+        }
+        Write-Host ""
+        Write-Host "Please close any applications using DroneDB (e.g., Registry, ddbcmd) and try again." -ForegroundColor Yellow
+        Write-Host ""
         exit 1
     }
 
