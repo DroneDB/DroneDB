@@ -298,6 +298,18 @@ bool getEptInfo(const std::string& eptJson, PointCloudInfo& info, int polyBounds
     return true;
 }
 
+// Helper function to update global bounds from point cloud info
+inline void updateGlobalBounds(const PointCloudInfo& info,
+                               double& globalMinX, double& globalMinY,
+                               double& globalMaxX, double& globalMaxY) {
+    if (info.bounds.size() >= 6) {
+        globalMinX = std::min(globalMinX, info.bounds[0]);
+        globalMinY = std::min(globalMinY, info.bounds[1]);
+        globalMaxX = std::max(globalMaxX, info.bounds[3]);
+        globalMaxY = std::max(globalMaxY, info.bounds[4]);
+    }
+}
+
 void buildEpt(const std::vector<std::string>& filenames, const std::string& outdir) {
     fs::path dest = outdir;
     fs::path tmpDir = dest / "tmp";
@@ -329,13 +341,8 @@ void buildEpt(const std::vector<std::string>& filenames, const std::string& outd
         if (getPointCloudInfo(f, pcInfo)) {
             totalPointCount += pcInfo.pointCount;
 
-            // Update global bounds if available (bounds: [minx, miny, minz, maxx, maxy, maxz])
-            if (pcInfo.bounds.size() >= 6) {
-                globalMinX = std::min(globalMinX, pcInfo.bounds[0]);
-                globalMinY = std::min(globalMinY, pcInfo.bounds[1]);
-                globalMaxX = std::max(globalMaxX, pcInfo.bounds[3]);
-                globalMaxY = std::max(globalMaxY, pcInfo.bounds[4]);
-            }
+            // Update global bounds if available
+            updateGlobalBounds(pcInfo, globalMinX, globalMinY, globalMaxX, globalMaxY);
         }
     }
 
@@ -345,15 +352,6 @@ void buildEpt(const std::vector<std::string>& filenames, const std::string& outd
                                    std::to_string(totalPointCount) +
                                    "). At least " + std::to_string(MIN_POINT_COUNT) +
                                    " points are required for EPT generation.");
-    }
-
-    // Validate extent - untwine may crash with FPE for zero-extent point clouds
-    double extentX = globalMaxX - globalMinX;
-    double extentY = globalMaxY - globalMinY;
-    if (extentX < MIN_EXTENT_EPSILON || extentY < MIN_EXTENT_EPSILON) {
-        throw InvalidArgsException("Point cloud has zero or near-zero extent (X: " +
-                                   std::to_string(extentX) + ", Y: " + std::to_string(extentY) +
-                                   "). Point cloud must have spatial extent for EPT generation.");
     }
 
     std::vector<std::string> inputFiles;
@@ -367,9 +365,31 @@ void buildEpt(const std::vector<std::string>& filenames, const std::string& outd
             LOGD << "Converting " << f << " to " << lasF;
             translateToLas(f, lasF);
             inputFiles.push_back(lasF);
+
+            // PLY files don't have bounds in their metadata, so we need to read them
+            // from the converted LAS file using PDAL QuickInfo
+            PointCloudInfo lasInfo;
+            if (getPointCloudInfo(lasF, lasInfo)) {
+                updateGlobalBounds(lasInfo, globalMinX, globalMinY, globalMaxX, globalMaxY);
+                if (lasInfo.bounds.size() >= 6) {
+                    LOGD << "Updated bounds from converted LAS: [" << lasInfo.bounds[0] << ", "
+                         << lasInfo.bounds[1] << "] - [" << lasInfo.bounds[3] << ", " << lasInfo.bounds[4] << "]";
+                }
+            }
         } else {
             inputFiles.push_back(f);
         }
+    }
+
+    // Validate extent - untwine may crash with FPE for zero-extent point clouds
+    // This validation must happen AFTER PLY->LAS conversion because PLY files
+    // don't have bounds in their metadata
+    double extentX = globalMaxX - globalMinX;
+    double extentY = globalMaxY - globalMinY;
+    if (extentX < MIN_EXTENT_EPSILON || extentY < MIN_EXTENT_EPSILON) {
+        throw InvalidArgsException("Point cloud has zero or near-zero extent (X: " +
+                                   std::to_string(extentX) + ", Y: " + std::to_string(extentY) +
+                                   "). Point cloud must have spatial extent for EPT generation.");
     }
 
     for (const auto& f : inputFiles)
