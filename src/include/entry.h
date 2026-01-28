@@ -169,6 +169,16 @@ namespace ddb
      * @param withHash whether to compute the hash of the file (slow)
      */
     DDB_DLL void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entry, bool wishHash = true);
+
+    /** Parse an entry with context reuse
+     * @param path path to file
+     * @param rootDirectory root directory from which to compute relative path
+     * @param entry reference to output Entry object
+     * @param withHash whether to compute the hash of the file (slow)
+     * @param ctx reference to FingerprintContext for caching Exiv2 data between fingerprint and parseEntry
+     */
+    DDB_DLL void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entry, bool withHash, FingerprintContext &ctx);
+
     DDB_DLL Geographic2D getRasterCoordinate(OGRCoordinateTransformationH hTransform, double *geotransform, double x, double y);
     DDB_DLL void calculateFootprint(const SensorSize &sensorSize, const GeoLocation &geo, const Focal &focal, const CameraOrientation &cameraOri, double relAltitude, BasicGeometry &geom);
     DDB_DLL void parseDroneDBEntry(const fs::path &ddbPath, Entry &entry);
@@ -176,6 +186,13 @@ namespace ddb
     /** Identify whether a file is an Image, GeoImage, Georaster or something else
      * as quickly as possible. Does not fingerprint for other types. */
     DDB_DLL EntryType fingerprint(const fs::path &path);
+
+    /** Identify whether a file is an Image, GeoImage, Georaster or something else
+     * and populate the FingerprintContext with Exiv2 data for reuse.
+     * @param path path to file
+     * @param ctx reference to FingerprintContext that will be populated with Exiv2 data
+     */
+    DDB_DLL EntryType fingerprint(const fs::path &path, FingerprintContext &ctx);
 
 }
 
