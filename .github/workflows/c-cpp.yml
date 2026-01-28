@@ -37,29 +37,6 @@ jobs:
           echo "GITHUB_RUN_NUMBER=${GITHUB_RUN_NUMBER}"
           echo "GITHUB_SHA=${GITHUB_SHA}"
           ls -la
-      - name: Cache vcpkg packages
-        uses: actions/cache@v4
-        with:
-          path: |
-            ${{ github.workspace }}/vcpkg/installed
-            ${{ github.workspace }}/vcpkg/packages
-          key: ${{ runner.os }}-vcpkg-packages-${{ hashFiles('**/vcpkg.json', '**/vcpkg-triplets/**', '.gitmodules') }}-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-vcpkg-packages-${{ hashFiles('**/vcpkg.json', '**/vcpkg-triplets/**', '.gitmodules') }}-
-            ${{ runner.os }}-vcpkg-packages-
-      - name: Cache vcpkg
-        uses: actions/cache@v4
-        with:
-          path: |
-            ${{ github.workspace }}/vcpkg
-            !${{ github.workspace }}/vcpkg/buildtrees
-            !${{ github.workspace }}/vcpkg/downloads
-            !${{ github.workspace }}/vcpkg/installed
-            !${{ github.workspace }}/vcpkg/packages
-          key: ${{ runner.os }}-vcpkg-${{ hashFiles('**/vcpkg.json', '**/vcpkg-triplets/**', '.gitmodules') }}-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-vcpkg-${{ hashFiles('**/vcpkg.json', '**/vcpkg-triplets/**', '.gitmodules') }}-
-            ${{ runner.os }}-vcpkg-
       - name: Cache CMake build
         uses: actions/cache@v4
         with:
@@ -77,14 +54,20 @@ jobs:
         with:
           vcpkgDirectory: '${{ github.workspace }}/vcpkg'
           vcpkgJsonGlob: vcpkg.json
+          doNotCache: false
       - name: Run CMake
-        run: |
-          mkdir -p build
-          cd build
-          # Clean dist directory to avoid including old artifacts
-          rm -rf dist/*.tgz
-          mkdir -p dist
-          cmake -DVCPKG_OVERLAY_TRIPLETS=${{ github.workspace }}/vcpkg-triplets -DVCPKG_HOST_TRIPLET=x64-linux-release -DVCPKG_TARGET_TRIPLET=x64-linux-release -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake ..
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 120
+          max_attempts: 3
+          retry_wait_seconds: 30
+          command: |
+            mkdir -p build
+            cd build
+            # Clean dist directory to avoid including old artifacts
+            rm -rf dist/*.tgz
+            mkdir -p dist
+            cmake -DVCPKG_OVERLAY_TRIPLETS=${{ github.workspace }}/vcpkg-triplets -DVCPKG_HOST_TRIPLET=x64-linux-release -DVCPKG_TARGET_TRIPLET=x64-linux-release -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake ..
       - name: Build C++ lib/program and tests
         run: cd build && make -j$(nproc)
       - name: Run C++ Tests
@@ -160,29 +143,6 @@ jobs:
         with:
           submodules: 'recursive'
           fetch-depth: 0
-      - name: Cache vcpkg packages
-        uses: actions/cache@v4
-        with:
-          path: |
-            ${{ github.workspace }}/vcpkg/installed
-            ${{ github.workspace }}/vcpkg/packages
-          key: ${{ runner.os }}-vcpkg-packages-${{ hashFiles('**/vcpkg.json', '**/vcpkg-triplets/**', '.gitmodules') }}-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-vcpkg-packages-${{ hashFiles('**/vcpkg.json', '**/vcpkg-triplets/**', '.gitmodules') }}-
-            ${{ runner.os }}-vcpkg-packages-
-      - name: Cache vcpkg
-        uses: actions/cache@v4
-        with:
-          path: |
-            ${{ github.workspace }}/vcpkg
-            !${{ github.workspace }}/vcpkg/buildtrees
-            !${{ github.workspace }}/vcpkg/downloads
-            !${{ github.workspace }}/vcpkg/installed
-            !${{ github.workspace }}/vcpkg/packages
-          key: ${{ runner.os }}-vcpkg-${{ hashFiles('**/vcpkg.json', '**/vcpkg-triplets/**', '.gitmodules') }}-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-vcpkg-${{ hashFiles('**/vcpkg.json', '**/vcpkg-triplets/**', '.gitmodules') }}-
-            ${{ runner.os }}-vcpkg-
       - name: Cache CMake build
         uses: actions/cache@v4
         with:
@@ -196,14 +156,20 @@ jobs:
         with:
           vcpkgDirectory: '${{ github.workspace }}/vcpkg'
           vcpkgJsonGlob: vcpkg.json
+          doNotCache: false
       - name: Build C++ lib/program and tests
-        shell: pwsh
-        run: |
-          if (!(Test-Path build)) { New-Item -ItemType Directory -Path build }
-          cd build
-          cmake .. -DVCPKG_HOST_TRIPLET=x64-windows-release -DVCPKG_TARGET_TRIPLET=x64-windows-release -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake"
-          cmake --build . --config Release --target ALL_BUILD -- /maxcpucount:$env:NUMBER_OF_PROCESSORS
-          dir
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 120
+          max_attempts: 3
+          retry_wait_seconds: 30
+          shell: pwsh
+          command: |
+            if (!(Test-Path build)) { New-Item -ItemType Directory -Path build }
+            cd build
+            cmake .. -DVCPKG_HOST_TRIPLET=x64-windows-release -DVCPKG_TARGET_TRIPLET=x64-windows-release -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake"
+            cmake --build . --config Release --target ALL_BUILD -- /maxcpucount:$env:NUMBER_OF_PROCESSORS
+            dir
       - name: Run C++ Tests
         run: cd build && .\ddbtest.exe --gtest_shuffle
         shell: pwsh
