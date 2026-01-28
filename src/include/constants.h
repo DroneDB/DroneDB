@@ -4,6 +4,9 @@
 #ifndef CONSTANTS_H
 #define CONSTANTS_H
 
+#define DDB_DATABASE_FILE "dbase.sqlite"
+#define DDB_EMPTY_DATABASE_FILE "dbase.empty.sqlite"
+
 #define DEFAULT_REGISTRY "hub.dronedb.app"
 #define DEFAULT_DSM_SERVICE_URL "https://portal.opentopography.org/API/globaldem?demtype=AW3D30&west={west}&south={south}&east={east}&north={north}&outputFormat=GTiff&API_Key=145a455467a2222cd5e0aa7d99f2a808"
 

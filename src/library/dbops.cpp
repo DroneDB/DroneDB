@@ -20,6 +20,7 @@
 #include "userprofile.h"
 #include "utils.h"
 #include "version.h"
+#include "constants.h"
 
 namespace ddb
 {
@@ -38,7 +39,7 @@ static std::mutex g_dbOpenMutex;
     {
         const fs::path dirPath = fs::absolute(directory);
         const fs::path ddbDirPath = dirPath / DDB_FOLDER;
-        const fs::path dbasePath = ddbDirPath / "dbase.sqlite";
+        const fs::path dbasePath = ddbDirPath / DDB_DATABASE_FILE;
 
         if (!exists(dbasePath))
         {
@@ -969,7 +970,7 @@ static std::mutex g_dbOpenMutex;
         auto ddbDirPath = dirPath / DDB_FOLDER;
         if (std::string(directory) == ".")
             ddbDirPath = DDB_FOLDER; // Nicer to the eye
-        const auto dbasePath = ddbDirPath / "dbase.sqlite";
+        const auto dbasePath = ddbDirPath / DDB_DATABASE_FILE;
 
         LOGD << "Checking if .ddb directory exists...";
         if (exists(ddbDirPath))
@@ -1034,7 +1035,7 @@ static std::mutex g_dbOpenMutex;
             else
             {
                 // For some reason it's missing, generate from scratch
-                LOGD << "Cannot find empty-dbase.sqlite in data path, strange! "
+                LOGD << "Cannot find " DDB_EMPTY_DATABASE_FILE " in data path, strange! "
                         "Building from scratch instead";
                 fromScratch = true;
             }

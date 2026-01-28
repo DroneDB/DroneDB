@@ -6,6 +6,7 @@
 #include "entry.h"
 
 #include "ddb.h"
+#include "constants.h"
 
 #include "mio.h"
 #include "pointcloud.h"
@@ -51,7 +52,7 @@ namespace ddb
             // Check for DroneDB dir
             try
             {
-                if (fs::exists(path / DDB_FOLDER / "dbase.sqlite"))
+                if (fs::exists(path / DDB_FOLDER / DDB_DATABASE_FILE))
                 {
                     parseDroneDBEntry(path, entry);
                 }

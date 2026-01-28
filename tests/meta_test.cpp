@@ -4,6 +4,7 @@
 #include "exceptions.h"
 #include "test.h"
 #include "testarea.h"
+#include "constants.h"
 
 namespace
 {
@@ -17,7 +18,7 @@ namespace
         const auto sqlite = ta.downloadTestAsset(
             "https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/"
             "dbase.sqlite",
-            "dbase.sqlite");
+            DDB_DATABASE_FILE);
 
         const auto testFolder = ta.getFolder("test");
         create_directory(testFolder / ".ddb");
@@ -104,7 +105,7 @@ namespace
         const auto sqlite = ta.downloadTestAsset(
             "https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/"
             "dbase.sqlite",
-            "dbase.sqlite");
+            DDB_DATABASE_FILE);
 
         const auto testFolder = ta.getFolder("test");
         create_directory(testFolder / ".ddb");
@@ -167,7 +168,7 @@ namespace
         const auto sqlite = ta.downloadTestAsset(
             "https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/"
             "dbase.sqlite",
-            "dbase.sqlite");
+            DDB_DATABASE_FILE);
 
         const auto testFolder = ta.getFolder("test");
         create_directory(testFolder / ".ddb");
