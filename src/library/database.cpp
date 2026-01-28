@@ -6,6 +6,8 @@
 #include "metamanager.h"
 
 #include <fstream>
+#include <iomanip>
+#include <sstream>
 #include <string>
 
 #include "exceptions.h"
@@ -237,7 +239,14 @@ END;
     json Database::getStamp() const
     {
         json j;
-        SHA256 checksum;
+
+        // Initialize OpenSSL EVP context for incremental hashing
+        EVP_MD_CTX* ctx = EVP_MD_CTX_new();
+        if (!ctx) throw AppException("Failed to create EVP_MD_CTX for SHA256");
+        if (EVP_DigestInit_ex(ctx, EVP_sha256(), NULL) != 1) {
+            EVP_MD_CTX_free(ctx);
+            throw AppException("Failed to initialize SHA256 digest");
+        }
 
         auto q = this->query("SELECT path,hash FROM entries ORDER BY path ASC");
         j["entries"] = json::array();
@@ -245,8 +254,8 @@ END;
         {
             const std::string p = q->getText(0);
             const std::string h = q->getText(1);
-            checksum.add(p.c_str(), p.length());
-            checksum.add(h.c_str(), h.length());
+            EVP_DigestUpdate(ctx, p.c_str(), p.length());
+            EVP_DigestUpdate(ctx, h.c_str(), h.length());
 
             j["entries"].push_back(json::object({{p, h}}));
         }
@@ -256,11 +265,21 @@ END;
         while (q->fetch())
         {
             const std::string id = q->getText(0);
-            checksum.add(id.c_str(), id.length());
+            EVP_DigestUpdate(ctx, id.c_str(), id.length());
             j["meta"].push_back(id);
         }
 
-        j["checksum"] = checksum.getHash();
+        // Finalize hash and convert to hex string
+        unsigned char hash[EVP_MAX_MD_SIZE];
+        unsigned int hashLen;
+        EVP_DigestFinal_ex(ctx, hash, &hashLen);
+        EVP_MD_CTX_free(ctx);
+
+        std::ostringstream oss;
+        for (unsigned int i = 0; i < hashLen; ++i) {
+            oss << std::hex << std::setfill('0') << std::setw(2) << (int)hash[i];
+        }
+        j["checksum"] = oss.str();
         return j;
     }
 

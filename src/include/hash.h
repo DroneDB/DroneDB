@@ -8,7 +8,7 @@
 #include <string>
 #include <fstream>
 #include "ddb_export.h"
-#include "hash-library/sha256.h"
+#include <openssl/evp.h>
 
 static const uint64_t crc64_table[256] = {
     uint64_t(0x0000000000000000), uint64_t(0x7ad870c830358979),

@@ -66,6 +66,7 @@ namespace ddb
         {
             if (entry.hash == "" && withHash)
                 entry.hash = Hash::fileSHA256(path.string());
+
             entry.size = p.getSize();
             entry.type = fingerprint(p.get());
 

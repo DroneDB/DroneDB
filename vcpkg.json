@@ -27,7 +27,6 @@
       ]
     },
     "gtest",
-    "hash-library",
     "laszip",
     "libgeotiff",
     "libspatialite",

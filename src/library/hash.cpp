@@ -2,37 +2,78 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include <sstream>
+#include <iomanip>
+#include <vector>
 #include "hash.h"
 #include "exceptions.h"
 
 using namespace ddb;
 
+namespace {
+    // Helper to convert hash bytes to hex string
+    std::string bytesToHex(const unsigned char* hash, unsigned int len) {
+        std::ostringstream oss;
+        for (unsigned int i = 0; i < len; ++i) {
+            oss << std::hex << std::setfill('0') << std::setw(2) << (int)hash[i];
+        }
+        return oss.str();
+    }
+}
+
 std::string Hash::fileSHA256(const std::string &path) {
     std::ifstream f(path, std::ios::binary);
-    if (!f.is_open()) {
+
+    if (!f.is_open())
         throw FSException("Cannot open " + path + " for hashing");
+
+    EVP_MD_CTX* ctx = EVP_MD_CTX_new();
+    if (!ctx)
+        throw AppException("Failed to create EVP_MD_CTX for SHA256");
+
+    if (EVP_DigestInit_ex(ctx, EVP_sha256(), NULL) != 1) {
+        EVP_MD_CTX_free(ctx);
+        throw AppException("Failed to initialize SHA256 digest");
     }
 
     const size_t BufferSize = 144*7*1024;
-    char* buffer = new char[BufferSize];
-    SHA256 digestSha2;
+    std::vector<char> buffer(BufferSize);
 
     while (f) {
-        f.read(buffer, BufferSize);
+        f.read(buffer.data(), BufferSize);
         size_t numBytesRead = size_t(f.gcount());
-        digestSha2.add(buffer, numBytesRead);
+        if (numBytesRead > 0) {
+            EVP_DigestUpdate(ctx, buffer.data(), numBytesRead);
+        }
     }
 
     f.close();
-    delete[] buffer;
 
-    return digestSha2.getHash();
+    unsigned char hash[EVP_MAX_MD_SIZE];
+    unsigned int hashLen;
+    EVP_DigestFinal_ex(ctx, hash, &hashLen);
+    EVP_MD_CTX_free(ctx);
+
+    return bytesToHex(hash, hashLen);
 }
 
 std::string Hash::strSHA256(const std::string &str){
-    SHA256 digestSha2;
-    digestSha2.add(str.c_str(), str.length());
-    return digestSha2.getHash();
+    EVP_MD_CTX* ctx = EVP_MD_CTX_new();
+    if (!ctx)
+        throw AppException("Failed to create EVP_MD_CTX for SHA256");
+
+    if (EVP_DigestInit_ex(ctx, EVP_sha256(), NULL) != 1) {
+        EVP_MD_CTX_free(ctx);
+        throw AppException("Failed to initialize SHA256 digest");
+    }
+
+    EVP_DigestUpdate(ctx, str.c_str(), str.length());
+
+    unsigned char hash[EVP_MAX_MD_SIZE];
+    unsigned int hashLen;
+    EVP_DigestFinal_ex(ctx, hash, &hashLen);
+    EVP_MD_CTX_free(ctx);
+
+    return bytesToHex(hash, hashLen);
 }
 
 std::string Hash::strCRC64(const std::string &str){
