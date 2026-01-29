@@ -201,7 +201,7 @@ namespace ddb
                         }
                     }
                 }
-                else
+                else if (e)
                 {
                     LOGD << "No XMP/EXIF data found in " << path.string();
                 }
@@ -723,10 +723,6 @@ namespace ddb
                     {
                         // Not a georeferenced image, just a plain image
                     }
-                }
-                else
-                {
-                    LOGD << "No XMP/EXIF data found in " << path.string();
                 }
             }
             catch (Exiv2::Error &)
