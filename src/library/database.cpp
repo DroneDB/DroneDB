@@ -50,6 +50,9 @@ namespace ddb
 
   CREATE INDEX IF NOT EXISTS ix_entries_type
   ON entries (type);
+
+  CREATE INDEX IF NOT EXISTS ix_entries_hash
+  ON entries (hash);
 )<<<";
 
     const char *passwordsTableDdl = R"<<<(
@@ -67,8 +70,9 @@ namespace ddb
       data TEXT NOT NULL,
       mtime INTEGER NOT NULL
   );
-  CREATE INDEX IF NOT EXISTS ix_entries_meta_path
-  ON entries_meta (path);
+  DROP INDEX IF EXISTS ix_entries_meta_path;
+  CREATE INDEX IF NOT EXISTS ix_entries_meta_path_key
+  ON entries_meta (path, key);
   CREATE INDEX IF NOT EXISTS ix_entries_meta_key
   ON entries_meta (key);
 
