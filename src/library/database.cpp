@@ -126,6 +126,14 @@ END;
             LOGD << "Entries meta table created";
         }
 
+        // Ensure indexes exist on existing databases (migration for new indexes)
+        // These are idempotent operations that will not fail if indexes already exist
+        LOGD << "Ensuring indexes exist";
+        this->exec("CREATE INDEX IF NOT EXISTS ix_entries_hash ON entries (hash)");
+        this->exec("DROP INDEX IF EXISTS ix_entries_meta_path");
+        this->exec("CREATE INDEX IF NOT EXISTS ix_entries_meta_path_key ON entries_meta (path, key)");
+        this->exec("CREATE INDEX IF NOT EXISTS ix_entries_meta_key ON entries_meta (key)");
+
         // Migration from 0.9.11 to 0.9.12 (can be removed in the near future)
         // where we renamed "entries.meta" --> "entries.properties"
         // TODO: remove me in 2022
