@@ -1035,8 +1035,8 @@ static std::mutex g_dbOpenMutex;
             else
             {
                 // For some reason it's missing, generate from scratch
-                LOGD << "Cannot find " DDB_EMPTY_DATABASE_FILE " in data path, strange! "
-                        "Building from scratch instead";
+                LOGD << "Cannot find " << emptyDbPath.string()
+                     << " in data path, strange! Building from scratch instead";
                 fromScratch = true;
             }
         }
