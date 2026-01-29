@@ -5,6 +5,7 @@
 #define EXIF_H
 
 #include <exiv2/exiv2.hpp>
+#include <memory>
 #include <stdio.h>
 #include "utils.h"
 #include "sensor_data.h"
