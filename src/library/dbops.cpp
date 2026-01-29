@@ -7,9 +7,11 @@
 #include "ddb.h"
 #include "status.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <future>
 #include <mutex>
+#include <thread>
 
 #include "entry_types.h"
 #include "exceptions.h"
@@ -707,13 +709,16 @@ static std::mutex g_dbOpenMutex;
         db->exec("COMMIT");
 
         // Parallel deletion of build folders (outside transaction for better performance)
+        // Limit concurrency to avoid spawning too many threads
         if (!hashesToDelete.empty())
         {
             const auto buildDir = db->buildDirectory();
+            const size_t maxConcurrency = std::max(1u, std::thread::hardware_concurrency());
             std::vector<std::future<void>> deletionFutures;
 
-            for (const auto &hash : hashesToDelete)
+            for (size_t i = 0; i < hashesToDelete.size(); ++i)
             {
+                const auto &hash = hashesToDelete[i];
                 deletionFutures.push_back(std::async(std::launch::async, [buildDir, hash]() {
                     const auto buildFolder = buildDir / hash;
                     if (fs::exists(buildFolder))
@@ -722,9 +727,26 @@ static std::mutex g_dbOpenMutex;
                         io::assureIsRemoved(buildFolder);
                     }
                 }));
+
+                // When we reach max concurrency, wait for all current futures before continuing
+                if (deletionFutures.size() >= maxConcurrency)
+                {
+                    for (auto &f : deletionFutures)
+                    {
+                        try
+                        {
+                            f.get();
+                        }
+                        catch (const std::exception &e)
+                        {
+                            LOGD << "Warning: Failed to delete build folder: " << e.what();
+                        }
+                    }
+                    deletionFutures.clear();
+                }
             }
 
-            // Wait for all deletions to complete and handle any errors
+            // Wait for remaining deletions to complete
             for (auto &f : deletionFutures)
             {
                 try
