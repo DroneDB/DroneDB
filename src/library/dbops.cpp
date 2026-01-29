@@ -8,6 +8,7 @@
 #include "status.h"
 
 #include <cstdlib>
+#include <future>
 #include <mutex>
 
 #include "entry_types.h"
@@ -658,24 +659,32 @@ static std::mutex g_dbOpenMutex;
 
         db->exec("BEGIN EXCLUSIVE TRANSACTION");
 
+        // Batch delete all metadata for entries matching the query
+        auto metaDeleteQ = db->query(
+            "DELETE FROM entries_meta WHERE path IN (SELECT path FROM entries WHERE path LIKE ? ESCAPE '/')");
+        metaDeleteQ->bind(1, str);
+        metaDeleteQ->execute();
+        metaDeleteQ->reset();
+
+        // Collect paths and hashes for callback and build folder cleanup
         auto q = db->query(
             "SELECT path, hash FROM entries WHERE path LIKE ? ESCAPE '/'");
 
         q->bind(1, str);
 
         int count = 0;
+        std::vector<std::string> hashesToDelete;
 
         while (q->fetch())
         {
-
             const auto path = q->getText(0);
             const auto hash = q->getText(1);
 
-            // Check for build folders to be removed
-            checkDeleteBuild(db, hash);
-
-            // Check for meta info to be removed
-            checkDeleteMeta(db, path);
+            // Collect non-empty hashes for parallel build folder deletion
+            if (!hash.empty())
+            {
+                hashesToDelete.push_back(hash);
+            }
 
             if (callback != nullptr)
                 callback(path);
@@ -696,6 +705,38 @@ static std::mutex g_dbOpenMutex;
         }
 
         db->exec("COMMIT");
+
+        // Parallel deletion of build folders (outside transaction for better performance)
+        if (!hashesToDelete.empty())
+        {
+            const auto buildDir = db->buildDirectory();
+            std::vector<std::future<void>> deletionFutures;
+
+            for (const auto &hash : hashesToDelete)
+            {
+                deletionFutures.push_back(std::async(std::launch::async, [buildDir, hash]() {
+                    const auto buildFolder = buildDir / hash;
+                    if (fs::exists(buildFolder))
+                    {
+                        LOGD << "Removing " << buildFolder.string();
+                        io::assureIsRemoved(buildFolder);
+                    }
+                }));
+            }
+
+            // Wait for all deletions to complete and handle any errors
+            for (auto &f : deletionFutures)
+            {
+                try
+                {
+                    f.get();
+                }
+                catch (const std::exception &e)
+                {
+                    LOGD << "Warning: Failed to delete build folder: " << e.what();
+                }
+            }
+        }
 
         return count;
     }

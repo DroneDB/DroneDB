@@ -5,6 +5,7 @@
 #include "gtest/gtest.h"
 #include "dbops.h"
 #include "exceptions.h"
+#include "metamanager.h"
 #include "test.h"
 #include "testarea.h"
 #include "utils.h"
@@ -273,6 +274,177 @@ namespace
         removeFromIndex(db.get(), toRemove);
 
         EXPECT_EQ(countEntries(db.get(), "1JI_0065.JPG"), 0);
+    }
+
+    // Helper function to count entries_meta rows
+    int countEntriesMeta(Database *db, const std::string &path = "")
+    {
+        std::string sql = path.empty()
+            ? "SELECT COUNT(*) FROM entries_meta"
+            : "SELECT COUNT(*) FROM entries_meta WHERE path = ?";
+        auto q = db->query(sql);
+        if (!path.empty()) q->bind(1, path);
+        q->fetch();
+        const auto cnt = q->getInt(0);
+        q->reset();
+        return cnt;
+    }
+
+    TEST(deleteFromIndex, deletesAssociatedMetadata)
+    {
+        TestArea ta(TEST_NAME);
+
+        const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", DDB_DATABASE_FILE);
+
+        const auto testFolder = ta.getFolder("test");
+        create_directory(testFolder / ".ddb");
+        fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
+
+        auto db = ddb::open(testFolder.string(), false);
+        MetaManager manager(db.get());
+
+        // Add metadata to an entry
+        const std::string entryPath = "1JI_0065.JPG";
+        manager.add("annotations", R"({"test": "value1"})", entryPath, testFolder.string());
+        manager.add("annotations", R"({"test": "value2"})", entryPath, testFolder.string());
+
+        // Verify metadata exists
+        EXPECT_EQ(countEntriesMeta(db.get(), entryPath), 2);
+
+        // Remove the entry
+        std::vector<std::string> toRemove;
+        toRemove.emplace_back((testFolder / entryPath).string());
+        removeFromIndex(db.get(), toRemove);
+
+        // Verify entry is removed
+        EXPECT_EQ(countEntries(db.get(), entryPath), 0);
+
+        // Verify metadata is also removed (batch delete)
+        EXPECT_EQ(countEntriesMeta(db.get(), entryPath), 0);
+    }
+
+    TEST(deleteFromIndex, deletesMultipleEntriesMetadata)
+    {
+        TestArea ta(TEST_NAME);
+
+        const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", DDB_DATABASE_FILE);
+
+        const auto testFolder = ta.getFolder("test");
+        create_directory(testFolder / ".ddb");
+        fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
+
+        auto db = ddb::open(testFolder.string(), false);
+        MetaManager manager(db.get());
+
+        // Add metadata to multiple entries in the pics folder
+        manager.add("annotations", R"({"note": "photo1"})", "pics/IMG_20160826_181302.jpg", testFolder.string());
+        manager.add("annotations", R"({"note": "photo2"})", "pics/IMG_20160826_181305.jpg", testFolder.string());
+        manager.add("annotations", R"({"note": "photo3"})", "pics/IMG_20160826_181309.jpg", testFolder.string());
+
+        // Verify metadata exists
+        EXPECT_EQ(countEntriesMeta(db.get(), "pics/IMG_20160826_181302.jpg"), 1);
+        EXPECT_EQ(countEntriesMeta(db.get(), "pics/IMG_20160826_181305.jpg"), 1);
+        EXPECT_EQ(countEntriesMeta(db.get(), "pics/IMG_20160826_181309.jpg"), 1);
+
+        // Remove the entire pics folder
+        std::vector<std::string> toRemove;
+        toRemove.emplace_back((testFolder / "pics").string());
+        removeFromIndex(db.get(), toRemove);
+
+        // Verify all metadata for pics folder entries is removed (batch delete covers folder)
+        EXPECT_EQ(countEntriesMeta(db.get(), "pics/IMG_20160826_181302.jpg"), 0);
+        EXPECT_EQ(countEntriesMeta(db.get(), "pics/IMG_20160826_181305.jpg"), 0);
+        EXPECT_EQ(countEntriesMeta(db.get(), "pics/IMG_20160826_181309.jpg"), 0);
+    }
+
+    TEST(deleteFromIndex, deletesBuildFolder)
+    {
+        TestArea ta(TEST_NAME);
+
+        const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", DDB_DATABASE_FILE);
+
+        const auto testFolder = ta.getFolder("test");
+        create_directory(testFolder / ".ddb");
+        fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
+
+        auto db = ddb::open(testFolder.string(), false);
+
+        // Get the hash of an entry to create a fake build folder
+        auto q = db->query("SELECT hash FROM entries WHERE path = ?");
+        q->bind(1, "1JI_0065.JPG");
+        EXPECT_TRUE(q->fetch());
+        const std::string hash = q->getText(0);
+        q->reset();
+        EXPECT_FALSE(hash.empty());
+
+        // Create a fake build folder with some content
+        const auto buildDir = db->buildDirectory();
+        const auto buildFolder = buildDir / hash;
+        fs::create_directories(buildFolder);
+        fileWriteAllText(buildFolder / "thumb.jpg", "fake thumbnail content");
+        fileWriteAllText(buildFolder / "preview.webp", "fake preview content");
+
+        EXPECT_TRUE(fs::exists(buildFolder));
+        EXPECT_TRUE(fs::exists(buildFolder / "thumb.jpg"));
+
+        // Remove the entry
+        std::vector<std::string> toRemove;
+        toRemove.emplace_back((testFolder / "1JI_0065.JPG").string());
+        removeFromIndex(db.get(), toRemove);
+
+        // Verify entry is removed
+        EXPECT_EQ(countEntries(db.get(), "1JI_0065.JPG"), 0);
+
+        // Verify build folder is removed (parallel deletion)
+        EXPECT_FALSE(fs::exists(buildFolder));
+    }
+
+    TEST(deleteFromIndex, deletesMultipleBuildFolders)
+    {
+        TestArea ta(TEST_NAME);
+
+        const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", DDB_DATABASE_FILE);
+
+        const auto testFolder = ta.getFolder("test");
+        create_directory(testFolder / ".ddb");
+        fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
+
+        auto db = ddb::open(testFolder.string(), false);
+        const auto buildDir = db->buildDirectory();
+
+        // Get hashes of entries in the pics folder and create build folders
+        std::vector<std::string> hashes;
+        auto q = db->query("SELECT hash FROM entries WHERE path LIKE 'pics/%' AND hash IS NOT NULL AND hash != ''");
+        while (q->fetch())
+        {
+            const std::string hash = q->getText(0);
+            if (!hash.empty())
+            {
+                hashes.push_back(hash);
+                const auto buildFolder = buildDir / hash;
+                fs::create_directories(buildFolder);
+                fileWriteAllText(buildFolder / "thumb.jpg", "fake content");
+            }
+        }
+        q->reset();
+
+        // Verify we have some build folders created
+        EXPECT_GT(hashes.size(), 0);
+        for (const auto &hash : hashes)
+        {
+            EXPECT_TRUE(fs::exists(buildDir / hash));
+        }
+
+        // Remove the entire pics folder
+        std::vector<std::string> toRemove;
+        toRemove.emplace_back((testFolder / "pics").string());
+        removeFromIndex(db.get(), toRemove);
+
+        // Verify all build folders are removed (parallel deletion)
+        for (const auto &hash : hashes)
+        {
+            EXPECT_FALSE(fs::exists(buildDir / hash));
+        }
     }
 
     TEST(listIndex, fileExact)
