@@ -26,12 +26,11 @@ std::string Hash::fileSHA256(const std::string &path) {
     if (!f.is_open())
         throw FSException("Cannot open " + path + " for hashing");
 
-    EVP_MD_CTX* ctx = EVP_MD_CTX_new();
+    EvpMdCtxPtr ctx(EVP_MD_CTX_new());
     if (!ctx)
         throw AppException("Failed to create EVP_MD_CTX for SHA256");
 
-    if (EVP_DigestInit_ex(ctx, EVP_sha256(), NULL) != 1) {
-        EVP_MD_CTX_free(ctx);
+    if (EVP_DigestInit_ex(ctx.get(), EVP_sha256(), NULL) != 1) {
         throw AppException("Failed to initialize SHA256 digest");
     }
 
@@ -42,7 +41,7 @@ std::string Hash::fileSHA256(const std::string &path) {
         f.read(buffer.data(), BufferSize);
         size_t numBytesRead = size_t(f.gcount());
         if (numBytesRead > 0) {
-            EVP_DigestUpdate(ctx, buffer.data(), numBytesRead);
+            EVP_DigestUpdate(ctx.get(), buffer.data(), numBytesRead);
         }
     }
 
@@ -50,28 +49,25 @@ std::string Hash::fileSHA256(const std::string &path) {
 
     unsigned char hash[EVP_MAX_MD_SIZE];
     unsigned int hashLen;
-    EVP_DigestFinal_ex(ctx, hash, &hashLen);
-    EVP_MD_CTX_free(ctx);
+    EVP_DigestFinal_ex(ctx.get(), hash, &hashLen);
 
     return bytesToHex(hash, hashLen);
 }
 
 std::string Hash::strSHA256(const std::string &str){
-    EVP_MD_CTX* ctx = EVP_MD_CTX_new();
+    EvpMdCtxPtr ctx(EVP_MD_CTX_new());
     if (!ctx)
         throw AppException("Failed to create EVP_MD_CTX for SHA256");
 
-    if (EVP_DigestInit_ex(ctx, EVP_sha256(), NULL) != 1) {
-        EVP_MD_CTX_free(ctx);
+    if (EVP_DigestInit_ex(ctx.get(), EVP_sha256(), NULL) != 1) {
         throw AppException("Failed to initialize SHA256 digest");
     }
 
-    EVP_DigestUpdate(ctx, str.c_str(), str.length());
+    EVP_DigestUpdate(ctx.get(), str.c_str(), str.length());
 
     unsigned char hash[EVP_MAX_MD_SIZE];
     unsigned int hashLen;
-    EVP_DigestFinal_ex(ctx, hash, &hashLen);
-    EVP_MD_CTX_free(ctx);
+    EVP_DigestFinal_ex(ctx.get(), hash, &hashLen);
 
     return bytesToHex(hash, hashLen);
 }

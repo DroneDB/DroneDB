@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "testarea.h"
 
+#include <algorithm>
 #include <cpr/cpr.h>
 #include <thread>
 #include <chrono>

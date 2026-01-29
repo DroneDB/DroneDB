@@ -7,8 +7,17 @@
 
 #include <string>
 #include <fstream>
+#include <memory>
 #include "ddb_export.h"
 #include <openssl/evp.h>
+
+// RAII wrapper for OpenSSL EVP_MD_CTX to prevent memory leaks
+struct EvpMdCtxDeleter {
+    void operator()(EVP_MD_CTX* ctx) const {
+        if (ctx) EVP_MD_CTX_free(ctx);
+    }
+};
+using EvpMdCtxPtr = std::unique_ptr<EVP_MD_CTX, EvpMdCtxDeleter>;
 
 static const uint64_t crc64_table[256] = {
     uint64_t(0x0000000000000000), uint64_t(0x7ad870c830358979),
