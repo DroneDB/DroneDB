@@ -157,10 +157,10 @@ namespace
         create_directory(testFolder / ".ddb");
         fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
 
-        // Manually add the old index to simulate an old database
+        // Open the existing legacy database (which may contain the old ix_entries_meta_path index)
         {
             auto db = ddb::open(testFolder.string(), false);
-            // The entries_meta table should be created by ensureSchemaConsistency
+            // Opening the database will run ensureSchemaConsistency,
             // which will drop ix_entries_meta_path if it exists and create the new indexes
         }
 
