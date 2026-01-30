@@ -97,73 +97,108 @@ END;
         this->exec(sql);
         LOGD << "Created tables";
 
+        // Set schema version for new databases
+        this->setUserVersion(DDB_SCHEMA_VERSION);
+        LOGD << "Set schema version to " << DDB_SCHEMA_VERSION;
+
         return *this;
     }
 
     DDB_DLL void Database::ensureSchemaConsistency()
     {
-
         LOGD << "Ensuring schema consistency";
 
-        if (!this->tableExists("entries"))
+        const int dbVersion = this->getUserVersion();
+        LOGD << "Database schema version: " << dbVersion;
+
+        // Check if database was created with a newer version of DroneDB
+        if (dbVersion > DDB_SCHEMA_VERSION)
         {
-            LOGD << "Entries table does not exist, creating it";
-            this->exec(entriesTableDdl);
-            LOGD << "Entries table created";
+            throw DBException("Database schema version " + std::to_string(dbVersion) +
+                " is newer than supported version " + std::to_string(DDB_SCHEMA_VERSION) +
+                ". Please update DroneDB to open this database.");
         }
 
-        if (!this->tableExists("passwords"))
+        // Database is already at current version, no migration needed
+        if (dbVersion == DDB_SCHEMA_VERSION)
         {
-            LOGD << "Passwords table does not exist, creating it";
-            this->exec(passwordsTableDdl);
-            LOGD << "Passwords table created";
+            LOGD << "Database schema is up to date";
+            return;
         }
 
-        if (!this->tableExists("entries_meta"))
+        // Legacy database (version 0) - run all table checks and migrations
+        // This handles databases created before the versioning system was introduced
+        if (dbVersion == 0)
         {
-            LOGD << "Entries meta table does not exist, creating it";
-            this->exec(entriesMetaTableDdl);
-            LOGD << "Entries meta table created";
-        }
+            LOGD << "Legacy database detected, running full schema check and migrations";
 
-        // Ensure indexes exist on existing databases (migration for new indexes)
-        // These are idempotent operations that will not fail if indexes already exist
-        LOGD << "Ensuring indexes exist";
-        this->exec("CREATE INDEX IF NOT EXISTS ix_entries_hash ON entries (hash)");
-        this->exec("DROP INDEX IF EXISTS ix_entries_meta_path");
-        this->exec("CREATE INDEX IF NOT EXISTS ix_entries_meta_path_key ON entries_meta (path, key)");
-        this->exec("CREATE INDEX IF NOT EXISTS ix_entries_meta_key ON entries_meta (key)");
-
-        // Migration from 0.9.11 to 0.9.12 (can be removed in the near future)
-        // where we renamed "entries.meta" --> "entries.properties"
-        // TODO: remove me in 2022
-        if (this->renameColumnIfExists("entries", "meta TEXT", "properties TEXT"))
-        {
-            this->reopen();
-        }
-
-        // Migration from 1.0.7 --> 1.0.8 (can be removed in the near future)
-        // we removed the attributes table (use entries_meta instead)
-        // TODO: remove me in 2023
-        if (this->tableExists("attributes"))
-        {
-            // Port public attr info to visibility meta
+            if (!this->tableExists("entries"))
             {
-                const auto q = this->query("SELECT ivalue FROM attributes WHERE name = 'public'");
-                if (q->fetch())
-                {
-                    if (q->getInt(0) == 1)
-                    {
-                        this->getMetaManager()->set("visibility", "1");
-                        LOGD << "Migrated attributes.public to entries_meta.visibility";
-                    }
-                }
+                LOGD << "Entries table does not exist, creating it";
+                this->exec(entriesTableDdl);
+                LOGD << "Entries table created";
             }
 
-            // Drop table
-            this->exec("DROP TABLE attributes");
-            LOGD << "Dropped attributes table";
+            if (!this->tableExists("passwords"))
+            {
+                LOGD << "Passwords table does not exist, creating it";
+                this->exec(passwordsTableDdl);
+                LOGD << "Passwords table created";
+            }
+
+            if (!this->tableExists("entries_meta"))
+            {
+                LOGD << "Entries meta table does not exist, creating it";
+                this->exec(entriesMetaTableDdl);
+                LOGD << "Entries meta table created";
+            }
+
+            // Ensure indexes exist on existing databases (migration for new indexes)
+            // These are idempotent operations that will not fail if indexes already exist
+            LOGD << "Ensuring indexes exist";
+            this->exec("CREATE INDEX IF NOT EXISTS ix_entries_hash ON entries (hash)");
+            this->exec("DROP INDEX IF EXISTS ix_entries_meta_path");
+            this->exec("CREATE INDEX IF NOT EXISTS ix_entries_meta_path_key ON entries_meta (path, key)");
+            this->exec("CREATE INDEX IF NOT EXISTS ix_entries_meta_key ON entries_meta (key)");
+
+            // Migration from 0.9.11 to 0.9.12
+            // Renamed "entries.meta" --> "entries.properties"
+            if (this->renameColumnIfExists("entries", "meta TEXT", "properties TEXT"))
+            {
+                this->reopen();
+            }
+
+            // Migration from 1.0.7 --> 1.0.8
+            // Removed the attributes table (use entries_meta instead)
+            if (this->tableExists("attributes"))
+            {
+                // Port public attr info to visibility meta
+                {
+                    const auto q = this->query("SELECT ivalue FROM attributes WHERE name = 'public'");
+                    if (q->fetch())
+                    {
+                        if (q->getInt(0) == 1)
+                        {
+                            this->getMetaManager()->set("visibility", "1");
+                            LOGD << "Migrated attributes.public to entries_meta.visibility";
+                        }
+                    }
+                }
+
+                // Drop table
+                this->exec("DROP TABLE attributes");
+                LOGD << "Dropped attributes table";
+            }
+
+            // Mark database as migrated to current version
+            this->setUserVersion(DDB_SCHEMA_VERSION);
+            LOGD << "Database migrated to schema version " << DDB_SCHEMA_VERSION;
         }
+
+        // Future migrations would be added here:
+        // if (dbVersion < 2) { runMigration_1_to_2(); }
+        // if (dbVersion < 3) { runMigration_2_to_3(); }
+        // etc.
     }
 
     json Database::getProperties() const

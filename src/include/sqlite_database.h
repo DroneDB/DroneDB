@@ -37,6 +37,10 @@ class SqliteDatabase {
     DDB_DLL void setWritableSchema(bool enabled);
     DDB_DLL bool renameColumnIfExists(const std::string &table, const std::string &columnDefBefore, const std::string &columnDefAfter);
 
+    // Schema versioning using PRAGMA user_version
+    DDB_DLL int getUserVersion() const;
+    DDB_DLL void setUserVersion(int version);
+
     DDB_DLL std::unique_ptr<Statement> query(const std::string &query) const;
 
     DDB_DLL ~SqliteDatabase();

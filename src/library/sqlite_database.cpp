@@ -137,6 +137,19 @@ namespace ddb
         return std::make_unique<Statement>(db, query);
     }
 
+    int SqliteDatabase::getUserVersion() const
+    {
+        auto q = this->query("PRAGMA user_version");
+        return q->fetch() ? q->getInt(0) : 0;
+    }
+
+    void SqliteDatabase::setUserVersion(int version)
+    {
+        // PRAGMA doesn't support parameter binding, must use string concatenation
+        // Version is an int, so no SQL injection risk
+        this->query("PRAGMA user_version = " + std::to_string(version))->execute();
+    }
+
     SqliteDatabase::~SqliteDatabase()
     {
         this->close();
