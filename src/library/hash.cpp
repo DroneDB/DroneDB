@@ -41,7 +41,7 @@ std::string Hash::fileSHA256(const std::string &path) {
         f.read(buffer.data(), BufferSize);
         size_t numBytesRead = size_t(f.gcount());
         if (numBytesRead > 0) {
-            EVP_DigestUpdate(ctx.get(), buffer.data(), numBytesRead);
+            safeDigestUpdate(ctx.get(), buffer.data(), numBytesRead);
         }
     }
 
@@ -49,7 +49,7 @@ std::string Hash::fileSHA256(const std::string &path) {
 
     unsigned char hash[EVP_MAX_MD_SIZE];
     unsigned int hashLen;
-    EVP_DigestFinal_ex(ctx.get(), hash, &hashLen);
+    safeDigestFinal(ctx.get(), hash, &hashLen);
 
     return bytesToHex(hash, hashLen);
 }
@@ -63,11 +63,11 @@ std::string Hash::strSHA256(const std::string &str){
         throw AppException("Failed to initialize SHA256 digest");
     }
 
-    EVP_DigestUpdate(ctx.get(), str.c_str(), str.length());
+    safeDigestUpdate(ctx.get(), str.c_str(), str.length());
 
     unsigned char hash[EVP_MAX_MD_SIZE];
     unsigned int hashLen;
-    EVP_DigestFinal_ex(ctx.get(), hash, &hashLen);
+    safeDigestFinal(ctx.get(), hash, &hashLen);
 
     return bytesToHex(hash, hashLen);
 }

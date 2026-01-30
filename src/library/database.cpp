@@ -301,8 +301,8 @@ END;
         {
             const std::string p = q->getText(0);
             const std::string h = q->getText(1);
-            EVP_DigestUpdate(ctx.get(), p.c_str(), p.length());
-            EVP_DigestUpdate(ctx.get(), h.c_str(), h.length());
+            safeDigestUpdate(ctx.get(), p.c_str(), p.length());
+            safeDigestUpdate(ctx.get(), h.c_str(), h.length());
 
             j["entries"].push_back(json::object({{p, h}}));
         }
@@ -312,14 +312,14 @@ END;
         while (q->fetch())
         {
             const std::string id = q->getText(0);
-            EVP_DigestUpdate(ctx.get(), id.c_str(), id.length());
+            safeDigestUpdate(ctx.get(), id.c_str(), id.length());
             j["meta"].push_back(id);
         }
 
         // Finalize hash and convert to hex string
         unsigned char hash[EVP_MAX_MD_SIZE];
         unsigned int hashLen;
-        EVP_DigestFinal_ex(ctx.get(), hash, &hashLen);
+        safeDigestFinal(ctx.get(), hash, &hashLen);
 
         std::ostringstream oss;
         for (unsigned int i = 0; i < hashLen; ++i) {

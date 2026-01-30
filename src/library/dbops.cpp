@@ -663,7 +663,7 @@ static std::mutex g_dbOpenMutex;
 
         // Batch delete all metadata for entries matching the query
         auto metaDeleteQ = db->query(
-            "DELETE FROM entries_meta WHERE path IN (SELECT path FROM entries WHERE path LIKE ? ESCAPE '/')");
+            "DELETE FROM entries_meta WHERE path LIKE ? ESCAPE '/'");
         metaDeleteQ->bind(1, str);
         metaDeleteQ->execute();
         metaDeleteQ->reset();

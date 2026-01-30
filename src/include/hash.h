@@ -8,6 +8,7 @@
 #include <string>
 #include <fstream>
 #include <memory>
+#include <stdexcept>
 #include "ddb_export.h"
 #include <openssl/evp.h>
 
@@ -18,6 +19,19 @@ struct EvpMdCtxDeleter {
     }
 };
 using EvpMdCtxPtr = std::unique_ptr<EVP_MD_CTX, EvpMdCtxDeleter>;
+
+// Safe wrappers for OpenSSL EVP digest functions with error checking
+inline void safeDigestUpdate(EVP_MD_CTX* ctx, const void* data, size_t len) {
+    if (EVP_DigestUpdate(ctx, data, len) != 1) {
+        throw std::runtime_error("EVP_DigestUpdate failed");
+    }
+}
+
+inline void safeDigestFinal(EVP_MD_CTX* ctx, unsigned char* hash, unsigned int* len) {
+    if (EVP_DigestFinal_ex(ctx, hash, len) != 1) {
+        throw std::runtime_error("EVP_DigestFinal_ex failed");
+    }
+}
 
 static const uint64_t crc64_table[256] = {
     uint64_t(0x0000000000000000), uint64_t(0x7ad870c830358979),
