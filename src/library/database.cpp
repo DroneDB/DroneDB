@@ -91,7 +91,8 @@ END;
     Database &Database::createTables()
     {
         const std::string sql = std::string(entriesTableDdl) + '\n' +
-                                passwordsTableDdl;
+                                passwordsTableDdl + '\n' +
+                                entriesMetaTableDdl;
 
         LOGD << "About to create tables...";
         this->exec(sql);
