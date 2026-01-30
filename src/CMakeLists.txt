@@ -28,7 +28,7 @@ find_package(LibZip CONFIG REQUIRED)
 find_package(plog CONFIG REQUIRED)
 find_package(cpr CONFIG REQUIRED)
 find_package(cxxopts CONFIG REQUIRED)
-find_package(unofficial-hash-library CONFIG REQUIRED)
+find_package(OpenSSL REQUIRED)
 find_package(unofficial-sqlite3 CONFIG REQUIRED)
 find_package(SpatiaLite REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
@@ -54,7 +54,7 @@ set(COMMON_LIBS
     cpr::cpr
     nlohmann_json::nlohmann_json
     cxxopts::cxxopts
-    unofficial::hash-library
+    OpenSSL::Crypto
     unofficial::sqlite3::sqlite3
     spatialite::spatialite
     nxs

@@ -27,9 +27,9 @@
       ]
     },
     "gtest",
-    "hash-library",
     "laszip",
     "libgeotiff",
+    "openssl",
     "libspatialite",
     "libzip",
     {

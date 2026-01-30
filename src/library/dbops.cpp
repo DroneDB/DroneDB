@@ -7,8 +7,11 @@
 #include "ddb.h"
 #include "status.h"
 
+#include <algorithm>
 #include <cstdlib>
+#include <future>
 #include <mutex>
+#include <thread>
 
 #include "entry_types.h"
 #include "exceptions.h"
@@ -20,6 +23,7 @@
 #include "userprofile.h"
 #include "utils.h"
 #include "version.h"
+#include "constants.h"
 
 namespace ddb
 {
@@ -38,7 +42,7 @@ static std::mutex g_dbOpenMutex;
     {
         const fs::path dirPath = fs::absolute(directory);
         const fs::path ddbDirPath = dirPath / DDB_FOLDER;
-        const fs::path dbasePath = ddbDirPath / "dbase.sqlite";
+        const fs::path dbasePath = ddbDirPath / DDB_DATABASE_FILE;
 
         if (!exists(dbasePath))
         {
@@ -657,24 +661,32 @@ static std::mutex g_dbOpenMutex;
 
         db->exec("BEGIN EXCLUSIVE TRANSACTION");
 
+        // Batch delete all metadata for entries matching the query
+        auto metaDeleteQ = db->query(
+            "DELETE FROM entries_meta WHERE path LIKE ? ESCAPE '/'");
+        metaDeleteQ->bind(1, str);
+        metaDeleteQ->execute();
+        metaDeleteQ->reset();
+
+        // Collect paths and hashes for callback and build folder cleanup
         auto q = db->query(
             "SELECT path, hash FROM entries WHERE path LIKE ? ESCAPE '/'");
 
         q->bind(1, str);
 
         int count = 0;
+        std::vector<std::string> hashesToDelete;
 
         while (q->fetch())
         {
-
             const auto path = q->getText(0);
             const auto hash = q->getText(1);
 
-            // Check for build folders to be removed
-            checkDeleteBuild(db, hash);
-
-            // Check for meta info to be removed
-            checkDeleteMeta(db, path);
+            // Collect non-empty hashes for parallel build folder deletion
+            if (!hash.empty())
+            {
+                hashesToDelete.push_back(hash);
+            }
 
             if (callback != nullptr)
                 callback(path);
@@ -695,6 +707,58 @@ static std::mutex g_dbOpenMutex;
         }
 
         db->exec("COMMIT");
+
+        // Parallel deletion of build folders (outside transaction for better performance)
+        // Limit concurrency to avoid spawning too many threads
+        if (!hashesToDelete.empty())
+        {
+            const auto buildDir = db->buildDirectory();
+            const size_t maxConcurrency = std::max(1u, std::thread::hardware_concurrency());
+            std::vector<std::future<void>> deletionFutures;
+
+            for (size_t i = 0; i < hashesToDelete.size(); ++i)
+            {
+                const auto &hash = hashesToDelete[i];
+                deletionFutures.push_back(std::async(std::launch::async, [buildDir, hash]() {
+                    const auto buildFolder = buildDir / hash;
+                    if (fs::exists(buildFolder))
+                    {
+                        LOGD << "Removing " << buildFolder.string();
+                        io::assureIsRemoved(buildFolder);
+                    }
+                }));
+
+                // When we reach max concurrency, wait for all current futures before continuing
+                if (deletionFutures.size() >= maxConcurrency)
+                {
+                    for (auto &f : deletionFutures)
+                    {
+                        try
+                        {
+                            f.get();
+                        }
+                        catch (const std::exception &e)
+                        {
+                            LOGD << "Warning: Failed to delete build folder: " << e.what();
+                        }
+                    }
+                    deletionFutures.clear();
+                }
+            }
+
+            // Wait for remaining deletions to complete
+            for (auto &f : deletionFutures)
+            {
+                try
+                {
+                    f.get();
+                }
+                catch (const std::exception &e)
+                {
+                    LOGD << "Warning: Failed to delete build folder: " << e.what();
+                }
+            }
+        }
 
         return count;
     }
@@ -969,7 +1033,7 @@ static std::mutex g_dbOpenMutex;
         auto ddbDirPath = dirPath / DDB_FOLDER;
         if (std::string(directory) == ".")
             ddbDirPath = DDB_FOLDER; // Nicer to the eye
-        const auto dbasePath = ddbDirPath / "dbase.sqlite";
+        const auto dbasePath = ddbDirPath / DDB_DATABASE_FILE;
 
         LOGD << "Checking if .ddb directory exists...";
         if (exists(ddbDirPath))
@@ -1034,8 +1098,8 @@ static std::mutex g_dbOpenMutex;
             else
             {
                 // For some reason it's missing, generate from scratch
-                LOGD << "Cannot find empty-dbase.sqlite in data path, strange! "
-                        "Building from scratch instead";
+                LOGD << "Cannot find " << emptyDbPath.string()
+                     << " in data path, strange! Building from scratch instead";
                 fromScratch = true;
             }
         }

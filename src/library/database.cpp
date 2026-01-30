@@ -6,6 +6,8 @@
 #include "metamanager.h"
 
 #include <fstream>
+#include <iomanip>
+#include <sstream>
 #include <string>
 
 #include "exceptions.h"
@@ -48,6 +50,9 @@ namespace ddb
 
   CREATE INDEX IF NOT EXISTS ix_entries_type
   ON entries (type);
+
+  CREATE INDEX IF NOT EXISTS ix_entries_hash
+  ON entries (hash);
 )<<<";
 
     const char *passwordsTableDdl = R"<<<(
@@ -65,8 +70,9 @@ namespace ddb
       data TEXT NOT NULL,
       mtime INTEGER NOT NULL
   );
-  CREATE INDEX IF NOT EXISTS ix_entries_meta_path
-  ON entries_meta (path);
+  DROP INDEX IF EXISTS ix_entries_meta_path;
+  CREATE INDEX IF NOT EXISTS ix_entries_meta_path_key
+  ON entries_meta (path, key);
   CREATE INDEX IF NOT EXISTS ix_entries_meta_key
   ON entries_meta (key);
 
@@ -85,71 +91,115 @@ END;
     Database &Database::createTables()
     {
         const std::string sql = std::string(entriesTableDdl) + '\n' +
-                                passwordsTableDdl;
+                                passwordsTableDdl + '\n' +
+                                entriesMetaTableDdl;
 
         LOGD << "About to create tables...";
         this->exec(sql);
         LOGD << "Created tables";
+
+        // Set schema version for new databases
+        this->setUserVersion(DDB_SCHEMA_VERSION);
+        LOGD << "Set schema version to " << DDB_SCHEMA_VERSION;
 
         return *this;
     }
 
     DDB_DLL void Database::ensureSchemaConsistency()
     {
-
         LOGD << "Ensuring schema consistency";
 
-        if (!this->tableExists("entries"))
+        const int dbVersion = this->getUserVersion();
+        LOGD << "Database schema version: " << dbVersion;
+
+        // Check if database was created with a newer version of DroneDB
+        if (dbVersion > DDB_SCHEMA_VERSION)
         {
-            LOGD << "Entries table does not exist, creating it";
-            this->exec(entriesTableDdl);
-            LOGD << "Entries table created";
+            throw DBException("Database schema version " + std::to_string(dbVersion) +
+                " is newer than supported version " + std::to_string(DDB_SCHEMA_VERSION) +
+                ". Please update DroneDB to open this database.");
         }
 
-        if (!this->tableExists("passwords"))
+        // Database is already at current version, no migration needed
+        if (dbVersion == DDB_SCHEMA_VERSION)
         {
-            LOGD << "Passwords table does not exist, creating it";
-            this->exec(passwordsTableDdl);
-            LOGD << "Passwords table created";
+            LOGD << "Database schema is up to date";
+            return;
         }
 
-        if (!this->tableExists("entries_meta"))
+        // Legacy database (version 0) - run all table checks and migrations
+        // This handles databases created before the versioning system was introduced
+        if (dbVersion == 0)
         {
-            LOGD << "Entries meta table does not exist, creating it";
-            this->exec(entriesMetaTableDdl);
-            LOGD << "Entries meta table created";
-        }
+            LOGD << "Legacy database detected, running full schema check and migrations";
 
-        // Migration from 0.9.11 to 0.9.12 (can be removed in the near future)
-        // where we renamed "entries.meta" --> "entries.properties"
-        // TODO: remove me in 2022
-        if (this->renameColumnIfExists("entries", "meta TEXT", "properties TEXT"))
-        {
-            this->reopen();
-        }
-
-        // Migration from 1.0.7 --> 1.0.8 (can be removed in the near future)
-        // we removed the attributes table (use entries_meta instead)
-        // TODO: remove me in 2023
-        if (this->tableExists("attributes"))
-        {
-            // Port public attr info to visibility meta
+            if (!this->tableExists("entries"))
             {
-                const auto q = this->query("SELECT ivalue FROM attributes WHERE name = 'public'");
-                if (q->fetch())
-                {
-                    if (q->getInt(0) == 1)
-                    {
-                        this->getMetaManager()->set("visibility", "1");
-                        LOGD << "Migrated attributes.public to entries_meta.visibility";
-                    }
-                }
+                LOGD << "Entries table does not exist, creating it";
+                this->exec(entriesTableDdl);
+                LOGD << "Entries table created";
             }
 
-            // Drop table
-            this->exec("DROP TABLE attributes");
-            LOGD << "Dropped attributes table";
+            if (!this->tableExists("passwords"))
+            {
+                LOGD << "Passwords table does not exist, creating it";
+                this->exec(passwordsTableDdl);
+                LOGD << "Passwords table created";
+            }
+
+            if (!this->tableExists("entries_meta"))
+            {
+                LOGD << "Entries meta table does not exist, creating it";
+                this->exec(entriesMetaTableDdl);
+                LOGD << "Entries meta table created";
+            }
+
+            // Ensure indexes exist on existing databases (migration for new indexes)
+            // These are idempotent operations that will not fail if indexes already exist
+            LOGD << "Ensuring indexes exist";
+            this->exec("CREATE INDEX IF NOT EXISTS ix_entries_hash ON entries (hash)");
+            this->exec("DROP INDEX IF EXISTS ix_entries_meta_path");
+            this->exec("CREATE INDEX IF NOT EXISTS ix_entries_meta_path_key ON entries_meta (path, key)");
+            this->exec("CREATE INDEX IF NOT EXISTS ix_entries_meta_key ON entries_meta (key)");
+
+            // Migration from 0.9.11 to 0.9.12
+            // Renamed "entries.meta" --> "entries.properties"
+            if (this->renameColumnIfExists("entries", "meta TEXT", "properties TEXT"))
+            {
+                this->reopen();
+            }
+
+            // Migration from 1.0.7 --> 1.0.8
+            // Removed the attributes table (use entries_meta instead)
+            if (this->tableExists("attributes"))
+            {
+                // Port public attr info to visibility meta
+                {
+                    const auto q = this->query("SELECT ivalue FROM attributes WHERE name = 'public'");
+                    if (q->fetch())
+                    {
+                        if (q->getInt(0) == 1)
+                        {
+                            this->getMetaManager()->set("visibility", "1");
+                            LOGD << "Migrated attributes.public to entries_meta.visibility";
+                        }
+                    }
+                }
+
+                // Drop table
+                this->exec("DROP TABLE attributes");
+                LOGD << "Dropped attributes table";
+            }
+
+            // Mark database as migrated to current version
+            this->setUserVersion(DDB_SCHEMA_VERSION);
+            LOGD << "Database migrated to schema version " << DDB_SCHEMA_VERSION;
         }
+
+        // Future migrations would be added here:
+        // if (dbVersion < 2) { runMigration_1_to_2(); }
+        // if (dbVersion < 3) { runMigration_2_to_3(); }
+        // etc.
     }
 
     json Database::getProperties() const
@@ -237,7 +287,13 @@ END;
     json Database::getStamp() const
     {
         json j;
-        SHA256 checksum;
+
+        // Initialize OpenSSL EVP context for incremental hashing
+        EvpMdCtxPtr ctx(EVP_MD_CTX_new());
+        if (!ctx) throw AppException("Failed to create EVP_MD_CTX for SHA256");
+        if (EVP_DigestInit_ex(ctx.get(), EVP_sha256(), NULL) != 1) {
+            throw AppException("Failed to initialize SHA256 digest");
+        }
 
         auto q = this->query("SELECT path,hash FROM entries ORDER BY path ASC");
         j["entries"] = json::array();
@@ -245,8 +301,8 @@ END;
         {
             const std::string p = q->getText(0);
             const std::string h = q->getText(1);
-            checksum.add(p.c_str(), p.length());
-            checksum.add(h.c_str(), h.length());
+            safeDigestUpdate(ctx.get(), p.c_str(), p.length());
+            safeDigestUpdate(ctx.get(), h.c_str(), h.length());
 
             j["entries"].push_back(json::object({{p, h}}));
         }
@@ -256,11 +312,20 @@ END;
         while (q->fetch())
         {
             const std::string id = q->getText(0);
-            checksum.add(id.c_str(), id.length());
+            safeDigestUpdate(ctx.get(), id.c_str(), id.length());
             j["meta"].push_back(id);
         }
 
-        j["checksum"] = checksum.getHash();
+        // Finalize hash and convert to hex string
+        unsigned char hash[EVP_MAX_MD_SIZE];
+        unsigned int hashLen;
+        safeDigestFinal(ctx.get(), hash, &hashLen);
+
+        std::ostringstream oss;
+        for (unsigned int i = 0; i < hashLen; ++i) {
+            oss << std::hex << std::setfill('0') << std::setw(2) << (int)hash[i];
+        }
+        j["checksum"] = oss.str();
         return j;
     }
 

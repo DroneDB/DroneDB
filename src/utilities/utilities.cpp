@@ -4,7 +4,6 @@
 #include <cctz/time_zone.h>
 #include <cpr/cpr.h>
 #include <gdal_priv.h>
-#include <hash-library/md5.h>
 
 #include <exiv2/exiv2.hpp>
 #include <fstream>
@@ -27,11 +26,6 @@ std::string getCurrentTime() {
 std::vector<std::string> processVector(const std::vector<std::string>& input) {
     using namespace boolinq;
     return from(input).where([](const std::string& s) { return !s.empty(); }).toStdVector();
-}
-
-std::string hashString(const std::string& input) {
-    MD5 md5;
-    return md5(input);
 }
 
 nlohmann::json fetchJsonData(const std::string& url) {

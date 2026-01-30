@@ -5,6 +5,7 @@
 #define EXIF_H
 
 #include <exiv2/exiv2.hpp>
+#include <memory>
 #include <stdio.h>
 #include "utils.h"
 #include "sensor_data.h"
@@ -112,6 +113,29 @@ namespace ddb
         bool hasExif();
         bool hasXmp();
         bool hasTags();
+    };
+
+    /**
+     * @brief Context for caching Exiv2 image and parser to avoid duplicate file reads.
+     *
+     * This struct allows fingerprint() and parseEntry() to share the same Exiv2::Image
+     * and ExifParser instance, eliminating the need to open and read the file twice.
+     */
+    struct FingerprintContext
+    {
+        std::unique_ptr<Exiv2::Image> exivImage;
+        std::unique_ptr<ExifParser> parser;
+        GeoLocation geo;
+        bool hasGeo = false;
+        bool populated = false;
+
+        FingerprintContext() = default;
+
+        // Non-copyable, moveable
+        FingerprintContext(const FingerprintContext &) = delete;
+        FingerprintContext &operator=(const FingerprintContext &) = delete;
+        FingerprintContext(FingerprintContext &&) = default;
+        FingerprintContext &operator=(FingerprintContext &&) = default;
     };
 
 }

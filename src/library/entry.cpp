@@ -6,6 +6,7 @@
 #include "entry.h"
 
 #include "ddb.h"
+#include "constants.h"
 
 #include "mio.h"
 #include "pointcloud.h"
@@ -19,6 +20,12 @@ namespace ddb
 {
 
     void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entry, bool withHash)
+    {
+        FingerprintContext ctx;
+        parseEntry(path, rootDirectory, entry, withHash, ctx);
+    }
+
+    void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entry, bool withHash, FingerprintContext &ctx)
     {
         entry.type = EntryType::Undefined;
 
@@ -51,7 +58,7 @@ namespace ddb
             // Check for DroneDB dir
             try
             {
-                if (fs::exists(path / DDB_FOLDER / "dbase.sqlite"))
+                if (fs::exists(path / DDB_FOLDER / DDB_DATABASE_FILE))
                 {
                     parseDroneDBEntry(path, entry);
                 }
@@ -65,8 +72,9 @@ namespace ddb
         {
             if (entry.hash == "" && withHash)
                 entry.hash = Hash::fileSHA256(path.string());
+
             entry.size = p.getSize();
-            entry.type = fingerprint(p.get());
+            entry.type = fingerprint(p.get(), ctx);
 
             bool pano = entry.type == EntryType::Panorama || entry.type == EntryType::GeoPanorama;
             bool image = entry.type == EntryType::Image || entry.type == EntryType::GeoImage || pano;
@@ -74,101 +82,128 @@ namespace ddb
 
             if (image || video)
             {
-                try
+                // Reuse ExifParser from context if available (populated by fingerprint)
+                ExifParser *e = nullptr;
+                std::unique_ptr<Exiv2::Image> localExivImage;
+                std::unique_ptr<ExifParser> localParser;
+
+                if (ctx.populated && ctx.parser)
                 {
-                    auto exivImage = Exiv2::ImageFactory::open(path.string());
-                    if (!exivImage.get())
-                        throw IndexException("Cannot open " + path.string());
-
-                    exivImage->readMetadata();
-                    ExifParser e(exivImage.get());
-
-                    if (e.hasTags())
+                    e = ctx.parser.get();
+                }
+                else
+                {
+                    // Fallback: open file if context not populated
+                    try
                     {
-                        SensorSize sensorSize;
-                        Focal focal;
-                        CameraOrientation cameraOri;
+                        localExivImage = Exiv2::ImageFactory::open(path.string());
+                        if (!localExivImage.get())
+                            throw IndexException("Cannot open " + path.string());
 
-                        ImageSize imageSize(0, 0);
-                        if (image)
-                            imageSize = e.extractImageSize();
-                        else if (video)
-                            imageSize = e.extractVideoSize();
+                        localExivImage->readMetadata();
+                        localParser = std::make_unique<ExifParser>(localExivImage.get());
+                        e = localParser.get();
+                    }
+                    catch (Exiv2::Error &)
+                    {
+                        LOGD << "Cannot read EXIF data: " << path.string();
+                        e = nullptr;
+                    }
+                }
 
-                        entry.properties["width"] = imageSize.width;
-                        entry.properties["height"] = imageSize.height;
-                        entry.properties["captureTime"] = e.extractCaptureTime();
+                if (e && e->hasTags())
+                {
+                    SensorSize sensorSize;
+                    Focal focal;
+                    CameraOrientation cameraOri;
 
-                        if (image)
+                    ImageSize imageSize(0, 0);
+                    if (image)
+                        imageSize = e->extractImageSize();
+                    else if (video)
+                        imageSize = e->extractVideoSize();
+
+                    entry.properties["width"] = imageSize.width;
+                    entry.properties["height"] = imageSize.height;
+                    entry.properties["captureTime"] = e->extractCaptureTime();
+
+                    if (image)
+                    {
+                        entry.properties["orientation"] = e->extractImageOrientation();
+                        entry.properties["make"] = e->extractMake();
+                        entry.properties["model"] = e->extractModel();
+                        entry.properties["sensor"] = e->extractSensor();
+
+                        if (e->extractSensorSize(sensorSize))
                         {
-                            entry.properties["orientation"] = e.extractImageOrientation();
-                            entry.properties["make"] = e.extractMake();
-                            entry.properties["model"] = e.extractModel();
-                            entry.properties["sensor"] = e.extractSensor();
-
-                            if (e.extractSensorSize(sensorSize))
-                            {
-                                entry.properties["sensorWidth"] = sensorSize.width;
-                                entry.properties["sensorHeight"] = sensorSize.height;
-                            }
-
-                            if (e.computeFocal(focal))
-                            {
-                                entry.properties["focalLength"] = focal.length;
-                                entry.properties["focalLength35"] = focal.length35;
-                            }
-
-                            e.extractCameraOrientation(cameraOri);
-                            entry.properties["cameraYaw"] = cameraOri.yaw;
-                            entry.properties["cameraPitch"] = cameraOri.pitch;
-                            entry.properties["cameraRoll"] = cameraOri.roll;
-                            LOGD << "Camera Orientation: " << cameraOri;
+                            entry.properties["sensorWidth"] = sensorSize.width;
+                            entry.properties["sensorHeight"] = sensorSize.height;
                         }
 
-                        GeoLocation geo;
-                        if (e.extractGeo(geo))
+                        if (e->computeFocal(focal))
                         {
-                            entry.point_geom.addPoint(geo.longitude, geo.latitude, geo.altitude);
-                            LOGD << "POINT GEOM: " << entry.point_geom.toWkt();
-
-                            // e.printAllTags();
-
-                            // Estimate image footprint
-                            if (image && !pano)
-                            {
-                                double relAltitude = 0.0;
-
-                                if (e.extractRelAltitude(relAltitude) && sensorSize.width > 0.0 && focal.length > 0.0)
-                                {
-                                    calculateFootprint(sensorSize, geo, focal, cameraOri, relAltitude, entry.polygon_geom);
-                                }
-                            }
+                            entry.properties["focalLength"] = focal.length;
+                            entry.properties["focalLength35"] = focal.length35;
                         }
 
-                        if (pano)
-                        {
-                            PanoramaInfo pInfo;
-                            if (e.extractPanoramaInfo(pInfo))
-                            {
-                                entry.properties["projectionType"] = pInfo.projectionType;
-                                entry.properties["croppedWidth"] = pInfo.croppedWidth;
-                                entry.properties["croppedHeight"] = pInfo.croppedHeight;
-                                entry.properties["croppedX"] = pInfo.croppedX;
-                                entry.properties["croppedY"] = pInfo.croppedY;
-                                entry.properties["poseHeading"] = pInfo.poseHeading;
-                                entry.properties["posePitch"] = pInfo.posePitch;
-                                entry.properties["poseRoll"] = pInfo.poseRoll;
-                            }
-                        }
+                        e->extractCameraOrientation(cameraOri);
+                        entry.properties["cameraYaw"] = cameraOri.yaw;
+                        entry.properties["cameraPitch"] = cameraOri.pitch;
+                        entry.properties["cameraRoll"] = cameraOri.roll;
+                        LOGD << "Camera Orientation: " << cameraOri;
+                    }
+
+                    // Reuse geo from context if already extracted by fingerprint
+                    GeoLocation geo;
+                    bool hasGeo = false;
+                    if (ctx.populated && ctx.hasGeo)
+                    {
+                        geo = ctx.geo;
+                        hasGeo = true;
                     }
                     else
                     {
-                        LOGD << "No XMP/EXIF data found in " << path.string();
+                        hasGeo = e->extractGeo(geo);
+                    }
+
+                    if (hasGeo)
+                    {
+                        entry.point_geom.addPoint(geo.longitude, geo.latitude, geo.altitude);
+                        LOGD << "POINT GEOM: " << entry.point_geom.toWkt();
+
+                        // e->printAllTags();
+
+                        // Estimate image footprint
+                        if (image && !pano)
+                        {
+                            double relAltitude = 0.0;
+
+                            if (e->extractRelAltitude(relAltitude) && sensorSize.width > 0.0 && focal.length > 0.0)
+                            {
+                                calculateFootprint(sensorSize, geo, focal, cameraOri, relAltitude, entry.polygon_geom);
+                            }
+                        }
+                    }
+
+                    if (pano)
+                    {
+                        PanoramaInfo pInfo;
+                        if (e->extractPanoramaInfo(pInfo))
+                        {
+                            entry.properties["projectionType"] = pInfo.projectionType;
+                            entry.properties["croppedWidth"] = pInfo.croppedWidth;
+                            entry.properties["croppedHeight"] = pInfo.croppedHeight;
+                            entry.properties["croppedX"] = pInfo.croppedX;
+                            entry.properties["croppedY"] = pInfo.croppedY;
+                            entry.properties["poseHeading"] = pInfo.poseHeading;
+                            entry.properties["posePitch"] = pInfo.posePitch;
+                            entry.properties["poseRoll"] = pInfo.poseRoll;
+                        }
                     }
                 }
-                catch (Exiv2::Error &)
+                else if (e)
                 {
-                    LOGD << "Cannot read EXIF data: " << path.string();
+                    LOGD << "No XMP/EXIF data found in " << path.string();
                 }
             }
             else if (entry.type == EntryType::GeoRaster)
@@ -586,6 +621,17 @@ namespace ddb
 
     EntryType fingerprint(const fs::path &path)
     {
+        FingerprintContext ctx;
+        return fingerprint(path, ctx);
+    }
+
+    EntryType fingerprint(const fs::path &path, FingerprintContext &ctx)
+    {
+        ctx.populated = false;
+        ctx.hasGeo = false;
+        ctx.exivImage.reset();
+        ctx.parser.reset();
+
         EntryType type = EntryType::Generic;
         io::Path p(path);
 
@@ -646,25 +692,26 @@ namespace ddb
 
             try
             {
-                auto image = Exiv2::ImageFactory::open(path.string());
-                if (!image.get())
+                ctx.exivImage = Exiv2::ImageFactory::open(path.string());
+                if (!ctx.exivImage.get())
                     throw IndexException("Cannot open " + path.string());
 
-                image->readMetadata();
-                ExifParser e(image.get());
+                ctx.exivImage->readMetadata();
+                ctx.parser = std::make_unique<ExifParser>(ctx.exivImage.get());
+                ctx.populated = true;
 
                 if (type == EntryType::Image)
                 {
                     // Panorama?
-                    if (image->pixelWidth() / image->pixelHeight() >= 2)
+                    if (ctx.exivImage->pixelWidth() / ctx.exivImage->pixelHeight() >= 2)
                         type = EntryType::Panorama;
                 }
 
-                if (e.hasTags())
+                if (ctx.parser->hasTags())
                 {
-                    GeoLocation geo;
-                    if (e.extractGeo(geo))
+                    if (ctx.parser->extractGeo(ctx.geo))
                     {
+                        ctx.hasGeo = true;
                         if (type == EntryType::Image)
                             type = EntryType::GeoImage;
                         else if (type == EntryType::Video)
@@ -677,14 +724,11 @@ namespace ddb
                         // Not a georeferenced image, just a plain image
                     }
                 }
-                else
-                {
-                    LOGD << "No XMP/EXIF data found in " << path.string();
-                }
             }
             catch (Exiv2::Error &)
             {
                 LOGD << "Cannot read EXIF data: " << path.string();
+                ctx.populated = false;
             }
         }
         else if (georaster)

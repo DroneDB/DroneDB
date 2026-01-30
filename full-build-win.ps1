@@ -11,8 +11,67 @@ param(
     [switch]$SkipTests,
 
     [Parameter(Mandatory=$false)]
-    [int]$Jobs = [System.Environment]::ProcessorCount
+    [int]$Jobs = [System.Environment]::ProcessorCount,
+
+    [Parameter(Mandatory=$false)]
+    [Alias('h', '?')]
+    [switch]$Help
 )
+
+function Show-Help {
+    $helpText = @"
+DroneDB Full Build Script for Windows
+======================================
+
+USAGE:
+    .\full-build-win.ps1 [OPTIONS]
+
+OPTIONS:
+    -BuildType <type>    Build configuration type. Valid values:
+                         Debug, Release, RelWithDebInfo, MinSizeRel
+                         Default: Debug
+
+    -Clean               Remove the build directory before building.
+                         This forces a complete rebuild.
+
+    -SkipTests           Skip running tests after the build completes.
+
+    -Jobs <n>            Number of parallel jobs for compilation.
+                         Default: Number of CPU cores ($([System.Environment]::ProcessorCount))
+
+    -Help, -h, -?        Show this help message and exit.
+
+EXAMPLES:
+    .\full-build-win.ps1
+        Build in Debug mode with default settings.
+
+    .\full-build-win.ps1 -BuildType Release
+        Build in Release mode.
+
+    .\full-build-win.ps1 -BuildType Release -Clean
+        Clean build directory and build in Release mode.
+
+    .\full-build-win.ps1 -BuildType Debug -SkipTests
+        Build in Debug mode without running tests.
+
+    .\full-build-win.ps1 -Jobs 4
+        Build using 4 parallel jobs.
+
+REQUIREMENTS:
+    - Visual Studio 2019 or later with C++ workload
+    - CMake 3.16 or later
+    - Git
+
+For more information, visit: https://github.com/DroneDB/DroneDB
+"@
+    Write-Host $helpText
+}
+
+# Show help if requested
+if ($Help) {
+    Show-Help
+    exit 0
+}
 
 # Enable strict error handling
 $ErrorActionPreference = "Stop"

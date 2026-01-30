@@ -10,4 +10,10 @@
     #define DDB_DLL
 #endif // _WIN32
 
+// Database schema version for migration management
+// Increment this value when making schema changes
+// Version 0 = legacy database without versioning
+// Version 1 = first versioned schema (current)
+#define DDB_SCHEMA_VERSION 1
+
 #endif // DDB_EXPORT_H

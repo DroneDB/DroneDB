@@ -9,6 +9,7 @@
 #include "entry.h"
 #include "test.h"
 #include "testarea.h"
+#include "constants.h"
 
 namespace
 {
@@ -20,12 +21,12 @@ namespace
 
         TestArea ta(TEST_NAME);
 
-        const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", "dbase.sqlite");
+        const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", DDB_DATABASE_FILE);
 
         const auto testFolder = ta.getFolder("test");
         create_directory(testFolder / ".ddb");
         fs::copy(sqlite.string(), testFolder / ".ddb", fs::copy_options::overwrite_existing);
-        const auto dbPath = testFolder / ".ddb" / "dbase.sqlite";
+        const auto dbPath = testFolder / ".ddb" / DDB_DATABASE_FILE;
         EXPECT_TRUE(fs::exists(dbPath));
 
         auto db = ddb::open(testFolder.string(), false);

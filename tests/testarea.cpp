@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "testarea.h"
 
+#include <algorithm>
 #include <cpr/cpr.h>
 #include <thread>
 #include <chrono>
@@ -14,9 +15,9 @@
 #include "mio.h"
 
 namespace {
-    // SQLite magic header: "SQLite format 3\000"
-    const char SQLITE_MAGIC[] = "SQLite format 3";
-    const size_t SQLITE_MAGIC_SIZE = 15;
+    // SQLite magic header: "SQLite format 3\000" (16 bytes including NUL terminator)
+    const char SQLITE_MAGIC[] = "SQLite format 3\0";
+    const size_t SQLITE_MAGIC_SIZE = 16;
 
     /**
      * @brief Validates that a file is a valid SQLite database by checking the magic header.
@@ -46,7 +47,7 @@ namespace {
             return false;
         }
 
-        bool valid = std::strncmp(header, SQLITE_MAGIC, SQLITE_MAGIC_SIZE) == 0;
+        bool valid = std::memcmp(header, SQLITE_MAGIC, SQLITE_MAGIC_SIZE) == 0;
         if (!valid) {
             LOGD << "Invalid SQLite header in " << filePath << ". First bytes: "
                  << std::string(header, std::min(static_cast<size_t>(10), strlen(header)));
