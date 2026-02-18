@@ -146,11 +146,24 @@ namespace ddb
                             entry.properties["focalLength35"] = focal.length35;
                         }
 
-                        e->extractCameraOrientation(cameraOri);
+                        bool hasCameraOri = e->extractCameraOrientation(cameraOri);
                         entry.properties["cameraYaw"] = cameraOri.yaw;
                         entry.properties["cameraPitch"] = cameraOri.pitch;
                         entry.properties["cameraRoll"] = cameraOri.roll;
+                        entry.properties["hasCameraOrientation"] = hasCameraOri;
                         LOGD << "Camera Orientation: " << cameraOri;
+
+                        // Extract flight speed
+                        FlightSpeed flightSpeed;
+                        if (e->extractFlightSpeed(flightSpeed))
+                        {
+                            entry.properties["flightSpeed"] = flightSpeed.horizontal();
+                            entry.properties["flightSpeed3D"] = flightSpeed.magnitude();
+                            entry.properties["flightSpeedX"] = flightSpeed.x;
+                            entry.properties["flightSpeedY"] = flightSpeed.y;
+                            entry.properties["flightSpeedZ"] = flightSpeed.z;
+                            LOGD << "Flight Speed: " << flightSpeed;
+                        }
                     }
 
                     // Reuse geo from context if already extracted by fingerprint

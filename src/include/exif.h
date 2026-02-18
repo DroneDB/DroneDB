@@ -7,6 +7,7 @@
 #include <exiv2/exiv2.hpp>
 #include <memory>
 #include <stdio.h>
+#include <cmath>
 #include "utils.h"
 #include "sensor_data.h"
 #include "ddb_export.h"
@@ -74,6 +75,27 @@ namespace ddb
         return os;
     }
 
+    struct FlightSpeed
+    {
+        double x;  // m/s, east-west axis (positive = east)
+        double y;  // m/s, north-south axis (positive = north)
+        double z;  // m/s, vertical axis (positive = up)
+
+        DDB_DLL FlightSpeed() : x(0), y(0), z(0) {};
+        DDB_DLL FlightSpeed(double x, double y, double z) : x(x), y(y), z(z) {};
+
+        // Horizontal speed magnitude in m/s
+        DDB_DLL double horizontal() const { return std::sqrt(x * x + y * y); }
+
+        // 3D speed magnitude in m/s
+        DDB_DLL double magnitude() const { return std::sqrt(x * x + y * y + z * z); }
+    };
+    inline std::ostream &operator<<(std::ostream &os, const FlightSpeed &s)
+    {
+        os << "X: " << s.x << " | Y: " << s.y << " | Z: " << s.z << " | Horizontal: " << s.horizontal() << " | 3D: " << s.magnitude();
+        return os;
+    }
+
     class ExifParser
     {
         Exiv2::Image *image;
@@ -106,6 +128,7 @@ namespace ddb
         int extractImageOrientation();
 
         bool extractCameraOrientation(CameraOrientation &cameraOri);
+        bool extractFlightSpeed(FlightSpeed &speed);
         bool extractPanoramaInfo(PanoramaInfo &info);
 
         void printAllTags();

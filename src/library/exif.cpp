@@ -554,6 +554,53 @@ namespace ddb
         return true;
     }
 
+    bool ExifParser::extractFlightSpeed(FlightSpeed &speed)
+    {
+        // Priority 1: DJI XMP proprietary tags (3D vector components)
+        auto xk = findXmpKey({"Xmp.drone-dji.FlightXSpeed"});
+        auto yk = findXmpKey({"Xmp.drone-dji.FlightYSpeed"});
+        auto zk = findXmpKey({"Xmp.drone-dji.FlightZSpeed"});
+
+        if (xk != xmpData.end() && yk != xmpData.end() && zk != xmpData.end())
+        {
+            speed.x = static_cast<double>(xk->toFloat());
+            speed.y = static_cast<double>(yk->toFloat());
+            speed.z = static_cast<double>(zk->toFloat());
+            return true;
+        }
+
+        // Priority 2: EXIF standard GPS speed (scalar only)
+        auto gpsSpeed = findExifKey("Exif.GPSInfo.GPSSpeed");
+        if (gpsSpeed != exifData.end())
+        {
+            double speedVal = evalFrac(gpsSpeed->toRational());
+
+            auto gpsSpeedRef = findExifKey("Exif.GPSInfo.GPSSpeedRef");
+            std::string ref = "K"; // Default: km/h
+            if (gpsSpeedRef != exifData.end())
+                ref = gpsSpeedRef->toString();
+
+            // Convert to m/s
+            double speedMs;
+            if (ref == "K")
+                speedMs = speedVal / 3.6;
+            else if (ref == "M")
+                speedMs = speedVal / 2.237;
+            else if (ref == "N")
+                speedMs = speedVal / 1.944;
+            else
+                speedMs = speedVal / 3.6; // Fallback km/h
+
+            // Scalar speed: store as horizontal magnitude (x=speed, y=0, z=0)
+            speed.x = speedMs;
+            speed.y = 0;
+            speed.z = 0;
+            return true;
+        }
+
+        return false;
+    }
+
     bool ExifParser::extractPanoramaInfo(PanoramaInfo &info)
     {
         auto imSize = extractImageSize();
