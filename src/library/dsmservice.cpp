@@ -209,8 +209,11 @@ bool DSMService::addGeoTIFFToCache(const fs::path &filePath, double latitude, do
         // Inside the boundaries, load data
         LOGD << position << " inside raster boundary, loading data from " << filePath.string();
         e.loadData(hDataset);
-        cache[filePath.filename().string()] = e;
     }
+
+    // Always cache the entry (at least with bbox) to avoid
+    // repeated GDALOpen calls for files outside query bounds
+    cache[filePath.filename().string()] = e;
 
     GDALClose(hDataset);
     // delete srs;
