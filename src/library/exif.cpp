@@ -286,7 +286,7 @@ namespace ddb
             auto xmpAltitude = findXmpKey({"Xmp.drone-dji.AbsoluteAltitude"});
             if (xmpAltitude != xmpData.end())
             {
-                geo.altitude = evalFrac(xmpAltitude->toRational());
+                geo.altitude = static_cast<double>(xmpAltitude->toFloat());
             }
 
             // Use DJI's XMP tags for lat/lon, if available
@@ -304,6 +304,23 @@ namespace ddb
             }
 
             return true;
+        }
+
+        // Fallback: DJI XMP tags without EXIF GPS (some models only write XMP)
+        {
+            auto xmpLat = findXmpKey({"Xmp.drone-dji.Latitude"});
+            auto xmpLon = findXmpKey({"Xmp.drone-dji.Longitude"});
+            if (xmpLat != xmpData.end() && xmpLon != xmpData.end())
+            {
+                geo.latitude = static_cast<double>(xmpLat->toFloat());
+                geo.longitude = static_cast<double>(xmpLon->toFloat());
+
+                auto xmpAlt = findXmpKey({"Xmp.drone-dji.AbsoluteAltitude"});
+                if (xmpAlt != xmpData.end())
+                    geo.altitude = static_cast<double>(xmpAlt->toFloat());
+
+                return true;
+            }
         }
 
         auto gpsCoordinates = findXmpKey({"Xmp.video.GPSCoordinates"});
@@ -432,9 +449,69 @@ namespace ddb
         return static_cast<double>(rational.first) / static_cast<double>(rational.second);
     }
 
-    // Extracts timestamp (seconds from Jan 1st 1970)
+    // Helper: parse SubSecTime string into milliseconds
+    double ExifParser::parseSubSec(const Exiv2::ExifData::const_iterator &subsec)
+    {
+        if (subsec == exifData.end() || subsec->count() == 0)
+            return 0.0;
+
+        double ss = static_cast<double>(subsec->toInt64());
+        size_t numDigits = subsec->toString().length();
+
+        // ."1" --> "100"
+        // ."12" --> "120"
+        // ."12345" --> "123.45"
+        if (numDigits == 0)
+            return 0.0;
+        else if (numDigits == 1)
+            return ss * 100.0;
+        else if (numDigits == 2)
+            return ss * 10.0;
+        else if (numDigits == 3)
+            return ss;
+        else
+            return ss / static_cast<double>(pow(10, numDigits - 3));
+    }
+
+    // Helper: parse OffsetTime string (e.g. "+02:00", "-05:30") into a UTC offset in seconds
+    bool ExifParser::parseOffsetTime(const Exiv2::ExifData::const_iterator &offset, int &offsetSeconds)
+    {
+        if (offset == exifData.end())
+            return false;
+
+        std::string s = offset->toString();
+        if (s.length() < 5) // Minimum: "+HH:MM" is 6 chars, but some write "+HHMM"
+            return false;
+
+        int sign = 1;
+        if (s[0] == '-')
+            sign = -1;
+        else if (s[0] != '+')
+            return false;
+
+        int hours = 0, minutes = 0;
+        // Try "+HH:MM" format first, then "+HHMM"
+        if (sscanf(s.c_str(), "%*c%d:%d", &hours, &minutes) == 2 ||
+            sscanf(s.c_str(), "%*c%2d%2d", &hours, &minutes) == 2)
+        {
+            offsetSeconds = sign * (hours * 3600 + minutes * 60);
+            return true;
+        }
+
+        return false;
+    }
+
+    // Extracts the best available capture timestamp (milliseconds from Jan 1st 1970 UTC).
+    //
+    // Priority cascade (inspired by OpenSfM):
+    //   0. XMP video epoch (DateUTC / MediaCreateDate) — for video files
+    //   1. GPS DateStamp + TimeStamp — always UTC, highest accuracy
+    //   2. DateTime EXIF + OffsetTime — explicit timezone offset, accurate UTC conversion
+    //   3. DateTime EXIF + geo-timezone lookup — fallback using geolocation
+    //   4. DateTime EXIF naive (assume UTC) — last resort
     double ExifParser::extractCaptureTime()
     {
+        // Priority 0: XMP video timestamps (Mac epoch)
         auto xmpDate = findXmpKey({"Xmp.video.DateUTC", "Xmp.video.MediaCreateDate"});
         if (xmpDate != xmpData.end())
         {
@@ -459,45 +536,103 @@ namespace ddb
             }
         }
 
-        auto time = findExifKey({"Exif.Photo.DateTimeOriginal",
-                                 "Exif.Photo.DateTimeDigitized",
-                                 "Exif.Image.DateTime"});
-        if (time == exifData.end())
-            return 0.0;
-
-        int year, month, day, hour, minute, second;
-
-        if (sscanf(time->toString().c_str(), "%d:%d:%d %d:%d:%d", &year, &month, &day, &hour, &minute, &second) == 6)
+        // Priority 1: GPS DateStamp + TimeStamp (always UTC, most accurate)
         {
-            double msecs = 0.0;
-            auto subsec = findExifKey({"Exif.Photo.SubSecTimeOriginal",
-                                       "Exif.Photo.SubSecTimeDigitized",
-                                       "Exif.Photo.SubSecTime"});
-            if (subsec != exifData.end() && subsec->count() > 0)
-            {
-                double ss = static_cast<double>(subsec->toInt64());
-                size_t numDigits = subsec->toString().length();
+            auto datestamp = findExifKey("Exif.GPSInfo.GPSDateStamp");
+            auto timestamp = findExifKey("Exif.GPSInfo.GPSTimeStamp");
 
-                // ."1" --> "100"
-                // ."12" --> "120"
-                // ."12345" --> "123.45"
-                if (numDigits == 0)
-                    msecs = 0.0;
-                else if (numDigits == 1)
-                    msecs = ss * 100.0;
-                else if (numDigits == 2)
-                    msecs = ss * 10.0;
-                else if (numDigits == 3)
-                    msecs = ss;
+            if (datestamp != exifData.end() && timestamp != exifData.end())
+            {
+                int year, month, day;
+                if (sscanf(datestamp->toString().c_str(), "%d:%d:%d", &year, &month, &day) == 3)
+                {
+                    double hours = evalFrac(timestamp->toRational(0));
+                    double minutes = evalFrac(timestamp->toRational(1));
+                    double seconds = evalFrac(timestamp->toRational(2));
+
+                    int h = static_cast<int>(hours);
+                    int m = static_cast<int>(minutes);
+                    int s = static_cast<int>(seconds);
+                    double msecs = (seconds - s) * 1000.0;
+
+                    cctz::time_zone utc = cctz::utc_time_zone();
+                    double result = Timezone::getUTCEpoch(year, month, day, h, m, s, msecs, utc);
+                    if (result > 0)
+                    {
+                        LOGD << "Using GPS timestamp as capture time (UTC)";
+                        return result;
+                    }
+                }
                 else
-                    msecs = ss / static_cast<double>(pow(10, numDigits - 3));
+                {
+                    LOGD << "Invalid GPS date stamp: " << datestamp->toString();
+                }
+            }
+        }
+
+        // Priority 2 & 3: DateTime EXIF with aligned SubSec and OffsetTime triples
+        // Try each triple in order; within each, prefer OffsetTime (priority 2)
+        // over geo-timezone lookup (priority 3)
+        struct DateTimeTriple {
+            const char *dateTimeKey;
+            const char *subSecKey;
+            const char *offsetKey;
+        };
+
+        const DateTimeTriple triples[] = {
+            {"Exif.Photo.DateTimeOriginal",  "Exif.Photo.SubSecTimeOriginal",  "Exif.Photo.OffsetTimeOriginal"},
+            {"Exif.Photo.DateTimeDigitized", "Exif.Photo.SubSecTimeDigitized", "Exif.Photo.OffsetTimeDigitized"},
+            {"Exif.Image.DateTime",          "Exif.Photo.SubSecTime",          "Exif.Photo.OffsetTime"}
+        };
+
+        // First pass: try triples that have OffsetTime (most accurate after GPS)
+        for (const auto &t : triples)
+        {
+            auto time = findExifKey(t.dateTimeKey);
+            if (time == exifData.end())
+                continue;
+
+            auto offset = findExifKey(t.offsetKey);
+            int offsetSecs = 0;
+            if (!parseOffsetTime(offset, offsetSecs))
+                continue; // No valid offset — skip in this pass
+
+            int year, month, day, hour, minute, second;
+            if (sscanf(time->toString().c_str(), "%d:%d:%d %d:%d:%d", &year, &month, &day, &hour, &minute, &second) != 6)
+                continue;
+
+            double msecs = parseSubSec(findExifKey(t.subSecKey));
+
+            // DateTime is in local time; apply offset to convert to UTC
+            // OffsetTime "+02:00" means local = UTC + 2h, so UTC = local - offset
+            cctz::time_zone utc = cctz::utc_time_zone();
+            double result = Timezone::getUTCEpoch(year, month, day, hour, minute, second, msecs, utc);
+            result -= offsetSecs * 1000.0;
+
+            if (result > 0)
+            {
+                LOGD << "Using DateTime+OffsetTime as capture time";
+                return result;
+            }
+        }
+
+        // Second pass: try triples without OffsetTime, using geo-timezone lookup
+        for (const auto &t : triples)
+        {
+            auto time = findExifKey(t.dateTimeKey);
+            if (time == exifData.end())
+                continue;
+
+            int year, month, day, hour, minute, second;
+            if (sscanf(time->toString().c_str(), "%d:%d:%d %d:%d:%d", &year, &month, &day, &hour, &minute, &second) != 6)
+            {
+                LOGD << "Invalid date/time format: " << time->toString();
+                continue;
             }
 
-            cctz::time_zone tz = cctz::utc_time_zone();
+            double msecs = parseSubSec(findExifKey(t.subSecKey));
 
-            // TODO: use OffsetTimeOriginal | OffsetTimeDigitized | OffsetTime
-            // if they are available
-            // https://github.com/mapillary/OpenSfM/blob/master/opensfm/exif.py#L373
+            cctz::time_zone tz = cctz::utc_time_zone();
 
             // Attempt to use geolocation information to
             // find the proper timezone and adjust the timestamp
@@ -505,15 +640,17 @@ namespace ddb
             if (extractGeo(geo))
             {
                 tz = Timezone::lookupTimezone(geo.latitude, geo.longitude);
+                LOGD << "Using DateTime+GeoTZ as capture time";
+            }
+            else
+            {
+                LOGD << "No geolocation for timezone lookup, assuming UTC";
             }
 
             return Timezone::getUTCEpoch(year, month, day, hour, minute, second, msecs, tz);
         }
-        else
-        {
-            LOGD << "Invalid date/time format: " << time->toString();
-            return 0.0;
-        }
+
+        return 0.0;
     }
 
     int ExifParser::extractImageOrientation()
@@ -599,6 +736,98 @@ namespace ddb
         }
 
         return false;
+    }
+
+    bool ExifParser::extractGpsAccuracy(GpsAccuracy &accuracy)
+    {
+        bool found = false;
+
+        // Priority 1: XMP Camera namespace tags (senseFly/Parrot/MicaSense)
+        auto xyAcc = findXmpKey({"Xmp.Camera.GPSXYAccuracy"});
+        auto zAcc = findXmpKey({"Xmp.Camera.GPSZAccuracy"});
+
+        if (xyAcc != xmpData.end())
+        {
+            accuracy.xyAccuracy = static_cast<double>(xyAcc->toFloat());
+            found = true;
+        }
+        if (zAcc != xmpData.end())
+        {
+            accuracy.zAccuracy = static_cast<double>(zAcc->toFloat());
+            found = true;
+        }
+
+        if (found) return true;
+
+        // Priority 2: DJI RTK XMP tags
+        auto rtkLon = findXmpKey({"Xmp.drone-dji.RtkStdLon"});
+        auto rtkLat = findXmpKey({"Xmp.drone-dji.RtkStdLat"});
+        auto rtkHgt = findXmpKey({"Xmp.drone-dji.RtkStdHgt"});
+
+        if (rtkLon != xmpData.end() && rtkLat != xmpData.end())
+        {
+            double lon = static_cast<double>(rtkLon->toFloat());
+            double lat = static_cast<double>(rtkLat->toFloat());
+            accuracy.xyAccuracy = std::sqrt(lon * lon + lat * lat);
+            found = true;
+        }
+        if (rtkHgt != xmpData.end())
+        {
+            accuracy.zAccuracy = static_cast<double>(rtkHgt->toFloat());
+            found = true;
+        }
+
+        if (found) return true;
+
+        // Priority 3: EXIF standard tags
+        auto hPosError = findExifKey("Exif.GPSInfo.GPSHPositioningError");
+        if (hPosError != exifData.end())
+        {
+            accuracy.xyAccuracy = evalFrac(hPosError->toRational());
+            found = true;
+        }
+
+        auto gpsDop = findExifKey("Exif.GPSInfo.GPSDOP");
+        if (gpsDop != exifData.end())
+        {
+            accuracy.dop = evalFrac(gpsDop->toRational());
+            found = true;
+        }
+
+        return found;
+    }
+
+    bool ExifParser::extractGpsDirection(GpsDirection &direction)
+    {
+        auto imgDir = findExifKey("Exif.GPSInfo.GPSImgDirection");
+        if (imgDir != exifData.end())
+        {
+            direction.imgDirection = evalFrac(imgDir->toRational());
+
+            // Check reference: T = true north (default), M = magnetic north
+            auto imgDirRef = findExifKey("Exif.GPSInfo.GPSImgDirectionRef");
+            direction.imgDirectionRef = "T";
+            if (imgDirRef != exifData.end())
+                direction.imgDirectionRef = imgDirRef->toString();
+
+            direction.hasImgDirection = true;
+        }
+
+        auto track = findExifKey("Exif.GPSInfo.GPSTrack");
+        if (track != exifData.end())
+        {
+            direction.track = evalFrac(track->toRational());
+
+            // Check reference: T = true north (default), M = magnetic north
+            auto trackRef = findExifKey("Exif.GPSInfo.GPSTrackRef");
+            direction.trackRef = "T";
+            if (trackRef != exifData.end())
+                direction.trackRef = trackRef->toString();
+
+            direction.hasTrack = true;
+        }
+
+        return direction.hasData();
     }
 
     bool ExifParser::extractPanoramaInfo(PanoramaInfo &info)

@@ -75,6 +75,24 @@ namespace ddb
         return os;
     }
 
+    struct GpsAccuracy
+    {
+        double xyAccuracy;  // meters, horizontal accuracy (-1 = not available)
+        double zAccuracy;   // meters, vertical accuracy (-1 = not available)
+        double dop;         // dilution of precision (-1 = not available)
+
+        DDB_DLL GpsAccuracy() : xyAccuracy(-1), zAccuracy(-1), dop(-1) {};
+        DDB_DLL GpsAccuracy(double xyAccuracy, double zAccuracy, double dop) : xyAccuracy(xyAccuracy), zAccuracy(zAccuracy), dop(dop) {};
+
+        // Returns true if at least one accuracy value is available
+        DDB_DLL bool hasData() const { return xyAccuracy >= 0 || zAccuracy >= 0 || dop >= 0; }
+    };
+    inline std::ostream &operator<<(std::ostream &os, const GpsAccuracy &a)
+    {
+        os << "XY: " << a.xyAccuracy << "m | Z: " << a.zAccuracy << "m | DOP: " << a.dop;
+        return os;
+    }
+
     struct FlightSpeed
     {
         double x;  // m/s, east-west axis (positive = east)
@@ -93,6 +111,32 @@ namespace ddb
     inline std::ostream &operator<<(std::ostream &os, const FlightSpeed &s)
     {
         os << "X: " << s.x << " | Y: " << s.y << " | Z: " << s.z << " | Horizontal: " << s.horizontal() << " | 3D: " << s.magnitude();
+        return os;
+    }
+
+    struct GpsDirection
+    {
+        double imgDirection;        // degrees (0-360), direction the image is facing
+        std::string imgDirectionRef; // "T" = true north, "M" = magnetic north
+        bool hasImgDirection;
+
+        double track;               // degrees (0-360), direction of GPS movement
+        std::string trackRef;       // "T" = true north, "M" = magnetic north
+        bool hasTrack;
+
+        DDB_DLL GpsDirection() : imgDirection(0), imgDirectionRef("T"), hasImgDirection(false),
+                                  track(0), trackRef("T"), hasTrack(false) {};
+
+        DDB_DLL bool hasData() const { return hasImgDirection || hasTrack; }
+    };
+    inline std::ostream &operator<<(std::ostream &os, const GpsDirection &d)
+    {
+        if (d.hasImgDirection)
+            os << "ImgDirection: " << d.imgDirection << "° (" << d.imgDirectionRef << ")";
+        if (d.hasImgDirection && d.hasTrack)
+            os << " | ";
+        if (d.hasTrack)
+            os << "Track: " << d.track << "° (" << d.trackRef << ")";
         return os;
     }
 
@@ -124,11 +168,16 @@ namespace ddb
         inline double geoToDecimal(const Exiv2::ExifData::const_iterator &geoTag, const Exiv2::ExifData::const_iterator &geoRefTag);
         inline double evalFrac(const Exiv2::Rational &rational);
 
+        double parseSubSec(const Exiv2::ExifData::const_iterator &subsec);
+        bool parseOffsetTime(const Exiv2::ExifData::const_iterator &offset, int &offsetSeconds);
+
         double extractCaptureTime();
         int extractImageOrientation();
 
         bool extractCameraOrientation(CameraOrientation &cameraOri);
         bool extractFlightSpeed(FlightSpeed &speed);
+        bool extractGpsAccuracy(GpsAccuracy &accuracy);
+        bool extractGpsDirection(GpsDirection &direction);
         bool extractPanoramaInfo(PanoramaInfo &info);
 
         void printAllTags();

@@ -164,6 +164,33 @@ namespace ddb
                             entry.properties["flightSpeedZ"] = flightSpeed.z;
                             LOGD << "Flight Speed: " << flightSpeed;
                         }
+
+                        // Extract GPS accuracy
+                        GpsAccuracy gpsAccuracy;
+                        if (e->extractGpsAccuracy(gpsAccuracy))
+                        {
+                            if (gpsAccuracy.xyAccuracy >= 0) entry.properties["gpsXYAccuracy"] = gpsAccuracy.xyAccuracy;
+                            if (gpsAccuracy.zAccuracy >= 0) entry.properties["gpsZAccuracy"] = gpsAccuracy.zAccuracy;
+                            if (gpsAccuracy.dop >= 0) entry.properties["gpsDop"] = gpsAccuracy.dop;
+                            LOGD << "GPS Accuracy: " << gpsAccuracy;
+                        }
+
+                        // Extract GPS direction and track
+                        GpsDirection gpsDirection;
+                        if (e->extractGpsDirection(gpsDirection))
+                        {
+                            if (gpsDirection.hasImgDirection)
+                            {
+                                entry.properties["gpsImgDirection"] = gpsDirection.imgDirection;
+                                entry.properties["gpsImgDirectionRef"] = gpsDirection.imgDirectionRef;
+                            }
+                            if (gpsDirection.hasTrack)
+                            {
+                                entry.properties["gpsTrack"] = gpsDirection.track;
+                                entry.properties["gpsTrackRef"] = gpsDirection.trackRef;
+                            }
+                            LOGD << "GPS Direction: " << gpsDirection;
+                        }
                     }
 
                     // Reuse geo from context if already extracted by fingerprint
