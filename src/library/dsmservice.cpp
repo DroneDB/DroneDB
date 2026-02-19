@@ -51,6 +51,9 @@ float DSMService::getAltitude(double latitude, double longitude)
     {
         if (it.second.bbox.contains(point))
         {
+            // Skip entries whose raster data has not been loaded
+            if (it.second.data.empty()) continue;
+
             float elevation = it.second.getElevation(latitude, longitude);
             if (!it.second.hasNodata || !utils::sameFloat(elevation, it.second.nodata))
             {
@@ -208,7 +211,10 @@ bool DSMService::addGeoTIFFToCache(const fs::path &filePath, double latitude, do
         e.loadData(hDataset);
     }
 
+    // Always cache the entry (at least with bbox) to avoid
+    // repeated GDALOpen calls for files outside query bounds
     cache[filePath.filename().string()] = e;
+
     GDALClose(hDataset);
     // delete srs;
     // delete compare;
