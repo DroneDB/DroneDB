@@ -5,6 +5,7 @@
 #include "database.h"
 #include "metamanager.h"
 
+#include <ctime>
 #include <fstream>
 #include <iomanip>
 #include <sstream>
@@ -387,12 +388,83 @@ END;
             j["spatial"] = {{"bbox", json::array({json::array({0, 0, 0, 0, 0, 0})})}};
         }
 
-        // No reliable temporal information is available
-        // TODO: some assets (geoimages) have temporal information
-        // perhaps there might be use in the future to populate it here
-        // Other ideas include using creation date / modification date, but
-        // these do not reflect the actual time of the assets
-        j["temporal"] = {{"interval", json::array({json::array({j_null, j_null})})}};
+        // Temporal extent: try captureTime from properties, fall back to mtime
+        std::string startDatetime;
+        std::string endDatetime;
+
+        // First try captureTime (milliseconds UTC epoch) from JSON properties
+        {
+            const auto tq = this->query(
+                "SELECT MIN(json_extract(properties, '$.captureTime')), "
+                "MAX(json_extract(properties, '$.captureTime')) "
+                "FROM entries WHERE json_extract(properties, '$.captureTime') > 0");
+            if (tq->fetch())
+            {
+                double minCapture = tq->getDouble(0);
+                double maxCapture = tq->getDouble(1);
+                if (minCapture > 0)
+                {
+                    time_t minSecs = static_cast<time_t>(minCapture / 1000.0);
+                    time_t maxSecs = static_cast<time_t>(maxCapture / 1000.0);
+                    struct tm utcTime;
+                    char buf[32];
+#ifdef _WIN32
+                    gmtime_s(&utcTime, &minSecs);
+#else
+                    gmtime_r(&minSecs, &utcTime);
+#endif
+                    strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &utcTime);
+                    startDatetime = buf;
+#ifdef _WIN32
+                    gmtime_s(&utcTime, &maxSecs);
+#else
+                    gmtime_r(&maxSecs, &utcTime);
+#endif
+                    strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &utcTime);
+                    endDatetime = buf;
+                }
+            }
+        }
+
+        // Fall back to mtime if no captureTime found
+        if (startDatetime.empty())
+        {
+            const auto tq = this->query(
+                "SELECT MIN(mtime), MAX(mtime) FROM entries WHERE mtime > 0");
+            if (tq->fetch())
+            {
+                time_t minMtime = static_cast<time_t>(tq->getInt(0));
+                time_t maxMtime = static_cast<time_t>(tq->getInt(1));
+                if (minMtime > 0)
+                {
+                    struct tm utcTime;
+                    char buf[32];
+#ifdef _WIN32
+                    gmtime_s(&utcTime, &minMtime);
+#else
+                    gmtime_r(&minMtime, &utcTime);
+#endif
+                    strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &utcTime);
+                    startDatetime = buf;
+#ifdef _WIN32
+                    gmtime_s(&utcTime, &maxMtime);
+#else
+                    gmtime_r(&maxMtime, &utcTime);
+#endif
+                    strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &utcTime);
+                    endDatetime = buf;
+                }
+            }
+        }
+
+        if (!startDatetime.empty())
+        {
+            j["temporal"] = {{"interval", json::array({json::array({startDatetime, endDatetime})})}};
+        }
+        else
+        {
+            j["temporal"] = {{"interval", json::array({json::array({j_null, j_null})})}};
+        }
 
         return j;
     }
