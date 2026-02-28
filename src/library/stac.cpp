@@ -6,12 +6,101 @@
 #include "exceptions.h"
 #include "mio.h"
 #include <cpr/cpr.h>
+#include <ctime>
+#include <iomanip>
+#include <sstream>
+#include <algorithm>
+#include <cctype>
 #include "ddb.h"
 #include "thumbs.h"
 #include "../../vendor/base64/base64.h"
 
 namespace ddb
 {
+
+    // Convert epoch milliseconds (double) to ISO 8601 UTC string
+    static std::string epochMsToIso8601(double epochMs)
+    {
+        time_t secs = static_cast<time_t>(epochMs / 1000.0);
+        struct tm utcTime;
+#ifdef _WIN32
+        gmtime_s(&utcTime, &secs);
+#else
+        gmtime_r(&secs, &utcTime);
+#endif
+        char buf[32];
+        strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &utcTime);
+        return std::string(buf);
+    }
+
+    // Convert epoch seconds (time_t) to ISO 8601 UTC string
+    static std::string epochSecsToIso8601(time_t epochSecs)
+    {
+        struct tm utcTime;
+#ifdef _WIN32
+        gmtime_s(&utcTime, &epochSecs);
+#else
+        gmtime_r(&epochSecs, &utcTime);
+#endif
+        char buf[32];
+        strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &utcTime);
+        return std::string(buf);
+    }
+
+    // Slugify a string to conform to STAC best practices: lowercase [a-z0-9_-]
+    static std::string slugify(const std::string &input)
+    {
+        std::string result;
+        result.reserve(input.size());
+        for (char ch : input)
+        {
+            char lower = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+            if (std::isalnum(static_cast<unsigned char>(lower)))
+            {
+                result += lower;
+            }
+            else if (lower == '_')
+            {
+                result += '_';
+            }
+            else
+            {
+                // Replace spaces, dots, and other chars with '-'
+                if (!result.empty() && result.back() != '-')
+                    result += '-';
+            }
+        }
+        // Trim leading/trailing dashes
+        while (!result.empty() && result.front() == '-') result.erase(result.begin());
+        while (!result.empty() && result.back() == '-') result.pop_back();
+        return result;
+    }
+
+    // Try to extract EPSG code from a WKT projection string
+    static int extractEpsgFromWkt(const std::string &wkt)
+    {
+        // Look for AUTHORITY["EPSG","NNNNN"] pattern in the WKT
+        // Use string search instead of regex for MSVC compatibility
+        const std::string marker = "AUTHORITY[\"EPSG\",\"";
+        auto pos = wkt.rfind(marker);
+        if (pos != std::string::npos)
+        {
+            pos += marker.size();
+            auto end = wkt.find('"', pos);
+            if (end != std::string::npos && end > pos)
+            {
+                try
+                {
+                    return std::stoi(wkt.substr(pos, end - pos));
+                }
+                catch (...)
+                {
+                    return 0;
+                }
+            }
+        }
+        return 0;
+    }
 
     json generateStac(const std::string &ddbPath,
                       const std::string &entry,
@@ -51,7 +140,8 @@ namespace ddb
                                 ELSE NULL
                            END AS geom,
                            AsWKT(Extent(GUnion(polygon_geom, ConvexHull(point_geom)))) AS bbox,
-                           type
+                           type,
+                           mtime
                     FROM entries WHERE path = ?
                 )<<<");
             q->bind(1, entry);
@@ -60,7 +150,7 @@ namespace ddb
                 // STAC Item
                 const auto path = q->getText(0);
                 j["type"] = "Feature";
-                j["id"] = path;
+                j["id"] = slugify(path);
 
                 try
                 {
@@ -72,6 +162,69 @@ namespace ddb
                 catch (json::exception &e)
                 {
                     throw AppException(std::string("Invalid entry JSON: ") + e.what());
+                }
+
+                //  STAC requires datetime property
+                {
+                    json j_null;
+                    if (j["properties"].contains("captureTime") &&
+                        j["properties"]["captureTime"].is_number() &&
+                        j["properties"]["captureTime"].get<double>() > 0)
+                    {
+                        j["properties"]["datetime"] = epochMsToIso8601(j["properties"]["captureTime"].get<double>());
+                    }
+                    else
+                    {
+                        // Fallback to mtime (filesystem modification time)
+                        time_t mtime = static_cast<time_t>(q->getInt(5));
+                        if (mtime > 0)
+                        {
+                            j["properties"]["datetime"] = epochSecsToIso8601(mtime);
+                        }
+                        else
+                        {
+                            j["properties"]["datetime"] = j_null;
+                        }
+                    }
+                }
+
+                // Projection STAC extension
+                {
+                    bool hasProjection = j["properties"].contains("geotransform") &&
+                                        j["properties"].contains("projection");
+                    if (hasProjection)
+                    {
+                        json stacExtensions = json::array();
+                        stacExtensions.push_back("https://stac-extensions.github.io/projection/v2.0.0/schema.json");
+                        j["stac_extensions"] = stacExtensions;
+
+                        // proj:transform (from geotransform)
+                        j["properties"]["proj:transform"] = j["properties"]["geotransform"];
+                        j["properties"].erase("geotransform");
+
+                        // proj:shape [height, width] (rows, cols)
+                        if (j["properties"].contains("height") && j["properties"].contains("width"))
+                        {
+                            j["properties"]["proj:shape"] = json::array({
+                                j["properties"]["height"],
+                                j["properties"]["width"]
+                            });
+                            j["properties"].erase("height");
+                            j["properties"].erase("width");
+                        }
+
+                        // proj:wkt2 (from projection)
+                        std::string wkt = j["properties"]["projection"].get<std::string>();
+                        j["properties"]["proj:wkt2"] = wkt;
+                        j["properties"].erase("projection");
+
+                        // Try to extract EPSG code
+                        int epsg = extractEpsgFromWkt(wkt);
+                        if (epsg > 0)
+                        {
+                            j["properties"]["proj:epsg"] = epsg;
+                        }
+                    }
                 }
 
                 const auto bbox = wktBboxCoordinates(q->getText(3));
