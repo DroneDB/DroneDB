@@ -48,10 +48,14 @@ namespace ddb
     }
 
     // Slugify a string to conform to STAC best practices: lowercase [a-z0-9_-]
-    static std::string slugify(const std::string &input)
+    static std::string slugify(const std::string &input, const std::string &prefix = "")
     {
         std::string result;
-        result.reserve(input.size());
+        result.reserve(prefix.size() + input.size());
+        if (!prefix.empty())
+        {
+            result += prefix;
+        }
         for (char ch : input)
         {
             char lower = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
@@ -150,7 +154,7 @@ namespace ddb
                 // STAC Item
                 const auto path = q->getText(0);
                 j["type"] = "Feature";
-                j["id"] = slugify(path);
+                j["id"] = slugify(path, "path-");
 
                 try
                 {
@@ -176,7 +180,7 @@ namespace ddb
                     else
                     {
                         // Fallback to mtime (filesystem modification time)
-                        time_t mtime = static_cast<time_t>(q->getInt(5));
+                        time_t mtime = static_cast<time_t>(q->getInt64(5));
                         if (mtime > 0)
                         {
                             j["properties"]["datetime"] = epochSecsToIso8601(mtime);
