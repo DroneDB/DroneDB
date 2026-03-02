@@ -433,8 +433,8 @@ END;
                 "SELECT MIN(mtime), MAX(mtime) FROM entries WHERE mtime > 0");
             if (tq->fetch())
             {
-                time_t minMtime = static_cast<time_t>(tq->getInt(0));
-                time_t maxMtime = static_cast<time_t>(tq->getInt(1));
+                time_t minMtime = static_cast<time_t>(tq->getInt64(0));
+                time_t maxMtime = static_cast<time_t>(tq->getInt64(1));
                 if (minMtime > 0)
                 {
                     struct tm utcTime;
