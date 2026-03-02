@@ -1,0 +1,282 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+#include "gtest/gtest.h"
+#include "dbops.h"
+#include "stac.h"
+#include "test.h"
+#include "testarea.h"
+
+namespace
+{
+
+    using namespace ddb;
+
+    class StacTest : public ::testing::Test
+    {
+    protected:
+        std::unique_ptr<TestArea> ta;
+        fs::path orthoPath;
+        fs::path imagePath;
+
+        void SetUp() override
+        {
+            ta = std::make_unique<TestArea>(TEST_NAME, true);
+
+            // Download a GeoRaster (has geotransform + projection, no captureTime)
+            orthoPath = ta->downloadTestAsset(
+                "https://github.com/DroneDB/test_data/raw/master/brighton/odm_orthophoto.tif",
+                "ortho.tif");
+
+            // Download a GeoImage (has captureTime from EXIF)
+            imagePath = ta->downloadTestAsset(
+                "https://github.com/DroneDB/test_data/raw/master/images/DJI_0018.JPG",
+                "DJI_0018.JPG");
+        }
+    };
+
+    // Test STAC Item generation for a GeoRaster with projection extension
+    TEST_F(StacTest, itemWithProjection)
+    {
+        ddb::initIndex(ta->getFolder().string());
+        auto db = ddb::open(ta->getFolder().string(), true);
+        ddb::addToIndex(db.get(), {orthoPath.string()});
+
+        auto j = generateStac(ta->getFolder().string(), "ortho.tif");
+
+        // Basic STAC Item structure
+        EXPECT_EQ(j["type"], "Feature");
+        EXPECT_EQ(j["stac_version"], "1.0.0");
+
+        // ID should be prefixed with path-
+        std::string id = j["id"];
+        EXPECT_TRUE(id.rfind("path-", 0) == 0) << "ID should start with 'path-', got: " << id;
+
+        // datetime property must exist (STAC requirement)
+        EXPECT_TRUE(j["properties"].contains("datetime"));
+
+        // GeoRaster should NOT have captureTime, so datetime falls back to mtime
+        // mtime is always > 0 for real files, so datetime should be a non-null ISO string
+        EXPECT_TRUE(j["properties"]["datetime"].is_string());
+        std::string datetime = j["properties"]["datetime"];
+        EXPECT_FALSE(datetime.empty());
+        // Check ISO 8601 format (starts with year, ends with Z)
+        EXPECT_TRUE(datetime.size() >= 20);
+        EXPECT_EQ(datetime.back(), 'Z');
+
+        // Projection extension fields
+        EXPECT_TRUE(j.contains("stac_extensions"));
+        EXPECT_TRUE(j["stac_extensions"].is_array());
+        bool hasProjectionExt = false;
+        for (const auto &ext : j["stac_extensions"])
+        {
+            if (ext.get<std::string>().find("projection") != std::string::npos)
+            {
+                hasProjectionExt = true;
+                break;
+            }
+        }
+        EXPECT_TRUE(hasProjectionExt) << "Should have projection STAC extension";
+
+        // proj:transform should exist (mapped from geotransform)
+        EXPECT_TRUE(j["properties"].contains("proj:transform"));
+        EXPECT_TRUE(j["properties"]["proj:transform"].is_array());
+
+        // proj:wkt2 should exist (mapped from projection)
+        EXPECT_TRUE(j["properties"].contains("proj:wkt2"));
+        EXPECT_TRUE(j["properties"]["proj:wkt2"].is_string());
+
+        // proj:shape should exist (mapped from height/width)
+        EXPECT_TRUE(j["properties"].contains("proj:shape"));
+        EXPECT_TRUE(j["properties"]["proj:shape"].is_array());
+        EXPECT_EQ(j["properties"]["proj:shape"].size(), 2);
+
+        // Original keys should be removed (moved to proj:* fields)
+        EXPECT_FALSE(j["properties"].contains("geotransform"));
+        EXPECT_FALSE(j["properties"].contains("projection"));
+        EXPECT_FALSE(j["properties"].contains("height"));
+        EXPECT_FALSE(j["properties"].contains("width"));
+    }
+
+    // Test STAC Item generation for a GeoImage with captureTime
+    TEST_F(StacTest, itemWithCaptureTime)
+    {
+        ddb::initIndex(ta->getFolder().string());
+        auto db = ddb::open(ta->getFolder().string(), true);
+        ddb::addToIndex(db.get(), {imagePath.string()});
+
+        auto j = generateStac(ta->getFolder().string(), "DJI_0018.JPG");
+
+        // Basic STAC Item structure
+        EXPECT_EQ(j["type"], "Feature");
+        EXPECT_EQ(j["stac_version"], "1.0.0");
+
+        // ID should be prefixed with path-
+        std::string id = j["id"];
+        EXPECT_TRUE(id.rfind("path-", 0) == 0) << "ID should start with 'path-', got: " << id;
+
+        // datetime property must exist from captureTime
+        EXPECT_TRUE(j["properties"].contains("datetime"));
+        EXPECT_TRUE(j["properties"]["datetime"].is_string());
+
+        std::string datetime = j["properties"]["datetime"];
+        EXPECT_FALSE(datetime.empty());
+        // Check ISO 8601 format
+        EXPECT_EQ(datetime.back(), 'Z');
+        EXPECT_TRUE(datetime.find('T') != std::string::npos);
+
+        // GeoImage should NOT have projection extension
+        if (j.contains("stac_extensions"))
+        {
+            for (const auto &ext : j["stac_extensions"])
+            {
+                EXPECT_TRUE(ext.get<std::string>().find("projection") == std::string::npos)
+                    << "GeoImage should not have projection extension";
+            }
+        }
+    }
+
+    // Test STAC Collection with temporal extent from captureTime
+    TEST_F(StacTest, collectionTemporalExtentFromCaptureTime)
+    {
+        ddb::initIndex(ta->getFolder().string());
+        auto db = ddb::open(ta->getFolder().string(), true);
+        ddb::addToIndex(db.get(), {imagePath.string()});
+
+        auto j = generateStac(ta->getFolder().string());
+
+        EXPECT_EQ(j["type"], "Collection");
+        EXPECT_EQ(j["stac_version"], "1.0.0");
+
+        // Temporal extent should be populated from captureTime
+        EXPECT_TRUE(j.contains("extent"));
+        EXPECT_TRUE(j["extent"].contains("temporal"));
+        EXPECT_TRUE(j["extent"]["temporal"].contains("interval"));
+        EXPECT_TRUE(j["extent"]["temporal"]["interval"].is_array());
+        EXPECT_GE(j["extent"]["temporal"]["interval"].size(), 1);
+
+        auto interval = j["extent"]["temporal"]["interval"][0];
+        EXPECT_TRUE(interval.is_array());
+        EXPECT_EQ(interval.size(), 2);
+
+        // Both start and end should be non-null ISO 8601 strings
+        EXPECT_TRUE(interval[0].is_string());
+        EXPECT_TRUE(interval[1].is_string());
+
+        std::string start = interval[0];
+        std::string end = interval[1];
+        EXPECT_FALSE(start.empty());
+        EXPECT_FALSE(end.empty());
+        EXPECT_EQ(start.back(), 'Z');
+        EXPECT_EQ(end.back(), 'Z');
+    }
+
+    // Test STAC Collection with temporal extent fallback to mtime
+    TEST_F(StacTest, collectionTemporalExtentFromMtime)
+    {
+        ddb::initIndex(ta->getFolder().string());
+        auto db = ddb::open(ta->getFolder().string(), true);
+
+        // Add only the ortho (GeoRaster has no captureTime), so falls back to mtime
+        ddb::addToIndex(db.get(), {orthoPath.string()});
+
+        auto j = generateStac(ta->getFolder().string());
+
+        EXPECT_EQ(j["type"], "Collection");
+
+        // Temporal extent should still be populated (from mtime)
+        EXPECT_TRUE(j.contains("extent"));
+        EXPECT_TRUE(j["extent"].contains("temporal"));
+        EXPECT_TRUE(j["extent"]["temporal"].contains("interval"));
+
+        auto interval = j["extent"]["temporal"]["interval"][0];
+
+        // mtime for a real file should give non-null values
+        EXPECT_TRUE(interval[0].is_string());
+        EXPECT_TRUE(interval[1].is_string());
+    }
+
+    // Test STAC Collection spatial extent
+    TEST_F(StacTest, collectionSpatialExtent)
+    {
+        ddb::initIndex(ta->getFolder().string());
+        auto db = ddb::open(ta->getFolder().string(), true);
+        ddb::addToIndex(db.get(), {orthoPath.string()});
+
+        auto j = generateStac(ta->getFolder().string());
+
+        EXPECT_TRUE(j.contains("extent"));
+        EXPECT_TRUE(j["extent"].contains("spatial"));
+        EXPECT_TRUE(j["extent"]["spatial"].contains("bbox"));
+        EXPECT_TRUE(j["extent"]["spatial"]["bbox"].is_array());
+        EXPECT_GE(j["extent"]["spatial"]["bbox"].size(), 1);
+    }
+
+    // Test that STAC Item IDs with path- prefix are unique for different paths
+    TEST_F(StacTest, itemIdUniqueness)
+    {
+        ddb::initIndex(ta->getFolder().string());
+        auto db = ddb::open(ta->getFolder().string(), true);
+        ddb::addToIndex(db.get(), {orthoPath.string(), imagePath.string()});
+
+        auto j1 = generateStac(ta->getFolder().string(), "ortho.tif");
+        auto j2 = generateStac(ta->getFolder().string(), "DJI_0018.JPG");
+
+        std::string id1 = j1["id"];
+        std::string id2 = j2["id"];
+
+        // IDs should be different for different entries
+        EXPECT_NE(id1, id2);
+
+        // Both should have path- prefix
+        EXPECT_TRUE(id1.rfind("path-", 0) == 0);
+        EXPECT_TRUE(id2.rfind("path-", 0) == 0);
+    }
+
+    // Test STAC Item links structure
+    TEST_F(StacTest, itemLinksStructure)
+    {
+        ddb::initIndex(ta->getFolder().string());
+        auto db = ddb::open(ta->getFolder().string(), true);
+        ddb::addToIndex(db.get(), {orthoPath.string()});
+
+        auto j = generateStac(ta->getFolder().string(), "ortho.tif");
+
+        // Should have links array
+        EXPECT_TRUE(j.contains("links"));
+        EXPECT_TRUE(j["links"].is_array());
+
+        // Should have assets
+        EXPECT_TRUE(j.contains("assets"));
+        EXPECT_TRUE(j["assets"].is_object());
+
+        // Should have geometry
+        EXPECT_TRUE(j.contains("geometry"));
+    }
+
+    // Test STAC Collection links contain items
+    TEST_F(StacTest, collectionLinksContainItems)
+    {
+        ddb::initIndex(ta->getFolder().string());
+        auto db = ddb::open(ta->getFolder().string(), true);
+        ddb::addToIndex(db.get(), {orthoPath.string(), imagePath.string()});
+
+        auto j = generateStac(ta->getFolder().string());
+
+        EXPECT_TRUE(j.contains("links"));
+        EXPECT_TRUE(j["links"].is_array());
+
+        // Should have item links for each indexed entry with geometry
+        int itemLinks = 0;
+        for (const auto &link : j["links"])
+        {
+            if (link.contains("rel") && link["rel"] == "item")
+            {
+                itemLinks++;
+            }
+        }
+        EXPECT_GE(itemLinks, 1) << "Collection should have at least one item link";
+    }
+
+} // namespace
