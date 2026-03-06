@@ -1,7 +1,7 @@
 add_subdirectory("segvcatch")
 add_subdirectory("url")
 add_subdirectory("base64")
-add_subdirectory("libnexus")
+add_subdirectory("nexus")
 
 file(GLOB UNTWINE_SRCS
     ${CMAKE_CURRENT_SOURCE_DIR}/untwine/epf/*.cpp

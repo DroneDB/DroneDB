@@ -14,7 +14,7 @@ endif()
 # Define export macro for cross-platform symbol exports in shared library
 target_compile_definitions(${PROJECT_NAME} PRIVATE MODERN_CPP_LIB_EXPORTS)
 
-add_dependencies(${PROJECT_NAME} nxs)
+add_dependencies(${PROJECT_NAME} nexus)
 
 # Find and link dependencies from vcpkg
 find_package(Threads REQUIRED)
@@ -57,7 +57,7 @@ set(COMMON_LIBS
     OpenSSL::Crypto
     unofficial::sqlite3::sqlite3
     spatialite::spatialite
-    nxs
+    nexus
     assimp::assimp
     KTX::ktx
     tinyobjloader::tinyobjloader
@@ -107,7 +107,7 @@ set (CUSTOM_INCLUDE_DIRS
         ${BOOLINQ_INCLUDE_DIRS}/pdal
         ${CMAKE_SOURCE_DIR}/vendor/untwine
         ${CMAKE_SOURCE_DIR}/vendor/untwine/${UNTWINE_OS_DIR}
-        ${CMAKE_SOURCE_DIR}/vendor/libnexus
+        ${CMAKE_SOURCE_DIR}/vendor/nexus/src
         )
 
 # Propagate the variable to the parent scope
@@ -159,30 +159,11 @@ else()
     endif()
 endif()
 
-if (WIN32)
-    set(LIBNEXUS_OUTPUT_DIR "${CMAKE_BINARY_DIR}/vendor/libnexus/$<CONFIG>")
-else()
-    set(LIBNEXUS_OUTPUT_DIR "${CMAKE_BINARY_DIR}/vendor/libnexus")
-endif()
-
 # Copy the necessary files to the binary directory after build
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E echo "Copying necessary files to the binary directory..."
-    # TARGET_FILE_DIR resolves to the appropriate output directory:
-    # - config-specific directory for multi-config generators (e.g. VS)
-    # - single output directory for single-config generators (e.g. Ninja)
-    # The copy_directory command is executed for all generator types.
     COMMAND ${CMAKE_COMMAND} -E copy_directory "$<TARGET_FILE_DIR:${PROJECT_NAME}>" "${OUTPUT_DIR}"
-    # Copy libnexus dll from its output directory
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE_DIR:nxs>/$<TARGET_FILE_NAME:nxs>" "${OUTPUT_DIR}/"
 )
-
-# Copy Qt plugins (imageformats, platforms, etc.) for libnexus - required for WebP support on Windows
-if(WIN32)
-    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory "$<TARGET_FILE_DIR:nxs>/plugins" "${OUTPUT_DIR}/plugins"
-    )
-endif()
 
 # Copy PROJ data if available
 if(PROJ_DATA_DIR AND EXISTS "${PROJ_DATA_DIR}/proj.db")
@@ -217,7 +198,7 @@ if (WIN32)
     )
 
     # Copy ALL DLLs from vcpkg bin directories to ensure transitive dependencies are included
-    # TARGET_RUNTIME_DLLS only copies direct dependencies, not transitive ones like Qt5's harfbuzz, pcre2, etc.
+    # TARGET_RUNTIME_DLLS only copies direct dependencies, not transitive ones
     set(VCPKG_BIN_DIR "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/bin")
     set(VCPKG_DEBUG_BIN_DIR "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/debug/bin")
 
