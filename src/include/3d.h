@@ -7,7 +7,7 @@
 #include <string>
 #include "ddb_export.h"
 #ifndef NO_NEXUS
-#include <nxs.h>
+#include "common/nxs.h"
 #endif
 #include <vector>
 

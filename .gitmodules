@@ -1,15 +1,16 @@
 [submodule "untwine"]
 	path = vendor/untwine
 	url = https://github.com/DroneDB/untwine.git
-[submodule "zonedetect"]
-	path = vendor/zonedetect
-	url = https://github.com/BertoldVdb/ZoneDetect.git
-[submodule "libnexus"]
-	path = vendor/libnexus
-	url = https://github.com/DroneDB/libnexus.git
 [submodule "vendor/zonedetect"]
 	path = vendor/zonedetect
 	url = https://github.com/BertoldVdb/ZoneDetect.git
 [submodule "vcpkg"]
 	path = vcpkg
 	url = https://github.com/microsoft/vcpkg.git
+[submodule "vendor/nexus"]
+	path = vendor/nexus
+	url = https://github.com/DroneDB/nexus.git
+	branch = sync-upstream
+[submodule "vendor/vcglib"]
+	path = vendor/vcglib
+	url = https://github.com/cnr-isti-vclab/vcglib.git

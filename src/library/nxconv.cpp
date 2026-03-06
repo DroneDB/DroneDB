@@ -22,12 +22,8 @@
 // libktx + stb_image_write for KTX2->PNG conversion
 #include <ktx.h>
 
-#ifndef NXCONV_STB_IMAGE_WRITE_IMPLEMENTATION
-#define NXCONV_STB_IMAGE_WRITE_IMPLEMENTATION
-#endif
-#ifdef NXCONV_STB_IMAGE_WRITE_IMPLEMENTATION
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#endif
+// stb_image_write implementation is provided by nexus (image.cpp)
+// Only include the header declarations here
 #include "stb_image_write.h"
 
 namespace fs = std::filesystem;
@@ -82,6 +78,9 @@ static void extractEmbeddedTextures(const aiScene* scene,
             std::string formatHint = tex->achFormatHint;
             if (formatHint.empty())
                 formatHint = "png";
+            // Assimp's achFormatHint may return "web" for WebP textures
+            if (formatHint == "web")
+                formatHint = "webp";
             filename = "texture_" + std::to_string(i) + "." + formatHint;
         } else {
             // Uncompressed ARGB texture, save as PNG
