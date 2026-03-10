@@ -1285,6 +1285,22 @@ static std::mutex g_dbOpenMutex;
                 deleteEntry(db, dest);
 
             replacePath(db, source, dest);
+
+            // If the file extension changed, re-detect the entry type
+            const auto sourceExt = fs::path(source).extension();
+            const auto destExt = fs::path(dest).extension();
+
+            if (sourceExt != destExt)
+            {
+                const auto newType = fingerprint(directory / dest);
+                if (newType != sourceEntry.type)
+                {
+                    auto typeUpdate = db->query("UPDATE entries SET type = ? WHERE path = ?");
+                    typeUpdate->bind(1, static_cast<int>(newType));
+                    typeUpdate->bind(2, dest);
+                    typeUpdate->execute();
+                }
+            }
         }
         else
         {
