@@ -177,18 +177,29 @@ void generateImageThumb(const fs::path& imagePath,
         targs = CSLAddString(targs, paletteHasAlpha ? "rgba" : "rgb");
         LOGD << "Expanding palette image to " << (paletteHasAlpha ? "RGBA" : "RGB");
     } else if (bandCount == 1) {
-        // Single band grayscale image: expand to RGB
-        targs = CSLAddString(targs, "-expand");
-        targs = CSLAddString(targs, "rgb");
-        // Auto-scale values to 0-255 range for grayscale
+        // Single band grayscale image (e.g. DSM/DEM): replicate band to RGB
+        // Note: -expand requires a color table, so we use -b to replicate the band
+        targs = CSLAddString(targs, "-b");
+        targs = CSLAddString(targs, "1");
+        targs = CSLAddString(targs, "-b");
+        targs = CSLAddString(targs, "1");
+        targs = CSLAddString(targs, "-b");
+        targs = CSLAddString(targs, "1");
+        // Auto-scale values to 0-255 range
         targs = CSLAddString(targs, "-scale");
-        LOGD << "Expanding grayscale image to RGB";
+        LOGD << "Replicating single band to RGB";
     } else if (bandCount == 2) {
-        // Grayscale + Alpha: expand to RGBA
-        targs = CSLAddString(targs, "-expand");
-        targs = CSLAddString(targs, "rgba");
+        // Grayscale + Alpha: replicate band 1 to RGB, keep band 2 as alpha
+        targs = CSLAddString(targs, "-b");
+        targs = CSLAddString(targs, "1");
+        targs = CSLAddString(targs, "-b");
+        targs = CSLAddString(targs, "1");
+        targs = CSLAddString(targs, "-b");
+        targs = CSLAddString(targs, "1");
+        targs = CSLAddString(targs, "-b");
+        targs = CSLAddString(targs, "2");
         targs = CSLAddString(targs, "-scale");
-        LOGD << "Expanding grayscale+alpha image to RGBA";
+        LOGD << "Replicating grayscale to RGB + alpha band";
     } else if (bandCount >= 3) {
         // RGB or more bands: scale and select bands
         targs = CSLAddString(targs, "-scale");
