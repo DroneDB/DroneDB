@@ -49,13 +49,9 @@
         "tiff"
       ]
     },
-    {
-      "name": "qt5",
-      "default-features": false,
-      "features": [
-        "imageformats"
-      ]
-    },
+    "libpng",
+    "libjpeg-turbo",
+    "bshoshany-thread-pool",
     "sqlite3",
     "zlib",
     "assimp",
