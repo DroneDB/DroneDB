@@ -313,6 +313,37 @@ TEST(thumbnail, paletteImage) {
     DDBVSIFree(buffer);
 }
 
+// Test for single-band GeoTIFF (DEM/DSM) - these have no color table
+// and require band replication instead of -expand to produce RGB WebP output.
+TEST(thumbnail, singleBandDem) {
+    TestArea ta(TEST_NAME);
+    fs::path dem = ta.downloadTestAsset(
+        "https://github.com/DroneDB/test_data/raw/refs/heads/master/dem/test_dem.tiff",
+        "test_dem.tiff");
+
+    // Generate WebP thumbnail to file
+    fs::path outFile = ta.getPath("dem-thumb.webp");
+    ddb::generateThumb(dem, 256, outFile, true);
+
+    // Verify thumbnail exists and is valid
+    EXPECT_TRUE(fs::exists(outFile)) << "DEM thumbnail file should exist";
+    EXPECT_TRUE(isWebPImageNonEmpty(outFile)) << "DEM thumbnail should not be empty";
+
+    // Test in-memory generation
+    uint8_t* buffer;
+    int bufSize;
+    ddb::generateThumb(dem, 256, "", true, &buffer, &bufSize);
+
+    EXPECT_TRUE(bufSize > 0) << "In-memory DEM thumbnail should have content";
+    EXPECT_NE(buffer, nullptr) << "In-memory buffer should not be null";
+
+    // Verify the in-memory result matches the file
+    EXPECT_EQ(io::Path(outFile).getSize(), bufSize)
+        << "File and memory thumbnail sizes should match";
+
+    DDBVSIFree(buffer);
+}
+
 // =============================================================================
 // Edge Cases Tests
 // =============================================================================
