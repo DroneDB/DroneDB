@@ -346,7 +346,7 @@ namespace ddb
                 }
 
                 j["assets"] = json::object();
-                j["assets"][path] = {{"href", stacCollectionRoot + downloadEndpoint + "/" + std::string(cpr::util::urlEncode(path))},
+                j["assets"][path] = {{"href", stacCollectionRoot + downloadEndpoint + "?path=" + std::string(cpr::util::urlEncode(path))},
                                      {"title", path},
                                      {"type", getStacMimeType(path)},
                                      {"roles", json::array({"data"})}};
