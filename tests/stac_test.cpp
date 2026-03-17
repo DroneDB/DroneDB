@@ -358,6 +358,8 @@ namespace
 
             auto &asset = j["assets"]["DJI_0018.JPG"];
             ASSERT_TRUE(asset.contains("roles"));
+            ASSERT_TRUE(asset["roles"].is_array());
+            ASSERT_GE(asset["roles"].size(), 1);
             EXPECT_EQ(asset["roles"][0], "data");
 
             ASSERT_TRUE(asset.contains("type"));
@@ -379,6 +381,8 @@ namespace
         auto &thumb = j["assets"]["thumbnail"];
 
         ASSERT_TRUE(thumb.contains("roles"));
+        ASSERT_TRUE(thumb["roles"].is_array());
+        ASSERT_GE(thumb["roles"].size(), 1);
         EXPECT_EQ(thumb["roles"][0], "thumbnail");
 
         ASSERT_TRUE(thumb.contains("type"));
@@ -405,6 +409,7 @@ namespace
         ASSERT_TRUE(j["assets"].contains("ortho with spaces.tif"));
 
         auto &asset = j["assets"]["ortho with spaces.tif"];
+        ASSERT_TRUE(asset.contains("href"));
         std::string href = asset["href"];
 
         // href must not contain raw spaces
@@ -418,7 +423,9 @@ namespace
         // Thumbnail href should also be encoded (already was, but verify)
         if (j["assets"].contains("thumbnail"))
         {
-            std::string thumbHref = j["assets"]["thumbnail"]["href"];
+            auto &thumbAsset = j["assets"]["thumbnail"];
+            ASSERT_TRUE(thumbAsset.contains("href"));
+            std::string thumbHref = thumbAsset["href"];
             EXPECT_EQ(thumbHref.find(' '), std::string::npos)
                 << "Thumbnail href should not contain raw spaces: " << thumbHref;
         }
