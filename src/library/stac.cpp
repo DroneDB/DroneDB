@@ -80,6 +80,86 @@ namespace ddb
         return result;
     }
 
+    // Get MIME type from file extension for STAC assets
+    static std::string getStacMimeType(const std::string &path)
+    {
+        auto ext = fs::path(path).extension().string();
+        std::transform(ext.begin(), ext.end(), ext.begin(),
+                       [](unsigned char c) { return std::tolower(c); });
+
+        // Images
+        if (ext == ".jpg" || ext == ".jpeg") return "image/jpeg";
+        if (ext == ".tif" || ext == ".tiff") return "image/tiff";
+        if (ext == ".png") return "image/png";
+        if (ext == ".webp") return "image/webp";
+        if (ext == ".gif") return "image/gif";
+        if (ext == ".bmp") return "image/bmp";
+        if (ext == ".svg") return "image/svg+xml";
+        if (ext == ".dng") return "image/tiff";
+        if (ext == ".ico") return "image/x-icon";
+
+        // Point clouds
+        if (ext == ".laz") return "application/vnd.laszip+copc";
+        if (ext == ".las") return "application/vnd.las";
+        if (ext == ".e57") return "application/x-e57";
+        if (ext == ".xyz") return "text/plain";
+        if (ext == ".ply") return "application/x-ply";
+        if (ext == ".pcd") return "application/x-pcd";
+
+        // Video
+        if (ext == ".mp4") return "video/mp4";
+        if (ext == ".mov") return "video/quicktime";
+        if (ext == ".avi") return "video/x-msvideo";
+        if (ext == ".mkv") return "video/x-matroska";
+        if (ext == ".webm") return "video/webm";
+        if (ext == ".wmv") return "video/x-ms-wmv";
+        if (ext == ".flv") return "video/x-flv";
+
+        // 3D models
+        if (ext == ".obj") return "model/obj";
+        if (ext == ".gltf") return "model/gltf+json";
+        if (ext == ".glb") return "model/gltf-binary";
+        if (ext == ".stl") return "model/stl";
+        if (ext == ".dae") return "model/vnd.collada+xml";
+        if (ext == ".3ds") return "application/x-3ds";
+        if (ext == ".fbx") return "application/x-fbx";
+        if (ext == ".nxs" || ext == ".nxz") return "application/octet-stream";
+        if (ext == ".mtl") return "model/mtl";
+
+        // Vector / GIS
+        if (ext == ".geojson") return "application/geo+json";
+        if (ext == ".gpkg") return "application/geopackage+sqlite3";
+        if (ext == ".fgb" || ext == ".flatgeobuf") return "application/flatgeobuf";
+        if (ext == ".kml") return "application/vnd.google-earth.kml+xml";
+        if (ext == ".kmz") return "application/vnd.google-earth.kmz";
+        if (ext == ".shp" || ext == ".shz") return "application/x-shapefile";
+        if (ext == ".shx" || ext == ".dbf" || ext == ".prj") return "application/x-shapefile";
+        if (ext == ".dxf") return "application/dxf";
+        if (ext == ".dwg") return "application/x-dwg";
+        if (ext == ".topojson") return "application/json";
+        if (ext == ".gpx") return "application/gpx+xml";
+        if (ext == ".gml") return "application/gml+xml";
+        if (ext == ".wkt") return "text/plain";
+
+        // Documents / text
+        if (ext == ".md") return "text/markdown";
+        if (ext == ".pdf") return "application/pdf";
+        if (ext == ".txt") return "text/plain";
+        if (ext == ".csv") return "text/csv";
+        if (ext == ".json") return "application/json";
+        if (ext == ".xml") return "application/xml";
+        if (ext == ".html" || ext == ".htm") return "text/html";
+        if (ext == ".yaml" || ext == ".yml") return "text/yaml";
+
+        // Archives
+        if (ext == ".zip") return "application/zip";
+        if (ext == ".gz" || ext == ".gzip") return "application/gzip";
+        if (ext == ".tar") return "application/x-tar";
+        if (ext == ".7z") return "application/x-7z-compressed";
+
+        return "application/octet-stream";
+    }
+
     // Try to extract EPSG code from a WKT projection string
     static int extractEpsgFromWkt(const std::string &wkt)
     {
@@ -234,7 +314,7 @@ namespace ddb
                 const auto bbox = wktBboxCoordinates(q->getText(3));
                 if (bbox.size() > 0)
                 {
-                    j["bbox"] = json::array({bbox});
+                    j["bbox"] = bbox;
                 }
 
                 json links = json::array();
@@ -266,8 +346,10 @@ namespace ddb
                 }
 
                 j["assets"] = json::object();
-                j["assets"][path] = {{"href", stacCollectionRoot + downloadEndpoint + "/" + path},
-                                     {"title", path}};
+                j["assets"][path] = {{"href", stacCollectionRoot + downloadEndpoint + "?path=" + std::string(cpr::util::urlEncode(path))},
+                                     {"title", path},
+                                     {"type", getStacMimeType(path)},
+                                     {"roles", json::array({"data"})}};
 
                 EntryType t = static_cast<EntryType>(q->getInt(4));
                 if (supportsThumbnails(t) || t == PointCloud)

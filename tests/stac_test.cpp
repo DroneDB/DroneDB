@@ -279,4 +279,156 @@ namespace
         EXPECT_GE(itemLinks, 1) << "Collection should have at least one item link";
     }
 
+    // #440: STAC Item bbox must be a flat array [minX, minY, maxX, maxY], not [[...]]
+    TEST_F(StacTest, itemBboxIsFlatArray)
+    {
+        ddb::initIndex(ta->getFolder().string());
+        auto db = ddb::open(ta->getFolder().string(), true);
+        ddb::addToIndex(db.get(), {orthoPath.string()});
+
+        auto j = generateStac(ta->getFolder().string(), "ortho.tif");
+
+        ASSERT_TRUE(j.contains("bbox"));
+        ASSERT_TRUE(j["bbox"].is_array());
+        EXPECT_EQ(j["bbox"].size(), 4) << "Item bbox must have exactly 4 elements";
+
+        // Each element must be a number, not an array
+        for (size_t i = 0; i < j["bbox"].size(); i++)
+        {
+            EXPECT_TRUE(j["bbox"][i].is_number())
+                << "bbox[" << i << "] should be a number, not an array";
+        }
+    }
+
+    // Regression: Collection spatial.bbox must remain an array of arrays [[minX, minY, maxX, maxY]]
+    TEST_F(StacTest, collectionBboxIsArrayOfArrays)
+    {
+        ddb::initIndex(ta->getFolder().string());
+        auto db = ddb::open(ta->getFolder().string(), true);
+        ddb::addToIndex(db.get(), {orthoPath.string()});
+
+        auto j = generateStac(ta->getFolder().string());
+
+        ASSERT_TRUE(j.contains("extent"));
+        ASSERT_TRUE(j["extent"].contains("spatial"));
+        ASSERT_TRUE(j["extent"]["spatial"].contains("bbox"));
+        ASSERT_TRUE(j["extent"]["spatial"]["bbox"].is_array());
+        ASSERT_GE(j["extent"]["spatial"]["bbox"].size(), 1);
+
+        // First element must be an array (of coordinates)
+        auto &firstBbox = j["extent"]["spatial"]["bbox"][0];
+        ASSERT_TRUE(firstBbox.is_array()) << "Collection spatial.bbox[0] must be an array";
+        EXPECT_GE(firstBbox.size(), 4) << "Collection spatial.bbox[0] must have at least 4 elements";
+
+        for (size_t i = 0; i < firstBbox.size(); i++)
+        {
+            EXPECT_TRUE(firstBbox[i].is_number())
+                << "Collection spatial.bbox[0][" << i << "] should be a number";
+        }
+    }
+
+    // #441: STAC Item main asset must have roles:["data"] and a valid type (MIME)
+    TEST_F(StacTest, itemAssetHasRolesAndType)
+    {
+        ddb::initIndex(ta->getFolder().string());
+        auto db = ddb::open(ta->getFolder().string(), true);
+        ddb::addToIndex(db.get(), {orthoPath.string(), imagePath.string()});
+
+        // Check ortho (GeoRaster → image/tiff)
+        {
+            auto j = generateStac(ta->getFolder().string(), "ortho.tif");
+            ASSERT_TRUE(j.contains("assets"));
+            ASSERT_TRUE(j["assets"].contains("ortho.tif"));
+
+            auto &asset = j["assets"]["ortho.tif"];
+            ASSERT_TRUE(asset.contains("roles"));
+            ASSERT_TRUE(asset["roles"].is_array());
+            EXPECT_EQ(asset["roles"].size(), 1);
+            EXPECT_EQ(asset["roles"][0], "data");
+
+            ASSERT_TRUE(asset.contains("type"));
+            EXPECT_EQ(asset["type"], "image/tiff");
+        }
+
+        // Check image (GeoImage → image/jpeg)
+        {
+            auto j = generateStac(ta->getFolder().string(), "DJI_0018.JPG");
+            ASSERT_TRUE(j.contains("assets"));
+            ASSERT_TRUE(j["assets"].contains("DJI_0018.JPG"));
+
+            auto &asset = j["assets"]["DJI_0018.JPG"];
+            ASSERT_TRUE(asset.contains("roles"));
+            ASSERT_TRUE(asset["roles"].is_array());
+            ASSERT_GE(asset["roles"].size(), 1);
+            EXPECT_EQ(asset["roles"][0], "data");
+
+            ASSERT_TRUE(asset.contains("type"));
+            EXPECT_EQ(asset["type"], "image/jpeg");
+        }
+    }
+
+    // #441: STAC Item thumbnail asset must have roles:["thumbnail"] and type
+    TEST_F(StacTest, itemThumbnailHasRolesAndType)
+    {
+        ddb::initIndex(ta->getFolder().string());
+        auto db = ddb::open(ta->getFolder().string(), true);
+        ddb::addToIndex(db.get(), {orthoPath.string()});
+
+        auto j = generateStac(ta->getFolder().string(), "ortho.tif",
+                               "https://example.com/orgs/test/ds/test");
+
+        ASSERT_TRUE(j["assets"].contains("thumbnail"));
+        auto &thumb = j["assets"]["thumbnail"];
+
+        ASSERT_TRUE(thumb.contains("roles"));
+        ASSERT_TRUE(thumb["roles"].is_array());
+        ASSERT_GE(thumb["roles"].size(), 1);
+        EXPECT_EQ(thumb["roles"][0], "thumbnail");
+
+        ASSERT_TRUE(thumb.contains("type"));
+        EXPECT_EQ(thumb["type"], "image/jpeg");
+
+        ASSERT_TRUE(thumb.contains("href"));
+    }
+
+    // #442: STAC Item asset href must be URL-encoded
+    TEST_F(StacTest, itemAssetHrefIsUrlEncoded)
+    {
+        ddb::initIndex(ta->getFolder().string());
+        auto db = ddb::open(ta->getFolder().string(), true);
+
+        // Copy ortho to a path with spaces
+        fs::path spacePath = ta->getFolder() / "ortho with spaces.tif";
+        fs::copy_file(orthoPath, spacePath);
+        ddb::addToIndex(db.get(), {spacePath.string()});
+
+        auto j = generateStac(ta->getFolder().string(), "ortho with spaces.tif",
+                               "https://example.com/orgs/test/ds/test");
+
+        ASSERT_TRUE(j.contains("assets"));
+        ASSERT_TRUE(j["assets"].contains("ortho with spaces.tif"));
+
+        auto &asset = j["assets"]["ortho with spaces.tif"];
+        ASSERT_TRUE(asset.contains("href"));
+        std::string href = asset["href"];
+
+        // href must not contain raw spaces
+        EXPECT_EQ(href.find(' '), std::string::npos)
+            << "Asset href should not contain raw spaces: " << href;
+
+        // href should contain URL-encoded spaces
+        EXPECT_NE(href.find("%20"), std::string::npos)
+            << "Asset href should contain %20 for spaces: " << href;
+
+        // Thumbnail href should also be encoded (already was, but verify)
+        if (j["assets"].contains("thumbnail"))
+        {
+            auto &thumbAsset = j["assets"]["thumbnail"];
+            ASSERT_TRUE(thumbAsset.contains("href"));
+            std::string thumbHref = thumbAsset["href"];
+            EXPECT_EQ(thumbHref.find(' '), std::string::npos)
+                << "Thumbnail href should not contain raw spaces: " << thumbHref;
+        }
+    }
+
 } // namespace
