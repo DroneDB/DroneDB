@@ -32,6 +32,7 @@
 namespace ddb {
 
 // Forward declarations for stale lock detection helpers (defined later in this file)
+static long readPidFromLockFile(const std::string& lockFilePath);
 static bool isLockFileStale(const std::string& lockFilePath);
 
 bool isBuildableInternal(const Entry& e, std::string& subfolder) {
@@ -152,8 +153,10 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
                         LOGW << "Failed to remove stale lock file: " << err.what();
                     }
                 } else {
-                    LOGD << "Force build: lock held by active process, cannot override: " << lockFile;
-                    throw BuildInProgressException("Build in progress by an active process");
+                    long activePid = readPidFromLockFile(lockFile);
+                    std::string pidInfo = activePid > 0 ? " (PID: " + std::to_string(activePid) + ")" : "";
+                    LOGD << "Force build: lock held by active process" << pidInfo << ", cannot override: " << lockFile;
+                    throw BuildInProgressException("Build in progress by another process" + pidInfo);
                 }
             }
         }

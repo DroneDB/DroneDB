@@ -11,6 +11,7 @@
 
 #include <thread>
 #include <chrono>
+#include <fstream>
 #include <future>
 #include <vector>
 #include <string>
@@ -398,11 +399,11 @@ TEST_F(BuildLockTest, IsBuildActiveDetection) {
 TEST_F(BuildLockTest, WaitMode_OrphanedLockFileOnDisk) {
     auto outputPath = testArea->getPath("stale_lock_test");
 
-    // Simulate an orphaned lock: create .building file with no process holding it
+    // Simulate an orphaned lock: create .building file with a dead PID (no process holding it)
     std::string lockFile = outputPath.string() + ".building";
     {
         std::ofstream f(lockFile);
-        f << "ORPHANED_LOCK_SENTINEL\n";
+        f << "PID: 99\nProcess: Simulated stale\n";
     }
     ASSERT_TRUE(fs::exists(lockFile));
 
@@ -430,11 +431,11 @@ TEST_F(BuildLockTest, WaitMode_OrphanedLockFileOnDisk) {
 TEST_F(BuildLockTest, NoWaitMode_FailsOnOrphanedLockFile) {
     auto outputPath = testArea->getPath("orphan_lock_test");
 
-    // Create an orphaned lock file (no process holds a handle)
+    // Create an orphaned lock file with dead PID (no process holds a handle)
     std::string lockFile = outputPath.string() + ".building";
     {
         std::ofstream f(lockFile);
-        f << "ORPHANED_LOCK_SENTINEL\n";
+        f << "PID: 99\n";
     }
     ASSERT_TRUE(fs::exists(lockFile));
 
@@ -458,11 +459,11 @@ TEST_F(BuildLockTest, NoWaitMode_FailsOnOrphanedLockFile) {
 TEST_F(BuildLockTest, ForceBuildScenario_StaleLockRecovery) {
     auto outputPath = testArea->getPath("force_build_scenario");
 
-    // Step 1: Simulate crashed build leaving a lock file
+    // Step 1: Simulate crashed build leaving a lock file with dead PID
     std::string lockFile = outputPath.string() + ".building";
     {
         std::ofstream f(lockFile);
-        f << "ORPHANED_LOCK_SENTINEL\n";
+        f << "PID: 99\nProcess: Crashed build\n";
     }
     ASSERT_TRUE(fs::exists(lockFile));
 
