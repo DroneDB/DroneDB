@@ -31,6 +31,9 @@
 
 namespace ddb {
 
+// Forward declarations for stale lock detection helpers (defined later in this file)
+static bool isLockFileStale(const std::string& lockFilePath);
+
 bool isBuildableInternal(const Entry& e, std::string& subfolder) {
     if (e.type == EntryType::PointCloud) {
         // Special case: do not build if this entry is in a "ept-data" folder
@@ -141,11 +144,16 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
         if (removeStale) {
             std::string lockFile = outputFolder + ".building";
             if (fs::exists(lockFile)) {
-                LOGD << "Force build: removing potentially stale lock file: " << lockFile;
-                try {
-                    io::assureIsRemoved(lockFile);
-                } catch (const std::exception& err) {
-                    LOGW << "Failed to remove stale lock file: " << err.what();
+                if (isLockFileStale(lockFile)) {
+                    LOGD << "Force build: removing stale lock file (dead PID): " << lockFile;
+                    try {
+                        io::assureIsRemoved(lockFile);
+                    } catch (const std::exception& err) {
+                        LOGW << "Failed to remove stale lock file: " << err.what();
+                    }
+                } else {
+                    LOGD << "Force build: lock held by active process, cannot override: " << lockFile;
+                    throw BuildInProgressException("Build in progress by an active process");
                 }
             }
         }

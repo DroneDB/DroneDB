@@ -234,17 +234,11 @@ void BuildLock::acquireLock(bool waitForLock) {
 
 #else
     // Unix implementation
-    if (waitForLock) {
-        // When waiting is requested, remove stale lock files first (matches Windows CREATE_ALWAYS behavior).
-        // This allows force-builds to reclaim locks left behind by crashed processes.
-        if (fs::exists(lockFilePath)) {
-            LOGD << "Lock file exists, removing for force-acquire: " << lockFilePath;
-            if (unlink(lockFilePath.c_str()) == -1 && errno != ENOENT) {
-                LOGW << "Failed to remove existing lock file: " << strerror(errno);
-                // Fall through to O_EXCL open which will throw BuildInProgressException
-            }
-        }
-    }
+    // Note: stale lock file recovery is handled at a higher level (build.cpp)
+    // via PID-based liveness checks. BuildLock remains a pure exclusivity primitive
+    // using O_EXCL — it never removes existing lock files, as unlink() on an open
+    // file succeeds on Unix (removing the directory entry while the inode persists),
+    // which would break mutual exclusion between concurrent processes.
 
     // O_EXCL ensures that open() fails if the file already exists
     fileDescriptor = open(
