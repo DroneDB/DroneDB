@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <fstream>
+#include <optional>
 #include <sstream>
 
 #include "3d.h"
@@ -134,7 +135,33 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
     // Acquire inter-process lock to prevent race conditions between different processes
     // This must come BEFORE the ThreadLock to ensure proper ordering of lock acquisition
     LOGD << "Acquiring inter-process build lock for: " << outputFolder;
-    BuildLock processLock(outputFolder);
+
+    // Helper lambda: try to acquire the build lock, optionally removing stale locks first
+    auto acquireBuildLock = [&](bool removeStale) -> std::optional<BuildLock> {
+        if (removeStale) {
+            std::string lockFile = outputFolder + ".building";
+            if (fs::exists(lockFile)) {
+                LOGD << "Force build: removing potentially stale lock file: " << lockFile;
+                try {
+                    io::assureIsRemoved(lockFile);
+                } catch (const std::exception& err) {
+                    LOGW << "Failed to remove stale lock file: " << err.what();
+                }
+            }
+        }
+        return BuildLock(outputFolder);
+    };
+
+    std::optional<BuildLock> processLockOpt;
+    try {
+        processLockOpt = acquireBuildLock(false);
+    } catch (const BuildInProgressException&) {
+        if (!force) throw;
+        // Force mode: attempt to reclaim stale lock and retry
+        LOGD << "Build lock failed, force=true: attempting stale lock removal and retry";
+        processLockOpt = acquireBuildLock(true);
+    }
+    BuildLock& processLock = *processLockOpt;
 
     // Acquire intra-process lock to coordinate between threads of the same process
     ThreadLock threadLock("build-" + (db->rootDirectory() / e.hash).string());

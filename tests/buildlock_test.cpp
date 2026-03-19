@@ -5,6 +5,7 @@
 #include "buildlock.h"
 #include "exceptions.h"
 #include "gtest/gtest.h"
+#include "mio.h"
 #include "test.h"
 #include "testarea.h"
 
@@ -387,5 +388,99 @@ TEST_F(BuildLockTest, IsBuildActiveDetection) {
 }
 
 
+
+/**
+ * @brief Test that wait=true constructor can reclaim a stale lock file on disk.
+ * This pins the bug where a failed build left a .building lock file and
+ * subsequent force builds could not proceed (Linux parity fix).
+ */
+TEST_F(BuildLockTest, WaitModeReclaims_StaleLockFile) {
+    auto outputPath = testArea->getPath("stale_lock_test");
+
+    // Simulate a stale lock: create the .building file manually on disk
+    // as if a previous process crashed and left it behind
+    std::string lockFile = outputPath.string() + ".building";
+    {
+        std::ofstream f(lockFile);
+        f << "PID: 999999\nProcess: Simulated stale\n";
+    }
+    ASSERT_TRUE(fs::exists(lockFile));
+
+    // Acquiring with wait=true (the default constructor) should succeed
+    // because the fix removes stale files before O_EXCL open on Linux,
+    // and uses CREATE_ALWAYS on Windows.
+    {
+        BuildLock lock(outputPath.string());  // wait=true
+        EXPECT_TRUE(lock.isHolding());
+    }
+
+    // Lock file should be cleaned up after release
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+#ifndef WIN32
+    EXPECT_FALSE(fs::exists(lockFile));
+#endif
+}
+
+/**
+ * @brief Test that wait=false (non-blocking check) fails against a stale lock file
+ * that has no valid process behind it — this is the isBuildActive check path.
+ * The lock file exists on disk but no one holds a file handle on it.
+ */
+TEST_F(BuildLockTest, NoWaitMode_FailsOnOrphanedLockFile) {
+    auto outputPath = testArea->getPath("orphan_lock_test");
+
+    // Create an orphaned lock file (no process holds a handle)
+    std::string lockFile = outputPath.string() + ".building";
+    {
+        std::ofstream f(lockFile);
+        f << "PID: 999999\n";
+    }
+    ASSERT_TRUE(fs::exists(lockFile));
+
+#ifdef WIN32
+    // On Windows, no process holds the file exclusively, so wait=false with
+    // CREATE_NEW will fail because file exists. This is expected.
+    EXPECT_THROW({
+        BuildLock lock(outputPath.string(), false);
+    }, BuildInProgressException);
+#else
+    // On Linux, O_EXCL will also fail because file exists, regardless of wait flag.
+    EXPECT_THROW({
+        BuildLock lock(outputPath.string(), false);
+    }, BuildInProgressException);
+#endif
+
+    // Clean up
+    io::assureIsRemoved(lockFile);
+}
+
+/**
+ * @brief Test the force-build scenario end to end at the lock level:
+ * 1. A lock file is left on disk (simulating crashed build)
+ * 2. wait=false fails (isBuildActive detects "active")
+ * 3. wait=true succeeds (force build can proceed)
+ */
+TEST_F(BuildLockTest, ForceBuildScenario_StaleLockRecovery) {
+    auto outputPath = testArea->getPath("force_build_scenario");
+
+    // Step 1: Simulate crashed build leaving a lock file
+    std::string lockFile = outputPath.string() + ".building";
+    {
+        std::ofstream f(lockFile);
+        f << "PID: 999999\nProcess: Crashed build\n";
+    }
+    ASSERT_TRUE(fs::exists(lockFile));
+
+    // Step 2: Non-blocking check should detect "build in progress"
+    EXPECT_THROW({
+        BuildLock checkLock(outputPath.string(), false);
+    }, BuildInProgressException);
+
+    // Step 3: Blocking acquire (force path) should succeed by reclaiming the stale lock
+    {
+        BuildLock forceLock(outputPath.string());  // wait=true
+        EXPECT_TRUE(forceLock.isHolding());
+    }
+}
 
 } // anonymous namespace

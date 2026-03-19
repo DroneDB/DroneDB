@@ -233,7 +233,19 @@ void BuildLock::acquireLock(bool waitForLock) {
     LOGD << "Build lock acquired successfully" << (waitForLock ? "" : " (no wait)") << ": " << lockFilePath;
 
 #else
-    // Unix implementation using open() with O_EXCL for atomic creation
+    // Unix implementation
+    if (waitForLock) {
+        // When waiting is requested, remove stale lock files first (matches Windows CREATE_ALWAYS behavior).
+        // This allows force-builds to reclaim locks left behind by crashed processes.
+        if (fs::exists(lockFilePath)) {
+            LOGD << "Lock file exists, removing for force-acquire: " << lockFilePath;
+            if (unlink(lockFilePath.c_str()) == -1 && errno != ENOENT) {
+                LOGW << "Failed to remove existing lock file: " << strerror(errno);
+                // Fall through to O_EXCL open which will throw BuildInProgressException
+            }
+        }
+    }
+
     // O_EXCL ensures that open() fails if the file already exists
     fileDescriptor = open(
         lockFilePath.c_str(),
