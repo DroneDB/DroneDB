@@ -111,20 +111,29 @@ namespace ddb
                     }
                 }
 
-                if (e && e->hasTags())
+                // Extract image dimensions even without EXIF tags,
+                // since pixelWidth()/pixelHeight() read from the file structure
+                if (e)
                 {
-                    SensorSize sensorSize;
-                    Focal focal;
-                    CameraOrientation cameraOri;
-
                     ImageSize imageSize(0, 0);
                     if (image)
                         imageSize = e->extractImageSize();
                     else if (video)
                         imageSize = e->extractVideoSize();
 
-                    entry.properties["width"] = imageSize.width;
-                    entry.properties["height"] = imageSize.height;
+                    if (imageSize.width > 0 && imageSize.height > 0)
+                    {
+                        entry.properties["width"] = imageSize.width;
+                        entry.properties["height"] = imageSize.height;
+                    }
+                }
+
+                if (e && e->hasTags())
+                {
+                    SensorSize sensorSize;
+                    Focal focal;
+                    CameraOrientation cameraOri;
+
                     entry.properties["captureTime"] = e->extractCaptureTime();
 
                     if (image)

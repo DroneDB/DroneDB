@@ -321,4 +321,61 @@ namespace
 
     }
 
+    // ========================================================================
+    // Image dimensions tests: width/height should be extracted even without EXIF
+    // ========================================================================
+
+    TEST(parseEntry, ImageWithoutExif_HasDimensions)
+    {
+        // test.png is a plain PNG with no EXIF/XMP metadata.
+        // Width and height should still be extracted from the file structure.
+        TestArea ta(TEST_NAME);
+        fs::path imagePath = ta.downloadTestAsset(
+            "https://github.com/DroneDB/test_data/raw/refs/heads/master/images/test.png",
+            "test.png");
+
+        ASSERT_TRUE(fs::exists(imagePath)) << "Test image not found";
+
+        Entry entry;
+        parseEntry(imagePath, ta.getFolder(), entry, false);
+
+        EXPECT_EQ(entry.type, EntryType::Image);
+
+        // Properties must not be empty — at least width/height should be present
+        EXPECT_FALSE(entry.properties.empty()) << "Properties should contain at least width and height";
+
+        ASSERT_TRUE(entry.properties.contains("width")) << "Width should be extracted even without EXIF tags";
+        ASSERT_TRUE(entry.properties.contains("height")) << "Height should be extracted even without EXIF tags";
+
+        EXPECT_EQ(entry.properties["width"].get<int>(), 1086);
+        EXPECT_EQ(entry.properties["height"].get<int>(), 815);
+    }
+
+    TEST(parseEntry, GeoImageWithExif_StillHasDimensions)
+    {
+        // Regression test: GeoImage (with EXIF) must still have width/height
+        TestArea ta(TEST_NAME);
+        fs::path imagePath = ta.downloadTestAsset(
+            "https://github.com/DroneDB/test_data/raw/refs/heads/master/images/DJI_0018.JPG",
+            "DJI_0018.JPG");
+
+        ASSERT_TRUE(fs::exists(imagePath)) << "Test image not found";
+
+        Entry entry;
+        parseEntry(imagePath, ta.getFolder(), entry, false);
+
+        EXPECT_EQ(entry.type, EntryType::GeoImage);
+
+        ASSERT_TRUE(entry.properties.contains("width")) << "Width must be present for GeoImage";
+        ASSERT_TRUE(entry.properties.contains("height")) << "Height must be present for GeoImage";
+
+        EXPECT_GT(entry.properties["width"].get<int>(), 0);
+        EXPECT_GT(entry.properties["height"].get<int>(), 0);
+
+        // Other EXIF properties must still be extracted
+        EXPECT_TRUE(entry.properties.contains("make"));
+        EXPECT_TRUE(entry.properties.contains("model"));
+        EXPECT_TRUE(entry.properties.contains("captureTime"));
+    }
+
 }
