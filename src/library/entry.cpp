@@ -112,7 +112,9 @@ namespace ddb
                 }
 
                 // Extract image dimensions even without EXIF tags,
-                // since pixelWidth()/pixelHeight() read from the file structure
+                // since pixelWidth()/pixelHeight() read from the file structure.
+                // Note: video dimensions still require XMP metadata (Xmp.video.Width/Height);
+                // metadata-independent video probing is not currently supported.
                 if (e)
                 {
                     ImageSize imageSize(0, 0);
