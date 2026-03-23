@@ -703,6 +703,13 @@ DDBErr DDBVSIFree(uint8_t* buffer) {
     DDB_C_END
 }
 
+DDBErr DDBFree(char* ptr) {
+    DDB_C_BEGIN
+    // ptr == nullptr is allowed (no-op, matches standard free behaviour)
+    free(ptr);
+    DDB_C_END
+}
+
 DDB_DLL DDBErr DDBTile(const char* inputPath,
                        int tz,
                        int tx,

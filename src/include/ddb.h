@@ -177,6 +177,11 @@ extern "C"
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBVSIFree(uint8_t *buffer);
 
+    /** Free a string buffer allocated by a DDB function (via copyToPtr / calloc).
+     * @param ptr pointer to string to be freed. If NULL, this is a no-op.
+     * @return DDBERR_NONE on success, an error otherwise */
+    DDB_DLL DDBErr DDBFree(char *ptr);
+
     /** Generate image/orthophoto/EPT tiles
      * @param inputPath path to the input geoTIFF/EPT
      * @param tz zoom level
