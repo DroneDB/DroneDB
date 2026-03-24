@@ -138,6 +138,9 @@ endif()
 
 find_package(Python3 REQUIRED)
 
+find_program(CURL_EXECUTABLE NAMES curl curl.exe REQUIRED)
+message(STATUS "Found curl: ${CURL_EXECUTABLE}")
+
 # Define a custom target to update sensor data using the Python script
 add_custom_target(
     update_sensor_data ALL
@@ -240,7 +243,7 @@ file(MAKE_DIRECTORY ${TEMP_DIR})
 # Add custom command to download the file using curl in the temporary directory
 add_custom_command(
     OUTPUT ${TEMP_DIR}/cacert.pem
-    COMMAND curl --retry-all-errors --retry 5 --retry-delay 10 --etag-compare ${TEMP_DIR}/etag.txt --etag-save ${TEMP_DIR}/etag.txt --remote-name https://curl.se/ca/cacert.pem
+    COMMAND ${CURL_EXECUTABLE} --retry-all-errors --retry 5 --retry-delay 10 --etag-compare ${TEMP_DIR}/etag.txt --etag-save ${TEMP_DIR}/etag.txt --remote-name https://curl.se/ca/cacert.pem
     COMMENT "Downloading updated CA certificate if modified"
     WORKING_DIRECTORY ${TEMP_DIR}
 )

@@ -5,6 +5,10 @@ param(
     [string]$BuildType = 'Debug',
 
     [Parameter(Mandatory=$false)]
+    [ValidateSet('Ninja', 'VisualStudio')]
+    [string]$Builder = 'Ninja',
+
+    [Parameter(Mandatory=$false)]
     [switch]$Clean,
 
     [Parameter(Mandatory=$false)]
@@ -31,6 +35,10 @@ OPTIONS:
                          Debug, Release, RelWithDebInfo, MinSizeRel
                          Default: Debug
 
+    -Builder <builder>   CMake generator to use. Valid values:
+                         Ninja, VisualStudio
+                         Default: Ninja
+
     -Clean               Remove the build directory before building.
                          This forces a complete rebuild.
 
@@ -43,10 +51,13 @@ OPTIONS:
 
 EXAMPLES:
     .\full-build-win.ps1
-        Build in Debug mode with default settings.
+        Build in Debug mode with Ninja (default).
 
     .\full-build-win.ps1 -BuildType Release
-        Build in Release mode.
+        Build in Release mode with Ninja.
+
+    .\full-build-win.ps1 -Builder VisualStudio
+        Build using Visual Studio generator.
 
     .\full-build-win.ps1 -BuildType Release -Clean
         Clean build directory and build in Release mode.
@@ -245,8 +256,38 @@ function Test-Prerequisites {
     return $vcvarsPath
 }
 
+function Get-VSGeneratorString {
+    $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+    if (Test-Path $vswhere) {
+        $vsMajor = & $vswhere -latest -products * `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+            -property catalog_productLineVersion `
+            -format value 2>$null
+
+        $vsYear = if ($vsMajor) { $vsMajor } else { $null }
+
+        # Map year to VS version number
+        $generatorMap = @{
+            '2019' = 'Visual Studio 16 2019'
+            '2022' = 'Visual Studio 17 2022'
+            '2025' = 'Visual Studio 18 2025'
+        }
+
+        if ($vsYear -and $generatorMap.ContainsKey($vsYear)) {
+            return $generatorMap[$vsYear]
+        }
+    }
+
+    # Fallback: default to VS 17 2022
+    Write-Host "  Could not detect VS version via vswhere, defaulting to Visual Studio 17 2022" -ForegroundColor Yellow
+    return 'Visual Studio 17 2022'
+}
+
 function Initialize-BuildEnvironment {
-    param([string]$VcvarsPath)
+    param(
+        [string]$VcvarsPath,
+        [string]$BuilderType
+    )
 
     Write-Info "Setting up Visual Studio build environment..."
 
@@ -257,13 +298,15 @@ function Initialize-BuildEnvironment {
         }
     }
 
-    # Verify ninja is available
-    try {
-        $ninjaVersion = ninja --version 2>&1
-        Write-Success "Ninja build system found: v$ninjaVersion"
-    } catch {
-        Write-ErrorMsg "Ninja not found after setting up Visual Studio environment."
-        throw "Build tools not properly configured."
+    if ($BuilderType -eq 'Ninja') {
+        # Verify ninja is available
+        try {
+            $ninjaVersion = ninja --version 2>&1
+            Write-Success "Ninja build system found: v$ninjaVersion"
+        } catch {
+            Write-ErrorMsg "Ninja not found after setting up Visual Studio environment."
+            throw "Build tools not properly configured."
+        }
     }
 }
 
@@ -274,6 +317,7 @@ try {
 
     Write-Info "Build Configuration:"
     Write-Host "  - Build Type: $BuildType" -ForegroundColor Yellow
+    Write-Host "  - Builder: $Builder" -ForegroundColor Yellow
     Write-Host "  - Parallel Jobs: $Jobs" -ForegroundColor Yellow
     Write-Host "  - Testing: $(if ($SkipTests) { 'Disabled' } else { 'Enabled' })" -ForegroundColor Yellow
     Write-Host "  - Clean Build: $(if ($Clean) { 'Yes' } else { 'No' })`n" -ForegroundColor Yellow
@@ -328,16 +372,36 @@ try {
     Write-Info "VCPKG_ROOT: $vcpkgRoot"
 
     # Initialize build environment
-    Initialize-BuildEnvironment -VcvarsPath $vcvarsPath
+    Initialize-BuildEnvironment -VcvarsPath $vcvarsPath -BuilderType $Builder
+
+    # Check if the build directory was configured with a different generator
+    $cmakeCachePath = Join-Path $buildDir "CMakeCache.txt"
+    if (Test-Path $cmakeCachePath) {
+        $cachedGenerator = Get-Content $cmakeCachePath | Where-Object { $_ -match '^CMAKE_GENERATOR:INTERNAL=(.+)$' } | ForEach-Object { $matches[1] }
+        if ($cachedGenerator) {
+            $expectedGenerator = if ($Builder -eq 'Ninja') { 'Ninja' } else { Get-VSGeneratorString }
+            if ($cachedGenerator -ne $expectedGenerator) {
+                Write-ErrorMsg "Build directory was configured with '$cachedGenerator' but you requested '$expectedGenerator'."
+                Write-Host "Run with -Clean to reconfigure the build directory." -ForegroundColor Yellow
+                throw "Generator mismatch. Use -Clean to reconfigure."
+            }
+        }
+    }
 
     # Configure with CMake
-    Write-Info "Configuring CMake..."
+    Write-Info "Configuring CMake with $Builder generator..."
     $cmakeArgs = @(
         "..",
-        "-G", "Ninja",
-        "-DCMAKE_BUILD_TYPE=$BuildType",
         "-DCMAKE_TOOLCHAIN_FILE=..\vcpkg\scripts\buildsystems\vcpkg.cmake"
     )
+
+    if ($Builder -eq 'Ninja') {
+        $cmakeArgs += @("-G", "Ninja", "-DCMAKE_BUILD_TYPE=$BuildType")
+    } else {
+        $vsGenerator = Get-VSGeneratorString
+        Write-Info "Using generator: $vsGenerator"
+        $cmakeArgs += @("-G", $vsGenerator, "-A", "x64")
+    }
 
     if (-not $SkipTests) {
         $cmakeArgs += "-DCMAKE_BUILD_TESTING=ON"
@@ -351,10 +415,14 @@ try {
     Write-Success "CMake configuration completed."
 
     # Build
-    Write-Info "Building DroneDB ($BuildType)..."
+    Write-Info "Building DroneDB ($BuildType) with $Builder..."
     Write-Host "Using $Jobs parallel jobs`n" -ForegroundColor Yellow
 
-    & cmake --build . --config $BuildType -- "-j$Jobs"
+    if ($Builder -eq 'Ninja') {
+        & cmake --build . --config $BuildType -- "-j$Jobs"
+    } else {
+        & cmake --build . --config $BuildType -- "/m:$Jobs"
+    }
     if ($LASTEXITCODE -ne 0) {
         Write-ErrorMsg "Build failed!"
         throw "Build failed with exit code $LASTEXITCODE"
