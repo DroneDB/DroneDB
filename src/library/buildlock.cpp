@@ -233,7 +233,13 @@ void BuildLock::acquireLock(bool waitForLock) {
     LOGD << "Build lock acquired successfully" << (waitForLock ? "" : " (no wait)") << ": " << lockFilePath;
 
 #else
-    // Unix implementation using open() with O_EXCL for atomic creation
+    // Unix implementation
+    // Note: stale lock file recovery is handled at a higher level (build.cpp)
+    // via PID-based liveness checks. BuildLock remains a pure exclusivity primitive
+    // using O_EXCL — it never removes existing lock files, as unlink() on an open
+    // file succeeds on Unix (removing the directory entry while the inode persists),
+    // which would break mutual exclusion between concurrent processes.
+
     // O_EXCL ensures that open() fails if the file already exists
     fileDescriptor = open(
         lockFilePath.c_str(),
