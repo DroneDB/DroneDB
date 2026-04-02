@@ -36,60 +36,70 @@ TEST(multispectral, sensorProfileLoad) {
 }
 
 TEST(multispectral, detectSensorRGB) {
-    // Create a 3-band Byte dataset in memory
-    GDALDriverH memDrv = GDALGetDriverByName("MEM");
-    ASSERT_NE(memDrv, nullptr);
+    TestArea ta(TEST_NAME);
+    // Create a 3-band Byte dataset saved to file
+    GDALDriverH tifDrv = GDALGetDriverByName("GTiff");
+    ASSERT_NE(tifDrv, nullptr);
 
-    GDALDatasetH hDs = GDALCreate(memDrv, "", 100, 100, 3, GDT_Byte, nullptr);
+    fs::path rasterPath = ta.getPath("rgb_test.tif");
+    GDALDatasetH hDs = GDALCreate(tifDrv, rasterPath.string().c_str(), 100, 100, 3, GDT_Byte, nullptr);
     ASSERT_NE(hDs, nullptr);
+    GDALClose(hDs);
 
     auto& spm = SensorProfileManager::instance();
-    auto result = spm.detectSensor(hDs);
+    auto result = spm.detectSensor(rasterPath.string());
 
     // 3-band Byte = standard RGB, not multispectral
-    EXPECT_FALSE(result.isMultispectral);
-    EXPECT_TRUE(result.profileId.empty());
-
-    GDALClose(hDs);
+    EXPECT_FALSE(result.detected);
+    EXPECT_TRUE(result.sensorId.empty());
 }
 
 TEST(multispectral, detectSensorRGBA) {
+    TestArea ta(TEST_NAME);
     // Create a 4-band Byte dataset with alpha
-    GDALDriverH memDrv = GDALGetDriverByName("MEM");
-    GDALDatasetH hDs = GDALCreate(memDrv, "", 100, 100, 4, GDT_Byte, nullptr);
+    GDALDriverH tifDrv = GDALGetDriverByName("GTiff");
+    fs::path rasterPath = ta.getPath("rgba_test.tif");
+    GDALDatasetH hDs = GDALCreate(tifDrv, rasterPath.string().c_str(), 100, 100, 4, GDT_Byte, nullptr);
     ASSERT_NE(hDs, nullptr);
 
     // Set band 4 as alpha
     GDALSetRasterColorInterpretation(GDALGetRasterBand(hDs, 4), GCI_AlphaBand);
+    GDALClose(hDs);
 
     auto& spm = SensorProfileManager::instance();
-    auto result = spm.detectSensor(hDs);
+    auto result = spm.detectSensor(rasterPath.string());
 
     // 4-band Byte with alpha = RGBA, not multispectral
-    EXPECT_FALSE(result.isMultispectral);
-
-    GDALClose(hDs);
+    EXPECT_FALSE(result.detected);
 }
 
 TEST(multispectral, detectSensor5BandUInt16) {
+    TestArea ta(TEST_NAME);
     // Create a 5-band UInt16 dataset (like MicaSense RedEdge)
-    GDALDriverH memDrv = GDALGetDriverByName("MEM");
-    GDALDatasetH hDs = GDALCreate(memDrv, "", 100, 100, 5, GDT_UInt16, nullptr);
+    GDALDriverH tifDrv = GDALGetDriverByName("GTiff");
+    fs::path rasterPath = ta.getPath("ms5_test.tif");
+    GDALDatasetH hDs = GDALCreate(tifDrv, rasterPath.string().c_str(), 100, 100, 5, GDT_UInt16, nullptr);
     ASSERT_NE(hDs, nullptr);
+    GDALClose(hDs);
 
     auto& spm = SensorProfileManager::instance();
-    auto result = spm.detectSensor(hDs);
+    auto result = spm.detectSensor(rasterPath.string());
 
     // 5-band UInt16 = multispectral
-    EXPECT_TRUE(result.isMultispectral);
-
-    GDALClose(hDs);
+    EXPECT_TRUE(result.detected);
 }
 
 TEST(multispectral, defaultBandMappingFallback) {
+    TestArea ta(TEST_NAME);
+    // Create a simple raster file for fallback mapping test
+    GDALDriverH tifDrv = GDALGetDriverByName("GTiff");
+    fs::path rasterPath = ta.getPath("fallback_test.tif");
+    GDALDatasetH hDs = GDALCreate(tifDrv, rasterPath.string().c_str(), 100, 100, 3, GDT_Byte, nullptr);
+    ASSERT_NE(hDs, nullptr);
+    GDALClose(hDs);
+
     auto& spm = SensorProfileManager::instance();
-    // Non-existent profile should still return a fallback
-    auto mapping = spm.getDefaultBandMapping("nonexistent-sensor");
+    auto mapping = spm.getDefaultBandMapping(rasterPath.string());
     EXPECT_GE(mapping.r, 1);
     EXPECT_GE(mapping.g, 1);
     EXPECT_GE(mapping.b, 1);
@@ -101,7 +111,8 @@ TEST(multispectral, defaultBandMappingFallback) {
 
 TEST(multispectral, vegetationFormulaList) {
     auto& ve = VegetationEngine::instance();
-    auto formulas = ve.getFormulasForFilter("RGB");
+    BandFilter rgbFilter = VegetationEngine::parseFilter("RGB", 3);
+    auto formulas = ve.getFormulasForFilter(rgbFilter);
 
     // RGB filter should have at least VARI, EXG, GLI, vNDVI
     bool hasVARI = false;
@@ -113,7 +124,8 @@ TEST(multispectral, vegetationFormulaList) {
 
 TEST(multispectral, vegetationFormulaNIR) {
     auto& ve = VegetationEngine::instance();
-    auto formulas = ve.getFormulasForFilter("RGBN");
+    BandFilter rgbnFilter = VegetationEngine::parseFilter("RGBN", 4);
+    auto formulas = ve.getFormulasForFilter(rgbnFilter);
 
     // RGBN filter should have NDVI
     bool hasNDVI = false;
@@ -126,44 +138,47 @@ TEST(multispectral, vegetationFormulaNIR) {
 TEST(multispectral, applyFormulaVARI) {
     auto& ve = VegetationEngine::instance();
 
-    // Create test data: 3 bands, 4 pixels
-    std::vector<std::vector<double>> bandData = {
-        {100, 200, 50, 0},   // Band 1 (R)
-        {200, 100, 150, 0},  // Band 2 (G)
-        {50, 50, 100, 0}     // Band 3 (B)
-    };
+    // Create test data: 3 bands, 4 pixels (as float)
+    std::vector<float> band1 = {100, 200, 50, 0};  // Band 0 (R)
+    std::vector<float> band2 = {200, 100, 150, 0};  // Band 1 (G)
+    std::vector<float> band3 = {50, 50, 100, 0};    // Band 2 (B)
+    std::vector<float*> bandData = {band1.data(), band2.data(), band3.data()};
 
-    BandFilter bf;
-    bf.R = 1; bf.G = 2; bf.B = 3; bf.N = 0; bf.Re = 0;
+    BandFilter bf = VegetationEngine::parseFilter("RGB", 3);
 
-    std::vector<double> result(4);
-    double nodata = -9999.0;
-    ve.applyFormula("VARI", bandData, bf, result, nodata);
+    std::vector<float> result(4);
+    float nodata = -9999.0f;
+    const auto* formulaPtr = ve.getFormula("VARI");
+    ASSERT_NE(formulaPtr, nullptr);
+    ve.applyFormula(*formulaPtr, bf, bandData, result.data(), 4, nodata);
 
     // VARI = (G - R) / (G + R - B)
     // Pixel 0: (200 - 100) / (200 + 100 - 50) = 100 / 250 = 0.4
     EXPECT_NEAR(result[0], 0.4, 0.01);
 
     // Pixel 3: all zeros → denominator ~0 → nodata
-    EXPECT_DOUBLE_EQ(result[3], nodata);
+    EXPECT_FLOAT_EQ(result[3], nodata);
 }
 
 TEST(multispectral, colormapsList) {
     auto& ve = VegetationEngine::instance();
-    std::string json = ve.getColormapsJson();
-    EXPECT_FALSE(json.empty());
-    EXPECT_NE(json.find("rdylgn"), std::string::npos);
-    EXPECT_NE(json.find("viridis"), std::string::npos);
+    json colormapsJson = ve.getColormapsJson();
+    std::string jsonStr = colormapsJson.dump();
+    EXPECT_FALSE(jsonStr.empty());
+    EXPECT_NE(jsonStr.find("rdylgn"), std::string::npos);
+    EXPECT_NE(jsonStr.find("viridis"), std::string::npos);
 }
 
 TEST(multispectral, applyColormap) {
     auto& ve = VegetationEngine::instance();
 
-    std::vector<double> values = {-1.0, 0.0, 0.5, 1.0};
-    double nodata = -9999.0;
+    std::vector<float> values = {-1.0f, 0.0f, 0.5f, 1.0f};
+    float nodata = -9999.0f;
     std::vector<uint8_t> rgba(values.size() * 4);
 
-    ve.applyColormap("rdylgn", values, nodata, -1.0, 1.0, rgba);
+    const auto* cmap = ve.getColormap("rdylgn");
+    ASSERT_NE(cmap, nullptr);
+    ve.applyColormap(values.data(), rgba.data(), values.size(), *cmap, -1.0f, 1.0f, nodata);
 
     // All pixels should have alpha = 255 (no nodata in input)
     for (size_t i = 0; i < values.size(); i++) {
@@ -174,11 +189,13 @@ TEST(multispectral, applyColormap) {
 TEST(multispectral, applyColormapNodata) {
     auto& ve = VegetationEngine::instance();
 
-    std::vector<double> values = {0.5, -9999.0};
-    double nodata = -9999.0;
+    std::vector<float> values = {0.5f, -9999.0f};
+    float nodata = -9999.0f;
     std::vector<uint8_t> rgba(values.size() * 4);
 
-    ve.applyColormap("rdylgn", values, nodata, -1.0, 1.0, rgba);
+    const auto* cmap = ve.getColormap("rdylgn");
+    ASSERT_NE(cmap, nullptr);
+    ve.applyColormap(values.data(), rgba.data(), values.size(), *cmap, -1.0f, 1.0f, nodata);
 
     // First pixel should have alpha = 255
     EXPECT_EQ(rgba[3], 255);
@@ -328,7 +345,7 @@ TEST(multispectral, validateMergeTypeMismatch) {
 }
 
 TEST(multispectral, mergeHappyPath) {
-    TestArea ta(TEST_NAME);
+    TestArea ta(TEST_NAME, true);
 
     GDALDriverH tifDrv = GDALGetDriverByName("GTiff");
     double gt[6] = {0, 0.001, 0, 50, 0, -0.001};

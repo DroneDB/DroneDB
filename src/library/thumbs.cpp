@@ -366,16 +366,14 @@ void generateImageThumbEx(const fs::path& imagePath,
     } else if (!visParams.preset.empty()) {
         // Use preset from sensor profile
         auto& spm = SensorProfileManager::instance();
-        auto detection = spm.detectSensor(hSrcDataset);
-        auto mapping = spm.getBandMappingForPreset(detection.profileId, visParams.preset);
+        auto mapping = spm.getBandMappingForPreset(imagePath.string(), visParams.preset);
         selectedBands = {mapping.r, mapping.g, mapping.b};
     } else {
         // Auto-detect sensor and use default mapping
         auto& spm = SensorProfileManager::instance();
-        auto detection = spm.detectSensor(hSrcDataset);
-        if (detection.isMultispectral) {
-            auto mapping = spm.getDefaultBandMapping(detection.profileId);
-            selectedBands = {mapping.r, mapping.g, mapping.b};
+        auto detection = spm.detectSensor(imagePath.string());
+        if (detection.detected) {
+            selectedBands = {detection.defaultBandMapping.r, detection.defaultBandMapping.g, detection.defaultBandMapping.b};
         }
         // If not multispectral, selectedBands stays empty → fall through to standard path
     }
@@ -385,60 +383,57 @@ void generateImageThumbEx(const fs::path& imagePath,
         auto& ve = VegetationEngine::instance();
 
         // Determine band filter
-        std::string filter = visParams.bandFilter;
-        if (filter.empty()) {
-            auto& spm = SensorProfileManager::instance();
-            auto detection = spm.detectSensor(hSrcDataset);
-            if (detection.isMultispectral) {
-                filter = ve.autoDetectFilter(hSrcDataset, detection.profileId);
-            } else {
-                filter = "RGB";
-            }
+        BandFilter bf;
+        if (!visParams.bandFilter.empty()) {
+            bf = VegetationEngine::parseFilter(visParams.bandFilter, bandCount);
+        } else {
+            bf = ve.autoDetectFilter(imagePath.string());
         }
 
-        BandFilter bf = ve.parseFilter(filter);
-
-        // Read all bands at thumbnail resolution
-        std::vector<std::vector<double>> bandData(bandCount);
+        // Read all bands at thumbnail resolution as float
         size_t pixCount = static_cast<size_t>(targetWidth) * targetHeight;
+        std::vector<std::vector<float>> bandDataStorage(bandCount);
+        std::vector<float*> bandDataPtrs(bandCount);
 
         for (int b = 0; b < bandCount; b++) {
-            bandData[b].resize(pixCount);
+            bandDataStorage[b].resize(pixCount);
+            bandDataPtrs[b] = bandDataStorage[b].data();
             GDALRasterBandH hBand = GDALGetRasterBand(hSrcDataset, b + 1);
             if (GDALRasterIO(hBand, GF_Read, 0, 0, width, height,
-                             bandData[b].data(), targetWidth, targetHeight,
-                             GDT_Float64, 0, 0) != CE_None) {
+                             bandDataPtrs[b], targetWidth, targetHeight,
+                             GDT_Float32, 0, 0) != CE_None) {
                 GDALClose(hSrcDataset);
                 throw GDALException("Cannot read band " + std::to_string(b + 1));
             }
         }
 
         // Apply formula
-        std::vector<double> result(pixCount);
-        double nodata = -9999.0;
-        ve.applyFormula(visParams.formula, bandData, bf, result, nodata);
+        std::vector<float> result(pixCount);
+        float nodata = -9999.0f;
+        const auto* formulaPtr = ve.getFormula(visParams.formula);
+        if (!formulaPtr) {
+            GDALClose(hSrcDataset);
+            throw InvalidArgsException("Unknown formula: " + visParams.formula);
+        }
+        ve.applyFormula(*formulaPtr, bf, bandDataPtrs, result.data(), pixCount, nodata);
 
         // Determine rescale range
-        double rMin, rMax;
+        float rMin, rMax;
         if (!visParams.rescale.empty()) {
             auto commaPos = visParams.rescale.find(',');
-            rMin = std::stod(visParams.rescale.substr(0, commaPos));
-            rMax = std::stod(visParams.rescale.substr(commaPos + 1));
+            rMin = std::stof(visParams.rescale.substr(0, commaPos));
+            rMax = std::stof(visParams.rescale.substr(commaPos + 1));
         } else {
             // Use formula's natural range or p2-p98
-            auto formulas = ve.getFormulasForFilter(filter);
             bool found = false;
-            for (const auto& f : formulas) {
-                if (f.id == visParams.formula && f.rangeMin != f.rangeMax) {
-                    rMin = f.rangeMin;
-                    rMax = f.rangeMax;
-                    found = true;
-                    break;
-                }
+            if (formulaPtr->hasRange && formulaPtr->rangeMin != formulaPtr->rangeMax) {
+                rMin = static_cast<float>(formulaPtr->rangeMin);
+                rMax = static_cast<float>(formulaPtr->rangeMax);
+                found = true;
             }
             if (!found) {
                 // Compute p2-p98
-                std::vector<double> valid;
+                std::vector<float> valid;
                 valid.reserve(pixCount);
                 for (size_t i = 0; i < pixCount; i++) {
                     if (result[i] != nodata) valid.push_back(result[i]);
@@ -455,8 +450,13 @@ void generateImageThumbEx(const fs::path& imagePath,
 
         // Apply colormap
         std::string cmId = visParams.colormap.empty() ? "rdylgn" : visParams.colormap;
+        const auto* cmap = ve.getColormap(cmId);
+        if (!cmap) {
+            GDALClose(hSrcDataset);
+            throw InvalidArgsException("Unknown colormap: " + cmId);
+        }
         std::vector<uint8_t> rgba(pixCount * 4);
-        ve.applyColormap(cmId, result, nodata, rMin, rMax, rgba);
+        ve.applyColormap(result.data(), rgba.data(), pixCount, *cmap, rMin, rMax, nodata);
 
         GDALClose(hSrcDataset);
 

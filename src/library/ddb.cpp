@@ -1385,25 +1385,22 @@ DDB_DLL DDBErr DDBGetRasterMetadata(const char* path, const char* formula,
     auto& ve = ddb::VegetationEngine::instance();
     json result;
 
+    int nBands = GDALGetRasterCount(hDs);
+
     // Determine effective band filter
-    std::string effectiveFilter = filterStr;
-    if (effectiveFilter.empty()) {
-        auto& spm = ddb::SensorProfileManager::instance();
-        auto detection = spm.detectSensor(hDs);
-        if (detection.isMultispectral) {
-            effectiveFilter = ve.autoDetectFilter(hDs, detection.profileId);
-        } else {
-            effectiveFilter = "RGB";
-        }
+    ddb::BandFilter effectiveFilter;
+    if (!filterStr.empty()) {
+        effectiveFilter = ddb::VegetationEngine::parseFilter(filterStr, nBands);
+    } else {
+        effectiveFilter = ve.autoDetectFilter(std::string(path));
     }
 
     // Statistics
     json statsJson;
-    int nBands = GDALGetRasterCount(hDs);
 
     if (!formulaStr.empty()) {
         // Formula statistics: compute on-demand
-        ddb::BandFilter bf = ve.parseFilter(effectiveFilter);
+        const ddb::BandFilter &bf = effectiveFilter;
         int width = GDALGetRasterXSize(hDs);
         int height = GDALGetRasterYSize(hDs);
 
@@ -1412,17 +1409,24 @@ DDB_DLL DDBErr DDBGetRasterMetadata(const char* path, const char* formula,
         int sampleH = std::min(height, 512);
         size_t pixCount = static_cast<size_t>(sampleW) * sampleH;
 
-        std::vector<std::vector<double>> bandData(nBands);
+        std::vector<std::vector<float>> bandDataStorage(nBands);
+        std::vector<float*> bandDataPtrs(nBands);
         for (int b = 0; b < nBands; b++) {
-            bandData[b].resize(pixCount);
+            bandDataStorage[b].resize(pixCount);
+            bandDataPtrs[b] = bandDataStorage[b].data();
             GDALRasterBandH hBand = GDALGetRasterBand(hDs, b + 1);
             GDALRasterIO(hBand, GF_Read, 0, 0, width, height,
-                         bandData[b].data(), sampleW, sampleH, GDT_Float64, 0, 0);
+                         bandDataPtrs[b], sampleW, sampleH, GDT_Float32, 0, 0);
         }
 
-        std::vector<double> formulaResult(pixCount);
-        double nodata = -9999.0;
-        ve.applyFormula(formulaStr, bandData, bf, formulaResult, nodata);
+        std::vector<float> formulaResult(pixCount);
+        float nodata = -9999.0f;
+        const auto* formulaObj = ve.getFormula(formulaStr);
+        if (!formulaObj) {
+            GDALClose(hDs);
+            throw InvalidArgsException("Unknown formula: " + formulaStr);
+        }
+        ve.applyFormula(*formulaObj, bf, bandDataPtrs, formulaResult.data(), pixCount, nodata);
 
         // Compute statistics
         std::vector<double> valid;
@@ -1432,11 +1436,12 @@ DDB_DLL DDBErr DDBGetRasterMetadata(const char* path, const char* formula,
         double fMax = std::numeric_limits<double>::lowest();
         for (size_t i = 0; i < pixCount; i++) {
             if (formulaResult[i] != nodata) {
-                valid.push_back(formulaResult[i]);
-                sum += formulaResult[i];
-                sumSq += formulaResult[i] * formulaResult[i];
-                fMin = std::min(fMin, formulaResult[i]);
-                fMax = std::max(fMax, formulaResult[i]);
+                double v = static_cast<double>(formulaResult[i]);
+                valid.push_back(v);
+                sum += v;
+                sumSq += v * v;
+                fMin = std::min(fMin, v);
+                fMax = std::max(fMax, v);
             }
         }
 
@@ -1498,13 +1503,13 @@ DDB_DLL DDBErr DDBGetRasterMetadata(const char* path, const char* formula,
     result["algorithms"] = algJson;
 
     // Colormaps
-    result["colormaps"] = json::parse(ve.getColormapsJson());
+    result["colormaps"] = ve.getColormapsJson();
 
-    result["autoBands"] = {{"filter", effectiveFilter}, {"match", !effectiveFilter.empty()}};
+    result["autoBands"] = {{"filter", effectiveFilter.id}, {"match", !effectiveFilter.id.empty()}};
 
     auto& spm = ddb::SensorProfileManager::instance();
-    auto detection = spm.detectSensor(hDs);
-    result["detectedSensor"] = detection.profileId;
+    auto detection = spm.detectSensor(std::string(path));
+    result["detectedSensor"] = detection.sensorId;
 
     GDALClose(hDs);
 

@@ -354,11 +354,11 @@ SensorDetectionResult SensorProfileManager::detectSensor(const std::string &rast
     GDALClose(hDataset);
 
     // No profile matched — for multi-band non-Byte images, return a basic result
-    // with fallback mapping
+    // with fallback mapping (§3.3 Detection Fallback)
     if (bandCount > 3 && dt != GDT_Byte) {
-        result.detected = false;
+        result.detected = true;
         result.sensorCategory = "multispectral";
-        result.defaultBandMapping = {1, 2, 3}; // Fallback
+        result.defaultBandMapping = getFallbackMapping(rasterPath, bandCount);
     }
 
     return result;
