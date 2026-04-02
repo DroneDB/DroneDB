@@ -8,6 +8,8 @@
 #include <pdal/filters/ColorinterpFilter.hpp>
 #include <pdal/io/EptReader.hpp>
 #include <sstream>
+#include <algorithm>
+#include <cmath>
 
 #include "coordstransformer.h"
 #include "dbops.h"
@@ -17,6 +19,8 @@
 #include "hash.h"
 #include "mio.h"
 #include "pointcloud.h"
+#include "sensorprofile.h"
+#include "vegetation.h"
 #include "tiler.h"
 #include "userprofile.h"
 #include "utils.h"
@@ -316,6 +320,319 @@ void generateImageThumb(const fs::path& imagePath,
 
         GDALFlushCache(hNewDataset);
         GDALClose(hNewDataset);
+    }
+
+    GDALTranslateOptionsFree(psOptions);
+    GDALClose(hSrcDataset);
+}
+
+void generateImageThumbEx(const fs::path& imagePath,
+                          int thumbSize,
+                          const fs::path& outImagePath,
+                          uint8_t** outBuffer,
+                          int* outBufferSize,
+                          const ThumbVisParams& visParams) {
+    GDALDatasetH hSrcDataset = GDALOpen(imagePath.string().c_str(), GA_ReadOnly);
+    if (!hSrcDataset)
+        throw GDALException("Cannot open " + imagePath.string() + " for reading");
+
+    const int width = GDALGetRasterXSize(hSrcDataset);
+    const int height = GDALGetRasterYSize(hSrcDataset);
+    const int bandCount = GDALGetRasterCount(hSrcDataset);
+    const GDALDataType srcType = GDALGetRasterDataType(GDALGetRasterBand(hSrcDataset, 1));
+
+    int targetWidth, targetHeight;
+    if (width > height) {
+        targetWidth = thumbSize;
+        targetHeight = std::max(1, static_cast<int>((static_cast<float>(thumbSize) / width) * height));
+    } else {
+        targetHeight = thumbSize;
+        targetWidth = std::max(1, static_cast<int>((static_cast<float>(thumbSize) / height) * width));
+    }
+
+    // Determine band indices to use
+    std::vector<int> selectedBands;
+
+    if (!visParams.bands.empty()) {
+        // Explicit bands provided
+        std::istringstream ss(visParams.bands);
+        std::string token;
+        while (std::getline(ss, token, ',')) {
+            int b = std::stoi(token);
+            if (b < 1 || b > bandCount)
+                throw InvalidArgsException("Band index " + std::to_string(b) + " out of range");
+            selectedBands.push_back(b);
+        }
+    } else if (!visParams.preset.empty()) {
+        // Use preset from sensor profile
+        auto& spm = SensorProfileManager::instance();
+        auto detection = spm.detectSensor(hSrcDataset);
+        auto mapping = spm.getBandMappingForPreset(detection.profileId, visParams.preset);
+        selectedBands = {mapping.r, mapping.g, mapping.b};
+    } else {
+        // Auto-detect sensor and use default mapping
+        auto& spm = SensorProfileManager::instance();
+        auto detection = spm.detectSensor(hSrcDataset);
+        if (detection.isMultispectral) {
+            auto mapping = spm.getDefaultBandMapping(detection.profileId);
+            selectedBands = {mapping.r, mapping.g, mapping.b};
+        }
+        // If not multispectral, selectedBands stays empty → fall through to standard path
+    }
+
+    // Formula mode: read required bands, apply formula, apply colormap
+    if (!visParams.formula.empty()) {
+        auto& ve = VegetationEngine::instance();
+
+        // Determine band filter
+        std::string filter = visParams.bandFilter;
+        if (filter.empty()) {
+            auto& spm = SensorProfileManager::instance();
+            auto detection = spm.detectSensor(hSrcDataset);
+            if (detection.isMultispectral) {
+                filter = ve.autoDetectFilter(hSrcDataset, detection.profileId);
+            } else {
+                filter = "RGB";
+            }
+        }
+
+        BandFilter bf = ve.parseFilter(filter);
+
+        // Read all bands at thumbnail resolution
+        std::vector<std::vector<double>> bandData(bandCount);
+        size_t pixCount = static_cast<size_t>(targetWidth) * targetHeight;
+
+        for (int b = 0; b < bandCount; b++) {
+            bandData[b].resize(pixCount);
+            GDALRasterBandH hBand = GDALGetRasterBand(hSrcDataset, b + 1);
+            if (GDALRasterIO(hBand, GF_Read, 0, 0, width, height,
+                             bandData[b].data(), targetWidth, targetHeight,
+                             GDT_Float64, 0, 0) != CE_None) {
+                GDALClose(hSrcDataset);
+                throw GDALException("Cannot read band " + std::to_string(b + 1));
+            }
+        }
+
+        // Apply formula
+        std::vector<double> result(pixCount);
+        double nodata = -9999.0;
+        ve.applyFormula(visParams.formula, bandData, bf, result, nodata);
+
+        // Determine rescale range
+        double rMin, rMax;
+        if (!visParams.rescale.empty()) {
+            auto commaPos = visParams.rescale.find(',');
+            rMin = std::stod(visParams.rescale.substr(0, commaPos));
+            rMax = std::stod(visParams.rescale.substr(commaPos + 1));
+        } else {
+            // Use formula's natural range or p2-p98
+            auto formulas = ve.getFormulasForFilter(filter);
+            bool found = false;
+            for (const auto& f : formulas) {
+                if (f.id == visParams.formula && f.rangeMin != f.rangeMax) {
+                    rMin = f.rangeMin;
+                    rMax = f.rangeMax;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                // Compute p2-p98
+                std::vector<double> valid;
+                valid.reserve(pixCount);
+                for (size_t i = 0; i < pixCount; i++) {
+                    if (result[i] != nodata) valid.push_back(result[i]);
+                }
+                if (!valid.empty()) {
+                    std::sort(valid.begin(), valid.end());
+                    rMin = valid[static_cast<size_t>(valid.size() * 0.02)];
+                    rMax = valid[static_cast<size_t>(std::min(valid.size() - 1, static_cast<size_t>(valid.size() * 0.98)))];
+                } else {
+                    rMin = 0; rMax = 1;
+                }
+            }
+        }
+
+        // Apply colormap
+        std::string cmId = visParams.colormap.empty() ? "rdylgn" : visParams.colormap;
+        std::vector<uint8_t> rgba(pixCount * 4);
+        ve.applyColormap(cmId, result, nodata, rMin, rMax, rgba);
+
+        GDALClose(hSrcDataset);
+
+        // Write output via MEM → WEBP
+        GDALDriverH memDrv = GDALGetDriverByName("MEM");
+        GDALDatasetH hMem = GDALCreate(memDrv, "", targetWidth, targetHeight, 4, GDT_Byte, nullptr);
+        for (int b = 0; b < 4; b++) {
+            std::vector<uint8_t> chanData(pixCount);
+            for (size_t i = 0; i < pixCount; i++) chanData[i] = rgba[i * 4 + b];
+            GDALRasterBandH hBand = GDALGetRasterBand(hMem, b + 1);
+            GDALRasterIO(hBand, GF_Write, 0, 0, targetWidth, targetHeight,
+                         chanData.data(), targetWidth, targetHeight, GDT_Byte, 0, 0);
+        }
+        GDALSetRasterColorInterpretation(GDALGetRasterBand(hMem, 4), GCI_AlphaBand);
+
+        GDALDriverH webpDrv = GDALGetDriverByName("WEBP");
+        char** webpOpts = nullptr;
+        webpOpts = CSLAddString(webpOpts, "QUALITY=95");
+
+        bool writeToMemory = outImagePath.empty() && outBuffer != nullptr;
+        if (writeToMemory) {
+            std::string vsiPath = "/vsimem/" + utils::generateRandomString(32) + ".webp";
+            GDALDatasetH hOut = GDALCreateCopy(webpDrv, vsiPath.c_str(), hMem, FALSE, webpOpts, nullptr, nullptr);
+            if (!hOut) {
+                CSLDestroy(webpOpts);
+                GDALClose(hMem);
+                throw GDALException("Cannot create formula thumbnail");
+            }
+            GDALFlushCache(hOut);
+            GDALClose(hOut);
+            vsi_l_offset bufSize;
+            *outBuffer = VSIGetMemFileBuffer(vsiPath.c_str(), &bufSize, TRUE);
+            *outBufferSize = static_cast<int>(bufSize);
+        } else {
+            GDALDatasetH hOut = GDALCreateCopy(webpDrv, outImagePath.string().c_str(), hMem, FALSE, webpOpts, nullptr, nullptr);
+            if (!hOut) {
+                CSLDestroy(webpOpts);
+                GDALClose(hMem);
+                throw GDALException("Cannot create formula thumbnail");
+            }
+            GDALFlushCache(hOut);
+            GDALClose(hOut);
+        }
+        CSLDestroy(webpOpts);
+        GDALClose(hMem);
+        return;
+    }
+
+    // Non-formula mode: band selection + stretch
+    char** targs = nullptr;
+    targs = CSLAddString(targs, "-outsize");
+    targs = CSLAddString(targs, std::to_string(targetWidth).c_str());
+    targs = CSLAddString(targs, std::to_string(targetHeight).c_str());
+    targs = CSLAddString(targs, "-ot");
+    targs = CSLAddString(targs, "Byte");
+    targs = CSLAddString(targs, "-r");
+    targs = CSLAddString(targs, "average");
+
+    if (!selectedBands.empty()) {
+        for (int b : selectedBands) {
+            targs = CSLAddString(targs, "-b");
+            targs = CSLAddString(targs, std::to_string(b).c_str());
+        }
+    } else if (bandCount == 1) {
+        targs = CSLAddString(targs, "-b");
+        targs = CSLAddString(targs, "1");
+        targs = CSLAddString(targs, "-b");
+        targs = CSLAddString(targs, "1");
+        targs = CSLAddString(targs, "-b");
+        targs = CSLAddString(targs, "1");
+    } else if (bandCount == 2) {
+        targs = CSLAddString(targs, "-b");
+        targs = CSLAddString(targs, "1");
+        targs = CSLAddString(targs, "-b");
+        targs = CSLAddString(targs, "1");
+        targs = CSLAddString(targs, "-b");
+        targs = CSLAddString(targs, "1");
+        targs = CSLAddString(targs, "-b");
+        targs = CSLAddString(targs, "2");
+    } else {
+        // Default: first 3 bands
+        targs = CSLAddString(targs, "-b");
+        targs = CSLAddString(targs, "1");
+        targs = CSLAddString(targs, "-b");
+        targs = CSLAddString(targs, "2");
+        targs = CSLAddString(targs, "-b");
+        targs = CSLAddString(targs, "3");
+    }
+
+    // Stretch: for non-Byte data, use -scale
+    if (srcType != GDT_Byte) {
+        if (!visParams.rescale.empty()) {
+            auto commaPos = visParams.rescale.find(',');
+            std::string sMin = visParams.rescale.substr(0, commaPos);
+            std::string sMax = visParams.rescale.substr(commaPos + 1);
+            targs = CSLAddString(targs, "-scale");
+            targs = CSLAddString(targs, sMin.c_str());
+            targs = CSLAddString(targs, sMax.c_str());
+            targs = CSLAddString(targs, "0");
+            targs = CSLAddString(targs, "255");
+        } else {
+            // Percentile stretch: compute p2-p98 on selected bands
+            std::vector<int> bandsToSample;
+            if (!selectedBands.empty()) {
+                bandsToSample = selectedBands;
+            } else {
+                for (int i = 1; i <= std::min(3, bandCount); i++) bandsToSample.push_back(i);
+            }
+
+            double globalMin = std::numeric_limits<double>::max();
+            double globalMax = std::numeric_limits<double>::lowest();
+            for (int b : bandsToSample) {
+                double bMin, bMax, bMean, bStdDev;
+                GDALRasterBandH hBand = GDALGetRasterBand(hSrcDataset, b);
+                if (GDALComputeRasterStatistics(hBand, TRUE, &bMin, &bMax, &bMean, &bStdDev, nullptr, nullptr) == CE_None) {
+                    // p2-p98 approximation: mean ± 2.33*stdDev (for normal distribution)
+                    double p2 = std::max(bMin, bMean - 2.33 * bStdDev);
+                    double p98 = std::min(bMax, bMean + 2.33 * bStdDev);
+                    globalMin = std::min(globalMin, p2);
+                    globalMax = std::max(globalMax, p98);
+                }
+            }
+            if (globalMin < globalMax) {
+                targs = CSLAddString(targs, "-scale");
+                targs = CSLAddString(targs, std::to_string(globalMin).c_str());
+                targs = CSLAddString(targs, std::to_string(globalMax).c_str());
+                targs = CSLAddString(targs, "0");
+                targs = CSLAddString(targs, "255");
+            } else {
+                targs = CSLAddString(targs, "-scale");
+            }
+        }
+    } else {
+        // Byte data might still need scale for consistency
+        targs = CSLAddString(targs, "-scale");
+    }
+
+    targs = CSLAddString(targs, "-of");
+    targs = CSLAddString(targs, "WEBP");
+    targs = CSLAddString(targs, "-co");
+    targs = CSLAddString(targs, "QUALITY=95");
+    targs = CSLAddString(targs, "-a_srs");
+    targs = CSLAddString(targs, "");
+
+    GDALTranslateOptions* psOptions = GDALTranslateOptionsNew(targs, nullptr);
+    CSLDestroy(targs);
+
+    if (!psOptions) {
+        GDALClose(hSrcDataset);
+        throw GDALException("Failed to create GDAL translate options");
+    }
+
+    bool writeToMemory = outImagePath.empty() && outBuffer != nullptr;
+    if (writeToMemory) {
+        std::string vsiPath = "/vsimem/" + utils::generateRandomString(32) + ".webp";
+        GDALDatasetH hNew = GDALTranslate(vsiPath.c_str(), hSrcDataset, psOptions, nullptr);
+        if (!hNew) {
+            VSIUnlink(vsiPath.c_str());
+            GDALTranslateOptionsFree(psOptions);
+            GDALClose(hSrcDataset);
+            throw GDALException("Failed to generate thumbnail");
+        }
+        GDALFlushCache(hNew);
+        GDALClose(hNew);
+        vsi_l_offset bufSize;
+        *outBuffer = VSIGetMemFileBuffer(vsiPath.c_str(), &bufSize, TRUE);
+        *outBufferSize = static_cast<int>(bufSize);
+    } else {
+        GDALDatasetH hNew = GDALTranslate(outImagePath.string().c_str(), hSrcDataset, psOptions, nullptr);
+        if (!hNew) {
+            GDALTranslateOptionsFree(psOptions);
+            GDALClose(hSrcDataset);
+            throw GDALException("Failed to generate thumbnail");
+        }
+        GDALFlushCache(hNew);
+        GDALClose(hNew);
     }
 
     GDALTranslateOptionsFree(psOptions);

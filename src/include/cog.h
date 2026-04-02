@@ -13,6 +13,7 @@
 namespace ddb {
 
 DDB_DLL void buildCog(const std::string& inputGTiff, const std::string& outputCog);
+DDB_DLL void generateCogStats(const std::string& cogPath);
 
 }
 
