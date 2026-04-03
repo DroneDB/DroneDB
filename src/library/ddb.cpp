@@ -1649,7 +1649,11 @@ DDB_DLL DDBErr DDBPreviewMergeMultispectral(const char** paths, int numPaths,
         std::istringstream ss(previewBands);
         std::string token;
         while (std::getline(ss, token, ',')) {
-            bandsVec.push_back(std::stoi(token));
+            try {
+                bandsVec.push_back(std::stoi(token));
+            } catch (const std::exception&) {
+                throw InvalidArgsException("Invalid preview band value: '" + token + "'");
+            }
         }
     }
     if (bandsVec.size() < 3) {
