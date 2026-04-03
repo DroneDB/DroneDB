@@ -106,30 +106,30 @@ MergeValidationResult validateMergeMultispectral(const std::vector<std::string> 
         double gt[6];
         if (GDALGetGeoTransform(hDs, gt) != CE_None) {
             result.warnings.push_back("Cannot read geotransform from: " + inputPaths[i]);
-        }
+        } else {
+            // Skew check
+            if (gt[2] != 0 || gt[4] != 0) {
+                result.errors.push_back(inputPaths[i] + " has non-zero skew");
+            }
 
-        // Skew check
-        if (gt[2] != 0 || gt[4] != 0) {
-            result.errors.push_back(inputPaths[i] + " has non-zero skew");
-        }
+            // Pixel size tolerance (relative)
+            double pxDiffX = std::abs(gt[1] - refGt[1]);
+            double pxDiffY = std::abs(gt[5] - refGt[5]);
+            double relDiffX = (std::abs(refGt[1]) > 0) ? pxDiffX / std::abs(refGt[1]) : 0;
+            double relDiffY = (std::abs(refGt[5]) > 0) ? pxDiffY / std::abs(refGt[5]) : 0;
 
-        // Pixel size tolerance (relative)
-        double pxDiffX = std::abs(gt[1] - refGt[1]);
-        double pxDiffY = std::abs(gt[5] - refGt[5]);
-        double relDiffX = (std::abs(refGt[1]) > 0) ? pxDiffX / std::abs(refGt[1]) : 0;
-        double relDiffY = (std::abs(refGt[5]) > 0) ? pxDiffY / std::abs(refGt[5]) : 0;
+            if (relDiffX > 0.05 || relDiffY > 0.05) {
+                result.errors.push_back("Pixel size mismatch > 5%: " + inputPaths[i]);
+            } else if (relDiffX > 0.01 || relDiffY > 0.01) {
+                result.warnings.push_back("Resolution differs slightly for " + inputPaths[i] + ", bands will be resampled");
+            }
 
-        if (relDiffX > 0.05 || relDiffY > 0.05) {
-            result.errors.push_back("Pixel size mismatch > 5%: " + inputPaths[i]);
-        } else if (relDiffX > 0.01 || relDiffY > 0.01) {
-            result.warnings.push_back("Resolution differs slightly for " + inputPaths[i] + ", bands will be resampled");
-        }
-
-        // Origin tolerance (1 pixel)
-        double origDiffX = std::abs(gt[0] - refGt[0]);
-        double origDiffY = std::abs(gt[3] - refGt[3]);
-        if (origDiffX > std::abs(refGt[1]) || origDiffY > std::abs(refGt[5])) {
-            result.errors.push_back("Origin mismatch > 1 pixel: " + inputPaths[i]);
+            // Origin tolerance (1 pixel)
+            double origDiffX = std::abs(gt[0] - refGt[0]);
+            double origDiffY = std::abs(gt[3] - refGt[3]);
+            if (origDiffX > std::abs(refGt[1]) || origDiffY > std::abs(refGt[5])) {
+                result.errors.push_back("Origin mismatch > 1 pixel: " + inputPaths[i]);
+            }
         }
 
         if (GDALGetRasterCount(hDs) > 1) {
