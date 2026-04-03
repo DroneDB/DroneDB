@@ -33,6 +33,7 @@
 #include "include/nxs.h"
 #include "include/search.h"
 #include "include/stac.h"
+#include "include/merge_multispectral.h"
 
 namespace cmd
 {
@@ -67,7 +68,8 @@ namespace cmd
       {"cog", new Cog()},
       {"nxs", new Nxs()},
       {"search", new Search()},
-      {"stac", new Stac()}};
+      {"stac", new Stac()},
+      {"merge-multispectral", new MergeMultispectral()}};
 
   std::map<std::string, std::string> aliases = {
       {"rm", "remove"},

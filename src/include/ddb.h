@@ -360,6 +360,91 @@ extern "C"
      *  @param output pointer to C-string where to store result (JSON) */
     DDB_DLL DDBErr DDBStac(const char *ddbPath, const char *entry, const char *stacCollectionRoot, const char *id, const char *stacCatalogRoot, char **output);
 
+    /** Get raster info including bands, detected sensor, presets
+     * @param path Path to raster file
+     * @param output Pointer to receive JSON string (caller must free with DDBFree)
+     * @return DDBERR_NONE on success, an error otherwise */
+    DDB_DLL DDBErr DDBGetRasterInfo(const char *path, char **output);
+
+    /** Get raster statistics and histogram for a band or formula
+     * @param path Path to raster file
+     * @param formula Optional formula (e.g., "NDVI"), NULL for raw bands
+     * @param bandFilter Band order (e.g., "RGB", "RGBNRe"), NULL for auto-detect
+     * @param output Pointer to receive JSON string (caller must free with DDBFree)
+     * @return DDBERR_NONE on success, an error otherwise */
+    DDB_DLL DDBErr DDBGetRasterMetadata(const char *path, const char *formula, const char *bandFilter, char **output);
+
+    /** Generate memory thumbnail with band mapping, formula, and stretch
+     * @param filePath Path to raster file
+     * @param size Thumbnail size in pixels
+     * @param preset Preset ID (e.g., "true-color"), or NULL
+     * @param bands Comma-separated band indices (e.g., "4,3,2"), or NULL
+     * @param formula Formula ID (e.g., "NDVI"), or NULL
+     * @param bandFilter Band order (e.g., "RGB"), or NULL for auto-detect
+     * @param colormap Colormap ID (e.g., "rdylgn"), or NULL for default
+     * @param rescale Rescale range "min,max" (e.g., "-1,1"), or NULL for auto
+     * @param outBuffer Pointer to output buffer (caller frees with DDBVSIFree)
+     * @param outBufferSize Pointer to receive buffer size
+     * @return DDBERR_NONE on success, an error otherwise */
+    DDB_DLL DDBErr DDBGenerateMemoryThumbnailEx(const char *filePath, int size,
+                                                 const char *preset, const char *bands,
+                                                 const char *formula, const char *bandFilter,
+                                                 const char *colormap, const char *rescale,
+                                                 uint8_t **outBuffer, int *outBufferSize);
+
+    /** Generate memory tile with band mapping, formula, and stretch
+     * @param inputPath Path to raster file
+     * @param tz Zoom level
+     * @param tx X coordinate
+     * @param ty Y coordinate
+     * @param tileSize Tile size in pixels
+     * @param tms TMS numbering
+     * @param forceRecreate Force regeneration
+     * @param inputPathHash Hash for caching
+     * @param preset Preset ID, or NULL
+     * @param bands Comma-separated band indices, or NULL
+     * @param formula Formula ID, or NULL
+     * @param bandFilter Band order, or NULL
+     * @param colormap Colormap ID, or NULL
+     * @param rescale Rescale range, or NULL
+     * @param outBuffer Pointer to output buffer (caller frees with DDBVSIFree)
+     * @param outBufferSize Pointer to receive buffer size
+     * @return DDBERR_NONE on success, an error otherwise */
+    DDB_DLL DDBErr DDBMemoryTileEx(const char *inputPath,
+                                    int tz, int tx, int ty,
+                                    int tileSize, bool tms,
+                                    bool forceRecreate, const char *inputPathHash,
+                                    const char *preset, const char *bands,
+                                    const char *formula, const char *bandFilter,
+                                    const char *colormap, const char *rescale,
+                                    uint8_t **outBuffer, int *outBufferSize);
+
+    /** Validate merge-multispectral inputs
+     * @param paths Array of input file paths
+     * @param numPaths Number of input file paths
+     * @param output Pointer to receive JSON validation result (caller frees with DDBFree)
+     * @return DDBERR_NONE on success, an error otherwise */
+    DDB_DLL DDBErr DDBValidateMergeMultispectral(const char **paths, int numPaths, char **output);
+
+    /** Preview merge-multispectral result
+     * @param paths Array of input file paths
+     * @param numPaths Number of input file paths
+     * @param previewBands Comma-separated band indices for RGB preview (e.g., "3,2,1")
+     * @param thumbSize Preview size in pixels
+     * @param outBuffer Pointer to output buffer (caller frees with DDBVSIFree)
+     * @param outBufferSize Pointer to receive buffer size
+     * @return DDBERR_NONE on success, an error otherwise */
+    DDB_DLL DDBErr DDBPreviewMergeMultispectral(const char **paths, int numPaths,
+                                                 const char *previewBands, int thumbSize,
+                                                 uint8_t **outBuffer, int *outBufferSize);
+
+    /** Merge single-band rasters into multi-band COG
+     * @param paths Array of input file paths
+     * @param numPaths Number of input file paths
+     * @param outputCog Output COG file path
+     * @return DDBERR_NONE on success, an error otherwise */
+    DDB_DLL DDBErr DDBMergeMultispectral(const char **paths, int numPaths, const char *outputCog);
+
 #ifdef __cplusplus
 }
 #endif

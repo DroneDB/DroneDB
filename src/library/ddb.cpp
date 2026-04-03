@@ -27,8 +27,10 @@
 #include "info.h"
 #include "json.h"
 #include "logger.h"
+#include "merge_multispectral.h"
 #include "mio.h"
 #include "passwordmanager.h"
+#include "sensorprofile.h"
 #include "stac.h"
 #include "status.h"
 #include "syncmanager.h"
@@ -36,6 +38,7 @@
 #include "thumbs.h"
 #include "tilerhelper.h"
 #include "utils.h"
+#include "vegetation.h"
 #include "version.h"
 
 using namespace ddb;
@@ -1344,6 +1347,338 @@ DDB_DLL DDBErr DDBStac(const char* ddbPath,
                                   stacCatalogRootStr);
 
     utils::copyToPtr(json.dump(), output);
+
+    DDB_C_END
+}
+
+DDB_DLL DDBErr DDBGetRasterInfo(const char* path, char** output) {
+    DDB_C_BEGIN
+
+    if (utils::isNullOrEmptyOrWhitespace(path))
+        throw InvalidArgsException("No path provided");
+    if (output == nullptr)
+        throw InvalidArgsException("Output pointer is null");
+
+    auto& spm = ddb::SensorProfileManager::instance();
+    std::string jsonStr = spm.getRasterInfoJson(std::string(path));
+    utils::copyToPtr(jsonStr, output);
+
+    DDB_C_END
+}
+
+DDB_DLL DDBErr DDBGetRasterMetadata(const char* path, const char* formula,
+                                     const char* bandFilter, char** output) {
+    DDB_C_BEGIN
+
+    if (utils::isNullOrEmptyOrWhitespace(path))
+        throw InvalidArgsException("No path provided");
+    if (output == nullptr)
+        throw InvalidArgsException("Output pointer is null");
+
+    const std::string formulaStr = formula ? std::string(formula) : "";
+    const std::string filterStr = bandFilter ? std::string(bandFilter) : "";
+
+    GDALDatasetH hDs = GDALOpen(path, GA_ReadOnly);
+    if (!hDs)
+        throw GDALException("Cannot open " + std::string(path));
+
+    auto& ve = ddb::VegetationEngine::instance();
+    json result;
+
+    int nBands = GDALGetRasterCount(hDs);
+
+    // Determine effective band filter
+    ddb::BandFilter effectiveFilter;
+    if (!filterStr.empty()) {
+        effectiveFilter = ddb::VegetationEngine::parseFilter(filterStr, nBands);
+    } else {
+        effectiveFilter = ve.autoDetectFilter(std::string(path));
+    }
+
+    // Statistics
+    json statsJson;
+
+    if (!formulaStr.empty()) {
+        // Formula statistics: compute on-demand
+        const ddb::BandFilter &bf = effectiveFilter;
+        int width = GDALGetRasterXSize(hDs);
+        int height = GDALGetRasterYSize(hDs);
+
+        // Sample at reduced resolution for performance
+        int sampleW = std::min(width, 512);
+        int sampleH = std::min(height, 512);
+        size_t pixCount = static_cast<size_t>(sampleW) * sampleH;
+
+        std::vector<std::vector<float>> bandDataStorage(nBands);
+        std::vector<float*> bandDataPtrs(nBands);
+        for (int b = 0; b < nBands; b++) {
+            bandDataStorage[b].resize(pixCount);
+            bandDataPtrs[b] = bandDataStorage[b].data();
+            GDALRasterBandH hBand = GDALGetRasterBand(hDs, b + 1);
+            GDALRasterIO(hBand, GF_Read, 0, 0, width, height,
+                         bandDataPtrs[b], sampleW, sampleH, GDT_Float32, 0, 0);
+        }
+
+        std::vector<float> formulaResult(pixCount);
+        float nodata = -9999.0f;
+        const auto* formulaObj = ve.getFormula(formulaStr);
+        if (!formulaObj) {
+            GDALClose(hDs);
+            throw InvalidArgsException("Unknown formula: " + formulaStr);
+        }
+        ve.applyFormula(*formulaObj, bf, bandDataPtrs, formulaResult.data(), pixCount, nodata);
+
+        // Compute statistics
+        std::vector<double> valid;
+        valid.reserve(pixCount);
+        double sum = 0, sumSq = 0;
+        double fMin = std::numeric_limits<double>::max();
+        double fMax = std::numeric_limits<double>::lowest();
+        for (size_t i = 0; i < pixCount; i++) {
+            if (formulaResult[i] != nodata) {
+                double v = static_cast<double>(formulaResult[i]);
+                valid.push_back(v);
+                sum += v;
+                sumSq += v * v;
+                fMin = std::min(fMin, v);
+                fMax = std::max(fMax, v);
+            }
+        }
+
+        if (!valid.empty()) {
+            double mean = sum / valid.size();
+            double variance = (sumSq / valid.size()) - (mean * mean);
+            double stddev = std::sqrt(std::max(0.0, variance));
+
+            std::sort(valid.begin(), valid.end());
+            double p2 = valid[static_cast<size_t>(valid.size() * 0.02)];
+            double p98 = valid[std::min(valid.size() - 1, static_cast<size_t>(valid.size() * 0.98))];
+
+            // Histogram
+            int bins = 255;
+            std::vector<int> counts(bins, 0);
+            std::vector<double> edges(bins + 1);
+            double range = fMax - fMin;
+            if (range <= 0) range = 1.0;
+            for (int i = 0; i <= bins; i++) {
+                edges[i] = fMin + (range * i / bins);
+            }
+            for (double v : valid) {
+                int idx = static_cast<int>((v - fMin) / range * (bins - 1));
+                idx = std::max(0, std::min(bins - 1, idx));
+                counts[idx]++;
+            }
+
+            statsJson["1"] = {
+                {"min", fMin}, {"max", fMax}, {"mean", mean}, {"std", stddev},
+                {"percentiles", {{"p2", p2}, {"p98", p98}}},
+                {"histogram", {{"counts", counts}, {"edges", edges}, {"bins", bins}}}
+            };
+        }
+    } else {
+        // Per-band statistics
+        for (int i = 1; i <= nBands; i++) {
+            GDALRasterBandH hBand = GDALGetRasterBand(hDs, i);
+            double bMin, bMax, bMean, bStdDev;
+            if (GDALComputeRasterStatistics(hBand, TRUE, &bMin, &bMax, &bMean, &bStdDev, nullptr, nullptr) == CE_None) {
+                statsJson[std::to_string(i)] = {
+                    {"min", bMin}, {"max", bMax}, {"mean", bMean}, {"std", bStdDev},
+                    {"percentiles", {{"p2", bMean - 2.33 * bStdDev}, {"p98", bMean + 2.33 * bStdDev}}}
+                };
+            }
+        }
+    }
+
+    result["statistics"] = statsJson;
+
+    // Available algorithms for this band filter
+    auto formulas = ve.getFormulasForFilter(effectiveFilter);
+    json algJson = json::array();
+    for (const auto& f : formulas) {
+        algJson.push_back({
+            {"id", f.id}, {"name", f.name}, {"expr", f.expr},
+            {"help", f.help}, {"range", {f.rangeMin, f.rangeMax}}
+        });
+    }
+    result["algorithms"] = algJson;
+
+    // Colormaps
+    result["colormaps"] = ve.getColormapsJson();
+
+    result["autoBands"] = {{"filter", effectiveFilter.id}, {"match", !effectiveFilter.id.empty()}};
+
+    auto& spm = ddb::SensorProfileManager::instance();
+    auto detection = spm.detectSensor(std::string(path));
+    result["detectedSensor"] = detection.sensorId;
+
+    GDALClose(hDs);
+
+    utils::copyToPtr(result.dump(), output);
+
+    DDB_C_END
+}
+
+DDB_DLL DDBErr DDBGenerateMemoryThumbnailEx(const char* filePath, int size,
+                                             const char* preset, const char* bands,
+                                             const char* formula, const char* bandFilter,
+                                             const char* colormap, const char* rescale,
+                                             uint8_t** outBuffer, int* outBufferSize) {
+    DDB_C_BEGIN
+
+    if (utils::isNullOrEmptyOrWhitespace(filePath))
+        throw InvalidArgsException("No file path provided");
+    if (size < 0)
+        throw InvalidArgsException("Invalid size parameter");
+    if (outBuffer == nullptr)
+        throw InvalidArgsException("Output buffer pointer is null");
+    if (outBufferSize == nullptr)
+        throw InvalidArgsException("Output buffer size pointer is null");
+
+    ddb::ThumbVisParams visParams;
+    if (preset) visParams.preset = std::string(preset);
+    if (bands) visParams.bands = std::string(bands);
+    if (formula) visParams.formula = std::string(formula);
+    if (bandFilter) visParams.bandFilter = std::string(bandFilter);
+    if (colormap) visParams.colormap = std::string(colormap);
+    if (rescale) visParams.rescale = std::string(rescale);
+
+    ddb::generateImageThumbEx(fs::path(filePath), size, "", outBuffer, outBufferSize, visParams);
+
+    DDB_C_END
+}
+
+DDB_DLL DDBErr DDBMemoryTileEx(const char* inputPath,
+                                int tz, int tx, int ty,
+                                int tileSize, bool tms,
+                                bool forceRecreate, const char* inputPathHash,
+                                const char* preset, const char* bands,
+                                const char* formula, const char* bandFilter,
+                                const char* colormap, const char* rescale,
+                                uint8_t** outBuffer, int* outBufferSize) {
+    DDB_C_BEGIN
+
+    if (utils::isNullOrEmptyOrWhitespace(inputPath))
+        throw InvalidArgsException("No input path provided");
+    if (outBuffer == nullptr)
+        throw InvalidArgsException("Output buffer pointer is null");
+    if (outBufferSize == nullptr)
+        throw InvalidArgsException("Output buffer size pointer is null");
+    if (tileSize < 0)
+        throw InvalidArgsException("Invalid tile size parameter");
+    if (tz < 0 || tx < 0 || ty < 0)
+        throw InvalidArgsException("Invalid tile coordinates");
+
+    // Build vizKey from params for cache differentiation
+    std::string vizKey;
+    if (preset) vizKey += std::string("p:") + preset;
+    if (bands) vizKey += std::string(",b:") + bands;
+    if (formula) vizKey += std::string(",f:") + formula;
+    if (bandFilter) vizKey += std::string(",bf:") + bandFilter;
+    if (colormap) vizKey += std::string(",cm:") + colormap;
+    if (rescale) vizKey += std::string(",rs:") + rescale;
+
+    const std::string hashStr = inputPathHash ? std::string(inputPathHash) : "";
+
+    // For now, pass through to standard tile generation
+    // TODO: implement band-aware tile generation in GDALTiler
+    ddb::TilerHelper::getTile(std::string(inputPath),
+                              tz, tx, ty,
+                              tileSize, tms,
+                              forceRecreate,
+                              "",
+                              outBuffer, outBufferSize,
+                              hashStr + vizKey);
+
+    DDB_C_END
+}
+
+DDB_DLL DDBErr DDBValidateMergeMultispectral(const char** paths, int numPaths, char** output) {
+    DDB_C_BEGIN
+
+    if (paths == nullptr || numPaths < 1)
+        throw InvalidArgsException("No input paths provided");
+    if (output == nullptr)
+        throw InvalidArgsException("Output pointer is null");
+
+    std::vector<std::string> inputPaths;
+    for (int i = 0; i < numPaths; i++) {
+        if (paths[i]) inputPaths.emplace_back(paths[i]);
+    }
+
+    auto validationResult = ddb::validateMergeMultispectral(inputPaths);
+
+    json j;
+    j["ok"] = validationResult.ok;
+    j["errors"] = validationResult.errors;
+    j["warnings"] = validationResult.warnings;
+    j["summary"] = {
+        {"totalBands", validationResult.summary.totalBands},
+        {"dataType", validationResult.summary.dataType},
+        {"width", validationResult.summary.width},
+        {"height", validationResult.summary.height},
+        {"crs", validationResult.summary.crs},
+        {"pixelSizeX", validationResult.summary.pixelSizeX},
+        {"pixelSizeY", validationResult.summary.pixelSizeY},
+        {"estimatedSize", validationResult.summary.estimatedSize}
+    };
+
+    utils::copyToPtr(j.dump(), output);
+
+    DDB_C_END
+}
+
+DDB_DLL DDBErr DDBPreviewMergeMultispectral(const char** paths, int numPaths,
+                                             const char* previewBands, int thumbSize,
+                                             uint8_t** outBuffer, int* outBufferSize) {
+    DDB_C_BEGIN
+
+    if (paths == nullptr || numPaths < 1)
+        throw InvalidArgsException("No input paths provided");
+    if (outBuffer == nullptr)
+        throw InvalidArgsException("Output buffer pointer is null");
+    if (outBufferSize == nullptr)
+        throw InvalidArgsException("Output buffer size pointer is null");
+
+    std::vector<std::string> inputPaths;
+    for (int i = 0; i < numPaths; i++) {
+        if (paths[i]) inputPaths.emplace_back(paths[i]);
+    }
+
+    std::vector<int> bandsVec;
+    if (previewBands) {
+        std::istringstream ss(previewBands);
+        std::string token;
+        while (std::getline(ss, token, ',')) {
+            try {
+                bandsVec.push_back(std::stoi(token));
+            } catch (const std::exception&) {
+                throw InvalidArgsException("Invalid preview band value: '" + token + "'");
+            }
+        }
+    }
+    if (bandsVec.size() < 3) {
+        bandsVec = {1, 2, 3};
+    }
+
+    ddb::previewMergeMultispectral(inputPaths, bandsVec, thumbSize > 0 ? thumbSize : 512, outBuffer, outBufferSize);
+
+    DDB_C_END
+}
+
+DDB_DLL DDBErr DDBMergeMultispectral(const char** paths, int numPaths, const char* outputCog) {
+    DDB_C_BEGIN
+
+    if (paths == nullptr || numPaths < 2)
+        throw InvalidArgsException("At least 2 input paths required");
+    if (utils::isNullOrEmptyOrWhitespace(outputCog))
+        throw InvalidArgsException("No output path provided");
+
+    std::vector<std::string> inputPaths;
+    for (int i = 0; i < numPaths; i++) {
+        if (paths[i]) inputPaths.emplace_back(paths[i]);
+    }
+
+    ddb::mergeMultispectral(inputPaths, std::string(outputCog));
 
     DDB_C_END
 }

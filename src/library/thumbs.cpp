@@ -8,6 +8,8 @@
 #include <pdal/filters/ColorinterpFilter.hpp>
 #include <pdal/io/EptReader.hpp>
 #include <sstream>
+#include <algorithm>
+#include <cmath>
 
 #include "coordstransformer.h"
 #include "dbops.h"
@@ -17,6 +19,8 @@
 #include "hash.h"
 #include "mio.h"
 #include "pointcloud.h"
+#include "sensorprofile.h"
+#include "vegetation.h"
 #include "tiler.h"
 #include "userprofile.h"
 #include "utils.h"
@@ -316,6 +320,365 @@ void generateImageThumb(const fs::path& imagePath,
 
         GDALFlushCache(hNewDataset);
         GDALClose(hNewDataset);
+    }
+
+    GDALTranslateOptionsFree(psOptions);
+    GDALClose(hSrcDataset);
+}
+
+void generateImageThumbEx(const fs::path& imagePath,
+                          int thumbSize,
+                          const fs::path& outImagePath,
+                          uint8_t** outBuffer,
+                          int* outBufferSize,
+                          const ThumbVisParams& visParams) {
+    GDALDatasetH hSrcDataset = GDALOpen(imagePath.string().c_str(), GA_ReadOnly);
+    if (!hSrcDataset)
+        throw GDALException("Cannot open " + imagePath.string() + " for reading");
+
+    const int width = GDALGetRasterXSize(hSrcDataset);
+    const int height = GDALGetRasterYSize(hSrcDataset);
+    const int bandCount = GDALGetRasterCount(hSrcDataset);
+    const GDALDataType srcType = GDALGetRasterDataType(GDALGetRasterBand(hSrcDataset, 1));
+
+    int targetWidth, targetHeight;
+    if (width > height) {
+        targetWidth = thumbSize;
+        targetHeight = std::max(1, static_cast<int>((static_cast<float>(thumbSize) / width) * height));
+    } else {
+        targetHeight = thumbSize;
+        targetWidth = std::max(1, static_cast<int>((static_cast<float>(thumbSize) / height) * width));
+    }
+
+    // Determine band indices to use
+    std::vector<int> selectedBands;
+
+    if (!visParams.bands.empty()) {
+        // Explicit bands provided
+        std::istringstream ss(visParams.bands);
+        std::string token;
+        while (std::getline(ss, token, ',')) {
+            int b = std::stoi(token);
+            if (b < 1 || b > bandCount)
+                throw InvalidArgsException("Band index " + std::to_string(b) + " out of range");
+            selectedBands.push_back(b);
+        }
+    } else if (!visParams.preset.empty()) {
+        // Use preset from sensor profile
+        auto& spm = SensorProfileManager::instance();
+        auto mapping = spm.getBandMappingForPreset(imagePath.string(), visParams.preset);
+        selectedBands = {mapping.r, mapping.g, mapping.b};
+    } else {
+        // Auto-detect sensor and use default mapping
+        auto& spm = SensorProfileManager::instance();
+        auto detection = spm.detectSensor(imagePath.string());
+        if (detection.detected) {
+            selectedBands = {detection.defaultBandMapping.r, detection.defaultBandMapping.g, detection.defaultBandMapping.b};
+        }
+        // If not multispectral, selectedBands stays empty → fall through to standard path
+    }
+
+    // Formula mode: read required bands, apply formula, apply colormap
+    if (!visParams.formula.empty()) {
+        auto& ve = VegetationEngine::instance();
+
+        // Determine band filter
+        BandFilter bf;
+        if (!visParams.bandFilter.empty()) {
+            bf = VegetationEngine::parseFilter(visParams.bandFilter, bandCount);
+        } else {
+            bf = ve.autoDetectFilter(imagePath.string());
+        }
+
+        // Read all bands at thumbnail resolution as float
+        size_t pixCount = static_cast<size_t>(targetWidth) * targetHeight;
+        std::vector<std::vector<float>> bandDataStorage(bandCount);
+        std::vector<float*> bandDataPtrs(bandCount);
+
+        for (int b = 0; b < bandCount; b++) {
+            bandDataStorage[b].resize(pixCount);
+            bandDataPtrs[b] = bandDataStorage[b].data();
+            GDALRasterBandH hBand = GDALGetRasterBand(hSrcDataset, b + 1);
+            if (GDALRasterIO(hBand, GF_Read, 0, 0, width, height,
+                             bandDataPtrs[b], targetWidth, targetHeight,
+                             GDT_Float32, 0, 0) != CE_None) {
+                GDALClose(hSrcDataset);
+                throw GDALException("Cannot read band " + std::to_string(b + 1));
+            }
+        }
+
+        // Apply formula
+        std::vector<float> result(pixCount);
+        float nodata = -9999.0f;
+        const auto* formulaPtr = ve.getFormula(visParams.formula);
+        if (!formulaPtr) {
+            GDALClose(hSrcDataset);
+            throw InvalidArgsException("Unknown formula: " + visParams.formula);
+        }
+        ve.applyFormula(*formulaPtr, bf, bandDataPtrs, result.data(), pixCount, nodata);
+
+        // Determine rescale range
+        float rMin, rMax;
+        if (!visParams.rescale.empty()) {
+            auto commaPos = visParams.rescale.find(',');
+            if (commaPos == std::string::npos) {
+                GDALClose(hSrcDataset);
+                throw InvalidArgsException("Invalid rescale format: " + visParams.rescale + ". Expected format: min,max");
+            }
+            std::string minStr = visParams.rescale.substr(0, commaPos);
+            std::string maxStr = visParams.rescale.substr(commaPos + 1);
+            if (minStr.empty() || maxStr.empty()) {
+                GDALClose(hSrcDataset);
+                throw InvalidArgsException("Invalid rescale format: " + visParams.rescale + ". Expected format: min,max");
+            }
+            try {
+                rMin = std::stof(minStr);
+                rMax = std::stof(maxStr);
+            } catch (const std::exception&) {
+                GDALClose(hSrcDataset);
+                throw InvalidArgsException("Invalid rescale values: " + visParams.rescale + ". Expected numeric format: min,max");
+            }
+        } else {
+            // Use formula's natural range or p2-p98
+            bool found = false;
+            if (formulaPtr->hasRange && formulaPtr->rangeMin != formulaPtr->rangeMax) {
+                rMin = static_cast<float>(formulaPtr->rangeMin);
+                rMax = static_cast<float>(formulaPtr->rangeMax);
+                found = true;
+            }
+            if (!found) {
+                // Compute p2-p98
+                std::vector<float> valid;
+                valid.reserve(pixCount);
+                for (size_t i = 0; i < pixCount; i++) {
+                    if (result[i] != nodata) valid.push_back(result[i]);
+                }
+                if (!valid.empty()) {
+                    std::sort(valid.begin(), valid.end());
+                    rMin = valid[static_cast<size_t>(valid.size() * 0.02)];
+                    rMax = valid[static_cast<size_t>(std::min(valid.size() - 1, static_cast<size_t>(valid.size() * 0.98)))];
+                } else {
+                    rMin = 0; rMax = 1;
+                }
+            }
+        }
+
+        // Apply colormap
+        std::string cmId = visParams.colormap.empty() ? "rdylgn" : visParams.colormap;
+        const auto* cmap = ve.getColormap(cmId);
+        if (!cmap) {
+            GDALClose(hSrcDataset);
+            throw InvalidArgsException("Unknown colormap: " + cmId);
+        }
+        std::vector<uint8_t> rgba(pixCount * 4);
+        ve.applyColormap(result.data(), rgba.data(), pixCount, *cmap, rMin, rMax, nodata);
+
+        GDALClose(hSrcDataset);
+
+        // Write output via MEM → WEBP
+        GDALDriverH memDrv = GDALGetDriverByName("MEM");
+        if (!memDrv)
+            throw GDALException("MEM driver not available");
+        GDALDatasetH hMem = GDALCreate(memDrv, "", targetWidth, targetHeight, 4, GDT_Byte, nullptr);
+        if (!hMem)
+            throw GDALException("Cannot create in-memory dataset for formula thumbnail");
+        for (int b = 0; b < 4; b++) {
+            std::vector<uint8_t> chanData(pixCount);
+            for (size_t i = 0; i < pixCount; i++) chanData[i] = rgba[i * 4 + b];
+            GDALRasterBandH hBand = GDALGetRasterBand(hMem, b + 1);
+            GDALRasterIO(hBand, GF_Write, 0, 0, targetWidth, targetHeight,
+                         chanData.data(), targetWidth, targetHeight, GDT_Byte, 0, 0);
+        }
+        GDALSetRasterColorInterpretation(GDALGetRasterBand(hMem, 4), GCI_AlphaBand);
+
+        GDALDriverH webpDrv = GDALGetDriverByName("WEBP");
+        if (!webpDrv) {
+            GDALClose(hMem);
+            throw GDALException("WEBP driver not available");
+        }
+        char** webpOpts = nullptr;
+        webpOpts = CSLAddString(webpOpts, "QUALITY=95");
+
+        bool writeToMemory = outImagePath.empty() && outBuffer != nullptr;
+        if (writeToMemory) {
+            std::string vsiPath = "/vsimem/" + utils::generateRandomString(32) + ".webp";
+            GDALDatasetH hOut = GDALCreateCopy(webpDrv, vsiPath.c_str(), hMem, FALSE, webpOpts, nullptr, nullptr);
+            if (!hOut) {
+                CSLDestroy(webpOpts);
+                GDALClose(hMem);
+                throw GDALException("Cannot create formula thumbnail");
+            }
+            GDALFlushCache(hOut);
+            GDALClose(hOut);
+            vsi_l_offset bufSize;
+            *outBuffer = VSIGetMemFileBuffer(vsiPath.c_str(), &bufSize, TRUE);
+            if (!*outBuffer) {
+                CSLDestroy(webpOpts);
+                GDALClose(hMem);
+                throw GDALException("Cannot retrieve formula thumbnail buffer from vsimem");
+            }
+            *outBufferSize = static_cast<int>(bufSize);
+        } else {
+            GDALDatasetH hOut = GDALCreateCopy(webpDrv, outImagePath.string().c_str(), hMem, FALSE, webpOpts, nullptr, nullptr);
+            if (!hOut) {
+                CSLDestroy(webpOpts);
+                GDALClose(hMem);
+                throw GDALException("Cannot create formula thumbnail");
+            }
+            GDALFlushCache(hOut);
+            GDALClose(hOut);
+        }
+        CSLDestroy(webpOpts);
+        GDALClose(hMem);
+        return;
+    }
+
+    // Non-formula mode: band selection + stretch
+    char** targs = nullptr;
+    targs = CSLAddString(targs, "-outsize");
+    targs = CSLAddString(targs, std::to_string(targetWidth).c_str());
+    targs = CSLAddString(targs, std::to_string(targetHeight).c_str());
+    targs = CSLAddString(targs, "-ot");
+    targs = CSLAddString(targs, "Byte");
+    targs = CSLAddString(targs, "-r");
+    targs = CSLAddString(targs, "average");
+
+    if (!selectedBands.empty()) {
+        for (int b : selectedBands) {
+            targs = CSLAddString(targs, "-b");
+            targs = CSLAddString(targs, std::to_string(b).c_str());
+        }
+    } else if (bandCount == 1) {
+        targs = CSLAddString(targs, "-b");
+        targs = CSLAddString(targs, "1");
+        targs = CSLAddString(targs, "-b");
+        targs = CSLAddString(targs, "1");
+        targs = CSLAddString(targs, "-b");
+        targs = CSLAddString(targs, "1");
+    } else if (bandCount == 2) {
+        targs = CSLAddString(targs, "-b");
+        targs = CSLAddString(targs, "1");
+        targs = CSLAddString(targs, "-b");
+        targs = CSLAddString(targs, "1");
+        targs = CSLAddString(targs, "-b");
+        targs = CSLAddString(targs, "1");
+        targs = CSLAddString(targs, "-b");
+        targs = CSLAddString(targs, "2");
+    } else {
+        // Default: first 3 bands
+        targs = CSLAddString(targs, "-b");
+        targs = CSLAddString(targs, "1");
+        targs = CSLAddString(targs, "-b");
+        targs = CSLAddString(targs, "2");
+        targs = CSLAddString(targs, "-b");
+        targs = CSLAddString(targs, "3");
+    }
+
+    // Stretch: for non-Byte data, use -scale
+    if (srcType != GDT_Byte) {
+        if (!visParams.rescale.empty()) {
+            auto commaPos = visParams.rescale.find(',');
+            if (commaPos == std::string::npos) {
+                CSLDestroy(targs);
+                GDALClose(hSrcDataset);
+                throw InvalidArgsException("Invalid rescale format: " + visParams.rescale + ". Expected format: min,max");
+            }
+            std::string sMin = visParams.rescale.substr(0, commaPos);
+            std::string sMax = visParams.rescale.substr(commaPos + 1);
+            if (sMin.empty() || sMax.empty()) {
+                CSLDestroy(targs);
+                GDALClose(hSrcDataset);
+                throw InvalidArgsException("Invalid rescale format: " + visParams.rescale + ". Expected format: min,max");
+            }
+            try {
+                (void)std::stof(sMin);
+                (void)std::stof(sMax);
+            } catch (const std::exception&) {
+                CSLDestroy(targs);
+                GDALClose(hSrcDataset);
+                throw InvalidArgsException("Invalid rescale values: " + visParams.rescale + ". Expected numeric format: min,max");
+            }
+            targs = CSLAddString(targs, "-scale");
+            targs = CSLAddString(targs, sMin.c_str());
+            targs = CSLAddString(targs, sMax.c_str());
+            targs = CSLAddString(targs, "0");
+            targs = CSLAddString(targs, "255");
+        } else {
+            // Percentile stretch: compute p2-p98 on selected bands
+            std::vector<int> bandsToSample;
+            if (!selectedBands.empty()) {
+                bandsToSample = selectedBands;
+            } else {
+                for (int i = 1; i <= std::min(3, bandCount); i++) bandsToSample.push_back(i);
+            }
+
+            double globalMin = std::numeric_limits<double>::max();
+            double globalMax = std::numeric_limits<double>::lowest();
+            for (int b : bandsToSample) {
+                double bMin, bMax, bMean, bStdDev;
+                GDALRasterBandH hBand = GDALGetRasterBand(hSrcDataset, b);
+                if (GDALComputeRasterStatistics(hBand, TRUE, &bMin, &bMax, &bMean, &bStdDev, nullptr, nullptr) == CE_None) {
+                    // p2-p98 approximation: mean ± 2.33*stdDev (for normal distribution)
+                    double p2 = std::max(bMin, bMean - 2.33 * bStdDev);
+                    double p98 = std::min(bMax, bMean + 2.33 * bStdDev);
+                    globalMin = std::min(globalMin, p2);
+                    globalMax = std::max(globalMax, p98);
+                }
+            }
+            if (globalMin < globalMax) {
+                targs = CSLAddString(targs, "-scale");
+                targs = CSLAddString(targs, std::to_string(globalMin).c_str());
+                targs = CSLAddString(targs, std::to_string(globalMax).c_str());
+                targs = CSLAddString(targs, "0");
+                targs = CSLAddString(targs, "255");
+            } else {
+                targs = CSLAddString(targs, "-scale");
+            }
+        }
+    } else {
+        // Byte data might still need scale for consistency
+        targs = CSLAddString(targs, "-scale");
+    }
+
+    targs = CSLAddString(targs, "-of");
+    targs = CSLAddString(targs, "WEBP");
+    targs = CSLAddString(targs, "-co");
+    targs = CSLAddString(targs, "QUALITY=95");
+    targs = CSLAddString(targs, "-a_srs");
+    targs = CSLAddString(targs, "");
+
+    GDALTranslateOptions* psOptions = GDALTranslateOptionsNew(targs, nullptr);
+    CSLDestroy(targs);
+
+    if (!psOptions) {
+        GDALClose(hSrcDataset);
+        throw GDALException("Failed to create GDAL translate options");
+    }
+
+    bool writeToMemory = outImagePath.empty() && outBuffer != nullptr;
+    if (writeToMemory) {
+        std::string vsiPath = "/vsimem/" + utils::generateRandomString(32) + ".webp";
+        GDALDatasetH hNew = GDALTranslate(vsiPath.c_str(), hSrcDataset, psOptions, nullptr);
+        if (!hNew) {
+            VSIUnlink(vsiPath.c_str());
+            GDALTranslateOptionsFree(psOptions);
+            GDALClose(hSrcDataset);
+            throw GDALException("Failed to generate thumbnail");
+        }
+        GDALFlushCache(hNew);
+        GDALClose(hNew);
+        vsi_l_offset bufSize;
+        *outBuffer = VSIGetMemFileBuffer(vsiPath.c_str(), &bufSize, TRUE);
+        *outBufferSize = static_cast<int>(bufSize);
+    } else {
+        GDALDatasetH hNew = GDALTranslate(outImagePath.string().c_str(), hSrcDataset, psOptions, nullptr);
+        if (!hNew) {
+            GDALTranslateOptionsFree(psOptions);
+            GDALClose(hSrcDataset);
+            throw GDALException("Failed to generate thumbnail");
+        }
+        GDALFlushCache(hNew);
+        GDALClose(hNew);
     }
 
     GDALTranslateOptionsFree(psOptions);
