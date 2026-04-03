@@ -166,7 +166,7 @@ namespace ddb
             GDALRasterBandH hBand = GDALGetRasterBand(hDs, i);
             double bMin, bMax, bMean, bStdDev;
 
-            if (GDALComputeRasterStatistics(hBand, FALSE, &bMin, &bMax, &bMean, &bStdDev, nullptr, nullptr) != CE_None) {
+            if (GDALComputeRasterStatistics(hBand, TRUE, &bMin, &bMax, &bMean, &bStdDev, nullptr, nullptr) != CE_None) {
                 LOGW << "Cannot compute statistics for band " << i;
                 continue;
             }
@@ -176,7 +176,7 @@ namespace ddb
             int nBuckets = 256;
             GUIntBig *histogram = nullptr;
 
-            if (GDALGetDefaultHistogramEx(hBand, &bMin, &bMax, &nBuckets, &histogram, TRUE, nullptr, nullptr) == CE_None && histogram) {
+            if (GDALGetDefaultHistogramEx(hBand, &bMin, &bMax, &nBuckets, &histogram, FALSE, nullptr, nullptr) == CE_None && histogram) {
                 GUIntBig totalPixels = 0;
                 for (int b = 0; b < nBuckets; b++) totalPixels += histogram[b];
 
