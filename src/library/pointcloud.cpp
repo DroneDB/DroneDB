@@ -401,6 +401,7 @@ void buildEpt(const std::vector<std::string>& filenames, const std::string& outd
     options.progressFd = -1;
     options.stats = false;
     options.level = -1;
+    // doCube prevents segfault in EPT generation for certain LAZ files (e.g. Lewis dataset)
     options.doCube = true;
 
     // Add dimension filtering to handle complex LAZ files with problematic custom dimensions
