@@ -9,6 +9,7 @@
 #include <map>
 #include <functional>
 #include <cstdint>
+#include <tuple>
 #include "json.h"
 #include "ddb_export.h"
 

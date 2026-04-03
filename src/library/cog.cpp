@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <chrono>
 #include <iomanip>
+#include <sstream>
 
 namespace ddb
 {
@@ -42,6 +43,7 @@ namespace ddb
                 }
 
                 LOGD << "Successfully copied optimized COG from " << inputGTiff << " to " << outputCog;
+                generateCogStats(outputCog);
                 return;
             } catch (const std::exception& e) {
                 LOGW << "Failed to copy COG file: " << e.what() << ". Falling back to rebuild.";
@@ -138,6 +140,10 @@ namespace ddb
                                             psOptions,
                                             nullptr);
         GDALWarpAppOptionsFree(psOptions);
+        if (!hNewDataset) {
+            GDALClose(hSrcDataset);
+            throw GDALException("GDALWarp failed to create output COG: " + outputCog);
+        }
         GDALClose(hNewDataset);
         GDALClose(hSrcDataset);
 
@@ -203,13 +209,20 @@ namespace ddb
         if (!bandsJson.empty()) {
             auto now = std::chrono::system_clock::now();
             auto time_t = std::chrono::system_clock::to_time_t(now);
+            std::tm tmBuf;
+#ifdef _WIN32
+            gmtime_s(&tmBuf, &time_t);
+#else
+            gmtime_r(&time_t, &tmBuf);
+#endif
             std::ostringstream oss;
-            oss << std::put_time(std::gmtime(&time_t), "%FT%TZ");
+            oss << std::put_time(&tmBuf, "%FT%TZ");
 
             statsJson["bands"] = bandsJson;
             statsJson["computedAt"] = oss.str();
 
-            fs::path statsPath = fs::path(cogPath).parent_path() / "stats.json";
+            fs::path cogFsPath(cogPath);
+            fs::path statsPath = cogFsPath.parent_path() / (cogFsPath.filename().string() + ".stats.json");
             std::ofstream out(statsPath.string());
             if (out.is_open()) {
                 out << statsJson.dump(2);

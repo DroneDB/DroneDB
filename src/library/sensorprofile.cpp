@@ -134,6 +134,45 @@ SensorProfileManager& SensorProfileManager::instance() {
     return inst;
 }
 
+void SensorProfileManager::ensureLoaded() const {
+    if (loaded_) return;
+
+    // Lazy-load defaults (mutex already held by caller)
+    std::string path;
+    fs::path dataFile = io::getDataPath("sensor-profiles.json");
+    path = dataFile.string();
+
+    if (path.empty() || !fs::exists(path)) {
+        LOGD << "Sensor profiles file not found, using empty profiles";
+        loaded_ = true;
+        return;
+    }
+
+    std::ifstream ifs(path);
+    if (!ifs.is_open()) {
+        LOGW << "Cannot open sensor profiles file: " << path;
+        loaded_ = true;
+        return;
+    }
+
+    json root = json::parse(ifs);
+    profiles_.clear();
+
+    if (root.contains("profiles")) {
+        for (const auto &pj : root["profiles"]) {
+            SensorProfile sp = pj.get<SensorProfile>();
+            profiles_.push_back(sp);
+        }
+    }
+
+    std::sort(profiles_.begin(), profiles_.end(), [](const SensorProfile &a, const SensorProfile &b) {
+        return a.detection.priority > b.detection.priority;
+    });
+
+    loaded_ = true;
+    LOGD << "Lazy-loaded " << profiles_.size() << " sensor profiles";
+}
+
 void SensorProfileManager::loadDefaults(const std::string &jsonPath) {
     std::lock_guard<std::mutex> lock(mutex_);
 
@@ -245,6 +284,8 @@ bool SensorProfileManager::matchesProfile(const SensorProfile &profile, int band
 
 SensorDetectionResult SensorProfileManager::detectSensor(const std::string &rasterPath) const {
     std::lock_guard<std::mutex> lock(mutex_);
+
+    ensureLoaded();
 
     SensorDetectionResult result;
 

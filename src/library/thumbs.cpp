@@ -421,8 +421,23 @@ void generateImageThumbEx(const fs::path& imagePath,
         float rMin, rMax;
         if (!visParams.rescale.empty()) {
             auto commaPos = visParams.rescale.find(',');
-            rMin = std::stof(visParams.rescale.substr(0, commaPos));
-            rMax = std::stof(visParams.rescale.substr(commaPos + 1));
+            if (commaPos == std::string::npos) {
+                GDALClose(hSrcDataset);
+                throw InvalidArgsException("Invalid rescale format: " + visParams.rescale + ". Expected format: min,max");
+            }
+            std::string minStr = visParams.rescale.substr(0, commaPos);
+            std::string maxStr = visParams.rescale.substr(commaPos + 1);
+            if (minStr.empty() || maxStr.empty()) {
+                GDALClose(hSrcDataset);
+                throw InvalidArgsException("Invalid rescale format: " + visParams.rescale + ". Expected format: min,max");
+            }
+            try {
+                rMin = std::stof(minStr);
+                rMax = std::stof(maxStr);
+            } catch (const std::exception&) {
+                GDALClose(hSrcDataset);
+                throw InvalidArgsException("Invalid rescale values: " + visParams.rescale + ". Expected numeric format: min,max");
+            }
         } else {
             // Use formula's natural range or p2-p98
             bool found = false;
@@ -462,7 +477,11 @@ void generateImageThumbEx(const fs::path& imagePath,
 
         // Write output via MEM → WEBP
         GDALDriverH memDrv = GDALGetDriverByName("MEM");
+        if (!memDrv)
+            throw GDALException("MEM driver not available");
         GDALDatasetH hMem = GDALCreate(memDrv, "", targetWidth, targetHeight, 4, GDT_Byte, nullptr);
+        if (!hMem)
+            throw GDALException("Cannot create in-memory dataset for formula thumbnail");
         for (int b = 0; b < 4; b++) {
             std::vector<uint8_t> chanData(pixCount);
             for (size_t i = 0; i < pixCount; i++) chanData[i] = rgba[i * 4 + b];
@@ -473,6 +492,10 @@ void generateImageThumbEx(const fs::path& imagePath,
         GDALSetRasterColorInterpretation(GDALGetRasterBand(hMem, 4), GCI_AlphaBand);
 
         GDALDriverH webpDrv = GDALGetDriverByName("WEBP");
+        if (!webpDrv) {
+            GDALClose(hMem);
+            throw GDALException("WEBP driver not available");
+        }
         char** webpOpts = nullptr;
         webpOpts = CSLAddString(webpOpts, "QUALITY=95");
 
@@ -489,6 +512,11 @@ void generateImageThumbEx(const fs::path& imagePath,
             GDALClose(hOut);
             vsi_l_offset bufSize;
             *outBuffer = VSIGetMemFileBuffer(vsiPath.c_str(), &bufSize, TRUE);
+            if (!*outBuffer) {
+                CSLDestroy(webpOpts);
+                GDALClose(hMem);
+                throw GDALException("Cannot retrieve formula thumbnail buffer from vsimem");
+            }
             *outBufferSize = static_cast<int>(bufSize);
         } else {
             GDALDatasetH hOut = GDALCreateCopy(webpDrv, outImagePath.string().c_str(), hMem, FALSE, webpOpts, nullptr, nullptr);
@@ -550,8 +578,26 @@ void generateImageThumbEx(const fs::path& imagePath,
     if (srcType != GDT_Byte) {
         if (!visParams.rescale.empty()) {
             auto commaPos = visParams.rescale.find(',');
+            if (commaPos == std::string::npos) {
+                CSLDestroy(targs);
+                GDALClose(hSrcDataset);
+                throw InvalidArgsException("Invalid rescale format: " + visParams.rescale + ". Expected format: min,max");
+            }
             std::string sMin = visParams.rescale.substr(0, commaPos);
             std::string sMax = visParams.rescale.substr(commaPos + 1);
+            if (sMin.empty() || sMax.empty()) {
+                CSLDestroy(targs);
+                GDALClose(hSrcDataset);
+                throw InvalidArgsException("Invalid rescale format: " + visParams.rescale + ". Expected format: min,max");
+            }
+            try {
+                (void)std::stof(sMin);
+                (void)std::stof(sMax);
+            } catch (const std::exception&) {
+                CSLDestroy(targs);
+                GDALClose(hSrcDataset);
+                throw InvalidArgsException("Invalid rescale values: " + visParams.rescale + ". Expected numeric format: min,max");
+            }
             targs = CSLAddString(targs, "-scale");
             targs = CSLAddString(targs, sMin.c_str());
             targs = CSLAddString(targs, sMax.c_str());

@@ -104,8 +104,10 @@ private:
     BandMapping getFallbackMapping(const std::string &rasterPath, int bandCount) const;
 
     mutable std::mutex mutex_;
-    std::vector<SensorProfile> profiles_;
-    bool loaded_ = false;
+    mutable std::vector<SensorProfile> profiles_;
+    mutable bool loaded_ = false;
+
+    void ensureLoaded() const;
 };
 
 // JSON serialization

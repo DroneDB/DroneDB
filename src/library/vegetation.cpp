@@ -9,6 +9,8 @@
 #include <cmath>
 #include <algorithm>
 #include <limits>
+#include <tuple>
+#include <cstdio>
 
 namespace ddb {
 
@@ -79,7 +81,7 @@ void VegetationEngine::initFormulas() {
     // Phase 0 - RGB indices
     formulas_.push_back({"VARI", "Visual Atmospheric Resistance Index", "(G - R) / (G + R - B)", "Areas of green vegetation on RGB images", -1, 1, true, "RGB"});
     formulas_.push_back({"EXG", "Excess Green Index", "(2 * G) - (R + B)", "Emphasizes green foliage", 0, 0, false, "RGB"});
-    formulas_.push_back({"GLI", "Green Leaf Index", "((G * 2) - R - B) / ((G * 2) + R + B)", "Green leaves and stems", -1, 1, true, "RG"});
+    formulas_.push_back({"GLI", "Green Leaf Index", "((G * 2) - R - B) / ((G * 2) + R + B)", "Green leaves and stems", -1, 1, true, "RGB"});
     formulas_.push_back({"vNDVI", "Visible NDVI", "0.5268 * (R^-0.1294 * G^0.3389 * B^-0.3118)", "Approximated NDVI for RGB sensors", 0, 0, false, "RGB"});
 
     // Phase 0 - NIR indices
@@ -105,20 +107,26 @@ std::vector<VegetationFormula> VegetationEngine::getFormulasForFilter(const Band
     std::vector<VegetationFormula> result;
     for (const auto &f : formulas_) {
         bool compatible = true;
-        for (char c : f.requiredBands) {
-            if (c == 'R' && !filter.has('R')) { compatible = false; break; }
-            if (c == 'G' && !filter.has('G')) { compatible = false; break; }
-            if (c == 'B' && !filter.has('B')) { compatible = false; break; }
-            if (c == 'N' && !filter.has('N')) { compatible = false; break; }
-            if (c == 'e' && !filter.has('e')) { compatible = false; break; }
-            // Handle "Re" in requiredBands
-            if (c == 'R' && f.requiredBands.find("Re") != std::string::npos) {
-                // Check if this 'R' is part of 'Re' - handled in the next iteration
+        // Parse requiredBands token-wise so that "Re" is treated as a single RedEdge band.
+        for (std::size_t i = 0; i < f.requiredBands.size() && compatible; ) {
+            char c = f.requiredBands[i];
+
+            // Treat "Re" as a single RedEdge requirement.
+            if (c == 'R' && (i + 1) < f.requiredBands.size() && f.requiredBands[i + 1] == 'e') {
+                if (!filter.has('e')) {
+                    compatible = false;
+                }
+                i += 2;
+                continue;
             }
-        }
-        // More specific check for "Re" as a pair
-        if (compatible && f.requiredBands.find("Re") != std::string::npos && !filter.has('e')) {
-            compatible = false;
+
+            if (c == 'R' && !filter.has('R')) { compatible = false; }
+            else if (c == 'G' && !filter.has('G')) { compatible = false; }
+            else if (c == 'B' && !filter.has('B')) { compatible = false; }
+            else if (c == 'N' && !filter.has('N')) { compatible = false; }
+            else if (c == 'e' && !filter.has('e')) { compatible = false; }
+
+            ++i;
         }
         if (compatible) result.push_back(f);
     }

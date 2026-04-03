@@ -47,7 +47,9 @@ MergeValidationResult validateMergeMultispectral(const std::vector<std::string> 
     GDALDataType refType = GDALGetRasterDataType(GDALGetRasterBand(hRef, 1));
 
     double refGt[6];
-    GDALGetGeoTransform(hRef, refGt);
+    if (GDALGetGeoTransform(hRef, refGt) != CE_None) {
+        result.warnings.push_back("Cannot read geotransform from reference file: " + inputPaths[0]);
+    }
 
     const char *refProj = GDALGetProjectionRef(hRef);
     OGRSpatialReferenceH refSrs = OSRNewSpatialReference(refProj);
@@ -102,7 +104,9 @@ MergeValidationResult validateMergeMultispectral(const std::vector<std::string> 
 
         // Geotransform check
         double gt[6];
-        GDALGetGeoTransform(hDs, gt);
+        if (GDALGetGeoTransform(hDs, gt) != CE_None) {
+            result.warnings.push_back("Cannot read geotransform from: " + inputPaths[i]);
+        }
 
         // Skew check
         if (gt[2] != 0 || gt[4] != 0) {
