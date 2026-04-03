@@ -464,7 +464,7 @@ TEST(multispectral, cogStatsSidecar) {
     // Generate stats sidecar directly
     generateCogStats(inputPath.string());
 
-    fs::path statsPath = inputPath.parent_path() / "stats.json";
+    fs::path statsPath = inputPath.parent_path() / (inputPath.filename().string() + ".stats.json");
     EXPECT_TRUE(fs::exists(statsPath));
 
     // Read and verify JSON
