@@ -175,23 +175,24 @@ namespace ddb
             double p2 = bMin, p98 = bMax;
             int nBuckets = 256;
             GUIntBig *histogram = nullptr;
+            double hMin = bMin, hMax = bMax;
 
-            if (GDALGetDefaultHistogramEx(hBand, &bMin, &bMax, &nBuckets, &histogram, FALSE, nullptr, nullptr) == CE_None && histogram) {
+            if (GDALGetDefaultHistogramEx(hBand, &hMin, &hMax, &nBuckets, &histogram, FALSE, nullptr, nullptr) == CE_None && histogram) {
                 GUIntBig totalPixels = 0;
                 for (int b = 0; b < nBuckets; b++) totalPixels += histogram[b];
 
                 GUIntBig target2 = static_cast<GUIntBig>(totalPixels * 0.02);
                 GUIntBig target98 = static_cast<GUIntBig>(totalPixels * 0.98);
                 GUIntBig cumulative = 0;
-                double bucketWidth = (bMax - bMin) / nBuckets;
+                double bucketWidth = (hMax - hMin) / nBuckets;
 
                 for (int b = 0; b < nBuckets; b++) {
                     cumulative += histogram[b];
                     if (cumulative >= target2 && p2 == bMin) {
-                        p2 = bMin + b * bucketWidth;
+                        p2 = hMin + b * bucketWidth;
                     }
                     if (cumulative >= target98 && p98 == bMax) {
-                        p98 = bMin + b * bucketWidth;
+                        p98 = hMin + b * bucketWidth;
                         break;
                     }
                 }
