@@ -358,7 +358,12 @@ void generateImageThumbEx(const fs::path& imagePath,
         std::istringstream ss(visParams.bands);
         std::string token;
         while (std::getline(ss, token, ',')) {
-            int b = std::stoi(token);
+            int b;
+            try {
+                b = std::stoi(token);
+            } catch (const std::exception &) {
+                throw InvalidArgsException("Invalid band value: '" + token + "'");
+            }
             if (b < 1 || b > bandCount)
                 throw InvalidArgsException("Band index " + std::to_string(b) + " out of range");
             selectedBands.push_back(b);
