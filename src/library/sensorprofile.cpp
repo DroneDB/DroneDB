@@ -215,6 +215,8 @@ void SensorProfileManager::loadDefaults(const std::string &jsonPath) {
 void SensorProfileManager::loadOverrides(const std::string &jsonStr) {
     std::lock_guard<std::mutex> lock(mutex_);
 
+    ensureLoaded();
+
     json root = json::parse(jsonStr);
     if (root.contains("profiles")) {
         for (const auto &pj : root["profiles"]) {
