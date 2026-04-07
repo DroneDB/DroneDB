@@ -46,8 +46,9 @@ MergeValidationResult validateMergeMultispectral(const std::vector<std::string> 
     int refHeight = GDALGetRasterYSize(hRef);
     GDALDataType refType = GDALGetRasterDataType(GDALGetRasterBand(hRef, 1));
 
-    double refGt[6];
-    if (GDALGetGeoTransform(hRef, refGt) != CE_None) {
+    double refGt[6] = {0, 1, 0, 0, 0, -1};
+    bool hasGeoTransform = (GDALGetGeoTransform(hRef, refGt) == CE_None);
+    if (!hasGeoTransform) {
         result.warnings.push_back("Cannot read geotransform from reference file: " + inputPaths[0]);
     }
 
