@@ -1,0 +1,259 @@
+{
+  "$schema": "https://dronedb.app/schemas/sensor-profiles-v1.0.json",
+  "version": "1.0",
+  "profiles": [
+    {
+      "id": "sentinel-2",
+      "name": "Sentinel-2 MSI",
+      "description": "Copernicus Sentinel-2 MultiSpectral Instrument (Level-2A)",
+      "sensorCategory": "multispectral",
+      "detection": {
+        "bandCount": 13,
+        "dataType": "UInt16",
+        "metadataPatterns": ["Sentinel-2", "S2A_", "S2B_", "SENTINEL2"],
+        "priority": 10
+      },
+      "bands": [
+        {"index": 1, "name": "Coastal Aerosol", "wavelength": 443, "resolution": 60, "domain": "optical"},
+        {"index": 2, "name": "Blue", "wavelength": 490, "resolution": 10, "domain": "optical"},
+        {"index": 3, "name": "Green", "wavelength": 560, "resolution": 10, "domain": "optical"},
+        {"index": 4, "name": "Red", "wavelength": 665, "resolution": 10, "domain": "optical"},
+        {"index": 5, "name": "Vegetation Red Edge 1", "wavelength": 705, "resolution": 20, "domain": "optical"},
+        {"index": 6, "name": "Vegetation Red Edge 2", "wavelength": 740, "resolution": 20, "domain": "optical"},
+        {"index": 7, "name": "Vegetation Red Edge 3", "wavelength": 783, "resolution": 20, "domain": "optical"},
+        {"index": 8, "name": "NIR", "wavelength": 842, "resolution": 10, "domain": "optical"},
+        {"index": 9, "name": "Vegetation Red Edge 4", "wavelength": 865, "resolution": 20, "domain": "optical"},
+        {"index": 10, "name": "Water Vapour", "wavelength": 945, "resolution": 60, "domain": "optical"},
+        {"index": 11, "name": "SWIR Cirrus", "wavelength": 1375, "resolution": 60, "domain": "swir"},
+        {"index": 12, "name": "SWIR 1", "wavelength": 1610, "resolution": 20, "domain": "swir"},
+        {"index": 13, "name": "SWIR 2", "wavelength": 2190, "resolution": 20, "domain": "swir"}
+      ],
+      "presets": [
+        {"id": "true-color", "name": "True Color (RGB)", "description": "Natural color visualization as seen by human eye", "bandMapping": {"r": 4, "g": 3, "b": 2}, "isDefault": true},
+        {"id": "false-color-ir", "name": "False Color Infrared (CIR)", "description": "Vegetation appears bright red, useful for agriculture", "bandMapping": {"r": 8, "g": 4, "b": 3}},
+        {"id": "agriculture", "name": "Agriculture", "description": "SWIR-NIR-Blue combination for crop analysis", "bandMapping": {"r": 12, "g": 8, "b": 2}},
+        {"id": "geology", "name": "Geology", "description": "SWIR-SWIR-Red for geological features", "bandMapping": {"r": 12, "g": 13, "b": 4}},
+        {"id": "moisture", "name": "Moisture Index", "description": "NIR-SWIR-Green for moisture detection", "bandMapping": {"r": 8, "g": 12, "b": 3}, "stretch": "percentile"},
+        {"id": "ndvi", "name": "NDVI (Vegetation Index)", "description": "Normalized Difference Vegetation Index", "type": "index", "formula": "NDVI", "colormap": "rdylgn"},
+        {"id": "ndwi", "name": "NDWI (Water Index)", "description": "Normalized Difference Water Index", "type": "index", "formula": "NDWI", "colormap": "bugn"}
+      ]
+    },
+    {
+      "id": "landsat-8",
+      "name": "Landsat 8/9 OLI",
+      "description": "USGS Landsat 8/9 Operational Land Imager",
+      "sensorCategory": "multispectral",
+      "detection": {
+        "bandCount": 11,
+        "dataType": "UInt16",
+        "metadataPatterns": ["Landsat", "LC08", "LC09", "LANDSAT_8", "LANDSAT_9"],
+        "priority": 10
+      },
+      "bands": [
+        {"index": 1, "name": "Coastal Aerosol", "wavelength": 443, "resolution": 30, "domain": "optical"},
+        {"index": 2, "name": "Blue", "wavelength": 482, "resolution": 30, "domain": "optical"},
+        {"index": 3, "name": "Green", "wavelength": 562, "resolution": 30, "domain": "optical"},
+        {"index": 4, "name": "Red", "wavelength": 655, "resolution": 30, "domain": "optical"},
+        {"index": 5, "name": "NIR", "wavelength": 865, "resolution": 30, "domain": "optical"},
+        {"index": 6, "name": "SWIR 1", "wavelength": 1609, "resolution": 30, "domain": "swir"},
+        {"index": 7, "name": "SWIR 2", "wavelength": 2201, "resolution": 30, "domain": "swir"},
+        {"index": 8, "name": "Panchromatic", "wavelength": 590, "resolution": 15, "domain": "optical"},
+        {"index": 9, "name": "Cirrus", "wavelength": 1373, "resolution": 30, "domain": "swir"},
+        {"index": 10, "name": "TIRS 1", "wavelength": 10895, "resolution": 100, "domain": "thermal"},
+        {"index": 11, "name": "TIRS 2", "wavelength": 12005, "resolution": 100, "domain": "thermal"}
+      ],
+      "presets": [
+        {"id": "true-color", "name": "True Color (RGB)", "description": "Natural color visualization", "bandMapping": {"r": 4, "g": 3, "b": 2}, "isDefault": true},
+        {"id": "false-color-ir", "name": "False Color Infrared", "description": "Vegetation health analysis", "bandMapping": {"r": 5, "g": 4, "b": 3}},
+        {"id": "urban", "name": "Urban", "description": "SWIR-NIR-Blue for urban areas", "bandMapping": {"r": 7, "g": 6, "b": 4}}
+      ]
+    },
+    {
+      "id": "landsat-5",
+      "name": "Landsat 5/7 TM/ETM+",
+      "description": "Legacy Landsat Thematic Mapper",
+      "sensorCategory": "multispectral",
+      "detection": {
+        "bandCount": 7,
+        "dataType": "Byte",
+        "metadataPatterns": ["Landsat", "LT05", "LE07"],
+        "priority": 5
+      },
+      "bands": [
+        {"index": 1, "name": "Blue", "wavelength": 485, "domain": "optical"},
+        {"index": 2, "name": "Green", "wavelength": 560, "domain": "optical"},
+        {"index": 3, "name": "Red", "wavelength": 660, "domain": "optical"},
+        {"index": 4, "name": "NIR", "wavelength": 830, "domain": "optical"},
+        {"index": 5, "name": "SWIR 1", "wavelength": 1650, "domain": "swir"},
+        {"index": 6, "name": "Thermal", "wavelength": 11450, "domain": "thermal"},
+        {"index": 7, "name": "SWIR 2", "wavelength": 2215, "domain": "swir"}
+      ],
+      "presets": [
+        {"id": "true-color", "name": "True Color (RGB)", "bandMapping": {"r": 3, "g": 2, "b": 1}, "isDefault": true},
+        {"id": "false-color-ir", "name": "False Color Infrared", "bandMapping": {"r": 4, "g": 3, "b": 2}}
+      ]
+    },
+    {
+      "id": "micasense-rededge",
+      "name": "MicaSense RedEdge",
+      "description": "MicaSense RedEdge multispectral camera for UAV (Blue 475nm)",
+      "sensorCategory": "multispectral",
+      "detection": {
+        "bandCount": 5,
+        "dataType": "UInt16",
+        "metadataPatterns": ["MicaSense", "RedEdge"],
+        "priority": 10
+      },
+      "bands": [
+        {"index": 1, "name": "Blue", "wavelength": 475, "domain": "optical"},
+        {"index": 2, "name": "Green", "wavelength": 560, "domain": "optical"},
+        {"index": 3, "name": "Red", "wavelength": 668, "domain": "optical"},
+        {"index": 4, "name": "Red Edge", "wavelength": 717, "domain": "optical"},
+        {"index": 5, "name": "NIR", "wavelength": 842, "domain": "optical"}
+      ],
+      "presets": [
+        {"id": "true-color", "name": "True Color (RGB)", "bandMapping": {"r": 3, "g": 2, "b": 1}, "isDefault": true},
+        {"id": "false-color-ir", "name": "Color Infrared (CIR)", "bandMapping": {"r": 5, "g": 3, "b": 2}},
+        {"id": "red-edge", "name": "Red Edge Composite", "description": "Highlights vegetation stress", "bandMapping": {"r": 5, "g": 4, "b": 3}}
+      ]
+    },
+    {
+      "id": "dji-p4-multispectral",
+      "name": "DJI P4 Multispectral",
+      "description": "DJI Phantom 4 Multispectral camera (Blue 450nm)",
+      "sensorCategory": "multispectral",
+      "detection": {
+        "bandCount": 5,
+        "dataType": "UInt16",
+        "metadataPatterns": ["FC6360", "P4 Multispectral"],
+        "priority": 10
+      },
+      "bands": [
+        {"index": 1, "name": "Blue", "wavelength": 450, "domain": "optical"},
+        {"index": 2, "name": "Green", "wavelength": 560, "domain": "optical"},
+        {"index": 3, "name": "Red", "wavelength": 650, "domain": "optical"},
+        {"index": 4, "name": "Red Edge", "wavelength": 730, "domain": "optical"},
+        {"index": 5, "name": "NIR", "wavelength": 840, "domain": "optical"}
+      ],
+      "presets": [
+        {"id": "true-color", "name": "True Color (RGB)", "bandMapping": {"r": 3, "g": 2, "b": 1}, "isDefault": true},
+        {"id": "false-color-ir", "name": "Color Infrared (CIR)", "bandMapping": {"r": 5, "g": 3, "b": 2}}
+      ]
+    },
+    {
+      "id": "dji-mavic-3m",
+      "name": "DJI Mavic 3 Multispectral",
+      "description": "DJI Mavic 3M (4 bands, no visible blue - default CIR)",
+      "sensorCategory": "multispectral",
+      "detection": {
+        "bandCount": 4,
+        "dataType": "UInt16",
+        "metadataPatterns": ["Mavic 3M", "FC3582", "M3M"],
+        "priority": 10
+      },
+      "bands": [
+        {"index": 1, "name": "Green", "wavelength": 560, "domain": "optical"},
+        {"index": 2, "name": "Red", "wavelength": 650, "domain": "optical"},
+        {"index": 3, "name": "Red Edge", "wavelength": 730, "domain": "optical"},
+        {"index": 4, "name": "NIR", "wavelength": 860, "domain": "optical"}
+      ],
+      "presets": [
+        {"id": "false-color-ir", "name": "Color Infrared (CIR)", "bandMapping": {"r": 4, "g": 1, "b": 2}, "isDefault": true},
+        {"id": "red-edge", "name": "Red Edge Composite", "bandMapping": {"r": 4, "g": 3, "b": 2}}
+      ]
+    },
+    {
+      "id": "parrot-sequoia",
+      "name": "Parrot Sequoia+",
+      "description": "Parrot Sequoia+ multispectral camera (4 bands, no blue)",
+      "sensorCategory": "multispectral",
+      "detection": {
+        "bandCount": 4,
+        "dataType": "UInt16",
+        "metadataPatterns": ["Sequoia", "Parrot"],
+        "priority": 8
+      },
+      "bands": [
+        {"index": 1, "name": "Green", "wavelength": 550, "domain": "optical"},
+        {"index": 2, "name": "Red", "wavelength": 660, "domain": "optical"},
+        {"index": 3, "name": "Red Edge", "wavelength": 735, "domain": "optical"},
+        {"index": 4, "name": "NIR", "wavelength": 790, "domain": "optical"}
+      ],
+      "presets": [
+        {"id": "false-color-ir", "name": "Color Infrared (CIR)", "bandMapping": {"r": 4, "g": 1, "b": 2}, "isDefault": true},
+        {"id": "red-edge", "name": "Red Edge Composite", "bandMapping": {"r": 4, "g": 3, "b": 2}}
+      ]
+    },
+    {
+      "id": "sentera-6x",
+      "name": "Sentera 6X",
+      "description": "Sentera 6X multispectral camera with dual red edge",
+      "sensorCategory": "multispectral",
+      "detection": {
+        "bandCount": 6,
+        "dataType": "UInt16",
+        "metadataPatterns": ["Sentera", "6X"],
+        "priority": 10
+      },
+      "bands": [
+        {"index": 1, "name": "Blue", "wavelength": 475, "domain": "optical"},
+        {"index": 2, "name": "Green", "wavelength": 550, "domain": "optical"},
+        {"index": 3, "name": "Red", "wavelength": 670, "domain": "optical"},
+        {"index": 4, "name": "Red Edge 1", "wavelength": 715, "domain": "optical"},
+        {"index": 5, "name": "Red Edge 2", "wavelength": 750, "domain": "optical"},
+        {"index": 6, "name": "NIR", "wavelength": 840, "domain": "optical"}
+      ],
+      "presets": [
+        {"id": "true-color", "name": "True Color (RGB)", "bandMapping": {"r": 3, "g": 2, "b": 1}, "isDefault": true},
+        {"id": "false-color-ir", "name": "Color Infrared (CIR)", "bandMapping": {"r": 6, "g": 3, "b": 2}}
+      ]
+    },
+    {
+      "id": "worldview-2",
+      "name": "WorldView-2/3",
+      "description": "DigitalGlobe WorldView-2 and WorldView-3 satellites",
+      "sensorCategory": "multispectral",
+      "detection": {
+        "bandCount": 8,
+        "dataType": "UInt16",
+        "metadataPatterns": ["WorldView", "WV02", "WV03"],
+        "priority": 10
+      },
+      "bands": [
+        {"index": 1, "name": "Coastal", "wavelength": 425, "domain": "optical"},
+        {"index": 2, "name": "Blue", "wavelength": 480, "domain": "optical"},
+        {"index": 3, "name": "Green", "wavelength": 545, "domain": "optical"},
+        {"index": 4, "name": "Yellow", "wavelength": 605, "domain": "optical"},
+        {"index": 5, "name": "Red", "wavelength": 660, "domain": "optical"},
+        {"index": 6, "name": "Red Edge", "wavelength": 725, "domain": "optical"},
+        {"index": 7, "name": "NIR1", "wavelength": 833, "domain": "optical"},
+        {"index": 8, "name": "NIR2", "wavelength": 950, "domain": "optical"}
+      ],
+      "presets": [
+        {"id": "true-color", "name": "True Color (RGB)", "bandMapping": {"r": 5, "g": 3, "b": 2}, "isDefault": true},
+        {"id": "false-color-ir", "name": "Color Infrared", "bandMapping": {"r": 7, "g": 5, "b": 3}}
+      ]
+    },
+    {
+      "id": "generic-4band",
+      "name": "Generic 4-Band (BGRN)",
+      "description": "Generic 4-band imagery (Blue, Green, Red, NIR). Low priority fallback.",
+      "sensorCategory": "multispectral",
+      "detection": {
+        "bandCount": 4,
+        "dataType": "UInt16",
+        "priority": 0
+      },
+      "bands": [
+        {"index": 1, "name": "Blue", "domain": "optical"},
+        {"index": 2, "name": "Green", "domain": "optical"},
+        {"index": 3, "name": "Red", "domain": "optical"},
+        {"index": 4, "name": "NIR", "domain": "optical"}
+      ],
+      "presets": [
+        {"id": "true-color", "name": "True Color (RGB)", "bandMapping": {"r": 3, "g": 2, "b": 1}, "isDefault": true},
+        {"id": "false-color-ir", "name": "Color Infrared", "bandMapping": {"r": 4, "g": 3, "b": 2}}
+      ]
+    }
+  ]
+}

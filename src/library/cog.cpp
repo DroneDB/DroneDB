@@ -7,6 +7,14 @@
 #include "logger.h"
 #include "mio.h"
 #include "exceptions.h"
+#include "json.h"
+
+#include <fstream>
+#include <cmath>
+#include <algorithm>
+#include <chrono>
+#include <iomanip>
+#include <sstream>
 
 namespace ddb
 {
@@ -35,6 +43,7 @@ namespace ddb
                 }
 
                 LOGD << "Successfully copied optimized COG from " << inputGTiff << " to " << outputCog;
+                generateCogStats(outputCog);
                 return;
             } catch (const std::exception& e) {
                 LOGW << "Failed to copy COG file: " << e.what() << ". Falling back to rebuild.";
@@ -131,8 +140,98 @@ namespace ddb
                                             psOptions,
                                             nullptr);
         GDALWarpAppOptionsFree(psOptions);
+        if (!hNewDataset) {
+            GDALClose(hSrcDataset);
+            throw GDALException("GDALWarp failed to create output COG: " + outputCog);
+        }
         GDALClose(hNewDataset);
         GDALClose(hSrcDataset);
+
+        // Generate stats.json sidecar
+        generateCogStats(outputCog);
+    }
+
+    void generateCogStats(const std::string &cogPath) {
+        GDALDatasetH hDs = GDALOpen(cogPath.c_str(), GA_ReadOnly);
+        if (!hDs) {
+            LOGW << "Cannot open COG for stats generation: " << cogPath;
+            return;
+        }
+
+        json statsJson;
+        json bandsJson;
+        int nBands = GDALGetRasterCount(hDs);
+
+        for (int i = 1; i <= nBands; i++) {
+            GDALRasterBandH hBand = GDALGetRasterBand(hDs, i);
+            double bMin, bMax, bMean, bStdDev;
+
+            if (GDALComputeRasterStatistics(hBand, TRUE, &bMin, &bMax, &bMean, &bStdDev, nullptr, nullptr) != CE_None) {
+                LOGW << "Cannot compute statistics for band " << i;
+                continue;
+            }
+
+            // Approximate percentiles from histogram
+            double p2 = bMin, p98 = bMax;
+            int nBuckets = 256;
+            GUIntBig *histogram = nullptr;
+            double hMin = bMin, hMax = bMax;
+
+            if (GDALGetDefaultHistogramEx(hBand, &hMin, &hMax, &nBuckets, &histogram, FALSE, nullptr, nullptr) == CE_None && histogram) {
+                GUIntBig totalPixels = 0;
+                for (int b = 0; b < nBuckets; b++) totalPixels += histogram[b];
+
+                GUIntBig target2 = static_cast<GUIntBig>(totalPixels * 0.02);
+                GUIntBig target98 = static_cast<GUIntBig>(totalPixels * 0.98);
+                GUIntBig cumulative = 0;
+                double bucketWidth = (hMax - hMin) / nBuckets;
+
+                for (int b = 0; b < nBuckets; b++) {
+                    cumulative += histogram[b];
+                    if (cumulative >= target2 && p2 == bMin) {
+                        p2 = hMin + b * bucketWidth;
+                    }
+                    if (cumulative >= target98 && p98 == bMax) {
+                        p98 = hMin + b * bucketWidth;
+                        break;
+                    }
+                }
+                VSIFree(histogram);
+            }
+
+            bandsJson[std::to_string(i)] = {
+                {"min", bMin}, {"max", bMax}, {"mean", bMean}, {"std", bStdDev},
+                {"p2", p2}, {"p98", p98}
+            };
+        }
+
+        GDALClose(hDs);
+
+        if (!bandsJson.empty()) {
+            auto now = std::chrono::system_clock::now();
+            auto time_t = std::chrono::system_clock::to_time_t(now);
+            std::tm tmBuf;
+#ifdef _WIN32
+            gmtime_s(&tmBuf, &time_t);
+#else
+            gmtime_r(&time_t, &tmBuf);
+#endif
+            std::ostringstream oss;
+            oss << std::put_time(&tmBuf, "%FT%TZ");
+
+            statsJson["bands"] = bandsJson;
+            statsJson["computedAt"] = oss.str();
+
+            fs::path cogFsPath(cogPath);
+            fs::path statsPath = cogFsPath.parent_path() / (cogFsPath.filename().string() + ".stats.json");
+            std::ofstream out(statsPath.string());
+            if (out.is_open()) {
+                out << statsJson.dump(2);
+                LOGD << "Wrote stats sidecar: " << statsPath.string();
+            } else {
+                LOGW << "Cannot write stats sidecar: " << statsPath.string();
+            }
+        }
     }
 
 }
