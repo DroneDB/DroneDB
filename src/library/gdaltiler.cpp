@@ -7,11 +7,16 @@
 #include <mutex>
 #include <memory>
 #include <vector>
+#include <algorithm>
+#include <sstream>
+#include <cmath>
 
 #include "entry.h"
 #include "exceptions.h"
 #include "logger.h"
 #include "mio.h"
+#include "sensorprofile.h"
+#include "vegetation.h"
 
 namespace ddb
 {
@@ -379,6 +384,355 @@ namespace ddb
         {
             return tilePath;
         }
+    }
+
+    std::string GDALTiler::tile(int tz, int tx, int ty,
+                                const ThumbVisParams &visParams,
+                                uint8_t **outBuffer, int *outBufferSize)
+    {
+        // If no vis params set, fall through to standard tile
+        if (visParams.preset.empty() && visParams.bands.empty() &&
+            visParams.formula.empty()) {
+            return tile(tz, tx, ty, outBuffer, outBufferSize);
+        }
+
+        std::string tilePath = getTilePath(tz, tx, ty, true);
+
+        if (tms) {
+            ty = tmsToXYZ(ty, tz);
+        }
+
+        BoundingBox<Projected2Di> tMinMax = getMinMaxCoordsForZ(tz);
+        if (!tMinMax.contains(tx, ty))
+            throw GDALException("Out of bounds");
+
+        const int totalBands = GDALGetRasterCount(inputDataset);
+        BoundingBox<Projected2D> b = mercator.tileBounds(tx, ty, tz);
+        const int querySize = tileSize;
+        GQResult g = geoQuery(inputDataset, b.min.x, b.max.y, b.max.x, b.min.y, querySize);
+
+        if (g.r.xsize == 0 || g.r.ysize == 0 || g.w.xsize == 0 || g.w.ysize == 0)
+            throw GDALException("Geoquery out of bounds");
+
+        const size_t wSize = static_cast<size_t>(g.w.xsize) * g.w.ysize;
+
+        // --- Formula mode ---
+        if (!visParams.formula.empty()) {
+            auto& ve = VegetationEngine::instance();
+
+            BandFilter bf;
+            if (!visParams.bandFilter.empty()) {
+                bf = VegetationEngine::parseFilter(visParams.bandFilter, totalBands);
+            } else {
+                bf = ve.autoDetectFilter(inputPath);
+            }
+
+            // Read all bands as float
+            std::vector<std::vector<float>> bandStorage(totalBands);
+            std::vector<float*> bandPtrs(totalBands);
+            int alphaBandIdx = -1;
+            std::vector<int> bandHasNodata(totalBands, 0);
+            std::vector<double> bandNodataVal(totalBands, 0.0);
+            for (int b2 = 0; b2 < totalBands; b2++) {
+                bandStorage[b2].resize(wSize);
+                bandPtrs[b2] = bandStorage[b2].data();
+                GDALRasterBandH hBand = GDALGetRasterBand(inputDataset, b2 + 1);
+                if (GDALRasterIO(hBand, GF_Read, g.r.x, g.r.y, g.r.xsize, g.r.ysize,
+                                 bandPtrs[b2], g.w.xsize, g.w.ysize,
+                                 GDT_Float32, 0, 0) != CE_None) {
+                    throw GDALException("Cannot read band " + std::to_string(b2 + 1));
+                }
+                if (GDALGetRasterColorInterpretation(hBand) == GCI_AlphaBand) {
+                    alphaBandIdx = b2;
+                }
+                bandNodataVal[b2] = GDALGetRasterNoDataValue(hBand, &bandHasNodata[b2]);
+            }
+
+            // Pre-mask transparent and nodata pixels
+            float nodata = -9999.0f;
+            for (size_t i = 0; i < wSize; i++) {
+                bool masked = false;
+                if (alphaBandIdx >= 0 && bandPtrs[alphaBandIdx][i] == 0.0f) {
+                    masked = true;
+                }
+                if (!masked) {
+                    for (int b2 = 0; b2 < totalBands; b2++) {
+                        if (b2 == alphaBandIdx) continue;
+                        if (bandHasNodata[b2] &&
+                            static_cast<double>(bandPtrs[b2][i]) == bandNodataVal[b2]) {
+                            masked = true;
+                            break;
+                        }
+                    }
+                }
+                if (masked) {
+                    for (int b2 = 0; b2 < totalBands; b2++) {
+                        bandPtrs[b2][i] = nodata;
+                    }
+                }
+            }
+
+            // Apply formula
+            std::vector<float> result(wSize);
+            const auto* formulaPtr = ve.getFormula(visParams.formula);
+            if (!formulaPtr)
+                throw InvalidArgsException("Unknown formula: " + visParams.formula);
+
+            ve.applyFormula(*formulaPtr, bf, bandPtrs, result.data(), wSize, nodata);
+
+            // Determine rescale range
+            float rMin, rMax;
+            if (!visParams.rescale.empty()) {
+                auto commaPos = visParams.rescale.find(',');
+                if (commaPos == std::string::npos)
+                    throw InvalidArgsException("Invalid rescale format: " + visParams.rescale);
+                rMin = std::stof(visParams.rescale.substr(0, commaPos));
+                rMax = std::stof(visParams.rescale.substr(commaPos + 1));
+            } else if (formulaPtr->hasRange && formulaPtr->rangeMin != formulaPtr->rangeMax) {
+                rMin = static_cast<float>(formulaPtr->rangeMin);
+                rMax = static_cast<float>(formulaPtr->rangeMax);
+            } else {
+                // Compute p2-p98
+                std::vector<float> valid;
+                valid.reserve(wSize);
+                for (size_t i = 0; i < wSize; i++) {
+                    if (result[i] != nodata && !std::isnan(result[i]))
+                        valid.push_back(result[i]);
+                }
+                if (!valid.empty()) {
+                    std::sort(valid.begin(), valid.end());
+                    rMin = valid[static_cast<size_t>(valid.size() * 0.02)];
+                    rMax = valid[std::min(valid.size() - 1, static_cast<size_t>(valid.size() * 0.98))];
+                } else {
+                    rMin = 0; rMax = 1;
+                }
+            }
+
+            // Apply colormap
+            std::string cmId = visParams.colormap.empty() ? "rdylgn" : visParams.colormap;
+            const auto* cmap = ve.getColormap(cmId);
+            if (!cmap)
+                throw InvalidArgsException("Unknown colormap: " + cmId);
+
+            std::vector<uint8_t> rgba(wSize * 4);
+            ve.applyColormap(result.data(), rgba.data(), wSize, *cmap, rMin, rMax, nodata);
+
+            // Create output tile (RGBA)
+            GDALDatasetH dsTile = GDALCreate(memDrv, "", tileSize, tileSize, 4, GDT_Byte, nullptr);
+            if (!dsTile) throw GDALException("Cannot create tile dataset");
+
+            for (int ch = 0; ch < 4; ch++) {
+                std::vector<uint8_t> chanData(wSize);
+                for (size_t i = 0; i < wSize; i++) chanData[i] = rgba[i * 4 + ch];
+                GDALRasterBandH hBand = GDALGetRasterBand(dsTile, ch + 1);
+                GDALRasterIO(hBand, GF_Write, g.w.x, g.w.y, g.w.xsize, g.w.ysize,
+                             chanData.data(), g.w.xsize, g.w.ysize, GDT_Byte, 0, 0);
+            }
+            GDALSetRasterColorInterpretation(GDALGetRasterBand(dsTile, 4), GCI_AlphaBand);
+
+            GDALDatasetH outDs = GDALCreateCopy(pngDrv, tilePath.c_str(), dsTile, FALSE,
+                                                nullptr, nullptr, nullptr);
+            if (!outDs) {
+                GDALClose(dsTile);
+                throw GDALException("Cannot create output tile");
+            }
+            GDALFlushCache(outDs);
+            GDALClose(outDs);
+            GDALClose(dsTile);
+
+            if (outBuffer != nullptr) {
+                vsi_l_offset bufSize;
+                *outBuffer = VSIGetMemFileBuffer(tilePath.c_str(), &bufSize, TRUE);
+                if (bufSize > std::numeric_limits<int>::max())
+                    throw GDALException("Exceeded max buf size");
+                *outBufferSize = static_cast<int>(bufSize);
+                return "";
+            }
+            return tilePath;
+        }
+
+        // --- Band selection mode ---
+        std::vector<int> selectedBands;
+        if (!visParams.bands.empty()) {
+            std::istringstream ss(visParams.bands);
+            std::string token;
+            while (std::getline(ss, token, ',')) {
+                int bIdx = std::stoi(token);
+                if (bIdx < 1 || bIdx > totalBands)
+                    throw InvalidArgsException("Band index " + std::to_string(bIdx) + " out of range");
+                selectedBands.push_back(bIdx);
+            }
+        } else if (!visParams.preset.empty()) {
+            auto& spm = SensorProfileManager::instance();
+            auto mapping = spm.getBandMappingForPreset(inputPath, visParams.preset);
+            selectedBands = {mapping.r, mapping.g, mapping.b};
+        } else {
+            // Auto-detect sensor
+            auto& spm = SensorProfileManager::instance();
+            auto detection = spm.detectSensor(inputPath);
+            if (detection.detected) {
+                selectedBands = {detection.defaultBandMapping.r,
+                                 detection.defaultBandMapping.g,
+                                 detection.defaultBandMapping.b};
+            }
+        }
+
+        int outBands = selectedBands.empty() ? std::min(3, nBands) : static_cast<int>(selectedBands.size());
+        outBands = std::min(3, outBands);
+
+        GDALDatasetH dsTile = GDALCreate(memDrv, "", tileSize, tileSize, outBands + 1,
+                                         GDT_Byte, nullptr);
+        if (!dsTile) throw GDALException("Cannot create tile dataset");
+
+        const GDALDataType type = GDALGetRasterDataType(GDALGetRasterBand(inputDataset, 1));
+
+        if (!selectedBands.empty()) {
+            // Read selected bands individually
+            for (int i = 0; i < outBands; i++) {
+                int srcBand = selectedBands[i];
+                GDALRasterBandH hSrcBand = GDALGetRasterBand(inputDataset, srcBand);
+
+                if (type != GDT_Byte) {
+                    // Read as float, compute stats, rescale to byte
+                    std::vector<float> fBuf(wSize);
+                    if (GDALRasterIO(hSrcBand, GF_Read, g.r.x, g.r.y, g.r.xsize, g.r.ysize,
+                                     fBuf.data(), g.w.xsize, g.w.ysize, GDT_Float32, 0, 0) != CE_None)
+                        throw GDALException("Cannot read band " + std::to_string(srcBand));
+
+                    // Get band statistics for percentile stretch
+                    GDALDatasetH statsDs = origDataset != nullptr ? origDataset : inputDataset;
+                    GDALRasterBandH hStatsBand = GDALGetRasterBand(statsDs, srcBand);
+                    double bMin, bMax, bMean, bStdDev;
+                    CPLErr statsRes = GDALGetRasterStatistics(hStatsBand, TRUE, FALSE, &bMin, &bMax, &bMean, &bStdDev);
+                    if (statsRes != CE_None) {
+                        GDALComputeRasterStatistics(hStatsBand, TRUE, &bMin, &bMax, &bMean, &bStdDev, nullptr, nullptr);
+                    }
+
+                    // Use p2-p98 approximation from mean/stddev
+                    double sMin = bMean - 2.33 * bStdDev;
+                    double sMax = bMean + 2.33 * bStdDev;
+                    sMin = std::max(sMin, bMin);
+                    sMax = std::min(sMax, bMax);
+                    if (sMin >= sMax) { sMin = bMin; sMax = bMax; }
+                    if (sMin >= sMax) sMax = sMin + 1.0;
+
+                    std::vector<uint8_t> byteBuf(wSize);
+                    double range = sMax - sMin;
+                    for (size_t px = 0; px < wSize; px++) {
+                        double v = std::max(sMin, std::min(sMax, static_cast<double>(fBuf[px])));
+                        byteBuf[px] = static_cast<uint8_t>(255.0 * (v - sMin) / range);
+                    }
+
+                    GDALRasterBandH hDstBand = GDALGetRasterBand(dsTile, i + 1);
+                    GDALRasterIO(hDstBand, GF_Write, g.w.x, g.w.y, g.w.xsize, g.w.ysize,
+                                 byteBuf.data(), g.w.xsize, g.w.ysize, GDT_Byte, 0, 0);
+                } else {
+                    // Byte data: read directly
+                    std::vector<uint8_t> buf(wSize);
+                    if (GDALRasterIO(hSrcBand, GF_Read, g.r.x, g.r.y, g.r.xsize, g.r.ysize,
+                                     buf.data(), g.w.xsize, g.w.ysize, GDT_Byte, 0, 0) != CE_None)
+                        throw GDALException("Cannot read band " + std::to_string(srcBand));
+
+                    GDALRasterBandH hDstBand = GDALGetRasterBand(dsTile, i + 1);
+                    GDALRasterIO(hDstBand, GF_Write, g.w.x, g.w.y, g.w.xsize, g.w.ysize,
+                                 buf.data(), g.w.xsize, g.w.ysize, GDT_Byte, 0, 0);
+                }
+            }
+        } else {
+            // No band selection: use standard path (first N bands)
+            std::unique_ptr<uint8_t[]> buffer(
+                new uint8_t[GDALGetDataTypeSizeBytes(type) * outBands * wSize]);
+
+            if (GDALDatasetRasterIO(inputDataset, GF_Read, g.r.x, g.r.y, g.r.xsize,
+                                    g.r.ysize, buffer.get(), g.w.xsize, g.w.ysize, type,
+                                    outBands, nullptr, 0, 0, 0) != CE_None) {
+                GDALClose(dsTile);
+                throw GDALException("Cannot read input dataset window");
+            }
+
+            if (type != GDT_Byte && type != GDT_Unknown) {
+                std::unique_ptr<uint8_t[]> scaledBuffer(new uint8_t[GDALGetDataTypeSizeBytes(GDT_Byte) * outBands * wSize]);
+                size_t bufSize = wSize * outBands;
+
+                double globalMin = std::numeric_limits<double>::max();
+                double globalMax = std::numeric_limits<double>::lowest();
+                for (int i = 0; i < outBands; i++) {
+                    double bMin2, bMax2;
+                    GDALDatasetH ds = origDataset != nullptr ? origDataset : inputDataset;
+                    GDALRasterBandH hBand = GDALGetRasterBand(ds, i + 1);
+                    CPLErr statsRes = GDALGetRasterStatistics(hBand, TRUE, FALSE, &bMin2, &bMax2, nullptr, nullptr);
+                    if (statsRes == CE_Warning) {
+                        double bMean2, bStdDev2;
+                        GDALGetRasterStatistics(hBand, TRUE, TRUE, &bMin2, &bMax2, &bMean2, &bStdDev2);
+                        GDALSetRasterStatistics(hBand, bMin2, bMax2, bMean2, bStdDev2);
+                    } else if (statsRes == CE_Failure) {
+                        throw GDALException("Cannot compute band statistics");
+                    }
+                    globalMin = std::min(globalMin, bMin2);
+                    globalMax = std::max(globalMax, bMax2);
+                }
+
+                switch (type) {
+                case GDT_UInt16: rescale<uint16_t>(buffer.get(), scaledBuffer.get(), bufSize, globalMin, globalMax); break;
+                case GDT_Int16: rescale<int16_t>(buffer.get(), scaledBuffer.get(), bufSize, globalMin, globalMax); break;
+                case GDT_UInt32: rescale<uint32_t>(buffer.get(), scaledBuffer.get(), bufSize, globalMin, globalMax); break;
+                case GDT_Int32: rescale<int32_t>(buffer.get(), scaledBuffer.get(), bufSize, globalMin, globalMax); break;
+                case GDT_Float32: rescale<float>(buffer.get(), scaledBuffer.get(), bufSize, globalMin, globalMax); break;
+                case GDT_Float64: rescale<double>(buffer.get(), scaledBuffer.get(), bufSize, globalMin, globalMax); break;
+                default: break;
+                }
+                buffer = std::move(scaledBuffer);
+            }
+
+            if (GDALDatasetRasterIO(dsTile, GF_Write, g.w.x, g.w.y, g.w.xsize,
+                                    g.w.ysize, buffer.get(), g.w.xsize, g.w.ysize,
+                                    GDT_Byte, outBands, nullptr, 0, 0, 0) != CE_None) {
+                GDALClose(dsTile);
+                throw GDALException("Cannot write tile data");
+            }
+        }
+
+        // Alpha
+        GDALRasterBandH alphaBand = FindAlphaBand(inputDataset);
+        if (alphaBand == nullptr) {
+            GDALRasterBandH raster = GDALGetRasterBand(inputDataset, 1);
+            alphaBand = GDALGetMaskBand(raster);
+        }
+
+        std::vector<uint8_t> alphaBuffer(wSize);
+        if (GDALRasterIO(alphaBand, GF_Read, g.r.x, g.r.y, g.r.xsize, g.r.ysize,
+                         alphaBuffer.data(), g.w.xsize, g.w.ysize, GDT_Byte, 0, 0) != CE_None) {
+            GDALClose(dsTile);
+            throw GDALException("Cannot read alpha data");
+        }
+
+        GDALRasterBandH tileAlpha = GDALGetRasterBand(dsTile, outBands + 1);
+        GDALSetRasterColorInterpretation(tileAlpha, GCI_AlphaBand);
+        if (GDALRasterIO(tileAlpha, GF_Write, g.w.x, g.w.y, g.w.xsize, g.w.ysize,
+                         alphaBuffer.data(), g.w.xsize, g.w.ysize, GDT_Byte, 0, 0) != CE_None) {
+            GDALClose(dsTile);
+            throw GDALException("Cannot write alpha data");
+        }
+
+        GDALDatasetH outDs = GDALCreateCopy(pngDrv, tilePath.c_str(), dsTile, FALSE,
+                                            nullptr, nullptr, nullptr);
+        if (!outDs) {
+            GDALClose(dsTile);
+            throw GDALException("Cannot create output tile");
+        }
+        GDALFlushCache(outDs);
+        GDALClose(outDs);
+        GDALClose(dsTile);
+
+        if (outBuffer != nullptr) {
+            vsi_l_offset bufSize;
+            *outBuffer = VSIGetMemFileBuffer(tilePath.c_str(), &bufSize, TRUE);
+            if (bufSize > std::numeric_limits<int>::max())
+                throw GDALException("Exceeded max buf size");
+            *outBufferSize = static_cast<int>(bufSize);
+            return "";
+        }
+        return tilePath;
     }
 
     template <typename T>

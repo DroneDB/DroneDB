@@ -400,6 +400,9 @@ void generateImageThumbEx(const fs::path& imagePath,
         std::vector<std::vector<float>> bandDataStorage(bandCount);
         std::vector<float*> bandDataPtrs(bandCount);
 
+        int alphaBandIdx = -1;
+        std::vector<int> bandHasNodata(bandCount, 0);
+        std::vector<double> bandNodataVal(bandCount, 0.0);
         for (int b = 0; b < bandCount; b++) {
             bandDataStorage[b].resize(pixCount);
             bandDataPtrs[b] = bandDataStorage[b].data();
@@ -410,11 +413,38 @@ void generateImageThumbEx(const fs::path& imagePath,
                 GDALClose(hSrcDataset);
                 throw GDALException("Cannot read band " + std::to_string(b + 1));
             }
+            if (GDALGetRasterColorInterpretation(hBand) == GCI_AlphaBand) {
+                alphaBandIdx = b;
+            }
+            bandNodataVal[b] = GDALGetRasterNoDataValue(hBand, &bandHasNodata[b]);
+        }
+
+        // Pre-mask transparent and nodata pixels
+        float nodata = -9999.0f;
+        for (size_t i = 0; i < pixCount; i++) {
+            bool masked = false;
+            if (alphaBandIdx >= 0 && bandDataPtrs[alphaBandIdx][i] == 0.0f) {
+                masked = true;
+            }
+            if (!masked) {
+                for (int b = 0; b < bandCount; b++) {
+                    if (b == alphaBandIdx) continue;
+                    if (bandHasNodata[b] &&
+                        static_cast<double>(bandDataPtrs[b][i]) == bandNodataVal[b]) {
+                        masked = true;
+                        break;
+                    }
+                }
+            }
+            if (masked) {
+                for (int b = 0; b < bandCount; b++) {
+                    bandDataPtrs[b][i] = nodata;
+                }
+            }
         }
 
         // Apply formula
         std::vector<float> result(pixCount);
-        float nodata = -9999.0f;
         const auto* formulaPtr = ve.getFormula(visParams.formula);
         if (!formulaPtr) {
             GDALClose(hSrcDataset);

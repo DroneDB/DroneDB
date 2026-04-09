@@ -445,6 +445,21 @@ extern "C"
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBMergeMultispectral(const char **paths, int numPaths, const char *outputCog);
 
+    /** Export raster with visualization params applied as GeoTIFF
+     * @param inputPath Path to source raster file
+     * @param outputPath Path for the output GeoTIFF file
+     * @param preset Preset ID, or NULL
+     * @param bands Comma-separated band indices, or NULL
+     * @param formula Formula ID (e.g., "NDVI"), or NULL
+     * @param bandFilter Band order (e.g., "RGB"), or NULL
+     * @param colormap Colormap ID (e.g., "rdylgn"), or NULL
+     * @param rescale Rescale range "min,max", or NULL
+     * @return DDBERR_NONE on success, an error otherwise */
+    DDB_DLL DDBErr DDBExportRaster(const char *inputPath, const char *outputPath,
+                                    const char *preset, const char *bands,
+                                    const char *formula, const char *bandFilter,
+                                    const char *colormap, const char *rescale);
+
 #ifdef __cplusplus
 }
 #endif

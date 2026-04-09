@@ -554,6 +554,60 @@ void VegetationEngine::initColormaps() {
         });
         colormaps_.push_back(c);
     }
+
+    // Whitehot (thermal)
+    {
+        Colormap c;
+        c.id = "whitehot";
+        c.name = "White Hot";
+        interpolateColormap(c.entries, {
+            {0.0f, 0, 0, 0},
+            {1.0f, 255, 255, 255}
+        });
+        colormaps_.push_back(c);
+    }
+
+    // Blackhot (thermal, inverted)
+    {
+        Colormap c;
+        c.id = "blackhot";
+        c.name = "Black Hot";
+        interpolateColormap(c.entries, {
+            {0.0f, 255, 255, 255},
+            {1.0f, 0, 0, 0}
+        });
+        colormaps_.push_back(c);
+    }
+
+    // Arctic
+    {
+        Colormap c;
+        c.id = "arctic";
+        c.name = "Arctic";
+        interpolateColormap(c.entries, {
+            {0.0f, 0, 0, 64},
+            {0.25f, 0, 100, 200},
+            {0.5f, 100, 200, 255},
+            {0.75f, 200, 240, 255},
+            {1.0f, 255, 255, 255}
+        });
+        colormaps_.push_back(c);
+    }
+
+    // Lava
+    {
+        Colormap c;
+        c.id = "lava";
+        c.name = "Lava";
+        interpolateColormap(c.entries, {
+            {0.0f, 0, 0, 0},
+            {0.25f, 128, 0, 0},
+            {0.5f, 255, 80, 0},
+            {0.75f, 255, 200, 0},
+            {1.0f, 255, 255, 200}
+        });
+        colormaps_.push_back(c);
+    }
 }
 
 } // namespace ddb
