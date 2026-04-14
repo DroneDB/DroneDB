@@ -30,6 +30,7 @@
 #include "merge_multispectral.h"
 #include "mio.h"
 #include "passwordmanager.h"
+#include "raster_utils.h"
 #include "sensorprofile.h"
 #include "stac.h"
 #include "status.h"
@@ -1413,51 +1414,19 @@ DDB_DLL DDBErr DDBGetRasterMetadata(const char* path, const char* formula,
         std::vector<float*> bandDataPtrs(nBands);
 
         // Read GDAL nodata values and detect alpha band
-        int alphaBandIdx = -1; // 0-based index of alpha band
-        std::vector<int> bandHasNodata(nBands, 0);
-        std::vector<double> bandNodataVal(nBands, 0.0);
+        auto nodataInfo = detectBandNodata(hDs, nBands);
         for (int b = 0; b < nBands; b++) {
             bandDataStorage[b].resize(pixCount);
             bandDataPtrs[b] = bandDataStorage[b].data();
             GDALRasterBandH hBand = GDALGetRasterBand(hDs, b + 1);
             GDALRasterIO(hBand, GF_Read, 0, 0, width, height,
                          bandDataPtrs[b], sampleW, sampleH, GDT_Float32, 0, 0);
-
-            if (GDALGetRasterColorInterpretation(hBand) == GCI_AlphaBand) {
-                alphaBandIdx = b;
-            }
-            bandNodataVal[b] = GDALGetRasterNoDataValue(hBand, &bandHasNodata[b]);
         }
 
         // Pre-mask: set pixels to output nodata where alpha=0 or any band
         // matches its GDAL nodata value, so applyFormula excludes them
-        float nodata = -9999.0f;
-        for (size_t i = 0; i < pixCount; i++) {
-            bool masked = false;
-            if (alphaBandIdx >= 0 && bandDataPtrs[alphaBandIdx][i] == 0.0f) {
-                masked = true;
-            }
-            if (!masked) {
-                for (int b = 0; b < nBands; b++) {
-                    if (b == alphaBandIdx) continue;
-                    if (bandHasNodata[b]) {
-                        const double sampleValue = static_cast<double>(bandDataPtrs[b][i]);
-                        const bool isNodata =
-                            (std::isnan(bandNodataVal[b]) && std::isnan(sampleValue)) ||
-                            (!std::isnan(bandNodataVal[b]) && sampleValue == bandNodataVal[b]);
-                        if (isNodata) {
-                            masked = true;
-                            break;
-                        }
-                    }
-                }
-            }
-            if (masked) {
-                for (int b = 0; b < nBands; b++) {
-                    bandDataPtrs[b][i] = nodata;
-                }
-            }
-        }
+        float nodata = NODATA_SENTINEL;
+        premaskNodata(bandDataPtrs, pixCount, nBands, nodataInfo, nodata);
 
         std::vector<float> formulaResult(pixCount);
         const auto* formulaObj = ve.getFormula(formulaStr);
@@ -1814,9 +1783,7 @@ DDB_DLL DDBErr DDBExportRaster(const char* inputPath, const char* outputPath,
         std::vector<float*> bandDataPtrs(bandCount);
 
         // Read bands and detect alpha/nodata
-        int alphaBandIdx = -1;
-        std::vector<int> bandHasNodata(bandCount, 0);
-        std::vector<double> bandNodataVal(bandCount, 0.0);
+        auto nodataInfo = detectBandNodata(hSrcDs, bandCount);
         for (int b = 0; b < bandCount; b++) {
             bandDataStorage[b].resize(pixCount);
             bandDataPtrs[b] = bandDataStorage[b].data();
@@ -1827,40 +1794,11 @@ DDB_DLL DDBErr DDBExportRaster(const char* inputPath, const char* outputPath,
                 GDALClose(hSrcDs);
                 throw GDALException("Cannot read band " + std::to_string(b + 1));
             }
-            if (GDALGetRasterColorInterpretation(hBand) == GCI_AlphaBand) {
-                alphaBandIdx = b;
-            }
-            bandNodataVal[b] = GDALGetRasterNoDataValue(hBand, &bandHasNodata[b]);
         }
 
         // Pre-mask transparent and nodata pixels
-        float nodata = -9999.0f;
-        for (size_t i = 0; i < pixCount; i++) {
-            bool masked = false;
-            if (alphaBandIdx >= 0 && bandDataPtrs[alphaBandIdx][i] == 0.0f) {
-                masked = true;
-            }
-            if (!masked) {
-                for (int b = 0; b < bandCount; b++) {
-                    if (b == alphaBandIdx) continue;
-                    if (bandHasNodata[b]) {
-                        const double sampleValue = static_cast<double>(bandDataPtrs[b][i]);
-                        const bool isNodata =
-                            (std::isnan(bandNodataVal[b]) && std::isnan(sampleValue)) ||
-                            (!std::isnan(bandNodataVal[b]) && sampleValue == bandNodataVal[b]);
-                        if (isNodata) {
-                            masked = true;
-                            break;
-                        }
-                    }
-                }
-            }
-            if (masked) {
-                for (int b = 0; b < bandCount; b++) {
-                    bandDataPtrs[b][i] = nodata;
-                }
-            }
-        }
+        float nodata = NODATA_SENTINEL;
+        premaskNodata(bandDataPtrs, pixCount, bandCount, nodataInfo, nodata);
 
         // Apply formula
         std::vector<float> result(pixCount);

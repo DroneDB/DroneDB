@@ -15,6 +15,7 @@
 #include "exceptions.h"
 #include "logger.h"
 #include "mio.h"
+#include "raster_utils.h"
 #include "sensorprofile.h"
 #include "vegetation.h"
 
@@ -430,9 +431,7 @@ namespace ddb
             // Read all bands as float
             std::vector<std::vector<float>> bandStorage(totalBands);
             std::vector<float*> bandPtrs(totalBands);
-            int alphaBandIdx = -1;
-            std::vector<int> bandHasNodata(totalBands, 0);
-            std::vector<double> bandNodataVal(totalBands, 0.0);
+            auto nodataInfo = detectBandNodata(inputDataset, totalBands);
             for (int b2 = 0; b2 < totalBands; b2++) {
                 bandStorage[b2].resize(wSize);
                 bandPtrs[b2] = bandStorage[b2].data();
@@ -442,40 +441,11 @@ namespace ddb
                                  GDT_Float32, 0, 0) != CE_None) {
                     throw GDALException("Cannot read band " + std::to_string(b2 + 1));
                 }
-                if (GDALGetRasterColorInterpretation(hBand) == GCI_AlphaBand) {
-                    alphaBandIdx = b2;
-                }
-                bandNodataVal[b2] = GDALGetRasterNoDataValue(hBand, &bandHasNodata[b2]);
             }
 
             // Pre-mask transparent and nodata pixels
-            float nodata = -9999.0f;
-            for (size_t i = 0; i < wSize; i++) {
-                bool masked = false;
-                if (alphaBandIdx >= 0 && bandPtrs[alphaBandIdx][i] == 0.0f) {
-                    masked = true;
-                }
-                if (!masked) {
-                    for (int b2 = 0; b2 < totalBands; b2++) {
-                        if (b2 == alphaBandIdx) continue;
-                        if (bandHasNodata[b2]) {
-                            const double sampleValue = static_cast<double>(bandPtrs[b2][i]);
-                            const bool isNodata =
-                                (std::isnan(bandNodataVal[b2]) && std::isnan(sampleValue)) ||
-                                (!std::isnan(bandNodataVal[b2]) && sampleValue == bandNodataVal[b2]);
-                            if (isNodata) {
-                                masked = true;
-                                break;
-                            }
-                        }
-                    }
-                }
-                if (masked) {
-                    for (int b2 = 0; b2 < totalBands; b2++) {
-                        bandPtrs[b2][i] = nodata;
-                    }
-                }
-            }
+            float nodata = NODATA_SENTINEL;
+            premaskNodata(bandPtrs, wSize, totalBands, nodataInfo, nodata);
 
             // Apply formula
             std::vector<float> result(wSize);
