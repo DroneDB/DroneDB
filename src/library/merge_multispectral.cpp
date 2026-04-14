@@ -207,8 +207,9 @@ std::vector<BandAlignmentInfo> detectBandAlignment(const std::vector<std::string
                 }
             }
 
-            // Determine detected status: need PP + pixel pitch
-            alignInfo[i].detected = bands[i].hasPP && bands[i].hasPixelPitch;
+            // Do not mark detected here; detection status is set later
+            // when a shift source is actually selected and shifts computed.
+            // alignInfo[i].detected stays false (default) until then.
 
             // Log lens model
             auto modelTypeIt = parser.findXmpKey("Xmp.Camera.ModelType");
@@ -841,8 +842,22 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
                         throw GDALException("Cannot open " + inputPaths[i]);
                     }
 
-                    int srcX = padLeft + dxVec[i];
-                    int srcY = padTop + dyVec[i];
+                    int srcX = padLeft - dxVec[i];
+                    int srcY = padTop - dyVec[i];
+
+                    int srcW = GDALGetRasterXSize(srcDs);
+                    int srcH = GDALGetRasterYSize(srcDs);
+                    if (srcX < 0 || srcY < 0 ||
+                        srcX + outW > srcW || srcY + outH > srcH) {
+                        LOGD << "Invalid aligned crop window for band " << i
+                             << ": srcwin=(" << srcX << ", " << srcY << ", "
+                             << outW << ", " << outH << "), dataset=("
+                             << srcW << ", " << srcH << ")";
+                        GDALClose(srcDs);
+                        for (auto d : shiftedDatasets) GDALClose(d);
+                        for (const auto &p : shiftedPaths) VSIUnlink(p.c_str());
+                        throw GDALException("Invalid aligned crop window for band " + std::to_string(i));
+                    }
 
                     std::string shiftedPath = "/vsimem/shifted_" +
                         utils::generateRandomString(8) + "_" + std::to_string(i) + ".tif";

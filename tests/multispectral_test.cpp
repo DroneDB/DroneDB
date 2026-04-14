@@ -545,10 +545,8 @@ static fs::path createGeoRaster(TestArea& ta, const std::string& name,
 TEST(multispectral, tileWithBandSelection) {
     TestArea ta(TEST_NAME);
     fs::path rasterPath = createGeoRaster(ta, "ms5_tile.tif", 256, 256, 5, GDT_UInt16);
-    fs::path outDir = ta.getPath("tiles_bands");
-    fs::create_directories(outDir);
-
-    GDALTiler tiler(rasterPath.string(), outDir.string(), 256, false);
+    // Use empty outputFolder for in-memory tile generation
+    GDALTiler tiler(rasterPath.string(), "", 256, false);
 
     // Get valid tile coords from tiler info
     auto info = tiler.getMinMaxZ();
@@ -568,8 +566,10 @@ TEST(multispectral, tileWithBandSelection) {
             EXPECT_GT(outBufferSize, 0);
             VSIFree(outBuffer);
         }
-    } catch (const ddb::GDALException&) {
-        // "Exceeded max buf size" is acceptable in test environment
+    } catch (const ddb::GDALException& ex) {
+        // Only "Exceeded max buf size" is acceptable in test environment
+        EXPECT_NE(std::string(ex.what()).find("Exceeded max buf size"), std::string::npos)
+            << "Unexpected GDALException: " << ex.what();
     }
 }
 
@@ -603,10 +603,8 @@ TEST(multispectral, tileWithFormula) {
         GDALClose(hDs);
     }
 
-    fs::path outDir = ta.getPath("tiles_ndvi");
-    fs::create_directories(outDir);
-
-    GDALTiler tiler(rasterPath.string(), outDir.string(), 256, false);
+    // Use empty outputFolder for in-memory tile generation
+    GDALTiler tiler(rasterPath.string(), "", 256, false);
     auto info = tiler.getMinMaxZ();
 
     ThumbVisParams visParams;
@@ -626,18 +624,18 @@ TEST(multispectral, tileWithFormula) {
             EXPECT_GT(outBufferSize, 0);
             VSIFree(outBuffer);
         }
-    } catch (const ddb::GDALException&) {
-        // "Exceeded max buf size" is acceptable in test environment
+    } catch (const ddb::GDALException& ex) {
+        EXPECT_NE(std::string(ex.what()).find("Exceeded max buf size"), std::string::npos)
+            << "Unexpected GDALException: " << ex.what();
     }
 }
 
 TEST(multispectral, tileNoVisParamsFallback) {
     TestArea ta(TEST_NAME);
     fs::path rasterPath = createGeoRaster(ta, "rgb_tile.tif", 256, 256, 3, GDT_Byte);
-    fs::path outDir = ta.getPath("tiles_fallback");
-    fs::create_directories(outDir);
 
-    GDALTiler tiler(rasterPath.string(), outDir.string(), 256, false);
+    // Use empty outputFolder for in-memory tile generation
+    GDALTiler tiler(rasterPath.string(), "", 256, false);
     auto info = tiler.getMinMaxZ();
 
     // Empty vis params should fall through to standard tile
@@ -654,8 +652,9 @@ TEST(multispectral, tileNoVisParamsFallback) {
             EXPECT_GT(outBufferSize, 0);
             VSIFree(outBuffer);
         }
-    } catch (const ddb::GDALException&) {
-        // "Exceeded max buf size" is acceptable in test environment
+    } catch (const ddb::GDALException& ex) {
+        EXPECT_NE(std::string(ex.what()).find("Exceeded max buf size"), std::string::npos)
+            << "Unexpected GDALException: " << ex.what();
     }
 }
 
@@ -675,12 +674,10 @@ TEST(multispectral, cApiMemoryTileEx) {
                                   nullptr, "3,2,1", nullptr, nullptr, nullptr, nullptr,
                                   &outBuffer, &outBufferSize);
 
-    if (err == DDBERR_NONE) {
-        EXPECT_NE(outBuffer, nullptr);
-        EXPECT_GT(outBufferSize, 0);
-        if (outBuffer) DDBVSIFree(outBuffer);
-    }
-    // Some tile coords may be out of bounds — that's ok
+    ASSERT_EQ(err, DDBERR_NONE) << "DDBMemoryTileEx failed with valid tile coords";
+    EXPECT_NE(outBuffer, nullptr);
+    EXPECT_GT(outBufferSize, 0);
+    if (outBuffer) DDBVSIFree(outBuffer);
 }
 
 TEST(multispectral, cApiMemoryTileExFormula) {
@@ -699,11 +696,10 @@ TEST(multispectral, cApiMemoryTileExFormula) {
                                   nullptr, nullptr, "VARI", "RGB", "rdylgn", "-1,1",
                                   &outBuffer, &outBufferSize);
 
-    if (err == DDBERR_NONE) {
-        EXPECT_NE(outBuffer, nullptr);
-        EXPECT_GT(outBufferSize, 0);
-        if (outBuffer) DDBVSIFree(outBuffer);
-    }
+    ASSERT_EQ(err, DDBERR_NONE) << "DDBMemoryTileEx with formula failed with valid tile coords";
+    EXPECT_NE(outBuffer, nullptr);
+    EXPECT_GT(outBufferSize, 0);
+    if (outBuffer) DDBVSIFree(outBuffer);
 }
 
 // ============================================================
