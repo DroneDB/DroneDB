@@ -164,7 +164,7 @@ namespace ddb
         std::string extractSensor();
         bool computeFocal(Focal &f);
         bool extractSensorSize(SensorSize &r);
-        inline double getMmPerUnit(long resolutionUnit);
+        double getMmPerUnit(long resolutionUnit);
 
         bool extractGeo(GeoLocation &geo);
         bool extractRelAltitude(double &relAltitude);

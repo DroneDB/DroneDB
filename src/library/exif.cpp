@@ -233,7 +233,7 @@ namespace ddb
 
     // Length of resolution unit in millimiters
     // https://www.sno.phy.queensu.ca/~phil/exiftool/TagNames/EXIF.html
-    inline double ExifParser::getMmPerUnit(long resolutionUnit)
+    double ExifParser::getMmPerUnit(long resolutionUnit)
     {
         if (resolutionUnit == 2)
         {
