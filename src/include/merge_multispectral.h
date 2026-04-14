@@ -11,6 +11,18 @@
 
 namespace ddb {
 
+struct BandAlignmentInfo {
+    bool detected = false;
+    std::string bandName;
+    double shiftX = 0;
+    double shiftY = 0;
+    std::string shiftSource;
+    bool isThermal = false;
+    int imageWidth = 0;
+    int imageHeight = 0;
+    int centralWavelength = 0;
+};
+
 struct MergeValidationResult {
     bool ok = false;
     std::vector<std::string> errors;
@@ -25,7 +37,17 @@ struct MergeValidationResult {
         int totalBands = 0;
         size_t estimatedSize = 0;
     } summary;
+
+    struct AlignmentStatus {
+        bool detected = false;
+        double maxShiftPixels = 0;
+        bool correctionApplied = false;
+        std::string shiftSource;
+        std::vector<BandAlignmentInfo> bands;
+    } alignment;
 };
+
+DDB_DLL std::vector<BandAlignmentInfo> detectBandAlignment(const std::vector<std::string> &inputPaths);
 
 DDB_DLL MergeValidationResult validateMergeMultispectral(const std::vector<std::string> &inputPaths);
 

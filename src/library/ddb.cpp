@@ -1677,6 +1677,27 @@ DDB_DLL DDBErr DDBValidateMergeMultispectral(const char** paths, int numPaths, c
         {"estimatedSize", validationResult.summary.estimatedSize}
     };
 
+    // Alignment info
+    json alignmentJson;
+    alignmentJson["detected"] = validationResult.alignment.detected;
+    alignmentJson["maxShiftPixels"] = validationResult.alignment.maxShiftPixels;
+    alignmentJson["correctionApplied"] = validationResult.alignment.correctionApplied;
+    alignmentJson["shiftSource"] = validationResult.alignment.shiftSource;
+
+    json bandsJson = json::array();
+    for (size_t i = 0; i < validationResult.alignment.bands.size(); i++) {
+        const auto &b = validationResult.alignment.bands[i];
+        bandsJson.push_back({
+            {"index", i},
+            {"name", b.bandName},
+            {"wavelength", b.centralWavelength},
+            {"shiftX", b.shiftX},
+            {"shiftY", b.shiftY}
+        });
+    }
+    alignmentJson["bands"] = bandsJson;
+    j["alignment"] = alignmentJson;
+
     utils::copyToPtr(j.dump(), output);
 
     DDB_C_END

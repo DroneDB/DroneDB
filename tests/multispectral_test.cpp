@@ -17,6 +17,8 @@
 #include "gdal_inc.h"
 #include "mio.h"
 #include "exceptions.h"
+#include "exif.h"
+#include "exifeditor.h"
 
 #include <fstream>
 #include <cstring>
@@ -697,6 +699,462 @@ TEST(multispectral, cApiMemoryTileExFormula) {
         EXPECT_GT(outBufferSize, 0);
         if (outBuffer) DDBVSIFree(outBuffer);
     }
+}
+
+// ============================================================
+// Merge GPS Preservation Tests
+// ============================================================
+
+TEST(multispectral, mergePreservesGpsFromExif) {
+    TestArea ta(TEST_NAME, true);
+
+    GDALDriverH tifDrv = GDALGetDriverByName("GTiff");
+    ASSERT_NE(tifDrv, nullptr);
+
+    // Create two single-band TIFFs WITHOUT geotransform/CRS (like camera bands)
+    std::vector<std::string> inputs;
+    for (int i = 0; i < 3; i++) {
+        fs::path bandPath = ta.getPath("gps_band" + std::to_string(i + 1) + ".tif");
+        GDALDatasetH hDs = GDALCreate(tifDrv, bandPath.string().c_str(), 50, 50, 1, GDT_UInt16, nullptr);
+        ASSERT_NE(hDs, nullptr);
+        std::vector<uint16_t> data(50 * 50, static_cast<uint16_t>((i + 1) * 1000));
+        GDALRasterIO(GDALGetRasterBand(hDs, 1), GF_Write, 0, 0, 50, 50,
+                     data.data(), 50, 50, GDT_UInt16, 0, 0);
+        GDALClose(hDs);
+        inputs.push_back(bandPath.string());
+    }
+
+    // Write GPS coordinates to all source files
+    double srcLat = 45.4642;
+    double srcLon = 9.1900;
+    double srcAlt = 120.5;
+    for (const auto &p : inputs) {
+        ExifEditor editor(p);
+        editor.SetGPS(srcLat, srcLon, srcAlt);
+    }
+
+    // Verify GPS was written to sources
+    {
+        auto img = Exiv2::ImageFactory::open(inputs[0]);
+        img->readMetadata();
+        ExifParser parser(img.get());
+        GeoLocation geo;
+        ASSERT_TRUE(parser.extractGeo(geo));
+        EXPECT_NEAR(geo.latitude, srcLat, 0.001);
+    }
+
+    // Merge
+    fs::path outputPath = ta.getPath("merged_gps.tif");
+    EXPECT_NO_THROW(mergeMultispectral(inputs, outputPath.string()));
+    EXPECT_TRUE(fs::exists(outputPath));
+
+    // Verify GPS is preserved in output
+    auto outImg = Exiv2::ImageFactory::open(outputPath.string());
+    outImg->readMetadata();
+    ExifParser outParser(outImg.get());
+    GeoLocation outGeo;
+    ASSERT_TRUE(outParser.extractGeo(outGeo));
+    EXPECT_NEAR(outGeo.latitude, srcLat, 0.001);
+    EXPECT_NEAR(outGeo.longitude, srcLon, 0.001);
+    EXPECT_NEAR(outGeo.altitude, srcAlt, 1.0);
+}
+
+TEST(multispectral, mergePreservesGpsWithRealData) {
+    TestArea ta(TEST_NAME, true);
+
+    // Download real multispectral band files from test_data repo
+    std::string baseUrl = "https://github.com/DroneDB/test_data/raw/master/multispectral/";
+    std::vector<std::string> inputs;
+    for (int i = 1; i <= 5; i++) {
+        std::string filename = "IMG_0180_" + std::to_string(i) + ".tif";
+        fs::path bandPath = ta.downloadTestAsset(baseUrl + filename, filename);
+        inputs.push_back(bandPath.string());
+    }
+
+    // Read GPS from first source
+    GeoLocation srcGeo;
+    {
+        auto img = Exiv2::ImageFactory::open(inputs[0]);
+        img->readMetadata();
+        ExifParser parser(img.get());
+        ASSERT_TRUE(parser.extractGeo(srcGeo));
+        EXPECT_NEAR(srcGeo.latitude, 50.98, 0.01);
+        EXPECT_NEAR(srcGeo.longitude, 21.43, 0.01);
+    }
+
+    // Merge
+    fs::path outputPath = ta.getPath("merged_real.tif");
+    EXPECT_NO_THROW(mergeMultispectral(inputs, outputPath.string()));
+    EXPECT_TRUE(fs::exists(outputPath));
+
+    // Verify output has 5 bands
+    GDALDatasetH hOut = GDALOpen(outputPath.string().c_str(), GA_ReadOnly);
+    ASSERT_NE(hOut, nullptr);
+    EXPECT_EQ(GDALGetRasterCount(hOut), 5);
+    GDALClose(hOut);
+
+    // Verify GPS is preserved
+    auto outImg = Exiv2::ImageFactory::open(outputPath.string());
+    outImg->readMetadata();
+    ExifParser outParser(outImg.get());
+    GeoLocation outGeo;
+    ASSERT_TRUE(outParser.extractGeo(outGeo));
+    EXPECT_NEAR(outGeo.latitude, srcGeo.latitude, 0.001);
+    EXPECT_NEAR(outGeo.longitude, srcGeo.longitude, 0.001);
+    EXPECT_NEAR(outGeo.altitude, srcGeo.altitude, 1.0);
+}
+
+TEST(multispectral, mergeNoGpsDoesNotFail) {
+    TestArea ta(TEST_NAME, true);
+
+    // Create TIFFs with geotransform but NO GPS EXIF
+    GDALDriverH tifDrv = GDALGetDriverByName("GTiff");
+    double gt[6] = {0, 0.001, 0, 50, 0, -0.001};
+    const char* proj = "GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563]],PRIMEM[\"Greenwich\",0],UNIT[\"degree\",0.0174532925199433]]";
+
+    std::vector<std::string> inputs;
+    for (int i = 0; i < 2; i++) {
+        fs::path bandPath = ta.getPath("nogps_band" + std::to_string(i + 1) + ".tif");
+        GDALDatasetH hDs = GDALCreate(tifDrv, bandPath.string().c_str(), 50, 50, 1, GDT_UInt16, nullptr);
+        GDALSetGeoTransform(hDs, gt);
+        GDALSetProjection(hDs, proj);
+        std::vector<uint16_t> data(50 * 50, static_cast<uint16_t>((i + 1) * 1000));
+        GDALRasterIO(GDALGetRasterBand(hDs, 1), GF_Write, 0, 0, 50, 50,
+                     data.data(), 50, 50, GDT_UInt16, 0, 0);
+        GDALClose(hDs);
+        inputs.push_back(bandPath.string());
+    }
+
+    // Merge should succeed without GPS (no crash, no error)
+    fs::path outputPath = ta.getPath("merged_nogps.tif");
+    EXPECT_NO_THROW(mergeMultispectral(inputs, outputPath.string()));
+    EXPECT_TRUE(fs::exists(outputPath));
+    EXPECT_EQ(GDALGetRasterCount(GDALOpen(outputPath.string().c_str(), GA_ReadOnly)), 2);
+}
+
+// ============================================================
+// Band Alignment Detection Tests
+// ============================================================
+
+TEST(multispectral, detectAlignmentMicaSense) {
+    TestArea ta(TEST_NAME);
+
+    std::string baseUrl = "https://github.com/DroneDB/test_data/raw/master/multispectral/";
+    std::vector<std::string> inputs;
+    for (int i = 1; i <= 5; i++) {
+        std::string filename = "IMG_0180_" + std::to_string(i) + ".tif";
+        fs::path bandPath = ta.downloadTestAsset(baseUrl + filename, filename);
+        inputs.push_back(bandPath.string());
+    }
+
+    auto alignInfo = detectBandAlignment(inputs);
+    ASSERT_EQ(alignInfo.size(), 5u);
+
+    // At least 2 bands should be detected
+    int detectedCount = 0;
+    for (const auto &a : alignInfo) {
+        if (a.detected) detectedCount++;
+    }
+    EXPECT_GE(detectedCount, 2);
+
+    // Max shift should be significant (MicaSense ~19 px)
+    double maxShift = 0;
+    for (const auto &a : alignInfo) {
+        maxShift = std::max(maxShift, std::max(std::abs(a.shiftX), std::abs(a.shiftY)));
+    }
+    EXPECT_GT(maxShift, 2.0);
+    EXPECT_LT(maxShift, 50.0);
+
+    // Source should be PrincipalPoint
+    for (const auto &a : alignInfo) {
+        if (a.detected) {
+            EXPECT_EQ(a.shiftSource, "PrincipalPoint");
+        }
+    }
+}
+
+TEST(multispectral, detectAlignmentNoXmpCamera) {
+    TestArea ta(TEST_NAME);
+
+    // Create two plain TIFFs without any XMP Camera metadata
+    GDALDriverH tifDrv = GDALGetDriverByName("GTiff");
+    std::vector<std::string> inputs;
+    for (int i = 0; i < 2; i++) {
+        fs::path p = ta.getPath("plain_" + std::to_string(i) + ".tif");
+        GDALDatasetH hDs = GDALCreate(tifDrv, p.string().c_str(), 100, 100, 1, GDT_UInt16, nullptr);
+        GDALClose(hDs);
+        inputs.push_back(p.string());
+    }
+
+    auto alignInfo = detectBandAlignment(inputs);
+    ASSERT_EQ(alignInfo.size(), 2u);
+    EXPECT_FALSE(alignInfo[0].detected);
+    EXPECT_FALSE(alignInfo[1].detected);
+}
+
+TEST(multispectral, detectAlignmentSingleFile) {
+    TestArea ta(TEST_NAME);
+
+    std::string baseUrl = "https://github.com/DroneDB/test_data/raw/master/multispectral/";
+    fs::path bandPath = ta.downloadTestAsset(baseUrl + "IMG_0180_1.tif", "IMG_0180_1.tif");
+    std::vector<std::string> inputs = {bandPath.string()};
+
+    auto alignInfo = detectBandAlignment(inputs);
+    ASSERT_EQ(alignInfo.size(), 1u);
+    // Single file: no crash, shift = 0
+    EXPECT_DOUBLE_EQ(alignInfo[0].shiftX, 0.0);
+    EXPECT_DOUBLE_EQ(alignInfo[0].shiftY, 0.0);
+}
+
+TEST(multispectral, validateAlignmentWarningMicaSense) {
+    TestArea ta(TEST_NAME);
+
+    std::string baseUrl = "https://github.com/DroneDB/test_data/raw/master/multispectral/";
+    std::vector<std::string> inputs;
+    for (int i = 1; i <= 5; i++) {
+        std::string filename = "IMG_0180_" + std::to_string(i) + ".tif";
+        fs::path bandPath = ta.downloadTestAsset(baseUrl + filename, filename);
+        inputs.push_back(bandPath.string());
+    }
+
+    auto result = validateMergeMultispectral(inputs);
+    EXPECT_TRUE(result.alignment.detected);
+    EXPECT_GT(result.alignment.maxShiftPixels, 2.0);
+    EXPECT_TRUE(result.alignment.correctionApplied);
+
+    // Should have alignment warning
+    bool hasAlignWarning = false;
+    for (const auto &w : result.warnings) {
+        if (w.find("misalignment") != std::string::npos) hasAlignWarning = true;
+    }
+    EXPECT_TRUE(hasAlignWarning);
+}
+
+TEST(multispectral, mergeWithAlignmentCorrection) {
+    TestArea ta(TEST_NAME, true);
+
+    std::string baseUrl = "https://github.com/DroneDB/test_data/raw/master/multispectral/";
+    std::vector<std::string> inputs;
+    for (int i = 1; i <= 5; i++) {
+        std::string filename = "IMG_0180_" + std::to_string(i) + ".tif";
+        fs::path bandPath = ta.downloadTestAsset(baseUrl + filename, filename);
+        inputs.push_back(bandPath.string());
+    }
+
+    fs::path outputPath = ta.getPath("merged_aligned.tif");
+    EXPECT_NO_THROW(mergeMultispectral(inputs, outputPath.string()));
+    EXPECT_TRUE(fs::exists(outputPath));
+
+    // Output should have 5 bands
+    GDALDatasetH hOut = GDALOpen(outputPath.string().c_str(), GA_ReadOnly);
+    ASSERT_NE(hOut, nullptr);
+    EXPECT_EQ(GDALGetRasterCount(hOut), 5);
+
+    // Output should be slightly smaller than input (due to alignment crop)
+    int outW = GDALGetRasterXSize(hOut);
+    int outH = GDALGetRasterYSize(hOut);
+    EXPECT_LT(outW, 1280);
+    EXPECT_LT(outH, 960);
+    EXPECT_GT(outW, 1200); // Should not lose too much
+    EXPECT_GT(outH, 900);
+
+    GDALClose(hOut);
+}
+
+TEST(multispectral, mergeGeorefNoShift) {
+    TestArea ta(TEST_NAME, true);
+
+    // Create georeferenced TIFFs — shift should NOT be applied
+    GDALDriverH tifDrv = GDALGetDriverByName("GTiff");
+    double gt[6] = {11.0, 0.00001, 0, 45.0, 0, -0.00001};
+    const char* proj = "GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563]],PRIMEM[\"Greenwich\",0],UNIT[\"degree\",0.0174532925199433]]";
+
+    std::vector<std::string> inputs;
+    for (int i = 0; i < 3; i++) {
+        fs::path p = ta.getPath("georef_" + std::to_string(i) + ".tif");
+        GDALDatasetH hDs = GDALCreate(tifDrv, p.string().c_str(), 100, 100, 1, GDT_UInt16, nullptr);
+        GDALSetGeoTransform(hDs, gt);
+        GDALSetProjection(hDs, proj);
+        std::vector<uint16_t> data(100 * 100, static_cast<uint16_t>((i + 1) * 100));
+        GDALRasterIO(GDALGetRasterBand(hDs, 1), GF_Write, 0, 0, 100, 100,
+                     data.data(), 100, 100, GDT_UInt16, 0, 0);
+        GDALClose(hDs);
+        inputs.push_back(p.string());
+    }
+
+    auto result = validateMergeMultispectral(inputs);
+    // Georeferenced files: correctionApplied should be false
+    EXPECT_FALSE(result.alignment.correctionApplied);
+
+    // Merge should produce same-size output
+    fs::path outputPath = ta.getPath("merged_georef.tif");
+    EXPECT_NO_THROW(mergeMultispectral(inputs, outputPath.string()));
+    GDALDatasetH hOut = GDALOpen(outputPath.string().c_str(), GA_ReadOnly);
+    ASSERT_NE(hOut, nullptr);
+    EXPECT_EQ(GDALGetRasterXSize(hOut), 100);
+    EXPECT_EQ(GDALGetRasterYSize(hOut), 100);
+    GDALClose(hOut);
+}
+
+TEST(multispectral, detectAlignmentParrotSequoia) {
+    TestArea ta(TEST_NAME);
+
+    std::string baseUrl = "https://github.com/DroneDB/test_data/raw/master/multispectral/parrot_sequoia/";
+    std::vector<std::string> suffixes = {"_GRE.TIF", "_RED.TIF", "_REG.TIF", "_NIR.TIF"};
+    std::vector<std::string> inputs;
+    for (const auto &s : suffixes) {
+        std::string filename = "IMG_180822_135805_0467" + s;
+        fs::path bandPath = ta.downloadTestAsset(baseUrl + filename, filename);
+        inputs.push_back(bandPath.string());
+    }
+
+    auto alignInfo = detectBandAlignment(inputs);
+    ASSERT_EQ(alignInfo.size(), 4u);
+
+    int detectedCount = 0;
+    for (const auto &a : alignInfo) {
+        if (a.detected) detectedCount++;
+    }
+    EXPECT_GE(detectedCount, 2);
+
+    // Max shift ~22 px
+    double maxShift = 0;
+    for (const auto &a : alignInfo) {
+        maxShift = std::max(maxShift, std::max(std::abs(a.shiftX), std::abs(a.shiftY)));
+    }
+    EXPECT_GT(maxShift, 5.0);
+    EXPECT_LT(maxShift, 50.0);
+}
+
+TEST(multispectral, detectAlignmentDjiM3M) {
+    TestArea ta(TEST_NAME);
+
+    std::string baseUrl = "https://github.com/DroneDB/test_data/raw/master/multispectral/dji/";
+    std::vector<std::string> suffixes = {"_MS_G.TIF", "_MS_R.TIF", "_MS_RE.TIF", "_MS_NIR.TIF"};
+    std::vector<std::string> inputs;
+    for (const auto &s : suffixes) {
+        std::string filename = "DJI_20240525174755_0001" + s;
+        fs::path bandPath = ta.downloadTestAsset(baseUrl + filename, filename);
+        inputs.push_back(bandPath.string());
+    }
+
+    auto alignInfo = detectBandAlignment(inputs);
+    ASSERT_EQ(alignInfo.size(), 4u);
+
+    int detectedCount = 0;
+    for (const auto &a : alignInfo) {
+        if (a.detected) detectedCount++;
+    }
+    EXPECT_GE(detectedCount, 2);
+
+    // Max shift ~24 px
+    double maxShift = 0;
+    for (const auto &a : alignInfo) {
+        maxShift = std::max(maxShift, std::max(std::abs(a.shiftX), std::abs(a.shiftY)));
+    }
+    EXPECT_GT(maxShift, 5.0);
+    EXPECT_LT(maxShift, 50.0);
+}
+
+TEST(multispectral, detectAlignmentDjiP4MS) {
+    TestArea ta(TEST_NAME);
+
+    std::string baseUrl = "https://github.com/DroneDB/test_data/raw/master/multispectral/dji_p4/";
+    std::vector<std::string> inputs;
+    for (int i = 21; i <= 25; i++) {
+        std::string filename = "DJI_00" + std::to_string(i) + ".TIF";
+        fs::path bandPath = ta.downloadTestAsset(baseUrl + filename, filename);
+        inputs.push_back(bandPath.string());
+    }
+
+    auto alignInfo = detectBandAlignment(inputs);
+    ASSERT_EQ(alignInfo.size(), 5u);
+
+    int detectedCount = 0;
+    for (const auto &a : alignInfo) {
+        if (a.detected) detectedCount++;
+    }
+    EXPECT_GE(detectedCount, 2);
+
+    // P4 MS: PP shift ~1.2, should use DJI RelOC (~9 px)
+    bool hasDjiSource = false;
+    for (const auto &a : alignInfo) {
+        if (a.detected && a.shiftSource == "DJI_RelativeOpticalCenter") {
+            hasDjiSource = true;
+        }
+    }
+    EXPECT_TRUE(hasDjiSource);
+}
+
+TEST(multispectral, detectAlignmentSentera6X) {
+    TestArea ta(TEST_NAME);
+
+    std::string baseUrl = "https://github.com/DroneDB/test_data/raw/master/multispectral/sentera_6x/";
+    std::vector<std::string> filenames = {
+        "IMG_0013_475_30.tif", "IMG_0013_550_20.tif", "IMG_0013_670_30.tif",
+        "IMG_0013_715_10.tif", "IMG_0013_840_20.tif"
+    };
+    std::vector<std::string> inputs;
+    for (const auto &f : filenames) {
+        fs::path bandPath = ta.downloadTestAsset(baseUrl + f, f);
+        inputs.push_back(bandPath.string());
+    }
+
+    auto alignInfo = detectBandAlignment(inputs);
+    ASSERT_EQ(alignInfo.size(), 5u);
+
+    int detectedCount = 0;
+    for (const auto &a : alignInfo) {
+        if (a.detected) detectedCount++;
+    }
+    EXPECT_GE(detectedCount, 2);
+
+    // Sentera 6X: max shift ~42 px (the largest)
+    double maxShift = 0;
+    for (const auto &a : alignInfo) {
+        maxShift = std::max(maxShift, std::max(std::abs(a.shiftX), std::abs(a.shiftY)));
+    }
+    EXPECT_GT(maxShift, 15.0);
+    EXPECT_LT(maxShift, 100.0);
+
+    // Source should be PrincipalPoint
+    for (const auto &a : alignInfo) {
+        if (a.detected) {
+            EXPECT_EQ(a.shiftSource, "PrincipalPoint");
+        }
+    }
+}
+
+TEST(multispectral, mergeRegressionNoAlignment) {
+    TestArea ta(TEST_NAME, true);
+
+    // Create simple TIFFs without alignment metadata — merge should work as before
+    GDALDriverH tifDrv = GDALGetDriverByName("GTiff");
+    double gt[6] = {0, 0.001, 0, 50, 0, -0.001};
+    const char* proj = "GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563]],PRIMEM[\"Greenwich\",0],UNIT[\"degree\",0.0174532925199433]]";
+
+    std::vector<std::string> inputs;
+    for (int i = 0; i < 3; i++) {
+        fs::path p = ta.getPath("regr_band" + std::to_string(i) + ".tif");
+        GDALDatasetH hDs = GDALCreate(tifDrv, p.string().c_str(), 50, 50, 1, GDT_UInt16, nullptr);
+        GDALSetGeoTransform(hDs, gt);
+        GDALSetProjection(hDs, proj);
+        std::vector<uint16_t> data(50 * 50, static_cast<uint16_t>((i + 1) * 1000));
+        GDALRasterIO(GDALGetRasterBand(hDs, 1), GF_Write, 0, 0, 50, 50,
+                     data.data(), 50, 50, GDT_UInt16, 0, 0);
+        GDALClose(hDs);
+        inputs.push_back(p.string());
+    }
+
+    fs::path outputPath = ta.getPath("merged_regr.tif");
+    EXPECT_NO_THROW(mergeMultispectral(inputs, outputPath.string()));
+    EXPECT_TRUE(fs::exists(outputPath));
+    GDALDatasetH hOut = GDALOpen(outputPath.string().c_str(), GA_ReadOnly);
+    ASSERT_NE(hOut, nullptr);
+    EXPECT_EQ(GDALGetRasterCount(hOut), 3);
+    EXPECT_EQ(GDALGetRasterXSize(hOut), 50);
+    EXPECT_EQ(GDALGetRasterYSize(hOut), 50);
+    GDALClose(hOut);
 }
 
 }  // namespace
