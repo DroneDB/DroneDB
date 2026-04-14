@@ -360,10 +360,17 @@ MergeValidationResult validateMergeMultispectral(const std::vector<std::string> 
         return result;
     }
 
+    // Build display names (filename only) for cleaner messages
+    std::vector<std::string> displayNames;
+    displayNames.reserve(inputPaths.size());
+    for (const auto &p : inputPaths) {
+        displayNames.push_back(fs::path(p).filename().string());
+    }
+
     // Open first file as reference
     GDALDatasetH hRef = GDALOpen(inputPaths[0].c_str(), GA_ReadOnly);
     if (!hRef) {
-        result.errors.push_back("Cannot open " + inputPaths[0]);
+        result.errors.push_back("Cannot open " + displayNames[0]);
         return result;
     }
 
@@ -374,7 +381,7 @@ MergeValidationResult validateMergeMultispectral(const std::vector<std::string> 
     double refGt[6] = {0, 1, 0, 0, 0, -1};
     bool hasGeoTransform = (GDALGetGeoTransform(hRef, refGt) == CE_None);
     if (!hasGeoTransform) {
-        result.warnings.push_back("Cannot read geotransform from reference file: " + inputPaths[0]);
+        result.warnings.push_back("Cannot read geotransform from reference file: " + displayNames[0]);
     }
 
     const char *refProj = GDALGetProjectionRef(hRef);
@@ -396,13 +403,13 @@ MergeValidationResult validateMergeMultispectral(const std::vector<std::string> 
     int totalBands = GDALGetRasterCount(hRef);
 
     if (GDALGetRasterCount(hRef) > 1) {
-        result.warnings.push_back(inputPaths[0] + " has " + std::to_string(GDALGetRasterCount(hRef)) + " bands");
+        result.warnings.push_back(displayNames[0] + " has " + std::to_string(GDALGetRasterCount(hRef)) + " bands");
     }
 
     for (size_t i = 1; i < inputPaths.size(); i++) {
         GDALDatasetH hDs = GDALOpen(inputPaths[i].c_str(), GA_ReadOnly);
         if (!hDs) {
-            result.errors.push_back("Cannot open " + inputPaths[i]);
+            result.errors.push_back("Cannot open " + displayNames[i]);
             continue;
         }
 
@@ -410,13 +417,13 @@ MergeValidationResult validateMergeMultispectral(const std::vector<std::string> 
         const char *proj = GDALGetProjectionRef(hDs);
         OGRSpatialReferenceH srs = OSRNewSpatialReference(proj);
         if (!OSRIsSame(refSrs, srs)) {
-            result.errors.push_back("CRS mismatch: " + inputPaths[i]);
+            result.errors.push_back("CRS mismatch: " + displayNames[i]);
         }
         OSRDestroySpatialReference(srs);
 
         // Dimension check
         if (GDALGetRasterXSize(hDs) != refWidth || GDALGetRasterYSize(hDs) != refHeight) {
-            result.errors.push_back("Dimension mismatch: " + inputPaths[i] +
+            result.errors.push_back("Dimension mismatch: " + displayNames[i] +
                 " (" + std::to_string(GDALGetRasterXSize(hDs)) + "x" + std::to_string(GDALGetRasterYSize(hDs)) +
                 " vs " + std::to_string(refWidth) + "x" + std::to_string(refHeight) + ")");
         }
@@ -424,18 +431,18 @@ MergeValidationResult validateMergeMultispectral(const std::vector<std::string> 
         // Data type check
         GDALDataType dt = GDALGetRasterDataType(GDALGetRasterBand(hDs, 1));
         if (dt != refType) {
-            result.errors.push_back("Data type mismatch: " + inputPaths[i] +
+            result.errors.push_back("Data type mismatch: " + displayNames[i] +
                 " (" + gdalTypeName(dt) + " vs " + gdalTypeName(refType) + ")");
         }
 
         // Geotransform check
         double gt[6];
         if (GDALGetGeoTransform(hDs, gt) != CE_None) {
-            result.warnings.push_back("Cannot read geotransform from: " + inputPaths[i]);
+            result.warnings.push_back("Cannot read geotransform from: " + displayNames[i]);
         } else {
             // Skew check
             if (gt[2] != 0 || gt[4] != 0) {
-                result.errors.push_back(inputPaths[i] + " has non-zero skew");
+                result.errors.push_back(displayNames[i] + " has non-zero skew");
             }
 
             // Pixel size tolerance (relative)
@@ -445,21 +452,21 @@ MergeValidationResult validateMergeMultispectral(const std::vector<std::string> 
             double relDiffY = (std::abs(refGt[5]) > 0) ? pxDiffY / std::abs(refGt[5]) : 0;
 
             if (relDiffX > 0.05 || relDiffY > 0.05) {
-                result.errors.push_back("Pixel size mismatch > 5%: " + inputPaths[i]);
+                result.errors.push_back("Pixel size mismatch > 5%: " + displayNames[i]);
             } else if (relDiffX > 0.01 || relDiffY > 0.01) {
-                result.warnings.push_back("Resolution differs slightly for " + inputPaths[i] + ", bands will be resampled");
+                result.warnings.push_back("Resolution differs slightly for " + displayNames[i] + ", bands will be resampled");
             }
 
             // Origin tolerance (1 pixel)
             double origDiffX = std::abs(gt[0] - refGt[0]);
             double origDiffY = std::abs(gt[3] - refGt[3]);
             if (origDiffX > std::abs(refGt[1]) || origDiffY > std::abs(refGt[5])) {
-                result.errors.push_back("Origin mismatch > 1 pixel: " + inputPaths[i]);
+                result.errors.push_back("Origin mismatch > 1 pixel: " + displayNames[i]);
             }
         }
 
         if (GDALGetRasterCount(hDs) > 1) {
-            result.warnings.push_back(inputPaths[i] + " has " + std::to_string(GDALGetRasterCount(hDs)) + " bands");
+            result.warnings.push_back(displayNames[i] + " has " + std::to_string(GDALGetRasterCount(hDs)) + " bands");
         }
 
         totalBands += GDALGetRasterCount(hDs);
