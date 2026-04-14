@@ -57,7 +57,7 @@ DDB_DLL void previewMergeMultispectral(const std::vector<std::string> &inputPath
                                         uint8_t **outBuffer, int *outBufferSize);
 
 DDB_DLL void mergeMultispectral(const std::vector<std::string> &inputPaths,
-                                 const std::string &outputCog);
+                                 const std::string &outputPath);
 
 } // namespace ddb
 

@@ -28,7 +28,7 @@ namespace cmd
 
     std::string MergeMultispectral::description()
     {
-        return "Merge single-band raster files into a multi-band Cloud Optimized GeoTIFF.";
+        return "Merge single-band raster files into a multi-band GeoTIFF.";
     }
 
     void MergeMultispectral::run(cxxopts::ParseResult &opts)

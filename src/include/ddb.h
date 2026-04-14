@@ -438,12 +438,12 @@ extern "C"
                                                  const char *previewBands, int thumbSize,
                                                  uint8_t **outBuffer, int *outBufferSize);
 
-    /** Merge single-band rasters into multi-band COG
+    /** Merge single-band rasters into multi-band GeoTIFF
      * @param paths Array of input file paths
      * @param numPaths Number of input file paths
-     * @param outputCog Output COG file path
+     * @param outputPath Output GeoTIFF file path
      * @return DDBERR_NONE on success, an error otherwise */
-    DDB_DLL DDBErr DDBMergeMultispectral(const char **paths, int numPaths, const char *outputCog);
+    DDB_DLL DDBErr DDBMergeMultispectral(const char **paths, int numPaths, const char *outputPath);
 
     /** Export raster with visualization params applied as GeoTIFF
      * @param inputPath Path to source raster file

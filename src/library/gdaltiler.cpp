@@ -458,10 +458,15 @@ namespace ddb
                 if (!masked) {
                     for (int b2 = 0; b2 < totalBands; b2++) {
                         if (b2 == alphaBandIdx) continue;
-                        if (bandHasNodata[b2] &&
-                            static_cast<double>(bandPtrs[b2][i]) == bandNodataVal[b2]) {
-                            masked = true;
-                            break;
+                        if (bandHasNodata[b2]) {
+                            const double sampleValue = static_cast<double>(bandPtrs[b2][i]);
+                            const bool isNodata =
+                                (std::isnan(bandNodataVal[b2]) && std::isnan(sampleValue)) ||
+                                (!std::isnan(bandNodataVal[b2]) && sampleValue == bandNodataVal[b2]);
+                            if (isNodata) {
+                                masked = true;
+                                break;
+                            }
                         }
                     }
                 }

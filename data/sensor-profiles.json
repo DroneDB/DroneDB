@@ -1,6 +1,6 @@
 {
   "$schema": "https://dronedb.app/schemas/sensor-profiles-v1.0.json",
-  "version": "1.0",
+  "version": "1.1",
   "profiles": [
     {
       "id": "sentinel-2",
@@ -18,13 +18,13 @@
         {"index": 2, "name": "Blue", "wavelength": 490, "resolution": 10, "domain": "optical"},
         {"index": 3, "name": "Green", "wavelength": 560, "resolution": 10, "domain": "optical"},
         {"index": 4, "name": "Red", "wavelength": 665, "resolution": 10, "domain": "optical"},
-        {"index": 5, "name": "Vegetation Red Edge 1", "wavelength": 705, "resolution": 20, "domain": "optical"},
-        {"index": 6, "name": "Vegetation Red Edge 2", "wavelength": 740, "resolution": 20, "domain": "optical"},
-        {"index": 7, "name": "Vegetation Red Edge 3", "wavelength": 783, "resolution": 20, "domain": "optical"},
+        {"index": 5, "name": "Red Edge 1", "wavelength": 705, "resolution": 20, "domain": "optical"},
+        {"index": 6, "name": "Red Edge 2", "wavelength": 740, "resolution": 20, "domain": "optical"},
+        {"index": 7, "name": "Red Edge 3", "wavelength": 783, "resolution": 20, "domain": "optical"},
         {"index": 8, "name": "NIR", "wavelength": 842, "resolution": 10, "domain": "optical"},
-        {"index": 9, "name": "Vegetation Red Edge 4", "wavelength": 865, "resolution": 20, "domain": "optical"},
+        {"index": 9, "name": "Narrow NIR", "wavelength": 865, "resolution": 20, "domain": "optical"},
         {"index": 10, "name": "Water Vapour", "wavelength": 945, "resolution": 60, "domain": "optical"},
-        {"index": 11, "name": "SWIR Cirrus", "wavelength": 1375, "resolution": 60, "domain": "swir"},
+        {"index": 11, "name": "Cirrus", "wavelength": 1375, "resolution": 60, "domain": "swir"},
         {"index": 12, "name": "SWIR 1", "wavelength": 1610, "resolution": 20, "domain": "swir"},
         {"index": 13, "name": "SWIR 2", "wavelength": 2190, "resolution": 20, "domain": "swir"}
       ],
@@ -34,8 +34,10 @@
         {"id": "agriculture", "name": "Agriculture", "description": "SWIR-NIR-Blue combination for crop analysis", "bandMapping": {"r": 12, "g": 8, "b": 2}},
         {"id": "geology", "name": "Geology", "description": "SWIR-SWIR-Red for geological features", "bandMapping": {"r": 12, "g": 13, "b": 4}},
         {"id": "moisture", "name": "Moisture Index", "description": "NIR-SWIR-Green for moisture detection", "bandMapping": {"r": 8, "g": 12, "b": 3}, "stretch": "percentile"},
-        {"id": "ndvi", "name": "NDVI (Vegetation Index)", "description": "Normalized Difference Vegetation Index", "type": "index", "formula": "NDVI", "colormap": "rdylgn"},
-        {"id": "ndwi", "name": "NDWI (Water Index)", "description": "Normalized Difference Water Index", "type": "index", "formula": "NDWI", "colormap": "bugn"}
+        {"id": "ndvi", "name": "NDVI", "description": "Normalized Difference Vegetation Index", "type": "index", "formula": "NDVI", "colormap": "rdylgn"},
+        {"id": "ndwi", "name": "NDWI", "description": "Normalized Difference Water Index", "type": "index", "formula": "NDWI", "colormap": "bugn"},
+        {"id": "gndvi", "name": "GNDVI", "description": "Green Normalized Difference Vegetation Index", "type": "index", "formula": "GNDVI", "colormap": "rdylgn"},
+        {"id": "ndre", "name": "NDRE", "description": "Normalized Difference Red Edge Index", "type": "index", "formula": "NDRE", "colormap": "rdylgn"}
       ]
     },
     {
@@ -65,32 +67,65 @@
       "presets": [
         {"id": "true-color", "name": "True Color (RGB)", "description": "Natural color visualization", "bandMapping": {"r": 4, "g": 3, "b": 2}, "isDefault": true},
         {"id": "false-color-ir", "name": "False Color Infrared", "description": "Vegetation health analysis", "bandMapping": {"r": 5, "g": 4, "b": 3}},
-        {"id": "urban", "name": "Urban", "description": "SWIR-NIR-Blue for urban areas", "bandMapping": {"r": 7, "g": 6, "b": 4}}
+        {"id": "urban", "name": "Urban", "description": "SWIR2-SWIR1-Red for urban heat islands and impervious surfaces", "bandMapping": {"r": 7, "g": 6, "b": 4}},
+        {"id": "ndvi", "name": "NDVI", "description": "Normalized Difference Vegetation Index", "type": "index", "formula": "NDVI", "colormap": "rdylgn"},
+        {"id": "ndwi", "name": "NDWI", "description": "Normalized Difference Water Index", "type": "index", "formula": "NDWI", "colormap": "bugn"},
+        {"id": "gndvi", "name": "GNDVI", "description": "Green Normalized Difference Vegetation Index", "type": "index", "formula": "GNDVI", "colormap": "rdylgn"}
       ]
     },
     {
-      "id": "landsat-5",
-      "name": "Landsat 5/7 TM/ETM+",
-      "description": "Legacy Landsat Thematic Mapper",
+      "id": "landsat-5-tm",
+      "name": "Landsat 5 TM",
+      "description": "USGS Landsat 5 Thematic Mapper",
       "sensorCategory": "multispectral",
       "detection": {
         "bandCount": 7,
-        "dataType": "Byte",
-        "metadataPatterns": ["Landsat", "LT05", "LE07"],
-        "priority": 5
+        "metadataPatterns": ["LT05", "Landsat_5", "LANDSAT_5"],
+        "priority": 8
       },
       "bands": [
-        {"index": 1, "name": "Blue", "wavelength": 485, "domain": "optical"},
-        {"index": 2, "name": "Green", "wavelength": 560, "domain": "optical"},
-        {"index": 3, "name": "Red", "wavelength": 660, "domain": "optical"},
-        {"index": 4, "name": "NIR", "wavelength": 830, "domain": "optical"},
-        {"index": 5, "name": "SWIR 1", "wavelength": 1650, "domain": "swir"},
-        {"index": 6, "name": "Thermal", "wavelength": 11450, "domain": "thermal"},
-        {"index": 7, "name": "SWIR 2", "wavelength": 2215, "domain": "swir"}
+        {"index": 1, "name": "Blue", "wavelength": 485, "resolution": 30, "domain": "optical"},
+        {"index": 2, "name": "Green", "wavelength": 560, "resolution": 30, "domain": "optical"},
+        {"index": 3, "name": "Red", "wavelength": 660, "resolution": 30, "domain": "optical"},
+        {"index": 4, "name": "NIR", "wavelength": 830, "resolution": 30, "domain": "optical"},
+        {"index": 5, "name": "SWIR 1", "wavelength": 1650, "resolution": 30, "domain": "swir"},
+        {"index": 6, "name": "Thermal", "wavelength": 11450, "resolution": 120, "domain": "thermal"},
+        {"index": 7, "name": "SWIR 2", "wavelength": 2215, "resolution": 30, "domain": "swir"}
       ],
       "presets": [
         {"id": "true-color", "name": "True Color (RGB)", "bandMapping": {"r": 3, "g": 2, "b": 1}, "isDefault": true},
-        {"id": "false-color-ir", "name": "False Color Infrared", "bandMapping": {"r": 4, "g": 3, "b": 2}}
+        {"id": "false-color-ir", "name": "False Color Infrared", "bandMapping": {"r": 4, "g": 3, "b": 2}},
+        {"id": "ndvi", "name": "NDVI", "description": "Normalized Difference Vegetation Index", "type": "index", "formula": "NDVI", "colormap": "rdylgn"},
+        {"id": "ndwi", "name": "NDWI", "description": "Normalized Difference Water Index", "type": "index", "formula": "NDWI", "colormap": "bugn"},
+        {"id": "gndvi", "name": "GNDVI", "description": "Green Normalized Difference Vegetation Index", "type": "index", "formula": "GNDVI", "colormap": "rdylgn"}
+      ]
+    },
+    {
+      "id": "landsat-7-etm",
+      "name": "Landsat 7 ETM+",
+      "description": "USGS Landsat 7 Enhanced Thematic Mapper Plus",
+      "sensorCategory": "multispectral",
+      "detection": {
+        "bandCount": 8,
+        "metadataPatterns": ["LE07", "Landsat_7", "LANDSAT_7", "ETM+"],
+        "priority": 8
+      },
+      "bands": [
+        {"index": 1, "name": "Blue", "wavelength": 485, "resolution": 30, "domain": "optical"},
+        {"index": 2, "name": "Green", "wavelength": 560, "resolution": 30, "domain": "optical"},
+        {"index": 3, "name": "Red", "wavelength": 660, "resolution": 30, "domain": "optical"},
+        {"index": 4, "name": "NIR", "wavelength": 835, "resolution": 30, "domain": "optical"},
+        {"index": 5, "name": "SWIR 1", "wavelength": 1650, "resolution": 30, "domain": "swir"},
+        {"index": 6, "name": "Thermal", "wavelength": 11450, "resolution": 60, "domain": "thermal"},
+        {"index": 7, "name": "SWIR 2", "wavelength": 2215, "resolution": 30, "domain": "swir"},
+        {"index": 8, "name": "Panchromatic", "wavelength": 710, "resolution": 15, "domain": "optical"}
+      ],
+      "presets": [
+        {"id": "true-color", "name": "True Color (RGB)", "bandMapping": {"r": 3, "g": 2, "b": 1}, "isDefault": true},
+        {"id": "false-color-ir", "name": "False Color Infrared", "bandMapping": {"r": 4, "g": 3, "b": 2}},
+        {"id": "ndvi", "name": "NDVI", "description": "Normalized Difference Vegetation Index", "type": "index", "formula": "NDVI", "colormap": "rdylgn"},
+        {"id": "ndwi", "name": "NDWI", "description": "Normalized Difference Water Index", "type": "index", "formula": "NDWI", "colormap": "bugn"},
+        {"id": "gndvi", "name": "GNDVI", "description": "Green Normalized Difference Vegetation Index", "type": "index", "formula": "GNDVI", "colormap": "rdylgn"}
       ]
     },
     {
@@ -114,7 +149,68 @@
       "presets": [
         {"id": "true-color", "name": "True Color (RGB)", "bandMapping": {"r": 3, "g": 2, "b": 1}, "isDefault": true},
         {"id": "false-color-ir", "name": "Color Infrared (CIR)", "bandMapping": {"r": 5, "g": 3, "b": 2}},
-        {"id": "red-edge", "name": "Red Edge Composite", "description": "Highlights vegetation stress", "bandMapping": {"r": 5, "g": 4, "b": 3}}
+        {"id": "red-edge", "name": "Red Edge Composite", "description": "Highlights vegetation stress", "bandMapping": {"r": 5, "g": 4, "b": 3}},
+        {"id": "ndvi", "name": "NDVI", "description": "Normalized Difference Vegetation Index", "type": "index", "formula": "NDVI", "colormap": "rdylgn"},
+        {"id": "ndwi", "name": "NDWI", "description": "Normalized Difference Water Index", "type": "index", "formula": "NDWI", "colormap": "bugn"},
+        {"id": "gndvi", "name": "GNDVI", "description": "Green Normalized Difference Vegetation Index", "type": "index", "formula": "GNDVI", "colormap": "rdylgn"},
+        {"id": "ndre", "name": "NDRE", "description": "Normalized Difference Red Edge Index", "type": "index", "formula": "NDRE", "colormap": "rdylgn"}
+      ]
+    },
+    {
+      "id": "micasense-altum",
+      "name": "MicaSense Altum",
+      "description": "MicaSense Altum multispectral + thermal camera for UAV",
+      "sensorCategory": "multispectral",
+      "detection": {
+        "bandCount": 6,
+        "dataType": "UInt16",
+        "metadataPatterns": ["Altum", "MicaSense"],
+        "priority": 12
+      },
+      "bands": [
+        {"index": 1, "name": "Blue", "wavelength": 475, "domain": "optical"},
+        {"index": 2, "name": "Green", "wavelength": 560, "domain": "optical"},
+        {"index": 3, "name": "Red", "wavelength": 668, "domain": "optical"},
+        {"index": 4, "name": "Red Edge", "wavelength": 717, "domain": "optical"},
+        {"index": 5, "name": "NIR", "wavelength": 842, "domain": "optical"},
+        {"index": 6, "name": "LWIR", "wavelength": 11000, "domain": "thermal"}
+      ],
+      "presets": [
+        {"id": "true-color", "name": "True Color (RGB)", "bandMapping": {"r": 3, "g": 2, "b": 1}, "isDefault": true},
+        {"id": "false-color-ir", "name": "Color Infrared (CIR)", "bandMapping": {"r": 5, "g": 3, "b": 2}},
+        {"id": "red-edge", "name": "Red Edge Composite", "description": "Highlights vegetation stress", "bandMapping": {"r": 5, "g": 4, "b": 3}},
+        {"id": "ndvi", "name": "NDVI", "description": "Normalized Difference Vegetation Index", "type": "index", "formula": "NDVI", "colormap": "rdylgn"},
+        {"id": "ndwi", "name": "NDWI", "description": "Normalized Difference Water Index", "type": "index", "formula": "NDWI", "colormap": "bugn"},
+        {"id": "gndvi", "name": "GNDVI", "description": "Green Normalized Difference Vegetation Index", "type": "index", "formula": "GNDVI", "colormap": "rdylgn"},
+        {"id": "ndre", "name": "NDRE", "description": "Normalized Difference Red Edge Index", "type": "index", "formula": "NDRE", "colormap": "rdylgn"}
+      ]
+    },
+    {
+      "id": "micasense-rededge-p",
+      "name": "MicaSense RedEdge-P",
+      "description": "MicaSense RedEdge-P multispectral camera for UAV",
+      "sensorCategory": "multispectral",
+      "detection": {
+        "bandCount": 5,
+        "dataType": "UInt16",
+        "metadataPatterns": ["RedEdge-P"],
+        "priority": 12
+      },
+      "bands": [
+        {"index": 1, "name": "Blue", "wavelength": 444, "domain": "optical"},
+        {"index": 2, "name": "Green", "wavelength": 531, "domain": "optical"},
+        {"index": 3, "name": "Red", "wavelength": 650, "domain": "optical"},
+        {"index": 4, "name": "Red Edge", "wavelength": 705, "domain": "optical"},
+        {"index": 5, "name": "NIR", "wavelength": 842, "domain": "optical"}
+      ],
+      "presets": [
+        {"id": "true-color", "name": "True Color (RGB)", "bandMapping": {"r": 3, "g": 2, "b": 1}, "isDefault": true},
+        {"id": "false-color-ir", "name": "Color Infrared (CIR)", "bandMapping": {"r": 5, "g": 3, "b": 2}},
+        {"id": "red-edge", "name": "Red Edge Composite", "description": "Highlights vegetation stress", "bandMapping": {"r": 5, "g": 4, "b": 3}},
+        {"id": "ndvi", "name": "NDVI", "description": "Normalized Difference Vegetation Index", "type": "index", "formula": "NDVI", "colormap": "rdylgn"},
+        {"id": "ndwi", "name": "NDWI", "description": "Normalized Difference Water Index", "type": "index", "formula": "NDWI", "colormap": "bugn"},
+        {"id": "gndvi", "name": "GNDVI", "description": "Green Normalized Difference Vegetation Index", "type": "index", "formula": "GNDVI", "colormap": "rdylgn"},
+        {"id": "ndre", "name": "NDRE", "description": "Normalized Difference Red Edge Index", "type": "index", "formula": "NDRE", "colormap": "rdylgn"}
       ]
     },
     {
@@ -137,7 +233,11 @@
       ],
       "presets": [
         {"id": "true-color", "name": "True Color (RGB)", "bandMapping": {"r": 3, "g": 2, "b": 1}, "isDefault": true},
-        {"id": "false-color-ir", "name": "Color Infrared (CIR)", "bandMapping": {"r": 5, "g": 3, "b": 2}}
+        {"id": "false-color-ir", "name": "Color Infrared (CIR)", "bandMapping": {"r": 5, "g": 3, "b": 2}},
+        {"id": "ndvi", "name": "NDVI", "description": "Normalized Difference Vegetation Index", "type": "index", "formula": "NDVI", "colormap": "rdylgn"},
+        {"id": "ndwi", "name": "NDWI", "description": "Normalized Difference Water Index", "type": "index", "formula": "NDWI", "colormap": "bugn"},
+        {"id": "gndvi", "name": "GNDVI", "description": "Green Normalized Difference Vegetation Index", "type": "index", "formula": "GNDVI", "colormap": "rdylgn"},
+        {"id": "ndre", "name": "NDRE", "description": "Normalized Difference Red Edge Index", "type": "index", "formula": "NDRE", "colormap": "rdylgn"}
       ]
     },
     {
@@ -159,7 +259,11 @@
       ],
       "presets": [
         {"id": "false-color-ir", "name": "Color Infrared (CIR)", "bandMapping": {"r": 4, "g": 1, "b": 2}, "isDefault": true},
-        {"id": "red-edge", "name": "Red Edge Composite", "bandMapping": {"r": 4, "g": 3, "b": 2}}
+        {"id": "red-edge", "name": "Red Edge Composite", "bandMapping": {"r": 4, "g": 3, "b": 2}},
+        {"id": "ndvi", "name": "NDVI", "description": "Normalized Difference Vegetation Index", "type": "index", "formula": "NDVI", "colormap": "rdylgn"},
+        {"id": "ndwi", "name": "NDWI", "description": "Normalized Difference Water Index", "type": "index", "formula": "NDWI", "colormap": "bugn"},
+        {"id": "gndvi", "name": "GNDVI", "description": "Green Normalized Difference Vegetation Index", "type": "index", "formula": "GNDVI", "colormap": "rdylgn"},
+        {"id": "ndre", "name": "NDRE", "description": "Normalized Difference Red Edge Index", "type": "index", "formula": "NDRE", "colormap": "rdylgn"}
       ]
     },
     {
@@ -181,7 +285,11 @@
       ],
       "presets": [
         {"id": "false-color-ir", "name": "Color Infrared (CIR)", "bandMapping": {"r": 4, "g": 1, "b": 2}, "isDefault": true},
-        {"id": "red-edge", "name": "Red Edge Composite", "bandMapping": {"r": 4, "g": 3, "b": 2}}
+        {"id": "red-edge", "name": "Red Edge Composite", "bandMapping": {"r": 4, "g": 3, "b": 2}},
+        {"id": "ndvi", "name": "NDVI", "description": "Normalized Difference Vegetation Index", "type": "index", "formula": "NDVI", "colormap": "rdylgn"},
+        {"id": "ndwi", "name": "NDWI", "description": "Normalized Difference Water Index", "type": "index", "formula": "NDWI", "colormap": "bugn"},
+        {"id": "gndvi", "name": "GNDVI", "description": "Green Normalized Difference Vegetation Index", "type": "index", "formula": "GNDVI", "colormap": "rdylgn"},
+        {"id": "ndre", "name": "NDRE", "description": "Normalized Difference Red Edge Index", "type": "index", "formula": "NDRE", "colormap": "rdylgn"}
       ]
     },
     {
@@ -205,39 +313,86 @@
       ],
       "presets": [
         {"id": "true-color", "name": "True Color (RGB)", "bandMapping": {"r": 3, "g": 2, "b": 1}, "isDefault": true},
-        {"id": "false-color-ir", "name": "Color Infrared (CIR)", "bandMapping": {"r": 6, "g": 3, "b": 2}}
+        {"id": "false-color-ir", "name": "Color Infrared (CIR)", "bandMapping": {"r": 6, "g": 3, "b": 2}},
+        {"id": "ndvi", "name": "NDVI", "description": "Normalized Difference Vegetation Index", "type": "index", "formula": "NDVI", "colormap": "rdylgn"},
+        {"id": "ndwi", "name": "NDWI", "description": "Normalized Difference Water Index", "type": "index", "formula": "NDWI", "colormap": "bugn"},
+        {"id": "gndvi", "name": "GNDVI", "description": "Green Normalized Difference Vegetation Index", "type": "index", "formula": "GNDVI", "colormap": "rdylgn"},
+        {"id": "ndre", "name": "NDRE", "description": "Normalized Difference Red Edge Index", "type": "index", "formula": "NDRE", "colormap": "rdylgn"}
       ]
     },
     {
       "id": "worldview-2",
-      "name": "WorldView-2/3",
-      "description": "DigitalGlobe WorldView-2 and WorldView-3 satellites",
+      "name": "WorldView-2",
+      "description": "DigitalGlobe WorldView-2 satellite (8-band VNIR)",
       "sensorCategory": "multispectral",
       "detection": {
         "bandCount": 8,
         "dataType": "UInt16",
-        "metadataPatterns": ["WorldView", "WV02", "WV03"],
+        "metadataPatterns": ["WV02", "WorldView-2", "WorldView"],
         "priority": 10
       },
       "bands": [
-        {"index": 1, "name": "Coastal", "wavelength": 425, "domain": "optical"},
-        {"index": 2, "name": "Blue", "wavelength": 480, "domain": "optical"},
-        {"index": 3, "name": "Green", "wavelength": 545, "domain": "optical"},
-        {"index": 4, "name": "Yellow", "wavelength": 605, "domain": "optical"},
-        {"index": 5, "name": "Red", "wavelength": 660, "domain": "optical"},
-        {"index": 6, "name": "Red Edge", "wavelength": 725, "domain": "optical"},
-        {"index": 7, "name": "NIR1", "wavelength": 833, "domain": "optical"},
-        {"index": 8, "name": "NIR2", "wavelength": 950, "domain": "optical"}
+        {"index": 1, "name": "Coastal", "wavelength": 425, "resolution": 2, "domain": "optical"},
+        {"index": 2, "name": "Blue", "wavelength": 480, "resolution": 2, "domain": "optical"},
+        {"index": 3, "name": "Green", "wavelength": 545, "resolution": 2, "domain": "optical"},
+        {"index": 4, "name": "Yellow", "wavelength": 605, "resolution": 2, "domain": "optical"},
+        {"index": 5, "name": "Red", "wavelength": 660, "resolution": 2, "domain": "optical"},
+        {"index": 6, "name": "Red Edge", "wavelength": 725, "resolution": 2, "domain": "optical"},
+        {"index": 7, "name": "NIR1", "wavelength": 833, "resolution": 2, "domain": "optical"},
+        {"index": 8, "name": "NIR2", "wavelength": 950, "resolution": 2, "domain": "optical"}
       ],
       "presets": [
         {"id": "true-color", "name": "True Color (RGB)", "bandMapping": {"r": 5, "g": 3, "b": 2}, "isDefault": true},
-        {"id": "false-color-ir", "name": "Color Infrared", "bandMapping": {"r": 7, "g": 5, "b": 3}}
+        {"id": "false-color-ir", "name": "Color Infrared", "bandMapping": {"r": 7, "g": 5, "b": 3}},
+        {"id": "ndvi", "name": "NDVI", "description": "Normalized Difference Vegetation Index", "type": "index", "formula": "NDVI", "colormap": "rdylgn"},
+        {"id": "ndwi", "name": "NDWI", "description": "Normalized Difference Water Index", "type": "index", "formula": "NDWI", "colormap": "bugn"},
+        {"id": "gndvi", "name": "GNDVI", "description": "Green Normalized Difference Vegetation Index", "type": "index", "formula": "GNDVI", "colormap": "rdylgn"},
+        {"id": "ndre", "name": "NDRE", "description": "Normalized Difference Red Edge Index", "type": "index", "formula": "NDRE", "colormap": "rdylgn"}
+      ]
+    },
+    {
+      "id": "worldview-3",
+      "name": "WorldView-3",
+      "description": "DigitalGlobe WorldView-3 satellite (8-band VNIR + 8-band SWIR)",
+      "sensorCategory": "multispectral",
+      "detection": {
+        "bandCount": 16,
+        "dataType": "UInt16",
+        "metadataPatterns": ["WV03", "WorldView-3"],
+        "priority": 12
+      },
+      "bands": [
+        {"index": 1, "name": "Coastal", "wavelength": 425, "resolution": 1, "domain": "optical"},
+        {"index": 2, "name": "Blue", "wavelength": 480, "resolution": 1, "domain": "optical"},
+        {"index": 3, "name": "Green", "wavelength": 545, "resolution": 1, "domain": "optical"},
+        {"index": 4, "name": "Yellow", "wavelength": 605, "resolution": 1, "domain": "optical"},
+        {"index": 5, "name": "Red", "wavelength": 660, "resolution": 1, "domain": "optical"},
+        {"index": 6, "name": "Red Edge", "wavelength": 725, "resolution": 1, "domain": "optical"},
+        {"index": 7, "name": "NIR1", "wavelength": 833, "resolution": 1, "domain": "optical"},
+        {"index": 8, "name": "NIR2", "wavelength": 950, "resolution": 1, "domain": "optical"},
+        {"index": 9, "name": "SWIR 1", "wavelength": 1195, "resolution": 4, "domain": "swir"},
+        {"index": 10, "name": "SWIR 2", "wavelength": 1550, "resolution": 4, "domain": "swir"},
+        {"index": 11, "name": "SWIR 3", "wavelength": 1660, "resolution": 4, "domain": "swir"},
+        {"index": 12, "name": "SWIR 4", "wavelength": 1730, "resolution": 4, "domain": "swir"},
+        {"index": 13, "name": "SWIR 5", "wavelength": 2165, "resolution": 4, "domain": "swir"},
+        {"index": 14, "name": "SWIR 6", "wavelength": 2205, "resolution": 4, "domain": "swir"},
+        {"index": 15, "name": "SWIR 7", "wavelength": 2260, "resolution": 4, "domain": "swir"},
+        {"index": 16, "name": "SWIR 8", "wavelength": 2330, "resolution": 4, "domain": "swir"}
+      ],
+      "presets": [
+        {"id": "true-color", "name": "True Color (RGB)", "bandMapping": {"r": 5, "g": 3, "b": 2}, "isDefault": true},
+        {"id": "false-color-ir", "name": "Color Infrared", "bandMapping": {"r": 7, "g": 5, "b": 3}},
+        {"id": "swir-composite", "name": "SWIR Composite", "description": "SWIR-NIR-Red for mineral and soil analysis", "bandMapping": {"r": 10, "g": 7, "b": 5}},
+        {"id": "ndvi", "name": "NDVI", "description": "Normalized Difference Vegetation Index", "type": "index", "formula": "NDVI", "colormap": "rdylgn"},
+        {"id": "ndwi", "name": "NDWI", "description": "Normalized Difference Water Index", "type": "index", "formula": "NDWI", "colormap": "bugn"},
+        {"id": "gndvi", "name": "GNDVI", "description": "Green Normalized Difference Vegetation Index", "type": "index", "formula": "GNDVI", "colormap": "rdylgn"},
+        {"id": "ndre", "name": "NDRE", "description": "Normalized Difference Red Edge Index", "type": "index", "formula": "NDRE", "colormap": "rdylgn"}
       ]
     },
     {
       "id": "generic-4band",
       "name": "Generic 4-Band (BGRN)",
-      "description": "Generic 4-band imagery (Blue, Green, Red, NIR). Low priority fallback.",
+      "description": "Generic 4-band imagery assumed as Blue, Green, Red, NIR. Low priority fallback for unrecognized 4-band UInt16 rasters.",
       "sensorCategory": "multispectral",
       "detection": {
         "bandCount": 4,
@@ -252,7 +407,67 @@
       ],
       "presets": [
         {"id": "true-color", "name": "True Color (RGB)", "bandMapping": {"r": 3, "g": 2, "b": 1}, "isDefault": true},
-        {"id": "false-color-ir", "name": "Color Infrared", "bandMapping": {"r": 4, "g": 3, "b": 2}}
+        {"id": "false-color-ir", "name": "Color Infrared", "bandMapping": {"r": 4, "g": 3, "b": 2}},
+        {"id": "ndvi", "name": "NDVI", "description": "Normalized Difference Vegetation Index", "type": "index", "formula": "NDVI", "colormap": "rdylgn"},
+        {"id": "ndwi", "name": "NDWI", "description": "Normalized Difference Water Index", "type": "index", "formula": "NDWI", "colormap": "bugn"},
+        {"id": "gndvi", "name": "GNDVI", "description": "Green Normalized Difference Vegetation Index", "type": "index", "formula": "GNDVI", "colormap": "rdylgn"}
+      ]
+    },
+    {
+      "id": "flir-vue-pro-r",
+      "name": "FLIR Vue Pro R",
+      "description": "FLIR Vue Pro R radiometric thermal camera for UAV",
+      "sensorCategory": "thermal",
+      "detection": {
+        "bandCount": 1,
+        "metadataPatterns": ["FLIR", "Vue Pro"],
+        "priority": 10
+      },
+      "bands": [
+        {"index": 1, "name": "LWIR", "wavelength": 10500, "domain": "thermal"}
+      ],
+      "presets": [
+        {"id": "ironbow", "name": "Ironbow", "description": "Standard thermal palette", "bandMapping": {"r": 1, "g": 1, "b": 1}, "isDefault": true, "type": "index", "formula": "CELSIUS", "colormap": "ironbow"},
+        {"id": "whitehot", "name": "White Hot", "description": "Grayscale, hot is white", "bandMapping": {"r": 1, "g": 1, "b": 1}, "type": "index", "formula": "CELSIUS", "colormap": "whitehot"},
+        {"id": "blackhot", "name": "Black Hot", "description": "Grayscale, hot is black", "bandMapping": {"r": 1, "g": 1, "b": 1}, "type": "index", "formula": "CELSIUS", "colormap": "blackhot"}
+      ]
+    },
+    {
+      "id": "dji-h20t",
+      "name": "DJI Zenmuse H20T",
+      "description": "DJI Zenmuse H20T thermal camera",
+      "sensorCategory": "thermal",
+      "detection": {
+        "bandCount": 1,
+        "metadataPatterns": ["H20T", "ZH20T", "Zenmuse H20T"],
+        "priority": 10
+      },
+      "bands": [
+        {"index": 1, "name": "LWIR", "wavelength": 11000, "domain": "thermal"}
+      ],
+      "presets": [
+        {"id": "ironbow", "name": "Ironbow", "description": "Standard thermal palette", "bandMapping": {"r": 1, "g": 1, "b": 1}, "isDefault": true, "type": "index", "formula": "CELSIUS", "colormap": "ironbow"},
+        {"id": "whitehot", "name": "White Hot", "description": "Grayscale, hot is white", "bandMapping": {"r": 1, "g": 1, "b": 1}, "type": "index", "formula": "CELSIUS", "colormap": "whitehot"},
+        {"id": "blackhot", "name": "Black Hot", "description": "Grayscale, hot is black", "bandMapping": {"r": 1, "g": 1, "b": 1}, "type": "index", "formula": "CELSIUS", "colormap": "blackhot"}
+      ]
+    },
+    {
+      "id": "dji-mavic-3t",
+      "name": "DJI Mavic 3T",
+      "description": "DJI Mavic 3 Thermal / Enterprise thermal camera",
+      "sensorCategory": "thermal",
+      "detection": {
+        "bandCount": 1,
+        "metadataPatterns": ["Mavic 3T", "M3T", "Mavic 3 Enterprise"],
+        "priority": 10
+      },
+      "bands": [
+        {"index": 1, "name": "LWIR", "wavelength": 11000, "domain": "thermal"}
+      ],
+      "presets": [
+        {"id": "ironbow", "name": "Ironbow", "description": "Standard thermal palette", "bandMapping": {"r": 1, "g": 1, "b": 1}, "isDefault": true, "type": "index", "formula": "CELSIUS", "colormap": "ironbow"},
+        {"id": "whitehot", "name": "White Hot", "description": "Grayscale, hot is white", "bandMapping": {"r": 1, "g": 1, "b": 1}, "type": "index", "formula": "CELSIUS", "colormap": "whitehot"},
+        {"id": "blackhot", "name": "Black Hot", "description": "Grayscale, hot is black", "bandMapping": {"r": 1, "g": 1, "b": 1}, "type": "index", "formula": "CELSIUS", "colormap": "blackhot"}
       ]
     }
   ]

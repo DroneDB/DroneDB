@@ -1440,10 +1440,15 @@ DDB_DLL DDBErr DDBGetRasterMetadata(const char* path, const char* formula,
             if (!masked) {
                 for (int b = 0; b < nBands; b++) {
                     if (b == alphaBandIdx) continue;
-                    if (bandHasNodata[b] &&
-                        static_cast<double>(bandDataPtrs[b][i]) == bandNodataVal[b]) {
-                        masked = true;
-                        break;
+                    if (bandHasNodata[b]) {
+                        const double sampleValue = static_cast<double>(bandDataPtrs[b][i]);
+                        const bool isNodata =
+                            (std::isnan(bandNodataVal[b]) && std::isnan(sampleValue)) ||
+                            (!std::isnan(bandNodataVal[b]) && sampleValue == bandNodataVal[b]);
+                        if (isNodata) {
+                            masked = true;
+                            break;
+                        }
                     }
                 }
             }
@@ -1741,12 +1746,12 @@ DDB_DLL DDBErr DDBPreviewMergeMultispectral(const char** paths, int numPaths,
     DDB_C_END
 }
 
-DDB_DLL DDBErr DDBMergeMultispectral(const char** paths, int numPaths, const char* outputCog) {
+DDB_DLL DDBErr DDBMergeMultispectral(const char** paths, int numPaths, const char* outputPath) {
     DDB_C_BEGIN
 
     if (paths == nullptr || numPaths < 2)
         throw InvalidArgsException("At least 2 input paths required");
-    if (utils::isNullOrEmptyOrWhitespace(outputCog))
+    if (utils::isNullOrEmptyOrWhitespace(outputPath))
         throw InvalidArgsException("No output path provided");
 
     std::vector<std::string> inputPaths;
@@ -1754,7 +1759,7 @@ DDB_DLL DDBErr DDBMergeMultispectral(const char** paths, int numPaths, const cha
         if (paths[i]) inputPaths.emplace_back(paths[i]);
     }
 
-    ddb::mergeMultispectral(inputPaths, std::string(outputCog));
+    ddb::mergeMultispectral(inputPaths, std::string(outputPath));
 
     DDB_C_END
 }
@@ -1793,6 +1798,8 @@ DDB_DLL DDBErr DDBExportRaster(const char* inputPath, const char* outputPath,
 
     if (!formulaStr.empty()) {
         // Formula mode: apply formula + colormap, export as RGBA GeoTIFF
+        // TODO: For very large rasters, consider processing in blocks/scanlines
+        // to avoid excessive memory usage (currently loads all bands fully into memory)
         auto& ve = ddb::VegetationEngine::instance();
 
         ddb::BandFilter bf;
@@ -1836,10 +1843,15 @@ DDB_DLL DDBErr DDBExportRaster(const char* inputPath, const char* outputPath,
             if (!masked) {
                 for (int b = 0; b < bandCount; b++) {
                     if (b == alphaBandIdx) continue;
-                    if (bandHasNodata[b] &&
-                        static_cast<double>(bandDataPtrs[b][i]) == bandNodataVal[b]) {
-                        masked = true;
-                        break;
+                    if (bandHasNodata[b]) {
+                        const double sampleValue = static_cast<double>(bandDataPtrs[b][i]);
+                        const bool isNodata =
+                            (std::isnan(bandNodataVal[b]) && std::isnan(sampleValue)) ||
+                            (!std::isnan(bandNodataVal[b]) && sampleValue == bandNodataVal[b]);
+                        if (isNodata) {
+                            masked = true;
+                            break;
+                        }
                     }
                 }
             }

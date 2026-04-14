@@ -429,10 +429,15 @@ void generateImageThumbEx(const fs::path& imagePath,
             if (!masked) {
                 for (int b = 0; b < bandCount; b++) {
                     if (b == alphaBandIdx) continue;
-                    if (bandHasNodata[b] &&
-                        static_cast<double>(bandDataPtrs[b][i]) == bandNodataVal[b]) {
-                        masked = true;
-                        break;
+                    if (bandHasNodata[b]) {
+                        const double sampleValue = static_cast<double>(bandDataPtrs[b][i]);
+                        const bool isNodata =
+                            (std::isnan(bandNodataVal[b]) && std::isnan(sampleValue)) ||
+                            (!std::isnan(bandNodataVal[b]) && sampleValue == bandNodataVal[b]);
+                        if (isNodata) {
+                            masked = true;
+                            break;
+                        }
                     }
                 }
             }

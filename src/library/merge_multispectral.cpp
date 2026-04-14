@@ -178,7 +178,7 @@ std::vector<BandAlignmentInfo> detectBandAlignment(const std::vector<std::string
             }
 
             // Priority 3: Sensor database lookup
-            if (!bands[i].hasPixelPitch && bands[i].imageWidth > 0) {
+            if (!bands[i].hasPixelPitch && bands[i].imageWidth > 0 && bands[i].imageHeight > 0) {
                 std::string sensor = parser.extractSensor();
                 if (SensorData::contains(sensor)) {
                     double sensorWidthMm = SensorData::getFocal(sensor);
@@ -303,14 +303,25 @@ std::vector<BandAlignmentInfo> detectBandAlignment(const std::vector<std::string
             alignInfo[i].detected = true;
         }
     } else if (useSource == SOURCE_DJI_RELATIVE_OC) {
-        for (size_t i = 0; i < N; i++) {
-            if (!bands[i].hasRelOptCenter && i != REF) continue;
-            double rocX = bands[i].relOptCenterX - bands[REF].relOptCenterX;
-            double rocY = bands[i].relOptCenterY - bands[REF].relOptCenterY;
-            alignInfo[i].shiftX = rocX;
-            alignInfo[i].shiftY = rocY;
-            alignInfo[i].shiftSource = "DJI_RelativeOpticalCenter";
-            alignInfo[i].detected = true;
+        // Find a reference band that actually has RelOC metadata
+        size_t djiRef = REF;
+        if (!bands[djiRef].hasRelOptCenter) {
+            for (size_t i = 0; i < N; i++) {
+                if (bands[i].hasRelOptCenter) { djiRef = i; break; }
+            }
+        }
+        if (!bands[djiRef].hasRelOptCenter) {
+            LOGD << "No band has DJI RelativeOpticalCenter metadata, skipping";
+        } else {
+            for (size_t i = 0; i < N; i++) {
+                if (!bands[i].hasRelOptCenter) continue;
+                double rocX = bands[i].relOptCenterX - bands[djiRef].relOptCenterX;
+                double rocY = bands[i].relOptCenterY - bands[djiRef].relOptCenterY;
+                alignInfo[i].shiftX = rocX;
+                alignInfo[i].shiftY = rocY;
+                alignInfo[i].shiftSource = "DJI_RelativeOpticalCenter";
+                alignInfo[i].detected = true;
+            }
         }
     }
 
@@ -636,11 +647,11 @@ void previewMergeMultispectral(const std::vector<std::string> &inputPaths,
 }
 
 void mergeMultispectral(const std::vector<std::string> &inputPaths,
-                         const std::string &outputCog) {
+                         const std::string &outputPath) {
     if (inputPaths.size() < 2) throw InvalidArgsException("At least 2 files required");
 
-    if (fs::exists(outputCog)) {
-        throw AppException("Output file already exists: " + outputCog);
+    if (fs::exists(outputPath)) {
+        throw AppException("Output file already exists: " + outputPath);
     }
 
     auto validation = validateMergeMultispectral(inputPaths);
@@ -720,9 +731,6 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
 
     if (hasGeoTransform) {
         // Use GDALWarp for georeferenced data (supports reprojection)
-        // NOTE: We use GTiff instead of COG because after creation we modify
-        // the file with Exiv2 to embed GPS EXIF metadata. Exiv2 does not
-        // understand COG's strict internal layout and would corrupt the file.
         char **warpArgs = nullptr;
         warpArgs = CSLAddString(warpArgs, "-of");
         warpArgs = CSLAddString(warpArgs, "GTiff");
@@ -751,7 +759,7 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
         GDALWarpAppOptions *warpOpts = GDALWarpAppOptionsNew(warpArgs, nullptr);
         CSLDestroy(warpArgs);
 
-        hOut = GDALWarp(outputCog.c_str(), nullptr, 1, &hVrt, warpOpts, nullptr);
+        hOut = GDALWarp(outputPath.c_str(), nullptr, 1, &hVrt, warpOpts, nullptr);
         GDALWarpAppOptionsFree(warpOpts);
     } else {
         // Use GDALTranslate for non-georeferenced data (no geotransform needed)
@@ -904,7 +912,7 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
                 GDALTranslateOptions *transOpts = GDALTranslateOptionsNew(transArgs, nullptr);
                 CSLDestroy(transArgs);
 
-                hOut = GDALTranslate(outputCog.c_str(), hVrt, transOpts, nullptr);
+                hOut = GDALTranslate(outputPath.c_str(), hVrt, transOpts, nullptr);
                 GDALTranslateOptionsFree(transOpts);
 
                 GDALClose(hVrt);
@@ -987,7 +995,7 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
             GDALTranslateOptions *transOpts = GDALTranslateOptionsNew(transArgs, nullptr);
             CSLDestroy(transArgs);
 
-            hOut = GDALTranslate(outputCog.c_str(), hVrt, transOpts, nullptr);
+            hOut = GDALTranslate(outputPath.c_str(), hVrt, transOpts, nullptr);
             GDALTranslateOptionsFree(transOpts);
         }
     }
@@ -998,7 +1006,7 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
             for (auto d : datasets) GDALClose(d);
         }
         VSIUnlink(vsiVrtPath.c_str());
-        throw GDALException("Cannot create merged COG: " + outputCog);
+        throw GDALException("Cannot create merged output: " + outputPath);
     }
 
     GDALFlushCache(hOut);
@@ -1014,15 +1022,15 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
     // Write GPS coordinates from source to merged output
     if (hasGps) {
         try {
-            ExifEditor editor(outputCog);
+            ExifEditor editor(outputPath);
             editor.SetGPS(srcGps.latitude, srcGps.longitude, srcGps.altitude);
-            LOGD << "GPS coordinates written to merged output: " << outputCog;
+            LOGD << "GPS coordinates written to merged output: " << outputPath;
         } catch (const std::exception &e) {
-            LOGD << "Could not write GPS to " << outputCog << ": " << e.what();
+            LOGD << "Could not write GPS to " << outputPath << ": " << e.what();
         }
     }
 
-    LOGD << "Merged " << inputPaths.size() << " bands into " << outputCog;
+    LOGD << "Merged " << inputPaths.size() << " bands into " << outputPath;
 }
 
 } // namespace ddb
