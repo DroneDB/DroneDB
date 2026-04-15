@@ -460,6 +460,32 @@ extern "C"
                                     const char *formula, const char *bandFilter,
                                     const char *colormap, const char *rescale);
 
+    /** Get thermal image info including calibration and temperature range
+     * @param filePath Path to thermal image (R-JPEG or GeoTIFF)
+     * @param output Pointer to receive JSON string (caller must free with DDBFree)
+     * @return DDBERR_NONE on success, an error otherwise */
+    DDB_DLL DDBErr DDBGetThermalInfo(const char *filePath, char **output);
+
+    /** Get temperature at a specific pixel
+     * @param filePath Path to thermal image
+     * @param x Pixel X coordinate
+     * @param y Pixel Y coordinate
+     * @param output Pointer to receive JSON string (caller must free with DDBFree)
+     * @return DDBERR_NONE on success, an error otherwise */
+    DDB_DLL DDBErr DDBGetThermalPoint(const char *filePath, int x, int y, char **output);
+
+    /** Get temperature statistics for a rectangular area
+     * @param filePath Path to thermal image
+     * @param x0 Left X coordinate
+     * @param y0 Top Y coordinate
+     * @param x1 Right X coordinate
+     * @param y1 Bottom Y coordinate
+     * @param output Pointer to receive JSON string (caller must free with DDBFree)
+     * @return DDBERR_NONE on success, an error otherwise */
+    DDB_DLL DDBErr DDBGetThermalAreaStats(const char *filePath,
+                                          int x0, int y0, int x1, int y1,
+                                          char **output);
+
 #ifdef __cplusplus
 }
 #endif

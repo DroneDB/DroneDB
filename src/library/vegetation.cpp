@@ -101,6 +101,10 @@ void VegetationEngine::initFormulas() {
     formulas_.push_back({"GRVI", "Green Ratio Vegetation Index", "N / G", "Green ratio", 0, 0, false, "GN"});
     formulas_.push_back({"ENDVI", "Enhanced NDVI", "((N + G) - (2*B)) / ((N + G) + (2*B))", "Enhanced NDVI", 0, 0, false, "GBN"});
     formulas_.push_back({"ARVI", "Atmospherically Resistant Vegetation Index", "(N - (2*R) + B) / (N + (2*R) + B)", "Corrects atmospheric effects", -1, 1, true, "RBN"});
+
+    // Thermal formulas
+    formulas_.push_back({"CELSIUS", "Celsius Temperature", "pixel value (passthrough)", "Temperature in degrees Celsius", -40, 150, true, ""});
+    formulas_.push_back({"KELVIN", "Kelvin Temperature", "pixel + 273.15", "Temperature in Kelvin", 233.15, 423.15, true, ""});
 }
 
 std::vector<VegetationFormula> VegetationEngine::getFormulasForFilter(const BandFilter &filter) const {
@@ -279,6 +283,19 @@ void VegetationEngine::applyFormula(const VegetationFormula &formula,
         } else if (id == "ARVI") {
             float denom = N + (2.0f * R) + B;
             result = (std::abs(denom) < EPS) ? nodata : (N - (2.0f * R) + B) / denom;
+        } else if (id == "CELSIUS") {
+            // Thermal passthrough: pixel value is already temperature in °C
+            // For single-band thermal rasters, use band index 0 directly
+            if (bandData.size() > 0 && bandData[0] != nullptr) {
+                float val = bandData[0][i];
+                result = (val == nodata) ? nodata : val;
+            }
+        } else if (id == "KELVIN") {
+            // Convert Celsius to Kelvin
+            if (bandData.size() > 0 && bandData[0] != nullptr) {
+                float val = bandData[0][i];
+                result = (val == nodata) ? nodata : val + 273.15f;
+            }
         }
 
         outData[i] = result;

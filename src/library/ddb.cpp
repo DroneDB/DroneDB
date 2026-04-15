@@ -8,6 +8,8 @@
 
 #include <csignal>
 #include <mutex>
+
+#include <exiv2/exiv2.hpp>
 #include <sstream>
 
 #ifdef WIN32
@@ -36,6 +38,7 @@
 #include "status.h"
 #include "syncmanager.h"
 #include "tagmanager.h"
+#include "thermal.h"
 #include "thumbs.h"
 #include "tilerhelper.h"
 #include "utils.h"
@@ -305,6 +308,14 @@ void DDBRegisterProcess(bool verbose) {
         setupLogging(verbose);
         initializeGDALandPROJ();
         setupSignalHandlers();
+
+        // Register custom XMP namespaces for thermal sensor metadata
+        try {
+            Exiv2::XmpProperties::registerNs("http://ns.flir.com/xmp/1.0/", "FLIR");
+            LOGD << "Registered FLIR XMP namespace";
+        } catch (const Exiv2::Error &e) {
+            LOGD << "FLIR XMP namespace already registered or error: " << e.what();
+        }
 
         ddb::utils::printVersions();
     });
@@ -1949,5 +1960,41 @@ DDB_DLL DDBErr DDBExportRaster(const char* inputPath, const char* outputPath,
         GDALClose(hOut);
     }
 
+    DDB_C_END
+}
+
+DDB_DLL DDBErr DDBGetThermalInfo(const char *filePath, char **output) {
+    DDB_C_BEGIN
+    if (utils::isNullOrEmptyOrWhitespace(filePath))
+        throw InvalidArgsException("No file path provided");
+    if (output == nullptr)
+        throw InvalidArgsException("Output pointer is null");
+
+    std::string jsonStr = ddb::getThermalInfoJson(std::string(filePath));
+    utils::copyToPtr(jsonStr, output);
+    DDB_C_END
+}
+
+DDB_DLL DDBErr DDBGetThermalPoint(const char *filePath, int x, int y, char **output) {
+    DDB_C_BEGIN
+    if (utils::isNullOrEmptyOrWhitespace(filePath))
+        throw InvalidArgsException("No file path provided");
+    if (output == nullptr)
+        throw InvalidArgsException("Output pointer is null");
+
+    std::string jsonStr = ddb::getThermalPointJson(std::string(filePath), x, y);
+    utils::copyToPtr(jsonStr, output);
+    DDB_C_END
+}
+
+DDB_DLL DDBErr DDBGetThermalAreaStats(const char *filePath, int x0, int y0, int x1, int y1, char **output) {
+    DDB_C_BEGIN
+    if (utils::isNullOrEmptyOrWhitespace(filePath))
+        throw InvalidArgsException("No file path provided");
+    if (output == nullptr)
+        throw InvalidArgsException("Output pointer is null");
+
+    std::string jsonStr = ddb::getThermalAreaStatsJson(std::string(filePath), x0, y0, x1, y1);
+    utils::copyToPtr(jsonStr, output);
     DDB_C_END
 }
