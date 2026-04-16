@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <fstream>
+#include <optional>
 #include <sstream>
 
 #include "3d.h"
@@ -29,6 +30,10 @@
 #endif
 
 namespace ddb {
+
+// Forward declarations for stale lock detection helpers (defined later in this file)
+static long readPidFromLockFile(const std::string& lockFilePath);
+static bool isLockFileStale(const std::string& lockFilePath);
 
 bool isBuildableInternal(const Entry& e, std::string& subfolder) {
     if (e.type == EntryType::PointCloud) {
@@ -134,7 +139,40 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
     // Acquire inter-process lock to prevent race conditions between different processes
     // This must come BEFORE the ThreadLock to ensure proper ordering of lock acquisition
     LOGD << "Acquiring inter-process build lock for: " << outputFolder;
-    BuildLock processLock(outputFolder);
+
+    // Helper lambda: try to acquire the build lock, optionally removing stale locks first
+    auto acquireBuildLock = [&](bool removeStale) -> std::optional<BuildLock> {
+        if (removeStale) {
+            std::string lockFile = outputFolder + ".building";
+            if (fs::exists(lockFile)) {
+                if (isLockFileStale(lockFile)) {
+                    LOGD << "Force build: removing stale lock file (dead PID): " << lockFile;
+                    try {
+                        io::assureIsRemoved(lockFile);
+                    } catch (const std::exception& err) {
+                        LOGW << "Failed to remove stale lock file: " << err.what();
+                    }
+                } else {
+                    long activePid = readPidFromLockFile(lockFile);
+                    std::string pidInfo = activePid > 0 ? " (PID: " + std::to_string(activePid) + ")" : "";
+                    LOGD << "Force build: lock held by active process" << pidInfo << ", cannot override: " << lockFile;
+                    throw BuildInProgressException("Build in progress by another process" + pidInfo);
+                }
+            }
+        }
+        return BuildLock(outputFolder);
+    };
+
+    std::optional<BuildLock> processLockOpt;
+    try {
+        processLockOpt = acquireBuildLock(false);
+    } catch (const BuildInProgressException&) {
+        if (!force) throw;
+        // Force mode: attempt to reclaim stale lock and retry
+        LOGD << "Build lock failed, force=true: attempting stale lock removal and retry";
+        processLockOpt = acquireBuildLock(true);
+    }
+    BuildLock& processLock = *processLockOpt;
 
     // Acquire intra-process lock to coordinate between threads of the same process
     ThreadLock threadLock("build-" + (db->rootDirectory() / e.hash).string());
