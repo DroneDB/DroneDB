@@ -225,25 +225,65 @@ static FlirSegmentInfo findFlirSegment(const std::string &filePath) {
 RawThermalData extractRawThermalData(const std::string &filePath) {
     RawThermalData result;
 
+    // Method 1: Try FLIR APP1 segment extraction (FLIR R-JPEG format)
     FlirSegmentInfo seg = findFlirSegment(filePath);
-    if (!seg.found) {
-        LOGD << "No raw thermal data found in " << filePath;
+    if (seg.found) {
+        std::ifstream file(filePath, std::ios::binary);
+        if (!file.is_open()) return result;
+
+        file.seekg(seg.rawDataOffset);
+        size_t pixelCount = static_cast<size_t>(seg.rawWidth) * seg.rawHeight;
+        result.data.resize(pixelCount);
+        file.read(reinterpret_cast<char*>(result.data.data()), pixelCount * 2);
+
+        result.width = seg.rawWidth;
+        result.height = seg.rawHeight;
+        result.valid = true;
+
+        LOGD << "Extracted " << pixelCount << " raw thermal pixels from " << filePath;
         return result;
     }
 
-    std::ifstream file(filePath, std::ios::binary);
-    if (!file.is_open()) return result;
+    // Method 2: GDAL fallback (DJI R-JPEG, thermal GeoTIFF, etc.)
+    LOGD << "No FLIR segment found, trying GDAL fallback for " << filePath;
 
-    file.seekg(seg.rawDataOffset);
-    size_t pixelCount = static_cast<size_t>(seg.rawWidth) * seg.rawHeight;
-    result.data.resize(pixelCount);
-    file.read(reinterpret_cast<char*>(result.data.data()), pixelCount * 2);
+    GDALDatasetH hDs = GDALOpen(filePath.c_str(), GA_ReadOnly);
+    if (!hDs) return result;
 
-    result.width = seg.rawWidth;
-    result.height = seg.rawHeight;
-    result.valid = true;
+    int w = GDALGetRasterXSize(hDs);
+    int h = GDALGetRasterYSize(hDs);
+    int nBands = GDALGetRasterCount(hDs);
 
-    LOGD << "Extracted " << pixelCount << " raw thermal pixels from " << filePath;
+    if (nBands >= 1) {
+        GDALRasterBandH hBand = GDALGetRasterBand(hDs, 1);
+        GDALDataType dt = GDALGetRasterDataType(hBand);
+        size_t pixelCount = static_cast<size_t>(w) * h;
+
+        if (dt == GDT_UInt16) {
+            // Direct raw radiometric data (e.g., thermal GeoTIFF)
+            result.data.resize(pixelCount);
+            if (GDALRasterIO(hBand, GF_Read, 0, 0, w, h,
+                             result.data.data(), w, h, GDT_UInt16, 0, 0) == CE_None) {
+                result.width = w;
+                result.height = h;
+                result.valid = true;
+                LOGD << "Extracted " << pixelCount << " raw thermal pixels via GDAL (UInt16)";
+            }
+        } else if (dt == GDT_Byte) {
+            // 8-bit thermal image (e.g., DJI R-JPEG)
+            // Read first band and cast to UInt16
+            result.data.resize(pixelCount);
+            if (GDALRasterIO(hBand, GF_Read, 0, 0, w, h,
+                             result.data.data(), w, h, GDT_UInt16, 0, 0) == CE_None) {
+                result.width = w;
+                result.height = h;
+                result.valid = true;
+                LOGD << "Extracted " << pixelCount << " thermal pixels via GDAL (Byte->UInt16)";
+            }
+        }
+    }
+
+    GDALClose(hDs);
     return result;
 }
 
