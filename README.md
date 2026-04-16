@@ -3,6 +3,7 @@
 [![License: MPL 2.0](https://img.shields.io/badge/license-MPL--2.0-blue)](LICENSE.md)
 [![GitHub commits](https://img.shields.io/github/commit-activity/m/DroneDB/DroneDB)](https://github.com/DroneDB/DroneDB/commits)
 [![C/C++ CI](https://github.com/DroneDB/DroneDB/actions/workflows/c-cpp.yml/badge.svg)](https://github.com/DroneDB/DroneDB/actions/workflows/c-cpp.yml)
+[![Discord](https://img.shields.io/discord/1491016144310767670?label=Discord&logo=discord&color=5865F2)](https://discord.gg/e9M3vBvzge)
 
 **DroneDB** is a free, open-source platform for modern geospatial data management. Store, visualize and share your geospatial data in the cloud. Orthophotos, point clouds, 3D models, geotagged files: all in one place.
 
@@ -23,6 +24,12 @@
 - **Cross-Platform** - Works on Windows and Linux
 
 ---
+
+## 💬 Community
+
+Join our Discord server to get help, share feedback, discuss features, and connect with other DroneDB users:
+
+**[Join the DroneDB Discord](https://discord.gg/e9M3vBvzge)**
 
 ## Quick Start
 
