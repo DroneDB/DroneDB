@@ -29,6 +29,7 @@
 #include "info.h"
 #include "json.h"
 #include "logger.h"
+#include "mask.h"
 #include "merge_multispectral.h"
 #include "mio.h"
 #include "passwordmanager.h"
@@ -1996,5 +1997,18 @@ DDB_DLL DDBErr DDBGetThermalAreaStats(const char *filePath, int x0, int y0, int 
 
     std::string jsonStr = ddb::getThermalAreaStatsJson(std::string(filePath), x0, y0, x1, y1);
     utils::copyToPtr(jsonStr, output);
+    DDB_C_END
+}
+
+DDB_DLL DDBErr DDBMaskBorders(const char *input, const char *output, int nearDist, bool white) {
+    DDB_C_BEGIN
+
+    if (utils::isNullOrEmptyOrWhitespace(input))
+        throw InvalidArgsException("No input path provided");
+    if (utils::isNullOrEmptyOrWhitespace(output))
+        throw InvalidArgsException("No output path provided");
+
+    ddb::maskBorders(std::string(input), std::string(output), nearDist, white);
+
     DDB_C_END
 }

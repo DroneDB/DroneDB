@@ -486,6 +486,17 @@ extern "C"
                                           int x0, int y0, int x1, int y1,
                                           char **output);
 
+    /** Mask orthophoto borders making them transparent
+     * @param input Path to input GeoTIFF
+     * @param output Path to output GeoTIFF (with alpha band)
+     * @param near Tolerance in grey levels (default 15)
+     * @param white If true, search for white borders instead of black
+     * @return DDBERR_NONE on success, an error otherwise */
+    DDB_DLL DDBErr DDBMaskBorders(const char *input,
+                                   const char *output,
+                                   int nearDist,
+                                   bool white);
+
 #ifdef __cplusplus
 }
 #endif
