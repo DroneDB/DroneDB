@@ -533,8 +533,8 @@ namespace ddb
             std::string token;
             while (std::getline(ss, token, ',')) {
                 int bIdx = std::stoi(token);
-                if (bIdx < 1 || bIdx > totalBands)
-                    throw InvalidArgsException("Band index " + std::to_string(bIdx) + " out of range");
+                if (bIdx < 1 || bIdx > nBands)
+                    throw InvalidArgsException("Band index " + std::to_string(bIdx) + " out of range (1-" + std::to_string(nBands) + ")");
                 selectedBands.push_back(bIdx);
             }
         } else if (!visParams.preset.empty()) {
