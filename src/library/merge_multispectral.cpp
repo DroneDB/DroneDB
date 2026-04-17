@@ -538,25 +538,49 @@ MergeValidationResult validateMergeMultispectral(const std::vector<std::string> 
         // Warnings
         if (maxShift > 2.0) {
             int shiftRounded = static_cast<int>(std::round(maxShift));
-            result.warnings.push_back(
-                "Band misalignment detected (~" + std::to_string(shiftRounded) +
-                " pixels). Bands from multi-camera sensors (e.g. MicaSense, DJI Multispectral) "
-                "are captured from slightly different viewpoints. For accurate vegetation indices "
-                "(NDVI, NDRE, etc.), process raw imagery with a photogrammetry tool (e.g. OpenDroneMap, "
-                "Pix4D) before merging. The merge will proceed with approximate pixel-shift correction.");
+            if (result.alignment.correctionApplied) {
+                result.warnings.push_back(
+                    "Band misalignment detected (~" + std::to_string(shiftRounded) +
+                    " pixels). Bands from multi-camera sensors (e.g. MicaSense, DJI Multispectral) "
+                    "are captured from slightly different viewpoints. For accurate vegetation indices "
+                    "(NDVI, NDRE, etc.), process raw imagery with a photogrammetry tool (e.g. WebODM, "
+                    "Pix4D) before merging. The merge will proceed with approximate pixel-shift correction.");
+            } else {
+                result.warnings.push_back(
+                    "Band misalignment detected (~" + std::to_string(shiftRounded) +
+                    " pixels). Bands from multi-camera sensors (e.g. MicaSense, DJI Multispectral) "
+                    "are captured from slightly different viewpoints. For accurate vegetation indices "
+                    "(NDVI, NDRE, etc.), process raw imagery with a photogrammetry tool (e.g. WebODM, "
+                    "Pix4D) before merging. Approximate pixel-shift correction is not being applied "
+                    "under the current input conditions.");
+            }
         } else if (maxShift > 0.5) {
             int shiftRounded = static_cast<int>(std::round(maxShift));
-            result.warnings.push_back(
-                "Minor band misalignment detected (~" + std::to_string(shiftRounded) +
-                " pixels). Approximate correction will be applied.");
+            if (result.alignment.correctionApplied) {
+                result.warnings.push_back(
+                    "Minor band misalignment detected (~" + std::to_string(shiftRounded) +
+                    " pixels). Approximate correction will be applied.");
+            } else {
+                result.warnings.push_back(
+                    "Minor band misalignment detected (~" + std::to_string(shiftRounded) +
+                    " pixels). Approximate correction is not being applied under the current input "
+                    "conditions.");
+            }
         }
 
         // Partial metadata warning
         if (detectedCount > 0 && detectedCount < static_cast<int>(alignInfo.size())) {
-            result.warnings.push_back(
-                "Band alignment metadata found for " + std::to_string(detectedCount) + "/" +
-                std::to_string(alignInfo.size()) + " bands. Correction will only be applied to "
-                "bands with calibration data. Results may be inconsistent.");
+            if (result.alignment.correctionApplied) {
+                result.warnings.push_back(
+                    "Band alignment metadata found for " + std::to_string(detectedCount) + "/" +
+                    std::to_string(alignInfo.size()) + " bands. Correction will only be applied to "
+                    "bands with calibration data. Results may be inconsistent.");
+            } else {
+                result.warnings.push_back(
+                    "Band alignment metadata found for " + std::to_string(detectedCount) + "/" +
+                    std::to_string(alignInfo.size()) + " bands, but approximate correction is not being "
+                    "applied under the current input conditions. Results may be inconsistent.");
+            }
         }
 
         // LWIR warning
