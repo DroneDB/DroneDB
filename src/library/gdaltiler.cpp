@@ -360,7 +360,14 @@ namespace ddb
         }
         else
         {
-            throw GDALException("Geoquery out of bounds");
+            // The tile lies on the edge of the raster and has zero overlap
+            // after rounding. Emit a fully transparent tile instead of
+            // failing so that edge tiles produced by getTilesForZoomLevel()
+            // don't abort the whole tiling pipeline.
+            LOGD << "Geoquery produced empty window; emitting transparent tile";
+            const GDALRasterBandH tileAlphaBand =
+                GDALGetRasterBand(dsTile, cappedBands + 1);
+            GDALSetRasterColorInterpretation(tileAlphaBand, GCI_AlphaBand);
         }
 
         const GDALDatasetH outDs = GDALCreateCopy(pngDrv, tilePath.c_str(), dsTile, FALSE,
@@ -413,7 +420,34 @@ namespace ddb
         GQResult g = geoQuery(inputDataset, b.min.x, b.max.y, b.max.x, b.min.y, querySize);
 
         if (g.r.xsize == 0 || g.r.ysize == 0 || g.w.xsize == 0 || g.w.ysize == 0)
-            throw GDALException("Geoquery out of bounds");
+        {
+            // Edge tile with zero overlap after rounding: emit a fully
+            // transparent tile so the tiling pipeline keeps going.
+            LOGD << "Geoquery produced empty window (visParams); emitting transparent tile";
+            GDALDatasetH dsTileEmpty = GDALCreate(memDrv, "", tileSize, tileSize, 4, GDT_Byte, nullptr);
+            if (!dsTileEmpty) throw GDALException("Cannot create tile dataset");
+            GDALSetRasterColorInterpretation(GDALGetRasterBand(dsTileEmpty, 4), GCI_AlphaBand);
+            GDALDatasetH outEmpty = GDALCreateCopy(pngDrv, tilePath.c_str(), dsTileEmpty, FALSE,
+                                                   nullptr, nullptr, nullptr);
+            if (!outEmpty) {
+                GDALClose(dsTileEmpty);
+                throw GDALException("Cannot create output tile");
+            }
+            GDALFlushCache(outEmpty);
+            GDALClose(outEmpty);
+            GDALClose(dsTileEmpty);
+
+            if (outBuffer != nullptr)
+            {
+                vsi_l_offset bufSize;
+                *outBuffer = VSIGetMemFileBuffer(tilePath.c_str(), &bufSize, TRUE);
+                if (bufSize > std::numeric_limits<int>::max())
+                    throw GDALException("Exceeded max buf size");
+                *outBufferSize = bufSize;
+                return "";
+            }
+            return tilePath;
+        }
 
         const size_t wSize = static_cast<size_t>(g.w.xsize) * g.w.ysize;
 
