@@ -698,6 +698,8 @@ std::string getThermalPointJson(const std::string &filePath, int x, int y) {
             GDALDataType dt = GDALGetRasterDataType(hBand);
 
             float temp = 0;
+            float rawSensorValue = 0;
+            bool hasRawSensorValue = false;
             bool gotValue = false;
 
             if (dt == GDT_Float32 || dt == GDT_Float64) {
@@ -709,6 +711,8 @@ std::string getThermalPointJson(const std::string &filePath, int x, int y) {
             } else if (dt == GDT_UInt16) {
                 uint16_t rawVal;
                 if (GDALRasterIO(hBand, GF_Read, x, y, 1, 1, &rawVal, 1, 1, GDT_UInt16, 0, 0) == CE_None) {
+                    rawSensorValue = static_cast<float>(rawVal);
+                    hasRawSensorValue = true;
                     ThermalCalibration cal = extractThermalCalibration(filePath);
                     if (cal.valid) {
                         temp = static_cast<float>(rawToTemperature(rawVal, cal));
@@ -724,7 +728,7 @@ std::string getThermalPointJson(const std::string &filePath, int x, int y) {
                 result["temperature"] = temp;
                 result["x"] = x;
                 result["y"] = y;
-                result["rawValue"] = temp;
+                result["rawValue"] = hasRawSensorValue ? rawSensorValue : temp;
 
                 // Get geo coordinates if available
                 double geoTransform[6];
