@@ -1894,21 +1894,27 @@ DDB_DLL DDBErr DDBExportRaster(const char* inputPath, const char* outputPath,
     } else {
         // Non-formula mode: band selection + rescale, export as GeoTIFF
         std::vector<int> selectedBands;
-        if (!bandsStr.empty()) {
-            std::istringstream ss(bandsStr);
-            std::string token;
-            while (std::getline(ss, token, ',')) {
-                int b = std::stoi(token);
-                if (b < 1 || b > bandCount)
-                    throw InvalidArgsException("Band index out of range: " + token);
-                selectedBands.push_back(b);
+        try {
+            if (!bandsStr.empty()) {
+                std::istringstream ss(bandsStr);
+                std::string token;
+                while (std::getline(ss, token, ',')) {
+                    int b = std::stoi(token);
+                    if (b < 1 || b > bandCount)
+                        throw InvalidArgsException("Band index out of range: " + token);
+                    selectedBands.push_back(b);
+                }
+            } else if (!presetStr.empty()) {
+                auto& spm = ddb::SensorProfileManager::instance();
+                auto mapping = spm.getBandMappingForPreset(std::string(inputPath), presetStr);
+                selectedBands = {mapping.r, mapping.g, mapping.b};
+            } else {
+                for (int i = 1; i <= std::min(3, bandCount); i++) selectedBands.push_back(i);
             }
-        } else if (!presetStr.empty()) {
-            auto& spm = ddb::SensorProfileManager::instance();
-            auto mapping = spm.getBandMappingForPreset(std::string(inputPath), presetStr);
-            selectedBands = {mapping.r, mapping.g, mapping.b};
-        } else {
-            for (int i = 1; i <= std::min(3, bandCount); i++) selectedBands.push_back(i);
+        } catch (const std::exception& e) {
+            LOGW << "Error parsing bands/preset: " << e.what();
+            GDALClose(hSrcDs);
+            throw;
         }
 
         // Use GDALTranslate for band selection + rescale
