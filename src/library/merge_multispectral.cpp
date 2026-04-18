@@ -275,13 +275,14 @@ std::vector<BandAlignmentInfo> detectBandAlignment(const std::vector<std::string
     }
 
     // Source selection
+    // Priority: DJI RelativeOpticalCenter → PrincipalPoint → none
     enum ShiftSource { SOURCE_NONE, SOURCE_PRINCIPAL_POINT, SOURCE_DJI_RELATIVE_OC };
     ShiftSource useSource = SOURCE_NONE;
 
-    if (maxPPShift > 1.5 && allHavePPAndPitch) {
-        useSource = SOURCE_PRINCIPAL_POINT;
-    } else if (hasDjiRelOC) {
+    if (hasDjiRelOC) {
         useSource = SOURCE_DJI_RELATIVE_OC;
+    } else if (maxPPShift > 1.5 && allHavePPAndPitch) {
+        useSource = SOURCE_PRINCIPAL_POINT;
     }
 
     // Apply selected source
@@ -971,8 +972,8 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
                     double centerShiftXPx = (padLeft - padRight) / 2.0;
                     double centerShiftYPx = (padTop - padBottom) / 2.0;
 
-                    // Try to compute GSD for GPS correction
-                    double pixelPitch = 0, focalLength = 0;
+                    // Try to compute GSD and yaw for GPS correction
+                    double pixelPitch = 0, focalLength = 0, yawDeg = 0;
                     try {
                         auto exivImg = Exiv2::ImageFactory::open(inputPaths[0]);
                         if (exivImg.get()) {
@@ -992,17 +993,36 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
                             if (p.extractSensorSize(ss) && w > 0) {
                                 pixelPitch = ss.width / w;
                             }
+
+                            CameraOrientation cameraOri;
+                            if (p.extractCameraOrientation(cameraOri)) {
+                                yawDeg = cameraOri.yaw;
+                            }
                         }
                     } catch (...) {}
 
                     if (srcGps.altitude > 0 && focalLength > 0 && pixelPitch > 0) {
                         double gsd = srcGps.altitude * pixelPitch / focalLength;
-                        double dLat = -(centerShiftYPx * gsd) / 111320.0;
-                        double dLon = (centerShiftXPx * gsd) /
+
+                        // Rotate pixel shift by camera yaw to convert from
+                        // image-space (col/row) to geographic (east/north).
+                        // Image axes: +X = right, +Y = down.
+                        // Yaw: 0 = north, 90 = east (CW from north).
+                        // Image-right direction in geo = bearing (yaw+90):
+                        //   unit vector = (cos(yaw), -sin(yaw))
+                        // Image-down direction in geo = bearing (yaw+180):
+                        //   unit vector = (-sin(yaw), -cos(yaw))
+                        double yawRad = yawDeg * M_PI / 180.0;
+                        double shiftE =  centerShiftXPx * std::cos(yawRad) - centerShiftYPx * std::sin(yawRad);
+                        double shiftN = -centerShiftXPx * std::sin(yawRad) - centerShiftYPx * std::cos(yawRad);
+
+                        double dLat = (shiftN * gsd) / 111320.0;
+                        double dLon = (shiftE * gsd) /
                             (111320.0 * std::cos(srcGps.latitude * M_PI / 180.0));
                         srcGps.latitude += dLat;
                         srcGps.longitude += dLon;
-                        LOGD << "GPS corrected for alignment crop: dLat=" << dLat << " dLon=" << dLon;
+                        LOGD << "GPS corrected for alignment crop: dLat=" << dLat
+                             << " dLon=" << dLon << " yaw=" << yawDeg;
                     } else {
                         LOGD << "Cannot compute GSD for GPS correction (alt="
                              << srcGps.altitude << " fl=" << focalLength << " pp=" << pixelPitch << ")";
