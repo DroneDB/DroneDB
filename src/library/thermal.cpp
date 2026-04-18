@@ -463,6 +463,134 @@ bool isThermalImage(const std::string &filePath) {
     FlirSegmentInfo seg = findFlirSegment(filePath);
     if (seg.found) return true;
 
+    // Method 5: GDAL metadata classification for labeled thermal rasters
+    // (e.g., Landsat surface temperature, processed thermal GeoTIFFs)
+    // Uses explicit metadata signals; avoids value-range heuristics to prevent
+    // false positives on DEMs or other single-band Float32 rasters.
+    {
+        GDALDatasetH hDs = GDALOpen(filePath.c_str(), GA_ReadOnly);
+        if (hDs) {
+            int nBands = GDALGetRasterCount(hDs);
+            if (nBands == 1) {
+                // Collect all metadata strings for keyword scanning
+                std::vector<std::string> metaStrings;
+
+                // Dataset-level metadata across all domains
+                char **mdDomains = GDALGetMetadataDomainList(hDs);
+                if (mdDomains) {
+                    for (int d = 0; mdDomains[d] != nullptr; d++) {
+                        char **md = GDALGetMetadata(hDs, mdDomains[d]);
+                        if (md) {
+                            for (int k = 0; md[k] != nullptr; k++)
+                                metaStrings.push_back(md[k]);
+                        }
+                    }
+                    CSLDestroy(mdDomains);
+                }
+
+                // Band-level metadata and description
+                GDALRasterBandH hBand = GDALGetRasterBand(hDs, 1);
+                const char *bandDesc = GDALGetDescription(hBand);
+                if (bandDesc && bandDesc[0]) metaStrings.push_back(bandDesc);
+
+                char **bmd = GDALGetMetadata(hBand, nullptr);
+                if (bmd) {
+                    for (int k = 0; bmd[k] != nullptr; k++)
+                        metaStrings.push_back(bmd[k]);
+                }
+
+                // Band unit info
+                const char *unitType = GDALGetRasterUnitType(hBand);
+                std::string unitStr = unitType ? unitType : "";
+
+                // Scale/offset (e.g., Landsat Collection 2: scale=0.00341802, offset=149.0)
+                int hasScale = FALSE, hasOffset = FALSE;
+                double scale = GDALGetRasterScale(hBand, &hasScale);
+                double offset = GDALGetRasterOffset(hBand, &hasOffset);
+
+                GDALClose(hDs);
+
+                // Build a single lowercase string for keyword search
+                std::string allMeta;
+                for (const auto &s : metaStrings) {
+                    allMeta += s;
+                    allMeta += ' ';
+                }
+                std::transform(allMeta.begin(), allMeta.end(), allMeta.begin(), ::tolower);
+
+                std::string unitLower = unitStr;
+                std::transform(unitLower.begin(), unitLower.end(), unitLower.begin(), ::tolower);
+
+                // DEM negative signals — reject early
+                static const std::vector<std::string> demKeywords = {
+                    "dem", "dtm", "dsm", "elevation", "height"
+                };
+                static const std::vector<std::string> demUnits = {
+                    "m", "ft", "meter", "meters", "feet", "foot"
+                };
+                static const std::vector<std::string> demCrsKeywords = {
+                    "vertical", "geoid", "ellipsoid height"
+                };
+
+                for (const auto &kw : demKeywords) {
+                    if (allMeta.find(kw) != std::string::npos) {
+                        LOGD << "GDAL metadata contains DEM keyword '" << kw << "', not thermal";
+                        return false;
+                    }
+                }
+                for (const auto &u : demUnits) {
+                    if (unitLower == u) {
+                        LOGD << "Band unit '" << unitStr << "' indicates DEM, not thermal";
+                        return false;
+                    }
+                }
+                for (const auto &kw : demCrsKeywords) {
+                    if (allMeta.find(kw) != std::string::npos) {
+                        LOGD << "GDAL metadata contains vertical CRS keyword '" << kw << "', not thermal";
+                        return false;
+                    }
+                }
+
+                // Thermal positive signals
+                static const std::vector<std::string> thermalKeywords = {
+                    "thermal", "temperature", "surface_temperature",
+                    "lst", "tir", "brightness_temperature", "bt", "lwir"
+                };
+                static const std::vector<std::string> thermalUnits = {
+                    "kelvin", "celsius", "degc", "degk",
+                    "\xc2\xb0""c", "\xc2\xb0""k"  // UTF-8 for °C, °K
+                };
+
+                for (const auto &kw : thermalKeywords) {
+                    if (allMeta.find(kw) != std::string::npos) {
+                        LOGD << "GDAL metadata contains thermal keyword '" << kw << "'";
+                        return true;
+                    }
+                }
+                for (const auto &u : thermalUnits) {
+                    if (unitLower.find(u) != std::string::npos) {
+                        LOGD << "Band unit '" << unitStr << "' indicates thermal";
+                        return true;
+                    }
+                }
+                if (unitLower == "k") {
+                    LOGD << "Band unit 'K' indicates Kelvin (thermal)";
+                    return true;
+                }
+
+                // Landsat-style thermal scale/offset pattern
+                if (hasScale && hasOffset && scale > 0.001 && scale < 0.01 &&
+                    offset > 100 && offset < 200) {
+                    LOGD << "Scale/offset pattern (scale=" << scale << ", offset=" << offset
+                         << ") consistent with Landsat thermal encoding";
+                    return true;
+                }
+            } else {
+                GDALClose(hDs);
+            }
+        }
+    }
+
     return false;
 }
 
@@ -518,7 +646,16 @@ static TemperatureData readTemperatureData(const std::string &filePath) {
                     raw.width = td.width;
                     raw.height = td.height;
                     raw.valid = true;
-                    td.temperatures = rawToTemperatureMap(raw, cal);
+                    if (cal.valid) {
+                        td.temperatures = rawToTemperatureMap(raw, cal);
+                    } else {
+                        LOGD << "No valid thermal calibration for " << filePath
+                             << ", returning raw UInt16 values as float";
+                        td.temperatures.resize(pixCount);
+                        for (size_t p = 0; p < pixCount; p++) {
+                            td.temperatures[p] = static_cast<float>(raw.data[p]);
+                        }
+                    }
                     GDALClose(hDs);
                     return td;
                 }
@@ -531,7 +668,17 @@ static TemperatureData readTemperatureData(const std::string &filePath) {
     RawThermalData raw = extractRawThermalData(filePath);
     if (raw.valid) {
         ThermalCalibration cal = extractThermalCalibration(filePath);
-        td.temperatures = rawToTemperatureMap(raw, cal);
+        if (cal.valid) {
+            td.temperatures = rawToTemperatureMap(raw, cal);
+        } else {
+            LOGD << "No valid thermal calibration for " << filePath
+                 << ", returning raw R-JPEG values as float";
+            size_t pixCount = raw.data.size();
+            td.temperatures.resize(pixCount);
+            for (size_t p = 0; p < pixCount; p++) {
+                td.temperatures[p] = static_cast<float>(raw.data[p]);
+            }
+        }
         td.width = raw.width;
         td.height = raw.height;
         return td;
