@@ -438,12 +438,64 @@ extern "C"
                                                  const char *previewBands, int thumbSize,
                                                  uint8_t **outBuffer, int *outBufferSize);
 
-    /** Merge single-band rasters into multi-band COG
+    /** Merge single-band rasters into multi-band GeoTIFF
      * @param paths Array of input file paths
      * @param numPaths Number of input file paths
-     * @param outputCog Output COG file path
+     * @param outputPath Output GeoTIFF file path
      * @return DDBERR_NONE on success, an error otherwise */
-    DDB_DLL DDBErr DDBMergeMultispectral(const char **paths, int numPaths, const char *outputCog);
+    DDB_DLL DDBErr DDBMergeMultispectral(const char **paths, int numPaths, const char *outputPath);
+
+    /** Export raster with visualization params applied as GeoTIFF
+     * @param inputPath Path to source raster file
+     * @param outputPath Path for the output GeoTIFF file
+     * @param preset Preset ID, or NULL
+     * @param bands Comma-separated band indices, or NULL
+     * @param formula Formula ID (e.g., "NDVI"), or NULL
+     * @param bandFilter Band order (e.g., "RGB"), or NULL
+     * @param colormap Colormap ID (e.g., "rdylgn"), or NULL
+     * @param rescale Rescale range "min,max", or NULL
+     * @return DDBERR_NONE on success, an error otherwise */
+    DDB_DLL DDBErr DDBExportRaster(const char *inputPath, const char *outputPath,
+                                    const char *preset, const char *bands,
+                                    const char *formula, const char *bandFilter,
+                                    const char *colormap, const char *rescale);
+
+    /** Get thermal image info including calibration and temperature range
+     * @param filePath Path to thermal image (R-JPEG or GeoTIFF)
+     * @param output Pointer to receive JSON string (caller must free with DDBFree)
+     * @return DDBERR_NONE on success, an error otherwise */
+    DDB_DLL DDBErr DDBGetThermalInfo(const char *filePath, char **output);
+
+    /** Get temperature at a specific pixel
+     * @param filePath Path to thermal image
+     * @param x Pixel X coordinate
+     * @param y Pixel Y coordinate
+     * @param output Pointer to receive JSON string (caller must free with DDBFree)
+     * @return DDBERR_NONE on success, an error otherwise */
+    DDB_DLL DDBErr DDBGetThermalPoint(const char *filePath, int x, int y, char **output);
+
+    /** Get temperature statistics for a rectangular area
+     * @param filePath Path to thermal image
+     * @param x0 Left X coordinate
+     * @param y0 Top Y coordinate
+     * @param x1 Right X coordinate
+     * @param y1 Bottom Y coordinate
+     * @param output Pointer to receive JSON string (caller must free with DDBFree)
+     * @return DDBERR_NONE on success, an error otherwise */
+    DDB_DLL DDBErr DDBGetThermalAreaStats(const char *filePath,
+                                          int x0, int y0, int x1, int y1,
+                                          char **output);
+
+    /** Mask orthophoto borders making them transparent
+     * @param input Path to input GeoTIFF
+     * @param output Path to output GeoTIFF (with alpha band)
+     * @param near Tolerance in grey levels (default 15)
+     * @param white If true, search for white borders instead of black
+     * @return DDBERR_NONE on success, an error otherwise */
+    DDB_DLL DDBErr DDBMaskBorders(const char *input,
+                                   const char *output,
+                                   int nearDist,
+                                   bool white);
 
 #ifdef __cplusplus
 }

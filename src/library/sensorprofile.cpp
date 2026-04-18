@@ -360,7 +360,7 @@ SensorDetectionResult SensorProfileManager::detectSensor(const std::string &rast
 
     // Try matching profiles (already sorted by priority descending)
     for (const auto &profile : profiles_) {
-        if (profile.sensorCategory != "multispectral") continue;
+        if (profile.sensorCategory != "multispectral" && profile.sensorCategory != "thermal") continue;
 
         if (matchesProfile(profile, bandCount, dataType, allMetadata, lastBandIsAlpha)) {
             result.detected = true;

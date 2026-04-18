@@ -33,6 +33,7 @@
 #include "include/nxs.h"
 #include "include/search.h"
 #include "include/stac.h"
+#include "include/mask.h"
 #include "include/merge_multispectral.h"
 
 namespace cmd
@@ -69,6 +70,7 @@ namespace cmd
       {"nxs", new Nxs()},
       {"search", new Search()},
       {"stac", new Stac()},
+      {"mask", new Mask()},
       {"merge-multispectral", new MergeMultispectral()}};
 
   std::map<std::string, std::string> aliases = {

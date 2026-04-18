@@ -59,6 +59,13 @@ namespace ddb
         if (!hSrcDataset)
             throw GDALException("Cannot open " + inputGTiff + " for reading");
 
+        // Check that the source has a valid CRS
+        const char* srcProjRef = GDALGetProjectionRef(hSrcDataset);
+        if (!srcProjRef || strlen(srcProjRef) == 0) {
+            GDALClose(hSrcDataset);
+            throw GDALException("Cannot build COG: input file has no coordinate reference system: " + inputGTiff);
+        }
+
         // Detect and preserve nodata from source
         int hasNoData;
         double srcNoData = GDALGetRasterNoDataValue(GDALGetRasterBand(hSrcDataset, 1), &hasNoData);
@@ -82,12 +89,18 @@ namespace ddb
 
         // Preserve nodata values for transparency
         if (hasNoData) {
-            targs = CSLAddString(targs, "-wo");
-            targs = CSLAddString(targs, "UNIFIED_SRC_NODATA=YES");
-            targs = CSLAddString(targs, "-dstnodata");
-            std::ostringstream oss;
-            oss << std::fixed << std::setprecision(0) << srcNoData;
-            targs = CSLAddString(targs, oss.str().c_str());
+            // Skip nodata preservation for special float values that cannot
+            // be reliably serialized (infinity, NaN, extreme floats)
+            if (std::isfinite(srcNoData) && std::fabs(srcNoData) < 1e+30) {
+                targs = CSLAddString(targs, "-wo");
+                targs = CSLAddString(targs, "UNIFIED_SRC_NODATA=YES");
+                targs = CSLAddString(targs, "-dstnodata");
+                std::ostringstream oss;
+                oss << std::setprecision(15) << srcNoData;
+                targs = CSLAddString(targs, oss.str().c_str());
+            } else {
+                LOGW << "Skipping nodata preservation for unsupported value: " << srcNoData;
+            }
         }
 
         // We can compress to JPG if these are 8bit bands (3 or 4) and no nodata
