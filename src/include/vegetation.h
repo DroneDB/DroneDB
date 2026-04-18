@@ -26,7 +26,7 @@ struct VegetationFormula {
     std::string requiredBands; // e.g. "RG", "RGN", "RGNRe"
 };
 
-// Band filter maps band symbols (R, G, B, N, Re) to 0-based band indices in the raster
+// Band filter maps band symbols (R, G, B, N, Re, T) to 0-based band indices in the raster
 struct BandFilter {
     std::string id; // e.g. "RGB", "RGBNRe"
     int R = -1;
@@ -34,6 +34,7 @@ struct BandFilter {
     int B = -1;
     int N = -1;
     int Re = -1;
+    int T = -1;  // Thermal band
 
     bool has(char c) const;
     int get(char c) const;
