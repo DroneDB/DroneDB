@@ -13,6 +13,7 @@
 #include "fs.h"
 #include "geo.h"
 #include "gdaltiler.h"
+#include "thumbs.h"
 
 namespace ddb
 {
@@ -51,6 +52,16 @@ namespace ddb
                                         int tileSize, bool tms,
                                         bool forceRecreate,
                                         const fs::path &outputFolder,
+                                        uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr,
+                                        const std::string &tileablePathHash = "");
+
+        // Get a single tile with visualization parameters
+        DDB_DLL static fs::path getTile(const fs::path &tileablePath,
+                                        int tz, int tx, int ty,
+                                        int tileSize, bool tms,
+                                        bool forceRecreate,
+                                        const fs::path &outputFolder,
+                                        const ThumbVisParams &visParams,
                                         uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr,
                                         const std::string &tileablePathHash = "");
 

@@ -3,9 +3,11 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "vegetation.h"
 #include "sensorprofile.h"
+#include "thermal.h"
 #include "exceptions.h"
 #include "logger.h"
 
+#include <gdal_priv.h>
 #include <cmath>
 #include <algorithm>
 #include <limits>
@@ -23,6 +25,7 @@ bool BandFilter::has(char c) const {
         case 'B': return B >= 0;
         case 'N': return N >= 0;
         case 'e': return Re >= 0; // 'e' for RedEdge
+        case 'T': return T >= 0;  // Thermal
         default: return false;
     }
 }
@@ -34,6 +37,7 @@ int BandFilter::get(char c) const {
         case 'B': return B;
         case 'N': return N;
         case 'e': return Re;
+        case 'T': return T;
         default: return -1;
     }
 }
@@ -55,6 +59,7 @@ BandFilter VegetationEngine::parseFilter(const std::string &filterStr, int bandC
                 case 'G': bf.G = idx++; break;
                 case 'B': bf.B = idx++; break;
                 case 'N': bf.N = idx++; break;
+                case 'T': bf.T = idx++; break; // Thermal
                 case 'L': idx++; break; // LWIR, skip
                 case 'P': idx++; break; // Pan, skip
                 default: idx++; break;
@@ -101,6 +106,10 @@ void VegetationEngine::initFormulas() {
     formulas_.push_back({"GRVI", "Green Ratio Vegetation Index", "N / G", "Green ratio", 0, 0, false, "GN"});
     formulas_.push_back({"ENDVI", "Enhanced NDVI", "((N + G) - (2*B)) / ((N + G) + (2*B))", "Enhanced NDVI", 0, 0, false, "GBN"});
     formulas_.push_back({"ARVI", "Atmospherically Resistant Vegetation Index", "(N - (2*R) + B) / (N + (2*R) + B)", "Corrects atmospheric effects", -1, 1, true, "RBN"});
+
+    // Thermal formulas
+    formulas_.push_back({"CELSIUS", "Celsius Temperature", "pixel value (passthrough)", "Temperature in degrees Celsius", -40, 150, true, "T"});
+    formulas_.push_back({"KELVIN", "Kelvin Temperature", "pixel + 273.15", "Temperature in Kelvin", 233.15, 423.15, true, "T"});
 }
 
 std::vector<VegetationFormula> VegetationEngine::getFormulasForFilter(const BandFilter &filter) const {
@@ -125,6 +134,7 @@ std::vector<VegetationFormula> VegetationEngine::getFormulasForFilter(const Band
             else if (c == 'B' && !filter.has('B')) { compatible = false; }
             else if (c == 'N' && !filter.has('N')) { compatible = false; }
             else if (c == 'e' && !filter.has('e')) { compatible = false; }
+            else if (c == 'T' && !filter.has('T')) { compatible = false; }
 
             ++i;
         }
@@ -161,6 +171,8 @@ BandFilter VegetationEngine::autoDetectFilter(const std::string &rasterPath) con
                 if (bf.B < 0) bf.B = bi.index - 1;
             } else if (nameLC == "nir" || nameLC.find("nir") == 0) {
                 if (bf.N < 0) bf.N = bi.index - 1;
+            } else if (nameLC == "lwir" || nameLC.find("thermal") != std::string::npos) {
+                if (bf.T < 0) bf.T = bi.index - 1;
             }
         }
 
@@ -171,6 +183,7 @@ BandFilter VegetationEngine::autoDetectFilter(const std::string &rasterPath) con
         if (bf.B >= 0) fid += "B";
         if (bf.N >= 0) fid += "N";
         if (bf.Re >= 0) fid += "Re";
+        if (bf.T >= 0) fid += "T";
         bf.id = fid;
 
         return bf;
@@ -178,6 +191,19 @@ BandFilter VegetationEngine::autoDetectFilter(const std::string &rasterPath) con
 
     // Fallback for undetected sensors
     BandFilter bf;
+
+    // Check if single-band thermal raster
+    GDALDatasetH hDs = GDALOpen(rasterPath.c_str(), GA_ReadOnly);
+    if (hDs) {
+        int nBands = GDALGetRasterCount(hDs);
+        GDALClose(hDs);
+        if (nBands == 1 && isThermalImage(rasterPath)) {
+            bf.id = "T";
+            bf.T = 0;
+            return bf;
+        }
+    }
+
     bf.id = "RGB";
     bf.R = 0;
     bf.G = 1;
@@ -279,6 +305,19 @@ void VegetationEngine::applyFormula(const VegetationFormula &formula,
         } else if (id == "ARVI") {
             float denom = N + (2.0f * R) + B;
             result = (std::abs(denom) < EPS) ? nodata : (N - (2.0f * R) + B) / denom;
+        } else if (id == "CELSIUS") {
+            // Thermal passthrough: pixel value is already temperature in °C
+            // For single-band thermal rasters, use band index 0 directly
+            if (bandData.size() > 0 && bandData[0] != nullptr) {
+                float val = bandData[0][i];
+                result = (val == nodata) ? nodata : val;
+            }
+        } else if (id == "KELVIN") {
+            // Convert Celsius to Kelvin
+            if (bandData.size() > 0 && bandData[0] != nullptr) {
+                float val = bandData[0][i];
+                result = (val == nodata) ? nodata : val + 273.15f;
+            }
         }
 
         outData[i] = result;
@@ -551,6 +590,60 @@ void VegetationEngine::initColormaps() {
             {0.5f, 102, 194, 164},
             {0.75f, 35, 139, 69},
             {1.0f, 0, 68, 27}
+        });
+        colormaps_.push_back(c);
+    }
+
+    // Whitehot (thermal)
+    {
+        Colormap c;
+        c.id = "whitehot";
+        c.name = "White Hot";
+        interpolateColormap(c.entries, {
+            {0.0f, 0, 0, 0},
+            {1.0f, 255, 255, 255}
+        });
+        colormaps_.push_back(c);
+    }
+
+    // Blackhot (thermal, inverted)
+    {
+        Colormap c;
+        c.id = "blackhot";
+        c.name = "Black Hot";
+        interpolateColormap(c.entries, {
+            {0.0f, 255, 255, 255},
+            {1.0f, 0, 0, 0}
+        });
+        colormaps_.push_back(c);
+    }
+
+    // Arctic
+    {
+        Colormap c;
+        c.id = "arctic";
+        c.name = "Arctic";
+        interpolateColormap(c.entries, {
+            {0.0f, 0, 0, 64},
+            {0.25f, 0, 100, 200},
+            {0.5f, 100, 200, 255},
+            {0.75f, 200, 240, 255},
+            {1.0f, 255, 255, 255}
+        });
+        colormaps_.push_back(c);
+    }
+
+    // Lava
+    {
+        Colormap c;
+        c.id = "lava";
+        c.name = "Lava";
+        interpolateColormap(c.entries, {
+            {0.0f, 0, 0, 0},
+            {0.25f, 128, 0, 0},
+            {0.5f, 255, 80, 0},
+            {0.75f, 255, 200, 0},
+            {1.0f, 255, 255, 200}
         });
         colormaps_.push_back(c);
     }

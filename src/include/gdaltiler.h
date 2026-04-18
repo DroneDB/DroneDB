@@ -11,6 +11,7 @@
 
 #include "ddb_export.h"
 #include "tiler.h"
+#include "thumbs.h"
 
 namespace ddb
 {
@@ -66,6 +67,11 @@ namespace ddb
         DDB_DLL ~GDALTiler();
 
         DDB_DLL std::string tile(int tz, int tx, int ty, uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr) override;
+
+        // Band-aware tile generation with visualization parameters
+        DDB_DLL std::string tile(int tz, int tx, int ty,
+                                 const ThumbVisParams &visParams,
+                                 uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr);
     };
 
 } // namespace ddb

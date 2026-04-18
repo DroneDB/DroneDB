@@ -19,6 +19,7 @@
 #include "hash.h"
 #include "mio.h"
 #include "pointcloud.h"
+#include "raster_utils.h"
 #include "sensorprofile.h"
 #include "vegetation.h"
 #include "tiler.h"
@@ -400,6 +401,7 @@ void generateImageThumbEx(const fs::path& imagePath,
         std::vector<std::vector<float>> bandDataStorage(bandCount);
         std::vector<float*> bandDataPtrs(bandCount);
 
+        auto nodataInfo = detectBandNodata(hSrcDataset, bandCount);
         for (int b = 0; b < bandCount; b++) {
             bandDataStorage[b].resize(pixCount);
             bandDataPtrs[b] = bandDataStorage[b].data();
@@ -412,9 +414,12 @@ void generateImageThumbEx(const fs::path& imagePath,
             }
         }
 
+        // Pre-mask transparent and nodata pixels
+        float nodata = NODATA_SENTINEL;
+        premaskNodata(bandDataPtrs, pixCount, bandCount, nodataInfo, nodata);
+
         // Apply formula
         std::vector<float> result(pixCount);
-        float nodata = -9999.0f;
         const auto* formulaPtr = ve.getFormula(visParams.formula);
         if (!formulaPtr) {
             GDALClose(hSrcDataset);

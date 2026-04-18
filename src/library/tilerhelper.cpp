@@ -34,9 +34,9 @@ namespace ddb
             r.min = std::stoi(zRange.substr(0, dashPos));
             r.max = std::stoi(zRange.substr(dashPos + 1, zRange.length() - 1));
             if (r.min > r.max)
-            
+
                 std::swap(r.min, r.max);
-            
+
         }
         else
         {
@@ -93,6 +93,22 @@ namespace ddb
             const fs::path fileToTile = toGeoTIFF(tileablePath, tileSize, forceRecreate, "", tileablePathHash);
             GDALTiler t(fileToTile.string(), outputFolder.string(), tileSize, tms);
             return t.tile(tz, tx, ty, outBuffer, outBufferSize);
+        }
+    }
+
+    fs::path TilerHelper::getTile(const fs::path &tileablePath, int tz, int tx, int ty, int tileSize, bool tms, bool forceRecreate, const fs::path &outputFolder, const ThumbVisParams &visParams, uint8_t **outBuffer, int *outBufferSize, const std::string &tileablePathHash)
+    {
+        if (io::Path(tileablePath).checkExtension({"json"}))
+        {
+            // EPT: vis params not supported, fall through to standard
+            EptTiler t(tileablePath.string(), outputFolder.string(), tileSize, tms);
+            return t.tile(tz, tx, ty, outBuffer, outBufferSize);
+        }
+        else
+        {
+            const fs::path fileToTile = toGeoTIFF(tileablePath, tileSize, forceRecreate, "", tileablePathHash);
+            GDALTiler t(fileToTile.string(), outputFolder.string(), tileSize, tms);
+            return t.tile(tz, tx, ty, visParams, outBuffer, outBufferSize);
         }
     }
 

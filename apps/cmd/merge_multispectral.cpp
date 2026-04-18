@@ -28,7 +28,7 @@ namespace cmd
 
     std::string MergeMultispectral::description()
     {
-        return "Merge single-band raster files into a multi-band Cloud Optimized GeoTIFF.";
+        return "Merge single-band raster files into a multi-band GeoTIFF.";
     }
 
     void MergeMultispectral::run(cxxopts::ParseResult &opts)
@@ -53,6 +53,27 @@ namespace cmd
                 {"width", result.summary.width},
                 {"height", result.summary.height}
             };
+
+            json alignmentJson;
+            alignmentJson["detected"] = result.alignment.detected;
+            alignmentJson["maxShiftPixels"] = result.alignment.maxShiftPixels;
+            alignmentJson["correctionApplied"] = result.alignment.correctionApplied;
+            alignmentJson["shiftSource"] = result.alignment.shiftSource;
+
+            json bandsJson = json::array();
+            for (size_t i = 0; i < result.alignment.bands.size(); i++) {
+                const auto &b = result.alignment.bands[i];
+                bandsJson.push_back({
+                    {"index", i},
+                    {"name", b.bandName},
+                    {"wavelength", b.centralWavelength},
+                    {"shiftX", b.shiftX},
+                    {"shiftY", b.shiftY}
+                });
+            }
+            alignmentJson["bands"] = bandsJson;
+            j["alignment"] = alignmentJson;
+
             std::cout << j.dump(2) << std::endl;
             return;
         }

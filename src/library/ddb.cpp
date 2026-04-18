@@ -8,6 +8,8 @@
 
 #include <csignal>
 #include <mutex>
+
+#include <exiv2/exiv2.hpp>
 #include <sstream>
 
 #ifdef WIN32
@@ -27,14 +29,17 @@
 #include "info.h"
 #include "json.h"
 #include "logger.h"
+#include "mask.h"
 #include "merge_multispectral.h"
 #include "mio.h"
 #include "passwordmanager.h"
+#include "raster_utils.h"
 #include "sensorprofile.h"
 #include "stac.h"
 #include "status.h"
 #include "syncmanager.h"
 #include "tagmanager.h"
+#include "thermal.h"
 #include "thumbs.h"
 #include "tilerhelper.h"
 #include "utils.h"
@@ -304,6 +309,14 @@ void DDBRegisterProcess(bool verbose) {
         setupLogging(verbose);
         initializeGDALandPROJ();
         setupSignalHandlers();
+
+        // Register custom XMP namespaces for thermal sensor metadata
+        try {
+            Exiv2::XmpProperties::registerNs("http://ns.flir.com/xmp/1.0/", "FLIR");
+            LOGD << "Registered FLIR XMP namespace";
+        } catch (const Exiv2::Error &e) {
+            LOGD << "FLIR XMP namespace already registered or error: " << e.what();
+        }
 
         ddb::utils::printVersions();
     });
@@ -1411,6 +1424,9 @@ DDB_DLL DDBErr DDBGetRasterMetadata(const char* path, const char* formula,
 
         std::vector<std::vector<float>> bandDataStorage(nBands);
         std::vector<float*> bandDataPtrs(nBands);
+
+        // Read GDAL nodata values and detect alpha band
+        auto nodataInfo = detectBandNodata(hDs, nBands);
         for (int b = 0; b < nBands; b++) {
             bandDataStorage[b].resize(pixCount);
             bandDataPtrs[b] = bandDataStorage[b].data();
@@ -1419,8 +1435,12 @@ DDB_DLL DDBErr DDBGetRasterMetadata(const char* path, const char* formula,
                          bandDataPtrs[b], sampleW, sampleH, GDT_Float32, 0, 0);
         }
 
+        // Pre-mask: set pixels to output nodata where alpha=0 or any band
+        // matches its GDAL nodata value, so applyFormula excludes them
+        float nodata = NODATA_SENTINEL;
+        premaskNodata(bandDataPtrs, pixCount, nBands, nodataInfo, nodata);
+
         std::vector<float> formulaResult(pixCount);
-        float nodata = -9999.0f;
         const auto* formulaObj = ve.getFormula(formulaStr);
         if (!formulaObj) {
             GDALClose(hDs);
@@ -1492,13 +1512,27 @@ DDB_DLL DDBErr DDBGetRasterMetadata(const char* path, const char* formula,
     result["statistics"] = statsJson;
 
     // Available algorithms for this band filter
-    auto formulas = ve.getFormulasForFilter(effectiveFilter);
+    // Include all formulas, mark incompatible ones as disabled
+    auto compatibleFormulas = ve.getFormulasForFilter(effectiveFilter);
+    auto allFormulas = ve.getAllFormulas();
     json algJson = json::array();
-    for (const auto& f : formulas) {
-        algJson.push_back({
+    for (const auto& f : allFormulas) {
+        json fj = {
             {"id", f.id}, {"name", f.name}, {"expr", f.expr},
-            {"help", f.help}, {"range", {f.rangeMin, f.rangeMax}}
-        });
+            {"help", f.help}
+        };
+        if (f.hasRange) {
+            fj["range"] = {f.rangeMin, f.rangeMax};
+        }
+        bool compatible = false;
+        for (const auto& cf : compatibleFormulas) {
+            if (cf.id == f.id) { compatible = true; break; }
+        }
+        if (!compatible) {
+            fj["disabled"] = true;
+            fj["disabledReason"] = "Requires bands: " + f.requiredBands;
+        }
+        algJson.push_back(fj);
     }
     result["algorithms"] = algJson;
 
@@ -1579,13 +1613,20 @@ DDB_DLL DDBErr DDBMemoryTileEx(const char* inputPath,
 
     const std::string hashStr = inputPathHash ? std::string(inputPathHash) : "";
 
-    // For now, pass through to standard tile generation
-    // TODO: implement band-aware tile generation in GDALTiler
+    ddb::ThumbVisParams visParams;
+    if (preset) visParams.preset = std::string(preset);
+    if (bands) visParams.bands = std::string(bands);
+    if (formula) visParams.formula = std::string(formula);
+    if (bandFilter) visParams.bandFilter = std::string(bandFilter);
+    if (colormap) visParams.colormap = std::string(colormap);
+    if (rescale) visParams.rescale = std::string(rescale);
+
     ddb::TilerHelper::getTile(std::string(inputPath),
                               tz, tx, ty,
                               tileSize, tms,
                               forceRecreate,
                               "",
+                              visParams,
                               outBuffer, outBufferSize,
                               hashStr + vizKey);
 
@@ -1621,6 +1662,27 @@ DDB_DLL DDBErr DDBValidateMergeMultispectral(const char** paths, int numPaths, c
         {"pixelSizeY", validationResult.summary.pixelSizeY},
         {"estimatedSize", validationResult.summary.estimatedSize}
     };
+
+    // Alignment info
+    json alignmentJson;
+    alignmentJson["detected"] = validationResult.alignment.detected;
+    alignmentJson["maxShiftPixels"] = validationResult.alignment.maxShiftPixels;
+    alignmentJson["correctionApplied"] = validationResult.alignment.correctionApplied;
+    alignmentJson["shiftSource"] = validationResult.alignment.shiftSource;
+
+    json bandsJson = json::array();
+    for (size_t i = 0; i < validationResult.alignment.bands.size(); i++) {
+        const auto &b = validationResult.alignment.bands[i];
+        bandsJson.push_back({
+            {"index", i},
+            {"name", b.bandName},
+            {"wavelength", b.centralWavelength},
+            {"shiftX", b.shiftX},
+            {"shiftY", b.shiftY}
+        });
+    }
+    alignmentJson["bands"] = bandsJson;
+    j["alignment"] = alignmentJson;
 
     utils::copyToPtr(j.dump(), output);
 
@@ -1665,12 +1727,12 @@ DDB_DLL DDBErr DDBPreviewMergeMultispectral(const char** paths, int numPaths,
     DDB_C_END
 }
 
-DDB_DLL DDBErr DDBMergeMultispectral(const char** paths, int numPaths, const char* outputCog) {
+DDB_DLL DDBErr DDBMergeMultispectral(const char** paths, int numPaths, const char* outputPath) {
     DDB_C_BEGIN
 
     if (paths == nullptr || numPaths < 2)
         throw InvalidArgsException("At least 2 input paths required");
-    if (utils::isNullOrEmptyOrWhitespace(outputCog))
+    if (utils::isNullOrEmptyOrWhitespace(outputPath))
         throw InvalidArgsException("No output path provided");
 
     std::vector<std::string> inputPaths;
@@ -1678,7 +1740,281 @@ DDB_DLL DDBErr DDBMergeMultispectral(const char** paths, int numPaths, const cha
         if (paths[i]) inputPaths.emplace_back(paths[i]);
     }
 
-    ddb::mergeMultispectral(inputPaths, std::string(outputCog));
+    ddb::mergeMultispectral(inputPaths, std::string(outputPath));
+
+    DDB_C_END
+}
+
+DDB_DLL DDBErr DDBExportRaster(const char* inputPath, const char* outputPath,
+                                const char* preset, const char* bands,
+                                const char* formula, const char* bandFilter,
+                                const char* colormap, const char* rescale) {
+    DDB_C_BEGIN
+
+    if (utils::isNullOrEmptyOrWhitespace(inputPath))
+        throw InvalidArgsException("No input path provided");
+    if (utils::isNullOrEmptyOrWhitespace(outputPath))
+        throw InvalidArgsException("No output path provided");
+
+    GDALDatasetH hSrcDs = GDALOpen(inputPath, GA_ReadOnly);
+    if (!hSrcDs)
+        throw GDALException("Cannot open " + std::string(inputPath));
+
+    const int width = GDALGetRasterXSize(hSrcDs);
+    const int height = GDALGetRasterYSize(hSrcDs);
+    const int bandCount = GDALGetRasterCount(hSrcDs);
+
+    const std::string formulaStr = formula ? std::string(formula) : "";
+    const std::string bandsStr = bands ? std::string(bands) : "";
+    const std::string presetStr = preset ? std::string(preset) : "";
+    const std::string filterStr = bandFilter ? std::string(bandFilter) : "";
+    const std::string colormapStr = colormap ? std::string(colormap) : "";
+    const std::string rescaleStr = rescale ? std::string(rescale) : "";
+
+    // Get source geotransform and projection
+    double geoTransform[6];
+    bool hasGeoTransform = (GDALGetGeoTransform(hSrcDs, geoTransform) == CE_None);
+    const char* projRef = GDALGetProjectionRef(hSrcDs);
+    std::string projection = projRef ? std::string(projRef) : "";
+
+    if (!formulaStr.empty()) {
+        // Formula mode: apply formula + colormap, export as RGBA GeoTIFF
+        // TODO: For very large rasters, consider processing in blocks/scanlines
+        // to avoid excessive memory usage (currently loads all bands fully into memory)
+        auto& ve = ddb::VegetationEngine::instance();
+
+        ddb::BandFilter bf;
+        if (!filterStr.empty()) {
+            bf = ddb::VegetationEngine::parseFilter(filterStr, bandCount);
+        } else {
+            bf = ve.autoDetectFilter(std::string(inputPath));
+        }
+
+        size_t pixCount = static_cast<size_t>(width) * height;
+        std::vector<std::vector<float>> bandDataStorage(bandCount);
+        std::vector<float*> bandDataPtrs(bandCount);
+
+        // Read bands and detect alpha/nodata
+        auto nodataInfo = detectBandNodata(hSrcDs, bandCount);
+        for (int b = 0; b < bandCount; b++) {
+            bandDataStorage[b].resize(pixCount);
+            bandDataPtrs[b] = bandDataStorage[b].data();
+            GDALRasterBandH hBand = GDALGetRasterBand(hSrcDs, b + 1);
+            if (GDALRasterIO(hBand, GF_Read, 0, 0, width, height,
+                             bandDataPtrs[b], width, height,
+                             GDT_Float32, 0, 0) != CE_None) {
+                GDALClose(hSrcDs);
+                throw GDALException("Cannot read band " + std::to_string(b + 1));
+            }
+        }
+
+        // Pre-mask transparent and nodata pixels
+        float nodata = NODATA_SENTINEL;
+        premaskNodata(bandDataPtrs, pixCount, bandCount, nodataInfo, nodata);
+
+        // Apply formula
+        std::vector<float> result(pixCount);
+        const auto* formulaPtr = ve.getFormula(formulaStr);
+        if (!formulaPtr) {
+            GDALClose(hSrcDs);
+            throw InvalidArgsException("Unknown formula: " + formulaStr);
+        }
+        ve.applyFormula(*formulaPtr, bf, bandDataPtrs, result.data(), pixCount, nodata);
+
+        // Determine rescale range
+        float rMin, rMax;
+        if (!rescaleStr.empty()) {
+            auto commaPos = rescaleStr.find(',');
+            if (commaPos == std::string::npos) {
+                GDALClose(hSrcDs);
+                throw InvalidArgsException("Invalid rescale format");
+            }
+            rMin = std::stof(rescaleStr.substr(0, commaPos));
+            rMax = std::stof(rescaleStr.substr(commaPos + 1));
+        } else if (formulaPtr->hasRange && formulaPtr->rangeMin != formulaPtr->rangeMax) {
+            rMin = static_cast<float>(formulaPtr->rangeMin);
+            rMax = static_cast<float>(formulaPtr->rangeMax);
+        } else {
+            std::vector<float> valid;
+            valid.reserve(pixCount);
+            for (size_t i = 0; i < pixCount; i++) {
+                if (result[i] != nodata) valid.push_back(result[i]);
+            }
+            if (!valid.empty()) {
+                std::sort(valid.begin(), valid.end());
+                rMin = valid[static_cast<size_t>(valid.size() * 0.02)];
+                rMax = valid[std::min(valid.size() - 1, static_cast<size_t>(valid.size() * 0.98))];
+            } else {
+                rMin = 0; rMax = 1;
+            }
+        }
+
+        // Apply colormap
+        std::string cmId = colormapStr.empty() ? "rdylgn" : colormapStr;
+        const auto* cmap = ve.getColormap(cmId);
+        if (!cmap) {
+            GDALClose(hSrcDs);
+            throw InvalidArgsException("Unknown colormap: " + cmId);
+        }
+        std::vector<uint8_t> rgba(pixCount * 4);
+        ve.applyColormap(result.data(), rgba.data(), pixCount, *cmap, rMin, rMax, nodata);
+
+        GDALClose(hSrcDs);
+
+        // Create output GeoTIFF with 4 bands (RGBA)
+        GDALDriverH gtiffDrv = GDALGetDriverByName("GTiff");
+        if (!gtiffDrv)
+            throw GDALException("GTiff driver not available");
+
+        char** createOpts = nullptr;
+        createOpts = CSLAddString(createOpts, "COMPRESS=DEFLATE");
+
+        GDALDatasetH hOut = GDALCreate(gtiffDrv, outputPath, width, height, 4, GDT_Byte, createOpts);
+        CSLDestroy(createOpts);
+        if (!hOut)
+            throw GDALException("Cannot create output GeoTIFF");
+
+        if (hasGeoTransform) GDALSetGeoTransform(hOut, geoTransform);
+        if (!projection.empty()) GDALSetProjection(hOut, projection.c_str());
+
+        for (int b = 0; b < 4; b++) {
+            std::vector<uint8_t> chanData(pixCount);
+            for (size_t i = 0; i < pixCount; i++) chanData[i] = rgba[i * 4 + b];
+            GDALRasterBandH hBand = GDALGetRasterBand(hOut, b + 1);
+            GDALRasterIO(hBand, GF_Write, 0, 0, width, height,
+                         chanData.data(), width, height, GDT_Byte, 0, 0);
+        }
+        GDALSetRasterColorInterpretation(GDALGetRasterBand(hOut, 1), GCI_RedBand);
+        GDALSetRasterColorInterpretation(GDALGetRasterBand(hOut, 2), GCI_GreenBand);
+        GDALSetRasterColorInterpretation(GDALGetRasterBand(hOut, 3), GCI_BlueBand);
+        GDALSetRasterColorInterpretation(GDALGetRasterBand(hOut, 4), GCI_AlphaBand);
+
+        GDALFlushCache(hOut);
+        GDALClose(hOut);
+    } else {
+        // Non-formula mode: band selection + rescale, export as GeoTIFF
+        std::vector<int> selectedBands;
+        try {
+            if (!bandsStr.empty()) {
+                std::istringstream ss(bandsStr);
+                std::string token;
+                while (std::getline(ss, token, ',')) {
+                    int b = std::stoi(token);
+                    if (b < 1 || b > bandCount)
+                        throw InvalidArgsException("Band index out of range: " + token);
+                    selectedBands.push_back(b);
+                }
+            } else if (!presetStr.empty()) {
+                auto& spm = ddb::SensorProfileManager::instance();
+                auto mapping = spm.getBandMappingForPreset(std::string(inputPath), presetStr);
+                selectedBands = {mapping.r, mapping.g, mapping.b};
+            } else {
+                for (int i = 1; i <= std::min(3, bandCount); i++) selectedBands.push_back(i);
+            }
+        } catch (const std::exception& e) {
+            LOGW << "Error parsing bands/preset: " << e.what();
+            GDALClose(hSrcDs);
+            throw;
+        }
+
+        // Use GDALTranslate for band selection + rescale
+        char** targs = nullptr;
+        targs = CSLAddString(targs, "-ot");
+        targs = CSLAddString(targs, "Byte");
+
+        for (int b : selectedBands) {
+            targs = CSLAddString(targs, "-b");
+            targs = CSLAddString(targs, std::to_string(b).c_str());
+        }
+
+        GDALDataType srcType = GDALGetRasterDataType(GDALGetRasterBand(hSrcDs, 1));
+        if (srcType != GDT_Byte) {
+            if (!rescaleStr.empty()) {
+                auto commaPos = rescaleStr.find(',');
+                if (commaPos != std::string::npos) {
+                    targs = CSLAddString(targs, "-scale");
+                    targs = CSLAddString(targs, rescaleStr.substr(0, commaPos).c_str());
+                    targs = CSLAddString(targs, rescaleStr.substr(commaPos + 1).c_str());
+                    targs = CSLAddString(targs, "0");
+                    targs = CSLAddString(targs, "255");
+                }
+            } else {
+                targs = CSLAddString(targs, "-scale");
+            }
+        }
+
+        targs = CSLAddString(targs, "-of");
+        targs = CSLAddString(targs, "GTiff");
+        targs = CSLAddString(targs, "-co");
+        targs = CSLAddString(targs, "COMPRESS=DEFLATE");
+
+        auto psOptions = GDALTranslateOptionsNew(targs, nullptr);
+        CSLDestroy(targs);
+        if (!psOptions) {
+            GDALClose(hSrcDs);
+            throw GDALException("Cannot create GDALTranslate options");
+        }
+
+        int bUsageError = FALSE;
+        GDALDatasetH hOut = GDALTranslate(outputPath, hSrcDs, psOptions, &bUsageError);
+        GDALTranslateOptionsFree(psOptions);
+        GDALClose(hSrcDs);
+
+        if (!hOut || bUsageError)
+            throw GDALException("Cannot create output GeoTIFF");
+
+        GDALFlushCache(hOut);
+        GDALClose(hOut);
+    }
+
+    DDB_C_END
+}
+
+DDB_DLL DDBErr DDBGetThermalInfo(const char *filePath, char **output) {
+    DDB_C_BEGIN
+    if (utils::isNullOrEmptyOrWhitespace(filePath))
+        throw InvalidArgsException("No file path provided");
+    if (output == nullptr)
+        throw InvalidArgsException("Output pointer is null");
+
+    std::string jsonStr = ddb::getThermalInfoJson(std::string(filePath));
+    utils::copyToPtr(jsonStr, output);
+    DDB_C_END
+}
+
+DDB_DLL DDBErr DDBGetThermalPoint(const char *filePath, int x, int y, char **output) {
+    DDB_C_BEGIN
+    if (utils::isNullOrEmptyOrWhitespace(filePath))
+        throw InvalidArgsException("No file path provided");
+    if (output == nullptr)
+        throw InvalidArgsException("Output pointer is null");
+
+    std::string jsonStr = ddb::getThermalPointJson(std::string(filePath), x, y);
+    utils::copyToPtr(jsonStr, output);
+    DDB_C_END
+}
+
+DDB_DLL DDBErr DDBGetThermalAreaStats(const char *filePath, int x0, int y0, int x1, int y1, char **output) {
+    DDB_C_BEGIN
+    if (utils::isNullOrEmptyOrWhitespace(filePath))
+        throw InvalidArgsException("No file path provided");
+    if (output == nullptr)
+        throw InvalidArgsException("Output pointer is null");
+
+    std::string jsonStr = ddb::getThermalAreaStatsJson(std::string(filePath), x0, y0, x1, y1);
+    utils::copyToPtr(jsonStr, output);
+    DDB_C_END
+}
+
+DDB_DLL DDBErr DDBMaskBorders(const char *input, const char *output, int nearDist, bool white) {
+    DDB_C_BEGIN
+
+    if (utils::isNullOrEmptyOrWhitespace(input))
+        throw InvalidArgsException("No input path provided");
+    if (utils::isNullOrEmptyOrWhitespace(output))
+        throw InvalidArgsException("No output path provided");
+
+    ddb::maskBorders(std::string(input), std::string(output), nearDist, white);
 
     DDB_C_END
 }

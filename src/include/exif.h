@@ -154,6 +154,9 @@ namespace ddb
         Exiv2::XmpData::const_iterator findXmpKey(const std::string &key);
         Exiv2::XmpData::const_iterator findXmpKey(const std::initializer_list<std::string> &keys);
 
+        Exiv2::ExifData::const_iterator exifEnd() const { return exifData.end(); }
+        Exiv2::XmpData::const_iterator xmpEnd() const { return xmpData.end(); }
+
         ImageSize extractImageSize();
         ImageSize extractVideoSize();
         std::string extractMake();
@@ -161,7 +164,7 @@ namespace ddb
         std::string extractSensor();
         bool computeFocal(Focal &f);
         bool extractSensorSize(SensorSize &r);
-        inline double getMmPerUnit(long resolutionUnit);
+        double getMmPerUnit(long resolutionUnit);
 
         bool extractGeo(GeoLocation &geo);
         bool extractRelAltitude(double &relAltitude);

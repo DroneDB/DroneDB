@@ -11,6 +11,7 @@
 #include "mio.h"
 #include "pointcloud.h"
 #include "ply.h"
+#include "thermal.h"
 #include "gdal_priv.h"
 #include "cpl_conv.h"
 #include "ogr_spatialref.h"
@@ -144,6 +145,16 @@ namespace ddb
                         entry.properties["make"] = e->extractMake();
                         entry.properties["model"] = e->extractModel();
                         entry.properties["sensor"] = e->extractSensor();
+
+                        // Detect thermal sensor
+                        {
+                            std::string make = entry.properties.value("make", "");
+                            std::string model = entry.properties.value("model", "");
+                            if (isThermalImageFromExif(make, model)) {
+                                entry.properties["sensorCategory"] = "thermal";
+                                LOGD << "Detected thermal sensor: " << make << " " << model;
+                            }
+                        }
 
                         if (e->extractSensorSize(sensorSize))
                         {
