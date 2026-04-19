@@ -229,4 +229,51 @@ TEST_F(IsBuildActiveTest, RealBuildInThread) {
     EXPECT_TRUE(isActive) << "isBuildActive should have detected the running build";
 }
 
+TEST_F(IsBuildActiveTest, StaleLockFileIsCleanedUp) {
+    // Test that isBuildActive detects and cleans up stale lock files
+    // (lock files left by crashed processes with dead PIDs)
+    Entry orthoEntry;
+    fs::path relativePath = fs::relative(orthoPath, dbPath);
+    ASSERT_TRUE(ddb::getEntry(db.get(), relativePath.string(), orthoEntry));
+
+    // Construct the build lock file path (matches what build.cpp uses)
+    std::string buildPath = db->buildDirectory().string();
+    fs::path orthoOutputPath = fs::path(buildPath) / orthoEntry.hash / "cog";
+    fs::create_directories(orthoOutputPath.parent_path());
+    std::string lockFile = orthoOutputPath.string() + ".building";
+
+    // Create a stale lock file with a dead PID (PID 99 should not be running)
+    {
+        std::ofstream f(lockFile);
+        f << "PID: 99\nProcess: Simulated crashed build\n";
+    }
+    ASSERT_TRUE(fs::exists(lockFile));
+
+    // isBuildActive should detect the stale lock, clean it up, and return false
+    EXPECT_FALSE(ddb::isBuildActive(db.get(), relativePath.string()));
+
+    // The stale lock file should have been removed
+    EXPECT_FALSE(fs::exists(lockFile));
+}
+
+TEST_F(IsBuildActiveTest, ActiveLockFileIsNotCleaned) {
+    // Test that isBuildActive does NOT clean up lock files held by active processes
+    Entry orthoEntry;
+    fs::path relativePath = fs::relative(orthoPath, dbPath);
+    ASSERT_TRUE(ddb::getEntry(db.get(), relativePath.string(), orthoEntry));
+
+    std::string buildPath = db->buildDirectory().string();
+    fs::path orthoOutputPath = fs::path(buildPath) / orthoEntry.hash / "cog";
+    fs::create_directories(orthoOutputPath.parent_path());
+
+    // Acquire a real build lock (simulates an active build by this process)
+    {
+        BuildLock activeLock(orthoOutputPath.string());
+        EXPECT_TRUE(activeLock.isHolding());
+
+        // isBuildActive should return true — lock is held by an active process
+        EXPECT_TRUE(ddb::isBuildActive(db.get(), relativePath.string()));
+    }
+}
+
 } // anonymous namespace
