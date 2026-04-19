@@ -101,8 +101,15 @@ private:
     /**
      * @brief Acquire the build lock with specified wait behavior
      *
-     * @param waitForLock If true, use blocking behavior (CREATE_ALWAYS on Windows).
-     *                    If false, fail immediately if lock exists (CREATE_NEW on Windows)
+     * @param waitForLock Controls lock acquisition strategy:
+     *   - **Windows**: true = CREATE_ALWAYS (overwrites orphaned files, blocks on
+     *     active handles); false = CREATE_NEW (fails immediately if file exists).
+     *   - **Unix/Linux**: Both modes use O_CREAT|O_EXCL (pure exclusivity). Stale
+     *     lock file recovery is **not** handled here — the caller (build.cpp) must
+     *     detect stale locks via PID liveness checks and remove them before retrying.
+     *     This asymmetry exists because Unix unlink() on an open file succeeds
+     *     (removing the directory entry but not the inode), which would break
+     *     mutual exclusion if done inside BuildLock.
      *
      * @throws AppException If the lock cannot be acquired
      */
