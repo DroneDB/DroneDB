@@ -112,6 +112,13 @@ void populatePointCloudBoundsFromQuickInfo(const pdal::QuickInfo& quickInfo,
 
         OGRCoordinateTransformationH hTransform = OCTNewCoordinateTransformation(hSrs, hTgt);
 
+        if (!hTransform) {
+            OSRDestroySpatialReference(hTgt);
+            OSRDestroySpatialReference(hSrs);
+            throw GDALException("Cannot create coordinate transformation from " + proj +
+                                " to EPSG:" + std::to_string(polyBoundsSrs));
+        }
+
         double geoMinX = bbox.minx;
         double geoMinY = bbox.miny;
         double geoMinZ = bbox.minz;
@@ -122,9 +129,13 @@ void populatePointCloudBoundsFromQuickInfo(const pdal::QuickInfo& quickInfo,
         bool minSuccess = OCTTransform(hTransform, 1, &geoMinX, &geoMinY, &geoMinZ);
         bool maxSuccess = OCTTransform(hTransform, 1, &geoMaxX, &geoMaxY, &geoMaxZ);
 
-        if (!minSuccess || !maxSuccess)
+        if (!minSuccess || !maxSuccess) {
+            OCTDestroyCoordinateTransformation(hTransform);
+            OSRDestroySpatialReference(hTgt);
+            OSRDestroySpatialReference(hSrs);
             throw GDALException("Cannot transform coordinates " + bbox.toWKT() + " to " +
                                 proj);
+        }
 
         info.polyBounds.clear();
 
@@ -148,6 +159,9 @@ void populatePointCloudBoundsFromQuickInfo(const pdal::QuickInfo& quickInfo,
                 info.centroid.clear();
                 info.centroid.addPoint(centroidX, centroidY, centroidZ);
             } else {
+                OCTDestroyCoordinateTransformation(hTransform);
+                OSRDestroySpatialReference(hTgt);
+                OSRDestroySpatialReference(hSrs);
                 throw GDALException("Cannot transform coordinates " +
                                     std::to_string(centroidX) + ", " +
                                     std::to_string(centroidY) + " to " + proj);
