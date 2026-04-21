@@ -140,13 +140,13 @@ void getGeoTiffInfo(const std::string& filepath,
 }
 
 long getPointCloudNumberOfPoints(const std::string& filepath) {
-    // Create a PDAL pipeline to read the LAS file
+    // Create a PDAL pipeline to read the point cloud file
     try {
         // Create a pipeline
         pdal::PipelineManager pipeline;
 
-        // Add a reader stage to the pipeline
-        pdal::Stage& reader = pipeline.makeReader(filepath, "readers.las");
+        // Add a reader stage to the pipeline (let PDAL auto-detect the format)
+        pdal::Stage& reader = pipeline.makeReader(filepath);
 
         // Execute the pipeline
         pipeline.execute();

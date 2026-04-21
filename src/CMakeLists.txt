@@ -192,16 +192,27 @@ if(PROJ_DATA_DIR AND EXISTS "${PROJ_DATA_DIR}/proj.db")
     add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E echo "Copying PROJ data from ${PROJ_DATA_DIR}..."
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "${PROJ_DATA_DIR}/proj.db" "${OUTPUT_DIR}/proj.db"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${PROJ_DATA_DIR}/proj.db" "$<TARGET_FILE_DIR:${PROJECT_NAME}>/proj.db"
         COMMENT "Copying PROJ database"
     )
 endif()
 
-# Copy other support files
+# Copy other support files.
+# Files are placed in both OUTPUT_DIR (next to the executables) and
+# $<TARGET_FILE_DIR:...> (next to the shared library itself) so that the
+# runtime data-path lookup in getDataPath() succeeds regardless of which
+# directory the DLL is loaded from (e.g. when .NET tests load ddb.dll
+# directly from build/src/ rather than from build/).
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/data/sensor_data.sqlite" "${OUTPUT_DIR}"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/data/timezone21.bin" "${OUTPUT_DIR}"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/data/sensor-profiles.json" "${OUTPUT_DIR}"
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/data/zoneinfo" "${OUTPUT_DIR}/zoneinfo"
+    # Also copy next to the shared library itself
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/data/sensor_data.sqlite" "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/data/timezone21.bin" "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/data/sensor-profiles.json" "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/data/zoneinfo" "$<TARGET_FILE_DIR:${PROJECT_NAME}>/zoneinfo"
 )
 
 # Windows-specific files

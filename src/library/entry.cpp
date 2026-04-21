@@ -700,7 +700,7 @@ namespace ddb
         if (p.checkExtension({"md"}))
             return EntryType::Markdown;
 
-        bool pointCloud = p.checkExtension({"laz", "las"});
+        bool pointCloud = p.checkExtension({"laz", "las", "e57", "pts", "xyz"});
 
         if (pointCloud)
             return EntryType::PointCloud;

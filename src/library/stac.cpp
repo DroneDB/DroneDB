@@ -102,6 +102,7 @@ namespace ddb
         if (ext == ".laz") return "application/vnd.laszip+copc";
         if (ext == ".las") return "application/vnd.las";
         if (ext == ".e57") return "application/x-e57";
+        if (ext == ".pts") return "application/x-pts";
         if (ext == ".xyz") return "text/plain";
         if (ext == ".ply") return "application/x-ply";
         if (ext == ".pcd") return "application/x-pcd";

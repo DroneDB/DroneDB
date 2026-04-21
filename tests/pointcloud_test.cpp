@@ -105,4 +105,214 @@ TEST(pointcloud, nexusFromPlyMesh) {
 
 }
 
+TEST(pointcloud, ptsInfo) {
+    TestArea ta(TEST_NAME);
+    fs::path pc = ta.downloadTestAsset(
+        "https://github.com/DroneDB/test_data/raw/refs/heads/master/point-clouds/test.pts",
+        "test.pts");
+
+    auto fp = ddb::fingerprint(pc);
+    EXPECT_TRUE(fp == ddb::EntryType::PointCloud);
+
+    ddb::PointCloudInfo ptsInfo;
+    EXPECT_TRUE(ddb::getPointCloudInfo(pc.string(), ptsInfo));
+    EXPECT_GT(ptsInfo.pointCount, 0) << "PTS file should have points";
+    // PTS is text-based and lacks bounds in metadata (like PLY)
+    EXPECT_TRUE(ptsInfo.bounds.empty()) << "PTS files should not have bounds in metadata";
+}
+
+TEST(pointcloud, xyzInfo) {
+    TestArea ta(TEST_NAME);
+    fs::path pc = ta.downloadTestAsset(
+        "https://github.com/DroneDB/test_data/raw/refs/heads/master/point-clouds/autzen-bmx-largersample.xyz",
+        "autzen-bmx-largersample.xyz");
+
+    auto fp = ddb::fingerprint(pc);
+    EXPECT_TRUE(fp == ddb::EntryType::PointCloud);
+
+    ddb::PointCloudInfo xyzInfo;
+    EXPECT_TRUE(ddb::getPointCloudInfo(pc.string(), xyzInfo));
+    EXPECT_GT(xyzInfo.pointCount, 0) << "XYZ file should have points";
+    // XYZ is text-based and lacks bounds in metadata (like PLY)
+    EXPECT_TRUE(xyzInfo.bounds.empty()) << "XYZ files should not have bounds in metadata";
+}
+
+TEST(pointcloud, eptFromPts) {
+    TestArea ta(TEST_NAME);
+    fs::path pc = ta.downloadTestAsset(
+        "https://github.com/DroneDB/test_data/raw/refs/heads/master/point-clouds/test.pts",
+        "test.pts");
+
+    auto fp = ddb::fingerprint(pc);
+    EXPECT_TRUE(fp == ddb::EntryType::PointCloud);
+
+    // Build EPT from PTS - this should work by converting to LAS first
+    ddb::buildEpt({pc.string()}, ta.getFolder("ept").string());
+    EXPECT_TRUE(fs::exists(ta.getFolder("ept") / "ept.json")) << "EPT generation from PTS should succeed";
+
+    // Verify the generated EPT has valid bounds
+    ddb::PointCloudInfo eptInfo;
+    EXPECT_TRUE(ddb::getEptInfo((ta.getFolder("ept") / "ept.json").string(), eptInfo));
+    EXPECT_EQ(eptInfo.bounds.size(), 6) << "EPT should have 6 bounds values";
+    EXPECT_GT(eptInfo.pointCount, 0) << "EPT should have points";
+}
+
+TEST(pointcloud, eptFromXyz) {
+    TestArea ta(TEST_NAME);
+    fs::path pc = ta.downloadTestAsset(
+        "https://github.com/DroneDB/test_data/raw/refs/heads/master/point-clouds/autzen-bmx-largersample.xyz",
+        "autzen-bmx-largersample.xyz");
+
+    auto fp = ddb::fingerprint(pc);
+    EXPECT_TRUE(fp == ddb::EntryType::PointCloud);
+
+    // Build EPT from XYZ - this should work by converting to LAS first
+    ddb::buildEpt({pc.string()}, ta.getFolder("ept").string());
+    EXPECT_TRUE(fs::exists(ta.getFolder("ept") / "ept.json")) << "EPT generation from XYZ should succeed";
+
+    // Verify the generated EPT has valid bounds
+    ddb::PointCloudInfo eptInfo;
+    EXPECT_TRUE(ddb::getEptInfo((ta.getFolder("ept") / "ept.json").string(), eptInfo));
+    EXPECT_EQ(eptInfo.bounds.size(), 6) << "EPT should have 6 bounds values";
+    EXPECT_GT(eptInfo.pointCount, 0) << "EPT should have points";
+}
+
+TEST(pointcloud, e57Info) {
+    TestArea ta(TEST_NAME);
+    fs::path pc = ta.downloadTestAsset(
+        "https://github.com/DroneDB/test_data/raw/refs/heads/master/point-clouds/A4.e57",
+        "A4.e57");
+
+    auto fp = ddb::fingerprint(pc);
+    EXPECT_TRUE(fp == ddb::EntryType::PointCloud);
+
+    ddb::PointCloudInfo e57Info;
+    EXPECT_TRUE(ddb::getPointCloudInfo(pc.string(), e57Info));
+    EXPECT_GT(e57Info.pointCount, 0) << "E57 file should have points";
+}
+
+TEST(pointcloud, eptFromE57) {
+    TestArea ta(TEST_NAME);
+    fs::path pc = ta.downloadTestAsset(
+        "https://github.com/DroneDB/test_data/raw/refs/heads/master/point-clouds/A4.e57",
+        "A4.e57");
+
+    auto fp = ddb::fingerprint(pc);
+    EXPECT_TRUE(fp == ddb::EntryType::PointCloud);
+
+    // Build EPT from E57 - this should work by converting to LAS first
+    ddb::buildEpt({pc.string()}, ta.getFolder("ept").string());
+    EXPECT_TRUE(fs::exists(ta.getFolder("ept") / "ept.json")) << "EPT generation from E57 should succeed";
+
+    // Verify the generated EPT has valid bounds
+    ddb::PointCloudInfo eptInfo;
+    EXPECT_TRUE(ddb::getEptInfo((ta.getFolder("ept") / "ept.json").string(), eptInfo));
+    EXPECT_EQ(eptInfo.bounds.size(), 6) << "EPT should have 6 bounds values";
+    EXPECT_GT(eptInfo.pointCount, 0) << "EPT should have points";
+}
+
+TEST(pointcloud, xyzWithCloudCompareHeaders) {
+    // Test file with //X Y Z R G B Return_Number Number_Of_Returns User_Data header
+    TestArea ta(TEST_NAME);
+    fs::path testFile = ta.getPath("cloudcompare_headers.xyz");
+    std::ofstream ofs(testFile);
+    ofs << "//X Y Z R G B Return_Number Number_Of_Returns User_Data\n";
+    ofs << "274849.83 4603201.67 3.68 95 116 77 1.0 1.0 3.0\n";
+    ofs << "274849.93 4603202.21 3.58 103 129 87 1.0 1.0 3.0\n";
+    ofs.close();
+
+    ddb::PointCloudInfo info;
+    EXPECT_TRUE(ddb::getPointCloudInfo(testFile.string(), info));
+    EXPECT_GT(info.pointCount, 0);
+    EXPECT_TRUE(info.dimensions.size() >= 3); // At least X, Y, Z
+}
+
+TEST(pointcloud, xyzWithoutHeaders) {
+    // Test file without header (space-separated)
+    TestArea ta(TEST_NAME);
+    fs::path testFile = ta.getPath("no_headers.xyz");
+    std::ofstream ofs(testFile);
+    ofs << "274849.83 4603201.67 3.68 95 116 77\n";
+    ofs << "274849.93 4603202.21 3.58 103 129 87\n";
+    ofs.close();
+
+    ddb::PointCloudInfo info;
+    EXPECT_TRUE(ddb::getPointCloudInfo(testFile.string(), info));
+    EXPECT_EQ(info.pointCount, 2);
+}
+
+TEST(pointcloud, xyzWithPointCount) {
+    // Test file with point count as first line
+    TestArea ta(TEST_NAME);
+    fs::path testFile = ta.getPath("with_count.xyz");
+    std::ofstream ofs(testFile);
+    ofs << "2\n";
+    ofs << "274849.83 4603201.67 3.68 95 116 77\n";
+    ofs << "274849.93 4603202.21 3.58 103 129 87\n";
+    ofs.close();
+
+    ddb::PointCloudInfo info;
+    EXPECT_TRUE(ddb::getPointCloudInfo(testFile.string(), info));
+    EXPECT_EQ(info.pointCount, 2);
+}
+
+TEST(pointcloud, xyzCommaSeparated) {
+    // Test standard comma-separated format (existing test data)
+    TestArea ta(TEST_NAME);
+    fs::path pc = ta.downloadTestAsset(
+        "https://github.com/DroneDB/test_data/raw/master/point-clouds/utm17_1.xyz",
+        "utm17_1.xyz");
+
+    ddb::PointCloudInfo info;
+    EXPECT_TRUE(ddb::getPointCloudInfo(pc.string(), info));
+    EXPECT_GT(info.pointCount, 0);
+}
+
+TEST(pointcloud, xyzMultipleCommentLines) {
+    // Test file with multiple comment lines at the start
+    TestArea ta(TEST_NAME);
+    fs::path testFile = ta.getPath("multiple_comments.xyz");
+    std::ofstream ofs(testFile);
+    ofs << "//Generated by CloudCompare\n";
+    ofs << "//Export date: 2024-01-01\n";
+    ofs << "//X Y Z R G B\n";
+    ofs << "1.0 2.0 3.0 100 150 200\n";
+    ofs << "4.0 5.0 6.0 110 160 210\n";
+    ofs.close();
+
+    ddb::PointCloudInfo info;
+    EXPECT_TRUE(ddb::getPointCloudInfo(testFile.string(), info));
+    EXPECT_EQ(info.pointCount, 2);
+}
+
+TEST(pointcloud, xyzTabSeparated) {
+    // Test file with tab-separated values
+    TestArea ta(TEST_NAME);
+    fs::path testFile = ta.getPath("tab_separated.xyz");
+    std::ofstream ofs(testFile);
+    ofs << "X\tY\tZ\n";
+    ofs << "1.0\t2.0\t3.0\n";
+    ofs << "4.0\t5.0\t6.0\n";
+    ofs.close();
+
+    ddb::PointCloudInfo info;
+    EXPECT_TRUE(ddb::getPointCloudInfo(testFile.string(), info));
+    EXPECT_EQ(info.pointCount, 2);
+}
+
+TEST(pointcloud, xyzSemicolonSeparated) {
+    // Test file with semicolon-separated values
+    TestArea ta(TEST_NAME);
+    fs::path testFile = ta.getPath("semicolon_separated.xyz");
+    std::ofstream ofs(testFile);
+    ofs << "X;Y;Z\n";
+    ofs << "1.0;2.0;3.0\n";
+    ofs << "4.0;5.0;6.0\n";
+    ofs.close();
+
+    ddb::PointCloudInfo info;
+    EXPECT_TRUE(ddb::getPointCloudInfo(testFile.string(), info));
+    EXPECT_EQ(info.pointCount, 2);
+}
+
 }  // namespace
