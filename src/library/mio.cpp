@@ -13,7 +13,7 @@ namespace ddb
     namespace io
     {
 
-        bool Path::checkExtension(const std::initializer_list<std::string> &matches)
+        bool Path::checkExtension(const std::initializer_list<std::string> &matches) const
         {
             std::string ext = p.extension().string();
             if (ext.size() < 1)

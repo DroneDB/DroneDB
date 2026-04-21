@@ -48,7 +48,7 @@ namespace ddb
 
             // Compares an extension with a list of extension strings
             // @return true if the extension matches one of those in the list
-            DDB_DLL bool checkExtension(const std::initializer_list<std::string> &matches);
+            DDB_DLL bool checkExtension(const std::initializer_list<std::string> &matches) const;
 
             DDB_DLL time_t getModifiedTime();
             DDB_DLL bool setModifiedTime(time_t mtime);

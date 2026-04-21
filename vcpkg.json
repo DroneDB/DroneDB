@@ -39,6 +39,7 @@
     {
       "name": "pdal",
       "features": [
+        "e57",
         "zstd"
       ]
     },

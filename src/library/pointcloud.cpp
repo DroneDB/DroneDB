@@ -9,6 +9,7 @@
 #include <bu/BuPyramid.hpp>
 #include <epf/Epf.hpp>
 #include <pdal/PointRef.hpp>
+#include <pdal/PointTable.hpp>
 #include <pdal/StageFactory.hpp>
 #include <pdal/io/LasWriter.hpp>
 #include <untwine/Common.hpp>
@@ -33,8 +34,173 @@ void fatal(const std::string& err) {
 
 namespace ddb {
 
+namespace {
+
+std::string resolvePointCloudReaderDriver(const std::string& filename) {
+    const io::Path path(filename);
+
+    if (path.checkExtension({"pts"}))
+        return "readers.pts";
+
+    if (path.checkExtension({"xyz"}))
+        return "readers.text";
+
+    return pdal::StageFactory::inferReaderDriver(filename);
+}
+
+bool suppressDirectSpatialInfo(const io::Path& path) {
+    return path.checkExtension({"pts", "xyz"});
+}
+
+void clearSpatialInfo(PointCloudInfo& info) {
+    info.bounds.clear();
+    info.centroid.clear();
+    info.polyBounds.clear();
+}
+
+void populatePointCloudDimensions(pdal::PointLayoutPtr layout, PointCloudInfo& info) {
+    info.dimensions.clear();
+
+    for (pdal::Dimension::Id dimension : layout->dims())
+        info.dimensions.push_back(layout->dimName(dimension));
+}
+
+void populatePointCloudInfoFromQuickInfo(const pdal::QuickInfo& quickInfo, PointCloudInfo& info) {
+    info.pointCount = quickInfo.m_pointCount;
+    info.wktProjection = quickInfo.m_srs.valid() ? quickInfo.m_srs.getWKT() : "";
+
+    info.dimensions.clear();
+    for (const auto& dimension : quickInfo.m_dimNames)
+        info.dimensions.push_back(dimension);
+}
+
+void populatePointCloudBoundsFromQuickInfo(const pdal::QuickInfo& quickInfo,
+                                           PointCloudInfo& info,
+                                           int polyBoundsSrs) {
+    clearSpatialInfo(info);
+    if (!quickInfo.m_bounds.valid())
+        return;
+
+    info.bounds.push_back(quickInfo.m_bounds.minx);
+    info.bounds.push_back(quickInfo.m_bounds.miny);
+    info.bounds.push_back(quickInfo.m_bounds.minz);
+    info.bounds.push_back(quickInfo.m_bounds.maxx);
+    info.bounds.push_back(quickInfo.m_bounds.maxy);
+    info.bounds.push_back(quickInfo.m_bounds.maxz);
+
+    pdal::BOX3D bbox = quickInfo.m_bounds;
+
+    // We need to convert the bbox to EPSG:<polyboundsSrs>
+    if (quickInfo.m_srs.valid()) {
+        OGRSpatialReferenceH hSrs = OSRNewSpatialReference(nullptr);
+        OGRSpatialReferenceH hTgt = OSRNewSpatialReference(nullptr);
+
+        std::string proj = quickInfo.m_srs.getProj4();
+        if (OSRImportFromProj4(hSrs, proj.c_str()) != OGRERR_NONE) {
+            OSRDestroySpatialReference(hTgt);
+            OSRDestroySpatialReference(hSrs);
+            throw GDALException("Cannot import spatial reference system " + proj +
+                                ". Is PROJ available?");
+        }
+
+        if (OSRImportFromEPSG(hTgt, polyBoundsSrs) != OGRERR_NONE) {
+            OSRDestroySpatialReference(hTgt);
+            OSRDestroySpatialReference(hSrs);
+            throw GDALException("Cannot read EPSG:" + std::to_string(polyBoundsSrs) +
+                                ". Is PROJ available?");
+        }
+
+        OGRCoordinateTransformationH hTransform = OCTNewCoordinateTransformation(hSrs, hTgt);
+
+        double geoMinX = bbox.minx;
+        double geoMinY = bbox.miny;
+        double geoMinZ = bbox.minz;
+        double geoMaxX = bbox.maxx;
+        double geoMaxY = bbox.maxy;
+        double geoMaxZ = bbox.maxz;
+
+        bool minSuccess = OCTTransform(hTransform, 1, &geoMinX, &geoMinY, &geoMinZ);
+        bool maxSuccess = OCTTransform(hTransform, 1, &geoMaxX, &geoMaxY, &geoMaxZ);
+
+        if (!minSuccess || !maxSuccess)
+            throw GDALException("Cannot transform coordinates " + bbox.toWKT() + " to " +
+                                proj);
+
+        info.polyBounds.clear();
+
+        if (geoMinZ < -30000 || geoMaxZ > 30000 || (geoMinX == -90 && geoMaxX == 90)) {
+            LOGD << "Strange point cloud bounds [[" << geoMinX << ", " << geoMaxX << "], ["
+                 << geoMinY << ", " << geoMaxY << "], [" << geoMinZ << ", " << geoMaxZ
+                 << "]]";
+            info.bounds.clear();
+        } else {
+            info.polyBounds.addPoint(geoMinX, geoMinY, geoMinZ);
+            info.polyBounds.addPoint(geoMaxX, geoMinY, geoMinZ);
+            info.polyBounds.addPoint(geoMaxX, geoMaxY, geoMinZ);
+            info.polyBounds.addPoint(geoMinX, geoMaxY, geoMinZ);
+            info.polyBounds.addPoint(geoMinX, geoMinY, geoMinZ);
+
+            double centroidX = (bbox.minx + bbox.maxx) / 2.0;
+            double centroidY = (bbox.miny + bbox.maxy) / 2.0;
+            double centroidZ = bbox.minz;
+
+            if (OCTTransform(hTransform, 1, &centroidX, &centroidY, &centroidZ)) {
+                info.centroid.clear();
+                info.centroid.addPoint(centroidX, centroidY, centroidZ);
+            } else {
+                throw GDALException("Cannot transform coordinates " +
+                                    std::to_string(centroidX) + ", " +
+                                    std::to_string(centroidY) + " to " + proj);
+            }
+        }
+
+        OCTDestroyCoordinateTransformation(hTransform);
+        OSRDestroySpatialReference(hTgt);
+        OSRDestroySpatialReference(hSrs);
+    }
+}
+
+pdal::Stage* createPointCloudReader(pdal::StageFactory& factory, const std::string& filename) {
+    const std::string driver = resolvePointCloudReaderDriver(filename);
+    if (driver.empty())
+        return nullptr;
+
+    pdal::Stage* reader = factory.createStage(driver);
+    if (!reader)
+        throw PDALException("Cannot create reader stage " + driver + " for " + filename);
+
+    pdal::Options options;
+    options.add("filename", filename);
+    reader->setOptions(options);
+
+    return reader;
+}
+
+bool populatePointCloudInfoFromReaderExecution(pdal::Stage& reader, PointCloudInfo& info) {
+    pdal::PointTable table;
+    reader.prepare(table);
+
+    pdal::PointViewSet pointViewSet = reader.execute(table);
+    if (pointViewSet.empty())
+        return false;
+
+    info.pointCount = 0;
+    for (const auto& pointView : pointViewSet)
+        info.pointCount += pointView->size();
+
+    info.wktProjection = "";
+    populatePointCloudDimensions(table.layout(), info);
+    clearSpatialInfo(info);
+
+    return true;
+}
+
+}  // namespace
+
 bool getPointCloudInfo(const std::string& filename, PointCloudInfo& info, int polyBoundsSrs) {
-    if (io::Path(filename).checkExtension({"ply"})) {
+    const io::Path path(filename);
+
+    if (path.checkExtension({"ply"})) {
         PlyInfo plyInfo;
         if (!getPlyInfo(filename, plyInfo))
             return false;
@@ -50,115 +216,33 @@ bool getPointCloudInfo(const std::string& filename, PointCloudInfo& info, int po
     // Las/Laz
     try {
         pdal::StageFactory factory;
-        std::string driver = pdal::StageFactory::inferReaderDriver(filename);
-        if (driver.empty()) {
+        pdal::Stage* reader = createPointCloudReader(factory, filename);
+        if (!reader) {
             LOGD << "Can't infer point cloud reader from " << filename;
             return false;
         }
 
-        pdal::Stage* s = factory.createStage(driver);
-        pdal::Options opts;
-        opts.add("filename", filename);
-        s->setOptions(opts);
+        if (path.checkExtension({"pts"})) {
+            if (!populatePointCloudInfoFromReaderExecution(*reader, info)) {
+                LOGD << "Cannot read point cloud info for " << filename;
+                return false;
+            }
 
-        pdal::QuickInfo qi = s->preview();
+            return true;
+        }
+
+        pdal::QuickInfo qi = reader->preview();
         if (!qi.valid()) {
             LOGD << "Cannot get quick info for point cloud " << filename;
             return false;
         }
 
-        info.pointCount = qi.m_pointCount;
+        populatePointCloudInfoFromQuickInfo(qi, info);
 
-        if (qi.m_srs.valid()) {
-            info.wktProjection = qi.m_srs.getWKT();
-        } else {
-            info.wktProjection = "";
-        }
-
-        info.dimensions.clear();
-        for (auto& dim : qi.m_dimNames) {
-            info.dimensions.push_back(dim);
-        }
-
-        info.bounds.clear();
-        if (qi.m_bounds.valid()) {
-            info.bounds.push_back(qi.m_bounds.minx);
-            info.bounds.push_back(qi.m_bounds.miny);
-            info.bounds.push_back(qi.m_bounds.minz);
-            info.bounds.push_back(qi.m_bounds.maxx);
-            info.bounds.push_back(qi.m_bounds.maxy);
-            info.bounds.push_back(qi.m_bounds.maxz);
-
-            pdal::BOX3D bbox = qi.m_bounds;
-
-            // We need to convert the bbox to EPSG:<polyboundsSrs>
-            if (qi.m_srs.valid()) {
-                OGRSpatialReferenceH hSrs = OSRNewSpatialReference(nullptr);
-                OGRSpatialReferenceH hTgt = OSRNewSpatialReference(nullptr);
-
-                std::string proj = qi.m_srs.getProj4();
-                if (OSRImportFromProj4(hSrs, proj.c_str()) != OGRERR_NONE) {
-                    OSRDestroySpatialReference(hTgt);
-                    OSRDestroySpatialReference(hSrs);
-                    throw GDALException("Cannot import spatial reference system " + proj +
-                                        ". Is PROJ available?");
-                }
-
-                if (OSRImportFromEPSG(hTgt, polyBoundsSrs) != OGRERR_NONE) {
-                    OSRDestroySpatialReference(hTgt);
-                    OSRDestroySpatialReference(hSrs);
-                    throw GDALException("Cannot read EPSG:" + std::to_string(polyBoundsSrs) +
-                                        ". Is PROJ available?");
-                }
-
-                OGRCoordinateTransformationH hTransform = OCTNewCoordinateTransformation(hSrs, hTgt);
-
-                double geoMinX = bbox.minx;
-                double geoMinY = bbox.miny;
-                double geoMinZ = bbox.minz;
-                double geoMaxX = bbox.maxx;
-                double geoMaxY = bbox.maxy;
-                double geoMaxZ = bbox.maxz;
-
-                bool minSuccess = OCTTransform(hTransform, 1, &geoMinX, &geoMinY, &geoMinZ);
-                bool maxSuccess = OCTTransform(hTransform, 1, &geoMaxX, &geoMaxY, &geoMaxZ);
-
-                if (!minSuccess || !maxSuccess)
-                    throw GDALException("Cannot transform coordinates " + bbox.toWKT() + " to " +
-                                        proj);
-
-                info.polyBounds.clear();
-
-                if (geoMinZ < -30000 || geoMaxZ > 30000 || (geoMinX == -90 && geoMaxX == 90)) {
-                    LOGD << "Strange point cloud bounds [[" << geoMinX << ", " << geoMaxX << "], ["
-                         << geoMinY << ", " << geoMaxY << "], [" << geoMinZ << ", " << geoMaxZ
-                         << "]]";
-                    info.bounds.clear();
-                } else {
-                    info.polyBounds.addPoint(geoMinX, geoMinY, geoMinZ);
-                    info.polyBounds.addPoint(geoMaxX, geoMinY, geoMinZ);
-                    info.polyBounds.addPoint(geoMaxX, geoMaxY, geoMinZ);
-                    info.polyBounds.addPoint(geoMinX, geoMaxY, geoMinZ);
-                    info.polyBounds.addPoint(geoMinX, geoMinY, geoMinZ);
-
-                    double centroidX = (bbox.minx + bbox.maxx) / 2.0;
-                    double centroidY = (bbox.miny + bbox.maxy) / 2.0;
-                    double centroidZ = bbox.minz;
-
-                    if (OCTTransform(hTransform, 1, &centroidX, &centroidY, &centroidZ)) {
-                        info.centroid.clear();
-                        info.centroid.addPoint(centroidX, centroidY, centroidZ);
-                    } else
-                        throw GDALException("Cannot transform coordinates " +
-                                            std::to_string(centroidX) + ", " +
-                                            std::to_string(centroidY) + " to " + proj);
-                }
-
-                OCTDestroyCoordinateTransformation(hTransform);
-                OSRDestroySpatialReference(hTgt);
-                OSRDestroySpatialReference(hSrs);
-            }
-        }
+        if (suppressDirectSpatialInfo(path))
+            clearSpatialInfo(info);
+        else
+            populatePointCloudBoundsFromQuickInfo(qi, info, polyBoundsSrs);
     } catch (pdal::pdal_error& e) {
         LOGD << "PDAL Error: " << e.what();
         throw PDALException(e.what());
@@ -356,11 +440,11 @@ void buildEpt(const std::vector<std::string>& filenames, const std::string& outd
 
     std::vector<std::string> inputFiles;
 
-    // Make sure these are LAS/LAZ. If it's PLY, we first need to convert
-    // to LAS
+    // Make sure these are LAS/LAZ. If it's PLY, E57, PTS, or XYZ, we first need to
+    // convert to LAS
     for (const auto& f : filenames) {
         auto p = io::Path(f);
-        if (p.checkExtension({"ply"})) {
+        if (p.checkExtension({"ply", "e57", "pts", "xyz"})) {
             std::string lasF = (tmpDir / Hash::strCRC64(f)).string() + ".las";
             LOGD << "Converting " << f << " to " << lasF;
             translateToLas(f, lasF);
@@ -566,17 +650,11 @@ void translateToLas(const std::string& input, const std::string& outputLas) {
     if (!fs::exists(input))
         throw FSException(input + " does not exist");
 
-    std::string driver = pdal::StageFactory::inferReaderDriver(input);
-    if (driver.empty()) {
-        throw PDALException("Cannot infer reader driver for " + input);
-    }
-
     try {
         pdal::StageFactory factory;
-        pdal::Stage* reader = factory.createStage(driver);
-        pdal::Options inOpts;
-        inOpts.add("filename", input);
-        reader->setOptions(inOpts);
+        pdal::Stage* reader = createPointCloudReader(factory, input);
+        if (!reader)
+            throw PDALException("Cannot infer reader driver for " + input);
 
         pdal::PointTable table;
         pdal::Options outLasOpts;
