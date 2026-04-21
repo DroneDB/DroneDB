@@ -4,9 +4,12 @@
 
 #include "thumbs.h"
 
+#include <algorithm>
 #include <chrono>
 #include <fstream>
+#include <sstream>
 #include <thread>
+#include <vector>
 
 #include "ddb.h"
 #include "exceptions.h"
@@ -113,53 +116,28 @@ TEST(thumbnail, lewis_file) {
 const size_t WEBP_MIN_HEADER_SIZE = 26;
 const size_t MIN_THUMBNAIL_SIZE = 1024;
 
-// Helper function to check if WebP image is not empty (not all transparent/white)
-bool isWebPImageNonEmpty(const fs::path& webpPath) {
-    // Check if file exists and has content
-    if (!fs::exists(webpPath)) {
-        return false;
-    }
-
+// Returns true if webpPath exists, has a valid RIFF/WEBP header, and is at
+// least minSize bytes. Pass MIN_THUMBNAIL_SIZE to reject trivially small files;
+// pass WEBP_MIN_HEADER_SIZE (the default) for a pure signature check.
+bool isValidWebP(const fs::path& webpPath,
+                 size_t minSize = WEBP_MIN_HEADER_SIZE) {
+    if (!fs::exists(webpPath)) return false;
     const auto fileSize = io::Path(webpPath).getSize();
-    if (fileSize == 0) {
-        return false;
-    }
-
-    // WebP files must be at least 26 bytes (minimal header size)
-    // A realistic thumbnail should be much larger (at least 1KB)
-    if (fileSize < WEBP_MIN_HEADER_SIZE) {
-        return false;
-    }
-
-    // Verify WebP signature by reading the file header
+    if (fileSize < static_cast<long long>(minSize)) return false;
     std::ifstream file(webpPath.string(), std::ios::binary);
-    if (!file.is_open()) {
-        return false;
-    }
-
-    // Read the first 12 bytes to check WebP signature
-    // WebP format: "RIFF" + 4 bytes size + "WEBP"
+    if (!file.is_open()) return false;
     uint8_t header[12];
     file.read(reinterpret_cast<char*>(header), 12);
-    file.close();
+    if (file.gcount() != 12) return false;
+    if (header[0]!='R'||header[1]!='I'||header[2]!='F'||header[3]!='F') return false;
+    if (header[8]!='W'||header[9]!='E'||header[10]!='B'||header[11]!='P') return false;
+    return true;
+}
 
-    if (file.gcount() != 12) {
-        return false;
-    }
-
-    // Check RIFF signature (bytes 0-3: "RIFF")
-    if (header[0] != 'R' || header[1] != 'I' || header[2] != 'F' || header[3] != 'F') {
-        return false;
-    }
-
-    // Check WebP signature (bytes 8-11: "WEBP")
-    if (header[8] != 'W' || header[9] != 'E' || header[10] != 'B' || header[11] != 'P') {
-        return false;
-    }
-
-    // For thumbnail testing purposes, expect at least 1KB for a meaningful image
-    // This helps distinguish between minimal valid WebP files and actual thumbnails
-    return fileSize >= MIN_THUMBNAIL_SIZE;
+// Wrapper used by single-file tests: also enforces the 1 KiB floor that
+// distinguishes a real thumbnail from a degenerate near-empty WebP.
+bool isWebPImageNonEmpty(const fs::path& webpPath) {
+    return isValidWebP(webpPath, MIN_THUMBNAIL_SIZE);
 }
 
 TEST(thumbnail, brightonsLazEpt) {
@@ -563,6 +541,160 @@ TEST(thumbnail, pointCloudFlatSurface) {
         // Expected if the point cloud also has zero X/Y extent
         SUCCEED() << "Flat surface point cloud rejected due to insufficient extent: " << e.what();
     }
+}
+
+// --- Batch regression tests for georaster thumbnail generation ---
+//
+// These tests exercise generateThumb over a wide variety of real-world rasters
+// from the public test_data repository. Each helper runs the full list and
+// aggregates failures so that a single broken input does not mask the others.
+
+namespace {
+
+struct BatchResult {
+    std::string filename;
+    std::string error;  // empty when the file succeeded
+};
+
+void runThumbnailBatch(const std::string& testName,
+                       const std::string& remoteFolder,
+                       const std::vector<std::string>& filenames,
+                       int thumbSize = 256) {
+    TestArea ta(testName);
+    std::vector<BatchResult> failures;
+
+    for (const auto& fname : filenames) {
+        const std::string url =
+            "https://github.com/DroneDB/test_data/raw/master/" +
+            remoteFolder + "/" + fname;
+        try {
+            fs::path src = ta.downloadTestAsset(url, fname);
+            // Sanitize output name: replace separators so path nesting in
+            // filenames does not escape the test area.
+            std::string outName = fname;
+            std::replace(outName.begin(), outName.end(), '/', '_');
+            std::replace(outName.begin(), outName.end(), '\\', '_');
+            fs::path outFile = ta.getPath(outName + ".thumb.webp");
+
+            ddb::generateThumb(src, thumbSize, outFile, true);
+
+            if (!fs::exists(outFile)) {
+                failures.push_back({fname, "output file missing"});
+                continue;
+            }
+            if (!isValidWebP(outFile)) {
+                failures.push_back({fname, "output not a valid WEBP"});
+                continue;
+            }
+
+            // Exercise the in-memory path too.
+            uint8_t* buffer = nullptr;
+            int bufSize = 0;
+            ddb::generateThumb(src, thumbSize, "", true, &buffer, &bufSize);
+            if (!buffer || bufSize <= 0) {
+                failures.push_back({fname, "in-memory thumbnail returned empty buffer"});
+            }
+            if (buffer) DDBVSIFree(buffer);
+        } catch (const std::exception& e) {
+            failures.push_back({fname, std::string("exception: ") + e.what()});
+        } catch (...) {
+            failures.push_back({fname, "unknown exception"});
+        }
+    }
+
+    if (!failures.empty()) {
+        std::ostringstream msg;
+        msg << "Thumbnail batch failed for " << failures.size() << "/"
+            << filenames.size() << " file(s):\n";
+        for (const auto& f : failures) {
+            msg << "  - " << f.filename << ": " << f.error << "\n";
+        }
+        FAIL() << msg.str();
+    }
+}
+
+}  // namespace
+
+// Regression test for repr3.tif: Byte raster with out-of-range nodata value
+// that historically caused the -dstalpha crash in GDALTranslate.
+TEST(thumbnail, rgbWithNodataRepr3) {
+    TestArea ta(TEST_NAME);
+    fs::path src = ta.downloadTestAsset(
+        "https://github.com/DroneDB/test_data/raw/master/ortho/repr3.tif",
+        "repr3.tif");
+
+    fs::path outFile = ta.getPath("repr3-thumb.webp");
+    EXPECT_NO_THROW(ddb::generateThumb(src, 512, outFile, true));
+    EXPECT_TRUE(fs::exists(outFile));
+    EXPECT_TRUE(isWebPImageNonEmpty(outFile));
+
+    uint8_t* buffer = nullptr;
+    int bufSize = 0;
+    EXPECT_NO_THROW(ddb::generateThumb(src, 256, "", true, &buffer, &bufSize));
+    EXPECT_GT(bufSize, 0);
+    EXPECT_NE(buffer, nullptr);
+    if (buffer) DDBVSIFree(buffer);
+}
+
+TEST(thumbnail, orthoBatch) {
+    runThumbnailBatch("thumbnail_orthoBatch", "ortho", {
+        "aukerman.tif",
+        "brighton-beach-cog.tif",
+        "brighton-beach.tif",
+        "caliterra.tif",
+        "copr.tif",
+        "mygla.tif",
+        "repr3.tif",
+        "sheffield-park-3.tif",
+        "vo.tif",
+        "w5s.tif",
+        "wro.tif",
+    });
+}
+
+TEST(thumbnail, orthoEdgeBatch) {
+    runThumbnailBatch("thumbnail_orthoEdgeBatch", "ortho/edge", {
+        "abetow-ERD2018-EBIRD_SCIENCE-20191109-a5cf4cb2_hr_2018_abundance_median.tiff",
+        "bremen_sea_ice_conc_2022_9_9.tif",
+        "dom1_32_356_5699_1_nw_2020.tif",
+        "eu_pasture.tiff",
+        "GA4886_VanderfordGlacier_2022_EGM2008_64m-epsg3031.cog",
+        "gadas-cyprus.tif",
+        "gadas-world.tif",
+        "gadas.tif",
+        "ga_ls_tc_pc_cyear_3_x17y37_2022--P1Y_final_wet_pc_50_LQ.tif",
+        "GeogToWGS84GeoKey5.tif",
+        "gfw-azores.tif",
+        "gpm_1d.20240617.tif",
+        "lcv_landuse.cropland_hyde_p_10km_s0..0cm_2016_v3.2.tif",
+        "LisbonElevation.tif",
+        "no_pixelscale_or_tiepoints.tiff",
+        "nt_20201024_f18_nrt_s.tif",
+        "nz_habitat_anticross_4326_1deg.tif",
+        "spam2005v3r2_harvested-area_wheat_total.tiff",
+        "umbra_mount_yasur.tiff",
+        "utm.tif",
+        "vestfold.tif",
+        "wildfires.tiff",
+        "wind_direction.tif",
+    });
+}
+
+TEST(thumbnail, testdataRasterBatch) {
+    runThumbnailBatch("thumbnail_testdataRasterBatch", "testdata/raster", {
+        "16bit_image.tif",
+        "byte.tif",
+        "float32_raster.tif",
+        "grayscale_alpha_image.png",
+        "grayscale_alpha_image.tif",
+        "grayscale_image.tif",
+        "image_with_nodata.tif",
+        "multiband_image.tif",
+        "rgba_with_alpha_band.tif",
+        "square_image.tif",
+        "tiny_image.tif",
+        "utm.tif",
+    });
 }
 
 }  // namespace
