@@ -4,7 +4,9 @@
 #include "pointcloud.h"
 
 #include <cpr/cpr.h>
+#include <fstream>
 #include <limits>
+#include <sstream>
 
 #include <bu/BuPyramid.hpp>
 #include <epf/Epf.hpp>
@@ -35,6 +37,326 @@ void fatal(const std::string& err) {
 namespace ddb {
 
 namespace {
+
+// Maximum number of lines to read for format detection
+static constexpr size_t MAX_HEADER_LINES = 20;
+
+// Comment prefix used by CloudCompare and other tools
+static constexpr const char* COMMENT_PREFIX = "//";
+
+struct TextReaderConfig {
+    std::string header;           // PDAL header option (e.g., "X, Y, Z, Red, Green, Blue")
+    int skip;                     // PDAL skip option (number of lines to skip)
+    char separator;               // PDAL separator option (space, tab, comma, semicolon)
+    bool hasHeader;               // Whether a header line was detected (needs header+skip override)
+    std::vector<std::string> detectedColumns;
+};
+
+// Trim leading/trailing whitespace and surrounding double quotes from a token
+static std::string trimAndUnquote(const std::string& token) {
+    size_t start = token.find_first_not_of(" \t\r\n");
+    size_t end = token.find_last_not_of(" \t\r\n");
+    if (start == std::string::npos)
+        return "";
+    std::string trimmed = token.substr(start, end - start + 1);
+    // Strip surrounding double quotes if present
+    if (trimmed.size() >= 2 && trimmed.front() == '"' && trimmed.back() == '"')
+        trimmed = trimmed.substr(1, trimmed.size() - 2);
+    return trimmed;
+}
+
+// Check if a line is empty or contains only whitespace
+static bool isBlankLine(const std::string& line) {
+    return line.find_first_not_of(" \t\r\n") == std::string::npos;
+}
+
+// Check if a line is a comment (starts with // after optional leading whitespace)
+static bool isCommentLine(const std::string& line) {
+    size_t start = line.find_first_not_of(" \t");
+    if (start == std::string::npos)
+        return false;
+    return line.compare(start, 2, COMMENT_PREFIX) == 0;
+}
+
+// Check if a string is a single non-negative integer (point count marker)
+static bool isSingleInteger(const std::string& line) {
+    std::string trimmed = trimAndUnquote(line);
+    if (trimmed.empty())
+        return false;
+    for (char c : trimmed) {
+        if (!std::isdigit(static_cast<unsigned char>(c)))
+            return false;
+    }
+    return true;
+}
+
+// Check if a line contains any alphabetic characters (indicator of a header line)
+static bool containsAlpha(const std::string& line) {
+    for (char c : line) {
+        if (std::isalpha(static_cast<unsigned char>(c)))
+            return true;
+    }
+    return false;
+}
+
+// Split a line by a specific separator. For space, any run of whitespace is one separator.
+static std::vector<std::string> splitBySeparator(const std::string& line, char sep) {
+    std::vector<std::string> result;
+    if (sep == ' ') {
+        // Whitespace-separated: split on runs of spaces/tabs
+        std::istringstream iss(line);
+        std::string token;
+        while (iss >> token) {
+            std::string t = trimAndUnquote(token);
+            if (!t.empty())
+                result.push_back(t);
+        }
+    } else {
+        std::string token;
+        std::istringstream iss(line);
+        while (std::getline(iss, token, sep)) {
+            std::string t = trimAndUnquote(token);
+            if (!t.empty())
+                result.push_back(t);
+        }
+    }
+    return result;
+}
+
+// Detect the most likely separator from a data/header line among: comma, semicolon, tab, space
+static char detectSeparator(const std::string& line) {
+    size_t tabCount = 0;
+    size_t commaCount = 0;
+    size_t semicolonCount = 0;
+
+    for (char c : line) {
+        switch (c) {
+            case '\t': tabCount++; break;
+            case ',': commaCount++; break;
+            case ';': semicolonCount++; break;
+            default: break;
+        }
+    }
+
+    // Priority: explicit separators first, fall back to space
+    if (commaCount > 0) return ',';
+    if (semicolonCount > 0) return ';';
+    if (tabCount > 0) return '\t';
+    return ' ';
+}
+
+// Map common column name variants to PDAL dimension names (alphanumeric + underscore only)
+static std::string mapColumnName(const std::string& raw) {
+    // Single-letter RGB aliases used by CloudCompare
+    if (raw == "R") return "Red";
+    if (raw == "G") return "Green";
+    if (raw == "B") return "Blue";
+    // CloudCompare uses underscores between words; PDAL canonical names are CamelCase
+    if (raw == "Return_Number") return "ReturnNumber";
+    if (raw == "Number_Of_Returns") return "NumberOfReturns";
+    if (raw == "User_Data") return "UserData";
+    if (raw == "Scan_Angle_Rank") return "ScanAngleRank";
+    if (raw == "Point_Source_ID" || raw == "Point_Source_Id") return "PointSourceId";
+    if (raw == "Gps_Time") return "GpsTime";
+    if (raw == "Scan_Direction_Flag") return "ScanDirectionFlag";
+    if (raw == "Edge_Of_Flight_Line") return "EdgeOfFlightLine";
+    if (raw == "Key_Point") return "KeyPoint";
+    if (raw == "Scan_Channel") return "ScanChannel";
+    return raw;
+}
+
+// Read up to maxLines lines from a file into memory
+static std::vector<std::string> readLeadingLines(const std::string& filename, size_t maxLines) {
+    std::vector<std::string> lines;
+    std::ifstream file(filename);
+    if (!file.is_open())
+        return lines;
+    std::string line;
+    while (lines.size() < maxLines && std::getline(file, line))
+        lines.push_back(line);
+    return lines;
+}
+
+// Determine if a line "looks like" a header (has alphabetic characters beyond scientific notation).
+// Numeric-only data lines may contain 'e'/'E' for scientific notation, but no other letters.
+static bool looksLikeHeaderLine(const std::string& line) {
+    if (!containsAlpha(line))
+        return false;
+    // Exclude scientific-notation-only alpha (e/E) followed/preceded by digits or signs
+    // Conservative: if the line contains any letter other than e/E, it's a header
+    for (char c : line) {
+        if (std::isalpha(static_cast<unsigned char>(c)) && c != 'e' && c != 'E')
+            return true;
+    }
+    // Only e/E present: could be scientific notation, not a header
+    return false;
+}
+
+// Build the PDAL "header" option string from a list of column names using the given separator.
+// PDAL parses the header option using the same separator as the data, so they must agree.
+static std::string buildHeaderString(const std::vector<std::string>& columns, char sep) {
+    std::ostringstream oss;
+    for (size_t i = 0; i < columns.size(); ++i) {
+        if (i > 0) {
+            // Use ", " for comma/semicolon to match the common formatting; a plain separator
+            // works too, but a trailing space is allowed and improves readability.
+            if (sep == ',' || sep == ';')
+                oss << sep << ' ';
+            else
+                oss << sep;
+        }
+        oss << columns[i];
+    }
+    return oss.str();
+}
+
+// Return a plausible default column list for a data row with `columnCount` values.
+// These are best-effort guesses matching conventions of CloudCompare and PDAL writers.
+static std::vector<std::string> defaultColumnsForCount(size_t columnCount) {
+    // Strictly XYZ only: anything beyond the 3 positional dims is exposed as generic extras.
+    // For typical layouts we use names PDAL recognizes natively so downstream tools see colors.
+    static const std::vector<std::string> tier3 = {"X", "Y", "Z"};
+    static const std::vector<std::string> tier4 = {"X", "Y", "Z", "Intensity"};
+    static const std::vector<std::string> tier6 = {"X", "Y", "Z", "Red", "Green", "Blue"};
+    static const std::vector<std::string> tier7 = {"X", "Y", "Z", "Red", "Green", "Blue", "Intensity"};
+    static const std::vector<std::string> tier9 = {"X", "Y", "Z", "Red", "Green", "Blue",
+                                                   "ReturnNumber", "NumberOfReturns", "UserData"};
+
+    switch (columnCount) {
+        case 3: return tier3;
+        case 4: return tier4;
+        case 6: return tier6;
+        case 7: return tier7;
+        case 9: return tier9;
+        default: break;
+    }
+
+    // Fallback: X, Y, Z and generic ExtraN dimensions for the remainder
+    std::vector<std::string> cols = tier3;
+    for (size_t i = 3; i < columnCount; ++i)
+        cols.push_back("Extra" + std::to_string(i - 3));
+    return cols;
+}
+
+// Detect the format of an XYZ text file and return the PDAL configuration needed to read it.
+// Reliability-first heuristic:
+//   1. If the first line is a "//"-prefixed comment containing alphabetic tokens, treat the
+//      content after "//" as the declared header (CloudCompare "columns title" export).
+//   2. Skip arbitrary leading comment and blank lines.
+//   3. If the next line is a single integer, treat it as a point-count marker and skip it.
+//   4. If the next line contains alphabetic tokens, treat it as an in-file header: extract
+//      column names, strip quotes, map CloudCompare aliases to PDAL names, and skip it.
+//   5. Detect the separator (comma, semicolon, tab, or space) from the header/data line.
+//   6. Always populate `config.header` so PDAL never falls back to interpreting a data row
+//      as the header line.
+TextReaderConfig detectTextFormat(const std::string& filename) {
+    TextReaderConfig config;
+    config.skip = 0;
+    config.separator = ' ';
+    config.hasHeader = false;
+    config.header = "X, Y, Z";
+
+    const std::vector<std::string> lines = readLeadingLines(filename, MAX_HEADER_LINES);
+    if (lines.empty()) {
+        LOGD << "Cannot read lines for format detection: " << filename;
+        return config;
+    }
+
+    // Step 1: attempt to extract column names from the LAST comment line preceding data
+    // (CloudCompare "columns title" export places column names in the comment immediately
+    // above the data rows; any earlier comments are typically generator/date banners).
+    std::vector<std::string> commentColumns;
+    size_t lastCommentIdx = std::string::npos;
+    for (size_t i = 0; i < lines.size(); ++i) {
+        if (isBlankLine(lines[i]))
+            continue;
+        if (!isCommentLine(lines[i]))
+            break;
+        lastCommentIdx = i;
+    }
+    if (lastCommentIdx != std::string::npos) {
+        const std::string& line = lines[lastCommentIdx];
+        size_t start = line.find_first_not_of(" \t");
+        std::string content = line.substr(start + 2);  // after "//"
+        if (looksLikeHeaderLine(content)) {
+            const char commentSeparator = detectSeparator(content);
+            commentColumns = splitBySeparator(content, commentSeparator);
+            for (auto& c : commentColumns)
+                c = mapColumnName(c);
+        }
+    }
+
+    // Step 2: skip leading comment/blank lines
+    size_t idx = 0;
+    while (idx < lines.size() && (isCommentLine(lines[idx]) || isBlankLine(lines[idx])))
+        ++idx;
+    config.skip = static_cast<int>(idx);
+
+    if (idx >= lines.size()) {
+        LOGD << "No data lines found in XYZ file: " << filename;
+        return config;
+    }
+
+    // Step 3: point-count marker
+    if (isSingleInteger(lines[idx])) {
+        ++config.skip;
+        ++idx;
+    }
+
+    if (idx >= lines.size()) {
+        LOGD << "No header/data lines after skip in XYZ file: " << filename;
+        return config;
+    }
+
+    // Step 4: inline header detection
+    const std::string& candidate = lines[idx];
+    std::vector<std::string> inlineColumns;
+    char sep = detectSeparator(candidate);
+    if (looksLikeHeaderLine(candidate)) {
+        inlineColumns = splitBySeparator(candidate, sep);
+        for (auto& c : inlineColumns)
+            c = mapColumnName(c);
+        ++config.skip;  // Skip the in-file header line, we override via `header` option
+        ++idx;
+    }
+
+    // Step 5: determine the data separator from the first real data row when available;
+    // fall back to whatever we detected from the header candidate.
+    if (idx < lines.size() && !isBlankLine(lines[idx]))
+        sep = detectSeparator(lines[idx]);
+    config.separator = sep;
+
+    // Step 6: choose the best available column list, in priority order:
+    //   inline in-file header > comment-line header (validated by data column count) >
+    //   inferred from data column count
+    const size_t dataColCount =
+        (idx < lines.size()) ? splitBySeparator(lines[idx], sep).size() : 0;
+
+    std::vector<std::string> columns;
+    if (inlineColumns.size() >= 3) {
+        columns = inlineColumns;
+    } else if (commentColumns.size() >= 3 &&
+               (dataColCount == 0 || commentColumns.size() == dataColCount)) {
+        columns = commentColumns;
+    } else if (dataColCount > 0) {
+        columns = defaultColumnsForCount(dataColCount);
+    } else {
+        columns = {"X", "Y", "Z"};
+    }
+
+    config.hasHeader = true;
+    config.detectedColumns = columns;
+    config.header = buildHeaderString(columns, sep);
+
+    LOGD << "XYZ format detected for " << filename << ": columns=" << columns.size()
+         << ", separator='" << (sep == ' ' ? std::string("space")
+                                           : sep == '\t' ? std::string("tab")
+                                                         : std::string(1, sep))
+         << "', skip=" << config.skip
+         << ", header='" << config.header << "'";
+
+    return config;
+}
 
 std::string resolvePointCloudReaderDriver(const std::string& filename) {
     const io::Path path(filename);
@@ -185,6 +507,25 @@ pdal::Stage* createPointCloudReader(pdal::StageFactory& factory, const std::stri
 
     pdal::Options options;
     options.add("filename", filename);
+
+    // Apply heuristic detection for readers.text (XYZ files)
+    if (driver == "readers.text") {
+        TextReaderConfig config = detectTextFormat(filename);
+
+        // Always set the header explicitly when we've parsed one, so we control dimension naming
+        // and PDAL does not fall over quoted/aliased names it cannot canonicalize.
+        if (config.hasHeader)
+            options.add("header", config.header);
+
+        if (config.skip > 0)
+            options.add("skip", config.skip);
+
+        // Only set separator if it's not the default (space). PDAL treats runs of whitespace
+        // as a single separator when unset, which is what we want for space-separated files.
+        if (config.separator != ' ')
+            options.add("separator", std::string(1, config.separator));
+    }
+
     reader->setOptions(options);
 
     return reader;
