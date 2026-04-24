@@ -370,6 +370,24 @@ SensorDetectionResult SensorProfileManager::detectSensor(const std::string &rast
             result.bands = profile.bands;
             result.presets = profile.presets;
 
+            // For generic profiles (no metadata patterns, e.g. "generic-4band"),
+            // prefer actual GDAL band descriptions when available, since the
+            // profile-defined names are only placeholders. This avoids
+            // mis-labeling bands of files that happen to match by band count
+            // alone but whose actual band order differs (e.g. ODM multispectral
+            // orthophoto with Red/Green/NIR/Rededge would otherwise be shown as
+            // Blue/Green/Red/NIR from generic-4band).
+            if (profile.detection.metadataPatterns.empty()) {
+                for (auto &bi : result.bands) {
+                    if (bi.index < 1 || bi.index > bandCount) continue;
+                    GDALRasterBandH hB = GDALGetRasterBand(hDataset, bi.index);
+                    const char *d = GDALGetDescription(hB);
+                    if (d != nullptr && *d != '\0') {
+                        bi.name = d;
+                    }
+                }
+            }
+
             // Find default preset
             for (const auto &p : profile.presets) {
                 if (p.isDefault) {
@@ -394,16 +412,39 @@ SensorDetectionResult SensorProfileManager::detectSensor(const std::string &rast
         }
     }
 
-    GDALClose(hDataset);
-
     // No profile matched — for multi-band non-Byte images, return a basic result
-    // with fallback mapping (§3.3 Detection Fallback)
+    // with fallback mapping (§3.3 Detection Fallback).
+    // Populate result.bands from GDAL descriptions / color interpretation so that
+    // downstream consumers (getRasterInfoJson, autoDetectFilter) can work with
+    // the detected sensor even without a matching profile.
     if (bandCount > 3 && dt != GDT_Byte) {
         result.detected = true;
         result.sensorCategory = "multispectral";
+
+        int lastDataBand = lastBandIsAlpha ? bandCount - 1 : bandCount;
+        for (int i = 1; i <= lastDataBand; i++) {
+            GDALRasterBandH hBand = GDALGetRasterBand(hDataset, i);
+            BandInfo bi;
+            bi.index = i;
+
+            const char *desc = GDALGetDescription(hBand);
+            std::string name = (desc != nullptr) ? std::string(desc) : std::string();
+            if (name.empty()) {
+                GDALColorInterp ci = GDALGetRasterColorInterpretation(hBand);
+                const char *ciName = GDALGetColorInterpretationName(ci);
+                if (ciName != nullptr) name = ciName;
+            }
+            bi.name = name;
+            bi.domain = "optical";
+            result.bands.push_back(bi);
+        }
+
+        GDALClose(hDataset);
         result.defaultBandMapping = getFallbackMapping(rasterPath, bandCount);
+        return result;
     }
 
+    GDALClose(hDataset);
     return result;
 }
 

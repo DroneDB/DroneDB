@@ -93,6 +93,69 @@ TEST(multispectral, detectSensor5BandUInt16) {
     EXPECT_TRUE(result.detected);
 }
 
+TEST(multispectral, detectSensorFallbackPopulatesBands) {
+    // Regression test: when no sensor profile matches but the raster is
+    // multi-band non-Byte (e.g. ODM multispectral orthophoto with Red, Green,
+    // NIR, Rededge + Alpha), detectSensor() must populate result.bands so that
+    // getRasterInfoJson returns band info and autoDetectFilter can build the
+    // correct filter (e.g. "RGNRe").
+    TestArea ta(TEST_NAME);
+    GDALDriverH tifDrv = GDALGetDriverByName("GTiff");
+    fs::path rasterPath = ta.getPath("ms5_desc.tif");
+    GDALDatasetH hDs = GDALCreate(tifDrv, rasterPath.string().c_str(), 64, 64, 5, GDT_UInt16, nullptr);
+    ASSERT_NE(hDs, nullptr);
+
+    // Set band descriptions and color interpretation (mimicking ODM output)
+    GDALRasterBandH b1 = GDALGetRasterBand(hDs, 1);
+    GDALSetDescription(b1, "Red");
+    GDALSetRasterColorInterpretation(b1, GCI_RedBand);
+
+    GDALRasterBandH b2 = GDALGetRasterBand(hDs, 2);
+    GDALSetDescription(b2, "Green");
+    GDALSetRasterColorInterpretation(b2, GCI_GreenBand);
+
+    GDALRasterBandH b3 = GDALGetRasterBand(hDs, 3);
+    GDALSetDescription(b3, "NIR");
+    GDALSetRasterColorInterpretation(b3, GCI_GrayIndex);
+
+    GDALRasterBandH b4 = GDALGetRasterBand(hDs, 4);
+    GDALSetDescription(b4, "Rededge");
+    GDALSetRasterColorInterpretation(b4, GCI_GrayIndex);
+
+    GDALRasterBandH b5 = GDALGetRasterBand(hDs, 5);
+    GDALSetRasterColorInterpretation(b5, GCI_AlphaBand);
+
+    GDALClose(hDs);
+
+    auto& spm = SensorProfileManager::instance();
+    auto result = spm.detectSensor(rasterPath.string());
+
+    EXPECT_TRUE(result.detected);
+    EXPECT_EQ(result.sensorCategory, "multispectral");
+    // Alpha should be excluded from reported bands
+    ASSERT_EQ(result.bands.size(), 4u);
+    EXPECT_EQ(result.bands[0].name, "Red");
+    EXPECT_EQ(result.bands[1].name, "Green");
+    EXPECT_EQ(result.bands[2].name, "NIR");
+    EXPECT_EQ(result.bands[3].name, "Rededge");
+
+    // autoDetectFilter should now map R/G/N/Re from the populated bands
+    auto& ve = VegetationEngine::instance();
+    auto bf = ve.autoDetectFilter(rasterPath.string());
+    EXPECT_EQ(bf.id, "RGNRe");
+    EXPECT_EQ(bf.R, 0);
+    EXPECT_EQ(bf.G, 1);
+    EXPECT_EQ(bf.N, 2);
+    EXPECT_EQ(bf.Re, 3);
+
+    // getRasterInfoJson should return non-empty bands
+    std::string infoJson = spm.getRasterInfoJson(rasterPath.string());
+    auto info = json::parse(infoJson);
+    EXPECT_EQ(info["bandCount"].get<int>(), 5);
+    ASSERT_TRUE(info.contains("bands"));
+    EXPECT_EQ(info["bands"].size(), 4u);
+}
+
 TEST(multispectral, defaultBandMappingFallback) {
     TestArea ta(TEST_NAME);
     // Create a simple raster file for fallback mapping test
