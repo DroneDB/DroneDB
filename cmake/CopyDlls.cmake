@@ -25,11 +25,13 @@ foreach(DLL_PATH ${SOURCE_DLLS})
     get_filename_component(DLL_NAME "${DLL_PATH}" NAME)
     set(DEST_PATH "${DEST_DIR}/${DLL_NAME}")
 
-    # Only copy if destination doesn't exist (avoid overwriting)
-    if(NOT EXISTS "${DEST_PATH}")
-        message(STATUS "Copying: ${DLL_NAME}")
-        file(COPY "${DLL_PATH}" DESTINATION "${DEST_DIR}")
-    endif()
+    # Always propagate DLLs from the active config's SOURCE_DIR, overwriting
+    # stale copies from a previous build of a different config. This is
+    # critical for PDAL plugin DLLs (e.g. libpdal_plugin_reader_e57.dll) which
+    # share the same filename between release and debug vcpkg directories and
+    # would otherwise be left with a CRT-mismatched binary, causing crashes
+    # or plugin registration failures at runtime.
+    file(COPY_FILE "${DLL_PATH}" "${DEST_PATH}" ONLY_IF_DIFFERENT)
 endforeach()
 
 # If FALLBACK_DIR is specified (for Debug builds needing Release DLLs), copy those too
