@@ -40,6 +40,10 @@
 #include "syncmanager.h"
 #include "tagmanager.h"
 #include "thermal.h"
+#include "raster_analysis.h"
+#include "raster_profile.h"
+#include "volume.h"
+#include "stockpile.h"
 #include "thumbs.h"
 #include "tilerhelper.h"
 #include "utils.h"
@@ -1970,38 +1974,95 @@ DDB_DLL DDBErr DDBExportRaster(const char* inputPath, const char* outputPath,
     DDB_C_END
 }
 
-DDB_DLL DDBErr DDBGetThermalInfo(const char *filePath, char **output) {
+DDB_DLL DDBErr DDBGetRasterValueInfo(const char *filePath, char **output) {
     DDB_C_BEGIN
     if (utils::isNullOrEmptyOrWhitespace(filePath))
         throw InvalidArgsException("No file path provided");
     if (output == nullptr)
         throw InvalidArgsException("Output pointer is null");
 
-    std::string jsonStr = ddb::getThermalInfoJson(std::string(filePath));
+    std::string jsonStr = ddb::getRasterValueInfoJson(std::string(filePath));
     utils::copyToPtr(jsonStr, output);
     DDB_C_END
 }
 
-DDB_DLL DDBErr DDBGetThermalPoint(const char *filePath, int x, int y, char **output) {
+DDB_DLL DDBErr DDBGetRasterPointValue(const char *filePath, int x, int y, char **output) {
     DDB_C_BEGIN
     if (utils::isNullOrEmptyOrWhitespace(filePath))
         throw InvalidArgsException("No file path provided");
     if (output == nullptr)
         throw InvalidArgsException("Output pointer is null");
 
-    std::string jsonStr = ddb::getThermalPointJson(std::string(filePath), x, y);
+    std::string jsonStr = ddb::getRasterPointJson(std::string(filePath), x, y);
     utils::copyToPtr(jsonStr, output);
     DDB_C_END
 }
 
-DDB_DLL DDBErr DDBGetThermalAreaStats(const char *filePath, int x0, int y0, int x1, int y1, char **output) {
+DDB_DLL DDBErr DDBGetRasterAreaStats(const char *filePath, int x0, int y0, int x1, int y1, char **output) {
     DDB_C_BEGIN
     if (utils::isNullOrEmptyOrWhitespace(filePath))
         throw InvalidArgsException("No file path provided");
     if (output == nullptr)
         throw InvalidArgsException("Output pointer is null");
 
-    std::string jsonStr = ddb::getThermalAreaStatsJson(std::string(filePath), x0, y0, x1, y1);
+    std::string jsonStr = ddb::getRasterAreaStatsJson(std::string(filePath), x0, y0, x1, y1);
+    utils::copyToPtr(jsonStr, output);
+    DDB_C_END
+}
+
+DDB_DLL DDBErr DDBGetRasterProfile(const char *filePath, const char *geoJsonLineString,
+                                   int samples, char **output) {
+    DDB_C_BEGIN
+    if (utils::isNullOrEmptyOrWhitespace(filePath))
+        throw InvalidArgsException("No file path provided");
+    if (utils::isNullOrEmptyOrWhitespace(geoJsonLineString))
+        throw InvalidArgsException("No GeoJSON LineString provided");
+    if (output == nullptr)
+        throw InvalidArgsException("Output pointer is null");
+
+    std::string jsonStr = ddb::getRasterProfileJson(std::string(filePath),
+                                                    std::string(geoJsonLineString),
+                                                    samples);
+    utils::copyToPtr(jsonStr, output);
+    DDB_C_END
+}
+
+DDB_DLL DDBErr DDBCalculateVolume(const char *rasterPath,
+                                  const char *polygonGeoJSON,
+                                  const char *baseMethod,
+                                  double flatElevation,
+                                  char **output) {
+    DDB_C_BEGIN
+    if (utils::isNullOrEmptyOrWhitespace(rasterPath))
+        throw InvalidArgsException("No raster path provided");
+    if (utils::isNullOrEmptyOrWhitespace(polygonGeoJSON))
+        throw InvalidArgsException("No polygon GeoJSON provided");
+    if (output == nullptr)
+        throw InvalidArgsException("Output pointer is null");
+
+    const std::string method = (baseMethod == nullptr) ? std::string()
+                                                       : std::string(baseMethod);
+    std::string jsonStr = ddb::calculateVolumeJson(std::string(rasterPath),
+                                                   std::string(polygonGeoJSON),
+                                                   method,
+                                                   flatElevation);
+    utils::copyToPtr(jsonStr, output);
+    DDB_C_END
+}
+
+DDB_DLL DDBErr DDBDetectStockpile(const char *rasterPath,
+                                  double lat, double lon,
+                                  double radius,
+                                  float sensitivity,
+                                  char **output) {
+    DDB_C_BEGIN
+    if (utils::isNullOrEmptyOrWhitespace(rasterPath))
+        throw InvalidArgsException("No raster path provided");
+    if (output == nullptr)
+        throw InvalidArgsException("Output pointer is null");
+
+    std::string jsonStr = ddb::detectStockpileJson(std::string(rasterPath),
+                                                   lat, lon, radius, sensitivity);
     utils::copyToPtr(jsonStr, output);
     DDB_C_END
 }

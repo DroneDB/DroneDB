@@ -399,36 +399,37 @@ std::vector<float> rawToTemperatureMap(const RawThermalData &raw, const ThermalC
 }
 
 // ---- Direct temperature raster detection ----
-
+//
+// A "direct temperature raster" is a raster whose pixel values are already
+// temperatures (in °C or K), as opposed to raw sensor counts that need
+// radiometric calibration. In practice this is always a Float32/Float64
+// single-band raster.
+//
+// We intentionally do NOT use a pure value-range heuristic: many single-band
+// Float32 rasters (DEMs/DSMs/DTMs, NDVI derivatives, etc.) have values that
+// overlap plausible temperature ranges and would otherwise be misclassified
+// as thermal. Registry, in particular, feeds us the COG build artifact
+// (`cog.tif`) whose filename carries no hint about the original product.
+//
+// Instead we delegate to isThermalImage() which performs explicit metadata
+// checks (Methods 1-5): EXIF make/model, FLIR/DJI XMP, FLIR APP1, and GDAL
+// metadata keywords / unit type / Landsat-style scale+offset. That function
+// also explicitly rejects DEM/DSM/DTM via negative keywords.
 bool isDirectTemperatureRaster(const std::string &filePath) {
+    if (!isThermalImage(filePath)) return false;
+
     GDALDatasetH hDs = GDALOpen(filePath.c_str(), GA_ReadOnly);
     if (!hDs) return false;
 
-    int nBands = GDALGetRasterCount(hDs);
-    if (nBands != 1) {
-        GDALClose(hDs);
-        return false;
-    }
-
-    GDALRasterBandH hBand = GDALGetRasterBand(hDs, 1);
-    GDALDataType dt = GDALGetRasterDataType(hBand);
-
-    // Float32 single-band rasters with typical temperature ranges
-    if (dt == GDT_Float32 || dt == GDT_Float64) {
-        // Check statistics to see if values are in a temperature range
-        double bMin, bMax, bMean, bStdDev;
-        if (GDALComputeRasterStatistics(hBand, TRUE, &bMin, &bMax, &bMean, &bStdDev, nullptr, nullptr) == CE_None) {
-            // Typical thermal range: -50 to +600 °C
-            if (bMin >= -100 && bMax <= 700 && bMean > -50 && bMean < 500) {
-                GDALClose(hDs);
-                LOGD << "Detected direct temperature raster: range " << bMin << " to " << bMax << " °C";
-                return true;
-            }
-        }
+    bool isDirect = false;
+    if (GDALGetRasterCount(hDs) == 1) {
+        GDALRasterBandH hBand = GDALGetRasterBand(hDs, 1);
+        GDALDataType dt = GDALGetRasterDataType(hBand);
+        isDirect = (dt == GDT_Float32 || dt == GDT_Float64);
     }
 
     GDALClose(hDs);
-    return false;
+    return isDirect;
 }
 
 // ---- Detection ----
@@ -595,17 +596,9 @@ bool isThermalImage(const std::string &filePath) {
 }
 
 // ---- Helper: read temperature data from file (R-JPEG or GeoTIFF) ----
+// (TemperatureData struct is declared in thermal.h so raster_analysis.cpp can use it.)
 
-struct TemperatureData {
-    std::vector<float> temperatures;
-    int width = 0;
-    int height = 0;
-    bool hasGeoTransform = false;
-    double geoTransform[6] = {};
-    std::string projection;
-};
-
-static TemperatureData readTemperatureData(const std::string &filePath) {
+TemperatureData readTemperatureData(const std::string &filePath) {
     TemperatureData td;
 
     // Try as GeoTIFF first (direct temperature or GDAL-readable)
@@ -688,8 +681,8 @@ static TemperatureData readTemperatureData(const std::string &filePath) {
 }
 
 // ---- Helper: convert pixel to geo coordinates ----
-static void pixelToGeo(double px, double py, const double geoTransform[6],
-                       const std::string &projection, double &geoX, double &geoY) {
+void pixelToGeo(double px, double py, const double geoTransform[6],
+                const std::string &projection, double &geoX, double &geoY) {
     double mapX = geoTransform[0] + geoTransform[1] * px + geoTransform[2] * py;
     double mapY = geoTransform[3] + geoTransform[4] * px + geoTransform[5] * py;
 
@@ -720,397 +713,6 @@ static void pixelToGeo(double px, double py, const double geoTransform[6],
     }
 }
 
-// ---- JSON query functions ----
 
-std::string getThermalInfoJson(const std::string &filePath) {
-    ThermalCalibration cal = extractThermalCalibration(filePath);
-
-    // Determine if direct temperature
-    bool isDirect = isDirectTemperatureRaster(filePath);
-
-    int width = 0, height = 0;
-    float tMin = 0, tMax = 0;
-    bool hasStats = false;
-
-    // Try GDAL statistics first (efficient for large files)
-    GDALDatasetH hDs = GDALOpen(filePath.c_str(), GA_ReadOnly);
-    if (hDs) {
-        width = GDALGetRasterXSize(hDs);
-        height = GDALGetRasterYSize(hDs);
-        int nBands = GDALGetRasterCount(hDs);
-
-        if (nBands >= 1) {
-            GDALRasterBandH hBand = GDALGetRasterBand(hDs, 1);
-            GDALDataType dt = GDALGetRasterDataType(hBand);
-
-            double bMin, bMax, bMean, bStdDev;
-            if (GDALComputeRasterStatistics(hBand, TRUE, &bMin, &bMax, &bMean, &bStdDev, nullptr, nullptr) == CE_None) {
-                if (isDirect || dt == GDT_Float32 || dt == GDT_Float64) {
-                    // Direct temperature values
-                    tMin = static_cast<float>(bMin);
-                    tMax = static_cast<float>(bMax);
-                    hasStats = true;
-                } else if (dt == GDT_UInt16 && cal.valid) {
-                    // Convert raw range to temperature using calibration
-                    tMin = static_cast<float>(rawToTemperature(static_cast<uint16_t>(bMin), cal));
-                    tMax = static_cast<float>(rawToTemperature(static_cast<uint16_t>(bMax), cal));
-                    if (tMin > tMax) std::swap(tMin, tMax);
-                    hasStats = true;
-                } else {
-                    // No calibration: report raw value range
-                    tMin = static_cast<float>(bMin);
-                    tMax = static_cast<float>(bMax);
-                    hasStats = true;
-                }
-            }
-        }
-        GDALClose(hDs);
-    }
-
-    // Fallback: try R-JPEG for small images
-    if (!hasStats) {
-        TemperatureData td = readTemperatureData(filePath);
-        if (!td.temperatures.empty()) {
-            width = td.width;
-            height = td.height;
-            tMin = std::numeric_limits<float>::max();
-            tMax = std::numeric_limits<float>::lowest();
-            for (float t : td.temperatures) {
-                if (std::isfinite(t) && t > -273.15f && t < 1000.0f) {
-                    tMin = std::min(tMin, t);
-                    tMax = std::max(tMax, t);
-                }
-            }
-            hasStats = true;
-        }
-    }
-
-    if (!hasStats) {
-        throw AppException("Cannot read thermal data from " + filePath);
-    }
-
-    // Try sensor detection
-    std::string sensorId;
-    try {
-        auto &spm = SensorProfileManager::instance();
-        auto det = spm.detectSensor(filePath);
-        if (det.detected) sensorId = det.sensorId;
-    } catch (...) {}
-
-    json result;
-    result["width"] = width;
-    result["height"] = height;
-    result["isDirectTemperature"] = isDirect;
-    result["sensorId"] = sensorId;
-    result["temperatureMin"] = tMin;
-    result["temperatureMax"] = tMax;
-
-    if (cal.valid) {
-        result["calibration"] = {
-            {"planckR1", cal.planckR1},
-            {"planckB", cal.planckB},
-            {"planckF", cal.planckF},
-            {"planckO", cal.planckO},
-            {"planckR2", cal.planckR2},
-            {"emissivity", cal.emissivity},
-            {"objectDistance", cal.objectDistance},
-            {"reflectedApparentTemperature", cal.reflectedApparentTemperature},
-            {"atmosphericTemperature", cal.atmosphericTemperature},
-            {"relativeHumidity", cal.relativeHumidity},
-            {"irWindowTemperature", cal.irWindowTemperature},
-            {"irWindowTransmission", cal.irWindowTransmission}
-        };
-    }
-
-    return result.dump();
-}
-
-std::string getThermalPointJson(const std::string &filePath, int x, int y) {
-    // Try GDAL first (efficient: read single pixel)
-    GDALDatasetH hDs = GDALOpen(filePath.c_str(), GA_ReadOnly);
-    if (hDs) {
-        int w = GDALGetRasterXSize(hDs);
-        int h = GDALGetRasterYSize(hDs);
-
-        if (x < 0 || x >= w || y < 0 || y >= h) {
-            GDALClose(hDs);
-            throw InvalidArgsException("Pixel coordinates out of bounds: (" +
-                std::to_string(x) + ", " + std::to_string(y) + ") for image " +
-                std::to_string(w) + "x" + std::to_string(h));
-        }
-
-        int nBands = GDALGetRasterCount(hDs);
-        if (nBands >= 1) {
-            GDALRasterBandH hBand = GDALGetRasterBand(hDs, 1);
-            GDALDataType dt = GDALGetRasterDataType(hBand);
-
-            float temp = 0;
-            float rawSensorValue = 0;
-            bool hasRawSensorValue = false;
-            bool gotValue = false;
-
-            if (dt == GDT_Float32 || dt == GDT_Float64) {
-                float pixVal;
-                if (GDALRasterIO(hBand, GF_Read, x, y, 1, 1, &pixVal, 1, 1, GDT_Float32, 0, 0) == CE_None) {
-                    temp = pixVal;
-                    gotValue = true;
-                }
-            } else if (dt == GDT_UInt16) {
-                uint16_t rawVal;
-                if (GDALRasterIO(hBand, GF_Read, x, y, 1, 1, &rawVal, 1, 1, GDT_UInt16, 0, 0) == CE_None) {
-                    rawSensorValue = static_cast<float>(rawVal);
-                    hasRawSensorValue = true;
-                    ThermalCalibration cal = extractThermalCalibration(filePath);
-                    if (cal.valid) {
-                        temp = static_cast<float>(rawToTemperature(rawVal, cal));
-                    } else {
-                        temp = static_cast<float>(rawVal);
-                    }
-                    gotValue = true;
-                }
-            }
-
-            if (gotValue) {
-                json result;
-                result["temperature"] = temp;
-                result["x"] = x;
-                result["y"] = y;
-                result["rawValue"] = hasRawSensorValue ? rawSensorValue : temp;
-
-                // Get geo coordinates if available
-                double geoTransform[6];
-                if (GDALGetGeoTransform(hDs, geoTransform) == CE_None) {
-                    const char* proj = GDALGetProjectionRef(hDs);
-                    if (proj && std::string(proj).length() > 0) {
-                        double geoX = 0, geoY = 0;
-                        pixelToGeo(x + 0.5, y + 0.5, geoTransform, std::string(proj), geoX, geoY);
-                        result["geoX"] = geoX;
-                        result["geoY"] = geoY;
-                        result["hasGeo"] = true;
-                    } else {
-                        result["hasGeo"] = false;
-                    }
-                } else {
-                    result["hasGeo"] = false;
-                }
-
-                GDALClose(hDs);
-                return result.dump();
-            }
-        }
-        GDALClose(hDs);
-    }
-
-    // Fallback: R-JPEG (small images)
-    TemperatureData td = readTemperatureData(filePath);
-    if (td.temperatures.empty()) {
-        throw AppException("Cannot read thermal data from " + filePath);
-    }
-
-    if (x < 0 || x >= td.width || y < 0 || y >= td.height) {
-        throw InvalidArgsException("Pixel coordinates out of bounds: (" +
-            std::to_string(x) + ", " + std::to_string(y) + ") for image " +
-            std::to_string(td.width) + "x" + std::to_string(td.height));
-    }
-
-    size_t idx = static_cast<size_t>(y) * td.width + x;
-    float temp = td.temperatures[idx];
-
-    json result;
-    result["temperature"] = temp;
-    result["x"] = x;
-    result["y"] = y;
-
-    // Get raw value if available
-    RawThermalData raw = extractRawThermalData(filePath);
-    if (raw.valid && idx < raw.data.size()) {
-        result["rawValue"] = raw.data[idx];
-    } else {
-        result["rawValue"] = temp;
-    }
-
-    if (td.hasGeoTransform && !td.projection.empty()) {
-        double geoX = 0, geoY = 0;
-        pixelToGeo(x + 0.5, y + 0.5, td.geoTransform, td.projection, geoX, geoY);
-        result["geoX"] = geoX;
-        result["geoY"] = geoY;
-        result["hasGeo"] = true;
-    } else {
-        result["hasGeo"] = false;
-    }
-
-    return result.dump();
-}
-
-std::string getThermalAreaStatsJson(const std::string &filePath, int x0, int y0, int x1, int y1) {
-    // Try GDAL first (efficient: read only ROI)
-    GDALDatasetH hDs = GDALOpen(filePath.c_str(), GA_ReadOnly);
-    if (hDs) {
-        int w = GDALGetRasterXSize(hDs);
-        int h = GDALGetRasterYSize(hDs);
-        int nBands = GDALGetRasterCount(hDs);
-
-        // Clamp to image bounds
-        x0 = std::max(0, std::min(x0, w - 1));
-        y0 = std::max(0, std::min(y0, h - 1));
-        x1 = std::max(0, std::min(x1, w - 1));
-        y1 = std::max(0, std::min(y1, h - 1));
-        if (x0 > x1) std::swap(x0, x1);
-        if (y0 > y1) std::swap(y0, y1);
-
-        if (nBands >= 1) {
-            GDALRasterBandH hBand = GDALGetRasterBand(hDs, 1);
-            GDALDataType dt = GDALGetRasterDataType(hBand);
-            ThermalCalibration cal;
-            bool needsConversion = false;
-
-            if (dt == GDT_UInt16) {
-                cal = extractThermalCalibration(filePath);
-                needsConversion = cal.valid;
-            }
-
-            int roiW = x1 - x0 + 1;
-            int roiH = y1 - y0 + 1;
-            size_t roiCount = static_cast<size_t>(roiW) * roiH;
-            std::vector<float> roiData(roiCount);
-
-            bool gotData = false;
-            if (dt == GDT_Float32 || dt == GDT_Float64) {
-                gotData = (GDALRasterIO(hBand, GF_Read, x0, y0, roiW, roiH,
-                    roiData.data(), roiW, roiH, GDT_Float32, 0, 0) == CE_None);
-            } else if (dt == GDT_UInt16) {
-                std::vector<uint16_t> rawRoi(roiCount);
-                if (GDALRasterIO(hBand, GF_Read, x0, y0, roiW, roiH,
-                    rawRoi.data(), roiW, roiH, GDT_UInt16, 0, 0) == CE_None) {
-                    for (size_t i = 0; i < roiCount; i++) {
-                        roiData[i] = needsConversion
-                            ? static_cast<float>(rawToTemperature(rawRoi[i], cal))
-                            : static_cast<float>(rawRoi[i]);
-                    }
-                    gotData = true;
-                }
-            }
-
-            if (gotData) {
-                std::vector<float> values;
-                values.reserve(roiCount);
-                for (float t : roiData) {
-                    if (std::isfinite(t)) values.push_back(t);
-                }
-
-                GDALClose(hDs);
-
-                if (values.empty()) {
-                    throw AppException("No valid data in the specified area");
-                }
-
-                std::sort(values.begin(), values.end());
-                float tMin = values.front();
-                float tMax = values.back();
-
-                double sum = 0;
-                for (float v : values) sum += v;
-                double mean = sum / values.size();
-
-                double sqSum = 0;
-                for (float v : values) {
-                    double diff = v - mean;
-                    sqSum += diff * diff;
-                }
-                double stddev = std::sqrt(sqSum / values.size());
-
-                float median;
-                size_t n = values.size();
-                if (n % 2 == 0) {
-                    median = (values[n / 2 - 1] + values[n / 2]) / 2.0f;
-                } else {
-                    median = values[n / 2];
-                }
-
-                json result;
-                result["min"] = tMin;
-                result["max"] = tMax;
-                result["mean"] = mean;
-                result["stddev"] = stddev;
-                result["median"] = median;
-                result["pixelCount"] = static_cast<int>(values.size());
-                result["bounds"] = {
-                    {"x0", x0}, {"y0", y0}, {"x1", x1}, {"y1", y1}
-                };
-                return result.dump();
-            }
-        }
-        GDALClose(hDs);
-    }
-
-    // Fallback: R-JPEG (small images)
-    TemperatureData td = readTemperatureData(filePath);
-    if (td.temperatures.empty()) {
-        throw AppException("Cannot read thermal data from " + filePath);
-    }
-
-    // Clamp to image bounds
-    x0 = std::max(0, std::min(x0, td.width - 1));
-    y0 = std::max(0, std::min(y0, td.height - 1));
-    x1 = std::max(0, std::min(x1, td.width - 1));
-    y1 = std::max(0, std::min(y1, td.height - 1));
-
-    if (x0 > x1) std::swap(x0, x1);
-    if (y0 > y1) std::swap(y0, y1);
-
-    // Collect valid temperatures in the ROI
-    std::vector<float> values;
-    values.reserve(static_cast<size_t>(x1 - x0 + 1) * (y1 - y0 + 1));
-
-    for (int row = y0; row <= y1; row++) {
-        for (int col = x0; col <= x1; col++) {
-            float t = td.temperatures[static_cast<size_t>(row) * td.width + col];
-            if (std::isfinite(t) && t > -273.15f && t < 1000.0f) {
-                values.push_back(t);
-            }
-        }
-    }
-
-    if (values.empty()) {
-        throw AppException("No valid temperature data in the specified area");
-    }
-
-    // Statistics
-    std::sort(values.begin(), values.end());
-    float tMin = values.front();
-    float tMax = values.back();
-
-    double sum = 0;
-    for (float v : values) sum += v;
-    double mean = sum / values.size();
-
-    double sqSum = 0;
-    for (float v : values) {
-        double diff = v - mean;
-        sqSum += diff * diff;
-    }
-    double stddev = std::sqrt(sqSum / values.size());
-
-    float median;
-    size_t n = values.size();
-    if (n % 2 == 0) {
-        median = (values[n / 2 - 1] + values[n / 2]) / 2.0f;
-    } else {
-        median = values[n / 2];
-    }
-
-    json result;
-    result["min"] = tMin;
-    result["max"] = tMax;
-    result["mean"] = mean;
-    result["stddev"] = stddev;
-    result["median"] = median;
-    result["pixelCount"] = static_cast<int>(values.size());
-    result["bounds"] = {
-        {"x0", x0}, {"y0", y0}, {"x1", x1}, {"y1", y1}
-    };
-
-    return result.dump();
-}
 
 } // namespace ddb
