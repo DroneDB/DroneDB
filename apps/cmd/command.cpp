@@ -44,17 +44,12 @@ namespace cmd
 
             run(result);
         }
-        catch (const cxxopts::exceptions::no_such_option &)
+        catch (const cxxopts::exceptions::exception &e)
         {
-            printHelp();
-        }
-        catch (const cxxopts::exceptions::incorrect_argument_type &)
-        {
-            printHelp();
-        }
-        catch (const cxxopts::exceptions::option_requires_argument &)
-        {
-            printHelp();
+            std::cerr << "error: " << e.what() << std::endl
+                      << std::endl;
+            printHelp(std::cerr, false);
+            exit(EXIT_FAILURE);
         }
         catch (const ddb::AppException &e)
         {

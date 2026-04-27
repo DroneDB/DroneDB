@@ -32,8 +32,22 @@ namespace
         EXPECT_TRUE(io::Path("path/./").hasChildren({"path/./../path/a/"}));
         EXPECT_TRUE(io::Path("path/./.").hasChildren({"path/./../path/b"}));
 
-        EXPECT_FALSE(io::Path("path").hasChildren({"path/3", "path/a/.."}));
+        // A path equal to the parent is now considered contained (issue #453:
+        // `ddb add .` from project root should succeed).
+        EXPECT_TRUE(io::Path("path").hasChildren({"path/3", "path/a/.."}));
+        EXPECT_TRUE(io::Path("path").hasChildren({"path"}));
+        EXPECT_TRUE(io::Path("path").hasChildren({"path/."}));
+        EXPECT_TRUE(io::Path(".").hasChildren({"."}));
+
+        // Mismatched paths must still be rejected.
         EXPECT_FALSE(io::Path("/my/path").hasChildren({"/my/pat", "/my/path/1"}));
+
+        // Guard against false prefix matches: "/foo" must not contain "/foobar".
+        EXPECT_FALSE(io::Path("/foo").hasChildren({"/foobar"}));
+        EXPECT_FALSE(io::Path("/foo").hasChildren({"/foo/ok", "/foobar/bad"}));
+#ifdef _WIN32
+        EXPECT_FALSE(io::Path("C:\\foo").hasChildren({"C:\\foobar"}));
+#endif
     }
 
     TEST(pathDepth, Normal)

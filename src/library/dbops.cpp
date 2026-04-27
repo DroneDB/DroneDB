@@ -12,6 +12,7 @@
 #include <future>
 #include <mutex>
 #include <thread>
+#include <unordered_set>
 
 #include "entry_types.h"
 #include "exceptions.h"
@@ -24,6 +25,8 @@
 #include "utils.h"
 #include "version.h"
 #include "constants.h"
+
+#include <glob.hpp>
 
 namespace ddb
 {
@@ -118,9 +121,13 @@ static std::mutex g_dbOpenMutex;
                     {
                         fs::path rp = i->path();
 
-                        // Skip .ddb
+                        // Skip .ddb (do not recurse into it and do not record
+                        // it as an indexable directory entry).
                         if (rp.filename() == DDB_FOLDER)
+                        {
                             i.disable_recursion_pending();
+                            continue;
+                        }
 
                         if (fs::is_directory(rp) && includeDirs)
                         {
@@ -223,9 +230,12 @@ static std::mutex g_dbOpenMutex;
                         }
 #endif
 
-                        // Skip .ddb recursion
+                        // Skip .ddb recursion (and don't record it as an entry)
                         if (rp.filename() == DDB_FOLDER)
+                        {
                             i.disable_recursion_pending();
+                            continue;
+                        }
 
                         // Max depth
                         if (maxDepth > 0 && i.depth() >= (maxDepth - 1))
@@ -284,6 +294,138 @@ static std::mutex g_dbOpenMutex;
                 result.push_back(fs::absolute(p).string());
             }
         }
+
+        return result;
+    }
+
+    namespace
+    {
+        // Returns true if the pattern contains shell glob meta-characters.
+        bool isGlobPattern(const std::string &p)
+        {
+            return p.find_first_of("*?[") != std::string::npos;
+        }
+
+        // Returns true if the path contains a `.ddb` segment.
+        bool containsDdbSegment(const fs::path &p)
+        {
+            for (const auto &part : p)
+            {
+                if (part == DDB_FOLDER)
+                    return true;
+            }
+            return false;
+        }
+    } // namespace
+
+    std::vector<std::string> expandGlobPatterns(
+        const std::vector<std::string> &patterns)
+    {
+        std::vector<std::string> result;
+        std::unordered_set<std::string> seen;
+        size_t totalMatches = 0;
+
+        const auto pushUnique = [&](const fs::path &p) {
+            if (containsDdbSegment(p))
+                return;
+            std::string abs = fs::absolute(p).string();
+            if (seen.insert(abs).second)
+                result.push_back(std::move(abs));
+        };
+
+        for (const std::string &pattern : patterns)
+        {
+            if (pattern.empty())
+                throw InvalidArgsException("Empty pattern in input list");
+
+            if (isGlobPattern(pattern))
+            {
+                // `**` triggers recursive globbing; everything else is single-level.
+                const bool recursive =
+                    pattern.find("**") != std::string::npos;
+                std::vector<fs::path> matches;
+                try
+                {
+                    matches = recursive ? glob::rglob(pattern)
+                                        : glob::glob(pattern);
+
+                    // p-ranav's `**` requires at least one directory segment,
+                    // so `**/<sub>` would skip files at the cwd. To match the
+                    // common shell expectation that `**` matches "zero or more
+                    // directories", also run the non-recursive variant with
+                    // the leading `**/` stripped and merge the results.
+                    if (recursive && pattern.rfind("**/", 0) == 0)
+                    {
+                        const std::string topLevel = pattern.substr(3);
+                        if (!topLevel.empty())
+                        {
+                            auto extra = glob::glob(topLevel);
+                            matches.insert(matches.end(),
+                                           std::make_move_iterator(extra.begin()),
+                                           std::make_move_iterator(extra.end()));
+                        }
+                    }
+                }
+                catch (const std::exception &e)
+                {
+                    LOGD << "Glob error for pattern '" << pattern
+                         << "': " << e.what();
+                }
+
+                size_t patternMatches = 0;
+                for (auto &m : matches)
+                {
+                    if (containsDdbSegment(m))
+                        continue;
+                    pushUnique(m);
+                    ++patternMatches;
+                }
+
+                if (patternMatches == 0)
+                {
+                    std::cerr << "warning: pattern '" << pattern
+                              << "' did not match any files" << std::endl;
+                }
+                totalMatches += patternMatches;
+            }
+            else
+            {
+                fs::path p(pattern);
+                if (!fs::exists(p))
+                    throw FSException("Path does not exist: " + pattern);
+
+                if (fs::is_directory(p))
+                {
+                    // Bare directories: expand recursively (preserves the
+                    // common `ddb add .` workflow). Hint at glob equivalent.
+                    LOGV << "Expanding directory '" << pattern
+                         << "' recursively (use '" << pattern
+                         << "/**/*' for explicit globbing).";
+
+                    pushUnique(p);
+                    for (auto it = fs::recursive_directory_iterator(p);
+                         it != fs::recursive_directory_iterator(); ++it)
+                    {
+                        if (it->path().filename() == DDB_FOLDER)
+                        {
+                            it.disable_recursion_pending();
+                            continue;
+                        }
+                        pushUnique(it->path());
+                    }
+                    ++totalMatches;
+                }
+                else
+                {
+                    pushUnique(p);
+                    ++totalMatches;
+                }
+            }
+        }
+
+        if (totalMatches == 0 && !patterns.empty())
+            throw FSException(
+                "No files matched any of the provided patterns");
 
         return result;
     }

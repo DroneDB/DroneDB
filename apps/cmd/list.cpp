@@ -27,8 +27,6 @@ namespace cmd
 			("i,input", "File(s) to list", cxxopts::value<std::vector<std::string>>())
 			("o,output", "Output file to write results to", cxxopts::value<std::string>()->default_value("stdout"))
 			("w,working-dir", "Working directory", cxxopts::value<std::string>()->default_value("."))
-			("r,recursive", "Recursively search in subdirectories", cxxopts::value<bool>())
-			("d,depth", "Max recursion depth", cxxopts::value<int>()->default_value("0"))
 			("f,format", "Output format (text|json)", cxxopts::value<std::string>()->default_value("text"));
 		// clang-format on
 		opts.parse_positional({"input"});
@@ -48,11 +46,10 @@ namespace cmd
 			const auto ddbPath = opts["working-dir"].as<std::string>();
 			const auto paths = opts.count("input") > 0 ? opts["input"].as<std::vector<std::string>>() : std::vector<std::string>();
 			const auto format = opts["format"].as<std::string>();
-			const auto recursive = opts["recursive"].count() > 0;
-			const auto depthOpt = opts["depth"];
 
-			// Take into consideration maxRecursionDepth only if the recursive flag is set and the option exists
-			const auto maxRecursionDepth = recursive ? (depthOpt.count() > 0 ? depthOpt.as<int>() : 0) : 0;
+			// Always recursive: users can scope output via the input paths/patterns.
+			const bool recursive = true;
+			const int maxRecursionDepth = 0;
 
 			const auto db = ddb::open(std::string(ddbPath), true);
 
@@ -72,9 +69,12 @@ namespace cmd
 				listIndex(db.get(), paths, std::cout, format, recursive, maxRecursionDepth);
 			}
 		}
-		catch (ddb::InvalidArgsException)
+		catch (ddb::InvalidArgsException &e)
 		{
-			printHelp();
+			std::cerr << "error: " << e.what() << std::endl
+					  << std::endl;
+			printHelp(std::cerr, false);
+			exit(EXIT_FAILURE);
 		}
 	}
 

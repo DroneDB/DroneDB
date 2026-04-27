@@ -108,6 +108,7 @@ set (CUSTOM_INCLUDE_DIRS
         ${CMAKE_SOURCE_DIR}/vendor/untwine
         ${CMAKE_SOURCE_DIR}/vendor/untwine/${UNTWINE_OS_DIR}
         ${CMAKE_SOURCE_DIR}/vendor/libnexus
+        ${CMAKE_SOURCE_DIR}/vendor/glob
         )
 
 # Propagate the variable to the parent scope

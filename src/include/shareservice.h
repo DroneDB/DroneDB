@@ -29,7 +29,7 @@ namespace ddb
         DDB_DLL ShareService();
         DDB_DLL std::string share(const std::vector<std::string> &input,
                                   const std::string &tag,
-                                  const std::string &password, bool recursive,
+                                  const std::string &password,
                                   const std::string &cwd = "",
                                   const ShareCallback &cb = nullptr,
                                   bool sslVerify = true);

@@ -20,7 +20,7 @@ namespace ddb
 
     std::string ShareService::share(const std::vector<std::string> &input,
                                     const std::string &tag,
-                                    const std::string &password, bool recursive,
+                                    const std::string &password,
                                     const std::string &cwd,
                                     const ShareCallback &cb,
                                     bool sslVerify)
@@ -28,8 +28,18 @@ namespace ddb
         if (input.empty())
             throw InvalidArgsException("No files to share");
 
-        std::vector<fs::path> filePaths =
-            getPathList(input, false, recursive ? 0 : 1);
+        // Input is expected to be already expanded (e.g. via expandGlobPatterns).
+        // Filter out directories: only file entries can be uploaded.
+        std::vector<fs::path> filePaths;
+        for (const auto &s : input)
+        {
+            fs::path p(s);
+            if (fs::exists(p) && !fs::is_directory(p))
+                filePaths.push_back(p);
+        }
+
+        if (filePaths.empty())
+            throw InvalidArgsException("No files to share");
 
         // Parse tag to find registry URL
         TagComponents tc = RegistryUtils::parseTag(tag);
