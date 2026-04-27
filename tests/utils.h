@@ -22,4 +22,8 @@ void createFile(const fs::path& filePath);
 bool createTestTree(const fs::path& root);
 std::string toHumanReadableTime(long long timeMs);
 
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
 #endif // TEST_UTILS_H

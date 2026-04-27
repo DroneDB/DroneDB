@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <fstream>
+#include <ctime>
 
 #include "constants.h"
 #include "dbops.h"
