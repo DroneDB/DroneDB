@@ -108,7 +108,6 @@ static std::mutex g_dbOpenMutex;
 
         for (fs::path p : paths)
         {
-            // fs::directory_options::skip_permission_denied
             if (p.filename() == DDB_FOLDER)
                 continue;
 
@@ -116,7 +115,8 @@ static std::mutex g_dbOpenMutex;
             {
                 try
                 {
-                    for (auto i = fs::recursive_directory_iterator(p);
+                    for (auto i = fs::recursive_directory_iterator(p,
+                         fs::directory_options::skip_permission_denied);
                          i != fs::recursive_directory_iterator(); ++i)
                     {
                         fs::path rp = i->path();
@@ -205,7 +205,6 @@ static std::mutex g_dbOpenMutex;
 
         for (fs::path p : paths)
         {
-            // fs::directory_options::skip_permission_denied
             if (p.filename() == DDB_FOLDER)
                 continue;
 
@@ -213,7 +212,8 @@ static std::mutex g_dbOpenMutex;
             {
                 if (fs::is_directory(p))
                 {
-                    for (auto i = fs::recursive_directory_iterator(p);
+                    for (auto i = fs::recursive_directory_iterator(p,
+                         fs::directory_options::skip_permission_denied);
                          i != fs::recursive_directory_iterator(); ++i)
                     {
                         fs::path rp = i->path();
@@ -403,7 +403,8 @@ static std::mutex g_dbOpenMutex;
                          << "/**/*' for explicit globbing).";
 
                     pushUnique(p);
-                    for (auto it = fs::recursive_directory_iterator(p);
+                    for (auto it = fs::recursive_directory_iterator(p,
+                         fs::directory_options::skip_permission_denied);
                          it != fs::recursive_directory_iterator(); ++it)
                     {
                         if (it->path().filename() == DDB_FOLDER)

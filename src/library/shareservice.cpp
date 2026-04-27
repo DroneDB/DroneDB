@@ -34,8 +34,14 @@ namespace ddb
         for (const auto &s : input)
         {
             fs::path p(s);
-            if (fs::exists(p) && !fs::is_directory(p))
-                filePaths.push_back(p);
+            // Resolve relative paths against cwd before existence check,
+            // so we don't incorrectly drop valid files when cwd is set.
+            fs::path resolvedPath = p;
+            if (!cwd.empty() && p.is_relative())
+                resolvedPath = fs::path(cwd) / p;
+
+            if (fs::exists(resolvedPath) && !fs::is_directory(resolvedPath))
+                filePaths.push_back(resolvedPath);
         }
 
         if (filePaths.empty())
