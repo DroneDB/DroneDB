@@ -30,7 +30,7 @@ namespace ddb {
 namespace {
 
 // Keep the implementation self-contained: small RAII wrappers mirroring
-// those in raster_profile.cpp. Duplication is intentional — the helpers
+// those in raster_profile.cpp. Duplication is intentional - the helpers
 // are 3 lines each and cross-TU sharing would add a header only for them.
 
 struct OgrGeometryDeleter {

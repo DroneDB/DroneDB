@@ -341,7 +341,7 @@ namespace
 
         EXPECT_EQ(entry.type, EntryType::Image);
 
-        // Properties must not be empty — at least width/height should be present
+        // Properties must not be empty - at least width/height should be present
         EXPECT_FALSE(entry.properties.empty()) << "Properties should contain at least width and height";
 
         ASSERT_TRUE(entry.properties.contains("width")) << "Width should be extracted even without EXIF tags";

@@ -1031,7 +1031,7 @@ TEST(multispectral, mergeWithAlignmentCorrection) {
 TEST(multispectral, mergeGeorefNoShift) {
     TestArea ta(TEST_NAME, true);
 
-    // Create georeferenced TIFFs — shift should NOT be applied
+    // Create georeferenced TIFFs - shift should NOT be applied
     GDALDriverH tifDrv = GDALGetDriverByName("GTiff");
     double gt[6] = {11.0, 0.00001, 0, 45.0, 0, -0.00001};
     const char* proj = "GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563]],PRIMEM[\"Greenwich\",0],UNIT[\"degree\",0.0174532925199433]]";
@@ -1195,7 +1195,7 @@ TEST(multispectral, detectAlignmentSentera6X) {
 TEST(multispectral, mergeRegressionNoAlignment) {
     TestArea ta(TEST_NAME, true);
 
-    // Create simple TIFFs without alignment metadata — merge should work as before
+    // Create simple TIFFs without alignment metadata - merge should work as before
     GDALDriverH tifDrv = GDALGetDriverByName("GTiff");
     double gt[6] = {0, 0.001, 0, 50, 0, -0.001};
     const char* proj = "GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563]],PRIMEM[\"Greenwich\",0],UNIT[\"degree\",0.0174532925199433]]";

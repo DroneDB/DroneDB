@@ -118,7 +118,7 @@ TEST(stockpile, noPileFlatDem) {
     fs::path dem = createSyntheticFlatDem(ta.getPath("dem_flat.tif"),
                                            w, h, originLon, originLat, pix);
 
-    // Click at center — should find no stockpile on a flat DEM
+    // Click at center - should find no stockpile on a flat DEM
     EXPECT_THROW(detectStockpileJson(dem.string(),
                                       originLat - (h / 2.0) * pix,
                                       originLon,

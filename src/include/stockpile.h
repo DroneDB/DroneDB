@@ -33,7 +33,7 @@ namespace ddb {
  * @param lat          Click latitude (WGS84, degrees)
  * @param lon          Click longitude (WGS84, degrees)
  * @param radiusMeters Search radius around the click (meters, >0)
- * @param sensitivity  [0,1] — higher = finer detail, lower = smoother boundary
+ * @param sensitivity  [0,1] - higher = finer detail, lower = smoother boundary
  *
  * Throws InvalidArgsException for bad user input,
  * AppException for GDAL/IO errors or when no stockpile is found.

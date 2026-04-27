@@ -160,7 +160,7 @@ std::vector<std::pair<int, int>> traceContour(const std::vector<uint8_t> &mask,
             break;
         }
         if (!found) break;
-        // Termination: Jacob's stopping criterion — came back to start with same dir.
+        // Termination: Jacob's stopping criterion - came back to start with same dir.
         if (cx == sx && cy == sy) break;
     }
     return contour;

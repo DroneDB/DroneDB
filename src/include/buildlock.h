@@ -105,7 +105,7 @@ private:
      *   - **Windows**: true = CREATE_ALWAYS (overwrites orphaned files, blocks on
      *     active handles); false = CREATE_NEW (fails immediately if file exists).
      *   - **Unix/Linux**: Both modes use O_CREAT|O_EXCL (pure exclusivity). Stale
-     *     lock file recovery is **not** handled here — the caller (build.cpp) must
+     *     lock file recovery is **not** handled here - the caller (build.cpp) must
      *     detect stale locks via PID liveness checks and remove them before retrying.
      *     This asymmetry exists because Unix unlink() on an open file succeeds
      *     (removing the directory entry but not the inode), which would break

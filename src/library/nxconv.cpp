@@ -1,4 +1,4 @@
-// nxconv.cpp — correct version for libktx 4.x
+// nxconv.cpp - correct version for libktx 4.x
 
 #include <assimp/postprocess.h>
 #include <assimp/scene.h>

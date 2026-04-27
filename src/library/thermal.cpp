@@ -135,7 +135,7 @@ static FlirSegmentInfo findFlirSegment(const std::string &filePath) {
     // Parse FFF header
     if (pos + 64 > fileSize) return info;
 
-    // Skip to raw data record — in most FLIR R-JPEGs, the raw data
+    // Skip to raw data record - in most FLIR R-JPEGs, the raw data
     // follows a recognizable pattern. We search for the raw data record.
 
     // FLIR FFF Record Directory parsing:
@@ -522,7 +522,7 @@ bool isThermalImage(const std::string &filePath) {
                 std::string unitLower = unitStr;
                 std::transform(unitLower.begin(), unitLower.end(), unitLower.begin(), ::tolower);
 
-                // DEM negative signals — reject early
+                // DEM negative signals - reject early
                 static const std::vector<std::string> demKeywords = {
                     "dem", "dtm", "dsm", "elevation", "height"
                 };

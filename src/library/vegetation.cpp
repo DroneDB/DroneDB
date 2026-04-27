@@ -429,7 +429,7 @@ void VegetationEngine::interpolateColormap(ColormapEntry *entries,
 }
 
 void VegetationEngine::initColormaps() {
-    // RdYlGn (Red-Yellow-Green) — standard NDVI colormap
+    // RdYlGn (Red-Yellow-Green) - standard NDVI colormap
     {
         Colormap c;
         c.id = "rdylgn";

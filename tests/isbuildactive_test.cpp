@@ -271,7 +271,7 @@ TEST_F(IsBuildActiveTest, ActiveLockFileIsNotCleaned) {
         BuildLock activeLock(orthoOutputPath.string());
         EXPECT_TRUE(activeLock.isHolding());
 
-        // isBuildActive should return true — lock is held by an active process
+        // isBuildActive should return true - lock is held by an active process
         EXPECT_TRUE(ddb::isBuildActive(db.get(), relativePath.string()));
     }
 }
