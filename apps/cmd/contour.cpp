@@ -51,6 +51,7 @@ namespace cmd
         if (!opts.count("input"))
         {
             printHelp();
+            return;
         }
 
         const auto input = opts["input"].as<std::string>();
@@ -66,6 +67,7 @@ namespace cmd
         {
             std::cerr << "Either --interval or --count must be > 0" << std::endl;
             printHelp();
+            return;
         }
 
         ddb::ContourOptions o;
