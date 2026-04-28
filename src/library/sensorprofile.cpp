@@ -412,7 +412,7 @@ SensorDetectionResult SensorProfileManager::detectSensor(const std::string &rast
         }
     }
 
-    // No profile matched — for multi-band non-Byte images, return a basic result
+    // No profile matched - for multi-band non-Byte images, return a basic result
     // with fallback mapping (§3.3 Detection Fallback).
     // Populate result.bands from GDAL descriptions / color interpretation so that
     // downstream consumers (getRasterInfoJson, autoDetectFilter) can work with

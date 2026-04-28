@@ -7,6 +7,7 @@
 #include "testarea.h"
 
 #include "thermal.h"
+#include "raster_analysis.h"
 #include "ddb.h"
 #include "sensorprofile.h"
 #include "gdal_inc.h"
@@ -132,50 +133,53 @@ TEST(thermal, rawToTempMap) {
 // JSON Query Functions
 // ============================================================
 
-TEST(thermal, thermalInfoJson) {
+TEST(thermal, rasterValueInfoJson) {
     TestArea ta(TEST_NAME);
     fs::path thermalImg = ta.downloadTestAsset(
         THERMAL_BASE_URL + "DJI_0001_R.JPG", "DJI_0001_R.JPG");
 
-    std::string jsonStr = getThermalInfoJson(thermalImg.string());
+    std::string jsonStr = getRasterValueInfoJson(thermalImg.string());
     auto j = json::parse(jsonStr);
 
     EXPECT_TRUE(j.contains("calibration"));
-    EXPECT_TRUE(j.contains("temperatureMin"));
-    EXPECT_TRUE(j.contains("temperatureMax"));
+    EXPECT_TRUE(j.contains("valueMin"));
+    EXPECT_TRUE(j.contains("valueMax"));
     EXPECT_TRUE(j.contains("width"));
     EXPECT_TRUE(j.contains("height"));
+    EXPECT_TRUE(j.contains("isThermal"));
+    EXPECT_TRUE(j["isThermal"].get<bool>());
     EXPECT_GT(j["width"].get<int>(), 0);
     EXPECT_GT(j["height"].get<int>(), 0);
-    EXPECT_LT(j["temperatureMin"].get<double>(), j["temperatureMax"].get<double>());
+    EXPECT_LT(j["valueMin"].get<double>(), j["valueMax"].get<double>());
 }
 
-TEST(thermal, thermalPointJson) {
+TEST(thermal, rasterPointJson) {
     TestArea ta(TEST_NAME);
     fs::path thermalImg = ta.downloadTestAsset(
         THERMAL_BASE_URL + "DJI_0001_R.JPG", "DJI_0001_R.JPG");
 
-    std::string jsonStr = getThermalPointJson(thermalImg.string(), 100, 100);
+    std::string jsonStr = getRasterPointJson(thermalImg.string(), 100, 100);
     auto j = json::parse(jsonStr);
 
-    EXPECT_TRUE(j.contains("temperature"));
+    EXPECT_TRUE(j.contains("value"));
     EXPECT_TRUE(j.contains("rawValue"));
     EXPECT_TRUE(j.contains("x"));
     EXPECT_TRUE(j.contains("y"));
+    EXPECT_TRUE(j.contains("isThermal"));
     EXPECT_EQ(j["x"].get<int>(), 100);
     EXPECT_EQ(j["y"].get<int>(), 100);
 
-    double temp = j["temperature"].get<double>();
-    EXPECT_GT(temp, -80.0);
-    EXPECT_LT(temp, 600.0);
+    double val = j["value"].get<double>();
+    EXPECT_GT(val, -80.0);
+    EXPECT_LT(val, 600.0);
 }
 
-TEST(thermal, thermalAreaStatsJson) {
+TEST(thermal, rasterAreaStatsJson) {
     TestArea ta(TEST_NAME);
     fs::path thermalImg = ta.downloadTestAsset(
         THERMAL_BASE_URL + "DJI_0001_R.JPG", "DJI_0001_R.JPG");
 
-    std::string jsonStr = getThermalAreaStatsJson(thermalImg.string(), 50, 50, 150, 150);
+    std::string jsonStr = getRasterAreaStatsJson(thermalImg.string(), 50, 50, 150, 150);
     auto j = json::parse(jsonStr);
 
     EXPECT_TRUE(j.contains("min"));
@@ -184,6 +188,7 @@ TEST(thermal, thermalAreaStatsJson) {
     EXPECT_TRUE(j.contains("stddev"));
     EXPECT_TRUE(j.contains("median"));
     EXPECT_TRUE(j.contains("pixelCount"));
+    EXPECT_TRUE(j.contains("isThermal"));
 
     EXPECT_GT(j["pixelCount"].get<int>(), 0);
     EXPECT_LE(j["min"].get<double>(), j["max"].get<double>());
@@ -195,46 +200,46 @@ TEST(thermal, thermalAreaStatsJson) {
 // C API Tests
 // ============================================================
 
-TEST(thermal, cApiGetThermalInfo) {
+TEST(thermal, cApiGetRasterValueInfo) {
     TestArea ta(TEST_NAME);
     fs::path thermalImg = ta.downloadTestAsset(
         THERMAL_BASE_URL + "DJI_0001_R.JPG", "DJI_0001_R.JPG");
 
     char *output = nullptr;
-    auto err = DDBGetThermalInfo(thermalImg.string().c_str(), &output);
+    auto err = DDBGetRasterValueInfo(thermalImg.string().c_str(), &output);
     EXPECT_EQ(err, DDBERR_NONE);
     EXPECT_NE(output, nullptr);
 
     auto j = json::parse(std::string(output));
     EXPECT_TRUE(j.contains("calibration"));
-    EXPECT_TRUE(j.contains("temperatureMin"));
+    EXPECT_TRUE(j.contains("valueMin"));
 
     DDBFree(output);
 }
 
-TEST(thermal, cApiGetThermalPoint) {
+TEST(thermal, cApiGetRasterPointValue) {
     TestArea ta(TEST_NAME);
     fs::path thermalImg = ta.downloadTestAsset(
         THERMAL_BASE_URL + "DJI_0001_R.JPG", "DJI_0001_R.JPG");
 
     char *output = nullptr;
-    auto err = DDBGetThermalPoint(thermalImg.string().c_str(), 50, 50, &output);
+    auto err = DDBGetRasterPointValue(thermalImg.string().c_str(), 50, 50, &output);
     EXPECT_EQ(err, DDBERR_NONE);
     EXPECT_NE(output, nullptr);
 
     auto j = json::parse(std::string(output));
-    EXPECT_TRUE(j.contains("temperature"));
+    EXPECT_TRUE(j.contains("value"));
 
     DDBFree(output);
 }
 
-TEST(thermal, cApiGetThermalAreaStats) {
+TEST(thermal, cApiGetRasterAreaStats) {
     TestArea ta(TEST_NAME);
     fs::path thermalImg = ta.downloadTestAsset(
         THERMAL_BASE_URL + "DJI_0001_R.JPG", "DJI_0001_R.JPG");
 
     char *output = nullptr;
-    auto err = DDBGetThermalAreaStats(thermalImg.string().c_str(), 10, 10, 100, 100, &output);
+    auto err = DDBGetRasterAreaStats(thermalImg.string().c_str(), 10, 10, 100, 100, &output);
     EXPECT_EQ(err, DDBERR_NONE);
     EXPECT_NE(output, nullptr);
 

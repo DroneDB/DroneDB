@@ -79,13 +79,24 @@ DDB_DLL RawThermalData extractRawThermalData(const std::string &filePath);
 DDB_DLL double rawToTemperature(uint16_t raw, const ThermalCalibration &cal);
 DDB_DLL std::vector<float> rawToTemperatureMap(const RawThermalData &raw, const ThermalCalibration &cal);
 
-// Query functions returning JSON
-DDB_DLL std::string getThermalInfoJson(const std::string &filePath);
-DDB_DLL std::string getThermalPointJson(const std::string &filePath, int x, int y);
-DDB_DLL std::string getThermalAreaStatsJson(const std::string &filePath, int x0, int y0, int x1, int y1);
-
 // Check if a GeoTIFF contains direct temperature values (e.g., ODM output)
 DDB_DLL bool isDirectTemperatureRaster(const std::string &filePath);
+
+// Internal shared helpers used by raster_analysis.cpp.
+// They live here so that thermal-specific code (Planck calibration, R-JPEG extraction)
+// can be reused by the neutral raster analysis surface without duplication.
+struct TemperatureData {
+    std::vector<float> temperatures;
+    int width = 0;
+    int height = 0;
+    bool hasGeoTransform = false;
+    double geoTransform[6] = {};
+    std::string projection;
+};
+
+DDB_DLL TemperatureData readTemperatureData(const std::string &filePath);
+DDB_DLL void pixelToGeo(double px, double py, const double geoTransform[6],
+                        const std::string &projection, double &geoX, double &geoY);
 
 } // namespace ddb
 

@@ -31,7 +31,7 @@ namespace ddb
         // Set alpha band for transparency
         targs = CSLAddString(targs, "-setalpha");
 
-        // Use floodfill algorithm — requires GDAL >= 3.8.
+        // Use floodfill algorithm - requires GDAL >= 3.8.
         // DroneDB pins GDAL via vcpkg, so this is always satisfied.
         // If building against a system GDAL, ensure version >= 3.8.
         targs = CSLAddString(targs, "-alg");

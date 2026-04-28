@@ -20,8 +20,7 @@ namespace cmd
     .custom_help("add *.JPG")
     .add_options()
     ("w,working-dir", "Working directory", cxxopts::value<std::string>()->default_value("."))
-    ("r,recursive", "Recursively add subdirectories and files", cxxopts::value<bool>())
-    ("p,paths", "Paths to add to index (files or directories)", cxxopts::value<std::vector<std::string>>());
+    ("p,paths", "Paths or shell-style glob patterns to add to index (e.g. *.JPG, **/*.tif)", cxxopts::value<std::vector<std::string>>());
         // clang-format on
         opts.parse_positional({"paths"});
     }
@@ -35,15 +34,17 @@ namespace cmd
     {
         if (!opts.count("paths"))
         {
-            printHelp();
+            std::cerr << "error: missing required argument 'paths'" << std::endl
+                      << std::endl;
+            printHelp(std::cerr, false);
+            exit(EXIT_FAILURE);
         }
 
         const auto ddbPath = opts["working-dir"].as<std::string>();
         const auto paths = opts["paths"].as<std::vector<std::string>>();
-        const auto recursive = opts.count("recursive") > 0;
 
         const auto db = ddb::open(std::string(ddbPath), true);
-        addToIndex(db.get(), ddb::expandPathList(paths, recursive, 0),
+        addToIndex(db.get(), ddb::expandGlobPatterns(paths),
                    [](const ddb::Entry &e, bool updated)
                    {
                        std::cout << (updated ? "U\t" : "A\t") << e.path

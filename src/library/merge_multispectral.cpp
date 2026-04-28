@@ -336,7 +336,7 @@ std::vector<BandAlignmentInfo> detectBandAlignment(const std::vector<std::string
         if (std::abs(alignInfo[i].shiftX) > maxShiftPx ||
             std::abs(alignInfo[i].shiftY) > maxShiftPx) {
             LOGD << "Implausible shift for band " << alignInfo[i].bandName
-                 << ": (" << alignInfo[i].shiftX << ", " << alignInfo[i].shiftY << ") px — ignoring";
+                 << ": (" << alignInfo[i].shiftX << ", " << alignInfo[i].shiftY << ") px - ignoring";
             alignInfo[i].detected = false;
             alignInfo[i].shiftX = 0;
             alignInfo[i].shiftY = 0;

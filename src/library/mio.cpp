@@ -191,7 +191,17 @@ namespace ddb
                     std::string absC = fs::weakly_canonical(fs::absolute(cp)).string();
                     if (absC.length() > 1 && absC.back() == fs::path::preferred_separator)
                         absC.pop_back();
-                    if (absC.rfind(absP, 0) != 0 || absP == absC)
+
+                    // A path is contained within itself (e.g. `ddb add .` from project root).
+                    if (absC == absP)
+                        continue;
+
+                    // Must be prefixed by the parent path AND followed by a path
+                    // separator (avoid false prefix matches like /foo vs /foobar).
+                    if (absC.rfind(absP, 0) != 0)
+                        return false;
+                    if (absC.length() > absP.length() &&
+                        absC[absP.length()] != fs::path::preferred_separator)
                         return false;
                 }
 

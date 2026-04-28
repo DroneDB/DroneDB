@@ -22,7 +22,21 @@ namespace ddb
     DDB_DLL std::unique_ptr<Database> open(const std::string &directory, bool traverseUp);
     DDB_DLL std::vector<fs::path> getIndexPathList(const fs::path &rootDirectory, const std::vector<std::string> &paths, bool includeDirs);
     DDB_DLL std::vector<fs::path> getPathList(const std::vector<std::string> &paths, bool includeDirs, int maxDepth, bool includeFiles = true);
+
+    /**
+     * Legacy path expander preserved for ABI compatibility (Node.js bindings,
+     * external C consumers). New CLI code should use `expandGlobPatterns`.
+     */
     DDB_DLL std::vector<std::string> expandPathList(const std::vector<std::string> &paths, bool recursive, int maxRecursionDepth);
+
+    /**
+     * Expands a list of literal paths and shell-style glob patterns
+     * (`*`, `?`, `[...]`, `**`) into absolute file paths. Bare directories
+     * are recursively expanded. Entries inside `.ddb` are always skipped.
+     * Emits a warning to stderr for patterns that match nothing; throws
+     * if no patterns matched anything at all.
+     */
+    DDB_DLL std::vector<std::string> expandGlobPatterns(const std::vector<std::string> &patterns);
     DDB_DLL std::vector<Entry> getMatchingEntries(Database *db, const fs::path &path, int maxRecursionDepth = 0, bool isFolder = false);
     DDB_DLL void checkDeleteBuild(Database *db, const std::string &hash);
     DDB_DLL void checkDeleteMeta(Database *db, const std::string &path);

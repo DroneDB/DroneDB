@@ -429,7 +429,7 @@ void VegetationEngine::interpolateColormap(ColormapEntry *entries,
 }
 
 void VegetationEngine::initColormaps() {
-    // RdYlGn (Red-Yellow-Green) — standard NDVI colormap
+    // RdYlGn (Red-Yellow-Green) - standard NDVI colormap
     {
         Colormap c;
         c.id = "rdylgn";
@@ -645,6 +645,35 @@ void VegetationEngine::initColormaps() {
             {0.75f, 255, 200, 0},
             {1.0f, 255, 255, 200}
         });
+        colormaps_.push_back(c);
+    }
+
+    // Terrain (elevation: water -> low land -> hills -> mountains -> snow)
+    {
+        Colormap c;
+        c.id = "terrain";
+        c.name = "Terrain";
+        interpolateColormap(c.entries, {
+            {0.0f, 51, 51, 153},
+            {0.2f, 0, 180, 180},
+            {0.4f, 160, 217, 121},
+            {0.6f, 236, 216, 122},
+            {0.8f, 169, 116, 67},
+            {1.0f, 255, 255, 255}
+        });
+        colormaps_.push_back(c);
+    }
+
+    // Greys (alias of grayscale; maps frontend "greys" id to the standard ramp)
+    {
+        Colormap c;
+        c.id = "greys";
+        c.name = "Greys";
+        for (int i = 0; i < 256; i++) {
+            // Light to dark, matches the frontend preview swatches.
+            uint8_t v = static_cast<uint8_t>(255 - i);
+            c.entries[i] = {v, v, v, 255};
+        }
         colormaps_.push_back(c);
     }
 }

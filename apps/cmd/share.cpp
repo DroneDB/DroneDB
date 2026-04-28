@@ -4,10 +4,15 @@
 
 #include "include/share.h"
 
+#include <cstdlib>
+
 #include "constants.h"
+#include "dbops.h"
 #include "exceptions.h"
+#include "logger.h"
 #include "mio.h"
 #include "include/progressbar.h"
+#include "registry.h"
 #include "registryutils.h"
 #include "shareservice.h"
 #include "utils.h"
@@ -15,18 +20,28 @@
 namespace cmd
 {
 
+    namespace
+    {
+        // Returns env var value or empty string if unset.
+        std::string envOrEmpty(const char *name)
+        {
+            const char *v = std::getenv(name);
+            return v ? std::string(v) : std::string();
+        }
+    }
+
     void Share::setOptions(cxxopts::Options &opts)
     {
         opts.positional_help("[args]")
             .custom_help("share *.JPG")
             .add_options()
-            ("i,input", "Files and directories to share", cxxopts::value<std::vector<std::string>>())
-            ("r,recursive", "Recursively share subdirectories", cxxopts::value<bool>())
+            ("i,input", "Files, directories and glob patterns to share (e.g. *.JPG, **/*.tif)", cxxopts::value<std::vector<std::string>>())
             ("t,tag", "Tag to use (organization/dataset or server[:port]/organization/dataset)", cxxopts::value<std::string>()->default_value(DEFAULT_REGISTRY "//"))
             ("p,password", "Optional password to protect dataset", cxxopts::value<std::string>()->default_value(""))
             ("s,server", "Registry server to share dataset with (alias of: -t <server>//)", cxxopts::value<std::string>())
             ("q,quiet", "Do not display progress", cxxopts::value<bool>())
-            ("k,insecure", "Disable SSL certificate verification", cxxopts::value<bool>());
+            ("k,insecure", "Disable SSL certificate verification", cxxopts::value<bool>())
+            ("non-interactive", "Do not prompt for credentials. Uses DDB_USERNAME and DDB_PASSWORD env vars if available.", cxxopts::value<bool>());
 
         opts.parse_positional({"input"});
     }
@@ -40,19 +55,24 @@ namespace cmd
     {
         if (!opts.count("input"))
         {
-            printHelp();
+            std::cerr << "error: missing required argument 'input'" << std::endl
+                      << std::endl;
+            printHelp(std::cerr, false);
+            exit(EXIT_FAILURE);
         }
 
-        auto input = opts["input"].as<std::vector<std::string>>();
+        auto rawInput = opts["input"].as<std::vector<std::string>>();
+        auto input = ddb::expandGlobPatterns(rawInput);
+
         auto tag = opts["tag"].as<std::string>();
         if (opts["server"].count() && !opts["tag"].count())
         {
             tag = opts["server"].as<std::string>() + "//";
         }
         auto password = opts["password"].as<std::string>();
-        auto recursive = opts["recursive"].count() > 0;
         auto quiet = opts["quiet"].count() > 0;
         auto sslVerify = opts["insecure"].count() == 0;
+        auto nonInteractive = opts["non-interactive"].count() > 0;
         auto cwd = ddb::io::getCwd().string();
 
         ProgressBar pb;
@@ -83,11 +103,29 @@ namespace cmd
         auto share = [&]()
         {
             const std::string url =
-                ss.share(input, tag, password, recursive, cwd, showProgress, sslVerify);
+                ss.share(input, tag, password, cwd, showProgress, sslVerify);
             if (!quiet)
                 pb.done();
             std::cout << url << std::endl;
         };
+
+        // Try env-var credentials before the share attempt so that the very
+        // first request has them available (the alternative would be to wait
+        // for an AuthException).
+        const auto envUser = envOrEmpty("DDB_USERNAME");
+        const auto envPass = envOrEmpty("DDB_PASSWORD");
+        if (!envUser.empty() && !envPass.empty())
+        {
+            try
+            {
+                ddb::Registry reg = ddb::RegistryUtils::createFromTag(tag, false, sslVerify);
+                reg.login(envUser, envPass);
+            }
+            catch (const ddb::AppException &e)
+            {
+                LOGD << "Env-var login failed: " << e.what();
+            }
+        }
 
         try
         {
@@ -95,7 +133,14 @@ namespace cmd
         }
         catch (const ddb::AuthException &)
         {
-            // Try logging-in
+            if (nonInteractive)
+            {
+                throw ddb::AuthException(
+                    "Authentication failed. Set DDB_USERNAME and "
+                    "DDB_PASSWORD env vars or run `ddb login` first.");
+            }
+
+            // Try logging-in interactively
             auto username = ddb::utils::getPrompt("Username: ");
             auto password = ddb::utils::getPass("Password: ");
 

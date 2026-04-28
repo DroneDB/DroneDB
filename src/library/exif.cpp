@@ -504,11 +504,11 @@ namespace ddb
     // Extracts the best available capture timestamp (milliseconds from Jan 1st 1970 UTC).
     //
     // Priority cascade (inspired by OpenSfM):
-    //   0. XMP video epoch (DateUTC / MediaCreateDate) — for video files
-    //   1. GPS DateStamp + TimeStamp — always UTC, highest accuracy
-    //   2. DateTime EXIF + OffsetTime — explicit timezone offset, accurate UTC conversion
-    //   3. DateTime EXIF + geo-timezone lookup — fallback using geolocation
-    //   4. DateTime EXIF naive (assume UTC) — last resort
+    //   0. XMP video epoch (DateUTC / MediaCreateDate) - for video files
+    //   1. GPS DateStamp + TimeStamp - always UTC, highest accuracy
+    //   2. DateTime EXIF + OffsetTime - explicit timezone offset, accurate UTC conversion
+    //   3. DateTime EXIF + geo-timezone lookup - fallback using geolocation
+    //   4. DateTime EXIF naive (assume UTC) - last resort
     double ExifParser::extractCaptureTime()
     {
         // Priority 0: XMP video timestamps (Mac epoch)
@@ -595,7 +595,7 @@ namespace ddb
             auto offset = findExifKey(t.offsetKey);
             int offsetSecs = 0;
             if (!parseOffsetTime(offset, offsetSecs))
-                continue; // No valid offset — skip in this pass
+                continue; // No valid offset - skip in this pass
 
             int year, month, day, hour, minute, second;
             if (sscanf(time->toString().c_str(), "%d:%d:%d %d:%d:%d", &year, &month, &day, &hour, &minute, &second) != 6)

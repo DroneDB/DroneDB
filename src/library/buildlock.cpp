@@ -236,7 +236,7 @@ void BuildLock::acquireLock(bool waitForLock) {
     // Unix implementation
     // Note: stale lock file recovery is handled at a higher level (build.cpp)
     // via PID-based liveness checks. BuildLock remains a pure exclusivity primitive
-    // using O_EXCL — it never removes existing lock files, as unlink() on an open
+    // using O_EXCL - it never removes existing lock files, as unlink() on an open
     // file succeeds on Unix (removing the directory entry while the inode persists),
     // which would break mutual exclusion between concurrent processes.
 

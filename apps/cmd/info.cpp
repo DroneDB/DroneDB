@@ -8,6 +8,7 @@
 #include "include/info.h"
 #include "exceptions.h"
 #include "basicgeometry.h"
+#include "dbops.h"
 
 namespace cmd
 {
@@ -22,8 +23,6 @@ namespace cmd
     ("i,input", "File(s) to examine", cxxopts::value<std::vector<std::string>>())
     ("o,output", "Output file to write results to", cxxopts::value<std::string>()->default_value("stdout"))
     ("f,format", "Output format (text|json|geojson)", cxxopts::value<std::string>()->default_value("text"))
-    ("r,recursive", "Recursively search in subdirectories", cxxopts::value<bool>())
-    ("d,depth", "Max recursion depth", cxxopts::value<int>()->default_value("0"))
     ("geometry", "Geometry to output (for geojson format only) (auto|point|polygon)", cxxopts::value<std::string>()->default_value("auto"))
     ("with-hash", "Compute SHA256 hashes", cxxopts::value<bool>());
         // clang-format on
@@ -39,7 +38,10 @@ namespace cmd
     {
         if (!opts.count("input"))
         {
-            printHelp();
+            std::cerr << "error: missing required argument 'input'" << std::endl
+                      << std::endl;
+            printHelp(std::cerr, false);
+            exit(EXIT_FAILURE);
         }
 
         auto input = opts["input"].as<std::vector<std::string>>();
@@ -48,9 +50,14 @@ namespace cmd
         {
             bool withHash = opts["with-hash"].count() > 0;
             auto format = opts["format"].as<std::string>();
-            auto recursive = opts["recursive"].count() > 0;
-            auto maxRecursionDepth = opts["depth"].as<int>();
             auto geometry = opts["geometry"].as<std::string>();
+
+            // Always recursive for symmetry with `list`. Use glob patterns to scope.
+            const bool recursive = true;
+            const int maxRecursionDepth = 0;
+
+            // Expand glob patterns to actual file paths.
+            const auto expanded = ddb::expandGlobPatterns(input);
 
             if (opts.count("output"))
             {
@@ -59,20 +66,23 @@ namespace cmd
                 if (!file.is_open())
                     throw ddb::FSException("Cannot open " + filename);
 
-                ddb::info(input, file, format, recursive, maxRecursionDepth,
+                ddb::info(expanded, file, format, recursive, maxRecursionDepth,
                           geometry, withHash, !recursive);
 
                 file.close();
             }
             else
             {
-                ddb::info(input, std::cout, format, recursive, maxRecursionDepth,
+                ddb::info(expanded, std::cout, format, recursive, maxRecursionDepth,
                           geometry, withHash, !recursive);
             }
         }
-        catch (ddb::InvalidArgsException)
+        catch (ddb::InvalidArgsException &e)
         {
-            printHelp();
+            std::cerr << "error: " << e.what() << std::endl
+                      << std::endl;
+            printHelp(std::cerr, false);
+            exit(EXIT_FAILURE);
         }
     }
 

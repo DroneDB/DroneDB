@@ -460,31 +460,117 @@ extern "C"
                                     const char *formula, const char *bandFilter,
                                     const char *colormap, const char *rescale);
 
-    /** Get thermal image info including calibration and temperature range
-     * @param filePath Path to thermal image (R-JPEG or GeoTIFF)
+    /** Get info about a single-band raster used for analysis (thermal image, DEM,
+     * or generic value raster), including min/max, unit, dimensions and
+     * optional thermal calibration.
+     * @param filePath Path to raster (R-JPEG thermal or GeoTIFF)
      * @param output Pointer to receive JSON string (caller must free with DDBFree)
      * @return DDBERR_NONE on success, an error otherwise */
-    DDB_DLL DDBErr DDBGetThermalInfo(const char *filePath, char **output);
+    DDB_DLL DDBErr DDBGetRasterValueInfo(const char *filePath, char **output);
 
-    /** Get temperature at a specific pixel
-     * @param filePath Path to thermal image
+    /** Get raster value at a specific pixel (temperature for thermal, elevation for DEM, etc.).
+     * @param filePath Path to raster
      * @param x Pixel X coordinate
      * @param y Pixel Y coordinate
      * @param output Pointer to receive JSON string (caller must free with DDBFree)
      * @return DDBERR_NONE on success, an error otherwise */
-    DDB_DLL DDBErr DDBGetThermalPoint(const char *filePath, int x, int y, char **output);
+    DDB_DLL DDBErr DDBGetRasterPointValue(const char *filePath, int x, int y, char **output);
 
-    /** Get temperature statistics for a rectangular area
-     * @param filePath Path to thermal image
+    /** Get value statistics (min/max/mean/stddev/median) for a rectangular area.
+     * @param filePath Path to raster
      * @param x0 Left X coordinate
      * @param y0 Top Y coordinate
      * @param x1 Right X coordinate
      * @param y1 Bottom Y coordinate
      * @param output Pointer to receive JSON string (caller must free with DDBFree)
      * @return DDBERR_NONE on success, an error otherwise */
-    DDB_DLL DDBErr DDBGetThermalAreaStats(const char *filePath,
-                                          int x0, int y0, int x1, int y1,
+    DDB_DLL DDBErr DDBGetRasterAreaStats(const char *filePath,
+                                         int x0, int y0, int x1, int y1,
+                                         char **output);
+
+    /** Sample a single-band raster along a GeoJSON LineString (WGS84) and
+     * return a JSON profile with equispaced samples (distance in meters,
+     * value, lon, lat). Supports DEM/DSM/DTM, thermal rasters and any single
+     * band raster with geotransform.
+     * @param filePath Path to the raster
+     * @param geoJsonLineString GeoJSON geometry (type LineString) in WGS84
+     * @param samples Requested number of samples (clamped to [2, 4096];
+     *                values <2 fall back to a sensible default)
+     * @param output Pointer to receive JSON string (caller must free with DDBFree)
+     * @return DDBERR_NONE on success, an error otherwise */
+    DDB_DLL DDBErr DDBGetRasterProfile(const char *filePath,
+                                       const char *geoJsonLineString,
+                                       int samples,
+                                       char **output);
+
+    /** Calculate stockpile volume from a DEM/DSM/DTM raster over a polygon.
+     * @param rasterPath Path to single-band elevation raster
+     * @param polygonGeoJSON GeoJSON Polygon or MultiPolygon in WGS84
+     * @param baseMethod One of: "lowest_perimeter" (default), "average_perimeter",
+     *                  "best_fit", "flat"
+     * @param flatElevation Elevation used when baseMethod == "flat"
+     * @param output Pointer to receive JSON string (caller must free with DDBFree)
+     * @return DDBERR_NONE on success, an error otherwise */
+    DDB_DLL DDBErr DDBCalculateVolume(const char *rasterPath,
+                                      const char *polygonGeoJSON,
+                                      const char *baseMethod,
+                                      double flatElevation,
+                                      char **output);
+
+    /** Auto-detect a stockpile footprint from a click on the raster.
+     * @param rasterPath Path to single-band elevation raster
+     * @param lat Click latitude (WGS84)
+     * @param lon Click longitude (WGS84)
+     * @param radius Search radius in meters (>0)
+     * @param sensitivity Detail level in [0, 1]
+     * @param output Pointer to receive JSON string (caller must free with DDBFree)
+     * @return DDBERR_NONE on success, an error otherwise */
+    DDB_DLL DDBErr DDBDetectStockpile(const char *rasterPath,
+                                      double lat, double lon,
+                                      double radius,
+                                      float sensitivity,
+                                      char **output);
+
+    /** Auto-detect ALL stockpile footprints by full-DEM scan.
+     * @param rasterPath Path to single-band elevation raster
+     * @param sensitivity Detail level in [0, 1]
+     * @param minAreaM2 Minimum component area in square meters (>=0)
+     * @param maxResults Maximum number of stockpiles returned (>0, capped to 500)
+     * @param output Pointer to receive JSON string (caller must free with DDBFree)
+     * @return DDBERR_NONE on success, an error otherwise */
+    DDB_DLL DDBErr DDBDetectAllStockpiles(const char *rasterPath,
+                                          float sensitivity,
+                                          double minAreaM2,
+                                          int maxResults,
                                           char **output);
+
+    /** Generate contour lines from a single-band raster (DEM/DSM/DTM).
+     *
+     * Either `interval` or `count` must be provided. When `interval > 0`
+     * the contour spacing is fixed. When `interval <= 0` and `count > 0`
+     * the spacing is derived from band statistics: (max - min) / count.
+     *
+     * NaN sentinel values disable optional clipping bounds.
+     *
+     * @param rasterPath Path to single-band elevation raster
+     * @param interval Vertical spacing between contour levels (<= 0 to use count)
+     * @param count Target number of contour levels (<= 0 when interval is used)
+     * @param baseOffset Reference base elevation for level alignment
+     * @param minElev Drop contours below this elevation (NaN to disable)
+     * @param maxElev Drop contours above this elevation (NaN to disable)
+     * @param simplifyTolerance Geometry simplification in raster CRS units (0 = none)
+     * @param bandIndex 1-based raster band index (1 if unsure)
+     * @param output Pointer to receive GeoJSON FeatureCollection (caller frees with DDBFree)
+     * @return DDBERR_NONE on success, an error otherwise */
+    DDB_DLL DDBErr DDBGenerateContours(const char *rasterPath,
+                                       double interval,
+                                       int count,
+                                       double baseOffset,
+                                       double minElev,
+                                       double maxElev,
+                                       double simplifyTolerance,
+                                       int bandIndex,
+                                       char **output);
 
     /** Mask orthophoto borders making them transparent
      * @param input Path to input GeoTIFF

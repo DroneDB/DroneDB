@@ -393,7 +393,7 @@ TEST_F(BuildLockTest, IsBuildActiveDetection) {
 /**
  * @brief Test that BuildLock correctly handles a pre-existing lock file on disk.
  * On Windows, CREATE_ALWAYS naturally reclaims orphaned files (no process handle).
- * On Linux, O_EXCL is a pure exclusivity primitive — stale recovery is the caller's
+ * On Linux, O_EXCL is a pure exclusivity primitive - stale recovery is the caller's
  * responsibility (build.cpp uses PID-based liveness checks).
  */
 TEST_F(BuildLockTest, WaitMode_OrphanedLockFileOnDisk) {
@@ -414,7 +414,7 @@ TEST_F(BuildLockTest, WaitMode_OrphanedLockFileOnDisk) {
         EXPECT_TRUE(lock.isHolding());
     }
 #else
-    // Linux O_EXCL fails because the file exists — stale recovery is the caller's job
+    // Linux O_EXCL fails because the file exists - stale recovery is the caller's job
     EXPECT_THROW({
         BuildLock lock(outputPath.string());  // wait=true
     }, BuildInProgressException);
@@ -425,7 +425,7 @@ TEST_F(BuildLockTest, WaitMode_OrphanedLockFileOnDisk) {
 
 /**
  * @brief Test that wait=false (non-blocking check) fails against an orphaned lock file
- * that has no valid process behind it — this is the isBuildActive check path.
+ * that has no valid process behind it - this is the isBuildActive check path.
  * The lock file exists on disk but no one holds a file handle on it.
  */
 TEST_F(BuildLockTest, NoWaitMode_FailsOnOrphanedLockFile) {
