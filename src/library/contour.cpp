@@ -176,8 +176,8 @@ std::string generateContoursJson(const std::string &rasterPath,
         }
     }
 
-    GDALDriverH memDrv = GDALGetDriverByName("MEM");
-    if (!memDrv) throw GDALException("MEM OGR driver not available");
+    GDALDriverH memDrv = GDALGetDriverByName("Memory");
+    if (!memDrv) throw GDALException("Memory OGR driver not available");
 
     GDALDatasetH hMemDs = GDALCreate(memDrv, "contours_mem", 0, 0, 0, GDT_Unknown, nullptr);
     if (!hMemDs) throw GDALException("Cannot create in-memory dataset");
