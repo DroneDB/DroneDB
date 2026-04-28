@@ -383,8 +383,8 @@ static std::mutex g_dbOpenMutex;
 
                 if (patternMatches == 0)
                 {
-                    std::cerr << "warning: pattern '" << pattern
-                              << "' did not match any files" << std::endl;
+                    LOGV << "Pattern '" << pattern
+                         << "' did not match any files";
                 }
                 totalMatches += patternMatches;
             }
@@ -402,6 +402,7 @@ static std::mutex g_dbOpenMutex;
                          << "' recursively (use '" << pattern
                          << "/**/*' for explicit globbing).";
 
+                    const size_t before = result.size();
                     pushUnique(p);
                     for (auto it = fs::recursive_directory_iterator(p,
                          fs::directory_options::skip_permission_denied);
@@ -414,12 +415,18 @@ static std::mutex g_dbOpenMutex;
                         }
                         pushUnique(it->path());
                     }
-                    ++totalMatches;
+                    // Only count this directory as a match if at least one
+                    // entry was actually added (e.g. the directory wasn't
+                    // skipped for being inside a `.ddb` folder).
+                    if (result.size() > before)
+                        ++totalMatches;
                 }
                 else
                 {
+                    const size_t before = result.size();
                     pushUnique(p);
-                    ++totalMatches;
+                    if (result.size() > before)
+                        ++totalMatches;
                 }
             }
         }
