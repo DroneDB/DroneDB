@@ -221,4 +221,124 @@ TEST(stockpile, cApiInvalidArgs) {
     EXPECT_NE(DDBDetectStockpile("nonexistent.tif", 45.0, 10.0, 50.0, 0.5f, &output), DDBERR_NONE);
 }
 
+// ---- Test 5: Detect-all on flat DEM returns empty list ----------------------
+
+TEST(stockpile, detectAllFlatDem) {
+    TestArea ta(TEST_NAME);
+    const int w = 80, h = 80;
+    const double originLon = 10.0;
+    const double originLat = 45.0;
+    const double pix = 0.0001;
+
+    fs::path dem = createSyntheticFlatDem(ta.getPath("dem_flat_all.tif"),
+                                           w, h, originLon, originLat, pix);
+
+    std::string out = detectAllStockpilesJson(dem.string(), 0.5f, 0.0, 50);
+    auto j = json::parse(out);
+    EXPECT_TRUE(j.contains("stockpiles"));
+    EXPECT_TRUE(j["stockpiles"].is_array());
+    EXPECT_EQ(j["stockpiles"].size(), 0u);
+    EXPECT_EQ(j["totalFound"].get<int>(), 0);
+}
+
+// ---- Test 6: Detect-all on single-mound DEM finds the mound -----------------
+
+TEST(stockpile, detectAllSingleMound) {
+    TestArea ta(TEST_NAME);
+    const int w = 120, h = 120;
+    const double originLon = 10.0;
+    const double originLat = 45.0;
+    const double pix = 0.0001;
+
+    fs::path dem = createSyntheticMoundDem(ta.getPath("dem_one_mound.tif"),
+                                            w, h, originLon, originLat, pix);
+
+    std::string out = detectAllStockpilesJson(dem.string(), 0.5f, 0.0, 10);
+    auto j = json::parse(out);
+    ASSERT_TRUE(j.contains("stockpiles"));
+    ASSERT_GE(j["stockpiles"].size(), 1u);
+
+    auto &first = j["stockpiles"][0];
+    EXPECT_TRUE(first.contains("polygon"));
+    EXPECT_TRUE(first.contains("estimatedVolume"));
+    EXPECT_TRUE(first.contains("confidence"));
+    EXPECT_TRUE(first.contains("baseElevation"));
+    EXPECT_TRUE(first.contains("centroid"));
+    EXPECT_TRUE(first.contains("areaM2"));
+    EXPECT_TRUE(first.contains("pixelCount"));
+    EXPECT_TRUE(first.contains("id"));
+    EXPECT_GT(first["estimatedVolume"].get<double>(), 0.0);
+    EXPECT_GT(first["areaM2"].get<double>(), 0.0);
+    EXPECT_GE(first["confidence"].get<double>(), 0.0);
+    EXPECT_LE(first["confidence"].get<double>(), 1.0);
+
+    auto &poly = first["polygon"];
+    EXPECT_EQ(poly["type"].get<std::string>(), "Polygon");
+    ASSERT_TRUE(poly["coordinates"].is_array());
+    ASSERT_GE(poly["coordinates"].size(), 1u);
+    ASSERT_GE(poly["coordinates"][0].size(), 4u); // closed ring with >=3 unique points
+}
+
+// ---- Test 7: maxResults is honoured -----------------------------------------
+
+TEST(stockpile, detectAllRespectsMaxResults) {
+    TestArea ta(TEST_NAME);
+    const int w = 120, h = 120;
+    const double originLon = 10.0;
+    const double originLat = 45.0;
+    const double pix = 0.0001;
+
+    fs::path dem = createSyntheticMoundDem(ta.getPath("dem_max_results.tif"),
+                                            w, h, originLon, originLat, pix);
+
+    std::string out = detectAllStockpilesJson(dem.string(), 0.5f, 0.0, 1);
+    auto j = json::parse(out);
+    EXPECT_LE(j["stockpiles"].size(), 1u);
+}
+
+// ---- Test 8: minAreaM2 filters out tiny components --------------------------
+
+TEST(stockpile, detectAllRespectsMinArea) {
+    TestArea ta(TEST_NAME);
+    const int w = 120, h = 120;
+    const double originLon = 10.0;
+    const double originLat = 45.0;
+    const double pix = 0.0001;
+
+    fs::path dem = createSyntheticMoundDem(ta.getPath("dem_minarea.tif"),
+                                            w, h, originLon, originLat, pix);
+
+    // Use a very large min area (1e9 m^2) to filter everything out.
+    std::string out = detectAllStockpilesJson(dem.string(), 0.5f, 1e9, 50);
+    auto j = json::parse(out);
+    EXPECT_EQ(j["stockpiles"].size(), 0u);
+}
+
+// ---- Test 9: C API smoke for DDBDetectAllStockpiles -------------------------
+
+TEST(stockpile, detectAllCApiSmoke) {
+    TestArea ta(TEST_NAME);
+    const int w = 120, h = 120;
+    const double originLon = 10.0;
+    const double originLat = 45.0;
+    const double pix = 0.0001;
+
+    fs::path dem = createSyntheticMoundDem(ta.getPath("dem_capi_all.tif"),
+                                            w, h, originLon, originLat, pix);
+
+    char *output = nullptr;
+    auto err = DDBDetectAllStockpiles(dem.string().c_str(), 0.5f, 0.0, 10, &output);
+    EXPECT_EQ(err, DDBERR_NONE);
+    ASSERT_NE(output, nullptr);
+
+    auto j = json::parse(std::string(output));
+    EXPECT_TRUE(j.contains("stockpiles"));
+    EXPECT_TRUE(j.contains("totalFound"));
+    DDBFree(output);
+
+    // Invalid args
+    EXPECT_NE(DDBDetectAllStockpiles(nullptr, 0.5f, 0.0, 10, &output), DDBERR_NONE);
+    EXPECT_NE(DDBDetectAllStockpiles("does_not_exist.tif", 0.5f, 0.0, 10, &output), DDBERR_NONE);
+}
+
 } // namespace

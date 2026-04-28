@@ -486,4 +486,405 @@ std::string detectStockpileJson(const std::string &rasterPath,
     return result.dump();
 }
 
+// ============================================================================
+// Batch detection (full-DEM scan)
+// ============================================================================
+
+namespace {
+
+// Two-pass connected-components labeling (4-connected) on a binary mask.
+// Returns a label image (0 = background) and the number of components.
+// Uses union-find to merge equivalences during the first pass.
+std::vector<int32_t> labelConnectedComponents(const std::vector<uint8_t> &binary,
+                                              int width, int height,
+                                              int32_t &numLabels) {
+    std::vector<int32_t> labels(binary.size(), 0);
+    std::vector<int32_t> parent;
+    parent.push_back(0); // 1-indexed
+
+    auto findRoot = [&](int32_t a) {
+        while (parent[a] != a) {
+            parent[a] = parent[parent[a]];
+            a = parent[a];
+        }
+        return a;
+    };
+    auto unite = [&](int32_t a, int32_t b) {
+        a = findRoot(a);
+        b = findRoot(b);
+        if (a == b) return;
+        if (a < b) parent[b] = a; else parent[a] = b;
+    };
+
+    // First pass.
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+            const size_t idx = static_cast<size_t>(y) * width + x;
+            if (!binary[idx]) continue;
+            int32_t left = (x > 0) ? labels[idx - 1] : 0;
+            int32_t up   = (y > 0) ? labels[idx - width] : 0;
+            if (left == 0 && up == 0) {
+                int32_t newLabel = static_cast<int32_t>(parent.size());
+                parent.push_back(newLabel);
+                labels[idx] = newLabel;
+            } else if (left != 0 && up == 0) {
+                labels[idx] = left;
+            } else if (left == 0 && up != 0) {
+                labels[idx] = up;
+            } else {
+                labels[idx] = std::min(left, up);
+                if (left != up) unite(left, up);
+            }
+        }
+    }
+
+    // Second pass: replace each label with its root and remap to dense ids.
+    std::vector<int32_t> remap(parent.size(), 0);
+    int32_t nextId = 0;
+    for (size_t i = 0; i < labels.size(); i++) {
+        if (labels[i] == 0) continue;
+        int32_t root = findRoot(labels[i]);
+        if (remap[root] == 0) remap[root] = ++nextId;
+        labels[i] = remap[root];
+    }
+    numLabels = nextId;
+    return labels;
+}
+
+// Extract a single-component mask from the labels image.
+std::vector<uint8_t> extractComponentMask(const std::vector<int32_t> &labels,
+                                          int32_t componentId) {
+    std::vector<uint8_t> mask(labels.size(), 0);
+    for (size_t i = 0; i < labels.size(); i++) {
+        if (labels[i] == componentId) mask[i] = 1;
+    }
+    return mask;
+}
+
+} // anonymous namespace
+
+std::string detectAllStockpilesJson(const std::string &rasterPath,
+                                    float sensitivity,
+                                    double minAreaM2,
+                                    int maxResults) {
+    sensitivity = std::clamp(sensitivity, 0.0f, 1.0f);
+    if (minAreaM2 < 0.0) minAreaM2 = 0.0;
+    if (maxResults <= 0) maxResults = 50;
+    // Hard cap: anti-DoS protection.
+    if (maxResults > 500) maxResults = 500;
+
+    LOGD << "detectAllStockpiles path=" << rasterPath
+         << " s=" << sensitivity << " minArea=" << minAreaM2
+         << " maxResults=" << maxResults;
+
+    // --- Open raster ---
+    GDALDatasetH hDs = GDALOpen(rasterPath.c_str(), GA_ReadOnly);
+    if (!hDs) throw AppException("Cannot open raster: " + rasterPath);
+    DsGuard dsGuard{hDs};
+
+    double gt[6];
+    if (GDALGetGeoTransform(hDs, gt) != CE_None)
+        throw AppException("Raster has no geotransform: " + rasterPath);
+
+    const int rasterW = GDALGetRasterXSize(hDs);
+    const int rasterH = GDALGetRasterYSize(hDs);
+    if (GDALGetRasterCount(hDs) < 1)
+        throw AppException("Raster has no bands");
+
+    GDALRasterBandH hBand = GDALGetRasterBand(hDs, 1);
+    int hasNoData = 0;
+    const double noData = GDALGetRasterNoDataValue(hBand, &hasNoData);
+    const char *projRef = GDALGetProjectionRef(hDs);
+    const std::string projection = projRef ? projRef : "";
+
+    // --- CRS setup ---
+    SrsHandle wgs84(OSRNewSpatialReference(nullptr));
+    OSRImportFromEPSG(wgs84.h, 4326);
+    OSRSetAxisMappingStrategy(wgs84.h, OAMS_TRADITIONAL_GIS_ORDER);
+
+    SrsHandle rasterSrs;
+    bool rasterIsGeographic = false;
+    if (!projection.empty()) {
+        rasterSrs.h = OSRNewSpatialReference(nullptr);
+        char *wktPtr = const_cast<char *>(projection.c_str());
+        if (OSRImportFromWkt(rasterSrs.h, &wktPtr) != OGRERR_NONE) {
+            OSRDestroySpatialReference(rasterSrs.h);
+            rasterSrs.h = nullptr;
+        } else {
+            OSRSetAxisMappingStrategy(rasterSrs.h, OAMS_TRADITIONAL_GIS_ORDER);
+            rasterIsGeographic = (OSRIsGeographic(rasterSrs.h) != 0);
+        }
+    }
+
+    // Approx pixel size in meters (for area/volume).
+    double metersPerPixelX = std::fabs(gt[1]);
+    double metersPerPixelY = std::fabs(gt[5]);
+    if (rasterIsGeographic || !rasterSrs.h) {
+        // Use raster center latitude for the cosine factor.
+        const double centerY = gt[3] + (rasterH / 2.0) * gt[5];
+        const double d2r = M_PI / 180.0;
+        const double mPerDeg = 111320.0;
+        metersPerPixelX = std::fabs(gt[1]) * mPerDeg * std::cos(centerY * d2r);
+        metersPerPixelY = std::fabs(gt[5]) * mPerDeg;
+        if (metersPerPixelX < 1e-6) metersPerPixelX = mPerDeg * std::fabs(gt[1]);
+    }
+    const double pixelArea = metersPerPixelX * metersPerPixelY;
+    if (!(pixelArea > 0))
+        throw AppException("Cannot compute pixel area for raster");
+
+    // --- Decide reading scale (downsample huge rasters) ---
+    // Cap working buffer at ~16M pixels to avoid OOM/DoS.
+    const size_t maxPixels = 16ull * 1024ull * 1024ull;
+    int scale = 1;
+    while (static_cast<size_t>(rasterW / scale) * static_cast<size_t>(rasterH / scale) > maxPixels) {
+        scale *= 2;
+    }
+    const int width = std::max(3, rasterW / scale);
+    const int height = std::max(3, rasterH / scale);
+    const double pxX = metersPerPixelX * static_cast<double>(scale);
+    const double pxY = metersPerPixelY * static_cast<double>(scale);
+    const double cellArea = pxX * pxY;
+
+    LOGD << "detectAll: rasterW=" << rasterW << " rasterH=" << rasterH
+         << " scale=" << scale << " width=" << width << " height=" << height;
+
+    // --- Read full raster (downsampled if needed) ---
+    std::vector<float> region(static_cast<size_t>(width) * height);
+    if (GDALRasterIO(hBand, GF_Read, 0, 0, rasterW, rasterH,
+                     region.data(), width, height, GDT_Float32, 0, 0) != CE_None)
+        throw AppException("Cannot read raster data");
+
+    const auto isValid = [&](float v) {
+        if (!std::isfinite(v)) return false;
+        if (hasNoData && std::fabs(static_cast<double>(v) - noData) < 1e-9) return false;
+        return true;
+    };
+
+    // --- Global low-pass base plane ---
+    // Strong smoothing of the elevation gives an approximation of the terrain trend.
+    // Then diff = elevation - trend isolates the prominent positive features.
+    std::vector<float> trend(region.size(), 0.0f);
+    {
+        // Replace nodata with median of valid values to keep the smoothing stable.
+        std::vector<double> valid;
+        valid.reserve(region.size() / 4);
+        for (float v : region) if (isValid(v)) valid.push_back(v);
+        if (valid.empty())
+            throw AppException("Raster contains no valid elevation data");
+        std::sort(valid.begin(), valid.end());
+        const float fillVal = static_cast<float>(valid[valid.size() / 2]);
+        for (size_t i = 0; i < region.size(); i++) {
+            trend[i] = isValid(region[i]) ? region[i] : fillVal;
+        }
+        // Sigma scales with image size and inversely with sensitivity:
+        // bigger sigma -> smoother trend -> more features come out.
+        const float baseSigma = std::max(8.0f, std::min(width, height) / 16.0f);
+        const float sigmaTrend = baseSigma * (1.5f - sensitivity);
+        gaussianFilter(trend, width, height, sigmaTrend);
+    }
+
+    // --- Difference map ---
+    std::vector<float> diff(region.size(), 0.0f);
+    for (size_t i = 0; i < region.size(); i++) {
+        if (isValid(region[i])) diff[i] = region[i] - trend[i];
+    }
+
+    // Light smoothing on diff to suppress noise.
+    const float sigmaDiff = (1.0f - sensitivity) * 4.0f + 0.5f;
+    gaussianFilter(diff, width, height, sigmaDiff);
+
+    // Adaptive threshold on positive diff (we only care about mounds).
+    double sumPos = 0.0;
+    size_t cntPos = 0;
+    for (float v : diff) {
+        if (v > 0.0f) { sumPos += v; cntPos++; }
+    }
+    if (cntPos == 0) {
+        json result;
+        result["stockpiles"] = json::array();
+        result["totalFound"] = 0;
+        result["sensitivityUsed"] = sensitivity;
+        result["minAreaUsed"] = minAreaM2;
+        return result.dump();
+    }
+    const double meanPos = sumPos / static_cast<double>(cntPos);
+    const double threshold = meanPos * (1.5 - sensitivity);
+
+    std::vector<uint8_t> binary(diff.size(), 0);
+    for (size_t i = 0; i < diff.size(); i++) {
+        if (diff[i] > threshold && isValid(region[i])) binary[i] = 1;
+    }
+
+    // --- Connected components ---
+    int32_t numLabels = 0;
+    auto labels = labelConnectedComponents(binary, width, height, numLabels);
+    LOGD << "detectAll: components=" << numLabels;
+
+    if (numLabels == 0) {
+        json result;
+        result["stockpiles"] = json::array();
+        result["totalFound"] = 0;
+        result["sensitivityUsed"] = sensitivity;
+        result["minAreaUsed"] = minAreaM2;
+        return result.dump();
+    }
+
+    // --- Compute per-component stats ---
+    struct CompStat {
+        int32_t id = 0;
+        size_t pixelCount = 0;
+        double estVolume = 0.0;
+        double sumX = 0.0; // pixel X centroid accumulator
+        double sumY = 0.0;
+        double maxDiff = 0.0;
+    };
+    std::vector<CompStat> stats(numLabels + 1);
+    for (int32_t i = 0; i <= numLabels; i++) stats[i].id = i;
+
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+            const size_t idx = static_cast<size_t>(y) * width + x;
+            const int32_t lab = labels[idx];
+            if (lab == 0) continue;
+            auto &s = stats[lab];
+            s.pixelCount++;
+            const double d = diff[idx];
+            if (d > 0.0) s.estVolume += d * cellArea;
+            s.sumX += x;
+            s.sumY += y;
+            if (d > s.maxDiff) s.maxDiff = d;
+        }
+    }
+
+    // --- Build coord transformer raster->WGS84 (reused for all components) ---
+    std::unique_ptr<CtHandle> rasterToWgs;
+    if (rasterSrs.h) {
+        rasterToWgs = std::make_unique<CtHandle>();
+        rasterToWgs->h = OCTNewCoordinateTransformation(rasterSrs.h, wgs84.h);
+        if (!rasterToWgs->h)
+            throw AppException("Cannot build transform to WGS84");
+    }
+
+    auto pixelToMap = [&](double px, double py, double &mx, double &my) {
+        // px, py are in the downsampled grid; convert to original raster coords.
+        const double opx = px * static_cast<double>(scale);
+        const double opy = py * static_cast<double>(scale);
+        mx = gt[0] + opx * gt[1] + opy * gt[2];
+        my = gt[3] + opx * gt[4] + opy * gt[5];
+    };
+
+    auto mapToWgs = [&](double mx, double my, double &lon, double &lat) {
+        lon = mx; lat = my;
+        if (rasterToWgs && rasterToWgs->h) {
+            if (!OCTTransform(rasterToWgs->h, 1, &lon, &lat, nullptr))
+                throw AppException("Cannot transform to WGS84");
+        }
+    };
+
+    // --- For each qualifying component, build polygon + result entry ---
+    struct Detection {
+        int32_t id;
+        json entry;
+        double estVolume;
+    };
+    std::vector<Detection> detections;
+    detections.reserve(numLabels);
+
+    const double epsPx = (1.0 - sensitivity) * 4.0 + 0.5;
+    const double epsMeters = epsPx * 0.5 * (pxX + pxY);
+
+    for (int32_t lab = 1; lab <= numLabels; lab++) {
+        const auto &s = stats[lab];
+        const double areaM2 = static_cast<double>(s.pixelCount) * cellArea;
+        if (areaM2 < minAreaM2) continue;
+        if (s.pixelCount < 4) continue;
+
+        auto mask = extractComponentMask(labels, lab);
+        auto contourPx = traceContour(mask, width, height);
+        if (contourPx.size() < 3) continue;
+
+        // Convert to map coords
+        std::vector<std::pair<double, double>> contourMap;
+        contourMap.reserve(contourPx.size());
+        for (const auto &p : contourPx) {
+            double mx, my;
+            pixelToMap(p.first + 0.5, p.second + 0.5, mx, my);
+            contourMap.push_back({mx, my});
+        }
+        auto simplified = douglasPeucker(contourMap, epsMeters);
+        if (simplified.size() < 3) simplified = contourMap;
+        if (simplified.front() != simplified.back()) simplified.push_back(simplified.front());
+
+        // To WGS84
+        std::vector<std::pair<double, double>> ring;
+        ring.reserve(simplified.size());
+        for (auto &p : simplified) {
+            double lon, lat;
+            mapToWgs(p.first, p.second, lon, lat);
+            ring.push_back({lon, lat});
+        }
+
+        // Confidence: combine compactness and prominence.
+        const double areaPx = static_cast<double>(s.pixelCount);
+        const double boundaryPx = static_cast<double>(contourPx.size());
+        const double compactness = (boundaryPx > 0)
+            ? std::min(1.0, (4.0 * M_PI * areaPx) / (boundaryPx * boundaryPx))
+            : 0.0;
+        const double prominence = std::min(1.0, s.maxDiff / std::max(1e-6, meanPos * 4.0));
+        const double confidence = std::clamp(0.3 + 0.4 * compactness + 0.3 * prominence, 0.0, 1.0);
+
+        // Centroid in WGS84.
+        const double cxPx = s.sumX / static_cast<double>(s.pixelCount);
+        const double cyPx = s.sumY / static_cast<double>(s.pixelCount);
+        double cMx, cMy;
+        pixelToMap(cxPx + 0.5, cyPx + 0.5, cMx, cMy);
+        double cLon, cLat;
+        mapToWgs(cMx, cMy, cLon, cLat);
+
+        // Base elevation: average trend at component centroid (meters).
+        const size_t cIdx = static_cast<size_t>(std::clamp<int>(static_cast<int>(cyPx), 0, height - 1)) * width
+                          + std::clamp<int>(static_cast<int>(cxPx), 0, width - 1);
+        const double baseElev = trend[cIdx];
+
+        json coords = json::array();
+        json outerRing = json::array();
+        for (const auto &p : ring) outerRing.push_back({p.first, p.second});
+        coords.push_back(outerRing);
+        json polygon = { {"type", "Polygon"}, {"coordinates", coords} };
+
+        json entry;
+        entry["polygon"] = polygon;
+        entry["estimatedVolume"] = s.estVolume;
+        entry["confidence"] = confidence;
+        entry["baseElevation"] = baseElev;
+        entry["centroid"] = { cLon, cLat };
+        entry["areaM2"] = areaM2;
+        entry["pixelCount"] = static_cast<uint64_t>(s.pixelCount);
+
+        detections.push_back({ lab, std::move(entry), s.estVolume });
+    }
+
+    // Sort by estimated volume desc, truncate to maxResults.
+    std::sort(detections.begin(), detections.end(),
+              [](const Detection &a, const Detection &b) { return a.estVolume > b.estVolume; });
+    if (static_cast<int>(detections.size()) > maxResults)
+        detections.resize(static_cast<size_t>(maxResults));
+
+    // Assign sequential ids.
+    json arr = json::array();
+    for (size_t i = 0; i < detections.size(); i++) {
+        detections[i].entry["id"] = static_cast<int>(i);
+        arr.push_back(std::move(detections[i].entry));
+    }
+
+    json result;
+    result["stockpiles"] = arr;
+    result["totalFound"] = static_cast<int>(arr.size());
+    result["sensitivityUsed"] = sensitivity;
+    result["minAreaUsed"] = minAreaM2;
+
+    LOGD << "detectAll: returning " << arr.size() << " stockpiles";
+    return result.dump();
+}
+
 } // namespace ddb

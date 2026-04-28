@@ -531,6 +531,19 @@ extern "C"
                                       float sensitivity,
                                       char **output);
 
+    /** Auto-detect ALL stockpile footprints by full-DEM scan.
+     * @param rasterPath Path to single-band elevation raster
+     * @param sensitivity Detail level in [0, 1]
+     * @param minAreaM2 Minimum component area in square meters (>=0)
+     * @param maxResults Maximum number of stockpiles returned (>0, capped to 500)
+     * @param output Pointer to receive JSON string (caller must free with DDBFree)
+     * @return DDBERR_NONE on success, an error otherwise */
+    DDB_DLL DDBErr DDBDetectAllStockpiles(const char *rasterPath,
+                                          float sensitivity,
+                                          double minAreaM2,
+                                          int maxResults,
+                                          char **output);
+
     /** Mask orthophoto borders making them transparent
      * @param input Path to input GeoTIFF
      * @param output Path to output GeoTIFF (with alpha band)

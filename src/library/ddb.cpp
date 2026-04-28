@@ -2067,6 +2067,25 @@ DDB_DLL DDBErr DDBDetectStockpile(const char *rasterPath,
     DDB_C_END
 }
 
+DDB_DLL DDBErr DDBDetectAllStockpiles(const char *rasterPath,
+                                      float sensitivity,
+                                      double minAreaM2,
+                                      int maxResults,
+                                      char **output) {
+    DDB_C_BEGIN
+    if (utils::isNullOrEmptyOrWhitespace(rasterPath))
+        throw InvalidArgsException("No raster path provided");
+    if (output == nullptr)
+        throw InvalidArgsException("Output pointer is null");
+
+    std::string jsonStr = ddb::detectAllStockpilesJson(std::string(rasterPath),
+                                                       sensitivity,
+                                                       minAreaM2,
+                                                       maxResults);
+    utils::copyToPtr(jsonStr, output);
+    DDB_C_END
+}
+
 DDB_DLL DDBErr DDBMaskBorders(const char *input, const char *output, int nearDist, bool white) {
     DDB_C_BEGIN
 
