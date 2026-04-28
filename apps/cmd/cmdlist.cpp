@@ -30,6 +30,7 @@
 #include "include/meta.h"
 #include "include/stamp.h"
 #include "include/cog.h"
+#include "include/contour.h"
 #include "include/nxs.h"
 #include "include/search.h"
 #include "include/stac.h"
@@ -67,6 +68,7 @@ namespace cmd
       {"meta", new Meta()},
       {"stamp", new Stamp()},
       {"cog", new Cog()},
+      {"contour", new Contour()},
       {"nxs", new Nxs()},
       {"search", new Search()},
       {"stac", new Stac()},

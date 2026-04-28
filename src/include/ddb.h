@@ -544,6 +544,34 @@ extern "C"
                                           int maxResults,
                                           char **output);
 
+    /** Generate contour lines from a single-band raster (DEM/DSM/DTM).
+     *
+     * Either `interval` or `count` must be provided. When `interval > 0`
+     * the contour spacing is fixed. When `interval <= 0` and `count > 0`
+     * the spacing is derived from band statistics: (max - min) / count.
+     *
+     * NaN sentinel values disable optional clipping bounds.
+     *
+     * @param rasterPath Path to single-band elevation raster
+     * @param interval Vertical spacing between contour levels (<= 0 to use count)
+     * @param count Target number of contour levels (<= 0 when interval is used)
+     * @param baseOffset Reference base elevation for level alignment
+     * @param minElev Drop contours below this elevation (NaN to disable)
+     * @param maxElev Drop contours above this elevation (NaN to disable)
+     * @param simplifyTolerance Geometry simplification in raster CRS units (0 = none)
+     * @param bandIndex 1-based raster band index (1 if unsure)
+     * @param output Pointer to receive GeoJSON FeatureCollection (caller frees with DDBFree)
+     * @return DDBERR_NONE on success, an error otherwise */
+    DDB_DLL DDBErr DDBGenerateContours(const char *rasterPath,
+                                       double interval,
+                                       int count,
+                                       double baseOffset,
+                                       double minElev,
+                                       double maxElev,
+                                       double simplifyTolerance,
+                                       int bandIndex,
+                                       char **output);
+
     /** Mask orthophoto borders making them transparent
      * @param input Path to input GeoTIFF
      * @param output Path to output GeoTIFF (with alpha band)

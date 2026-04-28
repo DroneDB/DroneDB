@@ -6,6 +6,7 @@
 
 #include <cpr/cpr.h>
 
+#include <cmath>
 #include <csignal>
 #include <mutex>
 
@@ -42,6 +43,7 @@
 #include "thermal.h"
 #include "raster_analysis.h"
 #include "raster_profile.h"
+#include "contour.h"
 #include "volume.h"
 #include "stockpile.h"
 #include "thumbs.h"
@@ -2082,6 +2084,35 @@ DDB_DLL DDBErr DDBDetectAllStockpiles(const char *rasterPath,
                                                        sensitivity,
                                                        minAreaM2,
                                                        maxResults);
+    utils::copyToPtr(jsonStr, output);
+    DDB_C_END
+}
+
+DDB_DLL DDBErr DDBGenerateContours(const char *rasterPath,
+                                   double interval,
+                                   int count,
+                                   double baseOffset,
+                                   double minElev,
+                                   double maxElev,
+                                   double simplifyTolerance,
+                                   int bandIndex,
+                                   char **output) {
+    DDB_C_BEGIN
+    if (utils::isNullOrEmptyOrWhitespace(rasterPath))
+        throw InvalidArgsException("No raster path provided");
+    if (output == nullptr)
+        throw InvalidArgsException("Output pointer is null");
+
+    ContourOptions opts;
+    if (interval > 0.0) opts.interval = interval;
+    if (count > 0) opts.count = count;
+    opts.baseOffset = baseOffset;
+    if (std::isfinite(minElev)) opts.minElev = minElev;
+    if (std::isfinite(maxElev)) opts.maxElev = maxElev;
+    opts.simplifyTolerance = std::max(0.0, simplifyTolerance);
+    opts.bandIndex = (bandIndex > 0) ? bandIndex : 1;
+
+    std::string jsonStr = ddb::generateContoursJson(std::string(rasterPath), opts);
     utils::copyToPtr(jsonStr, output);
     DDB_C_END
 }
