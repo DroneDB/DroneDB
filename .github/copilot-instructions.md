@@ -67,9 +67,9 @@ DroneDB is a free, open-source aerial data management platform built in C++ with
 ### Code Quality Standards
 - **Language**: Modern C++17 with clear, descriptive naming
 - **Memory Management**: RAII, smart pointers, avoid manual memory management
-- **Error Handling**: Use exceptions (`AppException`) with meaningful messages
-- **Logging**: Use `LOGD`, `LOGV` macros for debug output
-- **Testing**: Write unit tests for new functionality
+- **Error Handling**: Use the exception hierarchy from `src/include/exceptions.h`. All 24 exception types inherit from `AppException : std::runtime_error`. Key categories: `DBException`/`SQLException`, `GDALException`, `PDALException`, `NetException`, `FSException`, `ZipException`, `JSONException`, `RegistryException` (with `RegistryNotFoundException`, `NoStampException`, `PullRequiredException`), `BuildLockException` (with 4 subclasses), `BuildDepMissingException` (has `getMissingDependencies()` returning vector of missing dep names). Use the most specific type.
+- **Logging**: Use plog library macros `LOGD` (debug) and `LOGV` (verbose) with stream syntax (`LOGD << "msg" << var`). Initialize with `init_logger(true)` for console + file output (`ddb-log.csv`, CSV format, 32MB rolling, 5 backups). Base severity is `info`; call `set_logger_verbose()` to enable LOGD/LOGV on console.
+- **Testing**: Tests use Google Test (gtest) in `tests/` folder. Always use `TestArea` for isolated temp filesystem (`%TEMP%/ddb_test_areas/<name>`). For zip-based tests, use `TestFS` (supports remote URLs with auto-download + cache). Utility functions in `tests/utils.h` (`fileWriteAllText`, `makeTree`, `compareTree`, `calculateHash`). Include `tests/test.h` for `TEST_NAME` macro and `MANUAL_TEST` macro (for disabled tests). Run tests with `./ddbtest --gtest_shuffle` (shuffle is critical to catch inter-test dependencies).
 
 ### API Design Principles
 - **Consistency**: Follow existing patterns in codebase
@@ -78,11 +78,12 @@ DroneDB is a free, open-source aerial data management platform built in C++ with
 - **Extensibility**: Design for plugin architecture and future features
 
 ### Specific Patterns
-- **Database Operations**: Always use prepared statements and transactions
+- **Database Operations**: Always use `db->query()` which returns `std::unique_ptr<Statement>` (RAII). Pattern SELECT: `auto q = db->query("SELECT ... WHERE col = ?"); q->bind(1, val); if(q->fetch()) { auto v = q->getInt64(0); }`. Pattern DML: `q->execute()` (no fetch for INSERT/UPDATE/DELETE). Parameters 1-indexed, columns 0-indexed. Call `q->reset()` before reusing in a loop. Bind types: string, int, long long only (NO double/blob overloads). Transactions are manual: `db->exec("BEGIN EXCLUSIVE TRANSACTION")` ... `db->exec("COMMIT")`. No RAII transaction wrapper exists.
 - **File Operations**: Use `fs::path` for cross-platform compatibility
 - **Spatial Operations**: Leverage SpatiaLite for complex spatial queries
 - **JSON Handling**: Use nlohmann::json for structured data
 - **Progress Reporting**: Implement progress callbacks for long operations
+- **C API**: Functions use `DDB_C_BEGIN` / `DDB_C_END` macros wrapping try-catch. Return `DDBErr` enum (3 values: `DDBERR_NONE=0`, `DDBERR_EXCEPTION=1`, `DDBERR_BUILDDEPMISSING=2`). Error output via `char **output` (freed with `DDBFree()`) or `uint8_t **outBuffer` for binary data (freed with `DDBVSIFree()`). Last error stored in global 255-byte buffer via `DDBSetLastError()`/`DDBGetLastError()`. Must call `DDBRegisterProcess(verbose)` before any other DDB function.
 
 ### Architecture Considerations
 - **Modularity**: Keep geospatial logic separate from database logic
