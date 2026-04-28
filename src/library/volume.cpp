@@ -178,7 +178,18 @@ std::string calculateVolumeJson(const std::string &rasterPath,
     OSRImportFromEPSG(wgs84.h, 4326);
     OSRSetAxisMappingStrategy(wgs84.h, OAMS_TRADITIONAL_GIS_ORDER);
 
+    // Capture polygon centroid latitude in WGS84 *before* any reprojection
+    // so we can convert pixel sizes to meters when the raster CRS is
+    // geographic (e.g. EPSG:4326).
+    double polyCentroidLat = 0.0;
+    {
+        OGREnvelope wgsEnv;
+        geom->getEnvelope(&wgsEnv);
+        polyCentroidLat = 0.5 * (wgsEnv.MinY + wgsEnv.MaxY);
+    }
+
     SrsHandle rasterSrs;
+    bool rasterIsGeographic = false;
     if (!projection.empty()) {
         rasterSrs.h = OSRNewSpatialReference(nullptr);
         char *wktPtr = const_cast<char *>(projection.c_str());
@@ -187,15 +198,18 @@ std::string calculateVolumeJson(const std::string &rasterPath,
             rasterSrs.h = nullptr;
         } else {
             OSRSetAxisMappingStrategy(rasterSrs.h, OAMS_TRADITIONAL_GIS_ORDER);
+            rasterIsGeographic = (OSRIsGeographic(rasterSrs.h) != 0);
         }
     }
 
     if (rasterSrs.h) {
         CtHandle wgsToRaster;
         wgsToRaster.h = OCTNewCoordinateTransformation(wgs84.h, rasterSrs.h);
-        if (wgsToRaster.h) {
-            OGR_G_Transform(reinterpret_cast<OGRGeometryH>(geom.get()), wgsToRaster.h);
-        }
+        if (!wgsToRaster.h)
+            throw AppException("Cannot create WGS84 -> raster coordinate transformation");
+        if (OGR_G_Transform(reinterpret_cast<OGRGeometryH>(geom.get()),
+                            wgsToRaster.h) != OGRERR_NONE)
+            throw AppException("Cannot reproject polygon into raster CRS");
     }
 
     // --- Polygon envelope in pixel space ---
@@ -353,8 +367,19 @@ std::string calculateVolumeJson(const std::string &rasterPath,
     }
 
     // --- Accumulate cut/fill/area ---
-    const double pixelWidth = std::fabs(gt[1]);
-    const double pixelHeight = std::fabs(gt[5]);
+    // For projected CRS the geotransform is already in meters; for geographic
+    // CRS (e.g. EPSG:4326) it is in degrees, so convert to meters using a
+    // local WGS84 approximation (same as stockpile.cpp). Without this the
+    // documented m^2 / m^3 outputs would be off by ~10^10.
+    double pixelWidth = std::fabs(gt[1]);
+    double pixelHeight = std::fabs(gt[5]);
+    if (rasterIsGeographic || !rasterSrs.h) {
+        const double d2r = M_PI / 180.0;
+        const double mPerDeg = 111320.0; // good-enough WGS84 approximation
+        pixelWidth = std::fabs(gt[1]) * mPerDeg * std::cos(polyCentroidLat * d2r);
+        pixelHeight = std::fabs(gt[5]) * mPerDeg;
+        if (pixelWidth < 1e-6) pixelWidth = mPerDeg * std::fabs(gt[1]);
+    }
     const double pixelArea = pixelWidth * pixelHeight;
 
     double cutVolume = 0.0;
