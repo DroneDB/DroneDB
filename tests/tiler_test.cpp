@@ -61,18 +61,18 @@ TEST(testTiler, image) {
         "https://github.com/DroneDB/test_data/raw/master/brighton/point_cloud.laz",
         "point_cloud.laz");
 
-    ddb::buildEpt({pc.string()}, ta.getFolder("ept").string());
-    fs::path eptPath = ta.getPath(fs::path("ept") / "ept.json");
+    ddb::buildCopc({pc.string()}, ta.getFolder("copc").string());
+    fs::path copcPath = ta.getPath(fs::path("copc") / "cloud.copc.laz");
 
     fs::path outTile =
-        TilerHelper::getTile(eptPath, 20, 256337, 369481, 256, true, true, ta.getFolder());
+        TilerHelper::getTile(copcPath, 20, 256337, 369481, 256, true, true, ta.getFolder());
 
     EXPECT_TRUE(fs::exists(outTile));
 
     /* I'm disabling this test because it is flaky on some systems
     uint8_t *buffer;
     int bufSize;
-    TilerHelper::getTile(eptPath, 20, 256337, 369481, 256, true, true, "", &buffer, &bufSize);
+    TilerHelper::getTile(copcPath, 20, 256337, 369481, 256, true, true, "", &buffer, &bufSize);
 
     EXPECT_TRUE(bufSize > 0);
     EXPECT_EQ(io::Path(outTile).getSize(), bufSize);
@@ -100,8 +100,8 @@ TEST(testTiler, toledoPointCloud) {
         "https://github.com/DroneDB/test_data/raw/refs/heads/master/point-clouds/toledo.laz",
         "point_cloud.laz");
 
-    ddb::buildEpt({pc.string()}, ta.getFolder("ept").string());
-    fs::path eptPath = ta.getPath(fs::path("ept") / "ept.json");
+    ddb::buildCopc({pc.string()}, ta.getFolder("copc").string());
+    fs::path copcPath = ta.getPath(fs::path("copc") / "cloud.copc.laz");
 
     // Test tiles from Toledo dataset coordinates
     struct ToledoTileTest {
@@ -114,7 +114,7 @@ TEST(testTiler, toledoPointCloud) {
 
     for (const auto& tile : testTiles) {
         fs::path outTile =
-            TilerHelper::getTile(eptPath, tile.z, tile.x, tile.y, 256, true, true, ta.getFolder());
+            TilerHelper::getTile(copcPath, tile.z, tile.x, tile.y, 256, true, true, ta.getFolder());
 
         EXPECT_TRUE(fs::exists(outTile))
             << "Tile " << tile.z << "/" << tile.x << "/" << tile.y << " not found";
@@ -131,12 +131,12 @@ MANUAL_TEST(tilerBenchmark, lewis) {
 
     std::chrono::high_resolution_clock::time_point start = std::chrono::high_resolution_clock::now();
 
-    ddb::buildEpt({pc.string()}, ta.getFolder("ept").string());
-    fs::path eptPath = ta.getPath(fs::path("ept") / "ept.json");
+    ddb::buildCopc({pc.string()}, ta.getFolder("copc").string());
+    fs::path copcPath = ta.getPath(fs::path("copc") / "cloud.copc.laz");
 
     std::chrono::high_resolution_clock::time_point end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> timeElapsed = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
-    std::cout << "EPT build time: " << timeElapsed.count() << " seconds" << std::endl;
+    std::cout << "COPC build time: " << timeElapsed.count() << " seconds" << std::endl;
 
     // Test tiles from Toledo dataset coordinates
     struct LewisTileTest {
@@ -166,7 +166,7 @@ MANUAL_TEST(tilerBenchmark, lewis) {
 
     for (const auto& tile : testTiles) {
         fs::path outTile =
-            TilerHelper::getTile(eptPath, tile.z, tile.x, tile.y, 256, true, true, ta.getFolder());
+            TilerHelper::getTile(copcPath, tile.z, tile.x, tile.y, 256, true, true, ta.getFolder());
 
         EXPECT_TRUE(fs::exists(outTile))
             << "Tile " << tile.z << "/" << tile.x << "/" << tile.y << " not found";

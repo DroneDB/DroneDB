@@ -24,7 +24,7 @@
 #include "include/delta.h"
 #include "include/clone.h"
 #include "include/tag.h"
-#include "include/ept.h"
+#include "include/copc.h"
 #include "include/push.h"
 #include "include/pull.h"
 #include "include/meta.h"
@@ -62,7 +62,7 @@ namespace cmd
       {"delta", new Delta()},
       {"clone", new Clone()},
       {"tag", new Tag()},
-      {"ept", new Ept()},
+      {"copc", new Copc()},
       {"push", new Push()},
       {"pull", new Pull()},
       {"meta", new Meta()},

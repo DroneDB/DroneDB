@@ -5,7 +5,7 @@
 #include <iostream>
 #include "include/tile.h"
 #include "tilerhelper.h"
-#include "epttiler.h"
+#include "pctiler.h"
 #include "exceptions.h"
 
 namespace cmd
@@ -16,7 +16,7 @@ namespace cmd
         // clang-format off
     opts
     .positional_help("[args]")
-    .custom_help("tile [geo.tif | image.jpg | ept.json | https://host.com/cog.tif | https://host.com/image.jpg | https://host.com/ept.json] [output directory]")
+    .custom_help("tile [geo.tif | image.jpg | cloud.copc.laz | https://host.com/cog.tif | https://host.com/image.jpg | https://host.com/cloud.copc.laz] [output directory]")
     .add_options()
     ("i,input", "Path or URL to file to tile", cxxopts::value<std::string>())
     ("o,output", "Output directory where to store tiles", cxxopts::value<std::string>()->default_value("{filename}_tiles/"))
@@ -32,7 +32,7 @@ namespace cmd
 
     std::string Tile::description()
     {
-        return "Generate tiles for GeoTIFFs, GeoImages and EPT";
+        return "Generate tiles for GeoTIFFs, GeoImages and COPC point clouds";
     }
 
     void Tile::run(cxxopts::ParseResult &opts)

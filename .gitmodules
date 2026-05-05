@@ -1,6 +1,3 @@
-[submodule "untwine"]
-	path = vendor/untwine
-	url = https://github.com/DroneDB/untwine.git
 [submodule "zonedetect"]
 	path = vendor/zonedetect
 	url = https://github.com/BertoldVdb/ZoneDetect.git

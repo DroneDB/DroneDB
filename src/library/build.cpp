@@ -37,12 +37,12 @@ static bool isLockFileStale(const std::string& lockFilePath);
 
 bool isBuildableInternal(const Entry& e, std::string& subfolder) {
     if (e.type == EntryType::PointCloud) {
-        // Special case: do not build if this entry is in a "ept-data" folder
-        // as it indicates an EPT dataset file
+        // Special case: do not build if this entry is a leaf inside a built EPT dataset.
+        // We keep this guard to skip residual ept-data folders from older builds.
         if (fs::path(e.path).parent_path().filename().string() == "ept-data")
             return false;
 
-        subfolder = "ept";
+        subfolder = "copc";
         return true;
     } else if (e.type == EntryType::GeoRaster) {
         subfolder = "cog";
@@ -199,7 +199,9 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
 
         if (e.type == EntryType::PointCloud) {
             const std::vector vec = {relativePath};
-            buildEpt(vec, tempFolder);
+            // Defensive cleanup: remove any legacy EPT artifacts from previous builds
+            io::assureIsRemoved(baseOutputPath / "ept");
+            buildCopc(vec, tempFolder);
             built = true;
         } else if (e.type == EntryType::GeoRaster) {
             buildCog(relativePath, (fs::path(tempFolder) / "cog.tif").string());

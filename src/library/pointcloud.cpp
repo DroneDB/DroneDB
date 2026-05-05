@@ -3,36 +3,27 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "pointcloud.h"
 
-#include <cpr/cpr.h>
+#include <algorithm>
 #include <fstream>
 #include <limits>
 #include <sstream>
 
-#include <bu/BuPyramid.hpp>
-#include <epf/Epf.hpp>
+#include <pdal/PipelineManager.hpp>
 #include <pdal/PointRef.hpp>
 #include <pdal/PointTable.hpp>
 #include <pdal/StageFactory.hpp>
 #include <pdal/io/LasWriter.hpp>
-#include <untwine/Common.hpp>
-#include <untwine/ProgressWriter.hpp>
+#include <pdal/io/CopcReader.hpp>
 
 #include "entry.h"
 #include "exceptions.h"
 #include "gdal_inc.h"
 #include "geo.h"
+#include "hash.h"
 #include "logger.h"
 #include "mio.h"
 #include "ply.h"
 #include "utils.h"
-
-namespace untwine {
-
-void fatal(const std::string& err) {
-    throw ddb::UntwineException("Untwine fatal error: " + err);
-}
-
-}  // namespace untwine
 
 namespace ddb {
 
@@ -606,135 +597,37 @@ bool getPointCloudInfo(const std::string& filename, PointCloudInfo& info, int po
     return true;
 }
 
-bool getEptInfo(const std::string& eptJson, PointCloudInfo& info, int polyBoundsSrs, int* span) {
-    json j;
+bool getCopcInfo(const std::string& copcPath, PointCloudInfo& info, int polyBoundsSrs, int* span) {
     try {
-        auto contents = utils::readFile(eptJson);
+        pdal::Options copcOpts;
+        copcOpts.add("filename", copcPath);
 
-        j = json::parse(utils::readFile(eptJson));
-    } catch (json::exception& e) {
-        LOGD << e.what();
-        return false;
-    } catch (const FSException& e) {
-        LOGD << e.what();
-        return false;
-    } catch (const NetException& e) {
-        LOGD << e.what();
-        return false;
-    }
+        pdal::CopcReader reader;
+        reader.setOptions(copcOpts);
 
-    if (!j.contains("boundsConforming") || !j.contains("points") || !j.contains("schema") ||
-        !j.contains("span")) {
-        LOGD << "Invalid EPT: " << eptJson;
-        return false;
-    }
-
-    info.pointCount = j["points"];
-
-    if (j.contains("srs") && j["srs"].contains("wkt")) {
-        info.wktProjection = j["srs"]["wkt"];
-    } else {
-        info.wktProjection = "";
-    }
-
-    info.dimensions.clear();
-    for (auto& dim : j["schema"]) {
-        if (dim.contains("name")) {
-            info.dimensions.push_back(dim["name"]);
+        pdal::QuickInfo qi = reader.preview();
+        if (!qi.valid()) {
+            LOGD << "Cannot get quick info for COPC file " << copcPath;
+            return false;
         }
-    }
 
-    if (span != nullptr) {
-        *span = j["span"];
-    }
+        populatePointCloudInfoFromQuickInfo(qi, info);
+        populatePointCloudBoundsFromQuickInfo(qi, info, polyBoundsSrs);
 
-    const double minx = j["boundsConforming"][0];
-    const double miny = j["boundsConforming"][1];
-    const double minz = j["boundsConforming"][2];
-    const double maxx = j["boundsConforming"][3];
-    const double maxy = j["boundsConforming"][4];
-    const double maxz = j["boundsConforming"][5];
+        // COPC tile-zoom heuristic: writers.copc emits hierarchies whose root tile is
+        // sized to a power-of-two voxel grid; PDAL's default is 128 along each side.
+        // This matches the conventional EPT span used elsewhere in the code.
+        if (span != nullptr)
+            *span = 128;
 
-    info.bounds.clear();
-    info.bounds.push_back(minx);
-    info.bounds.push_back(miny);
-    info.bounds.push_back(minz);
-    info.bounds.push_back(maxx);
-    info.bounds.push_back(maxy);
-    info.bounds.push_back(maxz);
-
-    if (info.wktProjection.empty()) {
-        // Nothing else to do
-        LOGD << "WKT projection is empty";
         return true;
+    } catch (const pdal::pdal_error& e) {
+        LOGD << "PDAL error reading COPC " << copcPath << ": " << e.what();
+        return false;
+    } catch (const std::exception& e) {
+        LOGD << "Error reading COPC " << copcPath << ": " << e.what();
+        return false;
     }
-
-    OGRSpatialReferenceH hSrs = OSRNewSpatialReference(nullptr);
-    OGRSpatialReferenceH hTgt = OSRNewSpatialReference(nullptr);
-
-    char* wkt = strdup(info.wktProjection.c_str());
-
-    char* wktPointer = wkt;
-
-    if (OSRImportFromWkt(hSrs, &wktPointer) != OGRERR_NONE) {
-        free(wkt);
-        OSRDestroySpatialReference(hTgt);
-        OSRDestroySpatialReference(hSrs);
-        throw GDALException("Cannot import spatial reference system " + info.wktProjection +
-                            ". Is PROJ available?");
-    }
-
-    free(wkt);
-
-    if (OSRImportFromEPSG(hTgt, polyBoundsSrs) != OGRERR_NONE) {
-        OSRDestroySpatialReference(hTgt);
-        OSRDestroySpatialReference(hSrs);
-        throw GDALException("Cannot read EPSG:" + std::to_string(polyBoundsSrs) +
-                            ". Is PROJ available?");
-    }
-
-    OGRCoordinateTransformationH hTransform = OCTNewCoordinateTransformation(hSrs, hTgt);
-
-    double geoMinX = minx;
-    double geoMinY = miny;
-    double geoMinZ = minz;
-    double geoMaxX = maxx;
-    double geoMaxY = maxy;
-    double geoMaxZ = maxz;
-
-    const bool minSuccess = OCTTransform(hTransform, 1, &geoMinX, &geoMinY, &geoMinZ);
-    const bool maxSuccess = OCTTransform(hTransform, 1, &geoMaxX, &geoMaxY, &geoMaxZ);
-    info.polyBounds.clear();
-
-    if (!minSuccess || !maxSuccess) {
-        LOGD << "Cannot transform coordinates " << info.wktProjection
-             << " to EPSG:" << std::to_string(polyBoundsSrs);
-    } else {
-        info.polyBounds.addPoint(geoMinX, geoMinY, geoMinZ);
-        info.polyBounds.addPoint(geoMaxX, geoMinY, geoMinZ);
-        info.polyBounds.addPoint(geoMaxX, geoMaxY, geoMinZ);
-        info.polyBounds.addPoint(geoMinX, geoMaxY, geoMinZ);
-        info.polyBounds.addPoint(geoMinX, geoMinY, geoMinZ);
-
-        double centroidX = (minx + maxx) / 2.0;
-        double centroidY = (miny + maxy) / 2.0;
-        double centroidZ = minz;
-
-        if (OCTTransform(hTransform, 1, &centroidX, &centroidY, &centroidZ)) {
-            info.centroid.clear();
-            info.centroid.addPoint(centroidX, centroidY, centroidZ);
-        } else {
-            throw GDALException("Cannot transform coordinates " + std::to_string(centroidX) + ", " +
-                                std::to_string(centroidY) +
-                                " to EPSG:" + std::to_string(polyBoundsSrs));
-        }
-    }
-
-    OCTDestroyCoordinateTransformation(hTransform);
-    OSRDestroySpatialReference(hTgt);
-    OSRDestroySpatialReference(hSrs);
-
-    return true;
 }
 
 // Helper function to update global bounds from point cloud info
@@ -749,15 +642,27 @@ inline void updateGlobalBounds(const PointCloudInfo& info,
     }
 }
 
-void buildEpt(const std::vector<std::string>& filenames, const std::string& outdir) {
+bool isCopcPath(const std::string& filename) {
+    if (filename.size() < 9) return false;
+    // Lowercase comparison of trailing ".copc.laz"
+    static const std::string suffix = ".copc.laz";
+    if (filename.size() < suffix.size()) return false;
+    const std::string tail = filename.substr(filename.size() - suffix.size());
+    std::string lc(tail.size(), '\0');
+    std::transform(tail.begin(), tail.end(), lc.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+    return lc == suffix;
+}
+
+void buildCopc(const std::vector<std::string>& filenames, const std::string& outdir) {
     fs::path dest = outdir;
+    io::assureFolderExists(dest);
+
     fs::path tmpDir = dest / "tmp";
     io::assureFolderExists(tmpDir);
 
-    untwine::Options options{};
-
     // Minimum epsilon for extent validation (in the point cloud's native units)
-    // This prevents division-by-zero in untwine for degenerate point clouds
+    // This prevents degenerate output for zero-extent or near-zero-extent inputs.
     constexpr double MIN_EXTENT_EPSILON = 1e-10;
     constexpr size_t MIN_POINT_COUNT = 2;
 
@@ -779,24 +684,20 @@ void buildEpt(const std::vector<std::string>& filenames, const std::string& outd
         PointCloudInfo pcInfo;
         if (getPointCloudInfo(f, pcInfo)) {
             totalPointCount += pcInfo.pointCount;
-
-            // Update global bounds if available
             updateGlobalBounds(pcInfo, globalMinX, globalMinY, globalMaxX, globalMaxY);
         }
     }
 
-    // Validate point count - untwine may crash with FPE for single-point clouds
     if (totalPointCount < MIN_POINT_COUNT) {
         throw InvalidArgsException("Point cloud has insufficient points (" +
                                    std::to_string(totalPointCount) +
                                    "). At least " + std::to_string(MIN_POINT_COUNT) +
-                                   " points are required for EPT generation.");
+                                   " points are required for COPC generation.");
     }
 
+    // Convert non-LAS sources to a temporary LAS first; PDAL writers.copc accepts only
+    // formats supported by its readers (LAS/LAZ natively).
     std::vector<std::string> inputFiles;
-
-    // Make sure these are LAS/LAZ. If it's PLY, E57, PTS, or XYZ, we first need to
-    // convert to LAS
     for (const auto& f : filenames) {
         auto p = io::Path(f);
         if (p.checkExtension({"ply", "e57", "pts", "xyz"})) {
@@ -805,76 +706,77 @@ void buildEpt(const std::vector<std::string>& filenames, const std::string& outd
             translateToLas(f, lasF);
             inputFiles.push_back(lasF);
 
-            // PLY files don't have bounds in their metadata, so we need to read them
-            // from the converted LAS file using PDAL QuickInfo
+            // PLY/PTS/XYZ/E57 don't have reliable bounds in their headers; read them
+            // back from the converted LAS so the extent validation has something to chew on.
             PointCloudInfo lasInfo;
             if (getPointCloudInfo(lasF, lasInfo)) {
                 updateGlobalBounds(lasInfo, globalMinX, globalMinY, globalMaxX, globalMaxY);
-                if (lasInfo.bounds.size() >= 6) {
-                    LOGD << "Updated bounds from converted LAS: [" << lasInfo.bounds[0] << ", "
-                         << lasInfo.bounds[1] << "] - [" << lasInfo.bounds[3] << ", " << lasInfo.bounds[4] << "]";
-                }
             }
         } else {
             inputFiles.push_back(f);
         }
     }
 
-    // Validate extent - untwine may crash with FPE for zero-extent point clouds
-    // This validation must happen AFTER PLY->LAS conversion because PLY files
-    // don't have bounds in their metadata
     double extentX = globalMaxX - globalMinX;
     double extentY = globalMaxY - globalMinY;
     if (extentX < MIN_EXTENT_EPSILON || extentY < MIN_EXTENT_EPSILON) {
         throw InvalidArgsException("Point cloud has zero or near-zero extent (X: " +
                                    std::to_string(extentX) + ", Y: " + std::to_string(extentY) +
-                                   "). Point cloud must have spatial extent for EPT generation.");
+                                   "). Point cloud must have spatial extent for COPC generation.");
     }
 
-    for (const auto& f : inputFiles)
-        options.inputFiles.push_back(f);
+    const fs::path outPath = dest / CopcFileName;
+    io::assureIsRemoved(outPath);
 
-    options.tempDir = tmpDir.string();
-    options.outputDir = dest.string();
-    options.fileLimit = 10000000;
-    options.progressFd = -1;
-    options.stats = false;
-    options.level = -1;
-    // doCube prevents segfault in EPT generation for certain LAZ files (e.g. Lewis dataset)
-    options.doCube = true;
-
-    // Add dimension filtering to handle complex LAZ files with problematic custom dimensions
-    // Only include standard dimensions that are commonly supported
-    options.dimNames = {"X", "Y", "Z", "Red", "Green", "Blue", "Intensity", "ReturnNumber",
-                       "NumberOfReturns", "Classification", "ScanAngleRank", "UserData",
-                       "PointSourceId", "GpsTime"};
-
-    io::assureFolderExists(dest);
+    // Legacy EPT cleanup: if a previous EPT build is in this folder, remove it. The
+    // build pipeline already does this on its side, but we are defensive here too.
     io::assureIsRemoved(dest / "ept.json");
     io::assureIsRemoved(dest / "ept-data");
     io::assureIsRemoved(dest / "ept-hierarchy");
-    io::assureFolderExists(dest / "ept-data");
-    io::assureFolderExists(dest / "ept-hierarchy");
-
-    untwine::ProgressWriter progress(options.progressFd);
 
     try {
-        untwine::BaseInfo common;
+        // Build a PDAL pipeline: one or more LAS readers -> writers.copc.
+        // When there's a single input we attach the writer directly; when there are
+        // multiple inputs, PDAL's writers.copc expects a single stream, which we get
+        // by chaining all readers as inputs of a no-op merge filter.
+        pdal::PipelineManager mgr;
 
-        untwine::epf::Epf preflight(common);
-        preflight.run(options, progress);
+        std::vector<pdal::Stage*> readers;
+        for (const auto& f : inputFiles) {
+            pdal::Options ro;
+            ro.add("filename", f);
+            pdal::Stage& r = mgr.makeReader(f, "readers.las", ro);
+            readers.push_back(&r);
+        }
 
-        untwine::bu::BuPyramid builder(common);
-        builder.run(options, progress);
+        pdal::Stage* tail = readers.front();
+        if (readers.size() > 1) {
+            pdal::Stage& merge = mgr.makeFilter("filters.merge");
+            for (auto* r : readers) merge.setInput(*r);
+            tail = &merge;
+        }
+
+        pdal::Options wo;
+        wo.add("filename", outPath.string());
+        wo.add("forward", "all");
+        // Preserve any extra dimensions present in the source.
+        wo.add("extra_dims", "all");
+        pdal::Stage& writer = mgr.makeWriter(outPath.string(), "writers.copc", *tail, wo);
+        (void)writer;
+
+        mgr.execute();
 
         io::assureIsRemoved(tmpDir);
-        io::assureIsRemoved(dest / "temp");
+    } catch (const pdal::pdal_error& e) {
+        io::assureIsRemoved(tmpDir);
+        throw PDALException(std::string("COPC build failed: ") + e.what());
     } catch (const std::exception& e) {
         io::assureIsRemoved(tmpDir);
-        io::assureIsRemoved(dest / "temp");
-
-        throw UntwineException(e.what());
+        throw PDALException(std::string("COPC build failed: ") + e.what());
     }
+
+    if (!fs::exists(outPath))
+        throw PDALException("COPC build did not produce output file: " + outPath.string());
 }
 
 json PointCloudInfo::toJSON() {

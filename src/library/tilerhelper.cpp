@@ -4,7 +4,7 @@
 
 #include "tilerhelper.h"
 #include "gdaltiler.h"
-#include "epttiler.h"
+#include "pctiler.h"
 #include "threadlock.h"
 
 #include <memory>
@@ -82,10 +82,10 @@ namespace ddb
 
     fs::path TilerHelper::getTile(const fs::path &tileablePath, int tz, int tx, int ty, int tileSize, bool tms, bool forceRecreate, const fs::path &outputFolder, uint8_t **outBuffer, int *outBufferSize, const std::string &tileablePathHash)
     {
-        if (io::Path(tileablePath).checkExtension({"json"}))
+        if (isCopcPath(tileablePath.string()))
         {
-            // Assume EPT
-            EptTiler t(tileablePath.string(), outputFolder.string(), tileSize, tms);
+            // COPC point cloud
+            PointCloudTiler t(tileablePath.string(), outputFolder.string(), tileSize, tms);
             return t.tile(tz, tx, ty, outBuffer, outBufferSize);
         }
         else
@@ -98,10 +98,10 @@ namespace ddb
 
     fs::path TilerHelper::getTile(const fs::path &tileablePath, int tz, int tx, int ty, int tileSize, bool tms, bool forceRecreate, const fs::path &outputFolder, const ThumbVisParams &visParams, uint8_t **outBuffer, int *outBufferSize, const std::string &tileablePathHash)
     {
-        if (io::Path(tileablePath).checkExtension({"json"}))
+        if (isCopcPath(tileablePath.string()))
         {
-            // EPT: vis params not supported, fall through to standard
-            EptTiler t(tileablePath.string(), outputFolder.string(), tileSize, tms);
+            // COPC: vis params not supported, fall through to standard
+            PointCloudTiler t(tileablePath.string(), outputFolder.string(), tileSize, tms);
             return t.tile(tz, tx, ty, outBuffer, outBufferSize);
         }
         else
@@ -257,10 +257,10 @@ namespace ddb
     {
         Tiler *tiler;
 
-        if (io::Path(input).checkExtension({"json"}))
+        if (isCopcPath(input.string()))
         {
-            // Assume EPT
-            tiler = new EptTiler(input.string(), output.string(), tileSize, tms);
+            // COPC point cloud
+            tiler = new PointCloudTiler(input.string(), output.string(), tileSize, tms);
         }
         else
         {

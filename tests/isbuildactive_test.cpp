@@ -115,9 +115,9 @@ TEST_F(IsBuildActiveTest, PointCloudFileWithActiveBuild) {
     fs::path relativePath = fs::relative(pointCloudPath, dbPath);
     EXPECT_TRUE(ddb::getEntry(db.get(), relativePath.string(), pcEntry));
 
-    // Construct build path for point cloud (EPT) - ensure directory exists
+    // Construct build path for point cloud (COPC) - ensure directory exists
     std::string buildPath = db->buildDirectory().string();
-    fs::path pcOutputPath = fs::path(buildPath) / pcEntry.hash / "ept";
+    fs::path pcOutputPath = fs::path(buildPath) / pcEntry.hash / "copc";
     fs::create_directories(pcOutputPath.parent_path());
 
     // Create a build lock to simulate active build

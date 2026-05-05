@@ -1,8 +1,8 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
-#ifndef EPTTILER_H
-#define EPTTILER_H
+#ifndef PCTILER_H
+#define PCTILER_H
 
 #include "gdal_inc.h"
 
@@ -18,17 +18,19 @@
 namespace ddb
 {
 
-    class EptTiler : public Tiler
+    // Tiler that renders web-map raster tiles from a built COPC (.copc.laz) file
+    // using PDAL's CopcReader. Drop-in replacement for the previous EptTiler.
+    class PointCloudTiler : public Tiler
     {
         int wSize;
-        PointCloudInfo eptInfo;
+        PointCloudInfo pcInfo;
         bool hasColors;
 
     public:
-        DDB_DLL EptTiler(const std::string &eptPath,
-                         const std::string &outputFolder, int tileSize = 256,
-                         bool tms = false);
-        DDB_DLL ~EptTiler();
+        DDB_DLL PointCloudTiler(const std::string &copcPath,
+                                const std::string &outputFolder, int tileSize = 256,
+                                bool tms = false);
+        DDB_DLL ~PointCloudTiler();
 
         DDB_DLL std::string tile(int tz, int tx, int ty, uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr) override;
     };
@@ -38,4 +40,4 @@ namespace ddb
 
 } // namespace ddb
 
-#endif // EPTTILER_H
+#endif // PCTILER_H
