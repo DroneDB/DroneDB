@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-#include "epttiler.h"
+#include "pctiler.h"
 
 #include <mutex>
 #include <memory>
@@ -10,7 +10,7 @@
 
 #include <pdal/Options.hpp>
 #include <pdal/PointTable.hpp>
-#include <pdal/io/EptReader.hpp>
+#include <pdal/io/CopcReader.hpp>
 #include <pdal/filters/ColorinterpFilter.hpp>
 
 #include "entry.h"
@@ -24,24 +24,24 @@
 namespace ddb
 {
 
-    EptTiler::EptTiler(const std::string &inputPath, const std::string &outputFolder,
+    PointCloudTiler::PointCloudTiler(const std::string &inputPath, const std::string &outputFolder,
                        int tileSize, bool tms)
         : Tiler(inputPath, outputFolder, tileSize, tms),
           wSize(tileSize * tileSize)
     {
 
-        // Open EPT
+        // Open COPC and gather metadata
         int span;
-        if (!getEptInfo(inputPath, eptInfo, 3857, &span))
-            throw InvalidArgsException("Cannot get EPT info for " + inputPath);
+        if (!getCopcInfo(inputPath, pcInfo, 3857, &span))
+            throw InvalidArgsException("Cannot get COPC info for " + inputPath);
 
-        if (eptInfo.wktProjection.empty())
-            throw InvalidArgsException("EPT file has no WKT SRS: " + inputPath);
+        if (pcInfo.wktProjection.empty())
+            throw InvalidArgsException("COPC file has no WKT SRS: " + inputPath);
 
-        oMinX = eptInfo.polyBounds.getPoint(0).x;
-        oMaxX = eptInfo.polyBounds.getPoint(2).x;
-        oMaxY = eptInfo.polyBounds.getPoint(2).y;
-        oMinY = eptInfo.polyBounds.getPoint(0).y;
+        oMinX = pcInfo.polyBounds.getPoint(0).x;
+        oMaxX = pcInfo.polyBounds.getPoint(2).x;
+        oMaxY = pcInfo.polyBounds.getPoint(2).y;
+        oMinY = pcInfo.polyBounds.getPoint(0).y;
 
         LOGD << "Bounds (output SRS): (" << oMinX << "; " << oMinY << ") - ("
              << oMaxX << "; " << oMaxY << ")";
@@ -53,9 +53,9 @@ namespace ddb
         LOGD << "MinZ: " << tMinZ;
         LOGD << "MaxZ: " << tMaxZ;
 
-        hasColors = std::find(eptInfo.dimensions.begin(), eptInfo.dimensions.end(), "Red") != eptInfo.dimensions.end() &&
-                    std::find(eptInfo.dimensions.begin(), eptInfo.dimensions.end(), "Green") != eptInfo.dimensions.end() &&
-                    std::find(eptInfo.dimensions.begin(), eptInfo.dimensions.end(), "Blue") != eptInfo.dimensions.end();
+        hasColors = std::find(pcInfo.dimensions.begin(), pcInfo.dimensions.end(), "Red") != pcInfo.dimensions.end() &&
+                    std::find(pcInfo.dimensions.begin(), pcInfo.dimensions.end(), "Green") != pcInfo.dimensions.end() &&
+                    std::find(pcInfo.dimensions.begin(), pcInfo.dimensions.end(), "Blue") != pcInfo.dimensions.end();
         LOGD << "Has colors: " << (hasColors ? "true" : "false");
 
 #ifdef _WIN32
@@ -73,11 +73,11 @@ namespace ddb
 #endif
     }
 
-    EptTiler::~EptTiler()
+    PointCloudTiler::~PointCloudTiler()
     {
     }
 
-    std::string EptTiler::tile(int tz, int tx, int ty, uint8_t **outBuffer, int *outBufferSize)
+    std::string PointCloudTiler::tile(int tz, int tx, int ty, uint8_t **outBuffer, int *outBufferSize)
     {
         std::string tilePath = getTilePath(tz, tx, ty, true);
 
@@ -108,26 +108,26 @@ namespace ddb
         bounds.min.y -= boundsBufSize;
         bounds.max.y += boundsBufSize;
 
-        CoordsTransformer ct(3857, eptInfo.wktProjection);
+        CoordsTransformer ct(3857, pcInfo.wktProjection);
         ct.transform(&bounds.min.x, &bounds.min.y);
         ct.transform(&bounds.max.x, &bounds.max.y);
 
-        pdal::Options eptOpts;
+        pdal::Options copcOpts;
         fs::path path(inputPath);
-        eptOpts.add("filename", (!utils::isNetworkPath(inputPath) && path.is_relative()) ? ("." / path).string() : inputPath);
+        copcOpts.add("filename", (!utils::isNetworkPath(inputPath) && path.is_relative()) ? ("." / path).string() : inputPath);
 
         std::stringstream ss;
-        ss << std::setprecision(14) << "([" << bounds.min.x << "," << bounds.min.y << "], " << "[" << bounds.max.x << "," << bounds.max.y << "])";
-        eptOpts.add("bounds", ss.str());
-        LOGD << "EPT bounds: " << ss.str();
+        ss << std::setprecision(14) << "([" << bounds.min.x << "," << bounds.max.x << "]," << "[" << bounds.min.y << "," << bounds.max.y << "])";
+        copcOpts.add("bounds", ss.str());
+        LOGD << "COPC bounds: " << ss.str();
 
-        double eptResolution = mercator.resolution(tz - 2);
-        eptOpts.add("resolution", eptResolution);
-        LOGD << "EPT resolution: " << eptResolution;
+        double copcResolution = mercator.resolution(tz - 2);
+        copcOpts.add("resolution", copcResolution);
+        LOGD << "COPC resolution: " << copcResolution;
 
-        std::unique_ptr<pdal::EptReader> eptReader = std::make_unique<pdal::EptReader>();
-        pdal::Stage *main = eptReader.get();
-        eptReader->setOptions(eptOpts);
+        std::unique_ptr<pdal::CopcReader> copcReader = std::make_unique<pdal::CopcReader>();
+        pdal::Stage *main = copcReader.get();
+        copcReader->setOptions(copcOpts);
         LOGD << "Options set";
 
         std::unique_ptr<pdal::ColorinterpFilter> colorFilter;
@@ -139,14 +139,14 @@ namespace ddb
                 colorFilter.reset(new pdal::ColorinterpFilter());
 
                 // Add ramp filter
-                LOGD << "Adding ramp filter (" << eptInfo.bounds[2] << ", " << eptInfo.bounds[5] << ")";
+                LOGD << "Adding ramp filter (" << pcInfo.bounds[2] << ", " << pcInfo.bounds[5] << ")";
 
                 pdal::Options cfOpts;
                 cfOpts.add("ramp", "pestel_shades");
-                cfOpts.add("minimum", eptInfo.bounds[2]);
-                cfOpts.add("maximum", eptInfo.bounds[5]);
+                cfOpts.add("minimum", pcInfo.bounds[2]);
+                cfOpts.add("maximum", pcInfo.bounds[5]);
                 colorFilter->setOptions(cfOpts);
-                colorFilter->setInput(*eptReader);
+                colorFilter->setInput(*copcReader);
                 main = colorFilter.get();
             }
             catch (const pdal::pdal_error &e)
@@ -154,7 +154,7 @@ namespace ddb
                 LOGD << "ColorinterpFilter failed: " << e.what() << ". Proceeding without color filter.";
                 colorFilterFailed = true;
                 colorFilter.reset();
-                main = eptReader.get();
+                main = copcReader.get();
             }
         }
 
@@ -204,7 +204,7 @@ namespace ddb
         const double paddedTileScaleW = paddedTileSize / (tileBounds.max.x - tileBounds.min.x + pointRadiusMeters * 2.0);
         const double paddedTileScaleH = paddedTileSize / (tileBounds.max.y - tileBounds.min.y + pointRadiusMeters * 2.0);
 
-        CoordsTransformer ict(eptInfo.wktProjection, 3857);
+        CoordsTransformer ict(pcInfo.wktProjection, 3857);
 
         bool normalize = false;
         for (pdal::PointId idx = 0; idx < point_view->size(); ++idx)

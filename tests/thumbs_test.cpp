@@ -51,36 +51,36 @@ TEST(thumbnail, ortho) {
     DDBVSIFree(buffer);
 }
 
-TEST(thumbnail, ept_file) {
+TEST(thumbnail, copc_file) {
     TestArea ta(TEST_NAME);
     fs::path pc = ta.downloadTestAsset(
         "https://github.com/DroneDB/test_data/raw/master/brighton/point_cloud.laz",
         "point_cloud.laz");
 
-    ddb::buildEpt({pc.string()}, ta.getFolder("ept").string());
+    ddb::buildCopc({pc.string()}, ta.getFolder("copc").string());
 
     fs::path outFile = ta.getPath("output.webp");
-    fs::path eptPath = ta.getPath(fs::path("ept") / "ept.json");
+    fs::path copcPath = ta.getPath(fs::path("copc") / "cloud.copc.laz");
 
-    ddb::generateThumb(eptPath, 256, outFile, true);
+    ddb::generateThumb(copcPath, 256, outFile, true);
 
     EXPECT_TRUE(fs::exists(outFile));
     EXPECT_TRUE(io::Path(outFile).getSize() > 0);
 }
 
-TEST(thumbnail, ept_memory) {
+TEST(thumbnail, copc_memory) {
     TestArea ta(TEST_NAME);
     fs::path pc = ta.downloadTestAsset(
         "https://github.com/DroneDB/test_data/raw/master/brighton/point_cloud.laz",
         "point_cloud.laz");
 
-    ddb::buildEpt({pc.string()}, ta.getFolder("ept").string());
+    ddb::buildCopc({pc.string()}, ta.getFolder("copc").string());
 
-    fs::path eptPath = ta.getPath(fs::path("ept") / "ept.json");
+    fs::path copcPath = ta.getPath(fs::path("copc") / "cloud.copc.laz");
 
     uint8_t* buffer;
     int bufSize;
-    ddb::generateThumb(eptPath, 256, "", true, &buffer, &bufSize);
+    ddb::generateThumb(copcPath, 256, "", true, &buffer, &bufSize);
 
     EXPECT_TRUE(bufSize > 0);
     EXPECT_TRUE(buffer != nullptr);
@@ -102,12 +102,12 @@ TEST(thumbnail, lewis_file) {
         "https://github.com/DroneDB/test_data/raw/refs/heads/master/point-clouds/lewis.laz",
         "lewis.laz");
 
-    ddb::buildEpt({pc.string()}, ta.getFolder("ept").string());
+    ddb::buildCopc({pc.string()}, ta.getFolder("copc").string());
 
     fs::path outFile = ta.getPath("output.webp");
-    fs::path eptPath = ta.getPath(fs::path("ept") / "ept.json");
+    fs::path copcPath = ta.getPath(fs::path("copc") / "cloud.copc.laz");
 
-    ddb::generateThumb(eptPath, 256, outFile, true);
+    ddb::generateThumb(copcPath, 256, outFile, true);
 
     EXPECT_TRUE(fs::exists(outFile));
     EXPECT_TRUE(io::Path(outFile).getSize() > 0);
@@ -140,21 +140,21 @@ bool isWebPImageNonEmpty(const fs::path& webpPath) {
     return isValidWebP(webpPath, MIN_THUMBNAIL_SIZE);
 }
 
-TEST(thumbnail, brightonsLazEpt) {
+TEST(thumbnail, brightonsLazCopc) {
     TestArea ta(TEST_NAME);
     fs::path pc = ta.downloadTestAsset(
         "https://github.com/DroneDB/test_data/raw/master/brighton/point_cloud.laz",
         "point_cloud.laz");
 
-    // Build EPT from LAZ file
-    ddb::buildEpt({pc.string()}, ta.getFolder("ept").string());
+    // Build COPC from LAZ file
+    ddb::buildCopc({pc.string()}, ta.getFolder("copc").string());
 
-    fs::path eptPath = ta.getPath(fs::path("ept") / "ept.json");
-    EXPECT_TRUE(fs::exists(eptPath)) << "EPT file should exist after buildEpt";
+    fs::path copcPath = ta.getPath(fs::path("copc") / "cloud.copc.laz");
+    EXPECT_TRUE(fs::exists(copcPath)) << "COPC file should exist after buildCopc";
 
     // Generate WebP thumbnail
     fs::path outFile = ta.getPath("brighton_thumbnail.webp");
-    ddb::generateThumb(eptPath, 256, outFile, true);
+    ddb::generateThumb(copcPath, 256, outFile, true);
 
     // Verify thumbnail exists and is not empty
     EXPECT_TRUE(fs::exists(outFile)) << "Thumbnail file should exist";
@@ -162,21 +162,21 @@ TEST(thumbnail, brightonsLazEpt) {
 
 }
 
-TEST(thumbnail, toledoLazEpt) {
+TEST(thumbnail, toledoLazCopc) {
     TestArea ta(TEST_NAME);
     fs::path pc = ta.downloadTestAsset(
         "https://github.com/DroneDB/test_data/raw/refs/heads/master/point-clouds/toledo.laz",
         "toledo_point_cloud.laz");
 
-    // Build EPT from Toledo LAZ file
-    ddb::buildEpt({pc.string()}, ta.getFolder("toledo_ept").string());
+    // Build COPC from Toledo LAZ file
+    ddb::buildCopc({pc.string()}, ta.getFolder("toledo_copc").string());
 
-    fs::path eptPath = ta.getPath(fs::path("toledo_ept") / "ept.json");
-    EXPECT_TRUE(fs::exists(eptPath)) << "Toledo EPT file should exist after buildEpt";
+    fs::path copcPath = ta.getPath(fs::path("toledo_copc") / "cloud.copc.laz");
+    EXPECT_TRUE(fs::exists(copcPath)) << "Toledo COPC file should exist after buildCopc";
 
     // Generate WebP thumbnail with different size
     fs::path outFile = ta.getPath("toledo_thumbnail.webp");
-    ddb::generateThumb(eptPath, 512, outFile, true);
+    ddb::generateThumb(copcPath, 512, outFile, true);
 
     // Verify thumbnail exists and is not empty
     EXPECT_TRUE(fs::exists(outFile)) << "Toledo thumbnail file should exist";
@@ -184,7 +184,7 @@ TEST(thumbnail, toledoLazEpt) {
 
     // Test that a larger thumbnail has more data
     fs::path smallThumb = ta.getPath("toledo_small.webp");
-    ddb::generateThumb(eptPath, 128, smallThumb, true);
+    ddb::generateThumb(copcPath, 128, smallThumb, true);
 
     EXPECT_TRUE(fs::exists(smallThumb)) << "Small thumbnail should exist";
     EXPECT_TRUE(isWebPImageNonEmpty(smallThumb)) << "Small thumbnail should not be empty";
@@ -198,11 +198,11 @@ TEST(thumbnail, toledoLazEpt) {
     // Test in-memory generation for both sizes
     uint8_t* buffer512;
     int bufSize512;
-    ddb::generateThumb(eptPath, 512, "", true, &buffer512, &bufSize512);
+    ddb::generateThumb(copcPath, 512, "", true, &buffer512, &bufSize512);
 
     uint8_t* buffer128;
     int bufSize128;
-    ddb::generateThumb(eptPath, 128, "", true, &buffer128, &bufSize128);
+    ddb::generateThumb(copcPath, 128, "", true, &buffer128, &bufSize128);
 
     EXPECT_TRUE(bufSize512 > 100) << "512px in-memory thumbnail should have reasonable size";
     EXPECT_TRUE(bufSize128 > 100) << "128px in-memory thumbnail should have reasonable size";
@@ -220,15 +220,15 @@ TEST(thumbnail, pointCloudScalarField) {
         "https://github.com/DroneDB/test_data/raw/master/point-clouds/point-cloud-scalar-field.laz",
         "point_cloud.laz");
 
-    // Build EPT from LAZ file
-    ddb::buildEpt({pc.string()}, ta.getFolder("ept").string());
+    // Build COPC from LAZ file
+    ddb::buildCopc({pc.string()}, ta.getFolder("copc").string());
 
-    fs::path eptPath = ta.getPath(fs::path("ept") / "ept.json");
-    EXPECT_TRUE(fs::exists(eptPath)) << "EPT file should exist after buildEpt";
+    fs::path copcPath = ta.getPath(fs::path("copc") / "cloud.copc.laz");
+    EXPECT_TRUE(fs::exists(copcPath)) << "COPC file should exist after buildCopc";
 
     // Generate WebP thumbnail
     fs::path outFile = ta.getPath("point-cloud-scalar-field.webp");
-    ddb::generateThumb(eptPath, 256, outFile, true);
+    ddb::generateThumb(copcPath, 256, outFile, true);
 
     // Verify thumbnail exists and is not empty
     EXPECT_TRUE(fs::exists(outFile)) << "Thumbnail file should exist";
@@ -242,15 +242,15 @@ TEST(thumbnail, pointCloudComplex) {
         "https://github.com/DroneDB/test_data/raw/master/point-clouds/point-cloud-complex.laz",
         "point_cloud.laz");
 
-    // Build EPT from LAZ file
-    ddb::buildEpt({pc.string()}, ta.getFolder("ept").string());
+    // Build COPC from LAZ file
+    ddb::buildCopc({pc.string()}, ta.getFolder("copc").string());
 
-    fs::path eptPath = ta.getPath(fs::path("ept") / "ept.json");
-    EXPECT_TRUE(fs::exists(eptPath)) << "EPT file should exist after buildEpt";
+    fs::path copcPath = ta.getPath(fs::path("copc") / "cloud.copc.laz");
+    EXPECT_TRUE(fs::exists(copcPath)) << "COPC file should exist after buildCopc";
 
     // Generate WebP thumbnail
     fs::path outFile = ta.getPath("point-cloud-complex.webp");
-    ddb::generateThumb(eptPath, 256, outFile, true);
+    ddb::generateThumb(copcPath, 256, outFile, true);
 
     // Verify thumbnail exists and is not empty
     EXPECT_TRUE(fs::exists(outFile)) << "Thumbnail file should exist";
@@ -489,7 +489,7 @@ TEST(thumbnail, inMemoryNullPointers) {
 }
 
 // =============================================================================
-// Point Cloud Edge Cases - buildEpt validation tests
+// Point Cloud Edge Cases - buildCopc validation tests
 // =============================================================================
 
 // Base URL for test data files in DroneDB/test_data repository
@@ -505,16 +505,15 @@ fs::path downloadTestDataFile(TestArea& ta, const std::string& relativePath) {
 }
 
 // Test for point cloud with single point (edge case)
-// buildEpt should throw InvalidArgsException for single-point clouds
+// buildCopc should throw InvalidArgsException for single-point clouds
 TEST(thumbnail, pointCloudSinglePoint) {
     TestArea ta(TEST_NAME);
     fs::path pc = downloadTestDataFile(ta, "pointcloud/pc_single_point.laz");
 
-    // buildEpt should throw InvalidArgsException for single-point clouds
-    // (preventive validation to avoid FPE in untwine)
-    EXPECT_THROW(ddb::buildEpt({pc.string()}, ta.getFolder("ept").string()),
+    // buildCopc should throw InvalidArgsException for single-point clouds
+    EXPECT_THROW(ddb::buildCopc({pc.string()}, ta.getFolder("copc").string()),
                  ddb::InvalidArgsException)
-        << "buildEpt should reject single-point clouds with InvalidArgsException";
+        << "buildCopc should reject single-point clouds with InvalidArgsException";
 }
 
 // Test for point cloud with flat surface (all Z values identical)
@@ -524,16 +523,16 @@ TEST(thumbnail, pointCloudFlatSurface) {
     TestArea ta(TEST_NAME);
     fs::path pc = downloadTestDataFile(ta, "pointcloud/pc_flat_surface.laz");
 
-    // Build EPT from LAZ file
+    // Build COPC from LAZ file
     // This may throw InvalidArgsException if the flat surface also has zero X/Y extent
     try {
-        ddb::buildEpt({pc.string()}, ta.getFolder("ept").string());
+        ddb::buildCopc({pc.string()}, ta.getFolder("copc").string());
 
-        fs::path eptPath = ta.getPath(fs::path("ept") / "ept.json");
-        EXPECT_TRUE(fs::exists(eptPath)) << "EPT file should exist after buildEpt";
+        fs::path copcPath = ta.getPath(fs::path("copc") / "cloud.copc.laz");
+        EXPECT_TRUE(fs::exists(copcPath)) << "COPC file should exist after buildCopc";
 
         fs::path outFile = ta.getPath("flat-surface-thumb.webp");
-        EXPECT_NO_THROW(ddb::generateThumb(eptPath, 256, outFile, true))
+        EXPECT_NO_THROW(ddb::generateThumb(copcPath, 256, outFile, true))
             << "Flat surface point cloud should generate thumbnail (all points same Z -> gray)";
         EXPECT_TRUE(fs::exists(outFile)) << "Flat surface thumbnail should exist";
         EXPECT_TRUE(isWebPImageNonEmpty(outFile)) << "Flat surface thumbnail should have content";

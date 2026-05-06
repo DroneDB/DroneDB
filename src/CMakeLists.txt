@@ -88,25 +88,11 @@ target_include_directories(${PROJECT_NAME} PUBLIC
 )
 
 # Include paths
-if (MINGW)
-    set(UNTWINE_OS_DIR untwine/mingw)
-elseif (WIN32)
-    set(UNTWINE_OS_DIR untwine/windows)
-elseif (APPLE)
-    set(UNTWINE_OS_DIR untwine/osx)
-elseif (UNIX)
-    set(UNTWINE_OS_DIR untwine/generic)
-else()
-    message(FATAL_ERROR "OS not supported")
-endif()
-
 find_path(BOOLINQ_INCLUDE_DIRS "boolinq/boolinq.h")
 
 set (CUSTOM_INCLUDE_DIRS
         ${BOOLINQ_INCLUDE_DIRS}
         ${BOOLINQ_INCLUDE_DIRS}/pdal
-        ${CMAKE_SOURCE_DIR}/vendor/untwine
-        ${CMAKE_SOURCE_DIR}/vendor/untwine/${UNTWINE_OS_DIR}
         ${CMAKE_SOURCE_DIR}/vendor/libnexus
         ${CMAKE_SOURCE_DIR}/vendor/glob
         )

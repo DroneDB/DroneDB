@@ -6,14 +6,14 @@
 #include <cstdlib>
 #include <iomanip>
 #include <pdal/filters/ColorinterpFilter.hpp>
-#include <pdal/io/EptReader.hpp>
+#include <pdal/io/CopcReader.hpp>
 #include <sstream>
 #include <algorithm>
 #include <cmath>
 
 #include "coordstransformer.h"
 #include "dbops.h"
-#include "epttiler.h"
+#include "pctiler.h"
 #include "exceptions.h"
 #include "gdal_inc.h"
 #include "hash.h"
@@ -60,8 +60,8 @@ void generateThumbs(const std::vector<std::string>& input,
         const EntryType type = fingerprint(fp);
         io::Path p(fp);
 
-        // NOTE: This check is looking pretty ugly, maybe move "ept.json" in a const?
-        if (supportsThumbnails(type) || fp.filename() == "ept.json") {
+        // Point clouds are recognized by the .copc.laz suffix produced by buildCopc().
+        if (supportsThumbnails(type) || isCopcPath(fp.string())) {
             fs::path outImagePath;
             if (useCrc) {
                 outImagePath = output / getThumbFilename(fp, p.getModifiedTime(), thumbSize);
@@ -983,22 +983,22 @@ int renderPoints(pdal::PointViewPtr point_view,
     return pointsRendered;
 }
 
-void generatePointCloudThumb(const fs::path& eptPath,
+void generatePointCloudThumb(const fs::path& copcPath,
                              int thumbSize,
                              const fs::path& outImagePath,
                              uint8_t** outBuffer,
                              int* outBufferSize) {
-    PointCloudInfo eptInfo;
+    PointCloudInfo pcInfo;
 
-    // Load EPT information
+    // Load COPC information
     int span;
-    if (!getEptInfo(eptPath.string(), eptInfo, 3857, &span)) {
-        throw InvalidArgsException("Cannot get EPT info for " + eptPath.string());
+    if (!getCopcInfo(copcPath.string(), pcInfo, 3857, &span)) {
+        throw InvalidArgsException("Cannot get COPC info for " + copcPath.string());
     }
 
     // Validate bounds array has required elements (minX, minY, minZ, maxX, maxY, maxZ)
-    if (eptInfo.bounds.size() < 6) {
-        throw InvalidArgsException("EPT bounds array does not contain at least 6 elements (minX, minY, minZ, maxX, maxY, maxZ required)");
+    if (pcInfo.bounds.size() < 6) {
+        throw InvalidArgsException("COPC bounds array does not contain at least 6 elements (minX, minY, minZ, maxX, maxY, maxZ required)");
     }
 
     const auto tileSize = thumbSize;
@@ -1006,18 +1006,18 @@ void generatePointCloudThumb(const fs::path& eptPath,
 
     // Calculate bounds based on spatial reference system
     double oMinX, oMaxX, oMaxY, oMinY;
-    bool hasSpatialSystem = !eptInfo.wktProjection.empty() && !eptInfo.polyBounds.empty();
+    bool hasSpatialSystem = !pcInfo.wktProjection.empty() && !pcInfo.polyBounds.empty();
 
     if (hasSpatialSystem) {
-        oMinX = eptInfo.polyBounds.getPoint(0).x;
-        oMaxX = eptInfo.polyBounds.getPoint(2).x;
-        oMaxY = eptInfo.polyBounds.getPoint(2).y;
-        oMinY = eptInfo.polyBounds.getPoint(0).y;
+        oMinX = pcInfo.polyBounds.getPoint(0).x;
+        oMaxX = pcInfo.polyBounds.getPoint(2).x;
+        oMaxY = pcInfo.polyBounds.getPoint(2).y;
+        oMinY = pcInfo.polyBounds.getPoint(0).y;
     } else {
-        oMinX = eptInfo.bounds[0];
-        oMinY = eptInfo.bounds[1];
-        oMaxX = eptInfo.bounds[3];
-        oMaxY = eptInfo.bounds[4];
+        oMinX = pcInfo.bounds[0];
+        oMinY = pcInfo.bounds[1];
+        oMaxX = pcInfo.bounds[3];
+        oMaxY = pcInfo.bounds[4];
     }
 
     // Calculate length for zoom level determination
@@ -1025,10 +1025,10 @@ void generatePointCloudThumb(const fs::path& eptPath,
 
     if (length == 0) {
         // Fallback to raw bounds if transformed bounds are invalid
-        oMinX = eptInfo.bounds[0];
-        oMaxX = eptInfo.bounds[3];
-        oMaxY = eptInfo.bounds[4];
-        oMinY = eptInfo.bounds[1];
+        oMinX = pcInfo.bounds[0];
+        oMaxX = pcInfo.bounds[3];
+        oMaxY = pcInfo.bounds[4];
+        oMinY = pcInfo.bounds[1];
 
         length = std::min(std::abs(oMaxX - oMinX), std::abs(oMaxY - oMinY));
 
@@ -1042,12 +1042,12 @@ void generatePointCloudThumb(const fs::path& eptPath,
     // Determine zoom level and check for color dimensions
     const auto tMinZ = mercator.zoomForLength(length);
     const auto hasColors =
-        std::find(eptInfo.dimensions.begin(), eptInfo.dimensions.end(), "Red") !=
-            eptInfo.dimensions.end() &&
-        std::find(eptInfo.dimensions.begin(), eptInfo.dimensions.end(), "Green") !=
-            eptInfo.dimensions.end() &&
-        std::find(eptInfo.dimensions.begin(), eptInfo.dimensions.end(), "Blue") !=
-            eptInfo.dimensions.end();
+        std::find(pcInfo.dimensions.begin(), pcInfo.dimensions.end(), "Red") !=
+            pcInfo.dimensions.end() &&
+        std::find(pcInfo.dimensions.begin(), pcInfo.dimensions.end(), "Green") !=
+            pcInfo.dimensions.end() &&
+        std::find(pcInfo.dimensions.begin(), pcInfo.dimensions.end(), "Blue") !=
+            pcInfo.dimensions.end();
 
 #ifdef _WIN32
     const fs::path caBundlePath = io::getDataPath("curl-ca-bundle.crt");
@@ -1061,20 +1061,20 @@ void generatePointCloudThumb(const fs::path& eptPath,
     }
 #endif
 
-    // Configure EPT reader options
+    // Configure COPC reader options
     const auto tz = tMinZ;
     double resolution = tz < 0 ? 1 : mercator.resolution(tz);
 
-    pdal::Options eptOpts;
-    eptOpts.add("filename",
-                (!utils::isNetworkPath(eptPath.string()) && eptPath.is_relative())
-                    ? ("." / eptPath).string()
-                    : eptPath.string());
-    eptOpts.add("resolution", resolution);
+    pdal::Options copcOpts;
+    copcOpts.add("filename",
+                (!utils::isNetworkPath(copcPath.string()) && copcPath.is_relative())
+                    ? ("." / copcPath).string()
+                    : copcPath.string());
+    copcOpts.add("resolution", resolution);
 
-    std::unique_ptr<pdal::EptReader> eptReader = std::make_unique<pdal::EptReader>();
-    pdal::Stage* main = eptReader.get();
-    eptReader->setOptions(eptOpts);
+    std::unique_ptr<pdal::CopcReader> copcReader = std::make_unique<pdal::CopcReader>();
+    pdal::Stage* main = copcReader.get();
+    copcReader->setOptions(copcOpts);
 
     // Execute PDAL pipeline with comprehensive error handling
     pdal::PointTable table;
@@ -1130,11 +1130,11 @@ void generatePointCloudThumb(const fs::path& eptPath,
     // Generate colors based on available data
     std::vector<PointColor> colors = hasColors ?
         normalizeColors(point_view) :
-        generateZBasedColors(point_view, eptInfo.bounds[2], eptInfo.bounds[5]);
+        generateZBasedColors(point_view, pcInfo.bounds[2], pcInfo.bounds[5]);
 
     // Render points using appropriate coordinate transformation
     int pointsRendered = renderPoints(point_view, colors, hasSpatialSystem,
-                                     eptInfo.wktProjection, buffer.get(), alphaBuffer.get(),
+                                     pcInfo.wktProjection, buffer.get(), alphaBuffer.get(),
                                      zBuffer.get(), tileSize, tileScale, offsetX, offsetY,
                                      oMinX, oMinY);
 
@@ -1169,7 +1169,7 @@ fs::path generateThumb(const fs::path& inputPath,
     LOGD << "OutImagePath = " << outImagePath;
     LOGD << "Size = " << thumbSize;
 
-    if (inputPath.filename() == "ept.json")
+    if (isCopcPath(inputPath.string()))
         generatePointCloudThumb(inputPath, thumbSize, outImagePath, outBuffer, outBufferSize);
     else
         generateImageThumb(inputPath, thumbSize, outImagePath, outBuffer, outBufferSize);

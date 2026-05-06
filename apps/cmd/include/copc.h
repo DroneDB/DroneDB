@@ -2,18 +2,18 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-#ifndef EPT_CMD_H
-#define EPT_CMD_H
+#ifndef COPC_CMD_H
+#define COPC_CMD_H
 
 #include "command.h"
 
 namespace cmd
 {
 
-  class Ept : public Command
+  class Copc : public Command
   {
   public:
-    Ept() {}
+    Copc() {}
 
     virtual void run(cxxopts::ParseResult &opts) override;
     virtual void setOptions(cxxopts::Options &opts) override;
@@ -22,4 +22,4 @@ namespace cmd
 
 }
 
-#endif // EPT_CMD_H
+#endif // COPC_CMD_H
