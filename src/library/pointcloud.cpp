@@ -7,6 +7,7 @@
 #include <fstream>
 #include <limits>
 #include <sstream>
+#include <cctype>
 
 #include <pdal/PipelineManager.hpp>
 #include <pdal/PointRef.hpp>

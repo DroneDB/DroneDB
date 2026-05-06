@@ -70,11 +70,11 @@ TEST(pointcloud, copcFromPly) {
     EXPECT_TRUE(plyInfo.bounds.empty()) << "PLY files should not have bounds in metadata";
     EXPECT_GT(plyInfo.pointCount, 0) << "PLY file should have points";
 
-    // Build EPT from PLY - this should work by reading bounds from converted LAS
+    // Build COPC from PLY - this should work by reading bounds from converted LAS
     ddb::buildCopc({pc.string()}, ta.getFolder("copc").string());
     EXPECT_TRUE(fs::exists(ta.getFolder("copc") / "cloud.copc.laz")) << "COPC generation from PLY should succeed";
 
-    // Verify the generated EPT has valid bounds
+    // Verify the generated COPC has valid bounds
     ddb::PointCloudInfo copcInfo;
     EXPECT_TRUE(ddb::getCopcInfo((ta.getFolder("copc") / "cloud.copc.laz").string(), copcInfo));
     EXPECT_EQ(copcInfo.bounds.size(), 6) << "COPC should have 6 bounds values";
@@ -146,11 +146,11 @@ TEST(pointcloud, copcFromPts) {
     auto fp = ddb::fingerprint(pc);
     EXPECT_TRUE(fp == ddb::EntryType::PointCloud);
 
-    // Build EPT from PTS - this should work by converting to LAS first
+    // Build COPC from PTS - this should work by converting to LAS first
     ddb::buildCopc({pc.string()}, ta.getFolder("copc").string());
     EXPECT_TRUE(fs::exists(ta.getFolder("copc") / "cloud.copc.laz")) << "COPC generation from PTS should succeed";
 
-    // Verify the generated EPT has valid bounds
+    // Verify the generated COPC has valid bounds
     ddb::PointCloudInfo copcInfo;
     EXPECT_TRUE(ddb::getCopcInfo((ta.getFolder("copc") / "cloud.copc.laz").string(), copcInfo));
     EXPECT_EQ(copcInfo.bounds.size(), 6) << "COPC should have 6 bounds values";
@@ -166,11 +166,11 @@ TEST(pointcloud, copcFromXyz) {
     auto fp = ddb::fingerprint(pc);
     EXPECT_TRUE(fp == ddb::EntryType::PointCloud);
 
-    // Build EPT from XYZ - this should work by converting to LAS first
+    // Build COPC from XYZ - this should work by converting to LAS first
     ddb::buildCopc({pc.string()}, ta.getFolder("copc").string());
     EXPECT_TRUE(fs::exists(ta.getFolder("copc") / "cloud.copc.laz")) << "COPC generation from XYZ should succeed";
 
-    // Verify the generated EPT has valid bounds
+    // Verify the generated COPC has valid bounds
     ddb::PointCloudInfo copcInfo;
     EXPECT_TRUE(ddb::getCopcInfo((ta.getFolder("copc") / "cloud.copc.laz").string(), copcInfo));
     EXPECT_EQ(copcInfo.bounds.size(), 6) << "COPC should have 6 bounds values";
@@ -200,11 +200,11 @@ TEST(pointcloud, copcFromE57) {
     auto fp = ddb::fingerprint(pc);
     EXPECT_TRUE(fp == ddb::EntryType::PointCloud);
 
-    // Build EPT from E57 - this should work by converting to LAS first
+    // Build COPC from E57 - this should work by converting to LAS first
     ddb::buildCopc({pc.string()}, ta.getFolder("copc").string());
     EXPECT_TRUE(fs::exists(ta.getFolder("copc") / "cloud.copc.laz")) << "COPC generation from E57 should succeed";
 
-    // Verify the generated EPT has valid bounds
+    // Verify the generated COPC has valid bounds
     ddb::PointCloudInfo copcInfo;
     EXPECT_TRUE(ddb::getCopcInfo((ta.getFolder("copc") / "cloud.copc.laz").string(), copcInfo));
     EXPECT_EQ(copcInfo.bounds.size(), 6) << "COPC should have 6 bounds values";

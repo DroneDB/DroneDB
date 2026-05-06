@@ -511,7 +511,6 @@ TEST(thumbnail, pointCloudSinglePoint) {
     fs::path pc = downloadTestDataFile(ta, "pointcloud/pc_single_point.laz");
 
     // buildCopc should throw InvalidArgsException for single-point clouds
-    // (preventive validation to avoid FPE in untwine)
     EXPECT_THROW(ddb::buildCopc({pc.string()}, ta.getFolder("copc").string()),
                  ddb::InvalidArgsException)
         << "buildCopc should reject single-point clouds with InvalidArgsException";
