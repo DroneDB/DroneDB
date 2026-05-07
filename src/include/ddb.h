@@ -277,6 +277,19 @@ extern "C"
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBBuild(const char *ddbPath, const char *source = nullptr, const char *dest = nullptr, bool force = false, bool pendingOnly = false);
 
+    /** Cleanup a dataset:
+     *   1. Remove from the database all (non-directory) entries whose underlying
+     *      file no longer exists on the filesystem.
+     *   2. Remove orphaned build artifacts whose hash no longer corresponds to
+     *      any entry. Subdirectories with an active (live-PID) build lock are
+     *      skipped.
+     * @param ddbPath path to a DroneDB database (parent of ".ddb")
+     * @param output pointer to C-string with a JSON object of the form
+     *               { "entries": [...], "builds": [...] } listing what was
+     *               removed (caller must free with DDBFree)
+     * @return DDBERR_NONE on success, an error otherwise */
+    DDB_DLL DDBErr DDBCleanup(const char *ddbPath, char **output);
+
     /** IsBuildable
      * @param ddbPath path to the source DroneDB database (parent of ".ddb")
      * @param path Entry path

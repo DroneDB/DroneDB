@@ -5,9 +5,11 @@
 #include "build.h"
 
 #include <algorithm>
+#include <cctype>
 #include <fstream>
 #include <optional>
 #include <sstream>
+#include <unordered_set>
 
 #include "3d.h"
 #include "buildlock.h"
@@ -440,6 +442,186 @@ bool isBuildPending(Database* db) {
     }
 
     return false;
+}
+
+CleanupResult cleanupBuild(Database* db, const std::string& outputPath) {
+    CleanupResult result;
+
+    // -------- Phase 1: remove DB entries whose underlying file is gone --------
+    const fs::path rootDir = db->rootDirectory();
+    std::vector<std::string> missingPaths;
+
+    {
+        auto qEntries = db->query(
+            "SELECT path FROM entries WHERE type <> ? ORDER BY path");
+        qEntries->bind(1, EntryType::Directory);
+        while (qEntries->fetch()) {
+            const std::string entryPath = qEntries->getText(0);
+            std::error_code existsErr;
+            const bool present = fs::exists(rootDir / entryPath, existsErr);
+            if (existsErr) {
+                LOGW << "Cannot stat '" << entryPath
+                     << "' (skipping): " << existsErr.message();
+                continue;
+            }
+            if (!present)
+                missingPaths.push_back(entryPath);
+        }
+    }
+
+    if (!missingPaths.empty()) {
+        LOGD << "cleanupBuild: removing " << missingPaths.size()
+             << " stale DB entry/entries";
+        // Remove entries one at a time so that a failure on a single path
+        // does not lose the record of paths that were actually removed.
+        // removeFromIndex expects absolute paths (it computes the relative
+        // form internally via io::Path::relativeTo).
+        for (const auto& rel : missingPaths) {
+            const std::string absPath = (rootDir / rel).string();
+            try {
+                removeFromIndex(db, std::vector<std::string>{absPath});
+                result.removedEntries.push_back(rel);
+            } catch (const AppException& e) {
+                LOGW << "Failed to remove stale DB entry '" << rel
+                     << "': " << e.what();
+            }
+        }
+    }
+
+    // -------- Phase 2: remove orphan build artifacts --------
+    const fs::path buildDir = outputPath.empty() ? db->buildDirectory() : fs::path(outputPath);
+    std::error_code dirExistsErr;
+    if (!fs::exists(buildDir, dirExistsErr)) {
+        if (dirExistsErr)
+            LOGW << "Cannot check build directory '" << buildDir.string()
+                 << "': " << dirExistsErr.message();
+        else
+            LOGD << "Build directory does not exist: " << buildDir.string();
+        return result;
+    }
+
+    // Collect valid hashes from DB (after phase 1)
+    std::unordered_set<std::string> validHashes;
+    {
+        auto qHashes = db->query(
+            "SELECT DISTINCT hash FROM entries WHERE hash IS NOT NULL AND hash <> ''");
+        while (qHashes->fetch())
+            validHashes.insert(qHashes->getText(0));
+    }
+
+    LOGD << "cleanupBuild: " << validHashes.size() << " valid hash(es) in DB; scanning "
+         << buildDir.string();
+
+    // Build-artifact names are content hashes (currently SHA-256 hex, 64 chars).
+    // Validate the candidate name before deleting so we never wipe unrelated
+    // files/directories that may live in a user-specified output path.
+    auto isHashLike = [](const std::string& s) {
+        if (s.size() != 64)
+            return false;
+        for (unsigned char c : s) {
+            if (!std::isxdigit(c))
+                return false;
+        }
+        return true;
+    };
+
+    std::error_code iterErr;
+    fs::directory_iterator it(buildDir, iterErr);
+    if (iterErr) {
+        LOGW << "Cannot open build directory '" << buildDir.string()
+             << "': " << iterErr.message();
+        return result;
+    }
+
+    const fs::directory_iterator end;
+    for (; it != end; it.increment(iterErr)) {
+        if (iterErr) {
+            LOGW << "Error iterating build directory '" << buildDir.string()
+                 << "': " << iterErr.message();
+            break;
+        }
+
+        const auto& entry = *it;
+        const auto& p = entry.path();
+        const std::string name = p.filename().string();
+
+        std::error_code typeErr;
+        if (entry.is_directory(typeErr)) {
+            // Directory name is expected to be a content hash. Skip anything
+            // that doesn't look like one to avoid clobbering unrelated dirs.
+            if (!isHashLike(name)) {
+                LOGD << "Skipping non-hash directory: " << p.string();
+                continue;
+            }
+            if (validHashes.find(name) != validHashes.end())
+                continue;  // still referenced
+
+            // Lock files live one level deep: <hash>/<subfolder>.building.
+            // Use a non-recursive scan and treat any iteration error as
+            // "potentially active" to avoid wrongly deleting a locked dir.
+            bool skip = false;
+            std::error_code subErr;
+            fs::directory_iterator subIt(p, subErr);
+            if (subErr) {
+                LOGW << "Cannot scan orphan '" << p.string()
+                     << "' for active locks (" << subErr.message()
+                     << "); skipping removal as a precaution";
+                skip = true;
+            } else {
+                const fs::directory_iterator subEnd;
+                for (; !skip && subIt != subEnd; subIt.increment(subErr)) {
+                    if (subErr) {
+                        LOGW << "Iteration error inside '" << p.string()
+                             << "': " << subErr.message()
+                             << "; skipping removal as a precaution";
+                        skip = true;
+                        break;
+                    }
+                    if (subIt->path().extension() == ".building" &&
+                        !isLockFileStale(subIt->path().string())) {
+                        LOGD << "Skipping orphan with active build lock: " << p.string();
+                        skip = true;
+                        break;
+                    }
+                }
+            }
+
+            if (skip)
+                continue;
+
+            std::error_code rmErr;
+            fs::remove_all(p, rmErr);
+            if (rmErr) {
+                LOGW << "Failed to remove orphan build directory '" << p.string()
+                     << "': " << rmErr.message();
+            } else {
+                result.removedBuilds.push_back(p.string());
+                LOGD << "Removed orphan build directory: " << p.string();
+            }
+        } else if (entry.is_regular_file(typeErr) && p.extension() == ".pending") {
+            // .pending file naming convention: <hash>.pending. Validate the
+            // stem before deleting so we never touch unrelated *.pending files.
+            const std::string hash = p.stem().string();
+            if (!isHashLike(hash)) {
+                LOGD << "Skipping non-hash pending file: " << p.string();
+                continue;
+            }
+            if (validHashes.find(hash) != validHashes.end())
+                continue;
+
+            std::error_code rmErr;
+            fs::remove(p, rmErr);
+            if (rmErr) {
+                LOGW << "Failed to remove orphan pending file '" << p.string()
+                     << "': " << rmErr.message();
+            } else {
+                result.removedBuilds.push_back(p.string());
+                LOGD << "Removed orphan pending file: " << p.string();
+            }
+        }
+    }
+
+    return result;
 }
 
 // Helper functions for stale lock detection

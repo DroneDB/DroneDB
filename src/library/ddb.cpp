@@ -1065,6 +1065,28 @@ DDBBuild(const char* ddbPath, const char* source, const char* dest, bool force, 
     DDB_C_END
 }
 
+DDB_DLL DDBErr DDBCleanup(const char* ddbPath, char** output) {
+    DDB_C_BEGIN
+
+    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
+        throw InvalidArgsException("No ddb path provided");
+
+    if (output == nullptr)
+        throw InvalidArgsException("Output pointer is null");
+
+    const auto ddb = ddb::open(std::string(ddbPath), true);
+
+    const auto result = cleanupBuild(ddb.get(), "");
+
+    json j;
+    j["entries"] = result.removedEntries;
+    j["builds"] = result.removedBuilds;
+
+    utils::copyToPtr(j.dump(), output);
+
+    DDB_C_END
+}
+
 DDB_DLL DDBErr DDBIsBuildable(const char* ddbPath, const char* path, bool* isBuildable) {
     DDB_C_BEGIN
 

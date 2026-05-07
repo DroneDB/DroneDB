@@ -36,6 +36,7 @@
 #include "include/stac.h"
 #include "include/mask.h"
 #include "include/merge_multispectral.h"
+#include "include/cleanup.h"
 
 namespace cmd
 {
@@ -73,7 +74,8 @@ namespace cmd
       {"search", new Search()},
       {"stac", new Stac()},
       {"mask", new Mask()},
-      {"merge-multispectral", new MergeMultispectral()}};
+      {"merge-multispectral", new MergeMultispectral()},
+      {"cleanup", new Cleanup()}};
 
   std::map<std::string, std::string> aliases = {
       {"rm", "remove"},
