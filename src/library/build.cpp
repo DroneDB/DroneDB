@@ -5,6 +5,7 @@
 #include "build.h"
 
 #include <algorithm>
+#include <cctype>
 #include <fstream>
 #include <optional>
 #include <sstream>
@@ -471,21 +472,19 @@ CleanupResult cleanupBuild(Database* db, const std::string& outputPath) {
     if (!missingPaths.empty()) {
         LOGD << "cleanupBuild: removing " << missingPaths.size()
              << " stale DB entry/entries";
+        // Remove entries one at a time so that a failure on a single path
+        // does not lose the record of paths that were actually removed.
         // removeFromIndex expects absolute paths (it computes the relative
-        // form internally via io::Path::relativeTo). Convert before calling.
-        std::vector<std::string> absMissingPaths;
-        absMissingPaths.reserve(missingPaths.size());
-        for (const auto& rel : missingPaths)
-            absMissingPaths.push_back((rootDir / rel).string());
-
-        try {
-            removeFromIndex(db, absMissingPaths);
-            result.removedEntries = missingPaths;
-        } catch (const AppException& e) {
-            // Log and continue with the build cleanup phase: build artifacts
-            // associated with hashes no longer in the DB will still be cleaned
-            // up by phase 2.
-            LOGW << "Stale entry removal partially failed: " << e.what();
+        // form internally via io::Path::relativeTo).
+        for (const auto& rel : missingPaths) {
+            const std::string absPath = (rootDir / rel).string();
+            try {
+                removeFromIndex(db, std::vector<std::string>{absPath});
+                result.removedEntries.push_back(rel);
+            } catch (const AppException& e) {
+                LOGW << "Failed to remove stale DB entry '" << rel
+                     << "': " << e.what();
+            }
         }
     }
 
@@ -513,6 +512,19 @@ CleanupResult cleanupBuild(Database* db, const std::string& outputPath) {
     LOGD << "cleanupBuild: " << validHashes.size() << " valid hash(es) in DB; scanning "
          << buildDir.string();
 
+    // Build-artifact names are content hashes (currently SHA-256 hex, 64 chars).
+    // Validate the candidate name before deleting so we never wipe unrelated
+    // files/directories that may live in a user-specified output path.
+    auto isHashLike = [](const std::string& s) {
+        if (s.size() != 64)
+            return false;
+        for (unsigned char c : s) {
+            if (!std::isxdigit(c))
+                return false;
+        }
+        return true;
+    };
+
     std::error_code iterErr;
     fs::directory_iterator it(buildDir, iterErr);
     if (iterErr) {
@@ -535,7 +547,12 @@ CleanupResult cleanupBuild(Database* db, const std::string& outputPath) {
 
         std::error_code typeErr;
         if (entry.is_directory(typeErr)) {
-            // Directory name is expected to be a content hash
+            // Directory name is expected to be a content hash. Skip anything
+            // that doesn't look like one to avoid clobbering unrelated dirs.
+            if (!isHashLike(name)) {
+                LOGD << "Skipping non-hash directory: " << p.string();
+                continue;
+            }
             if (validHashes.find(name) != validHashes.end())
                 continue;  // still referenced
 
@@ -582,8 +599,13 @@ CleanupResult cleanupBuild(Database* db, const std::string& outputPath) {
                 LOGD << "Removed orphan build directory: " << p.string();
             }
         } else if (entry.is_regular_file(typeErr) && p.extension() == ".pending") {
-            // .pending file naming convention: <hash>.pending
+            // .pending file naming convention: <hash>.pending. Validate the
+            // stem before deleting so we never touch unrelated *.pending files.
             const std::string hash = p.stem().string();
+            if (!isHashLike(hash)) {
+                LOGD << "Skipping non-hash pending file: " << p.string();
+                continue;
+            }
             if (validHashes.find(hash) != validHashes.end())
                 continue;
 

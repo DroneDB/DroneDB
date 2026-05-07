@@ -294,6 +294,60 @@ namespace
         EXPECT_TRUE(fs::exists(stranger));
     }
 
+    TEST(cleanupBuild, IgnoresNonHashDirectory)
+    {
+        TestArea ta(TEST_NAME, true);
+        std::unique_ptr<Database> db;
+        std::vector<std::string> hashes;
+        setupIndexedDb(ta, db, hashes);
+
+        fs::path buildDir = db->buildDirectory();
+        fs::create_directories(buildDir);
+
+        // Directory whose name is not a 64-hex-char hash must be left alone.
+        fs::path legacy = buildDir / "legacy_data";
+        fs::create_directories(legacy);
+        std::ofstream(legacy / "keep.me") << "important";
+
+        // A real orphan alongside it gets removed normally.
+        fs::path orphan = makeFakeBuildDir(
+            buildDir, "8888888888888888888888888888888888888888888888888888888888888888");
+
+        auto result = ddb::cleanupBuild(db.get(), "");
+
+        ASSERT_EQ(result.removedBuilds.size(), 1u);
+        EXPECT_EQ(fs::path(result.removedBuilds[0]).filename(), orphan.filename());
+        EXPECT_TRUE(fs::exists(legacy));
+        EXPECT_TRUE(fs::exists(legacy / "keep.me"));
+        EXPECT_FALSE(fs::exists(orphan));
+    }
+
+    TEST(cleanupBuild, IgnoresNonHashPendingFile)
+    {
+        TestArea ta(TEST_NAME, true);
+        std::unique_ptr<Database> db;
+        std::vector<std::string> hashes;
+        setupIndexedDb(ta, db, hashes);
+
+        fs::path buildDir = db->buildDirectory();
+        fs::create_directories(buildDir);
+
+        // *.pending file whose stem isn't a hash must not be removed.
+        fs::path stranger = buildDir / "notes.pending";
+        std::ofstream(stranger) << "user notes";
+
+        // Real orphan pending alongside it is removed normally.
+        fs::path orphan = makeFakePendingFile(
+            buildDir, "4444444444444444444444444444444444444444444444444444444444444444");
+
+        auto result = ddb::cleanupBuild(db.get(), "");
+
+        ASSERT_EQ(result.removedBuilds.size(), 1u);
+        EXPECT_EQ(fs::path(result.removedBuilds[0]).filename(), orphan.filename());
+        EXPECT_TRUE(fs::exists(stranger));
+        EXPECT_FALSE(fs::exists(orphan));
+    }
+
     TEST(cleanupBuild, CustomOutputPath)
     {
         TestArea ta(TEST_NAME, true);
