@@ -8,6 +8,7 @@
 #include <fstream>
 #include <optional>
 #include <sstream>
+#include <unordered_set>
 
 #include "3d.h"
 #include "buildlock.h"
@@ -440,6 +441,90 @@ bool isBuildPending(Database* db) {
     }
 
     return false;
+}
+
+std::vector<std::string> cleanupBuild(Database* db, const std::string& outputPath) {
+    std::vector<std::string> removed;
+
+    const fs::path buildDir = outputPath.empty() ? db->buildDirectory() : fs::path(outputPath);
+    if (!fs::exists(buildDir)) {
+        LOGD << "Build directory does not exist: " << buildDir.string();
+        return removed;
+    }
+
+    // Collect valid hashes from DB
+    std::unordered_set<std::string> validHashes;
+    auto q = db->query("SELECT DISTINCT hash FROM entries WHERE hash IS NOT NULL AND hash <> ''");
+    while (q->fetch()) {
+        validHashes.insert(q->getText(0));
+    }
+
+    LOGD << "cleanupBuild: " << validHashes.size() << " valid hash(es) in DB; scanning "
+         << buildDir.string();
+
+    std::error_code iterErr;
+    for (const auto& entry : fs::directory_iterator(buildDir, iterErr)) {
+        if (iterErr) {
+            LOGW << "Cannot iterate build directory '" << buildDir.string()
+                 << "': " << iterErr.message();
+            break;
+        }
+
+        const auto& p = entry.path();
+        const std::string name = p.filename().string();
+
+        std::error_code typeErr;
+        if (entry.is_directory(typeErr)) {
+            // Directory name is expected to be a content hash
+            if (validHashes.find(name) != validHashes.end())
+                continue;  // still referenced
+
+            // Skip orphans that contain an active (non-stale) build lock
+            bool hasActiveLock = false;
+            std::error_code subErr;
+            auto subIt = fs::recursive_directory_iterator(p, subErr);
+            const fs::recursive_directory_iterator subEnd;
+            for (; !subErr && subIt != subEnd; subIt.increment(subErr)) {
+                if (subIt->path().extension() == ".building") {
+                    if (!isLockFileStale(subIt->path().string())) {
+                        hasActiveLock = true;
+                        LOGD << "Skipping orphan with active build lock: " << p.string();
+                        break;
+                    }
+                }
+            }
+
+            if (hasActiveLock)
+                continue;
+
+            std::error_code rmErr;
+            fs::remove_all(p, rmErr);
+            if (rmErr) {
+                LOGW << "Failed to remove orphan build directory '" << p.string()
+                     << "': " << rmErr.message();
+            } else {
+                removed.push_back(p.string());
+                LOGD << "Removed orphan build directory: " << p.string();
+            }
+        } else if (entry.is_regular_file(typeErr) && p.extension() == ".pending") {
+            // .pending file naming convention: <hash>.pending
+            const std::string hash = p.stem().string();
+            if (validHashes.find(hash) != validHashes.end())
+                continue;
+
+            std::error_code rmErr;
+            fs::remove(p, rmErr);
+            if (rmErr) {
+                LOGW << "Failed to remove orphan pending file '" << p.string()
+                     << "': " << rmErr.message();
+            } else {
+                removed.push_back(p.string());
+                LOGD << "Removed orphan pending file: " << p.string();
+            }
+        }
+    }
+
+    return removed;
 }
 
 // Helper functions for stale lock detection
