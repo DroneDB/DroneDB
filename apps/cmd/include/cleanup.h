@@ -2,6 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+#ifndef CLEANUP_H
+#define CLEANUP_H
+
 #include "command.h"
 
 namespace cmd
@@ -18,3 +21,5 @@ namespace cmd
   };
 
 }
+
+#endif // CLEANUP_H

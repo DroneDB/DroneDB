@@ -52,10 +52,12 @@ namespace
     }
 
     // Set up an indexed database with two text entries; returns the test area
-    // path and (via out-params) the hashes of the indexed entries.
+    // path and (via out-params) the hashes and absolute paths of the indexed
+    // entries.
     fs::path setupIndexedDb(TestArea &ta,
                             std::unique_ptr<Database> &db,
-                            std::vector<std::string> &outHashes)
+                            std::vector<std::string> &outHashes,
+                            std::vector<fs::path> &outFiles)
     {
         fs::path testFolder = ta.getFolder();
         ddb::initIndex(testFolder.string());
@@ -68,7 +70,8 @@ namespace
 
         ddb::addToIndex(db.get(), {f1.string(), f2.string()});
 
-        // Read back hashes from DB
+        outFiles = {f1, f2};
+
         outHashes.clear();
         auto q = db->query(
             "SELECT hash FROM entries WHERE hash IS NOT NULL AND hash <> '' ORDER BY path");
@@ -78,7 +81,26 @@ namespace
         return testFolder;
     }
 
-    // ---------- Tests ----------
+    fs::path setupIndexedDb(TestArea &ta,
+                            std::unique_ptr<Database> &db,
+                            std::vector<std::string> &outHashes)
+    {
+        std::vector<fs::path> files;
+        return setupIndexedDb(ta, db, outHashes, files);
+    }
+
+    // Count how many non-directory entries exist in the DB.
+    long countDataEntries(Database *db)
+    {
+        auto q = db->query("SELECT COUNT(*) FROM entries WHERE type <> ?");
+        q->bind(1, EntryType::Directory);
+        long n = 0;
+        if (q->fetch())
+            n = q->getInt64(0);
+        return n;
+    }
+
+    // ---------- Phase 2 (build orphan) tests ----------
 
     TEST(cleanupBuild, NoBuildDirectoryReturnsEmpty)
     {
@@ -87,9 +109,9 @@ namespace
         ddb::initIndex(testFolder.string());
         auto db = ddb::open(testFolder.string(), true);
 
-        // No build directory created yet; should be a no-op.
-        auto removed = ddb::cleanupBuild(db.get(), "");
-        EXPECT_TRUE(removed.empty());
+        auto result = ddb::cleanupBuild(db.get(), "");
+        EXPECT_TRUE(result.removedEntries.empty());
+        EXPECT_TRUE(result.removedBuilds.empty());
     }
 
     TEST(cleanupBuild, EmptyBuildDirectoryReturnsEmpty)
@@ -102,8 +124,8 @@ namespace
         fs::path buildDir = db->buildDirectory();
         fs::create_directories(buildDir);
 
-        auto removed = ddb::cleanupBuild(db.get(), "");
-        EXPECT_TRUE(removed.empty());
+        auto result = ddb::cleanupBuild(db.get(), "");
+        EXPECT_TRUE(result.removedBuilds.empty());
         EXPECT_TRUE(fs::exists(buildDir));
     }
 
@@ -118,12 +140,12 @@ namespace
         fs::path buildDir = db->buildDirectory();
         fs::create_directories(buildDir);
 
-        // Create build dirs that match real entry hashes
         fs::path d1 = makeFakeBuildDir(buildDir, hashes[0]);
         fs::path d2 = makeFakeBuildDir(buildDir, hashes[1]);
 
-        auto removed = ddb::cleanupBuild(db.get(), "");
-        EXPECT_TRUE(removed.empty());
+        auto result = ddb::cleanupBuild(db.get(), "");
+        EXPECT_TRUE(result.removedEntries.empty());
+        EXPECT_TRUE(result.removedBuilds.empty());
         EXPECT_TRUE(fs::exists(d1));
         EXPECT_TRUE(fs::exists(d2));
     }
@@ -138,15 +160,15 @@ namespace
         fs::path buildDir = db->buildDirectory();
         fs::create_directories(buildDir);
 
-        // One valid + one orphan
         fs::path validDir = makeFakeBuildDir(buildDir, hashes[0]);
         fs::path orphanDir = makeFakeBuildDir(
             buildDir, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef");
 
-        auto removed = ddb::cleanupBuild(db.get(), "");
+        auto result = ddb::cleanupBuild(db.get(), "");
 
-        ASSERT_EQ(removed.size(), 1u);
-        EXPECT_EQ(fs::path(removed[0]).filename(), orphanDir.filename());
+        EXPECT_TRUE(result.removedEntries.empty());
+        ASSERT_EQ(result.removedBuilds.size(), 1u);
+        EXPECT_EQ(fs::path(result.removedBuilds[0]).filename(), orphanDir.filename());
         EXPECT_FALSE(fs::exists(orphanDir));
         EXPECT_TRUE(fs::exists(validDir));
     }
@@ -161,15 +183,13 @@ namespace
         fs::path buildDir = db->buildDirectory();
         fs::create_directories(buildDir);
 
-        // Pending file for a real entry: should remain.
         fs::path validPending = makeFakePendingFile(buildDir, hashes[0]);
-        // Pending file for an unknown hash: should be removed.
         fs::path orphanPending = makeFakePendingFile(
             buildDir, "0000000000000000000000000000000000000000000000000000000000000000");
 
-        auto removed = ddb::cleanupBuild(db.get(), "");
-        ASSERT_EQ(removed.size(), 1u);
-        EXPECT_EQ(fs::path(removed[0]).filename(), orphanPending.filename());
+        auto result = ddb::cleanupBuild(db.get(), "");
+        ASSERT_EQ(result.removedBuilds.size(), 1u);
+        EXPECT_EQ(fs::path(result.removedBuilds[0]).filename(), orphanPending.filename());
         EXPECT_TRUE(fs::exists(validPending));
         EXPECT_FALSE(fs::exists(orphanPending));
     }
@@ -193,8 +213,8 @@ namespace
         fs::path orphanPending = makeFakePendingFile(
             buildDir, "3333333333333333333333333333333333333333333333333333333333333333");
 
-        auto removed = ddb::cleanupBuild(db.get(), "");
-        EXPECT_EQ(removed.size(), 3u);
+        auto result = ddb::cleanupBuild(db.get(), "");
+        EXPECT_EQ(result.removedBuilds.size(), 3u);
 
         EXPECT_TRUE(fs::exists(valid));
         EXPECT_TRUE(fs::exists(validPending));
@@ -217,13 +237,14 @@ namespace
             "abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabca";
         fs::path orphanDir = makeFakeBuildDir(buildDir, orphanHash);
 
-        // Place an active build lock inside (current process PID is alive)
+        // Active lock = current process PID (guaranteed to be alive). Lock files
+        // live one level deep under the hash directory: <hash>/<subfolder>.building.
         fs::path lockFile = orphanDir / "cog.building";
         writeLockFile(lockFile, GET_CURRENT_PID());
 
-        auto removed = ddb::cleanupBuild(db.get(), "");
+        auto result = ddb::cleanupBuild(db.get(), "");
 
-        EXPECT_TRUE(removed.empty());
+        EXPECT_TRUE(result.removedBuilds.empty());
         EXPECT_TRUE(fs::exists(orphanDir)) << "Active-locked orphan should not be removed";
         EXPECT_TRUE(fs::exists(lockFile));
     }
@@ -242,14 +263,16 @@ namespace
             "fefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefe";
         fs::path orphanDir = makeFakeBuildDir(buildDir, orphanHash);
 
-        // Stale lock: PID 99 is extremely unlikely to be alive in the test
-        // environment (mirrors the convention used in buildlock_test.cpp).
+        // PID 2147483646 is well above any realistic running PID and will not
+        // resolve to a live process on Windows or POSIX. (PID 0 is rejected as
+        // "unreadable" by readPidFromLockFile, which conservatively keeps the
+        // lock — so it can't be used as a stale marker.)
         fs::path lockFile = orphanDir / "cog.building";
-        writeLockFile(lockFile, 99);
+        writeLockFile(lockFile, 2147483646L);
 
-        auto removed = ddb::cleanupBuild(db.get(), "");
+        auto result = ddb::cleanupBuild(db.get(), "");
 
-        ASSERT_EQ(removed.size(), 1u);
+        ASSERT_EQ(result.removedBuilds.size(), 1u);
         EXPECT_FALSE(fs::exists(orphanDir));
     }
 
@@ -263,12 +286,11 @@ namespace
         fs::path buildDir = db->buildDirectory();
         fs::create_directories(buildDir);
 
-        // A regular file with no .pending extension at the top level: must be ignored.
         fs::path stranger = buildDir / "readme.txt";
         std::ofstream(stranger) << "not a build artifact";
 
-        auto removed = ddb::cleanupBuild(db.get(), "");
-        EXPECT_TRUE(removed.empty());
+        auto result = ddb::cleanupBuild(db.get(), "");
+        EXPECT_TRUE(result.removedBuilds.empty());
         EXPECT_TRUE(fs::exists(stranger));
     }
 
@@ -279,7 +301,6 @@ namespace
         std::vector<std::string> hashes;
         setupIndexedDb(ta, db, hashes);
 
-        // Use a custom output path outside .ddb/build/
         fs::path customDir = ta.getPath("custom_build");
         fs::create_directories(customDir);
 
@@ -287,9 +308,9 @@ namespace
         fs::path orphan = makeFakeBuildDir(
             customDir, "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc");
 
-        auto removed = ddb::cleanupBuild(db.get(), customDir.string());
+        auto result = ddb::cleanupBuild(db.get(), customDir.string());
 
-        ASSERT_EQ(removed.size(), 1u);
+        ASSERT_EQ(result.removedBuilds.size(), 1u);
         EXPECT_TRUE(fs::exists(valid));
         EXPECT_FALSE(fs::exists(orphan));
     }
@@ -308,28 +329,114 @@ namespace
             buildDir, "9999999999999999999999999999999999999999999999999999999999999999");
 
         auto first = ddb::cleanupBuild(db.get(), "");
-        EXPECT_EQ(first.size(), 1u);
+        EXPECT_EQ(first.removedBuilds.size(), 1u);
 
         auto second = ddb::cleanupBuild(db.get(), "");
-        EXPECT_TRUE(second.empty());
+        EXPECT_TRUE(second.removedBuilds.empty());
+        EXPECT_TRUE(second.removedEntries.empty());
     }
 
-    // ---------- C API ----------
+    // ---------- Phase 1 (DB stale entries) tests ----------
 
-    TEST(DDBCleanup, ReturnsJsonArray)
+    TEST(cleanupBuild, RemovesStaleDbEntriesAndTheirBuildFolder)
     {
         TestArea ta(TEST_NAME, true);
         std::unique_ptr<Database> db;
         std::vector<std::string> hashes;
-        fs::path testFolder = setupIndexedDb(ta, db, hashes);
+        std::vector<fs::path> files;
+        setupIndexedDb(ta, db, hashes, files);
+        ASSERT_EQ(files.size(), 2u);
+        ASSERT_EQ(hashes.size(), 2u);
+
+        // Pre-populate fake build folders for both entries.
+        fs::path buildDir = db->buildDirectory();
+        fs::create_directories(buildDir);
+        fs::path build0 = makeFakeBuildDir(buildDir, hashes[0]);
+        fs::path build1 = makeFakeBuildDir(buildDir, hashes[1]);
+
+        // Delete the source file for entry 0 from the filesystem.
+        ASSERT_TRUE(fs::remove(files[0]));
+
+        ASSERT_EQ(countDataEntries(db.get()), 2);
+
+        auto result = ddb::cleanupBuild(db.get(), "");
+
+        // Entry 0 should be removed from the DB.
+        ASSERT_EQ(result.removedEntries.size(), 1u);
+        EXPECT_EQ(result.removedEntries[0], files[0].filename().string());
+        EXPECT_EQ(countDataEntries(db.get()), 1);
+
+        // The build folder of the removed entry is cleaned up by removeFromIndex
+        // (phase 1), so phase 2's list should NOT contain it.
+        EXPECT_FALSE(fs::exists(build0));
+        EXPECT_TRUE(fs::exists(build1));
+        EXPECT_TRUE(result.removedBuilds.empty());
+    }
+
+    TEST(cleanupBuild, KeepsDbEntriesWhenFilesExist)
+    {
+        TestArea ta(TEST_NAME, true);
+        std::unique_ptr<Database> db;
+        std::vector<std::string> hashes;
+        std::vector<fs::path> files;
+        setupIndexedDb(ta, db, hashes, files);
+
+        const long beforeCount = countDataEntries(db.get());
+
+        auto result = ddb::cleanupBuild(db.get(), "");
+
+        EXPECT_TRUE(result.removedEntries.empty());
+        EXPECT_EQ(countDataEntries(db.get()), beforeCount);
+    }
+
+    TEST(cleanupBuild, CombinedPhase1AndPhase2)
+    {
+        TestArea ta(TEST_NAME, true);
+        std::unique_ptr<Database> db;
+        std::vector<std::string> hashes;
+        std::vector<fs::path> files;
+        setupIndexedDb(ta, db, hashes, files);
 
         fs::path buildDir = db->buildDirectory();
         fs::create_directories(buildDir);
-        makeFakeBuildDir(buildDir, hashes[0]);
+        // Build folder for entry 0 (will be removed via phase 1)
+        fs::path build0 = makeFakeBuildDir(buildDir, hashes[0]);
+        // Standalone orphan with no DB entry (phase 2)
+        fs::path orphan = makeFakeBuildDir(
+            buildDir, "7777777777777777777777777777777777777777777777777777777777777777");
+
+        // Delete entry 0's source file.
+        ASSERT_TRUE(fs::remove(files[0]));
+
+        auto result = ddb::cleanupBuild(db.get(), "");
+
+        EXPECT_EQ(result.removedEntries.size(), 1u);
+        ASSERT_EQ(result.removedBuilds.size(), 1u);
+        EXPECT_EQ(fs::path(result.removedBuilds[0]).filename(), orphan.filename());
+        EXPECT_FALSE(fs::exists(build0));
+        EXPECT_FALSE(fs::exists(orphan));
+    }
+
+    // ---------- C API ----------
+
+    TEST(DDBCleanup, ReturnsJsonObjectWithBothLists)
+    {
+        TestArea ta(TEST_NAME, true);
+        std::unique_ptr<Database> db;
+        std::vector<std::string> hashes;
+        std::vector<fs::path> files;
+        fs::path testFolder = setupIndexedDb(ta, db, hashes, files);
+
+        fs::path buildDir = db->buildDirectory();
+        fs::create_directories(buildDir);
+        fs::path build0 = makeFakeBuildDir(buildDir, hashes[0]);
         fs::path orphan = makeFakeBuildDir(
             buildDir, "5555555555555555555555555555555555555555555555555555555555555555");
 
-        // Close the DB so the C API can re-open it cleanly
+        // Delete entry 0's file so phase 1 has work too.
+        ASSERT_TRUE(fs::remove(files[0]));
+
+        // Close DB so the C API can re-open cleanly.
         db.reset();
 
         char *output = nullptr;
@@ -340,9 +447,17 @@ namespace
         json j = json::parse(output);
         DDBFree(output);
 
-        ASSERT_TRUE(j.is_array());
-        ASSERT_EQ(j.size(), 1u);
-        std::string p = j[0].get<std::string>();
+        ASSERT_TRUE(j.is_object());
+        ASSERT_TRUE(j.contains("entries"));
+        ASSERT_TRUE(j.contains("builds"));
+        ASSERT_TRUE(j["entries"].is_array());
+        ASSERT_TRUE(j["builds"].is_array());
+
+        ASSERT_EQ(j["entries"].size(), 1u);
+        EXPECT_EQ(j["entries"][0].get<std::string>(), files[0].filename().string());
+
+        ASSERT_EQ(j["builds"].size(), 1u);
+        std::string p = j["builds"][0].get<std::string>();
         EXPECT_NE(p.find(orphan.filename().string()), std::string::npos);
         EXPECT_FALSE(fs::exists(orphan));
     }

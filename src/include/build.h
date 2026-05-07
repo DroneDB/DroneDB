@@ -21,16 +21,32 @@ namespace ddb
     DDB_DLL bool isBuildActive(Database *db, const std::string &path);
 
     /**
-     * @brief Remove orphaned build artifacts (subdirectories and .pending files
-     *        whose hash no longer corresponds to any entry in the database).
-     *
-     * Skips entries that have an active build lock owned by a live process.
+     * @brief Result of a cleanup operation.
+     */
+    struct CleanupResult
+    {
+        /// Entry paths that were removed from the database because their
+        /// underlying files no longer exist on the filesystem.
+        std::vector<std::string> removedEntries;
+        /// Filesystem paths of orphaned build artifacts (subdirectories or
+        /// .pending files) that were removed from the build directory.
+        std::vector<std::string> removedBuilds;
+    };
+
+    /**
+     * @brief Perform a cleanup of a dataset:
+     *   1. Remove from the database all non-directory entries whose underlying
+     *      file no longer exists on the filesystem (their associated build
+     *      artifacts are removed by removeFromIndex).
+     *   2. Remove orphaned build artifacts (subdirectories and .pending files
+     *      whose hash no longer corresponds to any entry in the database).
+     *      Subdirectories with an active (live-PID) build lock are skipped.
      *
      * @param db database (already opened)
      * @param outputPath base build directory; if empty, uses db->buildDirectory()
-     * @return list of filesystem paths that were removed
+     * @return CleanupResult with the lists of removed items
      */
-    DDB_DLL std::vector<std::string> cleanupBuild(Database *db, const std::string &outputPath = "");
+    DDB_DLL CleanupResult cleanupBuild(Database *db, const std::string &outputPath = "");
 
 }
 

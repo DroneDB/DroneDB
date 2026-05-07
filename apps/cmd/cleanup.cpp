@@ -27,7 +27,7 @@ namespace cmd
 
     std::string Cleanup::description()
     {
-        return "Remove orphaned build artifacts (build outputs whose source files no longer exist).";
+        return "Remove DB entries whose files no longer exist and orphaned build artifacts.";
     }
 
     void Cleanup::run(cxxopts::ParseResult &opts)
@@ -37,18 +37,31 @@ namespace cmd
             const auto ddbPath = opts["working-dir"].as<std::string>();
 
             const auto db = ddb::open(ddbPath, true);
-            const auto removed = ddb::cleanupBuild(db.get(), "");
+            const auto result = ddb::cleanupBuild(db.get(), "");
 
-            if (removed.empty())
+            if (result.removedEntries.empty() && result.removedBuilds.empty())
             {
-                std::cout << "No orphaned build artifacts found." << std::endl;
+                std::cout << "Nothing to clean up." << std::endl;
+                return;
             }
-            else
+
+            if (!result.removedEntries.empty())
             {
-                for (const auto &p : removed)
-                    std::cout << "Removed: " << p << std::endl;
-                std::cout << removed.size() << " orphaned item(s) removed." << std::endl;
+                std::cout << "Removed stale DB entries:" << std::endl;
+                for (const auto &p : result.removedEntries)
+                    std::cout << "  - " << p << std::endl;
             }
+
+            if (!result.removedBuilds.empty())
+            {
+                std::cout << "Removed orphan build artifacts:" << std::endl;
+                for (const auto &p : result.removedBuilds)
+                    std::cout << "  - " << p << std::endl;
+            }
+
+            std::cout << result.removedEntries.size() << " stale entry/entries, "
+                      << result.removedBuilds.size() << " orphan build artifact(s) removed."
+                      << std::endl;
         }
         catch (ddb::InvalidArgsException &)
         {

@@ -1076,11 +1076,11 @@ DDB_DLL DDBErr DDBCleanup(const char* ddbPath, char** output) {
 
     const auto ddb = ddb::open(std::string(ddbPath), true);
 
-    const auto removed = cleanupBuild(ddb.get(), "");
+    const auto result = cleanupBuild(ddb.get(), "");
 
-    json j = json::array();
-    for (const auto& path : removed)
-        j.push_back(path);
+    json j;
+    j["entries"] = result.removedEntries;
+    j["builds"] = result.removedBuilds;
 
     utils::copyToPtr(j.dump(), output);
 
