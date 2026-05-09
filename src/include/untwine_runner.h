@@ -23,8 +23,11 @@ namespace ddb
     namespace untwine
     {
 
-        // Locates the Untwine executable using the discovery order documented in
-        // COPC-UNTWINE/README.md (env var, exe folder, install prefix, PATH).
+        // Locates the Untwine executable using the following discovery order:
+        //   1. DDB_UNTWINE_PATH env var (authoritative when non-empty)
+        //   2. Folder of the current executable (bundled next to ddbcmd/ddbtest)
+        //   3. <exe_folder>/../bin (cmake --install layout)
+        //   4. Directories on the system PATH
         // Returns an empty path if no usable binary is found. The result is cached
         // for the lifetime of the process; pass forceRefresh=true to bypass the cache.
         DDB_DLL fs::path findUntwineBinary(bool forceRefresh = false);
