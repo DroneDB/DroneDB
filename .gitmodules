@@ -9,4 +9,4 @@
 	url = https://github.com/microsoft/vcpkg.git
 [submodule "untwine"]
 	path = vendor/untwine
-	url = https://github.com/hobuinc/untwine.git
+	url = https://github.com/DroneDB/untwine.git
