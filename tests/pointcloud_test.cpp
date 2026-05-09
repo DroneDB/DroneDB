@@ -6,11 +6,35 @@
 #include "3d.h"
 
 #include "dbops.h"
+#include "exceptions.h"
 #include "gtest/gtest.h"
 #include "test.h"
 #include "testarea.h"
+#include "untwine_runner.h"
+
+#ifdef _WIN32
+#include <stdlib.h>
+#define DDB_SETENV(name, value) _putenv_s(name, value)
+#define DDB_UNSETENV(name) _putenv_s(name, "")
+#else
+#include <stdlib.h>
+#define DDB_SETENV(name, value) setenv(name, value, 1)
+#define DDB_UNSETENV(name) unsetenv(name)
+#endif
 
 namespace {
+
+// RAII helper that forces refresh of the Untwine binary cache on entry/exit so
+// tests that set DDB_UNTWINE_PATH don't leak state into siblings.
+struct UntwineEnvReset {
+    UntwineEnvReset() { ddb::untwine::findUntwineBinary(true); }
+    ~UntwineEnvReset() {
+        DDB_UNSETENV("DDB_UNTWINE_PATH");
+        DDB_UNSETENV("DDB_USE_PDAL_COPC");
+        DDB_UNSETENV("DDB_COPC_BACKEND");
+        ddb::untwine::findUntwineBinary(true);
+    }
+};
 
 using namespace ddb;
 
@@ -313,6 +337,91 @@ TEST(pointcloud, xyzSemicolonSeparated) {
     ddb::PointCloudInfo info;
     EXPECT_TRUE(ddb::getPointCloudInfo(testFile.string(), info));
     EXPECT_EQ(info.pointCount, 2);
+}
+
+// ---------------------------------------------------------------------------
+// COPC backend selection tests (Untwine vs PDAL fallback)
+// ---------------------------------------------------------------------------
+
+TEST(pointcloud, copcBackendForcePdal) {
+    // DDB_USE_PDAL_COPC=1 must always select PDAL, regardless of binary.
+    UntwineEnvReset reset;
+    DDB_SETENV("DDB_USE_PDAL_COPC", "1");
+    EXPECT_EQ(ddb::untwine::resolveBackend(ddb::CopcBackend::Auto), ddb::CopcBackend::Pdal);
+    EXPECT_EQ(ddb::untwine::resolveBackend(ddb::CopcBackend::Untwine), ddb::CopcBackend::Pdal);
+}
+
+TEST(pointcloud, copcBackendMissingBinaryFallsBackToPdal) {
+    // Pointing DDB_UNTWINE_PATH to a non-existent file must fall back to PDAL on Auto.
+    UntwineEnvReset reset;
+    DDB_SETENV("DDB_UNTWINE_PATH", "/nonexistent/path/to/untwine_does_not_exist");
+    EXPECT_TRUE(ddb::untwine::findUntwineBinary(true).empty());
+    EXPECT_EQ(ddb::untwine::resolveBackend(ddb::CopcBackend::Auto), ddb::CopcBackend::Pdal);
+}
+
+TEST(pointcloud, copcBackendForceUntwineMissingThrows) {
+    // Forcing Untwine when no binary is present must raise UntwineException.
+    UntwineEnvReset reset;
+    DDB_SETENV("DDB_UNTWINE_PATH", "/nonexistent/path/to/untwine_does_not_exist");
+    ddb::untwine::findUntwineBinary(true);
+    EXPECT_THROW(ddb::untwine::resolveBackend(ddb::CopcBackend::Untwine), ddb::UntwineException);
+}
+
+TEST(pointcloud, copcBuildFallbackWhenUntwineUnavailable) {
+    // End-to-end: even with a fake binary path, buildCopc should produce a valid COPC
+    // by falling back to the PDAL pipeline.
+    UntwineEnvReset reset;
+    DDB_SETENV("DDB_UNTWINE_PATH", "/nonexistent/path/to/untwine_does_not_exist");
+    ddb::untwine::findUntwineBinary(true);
+
+    TestArea ta(TEST_NAME);
+    fs::path pc = ta.downloadTestAsset(
+        "https://github.com/DroneDB/test_data/raw/master/brighton/point_cloud.laz",
+        "point_cloud.laz");
+
+    ddb::buildCopc({pc.string()}, ta.getFolder("copc").string());
+    EXPECT_TRUE(fs::exists(ta.getFolder("copc") / "cloud.copc.laz"));
+}
+
+TEST(pointcloud, copcBuildForcePdalProducesValidOutput) {
+    UntwineEnvReset reset;
+    DDB_SETENV("DDB_USE_PDAL_COPC", "1");
+
+    TestArea ta(TEST_NAME);
+    fs::path pc = ta.downloadTestAsset(
+        "https://github.com/DroneDB/test_data/raw/master/brighton/point_cloud.laz",
+        "point_cloud.laz");
+
+    ddb::buildCopc({pc.string()}, ta.getFolder("copc").string());
+    fs::path out = ta.getFolder("copc") / "cloud.copc.laz";
+    EXPECT_TRUE(fs::exists(out));
+
+    // Validate via the existing COPC info reader (round-trip).
+    ddb::PointCloudInfo info;
+    EXPECT_TRUE(ddb::getCopcInfo(out.string(), info));
+    EXPECT_GT(info.pointCount, 0u);
+}
+
+TEST(pointcloud, copcBuildWithUntwineWhenAvailable) {
+    // If untwine is discoverable in the environment (bundled next to ddbtest, or via
+    // DDB_UNTWINE_PATH), exercise the Untwine path end-to-end.
+    UntwineEnvReset reset;
+    if (ddb::untwine::findUntwineBinary(true).empty()) {
+        GTEST_SKIP() << "untwine binary not available in this environment";
+    }
+
+    TestArea ta(TEST_NAME);
+    fs::path pc = ta.downloadTestAsset(
+        "https://github.com/DroneDB/test_data/raw/master/brighton/point_cloud.laz",
+        "point_cloud.laz");
+
+    ddb::buildCopc({pc.string()}, ta.getFolder("copc").string());
+    fs::path out = ta.getFolder("copc") / "cloud.copc.laz";
+    ASSERT_TRUE(fs::exists(out));
+
+    ddb::PointCloudInfo info;
+    EXPECT_TRUE(ddb::getCopcInfo(out.string(), info));
+    EXPECT_GT(info.pointCount, 0u);
 }
 
 }  // namespace
