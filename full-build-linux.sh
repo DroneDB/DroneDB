@@ -29,15 +29,15 @@ if [ -f "${UNTWINE_SRC}/CMakeLists.txt" ]; then
     echo "Building optional Untwine COPC accelerator..."
     (
         set +e
-        mkdir -p untwine
-        cd untwine
+        mkdir -p untwine-build
+        cd untwine-build
         cmake "${UNTWINE_SRC}" -DCMAKE_TOOLCHAIN_FILE="../../vcpkg/scripts/buildsystems/vcpkg.cmake" -DCMAKE_BUILD_TYPE=Release \
             && cmake --build . -- -j"$CPU_CORES"
         rc=$?
         if [ $rc -eq 0 ]; then
             UNTWINE_BIN=$(find . -maxdepth 4 -type f -name untwine -executable | head -n1)
             if [ -n "$UNTWINE_BIN" ]; then
-                cp -f "$UNTWINE_BIN" ../untwine
+                cp -f "$UNTWINE_BIN" ..
                 echo "  ✓ untwine copied next to ddbcmd"
             else
                 echo "  - untwine binary not found in build output"

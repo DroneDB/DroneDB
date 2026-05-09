@@ -287,18 +287,26 @@ namespace ddb
                 cmdLine.append(quoteArg(args[i]));
             }
 
-            // Convert to wide
+            // Convert command line to wide
             int wideLen = MultiByteToWideChar(CP_UTF8, 0, cmdLine.c_str(), -1, nullptr, 0);
             std::wstring wideCmd(static_cast<size_t>(wideLen > 0 ? wideLen : 1), L'\0');
             MultiByteToWideChar(CP_UTF8, 0, cmdLine.c_str(), -1, wideCmd.data(), wideLen);
+
+            // Convert the resolved binary path to wide separately so we can pass it
+            // as lpApplicationName — this avoids relying on Windows PATH/CWD search
+            // and prevents executable-hijacking through the command-line token.
+            std::string binStr = bin.string();
+            int wideBinLen = MultiByteToWideChar(CP_UTF8, 0, binStr.c_str(), -1, nullptr, 0);
+            std::wstring wideBin(static_cast<size_t>(wideBinLen > 0 ? wideBinLen : 1), L'\0');
+            MultiByteToWideChar(CP_UTF8, 0, binStr.c_str(), -1, wideBin.data(), wideBinLen);
 
             STARTUPINFOW si{};
             si.cb = sizeof(si);
             PROCESS_INFORMATION pi{};
 
             BOOL ok = CreateProcessW(
-                nullptr,
-                wideCmd.data(),
+                wideBin.c_str(),  // lpApplicationName: explicit resolved path
+                wideCmd.data(),   // lpCommandLine: full quoted command line for argv
                 nullptr, nullptr,
                 FALSE,
                 CREATE_NO_WINDOW,
