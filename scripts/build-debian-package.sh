@@ -166,6 +166,16 @@ override_dh_auto_install:
 	cp \$(CURDIR)/build/libddb.so debian/ddb/usr/lib/
 	cp \$(CURDIR)/build/libnxs.so debian/ddb/usr/lib/
 
+	# Optional: copy untwine COPC accelerator if it was built (vendor/untwine).
+	# Installed alongside ddb so that runtime discovery
+	# (untwine_runner.cpp::findUntwineBinary -> getExeFolder()) finds it
+	# without any extra configuration. Falls back to PDAL writers.copc when
+	# the binary is missing.
+	if [ -f \$(CURDIR)/build/untwine ]; then \\
+		cp \$(CURDIR)/build/untwine debian/ddb/usr/bin/untwine; \\
+		chmod +x debian/ddb/usr/bin/untwine; \\
+	fi
+
 	# Copy PDAL libraries from vcpkg installed directory
 	cp \$(CURDIR)/build/vcpkg_installed/${VCPKG_HOST_TRIPLET}/lib/libpdalcpp.so.19 debian/ddb/usr/lib/
 	cp \$(CURDIR)/build/vcpkg_installed/${VCPKG_HOST_TRIPLET}/lib/libdbus-1.so.3 debian/ddb/usr/lib/
@@ -183,6 +193,15 @@ override_dh_auto_install:
 	cp \$(CURDIR)/build/timezone21.bin debian/ddb/usr/share/ddb/
 	cp \$(CURDIR)/build/sensor_data.sqlite debian/ddb/usr/share/ddb/
 	cp \$(CURDIR)/build/curl-ca-bundle.crt debian/ddb/usr/share/ddb/
+
+	# Copy license / attribution files (redistribution compliance)
+	mkdir -p debian/ddb/usr/share/doc/ddb
+	if [ -f \$(CURDIR)/LICENSE.md ]; then \\
+		cp \$(CURDIR)/LICENSE.md debian/ddb/usr/share/doc/ddb/copyright.md; \\
+	fi
+	if [ -f \$(CURDIR)/THIRD_PARTY_LICENSES.md ]; then \\
+		cp \$(CURDIR)/THIRD_PARTY_LICENSES.md debian/ddb/usr/share/doc/ddb/THIRD_PARTY_LICENSES.md; \\
+	fi
 
 	# Set permissions
 	chmod +x debian/ddb/usr/bin/ddb

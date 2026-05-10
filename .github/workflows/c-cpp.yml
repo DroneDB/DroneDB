@@ -70,6 +70,11 @@ jobs:
             cmake -DVCPKG_OVERLAY_TRIPLETS=${{ github.workspace }}/vcpkg-triplets -DVCPKG_HOST_TRIPLET=x64-linux-release -DVCPKG_TARGET_TRIPLET=x64-linux-release -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake ..
       - name: Build C++ lib/program and tests
         run: cd build && make -j$(nproc)
+      - name: Build Untwine COPC accelerator (optional)
+        continue-on-error: true
+        run: |
+          chmod +x ./scripts/build-untwine.sh
+          ./scripts/build-untwine.sh build Release
       - name: Run C++ Tests
         run: cd build && ./ddbtest --gtest_shuffle
       - name: Run Program Smoke Test
@@ -107,6 +112,14 @@ jobs:
             # Test linting of Debian package
             echo "Running lintian on Debian package..."
             lintian ../ddb_*.deb || echo "Lintian reported issues, but continuing..."
+
+            # Verify untwine packaging (non-blocking informational check)
+            echo "Checking whether untwine is included in the Debian package..."
+            if dpkg -c build/package/ddb_*.deb | grep -E '/usr/bin/untwine$' >/dev/null; then
+              echo "  ✓ untwine present in .deb (COPC accelerator enabled)"
+            else
+              echo "  ! untwine NOT present in .deb (DroneDB will fall back to PDAL writers.copc)"
+            fi
           else
             echo "Skipping Debian package build for PR"
           fi
@@ -170,6 +183,10 @@ jobs:
             cmake .. -DVCPKG_HOST_TRIPLET=x64-windows-release -DVCPKG_TARGET_TRIPLET=x64-windows-release -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake"
             cmake --build . --config Release --target ALL_BUILD -- /maxcpucount:$env:NUMBER_OF_PROCESSORS
             dir
+      - name: Build Untwine COPC accelerator (optional)
+        continue-on-error: true
+        shell: pwsh
+        run: .\scripts\build-untwine.ps1 -BuildDir build -Config Release -Builder VisualStudio
       - name: Run C++ Tests
         run: cd build && .\ddbtest.exe --gtest_shuffle
         shell: pwsh
@@ -194,6 +211,19 @@ jobs:
           Write-Host "`nVerifying package:"
           Get-ChildItem build/dist/*.zip | ForEach-Object {
             Write-Host "  Package: $($_.Name) ($([Math]::Round($_.Length / 1MB, 2)) MB)"
+          }
+
+          # Verify untwine packaging (non-blocking informational check)
+          $zipCheckDir = Join-Path $env:RUNNER_TEMP 'ddb-zip-check'
+          if (Test-Path $zipCheckDir) { Remove-Item -Recurse -Force $zipCheckDir }
+          $zipFile = Get-ChildItem build/dist/*.zip | Select-Object -First 1
+          if ($zipFile) {
+            Expand-Archive $zipFile.FullName -DestinationPath $zipCheckDir -Force
+            if (Test-Path (Join-Path $zipCheckDir 'untwine.exe')) {
+              Write-Host '  ✓ untwine.exe present in zip (COPC accelerator enabled)'
+            } else {
+              Write-Host '  ! untwine.exe NOT present in zip (DroneDB will fall back to PDAL writers.copc)'
+            }
           }
       - name: Upload Distribution Files
         uses: actions/upload-artifact@v4

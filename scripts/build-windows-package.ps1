@@ -184,6 +184,15 @@ if (Test-Path $untwinePath) {
     Write-Host "  - untwine.exe (not found, skipping — DroneDB will fall back to PDAL writers.copc)" -ForegroundColor Yellow
 }
 
+# Copy license files (always included for redistribution compliance)
+$licenseFiles = @("LICENSE.md", "THIRD_PARTY_LICENSES.md")
+foreach ($lic in $licenseFiles) {
+    if (Test-Path $lic) {
+        Copy-Item $lic $stagingDir -Force
+        Write-Host "  ✓ $lic" -ForegroundColor Green
+    }
+}
+
 # Copy directories (zoneinfo, plugins)
 Write-Host ""
 Write-Host "Copying directories..." -ForegroundColor Cyan

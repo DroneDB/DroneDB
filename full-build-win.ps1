@@ -431,85 +431,24 @@ try {
     Write-Success "Build completed successfully!"
 
     # ----------------------------------------------------------------------
-    # Optional: build the Untwine binary if a vendored source tree is present
-    # at vendor/untwine/. Failures here NEVER block the main build because
-    # DroneDB falls back to PDAL writers.copc when untwine.exe is missing.
-    #
-    # Untwine is built with the same configuration as DroneDB ($BuildType) so
-    # that the shared dependencies (pdalcpp, gdal, proj, ...) installed via
-    # vcpkg link against a matching CRT.  Building Untwine in a different
-    # configuration would mix Debug/Release CRTs and crash at startup.
+    # Optional: build the Untwine COPC accelerator (vendor/untwine).
+    # Delegated to scripts/build-untwine.ps1 so that the same logic is shared
+    # with the CI workflow and packaging scripts. Failures NEVER block the
+    # main build: DroneDB falls back to PDAL writers.copc when untwine.exe
+    # is missing.
     # ----------------------------------------------------------------------
-    $untwineSrc = Join-Path $PSScriptRoot "vendor\untwine"
-    if (Test-Path (Join-Path $untwineSrc "CMakeLists.txt")) {
-        Write-Host "`n========================================" -ForegroundColor Magenta
-        Write-Host "Untwine (optional COPC accelerator)" -ForegroundColor Magenta
-        Write-Host "========================================" -ForegroundColor Magenta
+    $untwineScript = Join-Path $PSScriptRoot "scripts\build-untwine.ps1"
+    if (Test-Path $untwineScript) {
         try {
-            # Use the same configuration as DroneDB so that shared vcpkg
-            # dependencies (pdalcpp, gdal, proj, ...) link against the matching CRT.
-            $untwineConfig = $BuildType
-
-            $untwineBuildDir = Join-Path $buildDir "untwine"
-            if (-Not (Test-Path $untwineBuildDir)) {
-                New-Item -ItemType Directory -Path $untwineBuildDir | Out-Null
-            }
-
-            Push-Location $untwineBuildDir
-            try {
-                $untwineCmakeArgs = @(
-                    $untwineSrc,
-                    "-DCMAKE_TOOLCHAIN_FILE=$vcpkgRoot\scripts\buildsystems\vcpkg.cmake",
-                    "-DVCPKG_MANIFEST_MODE=OFF",
-                    "-DVCPKG_INSTALLED_DIR=$buildDir\vcpkg_installed",
-                    "-DCMAKE_PREFIX_PATH=$buildDir\vcpkg_installed\x64-windows",
-                    "-DBUILD_TESTING=OFF"
-                )
-                if ($Builder -eq 'Ninja') {
-                    $untwineCmakeArgs += @("-G", "Ninja", "-DCMAKE_BUILD_TYPE=$untwineConfig")
-                } else {
-                    $untwineCmakeArgs += @("-G", (Get-VSGeneratorString), "-A", "x64")
-                }
-
-                Write-Info "Configuring Untwine ($untwineConfig, matching DroneDB's $BuildType)..."
-                & cmake @untwineCmakeArgs
-                if ($LASTEXITCODE -ne 0) { throw "cmake configure failed for untwine" }
-
-                Write-Info "Building Untwine ($untwineConfig)..."
-                if ($Builder -eq 'Ninja') {
-                    & cmake --build . --config $untwineConfig -- "-j$Jobs"
-                } else {
-                    & cmake --build . --config $untwineConfig -- "/m:$Jobs"
-                }
-                if ($LASTEXITCODE -ne 0) { throw "cmake build failed for untwine" }
-
-                # Locate the produced binary and copy it next to ddbcmd.exe so the
-                # discovery logic in src/library/untwine_runner.cpp can find it.
-                $untwineBin = Get-ChildItem -Path $untwineBuildDir -Filter "untwine.exe" -Recurse `
-                    -ErrorAction SilentlyContinue | Select-Object -First 1
-                if ($untwineBin) {
-                    Copy-Item $untwineBin.FullName (Join-Path $buildDir "untwine.exe") -Force
-                    Write-Success "untwine.exe copied to $buildDir"
-                } else {
-                    Write-Host "  - untwine.exe not found in build output (skipping copy)" -ForegroundColor Yellow
-                }
-            } finally {
-                Pop-Location
+            & $untwineScript -BuildDir $buildDir -Config $BuildType -Builder $Builder `
+                -VcpkgRoot $vcpkgRoot -Jobs $Jobs
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "WARNING: scripts/build-untwine.ps1 returned exit $LASTEXITCODE (non-blocking)." -ForegroundColor Yellow
+                Write-Host "DroneDB will use the PDAL writers.copc fallback at runtime." -ForegroundColor Yellow
             }
         } catch {
             Write-Host "WARNING: Untwine build failed (non-blocking): $($_.Exception.Message)" -ForegroundColor Yellow
             Write-Host "DroneDB will use the PDAL writers.copc fallback at runtime." -ForegroundColor Yellow
-        }
-    } else {
-        # Check whether the directory is an uninitialised git submodule
-        if (Test-Path $untwineSrc) {
-            Write-Host "`nINFO: vendor/untwine directory exists but CMakeLists.txt is missing." -ForegroundColor Yellow
-            Write-Host "      The git submodule is probably not initialised. Run:" -ForegroundColor Yellow
-            Write-Host "        git submodule update --init vendor/untwine" -ForegroundColor Cyan
-            Write-Host "      then re-run this build script to enable the Untwine COPC backend." -ForegroundColor Yellow
-            Write-Host "      DroneDB will use the PDAL writers.copc fallback in the meantime." -ForegroundColor Gray
-        } else {
-            Write-Host "`nINFO: vendor/untwine not present, skipping optional Untwine build (PDAL fallback will be used)." -ForegroundColor Gray
         }
     }
 

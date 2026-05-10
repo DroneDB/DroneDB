@@ -315,6 +315,12 @@ Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for gu
 
 This project is licensed under the [Mozilla Public License 2.0 (MPL-2.0)](LICENSE.md).
 
+Distribution archives (Windows ZIP, Debian package, Docker image) may include
+third-party components under different licenses — most notably the optional
+[Untwine](https://github.com/hobuinc/untwine) COPC accelerator (GPL-3.0).
+See [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) for the full list and
+attributions.
+
 ---
 
 <p align="center">
