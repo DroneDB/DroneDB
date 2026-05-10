@@ -434,6 +434,11 @@ try {
     # Optional: build the Untwine binary if a vendored source tree is present
     # at vendor/untwine/. Failures here NEVER block the main build because
     # DroneDB falls back to PDAL writers.copc when untwine.exe is missing.
+    #
+    # Untwine is built with the same configuration as DroneDB ($BuildType) so
+    # that the shared dependencies (pdalcpp, gdal, proj, ...) installed via
+    # vcpkg link against a matching CRT.  Building Untwine in a different
+    # configuration would mix Debug/Release CRTs and crash at startup.
     # ----------------------------------------------------------------------
     $untwineSrc = Join-Path $PSScriptRoot "vendor\untwine"
     if (Test-Path (Join-Path $untwineSrc "CMakeLists.txt")) {
@@ -441,6 +446,10 @@ try {
         Write-Host "Untwine (optional COPC accelerator)" -ForegroundColor Magenta
         Write-Host "========================================" -ForegroundColor Magenta
         try {
+            # Use the same configuration as DroneDB so that shared vcpkg
+            # dependencies (pdalcpp, gdal, proj, ...) link against the matching CRT.
+            $untwineConfig = $BuildType
+
             $untwineBuildDir = Join-Path $buildDir "untwine"
             if (-Not (Test-Path $untwineBuildDir)) {
                 New-Item -ItemType Directory -Path $untwineBuildDir | Out-Null
@@ -457,20 +466,20 @@ try {
                     "-DBUILD_TESTING=OFF"
                 )
                 if ($Builder -eq 'Ninja') {
-                    $untwineCmakeArgs += @("-G", "Ninja", "-DCMAKE_BUILD_TYPE=$BuildType")
+                    $untwineCmakeArgs += @("-G", "Ninja", "-DCMAKE_BUILD_TYPE=$untwineConfig")
                 } else {
                     $untwineCmakeArgs += @("-G", (Get-VSGeneratorString), "-A", "x64")
                 }
 
-                Write-Info "Configuring Untwine..."
+                Write-Info "Configuring Untwine ($untwineConfig, matching DroneDB's $BuildType)..."
                 & cmake @untwineCmakeArgs
                 if ($LASTEXITCODE -ne 0) { throw "cmake configure failed for untwine" }
 
-                Write-Info "Building Untwine ($BuildType)..."
+                Write-Info "Building Untwine ($untwineConfig)..."
                 if ($Builder -eq 'Ninja') {
-                    & cmake --build . --config $BuildType -- "-j$Jobs"
+                    & cmake --build . --config $untwineConfig -- "-j$Jobs"
                 } else {
-                    & cmake --build . --config $BuildType -- "/m:$Jobs"
+                    & cmake --build . --config $untwineConfig -- "/m:$Jobs"
                 }
                 if ($LASTEXITCODE -ne 0) { throw "cmake build failed for untwine" }
 
@@ -492,7 +501,16 @@ try {
             Write-Host "DroneDB will use the PDAL writers.copc fallback at runtime." -ForegroundColor Yellow
         }
     } else {
-        Write-Host "`nINFO: vendor/untwine not present, skipping optional Untwine build (PDAL fallback will be used)." -ForegroundColor Gray
+        # Check whether the directory is an uninitialised git submodule
+        if (Test-Path $untwineSrc) {
+            Write-Host "`nINFO: vendor/untwine directory exists but CMakeLists.txt is missing." -ForegroundColor Yellow
+            Write-Host "      The git submodule is probably not initialised. Run:" -ForegroundColor Yellow
+            Write-Host "        git submodule update --init vendor/untwine" -ForegroundColor Cyan
+            Write-Host "      then re-run this build script to enable the Untwine COPC backend." -ForegroundColor Yellow
+            Write-Host "      DroneDB will use the PDAL writers.copc fallback in the meantime." -ForegroundColor Gray
+        } else {
+            Write-Host "`nINFO: vendor/untwine not present, skipping optional Untwine build (PDAL fallback will be used)." -ForegroundColor Gray
+        }
     }
 
     # Display build artifacts
