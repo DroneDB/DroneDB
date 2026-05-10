@@ -130,8 +130,8 @@ fs::path TestArea::downloadTestAsset(const std::string& url,
             fs::remove(destination);
     }
 
-    // Retry with exponential backoff: 1s, 2s, 4s
-    const int maxRetries = 3;
+    // Retry with exponential backoff: 1s, 2s, 4s, 8s, 16s, 32s, 64s
+    const int maxRetries = 7;
     const int baseDelayMs = 1000;
 
     for (int attempt = 1; attempt <= maxRetries; ++attempt) {
