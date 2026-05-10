@@ -8,6 +8,10 @@
 #include <cpr/cpr.h>
 #include "mzip.h"
 #include <utils.h>
+#include <thread>
+#include <chrono>
+#include <fstream>
+#include <functional>
 
 TestFS::TestFS(const std::string &testArchivePath, const std::string &baseTestFolder, bool setCurrentDirectory)
     : testArchivePath(testArchivePath), baseTestFolder(baseTestFolder), oldCurrentDirectory_(std::filesystem::current_path())
@@ -24,7 +28,7 @@ TestFS::TestFS(const std::string &testArchivePath, const std::string &baseTestFo
         if (!std::filesystem::exists(tempPath))
         {
             std::cout << "Downloading archive...\n";
-            downloadTestAsset(testArchivePath, tempPath.string(), true);
+            downloadTestAsset(testArchivePath, tempPath, true);
         }
         else
         {
@@ -109,27 +113,95 @@ std::string TestFS::extractFileName(const std::string &path)
  * @param overwrite If true, overwrites the file if it already exists.
  * @return The path of the downloaded file.
  */
-std::filesystem::path TestFS::downloadTestAsset(const std::string &url, const std::string &destination, bool overwrite)
+std::filesystem::path TestFS::downloadTestAsset(const std::string &url, const std::filesystem::path &destination, bool overwrite, std::function<bool(const std::filesystem::path &)> validator)
 {
-    std::filesystem::path destPath = destination;
+    namespace fs = std::filesystem;
 
-    if (std::filesystem::exists(destPath))
+    if (fs::exists(destination))
     {
+        if (fs::file_size(destination) == 0)
+        {
+            overwrite = true;
+            LOGD << "Found empty file at " << destination << ", forcing overwrite";
+        }
+
         if (!overwrite)
-        {
-            return destPath;
-        }
+            return destination;
         else
-        {
-            std::filesystem::remove(destPath);
-        }
+            fs::remove(destination);
     }
 
-    std::ofstream ofs(destPath.string(), std::ios::binary);
-    auto request = cpr::Download(ofs, cpr::Url{url}, cpr::VerifySsl(false));
+    // Retry with exponential backoff: 1s, 2s, 4s, 8s, 16s, 32s, 64s
+    const int maxRetries = 7;
+    const int baseDelayMs = 1000;
 
-    if (request.error)
-        throw std::runtime_error("Failed to download " + url + " to " + destPath.string());
+    for (int attempt = 1; attempt <= maxRetries; ++attempt)
+    {
+        LOGD << "Downloading " << url << " (attempt " << attempt << "/" << maxRetries << ")";
 
-    return destPath;
+        std::ofstream ofs(destination.string(), std::ios::binary);
+        if (!ofs)
+            throw ddb::FSException("Cannot create file: " + destination.string());
+
+        auto request = cpr::Download(ofs, cpr::Url{url}, cpr::VerifySsl(false));
+        ofs.close();
+
+        // Check for network errors
+        if (request.error)
+        {
+            LOGD << "Download error: " << request.error.message;
+            if (fs::exists(destination)) fs::remove(destination);
+
+            if (attempt < maxRetries)
+            {
+                int delayMs = baseDelayMs * (1 << (attempt - 1));
+                LOGD << "Retrying in " << delayMs << "ms...";
+                std::this_thread::sleep_for(std::chrono::milliseconds(delayMs));
+                continue;
+            }
+            throw ddb::NetException("Failed to download " + url + " to " + destination.string() +
+                                    " after " + std::to_string(maxRetries) + " attempts: " +
+                                    request.error.message);
+        }
+
+        // Check HTTP status code
+        if (request.status_code != 200)
+        {
+            LOGD << "HTTP error " << request.status_code << " downloading " << url;
+            if (fs::exists(destination)) fs::remove(destination);
+
+            if (attempt < maxRetries)
+            {
+                int delayMs = baseDelayMs * (1 << (attempt - 1));
+                LOGD << "Retrying in " << delayMs << "ms...";
+                std::this_thread::sleep_for(std::chrono::milliseconds(delayMs));
+                continue;
+            }
+            throw ddb::NetException("Failed to download " + url + ": HTTP " +
+                                    std::to_string(request.status_code));
+        }
+
+        // Run optional validator
+        if (validator && !validator(destination))
+        {
+            LOGD << "Validation failed for downloaded file: " << destination;
+            fs::remove(destination);
+
+            if (attempt < maxRetries)
+            {
+                int delayMs = baseDelayMs * (1 << (attempt - 1));
+                LOGD << "Retrying in " << delayMs << "ms...";
+                std::this_thread::sleep_for(std::chrono::milliseconds(delayMs));
+                continue;
+            }
+            throw ddb::NetException("Downloaded file failed validation: " + url);
+        }
+
+        LOGD << "Downloaded " << url << " to " << destination;
+        return destination;
+    }
+
+    // Should not reach here
+    throw ddb::NetException("Failed to download " + url + " after " +
+                            std::to_string(maxRetries) + " attempts");
 }

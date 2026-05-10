@@ -2,9 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "testarea.h"
+#include "testfs.h"
 
 #include <algorithm>
-#include <cpr/cpr.h>
 #include <thread>
 #include <chrono>
 #include <fstream>
@@ -130,77 +130,11 @@ fs::path TestArea::downloadTestAsset(const std::string& url,
             fs::remove(destination);
     }
 
-    // Retry with exponential backoff: 1s, 2s, 4s, 8s, 16s, 32s, 64s
-    const int maxRetries = 7;
-    const int baseDelayMs = 1000;
+    std::function<bool(const fs::path&)> validator;
+    if (isSqliteFile)
+        validator = isValidSqliteFile;
 
-    for (int attempt = 1; attempt <= maxRetries; ++attempt) {
-        LOGD << "Downloading " << url << " (attempt " << attempt << "/" << maxRetries << ")";
-
-        std::ofstream ofs(destination.string(), std::ios::binary);
-        if (!ofs) {
-            throw ddb::FSException("Cannot create file: " + destination.string());
-        }
-
-        auto request = cpr::Download(ofs, cpr::Url{url}, cpr::VerifySsl(false));
-        ofs.close();
-
-        // Check for network errors
-        if (request.error) {
-            LOGD << "Download error: " << request.error.message;
-            if (fs::exists(destination)) fs::remove(destination);
-
-            if (attempt < maxRetries) {
-                int delayMs = baseDelayMs * (1 << (attempt - 1));  // 1s, 2s, 4s
-                LOGD << "Retrying in " << delayMs << "ms...";
-                std::this_thread::sleep_for(std::chrono::milliseconds(delayMs));
-                continue;
-            }
-            throw ddb::NetException("Failed to download " + url + " to " + destination.string() +
-                                    " after " + std::to_string(maxRetries) + " attempts: " +
-                                    request.error.message);
-        }
-
-        // Check HTTP status code
-        if (request.status_code != 200) {
-            LOGD << "HTTP error " << request.status_code << " downloading " << url;
-            if (fs::exists(destination)) fs::remove(destination);
-
-            if (attempt < maxRetries) {
-                int delayMs = baseDelayMs * (1 << (attempt - 1));
-                LOGD << "Retrying in " << delayMs << "ms...";
-                std::this_thread::sleep_for(std::chrono::milliseconds(delayMs));
-                continue;
-            }
-            throw ddb::NetException("Failed to download " + url + ": HTTP " +
-                                    std::to_string(request.status_code));
-        }
-
-        // For SQLite files, validate the downloaded content
-        if (isSqliteFile) {
-            if (!isValidSqliteFile(destination)) {
-                LOGD << "Downloaded file is not a valid SQLite database: " << destination;
-                fs::remove(destination);
-
-                if (attempt < maxRetries) {
-                    int delayMs = baseDelayMs * (1 << (attempt - 1));
-                    LOGD << "Retrying in " << delayMs << "ms...";
-                    std::this_thread::sleep_for(std::chrono::milliseconds(delayMs));
-                    continue;
-                }
-                throw ddb::NetException("Downloaded file is not a valid SQLite database: " + url);
-            }
-            LOGD << "SQLite file validated successfully: " << destination;
-        }
-
-        // Download successful
-        LOGD << "Downloaded " << url << " to " << destination;
-        return destination;
-    }
-
-    // Should not reach here, but just in case
-    throw ddb::NetException("Failed to download " + url + " after " +
-                            std::to_string(maxRetries) + " attempts");
+    return TestFS::downloadTestAsset(url, destination, false, validator);
 }
 
 void TestArea::clearAll() {

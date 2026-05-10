@@ -5,6 +5,7 @@
 #define TESTFS_H
 
 #include <string>
+#include <functional>
 #include "fs.h"
 
 /**
@@ -32,6 +33,20 @@ public:
      * @param baseTestFolder The base test folder to be cleared.
      */
     static void clearCache(const std::string &baseTestFolder);
+
+    /**
+     * @brief Downloads a test asset from a URL to a destination path with retry and optional validation.
+     * @param url The URL of the file to download.
+     * @param destination The destination path to save the downloaded file.
+     * @param overwrite If true, overwrites the file if it already exists.
+     * @param validator Optional callback to validate the downloaded file. If it returns false, the download is retried.
+     * @return The path of the downloaded file.
+     */
+    static std::filesystem::path downloadTestAsset(
+        const std::string &url,
+        const std::filesystem::path &destination,
+        bool overwrite = false,
+        std::function<bool(const std::filesystem::path &)> validator = nullptr);
 
     /**
      * @brief Path of the test archive (zip file).
@@ -72,14 +87,7 @@ private:
      */
     static std::string extractFileName(const std::string &path);
 
-    /**
-     * @brief Downloads a test asset from a URL to a specified destination.
-     * @param url The URL of the file to download.
-     * @param destination The destination path to save the downloaded file.
-     * @param overwrite If true, overwrites the file if it already exists.
-     * @return The path of the downloaded file.
-     */
-    static std::filesystem::path downloadTestAsset(const std::string &url, const std::string &destination, bool overwrite);
+
 };
 
 #endif // TESTFS_H
