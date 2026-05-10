@@ -179,6 +179,22 @@ After successful build, find executables in the `build/` directory:
 - **ddbcmd.exe** - Command-line tool
 - **ddb.dll** - Core library
 - **ddbtest.exe** - Test suite
+- **untwine.exe** - COPC converter (optional, see below)
+
+#### Untwine COPC (optional)
+
+If the `vendor/untwine` git submodule is initialised, the build script automatically compiles [Untwine](https://github.com/hobuinc/untwine) and places `untwine.exe` next to `ddbcmd.exe`. Untwine significantly accelerates the generation of Cloud Optimized Point Clouds (COPC) compared to the PDAL fallback.
+
+> **Important:** Untwine is always compiled with the **same `-BuildType`** as DroneDB. Both binaries share vcpkg-managed DLLs (pdalcpp, gdal, proj, …) that must link against the same C runtime. Mixing configurations (e.g. DroneDB Debug + Untwine Release) causes a CRT mismatch and a crash at startup.
+
+To initialise the submodule:
+
+```powershell
+git submodule update --init vendor/untwine
+.\full-build-win.ps1          # or -BuildType Release
+```
+
+If the submodule is not present, DroneDB falls back to the built-in PDAL `writers.copc` pipeline automatically — no configuration required.
 
 #### Troubleshooting
 
@@ -195,6 +211,42 @@ After successful build, find executables in the `build/` directory:
 - Try a clean build: `.\full-build-win.ps1 -Clean`
 - Manually bootstrap vcpkg: `cd vcpkg; .\bootstrap-vcpkg.bat`
 - Check prerequisites are installed and in PATH
+
+### Linux Build Script
+
+The `full-build-linux.sh` script configures vcpkg, runs CMake, and optionally builds the Untwine COPC accelerator in a single step.
+
+#### Basic Usage
+
+```bash
+# Release build (default)
+./full-build-linux.sh
+
+# Debug build
+./full-build-linux.sh Debug
+```
+
+The first (optional) positional argument sets the build type and is passed directly to CMake's `-DCMAKE_BUILD_TYPE`. Accepted values match CMake conventions: `Release`, `Debug`, `RelWithDebInfo`, `MinSizeRel`.
+
+#### Build Output
+
+After a successful build, executables are placed in `build/`:
+- **ddbcmd** / **libddb.so** - CLI tool and core library
+- **ddbtest** - Test suite
+- **untwine** - COPC accelerator (optional, see below)
+
+#### Untwine COPC Accelerator (optional)
+
+Same logic as on Windows: if `vendor/untwine/CMakeLists.txt` exists, the script compiles Untwine using the **same build type** as DroneDB and copies the resulting binary next to `ddbcmd`.
+
+To initialise the submodule:
+
+```bash
+git submodule update --init vendor/untwine
+./full-build-linux.sh          # or Debug
+```
+
+A build failure in the Untwine step is **non-blocking** — DroneDB falls back to the PDAL `writers.copc` pipeline automatically.
 
 ### Docker Build
 
