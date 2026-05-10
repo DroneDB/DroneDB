@@ -276,7 +276,56 @@ namespace ddb
                 args.push_back(tempDir.string());
             }
 
-            LOGD << "Spawning untwine: " << bin.string() << " with " << inputFiles.size() << " input file(s)";
+            // Use the structured --progress_fd protocol so we receive binary-framed
+            // messages from untwine and forward them to the DDB logger.
+            // Message format:
+            //   int32_t  msgId  — 1000=progress, 1001=error
+            //   [1000] uint32_t percent | uint32_t ssize | char[ssize]
+            //   [1001] uint32_t ssize   | char[ssize]
+            // On Windows the fd value is a HANDLE cast to size_t (QgisUntwine convention).
+            // On POSIX it is a plain pipe fd integer.
+
+#ifdef _WIN32
+            SECURITY_ATTRIBUTES sa{};
+            sa.nLength = sizeof(sa);
+            sa.bInheritHandle = TRUE;
+
+            HANDLE hProgRead = nullptr, hProgWrite = nullptr;
+            if (!CreatePipe(&hProgRead, &hProgWrite, &sa, 0))
+            {
+                errorOut = "CreatePipe failed for untwine progress_fd";
+                return false;
+            }
+            // The read end must NOT be inherited by the child.
+            SetHandleInformation(hProgRead, HANDLE_FLAG_INHERIT, 0);
+
+            // Pass write-handle value as size_t string (QgisUntwine_win.cpp convention).
+            {
+                size_t hval = reinterpret_cast<size_t>(hProgWrite);
+                args.push_back("--progress_fd");
+                args.push_back(std::to_string(hval));
+            }
+#else
+            int progPipe[2];
+            if (pipe(progPipe) != 0)
+            {
+                errorOut = "pipe() failed for untwine progress_fd";
+                return false;
+            }
+            args.push_back("--progress_fd");
+            args.push_back(std::to_string(progPipe[1]));
+#endif
+
+            // Log full command line for debugging.
+            {
+                std::ostringstream cmdDbg;
+                for (size_t i = 0; i < args.size(); ++i)
+                {
+                    if (i > 0) cmdDbg << ' ';
+                    cmdDbg << quoteArg(args[i]);
+                }
+                LOGD << "Spawning untwine (" << inputFiles.size() << " input file(s)): " << cmdDbg.str();
+            }
 
 #ifdef _WIN32
             // Build a single command line string
@@ -302,25 +351,72 @@ namespace ddb
 
             STARTUPINFOW si{};
             si.cb = sizeof(si);
+
             PROCESS_INFORMATION pi{};
 
             BOOL ok = CreateProcessW(
                 wideBin.c_str(),  // lpApplicationName: explicit resolved path
                 wideCmd.data(),   // lpCommandLine: full quoted command line for argv
                 nullptr, nullptr,
-                FALSE,
+                TRUE,             // bInheritHandles: child inherits hProgWrite
                 CREATE_NO_WINDOW,
                 nullptr, nullptr,
                 &si, &pi);
 
+            // Close write end in parent immediately after spawning so ReadFile reaches EOF.
+            CloseHandle(hProgWrite);
+
             if (!ok)
             {
+                CloseHandle(hProgRead);
                 DWORD err = GetLastError();
                 std::ostringstream oss;
                 oss << "CreateProcess failed for untwine (error " << err << ")";
                 errorOut = oss.str();
                 return false;
             }
+
+            // Parse the binary progress pipe until EOF (child exit).
+            {
+                auto readExact = [&](void *buf, DWORD n) -> bool {
+                    BYTE *p = static_cast<BYTE *>(buf);
+                    while (n > 0) {
+                        DWORD nr = 0;
+                        if (!ReadFile(hProgRead, p, n, &nr, nullptr) || nr == 0) return false;
+                        p += nr; n -= nr;
+                    }
+                    return true;
+                };
+
+                int32_t msgId;
+                while (readExact(&msgId, sizeof(msgId)))
+                {
+                    if (msgId == 1000) // progress
+                    {
+                        uint32_t percent = 0;
+                        if (!readExact(&percent, sizeof(percent))) break;
+                        uint32_t ssize = 0;
+                        if (!readExact(&ssize, sizeof(ssize))) break;
+                        std::string msg(ssize, '\0');
+                        if (ssize > 0 && !readExact(msg.data(), ssize)) break;
+                        LOGD << "[untwine] " << percent << "% " << msg;
+                    }
+                    else if (msgId == 1001) // error
+                    {
+                        uint32_t ssize = 0;
+                        if (!readExact(&ssize, sizeof(ssize))) break;
+                        std::string msg(ssize, '\0');
+                        if (ssize > 0 && !readExact(msg.data(), ssize)) break;
+                        LOGD << "[untwine] ERROR: " << msg;
+                    }
+                    else
+                    {
+                        LOGD << "[untwine] unexpected msgId=" << msgId << ", stopping pipe read";
+                        break;
+                    }
+                }
+            }
+            CloseHandle(hProgRead);
 
             WaitForSingleObject(pi.hProcess, INFINITE);
             DWORD exitCode = 1;
@@ -336,20 +432,73 @@ namespace ddb
                 return false;
             }
 #else
+            posix_spawn_file_actions_t actions;
+            posix_spawn_file_actions_init(&actions);
+            // Close the read end inside the child; the write end stays open (inherited).
+            posix_spawn_file_actions_addclose(&actions, progPipe[0]);
+
             std::vector<char *> argv;
             argv.reserve(args.size() + 1);
             for (auto &a : args) argv.push_back(const_cast<char *>(a.c_str()));
             argv.push_back(nullptr);
 
             pid_t pid = 0;
-            int spawnRet = posix_spawn(&pid, bin.c_str(), nullptr, nullptr, argv.data(), environ);
+            int spawnRet = posix_spawn(&pid, bin.c_str(), &actions, nullptr, argv.data(), environ);
+            posix_spawn_file_actions_destroy(&actions);
+
+            // Close the write end in the parent so read() below reaches EOF when the child exits.
+            close(progPipe[1]);
+
             if (spawnRet != 0)
             {
+                close(progPipe[0]);
                 std::ostringstream oss;
                 oss << "posix_spawn failed for untwine (errno " << spawnRet << ")";
                 errorOut = oss.str();
                 return false;
             }
+
+            // Parse the binary progress pipe until EOF (child exit).
+            {
+                auto readExact = [&](void *buf, size_t n) -> bool {
+                    uint8_t *p = static_cast<uint8_t *>(buf);
+                    while (n > 0) {
+                        ssize_t nr = read(progPipe[0], p, n);
+                        if (nr <= 0) return false;
+                        p += static_cast<size_t>(nr); n -= static_cast<size_t>(nr);
+                    }
+                    return true;
+                };
+
+                int32_t msgId;
+                while (readExact(&msgId, sizeof(msgId)))
+                {
+                    if (msgId == 1000) // progress
+                    {
+                        uint32_t percent = 0;
+                        if (!readExact(&percent, sizeof(percent))) break;
+                        uint32_t ssize = 0;
+                        if (!readExact(&ssize, sizeof(ssize))) break;
+                        std::string msg(ssize, '\0');
+                        if (ssize > 0 && !readExact(msg.data(), ssize)) break;
+                        LOGD << "[untwine] " << percent << "% " << msg;
+                    }
+                    else if (msgId == 1001) // error
+                    {
+                        uint32_t ssize = 0;
+                        if (!readExact(&ssize, sizeof(ssize))) break;
+                        std::string msg(ssize, '\0');
+                        if (ssize > 0 && !readExact(msg.data(), ssize)) break;
+                        LOGD << "[untwine] ERROR: " << msg;
+                    }
+                    else
+                    {
+                        LOGD << "[untwine] unexpected msgId=" << msgId << ", stopping pipe read";
+                        break;
+                    }
+                }
+            }
+            close(progPipe[0]);
 
             int status = 0;
             if (waitpid(pid, &status, 0) < 0)
