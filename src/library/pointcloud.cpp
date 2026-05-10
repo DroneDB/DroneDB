@@ -24,6 +24,7 @@
 #include "logger.h"
 #include "mio.h"
 #include "ply.h"
+#include "untwine_runner.h"
 #include "utils.h"
 
 namespace ddb {
@@ -655,86 +656,11 @@ bool isCopcPath(const std::string& filename) {
     return lc == suffix;
 }
 
-void buildCopc(const std::vector<std::string>& filenames, const std::string& outdir) {
-    fs::path dest = outdir;
-    io::assureFolderExists(dest);
-
-    fs::path tmpDir = dest / "tmp";
-    io::assureFolderExists(tmpDir);
-
-    // Minimum epsilon for extent validation (in the point cloud's native units)
-    // This prevents degenerate output for zero-extent or near-zero-extent inputs.
-    constexpr double MIN_EXTENT_EPSILON = 1e-10;
-    constexpr size_t MIN_POINT_COUNT = 2;
-
-    size_t totalPointCount = 0;
-    double globalMinX = std::numeric_limits<double>::max();
-    double globalMinY = std::numeric_limits<double>::max();
-    double globalMaxX = std::numeric_limits<double>::lowest();
-    double globalMaxY = std::numeric_limits<double>::lowest();
-
-    for (const std::string& f : filenames) {
-        if (!fs::exists(f))
-            throw FSException(f + " does not exist");
-
-        const EntryType type = fingerprint(f);
-        if (type != PointCloud)
-            throw InvalidArgsException(f + " is not a supported point cloud file");
-
-        // Get point cloud info for validation
-        PointCloudInfo pcInfo;
-        if (getPointCloudInfo(f, pcInfo)) {
-            totalPointCount += pcInfo.pointCount;
-            updateGlobalBounds(pcInfo, globalMinX, globalMinY, globalMaxX, globalMaxY);
-        }
-    }
-
-    if (totalPointCount < MIN_POINT_COUNT) {
-        throw InvalidArgsException("Point cloud has insufficient points (" +
-                                   std::to_string(totalPointCount) +
-                                   "). At least " + std::to_string(MIN_POINT_COUNT) +
-                                   " points are required for COPC generation.");
-    }
-
-    // Convert non-LAS sources to a temporary LAS first; PDAL writers.copc accepts only
-    // formats supported by its readers (LAS/LAZ natively).
-    std::vector<std::string> inputFiles;
-    for (const auto& f : filenames) {
-        auto p = io::Path(f);
-        if (p.checkExtension({"ply", "e57", "pts", "xyz"})) {
-            std::string lasF = (tmpDir / Hash::strCRC64(f)).string() + ".las";
-            LOGD << "Converting " << f << " to " << lasF;
-            translateToLas(f, lasF);
-            inputFiles.push_back(lasF);
-
-            // PLY/PTS/XYZ/E57 don't have reliable bounds in their headers; read them
-            // back from the converted LAS so the extent validation has something to chew on.
-            PointCloudInfo lasInfo;
-            if (getPointCloudInfo(lasF, lasInfo)) {
-                updateGlobalBounds(lasInfo, globalMinX, globalMinY, globalMaxX, globalMaxY);
-            }
-        } else {
-            inputFiles.push_back(f);
-        }
-    }
-
-    double extentX = globalMaxX - globalMinX;
-    double extentY = globalMaxY - globalMinY;
-    if (extentX < MIN_EXTENT_EPSILON || extentY < MIN_EXTENT_EPSILON) {
-        throw InvalidArgsException("Point cloud has zero or near-zero extent (X: " +
-                                   std::to_string(extentX) + ", Y: " + std::to_string(extentY) +
-                                   "). Point cloud must have spatial extent for COPC generation.");
-    }
-
-    const fs::path outPath = dest / CopcFileName;
-    io::assureIsRemoved(outPath);
-
-    // Legacy EPT cleanup: if a previous EPT build is in this folder, remove it. The
-    // build pipeline already does this on its side, but we are defensive here too.
-    io::assureIsRemoved(dest / "ept.json");
-    io::assureIsRemoved(dest / "ept-data");
-    io::assureIsRemoved(dest / "ept-hierarchy");
-
+// PDAL-based COPC builder: classic readers.las -> writers.copc pipeline.
+// Used as the default fallback when Untwine is not available or fails.
+static void buildCopcPdal(const std::vector<std::string>& inputFiles,
+                          const fs::path& outPath,
+                          const fs::path& tmpDir) {
     try {
         // Build a PDAL pipeline: one or more LAS readers -> writers.copc.
         // When there's a single input we attach the writer directly; when there are
@@ -778,6 +704,106 @@ void buildCopc(const std::vector<std::string>& filenames, const std::string& out
 
     if (!fs::exists(outPath))
         throw PDALException("COPC build did not produce output file: " + outPath.string());
+}
+
+void buildCopc(const std::vector<std::string>& filenames, const std::string& outdir) {
+    fs::path dest = outdir;
+    io::assureFolderExists(dest);
+
+    fs::path tmpDir = dest / "tmp";
+    io::assureFolderExists(tmpDir);
+
+    // Minimum epsilon for extent validation (in the point cloud's native units)
+    // This prevents degenerate output for zero-extent or near-zero-extent inputs.
+    constexpr double MIN_EXTENT_EPSILON = 1e-10;
+    constexpr size_t MIN_POINT_COUNT = 2;
+
+    size_t totalPointCount = 0;
+    double globalMinX = std::numeric_limits<double>::max();
+    double globalMinY = std::numeric_limits<double>::max();
+    double globalMaxX = std::numeric_limits<double>::lowest();
+    double globalMaxY = std::numeric_limits<double>::lowest();
+
+    for (const std::string& f : filenames) {
+        if (!fs::exists(f))
+            throw FSException(f + " does not exist");
+
+        const EntryType type = fingerprint(f);
+        if (type != PointCloud)
+            throw InvalidArgsException(f + " is not a supported point cloud file");
+
+        // Get point cloud info for validation
+        PointCloudInfo pcInfo;
+        if (getPointCloudInfo(f, pcInfo)) {
+            totalPointCount += pcInfo.pointCount;
+            updateGlobalBounds(pcInfo, globalMinX, globalMinY, globalMaxX, globalMaxY);
+        }
+    }
+
+    if (totalPointCount < MIN_POINT_COUNT) {
+        throw InvalidArgsException("Point cloud has insufficient points (" +
+                                   std::to_string(totalPointCount) +
+                                   "). At least " + std::to_string(MIN_POINT_COUNT) +
+                                   " points are required for COPC generation.");
+    }
+
+    // Convert non-LAS sources to a temporary LAS first; both backends accept only
+    // formats supported by PDAL's LAS reader (LAS/LAZ natively).
+    std::vector<std::string> inputFiles;
+    for (const auto& f : filenames) {
+        auto p = io::Path(f);
+        if (p.checkExtension({"ply", "e57", "pts", "xyz"})) {
+            std::string lasF = (tmpDir / Hash::strCRC64(f)).string() + ".las";
+            LOGD << "Converting " << f << " to " << lasF;
+            translateToLas(f, lasF);
+            inputFiles.push_back(lasF);
+
+            // PLY/PTS/XYZ/E57 don't have reliable bounds in their headers; read them
+            // back from the converted LAS so the extent validation has something to chew on.
+            PointCloudInfo lasInfo;
+            if (getPointCloudInfo(lasF, lasInfo)) {
+                updateGlobalBounds(lasInfo, globalMinX, globalMinY, globalMaxX, globalMaxY);
+            }
+        } else {
+            inputFiles.push_back(f);
+        }
+    }
+
+    double extentX = globalMaxX - globalMinX;
+    double extentY = globalMaxY - globalMinY;
+    if (extentX < MIN_EXTENT_EPSILON || extentY < MIN_EXTENT_EPSILON) {
+        throw InvalidArgsException("Point cloud has zero or near-zero extent (X: " +
+                                   std::to_string(extentX) + ", Y: " + std::to_string(extentY) +
+                                   "). Point cloud must have spatial extent for COPC generation.");
+    }
+
+    const fs::path outPath = dest / CopcFileName;
+    io::assureIsRemoved(outPath);
+
+    // Legacy EPT cleanup: if a previous EPT build is in this folder, remove it. The
+    // build pipeline already does this on its side, but we are defensive here too.
+    io::assureIsRemoved(dest / "ept.json");
+    io::assureIsRemoved(dest / "ept-data");
+    io::assureIsRemoved(dest / "ept-hierarchy");
+
+    CopcBackend backend = untwine::resolveBackend(CopcBackend::Auto);
+
+    if (backend == CopcBackend::Untwine) {
+        // Dedicated temp dir to keep parallel builds isolated.
+        fs::path untwineTemp = tmpDir / "untwine";
+        std::string err;
+        const bool ok = untwine::runUntwine(inputFiles, outPath, untwineTemp, err);
+        if (ok && fs::exists(outPath)) {
+            io::assureIsRemoved(tmpDir);
+            return;
+        }
+        // Auto fallback: log a warning and try PDAL.
+        LOGD << "Untwine COPC build failed (" << err << "), falling back to PDAL writers.copc";
+        // Make sure no half-written output is left behind before the fallback runs.
+        io::assureIsRemoved(outPath);
+    }
+
+    buildCopcPdal(inputFiles, outPath, tmpDir);
 }
 
 json PointCloudInfo::toJSON() {
