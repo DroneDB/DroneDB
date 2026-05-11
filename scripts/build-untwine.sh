@@ -68,6 +68,26 @@ UNTWINE_BUILD="${BUILD_DIR}/untwine-build"
 mkdir -p "${UNTWINE_BUILD}"
 
 VCPKG_TOOLCHAIN="${REPO_ROOT}/vcpkg/scripts/buildsystems/vcpkg.cmake"
+VCPKG_INSTALLED="${BUILD_DIR}/vcpkg_installed"
+
+# Auto-detect the triplet used by the main build. CI uses
+# x64-linux-release, local builds typically use x64-linux. We look for the
+# subdirectory that actually contains PDALConfig.cmake and prefer it.
+DETECTED_TRIPLET=""
+for triplet in "${VCPKG_HOST_TRIPLET:-}" "${UNTWINE_VCPKG_TRIPLET:-}" "x64-linux-release" "x64-linux"; do
+    if [ -n "${triplet}" ] && [ -f "${VCPKG_INSTALLED}/${triplet}/share/pdal/PDALConfig.cmake" ]; then
+        DETECTED_TRIPLET="${triplet}"
+        break
+    fi
+done
+
+if [ -n "${DETECTED_TRIPLET}" ]; then
+    PREFIX_PATH="${VCPKG_INSTALLED}/${DETECTED_TRIPLET}"
+    echo "  Found PDAL via triplet: ${DETECTED_TRIPLET}"
+else
+    PREFIX_PATH="${VCPKG_INSTALLED}/${VCPKG_HOST_TRIPLET:-x64-linux-release}"
+    echo "  WARNING: PDALConfig.cmake not found under ${VCPKG_INSTALLED}. Falling back to ${PREFIX_PATH}"
+fi
 
 (
     cd "${UNTWINE_BUILD}"
@@ -75,6 +95,10 @@ VCPKG_TOOLCHAIN="${REPO_ROOT}/vcpkg/scripts/buildsystems/vcpkg.cmake"
     echo "Configuring Untwine (${BUILD_TYPE})..."
     cmake "${VENDOR_DIR}" \
         -DCMAKE_TOOLCHAIN_FILE="${VCPKG_TOOLCHAIN}" \
+        -DVCPKG_MANIFEST_MODE=OFF \
+        -DVCPKG_INSTALLED_DIR="${VCPKG_INSTALLED}" \
+        -DCMAKE_PREFIX_PATH="${PREFIX_PATH}" \
+        -DPDAL_DIR="${PREFIX_PATH}/share/pdal" \
         -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
         -DBUILD_TESTING=OFF
 ) || { echo "ERROR: cmake configure failed for untwine" >&2; exit 1; }

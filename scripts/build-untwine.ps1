@@ -117,9 +117,28 @@ if (-not (Test-Path $untwineBuildDir)) {
     New-Item -ItemType Directory -Path $untwineBuildDir | Out-Null
 }
 
-# vcpkg installed dir is shared with the main build
+# vcpkg installed dir is shared with the main build. The triplet used by
+# the main build is auto-detected: we look for the subdirectory that
+# actually contains PDALConfig.cmake (release-only triplets like
+# x64-windows-release are preferred on CI; local builds typically use
+# x64-windows). Falls back to $VcpkgTriplet when no match is found.
 $vcpkgInstalled = Join-Path $BuildDir "vcpkg_installed"
-$prefixPath = Join-Path $vcpkgInstalled "x64-windows"
+$prefixPath = $null
+if (Test-Path $vcpkgInstalled) {
+    $candidates = @($VcpkgTriplet, "x64-windows-release", "x64-windows") | Select-Object -Unique
+    foreach ($triplet in $candidates) {
+        $tripletDir = Join-Path $vcpkgInstalled $triplet
+        if (Test-Path (Join-Path $tripletDir "share\pdal\PDALConfig.cmake")) {
+            $prefixPath = $tripletDir
+            Write-Host "  Found PDAL via triplet: $triplet" -ForegroundColor Green
+            break
+        }
+    }
+}
+if (-not $prefixPath) {
+    $prefixPath = Join-Path $vcpkgInstalled $VcpkgTriplet
+    Write-Host "  WARNING: PDALConfig.cmake not found under $vcpkgInstalled. Falling back to $prefixPath" -ForegroundColor Yellow
+}
 
 $cmakeArgs = @(
     $VendorDir,
@@ -127,6 +146,7 @@ $cmakeArgs = @(
     "-DVCPKG_MANIFEST_MODE=OFF",
     "-DVCPKG_INSTALLED_DIR=$vcpkgInstalled",
     "-DCMAKE_PREFIX_PATH=$prefixPath",
+    "-DPDAL_DIR=$prefixPath\share\pdal",
     "-DBUILD_TESTING=OFF"
 )
 
