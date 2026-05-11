@@ -48,7 +48,7 @@ jobs:
         cache-to: type=gha,mode=max
     - name: Image digest
       run: echo ${{ steps.docker_builder_build.outputs.digest }}
-      
+
   build_app:
     name: Build Application Image
     runs-on: ubuntu-24.04
@@ -68,6 +68,15 @@ jobs:
       with:
         username: ${{ secrets.DOCKERHUB_USERNAME }}
         password: ${{ secrets.DOCKERHUB_TOKEN }}
+    - name: Extract Docker metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: dronedb/dronedb
+        tags: |
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=raw,value=latest,enable={{is_default_branch}}
     - name: Build and push Docker application image
       id: docker_app_build
       uses: docker/build-push-action@v6
@@ -75,7 +84,8 @@ jobs:
         context: .
         file: ./docker/Dockerfile
         push: ${{ github.event_name != 'pull_request' && (github.event.inputs.push_to_registry != 'false' || github.event_name != 'workflow_dispatch') }}
-        tags: dronedb/dronedb:latest
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
     - name: Image digest
