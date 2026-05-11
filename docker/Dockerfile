@@ -31,18 +31,14 @@ RUN cd /workspace && \
 # Create a smaller runtime image
 FROM ubuntu:24.04
 
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y \
-    libstdc++6 \
-    libc6 \
-    && rm -rf /var/lib/apt/lists/*
-
 # Copy the built executable and dependencies from builder
 COPY --from=0 /workspace/build/package/*.deb /app/ddb.deb
 
-# Install the DEB package
-RUN dpkg -i /app/ddb.deb || apt-get install -f -y && \
-    rm /app/ddb.deb
+# Install the DEB package and all its dependencies, then clean up
+RUN apt-get update && \
+    apt-get install -y /app/ddb.deb && \
+    rm /app/ddb.deb && \
+    rm -rf /var/lib/apt/lists/*
 
 # Set the working directory
 WORKDIR /data
