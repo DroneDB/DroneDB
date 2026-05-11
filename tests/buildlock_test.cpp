@@ -392,9 +392,12 @@ TEST_F(BuildLockTest, IsBuildActiveDetection) {
 
 /**
  * @brief Test that BuildLock correctly handles a pre-existing lock file on disk.
- * On Windows, CREATE_ALWAYS naturally reclaims orphaned files (no process handle).
- * On Linux, O_EXCL is a pure exclusivity primitive - stale recovery is the caller's
- * responsibility (build.cpp uses PID-based liveness checks).
+ *
+ * Cross-platform behavior diverges here:
+ * - **Windows**: CREATE_ALWAYS overwrites the orphaned file → lock acquired.
+ * - **Unix/Linux/macOS**: the lock file persists on disk but the kernel-managed
+ *   advisory lock died with the previous process, so a fresh acquisition
+ *   succeeds (the file is just a container, the kernel provides exclusion).
  */
 TEST_F(BuildLockTest, WaitMode_OrphanedLockFileOnDisk) {
     auto outputPath = testArea->getPath("stale_lock_test");
@@ -407,31 +410,28 @@ TEST_F(BuildLockTest, WaitMode_OrphanedLockFileOnDisk) {
     }
     ASSERT_TRUE(fs::exists(lockFile));
 
-#ifdef WIN32
-    // Windows CREATE_ALWAYS overwrites the orphaned file → lock acquired
+    // Both platforms now reclaim the orphan transparently.
     {
         BuildLock lock(outputPath.string());  // wait=true
         EXPECT_TRUE(lock.isHolding());
     }
-#else
-    // Linux O_EXCL fails because the file exists - stale recovery is the caller's job
-    EXPECT_THROW({
-        BuildLock lock(outputPath.string());  // wait=true
-    }, BuildInProgressException);
-    // Clean up for next tests
-    io::assureIsRemoved(lockFile);
-#endif
+
+    // Lock file should have been cleaned up after the BuildLock went out of scope.
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    EXPECT_FALSE(fs::exists(lockFile));
 }
 
 /**
- * @brief Test that wait=false (non-blocking check) fails against an orphaned lock file
- * that has no valid process behind it - this is the isBuildActive check path.
- * The lock file exists on disk but no one holds a file handle on it.
+ * @brief Test that wait=false reclaims an orphaned lock file with no live holder.
+ *
+ * With kernel-managed locking on Unix and CREATE_NEW falling through to a
+ * fresh open on Windows-orphaned files (handled by the implementation),
+ * an orphaned file is no longer considered "active build in progress".
  */
-TEST_F(BuildLockTest, NoWaitMode_FailsOnOrphanedLockFile) {
+TEST_F(BuildLockTest, NoWaitMode_ReclaimsOrphanedLockFile) {
     auto outputPath = testArea->getPath("orphan_lock_test");
 
-    // Create an orphaned lock file with dead PID (no process holds a handle)
+    // Create an orphaned lock file (no process holds the kernel lock)
     std::string lockFile = outputPath.string() + ".building";
     {
         std::ofstream f(lockFile);
@@ -439,22 +439,31 @@ TEST_F(BuildLockTest, NoWaitMode_FailsOnOrphanedLockFile) {
     }
     ASSERT_TRUE(fs::exists(lockFile));
 
-    // Both platforms: wait=false always uses exclusive-create semantics
-    // (CREATE_NEW on Windows, O_EXCL on Linux), so existing file → fail
+#ifdef WIN32
+    // Windows wait=false uses CREATE_NEW which fails if the file exists,
+    // even when no handle is held. Higher-level code (build.cpp) handles
+    // this by deleting orphans before retry, but BuildLock itself is strict.
     EXPECT_THROW({
         BuildLock lock(outputPath.string(), false);
     }, BuildInProgressException);
-
-    // Clean up
     io::assureIsRemoved(lockFile);
+#else
+    // Unix: kernel locking - the orphan has no live holder, so wait=false
+    // succeeds and reclaims the file.
+    {
+        BuildLock lock(outputPath.string(), false);
+        EXPECT_TRUE(lock.isHolding());
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    EXPECT_FALSE(fs::exists(lockFile));
+#endif
 }
 
 /**
- * @brief Test the force-build scenario at the lock level:
- * 1. A lock file is left on disk (simulating crashed build)
- * 2. wait=false fails (isBuildActive detects "active")
- * 3. Caller removes the stale file (simulating build.cpp stale-detection logic)
- * 4. wait=true succeeds (force build proceeds after caller-side cleanup)
+ * @brief End-to-end recovery scenario: a "crashed" build leaves an orphan
+ * lock file behind; a subsequent process must be able to build without
+ * any special force flag or manual cleanup (on Unix; Windows still has
+ * the file-presence semantics for wait=false).
  */
 TEST_F(BuildLockTest, ForceBuildScenario_StaleLockRecovery) {
     auto outputPath = testArea->getPath("force_build_scenario");
@@ -467,21 +476,80 @@ TEST_F(BuildLockTest, ForceBuildScenario_StaleLockRecovery) {
     }
     ASSERT_TRUE(fs::exists(lockFile));
 
-    // Step 2: Non-blocking check should detect "build in progress"
+#ifdef WIN32
+    // On Windows, wait=false still fails (the file exists on disk and
+    // CREATE_NEW refuses); only wait=true (CREATE_ALWAYS) succeeds.
     EXPECT_THROW({
         BuildLock checkLock(outputPath.string(), false);
     }, BuildInProgressException);
-
-    // Step 3: Simulate caller-side stale lock removal (as build.cpp does after
-    // verifying the lock is stale via isLockFileStale/isProcessAlive)
-    io::assureIsRemoved(lockFile);
-    ASSERT_FALSE(fs::exists(lockFile));
-
-    // Step 4: Lock acquisition succeeds after stale file removal
     {
-        BuildLock forceLock(outputPath.string());  // wait=true
+        BuildLock forceLock(outputPath.string());  // wait=true → CREATE_ALWAYS
         EXPECT_TRUE(forceLock.isHolding());
     }
+#else
+    // On Unix, both modes recover transparently because the kernel lock died.
+    {
+        BuildLock recoveryLock(outputPath.string(), false);
+        EXPECT_TRUE(recoveryLock.isHolding());
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    EXPECT_FALSE(fs::exists(lockFile));
+#endif
 }
+
+/**
+ * @brief Multi-process recovery: after a child process holding the lock is
+ * forcefully killed (SIGKILL), the parent must be able to reacquire the lock
+ * immediately without intervention. This validates the kernel-managed
+ * release-on-death property that was the whole point of the refactor.
+ */
+#ifndef WIN32
+TEST_F(BuildLockTest, MultiProcess_KernelReleaseOnKill) {
+    auto outputPath = testArea->getPath("multi_proc_kill");
+
+    pid_t child = fork();
+    ASSERT_NE(child, -1);
+
+    if (child == 0) {
+        // Child: acquire lock and sleep forever until killed
+        try {
+            BuildLock lock(outputPath.string());
+            // Signal parent that the lock is held by creating a sentinel file
+            std::ofstream(outputPath.string() + ".child-ready").close();
+            // Hold the lock until SIGKILL
+            for (;;) ::pause();
+        } catch (...) {
+            ::_exit(1);
+        }
+        ::_exit(0);
+    }
+
+    // Parent: wait for child to acquire the lock
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!fs::exists(outputPath.string() + ".child-ready") &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    ASSERT_TRUE(fs::exists(outputPath.string() + ".child-ready"))
+        << "Child did not acquire lock in time";
+
+    // Parent attempt to lock must fail while child is alive
+    EXPECT_THROW({
+        BuildLock concurrent(outputPath.string(), false);
+    }, BuildInProgressException);
+
+    // Kill the child with SIGKILL (no graceful cleanup, no destructors)
+    ASSERT_EQ(::kill(child, SIGKILL), 0);
+    int status = 0;
+    ::waitpid(child, &status, 0);
+
+    // Parent must be able to immediately reacquire the lock, even though the
+    // .building file may still be on disk (the kernel released the lock).
+    {
+        BuildLock recovered(outputPath.string(), false);
+        EXPECT_TRUE(recovered.isHolding());
+    }
+}
+#endif
 
 } // anonymous namespace

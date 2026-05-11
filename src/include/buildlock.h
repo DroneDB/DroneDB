@@ -27,7 +27,15 @@ namespace ddb {
  * @details
  * The lock is implemented using platform-specific atomic file operations:
  * - Windows: CreateFile with exclusive access and FILE_FLAG_DELETE_ON_CLOSE
- * - Unix/Linux: open() with O_CREAT | O_EXCL flags
+ * - Linux: open() + fcntl(F_OFD_SETLK) for kernel-managed advisory locking
+ *   (NFSv4-safe, per-fd semantics)
+ * - macOS / BSD: open() + flock() (per-fd advisory locking)
+ *
+ * In every case the kernel releases the lock automatically when the holding
+ * process terminates - even on SIGKILL or container shutdown. This means
+ * orphan lock files on disk are harmless: any subsequent process can reclaim
+ * them, because mutual exclusion is provided by the kernel and not by the
+ * file's presence on disk.
  *
  * Key features:
  * - Atomic lock acquisition (no race conditions)
@@ -104,12 +112,11 @@ private:
      * @param waitForLock Controls lock acquisition strategy:
      *   - **Windows**: true = CREATE_ALWAYS (overwrites orphaned files, blocks on
      *     active handles); false = CREATE_NEW (fails immediately if file exists).
-     *   - **Unix/Linux**: Both modes use O_CREAT|O_EXCL (pure exclusivity). Stale
-     *     lock file recovery is **not** handled here - the caller (build.cpp) must
-     *     detect stale locks via PID liveness checks and remove them before retrying.
-     *     This asymmetry exists because Unix unlink() on an open file succeeds
-     *     (removing the directory entry but not the inode), which would break
-     *     mutual exclusion if done inside BuildLock.
+     *   - **Unix/Linux**: ignored. Both modes use non-blocking kernel advisory
+     *     locking (F_OFD_SETLK on Linux, flock() elsewhere). Orphan files are
+     *     reclaimable because the kernel released the previous lock at process
+     *     death; mutual exclusion is provided by the lock itself, not the file's
+     *     presence on disk.
      *
      * @throws AppException If the lock cannot be acquired
      */

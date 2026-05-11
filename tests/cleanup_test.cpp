@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "build.h"
+#include "buildlock.h"
 #include "dbops.h"
 #include "ddb.h"
 #include "entry.h"
@@ -237,16 +238,18 @@ namespace
             "abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabca";
         fs::path orphanDir = makeFakeBuildDir(buildDir, orphanHash);
 
-        // Active lock = current process PID (guaranteed to be alive). Lock files
-        // live one level deep under the hash directory: <hash>/<subfolder>.building.
-        fs::path lockFile = orphanDir / "cog.building";
-        writeLockFile(lockFile, GET_CURRENT_PID());
+        // Hold a real BuildLock for the duration of the test. With kernel-managed
+        // locking (F_OFD_SETLK / flock / CreateFile-no-share), "active" means
+        // exactly: another fd in this or another process currently owns the lock.
+        // A bare PID written to disk no longer counts as "active".
+        const fs::path outputFolder = orphanDir / "cog";
+        ddb::BuildLock activeLock(outputFolder.string());
 
         auto result = ddb::cleanupBuild(db.get(), "");
 
         EXPECT_TRUE(result.removedBuilds.empty());
         EXPECT_TRUE(fs::exists(orphanDir)) << "Active-locked orphan should not be removed";
-        EXPECT_TRUE(fs::exists(lockFile));
+        EXPECT_TRUE(fs::exists(outputFolder.string() + ".building"));
     }
 
     TEST(cleanupBuild, RemovesOrphanWithStaleLock)
@@ -263,10 +266,11 @@ namespace
             "fefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefe";
         fs::path orphanDir = makeFakeBuildDir(buildDir, orphanHash);
 
-        // PID 2147483646 is well above any realistic running PID and will not
-        // resolve to a live process on Windows or POSIX. (PID 0 is rejected as
-        // "unreadable" by readPidFromLockFile, which conservatively keeps the
-        // lock — so it can't be used as a stale marker.)
+        // A "stale" lock file is just a leftover from a crashed process: the
+        // file exists on disk but the kernel lock was released when the holder
+        // died. We simulate that by writing a fake PID into the file with no
+        // open fd attached. The new isLockFileStale uses a non-blocking probe
+        // BuildLock to discover that no live process holds the lock.
         fs::path lockFile = orphanDir / "cog.building";
         writeLockFile(lockFile, 2147483646L);
 

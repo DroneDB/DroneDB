@@ -1060,6 +1060,9 @@ DDBBuild(const char* ddbPath, const char* source, const char* dest, bool force, 
         }
     } catch (const ddb::BuildDepMissingException& e) {
         return DDBERR_BUILDDEPMISSING;
+    } catch (const ddb::BuildInProgressException& e) {
+        DDBSetLastError(e.what());
+        return DDBERR_BUILDINPROGRESS;
     }
 
     DDB_C_END

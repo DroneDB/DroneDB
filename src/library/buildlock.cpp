@@ -20,6 +20,57 @@
 #include <cerrno>
 #include <cstring>
 #include <unistd.h>   // for getpid()
+#  if defined(__linux__) && defined(F_OFD_SETLK)
+     // Linux 3.15+: prefer Open File Description locks - per-fd semantics,
+     // immune to the F_SETLK "any close releases all locks" foot-gun,
+     // and NFSv4-safe.
+#    define DDB_USE_OFD_LOCKS 1
+#  else
+     // macOS / BSD / older Linux: fall back to flock() which is also per-fd
+     // (in modern kernels) and supported on all common Unix-like systems.
+#    include <sys/file.h>
+#    define DDB_USE_FLOCK 1
+#  endif
+#endif
+
+// --- File-private helpers for Unix kernel locking -------------------------
+#ifndef WIN32
+namespace {
+
+/// Attempt to acquire an exclusive advisory lock on the open file descriptor.
+/// Non-blocking: returns true if the lock is acquired, false if another process
+/// already holds it. Any other error is reported via `outErrno` and returns false.
+bool tryAcquireKernelLock(int fd, int* outErrno) {
+    *outErrno = 0;
+#  ifdef DDB_USE_OFD_LOCKS
+    struct flock fl{};
+    fl.l_type   = F_WRLCK;
+    fl.l_whence = SEEK_SET;
+    fl.l_start  = 0;
+    fl.l_len    = 0;  // whole file
+    if (fcntl(fd, F_OFD_SETLK, &fl) == 0) return true;
+#  else
+    if (flock(fd, LOCK_EX | LOCK_NB) == 0) return true;
+#  endif
+    *outErrno = errno;
+    return false;
+}
+
+/// Release the advisory lock. Best-effort; close() also releases automatically.
+void releaseKernelLock(int fd) {
+#  ifdef DDB_USE_OFD_LOCKS
+    struct flock fl{};
+    fl.l_type   = F_UNLCK;
+    fl.l_whence = SEEK_SET;
+    fl.l_start  = 0;
+    fl.l_len    = 0;
+    (void)fcntl(fd, F_OFD_SETLK, &fl);
+#  else
+    (void)flock(fd, LOCK_UN);
+#  endif
+}
+
+} // anonymous namespace
 #endif
 
 namespace ddb {
@@ -115,19 +166,29 @@ void BuildLock::cleanup() {
     // Note: File is automatically deleted by Windows due to FILE_FLAG_DELETE_ON_CLOSE
 #else
     if (fileDescriptor != -1) {
-        // Close the file descriptor
-        if (close(fileDescriptor) == -1) {
-            LOGW << "Failed to close lock file descriptor: " << strerror(errno);
-        }
-        fileDescriptor = -1;
-
-        // Manually remove the lock file on Unix systems
+        // Order matters: unlink the directory entry BEFORE releasing the kernel
+        // lock. If we released the lock first, a competing process could open
+        // the file, take the lock on the same inode, and then we'd unlink it -
+        // a subsequent third process opening the same path would create a new
+        // inode and acquire an independent lock, defeating mutual exclusion.
+        //
+        // With unlink first: any concurrent open() sees a missing path and
+        // creates a fresh inode whose lock is unrelated to ours. POSIX permits
+        // unlink() on an open file; the old inode lives on until our close().
         if (unlink(lockFilePath.c_str()) == -1) {
             // Only log if the error is not "file not found" (already deleted)
             if (errno != ENOENT) {
                 LOGW << "Failed to remove lock file " << lockFilePath << ": " << strerror(errno);
             }
         }
+
+        // Explicit unlock for clarity. close() would also release the lock.
+        releaseKernelLock(fileDescriptor);
+
+        if (close(fileDescriptor) == -1) {
+            LOGW << "Failed to close lock file descriptor: " << strerror(errno);
+        }
+        fileDescriptor = -1;
     }
 #endif
 
@@ -233,27 +294,38 @@ void BuildLock::acquireLock(bool waitForLock) {
     LOGD << "Build lock acquired successfully" << (waitForLock ? "" : " (no wait)") << ": " << lockFilePath;
 
 #else
-    // Unix implementation
-    // Note: stale lock file recovery is handled at a higher level (build.cpp)
-    // via PID-based liveness checks. BuildLock remains a pure exclusivity primitive
-    // using O_EXCL - it never removes existing lock files, as unlink() on an open
-    // file succeeds on Unix (removing the directory entry while the inode persists),
-    // which would break mutual exclusion between concurrent processes.
+    // Unix implementation using kernel-managed advisory locks.
+    //
+    // Rationale: the previous implementation used O_CREAT|O_EXCL which relied
+    // on the lock file's presence to signal "build in progress". That approach
+    // is fragile in two ways:
+    //   1. If a process crashes, the orphan file remains and requires PID-based
+    //      liveness checks to detect staleness. PID checks are unreliable in
+    //      Docker containers (PID namespaces restart from low values and the
+    //      same PID can belong to an unrelated process after restart).
+    //   2. Cross-platform asymmetry: Windows' FILE_FLAG_DELETE_ON_CLOSE makes
+    //      orphans impossible, but the Unix branch had no equivalent.
+    //
+    // The new model: the file is just a container; mutual exclusion is provided
+    // by an OS-level advisory lock (F_OFD_SETLK on Linux, flock() elsewhere)
+    // that the kernel releases automatically when the holding process dies.
+    // Orphan files are harmless: the next process opens them, takes the lock,
+    // truncates the body and rewrites the diagnostic info.
+    //
+    // `waitForLock` is intentionally ignored on Unix (both modes are non-
+    // blocking) to preserve the existing higher-level semantics in build.cpp.
 
-    // O_EXCL ensures that open() fails if the file already exists
     fileDescriptor = open(
         lockFilePath.c_str(),
-        O_CREAT | O_EXCL | O_WRONLY,  // Create exclusively, write-only
-        S_IRUSR | S_IWUSR | S_IRGRP   // Permissions: rw-r-----
+        O_CREAT | O_WRONLY,           // no O_EXCL: an orphan file is reclaimable
+        S_IRUSR | S_IWUSR | S_IRGRP   // permissions: rw-r-----
     );
+    (void)waitForLock;  // unused on Unix; preserved in signature for API parity
 
     if (fileDescriptor == -1) {
         int error = errno;
 
-        if (error == EEXIST) {
-            // File already exists - another process is building
-            throw BuildInProgressException("Build in progress by another process");
-        } else if (error == EACCES) {
+        if (error == EACCES) {
             throw BuildLockPermissionException("Insufficient permissions to create build lock file: " + lockFilePath);
         } else if (error == ENOSPC) {
             throw BuildLockDiskFullException("Disk full - cannot create build lock file: " + lockFilePath);
@@ -262,11 +334,35 @@ void BuildLock::acquireLock(bool waitForLock) {
         } else if (error == ENAMETOOLONG) {
             throw BuildLockException("Lock file path too long: " + lockFilePath);
         } else {
-            // Generic error with errno for debugging
             std::ostringstream ss;
-            ss << "Failed to acquire build lock (" << strerror(error) << "): " << lockFilePath;
+            ss << "Failed to open build lock file (" << strerror(error) << "): " << lockFilePath;
             throw BuildLockException(ss.str());
         }
+    }
+
+    int lockErrno = 0;
+    if (!tryAcquireKernelLock(fileDescriptor, &lockErrno)) {
+        // Clean up the fd before throwing; do NOT unlink, the lock holder
+        // legitimately owns the file.
+        close(fileDescriptor);
+        fileDescriptor = -1;
+
+        if (lockErrno == EWOULDBLOCK || lockErrno == EAGAIN || lockErrno == EACCES) {
+            // EACCES is what F_OFD_SETLK can return when another process holds
+            // a conflicting lock on some filesystems (POSIX permits either).
+            throw BuildInProgressException("Build in progress by another process");
+        }
+
+        std::ostringstream ss;
+        ss << "Failed to acquire build lock (" << strerror(lockErrno) << "): " << lockFilePath;
+        throw BuildLockException(ss.str());
+    }
+
+    // Lock acquired. The file may contain stale diagnostic data from a previous
+    // crashed run; truncate it before writing fresh info.
+    if (ftruncate(fileDescriptor, 0) == -1) {
+        // Non-fatal; lock is valid even if truncate fails.
+        LOGW << "Failed to truncate lock file " << lockFilePath << ": " << strerror(errno);
     }
 
     isLocked = true;

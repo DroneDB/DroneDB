@@ -7,9 +7,12 @@
 #include <algorithm>
 #include <cctype>
 #include <fstream>
-#include <optional>
 #include <sstream>
 #include <unordered_set>
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 #include "3d.h"
 #include "buildlock.h"
@@ -22,19 +25,9 @@
 #include "threadlock.h"
 #include "vector.h"
 
-#ifdef WIN32
-#include <tlhelp32.h>
-#include <windows.h>
-#else
-#include <signal.h>
-
-#include <cerrno>
-#endif
-
 namespace ddb {
 
-// Forward declarations for stale lock detection helpers (defined later in this file)
-static long readPidFromLockFile(const std::string& lockFilePath);
+// Forward declaration for stale lock detection helper (defined later in this file)
 static bool isLockFileStale(const std::string& lockFilePath);
 
 bool isBuildableInternal(const Entry& e, std::string& subfolder) {
@@ -142,39 +135,14 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
     // This must come BEFORE the ThreadLock to ensure proper ordering of lock acquisition
     LOGD << "Acquiring inter-process build lock for: " << outputFolder;
 
-    // Helper lambda: try to acquire the build lock, optionally removing stale locks first
-    auto acquireBuildLock = [&](bool removeStale) -> std::optional<BuildLock> {
-        if (removeStale) {
-            std::string lockFile = outputFolder + ".building";
-            if (fs::exists(lockFile)) {
-                if (isLockFileStale(lockFile)) {
-                    LOGD << "Force build: removing stale lock file (dead PID): " << lockFile;
-                    try {
-                        io::assureIsRemoved(lockFile);
-                    } catch (const std::exception& err) {
-                        LOGW << "Failed to remove stale lock file: " << err.what();
-                    }
-                } else {
-                    long activePid = readPidFromLockFile(lockFile);
-                    std::string pidInfo = activePid > 0 ? " (PID: " + std::to_string(activePid) + ")" : "";
-                    LOGD << "Force build: lock held by active process" << pidInfo << ", cannot override: " << lockFile;
-                    throw BuildInProgressException("Build in progress by another process" + pidInfo);
-                }
-            }
-        }
-        return BuildLock(outputFolder);
-    };
-
-    std::optional<BuildLock> processLockOpt;
-    try {
-        processLockOpt = acquireBuildLock(false);
-    } catch (const BuildInProgressException&) {
-        if (!force) throw;
-        // Force mode: attempt to reclaim stale lock and retry
-        LOGD << "Build lock failed, force=true: attempting stale lock removal and retry";
-        processLockOpt = acquireBuildLock(true);
-    }
-    BuildLock& processLock = *processLockOpt;
+    // BuildLock uses kernel-managed advisory locks (Windows: CreateFile no-share +
+    // DELETE_ON_CLOSE; Linux: F_OFD_SETLK; macOS/BSD: flock). The kernel releases
+    // the lock automatically when the holding process terminates, so orphan lock
+    // files left by crashed processes are reclaimed transparently. A
+    // BuildInProgressException therefore signals a *legitimately* active build by
+    // another process - force=true must not override it, because doing so would
+    // corrupt the in-progress output of the other process.
+    BuildLock processLock(outputFolder);
 
     // Acquire intra-process lock to coordinate between threads of the same process
     ThreadLock threadLock("build-" + (db->rootDirectory() / e.hash).string());
@@ -624,154 +592,86 @@ CleanupResult cleanupBuild(Database* db, const std::string& outputPath) {
     return result;
 }
 
-// Helper functions for stale lock detection
-
-#ifdef WIN32
-/**
- * @brief Check if a process is running on Windows
- * @param pid Process ID to check
- * @return true if process exists and is running, false otherwise
- */
-static bool isProcessAlive(DWORD pid) {
-    // Try to open the process with minimal permissions
-    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
-    if (process == nullptr) {
-        // Process doesn't exist or we don't have permission
-        return false;
-    }
-
-    // Check if the process is still running
-    DWORD exitCode = 0;
-    bool success = GetExitCodeProcess(process, &exitCode);
-    CloseHandle(process);
-
-    if (!success) {
-        return false;
-    }
-
-    // STILL_ACTIVE means the process is still running
-    return exitCode == STILL_ACTIVE;
-}
-#else
-/**
- * @brief Check if a process is running on Linux/Unix
- * @param pid Process ID to check
- * @return true if process exists, false otherwise
- */
-static bool isProcessAlive(pid_t pid) {
-    if (pid <= 0) {
-        return false;
-    }
-
-    // kill() with signal 0 doesn't actually send a signal,
-    // but checks if the process exists and we have permission to signal it
-    if (kill(pid, 0) == 0) {
-        return true;  // Process exists
-    }
-
-    // ESRCH means "No such process"
-    // Any other error (like EPERM) means the process exists but we can't signal it
-    return errno != ESRCH;
-}
-#endif
+// Helper function for stale lock detection.
+//
+// Background: a ".building" file may persist on disk after a crash, but the
+// OS-level lock held by the dead process is gone (the kernel releases it
+// automatically). The most reliable way to tell "is anyone really holding
+// this lock?" is to attempt a non-blocking acquisition - if it succeeds the
+// previous holder is dead (stale), if it throws BuildInProgressException the
+// holder is alive. We immediately release the lock we just took (via RAII)
+// without removing the file, so a subsequent legitimate caller of BuildLock
+// gets a clean state.
 
 /**
- * @brief Read the PID from a build lock file
+ * @brief Check if a build lock file is stale (no live process holds the lock)
  * @param lockFilePath Path to the .building lock file
- * @return PID if successfully parsed, -1 on error
- */
-static long readPidFromLockFile(const std::string& lockFilePath) {
-    try {
-        std::ifstream file(lockFilePath);
-        if (!file.is_open()) {
-            LOGD << "Cannot open lock file: " << lockFilePath;
-            return -1;
-        }
-
-        std::string line;
-        // Read first line which should contain "PID: <number>"
-        if (std::getline(file, line)) {
-            const std::string pidPrefix = "PID: ";
-            if (line.find(pidPrefix) == 0) {
-                try {
-                    std::string pidStr = line.substr(pidPrefix.length());
-                    // Remove any trailing whitespace or newlines
-                    size_t lastNonWS = pidStr.find_last_not_of(" \t\r\n");
-                    if (lastNonWS != std::string::npos) {
-                        pidStr.erase(lastNonWS + 1);
-                    } else {
-                        pidStr.clear();  // All whitespace, clear the string
-                    }
-
-                    // Validate that the string contains only digits
-                    if (!std::all_of(pidStr.begin(), pidStr.end(), [](unsigned char c) {
-                            return std::isdigit(c);
-                        })) {
-                        LOGD << "Invalid PID format in lock file (non-digit character): " << pidStr;
-                        return -1;
-                    }
-
-                    long pid = std::stol(pidStr);
-                    if (pid <= 0) {
-                        LOGD << "Invalid PID value in lock file (negative or zero): " << pid;
-                        return -1;
-                    }
-
-                    return pid;
-                } catch (const std::invalid_argument& e) {
-                    LOGD << "Failed to parse PID from lock file (invalid_argument): " << e.what();
-                    return -1;
-                } catch (const std::out_of_range& e) {
-                    LOGD << "Failed to parse PID from lock file (out_of_range): " << e.what();
-                    return -1;
-                }
-            } else {
-                LOGD << "Lock file doesn't start with 'PID: ' prefix: " << line;
-            }
-        } else {
-            LOGD << "Lock file is empty: " << lockFilePath;
-        }
-    } catch (const std::exception& e) {
-        LOGD << "Exception while reading lock file: " << e.what();
-    }
-
-    return -1;
-}
-
-/**
- * @brief Check if a build lock file is stale (process no longer running)
- * @param lockFilePath Path to the .building lock file
- * @return true if lock is stale and can be safely removed, false if lock is valid or status is
- * uncertain
+ * @return true if lock is stale (and can be safely removed), false if lock is
+ *         still held by an active process or status is uncertain
  */
 static bool isLockFileStale(const std::string& lockFilePath) {
-    // Safety check: if file doesn't exist, it's not stale (it's gone)
     if (!fs::exists(lockFilePath)) {
-        return false;
+        return false;  // Nothing to check
     }
 
-    long pid = readPidFromLockFile(lockFilePath);
-
-    // If we can't read the PID, assume the lock is valid to be safe
-    // This prevents accidentally removing valid locks
-    if (pid < 0) {
-        LOGD << "Cannot determine lock status (PID unreadable), assuming valid";
+#ifdef _WIN32
+    // On Windows the BuildLock implementation holds the file with no sharing
+    // (dwShareMode = 0) and FILE_FLAG_DELETE_ON_CLOSE. So if we can open it
+    // exclusively for read with OPEN_EXISTING, no process currently owns the
+    // lock -> it is stale and the file can be removed safely. We do not pass
+    // FILE_FLAG_DELETE_ON_CLOSE here: cleanupBuild will remove the parent
+    // directory itself.
+    HANDLE h = CreateFileA(
+        lockFilePath.c_str(),
+        GENERIC_READ,
+        0,  // No sharing - matches the lock holder's request
+        nullptr,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL,
+        nullptr);
+    if (h == INVALID_HANDLE_VALUE) {
+        const DWORD err = GetLastError();
+        if (err == ERROR_SHARING_VIOLATION || err == ERROR_ACCESS_DENIED) {
+            LOGD << "Lock file is valid (live holder exists): " << lockFilePath;
+            return false;
+        }
+        if (err == ERROR_FILE_NOT_FOUND || err == ERROR_PATH_NOT_FOUND) {
+            return false;  // Race: file vanished
+        }
+        LOGD << "Cannot determine Windows lock status (err " << err << "), assuming valid: " << lockFilePath;
         return false;
     }
-
-#ifdef WIN32
-    bool alive = isProcessAlive(static_cast<DWORD>(pid));
+    CloseHandle(h);
+    LOGD << "Lock file is stale (no live holder on Windows): " << lockFilePath;
+    return true;
 #else
-    bool alive = isProcessAlive(static_cast<pid_t>(pid));
-#endif
-
-    if (!alive) {
-        LOGD << "Lock file is stale: process " << pid << " is not running";
-        return true;
+    // The lock file path is "<outputFolder>.building"; BuildLock appends the
+    // ".building" suffix internally, so we must strip it before constructing.
+    const std::string suffix = ".building";
+    if (lockFilePath.size() <= suffix.size() ||
+        lockFilePath.compare(lockFilePath.size() - suffix.size(), suffix.size(), suffix) != 0) {
+        LOGD << "Unexpected lock file name (no .building suffix): " << lockFilePath;
+        return false;
     }
+    const std::string outputFolder =
+        lockFilePath.substr(0, lockFilePath.size() - suffix.size());
 
-    LOGD << "Lock file is valid: process " << pid << " is still running";
-    return false;
+    try {
+        // Non-blocking acquisition; success means the previous holder is dead.
+        BuildLock probe(outputFolder, false);
+        LOGD << "Lock file is stale (kernel reports no live holder): " << lockFilePath;
+        // RAII releases the probe lock and unlinks the file on destruction.
+        // The caller of isLockFileStale (cleanupBuild) expects the file to be
+        // safely removable, which it now is.
+        return true;
+    } catch (const BuildInProgressException&) {
+        LOGD << "Lock file is valid (live holder exists): " << lockFilePath;
+        return false;
+    } catch (const AppException& e) {
+        LOGD << "Cannot determine lock status (" << e.what() << "), assuming valid";
+        return false;
+    }
+#endif
 }
 
 bool isBuildActive(Database* db, const std::string& path) {
@@ -798,60 +698,28 @@ bool isBuildActive(Database* db, const std::string& path) {
     std::string outPath = db->buildDirectory().string();
     fs::path baseOutputPath = fs::path(outPath) / e.hash;
     std::string outputFolder = (baseOutputPath / subfolder).string();
+    std::string lockFile = outputFolder + ".building";
 
     LOGD << "Checking for active build in: " << outputFolder;
 
-    std::string lockFilePath = outputFolder + ".building";
+    if (!fs::exists(lockFile)) {
+        return false;  // No lock file means no active build
+    }
 
-    // Try to create a BuildLock without waiting
-    // If it fails immediately, another process might be actively building
-    try {
-        BuildLock testLock(outputFolder, false);  // false = don't wait for lock
-        LOGD << "No active build detected, lock acquired successfully";
-        return false;  // Lock acquired successfully, no active build
-    } catch (const BuildInProgressException& e) {
-        // Lock file exists - check if it's stale before assuming build is active
-        LOGD << "Lock file exists, checking if stale: " << lockFilePath;
-
-        // Check if the lock file exists and is stale
-        if (fs::exists(lockFilePath) && isLockFileStale(lockFilePath)) {
-            LOGD << "Lock file is stale, attempting to remove it";
-
-            // Try to remove the stale lock file
-            try {
-                io::assureIsRemoved(lockFilePath);
-
-                // Verify the file was actually removed
-                if (!fs::exists(lockFilePath)) {
-                    LOGD << "Stale lock file removed successfully, no active build";
-                    return false;  // Stale lock removed, no active build
-                } else {
-                    LOGW << "Failed to verify removal of stale lock file";
-                    // Fall through to return true (conservative approach)
-                }
-            } catch (const std::exception& removeErr) {
-                // If we can't remove it, log the error but assume the build is active
-                // This is the conservative approach to avoid removing locks incorrectly
-                LOGW << "Failed to remove stale lock file: " << removeErr.what();
-                // Fall through to return true
-            }
-        } else {
-            LOGD << "Lock file is valid (process still running)";
+    // Reuse the cross-platform stale detection. If the lock file is stale
+    // (no kernel-level holder), clean it up and report no active build.
+    if (isLockFileStale(lockFile)) {
+        LOGD << "Removing stale lock file: " << lockFile;
+        std::error_code ec;
+        fs::remove(lockFile, ec);
+        if (ec) {
+            LOGD << "Failed to remove stale lock file (" << ec.message() << "): " << lockFile;
         }
-
-        // Either the lock is valid or we couldn't remove the stale lock
-        LOGD << "Active build detected: " << e.what();
-        return true;
-    } catch (const BuildLockException& e) {
-        // For any other build lock error, assume no active build
-        // This includes permission errors, disk full, etc.
-        LOGD << "No active build detected (build lock error): " << e.what();
-        return false;
-    } catch (const AppException& e) {
-        // Catch any other unexpected exceptions
-        LOGD << "No active build detected (other error): " << e.what();
         return false;
     }
+
+    LOGD << "Active build detected (kernel lock held): " << lockFile;
+    return true;
 }
 
 }  // namespace ddb

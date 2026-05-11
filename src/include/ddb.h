@@ -19,9 +19,10 @@ extern "C"
 
     enum DDBErr
     {
-        DDBERR_NONE = 0,      // No error
-        DDBERR_EXCEPTION = 1, // Generic app exception
-        DDBERR_BUILDDEPMISSING = 2
+        DDBERR_NONE = 0,            // No error
+        DDBERR_EXCEPTION = 1,       // Generic app exception
+        DDBERR_BUILDDEPMISSING = 2, // Build skipped: dependency missing
+        DDBERR_BUILDINPROGRESS = 3  // Build skipped: another process holds the lock
     };
 
 #define DDB_C_BEGIN \
