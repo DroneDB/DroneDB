@@ -20,7 +20,7 @@
 - **Geospatial Analysis** - Flight path visualization, EXIF metadata extraction, dataset partitioning, and STAC catalog support
 - **Multiple Sharing Options** - Direct links, embed codes, TMS tiles, Cloud-Optimized GeoTIFFs (COG), and Entwine Point Tiles (EPT)
 - **Cloud Sync** - Push and pull datasets to/from DroneDB Hub for collaboration
-- **Format Support** - Orthophotos (GeoTIFF, COG), point clouds (LAZ/LAS, PLY), 3D models (OBJ, glTF/GLB), vector files (GeoJSON, SHP, KML, DWG, GPKG), and 360° panoramas
+- **Format Support** - Orthophotos (GeoTIFF, COG), point clouds (LAS, LAZ, E57, PTS, XYZ, PLY), 3D models (OBJ, glTF/GLB), vector files (GeoJSON, DXF, DWG, SHP, SHZ, FGB, TopoJSON, KML, KMZ, GPKG), videos (MP4, MOV, WEBM, M4V, AVI, MKV), and 360° panoramas
 - **Cross-Platform** - Works on Windows and Linux
 
 ---
