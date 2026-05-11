@@ -722,7 +722,7 @@ namespace ddb
         bool dng = p.checkExtension({"dng"});
         bool tif = p.checkExtension({"tif", "tiff"});
         bool nongeoImage = p.checkExtension({"png", "gif", "webp"});
-        bool video = p.checkExtension({"mp4", "mov"});
+        bool video = p.checkExtension({"mp4", "mov", "webm", "m4v", "avi", "mkv"});
 
         bool georaster = false;
 
