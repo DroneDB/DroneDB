@@ -11,15 +11,21 @@ namespace ddb
 {
 
     void maskBorders(const std::string &input,
-                     const std::string &output,
-                     int nearDist,
-                     bool white,
-                     const std::string &color)
+                 const std::string &output,
+                 int nearDist,
+                 bool white,
+                 const std::string &color)
     {
-
         if (fs::exists(output)) {
             LOGD << "Output file " << output << " already exists, deleting it";
             fs::remove(output);
+        }
+
+        // Clean possible stale external mask from previous runs.
+        const std::string externalMask = output + ".msk";
+        if (fs::exists(externalMask)) {
+            LOGD << "External mask file " << externalMask << " already exists, deleting it";
+            fs::remove(externalMask);
         }
 
         GDALDatasetH hSrcDataset = GDALOpen(input.c_str(), GA_ReadOnly);
@@ -29,37 +35,65 @@ namespace ddb
         const int srcWidth = GDALGetRasterXSize(hSrcDataset);
         const int srcHeight = GDALGetRasterYSize(hSrcDataset);
         const int srcBands = GDALGetRasterCount(hSrcDataset);
-        // Rough estimate of the uncompressed output size including the alpha band
-        // we are about to add. Byte rasters dominate ortho workflows; for wider
-        // types this is still a conservative lower bound that drives the BIGTIFF
-        // decision below.
-        const uint64_t estimatedBytes =
-            static_cast<uint64_t>(srcWidth) * static_cast<uint64_t>(srcHeight) *
-            static_cast<uint64_t>(srcBands + 1);
-        // Classic TIFF caps at 4 GiB. Log when we expect to cross that line so
-        // the BIGTIFF=IF_SAFER promotion is auditable from --debug output.
-        const bool expectBigTiff = estimatedBytes > (uint64_t(4) << 30);
+
+        const uint64_t pixelCount =
+            static_cast<uint64_t>(srcWidth) * static_cast<uint64_t>(srcHeight);
+
+        uint64_t estimatedRasterBytes = 0;
+        int maxBytesPerSample = 0;
+        bool hasUnknownDataTypeSize = false;
+
+        for (int i = 1; i <= srcBands; ++i) {
+            GDALRasterBandH hBand = GDALGetRasterBand(hSrcDataset, i);
+            if (!hBand) {
+                hasUnknownDataTypeSize = true;
+                continue;
+            }
+
+            const GDALDataType eType = GDALGetRasterDataType(hBand);
+            const int bytesPerSample = GDALGetDataTypeSizeBytes(eType);
+
+            if (bytesPerSample <= 0) {
+                hasUnknownDataTypeSize = true;
+                continue;
+            }
+
+            estimatedRasterBytes += pixelCount * static_cast<uint64_t>(bytesPerSample);
+            maxBytesPerSample = std::max(maxBytesPerSample, bytesPerSample);
+        }
+
+        // With -setmask the transparency is a dataset mask, not an added alpha band.
+        // Internal GeoTIFF masks are conceptually 1 bit/pixel; this is only a rough
+        // uncompressed-size estimate
+        const uint64_t estimatedMaskBytes = (pixelCount + 7) / 8;
+        const uint64_t estimatedBytes = estimatedRasterBytes + estimatedMaskBytes;
+
+        // Informational only. The actual BigTIFF choice is controlled by the GTiff
+        // creation option BIGTIFF=IF_SAFER below.
+        const bool logBigTiffLikely = estimatedBytes > (uint64_t(4) << 30);
+
         LOGD << "Mask source: " << srcWidth << "x" << srcHeight
-             << " bands=" << srcBands
-             << " estimated output ~" << (estimatedBytes >> 20) << " MiB"
-             << (expectBigTiff ? " (BIGTIFF expected)" : "");
+            << " bands=" << srcBands
+            << " maxBytesPerSample=" << maxBytesPerSample
+            << " estimated uncompressed raster+1bit-mask ~"
+            << (estimatedBytes >> 20) << " MiB"
+            << (hasUnknownDataTypeSize ? " (data type size unknown for at least one band)" : "")
+            << (logBigTiffLikely ? " (BigTIFF may be needed; final decision uses BIGTIFF=IF_SAFER)" : "");
 
         char **targs = nullptr;
 
-        // Set alpha band for transparency
-        targs = CSLAddString(targs, "-setalpha");
+        // IMPORTANT: use mask, not alpha.
+        // Alpha would create a 4th Byte band and make JPEG/YCBCR less straightforward.
+        targs = CSLAddString(targs, "-setmask");
 
-        // Use floodfill algorithm - requires GDAL >= 3.8.
-        // DroneDB pins GDAL via vcpkg, so this is always satisfied.
-        // If building against a system GDAL, ensure version >= 3.8.
         targs = CSLAddString(targs, "-alg");
         targs = CSLAddString(targs, "floodfill");
+        // Faster alternative but doesn't handle concave collars
+        // targs = CSLAddString(targs, "twopasses");
 
-        // Tolerance
         targs = CSLAddString(targs, "-near");
         targs = CSLAddString(targs, std::to_string(nearDist).c_str());
 
-        // Color mode
         if (!color.empty()) {
             targs = CSLAddString(targs, "-color");
             targs = CSLAddString(targs, color.c_str());
@@ -67,43 +101,67 @@ namespace ddb
             targs = CSLAddString(targs, "-white");
         }
 
-        // Output format and compression.
-        // BIGTIFF=IF_SAFER auto-promotes to BigTIFF when the predicted size
-        // approaches the 4 GiB classic-TIFF limit (keeps small outputs classic).
-        // TILED + 512px blocks avoid the giant-strip scratch buffers that cause
-        // TIFFAppendToStrip failures on large orthos and match the COG pipeline.
-        // NUM_THREADS=ALL_CPUS speeds up LZW encoding on large rasters.
-        // Note: we intentionally do NOT generate overviews here; nearblack output
-        // is treated as an intermediate. Overview generation is left to the
-        // build/COG pipeline (see buildCog).
         targs = CSLAddString(targs, "-of");
         targs = CSLAddString(targs, "GTiff");
+
+        // Match the source style: RGB JPEG-in-TIFF with YCbCr.
         targs = CSLAddString(targs, "-co");
-        targs = CSLAddString(targs, "COMPRESS=LZW");
+        targs = CSLAddString(targs, "COMPRESS=JPEG");
         targs = CSLAddString(targs, "-co");
-        targs = CSLAddString(targs, "PREDICTOR=2");
+        targs = CSLAddString(targs, "PHOTOMETRIC=YCBCR");
+        targs = CSLAddString(targs, "-co");
+        targs = CSLAddString(targs, "JPEG_QUALITY=75");
+
+        // BIGTIFF=IF_SAFER lets the GTiff driver decide whether BigTIFF is safer.
+        // The estimate logged above is informational only and does not drive this
+        // decision.
         targs = CSLAddString(targs, "-co");
         targs = CSLAddString(targs, "BIGTIFF=IF_SAFER");
         targs = CSLAddString(targs, "-co");
+
+        // TILED + 512px blocks avoid giant-strip scratch buffers and match the COG
+        // pipeline. We do not generate overviews here; nearblack output is treated as
+        // an intermediate and overview generation is left to the build/COG pipeline.
         targs = CSLAddString(targs, "TILED=YES");
         targs = CSLAddString(targs, "-co");
         targs = CSLAddString(targs, "BLOCKXSIZE=512");
         targs = CSLAddString(targs, "-co");
         targs = CSLAddString(targs, "BLOCKYSIZE=512");
+
         targs = CSLAddString(targs, "-co");
         targs = CSLAddString(targs, "NUM_THREADS=ALL_CPUS");
 
         int bUsageError = FALSE;
+
+        // Force internal GeoTIFF mask instead of .msk sidecar, especially for GDAL < 3.9.
+        const char *prevInternalMask =
+            CPLGetThreadLocalConfigOption("GDAL_TIFF_INTERNAL_MASK", nullptr);
+        const std::string prevInternalMaskValue =
+            prevInternalMask ? prevInternalMask : "";
+
+        CPLSetThreadLocalConfigOption("GDAL_TIFF_INTERNAL_MASK", "YES");
+
         GDALNearblackOptions *psOptions = GDALNearblackOptionsNew(targs, nullptr);
         CSLDestroy(targs);
 
         if (!psOptions) {
+            CPLSetThreadLocalConfigOption(
+                "GDAL_TIFF_INTERNAL_MASK",
+                prevInternalMask ? prevInternalMaskValue.c_str() : nullptr
+            );
             GDALClose(hSrcDataset);
             throw GDALException("Failed to create nearblack options");
         }
 
-        GDALDatasetH hOutDataset = GDALNearblack(output.c_str(), nullptr, hSrcDataset, psOptions, &bUsageError);
+        GDALDatasetH hOutDataset =
+            GDALNearblack(output.c_str(), nullptr, hSrcDataset, psOptions, &bUsageError);
+
         GDALNearblackOptionsFree(psOptions);
+
+        CPLSetThreadLocalConfigOption(
+            "GDAL_TIFF_INTERNAL_MASK",
+            prevInternalMask ? prevInternalMaskValue.c_str() : nullptr
+        );
 
         if (bUsageError) {
             GDALClose(hSrcDataset);
