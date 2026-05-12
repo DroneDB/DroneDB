@@ -26,6 +26,24 @@ namespace ddb
         if (!hSrcDataset)
             throw GDALException("Cannot open " + input + " for reading");
 
+        const int srcWidth = GDALGetRasterXSize(hSrcDataset);
+        const int srcHeight = GDALGetRasterYSize(hSrcDataset);
+        const int srcBands = GDALGetRasterCount(hSrcDataset);
+        // Rough estimate of the uncompressed output size including the alpha band
+        // we are about to add. Byte rasters dominate ortho workflows; for wider
+        // types this is still a conservative lower bound that drives the BIGTIFF
+        // decision below.
+        const uint64_t estimatedBytes =
+            static_cast<uint64_t>(srcWidth) * static_cast<uint64_t>(srcHeight) *
+            static_cast<uint64_t>(srcBands + 1);
+        // Classic TIFF caps at 4 GiB. Log when we expect to cross that line so
+        // the BIGTIFF=IF_SAFER promotion is auditable from --debug output.
+        const bool expectBigTiff = estimatedBytes > (uint64_t(4) << 30);
+        LOGD << "Mask source: " << srcWidth << "x" << srcHeight
+             << " bands=" << srcBands
+             << " estimated output ~" << (estimatedBytes >> 20) << " MiB"
+             << (expectBigTiff ? " (BIGTIFF expected)" : "");
+
         char **targs = nullptr;
 
         // Set alpha band for transparency
@@ -49,13 +67,31 @@ namespace ddb
             targs = CSLAddString(targs, "-white");
         }
 
-        // Output format and compression
+        // Output format and compression.
+        // BIGTIFF=IF_SAFER auto-promotes to BigTIFF when the predicted size
+        // approaches the 4 GiB classic-TIFF limit (keeps small outputs classic).
+        // TILED + 512px blocks avoid the giant-strip scratch buffers that cause
+        // TIFFAppendToStrip failures on large orthos and match the COG pipeline.
+        // NUM_THREADS=ALL_CPUS speeds up LZW encoding on large rasters.
+        // Note: we intentionally do NOT generate overviews here; nearblack output
+        // is treated as an intermediate. Overview generation is left to the
+        // build/COG pipeline (see buildCog).
         targs = CSLAddString(targs, "-of");
         targs = CSLAddString(targs, "GTiff");
         targs = CSLAddString(targs, "-co");
         targs = CSLAddString(targs, "COMPRESS=LZW");
         targs = CSLAddString(targs, "-co");
         targs = CSLAddString(targs, "PREDICTOR=2");
+        targs = CSLAddString(targs, "-co");
+        targs = CSLAddString(targs, "BIGTIFF=IF_SAFER");
+        targs = CSLAddString(targs, "-co");
+        targs = CSLAddString(targs, "TILED=YES");
+        targs = CSLAddString(targs, "-co");
+        targs = CSLAddString(targs, "BLOCKXSIZE=512");
+        targs = CSLAddString(targs, "-co");
+        targs = CSLAddString(targs, "BLOCKYSIZE=512");
+        targs = CSLAddString(targs, "-co");
+        targs = CSLAddString(targs, "NUM_THREADS=ALL_CPUS");
 
         int bUsageError = FALSE;
         GDALNearblackOptions *psOptions = GDALNearblackOptionsNew(targs, nullptr);
