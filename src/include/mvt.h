@@ -22,7 +22,7 @@ namespace ddb
      * runtimes in the 10+ minute range. A budget bounds the worst case
      * regardless of how features are distributed.
      */
-    constexpr long long kMvtTileBudget = 50000;
+    constexpr long long kMvtTileBudget = 100000;
 
     /// Hard lower bound for MVT MAXZOOM (overview-only datasets).
     constexpr int kMvtMinZoomCap = 5;
