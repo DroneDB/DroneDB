@@ -5,72 +5,87 @@
 #include "test.h"
 #include "mvt.h"
 
+#include <algorithm>
+#include <cmath>
+
 namespace
 {
 
     using namespace ddb;
+    // The heuristic is budget-based: targeting kMvtTileBudget MVT tiles for a
+    // WGS84 envelope of `areaDeg2` square degrees, with the result clamped
+    // to [kMvtMinZoomCap, kMvtMaxZoomCap]. featureCount is unused; it is
+    // retained in the signature for ABI stability.
 
-    // Boundary conditions
-    TEST(testMvtDensity, EmptyDataset)
+    TEST(testMvtDensity, EmptyOrDegenerateReturnsMax)
     {
-        // featureCount <= 0 → floor (10)
-        EXPECT_EQ(computeMvtMaxZoom(0, 1.0), 10);
-        EXPECT_EQ(computeMvtMaxZoom(-1, 1.0), 10);
+        // featureCount <= 0 → max zoom cap (no work to do, no risk).
+        EXPECT_EQ(computeMvtMaxZoom(0, 1.0), kMvtMaxZoomCap);
+        EXPECT_EQ(computeMvtMaxZoom(-1, 1.0), kMvtMaxZoomCap);
+        // Degenerate (zero-area) bbox → max zoom cap.
+        EXPECT_EQ(computeMvtMaxZoom(1, 0.0), kMvtMaxZoomCap);
+        EXPECT_EQ(computeMvtMaxZoom(1000, 0.0), kMvtMaxZoomCap);
     }
 
-    TEST(testMvtDensity, DegenerateExtent)
+    TEST(testMvtDensity, SmallExtentSaturatesToMax)
     {
-        // Single point (area 0) but with features → maximum sensible zoom (18)
-        EXPECT_EQ(computeMvtMaxZoom(1, 0.0), 18);
-        EXPECT_EQ(computeMvtMaxZoom(1000, 0.0), 18);
+        // A tiny envelope produces few tiles even at the max cap, so the
+        // formula saturates upward and we get kMvtMaxZoomCap.
+        EXPECT_EQ(computeMvtMaxZoom(1,    1.0), kMvtMaxZoomCap);
+        EXPECT_EQ(computeMvtMaxZoom(1000, 1.0), kMvtMaxZoomCap);
+        EXPECT_EQ(computeMvtMaxZoom(1,    1e-4), kMvtMaxZoomCap);
     }
 
-    TEST(testMvtDensity, LowDensity)
+    TEST(testMvtDensity, FeatureCountIrrelevant)
     {
-        // 1 feature on a degree² → density 1 → floor 10
-        EXPECT_EQ(computeMvtMaxZoom(1, 1.0), 10);
-        // 10 features on a degree² → density 10 (not > 10) → still 10
-        EXPECT_EQ(computeMvtMaxZoom(10, 1.0), 10);
+        // Two very different feature counts on the same envelope must
+        // produce the same zoom: cost is bounded by tile count, not features.
+        const double area = 360.0 * 180.0; // global
+        EXPECT_EQ(computeMvtMaxZoom(1,        area),
+                  computeMvtMaxZoom(10000000, area));
     }
 
-    TEST(testMvtDensity, MediumDensity)
+    TEST(testMvtDensity, GlobalSparseDatasetIsModerate)
     {
-        // density 11 → zoom 12
-        EXPECT_EQ(computeMvtMaxZoom(11, 1.0), 12);
-        // density 101 → zoom 14
-        EXPECT_EQ(computeMvtMaxZoom(101, 1.0), 14);
-        // density 1001 → zoom 16
-        EXPECT_EQ(computeMvtMaxZoom(1001, 1.0), 16);
-    }
-
-    TEST(testMvtDensity, HighDensity)
-    {
-        // density 100001 → 18 (cap)
-        EXPECT_EQ(computeMvtMaxZoom(100001, 1.0), 18);
-        // density 10001 → 18
-        EXPECT_EQ(computeMvtMaxZoom(10001, 1.0), 18);
-    }
-
-    TEST(testMvtDensity, GlobalSparseDataset)
-    {
-        // 250 features on a global envelope (~64800 deg²) → density ~0.004
-        // → floor 10 (this is the "ita" worldwide shapefile case).
-        EXPECT_EQ(computeMvtMaxZoom(250, 360.0 * 180.0), 10);
+        // World admin boundaries: ~250 features on the global envelope.
+        // The old density heuristic produced kMvtMaxZoomCap-ish levels and
+        // pathological tile counts (~400k). The budget formula must keep z
+        // well below the cap.
+        const int z = computeMvtMaxZoom(250, 360.0 * 180.0);
+        EXPECT_LT(z, kMvtMaxZoomCap);
+        EXPECT_GE(z, kMvtMinZoomCap);
+        // Sanity: ratio = budget*64800/64800 = budget → z = floor(0.5*log2(budget)).
+        // For budget=50000 this is 7; verify symbolically against the constant.
+        const int expected = static_cast<int>(std::floor(
+            0.5 * std::log2(static_cast<double>(kMvtTileBudget))));
+        EXPECT_EQ(z, std::clamp(expected, kMvtMinZoomCap, kMvtMaxZoomCap));
     }
 
     TEST(testMvtDensity, BoundsAlwaysClamped)
     {
-        // Sweep a wide range to verify return value ∈ [10, 18]
+        // Sweep a wide range to verify return value ∈ [min, max]
         const long long counts[] = {0, 1, 100, 10000, 1000000, 1000000000LL};
-        const double areas[] = {0.0, 1e-6, 0.1, 1.0, 100.0, 64800.0};
+        const double areas[] = {0.0, 1e-6, 0.1, 1.0, 100.0, 64800.0, 1e9};
         for (long long c : counts)
         {
             for (double a : areas)
             {
                 const int z = computeMvtMaxZoom(c, a);
-                EXPECT_GE(z, 10);
-                EXPECT_LE(z, 18);
+                EXPECT_GE(z, kMvtMinZoomCap);
+                EXPECT_LE(z, kMvtMaxZoomCap);
             }
+        }
+    }
+
+    TEST(testMvtDensity, MonotonicInExtent)
+    {
+        // For positive featureCount, larger extent => same-or-lower zoom.
+        int prev = kMvtMaxZoomCap;
+        for (double a : {1e-3, 1.0, 100.0, 1000.0, 10000.0, 64800.0, 1e6})
+        {
+            const int z = computeMvtMaxZoom(1000, a);
+            EXPECT_LE(z, prev);
+            prev = z;
         }
     }
 

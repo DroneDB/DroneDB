@@ -2,7 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include <algorithm>
+#include <cctype>
 #include <limits>
+#include <set>
 #include <vector>
 
 #include "gdal_inc.h"
@@ -203,10 +205,111 @@ namespace ddb
             GDALClose(hOut);
         }
 
+        // ---- MVT layer-name sanitization ------------------------------------
+        //
+        // GDAL's MVT writer requires layer names to be plain identifiers:
+        // letters, digits and underscore, not starting with a digit. Sources
+        // such as KMZ commonly carry sublayers with spaces ("Western Theater")
+        // which the writer skips with: "ERROR 1: The layer name may not
+        // contain special characters or spaces". To preserve every layer we
+        // expose a renamed, read-only view via an in-memory OGR VRT.
+
+        bool isValidMvtLayerName(const std::string &name)
+        {
+            if (name.empty()) return false;
+            if (std::isdigit(static_cast<unsigned char>(name[0]))) return false;
+            for (char c : name)
+            {
+                const unsigned char uc = static_cast<unsigned char>(c);
+                if (!(std::isalnum(uc) || c == '_')) return false;
+            }
+            return true;
+        }
+
+        std::string sanitizeLayerName(const std::string &name)
+        {
+            std::string out;
+            out.reserve(name.size());
+            for (char c : name)
+            {
+                const unsigned char uc = static_cast<unsigned char>(c);
+                out.push_back((std::isalnum(uc) || c == '_') ? c : '_');
+            }
+            if (out.empty()) out = "layer";
+            if (std::isdigit(static_cast<unsigned char>(out[0])))
+                out.insert(out.begin(), '_');
+            return out;
+        }
+
+        // Returns true if any source layer has a name not acceptable by the
+        // MVT writer.
+        bool anyLayerNeedsSanitization(GDALDatasetH hSrcDS)
+        {
+            const int n = GDALDatasetGetLayerCount(hSrcDS);
+            for (int i = 0; i < n; i++)
+            {
+                OGRLayerH hLayer = GDALDatasetGetLayer(hSrcDS, i);
+                if (!hLayer) continue;
+                const char *raw = OGR_L_GetName(hLayer);
+                if (!raw || !isValidMvtLayerName(raw)) return true;
+            }
+            return false;
+        }
+
+        // Build a GPKG in /vsimem/ that copies each source layer with a
+        // sanitized, unique name. Uses GDALDatasetCopyLayer (per-index lookup)
+        // so it works even when the source has duplicate layer names
+        // (e.g. KMZ folders sharing a <name>).
+        //
+        // Returns the /vsimem/ path of the GPKG (caller owns: must VSIUnlink).
+        std::string buildSanitizedGpkg(GDALDatasetH hSrcDS)
+        {
+            GDALDriverH hGpkg = GDALGetDriverByName("GPKG");
+            if (!hGpkg)
+                throw AppException(
+                    "GPKG driver not available; cannot sanitize MVT layer names");
+
+            const std::string vsiPath =
+                "/vsimem/ddb_mvt_" + utils::generateRandomString(16) + ".gpkg";
+
+            GDALDatasetH hDst = GDALCreate(hGpkg, vsiPath.c_str(),
+                                            0, 0, 0, GDT_Unknown, nullptr);
+            if (!hDst)
+                throw AppException(
+                    "Cannot create in-memory GPKG for MVT layer sanitization");
+
+            std::set<std::string> used;
+            const int n = GDALDatasetGetLayerCount(hSrcDS);
+            int copied = 0;
+            for (int i = 0; i < n; i++)
+            {
+                OGRLayerH hLayer = GDALDatasetGetLayer(hSrcDS, i);
+                if (!hLayer) continue;
+                const char *raw = OGR_L_GetName(hLayer);
+                const std::string srcLayer = raw ? std::string(raw) : "";
+
+                std::string sane = sanitizeLayerName(srcLayer);
+                std::string candidate = sane;
+                int suffix = 2;
+                while (used.count(candidate) > 0)
+                    candidate = sane + "_" + std::to_string(suffix++);
+                used.insert(candidate);
+
+                OGRLayerH hCopied = GDALDatasetCopyLayer(
+                    hDst, hLayer, candidate.c_str(), nullptr);
+                if (hCopied) copied++;
+            }
+
+            GDALClose(hDst);
+            LOGD << "MVT sanitization: copied " << copied << "/" << n
+                 << " layers into " << vsiPath;
+            return vsiPath;
+        }
+
         // Convert input to MVT directory, reprojected to EPSG:3857.
         // Returns the dynamic MAXZOOM used.
-        int convertToMvt(GDALDatasetH hSrcDS, const std::string &outputDir,
-                         const VectorStats &stats)
+        int convertToMvt(GDALDatasetH hSrcDS, const std::string &srcPath,
+                         const std::string &outputDir, const VectorStats &stats)
         {
             // Sanity check driver availability up-front.
             if (GDALGetDriverByName("MVT") == nullptr)
@@ -224,8 +327,36 @@ namespace ddb
             }
             const int maxZoom = computeMvtMaxZoom(stats.featureCount, areaDeg2);
             const std::string maxZoomArg = "MAXZOOM=" + std::to_string(maxZoom);
+            LOGD << "MVT MAXZOOM=" << maxZoom
+                 << " (areaDeg2=" << areaDeg2
+                 << ", features=" << stats.featureCount << ")";
 
-            const bool needsSrs = allLayersMissSrs(hSrcDS);
+            // If any source layer name is rejected by the MVT writer, copy
+            // the layers into an in-memory GPKG with sanitized, unique names
+            // and translate from that instead. CopyLayer is index-based so
+            // it survives duplicate source layer names (e.g. KMZ folders).
+            GDALDatasetH hTranslateSrc = hSrcDS;
+            std::string sanitizedPath;
+            GDALDatasetH hSanitizedDS = nullptr;
+            if (anyLayerNeedsSanitization(hSrcDS))
+            {
+                sanitizedPath = buildSanitizedGpkg(hSrcDS);
+                hSanitizedDS = GDALOpenEx(sanitizedPath.c_str(),
+                                          GDAL_OF_VECTOR | GDAL_OF_READONLY,
+                                          nullptr, nullptr, nullptr);
+                if (!hSanitizedDS)
+                {
+                    VSIUnlink(sanitizedPath.c_str());
+                    throw AppException(
+                        "Cannot open sanitized GPKG for MVT translation: " +
+                        sanitizedPath);
+                }
+                hTranslateSrc = hSanitizedDS;
+                LOGD << "MVT: using sanitized GPKG (" << sanitizedPath
+                     << ") for " << srcPath;
+            }
+
+            const bool needsSrs = allLayersMissSrs(hTranslateSrc);
 
             // NOTE: -dsco takes a single KEY=VALUE token.
             // Valid MVT dsco keys: FORMAT, MINZOOM, MAXZOOM, EXTENT, BUFFER,
@@ -254,16 +385,24 @@ namespace ddb
             GDALVectorTranslateOptions *opts =
                 GDALVectorTranslateOptionsNew(argv, nullptr);
             if (!opts)
+            {
+                if (hSanitizedDS) GDALClose(hSanitizedDS);
+                if (!sanitizedPath.empty()) VSIUnlink(sanitizedPath.c_str());
                 throw AppException("Cannot create GDAL VectorTranslate options for MVT");
+            }
 
             // Reset GDAL error state so CPLGetLastErrorMsg() reflects this op.
             CPLErrorReset();
 
             int usageError = 0;
             GDALDatasetH hOut = GDALVectorTranslate(
-                outputDir.c_str(), nullptr, 1, &hSrcDS, opts, &usageError);
+                outputDir.c_str(), nullptr, 1, &hTranslateSrc, opts, &usageError);
 
             GDALVectorTranslateOptionsFree(opts);
+
+            // Release sanitization resources whether or not translate succeeded.
+            if (hSanitizedDS) GDALClose(hSanitizedDS);
+            if (!sanitizedPath.empty()) VSIUnlink(sanitizedPath.c_str());
 
             if (!hOut || usageError)
             {
@@ -364,7 +503,7 @@ namespace ddb
             try
             {
                 // Branch A: MVT first (cheaper to roll back).
-                convertToMvt(hSrcDS, mvtTemp.string(), stats);
+                convertToMvt(hSrcDS, input, mvtTemp.string(), stats);
                 // Branch B: GPKG sidecar.
                 const auto gpkgOut = (vecTemp / "source.gpkg").string();
                 convertToGpkg(hSrcDS, gpkgOut);
