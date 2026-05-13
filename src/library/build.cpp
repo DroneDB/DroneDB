@@ -180,8 +180,10 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
             buildNexus(relativePath, (fs::path(tempFolder) / "model.nxz").string());
             built = true;
         } else if (e.type == EntryType::Vector) {
-            buildVector(relativePath, (fs::path(tempFolder) / "vector.fgb").string());
-            built = true;
+            // buildVector manages its own atomic write to baseOutputPath/vec
+            // and baseOutputPath/mvt; do NOT use the standard tempFolder rename.
+            buildVector(relativePath, baseOutputPath.string());
+            // built stays false on purpose to skip the standard rename below.
         }
 
         if (built) {
@@ -239,10 +241,11 @@ void buildAll(Database* db, const std::string& outputPath, bool force) {
     // List all buildable files in DB
     auto q = db->query(
         "SELECT path, hash, type, properties, mtime, size, depth FROM entries WHERE type = ? OR "
-        "type = ? OR type = ?");
+        "type = ? OR type = ? OR type = ?");
     q->bind(1, PointCloud);
     q->bind(2, GeoRaster);
     q->bind(3, Model);
+    q->bind(4, Vector);
 
     while (q->fetch()) {
         Entry e(q->getText(0),

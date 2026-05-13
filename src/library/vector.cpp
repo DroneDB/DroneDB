@@ -1,8 +1,13 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+#include <algorithm>
+#include <limits>
+#include <vector>
+
 #include "gdal_inc.h"
 #include "vector.h"
+#include "mvt.h"
 #include "logger.h"
 #include "mio.h"
 #include "exceptions.h"
@@ -11,68 +16,276 @@
 namespace ddb
 {
 
-    void buildVector(const std::string &input, const std::string &outputVector, bool overwrite)
+    namespace
     {
-        fs::path p(input);
 
-        auto ext = fs::path(input).extension().string();
-        ddb::utils::toLower(ext);
+        // ---- helpers ---------------------------------------------------------
 
-        const auto outFile = outputVector.empty() ? p.replace_filename(p.filename().replace_extension(".fgb")).string() : outputVector;
-
-        LOGD << "Building vector " << input << " to " << outputVector << " with overwrite " << (overwrite ? "true" : "false") << " and outFile " << outFile;
-
-        // If it's already a flatgeobuf, we just copy it
-        // TODO OPT: We should create a link instead of copying
-        if (ext == ".fgb") {
-            LOGD << "File is already a FlatGeobuf";
-
-            if (overwrite)
-            {
-                LOGD << "Overwriting " << outputVector;
-                io::assureIsRemoved(outputVector);
-            }
-            else if (fs::exists(outputVector))
-            {
-                LOGD << "Output vector already exists, nothing to do";
-                return;
-            }
-
-            LOGD << "Copying " << input << " to " << outputVector;
-
-            fs::copy_file(input, outputVector);
-
-            return;
-        }
-
-        const auto deps = getVectorDependencies(input);
-        std::vector<std::string> missingDeps;
-
-        // Collect all missing dependencies
-        for (const std::string &d : deps)
+        std::string toLowerExt(const std::string &input)
         {
-            fs::path relPath = p.parent_path() / d;
-            if (!fs::exists(relPath))
-            {
-                missingDeps.push_back(d);
-            }
+            auto ext = fs::path(input).extension().string();
+            ddb::utils::toLower(ext);
+            return ext;
         }
 
-        // If there are missing dependencies, throw exception with the complete list
-        if (!missingDeps.empty())
+        // Compute total feature count and union envelope (in WGS84) for MAXZOOM.
+        struct VectorStats
         {
-            std::string errorMessage = "Dependencies missing for " + input + ": ";
-            for (size_t i = 0; i < missingDeps.size(); i++)
+            long long featureCount = 0;
+            // WGS84 envelope (degrees)
+            double minX =  std::numeric_limits<double>::max();
+            double minY =  std::numeric_limits<double>::max();
+            double maxX = -std::numeric_limits<double>::max();
+            double maxY = -std::numeric_limits<double>::max();
+            bool haveEnv = false;
+        };
+
+        VectorStats computeStats(GDALDatasetH hSrcDS)
+        {
+            VectorStats s;
+
+            OGRSpatialReferenceH hWgs84 = OSRNewSpatialReference(nullptr);
+            if (OSRImportFromEPSG(hWgs84, 4326) != OGRERR_NONE)
             {
-                if (i > 0) errorMessage += ", ";
-                errorMessage += missingDeps[i];
+                OSRDestroySpatialReference(hWgs84);
+                hWgs84 = nullptr;
             }
-            throw BuildDepMissingException(errorMessage, missingDeps);
+            else
+            {
+                OSRSetAxisMappingStrategy(hWgs84, OAMS_TRADITIONAL_GIS_ORDER);
+            }
+
+            const int layerCount = GDALDatasetGetLayerCount(hSrcDS);
+            for (int i = 0; i < layerCount; i++)
+            {
+                OGRLayerH hLayer = GDALDatasetGetLayer(hSrcDS, i);
+                if (!hLayer) continue;
+
+                s.featureCount += static_cast<long long>(OGR_L_GetFeatureCount(hLayer, FALSE));
+
+                OGREnvelope env;
+                if (OGR_L_GetExtent(hLayer, &env, TRUE) != OGRERR_NONE) continue;
+
+                OGRSpatialReferenceH hSrs = OGR_L_GetSpatialRef(hLayer);
+                double xs[4] = {env.MinX, env.MaxX, env.MaxX, env.MinX};
+                double ys[4] = {env.MinY, env.MinY, env.MaxY, env.MaxY};
+
+                if (hSrs && hWgs84)
+                {
+                    OSRSetAxisMappingStrategy(hSrs, OAMS_TRADITIONAL_GIS_ORDER);
+                    const char *authCode = OSRGetAuthorityCode(hSrs, nullptr);
+                    const char *authName = OSRGetAuthorityName(hSrs, nullptr);
+                    bool isWgs84 = (authName && authCode &&
+                                    std::string(authName) == "EPSG" &&
+                                    std::string(authCode) == "4326");
+                    if (!isWgs84)
+                    {
+                        OGRCoordinateTransformationH hT =
+                            OCTNewCoordinateTransformation(hSrs, hWgs84);
+                        if (hT)
+                        {
+                            if (!OCTTransform(hT, 4, xs, ys, nullptr))
+                            {
+                                LOGD << "computeStats: layer " << i << " transform failed";
+                                OCTDestroyCoordinateTransformation(hT);
+                                continue;
+                            }
+                            OCTDestroyCoordinateTransformation(hT);
+                        }
+                    }
+                }
+
+                const double mnX = std::min({xs[0], xs[1], xs[2], xs[3]});
+                const double mxX = std::max({xs[0], xs[1], xs[2], xs[3]});
+                const double mnY = std::min({ys[0], ys[1], ys[2], ys[3]});
+                const double mxY = std::max({ys[0], ys[1], ys[2], ys[3]});
+
+                if (!s.haveEnv)
+                {
+                    s.minX = mnX; s.maxX = mxX; s.minY = mnY; s.maxY = mxY;
+                    s.haveEnv = true;
+                }
+                else
+                {
+                    s.minX = std::min(s.minX, mnX);
+                    s.maxX = std::max(s.maxX, mxX);
+                    s.minY = std::min(s.minY, mnY);
+                    s.maxY = std::max(s.maxY, mxY);
+                }
+            }
+
+            if (hWgs84) OSRDestroySpatialReference(hWgs84);
+            return s;
         }
 
-        if (!convertToFlatGeobuf(input, outFile))
-            throw AppException("Cannot convert " + input + " to FlatGeobuf");
-    }
+        // Returns true if all source layers lack an SRS (typical for DXF).
+        // In that case, callers must inject -s_srs EPSG:4326 (we already
+        // computed the envelope assuming WGS84 in computeStats).
+        bool allLayersMissSrs(GDALDatasetH hSrcDS)
+        {
+            const int n = GDALDatasetGetLayerCount(hSrcDS);
+            if (n == 0) return false;
+            for (int i = 0; i < n; i++)
+            {
+                OGRLayerH hLayer = GDALDatasetGetLayer(hSrcDS, i);
+                if (hLayer && OGR_L_GetSpatialRef(hLayer) != nullptr) return false;
+            }
+            return true;
+        }
+
+        void checkDependencies(const std::string &input)
+        {
+            const auto deps = getVectorDependencies(input);
+            std::vector<std::string> missing;
+            const fs::path p(input);
+            for (const auto &d : deps)
+            {
+                if (!fs::exists(p.parent_path() / d))
+                    missing.push_back(d);
+            }
+            if (!missing.empty())
+            {
+                std::string msg = "Dependencies missing for " + input + ": ";
+                for (size_t i = 0; i < missing.size(); i++)
+                {
+                    if (i > 0) msg += ", ";
+                    msg += missing[i];
+                }
+                throw BuildDepMissingException(msg, missing);
+            }
+        }
+
+        // Convert input to GPKG with SPATIAL_INDEX=YES, reprojected to EPSG:4326.
+        // Multi-layer sources are preserved verbatim.
+        void convertToGpkg(GDALDatasetH hSrcDS, const std::string &output)
+        {
+            const bool needsSrs = allLayersMissSrs(hSrcDS);
+
+            std::vector<const char *> args;
+            args.insert(args.end(), {
+                "-f",     "GPKG",
+                "-t_srs", "EPSG:4326",
+                "-lco",   "SPATIAL_INDEX=YES",
+                "-lco",   "GEOMETRY_NAME=geom",
+                "-lco",   "FID=fid",
+                "-nlt",   "PROMOTE_TO_MULTI",
+                // KML/KMZ have DateTime fields that several drivers warn on;
+                // map to String for maximum compatibility.
+                "-mapFieldType", "DateTime=String",
+                "-skipfailures"});
+            if (needsSrs) {
+                args.push_back("-s_srs");
+                args.push_back("EPSG:4326");
+            }
+            args.push_back(nullptr);
+
+            char **argv = const_cast<char **>(args.data());
+            GDALVectorTranslateOptions *opts =
+                GDALVectorTranslateOptionsNew(argv, nullptr);
+            if (!opts)
+                throw AppException("Cannot create GDAL VectorTranslate options for GPKG");
+
+            CPLErrorReset();
+            int usageError = 0;
+            GDALDatasetH hOut = GDALVectorTranslate(
+                output.c_str(), nullptr, 1, &hSrcDS, opts, &usageError);
+
+            GDALVectorTranslateOptionsFree(opts);
+
+            if (!hOut || usageError)
+            {
+                const char *err = CPLGetLastErrorMsg();
+                const std::string gdalErr = (err && *err) ? std::string(err) : "<no GDAL error>";
+                if (hOut) GDALClose(hOut);
+                throw AppException("GDAL VectorTranslate (GPKG) failed for " +
+                                   output + ": " + gdalErr);
+            }
+            GDALClose(hOut);
+        }
+
+        // Convert input to MVT directory, reprojected to EPSG:3857.
+        // Returns the dynamic MAXZOOM used.
+        int convertToMvt(GDALDatasetH hSrcDS, const std::string &outputDir,
+                         const VectorStats &stats)
+        {
+            // Sanity check driver availability up-front.
+            if (GDALGetDriverByName("MVT") == nullptr)
+            {
+                std::vector<std::string> missing{"MVT driver"};
+                throw BuildDepMissingException(
+                    "MVT driver not available in this GDAL build", missing);
+            }
+
+            double areaDeg2 = 0.0;
+            if (stats.haveEnv)
+            {
+                areaDeg2 = std::max(0.0, stats.maxX - stats.minX) *
+                           std::max(0.0, stats.maxY - stats.minY);
+            }
+            const int maxZoom = computeMvtMaxZoom(stats.featureCount, areaDeg2);
+            const std::string maxZoomArg = "MAXZOOM=" + std::to_string(maxZoom);
+
+            const bool needsSrs = allLayersMissSrs(hSrcDS);
+
+            // NOTE: -dsco takes a single KEY=VALUE token.
+            // Valid MVT dsco keys: FORMAT, MINZOOM, MAXZOOM, EXTENT, BUFFER,
+            // COMPRESS, MAX_SIZE, MAX_FEATURES, TILE_EXTENSION, CONF, etc.
+            std::vector<const char *> args;
+            args.insert(args.end(), {
+                "-f",      "MVT",
+                "-t_srs",  "EPSG:3857",
+                "-dsco",   "FORMAT=DIRECTORY",
+                "-dsco",   "MINZOOM=0",
+                "-dsco",   maxZoomArg.c_str(),
+                "-dsco",   "EXTENT=4096",
+                "-dsco",   "BUFFER=80",
+                "-dsco",   "MAX_SIZE=500000",
+                "-dsco",   "MAX_FEATURES=200000",
+                "-dsco",   "COMPRESS=YES",
+                "-mapFieldType", "DateTime=String",
+                "-skipfailures"});
+            if (needsSrs) {
+                args.push_back("-s_srs");
+                args.push_back("EPSG:4326");
+            }
+            args.push_back(nullptr);
+
+            char **argv = const_cast<char **>(args.data());
+            GDALVectorTranslateOptions *opts =
+                GDALVectorTranslateOptionsNew(argv, nullptr);
+            if (!opts)
+                throw AppException("Cannot create GDAL VectorTranslate options for MVT");
+
+            // Reset GDAL error state so CPLGetLastErrorMsg() reflects this op.
+            CPLErrorReset();
+
+            int usageError = 0;
+            GDALDatasetH hOut = GDALVectorTranslate(
+                outputDir.c_str(), nullptr, 1, &hSrcDS, opts, &usageError);
+
+            GDALVectorTranslateOptionsFree(opts);
+
+            if (!hOut || usageError)
+            {
+                const char *err = CPLGetLastErrorMsg();
+                const std::string gdalErr = (err && *err) ? std::string(err) : "<no GDAL error>";
+                if (hOut) GDALClose(hOut);
+                throw AppException("GDAL VectorTranslate (MVT) failed for " +
+                                   outputDir + ": " + gdalErr);
+            }
+            GDALClose(hOut);
+            return maxZoom;
+        }
+
+        // Generate a sibling temp folder for staged atomic writes.
+        fs::path makeTempSibling(const fs::path &finalDir)
+        {
+            return finalDir.string() + "-temp-" + utils::generateRandomString(16);
+        }
+
+    } // anonymous namespace
+
+    // ---- public API ----------------------------------------------------------
 
     std::vector<std::string> getVectorDependencies(const std::string &input)
     {
@@ -81,9 +294,7 @@ namespace ddb
         if (!fs::exists(input))
             throw FSException(input + " does not exist");
 
-        auto ext = fs::path(input).extension().string();
-        ddb::utils::toLower(ext);
-
+        const auto ext = toLowerExt(input);
         if (ext == ".shp")
         {
             deps.push_back(fs::path(input).replace_extension(".shx").filename().string());
@@ -92,533 +303,92 @@ namespace ddb
         {
             deps.push_back(fs::path(input).replace_extension(".shp").filename().string());
         }
-
         return deps;
-
     }
 
-    /**
- * Opens a GDAL dataset from an input file.
- *
- * @param input Path to the input file
- * @return Pointer to the GDAL dataset or nullptr on error
- */
-GDALDatasetH openInputDataset(const char *input) {
-    // Open the source dataset
-    GDALDatasetH hSrcDS = GDALOpenEx(
-        input,
-        GDAL_OF_VECTOR | GDAL_OF_READONLY,
-        nullptr, nullptr, nullptr);
-    if (hSrcDS == nullptr) {
-        LOGD << "Failed to open input dataset.";
-    } else {
-        LOGD << "Input dataset opened successfully.";
-    }
-    return hSrcDS;
-}
-
-/**
- * Performs direct conversion of a GDAL dataset to FlatGeobuf.
- *
- * @param hSrcDS Source dataset to convert
- * @param output Path to the output file
- * @param psOptions Conversion options
- * @return true if conversion succeeded, false otherwise
- */
-bool performDirectConversion(GDALDatasetH hSrcDS, const char *output, GDALVectorTranslateOptions *psOptions) {
-    LOGD << "Using direct conversion";
-
-    // Perform the translation directly
-    int pbUsageError = 0;
-    GDALDatasetH hDstDS = GDALVectorTranslate(
-        output,
-        nullptr,
-        1,
-        &hSrcDS,
-        psOptions,
-        &pbUsageError);
-
-    LOGD << "Direct translation completed.";
-
-    if (hDstDS == nullptr || pbUsageError) {
-        LOGD << "GDALVectorTranslate failed.";
-
-        // Get last error
-        const char *err = CPLGetLastErrorMsg();
-        if (err != nullptr) {
-            const auto num = CPLGetLastErrorNo();
-            const auto type = CPLGetLastErrorType();
-            LOGD << "Error " << num << " of type " << type << ": " << err;
-        }
-
-        return false;
-    }
-
-    LOGD << "Output dataset created successfully.";
-    GDALClose(hDstDS);
-    return true;
-}
-
-/**
- * Creates a temporary in-memory dataset for layer merging.
- *
- * @return Pointer to the temporary dataset or nullptr on error
- */
-GDALDatasetH createTemporaryDataset() {
-    GDALDriverH hDriver = GDALGetDriverByName("Memory");
-    if (hDriver == nullptr) {
-        LOGD << "Memory driver not available.";
-        return nullptr;
-    }
-
-    GDALDatasetH hTempDS = GDALCreate(hDriver, "temp", 0, 0, 0, GDT_Unknown, nullptr);
-    if (hTempDS == nullptr) {
-        LOGD << "Failed to create temporary memory dataset.";
-    }
-    return hTempDS;
-}
-
-/**
- * Creates a unified layer in the temporary dataset.
- *
- * @param hTempDS Temporary dataset
- * @return Pointer to the created layer or nullptr on error
- */
-OGRLayerH createMergedLayer(GDALDatasetH hTempDS) {
-    // Create a single layer that will contain all features from all source layers
-    // Use wkbUnknown to accept any type of geometry from source layers
-    OGRLayerH mergedLayer = GDALDatasetCreateLayer(hTempDS, "merged", nullptr, wkbUnknown, nullptr);
-    if (mergedLayer == nullptr) {
-        LOGD << "Failed to create merged layer.";
-        return nullptr;
-    }
-
-    // Add source_layer field to store the original layer name
-    OGRFieldDefnH layerNameField = OGR_Fld_Create("source_layer", OFTString);
-    OGR_L_CreateField(mergedLayer, layerNameField, FALSE);
-    OGR_Fld_Destroy(layerNameField);
-
-    return mergedLayer;
-}
-
-/**
- * Copies a single field from one feature to another, handling different data types.
- *
- * @param feature Source feature
- * @param newFeature Destination feature
- * @param fieldDefn Field definition to copy
- * @param srcIdx Field index in the source feature
- * @param targetIdx Field index in the destination feature
- */
-void copyFeatureField(OGRFeatureH feature, OGRFeatureH newFeature, OGRFieldDefnH fieldDefn, int srcIdx, int targetIdx) {
-    // Copy field value based on its type
-    OGRFieldType fieldType = OGR_Fld_GetType(fieldDefn);
-    switch (fieldType) {
-        case OFTString:
-            OGR_F_SetFieldString(newFeature, targetIdx, OGR_F_GetFieldAsString(feature, srcIdx));
-            break;
-        case OFTInteger:
-            OGR_F_SetFieldInteger(newFeature, targetIdx, OGR_F_GetFieldAsInteger(feature, srcIdx));
-            break;
-        case OFTReal:
-            OGR_F_SetFieldDouble(newFeature, targetIdx, OGR_F_GetFieldAsDouble(feature, srcIdx));
-            break;
-        case OFTDateTime:
-            {
-                int year, month, day, hour, minute, second, tzFlag;
-                if (OGR_F_GetFieldAsDateTime(feature, srcIdx, &year, &month, &day, &hour, &minute, &second, &tzFlag)) {
-                    OGR_F_SetFieldDateTime(newFeature, targetIdx, year, month, day, hour, minute, second, tzFlag);
-                }
-            }
-            break;
-        default:
-            // For other types, use string representation
-            OGR_F_SetFieldString(newFeature, targetIdx, OGR_F_GetFieldAsString(feature, srcIdx));
-            break;
-    }
-}
-
-/**
- * Copies field definitions from all source layers to the unified layer.
- *
- * @param hSrcDS Source dataset
- * @param layerCount Number of layers in the source dataset
- * @param mergedLayer Destination unified layer
- * @return Number of unique fields added
- */
-int copyFieldDefinitions(GDALDatasetH hSrcDS, int layerCount, OGRLayerH mergedLayer) {
-    // Add all fields from all layers (collect unique fields)
-    std::set<std::string> uniqueFields;
-
-    // First pass: collect all unique field names
-    for (int i = 0; i < layerCount; i++) {
-        OGRLayerH srcLayer = GDALDatasetGetLayer(hSrcDS, i);
-        if (!srcLayer) continue;
-
-        OGRFeatureDefnH defn = OGR_L_GetLayerDefn(srcLayer);
-        int fieldCount = OGR_FD_GetFieldCount(defn);
-
-        for (int j = 0; j < fieldCount; j++) {
-            OGRFieldDefnH fieldDefn = OGR_FD_GetFieldDefn(defn, j);
-            std::string fieldName = OGR_Fld_GetNameRef(fieldDefn);
-            if (uniqueFields.find(fieldName) == uniqueFields.end()) {
-                uniqueFields.insert(fieldName);
-                // Create field in merged layer
-                OGR_L_CreateField(mergedLayer, fieldDefn, FALSE);
-            }
-        }
-    }
-
-    LOGD << "Created merged layer with " << uniqueFields.size() << " unique fields";
-    return uniqueFields.size();
-}
-
-/**
- * Copies all features from all source layers to the unified layer.
- *
- * @param hSrcDS Source dataset
- * @param layerCount Number of layers in the source dataset
- * @param mergedLayer Destination unified layer
- */
-void copyFeaturesToMergedLayer(GDALDatasetH hSrcDS, int layerCount, OGRLayerH mergedLayer) {
-    // Second pass: copy all features from all layers
-    for (int i = 0; i < layerCount; i++) {
-        OGRLayerH srcLayer = GDALDatasetGetLayer(hSrcDS, i);
-        if (!srcLayer) continue;
-
-        const char* layerName = OGR_L_GetName(srcLayer);
-        LOGD << "Merging features from layer: " << layerName;
-
-        // Get merged layer definition for creating new features
-        OGRFeatureDefnH mergedDefn = OGR_L_GetLayerDefn(mergedLayer);
-
-        // Copy all features
-        OGR_L_ResetReading(srcLayer);
-        OGRFeatureH feature;
-        while ((feature = OGR_L_GetNextFeature(srcLayer)) != nullptr) {
-            // Create new feature in merged layer
-            OGRFeatureH newFeature = OGR_F_Create(mergedDefn);
-
-            // Set the source layer name
-            OGR_F_SetFieldString(newFeature, OGR_FD_GetFieldIndex(mergedDefn, "source_layer"), layerName);
-
-            // Copy geometry
-            OGRGeometryH geom = OGR_F_GetGeometryRef(feature);
-            if (geom) {
-                OGRGeometryH geomCopy = OGR_G_Clone(geom);
-                OGR_F_SetGeometry(newFeature, geomCopy);
-                OGR_G_DestroyGeometry(geomCopy);
-            }
-
-            // Copy all field values for fields that exist in both layers
-            OGRFeatureDefnH srcDefn = OGR_L_GetLayerDefn(srcLayer);
-            int fieldCount = OGR_FD_GetFieldCount(srcDefn);
-            for (int j = 0; j < fieldCount; j++) {
-                OGRFieldDefnH fieldDefn = OGR_FD_GetFieldDefn(srcDefn, j);
-                const char* fieldName = OGR_Fld_GetNameRef(fieldDefn);
-
-                int targetIdx = OGR_FD_GetFieldIndex(mergedDefn, fieldName);
-                if (targetIdx >= 0 && OGR_F_IsFieldSetAndNotNull(feature, j)) {
-                    copyFeatureField(feature, newFeature, fieldDefn, j, targetIdx);
-                }
-            }
-
-            // Add feature to merged layer
-            OGR_L_CreateFeature(mergedLayer, newFeature);
-            OGR_F_Destroy(newFeature);
-            OGR_F_Destroy(feature);
-        }
-    }
-}
-
-/**
- * Creates a unified dataset from multiple layers and converts it to FlatGeobuf.
- *
- * @param hSrcDS Source dataset
- * @param layerCount Number of layers in the source dataset
- * @param output Path to the output file
- * @param psOptions Conversion options
- * @return true if conversion succeeded, false otherwise
- */
-bool mergeLayersAndConvert(GDALDatasetH hSrcDS, int layerCount, const char *output, GDALVectorTranslateOptions *psOptions) {
-    LOGD << "Source has multiple layers (" << layerCount << "), merging them into a single layer";
-
-    // Create temporary dataset
-    GDALDatasetH hTempDS = createTemporaryDataset();
-    if (hTempDS == nullptr) {
-        return false;
-    }
-
-    // Create merged layer
-    OGRLayerH mergedLayer = createMergedLayer(hTempDS);
-    if (mergedLayer == nullptr) {
-        GDALClose(hTempDS);
-        return false;
-    }
-
-    // Copy field definitions
-    copyFieldDefinitions(hSrcDS, layerCount, mergedLayer);
-
-    // Copy features
-    copyFeaturesToMergedLayer(hSrcDS, layerCount, mergedLayer);
-
-    // Now perform the translation from the temporary merged layer dataset to FlatGeobuf
-    int pbUsageError = 0;
-    GDALDatasetH hDstDS = GDALVectorTranslate(
-        output,
-        nullptr,
-        1,
-        &hTempDS,
-        psOptions,
-        &pbUsageError);
-
-    LOGD << "Translation completed.";
-
-    if (hDstDS == nullptr || pbUsageError) {
-        LOGD << "GDALVectorTranslate failed.";
-
-        // Get last error
-        const char *err = CPLGetLastErrorMsg();
-        if (err != nullptr) {
-            const auto num = CPLGetLastErrorNo();
-            const auto type = CPLGetLastErrorType();
-            LOGD << "Error " << num << " of type " << type << ": " << err;
-        }
-
-        GDALClose(hTempDS);
-        return false;
-    }
-
-    LOGD << "Output dataset created successfully.";
-    GDALClose(hDstDS);
-    GDALClose(hTempDS);
-    return true;
-}
-
-/**
- * Internal function for converting a vector file to FlatGeobuf.
- *
- * @param hSrcDS Already opened GDAL dataset (caller retains ownership, this function does NOT close it)
- * @param output Path to the output file
- * @param argv Options for GDAL VectorTranslate
- * @return true if conversion succeeded, false otherwise
- */
-bool convertToFlatGeobufInternal(GDALDatasetH hSrcDS, const char *output, char **argv) {
-    if (hSrcDS == nullptr) {
-        LOGD << "Source dataset is null.";
-        return false;
-    }
-
-    // Get layer count from source dataset
-    int layerCount = GDALDatasetGetLayerCount(hSrcDS);
-    LOGD << "Source dataset has " << layerCount << " layers";
-
-    // Parse options
-    GDALVectorTranslateOptions *psOptions = GDALVectorTranslateOptionsNew(argv, nullptr);
-    if (psOptions == nullptr) {
-        LOGD << "Failed to create GDAL vector translate options.";
-        return false;
-    }
-
-    bool result = false;
-
-    // Convert based on layer count
-    if (layerCount == 1) {
-        // For single layer, use direct conversion
-        result = performDirectConversion(hSrcDS, output, psOptions);
-    } else {
-        // For multiple layers, merge them first
-        result = mergeLayersAndConvert(hSrcDS, layerCount, output, psOptions);
-    }
-
-    // Clean up options (dataset is managed by caller)
-    GDALVectorTranslateOptionsFree(psOptions);
-
-    return result;
-}
-
-/**
- * Attempts to convert a dataset to FlatGeobuf with automatic retry using PROMOTE_TO_MULTI on failure.
- *
- * @param hSrcDS Already opened GDAL dataset (caller retains ownership)
- * @param output Path to the output file
- * @param reproject If true, reproject to EPSG:4326
- * @param withSpatialIndex If true, create spatial index (SPATIAL_INDEX=YES)
- * @return true if conversion succeeded, false otherwise
- */
-bool tryConvertWithFallback(GDALDatasetH hSrcDS, const char *output, bool reproject, bool withSpatialIndex) {
-    // Build base arguments
-    std::vector<char*> args;
-    args.push_back(const_cast<char*>("-f"));
-    args.push_back(const_cast<char*>("FlatGeobuf"));
-
-    if (reproject) {
-        args.push_back(const_cast<char*>("-t_srs"));
-        args.push_back(const_cast<char*>("EPSG:4326"));
-    }
-
-    args.push_back(const_cast<char*>("-mapFieldType"));
-    args.push_back(const_cast<char*>("StringList=String"));
-
-    if (withSpatialIndex) {
-        args.push_back(const_cast<char*>("-lco"));
-        args.push_back(const_cast<char*>("SPATIAL_INDEX=YES"));
-    }
-
-    args.push_back(nullptr);
-
-    // Try first conversion
-    if (convertToFlatGeobufInternal(hSrcDS, output, args.data())) {
-        return true;
-    }
-
-    LOGD << "Failed to convert to FlatGeobuf, retrying with PROMOTE_TO_MULTI";
-
-    // Build retry arguments with PROMOTE_TO_MULTI
-    std::vector<char*> argsMulti;
-    argsMulti.push_back(const_cast<char*>("-f"));
-    argsMulti.push_back(const_cast<char*>("FlatGeobuf"));
-
-    if (reproject) {
-        argsMulti.push_back(const_cast<char*>("-t_srs"));
-        argsMulti.push_back(const_cast<char*>("EPSG:4326"));
-    }
-
-    argsMulti.push_back(const_cast<char*>("-mapFieldType"));
-    argsMulti.push_back(const_cast<char*>("StringList=String"));
-
-    if (withSpatialIndex) {
-        argsMulti.push_back(const_cast<char*>("-lco"));
-        argsMulti.push_back(const_cast<char*>("SPATIAL_INDEX=YES"));
-    }
-
-    argsMulti.push_back(const_cast<char*>("-nlt"));
-    argsMulti.push_back(const_cast<char*>("PROMOTE_TO_MULTI"));
-    argsMulti.push_back(nullptr);
-
-    return convertToFlatGeobufInternal(hSrcDS, output, argsMulti.data());
-}
-
-/**
- * @brief Check if a GDAL dataset has a defined spatial reference system (CRS).
- *
- * Iterates through all layers in the dataset and checks if at least one
- * has a spatial reference system defined. This is useful to determine
- * whether reprojection is needed during format conversion.
- *
- * @param hDS Handle to an already opened GDAL dataset. Must not be nullptr.
- * @return true if at least one layer has a CRS defined, false otherwise.
- *
- * @note This overload does NOT close the dataset - caller retains ownership.
- * @see hasDefinedCRS(const std::string&) for file path version that manages dataset lifecycle.
- */
-bool hasDefinedCRS(GDALDatasetH hDS) {
-    if (hDS == nullptr) {
-        return false;
-    }
-
-    bool hasCRS = false;
-    int layerCount = GDALDatasetGetLayerCount(hDS);
-    for (int i = 0; i < layerCount && !hasCRS; i++) {
-        OGRLayerH hLayer = GDALDatasetGetLayer(hDS, i);
-        if (hLayer != nullptr) {
-            OGRSpatialReferenceH hSRS = OGR_L_GetSpatialRef(hLayer);
-            if (hSRS != nullptr) {
-                hasCRS = true;
-                LOGD << "Layer " << i << " has CRS defined";
-            }
-        }
-    }
-
-    return hasCRS;
-}
-
-/**
- * @brief Check if a vector file has a defined spatial reference system (CRS).
- *
- * Opens the specified vector file and checks if at least one layer has a
- * spatial reference system defined. Files without a CRS are typically
- * assumed to be in WGS84 or have no georeferencing.
- *
- * @param input Path to the input vector file (e.g., SHP, GeoJSON, DXF).
- * @return true if at least one layer has a CRS defined, false if no CRS
- *         is found or if the file cannot be opened.
- *
- * @note This function opens and closes the dataset internally.
- * @see hasDefinedCRS(GDALDatasetH) for version that works with already opened datasets.
- */
-bool hasDefinedCRS(const std::string &input) {
-    GDALDatasetH hDS = GDALOpenEx(input.c_str(), GDAL_OF_VECTOR | GDAL_OF_READONLY, nullptr, nullptr, nullptr);
-    if (hDS == nullptr) {
-        return false;
-    }
-
-    bool result = hasDefinedCRS(hDS);
-    GDALClose(hDS);
-    return result;
-}
-
-    bool convertToFlatGeobuf(const std::string &input, const std::string &output)
+    void buildVector(const std::string &input,
+                     const std::string &baseOutputPath,
+                     bool overwrite)
     {
+        LOGD << "buildVector(" << input << " -> " << baseOutputPath
+             << ", overwrite=" << (overwrite ? "true" : "false") << ")";
+
+        if (input.empty())
+            throw InvalidArgsException("buildVector: input is empty");
+        if (baseOutputPath.empty())
+            throw InvalidArgsException("buildVector: baseOutputPath is empty");
+        if (!fs::exists(input))
+            throw FSException(input + " does not exist");
+
+        // Step 1: verify sidecar deps (.shx for .shp)
+        checkDependencies(input);
+
+        // Step 2: open source once, reuse for both branches
+        GDALDatasetH hSrcDS = GDALOpenEx(input.c_str(),
+                                         GDAL_OF_VECTOR | GDAL_OF_READONLY,
+                                         nullptr, nullptr, nullptr);
+        if (!hSrcDS)
+            throw AppException("Cannot open vector source: " + input);
+
         try
         {
-            // Check if input and output strings are not empty
-            if (input.empty())
+            const VectorStats stats = computeStats(hSrcDS);
+            LOGD << "Vector stats: features=" << stats.featureCount
+                 << " envelope=[" << stats.minX << "," << stats.minY << ","
+                 << stats.maxX << "," << stats.maxY << "]";
+
+            const fs::path basePath(baseOutputPath);
+            io::assureFolderExists(basePath);
+
+            const fs::path vecDir = basePath / "vec";
+            const fs::path mvtDir = basePath / "mvt";
+
+            const bool vecExists = fs::exists(vecDir);
+            const bool mvtExists = fs::exists(mvtDir);
+
+            // Skip if both already published and not overwriting.
+            if (vecExists && mvtExists && !overwrite)
             {
-                LOGD << "Input filename is empty.";
-                return false;
+                LOGD << "Vector artifacts already exist, skipping (vec/ and mvt/)";
+                return;
             }
-            if (output.empty())
+
+            const fs::path vecTemp = makeTempSibling(vecDir);
+            const fs::path mvtTemp = makeTempSibling(mvtDir);
+            io::assureFolderExists(vecTemp);
+            // Note: MVT driver creates its own output directory; ensure parent.
+            io::assureFolderExists(mvtTemp.parent_path());
+            // Pre-remove mvtTemp if it leaked from a previous crash run.
+            io::assureIsRemoved(mvtTemp);
+
+            try
             {
-                LOGD << "Output filename is empty.";
-                return false;
+                // Branch A: MVT first (cheaper to roll back).
+                convertToMvt(hSrcDS, mvtTemp.string(), stats);
+                // Branch B: GPKG sidecar.
+                const auto gpkgOut = (vecTemp / "source.gpkg").string();
+                convertToGpkg(hSrcDS, gpkgOut);
             }
-
-            // Check if input file exists
-            if (!std::filesystem::exists(input))
+            catch (...)
             {
-                LOGD << "Input file does not exist.";
-                return false;
+                io::assureIsRemoved(vecTemp);
+                io::assureIsRemoved(mvtTemp);
+                throw;
             }
 
-            // Open dataset once and reuse for both CRS check and conversion
-            GDALDatasetH hSrcDS = openInputDataset(input.c_str());
-            if (hSrcDS == nullptr) {
-                LOGD << "Failed to open input dataset.";
-                return false;
-            }
-
-            // Check if source has a defined CRS - only reproject if it does
-            // Files without CRS are assumed to be already in WGS84 or have no georeferencing
-            bool needsReprojection = hasDefinedCRS(hSrcDS);
-            LOGD << "Source has CRS: " << (needsReprojection ? "yes, will reproject to EPSG:4326" : "no, skipping reprojection");
-
-            // GDAL VectorTranslate options explanation:
-            // -f FlatGeobuf: Output format
-            // -t_srs EPSG:4326: Reproject to WGS84 (only when source has CRS defined)
-            //                   Required for proper display in web maps (OpenLayers, Leaflet, etc.)
-            // -mapFieldType StringList=String: Convert string lists to simple strings for compatibility
-            // -lco SPATIAL_INDEX=YES: Create R-tree index for efficient spatial queries via HTTP Range requests
-            // -nlt PROMOTE_TO_MULTI: Promote geometries to multi-type (fallback for mixed geometry types)
-
-            bool result = tryConvertWithFallback(hSrcDS, output.c_str(), needsReprojection, true);
-
-            // Clean up dataset
-            GDALClose(hSrcDS);
-
-            return result;
-        }
-        catch (const std::exception &e)
-        {
-            LOGD << "Exception occurred during conversion to FlatGeobuf: " << e.what();
-
-            return false;
+            // Both temps ready - publish atomically.
+            if (vecExists) io::assureIsRemoved(vecDir);
+            if (mvtExists) io::assureIsRemoved(mvtDir);
+            io::rename(vecTemp.string(), vecDir.string());
+            io::rename(mvtTemp.string(), mvtDir.string());
         }
         catch (...)
         {
-            LOGD << "An unknown exception occurred.";
-            return false;
+            GDALClose(hSrcDS);
+            throw;
         }
+
+        GDALClose(hSrcDS);
     }
 
-}
+} // namespace ddb
