@@ -197,9 +197,15 @@ TEST(mask, cogPreservesPerDatasetMask) {
     ASSERT_NO_THROW(ddb::buildCog(maskedGtiff.string(), cogOutput.string()));
     ASSERT_TRUE(fs::exists(cogOutput));
 
-    // 4. The COG must expose transparency (alpha band or PER_DATASET mask).
-    //    buildCog converts the PER_DATASET mask to a -dstalpha during the warp
-    //    step, so the COG output carries an alpha band (GMF_ALPHA | GMF_PER_DATASET).
+    // 4. The COG must expose transparency. Depending on the GDAL version and
+    //    COG driver behaviour the transparency may appear as:
+    //    a) An explicit alpha band (GMF_ALPHA set), or
+    //    b) A stand-alone PER_DATASET dataset mask (GMF_PER_DATASET set,
+    //       GMF_ALL_VALID NOT set, GMF_NODATA NOT set).
+    //    GDAL 3.11 with the COG driver converts the -dstalpha alpha channel
+    //    to an internal mask IFD for JPEG output, resulting in a PER_DATASET
+    //    mask rather than an alpha band on readback. Checking only for
+    //    GMF_ALPHA would produce a false-negative on that version.
     {
         GDALDatasetH hCog = GDALOpen(cogOutput.string().c_str(), GA_ReadOnly);
         ASSERT_NE(hCog, nullptr);
@@ -210,8 +216,8 @@ TEST(mask, cogPreservesPerDatasetMask) {
         const bool hasTransparency =
             (maskFlags & GMF_ALPHA) != 0 ||
             ((maskFlags & GMF_PER_DATASET) != 0 &&
-             (maskFlags & GMF_NODATA) == 0 &&
-             GDALGetRasterCount(hCog) > 3);
+             (maskFlags & GMF_ALL_VALID) == 0 &&
+             (maskFlags & GMF_NODATA) == 0);
         GDALClose(hCog);
 
         EXPECT_TRUE(hasTransparency)
