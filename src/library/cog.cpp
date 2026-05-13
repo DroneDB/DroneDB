@@ -68,7 +68,30 @@ namespace ddb
 
         // Detect and preserve nodata from source
         int hasNoData;
-        double srcNoData = GDALGetRasterNoDataValue(GDALGetRasterBand(hSrcDataset, 1), &hasNoData);
+        GDALRasterBandH hSrcBand1 = GDALGetRasterBand(hSrcDataset, 1);
+        if (!hSrcBand1) {
+            GDALClose(hSrcDataset);
+            throw GDALException("Cannot read band 1 from " + inputGTiff);
+        }
+        double srcNoData = GDALGetRasterNoDataValue(hSrcBand1, &hasNoData);
+
+        // Some GDAL versions / code paths may fail to preserve a standalone
+        // PER_DATASET mask when a COG is produced through a warp/reprojection step
+        // (observed with GDAL 3.11.x on files produced by nearblack/maskBorders),
+        // causing masked borders to become opaque black pixels, especially with
+        // JPEG/YCbCr compression.
+        // To make COG generation deterministic
+        // across GDAL versions, when the source has a stand-alone PER_DATASET
+        // mask (not derived from an alpha band nor from a nodata value, which
+        // are handled by other code paths), we force GDALWarp to materialize
+        // the transparency as a destination alpha band. The COG driver then
+        // serializes that alpha as an internal 1-bit mask (MSK IFD) for JPEG
+        // output, preserving transparency without re-encoding alpha as JPEG.
+        const int srcMaskFlags = GDALGetMaskFlags(hSrcBand1);
+        const bool hasPerDatasetMask =
+            (srcMaskFlags & GMF_PER_DATASET) != 0 &&
+            (srcMaskFlags & GMF_ALPHA) == 0 &&
+            (srcMaskFlags & GMF_NODATA) == 0;
 
         char **targs = nullptr;
         targs = CSLAddString(targs, "-of");
@@ -101,6 +124,13 @@ namespace ddb
             } else {
                 LOGW << "Skipping nodata preservation for unsupported value: " << srcNoData;
             }
+        } else if (hasPerDatasetMask) {
+            // Materialize the source PER_DATASET mask as a destination alpha
+            // band so transparency survives the COG reprojection step. The COG
+            // driver converts the alpha back into an internal 1-bit mask for
+            // JPEG output (no alpha-in-JPEG cost) and into a 4th band for LZW.
+            LOGD << "Source has PER_DATASET mask; forcing -dstalpha to preserve transparency";
+            targs = CSLAddString(targs, "-dstalpha");
         }
 
         // We can compress to JPG if these are 8bit bands (3 or 4) and no nodata

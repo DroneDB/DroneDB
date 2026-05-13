@@ -586,9 +586,12 @@ extern "C"
                                        int bandIndex,
                                        char **output);
 
-    /** Mask orthophoto borders making them transparent
+    /** Mask orthophoto borders making them transparent.
+     * Supports 1-band rasters (greyscale ortho, thermal, DEM), 3-band 8-bit RGB and
+     * 4-band 8-bit RGBA orthophotos. Transparency is written as an internal GeoTIFF
+     * dataset mask (any pre-existing alpha band in RGBA inputs is overwritten).
      * @param input Path to input GeoTIFF
-     * @param output Path to output GeoTIFF (with alpha band)
+     * @param output Path to output GeoTIFF (with internal dataset mask)
      * @param near Tolerance in grey levels (default 15)
      * @param white If true, search for white borders instead of black
      * @return DDBERR_NONE on success, an error otherwise */
