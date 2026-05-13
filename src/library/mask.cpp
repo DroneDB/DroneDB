@@ -73,6 +73,23 @@ namespace ddb
                             "orthophoto); got ") + GDALGetDataTypeName(srcType));
         }
 
+        // For 4-band inputs, require that band 4 is an alpha channel. A 4-band
+        // raster where band 4 is not alpha (e.g. RGB+NIR multispectral) must go
+        // through the multispectral pipeline instead.
+        if (srcBands == 4) {
+            GDALRasterBandH hBand4 = GDALGetRasterBand(hSrcDataset, 4);
+            if (!hBand4) {
+                GDALClose(hSrcDataset);
+                throw GDALException("Cannot read band 4 from " + input);
+            }
+            if (GDALGetRasterColorInterpretation(hBand4) != GCI_AlphaBand) {
+                GDALClose(hSrcDataset);
+                throw InvalidArgsException(
+                    "4-band input must be RGBA (band 4 must be an alpha channel); "
+                    "for multispectral rasters (e.g. RGB+NIR) use the multispectral pipeline");
+            }
+        }
+
         const uint64_t pixelCount =
             static_cast<uint64_t>(srcWidth) * static_cast<uint64_t>(srcHeight);
         // With -setmask the transparency is a dataset mask (1 bit/pixel), not an
