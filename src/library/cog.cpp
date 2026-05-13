@@ -69,6 +69,10 @@ namespace ddb
         // Detect and preserve nodata from source
         int hasNoData;
         GDALRasterBandH hSrcBand1 = GDALGetRasterBand(hSrcDataset, 1);
+        if (!hSrcBand1) {
+            GDALClose(hSrcDataset);
+            throw GDALException("Cannot read band 1 from " + inputGTiff);
+        }
         double srcNoData = GDALGetRasterNoDataValue(hSrcBand1, &hasNoData);
 
         // Some GDAL versions / code paths may fail to preserve a standalone
