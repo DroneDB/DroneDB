@@ -63,7 +63,13 @@ namespace ddb
                 OGRLayerH hLayer = GDALDatasetGetLayer(hSrcDS, i);
                 if (!hLayer) continue;
 
-                s.featureCount += static_cast<long long>(OGR_L_GetFeatureCount(hLayer, FALSE));
+                // OGR_L_GetFeatureCount(..., FALSE) returns -1 when the driver
+                // cannot provide a cheap count. Treat that as "unknown, 0"
+                // so we never feed a negative running total to the MVT
+                // heuristic (which would otherwise force MAXZOOM).
+                const GIntBig rawCount = OGR_L_GetFeatureCount(hLayer, FALSE);
+                if (rawCount > 0)
+                    s.featureCount += static_cast<long long>(rawCount);
 
                 OGREnvelope env;
                 if (OGR_L_GetExtent(hLayer, &env, TRUE) != OGRERR_NONE) continue;
@@ -297,7 +303,20 @@ namespace ddb
 
                 OGRLayerH hCopied = GDALDatasetCopyLayer(
                     hDst, hLayer, candidate.c_str(), nullptr);
-                if (hCopied) copied++;
+                if (hCopied) {
+                    copied++;
+                } else {
+                    // Don't fail the whole build for one bad layer, but make
+                    // the omission auditable: the resulting MVT will not
+                    // contain features from this source layer.
+                    const char *err = CPLGetLastErrorMsg();
+                    LOGD << "MVT sanitization: GDALDatasetCopyLayer failed for "
+                         << "source layer index " << i
+                         << " (name='" << srcLayer
+                         << "', sanitized='" << candidate << "'): "
+                         << (err && *err ? err : "<no GDAL error>")
+                         << " - this layer will be missing from the MVT output";
+                }
             }
 
             GDALClose(hDst);
@@ -416,12 +435,6 @@ namespace ddb
             return maxZoom;
         }
 
-        // Generate a sibling temp folder for staged atomic writes.
-        fs::path makeTempSibling(const fs::path &finalDir)
-        {
-            return finalDir.string() + "-temp-" + utils::generateRandomString(16);
-        }
-
     } // anonymous namespace
 
     // ---- public API ----------------------------------------------------------
@@ -489,37 +502,72 @@ namespace ddb
             if (vecExists && mvtExists && !overwrite)
             {
                 LOGD << "Vector artifacts already exist, skipping (vec/ and mvt/)";
+                GDALClose(hSrcDS);
                 return;
             }
 
-            const fs::path vecTemp = makeTempSibling(vecDir);
-            const fs::path mvtTemp = makeTempSibling(mvtDir);
-            io::assureFolderExists(vecTemp);
-            // Note: MVT driver creates its own output directory; ensure parent.
-            io::assureFolderExists(mvtTemp.parent_path());
-            // Pre-remove mvtTemp if it leaked from a previous crash run.
-            io::assureIsRemoved(mvtTemp);
+            // Stage both outputs under a single sibling directory so that a
+            // crash partway through leaves at most one orphan directory to
+            // clean up. The publish step then promotes the two children with
+            // a best-effort rollback if the second rename fails.
+            const fs::path stagingDir = basePath /
+                (".vec-stage-" + utils::generateRandomString(16));
+            const fs::path stagingVec = stagingDir / "vec";
+            const fs::path stagingMvt = stagingDir / "mvt";
+            io::assureFolderExists(stagingDir);
+            io::assureFolderExists(stagingVec);
+            // MVT driver creates its own output dir; ensure parent exists
+            // and the target child does not (pre-empt leftovers).
+            io::assureIsRemoved(stagingMvt);
 
             try
             {
                 // Branch A: MVT first (cheaper to roll back).
-                convertToMvt(hSrcDS, input, mvtTemp.string(), stats);
+                convertToMvt(hSrcDS, input, stagingMvt.string(), stats);
                 // Branch B: GPKG sidecar.
-                const auto gpkgOut = (vecTemp / "source.gpkg").string();
+                const auto gpkgOut = (stagingVec / "source.gpkg").string();
                 convertToGpkg(hSrcDS, gpkgOut);
             }
             catch (...)
             {
-                io::assureIsRemoved(vecTemp);
-                io::assureIsRemoved(mvtTemp);
+                io::assureIsRemoved(stagingDir);
                 throw;
             }
 
-            // Both temps ready - publish atomically.
-            if (vecExists) io::assureIsRemoved(vecDir);
-            if (mvtExists) io::assureIsRemoved(mvtDir);
-            io::rename(vecTemp.string(), vecDir.string());
-            io::rename(mvtTemp.string(), mvtDir.string());
+            // Publish: move existing artifacts (if any) to a sibling backup
+            // dir, promote the staged outputs, and on failure restore from
+            // the backup so users never observe a half-published state.
+            const fs::path backupDir = basePath /
+                (".vec-backup-" + utils::generateRandomString(16));
+            const fs::path backupVec = backupDir / "vec";
+            const fs::path backupMvt = backupDir / "mvt";
+            const bool hadVec = vecExists;
+            const bool hadMvt = mvtExists;
+            io::assureFolderExists(backupDir);
+            try
+            {
+                if (hadVec) io::rename(vecDir.string(), backupVec.string());
+                if (hadMvt) io::rename(mvtDir.string(), backupMvt.string());
+                io::rename(stagingVec.string(), vecDir.string());
+                io::rename(stagingMvt.string(), mvtDir.string());
+            }
+            catch (...)
+            {
+                // Rollback: remove anything we already promoted, then
+                // restore the originals from the backup.
+                io::assureIsRemoved(vecDir);
+                io::assureIsRemoved(mvtDir);
+                if (hadVec && fs::exists(backupVec))
+                    io::rename(backupVec.string(), vecDir.string());
+                if (hadMvt && fs::exists(backupMvt))
+                    io::rename(backupMvt.string(), mvtDir.string());
+                io::assureIsRemoved(stagingDir);
+                io::assureIsRemoved(backupDir);
+                throw;
+            }
+
+            io::assureIsRemoved(stagingDir);
+            io::assureIsRemoved(backupDir);
         }
         catch (...)
         {

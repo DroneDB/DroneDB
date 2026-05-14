@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include <algorithm>
+#include <cctype>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -141,7 +142,13 @@ namespace ddb
         if (!hSrc)
             throw GDALException("Cannot open vector: " + vectorPath);
 
-        OGRLayer *layer = findLayer(hSrc, layerName);
+        OGRLayer *layer = nullptr;
+        try {
+            layer = findLayer(hSrc, layerName);
+        } catch (...) {
+            GDALClose(hSrc);
+            throw;
+        }
 
         // Apply spatial filter, reprojecting bbox to layer SRS if needed.
         if (bbox != nullptr) {
@@ -161,19 +168,29 @@ namespace ddb
                 if (!reqSrs.IsSame(layerSrs)) {
                     OGRCoordinateTransformation *t =
                         OGRCreateCoordinateTransformation(&reqSrs, layerSrs);
-                    if (t) {
-                        // Transform all 4 corners
-                        double xs[4] = {minX, maxX, maxX, minX};
-                        double ys[4] = {minY, minY, maxY, maxY};
-                        if (t->Transform(4, xs, ys)) {
-                            minX = *std::min_element(xs, xs + 4);
-                            maxX = *std::max_element(xs, xs + 4);
-                            minY = *std::min_element(ys, ys + 4);
-                            maxY = *std::max_element(ys, ys + 4);
-                        }
-                        OCTDestroyCoordinateTransformation(
-                            OGRCoordinateTransformation::ToHandle(t));
+                    if (!t) {
+                        GDALClose(hSrc);
+                        throw GDALException(
+                            "Cannot create bbox coordinate transformation from " +
+                            requestedSrs + " to layer SRS");
                     }
+                    // Transform all 4 corners
+                    double xs[4] = {minX, maxX, maxX, minX};
+                    double ys[4] = {minY, minY, maxY, maxY};
+                    const int ok = t->Transform(4, xs, ys);
+                    OCTDestroyCoordinateTransformation(
+                        OGRCoordinateTransformation::ToHandle(t));
+                    if (!ok) {
+                        GDALClose(hSrc);
+                        throw GDALException(
+                            "bbox coordinate transformation failed (" +
+                            requestedSrs + " -> layer SRS); refusing to apply "
+                            "the bbox in the wrong CRS.");
+                    }
+                    minX = *std::min_element(xs, xs + 4);
+                    maxX = *std::max_element(xs, xs + 4);
+                    minY = *std::min_element(ys, ys + 4);
+                    maxY = *std::max_element(ys, ys + 4);
                 }
             }
             layer->SetSpatialFilterRect(minX, minY, maxX, maxY);
@@ -191,12 +208,27 @@ namespace ddb
             argStore.emplace_back("-lco");
             argStore.emplace_back(fmt.layerCreationOpts);
         }
-        if (maxFeatures > 0) {
-            argStore.emplace_back("-limit");
-            argStore.emplace_back(std::to_string(maxFeatures));
+        // Pagination: when startIndex > 0 we cannot rely on -limit alone, so
+        // we route the request through OGR SQL with LIMIT/OFFSET using the
+        // SQLite dialect (works against any OGR data source). Otherwise we
+        // keep the original layer-restricted invocation with -limit.
+        const bool usePagedSql = (startIndex > 0);
+        std::string sqlStmt;
+        if (usePagedSql) {
+            sqlStmt = std::string("SELECT * FROM \"") + layer->GetName() + "\"";
+            if (maxFeatures > 0)
+                sqlStmt += " LIMIT " + std::to_string(maxFeatures);
+            sqlStmt += " OFFSET " + std::to_string(startIndex);
+            argStore.emplace_back("-sql"); argStore.emplace_back(sqlStmt);
+            argStore.emplace_back("-dialect"); argStore.emplace_back("SQLITE");
+        } else {
+            if (maxFeatures > 0) {
+                argStore.emplace_back("-limit");
+                argStore.emplace_back(std::to_string(maxFeatures));
+            }
+            // Restrict to a single layer (the one we want).
+            argStore.emplace_back(layer->GetName());
         }
-        // Restrict to a single layer (the one we want).
-        argStore.emplace_back(layer->GetName());
 
         std::vector<char *> argv;
         argv.reserve(argStore.size() + 1);
@@ -233,11 +265,6 @@ namespace ddb
         std::string result(reinterpret_cast<char *>(buf),
                            static_cast<size_t>(size));
         VSIFree(buf);
-
-        // Optional: pagination via startIndex is applied post-translate for
-        // GeoJSON only - rare use case, kept simple. (Per spec we keep it
-        // server-side via maxFeatures.) startIndex is preserved for future use.
-        (void)startIndex;
 
         return result;
     }

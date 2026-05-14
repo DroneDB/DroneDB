@@ -18,8 +18,11 @@ namespace ddb
      *   - <baseOutputPath>/mvt/{z}/{x}/{y}.pbf  (gzipped MVT tiles + metadata.json)
      *   - <baseOutputPath>/vec/source.gpkg      (GPKG with SPATIAL_INDEX=YES per layer)
      *
-     * Both outputs are written atomically via `<subfolder>-temp-<uuid>` then rename().
-     * If either output exists and @p overwrite is false, that existing artifact is kept.
+     * Both outputs are written atomically via a single sibling staging
+     * directory; on partial failure originals are restored from a backup.
+     * If BOTH `vec/` and `mvt/` already exist and @p overwrite is false the
+     * build is skipped; if only one of the two exists they are BOTH
+     * rebuilt so callers always observe a consistent pair.
      * Throws on failure; partial outputs are cleaned up.
      *
      * Multi-layer sources (GPKG, KMZ) preserve all layers in BOTH outputs.

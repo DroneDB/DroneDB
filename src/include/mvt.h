@@ -40,14 +40,17 @@ namespace ddb
      * the largest z such that this stays within ::kMvtTileBudget, then
      * clamp to [::kMvtMinZoomCap, ::kMvtMaxZoomCap].
      *
-     * The @p featureCount parameter is currently unused but kept in the
-     * signature for ABI/API stability and to leave room for a future
-     * combined heuristic.
+     * The @p featureCount parameter is used as a short-circuit only: when
+     * the count is exactly 0 the function returns ::kMvtMaxZoomCap because
+     * there is no real tiling work to bound. A negative value (OGR uses -1
+     * to signal "unknown") falls through to the area-based heuristic.
      *
-     * @param featureCount   Total feature count across all layers (>= 0).
-     *                       Currently unused (see rationale above).
+     * @param featureCount   Total feature count across all layers. May be
+     *                       negative when the source driver cannot provide
+     *                       a cheap count; only featureCount == 0 triggers
+     *                       the short-circuit.
      * @param extentAreaDeg2 Area in deg² of the union bounding box (>= 0).
-     *                       If 0 (single point / empty), returns ::kMvtMaxZoomCap.
+     *                       If <= 0 (single point / empty), returns ::kMvtMaxZoomCap.
      * @return MAXZOOM in [::kMvtMinZoomCap, ::kMvtMaxZoomCap].
      */
     DDB_DLL int computeMvtMaxZoom(long long featureCount, double extentAreaDeg2);

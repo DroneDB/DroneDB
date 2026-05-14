@@ -44,29 +44,36 @@ namespace
             ASSERT_NE(hLayer, nullptr);
 
             OGRSpatialReferenceH hSRS = OGR_L_GetSpatialRef(hLayer);
-            if (hSRS != nullptr)
-            {
-                EXPECT_TRUE(OSRIsGeographic(hSRS))
-                    << "GPKG layer " << i << " CRS is not geographic";
-                const char *authCode = OSRGetAuthorityCode(hSRS, nullptr);
-                const char *authName = OSRGetAuthorityName(hSRS, nullptr);
-                ASSERT_NE(authName, nullptr);
-                ASSERT_NE(authCode, nullptr);
-                EXPECT_STREQ(authName, "EPSG");
-                EXPECT_STREQ(authCode, "4326");
-            }
+            // E1: every GPKG layer produced by buildVector MUST have an
+            // explicit SRS. A missing SRS used to silently pass the test
+            // because the EPSG check was guarded by `if (hSRS != nullptr)`.
+            ASSERT_NE(hSRS, nullptr)
+                << "GPKG layer " << i << " is missing a spatial reference; "
+                << "buildVector must always reproject to EPSG:4326.";
+
+            EXPECT_TRUE(OSRIsGeographic(hSRS))
+                << "GPKG layer " << i << " CRS is not geographic";
+            const char *authCode = OSRGetAuthorityCode(hSRS, nullptr);
+            const char *authName = OSRGetAuthorityName(hSRS, nullptr);
+            ASSERT_NE(authName, nullptr);
+            ASSERT_NE(authCode, nullptr);
+            EXPECT_STREQ(authName, "EPSG");
+            EXPECT_STREQ(authCode, "4326");
         }
 
         GDALClose(hDS);
 
-        // MVT: directory must contain at least one zoom-level subdir or metadata.json
-        bool hasMvtContent = false;
-        for (const auto &p : fs::directory_iterator(mvtDir))
-        {
-            hasMvtContent = true;
-            break;
-        }
-        EXPECT_TRUE(hasMvtContent) << "MVT output directory is empty";
+        // MVT: verify the directory actually contains a real tile pyramid
+        // descriptor (metadata.json). We can't always require at least one
+        // .pbf tile because some valid inputs (e.g. KML with 0 placemarks)
+        // legitimately produce an empty tile set; the GPKG layer/SRS checks
+        // above already guarantee buildVector ran to completion.
+        const fs::path metadataJson = mvtDir / "metadata.json";
+        ASSERT_TRUE(fs::exists(metadataJson))
+            << "MVT output at " << mvtDir.string()
+            << " is missing metadata.json (expected GDAL MVT driver layout)";
+        EXPECT_GT(fs::file_size(metadataJson), static_cast<std::uintmax_t>(0))
+            << "MVT metadata.json is empty";
     }
 
     TEST(testVector, geoJson)

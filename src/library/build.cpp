@@ -149,7 +149,15 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
 
     // Check again if output exists after acquiring locks (another process might have completed the
     // build)
-    if (fs::exists(outputFolder) && !force) {
+    // For Vector entries we require BOTH the vec/ and mvt/ subdirectories
+    // to consider the build complete; otherwise we re-run buildVector so it
+    // can restore the missing half of the pair.
+    bool alreadyBuilt = fs::exists(outputFolder);
+    if (alreadyBuilt && e.type == EntryType::Vector) {
+        alreadyBuilt = fs::exists(baseOutputPath / "vec") &&
+                       fs::exists(baseOutputPath / "mvt");
+    }
+    if (alreadyBuilt && !force) {
         LOGD << "Build output already exists after acquiring lock, skipping: " << outputFolder;
         return;
     }
@@ -182,7 +190,10 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
         } else if (e.type == EntryType::Vector) {
             // buildVector manages its own atomic write to baseOutputPath/vec
             // and baseOutputPath/mvt; do NOT use the standard tempFolder rename.
-            buildVector(relativePath, baseOutputPath.string());
+            // Propagate the force flag so a partial build (e.g. vec/ present
+            // but mvt/ missing) is fully rebuilt instead of being silently
+            // treated as up-to-date inside buildVector.
+            buildVector(relativePath, baseOutputPath.string(), force);
             // built stays false on purpose to skip the standard rename below.
         }
 

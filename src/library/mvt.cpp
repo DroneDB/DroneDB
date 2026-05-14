@@ -11,9 +11,15 @@ namespace ddb
 
     int computeMvtMaxZoom(long long featureCount, double extentAreaDeg2)
     {
-        // Degenerate envelope (single point / empty bbox) or no features:
-        // use the cap zoom — cost is bounded by feature count, not coverage.
-        if (extentAreaDeg2 <= 0.0 || featureCount <= 0)
+        // Degenerate envelope (single point / empty bbox) or an explicitly
+        // empty layer: use the cap zoom — no real work to bound.
+        //
+        // NOTE: featureCount may legitimately be negative when the source
+        // driver could not provide a cheap count (OGR convention: -1 means
+        // "unknown"). In that case we must NOT short-circuit; the area-based
+        // heuristic is still meaningful and prevents pathological tile
+        // counts on large extents with unknown feature counts.
+        if (extentAreaDeg2 <= 0.0 || featureCount == 0)
             return kMvtMaxZoomCap;
 
         // Approximate number of MVT tiles intersecting the WGS84 bbox at zoom z:

@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstring>
 #include <iomanip>
@@ -245,8 +246,14 @@ namespace ddb
             GDALClose(hDS);
             throw GDALException("Cannot invert geotransform");
         }
-        const int px = static_cast<int>(invGt[0] + invGt[1] * dsX + invGt[2] * dsY);
-        const int py = static_cast<int>(invGt[3] + invGt[4] * dsX + invGt[5] * dsY);
+        // Use std::floor (not truncation toward zero) so that points slightly
+        // outside the raster on the negative side map to negative pixel
+        // coordinates and get reported as out-of-bounds, rather than being
+        // silently clamped to the edge pixel.
+        const double pxd = invGt[0] + invGt[1] * dsX + invGt[2] * dsY;
+        const double pyd = invGt[3] + invGt[4] * dsX + invGt[5] * dsY;
+        const int px = static_cast<int>(std::floor(pxd));
+        const int py = static_cast<int>(std::floor(pyd));
 
         const int rxs = GDALGetRasterXSize(hDS);
         const int rys = GDALGetRasterYSize(hDS);
@@ -391,22 +398,31 @@ namespace ddb
             throw GDALException("Warp failed for index render: " + inputPath);
         }
 
-        // Step 2: read required bands as Float32 buffers.
+        // Step 2: read required bands as Float32 buffers and capture their
+        // nodata values so that nodata pixels can be rendered as transparent
+        // (alpha = 0) instead of being colorized as if they were valid
+        // numeric samples.
         const int npx = width * height;
         std::vector<float> b1(npx), b2(npx), b3;
         if (idx.b3 > 0) b3.resize(npx);
+        bool has1 = false, has2 = false, has3 = false;
+        double nd1 = 0.0, nd2 = 0.0, nd3 = 0.0;
 
-        auto readBand = [&](int bi, float *dst) {
+        auto readBand = [&](int bi, float *dst, bool &hasND, double &ndVal) {
             GDALRasterBandH hB = GDALGetRasterBand(hWarp, bi);
             if (!hB) throw GDALException("Missing band " + std::to_string(bi));
             CPLErr e = GDALRasterIO(hB, GF_Read, 0, 0, width, height,
                                     dst, width, height, GDT_Float32, 0, 0);
             if (e != CE_None) throw GDALException("RasterIO failed for band " + std::to_string(bi));
+            int hn = 0;
+            const double v = GDALGetRasterNoDataValue(hB, &hn);
+            hasND = (hn != 0);
+            ndVal = v;
         };
         try {
-            readBand(idx.b1, b1.data());
-            readBand(idx.b2, b2.data());
-            if (idx.b3 > 0) readBand(idx.b3, b3.data());
+            readBand(idx.b1, b1.data(), has1, nd1);
+            readBand(idx.b2, b2.data(), has2, nd2);
+            if (idx.b3 > 0) readBand(idx.b3, b3.data(), has3, nd3);
         } catch (...) {
             GDALClose(hWarp);
             VSIUnlink(vsiTif.c_str());
@@ -415,29 +431,44 @@ namespace ddb
         GDALClose(hWarp);
         VSIUnlink(vsiTif.c_str());
 
+        // Helper to detect nodata in a single sample (tolerant of float NaN).
+        auto isND = [](double v, bool hasND, double ndVal) {
+            if (std::isnan(v)) return true;
+            if (!hasND) return false;
+            if (std::isnan(ndVal)) return true;
+            return v == ndVal;
+        };
+
         // Step 3: compute the index per-pixel into RGBA byte buffer.
         std::vector<uint8_t> rgba(static_cast<size_t>(npx) * 4);
         for (int i = 0; i < npx; ++i) {
             double v;
             const double v1 = b1[i], v2 = b2[i];
-            switch (idx.kind) {
-                case 0: { // simple normalized difference
-                    const double sum = v1 + v2;
-                    v = (sum == 0.0) ? std::nan("") : (v1 - v2) / sum;
-                    break;
+            const bool nodataHere =
+                isND(v1, has1, nd1) || isND(v2, has2, nd2) ||
+                (idx.b3 > 0 && isND(b3[i], has3, nd3));
+            if (nodataHere) {
+                v = std::nan("");
+            } else {
+                switch (idx.kind) {
+                    case 0: { // simple normalized difference
+                        const double sum = v1 + v2;
+                        v = (sum == 0.0) ? std::nan("") : (v1 - v2) / sum;
+                        break;
+                    }
+                    case 1: { // SAVI
+                        const double denom = v1 + v2 + idx.L;
+                        v = (denom == 0.0) ? std::nan("") : ((v1 - v2) / denom) * (1.0 + idx.L);
+                        break;
+                    }
+                    case 2: { // EVI
+                        const double v3 = b3[i];
+                        const double denom = v1 + 6.0 * v2 - 7.5 * v3 + 1.0;
+                        v = (denom == 0.0) ? std::nan("") : 2.5 * (v1 - v2) / denom;
+                        break;
+                    }
+                    default: v = std::nan("");
                 }
-                case 1: { // SAVI
-                    const double denom = v1 + v2 + idx.L;
-                    v = (denom == 0.0) ? std::nan("") : ((v1 - v2) / denom) * (1.0 + idx.L);
-                    break;
-                }
-                case 2: { // EVI
-                    const double v3 = b3[i];
-                    const double denom = v1 + 6.0 * v2 - 7.5 * v3 + 1.0;
-                    v = (denom == 0.0) ? std::nan("") : 2.5 * (v1 - v2) / denom;
-                    break;
-                }
-                default: v = std::nan("");
             }
             uint8_t r, g, b, a;
             rampNdvi(v, r, g, b, a);
@@ -448,20 +479,52 @@ namespace ddb
             rgba[off + 3] = a;
         }
 
-        // Step 4: write RGBA to a /vsimem dataset of the requested format.
+        // Step 4: write to a /vsimem dataset of the requested format.
+        // JPEG cannot carry an alpha band, so for that format we composite
+        // the RGBA pixels over an opaque white background and emit a 3-band
+        // RGB MEM dataset before handing off to CreateCopy.
         const std::string vsiOut =
             "/vsimem/ddb-idx-out-" + utils::generateRandomString(16) + "." + fi.vsiExt;
 
+        const bool emitAlpha = !fi.jpegCompositing;
+        const int outBandCount = emitAlpha ? 4 : 3;
+
         GDALDriverH hMem = GDALGetDriverByName("MEM");
-        GDALDatasetH hRgba = GDALCreate(hMem, "", width, height, 4, GDT_Byte, nullptr);
-        for (int b = 0; b < 4; ++b) {
-            GDALRasterBandH hB = GDALGetRasterBand(hRgba, b + 1);
-            GDALRasterIO(hB, GF_Write, 0, 0, width, height,
-                         rgba.data() + b, width, height, GDT_Byte, 4, 4 * width);
+        GDALDatasetH hRgba = GDALCreate(hMem, "", width, height, outBandCount,
+                                        GDT_Byte, nullptr);
+        if (emitAlpha) {
+            for (int b = 0; b < 4; ++b) {
+                GDALRasterBandH hB = GDALGetRasterBand(hRgba, b + 1);
+                GDALRasterIO(hB, GF_Write, 0, 0, width, height,
+                             rgba.data() + b, width, height, GDT_Byte, 4, 4 * width);
+            }
+            GDALColorInterp ci[4] = { GCI_RedBand, GCI_GreenBand, GCI_BlueBand, GCI_AlphaBand };
+            for (int b = 0; b < 4; ++b)
+                GDALSetRasterColorInterpretation(GDALGetRasterBand(hRgba, b + 1), ci[b]);
+        } else {
+            // Composite RGBA over white (255,255,255) so nodata regions are
+            // visible but distinct from valid red samples after JPEG encode.
+            std::vector<uint8_t> rgb(static_cast<size_t>(npx) * 3);
+            for (int i = 0; i < npx; ++i) {
+                const size_t in = static_cast<size_t>(i) * 4;
+                const size_t on = static_cast<size_t>(i) * 3;
+                const double a = rgba[in + 3] / 255.0;
+                for (int c = 0; c < 3; ++c) {
+                    const double src = rgba[in + c];
+                    const double bg = 255.0;
+                    const double comp = a * src + (1.0 - a) * bg;
+                    rgb[on + c] = static_cast<uint8_t>(std::clamp(comp, 0.0, 255.0));
+                }
+            }
+            for (int b = 0; b < 3; ++b) {
+                GDALRasterBandH hB = GDALGetRasterBand(hRgba, b + 1);
+                GDALRasterIO(hB, GF_Write, 0, 0, width, height,
+                             rgb.data() + b, width, height, GDT_Byte, 3, 3 * width);
+            }
+            GDALColorInterp ci[3] = { GCI_RedBand, GCI_GreenBand, GCI_BlueBand };
+            for (int b = 0; b < 3; ++b)
+                GDALSetRasterColorInterpretation(GDALGetRasterBand(hRgba, b + 1), ci[b]);
         }
-        GDALColorInterp ci[4] = { GCI_RedBand, GCI_GreenBand, GCI_BlueBand, GCI_AlphaBand };
-        for (int b = 0; b < 4; ++b)
-            GDALSetRasterColorInterpretation(GDALGetRasterBand(hRgba, b + 1), ci[b]);
 
         GDALDriverH hOutDrv = GDALGetDriverByName(fi.driver);
         if (!hOutDrv) {
