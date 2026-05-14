@@ -149,7 +149,15 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
 
     // Check again if output exists after acquiring locks (another process might have completed the
     // build)
-    if (fs::exists(outputFolder) && !force) {
+    // For Vector entries we require BOTH the vec/ and mvt/ subdirectories
+    // to consider the build complete; otherwise we re-run buildVector so it
+    // can restore the missing half of the pair.
+    bool alreadyBuilt = fs::exists(outputFolder);
+    if (alreadyBuilt && e.type == EntryType::Vector) {
+        alreadyBuilt = fs::exists(baseOutputPath / "vec") &&
+                       fs::exists(baseOutputPath / "mvt");
+    }
+    if (alreadyBuilt && !force) {
         LOGD << "Build output already exists after acquiring lock, skipping: " << outputFolder;
         return;
     }
@@ -180,8 +188,13 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
             buildNexus(relativePath, (fs::path(tempFolder) / "model.nxz").string());
             built = true;
         } else if (e.type == EntryType::Vector) {
-            buildVector(relativePath, (fs::path(tempFolder) / "vector.fgb").string());
-            built = true;
+            // buildVector manages its own atomic write to baseOutputPath/vec
+            // and baseOutputPath/mvt; do NOT use the standard tempFolder rename.
+            // Propagate the force flag so a partial build (e.g. vec/ present
+            // but mvt/ missing) is fully rebuilt instead of being silently
+            // treated as up-to-date inside buildVector.
+            buildVector(relativePath, baseOutputPath.string(), force);
+            // built stays false on purpose to skip the standard rename below.
         }
 
         if (built) {
@@ -239,10 +252,11 @@ void buildAll(Database* db, const std::string& outputPath, bool force) {
     // List all buildable files in DB
     auto q = db->query(
         "SELECT path, hash, type, properties, mtime, size, depth FROM entries WHERE type = ? OR "
-        "type = ? OR type = ?");
+        "type = ? OR type = ? OR type = ?");
     q->bind(1, PointCloud);
     q->bind(2, GeoRaster);
     q->bind(3, Model);
+    q->bind(4, Vector);
 
     while (q->fetch()) {
         Entry e(q->getText(0),

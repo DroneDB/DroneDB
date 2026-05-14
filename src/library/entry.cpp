@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include <exiv2/exiv2.hpp>
+#include <algorithm>
+#include <limits>
 #include "dbops.h"
 #include "entry.h"
 
@@ -19,6 +21,9 @@
 
 namespace ddb
 {
+
+    // Forward declaration - defined after parseEntry()
+    static void parseVectorEntry(const fs::path &path, Entry &entry);
 
     void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entry, bool withHash)
     {
@@ -449,6 +454,169 @@ namespace ddb
                     entry.point_geom = info.centroid;
                 }
             }
+            else if (entry.type == EntryType::Vector)
+            {
+                parseVectorEntry(path, entry);
+            }
+        }
+    }
+
+    void parseVectorEntry(const fs::path &path, Entry &entry)
+    {
+        // Compute polygon_geom (WGS84) and properties.vector multi-layer metadata.
+        // Best-effort: any failure leaves the entry indexed without geometry but
+        // never aborts the parse (a corrupted vector file should not block ddb add).
+        try
+        {
+            GDALDatasetH hDS = GDALOpenEx(path.string().c_str(),
+                                         GDAL_OF_VECTOR | GDAL_OF_READONLY,
+                                         nullptr, nullptr, nullptr);
+            if (hDS == nullptr)
+            {
+                LOGD << "Vector parse: GDAL cannot open " << path.string();
+                return;
+            }
+
+            // Lazy WGS84 SRS - only allocate when needed (first layer with SRS).
+            OGRSpatialReferenceH hWgs84 = nullptr;
+            // Convex envelope in WGS84 across all layers.
+            OGREnvelope totalEnv;
+            totalEnv.MinX = totalEnv.MinY =  std::numeric_limits<double>::max();
+            totalEnv.MaxX = totalEnv.MaxY = -std::numeric_limits<double>::max();
+            bool haveEnv = false;
+
+            const int layerCount = GDALDatasetGetLayerCount(hDS);
+            auto layersArr = json::array();
+
+            for (int i = 0; i < layerCount; i++)
+            {
+                OGRLayerH hLayer = GDALDatasetGetLayer(hDS, i);
+                if (hLayer == nullptr) continue;
+
+                OGREnvelope env;
+                if (OGR_L_GetExtent(hLayer, &env, TRUE) != OGRERR_NONE)
+                {
+                    LOGD << "Vector parse: layer " << i << " has no extent";
+                    continue;
+                }
+
+                OGRSpatialReferenceH hSrs = OGR_L_GetSpatialRef(hLayer);
+                OGREnvelope envWgs84 = env;
+
+                if (hSrs != nullptr)
+                {
+                    OSRSetAxisMappingStrategy(hSrs, OAMS_TRADITIONAL_GIS_ORDER);
+
+                    // Check if reprojection is needed (skip if already WGS84).
+                    const char *authCode = OSRGetAuthorityCode(hSrs, nullptr);
+                    const char *authName = OSRGetAuthorityName(hSrs, nullptr);
+                    bool isWgs84 = (authName && authCode &&
+                                    std::string(authName) == "EPSG" &&
+                                    std::string(authCode) == "4326");
+
+                    if (!isWgs84)
+                    {
+                        if (hWgs84 == nullptr)
+                        {
+                            hWgs84 = OSRNewSpatialReference(nullptr);
+                            if (OSRImportFromEPSG(hWgs84, 4326) != OGRERR_NONE)
+                            {
+                                LOGD << "Vector parse: failed to import EPSG:4326";
+                                OSRDestroySpatialReference(hWgs84);
+                                hWgs84 = nullptr;
+                            }
+                            else
+                            {
+                                OSRSetAxisMappingStrategy(hWgs84, OAMS_TRADITIONAL_GIS_ORDER);
+                            }
+                        }
+
+                        if (hWgs84 != nullptr)
+                        {
+                            OGRCoordinateTransformationH hT =
+                                OCTNewCoordinateTransformation(hSrs, hWgs84);
+                            if (hT != nullptr)
+                            {
+                                // Transform all 4 corners (a single rectangle in src
+                                // CRS can become a curved quadrilateral in WGS84).
+                                double xs[4] = {env.MinX, env.MaxX, env.MaxX, env.MinX};
+                                double ys[4] = {env.MinY, env.MinY, env.MaxY, env.MaxY};
+                                if (OCTTransform(hT, 4, xs, ys, nullptr))
+                                {
+                                    envWgs84.MinX = std::min({xs[0], xs[1], xs[2], xs[3]});
+                                    envWgs84.MaxX = std::max({xs[0], xs[1], xs[2], xs[3]});
+                                    envWgs84.MinY = std::min({ys[0], ys[1], ys[2], ys[3]});
+                                    envWgs84.MaxY = std::max({ys[0], ys[1], ys[2], ys[3]});
+                                }
+                                else
+                                {
+                                    LOGD << "Vector parse: layer " << i << " transform failed";
+                                }
+                                OCTDestroyCoordinateTransformation(hT);
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    LOGD << "Vector parse: layer " << i << " has no SRS, assuming WGS84";
+                }
+
+                // Per-layer metadata
+                auto layerJson = json::object();
+                const char *layerName = OGR_L_GetName(hLayer);
+                layerJson["name"] = layerName ? layerName : ("layer_" + std::to_string(i));
+
+                OGRwkbGeometryType gType = OGR_L_GetGeomType(hLayer);
+                layerJson["geometryType"] = OGRGeometryTypeToName(gType);
+
+                GIntBig fc = OGR_L_GetFeatureCount(hLayer, FALSE);
+                layerJson["featureCount"] = static_cast<int64_t>(fc);
+                layerJson["extent"] = {envWgs84.MinX, envWgs84.MinY, envWgs84.MaxX, envWgs84.MaxY};
+
+                layersArr.push_back(layerJson);
+
+                // Accumulate global envelope
+                if (!haveEnv)
+                {
+                    totalEnv = envWgs84;
+                    haveEnv = true;
+                }
+                else
+                {
+                    totalEnv.MinX = std::min(totalEnv.MinX, envWgs84.MinX);
+                    totalEnv.MinY = std::min(totalEnv.MinY, envWgs84.MinY);
+                    totalEnv.MaxX = std::max(totalEnv.MaxX, envWgs84.MaxX);
+                    totalEnv.MaxY = std::max(totalEnv.MaxY, envWgs84.MaxY);
+                }
+            }
+
+            if (hWgs84 != nullptr) OSRDestroySpatialReference(hWgs84);
+
+            entry.properties["vector"] = {
+                {"driver", GDALGetDriverShortName(GDALGetDatasetDriver(hDS))},
+                {"layers", layersArr}};
+
+            GDALClose(hDS);
+
+            if (haveEnv)
+            {
+                // Populate polygon_geom as 5-point closed ring in CCW order.
+                entry.polygon_geom.addPoint(totalEnv.MinX, totalEnv.MinY, 0.0);
+                entry.polygon_geom.addPoint(totalEnv.MaxX, totalEnv.MinY, 0.0);
+                entry.polygon_geom.addPoint(totalEnv.MaxX, totalEnv.MaxY, 0.0);
+                entry.polygon_geom.addPoint(totalEnv.MinX, totalEnv.MaxY, 0.0);
+                entry.polygon_geom.addPoint(totalEnv.MinX, totalEnv.MinY, 0.0);
+
+                entry.point_geom.addPoint((totalEnv.MinX + totalEnv.MaxX) / 2.0,
+                                          (totalEnv.MinY + totalEnv.MaxY) / 2.0,
+                                          0.0);
+            }
+        }
+        catch (const std::exception &e)
+        {
+            LOGD << "Vector parse warning: " << e.what();
+            entry.properties["warning"] = std::string("vector parse failed: ") + e.what();
         }
     }
 
