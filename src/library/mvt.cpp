@@ -22,6 +22,15 @@ namespace ddb
         if (extentAreaDeg2 <= 0.0 || featureCount == 0)
             return kMvtMaxZoomCap;
 
+        // World-scale guard: planet-wide envelopes (e.g. world admin
+        // boundaries) generate tens of thousands of tiles at any moderate
+        // MAXZOOM and each tile clips against every overlapping feature.
+        // DroneDB targets aerial/drone surveys, not planet-scale vector
+        // publishing, so cap aggressively when coverage is near-global.
+        constexpr double earthAreaDeg2 = 360.0 * 180.0;
+        if (extentAreaDeg2 >= kMvtGlobalCoverageThreshold * earthAreaDeg2)
+            return kMvtMinZoomCap;
+
         // Approximate number of MVT tiles intersecting the WGS84 bbox at zoom z:
         //
         //     tiles(z) ≈ areaDeg2 * 4^z / earthAreaDeg2
@@ -36,7 +45,6 @@ namespace ddb
         // bounded by bbox coverage, not feature count. Density-based
         // heuristics underrate sparse global datasets (e.g. world admin
         // boundaries) and produce pathological tile counts.
-        constexpr double earthAreaDeg2 = 360.0 * 180.0;
         const double ratio = (static_cast<double>(kMvtTileBudget) * earthAreaDeg2)
                              / extentAreaDeg2;
         // ratio > 0 here (budget>0, earthAreaDeg2>0, extentAreaDeg2>0).

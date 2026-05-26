@@ -45,19 +45,33 @@ namespace
                   computeMvtMaxZoom(10000000, area));
     }
 
-    TEST(testMvtDensity, GlobalSparseDatasetIsModerate)
+    TEST(testMvtDensity, GlobalDatasetForcedToOverviewOnly)
     {
-        // World admin boundaries: ~250 features on the global envelope.
-        // The old density heuristic produced kMvtMaxZoomCap-ish levels and
-        // pathological tile counts (~400k). The budget formula must keep z
-        // well below the cap.
-        const int z = computeMvtMaxZoom(250, 360.0 * 180.0);
-        EXPECT_LT(z, kMvtMaxZoomCap);
+        // Full-globe extent: world-scale guard must clamp to kMvtMinZoomCap
+        // regardless of feature count or budget. Building MVT tilesets for
+        // the entire planet is not a supported use case (each tile clips
+        // against every overlapping feature and runtimes explode).
+        EXPECT_EQ(computeMvtMaxZoom(250, 360.0 * 180.0), kMvtMinZoomCap);
+        EXPECT_EQ(computeMvtMaxZoom(1, 360.0 * 180.0), kMvtMinZoomCap);
+        EXPECT_EQ(computeMvtMaxZoom(1000000, 360.0 * 180.0), kMvtMinZoomCap);
+        // Just above the threshold is still global-scale.
+        const double globalish = kMvtGlobalCoverageThreshold * 360.0 * 180.0;
+        EXPECT_EQ(computeMvtMaxZoom(100, globalish), kMvtMinZoomCap);
+    }
+
+    TEST(testMvtDensity, LargeButNonGlobalUsesBudgetFormula)
+    {
+        // Just below the world-scale threshold the budget formula applies.
+        // For an extent of (threshold - epsilon) * earthAreaDeg2, the ratio
+        // is approximately budget / (threshold - epsilon), so z is
+        // floor(0.5 * log2(budget / threshold)) clamped to the bounds.
+        const double earthAreaDeg2 = 360.0 * 180.0;
+        const double area = (kMvtGlobalCoverageThreshold - 0.01) * earthAreaDeg2;
+        const int z = computeMvtMaxZoom(250, area);
         EXPECT_GE(z, kMvtMinZoomCap);
-        // Sanity: ratio = budget*64800/64800 = budget → z = floor(0.5*log2(budget)).
-        // For budget=50000 this is 7; verify symbolically against the constant.
-        const int expected = static_cast<int>(std::floor(
-            0.5 * std::log2(static_cast<double>(kMvtTileBudget))));
+        EXPECT_LE(z, kMvtMaxZoomCap);
+        const double ratio = (static_cast<double>(kMvtTileBudget) * earthAreaDeg2) / area;
+        const int expected = static_cast<int>(std::floor(0.5 * std::log2(ratio)));
         EXPECT_EQ(z, std::clamp(expected, kMvtMinZoomCap, kMvtMaxZoomCap));
     }
 

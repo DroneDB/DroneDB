@@ -21,8 +21,20 @@ namespace ddb
      * full globe) ended up at MAXZOOM=10, producing ~400k tiles and
      * runtimes in the 10+ minute range. A budget bounds the worst case
      * regardless of how features are distributed.
+     *
+     * Note: in addition to the budget, ::computeMvtMaxZoom forcibly caps
+     * MAXZOOM at ::kMvtMinZoomCap whenever the dataset extent covers more
+     * than ::kMvtGlobalCoverageThreshold of the globe. World-scale inputs
+     * are pathological for tile generation regardless of feature count
+     * (each tile clips against every overlapping feature) and DroneDB is
+     * not designed to publish planet-wide vector tilesets.
      */
-    constexpr long long kMvtTileBudget = 100000;
+    constexpr long long kMvtTileBudget = 10000;
+
+    /// Fraction of the global WGS84 envelope (360 * 180 deg^2) above which
+    /// the dataset is considered "world-scale" and MAXZOOM is forced down
+    /// to ::kMvtMinZoomCap (overview-only).
+    constexpr double kMvtGlobalCoverageThreshold = 0.5;
 
     /// Hard lower bound for MVT MAXZOOM (overview-only datasets).
     constexpr int kMvtMinZoomCap = 5;
@@ -39,6 +51,11 @@ namespace ddb
      * of tiles at zoom z is approximately areaDeg2 * 4^z / 64800. We pick
      * the largest z such that this stays within ::kMvtTileBudget, then
      * clamp to [::kMvtMinZoomCap, ::kMvtMaxZoomCap].
+     *
+     * Datasets whose extent covers more than ::kMvtGlobalCoverageThreshold
+     * of the globe are clamped to ::kMvtMinZoomCap regardless of the
+     * budget calculation: world-scale tilesets are not a supported use
+     * case and would otherwise dominate build time on every rebuild.
      *
      * The @p featureCount parameter is used as a short-circuit only: when
      * the count is exactly 0 the function returns ::kMvtMaxZoomCap because
