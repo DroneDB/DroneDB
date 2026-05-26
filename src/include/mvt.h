@@ -41,7 +41,7 @@ namespace ddb
 
     /// Hard upper bound for MVT MAXZOOM (avoid pointless detail / huge
     /// per-tile feature counts on densely packed regions).
-    constexpr int kMvtMaxZoomCap = 14;
+    constexpr int kMvtMaxZoomCap = 18;
 
     /**
      * Compute a dynamic MAXZOOM for MVT tiling based on a tile-count budget.
