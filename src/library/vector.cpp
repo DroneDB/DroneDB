@@ -495,8 +495,12 @@ namespace ddb
             const fs::path vecDir = basePath / "vec";
             const fs::path mvtDir = basePath / "mvt";
 
-            const bool vecExists = fs::exists(vecDir);
-            const bool mvtExists = fs::exists(mvtDir);
+            // A previous aborted build can leave empty vec/ or mvt/ directories
+            // behind. Check for the actual artifacts inside (source.gpkg and
+            // the MVT tileset metadata.json) so we don't silently skip and
+            // produce a broken state.
+            const bool vecExists = fs::exists(vecDir / "source.gpkg");
+            const bool mvtExists = fs::exists(mvtDir / "metadata.json");
 
             // Skip if both already published and not overwriting.
             if (vecExists && mvtExists && !overwrite)
@@ -541,8 +545,12 @@ namespace ddb
                 (".vec-backup-" + utils::generateRandomString(16));
             const fs::path backupVec = backupDir / "vec";
             const fs::path backupMvt = backupDir / "mvt";
-            const bool hadVec = vecExists;
-            const bool hadMvt = mvtExists;
+            // Back up any existing directory at the publish target, even if
+            // it lacks the canonical artifact (e.g. an empty leftover from a
+            // previous aborted build): otherwise the promote-rename below
+            // would fail because the destination already exists.
+            const bool hadVec = fs::exists(vecDir);
+            const bool hadMvt = fs::exists(mvtDir);
             io::assureFolderExists(backupDir);
             try
             {
