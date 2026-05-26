@@ -34,7 +34,7 @@ namespace ddb
     /// Fraction of the global WGS84 envelope (360 * 180 deg^2) above which
     /// the dataset is considered "world-scale" and MAXZOOM is forced down
     /// to ::kMvtMinZoomCap (overview-only).
-    constexpr double kMvtGlobalCoverageThreshold = 0.5;
+    constexpr double kMvtGlobalCoverageThreshold = 0.1;
 
     /// Hard lower bound for MVT MAXZOOM (overview-only datasets).
     constexpr int kMvtMinZoomCap = 5;
