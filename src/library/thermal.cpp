@@ -166,8 +166,8 @@ static FlirSegmentInfo findFlirSegment(const std::string &filePath) {
                 info.rawHeight = rawHeightIt->toInt64();
             }
         }
-    } catch (...) {
-        LOGD << "Could not read FLIR XMP dimensions";
+    } catch (const std::exception &e) {
+        LOGD << "Could not read FLIR XMP dimensions: " << e.what();
     }
 
     // If dimensions not found from XMP, try common sizes
@@ -304,7 +304,11 @@ ThermalCalibration extractThermalCalibration(const std::string &filePath) {
             if (it != parser.xmpEnd()) {
                 try {
                     return std::stod(it->toString());
-                } catch (...) {}
+                } catch (const std::invalid_argument &) {
+                    // Non-numeric XMP value; use default silently.
+                } catch (const std::out_of_range &) {
+                    // Numeric out of double range; use default silently.
+                }
             }
             return defaultVal;
         };
@@ -458,7 +462,9 @@ bool isThermalImage(const std::string &filePath) {
                                             "Xmp.drone-dji.ThermalObjectEmissivity"});
             if (djiIt != parser.xmpEnd()) return true;
         }
-    } catch (...) {}
+    } catch (const std::exception &e) {
+        LOGD << "isThermalImage: EXIF/XMP probing failed: " << e.what();
+    }
 
     // Method 4: Check for FLIR APP1 segment
     FlirSegmentInfo seg = findFlirSegment(filePath);

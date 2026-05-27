@@ -58,8 +58,9 @@ namespace cmd
                 build(db.get(), path, output, force);
             }
         }
-        catch (ddb::InvalidArgsException)
+        catch (ddb::InvalidArgsException &e)
         {
+            std::cerr << "Error: " << e.what() << std::endl;
             printHelp();
         }
     }

@@ -66,8 +66,9 @@ namespace cmd
 
             clone(tag, folder.generic_string(), sslVerify);
         }
-        catch (ddb::InvalidArgsException)
+        catch (ddb::InvalidArgsException &e)
         {
+            std::cerr << "Error: " << e.what() << std::endl;
             printHelp();
         }
     }

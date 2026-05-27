@@ -63,8 +63,9 @@ namespace cmd
                       << result.removedBuilds.size() << " orphan build artifact(s) removed."
                       << std::endl;
         }
-        catch (ddb::InvalidArgsException &)
+        catch (ddb::InvalidArgsException &e)
         {
+            std::cerr << "Error: " << e.what() << std::endl;
             printHelp();
         }
     }

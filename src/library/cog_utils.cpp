@@ -85,8 +85,8 @@ namespace ddb
             LOGD << "File appears to be an optimized COG with " << overviewCount << " overviews";
             isOptimized = true;
 
-        } catch (...) {
-            LOGD << "Error checking COG status, assuming needs rebuild";
+        } catch (const std::exception &e) {
+            LOGD << "Error checking COG status (" << e.what() << "), assuming needs rebuild";
             isOptimized = false;
         }
 
