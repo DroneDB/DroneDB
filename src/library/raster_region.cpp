@@ -490,8 +490,12 @@ namespace ddb
         const int outBandCount = emitAlpha ? 4 : 3;
 
         GDALDriverH hMem = GDALGetDriverByName("MEM");
+        if (!hMem)
+            throw GDALException("GDALGetDriverByName(\"MEM\") returned null; MEM driver unavailable");
         GDALDatasetH hRgba = GDALCreate(hMem, "", width, height, outBandCount,
                                         GDT_Byte, nullptr);
+        if (!hRgba)
+            throw GDALException("GDALCreate failed for in-memory RGBA dataset");
         if (emitAlpha) {
             for (int b = 0; b < 4; ++b) {
                 GDALRasterBandH hB = GDALGetRasterBand(hRgba, b + 1);

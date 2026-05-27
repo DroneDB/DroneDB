@@ -466,11 +466,14 @@ namespace ddb
         // Compute polygon_geom (WGS84) and properties.vector multi-layer metadata.
         // Best-effort: any failure leaves the entry indexed without geometry but
         // never aborts the parse (a corrupted vector file should not block ddb add).
+        // Declared outside try so that the catch block can release them on error.
+        GDALDatasetH hDS = nullptr;
+        OGRSpatialReferenceH hWgs84 = nullptr;
         try
         {
-            GDALDatasetH hDS = GDALOpenEx(path.string().c_str(),
-                                         GDAL_OF_VECTOR | GDAL_OF_READONLY,
-                                         nullptr, nullptr, nullptr);
+            hDS = GDALOpenEx(path.string().c_str(),
+                             GDAL_OF_VECTOR | GDAL_OF_READONLY,
+                             nullptr, nullptr, nullptr);
             if (hDS == nullptr)
             {
                 LOGD << "Vector parse: GDAL cannot open " << path.string();
@@ -478,7 +481,6 @@ namespace ddb
             }
 
             // Lazy WGS84 SRS - only allocate when needed (first layer with SRS).
-            OGRSpatialReferenceH hWgs84 = nullptr;
             // Convex envelope in WGS84 across all layers.
             OGREnvelope totalEnv;
             totalEnv.MinX = totalEnv.MinY =  std::numeric_limits<double>::max();
@@ -615,6 +617,9 @@ namespace ddb
         }
         catch (const std::exception &e)
         {
+            // Release GDAL/OSR resources that may have been opened before the exception.
+            if (hWgs84 != nullptr) OSRDestroySpatialReference(hWgs84);
+            if (hDS != nullptr) GDALClose(hDS);
             LOGD << "Vector parse warning: " << e.what();
             entry.properties["warning"] = std::string("vector parse failed: ") + e.what();
         }
