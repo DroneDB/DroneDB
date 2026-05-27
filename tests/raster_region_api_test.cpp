@@ -7,6 +7,7 @@
 #include "testarea.h"
 #include "fs.h"
 #include <nlohmann/json.hpp>
+#include <vector>
 #include <gdal.h>
 #include <gdal_priv.h>
 #include <ogr_srs_api.h>
