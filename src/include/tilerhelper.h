@@ -55,6 +55,16 @@ namespace ddb
                                         uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr,
                                         const std::string &tileablePathHash = "");
 
+        // Get a single tile with explicit output format ("png" or "jpeg")
+        DDB_DLL static fs::path getTile(const fs::path &tileablePath,
+                                        int tz, int tx, int ty,
+                                        int tileSize, bool tms,
+                                        bool forceRecreate,
+                                        const fs::path &outputFolder,
+                                        const std::string &outputFormat,
+                                        uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr,
+                                        const std::string &tileablePathHash = "");
+
         // Get a single tile with visualization parameters
         DDB_DLL static fs::path getTile(const fs::path &tileablePath,
                                         int tz, int tx, int ty,

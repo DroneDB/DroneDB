@@ -812,6 +812,48 @@ DDBErr DDBMemoryTile(const char* inputPath,
     DDB_C_END
 }
 
+DDBErr DDBMemoryTileFmt(const char* inputPath,
+                        int tz,
+                        int tx,
+                        int ty,
+                        uint8_t** outBuffer,
+                        int* outBufferSize,
+                        int tileSize,
+                        bool tms,
+                        bool forceRecreate,
+                        const char* inputPathHash,
+                        const char* outputFormat) {
+    DDB_C_BEGIN
+
+    if (utils::isNullOrEmptyOrWhitespace(inputPath))
+        throw InvalidArgsException("No input path provided");
+    if (outBuffer == nullptr)
+        throw InvalidArgsException("Output buffer pointer is null");
+    if (outBufferSize == nullptr)
+        throw InvalidArgsException("Output buffer size pointer is null");
+    if (tileSize < 0)
+        throw InvalidArgsException("Invalid tile size parameter");
+    if (tz < 0 || tx < 0 || ty < 0)
+        throw InvalidArgsException("Invalid tile coordinates");
+
+    const std::string hashStr = inputPathHash ? std::string(inputPathHash) : "";
+    const std::string fmtStr = (outputFormat && *outputFormat) ? std::string(outputFormat) : std::string("png");
+
+    ddb::TilerHelper::getTile(std::string(inputPath),
+                              tz,
+                              tx,
+                              ty,
+                              tileSize,
+                              tms,
+                              forceRecreate,
+                              "",
+                              fmtStr,
+                              outBuffer,
+                              outBufferSize,
+                              hashStr);
+    DDB_C_END
+}
+
 DDBErr DDBDelta(const char* ddbSourceStamp,
                 const char* ddbTargetStamp,
                 char** output,

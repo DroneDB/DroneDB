@@ -209,6 +209,9 @@ extern "C"
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBMemoryTile(const char *inputPath, int tz, int tx, int ty, uint8_t **outBuffer, int *outBufferSize, int tileSize = 256, bool tms = false, bool forceRecreate = false, const char *inputPathHash = "");
 
+    /** Generate a tile in memory with explicit output format ("png" or "jpeg"). */
+    DDB_DLL DDBErr DDBMemoryTileFmt(const char *inputPath, int tz, int tx, int ty, uint8_t **outBuffer, int *outBufferSize, int tileSize = 256, bool tms = false, bool forceRecreate = false, const char *inputPathHash = "", const char *outputFormat = "png");
+
     /** Generate delta between two ddbs
      * @param ddbSourceStamp JSON stamp of the source DroneDB database
      * @param ddbTargetStamp JSON stamp of the target DroneDB database
