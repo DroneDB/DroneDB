@@ -215,7 +215,17 @@ namespace ddb
         const bool usePagedSql = (startIndex > 0);
         std::string sqlStmt;
         if (usePagedSql) {
-            sqlStmt = std::string("SELECT * FROM \"") + layer->GetName() + "\"";
+            // Build a properly quoted identifier: embed the layer name between
+            // double-quotes and escape any embedded double-quote by doubling it
+            // (SQLite / OGR SQL identifier quoting rules).
+            const char *rawName = layer->GetName();
+            std::string lname(rawName ? rawName : "");
+            std::string qname;
+            qname.reserve(lname.size() + 2);
+            qname.push_back('"');
+            for (char c : lname) { if (c == '"') qname.push_back('"'); qname.push_back(c); }
+            qname.push_back('"');
+            sqlStmt = "SELECT * FROM " + qname;
             if (maxFeatures > 0)
                 sqlStmt += " LIMIT " + std::to_string(maxFeatures);
             sqlStmt += " OFFSET " + std::to_string(startIndex);
