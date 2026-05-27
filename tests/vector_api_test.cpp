@@ -26,13 +26,22 @@ namespace
         return gpkg;
     }
 
-    TEST(testVectorApi, DescribeGeoJson)
+    // Shared GPKG for tests that use test2.geojson: built once per binary run,
+    // then reused (buildVector is idempotent and the TestArea persists across
+    // test executions in the same temp directory).
+    static const fs::path& sharedTest2GeoJsonGpkg()
     {
-        TestArea ta(TEST_NAME);
-        const fs::path gpkg = BuildAndGetGpkg(
+        static TestArea ta("testVectorApi_shared");
+        static const fs::path gpkg = BuildAndGetGpkg(
             ta,
             "https://github.com/DroneDB/test_data/raw/refs/heads/master/vector/test2.geojson",
             "test.geojson");
+        return gpkg;
+    }
+
+    TEST(testVectorApi, DescribeGeoJson)
+    {
+        const fs::path& gpkg = sharedTest2GeoJsonGpkg();
 
         char *out = nullptr;
         const DDBErr err = DDBDescribeVector(gpkg.string().c_str(), nullptr, &out);
@@ -58,11 +67,7 @@ namespace
 
     TEST(testVectorApi, QueryGeoJson)
     {
-        TestArea ta(TEST_NAME);
-        const fs::path gpkg = BuildAndGetGpkg(
-            ta,
-            "https://github.com/DroneDB/test_data/raw/refs/heads/master/vector/test2.geojson",
-            "test.geojson");
+        const fs::path& gpkg = sharedTest2GeoJsonGpkg();
 
         char *out = nullptr;
         const DDBErr err = DDBQueryVector(
@@ -85,11 +90,7 @@ namespace
 
     TEST(testVectorApi, QueryWithBbox)
     {
-        TestArea ta(TEST_NAME);
-        const fs::path gpkg = BuildAndGetGpkg(
-            ta,
-            "https://github.com/DroneDB/test_data/raw/refs/heads/master/vector/test2.geojson",
-            "test.geojson");
+        const fs::path& gpkg = sharedTest2GeoJsonGpkg();
 
         // test2.geojson features lie around lon[4.55, 7.07] lat[51.72, 52.61]
         const double bboxOutside[4] = {-180.0, -90.0, -179.0, -89.0};
@@ -121,11 +122,7 @@ namespace
 
     TEST(testVectorApi, QueryLimitClampMax)
     {
-        TestArea ta(TEST_NAME);
-        const fs::path gpkg = BuildAndGetGpkg(
-            ta,
-            "https://github.com/DroneDB/test_data/raw/refs/heads/master/vector/test2.geojson",
-            "test.geojson");
+        const fs::path& gpkg = sharedTest2GeoJsonGpkg();
 
         // maxFeatures=1 should cap results
         char *out = nullptr;
@@ -141,11 +138,7 @@ namespace
 
     TEST(testVectorApi, QueryGml)
     {
-        TestArea ta(TEST_NAME);
-        const fs::path gpkg = BuildAndGetGpkg(
-            ta,
-            "https://github.com/DroneDB/test_data/raw/refs/heads/master/vector/test2.geojson",
-            "test.geojson");
+        const fs::path& gpkg = sharedTest2GeoJsonGpkg();
 
         char *out = nullptr;
         const DDBErr err = DDBQueryVector(gpkg.string().c_str(), nullptr,

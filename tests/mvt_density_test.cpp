@@ -19,9 +19,11 @@ namespace
 
     TEST(testMvtDensity, EmptyOrDegenerateReturnsMax)
     {
-        // featureCount <= 0 → max zoom cap (no work to do, no risk).
+        // featureCount == 0 (explicitly empty layer) → max zoom cap.
+        // NOTE: featureCount < 0 is the OGR "unknown count" convention; the
+        // implementation intentionally falls through to the area heuristic
+        // so that large-extent layers with an unknown count are still bounded.
         EXPECT_EQ(computeMvtMaxZoom(0, 1.0), kMvtMaxZoomCap);
-        EXPECT_EQ(computeMvtMaxZoom(-1, 1.0), kMvtMaxZoomCap);
         // Degenerate (zero-area) bbox → max zoom cap.
         EXPECT_EQ(computeMvtMaxZoom(1, 0.0), kMvtMaxZoomCap);
         EXPECT_EQ(computeMvtMaxZoom(1000, 0.0), kMvtMaxZoomCap);
@@ -29,11 +31,14 @@ namespace
 
     TEST(testMvtDensity, SmallExtentSaturatesToMax)
     {
-        // A tiny envelope produces few tiles even at the max cap, so the
-        // formula saturates upward and we get kMvtMaxZoomCap.
-        EXPECT_EQ(computeMvtMaxZoom(1,    1.0), kMvtMaxZoomCap);
-        EXPECT_EQ(computeMvtMaxZoom(1000, 1.0), kMvtMaxZoomCap);
+        // Extents ≤ ~0.0094 deg² produce z ≥ kMvtMaxZoomCap from the budget
+        // formula (ratio = kMvtTileBudget*64800/area ≥ 2^36), so the clamp
+        // saturates upward to kMvtMaxZoomCap.
+        // NOTE: 1 deg² does NOT saturate with the current budget of 10 000
+        // tiles — that gives z=14.  Only sub-centidegree² extents saturate.
         EXPECT_EQ(computeMvtMaxZoom(1,    1e-4), kMvtMaxZoomCap);
+        EXPECT_EQ(computeMvtMaxZoom(1000, 1e-4), kMvtMaxZoomCap);
+        EXPECT_EQ(computeMvtMaxZoom(1,    1e-6), kMvtMaxZoomCap);
     }
 
     TEST(testMvtDensity, FeatureCountIrrelevant)

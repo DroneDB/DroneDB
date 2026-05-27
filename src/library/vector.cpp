@@ -33,7 +33,14 @@ namespace ddb
         // Compute total feature count and union envelope (in WGS84) for MAXZOOM.
         struct VectorStats
         {
-            long long featureCount = 0;
+            // -1 = unknown (no layer reported a cheap count; OGR convention).
+            //  0 = confirmed empty (at least one layer reported 0, none reported >0).
+            // >0 = sum of cheap counts from layers that supplied one.
+            // Keeping these distinct is critical: computeMvtMaxZoom treats
+            // featureCount==0 as "empty layer => MAXZOOM cap" short-circuit,
+            // which on a real dataset with unknown count (e.g. DXF) would
+            // produce hundreds of thousands of empty tiles.
+            long long featureCount = -1;
             // WGS84 envelope (degrees)
             double minX =  std::numeric_limits<double>::max();
             double minY =  std::numeric_limits<double>::max();
@@ -64,12 +71,20 @@ namespace ddb
                 if (!hLayer) continue;
 
                 // OGR_L_GetFeatureCount(..., FALSE) returns -1 when the driver
-                // cannot provide a cheap count. Treat that as "unknown, 0"
-                // so we never feed a negative running total to the MVT
-                // heuristic (which would otherwise force MAXZOOM).
+                // cannot provide a cheap count (e.g. DXF, some KML setups).
+                // Preserve the distinction between "unknown" (-1) and
+                // "confirmed empty/non-negative" (>= 0): a layer that
+                // reports 0 promotes the running total from -1 to 0, and
+                // any layer that reports >0 contributes to the sum. If every
+                // layer reports -1, featureCount stays -1 and the MVT
+                // heuristic falls through to the area-only branch instead of
+                // mistakenly short-circuiting to MAXZOOM=18.
                 const GIntBig rawCount = OGR_L_GetFeatureCount(hLayer, FALSE);
-                if (rawCount > 0)
+                if (rawCount >= 0)
+                {
+                    if (s.featureCount < 0) s.featureCount = 0;
                     s.featureCount += static_cast<long long>(rawCount);
+                }
 
                 OGREnvelope env;
                 if (OGR_L_GetExtent(hLayer, &env, TRUE) != OGRERR_NONE) continue;
