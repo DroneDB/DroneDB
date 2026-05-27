@@ -152,10 +152,15 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
     // For Vector entries we require BOTH the vec/ and mvt/ subdirectories
     // to consider the build complete; otherwise we re-run buildVector so it
     // can restore the missing half of the pair.
-    bool alreadyBuilt = fs::exists(outputFolder);
-    if (alreadyBuilt && e.type == EntryType::Vector) {
+    // NOTE: Vector output never creates outputFolder itself (buildVector writes
+    // directly to baseOutputPath/vec and baseOutputPath/mvt), so we must check
+    // those subdirs unconditionally rather than gating on fs::exists(outputFolder).
+    bool alreadyBuilt;
+    if (e.type == EntryType::Vector) {
         alreadyBuilt = fs::exists(baseOutputPath / "vec") &&
                        fs::exists(baseOutputPath / "mvt");
+    } else {
+        alreadyBuilt = fs::exists(outputFolder);
     }
     if (alreadyBuilt && !force) {
         LOGD << "Build output already exists after acquiring lock, skipping: " << outputFolder;
