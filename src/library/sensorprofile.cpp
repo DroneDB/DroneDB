@@ -522,6 +522,29 @@ std::string SensorProfileManager::getRasterInfoJson(const std::string &rasterPat
     result["width"] = width;
     result["height"] = height;
 
+    // Expose the native CRS as a best-effort authority code (e.g. "EPSG:32634").
+    // Consumed by OGC WCS DescribeCoverage and by clients wanting OUTPUTCRS=native
+    // round-trips. Falls back to the raw WKT when the projection has no authority
+    // (rare for orthos), or to an empty string when the raster is non-georeferenced.
+    {
+        const char *wkt = GDALGetProjectionRef(hDataset);
+        std::string crs;
+        if (wkt && *wkt) {
+            OGRSpatialReferenceH hSrs = OSRNewSpatialReference(wkt);
+            if (hSrs) {
+                const char *authName = OSRGetAuthorityName(hSrs, nullptr);
+                const char *authCode = OSRGetAuthorityCode(hSrs, nullptr);
+                if (authName && *authName && authCode && *authCode) {
+                    crs = std::string(authName) + ":" + authCode;
+                } else {
+                    crs = wkt;
+                }
+                OSRDestroySpatialReference(hSrs);
+            }
+        }
+        result["crs"] = crs;
+    }
+
     if (det.detected) {
         result["detectedSensor"] = det.sensorId;
 

@@ -234,4 +234,72 @@ namespace
         EXPECT_EQ(outBuf, nullptr);
     }
 
+    // DDBRenderRasterRegionEx: validate band subset and OUTPUTCRS round-trip
+    // by emitting a GeoTIFF and inspecting it via GDAL.
+    TEST(testRasterRegionApi, RenderRegionExBandsAndOutputCrs)
+    {
+        TestArea ta(TEST_NAME);
+        const fs::path ortho = ta.downloadTestAsset(kOrthoUrl, "ortho.tif");
+
+        // Bbox in WGS84; request output in EPSG:3857 with only band 1.
+        const double bbox[4] = {-0.18, 50.81, -0.10, 50.84};
+        const int bands[] = {1};
+
+        uint8_t *outBuf = nullptr;
+        int outSize = 0;
+        const DDBErr err = DDBRenderRasterRegionEx(
+            ortho.string().c_str(), bbox, "EPSG:4326", "EPSG:3857",
+            bands, 1, 128, 128, "image/tiff", &outBuf, &outSize);
+
+        EXPECT_EQ(err, DDBERR_NONE) << DDBGetLastError();
+        ASSERT_NE(outBuf, nullptr);
+        ASSERT_GT(outSize, 0);
+
+        // Load the in-memory GeoTIFF through /vsimem so we can inspect it.
+        const std::string vsiName = "/vsimem/render_ex_test.tif";
+        VSIFCloseL(VSIFileFromMemBuffer(vsiName.c_str(), outBuf, outSize, FALSE));
+        GDALDatasetH hDS = GDALOpen(vsiName.c_str(), GA_ReadOnly);
+        ASSERT_NE(hDS, nullptr);
+
+        // Single requested band → output has the selected band (GDALWarp may
+        // still propagate the source nodata/mask as a hidden second band when
+        // the source raster carries one; we only assert that the explicit
+        // alpha channel that would otherwise be appended via -dstalpha is NOT
+        // present, i.e. band count stays small).
+        EXPECT_LE(GDALGetRasterCount(hDS), 2);
+        EXPECT_GE(GDALGetRasterCount(hDS), 1);
+
+        // Verify the output SRS is EPSG:3857.
+        const char *wkt = GDALGetProjectionRef(hDS);
+        ASSERT_NE(wkt, nullptr);
+        ASSERT_GT(strlen(wkt), 0u);
+        OGRSpatialReferenceH hSRS = OSRNewSpatialReference(wkt);
+        ASSERT_NE(hSRS, nullptr);
+        const char *code = OSRGetAuthorityCode(hSRS, nullptr);
+        EXPECT_TRUE(code != nullptr && std::string(code) == "3857");
+        OSRDestroySpatialReference(hSRS);
+
+        GDALClose(hDS);
+        VSIUnlink(vsiName.c_str());
+        DDBVSIFree(outBuf);
+    }
+
+    TEST(testRasterRegionApi, RenderRegionExInvalidBand)
+    {
+        TestArea ta(TEST_NAME);
+        const fs::path ortho = ta.downloadTestAsset(kOrthoUrl, "ortho.tif");
+        const double bbox[4] = {-0.18, 50.81, -0.10, 50.84};
+        // Brighton ortho has 3 (or 4 incl. alpha) bands; band 99 must fail.
+        const int bands[] = {99};
+
+        uint8_t *outBuf = nullptr;
+        int outSize = 0;
+        const DDBErr err = DDBRenderRasterRegionEx(
+            ortho.string().c_str(), bbox, "EPSG:4326", "",
+            bands, 1, 64, 64, "png", &outBuf, &outSize);
+
+        EXPECT_NE(err, DDBERR_NONE);
+        EXPECT_EQ(outBuf, nullptr);
+    }
+
 } // namespace

@@ -626,6 +626,27 @@ extern "C"
                                          uint8_t **outBuffer,
                                          int *outBufferSize);
 
+    /** Extended variant of @ref DDBRenderRasterRegion adding optional output CRS
+     * and 1-based band selection. Used by OGC WCS GetCoverage with
+     * RangeSubset / OutputCRS, and by any client that needs to preserve
+     * scientific multi-band data without forced reprojection.
+     *
+     * @param outputCrs Optional target CRS authority code (e.g. "EPSG:32634").
+     *                  NULL or empty = use @p bboxSrs (legacy behaviour).
+     * @param bands     Optional pointer to @p bandCount 1-based band indices.
+     *                  NULL or @p bandCount = 0 means "all bands".
+     * @param bandCount Number of entries in @p bands. */
+    DDB_DLL DDBErr DDBRenderRasterRegionEx(const char *inputPath,
+                                           const double *bbox,
+                                           const char *bboxSrs,
+                                           const char *outputCrs,
+                                           const int *bands,
+                                           int bandCount,
+                                           int width, int height,
+                                           const char *format,
+                                           uint8_t **outBuffer,
+                                           int *outBufferSize);
+
     /** Render a spectral index over a raster region (WMS GetMap STYLES support).
      *
      * Computes NDVI / NDRE / NDWI / EVI / SAVI using the standard 5-band mapping

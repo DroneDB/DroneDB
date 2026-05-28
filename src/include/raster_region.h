@@ -25,6 +25,13 @@ namespace ddb
      * @param outBytes    Allocated by VSIGetMemFileBuffer (steal=TRUE);
      *                    caller frees with `VSIFree` (== `DDBVSIFree`).
      * @param outSize     Buffer size in bytes.
+     * @param outputCrs   Optional target CRS authority code; empty (default) means
+     *                    "same as @p bboxSrs". Pass the source CRS to avoid
+     *                    cross-projection resampling artefacts (useful for
+     *                    scientific multi-band data via OGC WCS).
+     * @param bands       Optional 1-based band selection (e.g. {4, 1, 2} for a
+     *                    false-colour NIR/R/G composite). Empty (default) = all
+     *                    bands in source order.
      */
     DDB_DLL void renderRasterRegion(const std::string &inputPath,
                                     const double bbox[4],
@@ -32,7 +39,9 @@ namespace ddb
                                     int width, int height,
                                     const std::string &format,
                                     uint8_t **outBytes,
-                                    int *outSize);
+                                    int *outSize,
+                                    const std::string &outputCrs = "",
+                                    const std::vector<int> &bands = {});
 
     /**
      * Query a raster at a geographic point. Returns JSON.

@@ -2211,6 +2211,24 @@ DDB_DLL DDBErr DDBRenderRasterRegion(const char *inputPath,
                                      const char *format,
                                      uint8_t **outBuffer,
                                      int *outBufferSize) {
+    // Legacy entry point: delegate to the extended variant with no band
+    // selection and no explicit output CRS (target SRS = bbox SRS).
+    return DDBRenderRasterRegionEx(inputPath, bbox, bboxSrs, nullptr,
+                                   nullptr, 0,
+                                   width, height, format,
+                                   outBuffer, outBufferSize);
+}
+
+DDB_DLL DDBErr DDBRenderRasterRegionEx(const char *inputPath,
+                                       const double *bbox,
+                                       const char *bboxSrs,
+                                       const char *outputCrs,
+                                       const int *bands,
+                                       int bandCount,
+                                       int width, int height,
+                                       const char *format,
+                                       uint8_t **outBuffer,
+                                       int *outBufferSize) {
     DDB_C_BEGIN
 
     if (utils::isNullOrEmptyOrWhitespace(inputPath))
@@ -2221,12 +2239,20 @@ DDB_DLL DDBErr DDBRenderRasterRegion(const char *inputPath,
         throw InvalidArgsException("outBuffer is null");
     if (outBufferSize == nullptr)
         throw InvalidArgsException("outBufferSize is null");
+    if (bandCount < 0)
+        throw InvalidArgsException("bandCount is negative");
+    if (bandCount > 0 && bands == nullptr)
+        throw InvalidArgsException("bands is null but bandCount > 0");
 
     const std::string srs = bboxSrs ? bboxSrs : "";
     const std::string fmt = format  ? format  : "";
+    const std::string oSrs = outputCrs ? outputCrs : "";
+    std::vector<int> bandVec;
+    if (bandCount > 0) bandVec.assign(bands, bands + bandCount);
 
     ddb::renderRasterRegion(std::string(inputPath), bbox, srs,
-                            width, height, fmt, outBuffer, outBufferSize);
+                            width, height, fmt, outBuffer, outBufferSize,
+                            oSrs, bandVec);
 
     DDB_C_END
 }

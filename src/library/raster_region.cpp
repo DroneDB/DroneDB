@@ -81,7 +81,9 @@ namespace ddb
                             int width, int height,
                             const std::string &format,
                             uint8_t **outBytes,
-                            int *outSize)
+                            int *outSize,
+                            const std::string &outputCrs,
+                            const std::vector<int> &bands)
     {
         validateInputs(inputPath, bbox, width, height);
         if (!outBytes || !outSize)
@@ -89,12 +91,29 @@ namespace ddb
 
         const FormatInfo fi = resolveFormat(format);
         const std::string srs = bboxSrs.empty() ? std::string("EPSG:4326") : bboxSrs;
+        // outputCrs empty → keep current behaviour (target SRS = bbox SRS).
+        const std::string tSrs = outputCrs.empty() ? srs : outputCrs;
 
         GDALDatasetH hSrc = GDALOpenEx(inputPath.c_str(),
                                       GDAL_OF_RASTER | GDAL_OF_READONLY,
                                       nullptr, nullptr, nullptr);
         if (!hSrc)
             throw GDALException("Cannot open raster: " + inputPath);
+
+        // Validate requested band indices against the source raster.
+        if (!bands.empty())
+        {
+            const int srcBands = GDALGetRasterCount(hSrc);
+            for (int b : bands)
+            {
+                if (b < 1 || b > srcBands) {
+                    GDALClose(hSrc);
+                    throw InvalidArgsException(
+                        "renderRasterRegion: band " + std::to_string(b) +
+                        " out of range [1," + std::to_string(srcBands) + "]");
+                }
+            }
+        }
 
         const std::string vsiPath =
             "/vsimem/ddb-render-" + utils::generateRandomString(16) +
@@ -103,7 +122,7 @@ namespace ddb
         // Build GDALWarp options
         std::vector<std::string> argStore;
         argStore.emplace_back("-of");       argStore.emplace_back(fi.driver);
-        argStore.emplace_back("-t_srs");    argStore.emplace_back(srs);
+        argStore.emplace_back("-t_srs");    argStore.emplace_back(tSrs);
         argStore.emplace_back("-te");
         argStore.emplace_back(fmtDouble(bbox[0]));
         argStore.emplace_back(fmtDouble(bbox[1]));
@@ -115,7 +134,14 @@ namespace ddb
         argStore.emplace_back(std::to_string(height));
         argStore.emplace_back("-r");        argStore.emplace_back("bilinear");
         argStore.emplace_back("-multi");
-        if (fi.wantsAlpha)
+        for (int b : bands) {
+            argStore.emplace_back("-b");
+            argStore.emplace_back(std::to_string(b));
+        }
+        // Append an alpha mask only when the caller did not pin a specific band
+        // layout. When @p bands is non-empty the output must match exactly the
+        // requested bands (WCS RangeSubset semantics).
+        if (fi.wantsAlpha && bands.empty())
             argStore.emplace_back("-dstalpha");
         if (fi.jpegCompositing) {
             // JPEG has no alpha: use white background for nodata regions
