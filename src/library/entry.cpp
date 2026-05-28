@@ -461,7 +461,7 @@ namespace ddb
         }
     }
 
-    void parseVectorEntry(const fs::path &path, Entry &entry)
+    static void parseVectorEntry(const fs::path &path, Entry &entry)
     {
         // Compute polygon_geom (WGS84) and properties.vector multi-layer metadata.
         // Best-effort: any failure leaves the entry indexed without geometry but
