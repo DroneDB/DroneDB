@@ -144,8 +144,15 @@ namespace ddb
         if (fi.wantsAlpha && bands.empty())
             argStore.emplace_back("-dstalpha");
         if (fi.jpegCompositing) {
-            // JPEG has no alpha: use white background for nodata regions
-            argStore.emplace_back("-dstnodata"); argStore.emplace_back("255 255 255");
+            // JPEG has no alpha: use white background for nodata regions.
+            // Build one nodata value per output band to satisfy gdalwarp
+            // (single-band grayscale outputs reject a 3-value "255 255 255").
+            const int outBandCount = bands.empty()
+                ? GDALGetRasterCount(hSrc)
+                : static_cast<int>(bands.size());
+            std::string nodataStr = "255";
+            for (int i = 1; i < outBandCount; ++i) nodataStr += " 255";
+            argStore.emplace_back("-dstnodata"); argStore.emplace_back(nodataStr);
         }
 
         std::vector<char *> argv;
