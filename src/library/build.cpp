@@ -157,8 +157,8 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
     // those subdirs unconditionally rather than gating on fs::exists(outputFolder).
     bool alreadyBuilt;
     if (e.type == EntryType::Vector) {
-        alreadyBuilt = fs::exists(baseOutputPath / "vec") &&
-                       fs::exists(baseOutputPath / "mvt");
+        alreadyBuilt = fs::exists(baseOutputPath / "vec" / "source.gpkg") &&
+                       fs::exists(baseOutputPath / "mvt" / "metadata.json");
     } else {
         alreadyBuilt = fs::exists(outputFolder);
     }
