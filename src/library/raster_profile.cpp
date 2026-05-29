@@ -51,7 +51,9 @@ bool detectIsThermalProfile(const std::string &filePath) {
         auto &spm = SensorProfileManager::instance();
         auto det = spm.detectSensor(filePath);
         if (det.detected && det.sensorCategory == "thermal") return true;
-    } catch (...) { /* ignore and fall through */ }
+    } catch (const std::exception &e) {
+        LOGD << "SensorProfileManager failed in detectIsThermalProfile: " << e.what();
+    }
 
     return isThermalImage(filePath) || isDirectTemperatureRaster(filePath);
 }

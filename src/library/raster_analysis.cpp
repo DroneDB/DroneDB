@@ -46,7 +46,9 @@ bool detectIsThermal(const std::string &filePath, std::string &outSensorId) {
             outSensorId = det.sensorId;
             if (det.sensorCategory == "thermal") return true;
         }
-    } catch (...) { /* ignore, fall through */ }
+    } catch (const std::exception &e) {
+        LOGD << "SensorProfileManager failed in detectIsThermal: " << e.what();
+    }
 
     // Heuristic fallback (R-JPEG FLIR APP1 / DJI XMP / Landsat-style scale/offset).
     if (isThermalImage(filePath) || isDirectTemperatureRaster(filePath)) {

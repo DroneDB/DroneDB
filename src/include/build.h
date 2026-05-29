@@ -21,6 +21,21 @@ namespace ddb
     DDB_DLL bool isBuildActive(Database *db, const std::string &path);
 
     /**
+     * @brief Check whether the build artifacts for an entry are present and non-empty.
+     *
+     * Returns true only when the entry is buildable AND the expected output files
+     * exist and have non-zero size. Validates content rather than mere folder
+     * existence so that interrupted or aborted builds (which can leave empty
+     * directories behind) are reported as incomplete and re-queued.
+     *
+     * @param db database handle
+     * @param path entry path
+     * @return true if the build output is complete and valid; false otherwise
+     *         (not buildable, missing, or empty artifacts)
+     */
+    DDB_DLL bool isBuildComplete(Database *db, const std::string &path);
+
+    /**
      * @brief Result of a cleanup operation.
      */
     struct CleanupResult

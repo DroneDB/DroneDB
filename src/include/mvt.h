@@ -1,0 +1,77 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+#ifndef MVT_H
+#define MVT_H
+
+#include <string>
+#include "ddb_export.h"
+
+namespace ddb
+{
+
+    /**
+     * Maximum number of MVT tiles (cumulative across zoom levels) that the
+     * writer is allowed to produce for a single dataset. The MAXZOOM passed
+     * to GDAL's MVT writer is derived from this budget and the WGS84 bbox
+     * area of the source.
+     *
+     * Rationale: with the previous density-only heuristic, sparse global
+     * datasets (e.g. world admin boundaries with 250 features over the
+     * full globe) ended up at MAXZOOM=10, producing ~400k tiles and
+     * runtimes in the 10+ minute range. A budget bounds the worst case
+     * regardless of how features are distributed.
+     *
+     * Note: in addition to the budget, ::computeMvtMaxZoom forcibly caps
+     * MAXZOOM at ::kMvtMinZoomCap whenever the dataset extent covers more
+     * than ::kMvtGlobalCoverageThreshold of the globe. World-scale inputs
+     * are pathological for tile generation regardless of feature count
+     * (each tile clips against every overlapping feature) and DroneDB is
+     * not designed to publish planet-wide vector tilesets.
+     */
+    constexpr long long kMvtTileBudget = 10000;
+
+    /// Fraction of the global WGS84 envelope (360 * 180 deg^2) above which
+    /// the dataset is considered "world-scale" and MAXZOOM is forced down
+    /// to ::kMvtMinZoomCap (overview-only).
+    constexpr double kMvtGlobalCoverageThreshold = 0.1;
+
+    /// Hard lower bound for MVT MAXZOOM (overview-only datasets).
+    constexpr int kMvtMinZoomCap = 5;
+
+    /// Hard upper bound for MVT MAXZOOM (avoid pointless detail / huge
+    /// per-tile feature counts on densely packed regions).
+    constexpr int kMvtMaxZoomCap = 18;
+
+    /**
+     * Compute a dynamic MAXZOOM for MVT tiling based on a tile-count budget.
+     *
+     * The MVT writer materializes tiles for every zoom in [MINZOOM, MAXZOOM]
+     * that intersects features. For a bbox of @p extentAreaDeg2 the number
+     * of tiles at zoom z is approximately areaDeg2 * 4^z / 64800. We pick
+     * the largest z such that this stays within ::kMvtTileBudget, then
+     * clamp to [::kMvtMinZoomCap, ::kMvtMaxZoomCap].
+     *
+     * Datasets whose extent covers more than ::kMvtGlobalCoverageThreshold
+     * of the globe are clamped to ::kMvtMinZoomCap regardless of the
+     * budget calculation: world-scale tilesets are not a supported use
+     * case and would otherwise dominate build time on every rebuild.
+     *
+     * The @p featureCount parameter is used as a short-circuit only: when
+     * the count is exactly 0 the function returns ::kMvtMaxZoomCap because
+     * there is no real tiling work to bound. A negative value (OGR uses -1
+     * to signal "unknown") falls through to the area-based heuristic.
+     *
+     * @param featureCount   Total feature count across all layers. May be
+     *                       negative when the source driver cannot provide
+     *                       a cheap count; only featureCount == 0 triggers
+     *                       the short-circuit.
+     * @param extentAreaDeg2 Area in deg² of the union bounding box (>= 0).
+     *                       If <= 0 (single point / empty), returns ::kMvtMaxZoomCap.
+     * @return MAXZOOM in [::kMvtMinZoomCap, ::kMvtMaxZoomCap].
+     */
+    DDB_DLL int computeMvtMaxZoom(long long featureCount, double extentAreaDeg2);
+
+} // namespace ddb
+
+#endif // MVT_H

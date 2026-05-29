@@ -49,8 +49,9 @@ namespace cmd
 
 			searchIndex(db.get(), query, std::cout, format);
 		}
-		catch (ddb::InvalidArgsException)
+		catch (ddb::InvalidArgsException &e)
 		{
+			std::cerr << "Error: " << e.what() << std::endl;
 			printHelp();
 		}
 	}

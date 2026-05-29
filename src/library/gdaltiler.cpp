@@ -79,6 +79,9 @@ namespace ddb
         pngDrv = GDALGetDriverByName("PNG");
         if (pngDrv == nullptr)
             throw GDALException("Cannot create PNG driver");
+        jpegDrv = GDALGetDriverByName("JPEG");
+        if (jpegDrv == nullptr)
+            throw GDALException("Cannot create JPEG driver");
         memDrv = GDALGetDriverByName("MEM");
         if (memDrv == nullptr)
             throw GDALException("Cannot create MEM driver");
@@ -196,7 +199,20 @@ namespace ddb
 
     std::string GDALTiler::tile(int tz, int tx, int ty, uint8_t **outBuffer, int *outBufferSize)
     {
+        return tile(tz, tx, ty, std::string("png"), outBuffer, outBufferSize);
+    }
+
+    std::string GDALTiler::tile(int tz, int tx, int ty, const std::string &outputFormat, uint8_t **outBuffer, int *outBufferSize)
+    {
+        const bool wantJpeg = (outputFormat == "jpeg" || outputFormat == "jpg" || outputFormat == "image/jpeg");
+        GDALDriverH outDrv = wantJpeg ? jpegDrv : pngDrv;
         std::string tilePath = getTilePath(tz, tx, ty, true);
+        if (wantJpeg)
+        {
+            // Swap extension to .jpg for vsimem clarity; getTilePath always returns .png
+            const auto pos = tilePath.rfind(".png");
+            if (pos != std::string::npos) tilePath.replace(pos, 4, ".jpg");
+        }
 
         if (tms)
         {
@@ -205,8 +221,9 @@ namespace ddb
         }
 
         BoundingBox<Projected2Di> tMinMax = getMinMaxCoordsForZ(tz);
-        if (!tMinMax.contains(tx, ty))
-            throw GDALException("Out of bounds");
+        const bool outOfBounds = !tMinMax.contains(tx, ty);
+        if (outOfBounds)
+            LOGD << "Tile (" << tz << "," << tx << "," << ty << ") is out of bounds; emitting blank tile";
 
         // Need to create in-memory dataset
         // (PNG driver does not have Create() method)
@@ -220,7 +237,17 @@ namespace ddb
 
         const int querySize = tileSize; // TODO: you will need to change this for
                                         // interpolations other than NN
-        GQResult g = geoQuery(inputDataset, b.min.x, b.max.y, b.max.x, b.min.y, querySize);
+        GQResult g;
+        if (outOfBounds)
+        {
+            // Skip geoQuery; downstream code emits a transparent/white blank tile.
+            g.r.x = g.r.y = g.r.xsize = g.r.ysize = 0;
+            g.w.x = g.w.y = g.w.xsize = g.w.ysize = 0;
+        }
+        else
+        {
+            g = geoQuery(inputDataset, b.min.x, b.max.y, b.max.x, b.min.y, querySize);
+        }
 
         LOGD << "GeoQuery: " << g.r.x << "," << g.r.y << "|" << g.r.xsize << "x"
              << g.r.ysize << "|" << g.w.x << "," << g.w.y << "|" << g.w.xsize << "x"
@@ -365,18 +392,77 @@ namespace ddb
             // failing so that edge tiles produced by getTilesForZoomLevel()
             // don't abort the whole tiling pipeline.
             LOGD << "Geoquery produced empty window; emitting transparent tile";
+            // Zero-fill all pixel bands (MEM driver does not guarantee
+            // zero-initialised memory, so uninitialized values must be cleared
+            // explicitly to avoid emitting garbage pixels).
+            for (int i = 1; i <= cappedBands; i++)
+                GDALFillRaster(GDALGetRasterBand(dsTile, i), 0.0, 0.0);
             const GDALRasterBandH tileAlphaBand =
                 GDALGetRasterBand(dsTile, cappedBands + 1);
             GDALSetRasterColorInterpretation(tileAlphaBand, GCI_AlphaBand);
+            GDALFillRaster(tileAlphaBand, 0.0, 0.0);
         }
 
-        const GDALDatasetH outDs = GDALCreateCopy(pngDrv, tilePath.c_str(), dsTile, FALSE,
+        // JPEG driver does not support RGBA; copy RGB bands into a 3-band MEM
+        // dataset and emit JPEG from that. PNG path keeps the original 4-band tile.
+        GDALDatasetH dsForOut = dsTile;
+        GDALDatasetH dsRgbTemp = nullptr;
+        if (wantJpeg)
+        {
+            const int rgbBands = std::min(3, cappedBands);
+            dsRgbTemp = GDALCreate(memDrv, "", tileSize, tileSize, rgbBands, GDT_Byte, nullptr);
+            if (dsRgbTemp == nullptr)
+                throw GDALException("Cannot create JPEG temp dataset");
+
+            // Copy bands using GDALDatasetRasterIO band-by-band (avoids alpha)
+            std::unique_ptr<uint8_t[]> rgbBuf(new uint8_t[(size_t)tileSize * tileSize * rgbBands]);
+            if (GDALDatasetRasterIO(dsTile, GF_Read, 0, 0, tileSize, tileSize,
+                                    rgbBuf.get(), tileSize, tileSize, GDT_Byte,
+                                    rgbBands, nullptr, 0, 0, 0) != CE_None)
+            {
+                GDALClose(dsRgbTemp);
+                throw GDALException("Cannot read RGB bands for JPEG conversion");
+            }
+            // If source was masked transparent, fill those pixels with white so the JPEG
+            // doesn't carry garbage at edges. Alpha band index is cappedBands+1 in dsTile.
+            const GDALRasterBandH srcAlpha = GDALGetRasterBand(dsTile, cappedBands + 1);
+            if (srcAlpha != nullptr)
+            {
+                std::unique_ptr<uint8_t[]> alphaBuf(new uint8_t[(size_t)tileSize * tileSize]);
+                if (GDALRasterIO(srcAlpha, GF_Read, 0, 0, tileSize, tileSize,
+                                 alphaBuf.get(), tileSize, tileSize, GDT_Byte, 0, 0) == CE_None)
+                {
+                    const size_t px = (size_t)tileSize * tileSize;
+                    for (size_t i = 0; i < px; i++)
+                    {
+                        if (alphaBuf[i] == 0)
+                        {
+                            for (int b = 0; b < rgbBands; b++) rgbBuf[i * rgbBands + b] = 255;
+                        }
+                    }
+                }
+            }
+            if (GDALDatasetRasterIO(dsRgbTemp, GF_Write, 0, 0, tileSize, tileSize,
+                                    rgbBuf.get(), tileSize, tileSize, GDT_Byte,
+                                    rgbBands, nullptr, 0, 0, 0) != CE_None)
+            {
+                GDALClose(dsRgbTemp);
+                throw GDALException("Cannot write RGB bands for JPEG conversion");
+            }
+            dsForOut = dsRgbTemp;
+        }
+
+        const GDALDatasetH outDs = GDALCreateCopy(outDrv, tilePath.c_str(), dsForOut, FALSE,
                                                   nullptr, nullptr, nullptr);
         if (outDs == nullptr)
+        {
+            if (dsRgbTemp) GDALClose(dsRgbTemp);
             throw GDALException("Cannot create output dataset " + tilePath);
+        }
 
         GDALFlushCache(outDs);
         GDALClose(outDs);
+        if (dsRgbTemp) GDALClose(dsRgbTemp);
         GDALClose(dsTile);
 
         if (outBuffer != nullptr)

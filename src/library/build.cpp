@@ -89,6 +89,85 @@ bool isBuildable(Database* db, const std::string& path, std::string& subfolder) 
     return false;
 }
 
+// Returns true if the given file exists and has non-zero size.
+static bool fileExistsAndNonEmpty(const fs::path& p) {
+    std::error_code ec;
+    if (!fs::exists(p, ec) || ec)
+        return false;
+    if (!fs::is_regular_file(p, ec) || ec)
+        return false;
+    const auto sz = fs::file_size(p, ec);
+    if (ec)
+        return false;
+    return sz > 0;
+}
+
+// Returns true if the given directory exists and contains at least one
+// regular file (recursively) with non-zero size. Used to validate that
+// a build output folder is not merely an empty stub left by an aborted build.
+static bool directoryHasNonEmptyContent(const fs::path& dir) {
+    std::error_code ec;
+    if (!fs::exists(dir, ec) || ec)
+        return false;
+    if (!fs::is_directory(dir, ec) || ec)
+        return false;
+
+    for (auto it = fs::recursive_directory_iterator(dir, fs::directory_options::skip_permission_denied, ec);
+         !ec && it != fs::recursive_directory_iterator();
+         it.increment(ec)) {
+        const auto& entry = *it;
+        std::error_code fec;
+        if (entry.is_regular_file(fec) && !fec) {
+            const auto sz = entry.file_size(fec);
+            if (!fec && sz > 0)
+                return true;
+        }
+    }
+
+    return false;
+}
+
+// Centralized completeness check for a buildable entry's output. Validates
+// that the actual artifacts produced by each build type exist and have
+// non-zero content. Empty folders (e.g. left over from a crashed build)
+// are reported as incomplete so the build can be re-queued.
+//
+// Per-type rules:
+//   - Vector:    vec/source.gpkg AND mvt/metadata.json both exist and non-empty
+//   - Others:    the type's output subfolder exists and contains at least one
+//                non-empty file (covers copc/, cog/, nxs/)
+static bool isBuildOutputComplete(const fs::path& baseOutputPath,
+                                  const Entry& e,
+                                  const std::string& subfolder) {
+    if (e.type == EntryType::Vector) {
+        return fileExistsAndNonEmpty(baseOutputPath / "vec" / "source.gpkg") &&
+               fileExistsAndNonEmpty(baseOutputPath / "mvt" / "metadata.json");
+    }
+    return directoryHasNonEmptyContent(baseOutputPath / subfolder);
+}
+
+bool isBuildComplete(Database* db, const std::string& path) {
+    Entry e;
+    if (!getEntry(db, path, e))
+        return false;
+
+    std::string subfolder;
+    if (!isBuildableInternal(e, subfolder)) {
+        std::string mainFile;
+        if (!isBuildableDependency(e, mainFile, subfolder))
+            return false;
+
+        // For dependencies, completeness is defined by the main file's artifacts.
+        Entry mainEntry;
+        if (!getEntry(db, mainFile, mainEntry))
+            return false;
+        e = mainEntry;
+    }
+
+    const fs::path baseOutputPath = fs::path(db->buildDirectory()) / e.hash;
+    return isBuildOutputComplete(baseOutputPath, e, subfolder);
+}
+
 void buildInternal(Database* db, const Entry& e, const std::string& outputPath, bool force) {
     std::string outPath = outputPath;
     if (outPath.empty())
@@ -148,8 +227,9 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
     ThreadLock threadLock("build-" + (db->rootDirectory() / e.hash).string());
 
     // Check again if output exists after acquiring locks (another process might have completed the
-    // build)
-    if (fs::exists(outputFolder) && !force) {
+    // build). Delegate to the centralized completeness helper so the rules used here stay in
+    // lock-step with isBuildComplete() / DDBIsBuildComplete().
+    if (isBuildOutputComplete(baseOutputPath, e, subfolder) && !force) {
         LOGD << "Build output already exists after acquiring lock, skipping: " << outputFolder;
         return;
     }
@@ -180,8 +260,13 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
             buildNexus(relativePath, (fs::path(tempFolder) / "model.nxz").string());
             built = true;
         } else if (e.type == EntryType::Vector) {
-            buildVector(relativePath, (fs::path(tempFolder) / "vector.fgb").string());
-            built = true;
+            // buildVector manages its own atomic write to baseOutputPath/vec
+            // and baseOutputPath/mvt; do NOT use the standard tempFolder rename.
+            // Propagate the force flag so a partial build (e.g. vec/ present
+            // but mvt/ missing) is fully rebuilt instead of being silently
+            // treated as up-to-date inside buildVector.
+            buildVector(relativePath, baseOutputPath.string(), force);
+            // built stays false on purpose to skip the standard rename below.
         }
 
         if (built) {
@@ -239,10 +324,11 @@ void buildAll(Database* db, const std::string& outputPath, bool force) {
     // List all buildable files in DB
     auto q = db->query(
         "SELECT path, hash, type, properties, mtime, size, depth FROM entries WHERE type = ? OR "
-        "type = ? OR type = ?");
+        "type = ? OR type = ? OR type = ?");
     q->bind(1, PointCloud);
     q->bind(2, GeoRaster);
     q->bind(3, Model);
+    q->bind(4, Vector);
 
     while (q->fetch()) {
         Entry e(q->getText(0),

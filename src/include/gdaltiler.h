@@ -33,6 +33,7 @@ namespace ddb
     class GDALTiler : public Tiler
     {
         GDALDriverH pngDrv;
+        GDALDriverH jpegDrv;
         GDALDriverH memDrv;
 
         GDALDatasetH inputDataset = nullptr;
@@ -67,6 +68,11 @@ namespace ddb
         DDB_DLL ~GDALTiler();
 
         DDB_DLL std::string tile(int tz, int tx, int ty, uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr) override;
+
+        // Format-aware overload. outputFormat is one of "png" or "jpeg".
+        DDB_DLL std::string tile(int tz, int tx, int ty,
+                                 const std::string &outputFormat,
+                                 uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr);
 
         // Band-aware tile generation with visualization parameters
         DDB_DLL std::string tile(int tz, int tx, int ty,

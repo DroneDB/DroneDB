@@ -96,6 +96,22 @@ namespace ddb
         }
     }
 
+    fs::path TilerHelper::getTile(const fs::path &tileablePath, int tz, int tx, int ty, int tileSize, bool tms, bool forceRecreate, const fs::path &outputFolder, const std::string &outputFormat, uint8_t **outBuffer, int *outBufferSize, const std::string &tileablePathHash)
+    {
+        if (isCopcPath(tileablePath.string()))
+        {
+            // Point clouds: format is not configurable; PNG only
+            PointCloudTiler t(tileablePath.string(), outputFolder.string(), tileSize, tms);
+            return t.tile(tz, tx, ty, outBuffer, outBufferSize);
+        }
+        else
+        {
+            const fs::path fileToTile = toGeoTIFF(tileablePath, tileSize, forceRecreate, "", tileablePathHash);
+            GDALTiler t(fileToTile.string(), outputFolder.string(), tileSize, tms);
+            return t.tile(tz, tx, ty, outputFormat, outBuffer, outBufferSize);
+        }
+    }
+
     fs::path TilerHelper::getTile(const fs::path &tileablePath, int tz, int tx, int ty, int tileSize, bool tms, bool forceRecreate, const fs::path &outputFolder, const ThumbVisParams &visParams, uint8_t **outBuffer, int *outBufferSize, const std::string &tileablePathHash)
     {
         if (isCopcPath(tileablePath.string()))

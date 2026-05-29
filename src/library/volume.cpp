@@ -451,7 +451,8 @@ std::string calculateVolumeJson(const std::string &rasterPath,
     result["calculatedAt"] = nowIso8601();
     try {
         result["boundaryPolygon"] = json::parse(polygonGeoJson);
-    } catch (...) {
+    } catch (const json::parse_error &e) {
+        LOGD << "Failed to parse boundary polygon GeoJSON: " << e.what();
         result["boundaryPolygon"] = nullptr;
     }
 

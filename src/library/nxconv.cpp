@@ -348,8 +348,10 @@ static void exportWithAssimp(const aiScene* scene,
                                                     changed = true;
                                                     handled = true;
                                                 }
-                                            } catch (...) {
-                                                // Not a valid index, keep original
+                                            } catch (const std::invalid_argument &) {
+                                                // Not a numeric index, keep original line.
+                                            } catch (const std::out_of_range &) {
+                                                // Index out of int range, keep original line.
                                             }
                                         }
                                     }

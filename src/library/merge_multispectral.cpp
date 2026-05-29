@@ -92,7 +92,9 @@ std::vector<BandAlignmentInfo> detectBandAlignment(const std::vector<std::string
             // Read CentralWavelength
             auto cwIt = parser.findXmpKey("Xmp.Camera.CentralWavelength");
             if (cwIt != parser.xmpEnd()) {
-                try { bands[i].centralWavelength = std::stoi(cwIt->toString()); } catch (...) {}
+                try { bands[i].centralWavelength = std::stoi(cwIt->toString()); }
+                catch (const std::invalid_argument &) { /* non-numeric XMP, ignore */ }
+                catch (const std::out_of_range &) { /* out of range, ignore */ }
                 alignInfo[i].centralWavelength = bands[i].centralWavelength;
             }
 
@@ -104,7 +106,9 @@ std::vector<BandAlignmentInfo> detectBandAlignment(const std::vector<std::string
             // Read RigCameraIndex
             auto rigIt = parser.findXmpKey("Xmp.Camera.RigCameraIndex");
             if (rigIt != parser.xmpEnd()) {
-                try { bands[i].rigCameraIndex = std::stoi(rigIt->toString()); } catch (...) {}
+                try { bands[i].rigCameraIndex = std::stoi(rigIt->toString()); }
+                catch (const std::invalid_argument &) { /* non-numeric XMP, ignore */ }
+                catch (const std::out_of_range &) { /* out of range, ignore */ }
             }
 
             // Read PrincipalPoint (mm)
@@ -119,7 +123,9 @@ std::vector<BandAlignmentInfo> detectBandAlignment(const std::vector<std::string
             // Read PerspectiveFocalLength (mm)
             auto flIt = parser.findXmpKey("Xmp.Camera.PerspectiveFocalLength");
             if (flIt != parser.xmpEnd()) {
-                try { bands[i].focalLengthMm = std::stod(flIt->toString()); } catch (...) {}
+                try { bands[i].focalLengthMm = std::stod(flIt->toString()); }
+                catch (const std::invalid_argument &) { /* non-numeric XMP, ignore */ }
+                catch (const std::out_of_range &) { /* out of range, ignore */ }
             }
 
             // Read DJI RelativeOpticalCenter
@@ -130,7 +136,9 @@ std::vector<BandAlignmentInfo> detectBandAlignment(const std::vector<std::string
                     bands[i].relOptCenterX = std::stod(rocXIt->toString());
                     bands[i].relOptCenterY = std::stod(rocYIt->toString());
                     bands[i].hasRelOptCenter = true;
-                } catch (...) {}
+                }
+                catch (const std::invalid_argument &) { /* non-numeric XMP, ignore */ }
+                catch (const std::out_of_range &) { /* out of range, ignore */ }
             }
 
             // --- Pixel Pitch derivation (Priority chain) ---
@@ -173,7 +181,9 @@ std::vector<BandAlignmentInfo> detectBandAlignment(const std::vector<std::string
                             LOGD << "Band " << i << " pixel pitch from CalibratedFocalLength: "
                                  << pp * 1000.0 << " um";
                         }
-                    } catch (...) {}
+                    }
+                    catch (const std::invalid_argument &) { /* non-numeric XMP, ignore */ }
+                    catch (const std::out_of_range &) { /* out of range, ignore */ }
                 }
             }
 
@@ -982,7 +992,9 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
 
                             auto flIt = p.findXmpKey("Xmp.Camera.PerspectiveFocalLength");
                             if (flIt != p.xmpEnd()) {
-                                try { focalLength = std::stod(flIt->toString()); } catch (...) {}
+                                try { focalLength = std::stod(flIt->toString()); }
+                                catch (const std::invalid_argument &) { /* non-numeric XMP, ignore */ }
+                                catch (const std::out_of_range &) { /* out of range, ignore */ }
                             }
                             if (focalLength <= 0) {
                                 Focal f;
@@ -999,7 +1011,9 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
                                 yawDeg = cameraOri.yaw;
                             }
                         }
-                    } catch (...) {}
+                    } catch (const std::exception &e) {
+                        LOGD << "GPS correction: failed to read EXIF for shift: " << e.what();
+                    }
 
                     if (srcGps.altitude > 0 && focalLength > 0 && pixelPitch > 0) {
                         double gsd = srcGps.altitude * pixelPitch / focalLength;

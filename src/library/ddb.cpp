@@ -34,7 +34,9 @@
 #include "merge_multispectral.h"
 #include "mio.h"
 #include "passwordmanager.h"
+#include "raster_region.h"
 #include "raster_utils.h"
+#include "vector_query.h"
 #include "sensorprofile.h"
 #include "stac.h"
 #include "status.h"
@@ -810,6 +812,48 @@ DDBErr DDBMemoryTile(const char* inputPath,
     DDB_C_END
 }
 
+DDBErr DDBMemoryTileFmt(const char* inputPath,
+                        int tz,
+                        int tx,
+                        int ty,
+                        uint8_t** outBuffer,
+                        int* outBufferSize,
+                        int tileSize,
+                        bool tms,
+                        bool forceRecreate,
+                        const char* inputPathHash,
+                        const char* outputFormat) {
+    DDB_C_BEGIN
+
+    if (utils::isNullOrEmptyOrWhitespace(inputPath))
+        throw InvalidArgsException("No input path provided");
+    if (outBuffer == nullptr)
+        throw InvalidArgsException("Output buffer pointer is null");
+    if (outBufferSize == nullptr)
+        throw InvalidArgsException("Output buffer size pointer is null");
+    if (tileSize < 0)
+        throw InvalidArgsException("Invalid tile size parameter");
+    if (tz < 0 || tx < 0 || ty < 0)
+        throw InvalidArgsException("Invalid tile coordinates");
+
+    const std::string hashStr = inputPathHash ? std::string(inputPathHash) : "";
+    const std::string fmtStr = (outputFormat && *outputFormat) ? std::string(outputFormat) : std::string("png");
+
+    ddb::TilerHelper::getTile(std::string(inputPath),
+                              tz,
+                              tx,
+                              ty,
+                              tileSize,
+                              tms,
+                              forceRecreate,
+                              "",
+                              fmtStr,
+                              outBuffer,
+                              outBufferSize,
+                              hashStr);
+    DDB_C_END
+}
+
 DDBErr DDBDelta(const char* ddbSourceStamp,
                 const char* ddbTargetStamp,
                 char** output,
@@ -1142,6 +1186,24 @@ DDB_DLL DDBErr DDBIsBuildActive(const char* ddbPath, const char* path, bool* isB
 
     const auto ddb = ddb::open(std::string(ddbPath), true);
     *isBuildActive = ddb::isBuildActive(ddb.get(), std::string(path));
+
+    DDB_C_END
+}
+
+DDB_DLL DDBErr DDBIsBuildComplete(const char* ddbPath, const char* path, bool* isBuildComplete) {
+    DDB_C_BEGIN
+
+    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
+        throw InvalidArgsException("No directory provided");
+
+    if (utils::isNullOrEmptyOrWhitespace(path))
+        throw InvalidArgsException("No path provided");
+
+    if (isBuildComplete == nullptr)
+        throw InvalidArgsException("isBuildComplete parameter is null");
+
+    const auto ddb = ddb::open(std::string(ddbPath), true);
+    *isBuildComplete = ddb::isBuildComplete(ddb.get(), std::string(path));
 
     DDB_C_END
 }
@@ -2151,6 +2213,174 @@ DDB_DLL DDBErr DDBMaskBorders(const char *input, const char *output, int nearDis
         throw InvalidArgsException("No output path provided");
 
     ddb::maskBorders(std::string(input), std::string(output), nearDist, white);
+
+    DDB_C_END
+}
+
+
+// =====================================================================
+// OGC services C API (raster region rendering + vector query/describe).
+// =====================================================================
+
+DDB_DLL DDBErr DDBRenderRasterRegion(const char *inputPath,
+                                     const double *bbox,
+                                     const char *bboxSrs,
+                                     int width, int height,
+                                     const char *format,
+                                     uint8_t **outBuffer,
+                                     int *outBufferSize) {
+    // Legacy entry point: delegate to the extended variant with no band
+    // selection and no explicit output CRS (target SRS = bbox SRS).
+    return DDBRenderRasterRegionEx(inputPath, bbox, bboxSrs, nullptr,
+                                   nullptr, 0,
+                                   width, height, format,
+                                   outBuffer, outBufferSize);
+}
+
+DDB_DLL DDBErr DDBRenderRasterRegionEx(const char *inputPath,
+                                       const double *bbox,
+                                       const char *bboxSrs,
+                                       const char *outputCrs,
+                                       const int *bands,
+                                       int bandCount,
+                                       int width, int height,
+                                       const char *format,
+                                       uint8_t **outBuffer,
+                                       int *outBufferSize) {
+    DDB_C_BEGIN
+
+    if (utils::isNullOrEmptyOrWhitespace(inputPath))
+        throw InvalidArgsException("No input path provided");
+    if (bbox == nullptr)
+        throw InvalidArgsException("No bbox provided");
+    if (outBuffer == nullptr)
+        throw InvalidArgsException("outBuffer is null");
+    if (outBufferSize == nullptr)
+        throw InvalidArgsException("outBufferSize is null");
+    if (bandCount < 0)
+        throw InvalidArgsException("bandCount is negative");
+    if (bandCount > 0 && bands == nullptr)
+        throw InvalidArgsException("bands is null but bandCount > 0");
+
+    const std::string srs = bboxSrs ? bboxSrs : "";
+    const std::string fmt = format  ? format  : "";
+    const std::string oSrs = outputCrs ? outputCrs : "";
+    std::vector<int> bandVec;
+    if (bandCount > 0) bandVec.assign(bands, bands + bandCount);
+
+    ddb::renderRasterRegion(std::string(inputPath), bbox, srs,
+                            width, height, fmt, outBuffer, outBufferSize,
+                            oSrs, bandVec);
+
+    DDB_C_END
+}
+
+DDB_DLL DDBErr DDBRenderRasterIndex(const char *inputPath,
+                                    const char *indexName,
+                                    const double *bbox,
+                                    const char *bboxSrs,
+                                    int width, int height,
+                                    const char *format,
+                                    uint8_t **outBuffer,
+                                    int *outBufferSize) {
+    DDB_C_BEGIN
+
+    if (utils::isNullOrEmptyOrWhitespace(inputPath))
+        throw InvalidArgsException("No input path provided");
+    if (utils::isNullOrEmptyOrWhitespace(indexName))
+        throw InvalidArgsException("No indexName provided");
+    if (bbox == nullptr)
+        throw InvalidArgsException("No bbox provided");
+    if (outBuffer == nullptr || outBufferSize == nullptr)
+        throw InvalidArgsException("outBuffer/outBufferSize is null");
+
+    const std::string srs = bboxSrs ? bboxSrs : "";
+    const std::string fmt = format ? format : "";
+    ddb::renderRasterIndex(std::string(inputPath), std::string(indexName),
+                           bbox, srs, width, height, fmt,
+                           outBuffer, outBufferSize);
+
+    DDB_C_END
+}
+
+DDB_DLL DDBErr DDBQueryRasterPoint(const char *inputPath,
+                                   double x, double y,
+                                   const char *srs,
+                                   char **output) {
+    DDB_C_BEGIN
+
+    if (utils::isNullOrEmptyOrWhitespace(inputPath))
+        throw InvalidArgsException("No input path provided");
+    if (output == nullptr)
+        throw InvalidArgsException("output is null");
+
+    const std::string s = srs ? srs : "";
+    const std::string j = ddb::queryRasterPoint(std::string(inputPath), x, y, s);
+    utils::copyToPtr(j, output);
+
+    DDB_C_END
+}
+
+namespace {
+    std::string mapVectorMime(const char *mime) {
+        if (!mime || !*mime) return "geojson";
+        std::string m(mime);
+        if (m == "application/json" || m == "application/geo+json" ||
+            m == "geojson" || m == "json")
+            return "geojson";
+        if (m == "application/gml+xml" || m == "text/xml" || m == "gml")
+            return "gml";
+        // Anything else: let queryVector throw a clear error.
+        return m;
+    }
+}
+
+DDB_DLL DDBErr DDBQueryVector(const char *vectorPath,
+                              const char *layerName,
+                              const double *bbox,
+                              const char *bboxSrs,
+                              int maxFeatures,
+                              int startIndex,
+                              const char *outputFormat,
+                              char **output) {
+    DDB_C_BEGIN
+
+    if (utils::isNullOrEmptyOrWhitespace(vectorPath))
+        throw InvalidArgsException("No vector path provided");
+    if (output == nullptr)
+        throw InvalidArgsException("output is null");
+
+    const std::string layer = layerName ? layerName : "";
+    const std::string srs   = bboxSrs   ? bboxSrs   : "";
+    const std::string fmt   = mapVectorMime(outputFormat);
+
+    // Clamp maxFeatures to spec range [1, 10000]; 0 -> default 1000.
+    int mf = maxFeatures;
+    if (mf <= 0) mf = 1000;
+    if (mf > 10000) mf = 10000;
+
+    const std::string r = ddb::queryVector(std::string(vectorPath), layer,
+                                           bbox, srs, mf,
+                                           startIndex < 0 ? 0 : startIndex,
+                                           fmt);
+    utils::copyToPtr(r, output);
+
+    DDB_C_END
+}
+
+DDB_DLL DDBErr DDBDescribeVector(const char *vectorPath,
+                                 const char *layerName,
+                                 char **output) {
+    DDB_C_BEGIN
+
+    if (utils::isNullOrEmptyOrWhitespace(vectorPath))
+        throw InvalidArgsException("No vector path provided");
+    if (output == nullptr)
+        throw InvalidArgsException("output is null");
+
+    const std::string layer = layerName ? layerName : "";
+    const std::string j = ddb::describeVector(std::string(vectorPath), layer);
+    utils::copyToPtr(j, output);
 
     DDB_C_END
 }

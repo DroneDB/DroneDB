@@ -209,6 +209,9 @@ extern "C"
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBMemoryTile(const char *inputPath, int tz, int tx, int ty, uint8_t **outBuffer, int *outBufferSize, int tileSize = 256, bool tms = false, bool forceRecreate = false, const char *inputPathHash = "");
 
+    /** Generate a tile in memory with explicit output format ("png" or "jpeg"). */
+    DDB_DLL DDBErr DDBMemoryTileFmt(const char *inputPath, int tz, int tx, int ty, uint8_t **outBuffer, int *outBufferSize, int tileSize = 256, bool tms = false, bool forceRecreate = false, const char *inputPathHash = "", const char *outputFormat = "png");
+
     /** Generate delta between two ddbs
      * @param ddbSourceStamp JSON stamp of the source DroneDB database
      * @param ddbTargetStamp JSON stamp of the target DroneDB database
@@ -310,6 +313,16 @@ extern "C"
      * @param isBuildActive if a build is currently active for this entry
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBIsBuildActive(const char *ddbPath, const char *path, bool *isBuildActive);
+
+    /** IsBuildComplete
+     *  Reports whether the build artifacts for the given entry exist and have
+     *  non-zero content. Returns false for non-buildable entries, missing
+     *  outputs, or empty stub folders left by interrupted builds.
+     * @param ddbPath path to the source DroneDB database (parent of ".ddb")
+     * @param path Entry path to check
+     * @param isBuildComplete out: true if build output is complete and valid
+     * @return DDBERR_NONE on success, an error otherwise */
+    DDB_DLL DDBErr DDBIsBuildComplete(const char *ddbPath, const char *path, bool *isBuildComplete);
 
     /** Add metadata
      *  @param ddbPath path to the source DroneDB database (parent of ".ddb")
@@ -599,6 +612,122 @@ extern "C"
                                    const char *output,
                                    int nearDist,
                                    bool white);
+
+    /** Render a region of a georeferenced raster to a compressed image buffer.
+     * Output is produced by GDALWarp with optional resampling and reprojection.
+     * Useful for OGC WMS GetMap and OGC API Coverages.
+     *
+     * @param inputPath Path to source raster (preferably a COG for fast warp).
+     * @param bbox Pointer to 4 doubles [minX, minY, maxX, maxY] in @p bboxSrs.
+     * @param bboxSrs CRS authority code, e.g. "EPSG:3857" or "EPSG:4326".
+     *                If NULL, defaults to "EPSG:4326".
+     * @param width Output width in pixels (1..4096).
+     * @param height Output height in pixels (1..4096).
+     * @param format MIME type: "image/png" | "image/jpeg" | "image/webp" |
+     *               "image/tiff" | "image/geotiff".
+     *               If NULL, defaults to "image/png".
+     * @param outBuffer Receives a newly allocated buffer (free with DDBVSIFree).
+     * @param outBufferSize Receives the buffer size in bytes.
+     * @return DDBERR_NONE on success, an error otherwise. */
+    DDB_DLL DDBErr DDBRenderRasterRegion(const char *inputPath,
+                                         const double *bbox,
+                                         const char *bboxSrs,
+                                         int width, int height,
+                                         const char *format,
+                                         uint8_t **outBuffer,
+                                         int *outBufferSize);
+
+    /** Extended variant of @ref DDBRenderRasterRegion adding optional output CRS
+     * and 1-based band selection. Used by OGC WCS GetCoverage with
+     * RangeSubset / OutputCRS, and by any client that needs to preserve
+     * scientific multi-band data without forced reprojection.
+     *
+     * @param outputCrs Optional target CRS authority code (e.g. "EPSG:32634").
+     *                  NULL or empty = use @p bboxSrs (legacy behaviour).
+     * @param bands     Optional pointer to @p bandCount 1-based band indices.
+     *                  NULL or @p bandCount = 0 means "all bands".
+     * @param bandCount Number of entries in @p bands. */
+    DDB_DLL DDBErr DDBRenderRasterRegionEx(const char *inputPath,
+                                           const double *bbox,
+                                           const char *bboxSrs,
+                                           const char *outputCrs,
+                                           const int *bands,
+                                           int bandCount,
+                                           int width, int height,
+                                           const char *format,
+                                           uint8_t **outBuffer,
+                                           int *outBufferSize);
+
+    /** Render a spectral index over a raster region (WMS GetMap STYLES support).
+     *
+     * Computes NDVI / NDRE / NDWI / EVI / SAVI using the standard 5-band mapping
+     * (R=1, G=2, B=3, RedEdge=4, NIR=5) and applies a red-yellow-green color ramp.
+     *
+     * @param inputPath Source raster path.
+     * @param indexName One of: "NDVI", "NDRE", "NDWI", "EVI", "SAVI" (case-insensitive).
+     * @param bbox 4 doubles [minX,minY,maxX,maxY] in @p bboxSrs.
+     * @param bboxSrs CRS authority code; NULL = "EPSG:4326".
+     * @param width Output width in pixels (1..4096).
+     * @param height Output height in pixels (1..4096).
+     * @param format MIME: "image/png" | "image/jpeg" | "image/webp" | "image/tiff" | "image/geotiff".
+     * @param outBuffer Allocated buffer (free with DDBVSIFree).
+     * @param outBufferSize Buffer size in bytes.
+     * @return DDBERR_NONE on success, an error otherwise. */
+    DDB_DLL DDBErr DDBRenderRasterIndex(const char *inputPath,
+                                        const char *indexName,
+                                        const double *bbox,
+                                        const char *bboxSrs,
+                                        int width, int height,
+                                        const char *format,
+                                        uint8_t **outBuffer,
+                                        int *outBufferSize);
+
+    /** Query a raster at a geographic point (WMS GetFeatureInfo).
+     * Translates (x, y) in @p srs to pixel coords and samples every band.
+     *
+     * @param inputPath Path to source raster.
+     * @param x X coordinate in @p srs.
+     * @param y Y coordinate in @p srs.
+     * @param srs CRS authority code (e.g. "EPSG:4326"); NULL defaults to EPSG:4326.
+     * @param output JSON `{ "bands": [...], "lon": ..., "lat": ..., "pixel": [px,py] }`
+     *               (caller frees with DDBFree).
+     * @return DDBERR_NONE on success, an error otherwise. */
+    DDB_DLL DDBErr DDBQueryRasterPoint(const char *inputPath,
+                                       double x, double y,
+                                       const char *srs,
+                                       char **output);
+
+    /** Query features from a vector dataset (WFS GetFeature / OGC API Items).
+     *
+     * @param vectorPath Path to the vector source (typically build/{hash}/vec/source.gpkg).
+     * @param layerName Layer to query, or NULL to use the first layer.
+     * @param bbox Pointer to 4 doubles [minX,minY,maxX,maxY] in @p bboxSrs, or NULL.
+     * @param bboxSrs CRS of @p bbox (e.g. "EPSG:4326"); NULL when bbox is NULL.
+     * @param maxFeatures Max features to return (clamped to [1, 10000]).
+     * @param startIndex 0-based feature offset for pagination.
+     * @param outputFormat "application/json" (RFC7946 GeoJSON) or "application/gml+xml".
+     *                    NULL defaults to "application/json".
+     * @param output Receives the encoded features (caller frees with DDBFree).
+     * @return DDBERR_NONE on success, an error otherwise. */
+    DDB_DLL DDBErr DDBQueryVector(const char *vectorPath,
+                                  const char *layerName,
+                                  const double *bbox,
+                                  const char *bboxSrs,
+                                  int maxFeatures,
+                                  int startIndex,
+                                  const char *outputFormat,
+                                  char **output);
+
+    /** Describe a vector dataset (WFS DescribeFeatureType / OGC API collection).
+     *
+     * @param vectorPath Path to vector source.
+     * @param layerName Layer to describe; NULL = all layers.
+     * @param output JSON describing driver, layers, fields, geometryType, srs,
+     *               extent and feature count (caller frees with DDBFree).
+     * @return DDBERR_NONE on success, an error otherwise. */
+    DDB_DLL DDBErr DDBDescribeVector(const char *vectorPath,
+                                     const char *layerName,
+                                     char **output);
 
 #ifdef __cplusplus
 }
