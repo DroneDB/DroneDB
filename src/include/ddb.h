@@ -623,7 +623,8 @@ extern "C"
      *                If NULL, defaults to "EPSG:4326".
      * @param width Output width in pixels (1..4096).
      * @param height Output height in pixels (1..4096).
-     * @param format MIME type: "image/png" | "image/jpeg" | "image/webp".
+     * @param format MIME type: "image/png" | "image/jpeg" | "image/webp" |
+     *               "image/tiff" | "image/geotiff".
      *               If NULL, defaults to "image/png".
      * @param outBuffer Receives a newly allocated buffer (free with DDBVSIFree).
      * @param outBufferSize Receives the buffer size in bytes.
@@ -668,7 +669,7 @@ extern "C"
      * @param bboxSrs CRS authority code; NULL = "EPSG:4326".
      * @param width Output width in pixels (1..4096).
      * @param height Output height in pixels (1..4096).
-     * @param format MIME: "image/png" | "image/jpeg" | "image/webp".
+     * @param format MIME: "image/png" | "image/jpeg" | "image/webp" | "image/tiff" | "image/geotiff".
      * @param outBuffer Allocated buffer (free with DDBVSIFree).
      * @param outBufferSize Buffer size in bytes.
      * @return DDBERR_NONE on success, an error otherwise. */

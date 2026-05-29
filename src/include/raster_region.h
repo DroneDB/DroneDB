@@ -20,7 +20,8 @@ namespace ddb
      * @param bboxSrs     Authority code, e.g. "EPSG:3857". Empty = "EPSG:4326".
      * @param width       Output width in pixels (1..4096).
      * @param height      Output height in pixels (1..4096).
-     * @param format      MIME type: "image/png" | "image/jpeg" | "image/webp".
+     * @param format      MIME type: "image/png" | "image/jpeg" | "image/webp" |
+     *                    "image/tiff" | "image/geotiff".
      *                    Empty = "image/png".
      * @param outBytes    Allocated by VSIGetMemFileBuffer (steal=TRUE);
      *                    caller frees with `VSIFree` (== `DDBVSIFree`).
@@ -68,7 +69,7 @@ namespace ddb
      * @param bboxSrs     Authority code; empty = "EPSG:4326".
      * @param width       Output width in pixels (1..4096).
      * @param height      Output height in pixels (1..4096).
-     * @param format      MIME type: image/png | image/jpeg | image/webp.
+     * @param format      MIME type: image/png | image/jpeg | image/webp | image/tiff | image/geotiff.
      * @param outBytes    Caller frees with DDBVSIFree.
      * @param outSize     Buffer size.
      */
