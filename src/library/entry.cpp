@@ -594,6 +594,7 @@ namespace ddb
             }
 
             if (hWgs84 != nullptr) OSRDestroySpatialReference(hWgs84);
+            hWgs84 = nullptr;
 
             entry.properties["vector"] = {
                 {"driver", GDALGetDriverShortName(GDALGetDatasetDriver(hDS))},

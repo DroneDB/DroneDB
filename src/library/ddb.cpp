@@ -719,11 +719,9 @@ DDB_DLL DDBErr DDBGenerateMemoryThumbnail(const char* filePath,
 
 DDBErr DDBVSIFree(uint8_t* buffer) {
     DDB_C_BEGIN
-
-    if (buffer == nullptr)
-        throw InvalidArgsException("Buffer pointer is null");
-
-    VSIFree(buffer);
+    // nullptr is allowed — matches C free() semantics (no-op)
+    if (buffer != nullptr)
+        VSIFree(buffer);
     DDB_C_END
 }
 
