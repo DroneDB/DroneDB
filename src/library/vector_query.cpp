@@ -93,7 +93,7 @@ namespace ddb
             else
                 lj["extent"] = nullptr;
 
-            const GIntBig cnt = layer->GetFeatureCount(TRUE);
+            const GIntBig cnt = layer->GetFeatureCount(FALSE);
             lj["featureCount"] = static_cast<long long>(cnt);
 
             if (includeFields) {
