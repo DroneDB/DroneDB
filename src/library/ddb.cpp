@@ -1190,6 +1190,24 @@ DDB_DLL DDBErr DDBIsBuildActive(const char* ddbPath, const char* path, bool* isB
     DDB_C_END
 }
 
+DDB_DLL DDBErr DDBIsBuildComplete(const char* ddbPath, const char* path, bool* isBuildComplete) {
+    DDB_C_BEGIN
+
+    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
+        throw InvalidArgsException("No directory provided");
+
+    if (utils::isNullOrEmptyOrWhitespace(path))
+        throw InvalidArgsException("No path provided");
+
+    if (isBuildComplete == nullptr)
+        throw InvalidArgsException("isBuildComplete parameter is null");
+
+    const auto ddb = ddb::open(std::string(ddbPath), true);
+    *isBuildComplete = ddb::isBuildComplete(ddb.get(), std::string(path));
+
+    DDB_C_END
+}
+
 DDBErr DDBMetaAdd(const char* ddbPath,
                   const char* path,
                   const char* key,

@@ -314,6 +314,16 @@ extern "C"
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBIsBuildActive(const char *ddbPath, const char *path, bool *isBuildActive);
 
+    /** IsBuildComplete
+     *  Reports whether the build artifacts for the given entry exist and have
+     *  non-zero content. Returns false for non-buildable entries, missing
+     *  outputs, or empty stub folders left by interrupted builds.
+     * @param ddbPath path to the source DroneDB database (parent of ".ddb")
+     * @param path Entry path to check
+     * @param isBuildComplete out: true if build output is complete and valid
+     * @return DDBERR_NONE on success, an error otherwise */
+    DDB_DLL DDBErr DDBIsBuildComplete(const char *ddbPath, const char *path, bool *isBuildComplete);
+
     /** Add metadata
      *  @param ddbPath path to the source DroneDB database (parent of ".ddb")
      *  @param path Entry path to associate metadata with (or "" to add metadata to the DroneDB database itself)

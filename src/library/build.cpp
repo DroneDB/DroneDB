@@ -89,6 +89,85 @@ bool isBuildable(Database* db, const std::string& path, std::string& subfolder) 
     return false;
 }
 
+// Returns true if the given file exists and has non-zero size.
+static bool fileExistsAndNonEmpty(const fs::path& p) {
+    std::error_code ec;
+    if (!fs::exists(p, ec) || ec)
+        return false;
+    if (!fs::is_regular_file(p, ec) || ec)
+        return false;
+    const auto sz = fs::file_size(p, ec);
+    if (ec)
+        return false;
+    return sz > 0;
+}
+
+// Returns true if the given directory exists and contains at least one
+// regular file (recursively) with non-zero size. Used to validate that
+// a build output folder is not merely an empty stub left by an aborted build.
+static bool directoryHasNonEmptyContent(const fs::path& dir) {
+    std::error_code ec;
+    if (!fs::exists(dir, ec) || ec)
+        return false;
+    if (!fs::is_directory(dir, ec) || ec)
+        return false;
+
+    for (auto it = fs::recursive_directory_iterator(dir, fs::directory_options::skip_permission_denied, ec);
+         !ec && it != fs::recursive_directory_iterator();
+         it.increment(ec)) {
+        const auto& entry = *it;
+        std::error_code fec;
+        if (entry.is_regular_file(fec) && !fec) {
+            const auto sz = entry.file_size(fec);
+            if (!fec && sz > 0)
+                return true;
+        }
+    }
+
+    return false;
+}
+
+// Centralized completeness check for a buildable entry's output. Validates
+// that the actual artifacts produced by each build type exist and have
+// non-zero content. Empty folders (e.g. left over from a crashed build)
+// are reported as incomplete so the build can be re-queued.
+//
+// Per-type rules:
+//   - Vector:    vec/source.gpkg AND mvt/metadata.json both exist and non-empty
+//   - Others:    the type's output subfolder exists and contains at least one
+//                non-empty file (covers copc/, cog/, nxs/)
+static bool isBuildOutputComplete(const fs::path& baseOutputPath,
+                                  const Entry& e,
+                                  const std::string& subfolder) {
+    if (e.type == EntryType::Vector) {
+        return fileExistsAndNonEmpty(baseOutputPath / "vec" / "source.gpkg") &&
+               fileExistsAndNonEmpty(baseOutputPath / "mvt" / "metadata.json");
+    }
+    return directoryHasNonEmptyContent(baseOutputPath / subfolder);
+}
+
+bool isBuildComplete(Database* db, const std::string& path) {
+    Entry e;
+    if (!getEntry(db, path, e))
+        return false;
+
+    std::string subfolder;
+    if (!isBuildableInternal(e, subfolder)) {
+        std::string mainFile;
+        if (!isBuildableDependency(e, mainFile, subfolder))
+            return false;
+
+        // For dependencies, completeness is defined by the main file's artifacts.
+        Entry mainEntry;
+        if (!getEntry(db, mainFile, mainEntry))
+            return false;
+        e = mainEntry;
+    }
+
+    const fs::path baseOutputPath = fs::path(db->buildDirectory()) / e.hash;
+    return isBuildOutputComplete(baseOutputPath, e, subfolder);
+}
+
 void buildInternal(Database* db, const Entry& e, const std::string& outputPath, bool force) {
     std::string outPath = outputPath;
     if (outPath.empty())
@@ -148,21 +227,9 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
     ThreadLock threadLock("build-" + (db->rootDirectory() / e.hash).string());
 
     // Check again if output exists after acquiring locks (another process might have completed the
-    // build)
-    // For Vector entries we require BOTH the vec/ and mvt/ subdirectories
-    // to consider the build complete; otherwise we re-run buildVector so it
-    // can restore the missing half of the pair.
-    // NOTE: Vector output never creates outputFolder itself (buildVector writes
-    // directly to baseOutputPath/vec and baseOutputPath/mvt), so we must check
-    // those subdirs unconditionally rather than gating on fs::exists(outputFolder).
-    bool alreadyBuilt;
-    if (e.type == EntryType::Vector) {
-        alreadyBuilt = fs::exists(baseOutputPath / "vec" / "source.gpkg") &&
-                       fs::exists(baseOutputPath / "mvt" / "metadata.json");
-    } else {
-        alreadyBuilt = fs::exists(outputFolder);
-    }
-    if (alreadyBuilt && !force) {
+    // build). Delegate to the centralized completeness helper so the rules used here stay in
+    // lock-step with isBuildComplete() / DDBIsBuildComplete().
+    if (isBuildOutputComplete(baseOutputPath, e, subfolder) && !force) {
         LOGD << "Build output already exists after acquiring lock, skipping: " << outputFolder;
         return;
     }
