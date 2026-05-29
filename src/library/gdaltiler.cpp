@@ -392,9 +392,15 @@ namespace ddb
             // failing so that edge tiles produced by getTilesForZoomLevel()
             // don't abort the whole tiling pipeline.
             LOGD << "Geoquery produced empty window; emitting transparent tile";
+            // Zero-fill all pixel bands (MEM driver does not guarantee
+            // zero-initialised memory, so uninitialized values must be cleared
+            // explicitly to avoid emitting garbage pixels).
+            for (int i = 1; i <= cappedBands; i++)
+                GDALFillRaster(GDALGetRasterBand(dsTile, i), 0.0, 0.0);
             const GDALRasterBandH tileAlphaBand =
                 GDALGetRasterBand(dsTile, cappedBands + 1);
             GDALSetRasterColorInterpretation(tileAlphaBand, GCI_AlphaBand);
+            GDALFillRaster(tileAlphaBand, 0.0, 0.0);
         }
 
         // JPEG driver does not support RGBA; copy RGB bands into a 3-band MEM
