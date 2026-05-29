@@ -133,9 +133,13 @@ static bool directoryHasNonEmptyContent(const fs::path& dir) {
 // are reported as incomplete so the build can be re-queued.
 //
 // Per-type rules:
-//   - Vector:    vec/source.gpkg AND mvt/metadata.json both exist and non-empty
+//   - Vector:    vec/source.gpkg AND mvt/metadata.json both exist and non-empty.
+//                Checks two specific canonical sentinel files rather than
+//                scanning the directory; this is intentional — both artifacts
+//                are always co-produced and uniquely identify a complete build.
 //   - Others:    the type's output subfolder exists and contains at least one
-//                non-empty file (covers copc/, cog/, nxs/)
+//                non-empty file (covers copc/, cog/, nxs/). A directory-scan
+//                is used because the exact output filenames vary by input.
 static bool isBuildOutputComplete(const fs::path& baseOutputPath,
                                   const Entry& e,
                                   const std::string& subfolder) {
