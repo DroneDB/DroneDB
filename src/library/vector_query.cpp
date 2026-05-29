@@ -177,7 +177,15 @@ namespace ddb
                     // Transform all 4 corners
                     double xs[4] = {minX, maxX, maxX, minX};
                     double ys[4] = {minY, minY, maxY, maxY};
-                    const int ok = t->Transform(4, xs, ys);
+                    int ok;
+                    try {
+                        ok = t->Transform(4, xs, ys);
+                    } catch (...) {
+                        OCTDestroyCoordinateTransformation(
+                            OGRCoordinateTransformation::ToHandle(t));
+                        GDALClose(hSrc);
+                        throw;
+                    }
                     OCTDestroyCoordinateTransformation(
                         OGRCoordinateTransformation::ToHandle(t));
                     if (!ok) {

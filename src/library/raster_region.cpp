@@ -435,7 +435,7 @@ namespace ddb
         // nodata values so that nodata pixels can be rendered as transparent
         // (alpha = 0) instead of being colorized as if they were valid
         // numeric samples.
-        const int npx = width * height;
+        const size_t npx = static_cast<size_t>(width) * height;
         std::vector<float> b1(npx), b2(npx), b3;
         if (idx.b3 > 0) b3.resize(npx);
         bool has1 = false, has2 = false, has3 = false;

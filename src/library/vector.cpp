@@ -57,12 +57,9 @@ namespace ddb
             if (OSRImportFromEPSG(hWgs84, 4326) != OGRERR_NONE)
             {
                 OSRDestroySpatialReference(hWgs84);
-                hWgs84 = nullptr;
+                throw GDALException("computeStats: failed to import EPSG:4326 - PROJ database may be missing or corrupted");
             }
-            else
-            {
-                OSRSetAxisMappingStrategy(hWgs84, OAMS_TRADITIONAL_GIS_ORDER);
-            }
+            OSRSetAxisMappingStrategy(hWgs84, OAMS_TRADITIONAL_GIS_ORDER);
 
             const int layerCount = GDALDatasetGetLayerCount(hSrcDS);
             for (int i = 0; i < layerCount; i++)
@@ -184,8 +181,7 @@ namespace ddb
         {
             const bool needsSrs = allLayersMissSrs(hSrcDS);
 
-            std::vector<const char *> args;
-            args.insert(args.end(), {
+            std::vector<std::string> argStore = {
                 "-f",     "GPKG",
                 "-t_srs", "EPSG:4326",
                 "-lco",   "SPATIAL_INDEX=YES",
@@ -195,16 +191,18 @@ namespace ddb
                 // KML/KMZ have DateTime fields that several drivers warn on;
                 // map to String for maximum compatibility.
                 "-mapFieldType", "DateTime=String",
-                "-skipfailures"});
+                "-skipfailures"};
             if (needsSrs) {
-                args.push_back("-s_srs");
-                args.push_back("EPSG:4326");
+                argStore.push_back("-s_srs");
+                argStore.push_back("EPSG:4326");
             }
-            args.push_back(nullptr);
+            std::vector<char *> argv;
+            argv.reserve(argStore.size() + 1);
+            for (auto &s : argStore) argv.push_back(const_cast<char *>(s.c_str()));
+            argv.push_back(nullptr);
 
-            char **argv = const_cast<char **>(args.data());
             GDALVectorTranslateOptions *opts =
-                GDALVectorTranslateOptionsNew(argv, nullptr);
+                GDALVectorTranslateOptionsNew(argv.data(), nullptr);
             if (!opts)
                 throw AppException("Cannot create GDAL VectorTranslate options for GPKG");
 
@@ -395,29 +393,30 @@ namespace ddb
             // NOTE: -dsco takes a single KEY=VALUE token.
             // Valid MVT dsco keys: FORMAT, MINZOOM, MAXZOOM, EXTENT, BUFFER,
             // COMPRESS, MAX_SIZE, MAX_FEATURES, TILE_EXTENSION, CONF, etc.
-            std::vector<const char *> args;
-            args.insert(args.end(), {
+            std::vector<std::string> argStore = {
                 "-f",      "MVT",
                 "-t_srs",  "EPSG:3857",
                 "-dsco",   "FORMAT=DIRECTORY",
                 "-dsco",   "MINZOOM=0",
-                "-dsco",   maxZoomArg.c_str(),
+                "-dsco",   maxZoomArg,
                 "-dsco",   "EXTENT=4096",
                 "-dsco",   "BUFFER=80",
                 "-dsco",   "MAX_SIZE=500000",
                 "-dsco",   "MAX_FEATURES=200000",
                 "-dsco",   "COMPRESS=YES",
                 "-mapFieldType", "DateTime=String",
-                "-skipfailures"});
+                "-skipfailures"};
             if (needsSrs) {
-                args.push_back("-s_srs");
-                args.push_back("EPSG:4326");
+                argStore.push_back("-s_srs");
+                argStore.push_back("EPSG:4326");
             }
-            args.push_back(nullptr);
+            std::vector<char *> argv;
+            argv.reserve(argStore.size() + 1);
+            for (auto &s : argStore) argv.push_back(const_cast<char *>(s.c_str()));
+            argv.push_back(nullptr);
 
-            char **argv = const_cast<char **>(args.data());
             GDALVectorTranslateOptions *opts =
-                GDALVectorTranslateOptionsNew(argv, nullptr);
+                GDALVectorTranslateOptionsNew(argv.data(), nullptr);
             if (!opts)
             {
                 if (hSanitizedDS) GDALClose(hSanitizedDS);

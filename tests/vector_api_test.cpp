@@ -175,10 +175,9 @@ namespace
 
     TEST(testVectorApi, FreeIsNoopOnNull)
     {
-        // DDBFree accepts nullptr (matches free() semantics).
+        // Both DDBFree and DDBVSIFree accept nullptr (matches C free() semantics).
         EXPECT_EQ(DDBFree(nullptr), DDBERR_NONE);
-        // DDBVSIFree rejects nullptr (documented as a precondition).
-        EXPECT_NE(DDBVSIFree(nullptr), DDBERR_NONE);
+        EXPECT_EQ(DDBVSIFree(nullptr), DDBERR_NONE);
     }
 
 } // namespace

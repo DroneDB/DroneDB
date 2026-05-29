@@ -100,9 +100,9 @@ namespace ddb
     {
         if (isCopcPath(tileablePath.string()))
         {
-            // Point clouds: format is not configurable; PNG only
-            PointCloudTiler t(tileablePath.string(), outputFolder.string(), tileSize, tms);
-            return t.tile(tz, tx, ty, outBuffer, outBufferSize);
+            // Point clouds: format is not configurable (PNG only); delegate to
+            // the no-format overload so COPC dispatch logic lives in one place.
+            return getTile(tileablePath, tz, tx, ty, tileSize, tms, forceRecreate, outputFolder, outBuffer, outBufferSize, tileablePathHash);
         }
         else
         {
