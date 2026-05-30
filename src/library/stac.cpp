@@ -213,10 +213,10 @@ namespace ddb
         {
             if (!c.is_array())
                 return;
-            if (!c.empty() && c[0].is_number())
+            if (c.size() >= 2 && c[0].is_number() && c[1].is_number())
             {
                 const double x = c[0].get<double>();
-                const double y = (c.size() > 1 && c[1].is_number()) ? c[1].get<double>() : x;
+                const double y = c[1].get<double>();
                 minx = std::min(minx, x);
                 maxx = std::max(maxx, x);
                 miny = std::min(miny, y);
@@ -238,6 +238,7 @@ namespace ddb
     }
 
     // Parse an ISO 8601 / RFC 3339 instant into epoch seconds (UTC). Returns false on failure.
+    // Handles fractional seconds (stripped), Z suffix, and +/-HH:MM timezone offsets.
     static bool parseIso8601ToEpochSecs(const std::string &s, time_t &out)
     {
         if (s.empty())
@@ -246,11 +247,70 @@ namespace ddb
         struct tm tmv;
         std::memset(&tmv, 0, sizeof(tmv));
 
-        std::istringstream ss(s);
+        std::string base = s;
+        int tzOffsetSecs = 0;
+
+        // ISO 8601 / RFC 3339: YYYY-MM-DDTHH:MM:SS[.fff][Z|(+|-)HH:MM]
+        const auto tPos = base.find('T');
+        if (tPos != std::string::npos)
+        {
+            // Strip fractional seconds
+            const auto dotPos = base.find('.', tPos);
+            if (dotPos != std::string::npos)
+            {
+                const auto fracEnd = base.find_first_of("Z+-", dotPos + 1);
+                if (fracEnd == std::string::npos)
+                    base.erase(dotPos);
+                else
+                    base.erase(dotPos, fracEnd - dotPos);
+            }
+
+            // Timezone suffix begins no earlier than tPos+9 ("T00:00:00")
+            const std::string::size_type minTzPos = tPos + 9;
+            if (base.size() > minTzPos)
+            {
+                const auto zPos = base.find('Z', minTzPos);
+                if (zPos != std::string::npos)
+                {
+                    base.erase(zPos); // UTC — no offset adjustment
+                }
+                else
+                {
+                    const auto plusPos  = base.find('+', minTzPos);
+                    const auto minusPos = base.find('-', minTzPos);
+                    std::string::size_type offPos = std::string::npos;
+                    int sign = 0;
+                    if (plusPos != std::string::npos)
+                    {
+                        offPos = plusPos;
+                        sign = -1; // +HH:MM ahead of UTC → subtract to get UTC
+                    }
+                    else if (minusPos != std::string::npos)
+                    {
+                        offPos = minusPos;
+                        sign = +1; // -HH:MM behind UTC → add to get UTC
+                    }
+                    if (sign != 0)
+                    {
+                        const std::string tzStr = base.substr(offPos + 1);
+                        base.erase(offPos);
+                        try
+                        {
+                            const int h = std::stoi(tzStr.substr(0, 2));
+                            const int m = std::stoi(tzStr.size() >= 5 ? tzStr.substr(3, 2) : "0");
+                            tzOffsetSecs = sign * (h * 3600 + m * 60);
+                        }
+                        catch (...) {}
+                    }
+                }
+            }
+        }
+
+        std::istringstream ss(base);
         ss >> std::get_time(&tmv, "%Y-%m-%dT%H:%M:%S");
         if (ss.fail())
         {
-            std::istringstream ssDate(s);
+            std::istringstream ssDate(base);
             ssDate >> std::get_time(&tmv, "%Y-%m-%d");
             if (ssDate.fail())
                 return false;
@@ -261,7 +321,11 @@ namespace ddb
 #else
         out = timegm(&tmv);
 #endif
-        return out != static_cast<time_t>(-1);
+        if (out == static_cast<time_t>(-1))
+            return false;
+
+        out += tzOffsetSecs;
+        return true;
     }
 
     // Build a complete STAC Item (Feature) JSON for a single entry row.

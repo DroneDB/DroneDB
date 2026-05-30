@@ -1477,7 +1477,7 @@ DDB_DLL DDBErr DDBStacItemCollection(const char* ddbPath,
     const std::string idStr = id ? std::string(id) : "";
     const std::string stacCatalogRootStr = stacCatalogRoot ? std::string(stacCatalogRoot) : "";
 
-    // Parse bbox "minX,minY,maxX,maxY" into a vector of doubles (empty if absent/invalid)
+    // Parse bbox "minX,minY,maxX,maxY" into a vector of doubles (empty if absent; throws on invalid)
     std::vector<double> bboxVec;
     if (bbox != nullptr && !utils::isNullOrEmptyOrWhitespace(bbox)) {
         std::stringstream ss(bbox);
@@ -1493,7 +1493,7 @@ DDB_DLL DDBErr DDBStacItemCollection(const char* ddbPath,
             throw InvalidArgsException("bbox must contain exactly 4 comma-separated values");
     }
 
-    // Parse datetime: single instant or interval "start/end" ("../start" or "end/.." for open ends)
+    // Parse datetime: single instant or interval "start/end" ("../end" or "start/.." for open ends)
     std::string datetimeStart;
     std::string datetimeEnd;
     if (datetime != nullptr && !utils::isNullOrEmptyOrWhitespace(datetime)) {
