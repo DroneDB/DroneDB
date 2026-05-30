@@ -47,7 +47,7 @@ namespace
 
         // Basic STAC Item structure
         EXPECT_EQ(j["type"], "Feature");
-        EXPECT_EQ(j["stac_version"], "1.0.0");
+        EXPECT_EQ(j["stac_version"], "1.1.0");
 
         // ID should be prefixed with path-
         std::string id = j["id"];
@@ -97,6 +97,82 @@ namespace
         EXPECT_FALSE(j["properties"].contains("projection"));
         EXPECT_FALSE(j["properties"].contains("height"));
         EXPECT_FALSE(j["properties"].contains("width"));
+
+        // proj:code must be present (Projection Extension v2.0.0 replaced proj:epsg)
+        EXPECT_TRUE(j["properties"].contains("proj:code"));
+        EXPECT_TRUE(j["properties"]["proj:code"].is_string());
+        EXPECT_EQ(j["properties"]["proj:code"].get<std::string>().rfind("EPSG:", 0), 0)
+            << "proj:code must be a CURIE like 'EPSG:32601'";
+        EXPECT_FALSE(j["properties"].contains("proj:epsg"))
+            << "proj:epsg is forbidden by Projection Extension v2.0.0";
+    }
+
+    // STAC Item must carry the top-level "collection" field when a rel:collection link is present
+    TEST_F(StacTest, itemHasCollectionField)
+    {
+        ddb::initIndex(ta->getFolder().string());
+        auto db = ddb::open(ta->getFolder().string(), true);
+        ddb::addToIndex(db.get(), {orthoPath.string()});
+
+        const std::string collectionRoot = "http://localhost:7000/orgs/acme/ds/brighton";
+        const std::string collectionId = "acme/brighton";
+        auto j = generateStac(ta->getFolder().string(), "ortho.tif", collectionRoot,
+                              collectionId, "http://localhost:7000");
+
+        ASSERT_TRUE(j.contains("collection"));
+        EXPECT_EQ(j["collection"], collectionId);
+
+        // The collection link must also be present and consistent
+        bool hasCollectionLink = false;
+        for (const auto &link : j["links"])
+        {
+            if (link["rel"] == "collection")
+                hasCollectionLink = true;
+        }
+        EXPECT_TRUE(hasCollectionLink) << "Item must have a rel:collection link";
+    }
+
+    // STAC API ItemCollection (FeatureCollection) generation
+    TEST_F(StacTest, itemCollectionStructure)
+    {
+        ddb::initIndex(ta->getFolder().string());
+        auto db = ddb::open(ta->getFolder().string(), true);
+        ddb::addToIndex(db.get(), {orthoPath.string(), imagePath.string()});
+
+        const std::string collectionRoot = "http://localhost:7000/orgs/acme/ds/brighton";
+        const std::string collectionId = "acme/brighton";
+        auto fc = generateStacItemCollection(ta->getFolder().string(), collectionRoot,
+                                             collectionId, "http://localhost:7000");
+
+        EXPECT_EQ(fc["type"], "FeatureCollection");
+        ASSERT_TRUE(fc.contains("features"));
+        ASSERT_TRUE(fc["features"].is_array());
+        EXPECT_GE(fc["features"].size(), 1);
+        EXPECT_TRUE(fc.contains("links"));
+        EXPECT_TRUE(fc.contains("numberMatched"));
+        EXPECT_TRUE(fc.contains("numberReturned"));
+
+        // Each feature must be a valid STAC Item with the collection field set
+        for (const auto &feat : fc["features"])
+        {
+            EXPECT_EQ(feat["type"], "Feature");
+            EXPECT_EQ(feat["stac_version"], "1.1.0");
+            ASSERT_TRUE(feat.contains("collection"));
+            EXPECT_EQ(feat["collection"], collectionId);
+        }
+    }
+
+    // ItemCollection paging via limit/offset
+    TEST_F(StacTest, itemCollectionPaging)
+    {
+        ddb::initIndex(ta->getFolder().string());
+        auto db = ddb::open(ta->getFolder().string(), true);
+        ddb::addToIndex(db.get(), {orthoPath.string(), imagePath.string()});
+
+        auto page = generateStacItemCollection(ta->getFolder().string(), ".", "acme/brighton",
+                                               "", {}, "", "", 1, 0);
+        EXPECT_EQ(page["numberReturned"], 1);
+        EXPECT_GE(page["numberMatched"].get<long long>(), 1);
     }
 
     // Test STAC Item generation for a GeoImage with captureTime
@@ -110,7 +186,7 @@ namespace
 
         // Basic STAC Item structure
         EXPECT_EQ(j["type"], "Feature");
-        EXPECT_EQ(j["stac_version"], "1.0.0");
+        EXPECT_EQ(j["stac_version"], "1.1.0");
 
         // ID should be prefixed with path-
         std::string id = j["id"];
@@ -147,7 +223,7 @@ namespace
         auto j = generateStac(ta->getFolder().string());
 
         EXPECT_EQ(j["type"], "Collection");
-        EXPECT_EQ(j["stac_version"], "1.0.0");
+        EXPECT_EQ(j["stac_version"], "1.1.0");
 
         // Temporal extent should be populated from captureTime
         EXPECT_TRUE(j.contains("extent"));

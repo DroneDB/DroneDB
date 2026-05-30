@@ -387,6 +387,17 @@ extern "C"
      *  @param output pointer to C-string where to store result (JSON) */
     DDB_DLL DDBErr DDBStac(const char *ddbPath, const char *entry, const char *stacCollectionRoot, const char *id, const char *stacCatalogRoot, char **output);
 
+    /** Generate a STAC API ItemCollection (GeoJSON FeatureCollection of STAC Items)
+     *  @param ddbPath path to the source DroneDB database (parent of ".ddb")
+     *  @param stacCollectionRoot Absolute URL of the STAC collection
+     *  @param id STAC collection ID to use instead of folder name (must be unique for entire catalog)
+     *  @param stacCatalogRoot Absolute URL of the STAC catalog
+     *  @param bbox optional bounding box filter "minX,minY,maxX,maxY" (EPSG:4326), can be empty
+     *  @param datetime optional RFC 3339 datetime or interval "start/end" (".." for open ends), can be empty
+     *  @param limit maximum number of items to return (<= 0 defaults to 10)
+     *  @param offset number of items to skip (paging)
+     *  @param output pointer to C-string where to store result (JSON) */
+    DDB_DLL DDBErr DDBStacItemCollection(const char *ddbPath, const char *stacCollectionRoot, const char *id, const char *stacCatalogRoot, const char *bbox, const char *datetime, int limit, int offset, char **output);
     /** Get raster info including bands, detected sensor, presets
      * @param path Path to raster file
      * @param output Pointer to receive JSON string (caller must free with DDBFree)
