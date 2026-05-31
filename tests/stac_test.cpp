@@ -5,6 +5,7 @@
 #include "gtest/gtest.h"
 #include "dbops.h"
 #include "stac.h"
+#include "ddb.h"
 #include "test.h"
 #include "testarea.h"
 
@@ -47,7 +48,7 @@ namespace
 
         // Basic STAC Item structure
         EXPECT_EQ(j["type"], "Feature");
-        EXPECT_EQ(j["stac_version"], "1.0.0");
+        EXPECT_EQ(j["stac_version"], "1.1.0");
 
         // ID should be prefixed with path-
         std::string id = j["id"];
@@ -97,6 +98,82 @@ namespace
         EXPECT_FALSE(j["properties"].contains("projection"));
         EXPECT_FALSE(j["properties"].contains("height"));
         EXPECT_FALSE(j["properties"].contains("width"));
+
+        // proj:code must be present (Projection Extension v2.0.0 replaced proj:epsg)
+        EXPECT_TRUE(j["properties"].contains("proj:code"));
+        EXPECT_TRUE(j["properties"]["proj:code"].is_string());
+        EXPECT_EQ(j["properties"]["proj:code"].get<std::string>().rfind("EPSG:", 0), 0)
+            << "proj:code must be a CURIE like 'EPSG:32601'";
+        EXPECT_FALSE(j["properties"].contains("proj:epsg"))
+            << "proj:epsg is forbidden by Projection Extension v2.0.0";
+    }
+
+    // STAC Item must carry the top-level "collection" field when a rel:collection link is present
+    TEST_F(StacTest, itemHasCollectionField)
+    {
+        ddb::initIndex(ta->getFolder().string());
+        auto db = ddb::open(ta->getFolder().string(), true);
+        ddb::addToIndex(db.get(), {orthoPath.string()});
+
+        const std::string collectionRoot = "http://localhost:7000/orgs/acme/ds/brighton";
+        const std::string collectionId = "acme/brighton";
+        auto j = generateStac(ta->getFolder().string(), "ortho.tif", collectionRoot,
+                              collectionId, "http://localhost:7000");
+
+        ASSERT_TRUE(j.contains("collection"));
+        EXPECT_EQ(j["collection"], collectionId);
+
+        // The collection link must also be present and consistent
+        bool hasCollectionLink = false;
+        for (const auto &link : j["links"])
+        {
+            if (link["rel"] == "collection")
+                hasCollectionLink = true;
+        }
+        EXPECT_TRUE(hasCollectionLink) << "Item must have a rel:collection link";
+    }
+
+    // STAC API ItemCollection (FeatureCollection) generation
+    TEST_F(StacTest, itemCollectionStructure)
+    {
+        ddb::initIndex(ta->getFolder().string());
+        auto db = ddb::open(ta->getFolder().string(), true);
+        ddb::addToIndex(db.get(), {orthoPath.string(), imagePath.string()});
+
+        const std::string collectionRoot = "http://localhost:7000/orgs/acme/ds/brighton";
+        const std::string collectionId = "acme/brighton";
+        auto fc = generateStacItemCollection(ta->getFolder().string(), collectionRoot,
+                                             collectionId, "http://localhost:7000");
+
+        EXPECT_EQ(fc["type"], "FeatureCollection");
+        ASSERT_TRUE(fc.contains("features"));
+        ASSERT_TRUE(fc["features"].is_array());
+        EXPECT_GE(fc["features"].size(), 1);
+        EXPECT_TRUE(fc.contains("links"));
+        EXPECT_TRUE(fc.contains("numberMatched"));
+        EXPECT_TRUE(fc.contains("numberReturned"));
+
+        // Each feature must be a valid STAC Item with the collection field set
+        for (const auto &feat : fc["features"])
+        {
+            EXPECT_EQ(feat["type"], "Feature");
+            EXPECT_EQ(feat["stac_version"], "1.1.0");
+            ASSERT_TRUE(feat.contains("collection"));
+            EXPECT_EQ(feat["collection"], collectionId);
+        }
+    }
+
+    // ItemCollection paging via limit/offset
+    TEST_F(StacTest, itemCollectionPaging)
+    {
+        ddb::initIndex(ta->getFolder().string());
+        auto db = ddb::open(ta->getFolder().string(), true);
+        ddb::addToIndex(db.get(), {orthoPath.string(), imagePath.string()});
+
+        auto page = generateStacItemCollection(ta->getFolder().string(), ".", "acme/brighton",
+                                               "", {}, "", "", 1, 0);
+        EXPECT_EQ(page["numberReturned"], 1);
+        EXPECT_GE(page["numberMatched"].get<long long>(), 1);
     }
 
     // Test STAC Item generation for a GeoImage with captureTime
@@ -110,7 +187,7 @@ namespace
 
         // Basic STAC Item structure
         EXPECT_EQ(j["type"], "Feature");
-        EXPECT_EQ(j["stac_version"], "1.0.0");
+        EXPECT_EQ(j["stac_version"], "1.1.0");
 
         // ID should be prefixed with path-
         std::string id = j["id"];
@@ -147,7 +224,7 @@ namespace
         auto j = generateStac(ta->getFolder().string());
 
         EXPECT_EQ(j["type"], "Collection");
-        EXPECT_EQ(j["stac_version"], "1.0.0");
+        EXPECT_EQ(j["stac_version"], "1.1.0");
 
         // Temporal extent should be populated from captureTime
         EXPECT_TRUE(j.contains("extent"));
@@ -431,4 +508,108 @@ namespace
         }
     }
 
+    // ItemCollection bbox filtering
+    TEST_F(StacTest, itemCollectionBboxFilter)
+    {
+        ddb::initIndex(ta->getFolder().string());
+        auto db = ddb::open(ta->getFolder().string(), true);
+        ddb::addToIndex(db.get(), {orthoPath.string(), imagePath.string()});
+
+        // Bbox that covers nothing (remote ocean area) → 0 features
+        auto fcEmpty = generateStacItemCollection(ta->getFolder().string(), ".", "", "",
+                                                   {-179.0, -89.0, -178.0, -88.0});
+        EXPECT_EQ(fcEmpty["numberReturned"].get<size_t>(), 0)
+            << "Bbox covering no data should return 0 features";
+        EXPECT_EQ(fcEmpty["numberMatched"].get<long long>(), 0);
+
+        // World bbox → should return all geometry-bearing features
+        auto fcWorld = generateStacItemCollection(ta->getFolder().string(), ".", "", "",
+                                                   {-180.0, -90.0, 180.0, 90.0});
+        EXPECT_GE(fcWorld["numberReturned"].get<size_t>(), 1)
+            << "World bbox should return at least one feature";
+        EXPECT_EQ(fcWorld["numberReturned"], fcWorld["numberMatched"]);
+    }
+
+    // ItemCollection datetime filtering (including open-ended intervals)
+    TEST_F(StacTest, itemCollectionDatetimeFilter)
+    {
+        ddb::initIndex(ta->getFolder().string());
+        auto db = ddb::open(ta->getFolder().string(), true);
+        ddb::addToIndex(db.get(), {orthoPath.string(), imagePath.string()});
+
+        // Far-future interval → 0 features
+        auto fcFuture = generateStacItemCollection(ta->getFolder().string(), ".", "", "",
+                                                    {}, "2099-01-01T00:00:00Z", "2099-12-31T23:59:59Z");
+        EXPECT_EQ(fcFuture["numberMatched"].get<long long>(), 0)
+            << "Future datetime range should return 0 features";
+
+        // Open-ended start (../now+future): everything before far-future end
+        auto fcOpenStart = generateStacItemCollection(ta->getFolder().string(), ".", "", "",
+                                                       {}, "", "2099-12-31T23:59:59Z");
+        EXPECT_GE(fcOpenStart["numberMatched"].get<long long>(), 1)
+            << "Open-start range ending in far future should return all features";
+
+        // Open-ended end (epoch start/..): everything after epoch
+        auto fcOpenEnd = generateStacItemCollection(ta->getFolder().string(), ".", "", "",
+                                                     {}, "1970-01-01T00:00:00Z", "");
+        EXPECT_GE(fcOpenEnd["numberMatched"].get<long long>(), 1)
+            << "Open-end range starting at epoch should return all features";
+
+        // Timezone offset handling: same instant expressed differently should give same count
+        auto fcUtc  = generateStacItemCollection(ta->getFolder().string(), ".", "", "",
+                                                  {}, "1970-01-01T00:00:00Z", "2099-01-01T00:00:00+00:00");
+        auto fcOff  = generateStacItemCollection(ta->getFolder().string(), ".", "", "",
+                                                  {}, "1970-01-01T00:00:00Z", "2099-01-01T02:00:00+02:00");
+        EXPECT_EQ(fcUtc["numberMatched"], fcOff["numberMatched"])
+            << "Equivalent datetime with timezone offset should give the same result";
+    }
+
 } // namespace
+
+// ---- C API tests for DDBStacItemCollection ----------------------------------
+
+TEST(stacCApi, invalidArgsMissingDdbPath) {
+    char *output = nullptr;
+    EXPECT_NE(DDBStacItemCollection(nullptr, ".", "", "", nullptr, nullptr, 10, 0, &output), DDBERR_NONE);
+    EXPECT_NE(DDBStacItemCollection("", ".", "", "", nullptr, nullptr, 10, 0, &output), DDBERR_NONE);
+}
+
+TEST(stacCApi, invalidArgsMissingOutput) {
+    char *output = nullptr;
+    EXPECT_NE(DDBStacItemCollection("some_path", ".", "", "", nullptr, nullptr, 10, 0, nullptr), DDBERR_NONE);
+    (void)output;
+}
+
+TEST(stacCApi, invalidArgsBadBbox) {
+    char *output = nullptr;
+    // Non-numeric token
+    EXPECT_NE(DDBStacItemCollection("some_path", ".", "", "", "abc,2,3,4", nullptr, 10, 0, &output), DDBERR_NONE);
+    // Wrong number of values (3 instead of 4)
+    EXPECT_NE(DDBStacItemCollection("some_path", ".", "", "", "1.0,2.0,3.0", nullptr, 10, 0, &output), DDBERR_NONE);
+}
+
+TEST(stacCApi, successReturnsFeatureCollection) {
+    TestArea ta(TEST_NAME);
+    fs::path ortho = ta.downloadTestAsset(
+        "https://github.com/DroneDB/test_data/raw/master/brighton/odm_orthophoto.tif",
+        "ortho.tif");
+
+    ddb::initIndex(ta.getFolder().string());
+    auto db = ddb::open(ta.getFolder().string(), true);
+    ddb::addToIndex(db.get(), {ortho.string()});
+
+    char *output = nullptr;
+    auto err = DDBStacItemCollection(ta.getFolder().string().c_str(),
+                                     "http://localhost:7000/orgs/test/ds/test",
+                                     "test/ds", "http://localhost:7000",
+                                     nullptr, nullptr, 10, 0, &output);
+    EXPECT_EQ(err, DDBERR_NONE);
+    ASSERT_NE(output, nullptr);
+
+    auto fc = json::parse(std::string(output));
+    EXPECT_EQ(fc["type"], "FeatureCollection");
+    EXPECT_TRUE(fc.contains("features"));
+    EXPECT_GE(fc["features"].size(), 1);
+
+    DDBFree(output);
+}

@@ -1455,6 +1455,78 @@ DDB_DLL DDBErr DDBStac(const char* ddbPath,
     DDB_C_END
 }
 
+DDB_DLL DDBErr DDBStacItemCollection(const char* ddbPath,
+                                     const char* stacCollectionRoot,
+                                     const char* id,
+                                     const char* stacCatalogRoot,
+                                     const char* bbox,
+                                     const char* datetime,
+                                     int limit,
+                                     int offset,
+                                     char** output) {
+    DDB_C_BEGIN
+
+    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
+        throw InvalidArgsException("No directory provided");
+
+    if (output == nullptr)
+        throw InvalidArgsException("Output pointer is null");
+
+    const std::string stacCollectionRootStr =
+        stacCollectionRoot ? std::string(stacCollectionRoot) : "";
+    const std::string idStr = id ? std::string(id) : "";
+    const std::string stacCatalogRootStr = stacCatalogRoot ? std::string(stacCatalogRoot) : "";
+
+    // Parse bbox "minX,minY,maxX,maxY" into a vector of doubles (empty if absent; throws on invalid)
+    std::vector<double> bboxVec;
+    if (bbox != nullptr && !utils::isNullOrEmptyOrWhitespace(bbox)) {
+        std::stringstream ss(bbox);
+        std::string token;
+        while (std::getline(ss, token, ',')) {
+            try {
+                bboxVec.push_back(std::stod(token));
+            } catch (...) {
+                throw InvalidArgsException("Invalid bbox value: " + token);
+            }
+        }
+        if (bboxVec.size() != 4)
+            throw InvalidArgsException("bbox must contain exactly 4 comma-separated values");
+    }
+
+    // Parse datetime: single instant or interval "start/end" ("../end" or "start/.." for open ends)
+    std::string datetimeStart;
+    std::string datetimeEnd;
+    if (datetime != nullptr && !utils::isNullOrEmptyOrWhitespace(datetime)) {
+        const std::string dt(datetime);
+        const auto slash = dt.find('/');
+        if (slash == std::string::npos) {
+            datetimeStart = dt;
+            datetimeEnd = dt;
+        } else {
+            const std::string lo = dt.substr(0, slash);
+            const std::string hi = dt.substr(slash + 1);
+            if (lo != "..")
+                datetimeStart = lo;
+            if (hi != "..")
+                datetimeEnd = hi;
+        }
+    }
+
+    auto json = ddb::generateStacItemCollection(std::string(ddbPath),
+                                                stacCollectionRootStr,
+                                                idStr,
+                                                stacCatalogRootStr,
+                                                bboxVec,
+                                                datetimeStart,
+                                                datetimeEnd,
+                                                limit,
+                                                offset);
+
+    utils::copyToPtr(json.dump(), output);
+
+    DDB_C_END
+}
+
 DDB_DLL DDBErr DDBGetRasterInfo(const char* path, char** output) {
     DDB_C_BEGIN
 
