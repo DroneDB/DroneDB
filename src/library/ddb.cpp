@@ -8,7 +8,11 @@
 
 #include <cmath>
 #include <csignal>
+#include <cstdlib>
+#include <memory>
 #include <mutex>
+#include <type_traits>
+#include <algorithm>
 
 #include <exiv2/exiv2.hpp>
 #include <sstream>
@@ -1908,16 +1912,56 @@ DDB_DLL DDBErr DDBMergeMultispectral(const char** paths, int numPaths, const cha
     DDB_C_END
 }
 
-DDB_DLL DDBErr DDBExportRaster(const char* inputPath, const char* outputPath,
-                                const char* preset, const char* bands,
-                                const char* formula, const char* bandFilter,
-                                const char* colormap, const char* rescale) {
-    DDB_C_BEGIN
+// Auto-compute a windowed tile size for the formula export branch.
+// Honors an explicit tileSize when > 0, otherwise derives one from the source
+// block size clamped to [256, 1024] and capped so the per-tile working set
+// (input float bands + intermediate buffers) stays within ~64 MB.
+static int computeExportTileSize(GDALDatasetH hSrcDs, int bandCount, int tileSize) {
+    int result;
+    if (tileSize > 0) {
+        result = std::clamp(tileSize, 64, 8192);
+    } else {
+        int bx = 0, by = 0;
+        GDALGetBlockSize(GDALGetRasterBand(hSrcDs, 1), &bx, &by);
+        int t = std::clamp(std::max(bx, 512), 256, 1024);
 
+        const size_t budgetBytes = 64ull * 1024 * 1024;
+        // Working set per tile: bandCount input floats + formula result float +
+        // RGBA bytes, with a x2 headroom factor for GDAL internal buffers.
+        auto tileBytes = [&](int s) {
+            const size_t pix = static_cast<size_t>(s) * s;
+            return pix * (static_cast<size_t>(bandCount) * sizeof(float) + sizeof(float) + 4) * 2;
+        };
+        while (t > 256 && tileBytes(t) > budgetBytes) t /= 2;
+        result = std::max(t, 256);
+    }
+
+    // GeoTIFF requires tile dimensions to be a multiple of 16. Round up and
+    // re-clamp so the value is valid both as a processing window and as the
+    // output BLOCKXSIZE/BLOCKYSIZE.
+    result = ((result + 15) / 16) * 16;
+    return std::clamp(result, 64, 8192);
+}
+
+// Internal block-windowed raster export shared by DDBExportRaster (legacy ABI)
+// and DDBExportRaster2. Returns 0 on success, 1 if canceled by the progress
+// callback. Throws on errors (translated by the DDB_C_END macro in the callers).
+static int exportRasterImpl(const char* inputPath, const char* outputPath,
+                            const char* preset, const char* bands,
+                            const char* formula, const char* bandFilter,
+                            const char* colormap, const char* rescale,
+                            int tileSize,
+                            DDBProgressCallback progress, void* progressUserData) {
     if (utils::isNullOrEmptyOrWhitespace(inputPath))
         throw InvalidArgsException("No input path provided");
     if (utils::isNullOrEmptyOrWhitespace(outputPath))
         throw InvalidArgsException("No output path provided");
+
+    // Returns true if the operation should be canceled.
+    auto reportProgress = [&](double fraction, const char* phase) -> bool {
+        if (!progress) return false;
+        return progress(fraction, phase, progressUserData) != 0;
+    };
 
     GDALDatasetH hSrcDs = GDALOpen(inputPath, GA_ReadOnly);
     if (!hSrcDs)
@@ -1940,10 +1984,15 @@ DDB_DLL DDBErr DDBExportRaster(const char* inputPath, const char* outputPath,
     const char* projRef = GDALGetProjectionRef(hSrcDs);
     std::string projection = projRef ? std::string(projRef) : "";
 
+    // RAII guard so the source dataset is always closed on any return or throw.
+    auto gdalCloser = [](GDALDatasetH h) { if (h) GDALClose(h); };
+    std::unique_ptr<std::remove_pointer_t<GDALDatasetH>, decltype(gdalCloser)>
+        srcGuard(hSrcDs, gdalCloser);
+
     if (!formulaStr.empty()) {
-        // Formula mode: apply formula + colormap, export as RGBA GeoTIFF
-        // TODO: For very large rasters, consider processing in blocks/scanlines
-        // to avoid excessive memory usage (currently loads all bands fully into memory)
+        // Formula mode: apply formula + colormap, export as RGBA GeoTIFF.
+        // Block-windowed so peak memory is O(tileW * tileH * bandCount) and
+        // independent of the full raster size.
         auto& ve = ddb::VegetationEngine::instance();
 
         ddb::BandFilter bf;
@@ -1953,55 +2002,89 @@ DDB_DLL DDBErr DDBExportRaster(const char* inputPath, const char* outputPath,
             bf = ve.autoDetectFilter(std::string(inputPath));
         }
 
-        size_t pixCount = static_cast<size_t>(width) * height;
-        std::vector<std::vector<float>> bandDataStorage(bandCount);
-        std::vector<float*> bandDataPtrs(bandCount);
-
-        // Read bands and detect alpha/nodata
-        auto nodataInfo = detectBandNodata(hSrcDs, bandCount);
-        for (int b = 0; b < bandCount; b++) {
-            bandDataStorage[b].resize(pixCount);
-            bandDataPtrs[b] = bandDataStorage[b].data();
-            GDALRasterBandH hBand = GDALGetRasterBand(hSrcDs, b + 1);
-            if (GDALRasterIO(hBand, GF_Read, 0, 0, width, height,
-                             bandDataPtrs[b], width, height,
-                             GDT_Float32, 0, 0) != CE_None) {
-                GDALClose(hSrcDs);
-                throw GDALException("Cannot read band " + std::to_string(b + 1));
-            }
-        }
-
-        // Pre-mask transparent and nodata pixels
-        float nodata = NODATA_SENTINEL;
-        premaskNodata(bandDataPtrs, pixCount, bandCount, nodataInfo, nodata);
-
-        // Apply formula
-        std::vector<float> result(pixCount);
         const auto* formulaPtr = ve.getFormula(formulaStr);
-        if (!formulaPtr) {
-            GDALClose(hSrcDs);
+        if (!formulaPtr)
             throw InvalidArgsException("Unknown formula: " + formulaStr);
-        }
-        ve.applyFormula(*formulaPtr, bf, bandDataPtrs, result.data(), pixCount, nodata);
+        std::string cmId = colormapStr.empty() ? "rdylgn" : colormapStr;
+        const auto* cmap = ve.getColormap(cmId);
+        if (!cmap)
+            throw InvalidArgsException("Unknown colormap: " + cmId);
 
-        // Determine rescale range
+        const auto nodataInfo = detectBandNodata(hSrcDs, bandCount);
+        const float nodata = NODATA_SENTINEL;
+
+        const int tw = computeExportTileSize(hSrcDs, bandCount, tileSize);
+        const int th = tw;
+        const int ntx = (width + tw - 1) / tw;
+        const int nty = (height + th - 1) / th;
+        const size_t totalTiles = static_cast<size_t>(ntx) * nty;
+
+        // Reads a window of every band into the supplied per-band buffers and
+        // applies the formula, leaving the result in 'result'.
+        auto computeWindow = [&](int x0, int y0, int winW, int winH,
+                                 std::vector<std::vector<float>>& storage,
+                                 std::vector<float*>& ptrs,
+                                 std::vector<float>& result) {
+            const size_t winPix = static_cast<size_t>(winW) * winH;
+            for (int b = 0; b < bandCount; b++) {
+                storage[b].resize(winPix);
+                ptrs[b] = storage[b].data();
+                GDALRasterBandH hBand = GDALGetRasterBand(hSrcDs, b + 1);
+                if (GDALRasterIO(hBand, GF_Read, x0, y0, winW, winH,
+                                 ptrs[b], winW, winH, GDT_Float32, 0, 0) != CE_None)
+                    throw GDALException("Cannot read band " + std::to_string(b + 1));
+            }
+            premaskNodata(ptrs, winPix, bandCount, nodataInfo, nodata);
+            result.resize(winPix);
+            ve.applyFormula(*formulaPtr, bf, ptrs, result.data(), winPix, nodata);
+        };
+
+        // Determine rescale range. Explicit rescale and formula-defined ranges
+        // keep the export fully memory-bounded. The auto-percentile fallback
+        // performs an extra windowed pass that collects valid values (only hit
+        // when neither an explicit range nor a formula range is available).
         float rMin, rMax;
         if (!rescaleStr.empty()) {
             auto commaPos = rescaleStr.find(',');
-            if (commaPos == std::string::npos) {
-                GDALClose(hSrcDs);
+            if (commaPos == std::string::npos)
                 throw InvalidArgsException("Invalid rescale format");
-            }
             rMin = std::stof(rescaleStr.substr(0, commaPos));
             rMax = std::stof(rescaleStr.substr(commaPos + 1));
         } else if (formulaPtr->hasRange && formulaPtr->rangeMin != formulaPtr->rangeMax) {
             rMin = static_cast<float>(formulaPtr->rangeMin);
             rMax = static_cast<float>(formulaPtr->rangeMax);
         } else {
+            // Auto-percentile fallback: collect valid values with a windowed
+            // pass. To keep memory bounded regardless of raster size, values
+            // are uniformly subsampled into a fixed-capacity reservoir instead
+            // of storing every pixel.
+            constexpr size_t kMaxSamples = 4ull * 1024 * 1024;  // 16 MB of floats
+            std::vector<std::vector<float>> storage(bandCount);
+            std::vector<float*> ptrs(bandCount);
+            std::vector<float> result;
             std::vector<float> valid;
-            valid.reserve(pixCount);
-            for (size_t i = 0; i < pixCount; i++) {
-                if (result[i] != nodata) valid.push_back(result[i]);
+            valid.reserve(std::min<size_t>(kMaxSamples,
+                static_cast<size_t>(width) * height));
+            size_t seen = 0;
+            for (int ty = 0; ty < nty; ty++) {
+                for (int tx = 0; tx < ntx; tx++) {
+                    const int x0 = tx * tw, y0 = ty * th;
+                    const int winW = std::min(tw, width - x0);
+                    const int winH = std::min(th, height - y0);
+                    computeWindow(x0, y0, winW, winH, storage, ptrs, result);
+                    for (float v : result) {
+                        if (v == nodata || std::isnan(v)) continue;
+                        if (valid.size() < kMaxSamples) {
+                            valid.push_back(v);
+                        } else {
+                            // Reservoir sampling keeps a uniform subset.
+                            const size_t j = static_cast<size_t>(
+                                (static_cast<double>(std::rand()) / RAND_MAX) * seen);
+                            if (j < kMaxSamples) valid[j] = v;
+                        }
+                        seen++;
+                    }
+                }
             }
             if (!valid.empty()) {
                 std::sort(valid.begin(), valid.end());
@@ -2012,48 +2095,81 @@ DDB_DLL DDBErr DDBExportRaster(const char* inputPath, const char* outputPath,
             }
         }
 
-        // Apply colormap
-        std::string cmId = colormapStr.empty() ? "rdylgn" : colormapStr;
-        const auto* cmap = ve.getColormap(cmId);
-        if (!cmap) {
-            GDALClose(hSrcDs);
-            throw InvalidArgsException("Unknown colormap: " + cmId);
-        }
-        std::vector<uint8_t> rgba(pixCount * 4);
-        ve.applyColormap(result.data(), rgba.data(), pixCount, *cmap, rMin, rMax, nodata);
-
-        GDALClose(hSrcDs);
-
-        // Create output GeoTIFF with 4 bands (RGBA)
+        // Create tiled output GeoTIFF with 4 bands (RGBA)
         GDALDriverH gtiffDrv = GDALGetDriverByName("GTiff");
         if (!gtiffDrv)
             throw GDALException("GTiff driver not available");
 
         char** createOpts = nullptr;
+        createOpts = CSLAddString(createOpts, "TILED=YES");
+        createOpts = CSLAddString(createOpts, ("BLOCKXSIZE=" + std::to_string(tw)).c_str());
+        createOpts = CSLAddString(createOpts, ("BLOCKYSIZE=" + std::to_string(th)).c_str());
         createOpts = CSLAddString(createOpts, "COMPRESS=DEFLATE");
+        createOpts = CSLAddString(createOpts, "PREDICTOR=2");
+        createOpts = CSLAddString(createOpts, "BIGTIFF=IF_SAFER");
+        createOpts = CSLAddString(createOpts, "NUM_THREADS=ALL_CPUS");
 
         GDALDatasetH hOut = GDALCreate(gtiffDrv, outputPath, width, height, 4, GDT_Byte, createOpts);
         CSLDestroy(createOpts);
         if (!hOut)
             throw GDALException("Cannot create output GeoTIFF");
 
+        // RAII guard for the output dataset: closed on any throw. On success or
+        // cancel we release it explicitly after the appropriate finalization.
+        std::unique_ptr<std::remove_pointer_t<GDALDatasetH>, decltype(gdalCloser)>
+            outGuard(hOut, gdalCloser);
+
         if (hasGeoTransform) GDALSetGeoTransform(hOut, geoTransform);
         if (!projection.empty()) GDALSetProjection(hOut, projection.c_str());
-
-        for (int b = 0; b < 4; b++) {
-            std::vector<uint8_t> chanData(pixCount);
-            for (size_t i = 0; i < pixCount; i++) chanData[i] = rgba[i * 4 + b];
-            GDALRasterBandH hBand = GDALGetRasterBand(hOut, b + 1);
-            GDALRasterIO(hBand, GF_Write, 0, 0, width, height,
-                         chanData.data(), width, height, GDT_Byte, 0, 0);
-        }
         GDALSetRasterColorInterpretation(GDALGetRasterBand(hOut, 1), GCI_RedBand);
         GDALSetRasterColorInterpretation(GDALGetRasterBand(hOut, 2), GCI_GreenBand);
         GDALSetRasterColorInterpretation(GDALGetRasterBand(hOut, 3), GCI_BlueBand);
         GDALSetRasterColorInterpretation(GDALGetRasterBand(hOut, 4), GCI_AlphaBand);
 
+        std::vector<std::vector<float>> storage(bandCount);
+        std::vector<float*> ptrs(bandCount);
+        std::vector<float> result;
+        std::vector<uint8_t> rgba;
+        std::vector<uint8_t> chanData;
+        size_t doneTiles = 0;
+
+        reportProgress(0.0, "rendering");
+        for (int ty = 0; ty < nty; ty++) {
+            for (int tx = 0; tx < ntx; tx++) {
+                if (reportProgress(static_cast<double>(doneTiles) / totalTiles, "rendering")) {
+                    outGuard.reset();  // closes hOut
+                    srcGuard.reset();  // closes hSrcDs
+                    GDALDeleteDataset(gtiffDrv, outputPath);
+                    return 1;
+                }
+
+                const int x0 = tx * tw, y0 = ty * th;
+                const int winW = std::min(tw, width - x0);
+                const int winH = std::min(th, height - y0);
+                const size_t winPix = static_cast<size_t>(winW) * winH;
+
+                computeWindow(x0, y0, winW, winH, storage, ptrs, result);
+
+                rgba.resize(winPix * 4);
+                ve.applyColormap(result.data(), rgba.data(), winPix, *cmap, rMin, rMax, nodata);
+
+                chanData.resize(winPix);
+                for (int ch = 0; ch < 4; ch++) {
+                    for (size_t i = 0; i < winPix; i++) chanData[i] = rgba[i * 4 + ch];
+                    GDALRasterBandH hBand = GDALGetRasterBand(hOut, ch + 1);
+                    if (GDALRasterIO(hBand, GF_Write, x0, y0, winW, winH,
+                                     chanData.data(), winW, winH, GDT_Byte, 0, 0) != CE_None)
+                        throw GDALException("Cannot write output tile");
+                }
+                doneTiles++;
+            }
+        }
+
         GDALFlushCache(hOut);
-        GDALClose(hOut);
+        outGuard.reset();  // closes hOut
+        srcGuard.reset();  // closes hSrcDs
+        reportProgress(1.0, "rendering");
+        return 0;
     } else {
         // Non-formula mode: band selection + rescale, export as GeoTIFF
         std::vector<int> selectedBands;
@@ -2076,11 +2192,11 @@ DDB_DLL DDBErr DDBExportRaster(const char* inputPath, const char* outputPath,
             }
         } catch (const std::exception& e) {
             LOGW << "Error parsing bands/preset: " << e.what();
-            GDALClose(hSrcDs);
             throw;
         }
 
         // Use GDALTranslate for band selection + rescale
+        reportProgress(0.0, "converting");
         char** targs = nullptr;
         targs = CSLAddString(targs, "-ot");
         targs = CSLAddString(targs, "Byte");
@@ -2113,25 +2229,53 @@ DDB_DLL DDBErr DDBExportRaster(const char* inputPath, const char* outputPath,
 
         auto psOptions = GDALTranslateOptionsNew(targs, nullptr);
         CSLDestroy(targs);
-        if (!psOptions) {
-            GDALClose(hSrcDs);
+        if (!psOptions)
             throw GDALException("Cannot create GDALTranslate options");
-        }
 
         int bUsageError = FALSE;
         GDALDatasetH hOut = GDALTranslate(outputPath, hSrcDs, psOptions, &bUsageError);
         GDALTranslateOptionsFree(psOptions);
-        GDALClose(hSrcDs);
+        srcGuard.reset();  // closes hSrcDs
 
-        if (!hOut || bUsageError)
+        if (!hOut || bUsageError) {
+            if (hOut) GDALClose(hOut);
             throw GDALException("Cannot create output GeoTIFF");
+        }
 
         GDALFlushCache(hOut);
         GDALClose(hOut);
+        reportProgress(1.0, "converting");
+        return 0;
     }
+}
 
+DDB_DLL DDBErr DDBExportRaster(const char* inputPath, const char* outputPath,
+                                const char* preset, const char* bands,
+                                const char* formula, const char* bandFilter,
+                                const char* colormap, const char* rescale) {
+    DDB_C_BEGIN
+    // Legacy ABI: forward to the block-windowed implementation with auto tile
+    // size and no progress callback (so it can never be canceled).
+    exportRasterImpl(inputPath, outputPath, preset, bands, formula, bandFilter,
+                     colormap, rescale, 0, nullptr, nullptr);
     DDB_C_END
 }
+
+DDB_DLL DDBErr DDBExportRaster2(const char* inputPath, const char* outputPath,
+                                 const char* preset, const char* bands,
+                                 const char* formula, const char* bandFilter,
+                                 const char* colormap, const char* rescale,
+                                 int tileSize,
+                                 DDBProgressCallback progress, void* progressUserData) {
+    DDB_C_BEGIN
+    const int canceled = exportRasterImpl(inputPath, outputPath, preset, bands,
+                                          formula, bandFilter, colormap, rescale,
+                                          tileSize, progress, progressUserData);
+    if (canceled)
+        return DDBERR_CANCELED;
+    DDB_C_END
+}
+
 
 DDB_DLL DDBErr DDBGetRasterValueInfo(const char *filePath, char **output) {
     DDB_C_BEGIN
