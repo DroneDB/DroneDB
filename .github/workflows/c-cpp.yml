@@ -121,7 +121,7 @@ jobs:
               echo "  ✓ untwine present in .deb (COPC accelerator enabled)"
             else
               if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-                echo "  ✗ untwine NOT present in .deb — release builds MUST include untwine. Failing."
+                echo "  ✗ untwine NOT present in .deb - release builds MUST include untwine. Failing."
                 exit 1
               else
                 echo "  ! untwine NOT present in .deb (DroneDB will fall back to PDAL writers.copc)"
@@ -232,7 +232,7 @@ jobs:
               Write-Host '  ✓ untwine.exe present in zip (COPC accelerator enabled)'
             } else {
               if ($env:GITHUB_REF -like 'refs/tags/v*') {
-                Write-Host '  ✗ untwine.exe NOT present in zip — release builds MUST include untwine. Failing.'
+                Write-Host '  ✗ untwine.exe NOT present in zip - release builds MUST include untwine. Failing.'
                 exit 1
               } else {
                 Write-Host '  ! untwine.exe NOT present in zip (DroneDB will fall back to PDAL writers.copc)'

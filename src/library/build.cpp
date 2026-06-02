@@ -135,7 +135,7 @@ static bool directoryHasNonEmptyContent(const fs::path& dir) {
 // Per-type rules:
 //   - Vector:    vec/source.gpkg AND mvt/metadata.json both exist and non-empty.
 //                Checks two specific canonical sentinel files rather than
-//                scanning the directory; this is intentional — both artifacts
+//                scanning the directory; this is intentional - both artifacts
 //                are always co-produced and uniquely identify a complete build.
 //   - Others:    the type's output subfolder exists and contains at least one
 //                non-empty file (covers copc/, cog/, nxs/). A directory-scan

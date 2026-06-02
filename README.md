@@ -194,7 +194,7 @@ git submodule update --init vendor/untwine
 .\full-build-win.ps1          # or -BuildType Release
 ```
 
-If the submodule is not present, DroneDB falls back to the built-in PDAL `writers.copc` pipeline automatically — no configuration required.
+If the submodule is not present, DroneDB falls back to the built-in PDAL `writers.copc` pipeline automatically - no configuration required.
 
 #### Troubleshooting
 
@@ -246,7 +246,7 @@ git submodule update --init vendor/untwine
 ./full-build-linux.sh          # or Debug
 ```
 
-A build failure in the Untwine step is **non-blocking** — DroneDB falls back to the PDAL `writers.copc` pipeline automatically.
+A build failure in the Untwine step is **non-blocking** - DroneDB falls back to the PDAL `writers.copc` pipeline automatically.
 
 ### Docker Build
 
@@ -316,7 +316,7 @@ Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for gu
 This project is licensed under the [Mozilla Public License 2.0 (MPL-2.0)](LICENSE.md).
 
 Distribution archives (Windows ZIP, Debian package, Docker image) may include
-third-party components under different licenses — most notably the optional
+third-party components under different licenses - most notably the optional
 [Untwine](https://github.com/hobuinc/untwine) COPC accelerator (GPL-3.0).
 See [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) for the full list and
 attributions.

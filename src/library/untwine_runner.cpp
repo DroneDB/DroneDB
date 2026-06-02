@@ -165,7 +165,7 @@ namespace ddb
                 }
             }
 
-            // 3. <install_prefix>/bin (parent of exe folder + /bin) — covers cmake --install layouts
+            // 3. <install_prefix>/bin (parent of exe folder + /bin) - covers cmake --install layouts
             if (found.empty())
             {
                 fs::path exeDir = io::getExeFolderPath();
@@ -279,7 +279,7 @@ namespace ddb
             // Use the structured --progress_fd protocol so we receive binary-framed
             // messages from untwine and forward them to the DDB logger.
             // Message format:
-            //   int32_t  msgId  — 1000=progress, 1001=error
+            //   int32_t  msgId  - 1000=progress, 1001=error
             //   [1000] uint32_t percent | uint32_t ssize | char[ssize]
             //   [1001] uint32_t ssize   | char[ssize]
             // On Windows the fd value is a HANDLE cast to size_t (QgisUntwine convention).
@@ -342,7 +342,7 @@ namespace ddb
             MultiByteToWideChar(CP_UTF8, 0, cmdLine.c_str(), -1, wideCmd.data(), wideLen);
 
             // Convert the resolved binary path to wide separately so we can pass it
-            // as lpApplicationName — this avoids relying on Windows PATH/CWD search
+            // as lpApplicationName - this avoids relying on Windows PATH/CWD search
             // and prevents executable-hijacking through the command-line token.
             std::string binStr = bin.string();
             int wideBinLen = MultiByteToWideChar(CP_UTF8, 0, binStr.c_str(), -1, nullptr, 0);

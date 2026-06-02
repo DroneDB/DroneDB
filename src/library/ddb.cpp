@@ -723,7 +723,7 @@ DDB_DLL DDBErr DDBGenerateMemoryThumbnail(const char* filePath,
 
 DDBErr DDBVSIFree(uint8_t* buffer) {
     DDB_C_BEGIN
-    // nullptr is allowed — matches C free() semantics (no-op)
+    // nullptr is allowed - matches C free() semantics (no-op)
     if (buffer != nullptr)
         VSIFree(buffer);
     DDB_C_END

@@ -181,7 +181,7 @@ if (Test-Path $untwinePath) {
     Copy-Item $untwinePath $stagingDir -Force
     Write-Host "  ✓ untwine.exe (COPC accelerator)" -ForegroundColor Green
 } else {
-    Write-Host "  - untwine.exe (not found, skipping — DroneDB will fall back to PDAL writers.copc)" -ForegroundColor Yellow
+    Write-Host "  - untwine.exe (not found, skipping - DroneDB will fall back to PDAL writers.copc)" -ForegroundColor Yellow
 }
 
 # Copy license files (always included for redistribution compliance)

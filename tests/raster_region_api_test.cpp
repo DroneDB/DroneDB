@@ -218,7 +218,7 @@ namespace
     TEST(testRasterRegionApi, RenderIndexInsufficientBands)
     {
         TestArea ta(TEST_NAME);
-        // Brighton ortho only has RGB(+alpha) bands — NDVI needs NIR (band 5)
+        // Brighton ortho only has RGB(+alpha) bands - NDVI needs NIR (band 5)
         // and must therefore be rejected.
         const fs::path ortho = ta.downloadTestAsset(kOrthoUrl, "ortho.tif");
         const double bbox[4] = {-0.18, 50.81, -0.10, 50.84};
