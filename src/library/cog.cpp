@@ -206,6 +206,7 @@ namespace ddb
 
         GDALWarpAppOptions *psOptions = GDALWarpAppOptionsNew(targs, nullptr);
         CSLDestroy(targs);
+        if (!psOptions) throw GDALException("GDALWarpAppOptionsNew returned null");
 
         // Increase GDAL block cache before warp to reduce tile re-reads from disk.
         // Configurable via DDB_COG_CACHE_MB (default: 1024 MB).
