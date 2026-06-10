@@ -11,7 +11,7 @@ provided through [vcpkg](https://github.com/microsoft/vcpkg) at build
 time (GDAL, PROJ, PDAL, SpatiaLite, Exiv2, libcurl, ...). The licenses
 of those libraries apply to the redistributed binaries; refer to the
 upstream projects for the exact terms. The list below is not
-exhaustive — it focuses on components that ship as separate binaries
+exhaustive - it focuses on components that ship as separate binaries
 inside our distribution archives.
 
 ---

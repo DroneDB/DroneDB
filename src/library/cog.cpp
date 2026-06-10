@@ -10,7 +10,9 @@
 #include "json.h"
 
 #include <fstream>
+#include <atomic>
 #include <cmath>
+#include <cstdlib>
 #include <algorithm>
 #include <chrono>
 #include <iomanip>
@@ -18,6 +20,20 @@
 
 namespace ddb
 {
+    // Progress callback for GDALWarp: logs warp progress every ~5% to aid diagnostics.
+    // Uses an atomic counter to throttle log output (GDAL may call this very frequently).
+    static int CPL_STDCALL cogWarpProgress(double dfComplete,
+                                           const char* /*pszMessage*/,
+                                           void* pProgressArg) {
+        auto* lastPct = static_cast<std::atomic<int>*>(pProgressArg);
+        const int pct = static_cast<int>(dfComplete * 100.0);
+        int prev = lastPct->load();
+        if (pct >= prev + 5 && lastPct->compare_exchange_strong(prev, pct)) {
+            LOGD << "COG warp progress: " << pct << "%";
+        }
+        return TRUE;
+    }
+
     void buildCog(const std::string &inputGTiff, const std::string &outputCog)
     {
         // Check if input is already an optimized COG
@@ -107,8 +123,11 @@ namespace ddb
         targs = CSLAddString(targs, "bilinear");
         targs = CSLAddString(targs, "-co");
         targs = CSLAddString(targs, "TILING_SCHEME=GoogleMapsCompatible");
-        targs = CSLAddString(targs, "-co");
-        targs = CSLAddString(targs, "PREDICTOR=YES");
+
+        // Warp memory buffer: larger values reduce chunk overhead, especially with NUM_THREADS>1.
+        // Configurable via DDB_WARP_MEMORY_MB (default: 512 MB).
+        targs = CSLAddString(targs, "-wm");
+        targs = CSLAddString(targs, CPLGetConfigOption("DDB_WARP_MEMORY_MB", "512"));
 
         // Preserve nodata values for transparency
         if (hasNoData) {
@@ -153,14 +172,23 @@ namespace ddb
             {
                 targs = CSLAddString(targs, "-co");
                 targs = CSLAddString(targs, "COMPRESS=JPEG");
+                // JPEG quality: configurable via DDB_COG_JPEG_QUALITY (default: 75, matching GDAL default).
+                // PREDICTOR is not valid for JPEG and is intentionally omitted.
+                int jpegQuality = 75;
+                const char* envQuality = CPLGetConfigOption("DDB_COG_JPEG_QUALITY", nullptr);
+                if (envQuality) {
+                    jpegQuality = std::clamp(std::atoi(envQuality), 1, 100);
+                }
                 targs = CSLAddString(targs, "-co");
-                targs = CSLAddString(targs, "QUALITY=90");
+                targs = CSLAddString(targs, ("QUALITY=" + std::to_string(jpegQuality)).c_str());
             }
             else
             {
                 // LZW by default for non-8bit data
                 targs = CSLAddString(targs, "-co");
                 targs = CSLAddString(targs, "COMPRESS=LZW");
+                targs = CSLAddString(targs, "-co");
+                targs = CSLAddString(targs, "PREDICTOR=YES");
             }
         }
         else
@@ -168,6 +196,8 @@ namespace ddb
             // LZW by default for data with nodata values or other band counts
             targs = CSLAddString(targs, "-co");
             targs = CSLAddString(targs, "COMPRESS=LZW");
+            targs = CSLAddString(targs, "-co");
+            targs = CSLAddString(targs, "PREDICTOR=YES");
         }
 
         // BigTIFF
@@ -176,6 +206,23 @@ namespace ddb
 
         GDALWarpAppOptions *psOptions = GDALWarpAppOptionsNew(targs, nullptr);
         CSLDestroy(targs);
+        if (!psOptions) throw GDALException("GDALWarpAppOptionsNew returned null");
+
+        // Increase GDAL block cache before warp to reduce tile re-reads from disk.
+        // Configurable via DDB_COG_CACHE_MB (default: 1024 MB).
+        // Only increase if current value is lower; never decrease an already larger cache.
+        const GIntBig prevCacheMax = GDALGetCacheMax64();
+        const char* cacheMbEnv = CPLGetConfigOption("DDB_COG_CACHE_MB", "1024");
+        const GIntBig desiredCache = static_cast<GIntBig>(std::max(1, std::atoi(cacheMbEnv))) * 1024 * 1024;
+        const bool cacheRaised = prevCacheMax < desiredCache;
+        if (cacheRaised)
+            GDALSetCacheMax64(desiredCache);
+
+
+        // Attach progress callback for diagnostic logging during long warp operations
+        std::atomic<int> warpPct{0};
+        GDALWarpAppOptionsSetProgress(psOptions, cogWarpProgress, &warpPct);
+
         GDALDatasetH hNewDataset = GDALWarp(outputCog.c_str(),
                                             nullptr,
                                             1,
@@ -183,6 +230,11 @@ namespace ddb
                                             psOptions,
                                             nullptr);
         GDALWarpAppOptionsFree(psOptions);
+
+        // Restore previous GDAL cache size to avoid interfering with other operations
+        if (cacheRaised)
+            GDALSetCacheMax64(prevCacheMax);
+
         if (!hNewDataset) {
             GDALClose(hSrcDataset);
             throw GDALException("GDALWarp failed to create output COG: " + outputCog);

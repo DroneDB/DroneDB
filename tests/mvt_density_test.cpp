@@ -35,7 +35,7 @@ namespace
         // formula (ratio = kMvtTileBudget*64800/area ≥ 2^36), so the clamp
         // saturates upward to kMvtMaxZoomCap.
         // NOTE: 1 deg² does NOT saturate with the current budget of 10 000
-        // tiles — that gives z=14.  Only sub-centidegree² extents saturate.
+        // tiles - that gives z=14.  Only sub-centidegree² extents saturate.
         EXPECT_EQ(computeMvtMaxZoom(1,    1e-4), kMvtMaxZoomCap);
         EXPECT_EQ(computeMvtMaxZoom(1000, 1e-4), kMvtMaxZoomCap);
         EXPECT_EQ(computeMvtMaxZoom(1,    1e-6), kMvtMaxZoomCap);

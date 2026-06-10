@@ -272,7 +272,7 @@ namespace ddb
                 const auto zPos = base.find('Z', minTzPos);
                 if (zPos != std::string::npos)
                 {
-                    base.erase(zPos); // UTC — no offset adjustment
+                    base.erase(zPos); // UTC - no offset adjustment
                 }
                 else
                 {

@@ -594,6 +594,12 @@ TEST(stacCApi, successReturnsFeatureCollection) {
         "https://github.com/DroneDB/test_data/raw/master/brighton/odm_orthophoto.tif",
         "ortho.tif");
 
+    // Ensure .ddb is removed (stale leftovers from previous runs on Windows)
+    auto ddbDir = ta.getFolder() / ".ddb";
+    if (fs::exists(ddbDir)) {
+        std::error_code ec;
+        fs::remove_all(ddbDir, ec);
+    }
     ddb::initIndex(ta.getFolder().string());
     auto db = ddb::open(ta.getFolder().string(), true);
     ddb::addToIndex(db.get(), {ortho.string()});

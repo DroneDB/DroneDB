@@ -22,8 +22,16 @@ extern "C"
         DDBERR_NONE = 0,            // No error
         DDBERR_EXCEPTION = 1,       // Generic app exception
         DDBERR_BUILDDEPMISSING = 2, // Build skipped: dependency missing
-        DDBERR_BUILDINPROGRESS = 3  // Build skipped: another process holds the lock
+        DDBERR_BUILDINPROGRESS = 3, // Build skipped: another process holds the lock
+        DDBERR_CANCELED = 4         // Operation canceled by the progress callback
     };
+
+    /** Progress callback for long-running operations.
+     * @param fraction progress in [0,1], or -1 for indeterminate
+     * @param phase short label of the current phase (may be NULL)
+     * @param userData opaque pointer passed through from the caller
+     * @return 0 to continue, non-zero to request cancellation */
+    typedef int (*DDBProgressCallback)(double fraction, const char *phase, void *userData);
 
 #define DDB_C_BEGIN \
     try             \
@@ -483,6 +491,29 @@ extern "C"
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBMergeMultispectral(const char **paths, int numPaths, const char *outputPath);
 
+    /** Validate that source and reference rasters are compatible for alignment.
+     * @param sourcePath Absolute path to source GeoTIFF
+     * @param referencePath Absolute path to reference GeoTIFF
+     * @param output Pointer to C-string to receive JSON (caller frees with DDBFree)
+     * @return DDBERR_NONE on success, an error otherwise */
+    DDB_DLL DDBErr DDBValidateAlignRaster(const char *sourcePath,
+                                          const char *referencePath,
+                                          char **output);
+
+    /** Align source GeoTIFF to reference GeoTIFF and write output COG.
+     * @param sourcePath Absolute path to source GeoTIFF
+     * @param referencePath Absolute path to reference GeoTIFF
+     * @param outputPath Absolute path for the aligned output (COG). Note: the
+     *   output is always reprojected to EPSG:3857 regardless of the source CRS.
+     * @param mode "similarity" (default) or "translation"
+     * @param output Pointer to C-string to receive JSON AlignResult (caller frees with DDBFree)
+     * @return DDBERR_NONE on success, an error otherwise */
+    DDB_DLL DDBErr DDBAlignRaster(const char *sourcePath,
+                                  const char *referencePath,
+                                  const char *outputPath,
+                                  const char *mode,
+                                  char **output);
+
     /** Export raster with visualization params applied as GeoTIFF
      * @param inputPath Path to source raster file
      * @param outputPath Path for the output GeoTIFF file
@@ -497,6 +528,29 @@ extern "C"
                                     const char *preset, const char *bands,
                                     const char *formula, const char *bandFilter,
                                     const char *colormap, const char *rescale);
+
+    /** Export raster with visualization params applied as GeoTIFF, block-windowed.
+     * Unlike DDBExportRaster, the formula branch processes the raster in tiles so
+     * peak memory is bounded by O(tileSize^2 * bandCount) instead of O(width*height).
+     * Supports incremental progress reporting and cooperative cancellation.
+     * @param inputPath Path to source raster file
+     * @param outputPath Path for the output GeoTIFF file
+     * @param preset Preset ID, or NULL
+     * @param bands Comma-separated band indices, or NULL
+     * @param formula Formula ID (e.g., "NDVI"), or NULL
+     * @param bandFilter Band order (e.g., "RGB"), or NULL
+     * @param colormap Colormap ID (e.g., "rdylgn"), or NULL
+     * @param rescale Rescale range "min,max", or NULL
+     * @param tileSize Tile size in pixels for windowed processing; 0 = auto
+     * @param progress Optional progress callback (may be NULL)
+     * @param progressUserData Opaque pointer forwarded to the progress callback
+     * @return DDBERR_NONE on success, DDBERR_CANCELED if canceled, an error otherwise */
+    DDB_DLL DDBErr DDBExportRaster2(const char *inputPath, const char *outputPath,
+                                    const char *preset, const char *bands,
+                                    const char *formula, const char *bandFilter,
+                                    const char *colormap, const char *rescale,
+                                    int tileSize,
+                                    DDBProgressCallback progress, void *progressUserData);
 
     /** Get info about a single-band raster used for analysis (thermal image, DEM,
      * or generic value raster), including min/max, unit, dimensions and

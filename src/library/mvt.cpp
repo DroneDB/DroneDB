@@ -12,7 +12,7 @@ namespace ddb
     int computeMvtMaxZoom(long long featureCount, double extentAreaDeg2)
     {
         // Degenerate envelope (single point / empty bbox) or an explicitly
-        // empty layer: use the cap zoom — no real work to bound.
+        // empty layer: use the cap zoom - no real work to bound.
         //
         // NOTE: featureCount may legitimately be negative when the source
         // driver could not provide a cheap count (OGR convention: -1 means

@@ -6,6 +6,7 @@
 #include "include/build.h"
 #include "include/init.h"
 #include "include/add.h"
+#include "include/align.h"
 #include "include/remove.h"
 #include "include/sync.h"
 #include "include/rescan.h"
@@ -45,6 +46,7 @@ namespace cmd
       {"build", new Build()},
       {"init", new Init()},
       {"add", new Add()},
+      {"align", new Align()},
       {"remove", new Remove()},
       {"sync", new Sync()},
       {"rescan", new Rescan()},
