@@ -99,10 +99,12 @@ static RasterGrid readToCommonGrid(GDALDatasetH hDs,
     std::vector<std::vector<float>> bands(nbands, std::vector<float>(static_cast<size_t>(outW) * outH, 0.f));
     for (int b = 1; b <= nbands; b++) {
         GDALRasterBandH hBand = GDALGetRasterBand(hDs, b);
-        GDALRasterIO(hBand, GF_Read,
-                     px0, py0, px1 - px0, py1 - py0,
-                     bands[b - 1].data(), outW, outH,
-                     GDT_Float32, 0, 0);
+        if (!hBand) throw GDALException("Cannot get band " + std::to_string(b));
+        if (GDALRasterIO(hBand, GF_Read,
+                         px0, py0, px1 - px0, py1 - py0,
+                         bands[b - 1].data(), outW, outH,
+                         GDT_Float32, 0, 0) != CE_None)
+            throw GDALException("GDALRasterIO failed for band " + std::to_string(b));
     }
 
     std::vector<float> signal(static_cast<size_t>(outW) * outH);
@@ -551,13 +553,15 @@ static double computeZOffset(const std::string &alignedPath,
     int W = std::min(512, GDALGetRasterXSize(hA));
     int H = std::min(512, GDALGetRasterYSize(hA));
     std::vector<float> bufA((size_t)W * H), bufR((size_t)W * H);
-    GDALRasterIO(GDALGetRasterBand(hA, 1), GF_Read, 0, 0, W, H,
-                 bufA.data(), W, H, GDT_Float32, 0, 0);
-    GDALRasterIO(GDALGetRasterBand(hR, 1), GF_Read, 0, 0, W, H,
-                 bufR.data(), W, H, GDT_Float32, 0, 0);
+    const bool readOk =
+        GDALRasterIO(GDALGetRasterBand(hA, 1), GF_Read, 0, 0, W, H,
+                     bufA.data(), W, H, GDT_Float32, 0, 0) == CE_None &&
+        GDALRasterIO(GDALGetRasterBand(hR, 1), GF_Read, 0, 0, W, H,
+                     bufR.data(), W, H, GDT_Float32, 0, 0) == CE_None;
 
     int hasNd; double nd = GDALGetRasterNoDataValue(GDALGetRasterBand(hA, 1), &hasNd);
     GDALClose(hA); GDALClose(hR);
+    if (!readOk) return 0.0;
 
     std::vector<float> diffs;
     diffs.reserve(static_cast<size_t>(W) * H);

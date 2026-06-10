@@ -1949,8 +1949,13 @@ DDB_DLL DDBErr DDBAlignRaster(const char* sourcePath,
         throw InvalidArgsException("Output pointer is null");
 
     ddb::AlignOptions opts;
-    if (mode && std::string(mode) == "translation")
-        opts.mode = ddb::AlignMode::Translation;
+    if (mode) {
+        std::string modeStr(mode);
+        if (modeStr == "translation")
+            opts.mode = ddb::AlignMode::Translation;
+        else if (!modeStr.empty() && modeStr != "similarity")
+            throw InvalidArgsException("Unknown mode '" + modeStr + "'. Use: similarity | translation");
+    }
 
     auto r = ddb::alignRaster(std::string(sourcePath),
                               std::string(referencePath),
@@ -2126,15 +2131,16 @@ static int exportRasterImpl(const char* inputPath, const char* outputPath,
                     computeWindow(x0, y0, winW, winH, storage, ptrs, result);
                     for (float v : result) {
                         if (v == nodata || std::isnan(v)) continue;
+                        seen++;  // count this element before drawing (Algorithm R)
                         if (valid.size() < kMaxSamples) {
                             valid.push_back(v);
                         } else {
-                            // Reservoir sampling keeps a uniform subset.
+                            // Reservoir sampling: draw j from [0, seen) where seen
+                            // already includes this element → probability k/seen.
                             const size_t j = static_cast<size_t>(
                                 (static_cast<double>(std::rand()) / RAND_MAX) * seen);
                             if (j < kMaxSamples) valid[j] = v;
                         }
-                        seen++;
                     }
                 }
             }

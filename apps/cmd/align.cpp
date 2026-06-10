@@ -18,7 +18,7 @@ namespace cmd
         .add_options()
         ("i,input",     "Source GeoTIFF to align",                         cxxopts::value<std::string>())
         ("r,reference", "Reference GeoTIFF (ground truth, more accurate)", cxxopts::value<std::string>())
-        ("o,output",    "Output aligned GeoTIFF (COG)",                    cxxopts::value<std::string>())
+        ("o,output",    "Output aligned GeoTIFF (COG, reprojected to EPSG:3857)",  cxxopts::value<std::string>())
         ("m,mode",      "similarity (default) | translation",              cxxopts::value<std::string>()->default_value("similarity"))
         ("validate",    "Only validate inputs; do not align")
         ("no-seed",     "Disable phase-correlation seed (slower NCC search)");

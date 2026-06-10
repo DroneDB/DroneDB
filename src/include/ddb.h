@@ -503,7 +503,8 @@ extern "C"
     /** Align source GeoTIFF to reference GeoTIFF and write output COG.
      * @param sourcePath Absolute path to source GeoTIFF
      * @param referencePath Absolute path to reference GeoTIFF
-     * @param outputPath Absolute path for the aligned output (COG)
+     * @param outputPath Absolute path for the aligned output (COG). Note: the
+     *   output is always reprojected to EPSG:3857 regardless of the source CRS.
      * @param mode "similarity" (default) or "translation"
      * @param output Pointer to C-string to receive JSON AlignResult (caller frees with DDBFree)
      * @return DDBERR_NONE on success, an error otherwise */
