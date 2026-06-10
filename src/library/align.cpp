@@ -652,7 +652,10 @@ AlignValidationResult validateAlignRaster(const std::string &sourcePath,
     double oy = std::max(0.0, std::min(sY1, rY1) - std::max(sY0, rY0));
     double sArea = (sX1 - sX0) * (sY1 - sY0);
     r.summary.overlapPercent = (sArea > 0) ? 100.0 * (ox * oy) / sArea : 0.0;
-    if (r.summary.overlapPercent < 5.0)
+    // When CRS differ the envelopes are in incompatible coordinate systems;
+    // the raw overlap percentage is meaningless and must not block validation —
+    // alignRaster() will reproject the reference before checking real overlap.
+    if (!r.summary.crsMismatch && r.summary.overlapPercent < 5.0)
         r.errors.push_back("Insufficient overlap (" +
                            std::to_string(static_cast<int>(r.summary.overlapPercent)) + "%)");
 
@@ -712,6 +715,12 @@ AlignResult alignRaster(const std::string &sourcePath,
     double sY0 = gts[3] + gts[5] * GDALGetRasterYSize(hS), sY1 = gts[3];
     double rX0 = gtr[0], rX1 = gtr[0] + gtr[1] * GDALGetRasterXSize(hR);
     double rY0 = gtr[3] + gtr[5] * GDALGetRasterYSize(hR), rY1 = gtr[3];
+    // Normalize so that X0 < X1 and Y0 < Y1 regardless of pixel-size sign
+    // (handles west-up or south-up geotransforms with negative pixel sizes).
+    if (sX1 < sX0) std::swap(sX0, sX1);
+    if (sY1 < sY0) std::swap(sY0, sY1);
+    if (rX1 < rX0) std::swap(rX0, rX1);
+    if (rY1 < rY0) std::swap(rY0, rY1);
     double ox0 = std::max(sX0, rX0), ox1 = std::min(sX1, rX1);
     double oy0 = std::max(sY0, rY0), oy1 = std::min(sY1, rY1);
 
