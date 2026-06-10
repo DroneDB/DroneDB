@@ -13,6 +13,7 @@
 #include "gdal_inc.h"
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <thread>
 #include <vector>
@@ -65,6 +66,12 @@ fs::path makeSyntheticRaster(const fs::path& path, int width, int height, int ba
     // A trivial geotransform + projection so the export preserves georeferencing.
     double gt[6] = {0.0, 1.0, 0.0, 0.0, 0.0, -1.0};
     GDALSetGeoTransform(ds, gt);
+    OGRSpatialReference srs;
+    srs.importFromEPSG(4326);
+    char* wkt = nullptr;
+    srs.exportToWkt(&wkt);
+    GDALSetProjection(ds, wkt);
+    CPLFree(wkt);
 
     std::vector<float> row(static_cast<size_t>(width));
     for (int b = 0; b < bands; b++) {
@@ -104,12 +111,22 @@ class ExportRaster2Test : public ::testing::Test {
     void SetUp() override {
         DDBRegisterProcess(false);
         // Keep GDAL's block cache modest so the memory test isolates our buffers.
+        prevCacheMax_ = GDALGetCacheMax64();
         GDALSetCacheMax(64 * 1024 * 1024);
     }
+
+    void TearDown() override {
+        GDALSetCacheMax64(prevCacheMax_);
+    }
+
+ private:
+    GIntBig prevCacheMax_ = 0;
 };
 
 // 1) Memory: a large raster must not be loaded whole-into-memory.
-TEST_F(ExportRaster2Test, MemoryBounded) {
+// Disabled by default: generates a very large synthetic file (~800 MB) that is
+// slow and I/O-heavy in CI. Run explicitly with --gtest_filter=*MemoryBounded.
+MANUAL_TEST(ExportRaster2Test, MemoryBounded) {
     TestArea ta("ExportRaster2_Memory", true);
     const fs::path input = ta.getPath("big.tif");
     const fs::path output = ta.getPath("big_ndvi.tif");
@@ -246,7 +263,9 @@ TEST_F(ExportRaster2Test, ProgressMonotonic) {
 
 // 6) Auto-percentile rescale path (formula without a defined range) must stay
 //    memory-bounded thanks to reservoir subsampling. vNDVI has hasRange=false.
-TEST_F(ExportRaster2Test, AutoPercentileMemoryBounded) {
+// Disabled by default: generates a very large synthetic file (~768 MB) that is
+// slow and I/O-heavy in CI. Run explicitly with --gtest_filter=*AutoPercentile*.
+MANUAL_TEST(ExportRaster2Test, AutoPercentileMemoryBounded) {
     TestArea ta("ExportRaster2_AutoPercentile", true);
     const fs::path input = ta.getPath("ap.tif");
     const fs::path output = ta.getPath("ap_out.tif");

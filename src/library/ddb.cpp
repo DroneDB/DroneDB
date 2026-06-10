@@ -1961,9 +1961,13 @@ DDB_DLL DDBErr DDBAlignRaster(const char* sourcePath,
 }
 
 // Auto-compute a windowed tile size for the formula export branch.
-// Honors an explicit tileSize when > 0, otherwise derives one from the source
-// block size clamped to [256, 1024] and capped so the per-tile working set
-// (input float bands + intermediate buffers) stays within ~64 MB.
+// - Explicit tileSize > 0: clamped to [64, 8192], then rounded up to the
+//   nearest multiple of 16 (GeoTIFF tiling requirement).
+// - Auto (tileSize == 0): starts from max(blockSize, 512) clamped to
+//   [256, 1024], then halved until the per-tile working set
+//   (bandCount input floats + formula result float + RGBA bytes,
+//   x2 headroom) fits within ~64 MB, with a floor of 256; the
+//   result is then rounded up to the nearest multiple of 16.
 static int computeExportTileSize(GDALDatasetH hSrcDs, int bandCount, int tileSize) {
     int result;
     if (tileSize > 0) {
@@ -2243,8 +2247,11 @@ static int exportRasterImpl(const char* inputPath, const char* outputPath,
             throw;
         }
 
-        // Use GDALTranslate for band selection + rescale
-        reportProgress(0.0, "converting");
+        // Use GDALTranslate for band selection + rescale.
+        // Note: GDALTranslate does not expose an incremental progress callback
+        // via its options API, so callers will only receive progress at 0.0 and
+        // 1.0. Cancellation is only possible before the translate starts.
+        if (reportProgress(0.0, "converting")) return 1;
         char** targs = nullptr;
         targs = CSLAddString(targs, "-ot");
         targs = CSLAddString(targs, "Byte");
