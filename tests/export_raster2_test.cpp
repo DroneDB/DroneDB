@@ -126,7 +126,7 @@ class ExportRaster2Test : public ::testing::Test {
 // 1) Memory: a large raster must not be loaded whole-into-memory.
 // Disabled by default: generates a very large synthetic file (~800 MB) that is
 // slow and I/O-heavy in CI. Run explicitly with --gtest_filter=*MemoryBounded.
-MANUAL_TEST(ExportRaster2Test, MemoryBounded) {
+MANUAL_TEST_F(ExportRaster2Test, MemoryBounded) {
     TestArea ta("ExportRaster2_Memory", true);
     const fs::path input = ta.getPath("big.tif");
     const fs::path output = ta.getPath("big_ndvi.tif");
@@ -265,7 +265,7 @@ TEST_F(ExportRaster2Test, ProgressMonotonic) {
 //    memory-bounded thanks to reservoir subsampling. vNDVI has hasRange=false.
 // Disabled by default: generates a very large synthetic file (~768 MB) that is
 // slow and I/O-heavy in CI. Run explicitly with --gtest_filter=*AutoPercentile*.
-MANUAL_TEST(ExportRaster2Test, AutoPercentileMemoryBounded) {
+MANUAL_TEST_F(ExportRaster2Test, AutoPercentileMemoryBounded) {
     TestArea ta("ExportRaster2_AutoPercentile", true);
     const fs::path input = ta.getPath("ap.tif");
     const fs::path output = ta.getPath("ap_out.tif");

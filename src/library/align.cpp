@@ -7,6 +7,7 @@
 #include "exceptions.h"
 #include "logger.h"
 #include "json.h"
+#include "fs.h"          // fs::absolute — used by applyWarp() for VRT path resolution
 
 #include <algorithm>
 #include <cmath>
@@ -499,7 +500,10 @@ static void applyWarp(const std::string &sourcePath,
                       const Similarity2D &sim,
                       const std::string &targetCrs)
 {
-    GDALDatasetH hSrc = GDALOpen(sourcePath.c_str(), GA_ReadOnly);
+    // Resolve to an absolute path so the VRT SimpleSource can find the file
+    // regardless of any cwd change between the VRT creation and the warp read.
+    const std::string absSrcPath = fs::absolute(sourcePath).string();
+    GDALDatasetH hSrc = GDALOpen(absSrcPath.c_str(), GA_ReadOnly);
     if (!hSrc) throw GDALException("Cannot open " + sourcePath);
 
     double gt[6];
@@ -514,13 +518,19 @@ static void applyWarp(const std::string &sourcePath,
     ngt[4] = sc * (si * gt[1] + co * gt[4]);
     ngt[5] = sc * (si * gt[2] + co * gt[5]);
 
-    // Copy into a MEM dataset carrying the new GeoTransform
-    GDALDriverH  hMemDrv = GDALGetDriverByName("MEM");
-    GDALDatasetH hMem    = GDALCreateCopy(hMemDrv, "", hSrc, FALSE,
-                                          nullptr, nullptr, nullptr);
-    if (!hMem) { GDALClose(hSrc); throw GDALException("Cannot create MEM dataset for warp"); }
-    GDALSetGeoTransform(hMem, ngt);
-    GDALSetProjection(hMem, targetCrs.c_str());
+    // Wrap the source in a lightweight VRT (metadata-only) carrying the new
+    // GeoTransform. This avoids copying the entire raster pixel data into a
+    // MEM dataset (which peaks at O(W·H·B) RAM), letting GDALWarp read source
+    // pixels on-demand block-by-block (O(block) memory, independent of raster
+    // size). The VRT driver stores the source path as a SimpleSource reference;
+    // hSrc is kept open until after GDALWarp so the file remains accessible.
+    GDALDriverH hVrtDrv = GDALGetDriverByName("VRT");
+    if (!hVrtDrv) { GDALClose(hSrc); throw GDALException("VRT driver unavailable"); }
+    GDALDatasetH hVrt = GDALCreateCopy(hVrtDrv, "", hSrc, FALSE,
+                                       nullptr, nullptr, nullptr);
+    if (!hVrt) { GDALClose(hSrc); throw GDALException("Cannot create VRT wrapper for warp"); }
+    GDALSetGeoTransform(hVrt, ngt);
+    GDALSetProjection(hVrt, targetCrs.c_str());
 
     // GDALWarp → temporary LZW GTiff
     char **args = nullptr;
@@ -532,9 +542,10 @@ static void applyWarp(const std::string &sourcePath,
 
     GDALWarpAppOptions *wOpts = GDALWarpAppOptionsNew(args, nullptr);
     CSLDestroy(args);
-    GDALDatasetH hOut = GDALWarp(tmpPath.c_str(), nullptr, 1, &hMem, wOpts, nullptr);
+    GDALDatasetH hOut = GDALWarp(tmpPath.c_str(), nullptr, 1, &hVrt, wOpts, nullptr);
     GDALWarpAppOptionsFree(wOpts);
-    GDALClose(hMem); GDALClose(hSrc);
+    GDALClose(hVrt);
+    GDALClose(hSrc);
     if (!hOut) throw GDALException("GDALWarp failed for aligned output: " + tmpPath);
     GDALClose(hOut);
 }

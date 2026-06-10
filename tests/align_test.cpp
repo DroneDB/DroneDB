@@ -33,6 +33,31 @@ namespace
         return (h & 0xFFFFFFu) / static_cast<double>(0x1000000u);
     }
 
+    // ─── Helper: create a single-band Float32 GeoTIFF filled with a constant ──────
+    static void createUniformGeoTiff(const std::string &path,
+                                     int W, int H, double gt[6], float value)
+    {
+        GDALDriverH hDrv = GDALGetDriverByName("GTiff");
+        GDALDatasetH hDs = GDALCreate(hDrv, path.c_str(), W, H, 1, GDT_Float32, nullptr);
+        GDALSetGeoTransform(hDs, gt);
+
+        OGRSpatialReferenceH hSrs = OSRNewSpatialReference(nullptr);
+        OSRImportFromEPSG(hSrs, 32632);
+        char *wkt = nullptr;
+        OSRExportToWkt(hSrs, &wkt);
+        GDALSetProjection(hDs, wkt);
+        CPLFree(wkt);
+        OSRDestroySpatialReference(hSrs);
+
+        GDALRasterBandH hBand = GDALGetRasterBand(hDs, 1);
+        std::vector<float> row(static_cast<size_t>(W), value);
+        for (int r = 0; r < H; r++)
+            GDALRasterIO(hBand, GF_Write, 0, r, W, 1,
+                         row.data(), W, 1, GDT_Float32, 0, 0);
+        GDALFlushCache(hDs);
+        GDALClose(hDs);
+    }
+
     // ─── Helper: create a synthetic GeoTIFF with rich, broadband texture ─────────
     static void createSyntheticGeoTiff(const std::string &path,
                                        int W, int H, double gt[6],
@@ -202,6 +227,130 @@ namespace
         EXPECT_TRUE(r.ok);
         EXPECT_GT(r.summary.overlapPercent, 5.0);
         EXPECT_EQ(r.summary.sourceType, "ortho");
+    }
+
+    // ─── Test 7: VRT warp preserves a constant pixel field ───────────────────────
+    // A uniform-value raster bilinearly warped must remain constant in the valid
+    // interior region (bilinear interpolation of a constant C yields C exactly).
+    // This validates that the VRT lightweight wrapper correctly delivers source
+    // pixels to GDALWarp without losing data — the failure mode if VRT can't
+    // find the source file would be an output filled with nodata or zeros.
+    TEST_F(AlignTest, WarpPreservesConstantField)
+    {
+        TestArea ta(TEST_NAME);
+
+        const float kValue = 137.0f;
+        // Reference and source at the same position so phase correlation returns
+        // zero offset (constant field has no texture to track — that's fine here;
+        // the identity warp is the correct result).
+        double refGt[6] = {500000.0, 2.0, 0, 5000000.0, 0, -2.0};
+        double srcGt[6] = {500000.0, 2.0, 0, 5000000.0, 0, -2.0};
+
+        auto refPath = ta.getPath("ref_const.tif").string();
+        auto srcPath = ta.getPath("src_const.tif").string();
+        auto outPath = ta.getPath("out_const.tif").string();
+
+        createUniformGeoTiff(refPath, 256, 256, refGt, kValue);
+        createUniformGeoTiff(srcPath, 256, 256, srcGt, kValue);
+
+        ddb::AlignOptions opts;
+        opts.mode = ddb::AlignMode::Translation;
+        auto r = ddb::alignRaster(srcPath, refPath, outPath, opts);
+
+        ASSERT_TRUE(r.success);
+        ASSERT_TRUE(fs::exists(outPath));
+
+        // Open the output COG and sample interior pixels.
+        GDALDatasetH hOut = GDALOpen(outPath.c_str(), GA_ReadOnly);
+        ASSERT_NE(hOut, nullptr);
+
+        const int outW = GDALGetRasterXSize(hOut);
+        const int outH = GDALGetRasterYSize(hOut);
+        GDALRasterBandH hBand = GDALGetRasterBand(hOut, 1);
+        int hasNd;
+        const float nd = static_cast<float>(GDALGetRasterNoDataValue(hBand, &hasNd));
+
+        // Sample a central strip well away from the nodata border introduced by
+        // the COG reprojection (EPSG:3857). Bilinear of constant C = C.
+        const int margin = std::max(outW, outH) / 4;
+        std::vector<float> row(static_cast<size_t>(outW));
+        int sampledPixels = 0, correctPixels = 0;
+        for (int y = margin; y < outH - margin; y++) {
+            GDALRasterIO(hBand, GF_Read, 0, y, outW, 1,
+                         row.data(), outW, 1, GDT_Float32, 0, 0);
+            for (int x = margin; x < outW - margin; x++) {
+                if (hasNd && std::abs(row[x] - nd) < 1.0f) continue;
+                sampledPixels++;
+                // Tolerance 1.0 covers rounding from Float32 → bilinear → COG.
+                if (std::abs(row[x] - kValue) < 1.0f) correctPixels++;
+            }
+        }
+        GDALClose(hOut);
+
+        EXPECT_GT(sampledPixels, 0) << "No valid interior pixels found in output";
+        EXPECT_EQ(correctPixels, sampledPixels)
+            << correctPixels << "/" << sampledPixels
+            << " interior pixels equal " << kValue
+            << " (VRT may have failed to read source pixels)";
+    }
+
+    // ─── Test 8: VRT-based warp output is deterministic ──────────────────────────
+    // Running alignRaster twice with identical inputs must produce bit-identical
+    // output rasters. Validates that the VRT on-demand read path is reproducible
+    // (no uninitialized-buffer or partial-read artifacts from reopening the file).
+    TEST_F(AlignTest, WarpOutputDeterministic)
+    {
+        TestArea ta(TEST_NAME);
+
+        double refGt[6] = {500000.0, 0.5, 0, 5000000.0, 0, -0.5};
+        double srcGt[6] = {500003.0, 0.5, 0, 4999998.0, 0, -0.5};  // 3 m X, -2 m Y
+
+        auto refPath = ta.getPath("ref_det.tif").string();
+        auto srcPath = ta.getPath("src_det.tif").string();
+        auto out1    = ta.getPath("out_det1.tif").string();
+        auto out2    = ta.getPath("out_det2.tif").string();
+
+        createSyntheticGeoTiff(refPath, 256, 256, refGt);
+        createSyntheticGeoTiff(srcPath, 256, 256, srcGt);
+
+        ddb::AlignOptions opts;
+        opts.mode = ddb::AlignMode::Translation;
+
+        auto r1 = ddb::alignRaster(srcPath, refPath, out1, opts);
+        auto r2 = ddb::alignRaster(srcPath, refPath, out2, opts);
+
+        ASSERT_TRUE(r1.success);
+        ASSERT_TRUE(r2.success);
+
+        // Alignment results must match to sub-micron precision.
+        EXPECT_NEAR(r1.txMapUnits, r2.txMapUnits, 1e-6);
+        EXPECT_NEAR(r1.tyMapUnits, r2.tyMapUnits, 1e-6);
+
+        // Output pixel data must be bit-identical.
+        GDALDatasetH h1 = GDALOpen(out1.c_str(), GA_ReadOnly);
+        GDALDatasetH h2 = GDALOpen(out2.c_str(), GA_ReadOnly);
+        ASSERT_NE(h1, nullptr);
+        ASSERT_NE(h2, nullptr);
+
+        const int W      = GDALGetRasterXSize(h1);
+        const int H      = GDALGetRasterYSize(h1);
+        const int nBands = GDALGetRasterCount(h1);
+        EXPECT_EQ(W, GDALGetRasterXSize(h2));
+        EXPECT_EQ(H, GDALGetRasterYSize(h2));
+
+        std::vector<float> buf1(static_cast<size_t>(W) * H);
+        std::vector<float> buf2(buf1.size());
+        for (int b = 1; b <= nBands; b++) {
+            GDALRasterIO(GDALGetRasterBand(h1, b), GF_Read, 0, 0, W, H,
+                         buf1.data(), W, H, GDT_Float32, 0, 0);
+            GDALRasterIO(GDALGetRasterBand(h2, b), GF_Read, 0, 0, W, H,
+                         buf2.data(), W, H, GDT_Float32, 0, 0);
+            EXPECT_EQ(buf1, buf2)
+                << "Band " << b << " differs between two identical alignRaster runs"
+                << " (VRT read path non-determinism)";
+        }
+        GDALClose(h1);
+        GDALClose(h2);
     }
 
 } // namespace
