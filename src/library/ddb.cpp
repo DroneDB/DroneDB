@@ -35,6 +35,7 @@
 #include "json.h"
 #include "logger.h"
 #include "mask.h"
+#include "align.h"
 #include "merge_multispectral.h"
 #include "mio.h"
 #include "passwordmanager.h"
@@ -1908,6 +1909,53 @@ DDB_DLL DDBErr DDBMergeMultispectral(const char** paths, int numPaths, const cha
     }
 
     ddb::mergeMultispectral(inputPaths, std::string(outputPath));
+
+    DDB_C_END
+}
+
+DDB_DLL DDBErr DDBValidateAlignRaster(const char* sourcePath,
+                                      const char* referencePath,
+                                      char** output) {
+    DDB_C_BEGIN
+
+    if (utils::isNullOrEmptyOrWhitespace(sourcePath))
+        throw InvalidArgsException("sourcePath is required");
+    if (utils::isNullOrEmptyOrWhitespace(referencePath))
+        throw InvalidArgsException("referencePath is required");
+    if (output == nullptr)
+        throw InvalidArgsException("Output pointer is null");
+
+    auto r = ddb::validateAlignRaster(std::string(sourcePath),
+                                      std::string(referencePath));
+    utils::copyToPtr(ddb::alignValidationToJson(r), output);
+
+    DDB_C_END
+}
+
+DDB_DLL DDBErr DDBAlignRaster(const char* sourcePath,
+                              const char* referencePath,
+                              const char* outputPath,
+                              const char* mode,
+                              char** output) {
+    DDB_C_BEGIN
+
+    if (utils::isNullOrEmptyOrWhitespace(sourcePath))
+        throw InvalidArgsException("sourcePath is required");
+    if (utils::isNullOrEmptyOrWhitespace(referencePath))
+        throw InvalidArgsException("referencePath is required");
+    if (utils::isNullOrEmptyOrWhitespace(outputPath))
+        throw InvalidArgsException("outputPath is required");
+    if (output == nullptr)
+        throw InvalidArgsException("Output pointer is null");
+
+    ddb::AlignOptions opts;
+    if (mode && std::string(mode) == "translation")
+        opts.mode = ddb::AlignMode::Translation;
+
+    auto r = ddb::alignRaster(std::string(sourcePath),
+                              std::string(referencePath),
+                              std::string(outputPath), opts);
+    utils::copyToPtr(ddb::alignResultToJson(r), output);
 
     DDB_C_END
 }

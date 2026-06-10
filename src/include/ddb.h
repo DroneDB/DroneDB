@@ -491,6 +491,28 @@ extern "C"
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBMergeMultispectral(const char **paths, int numPaths, const char *outputPath);
 
+    /** Validate that source and reference rasters are compatible for alignment.
+     * @param sourcePath Absolute path to source GeoTIFF
+     * @param referencePath Absolute path to reference GeoTIFF
+     * @param output Pointer to C-string to receive JSON (caller frees with DDBFree)
+     * @return DDBERR_NONE on success, an error otherwise */
+    DDB_DLL DDBErr DDBValidateAlignRaster(const char *sourcePath,
+                                          const char *referencePath,
+                                          char **output);
+
+    /** Align source GeoTIFF to reference GeoTIFF and write output COG.
+     * @param sourcePath Absolute path to source GeoTIFF
+     * @param referencePath Absolute path to reference GeoTIFF
+     * @param outputPath Absolute path for the aligned output (COG)
+     * @param mode "similarity" (default) or "translation"
+     * @param output Pointer to C-string to receive JSON AlignResult (caller frees with DDBFree)
+     * @return DDBERR_NONE on success, an error otherwise */
+    DDB_DLL DDBErr DDBAlignRaster(const char *sourcePath,
+                                  const char *referencePath,
+                                  const char *outputPath,
+                                  const char *mode,
+                                  char **output);
+
     /** Export raster with visualization params applied as GeoTIFF
      * @param inputPath Path to source raster file
      * @param outputPath Path for the output GeoTIFF file
