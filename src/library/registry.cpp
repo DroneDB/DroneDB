@@ -205,20 +205,13 @@ namespace ddb
         const auto downloadUrl =
             url + "/orgs/" + organization + "/ds/" + dataset + "/ddb";
 
-        // LOGD << "Download url = " << downloadUrl;
-
-        // char *buffer;
-        size_t length;
-
         auto res = cpr::Get(cpr::Url(downloadUrl), utils::authCookie(this->authToken),
                             cpr::VerifySsl(this->sslVerify));
 
         if (res.status_code != 200)
             this->handleError(res);
 
-        zip::extractAllFromBuffer(res.text.c_str(), length, folder);
-
-        // LOGD << "Done";
+        zip::extractAllFromBuffer(res.text.c_str(), res.text.size(), folder);
     }
 
     json Registry::getStamp(const std::string &organization, const std::string &dataset)
