@@ -141,7 +141,14 @@ namespace ddb
                 oss << std::setprecision(15) << srcNoData;
                 targs = CSLAddString(targs, oss.str().c_str());
             } else {
-                LOGW << "Skipping nodata preservation for unsupported value: " << srcNoData;
+                // The nodata value cannot be reliably serialized as a
+                // -dstnodata string (NaN/Inf/extreme float). Materialize the
+                // transparency as a destination alpha band instead, so masked
+                // pixels do not become opaque in the output COG. GDALWarp still
+                // reads the source nodata from the band itself to drive the mask.
+                LOGW << "Nodata value cannot be serialized (" << srcNoData
+                     << "); using -dstalpha to preserve transparency";
+                targs = CSLAddString(targs, "-dstalpha");
             }
         } else if (hasPerDatasetMask) {
             // Materialize the source PER_DATASET mask as a destination alpha
@@ -168,7 +175,18 @@ namespace ddb
                     all8Bit = false;
                 }
             }
-            if (all8Bit)
+            // Only treat a 4-band raster as JPEG-eligible RGBA when the 4th band
+            // is actually an alpha channel. A 4-band RGBN raster (e.g. with a NIR
+            // band) must NOT be JPEG-compressed: the COG/JPEG path treats band 4
+            // as alpha and would lossily corrupt the spectral data. Fall back to
+            // LZW for such datasets.
+            bool jpegEligible = all8Bit;
+            if (numBands == 4 &&
+                GDALGetRasterColorInterpretation(GDALGetRasterBand(hSrcDataset, 4)) != GCI_AlphaBand)
+            {
+                jpegEligible = false;
+            }
+            if (jpegEligible)
             {
                 targs = CSLAddString(targs, "-co");
                 targs = CSLAddString(targs, "COMPRESS=JPEG");
