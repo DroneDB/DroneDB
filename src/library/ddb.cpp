@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <memory>
 #include <mutex>
+#include <random>
 #include <type_traits>
 #include <algorithm>
 
@@ -1965,6 +1966,28 @@ DDB_DLL DDBErr DDBAlignRaster(const char* sourcePath,
     DDB_C_END
 }
 
+// Build internal, power-of-two overviews on a freshly written GeoTIFF so the
+// output supports efficient zoomed/partial reads (closer to a cloud-optimized
+// layout). Levels are added while the largest dimension stays >= 256 px, using
+// the same DEFLATE+PREDICTOR compression for the pyramids. Best-effort: a
+// failure to build overviews is non-fatal (the full-resolution data is intact).
+static void buildInternalOverviews(GDALDatasetH hDs, int width, int height) {
+    std::vector<int> levels;
+    int factor = 2;
+    while (std::max(width, height) / factor >= 256 && levels.size() < 8) {
+        levels.push_back(factor);
+        factor *= 2;
+    }
+    if (levels.empty()) return;
+    // Thread-local config so concurrent exports do not clobber global GDAL state.
+    CPLSetThreadLocalConfigOption("COMPRESS_OVERVIEW", "DEFLATE");
+    CPLSetThreadLocalConfigOption("PREDICTOR_OVERVIEW", "2");
+    GDALBuildOverviews(hDs, "AVERAGE", static_cast<int>(levels.size()),
+                       levels.data(), 0, nullptr, nullptr, nullptr);
+    CPLSetThreadLocalConfigOption("COMPRESS_OVERVIEW", nullptr);
+    CPLSetThreadLocalConfigOption("PREDICTOR_OVERVIEW", nullptr);
+}
+
 // Auto-compute a windowed tile size for the formula export branch.
 // - Explicit tileSize > 0: clamped to [64, 8192], then rounded up to the
 //   nearest multiple of 16 (GeoTIFF tiling requirement).
@@ -2122,6 +2145,10 @@ static int exportRasterImpl(const char* inputPath, const char* outputPath,
             std::vector<float> valid;
             valid.reserve(std::min<size_t>(kMaxSamples,
                 static_cast<size_t>(width) * height));
+            // Deterministic, thread-local RNG (fixed seed) for reproducible
+            // reservoir sampling, independent of the global std::rand() state.
+            std::mt19937 reservoirRng(1337u);
+            std::uniform_real_distribution<double> reservoirUni(0.0, 1.0);
             size_t seen = 0;
             for (int ty = 0; ty < nty; ty++) {
                 for (int tx = 0; tx < ntx; tx++) {
@@ -2137,8 +2164,7 @@ static int exportRasterImpl(const char* inputPath, const char* outputPath,
                         } else {
                             // Reservoir sampling: draw j from [0, seen) where seen
                             // already includes this element → probability k/seen.
-                            const size_t j = static_cast<size_t>(
-                                (static_cast<double>(std::rand()) / RAND_MAX) * seen);
+                            const size_t j = static_cast<size_t>(reservoirUni(reservoirRng) * seen);
                             if (j < kMaxSamples) valid[j] = v;
                         }
                     }
@@ -2224,6 +2250,8 @@ static int exportRasterImpl(const char* inputPath, const char* outputPath,
         }
 
         GDALFlushCache(hOut);
+        // Add internal overviews for efficient zoomed/partial reads.
+        buildInternalOverviews(hOut, width, height);
         outGuard.reset();  // closes hOut
         srcGuard.reset();  // closes hSrcDs
         reportProgress(1.0, "rendering");
@@ -2286,6 +2314,8 @@ static int exportRasterImpl(const char* inputPath, const char* outputPath,
         targs = CSLAddString(targs, "-of");
         targs = CSLAddString(targs, "GTiff");
         targs = CSLAddString(targs, "-co");
+        targs = CSLAddString(targs, "TILED=YES");
+        targs = CSLAddString(targs, "-co");
         targs = CSLAddString(targs, "COMPRESS=DEFLATE");
 
         auto psOptions = GDALTranslateOptionsNew(targs, nullptr);
@@ -2305,6 +2335,13 @@ static int exportRasterImpl(const char* inputPath, const char* outputPath,
 
         GDALFlushCache(hOut);
         GDALClose(hOut);
+        // Reopen in update mode to add internal overviews (efficient zoomed
+        // reads). Best-effort: a failure here is non-fatal.
+        GDALDatasetH hOvr = GDALOpen(outputPath, GA_Update);
+        if (hOvr) {
+            buildInternalOverviews(hOvr, width, height);
+            GDALClose(hOvr);
+        }
         reportProgress(1.0, "converting");
         return 0;
     }
