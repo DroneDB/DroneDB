@@ -260,7 +260,8 @@ static void fft2d(std::vector<std::complex<double>> &m, int n, bool inverse) {
  *         (same convention as the per-patch NCC match below).
  */
 static std::pair<double, double> phaseCorrelate(const RasterGrid &src,
-                                                const RasterGrid &ref)
+                                                const RasterGrid &ref,
+                                                double *peakStrength = nullptr)
 {
     int nfft = 1;
     while (nfft < std::max({src.width, src.height, ref.width, ref.height}))
@@ -305,6 +306,28 @@ static std::pair<double, double> phaseCorrelate(const RasterGrid &src,
 
     int pr = static_cast<int>(peakIdx) / nfft;
     int pc = static_cast<int>(peakIdx) % nfft;
+
+    // Peak-to-sidelobe strength: how sharply the correlation surface peaks
+    // above its mean background (excluding a small neighborhood around the
+    // peak). A sharp, isolated peak => confident localization; a flat surface
+    // (e.g. textureless input) => low strength. Used to derive a [0,1]
+    // confidence for translation-only alignment.
+    if (peakStrength) {
+        double sum = 0.0; size_t cnt = 0;
+        const int exclude = 2;
+        for (int r = 0; r < nfft; r++) {
+            for (int c = 0; c < nfft; c++) {
+                int ddr = std::abs(r - pr); ddr = std::min(ddr, nfft - ddr);
+                int ddc = std::abs(c - pc); ddc = std::min(ddc, nfft - ddc);
+                if (ddr <= exclude && ddc <= exclude) continue;
+                sum += std::abs(cp[(size_t)r * nfft + c].real());
+                cnt++;
+            }
+        }
+        const double meanSidelobe = cnt > 0 ? sum / cnt : 0.0;
+        *peakStrength = (meanSidelobe > 1e-12) ? (peakVal / meanSidelobe) : 0.0;
+    }
+
     // Circular wrap-around: peaks past nfft/2 represent negative displacements
     double dr = pr < nfft / 2 ? pr : pr - nfft;
     double dc = pc < nfft / 2 ? pc : pc - nfft;
@@ -561,23 +584,66 @@ static double computeZOffset(const std::string &alignedPath,
     GDALDatasetH hR = GDALOpen(referencePath.c_str(), GA_ReadOnly);
     if (!hA || !hR) { if (hA) GDALClose(hA); if (hR) GDALClose(hR); return 0.0; }
 
-    int W = std::min(512, GDALGetRasterXSize(hA));
-    int H = std::min(512, GDALGetRasterYSize(hA));
-    std::vector<float> bufA((size_t)W * H), bufR((size_t)W * H);
-    const bool readOk =
-        GDALRasterIO(GDALGetRasterBand(hA, 1), GF_Read, 0, 0, W, H,
-                     bufA.data(), W, H, GDT_Float32, 0, 0) == CE_None &&
-        GDALRasterIO(GDALGetRasterBand(hR, 1), GF_Read, 0, 0, W, H,
-                     bufR.data(), W, H, GDT_Float32, 0, 0) == CE_None;
+    // Both rasters share the source CRS at this point (the reference is
+    // reprojected upstream when needed). Sample the *geographic* overlap on a
+    // shared world-aligned grid so that the compared elevation samples are
+    // co-located: comparing the top-left 512x512 pixel block of each raster by
+    // index would mix non-corresponding ground points whenever the origins or
+    // extents differ, biasing the median offset.
+    double gtA[6], gtR[6];
+    if (GDALGetGeoTransform(hA, gtA) != CE_None || GDALGetGeoTransform(hR, gtR) != CE_None) {
+        GDALClose(hA); GDALClose(hR); return 0.0;
+    }
 
-    int hasNd; double nd = GDALGetRasterNoDataValue(GDALGetRasterBand(hA, 1), &hasNd);
+    double aX0 = gtA[0], aX1 = gtA[0] + gtA[1] * GDALGetRasterXSize(hA);
+    double aY0 = gtA[3] + gtA[5] * GDALGetRasterYSize(hA), aY1 = gtA[3];
+    double rX0 = gtR[0], rX1 = gtR[0] + gtR[1] * GDALGetRasterXSize(hR);
+    double rY0 = gtR[3] + gtR[5] * GDALGetRasterYSize(hR), rY1 = gtR[3];
+    if (aX1 < aX0) std::swap(aX0, aX1);
+    if (aY1 < aY0) std::swap(aY0, aY1);
+    if (rX1 < rX0) std::swap(rX0, rX1);
+    if (rY1 < rY0) std::swap(rY0, rY1);
+    const double ox0 = std::max(aX0, rX0), ox1 = std::min(aX1, rX1);
+    const double oy0 = std::max(aY0, rY0), oy1 = std::min(aY1, rY1);
+    if (ox1 <= ox0 || oy1 <= oy0) { GDALClose(hA); GDALClose(hR); return 0.0; }
+
+    double gsd = std::max(std::abs(gtA[1]), std::abs(gtR[1]));
+    if (gsd <= 0) gsd = std::max(ox1 - ox0, oy1 - oy0) / 512.0;
+    const int outW = std::clamp(static_cast<int>(std::round((ox1 - ox0) / gsd)), 1, 512);
+    const int outH = std::clamp(static_cast<int>(std::round((oy1 - oy0) / gsd)), 1, 512);
+
+    // Reads the [ox0,oy0]->[ox1,oy1] world window from hDs, resampled to the
+    // shared outW x outH grid, so both buffers index the same ground points.
+    auto readOverlap = [&](GDALDatasetH hDs, const double gt[6],
+                           std::vector<float> &out) -> bool {
+        int px0 = static_cast<int>(std::floor((ox0 - gt[0]) / gt[1]));
+        int px1 = static_cast<int>(std::ceil ((ox1 - gt[0]) / gt[1]));
+        int py0 = static_cast<int>(std::floor((oy1 - gt[3]) / gt[5]));  // gt[5] < 0
+        int py1 = static_cast<int>(std::ceil ((oy0 - gt[3]) / gt[5]));
+        px0 = std::clamp(px0, 0, GDALGetRasterXSize(hDs));
+        px1 = std::clamp(px1, 0, GDALGetRasterXSize(hDs));
+        py0 = std::clamp(py0, 0, GDALGetRasterYSize(hDs));
+        py1 = std::clamp(py1, 0, GDALGetRasterYSize(hDs));
+        if (px1 <= px0 || py1 <= py0) return false;
+        out.assign(static_cast<size_t>(outW) * outH, 0.f);
+        return GDALRasterIO(GDALGetRasterBand(hDs, 1), GF_Read,
+                            px0, py0, px1 - px0, py1 - py0,
+                            out.data(), outW, outH, GDT_Float32, 0, 0) == CE_None;
+    };
+
+    std::vector<float> bufA, bufR;
+    const bool readOk = readOverlap(hA, gtA, bufA) && readOverlap(hR, gtR, bufR);
+    int hasNdA; const double ndA = GDALGetRasterNoDataValue(GDALGetRasterBand(hA, 1), &hasNdA);
+    int hasNdR; const double ndR = GDALGetRasterNoDataValue(GDALGetRasterBand(hR, 1), &hasNdR);
     GDALClose(hA); GDALClose(hR);
     if (!readOk) return 0.0;
 
     std::vector<float> diffs;
-    diffs.reserve(static_cast<size_t>(W) * H);
-    for (int i = 0; i < W * H; i++) {
-        if (hasNd && (std::abs(bufA[i] - nd) < 1e-3 || std::abs(bufR[i] - nd) < 1e-3)) continue;
+    diffs.reserve(bufA.size());
+    for (size_t i = 0; i < bufA.size(); i++) {
+        if (std::isnan(bufA[i]) || std::isnan(bufR[i])) continue;
+        if (hasNdA && std::abs(bufA[i] - static_cast<float>(ndA)) < 1e-3f) continue;
+        if (hasNdR && std::abs(bufR[i] - static_cast<float>(ndR)) < 1e-3f) continue;
         diffs.push_back(bufR[i] - bufA[i]);
     }
     if (diffs.empty()) return 0.0;
@@ -724,6 +790,22 @@ AlignResult alignRaster(const std::string &sourcePath,
     double ox0 = std::max(sX0, rX0), ox1 = std::min(sX1, rX1);
     double oy0 = std::max(sY0, rY0), oy1 = std::min(sY1, rY1);
 
+    // When the CRS differed, validateAlignRaster() could not check the real
+    // overlap (the envelopes were in incompatible coordinate systems). Now that
+    // the reference shares the source CRS, verify the overlap and fail fast with
+    // a clear message instead of relying on a later "empty window" error.
+    if (val.summary.crsMismatch) {
+        const double ovX = std::max(0.0, ox1 - ox0);
+        const double ovY = std::max(0.0, oy1 - oy0);
+        const double srcArea = (sX1 - sX0) * (sY1 - sY0);
+        const double overlapPct = (srcArea > 0) ? 100.0 * (ovX * ovY) / srcArea : 0.0;
+        if (overlapPct < 5.0) {
+            GDALClose(hS); GDALClose(hR);
+            throw AppException("Insufficient overlap after reprojection (" +
+                               std::to_string(static_cast<int>(overlapPct)) + "%)");
+        }
+    }
+
     bool isDem = detectIsDem(hS);
     // Use the worst (coarsest) GSD for the common grid
     double targetGsd = std::max(std::abs(gts[1]), std::abs(gtr[1]));
@@ -737,7 +819,8 @@ AlignResult alignRaster(const std::string &sourcePath,
 
     // ── TRANSLATION MODE ──────────────────────────────────────────────────────
     if (opts.mode == AlignMode::Translation) {
-        auto pc = phaseCorrelate(srcGrid, refGrid);
+        double peakStrength = 0.0;
+        auto pc = phaseCorrelate(srcGrid, refGrid, &peakStrength);
         double dc = pc.first, dr = pc.second;
         // (dc, dr) is the src→ref displacement in common-grid pixels.
         // Map to map units through the common grid transform (same convention as
@@ -760,7 +843,10 @@ AlignResult alignRaster(const std::string &sourcePath,
         result.success    = true;
         result.txMapUnits = sim.t.x;
         result.tyMapUnits = sim.t.y;
-        result.confidence = 0.8;   // phase corr: no inlier count
+        // Map the peak-to-sidelobe strength to a saturating [0,1] confidence
+        // (PSR ~ 10 => 0.5, higher => closer to 1). Replaces the previous fixed
+        // 0.8 so callers can distinguish a sharp, reliable match from a weak one.
+        result.confidence = std::clamp(peakStrength / (peakStrength + 10.0), 0.0, 1.0);
         return result;
     }
 

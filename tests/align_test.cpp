@@ -353,4 +353,103 @@ namespace
         GDALClose(h2);
     }
 
+    // ─── Helper: single-band Float32 DEM with PIXEL-coordinate elevation ────────
+    // The pattern is keyed on pixel (r, c), NOT world coordinates. This is
+    // required so that phase correlation can detect the XY displacement between
+    // two rasters whose geotransforms differ: sampling both at the same world
+    // positions in the overlap produces different pixel content (one sees rows
+    // r..r+H, cols c..c+W of the pattern; the other sees a shifted window).
+    // A world-coordinate function collapses after DEM standardization because
+    // both srcGrid and refGrid evaluate the same f(X,Y) → identical signals →
+    // dc=0, dr=0. The pixel-coordinate approach avoids this pitfall.
+    static void createPixelDem(const std::string &path, int W, int H,
+                               double gt[6], float zOffset)
+    {
+        GDALDriverH hDrv = GDALGetDriverByName("GTiff");
+        GDALDatasetH hDs = GDALCreate(hDrv, path.c_str(), W, H, 1, GDT_Float32, nullptr);
+        GDALSetGeoTransform(hDs, gt);
+
+        OGRSpatialReferenceH hSrs = OSRNewSpatialReference(nullptr);
+        OSRImportFromEPSG(hSrs, 32632);
+        char *wkt = nullptr;
+        OSRExportToWkt(hSrs, &wkt);
+        GDALSetProjection(hDs, wkt);
+        CPLFree(wkt);
+        OSRDestroySpatialReference(hSrs);
+
+        GDALRasterBandH hBand = GDALGetRasterBand(hDs, 1);
+        std::vector<float> row(static_cast<size_t>(W));
+        for (int r = 0; r < H; r++)
+        {
+            for (int c = 0; c < W; c++)
+            {
+                double v = 100.0 + 80.0 * hash01(r, c)
+                         + 20.0 * (std::sin(r * 0.06) + std::cos(c * 0.05));
+                row[c] = static_cast<float>(v) + zOffset;
+            }
+            GDALRasterIO(hBand, GF_Write, 0, r, W, 1, row.data(), W, 1, GDT_Float32, 0, 0);
+        }
+        GDALFlushCache(hDs);
+        GDALClose(hDs);
+    }
+
+    // ─── Test 9: DEM vertical (Z) offset recovery on the geographic overlap ───
+    // Source DEM is offset +4 m X / -3 m Y (integer pixel shift) and its
+    // elevations are exactly knownZ above the reference. After alignment the
+    // reported shiftZ must equal median(ref - aligned) = -knownZ, proving the
+    // offset is sampled on co-located ground points (not by raw pixel index).
+    TEST_F(AlignTest, DemZOffsetRecovery)
+    {
+        TestArea ta(TEST_NAME);
+        const double knownTx = 4.0, knownTy = -3.0; // map units (m), integer px
+        const float  knownZ  = 12.5f;
+        double refGt[6] = {500000.0, 1.0, 0, 5000000.0, 0, -1.0};
+        double srcGt[6] = {500000.0 + knownTx, 1.0, 0, 5000000.0 + knownTy, 0, -1.0};
+
+        auto refPath = ta.getPath("ref_zdem.tif").string();
+        auto srcPath = ta.getPath("src_zdem.tif").string();
+        auto outPath = ta.getPath("aligned_zdem.tif").string();
+
+        createPixelDem(refPath, 512, 512, refGt, 0.0f);
+        createPixelDem(srcPath, 512, 512, srcGt, knownZ);
+
+        ddb::AlignOptions opts;
+        opts.mode = ddb::AlignMode::Translation;
+        auto r = ddb::alignRaster(srcPath, refPath, outPath, opts);
+
+        ASSERT_TRUE(r.success);
+        EXPECT_TRUE(fs::exists(outPath));
+        // XY alignment removes the planimetric offset.
+        EXPECT_NEAR(r.txMapUnits, -knownTx, 1.5);
+        EXPECT_NEAR(r.tyMapUnits, -knownTy, 1.5);
+        // Vertical offset recovered on the overlap.
+        EXPECT_NEAR(r.shiftZ, -static_cast<double>(knownZ), 1.0);
+    }
+
+    // ─── Test 10: translation confidence reflects the phase-correlation peak ──
+    // Rich broadband texture yields a sharp peak → confidence stays in [0,1]
+    // and is clearly above zero (no longer a hardcoded constant).
+    TEST_F(AlignTest, TranslationConfidenceReflectsPeak)
+    {
+        TestArea ta(TEST_NAME);
+        double refGt[6] = {500000.0, 0.5, 0, 5000000.0, 0, -0.5};
+        double srcGt[6] = {500002.0, 0.5, 0, 4999999.0, 0, -0.5};
+
+        auto refPath = ta.getPath("ref_conf.tif").string();
+        auto srcPath = ta.getPath("src_conf.tif").string();
+        auto outPath = ta.getPath("aligned_conf.tif").string();
+
+        createSyntheticGeoTiff(refPath, 512, 512, refGt);
+        createSyntheticGeoTiff(srcPath, 512, 512, srcGt);
+
+        ddb::AlignOptions opts;
+        opts.mode = ddb::AlignMode::Translation;
+        auto r = ddb::alignRaster(srcPath, refPath, outPath, opts);
+
+        ASSERT_TRUE(r.success);
+        EXPECT_GE(r.confidence, 0.0);
+        EXPECT_LE(r.confidence, 1.0);
+        EXPECT_GT(r.confidence, 0.3);
+    }
+
 } // namespace
