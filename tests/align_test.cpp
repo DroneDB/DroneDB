@@ -98,7 +98,7 @@ namespace
         GDALClose(hDs);
     }
 
-    // ─── Test 1: Translation mode — recover a known offset ───────────────────────
+    // ─── Test 1: Translation mode - recover a known offset ───────────────────────
     TEST_F(AlignTest, TranslationRecovery)
     {
         TestArea ta(TEST_NAME);
@@ -129,7 +129,7 @@ namespace
         EXPECT_TRUE(fs::exists(outPath));
     }
 
-    // ─── Test 2: Similarity mode — valid output, low RMSE ────────────────────────
+    // ─── Test 2: Similarity mode - valid output, low RMSE ────────────────────────
     TEST_F(AlignTest, SimilarityOutputValid)
     {
         TestArea ta(TEST_NAME);
@@ -162,13 +162,13 @@ namespace
         // For this small pure-translation offset the similarity must collapse to a
         // near-identity transform. (tx/ty are the origin-referenced affine intercept
         // and are therefore not asserted here: at UTM coordinates a numerically tiny
-        // rotation shifts them by several metres while the alignment stays accurate —
+        // rotation shifts them by several metres while the alignment stays accurate -
         // the RMSE above is the meaningful alignment metric.)
         EXPECT_NEAR(r.scale, 1.0, 0.05);
         EXPECT_LT(std::abs(r.thetaDeg), 5.0);
     }
 
-    // ─── Test 3: Validation — no overlap ─────────────────────────────────────────
+    // ─── Test 3: Validation - no overlap ─────────────────────────────────────────
     TEST_F(AlignTest, ValidateNoOverlap)
     {
         TestArea ta(TEST_NAME);
@@ -183,7 +183,7 @@ namespace
         EXPECT_FALSE(r.errors.empty());
     }
 
-    // ─── Test 4: Validation — missing source ─────────────────────────────────────
+    // ─── Test 4: Validation - missing source ─────────────────────────────────────
     TEST_F(AlignTest, ValidateMissingSource)
     {
         TestArea ta(TEST_NAME);
@@ -213,7 +213,7 @@ namespace
         EXPECT_NE(j.find("\"mode\""), std::string::npos);
     }
 
-    // ─── Test 6: Validation — compatible inputs report ok ────────────────────────
+    // ─── Test 6: Validation - compatible inputs report ok ────────────────────────
     TEST_F(AlignTest, ValidateCompatible)
     {
         TestArea ta(TEST_NAME);
@@ -233,7 +233,7 @@ namespace
     // A uniform-value raster bilinearly warped must remain constant in the valid
     // interior region (bilinear interpolation of a constant C yields C exactly).
     // This validates that the VRT lightweight wrapper correctly delivers source
-    // pixels to GDALWarp without losing data — the failure mode if VRT can't
+    // pixels to GDALWarp without losing data - the failure mode if VRT can't
     // find the source file would be an output filled with nodata or zeros.
     TEST_F(AlignTest, WarpPreservesConstantField)
     {
@@ -241,7 +241,7 @@ namespace
 
         const float kValue = 137.0f;
         // Reference and source at the same position so phase correlation returns
-        // zero offset (constant field has no texture to track — that's fine here;
+        // zero offset (constant field has no texture to track - that's fine here;
         // the identity warp is the correct result).
         double refGt[6] = {500000.0, 2.0, 0, 5000000.0, 0, -2.0};
         double srcGt[6] = {500000.0, 2.0, 0, 5000000.0, 0, -2.0};

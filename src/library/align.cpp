@@ -3,11 +3,11 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "align.h"
 #include "gdal_inc.h"
-#include "cog.h"        // buildCog() — DRY reuse of the COG pattern
+#include "cog.h"        // buildCog() - DRY reuse of the COG pattern
 #include "exceptions.h"
 #include "logger.h"
 #include "json.h"
-#include "fs.h"          // fs::absolute — used by applyWarp() for VRT path resolution
+#include "fs.h"          // fs::absolute - used by applyWarp() for VRT path resolution
 
 #include <algorithm>
 #include <cmath>
@@ -139,7 +139,7 @@ static RasterGrid readToCommonGrid(GDALDatasetH hDs,
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// §C  INTEGRAL IMAGES (SAT) — O(1) NCC
+// §C  INTEGRAL IMAGES (SAT) - O(1) NCC
 // ══════════════════════════════════════════════════════════════════════════════
 
 struct IntegralImages {
@@ -208,7 +208,7 @@ static std::vector<PatchCandidate> selectPatches(
 
 // ══════════════════════════════════════════════════════════════════════════════
 // §E  2D PHASE CORRELATION (self-contained complex FFT)
-//     Coarse seed / Translation mode — no external FFT dependency.
+//     Coarse seed / Translation mode - no external FFT dependency.
 // ══════════════════════════════════════════════════════════════════════════════
 
 /** In-place iterative radix-2 Cooley-Tukey FFT. a.size() must be a power of 2. */
@@ -719,7 +719,7 @@ AlignValidationResult validateAlignRaster(const std::string &sourcePath,
     double sArea = (sX1 - sX0) * (sY1 - sY0);
     r.summary.overlapPercent = (sArea > 0) ? 100.0 * (ox * oy) / sArea : 0.0;
     // When CRS differ the envelopes are in incompatible coordinate systems;
-    // the raw overlap percentage is meaningless and must not block validation —
+    // the raw overlap percentage is meaningless and must not block validation -
     // alignRaster() will reproject the reference before checking real overlap.
     if (!r.summary.crsMismatch && r.summary.overlapPercent < 5.0)
         r.errors.push_back("Insufficient overlap (" +
