@@ -462,7 +462,7 @@ namespace ddb
         if (supportsThumbnails(t) || t == PointCloud || t == GaussianSplat)
         {
             j["assets"]["thumbnail"] = {{"title", "Thumbnail"},
-                                        {"type", "image/jpeg"},
+                                        {"type", "image/webp"},
                                         {"roles", json::array({"thumbnail"})},
                                         {"href", stacCollectionRoot + THUMB_ENDPOINT + "?path=" + std::string(cpr::util::urlEncode(path)) + "&size=512"}};
         }

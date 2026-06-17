@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <limits>
@@ -57,8 +58,11 @@ namespace ddb
             return std::log(p / (1.0f - p));
         }
 
-        // Parse the DDB_GSPLAT_SH_BITS environment override. Accepts "sh1" or "sh1,shRest".
-        // Falls back to SPZ defaults when unset or malformed.
+        // Parse the DDB_GSPLAT_SH_BITS environment override.
+        // Accepts one or two unsigned integers separated by a comma:
+        //   "5"   -> sets sh1Bits=5 (shRestBits unchanged)
+        //   "5,4" -> sets sh1Bits=5, shRestBits=4
+        // Each value must be in [1,8]. Falls back to SPZ defaults when unset or malformed.
         void applyShBitsFromEnv(spz::PackOptions &opts)
         {
             const char *env = std::getenv("DDB_GSPLAT_SH_BITS");
