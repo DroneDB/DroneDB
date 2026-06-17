@@ -62,6 +62,7 @@ set(COMMON_LIBS
     KTX::ktx
     tinyobjloader::tinyobjloader
     draco::draco
+    spz
 )
 
 

@@ -33,6 +33,7 @@
 #include "include/cog.h"
 #include "include/contour.h"
 #include "include/nxs.h"
+#include "include/gsplat.h"
 #include "include/search.h"
 #include "include/stac.h"
 #include "include/mask.h"
@@ -73,6 +74,7 @@ namespace cmd
       {"cog", new Cog()},
       {"contour", new Contour()},
       {"nxs", new Nxs()},
+      {"gsplat", new Gsplat()},
       {"search", new Search()},
       {"stac", new Stac()},
       {"mask", new Mask()},

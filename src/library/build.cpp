@@ -20,6 +20,7 @@
 #include "dbops.h"
 #include "ddb.h"
 #include "exceptions.h"
+#include "gsplat.h"
 #include "mio.h"
 #include "pointcloud.h"
 #include "threadlock.h"
@@ -47,6 +48,9 @@ bool isBuildableInternal(const Entry& e, std::string& subfolder) {
         return true;
     } else if (e.type == EntryType::Vector) {
         subfolder = "vec";
+        return true;
+    } else if (e.type == EntryType::GaussianSplat) {
+        subfolder = "gsplat";
         return true;
     }
 
@@ -143,10 +147,13 @@ static bool directoryHasNonEmptyContent(const fs::path& dir) {
 static bool isBuildOutputComplete(const fs::path& baseOutputPath,
                                   const Entry& e,
                                   const std::string& subfolder) {
-    if (e.type == EntryType::Vector) {
+    if (e.type == EntryType::Vector)
         return fileExistsAndNonEmpty(baseOutputPath / "vec" / "source.gpkg") &&
                fileExistsAndNonEmpty(baseOutputPath / "mvt" / "metadata.json");
-    }
+
+    if (e.type == EntryType::GaussianSplat)
+        return fileExistsAndNonEmpty(baseOutputPath / "gsplat" / "model.spz");
+
     return directoryHasNonEmptyContent(baseOutputPath / subfolder);
 }
 
@@ -271,6 +278,10 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
             // treated as up-to-date inside buildVector.
             buildVector(relativePath, baseOutputPath.string(), force);
             // built stays false on purpose to skip the standard rename below.
+        } else if (e.type == EntryType::GaussianSplat) {
+            // Native SPZ conversion into tempFolder/model.spz (+ georef.json when known).
+            buildGsplat(relativePath, tempFolder);
+            built = true;
         }
 
         if (built) {
@@ -328,11 +339,12 @@ void buildAll(Database* db, const std::string& outputPath, bool force) {
     // List all buildable files in DB
     auto q = db->query(
         "SELECT path, hash, type, properties, mtime, size, depth FROM entries WHERE type = ? OR "
-        "type = ? OR type = ? OR type = ?");
+        "type = ? OR type = ? OR type = ? OR type = ?");
     q->bind(1, PointCloud);
     q->bind(2, GeoRaster);
     q->bind(3, Model);
     q->bind(4, Vector);
+    q->bind(5, GaussianSplat);
 
     while (q->fetch()) {
         Entry e(q->getText(0),

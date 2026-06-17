@@ -110,6 +110,11 @@ namespace ddb
         if (ext == ".ply") return "application/x-ply";
         if (ext == ".pcd") return "application/x-pcd";
 
+        // Gaussian Splats
+        if (ext == ".spz") return "application/x-spz";
+        if (ext == ".splat") return "application/octet-stream";
+        if (ext == ".ksplat") return "application/octet-stream";
+
         // Video
         if (ext == ".mp4") return "video/mp4";
         if (ext == ".mov") return "video/quicktime";
@@ -454,7 +459,7 @@ namespace ddb
                              {"roles", json::array({"data"})}};
 
         const EntryType t = static_cast<EntryType>(entryTypeInt);
-        if (supportsThumbnails(t) || t == PointCloud)
+        if (supportsThumbnails(t) || t == PointCloud || t == GaussianSplat)
         {
             j["assets"]["thumbnail"] = {{"title", "Thumbnail"},
                                         {"type", "image/jpeg"},
