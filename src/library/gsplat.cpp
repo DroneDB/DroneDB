@@ -434,7 +434,9 @@ namespace ddb
 
     void writeGeoref(const GsplatGeoref &georef, const fs::path &outFile)
     {
-        io::assureFolderExists(outFile.parent_path());
+        const fs::path parentDir = outFile.parent_path();
+        if (!parentDir.empty())
+            io::assureFolderExists(parentDir);
         std::ofstream out(outFile.string(), std::ios::binary | std::ios::trunc);
         if (!out.good())
             throw FSException("Cannot write georef sidecar " + outFile.string());
@@ -454,7 +456,9 @@ namespace ddb
         if (fmt == SplatFormat::Unknown)
             throw InvalidArgsException("Unsupported Gaussian Splat format: " + input);
 
-        io::assureFolderExists(fs::path(output).parent_path());
+        const fs::path parentDir = fs::path(output).parent_path();
+        if (!parentDir.empty())
+            io::assureFolderExists(parentDir);
 
         if (fmt == SplatFormat::Spz)
         {
