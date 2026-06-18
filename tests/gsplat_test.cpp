@@ -3,7 +3,9 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include <cstdint>
+#include <cstdlib>
 #include <fstream>
+#include <string>
 #include <vector>
 
 #include "build.h"
@@ -441,21 +443,33 @@ TEST(gsplat, buildGsplatLodArtifactWhenToolAvailable) {
 TEST(gsplat, buildLodMissingToolDegradesGracefully) {
     TestArea ta(TEST_NAME);
 
+    // RAII guard: sets DDB_BUILDLOD_PATH on construction and restores it (plus refreshes
+    // the discovery cache) on destruction, even when the test body throws.
+    struct EnvRestorer {
+        std::string key, prev;
+        EnvRestorer(const char* k, const char* v) : key(k) {
+            const char* old = std::getenv(k);
+            prev = old ? old : "";
 #ifdef _WIN32
-#define GSPLAT_SETENV(name, value) _putenv_s(name, value)
+            _putenv_s(k, v);
 #else
-#define GSPLAT_SETENV(name, value) setenv(name, value, 1)
+            setenv(k, v, 1);
 #endif
+            ddb::buildlod::findBuildLodBinary(/*forceRefresh=*/true);
+        }
+        ~EnvRestorer() {
+#ifdef _WIN32
+            _putenv_s(key.c_str(), prev.c_str());
+#else
+            setenv(key.c_str(), prev.c_str(), 1);
+#endif
+            ddb::buildlod::findBuildLodBinary(/*forceRefresh=*/true);
+        }
+    };
 
     // Force "no tool" deterministically via the authoritative env override.
-    const std::string prev = []() {
-        const char* v = std::getenv("DDB_BUILDLOD_PATH");
-        return v ? std::string(v) : std::string();
-    }();
     const std::string missing = (ta.getFolder("nope") / "build-lod-missing").string();
-    GSPLAT_SETENV("DDB_BUILDLOD_PATH", missing.c_str());
-    // Bypass the process-wide discovery cache so the override takes effect immediately.
-    ddb::buildlod::findBuildLodBinary(/*forceRefresh=*/true);
+    EnvRestorer guard("DDB_BUILDLOD_PATH", missing.c_str());
     EXPECT_FALSE(ddb::buildlod::isBuildLodAvailable());
 
     const fs::path ply = ta.getPath("scene.ply");
@@ -466,12 +480,6 @@ TEST(gsplat, buildLodMissingToolDegradesGracefully) {
     EXPECT_TRUE(fs::exists(outdir / GsplatFileName)) << "model.spz must still be produced";
     EXPECT_FALSE(fs::exists(outdir / GsplatRadFileName)) << "no tool -> no model.rad";
     EXPECT_TRUE(fs::exists(outdir / GsplatThumbFileName)) << "thumbnail is pre-rendered even without LOD";
-
-    // Restore the previous override so later tests see the real discovery behavior.
-    GSPLAT_SETENV("DDB_BUILDLOD_PATH", prev.c_str());
-    ddb::buildlod::findBuildLodBinary(/*forceRefresh=*/true);
-
-#undef GSPLAT_SETENV
 }
 
 TEST(gsplat, ksplatRequiresExternalTool) {
