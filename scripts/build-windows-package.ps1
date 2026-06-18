@@ -184,6 +184,15 @@ if (Test-Path $untwinePath) {
     Write-Host "  - untwine.exe (not found, skipping - DroneDB will fall back to PDAL writers.copc)" -ForegroundColor Yellow
 }
 
+# Copy build-lod.exe if present (optional - enables Gaussian Splat LOD streaming, vendor/spark)
+$buildLodPath = Join-Path $BuildDir "build-lod.exe"
+if (Test-Path $buildLodPath) {
+    Copy-Item $buildLodPath $stagingDir -Force
+    Write-Host "  ✓ build-lod.exe (Gaussian Splat LOD producer)" -ForegroundColor Green
+} else {
+    Write-Host "  - build-lod.exe (not found, skipping - Gaussian Splats served without LOD streaming)" -ForegroundColor Yellow
+}
+
 # Copy license files (always included for redistribution compliance)
 $licenseFiles = @("LICENSE.md", "THIRD_PARTY_LICENSES.md")
 foreach ($lic in $licenseFiles) {

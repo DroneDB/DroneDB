@@ -12,6 +12,7 @@
 #include "entry.h"
 #include "exceptions.h"
 #include "gsplat.h"
+#include "buildlod_runner.h"
 #include "gtest/gtest.h"
 #include "ply.h"
 #include "test.h"
@@ -145,6 +146,25 @@ std::uintmax_t fileSize(const fs::path& p) {
     std::error_code ec;
     const auto s = fs::file_size(p, ec);
     return ec ? 0 : s;
+}
+
+// True when the file starts with the gzip magic (0x1F 0x8B), i.e. a legacy SPZ v1-3.
+// The Spark web viewer only decodes gzip-based SPZ, so the delivery artifact must be gzip.
+bool isGzip(const fs::path& p) {
+    std::ifstream in(p.string(), std::ios::binary);
+    if (!in.good()) return false;
+    unsigned char m[2] = {0};
+    in.read(reinterpret_cast<char*>(m), 2);
+    return in.gcount() == 2 && m[0] == 0x1F && m[1] == 0x8B;
+}
+
+// True when the file starts with the Spark RAD container magic ("RAD0" = 0x52 0x41 0x44 0x30).
+bool isRad(const fs::path& p) {
+    std::ifstream in(p.string(), std::ios::binary);
+    if (!in.good()) return false;
+    char m[4] = {0};
+    in.read(m, 4);
+    return in.gcount() == 4 && m[0] == 'R' && m[1] == 'A' && m[2] == 'D' && m[3] == '0';
 }
 
 // ---------------------------------------------------------------------------
@@ -282,6 +302,8 @@ TEST(gsplat, convertPlyToSpz) {
     ASSERT_TRUE(fs::exists(spz));
     EXPECT_GT(fileSize(spz), 0u);
     EXPECT_TRUE(ddb::looksLikeSpz(spz));
+    // The delivery artifact must be gzip-based SPZ (v3) for the Spark viewer.
+    EXPECT_TRUE(isGzip(spz)) << "convertToSpz must emit gzip-based SPZ v3, not NGSP/ZSTD v4";
 
     GaussianSplatInfo info;
     ASSERT_TRUE(ddb::getGaussianSplatInfo(spz.string(), info));
@@ -318,20 +340,138 @@ TEST(gsplat, convertSpzCopiesAsIs) {
     EXPECT_EQ(fileSize(copy), fileSize(spz));
 }
 
-TEST(gsplat, buildOutputsModelSpz) {
+// A gzip-based SPZ (v3) produced by convertToSpz is copied through unchanged, and the
+// result remains gzip (viewer-compatible). This guards the transcode-vs-copy branch.
+TEST(gsplat, deliverySpzIsAlwaysGzip) {
+    TestArea ta(TEST_NAME);
+    const fs::path splat = ta.getPath("scene.splat");
+    writeSplatBinary(splat, 32);
+    const fs::path spz = ta.getPath("scene.spz");
+    ddb::convertToSpz(splat.string(), spz.string());
+    ASSERT_TRUE(fs::exists(spz));
+    EXPECT_TRUE(isGzip(spz)) << ".splat -> .spz must produce gzip-based SPZ v3";
+
+    // Re-converting the gzip .spz is a copy and stays gzip.
+    const fs::path copy = ta.getPath("copy.spz");
+    ddb::convertToSpz(spz.string(), copy.string());
+    EXPECT_TRUE(isGzip(copy));
+}
+
+TEST(gsplat, buildOutputsArtifacts) {
     TestArea ta(TEST_NAME);
     const fs::path ply = ta.getPath("scene.ply");
     writeSplatPly(ply, 80, 1);
+
+    // Reflect the real discovery state (a sibling test may have pinned the override).
+    ddb::buildlod::findBuildLodBinary(/*forceRefresh=*/true);
 
     const fs::path outdir = ta.getFolder("gsplat_out");
     ddb::buildGsplat(ply.string(), outdir.string());
 
     const fs::path modelSpz = outdir / GsplatFileName;
-    ASSERT_TRUE(fs::exists(modelSpz));
-    EXPECT_GT(fileSize(modelSpz), 0u);
-    EXPECT_TRUE(ddb::looksLikeSpz(modelSpz));
+    const fs::path modelRad = outdir / GsplatRadFileName;
+
+    if (ddb::buildlod::isBuildLodAvailable()) {
+        // The full-SH .rad is the sole delivery artifact; the redundant .spz is dropped.
+        EXPECT_TRUE(fs::exists(modelRad)) << "build-lod available; model.rad must be produced";
+        EXPECT_GT(fileSize(modelRad), 0u);
+        EXPECT_FALSE(fs::exists(modelSpz)) << "model.spz must be dropped once model.rad exists";
+    } else {
+        // Graceful degradation: keep the viewer-compatible gzip SPZ v3 as the delivery file.
+        ASSERT_TRUE(fs::exists(modelSpz));
+        EXPECT_GT(fileSize(modelSpz), 0u);
+        EXPECT_TRUE(ddb::looksLikeSpz(modelSpz));
+        EXPECT_TRUE(isGzip(modelSpz)) << "build output must be gzip-based SPZ v3 (viewer-compatible)";
+        EXPECT_FALSE(fs::exists(modelRad));
+    }
+
     // No georef supplied -> no sidecar.
     EXPECT_FALSE(fs::exists(outdir / GsplatGeorefFileName));
+
+    // A bounds sidecar is always written for deterministic camera framing in the viewer.
+    const fs::path bounds = outdir / GsplatBoundsFileName;
+    ASSERT_TRUE(fs::exists(bounds)) << "buildGsplat must write bounds.json";
+    EXPECT_GT(fileSize(bounds), 0u);
+    std::ifstream bin(bounds.string(), std::ios::binary);
+    const json b = json::parse(bin);
+    ASSERT_TRUE(b.contains("min") && b.contains("max"));
+    EXPECT_EQ(b["min"].size(), 3u);
+    EXPECT_EQ(b["max"].size(), 3u);
+    for (int k = 0; k < 3; ++k)
+        EXPECT_LE(b["min"][k].get<double>(), b["max"][k].get<double>());
+
+    // A preview thumbnail is always pre-rendered (from the .spz before it is dropped).
+    const fs::path thumb = outdir / GsplatThumbFileName;
+    EXPECT_TRUE(fs::exists(thumb)) << "buildGsplat must write thumbnail.webp";
+    EXPECT_GT(fileSize(thumb), 0u);
+}
+
+// The optional level-of-detail artifact (model.rad) is produced only when the vendored
+// build-lod tool is discoverable. When it is, buildGsplat must emit a valid RAD container;
+// when it is not, the build still succeeds and serves model.spz (graceful degradation).
+TEST(gsplat, buildGsplatLodArtifactWhenToolAvailable) {
+    TestArea ta(TEST_NAME);
+    const fs::path ply = ta.getPath("scene.ply");
+    writeSplatPly(ply, 256, 1);
+
+    // Reflect the real discovery state (a sibling test may have pinned the override).
+    ddb::buildlod::findBuildLodBinary(/*forceRefresh=*/true);
+
+    const fs::path outdir = ta.getFolder("gsplat_out");
+    ddb::buildGsplat(ply.string(), outdir.string());
+
+    const fs::path modelRad = outdir / GsplatRadFileName;
+    if (ddb::buildlod::isBuildLodAvailable()) {
+        ASSERT_TRUE(fs::exists(modelRad)) << "build-lod is available; model.rad must be produced";
+        EXPECT_GT(fileSize(modelRad), 0u);
+        EXPECT_TRUE(isRad(modelRad)) << "model.rad must start with the RAD0 magic";
+        // The .rad is the sole delivery artifact; the redundant .spz is dropped.
+        EXPECT_FALSE(fs::exists(outdir / GsplatFileName)) << "model.spz must be dropped once model.rad exists";
+    } else {
+        // Graceful degradation: no tool, no LOD artifact, but the build still succeeded and
+        // serves the .spz instead.
+        EXPECT_TRUE(fs::exists(outdir / GsplatFileName)) << "without build-lod, model.spz is the delivery artifact";
+        EXPECT_FALSE(fs::exists(modelRad));
+        GTEST_SKIP() << "build-lod not discoverable; skipping RAD generation assertions";
+    }
+}
+
+// runBuildLod reports failure (without throwing) when the binary cannot be located, and
+// buildGsplat keeps producing model.spz so the splat remains viewable without LOD.
+TEST(gsplat, buildLodMissingToolDegradesGracefully) {
+    TestArea ta(TEST_NAME);
+
+#ifdef _WIN32
+#define GSPLAT_SETENV(name, value) _putenv_s(name, value)
+#else
+#define GSPLAT_SETENV(name, value) setenv(name, value, 1)
+#endif
+
+    // Force "no tool" deterministically via the authoritative env override.
+    const std::string prev = []() {
+        const char* v = std::getenv("DDB_BUILDLOD_PATH");
+        return v ? std::string(v) : std::string();
+    }();
+    const std::string missing = (ta.getFolder("nope") / "build-lod-missing").string();
+    GSPLAT_SETENV("DDB_BUILDLOD_PATH", missing.c_str());
+    // Bypass the process-wide discovery cache so the override takes effect immediately.
+    ddb::buildlod::findBuildLodBinary(/*forceRefresh=*/true);
+    EXPECT_FALSE(ddb::buildlod::isBuildLodAvailable());
+
+    const fs::path ply = ta.getPath("scene.ply");
+    writeSplatPly(ply, 64, 0);
+    const fs::path outdir = ta.getFolder("gsplat_out");
+    ddb::buildGsplat(ply.string(), outdir.string());
+
+    EXPECT_TRUE(fs::exists(outdir / GsplatFileName)) << "model.spz must still be produced";
+    EXPECT_FALSE(fs::exists(outdir / GsplatRadFileName)) << "no tool -> no model.rad";
+    EXPECT_TRUE(fs::exists(outdir / GsplatThumbFileName)) << "thumbnail is pre-rendered even without LOD";
+
+    // Restore the previous override so later tests see the real discovery behavior.
+    GSPLAT_SETENV("DDB_BUILDLOD_PATH", prev.c_str());
+    ddb::buildlod::findBuildLodBinary(/*forceRefresh=*/true);
+
+#undef GSPLAT_SETENV
 }
 
 TEST(gsplat, ksplatRequiresExternalTool) {
@@ -416,7 +556,8 @@ TEST(gsplat, buildWithGerefWritesSidecar) {
     const fs::path outdir = ta.getFolder("gsplat_geo");
     ddb::buildGsplat(ply.string(), outdir.string(), g);
 
-    EXPECT_TRUE(fs::exists(outdir / GsplatFileName));
+    // The delivery artifact is present (model.rad when build-lod ran, else model.spz).
+    EXPECT_TRUE(fs::exists(outdir / GsplatRadFileName) || fs::exists(outdir / GsplatFileName));
     ASSERT_TRUE(fs::exists(outdir / GsplatGeorefFileName));
 
     std::ifstream in((outdir / GsplatGeorefFileName).string());
@@ -434,9 +575,10 @@ TEST(gsplat, thumbnailFromSpzAtTwoSizes) {
     const fs::path ply = ta.getPath("scene.ply");
     writeSplatPly(ply, 400, 1);
 
-    const fs::path outdir = ta.getFolder("gsplat_thumb");
-    ddb::buildGsplat(ply.string(), outdir.string());
-    const fs::path spz = outdir / GsplatFileName;
+    // Convert directly to a standalone .spz so the splat thumbnail renderer is exercised
+    // independently of the build pipeline (which drops model.spz in favour of model.rad).
+    const fs::path spz = ta.getPath("scene.spz");
+    ddb::convertToSpz(ply.string(), spz.string());
     ASSERT_TRUE(fs::exists(spz));
 
     const fs::path thumb128 = ta.getPath("thumb_128.webp");
@@ -485,10 +627,19 @@ TEST(gsplat, buildPipelineIntegration) {
     ddb::build(db.get(), rel, "", false);
     EXPECT_TRUE(ddb::isBuildComplete(db.get(), rel));
 
-    const fs::path modelSpz =
-        fs::path(db->buildDirectory()) / e.hash / "gsplat" / "model.spz";
-    EXPECT_TRUE(fs::exists(modelSpz));
-    EXPECT_GT(fileSize(modelSpz), 0u);
+    const fs::path gsplatDir = fs::path(db->buildDirectory()) / e.hash / "gsplat";
+    // Delivery artifact: model.rad when build-lod ran, else the fallback model.spz.
+    const fs::path modelRad = gsplatDir / GsplatRadFileName;
+    const fs::path modelSpz = gsplatDir / GsplatFileName;
+    EXPECT_TRUE(fs::exists(modelRad) || fs::exists(modelSpz));
+    if (fs::exists(modelRad)) {
+        EXPECT_GT(fileSize(modelRad), 0u);
+        EXPECT_FALSE(fs::exists(modelSpz)) << "model.spz must be dropped once model.rad exists";
+    } else {
+        EXPECT_GT(fileSize(modelSpz), 0u);
+    }
+    // A preview thumbnail is always pre-rendered.
+    EXPECT_TRUE(fs::exists(gsplatDir / GsplatThumbFileName));
 }
 
 } // namespace

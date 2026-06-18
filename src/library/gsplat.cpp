@@ -12,10 +12,12 @@
 #include <limits>
 #include <sstream>
 
+#include "buildlod_runner.h"
 #include "exceptions.h"
 #include "logger.h"
 #include "mio.h"
 #include "ply.h"
+#include "thumbs.h"
 #include "utils.h"
 
 // SPZ (vendored, MIT) - native Gaussian Splat encoder/decoder.
@@ -48,6 +50,25 @@ namespace ddb
             if (p.checkExtension({"ksplat"}))
                 return SplatFormat::Ksplat;
             return SplatFormat::Unknown;
+        }
+
+        // SPZ file-format version written for the delivery artifact. The web viewer (Spark)
+        // only understands the gzip-based SPZ versions (1-3); version 4 switched to a ZSTD
+        // per-stream container ("NGSP") that Spark cannot decode (it reports "Invalid gzip
+        // header"). Version 3 keeps the same smallest-three quaternion precision as v4, so
+        // visual quality is unchanged - only the compression container differs (gzip vs zstd).
+        constexpr uint32_t kDeliverySpzVersion = 3;
+
+        // True when the file begins with the gzip magic (0x1F 0x8B), i.e. a legacy SPZ v1-3
+        // that the viewer can already read. NGSP/ZSTD (v4) files start with "NGSP" instead.
+        bool isGzipSpz(const fs::path &path)
+        {
+            std::ifstream in(path.string(), std::ios::binary);
+            if (!in.good())
+                return false;
+            uint8_t magic[2] = {0};
+            in.read(reinterpret_cast<char *>(magic), sizeof(magic));
+            return in.gcount() == 2 && magic[0] == 0x1F && magic[1] == 0x8B;
         }
 
         // Inverse sigmoid (logit) with clamping, used to store opacity the way SPZ expects.
@@ -88,6 +109,57 @@ namespace ddb
             catch (const std::exception &e)
             {
                 LOGD << "Ignoring malformed DDB_GSPLAT_SH_BITS='" << env << "': " << e.what();
+            }
+        }
+
+        // Loads the delivery .spz and writes a tiny bounds.json sidecar with the local-space
+        // axis-aligned bounding box of the splat centers: {"min":[x,y,z],"max":[x,y,z]}.
+        // The viewer reads this to frame the camera deterministically (essential for paged .rad
+        // playback, where no splats are resident at init time). Best-effort: never throws.
+        void writeSplatBounds(const fs::path &spzPath, const fs::path &outFile)
+        {
+            try
+            {
+                spz::UnpackOptions unpack;
+                spz::GaussianCloud cloud = spz::loadSpz(spzPath.string(), unpack);
+                const size_t n = static_cast<size_t>(std::max(cloud.numPoints, 0));
+                if (n == 0 || cloud.positions.size() < n * 3)
+                {
+                    LOGD << "Skipping bounds.json: no splat positions in " << spzPath.string();
+                    return;
+                }
+
+                double mn[3] = {std::numeric_limits<double>::max(),
+                                std::numeric_limits<double>::max(),
+                                std::numeric_limits<double>::max()};
+                double mx[3] = {std::numeric_limits<double>::lowest(),
+                                std::numeric_limits<double>::lowest(),
+                                std::numeric_limits<double>::lowest()};
+                for (size_t i = 0; i < n; ++i)
+                {
+                    for (int k = 0; k < 3; ++k)
+                    {
+                        const double v = static_cast<double>(cloud.positions[i * 3 + k]);
+                        mn[k] = std::min(mn[k], v);
+                        mx[k] = std::max(mx[k], v);
+                    }
+                }
+
+                json j;
+                j["min"] = {mn[0], mn[1], mn[2]};
+                j["max"] = {mx[0], mx[1], mx[2]};
+
+                std::ofstream out(outFile.string(), std::ios::binary);
+                if (!out.good())
+                {
+                    LOGD << "Could not open bounds.json for writing: " << outFile.string();
+                    return;
+                }
+                out << j.dump();
+            }
+            catch (const std::exception &e)
+            {
+                LOGD << "Skipping bounds.json (" << e.what() << ")";
             }
         }
 
@@ -388,7 +460,24 @@ namespace ddb
         {
             if (!looksLikeSpz(input))
                 throw AppException("File does not look like a valid .spz: " + input);
-            io::copy(input, output);
+            // Gzip-based SPZ (v1-3) is already viewer-compatible: copy it through unchanged.
+            // NGSP/ZSTD SPZ (v4) must be transcoded to v3 so the Spark viewer can decode it.
+            if (isGzipSpz(input))
+            {
+                io::copy(input, output);
+                return;
+            }
+
+            spz::UnpackOptions unpack;
+            spz::GaussianCloud cloud = spz::loadSpz(input, unpack);
+            if (cloud.numPoints <= 0)
+                throw AppException("No splats decoded from: " + input);
+
+            spz::PackOptions pack;
+            pack.version = kDeliverySpzVersion;
+            applyShBitsFromEnv(pack);
+            if (!spz::saveSpz(cloud, pack, output))
+                throw AppException("Failed to transcode .spz to viewer-compatible version: " + output);
             return;
         }
 
@@ -408,6 +497,7 @@ namespace ddb
         }
 
         spz::PackOptions pack; // canonical (from = UNSPECIFIED)
+        pack.version = kDeliverySpzVersion;
         applyShBitsFromEnv(pack);
 
         if (!spz::saveSpz(cloud, pack, output))
@@ -426,6 +516,57 @@ namespace ddb
 
         const fs::path outSpz = fs::path(outdir) / GsplatFileName;
         convertToSpz(input, outSpz.string());
+
+        // Local-space bounding box sidecar for deterministic camera framing in the viewer.
+        writeSplatBounds(outSpz, fs::path(outdir) / GsplatBoundsFileName);
+
+        // Pre-render a preview from the canonical .spz so file lists show a real thumbnail.
+        // generateThumb dispatches on the .spz extension to the splat renderer. Best-effort:
+        // a thumbnail failure must never fail the build.
+        const fs::path outThumb = fs::path(outdir) / GsplatThumbFileName;
+        try
+        {
+            generateThumb(outSpz, 512, outThumb, /*forceRecreate=*/true, nullptr, nullptr);
+        }
+        catch (const std::exception &e)
+        {
+            LOGD << "Skipping Gaussian Splat thumbnail (" << e.what() << ")";
+        }
+
+        // Optional level-of-detail artifact for progressive streaming of large scenes.
+        // Derived from the canonical model.spz so it stays inside the build temp folder
+        // (build-lod writes next to its input) and reuses the same quantization. This is
+        // best-effort: when build-lod is not bundled, or fails, we keep model.spz and the
+        // viewer falls back to non-streamed loading. See TBD/GaussianSplats/LOD-Support.md.
+        bool radProduced = false;
+        if (buildlod::isBuildLodAvailable())
+        {
+            const fs::path outRad = fs::path(outdir) / GsplatRadFileName;
+            std::string lodError;
+            if (buildlod::runBuildLod(outSpz, outRad, lodError, /*quality=*/true, GsplatRadMaxSh))
+            {
+                radProduced = true;
+                LOGD << "Generated Gaussian Splat LOD: " << outRad.string();
+            }
+            else
+                LOGD << "Skipping Gaussian Splat LOD (" << lodError << ")";
+        }
+        else
+        {
+            LOGD << "build-lod not available; serving Gaussian Splat without LOD streaming";
+        }
+
+        // Drop the canonical .spz once the full-SH .rad exists: the viewer streams the .rad,
+        // the thumbnail is pre-rendered, and downloads serve the original upload - so keeping
+        // the .spz would only duplicate storage. Keep it as the delivery artifact when no .rad
+        // was produced (graceful degradation without build-lod).
+        if (radProduced)
+        {
+            std::error_code ec;
+            fs::remove(outSpz, ec);
+            if (ec)
+                LOGD << "Could not remove redundant " << outSpz.string() << ": " << ec.message();
+        }
 
         if (georef.valid)
             writeGeoref(georef, fs::path(outdir) / GsplatGeorefFileName);

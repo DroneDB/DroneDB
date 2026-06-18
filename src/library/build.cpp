@@ -152,7 +152,8 @@ static bool isBuildOutputComplete(const fs::path& baseOutputPath,
                fileExistsAndNonEmpty(baseOutputPath / "mvt" / "metadata.json");
 
     if (e.type == EntryType::GaussianSplat)
-        return fileExistsAndNonEmpty(baseOutputPath / "gsplat" / "model.spz");
+        return fileExistsAndNonEmpty(baseOutputPath / "gsplat" / "model.rad") ||
+               fileExistsAndNonEmpty(baseOutputPath / "gsplat" / "model.spz");
 
     return directoryHasNonEmptyContent(baseOutputPath / subfolder);
 }

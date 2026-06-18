@@ -13,3 +13,6 @@
 [submodule "vendor/spz"]
 	path = vendor/spz
 	url = https://github.com/nianticlabs/spz.git
+[submodule "vendor/spark"]
+	path = vendor/spark
+	url = https://github.com/sparkjsdev/spark.git

@@ -20,6 +20,27 @@ namespace ddb
     constexpr const char *GsplatBuildSubfolder = "gsplat";
     constexpr const char *GsplatFileName = "model.spz";
     constexpr const char *GsplatGeorefFileName = "georef.json";
+    // Optional level-of-detail delivery artifact (Spark "RAD" container). Produced by the
+    // vendored build-lod tool when available; streamed progressively by the viewer via HTTP
+    // range requests (paged: true). Absence is non-fatal - the viewer falls back to model.spz.
+    constexpr const char *GsplatRadFileName = "model.rad";
+
+    // Tiny sidecar with the splat's local-space axis-aligned bounding box, written at build
+    // time. The viewer uses it to frame the camera deterministically. This is essential for the
+    // paged .rad path: a streamed mesh has no resident splats (hence no computable bounds) when
+    // it first initializes, so client-side auto-framing cannot work without this hint.
+    constexpr const char *GsplatBoundsFileName = "bounds.json";
+
+    // Pre-rendered preview written at build time (from the canonical .spz before it is dropped).
+    // Registry serves this as the entry thumbnail, so a real preview is shown in file lists
+    // without keeping the full .spz around or decoding the paged .rad on demand.
+    constexpr const char *GsplatThumbFileName = "thumbnail.webp";
+
+    // Web LOD delivery profile (see TBD/GaussianSplats/LOD-Support.md): bhatt-lod ("quality")
+    // with full spherical harmonics (degree 3) so the streamed .rad preserves the look of the
+    // source and can be served as the SOLE delivery artifact (the .spz is dropped after build).
+    // Single-file RAD so Registry can serve it with HTTP range requests.
+    constexpr int GsplatRadMaxSh = 3;
 
     // Standard spherical-harmonics DC -> RGB factor (Y_0^0 normalization constant).
     constexpr double SH_C0 = 0.2820947917738781;
