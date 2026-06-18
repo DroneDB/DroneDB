@@ -530,7 +530,7 @@ namespace ddb
         const fs::path outThumb = fs::path(outdir) / GsplatThumbFileName;
         try
         {
-            generateThumb(outSpz, 512, outThumb, /*forceRecreate=*/true, nullptr, nullptr);
+            generateThumb(outSpz, GsplatThumbSize, outThumb, /*forceRecreate=*/true, nullptr, nullptr);
         }
         catch (const std::exception &e)
         {

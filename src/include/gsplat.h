@@ -36,6 +36,8 @@ namespace ddb
     // without keeping the full .spz around or decoding the paged .rad on demand.
     constexpr const char *GsplatThumbFileName = "thumbnail.webp";
 
+    constexpr int GsplatThumbSize = 2048; // pixels, square
+
     // Web LOD delivery profile (see TBD/GaussianSplats/LOD-Support.md): bhatt-lod ("quality")
     // with full spherical harmonics (degree 3) so the streamed .rad preserves the look of the
     // source and can be served as the SOLE delivery artifact (the .spz is dropped after build).
