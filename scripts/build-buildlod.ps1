@@ -95,21 +95,26 @@ if (-not (Test-Path $BuildDir)) {
 
 $cargoArgs = @(
     "build",
-    "--release",
     "--package", "build-lod",
     "--no-default-features",
     "--manifest-path", $manifest
 )
 
-Write-Host "`nBuilding build-lod (release, --no-default-features)..." -ForegroundColor Cyan
+$profile = "debug"
+if ($Config -in @('Release', 'RelWithDebInfo', 'MinSizeRel')) {
+    $cargoArgs += "--release"
+    $profile = "release"
+}
+
+Write-Host "`nBuilding build-lod ($profile, --no-default-features)..." -ForegroundColor Cyan
 & cargo @cargoArgs
 if ($LASTEXITCODE -ne 0) {
     Write-Host "ERROR: cargo build failed for build-lod (exit $LASTEXITCODE)" -ForegroundColor Red
     exit $LASTEXITCODE
 }
 
-# cargo writes to <workspace>/target/release/build-lod.exe by default.
-$candidate = Join-Path $VendorDir "rust\target\release\build-lod.exe"
+# cargo writes to <workspace>/target/{profile}/build-lod.exe by default.
+$candidate = Join-Path $VendorDir "rust\target\$profile\build-lod.exe"
 $buildLodBin = $null
 if (Test-Path $candidate) {
     $buildLodBin = Get-Item $candidate

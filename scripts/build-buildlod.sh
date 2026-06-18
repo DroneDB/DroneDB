@@ -72,17 +72,24 @@ if [ ! -d "${BUILD_DIR}" ]; then
     exit 1
 fi
 
+CARGO_PROFILE_FLAGS=""
+CARGO_TARGET_SUBDIR="debug"
+if [ "${BUILD_TYPE}" != "Debug" ]; then
+    CARGO_PROFILE_FLAGS="--release"
+    CARGO_TARGET_SUBDIR="release"
+fi
+
 echo ""
-echo "Building build-lod (release, --no-default-features)..."
+echo "Building build-lod (${BUILD_TYPE}, --no-default-features)..."
 cargo build \
-    --release \
+    ${CARGO_PROFILE_FLAGS} \
     --package build-lod \
     --no-default-features \
     --manifest-path "${MANIFEST}" \
     || { echo "ERROR: cargo build failed for build-lod" >&2; exit 1; }
 
-# cargo writes to <workspace>/target/release/build-lod by default.
-BUILDLOD_BIN="${VENDOR_DIR}/rust/target/release/build-lod"
+# cargo writes to <workspace>/target/{profile}/build-lod by default.
+BUILDLOD_BIN="${VENDOR_DIR}/rust/target/${CARGO_TARGET_SUBDIR}/build-lod"
 if [ ! -x "${BUILDLOD_BIN}" ]; then
     BUILDLOD_BIN="$(find "${VENDOR_DIR}/rust/target" -maxdepth 4 -type f -name build-lod -perm -u+x 2>/dev/null | head -n1)"
 fi
