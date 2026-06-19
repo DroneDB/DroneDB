@@ -20,9 +20,9 @@ namespace ddb
     constexpr const char *GsplatBuildSubfolder = "gsplat";
     constexpr const char *GsplatFileName = "model.spz";
     constexpr const char *GsplatGeorefFileName = "georef.json";
-    // Optional level-of-detail delivery artifact (Spark "RAD" container). Produced by the
-    // vendored build-lod tool when available; streamed progressively by the viewer via HTTP
-    // range requests (paged: true). Absence is non-fatal - the viewer falls back to model.spz.
+    // Level-of-detail delivery artifact (Spark "RAD" container). Produced by the vendored
+    // build-lod tool; streamed progressively by the viewer via HTTP range requests (paged: true).
+    // This is the sole delivery artifact - the intermediate .spz is not kept after a successful build.
     constexpr const char *GsplatRadFileName = "model.rad";
 
     // Tiny sidecar with the splat's local-space axis-aligned bounding box, written at build
@@ -31,9 +31,10 @@ namespace ddb
     // it first initializes, so client-side auto-framing cannot work without this hint.
     constexpr const char *GsplatBoundsFileName = "bounds.json";
 
-    // Pre-rendered preview written at build time (from the canonical .spz before it is dropped).
-    // Registry serves this as the entry thumbnail, so a real preview is shown in file lists
-    // without keeping the full .spz around or decoding the paged .rad on demand.
+    // Thumbnail filename constant (kept for reference in test assertions).
+    // Thumbnails are generated on demand from the .rad/.spz at request time - no build-time
+    // thumbnail artifact is produced. The constant is used to verify that buildGsplat does
+    // not write a thumbnail file alongside the delivery artifact.
     constexpr const char *GsplatThumbFileName = "thumbnail.webp";
 
     constexpr int GsplatThumbSize = 2048; // pixels, square
@@ -104,9 +105,11 @@ namespace ddb
     // require an external tool not yet available (e.g. .ksplat).
     DDB_DLL void convertToSpz(const std::string &input, const std::string &output);
 
-    // Builds the canonical .spz delivery artifact from a splat source into `outdir`.
-    // Produces `<outdir>/model.spz`. If `georef.valid`, also writes `<outdir>/georef.json`.
-    // Throws on failure.
+    // Builds the Gaussian Splat delivery artifacts from a splat source into `outdir`.
+    // Requires the build-lod tool; throws BuildDepMissingException if unavailable.
+    // Produces `<outdir>/model.rad` (RAD container) and `<outdir>/bounds.json` (bounding box).
+    // If `georef.valid`, also writes `<outdir>/georef.json`.
+    // The intermediate .spz is not kept after a successful build.
     DDB_DLL void buildGsplat(const std::string &input, const std::string &outdir);
     DDB_DLL void buildGsplat(const std::string &input, const std::string &outdir,
                              const GsplatGeoref &georef);

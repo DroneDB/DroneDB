@@ -279,7 +279,8 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
             buildVector(relativePath, baseOutputPath.string(), force);
             // built stays false on purpose to skip the standard rename below.
         } else if (e.type == EntryType::GaussianSplat) {
-            // Native SPZ conversion into tempFolder/model.spz (+ georef.json when known).
+            // Runs build-lod to produce model.rad + bounds.json (+ georef.json when known).
+            // Throws BuildDepMissingException if build-lod is unavailable.
             buildGsplat(relativePath, tempFolder);
             built = true;
         }
