@@ -20,7 +20,7 @@
 - **Geospatial Analysis** - Flight path visualization, EXIF metadata extraction, dataset partitioning, and STAC catalog support
 - **Multiple Sharing Options** - Direct links, embed codes, TMS tiles, Cloud-Optimized GeoTIFFs (COG), and Entwine Point Tiles (EPT)
 - **Cloud Sync** - Push and pull datasets to/from DroneDB Hub for collaboration
-- **Format Support** - Orthophotos (GeoTIFF, COG), point clouds (LAS, LAZ, E57, PTS, XYZ, PLY), 3D models (OBJ, glTF/GLB), vector files (GeoJSON, DXF, DWG, SHP, SHZ, FGB, TopoJSON, KML, KMZ, GPKG), videos (MP4, MOV, WEBM, M4V, AVI, MKV), and 360° panoramas
+- **Format Support** - Orthophotos (GeoTIFF, COG), point clouds (LAS, LAZ, E57, PTS, XYZ, PLY), 3D models (OBJ, glTF/GLB), Gaussian Splats (PLY, SPLAT, SPZ), vector files (GeoJSON, DXF, DWG, SHP, SHZ, FGB, TopoJSON, KML, KMZ, GPKG), videos (MP4, MOV, WEBM, M4V, AVI, MKV), and 360° panoramas
 - **Cross-Platform** - Works on Windows and Linux
 
 ---
@@ -68,6 +68,9 @@ ddb search --type image
 # Build COG (Cloud-Optimized GeoTIFF) from raster
 ddb cog input.tif output.tif
 
+# Convert Gaussian Splat to compressed .spz format
+ddb gsplat input.ply output.spz
+
 # Share your dataset to DroneDB Hub
 ddb share . --tag myproject/dataset
 ```
@@ -88,6 +91,7 @@ ddb share . --tag myproject/dataset
 | `cog` | Create Cloud-Optimized GeoTIFFs |
 | `ept` | Create Entwine Point Tiles from point clouds |
 | `nxs` | Create Nexus 3D mesh format |
+| `gsplat` | Convert Gaussian Splat to compressed .spz format |
 | `stac` | Export as STAC catalog |
 | `clone` | Clone a remote repository |
 | `push` / `pull` | Sync with DroneDB Hub |
@@ -124,6 +128,7 @@ DroneDB uses **vcpkg** for dependency management and CMake for building.
 - **CMake 3.21+**
 - **Python 3.x**
 - **Git**
+- **Rust toolchain** (`cargo`, required for Gaussian Splat LOD support)
 - **Visual Studio 2019+** (Windows only, with C++ desktop development workload)
 
 ### Quick Build
@@ -180,6 +185,7 @@ After successful build, find executables in the `build/` directory:
 - **ddb.dll** - Core library
 - **ddbtest.exe** - Test suite
 - **untwine.exe** - COPC converter (optional, see below)
+- **build-lod.exe** - Gaussian Splat LOD producer (required for Gaussian Splat support)
 
 #### Untwine COPC (optional)
 
@@ -195,6 +201,21 @@ git submodule update --init vendor/untwine
 ```
 
 If the submodule is not present, DroneDB falls back to the built-in PDAL `writers.copc` pipeline automatically - no configuration required.
+
+#### build-lod (Gaussian Splat LOD producer)
+
+If the `vendor/spark` git submodule is initialised, the build script automatically compiles [Spark's `build-lod`](https://github.com/sparkjsdev/spark) Rust CLI and places `build-lod.exe` next to `ddbcmd.exe`. This binary is required for Gaussian Splat LOD streaming.
+
+> **Prerequisite:** A Rust toolchain (`cargo`) must be installed. Download it from [rustup.rs](https://rustup.rs).
+
+To initialise the submodule:
+
+```powershell
+git submodule update --init vendor/spark
+.\full-build-win.ps1          # or -BuildType Release
+```
+
+If `build-lod.exe` is missing, DroneDB can still serve Gaussian Splats but without LOD streaming (plain `model.spz`).
 
 #### Troubleshooting
 
@@ -234,6 +255,7 @@ After a successful build, executables are placed in `build/`:
 - **ddbcmd** / **libddb.so** - CLI tool and core library
 - **ddbtest** - Test suite
 - **untwine** - COPC accelerator (optional, see below)
+- **build-lod** - Gaussian Splat LOD producer (required for Gaussian Splat support)
 
 #### Untwine COPC Accelerator (optional)
 
@@ -247,6 +269,21 @@ git submodule update --init vendor/untwine
 ```
 
 A build failure in the Untwine step is **non-blocking** - DroneDB falls back to the PDAL `writers.copc` pipeline automatically.
+
+#### build-lod (Gaussian Splat LOD producer)
+
+Same logic as on Windows: if the `vendor/spark` submodule is present, the script compiles [Spark's `build-lod`](https://github.com/sparkjsdev/spark) via `cargo` and copies the resulting binary next to `ddbcmd`. This binary is required for Gaussian Splat LOD streaming.
+
+> **Prerequisite:** A Rust toolchain (`cargo`) must be installed. Download it from [rustup.rs](https://rustup.rs).
+
+To initialise the submodule:
+
+```bash
+git submodule update --init vendor/spark
+./full-build-linux.sh          # or Debug
+```
+
+If `build-lod` is missing, DroneDB can still serve Gaussian Splats but without LOD streaming (plain `model.spz`).
 
 ### Docker Build
 
@@ -317,7 +354,8 @@ This project is licensed under the [Mozilla Public License 2.0 (MPL-2.0)](LICENS
 
 Distribution archives (Windows ZIP, Debian package, Docker image) may include
 third-party components under different licenses - most notably the optional
-[Untwine](https://github.com/hobuinc/untwine) COPC accelerator (GPL-3.0).
+[Untwine](https://github.com/hobuinc/untwine) COPC accelerator (GPL-3.0) and
+the [SPZ](https://github.com/nianticlabs/spz) Gaussian Splat compression library (MIT).
 See [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) for the full list and
 attributions.
 
