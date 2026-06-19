@@ -183,6 +183,9 @@ jobs:
       PROJ_DATA: ${{ github.workspace }}/build
       VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
       VCPKG_FEATURE_FLAGS: "binarycaching,manifests,versions"
+      VCPKG_KEEP_ENV_VARS: "CMAKE_C_CLANG_TIDY;CMAKE_CXX_CLANG_TIDY"
+      CMAKE_C_CLANG_TIDY: ""
+      CMAKE_CXX_CLANG_TIDY: ""
     steps:
       - uses: actions/checkout@v4
         with:
