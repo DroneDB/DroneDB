@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 // nxconv.cpp - correct version for libktx 4.x
 
 #include <assimp/postprocess.h>
@@ -34,7 +38,7 @@ namespace fs = std::filesystem;
 
 namespace ddb {
 
-/// Check if the scene contains UV texture coordinates
+/** @brief Check if the scene contains UV texture coordinates */
 static bool sceneHasUVs(const aiScene* s) {
     if (!s)
         return false;
@@ -45,7 +49,7 @@ static bool sceneHasUVs(const aiScene* s) {
     return false;
 }
 
-/// Check if the scene contains vertex color data
+/** @brief Check if the scene contains vertex color data */
 static bool sceneHasVertexColors(const aiScene* s) {
     if (!s)
         return false;
@@ -56,10 +60,13 @@ static bool sceneHasVertexColors(const aiScene* s) {
     return false;
 }
 
-/// Extract embedded textures from the scene and save them to disk
-/// @param scene The Assimp scene containing embedded textures
-/// @param outputDir Directory where textures will be saved
-/// @param textureMap Output map from texture index to saved filename
+/**
+ * @brief Extract embedded textures from the scene and save them to disk
+ *
+ * @param scene The Assimp scene containing embedded textures
+ * @param outputDir Directory where textures will be saved
+ * @param textureMap Output map from texture index to saved filename
+ */
 static void extractEmbeddedTextures(const aiScene* scene,
                                     const fs::path& outputDir,
                                     std::map<int, std::string>& textureMap) {
@@ -132,10 +139,13 @@ static void extractEmbeddedTextures(const aiScene* scene,
 }
 
 
-/// Convert a KTX2 texture file to PNG format
-/// @param ktxPath Path to the input KTX2 file
-/// @param pngPath Path to the output PNG file
-/// @throws AppException if conversion fails
+/**
+ * @brief Convert a KTX2 texture file to PNG format
+ *
+ * @param ktxPath Path to the input KTX2 file
+ * @param pngPath Path to the output PNG file
+ * @throws AppException if conversion fails
+ */
 static void convertKtx2ToPng(const fs::path& ktxPath, const fs::path& pngPath) {
     LOGD << "[ktx2->png] " << ktxPath << " -> " << pngPath;
 
@@ -184,9 +194,12 @@ static void convertKtx2ToPng(const fs::path& ktxPath, const fs::path& pngPath) {
     }
 }
 
-/// Replace all *.ktx2 references in .mtl files with *.png (converting files)
-/// @param mtlPath Path to the MTL file to patch
-/// @throws FSException if file operations fail
+/**
+ * @brief Replace all *.ktx2 references in .mtl files with *.png (converting files)
+ *
+ * @param mtlPath Path to the MTL file to patch
+ * @throws FSException if file operations fail
+ */
 static void patchMtlKtx2ToPng(const fs::path& mtlPath) {
     if (!fs::exists(mtlPath))
         return;
@@ -258,15 +271,18 @@ static void patchMtlKtx2ToPng(const fs::path& mtlPath) {
 }
 
 
-/// Export a scene to OBJ or PLY format using Assimp
-/// @param scene The Assimp scene to export
-/// @param outBaseNoExt Base output path without extension
-/// @param forcePLY Force PLY format even if UVs are present
-/// @param preferPLYIfNoUV Prefer PLY if no UVs and vertex colors are present
-/// @param hasUVs Whether the scene has UV coordinates
-/// @param outGeomPath Output parameter for the generated geometry file path
-/// @param outMtlPath Output parameter for the generated MTL file path (OBJ only)
-/// @throws AppException if export fails
+/**
+ * @brief Export a scene to OBJ or PLY format using Assimp
+ *
+ * @param scene The Assimp scene to export
+ * @param outBaseNoExt Base output path without extension
+ * @param forcePLY Force PLY format even if UVs are present
+ * @param preferPLYIfNoUV Prefer PLY if no UVs and vertex colors are present
+ * @param hasUVs Whether the scene has UV coordinates
+ * @param outGeomPath Output parameter for the generated geometry file path
+ * @param outMtlPath Output parameter for the generated MTL file path (OBJ only)
+ * @throws AppException if export fails
+ */
 static void exportWithAssimp(const aiScene* scene,
                              const fs::path& outBaseNoExt,
                              bool forcePLY,
@@ -383,14 +399,17 @@ static void exportWithAssimp(const aiScene* scene,
 }
 
 
-/// Convert glTF/GLB file to OBJ or PLY format
-/// @param inputGltf Path to the input glTF or GLB file
-/// @param outputBasePath Base path for output files (without extension)
-/// @param outGeomPath Output parameter for the generated geometry file path
-/// @param outMtlPath Output parameter for the generated MTL file path (OBJ only)
-/// @param forcePLY Force PLY format output even if UVs are present
-/// @param preferPLYIfNoUV Prefer PLY format if no UVs and vertex colors are present
-/// @throws AppException if conversion fails
+/**
+ * @brief Convert glTF/GLB file to OBJ or PLY format
+ *
+ * @param inputGltf Path to the input glTF or GLB file
+ * @param outputBasePath Base path for output files (without extension)
+ * @param outGeomPath Output parameter for the generated geometry file path
+ * @param outMtlPath Output parameter for the generated MTL file path (OBJ only)
+ * @param forcePLY Force PLY format output even if UVs are present
+ * @param preferPLYIfNoUV Prefer PLY format if no UVs and vertex colors are present
+ * @throws AppException if conversion fails
+ */
 void convertGltfTo3dModel(const std::string& inputGltf,
                           const std::string& outputBasePath,
                           std::string& outGeomPath,

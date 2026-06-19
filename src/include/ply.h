@@ -18,6 +18,13 @@ namespace ddb
         unsigned long vertexCount;
         bool isMesh;
         bool hasTextures;
+        // True when the vertex element carries 3D Gaussian Splat attributes
+        // (spherical-harmonic DC term and/or anisotropic scale + rotation + opacity)
+        // and there is no face element. Mutually exclusive with isMesh.
+        bool isSplat;
+        // Spherical-harmonics degree (0..3) inferred from the number of f_rest_*
+        // properties. -1 when the file is not a Gaussian Splat.
+        int shDegree;
         std::vector<std::string> dimensions;
     };
 

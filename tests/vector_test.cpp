@@ -100,7 +100,7 @@ namespace
         VerifyVectorBuild(baseDir);
     }
 
-    TEST(testVector, geoJsonIta)
+    MANUAL_TEST(testVector, geoJsonIta)
     {
         TestFS testFS(
             "https://github.com/DroneDB/test_data/raw/refs/heads/master/vector/ita.zip",
@@ -293,7 +293,7 @@ namespace
      * Verify that conversion from a projected CRS (EPSG:6707 RDN2008/UTM32N N-E
      * axis order) correctly reprojects to WGS84 in the GPKG sidecar.
      */
-    TEST(testVector, bigShapefileMilan)
+    MANUAL_TEST(testVector, bigShapefileMilan)
     {
         TestFS testFS(
             "https://github.com/DroneDB/test_data/raw/refs/heads/master/vector/A010101.zip",

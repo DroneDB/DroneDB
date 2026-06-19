@@ -130,12 +130,13 @@ DDB_DLL std::string generateRandomString(int length) {
     return str;
 }
 
-/// <summary>
-/// Joins a vector of strings
-/// </summary>
-/// <param name="vec"></param>
-/// <param name="separator"></param>
-/// <returns></returns>
+/**
+ * @brief Joins a vector of strings with a separator character
+ *
+ * @param vec Vector of strings to join
+ * @param separator Character to place between elements
+ * @return Joined string with separator between elements (no trailing separator)
+ */
 std::string join(const std::vector<std::string>& vec, char separator) {
     std::stringstream ss;
     for (const auto& s : vec)

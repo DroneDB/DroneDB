@@ -40,3 +40,20 @@ cmake --build . -- -j"$CPU_CORES"
             echo "WARNING: scripts/build-untwine.sh failed (non-blocking, PDAL fallback will be used)"
     fi
 )
+
+# ----------------------------------------------------------------------
+# Optional: build the build-lod Gaussian Splat LOD producer (vendor/spark).
+# Delegated to scripts/build-buildlod.sh (cargo). Failures NEVER abort the
+# main build; DroneDB serves the plain model.spz (no LOD streaming) when
+# build-lod is missing.
+# ----------------------------------------------------------------------
+(
+    cd ..
+    if [ -x "./scripts/build-buildlod.sh" ]; then
+        ./scripts/build-buildlod.sh build "${BUILD_TYPE}" || \
+            echo "WARNING: scripts/build-buildlod.sh failed (non-blocking, model.spz served without LOD)"
+    elif [ -f "./scripts/build-buildlod.sh" ]; then
+        bash ./scripts/build-buildlod.sh build "${BUILD_TYPE}" || \
+            echo "WARNING: scripts/build-buildlod.sh failed (non-blocking, model.spz served without LOD)"
+    fi
+)

@@ -16,15 +16,21 @@
 #include "pctiler.h"
 #include "exceptions.h"
 #include "gdal_inc.h"
+#include "gsplat.h"
 #include "hash.h"
 #include "mio.h"
 #include "pointcloud.h"
+#include "rad.h"
 #include "raster_utils.h"
 #include "sensorprofile.h"
 #include "vegetation.h"
 #include "tiler.h"
 #include "userprofile.h"
 #include "utils.h"
+
+// SPZ (vendored, MIT) - decode .spz to render an on-demand splat thumbnail.
+#include "load-spz.h"
+#include "splat-types.h"
 
 namespace ddb {
 
@@ -1147,6 +1153,172 @@ void generatePointCloudThumb(const fs::path& copcPath,
                 outBufferSize);
 }
 
+// Shared orthographic rasteriser for Gaussian Splat previews. Inputs are already in display
+// space: `colors` holds RGB in [0,1] and `opacities` holds activated opacity (NOT logits). The
+// scene is projected onto the plane perpendicular to its flattest axis (so aerial scenes
+// naturally render top-down) and depth-sorted with a simple z-buffer. The output size honours
+// thumbSize at request time - nothing is precomputed at build time.
+static void rasterizeSplatPreview(const std::vector<float>& positions,
+                                  const std::vector<float>& colors,
+                                  const std::vector<float>& opacities,
+                                  size_t n,
+                                  int thumbSize,
+                                  const fs::path& outImagePath,
+                                  const std::string& sourceLabel,
+                                  uint8_t** outBuffer,
+                                  int* outBufferSize) {
+    if (n == 0 || positions.size() < n * 3)
+        throw InvalidArgsException("No splats to render in " + sourceLabel);
+
+    // Position bounds.
+    double mn[3] = {std::numeric_limits<double>::max(), std::numeric_limits<double>::max(),
+                    std::numeric_limits<double>::max()};
+    double mx[3] = {std::numeric_limits<double>::lowest(), std::numeric_limits<double>::lowest(),
+                    std::numeric_limits<double>::lowest()};
+    for (size_t i = 0; i < n; ++i) {
+        for (int k = 0; k < 3; ++k) {
+            const double v = static_cast<double>(positions[i * 3 + k]);
+            mn[k] = std::min(mn[k], v);
+            mx[k] = std::max(mx[k], v);
+        }
+    }
+
+    const double extent[3] = {mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]};
+
+    // Depth axis = flattest dimension; the remaining two form the image plane.
+    int depthAxis = 0;
+    if (extent[1] < extent[depthAxis]) depthAxis = 1;
+    if (extent[2] < extent[depthAxis]) depthAxis = 2;
+    const int uAxis = (depthAxis == 0) ? 1 : 0;
+    const int vAxis = (depthAxis == 2) ? 1 : 2;
+
+    const double uExtent = extent[uAxis];
+    const double vExtent = extent[vAxis];
+    if (uExtent <= 0.0 && vExtent <= 0.0)
+        throw GDALException("Gaussian Splat has zero planar extent; cannot render thumbnail");
+
+    const int tileSize = thumbSize;
+    const size_t wSize = static_cast<size_t>(tileSize) * static_cast<size_t>(tileSize);
+
+    // Band-sequential RGB (3 planes) + a separate alpha plane, matching RenderImage().
+    std::vector<uint8_t> buffer(wSize * 3, 0);
+    std::vector<uint8_t> alphaBuffer(wSize, 0);
+    std::vector<float> zBuffer(wSize, std::numeric_limits<float>::lowest());
+
+    // Fit the (u, v) extent into the tile preserving aspect ratio, with a 1px margin.
+    const double drawable = static_cast<double>(tileSize - 1);
+    const double scaleU = uExtent > 0.0 ? drawable / uExtent : 0.0;
+    const double scaleV = vExtent > 0.0 ? drawable / vExtent : 0.0;
+    double scale = std::min(scaleU > 0.0 ? scaleU : scaleV, scaleV > 0.0 ? scaleV : scaleU);
+    if (scale <= 0.0) scale = 1.0;
+    const double offX = (tileSize - uExtent * scale) / 2.0;
+    const double offY = (tileSize - vExtent * scale) / 2.0;
+
+    const auto toByte = [](double v) -> uint8_t {
+        return static_cast<uint8_t>(std::lround(std::min(std::max(v, 0.0), 1.0) * 255.0));
+    };
+
+    size_t rendered = 0;
+    for (size_t i = 0; i < n; ++i) {
+        // Opacities are already activated; skip near-transparent splats.
+        const double opacity = (i < opacities.size()) ? static_cast<double>(opacities[i]) : 1.0;
+        if (opacity < 0.02)
+            continue;
+
+        const double u = static_cast<double>(positions[i * 3 + uAxis]);
+        const double v = static_cast<double>(positions[i * 3 + vAxis]);
+        const double d = static_cast<double>(positions[i * 3 + depthAxis]);
+
+        int px = static_cast<int>((u - mn[uAxis]) * scale + offX);
+        int py = static_cast<int>((v - mn[vAxis]) * scale + offY);
+        if (px < 0 || px >= tileSize || py < 0 || py >= tileSize)
+            continue;
+        // Flip vertically so "up" in world space points up in the image.
+        py = tileSize - 1 - py;
+        const size_t idx = static_cast<size_t>(py) * static_cast<size_t>(tileSize) +
+                           static_cast<size_t>(px);
+
+        if (static_cast<float>(d) <= zBuffer[idx])
+            continue;
+        zBuffer[idx] = static_cast<float>(d);
+
+        double rgb[3] = {0.5, 0.5, 0.5};
+        if (colors.size() >= (i + 1) * 3) {
+            for (int c = 0; c < 3; ++c)
+                rgb[c] = static_cast<double>(colors[i * 3 + c]);
+        }
+
+        buffer[0 * wSize + idx] = toByte(rgb[0]);
+        buffer[1 * wSize + idx] = toByte(rgb[1]);
+        buffer[2 * wSize + idx] = toByte(rgb[2]);
+        alphaBuffer[idx] = 255;
+        ++rendered;
+    }
+
+    if (rendered == 0)
+        throw GDALException("No splats projected into the thumbnail frame");
+
+    RenderImage(outImagePath, tileSize, 3, buffer.data(), alphaBuffer.data(), outBuffer,
+                outBufferSize);
+}
+
+// Render an on-demand orthographic preview of a Gaussian Splat (.spz). Colours come from the
+// spherical-harmonics DC term and opacity from the stored logit; both are converted to display
+// space before handing off to the shared rasteriser.
+void generateSplatThumb(const fs::path& spzPath,
+                        int thumbSize,
+                        const fs::path& outImagePath,
+                        uint8_t** outBuffer,
+                        int* outBufferSize) {
+    spz::GaussianCloud cloud;
+    try {
+        spz::UnpackOptions unpack;
+        cloud = spz::loadSpz(spzPath.string(), unpack);
+    } catch (const std::exception& e) {
+        throw AppException(std::string("Cannot decode .spz for thumbnail: ") + e.what());
+    }
+
+    const size_t n = static_cast<size_t>(std::max(cloud.numPoints, 0));
+    if (n == 0 || cloud.positions.size() < n * 3)
+        throw InvalidArgsException("No splats to render in " + spzPath.string());
+
+    // Convert SPZ-native attributes to display space: SH DC term -> RGB, logit -> opacity.
+    std::vector<float> colors(n * 3, 0.5f);
+    std::vector<float> opacities(n, 0.0f);
+    for (size_t i = 0; i < n; ++i) {
+        const float logit = (i < cloud.alphas.size()) ? cloud.alphas[i] : 0.0f;
+        opacities[i] = 1.0f / (1.0f + std::exp(-logit));
+        if (cloud.colors.size() >= (i + 1) * 3) {
+            for (int c = 0; c < 3; ++c)
+                colors[i * 3 + c] =
+                    static_cast<float>(0.5 + SH_C0 * static_cast<double>(cloud.colors[i * 3 + c]));
+        }
+    }
+
+    rasterizeSplatPreview(cloud.positions, colors, opacities, n, thumbSize, outImagePath,
+                          spzPath.string(), outBuffer, outBufferSize);
+}
+
+// Render an on-demand preview from a Spark RAD level-of-detail file. Only the coarsest chunk is
+// decoded (a low-density view of the whole scene), so this stays cheap enough to run per request -
+// the same on-the-fly model used for COPC point clouds. RAD colours are already display RGB and
+// opacities already activated, so no conversion is required.
+void generateSplatThumbFromRad(const fs::path& radPath,
+                               int thumbSize,
+                               const fs::path& outImagePath,
+                               uint8_t** outBuffer,
+                               int* outBufferSize) {
+    RadCoarseSplats splats;
+    try {
+        splats = readRadCoarseSplats(radPath, /*maxChunks=*/1);
+    } catch (const std::exception& e) {
+        throw AppException(std::string("Cannot decode .rad for thumbnail: ") + e.what());
+    }
+
+    rasterizeSplatPreview(splats.positions, splats.colors, splats.opacities, splats.count,
+                          thumbSize, outImagePath, radPath.string(), outBuffer, outBufferSize);
+}
+
 // imagePath can be either absolute or relative or a network URL and it's up to the user to
 // invoke the function properly as to avoid conflicts with relative paths
 fs::path generateThumb(const fs::path& inputPath,
@@ -1171,6 +1343,10 @@ fs::path generateThumb(const fs::path& inputPath,
 
     if (isCopcPath(inputPath.string()))
         generatePointCloudThumb(inputPath, thumbSize, outImagePath, outBuffer, outBufferSize);
+    else if (isRadPath(inputPath.string()))
+        generateSplatThumbFromRad(inputPath, thumbSize, outImagePath, outBuffer, outBufferSize);
+    else if (isSpzPath(inputPath.string()))
+        generateSplatThumb(inputPath, thumbSize, outImagePath, outBuffer, outBufferSize);
     else
         generateImageThumb(inputPath, thumbSize, outImagePath, outBuffer, outBufferSize);
 

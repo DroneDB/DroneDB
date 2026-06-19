@@ -59,6 +59,7 @@
     },
     "sqlite3",
     "zlib",
+    "zstd",
     "assimp",
     "ktx",
     "stb",

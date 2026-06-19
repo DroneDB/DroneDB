@@ -37,6 +37,7 @@ find_package(Ktx CONFIG REQUIRED)
 find_package(Stb REQUIRED)
 find_package(tinyobjloader CONFIG REQUIRED)
 find_package(draco CONFIG REQUIRED)
+find_package(ZLIB REQUIRED)
 
 find_path(BOOLINQ_INCLUDE_DIRS "boolinq/boolinq.h")
 
@@ -62,6 +63,8 @@ set(COMMON_LIBS
     KTX::ktx
     tinyobjloader::tinyobjloader
     draco::draco
+    spz
+    ZLIB::ZLIB
 )
 
 

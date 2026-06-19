@@ -28,7 +28,8 @@ namespace ddb
         Model = 11,
         Panorama = 12,
         GeoPanorama = 13,
-        Vector = 14
+        Vector = 14,
+        GaussianSplat = 15
     };
 
     DDB_DLL std::string typeToHuman(EntryType t);

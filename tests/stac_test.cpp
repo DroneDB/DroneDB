@@ -427,7 +427,7 @@ namespace
             EXPECT_EQ(asset["type"], "image/tiff");
         }
 
-        // Check image (GeoImage → image/jpeg)
+        // Check image (GeoImage -> thumbnail MIME is image/webp, matching the GDAL WebP driver output)
         {
             auto j = generateStac(ta->getFolder().string(), "DJI_0018.JPG");
             ASSERT_TRUE(j.contains("assets"));
@@ -463,7 +463,7 @@ namespace
         EXPECT_EQ(thumb["roles"][0], "thumbnail");
 
         ASSERT_TRUE(thumb.contains("type"));
-        EXPECT_EQ(thumb["type"], "image/jpeg");
+        EXPECT_EQ(thumb["type"], "image/webp");
 
         ASSERT_TRUE(thumb.contains("href"));
     }

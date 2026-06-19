@@ -452,6 +452,26 @@ try {
         }
     }
 
+    # ----------------------------------------------------------------------
+    # Optional: build the build-lod Gaussian Splat LOD producer (vendor/spark).
+    # Delegated to scripts/build-buildlod.ps1 (cargo). Failures NEVER block the
+    # main build: DroneDB serves the plain model.spz (no LOD streaming) when
+    # build-lod.exe is missing.
+    # ----------------------------------------------------------------------
+    $buildLodScript = Join-Path $PSScriptRoot "scripts\build-buildlod.ps1"
+    if (Test-Path $buildLodScript) {
+        try {
+            & $buildLodScript -BuildDir $buildDir -Config $BuildType
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "WARNING: scripts/build-buildlod.ps1 returned exit $LASTEXITCODE (non-blocking)." -ForegroundColor Yellow
+                Write-Host "DroneDB will serve Gaussian Splats without LOD streaming." -ForegroundColor Yellow
+            }
+        } catch {
+            Write-Host "WARNING: build-lod build failed (non-blocking): $($_.Exception.Message)" -ForegroundColor Yellow
+            Write-Host "DroneDB will serve Gaussian Splats without LOD streaming." -ForegroundColor Yellow
+        }
+    }
+
     # Display build artifacts
     Write-Host "`n========================================" -ForegroundColor Magenta
     Write-Host "Build Artifacts:" -ForegroundColor Magenta

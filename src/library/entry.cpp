@@ -13,6 +13,7 @@
 #include "mio.h"
 #include "pointcloud.h"
 #include "ply.h"
+#include "gsplat.h"
 #include "thermal.h"
 #include "gdal_priv.h"
 #include "cpl_conv.h"
@@ -454,6 +455,19 @@ namespace ddb
                     entry.point_geom = info.centroid;
                 }
             }
+            else if (entry.type == EntryType::GaussianSplat)
+            {
+                // Lightweight metadata only (no full decode): splat count + SH degree.
+                // Georeferencing (and therefore footprint geometry) is established at
+                // build time from an ODX coords file; a freshly indexed splat renders
+                // in local space until then.
+                GaussianSplatInfo info;
+                if (getGaussianSplatInfo(path.string(), info))
+                {
+                    entry.properties = info.toJSON();
+                    entry.properties["georeferenced"] = false;
+                }
+            }
             else if (entry.type == EntryType::Vector)
             {
                 parseVectorEntry(path, entry);
@@ -879,9 +893,21 @@ namespace ddb
         if (pointCloud)
             return EntryType::PointCloud;
 
+        // Gaussian Splat binary formats (a splat-flavoured .ply is detected via identifyPly below).
+        if (p.checkExtension({"spz", "splat", "ksplat"}))
+        {
+            // The extension is an explicit signal; a lightweight content check only logs a
+            // warning when the bytes look unexpected, never reclassifies the file.
+            if (p.checkExtension({"spz"}) && !looksLikeSpz(path))
+                LOGD << "File has .spz extension but no NGSP/gzip magic: " << path.string();
+            else if (p.checkExtension({"splat"}) && !looksLikeSplatBinary(path))
+                LOGD << "File has .splat extension but size is not a multiple of 32: " << path.string();
+            return EntryType::GaussianSplat;
+        }
+
         if (p.checkExtension({"ply"}))
         {
-            // Could be a mesh or a point cloud
+            // Could be a mesh, a plain point cloud, or a Gaussian Splat
             return identifyPly(path);
         }
 

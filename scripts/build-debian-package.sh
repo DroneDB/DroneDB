@@ -176,6 +176,16 @@ override_dh_auto_install:
 		chmod +x debian/ddb/usr/bin/untwine; \\
 	fi
 
+	# Optional: copy build-lod Gaussian Splat LOD producer if it was built (vendor/spark).
+	# Installed alongside ddb so that runtime discovery
+	# (buildlod_runner.cpp::findBuildLodBinary -> getExeFolder()) finds it
+	# without any extra configuration. Gaussian Splats are served without LOD
+	# streaming (plain model.spz) when the binary is missing.
+	if [ -f \$(CURDIR)/build/build-lod ]; then \\
+		cp \$(CURDIR)/build/build-lod debian/ddb/usr/bin/build-lod; \\
+		chmod +x debian/ddb/usr/bin/build-lod; \\
+	fi
+
 	# Copy PDAL libraries from vcpkg installed directory
 	cp \$(CURDIR)/build/vcpkg_installed/${VCPKG_HOST_TRIPLET}/lib/libpdalcpp.so.19 debian/ddb/usr/lib/
 	cp \$(CURDIR)/build/vcpkg_installed/${VCPKG_HOST_TRIPLET}/lib/libdbus-1.so.3 debian/ddb/usr/lib/

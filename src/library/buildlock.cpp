@@ -37,9 +37,12 @@
 #ifndef WIN32
 namespace {
 
-/// Attempt to acquire an exclusive advisory lock on the open file descriptor.
-/// Non-blocking: returns true if the lock is acquired, false if another process
-/// already holds it. Any other error is reported via `outErrno` and returns false.
+/**
+ * @brief Attempt to acquire an exclusive advisory lock on the open file descriptor.
+ *
+ * Non-blocking: returns true if the lock is acquired, false if another process
+ * already holds it. Any other error is reported via `outErrno` and returns false.
+ */
 bool tryAcquireKernelLock(int fd, int* outErrno) {
     *outErrno = 0;
 #  ifdef DDB_USE_OFD_LOCKS
@@ -56,7 +59,7 @@ bool tryAcquireKernelLock(int fd, int* outErrno) {
     return false;
 }
 
-/// Release the advisory lock. Best-effort; close() also releases automatically.
+/** @brief Release the advisory lock. Best-effort; close() also releases automatically. */
 void releaseKernelLock(int fd) {
 #  ifdef DDB_USE_OFD_LOCKS
     struct flock fl{};

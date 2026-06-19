@@ -22,9 +22,7 @@
 
 namespace ddb {
 
-// ══════════════════════════════════════════════════════════════════════════════
-// §A  INTERNAL TYPES
-// ══════════════════════════════════════════════════════════════════════════════
+// ─── A  Internal types ──────────────────────────────────────────────────────
 
 struct Vec2 { double x = 0, y = 0; };
 struct TiePoint { Vec2 src; Vec2 ref; };
@@ -47,9 +45,7 @@ struct Similarity2D {
     }
 };
 
-// ══════════════════════════════════════════════════════════════════════════════
-// §B  RASTER → COMMON FLOAT32 GRID
-// ══════════════════════════════════════════════════════════════════════════════
+// ─── B  Raster to common float32 grid ───────────────────────────────────────
 
 static bool detectIsDem(GDALDatasetH hDs) {
     int n = GDALGetRasterCount(hDs);
@@ -138,9 +134,7 @@ static RasterGrid readToCommonGrid(GDALDatasetH hDs,
     return grid;
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// §C  INTEGRAL IMAGES (SAT) - O(1) NCC
-// ══════════════════════════════════════════════════════════════════════════════
+// ─── C  Integral images (SAT) - O(1) NCC ────────────────────────────────────
 
 struct IntegralImages {
     std::vector<double> sat, sat2;
@@ -170,9 +164,7 @@ struct IntegralImages {
     }
 };
 
-// ══════════════════════════════════════════════════════════════════════════════
-// §D  PATCH SELECTION BY TEXTURE (local variance)
-// ══════════════════════════════════════════════════════════════════════════════
+// ─── D  Patch selection by texture (local variance) ─────────────────────────
 
 struct PatchCandidate {
     int   row = 0, col = 0;   // top-left pixel in the source grid
@@ -206,10 +198,8 @@ static std::vector<PatchCandidate> selectPatches(
     return candidates;
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// §E  2D PHASE CORRELATION (self-contained complex FFT)
+// ─── E  2D phase correlation (self-contained complex FFT) ────────────────────
 //     Coarse seed / Translation mode - no external FFT dependency.
-// ══════════════════════════════════════════════════════════════════════════════
 
 /** In-place iterative radix-2 Cooley-Tukey FFT. a.size() must be a power of 2. */
 static void fft1d(std::vector<std::complex<double>> &a, bool inverse) {
@@ -334,9 +324,7 @@ static std::pair<double, double> phaseCorrelate(const RasterGrid &src,
     return {dc, dr};
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// §F  PER-PATCH NCC
-// ══════════════════════════════════════════════════════════════════════════════
+// ─── F  Per-patch NCC ───────────────────────────────────────────────────────
 
 struct NccMatch {
     double dr    = 0, dc = 0;  // sub-pixel displacement (common-grid pixels)
@@ -424,9 +412,7 @@ static NccMatch matchPatch(const RasterGrid    &srcGrid,
     return best;
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// §G  UMEYAMA / PROCRUSTES SIMILARITY ESTIMATOR (direct 2D closed form)
-// ══════════════════════════════════════════════════════════════════════════════
+// ─── G  Umeyama / Procrustes similarity estimator (direct 2D closed form) ────
 
 /**
  * Least-squares 2D similarity (scale, rotation, translation) mapping src→ref.
@@ -473,9 +459,7 @@ static Similarity2D umeyama(const std::vector<TiePoint> &pts) {
     return sim;
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// §H  RANSAC
-// ══════════════════════════════════════════════════════════════════════════════
+// ─── H  RANSAC ───────────────────────────────────────────────────────────────
 
 static Similarity2D ransac(const std::vector<TiePoint> &pts,
                            double threshold, int maxIter,
@@ -514,9 +498,7 @@ static Similarity2D ransac(const std::vector<TiePoint> &pts,
     return best;
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// §I  GEOTRANSFORM COMPOSITION + GDAL WARP
-// ══════════════════════════════════════════════════════════════════════════════
+// ─── I  Geotransform composition + GDAL warp ─────────────────────────────────
 
 static void applyWarp(const std::string &sourcePath,
                       const std::string &tmpPath,
@@ -573,9 +555,7 @@ static void applyWarp(const std::string &sourcePath,
     GDALClose(hOut);
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// §J  DEM Z OFFSET
-// ══════════════════════════════════════════════════════════════════════════════
+// ─── J  DEM Z offset ────────────────────────────────────────────────────────
 
 static double computeZOffset(const std::string &alignedPath,
                              const std::string &referencePath)
@@ -669,9 +649,7 @@ static void addZOffset(const std::string &path, double zOffset) {
     GDALClose(hDs);
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// §K  PUBLIC API
-// ══════════════════════════════════════════════════════════════════════════════
+// ─── K  Public API ──────────────────────────────────────────────────────────
 
 AlignValidationResult validateAlignRaster(const std::string &sourcePath,
                                           const std::string &referencePath)

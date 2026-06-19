@@ -2,12 +2,70 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include <fstream>
+#include <algorithm>
 #include "logger.h"
 #include "ply.h"
 #include "exceptions.h"
 
 namespace ddb
 {
+
+    namespace
+    {
+        // Determine whether a vertex-only PLY carries 3D Gaussian Splat attributes and,
+        // if so, its spherical-harmonics degree. Operates on the property names already
+        // collected in info.dimensions. A splat is never a mesh, so callers must check
+        // info.isMesh first.
+        void computePlySplatInfo(PlyInfo &info)
+        {
+            if (info.isMesh)
+                return;
+
+            const auto &dims = info.dimensions;
+            const auto has = [&dims](const std::string &name) {
+                return std::find(dims.begin(), dims.end(), name) != dims.end();
+            };
+
+            // Primary signature: the spherical-harmonics DC term.
+            // Fallback signature: anisotropic covariance attributes (scale + rotation + opacity),
+            // which a few exporters emit without an explicit f_dc_* term.
+            const bool primary = has("f_dc_0");
+            const bool fallback = has("scale_0") && has("scale_1") && has("scale_2") &&
+                                  has("rot_0") && has("rot_1") && has("rot_2") && has("rot_3") &&
+                                  has("opacity");
+
+            if (!primary && !fallback)
+                return;
+
+            info.isSplat = true;
+
+            // Spherical-harmonics degree from the count of f_rest_* properties.
+            // Per-channel higher-order coeffs x 3 channels:
+            //   0 -> degree 0, 9 -> degree 1, 24 -> degree 2, 45 -> degree 3.
+            int fRestCount = 0;
+            for (const auto &d : dims)
+            {
+                if (d.rfind("f_rest_", 0) == 0)
+                    ++fRestCount;
+            }
+
+            switch (fRestCount)
+            {
+                case 0:  info.shDegree = 0; break;
+                case 9:  info.shDegree = 1; break;
+                case 24: info.shDegree = 2; break;
+                case 45: info.shDegree = 3; break;
+                default:
+                    // Unknown/partial SH layout: clamp to the closest lower standard degree
+                    // so downstream consumers still get a sane value.
+                    if (fRestCount >= 45)      info.shDegree = 3;
+                    else if (fRestCount >= 24) info.shDegree = 2;
+                    else if (fRestCount >= 9)  info.shDegree = 1;
+                    else                       info.shDegree = 0;
+                    break;
+            }
+        }
+    } // namespace
 
     DDB_DLL bool getPlyInfo(const fs::path &plyFile, PlyInfo &info)
     {
@@ -25,6 +83,8 @@ namespace ddb
 
         info.isMesh = false;      // Assumed
         info.hasTextures = false; // Assumed
+        info.isSplat = false;     // Assumed
+        info.shDegree = -1;       // Not a splat
         info.dimensions.clear();
         info.vertexCount = 0;
 
@@ -78,10 +138,13 @@ namespace ddb
             }
             else if (line == "end_header")
             {
+                computePlySplatInfo(info);
                 return true;
             }
 
-            if (i++ > 100)
+            // Gaussian Splat headers can be long (degree-4 spherical harmonics carry
+            // 72 f_rest_* properties), so allow a generous but bounded number of lines.
+            if (i++ > 512)
             {
                 LOGD << "Hit PLY parser limit";
                 break; // Limit
@@ -102,10 +165,13 @@ namespace ddb
                 // (nexus has trouble building some of them?)
                 return info.hasTextures ? Generic : Model;
             }
-            else
+            // A 3D Gaussian Splat is a vertex-only PLY carrying SH/covariance
+            // attributes. Check before falling back to a plain point cloud.
+            if (info.isSplat)
             {
-                return PointCloud;
+                return GaussianSplat;
             }
+            return PointCloud;
         }
         else
             return Generic;
