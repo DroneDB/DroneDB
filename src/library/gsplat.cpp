@@ -17,6 +17,7 @@
 #include "logger.h"
 #include "mio.h"
 #include "ply.h"
+#include "rad.h"
 #include "thumbs.h"
 #include "utils.h"
 
@@ -109,57 +110,6 @@ namespace ddb
             catch (const std::exception &e)
             {
                 LOGD << "Ignoring malformed DDB_GSPLAT_SH_BITS='" << env << "': " << e.what();
-            }
-        }
-
-        // Loads the delivery .spz and writes a tiny bounds.json sidecar with the local-space
-        // axis-aligned bounding box of the splat centers: {"min":[x,y,z],"max":[x,y,z]}.
-        // The viewer reads this to frame the camera deterministically (essential for paged .rad
-        // playback, where no splats are resident at init time). Best-effort: never throws.
-        void writeSplatBounds(const fs::path &spzPath, const fs::path &outFile)
-        {
-            try
-            {
-                spz::UnpackOptions unpack;
-                spz::GaussianCloud cloud = spz::loadSpz(spzPath.string(), unpack);
-                const size_t n = static_cast<size_t>(std::max(cloud.numPoints, 0));
-                if (n == 0 || cloud.positions.size() < n * 3)
-                {
-                    LOGD << "Skipping bounds.json: no splat positions in " << spzPath.string();
-                    return;
-                }
-
-                double mn[3] = {std::numeric_limits<double>::max(),
-                                std::numeric_limits<double>::max(),
-                                std::numeric_limits<double>::max()};
-                double mx[3] = {std::numeric_limits<double>::lowest(),
-                                std::numeric_limits<double>::lowest(),
-                                std::numeric_limits<double>::lowest()};
-                for (size_t i = 0; i < n; ++i)
-                {
-                    for (int k = 0; k < 3; ++k)
-                    {
-                        const double v = static_cast<double>(cloud.positions[i * 3 + k]);
-                        mn[k] = std::min(mn[k], v);
-                        mx[k] = std::max(mx[k], v);
-                    }
-                }
-
-                json j;
-                j["min"] = {mn[0], mn[1], mn[2]};
-                j["max"] = {mx[0], mx[1], mx[2]};
-
-                std::ofstream out(outFile.string(), std::ios::binary);
-                if (!out.good())
-                {
-                    LOGD << "Could not open bounds.json for writing: " << outFile.string();
-                    return;
-                }
-                out << j.dump();
-            }
-            catch (const std::exception &e)
-            {
-                LOGD << "Skipping bounds.json (" << e.what() << ")";
             }
         }
 
@@ -518,58 +468,38 @@ namespace ddb
     {
         io::assureFolderExists(outdir);
 
-        const fs::path outSpz = fs::path(outdir) / GsplatFileName;
-        convertToSpz(input, outSpz.string());
+        // build-lod is a mandatory dependency: model.rad is the sole delivery artifact (streamed
+        // by the viewer, and decoded on demand to render thumbnails). Run it directly on the
+        // source splat so no intermediate .spz is materialized - memory stays bounded even for
+        // multi-gigabyte inputs, since build-lod reads the file in chunks.
+        if (!buildlod::isBuildLodAvailable())
+            throw BuildDepMissingException(
+                "Building Gaussian Splats requires the build-lod tool", "build-lod");
 
-        // Local-space bounding box sidecar for deterministic camera framing in the viewer.
-        writeSplatBounds(outSpz, fs::path(outdir) / GsplatBoundsFileName);
+        const fs::path outRad = fs::path(outdir) / GsplatRadFileName;
+        std::string lodError;
+        if (!buildlod::runBuildLod(input, outRad, lodError, /*quality=*/true, GsplatRadMaxSh))
+            throw AppException("build-lod failed for " + input + ": " + lodError);
 
-        // Pre-render a preview from the canonical .spz so file lists show a real thumbnail.
-        // generateThumb dispatches on the .spz extension to the splat renderer. Best-effort:
-        // a thumbnail failure must never fail the build.
-        const fs::path outThumb = fs::path(outdir) / GsplatThumbFileName;
-        try
+        // Local-space bounding box sidecar for deterministic camera framing in the viewer (the
+        // streamed .rad has no resident splats at init time). Computed by streaming the .rad
+        // centres: exact, bounded memory, and in the same coordinate space the viewer renders.
+        std::array<double, 3> boundsMin, boundsMax;
+        if (computeRadBounds(outRad, boundsMin, boundsMax))
         {
-            generateThumb(outSpz, GsplatThumbSize, outThumb, /*forceRecreate=*/true, nullptr, nullptr);
-        }
-        catch (const std::exception &e)
-        {
-            LOGD << "Skipping Gaussian Splat thumbnail (" << e.what() << ")";
-        }
-
-        // Optional level-of-detail artifact for progressive streaming of large scenes.
-        // Derived from the canonical model.spz so it stays inside the build temp folder
-        // (build-lod writes next to its input) and reuses the same quantization. This is
-        // best-effort: when build-lod is not bundled, or fails, we keep model.spz and the
-        // viewer falls back to non-streamed loading. See TBD/GaussianSplats/LOD-Support.md.
-        bool radProduced = false;
-        if (buildlod::isBuildLodAvailable())
-        {
-            const fs::path outRad = fs::path(outdir) / GsplatRadFileName;
-            std::string lodError;
-            if (buildlod::runBuildLod(outSpz, outRad, lodError, /*quality=*/true, GsplatRadMaxSh))
-            {
-                radProduced = true;
-                LOGD << "Generated Gaussian Splat LOD: " << outRad.string();
-            }
+            json j;
+            j["min"] = {boundsMin[0], boundsMin[1], boundsMin[2]};
+            j["max"] = {boundsMax[0], boundsMax[1], boundsMax[2]};
+            const fs::path boundsFile = fs::path(outdir) / GsplatBoundsFileName;
+            std::ofstream out(boundsFile.string(), std::ios::binary);
+            if (out.good())
+                out << j.dump();
             else
-                LOGD << "Skipping Gaussian Splat LOD (" << lodError << ")";
+                LOGD << "Could not write " << boundsFile.string();
         }
         else
         {
-            LOGD << "build-lod not available; serving Gaussian Splat without LOD streaming";
-        }
-
-        // Drop the canonical .spz once the full-SH .rad exists: the viewer streams the .rad,
-        // the thumbnail is pre-rendered, and downloads serve the original upload - so keeping
-        // the .spz would only duplicate storage. Keep it as the delivery artifact when no .rad
-        // was produced (graceful degradation without build-lod).
-        if (radProduced)
-        {
-            std::error_code ec;
-            fs::remove(outSpz, ec);
-            if (ec)
-                LOGD << "Could not remove redundant " << outSpz.string() << ": " << ec.message();
+            LOGD << "Skipping bounds.json: no centres decoded from " << outRad.string();
         }
 
         if (georef.valid)

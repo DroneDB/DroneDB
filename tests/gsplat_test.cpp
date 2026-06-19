@@ -17,6 +17,7 @@
 #include "buildlod_runner.h"
 #include "gtest/gtest.h"
 #include "ply.h"
+#include "rad.h"
 #include "test.h"
 #include "testarea.h"
 #include "thumbs.h"
@@ -368,24 +369,24 @@ TEST(gsplat, buildOutputsArtifacts) {
     ddb::buildlod::findBuildLodBinary(/*forceRefresh=*/true);
 
     const fs::path outdir = ta.getFolder("gsplat_out");
+
+    if (!ddb::buildlod::isBuildLodAvailable()) {
+        // build-lod is a mandatory dependency: without it the build is deferred (the missing
+        // dependency is surfaced) and no artifacts are produced.
+        EXPECT_THROW(ddb::buildGsplat(ply.string(), outdir.string()), BuildDepMissingException);
+        GTEST_SKIP() << "build-lod not discoverable; skipping artifact assertions";
+    }
+
     ddb::buildGsplat(ply.string(), outdir.string());
 
-    const fs::path modelSpz = outdir / GsplatFileName;
+    // model.rad is the sole delivery artifact - no intermediate .spz, no pre-rendered thumbnail.
     const fs::path modelRad = outdir / GsplatRadFileName;
-
-    if (ddb::buildlod::isBuildLodAvailable()) {
-        // The full-SH .rad is the sole delivery artifact; the redundant .spz is dropped.
-        EXPECT_TRUE(fs::exists(modelRad)) << "build-lod available; model.rad must be produced";
-        EXPECT_GT(fileSize(modelRad), 0u);
-        EXPECT_FALSE(fs::exists(modelSpz)) << "model.spz must be dropped once model.rad exists";
-    } else {
-        // Graceful degradation: keep the viewer-compatible gzip SPZ v3 as the delivery file.
-        ASSERT_TRUE(fs::exists(modelSpz));
-        EXPECT_GT(fileSize(modelSpz), 0u);
-        EXPECT_TRUE(ddb::looksLikeSpz(modelSpz));
-        EXPECT_TRUE(isGzip(modelSpz)) << "build output must be gzip-based SPZ v3 (viewer-compatible)";
-        EXPECT_FALSE(fs::exists(modelRad));
-    }
+    ASSERT_TRUE(fs::exists(modelRad)) << "model.rad must be produced";
+    EXPECT_GT(fileSize(modelRad), 0u);
+    EXPECT_TRUE(isRad(modelRad)) << "model.rad must start with the RAD0 magic";
+    EXPECT_FALSE(fs::exists(outdir / GsplatFileName)) << "no intermediate model.spz is kept";
+    EXPECT_FALSE(fs::exists(outdir / GsplatThumbFileName))
+        << "thumbnails are rendered on demand from the .rad, not at build time";
 
     // No georef supplied -> no sidecar.
     EXPECT_FALSE(fs::exists(outdir / GsplatGeorefFileName));
@@ -401,46 +402,56 @@ TEST(gsplat, buildOutputsArtifacts) {
     EXPECT_EQ(b["max"].size(), 3u);
     for (int k = 0; k < 3; ++k)
         EXPECT_LE(b["min"][k].get<double>(), b["max"][k].get<double>());
-
-    // A preview thumbnail is always pre-rendered (from the .spz before it is dropped).
-    const fs::path thumb = outdir / GsplatThumbFileName;
-    EXPECT_TRUE(fs::exists(thumb)) << "buildGsplat must write thumbnail.webp";
-    EXPECT_GT(fileSize(thumb), 0u);
 }
 
-// The optional level-of-detail artifact (model.rad) is produced only when the vendored
-// build-lod tool is discoverable. When it is, buildGsplat must emit a valid RAD container;
-// when it is not, the build still succeeds and serves model.spz (graceful degradation).
-TEST(gsplat, buildGsplatLodArtifactWhenToolAvailable) {
+// The RAD reader decodes the coarse first chunk for on-the-fly previews, and generateThumb
+// dispatches a .rad to the splat rasteriser - the same on-demand model used for COPC point
+// clouds. No build-time thumbnail or intermediate .spz is produced.
+TEST(gsplat, radReaderAndOnTheFlyThumbnail) {
     TestArea ta(TEST_NAME);
     const fs::path ply = ta.getPath("scene.ply");
-    writeSplatPly(ply, 256, 1);
+    writeSplatPly(ply, 4000, 3); // enough splats for a non-trivial LOD tree, full SH
 
     // Reflect the real discovery state (a sibling test may have pinned the override).
     ddb::buildlod::findBuildLodBinary(/*forceRefresh=*/true);
+    if (!ddb::buildlod::isBuildLodAvailable())
+        GTEST_SKIP() << "build-lod not discoverable; skipping RAD reader test";
 
     const fs::path outdir = ta.getFolder("gsplat_out");
     ddb::buildGsplat(ply.string(), outdir.string());
-
     const fs::path modelRad = outdir / GsplatRadFileName;
-    if (ddb::buildlod::isBuildLodAvailable()) {
-        ASSERT_TRUE(fs::exists(modelRad)) << "build-lod is available; model.rad must be produced";
-        EXPECT_GT(fileSize(modelRad), 0u);
-        EXPECT_TRUE(isRad(modelRad)) << "model.rad must start with the RAD0 magic";
-        // The .rad is the sole delivery artifact; the redundant .spz is dropped.
-        EXPECT_FALSE(fs::exists(outdir / GsplatFileName)) << "model.spz must be dropped once model.rad exists";
-    } else {
-        // Graceful degradation: no tool, no LOD artifact, but the build still succeeded and
-        // serves the .spz instead.
-        EXPECT_TRUE(fs::exists(outdir / GsplatFileName)) << "without build-lod, model.spz is the delivery artifact";
-        EXPECT_FALSE(fs::exists(modelRad));
-        GTEST_SKIP() << "build-lod not discoverable; skipping RAD generation assertions";
+    ASSERT_TRUE(fs::exists(modelRad));
+    EXPECT_TRUE(isRad(modelRad)) << "model.rad must start with the RAD0 magic";
+
+    // Coarse-chunk decode: positions/colours/opacities are populated and self-consistent.
+    const ddb::RadCoarseSplats splats = ddb::readRadCoarseSplats(modelRad, /*maxChunks=*/1);
+    ASSERT_GT(splats.count, 0u);
+    EXPECT_EQ(splats.positions.size(), splats.count * 3);
+    EXPECT_EQ(splats.colors.size(), splats.count * 3);
+    EXPECT_EQ(splats.opacities.size(), splats.count);
+    // Colours are display RGB in [0,1] (NOT SH coefficients).
+    for (const float c : splats.colors) {
+        EXPECT_GE(c, -0.02f);
+        EXPECT_LE(c, 1.02f);
     }
+
+    // Exact bounds across all chunks are well-formed and in the RAD coordinate space.
+    std::array<double, 3> bmin{}, bmax{};
+    ASSERT_TRUE(ddb::computeRadBounds(modelRad, bmin, bmax));
+    for (int k = 0; k < 3; ++k)
+        EXPECT_LE(bmin[k], bmax[k]);
+
+    // On-the-fly thumbnail: generateThumb dispatches a .rad to the splat rasteriser.
+    const fs::path thumb = ta.getPath("thumb.webp");
+    ddb::generateThumb(modelRad, 256, thumb, /*forceRecreate=*/true, nullptr, nullptr);
+    ASSERT_TRUE(fs::exists(thumb));
+    EXPECT_TRUE(isWebp(thumb)) << "the on-the-fly RAD thumbnail must be a WEBP image";
 }
 
-// runBuildLod reports failure (without throwing) when the binary cannot be located, and
-// buildGsplat keeps producing model.spz so the splat remains viewable without LOD.
-TEST(gsplat, buildLodMissingToolDegradesGracefully) {
+// build-lod is mandatory: when it cannot be located, buildGsplat throws a
+// BuildDepMissingException (so the build is deferred and retried once the tool is installed)
+// and produces no artifacts.
+TEST(gsplat, buildLodMissingToolThrows) {
     TestArea ta(TEST_NAME);
 
     // RAII guard: sets DDB_BUILDLOD_PATH on construction and restores it (plus refreshes
@@ -475,11 +486,10 @@ TEST(gsplat, buildLodMissingToolDegradesGracefully) {
     const fs::path ply = ta.getPath("scene.ply");
     writeSplatPly(ply, 64, 0);
     const fs::path outdir = ta.getFolder("gsplat_out");
-    ddb::buildGsplat(ply.string(), outdir.string());
 
-    EXPECT_TRUE(fs::exists(outdir / GsplatFileName)) << "model.spz must still be produced";
+    EXPECT_THROW(ddb::buildGsplat(ply.string(), outdir.string()), BuildDepMissingException);
     EXPECT_FALSE(fs::exists(outdir / GsplatRadFileName)) << "no tool -> no model.rad";
-    EXPECT_TRUE(fs::exists(outdir / GsplatThumbFileName)) << "thumbnail is pre-rendered even without LOD";
+    EXPECT_FALSE(fs::exists(outdir / GsplatFileName)) << "no tool -> no intermediate model.spz";
 }
 
 TEST(gsplat, ksplatRequiresExternalTool) {
@@ -617,6 +627,11 @@ TEST(gsplat, buildPipelineIntegration) {
     const fs::path ply = ta.getPath("scene.ply");
     writeSplatPly(ply, 120, 1);
 
+    // Gaussian Splat builds now require build-lod (model.rad is the sole delivery artifact).
+    ddb::buildlod::findBuildLodBinary(/*forceRefresh=*/true);
+    if (!ddb::buildlod::isBuildLodAvailable())
+        GTEST_SKIP() << "build-lod not discoverable; Gaussian Splat builds require it";
+
     ddb::initIndex(dsFolder.string());
     auto db = ddb::open(dsFolder.string(), true);
     ddb::addToIndex(db.get(), {ply.string()});
@@ -636,18 +651,13 @@ TEST(gsplat, buildPipelineIntegration) {
     EXPECT_TRUE(ddb::isBuildComplete(db.get(), rel));
 
     const fs::path gsplatDir = fs::path(db->buildDirectory()) / e.hash / "gsplat";
-    // Delivery artifact: model.rad when build-lod ran, else the fallback model.spz.
+    // model.rad is the sole delivery artifact; no intermediate .spz, no build-time thumbnail.
     const fs::path modelRad = gsplatDir / GsplatRadFileName;
-    const fs::path modelSpz = gsplatDir / GsplatFileName;
-    EXPECT_TRUE(fs::exists(modelRad) || fs::exists(modelSpz));
-    if (fs::exists(modelRad)) {
-        EXPECT_GT(fileSize(modelRad), 0u);
-        EXPECT_FALSE(fs::exists(modelSpz)) << "model.spz must be dropped once model.rad exists";
-    } else {
-        EXPECT_GT(fileSize(modelSpz), 0u);
-    }
-    // A preview thumbnail is always pre-rendered.
-    EXPECT_TRUE(fs::exists(gsplatDir / GsplatThumbFileName));
+    ASSERT_TRUE(fs::exists(modelRad)) << "model.rad is the delivery artifact";
+    EXPECT_GT(fileSize(modelRad), 0u);
+    EXPECT_FALSE(fs::exists(gsplatDir / GsplatFileName)) << "no intermediate model.spz is kept";
+    EXPECT_FALSE(fs::exists(gsplatDir / GsplatThumbFileName))
+        << "thumbnails are rendered on demand from the .rad, not at build time";
 }
 
 } // namespace
