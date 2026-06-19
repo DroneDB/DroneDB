@@ -218,9 +218,11 @@ jobs:
       - name: Build Untwine COPC accelerator
         # Optional on PR/master pushes (DroneDB falls back to PDAL writers.copc),
         # but MUST succeed on release tags so the zip ships with untwine.exe.
+        # Uses Ninja (default) to avoid VS 2025 clang-tidy co-compilation errors
+        # with third-party vcpkg dependencies (e.g. h3 library).
         continue-on-error: ${{ !startsWith(github.ref, 'refs/tags/') }}
         shell: pwsh
-        run: .\scripts\build-untwine.ps1 -BuildDir build -Config Release -Builder VisualStudio
+        run: .\scripts\build-untwine.ps1 -BuildDir build -Config Release
       - name: Install Rust toolchain
         # Required to build the build-lod Gaussian Splat LOD producer (vendor/spark).
         uses: actions-rust-lang/setup-rust-toolchain@v1
