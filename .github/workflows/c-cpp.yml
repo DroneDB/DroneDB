@@ -213,10 +213,13 @@ jobs:
           retry_wait_seconds: 30
           shell: pwsh
           command: |
+            $ErrorActionPreference = 'Stop'
             if (!(Test-Path build)) { New-Item -ItemType Directory -Path build }
             cd build
             cmake .. -DVCPKG_HOST_TRIPLET=x64-windows-release -DVCPKG_TARGET_TRIPLET=x64-windows-release -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake"
+            if ($LASTEXITCODE -ne 0) { throw "CMake configuration failed with exit code $LASTEXITCODE" }
             cmake --build . --config Release --target ALL_BUILD -- /maxcpucount:$env:NUMBER_OF_PROCESSORS
+            if ($LASTEXITCODE -ne 0) { throw "Build failed with exit code $LASTEXITCODE" }
             dir
       - name: Build Untwine COPC accelerator
         # Optional on PR/master pushes (DroneDB falls back to PDAL writers.copc),

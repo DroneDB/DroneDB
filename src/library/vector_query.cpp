@@ -64,7 +64,7 @@ namespace ddb
             return OGRGeometryTypeToName(t) ? OGRGeometryTypeToName(t) : "Unknown";
         }
 
-        std::string srsAuthCode(OGRSpatialReference *srs)
+        std::string srsAuthCode(const OGRSpatialReference *srs)
         {
             if (!srs) return "";
             const char *authName = srs->GetAuthorityName(nullptr);
@@ -84,7 +84,7 @@ namespace ddb
             lj["name"] = layer->GetName();
             lj["geometryType"] = geomTypeName(layer->GetGeomType());
 
-            OGRSpatialReference *sr = layer->GetSpatialRef();
+            const OGRSpatialReference *sr = layer->GetSpatialRef();
             lj["srs"] = srsAuthCode(sr);
 
             OGREnvelope env;
@@ -156,18 +156,22 @@ namespace ddb
                 bboxSrs.empty() ? std::string("EPSG:4326") : bboxSrs;
             double minX = bbox[0], minY = bbox[1], maxX = bbox[2], maxY = bbox[3];
 
-            OGRSpatialReference *layerSrs = layer->GetSpatialRef();
-            if (layerSrs) {
+            const OGRSpatialReference *layerSrsRef = layer->GetSpatialRef();
+            if (layerSrsRef) {
+                // GetSpatialRef() returns a const pointer (GDAL >= 3.x); take a
+                // mutable copy so we can normalize the axis mapping strategy
+                // without mutating the dataset's shared SRS object.
+                OGRSpatialReference layerSrs(*layerSrsRef);
                 OGRSpatialReference reqSrs;
                 if (reqSrs.SetFromUserInput(requestedSrs.c_str()) != OGRERR_NONE) {
                     GDALClose(hSrc);
                     throw InvalidArgsException("Invalid SRS: " + requestedSrs);
                 }
                 reqSrs.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
-                layerSrs->SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
-                if (!reqSrs.IsSame(layerSrs)) {
+                layerSrs.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
+                if (!reqSrs.IsSame(&layerSrs)) {
                     OGRCoordinateTransformation *t =
-                        OGRCreateCoordinateTransformation(&reqSrs, layerSrs);
+                        OGRCreateCoordinateTransformation(&reqSrs, &layerSrs);
                     if (!t) {
                         GDALClose(hSrc);
                         throw GDALException(
