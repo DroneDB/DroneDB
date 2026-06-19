@@ -566,6 +566,10 @@ TEST(gsplat, buildWithGerefWritesSidecar) {
     const fs::path ply = ta.getPath("scene.ply");
     writeSplatPly(ply, 40, 0);
 
+    // build-lod is mandatory for buildGsplat; skip if unavailable (CI may not have it).
+    if (!ddb::buildlod::isBuildLodAvailable())
+        GTEST_SKIP() << "build-lod not discoverable; skipping georef sidecar test";
+
     GsplatGeoref g;
     g.srs = "EPSG:32617";
     g.offset = {263892.0, 4156842.0, 0.0};
@@ -574,8 +578,9 @@ TEST(gsplat, buildWithGerefWritesSidecar) {
     const fs::path outdir = ta.getFolder("gsplat_geo");
     ddb::buildGsplat(ply.string(), outdir.string(), g);
 
-    // The delivery artifact is present (model.rad when build-lod ran, else model.spz).
-    EXPECT_TRUE(fs::exists(outdir / GsplatRadFileName) || fs::exists(outdir / GsplatFileName));
+    // model.rad is the sole delivery artifact - no intermediate .spz is kept.
+    ASSERT_TRUE(fs::exists(outdir / GsplatRadFileName)) << "model.rad must be produced";
+    EXPECT_FALSE(fs::exists(outdir / GsplatFileName)) << "no intermediate model.spz is kept";
     ASSERT_TRUE(fs::exists(outdir / GsplatGeorefFileName));
 
     std::ifstream in((outdir / GsplatGeorefFileName).string());
