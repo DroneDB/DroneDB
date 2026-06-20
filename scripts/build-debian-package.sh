@@ -187,16 +187,20 @@ override_dh_auto_install:
 	fi
 
 	# Copy PDAL libraries from vcpkg installed directory
-	cp \$(CURDIR)/build/vcpkg_installed/${VCPKG_HOST_TRIPLET}/lib/libpdalcpp.so.19 debian/ddb/usr/lib/
+	# Use wildcard to detect the actual SOVERSION (e.g., .so.19, .so.20, etc.)
+	# so the script survives future PDAL ABI bumps without manual updates
+	\$(eval PDAL_CPP_SO := \$(firstword \$(wildcard \$(CURDIR)/build/vcpkg_installed/${VCPKG_HOST_TRIPLET}/lib/libpdalcpp.so.[0-9]*)))
+	@test -n "\$(PDAL_CPP_SO)" || { echo "ERROR: libpdalcpp.so.* not found in vcpkg_installed"; exit 1; }
+	cp \$(PDAL_CPP_SO) debian/ddb/usr/lib/
 	cp \$(CURDIR)/build/vcpkg_installed/${VCPKG_HOST_TRIPLET}/lib/libdbus-1.so.3 debian/ddb/usr/lib/
 
 	# Create necessary symbolic links for libraries
-	ln -sf libpdalcpp.so.19 debian/ddb/usr/lib/libpdalcpp.so
+	ln -sf \$(notdir \$(PDAL_CPP_SO)) debian/ddb/usr/lib/libpdalcpp.so
 	ln -sf libdbus-1.so.3 debian/ddb/usr/lib/libdbus-1.so
 
-	# Copy PDAL plugins if needed
+	# Copy PDAL plugins if needed (wildcard SOVERSION to survive PDAL ABI bumps)
 	mkdir -p debian/ddb/usr/lib/pdal/plugins
-	cp \$(CURDIR)/build/vcpkg_installed/${VCPKG_HOST_TRIPLET}/lib/libpdal_plugin_*.so.19 debian/ddb/usr/lib/pdal/plugins/ || true
+	find \$(CURDIR)/build/vcpkg_installed/${VCPKG_HOST_TRIPLET}/lib -maxdepth 1 -name 'libpdal_plugin_*.so.[0-9]*' -exec cp {} debian/ddb/usr/lib/pdal/plugins/ \\; 2>/dev/null || true
 
 	# Copy data files from build directory directly
 	cp \$(CURDIR)/build/proj.db debian/ddb/usr/share/ddb/
