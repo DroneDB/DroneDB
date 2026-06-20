@@ -7,6 +7,21 @@
 #include <gdal_inc.h>
 #include <sqlite3.h>
 #include <spatialite.h>
+
+// termios.h defines baud rate macros (B0, B50, B75, ...) that clash with
+// PROJ function parameter names. Undefine them before including proj.h.
+#ifdef B0
+#undef B0
+#endif
+
+#ifdef B50
+#undef B50
+#endif
+
+#ifdef B75
+#undef B75
+#endif
+
 #include <proj.h>
 
 #include <pdal/pdal_features.hpp>
