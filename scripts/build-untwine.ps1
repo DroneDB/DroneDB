@@ -167,7 +167,74 @@ function Get-VSGenerator {
     return 'Visual Studio 17 2022'
 }
 
+function Enable-MsvcToolchain {
+    # The Ninja generator does not embed a compiler choice: CMake probes the
+    # PATH to find one. GitHub's windows-* runner images ship MinGW GCC under
+    # C:\mingw64\bin, which CMake will happily select. The resulting GCC-ABI
+    # objects then fail to link against the MSVC-built vcpkg PDAL with hundreds
+    # of "undefined reference to pdal::..." errors. Ensure the MSVC toolchain
+    # (cl.exe + INCLUDE/LIB) is active before configuring.
+    #
+    # No-op when the caller (e.g. full-build-win.ps1) has already imported the
+    # Visual Studio environment: cl.exe is then already discoverable on PATH.
+    if (Get-Command cl.exe -ErrorAction SilentlyContinue) {
+        Write-Host "  MSVC toolchain already active (cl.exe on PATH)." -ForegroundColor Green
+        return
+    }
+
+    $vcvars = $null
+    $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+    if (Test-Path $vswhere) {
+        $vsPath = & $vswhere -latest -products * `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+            -property installationPath -format value 2>$null
+        if ($vsPath) {
+            $candidate = Join-Path $vsPath "VC\Auxiliary\Build\vcvars64.bat"
+            if (Test-Path $candidate) { $vcvars = $candidate }
+        }
+    }
+    if (-not $vcvars) {
+        Write-Host "  WARNING: vcvars64.bat not found via vswhere; Ninja may select a non-MSVC compiler (e.g. MinGW gcc)." -ForegroundColor Yellow
+        return
+    }
+
+    Write-Host "  Importing MSVC environment: $vcvars" -ForegroundColor Cyan
+    cmd /c "`"$vcvars`" && set" | ForEach-Object {
+        if ($_ -match '^(.*?)=(.*)$') {
+            Set-Item -Path "env:$($matches[1])" -Value $matches[2] -Force
+        }
+    }
+    if (Get-Command cl.exe -ErrorAction SilentlyContinue) {
+        Write-Host "  MSVC toolchain activated (cl.exe now on PATH)." -ForegroundColor Green
+    } else {
+        Write-Host "  WARNING: cl.exe still not found after importing vcvars64.bat." -ForegroundColor Yellow
+    }
+}
+
 if ($Builder -eq 'Ninja') {
+    # On Windows the Ninja generator must run under an MSVC environment so it
+    # does not fall back to a stray MinGW gcc on the runner PATH (which would
+    # produce objects that cannot link against the MSVC-built vcpkg PDAL).
+    if ($env:OS -eq 'Windows_NT') {
+        Enable-MsvcToolchain
+
+        # Defensive self-heal: a previous CI run may have configured (and cached)
+        # build/untwine with a non-MSVC compiler. CMake caches the compiler in
+        # CMakeCache.txt, so reusing such a cache would keep producing unlinkable
+        # GCC objects even with cl.exe now on PATH. Wipe it for a clean reconfigure.
+        $cacheFile = Join-Path $untwineBuildDir "CMakeCache.txt"
+        if (Test-Path $cacheFile) {
+            $cachedCxx = $null
+            foreach ($line in (Get-Content $cacheFile)) {
+                if ($line -match '^CMAKE_CXX_COMPILER:[^=]*=(.*)$') { $cachedCxx = $matches[1]; break }
+            }
+            if ($cachedCxx -and $cachedCxx -notmatch '(?i)cl\.exe$') {
+                Write-Host "  Existing untwine cache uses non-MSVC compiler '$cachedCxx'. Wiping for a clean MSVC reconfigure." -ForegroundColor Yellow
+                Remove-Item -Recurse -Force $untwineBuildDir
+                New-Item -ItemType Directory -Path $untwineBuildDir | Out-Null
+            }
+        }
+    }
     $cmakeArgs += @("-G", "Ninja", "-DCMAKE_BUILD_TYPE=$Config")
 } else {
     $cmakeArgs += @("-G", (Get-VSGenerator), "-A", "x64")
