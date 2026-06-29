@@ -123,6 +123,11 @@ namespace ddb
         targs = CSLAddString(targs, "bilinear");
         targs = CSLAddString(targs, "-co");
         targs = CSLAddString(targs, "TILING_SCHEME=GoogleMapsCompatible");
+        // UPPER strategy: when the theoretical zoom level is non-integer,
+        // select the higher (more detailed) zoom level rather than rounding
+        // to the nearest. This preserves detail for high-res drone imagery
+        targs = CSLAddString(targs, "-co");
+        targs = CSLAddString(targs, "ZOOM_LEVEL_STRATEGY=UPPER");
 
         // Warp memory buffer: larger values reduce chunk overhead, especially with NUM_THREADS>1.
         // Configurable via DDB_WARP_MEMORY_MB (default: 512 MB).
