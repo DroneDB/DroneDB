@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <fstream>
 #include <sstream>
 #include <unordered_set>
@@ -30,6 +31,9 @@ namespace ddb {
 
 // Forward declaration for stale lock detection helper (defined later in this file)
 static bool isLockFileStale(const std::string& lockFilePath);
+
+// Forward declaration for the disk-space preflight helper (defined later in this file)
+static void ensureSufficientDiskSpace(const fs::path& dir);
 
 bool isBuildableInternal(const Entry& e, std::string& subfolder) {
     if (e.type == EntryType::PointCloud) {
@@ -244,6 +248,13 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
         LOGD << "Build output already exists after acquiring lock, skipping: " << outputFolder;
         return;
     }
+
+    // Fail fast if the build scratch filesystem is critically low on free space.
+    // A build that runs out of space mid-way (e.g. a multi-GB COG warp) would
+    // otherwise leave a large partial scratch file behind and, under a job runner
+    // that retries failed builds, repeat that until the disk fills. baseOutputPath
+    // lives on the same filesystem as the temp folder created just below.
+    ensureSufficientDiskSpace(baseOutputPath);
 
     const auto tempFolder = outputFolder + "-temp-" + utils::generateRandomString(16);
 
@@ -515,6 +526,85 @@ bool isBuildPending(Database* db) {
     return false;
 }
 
+// Minimum free disk space (in MB) required on the build scratch filesystem
+// before a build is started. Configurable via the DDB_MIN_FREE_DISK_MB
+// environment variable; set it to 0 to disable the check. Defaults to 512 MB,
+// low enough never to trip on a healthy host yet high enough to stop a build
+// from beginning on an essentially full disk.
+static void ensureSufficientDiskSpace(const fs::path& dir) {
+    long long minMb = 512;
+    if (const char* env = std::getenv("DDB_MIN_FREE_DISK_MB"); env && *env) {
+        char* endp = nullptr;
+        const long long v = std::strtoll(env, &endp, 10);
+        if (endp != env && v >= 0)
+            minMb = v;
+    }
+    if (minMb == 0)
+        return;  // explicitly disabled
+
+    std::error_code ec;
+    const fs::space_info si = fs::space(dir, ec);
+    if (ec)
+        return;  // cannot determine free space; do not block the build
+
+    const std::uintmax_t minBytes =
+        static_cast<std::uintmax_t>(minMb) * 1024ULL * 1024ULL;
+    if (si.available < minBytes) {
+        throw AppException(
+            "Insufficient free disk space to build: " +
+            std::to_string(si.available / (1024ULL * 1024ULL)) + " MB available, " +
+            std::to_string(minMb) + " MB required on " + dir.string() +
+            ". Free up space or adjust DDB_MIN_FREE_DISK_MB.");
+    }
+}
+
+// Remove orphaned "<subfolder>-temp-<rand>" scratch folders inside a build hash
+// directory. buildInternal() creates such a folder per build and renames it to
+// the final output (or deletes it) when done; a process crash during the build
+// leaves it behind together with any GDAL/COG/Nexus scratch it contains. A
+// folder is removed only when there is no live build lock for its subfolder, so
+// an in-progress build is never disturbed.
+static void removeOrphanTempFolders(const fs::path& hashDir, CleanupResult& result) {
+    std::error_code ec;
+    fs::directory_iterator it(hashDir, ec);
+    if (ec)
+        return;
+
+    const fs::directory_iterator end;
+    for (; it != end; it.increment(ec)) {
+        if (ec)
+            return;
+
+        std::error_code typeErr;
+        if (!it->is_directory(typeErr) || typeErr)
+            continue;
+
+        const std::string name = it->path().filename().string();
+        const auto pos = name.find("-temp-");
+        // Require a non-empty subfolder prefix and a non-empty random suffix so
+        // unrelated directory names are never matched.
+        if (pos == std::string::npos || pos == 0 || name.size() <= pos + 6)
+            continue;
+
+        const std::string subfolder = name.substr(0, pos);
+        const fs::path lockPath = hashDir / (subfolder + ".building");
+        if (fs::exists(lockPath) && !isLockFileStale(lockPath.string())) {
+            LOGD << "Skipping temp folder with active build lock: " << it->path().string();
+            continue;
+        }
+
+        std::error_code rmErr;
+        fs::remove_all(it->path(), rmErr);
+        if (rmErr) {
+            LOGW << "Failed to remove orphan temp folder '" << it->path().string()
+                 << "': " << rmErr.message();
+        } else {
+            result.removedBuilds.push_back(it->path().string());
+            LOGD << "Removed orphan build temp folder: " << it->path().string();
+        }
+    }
+}
+
 CleanupResult cleanupBuild(Database* db, const std::string& outputPath) {
     CleanupResult result;
 
@@ -624,8 +714,15 @@ CleanupResult cleanupBuild(Database* db, const std::string& outputPath) {
                 LOGD << "Skipping non-hash directory: " << p.string();
                 continue;
             }
-            if (validHashes.find(name) != validHashes.end())
+            if (validHashes.find(name) != validHashes.end()) {
+                // Still referenced: keep the build output, but reclaim any
+                // orphaned "<subfolder>-temp-<rand>" scratch folders left behind
+                // by a build that crashed before its RAII cleanup ran (a SIGSEGV
+                // bypasses the cleanup in buildInternal). Folders whose build is
+                // still active (live .building lock) are skipped.
+                removeOrphanTempFolders(p, result);
                 continue;  // still referenced
+            }
 
             // Lock files live one level deep: <hash>/<subfolder>.building.
             // Use a non-recursive scan and treat any iteration error as
