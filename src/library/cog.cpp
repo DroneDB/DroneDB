@@ -34,6 +34,47 @@ namespace ddb
         return TRUE;
     }
 
+    namespace {
+        // RAII guard that scopes GDAL's CPL_TMPDIR to a directory for the current
+        // thread only. The COG driver writes its overview/intermediate scratch into
+        // the directory of the final file only when CPL_TMPDIR is unset; the
+        // cog.tif_<pid>_<counter> intermediates come from CPLGenerateTempFilename(),
+        // which defaults to the process working directory. On the Registry
+        // containers that working directory is an anonymous Docker volume on the
+        // host root filesystem, so multi-GB COG scratch files accumulate on root.
+        // Pointing CPL_TMPDIR at the per-build temp folder keeps that scratch on the
+        // (large) datasets volume and ensures it is reclaimed together with the temp
+        // folder by the normal build cleanup. Thread-local so concurrent builds in
+        // the same process never clobber each other's setting. A no-op when given an
+        // empty directory (e.g. a bare output filename), preserving CLI behaviour.
+        class ScopedGdalTmpDir {
+        public:
+            explicit ScopedGdalTmpDir(const std::string& dir) : active_(!dir.empty()) {
+                if (!active_)
+                    return;
+                const char* prev = CPLGetThreadLocalConfigOption("CPL_TMPDIR", nullptr);
+                if (prev) {
+                    hadPrev_ = true;
+                    prev_ = prev;
+                }
+                CPLSetThreadLocalConfigOption("CPL_TMPDIR", dir.c_str());
+            }
+            ~ScopedGdalTmpDir() {
+                if (!active_)
+                    return;
+                CPLSetThreadLocalConfigOption("CPL_TMPDIR",
+                                              hadPrev_ ? prev_.c_str() : nullptr);
+            }
+            ScopedGdalTmpDir(const ScopedGdalTmpDir&) = delete;
+            ScopedGdalTmpDir& operator=(const ScopedGdalTmpDir&) = delete;
+
+        private:
+            bool active_;
+            bool hadPrev_ = false;
+            std::string prev_;
+        };
+    }  // namespace
+
     void buildCog(const std::string &inputGTiff, const std::string &outputCog)
     {
         // Check if input is already an optimized COG
@@ -226,6 +267,14 @@ namespace ddb
         // BigTIFF
         targs = CSLAddString(targs, "-co");
         targs = CSLAddString(targs, "BIGTIFF=IF_SAFER");
+
+        // Scope GDAL's temporary directory to the output's own folder (the
+        // per-build temp folder when called from the build pipeline) so the COG
+        // overview/intermediate scratch and any cog.tif_<pid>_<counter> files are
+        // created there instead of the process working directory, and are removed
+        // together with the build temp folder. Thread-local: safe under concurrent
+        // builds. No-op for a bare output filename (e.g. some CLI invocations).
+        const ScopedGdalTmpDir gdalTmpGuard(fs::path(outputCog).parent_path().string());
 
         GDALWarpAppOptions *psOptions = GDALWarpAppOptionsNew(targs, nullptr);
         CSLDestroy(targs);
