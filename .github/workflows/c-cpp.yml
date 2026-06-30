@@ -89,6 +89,13 @@ jobs:
         run: |
           chmod +x ./scripts/build-buildlod.sh
           ./scripts/build-buildlod.sh build Release
+      - name: Download Obj2Tiles (OGC 3D Tiles generator)
+        # Optional on PR/master pushes (3D Tiles generation disabled, Nexus still
+        # produced), but MUST succeed on release tags so the .deb ships with Obj2Tiles.
+        continue-on-error: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        run: |
+          chmod +x ./scripts/download-obj2tiles.sh
+          ./scripts/download-obj2tiles.sh build
       - name: Run C++ Tests
         run: cd build && ./ddbtest --gtest_shuffle
       - name: Run Program Smoke Test
@@ -150,6 +157,19 @@ jobs:
                 exit 1
               else
                 echo "  ! build-lod NOT present in .deb (Gaussian Splats served without LOD streaming)"
+              fi
+            fi
+
+            # Verify Obj2Tiles packaging. Required on release tags, informational otherwise.
+            echo "Checking whether Obj2Tiles is included in the Debian package..."
+            if dpkg -c build/package/ddb_*.deb | grep -E '/usr/bin/Obj2Tiles$' >/dev/null; then
+              echo "  ✓ Obj2Tiles present in .deb (OGC 3D Tiles generation enabled)"
+            else
+              if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+                echo "  ✗ Obj2Tiles NOT present in .deb - release builds MUST include Obj2Tiles. Failing."
+                exit 1
+              else
+                echo "  ! Obj2Tiles NOT present in .deb (3D Tiles generation disabled, Nexus still produced)"
               fi
             fi
           else
@@ -240,6 +260,12 @@ jobs:
         continue-on-error: ${{ !startsWith(github.ref, 'refs/tags/') }}
         shell: pwsh
         run: .\scripts\build-buildlod.ps1 -BuildDir build -Config Release
+      - name: Download Obj2Tiles (OGC 3D Tiles generator)
+        # Optional on PR/master pushes (3D Tiles generation disabled, Nexus still
+        # produced), but MUST succeed on release tags so the zip ships with Obj2Tiles.exe.
+        continue-on-error: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        shell: pwsh
+        run: .\scripts\download-obj2tiles.ps1 -TargetDir build
       - name: Run C++ Tests
         run: cd build && .\ddbtest.exe --gtest_shuffle
         shell: pwsh
@@ -280,6 +306,16 @@ jobs:
                 exit 1
               } else {
                 Write-Host '  ! untwine.exe NOT present in zip (DroneDB will fall back to PDAL writers.copc)'
+              }
+            }
+            if (Test-Path (Join-Path $zipCheckDir 'Obj2Tiles.exe')) {
+              Write-Host '  ✓ Obj2Tiles.exe present in zip (OGC 3D Tiles generation enabled)'
+            } else {
+              if ($env:GITHUB_REF -like 'refs/tags/v*') {
+                Write-Host '  ✗ Obj2Tiles.exe NOT present in zip - release builds MUST include Obj2Tiles. Failing.'
+                exit 1
+              } else {
+                Write-Host '  ! Obj2Tiles.exe NOT present in zip (3D Tiles generation disabled, Nexus still produced)'
               }
             }
           }

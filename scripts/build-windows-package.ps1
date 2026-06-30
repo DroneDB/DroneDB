@@ -193,6 +193,15 @@ if (Test-Path $buildLodPath) {
     Write-Host "  - build-lod.exe (not found, skipping - Gaussian Splats served without LOD streaming)" -ForegroundColor Yellow
 }
 
+# Copy Obj2Tiles.exe if present (optional - enables OGC 3D Tiles generation from OBJ models)
+$obj2tilesPath = Join-Path $BuildDir "Obj2Tiles.exe"
+if (Test-Path $obj2tilesPath) {
+    Copy-Item $obj2tilesPath $stagingDir -Force
+    Write-Host "  ✓ Obj2Tiles.exe (OGC 3D Tiles generator)" -ForegroundColor Green
+} else {
+    Write-Host "  - Obj2Tiles.exe (not found, skipping - 3D Tiles generation disabled, Nexus still produced)" -ForegroundColor Yellow
+}
+
 # Copy license files (always included for redistribution compliance)
 $licenseFiles = @("LICENSE.md", "THIRD_PARTY_LICENSES.md")
 foreach ($lic in $licenseFiles) {

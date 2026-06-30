@@ -55,6 +55,10 @@ namespace ddb
     {
         using AppException::AppException;
     };
+    class Obj2TilesException : public AppException
+    {
+        using AppException::AppException;
+    };
     class NetException : public AppException
     {
         using AppException::AppException;

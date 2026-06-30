@@ -148,6 +148,12 @@ static bool directoryHasNonEmptyContent(const fs::path& dir) {
 //   - Others:    the type's output subfolder exists and contains at least one
 //                non-empty file (covers copc/, cog/, nxs/). A directory-scan
 //                is used because the exact output filenames vary by input.
+//
+// Model note: a Model build also co-produces an additive OGC 3D Tiles tileset in
+// a sibling 3dtiles/ folder (see buildInternal). That artifact is intentionally
+// NOT part of completeness: it is best-effort (Obj2Tiles may be absent, or may
+// fail on a specific mesh), so keying completeness on nxs/ keeps builds from
+// looping. A forced rebuild regenerates 3dtiles/ alongside nxs/.
 static bool isBuildOutputComplete(const fs::path& baseOutputPath,
                                   const Entry& e,
                                   const std::string& subfolder) {
@@ -281,6 +287,18 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
         } else if (e.type == EntryType::Model) {
             buildNexus(relativePath, (fs::path(tempFolder) / "model.nxz").string());
             built = true;
+
+            // Additive, best-effort OGC 3D Tiles output for the unified Giro3D viewer.
+            // Written directly to a sibling 3dtiles/ folder (buildModel3DTiles performs
+            // its own atomic temp+rename), exactly as buildVector co-produces vec/+mvt/.
+            // Non-blocking by design: if Obj2Tiles is unavailable or fails on a given
+            // mesh, the Nexus output above is still published and build completeness
+            // stays keyed on nxs/ (see isBuildOutputComplete), so the build never loops.
+            try {
+                buildModel3DTiles(relativePath, (baseOutputPath / "3dtiles").string(), true);
+            } catch (const AppException& tilesEx) {
+                LOGD << "3D Tiles generation skipped for " << e.path << ": " << tilesEx.what();
+            }
         } else if (e.type == EntryType::Vector) {
             // buildVector manages its own atomic write to baseOutputPath/vec
             // and baseOutputPath/mvt; do NOT use the standard tempFolder rename.

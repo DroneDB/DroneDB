@@ -34,6 +34,14 @@ RUN cd /workspace && \
     ./scripts/build-buildlod.sh build Release || \
     echo "WARNING: build-lod build failed (non-blocking, Gaussian Splats served without LOD streaming)"
 
+# Optional: download the OpenDroneMap Obj2Tiles binary (OGC 3D Tiles generator).
+# AGPL-3.0, invoked only as a subprocess (see THIRD_PARTY_LICENSES.md). Failure is
+# non-blocking; DroneDB skips 3D Tiles generation (Nexus still produced) when missing.
+RUN cd /workspace && \
+    chmod +x scripts/download-obj2tiles.sh && \
+    ./scripts/download-obj2tiles.sh build || \
+    echo "WARNING: Obj2Tiles download failed (non-blocking, 3D Tiles generation disabled)"
+
 # Build the Debian package
 RUN cd /workspace && \
     chmod +x scripts/build-debian-package.sh && \

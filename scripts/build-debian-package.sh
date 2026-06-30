@@ -186,6 +186,16 @@ override_dh_auto_install:
 		chmod +x debian/ddb/usr/bin/build-lod; \\
 	fi
 
+	# Optional: copy Obj2Tiles OGC 3D Tiles generator if it was downloaded
+	# (scripts/download-obj2tiles.sh). Installed alongside ddb so that runtime
+	# discovery (obj2tiles_runner.cpp::findObj2TilesBinary -> getExeFolder())
+	# finds it without any extra configuration. OGC 3D Tiles generation for
+	# MODEL entries is skipped (Nexus still produced) when the binary is missing.
+	if [ -f \$(CURDIR)/build/Obj2Tiles ]; then \\
+		cp \$(CURDIR)/build/Obj2Tiles debian/ddb/usr/bin/Obj2Tiles; \\
+		chmod +x debian/ddb/usr/bin/Obj2Tiles; \\
+	fi
+
 	# Copy PDAL libraries from vcpkg installed directory
 	# Use wildcard to detect the actual SOVERSION (e.g., .so.19, .so.20, etc.)
 	# so the script survives future PDAL ABI bumps without manual updates
