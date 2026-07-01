@@ -74,6 +74,16 @@ try {
 
     Copy-Item $src $dest -Force
     Write-Host "  Obj2Tiles.exe installed to $dest"
+
+    # AGPL-3.0 compliance: fetch the upstream LICENSE.md and place it next to the binary.
+    $licenseDest = Join-Path $TargetDir "Obj2Tiles.LICENSE.md"
+    $licenseUrl = "https://raw.githubusercontent.com/OpenDroneMap/Obj2Tiles/$Version/LICENSE.md"
+    try {
+        Invoke-WebRequest -Uri $licenseUrl -OutFile $licenseDest -UseBasicParsing
+        Write-Host "  Obj2Tiles.LICENSE.md staged to $licenseDest"
+    } catch {
+        Write-Host "  WARNING: could not fetch Obj2Tiles LICENSE.md from $licenseUrl" -ForegroundColor Yellow
+    }
 } finally {
     Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
 }

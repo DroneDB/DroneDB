@@ -198,6 +198,11 @@ $obj2tilesPath = Join-Path $BuildDir "Obj2Tiles.exe"
 if (Test-Path $obj2tilesPath) {
     Copy-Item $obj2tilesPath $stagingDir -Force
     Write-Host "  ✓ Obj2Tiles.exe (OGC 3D Tiles generator)" -ForegroundColor Green
+    $obj2tilesLicense = Join-Path $BuildDir "Obj2Tiles.LICENSE.md"
+    if (Test-Path $obj2tilesLicense) {
+        Copy-Item $obj2tilesLicense $stagingDir -Force
+        Write-Host "  ✓ Obj2Tiles.LICENSE.md (AGPL-3.0 license)" -ForegroundColor Green
+    }
 } else {
     Write-Host "  - Obj2Tiles.exe (not found, skipping - 3D Tiles generation disabled, Nexus still produced)" -ForegroundColor Yellow
 }

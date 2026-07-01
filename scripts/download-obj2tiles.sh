@@ -80,3 +80,11 @@ fi
 cp "${TMP}/${BIN}" "${DEST}"
 chmod +x "${DEST}"
 echo "  Obj2Tiles installed to ${DEST}"
+
+# AGPL-3.0 compliance: fetch the upstream LICENSE.md and place it next to the binary.
+LICENSE_URL="https://raw.githubusercontent.com/OpenDroneMap/Obj2Tiles/${VERSION}/LICENSE.md"
+if curl -fL --retry 3 --retry-delay 5 -o "${TARGET_DIR}/Obj2Tiles.LICENSE.md" "${LICENSE_URL}"; then
+    echo "  Obj2Tiles.LICENSE.md staged to ${TARGET_DIR}/Obj2Tiles.LICENSE.md"
+else
+    echo "  WARNING: could not fetch Obj2Tiles LICENSE.md" >&2
+fi
