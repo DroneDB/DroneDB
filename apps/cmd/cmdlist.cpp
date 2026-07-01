@@ -33,6 +33,7 @@
 #include "include/cog.h"
 #include "include/contour.h"
 #include "include/nxs.h"
+#include "include/tiles3d.h"
 #include "include/gsplat.h"
 #include "include/search.h"
 #include "include/stac.h"
@@ -74,6 +75,7 @@ namespace cmd
       {"cog", new Cog()},
       {"contour", new Contour()},
       {"nxs", new Nxs()},
+      {"3dtiles", new Tiles3d()},
       {"gsplat", new Gsplat()},
       {"search", new Search()},
       {"stac", new Stac()},

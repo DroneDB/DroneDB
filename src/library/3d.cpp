@@ -4,12 +4,14 @@
 #include "3d.h"
 
 #include <fstream>
+#include <optional>
 #include <regex>
 
 #include "exceptions.h"
 #include "json.h"
 #include "logger.h"
 #include "mio.h"
+#include "obj2tiles_runner.h"
 #include "utils.h"
 
 namespace ddb {
@@ -318,6 +320,157 @@ std::string buildNexus(const std::string& inputObj, const std::string& outputNxs
     performNexusBuild(actualInputObj, outFile);
 
     return outFile;
+}
+
+std::optional<ModelGeoref> detectModelGeoref(const std::string& inputObj) {
+    const fs::path objPath(inputObj);
+    const fs::path dir = objPath.parent_path();
+    const fs::path parent = dir.parent_path();
+    const std::string stem = objPath.stem().string();
+
+    // Search order: explicit per-model sidecar, generic dataset sidecar, then the
+    // OpenDroneMap reference_lla.json (co-located, one level up, or in an opensfm/
+    // sibling for full ODM project layouts).
+    const std::vector<fs::path> candidates = {
+        dir / (stem + ".geo.json"),
+        dir / "georef.json",
+        dir / "reference_lla.json",
+        parent / "reference_lla.json",
+        parent / "opensfm" / "reference_lla.json",
+    };
+
+    // Returns the first present numeric value among keys, or def when none match.
+    const auto getNum = [](const json& j, std::initializer_list<const char*> keys,
+                           std::optional<double> def) -> std::optional<double> {
+        for (const char* k : keys) {
+            if (j.contains(k) && j[k].is_number())
+                return j[k].get<double>();
+        }
+        return def;
+    };
+
+    for (const auto& c : candidates) {
+        std::error_code ec;
+        if (!fs::exists(c, ec) || ec)
+            continue;
+
+        try {
+            std::ifstream in(c.string());
+            if (!in.good())
+                continue;
+
+            json j;
+            in >> j;
+
+            const auto lat = getNum(j, {"latitude", "lat"}, std::nullopt);
+            const auto lon = getNum(j, {"longitude", "lon", "lng"}, std::nullopt);
+            const auto alt = getNum(j, {"altitude", "alt", "elevation"}, 0.0);
+
+            if (!lat.has_value() || !lon.has_value())
+                continue;
+
+            if (*lat < -90.0 || *lat > 90.0 || *lon < -180.0 || *lon > 180.0) {
+                LOGD << "Ignoring out-of-range georeference in " << c.string() << " (lat=" << *lat
+                     << ", lon=" << *lon << ")";
+                continue;
+            }
+
+            LOGD << "Model georeference found in " << c.string() << ": lat=" << *lat
+                 << " lon=" << *lon << " alt=" << *alt;
+            return ModelGeoref{*lat, *lon, alt.value_or(0.0)};
+        } catch (const std::exception& e) {
+            LOGD << "Could not parse georeference sidecar " << c.string() << ": " << e.what();
+        }
+    }
+
+    return std::nullopt;
+}
+
+std::string buildModel3DTiles(const std::string& inputObj, const std::string& outputDir,
+                              bool overwrite, std::optional<ModelGeoref> georef,
+                              bool autoDetectGeoref) {
+    TempDirGuard tempGuard;
+
+    // Fail fast: if Obj2Tiles is unavailable, skip georef detection, GLTF->OBJ
+    // conversion and dependency validation entirely. Callers treat 3D Tiles as
+    // best-effort and keep producing Nexus.
+    if (obj2tiles::findObj2TilesBinary().empty())
+        throw Obj2TilesException(
+            "Obj2Tiles binary not found; cannot generate 3D Tiles. Set DDB_OBJ2TILES_PATH "
+            "or place Obj2Tiles next to the DroneDB executable.");
+
+    fs::path inputPath(inputObj);
+    std::string actualInputObj = inputObj;
+
+    // Resolve georeferencing from sidecars next to the ORIGINAL input (before any
+    // GLTF->OBJ conversion moves us into a temp directory). An explicit georef
+    // argument always wins.
+    if (!georef.has_value() && autoDetectGeoref)
+        georef = detectModelGeoref(inputObj);
+
+    // Convert GLTF/GLB to OBJ if needed (same pre-processing as buildNexus)
+    if (isGltfFile(inputPath)) {
+        validateGltfDependencies(inputObj, inputPath.parent_path());
+        actualInputObj = convertGltfToObj(inputObj, tempGuard);
+        inputPath = fs::path(actualInputObj);
+    }
+
+    // Validate dependencies (for OBJ files or converted GLTF)
+    validateDependencies(actualInputObj, inputPath.parent_path());
+
+    const fs::path outDir(outputDir);
+
+    // Handle an existing output directory
+    if (fs::exists(outDir) && !fs::is_empty(outDir)) {
+        if (overwrite)
+            io::assureIsRemoved(outDir);
+        else
+            throw AppException("Directory " + outDir.string() +
+                               " already exists (delete it first)");
+    }
+
+    // Produce into a sibling temporary directory, then atomically move it into place
+    // so a crashed/partial run never leaves an incomplete tileset at outDir.
+    fs::path parent = outDir.parent_path();
+    if (parent.empty())
+        parent = fs::current_path();
+    io::assureFolderExists(parent);
+
+    const fs::path tempOut =
+        parent / (outDir.filename().string() + "-temp-" + utils::generateRandomString(16));
+    io::assureIsRemoved(tempOut);
+    io::assureFolderExists(tempOut);
+
+    obj2tiles::Obj2TilesOptions opts;
+    if (georef.has_value()) {
+        // Georeferenced tiling: Obj2Tiles builds the ECEF transform from the origin,
+        // placing the model's local frame at the given WGS84 coordinates.
+        opts.localMode = false;
+        opts.lat = georef->latitude;
+        opts.lon = georef->longitude;
+        opts.alt = georef->altitude;
+        LOGD << "Building georeferenced 3D Tiles for " << inputObj << " at lat=" << georef->latitude
+             << " lon=" << georef->longitude << " alt=" << georef->altitude;
+    } else {
+        // Non-georeferenced (local) tiling: identity transform, parity with the
+        // current non-georeferenced Nexus viewer.
+        opts.localMode = true;
+        LOGD << "Building non-georeferenced (local) 3D Tiles for " << inputObj;
+    }
+
+    std::string err;
+    const bool ok = obj2tiles::runObj2Tiles(actualInputObj, tempOut, opts, err);
+    if (!ok) {
+        io::assureIsRemoved(tempOut);
+        throw Obj2TilesException("Could not build 3D Tiles for " + inputObj + ": " + err);
+    }
+
+    // Atomic swap into place.
+    if (fs::exists(outDir))
+        io::assureIsRemoved(outDir);
+    io::rename(tempOut, outDir);
+
+    return (outDir / "tileset.json").string();
 }
 
 std::optional<std::string> extractFileName(const std::string& input) {
