@@ -296,8 +296,10 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
             // stays keyed on nxs/ (see isBuildOutputComplete), so the build never loops.
             try {
                 buildModel3DTiles(relativePath, (baseOutputPath / "3dtiles").string(), true);
-            } catch (const AppException& tilesEx) {
+            } catch (const std::exception& tilesEx) {
                 LOGD << "3D Tiles generation skipped for " << e.path << ": " << tilesEx.what();
+            } catch (...) {
+                LOGD << "3D Tiles generation skipped for " << e.path << " (unknown error)";
             }
         } else if (e.type == EntryType::Vector) {
             // buildVector manages its own atomic write to baseOutputPath/vec
