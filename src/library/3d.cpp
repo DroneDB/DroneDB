@@ -390,6 +390,15 @@ std::string buildModel3DTiles(const std::string& inputObj, const std::string& ou
                               bool overwrite, std::optional<ModelGeoref> georef,
                               bool autoDetectGeoref) {
     TempDirGuard tempGuard;
+
+    // Fail fast: if Obj2Tiles is unavailable, skip georef detection, GLTF->OBJ
+    // conversion and dependency validation entirely. Callers treat 3D Tiles as
+    // best-effort and keep producing Nexus.
+    if (obj2tiles::findObj2TilesBinary().empty())
+        throw Obj2TilesException(
+            "Obj2Tiles binary not found; cannot generate 3D Tiles. Set DDB_OBJ2TILES_PATH "
+            "or place Obj2Tiles next to the DroneDB executable.");
+
     fs::path inputPath(inputObj);
     std::string actualInputObj = inputObj;
 
@@ -419,14 +428,6 @@ std::string buildModel3DTiles(const std::string& inputObj, const std::string& ou
             throw AppException("Directory " + outDir.string() +
                                " already exists (delete it first)");
     }
-
-    // Fail fast with a typed exception if the Obj2Tiles binary is unavailable, so
-    // callers (e.g. the build pipeline) can treat 3D Tiles as a best-effort,
-    // non-blocking artifact and keep producing Nexus.
-    if (obj2tiles::findObj2TilesBinary().empty())
-        throw Obj2TilesException(
-            "Obj2Tiles binary not found; cannot generate 3D Tiles. Set DDB_OBJ2TILES_PATH "
-            "or place Obj2Tiles next to the DroneDB executable.");
 
     // Produce into a sibling temporary directory, then atomically move it into place
     // so a crashed/partial run never leaves an incomplete tileset at outDir.
