@@ -193,9 +193,11 @@ override_dh_auto_install:
 	# MODEL entries is skipped (Nexus still produced) when the binary is missing.
 	if [ -f \$(CURDIR)/build/Obj2Tiles ]; then \\
 		cp \$(CURDIR)/build/Obj2Tiles debian/ddb/usr/bin/Obj2Tiles; \\
-		chmod +x debian/ddb/usr/bin/Obj2Tiles; \\		if [ -f \$(CURDIR)/build/Obj2Tiles.LICENSE.md ]; then \
-			cp \$(CURDIR)/build/Obj2Tiles.LICENSE.md debian/ddb/usr/share/doc/ddb/Obj2Tiles.LICENSE.md; \
-		fi \	fi
+		chmod +x debian/ddb/usr/bin/Obj2Tiles; \\
+		if [ -f \$(CURDIR)/build/Obj2Tiles.LICENSE.md ]; then \\
+			cp \$(CURDIR)/build/Obj2Tiles.LICENSE.md debian/ddb/usr/share/doc/ddb/Obj2Tiles.LICENSE.md; \\
+		fi \\
+	fi
 
 	# Copy PDAL libraries from vcpkg installed directory
 	# Use wildcard to detect the actual SOVERSION (e.g., .so.19, .so.20, etc.)
