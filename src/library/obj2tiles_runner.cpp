@@ -270,6 +270,12 @@ namespace ddb
             // Make sure the output directory exists (Obj2Tiles also creates it, but we
             // want a clean, existing target before launching).
             fs::create_directories(outDir, ec);
+            if (ec)
+            {
+                errorOut = "could not create output directory '" + outDir.string() +
+                           "': " + ec.message();
+                return false;
+            }
 
             std::vector<std::string> args;
             args.push_back(bin.string());
