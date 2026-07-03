@@ -78,6 +78,36 @@ namespace ddb
                                           std::optional<ModelGeoref> georef = std::nullopt,
                                           bool autoDetectGeoref = true);
 
+    /**
+     * @brief Local-space axis-aligned bounding box of a 3D model.
+     *
+     * Bounds are expressed in the model's own local coordinate frame (meters),
+     * following the OpenDroneMap / Obj2Tiles ENU convention where X is East, Y is
+     * North and Z is up. Combined with a @ref ModelGeoref origin this yields the
+     * model's WGS84 footprint.
+     */
+    struct ModelInfo
+    {
+        bool hasBounds = false;                     ///< True when the box below is valid.
+        double minX = 0.0, minY = 0.0, minZ = 0.0;  ///< Minimum corner (local meters).
+        double maxX = 0.0, maxY = 0.0, maxZ = 0.0;  ///< Maximum corner (local meters).
+    };
+
+    /**
+     * @brief Read a 3D model's local-space axis-aligned bounding box via Assimp.
+     *
+     * Supports every mesh format Assimp can import (OBJ/PLY/GLTF/GLB). Node
+     * transforms are baked in so the bounds are in the model's root frame.
+     * Best-effort: returns false (leaving @p info untouched) when the model cannot
+     * be read or has no vertices, so a model can still be indexed without a
+     * footprint instead of failing the whole parse.
+     *
+     * @param inputModel Path to the model file.
+     * @param info Output bounding box (only written when the function returns true).
+     * @return true when a non-empty bounding box was computed, false otherwise.
+     */
+    DDB_DLL bool getModelInfo(const std::string &inputModel, ModelInfo &info);
+
     DDB_DLL std::vector<std::string> getObjDependencies(const std::string &obj);
     DDB_DLL std::vector<std::string> getGltfDependencies(const std::string &gltf);
 

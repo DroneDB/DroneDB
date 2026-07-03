@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include <exiv2/exiv2.hpp>
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include "dbops.h"
 #include "entry.h"
@@ -13,6 +14,7 @@
 #include "mio.h"
 #include "pointcloud.h"
 #include "ply.h"
+#include "3d.h"
 #include "gsplat.h"
 #include "thermal.h"
 #include "gdal_priv.h"
@@ -25,6 +27,7 @@ namespace ddb
 
     // Forward declaration - defined after parseEntry()
     static void parseVectorEntry(const fs::path &path, Entry &entry);
+    static void parseModelEntry(const fs::path &path, Entry &entry);
 
     void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entry, bool withHash)
     {
@@ -472,6 +475,10 @@ namespace ddb
             {
                 parseVectorEntry(path, entry);
             }
+            else if (entry.type == EntryType::Model)
+            {
+                parseModelEntry(path, entry);
+            }
         }
     }
 
@@ -637,6 +644,61 @@ namespace ddb
             if (hDS != nullptr) GDALClose(hDS);
             LOGD << "Vector parse warning: " << e.what();
             entry.properties["warning"] = std::string("vector parse failed: ") + e.what();
+        }
+    }
+
+    static void parseModelEntry(const fs::path &path, Entry &entry)
+    {
+        // Georeferencing for 3D models is optional and lives in a sidecar (the
+        // OpenDroneMap reference_lla.json and friends resolved by detectModelGeoref).
+        // When present we flag the model as georeferenced and derive a WGS84 footprint
+        // from its local bounds, so it behaves like every other geo entry (footprint on
+        // the dataset map, globe in the unified viewer). Best-effort: any failure leaves
+        // the model indexed in local space rather than aborting the parse.
+        try
+        {
+            const auto georef = detectModelGeoref(path.string());
+            if (!georef.has_value())
+            {
+                entry.properties["georeferenced"] = false;
+                return;
+            }
+
+            entry.properties["georeferenced"] = true;
+
+            // Origin point: the model's local ENU frame is centered here.
+            entry.point_geom.clear();
+            entry.point_geom.addPoint(georef->longitude, georef->latitude, georef->altitude);
+
+            // Footprint: offset the model's local X/Y bounds (East/North meters) around
+            // the origin with an equirectangular approximation (accurate at model scale).
+            ModelInfo info;
+            if (getModelInfo(path.string(), info) && info.hasBounds)
+            {
+                constexpr double DEG2RAD = 0.017453292519943295;
+                constexpr double METERS_PER_DEG_LAT = 111320.0;
+                const double cosLat = std::cos(georef->latitude * DEG2RAD);
+                // Guard against the poles (cosLat -> 0) to keep the longitude span finite.
+                const double metersPerDegLon = METERS_PER_DEG_LAT * std::max(0.01, std::abs(cosLat));
+
+                const double west = georef->longitude + info.minX / metersPerDegLon;
+                const double east = georef->longitude + info.maxX / metersPerDegLon;
+                const double south = georef->latitude + info.minY / METERS_PER_DEG_LAT;
+                const double north = georef->latitude + info.maxY / METERS_PER_DEG_LAT;
+
+                // 5-point closed ring in CCW order, matching point-cloud/vector footprints.
+                entry.polygon_geom.clear();
+                entry.polygon_geom.addPoint(west, south, 0.0);
+                entry.polygon_geom.addPoint(east, south, 0.0);
+                entry.polygon_geom.addPoint(east, north, 0.0);
+                entry.polygon_geom.addPoint(west, north, 0.0);
+                entry.polygon_geom.addPoint(west, south, 0.0);
+            }
+        }
+        catch (const std::exception &e)
+        {
+            LOGD << "Model parse warning: " << e.what();
+            entry.properties["warning"] = std::string("model parse failed: ") + e.what();
         }
     }
 

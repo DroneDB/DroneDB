@@ -4,8 +4,11 @@
 
 #include "gtest/gtest.h"
 #include "entry.h"
+#include "json.h"
 #include "test.h"
 #include "testarea.h"
+#include <cmath>
+#include <fstream>
 
 namespace
 {
@@ -67,6 +70,68 @@ namespace
         EXPECT_NEAR(e.polygon_geom.getPoint(4).x, 175.4029416126, 1e-9);
         EXPECT_NEAR(e.polygon_geom.getPoint(4).y, -41.06584339802, 1e-9);
 
+    }
+
+    // A model with a georeferencing sidecar must be indexed as georeferenced, with a
+    // point_geom at the origin and a WGS84 footprint derived from its local bounds.
+    TEST(parseEntry, ModelGeoreferencedFootprint)
+    {
+        TestArea ta(TEST_NAME);
+        const fs::path obj = ta.getPath("model.obj");
+        {
+            std::ofstream o(obj.string());
+            o << "v 0 0 0\n"
+              << "v 10 0 0\n"
+              << "v 0 20 0\n"
+              << "v 0 0 5\n"
+              << "f 1 2 3\n"
+              << "f 1 4 2\n";
+        }
+        // ODM-style origin sidecar next to the model.
+        {
+            std::ofstream o(ta.getPath("reference_lla.json").string());
+            o << R"({"latitude": 45.0, "longitude": 9.0, "altitude": 100.0})";
+        }
+
+        Entry e;
+        parseEntry(obj, ta.getFolder(), e, false);
+
+        ASSERT_TRUE(e.properties.contains("georeferenced"));
+        EXPECT_TRUE(e.properties["georeferenced"].get<bool>());
+
+        // Origin point (lon, lat).
+        ASSERT_EQ(e.point_geom.size(), 1);
+        EXPECT_NEAR(e.point_geom.getPoint(0).x, 9.0, 1e-9);
+        EXPECT_NEAR(e.point_geom.getPoint(0).y, 45.0, 1e-9);
+
+        // Footprint: 5-point closed ring. Local X in [0,10] East, Y in [0,20] North.
+        ASSERT_EQ(e.polygon_geom.size(), 5);
+        const double mPerDegLat = 111320.0;
+        const double mPerDegLon = 111320.0 * std::cos(45.0 * 0.017453292519943295);
+        EXPECT_NEAR(e.polygon_geom.getPoint(0).x, 9.0, 1e-9);                      // west
+        EXPECT_NEAR(e.polygon_geom.getPoint(0).y, 45.0, 1e-9);                     // south
+        EXPECT_NEAR(e.polygon_geom.getPoint(1).x, 9.0 + 10.0 / mPerDegLon, 1e-9);  // east
+        EXPECT_NEAR(e.polygon_geom.getPoint(2).y, 45.0 + 20.0 / mPerDegLat, 1e-9); // north
+    }
+
+    // A model without any sidecar must be indexed as NOT georeferenced and carry no
+    // footprint (it renders in local space, with no globe in the unified viewer).
+    TEST(parseEntry, ModelLocalNoFootprint)
+    {
+        TestArea ta(TEST_NAME);
+        const fs::path obj = ta.getPath("model.obj");
+        {
+            std::ofstream o(obj.string());
+            o << "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
+        }
+
+        Entry e;
+        parseEntry(obj, ta.getFolder(), e, false);
+
+        ASSERT_TRUE(e.properties.contains("georeferenced"));
+        EXPECT_FALSE(e.properties["georeferenced"].get<bool>());
+        EXPECT_EQ(e.point_geom.size(), 0);
+        EXPECT_EQ(e.polygon_geom.size(), 0);
     }
 
     TEST(parseEntry, copr_EPSG32611)

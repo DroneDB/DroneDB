@@ -188,6 +188,39 @@ TEST(obj2tiles, detectGeorefRejectsOutOfRange) {
     EXPECT_FALSE(detectModelGeoref(obj.string()).has_value());
 }
 
+// getModelInfo reads a model's local-space bounding box (used to derive a
+// georeferenced model's WGS84 footprint). A simple OBJ with known vertices must
+// yield exactly those bounds.
+TEST(obj2tiles, getModelInfoBounds) {
+    TestArea ta(TEST_NAME);
+    const fs::path obj = ta.getPath("box.obj");
+    writeSidecar(obj,
+                 "v 0 0 0\n"
+                 "v 10 0 0\n"
+                 "v 0 20 0\n"
+                 "v 0 0 5\n"
+                 "f 1 2 3\n"
+                 "f 1 4 2\n");
+
+    ModelInfo info;
+    ASSERT_TRUE(getModelInfo(obj.string(), info));
+    EXPECT_TRUE(info.hasBounds);
+    EXPECT_NEAR(info.minX, 0.0, 1e-6);
+    EXPECT_NEAR(info.maxX, 10.0, 1e-6);
+    EXPECT_NEAR(info.minY, 0.0, 1e-6);
+    EXPECT_NEAR(info.maxY, 20.0, 1e-6);
+    EXPECT_NEAR(info.minZ, 0.0, 1e-6);
+    EXPECT_NEAR(info.maxZ, 5.0, 1e-6);
+}
+
+// A missing / unreadable model must fail gracefully (false, no throw) so indexing
+// proceeds without a footprint instead of aborting.
+TEST(obj2tiles, getModelInfoMissingReturnsFalse) {
+    TestArea ta(TEST_NAME);
+    ModelInfo info;
+    EXPECT_FALSE(getModelInfo(ta.getPath("does_not_exist.obj").string(), info));
+}
+
 // End-to-end georeferenced generation: a sidecar must yield a non-identity ECEF
 // transform in the tileset. Disabled on CI (needs the Obj2Tiles binary).
 MANUAL_TEST(obj2tiles, endToEndGeoreferenced) {
