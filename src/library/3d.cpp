@@ -442,6 +442,10 @@ std::string buildModel3DTiles(const std::string& inputObj, const std::string& ou
     io::assureFolderExists(tempOut);
 
     obj2tiles::Obj2TilesOptions opts;
+    // Octree mode: each LOD gets an extra subdivision level,
+    // producing a real tile hierarchy (smaller, view-dependent b3dm tiles) instead of
+    // the same tile count per LOD - closer to Nexus-style progressive streaming.
+    opts.octree = true;
     if (georef.has_value()) {
         // Georeferenced tiling: Obj2Tiles builds the ECEF transform from the origin,
         // placing the model's local frame at the given WGS84 coordinates.
