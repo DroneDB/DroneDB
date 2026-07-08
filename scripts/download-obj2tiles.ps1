@@ -15,7 +15,7 @@
     Destination folder for Obj2Tiles.exe. Default: build
 
 .PARAMETER Version
-    Obj2Tiles release tag. Default: $env:OBJ2TILES_VERSION or v1.4.0
+    Obj2Tiles release tag. Default: $env:OBJ2TILES_VERSION or value in scripts/obj2tiles-version
 
 .NOTES
     Exit code 0 on success or when the binary is already present (idempotent).
@@ -23,7 +23,18 @@
 #>
 param(
     [string]$TargetDir = "build",
-    [string]$Version = $(if ($env:OBJ2TILES_VERSION) { $env:OBJ2TILES_VERSION } else { "v1.4.0" })
+    [string]$Version = $(
+        if ($env:OBJ2TILES_VERSION) {
+            $env:OBJ2TILES_VERSION
+        } else {
+            $versionFile = Join-Path $PSScriptRoot "obj2tiles-version"
+            if (Test-Path $versionFile) {
+                (Get-Content $versionFile -ErrorAction SilentlyContinue).Trim()
+            } else {
+                "v1.5.0"
+            }
+        }
+    )
 )
 
 $ErrorActionPreference = 'Stop'
@@ -39,9 +50,24 @@ Write-Host "  Version: $Version"
 
 New-Item -ItemType Directory -Force -Path $TargetDir | Out-Null
 
+# Strip leading 'v' from version tag for comparison with binary output.
+$requestedVersion = $Version -replace '^v', ''
+
+# Query installed version from the binary itself using --version.
+$needsUpdate = $false
 if (Test-Path $dest) {
-    Write-Host "  Obj2Tiles.exe already present, skipping download."
-    exit 0
+    $versionOutput = & $dest --version 2>&1 | Out-String
+    if ($versionOutput -match 'Obj2Tiles\s+(\d+\.\d+\.\d+)') {
+        $installedVersion = $Matches[1]
+        if ($installedVersion -eq $requestedVersion) {
+            Write-Host "  Obj2Tiles $Version already present, skipping download."
+            exit 0
+        }
+        Write-Host "  Obj2Tiles present but version mismatch (installed: $installedVersion, requested: $Version). Upgrading..."
+    } else {
+        Write-Host "  Obj2Tiles present but version unreadable. Replacing..."
+    }
+    $needsUpdate = $true
 }
 
 $url = "https://github.com/OpenDroneMap/Obj2Tiles/releases/download/$Version/Obj2Tiles-Win64.zip"
@@ -73,7 +99,7 @@ try {
     }
 
     Copy-Item $src $dest -Force
-    Write-Host "  Obj2Tiles.exe installed to $dest"
+    Write-Host "  Obj2Tiles $Version installed to $dest"
 
     # AGPL-3.0 compliance: fetch the upstream LICENSE.md and place it next to the binary.
     $licenseDest = Join-Path $TargetDir "Obj2Tiles.LICENSE.md"

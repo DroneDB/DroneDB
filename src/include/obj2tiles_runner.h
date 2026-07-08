@@ -18,9 +18,9 @@ namespace ddb
         // Options forwarded to the Obj2Tiles CLI. Defaults mirror the Obj2Tiles
         // CLI defaults (divisions=2, lods=3). When localMode is true the model is
         // tiled with an identity transform (no ECEF georeferencing) and lat/lon/alt
-        // are ignored. The octree and lodTextureScale options are only understood by
-        // the enhanced fork (OpenDroneMap/Obj2Tiles#95); their flags are emitted only
-        // when set to a non-default value, keeping compatibility with upstream v1.4.0.
+        // are ignored. The octree and lodTextureScale options are supported since
+        // v1.5.0 (OpenDroneMap/Obj2Tiles#95); their flags are emitted only when set
+        // to a non-default value.
         struct Obj2TilesOptions
         {
             int lods = 3;                 // --lods

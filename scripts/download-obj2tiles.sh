@@ -11,7 +11,7 @@
 # Usage:
 #   scripts/download-obj2tiles.sh [TARGET_DIR] [VERSION]
 #     TARGET_DIR  destination folder for the binary (default: build)
-#     VERSION     Obj2Tiles release tag (default: $OBJ2TILES_VERSION or v1.4.0)
+#     VERSION     Obj2Tiles release tag (default: $OBJ2TILES_VERSION or value in scripts/obj2tiles-version)
 #
 # Exit codes:
 #   0  success, OR the binary is already present (idempotent), OR the platform is
@@ -20,7 +20,11 @@
 set -euo pipefail
 
 TARGET_DIR="${1:-build}"
-VERSION="${2:-${OBJ2TILES_VERSION:-v1.4.0}}"
+
+# Resolve default version: env var > scripts/obj2tiles-version > fallback
+_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_DEFAULT_VERSION="$(cat "${_SCRIPT_DIR}/obj2tiles-version" 2>/dev/null | tr -d '[:space:]' || echo 'v1.5.0')"
+VERSION="${2:-${OBJ2TILES_VERSION:-${_DEFAULT_VERSION}}}"
 
 BIN="Obj2Tiles"
 DEST="${TARGET_DIR}/${BIN}"
@@ -33,9 +37,24 @@ echo "  Version: ${VERSION}"
 
 mkdir -p "${TARGET_DIR}"
 
+# Strip leading 'v' from version tag for comparison with binary output.
+REQUESTED_VERSION="${VERSION#v}"
+
+# Query installed version from the binary itself using --version.
+NEEDS_UPDATE=false
 if [ -x "${DEST}" ]; then
-    echo "  Obj2Tiles already present, skipping download."
-    exit 0
+    INSTALLED_VERSION="$(${DEST} --version 2>/dev/null | grep -oP 'Obj2Tiles \K[0-9]+\.[0-9]+\.[0-9]+' || true)"
+    if [ -n "${INSTALLED_VERSION}" ] && [ "${INSTALLED_VERSION}" = "${REQUESTED_VERSION}" ]; then
+        echo "  Obj2Tiles ${VERSION} already present, skipping download."
+        exit 0
+    fi
+
+    if [ -n "${INSTALLED_VERSION}" ]; then
+        echo "  Obj2Tiles present but version mismatch (installed: ${INSTALLED_VERSION}, requested: ${VERSION}). Upgrading..."
+    else
+        echo "  Obj2Tiles present but version unreadable. Replacing..."
+    fi
+    NEEDS_UPDATE=true
 fi
 
 # Resolve platform -> OpenDroneMap release asset suffix.
@@ -79,7 +98,7 @@ fi
 
 cp "${TMP}/${BIN}" "${DEST}"
 chmod +x "${DEST}"
-echo "  Obj2Tiles installed to ${DEST}"
+echo "  Obj2Tiles ${VERSION} installed to ${DEST}"
 
 # AGPL-3.0 compliance: fetch the upstream LICENSE.md and place it next to the binary.
 LICENSE_URL="https://raw.githubusercontent.com/OpenDroneMap/Obj2Tiles/${VERSION}/LICENSE.md"

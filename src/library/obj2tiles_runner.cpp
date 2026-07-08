@@ -161,9 +161,9 @@ namespace ddb
                     args.push_back(fmtDouble(opts.alt));
                 }
 
-                // Fork-only flags (OpenDroneMap/Obj2Tiles#95): emit only when set to a
-                // non-default value so the same code path keeps working with the
-                // upstream v1.4.0 binary, which does not understand them.
+                // Flags --octree and --lod-texture-scale are supported since v1.5.0
+                // (OpenDroneMap/Obj2Tiles#95). Emit only when set to a non-default
+                // value so the same code path keeps working with older binaries.
                 if (opts.octree)
                     args.push_back("--octree");
                 if (opts.lodTextureScale != 1.0)
