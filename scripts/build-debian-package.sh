@@ -160,6 +160,7 @@ override_dh_auto_install:
 	mkdir -p debian/ddb/usr/bin
 	mkdir -p debian/ddb/usr/lib
 	mkdir -p debian/ddb/usr/share/ddb
+	mkdir -p debian/ddb/usr/share/doc/ddb
 
 	# Copy binary and libs from build directory directly
 	cp \$(CURDIR)/build/ddbcmd debian/ddb/usr/bin/ddb
