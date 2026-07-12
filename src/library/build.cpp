@@ -23,6 +23,7 @@
 #include "exceptions.h"
 #include "gsplat.h"
 #include "mio.h"
+#include "mzip.h"
 #include "pointcloud.h"
 #include "threadlock.h"
 #include "vector.h"
@@ -55,6 +56,9 @@ bool isBuildableInternal(const Entry& e, std::string& subfolder) {
         return true;
     } else if (e.type == EntryType::GaussianSplat) {
         subfolder = "gsplat";
+        return true;
+    } else if (e.type == EntryType::Tiles3D) {
+        subfolder = "3dtiles";
         return true;
     }
 
@@ -163,6 +167,9 @@ static bool isBuildOutputComplete(const fs::path& baseOutputPath,
 
     if (e.type == EntryType::GaussianSplat)
         return fileExistsAndNonEmpty(baseOutputPath / "gsplat" / "model.rad");
+
+    if (e.type == EntryType::Tiles3D)
+        return fileExistsAndNonEmpty(baseOutputPath / "3dtiles" / "tileset.json");
 
     return directoryHasNonEmptyContent(baseOutputPath / subfolder);
 }
@@ -314,6 +321,15 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
             // Throws BuildDepMissingException if build-lod is unavailable.
             buildGsplat(relativePath, tempFolder);
             built = true;
+        } else if (e.type == EntryType::Tiles3D) {
+            // Extracts the .3tz (ZIP OGC 3D Tiles) into the 3dtiles/ subfolder. Extraction
+            // is hardened against Zip-Slip / absolute paths in mzip::_extractAll. The
+            // archive is only valid when tileset.json is present at its root; the temp
+            // folder is then renamed onto build/{hash}/3dtiles/ by the shared block below.
+            zip::extractAll(relativePath, tempFolder);
+            if (!fileExistsAndNonEmpty(fs::path(tempFolder) / "tileset.json"))
+                throw AppException("Invalid .3tz archive: tileset.json not found at root");
+            built = true;
         }
 
         if (built) {
@@ -371,12 +387,13 @@ void buildAll(Database* db, const std::string& outputPath, bool force) {
     // List all buildable files in DB
     auto q = db->query(
         "SELECT path, hash, type, properties, mtime, size, depth FROM entries WHERE type = ? OR "
-        "type = ? OR type = ? OR type = ? OR type = ?");
+        "type = ? OR type = ? OR type = ? OR type = ? OR type = ?");
     q->bind(1, PointCloud);
     q->bind(2, GeoRaster);
     q->bind(3, Model);
     q->bind(4, Vector);
     q->bind(5, GaussianSplat);
+    q->bind(6, Tiles3D);
 
     while (q->fetch()) {
         Entry e(q->getText(0),

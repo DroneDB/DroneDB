@@ -25,7 +25,8 @@ namespace ddb
         {EntryType::Panorama, "Panorama"},
         {EntryType::GeoPanorama, "GeoPanorama"},
         {EntryType::Vector, "Vector"},
-        {EntryType::GaussianSplat, "GaussianSplat"}};
+        {EntryType::GaussianSplat, "GaussianSplat"},
+        {EntryType::Tiles3D, "Tiles3D"}};
 
     std::string typeToHuman(EntryType t)
     {

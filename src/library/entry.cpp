@@ -15,6 +15,7 @@
 #include "pointcloud.h"
 #include "ply.h"
 #include "3d.h"
+#include "tiles3d.h"
 #include "gsplat.h"
 #include "thermal.h"
 #include "gdal_priv.h"
@@ -28,6 +29,7 @@ namespace ddb
     // Forward declaration - defined after parseEntry()
     static void parseVectorEntry(const fs::path &path, Entry &entry);
     static void parseModelEntry(const fs::path &path, Entry &entry);
+    static void parseTiles3DEntry(const fs::path &path, Entry &entry);
 
     void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entry, bool withHash)
     {
@@ -479,6 +481,10 @@ namespace ddb
             {
                 parseModelEntry(path, entry);
             }
+            else if (entry.type == EntryType::Tiles3D)
+            {
+                parseTiles3DEntry(path, entry);
+            }
         }
     }
 
@@ -699,6 +705,48 @@ namespace ddb
         {
             LOGD << "Model parse warning: " << e.what();
             entry.properties["warning"] = std::string("model parse failed: ") + e.what();
+        }
+    }
+
+    static void parseTiles3DEntry(const fs::path &path, Entry &entry)
+    {
+        // Reads tileset.json from the .3tz (ZIP) root and, when the tileset is
+        // georeferenced (WGS84 region or ECEF bounding volume), derives a WGS84
+        // footprint so the entry gets a map footprint and the unified viewer opens
+        // it in globe mode. Best-effort: any failure leaves the archive indexed in
+        // local space rather than aborting the parse.
+        try
+        {
+            Tiles3DInfo info;
+            if (!getTiles3DInfo(path.string(), info))
+            {
+                entry.properties["georeferenced"] = false;
+                return;
+            }
+
+            entry.properties["georeferenced"] = info.georeferenced;
+            if (!info.assetVersion.empty())
+                entry.properties["tilesetVersion"] = info.assetVersion;
+            entry.properties["geometricError"] = info.geometricError;
+
+            if (info.georeferenced && info.hasBounds)
+            {
+                entry.point_geom.clear();
+                entry.point_geom.addPoint(info.centerLon, info.centerLat, info.centerAlt);
+
+                // 5-point closed ring (CCW), matching point-cloud/model footprints.
+                entry.polygon_geom.clear();
+                entry.polygon_geom.addPoint(info.west, info.south, 0.0);
+                entry.polygon_geom.addPoint(info.east, info.south, 0.0);
+                entry.polygon_geom.addPoint(info.east, info.north, 0.0);
+                entry.polygon_geom.addPoint(info.west, info.north, 0.0);
+                entry.polygon_geom.addPoint(info.west, info.south, 0.0);
+            }
+        }
+        catch (const std::exception &e)
+        {
+            LOGD << "Tiles3D parse warning: " << e.what();
+            entry.properties["georeferenced"] = false;
         }
     }
 
@@ -975,6 +1023,12 @@ namespace ddb
 
         if (p.checkExtension({"obj", "gltf", "glb"}))
             return EntryType::Model;
+
+        // OGC 3D Tiles archive (.3tz, a ZIP container with tileset.json at its root).
+        // The extension is the signal; ZIP validity is checked when the footprint is
+        // read (parseEntry) and when the archive is extracted at build time.
+        if (p.checkExtension({"3tz"}))
+            return EntryType::Tiles3D;
 
         // Check for vector files
         if (p.checkExtension({"geojson", "dxf", "dwg", "shp", "shz", "fgb", "topojson", "kml", "kmz", "gpkg"}))
