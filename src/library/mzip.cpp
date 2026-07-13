@@ -46,17 +46,18 @@ namespace ddb::zip
         }
 
         // Defense-in-depth: verify the resolved target stays inside outdir.
-        std::error_code ec;
-        const fs::path base = fs::weakly_canonical(fs::path(outdir), ec);
+        std::error_code baseEc, targetEc;
+        const fs::path base = fs::weakly_canonical(fs::path(outdir), baseEc);
         const fs::path target =
-            fs::weakly_canonical(fs::path(outdir) / fs::path(name), ec);
-        if (!ec)
+            fs::weakly_canonical(fs::path(outdir) / fs::path(name), targetEc);
+        if (!baseEc && !targetEc)
         {
-            const fs::path rel = fs::relative(target, base, ec);
+            std::error_code relEc;
+            const fs::path rel = fs::relative(target, base, relEc);
             // A path that escapes base resolves to a relative path whose first
             // component is "..". Comparing fs::path components is portable across
             // the narrow (POSIX) / wide (Windows) native string types.
-            if (ec || rel.empty() || *rel.begin() == fs::path(".."))
+            if (relEc || rel.empty() || *rel.begin() == fs::path(".."))
                 throw ZipException("Archive entry escapes extraction directory: " +
                                    std::string(entryName));
         }
