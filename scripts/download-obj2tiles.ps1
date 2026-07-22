@@ -101,6 +101,18 @@ try {
     Copy-Item $src $dest -Force
     Write-Host "  Obj2Tiles $Version installed to $dest"
 
+    # KTX2 texture compression (--texture-format Ktx2, Obj2Tiles >= v1.6.0) needs the
+    # bundled libktx native library (Apache-2.0), shipped alongside Obj2Tiles.exe in
+    # the same release archive; copy it next to the binary so its P/Invoke resolver
+    # (which looks in the executable's directory) finds it.
+    $ktxSrc = Join-Path $tmp "ktx.dll"
+    if (Test-Path $ktxSrc) {
+        Copy-Item $ktxSrc (Join-Path $TargetDir "ktx.dll") -Force
+        Write-Host "  ktx.dll (libktx, bundled) installed to $TargetDir"
+    } else {
+        Write-Host "  WARNING: ktx.dll not found in the downloaded archive; --texture-format Ktx2 will be unavailable." -ForegroundColor Yellow
+    }
+
     # AGPL-3.0 compliance: fetch the upstream LICENSE.md and place it next to the binary.
     $licenseDest = Join-Path $TargetDir "Obj2Tiles.LICENSE.md"
     $licenseUrl = "https://raw.githubusercontent.com/OpenDroneMap/Obj2Tiles/$Version/LICENSE.md"

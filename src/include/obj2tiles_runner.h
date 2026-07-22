@@ -16,21 +16,27 @@ namespace ddb
     {
 
         // Options forwarded to the Obj2Tiles CLI. Defaults mirror the Obj2Tiles
-        // CLI defaults (divisions=2, lods=3). When localMode is true the model is
-        // tiled with an identity transform (no ECEF georeferencing) and lat/lon/alt
-        // are ignored. The octree and lodTextureScale options are supported since
-        // v1.5.0 (OpenDroneMap/Obj2Tiles#95); their flags are emitted only when set
-        // to a non-default value.
+        // CLI defaults (divisions=2, lods=3, lodTextureScale=0.5). When localMode is
+        // true the model is tiled with an identity transform (no ECEF georeferencing)
+        // and lat/lon/alt are ignored. octree/lodTextureScale are supported since
+        // v1.5.0 (OpenDroneMap/Obj2Tiles#95); textureFormat/ktx2Quality since v1.6.0
+        // (OpenDroneMap/Obj2Tiles#97); splitStrategy since v1.4.0
+        // (OpenDroneMap/Obj2Tiles#92). All of these flags are emitted only when set to
+        // a non-default (or non-empty) value, so callers targeting an older Obj2Tiles
+        // binary can simply leave them unset.
         struct Obj2TilesOptions
         {
-            int lods = 3;                 // --lods
-            int divisions = 2;            // --divisions
-            bool localMode = true;        // --local (identity matrix, non-georeferenced)
-            std::optional<double> lat;    // --lat  (ignored when localMode)
-            std::optional<double> lon;    // --lon  (ignored when localMode)
-            double alt = 0.0;             // --alt  (ignored when localMode)
-            bool octree = false;          // --octree (fork only)
-            double lodTextureScale = 1.0; // --lod-texture-scale (fork only)
+            int lods = 3;                  // --lods
+            int divisions = 2;             // --divisions
+            bool localMode = true;         // --local (identity matrix, non-georeferenced)
+            std::optional<double> lat;     // --lat  (ignored when localMode)
+            std::optional<double> lon;     // --lon  (ignored when localMode)
+            double alt = 0.0;              // --alt  (ignored when localMode)
+            bool octree = false;           // --octree (since v1.5.0)
+            double lodTextureScale = 0.5;  // --lod-texture-scale (since v1.5.0; Obj2Tiles default)
+            std::string textureFormat;     // --texture-format (since v1.6.0; "Ktx2"/"Webp"/"Jpeg", empty = Obj2Tiles default "Jpeg")
+            int ktx2Quality = 128;         // --ktx2-quality (since v1.6.0; 1-255, only emitted when textureFormat == "Ktx2")
+            std::string splitStrategy;     // --split-strategy (since v1.4.0; "VertexMedian"/"VertexBaricenter"/"AbsoluteCenter", empty = Obj2Tiles default)
         };
 
         // Locates the Obj2Tiles executable using the following discovery order:

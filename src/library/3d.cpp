@@ -446,6 +446,17 @@ std::string buildModel3DTiles(const std::string& inputObj, const std::string& ou
     // producing a real tile hierarchy (smaller, view-dependent b3dm tiles) instead of
     // the same tile count per LOD - closer to Nexus-style progressive streaming.
     opts.octree = true;
+    // 3 levels of binary splitting per axis as the base grid ((2^3)^2 = 64 tiles),
+    // with octree mode adding further depth to finer LODs - a good balance between
+    // per-tile granularity/streaming and per-tile overhead for aerial datasets.
+    opts.divisions = 3;
+    // KTX2 (Basis Universal) texture atlases cut GPU/VRAM usage ~4-8x vs JPEG at the
+    // cost of requiring Obj2Tiles >= v1.6.0 with the bundled libktx native library
+    // (see scripts/download-obj2tiles.{ps1,sh}). VertexMedian gives the most balanced
+    // tile sizes for non-uniform geometry (requires Obj2Tiles >= v1.4.0).
+    opts.textureFormat = "Ktx2";
+    opts.ktx2Quality = 192;
+    opts.splitStrategy = "VertexMedian";
     if (georef.has_value()) {
         // Georeferenced tiling: Obj2Tiles builds the ECEF transform from the origin,
         // placing the model's local frame at the given WGS84 coordinates.

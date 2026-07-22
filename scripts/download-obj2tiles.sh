@@ -100,6 +100,21 @@ cp "${TMP}/${BIN}" "${DEST}"
 chmod +x "${DEST}"
 echo "  Obj2Tiles ${VERSION} installed to ${DEST}"
 
+# KTX2 texture compression (--texture-format Ktx2, Obj2Tiles >= v1.6.0) needs the
+# bundled libktx native library (Apache-2.0), shipped alongside the binary in the
+# same release archive; copy it next to Obj2Tiles so its P/Invoke resolver (which
+# looks in the executable's directory) finds it.
+case "${ASSET}" in
+    Linux64|LinuxArm64) KTX_LIB="libktx.so" ;;
+    Osx64)              KTX_LIB="libktx.dylib" ;;
+esac
+if [ -f "${TMP}/${KTX_LIB}" ]; then
+    cp "${TMP}/${KTX_LIB}" "${TARGET_DIR}/${KTX_LIB}"
+    echo "  ${KTX_LIB} (libktx, bundled) installed to ${TARGET_DIR}/${KTX_LIB}"
+else
+    echo "  WARNING: ${KTX_LIB} not found in the downloaded archive; --texture-format Ktx2 will be unavailable." >&2
+fi
+
 # AGPL-3.0 compliance: fetch the upstream LICENSE.md and place it next to the binary.
 LICENSE_URL="https://raw.githubusercontent.com/OpenDroneMap/Obj2Tiles/${VERSION}/LICENSE.md"
 if curl -fL --retry 3 --retry-delay 5 -o "${TARGET_DIR}/Obj2Tiles.LICENSE.md" "${LICENSE_URL}"; then

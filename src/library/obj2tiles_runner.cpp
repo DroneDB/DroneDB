@@ -161,15 +161,33 @@ namespace ddb
                     args.push_back(fmtDouble(opts.alt));
                 }
 
-                // Flags --octree and --lod-texture-scale are supported since v1.5.0
-                // (OpenDroneMap/Obj2Tiles#95). Emit only when set to a non-default
-                // value so the same code path keeps working with older binaries.
+                // Flags --octree/--lod-texture-scale are supported since v1.5.0
+                // (OpenDroneMap/Obj2Tiles#95); --texture-format/--ktx2-quality since
+                // v1.6.0 (OpenDroneMap/Obj2Tiles#97); --split-strategy since v1.4.0
+                // (OpenDroneMap/Obj2Tiles#92). Emit only when set to a non-default (or
+                // non-empty) value so the same code path keeps working with older
+                // Obj2Tiles binaries.
                 if (opts.octree)
                     args.push_back("--octree");
-                if (opts.lodTextureScale != 1.0)
+                if (opts.lodTextureScale != 0.5)
                 {
                     args.push_back("--lod-texture-scale");
                     args.push_back(fmtDouble(opts.lodTextureScale));
+                }
+                if (!opts.textureFormat.empty())
+                {
+                    args.push_back("--texture-format");
+                    args.push_back(opts.textureFormat);
+                    if (opts.textureFormat == "Ktx2")
+                    {
+                        args.push_back("--ktx2-quality");
+                        args.push_back(std::to_string(opts.ktx2Quality));
+                    }
+                }
+                if (!opts.splitStrategy.empty())
+                {
+                    args.push_back("--split-strategy");
+                    args.push_back(opts.splitStrategy);
                 }
             }
 

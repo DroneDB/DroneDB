@@ -200,6 +200,15 @@ override_dh_auto_install:
 		fi \\
 	fi
 
+	# Optional: copy the bundled libktx native library (Apache-2.0) used by
+	# Obj2Tiles for KTX2 texture compression (--texture-format Ktx2). Installed
+	# next to Obj2Tiles so its P/Invoke resolver finds it. Without it, Obj2Tiles
+	# still runs but --texture-format Ktx2 requests fail (3D Tiles generation
+	# then falls back to best-effort failure, same as a missing Obj2Tiles binary).
+	if [ -f \$(CURDIR)/build/libktx.so ]; then \\
+		cp \$(CURDIR)/build/libktx.so debian/ddb/usr/bin/libktx.so; \\
+	fi
+
 	# Copy PDAL libraries from vcpkg installed directory
 	# Use wildcard to detect the actual SOVERSION (e.g., .so.19, .so.20, etc.)
 	# so the script survives future PDAL ABI bumps without manual updates

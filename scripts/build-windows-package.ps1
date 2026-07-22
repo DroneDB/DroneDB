@@ -203,6 +203,13 @@ if (Test-Path $obj2tilesPath) {
         Copy-Item $obj2tilesLicense $stagingDir -Force
         Write-Host "  ✓ Obj2Tiles.LICENSE.md (AGPL-3.0 license)" -ForegroundColor Green
     }
+    # Bundled libktx native library (Apache-2.0), used by Obj2Tiles for KTX2 texture
+    # compression (--texture-format Ktx2). Without it, --texture-format Ktx2 requests fail.
+    $ktxPath = Join-Path $BuildDir "ktx.dll"
+    if (Test-Path $ktxPath) {
+        Copy-Item $ktxPath $stagingDir -Force
+        Write-Host "  ✓ ktx.dll (libktx, KTX2 texture compression)" -ForegroundColor Green
+    }
 } else {
     Write-Host "  - Obj2Tiles.exe (not found, skipping - 3D Tiles generation disabled, Nexus still produced)" -ForegroundColor Yellow
 }

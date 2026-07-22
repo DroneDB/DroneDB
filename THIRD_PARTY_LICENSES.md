@@ -107,6 +107,31 @@ Tiles output is disabled).
 
 ---
 
+## libktx / KTX-Software (bundled with Obj2Tiles for KTX2 texture compression)
+
+When Obj2Tiles is asked to emit KTX2 textures (`--texture-format Ktx2`,
+used by DroneDB's 3D Tiles build since Obj2Tiles v1.6.0), it loads the
+[KTX-Software](https://github.com/KhronosGroup/KTX-Software) native
+library (`ktx.dll` / `libktx.so` / `libktx.dylib`) via P/Invoke. This
+library is bundled unmodified in the upstream Obj2Tiles release archive
+and is copied next to the `Obj2Tiles` / `Obj2Tiles.exe` binary by
+[`scripts/download-obj2tiles.ps1`](scripts/download-obj2tiles.ps1) /
+[`scripts/download-obj2tiles.sh`](scripts/download-obj2tiles.sh).
+
+- **License**: Apache License, version 2.0.
+- **Source**: https://github.com/KhronosGroup/KTX-Software
+- **Distributed copy**: the precompiled `ktx.dll` / `libktx.so` /
+  `libktx.dylib` binary placed next to the Obj2Tiles executable.
+
+Like Obj2Tiles itself, libktx is invoked only by the separate Obj2Tiles
+subprocess and is never linked into `ddbcmd` / `libddb`; it does not
+affect DroneDB's MPL-2.0 licensing. It is optional: when absent,
+Obj2Tiles fails to honor `--texture-format Ktx2`, which DroneDB treats
+as a best-effort 3D Tiles generation failure (same as a missing
+Obj2Tiles binary), while Nexus output is unaffected.
+
+---
+
 ## libnexus / Nexus
 
 The `libnxs.so` / `nxs.dll` library shipped with DroneDB is a fork of
