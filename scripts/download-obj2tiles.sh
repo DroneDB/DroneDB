@@ -23,7 +23,7 @@ TARGET_DIR="${1:-build}"
 
 # Resolve default version: env var > scripts/obj2tiles-version > fallback
 _SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-_DEFAULT_VERSION="$(cat "${_SCRIPT_DIR}/obj2tiles-version" 2>/dev/null | tr -d '[:space:]' || echo 'v1.5.0')"
+_DEFAULT_VERSION="$(cat "${_SCRIPT_DIR}/obj2tiles-version" 2>/dev/null | tr -d '[:space:]' || echo 'v1.6.0')"
 VERSION="${2:-${OBJ2TILES_VERSION:-${_DEFAULT_VERSION}}}"
 
 BIN="Obj2Tiles"
