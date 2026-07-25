@@ -26,9 +26,9 @@ namespace ddb::zip
         std::replace(name.begin(), name.end(), '\\', '/');
 
         if (!name.empty() && name[0] == '/')
-            throw ZipException("Unsafe absolute path in archive entry: " + std::string(entryName));
+            throw ZipException("Unsafe absolute path in archive entry: " + name);
         if (name.size() >= 2 && name[1] == ':')
-            throw ZipException("Unsafe drive path in archive entry: " + std::string(entryName));
+            throw ZipException("Unsafe drive path in archive entry: " + name);
 
         // Reject any '..' path segment.
         size_t start = 0;
@@ -38,8 +38,7 @@ namespace ddb::zip
             const std::string seg =
                 name.substr(start, slash == std::string::npos ? std::string::npos : slash - start);
             if (seg == "..")
-                throw ZipException("Unsafe path traversal in archive entry: " +
-                                   std::string(entryName));
+                throw ZipException("Unsafe path traversal in archive entry: " + name);
             if (slash == std::string::npos)
                 break;
             start = slash + 1;
@@ -58,8 +57,7 @@ namespace ddb::zip
             // component is "..". Comparing fs::path components is portable across
             // the narrow (POSIX) / wide (Windows) native string types.
             if (relEc || rel.empty() || *rel.begin() == fs::path(".."))
-                throw ZipException("Archive entry escapes extraction directory: " +
-                                   std::string(entryName));
+                throw ZipException("Archive entry escapes extraction directory: " + name);
         }
     }
 
