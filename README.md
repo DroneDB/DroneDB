@@ -18,9 +18,9 @@
 - **Smart Indexing** - Automatic metadata extraction from images (EXIF), raster data (GDAL), point clouds (PDAL), and vector files
 - **Interactive Visualization** - Web-based viewers for orthophotos, 3D point clouds, textured models, and 360° panoramas
 - **Geospatial Analysis** - Flight path visualization, EXIF metadata extraction, dataset partitioning, and STAC catalog support
-- **Multiple Sharing Options** - Direct links, embed codes, TMS tiles, Cloud-Optimized GeoTIFFs (COG), and Entwine Point Tiles (EPT)
+- **Multiple Sharing Options** - Direct links, embed codes, TMS tiles, Cloud-Optimized GeoTIFFs (COG), and Cloud-Optimized Point Clouds (COPC)
 - **Cloud Sync** - Push and pull datasets to/from DroneDB Hub for collaboration
-- **Format Support** - Orthophotos (GeoTIFF, COG), point clouds (LAS, LAZ, E57, PTS, XYZ, PLY), 3D models (OBJ, glTF/GLB), Gaussian Splats (PLY, SPLAT, SPZ), vector files (GeoJSON, DXF, DWG, SHP, SHZ, FGB, TopoJSON, KML, KMZ, GPKG), videos (MP4, MOV, WEBM, M4V, AVI, MKV), and 360° panoramas
+- **Format Support** - Orthophotos (GeoTIFF, COG), point clouds (LAS, LAZ, E57, PTS, XYZ, PLY), 3D models (OBJ, glTF/GLB, OGC 3D Tiles), Gaussian Splats (PLY, SPLAT, SPZ), vector files (GeoJSON, DXF, DWG, SHP, SHZ, FGB, TopoJSON, KML, KMZ, GPKG), videos (MP4, MOV, WEBM, M4V, AVI, MKV), and 360° panoramas
 - **Cross-Platform** - Works on Windows and Linux
 
 ---
@@ -66,6 +66,9 @@ ddb search --type image
 # Build COG (Cloud-Optimized GeoTIFF) from raster
 ddb cog input.tif output.tif
 
+# Generate OGC 3D Tiles from a 3D model (requires Obj2Tiles binary)
+ddb 3dtiles model.obj ./3dtiles
+
 # Convert Gaussian Splat to compressed .spz format
 ddb gsplat input.ply output.spz
 
@@ -87,8 +90,9 @@ ddb share . --tag myproject/dataset
 | `thumbs` | Generate thumbnails |
 | `tile` | Generate map tiles |
 | `cog` | Create Cloud-Optimized GeoTIFFs |
-| `ept` | Create Entwine Point Tiles from point clouds |
+| `copc` | Create Cloud-Optimized Point Clouds |
 | `nxs` | Create Nexus 3D mesh format |
+| `3dtiles` | Generate OGC 3D Tiles (tileset.json + b3dm) from OBJ/glTF/GLB models |
 | `gsplat` | Convert Gaussian Splat to compressed .spz format |
 | `stac` | Export as STAC catalog |
 | `clone` | Clone a remote repository |
