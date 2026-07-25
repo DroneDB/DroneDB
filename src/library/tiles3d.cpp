@@ -58,17 +58,30 @@ namespace ddb
             return ok;
         }
 
+        // Applies only the linear (rotation/scale) part of a 3D Tiles 4x4 column-major
+        // transform to a vector, ignoring the translation. Used for direction/extent
+        // vectors such as bounding box half-axes. When the transform is absent
+        // (size != 16) the vector is returned unchanged.
+        std::array<double, 3> applyLinear(const std::vector<double> &m,
+                                          double x, double y, double z)
+        {
+            if (m.size() != 16)
+                return {x, y, z};
+            return {
+                m[0] * x + m[4] * y + m[8] * z,
+                m[1] * x + m[5] * y + m[9] * z,
+                m[2] * x + m[6] * y + m[10] * z};
+        }
+
         // Applies a 3D Tiles 4x4 column-major transform to a point. When the transform is
         // absent (size != 16) the point is returned unchanged.
         std::array<double, 3> applyTransform(const std::vector<double> &m,
                                              double x, double y, double z)
         {
+            const auto v = applyLinear(m, x, y, z);
             if (m.size() != 16)
-                return {x, y, z};
-            return {
-                m[0] * x + m[4] * y + m[8] * z + m[12],
-                m[1] * x + m[5] * y + m[9] * z + m[13],
-                m[2] * x + m[6] * y + m[10] * z + m[14]};
+                return v;
+            return {v[0] + m[12], v[1] + m[13], v[2] + m[14]};
         }
 
         // Transforms a geocentric ECEF point (EPSG:4978) to WGS84 lon/lat/alt (degrees,
@@ -200,14 +213,32 @@ namespace ddb
             const auto &b = bv["box"];
             const auto c = applyTransform(transform, b[0].get<double>(),
                                           b[1].get<double>(), b[2].get<double>());
-            // Bounding radius from the three half-axis vectors.
-            auto axisLen = [&](int off) {
-                const double ax = b[off].get<double>();
-                const double ay = b[off + 1].get<double>();
-                const double az = b[off + 2].get<double>();
-                return std::sqrt(ax * ax + ay * ay + az * az);
-            };
-            const double radius = axisLen(3) + axisLen(6) + axisLen(9);
+            // Bounding radius = distance from the centre to the farthest box corner,
+            // i.e. max over sign combinations of || +-xHalf +-yHalf +-zHalf ||. Fixing the
+            // first sign leaves 4 distinct corners (the rest are their negatives). For the
+            // usual orthogonal half-axes this equals sqrt(lx^2+ly^2+lz^2); summing the three
+            // axis lengths instead would overestimate it by up to sqrt(3). Note a
+            // componentwise |x|+|y|+|z| norm is not rotation invariant and also overestimates.
+            // Half-axes are extent vectors, so only the linear part of the transform applies
+            // (a scaled tileset would otherwise yield a wrong radius).
+            const auto hx = applyLinear(transform, b[3].get<double>(),
+                                        b[4].get<double>(), b[5].get<double>());
+            const auto hy = applyLinear(transform, b[6].get<double>(),
+                                        b[7].get<double>(), b[8].get<double>());
+            const auto hz = applyLinear(transform, b[9].get<double>(),
+                                        b[10].get<double>(), b[11].get<double>());
+            double radius = 0.0;
+            for (const double sy : {1.0, -1.0})
+                for (const double sz : {1.0, -1.0})
+                {
+                    double sq = 0.0;
+                    for (int k = 0; k < 3; ++k)
+                    {
+                        const double v = hx[k] + sy * hy[k] + sz * hz[k];
+                        sq += v * v;
+                    }
+                    radius = std::max(radius, std::sqrt(sq));
+                }
 
             const double dist = std::sqrt(c[0] * c[0] + c[1] * c[1] + c[2] * c[2]);
             // ECEF centres sit ~1 Earth radius from the origin; local frames are near 0.
