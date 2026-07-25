@@ -450,9 +450,11 @@ PendingFileData parsePendingFile(const fs::path& pendingFilePath) {
     // First line is the timestamp
     std::getline(pendingFile, line);
     try {
-        // Validate timestamp format before conversion
+        // Validate timestamp format before conversion.
+        // std::isdigit requires a value representable as unsigned char: a plain (signed)
+        // char holding a non-ASCII byte from a corrupted .pending file would be UB.
         for (char c : line)
-            if (!std::isdigit(c) && c != '-' && c != '+')
+            if (!std::isdigit(static_cast<unsigned char>(c)) && c != '-' && c != '+')
                 throw std::invalid_argument("Invalid timestamp format: " + line);
 
         data.lastAttempt = std::stoll(line);
