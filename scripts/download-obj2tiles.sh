@@ -43,7 +43,12 @@ REQUESTED_VERSION="${VERSION#v}"
 # Query installed version from the binary itself using --version.
 NEEDS_UPDATE=false
 if [ -x "${DEST}" ]; then
-    INSTALLED_VERSION="$(${DEST} --version 2>/dev/null | grep -oP 'Obj2Tiles \K[0-9]+\.[0-9]+\.[0-9]+' || true)"
+    # POSIX BRE sed instead of `grep -oP`: PCRE (-P) and \K are GNU extensions that
+    # BSD grep on macOS rejects, which would make every Darwin build re-download.
+    VERSION_OUTPUT="$("${DEST}" --version 2>/dev/null || true)"
+    INSTALLED_VERSION="$(printf '%s\n' "${VERSION_OUTPUT}" \
+        | sed -n 's/.*Obj2Tiles[[:space:]]\{1,\}\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' \
+        | head -n 1 || true)"
     if [ -n "${INSTALLED_VERSION}" ] && [ "${INSTALLED_VERSION}" = "${REQUESTED_VERSION}" ]; then
         echo "  Obj2Tiles ${VERSION} already present, skipping download."
         exit 0
