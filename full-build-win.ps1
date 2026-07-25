@@ -472,6 +472,26 @@ try {
         }
     }
 
+    # ----------------------------------------------------------------------
+    # Optional: download the OpenDroneMap Obj2Tiles binary (OGC 3D Tiles generator).
+    # Delegated to scripts/download-obj2tiles.ps1 so the same logic is shared with
+    # CI workflows and packaging. Failures NEVER block the main build: DroneDB skips
+    # 3D Tiles generation (Nexus still produced) when Obj2Tiles.exe is missing.
+    # ----------------------------------------------------------------------
+    $obj2tilesScript = Join-Path $PSScriptRoot "scripts\download-obj2tiles.ps1"
+    if (Test-Path $obj2tilesScript) {
+        try {
+            & $obj2tilesScript -TargetDir $buildDir
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "WARNING: scripts/download-obj2tiles.ps1 returned exit $LASTEXITCODE (non-blocking)." -ForegroundColor Yellow
+                Write-Host "DroneDB will skip 3D Tiles generation (Nexus still produced)." -ForegroundColor Yellow
+            }
+        } catch {
+            Write-Host "WARNING: Obj2Tiles download failed (non-blocking): $($_.Exception.Message)" -ForegroundColor Yellow
+            Write-Host "DroneDB will skip 3D Tiles generation (Nexus still produced)." -ForegroundColor Yellow
+        }
+    }
+
     # Display build artifacts
     Write-Host "`n========================================" -ForegroundColor Magenta
     Write-Host "Build Artifacts:" -ForegroundColor Magenta

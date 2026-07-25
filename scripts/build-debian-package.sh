@@ -160,6 +160,7 @@ override_dh_auto_install:
 	mkdir -p debian/ddb/usr/bin
 	mkdir -p debian/ddb/usr/lib
 	mkdir -p debian/ddb/usr/share/ddb
+	mkdir -p debian/ddb/usr/share/doc/ddb
 
 	# Copy binary and libs from build directory directly
 	cp \$(CURDIR)/build/ddbcmd debian/ddb/usr/bin/ddb
@@ -184,6 +185,28 @@ override_dh_auto_install:
 	if [ -f \$(CURDIR)/build/build-lod ]; then \\
 		cp \$(CURDIR)/build/build-lod debian/ddb/usr/bin/build-lod; \\
 		chmod +x debian/ddb/usr/bin/build-lod; \\
+	fi
+
+	# Optional: copy Obj2Tiles OGC 3D Tiles generator if it was downloaded
+	# (scripts/download-obj2tiles.sh). Installed alongside ddb so that runtime
+	# discovery (obj2tiles_runner.cpp::findObj2TilesBinary -> getExeFolder())
+	# finds it without any extra configuration. OGC 3D Tiles generation for
+	# MODEL entries is skipped (Nexus still produced) when the binary is missing.
+	if [ -f \$(CURDIR)/build/Obj2Tiles ]; then \\
+		cp \$(CURDIR)/build/Obj2Tiles debian/ddb/usr/bin/Obj2Tiles; \\
+		chmod +x debian/ddb/usr/bin/Obj2Tiles; \\
+		if [ -f \$(CURDIR)/build/Obj2Tiles.LICENSE.md ]; then \\
+			cp \$(CURDIR)/build/Obj2Tiles.LICENSE.md debian/ddb/usr/share/doc/ddb/Obj2Tiles.LICENSE.md; \\
+		fi \\
+	fi
+
+	# Optional: copy the bundled libktx native library (Apache-2.0) used by
+	# Obj2Tiles for KTX2 texture compression (--texture-format Ktx2). Installed
+	# next to Obj2Tiles so its P/Invoke resolver finds it. Without it, Obj2Tiles
+	# still runs but --texture-format Ktx2 requests fail (3D Tiles generation
+	# then falls back to best-effort failure, same as a missing Obj2Tiles binary).
+	if [ -f \$(CURDIR)/build/libktx.so ]; then \\
+		cp \$(CURDIR)/build/libktx.so debian/ddb/usr/bin/libktx.so; \\
 	fi
 
 	# Copy PDAL libraries from vcpkg installed directory

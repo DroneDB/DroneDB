@@ -315,6 +315,18 @@ extern "C"
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBIsBuildPending(const char *ddbPath, bool *isBuildPending);
 
+    /** Get information about pending (deferred) builds, i.e. builds skipped
+     *  because one or more dependencies (companion files or external tools)
+     *  were missing at the time of the attempt. This is a read-only view: it
+     *  does not consume ".pending" marker files or trigger any build.
+     * @param ddbPath path to the source DroneDB database (parent of ".ddb")
+     * @param output pointer to C-string where to store result (JSON array).
+     *               Each element: { "hash": "...", "path": "...",
+     *               "missingDependencies": ["..."], "lastAttempt": 1721612345 }
+     *               (caller must free with DDBFree)
+     * @return DDBERR_NONE on success, an error otherwise */
+    DDB_DLL DDBErr DDBGetPendingBuildInfo(const char *ddbPath, char **output);
+
     /** IsBuildActive
      * @param ddbPath path to the source DroneDB database (parent of ".ddb")
      * @param path Entry path to check if build is active for this entry

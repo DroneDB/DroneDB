@@ -1176,6 +1176,33 @@ DDB_DLL DDBErr DDBIsBuildPending(const char* ddbPath, bool* isBuildPending) {
     DDB_C_END
 }
 
+DDB_DLL DDBErr DDBGetPendingBuildInfo(const char* ddbPath, char** output) {
+    DDB_C_BEGIN
+
+    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
+        throw InvalidArgsException("No directory provided");
+
+    if (output == nullptr)
+        throw InvalidArgsException("Output pointer is null");
+
+    const auto db = ddb::open(std::string(ddbPath), true);
+    const auto pending = ddb::getPendingBuildInfo(db.get());
+
+    auto outJson = json::array();
+    for (const auto& p : pending) {
+        json j;
+        j["hash"] = p.hash;
+        j["path"] = p.path;
+        j["missingDependencies"] = p.missingDependencies;
+        j["lastAttempt"] = p.lastAttempt;
+        outJson.push_back(j);
+    }
+
+    utils::copyToPtr(outJson.dump(), output);
+
+    DDB_C_END
+}
+
 DDB_DLL DDBErr DDBIsBuildActive(const char* ddbPath, const char* path, bool* isBuildActive) {
     DDB_C_BEGIN
 

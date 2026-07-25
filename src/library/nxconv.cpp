@@ -8,6 +8,7 @@
 #include <assimp/scene.h>
 
 #include <algorithm>
+#include <limits>
 #include <assimp/Exporter.hpp>
 #include <assimp/Importer.hpp>
 #include <cctype>
@@ -398,6 +399,55 @@ static void exportWithAssimp(const aiScene* scene,
         LOGD << "MTL: " << outMtlPath;
 }
 
+
+bool getModelInfo(const std::string& inputModel, ModelInfo& info) {
+    // Bounds only: bake node transforms so vertices land in the model's root frame,
+    // and skip triangulation / normals / tangents / material work for speed. Wrapped
+    // in try/catch because indexing must never fail on a malformed model - the caller
+    // simply gets no footprint.
+    try {
+        Assimp::Importer importer;
+        const aiScene* scene = importer.ReadFile(inputModel, aiProcess_PreTransformVertices);
+        if (scene == nullptr || scene->mNumMeshes == 0)
+            return false;
+
+        double minX, minY, minZ, maxX, maxY, maxZ;
+        minX = minY = minZ = std::numeric_limits<double>::max();
+        maxX = maxY = maxZ = std::numeric_limits<double>::lowest();
+        bool any = false;
+
+        for (unsigned m = 0; m < scene->mNumMeshes; ++m) {
+            const aiMesh* mesh = scene->mMeshes[m];
+            if (mesh == nullptr)
+                continue;
+            for (unsigned v = 0; v < mesh->mNumVertices; ++v) {
+                const aiVector3D& p = mesh->mVertices[v];
+                minX = std::min(minX, static_cast<double>(p.x));
+                maxX = std::max(maxX, static_cast<double>(p.x));
+                minY = std::min(minY, static_cast<double>(p.y));
+                maxY = std::max(maxY, static_cast<double>(p.y));
+                minZ = std::min(minZ, static_cast<double>(p.z));
+                maxZ = std::max(maxZ, static_cast<double>(p.z));
+                any = true;
+            }
+        }
+
+        if (!any)
+            return false;
+
+        info.hasBounds = true;
+        info.minX = minX;
+        info.minY = minY;
+        info.minZ = minZ;
+        info.maxX = maxX;
+        info.maxY = maxY;
+        info.maxZ = maxZ;
+        return true;
+    } catch (const std::exception& e) {
+        LOGD << "getModelInfo failed for " << inputModel << ": " << e.what();
+        return false;
+    }
+}
 
 /**
  * @brief Convert glTF/GLB file to OBJ or PLY format

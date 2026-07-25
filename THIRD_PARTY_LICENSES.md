@@ -59,6 +59,79 @@ disk-backed COPC build path is disabled).
 
 ---
 
+## Obj2Tiles (optional OGC 3D Tiles generator)
+
+When present in the distribution archive, the `Obj2Tiles` /
+`Obj2Tiles.exe` binary is the upstream
+[OpenDroneMap/Obj2Tiles](https://github.com/OpenDroneMap/Obj2Tiles)
+tool, a precompiled .NET application redistributed **unmodified**
+(the same precompiled release binaries used by OpenDroneMap).
+
+- **License**: GNU Affero General Public License, version 3 (AGPL-3.0).
+- **Source**: https://github.com/OpenDroneMap/Obj2Tiles
+- **Distributed copy**: the precompiled `Obj2Tiles` / `Obj2Tiles.exe`
+  binary placed next to the DroneDB executable (mirroring the
+  OpenDroneMap packaging); the upstream `LICENSE.md` is preserved
+  alongside it.
+
+### Why AGPL is compatible with MPL-licensed DroneDB
+
+DroneDB invokes `Obj2Tiles` exclusively as a **separate subprocess**
+through [`src/library/obj2tiles_runner.cpp`](src/library/obj2tiles_runner.cpp);
+it is never linked (statically or dynamically) into `ddbcmd`,
+`libddb`, or any other DroneDB-licensed binary. Per the
+[GPL FAQ on aggregation](https://www.gnu.org/licenses/gpl-faq.html#MereAggregation),
+this constitutes "mere aggregation" of independent programs and the
+AGPL terms therefore apply only to the `Obj2Tiles` binary itself, not
+to the rest of DroneDB. DroneDB uses `Obj2Tiles` as an **offline build
+tool** (it is not exposed as, or run as part of, a network service by
+DroneDB), so AGPL's network-use clause is satisfied by providing a
+reference to the upstream source below.
+
+### Obtaining the corresponding source
+
+The `Obj2Tiles` source code is publicly available at the upstream
+repository linked above. The exact release version shipped with each
+DroneDB release is recorded in the packaging scripts of the
+corresponding git tag in this repository.
+
+### Optionality
+
+`Obj2Tiles` is an **optional generator**: when the binary is missing
+from the installation, DroneDB skips OGC 3D Tiles generation for
+`MODEL` entries and still produces the Nexus (`.nxz`) output, so no
+build fails. Distributors who prefer not to redistribute AGPL code may
+safely omit the `Obj2Tiles` / `Obj2Tiles.exe` file from the archive
+without affecting DroneDB's core functionality (only the additive 3D
+Tiles output is disabled).
+
+---
+
+## libktx / KTX-Software (bundled with Obj2Tiles for KTX2 texture compression)
+
+When Obj2Tiles is asked to emit KTX2 textures (`--texture-format Ktx2`,
+used by DroneDB's 3D Tiles build since Obj2Tiles v1.6.0), it loads the
+[KTX-Software](https://github.com/KhronosGroup/KTX-Software) native
+library (`ktx.dll` / `libktx.so` / `libktx.dylib`) via P/Invoke. This
+library is bundled unmodified in the upstream Obj2Tiles release archive
+and is copied next to the `Obj2Tiles` / `Obj2Tiles.exe` binary by
+[`scripts/download-obj2tiles.ps1`](scripts/download-obj2tiles.ps1) /
+[`scripts/download-obj2tiles.sh`](scripts/download-obj2tiles.sh).
+
+- **License**: Apache License, version 2.0.
+- **Source**: https://github.com/KhronosGroup/KTX-Software
+- **Distributed copy**: the precompiled `ktx.dll` / `libktx.so` /
+  `libktx.dylib` binary placed next to the Obj2Tiles executable.
+
+Like Obj2Tiles itself, libktx is invoked only by the separate Obj2Tiles
+subprocess and is never linked into `ddbcmd` / `libddb`; it does not
+affect DroneDB's MPL-2.0 licensing. It is optional: when absent,
+Obj2Tiles fails to honor `--texture-format Ktx2`, which DroneDB treats
+as a best-effort 3D Tiles generation failure (same as a missing
+Obj2Tiles binary), while Nexus output is unaffected.
+
+---
+
 ## libnexus / Nexus
 
 The `libnxs.so` / `nxs.dll` library shipped with DroneDB is a fork of

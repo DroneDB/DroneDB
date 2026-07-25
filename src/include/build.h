@@ -7,6 +7,10 @@
 #include "ddb_export.h"
 #include "dbops.h"
 
+#include <ctime>
+#include <string>
+#include <vector>
+
 namespace ddb
 {
 
@@ -17,6 +21,36 @@ namespace ddb
 
     DDB_DLL void buildPending(Database *db, const std::string &outputPath, bool force = false);
     DDB_DLL bool isBuildPending(Database *db);
+
+    /**
+     * @brief Information about a single deferred build, read from a ".pending"
+     * marker file. Missing dependencies are either companion/sidecar file
+     * paths (e.g. a ".shp" waiting on its ".dbf") or external tool names
+     * (e.g. "Obj2Tiles", "build-lod").
+     */
+    struct PendingBuildInfo
+    {
+        /// Entry hash (matches the ".pending" file stem)
+        std::string hash;
+        /// Entry path resolved from the database ("" if the entry no longer exists)
+        std::string path;
+        /// Dependency names still missing at the time of the last attempt
+        std::vector<std::string> missingDependencies;
+        /// Unix timestamp of the last build attempt (0 if unknown/malformed)
+        time_t lastAttempt = 0;
+    };
+
+    /**
+     * @brief Read-only view over all pending (deferred) builds in a database.
+     * Unlike buildPending(), this does not consume ".pending" files, does not
+     * check dependency availability, and never attempts a build. Entries
+     * whose hash no longer matches any indexed entry are skipped (they are
+     * garbage collected by cleanupBuild()).
+     * @param db database (already opened)
+     * @return list of pending build info, one per ".pending" file with a
+     *         matching indexed entry
+     */
+    DDB_DLL std::vector<PendingBuildInfo> getPendingBuildInfo(Database *db);
 
     DDB_DLL bool isBuildActive(Database *db, const std::string &path);
 

@@ -7,11 +7,59 @@
 #include "logger.h"
 #include "exceptions.h"
 
+#include <algorithm>
+#include <system_error>
+
 namespace ddb::zip
 {
 
 #define COPY_BUF_SIZE 4096
 #define ERR_SIZE 256
+
+    // Rejects ZIP entry names that would escape the extraction directory (Zip-Slip):
+    // absolute paths, Windows drive specifiers, and parent-directory traversal. This
+    // guards every caller of _extractAll (registry pulls and .3tz builds) against
+    // malicious archives, as required by the 3D Tiles archive security considerations.
+    static void ensureSafeZipEntry(const std::string &outdir, const char *entryName)
+    {
+        std::string name(entryName == nullptr ? "" : entryName);
+        std::replace(name.begin(), name.end(), '\\', '/');
+
+        if (!name.empty() && name[0] == '/')
+            throw ZipException("Unsafe absolute path in archive entry: " + name);
+        if (name.size() >= 2 && name[1] == ':')
+            throw ZipException("Unsafe drive path in archive entry: " + name);
+
+        // Reject any '..' path segment.
+        size_t start = 0;
+        while (true)
+        {
+            const size_t slash = name.find('/', start);
+            const std::string seg =
+                name.substr(start, slash == std::string::npos ? std::string::npos : slash - start);
+            if (seg == "..")
+                throw ZipException("Unsafe path traversal in archive entry: " + name);
+            if (slash == std::string::npos)
+                break;
+            start = slash + 1;
+        }
+
+        // Defense-in-depth: verify the resolved target stays inside outdir.
+        std::error_code baseEc, targetEc;
+        const fs::path base = fs::weakly_canonical(fs::path(outdir), baseEc);
+        const fs::path target =
+            fs::weakly_canonical(fs::path(outdir) / fs::path(name), targetEc);
+        if (!baseEc && !targetEc)
+        {
+            std::error_code relEc;
+            const fs::path rel = fs::relative(target, base, relEc);
+            // A path that escapes base resolves to a relative path whose first
+            // component is "..". Comparing fs::path components is portable across
+            // the narrow (POSIX) / wide (Windows) native string types.
+            if (relEc || rel.empty() || *rel.begin() == fs::path(".."))
+                throw ZipException("Archive entry escapes extraction directory: " + name);
+        }
+    }
 
     void extractAllFromBuffer(const void *zipBuffer, size_t length, const std::string &outdir, std::ostream *progressOut)
     {
@@ -75,6 +123,9 @@ namespace ddb::zip
                     LOGD << "zip: skipping entry at index " << eId << "with invalid name";
                     continue;
                 }
+
+                // Reject unsafe entry names (Zip-Slip) before touching the filesystem.
+                ensureSafeZipEntry(outdir, fStat.name);
 
                 // Directory
                 fs::path entryPath = fs::path(outdir) / fs::path(fStat.name);

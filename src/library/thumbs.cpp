@@ -1218,6 +1218,11 @@ static void rasterizeSplatPreview(const std::vector<float>& positions,
         return static_cast<uint8_t>(std::lround(std::min(std::max(v, 0.0), 1.0) * 255.0));
     };
 
+    // Point radius scales with thumbnail size so larger previews keep visual density.
+    // At 256 px the radius is 1; at 1024 px it is 4. Clamped to [1, 8].
+    const int radius = std::max(1, std::min(8, static_cast<int>(std::lround(static_cast<double>(tileSize) / 256.0))));
+    const int radiusSq = radius * radius;
+
     size_t rendered = 0;
     for (size_t i = 0; i < n; ++i) {
         // Opacities are already activated; skip near-transparent splats.
@@ -1229,30 +1234,42 @@ static void rasterizeSplatPreview(const std::vector<float>& positions,
         const double v = static_cast<double>(positions[i * 3 + vAxis]);
         const double d = static_cast<double>(positions[i * 3 + depthAxis]);
 
-        int px = static_cast<int>((u - mn[uAxis]) * scale + offX);
-        int py = static_cast<int>((v - mn[vAxis]) * scale + offY);
-        if (px < 0 || px >= tileSize || py < 0 || py >= tileSize)
-            continue;
+        int cx = static_cast<int>((u - mn[uAxis]) * scale + offX);
+        int cy = static_cast<int>((v - mn[vAxis]) * scale + offY);
         // Flip vertically so "up" in world space points up in the image.
-        py = tileSize - 1 - py;
-        const size_t idx = static_cast<size_t>(py) * static_cast<size_t>(tileSize) +
-                           static_cast<size_t>(px);
-
-        if (static_cast<float>(d) <= zBuffer[idx])
-            continue;
-        zBuffer[idx] = static_cast<float>(d);
+        cy = tileSize - 1 - cy;
 
         double rgb[3] = {0.5, 0.5, 0.5};
         if (colors.size() >= (i + 1) * 3) {
             for (int c = 0; c < 3; ++c)
                 rgb[c] = static_cast<double>(colors[i * 3 + c]);
         }
+        const uint8_t br = toByte(rgb[0]);
+        const uint8_t bg = toByte(rgb[1]);
+        const uint8_t bb = toByte(rgb[2]);
+        const float dz = static_cast<float>(d);
 
-        buffer[0 * wSize + idx] = toByte(rgb[0]);
-        buffer[1 * wSize + idx] = toByte(rgb[1]);
-        buffer[2 * wSize + idx] = toByte(rgb[2]);
-        alphaBuffer[idx] = 255;
-        ++rendered;
+        // Draw a filled circle, respecting the z-buffer.
+        for (int dy = -radius; dy <= radius; ++dy) {
+            for (int dx = -radius; dx <= radius; ++dx) {
+                if (dx * dx + dy * dy > radiusSq)
+                    continue;
+                const int px = cx + dx;
+                const int py = cy + dy;
+                if (px < 0 || px >= tileSize || py < 0 || py >= tileSize)
+                    continue;
+                const size_t idx = static_cast<size_t>(py) * static_cast<size_t>(tileSize) +
+                                   static_cast<size_t>(px);
+                if (dz <= zBuffer[idx])
+                    continue;
+                zBuffer[idx] = dz;
+                buffer[0 * wSize + idx] = br;
+                buffer[1 * wSize + idx] = bg;
+                buffer[2 * wSize + idx] = bb;
+                alphaBuffer[idx] = 255;
+                ++rendered;
+            }
+        }
     }
 
     if (rendered == 0)
@@ -1299,7 +1316,7 @@ void generateSplatThumb(const fs::path& spzPath,
                           spzPath.string(), outBuffer, outBufferSize);
 }
 
-// Render an on-demand preview from a Spark RAD level-of-detail file. Only the coarsest chunk is
+// Render an on-demand preview from a Spark RAD level-of-detail file. The two coarsest chunks are
 // decoded (a low-density view of the whole scene), so this stays cheap enough to run per request -
 // the same on-the-fly model used for COPC point clouds. RAD colours are already display RGB and
 // opacities already activated, so no conversion is required.
@@ -1310,7 +1327,7 @@ void generateSplatThumbFromRad(const fs::path& radPath,
                                int* outBufferSize) {
     RadCoarseSplats splats;
     try {
-        splats = readRadCoarseSplats(radPath, /*maxChunks=*/1);
+        splats = readRadCoarseSplats(radPath, /*maxChunks=*/2);
     } catch (const std::exception& e) {
         throw AppException(std::string("Cannot decode .rad for thumbnail: ") + e.what());
     }

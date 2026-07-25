@@ -23,6 +23,7 @@
 #include "exceptions.h"
 #include "gsplat.h"
 #include "mio.h"
+#include "mzip.h"
 #include "pointcloud.h"
 #include "threadlock.h"
 #include "vector.h"
@@ -55,6 +56,9 @@ bool isBuildableInternal(const Entry& e, std::string& subfolder) {
         return true;
     } else if (e.type == EntryType::GaussianSplat) {
         subfolder = "gsplat";
+        return true;
+    } else if (e.type == EntryType::Tiles3D) {
+        subfolder = "3dtiles";
         return true;
     }
 
@@ -148,6 +152,12 @@ static bool directoryHasNonEmptyContent(const fs::path& dir) {
 //   - Others:    the type's output subfolder exists and contains at least one
 //                non-empty file (covers copc/, cog/, nxs/). A directory-scan
 //                is used because the exact output filenames vary by input.
+//
+// Model note: a Model build also co-produces an additive OGC 3D Tiles tileset in
+// a sibling 3dtiles/ folder (see buildInternal). That artifact is intentionally
+// NOT part of completeness: it is best-effort (Obj2Tiles may be absent, or may
+// fail on a specific mesh), so keying completeness on nxs/ keeps builds from
+// looping. A forced rebuild regenerates 3dtiles/ alongside nxs/.
 static bool isBuildOutputComplete(const fs::path& baseOutputPath,
                                   const Entry& e,
                                   const std::string& subfolder) {
@@ -157,6 +167,9 @@ static bool isBuildOutputComplete(const fs::path& baseOutputPath,
 
     if (e.type == EntryType::GaussianSplat)
         return fileExistsAndNonEmpty(baseOutputPath / "gsplat" / "model.rad");
+
+    if (e.type == EntryType::Tiles3D)
+        return fileExistsAndNonEmpty(baseOutputPath / "3dtiles" / "tileset.json");
 
     return directoryHasNonEmptyContent(baseOutputPath / subfolder);
 }
@@ -281,6 +294,20 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
         } else if (e.type == EntryType::Model) {
             buildNexus(relativePath, (fs::path(tempFolder) / "model.nxz").string());
             built = true;
+
+            // Additive, best-effort OGC 3D Tiles output for the unified Giro3D viewer.
+            // Written directly to a sibling 3dtiles/ folder (buildModel3DTiles performs
+            // its own atomic temp+rename), exactly as buildVector co-produces vec/+mvt/.
+            // Non-blocking by design: if Obj2Tiles is unavailable or fails on a given
+            // mesh, the Nexus output above is still published and build completeness
+            // stays keyed on nxs/ (see isBuildOutputComplete), so the build never loops.
+            try {
+                buildModel3DTiles(relativePath, (baseOutputPath / "3dtiles").string(), true);
+            } catch (const std::exception& tilesEx) {
+                LOGD << "3D Tiles generation skipped for " << e.path << ": " << tilesEx.what();
+            } catch (...) {
+                LOGD << "3D Tiles generation skipped for " << e.path << " (unknown error)";
+            }
         } else if (e.type == EntryType::Vector) {
             // buildVector manages its own atomic write to baseOutputPath/vec
             // and baseOutputPath/mvt; do NOT use the standard tempFolder rename.
@@ -293,6 +320,15 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
             // Runs build-lod to produce model.rad + bounds.json (+ georef.json when known).
             // Throws BuildDepMissingException if build-lod is unavailable.
             buildGsplat(relativePath, tempFolder);
+            built = true;
+        } else if (e.type == EntryType::Tiles3D) {
+            // Extracts the .3tz (ZIP OGC 3D Tiles) into the 3dtiles/ subfolder. Extraction
+            // is hardened against Zip-Slip / absolute paths in mzip::_extractAll. The
+            // archive is only valid when tileset.json is present at its root; the temp
+            // folder is then renamed onto build/{hash}/3dtiles/ by the shared block below.
+            zip::extractAll(relativePath, tempFolder);
+            if (!fileExistsAndNonEmpty(fs::path(tempFolder) / "tileset.json"))
+                throw AppException("Invalid .3tz archive: tileset.json not found at root");
             built = true;
         }
 
@@ -351,12 +387,13 @@ void buildAll(Database* db, const std::string& outputPath, bool force) {
     // List all buildable files in DB
     auto q = db->query(
         "SELECT path, hash, type, properties, mtime, size, depth FROM entries WHERE type = ? OR "
-        "type = ? OR type = ? OR type = ? OR type = ?");
+        "type = ? OR type = ? OR type = ? OR type = ? OR type = ?");
     q->bind(1, PointCloud);
     q->bind(2, GeoRaster);
     q->bind(3, Model);
     q->bind(4, Vector);
     q->bind(5, GaussianSplat);
+    q->bind(6, Tiles3D);
 
     while (q->fetch()) {
         Entry e(q->getText(0),
@@ -388,6 +425,68 @@ void build(Database* db, const std::string& path, const std::string& outputPath,
     buildInternal(db, e, outputPath, force);
 }
 
+namespace {
+
+// Parsed contents of a ".pending" marker file created by buildInternal() when
+// a build is deferred due to missing dependencies (see BuildDepMissingException
+// handling above). Format: first line is a Unix timestamp of the last
+// attempt, following lines are missing dependency names (one per line).
+struct PendingFileData {
+    time_t lastAttempt = 0;
+    std::vector<std::string> missingDependencies;
+};
+
+// Reads and parses a ".pending" file without consuming it. Malformed or
+// unreadable timestamps are tolerated (lastAttempt stays 0) to preserve the
+// historical, lenient behavior of buildPending().
+PendingFileData parsePendingFile(const fs::path& pendingFilePath) {
+    PendingFileData data;
+
+    std::ifstream pendingFile(pendingFilePath.string());
+    if (!pendingFile)
+        return data;
+
+    std::string line;
+    // First line is the timestamp
+    std::getline(pendingFile, line);
+    try {
+        // Validate timestamp format before conversion.
+        // std::isdigit requires a value representable as unsigned char: a plain (signed)
+        // char holding a non-ASCII byte from a corrupted .pending file would be UB.
+        for (char c : line)
+            if (!std::isdigit(static_cast<unsigned char>(c)) && c != '-' && c != '+')
+                throw std::invalid_argument("Invalid timestamp format: " + line);
+
+        data.lastAttempt = std::stoll(line);
+
+        // Basic validation - timestamp should be reasonable
+        const time_t currentTime = utils::currentUnixTimestamp();
+        if (data.lastAttempt > currentTime)
+            LOGW << "Timestamp in pending file is in the future: " << line;
+        if (data.lastAttempt < 0)
+            throw std::invalid_argument("Negative timestamp");
+    } catch (const std::invalid_argument& e) {
+        LOGD << "Invalid timestamp format in pending file: " << e.what();
+        data.lastAttempt = 0;
+    } catch (const std::out_of_range& e) {
+        LOGD << "Timestamp out of range in pending file: " << e.what();
+        data.lastAttempt = 0;
+    } catch (...) {
+        LOGD << "Unknown error parsing timestamp in pending file";
+        data.lastAttempt = 0;
+    }
+
+    // Read the rest as dependencies
+    while (std::getline(pendingFile, line)) {
+        if (!line.empty())
+            data.missingDependencies.push_back(line);
+    }
+
+    return data;
+}
+
+}  // namespace
+
 void buildPending(Database* db, const std::string& outputPath, bool force) {
     auto buildDir = db->buildDirectory();
     if (!fs::exists(buildDir))
@@ -400,114 +499,78 @@ void buildPending(Database* db, const std::string& outputPath, bool force) {
     for (auto i = fs::recursive_directory_iterator(buildDir);
          i != fs::recursive_directory_iterator();
          ++i) {
-        if (i->path().extension() == ".pending") {
-            auto hash = i->path().filename().replace_extension("").string();
+        if (i->path().extension() != ".pending")
+            continue;
 
-            // Check if file still exists in our index
-            auto q = db->query(
-                "SELECT path, hash, type, properties, mtime, size, depth FROM entries WHERE hash = "
-                "?");
-            q->bind(1, hash);
-            bool found = false;
+        const auto hash = i->path().filename().replace_extension("").string();
+        const PendingFileData pending = parsePendingFile(i->path());
 
-            // Read the pending file to get missing dependencies
-            std::vector<std::string> missingDependencies;
-            std::ifstream pendingFile(i->path().string());
-            if (pendingFile) {
-                std::string line;
-                // First line is the timestamp                    std::getline(pendingFile, line);
-                time_t lastAttempt = 0;
-                try {
-                    // Validate timestamp format before conversion
-                    for (char c : line)
-                        if (!std::isdigit(c) && c != '-' && c != '+')
-                            throw std::invalid_argument("Invalid timestamp format: " + line);
+        // Implement exponential backoff for retry attempts
+        const time_t currentTime = utils::currentUnixTimestamp();
+        const time_t timeSinceLastAttempt = currentTime - pending.lastAttempt;
 
-                    lastAttempt = std::stoll(line);
-
-                    // Basic validation - timestamp should be reasonable
-                    time_t currentTime = utils::currentUnixTimestamp();
-                    if (lastAttempt > currentTime)
-                        LOGW << "Timestamp in pending file is in the future: " << line;
-                    if (lastAttempt < 0)
-                        throw std::invalid_argument("Negative timestamp");
-                } catch (const std::invalid_argument& e) {
-                    LOGD << "Invalid timestamp format in pending file: " << e.what();
-                } catch (const std::out_of_range& e) {
-                    LOGD << "Timestamp out of range in pending file: " << e.what();
-                } catch (...) {
-                    LOGD << "Unknown error parsing timestamp in pending file";
-                }
-
-                // Implement exponential backoff for retry attempts
-                time_t currentTime = utils::currentUnixTimestamp();
-                time_t timeSinceLastAttempt = currentTime - lastAttempt;
-
-                // Check pending file age to implement progressive backoff
-                // If recent failure (<5 min), wait longer before retry unless forced
-                if (timeSinceLastAttempt < 300 && !force) {  // 5 minutes
-                    LOGD << "Skipping build attempt for hash " << hash
-                         << " (too recent failure: " << timeSinceLastAttempt << " seconds ago)";
-                    continue;
-                }
-
-                // Read the rest as dependencies
-                while (std::getline(pendingFile, line)) {
-                    if (!line.empty()) {
-                        missingDependencies.push_back(line);
-                    }
-                }
-                pendingFile.close();
-            }
-
-            // Check if all dependencies are now available
-            bool allDependenciesAvailable = true;
-            for (const auto& dep : missingDependencies) {
-                // Look for dependency in database
-                auto depQuery = db->query("SELECT COUNT(*) FROM entries WHERE path = ?");
-                depQuery->bind(1, dep);
-                if (depQuery->fetch() && depQuery->getInt(0) == 0) {
-                    // Dependency still not available
-                    allDependenciesAvailable = false;
-                    LOGD << "Build still pending for hash " << hash << ": dependency " << dep
-                         << " is still missing";
-                    break;
-                }
-            }
-
-            // Only proceed with the build if all dependencies are available or if forced
-            if (!allDependenciesAvailable && !force) {
-                LOGD << "Skipping build attempt for hash " << hash
-                     << " due to missing dependencies";
-                continue;
-            }
-
-            while (q->fetch()) {
-                found = true;
-                Entry e(q->getText(0),
-                        q->getText(1),
-                        q->getInt(2),
-                        q->getText(3),
-                        q->getInt64(4),
-                        q->getInt64(5),
-                        q->getInt(6));
-
-                // Only remove the pending file if we're going to attempt the build
-                io::assureIsRemoved(i->path());
-
-                // Call build
-                try {
-                    LOGD << "Attempting build for " << e.path
-                         << " (all dependencies now available)";
-                    buildInternal(db, e, outPath, force);
-                } catch (const AppException& err) {
-                    LOGD << "Cannot build " << e.path << ": " << err.what();
-                }
-            }
-
-            if (!found)
-                io::assureIsRemoved(i->path());
+        // Check pending file age to implement progressive backoff
+        // If recent failure (<5 min), wait longer before retry unless forced
+        if (timeSinceLastAttempt < 300 && !force) {  // 5 minutes
+            LOGD << "Skipping build attempt for hash " << hash
+                 << " (too recent failure: " << timeSinceLastAttempt << " seconds ago)";
+            continue;
         }
+
+        // Check if all dependencies are now available
+        bool allDependenciesAvailable = true;
+        for (const auto& dep : pending.missingDependencies) {
+            // Look for dependency in database
+            auto depQuery = db->query("SELECT COUNT(*) FROM entries WHERE path = ?");
+            depQuery->bind(1, dep);
+            if (depQuery->fetch() && depQuery->getInt(0) == 0) {
+                // Dependency still not available
+                allDependenciesAvailable = false;
+                LOGD << "Build still pending for hash " << hash << ": dependency " << dep
+                     << " is still missing";
+                break;
+            }
+        }
+
+        // Only proceed with the build if all dependencies are available or if forced
+        if (!allDependenciesAvailable && !force) {
+            LOGD << "Skipping build attempt for hash " << hash
+                 << " due to missing dependencies";
+            continue;
+        }
+
+        // Check if file still exists in our index
+        auto q = db->query(
+            "SELECT path, hash, type, properties, mtime, size, depth FROM entries WHERE hash = "
+            "?");
+        q->bind(1, hash);
+        bool found = false;
+
+        while (q->fetch()) {
+            found = true;
+            Entry e(q->getText(0),
+                    q->getText(1),
+                    q->getInt(2),
+                    q->getText(3),
+                    q->getInt64(4),
+                    q->getInt64(5),
+                    q->getInt(6));
+
+            // Only remove the pending file if we're going to attempt the build
+            io::assureIsRemoved(i->path());
+
+            // Call build
+            try {
+                LOGD << "Attempting build for " << e.path
+                     << " (all dependencies now available)";
+                buildInternal(db, e, outPath, force);
+            } catch (const AppException& err) {
+                LOGD << "Cannot build " << e.path << ": " << err.what();
+            }
+        }
+
+        if (!found)
+            io::assureIsRemoved(i->path());
     }
 }
 
@@ -525,6 +588,40 @@ bool isBuildPending(Database* db) {
 
     return false;
 }
+
+std::vector<PendingBuildInfo> getPendingBuildInfo(Database* db) {
+    std::vector<PendingBuildInfo> result;
+
+    auto buildDir = db->buildDirectory();
+    if (!fs::exists(buildDir))
+        return result;
+
+    for (auto i = fs::recursive_directory_iterator(buildDir);
+         i != fs::recursive_directory_iterator();
+         ++i) {
+        if (i->path().extension() != ".pending")
+            continue;
+
+        const auto hash = i->path().filename().replace_extension("").string();
+        const PendingFileData pending = parsePendingFile(i->path());
+
+        auto q = db->query("SELECT path FROM entries WHERE hash = ?");
+        q->bind(1, hash);
+        if (!q->fetch())
+            continue;  // entry no longer indexed; garbage collected by cleanupBuild()
+
+        PendingBuildInfo info;
+        info.hash = hash;
+        info.path = q->getText(0);
+        info.missingDependencies = pending.missingDependencies;
+        info.lastAttempt = pending.lastAttempt;
+
+        result.push_back(std::move(info));
+    }
+
+    return result;
+}
+
 
 // Minimum free disk space (in MB) required on the build scratch filesystem
 // before a build is started. Configurable via the DDB_MIN_FREE_DISK_MB

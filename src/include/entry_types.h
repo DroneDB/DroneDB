@@ -29,7 +29,8 @@ namespace ddb
         Panorama = 12,
         GeoPanorama = 13,
         Vector = 14,
-        GaussianSplat = 15
+        GaussianSplat = 15,
+        Tiles3D = 16
     };
 
     DDB_DLL std::string typeToHuman(EntryType t);
