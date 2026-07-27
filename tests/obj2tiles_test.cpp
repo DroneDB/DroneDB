@@ -221,6 +221,92 @@ TEST(obj2tiles, getModelInfoMissingReturnsFalse) {
     EXPECT_FALSE(getModelInfo(ta.getPath("does_not_exist.obj").string(), info));
 }
 
+// ---------------------------------------------------------------------------
+// computeObj2TilesOpts heuristic: verify all threshold bands
+// ---------------------------------------------------------------------------
+
+// Tiny band: < 10K faces → lods=1, divisions=0, octree=false (depth=0)
+TEST(obj2tiles, computeOptsTiny) {
+    ModelInfo info;
+    info.faceCount = 9999;
+    auto opts = computeObj2TilesOpts(info);
+    EXPECT_EQ(opts.lods, 1);
+    EXPECT_EQ(opts.divisions, 0);
+    EXPECT_FALSE(opts.octree);
+    EXPECT_EQ(opts.textureFormat, "Ktx2");
+    EXPECT_EQ(opts.ktx2Quality, 192);
+    EXPECT_EQ(opts.splitStrategy, "VertexMedian");
+}
+
+// Small band: 10K–50K → lods=2, divisions=0, octree=true (depth=1)
+TEST(obj2tiles, computeOptsSmall) {
+    ModelInfo info;
+    info.faceCount = 30000;
+    auto opts = computeObj2TilesOpts(info);
+    EXPECT_EQ(opts.lods, 2);
+    EXPECT_EQ(opts.divisions, 0);
+    EXPECT_TRUE(opts.octree);
+}
+
+// Medium band: 50K–200K → lods=2, divisions=1, octree=true (depth=2)
+TEST(obj2tiles, computeOptsMedium) {
+    ModelInfo info;
+    info.faceCount = 100000;
+    auto opts = computeObj2TilesOpts(info);
+    EXPECT_EQ(opts.lods, 2);
+    EXPECT_EQ(opts.divisions, 1);
+    EXPECT_TRUE(opts.octree);
+}
+
+// Large band: 200K–750K → lods=3, divisions=1, octree=true (depth=3)
+TEST(obj2tiles, computeOptsLarge) {
+    ModelInfo info;
+    info.faceCount = 500000;
+    auto opts = computeObj2TilesOpts(info);
+    EXPECT_EQ(opts.lods, 3);
+    EXPECT_EQ(opts.divisions, 1);
+    EXPECT_TRUE(opts.octree);
+}
+
+// XL band: 750K–3M → lods=3, divisions=2, octree=true (depth=4)
+TEST(obj2tiles, computeOptsXL) {
+    ModelInfo info;
+    info.faceCount = 1500000u;
+    auto opts = computeObj2TilesOpts(info);
+    EXPECT_EQ(opts.lods, 3);
+    EXPECT_EQ(opts.divisions, 2);
+    EXPECT_TRUE(opts.octree);
+}
+
+// XXL band: 3M–12M → lods=4, divisions=2, octree=true (depth=5)
+TEST(obj2tiles, computeOptsXXL) {
+    ModelInfo info;
+    info.faceCount = 6000000u;
+    auto opts = computeObj2TilesOpts(info);
+    EXPECT_EQ(opts.lods, 4);
+    EXPECT_EQ(opts.divisions, 2);
+    EXPECT_TRUE(opts.octree);
+}
+
+// Boundary: exactly 10K faces → Small band (not Tiny)
+TEST(obj2tiles, computeOptsBoundary10K) {
+    ModelInfo info;
+    info.faceCount = 10000;
+    auto opts = computeObj2TilesOpts(info);
+    EXPECT_EQ(opts.lods, 2);
+    EXPECT_EQ(opts.divisions, 0);
+    EXPECT_TRUE(opts.octree);
+}
+
+// Cap: even with astronomically large face count, depth never exceeds MAX_TILE_DEPTH (6)
+TEST(obj2tiles, computeOptsCapNeverExceedsMaxDepth) {
+    ModelInfo info;
+    info.faceCount = UINT64_MAX;
+    auto opts = computeObj2TilesOpts(info);
+    int depth = opts.octree ? (opts.lods + opts.divisions - 1) : opts.divisions;
+    EXPECT_LE(depth, 6);
+}
+
 // End-to-end georeferenced generation: a sidecar must yield a non-identity ECEF
 // transform in the tileset. Disabled on CI (needs the Obj2Tiles binary).
 MANUAL_TEST(obj2tiles, endToEndGeoreferenced) {

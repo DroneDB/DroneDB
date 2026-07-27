@@ -620,4 +620,82 @@ std::vector<std::string> getGltfDependencies(const std::string& gltf) {
     }
 }
 
+/**
+ * @brief Compute Obj2Tiles parameters based on model face count.
+ *
+ * Threshold bands (from spec §4):
+ * - Tiny:    < 10K faces  → lods=1, divisions=0, octree=false  (depth=0,   ≤ 1 tile)
+ * - Small:   10K–50K     → lods=2, divisions=0, octree=true   (depth=1,   ≤ 4 tiles)
+ * - Medium:  50K–200K    → lods=2, divisions=1, octree=true   (depth=2,  ≤ 16 tiles)
+ * - Large:   200K–750K   → lods=3, divisions=1, octree=true   (depth=3,  ≤ 64 tiles)
+ * - XL:      750K–3M     → lods=3, divisions=2, octree=true   (depth=4, ≤ 256 tiles)
+ * - XXL:     3M–12M      → lods=4, divisions=2, octree=true   (depth=5, ≤ 1024 tiles)
+ * - Massive: > 12M       → lods=4, divisions=3, octree=true   (depth=6, ≤ 4096 tiles, hard cap)
+ */
+const int MAX_TILE_DEPTH = 6;
+
+obj2tiles::Obj2TilesOptions computeObj2TilesOpts(const ModelInfo& info) {
+    obj2tiles::Obj2TilesOptions opts;
+
+    uint64_t faces = info.faceCount;
+    bool octree = true;
+    int lods = 3;
+    int divisions = 2;
+
+    if (faces < 10000) {
+        // Tiny: < 10K faces
+        lods = 1;
+        divisions = 0;
+        octree = false;
+    } else if (faces < 50000) {
+        // Small: 10K–50K
+        lods = 2;
+        divisions = 0;
+    } else if (faces < 200000) {
+        // Medium: 50K–200K
+        lods = 2;
+        divisions = 1;
+    } else if (faces < 750000) {
+        // Large: 200K–750K
+        lods = 3;
+        divisions = 1;
+    } else if (faces < 3000000) {
+        // XL: 750K–3M
+        lods = 3;
+        divisions = 2;
+    } else if (faces < 12000000) {
+        // XXL: 3M–12M
+        lods = 4;
+        divisions = 2;
+    } else {
+        // Massive: > 12M (hard cap at depth 6)
+        lods = 4;
+        divisions = 3;
+    }
+
+    // Clamp: ensure depth never exceeds MAX_TILE_DEPTH
+    int depth = octree ? (lods + divisions - 1) : divisions;
+    if (octree && depth > MAX_TILE_DEPTH) {
+        // Reduce lods first (preserves finer base grid, coarser LOD hierarchy)
+        lods = MAX_TILE_DEPTH - divisions + 1;
+        if (lods < 1) lods = 1;
+    }
+
+    opts.lods = lods;
+    opts.divisions = divisions;
+    opts.octree = octree;
+
+    // Preserve texture defaults (same as current hardcoded values)
+    opts.textureFormat = "Ktx2";
+    opts.ktx2Quality = 192;
+    opts.splitStrategy = "VertexMedian";
+
+    LOGD << "computeObj2TilesOpts: faces=" << faces
+         << " → lods=" << lods << ", divisions=" << divisions
+         << ", octree=" << (octree ? "true" : "false")
+         << ", depth=" << (octree ? (lods + divisions - 1) : divisions);
+
+    return opts;
+}
+
 }  // namespace ddb

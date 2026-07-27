@@ -401,13 +401,13 @@ static void exportWithAssimp(const aiScene* scene,
 
 
 bool getModelInfo(const std::string& inputModel, ModelInfo& info) {
-    // Bounds only: bake node transforms so vertices land in the model's root frame,
-    // and skip triangulation / normals / tangents / material work for speed. Wrapped
-    // in try/catch because indexing must never fail on a malformed model - the caller
+    // Bounds + face count: bake node transforms so vertices land in the model's root frame,
+    // triangulate for accurate face counts; skip normals / tangents / material work for speed.
+    // Wrapped in try/catch because indexing must never fail on a malformed model - the caller
     // simply gets no footprint.
     try {
         Assimp::Importer importer;
-        const aiScene* scene = importer.ReadFile(inputModel, aiProcess_PreTransformVertices);
+        const aiScene* scene = importer.ReadFile(inputModel, aiProcess_PreTransformVertices | aiProcess_Triangulate);
         if (scene == nullptr || scene->mNumMeshes == 0)
             return false;
 
@@ -430,6 +430,8 @@ bool getModelInfo(const std::string& inputModel, ModelInfo& info) {
                 maxZ = std::max(maxZ, static_cast<double>(p.z));
                 any = true;
             }
+            // Triangulate flag ensures mNumFaces is triangle count
+            info.faceCount += mesh->mNumFaces;
         }
 
         if (!any)
