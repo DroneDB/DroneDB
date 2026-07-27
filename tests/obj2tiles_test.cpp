@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include <cmath>
+#include <cstdint>
 #include <fstream>
 
 #include "3d.h"
@@ -319,6 +320,9 @@ TEST(obj2tiles, forceDefaultsEnvVarParsing) {
         return env && env[0] != '0' && env[0] != '\0';
     };
 
+    // Save pre-existing value to restore afterwards
+    const char* saved = std::getenv("DDB_OBJ2TILES_FORCE_DEFAULTS");
+
     // Default: not set → false
     DDB_UNSETENV("DDB_OBJ2TILES_FORCE_DEFAULTS");
     EXPECT_FALSE(checkEnv());
@@ -339,9 +343,16 @@ TEST(obj2tiles, forceDefaultsEnvVarParsing) {
     DDB_SETENV("DDB_OBJ2TILES_FORCE_DEFAULTS", "");
     EXPECT_FALSE(checkEnv());
 
-    // Clean up
-    DDB_UNSETENV("DDB_OBJ2TILES_FORCE_DEFAULTS");
-    EXPECT_FALSE(checkEnv());
+    // Restore pre-existing value
+    if (saved) {
+        if (saved[0] == '\0') {
+            DDB_UNSETENV("DDB_OBJ2TILES_FORCE_DEFAULTS");
+        } else {
+            DDB_SETENV("DDB_OBJ2TILES_FORCE_DEFAULTS", saved);
+        }
+    } else {
+        DDB_UNSETENV("DDB_OBJ2TILES_FORCE_DEFAULTS");
+    }
 }
 
 // When force-defaults is active, a model that would normally get "Tiny" params

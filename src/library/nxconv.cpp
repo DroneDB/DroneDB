@@ -415,6 +415,7 @@ bool getModelInfo(const std::string& inputModel, ModelInfo& info) {
         minX = minY = minZ = std::numeric_limits<double>::max();
         maxX = maxY = maxZ = std::numeric_limits<double>::lowest();
         bool any = false;
+        uint64_t localFaceCount = 0;
 
         for (unsigned m = 0; m < scene->mNumMeshes; ++m) {
             const aiMesh* mesh = scene->mMeshes[m];
@@ -431,7 +432,7 @@ bool getModelInfo(const std::string& inputModel, ModelInfo& info) {
                 any = true;
             }
             // Triangulate flag ensures mNumFaces is triangle count
-            info.faceCount += mesh->mNumFaces;
+            localFaceCount += mesh->mNumFaces;
         }
 
         if (!any)
@@ -444,6 +445,7 @@ bool getModelInfo(const std::string& inputModel, ModelInfo& info) {
         info.maxX = maxX;
         info.maxY = maxY;
         info.maxZ = maxZ;
+        info.faceCount = localFaceCount;
         return true;
     } catch (const std::exception& e) {
         LOGD << "getModelInfo failed for " << inputModel << ": " << e.what();

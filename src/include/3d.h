@@ -4,6 +4,7 @@
 #ifndef _3D_H
 #define _3D_H
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include "ddb_export.h"
