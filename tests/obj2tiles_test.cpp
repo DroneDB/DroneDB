@@ -258,23 +258,25 @@ TEST(obj2tiles, computeOptsMedium) {
     EXPECT_TRUE(opts.octree);
 }
 
-// Large band: 200K–750K → lods=3, divisions=1, octree=true (depth=3)
+// Large band: 200K–750K → lods=3, divisions=2, octree=true (depth=4)
+// (divisions bumped 1→2 vs. original bands: favors base-grid granularity over LOD depth)
 TEST(obj2tiles, computeOptsLarge) {
     ModelInfo info;
     info.faceCount = 500000;
     auto opts = computeObj2TilesOpts(info);
     EXPECT_EQ(opts.lods, 3);
-    EXPECT_EQ(opts.divisions, 1);
+    EXPECT_EQ(opts.divisions, 2);
     EXPECT_TRUE(opts.octree);
 }
 
-// XL band: 750K–3M → lods=3, divisions=2, octree=true (depth=4)
+// XL band: 750K–3M → lods=3, divisions=3, octree=true (depth=5)
+// (divisions bumped 2→3 vs. original bands: favors base-grid granularity over LOD depth)
 TEST(obj2tiles, computeOptsXL) {
     ModelInfo info;
     info.faceCount = 1500000u;
     auto opts = computeObj2TilesOpts(info);
     EXPECT_EQ(opts.lods, 3);
-    EXPECT_EQ(opts.divisions, 2);
+    EXPECT_EQ(opts.divisions, 3);
     EXPECT_TRUE(opts.octree);
 }
 

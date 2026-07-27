@@ -651,10 +651,19 @@ std::vector<std::string> getGltfDependencies(const std::string& gltf) {
  * - Tiny:    < 10K faces  → lods=1, divisions=0, octree=false  (depth=0,   ≤ 1 tile)
  * - Small:   10K–50K     → lods=2, divisions=0, octree=true   (depth=1,   ≤ 4 tiles)
  * - Medium:  50K–200K    → lods=2, divisions=1, octree=true   (depth=2,  ≤ 16 tiles)
- * - Large:   200K–750K   → lods=3, divisions=1, octree=true   (depth=3,  ≤ 64 tiles)
- * - XL:      750K–3M     → lods=3, divisions=2, octree=true   (depth=4, ≤ 256 tiles)
+ * - Large:   200K–750K   → lods=3, divisions=2, octree=true   (depth=4, ≤ 256 tiles)
+ * - XL:      750K–3M     → lods=3, divisions=3, octree=true   (depth=5, ≤ 1024 tiles)
  * - XXL:     3M–12M      → lods=4, divisions=2, octree=true   (depth=5, ≤ 1024 tiles)
  * - Massive: > 12M       → lods=4, divisions=3, octree=true   (depth=6, ≤ 4096 tiles, hard cap)
+ *
+ * Note: Base-grid tiles (divisions) cull independently
+ * per-tile, while LOD-hierarchy depth only adds refinement steps on top of the same
+ * base grid. Favoring divisions over lods in the mid-to-large range yields finer
+ * per-tile download granularity for the same total depth budget. Kept face-count as
+ * the sole signal (not model area) because area is only meaningful in physical units
+ * for georeferenced photogrammetry output; generic user-uploaded models (arbitrary
+ * units, arbitrary orientation, orbit-viewed) would make an area-based divisions
+ * calculation actively harmful.
  */
 const int MAX_TILE_DEPTH = 6;
 
@@ -682,11 +691,11 @@ obj2tiles::Obj2TilesOptions computeObj2TilesOpts(const ModelInfo& info) {
     } else if (faces < 750000) {
         // Large: 200K–750K
         lods = 3;
-        divisions = 1;
+        divisions = 2;
     } else if (faces < 3000000) {
         // XL: 750K–3M
         lods = 3;
-        divisions = 2;
+        divisions = 3;
     } else if (faces < 12000000) {
         // XXL: 3M–12M
         lods = 4;
