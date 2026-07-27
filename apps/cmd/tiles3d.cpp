@@ -4,6 +4,7 @@
 
 #include "include/tiles3d.h"
 
+#include <cstdlib>
 #include <iostream>
 #include <optional>
 
@@ -26,7 +27,8 @@ namespace cmd
     ("lon", "Longitude of the model origin (WGS84). With --lat, forces a georeferenced tileset", cxxopts::value<double>())
     ("alt", "Altitude of the model origin in meters (used with --lat/--lon)", cxxopts::value<double>()->default_value("0"))
     ("local", "Force a non-georeferenced (local) tileset, skipping sidecar auto-detection", cxxopts::value<bool>()->default_value("false"))
-    ("overwrite", "Overwrite the output directory if it exists", cxxopts::value<bool>()->default_value("false"));
+    ("overwrite", "Overwrite the output directory if it exists", cxxopts::value<bool>()->default_value("false"))
+    ("force-defaults", "Skip face-count heuristic and use default Obj2Tiles parameters (divisions=3, lods=3, octree=true) for testing", cxxopts::value<bool>()->default_value("false"));
         // clang-format on
         opts.parse_positional({"input", "output"});
     }
@@ -53,6 +55,18 @@ namespace cmd
 
         const bool overwrite = opts["overwrite"].as<bool>();
         const bool forceLocal = opts["local"].as<bool>();
+        const bool forceDefaults = opts["force-defaults"].as<bool>();
+
+        // --force-defaults sets an environment variable that buildModel3DTiles() checks
+        // to skip the face-count heuristic and use hardcoded default parameters instead.
+        if (forceDefaults)
+        {
+#ifdef _WIN32
+            _putenv_s("DDB_OBJ2TILES_FORCE_DEFAULTS", "1");
+#else
+            setenv("DDB_OBJ2TILES_FORCE_DEFAULTS", "1", 1);
+#endif
+        }
 
         // Explicit --lat/--lon override sidecar auto-detection; --local forces local
         // mode; otherwise georeferencing is auto-detected from sidecars next to the input.

@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "3d.h"
 
+#include <cstdlib>
 #include <fstream>
 #include <optional>
 #include <regex>
@@ -441,19 +442,42 @@ std::string buildModel3DTiles(const std::string& inputObj, const std::string& ou
     io::assureIsRemoved(tempOut);
     io::assureFolderExists(tempOut);
 
+    // Compute Obj2Tiles parameters based on model face count.
+    // Face count → (divisions, lods, octree) heuristic selects the right tile
+    // hierarchy depth for the model's complexity. Small models (<10K faces) get
+    // a single tile at the finest LOD; large models get progressively deeper
+    // splits, hard-capped at depth 6 (≤ 4096 finest-LOD tiles).
+    // --force-defaults / DDB_OBJ2TILES_FORCE_DEFAULTS env var skips the heuristic
+    // and uses hardcoded defaults for testing/debugging.
+    const bool forceDefaults = [] {
+        const char* env = std::getenv("DDB_OBJ2TILES_FORCE_DEFAULTS");
+        return env && env[0] != '0' && env[0] != '\0';
+    }();
+
+    ModelInfo info;
     obj2tiles::Obj2TilesOptions opts;
-    // Octree mode: each LOD gets an extra subdivision level,
-    // producing a real tile hierarchy (smaller, view-dependent b3dm tiles) instead of
-    // the same tile count per LOD - closer to Nexus-style progressive streaming.
-    opts.octree = true;
-    // 3 levels of binary splitting per axis as the base grid ((2^3)^2 = 64 tiles),
-    // with octree mode adding further depth to finer LODs - a good balance between
-    // per-tile granularity/streaming and per-tile overhead for aerial datasets.
-    opts.divisions = 3;
-    // KTX2 (Basis Universal) texture atlases cut GPU/VRAM usage ~4-8x vs JPEG at the
-    // cost of requiring Obj2Tiles >= v1.6.0 with the bundled libktx native library
-    // (see scripts/download-obj2tiles.{ps1,sh}). VertexMedian gives the most balanced
-    // tile sizes for non-uniform geometry (requires Obj2Tiles >= v1.4.0).
+    if (forceDefaults) {
+        // --force-defaults: skip heuristic, use hardcoded defaults (current behavior)
+        opts.octree = true;
+        opts.divisions = 3;
+        opts.lods = 3;
+        LOGD << "DDB_OBJ2TILES_FORCE_DEFAULTS set — skipping heuristic, "
+             << "using defaults (divisions=3, lods=3, octree=true)";
+    } else if (getModelInfo(actualInputObj, info)) {
+        opts = computeObj2TilesOpts(info);
+        LOGD << "Model " << actualInputObj << " has " << (info.faceCount / 1000)
+             << "K faces → divisions=" << opts.divisions << ", lods=" << opts.lods
+             << ", octree=" << (opts.octree ? "true" : "false");
+    } else {
+        // Fallback: preserve current hardcoded behavior when model stats unavailable.
+        // Matches the "XXL" band (depth = 3 + 3 - 1 = 5, ≤ 1024 finest-LOD tiles).
+        opts.octree = true;
+        opts.divisions = 3;
+        opts.lods = 3;
+        LOGD << "Could not determine face count for " << actualInputObj
+             << " — using fallback (divisions=3, lods=3, octree=true)";
+    }
+    // Preserve texture defaults (heuristic sets divisions/lods/octree only)
     opts.textureFormat = "Ktx2";
     opts.ktx2Quality = 192;
     opts.splitStrategy = "VertexMedian";
