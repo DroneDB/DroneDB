@@ -401,13 +401,13 @@ static void exportWithAssimp(const aiScene* scene,
 
 
 bool getModelInfo(const std::string& inputModel, ModelInfo& info) {
-    // Bounds only: bake node transforms so vertices land in the model's root frame,
-    // and skip triangulation / normals / tangents / material work for speed. Wrapped
-    // in try/catch because indexing must never fail on a malformed model - the caller
+    // Bounds + face count: bake node transforms so vertices land in the model's root frame,
+    // triangulate for accurate face counts; skip normals / tangents / material work for speed.
+    // Wrapped in try/catch because indexing must never fail on a malformed model - the caller
     // simply gets no footprint.
     try {
         Assimp::Importer importer;
-        const aiScene* scene = importer.ReadFile(inputModel, aiProcess_PreTransformVertices);
+        const aiScene* scene = importer.ReadFile(inputModel, aiProcess_PreTransformVertices | aiProcess_Triangulate);
         if (scene == nullptr || scene->mNumMeshes == 0)
             return false;
 
@@ -415,6 +415,7 @@ bool getModelInfo(const std::string& inputModel, ModelInfo& info) {
         minX = minY = minZ = std::numeric_limits<double>::max();
         maxX = maxY = maxZ = std::numeric_limits<double>::lowest();
         bool any = false;
+        uint64_t localFaceCount = 0;
 
         for (unsigned m = 0; m < scene->mNumMeshes; ++m) {
             const aiMesh* mesh = scene->mMeshes[m];
@@ -430,6 +431,8 @@ bool getModelInfo(const std::string& inputModel, ModelInfo& info) {
                 maxZ = std::max(maxZ, static_cast<double>(p.z));
                 any = true;
             }
+            // Triangulate flag ensures mNumFaces is triangle count
+            localFaceCount += mesh->mNumFaces;
         }
 
         if (!any)
@@ -442,6 +445,7 @@ bool getModelInfo(const std::string& inputModel, ModelInfo& info) {
         info.maxX = maxX;
         info.maxY = maxY;
         info.maxZ = maxZ;
+        info.faceCount = localFaceCount;
         return true;
     } catch (const std::exception& e) {
         LOGD << "getModelInfo failed for " << inputModel << ": " << e.what();

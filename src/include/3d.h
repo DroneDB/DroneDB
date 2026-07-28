@@ -4,6 +4,7 @@
 #ifndef _3D_H
 #define _3D_H
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include "ddb_export.h"
@@ -11,6 +12,7 @@
 #include <nxs.h>
 #endif
 #include <vector>
+#include "obj2tiles_runner.h"
 
 namespace ddb
 {
@@ -91,6 +93,7 @@ namespace ddb
         bool hasBounds = false;                     ///< True when the box below is valid.
         double minX = 0.0, minY = 0.0, minZ = 0.0;  ///< Minimum corner (local meters).
         double maxX = 0.0, maxY = 0.0, maxZ = 0.0;  ///< Maximum corner (local meters).
+        uint64_t faceCount = 0;                     ///< Total number of mesh faces (triangles after triangulation).
     };
 
     /**
@@ -107,6 +110,20 @@ namespace ddb
      * @return true when a non-empty bounding box was computed, false otherwise.
      */
     DDB_DLL bool getModelInfo(const std::string &inputModel, ModelInfo &info);
+
+    /**
+     * @brief Compute Obj2Tiles parameters based on model face count.
+     *
+     * Maps info.faceCount to a (divisions, lods, octree) band from the spec.
+     * The resulting tile-hierarchy depth (divisions + lods - 1 when octree)
+     * is always <= MAX_TILE_DEPTH (6, i.e. <= 4096 finest-LOD tiles),
+     * regardless of faceCount, so pathologically large models cannot make
+     * Obj2Tiles produce an unbounded number of b3dm files.
+     *
+     * @param info Model info with faceCount populated by getModelInfo().
+     * @return Obj2TilesOptions with heuristic-based divisions/lods/octree.
+     */
+    DDB_DLL obj2tiles::Obj2TilesOptions computeObj2TilesOpts(const ModelInfo &info);
 
     DDB_DLL std::vector<std::string> getObjDependencies(const std::string &obj);
     DDB_DLL std::vector<std::string> getGltfDependencies(const std::string &gltf);
