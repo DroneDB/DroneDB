@@ -75,6 +75,25 @@ for file in proj.db timezone21.bin sensor_data.sqlite curl-ca-bundle.crt; do
     fi
 done
 
+# Obj2Tiles is optional, but when shipped it must actually start: it is a .NET
+# single-file app whose appended bundle is destroyed by strip/dwz, and the only
+# symptom is a runtime "Failure processing application bundle" error.
+if [ -f "$TEMP_DIR/usr/bin/Obj2Tiles" ]; then
+    echo "Checking Obj2Tiles..."
+    if ! OBJ2TILES_OUTPUT=$("$TEMP_DIR/usr/bin/Obj2Tiles" --version 2>&1); then
+        echo "Error: packaged Obj2Tiles failed to run!"
+        echo "$OBJ2TILES_OUTPUT"
+        exit 1
+    fi
+    echo "  $OBJ2TILES_OUTPUT"
+
+    # Without libktx next to the binary, --texture-format Ktx2 aborts the whole run.
+    if [ ! -f "$TEMP_DIR/usr/bin/libktx.so" ]; then
+        echo "Error: libktx.so not found next to Obj2Tiles; KTX2 texture compression would fail!"
+        exit 1
+    fi
+fi
+
 # Check postinst script
 echo "Checking postinst script..."
 if [ ! -f "$TEMP_DIR/DEBIAN/postinst" ]; then

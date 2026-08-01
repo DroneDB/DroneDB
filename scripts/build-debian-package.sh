@@ -155,6 +155,16 @@ override_dh_auto_test:
 override_dh_shlibdeps:
 	dh_shlibdeps --dpkg-shlibdeps-params=--ignore-missing-info
 
+# Obj2Tiles is a .NET single-file app: its bundle payload is appended AFTER the ELF
+# sections, so dh_strip discards it and the binary dies at startup with "Failure
+# processing application bundle". libktx survives stripping, but is excluded too so
+# both stay byte-identical to the upstream release we claim to redistribute unmodified.
+override_dh_strip:
+	dh_strip -XObj2Tiles -Xlibktx.so
+
+override_dh_dwz:
+	dh_dwz -XObj2Tiles -Xlibktx.so
+
 override_dh_auto_install:
 	# Create directory structure for installed files
 	mkdir -p debian/ddb/usr/bin
@@ -258,6 +268,29 @@ debuild -us -uc -b
 echo "Moving package to build directory..."
 mkdir -p build/package
 mv ../ddb_*.deb build/package/
+
+# Regression guard: dh_strip/dh_dwz truncate .NET single-file bundles silently,
+# and the damage only surfaces at runtime. Compare against the downloaded binaries.
+if [ -f build/Obj2Tiles ]; then
+  echo "Verifying packaged Obj2Tiles integrity..."
+  VERIFY_DIR=$(mktemp -d)
+  dpkg-deb -x build/package/ddb_*.deb "$VERIFY_DIR"
+  for f in Obj2Tiles libktx.so; do
+    [ -f "build/$f" ] || continue
+    if [ ! -f "$VERIFY_DIR/usr/bin/$f" ]; then
+      echo "ERROR: $f is missing from the package"
+      rm -rf "$VERIFY_DIR"
+      exit 1
+    fi
+    if ! cmp -s "build/$f" "$VERIFY_DIR/usr/bin/$f"; then
+      echo "ERROR: packaged $f differs from build/$f (stripped?)"
+      rm -rf "$VERIFY_DIR"
+      exit 1
+    fi
+    echo "  $f is byte-identical to the upstream binary."
+  done
+  rm -rf "$VERIFY_DIR"
+fi
 
 # Test the package
 echo "Testing the Debian package..."
