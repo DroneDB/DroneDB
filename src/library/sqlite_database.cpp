@@ -39,7 +39,11 @@ namespace ddb
         if (db != nullptr)
         {
             LOGD << "Closing connection to " << openFile;
-            sqlite3_close(db);
+            // _v2 marks the connection a zombie instead of leaking it (and its locks) when
+            // a statement was left unfinalized; sqlite3_close() would keep the handle alive.
+            const int rc = sqlite3_close_v2(db);
+            if (rc != SQLITE_OK)
+                LOGD << "sqlite3_close_v2 returned " << rc;
             db = nullptr;
         }
 
@@ -58,11 +62,14 @@ namespace ddb
         if (db == nullptr)
             throw DBException("Can't execute SQL: " + sql + ", db is not open");
 
-        char *errMsg;
-        if (sqlite3_exec(db, sql.c_str(), nullptr, nullptr, &errMsg) != SQLITE_OK)
+        char *errMsg = nullptr;
+        const int rc = sqlite3_exec(db, sql.c_str(), nullptr, nullptr, &errMsg);
+        if (rc != SQLITE_OK)
         {
-            const std::string error(errMsg);
+            const std::string error(errMsg ? errMsg : sqlite3_errstr(rc));
             sqlite3_free(errMsg);
+            if (rc == SQLITE_BUSY || rc == SQLITE_LOCKED)
+                throw DBBusyException(error);
             throw SQLException(error);
         }
 

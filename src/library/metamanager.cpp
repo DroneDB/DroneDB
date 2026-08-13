@@ -4,6 +4,7 @@
 #include "exceptions.h"
 #include "utils.h"
 #include "json.h"
+#include "transaction.h"
 
 namespace ddb
 {
@@ -267,7 +268,7 @@ namespace ddb
         if (!metaDump.is_array())
             throw InvalidArgsException("metaDump must be an array");
 
-        db->exec("BEGIN EXCLUSIVE TRANSACTION");
+        Transaction tx(db, Transaction::Mode::Immediate);
 
         const auto q = db->query("INSERT OR REPLACE INTO entries_meta(id, path, key, data, mtime) VALUES (?, ?, ?, ?, ?)");
         const auto singularDupQ = db->query("SELECT id,mtime FROM entries_meta WHERE path = ? AND key = ?");
@@ -328,7 +329,7 @@ namespace ddb
             i++;
         }
 
-        db->exec("COMMIT");
+        tx.commit();
         json j;
         j["restored"] = i;
         return j;
@@ -338,7 +339,7 @@ namespace ddb
     {
         const auto q = db->query("DELETE FROM entries_meta WHERE id = ?");
 
-        db->exec("BEGIN EXCLUSIVE TRANSACTION");
+        Transaction tx(db, Transaction::Mode::Immediate);
 
         int i = 0;
         for (auto &id : ids)
@@ -348,7 +349,7 @@ namespace ddb
             i++;
         }
 
-        db->exec("COMMIT");
+        tx.commit();
 
         json j;
         j["removed"] = i;

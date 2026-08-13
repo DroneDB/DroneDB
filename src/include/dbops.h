@@ -19,6 +19,28 @@ namespace ddb
     typedef std::function<void(const std::string &path)> RemoveCallback;
     typedef std::function<bool(const Entry &e, bool success, const std::string &error)> RescanCallback;
 
+    // Options for addToIndexEx / DDBAddWithOptions (03-workstream-dronedb-core.md §3.2).
+    struct DDB_DLL AddOptions {
+        bool stopOnError = true;      // default == today's addToIndex() semantics
+        int maxConflictRetries = 2;   // bounded re-plan passes on TOCTOU conflict
+    };
+
+    // One item-scoped failure (a corrupt/unreadable file), as opposed to a database-scoped
+    // failure (disk full, schema corruption) which always aborts the whole batch.
+    struct DDB_DLL AddItemError {
+        std::string path;
+        std::string code;    // "FS" | "GDAL" | "PDAL" | "JSON" | "INDEX" | "CONFLICT"
+        std::string message;
+    };
+
+    // Every path passed to addToIndexEx appears in exactly one of entries/unchanged/errors
+    // (completeness contract, 02-target-architecture.md §5.1).
+    struct DDB_DLL AddResult {
+        std::vector<std::pair<Entry, bool>> entries; // Entry + isUpdate (added=false, updated=true)
+        std::vector<std::string> unchanged;
+        std::vector<AddItemError> errors;
+    };
+
     DDB_DLL std::unique_ptr<Database> open(const std::string &directory, bool traverseUp);
     DDB_DLL std::vector<fs::path> getIndexPathList(const fs::path &rootDirectory, const std::vector<std::string> &paths, bool includeDirs);
     DDB_DLL std::vector<fs::path> getPathList(const std::vector<std::string> &paths, bool includeDirs, int maxDepth, bool includeFiles = true);
@@ -47,6 +69,17 @@ namespace ddb
     DDB_DLL void listIndex(Database *db, const std::vector<std::string> &paths, std::ostream &out, const std::string &format, bool recursive = false, int maxRecursionDepth = 0);
     DDB_DLL void searchIndex(Database *db, const std::string &query, std::ostream &out, const std::string &format);
     DDB_DLL void addToIndex(Database *db, const std::vector<std::string> &paths, AddCallback callback = nullptr);
+
+    /**
+     * Batch add with per-item error isolation (03-workstream-dronedb-core.md §3.2/§3.3).
+     * With options.stopOnError == false, an item-scoped failure (FSException, GDALException,
+     * PDALException, JSONException, IndexException) is captured in result.errors instead of
+     * aborting the batch; the other items still commit. Database-scoped failures (DBException,
+     * DBBusyException, std::bad_alloc) always abort the whole call regardless of stopOnError.
+     */
+    DDB_DLL void addToIndexEx(Database *db, const std::vector<std::string> &paths,
+                              const AddOptions &options, AddResult &result, AddCallback callback = nullptr);
+
     DDB_DLL void removeFromIndex(Database *db, const std::vector<std::string> &paths, RemoveCallback callback = nullptr);
     DDB_DLL void syncIndex(Database *db);
 

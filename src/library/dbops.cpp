@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <future>
 #include <mutex>
+#include <system_error>
 #include <thread>
 #include <unordered_set>
 
@@ -25,6 +26,7 @@
 #include "utils.h"
 #include "version.h"
 #include "constants.h"
+#include "transaction.h"
 
 #include <glob.hpp>
 
@@ -626,6 +628,206 @@ static std::mutex g_dbOpenMutex;
         }
     }
 
+    namespace {
+
+    // Result of the PLAN phase: what the index currently knows about a candidate path,
+    // read without holding a write lock.
+    struct PlannedAddItem {
+        fs::path absPath;
+        std::string relPath;
+        bool existsInDb = false;
+        long long dbMtime = 0;
+        std::string dbHash;
+    };
+
+    // Result of the COMPUTE phase: a fully parsed entry, ready to be written. Computed with
+    // no transaction held so hashing/EXIF/GDAL/PDAL cost never blocks other writers (I1).
+    struct ComputedAddItem {
+        Entry entry;
+        bool isUpdate = false;
+        long long observedMtime = 0;
+        long long observedSize = 0;
+    };
+
+    // PLAN: short, read-only pass over the index. No write lock is ever taken here.
+    std::vector<PlannedAddItem> planAddCandidates(Database *db, const std::vector<fs::path> &pathList,
+                                                  const fs::path &directory) {
+        std::vector<PlannedAddItem> planned;
+        planned.reserve(pathList.size());
+
+        auto q = db->query("SELECT mtime,hash FROM entries WHERE path=?");
+
+        for (auto &p : pathList) {
+            io::Path relPath = io::Path(p).relativeTo(directory);
+
+            if (p.has_filename()) {
+                const auto fileName = p.filename().generic_string();
+                if (fileName.find('\\') != std::string::npos) {
+                    LOGD << "Skipping '" << p << "'";
+                    continue; // Skip file
+                }
+            }
+
+            PlannedAddItem item;
+            item.absPath = p;
+            item.relPath = relPath.generic();
+
+            q->bind(1, item.relPath);
+            if (q->fetch()) {
+                item.existsInDb = true;
+                item.dbMtime = q->getInt64(0);
+                item.dbHash = q->getText(1);
+            }
+            q->reset();
+
+            planned.push_back(std::move(item));
+        }
+
+        return planned;
+    }
+
+    // COMPUTE: hashing, fingerprinting, EXIF/GDAL/PDAL metadata extraction. No transaction is
+    // held during this phase; this is the part that used to run for the whole duration of the
+    // write lock (C1/I1).
+    //
+    // Item-scoped exceptions (FSException, GDALException, PDALException, JSONException,
+    // IndexException) are captured into `errors` when `stopOnError` is false; with
+    // `stopOnError` true they propagate and abort the whole call, matching addToIndex()'s
+    // original all-or-nothing semantics. Database-scoped exceptions (DBException,
+    // DBBusyException, bad_alloc, anything else) always propagate (03-workstream §3.3).
+    std::vector<ComputedAddItem> computeAddEntries(const std::vector<PlannedAddItem> &planned,
+                                                    const fs::path &directory, bool stopOnError,
+                                                    std::vector<AddItemError> &errors,
+                                                    std::vector<std::string> &unchanged) {
+        std::vector<ComputedAddItem> computed;
+        computed.reserve(planned.size());
+
+        for (auto &item : planned) {
+            Entry e;
+            bool add = false;
+            bool update = false;
+
+            if (item.existsInDb) {
+                const auto status = checkUpdate(e, item.absPath, item.dbMtime, item.dbHash);
+                update = status != FileStatus::NotModified;
+                if (!update) {
+                    unchanged.push_back(item.relPath);
+                    continue;
+                }
+            } else {
+                add = true;
+            }
+
+            try {
+                // parseEntry() skips re-hashing if checkUpdate() already set e.hash.
+                parseEntry(item.absPath, directory, e, true);
+            } catch (const FSException &ex) {
+                if (stopOnError) throw;
+                errors.push_back({item.relPath, "FS", ex.what()});
+                continue;
+            } catch (const GDALException &ex) {
+                if (stopOnError) throw;
+                errors.push_back({item.relPath, "GDAL", ex.what()});
+                continue;
+            } catch (const PDALException &ex) {
+                if (stopOnError) throw;
+                errors.push_back({item.relPath, "PDAL", ex.what()});
+                continue;
+            } catch (const JSONException &ex) {
+                if (stopOnError) throw;
+                errors.push_back({item.relPath, "JSON", ex.what()});
+                continue;
+            } catch (const IndexException &ex) {
+                if (stopOnError) throw;
+                errors.push_back({item.relPath, "INDEX", ex.what()});
+                continue;
+            }
+
+            ComputedAddItem ci;
+            ci.isUpdate = !add;
+            ci.observedMtime = e.mtime;
+            ci.observedSize = static_cast<long long>(e.size);
+            ci.entry = std::move(e);
+            computed.push_back(std::move(ci));
+        }
+
+        return computed;
+    }
+
+    // COMMIT: Transaction(Immediate); re-verify (mtime,size) to guard against a file that
+    // changed between COMPUTE and COMMIT (TOCTOU, see 02-target-architecture.md §3.1), then
+    // INSERT/UPDATE. Only row writes happen inside the lock — milliseconds, not seconds.
+    // Items whose (mtime,size) changed since COMPUTE are reported via `conflicts` (absolute
+    // paths) instead of being written with stale metadata; the caller decides whether to
+    // re-plan them (addToIndexEx) or let them self-heal on the next add/rescan (addToIndex).
+    void commitAddEntries(Database *db, const std::vector<ComputedAddItem> &computed,
+                          const fs::path &directory, AddCallback callback,
+                          std::vector<std::pair<Entry, bool>> *accepted,
+                          std::vector<fs::path> *conflicts) {
+        if (computed.empty())
+            return;
+
+        auto insertQ = db->query(
+            "INSERT INTO entries (path, hash, type, properties, mtime, size, depth, "
+            "point_geom, polygon_geom) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, GeomFromText(?, 4326), GeomFromText(?, "
+            "4326))");
+        const auto updateQ = db->query(UPDATE_QUERY);
+
+        Transaction tx(db, Transaction::Mode::Immediate);
+
+        for (auto &ci : computed) {
+            const fs::path absPath = directory / io::Path(ci.entry.path).get();
+
+            std::error_code ec;
+            const auto size = static_cast<long long>(fs::file_size(absPath, ec));
+            long long mtime = -1;
+            try {
+                mtime = io::Path(absPath).getModifiedTime();
+            } catch (const std::exception &) {
+                ec = std::make_error_code(std::errc::no_such_file_or_directory);
+            }
+
+            if (ec || mtime != ci.observedMtime || size != ci.observedSize) {
+                LOGD << "Skipping '" << ci.entry.path
+                    << "': changed between compute and commit (will be re-detected next add)";
+                if (conflicts != nullptr)
+                    conflicts->push_back(absPath);
+                continue;
+            }
+
+            if (!ci.isUpdate) {
+                insertQ->bind(1, ci.entry.path);
+                insertQ->bind(2, ci.entry.hash);
+                insertQ->bind(3, ci.entry.type);
+                insertQ->bind(4, ci.entry.properties.dump());
+                insertQ->bind(5, static_cast<long long>(ci.entry.mtime));
+                insertQ->bind(6, static_cast<long long>(ci.entry.size));
+                insertQ->bind(7, ci.entry.depth);
+                insertQ->bind(8, ci.entry.point_geom.toWkt());
+                insertQ->bind(9, ci.entry.polygon_geom.toWkt());
+                insertQ->execute();
+            } else {
+                doUpdate(updateQ.get(), ci.entry);
+            }
+
+            if (accepted != nullptr)
+                accepted->push_back({ci.entry, ci.isUpdate});
+
+            if (callback != nullptr)
+                if (!callback(ci.entry, ci.isUpdate)) {
+                    // tx's destructor rolls back; log it explicitly so a canceled batch
+                    // is never a silent loss (C8).
+                    LOGD << "Add operation canceled by callback, rolling back transaction";
+                    return;
+                }
+        }
+
+        tx.commit();
+    }
+
+    } // namespace
+
     void addToIndex(Database *db, const std::vector<std::string> &paths,
                     AddCallback callback)
     {
@@ -634,84 +836,36 @@ static std::mutex g_dbOpenMutex;
         const fs::path directory = db->rootDirectory();
         auto pathList = getIndexPathList(directory, paths, true);
 
-        auto q = db->query("SELECT mtime,hash FROM entries WHERE path=?");
-        auto insertQ = db->query(
-            "INSERT INTO entries (path, hash, type, properties, mtime, size, depth, "
-            "point_geom, polygon_geom) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, GeomFromText(?, 4326), GeomFromText(?, "
-            "4326))");
-        const auto updateQ = db->query(UPDATE_QUERY);
-        db->exec("BEGIN EXCLUSIVE TRANSACTION");
+        std::vector<AddItemError> discardedErrors;
+        std::vector<std::string> discardedUnchanged;
+        auto planned = planAddCandidates(db, pathList, directory);
+        auto computed = computeAddEntries(planned, directory, /*stopOnError=*/true, discardedErrors, discardedUnchanged);
+        commitAddEntries(db, computed, directory, callback, nullptr, nullptr);
+    }
 
-        for (auto &p : pathList)
-        {
-            io::Path relPath = io::Path(p).relativeTo(directory);
+    void addToIndexEx(Database *db, const std::vector<std::string> &paths,
+                      const AddOptions &options, AddResult &result, AddCallback callback)
+    {
+        if (paths.empty())
+            return; // Nothing to do
+        const fs::path directory = db->rootDirectory();
+        auto pathList = getIndexPathList(directory, paths, true);
 
-            if (p.has_filename())
-            {
-                const auto fileName = p.filename().generic_string();
-                if (fileName.find('\\') != std::string::npos)
-                {
+        for (int pass = 0; pass <= options.maxConflictRetries && !pathList.empty(); ++pass) {
+            auto planned = planAddCandidates(db, pathList, directory);
+            auto computed = computeAddEntries(planned, directory, options.stopOnError,
+                                              result.errors, result.unchanged);
 
-                    LOGD << "Skipping '" << p << "'";
+            std::vector<fs::path> conflicts;
+            commitAddEntries(db, computed, directory, callback, &result.entries, &conflicts);
 
-                    // Skip file
-                    continue;
-                }
-            }
-
-            q->bind(1, relPath.generic());
-
-            bool update = false;
-            bool add = false;
-            Entry e;
-
-            if (q->fetch())
-            {
-
-                const auto status = checkUpdate(e, p, q->getInt64(0), q->getText(1));
-
-                // Entry exist, update if necessary
-                update = status != FileStatus::NotModified;
-            }
-            else
-            {
-                // Brand new, add
-                add = true;
-            }
-
-            if (add || update)
-            {
-                parseEntry(p, directory, e, true);
-
-                if (add)
-                {
-                    insertQ->bind(1, e.path);
-                    insertQ->bind(2, e.hash);
-                    insertQ->bind(3, e.type);
-                    insertQ->bind(4, e.properties.dump());
-                    insertQ->bind(5, static_cast<long long>(e.mtime));
-                    insertQ->bind(6, static_cast<long long>(e.size));
-                    insertQ->bind(7, e.depth);
-                    insertQ->bind(8, e.point_geom.toWkt());
-                    insertQ->bind(9, e.polygon_geom.toWkt());
-
-                    insertQ->execute();
-                }
-                else
-                {
-                    doUpdate(updateQ.get(), e);
-                }
-
-                if (callback != nullptr)
-                    if (!callback(e, !add))
-                        return; // cancel
-            }
-
-            q->reset();
+            pathList = conflicts; // bounded re-plan: only what actually changed under us
         }
 
-        db->exec("COMMIT");
+        for (auto &p : pathList) {
+            io::Path relPath = io::Path(p).relativeTo(directory);
+            result.errors.push_back({relPath.generic(), "CONFLICT", "File kept changing during indexing"});
+        }
     }
 
     void removeFromIndex(Database *db, const std::vector<std::string> &paths, RemoveCallback callback)
@@ -809,7 +963,7 @@ static std::mutex g_dbOpenMutex;
             LOGD << "Folder: " << str;
         }
 
-        db->exec("BEGIN EXCLUSIVE TRANSACTION");
+        Transaction tx(db, Transaction::Mode::Immediate);
 
         // Batch delete all metadata for entries matching the query
         auto metaDeleteQ = db->query(
@@ -856,7 +1010,7 @@ static std::mutex g_dbOpenMutex;
             q->reset();
         }
 
-        db->exec("COMMIT");
+        tx.commit();
 
         // Parallel deletion of build folders (outside transaction for better performance)
         // Limit concurrency to avoid spawning too many threads
@@ -994,7 +1148,7 @@ static std::mutex g_dbOpenMutex;
         auto deleteQ = db->query("DELETE FROM entries WHERE path = ?");
         const auto updateQ = db->query(UPDATE_QUERY);
 
-        db->exec("BEGIN EXCLUSIVE TRANSACTION");
+        Transaction tx(db, Transaction::Mode::Immediate);
 
         while (q->fetch())
         {
@@ -1028,7 +1182,7 @@ static std::mutex g_dbOpenMutex;
             }
         }
 
-        db->exec("COMMIT");
+        tx.commit();
     }
 
     void rescanIndex(Database *db, const std::vector<EntryType> &types, bool stopOnError, RescanCallback callback)
@@ -1064,7 +1218,7 @@ static std::mutex g_dbOpenMutex;
 
         const auto updateQ = db->query(UPDATE_QUERY);
 
-        db->exec("BEGIN EXCLUSIVE TRANSACTION");
+        Transaction tx(db, Transaction::Mode::Immediate);
 
         while (q->fetch())
         {
@@ -1081,18 +1235,13 @@ static std::mutex g_dbOpenMutex;
                 {
                     Entry e;
                     e.path = relPath.generic();
+                    // tx's destructor rolls back on this early return (I4/C8).
                     if (!callback(e, false, error))
-                    {
-                        db->exec("ROLLBACK");
                         return;
-                    }
                 }
 
                 if (stopOnError)
-                {
-                    db->exec("ROLLBACK");
-                    throw FSException(error);
-                }
+                    throw FSException(error); // tx's destructor rolls back
 
                 continue;
             }
@@ -1106,10 +1255,7 @@ static std::mutex g_dbOpenMutex;
                 if (callback != nullptr)
                 {
                     if (!callback(e, true, ""))
-                    {
-                        db->exec("ROLLBACK");
-                        return;
-                    }
+                        return; // tx's destructor rolls back
                 }
             }
             catch (const std::exception &ex)
@@ -1122,21 +1268,15 @@ static std::mutex g_dbOpenMutex;
                     Entry e;
                     e.path = relPath.generic();
                     if (!callback(e, false, error))
-                    {
-                        db->exec("ROLLBACK");
-                        return;
-                    }
+                        return; // tx's destructor rolls back
                 }
 
                 if (stopOnError)
-                {
-                    db->exec("ROLLBACK");
-                    throw;
-                }
+                    throw; // tx's destructor rolls back
             }
         }
 
-        db->exec("COMMIT");
+        tx.commit();
     }
 
     // Sets the modified times of files in the filesystem
@@ -1425,7 +1565,7 @@ static std::mutex g_dbOpenMutex;
 
         const fs::path directory = db->rootDirectory();
 
-        db->exec("BEGIN EXCLUSIVE TRANSACTION");
+        Transaction tx(db, Transaction::Mode::Immediate);
 
         // If we are moving a file
         if (sourceEntry.type != Directory)
@@ -1469,7 +1609,7 @@ static std::mutex g_dbOpenMutex;
             createMissingFolders(db);
         }
 
-        db->exec("COMMIT");
+        tx.commit();
     }
 
 } // namespace ddb
