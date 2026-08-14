@@ -783,8 +783,13 @@ static std::mutex g_dbOpenMutex;
         for (auto &ci : computed) {
             const fs::path absPath = directory / io::Path(ci.entry.path).get();
 
+            // Re-validate filesystem state (mtime/size) between COMPUTE and COMMIT.
+            // Directories use logical size (0, or aggregate for nested DroneDBs), so only
+            // call fs::file_size for regular files — it reports an error on directories.
             std::error_code ec;
-            const auto size = static_cast<long long>(fs::file_size(absPath, ec));
+            long long size = ci.observedSize;
+            if (!fs::is_directory(absPath))
+                size = static_cast<long long>(fs::file_size(absPath, ec));
             long long mtime = -1;
             try {
                 mtime = io::Path(absPath).getModifiedTime();
@@ -800,7 +805,33 @@ static std::mutex g_dbOpenMutex;
                 continue;
             }
 
-            if (!ci.isUpdate) {
+            // Re-query under the write transaction to handle the concurrent-add race.
+            // The add/update decision was made in PLAN without a lock; another writer may
+            // have committed a row with the same path before this transaction.
+            auto recheckQ = db->query("SELECT mtime,hash FROM entries WHERE path=?");
+            recheckQ->bind(1, ci.entry.path);
+            const bool stillAbsent = !recheckQ->fetch();
+
+            bool actuallyInsert = true;
+            if (!stillAbsent && !ci.isUpdate) {
+                // Planned as INSERT but row now exists (concurrent add) — convert to UPDATE
+                const long long dbMtime = recheckQ->getInt64(0);
+                const std::string dbHash = recheckQ->getText(1);
+                if (dbMtime == ci.entry.mtime && dbHash == ci.entry.hash) {
+                    // Unchanged — skip
+                    continue;
+                }
+                actuallyInsert = false; // treat as UPDATE instead
+            } else if (stillAbsent && ci.isUpdate) {
+                // Planned as UPDATE but row was deleted — re-plan via conflict retry
+                LOGD << "Skipping '" << ci.entry.path
+                    << "': update plan stale, row no longer exists (will be re-planned)";
+                if (conflicts != nullptr)
+                    conflicts->push_back(absPath);
+                continue;
+            }
+
+            if (actuallyInsert) {
                 insertQ->bind(1, ci.entry.path);
                 insertQ->bind(2, ci.entry.hash);
                 insertQ->bind(3, ci.entry.type);
@@ -815,10 +846,10 @@ static std::mutex g_dbOpenMutex;
                 doUpdate(updateQ.get(), ci.entry);
             }
 
-            tentative.push_back({ci.entry, ci.isUpdate});
+            tentative.push_back({ci.entry, actuallyInsert});
 
             if (callback != nullptr)
-                if (!callback(ci.entry, ci.isUpdate)) {
+                if (!callback(ci.entry, actuallyInsert)) {
                     // tx's destructor rolls back; log it explicitly so a canceled batch
                     // is never a silent loss (C8).
                     LOGD << "Add operation canceled by callback, rolling back transaction";
@@ -857,7 +888,11 @@ static std::mutex g_dbOpenMutex;
         const fs::path directory = db->rootDirectory();
         auto pathList = getIndexPathList(directory, paths, true);
 
-        for (int pass = 0; pass <= options.maxConflictRetries && !pathList.empty(); ++pass) {
+        // Clamp negative retries: a negative value would skip the loop entirely
+        // and report every item as a CONFLICT without attempting indexing.
+        const int maxRetries = options.maxConflictRetries < 0 ? AddOptions{}.maxConflictRetries : options.maxConflictRetries;
+
+        for (int pass = 0; pass <= maxRetries && !pathList.empty(); ++pass) {
             auto planned = planAddCandidates(db, pathList, directory);
             auto computed = computeAddEntries(planned, directory, options.stopOnError,
                                               result.errors, result.unchanged);

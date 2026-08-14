@@ -433,14 +433,28 @@ DDBErr DDBAddWithOptions(const char* ddbPath,
 
     AddOptions addOpts;
     addOpts.stopOnError = options->stopOnError;
-    // Clamp instead of trusting caller memory: a negative value would make the retry loop in
-    // addToIndexEx skip entirely and report every item as a CONFLICT without indexing anything.
-    addOpts.maxConflictRetries = options->maxConflictRetries < 0
-        ? AddOptions{}.maxConflictRetries
-        : options->maxConflictRetries;
+    addOpts.maxConflictRetries = options->maxConflictRetries;
 
     AddResult result;
-    addToIndexEx(db.get(), ddb::expandPathList(pathList, options->recursive, 0), addOpts, result);
+    std::vector<std::string> expandedPaths;
+    // Expand paths per-item when stopOnError is false: expandPathList throws for a missing
+    // path, which would abort the entire batch and bypass per-item error capture.
+    if (addOpts.stopOnError) {
+        expandedPaths = ddb::expandPathList(pathList, options->recursive, 0);
+    } else {
+        for (const auto &p : pathList) {
+            try {
+                auto partial = ddb::expandPathList({p}, options->recursive, 0);
+                expandedPaths.insert(expandedPaths.end(), partial.begin(), partial.end());
+            } catch (const std::exception &ex) {
+                const char *code = "INDEX";
+                if (!!p.find('*') || !!p.find('?') || !!p.find('[')) code = "FS";
+                result.errors.push_back({p, code, ex.what()});
+            }
+        }
+    }
+
+    addToIndexEx(db.get(), expandedPaths, addOpts, result);
 
     auto outJson = json::object();
     outJson["entries"] = json::array();

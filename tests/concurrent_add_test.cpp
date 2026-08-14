@@ -58,7 +58,7 @@ TEST(concurrentAdd, manyThreadsOneDatabaseBaseline) {
 
     constexpr int T = 16;             // concurrent writers, matches Hub UI parallelUploads-ish load
     constexpr int K = 25;              // files per writer
-    constexpr size_t FILE_SIZE = 2 * 1024 * 1024; // 2 MiB: makes hashing cost observable
+    constexpr size_t FILE_SIZE = 128 * 1024; // 128 KiB: observable hashing cost without 800 MiB disk I/O
 
     std::vector<std::vector<fs::path>> paths(T);
     for (int t = 0; t < T; ++t) {
