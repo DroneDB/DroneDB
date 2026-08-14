@@ -433,7 +433,11 @@ DDBErr DDBAddWithOptions(const char* ddbPath,
 
     AddOptions addOpts;
     addOpts.stopOnError = options->stopOnError;
-    addOpts.maxConflictRetries = options->maxConflictRetries;
+    // Clamp instead of trusting caller memory: a negative value would make the retry loop in
+    // addToIndexEx skip entirely and report every item as a CONFLICT without indexing anything.
+    addOpts.maxConflictRetries = options->maxConflictRetries < 0
+        ? AddOptions{}.maxConflictRetries
+        : options->maxConflictRetries;
 
     AddResult result;
     addToIndexEx(db.get(), ddb::expandPathList(pathList, options->recursive, 0), addOpts, result);

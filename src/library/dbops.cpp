@@ -776,6 +776,10 @@ static std::mutex g_dbOpenMutex;
 
         Transaction tx(db, Transaction::Mode::Immediate);
 
+        // Buffered locally and only merged into `accepted` after a successful commit, so a
+        // canceled/rolled-back batch never reports rolled-back writes as committed.
+        std::vector<std::pair<Entry, bool>> tentative;
+
         for (auto &ci : computed) {
             const fs::path absPath = directory / io::Path(ci.entry.path).get();
 
@@ -811,8 +815,7 @@ static std::mutex g_dbOpenMutex;
                 doUpdate(updateQ.get(), ci.entry);
             }
 
-            if (accepted != nullptr)
-                accepted->push_back({ci.entry, ci.isUpdate});
+            tentative.push_back({ci.entry, ci.isUpdate});
 
             if (callback != nullptr)
                 if (!callback(ci.entry, ci.isUpdate)) {
@@ -824,6 +827,9 @@ static std::mutex g_dbOpenMutex;
         }
 
         tx.commit();
+
+        if (accepted != nullptr)
+            accepted->insert(accepted->end(), tentative.begin(), tentative.end());
     }
 
     } // namespace

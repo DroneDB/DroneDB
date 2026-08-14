@@ -99,7 +99,8 @@ extern "C"
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBAdd(const char *ddbPath, const char **paths, int numPaths, char **output, bool recursive = false);
 
-    /** Options for DDBAddWithOptions (03-workstream-dronedb-core.md §3.2). */
+    /** Options for DDBAddWithOptions (03-workstream-dronedb-core.md §3.2). Caller must
+     * initialize every field explicitly; these are semantic defaults, not enforced ones. */
     typedef struct {
         bool recursive;
         bool stopOnError;        // default true == DDBAdd's semantics

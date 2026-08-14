@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
+#include <random>
 #include <string>
 #include <thread>
 
@@ -47,7 +48,12 @@ struct DDB_DLL RetryPolicy {
                                           ": " + e.what());
 
                 const unsigned backoff = std::min(maxDelayMs, baseDelayMs << std::min(attempt, 16u));
-                const unsigned delay = backoff == 0 ? 0 : static_cast<unsigned>(std::rand()) % (backoff + 1);
+                // thread_local RNG: std::rand() shares global state across threads and is not
+                // safe to call concurrently, which would both race and de-correlate the jitter
+                // this backoff relies on to desynchronize contending writers.
+                thread_local std::mt19937 rng{std::random_device{}()};
+                const unsigned delay = backoff == 0 ? 0
+                    : std::uniform_int_distribution<unsigned>(0, backoff)(rng);
                 LOGD << "Retrying " << what << " after " << delay << "ms (attempt " << attempt << "): " << e.what();
                 if (delay > 0)
                     std::this_thread::sleep_for(std::chrono::milliseconds(delay));
