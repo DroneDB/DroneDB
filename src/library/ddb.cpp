@@ -449,7 +449,11 @@ DDBErr DDBAddWithOptions(const char* ddbPath,
             } catch (const std::exception &ex) {
                 const char *code = "INDEX";
                 if (!!p.find('*') || !!p.find('?') || !!p.find('[')) code = "FS";
-                result.errors.push_back({p, code, ex.what()});
+                // Report the dataset-relative path (db root stripped), exactly like the
+                // entries/unchanged buckets: Registry C# matching keys on relative paths, a
+                // caller-supplied absolute path would never match the byPath lookup.
+                const auto relPath = io::Path(p).relativeTo(db->rootDirectory()).generic();
+                result.errors.push_back({relPath, code, ex.what()});
             }
         }
     }
