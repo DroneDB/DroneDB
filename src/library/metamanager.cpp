@@ -5,6 +5,7 @@
 #include "utils.h"
 #include "json.h"
 #include "transaction.h"
+#include "retrypolicy.h"
 
 namespace ddb
 {
@@ -116,7 +117,7 @@ namespace ddb
         q->bind(2, eKey);
         q->bind(3, eData);
         q->bind(4, eMtime);
-        q->execute();
+        executeWithRetry([&q] { q->execute(); }, "metadata add");
 
         auto result = getMetaJson("SELECT id, data, mtime FROM entries_meta WHERE rowid = last_insert_rowid()");
 
@@ -134,7 +135,7 @@ namespace ddb
         const auto q = db->query("DELETE FROM entries_meta WHERE path = ? and key = ?");
         q->bind(1, ePath);
         q->bind(2, eKey);
-        q->execute();
+        executeWithRetry([&q] { q->execute(); }, "metadata set (delete)");
 
         // Insert
         const auto iq = db->query("INSERT INTO entries_meta (path, key, data, mtime) VALUES (?, ?, ?, ?)");
@@ -142,7 +143,7 @@ namespace ddb
         iq->bind(2, eKey);
         iq->bind(3, eData);
         iq->bind(4, eMtime);
-        iq->execute();
+        executeWithRetry([&iq] { iq->execute(); }, "metadata set (insert)");
         return getMetaJson("SELECT id, data, mtime FROM entries_meta WHERE rowid = last_insert_rowid()");
     }
 
@@ -152,7 +153,7 @@ namespace ddb
             throw InvalidArgsException("Invalid metadata id empty");
         const auto q = db->query("DELETE FROM entries_meta WHERE id = ?");
         q->bind(1, id);
-        q->execute();
+        executeWithRetry([&q] { q->execute(); }, "metadata remove");
         json j;
         j["removed"] = db->changes();
         return j;
@@ -189,7 +190,7 @@ namespace ddb
         const auto q = db->query("DELETE FROM entries_meta WHERE key = ? AND path = ?");
         q->bind(1, key);
         q->bind(2, ePath);
-        q->execute();
+        executeWithRetry([&q] { q->execute(); }, "metadata unset");
 
         json j;
         j["removed"] = db->changes();

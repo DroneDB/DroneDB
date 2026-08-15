@@ -2,6 +2,7 @@
 #include "passwordmanager.h"
 #include "logger.h"
 #include "hash.h"
+#include "transaction.h"
 
 #include <string>
 #include <random>
@@ -41,8 +42,13 @@ namespace ddb
 		q->bind(1, salt);
 		q->bind(2, hash);
 
+		// Single-statement autocommit writer; wrapped in an IMMEDIATE transaction so BEGIN is
+		// retried with jitter on SQLITE_BUSY (busy_timeout is only a 200 ms floor). Safe: never
+		// called with a transaction already open on the connection (C API only, ddb.cpp).
+		Transaction tx(this->db, Transaction::Mode::Immediate);
 		q->execute();
 		q->reset();
+		tx.commit();
 	}
 
 	// Nice to have
@@ -84,7 +90,11 @@ namespace ddb
 		const std::string sql = "DELETE FROM passwords";
 		const auto q = this->db->query(sql);
 		q->execute();
+		// Same rationale as append(): retried IMMEDIATE transaction around the write.
+		Transaction tx(this->db, Transaction::Mode::Immediate);
+		q->execute();
 		q->reset();
+		tx.commit();
 	}
 
 }

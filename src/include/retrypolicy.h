@@ -10,6 +10,7 @@
 #include <random>
 #include <string>
 #include <thread>
+#include <utility>
 
 #include "ddb_export.h"
 #include "exceptions.h"
@@ -62,6 +63,15 @@ struct DDB_DLL RetryPolicy {
         }
     }
 };
+
+// Retries a single write statement on DBBusyException using the default policy. For stand-alone
+// single-statement writers that also run while another Transaction is open on the connection (a
+// nested BEGIN would fail): mirrors Transaction's BEGIN/COMMIT retry without opening a
+// transaction. busy_timeout is only a 200 ms floor; RetryPolicy owns the wait budget.
+template <typename Exec>
+void executeWithRetry(Exec &&exec, const char *what) {
+    RetryPolicy::defaultPolicy().run(std::forward<Exec>(exec), what);
+}
 
 } // namespace ddb
 

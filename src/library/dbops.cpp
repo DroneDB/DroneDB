@@ -27,6 +27,7 @@
 #include "version.h"
 #include "constants.h"
 #include "transaction.h"
+#include "retrypolicy.h"
 
 #include <glob.hpp>
 
@@ -985,7 +986,7 @@ static std::mutex g_dbOpenMutex;
         {
             auto q = db->query("DELETE FROM entries_meta WHERE path = ?");
             q->bind(1, path);
-            q->execute();
+            executeWithRetry([&q] { q->execute(); }, "checkDeleteMeta");
         }
     }
 
@@ -1457,7 +1458,7 @@ static std::mutex g_dbOpenMutex;
 
         auto f = db->query("DELETE FROM entries WHERE path = ?");
         f->bind(1, path);
-        f->execute();
+        executeWithRetry([&f] { f->execute(); }, "deleteEntry");
 
         checkDeleteMeta(db, path);
     }
@@ -1475,7 +1476,7 @@ static std::mutex g_dbOpenMutex;
         q->bind(1, path);
         q->bind(2, static_cast<long long>(mtime));
         q->bind(3, ddb::io::Path(path).depth());
-        q->execute();
+        executeWithRetry([&q] { q->execute(); }, "addFolder");
     }
 
     void createMissingFolders(Database *db)
@@ -1550,13 +1551,13 @@ static std::mutex g_dbOpenMutex;
         update->bind(1, dest);
         update->bind(2, depth);
         update->bind(3, source);
-        update->execute();
+        executeWithRetry([&update] { update->execute(); }, "replacePath");
 
         // Move meta
         auto mq = db->query("UPDATE entries_meta SET path = ? WHERE path = ?");
         mq->bind(1, dest);
         mq->bind(2, source);
-        mq->execute();
+        executeWithRetry([&mq] { mq->execute(); }, "replacePath meta");
     }
 
     void moveEntry(Database *db, const std::string &source, const std::string &dest)
