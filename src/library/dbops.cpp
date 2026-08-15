@@ -1190,6 +1190,11 @@ static std::mutex g_dbOpenMutex;
         auto deleteQ = db->query("DELETE FROM entries WHERE path = ?");
         const auto updateQ = db->query(UPDATE_QUERY);
 
+        // Deliberately one IMMEDIATE transaction for the whole re-index (design choice, kept):
+        // the entries table is always left in a consistent, fully re-parsed state, even for
+        // consumers reading between statements. The cost is that re-index holds the sole SQLite
+        // writer lock for its entire duration; concurrent addToIndexEx callers see busy and
+        // retry/jitter per RetryPolicy.
         Transaction tx(db, Transaction::Mode::Immediate);
 
         while (q->fetch())
@@ -1260,6 +1265,11 @@ static std::mutex g_dbOpenMutex;
 
         const auto updateQ = db->query(UPDATE_QUERY);
 
+        // Deliberately one IMMEDIATE transaction for the whole rescan (design choice, kept):
+        // the entries table is always left in a consistent, fully re-parsed state, even for
+        // consumers reading between statements. The cost is that re-scan holds the sole SQLite
+        // writer lock for its entire duration; concurrent addToIndexEx callers see busy and
+        // retry/jitter per RetryPolicy.
         Transaction tx(db, Transaction::Mode::Immediate);
 
         while (q->fetch())
