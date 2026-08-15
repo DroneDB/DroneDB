@@ -21,16 +21,25 @@ namespace ddb
 
     void Database::afterOpen()
     {
+        // Busy timeout FIRST: journal-mode conversion needs to acquire an exclusive lock and
+        // must be able to wait for it. Kept small (~200ms): transaction-acquisition retry/jitter
+        // is owned by RetryPolicy, not by this floor (see 02-target-architecture.md §3.3) — a
+        // larger floor here would reintroduce the unjittered wait RetryPolicy is meant to remove.
+        // This is only a floor for statements executed outside an explicit Transaction.
+        constexpr int busyTimeoutMs = 200;
+        if (sqlite3_busy_timeout(db, busyTimeoutMs) != SQLITE_OK)
+        {
+            LOGD << "Cannot set busy timeout";
+        }
+
         spatialiteCache = spatialite_alloc_connection();
         spatialite_init_ex(db, spatialiteCache, 0);
 
         this->setJournalMode("wal");
-
-        // If table is locked, sleep up to 30 seconds
-        if (sqlite3_busy_timeout(db, 30000) != SQLITE_OK)
-        {
-            LOGD << "Cannot set busy timeout";
-        }
+        // Safe under WAL: durable across app crashes, can only lose the most recent transactions
+        // on OS/power failure — acceptable for an index that is reconstructible from the
+        // filesystem (see the reconciliation sweep in workstream 04).
+        this->exec("PRAGMA synchronous=NORMAL;");
     }
 
     const char *entriesTableDdl = R"<<<(

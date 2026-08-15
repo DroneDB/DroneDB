@@ -62,7 +62,9 @@
 
 using namespace ddb;
 
-char ddbLastError[255];
+// thread_local: each thread's failing call gets its own buffer, so a cross-thread failure never
+// clobbers another thread's error message (was a plain global; a real data race under concurrency).
+thread_local char ddbLastError[255];
 
 // Forward declarations
 std::string getBuildInfo();
@@ -396,6 +398,84 @@ DDBErr DDBAdd(const char* ddbPath,
                    outJson.push_back(j);
                    return true;
                });
+
+    utils::copyToPtr(outJson.dump(), output);
+    DDB_C_END
+}
+
+DDBErr DDBAddWithOptions(const char* ddbPath,
+                         const char** paths,
+                         int numPaths,
+                         const DDBAddOptions* options,
+                         char** output) {
+    DDB_C_BEGIN
+
+    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
+        throw InvalidArgsException("No directory provided");
+
+    if (!utils::isValidArrayParam(paths, numPaths))
+        throw InvalidArgsException("Invalid paths array parameter");
+
+    if (utils::isNullOrEmptyOrWhitespace(paths, numPaths))
+        throw InvalidArgsException("No paths provided");
+
+    if (utils::hasNullStringInArray(paths, numPaths))
+        throw InvalidArgsException("Path array contains null elements");
+
+    if (options == nullptr)
+        throw InvalidArgsException("Options pointer is null");
+
+    if (output == nullptr)
+        throw InvalidArgsException("Output pointer is null");
+
+    const auto db = ddb::open(std::string(ddbPath), true);
+    const std::vector<std::string> pathList(paths, paths + numPaths);
+
+    AddOptions addOpts;
+    addOpts.stopOnError = options->stopOnError;
+    addOpts.maxConflictRetries = options->maxConflictRetries;
+
+    AddResult result;
+    std::vector<std::string> expandedPaths;
+    // Expand paths per-item when stopOnError is false: expandPathList throws for a missing
+    // path, which would abort the entire batch and bypass per-item error capture.
+    if (addOpts.stopOnError) {
+        expandedPaths = ddb::expandPathList(pathList, options->recursive, 0);
+    } else {
+        for (const auto &p : pathList) {
+            try {
+                auto partial = ddb::expandPathList({p}, options->recursive, 0);
+                expandedPaths.insert(expandedPaths.end(), partial.begin(), partial.end());
+            } catch (const std::exception &ex) {
+                const char *code = "INDEX";
+                if (!!p.find('*') || !!p.find('?') || !!p.find('[')) code = "FS";
+                // Report the dataset-relative path (db root stripped), exactly like the
+                // entries/unchanged buckets: Registry C# matching keys on relative paths, a
+                // caller-supplied absolute path would never match the byPath lookup.
+                const auto relPath = io::Path(p).relativeTo(db->rootDirectory()).generic();
+                result.errors.push_back({relPath, code, ex.what()});
+            }
+        }
+    }
+
+    addToIndexEx(db.get(), expandedPaths, addOpts, result);
+
+    auto outJson = json::object();
+    outJson["entries"] = json::array();
+    for (auto& [entry, isUpdate] : result.entries) {
+        json j;
+        entry.toJSON(j);
+        j["status"] = isUpdate ? "updated" : "added";
+        outJson["entries"].push_back(j);
+    }
+
+    outJson["unchanged"] = json::array();
+    for (auto& path : result.unchanged)
+        outJson["unchanged"].push_back(json{{"path", path}});
+
+    outJson["errors"] = json::array();
+    for (auto& err : result.errors)
+        outJson["errors"].push_back(json{{"path", err.path}, {"code", err.code}, {"message", err.message}});
 
     utils::copyToPtr(outJson.dump(), output);
     DDB_C_END

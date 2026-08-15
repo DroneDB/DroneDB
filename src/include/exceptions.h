@@ -23,6 +23,11 @@ namespace ddb
     {
         using DBException::DBException;
     };
+    // SQLITE_BUSY / SQLITE_LOCKED: transient contention, safe to retry (see RetryPolicy).
+    class DBBusyException : public DBException
+    {
+        using DBException::DBException;
+    };
     class FSException : public AppException
     {
         using AppException::AppException;

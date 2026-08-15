@@ -23,7 +23,8 @@ extern "C"
         DDBERR_EXCEPTION = 1,       // Generic app exception
         DDBERR_BUILDDEPMISSING = 2, // Build skipped: dependency missing
         DDBERR_BUILDINPROGRESS = 3, // Build skipped: another process holds the lock
-        DDBERR_CANCELED = 4         // Operation canceled by the progress callback
+        DDBERR_CANCELED = 4,        // Operation canceled by the progress callback
+        DDBERR_BUSY = 5             // Transient DB contention (SQLITE_BUSY/LOCKED); safe to retry
     };
 
     /** Progress callback for long-running operations.
@@ -37,6 +38,11 @@ extern "C"
     try             \
     {
 #define DDB_C_END                  \
+    }                              \
+    catch (const DBBusyException &e) \
+    {                              \
+        DDBSetLastError(e.what()); \
+        return DDBERR_BUSY;        \
     }                              \
     catch (const AppException &e)  \
     {                              \
@@ -60,7 +66,11 @@ extern "C"
     }                              \
     return DDBERR_NONE;
 
-    extern char ddbLastError[255];
+#ifdef __cplusplus
+    extern thread_local char ddbLastError[255];
+#endif
+    // thread_local (src/library/ddb.cpp): DDBGetLastError() must be called on the same thread
+    // that made the failing call, before any await/thread-hop - see DDBSetLastError.
     void DDBSetLastError(const char *err);
 
     /** Get the last error message
@@ -88,6 +98,28 @@ extern "C"
      * @param recursive whether to recursively add folders
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBAdd(const char *ddbPath, const char **paths, int numPaths, char **output, bool recursive = false);
+
+    /** Options for DDBAddWithOptions (03-workstream-dronedb-core.md §3.2). Caller must
+     * initialize every field explicitly; these are semantic defaults, not enforced ones. */
+    typedef struct {
+        bool recursive;
+        bool stopOnError;        // default true == DDBAdd's semantics
+        int maxConflictRetries;  // default 2
+    } DDBAddOptions;
+
+    /** Add one or more files to a DroneDB database with per-item error isolation.
+     * @param ddbPath path to a DroneDB database (parent of ".ddb")
+     * @param paths array of paths to add to index
+     * @param numPaths number of paths
+     * @param options add behaviour; when options->stopOnError is false, a corrupt/unreadable
+     *                file fails only itself instead of aborting the whole batch
+     * @param output pointer to C-string where to store output JSON:
+     *               { "entries": [...], "unchanged": [...], "errors": [...] } — every input
+     *               path appears in exactly one of the three arrays
+     * @return DDBERR_NONE on success (even if options->stopOnError is false and some items
+     *         failed — check the "errors" array), an error otherwise */
+    DDB_DLL DDBErr DDBAddWithOptions(const char *ddbPath, const char **paths, int numPaths,
+                                     const DDBAddOptions *options, char **output);
 
     /** Remove one or more files to a DroneDB database
      * @param ddbPath path to a DroneDB database (parent of ".ddb")
