@@ -764,7 +764,8 @@ static std::mutex g_dbOpenMutex;
     void commitAddEntries(Database *db, const std::vector<ComputedAddItem> &computed,
                           const fs::path &directory, AddCallback callback,
                           std::vector<std::pair<Entry, bool>> *accepted,
-                          std::vector<fs::path> *conflicts) {
+                          std::vector<fs::path> *conflicts,
+                          std::vector<std::string> *unchanged) {
         if (computed.empty())
             return;
 
@@ -819,7 +820,11 @@ static std::mutex g_dbOpenMutex;
                 const long long dbMtime = recheckQ->getInt64(0);
                 const std::string dbHash = recheckQ->getText(1);
                 if (dbMtime == ci.entry.mtime && dbHash == ci.entry.hash) {
-                    // Unchanged — skip
+                    // Unchanged — a concurrent writer already committed the identical
+                    // row. Report the path (null-guarded) so the completeness contract
+                    // holds: every input lands in exactly one of entries/unchanged/errors.
+                    if (unchanged != nullptr)
+                        unchanged->push_back(ci.entry.path);
                     continue;
                 }
                 actuallyInsert = false; // treat as UPDATE instead
@@ -878,7 +883,7 @@ static std::mutex g_dbOpenMutex;
         std::vector<std::string> discardedUnchanged;
         auto planned = planAddCandidates(db, pathList, directory);
         auto computed = computeAddEntries(planned, directory, /*stopOnError=*/true, discardedErrors, discardedUnchanged);
-        commitAddEntries(db, computed, directory, callback, nullptr, nullptr);
+        commitAddEntries(db, computed, directory, callback, nullptr, nullptr, nullptr);
     }
 
     void addToIndexEx(Database *db, const std::vector<std::string> &paths,
@@ -899,7 +904,8 @@ static std::mutex g_dbOpenMutex;
                                               result.errors, result.unchanged);
 
             std::vector<fs::path> conflicts;
-            commitAddEntries(db, computed, directory, callback, &result.entries, &conflicts);
+            commitAddEntries(db, computed, directory, callback, &result.entries, &conflicts,
+                             &result.unchanged);
 
             pathList = conflicts; // bounded re-plan: only what actually changed under us
         }

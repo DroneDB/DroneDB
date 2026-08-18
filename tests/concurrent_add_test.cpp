@@ -14,13 +14,16 @@
 #include <chrono>
 #include <cstdio>
 #include <fstream>
+#include <mutex>
 #include <numeric>
 #include <random>
+#include <set>
 #include <thread>
 #include <vector>
 
 #include "ddb.h"
 #include "gtest/gtest.h"
+#include "json.h"
 #include "test.h"
 #include "testarea.h"
 #include "utils.h"
@@ -113,6 +116,127 @@ TEST(concurrentAdd, manyThreadsOneDatabaseBaseline) {
             all.empty() ? 0.0 : all.back());
 
     EXPECT_EQ(failures.load(), 0);
+}
+
+// Writes `sizeBytes` of deterministic pseudo-random ASCII digits so every writer parses the exact
+// same bytes for a given seed (stable SHA256 and mtime) while the content stays plain text that
+// DroneDB fingerprints as a generic, indexable entry.
+void writeRandomTextFile(const fs::path &path, size_t sizeBytes, unsigned seed) {
+    std::mt19937 rng(seed);
+    std::vector<char> buf(sizeBytes, '0');
+    for (auto &b : buf) b = static_cast<char>('0' + static_cast<int>(rng() % 10));
+    std::ofstream f(path.string(), std::ios::binary);
+    f.write(buf.data(), static_cast<std::streamsize>(buf.size()));
+}
+
+// Regression for the commitAddEntries() completeness-contract gap (DroneDB-Roadmap Phase A,
+// adversarial finding #2). When a planned INSERT re-checks under the COMMIT transaction and finds
+// that a concurrent writer already committed an identical row (same path, same mtime AND same
+// hash), that path used to hit a bare `continue` and be reported in NONE of
+// entries/unchanged/errors. The caller then saw entries+unchanged+errors < inputPaths and -- on
+// the Registry side -- quarantined an already-indexed file, which the reconciliation sweep
+// re-indexed, looping.
+//
+// The race window cannot be forced deterministically: COMMIT holds an IMMEDIATE transaction, so a
+// second connection cannot write from inside the add callback. This stress shape is the only
+// viable coverage: several threads fire DDBAddWithOptions on the SAME set of identical files in
+// the same wave, and every successful call must uphold
+// entries.size() + unchanged.size() + errors.size() == inputPaths.size().
+//
+// Before the fix this fails (a losing writer reports one or more vanished paths); after the fix
+// the concurrent-identical path is routed into `unchanged`. Run with --gtest_repeat to raise the
+// hit rate (each repeat gets a fresh database).
+TEST(concurrentAdd, completenessUnderConcurrentIdenticalAdds) {
+    TestArea ta(TEST_NAME, true);
+    const auto root = ta.getFolder("ds");
+
+    char *outPath = nullptr;
+    ASSERT_EQ(DDBInit(root.string().c_str(), &outPath), DDBERR_NONE);
+    DDBFree(outPath);
+
+    const int T = 8;  // concurrent writers racing the same files
+    const int N = 20; // identical files; every writer adds this same set of N paths
+
+    std::vector<fs::path> files(N);
+    std::vector<std::string> pathStrs(N);
+    std::vector<const char *> pathPtrs(N);
+    for (int i = 0; i < N; ++i) {
+        files[i] = root / ("shared_" + std::to_string(i) + ".txt");
+        writeRandomTextFile(files[i], 256 * 1024, static_cast<unsigned>(i));
+        pathStrs[i] = files[i].string();
+        pathPtrs[i] = pathStrs[i].c_str();
+    }
+
+    std::atomic<int> violations{0}; // calls whose buckets did not sum to N (the contract gap)
+    std::atomic<int> duplicates{0}; // a path reported in more than one bucket
+    std::atomic<int> busy{0};
+    std::atomic<int> otherErrors{0};
+    std::string lastViolation;
+    std::mutex violationMx; // serializes the single diagnostic string
+
+    const DDBAddOptions opts{false, false, 2}; // recursive, stopOnError, maxConflictRetries
+
+    // One-shot C++17 barrier (std::countdown_latch is C++20): the last writer to arrive opens
+    // the gate; the others spin until it does, so all writers fire the add in the same wave.
+    std::atomic<int> arrived{0};
+    std::atomic<bool> go{false};
+
+    std::vector<std::thread> threads;
+    for (int t = 0; t < T; ++t) {
+        threads.emplace_back([&] {
+            if (arrived.fetch_add(1, std::memory_order_acq_rel) + 1 == T)
+                go.store(true, std::memory_order_release);
+            while (!go.load(std::memory_order_acquire))
+                std::this_thread::yield();
+
+            char *out = nullptr;
+            const auto err = DDBAddWithOptions(root.string().c_str(), pathPtrs.data(), N, &opts,
+                                               &out);
+            if (err != DDBERR_NONE) {
+                // No completed result, so nothing to inspect: not a contract violation.
+                if (err == DDBERR_BUSY)
+                    ++busy;
+                else
+                    ++otherErrors;
+                DDBFree(out); // no-op when out is nullptr
+                return;
+            }
+
+            const auto j = json::parse(out);
+            DDBFree(out);
+
+            const int entries = static_cast<int>(j["entries"].size());
+            const int unchanged = static_cast<int>(j["unchanged"].size());
+            const int errors = static_cast<int>(j["errors"].size());
+
+            if (entries + unchanged + errors != N) {
+                ++violations;
+                std::lock_guard<std::mutex> lk(violationMx);
+                lastViolation = "entries=" + std::to_string(entries) +
+                                " unchanged=" + std::to_string(unchanged) +
+                                " errors=" + std::to_string(errors) +
+                                " input=" + std::to_string(N);
+            } else {
+                // A double-count could mask a vanish that still sums to N, so separately check
+                // that every path lands in exactly one bucket.
+                std::set<std::string> seen;
+                for (const auto &e : j["entries"])
+                    if (!seen.insert(e["path"].get<std::string>()).second) ++duplicates;
+                for (const auto &e : j["unchanged"])
+                    if (!seen.insert(e["path"].get<std::string>()).second) ++duplicates;
+                for (const auto &e : j["errors"])
+                    if (!seen.insert(e["path"].get<std::string>()).second) ++duplicates;
+            }
+        });
+    }
+    for (auto &th : threads) th.join();
+
+    if (violations.load() != 0 || otherErrors.load() != 0)
+        fprintf(stderr, "[completeness] busy=%d otherErrors=%d violations=%d last=\"%s\"\n",
+                busy.load(), otherErrors.load(), violations.load(), lastViolation.c_str());
+
+    EXPECT_EQ(violations.load(), 0);
+    EXPECT_EQ(duplicates.load(), 0);
 }
 
 } // namespace
