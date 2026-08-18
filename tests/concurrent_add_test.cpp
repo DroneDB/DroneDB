@@ -171,6 +171,7 @@ TEST(concurrentAdd, completenessUnderConcurrentIdenticalAdds) {
     std::atomic<int> duplicates{0}; // a path reported in more than one bucket
     std::atomic<int> busy{0};
     std::atomic<int> otherErrors{0};
+    std::atomic<int> okCount{0}; // successful calls whose buckets were inspected
     std::string lastViolation;
     std::mutex violationMx; // serializes the single diagnostic string
 
@@ -202,8 +203,17 @@ TEST(concurrentAdd, completenessUnderConcurrentIdenticalAdds) {
                 return;
             }
 
-            const auto j = json::parse(out);
+            // An uncaught exception escaping the worker would std::terminate the whole run.
+            json j;
+            try {
+                j = json::parse(out);
+            } catch (const std::exception &e) {
+                DDBFree(out);
+                ++otherErrors; // malformed output is an API-level defect
+                return;
+            }
             DDBFree(out);
+            ++okCount;
 
             const int entries = static_cast<int>(j["entries"].size());
             const int unchanged = static_cast<int>(j["unchanged"].size());
@@ -237,6 +247,10 @@ TEST(concurrentAdd, completenessUnderConcurrentIdenticalAdds) {
 
     EXPECT_EQ(violations.load(), 0);
     EXPECT_EQ(duplicates.load(), 0);
+    // A run where every call failed would pass the contract checks above with zero coverage,
+    // so fail loudly on non-busy errors and require at least one inspected result.
+    EXPECT_EQ(otherErrors.load(), 0);
+    EXPECT_GE(okCount.load(), 1);
 }
 
 } // namespace
