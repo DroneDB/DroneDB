@@ -3,11 +3,11 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 // Baseline / regression harness for the "database is locked" incident under concurrent DDBAdd
-// calls to the same dataset (see DroneDB-Roadmap/WORKING/ImproveParallelWrites).
+// calls to the same dataset.
 //
 // Phases 1-3 (transaction RAII, plan/compute/commit split, retry policy) are implemented, so this
-// is now a real correctness gate (see 06-testing-and-validation.md, Phase 2 exit criteria):
-// concurrent DDBAdd calls to the same dataset must not surface SQLITE_BUSY/"database is locked".
+// is now a real correctness gate: concurrent DDBAdd calls to the same dataset must not surface
+// SQLITE_BUSY/"database is locked".
 
 #include <algorithm>
 #include <atomic>
@@ -50,7 +50,7 @@ double percentile(std::vector<double> sorted, double p) {
     return sorted[idx];
 }
 
-// baseline harness described in 06-testing-and-validation.md §2.2 / §1.
+// Baseline concurrent-write harness.
 TEST(concurrentAdd, manyThreadsOneDatabaseBaseline) {
     TestArea ta(TEST_NAME, true);
     const auto root = ta.getFolder("ds");
@@ -129,8 +129,8 @@ void writeRandomTextFile(const fs::path &path, size_t sizeBytes, unsigned seed) 
     f.write(buf.data(), static_cast<std::streamsize>(buf.size()));
 }
 
-// Regression for the commitAddEntries() completeness-contract gap (DroneDB-Roadmap Phase A,
-// adversarial finding #2). When a planned INSERT re-checks under the COMMIT transaction and finds
+// Regression for the commitAddEntries() completeness-contract gap. When a planned INSERT
+// re-checks under the COMMIT transaction and finds
 // that a concurrent writer already committed an identical row (same path, same mtime AND same
 // hash), that path used to hit a bare `continue` and be reported in NONE of
 // entries/unchanged/errors. The caller then saw entries+unchanged+errors < inputPaths and -- on

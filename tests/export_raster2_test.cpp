@@ -158,7 +158,7 @@ MANUAL_TEST_F(ExportRaster2Test, MemoryBounded) {
     const size_t deltaBytes = peak.load() > baseline ? peak.load() - baseline : 0;
     const double deltaMb = static_cast<double>(deltaBytes) / (1024.0 * 1024.0);
     // Whole-image processing of this raster would require >1 GB; windowed
-    // processing must stay well under the 600 MB host budget (roadmap DoD).
+    // processing must stay well under the 600 MB host budget.
     EXPECT_LT(deltaMb, 600.0) << "Peak memory delta was " << deltaMb << " MB";
 }
 

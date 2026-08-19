@@ -14,11 +14,10 @@ namespace {
 
 using namespace ddb;
 
-// NOTE (documented finding, see session notes / plan deviation log): the plan's "poison pill"
-// exit criterion for Phase 3 - a batch with one corrupt/missing file committing the other n-1
-// and reporting exactly one error - could not be exercised end-to-end through the public
-// addToIndex/addToIndexEx entry points as written. Two independent, pre-existing behaviors
-// (neither introduced by phases 1-3) block it:
+// NOTE (documented finding): the "poison pill" behavior - a batch with one corrupt/missing
+// file committing the other n-1 and reporting exactly one error - could not be exercised
+// end-to-end through the public addToIndex/addToIndexEx entry points as written. Two
+// independent, pre-existing behaviors block it:
 //   1. getIndexPathList() (dbops.cpp) eagerly validates existence for every literal input path
 //      *before* PLAN/COMPUTE ever run, and throws FSException for the whole call if any path is
 //      missing - regardless of whether that path was previously indexed. This makes a
@@ -29,11 +28,10 @@ using namespace ddb;
 // computeAddEntries()'s per-item try/catch for FSException/GDALException/PDALException/
 // JSONException/IndexException is still implemented and structurally correct (see
 // stopOnErrorAbortsWholeBatch below for a related, verified behavior), but a genuine poison-pill
-// regression test requires either loosening getIndexPathList's existence check to be per-item
-// (a wider behavior change affecting syncIndex/rescanIndex/moveEntry/removeFromIndex, out of
-// scope for this session - see 08-decision-log.md-style note in session memory) or a real
-// propagating parser exception (none exist today). Flagged for the plan owner rather than
-// silently faked.
+// regression test would require either loosening getIndexPathList's existence check to be
+// per-item (a wider behavior change affecting
+// syncIndex/rescanIndex/moveEntry/removeFromIndex) or a real propagating parser exception (none
+// exist today).
 
 // With stopOnError == true (the default, matching addToIndex()'s legacy semantics), a single
 // item failure still aborts the whole call and no rows are committed.
@@ -60,8 +58,8 @@ TEST(addToIndexEx, stopOnErrorAbortsWholeBatch) {
     EXPECT_EQ(q->getInt(0), 0);
 }
 
-// Every input path appears in exactly one of entries/unchanged/errors (completeness contract,
-// 02-target-architecture.md §5.1) across repeated calls (second call finds good1.txt unchanged).
+// Every input path appears in exactly one of entries/unchanged/errors (completeness contract)
+// across repeated calls (second call finds good1.txt unchanged).
 TEST(addToIndexEx, completenessContractAcrossCalls) {
     TestArea ta(TEST_NAME, true);
     const auto root = ta.getFolder("ds");

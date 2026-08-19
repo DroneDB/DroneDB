@@ -647,7 +647,7 @@ std::vector<std::string> getGltfDependencies(const std::string& gltf) {
 /**
  * @brief Compute Obj2Tiles parameters based on model face count.
  *
- * Threshold bands (from spec §4):
+ * Threshold bands:
  * - Tiny:    < 10K faces  → lods=1, divisions=0, octree=false  (depth=0,   ≤ 1 tile)
  * - Small:   10K–50K     → lods=2, divisions=0, octree=true   (depth=1,   ≤ 4 tiles)
  * - Medium:  50K–200K    → lods=2, divisions=1, octree=true   (depth=2,  ≤ 16 tiles)

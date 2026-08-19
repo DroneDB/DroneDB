@@ -695,7 +695,7 @@ static std::mutex g_dbOpenMutex;
     // IndexException) are captured into `errors` when `stopOnError` is false; with
     // `stopOnError` true they propagate and abort the whole call, matching addToIndex()'s
     // original all-or-nothing semantics. Database-scoped exceptions (DBException,
-    // DBBusyException, bad_alloc, anything else) always propagate (03-workstream §3.3).
+    // DBBusyException, bad_alloc, anything else) always propagate.
     std::vector<ComputedAddItem> computeAddEntries(const std::vector<PlannedAddItem> &planned,
                                                     const fs::path &directory, bool stopOnError,
                                                     std::vector<AddItemError> &errors,
@@ -756,7 +756,7 @@ static std::mutex g_dbOpenMutex;
     }
 
     // COMMIT: Transaction(Immediate); re-verify (mtime,size) to guard against a file that
-    // changed between COMPUTE and COMMIT (TOCTOU, see 02-target-architecture.md §3.1), then
+    // changed between COMPUTE and COMMIT (TOCTOU), then
     // INSERT/UPDATE. Only row writes happen inside the lock — milliseconds, not seconds.
     // Items whose (mtime,size) changed since COMPUTE are reported via `conflicts` (absolute
     // paths) instead of being written with stale metadata; the caller decides whether to
