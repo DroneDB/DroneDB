@@ -228,8 +228,18 @@ if ($Builder -eq 'Ninja') {
             foreach ($line in (Get-Content $cacheFile)) {
                 if ($line -match '^CMAKE_CXX_COMPILER:[^=]*=(.*)$') { $cachedCxx = $matches[1]; break }
             }
+            $currentCxx = (Get-Command cl.exe -ErrorAction SilentlyContinue).Source
+            $wipeReason = $null
             if ($cachedCxx -and $cachedCxx -notmatch '(?i)cl\.exe$') {
-                Write-Host "  Existing untwine cache uses non-MSVC compiler '$cachedCxx'. Wiping for a clean MSVC reconfigure." -ForegroundColor Yellow
+                $wipeReason = "uses a non-MSVC compiler '$cachedCxx'"
+            } elseif ($currentCxx -and $cachedCxx -and $cachedCxx.Replace('\', '/').ToLowerInvariant() -ne $currentCxx.Replace('\', '/').ToLowerInvariant()) {
+                # Guards against VS upgrades: the cache may pin an old cl.exe that
+                # then compiles against the new STL headers and fails with
+                # STL1001 "Unexpected compiler version".
+                $wipeReason = "pins a stale compiler '$cachedCxx' (active cl.exe is '$currentCxx')"
+            }
+            if ($wipeReason) {
+                Write-Host "  Existing untwine cache $wipeReason. Wiping for a clean reconfigure." -ForegroundColor Yellow
                 Remove-Item -Recurse -Force $untwineBuildDir
                 New-Item -ItemType Directory -Path $untwineBuildDir | Out-Null
             }

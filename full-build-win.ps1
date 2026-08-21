@@ -158,6 +158,28 @@ function Test-DdbFilesInUse {
     return $null
 }
 
+function Clean-BuildDirectory {
+    # Removes the root CMake cache, built binaries, and nested sub-project build
+    # directories that pin a compiler in their own CMakeCache.txt (e.g.
+    # build\untwine, produced by scripts\build-untwine.ps1). Those nested caches
+    # survive a root clean, and after a Visual Studio / compiler upgrade they
+    # cause STL1001 "Unexpected compiler version" failures.
+    Write-Info "Cleaning build directory..."
+    $cleanBuildDir = Join-Path $PSScriptRoot "build"
+    Remove-Item -Path (Join-Path $cleanBuildDir "CMakeCache.txt") -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path (Join-Path $cleanBuildDir "CMakeFiles") -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path (Join-Path $cleanBuildDir "*.dll") -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path (Join-Path $cleanBuildDir "*.exe") -Force -ErrorAction SilentlyContinue
+
+    $nestedCaches = Get-ChildItem -Path $cleanBuildDir -Recurse -Filter "CMakeCache.txt" -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -notlike "*\vcpkg_installed\*" -and $_.FullName -notlike "*\vcpkg\*" }
+    foreach ($cache in $nestedCaches) {
+        Write-Host "  - Removing stale sub-build: $($cache.DirectoryName)" -ForegroundColor Gray
+        Remove-Item -Path $cache.DirectoryName -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    Write-Success "Build directory cleaned."
+}
+
 function Find-VisualStudio {
     Write-Info "Searching for Visual Studio installation..."
 
@@ -354,12 +376,7 @@ try {
 
     # Clean build if requested
     if ($Clean -and (Test-Path $buildDir)) {
-        Write-Info "Cleaning build directory..."
-        Remove-Item -Path (Join-Path $buildDir "CMakeCache.txt") -Force -ErrorAction SilentlyContinue
-        Remove-Item -Path (Join-Path $buildDir "CMakeFiles") -Recurse -Force -ErrorAction SilentlyContinue
-        Remove-Item -Path (Join-Path $buildDir "*.dll") -Force -ErrorAction SilentlyContinue
-        Remove-Item -Path (Join-Path $buildDir "*.exe") -Force -ErrorAction SilentlyContinue
-        Write-Success "Build directory cleaned."
+        Clean-BuildDirectory
     }
 
     # Change to build directory
@@ -374,8 +391,30 @@ try {
     # Initialize build environment
     Initialize-BuildEnvironment -VcvarsPath $vcvarsPath -BuilderType $Builder
 
-    # Check if the build directory was configured with a different generator
+    # Detect a stale toolchain: if the compiler pinned in CMakeCache.txt no
+    # longer matches the active cl.exe (e.g. after a Visual Studio upgrade),
+    # the build fails with STL1001 "Unexpected compiler version" (old cl.exe
+    # + new STL headers). Auto-clean and reconfigure so the script self-heals.
     $cmakeCachePath = Join-Path $buildDir "CMakeCache.txt"
+    if (Test-Path $cmakeCachePath) {
+        $cacheMatch = Select-String -Path $cmakeCachePath -Pattern '^CMAKE_CXX_COMPILER:FILEPATH=(.*)$' | Select-Object -First 1
+        $cachedCompiler = if ($cacheMatch) { ($cacheMatch.Matches[0].Groups[1].Value).Trim().Trim('"').Replace('\', '/') } else { '' }
+        $clCmd = Get-Command cl.exe -ErrorAction SilentlyContinue
+        if ($cachedCompiler -and $clCmd) {
+            $currentCompiler = $clCmd.Source.Replace('\', '/')
+            if ($cachedCompiler.ToLowerInvariant() -ne $currentCompiler.ToLowerInvariant()) {
+                Write-Host ""
+                Write-Host "WARNING: The build cache pins a different C++ compiler than the active one." -ForegroundColor Yellow
+                Write-Host "  cached : $cachedCompiler" -ForegroundColor Yellow
+                Write-Host "  active : $currentCompiler" -ForegroundColor Yellow
+                Write-Host "This happens after a Visual Studio upgrade. Auto-cleaning the build directory and reconfiguring..." -ForegroundColor Yellow
+                Write-Host ""
+                Clean-BuildDirectory
+            }
+        }
+    }
+
+    # Check if the build directory was configured with a different generator
     if (Test-Path $cmakeCachePath) {
         $cachedGenerator = Get-Content $cmakeCachePath | Where-Object { $_ -match '^CMAKE_GENERATOR:INTERNAL=(.+)$' } | ForEach-Object { $matches[1] }
         if ($cachedGenerator) {
