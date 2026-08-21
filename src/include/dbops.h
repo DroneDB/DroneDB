@@ -19,7 +19,7 @@ namespace ddb
     typedef std::function<void(const std::string &path)> RemoveCallback;
     typedef std::function<bool(const Entry &e, bool success, const std::string &error)> RescanCallback;
 
-    // Options for addToIndexEx / DDBAddWithOptions (03-workstream-dronedb-core.md §3.2).
+    // Options for addToIndexEx / DDBAddWithOptions.
     struct DDB_DLL AddOptions {
         bool stopOnError = true;      // default == today's addToIndex() semantics
         int maxConflictRetries = 2;   // bounded re-plan passes on TOCTOU conflict
@@ -34,7 +34,7 @@ namespace ddb
     };
 
     // Every path passed to addToIndexEx appears in exactly one of entries/unchanged/errors
-    // (completeness contract, 02-target-architecture.md §5.1).
+    // (completeness contract).
     struct DDB_DLL AddResult {
         std::vector<std::pair<Entry, bool>> entries; // Entry + isUpdate (added=false, updated=true)
         std::vector<std::string> unchanged;
@@ -71,7 +71,7 @@ namespace ddb
     DDB_DLL void addToIndex(Database *db, const std::vector<std::string> &paths, AddCallback callback = nullptr);
 
     /**
-     * Batch add with per-item error isolation (03-workstream-dronedb-core.md §3.2/§3.3).
+     * Batch add with per-item error isolation.
      * With options.stopOnError == false, an item-scoped failure (FSException, GDALException,
      * PDALException, JSONException, IndexException) is captured in result.errors instead of
      * aborting the batch; the other items still commit. Database-scoped failures (DBException,

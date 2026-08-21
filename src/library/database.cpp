@@ -23,7 +23,7 @@ namespace ddb
     {
         // Busy timeout FIRST: journal-mode conversion needs to acquire an exclusive lock and
         // must be able to wait for it. Kept small (~200ms): transaction-acquisition retry/jitter
-        // is owned by RetryPolicy, not by this floor (see 02-target-architecture.md §3.3) — a
+        // is owned by RetryPolicy, not by this floor — a
         // larger floor here would reintroduce the unjittered wait RetryPolicy is meant to remove.
         // This is only a floor for statements executed outside an explicit Transaction.
         constexpr int busyTimeoutMs = 200;
@@ -38,7 +38,7 @@ namespace ddb
         this->setJournalMode("wal");
         // Safe under WAL: durable across app crashes, can only lose the most recent transactions
         // on OS/power failure — acceptable for an index that is reconstructible from the
-        // filesystem (see the reconciliation sweep in workstream 04).
+        // filesystem.
         this->exec("PRAGMA synchronous=NORMAL;");
     }
 
