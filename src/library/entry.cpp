@@ -1021,8 +1021,13 @@ namespace ddb
             return identifyPly(path);
         }
 
-        if (p.checkExtension({"obj", "gltf", "glb"}))
+        if (p.checkExtension({"obj"}))
             return EntryType::Model;
+
+        // A .gltf/.glb can also carry point geometry (3D Gaussian Splat tiles) or lines,
+        // neither of which yields a buildable model: classify from the declared primitives.
+        if (p.checkExtension({"gltf", "glb"}))
+            return identifyGltf(path);
 
         // OGC 3D Tiles archive (.3tz, a ZIP container with tileset.json at its root).
         // The extension is the signal; ZIP validity is checked when the footprint is
