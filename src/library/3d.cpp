@@ -680,12 +680,15 @@ EntryType identifyGltf(const fs::path& gltfFile) {
         return EntryType::Generic;
     }
 
-    if (!gltfJson.contains("meshes") || !gltfJson["meshes"].is_array()) {
+    // glTF 2.0 declares "meshes" as an array; glTF 1.0 declares it as an object
+    // keyed by mesh id. Both wrap mesh entries shaped the same way otherwise.
+    const auto& meshes = gltfJson.contains("meshes") ? gltfJson["meshes"] : json();
+    if (!meshes.is_array() && !meshes.is_object()) {
         LOGD << gltfFile.string() << " declares no meshes, treating as generic";
         return EntryType::Generic;
     }
 
-    for (const auto& mesh : gltfJson["meshes"]) {
+    for (const auto& mesh : meshes) {
         if (!mesh.contains("primitives") || !mesh["primitives"].is_array())
             continue;
 
