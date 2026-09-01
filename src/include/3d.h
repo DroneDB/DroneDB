@@ -8,6 +8,8 @@
 #include <optional>
 #include <string>
 #include "ddb_export.h"
+#include "entry_types.h"
+#include "fs.h"
 #ifndef NO_NEXUS
 #include <nxs.h>
 #endif
@@ -127,6 +129,25 @@ namespace ddb
 
     DDB_DLL std::vector<std::string> getObjDependencies(const std::string &obj);
     DDB_DLL std::vector<std::string> getGltfDependencies(const std::string &gltf);
+
+    /**
+     * @brief Classify a glTF/GLB file from the primitives declared in its JSON.
+     *
+     * The .gltf/.glb container is not limited to triangle meshes: it is also used
+     * to ship point geometry (for instance the 3D Gaussian Splatting tiles emitted
+     * by 3D Tiles exporters, which use `mode: 0` plus KHR_gaussian_splatting) and
+     * line geometry. Only triangle geometry can produce a 3D model build artifact,
+     * so everything else is reported as EntryType::Generic and is consequently not
+     * buildable (see isBuildableInternal in build.cpp).
+     *
+     * Mirrors @ref identifyPly: best-effort and never throws. A missing, unreadable
+     * or malformed file is reported as EntryType::Generic, so it can still be
+     * indexed instead of failing the whole parse.
+     *
+     * @param gltfFile Path to the .gltf or .glb file.
+     * @return EntryType::Model when triangle geometry is present, EntryType::Generic otherwise.
+     */
+    DDB_DLL EntryType identifyGltf(const fs::path &gltfFile);
 
     /**
      * @brief Convert glTF/GLB to OBJ or PLY format

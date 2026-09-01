@@ -7,6 +7,7 @@
 #include <fstream>
 #include <optional>
 #include <regex>
+#include <system_error>
 
 #include "exceptions.h"
 #include "json.h"
@@ -180,6 +181,24 @@ json readGlbJson(const std::string& glbPath) {
     // First chunk should be JSON (type 0x4E4F534A)
     if (chunk.chunkType != 0x4E4F534A)
         throw AppException("Invalid GLB file: first chunk is not JSON");
+
+    // Both header.length and chunk.chunkLength come straight from the file, so bound
+    // them against the real size before allocating: a corrupt or hostile GLB could
+    // otherwise ask for up to 4 GiB.
+    constexpr uint32_t GlbHeaderSize = 12;
+    constexpr uint32_t GlbChunkHeaderSize = 8;
+
+    std::error_code sizeErr;
+    const auto fileSize = fs::file_size(glbPath, sizeErr);
+    if (sizeErr)
+        throw FSException("Cannot determine size of GLB file: " + glbPath);
+
+    if (header.length > fileSize)
+        throw AppException("Invalid GLB file: declared length exceeds file size");
+
+    if (header.length < GlbHeaderSize + GlbChunkHeaderSize ||
+        chunk.chunkLength > header.length - GlbHeaderSize - GlbChunkHeaderSize)
+        throw AppException("Invalid GLB file: JSON chunk length exceeds declared length");
 
     // Read JSON data
     std::vector<char> jsonData(chunk.chunkLength);
@@ -642,6 +661,48 @@ std::vector<std::string> getGltfDependencies(const std::string& gltf) {
     } catch (const std::exception& e) {
         throw AppException("Error reading GLTF file: " + std::string(e.what()));
     }
+}
+
+EntryType identifyGltf(const fs::path& gltfFile) {
+    json gltfJson;
+
+    try {
+        if (isGlbFile(gltfFile)) {
+            gltfJson = readGlbJson(gltfFile.string());
+        } else {
+            std::ifstream file(gltfFile.string());
+            if (!file.is_open())
+                return EntryType::Generic;
+            file >> gltfJson;
+        }
+    } catch (const std::exception& e) {
+        LOGD << "Cannot classify " << gltfFile.string() << ", not a readable glTF: " << e.what();
+        return EntryType::Generic;
+    }
+
+    if (!gltfJson.contains("meshes") || !gltfJson["meshes"].is_array()) {
+        LOGD << gltfFile.string() << " declares no meshes, treating as generic";
+        return EntryType::Generic;
+    }
+
+    for (const auto& mesh : gltfJson["meshes"]) {
+        if (!mesh.contains("primitives") || !mesh["primitives"].is_array())
+            continue;
+
+        for (const auto& primitive : mesh["primitives"]) {
+            // glTF 2.0: mode defaults to 4 (TRIANGLES) when omitted.
+            // 4 = TRIANGLES, 5 = TRIANGLE_STRIP, 6 = TRIANGLE_FAN.
+            int mode = 4;
+            if (primitive.contains("mode") && primitive["mode"].is_number_integer())
+                mode = primitive["mode"].get<int>();
+
+            if (mode >= 4 && mode <= 6)
+                return EntryType::Model;
+        }
+    }
+
+    LOGD << gltfFile.string() << " has no triangle primitives, treating as generic";
+    return EntryType::Generic;
 }
 
 /**
