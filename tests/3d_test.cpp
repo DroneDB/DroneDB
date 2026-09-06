@@ -82,6 +82,79 @@ namespace
         out.write(json.data(), static_cast<std::streamsize>(json.size()));
     }
 
+    // Writes the GLB layout exporters actually emit: a space-padded JSON chunk followed
+    // by a zero-padded BIN chunk, both 4-byte aligned. declaredTotalLen overrides the
+    // header's length field when non-zero, to exercise inconsistent-but-readable files.
+    void writeGlbWithBin(const fs::path& path,
+                         const std::string& json,
+                         const std::vector<uint8_t>& bin,
+                         uint32_t declaredTotalLen = 0) {
+        std::string paddedJson = json;
+        while (paddedJson.size() % 4 != 0)
+            paddedJson += ' ';
+
+        std::vector<uint8_t> paddedBin = bin;
+        while (paddedBin.size() % 4 != 0)
+            paddedBin.push_back(0);
+
+        const uint32_t jsonLen = static_cast<uint32_t>(paddedJson.size());
+        const uint32_t binLen = static_cast<uint32_t>(paddedBin.size());
+        const uint32_t realTotalLen = 12 + 8 + jsonLen + 8 + binLen;
+
+        std::ofstream out(path.string(), std::ios::binary);
+        const uint32_t magic = 0x46546C67;    // "glTF"
+        const uint32_t version = 2;
+        const uint32_t totalLen = declaredTotalLen != 0 ? declaredTotalLen : realTotalLen;
+        out.write(reinterpret_cast<const char*>(&magic), 4);
+        out.write(reinterpret_cast<const char*>(&version), 4);
+        out.write(reinterpret_cast<const char*>(&totalLen), 4);
+
+        const uint32_t jsonChunkType = 0x4E4F534A; // "JSON"
+        out.write(reinterpret_cast<const char*>(&jsonLen), 4);
+        out.write(reinterpret_cast<const char*>(&jsonChunkType), 4);
+        out.write(paddedJson.data(), static_cast<std::streamsize>(paddedJson.size()));
+
+        const uint32_t binChunkType = 0x004E4942; // "BIN\0"
+        out.write(reinterpret_cast<const char*>(&binLen), 4);
+        out.write(reinterpret_cast<const char*>(&binChunkType), 4);
+        out.write(reinterpret_cast<const char*>(paddedBin.data()),
+                  static_cast<std::streamsize>(paddedBin.size()));
+    }
+
+    // A single-triangle asset whose buffer has no uri: its bytes live in the GLB BIN chunk.
+    std::string glbTriangleGltfJson(size_t binLength, const char* modeField) {
+        std::ostringstream j;
+        j << "{"
+             "\"asset\":{\"version\":\"2.0\"},"
+             "\"buffers\":[{\"byteLength\":" << binLength << "}],"
+             "\"bufferViews\":["
+             "{\"buffer\":0,\"byteOffset\":0,\"byteLength\":36},"
+             "{\"buffer\":0,\"byteOffset\":36,\"byteLength\":6}"
+             "],"
+             "\"accessors\":["
+             "{\"bufferView\":0,\"componentType\":5126,\"count\":3,\"type\":\"VEC3\",\"max\":[1,1,0],\"min\":[0,0,0]},"
+             "{\"bufferView\":1,\"componentType\":5123,\"count\":3,\"type\":\"SCALAR\"}"
+             "],"
+             "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0},\"indices\":1"
+          << (modeField ? std::string(",\"mode\":") + modeField : std::string())
+          << "}]}],"
+             "\"nodes\":[{\"mesh\":0}],"
+             "\"scenes\":[{\"nodes\":[0]}],"
+             "\"scene\":0"
+             "}";
+        return j.str();
+    }
+
+    // Positions + indices laid out to match glbTriangleGltfJson's bufferViews.
+    std::vector<uint8_t> glbTriangleBin() {
+        const std::vector<float> positions = {0, 0, 0, 1, 0, 0, 0, 1, 0};
+        const std::vector<uint16_t> indices = {0, 1, 2};
+        std::vector<uint8_t> bin = toBytes(positions);
+        const std::vector<uint8_t> idx = toBytes(indices);
+        bin.insert(bin.end(), idx.begin(), idx.end());
+        return bin;
+    }
+
     // A single-triangle glTF asset, "mode" of the sole primitive is caller-controlled.
     std::string triangleGltfJson(const char* modeField) {
         const std::vector<float> positions = {0, 0, 0, 1, 0, 0, 0, 1, 0};
@@ -808,6 +881,58 @@ namespace
         EntryType type = EntryType::Undefined;
         ASSERT_NO_THROW(type = ddb::fingerprint(glb));
         EXPECT_EQ(type, EntryType::Generic);
+    }
+
+    // The layout real exporters emit: padded JSON chunk followed by a BIN chunk.
+    TEST(file3d, identifyGlbWithBinChunkIsModel)
+    {
+        TestArea ta(TEST_NAME);
+        const auto bin = glbTriangleBin();
+
+        const fs::path model = ta.getPath("triangle_bin.glb");
+        writeGlbWithBin(model, glbTriangleGltfJson(bin.size(), nullptr), bin);
+        EXPECT_EQ(ddb::fingerprint(model), EntryType::Model);
+
+        const fs::path points = ta.getPath("points_bin.glb");
+        writeGlbWithBin(points, glbTriangleGltfJson(bin.size(), "0"), bin);
+        EXPECT_EQ(ddb::fingerprint(points), EntryType::Generic);
+    }
+
+    // Some exporters overstate the header's total length while the JSON chunk is intact.
+    // The allocation is bounded by the chunk length, so such a file stays classifiable.
+    TEST(file3d, identifyGlbOverstatedTotalLengthIsStillClassified)
+    {
+        TestArea ta(TEST_NAME);
+        const auto bin = glbTriangleBin();
+        const fs::path glb = ta.getPath("overstated.glb");
+
+        writeGlbWithBin(glb, glbTriangleGltfJson(bin.size(), nullptr), bin, 1024 * 1024);
+        ASSERT_LT(fs::file_size(glb), 1024u * 1024u);
+        EXPECT_EQ(ddb::fingerprint(glb), EntryType::Model);
+    }
+
+    // Extension matching is case-insensitive, so classification must run either way.
+    TEST(file3d, identifyGltfUppercaseExtensionsAreClassified)
+    {
+        TestArea ta(TEST_NAME);
+        const fs::path gltf = ta.getPath("POINTS.GLTF");
+        writeTextFile(gltf, triangleGltfJson("0"));
+        EXPECT_EQ(ddb::fingerprint(gltf), EntryType::Generic);
+
+        const fs::path glb = ta.getPath("TRIANGLE.GLB");
+        writeGlb(glb, triangleGltfJson(nullptr));
+        EXPECT_EQ(ddb::fingerprint(glb), EntryType::Model);
+    }
+
+    // A primitive that is not an object must not inherit the "mode omitted" triangle
+    // default, otherwise a malformed asset would be declared buildable.
+    TEST(file3d, identifyGltfNonObjectPrimitiveIsGeneric)
+    {
+        TestArea ta(TEST_NAME);
+        const fs::path gltf = ta.getPath("badprimitive.gltf");
+        writeTextFile(gltf,
+            "{\"asset\":{\"version\":\"2.0\"},\"meshes\":[{\"primitives\":[\"nonsense\",42,null]}]}");
+        EXPECT_EQ(ddb::fingerprint(gltf), EntryType::Generic);
     }
 
     // Regression test: a mesh mixing a triangle primitive with a point primitive must not

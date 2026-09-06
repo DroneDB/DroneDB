@@ -182,23 +182,24 @@ json readGlbJson(const std::string& glbPath) {
     if (chunk.chunkType != 0x4E4F534A)
         throw AppException("Invalid GLB file: first chunk is not JSON");
 
-    // Both header.length and chunk.chunkLength come straight from the file, so bound
-    // them against the real size before allocating: a corrupt or hostile GLB could
-    // otherwise ask for up to 4 GiB.
-    constexpr uint32_t GlbHeaderSize = 12;
-    constexpr uint32_t GlbChunkHeaderSize = 8;
+    // chunk.chunkLength drives the allocation below, so it is what has to fit in the file:
+    // a corrupt or hostile GLB could otherwise ask for up to 4 GiB.
+    constexpr uint64_t GlbHeaderSize = 12;
+    constexpr uint64_t GlbChunkHeaderSize = 8;
 
     std::error_code sizeErr;
     const auto fileSize = fs::file_size(glbPath, sizeErr);
     if (sizeErr)
         throw FSException("Cannot determine size of GLB file: " + glbPath);
 
-    if (header.length > fileSize)
-        throw AppException("Invalid GLB file: declared length exceeds file size");
+    if (GlbHeaderSize + GlbChunkHeaderSize + static_cast<uint64_t>(chunk.chunkLength) > fileSize)
+        throw AppException("Invalid GLB file: JSON chunk length exceeds file size");
 
-    if (header.length < GlbHeaderSize + GlbChunkHeaderSize ||
-        chunk.chunkLength > header.length - GlbHeaderSize - GlbChunkHeaderSize)
-        throw AppException("Invalid GLB file: JSON chunk length exceeds declared length");
+    // header.length is advisory for our purposes: some exporters overstate it while the
+    // JSON chunk is intact, so the file stays usable and we only leave a trace.
+    if (header.length > fileSize)
+        LOGW << "GLB " << glbPath << " declares a length of " << header.length
+             << " bytes but the file is " << fileSize;
 
     // Read JSON data
     std::vector<char> jsonData(chunk.chunkLength);
@@ -664,12 +665,27 @@ std::vector<std::string> getGltfDependencies(const std::string& gltf) {
 }
 
 EntryType identifyGltf(const fs::path& gltfFile) {
+    // A text .gltf can embed all of its buffers as data URIs, and the DOM costs several
+    // times the file size: past this point fall back to the extension alone.
+    constexpr uintmax_t MaxClassifiableGltfSize = 64ull * 1024 * 1024;
+
     json gltfJson;
 
     try {
         if (isGlbFile(gltfFile)) {
             gltfJson = readGlbJson(gltfFile.string());
         } else {
+            std::error_code sizeErr;
+            const auto fileSize = fs::file_size(gltfFile, sizeErr);
+            if (sizeErr)
+                return EntryType::Generic;
+
+            if (fileSize > MaxClassifiableGltfSize) {
+                LOGD << gltfFile.string() << " is too large to classify (" << fileSize
+                     << " bytes), assuming it is a model";
+                return EntryType::Model;
+            }
+
             std::ifstream file(gltfFile.string());
             if (!file.is_open())
                 return EntryType::Generic;
@@ -682,17 +698,20 @@ EntryType identifyGltf(const fs::path& gltfFile) {
 
     // glTF 2.0 declares "meshes" as an array; glTF 1.0 declares it as an object
     // keyed by mesh id. Both wrap mesh entries shaped the same way otherwise.
-    const auto& meshes = gltfJson.contains("meshes") ? gltfJson["meshes"] : json();
-    if (!meshes.is_array() && !meshes.is_object()) {
+    if (!gltfJson.contains("meshes") ||
+        (!gltfJson["meshes"].is_array() && !gltfJson["meshes"].is_object())) {
         LOGD << gltfFile.string() << " declares no meshes, treating as generic";
         return EntryType::Generic;
     }
 
-    for (const auto& mesh : meshes) {
+    for (const auto& mesh : gltfJson["meshes"]) {
         if (!mesh.contains("primitives") || !mesh["primitives"].is_array())
             continue;
 
         for (const auto& primitive : mesh["primitives"]) {
+            if (!primitive.is_object())
+                continue;
+
             // glTF 2.0: mode defaults to 4 (TRIANGLES) when omitted.
             // 4 = TRIANGLES, 5 = TRIANGLE_STRIP, 6 = TRIANGLE_FAN.
             int mode = 4;

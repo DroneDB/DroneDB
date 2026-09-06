@@ -142,7 +142,8 @@ namespace ddb
      *
      * Mirrors @ref identifyPly: best-effort and never throws. A missing, unreadable
      * or malformed file is reported as EntryType::Generic, so it can still be
-     * indexed instead of failing the whole parse.
+     * indexed instead of failing the whole parse. A text .gltf too large to parse
+     * cheaply on the indexing path falls back to EntryType::Model.
      *
      * @param gltfFile Path to the .gltf or .glb file.
      * @return EntryType::Model when triangle geometry is present, EntryType::Generic otherwise.
