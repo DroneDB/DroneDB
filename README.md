@@ -35,9 +35,12 @@
 
 #### Linux (Debian/Ubuntu)
 ```bash
-# Download and install from the latest release
+# Download the latest .deb from the releases page, then:
 sudo apt install ./ddb_X.Y.Z_amd64.deb
 ```
+
+The package installs the CLI as `ddb`. When building from source the executable is
+`build/ddbcmd` (same program, unprefixed build output).
 
 #### Windows
 Download the latest release from [GitHub Releases](https://github.com/DroneDB/DroneDB/releases) and run the installer.
@@ -58,13 +61,13 @@ ddb list
 ddb info image.jpg
 
 # Generate thumbnails
-ddb thumbs *.jpg
+ddb thumbs *.jpg -o thumbs/
 
 # Search for files
-ddb search --type image
+ddb search '*file*'
 
-# Build COG (Cloud-Optimized GeoTIFF) from raster
-ddb cog input.tif output.tif
+# Build COG (Cloud-Optimized GeoTIFF) from raster (output first, then input)
+ddb cog output.tif input.tif
 
 # Generate OGC 3D Tiles from a 3D model (requires Obj2Tiles binary)
 ddb 3dtiles model.obj ./3dtiles
@@ -291,7 +294,7 @@ If `build-lod` is missing, DroneDB can still serve Gaussian Splats but without L
 
 ```bash
 ./build-docker.sh
-docker run --rm -it -v $(pwd):/data ddb/app:latest
+docker run --rm -it -v $(pwd):/data dronedb/dronedb:latest --help
 ```
 
 ### Manual Build Steps
@@ -356,9 +359,12 @@ This project is licensed under the [Mozilla Public License 2.0 (MPL-2.0)](LICENS
 
 Distribution archives (Windows ZIP, Debian package, Docker image) may include
 third-party components under different licenses - most notably the optional
-[Untwine](https://github.com/hobuinc/untwine) COPC accelerator (GPL-3.0) and
-the [SPZ](https://github.com/nianticlabs/spz) Gaussian Splat compression library (MIT).
-See [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) for the full list and
+[Untwine](https://github.com/hobuinc/untwine) COPC accelerator (GPL-3.0), the
+[Obj2Tiles](https://github.com/OpenDroneMap/Obj2Tiles) 3D Tiles converter (AGPL-3.0)
+with its bundled libktx (Apache-2.0), libnexus mesh streaming (GPL-3.0+), the
+statically linked [SPZ](https://github.com/nianticlabs/spz) Gaussian Splat compression
+library (MIT), and the vcpkg-managed runtime libraries.
+See [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) for details and
 attributions.
 
 ---

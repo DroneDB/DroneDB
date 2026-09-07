@@ -1,7 +1,10 @@
 # DroneDB Development Instructions for AI Agents
 
+> **Doc rule**: Do not hardcode release/version numbers in this file — they change every release.
+> Read the current version from `package.json` and dependency pins from `vcpkg.json` / `scripts/obj2tiles-version`.
+
 ## Project Overview
-DroneDB is a free, open-source aerial data management platform built in C++ with Node.js bindings. It provides efficient storage, processing, and sharing of geospatial data including images, orthophotos, digital elevation models, point clouds, and vector files.
+DroneDB is a free, open-source aerial data management platform built in C++. Its public API surface is a flat C ABI (`src/include/ddb.h`); language bindings (e.g. for .NET or Node.js) live in separate consumer repositories, not in this repo. It provides efficient storage, processing, and sharing of geospatial data including images, orthophotos, digital elevation models, point clouds, vectors, 3D models, and Gaussian splats.
 
 ## Architecture Overview
 
@@ -37,14 +40,14 @@ DroneDB is a free, open-source aerial data management platform built in C++ with
 #### 3. **Build System**
 - Uses vcpkg for dependency management
 - Cross-platform CMake configuration
-- Support for Windows, Linux, macOS
+- Shipped/tested platforms: Windows and Linux (some APPLE code paths exist in CMake, but no macOS release)
 - Automatic dependency resolution for GDAL, PROJ, PDAL, etc.
+- Derived-product generation depends on **external out-of-process binaries** discovered at runtime (override with `DDB_OBJ2TILES_PATH`, `DDB_UNTWINE_PATH`, `DDB_BUILDLOD_PATH`): Obj2Tiles (downloaded by `scripts/download-obj2tiles.{sh,ps1}`, version pinned in `scripts/obj2tiles-version`), untwine (built from `vendor/untwine`), build-lod (Rust, from `vendor/spark`). Missing tools degrade gracefully with `DDBERR_BUILDDEPMISSING`
 - To build on Windows use `full-build-win.ps1` script and to build on Linux use `full-build-linux.sh` script (skip the cmake part if the build directory already exists)
 
-#### 4. **3D Visualization (`vendor/libnexus/`)**
-- Nexus format for efficient 3D mesh streaming
-- Web-based 3D viewer with progressive loading
-- Point cloud and mesh visualization
+#### 4. **3D Mesh Streaming (`vendor/libnexus/`)**
+- Dependency-free writer for the Nexus progressive 3D-mesh format (upstream cnr-isti-vclab/nexus), built as `libnxs` (guarded by `NO_NEXUS`)
+- `ddb nxs` produces `.nxs` files for streamed mesh/pointcloud viewing
 
 ### Key Dependencies
 - **GDAL**: Raster and vector data I/O
@@ -67,9 +70,9 @@ DroneDB is a free, open-source aerial data management platform built in C++ with
 ### Code Quality Standards
 - **Language**: Modern C++17 with clear, descriptive naming
 - **Memory Management**: RAII, smart pointers, avoid manual memory management
-- **Error Handling**: Use the exception hierarchy from `src/include/exceptions.h`. All 24 exception types inherit from `AppException : std::runtime_error`. Key categories: `DBException`/`SQLException`, `GDALException`, `PDALException`, `NetException`, `FSException`, `ZipException`, `JSONException`, `RegistryException` (with `RegistryNotFoundException`, `NoStampException`, `PullRequiredException`), `BuildLockException` (with 4 subclasses), `BuildDepMissingException` (has `getMissingDependencies()` returning vector of missing dep names). Use the most specific type.
-- **Logging**: Use plog library macros `LOGD` (debug) and `LOGV` (verbose) with stream syntax (`LOGD << "msg" << var`). Initialize with `init_logger(true)` for console + file output (`ddb-log.csv`, CSV format, 32MB rolling, 5 backups). Base severity is `info`; call `set_logger_verbose()` to enable LOGD/LOGV on console.
-- **Testing**: Tests use Google Test (gtest) in `tests/` folder. Always use `TestArea` for isolated temp filesystem (`%TEMP%/ddb_test_areas/<name>`). For zip-based tests, use `TestFS` (supports remote URLs with auto-download + cache). Utility functions in `tests/utils.h` (`fileWriteAllText`, `makeTree`, `compareTree`, `calculateHash`). Include `tests/test.h` for `TEST_NAME` macro and `MANUAL_TEST` macro (for disabled tests). Run tests with `./ddbtest --gtest_shuffle` (shuffle is critical to catch inter-test dependencies).
+- **Error Handling**: Use the exception hierarchy from `src/include/exceptions.h`. All exception types inherit from `AppException : std::runtime_error` (enumerate them in that header — do not assume a fixed count). Key categories: `DBException`/`SQLException`, `GDALException`, `PDALException`, `NetException`, `FSException`, `ZipException`, `JSONException`, `RegistryException` (with `RegistryNotFoundException`, `NoStampException`, `PullRequiredException`), `BuildLockException` (with 4 subclasses), `BuildDepMissingException` (has `getMissingDependencies()` returning vector of missing dep names). Use the most specific type.
+- **Logging**: Use plog library macros `LOGD` (debug) and `LOGV` (verbose) with stream syntax (`LOGD << "msg" << var`). Initialize with `init_logger(true)` for console + file output (`ddb-log.csv`, CSV format, ~32 KB rolling file, 5 backups). Base severity is `info`; call `set_logger_verbose()` to enable LOGD/LOGV on console.
+- **Testing**: Tests use Google Test (gtest) in `tests/` folder. Always use `TestArea` for isolated temp filesystem (under `fs::temp_directory_path()/ddb_test_areas/<name>`). For zip-based tests, use `TestFS` (supports remote URLs with auto-download + cache). Utility functions in `tests/utils.h` (`fileWriteAllText`, `makeTree`, `compareTree`, `calculateHash`). Include `tests/test.h` for `TEST_NAME` macro and `MANUAL_TEST` macro (for disabled tests). Run tests with `./ddbtest --gtest_shuffle` (shuffle is critical to catch inter-test dependencies).
 
 ### API Design Principles
 - **Consistency**: Follow existing patterns in codebase
@@ -83,13 +86,13 @@ DroneDB is a free, open-source aerial data management platform built in C++ with
 - **Spatial Operations**: Leverage SpatiaLite for complex spatial queries
 - **JSON Handling**: Use nlohmann::json for structured data
 - **Progress Reporting**: Implement progress callbacks for long operations
-- **C API**: Functions use `DDB_C_BEGIN` / `DDB_C_END` macros wrapping try-catch. Return `DDBErr` enum (3 values: `DDBERR_NONE=0`, `DDBERR_EXCEPTION=1`, `DDBERR_BUILDDEPMISSING=2`). Error output via `char **output` (freed with `DDBFree()`) or `uint8_t **outBuffer` for binary data (freed with `DDBVSIFree()`). Last error stored in global 255-byte buffer via `DDBSetLastError()`/`DDBGetLastError()`. Must call `DDBRegisterProcess(verbose)` before any other DDB function.
+- **C API**: Functions use `DDB_C_BEGIN` / `DDB_C_END` macros wrapping try-catch. Return `DDBErr` enum (`DDBERR_NONE=0`, `DDBERR_EXCEPTION=1`, `DDBERR_BUILDDEPMISSING=2`, `DDBERR_BUILDINPROGRESS=3`, `DDBERR_CANCELED=4`, `DDBERR_BUSY=5`; see `ddb.h` for the authoritative list). Error output via `char **output` (freed with `DDBFree()`) or `uint8_t **outBuffer` for binary data (freed with `DDBVSIFree()`). Last error stored in a `thread_local` 255-byte buffer via `DDBSetLastError()`/`DDBGetLastError()`. Must call `DDBRegisterProcess(verbose)` before any other DDB function. Long operations support cancellation through `DDBProgressCallback`.
 
 ### Architecture Considerations
 - **Modularity**: Keep geospatial logic separate from database logic
 - **Thread Safety**: Database operations should be thread-safe
 - **Resource Management**: Clean up GDAL/PROJ resources properly
-- **Platform Compatibility**: Test on Windows, Linux, macOS
+- **Platform Compatibility**: Ship and test on Windows and Linux (APPLE paths exist but are not released)
 
 ## Development Workflow
 
@@ -104,7 +107,7 @@ DroneDB is a free, open-source aerial data management platform built in C++ with
 - **Adding File Types**: Extend `parseEntry()` in `entry.cpp`
 - **Database Schema**: Update DDL in `database.cpp`, add migration logic
 - **Spatial Operations**: Use existing geo functions in `geo.cpp`
-- **API Extensions**: Add to C API in `ddb.h`, Node.js bindings in `nodejs/`
+- **API Extensions**: Add to the C API in `ddb.h` (implementations in `src/library/ddb.cpp`). Language bindings are not in this repo — consumers bind the C ABI themselves
 
 ### Performance Guidelines
 - **Database**: Use spatial indexes, batch operations, prepared statements
