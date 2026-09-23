@@ -158,9 +158,11 @@ namespace ddb
     BoundingBox<Projected2D> GlobalMercator::tileBounds(int tx, int ty,
                                                         int zoom) const
     {
-        const Projected2D min = pixelsToMeters(tx * tileSize, ty * tileSize, zoom);
+        // Pyramid pixel coords overflow int from z24 (256 px) / z23 (512 px)
+        const double size = static_cast<double>(tileSize);
+        const Projected2D min = pixelsToMeters(tx * size, ty * size, zoom);
         const Projected2D max =
-            pixelsToMeters((tx + 1) * tileSize, (ty + 1) * tileSize, zoom);
+            pixelsToMeters((tx + 1.0) * size, (ty + 1.0) * size, zoom);
         return BoundingBox<Projected2D>(min, max);
     }
 
@@ -181,7 +183,7 @@ namespace ddb
         return pixelsToTile(p.x, p.y);
     }
 
-    Projected2D GlobalMercator::pixelsToMeters(int px, int py, int zoom) const
+    Projected2D GlobalMercator::pixelsToMeters(double px, double py, int zoom) const
     {
         const double res = resolution(zoom);
         return Projected2D(px * res - originShift, py * res - originShift);

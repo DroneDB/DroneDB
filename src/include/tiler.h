@@ -39,7 +39,7 @@ namespace ddb
         Projected2Di metersToTile(double mx, double my, int zoom) const;
 
         // Converts pixel coordinates in given zoom level of pyramid to EPSG:3857"
-        Projected2D pixelsToMeters(int px, int py, int zoom) const;
+        Projected2D pixelsToMeters(double px, double py, int zoom) const;
 
         // Converts EPSG:3857 to pyramid pixel coordinates in given zoom level
         Projected2D metersToPixels(double mx, double my, int zoom) const;

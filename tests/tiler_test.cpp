@@ -9,7 +9,10 @@
 #include "test.h"
 #include "testarea.h"
 #include "tilerhelper.h"
+#include <algorithm>
 #include <chrono>
+#include <limits>
+#include <vector>
 
 namespace {
 
@@ -53,6 +56,42 @@ TEST(testTiler, DSM) {
     //      - edge cases
     //      - out of bounds
     //      - different tile sizes
+}
+
+// Northern-hemisphere TMS rows at z24 (256 px) and z23 (512 px) used to overflow
+// int in GlobalMercator::tileBounds, emitting fully transparent tiles.
+TEST(testTiler, DeepZoomNotBlank) {
+    TestArea ta(TEST_NAME);
+    fs::path ortho = ta.downloadTestAsset(
+        "https://github.com/DroneDB/test_data/raw/master/brighton/odm_orthophoto.tif",
+        "ortho.tif");
+
+    for (const auto &[tz, tileSize] : std::vector<std::pair<int, int>>{{24, 256}, {23, 512}, {26, 256}}) {
+        GDALTiler t(ortho.string(), "", tileSize);
+        const auto b = t.getMinMaxCoordsForZ(tz);
+        const int tx = (b.min.x + b.max.x) / 2;
+        const int ty = (b.min.y + b.max.y) / 2;
+        ASSERT_GT(static_cast<double>(ty) * tileSize, static_cast<double>(std::numeric_limits<int>::max()));
+
+        uint8_t *buffer = nullptr;
+        int bufSize = 0;
+        t.tile(tz, tx, ty, &buffer, &bufSize);
+        ASSERT_GT(bufSize, 0);
+
+        const std::string memPath = "/vsimem/deepzoom_" + std::to_string(tz) + "_" + std::to_string(tileSize) + ".png";
+        VSIFCloseL(VSIFileFromMemBuffer(memPath.c_str(), buffer, bufSize, TRUE));
+        GDALDatasetH ds = GDALOpen(memPath.c_str(), GA_ReadOnly);
+        ASSERT_NE(ds, nullptr);
+        const int bands = GDALGetRasterCount(ds);
+        std::vector<uint8_t> alpha(static_cast<size_t>(tileSize) * tileSize);
+        ASSERT_EQ(GDALRasterIO(GDALGetRasterBand(ds, bands), GF_Read, 0, 0, tileSize, tileSize,
+                               alpha.data(), tileSize, tileSize, GDT_Byte, 0, 0), CE_None);
+        GDALClose(ds);
+        VSIUnlink(memPath.c_str());
+
+        const bool anyOpaque = std::any_of(alpha.begin(), alpha.end(), [](uint8_t a) { return a > 0; });
+        EXPECT_TRUE(anyOpaque) << "Blank tile at z" << tz << " size " << tileSize;
+    }
 }
 
 TEST(testTiler, image) {
