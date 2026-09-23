@@ -26,8 +26,8 @@ namespace ddb
         DDB_DLL fs::path findBuildLodBinary(bool forceRefresh = false);
 
         // True when a build-lod binary is discoverable (convenience wrapper around
-        // findBuildLodBinary). LOD generation is optional, so callers use this to decide
-        // whether to attempt it and degrade gracefully (serve plain model.spz) when absent.
+        // findBuildLodBinary). build-lod is MANDATORY for Gaussian Splat (RAD) builds:
+        // buildGsplat throws BuildDepMissingException when the tool is absent.
         DDB_DLL bool isBuildLodAvailable();
 
         // Runs build-lod to convert a splat source (.ply | .spz | .splat | .ksplat | .sog)
