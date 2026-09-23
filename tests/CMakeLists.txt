@@ -14,8 +14,10 @@ if(BUILD_TESTING)
     # Create the test executable
     add_executable(ddbtest ${TEST_SOURCES})
 
-    # Link the library and testing framework
-    target_link_libraries(ddbtest PRIVATE ${PROJECT_NAME} GTest::gtest GTest::gtest_main cpr::cpr GDAL::GDAL tinyobjloader::tinyobjloader OpenSSL::Crypto Exiv2::exiv2lib)
+    # Link the library and testing framework. "spz" is the in-tree static SPZ codec target
+    # (vendor/CMakeLists.txt); its PUBLIC include dir (vendor/spz/src/cc) lets the gsplat tests
+    # encode/decode .spz fixtures directly. libddb is SHARED, so no duplicate objects.
+    target_link_libraries(ddbtest PRIVATE ${PROJECT_NAME} GTest::gtest GTest::gtest_main cpr::cpr GDAL::GDAL tinyobjloader::tinyobjloader OpenSSL::Crypto Exiv2::exiv2lib spz)
 
     # set PLOG to PLOG_GLOBAL/PLOG_IMPORT to share instances across modules (and import on Windows)
     if(WIN32)
