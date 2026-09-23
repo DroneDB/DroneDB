@@ -220,7 +220,7 @@ git submodule update --init vendor/spark
 .\full-build-win.ps1          # or -BuildType Release
 ```
 
-If `build-lod.exe` is missing, DroneDB can still serve Gaussian Splats but without LOD streaming (plain `model.spz`).
+If `build-lod.exe` is missing, Gaussian Splat builds are deferred: `ddb build` reports build-lod as a missing dependency until it is available.
 
 #### Troubleshooting
 
@@ -288,7 +288,7 @@ git submodule update --init vendor/spark
 ./full-build-linux.sh          # or Debug
 ```
 
-If `build-lod` is missing, DroneDB can still serve Gaussian Splats but without LOD streaming (plain `model.spz`).
+If `build-lod` is missing, Gaussian Splat builds are deferred: `ddb build` reports build-lod as a missing dependency until it is available.
 
 ### Docker Build
 

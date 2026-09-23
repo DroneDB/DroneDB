@@ -13,7 +13,8 @@ param(
 
 <#
 .SYNOPSIS
-    Builds the optional build-lod Gaussian Splat LOD producer binary for DroneDB.
+    Builds the build-lod Gaussian Splat LOD producer binary for DroneDB
+    (mandatory for Gaussian Splat builds, see DDB_REQUIRE_BUILDLOD below).
 
 .DESCRIPTION
     Compiles Spark's `build-lod` Rust CLI (expected at vendor/spark/rust relative to the
@@ -24,9 +25,11 @@ param(
     by the optional --cluster-sh path, which DroneDB does not use. Without it build-lod is a
     self-contained, pure-Rust binary with no system-library dependencies.
 
-    This script is intentionally tolerant: it never throws on failure. The caller (CI workflow,
-    full-build-win.ps1, packaging script) decides whether to treat a missing build-lod.exe as
-    fatal. DroneDB serves the plain model.spz (no LOD streaming) when build-lod is absent.
+    This script is intentionally tolerant LOCALLY: when vendor/spark or cargo is missing it
+    exits 0 and Gaussian Splat (RAD) builds are deferred - buildGsplat throws
+    BuildDepMissingException until build-lod.exe is available (no delivery artifact is
+    produced). Set DDB_REQUIRE_BUILDLOD (done by CI) to turn a missing source/toolchain
+    into a hard error (exit 1) instead.
 
 .PARAMETER BuildDir
     Directory containing the main DroneDB build (default: "build"). The resulting binary is
@@ -64,27 +67,39 @@ if (-not [System.IO.Path]::IsPathRooted($BuildDir)) {
 $manifest = Join-Path $VendorDir "rust\Cargo.toml"
 
 Write-Host "========================================" -ForegroundColor Magenta
-Write-Host "build-lod (optional Gaussian Splat LOD producer)" -ForegroundColor Magenta
+Write-Host "build-lod (Gaussian Splat LOD producer - mandatory for gsplat builds)" -ForegroundColor Magenta
 Write-Host "========================================" -ForegroundColor Magenta
 Write-Host "  Source : $VendorDir"
 Write-Host "  Build  : $BuildDir\build-lod.exe"
 Write-Host "  Config : $Config"
 
 if (-not (Test-Path $manifest)) {
+    if ($env:DDB_REQUIRE_BUILDLOD) {
+        Write-Host "ERROR: vendor/spark or rust/Cargo.toml missing but DDB_REQUIRE_BUILDLOD is set." -ForegroundColor Red
+        Write-Host "       build-lod is a MANDATORY dependency of Gaussian Splat builds." -ForegroundColor Red
+        Write-Host "       Run: git submodule update --init vendor/spark" -ForegroundColor Red
+        exit 1
+    }
     if (Test-Path $VendorDir) {
         Write-Host "INFO: vendor/spark exists but rust/Cargo.toml is missing." -ForegroundColor Yellow
         Write-Host "      The git submodule is probably not initialised. Run:" -ForegroundColor Yellow
         Write-Host "        git submodule update --init vendor/spark" -ForegroundColor Cyan
     } else {
-        Write-Host "INFO: vendor/spark not present, skipping optional build-lod build (model.spz served without LOD)." -ForegroundColor Gray
+        Write-Host "INFO: vendor/spark not present, skipping build-lod build (Gaussian Splat builds deferred until build-lod is available)." -ForegroundColor Gray
     }
     exit 0
 }
 
 $cargo = Get-Command cargo -ErrorAction SilentlyContinue
 if (-not $cargo) {
-    Write-Host "INFO: cargo (Rust toolchain) not found on PATH; skipping optional build-lod build." -ForegroundColor Yellow
-    Write-Host "      Install Rust from https://rustup.rs/ to enable Gaussian Splat LOD streaming." -ForegroundColor Cyan
+    if ($env:DDB_REQUIRE_BUILDLOD) {
+        Write-Host "ERROR: cargo (Rust toolchain) not found on PATH but DDB_REQUIRE_BUILDLOD is set." -ForegroundColor Red
+        Write-Host "       build-lod is a MANDATORY dependency of Gaussian Splat builds." -ForegroundColor Red
+        Write-Host "       Install Rust from https://rustup.rs/." -ForegroundColor Red
+        exit 1
+    }
+    Write-Host "INFO: cargo (Rust toolchain) not found on PATH; skipping build-lod build." -ForegroundColor Yellow
+    Write-Host "      Install Rust from https://rustup.rs/ to enable Gaussian Splat LOD builds." -ForegroundColor Cyan
     exit 0
 }
 
@@ -95,6 +110,7 @@ if (-not (Test-Path $BuildDir)) {
 
 $cargoArgs = @(
     "build",
+    "--locked",
     "--package", "build-lod",
     "--no-default-features",
     "--manifest-path", $manifest

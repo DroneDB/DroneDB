@@ -23,16 +23,15 @@ RUN cd /workspace && \
     ./scripts/build-untwine.sh build Release || \
     echo "WARNING: untwine build failed (non-blocking, PDAL fallback will be used)"
 
-# Optional: build the build-lod Gaussian Splat LOD producer (vendor/spark submodule).
-# Requires a Rust toolchain; failure is non-blocking - Gaussian Splats are then
-# served without LOD streaming (plain model.spz).
+# build-lod Gaussian Splat LOD producer (vendor/spark submodule): MANDATORY
+# dependency of Gaussian Splat builds - failure aborts the image build.
+# Requires a Rust toolchain (installed above if missing).
 ENV PATH="/root/.cargo/bin:${PATH}"
 RUN cd /workspace && \
     (command -v cargo >/dev/null 2>&1 || \
         (curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal)) && \
     chmod +x scripts/build-buildlod.sh && \
-    ./scripts/build-buildlod.sh build Release || \
-    echo "WARNING: build-lod build failed (non-blocking, Gaussian Splats served without LOD streaming)"
+    DDB_REQUIRE_BUILDLOD=1 ./scripts/build-buildlod.sh build Release
 
 # Optional: download the OpenDroneMap Obj2Tiles binary (OGC 3D Tiles generator).
 # AGPL-3.0, invoked only as a subprocess (see THIRD_PARTY_LICENSES.md). Failure is

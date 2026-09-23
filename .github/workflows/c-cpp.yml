@@ -20,6 +20,8 @@ jobs:
       VCPKG_BUILD_TYPE: release
       VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
       VCPKG_FEATURE_FLAGS: "binarycaching,manifests,versions"
+      # build-lod is MANDATORY for gsplat builds: its absence fails the gsplat tests.
+      DDB_REQUIRE_BUILDLOD: "1"
     steps:
       - name: Free Disk Space
         uses: ShubhamTatvamasi/free-disk-space-action@master
@@ -82,10 +84,13 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
+      - name: Check vendor/spark tag pin (informational)
+        # Repo policy pins vendor/spark to a release tag unless the commit was
+        # explicitly reviewed (see CONTRIBUTING.md). Non-blocking (|| keeps exit 0).
+        run: git -C vendor/spark describe --tags --exact-match >/dev/null 2>&1 || echo "::warning::vendor/spark is not on a release tag — repo policy pins spark to tags unless the commit is explicitly reviewed (see CONTRIBUTING.md 'Bumping vendor/spz and vendor/spark')"
       - name: Build build-lod (Gaussian Splat LOD producer)
-        # Optional on PR/master pushes (Gaussian Splats serve without LOD streaming),
-        # but MUST succeed on release tags so the .deb ships with build-lod.
-        continue-on-error: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        # build-lod is a MANDATORY dependency of Gaussian Splat builds:
+        # the DDB_REQUIRE_BUILDLOD env makes missing tooling fail the gsplat tests.
         run: |
           chmod +x ./scripts/build-buildlod.sh
           ./scripts/build-buildlod.sh build Release
@@ -96,6 +101,10 @@ jobs:
         run: |
           chmod +x ./scripts/download-obj2tiles.sh
           ./scripts/download-obj2tiles.sh build
+      - name: Verify Spark RAD format pin
+        run: |
+          echo "Checking vendor/spark/rust/spark-lib/src/rad.rs against the reviewed pin..."
+          sha256sum -c tests/data/spark-rad-format.sha256 || { echo "::error::rad.rs changed since the last verified pin: review encoding handling in src/library/rad.cpp, then refresh with: (cd $GITHUB_WORKSPACE && sha256sum vendor/spark/rust/spark-lib/src/rad.rs > tests/data/spark-rad-format.sha256)"; exit 1; }
       - name: Run C++ Tests
         run: cd build && ./ddbtest --gtest_shuffle
       - name: Run Program Smoke Test
@@ -156,7 +165,7 @@ jobs:
                 echo "  ✗ build-lod NOT present in .deb - release builds MUST include build-lod. Failing."
                 exit 1
               else
-                echo "  ! build-lod NOT present in .deb (Gaussian Splats served without LOD streaming)"
+                echo "  ! build-lod NOT present in .deb (Gaussian Splat builds deferred until build-lod is available)"
               fi
             fi
 
@@ -206,6 +215,8 @@ jobs:
       VCPKG_KEEP_ENV_VARS: "CMAKE_C_CLANG_TIDY;CMAKE_CXX_CLANG_TIDY"
       CMAKE_C_CLANG_TIDY: ""
       CMAKE_CXX_CLANG_TIDY: ""
+      # build-lod is MANDATORY for gsplat builds: its absence fails the gsplat tests.
+      DDB_REQUIRE_BUILDLOD: "1"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -255,9 +266,8 @@ jobs:
         with:
           toolchain: stable
       - name: Build build-lod (Gaussian Splat LOD producer)
-        # Optional on PR/master pushes (Gaussian Splats serve without LOD streaming),
-        # but MUST succeed on release tags so the zip ships with build-lod.exe.
-        continue-on-error: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        # build-lod is a MANDATORY dependency of Gaussian Splat builds:
+        # the DDB_REQUIRE_BUILDLOD env makes missing tooling fail the gsplat tests.
         shell: pwsh
         run: .\scripts\build-buildlod.ps1 -BuildDir build -Config Release
       - name: Download Obj2Tiles (OGC 3D Tiles generator)
@@ -316,6 +326,16 @@ jobs:
                 exit 1
               } else {
                 Write-Host '  ! Obj2Tiles.exe NOT present in zip (3D Tiles generation disabled, Nexus still produced)'
+              }
+            }
+            if (Test-Path (Join-Path $zipCheckDir 'build-lod.exe')) {
+              Write-Host '  ✓ build-lod.exe present in zip (Gaussian Splat LOD generation enabled)'
+            } else {
+              if ($env:GITHUB_REF -like 'refs/tags/v*') {
+                Write-Host '  ✗ build-lod.exe NOT present in zip - release builds MUST include build-lod. Failing.'
+                exit 1
+              } else {
+                Write-Host '  ! build-lod.exe NOT present in zip (Gaussian Splat builds will be deferred until build-lod is available)'
               }
             }
           }

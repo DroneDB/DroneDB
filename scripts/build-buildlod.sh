@@ -1,5 +1,6 @@
 #!/bin/bash
-# Builds the optional build-lod Gaussian Splat LOD producer binary for DroneDB.
+# Builds the build-lod Gaussian Splat LOD producer binary for DroneDB
+# (mandatory for Gaussian Splat builds, see DDB_REQUIRE_BUILDLOD below).
 #
 # Usage:
 #   scripts/build-buildlod.sh [BUILD_DIR] [BUILD_TYPE] [VENDOR_DIR]
@@ -18,13 +19,17 @@
 # --cluster-sh path, which DroneDB does not use. Without it build-lod is a self-contained,
 # pure-Rust binary with no system-library dependencies.
 #
-# This script is intentionally tolerant of missing sources/toolchain: when vendor/spark is not
-# present (submodule not initialised) or cargo is unavailable it prints an informational
-# message and exits 0, since DroneDB serves the plain model.spz (no LOD streaming) in that case.
+# This script is intentionally tolerant of missing sources/toolchain LOCALLY: when
+# vendor/spark is not present (submodule not initialised) or cargo is unavailable it prints
+# an informational message and exits 0. In that case Gaussian Splat (RAD) builds are
+# deferred: buildGsplat throws BuildDepMissingException until build-lod is available
+# (no delivery artifact is produced).
+# Set DDB_REQUIRE_BUILDLOD (done by CI) to turn a missing source/toolchain into a hard
+# error instead, so gsplat builds cannot silently ship without the mandatory LOD producer.
 #
 # Exit codes:
-#   0  success, OR vendor/spark / cargo not present (caller treats as soft skip)
-#   1  cargo build / copy failure (caller decides if fatal)
+#   0  success, OR vendor/spark / cargo not present and DDB_REQUIRE_BUILDLOD unset (soft skip)
+#   1  cargo build / copy failure, or missing source/toolchain with DDB_REQUIRE_BUILDLOD set
 
 set -u
 
@@ -44,26 +49,38 @@ esac
 MANIFEST="${VENDOR_DIR}/rust/Cargo.toml"
 
 echo "========================================"
-echo "build-lod (optional Gaussian Splat LOD producer)"
+echo "build-lod (Gaussian Splat LOD producer - mandatory for gsplat builds)"
 echo "========================================"
 echo "  Source : ${VENDOR_DIR}"
 echo "  Build  : ${BUILD_DIR}/build-lod"
 echo "  Config : ${BUILD_TYPE}"
 
 if [ ! -f "${MANIFEST}" ]; then
+    if [ -n "${DDB_REQUIRE_BUILDLOD:-}" ]; then
+        echo "ERROR: vendor/spark or rust/Cargo.toml missing but DDB_REQUIRE_BUILDLOD is set." >&2
+        echo "       build-lod is a MANDATORY dependency of Gaussian Splat builds." >&2
+        echo "       Run: git submodule update --init vendor/spark" >&2
+        exit 1
+    fi
     if [ -d "${VENDOR_DIR}" ]; then
         echo "INFO: vendor/spark exists but rust/Cargo.toml is missing."
         echo "      The git submodule is probably not initialised. Run:"
         echo "        git submodule update --init vendor/spark"
     else
-        echo "INFO: vendor/spark not present, skipping optional build-lod build (model.spz served without LOD)."
+        echo "INFO: vendor/spark not present, skipping build-lod build (Gaussian Splat builds deferred until build-lod is available)."
     fi
     exit 0
 fi
 
 if ! command -v cargo >/dev/null 2>&1; then
-    echo "INFO: cargo (Rust toolchain) not found on PATH; skipping optional build-lod build."
-    echo "      Install Rust from https://rustup.rs/ to enable Gaussian Splat LOD streaming."
+    if [ -n "${DDB_REQUIRE_BUILDLOD:-}" ]; then
+        echo "ERROR: cargo (Rust toolchain) not found on PATH but DDB_REQUIRE_BUILDLOD is set." >&2
+        echo "       build-lod is a MANDATORY dependency of Gaussian Splat builds." >&2
+        echo "       Install Rust from https://rustup.rs/." >&2
+        exit 1
+    fi
+    echo "INFO: cargo (Rust toolchain) not found on PATH; skipping build-lod build."
+    echo "      Install Rust from https://rustup.rs/ to enable Gaussian Splat LOD builds."
     exit 0
 fi
 
@@ -83,6 +100,7 @@ echo ""
 echo "Building build-lod (${BUILD_TYPE}, --no-default-features)..."
 cargo build \
     ${CARGO_PROFILE_FLAGS} \
+    --locked \
     --package build-lod \
     --no-default-features \
     --manifest-path "${MANIFEST}" \

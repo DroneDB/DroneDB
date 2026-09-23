@@ -83,3 +83,21 @@ Take a look at the list of [open issues](https://github.com/uav4geo/ddb/issues) 
 
 This project adheres to the [Contributor Covenant](CONDUCT.md). By participating, you are expected to uphold this code. Please report unacceptable behavior to the project maintainers.
 
+## Bumping vendor/spz and vendor/spark
+
+- **vendor/spz** (nianticlabs): bump by checking out a tagged commit. CI runs the gsplat
+  tests (including the SPZ v2/v3/v4 fixture tests). The delivery format must remain
+  gzip-based SPZ v3 (viewer constraint, `kDeliverySpzVersion` in `gsplat.cpp`). After the
+  bump, check the CI gsplat test count shows **0 skipped**.
+- **vendor/spark** (build-lod producer): policy is to pin to a release tag matching Hub's
+  `@sparkjsdev/spark` npm version, bumping both in the same release cycle. Current
+  exception: commit `750812d` (v2.1.0+15) is pinned on purpose because v2.1.0 lacks the
+  #359 SH clamp fix — move to the next tag once it is released. CI warns on non-tag pins.
+- If the **"Verify Spark RAD format pin"** CI step fails: the spark RAD writer
+  (`rust/spark-lib/src/rad.rs`) changed since the last review. Review encoding handling in
+  `src/library/rad.cpp` before merging, then refresh the pin file with the command printed
+  by the failing step.
+- Local verification: run `scripts/build-buildlod.*`, then
+  `build/ddbtest --gtest_filter=gsplat.*` with `DDB_REQUIRE_BUILDLOD=1` and confirm
+  0 skipped; spot-check a gsplat dataset in Hub.
+
