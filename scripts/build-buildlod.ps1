@@ -110,6 +110,7 @@ if (-not (Test-Path $BuildDir)) {
 
 $cargoArgs = @(
     "build",
+    "--locked",
     "--package", "build-lod",
     "--no-default-features",
     "--manifest-path", $manifest

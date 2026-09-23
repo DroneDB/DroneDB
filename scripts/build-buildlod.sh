@@ -100,6 +100,7 @@ echo ""
 echo "Building build-lod (${BUILD_TYPE}, --no-default-features)..."
 cargo build \
     ${CARGO_PROFILE_FLAGS} \
+    --locked \
     --package build-lod \
     --no-default-features \
     --manifest-path "${MANIFEST}" \
