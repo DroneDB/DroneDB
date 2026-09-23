@@ -492,10 +492,11 @@ try {
     }
 
     # ----------------------------------------------------------------------
-    # Optional: build the build-lod Gaussian Splat LOD producer (vendor/spark).
-    # Delegated to scripts/build-buildlod.ps1 (cargo). Failures NEVER block the
-    # main build: DroneDB serves the plain model.spz (no LOD streaming) when
-    # build-lod.exe is missing.
+    # build-lod Gaussian Splat LOD producer (vendor/spark): MANDATORY for
+    # Gaussian Splat builds. Locally failures NEVER abort the main build:
+    # Gaussian Splat (RAD) builds stay deferred (BuildDepMissingException)
+    # until build-lod.exe is available. CI sets DDB_REQUIRE_BUILDLOD to make
+    # a missing tool a hard error in scripts/build-buildlod.ps1.
     # ----------------------------------------------------------------------
     $buildLodScript = Join-Path $PSScriptRoot "scripts\build-buildlod.ps1"
     if (Test-Path $buildLodScript) {
@@ -503,12 +504,21 @@ try {
             & $buildLodScript -BuildDir $buildDir -Config $BuildType
             if ($LASTEXITCODE -ne 0) {
                 Write-Host "WARNING: scripts/build-buildlod.ps1 returned exit $LASTEXITCODE (non-blocking)." -ForegroundColor Yellow
-                Write-Host "DroneDB will serve Gaussian Splats without LOD streaming." -ForegroundColor Yellow
+                Write-Host "Gaussian Splat builds stay deferred until build-lod is available." -ForegroundColor Yellow
             }
         } catch {
             Write-Host "WARNING: build-lod build failed (non-blocking): $($_.Exception.Message)" -ForegroundColor Yellow
-            Write-Host "DroneDB will serve Gaussian Splats without LOD streaming." -ForegroundColor Yellow
+            Write-Host "Gaussian Splat builds stay deferred until build-lod is available." -ForegroundColor Yellow
         }
+    }
+    if (-not (Test-Path (Join-Path $buildDir "build-lod.exe"))) {
+        Write-Host "" -ForegroundColor Yellow
+        Write-Host "************************************************************************" -ForegroundColor Yellow
+        Write-Host "* WARNING: build-lod was NOT built/found in build/                     *" -ForegroundColor Yellow
+        Write-Host "* gsplat tests will be SKIPPED when running ddbtest without            *" -ForegroundColor Yellow
+        Write-Host "* DDB_REQUIRE_BUILDLOD. Install Rust or run scripts/build-buildlod.ps1 *" -ForegroundColor Yellow
+        Write-Host "************************************************************************" -ForegroundColor Yellow
+        Write-Host "" -ForegroundColor Yellow
     }
 
     # ----------------------------------------------------------------------

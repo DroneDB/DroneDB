@@ -190,8 +190,8 @@ override_dh_auto_install:
 	# Optional: copy build-lod Gaussian Splat LOD producer if it was built (vendor/spark).
 	# Installed alongside ddb so that runtime discovery
 	# (buildlod_runner.cpp::findBuildLodBinary -> getExeFolder()) finds it
-	# without any extra configuration. Gaussian Splats are served without LOD
-	# streaming (plain model.spz) when the binary is missing.
+	# without any extra configuration. Gaussian Splat builds are deferred
+	# (BuildDepMissingException) when the binary is missing.
 	if [ -f \$(CURDIR)/build/build-lod ]; then \\
 		cp \$(CURDIR)/build/build-lod debian/ddb/usr/bin/build-lod; \\
 		chmod +x debian/ddb/usr/bin/build-lod; \\

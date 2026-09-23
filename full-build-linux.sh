@@ -42,19 +42,29 @@ cmake --build . -- -j"$CPU_CORES"
 )
 
 # ----------------------------------------------------------------------
-# Optional: build the build-lod Gaussian Splat LOD producer (vendor/spark).
-# Delegated to scripts/build-buildlod.sh (cargo). Failures NEVER abort the
-# main build; DroneDB serves the plain model.spz (no LOD streaming) when
-# build-lod is missing.
+# build-lod Gaussian Splat LOD producer (vendor/spark): MANDATORY for Gaussian
+# Splat builds. Locally failures NEVER abort the main build; Gaussian Splat
+# (RAD) builds stay deferred (BuildDepMissingException) until build-lod is
+# available. CI sets DDB_REQUIRE_BUILDLOD to make a missing tool a hard error
+# in scripts/build-buildlod.sh.
 # ----------------------------------------------------------------------
 (
     cd ..
     if [ -x "./scripts/build-buildlod.sh" ]; then
         ./scripts/build-buildlod.sh build "${BUILD_TYPE}" || \
-            echo "WARNING: scripts/build-buildlod.sh failed (non-blocking, model.spz served without LOD)"
+            echo "WARNING: scripts/build-buildlod.sh failed (non-blocking, Gaussian Splat builds deferred until build-lod is available)"
     elif [ -f "./scripts/build-buildlod.sh" ]; then
         bash ./scripts/build-buildlod.sh build "${BUILD_TYPE}" || \
-            echo "WARNING: scripts/build-buildlod.sh failed (non-blocking, model.spz served without LOD)"
+            echo "WARNING: scripts/build-buildlod.sh failed (non-blocking, Gaussian Splat builds deferred until build-lod is available)"
+    fi
+    if [ ! -x "build/build-lod" ]; then
+        echo ""
+        echo "************************************************************************"
+        echo "* WARNING: build-lod was NOT built/found in build/                    *"
+        echo "* gsplat tests will be SKIPPED when running ddbtest without            *"
+        echo "* DDB_REQUIRE_BUILDLOD. Install Rust or run scripts/build-buildlod.sh   *"
+        echo "************************************************************************"
+        echo ""
     fi
 )
 
