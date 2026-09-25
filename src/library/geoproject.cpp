@@ -197,14 +197,17 @@ namespace ddb
 
             GDALClose(hSrcDataset);
             GDALClose(hDstDataset);
-            GDALFlushCache(hWrpDataset);
-            GDALClose(hWrpDataset);
 
+            // Check before flush/close: GDALFlushCache(nullptr) logs a misleading
+            // "NULL pointer" error that clobbers the real warp failure message
             if (hWrpDataset == nullptr)
             {
                 io::assureIsRemoved(tmpOutFile);
-                throw GDALException("Cannot geoproject " + p.string());
+                throw GDALException("Cannot geoproject " + p.string() + ": " + CPLGetLastErrorMsg());
             }
+
+            GDALFlushCache(hWrpDataset);
+            GDALClose(hWrpDataset);
 
             io::rename(tmpOutFile, outFile);
 
