@@ -167,16 +167,22 @@ namespace ddb
                     // Download to a temp file so a failed transfer never lands in the cache
                     const fs::path tmpPath = localTileablePath.string() + ".download-" + utils::generateRandomString(16);
                     cpr::Response res;
+                    bool writeOk = false;
                     {
                         std::ofstream of(tmpPath.string(), std::ios::binary);
                         res = cpr::Download(of, cpr::Url(tileablePath.string()));
+                        // cpr's write callback ignores stream errors, so a disk-full
+                        // or I/O failure only shows up on the stream state
+                        of.close();
+                        writeOk = !of.fail();
                     }
 
-                    if (res.error || res.status_code < 200 || res.status_code >= 300)
+                    if (!writeOk || res.error || res.status_code < 200 || res.status_code >= 300)
                     {
                         io::assureIsRemoved(tmpPath);
                         throw NetException("Cannot download " + tileablePath.string() + " (HTTP " +
-                                           std::to_string(res.status_code) + "): " + res.error.message);
+                                           std::to_string(res.status_code) + "): " +
+                                           (writeOk ? res.error.message : std::string("write error")));
                     }
 
                     io::rename(tmpPath, localTileablePath);
