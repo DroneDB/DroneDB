@@ -68,7 +68,8 @@ namespace ddb
                 outFile = output;
             }
 
-            std::string tmpOutFile = fs::path(outFile).replace_extension(".tif.tmp").string();
+            // Unique per call so concurrent processes sharing a cache don't clobber each other
+            std::string tmpOutFile = fs::path(outFile).replace_extension("." + utils::generateRandomString(8) + ".tif.tmp").string();
 
             Point ul = e.polygon_geom.getPoint(0);
             Point ll = e.polygon_geom.getPoint(1);
@@ -101,17 +102,17 @@ namespace ddb
                     if (outsize.back() == '%')
                     {
                         targs = CSLAddString(targs, outsize.c_str());
-                        
+
                         // Validate percentage format before conversion
                         std::string percentValue = outsize.substr(0, outsize.length() - 1);
                         for (char c : percentValue)
                             if (!std::isdigit(c) && c != '.' && c != '-' && c != '+')
                                 throw InvalidArgsException("Invalid percentage format: " + outsize);
-                        
+
                         double value = std::stod(percentValue);
                         if (value <= 0)
                             throw InvalidArgsException("Percentage must be positive: " + outsize);
-                        
+
                         ratio = value / 100.0;
                     }
                     else
@@ -120,11 +121,11 @@ namespace ddb
                         for (char c : outsize)
                             if (!std::isdigit(c) && c != '.' && c != '-' && c != '+')
                                 throw InvalidArgsException("Invalid numeric format: " + outsize);
-                        
+
                         double value = std::stod(outsize);
                         if (value <= 0)
                             throw InvalidArgsException("Size must be positive: " + outsize);
-                        
+
                         ratio = value / width;
                         targs = CSLAddString(targs, utils::toStr(ratio * height).c_str());
                     }
@@ -196,6 +197,15 @@ namespace ddb
 
             GDALClose(hSrcDataset);
             GDALClose(hDstDataset);
+
+            // Check before flush/close: GDALFlushCache(nullptr) logs a misleading
+            // "NULL pointer" error that clobbers the real warp failure message
+            if (hWrpDataset == nullptr)
+            {
+                io::assureIsRemoved(tmpOutFile);
+                throw GDALException("Cannot geoproject " + p.string() + ": " + CPLGetLastErrorMsg());
+            }
+
             GDALFlushCache(hWrpDataset);
             GDALClose(hWrpDataset);
 

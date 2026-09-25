@@ -9,8 +9,6 @@
 
 #include <memory>
 #include <vector>
-#include <chrono>
-#include <thread>
 
 #include "entry.h"
 #include "exceptions.h"
@@ -166,16 +164,28 @@ namespace ddb
                 bool download = alwaysDownload || !fs::exists(localTileablePath);
                 if (download)
                 {
-                    std::ofstream of(localTileablePath.string(), std::ios::binary);
-                    auto res = cpr::Download(of, cpr::Url(tileablePath.string()));
-
-                    // TODO: Should we check return code?
-                    /*if (res.error)
+                    // Download to a temp file so a failed transfer never lands in the cache
+                    const fs::path tmpPath = localTileablePath.string() + ".download-" + utils::generateRandomString(16);
+                    cpr::Response res;
+                    bool writeOk = false;
                     {
-                        LOGE << "Error downloading " << tileablePath.string() << ": " << res.error.message;
-                        io::assureIsRemoved(localTileablePath);
-                        throw FSException("Error downloading " + tileablePath.string());
-                    }*/
+                        std::ofstream of(tmpPath.string(), std::ios::binary);
+                        res = cpr::Download(of, cpr::Url(tileablePath.string()));
+                        // cpr's write callback ignores stream errors, so a disk-full
+                        // or I/O failure only shows up on the stream state
+                        of.close();
+                        writeOk = !of.fail();
+                    }
+
+                    if (!writeOk || res.error || res.status_code < 200 || res.status_code >= 300)
+                    {
+                        io::assureIsRemoved(tmpPath);
+                        throw NetException("Cannot download " + tileablePath.string() + " (HTTP " +
+                                           std::to_string(res.status_code) + "): " +
+                                           (writeOk ? res.error.message : std::string("write error")));
+                    }
+
+                    io::rename(tmpPath, localTileablePath);
                 }
             }
         }
@@ -222,17 +232,12 @@ namespace ddb
                 {
                     ThreadLock lock(outputPath.string());
 
-                    // Recheck is needed for other processes that might have generated
-                    // the file
-
-                    if (!fs::exists(outputPath))
+                    // Another thread may have generated the file while we waited
+                    // (geoProject publishes it via an atomic rename)
+                    if (forceRecreate || !fs::exists(outputPath))
                     {
                         ddb::geoProject({localTileablePath.string()}, outputPath.string(),
                                         "100%", true);
-
-                        // Helps making sure that output path is available in the filesystem before
-                        // releasing the thread lock
-                        std::this_thread::sleep_for(std::chrono::milliseconds(5));
                     }
                 }
             }

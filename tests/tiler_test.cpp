@@ -3,17 +3,27 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "ddb.h"
+#include "exceptions.h"
 #include "gdaltiler.h"
+#include "hash.h"
 #include "mio.h"
 #include "pointcloud.h"
 #include "test.h"
 #include "testarea.h"
 #include "tilerhelper.h"
+#include "userprofile.h"
 #include <algorithm>
 #include <chrono>
+#include <csignal>
 #include <limits>
 #include <utility>
 #include <vector>
+#ifndef WIN32
+#include <sys/resource.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#include <cerrno>
+#endif
 
 namespace {
 
@@ -266,5 +276,50 @@ TEST(testTiler, MultipleZoomLevels) {
             << "Tile " << tile.z << "/" << tile.x << "/" << tile.y << " not found";
     }
 }
+
+#ifndef WIN32
+/**
+ * @brief A download truncated by a write error (e.g. disk full) must not be
+ *        renamed into the tiles cache
+ *
+ * Runs the download in a child capped by RLIMIT_FSIZE so the transfer is cut
+ * short mid-write; toGeoTIFF must throw and leave neither the cache entry nor
+ * a stale temp file behind.
+ */
+TEST(testTilerHelper, FailedDownloadIsNotCached) {
+    const std::string url =
+        "https://github.com/DroneDB/test_data/raw/master/brighton/odm_orthophoto.tif";
+    const fs::path cached = UserProfile::get()->getTilesDir() /
+                            fs::path(Hash::strCRC64(url) + ".tif");
+    io::assureIsRemoved(cached);
+
+    pid_t child = fork();
+    ASSERT_NE(child, -1);
+    if (child == 0) {
+        // Make writes fail past 64 KB instead of killing the process, so the
+        // ofstream failbit path is exercised
+        std::signal(SIGXFSZ, SIG_IGN);
+        struct rlimit rl;
+        rl.rlim_cur = rl.rlim_max = 64 * 1024;
+        setrlimit(RLIMIT_FSIZE, &rl);
+        try {
+            TilerHelper::toGeoTIFF(url, 256, false);
+            _exit(1);  // a >64 KB transfer truncated at 64 KB must not succeed
+        } catch (const NetException&) {
+            _exit(0);
+        } catch (...) {
+            _exit(2);
+        }
+    }
+
+    int status = 0;
+    waitpid(child, &status, 0);
+    ASSERT_TRUE(WIFEXITED(status)) << "child killed by signal";
+    EXPECT_EQ(WEXITSTATUS(status), 0);
+
+    EXPECT_FALSE(fs::exists(cached));
+    io::assureIsRemoved(cached);
+}
+#endif
 
 }  // namespace
