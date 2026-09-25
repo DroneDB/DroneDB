@@ -6,31 +6,40 @@
 namespace ddb
 {
 
-    std::unordered_map<std::string, std::mutex> _mutexes;
-    std::unordered_map<std::string, int> _mutexesCount;
+    struct KeyedMutex
+    {
+        std::mutex mutex;
+        int refCount = 0;
+    };
+
+    namespace
+    {
+        // Guards the registry map only; never held while waiting on a per-key mutex.
+        std::mutex registryMutex;
+        std::unordered_map<std::string, std::shared_ptr<KeyedMutex>> registry;
+    }
 
     ThreadLock::ThreadLock(const std::string &key) : key(key)
     {
-        if (_mutexesCount.find(key) == _mutexesCount.end())
         {
-            _mutexesCount[key] = 1;
-        }
-        else
-        {
-            _mutexesCount[key]++;
+            std::lock_guard<std::mutex> guard(registryMutex);
+            auto &slot = registry[key];
+            if (!slot) slot = std::make_shared<KeyedMutex>();
+            slot->refCount++;
+            entry = slot;
         }
 
-        (_mutexes[key]).lock();
+        entry->mutex.lock();
     }
 
     ThreadLock::~ThreadLock()
     {
-        (_mutexes[key]).unlock();
+        entry->mutex.unlock();
 
-        if (--_mutexesCount[key] <= 0)
+        std::lock_guard<std::mutex> guard(registryMutex);
+        if (--entry->refCount <= 0)
         {
-            _mutexes.erase(key);
-            _mutexesCount.erase(key);
+            registry.erase(key);
         }
     }
 

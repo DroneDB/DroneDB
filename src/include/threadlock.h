@@ -4,6 +4,7 @@
 #ifndef THREADLOCK_H
 #define THREADLOCK_H
 
+#include <memory>
 #include <mutex>
 #include <unordered_map>
 #include <string>
@@ -11,13 +12,18 @@
 namespace ddb
 {
 
+    struct KeyedMutex;
+
     class ThreadLock
     {
         std::string key;
+        std::shared_ptr<KeyedMutex> entry;
 
     public:
         ThreadLock(const std::string &key);
         ~ThreadLock();
+        ThreadLock(const ThreadLock &) = delete;
+        ThreadLock &operator=(const ThreadLock &) = delete;
     };
 
 }
