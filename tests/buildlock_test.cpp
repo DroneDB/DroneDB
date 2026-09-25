@@ -230,6 +230,7 @@ TEST_F(BuildLockTest, NoConcurrentHoldersUnderContention) {
     std::atomic<int> holders{0};
     std::atomic<int> maxHolders{0};
     std::atomic<int> acquisitions{0};
+    std::atomic<int> unexpectedErrors{0};
 
     std::vector<std::thread> threads;
     for (int i = 0; i < numThreads; ++i) {
@@ -245,12 +246,17 @@ TEST_F(BuildLockTest, NoConcurrentHoldersUnderContention) {
                     --holders;
                 } catch (const BuildInProgressException&) {
                     // Expected under contention
+                } catch (const std::exception&) {
+                    // Never let an exception escape the thread (std::terminate would
+                    // kill the whole test binary)
+                    unexpectedErrors++;
                 }
             }
         });
     }
     for (auto& t : threads) t.join();
 
+    EXPECT_EQ(unexpectedErrors.load(), 0);
     EXPECT_GT(acquisitions.load(), 0);
     EXPECT_EQ(maxHolders.load(), 1);
 }
