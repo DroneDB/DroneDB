@@ -544,6 +544,8 @@ TEST_F(BuildLockTest, ForceBuildScenario_StaleLockRecovery) {
 #ifndef WIN32
 TEST_F(BuildLockTest, MultiProcess_KernelReleaseOnKill) {
     auto outputPath = testArea->getPath("multi_proc_kill");
+    // TestArea is reused across runs; a leftover sentinel would skip the wait below
+    io::assureIsRemoved(outputPath.string() + ".child-ready");
 
     pid_t child = fork();
     ASSERT_NE(child, -1);
