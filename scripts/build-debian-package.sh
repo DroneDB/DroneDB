@@ -235,6 +235,18 @@ override_dh_auto_install:
 	mkdir -p debian/ddb/usr/lib/pdal/plugins
 	find \$(CURDIR)/build/vcpkg_installed/${VCPKG_HOST_TRIPLET}/lib -maxdepth 1 -name 'libpdal_plugin_*.so.[0-9]*' -exec cp {} debian/ddb/usr/lib/pdal/plugins/ \\; 2>/dev/null || true
 
+	# Copy UNVERSIONED plugin sonames next to libpdalcpp. PDAL >= 19 resolves
+	# stage plugins with dlopen() of the unversioned name (e.g.
+	# libpdal_plugin_reader_e57.so) using only the dynamic loader search path,
+	# i.e. the directory that holds libpdalcpp (/usr/lib); it no longer scans
+	# the plugins subdirectory. Versioned-only copies under
+	# /usr/lib/pdal/plugins are therefore dead weight at runtime and every
+	# plugin-only format breaks with "Cannot create reader stage
+	# readers.e57" (the E57 upload failure). cp -L follows the vcpkg tree
+	# symlinks so real files are packaged.
+	find \$(CURDIR)/build/vcpkg_installed/${VCPKG_HOST_TRIPLET}/lib -maxdepth 1 -name 'libpdal_plugin_*.so' -exec cp -L {} debian/ddb/usr/lib/ \\;
+	@test -f debian/ddb/usr/lib/libpdal_plugin_reader_e57.so || { echo "ERROR: unversioned libpdal_plugin_reader_e57.so missing from /usr/lib (next to libpdalcpp). PDAL >= 19 loads plugins only via unversioned sonames, so E57 indexing would be dead."; exit 1; }
+
 	# Copy data files from build directory directly
 	cp \$(CURDIR)/build/proj.db debian/ddb/usr/share/ddb/
 	cp \$(CURDIR)/build/timezone21.bin debian/ddb/usr/share/ddb/
@@ -291,6 +303,28 @@ if [ -f build/Obj2Tiles ]; then
   done
   rm -rf "$VERIFY_DIR"
 fi
+
+# Regression guard: PDAL >= 19 loads plugins by unversioned soname from the
+# loader path (the directory containing libpdalcpp). Before the fix documented
+# in override_dh_auto_install above, the deb shipped only versioned copies in
+# /usr/lib/pdal/plugins and every E57 add failed with
+# "Cannot create reader stage readers.e57" while all previous packaging checks
+# passed, so verify the shipped layout explicitly here too.
+echo "Verifying PDAL plugin packaging..."
+PKG_CHECK_DIR=$(mktemp -d)
+dpkg-deb -x build/package/ddb_*.deb "$PKG_CHECK_DIR"
+if [ ! -f "$PKG_CHECK_DIR/usr/lib/libpdal_plugin_reader_e57.so" ]; then
+  echo "ERROR: unversioned libpdal_plugin_reader_e57.so missing from /usr/lib in the package"
+  rm -rf "$PKG_CHECK_DIR"
+  exit 1
+fi
+if ! ls "$PKG_CHECK_DIR"/usr/lib/pdal/plugins/libpdal_plugin_* >/dev/null 2>&1; then
+  echo "ERROR: versioned PDAL plugins missing from /usr/lib/pdal/plugins"
+  rm -rf "$PKG_CHECK_DIR"
+  exit 1
+fi
+rm -rf "$PKG_CHECK_DIR"
+echo "  PDAL plugin layout OK (unversioned copies next to libpdalcpp, versioned set under /usr/lib/pdal/plugins)."
 
 # Test the package
 echo "Testing the Debian package..."
