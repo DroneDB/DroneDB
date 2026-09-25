@@ -166,16 +166,22 @@ namespace ddb
                 bool download = alwaysDownload || !fs::exists(localTileablePath);
                 if (download)
                 {
-                    std::ofstream of(localTileablePath.string(), std::ios::binary);
-                    auto res = cpr::Download(of, cpr::Url(tileablePath.string()));
-
-                    // TODO: Should we check return code?
-                    /*if (res.error)
+                    // Download to a temp file so a failed transfer never lands in the cache
+                    const fs::path tmpPath = localTileablePath.string() + ".download-" + utils::generateRandomString(16);
+                    cpr::Response res;
                     {
-                        LOGE << "Error downloading " << tileablePath.string() << ": " << res.error.message;
-                        io::assureIsRemoved(localTileablePath);
-                        throw FSException("Error downloading " + tileablePath.string());
-                    }*/
+                        std::ofstream of(tmpPath.string(), std::ios::binary);
+                        res = cpr::Download(of, cpr::Url(tileablePath.string()));
+                    }
+
+                    if (res.error || res.status_code < 200 || res.status_code >= 300)
+                    {
+                        io::assureIsRemoved(tmpPath);
+                        throw NetException("Cannot download " + tileablePath.string() + " (HTTP " +
+                                           std::to_string(res.status_code) + "): " + res.error.message);
+                    }
+
+                    io::rename(tmpPath, localTileablePath);
                 }
             }
         }
