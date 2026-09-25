@@ -73,6 +73,16 @@ void releaseKernelLock(int fd) {
 #  endif
 }
 
+/** @brief True if the file behind `fd` is still the one linked at `path` (not unlinked by a previous holder). */
+bool isStillLinked(int fd, const std::string& path) {
+    struct stat fdStat{};
+    struct stat pathStat{};
+    if (fstat(fd, &fdStat) == -1 || stat(path.c_str(), &pathStat) == -1) return false;
+    return fdStat.st_dev == pathStat.st_dev && fdStat.st_ino == pathStat.st_ino;
+}
+
+constexpr int kMaxStaleInodeRetries = 16;
+
 } // anonymous namespace
 #endif
 
@@ -318,47 +328,59 @@ void BuildLock::acquireLock(bool waitForLock) {
     // `waitForLock` is intentionally ignored on Unix (both modes are non-
     // blocking) to preserve the existing higher-level semantics in build.cpp.
 
-    fileDescriptor = open(
-        lockFilePath.c_str(),
-        O_CREAT | O_WRONLY,           // no O_EXCL: an orphan file is reclaimable
-        S_IRUSR | S_IWUSR | S_IRGRP   // permissions: rw-r-----
-    );
     (void)waitForLock;  // unused on Unix; preserved in signature for API parity
 
-    if (fileDescriptor == -1) {
-        int error = errno;
+    for (int attempt = 0;; ++attempt) {
+        fileDescriptor = open(
+            lockFilePath.c_str(),
+            O_CREAT | O_WRONLY,           // no O_EXCL: an orphan file is reclaimable
+            S_IRUSR | S_IWUSR | S_IRGRP   // permissions: rw-r-----
+        );
 
-        if (error == EACCES) {
-            throw BuildLockPermissionException("Insufficient permissions to create build lock file: " + lockFilePath);
-        } else if (error == ENOSPC) {
-            throw BuildLockDiskFullException("Disk full - cannot create build lock file: " + lockFilePath);
-        } else if (error == ENOENT) {
-            throw BuildLockDirectoryException("Lock file directory does not exist: " + lockFilePath);
-        } else if (error == ENAMETOOLONG) {
-            throw BuildLockException("Lock file path too long: " + lockFilePath);
-        } else {
+        if (fileDescriptor == -1) {
+            int error = errno;
+
+            if (error == EACCES) {
+                throw BuildLockPermissionException("Insufficient permissions to create build lock file: " + lockFilePath);
+            } else if (error == ENOSPC) {
+                throw BuildLockDiskFullException("Disk full - cannot create build lock file: " + lockFilePath);
+            } else if (error == ENOENT) {
+                throw BuildLockDirectoryException("Lock file directory does not exist: " + lockFilePath);
+            } else if (error == ENAMETOOLONG) {
+                throw BuildLockException("Lock file path too long: " + lockFilePath);
+            } else {
+                std::ostringstream ss;
+                ss << "Failed to open build lock file (" << strerror(error) << "): " << lockFilePath;
+                throw BuildLockException(ss.str());
+            }
+        }
+
+        int lockErrno = 0;
+        if (!tryAcquireKernelLock(fileDescriptor, &lockErrno)) {
+            // Clean up the fd before throwing; do NOT unlink, the lock holder
+            // legitimately owns the file.
+            close(fileDescriptor);
+            fileDescriptor = -1;
+
+            if (lockErrno == EWOULDBLOCK || lockErrno == EAGAIN || lockErrno == EACCES) {
+                // EACCES is what F_OFD_SETLK can return when another process holds
+                // a conflicting lock on some filesystems (POSIX permits either).
+                throw BuildInProgressException("Build in progress by another process");
+            }
+
             std::ostringstream ss;
-            ss << "Failed to open build lock file (" << strerror(error) << "): " << lockFilePath;
+            ss << "Failed to acquire build lock (" << strerror(lockErrno) << "): " << lockFilePath;
             throw BuildLockException(ss.str());
         }
-    }
 
-    int lockErrno = 0;
-    if (!tryAcquireKernelLock(fileDescriptor, &lockErrno)) {
-        // Clean up the fd before throwing; do NOT unlink, the lock holder
-        // legitimately owns the file.
+        // The previous holder may have unlinked the file between our open() and the lock:
+        // that inode is orphaned and locking it excludes nobody, so retry on the current path.
+        if (isStillLinked(fileDescriptor, lockFilePath)) break;
+
         close(fileDescriptor);
         fileDescriptor = -1;
-
-        if (lockErrno == EWOULDBLOCK || lockErrno == EAGAIN || lockErrno == EACCES) {
-            // EACCES is what F_OFD_SETLK can return when another process holds
-            // a conflicting lock on some filesystems (POSIX permits either).
+        if (attempt >= kMaxStaleInodeRetries)
             throw BuildInProgressException("Build in progress by another process");
-        }
-
-        std::ostringstream ss;
-        ss << "Failed to acquire build lock (" << strerror(lockErrno) << "): " << lockFilePath;
-        throw BuildLockException(ss.str());
     }
 
     // Lock acquired. The file may contain stale diagnostic data from a previous

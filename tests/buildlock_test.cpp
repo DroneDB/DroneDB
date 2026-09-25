@@ -218,6 +218,44 @@ TEST_F(BuildLockTest, ThreadSafety) {
 }
 
 /**
+ * @brief Rapid acquire/release contention must never yield two simultaneous holders
+ *
+ * Exercises the window where a contender opens the lock file just before the
+ * holder unlinks it and would otherwise lock the orphaned inode.
+ */
+TEST_F(BuildLockTest, NoConcurrentHoldersUnderContention) {
+    auto outputPath = testArea->getPath("contention_test");
+    const int numThreads = 8;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    std::atomic<int> holders{0};
+    std::atomic<int> maxHolders{0};
+    std::atomic<int> acquisitions{0};
+
+    std::vector<std::thread> threads;
+    for (int i = 0; i < numThreads; ++i) {
+        threads.emplace_back([&]() {
+            while (std::chrono::steady_clock::now() < deadline) {
+                try {
+                    BuildLock lock(outputPath.string(), false);
+                    const int now = ++holders;
+                    int prev = maxHolders.load();
+                    while (now > prev && !maxHolders.compare_exchange_weak(prev, now)) {}
+                    acquisitions++;
+                    std::this_thread::yield();
+                    --holders;
+                } catch (const BuildInProgressException&) {
+                    // Expected under contention
+                }
+            }
+        });
+    }
+    for (auto& t : threads) t.join();
+
+    EXPECT_GT(acquisitions.load(), 0);
+    EXPECT_EQ(maxHolders.load(), 1);
+}
+
+/**
  * @brief Test lock behavior with non-existent directory
  */
 TEST_F(BuildLockTest, NonExistentDirectory) {
