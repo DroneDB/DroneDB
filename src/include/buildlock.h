@@ -68,8 +68,10 @@ namespace ddb {
  * be used as a general-purpose file locking mechanism.
  *
  * @thread_safety
- * This class is not thread-safe. Multiple threads within the same process
- * should coordinate using ThreadLock before attempting to acquire a BuildLock.
+ * A single instance must not be shared between threads, but separate instances
+ * on the same path exclude each other across threads of one process too (OFD
+ * locks, flock() and no-share CreateFile are all per open file). No ThreadLock
+ * is needed around a BuildLock.
  */
 class DDB_DLL BuildLock {
 private:
@@ -110,8 +112,9 @@ private:
      * @brief Acquire the build lock with specified wait behavior
      *
      * @param waitForLock Controls lock acquisition strategy:
-     *   - **Windows**: true = CREATE_ALWAYS (overwrites orphaned files, blocks on
-     *     active handles); false = CREATE_NEW (fails immediately if file exists).
+     *   - **Windows**: true = CREATE_ALWAYS (overwrites orphaned files, fails with
+     *     a sharing violation on active handles); false = CREATE_NEW (fails if the
+     *     file exists). Neither mode waits.
      *   - **Unix/Linux**: ignored. Both modes use non-blocking kernel advisory
      *     locking (F_OFD_SETLK on Linux, flock() elsewhere). Orphan files are
      *     reclaimable because the kernel released the previous lock at process
@@ -156,7 +159,7 @@ public:
      * "{outputPath}.building".
      *
      * @param outputPath The target build output path to lock
-     * @param wait If true, wait for the lock to become available. If false, fail immediately if lock is held
+     * @param wait Windows only: true reclaims an orphaned lock file, false fails if it exists. Never blocks
      *
      * @throws AppException If wait=false and another process is already building to this path
      * @throws AppException If the lock cannot be acquired due to system errors

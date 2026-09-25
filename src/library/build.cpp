@@ -25,7 +25,6 @@
 #include "mio.h"
 #include "mzip.h"
 #include "pointcloud.h"
-#include "threadlock.h"
 #include "vector.h"
 
 namespace ddb {
@@ -238,9 +237,8 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
     // This prevents BuildLockDirectoryException when multiple processes race to build
     io::assureFolderExists(baseOutputPath);
 
-    // Acquire inter-process lock to prevent race conditions between different processes
-    // This must come BEFORE the ThreadLock to ensure proper ordering of lock acquisition
-    LOGD << "Acquiring inter-process build lock for: " << outputFolder;
+    // BuildLock excludes other threads of this process as well as other processes
+    LOGD << "Acquiring build lock for: " << outputFolder;
 
     // BuildLock uses kernel-managed advisory locks (Windows: CreateFile no-share +
     // DELETE_ON_CLOSE; Linux: F_OFD_SETLK; macOS/BSD: flock). The kernel releases
@@ -250,9 +248,6 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
     // another process - force=true must not override it, because doing so would
     // corrupt the in-progress output of the other process.
     BuildLock processLock(outputFolder);
-
-    // Acquire intra-process lock to coordinate between threads of the same process
-    ThreadLock threadLock("build-" + (db->rootDirectory() / e.hash).string());
 
     // Check again if output exists after acquiring locks (another process might have completed the
     // build). Delegate to the centralized completeness helper so the rules used here stay in
