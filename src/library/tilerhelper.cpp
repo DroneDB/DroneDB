@@ -9,8 +9,6 @@
 
 #include <memory>
 #include <vector>
-#include <chrono>
-#include <thread>
 
 #include "entry.h"
 #include "exceptions.h"
@@ -228,17 +226,12 @@ namespace ddb
                 {
                     ThreadLock lock(outputPath.string());
 
-                    // Recheck is needed for other processes that might have generated
-                    // the file
-
-                    if (!fs::exists(outputPath))
+                    // Another thread may have generated the file while we waited
+                    // (geoProject publishes it via an atomic rename)
+                    if (forceRecreate || !fs::exists(outputPath))
                     {
                         ddb::geoProject({localTileablePath.string()}, outputPath.string(),
                                         "100%", true);
-
-                        // Helps making sure that output path is available in the filesystem before
-                        // releasing the thread lock
-                        std::this_thread::sleep_for(std::chrono::milliseconds(5));
                     }
                 }
             }

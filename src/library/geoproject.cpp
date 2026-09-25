@@ -68,7 +68,8 @@ namespace ddb
                 outFile = output;
             }
 
-            std::string tmpOutFile = fs::path(outFile).replace_extension(".tif.tmp").string();
+            // Unique per call so concurrent processes sharing a cache don't clobber each other
+            std::string tmpOutFile = fs::path(outFile).replace_extension("." + utils::generateRandomString(8) + ".tif.tmp").string();
 
             Point ul = e.polygon_geom.getPoint(0);
             Point ll = e.polygon_geom.getPoint(1);
@@ -198,6 +199,12 @@ namespace ddb
             GDALClose(hDstDataset);
             GDALFlushCache(hWrpDataset);
             GDALClose(hWrpDataset);
+
+            if (hWrpDataset == nullptr)
+            {
+                io::assureIsRemoved(tmpOutFile);
+                throw GDALException("Cannot geoproject " + p.string());
+            }
 
             io::rename(tmpOutFile, outFile);
 
