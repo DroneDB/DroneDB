@@ -111,79 +111,119 @@ jobs:
         run: cd build && ./ddbcmd --debug
       - name: Build Debian Package
         run: |
-          if [ -n "${{ startsWith(github.ref, 'refs/tags/') }}" ] || [ "${{ github.event_name }}" == "workflow_dispatch" ] || [ "${{ github.event_name }}" == "push" ]; then
-            # Set DDB_VERSION env var for the package
-            if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-              echo "DDB_VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
-            else
-              # Use commit hash for non-tag builds
-              echo "DDB_VERSION=$(git describe --always)" >> $GITHUB_ENV
-            fi
-
-            # Set VCPKG_HOST_TRIPLET for the build script
-            echo "VCPKG_HOST_TRIPLET=${VCPKG_DEFAULT_TRIPLET}" >> $GITHUB_ENV
-
-            # Clean dist and package directories to avoid including old artifacts
-            rm -rf build/dist/*.tgz build/package/*.deb
-            mkdir -p build/dist build/package
-
-            # Verify required files exist in build directory
-            for file in ddbcmd libddb.so libnxs.so proj.db timezone21.bin sensor_data.sqlite curl-ca-bundle.crt; do
-              if [ ! -f "build/$file" ]; then
-                echo "Error: Required file $file not found in build directory!"
-                exit 1
-              fi
-            done
-
-            # Execute the build script
-            chmod +x scripts/build-debian-package.sh
-            ./scripts/build-debian-package.sh
-
-            # Test linting of Debian package
-            echo "Running lintian on Debian package..."
-            lintian ../ddb_*.deb || echo "Lintian reported issues, but continuing..."
-
-            # Verify untwine packaging. Required on release tags, informational otherwise.
-            echo "Checking whether untwine is included in the Debian package..."
-            if dpkg -c build/package/ddb_*.deb | grep -E '/usr/bin/untwine$' >/dev/null; then
-              echo "  ✓ untwine present in .deb (COPC accelerator enabled)"
-            else
-              if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-                echo "  ✗ untwine NOT present in .deb - release builds MUST include untwine. Failing."
-                exit 1
-              else
-                echo "  ! untwine NOT present in .deb (DroneDB will fall back to PDAL writers.copc)"
-              fi
-            fi
-
-            # Verify build-lod packaging. Required on release tags, informational otherwise.
-            echo "Checking whether build-lod is included in the Debian package..."
-            if dpkg -c build/package/ddb_*.deb | grep -E '/usr/bin/build-lod$' >/dev/null; then
-              echo "  ✓ build-lod present in .deb (Gaussian Splat LOD streaming enabled)"
-            else
-              if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-                echo "  ✗ build-lod NOT present in .deb - release builds MUST include build-lod. Failing."
-                exit 1
-              else
-                echo "  ! build-lod NOT present in .deb (Gaussian Splat builds deferred until build-lod is available)"
-              fi
-            fi
-
-            # Verify Obj2Tiles packaging. Required on release tags, informational otherwise.
-            echo "Checking whether Obj2Tiles is included in the Debian package..."
-            if dpkg -c build/package/ddb_*.deb | grep -E '/usr/bin/Obj2Tiles$' >/dev/null; then
-              echo "  ✓ Obj2Tiles present in .deb (OGC 3D Tiles generation enabled)"
-            else
-              if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-                echo "  ✗ Obj2Tiles NOT present in .deb - release builds MUST include Obj2Tiles. Failing."
-                exit 1
-              else
-                echo "  ! Obj2Tiles NOT present in .deb (3D Tiles generation disabled, Nexus still produced)"
-              fi
-            fi
+          # Set DDB_VERSION env var for the package
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            echo "DDB_VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
           else
-            echo "Skipping Debian package build for PR"
+            # Use commit hash for non-tag builds
+            echo "DDB_VERSION=$(git describe --always)" >> $GITHUB_ENV
           fi
+
+          # Set VCPKG_HOST_TRIPLET for the build script
+          echo "VCPKG_HOST_TRIPLET=${VCPKG_DEFAULT_TRIPLET}" >> $GITHUB_ENV
+
+          # Clean dist and package directories to avoid including old artifacts
+          rm -rf build/dist/*.tgz build/package/*.deb
+          mkdir -p build/dist build/package
+
+          # Verify required files exist in build directory
+          for file in ddbcmd libddb.so libnxs.so proj.db timezone21.bin sensor_data.sqlite curl-ca-bundle.crt; do
+            if [ ! -f "build/$file" ]; then
+              echo "Error: Required file $file not found in build directory!"
+              exit 1
+            fi
+          done
+
+          # Execute the build script
+          chmod +x scripts/build-debian-package.sh
+          ./scripts/build-debian-package.sh
+
+          # Test linting of Debian package
+          echo "Running lintian on Debian package..."
+          lintian ../ddb_*.deb || echo "Lintian reported issues, but continuing..."
+
+          # Verify untwine packaging. Required on release tags, informational otherwise.
+          echo "Checking whether untwine is included in the Debian package..."
+          if dpkg -c build/package/ddb_*.deb | grep -E '/usr/bin/untwine$' >/dev/null; then
+            echo "  ✓ untwine present in .deb (COPC accelerator enabled)"
+          else
+            if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+              echo "  ✗ untwine NOT present in .deb - release builds MUST include untwine. Failing."
+              exit 1
+            else
+              echo "  ! untwine NOT present in .deb (DroneDB will fall back to PDAL writers.copc)"
+            fi
+          fi
+
+          # Verify build-lod packaging. Required on release tags, informational otherwise.
+          echo "Checking whether build-lod is included in the Debian package..."
+          if dpkg -c build/package/ddb_*.deb | grep -E '/usr/bin/build-lod$' >/dev/null; then
+            echo "  ✓ build-lod present in .deb (Gaussian Splat LOD streaming enabled)"
+          else
+            if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+              echo "  ✗ build-lod NOT present in .deb - release builds MUST include build-lod. Failing."
+              exit 1
+            else
+              echo "  ! build-lod NOT present in .deb (Gaussian Splat builds deferred until build-lod is available)"
+            fi
+          fi
+
+          # Verify Obj2Tiles packaging. Required on release tags, informational otherwise.
+          echo "Checking whether Obj2Tiles is included in the Debian package..."
+          if dpkg -c build/package/ddb_*.deb | grep -E '/usr/bin/Obj2Tiles$' >/dev/null; then
+            echo "  ✓ Obj2Tiles present in .deb (OGC 3D Tiles generation enabled)"
+          else
+            if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+              echo "  ✗ Obj2Tiles NOT present in .deb - release builds MUST include Obj2Tiles. Failing."
+              exit 1
+            else
+              echo "  ! Obj2Tiles NOT present in .deb (3D Tiles generation disabled, Nexus still produced)"
+            fi
+          fi
+
+          # Verify PDAL plugin packaging. PDAL >= 19 loads plugins by
+          # unversioned soname from the loader path (the directory holding
+          # libpdalcpp); without unversioned copies in /usr/lib every E57
+          # fails with "Cannot create reader stage readers.e57". This
+          # regressed silently for months, so it fails the build outright.
+          echo "Checking PDAL plugin packaging..."
+          if ! dpkg -c build/package/ddb_*.deb | grep -E '/usr/lib/libpdal_plugin_reader_e57\.so$' >/dev/null; then
+            echo "  ✗ unversioned libpdal_plugin_reader_e57.so missing from /usr/lib - E57 indexing would be dead. Failing."
+            exit 1
+          fi
+          if ! dpkg -c build/package/ddb_*.deb | grep -E '/usr/lib/pdal/plugins/libpdal_plugin_' >/dev/null; then
+            echo "  ✗ versioned PDAL plugins missing from /usr/lib/pdal/plugins. Failing."
+            exit 1
+          fi
+          echo "  ✓ PDAL plugin layout OK (unversioned next to libpdalcpp + versioned under /usr/lib/pdal/plugins)"
+
+          # Functional smoke test: install the .deb in a clean Ubuntu 24.04
+          # (same base image as the dronedb/registry runtime image) and
+          # really index an E57. A build-tree-side test cannot catch this
+          # class of bug: the packaged binaries' RUNPATH points into the
+          # build tree, so from a checkout the loader would silently prefer
+          # the build-tree plugins even when the package ships a broken
+          # layout. In a clean container the only candidate is /usr/lib,
+          # exactly as in the Registry containers.
+          echo "Running E57 package smoke test in clean ubuntu:24.04..."
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE/build/package:/pkg:ro" \
+            ubuntu:24.04 bash -ec '
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update -qq
+              apt-get install -y -qq /pkg/ddb_*.deb curl ca-certificates >/dev/null
+              mkdir -p /tmp/e57smoke && cd /tmp/e57smoke
+              ddb --version
+              curl -fsSL --retry 3 -o a4.e57 https://github.com/DroneDB/test_data/raw/refs/heads/master/point-clouds/A4.e57
+              ddb init . > /dev/null
+              ddb add a4.e57
+              ddb list | grep -q "a4\.e57"
+              ddb info a4.e57 --format json | grep -qE "\"pointCount\":[1-9]"
+              echo "  ✓ packaged ddb indexed an E57 file in a clean Ubuntu 24.04"
+            ' || {
+              echo "  ✗ E57 package smoke test failed - the installed package cannot index E57 (PDAL plugins?)."
+              exit 1
+            }
       - name: Upload Distribution Files
         uses: actions/upload-artifact@v4
         with:

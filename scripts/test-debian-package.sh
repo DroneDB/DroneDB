@@ -94,6 +94,32 @@ if [ -f "$TEMP_DIR/usr/bin/Obj2Tiles" ]; then
     fi
 fi
 
+# PDAL >= 19 resolves stage plugins with dlopen() of the UNVERSIONED soname
+# (libpdal_plugin_reader_e57.so) from the loader path only - the directory
+# containing libpdalcpp. It does not scan the plugins subdirectory, so a
+# package that ships just the versioned files under /usr/lib/pdal/plugins
+# indexes zero E57 points ("Cannot create reader stage readers.e57") even
+# though file-listing checks look complete. The unversioned copies must ship
+# next to libpdalcpp in /usr/lib. The runtime counterpart of this check (a
+# real E57 add against the installed package) runs as the docker-based
+# "package smoke test" step in .github/workflows/c-cpp.yml: an extraction-
+# only smoke test cannot be trusted here because the build tree is reachable
+# through the binaries' RUNPATH and would shadow the packaged files.
+echo "Checking PDAL plugin packaging..."
+if [ ! -f "$TEMP_DIR/usr/lib/libpdalcpp.so.20" ] && ! ls "$TEMP_DIR"/usr/lib/libpdalcpp.so.* >/dev/null 2>&1; then
+    echo "Error: no versioned libpdalcpp.so.* found in /usr/lib!"
+    exit 1
+fi
+if [ ! -f "$TEMP_DIR/usr/lib/libpdal_plugin_reader_e57.so" ]; then
+    echo "Error: unversioned libpdal_plugin_reader_e57.so not found next to libpdalcpp!"
+    echo "PDAL >= 19 would fail every E57 add with 'Cannot create reader stage readers.e57'."
+    exit 1
+fi
+if [ ! -d "$TEMP_DIR/usr/lib/pdal/plugins" ] || ! ls "$TEMP_DIR"/usr/lib/pdal/plugins/libpdal_plugin_reader_e57.so.* >/dev/null 2>&1; then
+    echo "Error: versioned PDAL plugins missing from /usr/lib/pdal/plugins!"
+    exit 1
+fi
+
 # Check postinst script
 echo "Checking postinst script..."
 if [ ! -f "$TEMP_DIR/DEBIAN/postinst" ]; then
