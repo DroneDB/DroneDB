@@ -11,6 +11,7 @@
 #include <fstream>
 #include <chrono>
 #include <iomanip>
+#include <atomic>
 
 #ifdef WIN32
 #include <process.h>  // for _getpid()
@@ -82,6 +83,24 @@ bool isStillLinked(int fd, const std::string& path) {
 }
 
 constexpr int kMaxStaleInodeRetries = 16;
+
+} // anonymous namespace
+#endif
+
+#ifdef WIN32
+namespace {
+
+/** @brief True if a new file can be created in `dir` (tells real ACL denials from lock contention). */
+bool probeDirectoryWritable(const fs::path& dir) {
+    static std::atomic<unsigned long> counter{0};
+    auto probe = dir / (".ddb_lock_probe_" + std::to_string(_getpid()) + "_" +
+                       std::to_string(counter.fetch_add(1)));
+    HANDLE h = CreateFileA(probe.string().c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
+                           FILE_ATTRIBUTE_HIDDEN | FILE_FLAG_DELETE_ON_CLOSE, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return false;
+    CloseHandle(h);
+    return true;
+}
 
 } // anonymous namespace
 #endif
@@ -286,10 +305,14 @@ void BuildLock::acquireLock(bool waitForLock) {
     if (fileHandle == INVALID_HANDLE_VALUE) {
         DWORD error = GetLastError();
 
-        if (error == ERROR_SHARING_VIOLATION || error == ERROR_FILE_EXISTS || error == ERROR_ALREADY_EXISTS) {
+        if (error == ERROR_SHARING_VIOLATION || error == ERROR_FILE_EXISTS ||
+            error == ERROR_ALREADY_EXISTS || error == ERROR_DELETE_PENDING) {
             // This is the expected error when another process holds the lock
             throw BuildInProgressException("Build in progress by another process");
         } else if (error == ERROR_ACCESS_DENIED) {
+            // NOTE: a holder's file that is delete-pending (being released) also yields ACCESS_DENIED
+            if (probeDirectoryWritable(lockPath.parent_path()))
+                throw BuildInProgressException("Build in progress by another process");
             throw BuildLockPermissionException("Insufficient permissions to create build lock file: " + lockFilePath);
         } else if (error == ERROR_DISK_FULL) {
             throw BuildLockDiskFullException("Disk full - cannot create build lock file: " + lockFilePath);
