@@ -13,6 +13,7 @@
 #include <chrono>
 #include <fstream>
 #include <future>
+#include <mutex>
 #include <vector>
 #include <string>
 
@@ -231,6 +232,9 @@ TEST_F(BuildLockTest, NoConcurrentHoldersUnderContention) {
     std::atomic<int> maxHolders{0};
     std::atomic<int> acquisitions{0};
     std::atomic<int> unexpectedErrors{0};
+    // Keep the first few swallowed exception messages to make failures self-diagnostic
+    std::mutex errorsMx;
+    std::vector<std::string> errorSamples;
 
     std::vector<std::thread> threads;
     for (int i = 0; i < numThreads; ++i) {
@@ -246,16 +250,21 @@ TEST_F(BuildLockTest, NoConcurrentHoldersUnderContention) {
                     --holders;
                 } catch (const BuildInProgressException&) {
                     // Expected under contention
-                } catch (const std::exception&) {
+                } catch (const std::exception& e) {
                     // Never let an exception escape the thread (std::terminate would
                     // kill the whole test binary)
                     unexpectedErrors++;
+                    std::lock_guard<std::mutex> lk(errorsMx);
+                    if (errorSamples.size() < 5) errorSamples.emplace_back(e.what());
                 }
             }
         });
     }
     for (auto& t : threads) t.join();
 
+    for (const auto& msg : errorSamples) {
+        ADD_FAILURE() << "Unexpected exception: " << msg;
+    }
     EXPECT_EQ(unexpectedErrors.load(), 0);
     EXPECT_GT(acquisitions.load(), 0);
     EXPECT_EQ(maxHolders.load(), 1);
