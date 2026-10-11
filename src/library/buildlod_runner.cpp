@@ -12,16 +12,7 @@
 
 #include "logger.h"
 #include "mio.h"
-
-#ifdef _WIN32
-#include <windows.h>
-#else
-#include <sys/types.h>
-#include <sys/wait.h>
-#include <unistd.h>
-#include <spawn.h>
-extern char **environ;
-#endif
+#include "process_runner.h"
 
 namespace ddb
 {
@@ -81,42 +72,8 @@ namespace ddb
                 return {};
             }
 
-            std::string quoteArg(const std::string &arg)
-            {
-#ifdef _WIN32
-                if (arg.find_first_of(" \t\"") == std::string::npos && !arg.empty())
-                    return arg;
-
-                std::string out;
-                out.reserve(arg.size() + 2);
-                out.push_back('"');
-                size_t backslashes = 0;
-                for (char c : arg)
-                {
-                    if (c == '\\')
-                    {
-                        ++backslashes;
-                        out.push_back(c);
-                    }
-                    else if (c == '"')
-                    {
-                        out.append(backslashes + 1, '\\');
-                        out.push_back('"');
-                        backslashes = 0;
-                    }
-                    else
-                    {
-                        backslashes = 0;
-                        out.push_back(c);
-                    }
-                }
-                out.append(backslashes, '\\');
-                out.push_back('"');
-                return out;
-#else
-                return arg;
-#endif
-            }
+            // Tail of the captured output included in errorOut.
+            constexpr size_t kErrorTailLength = 512;
 
             // build-lod derives its output name from the input: it replaces the input's
             // extension with "-lod" and appends ".rad" (see rust/build-lod/src/main.rs).
@@ -227,171 +184,24 @@ namespace ddb
             int clampedSh = maxSh < 0 ? 0 : (maxSh > 3 ? 3 : maxSh);
 
             std::vector<std::string> args;
-            args.push_back(bin.string());
             args.push_back(input.string());
             args.push_back(quality ? "--quality" : "--quick");
             args.push_back("--max-sh=" + std::to_string(clampedSh));
             args.push_back("--rad"); // single-file RAD (HTTP range friendly)
 
-            {
-                std::ostringstream cmdDbg;
-                for (size_t i = 0; i < args.size(); ++i)
-                {
-                    if (i > 0) cmdDbg << ' ';
-                    cmdDbg << quoteArg(args[i]);
-                }
-                LOGD << "Spawning build-lod: " << cmdDbg.str();
-            }
+            LOGD << "Spawning build-lod: " << process::formatCommandLine(bin, args);
 
-#ifdef _WIN32
-            // Capture the child's stdout+stderr through a single pipe so build-lod's
-            // (verbose) progress output is forwarded to the DDB log instead of a console.
-            SECURITY_ATTRIBUTES sa{};
-            sa.nLength = sizeof(sa);
-            sa.bInheritHandle = TRUE;
+            // stdout+stderr are captured and forwarded to the DDB log line by line.
+            process::Options popts;
+            popts.onOutputLine = [](const std::string &line) { LOGD << "[build-lod] " << line; };
 
-            HANDLE hOutRead = nullptr, hOutWrite = nullptr;
-            if (!CreatePipe(&hOutRead, &hOutWrite, &sa, 0))
-            {
-                errorOut = "CreatePipe failed for build-lod output";
-                return false;
-            }
-            SetHandleInformation(hOutRead, HANDLE_FLAG_INHERIT, 0);
-
-            std::string cmdLine;
-            for (size_t i = 0; i < args.size(); ++i)
-            {
-                if (i > 0) cmdLine.push_back(' ');
-                cmdLine.append(quoteArg(args[i]));
-            }
-
-            int wideLen = MultiByteToWideChar(CP_UTF8, 0, cmdLine.c_str(), -1, nullptr, 0);
-            std::wstring wideCmd(static_cast<size_t>(wideLen > 0 ? wideLen : 1), L'\0');
-            MultiByteToWideChar(CP_UTF8, 0, cmdLine.c_str(), -1, wideCmd.data(), wideLen);
-
-            std::string binStr = bin.string();
-            int wideBinLen = MultiByteToWideChar(CP_UTF8, 0, binStr.c_str(), -1, nullptr, 0);
-            std::wstring wideBin(static_cast<size_t>(wideBinLen > 0 ? wideBinLen : 1), L'\0');
-            MultiByteToWideChar(CP_UTF8, 0, binStr.c_str(), -1, wideBin.data(), wideBinLen);
-
-            STARTUPINFOW si{};
-            si.cb = sizeof(si);
-            si.dwFlags = STARTF_USESTDHANDLES;
-            si.hStdOutput = hOutWrite;
-            si.hStdError = hOutWrite;
-            si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
-
-            PROCESS_INFORMATION pi{};
-
-            BOOL ok = CreateProcessW(
-                wideBin.c_str(),
-                wideCmd.data(),
-                nullptr, nullptr,
-                TRUE, // inherit hStdOutput/hStdError
-                CREATE_NO_WINDOW,
-                nullptr, nullptr,
-                &si, &pi);
-
-            CloseHandle(hOutWrite);
-
-            if (!ok)
-            {
-                CloseHandle(hOutRead);
-                DWORD err = GetLastError();
-                std::ostringstream oss;
-                oss << "CreateProcess failed for build-lod (error " << err << ")";
-                errorOut = oss.str();
-                return false;
-            }
-
-            std::string captured;
-            {
-                char buf[4096];
-                DWORD nr = 0;
-                while (ReadFile(hOutRead, buf, sizeof(buf), &nr, nullptr) && nr > 0)
-                    captured.append(buf, nr);
-            }
-            CloseHandle(hOutRead);
-
-            WaitForSingleObject(pi.hProcess, INFINITE);
-            DWORD exitCode = 1;
-            GetExitCodeProcess(pi.hProcess, &exitCode);
-            CloseHandle(pi.hThread);
-            CloseHandle(pi.hProcess);
-#else
-            int outPipe[2];
-            if (pipe(outPipe) != 0)
-            {
-                errorOut = "pipe() failed for build-lod output";
-                return false;
-            }
-
-            posix_spawn_file_actions_t actions;
-            posix_spawn_file_actions_init(&actions);
-            posix_spawn_file_actions_addclose(&actions, outPipe[0]);
-            posix_spawn_file_actions_adddup2(&actions, outPipe[1], STDOUT_FILENO);
-            posix_spawn_file_actions_adddup2(&actions, outPipe[1], STDERR_FILENO);
-            posix_spawn_file_actions_addclose(&actions, outPipe[1]);
-
-            std::vector<char *> argv;
-            argv.reserve(args.size() + 1);
-            for (auto &a : args) argv.push_back(const_cast<char *>(a.c_str()));
-            argv.push_back(nullptr);
-
-            pid_t pid = 0;
-            int spawnRet = posix_spawn(&pid, bin.c_str(), &actions, nullptr, argv.data(), environ);
-            posix_spawn_file_actions_destroy(&actions);
-
-            close(outPipe[1]);
-
-            if (spawnRet != 0)
-            {
-                close(outPipe[0]);
-                std::ostringstream oss;
-                oss << "posix_spawn failed for build-lod (errno " << spawnRet << ")";
-                errorOut = oss.str();
-                return false;
-            }
-
-            std::string captured;
-            {
-                char buf[4096];
-                ssize_t nr = 0;
-                while ((nr = read(outPipe[0], buf, sizeof(buf))) > 0)
-                    captured.append(buf, static_cast<size_t>(nr));
-            }
-            close(outPipe[0]);
-
-            int status = 0;
-            if (waitpid(pid, &status, 0) < 0)
-            {
-                errorOut = "waitpid failed for build-lod";
-                return false;
-            }
-            if (!WIFEXITED(status))
-            {
-                errorOut = "build-lod terminated abnormally";
-                return false;
-            }
-            int exitCode = WEXITSTATUS(status);
-#endif
-
-            if (!captured.empty())
-                LOGD << "[build-lod] " << captured;
-
-            if (exitCode != 0)
+            const process::Result res = process::run(bin, args, popts);
+            if (!res.success())
             {
                 std::ostringstream oss;
-                oss << "build-lod exited with code " << exitCode;
+                oss << "build-lod " << res.describe();
                 // Surface the tail of the captured output to aid diagnostics.
-                if (!captured.empty())
-                {
-                    constexpr size_t kTail = 512;
-                    const std::string tail = captured.size() > kTail
-                                                 ? captured.substr(captured.size() - kTail)
-                                                 : captured;
-                    oss << ": " << tail;
-                }
+                if (!res.outputTail.empty()) oss << ": " << res.tail(kErrorTailLength);
                 errorOut = oss.str();
                 fs::remove(producedRad, ec);
                 return false;

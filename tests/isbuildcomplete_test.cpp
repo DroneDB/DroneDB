@@ -198,6 +198,48 @@ TEST_F(IsBuildCompleteTest, VectorWithBothArtifactsReturnsTrue) {
 
 // --- C API ---
 
+// --- Model: completeness is keyed on nxs/ only; 3dtiles/ is best-effort ---
+
+// Indexes a dependency-free OBJ and returns its relative path.
+std::string addModel(Database* db, const fs::path& dbPath) {
+    const fs::path obj = dbPath / "model.obj";
+    std::ofstream(obj) << "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
+    ddb::addToIndex(db, {obj.string()});
+    Entry e;
+    EXPECT_TRUE(ddb::getEntry(db, "model.obj", e));
+    EXPECT_EQ(e.type, EntryType::Model);
+    return "model.obj";
+}
+
+TEST_F(IsBuildCompleteTest, ModelWithoutArtifactsReturnsFalse) {
+    const auto rel = addModel(db.get(), dbPath);
+    EXPECT_FALSE(ddb::isBuildComplete(db.get(), rel));
+}
+
+TEST_F(IsBuildCompleteTest, ModelEmptyNxsReturnsFalse) {
+    const auto rel = addModel(db.get(), dbPath);
+    const fs::path base = fs::path(db->buildDirectory()) / hashOf(dbPath / rel);
+    writeFile(base / "nxs" / "model.nxz", "");
+    EXPECT_FALSE(ddb::isBuildComplete(db.get(), rel));
+}
+
+TEST_F(IsBuildCompleteTest, ModelTilesOnlyReturnsFalse) {
+    const auto rel = addModel(db.get(), dbPath);
+    const fs::path base = fs::path(db->buildDirectory()) / hashOf(dbPath / rel);
+    writeFile(base / "3dtiles" / "tileset.json", "{}");
+    EXPECT_FALSE(ddb::isBuildComplete(db.get(), rel));
+}
+
+TEST_F(IsBuildCompleteTest, ModelNxsWithoutTilesReturnsTrue) {
+    const auto rel = addModel(db.get(), dbPath);
+    const fs::path base = fs::path(db->buildDirectory()) / hashOf(dbPath / rel);
+    writeFile(base / "nxs" / "model.nxz", "some NXZ bytes");
+    EXPECT_TRUE(ddb::isBuildComplete(db.get(), rel));
+
+    writeFile(base / "3dtiles" / "tileset.json", "{}");
+    EXPECT_TRUE(ddb::isBuildComplete(db.get(), rel));
+}
+
 TEST_F(IsBuildCompleteTest, DDBIsBuildCompleteCAPI) {
     const auto hash = hashOf(orthoPath);
     const fs::path out = fs::path(db->buildDirectory()) / hash / "cog";

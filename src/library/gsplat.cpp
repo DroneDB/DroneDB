@@ -399,9 +399,10 @@ namespace ddb
     {
         const SplatFormat fmt = formatOf(input);
 
+        // A missing external tool is not a missing dependency: fail instead of deferring.
         if (fmt == SplatFormat::Ksplat)
-            throw BuildDepMissingException(
-                "Converting .ksplat requires the optional splat-transform tool", "splat-transform");
+            throw AppException("Converting .ksplat requires the optional splat-transform tool, "
+                               "which is not available");
 
         if (fmt == SplatFormat::Unknown)
             throw InvalidArgsException("Unsupported Gaussian Splat format: " + input);
@@ -472,9 +473,12 @@ namespace ddb
         // by the viewer, and decoded on demand to render thumbnails). Run it directly on the
         // source splat so no intermediate .spz is materialized - memory stays bounded even for
         // multi-gigabyte inputs, since build-lod reads the file in chunks.
+        // A missing external tool fails the build (it would never appear by uploading
+        // files). After the tool is installed, the next full build picks the entry up.
         if (!buildlod::isBuildLodAvailable())
-            throw BuildDepMissingException(
-                "Building Gaussian Splats requires the build-lod tool", "build-lod");
+            throw AppException(
+                "Building Gaussian Splats requires the build-lod tool, which was not found "
+                "(set DDB_BUILDLOD_PATH or place build-lod next to the DroneDB executable)");
 
         const fs::path outRad = fs::path(outdir) / GsplatRadFileName;
         std::string lodError;

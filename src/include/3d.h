@@ -34,7 +34,29 @@ namespace ddb
         double altitude = 0.0;  ///< Altitude of the model origin, meters.
     };
 
-    DDB_DLL std::string buildNexus(const std::string &inputObj, const std::string &outputNxs, bool overwrite = false);
+    /**
+     * @brief Build a Nexus (.nxz) file from an OBJ/GLTF/GLB/PLY model.
+     *
+     * File dependencies are validated first (see @ref getObjDependencies; for a PLY
+     * only its `comment TextureFile`, read from the header, see getPlyTexture()).
+     * An untextured PLY is read by Nexus as is; a textured PLY is converted to
+     * OBJ + MTL + texture (convertPlyToObj()) and a GLTF/GLB to OBJ (or to PLY when
+     * it has no texture coordinates) in a temporary folder first.
+     * @param outputNxs Output file; when empty, `<input stem>.nxz` next to @p inputObj.
+     * @param datasetRoot Root folder of the dataset that contains @p inputObj, or empty
+     *                    when unknown. When set, OBJ/MTL/PLY texture references that
+     *                    resolve outside it are rejected. It never applies to the
+     *                    temporary files produced from a GLTF/GLB or PLY input.
+     * @throws BuildDepMissingException if a dependency (MTL, texture, buffer) is missing
+     *         and could still be added to the dataset.
+     * @throws AppException if a reference is absolute or escapes @p datasetRoot (it can
+     *         never be satisfied), if a GLTF/GLB buffer or image URI is absolute or
+     *         leaves the glTF's folder (only files in that folder or below are
+     *         staged for the converted model), if the converted model still
+     *         references a file that cannot be resolved, or on any other failure.
+     */
+    DDB_DLL std::string buildNexus(const std::string &inputObj, const std::string &outputNxs, bool overwrite = false,
+                                   const std::string &datasetRoot = "");
 
     /**
      * @brief Detect a model's WGS84 georeferencing origin from sidecar files.
@@ -52,15 +74,24 @@ namespace ddb
     DDB_DLL std::optional<ModelGeoref> detectModelGeoref(const std::string &inputObj);
 
     /**
-     * @brief Generate an OGC 3D Tiles tileset from an OBJ/GLTF/GLB model using Obj2Tiles.
+     * @brief Generate an OGC 3D Tiles tileset from an OBJ/GLTF/GLB/PLY model using Obj2Tiles.
      *
-     * Mirrors @ref buildNexus: GLTF/GLB inputs are converted to OBJ first and file
-     * dependencies are validated. The Obj2Tiles binary is invoked as a subprocess
+     * Mirrors @ref buildNexus: file dependencies are validated, then GLTF/GLB inputs
+     * are converted to OBJ (vertex colours kept as `v x y z r g b` when there are no
+     * texture coordinates) and PLY inputs are streamed to OBJ (+ MTL + texture) by
+     * convertPlyToObj(), whose face count and bounds replace the Assimp pass of
+     * @ref getModelInfo. The Obj2Tiles binary is invoked as a subprocess
      * (see obj2tiles_runner.h). On success the output directory contains
      * `tileset.json` and one or more `LOD-<n>` folders with `.b3dm` tiles.
      *
-     * The write is atomic: tiles are produced into a sibling temporary directory and
-     * renamed onto @p outputDir only after a valid `tileset.json` is produced.
+     * Safe rebuild: a @ref BuildLock on @p outputDir (`<outputDir>.building`) is held
+     * until return. Under it, a lone `<outputDir>-old` left by an interrupted swap is
+     * renamed back, and a stale one next to @p outputDir is deleted. Tiles are then
+     * produced into a sibling `<outputDir>-temp-<rand>` (removed on any failure) and
+     * @p outputDir is left untouched until Obj2Tiles succeeds; then @p outputDir is
+     * renamed to `<outputDir>-old`, the temp folder to @p outputDir, and `-old` is
+     * deleted. A failed rebuild therefore keeps the previous tileset. Trailing
+     * separators in @p outputDir are ignored.
      *
      * Georeferencing: if @p georef is provided it is used; otherwise, when
      * @p autoDetectGeoref is true (the default), @ref detectModelGeoref is used to
@@ -69,18 +100,25 @@ namespace ddb
      *
      * @param inputObj Path to the input OBJ (or GLTF/GLB) model.
      * @param outputDir Destination directory for the tileset (e.g. `<hash>/3dtiles`).
-     * @param overwrite When true, an existing non-empty @p outputDir is replaced; when
-     *                  false, a non-empty @p outputDir causes an exception.
+     * @param overwrite When true, an existing non-empty @p outputDir is replaced (only
+     *                  once the new tileset is complete); when false, a non-empty
+     *                  @p outputDir causes an exception.
      * @param georef Optional explicit georeferencing origin (overrides auto-detection).
      * @param autoDetectGeoref When true and @p georef is empty, attempt sidecar detection.
+     * @param datasetRoot Root folder of the dataset that contains @p inputObj, or empty
+     *                    when unknown (same meaning as in @ref buildNexus).
      * @return The path to the generated `tileset.json`.
      * @throws Obj2TilesException if the Obj2Tiles binary is unavailable or fails.
+     * @throws BuildInProgressException if another tiles build holds the lock on @p outputDir.
      * @throws BuildDepMissingException if model dependencies (textures/buffers) are missing.
+     * @throws AppException if a dependency reference is unsatisfiable (same cases as
+     *         @ref buildNexus).
      */
     DDB_DLL std::string buildModel3DTiles(const std::string &inputObj, const std::string &outputDir,
                                           bool overwrite = false,
                                           std::optional<ModelGeoref> georef = std::nullopt,
-                                          bool autoDetectGeoref = true);
+                                          bool autoDetectGeoref = true,
+                                          const std::string &datasetRoot = "");
 
     /**
      * @brief Local-space axis-aligned bounding box of a 3D model.
@@ -122,12 +160,29 @@ namespace ddb
      * regardless of faceCount, so pathologically large models cannot make
      * Obj2Tiles produce an unbounded number of b3dm files.
      *
-     * @param info Model info with faceCount populated by getModelInfo().
+     * @param info Model info with faceCount populated by getModelInfo() or by the
+     *             PLY converter (PlyToObjResult::info).
      * @return Obj2TilesOptions with heuristic-based divisions/lods/octree.
      */
     DDB_DLL obj2tiles::Obj2TilesOptions computeObj2TilesOpts(const ModelInfo &info);
 
-    DDB_DLL std::vector<std::string> getObjDependencies(const std::string &obj);
+    /**
+     * @brief List the file dependencies of an OBJ (its MTL files and their textures).
+     *
+     * Path contract: `mtllib` resolves against the OBJ's folder; a texture referenced
+     * by an MTL is present if it exists relative to the MTL's folder, otherwise relative
+     * to the OBJ's folder. References are normalised (`\` becomes `/`, then
+     * lexically normalised) and duplicates are dropped. Names are returned relative to
+     * the OBJ's folder: same-folder dependencies are bare names, and a texture of
+     * `mats/m.mtl` is returned as `mats/<texture>`.
+     *
+     * @param obj Path to the OBJ file.
+     * @param datasetRoot Root folder of the dataset that contains @p obj, or empty when
+     *                    unknown. When set, references resolving outside it are rejected.
+     * @throws FSException if @p obj does not exist.
+     * @throws AppException if a reference is absolute, or escapes @p datasetRoot.
+     */
+    DDB_DLL std::vector<std::string> getObjDependencies(const std::string &obj, const std::string &datasetRoot = "");
     DDB_DLL std::vector<std::string> getGltfDependencies(const std::string &gltf);
 
     /**
@@ -158,7 +213,8 @@ namespace ddb
      * @param outGeomPath Output parameter for the generated geometry file path
      * @param outMtlPath Output parameter for the generated MTL file path (OBJ only)
      * @param forcePLY Force PLY format output even if UVs are present
-     * @param preferPLYIfNoUV Prefer PLY format if no UVs and vertex colors are present
+     * @param preferPLYIfNoUV Write PLY instead of OBJ when the scene has no UVs (the OBJ
+     *                        output keeps vertex colours as `v x y z r g b` either way)
      * @throws AppException if conversion fails
      */
     DDB_DLL void convertGltfTo3dModel(const std::string &inputGltf,

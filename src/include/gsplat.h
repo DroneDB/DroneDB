@@ -101,12 +101,12 @@ namespace ddb
     DDB_DLL void writeGeoref(const GsplatGeoref &georef, const fs::path &outFile);
 
     // Converts a splat source (.ply | .splat | .spz) into a single .spz file.
-    // Throws AppException on failure and BuildDepMissingException for formats that
-    // require an external tool not yet available (e.g. .ksplat).
+    // Throws AppException on failure, including for formats that require an external
+    // tool that is not available (e.g. .ksplat needs splat-transform).
     DDB_DLL void convertToSpz(const std::string &input, const std::string &output);
 
     // Builds the Gaussian Splat delivery artifacts from a splat source into `outdir`.
-    // Requires the build-lod tool; throws BuildDepMissingException if unavailable.
+    // Requires the build-lod tool; throws AppException if it is unavailable.
     // Produces `<outdir>/model.rad` (RAD container) and `<outdir>/bounds.json` (bounding box).
     // If `georef.valid`, also writes `<outdir>/georef.json`.
     // The intermediate .spz is not kept after a successful build.

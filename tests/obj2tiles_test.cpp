@@ -5,12 +5,18 @@
 #include <cmath>
 #include <cstdint>
 #include <fstream>
+#include <optional>
+#include <sstream>
+#include <string>
+#include <thread>
+#include <vector>
 
 #include "3d.h"
 #include "exceptions.h"
 #include "fs.h"
 #include "gtest/gtest.h"
 #include "json.h"
+#include "mio.h"
 #include "obj2tiles_runner.h"
 #include "test.h"
 #include "testarea.h"
@@ -408,6 +414,218 @@ MANUAL_TEST(obj2tiles, endToEndGeoreferenced) {
     // transform is NOT the identity used for local-mode tilesets.
     const double tx = t[12].get<double>(), ty = t[13].get<double>(), tz = t[14].get<double>();
     EXPECT_GT(std::abs(tx) + std::abs(ty) + std::abs(tz), 1.0);
+}
+
+// ---------------------------------------------------------------------------
+// D-C1: DDB_OBJ2TILES_MAX_CORES -> DOTNET_PROCESSOR_COUNT in the child only.
+// A fake Obj2Tiles (POSIX shell script) dumps its environment; the tests check
+// only the child's environment (the runtime effect is measured manually).
+// ---------------------------------------------------------------------------
+
+#ifdef _WIN32
+#define SKIP_WITHOUT_POSIX_SHELL() GTEST_SKIP() << "fake Obj2Tiles is a POSIX shell script"
+#else
+#define SKIP_WITHOUT_POSIX_SHELL() \
+    do {                           \
+    } while (0)
+#endif
+
+// Saves and restores an environment variable around a test.
+struct EnvVarGuard {
+    std::string name;
+    std::optional<std::string> saved;
+    explicit EnvVarGuard(const char* n) : name(n) {
+        if (const char* v = std::getenv(n)) saved = v;
+    }
+    ~EnvVarGuard() {
+        if (saved)
+            DDB_SETENV(name.c_str(), saved->c_str());
+        else
+            DDB_UNSETENV(name.c_str());
+    }
+};
+
+// Writes a fake Obj2Tiles that records its environment in <out>/env.txt and
+// writes a tileset.json (argv: input output ...).
+fs::path writeEnvDumpingObj2Tiles(const fs::path& dir) {
+    const fs::path script = dir / "fake_obj2tiles_env.sh";
+    writeSidecar(script,
+                 "#!/bin/sh\n"
+                 "out=\"$2\"\n"
+                 "mkdir -p \"$out\"\n"
+                 "env > \"$out/env.txt\"\n"
+                 "echo '{\"asset\":{\"version\":\"1.0\"},\"geometricError\":0,\"root\":{}}' > "
+                 "\"$out/tileset.json\"\n");
+    fs::permissions(script, fs::perms::owner_all, fs::perm_options::replace);
+    return script;
+}
+
+// Runs the fake binary with DDB_OBJ2TILES_MAX_CORES = cap (nullopt = unset) and
+// returns every DOTNET_PROCESSOR_COUNT value seen by the child.
+std::vector<std::string> childProcessorCounts(TestArea& ta, const std::string& label,
+                                              const std::optional<std::string>& cap) {
+    if (cap)
+        DDB_SETENV("DDB_OBJ2TILES_MAX_CORES", cap->c_str());
+    else
+        DDB_UNSETENV("DDB_OBJ2TILES_MAX_CORES");
+
+    const fs::path dir = ta.getFolder("env_" + label);
+    const fs::path script = writeEnvDumpingObj2Tiles(dir);
+    const fs::path obj = dir / "model.obj";
+    writeSidecar(obj, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
+    const fs::path out = dir / "out";
+    io::assureIsRemoved(out);
+
+    obj2tiles::Obj2TilesOptions opts;
+    std::string err;
+    const bool ok = obj2tiles::runObj2Tiles(obj, out, opts, err, script);
+    EXPECT_TRUE(ok) << label << ": " << err;
+
+    std::vector<std::string> values;
+    std::ifstream in((out / "env.txt").string());
+    std::string line;
+    const std::string key = "DOTNET_PROCESSOR_COUNT=";
+    while (std::getline(in, line))
+        if (line.rfind(key, 0) == 0) values.push_back(line.substr(key.size()));
+    return values;
+}
+
+std::string expectedCap(unsigned int requested) {
+    const unsigned int hw = std::thread::hardware_concurrency();
+    return std::to_string(hw > 0 && requested > hw ? hw : requested);
+}
+
+TEST(obj2tiles, maxCoresValidDecimalReachesChild) {
+    SKIP_WITHOUT_POSIX_SHELL();
+    EnvVarGuard capGuard("DDB_OBJ2TILES_MAX_CORES");
+    EnvVarGuard dotnetGuard("DOTNET_PROCESSOR_COUNT");
+    DDB_UNSETENV("DOTNET_PROCESSOR_COUNT");
+    TestArea ta(TEST_NAME);
+
+    EXPECT_EQ(childProcessorCounts(ta, "one", std::string("1")), std::vector<std::string>{"1"});
+    EXPECT_EQ(childProcessorCounts(ta, "two", std::string("2")), std::vector<std::string>{expectedCap(2)});
+    // Leading zeros are still a decimal integer.
+    EXPECT_EQ(childProcessorCounts(ta, "zeros", std::string("001")), std::vector<std::string>{"1"});
+    // Never set in the parent process.
+    EXPECT_EQ(std::getenv("DOTNET_PROCESSOR_COUNT"), nullptr);
+}
+
+TEST(obj2tiles, maxCoresInvalidValuesAddNothing) {
+    SKIP_WITHOUT_POSIX_SHELL();
+    EnvVarGuard capGuard("DDB_OBJ2TILES_MAX_CORES");
+    EnvVarGuard dotnetGuard("DOTNET_PROCESSOR_COUNT");
+    DDB_UNSETENV("DOTNET_PROCESSOR_COUNT");
+    TestArea ta(TEST_NAME);
+
+    EXPECT_TRUE(childProcessorCounts(ta, "unset", std::nullopt).empty());
+    const std::vector<std::string> invalid = {"0x10", "0", "-4", "abc", "", " 4", "4 ", "+4",
+                                              "99999999999999999999"};
+    for (size_t i = 0; i < invalid.size(); ++i)
+        EXPECT_TRUE(childProcessorCounts(ta, "bad" + std::to_string(i), invalid[i]).empty())
+            << "value '" << invalid[i] << "'";
+}
+
+TEST(obj2tiles, maxCoresInheritedValuePassesThroughWhenUnsetOrInvalid) {
+    SKIP_WITHOUT_POSIX_SHELL();
+    EnvVarGuard capGuard("DDB_OBJ2TILES_MAX_CORES");
+    EnvVarGuard dotnetGuard("DOTNET_PROCESSOR_COUNT");
+    DDB_SETENV("DOTNET_PROCESSOR_COUNT", "5");
+    TestArea ta(TEST_NAME);
+
+    EXPECT_EQ(childProcessorCounts(ta, "unset", std::nullopt), std::vector<std::string>{"5"});
+    EXPECT_EQ(childProcessorCounts(ta, "empty", std::string("")), std::vector<std::string>{"5"});
+    EXPECT_EQ(childProcessorCounts(ta, "hex", std::string("0x10")), std::vector<std::string>{"5"});
+    EXPECT_EQ(childProcessorCounts(ta, "zero", std::string("0")), std::vector<std::string>{"5"});
+    EXPECT_EQ(childProcessorCounts(ta, "neg", std::string("-4")), std::vector<std::string>{"5"});
+    EXPECT_EQ(childProcessorCounts(ta, "abc", std::string("abc")), std::vector<std::string>{"5"});
+}
+
+TEST(obj2tiles, maxCoresOverridesInheritedValue) {
+    SKIP_WITHOUT_POSIX_SHELL();
+    EnvVarGuard capGuard("DDB_OBJ2TILES_MAX_CORES");
+    EnvVarGuard dotnetGuard("DOTNET_PROCESSOR_COUNT");
+    DDB_SETENV("DOTNET_PROCESSOR_COUNT", "64");
+    TestArea ta(TEST_NAME);
+
+    // Exactly one DOTNET_PROCESSOR_COUNT entry, with the cap's value.
+    EXPECT_EQ(childProcessorCounts(ta, "override", std::string("1")), std::vector<std::string>{"1"});
+    // The parent's value is untouched.
+    ASSERT_NE(std::getenv("DOTNET_PROCESSOR_COUNT"), nullptr);
+    EXPECT_STREQ(std::getenv("DOTNET_PROCESSOR_COUNT"), "64");
+}
+
+TEST(obj2tiles, maxCoresClampedToHardwareConcurrency) {
+    SKIP_WITHOUT_POSIX_SHELL();
+    const unsigned int hw = std::thread::hardware_concurrency();
+    if (hw == 0) GTEST_SKIP() << "hardware_concurrency() unknown: no clamp applies";
+    EnvVarGuard capGuard("DDB_OBJ2TILES_MAX_CORES");
+    EnvVarGuard dotnetGuard("DOTNET_PROCESSOR_COUNT");
+    DDB_UNSETENV("DOTNET_PROCESSOR_COUNT");
+    TestArea ta(TEST_NAME);
+
+    EXPECT_EQ(childProcessorCounts(ta, "above", std::to_string(hw + 7)),
+              std::vector<std::string>{std::to_string(hw)});
+    EXPECT_EQ(childProcessorCounts(ta, "exact", std::to_string(hw)),
+              std::vector<std::string>{std::to_string(hw)});
+    EXPECT_EQ(childProcessorCounts(ta, "huge", std::string("1000000")),
+              std::vector<std::string>{std::to_string(hw)});
+}
+
+// A2.2 / A4: failures carry the exit code or signal number and the output tail.
+TEST(obj2tiles, runReportsExitCodeSignalAndTail) {
+    SKIP_WITHOUT_POSIX_SHELL();
+    TestArea ta(TEST_NAME);
+    const fs::path obj = ta.getPath("model.obj");
+    writeSidecar(obj, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
+
+    const fs::path failing = ta.getPath("fake_fail.sh");
+    writeSidecar(failing, "#!/bin/sh\necho 'first line'\necho 'fake Obj2Tiles failure' >&2\nexit 3\n");
+    fs::permissions(failing, fs::perms::owner_all, fs::perm_options::replace);
+
+    obj2tiles::Obj2TilesOptions opts;
+    std::string err;
+    EXPECT_FALSE(obj2tiles::runObj2Tiles(obj, ta.getPath("out_fail"), opts, err, failing));
+    EXPECT_NE(err.find("exited with code 3"), std::string::npos) << err;
+    EXPECT_NE(err.find("fake Obj2Tiles failure"), std::string::npos) << err;
+
+    const fs::path killed = ta.getPath("fake_killed.sh");
+    writeSidecar(killed, "#!/bin/sh\necho 'about to die'\nkill -9 $$\n");
+    fs::permissions(killed, fs::perms::owner_all, fs::perm_options::replace);
+    err.clear();
+    EXPECT_FALSE(obj2tiles::runObj2Tiles(obj, ta.getPath("out_killed"), opts, err, killed));
+    EXPECT_NE(err.find("signal 9"), std::string::npos) << err;
+    EXPECT_NE(err.find("about to die"), std::string::npos) << err;
+
+    // Exit 0 without a tileset is still a failure.
+    const fs::path noTileset = ta.getPath("fake_no_tileset.sh");
+    writeSidecar(noTileset, "#!/bin/sh\nexit 0\n");
+    fs::permissions(noTileset, fs::perms::owner_all, fs::perm_options::replace);
+    err.clear();
+    EXPECT_FALSE(obj2tiles::runObj2Tiles(obj, ta.getPath("out_none"), opts, err, noTileset));
+    EXPECT_NE(err.find("tileset.json is missing"), std::string::npos) << err;
+}
+
+// A2.2: exit 0 without tileset.json still reports the output tail.
+TEST(obj2tiles, runReportsTailWhenTilesetMissing) {
+    SKIP_WITHOUT_POSIX_SHELL();
+    TestArea ta(TEST_NAME);
+    const fs::path obj = ta.getPath("model.obj");
+    writeSidecar(obj, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
+
+    const fs::path script = ta.getPath("fake_silent_failure.sh");
+    writeSidecar(script,
+                 "#!/bin/sh\n"
+                 "echo 'Loading model'\n"
+                 "echo 'Unhandled: could not write tiles' >&2\n"
+                 "exit 0\n");
+    fs::permissions(script, fs::perms::owner_all, fs::perm_options::replace);
+
+    obj2tiles::Obj2TilesOptions opts;
+    std::string err;
+    EXPECT_FALSE(obj2tiles::runObj2Tiles(obj, ta.getPath("out"), opts, err, script));
+    EXPECT_NE(err.find("tileset.json is missing"), std::string::npos) << err;
+    EXPECT_NE(err.find("Unhandled: could not write tiles"), std::string::npos) << err;
+    EXPECT_NE(err.find("Loading model"), std::string::npos) << err;
 }
 
 }  // namespace

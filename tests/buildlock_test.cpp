@@ -24,6 +24,10 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <signal.h>
+#include <fcntl.h>
+#include <spawn.h>
+#include <sstream>
+extern char **environ;
 #endif
 
 namespace {
@@ -604,6 +608,53 @@ TEST_F(BuildLockTest, MultiProcess_KernelReleaseOnKill) {
         BuildLock recovered(outputPath.string(), false);
         EXPECT_TRUE(recovered.isHolding());
     }
+}
+#endif
+
+/**
+ * @brief The lock descriptor is close-on-exec: a child process spawned while a
+ * BuildLock is held (with a plain posix_spawn that inherits every non-CLOEXEC
+ * descriptor) must not receive it, so it can never keep the lock alive.
+ */
+#ifdef __linux__
+TEST_F(BuildLockTest, LockFdNotInheritedByChildren) {
+    auto outputPath = testArea->getPath("cloexec_lock");
+    BuildLock lock(outputPath.string());
+    ASSERT_TRUE(lock.isHolding());
+    const std::string lockFile = fs::canonical(lock.getLockFilePath()).string();
+
+    // Parent side: the descriptor pointing at the lock file has FD_CLOEXEC.
+    int lockFd = -1;
+    for (const auto& e : fs::directory_iterator("/proc/self/fd")) {
+        std::error_code ec;
+        const auto target = fs::read_symlink(e.path(), ec);
+        if (!ec && target.string() == lockFile) lockFd = std::stoi(e.path().filename().string());
+    }
+    ASSERT_GE(lockFd, 0) << "lock descriptor not found in /proc/self/fd";
+    const int flags = ::fcntl(lockFd, F_GETFD);
+    ASSERT_NE(flags, -1);
+    EXPECT_TRUE(flags & FD_CLOEXEC);
+
+    // Child side: list the descriptor targets of a spawned shell.
+    const auto listing = testArea->getPath("child_fds.txt");
+    // (`|| true`: the descriptor the shell used to expand the glob is gone by now)
+    const std::string script = "for f in /proc/$$/fd/*; do readlink \"$f\" || true; done > \"$1\"";
+    std::vector<std::string> args = {"sh", "-c", script, "sh", listing.string()};
+    std::vector<char*> argv;
+    for (auto& a : args) argv.push_back(a.data());
+    argv.push_back(nullptr);
+    pid_t pid = 0;
+    ASSERT_EQ(::posix_spawn(&pid, "/bin/sh", nullptr, nullptr, argv.data(), environ), 0);
+    int status = 0;
+    ASSERT_EQ(::waitpid(pid, &status, 0), pid);
+    ASSERT_TRUE(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+
+    std::ifstream in(listing.string());
+    std::stringstream ss;
+    ss << in.rdbuf();
+    const std::string targets = ss.str();
+    EXPECT_FALSE(targets.empty());
+    EXPECT_EQ(targets.find(lockFile), std::string::npos) << "child inherited the lock fd:\n" << targets;
 }
 #endif
 

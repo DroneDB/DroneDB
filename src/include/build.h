@@ -19,14 +19,27 @@ namespace ddb
     DDB_DLL void buildAll(Database *db, const std::string &outputPath, bool force = false);
     DDB_DLL void build(Database *db, const std::string &path, const std::string &outputPath, bool force = false);
 
+    /**
+     * @brief Retry every deferred build (one per "<hash>.pending" marker in the build
+     * directory). A retry is a full build attempt of the entry: the dependency names in
+     * the marker are informational and are not matched against the index. Entries
+     * attempted less than 60 seconds ago are skipped unless @p force is set. Errors are
+     * logged, never thrown: a dependency still missing rewrites the marker; any other
+     * failure consumes it.
+     * @param db database (already opened)
+     * @param outputPath base build directory; if empty, uses db->buildDirectory()
+     * @param force rebuild even if complete, and ignore the retry backoff
+     */
     DDB_DLL void buildPending(Database *db, const std::string &outputPath, bool force = false);
     DDB_DLL bool isBuildPending(Database *db);
 
     /**
      * @brief Information about a single deferred build, read from a ".pending"
-     * marker file. Missing dependencies are either companion/sidecar file
-     * paths (e.g. a ".shp" waiting on its ".dbf") or external tool names
-     * (e.g. "Obj2Tiles", "build-lod").
+     * marker file. Missing dependencies are companion/sidecar file paths,
+     * relative to the dataset root (e.g. "sub/m.mtl" or "sub/layer.shx");
+     * markers written by older versions may hold names relative to the
+     * source file's folder. Missing external tools (e.g. "build-lod") are not
+     * deferred: they fail the build.
      */
     struct PendingBuildInfo
     {
@@ -43,7 +56,7 @@ namespace ddb
     /**
      * @brief Read-only view over all pending (deferred) builds in a database.
      * Unlike buildPending(), this does not consume ".pending" files, does not
-     * check dependency availability, and never attempts a build. Entries
+     * apply the retry backoff, and never attempts a build. Entries
      * whose hash no longer matches any indexed entry are skipped (they are
      * garbage collected by cleanupBuild()).
      * @param db database (already opened)

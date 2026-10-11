@@ -119,6 +119,31 @@ TEST_F(GetPendingBuildInfoTest, EntryNoLongerInDbIsSkipped) {
     EXPECT_TRUE(ddb::getPendingBuildInfo(db.get()).empty());
 }
 
+// Same marker set as buildPending(): only top-level "<hash>.pending" files.
+// Nested markers (e.g. inside an output folder) and non-hash names are ignored
+// by getPendingBuildInfo() and isBuildPending() alike.
+TEST_F(GetPendingBuildInfoTest, OnlyTopLevelHashMarkersCount) {
+    const auto hash = hashOf(vectorPath);
+    const fs::path buildDir = db->buildDirectory();
+
+    writePendingFile(buildDir / hash, hash, "0", {"nested.dbf"});
+    writePendingFile(buildDir / "sub" / "deeper", hash, "0", {"deeper.dbf"});
+    writePendingFile(buildDir, "notahash", "0", {"x.dbf"});
+    writePendingFile(buildDir, hash.substr(0, 63), "0", {"short.dbf"});
+    fs::create_directories(buildDir / (hash + "x.pending"));  // a directory, not a marker
+
+    EXPECT_TRUE(ddb::getPendingBuildInfo(db.get()).empty());
+    EXPECT_FALSE(ddb::isBuildPending(db.get()));
+
+    writePendingFile(buildDir, hash, "0", {"layer.dbf"});
+    const auto pending = ddb::getPendingBuildInfo(db.get());
+    ASSERT_EQ(pending.size(), 1u);
+    EXPECT_EQ(pending[0].hash, hash);
+    ASSERT_EQ(pending[0].missingDependencies.size(), 1u);
+    EXPECT_EQ(pending[0].missingDependencies[0], "layer.dbf");
+    EXPECT_TRUE(ddb::isBuildPending(db.get()));
+}
+
 TEST_F(GetPendingBuildInfoTest, MalformedTimestampToleratedAsZero) {
     const auto hash = hashOf(vectorPath);
     writePendingFile(db->buildDirectory(), hash, "not-a-timestamp", {"layer.dbf"});
@@ -131,7 +156,7 @@ TEST_F(GetPendingBuildInfoTest, MalformedTimestampToleratedAsZero) {
 }
 
 TEST_F(GetPendingBuildInfoTest, DoesNotTriggerBuildOrApplyBackoff) {
-    // Even a very recent timestamp (well within the 5-minute backoff window
+    // Even a very recent timestamp (well within the 60-second retry backoff
     // used by buildPending()) must still be reported: this is a pure query,
     // not a retry attempt.
     const auto hash = hashOf(vectorPath);

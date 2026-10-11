@@ -343,13 +343,10 @@ namespace ddb
         int convertToMvt(GDALDatasetH hSrcDS, const std::string &srcPath,
                          const std::string &outputDir, const VectorStats &stats)
         {
-            // Sanity check driver availability up-front.
+            // Sanity check driver availability up-front. A missing driver can never
+            // be provided by adding files, so the build fails instead of deferring.
             if (GDALGetDriverByName("MVT") == nullptr)
-            {
-                std::vector<std::string> missing{"MVT driver"};
-                throw BuildDepMissingException(
-                    "MVT driver not available in this GDAL build", missing);
-            }
+                throw AppException("MVT driver not available in this GDAL build");
 
             double areaDeg2 = 0.0;
             if (stats.haveEnv)

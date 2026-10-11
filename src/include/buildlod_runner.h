@@ -27,7 +27,7 @@ namespace ddb
 
         // True when a build-lod binary is discoverable (convenience wrapper around
         // findBuildLodBinary). build-lod is MANDATORY for Gaussian Splat (RAD) builds:
-        // buildGsplat throws BuildDepMissingException when the tool is absent.
+        // buildGsplat throws AppException (the build fails) when the tool is absent.
         DDB_DLL bool isBuildLodAvailable();
 
         // Runs build-lod to convert a splat source (.ply | .spz | .splat | .ksplat | .sog)

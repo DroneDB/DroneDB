@@ -356,7 +356,9 @@ void BuildLock::acquireLock(bool waitForLock) {
     for (int attempt = 0;; ++attempt) {
         fileDescriptor = open(
             lockFilePath.c_str(),
-            O_CREAT | O_WRONLY,           // no O_EXCL: an orphan file is reclaimable
+            // no O_EXCL: an orphan file is reclaimable. O_CLOEXEC: child processes
+            // must never inherit the descriptor (it would keep the lock alive).
+            O_CREAT | O_WRONLY | O_CLOEXEC,
             S_IRUSR | S_IWUSR | S_IRGRP   // permissions: rw-r-----
         );
 

@@ -8,6 +8,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <fstream>
+#include <optional>
 #include <sstream>
 #include <unordered_set>
 
@@ -20,6 +21,7 @@
 #include "cog.h"
 #include "dbops.h"
 #include "ddb.h"
+#include "deppath.h"
 #include "exceptions.h"
 #include "gsplat.h"
 #include "mio.h"
@@ -34,6 +36,19 @@ static bool isLockFileStale(const std::string& lockFilePath);
 
 // Forward declaration for the disk-space preflight helper (defined later in this file)
 static void ensureSufficientDiskSpace(const fs::path& dir);
+
+// Build-artifact names are content hashes (currently SHA-256 hex, 64 chars).
+// Callers validate a candidate name before acting on it so unrelated files or
+// directories living in a user-specified output path are never touched.
+static bool isHashLike(const std::string& s) {
+    if (s.size() != 64)
+        return false;
+    for (unsigned char c : s) {
+        if (!std::isxdigit(c))
+            return false;
+    }
+    return true;
+}
 
 bool isBuildableInternal(const Entry& e, std::string& subfolder) {
     if (e.type == EntryType::PointCloud) {
@@ -72,8 +87,9 @@ bool isBuildableDependency(const Entry& e, std::string& mainFile, std::string& s
         io::Path p(e.path);
         if (p.checkExtension({"cpg", "dbf", "prj", "shx"})) {
             subfolder = "vec";
-            // Mainfile has got the same name but with shp extension
-            mainFile = fs::path(e.path).filename().replace_extension(".shp").string();
+            // Mainfile has got the same name but with shp extension, in the same folder
+            // (entry paths are dataset-relative, so the folder must be kept).
+            mainFile = fs::path(e.path).replace_extension(".shp").generic_string();
             return true;
         }
     }
@@ -206,6 +222,11 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
     std::string outputFolder;
     std::string subfolder;
 
+    // The entry whose artifacts are built. Differs from e when e is a sidecar
+    // (e.g. a .dbf) that triggers the build of its main file (the .shp): type
+    // dispatch, the input path and the output hash must all come from the main file.
+    Entry target = e;
+
     if (isBuildableInternal(e, subfolder)) {
         baseOutputPath = fs::path(outPath) / e.hash;
         outputFolder = (baseOutputPath / subfolder).string();
@@ -223,7 +244,8 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
             // We need to force the build because this dependency file could add new data
             force = true;
 
-            baseOutputPath = fs::path(outPath) / mainEntry.hash;
+            target = mainEntry;
+            baseOutputPath = fs::path(outPath) / target.hash;
             outputFolder = (baseOutputPath / subfolder).string();
 
             LOGD << "Triggering build of " << mainFile << " because of " << e.path;
@@ -249,10 +271,17 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
     // corrupt the in-progress output of the other process.
     BuildLock processLock(outputFolder);
 
+    // Every attempt that gets the lock consumes the ".pending" marker: a build that
+    // is skipped as complete, fails, or succeeds is no longer pending, and a
+    // dependency that is still missing rewrites it in the catch below. A
+    // BuildInProgressException (thrown above) leaves it untouched.
+    const std::string pendFile = baseOutputPath.string() + ".pending";
+    io::assureIsRemoved(pendFile);
+
     // Check again if output exists after acquiring locks (another process might have completed the
     // build). Delegate to the centralized completeness helper so the rules used here stay in
     // lock-step with isBuildComplete() / DDBIsBuildComplete().
-    if (isBuildOutputComplete(baseOutputPath, e, subfolder) && !force) {
+    if (isBuildOutputComplete(baseOutputPath, target, subfolder) && !force) {
         LOGD << "Build output already exists after acquiring lock, skipping: " << outputFolder;
         return;
     }
@@ -268,26 +297,25 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
 
     io::assureFolderExists(tempFolder);
 
-    auto relativePath = (db->rootDirectory() / e.path).string();
-
-    std::string pendFile = baseOutputPath.string() + ".pending";
-    io::assureIsRemoved(pendFile);
+    const std::string datasetRoot = db->rootDirectory().string();
+    auto relativePath = (db->rootDirectory() / target.path).string();
 
     // We could vectorize this logic, but it's an overkill by now
     try {
         bool built = false;
 
-        if (e.type == EntryType::PointCloud) {
+        if (target.type == EntryType::PointCloud) {
             const std::vector vec = {relativePath};
             // Defensive cleanup: remove any legacy EPT artifacts from previous builds
             io::assureIsRemoved(baseOutputPath / "ept");
             buildCopc(vec, tempFolder);
             built = true;
-        } else if (e.type == EntryType::GeoRaster) {
+        } else if (target.type == EntryType::GeoRaster) {
             buildCog(relativePath, (fs::path(tempFolder) / "cog.tif").string());
             built = true;
-        } else if (e.type == EntryType::Model) {
-            buildNexus(relativePath, (fs::path(tempFolder) / "model.nxz").string());
+        } else if (target.type == EntryType::Model) {
+            buildNexus(relativePath, (fs::path(tempFolder) / "model.nxz").string(), false,
+                       datasetRoot);
             built = true;
 
             // Additive, best-effort OGC 3D Tiles output for the unified Giro3D viewer.
@@ -296,14 +324,18 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
             // Non-blocking by design: if Obj2Tiles is unavailable or fails on a given
             // mesh, the Nexus output above is still published and build completeness
             // stays keyed on nxs/ (see isBuildOutputComplete), so the build never loops.
+            // Nothing is rethrown from here, BuildDepMissingException included: it cannot
+            // occur (buildNexus validated the same input above), and rethrowing it would
+            // discard tempFolder before model.nxz reaches nxs/.
             try {
-                buildModel3DTiles(relativePath, (baseOutputPath / "3dtiles").string(), true);
+                buildModel3DTiles(relativePath, (baseOutputPath / "3dtiles").string(), true,
+                                  std::nullopt, true, datasetRoot);
             } catch (const std::exception& tilesEx) {
-                LOGD << "3D Tiles generation skipped for " << e.path << ": " << tilesEx.what();
+                LOGW << "3D Tiles generation skipped for " << target.path << ": " << tilesEx.what();
             } catch (...) {
-                LOGD << "3D Tiles generation skipped for " << e.path << " (unknown error)";
+                LOGW << "3D Tiles generation skipped for " << target.path << " (unknown error)";
             }
-        } else if (e.type == EntryType::Vector) {
+        } else if (target.type == EntryType::Vector) {
             // buildVector manages its own atomic write to baseOutputPath/vec
             // and baseOutputPath/mvt; do NOT use the standard tempFolder rename.
             // Propagate the force flag so a partial build (e.g. vec/ present
@@ -311,12 +343,13 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
             // treated as up-to-date inside buildVector.
             buildVector(relativePath, baseOutputPath.string(), force);
             // built stays false on purpose to skip the standard rename below.
-        } else if (e.type == EntryType::GaussianSplat) {
+        } else if (target.type == EntryType::GaussianSplat) {
             // Runs build-lod to produce model.rad + bounds.json (+ georef.json when known).
-            // Throws BuildDepMissingException if build-lod is unavailable.
+            // Throws a plain AppException if build-lod is unavailable: a missing tool is
+            // not a missing dependency, so the build fails instead of staying pending.
             buildGsplat(relativePath, tempFolder);
             built = true;
-        } else if (e.type == EntryType::Tiles3D) {
+        } else if (target.type == EntryType::Tiles3D) {
             // Extracts the .3tz (ZIP OGC 3D Tiles) into the 3dtiles/ subfolder. Extraction
             // is hardened against Zip-Slip / absolute paths in mzip::_extractAll. The
             // archive is only valid when tileset.json is present at its root; the temp
@@ -337,37 +370,40 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
         }
 
         io::assureIsRemoved(tempFolder);
-    } catch (const BuildDepMissingException& e) {
-        // Create pending file with timestamp and missing dependencies
+    } catch (const BuildDepMissingException& ex) {
+        // Create pending file with timestamp and missing dependencies. Builders
+        // report names relative to the source file's folder; ".pending" stores
+        // them relative to the dataset root (display only: a retry is a full
+        // build attempt that re-validates on disk).
         std::ofstream pf(pendFile);
         if (pf) {
             // First line: timestamp
             pf << utils::currentUnixTimestamp() << std::endl;
             // Following lines: missing dependencies (one per line)
-            for (const auto& dep : e.getMissingDependencies()) {
-                pf << dep << std::endl;
+            for (const auto& dep : ex.getMissingDependencies()) {
+                pf << deppath::toDatasetRelative(target.path, dep) << std::endl;
             }
             pf.close();
 
-            LOGD << "Created pending file for " << e.what() << " with "
-                 << e.getMissingDependencies().size() << " missing dependencies";
+            LOGD << "Created pending file for " << ex.what() << " with "
+                 << ex.getMissingDependencies().size() << " missing dependencies";
         } else {
-            LOGD << "Error! Cannot create pending file " << baseOutputPath.string() << ".pending";
+            LOGD << "Error! Cannot create pending file " << pendFile;
         }
 
         io::assureIsRemoved(tempFolder);
 
-        throw e;
-    } catch (const AppException& e) {
+        throw;
+    } catch (const AppException&) {
         io::assureIsRemoved(tempFolder);
 
-        throw e;
+        throw;
     } catch (...) {
         // Since we use third party libraries, some exceptions might not
         // get caught otherwise
         io::assureIsRemoved(tempFolder);
 
-        throw AppException("Unknown build error failure for " + e.path + " (" +
+        throw AppException("Unknown build error failure for " + target.path + " (" +
                            baseOutputPath.string() + ")");
     }
 }
@@ -426,14 +462,18 @@ namespace {
 // a build is deferred due to missing dependencies (see BuildDepMissingException
 // handling above). Format: first line is a Unix timestamp of the last
 // attempt, following lines are missing dependency names (one per line).
+// Names are dataset-root-relative paths of companion files (e.g. "sub/m.mtl",
+// "sub/mats/tex.png"); markers written by older versions may hold names
+// relative to the source file's folder. They are informational only: a retry
+// never matches them against the index.
 struct PendingFileData {
     time_t lastAttempt = 0;
     std::vector<std::string> missingDependencies;
 };
 
 // Reads and parses a ".pending" file without consuming it. Malformed or
-// unreadable timestamps are tolerated (lastAttempt stays 0) to preserve the
-// historical, lenient behavior of buildPending().
+// unreadable timestamps are tolerated (lastAttempt stays 0, i.e. the build is
+// due immediately) to preserve the historical, lenient behavior of buildPending().
 PendingFileData parsePendingFile(const fs::path& pendingFilePath) {
     PendingFileData data;
 
@@ -480,125 +520,125 @@ PendingFileData parsePendingFile(const fs::path& pendingFilePath) {
     return data;
 }
 
+// Collects the ".pending" markers of a build directory: only top-level
+// "<hash>.pending" regular files (buildInternal writes them next to the per-hash
+// output folders), never nested or non-hash names. Collecting first also keeps
+// callers that build from mutating the directory under a live iterator.
+// Iteration errors are logged and end the scan (never thrown).
+std::vector<fs::path> collectPendingFiles(const fs::path& buildDir) {
+    std::vector<fs::path> pendingFiles;
+    std::error_code ec;
+    if (!fs::exists(buildDir, ec) || ec)
+        return pendingFiles;
+
+    fs::directory_iterator it(buildDir, ec);
+    if (ec) {
+        LOGW << "Cannot open build directory '" << buildDir.string() << "': " << ec.message();
+        return pendingFiles;
+    }
+    for (const fs::directory_iterator end; it != end; it.increment(ec)) {
+        if (ec) {
+            LOGW << "Error iterating build directory '" << buildDir.string() << "': " << ec.message();
+            break;
+        }
+        const fs::path& p = it->path();
+        std::error_code typeErr;
+        if (p.extension() != ".pending" || !it->is_regular_file(typeErr) || typeErr)
+            continue;
+        if (!isHashLike(p.stem().string()))
+            continue;
+        pendingFiles.push_back(p);
+    }
+    return pendingFiles;
+}
+
 }  // namespace
 
+// Minimum delay between two attempts of the same pending build (seconds since
+// the timestamp on the first line of its ".pending" file). force bypasses it.
+static constexpr time_t PendingRetryBackoffSeconds = 60;
+
+// Retries every deferred build. A retry is a full build attempt: the dependency
+// names stored in ".pending" are for display only and are never matched against
+// the index (they used to be, which left models in subfolders pending forever).
+// Each builder validates its dependencies on disk first; one still missing
+// rewrites ".pending" (BuildDepMissingException, logged at debug), any other
+// failure is logged at warning level and the marker is consumed by the attempt
+// (buildInternal removes it once it holds the build lock, so a build already in
+// progress elsewhere keeps it).
 void buildPending(Database* db, const std::string& outputPath, bool force) {
-    auto buildDir = db->buildDirectory();
-    if (!fs::exists(buildDir))
+    const fs::path buildDir = outputPath.empty() ? db->buildDirectory() : fs::path(outputPath);
+    std::error_code ec;
+    if (!fs::exists(buildDir, ec) || ec)
         return;
 
-    std::string outPath = outputPath;
-    if (outPath.empty())
-        outPath = buildDir.string();
+    const std::string outPath = buildDir.string();
 
-    for (auto i = fs::recursive_directory_iterator(buildDir);
-         i != fs::recursive_directory_iterator();
-         ++i) {
-        if (i->path().extension() != ".pending")
-            continue;
+    // Collect first: building creates and removes files in this directory, which
+    // must not happen under a live directory iterator.
+    const std::vector<fs::path> pendingFiles = collectPendingFiles(buildDir);
 
-        const auto hash = i->path().filename().replace_extension("").string();
-        const PendingFileData pending = parsePendingFile(i->path());
+    for (const auto& pendingPath : pendingFiles) {
+        const auto hash = pendingPath.stem().string();
+        const PendingFileData pending = parsePendingFile(pendingPath);
 
-        // Implement exponential backoff for retry attempts
-        const time_t currentTime = utils::currentUnixTimestamp();
-        const time_t timeSinceLastAttempt = currentTime - pending.lastAttempt;
-
-        // Check pending file age to implement progressive backoff
-        // If recent failure (<5 min), wait longer before retry unless forced
-        if (timeSinceLastAttempt < 300 && !force) {  // 5 minutes
+        const time_t timeSinceLastAttempt = utils::currentUnixTimestamp() - pending.lastAttempt;
+        if (timeSinceLastAttempt < PendingRetryBackoffSeconds && !force) {
             LOGD << "Skipping build attempt for hash " << hash
-                 << " (too recent failure: " << timeSinceLastAttempt << " seconds ago)";
+                 << " (last attempt " << timeSinceLastAttempt << " seconds ago)";
             continue;
         }
 
-        // Check if all dependencies are now available
-        bool allDependenciesAvailable = true;
-        for (const auto& dep : pending.missingDependencies) {
-            // Look for dependency in database
-            auto depQuery = db->query("SELECT COUNT(*) FROM entries WHERE path = ?");
-            depQuery->bind(1, dep);
-            if (depQuery->fetch() && depQuery->getInt(0) == 0) {
-                // Dependency still not available
-                allDependenciesAvailable = false;
-                LOGD << "Build still pending for hash " << hash << ": dependency " << dep
-                     << " is still missing";
-                break;
+        std::vector<Entry> entries;
+        {
+            auto q = db->query(
+                "SELECT path, hash, type, properties, mtime, size, depth FROM entries WHERE hash = "
+                "?");
+            q->bind(1, hash);
+            while (q->fetch()) {
+                entries.emplace_back(q->getText(0),
+                                     q->getText(1),
+                                     q->getInt(2),
+                                     q->getText(3),
+                                     q->getInt64(4),
+                                     q->getInt64(5),
+                                     q->getInt(6));
             }
         }
 
-        // Only proceed with the build if all dependencies are available or if forced
-        if (!allDependenciesAvailable && !force) {
-            LOGD << "Skipping build attempt for hash " << hash
-                 << " due to missing dependencies";
+        if (entries.empty()) {
+            // Entry no longer indexed: nothing to retry (cleanupBuild garbage collects it too)
+            LOGD << "Removing pending file of unindexed hash " << hash;
+            io::assureIsRemoved(pendingPath);
             continue;
         }
 
-        // Check if file still exists in our index
-        auto q = db->query(
-            "SELECT path, hash, type, properties, mtime, size, depth FROM entries WHERE hash = "
-            "?");
-        q->bind(1, hash);
-        bool found = false;
-
-        while (q->fetch()) {
-            found = true;
-            Entry e(q->getText(0),
-                    q->getText(1),
-                    q->getInt(2),
-                    q->getText(3),
-                    q->getInt64(4),
-                    q->getInt64(5),
-                    q->getInt(6));
-
-            // Only remove the pending file if we're going to attempt the build
-            io::assureIsRemoved(i->path());
-
-            // Call build
+        for (const auto& e : entries) {
             try {
-                LOGD << "Attempting build for " << e.path
-                     << " (all dependencies now available)";
+                LOGD << "Retrying pending build for " << e.path;
                 buildInternal(db, e, outPath, force);
-            } catch (const AppException& err) {
-                LOGD << "Cannot build " << e.path << ": " << err.what();
+            } catch (const BuildDepMissingException& err) {
+                LOGD << "Build of " << e.path << " is still pending: " << err.what();
+            } catch (const BuildInProgressException& err) {
+                LOGD << "Build of " << e.path << " is already in progress: " << err.what();
+            } catch (const std::exception& err) {
+                LOGW << "Pending build of " << e.path << " failed: " << err.what();
             }
         }
-
-        if (!found)
-            io::assureIsRemoved(i->path());
     }
 }
 
+// Same marker set as buildPending(): top-level "<hash>.pending" files only.
 bool isBuildPending(Database* db) {
-    auto buildDir = db->buildDirectory();
-    if (!fs::exists(buildDir))
-        return false;
-
-    for (auto i = fs::recursive_directory_iterator(buildDir);
-         i != fs::recursive_directory_iterator();
-         ++i) {
-        if (i->path().extension() == ".pending")
-            return true;
-    }
-
-    return false;
+    return !collectPendingFiles(db->buildDirectory()).empty();
 }
 
 std::vector<PendingBuildInfo> getPendingBuildInfo(Database* db) {
     std::vector<PendingBuildInfo> result;
 
-    auto buildDir = db->buildDirectory();
-    if (!fs::exists(buildDir))
-        return result;
-
-    for (auto i = fs::recursive_directory_iterator(buildDir);
-         i != fs::recursive_directory_iterator();
-         ++i) {
-        if (i->path().extension() != ".pending")
-            continue;
-
-        const auto hash = i->path().filename().replace_extension("").string();
-        const PendingFileData pending = parsePendingFile(i->path());
+    for (const auto& pendingPath : collectPendingFiles(db->buildDirectory())) {
+        const auto hash = pendingPath.stem().string();
+        const PendingFileData pending = parsePendingFile(pendingPath);
 
         auto q = db->query("SELECT path FROM entries WHERE hash = ?");
         q->bind(1, hash);
@@ -650,17 +690,118 @@ static void ensureSufficientDiskSpace(const fs::path& dir) {
     }
 }
 
+// Removes a leftover build folder and records it in the cleanup result.
+static void removeOrphanFolder(const fs::path& p, CleanupResult& result) {
+    std::error_code rmErr;
+    fs::remove_all(p, rmErr);
+    if (rmErr) {
+        LOGW << "Failed to remove orphan temp folder '" << p.string()
+             << "': " << rmErr.message();
+    } else {
+        result.removedBuilds.push_back(p.string());
+        LOGD << "Removed orphan build temp folder: " << p.string();
+    }
+}
+
+// Prefix of 3D Tiles leftovers already moved aside by a cleanup. It still
+// matches "3dtiles-temp-*", so a trash folder whose deletion failed is picked up
+// by the next cleanup. No build ever uses such a folder (buildModel3DTiles names
+// its temp folders "3dtiles-temp-<rand16>", without dashes in the suffix), so it
+// is deleted without holding the "3dtiles" lock.
+static const std::string TilesTrashPrefix = "3dtiles-temp-trash-";
+
+// The 3D Tiles siblings "3dtiles-temp-<rand>" and "3dtiles-old" belong to
+// buildModel3DTiles, which holds its own "3dtiles" lock (a Model build otherwise
+// holds only "nxs"). They are handled only while that lock is absent or stale.
+// Under the lock (taken here, so a tiles build cannot start between the check
+// and the move) they are only renamed to unique "3dtiles-temp-trash-<rand16>"
+// names; the lock is released before the (possibly long) deletion, so a
+// concurrent tiles build is never refused with BuildInProgress because of a
+// cleanup. "3dtiles-old" is the only copy of the previous tileset while
+// "3dtiles/" is missing (an interrupted swap that the next tiles build restores),
+// so it is moved aside only while "3dtiles/" exists. trashFolders are leftovers
+// of an earlier cleanup: they are deleted whatever the lock state.
+static void removeOrphanTilesFolders(const fs::path& hashDir,
+                                     const std::vector<fs::path>& tempFolders,
+                                     const fs::path& oldFolder,
+                                     const std::vector<fs::path>& trashFolders,
+                                     CleanupResult& result) {
+    const fs::path tilesDir = hashDir / "3dtiles";
+
+    // (trash path, path to report once deleted)
+    std::vector<std::pair<fs::path, fs::path>> toDelete;
+    for (const auto& t : trashFolders)
+        toDelete.emplace_back(t, t);
+
+    if (!tempFolders.empty() || !oldFolder.empty()) {
+        std::optional<BuildLock> tilesLock;
+        try {
+            tilesLock.emplace(tilesDir.string(), false);
+        } catch (const BuildInProgressException&) {
+            LOGD << "Skipping 3D Tiles temp folders with active build lock in: " << hashDir.string();
+        } catch (const AppException& e) {
+            LOGW << "Cannot lock " << tilesDir.string() << " (" << e.what()
+                 << "); skipping 3D Tiles temp folders";
+        }
+
+        if (tilesLock) {
+            const auto moveAside = [&](const fs::path& p) {
+                const fs::path trash = hashDir / (TilesTrashPrefix + utils::generateRandomString(16));
+                std::error_code ec;
+                fs::rename(p, trash, ec);
+                if (ec) {
+                    LOGW << "Cannot move orphan folder '" << p.string() << "' aside for deletion: "
+                         << ec.message();
+                    return;
+                }
+                toDelete.emplace_back(trash, p);
+            };
+
+            for (const auto& t : tempFolders)
+                moveAside(t);
+
+            if (!oldFolder.empty()) {
+                std::error_code ec;
+                if (fs::exists(tilesDir, ec) && !ec)
+                    moveAside(oldFolder);
+                else
+                    LOGD << "Keeping " << oldFolder.string() << ": " << tilesDir.string()
+                         << " is missing, the next tiles build restores it";
+            }
+        }
+        // tilesLock is released here, before any deletion.
+    }
+
+    for (const auto& [trash, reported] : toDelete) {
+        std::error_code rmErr;
+        fs::remove_all(trash, rmErr);
+        if (rmErr) {
+            LOGW << "Failed to remove orphan temp folder '" << trash.string()
+                 << "' (the next cleanup retries): " << rmErr.message();
+        } else {
+            result.removedBuilds.push_back(reported.string());
+            LOGD << "Removed orphan build temp folder: " << reported.string();
+        }
+    }
+}
+
 // Remove orphaned "<subfolder>-temp-<rand>" scratch folders inside a build hash
 // directory. buildInternal() creates such a folder per build and renames it to
 // the final output (or deletes it) when done; a process crash during the build
 // leaves it behind together with any GDAL/COG/Nexus scratch it contains. A
 // folder is removed only when there is no live build lock for its subfolder, so
-// an in-progress build is never disturbed.
+// an in-progress build is never disturbed. "3dtiles-temp-*" (including the
+// "3dtiles-temp-trash-*" leftovers of an earlier cleanup) and "3dtiles-old" are
+// handled by removeOrphanTilesFolders.
 static void removeOrphanTempFolders(const fs::path& hashDir, CleanupResult& result) {
     std::error_code ec;
     fs::directory_iterator it(hashDir, ec);
     if (ec)
         return;
+
+    std::vector<fs::path> tilesTempFolders;
+    std::vector<fs::path> tilesTrashFolders;
+    fs::path tilesOldFolder;
 
     const fs::directory_iterator end;
     for (; it != end; it.increment(ec)) {
@@ -672,6 +813,11 @@ static void removeOrphanTempFolders(const fs::path& hashDir, CleanupResult& resu
             continue;
 
         const std::string name = it->path().filename().string();
+        if (name == "3dtiles-old") {
+            tilesOldFolder = it->path();
+            continue;
+        }
+
         const auto pos = name.find("-temp-");
         // Require a non-empty subfolder prefix and a non-empty random suffix so
         // unrelated directory names are never matched.
@@ -679,22 +825,25 @@ static void removeOrphanTempFolders(const fs::path& hashDir, CleanupResult& resu
             continue;
 
         const std::string subfolder = name.substr(0, pos);
+        if (subfolder == "3dtiles") {
+            if (name.rfind(TilesTrashPrefix, 0) == 0)
+                tilesTrashFolders.push_back(it->path());
+            else
+                tilesTempFolders.push_back(it->path());
+            continue;
+        }
+
         const fs::path lockPath = hashDir / (subfolder + ".building");
         if (fs::exists(lockPath) && !isLockFileStale(lockPath.string())) {
             LOGD << "Skipping temp folder with active build lock: " << it->path().string();
             continue;
         }
 
-        std::error_code rmErr;
-        fs::remove_all(it->path(), rmErr);
-        if (rmErr) {
-            LOGW << "Failed to remove orphan temp folder '" << it->path().string()
-                 << "': " << rmErr.message();
-        } else {
-            result.removedBuilds.push_back(it->path().string());
-            LOGD << "Removed orphan build temp folder: " << it->path().string();
-        }
+        removeOrphanFolder(it->path(), result);
     }
+
+    if (!tilesTempFolders.empty() || !tilesOldFolder.empty() || !tilesTrashFolders.empty())
+        removeOrphanTilesFolders(hashDir, tilesTempFolders, tilesOldFolder, tilesTrashFolders, result);
 }
 
 CleanupResult cleanupBuild(Database* db, const std::string& outputPath) {
@@ -765,18 +914,8 @@ CleanupResult cleanupBuild(Database* db, const std::string& outputPath) {
     LOGD << "cleanupBuild: " << validHashes.size() << " valid hash(es) in DB; scanning "
          << buildDir.string();
 
-    // Build-artifact names are content hashes (currently SHA-256 hex, 64 chars).
-    // Validate the candidate name before deleting so we never wipe unrelated
-    // files/directories that may live in a user-specified output path.
-    auto isHashLike = [](const std::string& s) {
-        if (s.size() != 64)
-            return false;
-        for (unsigned char c : s) {
-            if (!std::isxdigit(c))
-                return false;
-        }
-        return true;
-    };
+    // Artifact names are validated with isHashLike() before deleting so we never
+    // wipe unrelated files/directories that may live in a user-specified output path.
 
     std::error_code iterErr;
     fs::directory_iterator it(buildDir, iterErr);

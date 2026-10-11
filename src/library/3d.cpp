@@ -3,17 +3,22 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "3d.h"
 
+#include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <fstream>
 #include <optional>
-#include <regex>
+#include <sstream>
 #include <system_error>
 
+#include "buildlock.h"
+#include "deppath.h"
 #include "exceptions.h"
 #include "json.h"
 #include "logger.h"
 #include "mio.h"
 #include "obj2tiles_runner.h"
+#include "plyconv.h"
 #include "utils.h"
 
 namespace ddb {
@@ -31,10 +36,21 @@ public:
         shouldCleanup = true;
     }
 
+    // The directory was moved into place (or is otherwise owned elsewhere now).
+    void release() { shouldCleanup = false; }
+
     ~TempDirGuard() {
-        if (shouldCleanup && fs::exists(dir)) {
-            LOGD << "Cleaning up temporary directory: " << dir;
-            io::assureIsRemoved(dir);
+        if (!shouldCleanup)
+            return;
+        // Never throw from a destructor (it may run during stack unwinding).
+        try {
+            std::error_code ec;
+            if (fs::exists(dir, ec)) {
+                LOGD << "Cleaning up temporary directory: " << dir;
+                io::assureIsRemoved(dir);
+            }
+        } catch (const std::exception& e) {
+            LOGW << "Cannot remove temporary directory " << dir << ": " << e.what();
         }
     }
 };
@@ -215,21 +231,113 @@ json readGlbJson(const std::string& glbPath) {
     }
 }
 
-// Validate GLTF dependencies
-void validateGltfDependencies(const std::string& gltfFile, const fs::path& parentPath) {
-    // GLB files have everything embedded, skip validation
-    if (isGlbFile(gltfFile)) {
-        LOGD << "GLB file detected, skipping dependency validation (embedded resources)";
-        return;
+// Reads the JSON document of a .gltf (text) or .glb (JSON chunk) and checks the
+// basic glTF structure.
+// @throws FSException if the file does not exist or cannot be opened.
+// @throws AppException if it is not a valid glTF/GLB.
+json readGltfDocument(const std::string& gltf) {
+    if (!fs::exists(gltf))
+        throw FSException(gltf + " does not exist");
+
+    // Determine if GLTF (text JSON) or GLB (binary)
+    std::string ext = fs::path(gltf).extension().string();
+    utils::toLower(ext);
+
+    json gltfJson;
+
+    try {
+        if (ext == ".gltf") {
+            // Read as text JSON file
+            std::ifstream file(gltf);
+            if (!file.is_open())
+                throw FSException("Cannot open GLTF file: " + gltf);
+
+            try {
+                file >> gltfJson;
+            } catch (const json::exception& e) {
+                throw AppException("Invalid GLTF file: JSON parse error: " + std::string(e.what()));
+            }
+        } else if (ext == ".glb") {
+            // Read binary GLB and extract JSON chunk
+            gltfJson = readGlbJson(gltf);
+        } else {
+            throw AppException("File is not a GLTF or GLB: " + gltf);
+        }
+
+        // Validate basic GLTF structure
+        if (!gltfJson.contains("asset")) {
+            throw AppException("Invalid GLTF file: missing 'asset' property");
+        }
+    } catch (const AppException&) {
+        throw;  // Re-throw our exceptions
+    } catch (const std::exception& e) {
+        throw AppException("Error reading GLTF file: " + std::string(e.what()));
     }
 
-    auto deps = getGltfDependencies(gltfFile);
+    return gltfJson;
+}
+
+bool isHttpUri(const std::string& uri) {
+    std::string scheme = uri.substr(0, 8);
+    utils::toLower(scheme);
+    return scheme.rfind("http://", 0) == 0 || scheme.rfind("https://", 0) == 0;
+}
+
+// Validate the file dependencies (buffer and image URIs) of a glTF or GLB.
+//  - data: URIs are embedded content: nothing to check;
+//  - http(s) URIs are never fetched and are not dependencies: they are left to
+//    the converter, whose failure (or an unresolvable texture in its output) is
+//    a plain AppException, never a pending build (see prepareModelInput);
+//  - absolute paths and file: URIs, and relative URIs that leave the glTF's
+//    folder (e.g. "../shared/tex.png"), can never be satisfied: only files in the
+//    glTF's folder or below are staged for the converted model, so they fail
+//    with AppException naming the URI instead of leaving the build pending;
+//  - other relative URIs must exist: missing ones are reported (normalised,
+//    relative to the glTF's folder) with BuildDepMissingException.
+void validateGltfDependencies(const std::string& gltfFile, const fs::path& parentPath) {
+    const json gltfJson = readGltfDocument(gltfFile);
+    const fs::path baseDir = parentPath.empty() ? fs::path(".") : parentPath;
     std::vector<std::string> missingDeps;
 
-    for (const std::string& d : deps) {
-        fs::path relPath = parentPath / d;
-        if (!fs::exists(relPath))
-            missingDeps.push_back(d);
+    const auto check = [&](const char* kind, const std::string& uri) {
+        if (isDataUri(uri))
+            return;
+        if (isHttpUri(uri)) {
+            LOGD << gltfFile << " references the remote " << kind << " " << uri
+                 << ", which is not fetched";
+            return;
+        }
+        if (deppath::isAbsolute(uri))
+            throw AppException(gltfFile + " references the " + kind + " '" + uri +
+                               "' by an absolute path or URI, which can never be satisfied");
+
+        const std::string name = deppath::normalize(uri);
+        if (name.empty() || name == ".")
+            return;
+        if (deppath::isAbsolute(name) || !deppath::isInside(baseDir / fs::path(name), baseDir))
+            throw AppException(gltfFile + " references the " + kind + " '" + uri +
+                               "' outside its folder, which can never be satisfied (only files in "
+                               "the glTF's folder or its subfolders are used)");
+
+        std::error_code ec;
+        if (!fs::exists(baseDir / fs::path(name), ec) || ec) {
+            if (std::find(missingDeps.begin(), missingDeps.end(), name) == missingDeps.end())
+                missingDeps.push_back(name);
+        }
+    };
+
+    try {
+        for (const char* section : {"buffers", "images"}) {
+            if (!gltfJson.contains(section) || !gltfJson[section].is_array())
+                continue;
+            const char* kind = std::string(section) == "buffers" ? "buffer" : "image";
+            for (const auto& item : gltfJson[section]) {
+                if (item.is_object() && item.contains("uri") && item["uri"].is_string())
+                    check(kind, item["uri"].get<std::string>());
+            }
+        }
+    } catch (const json::exception& e) {
+        throw AppException("Error parsing GLTF JSON: " + std::string(e.what()));
     }
 
     if (!missingDeps.empty()) {
@@ -243,8 +351,263 @@ void validateGltfDependencies(const std::string& gltfFile, const fs::path& paren
     }
 }
 
-// Convert GLTF/GLB to OBJ in a temporary directory
-std::string convertGltfToObj(const std::string& inputGltf, TempDirGuard& tempGuard) {
+// One file dependency of an OBJ. Satisfied when any candidate exists.
+struct ObjDependency {
+    // Reported name: normalised, relative to the OBJ's folder ("m.mtl",
+    // "tex.png", "mats/tex.png" for a texture of "mats/m.mtl").
+    std::string name;
+    // Paths to probe, in lookup order.
+    std::vector<fs::path> candidates;
+};
+
+// Returns the first whitespace-delimited token of a line and the rest (trimmed).
+std::string splitKeyword(const std::string& line, std::string& rest) {
+    const auto begin = line.find_first_not_of(" \t\r");
+    if (begin == std::string::npos) {
+        rest.clear();
+        return "";
+    }
+    const auto end = line.find_first_of(" \t\r", begin);
+    const std::string keyword =
+        line.substr(begin, end == std::string::npos ? std::string::npos : end - begin);
+    rest = end == std::string::npos ? "" : line.substr(end);
+    utils::trim(rest);
+    return keyword;
+}
+
+// Extracts the file name from the arguments of an MTL texture statement
+// ("map_Kd [options] file"). A double-quoted name is taken verbatim (spaces
+// allowed); otherwise leading options ("-bm 1.0", "-o 0 0 0", "-clamp on",
+// "-type sphere", ...) are skipped and the rest of the line is the name. Unlike a
+// word-boundary regex this keeps a leading "/", "./" or "../", which the path
+// contract needs to see.
+std::optional<std::string> parseTextureArgument(const std::string& args) {
+    const auto q1 = args.find('"');
+    if (q1 != std::string::npos) {
+        const auto q2 = args.find('"', q1 + 1);
+        if (q2 != std::string::npos && q2 > q1 + 1)
+            return args.substr(q1 + 1, q2 - q1 - 1);
+    }
+
+    std::vector<std::string> tokens;
+    {
+        std::istringstream iss(args);
+        std::string t;
+        while (iss >> t)
+            tokens.push_back(t);
+    }
+
+    const auto isNumber = [](const std::string& t) {
+        char* end = nullptr;
+        std::strtod(t.c_str(), &end);
+        return end != t.c_str() && *end == '\0';
+    };
+
+    size_t i = 0;
+    while (i < tokens.size() && tokens[i].size() > 1 && tokens[i][0] == '-' &&
+           std::isalpha(static_cast<unsigned char>(tokens[i][1]))) {
+        const std::string opt = tokens[i++];
+        if (opt == "-type" || opt == "-imfchan") {
+            if (i < tokens.size())
+                ++i;  // one word argument
+            continue;
+        }
+        while (i < tokens.size() &&
+               (isNumber(tokens[i]) || tokens[i] == "on" || tokens[i] == "off"))
+            ++i;
+    }
+
+    if (i >= tokens.size())
+        return std::nullopt;
+
+    std::string name = tokens[i];
+    for (size_t k = i + 1; k < tokens.size(); ++k)
+        name += " " + tokens[k];
+    return name;
+}
+
+[[noreturn]] void throwUnsatisfiable(const std::string& sourceFile, const std::string& ref,
+                                     const char* why) {
+    throw AppException("Unsatisfiable dependency in " + sourceFile + ": '" + ref + "' " + why +
+                       " and can never be provided by adding files to the dataset");
+}
+
+// Path contract for OBJ dependencies (see deppath.h):
+//   - mtllib resolves against the OBJ's folder;
+//   - an MTL texture is present if it exists relative to the MTL's folder,
+//     otherwise relative to the OBJ's folder; it is reported as
+//     "<MTL folder relative to the OBJ folder>/<texture>";
+//   - absolute references, and references escaping datasetRoot (when known),
+//     throw AppException.
+std::vector<ObjDependency> collectObjDependencies(const std::string& obj,
+                                                  const fs::path& datasetRoot) {
+    if (!fs::exists(obj))
+        throw FSException(obj + " does not exist");
+
+    const fs::path objDir = fs::path(obj).parent_path();
+    const bool checkRoot = !datasetRoot.empty();
+
+    std::vector<ObjDependency> deps;
+    const auto add = [&deps](ObjDependency d) {
+        for (const auto& existing : deps)
+            if (existing.name == d.name)
+                return;
+        deps.push_back(std::move(d));
+    };
+
+    static const std::vector<std::string> textureKeys = {"map_Ka", "map_Kd", "map_Ks", "map_Ns",
+                                                         "map_d", "disp", "decal", "bump",
+                                                         "map_bump", "refl", "map_Pr", "map_Pm",
+                                                         "map_Ps", "map_Ke"};
+
+    std::ifstream fin(obj);
+    std::string line;
+    while (std::getline(fin, line)) {
+        std::string mtlRef;
+        if (splitKeyword(line, mtlRef) != "mtllib" || mtlRef.empty())
+            continue;
+
+        // Remove double quotes if present
+        if (mtlRef.size() >= 2 && mtlRef.front() == '"' && mtlRef.back() == '"')
+            mtlRef = mtlRef.substr(1, mtlRef.size() - 2);
+
+        const std::string mtlName = deppath::normalize(mtlRef);
+        if (mtlName.empty() || mtlName == ".")
+            continue;
+        if (deppath::isAbsolute(mtlName))
+            throwUnsatisfiable(obj, mtlRef, "is an absolute path");
+
+        const fs::path mtlPath = objDir / fs::path(mtlName);
+        if (checkRoot && !deppath::isInside(mtlPath, datasetRoot))
+            throwUnsatisfiable(obj, mtlRef, "points outside the dataset");
+
+        add({mtlName, {mtlPath}});
+
+        if (!fs::exists(mtlPath))
+            continue;
+
+        const fs::path mtlRelDir = fs::path(mtlName).parent_path();
+        const fs::path mtlDir = mtlPath.parent_path();
+
+        // Parse MTL
+        std::string mtlLine;
+        std::ifstream mtlFin(mtlPath.string());
+        while (std::getline(mtlFin, mtlLine)) {
+            std::string rest;
+            const std::string key = splitKeyword(mtlLine, rest);
+            if (std::find(textureKeys.begin(), textureKeys.end(), key) == textureKeys.end())
+                continue;
+
+            const auto textureRef = parseTextureArgument(rest);
+            if (!textureRef.has_value())
+                continue;
+
+            const std::string tex = deppath::normalize(textureRef.value());
+            if (tex.empty() || tex == ".")
+                continue;
+            if (deppath::isAbsolute(tex))
+                throwUnsatisfiable(mtlPath.string(), textureRef.value(), "is an absolute path");
+
+            ObjDependency d;
+            d.name = mtlRelDir.empty()
+                         ? tex
+                         : deppath::normalize((mtlRelDir / fs::path(tex)).generic_string());
+            for (const auto& c : {mtlDir / fs::path(tex), objDir / fs::path(tex)}) {
+                if (checkRoot && !deppath::isInside(c, datasetRoot))
+                    continue;
+                if (std::find(d.candidates.begin(), d.candidates.end(), c) == d.candidates.end())
+                    d.candidates.push_back(c);
+            }
+            if (d.candidates.empty())
+                throwUnsatisfiable(
+                    mtlPath.string(), textureRef.value(), "points outside the dataset");
+
+            add(std::move(d));
+        }
+    }
+
+    return deps;
+}
+
+// Validate that all file dependencies of an OBJ exist. Missing names are
+// reported relative to the OBJ's folder (BuildDepMissingException); see
+// collectObjDependencies for the path contract. datasetRoot is empty for
+// files produced by a converter in a temp folder.
+void validateDependencies(const std::string& objFile, const fs::path& datasetRoot) {
+    const auto deps = collectObjDependencies(objFile, datasetRoot);
+    std::vector<std::string> missingDeps;
+
+    for (const auto& d : deps) {
+        bool found = false;
+        for (const auto& c : d.candidates) {
+            std::error_code ec;
+            if (fs::exists(c, ec) && !ec) {
+                found = true;
+                break;
+            }
+        }
+        if (!found)
+            missingDeps.push_back(d.name);
+    }
+
+    if (!missingDeps.empty()) {
+        std::string errorMessage = "Dependencies missing for " + objFile + ": ";
+        for (size_t i = 0; i < missingDeps.size(); i++) {
+            if (i > 0)
+                errorMessage += ", ";
+            errorMessage += missingDeps[i];
+        }
+        throw BuildDepMissingException(errorMessage, missingDeps);
+    }
+}
+
+// The OBJ converted from a glTF lives in a temp folder, but its MTL keeps the
+// glTF's relative image URIs (embedded images are extracted next to it by the
+// converter). Stage external images there too, so that dependency validation,
+// Nexus and Obj2Tiles find them. Only images inside the glTF's folder are
+// staged, matching validateGltfDependencies. Images are copied, never linked, so
+// nothing writing into the temp folder can alter the dataset's files.
+void stageGltfTextures(const fs::path& gltfDir, const std::string& convertedObj) {
+    const fs::path tempDir = fs::path(convertedObj).parent_path();
+
+    for (const auto& d : collectObjDependencies(convertedObj, fs::path())) {
+        bool present = false;
+        for (const auto& c : d.candidates) {
+            std::error_code ec;
+            if (fs::exists(c, ec) && !ec) {
+                present = true;
+                break;
+            }
+        }
+        if (present || !isSafePath(d.name, gltfDir))
+            continue;
+
+        const fs::path src = gltfDir / fs::path(d.name);
+        std::error_code ec;
+        if (!fs::is_regular_file(src, ec) || ec)
+            continue;
+
+        const fs::path dst = tempDir / fs::path(d.name);
+        if (!deppath::isInside(dst, tempDir))
+            continue;
+
+        fs::create_directories(dst.parent_path(), ec);
+        ec.clear();
+        fs::copy_file(src, dst, fs::copy_options::overwrite_existing, ec);
+        if (ec)
+            LOGW << "Cannot stage texture " << src.string() << " for the converted model: "
+                 << ec.message();
+        else
+            LOGD << "Staged texture " << src.string() << " -> " << dst.string();
+    }
+}
+
+// Convert GLTF/GLB to OBJ in a temporary directory. With preferPLYIfNoUV a glTF
+// without texture coordinates is written as PLY instead (keeps vertex colours for
+// Nexus, whose OBJ reader ignores them); Obj2Tiles reads OBJ only, and the OBJ
+// exporter writes vertex colours as `v x y z r g b`.
+std::string convertGltfToObj(const std::string& inputGltf, TempDirGuard& tempGuard,
+                             bool preferPLYIfNoUV) {
     LOGD << "Input is GLTF/GLB, converting to OBJ first";
 
     fs::path inputPath(inputGltf);
@@ -257,31 +620,129 @@ std::string convertGltfToObj(const std::string& inputGltf, TempDirGuard& tempGua
     std::string outMtlPath;
     std::string outputBasePath = (tempDir / inputPath.stem()).string();
 
-    convertGltfTo3dModel(inputGltf, outputBasePath, outGeomPath, outMtlPath, false, true);
+    convertGltfTo3dModel(inputGltf, outputBasePath, outGeomPath, outMtlPath, false,
+                         preferPLYIfNoUV);
 
     LOGD << "GLTF/GLB converted to: " << outGeomPath;
+
+    if (!outMtlPath.empty())
+        stageGltfTextures(inputPath.parent_path(), outGeomPath);
+
     return outGeomPath;
 }
 
-// Validate that all file dependencies exist
-void validateDependencies(const std::string& objFile, const fs::path& parentPath) {
-    auto deps = getObjDependencies(objFile);
-    std::vector<std::string> missingDeps;
+// Consumer of a prepared model (see prepareModelInput).
+enum class ModelConsumer { Nexus, Tiles };
 
-    for (const std::string& d : deps) {
-        fs::path relPath = parentPath / d;
-        if (!fs::exists(relPath))
-            missingDeps.push_back(d);
+// A model ready for Nexus or Obj2Tiles, plus the stats a converter computed.
+struct PreparedModel {
+    std::string path;               // file to hand to the consumer
+    std::optional<ModelInfo> info;  // face count + bounds when a converter supplied them
+};
+
+// Validates a model written by a converter into a temp folder (P3). Every
+// satisfiable dependency of the original input was checked and staged before the
+// conversion, so a name still missing here can never be satisfied by uploading a
+// file: its temp-folder-relative name must not reach ".pending" (it would retry
+// forever). It is reported as a plain AppException naming the original input.
+void validateConvertedDependencies(const std::string& convertedObj, const std::string& originalInput) {
+    try {
+        validateDependencies(convertedObj, fs::path());
+    } catch (const BuildDepMissingException& e) {
+        std::string names;
+        for (const auto& d : e.getMissingDependencies())
+            names += (names.empty() ? "" : ", ") + d;
+        throw AppException("The model converted from " + originalInput +
+                           " references files that cannot be resolved: " + names);
+    }
+}
+
+// Single owner of the input-format dispatch for buildNexus and buildModel3DTiles.
+// Validates the dependencies of the input and converts it when the consumer
+// cannot read it as is:
+//   - glTF/GLB: validated, then converted to OBJ in a temp folder. For Nexus a
+//     glTF without UVs becomes a PLY (Nexus ignores OBJ vertex colours); for
+//     Obj2Tiles it is always an OBJ.
+//   - PLY: never text-scanned as an OBJ. Its TextureFile (if any) is checked from
+//     the header against the dataset root. Nexus reads an untextured PLY natively;
+//     otherwise the streaming converter writes OBJ (+ MTL + texture) in a temp
+//     folder and reports face count and bounds.
+//   - anything else (OBJ): validated in place.
+// The dataset root applies to the original input only; converted outputs in a
+// temp folder are validated without it (P3). tempGuard owns that temp folder.
+PreparedModel prepareModelInput(const std::string& input, ModelConsumer consumer,
+                                const std::string& datasetRoot, TempDirGuard& tempGuard) {
+    const fs::path inputPath(input);
+
+    if (isGltfFile(inputPath)) {
+        validateGltfDependencies(input, inputPath.parent_path());
+        PreparedModel m;
+        m.path = convertGltfToObj(input, tempGuard, consumer == ModelConsumer::Nexus);
+        // An Assimp-exported PLY has no file dependencies.
+        if (!isPlyFile(m.path))
+            validateConvertedDependencies(m.path, input);
+        return m;
     }
 
-    if (!missingDeps.empty()) {
-        std::string errorMessage = "Dependencies missing for " + objFile + ": ";
-        for (size_t i = 0; i < missingDeps.size(); i++) {
-            if (i > 0)
-                errorMessage += ", ";
-            errorMessage += missingDeps[i];
+    if (isPlyFile(inputPath)) {
+        // Header-only: throws BuildDepMissingException for a missing texture and
+        // AppException for an absolute or root-escaping TextureFile.
+        const std::string texture = getPlyTexture(input, datasetRoot);
+
+        if (consumer == ModelConsumer::Nexus && texture.empty()) {
+            LOGD << "Untextured PLY, handing it to Nexus as is: " << input;
+            return {input, std::nullopt};
         }
-        throw BuildDepMissingException(errorMessage, missingDeps);
+
+        const fs::path tempDir =
+            fs::temp_directory_path() / ("ddb_ply_convert_" + utils::generateRandomString(16));
+        fs::create_directories(tempDir);
+        tempGuard.set(tempDir);
+
+        PlyToObjOptions opts;
+        opts.withTexture = true;
+        opts.datasetRoot = datasetRoot;
+        const PlyToObjResult res =
+            convertPlyToObj(input, (tempDir / inputPath.stem()).string(), opts);
+        LOGD << "PLY converted to " << res.objPath << " (" << res.info.faceCount << " faces"
+             << (res.mtlPath.empty() ? "" : ", textured") << ")";
+
+        validateConvertedDependencies(res.objPath, input);
+
+        PreparedModel m;
+        m.path = res.objPath;
+        if (res.info.hasBounds)
+            m.info = res.info;
+        return m;
+    }
+
+    validateDependencies(input, fs::path(datasetRoot));
+    return {input, std::nullopt};
+}
+
+// "out/3dtiles/" and "out/3dtiles//" -> "out/3dtiles", so the lock, the temp and
+// the -old siblings are derived from the folder name (P8).
+fs::path stripTrailingSeparators(const std::string& dir) {
+    fs::path p(dir);
+    while (!p.empty() && !p.has_filename() && p.has_relative_path())
+        p = p.parent_path();
+    return p;
+}
+
+// A3 recovery, under the tiles lock: a crash between the two renames of the swap
+// leaves only "<outDir>-old" (restore it); a crash before its final delete leaves
+// both (outDir is the newer, complete tileset: drop the old one).
+void recoverTilesSwap(const fs::path& outDir, const fs::path& oldDir) {
+    std::error_code ec;
+    if (!fs::exists(oldDir, ec))
+        return;
+
+    if (!fs::exists(outDir, ec)) {
+        LOGI << "Restoring previous 3D Tiles from " << oldDir.string();
+        io::rename(oldDir, outDir);
+    } else {
+        LOGD << "Removing superseded 3D Tiles " << oldDir.string();
+        io::assureIsRemoved(oldDir);
     }
 }
 
@@ -306,25 +767,11 @@ void performNexusBuild(const std::string& inputFile, const std::string& outputFi
 }
 }  // namespace
 
-std::string buildNexus(const std::string& inputObj, const std::string& outputNxs, bool overwrite) {
-    TempDirGuard tempGuard;
-    fs::path inputPath(inputObj);
-    std::string actualInputObj = inputObj;
-
-    // Convert GLTF/GLB to OBJ if needed
-    if (isGltfFile(inputPath)) {
-        // Validate GLTF dependencies before conversion
-        validateGltfDependencies(inputObj, inputPath.parent_path());
-
-        actualInputObj = convertGltfToObj(inputObj, tempGuard);
-        inputPath = fs::path(actualInputObj);
-    }
-
-    // Determine output file path
+std::string buildNexus(const std::string& inputObj, const std::string& outputNxs, bool overwrite,
+                       const std::string& datasetRoot) {
+    // Default output: next to the original input (never inside a conversion temp folder).
     const auto outFile =
-        outputNxs.empty()
-            ? inputPath.replace_filename(inputPath.filename().replace_extension(".nxz")).string()
-            : outputNxs;
+        outputNxs.empty() ? fs::path(inputObj).replace_extension(".nxz").string() : outputNxs;
 
     // Check if output file already exists
     if (fs::exists(outFile)) {
@@ -334,11 +781,14 @@ std::string buildNexus(const std::string& inputObj, const std::string& outputNxs
             throw AppException("File " + outFile + " already exists (delete it first)");
     }
 
-    // Validate dependencies (for OBJ files or converted GLTF)
-    validateDependencies(actualInputObj, inputPath.parent_path());
+    // Validate dependencies and convert when needed (glTF/GLB, textured PLY).
+    // Throws before Nexus runs, so a missing dependency never produces output.
+    TempDirGuard tempGuard;
+    const PreparedModel model =
+        prepareModelInput(inputObj, ModelConsumer::Nexus, datasetRoot, tempGuard);
 
     // Build the nexus file
-    performNexusBuild(actualInputObj, outFile);
+    performNexusBuild(model.path, outFile);
 
     return outFile;
 }
@@ -409,58 +859,58 @@ std::optional<ModelGeoref> detectModelGeoref(const std::string& inputObj) {
 
 std::string buildModel3DTiles(const std::string& inputObj, const std::string& outputDir,
                               bool overwrite, std::optional<ModelGeoref> georef,
-                              bool autoDetectGeoref) {
-    TempDirGuard tempGuard;
-
-    // Fail fast: if Obj2Tiles is unavailable, skip georef detection, GLTF->OBJ
-    // conversion and dependency validation entirely. Callers treat 3D Tiles as
-    // best-effort and keep producing Nexus.
+                              bool autoDetectGeoref, const std::string& datasetRoot) {
+    // Fail fast: if Obj2Tiles is unavailable, skip georef detection, conversion and
+    // dependency validation entirely. Callers treat 3D Tiles as best-effort and keep
+    // producing Nexus.
     if (obj2tiles::findObj2TilesBinary().empty())
         throw Obj2TilesException(
             "Obj2Tiles binary not found; cannot generate 3D Tiles. Set DDB_OBJ2TILES_PATH "
             "or place Obj2Tiles next to the DroneDB executable.");
 
-    fs::path inputPath(inputObj);
-    std::string actualInputObj = inputObj;
+    fs::path outDir = stripTrailingSeparators(outputDir);
+    {
+        const std::string name = outDir.filename().string();
+        if (name.empty() || name == "." || name == "..")
+            throw AppException("Invalid 3D Tiles output directory: " + outputDir);
+    }
+    if (!outDir.has_parent_path())
+        outDir = fs::current_path() / outDir;
+    const fs::path parent = outDir.parent_path();
+    io::assureFolderExists(parent);
+
+    const std::string outName = outDir.filename().string();
+    const fs::path oldDir = parent / (outName + "-old");
+
+    // One tiles build per output folder ("<outDir>.building"), held until return.
+    // It also gates removeOrphanTempFolders (cleanupBuild) for the -temp-/-old
+    // siblings. Throws BuildInProgressException when another build holds it.
+    BuildLock tilesLock(outDir.string());
+
+    recoverTilesSwap(outDir, oldDir);
+
+    if (!overwrite && fs::exists(outDir) && !fs::is_empty(outDir))
+        throw AppException("Directory " + outDir.string() + " already exists (delete it first)");
 
     // Resolve georeferencing from sidecars next to the ORIGINAL input (before any
-    // GLTF->OBJ conversion moves us into a temp directory). An explicit georef
-    // argument always wins.
+    // conversion moves us into a temp directory). An explicit georef argument
+    // always wins.
     if (!georef.has_value() && autoDetectGeoref)
         georef = detectModelGeoref(inputObj);
 
-    // Convert GLTF/GLB to OBJ if needed (same pre-processing as buildNexus)
-    if (isGltfFile(inputPath)) {
-        validateGltfDependencies(inputObj, inputPath.parent_path());
-        actualInputObj = convertGltfToObj(inputObj, tempGuard);
-        inputPath = fs::path(actualInputObj);
-    }
+    // Validate dependencies and convert to OBJ when needed (glTF/GLB, PLY).
+    TempDirGuard inputGuard;
+    const PreparedModel model =
+        prepareModelInput(inputObj, ModelConsumer::Tiles, datasetRoot, inputGuard);
+    const std::string& actualInputObj = model.path;
 
-    // Validate dependencies (for OBJ files or converted GLTF)
-    validateDependencies(actualInputObj, inputPath.parent_path());
-
-    const fs::path outDir(outputDir);
-
-    // Handle an existing output directory
-    if (fs::exists(outDir) && !fs::is_empty(outDir)) {
-        if (overwrite)
-            io::assureIsRemoved(outDir);
-        else
-            throw AppException("Directory " + outDir.string() +
-                               " already exists (delete it first)");
-    }
-
-    // Produce into a sibling temporary directory, then atomically move it into place
-    // so a crashed/partial run never leaves an incomplete tileset at outDir.
-    fs::path parent = outDir.parent_path();
-    if (parent.empty())
-        parent = fs::current_path();
-    io::assureFolderExists(parent);
-
-    const fs::path tempOut =
-        parent / (outDir.filename().string() + "-temp-" + utils::generateRandomString(16));
+    // Produce into a sibling temporary directory; outDir is untouched until
+    // Obj2Tiles succeeds. The guard removes the temp folder on any failure.
+    const fs::path tempOut = parent / (outName + "-temp-" + utils::generateRandomString(16));
+    TempDirGuard outGuard;
     io::assureIsRemoved(tempOut);
     io::assureFolderExists(tempOut);
+    outGuard.set(tempOut);
 
     // Compute Obj2Tiles parameters based on model face count.
     // Face count → (divisions, lods, octree) heuristic selects the right tile
@@ -483,6 +933,13 @@ std::string buildModel3DTiles(const std::string& inputObj, const std::string& ou
         opts.lods = 3;
         LOGD << "DDB_OBJ2TILES_FORCE_DEFAULTS set — skipping heuristic, "
              << "using defaults (divisions=3, lods=3, octree=true)";
+    } else if (model.info.has_value()) {
+        // The converter already counted faces and bounds: no Assimp re-import.
+        info = *model.info;
+        opts = computeObj2TilesOpts(info);
+        LOGD << "Model " << inputObj << " has " << (info.faceCount / 1000)
+             << "K faces (from the converter) → divisions=" << opts.divisions
+             << ", lods=" << opts.lods << ", octree=" << (opts.octree ? "true" : "false");
     } else if (getModelInfo(actualInputObj, info)) {
         opts = computeObj2TilesOpts(info);
         LOGD << "Model " << actualInputObj << " has " << (info.faceCount / 1000)
@@ -518,145 +975,65 @@ std::string buildModel3DTiles(const std::string& inputObj, const std::string& ou
     }
 
     std::string err;
-    const bool ok = obj2tiles::runObj2Tiles(actualInputObj, tempOut, opts, err);
-    if (!ok) {
-        io::assureIsRemoved(tempOut);
+    if (!obj2tiles::runObj2Tiles(actualInputObj, tempOut, opts, err))
         throw Obj2TilesException("Could not build 3D Tiles for " + inputObj + ": " + err);
+
+    // Two-step swap (A3): outDir -> "<outDir>-old", temp -> outDir, drop -old.
+    // A crash in between is repaired by recoverTilesSwap on the next run.
+    std::error_code ec;
+    const bool hadPrevious = fs::exists(outDir, ec);
+    if (hadPrevious) {
+        try {
+            io::rename(outDir, oldDir);
+        } catch (const std::exception& e) {
+            // Previous tiles are intact; the guard removes the new ones.
+            throw AppException("Cannot move the previous 3D Tiles aside (" + std::string(e.what()) +
+                               "); keeping them");
+        }
     }
 
-    // Atomic swap into place.
-    if (fs::exists(outDir))
-        io::assureIsRemoved(outDir);
-    io::rename(tempOut, outDir);
+    try {
+        io::rename(tempOut, outDir);
+    } catch (const std::exception& e) {
+        std::string restored;
+        if (hadPrevious) {
+            try {
+                io::rename(oldDir, outDir);
+                restored = "; previous tiles restored";
+            } catch (const std::exception& re) {
+                // recoverTilesSwap restores them on the next run.
+                restored = "; previous tiles left in " + oldDir.string() + " (" + re.what() + ")";
+            }
+        }
+        throw AppException("Cannot move the new 3D Tiles into place (" + std::string(e.what()) +
+                           ")" + restored);
+    }
+    outGuard.release();
+
+    if (hadPrevious) {
+        try {
+            io::assureIsRemoved(oldDir);
+        } catch (const std::exception& e) {
+            // The new tileset is in place; the next run or cleanupBuild drops -old.
+            LOGW << "Cannot remove previous 3D Tiles " << oldDir.string() << ": " << e.what();
+        }
+    }
 
     return (outDir / "tileset.json").string();
 }
 
-std::optional<std::string> extractFileName(const std::string& input) {
-    // Define the regex pattern for extracting file names without restricting file extension
-    std::regex pattern("\"([^\"]+\\.[^\\s\"]+)\"|\\b([^\" \\t]+\\.[^\\s\"]+)\\b");
-
-    std::smatch match;
-    if (!std::regex_search(input, match, pattern))
-        return std::nullopt;
-
-    // Check which capturing group has been matched
-    if (match[1].matched)
-        return match[1].str();  // File name from double quotes
-
-    if (match[2].matched)
-        return match[2].str();  // Filenames not in quotes
-
-    return std::nullopt;
-}
-
-std::vector<std::string> getObjDependencies(const std::string& obj) {
+std::vector<std::string> getObjDependencies(const std::string& obj,
+                                            const std::string& datasetRoot) {
     std::vector<std::string> deps;
-    if (!fs::exists(obj))
-        throw FSException(obj + " does not exist");
-
-    std::ifstream fin(obj);
-    fs::path p(obj);
-    fs::path parentPath = p.parent_path();
-
-    const auto keys = {"map_Ka",
-                       "map_Kd",
-                       "map_Ks",
-                       "map_Ns",
-                       "map_d",
-                       "disp",
-                       "decal",
-                       "bump",
-                       "map_bump",
-                       "refl",
-                       "map_Pr",
-                       "map_Pm",
-                       "map_Ps",
-                       "map_Ke"};
-
-    std::string line;
-    while (std::getline(fin, line)) {
-        size_t mtllibPos = line.find("mtllib");
-
-        // Parse the mtllib line, otherwise skip
-        if (mtllibPos == std::string::npos)
-            continue;
-
-        // 6 = length of "mtllib"
-        std::string mtlFile = line.substr(6 + mtllibPos, std::string::npos);
-        utils::trim(mtlFile);
-
-        // Remove double quotes if present
-        if (mtlFile.size() >= 2 && mtlFile[0] == '"' && mtlFile[mtlFile.size() - 1] == '"')
-            mtlFile = mtlFile.substr(1, mtlFile.size() - 2);
-
-        deps.push_back(mtlFile);
-        fs::path mtlRelPath = parentPath / mtlFile;
-
-        if (!fs::exists(mtlRelPath))
-            continue;
-
-        // Parse MTL
-        std::string mtlLine;
-        std::ifstream mtlFin(mtlRelPath.string());
-        while (std::getline(mtlFin, mtlLine)) {
-            for (const auto& key : keys) {
-                size_t keyPos = mtlLine.find(key);
-                if (keyPos == std::string::npos)
-                    continue;
-
-                auto lineToParse = mtlLine.substr(keyPos + strlen(key), std::string::npos);
-                auto textureFilename = extractFileName(lineToParse);
-
-                if (textureFilename.has_value())
-                    deps.push_back(textureFilename.value());
-            }
-        }
-    }
-
+    for (const auto& d : collectObjDependencies(obj, fs::path(datasetRoot)))
+        deps.push_back(d.name);
     return deps;
 }
 
 std::vector<std::string> getGltfDependencies(const std::string& gltf) {
-    if (!fs::exists(gltf))
-        throw FSException(gltf + " does not exist");
-
-    fs::path p(gltf);
-    fs::path parentPath = p.parent_path();
-
-    // Determine if GLTF (text JSON) or GLB (binary)
-    std::string ext = p.extension().string();
-    utils::toLower(ext);
-
-    json gltfJson;
-
+    const json gltfJson = readGltfDocument(gltf);
     try {
-        if (ext == ".gltf") {
-            // Read as text JSON file
-            std::ifstream file(gltf);
-            if (!file.is_open())
-                throw FSException("Cannot open GLTF file: " + gltf);
-
-            try {
-                file >> gltfJson;
-            } catch (const json::exception& e) {
-                throw AppException("Invalid GLTF file: JSON parse error: " + std::string(e.what()));
-            }
-        } else if (ext == ".glb") {
-            // Read binary GLB and extract JSON chunk
-            gltfJson = readGlbJson(gltf);
-        } else {
-            throw AppException("File is not a GLTF or GLB: " + gltf);
-        }
-
-        // Validate basic GLTF structure
-        if (!gltfJson.contains("asset")) {
-            throw AppException("Invalid GLTF file: missing 'asset' property");
-        }
-
-        // Parse and extract dependencies
-        return parseGltfJson(gltfJson, parentPath);
-
+        return parseGltfJson(gltfJson, fs::path(gltf).parent_path());
     } catch (const AppException&) {
         throw;  // Re-throw our exceptions
     } catch (const std::exception& e) {

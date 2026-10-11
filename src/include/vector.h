@@ -28,9 +28,11 @@ namespace ddb
      * Multi-layer sources (GPKG, KMZ) preserve all layers in BOTH outputs.
      * Source SRS is reprojected to EPSG:4326 (GPKG) / EPSG:3857 (MVT).
      *
-     * @throws BuildDepMissingException If sidecar files are missing or
-     *                                  the GDAL build lacks the MVT driver.
-     * @throws AppException             On unrecoverable conversion errors.
+     * @throws BuildDepMissingException If sidecar files are missing (names are
+     *                                  relative to the input's folder).
+     * @throws AppException             On unrecoverable conversion errors,
+     *                                  including a GDAL build without the
+     *                                  MVT driver.
      */
     DDB_DLL void buildVector(const std::string &input,
                              const std::string &baseOutputPath,

@@ -477,6 +477,200 @@ namespace
 
     // ---------- C API ----------
 
+    // ---------- Orphan temp folders inside a still-referenced hash dir ----------
+
+    // Creates <hashDir>/<name>/<file> and returns <hashDir>/<name>.
+    fs::path makeSubfolder(const fs::path &hashDir, const std::string &name)
+    {
+        const fs::path d = hashDir / name;
+        fs::create_directories(d);
+        std::ofstream(d / "tileset.json") << "{}";
+        return d;
+    }
+
+    bool wasRemoved(const CleanupResult &r, const fs::path &p)
+    {
+        return std::find(r.removedBuilds.begin(), r.removedBuilds.end(), p.string()) !=
+               r.removedBuilds.end();
+    }
+
+    // Generic "<sub>-temp-*" handling is unchanged: removed without a live lock,
+    // kept under one.
+    TEST(cleanupBuild, GenericTempFolderFollowsItsOwnLock)
+    {
+        TestArea ta(TEST_NAME, true);
+        std::unique_ptr<Database> db;
+        std::vector<std::string> hashes;
+        setupIndexedDb(ta, db, hashes);
+        const fs::path hashDir = makeFakeBuildDir(db->buildDirectory(), hashes[0]);
+
+        const fs::path cogTemp = makeSubfolder(hashDir, "cog-temp-abc123");
+        {
+            ddb::BuildLock live((hashDir / "cog").string());
+            const auto r = ddb::cleanupBuild(db.get(), "");
+            EXPECT_TRUE(fs::exists(cogTemp));
+            EXPECT_FALSE(wasRemoved(r, cogTemp));
+        }
+
+        const auto r = ddb::cleanupBuild(db.get(), "");
+        EXPECT_FALSE(fs::exists(cogTemp));
+        EXPECT_TRUE(wasRemoved(r, cogTemp));
+        EXPECT_TRUE(fs::exists(hashDir / "cog" / "cog.tif"));
+    }
+
+    // A Model build holds "nxs.building" while buildModel3DTiles writes
+    // "3dtiles-temp-*" under its own "3dtiles" lock: only that lock protects them.
+    TEST(cleanupBuild, TilesTempAndOldKeptUnderLiveTilesLock)
+    {
+        TestArea ta(TEST_NAME, true);
+        std::unique_ptr<Database> db;
+        std::vector<std::string> hashes;
+        setupIndexedDb(ta, db, hashes);
+        const fs::path hashDir = makeFakeBuildDir(db->buildDirectory(), hashes[0]);
+
+        const fs::path tiles = makeSubfolder(hashDir, "3dtiles");
+        const fs::path tilesTemp = makeSubfolder(hashDir, "3dtiles-temp-0123456789abcdef");
+        const fs::path tilesOld = makeSubfolder(hashDir, "3dtiles-old");
+
+        ddb::BuildLock live(tiles.string());
+        const auto r = ddb::cleanupBuild(db.get(), "");
+        EXPECT_TRUE(r.removedBuilds.empty());
+        EXPECT_TRUE(fs::exists(tilesTemp));
+        EXPECT_TRUE(fs::exists(tilesOld));
+        EXPECT_TRUE(fs::exists(tiles));
+        EXPECT_TRUE(fs::exists(tiles.string() + ".building"));
+    }
+
+    // A live "nxs" lock (a Model build) does not protect the tiles siblings either
+    // way: with the "3dtiles" lock absent they are removed.
+    TEST(cleanupBuild, TilesTempAndOldRemovedWithoutTilesLock)
+    {
+        TestArea ta(TEST_NAME, true);
+        std::unique_ptr<Database> db;
+        std::vector<std::string> hashes;
+        setupIndexedDb(ta, db, hashes);
+        const fs::path hashDir = makeFakeBuildDir(db->buildDirectory(), hashes[0]);
+
+        const fs::path tiles = makeSubfolder(hashDir, "3dtiles");
+        const fs::path tilesTemp = makeSubfolder(hashDir, "3dtiles-temp-0123456789abcdef");
+        const fs::path tilesOld = makeSubfolder(hashDir, "3dtiles-old");
+        ddb::BuildLock nxsLive((hashDir / "nxs").string());
+
+        const auto r = ddb::cleanupBuild(db.get(), "");
+        EXPECT_FALSE(fs::exists(tilesTemp));
+        EXPECT_FALSE(fs::exists(tilesOld));
+        EXPECT_TRUE(wasRemoved(r, tilesTemp));
+        EXPECT_TRUE(wasRemoved(r, tilesOld));
+        EXPECT_TRUE(fs::exists(tiles / "tileset.json"));
+        // The lock taken by cleanup while deleting is released.
+        EXPECT_FALSE(fs::exists(tiles.string() + ".building"));
+    }
+
+    TEST(cleanupBuild, TilesTempAndOldRemovedWithStaleTilesLock)
+    {
+        TestArea ta(TEST_NAME, true);
+        std::unique_ptr<Database> db;
+        std::vector<std::string> hashes;
+        setupIndexedDb(ta, db, hashes);
+        const fs::path hashDir = makeFakeBuildDir(db->buildDirectory(), hashes[0]);
+
+        const fs::path tiles = makeSubfolder(hashDir, "3dtiles");
+        const fs::path tilesTemp = makeSubfolder(hashDir, "3dtiles-temp-0123456789abcdef");
+        const fs::path tilesOld = makeSubfolder(hashDir, "3dtiles-old");
+        // Leftover of a crashed holder: the file exists, no process holds the lock.
+        writeLockFile(hashDir / "3dtiles.building", 2147483646L);
+
+        const auto r = ddb::cleanupBuild(db.get(), "");
+        EXPECT_FALSE(fs::exists(tilesTemp));
+        EXPECT_FALSE(fs::exists(tilesOld));
+        EXPECT_TRUE(wasRemoved(r, tilesTemp));
+        EXPECT_TRUE(wasRemoved(r, tilesOld));
+        EXPECT_TRUE(fs::exists(tiles / "tileset.json"));
+    }
+
+    // "3dtiles-old" without "3dtiles/" is the only copy of the previous tileset
+    // (an interrupted swap that the next tiles build restores): keep it.
+    TEST(cleanupBuild, TilesOldKeptWhileTilesMissing)
+    {
+        TestArea ta(TEST_NAME, true);
+        std::unique_ptr<Database> db;
+        std::vector<std::string> hashes;
+        setupIndexedDb(ta, db, hashes);
+        const fs::path hashDir = makeFakeBuildDir(db->buildDirectory(), hashes[0]);
+
+        const fs::path tilesTemp = makeSubfolder(hashDir, "3dtiles-temp-0123456789abcdef");
+        const fs::path tilesOld = makeSubfolder(hashDir, "3dtiles-old");
+
+        const auto r = ddb::cleanupBuild(db.get(), "");
+        EXPECT_TRUE(fs::exists(tilesOld / "tileset.json"));
+        EXPECT_FALSE(wasRemoved(r, tilesOld));
+        EXPECT_FALSE(fs::exists(tilesTemp));
+        EXPECT_TRUE(wasRemoved(r, tilesTemp));
+    }
+
+    std::vector<fs::path> listTilesTrash(const fs::path &hashDir)
+    {
+        std::vector<fs::path> out;
+        for (const auto &e : fs::directory_iterator(hashDir))
+            if (e.is_directory() && e.path().filename().string().rfind("3dtiles-temp-trash-", 0) == 0)
+                out.push_back(e.path());
+        return out;
+    }
+
+    // A3.5 race: the "3dtiles" lock is held only while the leftovers are renamed
+    // aside ("3dtiles-temp-trash-<rand>"); the deletion happens after its release.
+    // Trash left by an earlier cleanup is deleted even under a live tiles lock.
+    TEST(cleanupBuild, TilesLeftoversDeletedOutsideTheTilesLock)
+    {
+        TestArea ta(TEST_NAME, true);
+        std::unique_ptr<Database> db;
+        std::vector<std::string> hashes;
+        setupIndexedDb(ta, db, hashes);
+        const fs::path hashDir = makeFakeBuildDir(db->buildDirectory(), hashes[0]);
+        const fs::path tiles = makeSubfolder(hashDir, "3dtiles");
+
+        {
+            const fs::path trash = makeSubfolder(hashDir, "3dtiles-temp-trash-0123456789abcdef");
+            const fs::path tilesTemp = makeSubfolder(hashDir, "3dtiles-temp-0123456789abcdef");
+            ddb::BuildLock live(tiles.string());
+            const auto r = ddb::cleanupBuild(db.get(), "");
+            EXPECT_FALSE(fs::exists(trash));
+            EXPECT_TRUE(wasRemoved(r, trash));
+            EXPECT_TRUE(fs::exists(tilesTemp)); // protected by the live lock
+            EXPECT_FALSE(wasRemoved(r, tilesTemp));
+        }
+
+#ifndef _WIN32
+        if (::geteuid() == 0)
+            GTEST_SKIP() << "permission-based delete failure cannot be simulated as root";
+
+        // A leftover whose deletion fails: it is renamed aside under the lock, the
+        // lock is released, and the next cleanup deletes the trash folder.
+        const fs::path tilesTemp = hashDir / "3dtiles-temp-0123456789abcdef";
+        const fs::path stuck = tilesTemp / "stuck";
+        fs::create_directories(stuck);
+        std::ofstream(stuck / "f.bin") << "x";
+        fs::permissions(stuck, fs::perms::owner_read | fs::perms::owner_exec, fs::perm_options::replace);
+
+        const auto r1 = ddb::cleanupBuild(db.get(), "");
+        EXPECT_FALSE(fs::exists(tilesTemp));
+        EXPECT_FALSE(wasRemoved(r1, tilesTemp));
+        const auto trash = listTilesTrash(hashDir);
+        ASSERT_EQ(trash.size(), 1u);
+        EXPECT_TRUE(fs::exists(trash[0] / "stuck" / "f.bin"));
+        // The lock is not held after the cleanup: a tiles build can start.
+        EXPECT_FALSE(fs::exists(tiles.string() + ".building"));
+        EXPECT_NO_THROW({ ddb::BuildLock probe(tiles.string(), false); });
+        EXPECT_TRUE(fs::exists(tiles / "tileset.json"));
+
+        fs::permissions(trash[0] / "stuck", fs::perms::owner_all, fs::perm_options::replace);
+        const auto r2 = ddb::cleanupBuild(db.get(), "");
+        EXPECT_FALSE(fs::exists(trash[0]));
+        EXPECT_TRUE(wasRemoved(r2, trash[0]));
+        EXPECT_TRUE(listTilesTrash(hashDir).empty());
+#endif
+    }
+
     TEST(DDBCleanup, ReturnsJsonObjectWithBothLists)
     {
         TestArea ta(TEST_NAME, true);

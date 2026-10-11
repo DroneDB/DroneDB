@@ -51,8 +51,22 @@ namespace ddb
         // Runs the Obj2Tiles binary to convert a single OBJ into an OGC 3D Tiles
         // tileset (tileset.json + LOD-*/*.b3dm) under outDir. Returns true on success
         // (binary exited with code 0 and outDir/tileset.json exists). On failure
-        // returns false and leaves a message in errorOut. The binary path is resolved
-        // via findObj2TilesBinary() unless a non-empty path is provided.
+        // returns false and leaves a message in errorOut (exit code or signal number
+        // plus the tail of the output). The binary path is resolved via
+        // findObj2TilesBinary() unless a non-empty path is provided.
+        //
+        // The child is launched through process::run (stdin from the null device,
+        // no inherited descriptors, idle timeout, orphan protection). Its output is
+        // logged at debug level; on failure the output tail is logged at info, on
+        // success a one-line summary.
+        //
+        // DDB_OBJ2TILES_MAX_CORES (read on every call): a positive decimal integer
+        // caps the cores Obj2Tiles sizes itself for by setting
+        // DOTNET_PROCESSOR_COUNT=<n> in the child's environment only (overriding an
+        // inherited value), clamped to std::thread::hardware_concurrency(). Unset or
+        // empty: no cap, the child inherits the environment unchanged. Invalid values
+        // (0, negative, hex, non-numeric, overflow) are logged as a warning and
+        // treated as unset.
         DDB_DLL bool runObj2Tiles(const fs::path &inputObj,
                                   const fs::path &outDir,
                                   const Obj2TilesOptions &opts,

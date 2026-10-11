@@ -317,8 +317,14 @@ extern "C"
      * @param source source entry path (optional, if not specified: build all)
      * @param dest dest filesystem path (optional, if not specified: default path)
      * @param force rebuild if already existing (default false)
-     * @param pendingOnly build only pending files (default false)
-     * @return DDBERR_NONE on success, an error otherwise */
+     * @param pendingOnly retry only pending (deferred) builds (default false). Each due
+     *        entry (last attempt at least 60 s ago, or force) gets a full build attempt;
+     *        per-entry failures are logged, not returned.
+     * @return DDBERR_NONE on success, DDBERR_BUILDDEPMISSING when a single-entry build is
+     *         deferred because a companion file is missing (a ".pending" marker is
+     *         written), an error otherwise. Missing external tools and dependency
+     *         references that can never be satisfied (absolute, or outside the dataset)
+     *         are errors, not deferrals. */
     DDB_DLL DDBErr DDBBuild(const char *ddbPath, const char *source = nullptr, const char *dest = nullptr, bool force = false, bool pendingOnly = false);
 
     /** Cleanup a dataset:
@@ -348,8 +354,8 @@ extern "C"
     DDB_DLL DDBErr DDBIsBuildPending(const char *ddbPath, bool *isBuildPending);
 
     /** Get information about pending (deferred) builds, i.e. builds skipped
-     *  because one or more dependencies (companion files or external tools)
-     *  were missing at the time of the attempt. This is a read-only view: it
+     *  because one or more companion files were missing at the time of the
+     *  attempt (names are dataset-root-relative paths). This is a read-only view: it
      *  does not consume ".pending" marker files or trigger any build.
      * @param ddbPath path to the source DroneDB database (parent of ".ddb")
      * @param output pointer to C-string where to store result (JSON array).

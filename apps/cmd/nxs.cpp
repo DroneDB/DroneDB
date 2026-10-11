@@ -27,7 +27,7 @@ namespace cmd
 
     std::string Nxs::description()
     {
-        return "Generate nexus (NXS/NXZ) files from OBJs.";
+        return "Generate nexus (NXS/NXZ) files from 3D models (OBJ/GLTF/GLB/PLY).";
     }
 
     void Nxs::run(cxxopts::ParseResult &opts)
