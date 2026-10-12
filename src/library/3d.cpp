@@ -703,7 +703,7 @@ PreparedModel prepareModelInput(const std::string& input, ModelConsumer consumer
         opts.withTexture = true;
         opts.datasetRoot = datasetRoot;
         const PlyToObjResult res =
-            convertPlyToObj(input, (tempDir / inputPath.stem()).string(), opts);
+            convertPlyToObj(input, (tempDir / "model").string(), opts);
         LOGD << "PLY converted to " << res.objPath << " (" << res.info.faceCount << " faces"
              << (res.mtlPath.empty() ? "" : ", textured") << ")";
 

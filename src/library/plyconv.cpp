@@ -52,11 +52,13 @@ namespace ddb
             char buf[64];
 #if defined(__cpp_lib_to_chars) && __cpp_lib_to_chars >= 201611L
             const auto r = std::to_chars(buf, buf + sizeof(buf), v, std::chars_format::general, precision);
+            if (r.ec != std::errc())
+                throw AppException("Cannot format an OBJ numeric value");
             out.append(buf, r.ptr);
 #else
             const int n = std::snprintf(buf, sizeof(buf), "%.*g", precision, v);
-            if (n <= 0)
-                return;
+            if (n <= 0 || static_cast<size_t>(n) >= sizeof(buf))
+                throw AppException("Cannot format an OBJ numeric value");
             // %g never groups thousands; only the decimal separator can be localised.
             const char *dp = std::localeconv()->decimal_point;
             const char sep = (dp != nullptr && dp[0] != '\0') ? dp[0] : '.';
@@ -71,6 +73,8 @@ namespace ddb
         {
             char buf[24];
             const auto r = std::to_chars(buf, buf + sizeof(buf), v);
+            if (r.ec != std::errc())
+                throw AppException("Cannot format an OBJ index");
             out.append(buf, r.ptr);
         }
 
@@ -372,13 +376,21 @@ namespace ddb
 
         // File name used for the copied texture next to the OBJ: the basename with
         // whitespace replaced (OBJ/MTL readers split `map_Kd` on whitespace).
-        std::string sanitizedTextureName(const fs::path &texture)
+        std::string sanitizedFilename(const fs::path &path)
         {
-            std::string n = texture.filename().string();
+            std::string n = path.filename().string();
             for (auto &c : n)
-                if (c == ' ' || c == '\t')
+                if (std::isspace(static_cast<unsigned char>(c)))
                     c = '_';
             return n;
+        }
+
+        bool sameFile(const fs::path &a, const fs::path &b)
+        {
+            if (fs::absolute(a).lexically_normal() == fs::absolute(b).lexically_normal())
+                return true;
+            std::error_code ec;
+            return fs::equivalent(a, b, ec) && !ec;
         }
 
         // ------------------------------------------------------------------
@@ -664,7 +676,20 @@ namespace ddb
 
                     const double x = vals[plan.px], y = vals[plan.py], z = vals[plan.pz];
                     if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z))
-                        throw AppException(ctx(ply) + "vertex " + std::to_string(i) + " has a non-finite coordinate");
+                        throw AppException(ctx(ply) + "vertex " + std::to_string(i) +
+                                           " has a non-finite coordinate (properties x/y/z)");
+
+                    const auto finiteGroup = [&](const char *group, std::initializer_list<int> properties) {
+                        for (const int pi : properties)
+                            if (!std::isfinite(vals[pi]))
+                                throw AppException(ctx(ply) + "vertex " + std::to_string(i) +
+                                                   " has a non-finite " + group + " (property '" +
+                                                   e.properties[pi].name + "')");
+                    };
+                    if (plan.hasColors())
+                        finiteGroup("color", {plan.cr, plan.cg, plan.cb});
+                    if (plan.perVertexTexcoords())
+                        finiteGroup("texcoord", {plan.ts, plan.tt});
 
                     minX = std::min(minX, x);
                     maxX = std::max(maxX, x);
@@ -762,16 +787,23 @@ namespace ddb
                     }
 
                     const size_t n = corners.size();
-                    if (perFaceTc && tc.size() != 2 * n)
-                        throw AppException(ctx(ply) + "face " + std::to_string(i) + " has " +
-                                           std::to_string(tc.size()) + " texcoord values, expected " +
-                                           std::to_string(2 * n) + " (2 per corner)");
-
                     if (n < 3)
                     {
                         ++degenerate;
                         continue;
                     }
+
+                    if (perFaceTc && tc.size() != 2 * n)
+                        throw AppException(ctx(ply) + "face " + std::to_string(i) + " has " +
+                                           std::to_string(tc.size()) + " texcoord values, expected " +
+                                           std::to_string(2 * n) + " (2 per corner)");
+                    if (perFaceTc)
+                        for (size_t c = 0; c < tc.size(); ++c)
+                            if (!std::isfinite(tc[c]))
+                                throw AppException(ctx(ply) + "face " + std::to_string(i) +
+                                                   " has a non-finite texcoord (property '" +
+                                                   e.properties[plan.faceTexcoord].name +
+                                                   "', value " + std::to_string(c) + ")");
 
                     std::string &b = obj.buffer();
                     // Per-face texcoords: one vt per corner, in face order, right before the f lines.
@@ -880,13 +912,15 @@ namespace ddb
 
         PlyToObjResult res;
         const fs::path objPath = objPathFor(outputBase);
+        if (!texture.empty() && sameFile(objPath, texture))
+            throw AppException(ctx(ply) + "OBJ output would overwrite the source texture: " + objPath.string());
         const fs::path outDir = objPath.parent_path();
         if (!outDir.empty())
         {
             std::error_code ec;
             fs::create_directories(outDir, ec);
             if (ec)
-                throw FSException("Cannot create " + outDir.string() + ": " + ec.message());
+                throw FSException("Cannot create " + outDir.string() + ": " + ec.message(), ec);
         }
 
         OutputGuard guard;
@@ -895,9 +929,18 @@ namespace ddb
         std::string mtlName;
         if (!texture.empty())
         {
-            const fs::path mtlPath = fs::path(objPath).replace_extension(".mtl");
-            const std::string texName = sanitizedTextureName(texture);
-            const fs::path texDst = outDir / texName;
+            fs::path mtlPath = outDir / sanitizedFilename(fs::path(objPath).replace_extension(".mtl"));
+            // A source texture may have any extension. Choose a distinct material
+            // filename before opening it, including when outputs share its folder.
+            while (sameFile(mtlPath, texture) || sameFile(mtlPath, objPath))
+                mtlPath = outDir / (mtlPath.stem().string() + "_material.mtl");
+            std::string texName = sanitizedFilename(texture);
+            fs::path texDst = outDir / texName;
+            while (sameFile(texDst, objPath) || sameFile(texDst, mtlPath))
+            {
+                texName = "texture_" + texName;
+                texDst = outDir / texName;
+            }
 
             guard.add(mtlPath);
             {
@@ -909,14 +952,14 @@ namespace ddb
             }
 
             std::error_code ec;
-            const bool same = fs::exists(texDst) && fs::equivalent(texture, texDst, ec);
+            const bool same = sameFile(texture, texDst);
             if (!same)
             {
                 guard.add(texDst);
                 fs::copy_file(texture, texDst, fs::copy_options::overwrite_existing, ec);
                 if (ec)
                     throw FSException("Cannot copy texture " + texture.string() + " to " + texDst.string() + ": " +
-                                      ec.message());
+                                      ec.message(), ec);
             }
 
             mtlName = mtlPath.filename().string();

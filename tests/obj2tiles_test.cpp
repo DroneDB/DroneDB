@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdint>
 #include <fstream>
+#include <iterator>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -14,6 +15,7 @@
 #include "3d.h"
 #include "exceptions.h"
 #include "fs.h"
+#include "helpers/process_test_utils.h"
 #include "gtest/gtest.h"
 #include "json.h"
 #include "mio.h"
@@ -80,6 +82,27 @@ TEST(obj2tiles, runReturnsFalseWhenBinaryMissing) {
     const bool ok = ddb::obj2tiles::runObj2Tiles("model.obj", out, opts, err);
     EXPECT_FALSE(ok);
     EXPECT_NE(err.find("not found"), std::string::npos);
+}
+
+TEST(obj2tiles, seededOutputRejectedBeforeToolRuns) {
+    TestArea ta(TEST_NAME, true);
+    const fs::path output = ta.getFolder("out");
+    writeSidecar(output / "tileset.json", "old tileset");
+    writeSidecar(output / "keep.bin", "old artifact");
+    obj2tiles::Obj2TilesOptions opts;
+    std::string error;
+    // A bogus executable/input proves validation precedes any tool launch.
+    EXPECT_FALSE(obj2tiles::runObj2Tiles("missing.obj", output, opts, error, kBogusBinary));
+    EXPECT_NE(error.find("must be absent or empty"), std::string::npos) << error;
+    const auto content = [](const fs::path& path) {
+        std::ifstream in(path, std::ios::binary);
+        return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    };
+    EXPECT_EQ(content(output / "tileset.json"), "old tileset");
+    EXPECT_EQ(content(output / "keep.bin"), "old artifact");
+    EXPECT_EQ(fs::file_size(output / "tileset.json"), 11u);
+    EXPECT_EQ(fs::file_size(output / "keep.bin"), 12u);
+    EXPECT_EQ(std::distance(fs::directory_iterator(output), fs::directory_iterator()), 2);
 }
 
 // buildModel3DTiles must surface the missing binary as a typed Obj2TilesException
@@ -444,6 +467,21 @@ struct EnvVarGuard {
             DDB_UNSETENV(name.c_str());
     }
 };
+
+TEST(obj2tiles, emptyDestinationCannotReportOldSuccessFromNoOutputTool) {
+    TestArea ta(TEST_NAME, true);
+    EnvVarGuard guard("DDB_TEST_CHILD_MODE");
+    DDB_SETENV("DDB_TEST_CHILD_MODE", "no-output");
+    ASSERT_TRUE(fs::is_regular_file(testChildPath())) << testChildPath();
+    const fs::path obj = ta.getPath("model.obj");
+    writeSidecar(obj, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
+    obj2tiles::Obj2TilesOptions opts;
+    std::string error;
+    const fs::path output = ta.getFolder("out");
+    EXPECT_FALSE(obj2tiles::runObj2Tiles(obj, output, opts, error, testChildPath()));
+    EXPECT_NE(error.find("tileset.json is missing"), std::string::npos) << error;
+    EXPECT_TRUE(fs::is_empty(output));
+}
 
 // Writes a fake Obj2Tiles that records its environment in <out>/env.txt and
 // writes a tileset.json (argv: input output ...).

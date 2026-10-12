@@ -407,7 +407,7 @@ TEST(tiles3dBuild, plyIsConvertedToObjForTiles) {
     SKIP_WITHOUT_POSIX_SHELL();
     Obj2TilesEnvReset reset;
     TestArea ta(TEST_NAME);
-    const fs::path ply = ta.getPath("mesh.ply");
+    const fs::path ply = ta.getPath("mesh  with  spaces.ply");
     writeText(ply, gridPly(6));
     const fs::path out = ta.getPath("3dtiles");
 
@@ -417,6 +417,7 @@ TEST(tiles3dBuild, plyIsConvertedToObjForTiles) {
     const auto args = readLines(out / "args.txt");
     ASSERT_GE(args.size(), 2u);
     EXPECT_EQ(fs::path(args[0]).extension(), ".obj");
+    EXPECT_EQ(fs::path(args[0]).filename(), "model.obj");
     EXPECT_NE(fs::path(args[0]).parent_path(), ply.parent_path()) << "converted in a temp folder";
     EXPECT_FALSE(fs::exists(args[0])) << "the conversion temp folder is removed";
 

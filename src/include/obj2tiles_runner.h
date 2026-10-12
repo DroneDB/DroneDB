@@ -48,25 +48,30 @@ namespace ddb
         // for the lifetime of the process; pass forceRefresh=true to bypass the cache.
         DDB_DLL fs::path findObj2TilesBinary(bool forceRefresh = false);
 
-        // Runs the Obj2Tiles binary to convert a single OBJ into an OGC 3D Tiles
-        // tileset (tileset.json + LOD-*/*.b3dm) under outDir. Returns true on success
-        // (binary exited with code 0 and outDir/tileset.json exists). On failure
-        // returns false and leaves a message in errorOut (exit code or signal number
-        // plus the tail of the output). The binary path is resolved via
-        // findObj2TilesBinary() unless a non-empty path is provided.
-        //
-        // The child is launched through process::run (stdin from the null device,
-        // no inherited descriptors, idle timeout, orphan protection). Its output is
-        // logged at debug level; on failure the output tail is logged at info, on
-        // success a one-line summary.
-        //
-        // DDB_OBJ2TILES_MAX_CORES (read on every call): a positive decimal integer
-        // caps the cores Obj2Tiles sizes itself for by setting
-        // DOTNET_PROCESSOR_COUNT=<n> in the child's environment only (overriding an
-        // inherited value), clamped to std::thread::hardware_concurrency(). Unset or
-        // empty: no cap, the child inherits the environment unchanged. Invalid values
-        // (0, negative, hex, non-numeric, overflow) are logged as a warning and
-        // treated as unset.
+        /**
+         * @brief Convert a single OBJ to an OGC 3D Tiles tileset with Obj2Tiles.
+         *
+         * The destination must be absent or an empty directory. A pre-existing
+         * nonempty destination is rejected before launching the tool, with its
+         * files preserved. Intentional rebuilds must use a fresh staging directory
+         * (buildModel3DTiles provides staging and publication of a replacement).
+         *
+         * The child uses process::run supervision (null stdin, isolated descriptors,
+         * idle timeout and orphan protection). Output is logged at debug level;
+         * failures include the exit/signal diagnostic and output tail.
+         * DDB_OBJ2TILES_MAX_CORES is read on each call: a positive decimal integer
+         * sets DOTNET_PROCESSOR_COUNT in the child only, capped to known hardware
+         * concurrency. Empty/unset inherits the environment; invalid values are
+         * logged and ignored.
+         *
+         * @param inputObj Source OBJ file.
+         * @param outDir Absent or empty destination for tileset.json and LOD-* tiles.
+         * @param opts Options forwarded to the tool.
+         * @param errorOut Actionable failure diagnostic; cleared on entry.
+         * @param binary Explicit executable, or empty to use findObj2TilesBinary().
+         * @return true when the child exits successfully and produces tileset.json;
+         *         false on invalid destination, missing tool/input or tool failure.
+         */
         DDB_DLL bool runObj2Tiles(const fs::path &inputObj,
                                   const fs::path &outDir,
                                   const Obj2TilesOptions &opts,

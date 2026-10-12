@@ -270,6 +270,27 @@ namespace ddb
         {
             errorOut.clear();
 
+            // Public calls require a fresh destination. Otherwise a successful
+            // no-output tool could make an old tileset look like new output.
+            std::error_code ec;
+            const bool outputExists = fs::exists(outDir, ec);
+            if (ec)
+            {
+                errorOut = "could not inspect output directory '" + outDir.string() + "': " + ec.message();
+                return false;
+            }
+            if (outputExists)
+            {
+                const bool directory = fs::is_directory(outDir, ec);
+                const bool empty = directory && !ec && fs::is_empty(outDir, ec);
+                if (ec || !empty)
+                {
+                    errorOut = "Obj2Tiles output directory must be absent or empty: '" + outDir.string() +
+                               "'. Use a fresh staging directory" + (ec ? ": " + ec.message() : ".");
+                    return false;
+                }
+            }
+
             fs::path bin = binary.empty() ? findObj2TilesBinary() : binary;
             if (bin.empty() || !isExecutableFile(bin))
             {
@@ -277,7 +298,6 @@ namespace ddb
                 return false;
             }
 
-            std::error_code ec;
             if (!fs::exists(inputObj, ec))
             {
                 errorOut = "input OBJ does not exist: " + inputObj.string();
@@ -341,10 +361,10 @@ namespace ddb
             }
 
             const fs::path tilesetPath = outDir / "tileset.json";
-            if (!fs::exists(tilesetPath, ec))
+            if (!fs::is_regular_file(tilesetPath, ec) || ec || fs::file_size(tilesetPath, ec) == 0 || ec)
             {
                 std::ostringstream oss;
-                oss << "Obj2Tiles reported success but tileset.json is missing: " << tilesetPath.string();
+                oss << "Obj2Tiles reported success but tileset.json is missing or empty: " << tilesetPath.string();
                 if (!res.outputTail.empty()) oss << ": " << res.tail(kErrorTailLength);
                 errorOut = oss.str();
 

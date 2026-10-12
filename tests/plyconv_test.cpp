@@ -7,10 +7,12 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
+#include <limits>
 #include <map>
 #include <sstream>
 #include <string>
@@ -27,6 +29,7 @@
 #include "exceptions.h"
 #include "fs.h"
 #include "gtest/gtest.h"
+#include "json.h"
 #include "obj2tiles_runner.h"
 #include "ply.h"
 #include "plyconv.h"
@@ -839,6 +842,96 @@ TEST(plyconv, perFaceTexcoordWrongCount) {
     expectConvertError(ply, ta.getPath("bad_ft"), "face 1 has 6 texcoord values, expected 8");
 }
 
+TEST(plyconv, emittedAttributesMustBeFinite) {
+    TestArea ta(TEST_NAME, true);
+    std::ofstream(ta.getPath("source.jpg"), std::ios::binary) << "source texture bytes";
+    const std::vector<double> invalid = {std::numeric_limits<double>::quiet_NaN(),
+                                        std::numeric_limits<double>::infinity(),
+                                        -std::numeric_limits<double>::infinity()};
+    for (const std::string format : {"ascii", "binary_little_endian", "binary_big_endian"})
+        for (const std::string group : {"position", "color", "vertex-uv", "face-uv"})
+            for (size_t channel = 0; channel < (group == "vertex-uv" ? 2u : group == "face-uv" ? 6u : 3u); ++channel)
+                for (size_t bad = 0; bad < invalid.size(); ++bad) {
+                    SCOPED_TRACE(format + " " + group + " " + std::to_string(channel) + " " + std::to_string(bad));
+                    PlySpec s;
+                    s.format = format;
+                    s.comments = {"TextureFile source.jpg"};
+                    Elem vertices = vertexElem(kSquare);
+                    Elem faces = faceElem(kSquareTris);
+                    std::string needle;
+                    if (group == "position") {
+                        vertices.rows[1][channel][0] = invalid[bad];
+                        needle = "vertex 1 has a non-finite coordinate";
+                    } else if (group == "color") {
+                        for (const std::string property : {"red", "green", "blue"}) {
+                            vertices.props.push_back({"float", property, ""});
+                            for (auto& row : vertices.rows) row.push_back({0.25});
+                        }
+                        vertices.rows[1][3 + channel][0] = invalid[bad];
+                        needle = "vertex 1 has a non-finite color (property '" + vertices.props[3 + channel].name + "')";
+                    } else if (group == "vertex-uv") {
+                        for (const std::string property : {"s", "t"}) {
+                            vertices.props.push_back({"float", property, ""});
+                            for (auto& row : vertices.rows) row.push_back({0.25});
+                        }
+                        vertices.rows[1][3 + channel][0] = invalid[bad];
+                        needle = "vertex 1 has a non-finite texcoord (property '" + vertices.props[3 + channel].name + "')";
+                    } else {
+                        faces.props.push_back({"float", "texcoord", "uchar"});
+                        for (auto& row : faces.rows) row.push_back({0, 0, 1, 0, 1, 1});
+                        faces.rows[1][1][channel] = invalid[bad];
+                        needle = "face 1 has a non-finite texcoord (property 'texcoord'";
+                    }
+                    s.elements = {vertices, faces};
+                    const fs::path ply = ta.getPath("input.ply");
+                    const fs::path out = ta.getPath("out/model");
+                    writePly(ply, s);
+                    expectConvertError(ply, out, needle);
+                    EXPECT_FALSE(fs::exists(ta.getPath("out/source.jpg")));
+                    EXPECT_EQ(readAll(ta.getPath("source.jpg")), "source texture bytes");
+                }
+}
+
+TEST(plyconv, finiteUvAndColorRangesArePreserved) {
+    TestArea ta(TEST_NAME, true);
+    for (const std::string format : {"ascii", "binary_little_endian", "binary_big_endian"}) {
+        PlySpec s;
+        s.format = format;
+        Elem vertices = vertexElem(kSquare);
+        for (const std::string property : {"red", "green", "blue", "s", "t"}) {
+            vertices.props.push_back({"double", property, ""});
+            for (auto& row : vertices.rows) row.push_back({property == "green" || property == "t" ? 2.5 : -1.25});
+        }
+        s.elements = {vertices, faceElem(kSquareTris)};
+        writePly(ta.getPath("input.ply"), s);
+        const auto res = convertPlyToObj(ta.getPath("input.ply").string(), ta.getPath("model").string());
+        EXPECT_EQ(objLines(res.objPath, "vt "), (std::vector<std::string>(4, "vt -1.25 2.5")));
+        EXPECT_EQ(objLines(res.objPath, "v ")[0], "v 0 0 0 -1.25 2.5 -1.25");
+    }
+}
+
+TEST(plyconv, degenerateFaceConsumesRecordBeforeSkippingUvCheck) {
+    TestArea ta(TEST_NAME, true);
+    for (const std::string format : {"ascii", "binary_little_endian", "binary_big_endian"}) {
+        PlySpec s;
+        s.format = format;
+        Elem faces{"face", {{"int", "vertex_indices", "uchar"}, {"float", "texcoord", "uchar"},
+                             {"int", "ignored", ""}}, {}};
+        faces.rows = {{{0, 1}, {}, {17}}, {{0, 1, 2}, {0, 0, 1, 0, 1, 1}, {29}}};
+        s.elements = {vertexElem(kSquare), faces};
+        writePly(ta.getPath("input.ply"), s);
+        const auto res = convertPlyToObj(ta.getPath("input.ply").string(), ta.getPath("model").string());
+        EXPECT_EQ(res.info.faceCount, 1u);
+        EXPECT_EQ(res.texcoordCount, 3u);
+        EXPECT_EQ(objLines(res.objPath, "f "), (std::vector<std::string>{"f 1/1 2/2 3/3"}));
+        // A retained face still requires the exact UV length.
+        faces.rows[1][1] = {};
+        s.elements[1] = faces;
+        writePly(ta.getPath("bad.ply"), s);
+        expectConvertError(ta.getPath("bad.ply"), ta.getPath("bad"), "face 1 has 0 texcoord values, expected 6");
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Unsupported / malformed input
 // ---------------------------------------------------------------------------
@@ -966,9 +1059,9 @@ TEST(plyconv, textureWritten) {
     opts.datasetRoot = ta.getPath("ds").string();
     const auto r = convertPlyToObj(ply.string(), ta.getPath("out/model").string(), opts);
     ASSERT_FALSE(r.mtlPath.empty());
-    EXPECT_EQ(r.mtlPath, ta.getPath("out/model.mtl").string());
+    EXPECT_EQ(fs::path(r.mtlPath), ta.getPath("out/model.mtl"));
     EXPECT_TRUE(fs::exists(ta.getPath("out/tex.jpg")));
-    EXPECT_EQ(r.texturePath, ta.getPath("out/tex.jpg").string());
+    EXPECT_EQ(fs::path(r.texturePath), ta.getPath("out/tex.jpg"));
     EXPECT_EQ(fs::file_size(ta.getPath("out/tex.jpg")), fs::file_size(ta.getPath("ds/tex.jpg")));
 
     const auto lines = objLines(r.objPath);
@@ -999,6 +1092,61 @@ TEST(plyconv, textureWritten) {
     const auto r3 = convertPlyToObj(spaced.string(), ta.getPath("out3/m").string());
     EXPECT_EQ(objLines(r3.mtlPath), (std::vector<std::string>{"newmtl material0", "map_Kd my_tex.jpg"}));
     EXPECT_TRUE(fs::exists(ta.getPath("out3/my_tex.jpg")));
+}
+
+TEST(plyconv, materialFilenameSanitizesWhitespaceAndPreservesObjPath) {
+    TestArea ta(TEST_NAME, true);
+    const fs::path ply = ta.getPath("input.ply");
+    writeF1(ply);
+    std::ofstream(ta.getPath("tex.jpg"), std::ios::binary) << "source texture";
+    std::vector<std::string> names = {"public  model.obj"};
+#ifndef _WIN32
+    names.push_back("public \t\v\f\r\n model.obj");
+#endif
+    for (size_t i = 0; i < names.size(); ++i) {
+        const fs::path output = ta.getFolder("out" + std::to_string(i)) / names[i];
+        const auto result = convertPlyToObj(ply.string(), output.string());
+        EXPECT_EQ(fs::path(result.objPath), output);
+        const std::string material = fs::path(result.mtlPath).filename().string();
+        EXPECT_EQ(std::find_if(material.begin(), material.end(),
+                              [](unsigned char c) { return std::isspace(c); }), material.end());
+        EXPECT_EQ(objLines(result.objPath)[0], "mtllib " + material);
+        for (const auto& dependency : getObjDependencies(result.objPath))
+            EXPECT_TRUE(fs::is_regular_file(output.parent_path() / dependency)) << dependency;
+    }
+    EXPECT_EQ(readAll(ta.getPath("tex.jpg")), "source texture");
+}
+
+TEST(plyconv, generatedOutputsDoNotOverwriteSourceTexture) {
+    TestArea ta(TEST_NAME, true);
+    const fs::path ply = ta.getPath("input.ply");
+    // A source texture may have a material-like name. Material output gets a
+    // separate filename before any output is opened.
+    writeF1(ply, "TextureFile result.mtl");
+    const fs::path source = ta.getPath("result.mtl");
+    std::ofstream(source) << "source texture bytes";
+    const auto result = convertPlyToObj(ply.string(), ta.getPath("result").string());
+    EXPECT_NE(fs::path(result.mtlPath), source);
+    EXPECT_EQ(readAll(source), "source texture bytes");
+    EXPECT_EQ(objLines(result.mtlPath).back(), "map_Kd result.mtl");
+
+    // Copying a nested texture whose basename matches the generated material
+    // must choose a separate copied-texture filename as well.
+    const fs::path nested = ta.getFolder("nested") / "model.mtl";
+    std::ofstream(nested) << "nested source";
+    writeF1(ply, "TextureFile nested/model.mtl");
+    const auto copied = convertPlyToObj(ply.string(), ta.getPath("out/model").string());
+    EXPECT_NE(fs::path(copied.texturePath), fs::path(copied.mtlPath));
+    EXPECT_EQ(readAll(copied.texturePath), "nested source");
+    EXPECT_EQ(readAll(nested), "nested source");
+
+    // Preserving the requested OBJ path is impossible if it names the source
+    // texture itself, so reject the call before opening any outputs.
+    const fs::path objSource = ta.getPath("source.obj");
+    std::ofstream(objSource) << "keep source";
+    writeF1(ply, "TextureFile source.obj");
+    EXPECT_THROW(convertPlyToObj(ply.string(), objSource.string()), AppException);
+    EXPECT_EQ(readAll(objSource), "keep source");
 }
 
 // MeshLab-style multi-texture meshes (several TextureFile comments and/or a
@@ -1368,6 +1516,8 @@ MANUAL_TEST(plyconv, convertBrighton) {
 // ---------------------------------------------------------------------------
 
 void runThroughObj2Tiles(const fs::path& obj, const fs::path& out) {
+    // TestArea persists between runs; intentional reruns use fresh destinations.
+    fs::remove_all(out);
     obj2tiles::Obj2TilesOptions opts;
     opts.lods = 2;
     opts.divisions = 1;
@@ -1402,6 +1552,42 @@ TEST(plyconv, obj2tilesParsesOutput) {
     const auto rn = convertPlyToObj(ta.getPath("ngon.ply").string(), ta.getPath("ngon").string());
     EXPECT_EQ(rn.info.faceCount, 81u * 2u + 4u);
     runThroughObj2Tiles(rn.objPath, ta.getPath("tiles_ngon"));
+}
+
+TEST(plyconv, realObj2TilesParsesTexturedRepeatedSpaceFilename) {
+    if (obj2tiles::findObj2TilesBinary(true).empty())
+        GTEST_SKIP() << "Obj2Tiles binary not available";
+    TestArea ta(TEST_NAME, true);
+    const fs::path ply = ta.getPath("source  mesh.ply");
+    writeF1(ply, "TextureFile my  texture.jpg");
+    ASSERT_TRUE(writeJpeg(ta.getPath("my  texture.jpg")));
+    const auto result = convertPlyToObj(ply.string(), ta.getPath("converted  model.obj").string());
+    EXPECT_EQ(fs::path(result.mtlPath).filename(), "converted__model.mtl");
+    runThroughObj2Tiles(result.objPath, ta.getPath("public_tiles"));
+    // The full tiles builder also converts the original filename privately.
+    const fs::path tiles = ta.getPath("build_tiles");
+    EXPECT_NO_THROW(buildModel3DTiles(ply.string(), tiles.string(), true));
+    EXPECT_TRUE(fs::is_regular_file(tiles / "tileset.json"));
+    for (const fs::path output : {ta.getPath("public_tiles"), tiles}) {
+        std::ifstream input(output / "tileset.json");
+        json tileset;
+        input >> tileset;
+        size_t references = 0;
+        const auto check = [&](const auto& self, const json& node) -> void {
+            if (node.contains("content")) {
+                const auto& content = node["content"];
+                const auto key = content.contains("uri") ? "uri" : "url";
+                ASSERT_TRUE(content.contains(key));
+                EXPECT_TRUE(fs::is_regular_file(output / content[key].get<std::string>()));
+                ++references;
+            }
+            if (node.contains("children"))
+                for (const auto& child : node["children"]) self(self, child);
+        };
+        check(check, tileset.at("root"));
+        EXPECT_GT(references, 0u);
+    }
+    EXPECT_EQ(readAll(ta.getPath("my  texture.jpg")), readAll(result.texturePath));
 }
 
 }  // namespace

@@ -66,17 +66,26 @@ namespace ddb
      *    when both exist. With texture coordinates every `f` corner is `v/vt`.
      * Numbers are written locale-independently with round-trip precision
      * (`%.9g` for float sources, `%.17g` otherwise). Vertices are not de-duplicated.
+     * Every emitted position, colour and texture coordinate must be finite;
+     * finite colours/UVs outside 0..1 are preserved. Degenerate face records are
+     * fully consumed before being skipped, including any unused texcoord list.
      *
      * Multi-texture meshes (several `comment TextureFile` lines or a per-face
      * `texnumber` property) are rejected with AppException when withTexture is set
      * (identifyPly() classifies them as Generic).
      *
      * The texture check (see @ref getPlyTexture) runs on the header before any body
-     * I/O. Partial outputs are removed on failure.
+     * I/O. Partial generated outputs are removed on failure. Material and copied
+     * texture filenames replace whitespace with underscores and are adjusted to
+     * avoid collisions. The OBJ references the actual material filename, and
+     * source textures are preserved; an OBJ output that aliases its source texture
+     * is rejected before any output is opened.
      *
      * @param inputPly Path to the PLY.
-     * @param outputBase Output path without extension (`<outputBase>.obj`, `.mtl`);
-     *                   a trailing `.obj` extension is accepted and kept.
+     * @param outputBase Output path without extension (`<outputBase>.obj`);
+     *                   a trailing `.obj` extension is accepted and kept. The OBJ
+     *                   path is preserved; use result.mtlPath/result.texturePath
+     *                   for the generated dependency filenames.
      * @throws FSException if the PLY cannot be opened or an output cannot be written.
      * @throws BuildDepMissingException if the TextureFile is missing (withTexture).
      * @throws AppException on unsupported or malformed input, or an unsatisfiable
