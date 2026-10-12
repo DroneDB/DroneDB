@@ -98,6 +98,9 @@ namespace ddb
             int exitCode = -1;
             int termSignal = 0;     // POSIX: signal that terminated the child (0 = none)
             bool timedOut = false;  // killed by the idle timeout
+            // Drain grace expired after the direct child exited, so its remaining
+            // descendants were terminated. This does not change child success.
+            bool descendantsTerminated = false;
             std::string errorMessage; // spawn/wait failure description (empty otherwise)
             std::string outputTail;   // last outputCapacity bytes of stdout+stderr
             uint64_t totalBytes = 0;  // total bytes read from stdout+stderr
@@ -108,6 +111,7 @@ namespace ddb
 
             // Human-readable status: "exited with code 3", "killed by signal 9 (Killed)",
             // "killed after 60 s without output", "failed to start: <reason>".
+            // Appends a diagnostic when drain-grace cleanup terminated descendants.
             std::string describe() const;
 
             // Last maxLen bytes of outputTail ("..." prefixed when truncated).

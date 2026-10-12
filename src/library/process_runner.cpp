@@ -503,9 +503,22 @@ namespace ddb
 
                 while (outPipe[0] >= 0 || extraPipe[0] >= 0)
                 {
+                    if (!childExited)
+                    {
+                        // Observe exit before applying the idle timeout. Once the
+                        // direct child exits, only the drain deadline applies.
+                        // WNOWAIT keeps the pid/group reserved for killGroup().
+                        siginfo_t si{};
+                        if (::waitid(P_PID, static_cast<id_t>(pid), &si, WEXITED | WNOHANG | WNOWAIT) == 0 &&
+                            si.si_pid == pid)
+                        {
+                            childExited = true;
+                            exitTime = Clock::now();
+                        }
+                    }
                     const auto now = Clock::now();
                     long long waitMs = 500; // periodic check for child exit
-                    if (opts.idleTimeout.count() > 0)
+                    if (!childExited && opts.idleTimeout.count() > 0)
                     {
                         const long long remaining = static_cast<long long>(
                             std::chrono::duration_cast<milliseconds>(lastActivity + opts.idleTimeout - now).count());
@@ -527,6 +540,7 @@ namespace ddb
                         {
                             // The child is gone but a descendant keeps the pipes open.
                             killGroup(pid);
+                            r.descendantsTerminated = true;
                             killed = true;
                             break;
                         }
@@ -573,20 +587,6 @@ namespace ddb
                         else if (nr == 0 || (errno != EINTR && errno != EAGAIN))
                         {
                             closeFd(fd); // EOF or unrecoverable error
-                        }
-                    }
-
-                    if (!childExited)
-                    {
-                        // Detect exit without reaping (the zombie keeps the pid and
-                        // its process group id reserved for killGroup()).
-                        siginfo_t si;
-                        std::memset(&si, 0, sizeof(si));
-                        if (::waitid(P_PID, static_cast<id_t>(pid), &si, WEXITED | WNOHANG | WNOWAIT) == 0 &&
-                            si.si_pid == pid)
-                        {
-                            childExited = true;
-                            exitTime = Clock::now();
                         }
                     }
                 }
@@ -908,35 +908,31 @@ namespace ddb
 
                 while (outRead || extraRead)
                 {
+                    // Probe on every iteration, including when a descendant is
+                    // continuously writing. Record the first observed exit once.
+                    if (!childExited && WaitForSingleObject(pi.hProcess, 0) == WAIT_OBJECT_0)
+                    {
+                        childExited = true;
+                        exitTime = Clock::now();
+                    }
                     bool active = pump(outRead, true);
                     active = pump(extraRead, false) || active;
                     const auto now = Clock::now();
-                    if (active)
-                    {
-                        lastActivity = now;
-                        continue;
-                    }
-                    if (opts.idleTimeout.count() > 0 && now - lastActivity >= opts.idleTimeout)
+                    if (active) lastActivity = now;
+                    if (!childExited && opts.idleTimeout.count() > 0 && now - lastActivity >= opts.idleTimeout)
                     {
                         r.timedOut = true;
                         r.errorMessage = timeoutMessage(opts.idleTimeout);
                         terminate();
                         break;
                     }
-                    if (childExited && now - exitTime >= kExitDrainGrace)
+                    if (childExited && (outRead || extraRead) && now - exitTime >= kExitDrainGrace)
                     {
                         terminate(); // a descendant keeps the pipes open
+                        r.descendantsTerminated = inJob;
                         break;
                     }
-                    if (!childExited && WaitForSingleObject(pi.hProcess, 25) == WAIT_OBJECT_0)
-                    {
-                        childExited = true;
-                        exitTime = Clock::now();
-                    }
-                    else if (childExited)
-                    {
-                        Sleep(25);
-                    }
+                    if (!active) Sleep(25);
                 }
                 closeHandle(outRead);
                 closeHandle(extraRead);
@@ -948,6 +944,7 @@ namespace ddb
                 {
                     for (;;)
                     {
+                        if (WaitForSingleObject(pi.hProcess, 0) == WAIT_OBJECT_0) break;
                         const long long remaining = static_cast<long long>(std::chrono::duration_cast<milliseconds>(
                                                                                lastActivity + opts.idleTimeout - Clock::now())
                                                                                .count());
@@ -1014,6 +1011,7 @@ namespace ddb
                 oss << "terminated abnormally";
                 if (!errorMessage.empty()) oss << ": " << errorMessage;
             }
+            if (descendantsTerminated) oss << "; stray descendants terminated after output drain grace";
             return oss.str();
         }
 
@@ -1026,10 +1024,15 @@ namespace ddb
         Result run(const fs::path &binary, const std::vector<std::string> &args, const Options &options)
         {
 #ifdef _WIN32
-            return runWindows(binary, args, options);
+            Result result = runWindows(binary, args, options);
 #else
-            return runPosix(binary, args, options);
+            Result result = runPosix(binary, args, options);
 #endif
+            // Surface cleanup even for successful tool calls, whose wrappers may
+            // otherwise log only failures or a generic completion message.
+            if (result.descendantsTerminated)
+                LOGW << binary.string() << " " << result.describe();
+            return result;
         }
 
         std::string formatCommandLine(const fs::path &binary, const std::vector<std::string> &args)

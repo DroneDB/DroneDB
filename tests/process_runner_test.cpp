@@ -2,8 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// Tests for the shared child-process launcher (spec A4). They drive /bin/sh, so
-// they run on POSIX only; tests that inspect /proc are Linux-only.
+// Shared lifecycle tests use a portable child; shell/descriptor tests remain
+// platform-specific, and tests that inspect /proc are Linux-only.
 
 #include <chrono>
 #include <cstdlib>
@@ -20,8 +20,11 @@
 #include "process_runner.h"
 #include "test.h"
 #include "testarea.h"
+#include "helpers/process_test_utils.h"
 
-#ifndef _WIN32
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <fcntl.h>
 #include <signal.h>
 #include <sys/types.h>
@@ -75,13 +78,21 @@ std::vector<std::string> splitLines(const std::string& s) {
     return out;
 }
 
-#ifndef _WIN32
 // True when pid no longer exists or is a zombie (dead but not yet reaped by its
 // new parent). Waits up to `within`.
-bool processGone(pid_t pid, milliseconds within) {
+bool processGone(unsigned long pid, milliseconds within) {
     const auto deadline = std::chrono::steady_clock::now() + within;
     for (;;) {
         bool gone = false;
+#ifdef _WIN32
+        HANDLE process = OpenProcess(SYNCHRONIZE, FALSE, static_cast<DWORD>(pid));
+        if (process) {
+            gone = WaitForSingleObject(process, 0) == WAIT_OBJECT_0;
+            CloseHandle(process);
+        } else {
+            gone = GetLastError() == ERROR_INVALID_PARAMETER;
+        }
+#else
         if (::kill(pid, 0) != 0 && errno == ESRCH) {
             gone = true;
         } else {
@@ -92,6 +103,7 @@ bool processGone(pid_t pid, milliseconds within) {
                                     (stat[rp + 2] == 'Z' || stat[rp + 2] == 'X'));
 #endif
         }
+#endif
         if (gone) return true;
         if (std::chrono::steady_clock::now() >= deadline) return false;
         std::this_thread::sleep_for(milliseconds(20));
@@ -106,22 +118,21 @@ bool waitForFile(const fs::path& p, milliseconds within) {
     }
     return false;
 }
-#endif
 
 TEST(processRunner, exitCodePropagated) {
-    SKIP_ON_WINDOWS();
-    const auto r = sh("echo hello; exit 7");
+    const auto r = process::run(testChildPath(), {"exit", "7"});
     EXPECT_TRUE(r.started);
     EXPECT_TRUE(r.exited);
     EXPECT_EQ(r.exitCode, 7);
     EXPECT_EQ(r.termSignal, 0);
     EXPECT_FALSE(r.timedOut);
+    EXPECT_FALSE(r.descendantsTerminated);
     EXPECT_FALSE(r.success());
     EXPECT_EQ(r.outputTail, "hello\n");
     EXPECT_EQ(r.totalBytes, 6u);
     EXPECT_NE(r.describe().find("exited with code 7"), std::string::npos) << r.describe();
 
-    const auto ok = sh("exit 0");
+    const auto ok = process::run(testChildPath(), {"exit", "0"});
     EXPECT_TRUE(ok.success());
 }
 
@@ -207,8 +218,6 @@ TEST(processRunner, onlyStandardFdsInherited) {
 }
 
 TEST(processRunner, idleTimeoutKillsProcessGroup) {
-    SKIP_ON_WINDOWS();
-#ifndef _WIN32
     TestArea ta(TEST_NAME);
     const fs::path pidFile = ta.getPath("grandchild.pid");
     io::assureIsRemoved(pidFile);
@@ -216,55 +225,60 @@ TEST(processRunner, idleTimeoutKillsProcessGroup) {
     process::Options opts;
     opts.idleTimeout = milliseconds(800);
     const auto start = std::chrono::steady_clock::now();
-    // The background sleep (grandchild) inherits the output pipe: only killing
-    // the whole process group lets the pipe reach EOF.
-    const auto r = sh("sleep 30 & echo $! > \"$1\"; sleep 30", opts, {pidFile.string()});
+    const auto r = process::run(testChildPath(), {"descendant", pidFile.string(), "silent", "30000", "0"}, opts);
     const auto elapsed = std::chrono::steady_clock::now() - start;
 
     EXPECT_TRUE(r.started);
     EXPECT_TRUE(r.timedOut);
     EXPECT_FALSE(r.success());
+#ifndef _WIN32
     EXPECT_EQ(r.termSignal, SIGKILL);
+#endif
+    EXPECT_FALSE(r.descendantsTerminated);
     EXPECT_NE(r.describe().find("without output"), std::string::npos) << r.describe();
     EXPECT_LT(elapsed, std::chrono::seconds(10));
 
     ASSERT_TRUE(waitForFile(pidFile, milliseconds(2000)));
-    const pid_t grandchild = static_cast<pid_t>(std::stol(readText(pidFile)));
+    const auto grandchild = std::stoul(readText(pidFile));
     ASSERT_GT(grandchild, 0);
     EXPECT_TRUE(processGone(grandchild, milliseconds(3000))) << "grandchild " << grandchild << " survived";
-#endif
 }
 
 // A4: a child that closes every monitored pipe but keeps running is still
 // subject to the idle timeout (measured from its last output).
 TEST(processRunner, idleTimeoutAppliesAfterPipesClosed) {
-    SKIP_ON_WINDOWS();
-#ifndef _WIN32
     process::Options opts;
     opts.idleTimeout = milliseconds(800);
     const auto start = std::chrono::steady_clock::now();
-    const auto r = sh("echo before-close; exec >&- 2>&-; sleep 30", opts);
+    const auto r = process::run(testChildPath(), {"close-output", "30000", "0"}, opts);
     const auto elapsed = std::chrono::steady_clock::now() - start;
 
     EXPECT_TRUE(r.started);
     EXPECT_TRUE(r.timedOut) << r.describe();
     EXPECT_FALSE(r.success());
+#ifndef _WIN32
     EXPECT_EQ(r.termSignal, SIGKILL);
+#endif
     EXPECT_NE(r.outputTail.find("before-close"), std::string::npos);
     EXPECT_GE(elapsed, milliseconds(700));
     EXPECT_LT(elapsed, std::chrono::seconds(10));
 
     // Control: closing the pipes and exiting before the deadline is a normal exit.
-    const auto quick = sh("exec >&- 2>&-; sleep 0.2; exit 4", opts);
+    const auto quick = process::run(testChildPath(), {"close-output", "200", "4"}, opts);
     EXPECT_FALSE(quick.timedOut) << quick.describe();
     EXPECT_TRUE(quick.exited);
     EXPECT_EQ(quick.exitCode, 4);
-#endif
+
+    // Exercise closure of the progress channel as well as stdout/stderr.
+    opts.extraChannel = true;
+    const auto extra = process::run(testChildPath(),
+        {"close-output", "30000", "0", process::kExtraChannelPlaceholder}, opts);
+    EXPECT_TRUE(extra.timedOut) << extra.describe();
+    EXPECT_LT(extra.duration, std::chrono::seconds(10));
 }
 
 // P6: activity on the extra channel alone keeps the child alive.
 TEST(processRunner, extraChannelActivityResetsIdleTimer) {
-    SKIP_ON_WINDOWS();
     std::string extra;
     process::Options opts;
     opts.extraChannel = true;
@@ -272,8 +286,7 @@ TEST(processRunner, extraChannelActivityResetsIdleTimer) {
     opts.onExtraData = [&extra](const char* d, size_t n) { extra.append(d, n); };
 
     const auto start = std::chrono::steady_clock::now();
-    const auto r = sh("i=0; while [ $i -lt 8 ]; do echo tick >&$1; sleep 0.2; i=$((i+1)); done",
-                      opts, {process::kExtraChannelPlaceholder});
+    const auto r = process::run(testChildPath(), {"extra-ticks", process::kExtraChannelPlaceholder}, opts);
     const auto elapsed = std::chrono::steady_clock::now() - start;
 
     EXPECT_FALSE(r.timedOut) << r.describe();
@@ -286,7 +299,8 @@ TEST(processRunner, extraChannelActivityResetsIdleTimer) {
     EXPECT_GT(elapsed, milliseconds(1000));
 
     // Control: the same idle timeout kills a child that is silent everywhere.
-    const auto silent = sh("sleep 5", opts, {process::kExtraChannelPlaceholder});
+    const auto silent = process::run(testChildPath(),
+        {"close-output", "5000", "0", process::kExtraChannelPlaceholder}, opts);
     EXPECT_TRUE(silent.timedOut);
 }
 
@@ -375,26 +389,60 @@ TEST(processRunner, scriptWithShebangRuns) {
 // The direct child exits but a background descendant keeps the output pipe open:
 // run() returns after the drain grace period and kills the straggler.
 TEST(processRunner, strayDescendantDoesNotBlock) {
-    SKIP_ON_WINDOWS();
-#ifndef _WIN32
     TestArea ta(TEST_NAME);
     const fs::path pidFile = ta.getPath("stray.pid");
     io::assureIsRemoved(pidFile);
 
     const auto start = std::chrono::steady_clock::now();
-    const auto r = sh("sleep 60 & echo $! > \"$1\"; exit 4", process::Options(), {pidFile.string()});
+    const auto r = process::run(testChildPath(), {"descendant", pidFile.string(), "silent", "0", "4"});
     const auto elapsed = std::chrono::steady_clock::now() - start;
 
     EXPECT_TRUE(r.exited);
     EXPECT_EQ(r.exitCode, 4);
     EXPECT_FALSE(r.timedOut);
-    EXPECT_LT(elapsed, process::kExitDrainGrace + std::chrono::seconds(5));
+    EXPECT_TRUE(r.descendantsTerminated);
+    EXPECT_NE(r.describe().find("stray descendants terminated"), std::string::npos) << r.describe();
+    EXPECT_LT(elapsed, process::kExitDrainGrace + std::chrono::seconds(2));
 
     ASSERT_TRUE(waitForFile(pidFile, milliseconds(2000)));
-    const pid_t stray = static_cast<pid_t>(std::stol(readText(pidFile)));
+    const auto stray = std::stoul(readText(pidFile));
     EXPECT_TRUE(processGone(stray, milliseconds(3000))) << "descendant " << stray << " survived";
-#endif
 }
+
+class ProcessRunnerDescendant : public ::testing::TestWithParam<std::string> {};
+
+// Activity must neither hide direct exit nor postpone the drain deadline. With
+// silent descendants the short idle timeout must not replace child success.
+TEST_P(ProcessRunnerDescendant, successPreservedAndDrainDeadlineEnforced) {
+    TestArea ta(TEST_NAME);
+    const auto pidFile = ta.getPath("stray-" + GetParam() + ".pid");
+    io::assureIsRemoved(pidFile);
+    process::Options opts;
+    opts.idleTimeout = milliseconds(800);
+    opts.extraChannel = GetParam() == "extra";
+    size_t extraBytes = 0;
+    opts.onExtraData = [&extraBytes](const char*, size_t n) { extraBytes += n; };
+    std::vector<std::string> args = {"descendant", pidFile.string(), GetParam(), "0", "0"};
+    if (opts.extraChannel) args.push_back(process::kExtraChannelPlaceholder);
+    const auto start = std::chrono::steady_clock::now();
+    const auto r = process::run(testChildPath(), args, opts);
+    const auto elapsed = std::chrono::steady_clock::now() - start;
+
+    EXPECT_TRUE(r.success()) << r.describe();
+    EXPECT_TRUE(r.descendantsTerminated) << r.describe();
+    EXPECT_FALSE(r.timedOut);
+    EXPECT_EQ(r.exitCode, 0);
+    EXPECT_GE(elapsed, process::kExitDrainGrace);
+    EXPECT_LT(elapsed, process::kExitDrainGrace + std::chrono::seconds(2));
+    if (GetParam() == "streaming") EXPECT_GT(r.totalBytes, 0u);
+    if (GetParam() == "extra") EXPECT_GT(extraBytes, 0u);
+    ASSERT_TRUE(waitForFile(pidFile, milliseconds(2000)));
+    const auto stray = std::stoul(readText(pidFile));
+    EXPECT_TRUE(processGone(stray, milliseconds(3000))) << "descendant " << stray << " survived";
+}
+
+INSTANTIATE_TEST_SUITE_P(portable, ProcessRunnerDescendant,
+                        ::testing::Values("silent", "streaming", "extra"));
 
 // Linux PR_SET_PDEATHSIG: when the process that spawned the child dies, the child
 // is killed too. An intermediate process (forked from the test) runs the helper

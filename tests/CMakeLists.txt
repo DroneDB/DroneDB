@@ -8,11 +8,23 @@ if(BUILD_TESTING)
     find_package(tinyobjloader CONFIG REQUIRED)
     find_package(OpenSSL REQUIRED)
     find_package(exiv2 CONFIG REQUIRED)
+    find_package(Threads REQUIRED)
+    find_package(plog CONFIG REQUIRED)
 
     file(GLOB TEST_SOURCES "*.cpp")
 
+    # Keep the child helper's main outside TEST_SOURCES. Lifecycle and crash-lock
+    # tests use the same executable on Windows and Linux.
+    # Compile the lock implementation directly so the tiny helper does not load
+    # the geospatial DLL graph before short lifecycle deadlines begin.
+    add_executable(ddbtest_child helpers/process_child.cpp ../src/library/buildlock.cpp)
+    target_link_libraries(ddbtest_child PRIVATE plog::plog Threads::Threads)
+    target_include_directories(ddbtest_child PRIVATE ${CUSTOM_INCLUDE_DIRS} "${PROJECT_SOURCE_DIR}/src/include")
+
     # Create the test executable
     add_executable(ddbtest ${TEST_SOURCES})
+    add_dependencies(ddbtest ddbtest_child)
+    target_compile_definitions(ddbtest PRIVATE DDB_TEST_CHILD_NAME="$<TARGET_FILE_NAME:ddbtest_child>")
 
     # Link the library and testing framework. "spz" is the in-tree static SPZ codec target
     # (vendor/CMakeLists.txt); its PUBLIC include dir (vendor/spz/src/cc) lets the gsplat tests
@@ -34,6 +46,12 @@ if(BUILD_TESTING)
     # Copy only the test executable to build directory (not the entire folder)
     # This fixes the issue where copy_directory overwrites cmake_install.cmake
     add_custom_command(TARGET ddbtest POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:ddbtest_child>"
+            "$<TARGET_FILE_DIR:ddbtest>"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:ddbtest_child>"
+            "${CMAKE_BINARY_DIR}"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "$<TARGET_FILE:ddbtest>"
             "${CMAKE_BINARY_DIR}"
