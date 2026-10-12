@@ -586,7 +586,9 @@ TEST(PendingBuild, VectorNoSpaceRetainsExistingPendingHintsAndFreshTimestamp) {
     for (const std::string driver : {"MVT", "GPKG"})
         for (const bool onClose : {false, true}) {
             SCOPED_TRACE(driver + (onClose ? " close" : " translate"));
-            Dataset ds(TEST_NAME + driver + (onClose ? "-close" : "-translate"));
+            // Short area name: hash + .vec-stage-* + MVT tile dirs must stay under
+            // the Windows CreateDirectory limit (MAX_PATH - 12).
+            Dataset ds("PendingBuild-VecNoSpace-" + driver + (onClose ? "-close" : "-translate"));
             deferShapefileInSubfolder(ds); // dependency was missing, then arrived
             ds.backdatePending("sub/layer.shp");
             const auto before = utils::currentUnixTimestamp();
