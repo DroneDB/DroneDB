@@ -116,7 +116,7 @@ BuildLock::BuildLock(const std::string& outputPath)
     , fileDescriptor(-1)
 #endif
 {
-    acquireLock(true);  // Use waiting behavior (original constructor behavior)
+    acquireLock(true);  // Legacy flag; acquisition is nonblocking on both platforms.
 }
 
 BuildLock::BuildLock(const std::string& outputPath, bool wait)
@@ -296,7 +296,7 @@ void BuildLock::acquireLock(bool waitForLock) {
         GENERIC_WRITE,              // We need write access to write PID info
         0,                          // No sharing - this is the key for exclusivity
         nullptr,                    // Default security attributes
-        waitForLock ? CREATE_ALWAYS : CREATE_NEW,  // CREATE_ALWAYS overwrites, CREATE_NEW fails if exists
+        OPEN_ALWAYS,                // Atomically open/create; orphan files are reclaimable in both modes
         FILE_ATTRIBUTE_TEMPORARY |  // Hint that this is a temporary file
         FILE_FLAG_DELETE_ON_CLOSE,  // Automatic cleanup on process termination
         nullptr                     // No template file
@@ -314,7 +314,7 @@ void BuildLock::acquireLock(bool waitForLock) {
             if (probeDirectoryWritable(lockPath.parent_path()))
                 throw BuildInProgressException("Build in progress by another process");
             throw BuildLockPermissionException("Insufficient permissions to create build lock file: " + lockFilePath);
-        } else if (error == ERROR_DISK_FULL) {
+        } else if (error == ERROR_DISK_FULL || error == ERROR_HANDLE_DISK_FULL) {
             throw BuildLockDiskFullException("Disk full - cannot create build lock file: " + lockFilePath);
         } else if (error == ERROR_PATH_NOT_FOUND) {
             throw BuildLockDirectoryException("Lock file directory does not exist: " + lockFilePath);
@@ -327,6 +327,11 @@ void BuildLock::acquireLock(bool waitForLock) {
     }
 
     isLocked = true;
+    // OPEN_ALWAYS preserves diagnostic contents until exclusive ownership. Only
+    // the holder may truncate an orphan's contents; contention must not mutate it.
+    if (!SetFilePointerEx(fileHandle, LARGE_INTEGER{}, nullptr, FILE_BEGIN) || !SetEndOfFile(fileHandle)) {
+        LOGW << "Failed to truncate lock file " << lockFilePath << " (Windows error " << GetLastError() << ")";
+    }
     LOGD << "Build lock acquired successfully" << (waitForLock ? "" : " (no wait)") << ": " << lockFilePath;
 
 #else
