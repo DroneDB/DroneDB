@@ -85,8 +85,9 @@ namespace ddb
      * `tileset.json` and one or more `LOD-<n>` folders with `.b3dm` tiles.
      *
      * Safe rebuild: a @ref BuildLock on @p outputDir (`<outputDir>.building`) is held
-     * until return. Under it, a lone `<outputDir>-old` left by an interrupted swap is
-     * renamed back, and a stale one next to @p outputDir is deleted. Tiles are then
+     * until return. Under it, a usable `<outputDir>-old` left by an interrupted swap is
+     * restored when the final tiles sentinel is missing/empty. The backup is deleted
+     * only when the final sentinel is a nonempty regular file. Tiles are then
      * produced into a sibling `<outputDir>-temp-<rand>` (removed on any failure) and
      * @p outputDir is left untouched until Obj2Tiles succeeds; then @p outputDir is
      * renamed to `<outputDir>-old`, the temp folder to @p outputDir, and `-old` is
@@ -119,6 +120,20 @@ namespace ddb
                                           std::optional<ModelGeoref> georef = std::nullopt,
                                           bool autoDetectGeoref = true,
                                           const std::string &datasetRoot = "");
+
+    /** Read-only sentinel check used by tiles recovery and build cleanup. */
+    DDB_DLL bool isModel3DTilesComplete(const fs::path &outputDir);
+
+    /** A usable swap backup exists while the final tiles sentinel is missing/empty. */
+    DDB_DLL bool hasRecoverableModel3DTilesSwap(const fs::path &outputDir);
+
+    /**
+     * Repair an interrupted tiles swap under the output's tiles BuildLock.
+     * A full Model build must already hold its primary lock before calling this.
+     * Throws BuildInProgressException without changing directories when busy;
+     * filesystem failures preserve the usable backup and are propagated.
+     */
+    DDB_DLL void recoverModel3DTilesSwap(const std::string &outputDir);
 
     /**
      * @brief Local-space axis-aligned bounding box of a 3D model.

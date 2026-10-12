@@ -729,20 +729,31 @@ fs::path stripTrailingSeparators(const std::string& dir) {
     return p;
 }
 
-// A3 recovery, under the tiles lock: a crash between the two renames of the swap
-// leaves only "<outDir>-old" (restore it); a crash before its final delete leaves
-// both (outDir is the newer, complete tileset: drop the old one).
+// Use the expected sentinel, not directory existence: the final directory can
+// itself be a partial output. Throwing filesystem calls keep inspection errors
+// from being mistaken for permission to delete the backup.
+bool tilesSentinelComplete(const fs::path& dir) {
+    const fs::path sentinel = dir / "tileset.json";
+    return fs::is_regular_file(sentinel) && fs::file_size(sentinel) > 0;
+}
+
+// Caller holds the tiles lock; never recursively acquire it here.
 void recoverTilesSwap(const fs::path& outDir, const fs::path& oldDir) {
-    std::error_code ec;
-    if (!fs::exists(oldDir, ec))
+    if (!fs::exists(oldDir))
         return;
 
-    if (!fs::exists(outDir, ec)) {
+    if (tilesSentinelComplete(outDir)) {
+        LOGD << "Removing superseded 3D Tiles " << oldDir.string();
+        io::assureIsRemoved(oldDir);
+    } else if (tilesSentinelComplete(oldDir)) {
+        // Remove the incomplete final first: if either operation fails, the
+        // last usable tileset still resides in oldDir.
+        io::assureIsRemoved(outDir);
         LOGI << "Restoring previous 3D Tiles from " << oldDir.string();
         io::rename(oldDir, outDir);
     } else {
-        LOGD << "Removing superseded 3D Tiles " << oldDir.string();
-        io::assureIsRemoved(oldDir);
+        LOGW << "Keeping incomplete 3D Tiles backup " << oldDir.string()
+             << " until a complete replacement is published";
     }
 }
 
@@ -766,6 +777,27 @@ void performNexusBuild(const std::string& inputFile, const std::string& outputFi
 #endif
 }
 }  // namespace
+
+bool isModel3DTilesComplete(const fs::path& outputDir) {
+    try {
+        return tilesSentinelComplete(outputDir);
+    } catch (const fs::filesystem_error& e) {
+        LOGW << "Cannot inspect 3D Tiles sentinel in " << outputDir.string() << ": " << e.what();
+        return false;
+    }
+}
+
+bool hasRecoverableModel3DTilesSwap(const fs::path& outputDir) {
+    const fs::path oldDir = outputDir.parent_path() / (outputDir.filename().string() + "-old");
+    return isModel3DTilesComplete(oldDir) && !isModel3DTilesComplete(outputDir);
+}
+
+void recoverModel3DTilesSwap(const std::string& outputDir) {
+    const fs::path outDir = stripTrailingSeparators(outputDir);
+    BuildLock tilesLock(outDir.string());
+    const fs::path oldDir = outDir.parent_path() / (outDir.filename().string() + "-old");
+    recoverTilesSwap(outDir, oldDir);
+}
 
 std::string buildNexus(const std::string& inputObj, const std::string& outputNxs, bool overwrite,
                        const std::string& datasetRoot) {
@@ -981,7 +1013,12 @@ std::string buildModel3DTiles(const std::string& inputObj, const std::string& ou
     // Two-step swap (A3): outDir -> "<outDir>-old", temp -> outDir, drop -old.
     // A crash in between is repaired by recoverTilesSwap on the next run.
     std::error_code ec;
-    const bool hadPrevious = fs::exists(outDir, ec);
+    // An incomplete backup may have been retained by recovery. Keep it through
+    // publication rather than overwrite it with another incomplete final.
+    const bool retainedBackup = fs::exists(oldDir);
+    if (retainedBackup)
+        io::assureIsRemoved(outDir);
+    const bool hadPrevious = !retainedBackup && fs::exists(outDir, ec);
     if (hadPrevious) {
         try {
             io::rename(outDir, oldDir);
@@ -1010,7 +1047,7 @@ std::string buildModel3DTiles(const std::string& inputObj, const std::string& ou
     }
     outGuard.release();
 
-    if (hadPrevious) {
+    if (hadPrevious || retainedBackup) {
         try {
             io::assureIsRemoved(oldDir);
         } catch (const std::exception& e) {

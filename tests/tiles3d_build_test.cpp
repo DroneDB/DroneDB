@@ -339,6 +339,8 @@ TEST(tiles3dBuild, bothExistAndRebuildFailsKeepsNewerTiles) {
     writeText(obj, gridObj());
     const fs::path out = ta.getPath("3dtiles");
     const fs::path old = ta.getPath("3dtiles-old");
+    writeText(out / "tileset.json", "{}");
+    writeText(old / "tileset.json", "{}");
     writeText(out / "marker.txt", "newer");
     writeText(old / "marker.txt", "older");
 
@@ -578,6 +580,97 @@ struct ModelDataset {
     std::unique_ptr<Database> db;
     std::map<std::string, std::string> hashes;
 };
+
+TEST(tiles3dBuild, completeModelRecoversTilesBeforeReturningWithoutTools) {
+    Obj2TilesEnvReset reset;
+    usePath(kBogusBinary);
+    ModelDataset ds(TEST_NAME);
+    ds.add("model.obj", gridObj());
+    const fs::path base = ds.out("model.obj");
+    const fs::path nxs = base / "nxs" / "model.nxz";
+    const fs::path tiles = base / "3dtiles";
+    const fs::path old = base / "3dtiles-old";
+    writeText(nxs, "existing Nexus bytes");
+    const auto nxsTime = fs::last_write_time(nxs);
+
+    // Recovery is reached through the public API, even with no converter tool.
+    for (const std::string state : {"missing", "empty", "partial", "sentinel-directory"}) {
+        SCOPED_TRACE(state);
+        fs::remove_all(tiles);
+        writeText(old / "tileset.json", "{}");
+        writeText(old / "marker", "usable backup");
+        if (state == "empty")
+            writeText(tiles / "tileset.json", "");
+        else if (state == "partial")
+            writeText(tiles / "unfinished.bin", "partial");
+        else if (state == "sentinel-directory")
+            fs::create_directories(tiles / "tileset.json");
+        bool complete = true;
+        ASSERT_EQ(DDBIsBuildComplete(ds.root.string().c_str(), "model.obj", &complete), DDBERR_NONE);
+        EXPECT_FALSE(complete);
+        EXPECT_TRUE(fs::exists(old / "marker")); // completeness is read-only
+        ASSERT_EQ(DDBBuild(ds.root.string().c_str(), "model.obj", nullptr, false), DDBERR_NONE)
+            << DDBGetLastError();
+        EXPECT_EQ(readText(tiles / "marker"), "usable backup");
+        EXPECT_FALSE(fs::exists(old));
+        ASSERT_EQ(DDBIsBuildComplete(ds.root.string().c_str(), "model.obj", &complete), DDBERR_NONE);
+        EXPECT_TRUE(complete);
+        EXPECT_EQ(readText(nxs), "existing Nexus bytes");
+        EXPECT_EQ(fs::last_write_time(nxs), nxsTime);
+    }
+
+    // A complete final wins; ordinary Nexus-only models remain complete.
+    writeText(tiles / "marker", "newer");
+    writeText(old / "tileset.json", "{}");
+    ASSERT_EQ(DDBBuild(ds.root.string().c_str(), "model.obj", nullptr, false), DDBERR_NONE);
+    EXPECT_EQ(readText(tiles / "marker"), "newer");
+    EXPECT_FALSE(fs::exists(old));
+    fs::remove_all(tiles);
+    EXPECT_TRUE(isBuildComplete(ds.db.get(), "model.obj"));
+}
+
+TEST(tiles3dBuild, completeModelDefersRecoveryUnderLiveTilesLock) {
+    ModelDataset ds(TEST_NAME);
+    ds.add("model.obj", gridObj());
+    const fs::path base = ds.out("model.obj");
+    const fs::path tiles = base / "3dtiles";
+    const fs::path old = base / "3dtiles-old";
+    writeText(base / "nxs" / "model.nxz", "existing Nexus");
+    writeText(old / "tileset.json", "{}");
+    writeText(old / "marker", "previous");
+    writeText(tiles / "unfinished", "in flight");
+    const fs::path pending(base.string() + ".pending");
+    writeText(pending, "original marker\n");
+    {
+        BuildLock holder(tiles.string());
+        EXPECT_THROW(build(ds.db.get(), "model.obj", "", false), BuildInProgressException);
+        EXPECT_EQ(DDBBuild(ds.root.string().c_str(), "model.obj", nullptr, false), DDBERR_BUILDINPROGRESS);
+        EXPECT_EQ(readText(old / "marker"), "previous");
+        EXPECT_EQ(readText(tiles / "unfinished"), "in flight");
+        EXPECT_EQ(readText(pending), "original marker\n");
+        EXPECT_FALSE(isBuildComplete(ds.db.get(), "model.obj"));
+    }
+    EXPECT_NO_THROW(build(ds.db.get(), "model.obj", "", false));
+    EXPECT_EQ(readText(tiles / "marker"), "previous");
+    EXPECT_TRUE(isBuildComplete(ds.db.get(), "model.obj"));
+}
+
+TEST(tiles3dBuild, recoveryInspectionErrorPreservesUsableBackup) {
+    TestArea ta(TEST_NAME, true);
+    const fs::path tiles = ta.getFolder("3dtiles");
+    const fs::path old = ta.getPath("3dtiles-old");
+    writeText(old / "tileset.json", "{}");
+    writeText(old / "marker", "last usable copy");
+    std::error_code error;
+    fs::create_symlink("tileset.json", tiles / "tileset.json", error);
+    if (error)
+        GTEST_SKIP() << "cannot create error-inducing symlink: " << error.message();
+    EXPECT_THROW(recoverModel3DTilesSwap(tiles.string()), fs::filesystem_error);
+    EXPECT_EQ(readText(old / "marker"), "last usable copy");
+    EXPECT_EQ(readText(old / "tileset.json"), "{}");
+    EXPECT_TRUE(fs::is_symlink(tiles / "tileset.json"));
+    EXPECT_FALSE(fs::exists(tiles.string() + ".building"));
+}
 
 TEST(tiles3dBuild, modelBuildProducesNexusAndTiles) {
     SKIP_WITHOUT_POSIX_SHELL();

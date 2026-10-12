@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <cerrno>
 #include <cstring>
 #include <fstream>
 #include <limits>
@@ -387,12 +388,27 @@ namespace ddb
         const fs::path parentDir = outFile.parent_path();
         if (!parentDir.empty())
             io::assureFolderExists(parentDir);
-        std::ofstream out(outFile.string(), std::ios::binary | std::ios::trunc);
+        std::ofstream out;
+        errno = 0;
+        out.open(outFile.string(), std::ios::binary | std::ios::trunc);
+        const int openError = errno;
         if (!out.good())
-            throw FSException("Cannot write georef sidecar " + outFile.string());
+            throw FSException("Cannot write georef sidecar " + outFile.string(),
+                              std::error_code(openError, std::generic_category()));
+        errno = 0;
         out << georef.toJSON().dump(2);
+        out.flush();
+        const int writeError = errno;
         if (!out.good())
-            throw FSException("Failed while writing " + outFile.string());
+            throw FSException("Failed while writing " + outFile.string(),
+                              std::error_code(writeError, std::generic_category()));
+        errno = 0;
+        out.close();
+        const int closeError = errno;
+        if (out.fail())
+            throw FSException("Failed while closing " + outFile.string(),
+                              std::error_code(closeError, std::generic_category()));
+
     }
 
     void convertToSpz(const std::string &input, const std::string &output)
@@ -481,9 +497,11 @@ namespace ddb
                 "(set DDB_BUILDLOD_PATH or place build-lod next to the DroneDB executable)");
 
         const fs::path outRad = fs::path(outdir) / GsplatRadFileName;
-        std::string lodError;
-        if (!buildlod::runBuildLod(input, outRad, lodError, /*quality=*/true, GsplatRadMaxSh))
-            throw AppException("build-lod failed for " + input + ": " + lodError);
+        const auto lodResult = buildlod::runBuildLodResult(input, outRad, /*quality=*/true, GsplatRadMaxSh);
+        if (!lodResult.succeeded) {
+            lodResult.throwIfRetryable("build-lod failed for " + input + ": ");
+            throw AppException("build-lod failed for " + input + ": " + lodResult.error);
+        }
 
         // Local-space bounding box sidecar for deterministic camera framing in the viewer (the
         // streamed .rad has no resident splats at init time). Computed by streaming the .rad

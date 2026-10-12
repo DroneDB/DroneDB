@@ -10,6 +10,7 @@
 #include "json.h"
 
 #include <fstream>
+#include <cerrno>
 #include <atomic>
 #include <cmath>
 #include <cstdlib>
@@ -83,25 +84,18 @@ namespace ddb
 
             // Simply copy the file instead of rebuilding
             try {
-                std::ifstream src(inputGTiff, std::ios::binary);
-                std::ofstream dst(outputCog, std::ios::binary);
-
-                if (!src.is_open()) {
-                    throw AppException("Cannot open source file for reading: " + inputGTiff);
-                }
-                if (!dst.is_open()) {
-                    throw AppException("Cannot open destination file for writing: " + outputCog);
-                }
-
-                dst << src.rdbuf();
-
-                if (src.bad() || dst.bad()) {
-                    throw AppException("Error occurred during file copy");
-                }
+                // The filesystem wrapper carries the actual write error code.
+                // A full disk must escape the fallback and preserve pending work.
+                io::copy(inputGTiff, outputCog);
 
                 LOGD << "Successfully copied optimized COG from " << inputGTiff << " to " << outputCog;
                 generateCogStats(outputCog);
                 return;
+            } catch (const FSException& e) {
+                if (e.code() == std::errc::no_space_on_device)
+                    throw;
+                LOGW << "Failed to copy COG file: " << e.what() << ". Falling back to rebuild.";
+                // Fall through to normal rebuild process
             } catch (const std::exception& e) {
                 LOGW << "Failed to copy COG file: " << e.what() << ". Falling back to rebuild.";
                 // Fall through to normal rebuild process
@@ -295,12 +289,16 @@ namespace ddb
         std::atomic<int> warpPct{0};
         GDALWarpAppOptionsSetProgress(psOptions, cogWarpProgress, &warpPct);
 
+        // Capture the OS write error immediately, before cleanup or logging can
+        // replace it. Clearing errno before each write API avoids stale errors.
+        errno = 0;
         GDALDatasetH hNewDataset = GDALWarp(outputCog.c_str(),
                                             nullptr,
                                             1,
                                             &hSrcDataset,
                                             psOptions,
                                             nullptr);
+        const int warpSystemError = errno;
         GDALWarpAppOptionsFree(psOptions);
 
         // Restore previous GDAL cache size to avoid interfering with other operations
@@ -309,10 +307,23 @@ namespace ddb
 
         if (!hNewDataset) {
             GDALClose(hSrcDataset);
+            if (warpSystemError == ENOSPC)
+                throw RetryableBuildException("GDALWarp ran out of space creating COG: " + outputCog,
+                                              RetryableBuildReason::NoSpaceOnDevice);
             throw GDALException("GDALWarp failed to create output COG: " + outputCog);
         }
+        CPLErrorReset();
+        errno = 0;
         GDALClose(hNewDataset);
+        const int closeSystemError = errno;
+        const bool closeFailed = CPLGetLastErrorType() >= CE_Failure;
         GDALClose(hSrcDataset);
+        if (closeFailed) {
+            if (closeSystemError == ENOSPC)
+                throw RetryableBuildException("COG close ran out of space: " + outputCog,
+                                              RetryableBuildReason::NoSpaceOnDevice);
+            throw GDALException("Failed to close output COG: " + outputCog);
+        }
 
         // Generate stats.json sidecar
         generateCogStats(outputCog);

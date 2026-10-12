@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cerrno>
 #include <cstdlib>
 #include <fstream>
 #include <optional>
@@ -36,6 +37,51 @@ static bool isLockFileStale(const std::string& lockFilePath);
 
 // Forward declaration for the disk-space preflight helper (defined later in this file)
 static void ensureSufficientDiskSpace(const fs::path& dir);
+
+// Write the complete marker into a sibling file before replacing the old one.
+// Failure (especially ENOSPC) must never remove the last pending marker.
+static bool replacePendingMarker(const fs::path& pendingPath, const std::string& dependencyLines) {
+    const fs::path temporary = pendingPath.string() + ".tmp-" + utils::generateRandomString(16);
+    try {
+        std::ofstream out;
+        errno = 0;
+        out.open(temporary.string(), std::ios::binary | std::ios::trunc);
+        const int openError = errno;
+        if (!out.is_open())
+            throw FSException("Cannot open pending marker " + temporary.string(),
+                              std::error_code(openError, std::generic_category()));
+        errno = 0;
+        out << utils::currentUnixTimestamp() << "\n" << dependencyLines;
+        out.flush();
+        const int writeError = errno;
+        if (!out)
+            throw FSException("Cannot write pending marker " + temporary.string(),
+                              std::error_code(writeError, std::generic_category()));
+        errno = 0;
+        out.close();
+        const int closeError = errno;
+        if (out.fail())
+            throw FSException("Cannot close pending marker " + temporary.string(),
+                              std::error_code(closeError, std::generic_category()));
+#ifdef _WIN32
+        // std::filesystem::rename does not replace an existing file on Windows.
+        if (!MoveFileExW(temporary.c_str(), pendingPath.c_str(),
+                         MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+            const std::error_code ec(GetLastError(), std::system_category());
+            throw FSException("Cannot replace pending marker: " + ec.message(), ec);
+        }
+#else
+        io::rename(temporary, pendingPath);
+#endif
+        return true;
+    } catch (const std::exception& ex) {
+        LOGW << "Cannot refresh pending marker '" << pendingPath.string()
+             << "'; original marker retained: " << ex.what();
+        std::error_code ignored;
+        fs::remove(temporary, ignored);
+        return false;
+    }
+}
 
 // Build-artifact names are content hashes (currently SHA-256 hex, 64 chars).
 // Callers validate a candidate name before acting on it so unrelated files or
@@ -170,12 +216,13 @@ static bool directoryHasNonEmptyContent(const fs::path& dir) {
 //
 // Model note: a Model build also co-produces an additive OGC 3D Tiles tileset in
 // a sibling 3dtiles/ folder (see buildInternal). That artifact is intentionally
-// NOT part of completeness: it is best-effort (Obj2Tiles may be absent, or may
-// fail on a specific mesh), so keying completeness on nxs/ keeps builds from
-// looping. A forced rebuild regenerates 3dtiles/ alongside nxs/.
+// optional for completeness. The sole exception is an identifiable interrupted
+// tiles swap (usable backup and missing/incomplete final); report it incomplete
+// so the normal completeness sweep can enqueue recovery without rebuilding nxs/.
 static bool isBuildOutputComplete(const fs::path& baseOutputPath,
                                   const Entry& e,
-                                  const std::string& subfolder) {
+                                  const std::string& subfolder,
+                                  bool checkTilesSwap = true) {
     if (e.type == EntryType::Vector)
         return fileExistsAndNonEmpty(baseOutputPath / "vec" / "source.gpkg") &&
                fileExistsAndNonEmpty(baseOutputPath / "mvt" / "metadata.json");
@@ -185,6 +232,10 @@ static bool isBuildOutputComplete(const fs::path& baseOutputPath,
 
     if (e.type == EntryType::Tiles3D)
         return fileExistsAndNonEmpty(baseOutputPath / "3dtiles" / "tileset.json");
+
+    if (checkTilesSwap && e.type == EntryType::Model &&
+        hasRecoverableModel3DTilesSwap(baseOutputPath / "3dtiles"))
+        return false;
 
     return directoryHasNonEmptyContent(baseOutputPath / subfolder);
 }
@@ -271,37 +322,60 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
     // corrupt the in-progress output of the other process.
     BuildLock processLock(outputFolder);
 
-    // Every attempt that gets the lock consumes the ".pending" marker: a build that
-    // is skipped as complete, fails, or succeeds is no longer pending, and a
-    // dependency that is still missing rewrites it in the catch below. A
-    // BuildInProgressException (thrown above) leaves it untouched.
-    const std::string pendFile = baseOutputPath.string() + ".pending";
-    io::assureIsRemoved(pendFile);
-
-    // Check again if output exists after acquiring locks (another process might have completed the
-    // build). Delegate to the centralized completeness helper so the rules used here stay in
-    // lock-step with isBuildComplete() / DDBIsBuildComplete().
-    if (isBuildOutputComplete(baseOutputPath, target, subfolder) && !force) {
-        LOGD << "Build output already exists after acquiring lock, skipping: " << outputFolder;
-        return;
-    }
-
-    // Fail fast if the build scratch filesystem is critically low on free space.
-    // A build that runs out of space mid-way (e.g. a multi-GB COG warp) would
-    // otherwise leave a large partial scratch file behind and, under a job runner
-    // that retries failed builds, repeat that until the disk fills. baseOutputPath
-    // lives on the same filesystem as the temp folder created just below.
-    ensureSufficientDiskSpace(baseOutputPath);
+    // Marker snapshot is read after exclusive primary ownership. Mutation waits
+    // until serialized Model recovery has finished, so a busy tiles holder leaves
+    // the original attempt timestamp untouched.
+    const fs::path pendFile = baseOutputPath.string() + ".pending";
+    bool wasPending = false;
+    std::string pendingDependencyLines;
 
     const auto tempFolder = outputFolder + "-temp-" + utils::generateRandomString(16);
-
-    io::assureFolderExists(tempFolder);
+    auto cleanupTemporary = [&]() {
+        try {
+            io::assureIsRemoved(tempFolder);
+        } catch (const std::exception& cleanupError) {
+            LOGW << "Cannot remove build scratch '" << tempFolder << "': " << cleanupError.what();
+        }
+    };
+    auto retainPending = [&]() {
+        if (wasPending)
+            replacePendingMarker(pendFile, pendingDependencyLines);
+        cleanupTemporary();
+    };
 
     const std::string datasetRoot = db->rootDirectory().string();
     auto relativePath = (db->rootDirectory() / target.path).string();
 
-    // We could vectorize this logic, but it's an overkill by now
     try {
+        wasPending = fs::is_regular_file(pendFile);
+        if (wasPending) {
+            std::ifstream pending(pendFile.string(), std::ios::binary);
+            if (!pending.is_open())
+                throw FSException("Cannot read pending marker " + pendFile.string());
+            std::string timestamp;
+            std::getline(pending, timestamp);
+            pendingDependencyLines.assign(std::istreambuf_iterator<char>(pending), {});
+        }
+
+        // Lock order is primary Model lock then tiles lock. Recovery must run
+        // before the complete Nexus return, without recursively taking tiles lock.
+        if (target.type == EntryType::Model)
+            recoverModel3DTilesSwap((baseOutputPath / "3dtiles").string());
+
+        // Recheck primary artifacts after serialized recovery. Success consumes
+        // pending work even when Nexus was already complete before this attempt.
+        if (isBuildOutputComplete(baseOutputPath, target, subfolder, false) && !force) {
+            LOGD << "Build output already exists after acquiring lock, skipping: " << outputFolder;
+            io::assureIsRemoved(pendFile);
+            return;
+        }
+
+        if (wasPending)
+            replacePendingMarker(pendFile, pendingDependencyLines);
+        // Both preflight and scratch creation are inside the classified attempt.
+        ensureSufficientDiskSpace(baseOutputPath);
+        io::assureFolderExists(tempFolder);
+
         bool built = false;
 
         if (target.type == EntryType::PointCloud) {
@@ -370,39 +444,47 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
         }
 
         io::assureIsRemoved(tempFolder);
+        io::assureIsRemoved(pendFile);
     } catch (const BuildDepMissingException& ex) {
-        // Create pending file with timestamp and missing dependencies. Builders
-        // report names relative to the source file's folder; ".pending" stores
-        // them relative to the dataset root (display only: a retry is a full
-        // build attempt that re-validates on disk).
-        std::ofstream pf(pendFile);
-        if (pf) {
-            // First line: timestamp
-            pf << utils::currentUnixTimestamp() << std::endl;
-            // Following lines: missing dependencies (one per line)
-            for (const auto& dep : ex.getMissingDependencies()) {
-                pf << deppath::toDatasetRelative(target.path, dep) << std::endl;
-            }
-            pf.close();
-
-            LOGD << "Created pending file for " << ex.what() << " with "
-                 << ex.getMissingDependencies().size() << " missing dependencies";
-        } else {
-            LOGD << "Error! Cannot create pending file " << pendFile;
-        }
-
-        io::assureIsRemoved(tempFolder);
-
+        // Deferred success refreshes dependencies relative to the dataset root.
+        // Atomic replacement also protects an existing marker if the disk is full.
+        std::string dependencies;
+        for (const auto& dep : ex.getMissingDependencies())
+            dependencies += deppath::toDatasetRelative(target.path, dep) + "\n";
+        replacePendingMarker(pendFile, dependencies);
+        cleanupTemporary();
         throw;
+    } catch (const BuildInProgressException&) {
+        // Contention with the tiles holder is not an owned build attempt.
+        cleanupTemporary();
+        throw;
+    } catch (const RetryableBuildException&) {
+        retainPending();
+        throw;
+    } catch (const FSException& ex) {
+        if (ex.code() == std::errc::no_space_on_device) {
+            retainPending();
+            throw RetryableBuildException(ex.what(), RetryableBuildReason::NoSpaceOnDevice);
+        }
+        io::assureIsRemoved(pendFile);
+        cleanupTemporary();
+        throw;
+    } catch (const fs::filesystem_error& ex) {
+        if (ex.code() == std::errc::no_space_on_device) {
+            retainPending();
+            throw RetryableBuildException(ex.what(), RetryableBuildReason::NoSpaceOnDevice);
+        }
+        io::assureIsRemoved(pendFile);
+        cleanupTemporary();
+        throw AppException(ex.what());
     } catch (const AppException&) {
-        io::assureIsRemoved(tempFolder);
-
+        io::assureIsRemoved(pendFile);
+        cleanupTemporary();
         throw;
     } catch (...) {
-        // Since we use third party libraries, some exceptions might not
-        // get caught otherwise
-        io::assureIsRemoved(tempFolder);
-
+        // Unknown third-party failures are permanent, never inferred from text.
+        io::assureIsRemoved(pendFile);
+        cleanupTemporary();
         throw AppException("Unknown build error failure for " + target.path + " (" +
                            baseOutputPath.string() + ")");
     }
@@ -562,10 +644,10 @@ static constexpr time_t PendingRetryBackoffSeconds = 60;
 // names stored in ".pending" are for display only and are never matched against
 // the index (they used to be, which left models in subfolders pending forever).
 // Each builder validates its dependencies on disk first; one still missing
-// rewrites ".pending" (BuildDepMissingException, logged at debug), any other
-// failure is logged at warning level and the marker is consumed by the attempt
-// (buildInternal removes it once it holds the build lock, so a build already in
-// progress elsewhere keeps it).
+// refreshes ".pending" (BuildDepMissingException, logged at debug). Classified
+// primary transient failures keep an existing marker and refresh its timestamp;
+// permanent failures consume it. Build-lock contention leaves it untouched.
+// Failures remain logged at warning level for the next bounded coordinator/sweep.
 void buildPending(Database* db, const std::string& outputPath, bool force) {
     const fs::path buildDir = outputPath.empty() ? db->buildDirectory() : fs::path(outputPath);
     std::error_code ec;
@@ -682,11 +764,11 @@ static void ensureSufficientDiskSpace(const fs::path& dir) {
     const std::uintmax_t minBytes =
         static_cast<std::uintmax_t>(minMb) * 1024ULL * 1024ULL;
     if (si.available < minBytes) {
-        throw AppException(
+        throw RetryableBuildException(
             "Insufficient free disk space to build: " +
             std::to_string(si.available / (1024ULL * 1024ULL)) + " MB available, " +
             std::to_string(minMb) + " MB required on " + dir.string() +
-            ". Free up space or adjust DDB_MIN_FREE_DISK_MB.");
+            ". Free up space or adjust DDB_MIN_FREE_DISK_MB.", RetryableBuildReason::LowDiskSpace);
     }
 }
 
@@ -717,9 +799,9 @@ static const std::string TilesTrashPrefix = "3dtiles-temp-trash-";
 // and the move) they are only renamed to unique "3dtiles-temp-trash-<rand16>"
 // names; the lock is released before the (possibly long) deletion, so a
 // concurrent tiles build is never refused with BuildInProgress because of a
-// cleanup. "3dtiles-old" is the only copy of the previous tileset while
-// "3dtiles/" is missing (an interrupted swap that the next tiles build restores),
-// so it is moved aside only while "3dtiles/" exists. trashFolders are leftovers
+// cleanup. "3dtiles-old" may be the only usable tileset when the final directory
+// is absent or incomplete, so it is moved aside only once the final has its
+// expected nonempty regular sentinel. trashFolders are leftovers
 // of an earlier cleanup: they are deleted whatever the lock state.
 static void removeOrphanTilesFolders(const fs::path& hashDir,
                                      const std::vector<fs::path>& tempFolders,
@@ -761,12 +843,11 @@ static void removeOrphanTilesFolders(const fs::path& hashDir,
                 moveAside(t);
 
             if (!oldFolder.empty()) {
-                std::error_code ec;
-                if (fs::exists(tilesDir, ec) && !ec)
+                if (isModel3DTilesComplete(tilesDir))
                     moveAside(oldFolder);
                 else
                     LOGD << "Keeping " << oldFolder.string() << ": " << tilesDir.string()
-                         << " is missing, the next tiles build restores it";
+                         << " has no complete tiles sentinel; a build can restore it";
             }
         }
         // tilesLock is released here, before any deletion.

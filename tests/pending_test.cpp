@@ -7,27 +7,62 @@
 // display only, and dependencies that can never be satisfied fail the build.
 
 #include <cstdint>
+#include <chrono>
+#include <cstdlib>
+#include <iterator>
 #include <fstream>
 #include <memory>
+#include <functional>
 #include <string>
 #include <vector>
 
 #include "3d.h"
 #include "build.h"
+#include "buildlock.h"
+#include "buildlod_runner.h"
 #include "dbops.h"
 #include "ddb.h"
 #include "exceptions.h"
 #include "gdal_priv.h"
 #include "gtest/gtest.h"
+#include "helpers/process_test_utils.h"
 #include "ogr_api.h"
 #include "ogr_srs_api.h"
 #include "test.h"
 #include "testarea.h"
 #include "utils.h"
 
+namespace ddb_test {
+void withVectorWriteFailure(const char* driver, bool onClose, const std::function<void()>& operation);
+}
+
 namespace {
 
 using namespace ddb;
+
+class ScopedRetryEnv {
+public:
+    ScopedRetryEnv(const char* name, const char* value) : name_(name) {
+        if (const char* old = std::getenv(name)) { hadValue_ = true; previous_ = old; }
+        set(value);
+    }
+    ~ScopedRetryEnv() { set(hadValue_ ? previous_.c_str() : nullptr); }
+private:
+    void set(const char* value) {
+#ifdef _WIN32
+        _putenv_s(name_.c_str(), value ? value : "");
+#else
+        if (value) setenv(name_.c_str(), value, 1); else unsetenv(name_.c_str());
+#endif
+    }
+    std::string name_, previous_;
+    bool hadValue_ = false;
+};
+
+std::string markerContents(const fs::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(in), {});
+}
 
 // A real 4x4 RGB PNG: Nexus aborts on an invalid image, so a placeholder will not do.
 const std::vector<uint8_t> kPng = {
@@ -546,5 +581,237 @@ TEST(PendingBuild, ShapefileSidecarInSubfolderBuildsMainFile) {
     EXPECT_TRUE(fs::exists(out / "vec" / "source.gpkg"));
     EXPECT_TRUE(fs::exists(out / "mvt" / "metadata.json"));
 }
+
+TEST(PendingBuild, VectorNoSpaceRetainsExistingPendingHintsAndFreshTimestamp) {
+    for (const std::string driver : {"MVT", "GPKG"})
+        for (const bool onClose : {false, true}) {
+            SCOPED_TRACE(driver + (onClose ? " close" : " translate"));
+            Dataset ds(TEST_NAME + driver + (onClose ? "-close" : "-translate"));
+            deferShapefileInSubfolder(ds); // dependency was missing, then arrived
+            ds.backdatePending("sub/layer.shp");
+            const auto before = utils::currentUnixTimestamp();
+            {
+                ScopedRetryEnv enoughDisk("DDB_MIN_FREE_DISK_MB", "0");
+                ddb_test::withVectorWriteFailure(driver.c_str(), onClose, [&] {
+                    EXPECT_THROW(ddb::build(ds.db.get(), "sub/layer.shp", "", false), RetryableBuildException);
+                });
+            }
+            const auto pending = getPendingBuildInfo(ds.db.get());
+            ASSERT_EQ(pending.size(), 1u);
+            EXPECT_GE(pending[0].lastAttempt, before);
+            EXPECT_EQ(pending[0].missingDependencies, (std::vector<std::string>{"sub/layer.shx"}));
+            EXPECT_FALSE(isBuildComplete(ds.db.get(), "sub/layer.shp"));
+            // The restored real driver can complete the same pending entry.
+            ds.backdatePending("sub/layer.shp", 60);
+            ScopedRetryEnv enoughDisk("DDB_MIN_FREE_DISK_MB", "0");
+            EXPECT_NO_THROW(buildPending(ds.db.get(), "", false));
+            EXPECT_FALSE(fs::exists(ds.pendingFile("sub/layer.shp")));
+            EXPECT_TRUE(isBuildComplete(ds.db.get(), "sub/layer.shp"));
+        }
+}
+
+TEST(PendingBuild, PrimaryIdleTimeoutRetainsMarkerThroughFailedEntryBuild) {
+    Dataset ds(TEST_NAME);
+    const fs::path input = ds.path("sample.splat");
+    {
+        // One valid Gaussian splat: XYZ, scales, RGBA and an identity quaternion.
+        std::ofstream out(input, std::ios::binary);
+        const float values[6] = {0, 0, 0, 0.1f, 0.1f, 0.1f};
+        const uint8_t attributes[8] = {255, 180, 90, 255, 255, 128, 128, 128};
+        out.write(reinterpret_cast<const char*>(values), sizeof(values));
+        out.write(reinterpret_cast<const char*>(attributes), sizeof(attributes));
+    }
+    ds.add({"sample.splat"});
+    Entry entry;
+    ASSERT_TRUE(getEntry(ds.db.get(), "sample.splat", entry));
+    ASSERT_EQ(entry.type, EntryType::GaussianSplat);
+    ds.writePendingMarker("sample.splat", 1, {"previous dependency hint"});
+    const auto realTool = buildlod::findBuildLodBinary(true);
+    const auto before = utils::currentUnixTimestamp();
+    const auto start = std::chrono::steady_clock::now();
+    {
+        ScopedRetryEnv tool("DDB_BUILDLOD_PATH", testChildPath().string().c_str());
+        ScopedRetryEnv mode("DDB_TEST_CHILD_MODE", "idle");
+        ScopedRetryEnv deadline("DDB_BUILDLOD_IDLE_TIMEOUT_SECONDS", "1");
+        ScopedRetryEnv enoughDisk("DDB_MIN_FREE_DISK_MB", "0");
+        buildlod::findBuildLodBinary(true);
+        try {
+            build(ds.db.get(), "sample.splat", "", false);
+            FAIL() << "the primary tool should time out";
+        } catch (const RetryableBuildException& exception) {
+            EXPECT_EQ(exception.reason(), RetryableBuildReason::IdleTimeout);
+        }
+        EXPECT_EQ(DDBBuild(ds.root.string().c_str(), "sample.splat", nullptr, false), DDBERR_EXCEPTION);
+    }
+    buildlod::findBuildLodBinary(true);
+    EXPECT_LT(std::chrono::steady_clock::now() - start, std::chrono::seconds(15));
+    const auto pending = getPendingBuildInfo(ds.db.get());
+    ASSERT_EQ(pending.size(), 1u);
+    EXPECT_GE(pending[0].lastAttempt, before);
+    EXPECT_EQ(pending[0].missingDependencies, (std::vector<std::string>{"previous dependency hint"}));
+    EXPECT_FALSE(isBuildComplete(ds.db.get(), "sample.splat"));
+    const fs::path output = ds.db->buildDirectory() / entry.hash;
+    EXPECT_FALSE(fs::exists(output / "gsplat" / "model.rad"));
+    for (const auto& child : fs::directory_iterator(output))
+        EXPECT_EQ(child.path().filename().string().find("gsplat-temp-"), std::string::npos);
+    if (!realTool.empty()) {
+        ScopedRetryEnv tool("DDB_BUILDLOD_PATH", realTool.string().c_str());
+        ScopedRetryEnv enoughDisk("DDB_MIN_FREE_DISK_MB", "0");
+        buildlod::findBuildLodBinary(true);
+        ds.backdatePending("sample.splat", 60);
+        EXPECT_NO_THROW(buildPending(ds.db.get(), "", false));
+        EXPECT_FALSE(fs::exists(ds.pendingFile("sample.splat")));
+        EXPECT_TRUE(isBuildComplete(ds.db.get(), "sample.splat"));
+    }
+    buildlod::findBuildLodBinary(true);
+}
+
+TEST(PendingBuild, InvalidBuildLodDeadlineIsPermanentAndDoesNotTouchRunnerOutputs) {
+    Dataset ds(TEST_NAME);
+    const fs::path input = ds.path("sample.splat");
+    writeText(input, std::string(32, '\0'));
+    const fs::path output = ds.path("previous.rad");
+    const fs::path adjacent = ds.path("sample-lod.rad");
+    for (const char* invalid : {"0", "-1", "+1", "1.5", " 1", "1 ", "abc", "86401", "9223372037", "18446744073709551616"}) {
+        SCOPED_TRACE(invalid);
+        writeText(output, "previous output");
+        writeText(adjacent, "adjacent output");
+        ScopedRetryEnv deadline("DDB_BUILDLOD_IDLE_TIMEOUT_SECONDS", invalid);
+        const auto result = buildlod::runBuildLodResult(input, output, true, 1, testChildPath());
+        EXPECT_FALSE(result.succeeded);
+        EXPECT_FALSE(result.timedOut);
+        EXPECT_NE(result.error.find("DDB_BUILDLOD_IDLE_TIMEOUT_SECONDS"), std::string::npos);
+        EXPECT_NO_THROW(result.throwIfRetryable("primary: "));
+        EXPECT_EQ(markerContents(output), "previous output");
+        EXPECT_EQ(markerContents(adjacent), "adjacent output");
+    }
+    ds.add({"sample.splat"});
+    ds.writePendingMarker("sample.splat", 1, {"previous hint"});
+    {
+        ScopedRetryEnv tool("DDB_BUILDLOD_PATH", testChildPath().string().c_str());
+        ScopedRetryEnv deadline("DDB_BUILDLOD_IDLE_TIMEOUT_SECONDS", "invalid");
+        ScopedRetryEnv enoughDisk("DDB_MIN_FREE_DISK_MB", "0");
+        buildlod::findBuildLodBinary(true);
+        EXPECT_EQ(DDBBuild(ds.root.string().c_str(), "sample.splat", nullptr, false), DDBERR_EXCEPTION);
+        EXPECT_FALSE(fs::exists(ds.pendingFile("sample.splat")));
+    }
+    buildlod::findBuildLodBinary(true);
+}
+
+TEST(PendingBuild, MaximumBuildLodDeadlineParsesAndLaunchesTool) {
+    Dataset ds(TEST_NAME);
+    const fs::path input = ds.path("sample.splat");
+    const fs::path output = ds.path("model.rad");
+    writeText(input, std::string(32, '\0'));
+    ScopedRetryEnv deadline("DDB_BUILDLOD_IDLE_TIMEOUT_SECONDS", "86400");
+    process::Options options;
+    options.envOverrides.emplace_back("DDB_TEST_CHILD_MODE", "no-output");
+    const auto started = std::chrono::steady_clock::now();
+    const auto result = buildlod::runBuildLodResult(input, output, true, 1, testChildPath(), options);
+    // Exit 0 with no output proves parsing accepted the upper bound and launched
+    // the child. The missing-output contract still makes this a permanent failure.
+    EXPECT_FALSE(result.succeeded);
+    EXPECT_FALSE(result.timedOut);
+    EXPECT_NE(result.error.find("reported success but expected output is missing"), std::string::npos);
+    EXPECT_NO_THROW(result.throwIfRetryable("primary: "));
+    EXPECT_LT(std::chrono::steady_clock::now() - started, std::chrono::seconds(10));
+}
+
+// A pending primary failure stays visibly failed while its existing dependency
+// hints and refreshed timestamp let a delayed coordinator retry the same entry.
+TEST(PendingBuild, LowDiskRetainsPendingThenSucceedsAtSixtySecondBoundary) {
+    Dataset ds(TEST_NAME);
+    writeText(ds.path("m.obj"), objWithMtllib("mtllib m.mtl"));
+    ds.add({"m.obj"});
+    expectDeferred(ds, "m.obj");
+    writeText(ds.path("m.mtl"), mtlWithTexture("map_Kd tex.png"));
+    writePng(ds.path("tex.png"));
+    ds.add({"m.mtl", "tex.png"});
+    ds.backdatePending("m.obj");
+    const auto beforeAttempt = utils::currentUnixTimestamp();
+    {
+        ScopedRetryEnv lowDisk("DDB_MIN_FREE_DISK_MB", "100000000000");
+        EXPECT_THROW(ddb::build(ds.db.get(), "m.obj", "", false), RetryableBuildException);
+        // The C ABI still signals an ordinary failed entry job.
+        EXPECT_EQ(DDBBuild(ds.root.string().c_str(), "m.obj", nullptr, false, false), DDBERR_EXCEPTION);
+    }
+    const auto pending = ddb::getPendingBuildInfo(ds.db.get());
+    ASSERT_EQ(pending.size(), 1u);
+    EXPECT_GE(pending[0].lastAttempt, beforeAttempt);
+    EXPECT_EQ(pending[0].missingDependencies, (std::vector<std::string>{"m.mtl"}));
+    EXPECT_FALSE(ds.nxzBuilt("m.obj"));
+
+    ScopedRetryEnv enoughDisk("DDB_MIN_FREE_DISK_MB", "0");
+    ddb::buildPending(ds.db.get(), "", false);
+    EXPECT_TRUE(fs::exists(ds.pendingFile("m.obj"))) << "fresh attempt is inside 60-second backoff";
+    ds.backdatePending("m.obj", 60);
+    ddb::buildPending(ds.db.get(), "", false);
+    EXPECT_FALSE(fs::exists(ds.pendingFile("m.obj")));
+    EXPECT_TRUE(ddb::isBuildComplete(ds.db.get(), "m.obj"));
+}
+
+TEST(PendingBuild, FreshLowDiskFailureDoesNotCreatePendingMarker) {
+    Dataset ds(TEST_NAME);
+    writeText(ds.path("m.obj"), objWithMtllib("mtllib missing.mtl"));
+    ds.add({"m.obj"});
+    ScopedRetryEnv lowDisk("DDB_MIN_FREE_DISK_MB", "100000000000");
+    EXPECT_THROW(ddb::build(ds.db.get(), "m.obj", "", false), RetryableBuildException);
+    EXPECT_FALSE(fs::exists(ds.pendingFile("m.obj")));
+}
+
+TEST(PendingBuild, PrimaryLockContentionLeavesMarkerByteForByteUnchanged) {
+    Dataset ds(TEST_NAME);
+    writeText(ds.path("m.obj"), objWithMtllib("mtllib missing.mtl"));
+    ds.add({"m.obj"});
+    ds.writePendingMarker("m.obj", 1, {"missing.mtl", "older hint.png"});
+    const auto original = markerContents(ds.pendingFile("m.obj"));
+    const auto base = ds.db->buildDirectory() / ds.hashOf("m.obj");
+    fs::create_directories(base);
+    BuildLock lock((base / "nxs").string());
+    EXPECT_THROW(ddb::build(ds.db.get(), "m.obj", "", false), BuildInProgressException);
+    EXPECT_EQ(markerContents(ds.pendingFile("m.obj")), original);
+}
+
+TEST(PendingBuild, TilesLockContentionLeavesMarkerByteForByteUnchanged) {
+    Dataset ds(TEST_NAME);
+    writeText(ds.path("m.obj"), objWithMtllib("mtllib missing.mtl"));
+    ds.add({"m.obj"});
+    ds.writePendingMarker("m.obj", 1, {"missing.mtl"});
+    const auto original = markerContents(ds.pendingFile("m.obj"));
+    const auto base = ds.db->buildDirectory() / ds.hashOf("m.obj");
+    fs::create_directories(base);
+    BuildLock lock((base / "3dtiles").string());
+    EXPECT_THROW(ddb::build(ds.db.get(), "m.obj", "", false), BuildInProgressException);
+    EXPECT_EQ(markerContents(ds.pendingFile("m.obj")), original);
+}
+
+#ifndef _WIN32
+TEST(PendingBuild, FailedAtomicTimestampReplacementPreservesOriginalMarker) {
+    Dataset ds(TEST_NAME);
+    writeText(ds.path("m.obj"), objWithMtllib("mtllib missing.mtl"));
+    ds.add({"m.obj"});
+    ds.writePendingMarker("m.obj", 1, {"missing.mtl"});
+    const auto original = markerContents(ds.pendingFile("m.obj"));
+    fs::create_directories(ds.db->buildDirectory() / ds.hashOf("m.obj"));
+    const auto permissions = fs::status(ds.db->buildDirectory()).permissions();
+    struct RestorePermissions {
+        fs::path path;
+        fs::perms permissions;
+        ~RestorePermissions() { std::error_code ec; fs::permissions(path, permissions, ec); }
+    } restore{ds.db->buildDirectory(), permissions};
+    fs::permissions(ds.db->buildDirectory(), fs::perms::owner_write | fs::perms::group_write |
+                    fs::perms::others_write, fs::perm_options::remove);
+    // Root can bypass directory permissions; this test needs the failure injection.
+    std::ofstream probe(ds.db->buildDirectory() / "permission-probe");
+    if (probe.is_open()) {
+        probe.close();
+        fs::remove(ds.db->buildDirectory() / "permission-probe");
+        GTEST_SKIP() << "Current user bypasses write permissions";
+    }
+    ScopedRetryEnv lowDisk("DDB_MIN_FREE_DISK_MB", "100000000000");
+    EXPECT_THROW(ddb::build(ds.db.get(), "m.obj", "", false), RetryableBuildException);
+    EXPECT_EQ(markerContents(ds.pendingFile("m.obj")), original);
+}
+#endif
 
 }  // namespace

@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <vector>
 #include <string>
+#include <system_error>
 
 namespace ddb
 {
@@ -30,7 +31,26 @@ namespace ddb
     };
     class FSException : public AppException
     {
+    public:
         using AppException::AppException;
+        FSException(const std::string &message, const std::error_code &code) :
+            AppException(message), code_(code) {}
+        const std::error_code &code() const noexcept { return code_; }
+    private:
+        std::error_code code_;
+    };
+
+    // Only these classified failures can preserve an existing pending build.
+    // This is internal to native builds; the C API still reports a failed job.
+    enum class RetryableBuildReason { LowDiskSpace, NoSpaceOnDevice, IdleTimeout };
+    class RetryableBuildException : public AppException
+    {
+    public:
+        RetryableBuildException(const std::string &message, RetryableBuildReason reason) :
+            AppException(message), reason_(reason) {}
+        RetryableBuildReason reason() const noexcept { return reason_; }
+    private:
+        RetryableBuildReason reason_;
     };
     class ZipException : public AppException
     {

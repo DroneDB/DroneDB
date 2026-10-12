@@ -5,12 +5,14 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cerrno>
 #include <charconv>
 #include <clocale>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <initializer_list>
 #include <limits>
 #include <locale>
 #include <sstream>
@@ -252,10 +254,14 @@ namespace ddb
         class TextWriter
         {
         public:
-            explicit TextWriter(const fs::path &p) : path(p), out(p.string(), std::ios::binary | std::ios::trunc)
+            explicit TextWriter(const fs::path &p) : path(p)
             {
+                errno = 0;
+                out.open(p.string(), std::ios::binary | std::ios::trunc);
+                const int systemError = errno;
                 if (!out.is_open())
-                    throw FSException("Cannot write " + p.string());
+                    throw FSException("Cannot write " + p.string(),
+                                      std::error_code(systemError, std::generic_category()));
                 data.reserve(kIoChunk + 4096);
             }
 
@@ -271,19 +277,31 @@ namespace ddb
             {
                 if (!data.empty())
                 {
+                    errno = 0;
                     out.write(data.data(), static_cast<std::streamsize>(data.size()));
+                    const int systemError = errno;
+                    if (!out)
+                        throw FSException("Cannot write " + path.string(),
+                                          std::error_code(systemError, std::generic_category()));
                     data.clear();
                 }
+                errno = 0;
+                out.flush();
+                const int systemError = errno;
                 if (!out)
-                    throw FSException("Cannot write " + path.string() + " (disk full?)");
+                    throw FSException("Cannot flush " + path.string(),
+                                      std::error_code(systemError, std::generic_category()));
             }
 
             void close()
             {
                 flush();
+                errno = 0;
                 out.close();
+                const int systemError = errno;
                 if (out.fail())
-                    throw FSException("Cannot write " + path.string());
+                    throw FSException("Cannot close " + path.string(),
+                                      std::error_code(systemError, std::generic_category()));
             }
 
         private:

@@ -4,6 +4,7 @@
 #include "buildlod_runner.h"
 
 #include <cstdlib>
+#include <cstdint>
 #include <mutex>
 #include <sstream>
 #include <string>
@@ -157,81 +158,118 @@ namespace ddb
                          int maxSh,
                          const fs::path &binary)
         {
-            errorOut.clear();
+            const auto result = runBuildLodResult(input, outputRad, quality, maxSh, binary);
+            errorOut = result.error;
+            return result.succeeded;
+        }
 
+        ToolRunResult runBuildLodResult(const fs::path &input,
+                                       const fs::path &outputRad,
+                                       bool quality,
+                                       int maxSh,
+                                       const fs::path &binary,
+                                       const process::Options &options)
+        {
+            ToolRunResult result;
+            process::Options popts = options;
+            if (const char *raw = std::getenv("DDB_BUILDLOD_IDLE_TIMEOUT_SECONDS"))
+            {
+                if (*raw)
+                {
+                    using Milliseconds = std::chrono::milliseconds;
+                    constexpr uint64_t limit = 86400; // 24 hours; keeps steady-clock deadlines representable.
+                    uint64_t seconds = 0;
+                    bool valid = true;
+                    for (const char *p = raw; *p; ++p)
+                    {
+                        if (*p < '0' || *p > '9' || seconds > (limit - static_cast<uint64_t>(*p - '0')) / 10)
+                        {
+                            valid = false;
+                            break;
+                        }
+                        seconds = seconds * 10 + static_cast<uint64_t>(*p - '0');
+                    }
+                    if (!valid || seconds == 0)
+                    {
+                        result.error = "Invalid DDB_BUILDLOD_IDLE_TIMEOUT_SECONDS; expected an integer from 1 to 86400 seconds (24 hours)";
+                        return result;
+                    }
+                    popts.idleTimeout = Milliseconds(static_cast<Milliseconds::rep>(seconds * 1000));
+                }
+            }
             fs::path bin = binary.empty() ? findBuildLodBinary() : binary;
             if (bin.empty() || !isExecutableFile(bin))
             {
-                errorOut = "build-lod binary not found";
-                return false;
+                result.error = "build-lod binary not found";
+                return result;
             }
 
             std::error_code ec;
             if (!fs::exists(input, ec) || ec)
             {
-                errorOut = "build-lod input does not exist: " + input.string();
-                return false;
+                result.errorCode = ec;
+                result.error = "build-lod input does not exist: " + input.string();
+                return result;
             }
 
             const fs::path producedRad = expectedLodOutput(input);
-
-            // Clean any stale outputs so we never mistake a leftover for a fresh build.
+            // Preserve the actual error before cleanup can overwrite it.
+            auto failIo = [&result](const std::string &operation, const std::error_code &code) {
+                result.errorCode = code;
+                result.error = operation + ": " + code.message();
+                return result;
+            };
             fs::remove(producedRad, ec);
+            if (ec) return failIo("Cannot remove stale build-lod output", ec);
             fs::remove(outputRad, ec);
-            fs::create_directories(outputRad.parent_path(), ec);
+            if (ec) return failIo("Cannot remove stale RAD output", ec);
+            if (!outputRad.parent_path().empty()) {
+                fs::create_directories(outputRad.parent_path(), ec);
+                if (ec) return failIo("Cannot create RAD output directory", ec);
+            }
 
-            // Clamp SH degree to the range build-lod accepts (0..3).
             int clampedSh = maxSh < 0 ? 0 : (maxSh > 3 ? 3 : maxSh);
-
-            std::vector<std::string> args;
-            args.push_back(input.string());
-            args.push_back(quality ? "--quality" : "--quick");
-            args.push_back("--max-sh=" + std::to_string(clampedSh));
-            args.push_back("--rad"); // single-file RAD (HTTP range friendly)
-
+            std::vector<std::string> args = {input.string(), quality ? "--quality" : "--quick",
+                                            "--max-sh=" + std::to_string(clampedSh), "--rad"};
             LOGD << "Spawning build-lod: " << process::formatCommandLine(bin, args);
 
-            // stdout+stderr are captured and forwarded to the DDB log line by line.
-            process::Options popts;
             popts.onOutputLine = [](const std::string &line) { LOGD << "[build-lod] " << line; };
-
             const process::Result res = process::run(bin, args, popts);
+            if (res.descendantsTerminated)
+                LOGW << "build-lod " << res.describe();
             if (!res.success())
             {
+                result.timedOut = res.timedOut;
                 std::ostringstream oss;
                 oss << "build-lod " << res.describe();
-                // Surface the tail of the captured output to aid diagnostics.
                 if (!res.outputTail.empty()) oss << ": " << res.tail(kErrorTailLength);
-                errorOut = oss.str();
+                result.error = oss.str();
                 fs::remove(producedRad, ec);
-                return false;
+                return result;
             }
 
             if (!fs::exists(producedRad, ec) || ec)
             {
-                errorOut = "build-lod reported success but expected output is missing: " +
-                           producedRad.string();
-                return false;
+                result.errorCode = ec;
+                result.error = "build-lod reported success but expected output is missing: " + producedRad.string();
+                return result;
             }
 
-            // Move the "<stem>-lod.rad" produced by build-lod to the canonical model.rad.
-            fs::remove(outputRad, ec);
             fs::rename(producedRad, outputRad, ec);
             if (ec)
             {
-                // Cross-device or other rename failure: fall back to copy + remove.
+                // Cross-device moves may succeed via copy. An identifiable full disk
+                // is terminal for this attempt rather than an unexplained tool failure.
+                if (ec == std::errc::no_space_on_device)
+                    return failIo("Cannot move build-lod output", ec);
                 std::error_code copyEc;
                 fs::copy_file(producedRad, outputRad, fs::copy_options::overwrite_existing, copyEc);
-                fs::remove(producedRad, ec);
                 if (copyEc)
-                {
-                    errorOut = "failed to move build-lod output to " + outputRad.string() +
-                               ": " + copyEc.message();
-                    return false;
-                }
+                    return failIo("failed to move build-lod output to " + outputRad.string(), copyEc);
+                fs::remove(producedRad, ec);
             }
-
-            return true;
+            result.succeeded = true;
+            return result;
         }
 
     } // namespace buildlod

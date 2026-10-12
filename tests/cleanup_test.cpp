@@ -608,6 +608,29 @@ namespace
         EXPECT_TRUE(wasRemoved(r, tilesTemp));
     }
 
+    TEST(cleanupBuild, TilesOldKeptWhileFinalSentinelIncomplete)
+    {
+        for (const std::string state : {"missing", "empty", "directory"})
+        {
+            SCOPED_TRACE(state);
+            TestArea ta(std::string(TEST_NAME) + "-" + state, true);
+            std::unique_ptr<Database> db;
+            std::vector<std::string> hashes;
+            setupIndexedDb(ta, db, hashes);
+            const fs::path hashDir = makeFakeBuildDir(db->buildDirectory(), hashes[0]);
+            const fs::path tiles = makeSubfolder(hashDir, "3dtiles");
+            const fs::path old = makeSubfolder(hashDir, "3dtiles-old");
+            fs::remove(tiles / "tileset.json");
+            if (state == "empty")
+                std::ofstream(tiles / "tileset.json");
+            else if (state == "directory")
+                fs::create_directory(tiles / "tileset.json");
+            const auto result = cleanupBuild(db.get(), "");
+            EXPECT_TRUE(fs::exists(old / "tileset.json"));
+            EXPECT_FALSE(wasRemoved(result, old));
+        }
+    }
+
     std::vector<fs::path> listTilesTrash(const fs::path &hashDir)
     {
         std::vector<fs::path> out;

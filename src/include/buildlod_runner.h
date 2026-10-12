@@ -8,6 +8,8 @@
 
 #include "ddb_export.h"
 #include "fs.h"
+#include "process_runner.h"
+#include "tool_runner_result.h"
 
 namespace ddb
 {
@@ -39,12 +41,25 @@ namespace ddb
         // with code 0 and outputRad exists). On failure returns false, leaves a message in
         // errorOut, and removes any partial output. The binary path is resolved via
         // findBuildLodBinary() unless a non-empty path is provided.
+        // DDB_BUILDLOD_IDLE_TIMEOUT_SECONDS overrides the supervised idle deadline
+        // on every call, including Gaussian Splat entry builds. Set a decimal
+        // integer from 1 to 86400 seconds (24 hours); empty/unset preserves Options
+        // deadline (60 minutes by default). Invalid/overflowing values return an
+        // actionable permanent failure before changing output files or launching.
         DDB_DLL bool runBuildLod(const fs::path &input,
                                  const fs::path &outputRad,
                                  std::string &errorOut,
                                  bool quality = true,
                                  int maxSh = 1,
                                  const fs::path &binary = fs::path());
+
+        // Native build callers use structured failures; legacy callers retain bool/errorOut.
+        DDB_DLL ToolRunResult runBuildLodResult(const fs::path &input,
+                                                  const fs::path &outputRad,
+                                                  bool quality = true,
+                                                  int maxSh = 1,
+                                                  const fs::path &binary = fs::path(),
+                                                  const process::Options &options = process::Options());
 
     } // namespace buildlod
 

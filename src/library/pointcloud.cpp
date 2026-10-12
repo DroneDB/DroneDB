@@ -694,6 +694,12 @@ static void buildCopcPdal(const std::vector<std::string>& inputFiles,
         mgr.execute();
 
         io::assureIsRemoved(tmpDir);
+    } catch (const FSException&) {
+        io::assureIsRemoved(tmpDir);
+        throw;
+    } catch (const fs::filesystem_error& e) {
+        io::assureIsRemoved(tmpDir);
+        throw FSException(std::string("COPC build failed: ") + e.what(), e.code());
     } catch (const pdal::pdal_error& e) {
         io::assureIsRemoved(tmpDir);
         throw PDALException(std::string("COPC build failed: ") + e.what());
@@ -791,14 +797,16 @@ void buildCopc(const std::vector<std::string>& filenames, const std::string& out
     if (backend == CopcBackend::Untwine) {
         // Dedicated temp dir to keep parallel builds isolated.
         fs::path untwineTemp = tmpDir / "untwine";
-        std::string err;
-        const bool ok = untwine::runUntwine(inputFiles, outPath, untwineTemp, err);
-        if (ok && fs::exists(outPath)) {
+        const auto result = untwine::runUntwineResult(inputFiles, outPath, untwineTemp);
+        if (result.succeeded && fs::exists(outPath)) {
             io::assureIsRemoved(tmpDir);
             return;
         }
-        // Auto fallback: log a warning and try PDAL.
-        LOGD << "Untwine COPC build failed (" << err << "), falling back to PDAL writers.copc";
+        // Idle timeout/identifiable ENOSPC abort this primary attempt and preserve
+        // its pending marker rather than starting another large writer immediately.
+        result.throwIfRetryable("Untwine COPC build failed: ");
+        // Auto fallback: log a warning and try PDAL for ordinary failures.
+        LOGD << "Untwine COPC build failed (" << result.error << "), falling back to PDAL writers.copc";
         // Make sure no half-written output is left behind before the fallback runs.
         io::assureIsRemoved(outPath);
     }

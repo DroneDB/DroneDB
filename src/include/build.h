@@ -24,8 +24,10 @@ namespace ddb
      * directory). A retry is a full build attempt of the entry: the dependency names in
      * the marker are informational and are not matched against the index. Entries
      * attempted less than 60 seconds ago are skipped unless @p force is set. Errors are
-     * logged, never thrown: a dependency still missing rewrites the marker; any other
-     * failure consumes it.
+     * logged, never thrown: missing dependencies refresh the marker. Low disk space,
+     * identifiable ENOSPC and primary-tool idle timeout preserve an existing marker;
+     * permanent failures and complete builds consume it. Lock contention leaves it
+     * untouched. Fresh failed builds do not gain a marker except for dependencies.
      * @param db database (already opened)
      * @param outputPath base build directory; if empty, uses db->buildDirectory()
      * @param force rebuild even if complete, and ignore the retry backoff
@@ -39,7 +41,8 @@ namespace ddb
      * relative to the dataset root (e.g. "sub/m.mtl" or "sub/layer.shx");
      * markers written by older versions may hold names relative to the
      * source file's folder. Missing external tools (e.g. "build-lod") are not
-     * deferred: they fail the build.
+     * deferred: they fail the build. A marker retained after a classified primary
+     * transient failure keeps the dependency hints from its prior deferred attempt.
      */
     struct PendingBuildInfo
     {

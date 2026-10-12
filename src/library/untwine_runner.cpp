@@ -265,22 +265,30 @@ namespace ddb
                         std::string &errorOut,
                         const fs::path &binary)
         {
-            errorOut.clear();
+            const auto result = runUntwineResult(inputFiles, outputFile, tempDir, binary);
+            errorOut = result.error;
+            return result.succeeded;
+        }
 
+        ToolRunResult runUntwineResult(const std::vector<std::string> &inputFiles,
+                                      const fs::path &outputFile,
+                                      const fs::path &tempDir,
+                                      const fs::path &binary,
+                                      const process::Options &options)
+        {
+            ToolRunResult result;
             fs::path bin = binary.empty() ? findUntwineBinary() : binary;
             if (bin.empty() || !isExecutableFile(bin))
             {
-                errorOut = "untwine binary not found";
-                return false;
+                result.error = "untwine binary not found";
+                return result;
             }
-
             if (inputFiles.empty())
             {
-                errorOut = "no input files provided";
-                return false;
+                result.error = "no input files provided";
+                return result;
             }
 
-            // Build comma-separated file list (Untwine accepts a comma-separated --files value).
             std::string filesArg;
             for (size_t i = 0; i < inputFiles.size(); ++i)
             {
@@ -288,56 +296,58 @@ namespace ddb
                 filesArg.append(inputFiles[i]);
             }
 
-            // Make sure output dir exists; remove any pre-existing output file so untwine has a clean slate.
             std::error_code ec;
-            fs::create_directories(outputFile.parent_path(), ec);
-            if (fs::exists(outputFile, ec)) fs::remove(outputFile, ec);
+            auto failIo = [&result](const std::string &operation, const std::error_code &code) {
+                result.errorCode = code;
+                result.error = operation + ": " + code.message();
+                return result;
+            };
+            if (!outputFile.parent_path().empty()) {
+                fs::create_directories(outputFile.parent_path(), ec);
+                if (ec) return failIo("Cannot create COPC output directory", ec);
+            }
+            fs::remove(outputFile, ec);
+            if (ec) return failIo("Cannot remove stale COPC output", ec);
 
-            std::vector<std::string> args;
-            args.push_back("--files");
-            args.push_back(filesArg);
-            args.push_back("--output_dir");
-            args.push_back(outputFile.string());
+            std::vector<std::string> args = {"--files", filesArg, "--output_dir", outputFile.string()};
             if (!tempDir.empty())
             {
                 fs::create_directories(tempDir, ec);
+                if (ec) return failIo("Cannot create Untwine temporary directory", ec);
                 args.push_back("--temp_dir");
                 args.push_back(tempDir.string());
             }
-
-            // Structured progress channel: process::run passes the write end of an
-            // extra pipe to the child (a fixed descriptor number on POSIX, the
-            // inherited HANDLE value as size_t on Windows - QgisUntwine convention)
-            // in place of the placeholder argument.
             args.push_back("--progress_fd");
             args.push_back(process::kExtraChannelPlaceholder);
 
             LOGD << "Spawning untwine (" << inputFiles.size() << " input file(s)): "
                  << process::formatCommandLine(bin, args);
-
             ProgressDecoder progress;
-            process::Options popts;
+            process::Options popts = options;
             popts.extraChannel = true;
             popts.onExtraData = [&progress](const char *data, size_t n) { progress.feed(data, n); };
             popts.onOutputLine = [](const std::string &line) { LOGD << "[untwine] " << line; };
 
             const process::Result res = process::run(bin, args, popts);
+            if (res.descendantsTerminated)
+                LOGW << "untwine " << res.describe();
             if (!res.success())
             {
+                result.timedOut = res.timedOut;
                 std::ostringstream oss;
                 oss << "untwine " << res.describe();
                 if (!res.outputTail.empty()) oss << ": " << res.tail(kErrorTailLength);
-                errorOut = oss.str();
-                return false;
+                result.error = oss.str();
+                return result;
             }
-
-            if (!fs::exists(outputFile))
+            if (!fs::exists(outputFile, ec) || ec)
             {
-                errorOut = "untwine reported success but output file is missing: " + outputFile.string();
-                return false;
+                result.errorCode = ec;
+                result.error = "untwine reported success but output file is missing: " + outputFile.string();
+                return result;
             }
-
-            return true;
+            result.succeeded = true;
+            return result;
         }
 
     } // namespace untwine
