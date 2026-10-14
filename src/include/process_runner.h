@@ -35,6 +35,18 @@ namespace ddb
     //     (PR_SET_PDEATHSIG); Windows children are placed in a Job Object with
     //     JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE.
     //
+    // POSIX spawning uses fork() + execve() rather than posix_spawn(): the child
+    // needs setpgid, PR_SET_PDEATHSIG, a reset signal mask/SIGPIPE and
+    // close_range, which posix_spawn cannot all express portably. The cost is a
+    // page-table copy proportional to the parent's resident size on every tool
+    // launch (tens of milliseconds for a multi-GB host such as the Registry) and,
+    // under strict overcommit (vm.overcommit_memory=2), fork() may fail with ENOMEM
+    // where posix_spawn would not; that failure is reported in Result::errorMessage
+    // ("fork(): Cannot allocate memory"). Switch to posix_spawn with
+    // posix_spawnattr_setpgroup/SETSIGMASK/SETSIGDEF and
+    // posix_spawn_file_actions_addclosefrom_np (glibc 2.34) if that ever shows up
+    // in the field; only PR_SET_PDEATHSIG would be lost.
+    //
     // The parent reads both pipes until EOF and kills the child (its whole
     // process group / job) when no byte arrives on ANY monitored pipe for the
     // idle timeout. run() blocks the calling thread (the child is forked on it)
