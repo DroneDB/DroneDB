@@ -21,9 +21,9 @@ namespace ddb
         // and lat/lon/alt are ignored. octree/lodTextureScale are supported since
         // v1.5.0 (OpenDroneMap/Obj2Tiles#95); textureFormat/ktx2Quality since v1.6.0
         // (OpenDroneMap/Obj2Tiles#97); splitStrategy since v1.4.0
-        // (OpenDroneMap/Obj2Tiles#92). All of these flags are emitted only when set to
-        // a non-default (or non-empty) value, so callers targeting an older Obj2Tiles
-        // binary can simply leave them unset.
+        // (OpenDroneMap/Obj2Tiles#92); ktx2Threads since v1.8.0 (OpenDroneMap/Obj2Tiles#102).
+        // All of these flags are emitted only when set to a non-default (or non-empty)
+        // value, so callers targeting an older Obj2Tiles binary can simply leave them unset.
         struct Obj2TilesOptions
         {
             int lods = 3;                  // --lods
@@ -36,6 +36,7 @@ namespace ddb
             double lodTextureScale = 0.5;  // --lod-texture-scale (since v1.5.0; Obj2Tiles default)
             std::string textureFormat;     // --texture-format (since v1.6.0; "Ktx2"/"Webp"/"Jpeg", empty = Obj2Tiles default "Jpeg")
             int ktx2Quality = 128;         // --ktx2-quality (since v1.6.0; 1-255, only emitted when textureFormat == "Ktx2")
+            int ktx2Threads = 0;           // --ktx2-threads (since v1.8.0; 0 = single-threaded encoder, only emitted when textureFormat == "Ktx2" and no core cap applies)
             std::string splitStrategy;     // --split-strategy (since v1.4.0; "VertexMedian"/"VertexBaricenter"/"AbsoluteCenter", empty = Obj2Tiles default)
         };
 
@@ -62,7 +63,9 @@ namespace ddb
          * DDB_OBJ2TILES_MAX_CORES is read on each call: a positive decimal integer
          * sets DOTNET_PROCESSOR_COUNT in the child only, capped to known hardware
          * concurrency. Empty/unset inherits the environment; invalid values are
-         * logged and ignored.
+         * logged and ignored. libktx encoder threads are native and ignore
+         * DOTNET_PROCESSOR_COUNT, so opts.ktx2Threads is dropped whenever a core
+         * cap applies (DDB_OBJ2TILES_MAX_CORES or an inherited DOTNET_PROCESSOR_COUNT).
          *
          * @param inputObj Source OBJ file.
          * @param outDir Absent or empty destination for tileset.json and LOD-* tiles.

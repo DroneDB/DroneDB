@@ -1220,10 +1220,20 @@ obj2tiles::Obj2TilesOptions computeObj2TilesOpts(const ModelInfo& info) {
     opts.ktx2Quality = 192;
     opts.splitStrategy = "VertexMedian";
 
+    // KTX2 encoding dominates Obj2Tiles run time and runs one tile per core.
+    // With at most 16 finest-LOD tiles (depth <= 2) most cores sit idle while
+    // each tile encodes its textures single-threaded, so the encoder gets
+    // threads of its own. Measured with Obj2Tiles 1.8.0: 101K faces / 42 4K
+    // textures 42 s -> 26 s; 8 threads gave no further gain. Deeper hierarchies
+    // (256+ finest tiles) already saturate the cores: no speed-up there, only
+    // +1-2 GB peak memory, so they keep the single-threaded encoder.
+    const int finalDepth = octree ? (lods + divisions - 1) : divisions;
+    opts.ktx2Threads = finalDepth <= 2 ? 4 : 0;
+
     LOGD << "computeObj2TilesOpts: faces=" << faces
          << " → lods=" << lods << ", divisions=" << divisions
          << ", octree=" << (octree ? "true" : "false")
-         << ", depth=" << (octree ? (lods + divisions - 1) : divisions);
+         << ", depth=" << finalDepth << ", ktx2Threads=" << opts.ktx2Threads;
 
     return opts;
 }

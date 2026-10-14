@@ -266,6 +266,7 @@ TEST(obj2tiles, computeOptsTiny) {
     EXPECT_EQ(opts.textureFormat, "Ktx2");
     EXPECT_EQ(opts.ktx2Quality, 192);
     EXPECT_EQ(opts.splitStrategy, "VertexMedian");
+    EXPECT_EQ(opts.ktx2Threads, 4); // single tile: the encoder gets its own threads
 }
 
 // Small band: 10K–50K → lods=2, divisions=0, octree=true (depth=1)
@@ -276,6 +277,7 @@ TEST(obj2tiles, computeOptsSmall) {
     EXPECT_EQ(opts.lods, 2);
     EXPECT_EQ(opts.divisions, 0);
     EXPECT_TRUE(opts.octree);
+    EXPECT_EQ(opts.ktx2Threads, 4);
 }
 
 // Medium band: 50K–200K → lods=2, divisions=1, octree=true (depth=2)
@@ -286,6 +288,7 @@ TEST(obj2tiles, computeOptsMedium) {
     EXPECT_EQ(opts.lods, 2);
     EXPECT_EQ(opts.divisions, 1);
     EXPECT_TRUE(opts.octree);
+    EXPECT_EQ(opts.ktx2Threads, 4); // depth 2: 16 finest tiles
 }
 
 // Large band: 200K–750K → lods=3, divisions=2, octree=true (depth=4)
@@ -297,6 +300,7 @@ TEST(obj2tiles, computeOptsLarge) {
     EXPECT_EQ(opts.lods, 3);
     EXPECT_EQ(opts.divisions, 2);
     EXPECT_TRUE(opts.octree);
+    EXPECT_EQ(opts.ktx2Threads, 0); // 256 finest tiles already saturate the cores
 }
 
 // XL band: 750K–3M → lods=3, divisions=3, octree=true (depth=5)
@@ -308,6 +312,7 @@ TEST(obj2tiles, computeOptsXL) {
     EXPECT_EQ(opts.lods, 3);
     EXPECT_EQ(opts.divisions, 3);
     EXPECT_TRUE(opts.octree);
+    EXPECT_EQ(opts.ktx2Threads, 0);
 }
 
 // XXL band: 3M–12M → lods=4, divisions=2, octree=true (depth=5)
@@ -318,6 +323,17 @@ TEST(obj2tiles, computeOptsXXL) {
     EXPECT_EQ(opts.lods, 4);
     EXPECT_EQ(opts.divisions, 2);
     EXPECT_TRUE(opts.octree);
+}
+
+// Encoder threads stop exactly where the Large band (depth 4) starts.
+TEST(obj2tiles, computeOptsKtx2ThreadsBoundary200K) {
+    ModelInfo info;
+    info.faceCount = 199999;
+    EXPECT_EQ(computeObj2TilesOpts(info).ktx2Threads, 4);
+    info.faceCount = 200000;
+    EXPECT_EQ(computeObj2TilesOpts(info).ktx2Threads, 0);
+    info.faceCount = UINT64_MAX;
+    EXPECT_EQ(computeObj2TilesOpts(info).ktx2Threads, 0);
 }
 
 // Boundary: exactly 10K faces → Small band (not Tiny)
@@ -607,6 +623,105 @@ TEST(obj2tiles, maxCoresClampedToHardwareConcurrency) {
               std::vector<std::string>{std::to_string(hw)});
     EXPECT_EQ(childProcessorCounts(ta, "huge", std::string("1000000")),
               std::vector<std::string>{std::to_string(hw)});
+}
+
+// ---------------------------------------------------------------------------
+// --ktx2-threads: forwarded only with KTX2 textures and only without a core
+// cap (libktx threads are native and ignore DOTNET_PROCESSOR_COUNT).
+// ---------------------------------------------------------------------------
+
+// Runs a fake Obj2Tiles that records its argv one per line and returns it.
+std::vector<std::string> childArgs(TestArea& ta, const std::string& label,
+                                   const obj2tiles::Obj2TilesOptions& opts) {
+    const fs::path dir = ta.getFolder("args_" + label);
+    const fs::path script = dir / "fake_obj2tiles_args.sh";
+    writeSidecar(script,
+                 "#!/bin/sh\n"
+                 "out=\"$2\"\n"
+                 "mkdir -p \"$out\"\n"
+                 "printf '%s\\n' \"$@\" > \"$out/args.txt\"\n"
+                 "echo '{\"asset\":{\"version\":\"1.0\"},\"geometricError\":0,\"root\":{}}' > "
+                 "\"$out/tileset.json\"\n");
+    fs::permissions(script, fs::perms::owner_all, fs::perm_options::replace);
+    const fs::path obj = dir / "model.obj";
+    writeSidecar(obj, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
+    const fs::path out = dir / "out";
+    io::assureIsRemoved(out);
+
+    std::string err;
+    EXPECT_TRUE(obj2tiles::runObj2Tiles(obj, out, opts, err, script)) << label << ": " << err;
+
+    std::vector<std::string> args;
+    std::ifstream in((out / "args.txt").string());
+    for (std::string line; std::getline(in, line);) args.push_back(line);
+    return args;
+}
+
+// Value following `flag` in argv, or nullopt when the flag is absent.
+std::optional<std::string> argValue(const std::vector<std::string>& args, const std::string& flag) {
+    for (size_t i = 0; i + 1 < args.size(); ++i)
+        if (args[i] == flag) return args[i + 1];
+    return std::nullopt;
+}
+
+obj2tiles::Obj2TilesOptions ktx2Opts(int threads) {
+    obj2tiles::Obj2TilesOptions opts;
+    opts.textureFormat = "Ktx2";
+    opts.ktx2Threads = threads;
+    return opts;
+}
+
+TEST(obj2tiles, ktx2ThreadsReachChildWithoutCoreCap) {
+    SKIP_WITHOUT_POSIX_SHELL();
+    EnvVarGuard capGuard("DDB_OBJ2TILES_MAX_CORES");
+    EnvVarGuard dotnetGuard("DOTNET_PROCESSOR_COUNT");
+    DDB_UNSETENV("DDB_OBJ2TILES_MAX_CORES");
+    DDB_UNSETENV("DOTNET_PROCESSOR_COUNT");
+    TestArea ta(TEST_NAME);
+
+    EXPECT_EQ(argValue(childArgs(ta, "four", ktx2Opts(4)), "--ktx2-threads"), std::optional<std::string>("4"));
+    // 0 keeps the Obj2Tiles default (single-threaded encoder): no flag.
+    EXPECT_EQ(argValue(childArgs(ta, "zero", ktx2Opts(0)), "--ktx2-threads"), std::nullopt);
+}
+
+TEST(obj2tiles, ktx2ThreadsNeverSentWithoutKtx2Textures) {
+    SKIP_WITHOUT_POSIX_SHELL();
+    EnvVarGuard capGuard("DDB_OBJ2TILES_MAX_CORES");
+    EnvVarGuard dotnetGuard("DOTNET_PROCESSOR_COUNT");
+    DDB_UNSETENV("DDB_OBJ2TILES_MAX_CORES");
+    DDB_UNSETENV("DOTNET_PROCESSOR_COUNT");
+    TestArea ta(TEST_NAME);
+
+    // Obj2Tiles rejects --ktx2-threads without --texture-format Ktx2.
+    obj2tiles::Obj2TilesOptions jpeg = ktx2Opts(4);
+    jpeg.textureFormat.clear();
+    EXPECT_EQ(argValue(childArgs(ta, "default", jpeg), "--ktx2-threads"), std::nullopt);
+    jpeg.textureFormat = "Webp";
+    EXPECT_EQ(argValue(childArgs(ta, "webp", jpeg), "--ktx2-threads"), std::nullopt);
+}
+
+TEST(obj2tiles, ktx2ThreadsDroppedUnderCoreCap) {
+    SKIP_WITHOUT_POSIX_SHELL();
+    EnvVarGuard capGuard("DDB_OBJ2TILES_MAX_CORES");
+    EnvVarGuard dotnetGuard("DOTNET_PROCESSOR_COUNT");
+    TestArea ta(TEST_NAME);
+
+    // Explicit DroneDB cap.
+    DDB_UNSETENV("DOTNET_PROCESSOR_COUNT");
+    DDB_SETENV("DDB_OBJ2TILES_MAX_CORES", "2");
+    auto args = childArgs(ta, "ddbcap", ktx2Opts(4));
+    EXPECT_EQ(argValue(args, "--ktx2-threads"), std::nullopt);
+    EXPECT_EQ(argValue(args, "--ktx2-quality"), std::optional<std::string>("128")); // rest of KTX2 args intact
+
+    // Cap inherited from the environment.
+    DDB_UNSETENV("DDB_OBJ2TILES_MAX_CORES");
+    DDB_SETENV("DOTNET_PROCESSOR_COUNT", "2");
+    EXPECT_EQ(argValue(childArgs(ta, "inherited", ktx2Opts(4)), "--ktx2-threads"), std::nullopt);
+
+    // An invalid DroneDB cap is ignored, so it does not count as a cap.
+    DDB_UNSETENV("DOTNET_PROCESSOR_COUNT");
+    DDB_SETENV("DDB_OBJ2TILES_MAX_CORES", "abc");
+    EXPECT_EQ(argValue(childArgs(ta, "invalid", ktx2Opts(4)), "--ktx2-threads"), std::optional<std::string>("4"));
 }
 
 // A2.2 / A4: failures carry the exit code or signal number and the output tail.

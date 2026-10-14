@@ -141,6 +141,13 @@ namespace ddb
                     {
                         args.push_back("--ktx2-quality");
                         args.push_back(std::to_string(opts.ktx2Quality));
+                        // --ktx2-threads since v1.8.0 (OpenDroneMap/Obj2Tiles#102);
+                        // Obj2Tiles rejects it without --texture-format Ktx2.
+                        if (opts.ktx2Threads > 0)
+                        {
+                            args.push_back("--ktx2-threads");
+                            args.push_back(std::to_string(opts.ktx2Threads));
+                        }
                     }
                 }
                 if (!opts.splitStrategy.empty())
@@ -314,16 +321,28 @@ namespace ddb
                 return false;
             }
 
+            // Per-child core cap (C1): only the child's environment is changed.
+            const auto maxCores = readMaxCores();
+            const char *inheritedCount = std::getenv("DOTNET_PROCESSOR_COUNT");
+            const bool coreCapped = maxCores || (inheritedCount && inheritedCount[0] != '\0');
+
+            // libktx encoder threads are native: DOTNET_PROCESSOR_COUNT does not
+            // bound them, so they would multiply past any core cap.
+            Obj2TilesOptions effective = opts;
+            if (coreCapped && effective.ktx2Threads > 0)
+            {
+                LOGD << "Obj2Tiles core cap set: dropping --ktx2-threads " << effective.ktx2Threads;
+                effective.ktx2Threads = 0;
+            }
+
             std::vector<std::string> args;
             args.push_back(inputObj.string()); // positional: Input
             args.push_back(outDir.string());   // positional: Output
-            appendOptionArgs(args, opts);
+            appendOptionArgs(args, effective);
 
             LOGD << "Spawning Obj2Tiles: " << process::formatCommandLine(bin, args);
 
-            // Per-child core cap (C1): only the child's environment is changed.
             process::Options popts;
-            const auto maxCores = readMaxCores();
             if (maxCores)
             {
                 popts.envOverrides.emplace_back("DOTNET_PROCESSOR_COUNT", std::to_string(*maxCores));
