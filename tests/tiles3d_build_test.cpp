@@ -11,10 +11,12 @@
 // not depend on the real binary; they are skipped on Windows. Tests that need the
 // real Obj2Tiles are skipped when it is not available.
 
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
+#include <thread>
 #include <map>
 #include <memory>
 #include <sstream>
@@ -695,6 +697,79 @@ TEST(tiles3dBuild, modelBuildProducesNexusAndTiles) {
     EXPECT_TRUE(fs::exists(ds.out("model.obj") / "nxs" / "model.nxz"));
     EXPECT_EQ(readText(ds.out("model.obj") / "3dtiles" / "marker.txt"), "previous");
     expectNoLeftovers(ds.out("model.obj") / "3dtiles");
+}
+
+// Stress test for the lock order shared by builds and cleanupBuild (primary
+// "nxs" lock, then "3dtiles"). A cleanup thread keeps seeding a stale
+// "3dtiles-temp-*" leftover and collecting it (which takes both locks for the
+// rename) while forced Model builds run on the main thread. Invariant: a build
+// that returns normally has replaced the tiles (the stale marker is gone and
+// tileset.json exists). Before the fix cleanup could hold the "3dtiles" lock
+// alone, the build swallowed BuildInProgress as a best-effort tiles failure and
+// returned normally with the old tiles still in place. A build refused on its
+// primary lock is the allowed, benign outcome.
+TEST(tiles3dBuild, cleanupNeverStripsTilesFromConcurrentModelBuild) {
+    SKIP_WITHOUT_POSIX_SHELL();
+    Obj2TilesEnvReset reset;
+    ModelDataset ds(TEST_NAME);
+    ds.add("model.obj", gridObj());
+    usePath(writeFakeObj2Tiles(ds.ta.getFolder(), true));
+
+    const fs::path base = ds.out("model.obj");
+    const fs::path tiles = base / "3dtiles";
+    ddb::build(ds.db.get(), "model.obj", "", false);
+    ASSERT_TRUE(fs::exists(tiles / "tileset.json"));
+
+    // Second connection for the cleanup thread: a Database is not shared across threads.
+    auto cleanupDb = ddb::open(ds.root.string(), true);
+    std::atomic<bool> stop{false};
+    std::atomic<int> cleanups{0};
+    std::thread cleaner([&]() {
+        while (!stop.load()) {
+            std::error_code ec;
+            fs::create_directories(base / "3dtiles-temp-0123456789abcdef", ec);
+            std::ofstream((base / "3dtiles-temp-0123456789abcdef" / "x.b3dm").string()) << "x";
+            try {
+                ddb::cleanupBuild(cleanupDb.get(), "");
+            } catch (const std::exception&) {
+                // Lock/IO contention is not what this test is about.
+            }
+            ++cleanups;
+        }
+    });
+
+    int refused = 0, built = 0;
+    for (int i = 0; i < 20; ++i) {
+        writeText(tiles / "stale.marker", "iteration " + std::to_string(i));
+        try {
+            ddb::build(ds.db.get(), "model.obj", "", true);
+        } catch (const BuildInProgressException&) {
+            // Cleanup held the primary lock: benign, the previous tiles stay intact.
+            ++refused;
+            EXPECT_TRUE(fs::exists(tiles / "stale.marker"));
+            EXPECT_TRUE(fs::exists(tiles / "tileset.json"));
+            continue;
+        }
+        ++built;
+        EXPECT_TRUE(fs::exists(base / "nxs" / "model.nxz")) << "iteration " << i;
+        EXPECT_TRUE(fs::exists(tiles / "tileset.json")) << "iteration " << i;
+        EXPECT_FALSE(fs::exists(tiles / "stale.marker"))
+            << "iteration " << i << ": build returned normally without replacing the tiles";
+    }
+    stop.store(true);
+    cleaner.join();
+
+    EXPECT_GT(built, 0);
+    EXPECT_GT(cleanups.load(), 0);
+    LOGD << "cleanupNeverStripsTilesFromConcurrentModelBuild: " << built << " built, " << refused
+         << " refused on the primary lock, " << cleanups.load() << " cleanups";
+
+    // Nothing is held after the run and the leftovers of the last cleanup pass
+    // are collectable.
+    std::error_code ec;
+    fs::remove_all(base / "3dtiles-temp-0123456789abcdef", ec);
+    expectNoLeftovers(tiles);
+    EXPECT_NO_THROW({ BuildLock probe((base / "nxs").string(), false); });
 }
 
 TEST(tiles3dBuild, modelBuildNexusOnlyWithoutObj2Tiles) {

@@ -84,6 +84,14 @@ namespace ddb
      * (see obj2tiles_runner.h). On success the output directory contains
      * `tileset.json` and one or more `LOD-<n>` folders with `.b3dm` tiles.
      *
+     * Lock protocol: the primary lock of the owning build (`nxs` for a Model) comes
+     * first, then the `3dtiles` lock taken here; cleanupBuild follows the same order
+     * when it handles the `-temp-`/`-old` siblings, so a Model build can only meet
+     * cleanup on its primary lock (benign, retried by the callers) and never on the
+     * tiles lock. A caller that may overlap cleanupBuild must therefore hold the
+     * primary lock before calling this function. The standalone `ddb tiles3d`
+     * command holds only the tiles lock.
+     *
      * Safe rebuild: a @ref BuildLock on @p outputDir (`<outputDir>.building`) is held
      * until return. Under it, a usable `<outputDir>-old` left by an interrupted swap is
      * restored when the final tiles sentinel is missing/empty. The backup is deleted
@@ -129,7 +137,9 @@ namespace ddb
 
     /**
      * Repair an interrupted tiles swap under the output's tiles BuildLock.
-     * A full Model build must already hold its primary lock before calling this.
+     * A full Model build must already hold its primary lock before calling this
+     * (lock order: primary `nxs` lock, then `3dtiles`; cleanupBuild uses the same
+     * order, see @ref buildModel3DTiles).
      * Throws BuildInProgressException without changing directories when busy;
      * filesystem failures preserve the usable backup and are propagated.
      */

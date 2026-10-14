@@ -14,6 +14,7 @@
 #include "testarea.h"
 
 #include <algorithm>
+#include <chrono>
 #include <fstream>
 #include <string>
 
@@ -541,9 +542,10 @@ namespace
         EXPECT_TRUE(fs::exists(tiles.string() + ".building"));
     }
 
-    // A live "nxs" lock (a Model build) does not protect the tiles siblings either
-    // way: with the "3dtiles" lock absent they are removed.
-    TEST(cleanupBuild, TilesTempAndOldRemovedWithoutTilesLock)
+    // Cleanup follows the build's lock order: primary "nxs" lock first, then
+    // "3dtiles". A live "nxs" lock (a Model build in progress) therefore protects
+    // the tiles siblings too, and cleanup never waits for it.
+    TEST(cleanupBuild, TilesTempAndOldKeptUnderLivePrimaryLock)
     {
         TestArea ta(TEST_NAME, true);
         std::unique_ptr<Database> db;
@@ -556,14 +558,68 @@ namespace
         const fs::path tilesOld = makeSubfolder(hashDir, "3dtiles-old");
         ddb::BuildLock nxsLive((hashDir / "nxs").string());
 
+        const auto start = std::chrono::steady_clock::now();
+        const auto r = ddb::cleanupBuild(db.get(), "");
+        const auto elapsed = std::chrono::steady_clock::now() - start;
+        EXPECT_LT(elapsed, std::chrono::seconds(5)) << "cleanup must not block on a held lock";
+
+        EXPECT_TRUE(r.removedBuilds.empty());
+        EXPECT_TRUE(fs::exists(tilesTemp));
+        EXPECT_TRUE(fs::exists(tilesOld));
+        EXPECT_TRUE(fs::exists(tiles / "tileset.json"));
+        // Cleanup never reached the tiles lock, and still holds nothing.
+        EXPECT_FALSE(fs::exists(tiles.string() + ".building"));
+        EXPECT_NO_THROW({ ddb::BuildLock probe(tiles.string(), false); });
+    }
+
+    // With no lock held at all the siblings are removed and no lock file of either
+    // kind is left behind.
+    TEST(cleanupBuild, TilesTempAndOldRemovedWithoutAnyLock)
+    {
+        TestArea ta(TEST_NAME, true);
+        std::unique_ptr<Database> db;
+        std::vector<std::string> hashes;
+        setupIndexedDb(ta, db, hashes);
+        const fs::path hashDir = makeFakeBuildDir(db->buildDirectory(), hashes[0]);
+
+        const fs::path tiles = makeSubfolder(hashDir, "3dtiles");
+        const fs::path tilesTemp = makeSubfolder(hashDir, "3dtiles-temp-0123456789abcdef");
+        const fs::path tilesOld = makeSubfolder(hashDir, "3dtiles-old");
+
         const auto r = ddb::cleanupBuild(db.get(), "");
         EXPECT_FALSE(fs::exists(tilesTemp));
         EXPECT_FALSE(fs::exists(tilesOld));
         EXPECT_TRUE(wasRemoved(r, tilesTemp));
         EXPECT_TRUE(wasRemoved(r, tilesOld));
         EXPECT_TRUE(fs::exists(tiles / "tileset.json"));
-        // The lock taken by cleanup while deleting is released.
+        // Both locks taken by cleanup are released, in order.
         EXPECT_FALSE(fs::exists(tiles.string() + ".building"));
+        EXPECT_FALSE(fs::exists((hashDir / "nxs").string() + ".building"));
+        EXPECT_NO_THROW({ ddb::BuildLock probeNxs((hashDir / "nxs").string(), false); });
+        EXPECT_NO_THROW({ ddb::BuildLock probeTiles(tiles.string(), false); });
+    }
+
+    // Trash folders of an earlier cleanup need no lock: they are deleted even
+    // while a Model build holds the primary lock, and the live build's temp
+    // folder is left alone.
+    TEST(cleanupBuild, TilesTrashDeletedUnderLivePrimaryLock)
+    {
+        TestArea ta(TEST_NAME, true);
+        std::unique_ptr<Database> db;
+        std::vector<std::string> hashes;
+        setupIndexedDb(ta, db, hashes);
+        const fs::path hashDir = makeFakeBuildDir(db->buildDirectory(), hashes[0]);
+
+        makeSubfolder(hashDir, "3dtiles");
+        const fs::path trash = makeSubfolder(hashDir, "3dtiles-temp-trash-0123456789abcdef");
+        const fs::path tilesTemp = makeSubfolder(hashDir, "3dtiles-temp-0123456789abcdef");
+        ddb::BuildLock nxsLive((hashDir / "nxs").string());
+
+        const auto r = ddb::cleanupBuild(db.get(), "");
+        EXPECT_FALSE(fs::exists(trash));
+        EXPECT_TRUE(wasRemoved(r, trash));
+        EXPECT_TRUE(fs::exists(tilesTemp));
+        EXPECT_FALSE(wasRemoved(r, tilesTemp));
     }
 
     TEST(cleanupBuild, TilesTempAndOldRemovedWithStaleTilesLock)
