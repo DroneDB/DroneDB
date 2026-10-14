@@ -21,7 +21,7 @@ namespace cmd
     .positional_help("[args]")
     .custom_help("3dtiles model.obj [output_dir]")
     .add_options()
-    ("i,input", "Model to process (OBJ/GLTF/GLB)", cxxopts::value<std::string>())
+    ("i,input", "Model to process (OBJ/GLTF/GLB/PLY)", cxxopts::value<std::string>())
     ("o,output", "Output 3D Tiles directory (defaults to a 3dtiles/ folder next to the input)", cxxopts::value<std::string>())
     ("lat", "Latitude of the model origin (WGS84). With --lon, forces a georeferenced tileset", cxxopts::value<double>())
     ("lon", "Longitude of the model origin (WGS84). With --lat, forces a georeferenced tileset", cxxopts::value<double>())
@@ -35,7 +35,7 @@ namespace cmd
 
     std::string Tiles3d::description()
     {
-        return "Generate OGC 3D Tiles (tileset.json + b3dm) from OBJs using Obj2Tiles.";
+        return "Generate OGC 3D Tiles (tileset.json + b3dm) from 3D models (OBJ/GLTF/GLB/PLY) using Obj2Tiles.";
     }
 
     void Tiles3d::run(cxxopts::ParseResult &opts)

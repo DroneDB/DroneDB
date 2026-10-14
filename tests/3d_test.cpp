@@ -4,6 +4,8 @@
 
 #include "gtest/gtest.h"
 #include "3d.h"
+#include "build.h"
+#include "dbops.h"
 #include "entry.h"
 #include "test.h"
 #include "testfs.h"
@@ -953,6 +955,231 @@ namespace
         ASSERT_NO_THROW(outNxz = buildNexus(gltf.string(), nxz.string(), true));
         ASSERT_TRUE(fs::exists(outNxz));
         EXPECT_GT(fs::file_size(outNxz), 0);
+    }
+
+    // ---------------------------------------------------------------------------
+    // glTF inside a dataset (P3): the original glTF is validated against the dataset
+    // root, the OBJ converted into a temp folder is not, and its textures must
+    // still be found.
+    // ---------------------------------------------------------------------------
+
+    // A real 4x4 RGB PNG (Nexus aborts on an invalid image).
+    const std::vector<uint8_t> kTinyPng = {
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48,
+        0x44, 0x52, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x04, 0x08, 0x02, 0x00, 0x00,
+        0x00, 0x26, 0x93, 0x09, 0x29, 0x00, 0x00, 0x00, 0x29, 0x49, 0x44, 0x41, 0x54, 0x78,
+        0xda, 0x0d, 0xc7, 0x31, 0x01, 0x00, 0x00, 0x0c, 0xc2, 0x30, 0x84, 0x55, 0x18, 0x67,
+        0x45, 0x21, 0x70, 0xcb, 0x97, 0x24, 0x12, 0x1b, 0x17, 0x13, 0x04, 0x8b, 0xe3, 0x53,
+        0xa9, 0xad, 0xeb, 0x67, 0x32, 0x3b, 0x37, 0x0f, 0xa7, 0x63, 0x13, 0x41, 0x06, 0x1a,
+        0x2b, 0x55, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82};
+
+    // Geometry of a textured quad: 4 positions (48 B), 4 UVs (32 B), 6 indices (12 B).
+    std::vector<uint8_t> texturedQuadBin() {
+        const std::vector<float> pos = {0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0};
+        const std::vector<float> uv = {0, 0, 1, 0, 1, 1, 0, 1};
+        const std::vector<uint16_t> idx = {0, 1, 2, 0, 2, 3};
+        std::vector<uint8_t> bin = toBytes(pos);
+        const auto uvBytes = toBytes(uv);
+        const auto idxBytes = toBytes(idx);
+        bin.insert(bin.end(), uvBytes.begin(), uvBytes.end());
+        bin.insert(bin.end(), idxBytes.begin(), idxBytes.end());
+        return bin;
+    }
+
+    // bufferField: the buffer object's extra fields (e.g. a uri). imageField: the image object.
+    // extraBufferView: appended to bufferViews (for an embedded image), may be empty.
+    std::string texturedQuadGltfJson(size_t bufferLength, const std::string& bufferUriField,
+                                     const std::string& imageObject,
+                                     const std::string& extraBufferView) {
+        std::ostringstream j;
+        j << "{\"asset\":{\"version\":\"2.0\"},"
+          << "\"buffers\":[{\"byteLength\":" << bufferLength << bufferUriField << "}],"
+          << "\"bufferViews\":["
+             "{\"buffer\":0,\"byteOffset\":0,\"byteLength\":48},"
+             "{\"buffer\":0,\"byteOffset\":48,\"byteLength\":32},"
+             "{\"buffer\":0,\"byteOffset\":80,\"byteLength\":12}"
+          << extraBufferView << "],"
+          << "\"accessors\":["
+             "{\"bufferView\":0,\"componentType\":5126,\"count\":4,\"type\":\"VEC3\",\"max\":[1,1,0],\"min\":[0,0,0]},"
+             "{\"bufferView\":1,\"componentType\":5126,\"count\":4,\"type\":\"VEC2\"},"
+             "{\"bufferView\":2,\"componentType\":5123,\"count\":6,\"type\":\"SCALAR\"}],"
+          << "\"images\":[" << imageObject << "],"
+          << "\"samplers\":[{}],"
+             "\"textures\":[{\"source\":0,\"sampler\":0}],"
+             "\"materials\":[{\"pbrMetallicRoughness\":{\"baseColorTexture\":{\"index\":0}}}],"
+             "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0,\"TEXCOORD_0\":1},\"indices\":2,\"material\":0}]}],"
+             "\"nodes\":[{\"mesh\":0}],\"scenes\":[{\"nodes\":[0]}],\"scene\":0}";
+        return j.str();
+    }
+
+    void writeBytes(const fs::path& path, const std::vector<uint8_t>& data) {
+        fs::create_directories(path.parent_path());
+        std::ofstream out(path.string(), std::ios::binary);
+        out.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
+    }
+
+    struct GltfDataset {
+        explicit GltfDataset(const std::string& name) : ta(name, true) {
+            root = ta.getFolder("");
+            ddb::initIndex(root.string());
+            db = ddb::open(root.string(), true);
+        }
+        void add(const std::vector<std::string>& rels) {
+            std::vector<std::string> abs;
+            for (const auto& r : rels)
+                abs.push_back((root / r).string());
+            ddb::addToIndex(db.get(), abs);
+        }
+        std::string hashOf(const std::string& rel) {
+            Entry e;
+            EXPECT_TRUE(ddb::getEntry(db.get(), rel, e));
+            return e.hash;
+        }
+        TestArea ta;
+        fs::path root;
+        std::unique_ptr<Database> db;
+    };
+
+    void writeGltfWithExternalTexture(const fs::path& gltf) {
+        const auto bin = texturedQuadBin();
+        fs::create_directories(gltf.parent_path());
+        writeTextFile(gltf, texturedQuadGltfJson(bin.size(), ",\"uri\":\"" + dataUri(bin) + "\"",
+                                                 "{\"uri\":\"tex.png\"}", ""));
+    }
+
+    TEST(file3d, buildGltfInSubfolderWithExternalTexture)
+    {
+        GltfDataset ds(TEST_NAME);
+        writeGltfWithExternalTexture(ds.root / "sub" / "model.gltf");
+        writeBytes(ds.root / "sub" / "tex.png", kTinyPng);
+        ds.add({"sub/model.gltf", "sub/tex.png"});
+
+        Entry e;
+        ASSERT_TRUE(ddb::getEntry(ds.db.get(), "sub/model.gltf", e));
+        ASSERT_EQ(e.type, EntryType::Model);
+
+        ASSERT_NO_THROW(ddb::build(ds.db.get(), "sub/model.gltf", "", false));
+        EXPECT_TRUE(ddb::isBuildComplete(ds.db.get(), "sub/model.gltf"));
+        EXPECT_FALSE(ddb::isBuildPending(ds.db.get()));
+        EXPECT_TRUE(fs::exists(ds.db->buildDirectory() / e.hash / "nxs" / "model.nxz"));
+    }
+
+    // Builds rel and expects a plain AppException mentioning `mentions`, with no
+    // ".pending" left behind (an unsatisfiable reference must not retry forever).
+    void expectGltfBuildFailsWithoutPending(GltfDataset& ds, const std::string& rel,
+                                            const std::string& mentions) {
+        SCOPED_TRACE(rel);
+        try {
+            ddb::build(ds.db.get(), rel, "", false);
+            FAIL() << "build of " << rel << " should fail";
+        } catch (const BuildDepMissingException& e) {
+            FAIL() << "an unsatisfiable glTF reference must not defer the build: " << e.what();
+        } catch (const AppException& e) {
+            EXPECT_NE(std::string(e.what()).find(mentions), std::string::npos) << e.what();
+        }
+        EXPECT_FALSE(ddb::isBuildPending(ds.db.get()));
+        EXPECT_FALSE(fs::exists(ds.db->buildDirectory() / (ds.hashOf(rel) + ".pending")));
+        EXPECT_FALSE(ddb::isBuildComplete(ds.db.get(), rel));
+    }
+
+    void writeGltfWithImageUri(const fs::path& gltf, const std::string& imageUri) {
+        const auto bin = texturedQuadBin();
+        fs::create_directories(gltf.parent_path());
+        writeTextFile(gltf, texturedQuadGltfJson(bin.size(), ",\"uri\":\"" + dataUri(bin) + "\"",
+                                                 "{\"uri\":\"" + imageUri + "\"}", ""));
+    }
+
+    // A glTF image that leaves the glTF's folder is never staged for the converted
+    // model: even when the file exists in the dataset, the build fails outright.
+    TEST(file3d, buildGltfImageOutsideItsFolderFailsWithoutPending)
+    {
+        GltfDataset ds(TEST_NAME);
+        writeGltfWithImageUri(ds.root / "sub" / "model.gltf", "../shared/tex.png");
+        writeBytes(ds.root / "shared" / "tex.png", kTinyPng);
+        ds.add({"sub/model.gltf", "shared/tex.png"});
+
+        Entry e;
+        ASSERT_TRUE(ddb::getEntry(ds.db.get(), "sub/model.gltf", e));
+        ASSERT_EQ(e.type, EntryType::Model);
+        expectGltfBuildFailsWithoutPending(ds, "sub/model.gltf", "../shared/tex.png");
+
+        // buildPending has nothing to retry.
+        ddb::buildPending(ds.db.get(), "", true);
+        EXPECT_FALSE(ddb::isBuildPending(ds.db.get()));
+    }
+
+    // Same for a buffer that leaves the glTF's folder, and for absolute paths/URIs.
+    TEST(file3d, buildGltfUnsatisfiableUrisFailWithoutPending)
+    {
+        GltfDataset ds(TEST_NAME);
+        const auto bin = texturedQuadBin();
+        writeBytes(ds.root / "shared" / "quad.bin", bin);
+        writeBytes(ds.root / "sub" / "tex.png", kTinyPng);
+        writeTextFile(ds.root / "sub" / "buffer.gltf",
+                      texturedQuadGltfJson(bin.size(), ",\"uri\":\"../shared/quad.bin\"",
+                                           "{\"uri\":\"tex.png\"}", ""));
+        writeGltfWithImageUri(ds.root / "sub" / "abs.gltf", "/abs/tex.png");
+        writeGltfWithImageUri(ds.root / "sub" / "fileuri.gltf", "file:///abs/tex.png");
+        ds.add({"sub/buffer.gltf", "sub/abs.gltf", "sub/fileuri.gltf", "sub/tex.png", "shared/quad.bin"});
+
+        expectGltfBuildFailsWithoutPending(ds, "sub/buffer.gltf", "../shared/quad.bin");
+        expectGltfBuildFailsWithoutPending(ds, "sub/abs.gltf", "/abs/tex.png");
+        expectGltfBuildFailsWithoutPending(ds, "sub/fileuri.gltf", "file:///abs/tex.png");
+    }
+
+    // A remote (http/https) image is not a dependency and is never fetched. The
+    // converted model still references it, which the temp-folder validation
+    // reports (P3) as a plain AppException naming the original glTF: the build
+    // fails and is never deferred with temp-folder names.
+    TEST(file3d, buildGltfRemoteImageNeverPending)
+    {
+        GltfDataset ds(TEST_NAME);
+        writeGltfWithImageUri(ds.root / "sub" / "model.gltf", "https://example.invalid/tex.png");
+        ds.add({"sub/model.gltf"});
+
+        EXPECT_TRUE(ddb::getGltfDependencies((ds.root / "sub" / "model.gltf").string()).empty());
+        expectGltfBuildFailsWithoutPending(ds, "sub/model.gltf", "model.gltf references files that cannot be resolved");
+    }
+
+    TEST(file3d, buildGltfInSubfolderMissingTextureIsPending)
+    {
+        GltfDataset ds(TEST_NAME);
+        writeGltfWithExternalTexture(ds.root / "sub" / "model.gltf");
+        ds.add({"sub/model.gltf"});
+
+        EXPECT_THROW(ddb::build(ds.db.get(), "sub/model.gltf", "", false), BuildDepMissingException);
+        const auto pending = ddb::getPendingBuildInfo(ds.db.get());
+        ASSERT_EQ(pending.size(), 1u);
+        EXPECT_EQ(pending[0].missingDependencies, std::vector<std::string>{"sub/tex.png"});
+
+        writeBytes(ds.root / "sub" / "tex.png", kTinyPng);
+        ds.add({"sub/tex.png"});
+        ddb::buildPending(ds.db.get(), "", true);
+        EXPECT_FALSE(ddb::isBuildPending(ds.db.get()));
+        EXPECT_TRUE(ddb::isBuildComplete(ds.db.get(), "sub/model.gltf"));
+    }
+
+    TEST(file3d, buildGlbWithEmbeddedTextureInSubfolder)
+    {
+        GltfDataset ds(TEST_NAME);
+        auto bin = texturedQuadBin();  // 92 bytes, 4-byte aligned
+        const size_t imageOffset = bin.size();
+        bin.insert(bin.end(), kTinyPng.begin(), kTinyPng.end());
+
+        std::ostringstream view;
+        view << ",{\"buffer\":0,\"byteOffset\":" << imageOffset << ",\"byteLength\":" << kTinyPng.size() << "}";
+        const fs::path glb = ds.root / "sub" / "model.glb";
+        fs::create_directories(glb.parent_path());
+        writeGlbWithBin(glb,
+                        texturedQuadGltfJson(bin.size(), "",
+                                             "{\"bufferView\":3,\"mimeType\":\"image/png\"}",
+                                             view.str()),
+                        bin);
+        ds.add({"sub/model.glb"});
+
+        ASSERT_NO_THROW(ddb::build(ds.db.get(), "sub/model.glb", "", false));
+        EXPECT_TRUE(ddb::isBuildComplete(ds.db.get(), "sub/model.glb"));
+        EXPECT_FALSE(ddb::isBuildPending(ds.db.get()));
     }
 
 }

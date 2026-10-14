@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include <algorithm>
+#include <cerrno>
 #include <cctype>
 #include <limits>
 #include <set>
@@ -22,6 +23,46 @@ namespace ddb
     {
 
         // ---- helpers ---------------------------------------------------------
+
+        struct VectorCloseStatus
+        {
+            int systemError = 0;
+            bool failed = false;
+            std::string message;
+        };
+
+        // Capture output close/flush failures before freeing options, releasing
+        // source datasets or deleting staging files can replace GDAL/OS errors.
+        VectorCloseStatus closeVectorOutput(GDALDatasetH dataset)
+        {
+            VectorCloseStatus result;
+            if (!dataset) return result;
+            CPLErrorReset();
+            errno = 0;
+#if GDAL_VERSION_NUM >= 3070000
+            const CPLErr closeResult = GDALClose(dataset);
+            result.systemError = errno;
+            result.failed = closeResult >= CE_Failure;
+#else
+            GDALClose(dataset);
+            result.systemError = errno;
+#endif
+            result.failed = result.failed || CPLGetLastErrorType() >= CE_Failure;
+            const char *error = CPLGetLastErrorMsg();
+            result.message = error && *error ? error : "<no GDAL error>";
+            return result;
+        }
+
+        [[noreturn]] void throwVectorWriteFailure(const std::string &operation,
+                                                  const std::string &output,
+                                                  int systemError,
+                                                  const std::string &message)
+        {
+            const std::string description = operation + " failed for " + output + ": " + message;
+            if (systemError == ENOSPC)
+                throw RetryableBuildException(description, RetryableBuildReason::NoSpaceOnDevice);
+            throw AppException(description);
+        }
 
         std::string toLowerExt(const std::string &input)
         {
@@ -207,21 +248,27 @@ namespace ddb
                 throw AppException("Cannot create GDAL VectorTranslate options for GPKG");
 
             CPLErrorReset();
+            errno = 0;
             int usageError = 0;
             GDALDatasetH hOut = GDALVectorTranslate(
                 output.c_str(), nullptr, 1, &hSrcDS, opts, &usageError);
+            const int translateSystemError = errno;
+            const bool translateFailed = !hOut || usageError ||
+                (translateSystemError == ENOSPC && CPLGetLastErrorType() >= CE_Failure);
+            const char *error = CPLGetLastErrorMsg();
+            const std::string translateMessage = error && *error ? error : "<no GDAL error>";
 
             GDALVectorTranslateOptionsFree(opts);
+            const auto closeStatus = closeVectorOutput(hOut);
 
-            if (!hOut || usageError)
-            {
-                const char *err = CPLGetLastErrorMsg();
-                const std::string gdalErr = (err && *err) ? std::string(err) : "<no GDAL error>";
-                if (hOut) GDALClose(hOut);
-                throw AppException("GDAL VectorTranslate (GPKG) failed for " +
-                                   output + ": " + gdalErr);
-            }
-            GDALClose(hOut);
+            if (translateFailed)
+                throwVectorWriteFailure("GDAL VectorTranslate (GPKG)", output,
+                    translateSystemError == ENOSPC ? translateSystemError :
+                        closeStatus.failed ? closeStatus.systemError : translateSystemError,
+                    translateMessage);
+            if (closeStatus.failed)
+                throwVectorWriteFailure("GDAL output close (GPKG)", output,
+                                        closeStatus.systemError, closeStatus.message);
         }
 
         // ---- MVT layer-name sanitization ------------------------------------
@@ -343,13 +390,10 @@ namespace ddb
         int convertToMvt(GDALDatasetH hSrcDS, const std::string &srcPath,
                          const std::string &outputDir, const VectorStats &stats)
         {
-            // Sanity check driver availability up-front.
+            // Sanity check driver availability up-front. A missing driver can never
+            // be provided by adding files, so the build fails instead of deferring.
             if (GDALGetDriverByName("MVT") == nullptr)
-            {
-                std::vector<std::string> missing{"MVT driver"};
-                throw BuildDepMissingException(
-                    "MVT driver not available in this GDAL build", missing);
-            }
+                throw AppException("MVT driver not available in this GDAL build");
 
             double areaDeg2 = 0.0;
             if (stats.haveEnv)
@@ -428,24 +472,30 @@ namespace ddb
             CPLErrorReset();
 
             int usageError = 0;
+            errno = 0;
             GDALDatasetH hOut = GDALVectorTranslate(
                 outputDir.c_str(), nullptr, 1, &hTranslateSrc, opts, &usageError);
+            const int translateSystemError = errno;
+            const bool translateFailed = !hOut || usageError ||
+                (translateSystemError == ENOSPC && CPLGetLastErrorType() >= CE_Failure);
+            const char *error = CPLGetLastErrorMsg();
+            const std::string translateMessage = error && *error ? error : "<no GDAL error>";
 
             GDALVectorTranslateOptionsFree(opts);
+            const auto closeStatus = closeVectorOutput(hOut);
 
             // Release sanitization resources whether or not translate succeeded.
             if (hSanitizedDS) GDALClose(hSanitizedDS);
             if (!sanitizedPath.empty()) VSIUnlink(sanitizedPath.c_str());
 
-            if (!hOut || usageError)
-            {
-                const char *err = CPLGetLastErrorMsg();
-                const std::string gdalErr = (err && *err) ? std::string(err) : "<no GDAL error>";
-                if (hOut) GDALClose(hOut);
-                throw AppException("GDAL VectorTranslate (MVT) failed for " +
-                                   outputDir + ": " + gdalErr);
-            }
-            GDALClose(hOut);
+            if (translateFailed)
+                throwVectorWriteFailure("GDAL VectorTranslate (MVT)", outputDir,
+                    translateSystemError == ENOSPC ? translateSystemError :
+                        closeStatus.failed ? closeStatus.systemError : translateSystemError,
+                    translateMessage);
+            if (closeStatus.failed)
+                throwVectorWriteFailure("GDAL output close (MVT)", outputDir,
+                                        closeStatus.systemError, closeStatus.message);
             return maxZoom;
         }
 

@@ -8,6 +8,8 @@
 #include <vector>
 #include "ddb_export.h"
 #include "fs.h"
+#include "process_runner.h"
+#include "tool_runner_result.h"
 
 namespace ddb
 {
@@ -53,6 +55,13 @@ namespace ddb
                                 const fs::path &tempDir,
                                 std::string &errorOut,
                                 const fs::path &binary = fs::path());
+
+        // Native build callers use structured failures; legacy callers retain bool/errorOut.
+        DDB_DLL ToolRunResult runUntwineResult(const std::vector<std::string> &inputFiles,
+                                                 const fs::path &outputFile,
+                                                 const fs::path &tempDir,
+                                                 const fs::path &binary = fs::path(),
+                                                 const process::Options &options = process::Options());
 
     } // namespace untwine
 

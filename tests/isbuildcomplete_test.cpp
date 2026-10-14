@@ -198,6 +198,84 @@ TEST_F(IsBuildCompleteTest, VectorWithBothArtifactsReturnsTrue) {
 
 // --- C API ---
 
+// --- Model: tiles are optional, except an identifiable interrupted swap ---
+
+// Indexes a dependency-free OBJ and returns its relative path.
+std::string addModel(Database* db, const fs::path& dbPath) {
+    const fs::path obj = dbPath / "model.obj";
+    std::ofstream(obj) << "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
+    ddb::addToIndex(db, {obj.string()});
+    Entry e;
+    EXPECT_TRUE(ddb::getEntry(db, "model.obj", e));
+    EXPECT_EQ(e.type, EntryType::Model);
+    return "model.obj";
+}
+
+TEST_F(IsBuildCompleteTest, ModelWithoutArtifactsReturnsFalse) {
+    const auto rel = addModel(db.get(), dbPath);
+    EXPECT_FALSE(ddb::isBuildComplete(db.get(), rel));
+}
+
+TEST_F(IsBuildCompleteTest, ModelEmptyNxsReturnsFalse) {
+    const auto rel = addModel(db.get(), dbPath);
+    const fs::path base = fs::path(db->buildDirectory()) / hashOf(dbPath / rel);
+    writeFile(base / "nxs" / "model.nxz", "");
+    EXPECT_FALSE(ddb::isBuildComplete(db.get(), rel));
+}
+
+TEST_F(IsBuildCompleteTest, ModelTilesOnlyReturnsFalse) {
+    const auto rel = addModel(db.get(), dbPath);
+    const fs::path base = fs::path(db->buildDirectory()) / hashOf(dbPath / rel);
+    writeFile(base / "3dtiles" / "tileset.json", "{}");
+    EXPECT_FALSE(ddb::isBuildComplete(db.get(), rel));
+}
+
+TEST_F(IsBuildCompleteTest, ModelNxsWithoutTilesReturnsTrue) {
+    const auto rel = addModel(db.get(), dbPath);
+    const fs::path base = fs::path(db->buildDirectory()) / hashOf(dbPath / rel);
+    writeFile(base / "nxs" / "model.nxz", "some NXZ bytes");
+    EXPECT_TRUE(ddb::isBuildComplete(db.get(), rel));
+
+    writeFile(base / "3dtiles" / "tileset.json", "{}");
+    EXPECT_TRUE(ddb::isBuildComplete(db.get(), rel));
+}
+
+TEST(isBuildComplete, modelSwapExceptionIsNarrowAndReadOnly) {
+    TestArea ta(TEST_NAME, true);
+    const fs::path root = ta.getFolder();
+    initIndex(root.string());
+    auto db = ddb::open(root.string(), true);
+    const auto rel = addModel(db.get(), root);
+    Entry entry;
+    ASSERT_TRUE(getEntry(db.get(), rel, entry));
+    const fs::path base = db->buildDirectory() / entry.hash;
+    const fs::path tiles = base / "3dtiles";
+    const fs::path old = base / "3dtiles-old";
+    fs::create_directories(base / "nxs");
+    std::ofstream(base / "nxs" / "model.nxz") << "existing Nexus";
+    const auto check = [&](bool expected) {
+        bool complete = !expected;
+        ASSERT_EQ(DDBIsBuildComplete(root.string().c_str(), rel.c_str(), &complete), DDBERR_NONE);
+        EXPECT_EQ(complete, expected);
+        EXPECT_FALSE(fs::exists(tiles.string() + ".building"));
+    };
+    check(true); // no optional tiles at all
+    fs::create_directory(old);
+    std::ofstream(old / "tileset.json");
+    check(true); // empty backup cannot identify a recoverable swap
+    std::ofstream(old / "tileset.json") << "{}";
+    check(false);
+    EXPECT_TRUE(fs::exists(old / "tileset.json"));
+    EXPECT_FALSE(fs::exists(tiles));
+    fs::create_directory(tiles);
+    std::ofstream(tiles / "tileset.json");
+    check(false);
+    EXPECT_EQ(fs::file_size(tiles / "tileset.json"), 0u);
+    std::ofstream(tiles / "tileset.json") << "{}";
+    check(true); // both usable: ordinary completeness is restored
+    EXPECT_TRUE(fs::exists(old / "tileset.json")); // no cleanup during observation
+}
+
 TEST_F(IsBuildCompleteTest, DDBIsBuildCompleteCAPI) {
     const auto hash = hashOf(orthoPath);
     const fs::path out = fs::path(db->buildDirectory()) / hash / "cog";

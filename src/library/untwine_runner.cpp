@@ -4,9 +4,10 @@
 #include "untwine_runner.h"
 
 #include <algorithm>
-#include <atomic>
 #include <cctype>
+#include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <mutex>
 #include <sstream>
 #include <string>
@@ -16,16 +17,7 @@
 #include "exceptions.h"
 #include "logger.h"
 #include "mio.h"
-
-#ifdef _WIN32
-#include <windows.h>
-#else
-#include <sys/types.h>
-#include <sys/wait.h>
-#include <unistd.h>
-#include <spawn.h>
-extern char **environ;
-#endif
+#include "process_runner.h"
 
 namespace ddb
 {
@@ -86,45 +78,83 @@ namespace ddb
                 return {};
             }
 
-            std::string quoteArg(const std::string &arg)
-            {
-#ifdef _WIN32
-                // Quote arguments containing spaces or quotes for CommandLineToArgvW round-trip.
-                if (arg.find_first_of(" \t\"") == std::string::npos && !arg.empty())
-                    return arg;
+            // Tail of the captured output included in errorOut.
+            constexpr size_t kErrorTailLength = 600;
 
-                std::string out;
-                out.reserve(arg.size() + 2);
-                out.push_back('"');
-                size_t backslashes = 0;
-                for (char c : arg)
+            // Largest message accepted on the progress channel; anything bigger is
+            // treated as a corrupt stream.
+            constexpr uint32_t kMaxProgressMessage = 1u << 20;
+
+            // Incremental decoder for Untwine's --progress_fd protocol:
+            //   int32_t  msgId  - 1000=progress, 1001=error
+            //   [1000] uint32_t percent | uint32_t ssize | char[ssize]
+            //   [1001] uint32_t ssize   | char[ssize]
+            // Messages are logged at debug level. An unknown msgId stops decoding
+            // (the channel is still drained so the child never blocks on it).
+            class ProgressDecoder
+            {
+              public:
+                void feed(const char *data, size_t n)
                 {
-                    if (c == '\\')
+                    if (stopped_) return;
+                    buf_.append(data, n);
+                    size_t pos = 0;
+                    while (!stopped_)
                     {
-                        ++backslashes;
-                        out.push_back(c);
+                        const size_t used = decodeOne(pos);
+                        if (used == 0) break;
+                        pos += used;
                     }
-                    else if (c == '"')
-                    {
-                        // Escape any preceding backslashes plus the quote itself.
-                        out.append(backslashes + 1, '\\');
-                        out.push_back('"');
-                        backslashes = 0;
-                    }
-                    else
-                    {
-                        backslashes = 0;
-                        out.push_back(c);
-                    }
+                    buf_.erase(0, pos);
+                    if (stopped_) buf_.clear();
                 }
-                // Trailing backslashes need to be doubled before the closing quote.
-                out.append(backslashes, '\\');
-                out.push_back('"');
-                return out;
-#else
-                return arg;
-#endif
-            }
+
+              private:
+                template <typename T>
+                bool peek(size_t at, T &out) const
+                {
+                    if (buf_.size() < at + sizeof(T)) return false;
+                    std::memcpy(&out, buf_.data() + at, sizeof(T));
+                    return true;
+                }
+
+                // Decodes one complete message at pos; returns its size, or 0 when
+                // more bytes are needed (or decoding stopped).
+                size_t decodeOne(size_t pos)
+                {
+                    int32_t msgId = 0;
+                    if (!peek(pos, msgId)) return 0;
+                    if (msgId == 1000) // progress
+                    {
+                        uint32_t percent = 0, ssize = 0;
+                        if (!peek(pos + 4, percent) || !peek(pos + 8, ssize)) return 0;
+                        if (ssize > kMaxProgressMessage) return stop(msgId);
+                        if (buf_.size() < pos + 12 + ssize) return 0;
+                        LOGD << "[untwine] " << percent << "% " << buf_.substr(pos + 12, ssize);
+                        return 12 + ssize;
+                    }
+                    if (msgId == 1001) // error
+                    {
+                        uint32_t ssize = 0;
+                        if (!peek(pos + 4, ssize)) return 0;
+                        if (ssize > kMaxProgressMessage) return stop(msgId);
+                        if (buf_.size() < pos + 8 + ssize) return 0;
+                        LOGD << "[untwine] ERROR: " << buf_.substr(pos + 8, ssize);
+                        return 8 + ssize;
+                    }
+                    return stop(msgId);
+                }
+
+                size_t stop(int32_t msgId)
+                {
+                    LOGD << "[untwine] unexpected msgId=" << msgId << ", ignoring further progress messages";
+                    stopped_ = true;
+                    return 0;
+                }
+
+                std::string buf_;
+                bool stopped_ = false;
+            };
 
         } // namespace
 
@@ -235,22 +265,30 @@ namespace ddb
                         std::string &errorOut,
                         const fs::path &binary)
         {
-            errorOut.clear();
+            const auto result = runUntwineResult(inputFiles, outputFile, tempDir, binary);
+            errorOut = result.error;
+            return result.succeeded;
+        }
 
+        ToolRunResult runUntwineResult(const std::vector<std::string> &inputFiles,
+                                      const fs::path &outputFile,
+                                      const fs::path &tempDir,
+                                      const fs::path &binary,
+                                      const process::Options &options)
+        {
+            ToolRunResult result;
             fs::path bin = binary.empty() ? findUntwineBinary() : binary;
             if (bin.empty() || !isExecutableFile(bin))
             {
-                errorOut = "untwine binary not found";
-                return false;
+                result.error = "untwine binary not found";
+                return result;
             }
-
             if (inputFiles.empty())
             {
-                errorOut = "no input files provided";
-                return false;
+                result.error = "no input files provided";
+                return result;
             }
 
-            // Build comma-separated file list (Untwine accepts a comma-separated --files value).
             std::string filesArg;
             for (size_t i = 0; i < inputFiles.size(); ++i)
             {
@@ -258,277 +296,58 @@ namespace ddb
                 filesArg.append(inputFiles[i]);
             }
 
-            // Make sure output dir exists; remove any pre-existing output file so untwine has a clean slate.
             std::error_code ec;
-            fs::create_directories(outputFile.parent_path(), ec);
-            if (fs::exists(outputFile, ec)) fs::remove(outputFile, ec);
+            auto failIo = [&result](const std::string &operation, const std::error_code &code) {
+                result.errorCode = code;
+                result.error = operation + ": " + code.message();
+                return result;
+            };
+            if (!outputFile.parent_path().empty()) {
+                fs::create_directories(outputFile.parent_path(), ec);
+                if (ec) return failIo("Cannot create COPC output directory", ec);
+            }
+            fs::remove(outputFile, ec);
+            if (ec) return failIo("Cannot remove stale COPC output", ec);
 
-            std::vector<std::string> args;
-            args.push_back(bin.string());
-            args.push_back("--files");
-            args.push_back(filesArg);
-            args.push_back("--output_dir");
-            args.push_back(outputFile.string());
+            std::vector<std::string> args = {"--files", filesArg, "--output_dir", outputFile.string()};
             if (!tempDir.empty())
             {
                 fs::create_directories(tempDir, ec);
+                if (ec) return failIo("Cannot create Untwine temporary directory", ec);
                 args.push_back("--temp_dir");
                 args.push_back(tempDir.string());
             }
-
-            // Use the structured --progress_fd protocol so we receive binary-framed
-            // messages from untwine and forward them to the DDB logger.
-            // Message format:
-            //   int32_t  msgId  - 1000=progress, 1001=error
-            //   [1000] uint32_t percent | uint32_t ssize | char[ssize]
-            //   [1001] uint32_t ssize   | char[ssize]
-            // On Windows the fd value is a HANDLE cast to size_t (QgisUntwine convention).
-            // On POSIX it is a plain pipe fd integer.
-
-#ifdef _WIN32
-            SECURITY_ATTRIBUTES sa{};
-            sa.nLength = sizeof(sa);
-            sa.bInheritHandle = TRUE;
-
-            HANDLE hProgRead = nullptr, hProgWrite = nullptr;
-            if (!CreatePipe(&hProgRead, &hProgWrite, &sa, 0))
-            {
-                errorOut = "CreatePipe failed for untwine progress_fd";
-                return false;
-            }
-            // The read end must NOT be inherited by the child.
-            SetHandleInformation(hProgRead, HANDLE_FLAG_INHERIT, 0);
-
-            // Pass write-handle value as size_t string (QgisUntwine_win.cpp convention).
-            {
-                size_t hval = reinterpret_cast<size_t>(hProgWrite);
-                args.push_back("--progress_fd");
-                args.push_back(std::to_string(hval));
-            }
-#else
-            int progPipe[2];
-            if (pipe(progPipe) != 0)
-            {
-                errorOut = "pipe() failed for untwine progress_fd";
-                return false;
-            }
             args.push_back("--progress_fd");
-            args.push_back(std::to_string(progPipe[1]));
-#endif
+            args.push_back(process::kExtraChannelPlaceholder);
 
-            // Log full command line for debugging.
+            LOGD << "Spawning untwine (" << inputFiles.size() << " input file(s)): "
+                 << process::formatCommandLine(bin, args);
+            ProgressDecoder progress;
+            process::Options popts = options;
+            popts.extraChannel = true;
+            popts.onExtraData = [&progress](const char *data, size_t n) { progress.feed(data, n); };
+            popts.onOutputLine = [](const std::string &line) { LOGD << "[untwine] " << line; };
+
+            const process::Result res = process::run(bin, args, popts);
+            if (res.descendantsTerminated)
+                LOGW << "untwine " << res.describe();
+            if (!res.success())
             {
-                std::ostringstream cmdDbg;
-                for (size_t i = 0; i < args.size(); ++i)
-                {
-                    if (i > 0) cmdDbg << ' ';
-                    cmdDbg << quoteArg(args[i]);
-                }
-                LOGD << "Spawning untwine (" << inputFiles.size() << " input file(s)): " << cmdDbg.str();
-            }
-
-#ifdef _WIN32
-            // Build a single command line string
-            std::string cmdLine;
-            for (size_t i = 0; i < args.size(); ++i)
-            {
-                if (i > 0) cmdLine.push_back(' ');
-                cmdLine.append(quoteArg(args[i]));
-            }
-
-            // Convert command line to wide
-            int wideLen = MultiByteToWideChar(CP_UTF8, 0, cmdLine.c_str(), -1, nullptr, 0);
-            std::wstring wideCmd(static_cast<size_t>(wideLen > 0 ? wideLen : 1), L'\0');
-            MultiByteToWideChar(CP_UTF8, 0, cmdLine.c_str(), -1, wideCmd.data(), wideLen);
-
-            // Convert the resolved binary path to wide separately so we can pass it
-            // as lpApplicationName - this avoids relying on Windows PATH/CWD search
-            // and prevents executable-hijacking through the command-line token.
-            std::string binStr = bin.string();
-            int wideBinLen = MultiByteToWideChar(CP_UTF8, 0, binStr.c_str(), -1, nullptr, 0);
-            std::wstring wideBin(static_cast<size_t>(wideBinLen > 0 ? wideBinLen : 1), L'\0');
-            MultiByteToWideChar(CP_UTF8, 0, binStr.c_str(), -1, wideBin.data(), wideBinLen);
-
-            STARTUPINFOW si{};
-            si.cb = sizeof(si);
-
-            PROCESS_INFORMATION pi{};
-
-            BOOL ok = CreateProcessW(
-                wideBin.c_str(),  // lpApplicationName: explicit resolved path
-                wideCmd.data(),   // lpCommandLine: full quoted command line for argv
-                nullptr, nullptr,
-                TRUE,             // bInheritHandles: child inherits hProgWrite
-                CREATE_NO_WINDOW,
-                nullptr, nullptr,
-                &si, &pi);
-
-            // Close write end in parent immediately after spawning so ReadFile reaches EOF.
-            CloseHandle(hProgWrite);
-
-            if (!ok)
-            {
-                CloseHandle(hProgRead);
-                DWORD err = GetLastError();
+                result.timedOut = res.timedOut;
                 std::ostringstream oss;
-                oss << "CreateProcess failed for untwine (error " << err << ")";
-                errorOut = oss.str();
-                return false;
+                oss << "untwine " << res.describe();
+                if (!res.outputTail.empty()) oss << ": " << res.tail(kErrorTailLength);
+                result.error = oss.str();
+                return result;
             }
-
-            // Parse the binary progress pipe until EOF (child exit).
+            if (!fs::exists(outputFile, ec) || ec)
             {
-                auto readExact = [&](void *buf, DWORD n) -> bool {
-                    BYTE *p = static_cast<BYTE *>(buf);
-                    while (n > 0) {
-                        DWORD nr = 0;
-                        if (!ReadFile(hProgRead, p, n, &nr, nullptr) || nr == 0) return false;
-                        p += nr; n -= nr;
-                    }
-                    return true;
-                };
-
-                int32_t msgId;
-                while (readExact(&msgId, sizeof(msgId)))
-                {
-                    if (msgId == 1000) // progress
-                    {
-                        uint32_t percent = 0;
-                        if (!readExact(&percent, sizeof(percent))) break;
-                        uint32_t ssize = 0;
-                        if (!readExact(&ssize, sizeof(ssize))) break;
-                        std::string msg(ssize, '\0');
-                        if (ssize > 0 && !readExact(msg.data(), ssize)) break;
-                        LOGD << "[untwine] " << percent << "% " << msg;
-                    }
-                    else if (msgId == 1001) // error
-                    {
-                        uint32_t ssize = 0;
-                        if (!readExact(&ssize, sizeof(ssize))) break;
-                        std::string msg(ssize, '\0');
-                        if (ssize > 0 && !readExact(msg.data(), ssize)) break;
-                        LOGD << "[untwine] ERROR: " << msg;
-                    }
-                    else
-                    {
-                        LOGD << "[untwine] unexpected msgId=" << msgId << ", stopping pipe read";
-                        break;
-                    }
-                }
+                result.errorCode = ec;
+                result.error = "untwine reported success but output file is missing: " + outputFile.string();
+                return result;
             }
-            CloseHandle(hProgRead);
-
-            WaitForSingleObject(pi.hProcess, INFINITE);
-            DWORD exitCode = 1;
-            GetExitCodeProcess(pi.hProcess, &exitCode);
-            CloseHandle(pi.hThread);
-            CloseHandle(pi.hProcess);
-
-            if (exitCode != 0)
-            {
-                std::ostringstream oss;
-                oss << "untwine exited with code " << exitCode;
-                errorOut = oss.str();
-                return false;
-            }
-#else
-            posix_spawn_file_actions_t actions;
-            posix_spawn_file_actions_init(&actions);
-            // Close the read end inside the child; the write end stays open (inherited).
-            posix_spawn_file_actions_addclose(&actions, progPipe[0]);
-
-            std::vector<char *> argv;
-            argv.reserve(args.size() + 1);
-            for (auto &a : args) argv.push_back(const_cast<char *>(a.c_str()));
-            argv.push_back(nullptr);
-
-            pid_t pid = 0;
-            int spawnRet = posix_spawn(&pid, bin.c_str(), &actions, nullptr, argv.data(), environ);
-            posix_spawn_file_actions_destroy(&actions);
-
-            // Close the write end in the parent so read() below reaches EOF when the child exits.
-            close(progPipe[1]);
-
-            if (spawnRet != 0)
-            {
-                close(progPipe[0]);
-                std::ostringstream oss;
-                oss << "posix_spawn failed for untwine (errno " << spawnRet << ")";
-                errorOut = oss.str();
-                return false;
-            }
-
-            // Parse the binary progress pipe until EOF (child exit).
-            {
-                auto readExact = [&](void *buf, size_t n) -> bool {
-                    uint8_t *p = static_cast<uint8_t *>(buf);
-                    while (n > 0) {
-                        ssize_t nr = read(progPipe[0], p, n);
-                        if (nr <= 0) return false;
-                        p += static_cast<size_t>(nr); n -= static_cast<size_t>(nr);
-                    }
-                    return true;
-                };
-
-                int32_t msgId;
-                while (readExact(&msgId, sizeof(msgId)))
-                {
-                    if (msgId == 1000) // progress
-                    {
-                        uint32_t percent = 0;
-                        if (!readExact(&percent, sizeof(percent))) break;
-                        uint32_t ssize = 0;
-                        if (!readExact(&ssize, sizeof(ssize))) break;
-                        std::string msg(ssize, '\0');
-                        if (ssize > 0 && !readExact(msg.data(), ssize)) break;
-                        LOGD << "[untwine] " << percent << "% " << msg;
-                    }
-                    else if (msgId == 1001) // error
-                    {
-                        uint32_t ssize = 0;
-                        if (!readExact(&ssize, sizeof(ssize))) break;
-                        std::string msg(ssize, '\0');
-                        if (ssize > 0 && !readExact(msg.data(), ssize)) break;
-                        LOGD << "[untwine] ERROR: " << msg;
-                    }
-                    else
-                    {
-                        LOGD << "[untwine] unexpected msgId=" << msgId << ", stopping pipe read";
-                        break;
-                    }
-                }
-            }
-            close(progPipe[0]);
-
-            int status = 0;
-            if (waitpid(pid, &status, 0) < 0)
-            {
-                errorOut = "waitpid failed for untwine";
-                return false;
-            }
-
-            if (!WIFEXITED(status))
-            {
-                errorOut = "untwine terminated abnormally";
-                return false;
-            }
-            int exitCode = WEXITSTATUS(status);
-            if (exitCode != 0)
-            {
-                std::ostringstream oss;
-                oss << "untwine exited with code " << exitCode;
-                errorOut = oss.str();
-                return false;
-            }
-#endif
-
-            if (!fs::exists(outputFile))
-            {
-                errorOut = "untwine reported success but output file is missing: " + outputFile.string();
-                return false;
-            }
-
-            return true;
+            result.succeeded = true;
+            return result;
         }
 
     } // namespace untwine

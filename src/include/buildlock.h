@@ -112,9 +112,9 @@ private:
      * @brief Acquire the build lock with specified wait behavior
      *
      * @param waitForLock Controls lock acquisition strategy:
-     *   - **Windows**: true = CREATE_ALWAYS (overwrites orphaned files, fails with
-     *     a sharing violation on active handles); false = CREATE_NEW (fails if the
-     *     file exists). Neither mode waits.
+     *   - **Windows**: both modes use OPEN_ALWAYS with no sharing and delete-on-close.
+     *     Unlocked orphan files are reclaimed; active handles exclude new holders.
+     *     Neither mode waits.
      *   - **Unix/Linux**: ignored. Both modes use non-blocking kernel advisory
      *     locking (F_OFD_SETLK on Linux, flock() elsewhere). Orphan files are
      *     reclaimable because the kernel released the previous lock at process
@@ -144,7 +144,7 @@ public:
      * an exception is thrown with a descriptive message.
      *
      * Common failure scenarios:
-     * - Another process is building the same file (ERROR_SHARING_VIOLATION on Windows, EEXIST on Unix)
+     * - Another process is building the same file (exclusive handle/advisory lock contention)
      * - Insufficient permissions to create lock file
      * - Disk full or other I/O errors
      * - Network filesystem temporarily unavailable
@@ -159,7 +159,7 @@ public:
      * "{outputPath}.building".
      *
      * @param outputPath The target build output path to lock
-     * @param wait Windows only: true reclaims an orphaned lock file, false fails if it exists. Never blocks
+     * @param wait Preserved for API compatibility. Both modes reclaim unlocked orphan files and never block
      *
      * @throws AppException If wait=false and another process is already building to this path
      * @throws AppException If the lock cannot be acquired due to system errors

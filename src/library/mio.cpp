@@ -210,7 +210,7 @@ namespace ddb
             catch (const fs::filesystem_error &e)
             {
                 LOGD << e.what();
-                throw FSException(e.what());
+                throw FSException(e.what(), e.code());
             }
         }
 
@@ -229,7 +229,7 @@ namespace ddb
             catch (const fs::filesystem_error &e)
             {
                 LOGD << e.what();
-                throw FSException(e.what());
+                throw FSException(e.what(), e.code());
             }
         }
 
@@ -285,7 +285,7 @@ namespace ddb
             catch (const fs::filesystem_error &e)
             {
                 LOGD << e.what();
-                throw FSException(e.what());
+                throw FSException(e.what(), e.code());
             }
         }
 
@@ -544,7 +544,7 @@ namespace ddb
                 // For some reason sometimes this is zero (success)?
                 if (e.value() != 0)
                 {
-                    throw FSException(d.string() + " is not a valid directory (error: " + e.message() + ").");
+                    throw FSException(d.string() + " is not a valid directory (error: " + e.message() + ").", e);
                 }
             }
         }
@@ -591,7 +591,7 @@ namespace ddb
             if (e.value() != 0)
             {
                 throw FSException("Cannot copy " + from.string() + " --> " + to.string() +
-                                  " (" + e.message() + ")");
+                                  " (" + e.message() + ")", e);
             }
         }
 
@@ -650,7 +650,7 @@ namespace ddb
             if (e.value() != 0)
             {
                 throw FSException("Cannot move " + from.string() + " --> " + to.string() +
-                                  " (" + e.message() + ")");
+                                  " (" + e.message() + ")", e);
             }
         }
 

@@ -402,9 +402,9 @@ TEST(gsplat, buildOutputsArtifacts) {
 
     ddb::buildlod::findBuildLodBinary(/*forceRefresh=*/true);
     if (!ddb::buildlod::isBuildLodAvailable()) {
-        // build-lod is a mandatory dependency: without it the build is deferred (the missing
-        // dependency is surfaced) and no artifacts are produced.
-        EXPECT_THROW(ddb::buildGsplat(ply.string(), outdir.string()), BuildDepMissingException);
+        // build-lod is a mandatory tool: without it the build fails (it is not deferred)
+        // and no artifacts are produced.
+        EXPECT_THROW(ddb::buildGsplat(ply.string(), outdir.string()), AppException);
         REQUIRE_BUILDLOD_OR_SKIP("build-lod not discoverable; skipping artifact assertions");
     }
 
@@ -640,48 +640,97 @@ TEST(gsplat, malformedRadThrows) {
     EXPECT_THROW(ddb::computeRadBounds(half, hmin, hmax), AppException);
 }
 
-// build-lod is mandatory: when it cannot be located, buildGsplat throws a
-// BuildDepMissingException (so the build is deferred and retried once the tool is installed)
-// and produces no artifacts.
+// RAII guard: sets an environment variable on construction and restores it (plus refreshes
+// the build-lod discovery cache) on destruction, even when the test body throws.
+struct BuildLodEnvRestorer {
+    std::string key, prev;
+    bool hadPrev = false;
+    BuildLodEnvRestorer(const char* k, const char* v) : key(k) {
+        const char* old = std::getenv(k);
+        hadPrev = old != nullptr;
+        prev = old ? old : "";
+#ifdef _WIN32
+        _putenv_s(k, v);
+#else
+        setenv(k, v, 1);
+#endif
+        ddb::buildlod::findBuildLodBinary(/*forceRefresh=*/true);
+    }
+    ~BuildLodEnvRestorer() {
+#ifdef _WIN32
+        _putenv_s(key.c_str(), prev.c_str());
+#else
+        if (hadPrev)
+            setenv(key.c_str(), prev.c_str(), 1);
+        else
+            unsetenv(key.c_str());
+#endif
+        ddb::buildlod::findBuildLodBinary(/*forceRefresh=*/true);
+    }
+};
+
+// Asserts that `fn` throws a plain AppException (not BuildDepMissingException) whose
+// message mentions `tool`: a missing external tool fails the build instead of deferring it.
+template <typename Fn>
+void expectMissingToolFailure(Fn fn, const std::string& tool) {
+    try {
+        fn();
+        FAIL() << "Expected AppException naming " << tool;
+    } catch (const BuildDepMissingException& e) {
+        FAIL() << "A missing tool must not defer the build: " << e.what();
+    } catch (const AppException& e) {
+        EXPECT_NE(std::string(e.what()).find(tool), std::string::npos) << e.what();
+    }
+}
+
+// build-lod is mandatory: when it cannot be located, buildGsplat throws a plain
+// AppException (the build fails; a missing tool is not a missing dependency, so it is
+// never deferred) and produces no artifacts.
 TEST(gsplat, buildLodMissingToolThrows) {
     TestArea ta(TEST_NAME);
 
-    // RAII guard: sets DDB_BUILDLOD_PATH on construction and restores it (plus refreshes
-    // the discovery cache) on destruction, even when the test body throws.
-    struct EnvRestorer {
-        std::string key, prev;
-        EnvRestorer(const char* k, const char* v) : key(k) {
-            const char* old = std::getenv(k);
-            prev = old ? old : "";
-#ifdef _WIN32
-            _putenv_s(k, v);
-#else
-            setenv(k, v, 1);
-#endif
-            ddb::buildlod::findBuildLodBinary(/*forceRefresh=*/true);
-        }
-        ~EnvRestorer() {
-#ifdef _WIN32
-            _putenv_s(key.c_str(), prev.c_str());
-#else
-            setenv(key.c_str(), prev.c_str(), 1);
-#endif
-            ddb::buildlod::findBuildLodBinary(/*forceRefresh=*/true);
-        }
-    };
-
     // Force "no tool" deterministically via the authoritative env override.
     const std::string missing = (ta.getFolder("nope") / "build-lod-missing").string();
-    EnvRestorer guard("DDB_BUILDLOD_PATH", missing.c_str());
+    BuildLodEnvRestorer guard("DDB_BUILDLOD_PATH", missing.c_str());
     EXPECT_FALSE(ddb::buildlod::isBuildLodAvailable());
 
     const fs::path ply = ta.getPath("scene.ply");
     writeSplatPly(ply, 64, 0);
     const fs::path outdir = ta.getFolder("gsplat_out");
 
-    EXPECT_THROW(ddb::buildGsplat(ply.string(), outdir.string()), BuildDepMissingException);
+    expectMissingToolFailure([&] { ddb::buildGsplat(ply.string(), outdir.string()); }, "build-lod");
     EXPECT_FALSE(fs::exists(outdir / GsplatRadFileName)) << "no tool -> no model.rad";
     EXPECT_FALSE(fs::exists(outdir / GsplatFileName)) << "no tool -> no intermediate model.spz";
+}
+
+// Through the build pipeline: a GaussianSplat entry without build-lod fails the build
+// (no ".pending" marker, the C API reports an error rather than a deferral).
+TEST(gsplat, buildWithoutBuildLodFailsWithoutPending) {
+    TestArea ta(TEST_NAME, true);
+    const fs::path dsFolder = ta.getFolder("");
+    const fs::path ply = ta.getPath("scene.ply");
+    writeSplatPly(ply, 64, 0);
+
+    ddb::initIndex(dsFolder.string());
+    auto db = ddb::open(dsFolder.string(), true);
+    ddb::addToIndex(db.get(), {ply.string()});
+    const auto rel = fs::relative(ply, dsFolder).generic_string();
+    Entry e;
+    ASSERT_TRUE(ddb::getEntry(db.get(), rel, e));
+    ASSERT_EQ(e.type, EntryType::GaussianSplat);
+
+    const std::string missing = (ta.getFolder("nope") / "build-lod-missing").string();
+    BuildLodEnvRestorer guard("DDB_BUILDLOD_PATH", missing.c_str());
+    ASSERT_FALSE(ddb::buildlod::isBuildLodAvailable());
+
+    expectMissingToolFailure([&] { ddb::build(db.get(), rel, "", false); }, "build-lod");
+    EXPECT_FALSE(fs::exists(db->buildDirectory() / (e.hash + ".pending")));
+    EXPECT_FALSE(ddb::isBuildPending(db.get()));
+    EXPECT_FALSE(ddb::isBuildComplete(db.get(), rel));
+
+    EXPECT_EQ(DDBBuild(dsFolder.string().c_str(), rel.c_str(), nullptr, false, false),
+              DDBERR_EXCEPTION);
+    EXPECT_FALSE(ddb::isBuildPending(db.get()));
 }
 
 TEST(gsplat, ksplatRequiresExternalTool) {
@@ -690,14 +739,9 @@ TEST(gsplat, ksplatRequiresExternalTool) {
     { std::ofstream o(ksplat.string(), std::ios::binary); o << "ksplatdata"; }
 
     const fs::path spz = ta.getPath("scene.spz");
-    try {
-        ddb::convertToSpz(ksplat.string(), spz.string());
-        FAIL() << "Expected BuildDepMissingException";
-    } catch (const BuildDepMissingException& e) {
-        const auto& deps = e.getMissingDependencies();
-        ASSERT_FALSE(deps.empty());
-        EXPECT_EQ(deps[0], "splat-transform");
-    }
+    // splat-transform is an external tool: its absence fails the conversion outright.
+    expectMissingToolFailure([&] { ddb::convertToSpz(ksplat.string(), spz.string()); },
+                             "splat-transform");
     EXPECT_FALSE(fs::exists(spz));
 }
 

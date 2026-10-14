@@ -3,27 +3,23 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "obj2tiles_runner.h"
 
+#include <chrono>
+#include <cstdint>
 #include <cstdlib>
 #include <iomanip>
 #include <locale>
 #include <mutex>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <system_error>
+#include <thread>
+#include <utility>
 #include <vector>
 
 #include "logger.h"
 #include "mio.h"
-
-#ifdef _WIN32
-#include <windows.h>
-#else
-#include <sys/types.h>
-#include <sys/wait.h>
-#include <unistd.h>
-#include <spawn.h>
-extern char **environ;
-#endif
+#include "process_runner.h"
 
 namespace ddb
 {
@@ -95,43 +91,6 @@ namespace ddb
                 return oss.str();
             }
 
-            std::string quoteArg(const std::string &arg)
-            {
-#ifdef _WIN32
-                if (arg.find_first_of(" \t\"") == std::string::npos && !arg.empty())
-                    return arg;
-
-                std::string out;
-                out.reserve(arg.size() + 2);
-                out.push_back('"');
-                size_t backslashes = 0;
-                for (char c : arg)
-                {
-                    if (c == '\\')
-                    {
-                        ++backslashes;
-                        out.push_back(c);
-                    }
-                    else if (c == '"')
-                    {
-                        out.append(backslashes + 1, '\\');
-                        out.push_back('"');
-                        backslashes = 0;
-                    }
-                    else
-                    {
-                        backslashes = 0;
-                        out.push_back(c);
-                    }
-                }
-                out.append(backslashes, '\\');
-                out.push_back('"');
-                return out;
-#else
-                return arg;
-#endif
-            }
-
             // Append the CLI arguments derived from opts (everything after the input
             // and output positional arguments).
             void appendOptionArgs(std::vector<std::string> &args, const Obj2TilesOptions &opts)
@@ -191,12 +150,52 @@ namespace ddb
                 }
             }
 
-            // Keep only the tail of the captured child output for inclusion in error
-            // messages (the full output is always logged at debug level).
-            std::string tail(const std::string &s, size_t maxLen = 600)
+            // Tail of the captured output included in errorOut.
+            constexpr size_t kErrorTailLength = 600;
+
+            // Reads DDB_OBJ2TILES_MAX_CORES (spec C1). Valid values are non-empty
+            // strings of decimal digits with a value >= 1; anything else (0,
+            // negative, hex, non-numeric, overflow) is logged and treated as unset.
+            // The value is clamped to the hardware concurrency when known.
+            // Returns the effective cap, or nullopt for "no cap".
+            std::optional<unsigned int> readMaxCores()
             {
-                if (s.size() <= maxLen) return s;
-                return "..." + s.substr(s.size() - maxLen);
+                const char *raw = std::getenv("DDB_OBJ2TILES_MAX_CORES");
+                if (!raw || raw[0] == '\0') return std::nullopt;
+
+                const std::string value(raw);
+                uint64_t n = 0;
+                bool valid = true;
+                for (char c : value)
+                {
+                    if (c < '0' || c > '9')
+                    {
+                        valid = false;
+                        break;
+                    }
+                    n = n * 10 + static_cast<uint64_t>(c - '0');
+                    if (n > static_cast<uint64_t>(INT32_MAX))
+                    {
+                        valid = false; // overflow
+                        break;
+                    }
+                }
+                if (!valid || n == 0)
+                {
+                    LOGW << "Ignoring invalid DDB_OBJ2TILES_MAX_CORES=\"" << value
+                         << "\" (expected a positive decimal integer)";
+                    return std::nullopt;
+                }
+
+                unsigned int cap = static_cast<unsigned int>(n);
+                const unsigned int hw = std::thread::hardware_concurrency();
+                if (hw > 0 && cap > hw)
+                {
+                    LOGD << "DDB_OBJ2TILES_MAX_CORES=" << value << " exceeds the " << hw
+                         << " available cores; clamping";
+                    cap = hw;
+                }
+                return cap;
             }
 
         } // namespace
@@ -271,6 +270,27 @@ namespace ddb
         {
             errorOut.clear();
 
+            // Public calls require a fresh destination. Otherwise a successful
+            // no-output tool could make an old tileset look like new output.
+            std::error_code ec;
+            const bool outputExists = fs::exists(outDir, ec);
+            if (ec)
+            {
+                errorOut = "could not inspect output directory '" + outDir.string() + "': " + ec.message();
+                return false;
+            }
+            if (outputExists)
+            {
+                const bool directory = fs::is_directory(outDir, ec);
+                const bool empty = directory && !ec && fs::is_empty(outDir, ec);
+                if (ec || !empty)
+                {
+                    errorOut = "Obj2Tiles output directory must be absent or empty: '" + outDir.string() +
+                               "'. Use a fresh staging directory" + (ec ? ": " + ec.message() : ".");
+                    return false;
+                }
+            }
+
             fs::path bin = binary.empty() ? findObj2TilesBinary() : binary;
             if (bin.empty() || !isExecutableFile(bin))
             {
@@ -278,7 +298,6 @@ namespace ddb
                 return false;
             }
 
-            std::error_code ec;
             if (!fs::exists(inputObj, ec))
             {
                 errorOut = "input OBJ does not exist: " + inputObj.string();
@@ -296,188 +315,62 @@ namespace ddb
             }
 
             std::vector<std::string> args;
-            args.push_back(bin.string());
             args.push_back(inputObj.string()); // positional: Input
             args.push_back(outDir.string());   // positional: Output
             appendOptionArgs(args, opts);
 
-            // Log full command line for debugging.
+            LOGD << "Spawning Obj2Tiles: " << process::formatCommandLine(bin, args);
+
+            // Per-child core cap (C1): only the child's environment is changed.
+            process::Options popts;
+            const auto maxCores = readMaxCores();
+            if (maxCores)
             {
-                std::ostringstream cmdDbg;
-                for (size_t i = 0; i < args.size(); ++i)
-                {
-                    if (i > 0) cmdDbg << ' ';
-                    cmdDbg << quoteArg(args[i]);
-                }
-                LOGD << "Spawning Obj2Tiles: " << cmdDbg.str();
+                popts.envOverrides.emplace_back("DOTNET_PROCESSOR_COUNT", std::to_string(*maxCores));
+                LOGI << "Obj2Tiles core cap: " << *maxCores;
             }
-
-            std::string childOutput;
-
-#ifdef _WIN32
-            SECURITY_ATTRIBUTES sa{};
-            sa.nLength = sizeof(sa);
-            sa.bInheritHandle = TRUE;
-
-            HANDLE hOutRead = nullptr, hOutWrite = nullptr;
-            if (!CreatePipe(&hOutRead, &hOutWrite, &sa, 0))
+            else
             {
-                errorOut = "CreatePipe failed for Obj2Tiles output";
-                return false;
+                LOGI << "Obj2Tiles core cap: none";
             }
-            // The read end must NOT be inherited by the child.
-            SetHandleInformation(hOutRead, HANDLE_FLAG_INHERIT, 0);
+            // Full output at debug level, line by line as it arrives.
+            popts.onOutputLine = [](const std::string &line) { LOGD << "[Obj2Tiles] " << line; };
 
-            std::string cmdLine;
-            for (size_t i = 0; i < args.size(); ++i)
-            {
-                if (i > 0) cmdLine.push_back(' ');
-                cmdLine.append(quoteArg(args[i]));
-            }
+            const process::Result res = process::run(bin, args, popts);
 
-            int wideLen = MultiByteToWideChar(CP_UTF8, 0, cmdLine.c_str(), -1, nullptr, 0);
-            std::wstring wideCmd(static_cast<size_t>(wideLen > 0 ? wideLen : 1), L'\0');
-            MultiByteToWideChar(CP_UTF8, 0, cmdLine.c_str(), -1, wideCmd.data(), wideLen);
-
-            std::string binStr = bin.string();
-            int wideBinLen = MultiByteToWideChar(CP_UTF8, 0, binStr.c_str(), -1, nullptr, 0);
-            std::wstring wideBin(static_cast<size_t>(wideBinLen > 0 ? wideBinLen : 1), L'\0');
-            MultiByteToWideChar(CP_UTF8, 0, binStr.c_str(), -1, wideBin.data(), wideBinLen);
-
-            STARTUPINFOW si{};
-            si.cb = sizeof(si);
-            si.dwFlags = STARTF_USESTDHANDLES;
-            si.hStdOutput = hOutWrite;
-            si.hStdError = hOutWrite;
-            si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
-
-            PROCESS_INFORMATION pi{};
-
-            BOOL ok = CreateProcessW(
-                wideBin.c_str(), // lpApplicationName: explicit resolved path
-                wideCmd.data(),  // lpCommandLine: full quoted command line for argv
-                nullptr, nullptr,
-                TRUE, // bInheritHandles: child inherits hOutWrite
-                CREATE_NO_WINDOW,
-                nullptr, nullptr,
-                &si, &pi);
-
-            // Close write end in parent immediately after spawning so ReadFile reaches EOF.
-            CloseHandle(hOutWrite);
-
-            if (!ok)
-            {
-                CloseHandle(hOutRead);
-                DWORD err = GetLastError();
-                std::ostringstream oss;
-                oss << "CreateProcess failed for Obj2Tiles (error " << err << ")";
-                errorOut = oss.str();
-                return false;
-            }
-
-            // Drain the child's combined stdout/stderr until EOF (child exit).
-            {
-                char buf[4096];
-                DWORD nr = 0;
-                while (ReadFile(hOutRead, buf, sizeof(buf), &nr, nullptr) && nr > 0)
-                    childOutput.append(buf, nr);
-            }
-            CloseHandle(hOutRead);
-
-            WaitForSingleObject(pi.hProcess, INFINITE);
-            DWORD exitCode = 1;
-            GetExitCodeProcess(pi.hProcess, &exitCode);
-            CloseHandle(pi.hThread);
-            CloseHandle(pi.hProcess);
-
-            if (!childOutput.empty())
-                LOGD << "[Obj2Tiles] " << childOutput;
-
-            if (exitCode != 0)
+            if (!res.success())
             {
                 std::ostringstream oss;
-                oss << "Obj2Tiles exited with code " << exitCode;
-                if (!childOutput.empty()) oss << ": " << tail(childOutput);
+                oss << "Obj2Tiles " << res.describe();
+                if (!res.outputTail.empty()) oss << ": " << res.tail(kErrorTailLength);
                 errorOut = oss.str();
-                return false;
-            }
-#else
-            int outPipe[2];
-            if (pipe(outPipe) != 0)
-            {
-                errorOut = "pipe() failed for Obj2Tiles output";
+
+                LOGI << "Obj2Tiles failed: " << res.describe()
+                     << (res.outputTail.empty() ? std::string(", no output")
+                                                : ", output tail:\n" + res.tail(process::kDefaultOutputCapacity));
                 return false;
             }
 
-            posix_spawn_file_actions_t actions;
-            posix_spawn_file_actions_init(&actions);
-            // Redirect the child's stdout and stderr to the pipe write end, then close
-            // both original pipe descriptors inside the child.
-            posix_spawn_file_actions_adddup2(&actions, outPipe[1], STDOUT_FILENO);
-            posix_spawn_file_actions_adddup2(&actions, outPipe[1], STDERR_FILENO);
-            posix_spawn_file_actions_addclose(&actions, outPipe[0]);
-            posix_spawn_file_actions_addclose(&actions, outPipe[1]);
-
-            std::vector<char *> argv;
-            argv.reserve(args.size() + 1);
-            for (auto &a : args) argv.push_back(const_cast<char *>(a.c_str()));
-            argv.push_back(nullptr);
-
-            pid_t pid = 0;
-            int spawnRet = posix_spawn(&pid, bin.c_str(), &actions, nullptr, argv.data(), environ);
-            posix_spawn_file_actions_destroy(&actions);
-
-            // Close the write end in the parent so read() below reaches EOF when the child exits.
-            close(outPipe[1]);
-
-            if (spawnRet != 0)
-            {
-                close(outPipe[0]);
-                std::ostringstream oss;
-                oss << "posix_spawn failed for Obj2Tiles (errno " << spawnRet << ")";
-                errorOut = oss.str();
-                return false;
-            }
-
-            // Drain the child's combined stdout/stderr until EOF (child exit).
-            {
-                char buf[4096];
-                ssize_t nr = 0;
-                while ((nr = read(outPipe[0], buf, sizeof(buf))) > 0)
-                    childOutput.append(buf, static_cast<size_t>(nr));
-            }
-            close(outPipe[0]);
-
-            int status = 0;
-            if (waitpid(pid, &status, 0) < 0)
-            {
-                errorOut = "waitpid failed for Obj2Tiles";
-                return false;
-            }
-
-            if (!childOutput.empty())
-                LOGD << "[Obj2Tiles] " << childOutput;
-
-            if (!WIFEXITED(status))
-            {
-                errorOut = "Obj2Tiles terminated abnormally";
-                return false;
-            }
-            int exitCode = WEXITSTATUS(status);
-            if (exitCode != 0)
             {
                 std::ostringstream oss;
-                oss << "Obj2Tiles exited with code " << exitCode;
-                if (!childOutput.empty()) oss << ": " << tail(childOutput);
-                errorOut = oss.str();
-                return false;
+                oss.imbue(std::locale::classic());
+                oss << "Obj2Tiles finished: exit code 0 in " << std::fixed << std::setprecision(1)
+                    << (static_cast<double>(res.duration.count()) / 1000.0) << " s, " << res.totalBytes
+                    << " bytes of output";
+                LOGI << oss.str();
             }
-#endif
 
             const fs::path tilesetPath = outDir / "tileset.json";
-            if (!fs::exists(tilesetPath, ec))
+            if (!fs::is_regular_file(tilesetPath, ec) || ec || fs::file_size(tilesetPath, ec) == 0 || ec)
             {
-                errorOut = "Obj2Tiles reported success but tileset.json is missing: " + tilesetPath.string();
+                std::ostringstream oss;
+                oss << "Obj2Tiles reported success but tileset.json is missing or empty: " << tilesetPath.string();
+                if (!res.outputTail.empty()) oss << ": " << res.tail(kErrorTailLength);
+                errorOut = oss.str();
+
+                LOGI << "Obj2Tiles exited with code 0 without writing " << tilesetPath.string()
+                     << (res.outputTail.empty() ? std::string(", no output")
+                                                : ", output tail:\n" + res.tail(process::kDefaultOutputCapacity));
                 return false;
             }
 
