@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
+#include <chrono>
 #include <cstdlib>
 #include <fstream>
 #include <optional>
@@ -41,6 +42,7 @@ static void ensureSufficientDiskSpace(const fs::path& dir);
 // Write the complete marker into a sibling file before replacing the old one.
 // Failure (especially ENOSPC) must never remove the last pending marker.
 static bool replacePendingMarker(const fs::path& pendingPath, const std::string& dependencyLines) {
+    // "<hash>.pending.tmp-<rand16>", see PendingMarkerTempInfix.
     const fs::path temporary = pendingPath.string() + ".tmp-" + utils::generateRandomString(16);
     try {
         std::ofstream out;
@@ -100,6 +102,26 @@ static bool isHashLike(const std::string& s) {
 // Model build holds for its whole duration; cleanupBuild takes the same lock
 // before touching the 3D Tiles siblings so it is serialized with builds.
 static const char* const ModelSubfolder = "nxs";
+
+// Infix of the sibling written by replacePendingMarker() before the atomic
+// rename: "<hash>.pending.tmp-<rand16>". A crash between write and rename
+// leaves it behind; cleanupBuild removes such leftovers once they are old.
+static const std::string PendingMarkerTempInfix = ".pending.tmp-";
+
+// True for "<64 hex>.pending.tmp-<non-empty suffix>".
+static bool isPendingMarkerTempName(const std::string& name) {
+    const size_t infixAt = 64;
+    if (name.size() <= infixAt + PendingMarkerTempInfix.size())
+        return false;
+    if (name.compare(infixAt, PendingMarkerTempInfix.size(), PendingMarkerTempInfix) != 0)
+        return false;
+    return isHashLike(name.substr(0, infixAt));
+}
+
+// A pending marker temp file younger than this may belong to a live
+// replacePendingMarker() call (its rename follows the close within
+// microseconds); only older leftovers are collected.
+static constexpr std::chrono::hours PendingMarkerTempMinAge{1};
 
 bool isBuildableInternal(const Entry& e, std::string& subfolder) {
     if (e.type == EntryType::PointCloud) {
@@ -1138,6 +1160,31 @@ CleanupResult cleanupBuild(Database* db, const std::string& outputPath) {
             } else {
                 result.removedBuilds.push_back(p.string());
                 LOGD << "Removed orphan pending file: " << p.string();
+            }
+        } else if (entry.is_regular_file(typeErr) && isPendingMarkerTempName(name)) {
+            // Leftover of replacePendingMarker() interrupted between write and
+            // rename. It is never valid state, whatever its hash, but a fresh one
+            // may belong to a live writer: collect it only once it is old.
+            std::error_code timeErr;
+            const auto writeTime = fs::last_write_time(p, timeErr);
+            if (timeErr) {
+                LOGW << "Cannot read the age of pending marker temp file '" << p.string()
+                     << "' (" << timeErr.message() << "); keeping it";
+                continue;
+            }
+            if (fs::file_time_type::clock::now() - writeTime < PendingMarkerTempMinAge) {
+                LOGD << "Keeping recent pending marker temp file: " << p.string();
+                continue;
+            }
+
+            std::error_code rmErr;
+            fs::remove(p, rmErr);
+            if (rmErr) {
+                LOGW << "Failed to remove pending marker temp file '" << p.string()
+                     << "': " << rmErr.message();
+            } else {
+                result.removedBuilds.push_back(p.string());
+                LOGD << "Removed stale pending marker temp file: " << p.string();
             }
         }
     }
