@@ -4,6 +4,9 @@
 #ifndef COORDSTRANSFORMER_H
 #define COORDSTRANSFORMER_H
 
+#include <cstddef>
+#include <string>
+
 #include "gdal_inc.h"
 #include "ddb_export.h"
 
@@ -24,6 +27,10 @@ namespace ddb
 
         DDB_DLL void transform(double *x, double *y);
         DDB_DLL void transform(double *x, double *y, double *z);
+
+        // Transforms n points in place in one PROJ call. Points that cannot be
+        // transformed are set to HUGE_VAL instead of failing the call.
+        DDB_DLL void transform(size_t n, double *x, double *y);
     };
 
 }

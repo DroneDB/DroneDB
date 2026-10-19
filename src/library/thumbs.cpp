@@ -5,15 +5,15 @@
 
 #include <cstdlib>
 #include <iomanip>
-#include <pdal/filters/ColorinterpFilter.hpp>
 #include <pdal/io/CopcReader.hpp>
 #include <sstream>
 #include <algorithm>
 #include <cmath>
 
 #include "coordstransformer.h"
+#include "copc_utils.h"
 #include "dbops.h"
-#include "pctiler.h"
+#include "point_rasterizer.h"
 #include "exceptions.h"
 #include "gdal_inc.h"
 #include "gsplat.h"
@@ -21,12 +21,12 @@
 #include "mio.h"
 #include "pointcloud.h"
 #include "rad.h"
-#include "raster_utils.h"
-#include "sensorprofile.h"
-#include "vegetation.h"
+#include "raster_stats.h"
+#include "tile_encoder.h"
 #include "tiler.h"
 #include "userprofile.h"
 #include "utils.h"
+#include "vis_render.h"
 
 // SPZ (vendored, MIT) - decode .spz to render an on-demand splat thumbnail.
 #include "load-spz.h"
@@ -94,6 +94,14 @@ fs::path getThumbFilename(const fs::path& imagePath, time_t modifiedTime, int th
 
 namespace {
 
+// WebP quality of every thumbnail: at preview sizes q80 is visually indistinguishable
+// from q95 at about half the bytes and encode time
+constexpr int ThumbnailWebpQuality = 80;
+
+// A point-cloud thumbnail reads about this many points per output pixel: enough for
+// the 2-px discs to cover the footprint, a fraction of the cloud
+constexpr uint64_t PointsPerThumbnailPixel = 2;
+
 // RAII guard that closes a GDAL dataset on scope exit. Does nothing if released.
 struct GdalDatasetGuard {
     GDALDatasetH handle;
@@ -101,155 +109,27 @@ struct GdalDatasetGuard {
     ~GdalDatasetGuard() { if (handle) GDALClose(handle); }
     GdalDatasetGuard(const GdalDatasetGuard&) = delete;
     GdalDatasetGuard& operator=(const GdalDatasetGuard&) = delete;
-    GDALDatasetH release() { GDALDatasetH h = handle; handle = nullptr; return h; }
 };
 
-// RAII guard that unlinks a vsimem path on scope exit.
-struct VsiMemGuard {
-    std::string path;
-    explicit VsiMemGuard(std::string p) : path(std::move(p)) {}
-    ~VsiMemGuard() { if (!path.empty()) VSIUnlink(path.c_str()); }
-    VsiMemGuard(const VsiMemGuard&) = delete;
-    VsiMemGuard& operator=(const VsiMemGuard&) = delete;
-    void release() { path.clear(); }
+// Range of source values mapped to 0-255 for one output band
+struct ScaleRange {
+    double min;
+    double max;
 };
 
-// Build gdal_translate-style args to normalize a source raster to a 3-band
-// Byte GTiff of a given target size. Alpha is handled separately via the
-// mask band to keep this stage source-agnostic.
-char** buildThumbNormalizationArgs(int targetWidth,
-                                   int targetHeight,
-                                   bool hasPalette,
-                                   int bandCount) {
-    char** args = nullptr;
-    args = CSLAddString(args, "-outsize");
-    args = CSLAddString(args, std::to_string(targetWidth).c_str());
-    args = CSLAddString(args, std::to_string(targetHeight).c_str());
-    args = CSLAddString(args, "-ot");
-    args = CSLAddString(args, "Byte");
-    args = CSLAddString(args, "-r");
-    args = CSLAddString(args, hasPalette ? "nearest" : "average");
-    args = CSLAddString(args, "-of");
-    args = CSLAddString(args, "GTiff");
+// Writes a thumbnail as WEBP to outImagePath, or into *outBuffer when no path is given
+void writeThumbnail(const RasterImage& image,
+                    const fs::path& outImagePath,
+                    uint8_t** outBuffer,
+                    int* outBufferSize) {
+    EncodeOptions options;
+    options.format = ImageFormat::Webp;
+    options.quality = ThumbnailWebpQuality;
 
-    if (hasPalette) {
-        // Expand palette to RGB. Palette transparency, if any, is recovered
-        // from the source mask band in a later step.
-        args = CSLAddString(args, "-expand");
-        args = CSLAddString(args, "rgb");
-    } else if (bandCount == 1) {
-        // Grayscale (e.g. DEM/DSM): replicate band 1 three times and rescale
-        // from the data range to 0-255 for visual contrast.
-        args = CSLAddString(args, "-b");
-        args = CSLAddString(args, "1");
-        args = CSLAddString(args, "-b");
-        args = CSLAddString(args, "1");
-        args = CSLAddString(args, "-b");
-        args = CSLAddString(args, "1");
-        args = CSLAddString(args, "-scale");
-    } else if (bandCount == 2) {
-        // Grayscale + alpha: replicate band 1 for the RGB triplet; alpha is
-        // read explicitly from band 2 later.
-        args = CSLAddString(args, "-b");
-        args = CSLAddString(args, "1");
-        args = CSLAddString(args, "-b");
-        args = CSLAddString(args, "1");
-        args = CSLAddString(args, "-b");
-        args = CSLAddString(args, "1");
-        args = CSLAddString(args, "-scale");
-    } else {
-        // RGB or more: always pick the first three bands for the color output.
-        args = CSLAddString(args, "-b");
-        args = CSLAddString(args, "1");
-        args = CSLAddString(args, "-b");
-        args = CSLAddString(args, "2");
-        args = CSLAddString(args, "-b");
-        args = CSLAddString(args, "3");
-        args = CSLAddString(args, "-scale");
-    }
-
-    // Drop SRS: the thumbnail is meant as a display-only artifact.
-    args = CSLAddString(args, "-a_srs");
-    args = CSLAddString(args, "");
-    return args;
-}
-
-// Decide which source band should provide the alpha channel for the thumbnail.
-// Returns nullptr when the source is known to be fully opaque (no nodata, no
-// alpha band, no per-dataset mask) so the caller can skip the alpha pass.
-GDALRasterBandH resolveAlphaBand(GDALDatasetH hSrc, int bandCount) {
-    // Generic 2-band rasters conventionally carry grayscale + alpha.
-    if (bandCount == 2)
-        return GDALGetRasterBand(hSrc, 2);
-
-    // Prefer an explicit alpha band when present on 4+ band rasters.
-    if (bandCount >= 4) {
-        GDALRasterBandH band4 = GDALGetRasterBand(hSrc, 4);
-        if (band4 && GDALGetRasterColorInterpretation(band4) == GCI_AlphaBand)
-            return band4;
-    }
-
-    GDALRasterBandH band1 = GDALGetRasterBand(hSrc, 1);
-    if (!band1)
-        return nullptr;
-
-    // GDALGetMaskBand always returns a valid handle, but for fully-valid
-    // rasters its only flag is GMF_ALL_VALID. In that case skip the extra
-    // mask read and output a plain 3-band WEBP.
-    const int maskFlags = GDALGetMaskFlags(band1);
-    if (maskFlags == GMF_ALL_VALID)
-        return nullptr;
-
-    return GDALGetMaskBand(band1);
-}
-
-// Encode a prepared GDAL dataset (MEM or GTiff-in-vsimem) as a WEBP file or
-// in-memory buffer. Centralises the WEBP creation options and the vsimem
-// buffer extraction logic.
-void writeWebPFromDataset(GDALDatasetH hSrc,
-                          const fs::path& outImagePath,
-                          uint8_t** outBuffer,
-                          int* outBufferSize) {
-    GDALDriverH webpDrv = GDALGetDriverByName("WEBP");
-    if (!webpDrv)
-        throw GDALException("WEBP driver not available");
-
-    char** webpOpts = nullptr;
-    webpOpts = CSLAddString(webpOpts, "QUALITY=95");
-    webpOpts = CSLAddString(webpOpts, "LOSSLESS=FALSE");
-
-    const bool writeToMemory = outImagePath.empty() && outBuffer != nullptr;
-    std::string outPath;
-    if (writeToMemory) {
-        outPath = "/vsimem/" + utils::generateRandomString(32) + ".webp";
-    } else {
-        outPath = outImagePath.string();
-    }
-
-    GDALDatasetH hOut =
-        GDALCreateCopy(webpDrv, outPath.c_str(), hSrc, FALSE, webpOpts, nullptr, nullptr);
-    CSLDestroy(webpOpts);
-
-    if (!hOut) {
-        if (writeToMemory) VSIUnlink(outPath.c_str());
-        throw GDALException(std::string("Cannot create WEBP thumbnail: ") + CPLGetLastErrorMsg());
-    }
-    GDALFlushCache(hOut);
-    GDALClose(hOut);
-
-    if (!writeToMemory)
-        return;
-
-    vsi_l_offset bufSize = 0;
-    *outBuffer = VSIGetMemFileBuffer(outPath.c_str(), &bufSize, TRUE);
-    if (*outBuffer == nullptr)
-        throw GDALException("Failed to read WEBP thumbnail from vsimem");
-    if (bufSize > static_cast<vsi_l_offset>(std::numeric_limits<int>::max())) {
-        VSIFree(*outBuffer);
-        *outBuffer = nullptr;
-        throw GDALException("WEBP thumbnail exceeds maximum buffer size");
-    }
-    *outBufferSize = static_cast<int>(bufSize);
+    if (outImagePath.empty() && outBuffer != nullptr)
+        TileEncoder::encode(image, options, outBuffer, outBufferSize);
+    else
+        TileEncoder::write(image, options, outImagePath.string());
 }
 
 // Open a source raster, transparently falling back between a /vsicurl/ URL
@@ -295,87 +175,117 @@ void computeThumbTargetSize(int srcWidth, int srcHeight, int thumbSize,
     if (outHeight < 1) outHeight = 1;
 }
 
-// Detect whether the source's palette includes at least one transparent entry.
-bool paletteContainsAlpha(GDALColorTableH hColorTable) {
-    if (!hColorTable) return false;
-    const int colorCount = GDALGetColorEntryCount(hColorTable);
-    for (int i = 0; i < colorCount; i++) {
-        const GDALColorEntry* entry = GDALGetColorEntry(hColorTable, i);
-        if (entry && entry->c4 < 255) return true;
+// Decide which source band should provide the alpha channel for the thumbnail.
+// Returns nullptr when the source is known to be fully opaque (no nodata, no
+// alpha band, no per-dataset mask) so the caller can skip the alpha pass.
+GDALRasterBandH resolveAlphaBand(GDALDatasetH hSrc, int bandCount) {
+    // Generic 2-band rasters conventionally carry grayscale + alpha.
+    if (bandCount == 2)
+        return GDALGetRasterBand(hSrc, 2);
+
+    // Prefer an explicit alpha band when present on 4+ band rasters.
+    if (bandCount >= 4) {
+        GDALRasterBandH band4 = GDALGetRasterBand(hSrc, 4);
+        if (band4 && GDALGetRasterColorInterpretation(band4) == GCI_AlphaBand)
+            return band4;
     }
-    return false;
+
+    GDALRasterBandH band1 = GDALGetRasterBand(hSrc, 1);
+    if (!band1)
+        return nullptr;
+
+    // GDALGetMaskBand always returns a valid handle, but for fully-valid
+    // rasters its only flag is GMF_ALL_VALID. In that case skip the extra
+    // mask read and output a plain 3-band WEBP.
+    const int maskFlags = GDALGetMaskFlags(band1);
+    if (maskFlags == GMF_ALL_VALID)
+        return nullptr;
+
+    return GDALGetMaskBand(band1);
 }
 
-// Build an in-memory RGBA dataset from a normalized RGB intermediate plus an
-// explicit alpha buffer. The caller retains ownership of the returned handle.
-GDALDatasetH buildRGBAMemDataset(GDALDatasetH hIntermediate,
-                                 const uint8_t* alphaBuffer,
-                                 int width, int height) {
-    GDALDriverH memDrv = GDALGetDriverByName("MEM");
-    if (!memDrv)
-        throw GDALException("MEM driver not available");
-
-    GDALDatasetH hMem = GDALCreate(memDrv, "", width, height, 4, GDT_Byte, nullptr);
-    if (!hMem)
-        throw GDALException("Cannot create in-memory RGBA dataset");
-
-    GdalDatasetGuard memGuard(hMem);
-
-    // Copy RGB from intermediate → MEM bands 1..3.
-    std::vector<uint8_t> rgbBuffer(static_cast<size_t>(width) * height * 3);
-    if (GDALDatasetRasterIO(hIntermediate, GF_Read, 0, 0, width, height,
-                            rgbBuffer.data(), width, height,
-                            GDT_Byte, 3, nullptr, 0, 0, 0) != CE_None) {
-        throw GDALException(std::string("Failed to read intermediate RGB: ") +
-                            CPLGetLastErrorMsg());
-    }
-    if (GDALDatasetRasterIO(hMem, GF_Write, 0, 0, width, height,
-                            rgbBuffer.data(), width, height,
-                            GDT_Byte, 3, nullptr, 0, 0, 0) != CE_None) {
-        throw GDALException(std::string("Failed to write RGB into MEM dataset: ") +
-                            CPLGetLastErrorMsg());
-    }
-
-    // Write alpha to band 4 and mark the color interpretation accordingly so
-    // downstream drivers (WEBP, PNG, …) treat it as a true alpha channel.
-    GDALRasterBandH hAlphaOut = GDALGetRasterBand(hMem, 4);
-    if (!hAlphaOut)
-        throw GDALException("Cannot access alpha band in MEM dataset");
-    if (GDALRasterIO(hAlphaOut, GF_Write, 0, 0, width, height,
-                     const_cast<uint8_t*>(alphaBuffer), width, height,
-                     GDT_Byte, 0, 0) != CE_None) {
-        throw GDALException(std::string("Failed to write alpha into MEM dataset: ") +
-                            CPLGetLastErrorMsg());
-    }
-    GDALSetRasterColorInterpretation(hAlphaOut, GCI_AlphaBand);
-
-    return memGuard.release();
-}
-
-// Read an alpha source band at target resolution. Returns an empty vector if
-// the alpha would be entirely opaque (in which case no alpha channel is
-// required in the output).
-std::vector<uint8_t> readAlphaBuffer(GDALRasterBandH hAlphaBand,
-                                     int srcWidth, int srcHeight,
-                                     int dstWidth, int dstHeight) {
-    std::vector<uint8_t> buffer(static_cast<size_t>(dstWidth) * dstHeight);
+// Read an alpha source band at target resolution into image.alpha. Leaves the image
+// without alpha when every pixel is opaque.
+void readThumbAlpha(GDALRasterBandH hAlphaBand, int srcWidth, int srcHeight, RasterImage& image) {
+    std::vector<uint8_t> buffer(image.pixels());
 
     GDALRasterIOExtraArg extraArg;
     INIT_RASTERIO_EXTRA_ARG(extraArg);
     extraArg.eResampleAlg = GRIORA_Average;
 
     if (GDALRasterIOEx(hAlphaBand, GF_Read, 0, 0, srcWidth, srcHeight,
-                       buffer.data(), dstWidth, dstHeight,
+                       buffer.data(), image.width, image.height,
                        GDT_Byte, 0, 0, &extraArg) != CE_None) {
         throw GDALException(std::string("Failed to read alpha/mask band: ") +
                             CPLGetLastErrorMsg());
     }
 
-    // If every pixel is fully opaque we can drop the alpha channel entirely.
-    for (uint8_t v : buffer) {
-        if (v < 255) return buffer;
+    if (std::any_of(buffer.begin(), buffer.end(), [](uint8_t v) { return v < 255; }))
+        image.alpha = std::move(buffer);
+}
+
+// Resamples the source to a 3-band Byte image of width x height. bands[i] is the source
+// band of output band i (ignored when expandPalette); scales[i], when given, maps
+// [min, max] of output band i to 0-255. Byte data without scales is copied as is.
+RasterImage translateToImage(GDALDatasetH hSrc,
+                             int width,
+                             int height,
+                             const std::vector<int>& bands,
+                             bool expandPalette,
+                             const std::vector<ScaleRange>& scales,
+                             const std::string& sourceLabel) {
+    const auto fmt = [](double v) {
+        std::ostringstream os;
+        os << std::setprecision(17) << v;
+        return os.str();
+    };
+
+    std::vector<std::string> argStore = {
+        "-outsize", std::to_string(width), std::to_string(height),
+        "-ot", "Byte",
+        "-r", expandPalette ? "nearest" : "average",
+        "-of", "MEM",
+        // Drop SRS: the thumbnail is meant as a display-only artifact.
+        "-a_srs", ""};
+
+    if (expandPalette) {
+        // Palette transparency, if any, is recovered from the source mask band.
+        argStore.insert(argStore.end(), {"-expand", "rgb"});
+    } else {
+        for (int b : bands)
+            argStore.insert(argStore.end(), {"-b", std::to_string(b)});
     }
-    return {};
+
+    for (size_t i = 0; i < scales.size(); i++) {
+        argStore.insert(argStore.end(), {"-scale_" + std::to_string(i + 1),
+                                         fmt(scales[i].min), fmt(scales[i].max), "0", "255"});
+    }
+
+    std::vector<char*> argv;
+    argv.reserve(argStore.size() + 1);
+    for (auto& s : argStore) argv.push_back(const_cast<char*>(s.c_str()));
+    argv.push_back(nullptr);
+
+    GDALTranslateOptions* psOptions = GDALTranslateOptionsNew(argv.data(), nullptr);
+    if (!psOptions)
+        throw GDALException("Failed to create GDAL translate options for " + sourceLabel);
+
+    GdalDatasetGuard translated(GDALTranslate("", hSrc, psOptions, nullptr));
+    GDALTranslateOptionsFree(psOptions);
+    if (!translated.handle)
+        throw GDALException("Failed to normalize " + sourceLabel + " for thumbnail: " + CPLGetLastErrorMsg());
+
+    RasterImage image(width, height, 3, false);
+    if (GDALDatasetRasterIO(translated.handle, GF_Read, 0, 0, width, height, image.color.data(), width, height,
+                            GDT_Byte, 3, nullptr, 0, 0, 0) != CE_None)
+        throw GDALException(std::string("Failed to read thumbnail pixels: ") + CPLGetLastErrorMsg());
+    return image;
+}
+
+// Display range of the source band (its minimum and maximum) for a stretch to 0-255
+ScaleRange bandRange(const fs::path& imagePath, GDALDatasetH hSrc, int band) {
+    const auto s = RasterStatsProvider::instance().get(imagePath.string(), hSrc, band);
+    return {s.min, s.max};
 }
 
 }  // namespace
@@ -385,7 +295,6 @@ void generateImageThumb(const fs::path& imagePath,
                         const fs::path& outImagePath,
                         uint8_t** outBuffer,
                         int* outBufferSize) {
-    // ---- Open source ---------------------------------------------------------
     std::string openPath;
     GdalDatasetGuard srcGuard(openThumbSource(imagePath, openPath));
     GDALDatasetH hSrc = srcGuard.handle;
@@ -397,58 +306,29 @@ void generateImageThumb(const fs::path& imagePath,
         throw GDALException("Invalid source raster dimensions in " + openPath);
 
     GDALRasterBandH hBand1 = GDALGetRasterBand(hSrc, 1);
-    GDALColorTableH hColorTable = hBand1 ? GDALGetRasterColorTable(hBand1) : nullptr;
-    const bool hasPalette = (hColorTable != nullptr);
-    const bool paletteHasAlpha = paletteContainsAlpha(hColorTable);
-    (void)paletteHasAlpha;  // Alpha is always recovered via the mask band.
+    const bool hasPalette = hBand1 && GDALGetRasterColorTable(hBand1) != nullptr;
+    const bool isByte = GDALGetRasterDataType(hBand1) == GDT_Byte;
 
-    // ---- Compute target size -------------------------------------------------
     int targetWidth = 0, targetHeight = 0;
     computeThumbTargetSize(srcWidth, srcHeight, thumbSize, targetWidth, targetHeight);
 
-    // ---- Step 1: normalize source to an RGB Byte GTiff in vsimem -------------
-    char** targs = buildThumbNormalizationArgs(targetWidth, targetHeight,
-                                               hasPalette, bandCount);
-    GDALTranslateOptions* psOptions = GDALTranslateOptionsNew(targs, nullptr);
-    CSLDestroy(targs);
-    if (!psOptions)
-        throw GDALException("Failed to create GDAL translate options for " + openPath);
-
-    const std::string intermediatePath =
-        "/vsimem/" + utils::generateRandomString(32) + ".tif";
-    VsiMemGuard intermediateGuard(intermediatePath);
-
-    int translateError = 0;
-    GDALDatasetH hIntermediateRaw =
-        GDALTranslate(intermediatePath.c_str(), hSrc, psOptions, &translateError);
-    GDALTranslateOptionsFree(psOptions);
-    if (!hIntermediateRaw) {
-        throw GDALException("Failed to normalize " + openPath +
-                            " for thumbnail: " + CPLGetLastErrorMsg());
-    }
-    GdalDatasetGuard intermediateGuardDs(hIntermediateRaw);
-
-    // ---- Step 2: read alpha source (if any) ----------------------------------
-    std::vector<uint8_t> alphaBuffer;
-    GDALRasterBandH hAlphaBand = resolveAlphaBand(hSrc, bandCount);
-    if (hAlphaBand != nullptr) {
-        alphaBuffer = readAlphaBuffer(hAlphaBand,
-                                      srcWidth, srcHeight,
-                                      targetWidth, targetHeight);
+    // Grey (and grey + alpha) is replicated to RGB; otherwise the first three bands.
+    // Only non-Byte data (DEM, thermal...) is stretched, from the raster statistics:
+    // 8-bit photos keep their colours.
+    const std::vector<int> bands = bandCount <= 2 ? std::vector<int>{1, 1, 1} : std::vector<int>{1, 2, 3};
+    std::vector<ScaleRange> scales;
+    if (!hasPalette && !isByte) {
+        for (int b : bands)
+            scales.push_back(bandRange(imagePath, hSrc, b));
     }
 
-    // ---- Step 3: encode as WEBP ---------------------------------------------
-    if (alphaBuffer.empty()) {
-        LOGD << "Writing 3-band WEBP thumbnail for " << openPath;
-        writeWebPFromDataset(hIntermediateRaw, outImagePath, outBuffer, outBufferSize);
-        return;
-    }
+    RasterImage image = translateToImage(hSrc, targetWidth, targetHeight, bands, hasPalette, scales, openPath);
 
-    LOGD << "Writing 4-band RGBA WEBP thumbnail for " << openPath;
-    GdalDatasetGuard memGuard(buildRGBAMemDataset(hIntermediateRaw,
-                                                  alphaBuffer.data(),
-                                                  targetWidth, targetHeight));
-    writeWebPFromDataset(memGuard.handle, outImagePath, outBuffer, outBufferSize);
+    if (GDALRasterBandH hAlphaBand = resolveAlphaBand(hSrc, bandCount))
+        readThumbAlpha(hAlphaBand, srcWidth, srcHeight, image);
+
+    LOGD << "Writing " << (image.hasAlpha() ? "RGBA" : "RGB") << " WEBP thumbnail for " << openPath;
+    writeThumbnail(image, outImagePath, outBuffer, outBufferSize);
 }
 
 void generateImageThumbEx(const fs::path& imagePath,
@@ -457,542 +337,69 @@ void generateImageThumbEx(const fs::path& imagePath,
                           uint8_t** outBuffer,
                           int* outBufferSize,
                           const ThumbVisParams& visParams) {
-    GDALDatasetH hSrcDataset = GDALOpen(imagePath.string().c_str(), GA_ReadOnly);
-    if (!hSrcDataset)
+    GdalDatasetGuard srcGuard(GDALOpen(imagePath.string().c_str(), GA_ReadOnly));
+    GDALDatasetH hSrc = srcGuard.handle;
+    if (!hSrc)
         throw GDALException("Cannot open " + imagePath.string() + " for reading");
 
-    const int width = GDALGetRasterXSize(hSrcDataset);
-    const int height = GDALGetRasterYSize(hSrcDataset);
-    const int bandCount = GDALGetRasterCount(hSrcDataset);
-    const GDALDataType srcType = GDALGetRasterDataType(GDALGetRasterBand(hSrcDataset, 1));
+    const int width = GDALGetRasterXSize(hSrc);
+    const int height = GDALGetRasterYSize(hSrc);
+    const int bandCount = GDALGetRasterCount(hSrc);
+    const GDALDataType srcType = GDALGetRasterDataType(GDALGetRasterBand(hSrc, 1));
 
     int targetWidth, targetHeight;
-    if (width > height) {
-        targetWidth = thumbSize;
-        targetHeight = std::max(1, static_cast<int>((static_cast<float>(thumbSize) / width) * height));
-    } else {
-        targetHeight = thumbSize;
-        targetWidth = std::max(1, static_cast<int>((static_cast<float>(thumbSize) / height) * width));
-    }
+    computeThumbTargetSize(width, height, thumbSize, targetWidth, targetHeight);
 
-    // Determine band indices to use
-    std::vector<int> selectedBands;
-
-    if (!visParams.bands.empty()) {
-        // Explicit bands provided
-        std::istringstream ss(visParams.bands);
-        std::string token;
-        while (std::getline(ss, token, ',')) {
-            int b;
-            try {
-                b = std::stoi(token);
-            } catch (const std::exception &) {
-                throw InvalidArgsException("Invalid band value: '" + token + "'");
-            }
-            if (b < 1 || b > bandCount)
-                throw InvalidArgsException("Band index " + std::to_string(b) + " out of range");
-            selectedBands.push_back(b);
-        }
-    } else if (!visParams.preset.empty()) {
-        // Use preset from sensor profile
-        auto& spm = SensorProfileManager::instance();
-        auto mapping = spm.getBandMappingForPreset(imagePath.string(), visParams.preset);
-        selectedBands = {mapping.r, mapping.g, mapping.b};
-    } else {
-        // Auto-detect sensor and use default mapping
-        auto& spm = SensorProfileManager::instance();
-        auto detection = spm.detectSensor(imagePath.string());
-        if (detection.detected) {
-            selectedBands = {detection.defaultBandMapping.r, detection.defaultBandMapping.g, detection.defaultBandMapping.b};
-        }
-        // If not multispectral, selectedBands stays empty → fall through to standard path
-    }
-
-    // Formula mode: read required bands, apply formula, apply colormap
+    // Formula mode: vegetation index rendered with its colormap
     if (!visParams.formula.empty()) {
-        auto& ve = VegetationEngine::instance();
+        const RasterWindow window{0, 0, width, height, targetWidth, targetHeight};
+        const auto rgba = renderFormulaRgba(hSrc, imagePath.string(), window, visParams);
 
-        // Determine band filter
-        BandFilter bf;
-        if (!visParams.bandFilter.empty()) {
-            bf = VegetationEngine::parseFilter(visParams.bandFilter, bandCount);
-        } else {
-            bf = ve.autoDetectFilter(imagePath.string());
+        RasterImage image(targetWidth, targetHeight, 3, true);
+        for (size_t i = 0; i < image.pixels(); i++) {
+            for (int b = 0; b < 3; b++) image.band(b)[i] = rgba[i * 4 + b];
+            image.alpha[i] = rgba[i * 4 + 3];
         }
-
-        // Read all bands at thumbnail resolution as float
-        size_t pixCount = static_cast<size_t>(targetWidth) * targetHeight;
-        std::vector<std::vector<float>> bandDataStorage(bandCount);
-        std::vector<float*> bandDataPtrs(bandCount);
-
-        auto nodataInfo = detectBandNodata(hSrcDataset, bandCount);
-        for (int b = 0; b < bandCount; b++) {
-            bandDataStorage[b].resize(pixCount);
-            bandDataPtrs[b] = bandDataStorage[b].data();
-            GDALRasterBandH hBand = GDALGetRasterBand(hSrcDataset, b + 1);
-            if (GDALRasterIO(hBand, GF_Read, 0, 0, width, height,
-                             bandDataPtrs[b], targetWidth, targetHeight,
-                             GDT_Float32, 0, 0) != CE_None) {
-                GDALClose(hSrcDataset);
-                throw GDALException("Cannot read band " + std::to_string(b + 1));
-            }
-        }
-
-        // Pre-mask transparent and nodata pixels
-        float nodata = NODATA_SENTINEL;
-        premaskNodata(bandDataPtrs, pixCount, bandCount, nodataInfo, nodata);
-
-        // Apply formula
-        std::vector<float> result(pixCount);
-        const auto* formulaPtr = ve.getFormula(visParams.formula);
-        if (!formulaPtr) {
-            GDALClose(hSrcDataset);
-            throw InvalidArgsException("Unknown formula: " + visParams.formula);
-        }
-        ve.applyFormula(*formulaPtr, bf, bandDataPtrs, result.data(), pixCount, nodata);
-
-        // Determine rescale range
-        float rMin, rMax;
-        if (!visParams.rescale.empty()) {
-            auto commaPos = visParams.rescale.find(',');
-            if (commaPos == std::string::npos) {
-                GDALClose(hSrcDataset);
-                throw InvalidArgsException("Invalid rescale format: " + visParams.rescale + ". Expected format: min,max");
-            }
-            std::string minStr = visParams.rescale.substr(0, commaPos);
-            std::string maxStr = visParams.rescale.substr(commaPos + 1);
-            if (minStr.empty() || maxStr.empty()) {
-                GDALClose(hSrcDataset);
-                throw InvalidArgsException("Invalid rescale format: " + visParams.rescale + ". Expected format: min,max");
-            }
-            try {
-                rMin = std::stof(minStr);
-                rMax = std::stof(maxStr);
-            } catch (const std::exception&) {
-                GDALClose(hSrcDataset);
-                throw InvalidArgsException("Invalid rescale values: " + visParams.rescale + ". Expected numeric format: min,max");
-            }
-        } else {
-            // Use formula's natural range or p2-p98
-            bool found = false;
-            if (formulaPtr->hasRange && formulaPtr->rangeMin != formulaPtr->rangeMax) {
-                rMin = static_cast<float>(formulaPtr->rangeMin);
-                rMax = static_cast<float>(formulaPtr->rangeMax);
-                found = true;
-            }
-            if (!found) {
-                // Compute p2-p98
-                std::vector<float> valid;
-                valid.reserve(pixCount);
-                for (size_t i = 0; i < pixCount; i++) {
-                    if (result[i] != nodata) valid.push_back(result[i]);
-                }
-                if (!valid.empty()) {
-                    std::sort(valid.begin(), valid.end());
-                    rMin = valid[static_cast<size_t>(valid.size() * 0.02)];
-                    rMax = valid[static_cast<size_t>(std::min(valid.size() - 1, static_cast<size_t>(valid.size() * 0.98)))];
-                } else {
-                    rMin = 0; rMax = 1;
-                }
-            }
-        }
-
-        // Apply colormap
-        std::string cmId = visParams.colormap.empty() ? "rdylgn" : visParams.colormap;
-        const auto* cmap = ve.getColormap(cmId);
-        if (!cmap) {
-            GDALClose(hSrcDataset);
-            throw InvalidArgsException("Unknown colormap: " + cmId);
-        }
-        std::vector<uint8_t> rgba(pixCount * 4);
-        ve.applyColormap(result.data(), rgba.data(), pixCount, *cmap, rMin, rMax, nodata);
-
-        GDALClose(hSrcDataset);
-
-        // Write output via MEM → WEBP
-        GDALDriverH memDrv = GDALGetDriverByName("MEM");
-        if (!memDrv)
-            throw GDALException("MEM driver not available");
-        GDALDatasetH hMem = GDALCreate(memDrv, "", targetWidth, targetHeight, 4, GDT_Byte, nullptr);
-        if (!hMem)
-            throw GDALException("Cannot create in-memory dataset for formula thumbnail");
-        for (int b = 0; b < 4; b++) {
-            std::vector<uint8_t> chanData(pixCount);
-            for (size_t i = 0; i < pixCount; i++) chanData[i] = rgba[i * 4 + b];
-            GDALRasterBandH hBand = GDALGetRasterBand(hMem, b + 1);
-            GDALRasterIO(hBand, GF_Write, 0, 0, targetWidth, targetHeight,
-                         chanData.data(), targetWidth, targetHeight, GDT_Byte, 0, 0);
-        }
-        GDALSetRasterColorInterpretation(GDALGetRasterBand(hMem, 4), GCI_AlphaBand);
-
-        GDALDriverH webpDrv = GDALGetDriverByName("WEBP");
-        if (!webpDrv) {
-            GDALClose(hMem);
-            throw GDALException("WEBP driver not available");
-        }
-        char** webpOpts = nullptr;
-        webpOpts = CSLAddString(webpOpts, "QUALITY=95");
-
-        bool writeToMemory = outImagePath.empty() && outBuffer != nullptr;
-        if (writeToMemory) {
-            std::string vsiPath = "/vsimem/" + utils::generateRandomString(32) + ".webp";
-            GDALDatasetH hOut = GDALCreateCopy(webpDrv, vsiPath.c_str(), hMem, FALSE, webpOpts, nullptr, nullptr);
-            if (!hOut) {
-                CSLDestroy(webpOpts);
-                GDALClose(hMem);
-                throw GDALException("Cannot create formula thumbnail");
-            }
-            GDALFlushCache(hOut);
-            GDALClose(hOut);
-            vsi_l_offset bufSize;
-            *outBuffer = VSIGetMemFileBuffer(vsiPath.c_str(), &bufSize, TRUE);
-            if (!*outBuffer) {
-                CSLDestroy(webpOpts);
-                GDALClose(hMem);
-                throw GDALException("Cannot retrieve formula thumbnail buffer from vsimem");
-            }
-            *outBufferSize = static_cast<int>(bufSize);
-        } else {
-            GDALDatasetH hOut = GDALCreateCopy(webpDrv, outImagePath.string().c_str(), hMem, FALSE, webpOpts, nullptr, nullptr);
-            if (!hOut) {
-                CSLDestroy(webpOpts);
-                GDALClose(hMem);
-                throw GDALException("Cannot create formula thumbnail");
-            }
-            GDALFlushCache(hOut);
-            GDALClose(hOut);
-        }
-        CSLDestroy(webpOpts);
-        GDALClose(hMem);
+        writeThumbnail(image, outImagePath, outBuffer, outBufferSize);
         return;
     }
 
-    // Non-formula mode: band selection + stretch
-    char** targs = nullptr;
-    targs = CSLAddString(targs, "-outsize");
-    targs = CSLAddString(targs, std::to_string(targetWidth).c_str());
-    targs = CSLAddString(targs, std::to_string(targetHeight).c_str());
-    targs = CSLAddString(targs, "-ot");
-    targs = CSLAddString(targs, "Byte");
-    targs = CSLAddString(targs, "-r");
-    targs = CSLAddString(targs, "average");
+    // Band selection (explicit, preset or detected sensor) + stretch
+    std::vector<int> bands = resolveVisBands(imagePath.string(), visParams, bandCount);
+    if (bands.empty())
+        bands = bandCount <= 2 ? std::vector<int>{1, 1, 1} : std::vector<int>{1, 2, 3};
+    bands.resize(3, bands.back());
 
-    if (!selectedBands.empty()) {
-        for (int b : selectedBands) {
-            targs = CSLAddString(targs, "-b");
-            targs = CSLAddString(targs, std::to_string(b).c_str());
+    // Explicit range for all bands; for non-Byte data otherwise the common p2-p98
+    // (approximated from the statistics) of the shown bands. 8-bit data is not stretched.
+    std::vector<ScaleRange> scales;
+    if (!visParams.rescale.empty()) {
+        const auto [rMin, rMax] = parseRescaleRange(visParams.rescale);
+        scales.assign(bands.size(), {rMin, rMax});
+    } else if (srcType != GDT_Byte) {
+        double globalMin = std::numeric_limits<double>::max();
+        double globalMax = std::numeric_limits<double>::lowest();
+        for (int b : bands) {
+            const auto [sMin, sMax] = stretchRange(RasterStatsProvider::instance().get(imagePath.string(), hSrc, b));
+            globalMin = std::min(globalMin, sMin);
+            globalMax = std::max(globalMax, sMax);
         }
-    } else if (bandCount == 1) {
-        targs = CSLAddString(targs, "-b");
-        targs = CSLAddString(targs, "1");
-        targs = CSLAddString(targs, "-b");
-        targs = CSLAddString(targs, "1");
-        targs = CSLAddString(targs, "-b");
-        targs = CSLAddString(targs, "1");
-    } else if (bandCount == 2) {
-        targs = CSLAddString(targs, "-b");
-        targs = CSLAddString(targs, "1");
-        targs = CSLAddString(targs, "-b");
-        targs = CSLAddString(targs, "1");
-        targs = CSLAddString(targs, "-b");
-        targs = CSLAddString(targs, "1");
-        targs = CSLAddString(targs, "-b");
-        targs = CSLAddString(targs, "2");
-    } else {
-        // Default: first 3 bands
-        targs = CSLAddString(targs, "-b");
-        targs = CSLAddString(targs, "1");
-        targs = CSLAddString(targs, "-b");
-        targs = CSLAddString(targs, "2");
-        targs = CSLAddString(targs, "-b");
-        targs = CSLAddString(targs, "3");
+        scales.assign(bands.size(), {globalMin, globalMax});
     }
 
-    // Stretch: for non-Byte data, use -scale
-    if (srcType != GDT_Byte) {
-        if (!visParams.rescale.empty()) {
-            auto commaPos = visParams.rescale.find(',');
-            if (commaPos == std::string::npos) {
-                CSLDestroy(targs);
-                GDALClose(hSrcDataset);
-                throw InvalidArgsException("Invalid rescale format: " + visParams.rescale + ". Expected format: min,max");
-            }
-            std::string sMin = visParams.rescale.substr(0, commaPos);
-            std::string sMax = visParams.rescale.substr(commaPos + 1);
-            if (sMin.empty() || sMax.empty()) {
-                CSLDestroy(targs);
-                GDALClose(hSrcDataset);
-                throw InvalidArgsException("Invalid rescale format: " + visParams.rescale + ". Expected format: min,max");
-            }
-            try {
-                (void)std::stof(sMin);
-                (void)std::stof(sMax);
-            } catch (const std::exception&) {
-                CSLDestroy(targs);
-                GDALClose(hSrcDataset);
-                throw InvalidArgsException("Invalid rescale values: " + visParams.rescale + ". Expected numeric format: min,max");
-            }
-            targs = CSLAddString(targs, "-scale");
-            targs = CSLAddString(targs, sMin.c_str());
-            targs = CSLAddString(targs, sMax.c_str());
-            targs = CSLAddString(targs, "0");
-            targs = CSLAddString(targs, "255");
-        } else {
-            // Percentile stretch: compute p2-p98 on selected bands
-            std::vector<int> bandsToSample;
-            if (!selectedBands.empty()) {
-                bandsToSample = selectedBands;
-            } else {
-                for (int i = 1; i <= std::min(3, bandCount); i++) bandsToSample.push_back(i);
-            }
+    RasterImage image = translateToImage(hSrc, targetWidth, targetHeight, bands, false, scales, imagePath.string());
+    if (GDALRasterBandH hAlphaBand = resolveAlphaBand(hSrc, bandCount))
+        readThumbAlpha(hAlphaBand, width, height, image);
 
-            double globalMin = std::numeric_limits<double>::max();
-            double globalMax = std::numeric_limits<double>::lowest();
-            for (int b : bandsToSample) {
-                double bMin, bMax, bMean, bStdDev;
-                GDALRasterBandH hBand = GDALGetRasterBand(hSrcDataset, b);
-                if (GDALComputeRasterStatistics(hBand, TRUE, &bMin, &bMax, &bMean, &bStdDev, nullptr, nullptr) == CE_None) {
-                    // p2-p98 approximation: mean ± 2.33*stdDev (for normal distribution)
-                    double p2 = std::max(bMin, bMean - 2.33 * bStdDev);
-                    double p98 = std::min(bMax, bMean + 2.33 * bStdDev);
-                    globalMin = std::min(globalMin, p2);
-                    globalMax = std::max(globalMax, p98);
-                }
-            }
-            if (globalMin < globalMax) {
-                targs = CSLAddString(targs, "-scale");
-                targs = CSLAddString(targs, std::to_string(globalMin).c_str());
-                targs = CSLAddString(targs, std::to_string(globalMax).c_str());
-                targs = CSLAddString(targs, "0");
-                targs = CSLAddString(targs, "255");
-            } else {
-                targs = CSLAddString(targs, "-scale");
-            }
-        }
-    } else {
-        // Byte data might still need scale for consistency
-        targs = CSLAddString(targs, "-scale");
-    }
-
-    targs = CSLAddString(targs, "-of");
-    targs = CSLAddString(targs, "WEBP");
-    targs = CSLAddString(targs, "-co");
-    targs = CSLAddString(targs, "QUALITY=95");
-    targs = CSLAddString(targs, "-a_srs");
-    targs = CSLAddString(targs, "");
-
-    GDALTranslateOptions* psOptions = GDALTranslateOptionsNew(targs, nullptr);
-    CSLDestroy(targs);
-
-    if (!psOptions) {
-        GDALClose(hSrcDataset);
-        throw GDALException("Failed to create GDAL translate options");
-    }
-
-    bool writeToMemory = outImagePath.empty() && outBuffer != nullptr;
-    if (writeToMemory) {
-        std::string vsiPath = "/vsimem/" + utils::generateRandomString(32) + ".webp";
-        GDALDatasetH hNew = GDALTranslate(vsiPath.c_str(), hSrcDataset, psOptions, nullptr);
-        if (!hNew) {
-            VSIUnlink(vsiPath.c_str());
-            GDALTranslateOptionsFree(psOptions);
-            GDALClose(hSrcDataset);
-            throw GDALException("Failed to generate thumbnail");
-        }
-        GDALFlushCache(hNew);
-        GDALClose(hNew);
-        vsi_l_offset bufSize;
-        *outBuffer = VSIGetMemFileBuffer(vsiPath.c_str(), &bufSize, TRUE);
-        *outBufferSize = static_cast<int>(bufSize);
-    } else {
-        GDALDatasetH hNew = GDALTranslate(outImagePath.string().c_str(), hSrcDataset, psOptions, nullptr);
-        if (!hNew) {
-            GDALTranslateOptionsFree(psOptions);
-            GDALClose(hSrcDataset);
-            throw GDALException("Failed to generate thumbnail");
-        }
-        GDALFlushCache(hNew);
-        GDALClose(hNew);
-    }
-
-    GDALTranslateOptionsFree(psOptions);
-    GDALClose(hSrcDataset);
-}
-
-void RenderImage(const fs::path& outImagePath,
-                 const int tileSize,
-                 const int nBands,
-                 uint8_t* buffer,
-                 uint8_t* alphaBuffer = nullptr,
-                 uint8_t** outBuffer = nullptr,
-                 int* outBufferSize = nullptr) {
-    GDALDriverH memDrv = GDALGetDriverByName("MEM");
-    if (memDrv == nullptr)
-        throw GDALException("Cannot create MEM driver");
-
-    GDALDriverH webpDrv = GDALGetDriverByName("WEBP");
-    if (webpDrv == nullptr)
-        throw GDALException("Cannot create WEBP driver");  // Determine the effective number of bands
-                                                           // (3 RGB + optionally 1 Alpha)
-    int effectiveBands = nBands;
-    if (alphaBuffer != nullptr) {
-        effectiveBands = 4;  // RGB + Alpha
-    }
-
-    // Need to create in-memory dataset
-    const GDALDatasetH hDataset =
-        GDALCreate(memDrv, "", tileSize, tileSize, effectiveBands, GDT_Byte, nullptr);
-    if (hDataset == nullptr)
-        throw GDALException("Cannot create GDAL dataset");
-
-    // Write RGB data
-    if (GDALDatasetRasterIO(hDataset,
-                            GF_Write,
-                            0,
-                            0,
-                            tileSize,
-                            tileSize,
-                            buffer,
-                            tileSize,
-                            tileSize,
-                            GDT_Byte,
-                            nBands,
-                            nullptr,
-                            0,
-                            0,
-                            0) != CE_None) {
-        throw GDALException("Cannot write tile data");
-    }
-
-    // If we have alphaBuffer, also write the alpha channel
-    if (alphaBuffer != nullptr) {
-        GDALRasterBandH alphaBand = GDALGetRasterBand(hDataset, 4);
-        if (GDALRasterIO(alphaBand,
-                         GF_Write,
-                         0,
-                         0,
-                         tileSize,
-                         tileSize,
-                         alphaBuffer,
-                         tileSize,
-                         tileSize,
-                         GDT_Byte,
-                         0,
-                         0) != CE_None) {
-            throw GDALException("Cannot write alpha channel data");
-        }
-    }
-
-    // Define consistent WEBP creation options
-    char** webpOpts = nullptr;
-    webpOpts = CSLAddString(webpOpts, "QUALITY=95");
-
-    bool writeToMemory = outImagePath.empty() && outBuffer != nullptr;
-    if (writeToMemory) {
-        // Write to memory via vsimem
-        std::string vsiPath = "/vsimem/" + utils::generateRandomString(32) + ".webp";
-        const GDALDatasetH outDs =
-            GDALCreateCopy(webpDrv, vsiPath.c_str(), hDataset, FALSE, webpOpts, nullptr, nullptr);
-        if (outDs == nullptr)
-            throw GDALException("Cannot create output dataset " + outImagePath.string());
-        GDALFlushCache(outDs);
-        GDALClose(outDs);
-
-        // Read memory to buffer
-        vsi_l_offset bufSize;
-        *outBuffer = VSIGetMemFileBuffer(vsiPath.c_str(), &bufSize, TRUE);
-        if (bufSize > std::numeric_limits<int>::max())
-            throw GDALException("Exceeded max buf size");
-        *outBufferSize = bufSize;
-    } else {
-        const GDALDatasetH outDs = GDALCreateCopy(webpDrv,
-                                                  outImagePath.string().c_str(),
-                                                  hDataset,
-                                                  FALSE,
-                                                  webpOpts,
-                                                  nullptr,
-                                                  nullptr);
-        if (outDs == nullptr)
-            throw GDALException("Cannot create output dataset " + outImagePath.string() + ": " + CPLGetLastErrorMsg());
-        GDALFlushCache(outDs);
-        GDALClose(outDs);
-    }
-
-    CSLDestroy(webpOpts);
-    GDALClose(hDataset);
-}
-
-// Helper function to render points with optional coordinate transformation
-int renderPoints(pdal::PointViewPtr point_view,
-                const std::vector<PointColor>& colors,
-                bool hasSpatialSystem,
-                const std::string& wktProjection,
-                uint8_t* buffer,
-                uint8_t* alphaBuffer,
-                float* zBuffer,
-                int tileSize,
-                double tileScale,
-                double offsetX,
-                double offsetY,
-                double oMinX,
-                double oMinY) {
-    int pointsRendered = 0;
-    const auto wSize = tileSize * tileSize;
-
-    if (hasSpatialSystem) {
-        CoordsTransformer ict(wktProjection, 3857);
-
-        for (pdal::PointId idx = 0; idx < point_view->size(); ++idx) {
-            auto p = point_view->point(idx);
-            auto x = p.getFieldAs<double>(pdal::Dimension::Id::X);
-            auto y = p.getFieldAs<double>(pdal::Dimension::Id::Y);
-            auto z = p.getFieldAs<double>(pdal::Dimension::Id::Z);
-
-            ict.transform(&x, &y);
-
-            // Map projected coordinates to local PNG coordinates
-            int px = std::round((x - oMinX) * tileScale + offsetX);
-            int py = tileSize - 1 - std::round((y - oMinY) * tileScale + offsetY);
-
-            if (px >= 0 && px < tileSize && py >= 0 && py < tileSize &&
-                zBuffer[py * tileSize + px] < z) {
-                zBuffer[py * tileSize + px] = z;
-                drawCircle(buffer, alphaBuffer, px, py, 2,
-                          colors[idx].r, colors[idx].g, colors[idx].b,
-                          tileSize, wSize);
-                pointsRendered++;
-            }
-        }
-    } else {
-        for (pdal::PointId idx = 0; idx < point_view->size(); ++idx) {
-            auto p = point_view->point(idx);
-            auto x = p.getFieldAs<double>(pdal::Dimension::Id::X);
-            auto y = p.getFieldAs<double>(pdal::Dimension::Id::Y);
-            auto z = p.getFieldAs<double>(pdal::Dimension::Id::Z);
-
-            // Map coordinates to local PNG coordinates
-            int px = std::round((x - oMinX) * tileScale + offsetX);
-            int py = tileSize - 1 - std::round((y - oMinY) * tileScale + offsetY);
-
-            if (px >= 0 && px < tileSize && py >= 0 && py < tileSize &&
-                zBuffer[py * tileSize + px] < z) {
-                zBuffer[py * tileSize + px] = z;
-                drawCircle(buffer, alphaBuffer, px, py, 2,
-                          colors[idx].r, colors[idx].g, colors[idx].b,
-                          tileSize, wSize);
-                pointsRendered++;
-            }
-        }
-    }
-
-    return pointsRendered;
+    writeThumbnail(image, outImagePath, outBuffer, outBufferSize);
 }
 
 void generatePointCloudThumb(const fs::path& copcPath,
                              int thumbSize,
                              const fs::path& outImagePath,
                              uint8_t** outBuffer,
-                             int* outBufferSize) {
+                             int* outBufferSize,
+                             uint64_t pointBudget) {
     PointCloudInfo pcInfo;
 
     // Load COPC information
@@ -1044,8 +451,6 @@ void generatePointCloudThumb(const fs::path& copcPath,
         hasSpatialSystem = false;
     }
 
-    // Determine zoom level and check for color dimensions
-    const auto tMinZ = mercator.zoomForLength(length);
     const auto hasColors =
         std::find(pcInfo.dimensions.begin(), pcInfo.dimensions.end(), "Red") !=
             pcInfo.dimensions.end() &&
@@ -1066,86 +471,83 @@ void generatePointCloudThumb(const fs::path& copcPath,
     }
 #endif
 
-    // Configure COPC reader options
-    const auto tz = tMinZ;
-    double resolution = tz < 0 ? 1 : mercator.resolution(tz);
-
-    pdal::Options copcOpts;
-    copcOpts.add("filename",
-                (!utils::isNetworkPath(copcPath.string()) && copcPath.is_relative())
-                    ? ("." / copcPath).string()
-                    : copcPath.string());
-    copcOpts.add("resolution", resolution);
-
-    std::unique_ptr<pdal::CopcReader> copcReader = std::make_unique<pdal::CopcReader>();
-    pdal::Stage* main = copcReader.get();
-    copcReader->setOptions(copcOpts);
-
-    // Execute PDAL pipeline with comprehensive error handling
-    pdal::PointTable table;
-    pdal::PointViewSet point_view_set;
-    pdal::PointViewPtr point_view;
-
+    // Read the octree down to the deepest level whose points fit the budget (about
+    // PointsPerThumbnailPixel per output pixel), not every point finer than a pixel
+    const uint64_t budget = pointBudget > 0
+        ? pointBudget
+        : PointsPerThumbnailPixel * static_cast<uint64_t>(thumbSize) * static_cast<uint64_t>(thumbSize);
+    double resolution;
     try {
-        main->prepare(table);
-        point_view_set = main->execute(table);
-        point_view = *point_view_set.begin();
-
-        if (point_view->empty()) {
-            throw GDALException("No points fetched from cloud, check zoom level");
-        }
-    } catch (const pdal::pdal_error& e) {
-        throw PDALException("PDAL error: " + std::string(e.what()));
-    } catch (const std::exception& e) {
-        throw PDALException("Failed to process point cloud pipeline: " + std::string(e.what()));
+        const auto hierarchy = readCopcHierarchy(copcPath.string());
+        const int depth = planCopcDepth(hierarchy.pointsPerDepth, budget);
+        resolution = copcResolutionForDepth(hierarchy.spacing, depth);
+        LOGD << "Point cloud thumbnail reads COPC depths 0-" << depth << " (resolution " << resolution << ")";
+    } catch (const AppException& e) {
+        // Pixel-size heuristic: reads every level finer than a pixel
+        LOGD << "Cannot plan COPC read (" << e.what() << "), using the pixel size";
+        const auto tz = mercator.zoomForLength(length);
+        resolution = tz < 0 ? 1 : mercator.resolution(tz);
     }
 
-    // Initialize rendering buffers
-    const auto wSize = tileSize * tileSize;
-    constexpr int nBands = 3;
-    const int bufSize = GDALGetDataTypeSizeBytes(GDT_Byte) * wSize;
+    pdal::Options copcOpts = copcReaderOptions(copcPath.string());
+    copcOpts.add("resolution", resolution);
 
-    std::vector<uint8_t> buffer(static_cast<size_t>(bufSize) * nBands, 0);
-    std::vector<uint8_t> alphaBuffer(static_cast<size_t>(bufSize), 0);
-    std::vector<float> zBuffer(static_cast<size_t>(wSize), -99999.0f);
+    pdal::CopcReader copcReader;
+    copcReader.setOptions(copcOpts);
 
-    // Calculate scaling and offset for centering
+    // Fit the footprint in the square thumbnail, centred
     const double width = oMaxX - oMinX;
     const double height = oMaxY - oMinY;
     const double tileScaleW = tileSize / width;
     const double tileScaleH = tileSize / height;
 
-    double tileScale, offsetX, offsetY;
+    PixelMapping mapping;
+    mapping.originX = oMinX;
+    mapping.originY = oMinY;
     if (tileScaleW > tileScaleH) {
         // Taller than wider
-        tileScale = tileScaleH;
-        offsetY = 0;
-        offsetX = (tileSize - width * tileScaleH) / 2;
+        mapping.scaleX = mapping.scaleY = tileScaleH;
+        mapping.offsetX = (tileSize - width * tileScaleH) / 2;
     } else {
         // Wider than taller
-        tileScale = tileScaleW;
-        offsetX = 0;
-        offsetY = (tileSize - height * tileScaleW) / 2;
+        mapping.scaleX = mapping.scaleY = tileScaleW;
+        mapping.offsetY = (tileSize - height * tileScaleW) / 2;
+    }
+    mapping.width = mapping.height = tileSize;
+
+    std::unique_ptr<CoordsTransformer> toMercator;
+    if (hasSpatialSystem)
+        toMercator = std::make_unique<CoordsTransformer>(pcInfo.wktProjection, 3857);
+
+    const double minZ = pcInfo.bounds[2];
+    const double zRange = pcInfo.bounds[5] - minZ;
+
+    PointRasterizer rasterizer(tileSize, mapping);
+    size_t pointsRead = 0;
+    try {
+        forEachPointBatch(copcReader, [&](PointBatch& points) {
+            pointsRead += points.size();
+            if (!hasColors) {
+                // Grey from elevation: lower is darker
+                for (size_t i = 0; i < points.size(); i++) {
+                    const uint16_t intensity = zRange > 0
+                        ? static_cast<uint8_t>((points.z[i] - minZ) / zRange * 255)
+                        : 128;
+                    points.red[i] = points.green[i] = points.blue[i] = intensity;
+                }
+            }
+            if (toMercator)
+                toMercator->transform(points.size(), points.x.data(), points.y.data());
+            rasterizer.add(points);
+        });
+    } catch (const pdal::pdal_error& e) {
+        throw PDALException("PDAL error: " + std::string(e.what()));
     }
 
-    // Generate colors based on available data
-    std::vector<PointColor> colors = hasColors ?
-        normalizeColors(point_view) :
-        generateZBasedColors(point_view, pcInfo.bounds[2], pcInfo.bounds[5]);
+    if (pointsRead == 0)
+        throw GDALException("No points fetched from cloud, check zoom level");
 
-    // Render points using appropriate coordinate transformation
-    int pointsRendered = renderPoints(point_view, colors, hasSpatialSystem,
-                                     pcInfo.wktProjection, buffer.data(), alphaBuffer.data(),
-                                     zBuffer.data(), tileSize, tileScale, offsetX, offsetY,
-                                     oMinX, oMinY);
-
-    RenderImage(outImagePath,
-                tileSize,
-                nBands,
-                buffer.data(),
-                alphaBuffer.data(),
-                outBuffer,
-                outBufferSize);
+    writeThumbnail(rasterizer.toImage(), outImagePath, outBuffer, outBufferSize);
 }
 
 // Shared orthographic rasteriser for Gaussian Splat previews. Inputs are already in display
@@ -1195,7 +597,7 @@ static void rasterizeSplatPreview(const std::vector<float>& positions,
     const int tileSize = thumbSize;
     const size_t wSize = static_cast<size_t>(tileSize) * static_cast<size_t>(tileSize);
 
-    // Band-sequential RGB (3 planes) + a separate alpha plane, matching RenderImage().
+    // Band-sequential RGB (3 planes) + a separate alpha plane, as in RasterImage
     std::vector<uint8_t> buffer(wSize * 3, 0);
     std::vector<uint8_t> alphaBuffer(wSize, 0);
     std::vector<float> zBuffer(wSize, std::numeric_limits<float>::lowest());
@@ -1270,8 +672,10 @@ static void rasterizeSplatPreview(const std::vector<float>& positions,
     if (rendered == 0)
         throw GDALException("No splats projected into the thumbnail frame");
 
-    RenderImage(outImagePath, tileSize, 3, buffer.data(), alphaBuffer.data(), outBuffer,
-                outBufferSize);
+    RasterImage image(tileSize, tileSize, 3, false);
+    image.color = std::move(buffer);
+    image.alpha = std::move(alphaBuffer);
+    writeThumbnail(image, outImagePath, outBuffer, outBufferSize);
 }
 
 // Render an on-demand orthographic preview of a Gaussian Splat (.spz). Colours come from the

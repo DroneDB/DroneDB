@@ -8,6 +8,7 @@
 #include "fs.h"
 #include "ddb_export.h"
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -32,6 +33,12 @@ namespace ddb
                                        const fs::path &outImagePath,
                                        uint8_t **outBuffer, int *outBufferSize,
                                        const ThumbVisParams &visParams);
+    // Thumbnail of a COPC point cloud. It reads the octree down to the deepest level
+    // whose points fit pointBudget (0 = about 2 points per output pixel).
+    DDB_DLL void generatePointCloudThumb(const fs::path &copcPath, int thumbSize,
+                                         const fs::path &outImagePath,
+                                         uint8_t **outBuffer, int *outBufferSize,
+                                         uint64_t pointBudget = 0);
     DDB_DLL void cleanupThumbsUserCache();
 
 }

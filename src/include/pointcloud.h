@@ -10,11 +10,6 @@
 #include "json.h"
 #include "basicgeometry.h"
 
-namespace pdal
-{
-    class PointView;
-}
-
 namespace ddb
 {
 
@@ -49,8 +44,6 @@ namespace ddb
     // point cloud files. Output is a single file named `cloud.copc.laz` placed inside `outdir`.
     DDB_DLL void buildCopc(const std::vector<std::string> &filenames, const std::string &outdir);
 
-    DDB_DLL std::vector<PointColor> normalizeColors(const std::shared_ptr<pdal::PointView>& point_view);
-    DDB_DLL std::vector<PointColor> generateZBasedColors(const std::shared_ptr<pdal::PointView>& point_view, double minZ, double maxZ);
     DDB_DLL void translateToLas(const std::string &input, const std::string &outputLas);
 
     // Standard layout of the COPC build artifact within an entry's build folder.
