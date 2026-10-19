@@ -169,6 +169,50 @@ namespace ddb
                 return "killed after " + fmtSeconds(idle) + " without output";
             }
 
+            std::string runtimeMessage(milliseconds limit)
+            {
+                return "killed after running for " + fmtSeconds(limit) + " (time limit)";
+            }
+
+            // Milliseconds left before the first enabled limit (idle timeout measured
+            // from lastActivity, maxRuntime from start) expires; sets runtimeHit when
+            // maxRuntime is the one that expires first. -1 when no limit is enabled.
+            template <typename TimePoint>
+            long long remainingBudget(const Options &opts, TimePoint start, TimePoint lastActivity,
+                                      TimePoint now, bool &runtimeHit)
+            {
+                bool limited = false;
+                long long remaining = -1;
+                runtimeHit = false;
+                if (opts.idleTimeout.count() > 0)
+                {
+                    remaining = std::chrono::duration_cast<milliseconds>(lastActivity + opts.idleTimeout - now).count();
+                    limited = true;
+                }
+                if (opts.maxRuntime.count() > 0)
+                {
+                    const long long left =
+                        std::chrono::duration_cast<milliseconds>(start + opts.maxRuntime - now).count();
+                    if (!limited || left < remaining)
+                    {
+                        remaining = left;
+                        runtimeHit = true;
+                    }
+                    limited = true;
+                }
+                return limited ? remaining : -1;
+            }
+
+            bool anyLimit(const Options &opts)
+            {
+                return opts.idleTimeout.count() > 0 || opts.maxRuntime.count() > 0;
+            }
+
+            std::string limitMessage(const Options &opts, bool runtimeHit)
+            {
+                return runtimeHit ? runtimeMessage(opts.maxRuntime) : timeoutMessage(opts.idleTimeout);
+            }
+
             std::string quoteForLog(const std::string &arg)
             {
 #ifdef _WIN32
@@ -518,14 +562,14 @@ namespace ddb
                     }
                     const auto now = Clock::now();
                     long long waitMs = 500; // periodic check for child exit
-                    if (!childExited && opts.idleTimeout.count() > 0)
+                    if (!childExited && anyLimit(opts))
                     {
-                        const long long remaining = static_cast<long long>(
-                            std::chrono::duration_cast<milliseconds>(lastActivity + opts.idleTimeout - now).count());
+                        bool runtimeHit = false;
+                        const long long remaining = remainingBudget(opts, start, lastActivity, now, runtimeHit);
                         if (remaining <= 0)
                         {
                             r.timedOut = true;
-                            r.errorMessage = timeoutMessage(opts.idleTimeout);
+                            r.errorMessage = limitMessage(opts, runtimeHit);
                             killGroup(pid);
                             killed = true;
                             break;
@@ -597,7 +641,7 @@ namespace ddb
                 // (e.g. it closed stdout/stderr itself): keep enforcing the idle
                 // timeout, measured from the last activity, instead of blocking in
                 // waitpid() forever. Nothing can count as activity any more.
-                if (!killed && !childExited && opts.idleTimeout.count() > 0)
+                if (!killed && !childExited && anyLimit(opts))
                 {
                     for (;;)
                     {
@@ -607,13 +651,13 @@ namespace ddb
                         if (wr == 0 && si.si_pid == pid) break; // exited (not reaped yet)
                         if (wr < 0 && errno != EINTR) break;    // waitChild() reports it
 
-                        const long long remaining = static_cast<long long>(std::chrono::duration_cast<milliseconds>(
-                                                                               lastActivity + opts.idleTimeout - Clock::now())
-                                                                               .count());
+                        bool runtimeHit = false;
+                        const long long remaining =
+                            remainingBudget(opts, start, lastActivity, Clock::now(), runtimeHit);
                         if (remaining <= 0)
                         {
                             r.timedOut = true;
-                            r.errorMessage = timeoutMessage(opts.idleTimeout);
+                            r.errorMessage = limitMessage(opts, runtimeHit);
                             killGroup(pid);
                             break;
                         }
@@ -919,12 +963,16 @@ namespace ddb
                     active = pump(extraRead, false) || active;
                     const auto now = Clock::now();
                     if (active) lastActivity = now;
-                    if (!childExited && opts.idleTimeout.count() > 0 && now - lastActivity >= opts.idleTimeout)
+                    if (!childExited && anyLimit(opts))
                     {
-                        r.timedOut = true;
-                        r.errorMessage = timeoutMessage(opts.idleTimeout);
-                        terminate();
-                        break;
+                        bool runtimeHit = false;
+                        if (remainingBudget(opts, start, lastActivity, now, runtimeHit) <= 0)
+                        {
+                            r.timedOut = true;
+                            r.errorMessage = limitMessage(opts, runtimeHit);
+                            terminate();
+                            break;
+                        }
                     }
                     if (childExited && (outRead || extraRead) && now - exitTime >= kExitDrainGrace)
                     {
@@ -940,18 +988,18 @@ namespace ddb
                 // Every monitored pipe is closed but the child may still be running:
                 // keep enforcing the idle timeout (from the last activity) instead of
                 // waiting forever.
-                if (!r.timedOut && !childExited && opts.idleTimeout.count() > 0)
+                if (!r.timedOut && !childExited && anyLimit(opts))
                 {
                     for (;;)
                     {
                         if (WaitForSingleObject(pi.hProcess, 0) == WAIT_OBJECT_0) break;
-                        const long long remaining = static_cast<long long>(std::chrono::duration_cast<milliseconds>(
-                                                                               lastActivity + opts.idleTimeout - Clock::now())
-                                                                               .count());
+                        bool runtimeHit = false;
+                        const long long remaining =
+                            remainingBudget(opts, start, lastActivity, Clock::now(), runtimeHit);
                         if (remaining <= 0)
                         {
                             r.timedOut = true;
-                            r.errorMessage = timeoutMessage(opts.idleTimeout);
+                            r.errorMessage = limitMessage(opts, runtimeHit);
                             terminate();
                             break;
                         }

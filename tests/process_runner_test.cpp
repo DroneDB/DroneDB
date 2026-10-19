@@ -277,6 +277,42 @@ TEST(processRunner, idleTimeoutAppliesAfterPipesClosed) {
     EXPECT_LT(extra.duration, std::chrono::seconds(10));
 }
 
+// A child that never stops writing never trips the idle timeout; maxRuntime
+// still bounds it (DDB-12: dwg2dxf can loop while printing warnings).
+TEST(processRunner, maxRuntimeKillsChattyChild) {
+    process::Options opts;
+    opts.idleTimeout = milliseconds(800);
+    opts.maxRuntime = milliseconds(1500);
+    const auto start = std::chrono::steady_clock::now();
+    const auto r = process::run(testChildPath(), {"descendant-worker", "streaming"}, opts);
+    const auto elapsed = std::chrono::steady_clock::now() - start;
+
+    EXPECT_TRUE(r.started);
+    EXPECT_TRUE(r.timedOut) << r.describe();
+    EXPECT_FALSE(r.success());
+    EXPECT_GT(r.totalBytes, 0u);
+    EXPECT_NE(r.describe().find("time limit"), std::string::npos) << r.describe();
+    EXPECT_GE(elapsed, milliseconds(1400));
+    EXPECT_LT(elapsed, std::chrono::seconds(10));
+}
+
+// maxRuntime also applies after the child closed its pipes, with the idle
+// timeout disabled.
+TEST(processRunner, maxRuntimeAppliesAfterPipesClosed) {
+    process::Options opts;
+    opts.idleTimeout = milliseconds(0);
+    opts.maxRuntime = milliseconds(800);
+    const auto r = process::run(testChildPath(), {"close-output", "30000", "0"}, opts);
+
+    EXPECT_TRUE(r.timedOut) << r.describe();
+    EXPECT_NE(r.describe().find("time limit"), std::string::npos) << r.describe();
+    EXPECT_LT(r.duration, std::chrono::seconds(10));
+
+    // Control: a quick child finishes normally under the same limit.
+    const auto quick = process::run(testChildPath(), {"exit", "0"}, opts);
+    EXPECT_TRUE(quick.success()) << quick.describe();
+}
+
 // P6: activity on the extra channel alone keeps the child alive.
 TEST(processRunner, extraChannelActivityResetsIdleTimer) {
     std::string extra;

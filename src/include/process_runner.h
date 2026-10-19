@@ -89,6 +89,11 @@ namespace ddb
             // long. Zero or negative disables the timeout.
             std::chrono::milliseconds idleTimeout = kDefaultIdleTimeout;
 
+            // Kill the child when it has run this long in total, output or not (a
+            // tool that loops while printing warnings never trips idleTimeout).
+            // Zero or negative disables the limit (the default).
+            std::chrono::milliseconds maxRuntime{0};
+
             // Capacity in bytes of the output ring buffer (minimum 1).
             size_t outputCapacity = kDefaultOutputCapacity;
 
@@ -109,7 +114,7 @@ namespace ddb
             bool exited = false;    // the child terminated normally (exitCode valid)
             int exitCode = -1;
             int termSignal = 0;     // POSIX: signal that terminated the child (0 = none)
-            bool timedOut = false;  // killed by the idle timeout
+            bool timedOut = false;  // killed by the idle timeout or the maxRuntime limit
             // Drain grace expired after the direct child exited, so its remaining
             // descendants were terminated. This does not change child success.
             bool descendantsTerminated = false;
