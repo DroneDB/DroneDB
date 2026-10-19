@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
+#include <chrono>
 #include <cstdlib>
 #include <fstream>
 #include <optional>
@@ -41,6 +42,7 @@ static void ensureSufficientDiskSpace(const fs::path& dir);
 // Write the complete marker into a sibling file before replacing the old one.
 // Failure (especially ENOSPC) must never remove the last pending marker.
 static bool replacePendingMarker(const fs::path& pendingPath, const std::string& dependencyLines) {
+    // "<hash>.pending.tmp-<rand16>", see PendingMarkerTempInfix.
     const fs::path temporary = pendingPath.string() + ".tmp-" + utils::generateRandomString(16);
     try {
         std::ofstream out;
@@ -96,6 +98,31 @@ static bool isHashLike(const std::string& s) {
     return true;
 }
 
+// Primary output subfolder of a Model build. Its ".building" lock is the one a
+// Model build holds for its whole duration; cleanupBuild takes the same lock
+// before touching the 3D Tiles siblings so it is serialized with builds.
+static const char* const ModelSubfolder = "nxs";
+
+// Infix of the sibling written by replacePendingMarker() before the atomic
+// rename: "<hash>.pending.tmp-<rand16>". A crash between write and rename
+// leaves it behind; cleanupBuild removes such leftovers once they are old.
+static const std::string PendingMarkerTempInfix = ".pending.tmp-";
+
+// True for "<64 hex>.pending.tmp-<non-empty suffix>".
+static bool isPendingMarkerTempName(const std::string& name) {
+    const size_t infixAt = 64;
+    if (name.size() <= infixAt + PendingMarkerTempInfix.size())
+        return false;
+    if (name.compare(infixAt, PendingMarkerTempInfix.size(), PendingMarkerTempInfix) != 0)
+        return false;
+    return isHashLike(name.substr(0, infixAt));
+}
+
+// A pending marker temp file younger than this may belong to a live
+// replacePendingMarker() call (its rename follows the close within
+// microseconds); only older leftovers are collected.
+static constexpr std::chrono::hours PendingMarkerTempMinAge{1};
+
 bool isBuildableInternal(const Entry& e, std::string& subfolder) {
     if (e.type == EntryType::PointCloud) {
         // Special case: do not build if this entry is a leaf inside a built EPT dataset.
@@ -109,7 +136,7 @@ bool isBuildableInternal(const Entry& e, std::string& subfolder) {
         subfolder = "cog";
         return true;
     } else if (e.type == EntryType::Model) {
-        subfolder = "nxs";
+        subfolder = ModelSubfolder;
         return true;
     } else if (e.type == EntryType::Vector) {
         subfolder = "vec";
@@ -401,9 +428,18 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
             // Nothing is rethrown from here, BuildDepMissingException included: it cannot
             // occur (buildNexus validated the same input above), and rethrowing it would
             // discard tempFolder before model.nxz reaches nxs/.
+            // Lock order is the primary lock (held here) then the "3dtiles" lock.
+            // cleanupBuild follows the same order, so the only way to meet a busy
+            // tiles lock is a tiles build started outside a Model build (the
+            // "ddb tiles3d" command on this output folder).
             try {
                 buildModel3DTiles(relativePath, (baseOutputPath / "3dtiles").string(), true,
                                   std::nullopt, true, datasetRoot);
+            } catch (const BuildInProgressException& tilesEx) {
+                LOGW << "3D Tiles for " << target.path << " not generated: another tiles build holds "
+                     << (baseOutputPath / "3dtiles").string() << ".building (for example 'ddb tiles3d'): "
+                     << tilesEx.what() << ". The Nexus output is published; rebuild with force to "
+                     << "produce the tiles";
             } catch (const std::exception& tilesEx) {
                 LOGW << "3D Tiles generation skipped for " << target.path << ": " << tilesEx.what();
             } catch (...) {
@@ -793,21 +829,33 @@ static void removeOrphanFolder(const fs::path& p, CleanupResult& result) {
 static const std::string TilesTrashPrefix = "3dtiles-temp-trash-";
 
 // The 3D Tiles siblings "3dtiles-temp-<rand>" and "3dtiles-old" belong to
-// buildModel3DTiles, which holds its own "3dtiles" lock (a Model build otherwise
-// holds only "nxs"). They are handled only while that lock is absent or stale.
-// Under the lock (taken here, so a tiles build cannot start between the check
-// and the move) they are only renamed to unique "3dtiles-temp-trash-<rand16>"
-// names; the lock is released before the (possibly long) deletion, so a
-// concurrent tiles build is never refused with BuildInProgress because of a
-// cleanup. "3dtiles-old" may be the only usable tileset when the final directory
-// is absent or incomplete, so it is moved aside only once the final has its
-// expected nonempty regular sentinel. trashFolders are leftovers
-// of an earlier cleanup: they are deleted whatever the lock state.
+// buildModel3DTiles, which runs under the "3dtiles" lock inside a Model build
+// that already holds the primary "nxs" lock (buildInternal); the standalone
+// "ddb tiles3d" command holds only the "3dtiles" lock.
+//
+// Lock order here is the same as in a build: first the primary "nxs" lock, then
+// the "3dtiles" lock, both non-blocking. Holding "nxs" means no Model build can
+// be in flight, so a build can never meet this cleanup on the "3dtiles" lock
+// (a refusal there would be swallowed as a best-effort tiles failure and the
+// tiles would never be produced, because completeness is keyed on nxs/). A
+// Model build that arrives while both locks are held is refused on its primary
+// lock instead, which every caller already treats as benign contention
+// (buildPending leaves the marker untouched, the Registry skips the job and
+// its completeness sweep re-enqueues the incomplete entry). If either lock is
+// busy the siblings are left alone until the next cleanup.
+//
+// Under the locks the siblings are only renamed to unique
+// "3dtiles-temp-trash-<rand16>" names; both locks are released before the
+// (possibly long) deletion. "3dtiles-old" may be the only usable tileset when
+// the final directory is absent or incomplete, so it is moved aside only once
+// the final has its expected nonempty regular sentinel. trashFolders are
+// leftovers of an earlier cleanup: they are deleted whatever the lock state.
 static void removeOrphanTilesFolders(const fs::path& hashDir,
                                      const std::vector<fs::path>& tempFolders,
                                      const fs::path& oldFolder,
                                      const std::vector<fs::path>& trashFolders,
                                      CleanupResult& result) {
+    const fs::path primaryDir = hashDir / ModelSubfolder;
     const fs::path tilesDir = hashDir / "3dtiles";
 
     // (trash path, path to report once deleted)
@@ -816,14 +864,29 @@ static void removeOrphanTilesFolders(const fs::path& hashDir,
         toDelete.emplace_back(t, t);
 
     if (!tempFolders.empty() || !oldFolder.empty()) {
+        // Declared in acquisition order: destruction releases "3dtiles" first,
+        // then "nxs" (reverse order).
+        std::optional<BuildLock> primaryLock;
         std::optional<BuildLock> tilesLock;
         try {
-            tilesLock.emplace(tilesDir.string(), false);
+            primaryLock.emplace(primaryDir.string(), false);
         } catch (const BuildInProgressException&) {
-            LOGD << "Skipping 3D Tiles temp folders with active build lock in: " << hashDir.string();
+            LOGD << "Skipping 3D Tiles temp folders: a Model build is in progress in "
+                 << hashDir.string();
         } catch (const AppException& e) {
-            LOGW << "Cannot lock " << tilesDir.string() << " (" << e.what()
+            LOGW << "Cannot lock " << primaryDir.string() << " (" << e.what()
                  << "); skipping 3D Tiles temp folders";
+        }
+        if (primaryLock) {
+            try {
+                tilesLock.emplace(tilesDir.string(), false);
+            } catch (const BuildInProgressException&) {
+                LOGD << "Skipping 3D Tiles temp folders with active tiles build lock in: "
+                     << hashDir.string();
+            } catch (const AppException& e) {
+                LOGW << "Cannot lock " << tilesDir.string() << " (" << e.what()
+                     << "); skipping 3D Tiles temp folders";
+            }
         }
 
         if (tilesLock) {
@@ -850,7 +913,7 @@ static void removeOrphanTilesFolders(const fs::path& hashDir,
                          << " has no complete tiles sentinel; a build can restore it";
             }
         }
-        // tilesLock is released here, before any deletion.
+        // Both locks are released here ("3dtiles" then "nxs"), before any deletion.
     }
 
     for (const auto& [trash, reported] : toDelete) {
@@ -1097,6 +1160,31 @@ CleanupResult cleanupBuild(Database* db, const std::string& outputPath) {
             } else {
                 result.removedBuilds.push_back(p.string());
                 LOGD << "Removed orphan pending file: " << p.string();
+            }
+        } else if (entry.is_regular_file(typeErr) && isPendingMarkerTempName(name)) {
+            // Leftover of replacePendingMarker() interrupted between write and
+            // rename. It is never valid state, whatever its hash, but a fresh one
+            // may belong to a live writer: collect it only once it is old.
+            std::error_code timeErr;
+            const auto writeTime = fs::last_write_time(p, timeErr);
+            if (timeErr) {
+                LOGW << "Cannot read the age of pending marker temp file '" << p.string()
+                     << "' (" << timeErr.message() << "); keeping it";
+                continue;
+            }
+            if (fs::file_time_type::clock::now() - writeTime < PendingMarkerTempMinAge) {
+                LOGD << "Keeping recent pending marker temp file: " << p.string();
+                continue;
+            }
+
+            std::error_code rmErr;
+            fs::remove(p, rmErr);
+            if (rmErr) {
+                LOGW << "Failed to remove pending marker temp file '" << p.string()
+                     << "': " << rmErr.message();
+            } else {
+                result.removedBuilds.push_back(p.string());
+                LOGD << "Removed stale pending marker temp file: " << p.string();
             }
         }
     }

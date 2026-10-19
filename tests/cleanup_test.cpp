@@ -14,6 +14,7 @@
 #include "testarea.h"
 
 #include <algorithm>
+#include <chrono>
 #include <fstream>
 #include <string>
 
@@ -89,6 +90,9 @@ namespace
         std::vector<fs::path> files;
         return setupIndexedDb(ta, db, outHashes, files);
     }
+
+    // Defined with the orphan temp folder tests below.
+    bool wasRemoved(const CleanupResult &r, const fs::path &p);
 
     // Count how many non-directory entries exist in the DB.
     long countDataEntries(Database *db)
@@ -352,6 +356,63 @@ namespace
         EXPECT_FALSE(fs::exists(orphan));
     }
 
+    // "<hash>.pending.tmp-<rand>" is the sibling replacePendingMarker() writes
+    // before its atomic rename. A crash in between leaves it behind: it is
+    // removed once old (even for a still-indexed hash, it is never valid state),
+    // kept while fresh (a live writer may be about to rename it), and never
+    // matched for a non-hash prefix.
+    TEST(cleanupBuild, RemovesStalePendingMarkerTempFiles)
+    {
+        TestArea ta(TEST_NAME, true);
+        std::unique_ptr<Database> db;
+        std::vector<std::string> hashes;
+        setupIndexedDb(ta, db, hashes);
+
+        fs::path buildDir = db->buildDirectory();
+        fs::create_directories(buildDir);
+
+        const auto writeTemp = [&](const std::string &name) {
+            const fs::path p = buildDir / name;
+            std::ofstream(p) << "0\nsub/m.mtl\n";
+            return p;
+        };
+        const auto makeOld = [](const fs::path &p) {
+            fs::last_write_time(p, fs::file_time_type::clock::now() - std::chrono::hours(3));
+        };
+
+        const fs::path staleValid = writeTemp(hashes[0] + ".pending.tmp-0123456789abcdef");
+        makeOld(staleValid);
+        const fs::path staleOrphan = writeTemp(
+            "5555555555555555555555555555555555555555555555555555555555555555.pending.tmp-fedcba9876543210");
+        makeOld(staleOrphan);
+        const fs::path fresh = writeTemp(hashes[1] + ".pending.tmp-00000000000000ff");
+        const fs::path stranger = writeTemp("notes.pending.tmp-0123456789abcdef");
+        makeOld(stranger);
+        const fs::path noSuffix = writeTemp(hashes[0] + ".pending.tmp-");
+        makeOld(noSuffix);
+        // A real marker of an indexed hash is untouched.
+        const fs::path marker = makeFakePendingFile(buildDir, hashes[0]);
+
+        const auto result = ddb::cleanupBuild(db.get(), "");
+
+        EXPECT_FALSE(fs::exists(staleValid));
+        EXPECT_FALSE(fs::exists(staleOrphan));
+        EXPECT_TRUE(wasRemoved(result, staleValid));
+        EXPECT_TRUE(wasRemoved(result, staleOrphan));
+        EXPECT_EQ(result.removedBuilds.size(), 2u);
+        EXPECT_TRUE(fs::exists(fresh));
+        EXPECT_TRUE(fs::exists(stranger));
+        EXPECT_TRUE(fs::exists(noSuffix));
+        EXPECT_TRUE(fs::exists(marker));
+
+        // The fresh one is collected once it has aged.
+        makeOld(fresh);
+        const auto again = ddb::cleanupBuild(db.get(), "");
+        EXPECT_FALSE(fs::exists(fresh));
+        EXPECT_TRUE(wasRemoved(again, fresh));
+        EXPECT_TRUE(fs::exists(marker));
+    }
+
     TEST(cleanupBuild, CustomOutputPath)
     {
         TestArea ta(TEST_NAME, true);
@@ -541,9 +602,10 @@ namespace
         EXPECT_TRUE(fs::exists(tiles.string() + ".building"));
     }
 
-    // A live "nxs" lock (a Model build) does not protect the tiles siblings either
-    // way: with the "3dtiles" lock absent they are removed.
-    TEST(cleanupBuild, TilesTempAndOldRemovedWithoutTilesLock)
+    // Cleanup follows the build's lock order: primary "nxs" lock first, then
+    // "3dtiles". A live "nxs" lock (a Model build in progress) therefore protects
+    // the tiles siblings too, and cleanup never waits for it.
+    TEST(cleanupBuild, TilesTempAndOldKeptUnderLivePrimaryLock)
     {
         TestArea ta(TEST_NAME, true);
         std::unique_ptr<Database> db;
@@ -556,14 +618,68 @@ namespace
         const fs::path tilesOld = makeSubfolder(hashDir, "3dtiles-old");
         ddb::BuildLock nxsLive((hashDir / "nxs").string());
 
+        const auto start = std::chrono::steady_clock::now();
+        const auto r = ddb::cleanupBuild(db.get(), "");
+        const auto elapsed = std::chrono::steady_clock::now() - start;
+        EXPECT_LT(elapsed, std::chrono::seconds(5)) << "cleanup must not block on a held lock";
+
+        EXPECT_TRUE(r.removedBuilds.empty());
+        EXPECT_TRUE(fs::exists(tilesTemp));
+        EXPECT_TRUE(fs::exists(tilesOld));
+        EXPECT_TRUE(fs::exists(tiles / "tileset.json"));
+        // Cleanup never reached the tiles lock, and still holds nothing.
+        EXPECT_FALSE(fs::exists(tiles.string() + ".building"));
+        EXPECT_NO_THROW({ ddb::BuildLock probe(tiles.string(), false); });
+    }
+
+    // With no lock held at all the siblings are removed and no lock file of either
+    // kind is left behind.
+    TEST(cleanupBuild, TilesTempAndOldRemovedWithoutAnyLock)
+    {
+        TestArea ta(TEST_NAME, true);
+        std::unique_ptr<Database> db;
+        std::vector<std::string> hashes;
+        setupIndexedDb(ta, db, hashes);
+        const fs::path hashDir = makeFakeBuildDir(db->buildDirectory(), hashes[0]);
+
+        const fs::path tiles = makeSubfolder(hashDir, "3dtiles");
+        const fs::path tilesTemp = makeSubfolder(hashDir, "3dtiles-temp-0123456789abcdef");
+        const fs::path tilesOld = makeSubfolder(hashDir, "3dtiles-old");
+
         const auto r = ddb::cleanupBuild(db.get(), "");
         EXPECT_FALSE(fs::exists(tilesTemp));
         EXPECT_FALSE(fs::exists(tilesOld));
         EXPECT_TRUE(wasRemoved(r, tilesTemp));
         EXPECT_TRUE(wasRemoved(r, tilesOld));
         EXPECT_TRUE(fs::exists(tiles / "tileset.json"));
-        // The lock taken by cleanup while deleting is released.
+        // Both locks taken by cleanup are released, in order.
         EXPECT_FALSE(fs::exists(tiles.string() + ".building"));
+        EXPECT_FALSE(fs::exists((hashDir / "nxs").string() + ".building"));
+        EXPECT_NO_THROW({ ddb::BuildLock probeNxs((hashDir / "nxs").string(), false); });
+        EXPECT_NO_THROW({ ddb::BuildLock probeTiles(tiles.string(), false); });
+    }
+
+    // Trash folders of an earlier cleanup need no lock: they are deleted even
+    // while a Model build holds the primary lock, and the live build's temp
+    // folder is left alone.
+    TEST(cleanupBuild, TilesTrashDeletedUnderLivePrimaryLock)
+    {
+        TestArea ta(TEST_NAME, true);
+        std::unique_ptr<Database> db;
+        std::vector<std::string> hashes;
+        setupIndexedDb(ta, db, hashes);
+        const fs::path hashDir = makeFakeBuildDir(db->buildDirectory(), hashes[0]);
+
+        makeSubfolder(hashDir, "3dtiles");
+        const fs::path trash = makeSubfolder(hashDir, "3dtiles-temp-trash-0123456789abcdef");
+        const fs::path tilesTemp = makeSubfolder(hashDir, "3dtiles-temp-0123456789abcdef");
+        ddb::BuildLock nxsLive((hashDir / "nxs").string());
+
+        const auto r = ddb::cleanupBuild(db.get(), "");
+        EXPECT_FALSE(fs::exists(trash));
+        EXPECT_TRUE(wasRemoved(r, trash));
+        EXPECT_TRUE(fs::exists(tilesTemp));
+        EXPECT_FALSE(wasRemoved(r, tilesTemp));
     }
 
     TEST(cleanupBuild, TilesTempAndOldRemovedWithStaleTilesLock)
