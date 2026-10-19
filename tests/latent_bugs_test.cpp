@@ -8,9 +8,16 @@
 //  B3 zeroHeight*DoesNotCrash      fingerprint() must not divide by a zero height.
 //  B1/B4 generatesWithoutGdalWarnings  no WEBP WRITE_EXIF_METADATA warning; run under
 //        ASan to also catch the alloc-dealloc mismatch (B1).
+//  B6 registerProcessKeepsHostSignalHandlers  DDBRegisterProcess must not replace the
+//        host's SIGSEGV/SIGFPE/SIGTERM/SIGINT handlers (the .NET Registry relies on them).
 
+#include <cstdlib>
 #include <fstream>
 #include <vector>
+
+#ifndef _WIN32
+#include <sys/wait.h>
+#endif
 
 #include "gtest/gtest.h"
 
@@ -18,6 +25,7 @@
 #include "exceptions.h"
 #include "gdal_inc.h"
 #include "gdaltiler.h"
+#include "mio.h"
 #include "pointcloud.h"
 #include "test.h"
 #include "testarea.h"
@@ -199,5 +207,17 @@ namespace
         VSIFree(buf);
         for (const auto &w : WarningCollector::warnings)
             ADD_FAILURE() << "GDAL warning during thumbnail: " << w;  // B4: WRITE_EXIF_METADATA on WEBP
+    }
+    TEST(DDB11_Signals, registerProcessKeepsHostSignalHandlers)
+    {
+        const fs::path probe = io::getExeFolderPath() / DDB_SIGNAL_PROBE_NAME;
+        ASSERT_TRUE(fs::exists(probe)) << probe;
+        const int rc = std::system(("\"" + probe.string() + "\"").c_str());
+#ifdef _WIN32
+        EXPECT_EQ(rc, 0) << "DDBRegisterProcess replaced the host's unhandled exception filter";
+#else
+        ASSERT_TRUE(WIFEXITED(rc)) << "probe did not exit normally: " << rc;
+        EXPECT_EQ(WEXITSTATUS(rc), 0) << "DDBRegisterProcess replaced host signal handlers (see stderr)";
+#endif
     }
 } // namespace

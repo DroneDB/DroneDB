@@ -7,7 +7,6 @@
 #include <cpr/cpr.h>
 
 #include <cmath>
-#include <csignal>
 #include <cstdlib>
 #include <memory>
 #include <mutex>
@@ -22,7 +21,6 @@
 #include <windows.h>
 #endif
 
-#include "../../vendor/segvcatch/segvcatch.h"
 #include "build.h"
 #include "build_budget.h"
 #include "database.h"
@@ -69,9 +67,6 @@ thread_local char ddbLastError[255];
 
 // Forward declarations
 std::string getBuildInfo();
-void handleSegv();
-void handleFpe();
-void setupSignalHandlers();
 void setupLogging(bool verbose);
 void initializeGDALandPROJ();
 
@@ -203,90 +198,6 @@ void setupLogging(bool verbose) {
     }
 }
 
-void setupSignalHandlers() {
-    try {
-        // Setup signal handlers to catch crashes and handle them gracefully
-        LOGD << "Setting up signal handlers";
-
-#ifdef WIN32
-        // Windows: Setup structured exception handling
-
-        // Configure unhandled exception filter
-        SetUnhandledExceptionFilter([](EXCEPTION_POINTERS* exceptionInfo) -> LONG {
-            LOGE << "Unhandled exception detected in DDB process";
-            LOGE << "Exception code: 0x" << std::hex
-                 << exceptionInfo->ExceptionRecord->ExceptionCode;
-
-            return EXCEPTION_EXECUTE_HANDLER;
-        });
-
-        LOGD << "Windows exception handler installed";
-
-#else
-        // Unix/Linux: Setup signal handlers
-
-        // SIGSEGV handler
-        signal(SIGSEGV, [](int sig) {
-            LOGE << "Segmentation fault detected (SIGSEGV)";
-            handleSegv();
-        });
-
-        // SIGFPE handler
-        signal(SIGFPE, [](int sig) {
-            LOGE << "Floating point exception detected (SIGFPE)";
-            handleFpe();
-        });
-
-        // SIGTERM handler for graceful shutdown
-        signal(SIGTERM, [](int sig) {
-            LOGD << "Termination signal received (SIGTERM)";
-            exit(0);
-        });
-
-        // SIGINT handler (Ctrl+C)
-        signal(SIGINT, [](int sig) {
-            LOGD << "Interrupt signal received (SIGINT)";
-            exit(0);
-        });
-
-        LOGD << "Unix signal handlers installed";
-
-#endif
-
-        // Install existing segvcatch handlers (cross-platform)
-        segvcatch::init_segv(&handleSegv);
-        segvcatch::init_fpe(&handleFpe);
-
-        LOGD << "Cross-platform crash handlers installed";
-
-    } catch (const std::exception& e) {
-        LOGW << "Failed to setup some signal handlers: " << e.what();
-        LOGW << "Process may not handle crashes gracefully";
-    }
-}
-
-void handleSegv() {
-    LOGE << "=== SEGMENTATION FAULT DETECTED ===";
-    LOGE << "DDB Process: " << io::getExeFolderPath().string();
-    LOGE << "Version: " << APP_VERSION;
-
-    // Log process state before crash
-    try {
-        LOGE << "Current working directory: " << fs::current_path().string();
-    } catch (...) {
-        LOGE << "Could not determine current directory";
-    }
-
-    throw ddb::AppException("Application encountered a segfault");
-}
-
-void handleFpe() {
-    LOGE << "=== FLOATING POINT EXCEPTION DETECTED ===";
-    LOGE << "DDB Process: " << io::getExeFolderPath().string();
-    LOGE << "Version: " << APP_VERSION;
-
-    throw ddb::AppException("Application encountered a floating point exception");
-}
 
 void initializeGDALandPROJ() {
     // Initialize GDAL and PROJ
@@ -329,7 +240,9 @@ void DDBRegisterProcess(bool verbose) {
         setupLocaleUnified();
         setupLogging(verbose);
         initializeGDALandPROJ();
-        setupSignalHandlers();
+        // No signal or crash handlers here: this runs inside host processes (the .NET
+        // Registry, tests) whose runtimes own SIGSEGV/SIGFPE/SIGTERM. The ddb CLI installs
+        // its own in apps/crash_handlers.cpp.
 
         // Register custom XMP namespaces for thermal sensor metadata
         try {

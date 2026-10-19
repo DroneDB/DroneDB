@@ -2,7 +2,10 @@ set(CMD_SRC_LIST "")
 
 add_subdirectory(cmd)
 
-add_executable(${PROJECT_NAME}cmd main.cpp ${CMD_SRC_LIST})
+# crash_handlers + segvcatch are CLI-only: they replace process-wide signal handlers,
+# which libddb must never do inside a host process (DDB-11 B6).
+add_executable(${PROJECT_NAME}cmd main.cpp crash_handlers.cpp
+    ${CMAKE_SOURCE_DIR}/vendor/segvcatch/segvcatch.cpp ${CMD_SRC_LIST})
 
 # Link the static library version
 target_link_libraries(${PROJECT_NAME}cmd PRIVATE ${PROJECT_NAME})

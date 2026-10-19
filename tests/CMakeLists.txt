@@ -21,10 +21,17 @@ if(BUILD_TESTING)
     target_link_libraries(ddbtest_child PRIVATE plog::plog Threads::Threads)
     target_include_directories(ddbtest_child PRIVATE ${CUSTOM_INCLUDE_DIRS} "${PROJECT_SOURCE_DIR}/src/include")
 
+    # Host-process stand-in for DDB-11 B6: checks that DDBRegisterProcess leaves the
+    # host's signal handlers alone. Separate process: libddb initializes once per process.
+    add_executable(ddbtest_signal_probe helpers/signal_probe.cpp)
+    target_link_libraries(ddbtest_signal_probe PRIVATE ${PROJECT_NAME})
+    target_include_directories(ddbtest_signal_probe PRIVATE ${CUSTOM_INCLUDE_DIRS} "${PROJECT_SOURCE_DIR}/src/include")
+
     # Create the test executable
     add_executable(ddbtest ${TEST_SOURCES})
-    add_dependencies(ddbtest ddbtest_child)
-    target_compile_definitions(ddbtest PRIVATE DDB_TEST_CHILD_NAME="$<TARGET_FILE_NAME:ddbtest_child>")
+    add_dependencies(ddbtest ddbtest_child ddbtest_signal_probe)
+    target_compile_definitions(ddbtest PRIVATE DDB_TEST_CHILD_NAME="$<TARGET_FILE_NAME:ddbtest_child>"
+        DDB_SIGNAL_PROBE_NAME="$<TARGET_FILE_NAME:ddbtest_signal_probe>")
 
     # Link the library and testing framework. "spz" is the in-tree static SPZ codec target
     # (vendor/CMakeLists.txt); its PUBLIC include dir (vendor/spz/src/cc) lets the gsplat tests
@@ -51,6 +58,12 @@ if(BUILD_TESTING)
             "$<TARGET_FILE_DIR:ddbtest>"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "$<TARGET_FILE:ddbtest_child>"
+            "${CMAKE_BINARY_DIR}"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:ddbtest_signal_probe>"
+            "$<TARGET_FILE_DIR:ddbtest>"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:ddbtest_signal_probe>"
             "${CMAKE_BINARY_DIR}"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "$<TARGET_FILE:ddbtest>"

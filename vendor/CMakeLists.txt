@@ -1,4 +1,5 @@
-add_subdirectory("segvcatch")
+# segvcatch is built into the ddb CLI only (apps/CMakeLists.txt): its handlers must
+# never be installed in host processes that load libddb (DDB-11 B6).
 add_subdirectory("url")
 add_subdirectory("base64")
 add_subdirectory("libnexus")

@@ -14,6 +14,7 @@
 #include "ddb.h"
 #include "dbops.h"
 #include "mio.h"
+#include "crash_handlers.h"
 
 using namespace std;
 using namespace ddb;
@@ -52,6 +53,7 @@ int main(int argc, char *argv[])
 {
     memcpy(argv[0], "ddb\0", 4);
     DDBRegisterProcess(hasParam(argc, argv, "--debug"));
+    installCrashHandlers();
 
     // Super secret command to generate docs
     if (hasParam(argc, argv, "--gendocs"))
