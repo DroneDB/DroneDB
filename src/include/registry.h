@@ -113,7 +113,12 @@ namespace ddb
                                  const std::vector<std::string> &ids);
     };
 
-    DDB_DLL std::vector<Conflict> applyDelta(const Delta &d, const fs::path &sourcePath, Database *destination, const MergeStrategy mergeStrategy, const json &sourceMetaDump, std::ostream &out = std::cout);
+    /**
+     * Applies a delta to `destination`, taking the added files from `sourcePath` (moved, not
+     * copied). With verifyHashes, every added file is checked against the hash in the delta
+     * before anything changes, and a mismatch throws; the index stores the delta's hashes.
+     */
+    DDB_DLL std::vector<Conflict> applyDelta(const Delta &d, const fs::path &sourcePath, Database *destination, const MergeStrategy mergeStrategy, const json &sourceMetaDump, std::ostream &out = std::cout, bool verifyHashes = true);
     DDB_DLL void ensureParentFolderExists(const fs::path &folder);
     DDB_DLL std::unordered_map<std::string, bool> computeDeltaLocals(Delta d, Database *destination, const std::string &hlDestFolder);
 

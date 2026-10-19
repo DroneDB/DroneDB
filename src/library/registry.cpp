@@ -5,12 +5,19 @@
 #include "registry.h"
 
 #include <boolinq/boolinq.h>
+
+#include <algorithm>
+#include <atomic>
+#include <future>
+#include <thread>
+
 #include <cpr/cpr.h>
 
 #include "build.h"
 #include "ddb.h"
 #include "delta.h"
 #include "exceptions.h"
+#include "hash.h"
 #include "json.h"
 #include "mio.h"
 #include "mzip.h"
@@ -355,122 +362,142 @@ void ensureParentFolderExists(const fs::path& folder) {
     }
 }
 
+namespace {
+
+// Checks that every file add in `sourcePath` has the hash the delta declares. Runs before
+// applyDelta changes anything, a few files at a time (the reads dominate), with no
+// transaction open.
+void verifyDeltaHashes(const Delta& d, const fs::path& sourcePath) {
+    std::vector<const AddAction*> files;
+    for (const auto& add : d.adds)
+        if (!add.isDirectory())
+            files.push_back(&add);
+    if (files.empty())
+        return;
+
+    // A few parallel readers help on a RAID array without thrashing a single disk
+    const size_t workers = std::min<size_t>({files.size(), 4, std::max(1u, std::thread::hardware_concurrency())});
+    std::atomic<size_t> next{0};
+    std::vector<std::future<void>> futures;
+    for (size_t w = 0; w < workers; w++)
+        futures.push_back(std::async(std::launch::async, [&]() {
+            for (size_t i = next++; i < files.size(); i = next++) {
+                const auto& add = *files[i];
+                const auto actual = Hash::fileSHA256((sourcePath / add.path).string());
+                if (actual != add.hash)
+                    throw AppException("Hash mismatch for " + add.path + ": expected " + add.hash +
+                                       ", got " + actual);
+            }
+        }));
+
+    // Wait for every worker before rethrowing: they reference this frame
+    std::exception_ptr error;
+    for (auto& f : futures) {
+        try {
+            f.get();
+        } catch (...) {
+            if (!error) error = std::current_exception();
+            next = files.size();
+        }
+    }
+    if (error)
+        std::rethrow_exception(error);
+}
+
+// Whether a delta entry can be applied over the destination's version of `path`
+bool canApply(Database* destination,
+              const std::string& path,
+              const std::string& hash,
+              const MergeStrategy mergeStrategy,
+              const ConflictType conflictType,
+              std::vector<Conflict>& conflicts,
+              bool& indexed) {
+    Entry e;
+    indexed = getEntry(destination, path, e);
+    if (!indexed || hash == e.hash)
+        return true;
+
+    switch (mergeStrategy) {
+        case MergeStrategy::DontMerge:
+            conflicts.push_back(Conflict(path, conflictType));
+            return false;
+        case MergeStrategy::KeepOurs:
+            return false;
+        case MergeStrategy::KeepTheirs:
+        default:
+            return true;
+    }
+}
+
+}  // namespace
+
 std::vector<Conflict> applyDelta(const Delta& d,
                                  const fs::path& sourcePath,
                                  Database* destination,
                                  const MergeStrategy mergeStrategy,
                                  const json& sourceMetaDump,
-                                 std::ostream& out) {
+                                 std::ostream& out,
+                                 bool verifyHashes) {
     std::vector<Conflict> conflicts;
 
     // File operations
     if (d.adds.size() > 0 || d.removes.size() > 0) {
-        fs::path destPath = destination->rootDirectory();
-        const std::string tmpFolderName =
-            (fs::path(DDB_FOLDER) / "tmp" / utils::generateRandomString(8)).string();
+        const fs::path destPath = destination->rootDirectory();
 
-        const auto tempPath = destPath / tmpFolderName;
+        if (verifyHashes)
+            verifyDeltaHashes(d, sourcePath);
 
-        if (fs::exists(tempPath)) {
-            io::assureIsRemoved(tempPath);
-        }
-        io::assureFolderExists(tempPath);
+        // Removes. We don't check whether the file has been modified on the FS, perhaps we should?
+        std::vector<std::string> indexedRemovals;
+        std::vector<const RemoveAction*> fileRemovals;
+        for (const auto& rem : d.removes) {
+            bool indexed;
+            if (!canApply(destination, rem.path, rem.hash, mergeStrategy,
+                          ConflictType::RemoteDeleteLocalModified, conflicts, indexed))
+                continue;
 
-        Entry e;
-
-        json debug = d;
-        // LOGD << debug.dump(4);
-
-        if (d.removes.empty()) {
-            // LOGD << "No removes in delta";
-        } else {
-            // LOGD << "Working on removes";
-
-            for (const auto& rem : d.removes) {
-                // LOGD << rem.toString();
-
-                const auto dest = destPath / rem.path;
-
-                // LOGD << "Dest = " << dest;
-
-                // Check if database has modified the entry to be deleted
-                // if so, warn user and exit, unless a merge strategy
-                // has been specified.
-
-                // Currently we don't check if the file has been
-                // modified on the FS, perhaps we should?
-                bool indexed = true;
-
-                if (getEntry(destination, rem.path, e)) {
-                    if (rem.hash != e.hash) {
-                        if (mergeStrategy == MergeStrategy::DontMerge) {
-                            conflicts.push_back(
-                                Conflict(rem.path, ConflictType::RemoteDeleteLocalModified));
-                            continue;  // Skip
-                        } else if (mergeStrategy == MergeStrategy::KeepOurs) {
-                            continue;  // Skip
-                        } else if (mergeStrategy == MergeStrategy::KeepTheirs) {
-                            // Continue as normal
-                        }
-                    }
-                } else {
-                    indexed = false;
-                }
-
-                if (fs::exists(dest)) {
-                    if (indexed)
-                        removeFromIndex(destination, {dest.string()});
-                    io::assureIsRemoved(dest);
-                    out << "D\t" << rem.path << std::endl;
-                }
+            const auto dest = destPath / rem.path;
+            if (fs::exists(dest)) {
+                if (indexed)
+                    indexedRemovals.push_back(dest.string());
+                fileRemovals.push_back(&rem);
             }
         }
 
-        if (d.adds.empty()) {
-            // LOGD << "No adds in delta";
-        } else {
-            // LOGD << "Working on adds";
+        // Children before their folder even when the delta is not sorted: removing a folder
+        // removes its content from the index
+        std::sort(indexedRemovals.rbegin(), indexedRemovals.rend());
+        std::sort(fileRemovals.begin(), fileRemovals.end(),
+                  [](const RemoveAction* l, const RemoveAction* r) { return l->path > r->path; });
 
-            for (const auto& add : d.adds) {
-                // LOGD << add.toString();
-
-                const auto source = sourcePath / add.path;
-                const auto dest = destPath / add.path;
-
-                // Check if the database has a modified entry
-                // for the same paths we are adding
-                if (getEntry(destination, add.path, e)) {
-                    if (add.hash != e.hash) {
-                        if (mergeStrategy == MergeStrategy::DontMerge) {
-                            conflicts.push_back(Conflict(add.path, ConflictType::BothModified));
-                            continue;  // Skip
-                        } else if (mergeStrategy == MergeStrategy::KeepOurs) {
-                            continue;  // Skip
-                        } else if (mergeStrategy == MergeStrategy::KeepTheirs) {
-                            // Continue as normal
-                        }
-                    }
-                }
-
-                if (add.isDirectory()) {
-                    io::createDirectories(dest);
-                } else {
-                    io::copy(source, dest);
-                }
-
-                // TODO: this could be made faster for large files
-                // by passing the already known hash instead
-                // of computing it
-                addToIndex(destination, {dest.string()}, [&out](const Entry& e, bool updated) {
-                    out << (updated ? "U" : "A") << "\t" << e.path << std::endl;
-                    return true;
-                });
-            }
+        removeFromIndex(destination, indexedRemovals);
+        for (const auto* rem : fileRemovals) {
+            io::assureIsRemoved(destPath / rem->path);
+            out << "D\t" << rem->path << std::endl;
         }
 
-        if (fs::exists(tempPath)) {
-            io::assureIsRemoved(tempPath);
+        // Adds (sorted by path: folders before their content). Files are moved, not
+        // copied: the source folder is a temporary folder on the same volume.
+        std::vector<KnownFile> addedFiles;
+        for (const auto& add : d.adds) {
+            bool indexed;
+            if (!canApply(destination, add.path, add.hash, mergeStrategy, ConflictType::BothModified,
+                          conflicts, indexed))
+                continue;
+
+            const auto dest = destPath / add.path;
+            if (add.isDirectory())
+                io::createDirectories(dest);
+            else
+                io::moveOrCopy(sourcePath / add.path, dest);
+
+            addedFiles.push_back({dest.string(), add.hash});
         }
+
+        addToIndexWithHashes(destination, addedFiles, [&out](const Entry& e, bool updated) {
+            out << (updated ? "U" : "A") << "\t" << e.path << std::endl;
+            return true;
+        });
 
         if (conflicts.size() == 0) {
             auto mPathList = d.modifiedPathList();

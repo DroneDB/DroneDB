@@ -42,7 +42,12 @@ namespace ddb
     };
 
     DDB_DLL std::unique_ptr<Database> open(const std::string &directory, bool traverseUp);
-    DDB_DLL std::vector<fs::path> getIndexPathList(const fs::path &rootDirectory, const std::vector<std::string> &paths, bool includeDirs);
+    /**
+     * The absolute paths to index for `paths`: each file once, the folders (with includeDirs)
+     * including the parents of every path up to rootDirectory, and with `recursive` the
+     * content of every listed folder.
+     */
+    DDB_DLL std::vector<fs::path> getIndexPathList(const fs::path &rootDirectory, const std::vector<std::string> &paths, bool includeDirs, bool recursive = true);
     DDB_DLL std::vector<fs::path> getPathList(const std::vector<std::string> &paths, bool includeDirs, int maxDepth, bool includeFiles = true);
 
     /**
@@ -90,6 +95,20 @@ namespace ddb
     DDB_DLL void listIndex(Database *db, const std::vector<std::string> &paths, std::ostream &out, const std::string &format, bool recursive = false, int maxRecursionDepth = 0);
     DDB_DLL void searchIndex(Database *db, const std::string &query, std::ostream &out, const std::string &format);
     DDB_DLL void addToIndex(Database *db, const std::vector<std::string> &paths, AddCallback callback = nullptr);
+
+    // A file (absolute path) with the SHA-256 the caller already knows; empty for folders
+    struct DDB_DLL KnownFile {
+        std::string path;
+        std::string hash;
+    };
+
+    /**
+     * addToIndex() for files whose SHA-256 the caller already trusts (applyDelta: the delta
+     * carries it, and the caller verified it when needed). These files are not hashed again,
+     * and an indexed file is updated when its hash differs. Metadata is still parsed.
+     * One write transaction for the whole list.
+     */
+    DDB_DLL void addToIndexWithHashes(Database *db, const std::vector<KnownFile> &files, AddCallback callback = nullptr);
 
     /**
      * Batch add with per-item error isolation.

@@ -272,7 +272,9 @@ extern "C"
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBDelta(const char *ddbSourceStamp, const char *ddbTargetStamp, char **output, const char *format);
 
-    /** Apply a delta on a database
+    /** Apply a delta on a database. The added files are moved out of sourcePath, and each
+     * must match the hash in the delta (checked before any change; set the environment
+     * variable DDB_VERIFY_PUSH_HASHES=0 to skip the check)
      * @param delta JSON delta between databases
      * @param sourcePath path to source database (or path to partial files to be added)
      * @param ddbPath path to DroneDB database to which the delta should be applied

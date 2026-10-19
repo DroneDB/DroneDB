@@ -105,6 +105,12 @@ namespace ddb
         DDB_DLL void hardlink(const fs::path &target, const fs::path &linkName);
         DDB_DLL void hardlinkSafe(const fs::path &target, const fs::path &linkName);
         DDB_DLL void rename(const fs::path &from, const fs::path &to);
+
+        // Moves the file `from` to `to`, replacing `to`. Renames it when it is the only link to
+        // its data; copies it and removes `from` when it has other hard links (so `to` never
+        // shares its data with another path) or when the rename fails (another volume).
+        // Returns true when the file was renamed.
+        DDB_DLL bool moveOrCopy(const fs::path &from, const fs::path &to);
         DDB_DLL void remove(const fs::path p);
         DDB_DLL bool exists(const fs::path p);
 

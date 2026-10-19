@@ -954,6 +954,13 @@ DDB_DLL DDBErr DDBApplyDelta(const char* delta,
         throw InvalidArgsException(e.what());
     }
 
+    // The added files must match the hashes of the delta (DDB_VERIFY_PUSH_HASHES=0 skips the
+    // check, for hosts that verify the uploaded bytes themselves)
+    const bool verifyHashes = [] {
+        const char* env = std::getenv("DDB_VERIFY_PUSH_HASHES");
+        return env == nullptr || (env[0] != '0' && env[0] != '\0');
+    }();
+
     const auto ddb = ddb::open(std::string(ddbPath), false);
     std::stringstream ss;
     const auto adc = applyDelta(d,
@@ -961,7 +968,8 @@ DDB_DLL DDBErr DDBApplyDelta(const char* delta,
                                 ddb.get(),
                                 static_cast<MergeStrategy>(mergeStrategy),
                                 metaDump,
-                                ss);
+                                ss,
+                                verifyHashes);
 
     json j = json::array();
     for (auto& c : adc)

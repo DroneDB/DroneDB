@@ -16,6 +16,7 @@
 #include <mutex>
 #include <system_error>
 #include <thread>
+#include <unordered_map>
 #include <unordered_set>
 
 #include "entry_types.h"
@@ -95,10 +96,18 @@ static std::mutex g_templateMutex;
     // includeDirs
     std::vector<fs::path> getIndexPathList(const fs::path &rootDirectory,
                                            const std::vector<std::string> &paths,
-                                           bool includeDirs)
+                                           bool includeDirs, bool recursive)
     {
         std::vector<fs::path> result;
         std::unordered_map<std::string, bool> directories;
+
+        // A file can be listed explicitly and found again under a listed folder
+        std::unordered_set<std::string> files;
+        const auto addFile = [&result, &files](const fs::path &f)
+        {
+            if (files.insert(f.string()).second)
+                result.push_back(f);
+        };
 
         for (const std::string &p : paths)
         {
@@ -121,46 +130,49 @@ static std::mutex g_templateMutex;
 
             if (fs::is_directory(p))
             {
-                try
+                if (recursive)
                 {
-                    for (auto i = fs::recursive_directory_iterator(p,
-                         fs::directory_options::skip_permission_denied);
-                         i != fs::recursive_directory_iterator(); ++i)
+                    try
                     {
-                        fs::path rp = i->path();
+                        for (auto i = fs::recursive_directory_iterator(p,
+                             fs::directory_options::skip_permission_denied);
+                             i != fs::recursive_directory_iterator(); ++i)
+                        {
+                            fs::path rp = i->path();
 
-                        // Skip .ddb (do not recurse into it and do not record
-                        // it as an indexable directory entry).
-                        if (rp.filename() == DDB_FOLDER)
-                        {
-                            i.disable_recursion_pending();
-                            continue;
-                        }
-
-                        if (fs::is_directory(rp) && includeDirs)
-                        {
-                            directories[rp.string()] = true;
-                        }
-                        else
-                        {
-                            result.push_back(rp);
-                        }
-
-                        if (includeDirs)
-                        {
-                            while (rp.has_parent_path() &&
-                                   rootDir.isParentOf(rp.parent_path()) &&
-                                   rp.string() != rp.parent_path().string())
+                            // Skip .ddb (do not recurse into it and do not record
+                            // it as an indexable directory entry).
+                            if (rp.filename() == DDB_FOLDER)
                             {
-                                rp = rp.parent_path();
+                                i.disable_recursion_pending();
+                                continue;
+                            }
+
+                            if (fs::is_directory(rp) && includeDirs)
+                            {
                                 directories[rp.string()] = true;
+                            }
+                            else
+                            {
+                                addFile(rp);
+                            }
+
+                            if (includeDirs)
+                            {
+                                while (rp.has_parent_path() &&
+                                       rootDir.isParentOf(rp.parent_path()) &&
+                                       rp.string() != rp.parent_path().string())
+                                {
+                                    rp = rp.parent_path();
+                                    directories[rp.string()] = true;
+                                }
                             }
                         }
                     }
-                }
-                catch (const fs::filesystem_error &e)
-                {
-                    throw FSException(e.what());
+                    catch (const fs::filesystem_error &e)
+                    {
+                        throw FSException(e.what());
+                    }
                 }
 
                 directories[p.string()] = true;
@@ -178,7 +190,7 @@ static std::mutex g_templateMutex;
             else if (fs::exists(p))
             {
                 // File
-                result.push_back(p);
+                addFile(p);
 
                 if (includeDirs)
                 {
@@ -636,6 +648,9 @@ static std::mutex g_templateMutex;
 
     namespace {
 
+    // Relative path -> SHA-256 the caller already trusts
+    using KnownHashes = std::unordered_map<std::string, std::string>;
+
     // Result of the PLAN phase: what the index currently knows about a candidate path,
     // read without holding a write lock.
     struct PlannedAddItem {
@@ -701,10 +716,14 @@ static std::mutex g_templateMutex;
     // `stopOnError` true they propagate and abort the whole call, matching addToIndex()'s
     // original all-or-nothing semantics. Database-scoped exceptions (DBException,
     // DBBusyException, bad_alloc, anything else) always propagate.
+    //
+    // `knownHashes` (relative path -> SHA-256) holds hashes the caller already trusts: those
+    // files are never hashed, and an indexed one is updated when its hash differs.
     std::vector<ComputedAddItem> computeAddEntries(const std::vector<PlannedAddItem> &planned,
                                                     const fs::path &directory, bool stopOnError,
                                                     std::vector<AddItemError> &errors,
-                                                    std::vector<std::string> &unchanged) {
+                                                    std::vector<std::string> &unchanged,
+                                                    const KnownHashes *knownHashes = nullptr) {
         std::vector<ComputedAddItem> computed;
         computed.reserve(planned.size());
 
@@ -713,7 +732,20 @@ static std::mutex g_templateMutex;
             bool add = false;
             bool update = false;
 
-            if (item.existsInDb) {
+            const std::string *knownHash = nullptr;
+            if (knownHashes != nullptr) {
+                const auto it = knownHashes->find(item.relPath);
+                if (it != knownHashes->end()) knownHash = &it->second;
+            }
+
+            if (knownHash != nullptr) {
+                e.hash = *knownHash;
+                add = !item.existsInDb;
+                if (!add && *knownHash == item.dbHash) {
+                    unchanged.push_back(item.relPath);
+                    continue;
+                }
+            } else if (item.existsInDb) {
                 const auto status = checkUpdate(e, item.absPath, item.dbMtime, item.dbHash);
                 update = status != FileStatus::NotModified;
                 if (!update) {
@@ -929,20 +961,22 @@ static std::mutex g_templateMutex;
         return io::Path(path).checkExtension({"prj"});
     }
 
-    } // namespace
-
-    void addToIndex(Database *db, const std::vector<std::string> &paths,
-                    AddCallback callback)
+    // addToIndex() with optional trusted hashes (see computeAddEntries)
+    void addPathsToIndex(Database *db, const std::vector<std::string> &paths, const KnownHashes *knownHashes,
+                         AddCallback callback)
     {
         if (paths.empty())
             return; // Nothing to do
         const fs::path directory = db->rootDirectory();
-        auto pathList = getIndexPathList(directory, paths, true);
+        // Index exactly what was asked when the caller knows the hashes (applyDelta lists every
+        // path it adds): walking a folder could pick up files it did not add.
+        auto pathList = getIndexPathList(directory, paths, true, /*recursive=*/knownHashes == nullptr);
 
         std::vector<AddItemError> discardedErrors;
         std::vector<std::string> discardedUnchanged;
         auto planned = planAddCandidates(db, pathList, directory);
-        auto computed = computeAddEntries(planned, directory, /*stopOnError=*/true, discardedErrors, discardedUnchanged);
+        auto computed = computeAddEntries(planned, directory, /*stopOnError=*/true, discardedErrors, discardedUnchanged,
+                                          knownHashes);
         std::vector<std::pair<Entry, bool>> accepted;
         commitAddEntries(db, computed, directory, callback, &accepted, nullptr, nullptr);
 
@@ -950,6 +984,30 @@ static std::mutex g_templateMutex;
         for (const auto &a : accepted)
             if (isPrjPath(a.first.path)) prjPaths.push_back(a.first.path);
         refreshPrjMains(db, directory, prjPaths, false);
+    }
+
+    } // namespace
+
+    void addToIndex(Database *db, const std::vector<std::string> &paths,
+                    AddCallback callback)
+    {
+        addPathsToIndex(db, paths, nullptr, callback);
+    }
+
+    void addToIndexWithHashes(Database *db, const std::vector<KnownFile> &files, AddCallback callback)
+    {
+        const fs::path directory = db->rootDirectory();
+        std::vector<std::string> paths;
+        KnownHashes knownHashes;
+        paths.reserve(files.size());
+        for (const auto &f : files)
+        {
+            paths.push_back(f.path);
+            if (!f.hash.empty())
+                knownHashes[io::Path(f.path).relativeTo(directory).generic()] = f.hash;
+        }
+
+        addPathsToIndex(db, paths, &knownHashes, callback);
     }
 
     void addToIndexEx(Database *db, const std::vector<std::string> &paths,
@@ -986,54 +1044,6 @@ static std::mutex g_templateMutex;
         for (size_t i = firstNewEntry; i < result.entries.size(); i++)
             if (isPrjPath(result.entries[i].first.path)) prjPaths.push_back(result.entries[i].first.path);
         refreshPrjMains(db, directory, prjPaths, false);
-    }
-
-    void removeFromIndex(Database *db, const std::vector<std::string> &paths, RemoveCallback callback)
-    {
-        if (paths.empty())
-        {
-            // Nothing to do
-            LOGD << "No paths provided";
-            return;
-        }
-
-        const fs::path directory = db->rootDirectory();
-
-        auto pathList = std::vector<fs::path>(paths.begin(), paths.end());
-        std::vector<std::string> removedPrj;
-
-        for (auto &p : pathList)
-        {
-            LOGD << "Deleting path: " << p;
-
-            auto relPath = io::Path(p).relativeTo(directory);
-
-            LOGD << "Rel path: " << relPath.generic();
-
-            auto entryMatches = getMatchingEntries(db, relPath.generic());
-
-            int tot = 0;
-
-            for (auto &e : entryMatches)
-            {
-                auto cnt = deleteFromIndex(db, e.path, false, callback);
-                if (cnt > 0 && e.type != Directory && isPrjPath(e.path))
-                    removedPrj.push_back(e.path);
-
-                if (e.type == Directory)
-                    cnt += deleteFromIndex(db, e.path, true, callback);
-
-                // if (!cnt)
-                //     std::cout << "No matching entries" << std::endl;
-
-                tot += cnt;
-            }
-
-            if (!tot)
-                throw FSException("No matching entries");
-        }
-
-        refreshPrjMains(db, directory, removedPrj, true);
     }
 
     std::string sanitize_query_param(const std::string &str)
@@ -1075,19 +1085,101 @@ static std::mutex g_templateMutex;
             statement.bind(firstParam + static_cast<int>(i), predicate.bindings[i]);
     }
 
+    namespace {
+
+    void removeBuildFolder(const fs::path &buildFolder)
+    {
+        if (fs::exists(buildFolder))
+        {
+            LOGD << "Removing " << buildFolder.string();
+            RasterCache::instance().release(buildFolder);
+            io::assureIsRemoved(buildFolder);
+        }
+    }
+
+    // Deletes the entries matching `predicate`, and their metadata, inside the caller's
+    // transaction. Appends the deleted paths and their (non-empty) hashes; returns the count.
+    int deleteMatchingRows(Database *db, const PathPredicate &predicate, std::vector<std::string> &deletedPaths,
+                           std::vector<std::string> &deletedHashes)
+    {
+        // An empty predicate matches every entry: never delete the whole index here.
+        if (predicate.sql.empty())
+            return 0;
+
+        auto metaDeleteQ = db->query("DELETE FROM entries_meta WHERE " + predicate.sql);
+        bindPathPredicate(*metaDeleteQ, predicate);
+        metaDeleteQ->execute();
+
+        auto q = db->query("SELECT path, hash FROM entries WHERE " + predicate.sql);
+        bindPathPredicate(*q, predicate);
+
+        int count = 0;
+        while (q->fetch())
+        {
+            deletedPaths.push_back(q->getText(0));
+            const auto hash = q->getText(1);
+            if (!hash.empty())
+                deletedHashes.push_back(hash);
+            count++;
+        }
+        q->reset();
+
+        if (count > 0)
+        {
+            auto deleteQ = db->query("DELETE FROM entries WHERE " + predicate.sql);
+            bindPathPredicate(*deleteQ, predicate);
+            deleteQ->execute();
+        }
+
+        return count;
+    }
+
+    // Removes the build folders of deleted entries, in parallel, outside any transaction.
+    void deleteBuildFolders(Database *db, const std::vector<std::string> &hashes)
+    {
+        if (hashes.empty())
+            return;
+
+        // Limit concurrency to avoid spawning too many threads
+        const auto buildDir = db->buildDirectory();
+        const size_t maxConcurrency = std::max(1u, std::thread::hardware_concurrency());
+        std::vector<std::future<void>> deletionFutures;
+
+        const auto waitAll = [&deletionFutures]()
+        {
+            for (auto &f : deletionFutures)
+            {
+                try
+                {
+                    f.get();
+                }
+                catch (const std::exception &e)
+                {
+                    LOGD << "Warning: Failed to delete build folder: " << e.what();
+                }
+            }
+            deletionFutures.clear();
+        };
+
+        for (const auto &hash : hashes)
+        {
+            deletionFutures.push_back(std::async(std::launch::async, [buildDir, hash]()
+                                                 { removeBuildFolder(buildDir / hash); }));
+
+            // When we reach max concurrency, wait for all current futures before continuing
+            if (deletionFutures.size() >= maxConcurrency)
+                waitAll();
+        }
+
+        waitAll();
+    }
+
+    } // namespace
+
     void checkDeleteBuild(Database *db, const std::string &hash)
     {
         if (!hash.empty())
-        {
-            const auto buildFolder = db->buildDirectory() / hash;
-
-            if (fs::exists(buildFolder))
-            {
-                LOGD << "Removing " << (buildFolder).string();
-                RasterCache::instance().release(buildFolder);
-                io::assureIsRemoved(buildFolder);
-            }
-        }
+            removeBuildFolder(db->buildDirectory() / hash);
     }
 
     void checkDeleteMeta(Database *db, const std::string &path)
@@ -1114,106 +1206,73 @@ static std::mutex g_templateMutex;
 
         LOGD << "Predicate: " << predicate.sql;
 
+        std::vector<std::string> deletedPaths, deletedHashes;
         Transaction tx(db, Transaction::Mode::Immediate);
-
-        // Batch delete all metadata for entries matching the query
-        auto metaDeleteQ = db->query("DELETE FROM entries_meta WHERE " + predicate.sql);
-        bindPathPredicate(*metaDeleteQ, predicate);
-        metaDeleteQ->execute();
-        metaDeleteQ->reset();
-
-        // Collect paths and hashes for callback and build folder cleanup
-        auto q = db->query("SELECT path, hash FROM entries WHERE " + predicate.sql);
-        bindPathPredicate(*q, predicate);
-
-        int count = 0;
-        std::vector<std::string> hashesToDelete;
-
-        while (q->fetch())
-        {
-            const auto path = q->getText(0);
-            const auto hash = q->getText(1);
-
-            // Collect non-empty hashes for parallel build folder deletion
-            if (!hash.empty())
-            {
-                hashesToDelete.push_back(hash);
-            }
-
-            if (callback != nullptr)
-                callback(path);
-
-            count++;
-        }
-
-        q->reset();
-
-        if (count > 0)
-        {
-            q = db->query("DELETE FROM entries WHERE " + predicate.sql);
-
-            bindPathPredicate(*q, predicate);
-            q->execute();
-
-            q->reset();
-        }
-
+        const int count = deleteMatchingRows(db, predicate, deletedPaths, deletedHashes);
         tx.commit();
 
-        // Parallel deletion of build folders (outside transaction for better performance)
-        // Limit concurrency to avoid spawning too many threads
-        if (!hashesToDelete.empty())
-        {
-            const auto buildDir = db->buildDirectory();
-            const size_t maxConcurrency = std::max(1u, std::thread::hardware_concurrency());
-            std::vector<std::future<void>> deletionFutures;
+        if (callback != nullptr)
+            for (const auto &path : deletedPaths)
+                callback(path);
 
-            for (size_t i = 0; i < hashesToDelete.size(); ++i)
-            {
-                const auto &hash = hashesToDelete[i];
-                deletionFutures.push_back(std::async(std::launch::async, [buildDir, hash]() {
-                    const auto buildFolder = buildDir / hash;
-                    if (fs::exists(buildFolder))
-                    {
-                        LOGD << "Removing " << buildFolder.string();
-                        RasterCache::instance().release(buildFolder);
-                        io::assureIsRemoved(buildFolder);
-                    }
-                }));
-
-                // When we reach max concurrency, wait for all current futures before continuing
-                if (deletionFutures.size() >= maxConcurrency)
-                {
-                    for (auto &f : deletionFutures)
-                    {
-                        try
-                        {
-                            f.get();
-                        }
-                        catch (const std::exception &e)
-                        {
-                            LOGD << "Warning: Failed to delete build folder: " << e.what();
-                        }
-                    }
-                    deletionFutures.clear();
-                }
-            }
-
-            // Wait for remaining deletions to complete
-            for (auto &f : deletionFutures)
-            {
-                try
-                {
-                    f.get();
-                }
-                catch (const std::exception &e)
-                {
-                    LOGD << "Warning: Failed to delete build folder: " << e.what();
-                }
-            }
-        }
+        deleteBuildFolders(db, deletedHashes);
 
         return count;
+    }
+
+    void removeFromIndex(Database *db, const std::vector<std::string> &paths, RemoveCallback callback)
+    {
+        if (paths.empty())
+        {
+            // Nothing to do
+            LOGD << "No paths provided";
+            return;
+        }
+
+        const fs::path directory = db->rootDirectory();
+
+        std::vector<std::string> deletedPaths, deletedHashes, removedPrj;
+
+        {
+            // One transaction for the whole list: a path without entries removes nothing.
+            Transaction tx(db, Transaction::Mode::Immediate);
+
+            for (const auto &p : paths)
+            {
+                LOGD << "Deleting path: " << p;
+
+                auto relPath = io::Path(p).relativeTo(directory);
+
+                LOGD << "Rel path: " << relPath.generic();
+
+                int tot = 0;
+
+                for (auto &e : getMatchingEntries(db, relPath.generic()))
+                {
+                    auto cnt = deleteMatchingRows(db, buildPathPredicate(e.path, false), deletedPaths, deletedHashes);
+                    if (cnt > 0 && e.type != Directory && isPrjPath(e.path))
+                        removedPrj.push_back(e.path);
+
+                    if (e.type == Directory)
+                        cnt += deleteMatchingRows(db, buildPathPredicate(e.path, true), deletedPaths, deletedHashes);
+
+                    tot += cnt;
+                }
+
+                if (!tot)
+                    throw FSException("No matching entries");
+            }
+
+            tx.commit();
+        }
+
+        // Reported once committed, so a rolled-back removal is never announced
+        if (callback != nullptr)
+            for (const auto &path : deletedPaths)
+                callback(path);
+
+        deleteBuildFolders(db, deletedHashes);
+        refreshPrjMains(db, directory, removedPrj, true);
     }
 
     // Columns read by readEntryRow(). The metadata column is a correlated subquery

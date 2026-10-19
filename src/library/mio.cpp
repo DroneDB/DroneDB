@@ -654,6 +654,24 @@ namespace ddb
             }
         }
 
+        bool moveOrCopy(const fs::path &from, const fs::path &to)
+        {
+            std::error_code e;
+            const auto links = fs::hard_link_count(from, e);
+            if (!e && links == 1)
+            {
+                fs::rename(from, to, e);
+                if (!e)
+                    return true;
+                LOGD << "Cannot rename " << from.string() << " --> " << to.string() << " (" << e.message()
+                     << "), copying it";
+            }
+
+            io::copy(from, to);
+            io::remove(from);
+            return false;
+        }
+
         FileLock::FileLock()
         {
         }
