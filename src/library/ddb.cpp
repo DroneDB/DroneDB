@@ -24,6 +24,7 @@
 
 #include "../../vendor/segvcatch/segvcatch.h"
 #include "build.h"
+#include "build_budget.h"
 #include "database.h"
 #include "dbops.h"
 #include "delta.h"
@@ -302,6 +303,10 @@ void initializeGDALandPROJ() {
     // Optimize vsicurl for remote file access
     CPLSetConfigOption("GDAL_DISABLE_READDIR_ON_OPEN", "YES");
     CPLSetConfigOption("CPL_VSIL_CURL_ALLOWED_EXTENSIONS", ".tif,.tiff,.vrt,.ovr,.msk");
+
+    // GDAL's default block cache is 5% of RAM (6 GB on a 128 GB host) and is
+    // shared by tile serving and builds; bound it unless GDAL_CACHEMAX is set.
+    applyDefaultGdalCacheBound();
 
     LOGD << "GDAL and PROJ initialization completed";
 

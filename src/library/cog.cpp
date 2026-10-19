@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "gdal_inc.h"
 #include "cog.h"
+#include "build_budget.h"
 #include "cog_utils.h"
 #include "logger.h"
 #include "mio.h"
@@ -144,6 +145,11 @@ namespace ddb
             (srcMaskFlags & GMF_ALPHA) == 0 &&
             (srcMaskFlags & GMF_NODATA) == 0;
 
+        // Threads, warp memory and block cache come from one budget (DDB-08) so
+        // that several builds running in one process stay within known bounds.
+        const BuildResourceBudget budget = BuildResourceBudget::fromConfig();
+        const std::string numThreads = "NUM_THREADS=" + budget.gdalNumThreads();
+
         char **targs = nullptr;
         targs = CSLAddString(targs, "-of");
         targs = CSLAddString(targs, "COG");
@@ -151,9 +157,9 @@ namespace ddb
         targs = CSLAddString(targs, "EPSG:3857");
         targs = CSLAddString(targs, "-multi");
         targs = CSLAddString(targs, "-wo");
-        targs = CSLAddString(targs, "NUM_THREADS=ALL_CPUS");
+        targs = CSLAddString(targs, numThreads.c_str());
         targs = CSLAddString(targs, "-co");
-        targs = CSLAddString(targs, "NUM_THREADS=ALL_CPUS");
+        targs = CSLAddString(targs, numThreads.c_str());
         targs = CSLAddString(targs, "-r");
         targs = CSLAddString(targs, "bilinear");
         targs = CSLAddString(targs, "-co");
@@ -165,9 +171,8 @@ namespace ddb
         targs = CSLAddString(targs, "ZOOM_LEVEL_STRATEGY=UPPER");
 
         // Warp memory buffer: larger values reduce chunk overhead, especially with NUM_THREADS>1.
-        // Configurable via DDB_WARP_MEMORY_MB (default: 512 MB).
         targs = CSLAddString(targs, "-wm");
-        targs = CSLAddString(targs, CPLGetConfigOption("DDB_WARP_MEMORY_MB", "512"));
+        targs = CSLAddString(targs, std::to_string(budget.warpMemoryMb).c_str());
 
         // Preserve nodata values for transparency
         if (hasNoData) {
@@ -274,16 +279,10 @@ namespace ddb
         CSLDestroy(targs);
         if (!psOptions) throw GDALException("GDALWarpAppOptionsNew returned null");
 
-        // Increase GDAL block cache before warp to reduce tile re-reads from disk.
-        // Configurable via DDB_COG_CACHE_MB (default: 1024 MB).
-        // Only increase if current value is lower; never decrease an already larger cache.
-        const GIntBig prevCacheMax = GDALGetCacheMax64();
-        const char* cacheMbEnv = CPLGetConfigOption("DDB_COG_CACHE_MB", "1024");
-        const GIntBig desiredCache = static_cast<GIntBig>(std::max(1, std::atoi(cacheMbEnv))) * 1024 * 1024;
-        const bool cacheRaised = prevCacheMax < desiredCache;
-        if (cacheRaised)
-            GDALSetCacheMax64(desiredCache);
-
+        // Set the GDAL block cache to exactly the budget for the rest of the build:
+        // raised on small hosts (fewer tile re-reads), lowered on large ones where
+        // GDAL's 5%-of-RAM default made one warp peak at 12 GB without being faster.
+        const ScopedGdalCacheMax cacheGuard(budget.cacheBytes);
 
         // Attach progress callback for diagnostic logging during long warp operations
         std::atomic<int> warpPct{0};
@@ -300,10 +299,6 @@ namespace ddb
                                             nullptr);
         const int warpSystemError = errno;
         GDALWarpAppOptionsFree(psOptions);
-
-        // Restore previous GDAL cache size to avoid interfering with other operations
-        if (cacheRaised)
-            GDALSetCacheMax64(prevCacheMax);
 
         if (!hNewDataset) {
             GDALClose(hSrcDataset);
