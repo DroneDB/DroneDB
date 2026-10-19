@@ -59,6 +59,27 @@ namespace ddb
      * if no patterns matched anything at all.
      */
     DDB_DLL std::vector<std::string> expandGlobPatterns(const std::vector<std::string> &patterns);
+
+    /**
+     * SQL predicate on a path column, with its bindings. Built by buildPathPredicate().
+     * An empty sql matches every row.
+     */
+    struct PathPredicate
+    {
+        std::string sql;
+        std::vector<std::string> bindings;
+    };
+
+    /**
+     * Picks the cheapest predicate that selects `query` on `column`:
+     * - no `*`, isFolder == false: `column = ?` (primary key seek, case-sensitive)
+     * - no `*`, isFolder == true: the descendants of the folder, `column >= 'query/' AND column < 'query0'`
+     *   ('0' is the character after '/', so sibling folders such as "query2" are excluded)
+     * - `*` present: `column LIKE ? ESCAPE '/'` with `*` as the wildcard (table scan)
+     * An empty query matches every entry.
+     */
+    DDB_DLL PathPredicate buildPathPredicate(const std::string &query, bool isFolder, const std::string &column = "path");
+
     DDB_DLL std::vector<Entry> getMatchingEntries(Database *db, const fs::path &path, int maxRecursionDepth = 0, bool isFolder = false);
     DDB_DLL void checkDeleteBuild(Database *db, const std::string &hash);
     DDB_DLL void checkDeleteMeta(Database *db, const std::string &path);
@@ -111,6 +132,9 @@ namespace ddb
     DDB_DLL void syncLocalMTimes(Database *db, const std::vector<std::string> &files = {});
     DDB_DLL void moveEntry(Database *db, const std::string &source, const std::string &dest);
     DDB_DLL bool getEntry(Database *db, const std::string &path, Entry &entry);
+
+    /** Exact lookup of one entry, including its metadata (entry.meta). Returns false if not found. */
+    DDB_DLL bool getEntryWithMeta(Database *db, const std::string &path, Entry &entry);
     DDB_DLL bool pathExists(Database *db, const std::string &path);
 
     DDB_DLL std::string initIndex(const std::string &directory, bool fromScratch = false);

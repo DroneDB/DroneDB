@@ -94,11 +94,13 @@ namespace
         auto db = ddb::open(testFolder.string(), false);
 
         std::vector<std::string> toRemove;
-        toRemove.emplace_back((testFolder / "pics.jpg").string());
+        // Lookups are case-sensitive: the index stores "pics.JPG"
+        EXPECT_EQ(countEntries(db.get(), "pics.JPG"), 1);
+        toRemove.emplace_back((testFolder / "pics.JPG").string());
 
         removeFromIndex(db.get(), toRemove);
 
-        EXPECT_EQ(countEntries(db.get(), "pics.jpg"), 0);
+        EXPECT_EQ(countEntries(db.get(), "pics.JPG"), 0);
     }
 
     TEST(deleteFromIndex, folderPath)

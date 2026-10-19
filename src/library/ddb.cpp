@@ -471,16 +471,12 @@ DDBErr DDBGet(const char* ddbPath, const char* path, char** output) {
 
     const auto db = ddb::open(std::string(ddbPath), false);
 
-    auto entries = ddb::getMatchingEntries(db.get(), std::string(path));
-    std::string entryJson;
-    if (entries.size() == 1) {
-        entryJson = entries[0].toJSONString();
-    } else if (entries.size() > 1) {
-        throw InvalidArgsException("Multiple entries were returned for " + std::string(path));
-    } else {
-        throw InvalidArgsException("No entry " + std::string(path));
+    ddb::Entry entry;
+    if (!ddb::getEntryWithMeta(db.get(), std::string(path), entry)) {
+        DDBSetLastError(("No entry " + std::string(path)).c_str());
+        return DDBERR_NOTFOUND;
     }
-    utils::copyToPtr(entryJson, output);
+    utils::copyToPtr(entry.toJSONString(), output);
 
     DDB_C_END
 }

@@ -24,7 +24,8 @@ extern "C"
         DDBERR_BUILDDEPMISSING = 2, // Build skipped: dependency missing
         DDBERR_BUILDINPROGRESS = 3, // Build skipped: another process holds the lock
         DDBERR_CANCELED = 4,        // Operation canceled by the progress callback
-        DDBERR_BUSY = 5             // Transient DB contention (SQLITE_BUSY/LOCKED); safe to retry
+        DDBERR_BUSY = 5,            // Transient DB contention (SQLITE_BUSY/LOCKED); safe to retry
+        DDBERR_NOTFOUND = 6         // The requested entry does not exist
     };
 
     /** Progress callback for long-running operations.
@@ -142,11 +143,11 @@ extern "C"
     DDB_DLL DDBErr DDBInfo(const char **paths, int numPaths, char **output, const char *format = "text", bool recursive = false, int maxRecursionDepth = 0,
                            const char *geometry = "auto", bool withHash = false, bool stopOnError = true);
 
-    /** Retrieve a single entry from the index
+    /** Retrieve a single entry from the index, including its metadata
      * @param ddbPath path to a DroneDB database (parent of ".ddb")
-     * @param path path of the entry
+     * @param path dataset-relative path of the entry (exact match, no wildcards)
      * @param output pointer to C-string where to store result (JSON)
-     * @return DDBERR_NONE on success, an error otherwise */
+     * @return DDBERR_NONE on success, DDBERR_NOTFOUND if no entry has this path, an error otherwise */
     DDB_DLL DDBErr DDBGet(const char *ddbPath, const char *path, char **output);
 
     /** List files inside index

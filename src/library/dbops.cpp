@@ -972,6 +972,32 @@ static std::mutex g_dbOpenMutex;
         return res;
     }
 
+    PathPredicate buildPathPredicate(const std::string &query, bool isFolder, const std::string &column)
+    {
+        if (query.empty())
+            return {};
+
+        if (query.find('*') != std::string::npos)
+        {
+            // Wildcards need LIKE, which cannot use the (case-sensitive) primary key index
+            auto pattern = sanitize_query_param(query);
+            if (isFolder)
+                pattern += "//%";
+            return {column + " LIKE ? ESCAPE '/'", {pattern}};
+        }
+
+        if (isFolder)
+            return {column + " >= ? AND " + column + " < ?", {query + "/", query + "0"}};
+
+        return {column + " = ?", {query}};
+    }
+
+    static void bindPathPredicate(Statement &statement, const PathPredicate &predicate, int firstParam = 1)
+    {
+        for (size_t i = 0; i < predicate.bindings.size(); i++)
+            statement.bind(firstParam + static_cast<int>(i), predicate.bindings[i]);
+    }
+
     void checkDeleteBuild(Database *db, const std::string &hash)
     {
         if (!hash.empty())
@@ -1001,30 +1027,26 @@ static std::mutex g_dbOpenMutex;
 
         LOGD << "Query: " << query;
 
-        auto str = sanitize_query_param(query);
+        // An empty query never matched anything here (unlike getMatchingEntries, where it
+        // means the whole index): keep it that way rather than deleting every entry.
+        if (query.empty())
+            return 0;
 
-        LOGD << "Sanitized: " << str;
+        const auto predicate = buildPathPredicate(query, isFolder);
 
-        if (isFolder)
-        {
-            str += "//%";
-            LOGD << "Folder: " << str;
-        }
+        LOGD << "Predicate: " << predicate.sql;
 
         Transaction tx(db, Transaction::Mode::Immediate);
 
         // Batch delete all metadata for entries matching the query
-        auto metaDeleteQ = db->query(
-            "DELETE FROM entries_meta WHERE path LIKE ? ESCAPE '/'");
-        metaDeleteQ->bind(1, str);
+        auto metaDeleteQ = db->query("DELETE FROM entries_meta WHERE " + predicate.sql);
+        bindPathPredicate(*metaDeleteQ, predicate);
         metaDeleteQ->execute();
         metaDeleteQ->reset();
 
         // Collect paths and hashes for callback and build folder cleanup
-        auto q = db->query(
-            "SELECT path, hash FROM entries WHERE path LIKE ? ESCAPE '/'");
-
-        q->bind(1, str);
+        auto q = db->query("SELECT path, hash FROM entries WHERE " + predicate.sql);
+        bindPathPredicate(*q, predicate);
 
         int count = 0;
         std::vector<std::string> hashesToDelete;
@@ -1050,9 +1072,9 @@ static std::mutex g_dbOpenMutex;
 
         if (count > 0)
         {
-            q = db->query("DELETE FROM entries WHERE path LIKE ? ESCAPE '/'");
+            q = db->query("DELETE FROM entries WHERE " + predicate.sql);
 
-            q->bind(1, str);
+            bindPathPredicate(*q, predicate);
             q->execute();
 
             q->reset();
@@ -1115,6 +1137,35 @@ static std::mutex g_dbOpenMutex;
         return count;
     }
 
+    // Columns read by readEntryRow(). The metadata column is a correlated subquery
+    // (one seek on ix_entries_meta_path_key per entry); joining entries_meta instead
+    // would return each entry once per metadata row.
+    static const char *ENTRY_WITH_META_SELECT = R"<<<(
+        SELECT e.path, e.hash, e.type, e.properties, e.mtime, e.size, e.depth,
+        json_extract(AsGeoJSON(e.point_geom), '$.coordinates'), json_extract(AsGeoJSON(e.polygon_geom), '$.coordinates'),
+        (
+            SELECT NULLIF(json_group_object(key, json(meta)), '{}')
+            FROM (
+                SELECT emi.key AS key, CASE WHEN substr(emi.key, -1, 1) = 's'
+                                THEN json_group_array(json_object('id', emi.id, 'data', json(emi.data), 'mtime', emi.mtime))
+                                ELSE json_object('id', emi.id, 'data', json(emi.data), 'mtime', emi.mtime)
+                            END AS meta
+                FROM entries_meta emi
+                WHERE emi.path = e.path
+                GROUP BY emi.key
+            )
+        ) AS meta
+        FROM entries e
+    )<<<";
+
+    static void readEntryRow(Statement &q, Entry &e)
+    {
+        e.parseFields(q.getText(0), q.getText(1), q.getInt(2), q.getText(3),
+                      q.getInt64(4), q.getInt64(5), q.getInt(6),
+                      q.getText(7), q.getText(8),
+                      q.getText(9));
+    }
+
     std::vector<Entry> getMatchingEntries(Database *db, const fs::path &path,
                                           int maxRecursionDepth, bool isFolder)
     {
@@ -1126,61 +1177,30 @@ static std::mutex g_dbOpenMutex;
 
         LOGD << "Query: " << query;
 
-        auto sanitized = sanitize_query_param(query);
+        const auto predicate = buildPathPredicate(query, isFolder, "e.path");
 
-        if (sanitized.length() == 0)
-            sanitized = "%";
+        LOGD << "Predicate: " << (predicate.sql.empty() ? "<all>" : predicate.sql);
 
-        LOGD << "Sanitized: " << sanitized;
-
-        if (isFolder)
-        {
-            sanitized += "//%";
-
-            LOGD << "Folder: " << sanitized;
-        }
-
-        std::string sql = R"<<<(
-        SELECT e.path, e.hash, e.type, e.properties, e.mtime, e.size, e.depth,
-        json_extract(AsGeoJSON(e.point_geom), '$.coordinates'), json_extract(AsGeoJSON(e.polygon_geom), '$.coordinates'),
-        CASE
-            WHEN em.id IS NULL THEN NULL
-            WHEN em.id IS NOT NULL THEN (
-                SELECT json_group_object(key, meta)
-                FROM (
-                    SELECT key, CASE WHEN substr(key, -1, 1) = 's'
-                                    THEN json_group_array(json_object('id', emi.id, 'data', json(emi.data), 'mtime', emi.mtime))
-                                    ELSE json_object('id', emi.id, 'data', json(emi.data), 'mtime', emi.mtime)
-                                END AS meta
-                    FROM entries_meta emi
-                    WHERE path = e.path
-                    GROUP BY key
-                )
-            )
-        END AS meta
-        FROM entries e
-        LEFT JOIN entries_meta em
-        ON e.path = em.path
-        WHERE
-        e.path LIKE ? ESCAPE '/'
-    )<<<";
-
+        std::vector<std::string> conditions;
+        if (!predicate.sql.empty())
+            conditions.push_back(predicate.sql);
         if (maxRecursionDepth > 0)
-            sql += " AND e.depth <= " + std::to_string(maxRecursionDepth - 1);
+            conditions.push_back("e.depth <= " + std::to_string(maxRecursionDepth - 1));
+
+        std::string sql = ENTRY_WITH_META_SELECT;
+        for (size_t i = 0; i < conditions.size(); i++)
+            sql += (i == 0 ? " WHERE " : " AND ") + conditions[i];
 
         auto q = db->query(sql);
+        bindPathPredicate(*q, predicate);
 
         std::vector<Entry> entries;
 
-        q->bind(1, sanitized);
-
         while (q->fetch())
         {
-            Entry e(q->getText(0), q->getText(1), q->getInt(2), q->getText(3),
-                    q->getInt64(4), q->getInt64(5), q->getInt(6),
-                    q->getText(7), q->getText(8),
-                    q->getText(9));
-            entries.push_back(e);
+            Entry e;
+            readEntryRow(*q, e);
+            entries.push_back(std::move(e));
         }
 
         q->reset();
@@ -1535,15 +1555,31 @@ static std::mutex g_dbOpenMutex;
         return true;
     }
 
+    bool getEntryWithMeta(Database *db, const std::string &path, Entry &entry)
+    {
+        auto q = db->query(std::string(ENTRY_WITH_META_SELECT) + " WHERE e.path = ?");
+        q->bind(1, path);
+
+        if (!q->fetch())
+            return false;
+
+        readEntryRow(*q, entry);
+        return true;
+    }
+
     std::vector<std::string> listFolderPaths(Database *db, const std::string &path)
     {
 
         std::vector<std::string> res;
 
-        auto q = db->query("SELECT path FROM entries WHERE path LIKE ? OR path = ?");
+        if (path.empty())
+            return res;
 
-        q->bind(1, path + "/%");
-        q->bind(2, path);
+        const auto descendants = buildPathPredicate(path, true);
+        auto q = db->query("SELECT path FROM entries WHERE path = ? OR (" + descendants.sql + ")");
+
+        q->bind(1, path);
+        bindPathPredicate(*q, descendants, 2);
 
         while (q->fetch())
         {
