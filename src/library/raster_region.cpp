@@ -18,6 +18,8 @@
 #include "ogr_spatialref.h"
 
 #include "raster_region.h"
+#include "raster_cache.h"
+#include "tile_encoder.h"
 #include "exceptions.h"
 #include "logger.h"
 #include "utils.h"
@@ -36,18 +38,35 @@ namespace ddb
             const char *vsiExt;
             bool wantsAlpha;       // append -dstalpha
             bool jpegCompositing;  // if true, composite on white before write
+            std::vector<std::string> creationOptions;
         };
 
         FormatInfo resolveFormat(const std::string &mime)
         {
             const std::string m = mime.empty() ? "image/png" : mime;
-            if (m == "image/png"  || m == "png")         return {"PNG",  "png",  true,  false};
-            if (m == "image/jpeg" || m == "jpeg" || m == "jpg" || m == "image/jpg")
-                                                          return {"JPEG", "jpg",  false, true};
-            if (m == "image/webp" || m == "webp")        return {"WEBP", "webp", true,  false};
             if (m == "image/tiff" || m == "image/geotiff" || m == "tiff" || m == "tif")
-                                                          return {"GTiff", "tif",  true,  false};
-            throw InvalidArgsException("Unsupported format: " + m);
+                return {"GTiff", "tif", true, false, {}};
+
+            // Renders are map previews (WMS GetMap): the same encoding as tiles
+            EncodeOptions options;
+            try
+            {
+                options.format = parseImageFormat(m);
+            }
+            catch (const InvalidArgsException &)
+            {
+                throw InvalidArgsException("Unsupported format: " + m);
+            }
+            const auto opts = imageCreationOptions(options);
+            switch (options.format)
+            {
+            case ImageFormat::Jpeg:
+                return {"JPEG", "jpg", false, true, opts};
+            case ImageFormat::Webp:
+                return {"WEBP", "webp", true, false, opts};
+            default:
+                return {"PNG", "png", true, false, opts};
+            }
         }
 
         std::string fmtDouble(double v) {
@@ -94,11 +113,9 @@ namespace ddb
         // outputCrs empty → keep current behaviour (target SRS = bbox SRS).
         const std::string tSrs = outputCrs.empty() ? srs : outputCrs;
 
-        GDALDatasetH hSrc = GDALOpenEx(inputPath.c_str(),
-                                      GDAL_OF_RASTER | GDAL_OF_READONLY,
-                                      nullptr, nullptr, nullptr);
-        if (!hSrc)
-            throw GDALException("Cannot open raster: " + inputPath);
+        // A handle kept from previous requests: no open, warm block cache
+        const auto source = RasterCache::instance().acquireDataset(inputPath);
+        GDALDatasetH hSrc = source->handle();
 
         // Validate requested band indices against the source raster.
         if (!bands.empty())
@@ -107,7 +124,6 @@ namespace ddb
             for (int b : bands)
             {
                 if (b < 1 || b > srcBands) {
-                    GDALClose(hSrc);
                     throw InvalidArgsException(
                         "renderRasterRegion: band " + std::to_string(b) +
                         " out of range [1," + std::to_string(srcBands) + "]");
@@ -134,6 +150,10 @@ namespace ddb
         argStore.emplace_back(std::to_string(height));
         argStore.emplace_back("-r");        argStore.emplace_back("bilinear");
         argStore.emplace_back("-multi");
+        for (const auto &co : fi.creationOptions) {
+            argStore.emplace_back("-co");
+            argStore.emplace_back(co);
+        }
         for (int b : bands) {
             argStore.emplace_back("-b");
             argStore.emplace_back(std::to_string(b));
@@ -162,15 +182,12 @@ namespace ddb
 
         GDALWarpAppOptions *opts =
             GDALWarpAppOptionsNew(argv.data(), nullptr);
-        if (!opts) {
-            GDALClose(hSrc);
+        if (!opts)
             throw GDALException("Cannot build GDALWarp options");
-        }
 
         int usageErr = 0;
         GDALDatasetH hOut = GDALWarp(vsiPath.c_str(), nullptr, 1, &hSrc, opts, &usageErr);
         GDALWarpAppOptionsFree(opts);
-        GDALClose(hSrc);
 
         if (!hOut || usageErr) {
             if (hOut) GDALClose(hOut);
@@ -201,22 +218,17 @@ namespace ddb
 
         const std::string requestedSrs = srs.empty() ? std::string("EPSG:4326") : srs;
 
-        GDALDatasetH hDS = GDALOpenEx(inputPath.c_str(),
-                                     GDAL_OF_RASTER | GDAL_OF_READONLY,
-                                     nullptr, nullptr, nullptr);
-        if (!hDS)
-            throw GDALException("Cannot open raster: " + inputPath);
+        const auto source = RasterCache::instance().acquireDataset(inputPath);
+        GDALDatasetH hDS = source->handle();
 
         double gt[6];
         if (GDALGetGeoTransform(hDS, gt) != CE_None) {
-            GDALClose(hDS);
             throw GDALException("Raster has no geotransform: " + inputPath);
         }
 
         // Source SRS
         const char *wkt = GDALGetProjectionRef(hDS);
         if (!wkt || strlen(wkt) == 0) {
-            GDALClose(hDS);
             throw GDALException("Raster has no projection: " + inputPath);
         }
 
@@ -226,7 +238,6 @@ namespace ddb
         if (OSRSetFromUserInput(hReqSrs, requestedSrs.c_str()) != OGRERR_NONE) {
             OSRDestroySpatialReference(hDsSrs);
             OSRDestroySpatialReference(hReqSrs);
-            GDALClose(hDS);
             throw InvalidArgsException("Invalid SRS: " + requestedSrs);
         }
         OSRSetAxisMappingStrategy(hReqSrs, OAMS_TRADITIONAL_GIS_ORDER);
@@ -240,14 +251,12 @@ namespace ddb
             if (!hT) {
                 OSRDestroySpatialReference(hDsSrs);
                 OSRDestroySpatialReference(hReqSrs);
-                GDALClose(hDS);
                 throw GDALException("Cannot create coord transformation");
             }
             if (!OCTTransform(hT, 1, &dsX, &dsY, nullptr)) {
                 OCTDestroyCoordinateTransformation(hT);
                 OSRDestroySpatialReference(hDsSrs);
                 OSRDestroySpatialReference(hReqSrs);
-                GDALClose(hDS);
                 throw GDALException("Point transformation failed");
             }
             OCTDestroyCoordinateTransformation(hT);
@@ -276,7 +285,6 @@ namespace ddb
         // Invert geotransform: pixel <- world
         double invGt[6];
         if (!GDALInvGeoTransform(gt, invGt)) {
-            GDALClose(hDS);
             throw GDALException("Cannot invert geotransform");
         }
         // Use std::floor (not truncation toward zero) so that points slightly
@@ -323,8 +331,6 @@ namespace ddb
             }
             out["bands"].push_back(bj);
         }
-
-        GDALClose(hDS);
         return out.dump();
     }
 
@@ -389,15 +395,11 @@ namespace ddb
         const std::string srs = bboxSrs.empty() ? std::string("EPSG:4326") : bboxSrs;
 
         // Step 1: warp to /vsimem GTiff at target window & resolution (keep all bands).
-        GDALDatasetH hSrc = GDALOpenEx(inputPath.c_str(),
-                                      GDAL_OF_RASTER | GDAL_OF_READONLY,
-                                      nullptr, nullptr, nullptr);
-        if (!hSrc)
-            throw GDALException("Cannot open raster: " + inputPath);
+        const auto source = RasterCache::instance().acquireDataset(inputPath);
+        GDALDatasetH hSrc = source->handle();
 
         const int srcBands = GDALGetRasterCount(hSrc);
         if (srcBands < std::max({idx.b1, idx.b2, idx.b3})) {
-            GDALClose(hSrc);
             throw InvalidArgsException("Raster has insufficient bands for " + indexName);
         }
 
@@ -420,11 +422,10 @@ namespace ddb
         argv.push_back(nullptr);
 
         GDALWarpAppOptions *opts = GDALWarpAppOptionsNew(argv.data(), nullptr);
-        if (!opts) { GDALClose(hSrc); throw GDALException("Cannot build warp options"); }
+        if (!opts) throw GDALException("Cannot build warp options");
         int usageErr = 0;
         GDALDatasetH hWarp = GDALWarp(vsiTif.c_str(), nullptr, 1, &hSrc, opts, &usageErr);
         GDALWarpAppOptionsFree(opts);
-        GDALClose(hSrc);
         if (!hWarp || usageErr) {
             if (hWarp) GDALClose(hWarp);
             VSIUnlink(vsiTif.c_str());
@@ -568,8 +569,12 @@ namespace ddb
             GDALClose(hRgba);
             throw GDALException(std::string("Driver not available: ") + fi.driver);
         }
+        char **createOpts = nullptr;
+        for (const auto &co : fi.creationOptions)
+            createOpts = CSLAddString(createOpts, co.c_str());
         GDALDatasetH hOut = GDALCreateCopy(hOutDrv, vsiOut.c_str(), hRgba,
-                                           FALSE, nullptr, nullptr, nullptr);
+                                           FALSE, createOpts, nullptr, nullptr);
+        CSLDestroy(createOpts);
         GDALClose(hRgba);
         if (!hOut) {
             VSIUnlink(vsiOut.c_str());
