@@ -28,6 +28,12 @@ namespace ddb
      * Multi-layer sources (GPKG, KMZ) preserve all layers in BOTH outputs.
      * Source SRS is reprojected to EPSG:4326 (GPKG) / EPSG:3857 (MVT).
      *
+     * CAD drawings (.dxf, .dwg): a DWG is converted with LibreDWG dwg2dxf
+     * (cad.h); the CRS comes from cad::resolveCadCrs (layer SRS, same-name
+     * .prj, GEODATA, lon/lat extent). A drawing without a CRS is "local":
+     * only vec/source.gpkg (drawing coordinates, no SRS) and vec/local.json
+     * (units, extent) are written, no mvt/, and an older mvt/ is removed.
+     *
      * @throws BuildDepMissingException If sidecar files are missing (names are
      *                                  relative to the input's folder).
      * @throws AppException             On unrecoverable conversion errors,

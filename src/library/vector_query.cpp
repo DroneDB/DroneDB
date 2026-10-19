@@ -213,10 +213,17 @@ namespace ddb
                                     utils::generateRandomString(16) +
                                     "." + fmt.vsiExt;
 
+        // A layer without an SRS (a local CAD drawing, DDB-12) cannot be
+        // reprojected: return its own coordinates, as plain GeoJSON (RFC 7946
+        // mandates WGS84, so its layer option is not applied either).
+        const bool layerHasSrs = layer->GetSpatialRef() != nullptr;
+
         std::vector<std::string> argStore;
         argStore.emplace_back("-f"); argStore.emplace_back(fmt.driver);
-        argStore.emplace_back("-t_srs"); argStore.emplace_back("EPSG:4326");
-        if (fmt.layerCreationOpts) {
+        if (layerHasSrs) {
+            argStore.emplace_back("-t_srs"); argStore.emplace_back("EPSG:4326");
+        }
+        if (fmt.layerCreationOpts && layerHasSrs) {
             argStore.emplace_back("-lco");
             argStore.emplace_back(fmt.layerCreationOpts);
         }

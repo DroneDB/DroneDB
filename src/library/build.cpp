@@ -153,21 +153,41 @@ bool isBuildableInternal(const Entry& e, std::string& subfolder) {
     return false;
 }
 
-bool isBuildableDependency(const Entry& e, std::string& mainFile, std::string& subfolder) {
-    // Special case: some files are not buildable by themselves but should trigger a build even if
-    // the build has already been done For example .cpg, .dbf, .prj, .shx files in a shapefile
+using EntryLookup = std::function<bool(const std::string&, Entry&)>;
 
-    if (e.type == EntryType::Generic) {
-        io::Path p(e.path);
-        if (p.checkExtension({"cpg", "dbf", "prj", "shx"})) {
-            subfolder = "vec";
-            // Mainfile has got the same name but with shp extension, in the same folder
-            // (entry paths are dataset-relative, so the folder must be kept).
-            mainFile = fs::path(e.path).replace_extension(".shp").generic_string();
+// Main files a sidecar belongs to, in lookup order (same folder and stem;
+// entry paths are dataset-relative, so the folder is kept). .cpg/.dbf/.shx
+// belong to a shapefile; a .prj also gives a CAD drawing its CRS (DDB-12).
+static std::vector<std::string> dependencyMainCandidates(const Entry& e) {
+    if (e.type != EntryType::Generic)
+        return {};
+
+    io::Path p(e.path);
+    std::vector<const char*> extensions;
+    if (p.checkExtension({"cpg", "dbf", "shx"}))
+        extensions = {".shp", ".SHP"};
+    else if (p.checkExtension({"prj"}))
+        extensions = {".shp", ".SHP", ".dxf", ".DXF", ".dwg", ".DWG"};
+    else
+        return {};
+
+    std::vector<std::string> candidates;
+    for (const char* ext : extensions)
+        candidates.push_back(fs::path(e.path).replace_extension(ext).generic_string());
+    return candidates;
+}
+
+// Special case: some files are not buildable by themselves but trigger the
+// (forced) rebuild of their main file, e.g. the .dbf of a shapefile or the .prj
+// of a drawing. A sidecar is buildable only while its main file is indexed:
+// an orphan .prj next to a raster is not (otherwise it is never "complete"
+// and is rebuilt forever by completeness sweeps).
+static bool isBuildableDependency(const Entry& e, const EntryLookup& lookup, Entry& mainEntry,
+                                  std::string& subfolder) {
+    for (const auto& candidate : dependencyMainCandidates(e)) {
+        if (lookup(candidate, mainEntry) && isBuildableInternal(mainEntry, subfolder))
             return true;
-        }
     }
-
     return false;
 }
 
@@ -181,13 +201,9 @@ bool isBuildable(Database* db, const std::string& path, std::string& subfolder) 
     if (isBuildableInternal(e, subfolder))
         return true;
 
-    std::string mainFile;
-
-    if (isBuildableDependency(e, mainFile, subfolder))
-        return true;
-
-    // If we reach here, the entry is not buildable
-    return false;
+    Entry mainEntry;
+    return isBuildableDependency(e, [db](const std::string& p, Entry& out) { return getEntry(db, p, out); },
+                                 mainEntry, subfolder);
 }
 
 // Returns true if the given file exists and has non-zero size.
@@ -238,6 +254,8 @@ static bool directoryHasNonEmptyContent(const fs::path& dir) {
 //                Checks two specific canonical sentinel files rather than
 //                scanning the directory; this is intentional - both artifacts
 //                are always co-produced and uniquely identify a complete build.
+//                A local CAD drawing (no CRS) has no MVT: vec/local.json
+//                replaces mvt/metadata.json as the second sentinel.
 //   - Others:    the type's output subfolder exists and contains at least one
 //                non-empty file (covers copc/, cog/, nxs/). A directory-scan
 //                is used because the exact output filenames vary by input.
@@ -253,7 +271,8 @@ static bool isBuildOutputComplete(const fs::path& baseOutputPath,
                                   bool checkTilesSwap = true) {
     if (e.type == EntryType::Vector)
         return fileExistsAndNonEmpty(baseOutputPath / "vec" / "source.gpkg") &&
-               fileExistsAndNonEmpty(baseOutputPath / "mvt" / "metadata.json");
+               (fileExistsAndNonEmpty(baseOutputPath / "mvt" / "metadata.json") ||
+                fileExistsAndNonEmpty(baseOutputPath / "vec" / "local.json"));
 
     if (e.type == EntryType::GaussianSplat)
         return fileExistsAndNonEmpty(baseOutputPath / "gsplat" / "model.rad");
@@ -271,17 +290,13 @@ static bool isBuildOutputComplete(const fs::path& baseOutputPath,
 // isBuildComplete() for an entry already read from the index. lookup reads the
 // main file of a buildable dependency (e.g. the .shp of a .dbf).
 static bool isEntryBuildComplete(const fs::path& buildDirectory, const Entry& entry,
-                                 const std::function<bool(const std::string&, Entry&)>& lookup) {
+                                 const EntryLookup& lookup) {
     Entry e = entry;
     std::string subfolder;
     if (!isBuildableInternal(e, subfolder)) {
-        std::string mainFile;
-        if (!isBuildableDependency(e, mainFile, subfolder))
-            return false;
-
         // For dependencies, completeness is defined by the main file's artifacts.
         Entry mainEntry;
-        if (!lookup(mainFile, mainEntry))
+        if (!isBuildableDependency(e, lookup, mainEntry, subfolder))
             return false;
         e = mainEntry;
     }
@@ -327,9 +342,9 @@ std::vector<BuildStatus> getBuildStatus(Database* db, const std::vector<std::str
             status.exists = true;
 
             std::string subfolder;
-            std::string mainFile;
+            Entry mainEntry;
             status.buildable = isBuildableInternal(e, subfolder) ||
-                               isBuildableDependency(e, mainFile, subfolder);
+                               isBuildableDependency(e, lookup, mainEntry, subfolder);
             status.complete = status.buildable && isEntryBuildComplete(buildDirectory, e, lookup);
         }
 
@@ -359,16 +374,10 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
         baseOutputPath = fs::path(outPath) / e.hash;
         outputFolder = (baseOutputPath / subfolder).string();
     } else {
-        std::string mainFile;
+        Entry mainEntry;
 
-        if (isBuildableDependency(e, mainFile, subfolder)) {
-            // Check if main file exists
-            Entry mainEntry;
-            if (!getEntry(db, mainFile, mainEntry)) {
-                LOGD << e.path << " is a dependency of " << mainFile << " but it's missing";
-                return;
-            }
-
+        if (isBuildableDependency(e, [db](const std::string& p, Entry& out) { return getEntry(db, p, out); },
+                                  mainEntry, subfolder)) {
             // We need to force the build because this dependency file could add new data
             force = true;
 
@@ -376,7 +385,7 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
             baseOutputPath = fs::path(outPath) / target.hash;
             outputFolder = (baseOutputPath / subfolder).string();
 
-            LOGD << "Triggering build of " << mainFile << " because of " << e.path;
+            LOGD << "Triggering build of " << target.path << " because of " << e.path;
         } else {
             LOGD << "No build needed";
             return;
@@ -1332,13 +1341,10 @@ bool isBuildActive(Database* db, const std::string& path) {
 
     std::string subfolder;
     if (!isBuildableInternal(e, subfolder)) {
-        std::string mainFile;
-        if (!isBuildableDependency(e, mainFile, subfolder))
-            return false;
-
-        // For dependencies, check if main file exists and use its hash
+        // For dependencies, use the main file's hash
         Entry mainEntry;
-        if (!getEntry(db, mainFile, mainEntry))
+        if (!isBuildableDependency(e, [db](const std::string& p, Entry& out) { return getEntry(db, p, out); },
+                                   mainEntry, subfolder))
             return false;
 
         e = mainEntry;

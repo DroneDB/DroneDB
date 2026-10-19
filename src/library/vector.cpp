@@ -4,11 +4,15 @@
 #include <algorithm>
 #include <cerrno>
 #include <cctype>
+#include <fstream>
 #include <limits>
+#include <optional>
 #include <set>
 #include <vector>
 
+#include "cad.h"
 #include "gdal_inc.h"
+#include "json.h"
 #include "vector.h"
 #include "mvt.h"
 #include "logger.h"
@@ -90,7 +94,8 @@ namespace ddb
             bool haveEnv = false;
         };
 
-        VectorStats computeStats(GDALDatasetH hSrcDS)
+        // sourceSrs: SRS of layers that carry none (empty = assume WGS84).
+        VectorStats computeStats(GDALDatasetH hSrcDS, const std::string &sourceSrs)
         {
             VectorStats s;
 
@@ -101,6 +106,19 @@ namespace ddb
                 throw GDALException("computeStats: failed to import EPSG:4326 - PROJ database may be missing or corrupted");
             }
             OSRSetAxisMappingStrategy(hWgs84, OAMS_TRADITIONAL_GIS_ORDER);
+
+            OGRSpatialReferenceH hSource = nullptr;
+            if (!sourceSrs.empty())
+            {
+                hSource = OSRNewSpatialReference(nullptr);
+                if (OSRSetFromUserInput(hSource, sourceSrs.c_str()) != OGRERR_NONE)
+                {
+                    OSRDestroySpatialReference(hSource);
+                    OSRDestroySpatialReference(hWgs84);
+                    throw GDALException("computeStats: invalid source SRS " + sourceSrs);
+                }
+                OSRSetAxisMappingStrategy(hSource, OAMS_TRADITIONAL_GIS_ORDER);
+            }
 
             const int layerCount = GDALDatasetGetLayerCount(hSrcDS);
             for (int i = 0; i < layerCount; i++)
@@ -128,6 +146,7 @@ namespace ddb
                 if (OGR_L_GetExtent(hLayer, &env, TRUE) != OGRERR_NONE) continue;
 
                 OGRSpatialReferenceH hSrs = OGR_L_GetSpatialRef(hLayer);
+                if (!hSrs) hSrs = hSource;
                 double xs[4] = {env.MinX, env.MaxX, env.MaxX, env.MinX};
                 double ys[4] = {env.MinY, env.MinY, env.MaxY, env.MaxY};
 
@@ -175,13 +194,14 @@ namespace ddb
                 }
             }
 
+            if (hSource) OSRDestroySpatialReference(hSource);
             if (hWgs84) OSRDestroySpatialReference(hWgs84);
             return s;
         }
 
         // Returns true if all source layers lack an SRS (typical for DXF).
-        // In that case, callers must inject -s_srs EPSG:4326 (we already
-        // computed the envelope assuming WGS84 in computeStats).
+        // In that case, callers must inject -s_srs (the CAD CRS, or EPSG:4326
+        // for other inputs, matching the envelope computed in computeStats).
         bool allLayersMissSrs(GDALDatasetH hSrcDS)
         {
             const int n = GDALDatasetGetLayerCount(hSrcDS);
@@ -216,26 +236,32 @@ namespace ddb
             }
         }
 
-        // Convert input to GPKG with SPATIAL_INDEX=YES, reprojected to EPSG:4326.
-        // Multi-layer sources are preserved verbatim.
-        void convertToGpkg(GDALDatasetH hSrcDS, const std::string &output)
+        // Convert input to GPKG with SPATIAL_INDEX=YES. Multi-layer sources are
+        // preserved verbatim. reproject: to EPSG:4326, assigning sourceSrs to
+        // layers without an SRS; otherwise (a local CAD drawing) the geometry
+        // keeps its drawing coordinates and no SRS.
+        void convertToGpkg(GDALDatasetH hSrcDS, const std::string &output,
+                           const std::string &sourceSrs, bool reproject)
         {
-            const bool needsSrs = allLayersMissSrs(hSrcDS);
+            const bool needsSrs = reproject && allLayersMissSrs(hSrcDS);
 
-            std::vector<std::string> argStore = {
-                "-f",     "GPKG",
-                "-t_srs", "EPSG:4326",
-                "-lco",   "SPATIAL_INDEX=YES",
-                "-lco",   "GEOMETRY_NAME=geom",
-                "-lco",   "FID=fid",
-                "-nlt",   "PROMOTE_TO_MULTI",
-                // KML/KMZ have DateTime fields that several drivers warn on;
-                // map to String for maximum compatibility.
-                "-mapFieldType", "DateTime=String",
-                "-skipfailures"};
+            std::vector<std::string> argStore = {"-f", "GPKG"};
+            if (reproject) {
+                argStore.push_back("-t_srs");
+                argStore.push_back("EPSG:4326");
+            }
+            for (const char *a : {"-lco", "SPATIAL_INDEX=YES",
+                                  "-lco", "GEOMETRY_NAME=geom",
+                                  "-lco", "FID=fid",
+                                  "-nlt", "PROMOTE_TO_MULTI",
+                                  // KML/KMZ have DateTime fields that several drivers warn on;
+                                  // map to String for maximum compatibility.
+                                  "-mapFieldType", "DateTime=String",
+                                  "-skipfailures"})
+                argStore.push_back(a);
             if (needsSrs) {
                 argStore.push_back("-s_srs");
-                argStore.push_back("EPSG:4326");
+                argStore.push_back(sourceSrs);
             }
             std::vector<char *> argv;
             argv.reserve(argStore.size() + 1);
@@ -388,7 +414,8 @@ namespace ddb
         // Convert input to MVT directory, reprojected to EPSG:3857.
         // Returns the dynamic MAXZOOM used.
         int convertToMvt(GDALDatasetH hSrcDS, const std::string &srcPath,
-                         const std::string &outputDir, const VectorStats &stats)
+                         const std::string &outputDir, const VectorStats &stats,
+                         const std::string &sourceSrs)
         {
             // Sanity check driver availability up-front. A missing driver can never
             // be provided by adding files, so the build fails instead of deferring.
@@ -452,7 +479,7 @@ namespace ddb
                 "-skipfailures"};
             if (needsSrs) {
                 argStore.push_back("-s_srs");
-                argStore.push_back("EPSG:4326");
+                argStore.push_back(sourceSrs);
             }
             std::vector<char *> argv;
             argv.reserve(argStore.size() + 1);
@@ -539,8 +566,19 @@ namespace ddb
         // Step 1: verify sidecar deps (.shx for .shp)
         checkDependencies(input);
 
-        // Step 2: open source once, reuse for both branches
-        GDALDatasetH hSrcDS = GDALOpenEx(input.c_str(),
+        const fs::path basePath(baseOutputPath);
+        io::assureFolderExists(basePath);
+
+        // Step 2: CAD drawings: a DWG is converted to a temporary DXF (staged
+        // next to the outputs), and the CRS comes from the drawing (cad.h).
+        const bool isCad = cad::isCadFile(input);
+        std::optional<cad::CadSource> cadSource;
+        if (isCad)
+            cadSource.emplace(fs::path(input), nullptr, basePath);
+        const std::string openPath = isCad ? cadSource->dxfPath().string() : input;
+
+        // Step 3: open source once, reuse for both branches
+        GDALDatasetH hSrcDS = GDALOpenEx(openPath.c_str(),
                                          GDAL_OF_VECTOR | GDAL_OF_READONLY,
                                          nullptr, nullptr, nullptr);
         if (!hSrcDS)
@@ -548,36 +586,46 @@ namespace ddb
 
         try
         {
-            const VectorStats stats = computeStats(hSrcDS);
-            LOGD << "Vector stats: features=" << stats.featureCount
-                 << " envelope=[" << stats.minX << "," << stats.minY << ","
-                 << stats.maxX << "," << stats.maxY << "]";
-
-            const fs::path basePath(baseOutputPath);
-            io::assureFolderExists(basePath);
+            // Layers without an SRS: EPSG:4326 for non-CAD inputs (historical
+            // behaviour), the drawing's CRS for CAD, nothing for a local drawing.
+            std::string sourceSrs = "EPSG:4326";
+            bool local = false;
+            cad::CadCrs crs;
+            std::string units;
+            if (isCad)
+            {
+                const auto info = cad::readDxfInfo(openPath);
+                crs = cad::resolveCadCrs(fs::path(input), hSrcDS, info);
+                units = cad::insUnitsName(info.insUnits);
+                local = !crs.georeferenced;
+                if (!crs.srs.empty()) sourceSrs = crs.srs;
+                LOGD << "CAD CRS for " << input << ": source=" << crs.source
+                     << " label=" << crs.label << (local ? " (local)" : "");
+            }
 
             const fs::path vecDir = basePath / "vec";
             const fs::path mvtDir = basePath / "mvt";
 
             // A previous aborted build can leave empty vec/ or mvt/ directories
             // behind. Check for the actual artifacts inside (source.gpkg and
-            // the MVT tileset metadata.json) so we don't silently skip and
-            // produce a broken state.
+            // the MVT tileset metadata.json, or local.json for a local drawing)
+            // so we don't silently skip and produce a broken state.
             const bool vecExists = fs::exists(vecDir / "source.gpkg");
-            const bool mvtExists = fs::exists(mvtDir / "metadata.json");
+            const bool upToDate = local ? fs::exists(vecDir / "local.json")
+                                        : fs::exists(mvtDir / "metadata.json") &&
+                                              !fs::exists(vecDir / "local.json");
 
-            // Skip if both already published and not overwriting.
-            if (vecExists && mvtExists && !overwrite)
+            if (vecExists && upToDate && !overwrite)
             {
-                LOGD << "Vector artifacts already exist, skipping (vec/ and mvt/)";
+                LOGD << "Vector artifacts already exist, skipping";
                 GDALClose(hSrcDS);
                 return;
             }
 
             // Stage both outputs under a single sibling directory so that a
             // crash partway through leaves at most one orphan directory to
-            // clean up. The publish step then promotes the two children with
-            // a best-effort rollback if the second rename fails.
+            // clean up. The publish step then promotes the children with a
+            // best-effort rollback if a rename fails.
             const fs::path stagingDir = basePath /
                 (".vec-stage-" + utils::generateRandomString(16));
             const fs::path stagingVec = stagingDir / "vec";
@@ -590,11 +638,32 @@ namespace ddb
 
             try
             {
-                // Branch A: MVT first (cheaper to roll back).
-                convertToMvt(hSrcDS, input, stagingMvt.string(), stats);
-                // Branch B: GPKG sidecar.
                 const auto gpkgOut = (stagingVec / "source.gpkg").string();
-                convertToGpkg(hSrcDS, gpkgOut);
+                if (local)
+                {
+                    // Drawing coordinates, no SRS and no MVT pyramid: there is
+                    // nothing to place on a map (the Hub shows it without a globe).
+                    convertToGpkg(hSrcDS, gpkgOut, "", false);
+                    json localInfo = {{"georeferenced", false}, {"units", units}};
+                    if (crs.hasExtent)
+                        localInfo["extent"] = {crs.extent.MinX, crs.extent.MinY,
+                                               crs.extent.MaxX, crs.extent.MaxY};
+                    std::ofstream out((stagingVec / "local.json").string(), std::ios::binary);
+                    out << localInfo.dump();
+                    if (!out)
+                        throw FSException("Cannot write " + (stagingVec / "local.json").string());
+                }
+                else
+                {
+                    const VectorStats stats = computeStats(hSrcDS, sourceSrs);
+                    LOGD << "Vector stats: features=" << stats.featureCount
+                         << " envelope=[" << stats.minX << "," << stats.minY << ","
+                         << stats.maxX << "," << stats.maxY << "]";
+                    // Branch A: MVT first (cheaper to roll back).
+                    convertToMvt(hSrcDS, input, stagingMvt.string(), stats, sourceSrs);
+                    // Branch B: GPKG sidecar.
+                    convertToGpkg(hSrcDS, gpkgOut, sourceSrs, true);
+                }
             }
             catch (...)
             {
@@ -604,7 +673,8 @@ namespace ddb
 
             // Publish: move existing artifacts (if any) to a sibling backup
             // dir, promote the staged outputs, and on failure restore from
-            // the backup so users never observe a half-published state.
+            // the backup so users never observe a half-published state. A
+            // local build publishes no mvt/, so an old pyramid is retired.
             const fs::path backupDir = basePath /
                 (".vec-backup-" + utils::generateRandomString(16));
             const fs::path backupVec = backupDir / "vec";
@@ -621,7 +691,7 @@ namespace ddb
                 if (hadVec) io::rename(vecDir.string(), backupVec.string());
                 if (hadMvt) io::rename(mvtDir.string(), backupMvt.string());
                 io::rename(stagingVec.string(), vecDir.string());
-                io::rename(stagingMvt.string(), mvtDir.string());
+                if (!local) io::rename(stagingMvt.string(), mvtDir.string());
             }
             catch (...)
             {

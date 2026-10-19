@@ -4,6 +4,7 @@
 #include "dbops.h"
 
 #include "build.h"
+#include "cad.h"
 #include "databasepool.h"
 #include "ddb.h"
 #include "status.h"
@@ -874,6 +875,59 @@ static std::mutex g_templateMutex;
             accepted->insert(accepted->end(), tentative.begin(), tentative.end());
     }
 
+    // DDB-12: a .prj gives its shapefile or CAD drawing a coordinate system.
+    // Adding, changing or removing one changes the main file's footprint and
+    // makes its built vector artifacts stale: re-parse the main entry and drop
+    // those artifacts, so the next build (the .prj's own, or any later one)
+    // redoes them. Runs after the add/remove transaction; best effort per file.
+    void refreshPrjMains(Database *db, const fs::path &directory, const std::vector<std::string> &prjPaths,
+                         bool removed) {
+        if (prjPaths.empty())
+            return;
+
+        // A removed .prj is usually still on disk at this point (hosts delete the
+        // file after the index entry): it must not give the drawing a CRS.
+        std::vector<fs::path> ignored;
+        if (removed)
+            for (const auto &prj : prjPaths)
+                ignored.push_back(directory / io::Path(prj).get());
+        cad::IgnoredSidecarScope ignore(ignored);
+
+        const auto updateQ = db->query(UPDATE_QUERY);
+        for (const auto &prj : prjPaths) {
+            for (const char *ext : {".shp", ".SHP", ".dxf", ".DXF", ".dwg", ".DWG"}) {
+                const std::string mainPath = fs::path(prj).replace_extension(ext).generic_string();
+                Entry old;
+                if (!getEntry(db, mainPath, old))
+                    continue;
+
+                Entry fresh;
+                fresh.hash = old.hash; // content unchanged: skip re-hashing
+                try {
+                    parseEntry(directory / io::Path(mainPath).get(), directory, fresh, true);
+                } catch (const std::exception &e) {
+                    LOGW << "Cannot re-read " << mainPath << " after a change to " << prj << ": " << e.what();
+                    continue;
+                }
+
+                {
+                    Transaction tx(db, Transaction::Mode::Immediate);
+                    doUpdate(updateQ.get(), fresh);
+                    tx.commit();
+                }
+
+                const fs::path out = db->buildDirectory() / old.hash;
+                io::assureIsRemoved(out / "vec");
+                io::assureIsRemoved(out / "mvt");
+                LOGD << "Refreshed " << mainPath << " after a change to " << prj;
+            }
+        }
+    }
+
+    bool isPrjPath(const std::string &path) {
+        return io::Path(path).checkExtension({"prj"});
+    }
+
     } // namespace
 
     void addToIndex(Database *db, const std::vector<std::string> &paths,
@@ -888,7 +942,13 @@ static std::mutex g_templateMutex;
         std::vector<std::string> discardedUnchanged;
         auto planned = planAddCandidates(db, pathList, directory);
         auto computed = computeAddEntries(planned, directory, /*stopOnError=*/true, discardedErrors, discardedUnchanged);
-        commitAddEntries(db, computed, directory, callback, nullptr, nullptr, nullptr);
+        std::vector<std::pair<Entry, bool>> accepted;
+        commitAddEntries(db, computed, directory, callback, &accepted, nullptr, nullptr);
+
+        std::vector<std::string> prjPaths;
+        for (const auto &a : accepted)
+            if (isPrjPath(a.first.path)) prjPaths.push_back(a.first.path);
+        refreshPrjMains(db, directory, prjPaths, false);
     }
 
     void addToIndexEx(Database *db, const std::vector<std::string> &paths,
@@ -902,6 +962,7 @@ static std::mutex g_templateMutex;
         // Clamp negative retries: a negative value would skip the loop entirely
         // and report every item as a CONFLICT without attempting indexing.
         const int maxRetries = options.maxConflictRetries < 0 ? AddOptions{}.maxConflictRetries : options.maxConflictRetries;
+        const size_t firstNewEntry = result.entries.size();
 
         for (int pass = 0; pass <= maxRetries && !pathList.empty(); ++pass) {
             auto planned = planAddCandidates(db, pathList, directory);
@@ -919,6 +980,11 @@ static std::mutex g_templateMutex;
             io::Path relPath = io::Path(p).relativeTo(directory);
             result.errors.push_back({relPath.generic(), "CONFLICT", "File kept changing during indexing"});
         }
+
+        std::vector<std::string> prjPaths;
+        for (size_t i = firstNewEntry; i < result.entries.size(); i++)
+            if (isPrjPath(result.entries[i].first.path)) prjPaths.push_back(result.entries[i].first.path);
+        refreshPrjMains(db, directory, prjPaths, false);
     }
 
     void removeFromIndex(Database *db, const std::vector<std::string> &paths, RemoveCallback callback)
@@ -933,6 +999,7 @@ static std::mutex g_templateMutex;
         const fs::path directory = db->rootDirectory();
 
         auto pathList = std::vector<fs::path>(paths.begin(), paths.end());
+        std::vector<std::string> removedPrj;
 
         for (auto &p : pathList)
         {
@@ -949,6 +1016,8 @@ static std::mutex g_templateMutex;
             for (auto &e : entryMatches)
             {
                 auto cnt = deleteFromIndex(db, e.path, false, callback);
+                if (cnt > 0 && e.type != Directory && isPrjPath(e.path))
+                    removedPrj.push_back(e.path);
 
                 if (e.type == Directory)
                     cnt += deleteFromIndex(db, e.path, true, callback);
@@ -962,6 +1031,8 @@ static std::mutex g_templateMutex;
             if (!tot)
                 throw FSException("No matching entries");
         }
+
+        refreshPrjMains(db, directory, removedPrj, true);
     }
 
     std::string sanitize_query_param(const std::string &str)

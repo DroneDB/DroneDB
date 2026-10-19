@@ -122,7 +122,9 @@ namespace
         EXPECT_TRUE(at("roads.shp").complete);
         EXPECT_TRUE(at("roads.dbf").buildable);
         EXPECT_TRUE(at("roads.dbf").complete) << "a dependency is complete when its main file is";
-        EXPECT_TRUE(at("orphan.dbf").buildable);
+        // A sidecar without its main file is not buildable (DDB-12): "buildable
+        // but never complete" made completeness sweeps re-enqueue it forever.
+        EXPECT_FALSE(at("orphan.dbf").buildable);
         EXPECT_FALSE(at("orphan.dbf").complete);
         EXPECT_FALSE(at("dir").buildable);
         EXPECT_FALSE(at("missing.tif").exists);

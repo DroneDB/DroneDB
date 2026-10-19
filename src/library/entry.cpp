@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <optional>
 #include "dbops.h"
 #include "entry.h"
 
@@ -15,6 +16,7 @@
 #include "pointcloud.h"
 #include "ply.h"
 #include "3d.h"
+#include "cad.h"
 #include "tiles3d.h"
 #include "gsplat.h"
 #include "thermal.h"
@@ -493,18 +495,74 @@ namespace ddb
         // Compute polygon_geom (WGS84) and properties.vector multi-layer metadata.
         // Best-effort: any failure leaves the entry indexed without geometry but
         // never aborts the parse (a corrupted vector file should not block ddb add).
-        // Declared outside try so that the catch block can release them on error.
+        // Declared outside try so that the catch block can release them on error;
+        // the CAD source outlives hDS (a converted DXF is deleted only once closed).
+        std::optional<cad::CadSource> cadSource;
         GDALDatasetH hDS = nullptr;
         OGRSpatialReferenceH hWgs84 = nullptr;
+        OGRSpatialReferenceH hCadSrs = nullptr;
         try
         {
-            hDS = GDALOpenEx(path.string().c_str(),
+            // CAD drawings: a DWG is read through a temporary DXF, and the CRS
+            // comes from the drawing (the same rule the build uses, cad.h).
+            const bool isCad = cad::isCadFile(path);
+            if (isCad)
+                cadSource.emplace(path);
+            const fs::path openPath = isCad ? cadSource->dxfPath() : path;
+
+            hDS = GDALOpenEx(openPath.string().c_str(),
                              GDAL_OF_VECTOR | GDAL_OF_READONLY,
                              nullptr, nullptr, nullptr);
             if (hDS == nullptr)
             {
                 LOGD << "Vector parse: GDAL cannot open " << path.string();
                 return;
+            }
+
+            json cadJson;
+            if (isCad)
+            {
+                const auto info = cad::readDxfInfo(openPath);
+                const auto crs = cad::resolveCadCrs(path, hDS, info);
+                cadJson = {{"crs", {{"source", crs.source}, {"label", crs.label}}},
+                           {"units", cad::insUnitsName(info.insUnits)}};
+                if (cadSource->converted()) cadJson["converter"] = "dwg2dxf";
+                entry.properties["georeferenced"] = crs.georeferenced;
+
+                if (!crs.georeferenced)
+                {
+                    // Local drawing: no footprint (nothing to place on a map); the
+                    // layer extents stay in drawing coordinates.
+                    auto layers = json::array();
+                    for (int i = 0; i < GDALDatasetGetLayerCount(hDS); i++)
+                    {
+                        OGRLayerH hLayer = GDALDatasetGetLayer(hDS, i);
+                        if (hLayer == nullptr) continue;
+                        const char *layerName = OGR_L_GetName(hLayer);
+                        auto layerJson = json::object();
+                        layerJson["name"] = layerName ? layerName : ("layer_" + std::to_string(i));
+                        layerJson["geometryType"] = OGRGeometryTypeToName(OGR_L_GetGeomType(hLayer));
+                        layerJson["featureCount"] = static_cast<int64_t>(OGR_L_GetFeatureCount(hLayer, FALSE));
+                        layers.push_back(layerJson);
+                    }
+                    entry.properties["vector"] = {
+                        {"driver", GDALGetDriverShortName(GDALGetDatasetDriver(hDS))},
+                        {"layers", layers}};
+                    entry.properties["vector"].update(cadJson);
+                    if (crs.hasExtent)
+                        entry.properties["vector"]["localExtent"] = {crs.extent.MinX, crs.extent.MinY,
+                                                                     crs.extent.MaxX, crs.extent.MaxY};
+                    GDALClose(hDS);
+                    hDS = nullptr;
+                    return;
+                }
+
+                if (!crs.srs.empty())
+                {
+                    hCadSrs = OSRNewSpatialReference(nullptr);
+                    if (OSRSetFromUserInput(hCadSrs, crs.srs.c_str()) != OGRERR_NONE)
+                        throw GDALException("Invalid CAD coordinate system " + crs.label);
+                }
             }
 
             // Lazy WGS84 SRS - only allocate when needed (first layer with SRS).
@@ -530,6 +588,7 @@ namespace ddb
                 }
 
                 OGRSpatialReferenceH hSrs = OGR_L_GetSpatialRef(hLayer);
+                if (hSrs == nullptr) hSrs = hCadSrs; // CAD layers carry no SRS
                 OGREnvelope envWgs84 = env;
 
                 if (hSrs != nullptr)
@@ -622,12 +681,16 @@ namespace ddb
 
             if (hWgs84 != nullptr) OSRDestroySpatialReference(hWgs84);
             hWgs84 = nullptr;
+            if (hCadSrs != nullptr) OSRDestroySpatialReference(hCadSrs);
+            hCadSrs = nullptr;
 
             entry.properties["vector"] = {
                 {"driver", GDALGetDriverShortName(GDALGetDatasetDriver(hDS))},
                 {"layers", layersArr}};
+            if (!cadJson.is_null()) entry.properties["vector"].update(cadJson);
 
             GDALClose(hDS);
+            hDS = nullptr;
 
             if (haveEnv)
             {
@@ -647,6 +710,7 @@ namespace ddb
         {
             // Release GDAL/OSR resources that may have been opened before the exception.
             if (hWgs84 != nullptr) OSRDestroySpatialReference(hWgs84);
+            if (hCadSrs != nullptr) OSRDestroySpatialReference(hCadSrs);
             if (hDS != nullptr) GDALClose(hDS);
             LOGD << "Vector parse warning: " << e.what();
             entry.properties["warning"] = std::string("vector parse failed: ") + e.what();
