@@ -1051,7 +1051,22 @@ DDB_DLL DDBErr DDBGetStamp(const char* ddbPath, char** output) {
         throw InvalidArgsException("No output provided");
 
     const auto ddb = ddb::open(std::string(ddbPath), true);
-    utils::copyToPtr(ddb->getStamp().dump(), output);
+    utils::copyToPtr(ddb->getStampJson(), output);
+
+    DDB_C_END
+}
+
+DDB_DLL DDBErr DDBGetStampChecksum(const char* ddbPath, char** output) {
+    DDB_C_BEGIN
+
+    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
+        throw InvalidArgsException("No directory provided");
+
+    if (output == nullptr)
+        throw InvalidArgsException("No output provided");
+
+    const auto ddb = ddb::open(std::string(ddbPath), true);
+    utils::copyToPtr(ddb->getStampChecksum(), output);
 
     DDB_C_END
 }

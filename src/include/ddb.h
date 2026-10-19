@@ -308,6 +308,13 @@ extern "C"
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBGetStamp(const char *ddbPath, char **output);
 
+    /** Get the checksum of the current database's stamp (the "checksum" field of
+     * DDBGetStamp) without building the stamp
+     * @param ddbPath path to the source DroneDB database (parent of ".ddb")
+     * @param output pointer to C-string where to store the checksum (hex SHA-256)
+     * @return DDBERR_NONE on success, an error otherwise */
+    DDB_DLL DDBErr DDBGetStampChecksum(const char *ddbPath, char **output);
+
     /** Rescan all files in the index to update metadata
      * @param ddbPath path to a DroneDB database (parent of ".ddb")
      * @param output pointer to C-string where to store output (JSON array of results)

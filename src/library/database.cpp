@@ -315,11 +315,46 @@ END;
         return j;
     }
 
-    json Database::getStamp() const
+    namespace
     {
-        json j;
+        // Appends `s` as a JSON string literal, escaped like json::dump() does.
+        void appendJsonString(std::string &out, const std::string &s)
+        {
+            static const char *hex = "0123456789abcdef";
+            out += '"';
+            size_t plainStart = 0;
+            for (size_t i = 0; i < s.size(); i++)
+            {
+                const auto c = static_cast<unsigned char>(s[i]);
+                if (c >= 0x20 && c != '"' && c != '\\')
+                    continue;
 
-        // Initialize OpenSSL EVP context for incremental hashing
+                out.append(s, plainStart, i - plainStart);
+                plainStart = i + 1;
+                switch (c)
+                {
+                case '"': out += "\\\""; break;
+                case '\\': out += "\\\\"; break;
+                case '\b': out += "\\b"; break;
+                case '\f': out += "\\f"; break;
+                case '\n': out += "\\n"; break;
+                case '\r': out += "\\r"; break;
+                case '\t': out += "\\t"; break;
+                default:
+                    out += "\\u00";
+                    out += hex[c >> 4];
+                    out += hex[c & 0x0f];
+                }
+            }
+            out.append(s, plainStart, std::string::npos);
+            out += '"';
+        }
+    }
+
+    std::string Database::readStamp(const StampEntryVisitor &onEntry, const StampMetaVisitor &onMeta) const
+    {
+        // The checksum is a SHA-256 over every path+hash (path order), then every meta id
+        // (id order). Clients compare it across versions: keep the input and order fixed.
         EvpMdCtxPtr ctx(EVP_MD_CTX_new());
         if (!ctx) throw AppException("Failed to create EVP_MD_CTX for SHA256");
         if (EVP_DigestInit_ex(ctx.get(), EVP_sha256(), NULL) != 1) {
@@ -327,27 +362,23 @@ END;
         }
 
         auto q = this->query("SELECT path,hash FROM entries ORDER BY path ASC");
-        j["entries"] = json::array();
         while (q->fetch())
         {
             const std::string p = q->getText(0);
             const std::string h = q->getText(1);
             safeDigestUpdate(ctx.get(), p.c_str(), p.length());
             safeDigestUpdate(ctx.get(), h.c_str(), h.length());
-
-            j["entries"].push_back(json::object({{p, h}}));
+            if (onEntry) onEntry(p, h);
         }
 
         q = this->query("SELECT id FROM entries_meta ORDER BY id ASC");
-        j["meta"] = json::array();
         while (q->fetch())
         {
             const std::string id = q->getText(0);
             safeDigestUpdate(ctx.get(), id.c_str(), id.length());
-            j["meta"].push_back(id);
+            if (onMeta) onMeta(id);
         }
 
-        // Finalize hash and convert to hex string
         unsigned char hash[EVP_MAX_MD_SIZE];
         unsigned int hashLen;
         safeDigestFinal(ctx.get(), hash, &hashLen);
@@ -356,8 +387,62 @@ END;
         for (unsigned int i = 0; i < hashLen; ++i) {
             oss << std::hex << std::setfill('0') << std::setw(2) << (int)hash[i];
         }
-        j["checksum"] = oss.str();
+        return oss.str();
+    }
+
+    json Database::getStamp() const
+    {
+        json j;
+        j["entries"] = json::array();
+        j["meta"] = json::array();
+        j["checksum"] = readStamp(
+            [&j](const std::string &p, const std::string &h)
+            { j["entries"].push_back(json::object({{p, h}})); },
+            [&j](const std::string &id)
+            { j["meta"].push_back(id); });
         return j;
+    }
+
+    std::string Database::getStampJson() const
+    {
+        // Same document as getStamp().dump(), written directly: a 50k-entry stamp would
+        // otherwise allocate one json object per entry and serialize them afterwards.
+        // "checksum" comes first (keys are sorted) but is known last: reserve its place.
+        static const std::string head = "{\"checksum\":\"";
+        constexpr size_t checksumLength = 64; // hex SHA-256
+
+        std::string out = head + std::string(checksumLength, '0') + "\",\"entries\":[";
+        const size_t firstEntry = out.size();
+        std::string meta = "[";
+        const auto checksum = readStamp(
+            [&out, firstEntry](const std::string &p, const std::string &h)
+            {
+                if (out.size() > firstEntry) out += ',';
+                out += '{';
+                appendJsonString(out, p);
+                out += ':';
+                appendJsonString(out, h);
+                out += '}';
+            },
+            [&meta](const std::string &id)
+            {
+                if (meta.size() > 1) meta += ',';
+                appendJsonString(meta, id);
+            });
+
+        if (checksum.size() != checksumLength)
+            throw AppException("Unexpected stamp checksum length");
+        out.replace(head.size(), checksumLength, checksum);
+
+        out += "],\"meta\":";
+        out += meta;
+        out += "]}";
+        return out;
+    }
+
+    std::string Database::getStampChecksum() const
+    {
+        return readStamp(nullptr, nullptr);
     }
 
     fs::path Database::rootDirectory() const

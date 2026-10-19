@@ -93,6 +93,17 @@ namespace ddb
     DDB_DLL Delta getDelta(const json &sourceDbStamp,
                            const json &destinationDbStamp);
 
+    /**
+     * Appends the entry changes between two entry lists, both sorted by path (byte order).
+     * A source entry is added when no destination entry has the same path and hash.
+     * A destination entry is removed when no source entry has the same path and the
+     * same kind (file or folder). Runs in O(n + m).
+     */
+    DDB_DLL void diffSortedEntries(const std::vector<SimpleEntry> &source,
+                                   const std::vector<SimpleEntry> &destination,
+                                   std::vector<AddAction> &adds,
+                                   std::vector<RemoveAction> &removes);
+
     DDB_DLL Delta getDelta(Database *sourceDb, Database *targetDb);
 
     DDB_DLL void delta(Database *sourceDb, Database *targetDb, std::ostream &output, const std::string &format);

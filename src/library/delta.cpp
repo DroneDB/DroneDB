@@ -102,6 +102,71 @@ namespace ddb
         }
     }
 
+    void diffSortedEntries(const std::vector<SimpleEntry> &source,
+                           const std::vector<SimpleEntry> &destination,
+                           std::vector<AddAction> &adds,
+                           std::vector<RemoveAction> &removes)
+    {
+        // Merge-join over both lists (sorted by path): O(n + m).
+        size_t i = 0, j = 0;
+        while (i < source.size() || j < destination.size())
+        {
+            if (j == destination.size() || (i < source.size() && source[i].path < destination[j].path))
+            {
+                LOGD << "ADD  -> " << source[i].toString();
+                adds.emplace_back(source[i].path, source[i].hash);
+                i++;
+                continue;
+            }
+
+            if (i == source.size() || destination[j].path < source[i].path)
+            {
+                LOGD << "DEL  -> " << destination[j].toString();
+                removes.emplace_back(destination[j].path, destination[j].hash);
+                j++;
+                continue;
+            }
+
+            // Same path on both sides. A stamp read from an index has one entry per path,
+            // but a stamp built by hand can repeat one: compare the two groups.
+            const std::string &path = source[i].path;
+            size_t iEnd = i, jEnd = j;
+            while (iEnd < source.size() && source[iEnd].path == path)
+                iEnd++;
+            while (jEnd < destination.size() && destination[jEnd].path == path)
+                jEnd++;
+
+            for (size_t s = i; s < iEnd; s++)
+            {
+                bool sameHash = false;
+                for (size_t d = j; d < jEnd && !sameHash; d++)
+                    sameHash = destination[d].hash == source[s].hash;
+
+                if (!sameHash)
+                {
+                    LOGD << "ADD  -> " << source[s].toString();
+                    adds.emplace_back(source[s].path, source[s].hash);
+                }
+            }
+
+            for (size_t d = j; d < jEnd; d++)
+            {
+                bool sameKind = false;
+                for (size_t s = i; s < iEnd && !sameKind; s++)
+                    sameKind = source[s].isDirectory() == destination[d].isDirectory();
+
+                if (!sameKind)
+                {
+                    LOGD << "DEL  -> " << destination[d].toString();
+                    removes.emplace_back(destination[d].path, destination[d].hash);
+                }
+            }
+
+            i = iEnd;
+            j = jEnd;
+        }
+    }
+
     Delta getDelta(const json &sourceDbStamp,
                    const json &destinationDbStamp)
     {
@@ -114,52 +179,12 @@ namespace ddb
         std::vector<std::string> metaAdds;
         std::vector<std::string> metaRemoves;
 
-        // Sort by path
-        std::sort(source.begin(), source.end(),
-                  [](const SimpleEntry &l, const SimpleEntry &r)
-                  {
-                      return l.path < r.path;
-                  });
+        const auto byPath = [](const SimpleEntry &l, const SimpleEntry &r)
+        { return l.path < r.path; };
+        std::sort(source.begin(), source.end(), byPath);
+        std::sort(destination.begin(), destination.end(), byPath);
 
-        // Sort by path
-        std::sort(destination.begin(), destination.end(),
-                  [](const SimpleEntry &l, const SimpleEntry &r)
-                  {
-                      return l.path < r.path;
-                  });
-
-        for (const SimpleEntry &entry : source)
-        {
-            const auto inDestWithSameHashAndPath =
-                std::find_if(destination.begin(), destination.end(),
-                             [&entry](const SimpleEntry &e)
-                             {
-                                 return e.hash == entry.hash &&
-                                        e.path == entry.path;
-                             }) != destination.end();
-
-            if (inDestWithSameHashAndPath)
-            {
-                LOGD << "SKIP -> " << entry.toString();
-                continue;
-            }
-
-            LOGD << "ADD  -> " << entry.toString();
-            adds.emplace_back(AddAction(entry.path, entry.hash));
-        }
-
-        for (const SimpleEntry &entry : destination)
-        {
-            const auto notInSourceWithSamePath = std::find_if(
-                source.begin(), source.end(), [&entry](const SimpleEntry &e)
-                { return e.path == entry.path && e.isDirectory() == entry.isDirectory(); });
-
-            if (notInSourceWithSamePath == source.end())
-            {
-                LOGD << "DEL  -> " << entry.toString();
-                removes.emplace_back(RemoveAction(entry.path, entry.hash));
-            }
-        }
+        diffSortedEntries(source, destination, adds, removes);
 
         // Sort removes by path descending
         std::sort(removes.begin(), removes.end(),
@@ -212,7 +237,9 @@ namespace ddb
         if (!stamp.contains("entries"))
             throw InvalidArgsException("Stamp entries not found");
 
-        for (auto &i : stamp["entries"])
+        const auto &entries = stamp["entries"];
+        result.reserve(entries.size());
+        for (auto &i : entries)
         {
             auto obj = i.begin();
             result.push_back(SimpleEntry(obj.key(), obj.value()));

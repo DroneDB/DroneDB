@@ -12,6 +12,8 @@
 #include "json.h"
 #include "constants.h"
 
+#include <functional>
+
 namespace ddb
 {
 
@@ -35,6 +37,11 @@ namespace ddb
     void markPooled(const std::string &key, const std::string &fileId);
     sqlite3 *detachPooled(void *&cache, std::string &key, std::string &fileId, bool &wrote);
 
+    using StampEntryVisitor = std::function<void(const std::string &path, const std::string &hash)>;
+    using StampMetaVisitor = std::function<void(const std::string &id)>;
+    // Reads the rows of the stamp in stamp order and returns its checksum
+    std::string readStamp(const StampEntryVisitor &onEntry, const StampMetaVisitor &onMeta) const;
+
   public:
     DDB_DLL ~Database() override;
 
@@ -46,6 +53,10 @@ namespace ddb
 
     DDB_DLL json getProperties() const;
     DDB_DLL json getStamp() const;
+    /// getStamp().dump(), without building the json document
+    DDB_DLL std::string getStampJson() const;
+    /// getStamp()["checksum"], without collecting the entries
+    DDB_DLL std::string getStampChecksum() const;
 
     DDB_DLL fs::path rootDirectory() const;
     DDB_DLL fs::path ddbDirectory() const;
