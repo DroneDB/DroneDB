@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "ddb_export.h"
+#include "fileversion.h"
 #include "fs.h"
 
 struct sqlite3;
@@ -109,10 +110,6 @@ namespace ddb
         std::chrono::steady_clock::time_point lastPurge_;
     };
 
-    /// Identity of a file that changes when the path points to another file: device and
-    /// inode on POSIX; on Windows, where an open file cannot be replaced, a constant.
-    /// Empty when the file does not exist.
-    DDB_DLL std::string fileIdentity(const fs::path &file);
 
 }
 

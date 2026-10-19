@@ -6,11 +6,8 @@
 #include <algorithm>
 #include <cstdlib>
 
-#ifndef _WIN32
-#include <sys/stat.h>
-#endif
-
 #include "database.h"
+#include "fileversion.h"
 #include "logger.h"
 
 namespace ddb
@@ -38,14 +35,7 @@ namespace ddb
 
         std::string poolKey(const fs::path &dbFile)
         {
-            return fs::absolute(dbFile).lexically_normal().generic_string();
-        }
-
-        bool isUnder(const std::string &key, const std::string &prefix)
-        {
-            if (key.size() < prefix.size() || key.compare(0, prefix.size(), prefix) != 0)
-                return false;
-            return key.size() == prefix.size() || prefix.back() == '/' || key[prefix.size()] == '/';
+            return cacheKeyPath(dbFile);
         }
 
         void closeHandle(sqlite3 *handle, void *spatialiteCache)
@@ -56,20 +46,6 @@ namespace ddb
             if (spatialiteCache != nullptr)
                 spatialite_cleanup_ex(spatialiteCache);
         }
-    }
-
-    std::string fileIdentity(const fs::path &file)
-    {
-#ifdef _WIN32
-        std::error_code ec;
-        return fs::exists(file, ec) ? "file" : "";
-#else
-        struct stat st{};
-        if (stat(file.c_str(), &st) != 0)
-            return "";
-        return std::to_string(static_cast<unsigned long long>(st.st_dev)) + ":" +
-               std::to_string(static_cast<unsigned long long>(st.st_ino));
-#endif
     }
 
     DatabasePool &DatabasePool::instance()
@@ -228,7 +204,7 @@ namespace ddb
             std::lock_guard<std::mutex> lock(mutex_);
             for (auto it = idle_.begin(); it != idle_.end();)
             {
-                if (isUnder(it->key, prefix))
+                if (isCacheKeyUnder(it->key, prefix))
                 {
                     closing.push_back(*it);
                     it = idle_.erase(it);
