@@ -128,6 +128,24 @@ namespace
         EXPECT_EQ(paths(d.removes), (std::vector<std::string>{"b.jpg"}));
     }
 
+    TEST(Delta, modifiedAddsCarryTheBaseHash)
+    {
+        const auto src = makeStamp({{"a.jpg", "h1-new"}, {"b.jpg", "h2"}});
+        const auto dst = makeStamp({{"a.jpg", "h1-old"}});
+        const auto d = getDelta(src, dst);
+        ASSERT_EQ(d.adds.size(), 2u);
+        EXPECT_EQ(d.adds[0].path, "a.jpg");
+        EXPECT_EQ(d.adds[0].baseHash, std::optional<std::string>("h1-old"));
+        EXPECT_EQ(d.adds[1].path, "b.jpg");
+        EXPECT_FALSE(d.adds[1].baseHash.has_value());
+
+        // JSON round trip (DDBDelta / DDBApplyDelta)
+        Delta back = json(d);
+        EXPECT_EQ(back.adds[0].baseHash, std::optional<std::string>("h1-old"));
+        EXPECT_FALSE(back.adds[1].baseHash.has_value());
+        EXPECT_FALSE(json(d)["adds"][1].contains("baseHash"));
+    }
+
     TEST(DDB03_Delta, matchesReferenceImplementation)
     {
         std::mt19937 rng(20261019);

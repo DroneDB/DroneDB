@@ -402,17 +402,20 @@ void verifyDeltaHashes(const Delta& d, const fs::path& sourcePath) {
         std::rethrow_exception(error);
 }
 
-// Whether a delta entry can be applied over the destination's version of `path`
+// Whether a delta entry can be applied over the destination's version of `path`: there is
+// none, it already matches, or it did not change since the stamp the delta was computed
+// from (`baseHash`). Otherwise both sides changed it: the merge strategy decides.
 bool canApply(Database* destination,
               const std::string& path,
               const std::string& hash,
+              const std::optional<std::string>& baseHash,
               const MergeStrategy mergeStrategy,
               const ConflictType conflictType,
               std::vector<Conflict>& conflicts,
               bool& indexed) {
     Entry e;
     indexed = getEntry(destination, path, e);
-    if (!indexed || hash == e.hash)
+    if (!indexed || hash == e.hash || (baseHash && *baseHash == e.hash))
         return true;
 
     switch (mergeStrategy) {
@@ -449,8 +452,9 @@ std::vector<Conflict> applyDelta(const Delta& d,
         std::vector<std::string> indexedRemovals;
         std::vector<const RemoveAction*> fileRemovals;
         for (const auto& rem : d.removes) {
+            // rem.hash is the hash in the destination stamp
             bool indexed;
-            if (!canApply(destination, rem.path, rem.hash, mergeStrategy,
+            if (!canApply(destination, rem.path, rem.hash, rem.hash, mergeStrategy,
                           ConflictType::RemoteDeleteLocalModified, conflicts, indexed))
                 continue;
 
@@ -479,8 +483,8 @@ std::vector<Conflict> applyDelta(const Delta& d,
         std::vector<KnownFile> addedFiles;
         for (const auto& add : d.adds) {
             bool indexed;
-            if (!canApply(destination, add.path, add.hash, mergeStrategy, ConflictType::BothModified,
-                          conflicts, indexed))
+            if (!canApply(destination, add.path, add.hash, add.baseHash, mergeStrategy,
+                          ConflictType::BothModified, conflicts, indexed))
                 continue;
 
             const auto dest = destPath / add.path;

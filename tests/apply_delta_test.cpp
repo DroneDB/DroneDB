@@ -366,6 +366,36 @@ namespace
         }
     }
 
+    TEST(ApplyDelta, remoteChangeOfAnUnchangedLocalFileIsNoConflict)
+    {
+        // The delta of a pull is computed against the last synced stamp: a file modified on
+        // the remote and unchanged locally since then is no conflict
+        Fixture f(TEST_NAME);
+        const auto base = f.hashOf("old.txt");
+        auto add = f.stage("old.txt", "remote edit");
+        add.baseHash = base;
+        Delta d;
+        d.adds.push_back(add);
+
+        EXPECT_TRUE(f.apply(d, MergeStrategy::DontMerge).empty());
+        EXPECT_EQ(readFile(f.root / "old.txt"), "remote edit");
+        EXPECT_EQ(f.hashOf("old.txt"), add.hash);
+    }
+
+    TEST(ApplyDelta, localChangeSinceTheBaseIsAConflict)
+    {
+        Fixture f(TEST_NAME);
+        auto add = f.stage("old.txt", "remote edit");
+        add.baseHash = "hash-at-last-sync";
+        Delta d;
+        d.adds.push_back(add);
+
+        const auto conflicts = f.apply(d, MergeStrategy::DontMerge);
+        ASSERT_EQ(conflicts.size(), 1u);
+        EXPECT_EQ(conflicts[0].type, ConflictType::BothModified);
+        EXPECT_EQ(readFile(f.root / "old.txt"), "old");
+    }
+
     TEST(DDB04_ApplyDelta, cApiVerifiesHashes)
     {
         Fixture f(TEST_NAME);

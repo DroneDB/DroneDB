@@ -29,6 +29,8 @@ namespace ddb
     void to_json(json &j, const AddAction &e)
     {
         j = json{{"path", e.path}, {"hash", e.hash}};
+        if (e.baseHash)
+            j["baseHash"] = *e.baseHash;
     }
 
     void to_json(json &j, const Delta &d)
@@ -45,7 +47,10 @@ namespace ddb
         {
             for (auto &add : j["adds"])
             {
-                d.adds.push_back(AddAction(add["path"], add["hash"]));
+                std::optional<std::string> baseHash;
+                if (add.contains("baseHash"))
+                    baseHash = add["baseHash"].get<std::string>();
+                d.adds.push_back(AddAction(add["path"], add["hash"], baseHash));
             }
         }
         if (j.contains("removes"))
@@ -145,7 +150,7 @@ namespace ddb
                 if (!sameHash)
                 {
                     LOGD << "ADD  -> " << source[s].toString();
-                    adds.emplace_back(source[s].path, source[s].hash);
+                    adds.emplace_back(source[s].path, source[s].hash, destination[j].hash);
                 }
             }
 

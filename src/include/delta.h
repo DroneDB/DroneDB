@@ -5,6 +5,7 @@
 #define DELTA_H
 
 #include <iostream>
+#include <optional>
 
 #include "dbops.h"
 #include "ddb_export.h"
@@ -41,10 +42,16 @@ namespace ddb
         std::string path;
         std::string hash;
 
-        AddAction(const std::string &path, const std::string &hash)
+        // Hash of the path in the destination stamp, when the path is there (a modification).
+        // applyDelta only reports a conflict when the local entry changed since then.
+        std::optional<std::string> baseHash;
+
+        AddAction(const std::string &path, const std::string &hash,
+                  std::optional<std::string> baseHash = std::nullopt)
         {
             this->path = path;
             this->hash = hash;
+            this->baseHash = std::move(baseHash);
         }
 
         std::string toString() const
