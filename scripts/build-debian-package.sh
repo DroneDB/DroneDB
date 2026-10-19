@@ -219,6 +219,20 @@ override_dh_auto_install:
 		cp \$(CURDIR)/build/libktx.so debian/ddb/usr/bin/libktx.so; \\
 	fi
 
+	# Optional: copy the LibreDWG dwg2dxf converter if it was built
+	# (scripts/build-libredwg.sh). Installed alongside ddb so that runtime
+	# discovery (cad.cpp::findDwg2DxfBinary -> exe folder, then PATH, which is how
+	# Registry finds it) needs no configuration. GPL-3.0-or-later, invoked only as
+	# a subprocess; its license text ships next to the other notices. Without it,
+	# DWG builds fail with an actionable message; every other format is unaffected.
+	if [ -f \$(CURDIR)/build/dwg2dxf ]; then \\
+		cp \$(CURDIR)/build/dwg2dxf debian/ddb/usr/bin/dwg2dxf; \\
+		chmod +x debian/ddb/usr/bin/dwg2dxf; \\
+		if [ -f \$(CURDIR)/build/dwg2dxf.LICENSE.txt ]; then \\
+			cp \$(CURDIR)/build/dwg2dxf.LICENSE.txt debian/ddb/usr/share/doc/ddb/dwg2dxf.LICENSE.txt; \\
+		fi \\
+	fi
+
 	# Copy PDAL libraries from vcpkg installed directory
 	# Use wildcard to detect the actual SOVERSION (e.g., .so.19, .so.20, etc.)
 	# so the script survives future PDAL ABI bumps without manual updates
@@ -302,6 +316,29 @@ if [ -f build/Obj2Tiles ]; then
     echo "  $f is byte-identical to the upstream binary."
   done
   rm -rf "$VERIFY_DIR"
+fi
+
+# dwg2dxf (DWG support): when it was built, the package must carry it, its
+# license, and the pinned version (it is our own build, so dh_strip may touch it).
+if [ -f build/dwg2dxf ]; then
+  echo "Verifying packaged dwg2dxf..."
+  DWG_CHECK_DIR=$(mktemp -d)
+  dpkg-deb -x build/package/ddb_*.deb "$DWG_CHECK_DIR"
+  for f in usr/bin/dwg2dxf usr/share/doc/ddb/dwg2dxf.LICENSE.txt; do
+    if [ ! -f "$DWG_CHECK_DIR/$f" ]; then
+      echo "ERROR: /$f is missing from the package"
+      rm -rf "$DWG_CHECK_DIR"
+      exit 1
+    fi
+  done
+  EXPECTED_LIBREDWG="$(tr -d '[:space:]' < scripts/libredwg-version)"
+  if ! "$DWG_CHECK_DIR/usr/bin/dwg2dxf" --version 2>&1 | grep -q "dwg2dxf ${EXPECTED_LIBREDWG}"; then
+    echo "ERROR: packaged dwg2dxf does not report version ${EXPECTED_LIBREDWG}"
+    rm -rf "$DWG_CHECK_DIR"
+    exit 1
+  fi
+  rm -rf "$DWG_CHECK_DIR"
+  echo "  dwg2dxf ${EXPECTED_LIBREDWG} packaged with its license."
 fi
 
 # Regression guard: PDAL >= 19 loads plugins by unversioned soname from the

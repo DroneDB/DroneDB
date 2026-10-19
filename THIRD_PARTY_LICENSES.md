@@ -132,6 +132,58 @@ Obj2Tiles binary), while Nexus output is unaffected.
 
 ---
 
+## LibreDWG `dwg2dxf` (optional DWG converter)
+
+When present in the distribution archive, the `dwg2dxf` /
+`dwg2dxf.exe` binary is the
+[GNU LibreDWG](https://www.gnu.org/software/libredwg/) DWG-to-DXF
+converter, built **unmodified** from the signed GNU release tarball by
+[`scripts/build-libredwg.sh`](scripts/build-libredwg.sh) (version in
+[`scripts/libredwg-version`](scripts/libredwg-version); the tarball
+signature is verified against the LibreDWG maintainer's key
+`38A4167B0DB69E49C5F7216CB8C28866AB27A7A2`). Configure flags:
+`--disable-shared --enable-static --disable-bindings --disable-docs
+--disable-python --enable-release`; the Windows binary is
+cross-compiled with mingw-w64 from the same tarball
+(`LDFLAGS=-all-static`).
+
+- **License**: GNU General Public License, version 3 or later
+  (GPL-3.0-or-later).
+- **Source**: https://www.gnu.org/software/libredwg/
+- **Distributed copy**: the `dwg2dxf` / `dwg2dxf.exe` binary placed
+  next to the DroneDB executable, with the upstream `COPYING` file
+  next to it as `dwg2dxf.LICENSE.txt`.
+
+### Why GPL is compatible with MPL-licensed DroneDB
+
+DroneDB invokes `dwg2dxf` exclusively as a **separate subprocess**
+through [`src/library/cad.cpp`](src/library/cad.cpp) (bounded by an
+idle timeout and a total run time); LibreDWG is never linked
+(statically or dynamically) into `ddbcmd`, `libddb`, or any other
+DroneDB-licensed binary. Per the
+[GPL FAQ on aggregation](https://www.gnu.org/licenses/gpl-faq.html#MereAggregation),
+this constitutes "mere aggregation" of independent programs and the
+GPL terms therefore apply only to the `dwg2dxf` binary itself.
+
+### Obtaining the corresponding source
+
+Every DroneDB release that ships `dwg2dxf` attaches the exact
+`libredwg-<version>.tar.xz` it was built from, with its GNU signature
+(`.sig`), to the same GitHub release. The build script and flags are in
+the corresponding git tag of this repository. The same tarball is also
+available from the GNU FTP server linked above.
+
+### Optionality
+
+`dwg2dxf` is an **optional converter**: when the binary is missing,
+DWG files are still indexed (without a footprint) and their builds fail
+with a message that names the missing tool; every other format,
+including DXF, is unaffected. Distributors who prefer not to
+redistribute GPL code may safely omit `dwg2dxf` / `dwg2dxf.exe` from
+the archive.
+
+---
+
 ## libnexus / Nexus
 
 The `libnxs.so` / `nxs.dll` library shipped with DroneDB is a fork of
@@ -152,6 +204,12 @@ LGPL, or X11). The relevant license files can be found inside
 `build/vcpkg_installed/<triplet>/share/<port>/copyright` after a
 build, and the upstream license texts are available in the vcpkg
 ports tree at https://github.com/microsoft/vcpkg.
+
+GDAL (MIT) is built from the overlay port in
+[`vcpkg-overlays/gdal`](vcpkg-overlays/gdal): the upstream vcpkg port
+plus one source patch, `dxf-fit-point-splines.patch`, which makes the
+DXF driver read SPLINE entities defined only by fit points (as written
+by LibreDWG `dwg2dxf`) instead of dropping them.
 
 ---
 

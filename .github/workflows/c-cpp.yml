@@ -9,8 +9,48 @@ on:
     branches: [master]
 
 jobs:
+  # LibreDWG dwg2dxf (DWG support), built once from the signed GNU release for both
+  # platforms (Windows: mingw-w64 cross build) so the binary that is tested is the
+  # binary that ships. Cached on the pinned version and the build script.
+  build_libredwg:
+    name: Build LibreDWG dwg2dxf (Linux + Windows)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache dwg2dxf
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: libredwg-out
+          key: libredwg-${{ hashFiles('scripts/libredwg-version', 'scripts/build-libredwg.sh') }}
+      - name: Build dwg2dxf (native + mingw-w64 cross)
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq build-essential mingw-w64 pkg-config xz-utils gpg curl
+          export LIBREDWG_SOURCE_DIR=libredwg-out/source
+          ./scripts/build-libredwg.sh libredwg-out/linux
+          ./scripts/build-libredwg.sh libredwg-out/windows "" x86_64-w64-mingw32
+      - name: Upload dwg2dxf
+        uses: actions/upload-artifact@v4
+        with:
+          name: libredwg
+          path: libredwg-out
+          retention-days: 90
+      - name: Attach LibreDWG Corresponding Source to Release
+        # GPL-3.0 section 6: releases that ship dwg2dxf offer the exact source they were built from.
+        uses: svenstaro/upload-release-action@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: libredwg-out/source/*
+          file_glob: true
+          tag: ${{ github.ref }}
+          overwrite: true
+
   build_ubuntu:
     name: Build/Test on Ubuntu
+    needs: build_libredwg
     runs-on: ubuntu-24.04
     env:
       VCPKG_ROOT: ${{ github.workspace }}/vcpkg
@@ -101,11 +141,34 @@ jobs:
         run: |
           chmod +x ./scripts/download-obj2tiles.sh
           ./scripts/download-obj2tiles.sh build
+      - name: Get dwg2dxf (DWG converter)
+        # Optional on PR/master pushes (DWG builds fail with an actionable message),
+        # but MUST succeed on release tags so the .deb ships with dwg2dxf.
+        continue-on-error: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/download-artifact@v4
+        with:
+          name: libredwg
+          path: libredwg-out
+      - name: Install dwg2dxf next to ddbcmd
+        continue-on-error: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        run: |
+          cp libredwg-out/linux/dwg2dxf libredwg-out/linux/dwg2dxf.LICENSE.txt build/
+          chmod +x build/dwg2dxf
+          build/dwg2dxf --version
+      - name: Verify LibreDWG is not linked into libddb
+        # dwg2dxf (GPL) is only ever run as a subprocess; libddb must not contain LibreDWG.
+        run: |
+          if nm -D --defined-only build/libddb.so | grep -E ' (dwg_|dxf_)[a-z_]+$' | grep -q .; then
+            echo "::error::libddb.so exports LibreDWG symbols"; exit 1
+          fi
       - name: Verify Spark RAD format pin
         run: |
           echo "Checking vendor/spark/rust/spark-lib/src/rad.rs against the reviewed pin..."
           sha256sum -c tests/data/spark-rad-format.sha256 || { echo "::error::rad.rs changed since the last verified pin: review encoding handling in src/library/rad.cpp, then refresh with: (cd $GITHUB_WORKSPACE && sha256sum vendor/spark/rust/spark-lib/src/rad.rs > tests/data/spark-rad-format.sha256)"; exit 1; }
       - name: Run C++ Tests
+        env:
+          # Real-converter tests skip when the binary is absent (non-tag builds).
+          DDB_DWG2DXF_PATH: ${{ github.workspace }}/build/dwg2dxf
         run: cd build && ./ddbtest --gtest_shuffle
       - name: Run Program Smoke Test
         run: cd build && ./ddbcmd --debug
@@ -181,6 +244,19 @@ jobs:
             fi
           fi
 
+          # Verify dwg2dxf packaging. Required on release tags, informational otherwise.
+          echo "Checking whether dwg2dxf is included in the Debian package..."
+          if dpkg -c build/package/ddb_*.deb | grep -E '/usr/bin/dwg2dxf$' >/dev/null; then
+            echo "  ✓ dwg2dxf present in .deb (DWG support enabled)"
+          else
+            if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+              echo "  ✗ dwg2dxf NOT present in .deb - release builds MUST include dwg2dxf. Failing."
+              exit 1
+            else
+              echo "  ! dwg2dxf NOT present in .deb (DWG builds fail with an actionable message)"
+            fi
+          fi
+
           # Verify PDAL plugin packaging. PDAL >= 19 loads plugins by
           # unversioned soname from the loader path (the directory holding
           # libpdalcpp); without unversioned copies in /usr/lib every E57
@@ -220,6 +296,18 @@ jobs:
               ddb list | grep -q "a4\.e57"
               ddb info a4.e57 --format json | grep -qE "\"pointCount\":[1-9]"
               echo "  ✓ packaged ddb indexed an E57 file in a clean Ubuntu 24.04"
+              if [ -x /usr/bin/dwg2dxf ]; then
+                mkdir -p /tmp/dwgsmoke && cd /tmp/dwgsmoke
+                base=https://github.com/DroneDB/test_data/raw/refs/heads/master/vector/autocad
+                curl -fsSL --retry 3 -o site.dwg $base/utm32n_site_dwg.dwg
+                curl -fsSL --retry 3 -o site.prj $base/utm32n_site_dwg.prj
+                ddb init . > /dev/null
+                ddb add site.dwg site.prj
+                ddb build site.dwg
+                find .ddb/build -path "*vec/source.gpkg" | grep -q .
+                find .ddb/build -path "*mvt/metadata.json" | grep -q .
+                echo "  ✓ packaged ddb built a DWG with the packaged dwg2dxf in a clean Ubuntu 24.04"
+              fi
             ' || {
               echo "  ✗ E57 package smoke test failed - the installed package cannot index E57 (PDAL plugins?)."
               exit 1
@@ -243,6 +331,7 @@ jobs:
 
   build_windows:
     name: Build/Test on Windows
+    needs: build_libredwg
     runs-on: windows-latest
     env:
       VCPKG_ROOT: ${{ github.workspace }}/vcpkg
@@ -316,7 +405,23 @@ jobs:
         continue-on-error: ${{ !startsWith(github.ref, 'refs/tags/') }}
         shell: pwsh
         run: .\scripts\download-obj2tiles.ps1 -TargetDir build
+      - name: Get dwg2dxf.exe (DWG converter)
+        # Optional on PR/master pushes, but MUST succeed on release tags so the zip
+        # ships with dwg2dxf.exe (cross-compiled by build_libredwg).
+        continue-on-error: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/download-artifact@v4
+        with:
+          name: libredwg
+          path: libredwg-out
+      - name: Install dwg2dxf.exe next to ddbcmd.exe
+        continue-on-error: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        shell: pwsh
+        run: |
+          Copy-Item libredwg-out/windows/dwg2dxf.exe, libredwg-out/windows/dwg2dxf.LICENSE.txt build/ -Force
+          & build/dwg2dxf.exe --version
       - name: Run C++ Tests
+        env:
+          DDB_DWG2DXF_PATH: ${{ github.workspace }}\build\dwg2dxf.exe
         run: cd build && .\ddbtest.exe --gtest_shuffle
         shell: pwsh
       - name: Run Program Smoke Test
@@ -376,6 +481,40 @@ jobs:
                 exit 1
               } else {
                 Write-Host '  ! build-lod.exe NOT present in zip (Gaussian Splat builds will be deferred until build-lod is available)'
+              }
+            }
+            if (Test-Path (Join-Path $zipCheckDir 'dwg2dxf.exe')) {
+              Write-Host '  ✓ dwg2dxf.exe present in zip (DWG support enabled)'
+              # Smoke test with only the zip contents and System32 on PATH: proves the
+              # converter needs no DLL we do not ship, on a real Windows host.
+              $savedPath = $env:PATH
+              $env:PATH = "$zipCheckDir;$env:SystemRoot\System32"
+              try {
+                & (Join-Path $zipCheckDir 'dwg2dxf.exe') --version
+                if ($LASTEXITCODE -ne 0) { throw "dwg2dxf.exe --version failed ($LASTEXITCODE)" }
+                $smoke = Join-Path $env:RUNNER_TEMP 'dwg-smoke'
+                New-Item -ItemType Directory -Force -Path $smoke | Out-Null
+                $base = 'https://github.com/DroneDB/test_data/raw/refs/heads/master/vector/autocad'
+                Invoke-WebRequest "$base/utm32n_site_dwg.dwg" -OutFile (Join-Path $smoke 'site.dwg')
+                Invoke-WebRequest "$base/utm32n_site_dwg.prj" -OutFile (Join-Path $smoke 'site.prj')
+                Push-Location $smoke
+                $ddb = Join-Path $zipCheckDir 'ddbcmd.exe'
+                & $ddb init . | Out-Null
+                & $ddb add site.dwg site.prj | Out-Null
+                & $ddb build site.dwg
+                if ($LASTEXITCODE -ne 0) { throw "ddbcmd build of a DWG failed ($LASTEXITCODE)" }
+                if (-not (Get-ChildItem -Recurse .ddb/build -Filter source.gpkg)) { throw "no vec/source.gpkg produced" }
+                Pop-Location
+                Write-Host '  ✓ packaged ddbcmd.exe built a DWG with the packaged dwg2dxf.exe'
+              } finally {
+                $env:PATH = $savedPath
+              }
+            } else {
+              if ($env:GITHUB_REF -like 'refs/tags/v*') {
+                Write-Host '  ✗ dwg2dxf.exe NOT present in zip - release builds MUST include dwg2dxf. Failing.'
+                exit 1
+              } else {
+                Write-Host '  ! dwg2dxf.exe NOT present in zip (DWG builds fail with an actionable message)'
               }
             }
           }

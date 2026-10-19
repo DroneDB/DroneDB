@@ -105,6 +105,22 @@ fi
 # "package smoke test" step in .github/workflows/c-cpp.yml: an extraction-
 # only smoke test cannot be trusted here because the build tree is reachable
 # through the binaries' RUNPATH and would shadow the packaged files.
+# dwg2dxf is optional (DWG support), but when shipped it must run and come with
+# its GPL license text.
+if [ -f "$TEMP_DIR/usr/bin/dwg2dxf" ]; then
+    echo "Checking dwg2dxf..."
+    if ! DWG2DXF_OUTPUT=$("$TEMP_DIR/usr/bin/dwg2dxf" --version 2>&1); then
+        echo "Error: packaged dwg2dxf failed to run!"
+        echo "$DWG2DXF_OUTPUT"
+        exit 1
+    fi
+    echo "  $DWG2DXF_OUTPUT"
+    if [ ! -f "$TEMP_DIR/usr/share/doc/ddb/dwg2dxf.LICENSE.txt" ]; then
+        echo "Error: dwg2dxf.LICENSE.txt not found in /usr/share/doc/ddb!"
+        exit 1
+    fi
+fi
+
 echo "Checking PDAL plugin packaging..."
 if [ ! -f "$TEMP_DIR/usr/lib/libpdalcpp.so.20" ] && ! ls "$TEMP_DIR"/usr/lib/libpdalcpp.so.* >/dev/null 2>&1; then
     echo "Error: no versioned libpdalcpp.so.* found in /usr/lib!"

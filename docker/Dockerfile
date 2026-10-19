@@ -41,6 +41,15 @@ RUN cd /workspace && \
     ./scripts/download-obj2tiles.sh build || \
     echo "WARNING: Obj2Tiles download failed (non-blocking, 3D Tiles generation disabled)"
 
+# Optional: build the LibreDWG dwg2dxf converter (DWG support) from the signed GNU
+# release. GPL-3.0, invoked only as a subprocess (see THIRD_PARTY_LICENSES.md).
+# Failure is non-blocking; DWG builds then fail with an actionable message.
+RUN cd /workspace && \
+    (command -v pkg-config >/dev/null 2>&1 && command -v gpg >/dev/null 2>&1 || \
+        (apt-get update && apt-get install -y --no-install-recommends pkg-config gpg xz-utils)) && \
+    bash scripts/build-libredwg.sh build || \
+    echo "WARNING: dwg2dxf build failed (non-blocking, DWG support disabled)"
+
 # Build the Debian package
 RUN cd /workspace && \
     chmod +x scripts/build-debian-package.sh && \
