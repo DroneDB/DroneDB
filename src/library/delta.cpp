@@ -247,6 +247,12 @@ namespace ddb
         for (auto &i : entries)
         {
             auto obj = i.begin();
+
+            // Older versions indexed the dataset root (`ddb add .`) as an entry with an empty
+            // path: it is not a file or a folder of the dataset, so it is never synced
+            if (obj.key().empty())
+                continue;
+
             result.push_back(SimpleEntry(obj.key(), obj.value()));
         }
 

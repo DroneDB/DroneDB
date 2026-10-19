@@ -2,16 +2,20 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// Change detection: the index stores modification times with sub-second precision, so
-// `ddb add` sees an edit made in the same second as the previous add (same size); rows
-// written with whole seconds (older versions) are still compared to the second, so nothing
-// is re-hashed.
+// Change detection and index paths:
+//
+//  - the index stores modification times with sub-second precision, so `ddb add` sees an
+//    edit made in the same second as the previous add (same size); rows written with whole
+//    seconds (older versions) are still compared to the second, so nothing is re-hashed;
+//  - the dataset root is never an entry (`ddb add .` used to index it with an empty path),
+//    and such a row is removed when the index is opened.
 
 #include <fstream>
 #include <thread>
 
 #include "gtest/gtest.h"
 
+#include "databasepool.h"
 #include "dbops.h"
 #include "ddb.h"
 #include "mio.h"
@@ -149,6 +153,35 @@ namespace
         statusIndex(f.db.get(), [&status](const FileStatus s, const std::string &file)
                     { if (file == "a.txt") status = s; });
         EXPECT_EQ(status, Modified);
+    }
+
+    TEST(IndexChange, rootIsNeverAnEntry)
+    {
+        Fixture f(TEST_NAME);
+        writeFile(f.root / "dir" / "a.txt", "a");
+
+        addToIndex(f.db.get(), {f.root.string()});
+        addToIndex(f.db.get(), {(f.root / ".").string()});
+
+        EXPECT_EQ(f.hashOf(""), "<missing>");
+        EXPECT_NE(f.hashOf("dir/a.txt"), "<missing>");
+        EXPECT_EQ(f.hashOf("dir"), "");
+    }
+
+    TEST(IndexChange, rootEntryIsRemovedOnOpen)
+    {
+        Fixture f(TEST_NAME);
+        writeFile(f.root / "a.txt", "a");
+        f.add("a.txt");
+        f.db->exec("INSERT INTO entries (path, hash, type, properties, mtime, size, depth) "
+                   "VALUES ('', '', 7, '{}', 0, 0, 0)");
+        ASSERT_EQ(f.hashOf(""), "");
+        f.db->close();
+        DatabasePool::instance().releaseConnections(f.root);
+
+        f.db = ddb::open(f.root.string(), false);
+        EXPECT_EQ(f.hashOf(""), "<missing>");
+        EXPECT_NE(f.hashOf("a.txt"), "<missing>");
     }
 
 } // namespace

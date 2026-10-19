@@ -233,6 +233,22 @@ END;
         // etc.
     }
 
+    void Database::removeRootEntry()
+    {
+        try
+        {
+            if (!this->query("SELECT 1 FROM entries WHERE path = ''")->fetch())
+                return;
+
+            this->exec("DELETE FROM entries WHERE path = ''");
+            LOGD << "Removed the root entry of " << this->getOpenFile();
+        }
+        catch (const std::exception &e)
+        {
+            LOGD << "Cannot remove the root entry of " << this->getOpenFile() << ": " << e.what();
+        }
+    }
+
     json Database::getProperties() const
     {
         json j;

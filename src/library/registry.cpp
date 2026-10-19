@@ -452,6 +452,10 @@ std::vector<Conflict> applyDelta(const Delta& d,
         std::vector<std::string> indexedRemovals;
         std::vector<const RemoveAction*> fileRemovals;
         for (const auto& rem : d.removes) {
+            // The dataset root (older versions indexed it as "") is never removed
+            if (rem.path.empty())
+                continue;
+
             // rem.hash is the hash in the destination stamp
             bool indexed;
             if (!canApply(destination, rem.path, rem.hash, rem.hash, mergeStrategy,
@@ -482,6 +486,9 @@ std::vector<Conflict> applyDelta(const Delta& d,
         // copied: the source folder is a temporary folder on the same volume.
         std::vector<KnownFile> addedFiles;
         for (const auto& add : d.adds) {
+            if (add.path.empty())
+                continue;
+
             bool indexed;
             if (!canApply(destination, add.path, add.hash, add.baseHash, mergeStrategy,
                           ConflictType::BothModified, conflicts, indexed))

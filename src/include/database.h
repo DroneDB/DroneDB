@@ -50,6 +50,9 @@ namespace ddb
     DDB_DLL void afterOpen() override;
     DDB_DLL Database &createTables();
     DDB_DLL void ensureSchemaConsistency();
+    /// Removes the entry with an empty path that older versions wrote for the dataset root
+    /// (`ddb add .`). Best effort: an index that cannot be written keeps it.
+    DDB_DLL void removeRootEntry();
 
     DDB_DLL json getProperties() const;
     DDB_DLL json getStamp() const;

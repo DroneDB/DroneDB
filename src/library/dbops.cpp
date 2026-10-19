@@ -82,6 +82,7 @@ static std::mutex g_templateMutex;
                               dbasePath.string() + ")");
 
         db->ensureSchemaConsistency();
+        db->removeRootEntry();
         pool.adopt(dbasePath, *db);
 
         return db;
@@ -177,7 +178,9 @@ static std::mutex g_templateMutex;
                     }
                 }
 
-                directories[p.string()] = true;
+                // The dataset root is not an entry (`ddb add .` used to index it as "")
+                if (rootDir.isParentOf(p))
+                    directories[p.string()] = true;
                 if (includeDirs)
                 {
                     while (p.has_parent_path() &&

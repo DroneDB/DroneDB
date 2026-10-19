@@ -146,6 +146,15 @@ namespace
         EXPECT_FALSE(json(d)["adds"][1].contains("baseHash"));
     }
 
+    TEST(Delta, rootEntryIsIgnored)
+    {
+        // Older versions indexed the dataset root (`ddb add .`) with an empty path
+        const auto src = makeStamp({{"a.jpg", "h1"}});
+        const auto dst = makeStamp({{"", ""}, {"a.jpg", "h1"}});
+        EXPECT_TRUE(getDelta(src, dst).empty());
+        EXPECT_TRUE(getDelta(dst, src).empty());
+    }
+
     TEST(DDB03_Delta, matchesReferenceImplementation)
     {
         std::mt19937 rng(20261019);

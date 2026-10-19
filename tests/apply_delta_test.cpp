@@ -396,6 +396,21 @@ namespace
         EXPECT_EQ(readFile(f.root / "old.txt"), "old");
     }
 
+    TEST(ApplyDelta, rootEntryIsNeverRemoved)
+    {
+        // A stamp from an older version may list the root as "": removing it must not
+        // delete the dataset folder
+        Fixture f(TEST_NAME);
+        Delta d;
+        d.removes.push_back(RemoveAction("", ""));
+        d.adds.push_back(AddAction("", ""));
+
+        EXPECT_TRUE(f.apply(d).empty());
+        EXPECT_TRUE(fs::exists(f.root / "keep.txt"));
+        EXPECT_TRUE(fs::exists(f.root / DDB_FOLDER));
+        EXPECT_EQ(f.hashOf(""), "<missing>");
+    }
+
     TEST(DDB04_ApplyDelta, cApiVerifiesHashes)
     {
         Fixture f(TEST_NAME);
