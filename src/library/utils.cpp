@@ -367,7 +367,7 @@ DDB_DLL bool isValidNonEmptyStringParam(const char* str) {
     return str != nullptr && strlen(str) > 0;
 }
 
-DDB_DLL std::vector<ddb::EntryType> parseEntryTypeList(const char* types) {
+DDB_DLL std::vector<ddb::EntryType> parseEntryTypeList(const char* types, bool allowDirectory) {
     std::vector<ddb::EntryType> typeFilter;
 
     if (types == nullptr || strlen(types) == 0)
@@ -382,12 +382,45 @@ DDB_DLL std::vector<ddb::EntryType> parseEntryTypeList(const char* types) {
         ddb::EntryType t = ddb::typeFromHuman(item);
         if (t == ddb::EntryType::Undefined)
             throw InvalidArgsException("Unknown entry type: " + item);
-        if (t == ddb::EntryType::Directory)
+        if (t == ddb::EntryType::Directory && !allowDirectory)
             throw InvalidArgsException("Cannot rescan directories");
         typeFilter.push_back(t);
     }
 
     return typeFilter;
+}
+
+DDB_DLL bool matchesNamePattern(const std::string& name, const std::string& pattern) {
+    const auto same = [](char a, char b) {
+        return std::tolower(static_cast<unsigned char>(a)) == std::tolower(static_cast<unsigned char>(b));
+    };
+
+    // Greedy match; on a mismatch the last '*' takes one more character
+    size_t n = 0, p = 0;
+    size_t starP = std::string::npos, starN = 0;
+    while (n < name.size()) {
+        if (p < pattern.size() && pattern[p] == '*') {
+            starP = p++;
+            starN = n;
+        } else if (p < pattern.size() && pattern[p] == '?') {
+            // One character: a UTF-8 lead byte and its continuation bytes
+            p++;
+            n++;
+            while (n < name.size() && (static_cast<unsigned char>(name[n]) & 0xC0) == 0x80)
+                n++;
+        } else if (p < pattern.size() && same(pattern[p], name[n])) {
+            p++;
+            n++;
+        } else if (starP != std::string::npos) {
+            p = starP + 1;
+            n = ++starN;
+        } else {
+            return false;
+        }
+    }
+    while (p < pattern.size() && pattern[p] == '*')
+        p++;
+    return p == pattern.size();
 }
 
 DDB_DLL std::vector<std::string> parseExtensionList(const char* extensions) {

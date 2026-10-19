@@ -572,6 +572,32 @@ DDBErr DDBList(const char* ddbPath,
     DDB_C_END
 }
 
+DDBErr DDBListEntries(const char* ddbPath, const char* folder, bool recursive, const char* namePattern,
+                      const char* types, bool withDetails, char** output) {
+    DDB_C_BEGIN
+
+    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
+        throw InvalidArgsException("No directory provided");
+
+    if (output == nullptr)
+        throw InvalidArgsException("Output pointer is null");
+
+    EntryQuery query;
+    query.folder = folder != nullptr ? folder : "";
+    query.recursive = recursive;
+    query.namePattern = namePattern != nullptr ? namePattern : "";
+    query.types = utils::parseEntryTypeList(types, /*allowDirectory=*/true);
+    query.withDetails = withDetails;
+
+    const auto db = ddb::open(std::string(ddbPath), false);
+
+    std::ostringstream ss;
+    writeEntries(ss, listEntries(db.get(), query), "json");
+    utils::copyToPtr(ss.str(), output);
+
+    DDB_C_END
+}
+
 DDBErr DDBSearch(const char* ddbPath, const char* query, char** output, const char* format) {
     DDB_C_BEGIN
 

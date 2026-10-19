@@ -170,6 +170,21 @@ extern "C"
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBList(const char *ddbPath, const char **paths, int numPaths, char **output, const char *format, bool recursive = false, int maxRecursionDepth = 0);
 
+    /** List the entries below a folder that match a file name pattern and entry types. The
+     * filters run in the index query, so non-matching entries are never read or serialized.
+     * @param ddbPath path to a DroneDB database (parent of ".ddb")
+     * @param folder dataset-relative folder, "" for the dataset root; a file selects itself
+     * @param recursive the whole subtree of the folder (true) or its children only (false)
+     * @param namePattern file name pattern ('*' any characters, '?' one character, ASCII letters
+     *                    in any case), or "" for every name
+     * @param types comma-separated entry types (see DDBRescan, "directory" allowed), or "" for all
+     * @param withDetails true: full entries as DDBList's "json" format; false: path, hash, type,
+     *                    mtime, size and depth only
+     * @param output pointer to C-string where to store the JSON array, sorted by path
+     * @return DDBERR_NONE on success, an error otherwise */
+    DDB_DLL DDBErr DDBListEntries(const char *ddbPath, const char *folder, bool recursive, const char *namePattern,
+                                  const char *types, bool withDetails, char **output);
+
     /** Search files inside index
      * @param ddbPath path to a DroneDB database (parent of ".ddb")
      * @param query search string

@@ -86,6 +86,32 @@ namespace ddb
     DDB_DLL PathPredicate buildPathPredicate(const std::string &query, bool isFolder, const std::string &column = "path");
 
     DDB_DLL std::vector<Entry> getMatchingEntries(Database *db, const fs::path &path, int maxRecursionDepth = 0, bool isFolder = false);
+
+    /**
+     * Which entries listEntries() returns. Every filter is applied by the index query, so
+     * the entries that do not match are never read.
+     */
+    struct EntryQuery
+    {
+        // Dataset-relative folder ("" = the dataset root). A file selects itself.
+        std::string folder;
+        // The whole subtree of the folder, or its children only
+        bool recursive = true;
+        // File name pattern: '*' matches any characters, '?' one character; ASCII letters
+        // match regardless of case. Empty matches every name.
+        std::string namePattern;
+        // Entry types to return; empty returns every type
+        std::vector<EntryType> types;
+        // With properties, geometries and meta; false reads path, hash, type, mtime, size
+        // and depth only
+        bool withDetails = true;
+    };
+
+    // The entries selected by `query`, sorted by path
+    DDB_DLL std::vector<Entry> listEntries(Database *db, const EntryQuery &query);
+
+    // Writes entries in "text" (one path per line) or "json" (array of Entry::toJSON) format
+    DDB_DLL void writeEntries(std::ostream &out, const std::vector<Entry> &entries, const std::string &format);
     DDB_DLL void checkDeleteBuild(Database *db, const std::string &hash);
     DDB_DLL void checkDeleteMeta(Database *db, const std::string &path);
     DDB_DLL int deleteFromIndex(Database *db, const std::string &query, bool isFolder = false, RemoveCallback callback = nullptr);

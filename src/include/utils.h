@@ -185,8 +185,13 @@ DDB_DLL bool isValidNonEmptyStringParam(const char* str);
 
 // Parse a comma-separated list of entry type names into a vector of EntryType
 // Returns an empty vector if types is null or empty
-// Throws InvalidArgsException if an unknown type is found or if Directory type is specified
-DDB_DLL std::vector<ddb::EntryType> parseEntryTypeList(const char* types);
+// Throws InvalidArgsException if an unknown type is found, or if Directory is specified and
+// allowDirectory is false (rescans skip directories)
+DDB_DLL std::vector<ddb::EntryType> parseEntryTypeList(const char* types, bool allowDirectory = false);
+
+// True if name matches pattern, where '*' matches any characters (also none) and '?' one
+// (UTF-8) character. ASCII letters match regardless of case.
+DDB_DLL bool matchesNamePattern(const std::string& name, const std::string& pattern);
 
 // Parse a comma-separated list of file extensions ("dwg,.DXF,copc.laz") into
 // lowercase extensions without the leading dot. Empty items are skipped.
