@@ -411,6 +411,23 @@ namespace
         EXPECT_EQ(f.hashOf(""), "<missing>");
     }
 
+    TEST(ApplyDelta, pathsOutsideTheDatasetAreRejected)
+    {
+        Fixture f(TEST_NAME);
+        for (const std::string bad : {"../outside.txt", "dir/../../outside.txt", "/etc/passwd"})
+        {
+            Delta d;
+            d.removes.push_back(RemoveAction("keep.txt", f.hashOf("keep.txt")));
+            d.removes.push_back(RemoveAction(bad, "h"));
+            EXPECT_THROW(f.apply(d, MergeStrategy::KeepTheirs, false), InvalidArgsException) << bad;
+            EXPECT_TRUE(fs::exists(f.root / "keep.txt")) << "nothing changes";
+
+            Delta a;
+            a.adds.push_back(AddAction(bad, "h"));
+            EXPECT_THROW(f.apply(a, MergeStrategy::KeepTheirs, false), InvalidArgsException) << bad;
+        }
+    }
+
     TEST(DDB04_ApplyDelta, cApiVerifiesHashes)
     {
         Fixture f(TEST_NAME);

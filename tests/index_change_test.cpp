@@ -8,7 +8,8 @@
 //    edit made in the same second as the previous add (same size); rows written with whole
 //    seconds (older versions) are still compared to the second, so nothing is re-hashed;
 //  - the dataset root is never an entry (`ddb add .` used to index it with an empty path),
-//    and such a row is removed when the index is opened.
+//    and such a row is removed when the index is opened;
+//  - "/data/ds" is not a parent of "/data/ds2".
 
 #include <fstream>
 #include <thread>
@@ -18,6 +19,7 @@
 #include "databasepool.h"
 #include "dbops.h"
 #include "ddb.h"
+#include "exceptions.h"
 #include "mio.h"
 #include "status.h"
 #include "test.h"
@@ -184,4 +186,22 @@ namespace
         EXPECT_NE(f.hashOf("a.txt"), "<missing>");
     }
 
+    TEST(IndexChange, parentNeedsASeparator)
+    {
+        TestArea ta(TEST_NAME, true);
+        const auto base = ta.getFolder("x");
+        fs::create_directories(base / "ds");
+        fs::create_directories(base / "ds2");
+
+        EXPECT_TRUE(io::Path(base / "ds").isParentOf(base / "ds" / "a.txt"));
+        EXPECT_FALSE(io::Path(base / "ds").isParentOf(base / "ds2" / "a.txt"));
+        EXPECT_FALSE(io::Path(base / "ds").isParentOf(base / "ds"));
+        EXPECT_TRUE(io::Path("/").isParentOf("/tmp"));
+
+        // A path next to the dataset is not inside it
+        initIndex((base / "ds").string());
+        const auto db = ddb::open((base / "ds").string(), false);
+        writeFile(base / "ds2" / "a.txt", "a");
+        EXPECT_THROW(addToIndex(db.get(), {(base / "ds2" / "a.txt").string()}), FSException);
+    }
 } // namespace

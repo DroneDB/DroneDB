@@ -255,30 +255,39 @@ namespace ddb
 #endif
         }
 
+        namespace
+        {
+            // Absolute, normalized, without a trailing separator
+            std::string normalizedAbsolute(const fs::path &path)
+            {
+                std::string s = fs::weakly_canonical(fs::absolute(path)).string();
+                if (s.length() > 1 && s.back() == fs::path::preferred_separator)
+                    s.pop_back();
+                return s;
+            }
+
+            // Whether normalized `child` is below normalized `parent` (prefixed by it AND followed
+            // by a separator: /foo is not a parent of /foobar)
+            bool isBelow(const std::string &parent, const std::string &child)
+            {
+                return child.size() > parent.size() && child.rfind(parent, 0) == 0 &&
+                       (parent.back() == fs::path::preferred_separator ||
+                        child[parent.size()] == fs::path::preferred_separator);
+            }
+        }
+
         bool Path::hasChildren(const std::vector<std::string> &childPaths)
         {
             try
             {
-                std::string absP = fs::weakly_canonical(fs::absolute(p)).string();
-                if (absP.length() > 1 && absP.back() == fs::path::preferred_separator)
-                    absP.pop_back();
+                const std::string absP = normalizedAbsolute(p);
 
                 for (auto &cp : childPaths)
                 {
-                    std::string absC = fs::weakly_canonical(fs::absolute(cp)).string();
-                    if (absC.length() > 1 && absC.back() == fs::path::preferred_separator)
-                        absC.pop_back();
+                    const std::string absC = normalizedAbsolute(cp);
 
                     // A path is contained within itself (e.g. `ddb add .` from project root).
-                    if (absC == absP)
-                        continue;
-
-                    // Must be prefixed by the parent path AND followed by a path
-                    // separator (avoid false prefix matches like /foo vs /foobar).
-                    if (absC.rfind(absP, 0) != 0)
-                        return false;
-                    if (absC.length() > absP.length() &&
-                        absC[absP.length()] != fs::path::preferred_separator)
+                    if (absC != absP && !isBelow(absP, absC))
                         return false;
                 }
 
@@ -295,13 +304,7 @@ namespace ddb
         {
             try
             {
-                std::string absP = fs::weakly_canonical(fs::absolute(p)).string();
-                if (absP.length() > 1 && absP.back() == fs::path::preferred_separator)
-                    absP.pop_back();
-                std::string absC = fs::weakly_canonical(fs::absolute(childPath)).string();
-                if (absC.length() > 1 && absC.back() == fs::path::preferred_separator)
-                    absC.pop_back();
-                return absC.rfind(absP, 0) == 0 && absP != absC;
+                return isBelow(normalizedAbsolute(p), normalizedAbsolute(childPath));
             }
             catch (const fs::filesystem_error &e)
             {

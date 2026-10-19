@@ -402,6 +402,20 @@ void verifyDeltaHashes(const Delta& d, const fs::path& sourcePath) {
         std::rethrow_exception(error);
 }
 
+// A delta path must name something inside the dataset
+void checkDeltaPaths(const Delta& d) {
+    const auto check = [](const std::string& path) {
+        const fs::path p(path);
+        const bool escapes = std::any_of(p.begin(), p.end(), [](const fs::path& part) { return part == ".."; });
+        if (p.is_absolute() || p.has_root_name() || p.has_root_directory() || escapes)
+            throw InvalidArgsException("Invalid path in delta: " + path);
+    };
+    for (const auto& add : d.adds)
+        check(add.path);
+    for (const auto& rem : d.removes)
+        check(rem.path);
+}
+
 // Whether a delta entry can be applied over the destination's version of `path`: there is
 // none, it already matches, or it did not change since the stamp the delta was computed
 // from (`baseHash`). Otherwise both sides changed it: the merge strategy decides.
@@ -445,6 +459,7 @@ std::vector<Conflict> applyDelta(const Delta& d,
     if (d.adds.size() > 0 || d.removes.size() > 0) {
         const fs::path destPath = destination->rootDirectory();
 
+        checkDeltaPaths(d);
         if (verifyHashes)
             verifyDeltaHashes(d, sourcePath);
 
