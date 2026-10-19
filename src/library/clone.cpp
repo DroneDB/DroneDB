@@ -39,6 +39,10 @@ namespace ddb
 
         try
         {
+            // Saved credentials (ddb login): without them a private dataset answers 401
+            if (!ac.empty() && reg.login(ac.username, ac.password).length() <= 0)
+                throw AuthException("Cannot authenticate with " + reg.getUrl());
+
             reg.clone(tag.organization, tag.dataset, folder, std::cout);
         }
         catch (const AuthException &)

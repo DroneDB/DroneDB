@@ -221,13 +221,12 @@ json Registry::getStamp(const std::string& organization, const std::string& data
     if (res.status_code != 200)
         this->handleError(res);
 
-    json stamp = res.text;
-
-    // Quick sanity check<< ", diff = " << now - this->tokenExpiration;
-    if (stamp.contains("checksum")) {
+    // Quick sanity check (a discarded parse is not an object)
+    json stamp = json::parse(res.text, nullptr, false);
+    if (stamp.is_object() && stamp.contains("checksum")) {
         return stamp;
     } else {
-        throw RegistryException("Invalid stamp: " + stamp.dump());
+        throw RegistryException("Invalid stamp: " + res.text);
     }
 }
 
@@ -345,13 +344,12 @@ json Registry::getMetaDump(const std::string& organization,
     if (res.status_code != 200)
         this->handleError(res);
 
-    json metaDump = res.text;
-
-    // Quick sanity check
+    // Quick sanity check (a discarded parse is not an array)
+    json metaDump = json::parse(res.text, nullptr, false);
     if (metaDump.is_array()) {
         return metaDump;
     } else {
-        throw RegistryException("Invalid meta dump: " + metaDump.dump());
+        throw RegistryException("Invalid meta dump: " + res.text);
     }
 }
 
