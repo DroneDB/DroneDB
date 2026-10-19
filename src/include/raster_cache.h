@@ -22,16 +22,22 @@ namespace ddb
 {
     class Tiler;
 
-    /// A raster opened read-only with GDAL, closed when destroyed
-    class RasterDataset
+    /// A raster or vector file opened read-only with GDAL, closed when destroyed
+    class OpenedDataset
     {
         GDALDatasetH handle_ = nullptr;
 
     public:
-        DDB_DLL explicit RasterDataset(const std::string &path);
-        DDB_DLL ~RasterDataset();
-        RasterDataset(const RasterDataset &) = delete;
-        RasterDataset &operator=(const RasterDataset &) = delete;
+        enum class Kind
+        {
+            Raster,
+            Vector
+        };
+
+        DDB_DLL explicit OpenedDataset(const std::string &path, Kind kind = Kind::Raster);
+        DDB_DLL ~OpenedDataset();
+        OpenedDataset(const OpenedDataset &) = delete;
+        OpenedDataset &operator=(const OpenedDataset &) = delete;
 
         GDALDatasetH handle() const { return handle_; }
     };
@@ -48,7 +54,8 @@ namespace ddb
 
     /**
      * Process-wide cache of prepared rasters: tilers (GDALTiler, PointCloudTiler) and
-     * read-only GDAL datasets, keyed by file and kept idle between calls.
+     * read-only GDAL datasets (rasters, and the vector GeoPackages that WFS/OGC API
+     * Features queries read), keyed by file and kept idle between calls.
      *
      * A tile request on a raster seen recently skips the dataset open, the SRS parsing,
      * the warped VRT and the COPC header read, and keeps GDAL's block cache warm. Objects
@@ -142,7 +149,11 @@ namespace ddb
         DDB_DLL Lease<Tiler> acquireTiler(const TilerKey &key, const TilerFactory &create);
 
         /// The raster at path opened read-only: an idle handle when available
-        DDB_DLL Lease<RasterDataset> acquireDataset(const std::string &path);
+        DDB_DLL Lease<OpenedDataset> acquireDataset(const std::string &path);
+
+        /// The vector file at path opened read-only: an idle handle when available. The
+        /// caller must clear the filters it sets on its layers before giving it back.
+        DDB_DLL Lease<OpenedDataset> acquireVectorDataset(const std::string &path);
 
         /// Closes the idle instances of every file under path (a file, a build folder, a
         /// dataset folder). Returns how many were closed.
@@ -168,6 +179,7 @@ namespace ddb
 
         RasterCache();
 
+        Lease<OpenedDataset> acquireOpened(const std::string &file, OpenedDataset::Kind kind);
         std::shared_ptr<void> take(const std::string &key, const std::string &version);
         DDB_DLL void giveBack(const std::string &key, const std::string &path, const std::string &version,
                               std::shared_ptr<void> object);
@@ -183,7 +195,7 @@ namespace ddb
     };
 
     using TilerLease = RasterCache::Lease<Tiler>;
-    using DatasetLease = RasterCache::Lease<RasterDataset>;
+    using DatasetLease = RasterCache::Lease<OpenedDataset>;
 }
 
 #endif // RASTER_CACHE_H

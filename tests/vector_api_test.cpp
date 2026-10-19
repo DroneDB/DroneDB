@@ -6,8 +6,16 @@
 #include "test.h"
 #include "testarea.h"
 #include "vector.h"
+#include "vector_query.h"
+#include "raster_cache.h"
 #include "fs.h"
+#include "gdal_inc.h"
+#include "ogrsf_frmts.h"
 #include <nlohmann/json.hpp>
+#include <array>
+#include <functional>
+#include <regex>
+#include <set>
 
 namespace
 {
@@ -171,6 +179,170 @@ namespace
 
         err = DDBDescribeVector("does-not-exist.gpkg", nullptr, &out);
         EXPECT_NE(err, DDBERR_NONE);
+    }
+
+    // ---- REG-11: stable feature ids, fid lookups, counts, bbox with paging -----------------
+
+    // Feature ids in a GML response, in order
+    std::vector<std::string> gmlIds(const std::string &gml)
+    {
+        std::vector<std::string> ids;
+        static const std::regex featureId(R"re(<ogr:\w+ gml:id="([^"]+)")re");
+        for (std::sregex_iterator it(gml.begin(), gml.end(), featureId), end; it != end; ++it)
+            ids.push_back((*it)[1]);
+        return ids;
+    }
+
+    std::string query(const fs::path &gpkg, const ddb::VectorQuery &q)
+    {
+        return ddb::queryVector(gpkg.string(), q);
+    }
+
+    ddb::VectorQuery gmlQuery(int maxFeatures, int startIndex)
+    {
+        ddb::VectorQuery q;
+        q.maxFeatures = maxFeatures;
+        q.startIndex = startIndex;
+        q.outputFormat = "gml";
+        return q;
+    }
+
+    // The bbox of one feature, in EPSG:4326
+    std::array<double, 4> featureBbox(const fs::path &gpkg, int64_t fid)
+    {
+        ddb::VectorQuery q;
+        q.fids = {fid};
+        const auto fc = json::parse(query(gpkg, q));
+        double minX = 180, minY = 90, maxX = -180, maxY = -90;
+        std::function<void(const json &)> visit = [&](const json &c)
+        {
+            if (c.is_array() && !c.empty() && c[0].is_number())
+            {
+                minX = std::min(minX, c[0].get<double>());
+                maxX = std::max(maxX, c[0].get<double>());
+                minY = std::min(minY, c[1].get<double>());
+                maxY = std::max(maxY, c[1].get<double>());
+            }
+            else if (c.is_array())
+                for (const auto &child : c)
+                    visit(child);
+        };
+        visit(fc["features"][0]["geometry"]["coordinates"]);
+        return {minX, minY, maxX, maxY};
+    }
+
+    TEST(REG11_VectorQuery, featureIdsAreTheFidsInEveryPage)
+    {
+        const fs::path &gpkg = sharedTest2GeoJsonGpkg();
+
+        const auto all = gmlIds(query(gpkg, gmlQuery(10, 0)));
+        ASSERT_EQ(all.size(), 4u);
+        EXPECT_EQ(all, (std::vector<std::string>{"test.1", "test.2", "test.3", "test.4"}));
+
+        // Pages (the second one goes through SQL) keep the ids and the layer name
+        EXPECT_EQ(gmlIds(query(gpkg, gmlQuery(2, 0))), (std::vector<std::string>{"test.1", "test.2"}));
+        EXPECT_EQ(gmlIds(query(gpkg, gmlQuery(2, 2))), (std::vector<std::string>{"test.3", "test.4"}));
+
+        // GeoJSON features carry the fid as id
+        ddb::VectorQuery q;
+        q.startIndex = 3;
+        const auto fc = json::parse(query(gpkg, q));
+        ASSERT_EQ(fc["features"].size(), 1u);
+        EXPECT_EQ(fc["features"][0]["id"], 4);
+    }
+
+    TEST(REG11_VectorQuery, fidsSelectFeaturesByPrimaryKey)
+    {
+        const fs::path &gpkg = sharedTest2GeoJsonGpkg();
+
+        auto q = gmlQuery(10, 0);
+        q.fids = {4, 2, 99};
+        EXPECT_EQ(gmlIds(query(gpkg, q)), (std::vector<std::string>{"test.2", "test.4"}));
+
+        q.startIndex = 1;
+        EXPECT_EQ(gmlIds(query(gpkg, q)), (std::vector<std::string>{"test.4"}));
+
+        q.fids = {99};
+        q.startIndex = 0;
+        EXPECT_TRUE(gmlIds(query(gpkg, q)).empty());
+
+        // C API
+        const long long fids[] = {3};
+        char *out = nullptr;
+        ASSERT_EQ(DDBQueryVectorEx(gpkg.string().c_str(), nullptr, nullptr, nullptr, fids, 1, 10, 0,
+                                   "application/gml+xml", &out),
+                  DDBERR_NONE)
+            << DDBGetLastError();
+        EXPECT_EQ(gmlIds(out), (std::vector<std::string>{"test.3"}));
+        DDBFree(out);
+        EXPECT_NE(DDBQueryVectorEx(gpkg.string().c_str(), nullptr, nullptr, nullptr, nullptr, 2, 10, 0,
+                                   "application/json", &out),
+                  DDBERR_NONE);
+    }
+
+    TEST(REG11_VectorQuery, countsMatchTheQueries)
+    {
+        const fs::path &gpkg = sharedTest2GeoJsonGpkg();
+
+        ddb::VectorQuery q;
+        EXPECT_EQ(ddb::countVectorFeatures(gpkg.string(), q), 4);
+        q.fids = {1, 3, 99};
+        EXPECT_EQ(ddb::countVectorFeatures(gpkg.string(), q), 2);
+
+        q = {};
+        q.bbox = featureBbox(gpkg, 2);
+        const auto inBbox = gmlIds(query(gpkg, [&] { auto g = gmlQuery(10, 0); g.bbox = q.bbox; return g; }()));
+        ASSERT_FALSE(inBbox.empty());
+        EXPECT_NE(std::find(inBbox.begin(), inBbox.end(), "test.2"), inBbox.end());
+        EXPECT_EQ(ddb::countVectorFeatures(gpkg.string(), q), static_cast<int64_t>(inBbox.size()));
+
+        long long count = -1;
+        const double bbox[] = {(*q.bbox)[0], (*q.bbox)[1], (*q.bbox)[2], (*q.bbox)[3]};
+        ASSERT_EQ(DDBCountVector(gpkg.string().c_str(), nullptr, bbox, "EPSG:4326", nullptr, 0, &count), DDBERR_NONE);
+        EXPECT_EQ(count, static_cast<long long>(inBbox.size()));
+    }
+
+    // The bbox used to be dropped for pages after the first (startIndex > 0 goes through SQL)
+    TEST(REG11_VectorQuery, bboxAppliesToLaterPages)
+    {
+        const fs::path &gpkg = sharedTest2GeoJsonGpkg();
+
+        auto first = gmlQuery(1, 0);
+        first.bbox = featureBbox(gpkg, 2);
+        const auto all = gmlIds(query(gpkg, [&] { auto g = first; g.maxFeatures = 10; return g; }()));
+        ASSERT_LT(all.size(), 4u) << "the bbox must select a subset";
+
+        std::vector<std::string> paged;
+        for (int start = 0; start < 6; start++)
+        {
+            auto page = first;
+            page.startIndex = start;
+            for (const auto &id : gmlIds(query(gpkg, page)))
+                paged.push_back(id);
+        }
+        EXPECT_EQ(paged, all);
+    }
+
+    // Queries reuse an open dataset, and the filters of one never leak into the next
+    TEST(REG11_VectorQuery, reusedDatasetsStartWithoutFilters)
+    {
+        const fs::path &gpkg = sharedTest2GeoJsonGpkg();
+        auto &cache = ddb::RasterCache::instance();
+        cache.release(gpkg);
+        const auto before = cache.stats();
+
+        ddb::VectorQuery filtered;
+        filtered.bbox = featureBbox(gpkg, 2);
+        filtered.fids = {2};
+        EXPECT_EQ(ddb::countVectorFeatures(gpkg.string(), filtered), 1);
+        EXPECT_EQ(gmlIds(query(gpkg, [&] { auto g = gmlQuery(10, 0); g.fids = {2}; g.bbox = filtered.bbox; return g; }())),
+                  (std::vector<std::string>{"test.2"}));
+
+        EXPECT_EQ(ddb::countVectorFeatures(gpkg.string(), {}), 4);
+        EXPECT_EQ(gmlIds(query(gpkg, gmlQuery(10, 0))).size(), 4u);
+
+        const auto after = cache.stats();
+        EXPECT_GE(after.reused - before.reused, 3u) << "one open, then idle reuse";
     }
 
     TEST(testVectorApi, FreeIsNoopOnNull)

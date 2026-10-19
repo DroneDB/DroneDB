@@ -4,11 +4,37 @@
 #ifndef VECTOR_QUERY_H
 #define VECTOR_QUERY_H
 
+#include <array>
+#include <cstdint>
+#include <optional>
 #include <string>
+#include <vector>
 #include "ddb_export.h"
 
 namespace ddb
 {
+    /** Which features of a vector layer queryVector() / countVectorFeatures() select. */
+    struct VectorQuery
+    {
+        std::string layerName;                      // empty = first layer
+        std::optional<std::array<double, 4>> bbox;  // [minX, minY, maxX, maxY]; none = no filter
+        std::string bboxSrs;                        // empty = "EPSG:4326"
+        std::vector<int64_t> fids;                  // feature ids; empty = every feature
+        int maxFeatures = 0;                        // 0 = unbounded (query only)
+        int startIndex = 0;                         // 0-based offset (query only)
+        std::string outputFormat;                   // "geojson" (default, also "json") | "gml" (query only)
+    };
+
+    /**
+     * Features of a vector layer, reprojected to EPSG:4326 when the layer has an SRS.
+     * Feature ids are the source FIDs (GML: gml:id="<layer>.<fid>"), so the same feature
+     * keeps its id in every page and in id lookups. With fids set, a GeoPackage reads
+     * them by primary key.
+     */
+    DDB_DLL std::string queryVector(const std::string &vectorPath, const VectorQuery &query);
+
+    /** Number of features matching query's layer, bbox and fids (paging is ignored). */
+    DDB_DLL int64_t countVectorFeatures(const std::string &vectorPath, const VectorQuery &query);
     /**
      * Query a vector dataset, returning features as a string.
      *

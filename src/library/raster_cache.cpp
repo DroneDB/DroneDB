@@ -41,14 +41,16 @@ namespace ddb
         }
     }
 
-    RasterDataset::RasterDataset(const std::string &path)
+    OpenedDataset::OpenedDataset(const std::string &path, Kind kind)
     {
-        handle_ = GDALOpenEx(path.c_str(), GDAL_OF_RASTER | GDAL_OF_READONLY, nullptr, nullptr, nullptr);
+        const bool raster = kind == Kind::Raster;
+        handle_ = GDALOpenEx(path.c_str(), (raster ? GDAL_OF_RASTER : GDAL_OF_VECTOR) | GDAL_OF_READONLY, nullptr,
+                             nullptr, nullptr);
         if (handle_ == nullptr)
-            throw GDALException("Cannot open raster: " + path);
+            throw GDALException(std::string(raster ? "Cannot open raster: " : "Cannot open vector: ") + path);
     }
 
-    RasterDataset::~RasterDataset()
+    OpenedDataset::~OpenedDataset()
     {
         if (handle_ != nullptr)
             GDALClose(handle_);
@@ -92,23 +94,33 @@ namespace ddb
         return Lease<Tiler>(this, k, path, version, std::move(tiler));
     }
 
-    RasterCache::Lease<RasterDataset> RasterCache::acquireDataset(const std::string &rasterPath)
+    RasterCache::Lease<OpenedDataset> RasterCache::acquireDataset(const std::string &rasterPath)
     {
-        const auto version = fileVersion(rasterPath);
+        return acquireOpened(rasterPath, OpenedDataset::Kind::Raster);
+    }
+
+    RasterCache::Lease<OpenedDataset> RasterCache::acquireVectorDataset(const std::string &vectorPath)
+    {
+        return acquireOpened(vectorPath, OpenedDataset::Kind::Vector);
+    }
+
+    RasterCache::Lease<OpenedDataset> RasterCache::acquireOpened(const std::string &file, OpenedDataset::Kind kind)
+    {
+        const auto version = fileVersion(file);
         if (version.empty())
-            return Lease<RasterDataset>(nullptr, "", "", "", std::make_shared<RasterDataset>(rasterPath));
+            return Lease<OpenedDataset>(nullptr, "", "", "", std::make_shared<OpenedDataset>(file, kind));
 
-        const auto path = cacheKeyPath(rasterPath);
-        const auto k = "dataset|" + path;
+        const auto path = cacheKeyPath(file);
+        const auto k = (kind == OpenedDataset::Kind::Raster ? "dataset|" : "vector|") + path;
         if (auto idle = take(k, version))
-            return Lease<RasterDataset>(this, k, path, version, std::static_pointer_cast<RasterDataset>(idle));
+            return Lease<OpenedDataset>(this, k, path, version, std::static_pointer_cast<OpenedDataset>(idle));
 
-        auto dataset = std::make_shared<RasterDataset>(rasterPath);
+        auto dataset = std::make_shared<OpenedDataset>(file, kind);
         {
             std::lock_guard<std::mutex> lock(mutex_);
             stats_.created++;
         }
-        return Lease<RasterDataset>(this, k, path, version, std::move(dataset));
+        return Lease<OpenedDataset>(this, k, path, version, std::move(dataset));
     }
 
     std::shared_ptr<void> RasterCache::take(const std::string &key, const std::string &version)

@@ -892,6 +892,40 @@ extern "C"
                                   const char *outputFormat,
                                   char **output);
 
+    /** DDBQueryVector restricted to the features with the given ids (WFS RESOURCEID,
+     * GetFeatureById, OGC API /items/{id}). Feature ids are the source FIDs: GML ids are
+     * "<layer>.<fid>" and GeoJSON features carry "id": fid, the same in every page.
+     *
+     * @param fids Feature ids to return, or NULL for every feature; a GeoPackage reads
+     *             them by primary key.
+     * @param numFids Number of ids in @p fids.
+     * Other parameters and the result: see DDBQueryVector. */
+    DDB_DLL DDBErr DDBQueryVectorEx(const char *vectorPath,
+                                    const char *layerName,
+                                    const double *bbox,
+                                    const char *bboxSrs,
+                                    const long long *fids,
+                                    int numFids,
+                                    int maxFeatures,
+                                    int startIndex,
+                                    const char *outputFormat,
+                                    char **output);
+
+    /** Count the features of a vector layer that match a bbox and feature ids (WFS
+     * numberMatched, OGC API numberMatched), without reading them when the format has a
+     * spatial index (GeoPackage).
+     *
+     * @param vectorPath, layerName, bbox, bboxSrs, fids, numFids See DDBQueryVectorEx.
+     * @param count Receives the number of matching features.
+     * @return DDBERR_NONE on success, an error otherwise. */
+    DDB_DLL DDBErr DDBCountVector(const char *vectorPath,
+                                  const char *layerName,
+                                  const double *bbox,
+                                  const char *bboxSrs,
+                                  const long long *fids,
+                                  int numFids,
+                                  long long *count);
+
     /** Describe a vector dataset (WFS DescribeFeatureType / OGC API collection).
      *
      * @param vectorPath Path to vector source.
