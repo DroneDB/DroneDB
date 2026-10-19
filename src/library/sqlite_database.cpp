@@ -36,6 +36,12 @@ namespace ddb
 
     SqliteDatabase &SqliteDatabase::close()
     {
+        closeConnection();
+        return *this;
+    }
+
+    void SqliteDatabase::closeConnection()
+    {
         if (db != nullptr)
         {
             LOGD << "Closing connection to " << openFile;
@@ -46,15 +52,16 @@ namespace ddb
                 LOGD << "sqlite3_close_v2 returned " << rc;
             db = nullptr;
         }
-
-        return *this;
     }
 
     SqliteDatabase &SqliteDatabase::reopen()
     {
         if (openFile.empty() || db == nullptr)
             throw DBException("Cannot reopen unopened database");
-        return this->close().open(openFile);
+        // A new connection, never one kept by close(): reopen() is used to read a schema
+        // changed through writable_schema, which an existing connection does not reparse
+        closeConnection();
+        return this->open(openFile);
     }
 
     SqliteDatabase &SqliteDatabase::exec(const std::string &sql)
@@ -165,7 +172,7 @@ namespace ddb
 
     SqliteDatabase::~SqliteDatabase()
     {
-        this->close();
+        this->closeConnection();
     }
 
 }

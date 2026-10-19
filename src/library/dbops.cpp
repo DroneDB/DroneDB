@@ -4,6 +4,7 @@
 #include "dbops.h"
 
 #include "build.h"
+#include "databasepool.h"
 #include "ddb.h"
 #include "status.h"
 
@@ -62,6 +63,13 @@ static std::mutex g_templateMutex;
         LOGD << dbasePath.string() + " exists";
 
         auto db = std::make_unique<Database>();
+
+        // An idle connection to this index skips the open, the SpatiaLite setup, the
+        // schema parse and the checks below (it passed them when it was opened)
+        auto &pool = DatabasePool::instance();
+        if (pool.acquire(dbasePath, *db))
+            return db;
+
         db->open(dbasePath.string());
 
         if (!db->tableExists("entries"))
@@ -69,6 +77,7 @@ static std::mutex g_templateMutex;
                               dbasePath.string() + ")");
 
         db->ensureSchemaConsistency();
+        pool.adopt(dbasePath, *db);
 
         return db;
     }

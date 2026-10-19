@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+#include <cstdlib>
 #include <iostream>
 #include "gdal_inc.h"
 
@@ -52,6 +53,14 @@ bool hasParam(int argc, char *argv[], const char *param)
 int main(int argc, char *argv[])
 {
     memcpy(argv[0], "ddb\0", 4);
+
+    // One command per process: open and close indexes directly (no idle connections)
+#ifdef _WIN32
+    if (std::getenv("DDB_DB_POOL_SIZE") == nullptr)
+        _putenv_s("DDB_DB_POOL_SIZE", "0");
+#else
+    setenv("DDB_DB_POOL_SIZE", "0", 0);
+#endif
     DDBRegisterProcess(hasParam(argc, argv, "--debug"));
     installCrashHandlers();
 

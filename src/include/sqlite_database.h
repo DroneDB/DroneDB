@@ -23,11 +23,14 @@ class SqliteDatabase {
   protected:
     sqlite3 *db;
     std::string openFile;
+
+    // Closes the SQLite connection (close() may be overridden to keep it)
+    DDB_DLL void closeConnection();
   public:
     DDB_DLL SqliteDatabase();
     DDB_DLL SqliteDatabase &open(const std::string &file);
     DDB_DLL virtual void afterOpen();
-    DDB_DLL SqliteDatabase &close();
+    DDB_DLL virtual SqliteDatabase &close();
     DDB_DLL SqliteDatabase &reopen();
     DDB_DLL SqliteDatabase &exec(const std::string &sql);
     DDB_DLL bool tableExists(const std::string &table);
@@ -44,7 +47,7 @@ class SqliteDatabase {
 
     DDB_DLL std::unique_ptr<Statement> query(const std::string &query) const;
 
-    DDB_DLL ~SqliteDatabase();
+    DDB_DLL virtual ~SqliteDatabase();
 };
 
 }

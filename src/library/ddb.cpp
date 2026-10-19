@@ -25,6 +25,7 @@
 #include "build.h"
 #include "build_budget.h"
 #include "database.h"
+#include "databasepool.h"
 #include "dbops.h"
 #include "delta.h"
 #include "entry.h"
@@ -474,6 +475,19 @@ DDBErr DDBInfo(const char** paths,
     std::ostringstream ss;
     info(input, ss, format, recursive, maxRecursionDepth, geometry, withHash, stopOnError);
     utils::copyToPtr(ss.str(), output);
+    DDB_C_END
+}
+
+DDBErr DDBReleaseConnections(const char* path, int* closed) {
+    DDB_C_BEGIN
+
+    if (utils::isNullOrEmptyOrWhitespace(path))
+        throw InvalidArgsException("No path provided");
+
+    const auto count = ddb::DatabasePool::instance().releaseConnections(fs::path(path));
+    if (closed != nullptr)
+        *closed = static_cast<int>(count);
+
     DDB_C_END
 }
 

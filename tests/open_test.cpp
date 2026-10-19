@@ -18,6 +18,7 @@
 #include "gtest/gtest.h"
 
 #include "database.h"
+#include "databasepool.h"
 #include "dbops.h"
 #include "ddb.h"
 #include "test.h"
@@ -104,7 +105,9 @@ namespace
             addToIndex(db.get(), {(root / "b.txt").string()});
         }
 
-        // Put the older file back next to the kept -wal/-shm
+        // Put the older file back next to the kept -wal/-shm. Overwriting an index file in
+        // place requires closing this process' idle connections to it first.
+        DatabasePool::instance().releaseConnections(root);
         fs::copy_file(snapshot, dbFile(root), fs::copy_options::overwrite_existing);
 
         auto db = ddb::open(root.string(), false);
@@ -136,6 +139,8 @@ namespace
     TEST(DDB02_Open, rollbackJournalDatabaseIsSwitchedToWal)
     {
         const auto root = makeIndex(TEST_NAME);
+        // Leaving WAL mode needs the only connection to the file
+        DatabasePool::instance().releaseConnections(root);
         {
             Database db;
             db.open(dbFile(root).string());

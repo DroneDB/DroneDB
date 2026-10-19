@@ -143,6 +143,14 @@ extern "C"
     DDB_DLL DDBErr DDBInfo(const char **paths, int numPaths, char **output, const char *format = "text", bool recursive = false, int maxRecursionDepth = 0,
                            const char *geometry = "auto", bool withHash = false, bool stopOnError = true);
 
+    /** Close the idle pooled index connections of the datasets under a folder.
+     *  Call it before deleting, moving or replacing a dataset folder (or its .ddb/dbase.sqlite)
+     *  from this process: idle connections keep the index files open.
+     * @param path dataset folder (parent of ".ddb"), or a folder that contains datasets
+     * @param closed out (optional): number of connections closed
+     * @return DDBERR_NONE on success, an error otherwise */
+    DDB_DLL DDBErr DDBReleaseConnections(const char *path, int *closed);
+
     /** Retrieve a single entry from the index, including its metadata
      * @param ddbPath path to a DroneDB database (parent of ".ddb")
      * @param path dataset-relative path of the entry (exact match, no wildcards)

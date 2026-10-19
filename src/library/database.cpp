@@ -4,6 +4,7 @@
 
 #include "database.h"
 #include "metamanager.h"
+#include "databasepool.h"
 
 #include <ctime>
 #include <fstream>
@@ -509,7 +510,6 @@ END;
 
     Database::~Database()
     {
-        // The SpatiaLite cache must outlive the connection that uses it
         this->close();
 
         if (metaManager != nullptr)
@@ -517,11 +517,68 @@ END;
             delete metaManager;
             metaManager = nullptr;
         }
+    }
+
+    SqliteDatabase &Database::close()
+    {
+        if (db != nullptr && pooled)
+        {
+            DatabasePool::instance().release(*this);
+            return *this;
+        }
+
+        // The SpatiaLite cache must outlive the connection that uses it
+        closeConnection();
         if (spatialiteCache != nullptr)
         {
             spatialite_cleanup_ex(spatialiteCache);
             spatialiteCache = nullptr;
         }
+        return *this;
+    }
+
+    void Database::attachPooled(sqlite3 *handle, void *cache, const std::string &file, const std::string &key,
+                                const std::string &fileId)
+    {
+        if (db != nullptr)
+            throw DBException("Can't attach a pooled connection to " + file + ", one is already open (" + openFile + ")");
+
+        db = handle;
+        openFile = file;
+        spatialiteCache = cache;
+        pooled = true;
+        pooledNew = false;
+        poolKey = key;
+        poolFileId = fileId;
+        changesAtAcquire = sqlite3_total_changes64(db);
+    }
+
+    void Database::markPooled(const std::string &key, const std::string &fileId)
+    {
+        pooled = true;
+        // Schema checks may have migrated it: checkpoint on the first release
+        pooledNew = true;
+        poolKey = key;
+        poolFileId = fileId;
+        changesAtAcquire = sqlite3_total_changes64(db);
+    }
+
+    sqlite3 *Database::detachPooled(void *&cache, std::string &key, std::string &fileId, bool &wrote)
+    {
+        sqlite3 *handle = db;
+        if (handle == nullptr)
+            return nullptr;
+
+        wrote = pooledNew || sqlite3_total_changes64(handle) != changesAtAcquire;
+        cache = spatialiteCache;
+        key = poolKey;
+        fileId = poolFileId;
+
+        db = nullptr;
+        spatialiteCache = nullptr;
+        pooled = false;
+        pooledNew = false;
+        return handle;
     }
 
     json wktBboxCoordinates(const std::string &wktBbox)

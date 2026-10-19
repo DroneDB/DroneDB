@@ -15,14 +15,31 @@
 namespace ddb
 {
 
+  class DatabasePool;
+
   class Database : public SqliteDatabase
   {
   private:
     MetaManager *metaManager = nullptr;
     void *spatialiteCache = nullptr;
 
+    // Set when the connection comes from or goes back to the DatabasePool
+    bool pooled = false;
+    bool pooledNew = false;
+    std::string poolKey;
+    std::string poolFileId;
+    sqlite3_int64 changesAtAcquire = 0;
+
+    friend class DatabasePool;
+    void attachPooled(sqlite3 *handle, void *cache, const std::string &file, const std::string &key, const std::string &fileId);
+    void markPooled(const std::string &key, const std::string &fileId);
+    sqlite3 *detachPooled(void *&cache, std::string &key, std::string &fileId, bool &wrote);
+
   public:
-    DDB_DLL ~Database();
+    DDB_DLL ~Database() override;
+
+    /// Gives a connection opened by ddb::open() back to the DatabasePool, otherwise closes it
+    DDB_DLL SqliteDatabase &close() override;
     DDB_DLL void afterOpen() override;
     DDB_DLL Database &createTables();
     DDB_DLL void ensureSchemaConsistency();
