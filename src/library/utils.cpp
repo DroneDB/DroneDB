@@ -390,5 +390,44 @@ DDB_DLL std::vector<ddb::EntryType> parseEntryTypeList(const char* types) {
     return typeFilter;
 }
 
+DDB_DLL std::vector<std::string> parseExtensionList(const char* extensions) {
+    std::vector<std::string> result;
+
+    if (extensions == nullptr || strlen(extensions) == 0)
+        return result;
+
+    std::stringstream ss(extensions);
+    std::string item;
+    while (std::getline(ss, item, ',')) {
+        trim(item);
+        if (item.empty())
+            continue;
+
+        std::string ext = item[0] == '.' ? item.substr(1) : item;
+        if (ext.empty() || ext.find_first_of("/\\*? \t") != std::string::npos)
+            throw InvalidArgsException("Invalid extension: " + item);
+
+        toLower(ext);
+        result.push_back(ext);
+    }
+
+    return result;
+}
+
+DDB_DLL bool hasAnyExtension(const std::string& path, const std::vector<std::string>& extensions) {
+    std::string lower = path;
+    toLower(lower);
+
+    for (const auto& ext : extensions) {
+        // "a.dwg" matches "dwg", "x.copc.laz" matches "copc.laz" and "laz", "dwg" alone does not
+        if (lower.size() > ext.size() + 1 &&
+            lower.compare(lower.size() - ext.size(), ext.size(), ext) == 0 &&
+            lower[lower.size() - ext.size() - 1] == '.')
+            return true;
+    }
+
+    return false;
+}
+
 
 }  // namespace ddb::utils

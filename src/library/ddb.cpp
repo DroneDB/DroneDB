@@ -1055,6 +1055,11 @@ DDB_DLL DDBErr DDBGetStamp(const char* ddbPath, char** output) {
 }
 
 DDB_DLL DDBErr DDBRescan(const char* ddbPath, char** output, const char* types, bool stopOnError) {
+    return DDBRescanEx(ddbPath, output, types, "", stopOnError);
+}
+
+DDB_DLL DDBErr DDBRescanEx(const char* ddbPath, char** output, const char* types, const char* extensions,
+                           bool stopOnError) {
     DDB_C_BEGIN
 
     if (utils::isNullOrEmptyOrWhitespace(ddbPath))
@@ -1063,13 +1068,14 @@ DDB_DLL DDBErr DDBRescan(const char* ddbPath, char** output, const char* types, 
     if (output == nullptr)
         throw InvalidArgsException("Output pointer is null");
 
-    // Parse types string into vector
+    // Parse filter strings into vectors
     const std::vector<EntryType> typeFilter = utils::parseEntryTypeList(types);
+    const std::vector<std::string> extensionFilter = utils::parseExtensionList(extensions);
 
     const auto db = ddb::open(std::string(ddbPath), true);
     auto outJson = json::array();
 
-    rescanIndex(db.get(), typeFilter, stopOnError,
+    rescanIndex(db.get(), typeFilter, extensionFilter, stopOnError,
                 [&outJson](const Entry& e, bool success, const std::string& error) {
                     json j;
                     j["path"] = e.path;

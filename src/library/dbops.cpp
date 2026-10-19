@@ -1265,6 +1265,12 @@ static std::mutex g_templateMutex;
 
     void rescanIndex(Database *db, const std::vector<EntryType> &types, bool stopOnError, RescanCallback callback)
     {
+        rescanIndex(db, types, {}, stopOnError, callback);
+    }
+
+    void rescanIndex(Database *db, const std::vector<EntryType> &types, const std::vector<std::string> &extensions,
+                     bool stopOnError, RescanCallback callback)
+    {
         const fs::path directory = db->rootDirectory();
 
         // Build query based on requested types
@@ -1305,7 +1311,11 @@ static std::mutex g_templateMutex;
 
         while (q->fetch())
         {
-            io::Path relPath = fs::path(q->getText(0));
+            const std::string path = q->getText(0);
+            if (!extensions.empty() && !utils::hasAnyExtension(path, extensions))
+                continue;
+
+            io::Path relPath = fs::path(path);
             fs::path fullPath = directory / relPath.get();
 
             // Check if file still exists (outside try-catch to handle stopOnError correctly)

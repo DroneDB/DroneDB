@@ -188,6 +188,17 @@ DDB_DLL bool isValidNonEmptyStringParam(const char* str);
 // Throws InvalidArgsException if an unknown type is found or if Directory type is specified
 DDB_DLL std::vector<ddb::EntryType> parseEntryTypeList(const char* types);
 
+// Parse a comma-separated list of file extensions ("dwg,.DXF,copc.laz") into
+// lowercase extensions without the leading dot. Empty items are skipped.
+// Returns an empty vector if extensions is null or empty
+// Throws InvalidArgsException if an item is a bare dot or contains a path separator,
+// a wildcard or whitespace
+DDB_DLL std::vector<std::string> parseExtensionList(const char* extensions);
+
+// True if path ends with "." + one of extensions (lowercase, without the dot, as
+// returned by parseExtensionList). Comparison ignores case
+DDB_DLL bool hasAnyExtension(const std::string& path, const std::vector<std::string>& extensions);
+
 // Fix for removing macros
 #undef max
 #undef min

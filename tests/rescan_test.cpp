@@ -4,12 +4,15 @@
 
 #include "gtest/gtest.h"
 #include "dbops.h"
+#include "ddb.h"
 #include "entry.h"
 #include "entry_types.h"
 #include "exceptions.h"
 #include "test.h"
 #include "testarea.h"
+#include "utils.h"
 
+#include <algorithm>
 #include <fstream>
 
 namespace
@@ -307,6 +310,129 @@ namespace
     {
         // typeFromHuman should return Undefined for invalid types
         EXPECT_EQ(typeFromHuman("invalidtype"), EntryType::Undefined);
+    }
+
+    TEST(parseExtensionList, normalizesItems)
+    {
+        const auto exts = utils::parseExtensionList(" dwg, .DXF ,,copc.LAZ,");
+        ASSERT_EQ(exts.size(), 3);
+        EXPECT_EQ(exts[0], "dwg");
+        EXPECT_EQ(exts[1], "dxf");
+        EXPECT_EQ(exts[2], "copc.laz");
+
+        EXPECT_TRUE(utils::parseExtensionList("").empty());
+        EXPECT_TRUE(utils::parseExtensionList(nullptr).empty());
+    }
+
+    TEST(parseExtensionList, rejectsInvalidItems)
+    {
+        EXPECT_THROW(utils::parseExtensionList("."), InvalidArgsException);
+        EXPECT_THROW(utils::parseExtensionList("*.dwg"), InvalidArgsException);
+        EXPECT_THROW(utils::parseExtensionList("a/dwg"), InvalidArgsException);
+        EXPECT_THROW(utils::parseExtensionList("tar gz"), InvalidArgsException);
+    }
+
+    TEST(hasAnyExtension, matchesSuffixAfterDot)
+    {
+        EXPECT_TRUE(utils::hasAnyExtension("plans/site.DWG", {"dwg"}));
+        EXPECT_TRUE(utils::hasAnyExtension("scan.copc.laz", {"copc.laz"}));
+        EXPECT_TRUE(utils::hasAnyExtension("scan.copc.laz", {"laz"}));
+        EXPECT_FALSE(utils::hasAnyExtension("scan.laz", {"copc.laz"}));
+        EXPECT_FALSE(utils::hasAnyExtension("dwg", {"dwg"}));
+        EXPECT_FALSE(utils::hasAnyExtension("plans/sitedwg", {"dwg"}));
+        EXPECT_FALSE(utils::hasAnyExtension("site.dwg.bak", {"dwg"}));
+    }
+
+    TEST(rescanIndex, rescanWithExtensionFilter)
+    {
+        TestArea ta(TEST_NAME, true);
+
+        auto testFolder = ta.getFolder();
+        ddb::initIndex(testFolder.string());
+        auto db = ddb::open(testFolder.string(), true);
+
+        fs::path lowerTxt = testFolder / "a.txt";
+        fs::path upperTxt = testFolder / "B.TXT";
+        fs::path md = testFolder / "readme.md";
+        {
+            std::ofstream(lowerTxt) << "a";
+            std::ofstream(upperTxt) << "b";
+            std::ofstream(md) << "# Readme";
+        }
+        ddb::addToIndex(db.get(), {lowerTxt.string(), upperTxt.string(), md.string()});
+
+        std::vector<std::string> rescanned;
+        ddb::rescanIndex(db.get(), {}, {"txt"}, true,
+            [&rescanned](const Entry &e, bool success, const std::string &) {
+                if (success) rescanned.push_back(e.path);
+                return true;
+            });
+
+        std::sort(rescanned.begin(), rescanned.end());
+        ASSERT_EQ(rescanned.size(), 2);
+        EXPECT_EQ(rescanned[0], "B.TXT");
+        EXPECT_EQ(rescanned[1], "a.txt");
+    }
+
+    TEST(rescanIndex, typeAndExtensionFiltersMustBothMatch)
+    {
+        TestArea ta(TEST_NAME, true);
+
+        auto testFolder = ta.getFolder();
+        ddb::initIndex(testFolder.string());
+        auto db = ddb::open(testFolder.string(), true);
+
+        fs::path txt = testFolder / "notes.txt";
+        fs::path md = testFolder / "readme.md";
+        {
+            std::ofstream(txt) << "notes";
+            std::ofstream(md) << "# Readme";
+        }
+        ddb::addToIndex(db.get(), {txt.string(), md.string()});
+
+        int rescanCount = 0;
+        auto countSuccess = [&rescanCount](const Entry &, bool success, const std::string &) {
+            if (success) rescanCount++;
+            return true;
+        };
+
+        // notes.txt is Generic: no entry is both Markdown and .txt
+        ddb::rescanIndex(db.get(), {EntryType::Markdown}, {"txt"}, true, countSuccess);
+        EXPECT_EQ(rescanCount, 0);
+
+        ddb::rescanIndex(db.get(), {EntryType::Markdown}, {"md", "txt"}, true, countSuccess);
+        EXPECT_EQ(rescanCount, 1);
+    }
+
+    TEST(DDBRescanEx, filtersByExtension)
+    {
+        TestArea ta(TEST_NAME, true);
+
+        auto testFolder = ta.getFolder();
+        ddb::initIndex(testFolder.string());
+        {
+            auto db = ddb::open(testFolder.string(), true);
+            fs::path txt = testFolder / "notes.txt";
+            fs::path md = testFolder / "readme.md";
+            std::ofstream(txt) << "notes";
+            std::ofstream(md) << "# Readme";
+            ddb::addToIndex(db.get(), {txt.string(), md.string()});
+        }
+
+        char *output = nullptr;
+        ASSERT_EQ(DDBRescanEx(testFolder.string().c_str(), &output, "", ".MD", true), DDBERR_NONE)
+            << DDBGetLastError();
+        ASSERT_NE(output, nullptr);
+        json j = json::parse(output);
+        DDBFree(output);
+
+        ASSERT_TRUE(j.is_array());
+        ASSERT_EQ(j.size(), 1);
+        EXPECT_EQ(j[0]["path"], "readme.md");
+        EXPECT_TRUE(j[0]["success"].get<bool>());
+
+        output = nullptr;
+        EXPECT_NE(DDBRescanEx(testFolder.string().c_str(), &output, "", "*.md", true), DDBERR_NONE);
     }
 
 } // namespace

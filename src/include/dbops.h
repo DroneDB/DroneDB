@@ -110,6 +110,9 @@ namespace ddb
      * @param db           Pointer to the Database to operate on. Must be valid and open.
      * @param types        Optional list of EntryType values to restrict which entries are rescanned.
      *                     If empty, all entry types are rescanned.
+     * @param extensions   Optional list of file extensions (lowercase, without the dot, see
+     *                     utils::parseExtensionList) to restrict which entries are rescanned.
+     *                     If empty, all extensions are rescanned. An entry must match both filters.
      * @param stopOnError  If true, the function throws an exception (AppException) on the first error encountered.
      *                     If false, errors are reported via the callback and rescanning continues.
      * @param callback     Optional callback function called for each entry processed.
@@ -128,6 +131,9 @@ namespace ddb
      * Thread Safety:
      *   - Uses database transactions internally; not safe for concurrent modification of the same database.
      */
+    DDB_DLL void rescanIndex(Database *db, const std::vector<EntryType> &types,
+                             const std::vector<std::string> &extensions, bool stopOnError = true,
+                             RescanCallback callback = nullptr);
     DDB_DLL void rescanIndex(Database *db, const std::vector<EntryType> &types = {}, bool stopOnError = true, RescanCallback callback = nullptr);
     DDB_DLL void syncLocalMTimes(Database *db, const std::vector<std::string> &files = {});
     DDB_DLL void moveEntry(Database *db, const std::string &source, const std::string &dest);

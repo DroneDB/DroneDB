@@ -314,6 +314,17 @@ extern "C"
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBRescan(const char *ddbPath, char **output, const char *types = "", bool stopOnError = true);
 
+    /** Rescan the files in the index that match both a type and an extension filter
+     * @param ddbPath path to a DroneDB database (parent of ".ddb")
+     * @param output pointer to C-string where to store output (JSON array of results, same format as DDBRescan)
+     * @param types comma-separated list of entry types to rescan (see DDBRescan), or empty for all
+     * @param extensions comma-separated list of file extensions to rescan (e.g., "dwg,.dxf,copc.laz"; case and
+     *                   leading dot are ignored), or empty for all
+     * @param stopOnError whether to stop processing on first error (default true)
+     * @return DDBERR_NONE on success, an error otherwise */
+    DDB_DLL DDBErr DDBRescanEx(const char *ddbPath, char **output, const char *types = "",
+                               const char *extensions = "", bool stopOnError = true);
+
     /** Move entry
      * @param ddbPath path to the source DroneDB database (parent of ".ddb")
      * @param source source entry path
