@@ -1250,6 +1250,33 @@ DDB_DLL DDBErr DDBIsBuildComplete(const char* ddbPath, const char* path, bool* i
     DDB_C_END
 }
 
+DDB_DLL DDBErr DDBGetBuildStatus(const char* ddbPath, const char** paths, int numPaths, char** output) {
+    DDB_C_BEGIN
+
+    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
+        throw InvalidArgsException("No directory provided");
+
+    if (!utils::isValidArrayParam(paths, numPaths))
+        throw InvalidArgsException("Invalid paths array parameter");
+
+    if (utils::hasNullStringInArray(paths, numPaths))
+        throw InvalidArgsException("Path array contains null elements");
+
+    if (output == nullptr)
+        throw InvalidArgsException("Output pointer is null");
+
+    const auto ddb = ddb::open(std::string(ddbPath), true);
+    const auto statuses = ddb::getBuildStatus(ddb.get(), std::vector<std::string>(paths, paths + numPaths));
+
+    json j = json::array();
+    for (const auto& s : statuses)
+        j.push_back({{"path", s.path}, {"exists", s.exists}, {"buildable", s.buildable}, {"complete", s.complete}});
+
+    utils::copyToPtr(j.dump(), output);
+
+    DDB_C_END
+}
+
 DDBErr DDBMetaAdd(const char* ddbPath,
                   const char* path,
                   const char* key,

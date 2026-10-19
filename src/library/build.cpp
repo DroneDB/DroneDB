@@ -10,6 +10,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <fstream>
+#include <functional>
 #include <optional>
 #include <sstream>
 #include <unordered_set>
@@ -267,11 +268,11 @@ static bool isBuildOutputComplete(const fs::path& baseOutputPath,
     return directoryHasNonEmptyContent(baseOutputPath / subfolder);
 }
 
-bool isBuildComplete(Database* db, const std::string& path) {
-    Entry e;
-    if (!getEntry(db, path, e))
-        return false;
-
+// isBuildComplete() for an entry already read from the index. lookup reads the
+// main file of a buildable dependency (e.g. the .shp of a .dbf).
+static bool isEntryBuildComplete(const fs::path& buildDirectory, const Entry& entry,
+                                 const std::function<bool(const std::string&, Entry&)>& lookup) {
+    Entry e = entry;
     std::string subfolder;
     if (!isBuildableInternal(e, subfolder)) {
         std::string mainFile;
@@ -280,13 +281,62 @@ bool isBuildComplete(Database* db, const std::string& path) {
 
         // For dependencies, completeness is defined by the main file's artifacts.
         Entry mainEntry;
-        if (!getEntry(db, mainFile, mainEntry))
+        if (!lookup(mainFile, mainEntry))
             return false;
         e = mainEntry;
     }
 
-    const fs::path baseOutputPath = fs::path(db->buildDirectory()) / e.hash;
-    return isBuildOutputComplete(baseOutputPath, e, subfolder);
+    return isBuildOutputComplete(buildDirectory / e.hash, e, subfolder);
+}
+
+bool isBuildComplete(Database* db, const std::string& path) {
+    Entry e;
+    if (!getEntry(db, path, e))
+        return false;
+
+    return isEntryBuildComplete(db->buildDirectory(), e, [db](const std::string& p, Entry& out) {
+        return getEntry(db, p, out);
+    });
+}
+
+std::vector<BuildStatus> getBuildStatus(Database* db, const std::vector<std::string>& paths) {
+    // One prepared statement for every lookup; only the columns the build rules read
+    auto q = db->query("SELECT path, hash, type FROM entries WHERE path = ?");
+    const auto lookup = [&q](const std::string& p, Entry& out) {
+        q->bind(1, p);
+        const bool found = q->fetch();
+        if (found) {
+            out.path = q->getText(0);
+            out.hash = q->getText(1);
+            out.type = static_cast<EntryType>(q->getInt(2));
+        }
+        q->reset();
+        return found;
+    };
+
+    const fs::path buildDirectory = db->buildDirectory();
+    std::vector<BuildStatus> result;
+    result.reserve(paths.size());
+
+    for (const auto& path : paths) {
+        BuildStatus status;
+        status.path = path;
+
+        Entry e;
+        if (lookup(path, e)) {
+            status.exists = true;
+
+            std::string subfolder;
+            std::string mainFile;
+            status.buildable = isBuildableInternal(e, subfolder) ||
+                               isBuildableDependency(e, mainFile, subfolder);
+            status.complete = status.buildable && isEntryBuildComplete(buildDirectory, e, lookup);
+        }
+
+        result.push_back(std::move(status));
+    }
+
+    return result;
 }
 
 void buildInternal(Database* db, const Entry& e, const std::string& outputPath, bool force) {

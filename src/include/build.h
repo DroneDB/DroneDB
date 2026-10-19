@@ -86,6 +86,31 @@ namespace ddb
     DDB_DLL bool isBuildComplete(Database *db, const std::string &path);
 
     /**
+     * @brief Build status of one entry, as reported by getBuildStatus().
+     */
+    struct BuildStatus
+    {
+        /// Entry path, as requested
+        std::string path;
+        /// The index has an entry with this path
+        bool exists = false;
+        /// Same answer as isBuildable() (false when the entry does not exist)
+        bool buildable = false;
+        /// Same answer as isBuildComplete()
+        bool complete = false;
+    };
+
+    /**
+     * @brief isBuildable() and isBuildComplete() for several entries on one connection.
+     * Reads only path, hash and type of each entry; the completeness checks are the
+     * same filesystem checks as isBuildComplete().
+     * @param db database handle
+     * @param paths dataset-relative entry paths (exact match)
+     * @return one status per input path, in input order
+     */
+    DDB_DLL std::vector<BuildStatus> getBuildStatus(Database *db, const std::vector<std::string> &paths);
+
+    /**
      * @brief Result of a cleanup operation.
      */
     struct CleanupResult

@@ -383,6 +383,18 @@ extern "C"
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBIsBuildComplete(const char *ddbPath, const char *path, bool *isBuildComplete);
 
+    /** GetBuildStatus
+     *  DDBIsBuildable and DDBIsBuildComplete for several entries with one index open.
+     * @param ddbPath path to the source DroneDB database (parent of ".ddb")
+     * @param paths array of dataset-relative entry paths (exact match)
+     * @param numPaths number of paths
+     * @param output pointer to C-string where to store result (JSON array, one element per
+     *               input path, in input order). Each element:
+     *               { "path": "...", "exists": true, "buildable": true, "complete": false }
+     *               (caller must free with DDBFree)
+     * @return DDBERR_NONE on success, an error otherwise */
+    DDB_DLL DDBErr DDBGetBuildStatus(const char *ddbPath, const char **paths, int numPaths, char **output);
+
     /** Add metadata
      *  @param ddbPath path to the source DroneDB database (parent of ".ddb")
      *  @param path Entry path to associate metadata with (or "" to add metadata to the DroneDB database itself)
