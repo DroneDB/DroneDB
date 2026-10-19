@@ -279,7 +279,7 @@ namespace ddb
                 size_t bufSize = wSize * cappedBands;
 
                 double globalMin = std::numeric_limits<double>::max(),
-                       globalMax = std::numeric_limits<double>::min();
+                       globalMax = std::numeric_limits<double>::lowest();
 
                 for (int i = 0; i < cappedBands; i++)
                 {

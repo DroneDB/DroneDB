@@ -1085,8 +1085,11 @@ namespace ddb
 
                 if (type == EntryType::Image)
                 {
-                    // Panorama?
-                    if (ctx.exivImage->pixelWidth() / ctx.exivImage->pixelHeight() >= 2)
+                    // Panorama? Exiv2 reports 0x0 when the dimensions are unknown
+                    // (EXIF-less or truncated files): never divide by the height.
+                    const auto w = static_cast<uint64_t>(ctx.exivImage->pixelWidth());
+                    const auto h = static_cast<uint64_t>(ctx.exivImage->pixelHeight());
+                    if (h > 0 && w >= 2 * h)
                         type = EntryType::Panorama;
                 }
 

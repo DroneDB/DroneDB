@@ -886,7 +886,6 @@ void RenderImage(const fs::path& outImagePath,
     // Define consistent WEBP creation options
     char** webpOpts = nullptr;
     webpOpts = CSLAddString(webpOpts, "QUALITY=95");
-    webpOpts = CSLAddString(webpOpts, "WRITE_EXIF_METADATA=NO");
 
     bool writeToMemory = outImagePath.empty() && outBuffer != nullptr;
     if (writeToMemory) {
@@ -1106,13 +1105,9 @@ void generatePointCloudThumb(const fs::path& copcPath,
     constexpr int nBands = 3;
     const int bufSize = GDALGetDataTypeSizeBytes(GDT_Byte) * wSize;
 
-    std::unique_ptr<uint8_t> buffer(new uint8_t[bufSize * nBands]);
-    std::unique_ptr<uint8_t> alphaBuffer(new uint8_t[bufSize]);
-    std::unique_ptr<float> zBuffer(new float[bufSize]);
-
-    memset(buffer.get(), 0, bufSize * nBands);
-    memset(alphaBuffer.get(), 0, bufSize);
-    std::fill_n(zBuffer.get(), wSize, -99999.0f);
+    std::vector<uint8_t> buffer(static_cast<size_t>(bufSize) * nBands, 0);
+    std::vector<uint8_t> alphaBuffer(static_cast<size_t>(bufSize), 0);
+    std::vector<float> zBuffer(static_cast<size_t>(wSize), -99999.0f);
 
     // Calculate scaling and offset for centering
     const double width = oMaxX - oMinX;
@@ -1140,15 +1135,15 @@ void generatePointCloudThumb(const fs::path& copcPath,
 
     // Render points using appropriate coordinate transformation
     int pointsRendered = renderPoints(point_view, colors, hasSpatialSystem,
-                                     pcInfo.wktProjection, buffer.get(), alphaBuffer.get(),
-                                     zBuffer.get(), tileSize, tileScale, offsetX, offsetY,
+                                     pcInfo.wktProjection, buffer.data(), alphaBuffer.data(),
+                                     zBuffer.data(), tileSize, tileScale, offsetX, offsetY,
                                      oMinX, oMinY);
 
     RenderImage(outImagePath,
                 tileSize,
                 nBands,
-                buffer.get(),
-                alphaBuffer.get(),
+                buffer.data(),
+                alphaBuffer.data(),
                 outBuffer,
                 outBufferSize);
 }
