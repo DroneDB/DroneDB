@@ -34,9 +34,8 @@
 namespace ddb
 {
 
-// Global mutex to protect database open/close operations
-// Spatialite/GEOS is not thread-safe when initializing multiple connections concurrently
-static std::mutex g_dbOpenMutex;
+// Serializes the creation of the empty database template shared by initIndex() calls
+static std::mutex g_templateMutex;
 
 #define UPDATE_QUERY                                                              \
     "UPDATE entries SET hash=?, type=?, properties=?, mtime=?, size=?, depth=?, " \
@@ -63,18 +62,13 @@ static std::mutex g_dbOpenMutex;
         LOGD << dbasePath.string() + " exists";
 
         auto db = std::make_unique<Database>();
+        db->open(dbasePath.string());
 
-        // Lock to protect Spatialite/GEOS initialization which is not thread-safe
-        {
-            std::lock_guard<std::mutex> lock(g_dbOpenMutex);
-            db->open(dbasePath.string());
+        if (!db->tableExists("entries"))
+            throw DBException("Table 'entries' not found (not a valid database: " +
+                              dbasePath.string() + ")");
 
-            if (!db->tableExists("entries"))
-                throw DBException("Table 'entries' not found (not a valid database: " +
-                                  dbasePath.string() + ")");
-
-            db->ensureSchemaConsistency();
-        }
+        db->ensureSchemaConsistency();
 
         return db;
     }
@@ -1433,19 +1427,19 @@ static std::mutex g_dbOpenMutex;
             const fs::path emptyDbPath = UserProfile::get()->getTemplatesDir() /
                                          ("empty-dbase-" APP_REVISION ".sqlite");
 
-            // Need to create?
-            if (!exists(emptyDbPath))
+            // Need to create? (checked under the lock: the file exists as soon as
+            // another thread starts creating it)
             {
-                LOGD << "Creating " << emptyDbPath.string();
-
-                // Create database
-                auto db = std::make_unique<Database>();
+                std::lock_guard<std::mutex> lock(g_templateMutex);
+                if (!exists(emptyDbPath))
                 {
-                    std::lock_guard<std::mutex> lock(g_dbOpenMutex);
-                    db->open(emptyDbPath.string());
-                    db->createTables();
+                    LOGD << "Creating " << emptyDbPath.string();
+
+                    Database db;
+                    db.open(emptyDbPath.string());
+                    db.createTables();
+                    db.close();
                 }
-                db->close();
             }
 
             if (exists(emptyDbPath))
@@ -1477,13 +1471,10 @@ static std::mutex g_dbOpenMutex;
             LOGD << "Creating " << dbasePath.string();
 
             // Create database
-            auto db = std::make_unique<Database>();
-            {
-                std::lock_guard<std::mutex> lock(g_dbOpenMutex);
-                db->open(dbasePath.string());
-                db->createTables();
-            }
-            db->close();
+            Database db;
+            db.open(dbasePath.string());
+            db.createTables();
+            db.close();
         }
 
         return ddbDirPath.string();

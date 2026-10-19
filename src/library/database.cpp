@@ -8,6 +8,7 @@
 #include <ctime>
 #include <fstream>
 #include <iomanip>
+#include <mutex>
 #include <sstream>
 #include <string>
 
@@ -32,13 +33,32 @@ namespace ddb
             LOGD << "Cannot set busy timeout";
         }
 
+        // spatialite_initialize() sets an unguarded global flag (and initializes libxml2) on
+        // its first call, which spatialite_alloc_connection() makes implicitly: run it once.
+        // With a reentrant GEOS build (GEOS_REENTRANT) the rest of the per-connection setup
+        // only touches the new cache and this handle, so connections can open concurrently.
+        static std::once_flag spatialiteInitialized;
+        std::call_once(spatialiteInitialized, [] { spatialite_initialize(); });
+
+        // reopen() runs afterOpen() again on a closed handle
+        if (spatialiteCache != nullptr)
+            spatialite_cleanup_ex(spatialiteCache);
         spatialiteCache = spatialite_alloc_connection();
         spatialite_init_ex(db, spatialiteCache, 0);
 
-        this->setJournalMode("wal");
-        // Safe under WAL: durable across app crashes, can only lose the most recent transactions
-        // on OS/power failure — acceptable for an index that is reconstructible from the
-        // filesystem.
+        // Indexes are created in WAL mode: only legacy databases need the switch (which
+        // takes an exclusive lock)
+        if (this->getJournalMode() != "wal")
+            this->setJournalMode("wal");
+
+        // Keep the -wal/-shm files when the last connection closes, so that every
+        // read-only call does not delete and recreate them. The size limit truncates the
+        // WAL to zero bytes once it has been checkpointed (on close and on reset), so no
+        // checkpointed frames are left next to the database file.
+        int persistWal = 1;
+        sqlite3_file_control(db, "main", SQLITE_FCNTL_PERSIST_WAL, &persistWal);
+        this->exec("PRAGMA journal_size_limit=0;");
+
         this->exec("PRAGMA synchronous=NORMAL;");
     }
 
@@ -489,6 +509,9 @@ END;
 
     Database::~Database()
     {
+        // The SpatiaLite cache must outlive the connection that uses it
+        this->close();
+
         if (metaManager != nullptr)
         {
             delete metaManager;

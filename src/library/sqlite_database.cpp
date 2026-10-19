@@ -101,6 +101,12 @@ namespace ddb
         return sqlite3_changes(db);
     }
 
+    std::string SqliteDatabase::getJournalMode() const
+    {
+        auto q = this->query("PRAGMA journal_mode");
+        return q->fetch() ? q->getText(0) : "";
+    }
+
     void SqliteDatabase::setJournalMode(const std::string &mode)
     {
         this->exec("PRAGMA journal_mode=" + mode + ";");

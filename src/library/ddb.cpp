@@ -15,6 +15,7 @@
 #include <algorithm>
 
 #include <exiv2/exiv2.hpp>
+#include <sqlite3.h>
 #include <sstream>
 
 #ifdef WIN32
@@ -69,6 +70,15 @@ thread_local char ddbLastError[255];
 std::string getBuildInfo();
 void setupLogging(bool verbose);
 void initializeGDALandPROJ();
+
+// SQLite keeps allocation statistics by default (SQLITE_DEFAULT_MEMSTATUS=1), which takes a
+// process-wide mutex on every allocation. Each index open parses the SpatiaLite schema
+// (thousands of allocations), so concurrent opens serialized on that mutex and 8 threads
+// were slower than one. Nothing here reads the statistics (sqlite3_memory_used,
+// soft heap limit). Only effective before SQLite initializes.
+static int configureSqlite() {
+    return sqlite3_config(SQLITE_CONFIG_MEMSTATUS, 0);
+}
 
 // Thread-safe initialization using std::once_flag
 static std::once_flag initialization_flag;
@@ -233,12 +243,19 @@ void initializeGDALandPROJ() {
 
 void DDBRegisterProcess(bool verbose) {
     std::call_once(initialization_flag, [verbose]() {
+        // Before anything (GDAL, PROJ, SpatiaLite) initializes SQLite
+        const int sqliteConfigRc = configureSqlite();
+
         LOGD << "Initializing DDB process";
         const auto exeFolder = io::getExeFolderPath().string();
 
         setupEnvironmentVariables(exeFolder);
         setupLocaleUnified();
         setupLogging(verbose);
+
+        if (sqliteConfigRc != SQLITE_OK)
+            LOGW << "Cannot disable SQLite memory statistics (SQLite was already initialized, rc="
+                 << sqliteConfigRc << "): concurrent index opens will contend on its allocator mutex";
         initializeGDALandPROJ();
         // No signal or crash handlers here: this runs inside host processes (the .NET
         // Registry, tests) whose runtimes own SIGSEGV/SIGFPE/SIGTERM. The ddb CLI installs
