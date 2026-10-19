@@ -817,7 +817,7 @@ static std::mutex g_templateMutex;
             recheckQ->bind(1, ci.entry.path);
             const bool stillAbsent = !recheckQ->fetch();
 
-            bool actuallyInsert = true;
+            bool actuallyInsert = !ci.isUpdate;
             if (!stillAbsent && !ci.isUpdate) {
                 // Planned as INSERT but row now exists (concurrent add) — convert to UPDATE
                 const long long dbMtime = recheckQ->getInt64(0);
@@ -855,10 +855,12 @@ static std::mutex g_templateMutex;
                 doUpdate(updateQ.get(), ci.entry);
             }
 
-            tentative.push_back({ci.entry, actuallyInsert});
+            // Both report "updated", the opposite of "inserted"
+            const bool updated = !actuallyInsert;
+            tentative.push_back({ci.entry, updated});
 
             if (callback != nullptr)
-                if (!callback(ci.entry, actuallyInsert)) {
+                if (!callback(ci.entry, updated)) {
                     // tx's destructor rolls back; log it explicitly so a canceled batch
                     // is never a silent loss (C8).
                     LOGD << "Add operation canceled by callback, rolling back transaction";

@@ -85,4 +85,39 @@ TEST(addToIndexEx, completenessContractAcrossCalls) {
     EXPECT_TRUE(second.errors.empty());
 }
 
+// A new entry is reported as added and a changed one as updated, in AddResult and to the
+// callback (both used to carry the opposite flag, so `ddb add` printed "U" for new files).
+TEST(addToIndexEx, reportsAddedThenUpdated) {
+    TestArea ta(TEST_NAME, true);
+    const auto root = ta.getFolder("ds");
+    const auto file = root / "good1.txt";
+
+    fileWriteAllText(file, "hello");
+
+    initIndex(root.string());
+    auto db = ddb::open(root.string(), true);
+    AddOptions opts;
+
+    std::vector<bool> reported;
+    const auto callback = [&reported](const Entry &, bool updated) {
+        reported.push_back(updated);
+        return true;
+    };
+
+    AddResult first;
+    addToIndexEx(db.get(), {file.string()}, opts, first, callback);
+    ASSERT_EQ(first.entries.size(), 1u);
+    EXPECT_FALSE(first.entries[0].second) << "a new entry is not an update";
+
+    fileWriteAllText(file, "hello, changed");
+    fs::last_write_time(file, fs::last_write_time(file) + std::chrono::seconds(10));
+
+    AddResult second;
+    addToIndexEx(db.get(), {file.string()}, opts, second, callback);
+    ASSERT_EQ(second.entries.size(), 1u);
+    EXPECT_TRUE(second.entries[0].second);
+
+    EXPECT_EQ(reported, (std::vector<bool>{false, true}));
+}
+
 } // namespace
