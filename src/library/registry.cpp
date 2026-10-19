@@ -673,9 +673,9 @@ std::unordered_map<std::string, bool> computeDeltaLocals(Delta d,
             auto ePath = q->getText(0);
             // Check the filesystem to make sure this hasn't been modified
             io::Path p(db->rootDirectory() / ePath);
-            long long eMtime = q->getInt64(1);
+            const double eMtime = q->getDouble(1);
             bool valid = false;
-            if (p.getModifiedTime() == eMtime) {
+            if (io::sameModifiedTime(eMtime, p.getModifiedTimePrecise())) {
                 valid = true;
             } else {
                 // Actually compute hash

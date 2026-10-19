@@ -4,6 +4,8 @@
 #include "mio.h"
 #include "utils.h"
 
+#include <cmath>
+
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
 #endif
@@ -145,6 +147,81 @@ namespace ddb
                 return false;
             }
 #endif
+        }
+
+        namespace
+        {
+            constexpr int64_t WINDOWS_UNIX_TIME_START = 0x019DB1DED53E8000; // January 1, 1970 in 100ns ticks
+            constexpr int64_t WINDOWS_TICKS_PER_SECOND = 10000000;
+        }
+
+        double Path::getModifiedTimePrecise()
+        {
+#ifdef WIN32
+            WIN32_FILE_ATTRIBUTE_DATA data;
+            if (!GetFileAttributesExW(p.wstring().c_str(), GetFileExInfoStandard, &data))
+                throw FSException("Cannot stat mtime " + p.string() + " (errcode: " + std::to_string(GetLastError()) + ")");
+
+            LARGE_INTEGER li;
+            li.LowPart = data.ftLastWriteTime.dwLowDateTime;
+            li.HighPart = data.ftLastWriteTime.dwHighDateTime;
+            const int64_t ticks = li.QuadPart - WINDOWS_UNIX_TIME_START;
+            return static_cast<double>(ticks / WINDOWS_TICKS_PER_SECOND) +
+                   static_cast<double>(ticks % WINDOWS_TICKS_PER_SECOND) / WINDOWS_TICKS_PER_SECOND;
+#else
+            struct stat result;
+            if (stat(p.string().c_str(), &result) != 0)
+                throw FSException("Cannot stat mtime " + p.string());
+#ifdef __APPLE__
+            const auto &ts = result.st_mtimespec;
+#else
+            const auto &ts = result.st_mtim;
+#endif
+            return static_cast<double>(ts.tv_sec) + static_cast<double>(ts.tv_nsec) / 1e9;
+#endif
+        }
+
+        bool Path::setModifiedTimePrecise(double mtime)
+        {
+            if (sameModifiedTime(mtime, getModifiedTimePrecise()))
+                return false;
+
+            const double seconds = std::floor(mtime);
+            const auto nanoseconds = std::min<long long>(std::llround((mtime - seconds) * 1e9), 999999999);
+#ifdef WIN32
+            HANDLE hFile = CreateFileW(p.wstring().c_str(), FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
+                                       OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+            if (hFile == INVALID_HANDLE_VALUE)
+                throw FSException("Cannot set mtime (open) " + p.string() + " (errcode: " + std::to_string(GetLastError()) + ")");
+
+            LARGE_INTEGER li;
+            li.QuadPart = static_cast<int64_t>(seconds) * WINDOWS_TICKS_PER_SECOND + nanoseconds / 100 + WINDOWS_UNIX_TIME_START;
+            FILETIME ftModified;
+            ftModified.dwLowDateTime = li.LowPart;
+            ftModified.dwHighDateTime = li.HighPart;
+
+            // NULL keeps the creation and access times
+            const bool ok = SetFileTime(hFile, NULL, NULL, &ftModified);
+            CloseHandle(hFile);
+            if (!ok)
+                throw FSException("Cannot set mtime " + p.string());
+#else
+            struct timespec times[2];
+            times[0].tv_sec = 0;
+            times[0].tv_nsec = UTIME_OMIT; // keep the access time
+            times[1].tv_sec = static_cast<time_t>(seconds);
+            times[1].tv_nsec = static_cast<long>(nanoseconds);
+            if (utimensat(AT_FDCWD, p.string().c_str(), times, 0) != 0)
+                throw FSException("Cannot set mtime " + p.string());
+#endif
+            return true;
+        }
+
+        bool sameModifiedTime(double stored, double file)
+        {
+            if (stored == std::floor(stored))
+                return std::floor(file) == stored;
+            return std::abs(stored - file) < 1e-6;
         }
 
         std::uintmax_t Path::getSize()

@@ -11,9 +11,11 @@
 #include "status.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <future>
 #include <mutex>
+#include <optional>
 #include <system_error>
 #include <thread>
 #include <unordered_map>
@@ -458,8 +460,8 @@ static std::mutex g_templateMutex;
         return result;
     }
 
-    FileStatus checkUpdate(Entry &e, const fs::path &p, long long dbMtime,
-                           const std::string &dbHash)
+    FileStatus checkUpdate(Entry &e, const fs::path &p, double dbMtime,
+                           const std::string &dbHash, double *fileMtime)
     {
 
         if (!exists(p))
@@ -470,13 +472,17 @@ static std::mutex g_templateMutex;
         if (folder)
             return NotModified;
 
-        // Did it change?
-        e.mtime = io::Path(p).getModifiedTime();
+        // Did it change? Sub-second times catch an edit made in the same second as the
+        // previous add (same size, same whole-second time)
+        const double mtime = io::Path(p).getModifiedTimePrecise();
+        e.mtime = static_cast<time_t>(std::floor(mtime));
+        if (fileMtime != nullptr)
+            *fileMtime = mtime;
 
-        if (e.mtime != dbMtime)
+        if (!io::sameModifiedTime(dbMtime, mtime))
         {
-            LOGD << p.string() << " modified time ( " << dbMtime
-                 << " ) differs from file value: " << e.mtime;
+            LOGD << p.string() << " modified time ( " << std::fixed << dbMtime
+                 << " ) differs from file value: " << mtime;
 
             e.hash = Hash::fileSHA256(p.string());
 
@@ -493,11 +499,16 @@ static std::mutex g_templateMutex;
 
     void doUpdate(Statement *updateQ, const Entry &e)
     {
-        // Fields
+        doUpdate(updateQ, e, static_cast<double>(e.mtime));
+    }
+
+    void doUpdate(Statement *updateQ, const Entry &e, double mtime)
+    {
+        // Fields (a whole-number mtime is stored as an integer, like before)
         updateQ->bind(1, e.hash);
         updateQ->bind(2, e.type);
         updateQ->bind(3, e.properties.dump());
-        updateQ->bind(4, static_cast<long long>(e.mtime));
+        updateQ->bind(4, mtime);
         updateQ->bind(5, static_cast<long long>(e.size));
         updateQ->bind(6, e.depth);
         updateQ->bind(7, e.point_geom.toWkt());
@@ -657,7 +668,7 @@ static std::mutex g_templateMutex;
         fs::path absPath;
         std::string relPath;
         bool existsInDb = false;
-        long long dbMtime = 0;
+        double dbMtime = 0;
         std::string dbHash;
     };
 
@@ -666,7 +677,7 @@ static std::mutex g_templateMutex;
     struct ComputedAddItem {
         Entry entry;
         bool isUpdate = false;
-        long long observedMtime = 0;
+        double observedMtime = 0; // stored in the index (sub-second precision)
         long long observedSize = 0;
     };
 
@@ -696,7 +707,7 @@ static std::mutex g_templateMutex;
             q->bind(1, item.relPath);
             if (q->fetch()) {
                 item.existsInDb = true;
-                item.dbMtime = q->getInt64(0);
+                item.dbMtime = q->getDouble(0);
                 item.dbHash = q->getText(1);
             }
             q->reset();
@@ -731,6 +742,7 @@ static std::mutex g_templateMutex;
             Entry e;
             bool add = false;
             bool update = false;
+            std::optional<double> observedMtime;
 
             const std::string *knownHash = nullptr;
             if (knownHashes != nullptr) {
@@ -746,7 +758,9 @@ static std::mutex g_templateMutex;
                     continue;
                 }
             } else if (item.existsInDb) {
-                const auto status = checkUpdate(e, item.absPath, item.dbMtime, item.dbHash);
+                double fileMtime = 0;
+                const auto status = checkUpdate(e, item.absPath, item.dbMtime, item.dbHash, &fileMtime);
+                observedMtime = fileMtime;
                 update = status != FileStatus::NotModified;
                 if (!update) {
                     unchanged.push_back(item.relPath);
@@ -757,6 +771,12 @@ static std::mutex g_templateMutex;
             }
 
             try {
+                // Read before the content, so a write during the parse shows up at commit
+                if (!observedMtime) {
+                    observedMtime = io::Path(item.absPath).getModifiedTimePrecise();
+                    e.mtime = static_cast<time_t>(std::floor(*observedMtime));
+                }
+
                 // parseEntry() skips re-hashing if checkUpdate() already set e.hash.
                 parseEntry(item.absPath, directory, e, true);
             } catch (const FSException &ex) {
@@ -783,7 +803,7 @@ static std::mutex g_templateMutex;
 
             ComputedAddItem ci;
             ci.isUpdate = !add;
-            ci.observedMtime = e.mtime;
+            ci.observedMtime = *observedMtime;
             ci.observedSize = static_cast<long long>(e.size);
             ci.entry = std::move(e);
             computed.push_back(std::move(ci));
@@ -829,9 +849,9 @@ static std::mutex g_templateMutex;
             long long size = ci.observedSize;
             if (!fs::is_directory(absPath))
                 size = static_cast<long long>(fs::file_size(absPath, ec));
-            long long mtime = -1;
+            double mtime = -1;
             try {
-                mtime = io::Path(absPath).getModifiedTime();
+                mtime = io::Path(absPath).getModifiedTimePrecise();
             } catch (const std::exception &) {
                 ec = std::make_error_code(std::errc::no_such_file_or_directory);
             }
@@ -854,9 +874,9 @@ static std::mutex g_templateMutex;
             bool actuallyInsert = !ci.isUpdate;
             if (!stillAbsent && !ci.isUpdate) {
                 // Planned as INSERT but row now exists (concurrent add) — convert to UPDATE
-                const long long dbMtime = recheckQ->getInt64(0);
+                const double dbMtime = recheckQ->getDouble(0);
                 const std::string dbHash = recheckQ->getText(1);
-                if (dbMtime == ci.entry.mtime && dbHash == ci.entry.hash) {
+                if (io::sameModifiedTime(dbMtime, ci.observedMtime) && dbHash == ci.entry.hash) {
                     // Unchanged — a concurrent writer already committed the identical
                     // row. Report the path (null-guarded) so the completeness contract
                     // holds: every input lands in exactly one of entries/unchanged/errors.
@@ -879,14 +899,14 @@ static std::mutex g_templateMutex;
                 insertQ->bind(2, ci.entry.hash);
                 insertQ->bind(3, ci.entry.type);
                 insertQ->bind(4, ci.entry.properties.dump());
-                insertQ->bind(5, static_cast<long long>(ci.entry.mtime));
+                insertQ->bind(5, ci.observedMtime);
                 insertQ->bind(6, static_cast<long long>(ci.entry.size));
                 insertQ->bind(7, ci.entry.depth);
                 insertQ->bind(8, ci.entry.point_geom.toWkt());
                 insertQ->bind(9, ci.entry.polygon_geom.toWkt());
                 insertQ->execute();
             } else {
-                doUpdate(updateQ.get(), ci.entry);
+                doUpdate(updateQ.get(), ci.entry, ci.observedMtime);
             }
 
             // Both report "updated", the opposite of "inserted"
@@ -1366,9 +1386,10 @@ static std::mutex g_templateMutex;
             io::Path relPath = fs::path(q->getText(0));
             fs::path p = directory / relPath.get();
             Entry e;
-            const auto mtime = q->getInt64(1);
+            const auto mtime = q->getDouble(1);
             const auto hash = q->getText(2);
-            const auto status = checkUpdate(e, p, mtime, hash);
+            double fileMtime = 0;
+            const auto status = checkUpdate(e, p, mtime, hash, &fileMtime);
 
             switch (status)
             {
@@ -1385,7 +1406,7 @@ static std::mutex g_templateMutex;
             case Modified:
 
                 parseEntry(p, directory, e, true);
-                doUpdate(updateQ.get(), e);
+                doUpdate(updateQ.get(), e, fileMtime);
                 std::cout << "U\t" << e.path << std::endl;
                 break;
 
@@ -1532,7 +1553,7 @@ static std::mutex g_templateMutex;
         while (q->fetch())
         {
             io::Path fullPath = directory / fs::path(q->getText(0));
-            if (fullPath.setModifiedTime(static_cast<time_t>(q->getInt64(1))))
+            if (fullPath.setModifiedTimePrecise(q->getDouble(1)))
             {
                 LOGD << "Updated mtime for " << fullPath.string();
             }

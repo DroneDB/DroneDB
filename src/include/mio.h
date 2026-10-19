@@ -52,6 +52,11 @@ namespace ddb
 
             DDB_DLL time_t getModifiedTime();
             DDB_DLL bool setModifiedTime(time_t mtime);
+
+            // Modification time in seconds, with the sub-second part the file system keeps
+            DDB_DLL double getModifiedTimePrecise();
+            // Sets the modification time unless sameModifiedTime() already holds; returns true if set
+            DDB_DLL bool setModifiedTimePrecise(double mtime);
             DDB_DLL std::uintmax_t getSize();
             DDB_DLL bool hasChildren(const std::vector<std::string> &childPaths);
             DDB_DLL bool isParentOf(const fs::path &childPath);
@@ -94,6 +99,11 @@ namespace ddb
         // emulate flock
         int flock(int fd, int operation);
 #endif
+
+        // Whether a modification time stored in an index matches the file's (getModifiedTimePrecise).
+        // A whole number is compared to the second (rows written before sub-second times were
+        // stored, and file systems that keep seconds only); otherwise to the microsecond.
+        DDB_DLL bool sameModifiedTime(double stored, double file);
 
         DDB_DLL fs::path getExeFolderPath();
         DDB_DLL fs::path getDataPath(const fs::path &p);

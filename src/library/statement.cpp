@@ -54,6 +54,13 @@ Statement &Statement::bind(int paramNum, long long value)
     return *this;
 }
 
+Statement &Statement::bind(int paramNum, double value)
+{
+    assert(stmt != nullptr && db != nullptr);
+    bindCheck(sqlite3_bind_double(stmt, paramNum, value));
+    return *this;
+}
+
 Statement &Statement::step()
 {
     assert(stmt != nullptr);

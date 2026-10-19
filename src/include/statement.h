@@ -30,6 +30,7 @@ public:
   DDB_DLL Statement &bind(int paramNum, const std::string &value);
   DDB_DLL Statement &bind(int paramNum, int value);
   DDB_DLL Statement &bind(int paramNum, long long value);
+  DDB_DLL Statement &bind(int paramNum, double value);
 
   DDB_DLL bool fetch();
 

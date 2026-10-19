@@ -32,7 +32,7 @@ namespace ddb
 
             checkedPaths.insert(path);
 
-            const auto status = checkUpdate(e, p, q->getInt64(1), q->getText(2));
+            const auto status = checkUpdate(e, p, q->getDouble(1), q->getText(2));
 
             cb(status, relPath.generic());
         }

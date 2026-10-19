@@ -19,7 +19,13 @@ namespace ddb
         NotModified
     };
 
-    DDB_DLL FileStatus checkUpdate(Entry &e, const fs::path &p, long long dbMtime, const std::string &dbHash);
+    /**
+     * Compares a file with its index row (modification time, then hash when the time differs).
+     * Sets e.mtime, and e.hash when it hashed the file. fileMtime, when given, receives the
+     * file's modification time with sub-second precision (to store in the index).
+     */
+    DDB_DLL FileStatus checkUpdate(Entry &e, const fs::path &p, double dbMtime, const std::string &dbHash,
+                                   double *fileMtime = nullptr);
 
     typedef std::function<void(const FileStatus status, const std::string &file)> FileStatusCallback;
 

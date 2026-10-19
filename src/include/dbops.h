@@ -91,6 +91,8 @@ namespace ddb
     DDB_DLL int deleteFromIndex(Database *db, const std::string &query, bool isFolder = false, RemoveCallback callback = nullptr);
 
     DDB_DLL void doUpdate(Statement *updateQ, const Entry &e);
+    // doUpdate() storing `mtime` (with sub-second precision) instead of e.mtime
+    DDB_DLL void doUpdate(Statement *updateQ, const Entry &e, double mtime);
 
     DDB_DLL void listIndex(Database *db, const std::vector<std::string> &paths, std::ostream &out, const std::string &format, bool recursive = false, int maxRecursionDepth = 0);
     DDB_DLL void searchIndex(Database *db, const std::string &query, std::ostream &out, const std::string &format);
