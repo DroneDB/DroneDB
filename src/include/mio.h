@@ -38,6 +38,14 @@ namespace ddb
     namespace io
     {
 
+        // What one stat() of a path returns
+        struct FileState
+        {
+            bool directory = false;
+            std::uintmax_t size = 0;
+            double mtime = 0; // seconds, with the sub-second part the file system keeps
+        };
+
         class Path
         {
             fs::path p;
@@ -53,6 +61,8 @@ namespace ddb
             DDB_DLL time_t getModifiedTime();
             DDB_DLL bool setModifiedTime(time_t mtime);
 
+            // Type, size and modification time in one system call; throws FSException
+            DDB_DLL FileState getState();
             // Modification time in seconds, with the sub-second part the file system keeps
             DDB_DLL double getModifiedTimePrecise();
             // Sets the modification time unless sameModifiedTime() already holds; returns true if set

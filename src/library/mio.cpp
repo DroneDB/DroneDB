@@ -155,30 +155,41 @@ namespace ddb
             constexpr int64_t WINDOWS_TICKS_PER_SECOND = 10000000;
         }
 
-        double Path::getModifiedTimePrecise()
+        FileState Path::getState()
         {
+            FileState state;
 #ifdef WIN32
             WIN32_FILE_ATTRIBUTE_DATA data;
             if (!GetFileAttributesExW(p.wstring().c_str(), GetFileExInfoStandard, &data))
-                throw FSException("Cannot stat mtime " + p.string() + " (errcode: " + std::to_string(GetLastError()) + ")");
+                throw FSException("Cannot stat " + p.string() + " (errcode: " + std::to_string(GetLastError()) + ")");
 
             LARGE_INTEGER li;
             li.LowPart = data.ftLastWriteTime.dwLowDateTime;
             li.HighPart = data.ftLastWriteTime.dwHighDateTime;
             const int64_t ticks = li.QuadPart - WINDOWS_UNIX_TIME_START;
-            return static_cast<double>(ticks / WINDOWS_TICKS_PER_SECOND) +
-                   static_cast<double>(ticks % WINDOWS_TICKS_PER_SECOND) / WINDOWS_TICKS_PER_SECOND;
+            state.mtime = static_cast<double>(ticks / WINDOWS_TICKS_PER_SECOND) +
+                          static_cast<double>(ticks % WINDOWS_TICKS_PER_SECOND) / WINDOWS_TICKS_PER_SECOND;
+            state.directory = (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+            state.size = (static_cast<std::uintmax_t>(data.nFileSizeHigh) << 32) | data.nFileSizeLow;
 #else
             struct stat result;
             if (stat(p.string().c_str(), &result) != 0)
-                throw FSException("Cannot stat mtime " + p.string());
+                throw FSException("Cannot stat " + p.string());
 #ifdef __APPLE__
             const auto &ts = result.st_mtimespec;
 #else
             const auto &ts = result.st_mtim;
 #endif
-            return static_cast<double>(ts.tv_sec) + static_cast<double>(ts.tv_nsec) / 1e9;
+            state.mtime = static_cast<double>(ts.tv_sec) + static_cast<double>(ts.tv_nsec) / 1e9;
+            state.directory = S_ISDIR(result.st_mode);
+            state.size = static_cast<std::uintmax_t>(result.st_size);
 #endif
+            return state;
+        }
+
+        double Path::getModifiedTimePrecise()
+        {
+            return getState().mtime;
         }
 
         bool Path::setModifiedTimePrecise(double mtime)
@@ -341,8 +352,11 @@ namespace ddb
         {
             try
             {
+                const fs::path absPath = weakly_canonical(absolute(p));
+                const fs::path absParent = weakly_canonical(absolute(parent));
+
                 // Special case where parent == path
-                if (weakly_canonical(absolute(p)) == weakly_canonical(absolute(parent)))
+                if (absPath == absParent)
                 {
                     return fs::path("");
                 }
@@ -351,13 +365,14 @@ namespace ddb
                 // in this case we return the relative canonical absolute path
                 if (parent == parent.root_path() || parent == "/")
                 {
-                    return fs::weakly_canonical(fs::absolute(p)).relative_path();
+                    return absPath.relative_path();
                 }
 
-                fs::path relPath = relative(weakly_canonical(absolute(p)), weakly_canonical(absolute(parent)));
+                // What fs::relative() returns, without canonicalizing both paths again
+                fs::path relPath = absPath.lexically_relative(absParent);
                 if (relPath.generic_string() == ".")
                 {
-                    return weakly_canonical(absolute(parent));
+                    return absParent;
                 }
 
                 return relPath;

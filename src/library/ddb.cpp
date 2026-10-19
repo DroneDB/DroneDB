@@ -85,6 +85,21 @@ static int configureSqlite() {
 // Thread-safe initialization using std::once_flag
 static std::once_flag initialization_flag;
 
+// Exiv2's XMP toolkit must be initialized before threads parse images (indexing runs on
+// several threads, DDB-09); the lock serializes the namespaces it registers while decoding.
+static void initializeXmp() {
+    static std::mutex xmpMutex;
+    const auto lockUnlock = [](void* data, bool lock) {
+        auto* mutex = static_cast<std::mutex*>(data);
+        if (lock)
+            mutex->lock();
+        else
+            mutex->unlock();
+    };
+    if (!Exiv2::XmpParser::initialize(lockUnlock, &xmpMutex))
+        LOGW << "Cannot initialize the XMP toolkit";
+}
+
 void setupEnvironmentVariables(const std::string& exeFolder) {
     // Setup PROJ paths (uniform for both platforms)
     const auto projDataPath = fs::path(exeFolder).string();
@@ -262,6 +277,8 @@ void DDBRegisterProcess(bool verbose) {
         // No signal or crash handlers here: this runs inside host processes (the .NET
         // Registry, tests) whose runtimes own SIGSEGV/SIGFPE/SIGTERM. The ddb CLI installs
         // its own in apps/crash_handlers.cpp.
+
+        initializeXmp();
 
         // Register custom XMP namespaces for thermal sensor metadata
         try {

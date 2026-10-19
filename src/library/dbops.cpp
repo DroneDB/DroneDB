@@ -13,11 +13,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
-#include <future>
 #include <mutex>
 #include <optional>
 #include <system_error>
-#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -27,6 +25,7 @@
 #include "hash.h"
 #include "logger.h"
 #include "mio.h"
+#include "parallel.h"
 
 #include "userprofile.h"
 #include "utils.h"
@@ -112,6 +111,21 @@ static std::mutex g_templateMutex;
                 result.push_back(f);
         };
 
+        io::Path rootDir = rootDirectory;
+
+        // Records the folders between `path` and the root. Stops at a folder already
+        // recorded: its own parents were recorded with it.
+        const auto addParents = [&rootDir, &directories](fs::path path)
+        {
+            while (path.has_parent_path() && path != path.parent_path())
+            {
+                path = path.parent_path();
+                if (directories.count(path.string()) > 0 || !rootDir.isParentOf(path))
+                    break;
+                directories[path.string()] = true;
+            }
+        };
+
         for (const std::string &p : paths)
         {
             if (p.empty())
@@ -123,8 +137,6 @@ static std::mutex g_templateMutex;
             throw FSException("Some paths are not contained within: " +
                               rootDirectory.string() + ". Did you run ddb init?");
         }
-
-        io::Path rootDir = rootDirectory;
 
         for (fs::path p : paths)
         {
@@ -151,7 +163,8 @@ static std::mutex g_templateMutex;
                                 continue;
                             }
 
-                            if (fs::is_directory(rp) && includeDirs)
+                            // The iterator knows the type from the directory listing: no stat
+                            if (i->is_directory() && includeDirs)
                             {
                                 directories[rp.string()] = true;
                             }
@@ -161,15 +174,7 @@ static std::mutex g_templateMutex;
                             }
 
                             if (includeDirs)
-                            {
-                                while (rp.has_parent_path() &&
-                                       rootDir.isParentOf(rp.parent_path()) &&
-                                       rp.string() != rp.parent_path().string())
-                                {
-                                    rp = rp.parent_path();
-                                    directories[rp.string()] = true;
-                                }
-                            }
+                                addParents(rp);
                         }
                     }
                     catch (const fs::filesystem_error &e)
@@ -182,15 +187,7 @@ static std::mutex g_templateMutex;
                 if (rootDir.isParentOf(p))
                     directories[p.string()] = true;
                 if (includeDirs)
-                {
-                    while (p.has_parent_path() &&
-                           rootDir.isParentOf(p.parent_path()) &&
-                           p.string() != p.parent_path().string())
-                    {
-                        p = p.parent_path();
-                        directories[p.string()] = true;
-                    }
-                }
+                    addParents(p);
             }
             else if (fs::exists(p))
             {
@@ -198,15 +195,7 @@ static std::mutex g_templateMutex;
                 addFile(p);
 
                 if (includeDirs)
-                {
-                    while (p.has_parent_path() &&
-                           rootDir.isParentOf(p.parent_path()) &&
-                           p.string() != p.parent_path().string())
-                    {
-                        p = p.parent_path();
-                        directories[p.string()] = true;
-                    }
-                }
+                    addParents(p);
             }
             else
             {
@@ -268,7 +257,7 @@ static std::mutex g_templateMutex;
                         else if (maxDepth == -1)
                             i.disable_recursion_pending();
 
-                        if (fs::is_directory(rp))
+                        if (i->is_directory())
                         {
                             if (includeDirs)
                                 result.push_back(rp);
@@ -721,14 +710,98 @@ static std::mutex g_templateMutex;
         return planned;
     }
 
+    // Threads that hash and parse files while indexing (DDB_INDEX_THREADS: N, 0 = every
+    // core, default min(8, cores); 1 = serial)
+    size_t indexThreads() {
+        const int threads = parallel::threadsOption("DDB_INDEX_THREADS", 8);
+        return threads == 0 ? parallel::hardwareThreads() : static_cast<size_t>(threads);
+    }
+
+    // What COMPUTE did with one planned item: an entry to write, no change, or an error
+    struct ComputeOutcome {
+        std::optional<ComputedAddItem> computed;
+        std::optional<AddItemError> error;
+        bool unchanged = false;
+    };
+
+    ComputeOutcome computeAddEntry(const PlannedAddItem &item, const fs::path &directory, bool stopOnError,
+                                   const KnownHashes *knownHashes) {
+        ComputeOutcome outcome;
+        Entry e;
+        bool add = false;
+        std::optional<double> observedMtime;
+
+        const std::string *knownHash = nullptr;
+        if (knownHashes != nullptr) {
+            const auto it = knownHashes->find(item.relPath);
+            if (it != knownHashes->end()) knownHash = &it->second;
+        }
+
+        if (knownHash != nullptr) {
+            e.hash = *knownHash;
+            add = !item.existsInDb;
+            if (!add && *knownHash == item.dbHash) {
+                outcome.unchanged = true;
+                return outcome;
+            }
+        } else if (item.existsInDb) {
+            double fileMtime = 0;
+            const auto status = checkUpdate(e, item.absPath, item.dbMtime, item.dbHash, &fileMtime);
+            observedMtime = fileMtime;
+            if (status == FileStatus::NotModified) {
+                outcome.unchanged = true;
+                return outcome;
+            }
+        } else {
+            add = true;
+        }
+
+        const auto fail = [&](const char *code, const std::exception &ex) {
+            if (stopOnError) throw;
+            outcome.error = AddItemError{item.relPath, code, ex.what()};
+            return outcome;
+        };
+
+        try {
+            // Read before the content, so a write during the parse shows up at commit
+            if (!observedMtime) {
+                observedMtime = io::Path(item.absPath).getModifiedTimePrecise();
+                e.mtime = static_cast<time_t>(std::floor(*observedMtime));
+            }
+
+            // parseEntry() skips re-hashing if checkUpdate() already set e.hash.
+            parseEntry(item.absPath, directory, e, true);
+        } catch (const FSException &ex) {
+            return fail("FS", ex);
+        } catch (const GDALException &ex) {
+            return fail("GDAL", ex);
+        } catch (const PDALException &ex) {
+            return fail("PDAL", ex);
+        } catch (const JSONException &ex) {
+            return fail("JSON", ex);
+        } catch (const IndexException &ex) {
+            return fail("INDEX", ex);
+        }
+
+        ComputedAddItem ci;
+        ci.isUpdate = !add;
+        ci.observedMtime = *observedMtime;
+        ci.observedSize = static_cast<long long>(e.size);
+        ci.entry = std::move(e);
+        outcome.computed = std::move(ci);
+        return outcome;
+    }
+
     // COMPUTE: hashing, fingerprinting, EXIF/GDAL/PDAL metadata extraction. No transaction is
     // held during this phase; this is the part that used to run for the whole duration of the
-    // write lock (C1/I1).
+    // write lock (C1/I1). Items are independent, so they run on indexThreads() threads; the
+    // results, errors and unchanged paths keep the input order.
     //
     // Item-scoped exceptions (FSException, GDALException, PDALException, JSONException,
     // IndexException) are captured into `errors` when `stopOnError` is false; with
     // `stopOnError` true they propagate and abort the whole call, matching addToIndex()'s
-    // original all-or-nothing semantics. Database-scoped exceptions (DBException,
+    // original all-or-nothing semantics (the exception of the first failed item in input
+    // order, as a serial loop would). Database-scoped exceptions (DBException,
     // DBBusyException, bad_alloc, anything else) always propagate.
     //
     // `knownHashes` (relative path -> SHA-256) holds hashes the caller already trusts: those
@@ -738,78 +811,21 @@ static std::mutex g_templateMutex;
                                                     std::vector<AddItemError> &errors,
                                                     std::vector<std::string> &unchanged,
                                                     const KnownHashes *knownHashes = nullptr) {
+        std::vector<ComputeOutcome> outcomes(planned.size());
+        parallel::forEachIndex(planned.size(), indexThreads(), [&](size_t i) {
+            outcomes[i] = computeAddEntry(planned[i], directory, stopOnError, knownHashes);
+        });
+
         std::vector<ComputedAddItem> computed;
         computed.reserve(planned.size());
-
-        for (auto &item : planned) {
-            Entry e;
-            bool add = false;
-            bool update = false;
-            std::optional<double> observedMtime;
-
-            const std::string *knownHash = nullptr;
-            if (knownHashes != nullptr) {
-                const auto it = knownHashes->find(item.relPath);
-                if (it != knownHashes->end()) knownHash = &it->second;
-            }
-
-            if (knownHash != nullptr) {
-                e.hash = *knownHash;
-                add = !item.existsInDb;
-                if (!add && *knownHash == item.dbHash) {
-                    unchanged.push_back(item.relPath);
-                    continue;
-                }
-            } else if (item.existsInDb) {
-                double fileMtime = 0;
-                const auto status = checkUpdate(e, item.absPath, item.dbMtime, item.dbHash, &fileMtime);
-                observedMtime = fileMtime;
-                update = status != FileStatus::NotModified;
-                if (!update) {
-                    unchanged.push_back(item.relPath);
-                    continue;
-                }
-            } else {
-                add = true;
-            }
-
-            try {
-                // Read before the content, so a write during the parse shows up at commit
-                if (!observedMtime) {
-                    observedMtime = io::Path(item.absPath).getModifiedTimePrecise();
-                    e.mtime = static_cast<time_t>(std::floor(*observedMtime));
-                }
-
-                // parseEntry() skips re-hashing if checkUpdate() already set e.hash.
-                parseEntry(item.absPath, directory, e, true);
-            } catch (const FSException &ex) {
-                if (stopOnError) throw;
-                errors.push_back({item.relPath, "FS", ex.what()});
-                continue;
-            } catch (const GDALException &ex) {
-                if (stopOnError) throw;
-                errors.push_back({item.relPath, "GDAL", ex.what()});
-                continue;
-            } catch (const PDALException &ex) {
-                if (stopOnError) throw;
-                errors.push_back({item.relPath, "PDAL", ex.what()});
-                continue;
-            } catch (const JSONException &ex) {
-                if (stopOnError) throw;
-                errors.push_back({item.relPath, "JSON", ex.what()});
-                continue;
-            } catch (const IndexException &ex) {
-                if (stopOnError) throw;
-                errors.push_back({item.relPath, "INDEX", ex.what()});
-                continue;
-            }
-
-            ComputedAddItem ci;
-            ci.isUpdate = !add;
-            ci.observedMtime = *observedMtime;
-            ci.observedSize = static_cast<long long>(e.size);
-            ci.entry = std::move(e);
-            computed.push_back(std::move(ci));
+        for (size_t i = 0; i < outcomes.size(); i++) {
+            auto &outcome = outcomes[i];
+            if (outcome.computed)
+                computed.push_back(std::move(*outcome.computed));
+            else if (outcome.error)
+                errors.push_back(std::move(*outcome.error));
+            else if (outcome.unchanged)
+                unchanged.push_back(planned[i].relPath);
         }
 
         return computed;
@@ -835,6 +851,7 @@ static std::mutex g_templateMutex;
             "VALUES (?, ?, ?, ?, ?, ?, ?, GeomFromText(?, 4326), GeomFromText(?, "
             "4326))");
         const auto updateQ = db->query(UPDATE_QUERY);
+        const auto recheckQ = db->query("SELECT mtime,hash FROM entries WHERE path=?");
 
         Transaction tx(db, Transaction::Mode::Immediate);
 
@@ -845,21 +862,19 @@ static std::mutex g_templateMutex;
         for (auto &ci : computed) {
             const fs::path absPath = directory / io::Path(ci.entry.path).get();
 
-            // Re-validate filesystem state (mtime/size) between COMPUTE and COMMIT.
-            // Directories use logical size (0, or aggregate for nested DroneDBs), so only
-            // call fs::file_size for regular files — it reports an error on directories.
-            std::error_code ec;
-            long long size = ci.observedSize;
-            if (!fs::is_directory(absPath))
-                size = static_cast<long long>(fs::file_size(absPath, ec));
-            double mtime = -1;
+            // Re-validate filesystem state (mtime/size) between COMPUTE and COMMIT, with one
+            // stat. Directories use logical size (0, or aggregate for nested DroneDBs), so
+            // only the size of regular files is compared.
+            bool changed = false;
             try {
-                mtime = io::Path(absPath).getModifiedTimePrecise();
-            } catch (const std::exception &) {
-                ec = std::make_error_code(std::errc::no_such_file_or_directory);
+                const auto state = io::Path(absPath).getState();
+                const long long size = state.directory ? ci.observedSize : static_cast<long long>(state.size);
+                changed = state.mtime != ci.observedMtime || size != ci.observedSize;
+            } catch (const FSException &) {
+                changed = true; // gone
             }
 
-            if (ec || mtime != ci.observedMtime || size != ci.observedSize) {
+            if (changed) {
                 LOGD << "Skipping '" << ci.entry.path
                     << "': changed between compute and commit (will be re-detected next add)";
                 if (conflicts != nullptr)
@@ -870,15 +885,15 @@ static std::mutex g_templateMutex;
             // Re-query under the write transaction to handle the concurrent-add race.
             // The add/update decision was made in PLAN without a lock; another writer may
             // have committed a row with the same path before this transaction.
-            auto recheckQ = db->query("SELECT mtime,hash FROM entries WHERE path=?");
             recheckQ->bind(1, ci.entry.path);
             const bool stillAbsent = !recheckQ->fetch();
+            const double dbMtime = stillAbsent ? 0 : recheckQ->getDouble(0);
+            const std::string dbHash = stillAbsent ? "" : recheckQ->getText(1);
+            recheckQ->reset();
 
             bool actuallyInsert = !ci.isUpdate;
             if (!stillAbsent && !ci.isUpdate) {
                 // Planned as INSERT but row now exists (concurrent add) — convert to UPDATE
-                const double dbMtime = recheckQ->getDouble(0);
-                const std::string dbHash = recheckQ->getText(1);
                 if (io::sameModifiedTime(dbMtime, ci.observedMtime) && dbHash == ci.entry.hash) {
                     // Unchanged — a concurrent writer already committed the identical
                     // row. Report the path (null-guarded) so the completeness contract
@@ -1163,38 +1178,17 @@ static std::mutex g_templateMutex;
         if (hashes.empty())
             return;
 
-        // Limit concurrency to avoid spawning too many threads
         const auto buildDir = db->buildDirectory();
-        const size_t maxConcurrency = std::max(1u, std::thread::hardware_concurrency());
-        std::vector<std::future<void>> deletionFutures;
-
-        const auto waitAll = [&deletionFutures]()
-        {
-            for (auto &f : deletionFutures)
+        parallel::forEachIndex(hashes.size(), parallel::hardwareThreads(), [&](size_t i)
+                               {
+            try
             {
-                try
-                {
-                    f.get();
-                }
-                catch (const std::exception &e)
-                {
-                    LOGD << "Warning: Failed to delete build folder: " << e.what();
-                }
+                removeBuildFolder(buildDir / hashes[i]);
             }
-            deletionFutures.clear();
-        };
-
-        for (const auto &hash : hashes)
-        {
-            deletionFutures.push_back(std::async(std::launch::async, [buildDir, hash]()
-                                                 { removeBuildFolder(buildDir / hash); }));
-
-            // When we reach max concurrency, wait for all current futures before continuing
-            if (deletionFutures.size() >= maxConcurrency)
-                waitAll();
-        }
-
-        waitAll();
+            catch (const std::exception &e)
+            {
+                LOGD << "Warning: Failed to delete build folder: " << e.what();
+            } });
     }
 
     } // namespace

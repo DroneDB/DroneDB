@@ -7,9 +7,6 @@
 #include <boolinq/boolinq.h>
 
 #include <algorithm>
-#include <atomic>
-#include <future>
-#include <thread>
 
 #include <cpr/cpr.h>
 
@@ -21,6 +18,7 @@
 #include "json.h"
 #include "mio.h"
 #include "mzip.h"
+#include "parallel.h"
 #include "pushmanager.h"
 #include "syncmanager.h"
 #include "tagmanager.h"
@@ -374,32 +372,12 @@ void verifyDeltaHashes(const Delta& d, const fs::path& sourcePath) {
         return;
 
     // A few parallel readers help on a RAID array without thrashing a single disk
-    const size_t workers = std::min<size_t>({files.size(), 4, std::max(1u, std::thread::hardware_concurrency())});
-    std::atomic<size_t> next{0};
-    std::vector<std::future<void>> futures;
-    for (size_t w = 0; w < workers; w++)
-        futures.push_back(std::async(std::launch::async, [&]() {
-            for (size_t i = next++; i < files.size(); i = next++) {
-                const auto& add = *files[i];
-                const auto actual = Hash::fileSHA256((sourcePath / add.path).string());
-                if (actual != add.hash)
-                    throw AppException("Hash mismatch for " + add.path + ": expected " + add.hash +
-                                       ", got " + actual);
-            }
-        }));
-
-    // Wait for every worker before rethrowing: they reference this frame
-    std::exception_ptr error;
-    for (auto& f : futures) {
-        try {
-            f.get();
-        } catch (...) {
-            if (!error) error = std::current_exception();
-            next = files.size();
-        }
-    }
-    if (error)
-        std::rethrow_exception(error);
+    parallel::forEachIndex(files.size(), 4, [&](size_t i) {
+        const auto& add = *files[i];
+        const auto actual = Hash::fileSHA256((sourcePath / add.path).string());
+        if (actual != add.hash)
+            throw AppException("Hash mismatch for " + add.path + ": expected " + add.hash + ", got " + actual);
+    });
 }
 
 // A delta path must name something inside the dataset

@@ -3,14 +3,13 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "build_budget.h"
 
-#include <algorithm>
 #include <cstdlib>
 #include <mutex>
 #include <set>
-#include <thread>
 
 #include "gdal_inc.h"
 #include "logger.h"
+#include "parallel.h"
 
 namespace ddb {
 
@@ -28,11 +27,6 @@ int positiveOption(const char* name, int fallback) {
         return fallback;
     const int parsed = std::atoi(value);
     return parsed > 0 ? parsed : fallback;
-}
-
-int defaultThreads() {
-    const unsigned int hw = std::thread::hardware_concurrency();
-    return static_cast<int>(std::clamp(hw, 1u, static_cast<unsigned int>(DefaultMaxThreads)));
 }
 
 // Shared state of all live ScopedGdalCacheMax guards.
@@ -53,14 +47,8 @@ BuildResourceBudget BuildResourceBudget::fromConfig() {
     BuildResourceBudget budget{};
     budget.cacheBytes = static_cast<int64_t>(positiveOption("DDB_COG_CACHE_MB", DefaultCacheMb)) * MiB;
     budget.warpMemoryMb = positiveOption("DDB_WARP_MEMORY_MB", DefaultWarpMemoryMb);
-
-    // 0 is a valid explicit value (all cores), so it is not read with positiveOption.
-    budget.threads = defaultThreads();
-    if (const char* threads = CPLGetConfigOption("DDB_BUILD_THREADS", nullptr)) {
-        const int parsed = std::atoi(threads);
-        if (parsed >= 0)
-            budget.threads = parsed;
-    }
+    // 0 is a valid explicit value (all cores)
+    budget.threads = parallel::threadsOption("DDB_BUILD_THREADS", DefaultMaxThreads);
     return budget;
 }
 
