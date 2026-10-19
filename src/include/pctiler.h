@@ -14,17 +14,25 @@
 #include "geo.h"
 #include "tiler.h"
 #include "pointcloud.h"
+#include "coordstransformer.h"
+
+#include <memory>
 
 namespace ddb
 {
 
     // Tiler that renders web-map raster tiles from a built COPC (.copc.laz) file
     // using PDAL's CopcReader. Drop-in replacement for the previous EptTiler.
+    // The constructor reads the COPC header and prepares the coordinate transforms once;
+    // every tile then streams the points of its window through PointRasterizer. An
+    // instance must not be used by two threads at once (RasterCache hands out one per
+    // caller).
     class PointCloudTiler : public Tiler
     {
-        int wSize;
         PointCloudInfo pcInfo;
         bool hasColors;
+        std::unique_ptr<CoordsTransformer> toCloud;    // EPSG:3857 -> cloud CRS
+        std::unique_ptr<CoordsTransformer> toMercator; // cloud CRS -> EPSG:3857
 
     public:
         DDB_DLL PointCloudTiler(const std::string &copcPath,
@@ -32,11 +40,15 @@ namespace ddb
                                 bool tms = false);
         DDB_DLL ~PointCloudTiler();
 
-        DDB_DLL std::string tile(int tz, int tx, int ty, uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr) override;
-    };
+        using Tiler::tile;
 
-    DDB_DLL void drawCircle(uint8_t *buffer, uint8_t *alpha, int px, int py, int radius,
-                            uint8_t r, uint8_t g, uint8_t b, int tileSize, int wSize);
+        DDB_DLL std::string tile(int tz, int tx, int ty, ImageFormat format,
+                                 uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr) override;
+
+        // Tiles are read from the COPC level this many zoom levels coarser than the tile's
+        // pixel size (DDB_PCTILE_RESOLUTION_OFFSET, default 2)
+        DDB_DLL static int resolutionOffset();
+    };
 
 } // namespace ddb
 

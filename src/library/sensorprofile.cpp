@@ -6,6 +6,7 @@
 #include "exceptions.h"
 #include "logger.h"
 #include "mio.h"
+#include "fileversion.h"
 
 #include <fstream>
 #include <algorithm>
@@ -134,6 +135,13 @@ SensorProfileManager& SensorProfileManager::instance() {
     return inst;
 }
 
+void SensorProfileManager::invalidateDetections() {
+    // Detections made with the previous profiles are dropped, and those in progress
+    // are not stored (see detectSensor)
+    generation_++;
+    detections_.clear();
+}
+
 void SensorProfileManager::ensureLoaded() const {
     if (loaded_) return;
 
@@ -175,6 +183,7 @@ void SensorProfileManager::ensureLoaded() const {
 
 void SensorProfileManager::loadDefaults(const std::string &jsonPath) {
     std::lock_guard<std::mutex> lock(mutex_);
+    invalidateDetections();
 
     std::string path = jsonPath;
     if (path.empty()) {
@@ -214,6 +223,7 @@ void SensorProfileManager::loadDefaults(const std::string &jsonPath) {
 
 void SensorProfileManager::loadOverrides(const std::string &jsonStr) {
     std::lock_guard<std::mutex> lock(mutex_);
+    invalidateDetections();
 
     ensureLoaded();
 
@@ -285,10 +295,49 @@ bool SensorProfileManager::matchesProfile(const SensorProfile &profile, int band
 }
 
 SensorDetectionResult SensorProfileManager::detectSensor(const std::string &rasterPath) const {
+    // Memoised per file version: a tile or thumbnail request does not reopen the raster
+    // and rescan its metadata, and the lock is not held during the GDAL work
+    const auto version = fileVersion(rasterPath);
+    std::vector<SensorProfile> profiles;
+    uint64_t generation;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        ensureLoaded();
+        if (!version.empty()) {
+            for (auto it = detections_.begin(); it != detections_.end(); ++it) {
+                if (it->path != rasterPath) continue;
+                if (it->version != version) {
+                    detections_.erase(it);
+                    break;
+                }
+                detections_.splice(detections_.begin(), detections_, it);
+                return detections_.front().result;
+            }
+        }
+        profiles = profiles_;
+        generation = generation_;
+    }
+
+    auto result = detectSensorUncached(rasterPath, profiles);
+
     std::lock_guard<std::mutex> lock(mutex_);
+    uncachedDetections_++;
+    if (!version.empty() && generation == generation_) {
+        detections_.remove_if([&](const CachedDetection &d) { return d.path == rasterPath; });
+        detections_.push_front(CachedDetection{rasterPath, version, result});
+        if (detections_.size() > MaxCachedDetections)
+            detections_.pop_back();
+    }
+    return result;
+}
 
-    ensureLoaded();
+uint64_t SensorProfileManager::uncachedDetections() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return uncachedDetections_;
+}
 
+SensorDetectionResult SensorProfileManager::detectSensorUncached(const std::string &rasterPath,
+                                                                 const std::vector<SensorProfile> &profiles) const {
     SensorDetectionResult result;
 
     GDALDatasetH hDataset = GDALOpen(rasterPath.c_str(), GA_ReadOnly);
@@ -359,7 +408,7 @@ SensorDetectionResult SensorProfileManager::detectSensor(const std::string &rast
     }
 
     // Try matching profiles (already sorted by priority descending)
-    for (const auto &profile : profiles_) {
+    for (const auto &profile : profiles) {
         if (profile.sensorCategory != "multispectral" && profile.sensorCategory != "thermal") continue;
 
         if (matchesProfile(profile, bandCount, dataType, allMetadata, lastBandIsAlpha)) {

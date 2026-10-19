@@ -27,6 +27,7 @@
 #include "deppath.h"
 #include "exceptions.h"
 #include "gsplat.h"
+#include "raster_cache.h"
 #include "mio.h"
 #include "mzip.h"
 #include "pointcloud.h"
@@ -531,8 +532,11 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
 
         if (built) {
             LOGD << "Build complete, moving temp folder to " << outputFolder;
-            if (fs::exists(outputFolder))
+            if (fs::exists(outputFolder)) {
+                // Rasters of the previous output kept open would block this on Windows
+                RasterCache::instance().release(outputFolder);
                 io::assureIsRemoved(outputFolder);
+            }
 
             io::assureFolderExists(fs::path(outputFolder).parent_path());
             io::rename(tempFolder, outputFolder);

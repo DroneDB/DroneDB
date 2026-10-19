@@ -143,11 +143,12 @@ extern "C"
     DDB_DLL DDBErr DDBInfo(const char **paths, int numPaths, char **output, const char *format = "text", bool recursive = false, int maxRecursionDepth = 0,
                            const char *geometry = "auto", bool withHash = false, bool stopOnError = true);
 
-    /** Close the idle pooled index connections of the datasets under a folder.
+    /** Close the idle pooled index connections and the idle cached rasters (tilers and
+     *  datasets kept open between tile/render calls) of the files under a folder.
      *  Call it before deleting, moving or replacing a dataset folder (or its .ddb/dbase.sqlite)
-     *  from this process: idle connections keep the index files open.
+     *  from this process: idle connections and rasters keep their files open.
      * @param path dataset folder (parent of ".ddb"), or a folder that contains datasets
-     * @param closed out (optional): number of connections closed
+     * @param closed out (optional): number of connections and rasters closed
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBReleaseConnections(const char *path, int *closed);
 
@@ -258,7 +259,9 @@ extern "C"
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBMemoryTile(const char *inputPath, int tz, int tx, int ty, uint8_t **outBuffer, int *outBufferSize, int tileSize = 256, bool tms = false, bool forceRecreate = false, const char *inputPathHash = "");
 
-    /** Generate a tile in memory with explicit output format ("png" or "jpeg"). */
+    /** Generate a tile in memory with explicit output format: "png", "jpeg" or "webp"
+     *  (or their MIME types). PNG tiles are written at zlib level 1, WebP tiles lossy at
+     *  quality 80; tiles without transparent pixels have no alpha band. */
     DDB_DLL DDBErr DDBMemoryTileFmt(const char *inputPath, int tz, int tx, int ty, uint8_t **outBuffer, int *outBufferSize, int tileSize = 256, bool tms = false, bool forceRecreate = false, const char *inputPathHash = "", const char *outputFormat = "png");
 
     /** Generate delta between two ddbs

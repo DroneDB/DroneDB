@@ -64,7 +64,29 @@ namespace ddb
     {
     }
 
+    std::string Tiler::tile(int tz, int tx, int ty, uint8_t **outBuffer, int *outBufferSize)
+    {
+        return tile(tz, tx, ty, ImageFormat::Png, outBuffer, outBufferSize);
+    }
+
     std::string Tiler::tile(const TileInfo &t) { return tile(t.tz, t.tx, t.ty); }
+
+    std::string Tiler::writeTile(const RasterImage &image, ImageFormat format, int tz, int tx, int ty,
+                                 uint8_t **outBuffer, int *outBufferSize)
+    {
+        std::string tilePath = getTilePath(tz, tx, ty, true);
+        if (format != ImageFormat::Png)
+        {
+            const auto pos = tilePath.rfind(".png");
+            if (pos != std::string::npos)
+                tilePath.replace(pos, 4, std::string(".") + imageFormatExtension(format));
+        }
+
+        EncodeOptions options;
+        options.format = format;
+        TileEncoder::write(image, options, tilePath, outBuffer, outBufferSize);
+        return outBuffer != nullptr ? "" : tilePath;
+    }
 
     std::vector<TileInfo> Tiler::getTilesForZoomLevel(int tz) const
     {
@@ -101,32 +123,6 @@ namespace ddb
         //    b.max.y = std::min<double>(std::pow(2, tz - 1), b.max.y);
 
         return b;
-    }
-
-    template <typename T>
-    void Tiler::rescale(GDALRasterBandH hBand, char *buffer, size_t bufsize)
-    {
-        double minmax[2];
-        GDALComputeRasterMinMax(hBand, TRUE, minmax);
-
-        // Avoid divide by zero
-        if (minmax[0] == minmax[1])
-            minmax[1] += 0.1;
-
-        LOGD << "Min: " << minmax[0] << " | Max: " << minmax[1];
-
-        // Can still happen according to GDAL for very large values
-        if (minmax[0] == minmax[1])
-            throw GDALException(
-                "Cannot scale values due to source min/max being equal");
-
-        double deltamm = minmax[1] - minmax[0];
-        T *ptr = reinterpret_cast<T *>(buffer);
-
-        for (size_t i = 0; i < bufsize; i++)
-        {
-            ptr[i] = static_cast<T>(((ptr[i] - minmax[0]) / deltamm) * 255.0);
-        }
     }
 
     int Tiler::tmsToXYZ(int ty, int tz) const

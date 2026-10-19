@@ -26,6 +26,7 @@
 #include "build_budget.h"
 #include "database.h"
 #include "databasepool.h"
+#include "raster_cache.h"
 #include "dbops.h"
 #include "delta.h"
 #include "entry.h"
@@ -484,7 +485,8 @@ DDBErr DDBReleaseConnections(const char* path, int* closed) {
     if (utils::isNullOrEmptyOrWhitespace(path))
         throw InvalidArgsException("No path provided");
 
-    const auto count = ddb::DatabasePool::instance().releaseConnections(fs::path(path));
+    const auto count = ddb::DatabasePool::instance().releaseConnections(fs::path(path)) +
+                       ddb::RasterCache::instance().release(fs::path(path));
     if (closed != nullptr)
         *closed = static_cast<int>(count);
 

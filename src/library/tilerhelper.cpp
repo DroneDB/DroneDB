@@ -6,6 +6,9 @@
 #include "gdaltiler.h"
 #include "pctiler.h"
 #include "threadlock.h"
+#include "raster_cache.h"
+
+#include <functional>
 
 #include <memory>
 #include <vector>
@@ -78,58 +81,53 @@ namespace ddb
         return TilerHelper::getTile(tileablePath, tz, tx, ty, tileSize, tms, forceRecreate, tileCacheFolder, nullptr, nullptr, tileablePathHash);
     }
 
+    std::string TilerHelper::withTiler(const fs::path &tileablePath, int tileSize, bool tms, bool forceRecreate,
+                                       const fs::path &outputFolder, const std::string &tileablePathHash,
+                                       const std::function<std::string(Tiler &)> &render)
+    {
+        const bool copc = isCopcPath(tileablePath.string());
+        const fs::path localPath = copc ? tileablePath : toLocalFile(tileablePath, tileablePathHash);
+
+        // A forced recreation must not be served by a tiler prepared before it
+        if (forceRecreate)
+            RasterCache::instance().release(localPath);
+
+        const TilerKey key{localPath.string(), tileSize, tms, outputFolder.string()};
+        auto tiler = RasterCache::instance().acquireTiler(key, [&]() -> std::unique_ptr<Tiler> {
+            if (copc)
+                return std::make_unique<PointCloudTiler>(localPath.string(), outputFolder.string(), tileSize, tms);
+
+            const fs::path fileToTile = toGeoTIFF(localPath, tileSize, forceRecreate, "", tileablePathHash);
+            return std::make_unique<GDALTiler>(fileToTile.string(), outputFolder.string(), tileSize, tms);
+        });
+        return render(*tiler);
+    }
+
     fs::path TilerHelper::getTile(const fs::path &tileablePath, int tz, int tx, int ty, int tileSize, bool tms, bool forceRecreate, const fs::path &outputFolder, uint8_t **outBuffer, int *outBufferSize, const std::string &tileablePathHash)
     {
-        if (isCopcPath(tileablePath.string()))
-        {
-            // COPC point cloud
-            PointCloudTiler t(tileablePath.string(), outputFolder.string(), tileSize, tms);
-            return t.tile(tz, tx, ty, outBuffer, outBufferSize);
-        }
-        else
-        {
-            const fs::path fileToTile = toGeoTIFF(tileablePath, tileSize, forceRecreate, "", tileablePathHash);
-            GDALTiler t(fileToTile.string(), outputFolder.string(), tileSize, tms);
-            return t.tile(tz, tx, ty, outBuffer, outBufferSize);
-        }
+        return getTile(tileablePath, tz, tx, ty, tileSize, tms, forceRecreate, outputFolder, std::string("png"),
+                       outBuffer, outBufferSize, tileablePathHash);
     }
 
     fs::path TilerHelper::getTile(const fs::path &tileablePath, int tz, int tx, int ty, int tileSize, bool tms, bool forceRecreate, const fs::path &outputFolder, const std::string &outputFormat, uint8_t **outBuffer, int *outBufferSize, const std::string &tileablePathHash)
     {
-        if (isCopcPath(tileablePath.string()))
-        {
-            // Point clouds: format is not configurable (PNG only); delegate to
-            // the no-format overload so COPC dispatch logic lives in one place.
-            return getTile(tileablePath, tz, tx, ty, tileSize, tms, forceRecreate, outputFolder, outBuffer, outBufferSize, tileablePathHash);
-        }
-        else
-        {
-            const fs::path fileToTile = toGeoTIFF(tileablePath, tileSize, forceRecreate, "", tileablePathHash);
-            GDALTiler t(fileToTile.string(), outputFolder.string(), tileSize, tms);
-            return t.tile(tz, tx, ty, outputFormat, outBuffer, outBufferSize);
-        }
+        const ImageFormat format = parseImageFormat(outputFormat);
+        return withTiler(tileablePath, tileSize, tms, forceRecreate, outputFolder, tileablePathHash,
+                         [&](Tiler &t) { return t.tile(tz, tx, ty, format, outBuffer, outBufferSize); });
     }
 
     fs::path TilerHelper::getTile(const fs::path &tileablePath, int tz, int tx, int ty, int tileSize, bool tms, bool forceRecreate, const fs::path &outputFolder, const ThumbVisParams &visParams, uint8_t **outBuffer, int *outBufferSize, const std::string &tileablePathHash)
     {
-        if (isCopcPath(tileablePath.string()))
-        {
-            // COPC: vis params not supported, fall through to standard
-            PointCloudTiler t(tileablePath.string(), outputFolder.string(), tileSize, tms);
-            return t.tile(tz, tx, ty, outBuffer, outBufferSize);
-        }
-        else
-        {
-            const fs::path fileToTile = toGeoTIFF(tileablePath, tileSize, forceRecreate, "", tileablePathHash);
-            GDALTiler t(fileToTile.string(), outputFolder.string(), tileSize, tms);
-            return t.tile(tz, tx, ty, visParams, outBuffer, outBufferSize);
-        }
+        return withTiler(tileablePath, tileSize, tms, forceRecreate, outputFolder, tileablePathHash,
+                         [&](Tiler &t) {
+                             // Visualization parameters apply to rasters; point clouds render as usual
+                             if (auto *raster = dynamic_cast<GDALTiler *>(&t))
+                                 return raster->tile(tz, tx, ty, visParams, outBuffer, outBufferSize);
+                             return t.tile(tz, tx, ty, outBuffer, outBufferSize);
+                         });
     }
 
-    fs::path TilerHelper::toGeoTIFF(const fs::path &tileablePath, int tileSize,
-                                    bool forceRecreate,
-                                    const fs::path &outputGeotiff,
-                                    const std::string &tileablePathHash)
+    fs::path TilerHelper::toLocalFile(const fs::path &tileablePath, const std::string &tileablePathHash)
     {
         fs::path localTileablePath;
 
@@ -185,6 +183,8 @@ namespace ddb
                                            (writeOk ? res.error.message : std::string("write error")));
                     }
 
+                    // Tilers kept open on the previous download would block the replace on Windows
+                    RasterCache::instance().release(localTileablePath);
                     io::rename(tmpPath, localTileablePath);
                 }
             }
@@ -193,6 +193,16 @@ namespace ddb
         {
             localTileablePath = tileablePath;
         }
+
+        return localTileablePath;
+    }
+
+    fs::path TilerHelper::toGeoTIFF(const fs::path &tileablePath, int tileSize,
+                                    bool forceRecreate,
+                                    const fs::path &outputGeotiff,
+                                    const std::string &tileablePathHash)
+    {
+        const fs::path localTileablePath = toLocalFile(tileablePath, tileablePathHash);
 
         const EntryType type = fingerprint(localTileablePath);
 

@@ -12,6 +12,7 @@
 #include "ddb_export.h"
 #include "fs.h"
 #include "geo.h"
+#include "tile_encoder.h"
 
 namespace ddb
 {
@@ -82,8 +83,11 @@ namespace ddb
         // Convert from XYZ to TMS
         int xyzToTMS(int ty, int tz) const;
 
-        template <typename T>
-        void rescale(GDALRasterBandH hBand, char *buffer, size_t bufsize);
+        // Encodes image as tile (tz, tx, ty) of this tiler: into *outBuffer when set,
+        // otherwise into the tile file under the output folder (or /vsimem/), whose path
+        // is returned
+        std::string writeTile(const RasterImage &image, ImageFormat format, int tz, int tx, int ty,
+                              uint8_t **outBuffer, int *outBufferSize);
 
     public:
         DDB_DLL Tiler(const std::string &inputPath,
@@ -94,7 +98,10 @@ namespace ddb
         DDB_DLL std::string getTilePath(int z, int x, int y,
                                         bool createIfNotExists);
 
-        DDB_DLL virtual std::string tile(int tz, int tx, int ty, uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr) = 0;
+        // PNG tile
+        DDB_DLL std::string tile(int tz, int tx, int ty, uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr);
+        DDB_DLL virtual std::string tile(int tz, int tx, int ty, ImageFormat format,
+                                         uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr) = 0;
         DDB_DLL std::string tile(const TileInfo &tile);
 
         DDB_DLL std::vector<TileInfo> getTilesForZoomLevel(int tz) const;

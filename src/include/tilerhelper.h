@@ -6,6 +6,7 @@
 
 #include "gdal_inc.h"
 
+#include <functional>
 #include <sstream>
 #include <string>
 
@@ -27,6 +28,17 @@ namespace ddb
         // Where to store local cache tiles
         static fs::path getCacheFolderName(const fs::path &tileablePath,
                                            time_t modifiedTime, int tileSize);
+
+        // Runs render with a tiler for tileablePath: one prepared earlier and kept in
+        // RasterCache when available, otherwise a new one (geoprojecting the file first
+        // when it is not a georaster)
+        static std::string withTiler(const fs::path &tileablePath, int tileSize, bool tms, bool forceRecreate,
+                                     const fs::path &outputFolder, const std::string &tileablePathHash,
+                                     const std::function<std::string(Tiler &)> &render);
+
+        // Local copy of tileablePath: the path itself, or for a URL the file downloaded
+        // into the user cache
+        static fs::path toLocalFile(const fs::path &tileablePath, const std::string &tileablePathHash);
 
     public:
         DDB_DLL static void runTiler(const fs::path &input,
@@ -55,7 +67,7 @@ namespace ddb
                                         uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr,
                                         const std::string &tileablePathHash = "");
 
-        // Get a single tile with explicit output format ("png" or "jpeg")
+        // Get a single tile with explicit output format ("png", "jpeg" or "webp")
         DDB_DLL static fs::path getTile(const fs::path &tileablePath,
                                         int tz, int tx, int ty,
                                         int tileSize, bool tms,

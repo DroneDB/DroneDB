@@ -25,14 +25,6 @@ namespace ddb
         json toJSON();
     };
 
-    struct PointColor
-    {
-        uint8_t r;
-        uint8_t g;
-        uint8_t b;
-        uint8_t a = 0;
-    };
-
     DDB_DLL bool getPointCloudInfo(const std::string &filename, PointCloudInfo &info, int polyboundsSrs = 4326);
 
     // Reads metadata from a built COPC (.copc.laz) file. `span` returns an estimated

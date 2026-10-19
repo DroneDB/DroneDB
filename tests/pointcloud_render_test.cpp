@@ -16,10 +16,12 @@
 #include "copc_utils.h"
 #include "pointcloud.h"
 #include "point_rasterizer.h"
+#include "raster_cache.h"
 #include "raster_test_utils.h"
 #include "test.h"
 #include "testarea.h"
 #include "thumbs.h"
+#include "tilerhelper.h"
 
 namespace
 {
@@ -166,6 +168,29 @@ namespace
             buildCopc({pc.string()}, ta.getFolder("copc").string());
         }
         return copc;
+    }
+
+    TEST(DDB06_PointCloudTiler, cacheHitSkipsCopcInfo)
+    {
+        TestArea ta(TEST_NAME, true);
+        const auto copc = brightonCopc(ta);
+
+        const auto before = RasterCache::instance().stats();
+        int opaqueTiles = 0;
+        for (int i = 0; i < 5; i++)
+        {
+            uint8_t *buf = nullptr;
+            int size = 0;
+            TilerHelper::getTile(copc, 20, 256337, 369481, 256, true, false, "", &buf, &size);
+            const auto img = decodeImage(takeBuffer(buf, size));
+            if (std::count(img.alpha().begin(), img.alpha().end(), 255) > 1000)
+                opaqueTiles++;
+        }
+        const auto after = RasterCache::instance().stats();
+
+        EXPECT_EQ(after.created - before.created, 1u) << "one PointCloudTiler (one COPC header read) for 5 tiles";
+        EXPECT_EQ(after.reused - before.reused, 4u);
+        EXPECT_EQ(opaqueTiles, 5);
     }
 
     TEST(DDB07_Thumb, plannerPicksDeepestLevelInBudget)

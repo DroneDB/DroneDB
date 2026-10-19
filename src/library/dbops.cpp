@@ -6,6 +6,7 @@
 #include "build.h"
 #include "cad.h"
 #include "databasepool.h"
+#include "raster_cache.h"
 #include "ddb.h"
 #include "status.h"
 
@@ -1083,6 +1084,7 @@ static std::mutex g_templateMutex;
             if (fs::exists(buildFolder))
             {
                 LOGD << "Removing " << (buildFolder).string();
+                RasterCache::instance().release(buildFolder);
                 io::assureIsRemoved(buildFolder);
             }
         }
@@ -1174,6 +1176,7 @@ static std::mutex g_templateMutex;
                     if (fs::exists(buildFolder))
                     {
                         LOGD << "Removing " << buildFolder.string();
+                        RasterCache::instance().release(buildFolder);
                         io::assureIsRemoved(buildFolder);
                     }
                 }));
