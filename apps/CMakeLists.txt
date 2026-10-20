@@ -11,10 +11,6 @@ add_executable(${PROJECT_NAME}cmd main.cpp crash_handlers.cpp
 find_package(cxxopts CONFIG REQUIRED)
 target_link_libraries(${PROJECT_NAME}cmd PRIVATE ${PROJECT_NAME} cxxopts::cxxopts)
 
-message(STATUS "DDB: CUSTOM_INCLUDE_DIRS: ${CUSTOM_INCLUDE_DIRS}")
-
-target_include_directories(${PROJECT_NAME}cmd PRIVATE ${CUSTOM_INCLUDE_DIRS})
-
 if(WIN32)
     target_compile_definitions(${PROJECT_NAME}cmd PRIVATE PLOG_EXPORT)
     set_target_properties(${PROJECT_NAME}cmd PROPERTIES ENABLE_EXPORTS 1)

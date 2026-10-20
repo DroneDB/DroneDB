@@ -20,13 +20,12 @@ if(BUILD_TESTING)
     # the geospatial DLL graph before short lifecycle deadlines begin.
     add_executable(ddbtest_child helpers/process_child.cpp ../src/library/buildlock.cpp)
     target_link_libraries(ddbtest_child PRIVATE plog::plog Threads::Threads)
-    target_include_directories(ddbtest_child PRIVATE ${CUSTOM_INCLUDE_DIRS} "${PROJECT_SOURCE_DIR}/src/include")
+    target_include_directories(ddbtest_child PRIVATE "${PROJECT_SOURCE_DIR}/src/include")
 
     # Host-process stand-in for DDB-11 B6: checks that DDBRegisterProcess leaves the
     # host's signal handlers alone. Separate process: libddb initializes once per process.
     add_executable(ddbtest_signal_probe helpers/signal_probe.cpp)
     target_link_libraries(ddbtest_signal_probe PRIVATE ${PROJECT_NAME})
-    target_include_directories(ddbtest_signal_probe PRIVATE ${CUSTOM_INCLUDE_DIRS} "${PROJECT_SOURCE_DIR}/src/include")
 
     # Create the test executable
     add_executable(ddbtest ${TEST_SOURCES})
@@ -42,8 +41,9 @@ if(BUILD_TESTING)
     # Link the library and testing framework. "spz" is the in-tree static SPZ codec target
     # (vendor/CMakeLists.txt); its PUBLIC include dir (vendor/spz/src/cc) lets the gsplat tests
     # encode/decode .spz fixtures directly. libddb is SHARED, so no duplicate objects.
-    # SQLite is a PRIVATE dependency of libddb; open_test.cpp calls its C API directly.
-    target_link_libraries(ddbtest PRIVATE ${PROJECT_NAME} GTest::gtest GTest::gtest_main cpr::cpr GDAL::GDAL tinyobjloader::tinyobjloader OpenSSL::Crypto Exiv2::exiv2lib unofficial::sqlite3::sqlite3 spz)
+    # SQLite is a PRIVATE dependency of libddb; open_test.cpp calls its C API directly, and
+    # utils.cpp uses boolinq (header-only INTERFACE target, src/CMakeLists.txt).
+    target_link_libraries(ddbtest PRIVATE ${PROJECT_NAME} GTest::gtest GTest::gtest_main cpr::cpr GDAL::GDAL tinyobjloader::tinyobjloader OpenSSL::Crypto Exiv2::exiv2lib unofficial::sqlite3::sqlite3 spz boolinq)
 
     # set PLOG to PLOG_GLOBAL/PLOG_IMPORT to share instances across modules (and import on Windows)
     if(WIN32)
@@ -54,10 +54,6 @@ if(BUILD_TESTING)
     else()
         target_compile_definitions(ddbtest PRIVATE PLOG_GLOBAL)
     endif()
-
-    message(STATUS "TESTING: CUSTOM_INCLUDE_DIRS: ${CUSTOM_INCLUDE_DIRS}")
-
-    target_include_directories(ddbtest PRIVATE ${CUSTOM_INCLUDE_DIRS})
 
     # Copy only the test executable to build directory (not the entire folder)
     # This fixes the issue where copy_directory overwrites cmake_install.cmake

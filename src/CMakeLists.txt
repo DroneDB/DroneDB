@@ -38,7 +38,7 @@ find_package(tinyobjloader CONFIG REQUIRED)
 find_package(draco CONFIG REQUIRED)
 find_package(ZLIB REQUIRED)
 
-find_path(BOOLINQ_INCLUDE_DIRS "boolinq/boolinq.h")
+find_path(BOOLINQ_INCLUDE_DIRS "boolinq/boolinq.h" REQUIRED)
 
 # Common libraries
 set(COMMON_LIBS
@@ -71,9 +71,6 @@ target_link_libraries(${PROJECT_NAME} PRIVATE ${COMMON_LIBS})
 
 # Exclude kubazip to avoid symbol conflicts with libzip
 # assimp depends on kubazip, but we already link libzip directly
-set_target_properties(${PROJECT_NAME} PROPERTIES
-    LINK_INTERFACE_LIBRARIES ""
-)
 get_target_property(ASSIMP_LINK_LIBRARIES assimp::assimp INTERFACE_LINK_LIBRARIES)
 if(ASSIMP_LINK_LIBRARIES)
     list(REMOVE_ITEM ASSIMP_LINK_LIBRARIES "kubazip::kubazip")
@@ -83,25 +80,28 @@ endif()
 target_include_directories(${PROJECT_NAME} PRIVATE ${GEOTIFF_INCLUDE_DIR})
 target_include_directories(${PROJECT_NAME} PRIVATE ${Stb_INCLUDE_DIR})
 
-# Include directories (public for external use)
+# Public headers: consumers (ddbcmd, ddbtest) get these by linking ddb. vendor/libnexus is
+# public because 3d.h includes <nxs.h> (installed to include/ by libnexus).
 target_include_directories(${PROJECT_NAME} PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/vendor/libnexus>
     $<INSTALL_INTERFACE:include>
 )
 
-set (CUSTOM_INCLUDE_DIRS
-        ${BOOLINQ_INCLUDE_DIRS}
-        ${BOOLINQ_INCLUDE_DIRS}/pdal
-        ${CMAKE_SOURCE_DIR}/vendor/libnexus
-        ${CMAKE_SOURCE_DIR}/vendor/glob
-        )
+# Library sources only: glob.hpp (dbops.cpp), and <prefix>/include/pdal because PDAL's own
+# headers include their siblings without the pdal/ prefix (ColorinterpFilter.hpp includes
+# <filters/StatsFilter.hpp>).
+find_path(PDAL_HEADERS_DIR "filters/StatsFilter.hpp" PATH_SUFFIXES pdal REQUIRED)
+target_include_directories(${PROJECT_NAME} PRIVATE
+    ${PDAL_HEADERS_DIR}
+    ${CMAKE_SOURCE_DIR}/vendor/glob
+)
 
-# Propagate the variable to the parent scope
-set(CUSTOM_INCLUDE_DIRS ${CUSTOM_INCLUDE_DIRS} PARENT_SCOPE)
-
-message(STATUS "lib CUSTOM_INCLUDE_DIRS: ${CUSTOM_INCLUDE_DIRS}")
-
-target_include_directories(${PROJECT_NAME} PUBLIC ${CUSTOM_INCLUDE_DIRS})
+# boolinq is header-only and ships no CMake config: an INTERFACE target carries its include
+# dir to libddb (registry.cpp) and the tests (utils.cpp).
+add_library(boolinq INTERFACE)
+target_include_directories(boolinq INTERFACE ${BOOLINQ_INCLUDE_DIRS})
+target_link_libraries(${PROJECT_NAME} PRIVATE boolinq)
 
 if(WIN32)
     target_compile_definitions(${PROJECT_NAME} PRIVATE PLOG_EXPORT)

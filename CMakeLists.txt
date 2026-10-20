@@ -106,8 +106,6 @@ set(SRC_LIST "")
 # Add vendor directory
 add_subdirectory(vendor)
 
-set(CUSTOM_INCLUDE_DIRS "")
-
 # Add the source code (builds both shared and static libs)
 add_subdirectory(src)
 
