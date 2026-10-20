@@ -84,16 +84,32 @@ namespace ddb
             int insUnits = -1;          // $INSUNITS (-1: absent)
             int geoDataType = -1;       // GEODATA coordinate type (-1: no GEODATA)
             std::string geoDataDefinition; // GEODATA coordinate system definition (XML)
+            int geoDataVersion = 0;     // GEODATA object version (code 90)
+            // A local grid (type 1) places the drawing with these: the design point
+            // (drawing coordinates) is the reference point (coordinate system), the
+            // north direction is a drawing vector, the unit scale turns drawing units
+            // into metres.
+            double geoDesignX = 0, geoDesignY = 0;
+            double geoReferenceX = 0, geoReferenceY = 0;
+            double geoNorthX = 0, geoNorthY = 1;
+            double geoUnitScale = 1;
         };
         DDB_DLL DxfInfo readDxfInfo(const fs::path &dxf);
 
         // Unit name for $INSUNITS ("m", "ft", "mm", ...; "" when unknown/unitless).
         DDB_DLL std::string insUnitsName(int insUnits);
 
-        // SRS (authority code such as "EPSG:2193", or WKT) from a GEODATA object.
-        // Only types 2 (projected grid) and 3 (geographic) qualify; type 0 (unset)
-        // and 1 (local grid with a reference point) have no usable CRS.
+        // SRS (authority code such as "EPSG:2193", or WKT) from a GEODATA object of
+        // type 2 (projected grid) or 3 (geographic); type 0 (unset) and 1 (local grid,
+        // see the DxfInfo overload) have none.
         DDB_DLL std::optional<std::string> srsFromGeoData(int type, const std::string &definition);
+
+        // SRS of a drawing's GEODATA: types 2 and 3 as above; a local grid (type 1) of
+        // a projected coordinate system becomes a WKT2 derived projected CRS whose
+        // affine conversion takes the drawing's design point to the reference point,
+        // turns the drawing's north direction to grid north and scales drawing units
+        // to the system's units.
+        DDB_DLL std::optional<std::string> srsFromGeoData(const DxfInfo &info);
 
         struct CadCrs
         {

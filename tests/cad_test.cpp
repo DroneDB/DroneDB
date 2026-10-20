@@ -342,6 +342,43 @@ namespace
         EXPECT_TRUE(fs::exists(out / "mvt" / "metadata.json"));
     }
 
+    // GEODATA type 1 (local grid): the design point of the drawing is the reference
+    // point of the coordinate system (DDB-12 P4). The site drawing, its GEODATA turned
+    // into a local grid, lands where the projected grid put it, or 1 km east of it
+    // when its design point moves 1 km west.
+    TEST(cadVector, CadGeodataLocalGridPlacesTheDrawing)
+    {
+        TestArea ta(TEST_NAME, true);
+        const auto grid = cadAsset(ta, "utm32n_site_geodata.dxf");
+        std::ifstream in(grid.string(), std::ios::binary);
+        const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        const std::string geoData = "AcDbGeoData\n 90\n2\n330\n0\n 70\n2\n 10\n514000.0\n";
+        ASSERT_NE(text.find(geoData), std::string::npos);
+
+        const auto variant = [&](const std::string &name, const std::string &designX) {
+            std::string t = text;
+            t.replace(t.find(geoData), geoData.size(),
+                      "AcDbGeoData\n 90\n2\n330\n0\n 70\n1\n 10\n" + designX + "\n");
+            const auto path = ta.getPath(name);
+            std::ofstream(path.string(), std::ios::binary) << t;
+            return path;
+        };
+
+        buildVector(grid.string(), ta.getPath("grid").string());
+        buildVector(variant("same.dxf", "514000.0").string(), ta.getPath("same").string());
+        buildVector(variant("west.dxf", "513000.0").string(), ta.getPath("west").string());
+        const auto g = readGpkg(ta.getPath("grid"));
+        const auto same = readGpkg(ta.getPath("same"));
+        const auto east = readGpkg(ta.getPath("west"));
+        ASSERT_TRUE(g.opened && same.opened && east.opened);
+
+        EXPECT_NEAR(same.extent.MinX, g.extent.MinX, 1e-9);
+        EXPECT_NEAR(same.extent.MaxY, g.extent.MaxY, 1e-9);
+        const double kmInDegrees = 1000.0 / (111320.0 * std::cos(45.46 * M_PI / 180.0));
+        EXPECT_NEAR(east.extent.MinX - g.extent.MinX, kmInDegrees, 2e-4);
+        EXPECT_NEAR(east.extent.MinY, g.extent.MinY, 2e-4);
+    }
+
     // Decision D1: CAD files without a CRS whose coordinates fit in lon/lat
     // keep the historical EPSG:4326 assumption (all five older DXF test assets
     // do; civil_war_by_campaign.dxf is real lon/lat).
@@ -611,6 +648,56 @@ namespace
         EXPECT_FALSE(cad::srsFromGeoData(2, "<Dictionary/>").has_value());
         // A WKT definition (older writers) is accepted as is.
         EXPECT_TRUE(cad::srsFromGeoData(2, "EPSG:32632").has_value());
+    }
+
+    TEST(cadGeoData, LocalGridIsAnAffineOfItsCoordinateSystem)
+    {
+        cad::DxfInfo info;
+        info.geoDataType = 1;
+        info.geoDataVersion = 2;
+        info.geoDataDefinition = "<Dictionary><Alias id=\"32632\" type=\"CoordinateSystem\">"
+                                 "<ObjectId>UTM84-32N</ObjectId><Namespace>EPSG Code</Namespace></Alias></Dictionary>";
+        info.geoDesignX = 100;
+        info.geoDesignY = 200;
+        info.geoReferenceX = 514000;
+        info.geoReferenceY = 5034000;
+        const double phi = 30 * M_PI / 180;
+        info.geoNorthX = std::sin(phi); // the drawing's north, 30 degrees clockwise of its Y axis
+        info.geoNorthY = std::cos(phi);
+        info.geoUnitScale = 0.001; // millimetres
+
+        const auto wkt = cad::srsFromGeoData(info);
+        ASSERT_TRUE(wkt.has_value());
+        OGRSpatialReference local, utm;
+        ASSERT_EQ(local.SetFromUserInput(wkt->c_str()), OGRERR_NONE);
+        utm.importFromEPSG(32632);
+        local.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
+        utm.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
+        std::unique_ptr<OGRCoordinateTransformation> ct(OGRCreateCoordinateTransformation(&local, &utm));
+        ASSERT_TRUE(ct);
+
+        double x = 100, y = 200;
+        ASSERT_TRUE(ct->Transform(1, &x, &y));
+        EXPECT_NEAR(x, 514000, 1e-6) << "the design point is the reference point";
+        EXPECT_NEAR(y, 5034000, 1e-6);
+
+        // 1000 mm along the drawing's north is 1 m grid north
+        x = 100 + 1000 * std::sin(phi);
+        y = 200 + 1000 * std::cos(phi);
+        ASSERT_TRUE(ct->Transform(1, &x, &y));
+        EXPECT_NEAR(x, 514000, 1e-6);
+        EXPECT_NEAR(y, 5034001, 1e-6);
+
+        // Not readable: version 1 layout, no projected coordinate system
+        auto old = info;
+        old.geoDataVersion = 1;
+        EXPECT_FALSE(cad::srsFromGeoData(old).has_value());
+        auto geographic = info;
+        geographic.geoDataDefinition = "EPSG:4326";
+        EXPECT_FALSE(cad::srsFromGeoData(geographic).has_value());
+        auto noScale = info;
+        noScale.geoUnitScale = 0;
+        EXPECT_FALSE(cad::srsFromGeoData(noScale).has_value());
     }
 
     TEST(cadGeoData, DwgVersionFromMagic)

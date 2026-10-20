@@ -4,6 +4,9 @@
 #include "cad.h"
 
 #include <cctype>
+#include <cmath>
+#include <iomanip>
+#include <locale>
 #include <cstdlib>
 #include <fstream>
 #include <regex>
@@ -335,8 +338,21 @@ namespace ddb
                 }
                 else if (inGeoData)
                 {
-                    if (code == 70 && geoType < 0) geoType = std::atoi(trim(value).c_str());
-                    else if (code == 3 || code == 301) geoXml += decodeCaret(value);
+                    const auto number = [&value]() { return std::atof(trim(value).c_str()); };
+                    switch (code)
+                    {
+                    case 70: if (geoType < 0) geoType = std::atoi(trim(value).c_str()); break;
+                    case 90: info.geoDataVersion = std::atoi(trim(value).c_str()); break;
+                    case 3: case 301: geoXml += decodeCaret(value); break;
+                    case 10: info.geoDesignX = number(); break;
+                    case 20: info.geoDesignY = number(); break;
+                    case 11: info.geoReferenceX = number(); break;
+                    case 21: info.geoReferenceY = number(); break;
+                    case 12: info.geoNorthX = number(); break;
+                    case 22: info.geoNorthY = number(); break;
+                    case 40: info.geoUnitScale = number(); break;
+                    default: break;
+                    }
                 }
             }
 
@@ -393,6 +409,97 @@ namespace ddb
             if (s.SetFromUserInput(definition.c_str()) == OGRERR_NONE)
                 return toWkt(s);
             return std::nullopt;
+        }
+
+        namespace
+        {
+            // The text of the WKT node starting at `start` ("NAME[...]"), brackets matched
+            std::string wktNode(const std::string &wkt, size_t start)
+            {
+                int depth = 0;
+                bool quoted = false;
+                for (size_t i = start; i < wkt.size(); i++)
+                {
+                    if (wkt[i] == '"') quoted = !quoted;
+                    else if (!quoted && wkt[i] == '[') depth++;
+                    else if (!quoted && wkt[i] == ']' && --depth == 0)
+                        return wkt.substr(start, i - start + 1);
+                }
+                return "";
+            }
+
+            std::string wktNumber(double v)
+            {
+                std::ostringstream os;
+                os.imbue(std::locale::classic());
+                os << std::setprecision(17) << v;
+                return os.str();
+            }
+
+            // WKT2 of a CRS derived from projected `base` by an affine conversion
+            // (EPSG:9624): drawing = A0 + A1 E + A2 N, B0 + B1 E + B2 N
+            std::optional<std::string> localGridCrs(const OGRSpatialReference &base, const DxfInfo &info)
+            {
+                const std::string wkt = toWkt(base);
+                const auto geog = wkt.find("BASEGEOGCRS[");
+                const auto conversion = wkt.find("CONVERSION[");
+                // PROJCRS["name",...: the name is the first quoted string
+                const auto nameEnd = wkt.find('"', 9);
+                if (wkt.rfind("PROJCRS[\"", 0) != 0 || geog == std::string::npos ||
+                    conversion == std::string::npos || nameEnd == std::string::npos)
+                    return std::nullopt;
+                const std::string name = wkt.substr(8, nameEnd - 7);
+
+                const char *unitName = nullptr;
+                const double unitMetres = base.GetLinearUnits(&unitName);
+                const double northLength = std::hypot(info.geoNorthX, info.geoNorthY);
+                if (!(info.geoUnitScale > 0) || !(unitMetres > 0) || !(northLength > 0))
+                    return std::nullopt;
+
+                // grid = reference + s R (drawing - design), R turning the drawing's north
+                // to grid north (counter-clockwise by phi); the conversion is the inverse
+                const double s = info.geoUnitScale / unitMetres;
+                const double phi = std::atan2(info.geoNorthX / northLength, info.geoNorthY / northLength);
+                const double c = std::cos(phi), sn = std::sin(phi);
+                const double a1 = c / s, a2 = sn / s, b1 = -sn / s, b2 = c / s;
+                const double a0 = info.geoDesignX - (a1 * info.geoReferenceX + a2 * info.geoReferenceY);
+                const double b0 = info.geoDesignY - (b1 * info.geoReferenceX + b2 * info.geoReferenceY);
+
+                const std::string unit = "LENGTHUNIT[\"" + std::string(unitName ? unitName : "metre") + "\"," +
+                                         wktNumber(unitMetres) + "]";
+                const auto parameter = [](const char *n, double v, const std::string &u) {
+                    return std::string("PARAMETER[\"") + n + "\"," + wktNumber(v) + "," + u + "]";
+                };
+                const std::string coefficient = "SCALEUNIT[\"coefficient\",1]";
+                const std::string localName = "Local grid of " + name.substr(1, name.size() - 2);
+
+                return "DERIVEDPROJCRS[\"" + localName + "\",BASEPROJCRS[" + name + "," + wktNode(wkt, geog) + "," +
+                       wktNode(wkt, conversion) + "],DERIVINGCONVERSION[\"Drawing local grid\"," +
+                       "METHOD[\"Affine parametric transformation\",ID[\"EPSG\",9624]]," +
+                       parameter("A0", a0, unit) + "," + parameter("A1", a1, coefficient) + "," +
+                       parameter("A2", a2, coefficient) + "," + parameter("B0", b0, unit) + "," +
+                       parameter("B1", b1, coefficient) + "," + parameter("B2", b2, coefficient) + "]," +
+                       "CS[Cartesian,2],AXIS[\"(E)\",east,ORDER[1]," + unit + "],AXIS[\"(N)\",north,ORDER[2]," +
+                       unit + "]]";
+            }
+        } // namespace
+
+        std::optional<std::string> srsFromGeoData(const DxfInfo &info)
+        {
+            if (info.geoDataType != 1)
+                return srsFromGeoData(info.geoDataType, info.geoDataDefinition);
+
+            // Local grid: the definition names the coordinate system of the reference point.
+            // GEODATA version 1 (AutoCAD 2009) lays the points out differently: not read.
+            if (info.geoDataVersion < 2)
+                return std::nullopt;
+            const auto base = srsFromGeoData(2, info.geoDataDefinition);
+            if (!base)
+                return std::nullopt;
+            OGRSpatialReference s;
+            if (s.SetFromUserInput(base->c_str()) != OGRERR_NONE || !s.IsProjected())
+                return std::nullopt;
+            return localGridCrs(s, info);
         }
 
         namespace
@@ -496,7 +603,7 @@ namespace ddb
             }
 
             // 3. GEODATA stored in the drawing by AutoCAD / Civil 3D.
-            if (const auto srs = srsFromGeoData(info.geoDataType, info.geoDataDefinition))
+            if (const auto srs = srsFromGeoData(info))
             {
                 OGRSpatialReference s;
                 s.SetFromUserInput(srs->c_str());
