@@ -4,7 +4,9 @@
 
 // DDB-02 Phase 2 — ddb::open() reuses idle index connections (DatabasePool).
 
+#include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <fstream>
 #include <thread>
 
@@ -123,6 +125,39 @@ namespace
         EXPECT_EQ(stats().idle, 1u) << "the writer's connection is kept";
     }
 
+    TEST_F(DDB02_Pool, schemaOnlyWriteReachesTheDatabaseFile)
+    {
+        // total_changes does not count DDL: the release checkpoint must not rely on it
+        const auto root = makeIndex(TEST_NAME);
+        ASSERT_TRUE(has(root, "a.txt")); // leaves an idle connection, reused below
+        {
+            auto db = ddb::open(root.string(), false);
+            db->exec("CREATE TABLE pool_checkpoint_test (x INTEGER)");
+        }
+        EXPECT_EQ(stats().idle, 1u);
+
+        // immutable=1 reads the database file alone, without the WAL
+        const auto file = (root / DDB_FOLDER / DDB_DATABASE_FILE).generic_string();
+#ifdef _WIN32
+        const auto uri = "file:///" + file + "?immutable=1";
+#else
+        const auto uri = "file:" + file + "?immutable=1";
+#endif
+        sqlite3 *raw = nullptr;
+        ASSERT_EQ(sqlite3_open_v2(uri.c_str(), &raw, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, nullptr), SQLITE_OK);
+        sqlite3_stmt *stmt = nullptr;
+        ASSERT_EQ(sqlite3_prepare_v2(raw, "SELECT count(*) FROM sqlite_master WHERE name = 'pool_checkpoint_test'",
+                                     -1, &stmt, nullptr),
+                  SQLITE_OK);
+        ASSERT_EQ(sqlite3_step(stmt), SQLITE_ROW);
+        EXPECT_EQ(sqlite3_column_int(stmt, 0), 1) << "the table is only in the WAL";
+        sqlite3_finalize(stmt);
+        sqlite3_close_v2(raw);
+    }
+
+    // Windows cannot delete or replace a file a connection keeps open: there
+    // releaseConnections() must come first, and fileIdentity() is a constant
+#ifndef _WIN32
     TEST_F(DDB02_Pool, recreatedDatasetIsNotServedByTheOldConnection)
     {
         const auto root = makeIndex(TEST_NAME);
@@ -152,6 +187,7 @@ namespace
         EXPECT_FALSE(has(root, "b.txt"));
         EXPECT_TRUE(has(root, "a.txt"));
     }
+#endif
 
     TEST_F(DDB02_Pool, openTransactionIsNotKept)
     {
@@ -233,6 +269,23 @@ namespace
         EXPECT_EQ(closed, 1);
         EXPECT_EQ(stats().idle, 0u);
     }
+
+#ifdef _WIN32
+    TEST_F(DDB02_Pool, releaseConnectionsIgnoresLetterCase)
+    {
+        // Windows paths are case-insensitive: another spelling names the same folder
+        const auto ds = makeIndex(TEST_NAME);
+        ASSERT_TRUE(has(ds, "a.txt"));
+        ASSERT_EQ(stats().idle, 1u);
+
+        auto upper = ds.string();
+        std::transform(upper.begin(), upper.end(), upper.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+        ASSERT_NE(upper, ds.string());
+        EXPECT_EQ(DatabasePool::instance().releaseConnections(upper), 1u);
+        EXPECT_EQ(stats().idle, 0u);
+    }
+#endif
 
     TEST_F(DDB02_Pool, reopenUsesANewConnection)
     {

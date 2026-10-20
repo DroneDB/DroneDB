@@ -53,11 +53,17 @@ namespace ddb
 
     std::string cacheKeyPath(const fs::path &path)
     {
+        // Canonical where the path exists (symlinks resolved and, on Windows, the letter
+        // case of the file system), so two spellings of a folder release the same entries
         std::error_code ec;
-        auto absolute = fs::absolute(path, ec);
+        auto canonical = fs::weakly_canonical(path, ec);
         if (ec)
-            absolute = path;
-        return absolute.lexically_normal().generic_string();
+        {
+            canonical = fs::absolute(path, ec);
+            if (ec)
+                canonical = path;
+        }
+        return canonical.lexically_normal().generic_string();
     }
 
     bool isCacheKeyUnder(const std::string &key, const std::string &prefix)

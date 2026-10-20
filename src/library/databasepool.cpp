@@ -160,16 +160,20 @@ namespace ddb
         bool keep = sqlite3_get_autocommit(connection.handle) != 0 &&
                     sqlite3_next_stmt(connection.handle, nullptr) == nullptr;
 
-        if (keep && wrote)
+        if (keep)
         {
             // Same state as when the last connection closed: changes are in the database
-            // file and the WAL is empty. Busy (a reader holds an old snapshot) leaves the
-            // WAL to the next checkpoint, as a close does.
+            // file, so copying it alone copies the data. A connection that changed rows
+            // also empties the WAL. Any other runs a passive checkpoint, which never waits:
+            // it catches writes that total_changes does not count (schema, PRAGMA
+            // user_version). A WAL that cannot be fully checkpointed (a reader holds an
+            // old snapshot) closes the connection instead, as before pooling.
             int logFrames = 0;
             int checkpointed = 0;
-            const int rc = sqlite3_wal_checkpoint_v2(connection.handle, nullptr, SQLITE_CHECKPOINT_TRUNCATE,
+            const int rc = sqlite3_wal_checkpoint_v2(connection.handle, nullptr,
+                                                     wrote ? SQLITE_CHECKPOINT_TRUNCATE : SQLITE_CHECKPOINT_PASSIVE,
                                                      &logFrames, &checkpointed);
-            if (rc != SQLITE_OK && rc != SQLITE_BUSY)
+            if (rc != SQLITE_OK || checkpointed < logFrames)
                 keep = false;
         }
 
