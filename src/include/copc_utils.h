@@ -97,6 +97,16 @@ namespace ddb
     /// getCopcInfo and pass bounds in the cloud CRS) and up to 4 decompression threads
     DDB_DLL pdal::Options copcReaderOptions(const std::string &copcPath);
 
+    /// readers.copc options for the points of a 2D window (cloud CRS, bounds included) down to
+    /// the depth for resolution; the bounds text keeps every bit of the doubles
+    DDB_DLL pdal::Options copcWindowOptions(const std::string &copcPath, double minX, double minY, double maxX,
+                                            double maxY, double resolution);
+
+    /// The points readers.copc returns for that window and resolution, in batches (the
+    /// reference CopcNodeReader matches)
+    DDB_DLL void readCopcWindow(const std::string &copcPath, double minX, double minY, double maxX, double maxY,
+                                double resolution, const std::function<void(PointBatch &)> &sink);
+
     /// Runs the (streamable) PDAL pipeline that ends at tail without holding its points:
     /// they go to sink in batches of up to chunkSize. Batches carry the Red/Green/Blue
     /// dimensions when the pipeline has them, zeros otherwise.

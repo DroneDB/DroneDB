@@ -139,18 +139,10 @@ namespace ddb
         toCloud->transform(&bounds.min.x, &bounds.min.y);
         toCloud->transform(&bounds.max.x, &bounds.max.y);
 
-        // readers.copc parses its bounds from this text: the node reader takes the same
-        // (rounded) values, so both read the same points
-        const auto asText = [](double v) {
-            std::ostringstream os;
-            os << std::setprecision(14) << v;
-            return std::stod(os.str());
-        };
-        const double minX = asText(bounds.min.x), maxX = asText(bounds.max.x);
-        const double minY = asText(bounds.min.y), maxY = asText(bounds.max.y);
-        std::stringstream ss;
-        ss << std::setprecision(14) << "([" << minX << "," << maxX << "]," << "[" << minY << "," << maxY << "])";
-        LOGD << "COPC bounds: " << ss.str();
+        // Both readers take these exact values (copcWindowOptions writes them losslessly)
+        const double minX = bounds.min.x, maxX = bounds.max.x;
+        const double minY = bounds.min.y, maxY = bounds.max.y;
+        LOGD << "COPC bounds: [" << minX << ", " << maxX << "] x [" << minY << ", " << maxY << "]";
 
         const double copcResolution = mercator.resolution(tz - resolutionOffset());
         LOGD << "COPC resolution: " << copcResolution;
@@ -193,7 +185,7 @@ namespace ddb
         if (!drawn)
         {
             rasterizer.emplace(tileSize, mapping, pointRadius, pointRadius);
-            readWithPdal(ss.str(), copcResolution, draw);
+            readWithPdal(minX, minY, maxX, maxY, copcResolution, draw);
         }
 
         LOGD << "Drew " << rasterizer->drawn() << " points";
@@ -201,15 +193,11 @@ namespace ddb
         return writeTile(rasterizer->toImage(), format, tz, tx, ty, outBuffer, outBufferSize);
     }
 
-    void PointCloudTiler::readWithPdal(const std::string &bounds, double resolution,
+    void PointCloudTiler::readWithPdal(double minX, double minY, double maxX, double maxY, double resolution,
                                        const std::function<void(PointBatch &)> &sink)
     {
-        pdal::Options copcOpts = copcReaderOptions(inputPath);
-        copcOpts.add("bounds", bounds);
-        copcOpts.add("resolution", resolution);
-
         pdal::CopcReader copcReader;
-        copcReader.setOptions(copcOpts);
+        copcReader.setOptions(copcWindowOptions(inputPath, minX, minY, maxX, maxY, resolution));
         pdal::Stage *main = &copcReader;
 
         std::unique_ptr<pdal::ColorinterpFilter> colorFilter;

@@ -4,6 +4,8 @@
 #include "copc_utils.h"
 
 #include <cmath>
+#include <iomanip>
+#include <sstream>
 #include <cstring>
 #include <algorithm>
 #include <thread>
@@ -12,6 +14,7 @@
 #include <pdal/PointTable.hpp>
 #include <pdal/PointRef.hpp>
 #include <pdal/Stage.hpp>
+#include <pdal/io/CopcReader.hpp>
 
 #include <lazperf/readers.hpp>
 
@@ -292,6 +295,25 @@ namespace ddb
         if (!utils::isNetworkPath(copcPath))
             options.add("threads", static_cast<int>(std::clamp(std::thread::hardware_concurrency(), 1u, 4u)));
         return options;
+    }
+
+    pdal::Options copcWindowOptions(const std::string &copcPath, double minX, double minY, double maxX, double maxY,
+                                    double resolution)
+    {
+        pdal::Options options = copcReaderOptions(copcPath);
+        std::ostringstream bounds;
+        bounds << std::setprecision(17) << "([" << minX << "," << maxX << "],[" << minY << "," << maxY << "])";
+        options.add("bounds", bounds.str());
+        options.add("resolution", resolution);
+        return options;
+    }
+
+    void readCopcWindow(const std::string &copcPath, double minX, double minY, double maxX, double maxY,
+                        double resolution, const std::function<void(PointBatch &)> &sink)
+    {
+        pdal::CopcReader reader;
+        reader.setOptions(copcWindowOptions(copcPath, minX, minY, maxX, maxY, resolution));
+        forEachPointBatch(reader, sink);
     }
 
     void forEachPointBatch(pdal::Stage &tail, const std::function<void(PointBatch &)> &sink, size_t chunkSize)

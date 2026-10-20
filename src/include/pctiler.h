@@ -42,7 +42,7 @@ namespace ddb
         // readers.copc reads the others (remote files, ramp-coloured clouds)
         std::unique_ptr<CopcNodeReader> nodeReader;
 
-        void readWithPdal(const std::string &bounds, double resolution,
+        void readWithPdal(double minX, double minY, double maxX, double maxY, double resolution,
                           const std::function<void(PointBatch &)> &sink);
 
     public:

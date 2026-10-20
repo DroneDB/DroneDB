@@ -7,12 +7,8 @@
 
 #include <algorithm>
 #include <cstdlib>
-#include <iomanip>
-#include <sstream>
 #include <thread>
 #include <tuple>
-
-#include <pdal/io/CopcReader.hpp>
 
 #include "copc_node_cache.h"
 #include "copc_utils.h"
@@ -63,16 +59,9 @@ namespace
 
     std::vector<Point> readWithPdal(const fs::path &copc, const Window &w, double resolution)
     {
-        pdal::Options options = copcReaderOptions(copc.string());
-        std::ostringstream bounds;
-        bounds << std::setprecision(17) << "([" << w.minX << "," << w.maxX << "],[" << w.minY << "," << w.maxY << "])";
-        options.add("bounds", bounds.str());
-        options.add("resolution", resolution);
-        pdal::CopcReader reader;
-        reader.setOptions(options);
-
         std::vector<Point> points;
-        forEachPointBatch(reader, [&](PointBatch &b) { append(points, b); });
+        readCopcWindow(copc.string(), w.minX, w.minY, w.maxX, w.maxY, resolution,
+                       [&](PointBatch &b) { append(points, b); });
         std::sort(points.begin(), points.end());
         return points;
     }
