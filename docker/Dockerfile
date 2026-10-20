@@ -1,4 +1,4 @@
-FROM dronedb/builder
+FROM dronedb/builder AS builder
 
 # Set environment variables
 ENV CMAKE_BUILD_TYPE=Release \
@@ -55,11 +55,16 @@ RUN cd /workspace && \
     chmod +x scripts/build-debian-package.sh && \
     ./scripts/build-debian-package.sh
 
-# Create a smaller runtime image
-FROM ubuntu:24.04
+# The Debian package on its own. CI replaces this stage with the .deb it has
+# already tested (--build-context package=<dir>), so the source build above is skipped.
+FROM scratch AS package
+COPY --from=builder /workspace/build/package/*.deb /
 
-# Copy the built executable and dependencies from builder
-COPY --from=0 /workspace/build/package/*.deb /app/ddb.deb
+# Create a smaller runtime image
+FROM ubuntu:24.04 AS runtime
+
+# Copy the Debian package and install it with its dependencies
+COPY --from=package /*.deb /app/ddb.deb
 
 # Install the DEB package and all its dependencies, then clean up
 RUN apt-get update && \

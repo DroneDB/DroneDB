@@ -1,0 +1,41 @@
+name: vcpkg binary cache
+description: >
+  Restore the vcpkg binary cache (built port archives) and point vcpkg at it.
+  Pair it with actions/cache/save right after the step that runs vcpkg install,
+  using the `path` and `key` outputs, when `cache-hit` is not 'true'.
+
+outputs:
+  path:
+    description: Directory that holds the vcpkg binary archives
+    value: ${{ steps.vars.outputs.path }}
+  key:
+    description: Exact cache key for this manifest, triplet and vcpkg version
+    value: ${{ steps.vars.outputs.key }}
+  cache-hit:
+    description: "'true' when the exact key was restored"
+    value: ${{ steps.restore.outputs.cache-hit }}
+
+runs:
+  using: composite
+  steps:
+    - name: Compute vcpkg binary cache key
+      id: vars
+      shell: bash
+      run: |
+        # Forward slashes: vcpkg reads VCPKG_BINARY_SOURCES the same way on Windows and Linux.
+        dir="${GITHUB_WORKSPACE//\\//}/vcpkg-bincache"
+        mkdir -p "$dir"
+        # The vcpkg submodule commit pins the port versions and the vcpkg tool.
+        vcpkg_rev=$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD:vcpkg)
+        echo "path=$dir" >> "$GITHUB_OUTPUT"
+        echo "key=vcpkg-bin-${RUNNER_OS}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'vcpkg-triplets/**', 'vcpkg-overlays/**') }}-${vcpkg_rev}" >> "$GITHUB_OUTPUT"
+        echo "prefix=vcpkg-bin-${RUNNER_OS}-" >> "$GITHUB_OUTPUT"
+        echo "VCPKG_BINARY_SOURCES=clear;files,$dir,readwrite" >> "$GITHUB_ENV"
+    - name: Restore vcpkg binary cache
+      id: restore
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ steps.vars.outputs.path }}
+        key: ${{ steps.vars.outputs.key }}
+        # A partial match still helps: vcpkg rebuilds only the ports whose ABI hash changed.
+        restore-keys: ${{ steps.vars.outputs.prefix }}
