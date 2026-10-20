@@ -16,10 +16,12 @@
 #include "exceptions.h"
 #include "hash.h"
 #include "json.h"
+#include "logger.h"
 #include "mio.h"
 #include "mzip.h"
 #include "parallel.h"
 #include "pushmanager.h"
+#include "raster_cache.h"
 #include "syncmanager.h"
 #include "tagmanager.h"
 #include "url.h"
@@ -471,35 +473,55 @@ std::vector<Conflict> applyDelta(const Delta& d,
 
         removeFromIndex(destination, indexedRemovals);
         for (const auto* rem : fileRemovals) {
+            // A raster kept open by recent tile requests would block this on Windows
+            RasterCache::instance().release(destPath / rem->path);
             io::assureIsRemoved(destPath / rem->path);
             out << "D\t" << rem->path << std::endl;
         }
 
+        const auto indexAdded = [&](const std::vector<KnownFile>& files) {
+            addToIndexWithHashes(destination, files, [&out](const Entry& e, bool updated) {
+                out << (updated ? "U" : "A") << "\t" << e.path << std::endl;
+                return true;
+            });
+        };
+
         // Adds (sorted by path: folders before their content). Files are moved, not
         // copied: the source folder is a temporary folder on the same volume.
         std::vector<KnownFile> addedFiles;
-        for (const auto& add : d.adds) {
-            if (add.path.empty())
-                continue;
+        try {
+            for (const auto& add : d.adds) {
+                if (add.path.empty())
+                    continue;
 
-            bool indexed;
-            if (!canApply(destination, add.path, add.hash, add.baseHash, mergeStrategy,
-                          ConflictType::BothModified, conflicts, indexed))
-                continue;
+                bool indexed;
+                if (!canApply(destination, add.path, add.hash, add.baseHash, mergeStrategy,
+                              ConflictType::BothModified, conflicts, indexed))
+                    continue;
 
-            const auto dest = destPath / add.path;
-            if (add.isDirectory())
-                io::createDirectories(dest);
-            else
-                io::moveOrCopy(sourcePath / add.path, dest);
+                const auto dest = destPath / add.path;
+                if (add.isDirectory()) {
+                    io::createDirectories(dest);
+                } else {
+                    RasterCache::instance().release(dest);
+                    io::moveOrCopy(sourcePath / add.path, dest);
+                }
 
-            addedFiles.push_back({dest.string(), add.hash});
+                addedFiles.push_back({dest.string(), add.hash});
+            }
+        } catch (const std::exception& e) {
+            // The files already moved are gone from the source folder: index them, so the
+            // index matches the dataset and a new delta does not ask for them again
+            LOGW << "Delta apply failed after " << addedFiles.size() << " adds: " << e.what();
+            try {
+                indexAdded(addedFiles);
+            } catch (const std::exception& ie) {
+                LOGW << "Cannot index the adds applied before the failure: " << ie.what();
+            }
+            throw;
         }
 
-        addToIndexWithHashes(destination, addedFiles, [&out](const Entry& e, bool updated) {
-            out << (updated ? "U" : "A") << "\t" << e.path << std::endl;
-            return true;
-        });
+        indexAdded(addedFiles);
 
         if (conflicts.size() == 0) {
             auto mPathList = d.modifiedPathList();

@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <map>
 #include <mutex>
 #include <optional>
 #include <system_error>
@@ -1123,41 +1124,65 @@ static std::mutex g_templateMutex;
         }
     }
 
-    // Deletes the entries matching `predicate`, and their metadata, inside the caller's
-    // transaction. Appends the deleted paths and their (non-empty) hashes; returns the count.
-    int deleteMatchingRows(Database *db, const PathPredicate &predicate, std::vector<std::string> &deletedPaths,
-                           std::vector<std::string> &deletedHashes)
+    // Deletes the entries matching a predicate, and their metadata, inside the caller's
+    // transaction. The statements are prepared once for one predicate sql and bound again
+    // for each run, so removing many paths does not prepare three statements per path.
+    class RowDeleter
     {
-        // An empty predicate matches every entry: never delete the whole index here.
-        if (predicate.sql.empty())
-            return 0;
+        std::unique_ptr<Statement> metaDelete_, select_, delete_;
 
-        auto metaDeleteQ = db->query("DELETE FROM entries_meta WHERE " + predicate.sql);
-        bindPathPredicate(*metaDeleteQ, predicate);
-        metaDeleteQ->execute();
+    public:
+        RowDeleter(Database *db, const std::string &predicateSql)
+            : metaDelete_(db->query("DELETE FROM entries_meta WHERE " + predicateSql)),
+              select_(db->query("SELECT path, hash FROM entries WHERE " + predicateSql)),
+              delete_(db->query("DELETE FROM entries WHERE " + predicateSql))
+        {
+        }
 
-        auto q = db->query("SELECT path, hash FROM entries WHERE " + predicate.sql);
+        // `predicate` has the sql given to the constructor. Appends the deleted paths and
+        // their (non-empty) hashes; returns the count.
+        int run(const PathPredicate &predicate, std::vector<std::string> &deletedPaths,
+                std::vector<std::string> &deletedHashes)
+        {
+            bindPathPredicate(*metaDelete_, predicate);
+            metaDelete_->execute();
+
+            bindPathPredicate(*select_, predicate);
+            int count = 0;
+            while (select_->fetch())
+            {
+                deletedPaths.push_back(select_->getText(0));
+                const auto hash = select_->getText(1);
+                if (!hash.empty())
+                    deletedHashes.push_back(hash);
+                count++;
+            }
+            select_->reset();
+
+            if (count > 0)
+            {
+                bindPathPredicate(*delete_, predicate);
+                delete_->execute();
+            }
+
+            return count;
+        }
+    };
+
+    // Path and type of the entries `query` selects (see buildPathPredicate), without the
+    // metadata and geometries getMatchingEntries() reads
+    std::vector<std::pair<std::string, EntryType>> matchingPathsAndTypes(Database *db, const std::string &query)
+    {
+        const auto predicate = buildPathPredicate(query, false);
+        auto q = db->query("SELECT path, type FROM entries" +
+                           (predicate.sql.empty() ? std::string() : " WHERE " + predicate.sql));
         bindPathPredicate(*q, predicate);
 
-        int count = 0;
+        std::vector<std::pair<std::string, EntryType>> matches;
         while (q->fetch())
-        {
-            deletedPaths.push_back(q->getText(0));
-            const auto hash = q->getText(1);
-            if (!hash.empty())
-                deletedHashes.push_back(hash);
-            count++;
-        }
+            matches.emplace_back(q->getText(0), static_cast<EntryType>(q->getInt(1)));
         q->reset();
-
-        if (count > 0)
-        {
-            auto deleteQ = db->query("DELETE FROM entries WHERE " + predicate.sql);
-            bindPathPredicate(*deleteQ, predicate);
-            deleteQ->execute();
-        }
-
-        return count;
+        return matches;
     }
 
     // Removes the build folders of deleted entries, in parallel, outside any transaction.
@@ -1213,7 +1238,7 @@ static std::mutex g_templateMutex;
 
         std::vector<std::string> deletedPaths, deletedHashes;
         Transaction tx(db, Transaction::Mode::Immediate);
-        const int count = deleteMatchingRows(db, predicate, deletedPaths, deletedHashes);
+        const int count = RowDeleter(db, predicate.sql).run(predicate, deletedPaths, deletedHashes);
         tx.commit();
 
         if (callback != nullptr)
@@ -1242,6 +1267,10 @@ static std::mutex g_templateMutex;
             // One transaction for the whole list: a path without entries removes nothing.
             Transaction tx(db, Transaction::Mode::Immediate);
 
+            // Every path must match before anything is removed: a path listed twice, or
+            // inside a folder also listed, is then removed once instead of failing the
+            // second time. Sorted, so a folder comes before its content.
+            std::map<std::string, EntryType> targets;
             for (const auto &p : paths)
             {
                 LOGD << "Deleting path: " << p;
@@ -1250,22 +1279,23 @@ static std::mutex g_templateMutex;
 
                 LOGD << "Rel path: " << relPath.generic();
 
-                int tot = 0;
-
-                for (auto &e : getMatchingEntries(db, relPath.generic()))
-                {
-                    auto cnt = deleteMatchingRows(db, buildPathPredicate(e.path, false), deletedPaths, deletedHashes);
-                    if (cnt > 0 && e.type != Directory && isPrjPath(e.path))
-                        removedPrj.push_back(e.path);
-
-                    if (e.type == Directory)
-                        cnt += deleteMatchingRows(db, buildPathPredicate(e.path, true), deletedPaths, deletedHashes);
-
-                    tot += cnt;
-                }
-
-                if (!tot)
+                const auto matches = matchingPathsAndTypes(db, relPath.generic());
+                if (matches.empty())
                     throw FSException("No matching entries");
+                targets.insert(matches.begin(), matches.end());
+            }
+
+            RowDeleter exact(db, "path = ?");
+            RowDeleter descendants(db, descendantsPredicate("", "path").sql);
+
+            for (const auto &[path, type] : targets)
+            {
+                const auto cnt = exact.run({"path = ?", {path}}, deletedPaths, deletedHashes);
+                if (cnt > 0 && type != Directory && isPrjPath(path))
+                    removedPrj.push_back(path);
+
+                if (type == Directory && !path.empty())
+                    descendants.run(descendantsPredicate(path, "path"), deletedPaths, deletedHashes);
             }
 
             tx.commit();

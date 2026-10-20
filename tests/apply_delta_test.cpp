@@ -468,6 +468,54 @@ namespace
         EXPECT_EQ(f.hashOf("dir/gone.txt"), "<missing>");
     }
 
+    TEST(DDB04_RemoveFromIndex, pathListedTwiceOrInsideAListedFolder)
+    {
+        // Removed once; the repeat must not fail (and roll back) the whole removal
+        Fixture f(TEST_NAME);
+        std::vector<std::string> removed;
+        removeFromIndex(f.db.get(),
+                        {(f.root / "keep.txt").string(), (f.root / "keep.txt").string(),
+                         (f.root / "dir").string(), (f.root / "dir" / "gone.txt").string()},
+                        [&removed](const std::string &p)
+                        { removed.push_back(p); });
+        std::sort(removed.begin(), removed.end());
+        EXPECT_EQ(removed, (std::vector<std::string>{"dir", "dir/gone.txt", "keep.txt"}));
+        EXPECT_EQ(f.hashOf("keep.txt"), "<missing>");
+        EXPECT_EQ(f.hashOf("dir/gone.txt"), "<missing>");
+        EXPECT_NE(f.hashOf("old.txt"), "<missing>");
+    }
+
+    TEST(DDB04_ApplyDelta, removeListedTwice)
+    {
+        Fixture f(TEST_NAME);
+        const auto hash = f.hashOf("old.txt");
+        Delta d;
+        d.removes.push_back(RemoveAction("old.txt", hash));
+        d.removes.push_back(RemoveAction("old.txt", hash));
+
+        EXPECT_TRUE(f.apply(d).empty());
+        EXPECT_FALSE(fs::exists(f.root / "old.txt"));
+        EXPECT_EQ(f.hashOf("old.txt"), "<missing>");
+    }
+
+    TEST(DDB04_ApplyDelta, failedAddStillIndexesTheFilesAlreadyMoved)
+    {
+        Fixture f(TEST_NAME);
+        writeFile(f.root / "blocker", "a file where the delta expects a folder");
+        Delta d;
+        d.adds.push_back(f.stage("a.txt", "alpha"));
+        d.adds.push_back(f.stage("blocker/c.txt", "charlie"));
+
+        EXPECT_ANY_THROW(f.apply(d));
+
+        // a.txt left the source folder: the index must describe it, or nothing could
+        // bring the dataset and the index back in step
+        EXPECT_FALSE(fs::exists(f.source / "a.txt"));
+        EXPECT_EQ(readFile(f.root / "a.txt"), "alpha");
+        EXPECT_EQ(f.hashOf("a.txt"), Hash::fileSHA256((f.root / "a.txt").string()));
+        EXPECT_EQ(f.hashOf("blocker/c.txt"), "<missing>");
+    }
+
     TEST(DDB04_MoveOrCopy, renamesSingleLinkAndCopiesSharedData)
     {
         TestArea ta(TEST_NAME, true);
