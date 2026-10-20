@@ -17,20 +17,3 @@ if(WIN32)
 else()
     target_compile_definitions(${PROJECT_NAME}cmd PRIVATE PLOG_GLOBAL)
 endif()
-
-if (WIN32)
-    # For the ddb executable:
-    add_custom_command(TARGET ${PROJECT_NAME}cmd POST_BUILD
-        # Copy the exe directly to the build directory
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "$<TARGET_FILE:${PROJECT_NAME}cmd>"
-            "${CMAKE_BINARY_DIR}/$<TARGET_FILE_NAME:${PROJECT_NAME}cmd>"
-    )
-else()
-    # For the ddb executable:
-    add_custom_command(TARGET ${PROJECT_NAME}cmd POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${CMAKE_BINARY_DIR}/apps"
-            "${CMAKE_BINARY_DIR}"
-    )
-endif()

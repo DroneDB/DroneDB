@@ -185,8 +185,7 @@ jobs:
           DDB_DWG2DXF_PATH: ${{ github.workspace }}/build/dwg2dxf
         run: cd build && ./ddbtest --gtest_shuffle
       - name: Run CLI Exit Code Tests
-        # From build/tests: the ddbcmd post-build copy of build/apps overwrites build/CTestTestfile.cmake
-        run: cd build/tests && ctest -R '^cli\.' --output-on-failure
+        run: cd build && ctest -R '^cli\.' --output-on-failure
       - name: Run Program Smoke Test
         run: cd build && ./ddbcmd --version --debug
       - name: Build Debian Package
@@ -541,7 +540,7 @@ jobs:
           retention-days: 14
       - name: Run CLI Exit Code Tests
         run: |
-          cd build/tests
+          cd build
           ctest -C Release -R '^cli\.' --output-on-failure
         shell: pwsh
       - name: Run Program Smoke Test

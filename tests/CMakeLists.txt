@@ -55,43 +55,23 @@ if(BUILD_TESTING)
         target_compile_definitions(ddbtest PRIVATE PLOG_GLOBAL)
     endif()
 
-    # Copy only the test executable to build directory (not the entire folder)
-    # This fixes the issue where copy_directory overwrites cmake_install.cmake
-    add_custom_command(TARGET ddbtest POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "$<TARGET_FILE:ddbtest_child>"
-            "$<TARGET_FILE_DIR:ddbtest>"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "$<TARGET_FILE:ddbtest_child>"
-            "${CMAKE_BINARY_DIR}"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "$<TARGET_FILE:ddbtest_signal_probe>"
-            "$<TARGET_FILE_DIR:ddbtest>"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "$<TARGET_FILE:ddbtest_signal_probe>"
-            "${CMAKE_BINARY_DIR}"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "$<TARGET_FILE:ddbtest>"
-            "${CMAKE_BINARY_DIR}"
-        COMMENT "Copying ddbtest to build directory"
-    )
-
-    # On Windows, also copy runtime DLLs
+    # ddbtest, ddbtest_child and ddbtest_signal_probe are built in DDB_RUNTIME_DIR (root
+    # CMakeLists.txt), next to libddb and the data files. On Windows, also stage the test's DLLs.
     if (WIN32)
         add_custom_command(TARGET ddbtest POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E echo "Staging runtime DLLs for ddbtest..."
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 $<TARGET_RUNTIME_DLLS:ddbtest>
-                "${CMAKE_BINARY_DIR}"
+                "${DDB_RUNTIME_DIR}"
             COMMAND_EXPAND_LISTS
         )
     endif()
 
     # CLI exit codes (DQ-02): usage errors and failed commands must exit 1, an explicit
     # help request exits 0. Each test checks the exact code (cli_expect_exit.cmake), so a
-    # crash or a loader failure no longer counts as an expected failure. The staged copy
-    # in the build root is the one users run and the one next to the Windows DLLs.
-    set(DDB_CLI_EXE "${CMAKE_BINARY_DIR}/$<TARGET_FILE_NAME:${PROJECT_NAME}cmd>")
+    # crash or a loader failure no longer counts as an expected failure. ddbcmd is built in
+    # the build root, next to the Windows DLLs: the binary users run.
+    set(DDB_CLI_EXE "$<TARGET_FILE:${PROJECT_NAME}cmd>")
     function(ddb_add_cli_test)
         cmake_parse_arguments(CLI "" "NAME;EXIT;WORKING_DIRECTORY" "ARGS" ${ARGN})
         if(NOT CLI_WORKING_DIRECTORY)

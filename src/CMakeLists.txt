@@ -102,14 +102,6 @@ else()
 endif()
 
 
-if (WIN32)
-    set(OUTPUT_DIR "${CMAKE_BINARY_DIR}")
-    set(SRC_RELEASE_DIR "${CMAKE_BINARY_DIR}/src/$<CONFIG>")
-else()
-    set(OUTPUT_DIR "${CMAKE_BINARY_DIR}")
-    set(SRC_RELEASE_DIR "${CMAKE_BINARY_DIR}/src")
-endif()
-
 find_package(Python3 REQUIRED)
 
 # Define a custom target to update sensor data using the Python script
@@ -124,81 +116,39 @@ add_custom_target(
 
 message(STATUS "Build target 'update_sensor_data' is ready.")
 
-if (WIN32)
-    set(PROJ_DIR "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/share/proj")
-else()
-    set(PROJ_DIR "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/share/proj4")
-    if(NOT EXISTS "${PROJ_DIR}/proj.db")
-        set(PROJ_DIR "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/share/proj")
-    endif()
-endif()
-
-if (WIN32)
-    set(LIBNEXUS_OUTPUT_DIR "${CMAKE_BINARY_DIR}/vendor/libnexus/$<CONFIG>")
-else()
-    set(LIBNEXUS_OUTPUT_DIR "${CMAKE_BINARY_DIR}/vendor/libnexus")
-endif()
-
-# Copy the necessary files to the binary directory after build
-add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E echo "Copying necessary files to the binary directory..."
-    # TARGET_FILE_DIR resolves to the appropriate output directory:
-    # - config-specific directory for multi-config generators (e.g. VS)
-    # - single output directory for single-config generators (e.g. Ninja)
-    # The copy_directory command is executed for all generator types.
-    COMMAND ${CMAKE_COMMAND} -E copy_directory "$<TARGET_FILE_DIR:${PROJECT_NAME}>" "${OUTPUT_DIR}"
-    # Copy libnexus dll from its output directory
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE_DIR:nxs>/$<TARGET_FILE_NAME:nxs>" "${OUTPUT_DIR}/"
-)
-
-# Copy Qt plugins (imageformats, platforms, etc.) for libnexus - required for WebP support on Windows
-if(WIN32)
-    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory "$<TARGET_FILE_DIR:nxs>/plugins" "${OUTPUT_DIR}/plugins"
-    )
-endif()
-
-# Copy PROJ data if available
+# Runtime files next to libddb: ddb, nxs, ddbcmd and the test binaries are all built in
+# DDB_RUNTIME_DIR (root CMakeLists.txt), so getDataPath() finds these files whether it looks next
+# to the library or next to the executable. On Windows, libnexus's own post-build step copies
+# the Qt plugins (WebP textures) next to nxs.dll, i.e. to DDB_RUNTIME_DIR/plugins.
 if(PROJ_DATA_DIR AND EXISTS "${PROJ_DATA_DIR}/proj.db")
     add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E echo "Copying PROJ data from ${PROJ_DATA_DIR}..."
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${PROJ_DATA_DIR}/proj.db" "${OUTPUT_DIR}/proj.db"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${PROJ_DATA_DIR}/proj.db" "$<TARGET_FILE_DIR:${PROJECT_NAME}>/proj.db"
-        COMMENT "Copying PROJ database"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${PROJ_DATA_DIR}/proj.db" "${DDB_RUNTIME_DIR}"
+        COMMENT "Copying PROJ database from ${PROJ_DATA_DIR}"
     )
 endif()
 
-# Copy other support files.
-# Files are placed in both OUTPUT_DIR (next to the executables) and
-# $<TARGET_FILE_DIR:...> (next to the shared library itself) so that the
-# runtime data-path lookup in getDataPath() succeeds regardless of which
-# directory the DLL is loaded from (e.g. when .NET tests load ddb.dll
-# directly from build/src/ rather than from build/).
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/data/sensor_data.sqlite" "${OUTPUT_DIR}"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/data/timezone21.bin" "${OUTPUT_DIR}"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/data/sensor-profiles.json" "${OUTPUT_DIR}"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/data/zoneinfo" "${OUTPUT_DIR}/zoneinfo"
-    # Also copy next to the shared library itself
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/data/sensor_data.sqlite" "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/data/timezone21.bin" "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/data/sensor-profiles.json" "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/data/zoneinfo" "$<TARGET_FILE_DIR:${PROJECT_NAME}>/zoneinfo"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_SOURCE_DIR}/data/sensor_data.sqlite"
+        "${CMAKE_SOURCE_DIR}/data/timezone21.bin"
+        "${CMAKE_SOURCE_DIR}/data/sensor-profiles.json"
+        "${DDB_RUNTIME_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/data/zoneinfo" "${DDB_RUNTIME_DIR}/zoneinfo"
 )
 
 # Windows-specific files
 if (WIN32)
     add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/data/ddb.bat" "${OUTPUT_DIR}"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/data/ddb.bat" "${DDB_RUNTIME_DIR}"
     )
 
-    # Automatic copy of ALL required DLLs next to the executable (MSVC only).
+    # Automatic copy of ALL required DLLs next to the library and executables (MSVC only).
     # Avoids endless manual chasing after gdal/proj/curl/zlib/etc.
     add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
         COMMAND "${CMAKE_COMMAND}" -E echo "Staging runtime DLLs for ${PROJECT_NAME}..."
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
                 $<TARGET_RUNTIME_DLLS:${PROJECT_NAME}>
-                $<TARGET_FILE_DIR:${PROJECT_NAME}>
+                "${DDB_RUNTIME_DIR}"
         COMMAND_EXPAND_LISTS
     )
 
@@ -212,7 +162,7 @@ if (WIN32)
         COMMAND "${CMAKE_COMMAND}"
             -DSOURCE_DIR=$<IF:$<CONFIG:Debug>,${VCPKG_DEBUG_BIN_DIR},${VCPKG_BIN_DIR}>
             $<$<CONFIG:Debug>:-DFALLBACK_DIR=${VCPKG_BIN_DIR}>
-            -DDEST_DIR=${OUTPUT_DIR}
+            -DDEST_DIR=${DDB_RUNTIME_DIR}
             -P "${CMAKE_SOURCE_DIR}/cmake/CopyDlls.cmake"
         COMMENT "Copying vcpkg DLLs"
     )

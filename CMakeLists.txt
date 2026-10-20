@@ -17,11 +17,15 @@ else()
     message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 endif()
 
-set(OUTPUT_DIR "${CMAKE_BINARY_DIR}")
-
-# Define support files directory (these are typically in the main build directory)
-set(SUPPORT_DIR "${CMAKE_BINARY_DIR}")
-message(STATUS "Using support directory: ${SUPPORT_DIR}")
+# Build tree layout: everything users and tests run, and everything packaging copies, is in the
+# build root (ddbcmd, libddb, libnxs, ddbtest and its helpers, the data files and, on Windows,
+# the DLLs and Qt plugins). Targets are built there directly instead of being copied after the
+# build, so build/Makefile and build/CTestTestfile.cmake stay the top-level ones. The generator
+# expression stops multi-config generators (Visual Studio) from appending a per-config
+# subdirectory. Set before add_subdirectory(vendor) so it also covers libnexus's nxs.
+set(DDB_RUNTIME_DIR "${CMAKE_BINARY_DIR}")
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "$<1:${DDB_RUNTIME_DIR}>")
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "$<1:${DDB_RUNTIME_DIR}>")
 
 # Use vcpkg manifest mode
 
