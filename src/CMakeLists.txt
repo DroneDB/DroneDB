@@ -67,24 +67,26 @@ set(COMMON_LIBS
 )
 
 
-target_link_libraries(${PROJECT_NAME} PRIVATE ${COMMON_LIBS})
+target_link_libraries(${PROJECT_NAME} PRIVATE ${COMMON_LIBS} ddb_warnings)
 
-target_include_directories(${PROJECT_NAME} PRIVATE ${GEOTIFF_INCLUDE_DIR})
-target_include_directories(${PROJECT_NAME} PRIVATE ${Stb_INCLUDE_DIR})
+# Third-party include directories are SYSTEM: their warnings are not ours (cmake/Warnings.cmake)
+target_include_directories(${PROJECT_NAME} SYSTEM PRIVATE ${GEOTIFF_INCLUDE_DIR} ${Stb_INCLUDE_DIR})
 
 # Public headers: consumers (ddbcmd, ddbtest) get these by linking ddb. vendor/libnexus is
 # public because 3d.h includes <nxs.h> (installed to include/ by libnexus).
 target_include_directories(${PROJECT_NAME} PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/vendor/libnexus>
     $<INSTALL_INTERFACE:include>
+)
+target_include_directories(${PROJECT_NAME} SYSTEM PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/vendor/libnexus>
 )
 
 # Library sources only: glob.hpp (dbops.cpp), and <prefix>/include/pdal because PDAL's own
 # headers include their siblings without the pdal/ prefix (ColorinterpFilter.hpp includes
 # <filters/StatsFilter.hpp>).
 find_path(PDAL_HEADERS_DIR "filters/StatsFilter.hpp" PATH_SUFFIXES pdal REQUIRED)
-target_include_directories(${PROJECT_NAME} PRIVATE
+target_include_directories(${PROJECT_NAME} SYSTEM PRIVATE
     ${PDAL_HEADERS_DIR}
     ${CMAKE_SOURCE_DIR}/vendor/glob
 )
@@ -92,7 +94,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 # boolinq is header-only and ships no CMake config: an INTERFACE target carries its include
 # dir to libddb (registry.cpp) and the tests (utils.cpp).
 add_library(boolinq INTERFACE)
-target_include_directories(boolinq INTERFACE ${BOOLINQ_INCLUDE_DIRS})
+target_include_directories(boolinq SYSTEM INTERFACE ${BOOLINQ_INCLUDE_DIRS})
 target_link_libraries(${PROJECT_NAME} PRIVATE boolinq)
 
 if(WIN32)

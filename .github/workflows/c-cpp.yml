@@ -53,6 +53,26 @@ jobs:
           tag: ${{ github.ref }}
           overwrite: true
 
+  # clang-format on the lines a change touches only (DQ-01: no mass reformat). Fails when a
+  # changed line in src/, apps/ or tests/ does not follow .clang-format; the log shows the fix.
+  lint_format:
+    name: clang-format on changed lines
+    if: github.ref_type != 'tag'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # Report-only until .clang-format matches the code base: the current file would flag
+      # most changes (209 hunks in the last 30 commits). DQ-01 left open: tune it, then drop
+      # --report-only so formatting of changed lines fails the job.
+      - name: Check formatting of changed lines
+        env:
+          LINT_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          ls /usr/bin/clang-format-diff* >/dev/null 2>&1 || { sudo apt-get update -qq && sudo apt-get install -y -qq clang-format; }
+          python3 scripts/lint-changed-lines.py format --base "$LINT_BASE" --report-only
+
   build_ubuntu:
     name: Build/Test on Ubuntu
     needs: build_libredwg
@@ -125,7 +145,27 @@ jobs:
           path: ${{ steps.vcpkg-cache.outputs.path }}
           key: ${{ steps.configure.outcome == 'success' && steps.vcpkg-cache.outputs.key || steps.vcpkg-cache.outputs.partial-key }}
       - name: Build C++ lib/program and tests
-        run: cd build && make -j$(nproc)
+        # build.log feeds the warning ratchet below. ccache replays a cached compile's warnings, and
+        # build/ is fresh on every run, so the log holds the warnings of every translation unit.
+        env:
+          LC_MESSAGES: C  # untranslated "warning:" lines for the ratchet
+        run: |
+          set -o pipefail
+          cd build && make -j$(nproc) 2>&1 | tee build.log
+      - name: Check compiler warnings (ratchet)
+        # Fails on a new warning in src/, apps/ or tests/ (cmake/warnings-baseline.txt, measured with
+        # this job's GCC), and on a large unexplained drop (the baseline must then be updated).
+        # Linux only: Windows (MSVC /W4) warnings are in its build log, not ratcheted, until a
+        # Windows baseline exists.
+        run: python3 scripts/check-warnings.py build/build.log --build-dir build
+      - name: clang-tidy on changed lines (report-only)
+        # Findings are annotated on the PR but do not fail the job yet (scripts/lint-changed-lines.py).
+        if: github.ref_type != 'tag'
+        env:
+          LINT_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          ls /usr/bin/clang-tidy-diff*.py >/dev/null 2>&1 || sudo apt-get install -y -qq clang-tidy
+          python3 scripts/lint-changed-lines.py tidy --base "$LINT_BASE" --build-dir build
       - name: Build Untwine COPC accelerator
         # Optional on PR/master pushes (DroneDB falls back to PDAL writers.copc),
         # but MUST succeed on release tags so the .deb ships with untwine.

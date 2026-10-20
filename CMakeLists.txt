@@ -100,6 +100,10 @@ endif()
 # Add custom CMake modules
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 include(MsvcReleaseDebugInfo)
+include(Warnings)
+
+# compile_commands.json for clang-tidy and editors (DQ-01); ignored by the Visual Studio generators
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Option to build tests
 option(BUILD_TESTING "Build unit tests" ON)

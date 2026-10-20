@@ -19,13 +19,13 @@ if(BUILD_TESTING)
     # Compile the lock implementation directly so the tiny helper does not load
     # the geospatial DLL graph before short lifecycle deadlines begin.
     add_executable(ddbtest_child helpers/process_child.cpp ../src/library/buildlock.cpp)
-    target_link_libraries(ddbtest_child PRIVATE plog::plog Threads::Threads)
+    target_link_libraries(ddbtest_child PRIVATE plog::plog Threads::Threads ddb_warnings)
     target_include_directories(ddbtest_child PRIVATE "${PROJECT_SOURCE_DIR}/src/include")
 
     # Host-process stand-in for DDB-11 B6: checks that DDBRegisterProcess leaves the
     # host's signal handlers alone. Separate process: libddb initializes once per process.
     add_executable(ddbtest_signal_probe helpers/signal_probe.cpp)
-    target_link_libraries(ddbtest_signal_probe PRIVATE ${PROJECT_NAME})
+    target_link_libraries(ddbtest_signal_probe PRIVATE ${PROJECT_NAME} ddb_warnings)
 
     # Create the test executable
     add_executable(ddbtest ${TEST_SOURCES})
@@ -43,7 +43,7 @@ if(BUILD_TESTING)
     # encode/decode .spz fixtures directly. libddb is SHARED, so no duplicate objects.
     # SQLite is a PRIVATE dependency of libddb; open_test.cpp calls its C API directly, and
     # utils.cpp uses boolinq (header-only INTERFACE target, src/CMakeLists.txt).
-    target_link_libraries(ddbtest PRIVATE ${PROJECT_NAME} GTest::gtest GTest::gtest_main cpr::cpr GDAL::GDAL tinyobjloader::tinyobjloader OpenSSL::Crypto Exiv2::exiv2lib unofficial::sqlite3::sqlite3 spz boolinq)
+    target_link_libraries(ddbtest PRIVATE ${PROJECT_NAME} GTest::gtest GTest::gtest_main cpr::cpr GDAL::GDAL tinyobjloader::tinyobjloader OpenSSL::Crypto Exiv2::exiv2lib unofficial::sqlite3::sqlite3 spz boolinq ddb_warnings)
 
     # set PLOG to PLOG_GLOBAL/PLOG_IMPORT to share instances across modules (and import on Windows)
     if(WIN32)

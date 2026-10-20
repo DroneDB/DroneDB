@@ -9,7 +9,7 @@ add_executable(${PROJECT_NAME}cmd main.cpp crash_handlers.cpp
 
 # cxxopts parses the command line; only the CLI uses it, libddb does not
 find_package(cxxopts CONFIG REQUIRED)
-target_link_libraries(${PROJECT_NAME}cmd PRIVATE ${PROJECT_NAME} cxxopts::cxxopts)
+target_link_libraries(${PROJECT_NAME}cmd PRIVATE ${PROJECT_NAME} cxxopts::cxxopts ddb_warnings)
 
 if(WIN32)
     target_compile_definitions(${PROJECT_NAME}cmd PRIVATE PLOG_EXPORT)
