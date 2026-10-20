@@ -122,6 +122,25 @@ extern "C"
     DDB_DLL DDBErr DDBAddWithOptions(const char *ddbPath, const char **paths, int numPaths,
                                      const DDBAddOptions *options, char **output);
 
+    /** A file with the SHA-256 its writer computed while writing it (see DDBAddWithHints) */
+    typedef struct {
+        const char *path;   // file to add
+        const char *sha256; // lowercase hex digest; NULL or "" = no hint, the file is hashed
+        long long size;     // bytes written; < 0 = not checked
+        double mtime;       // modification time after the write (seconds since the epoch); <= 0 = not checked
+    } DDBAddHint;
+
+    /** DDBAddWithOptions for files whose SHA-256 the caller computed while writing them.
+     * A hint is used only when the file still has its size and mtime; otherwise the file is
+     * hashed as usual, so a wrong hint can never index a wrong hash for a changed file.
+     * Folders are not expanded (options->recursive is ignored).
+     * @param files array of files with their hints
+     * @param numFiles number of files
+     * @param options, output as DDBAddWithOptions
+     * @return as DDBAddWithOptions */
+    DDB_DLL DDBErr DDBAddWithHints(const char *ddbPath, const DDBAddHint *files, int numFiles,
+                                   const DDBAddOptions *options, char **output);
+
     /** Remove one or more files to a DroneDB database
      * @param ddbPath path to a DroneDB database (parent of ".ddb")
      * @param paths array of paths to add to index

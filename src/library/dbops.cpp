@@ -632,8 +632,54 @@ static std::mutex g_templateMutex;
 
     namespace {
 
-    // Relative path -> SHA-256 the caller already trusts
-    using KnownHashes = std::unordered_map<std::string, std::string>;
+    // Relative path -> the SHA-256 the caller already knows (and the size/mtime it saw, if any)
+    using KnownHashes = std::unordered_map<std::string, KnownFile>;
+
+    KnownHashes toKnownHashes(const std::vector<KnownFile> &files, const fs::path &directory) {
+        KnownHashes known;
+        for (const auto &f : files)
+            if (!f.hash.empty())
+                known[io::Path(f.path).relativeTo(directory).generic()] = f;
+        return known;
+    }
+
+    std::vector<std::string> pathsOf(const std::vector<KnownFile> &files) {
+        std::vector<std::string> paths;
+        paths.reserve(files.size());
+        for (const auto &f : files)
+            paths.push_back(f.path);
+        return paths;
+    }
+
+    // The known hash of `item`, or null when there is none or the file no longer has the
+    // size/mtime the caller saw when it computed the hash (then the file is hashed as usual).
+    // Sets `observedMtime` when it stats the file.
+    const std::string *trustedHash(const KnownHashes *knownHashes, const std::string &relPath,
+                                   const fs::path &absPath, std::optional<double> &observedMtime) {
+        if (knownHashes == nullptr)
+            return nullptr;
+        const auto it = knownHashes->find(relPath);
+        if (it == knownHashes->end())
+            return nullptr;
+
+        const KnownFile &known = it->second;
+        if (known.size < 0 && known.mtime <= 0)
+            return &known.hash;
+
+        try {
+            const auto state = io::Path(absPath).getState();
+            if (state.directory ||
+                (known.size >= 0 && static_cast<long long>(state.size) != known.size) ||
+                (known.mtime > 0 && !io::sameModifiedTime(known.mtime, state.mtime))) {
+                LOGD << "Hashing '" << relPath << "': it changed since its known hash was computed";
+                return nullptr;
+            }
+            observedMtime = state.mtime;
+        } catch (const FSException &) {
+            return nullptr; // gone: the normal path reports it
+        }
+        return &known.hash;
+    }
 
     // Result of the PLAN phase: what the index currently knows about a candidate path,
     // read without holding a write lock.
@@ -712,14 +758,12 @@ static std::mutex g_templateMutex;
         bool add = false;
         std::optional<double> observedMtime;
 
-        const std::string *knownHash = nullptr;
-        if (knownHashes != nullptr) {
-            const auto it = knownHashes->find(item.relPath);
-            if (it != knownHashes->end()) knownHash = &it->second;
-        }
+        const std::string *knownHash = trustedHash(knownHashes, item.relPath, item.absPath, observedMtime);
 
         if (knownHash != nullptr) {
             e.hash = *knownHash;
+            if (observedMtime)
+                e.mtime = static_cast<time_t>(std::floor(*observedMtime));
             add = !item.existsInDb;
             if (!add && *knownHash == item.dbHash) {
                 outcome.unchanged = true;
@@ -1016,27 +1060,19 @@ static std::mutex g_templateMutex;
 
     void addToIndexWithHashes(Database *db, const std::vector<KnownFile> &files, AddCallback callback)
     {
-        const fs::path directory = db->rootDirectory();
-        std::vector<std::string> paths;
-        KnownHashes knownHashes;
-        paths.reserve(files.size());
-        for (const auto &f : files)
-        {
-            paths.push_back(f.path);
-            if (!f.hash.empty())
-                knownHashes[io::Path(f.path).relativeTo(directory).generic()] = f.hash;
-        }
-
-        addPathsToIndex(db, paths, &knownHashes, callback);
+        const auto knownHashes = toKnownHashes(files, db->rootDirectory());
+        addPathsToIndex(db, pathsOf(files), &knownHashes, callback);
     }
 
-    void addToIndexEx(Database *db, const std::vector<std::string> &paths,
-                      const AddOptions &options, AddResult &result, AddCallback callback)
+    // addToIndexEx() with optional known hashes (see computeAddEntries)
+    static void addPathsToIndexEx(Database *db, const std::vector<std::string> &paths, const AddOptions &options,
+                                  AddResult &result, AddCallback callback, const KnownHashes *knownHashes)
     {
         if (paths.empty())
             return; // Nothing to do
         const fs::path directory = db->rootDirectory();
-        auto pathList = getIndexPathList(directory, paths, true);
+        // Files with known hashes are indexed exactly as listed (see addPathsToIndex)
+        auto pathList = getIndexPathList(directory, paths, true, /*recursive=*/knownHashes == nullptr);
 
         // Clamp negative retries: a negative value would skip the loop entirely
         // and report every item as a CONFLICT without attempting indexing.
@@ -1046,7 +1082,7 @@ static std::mutex g_templateMutex;
         for (int pass = 0; pass <= maxRetries && !pathList.empty(); ++pass) {
             auto planned = planAddCandidates(db, pathList, directory);
             auto computed = computeAddEntries(planned, directory, options.stopOnError,
-                                              result.errors, result.unchanged);
+                                              result.errors, result.unchanged, knownHashes);
 
             std::vector<fs::path> conflicts;
             commitAddEntries(db, computed, directory, callback, &result.entries, &conflicts,
@@ -1064,6 +1100,19 @@ static std::mutex g_templateMutex;
         for (size_t i = firstNewEntry; i < result.entries.size(); i++)
             if (isPrjPath(result.entries[i].first.path)) prjPaths.push_back(result.entries[i].first.path);
         refreshPrjMains(db, directory, prjPaths, false);
+    }
+
+    void addToIndexEx(Database *db, const std::vector<std::string> &paths,
+                      const AddOptions &options, AddResult &result, AddCallback callback)
+    {
+        addPathsToIndexEx(db, paths, options, result, callback, nullptr);
+    }
+
+    void addToIndexEx(Database *db, const std::vector<KnownFile> &files,
+                      const AddOptions &options, AddResult &result, AddCallback callback)
+    {
+        const auto knownHashes = toKnownHashes(files, db->rootDirectory());
+        addPathsToIndexEx(db, pathsOf(files), options, result, callback, &knownHashes);
     }
 
     std::string sanitize_query_param(const std::string &str)

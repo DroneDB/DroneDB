@@ -358,63 +358,36 @@ DDBErr DDBAdd(const char* ddbPath,
     DDB_C_END
 }
 
-DDBErr DDBAddWithOptions(const char* ddbPath,
-                         const char** paths,
-                         int numPaths,
-                         const DDBAddOptions* options,
-                         char** output) {
-    DDB_C_BEGIN
+// Records a path that cannot be expanded as an item error, relative to the dataset like the
+// entries/unchanged buckets: Registry C# matching keys on relative paths, a caller-supplied
+// absolute path would never match the byPath lookup.
+static void addPathError(Database *db, const std::string &p, const std::exception &ex, AddResult &result) {
+    const char *code = "INDEX";
+    if (!!p.find('*') || !!p.find('?') || !!p.find('[')) code = "FS";
+    const auto relPath = io::Path(p).relativeTo(db->rootDirectory()).generic();
+    result.errors.push_back({relPath, code, ex.what()});
+}
 
+static AddOptions toAddOptions(const DDBAddOptions *options) {
+    AddOptions addOpts;
+    addOpts.stopOnError = options->stopOnError;
+    addOpts.maxConflictRetries = options->maxConflictRetries;
+    return addOpts;
+}
+
+static void validateAddArgs(const char *ddbPath, const DDBAddOptions *options, char **output) {
     if (utils::isNullOrEmptyOrWhitespace(ddbPath))
         throw InvalidArgsException("No directory provided");
-
-    if (!utils::isValidArrayParam(paths, numPaths))
-        throw InvalidArgsException("Invalid paths array parameter");
-
-    if (utils::isNullOrEmptyOrWhitespace(paths, numPaths))
-        throw InvalidArgsException("No paths provided");
-
-    if (utils::hasNullStringInArray(paths, numPaths))
-        throw InvalidArgsException("Path array contains null elements");
 
     if (options == nullptr)
         throw InvalidArgsException("Options pointer is null");
 
     if (output == nullptr)
         throw InvalidArgsException("Output pointer is null");
+}
 
-    const auto db = ddb::open(std::string(ddbPath), true);
-    const std::vector<std::string> pathList(paths, paths + numPaths);
-
-    AddOptions addOpts;
-    addOpts.stopOnError = options->stopOnError;
-    addOpts.maxConflictRetries = options->maxConflictRetries;
-
-    AddResult result;
-    std::vector<std::string> expandedPaths;
-    // Expand paths per-item when stopOnError is false: expandPathList throws for a missing
-    // path, which would abort the entire batch and bypass per-item error capture.
-    if (addOpts.stopOnError) {
-        expandedPaths = ddb::expandPathList(pathList, options->recursive, 0);
-    } else {
-        for (const auto &p : pathList) {
-            try {
-                auto partial = ddb::expandPathList({p}, options->recursive, 0);
-                expandedPaths.insert(expandedPaths.end(), partial.begin(), partial.end());
-            } catch (const std::exception &ex) {
-                const char *code = "INDEX";
-                if (!!p.find('*') || !!p.find('?') || !!p.find('[')) code = "FS";
-                // Report the dataset-relative path (db root stripped), exactly like the
-                // entries/unchanged buckets: Registry C# matching keys on relative paths, a
-                // caller-supplied absolute path would never match the byPath lookup.
-                const auto relPath = io::Path(p).relativeTo(db->rootDirectory()).generic();
-                result.errors.push_back({relPath, code, ex.what()});
-            }
-        }
-    }
-
-    addToIndexEx(db.get(), expandedPaths, addOpts, result);
-
+// { "entries": [...], "unchanged": [...], "errors": [...] }
+static std::string addResultJson(const AddResult &result) {
     auto outJson = json::object();
     outJson["entries"] = json::array();
     for (auto& [entry, isUpdate] : result.entries) {
@@ -432,7 +405,89 @@ DDBErr DDBAddWithOptions(const char* ddbPath,
     for (auto& err : result.errors)
         outJson["errors"].push_back(json{{"path", err.path}, {"code", err.code}, {"message", err.message}});
 
-    utils::copyToPtr(outJson.dump(), output);
+    return outJson.dump();
+}
+
+DDBErr DDBAddWithOptions(const char* ddbPath,
+                         const char** paths,
+                         int numPaths,
+                         const DDBAddOptions* options,
+                         char** output) {
+    DDB_C_BEGIN
+
+    if (!utils::isValidArrayParam(paths, numPaths))
+        throw InvalidArgsException("Invalid paths array parameter");
+
+    if (utils::isNullOrEmptyOrWhitespace(paths, numPaths))
+        throw InvalidArgsException("No paths provided");
+
+    if (utils::hasNullStringInArray(paths, numPaths))
+        throw InvalidArgsException("Path array contains null elements");
+
+    validateAddArgs(ddbPath, options, output);
+
+    const auto db = ddb::open(std::string(ddbPath), true);
+    const std::vector<std::string> pathList(paths, paths + numPaths);
+    const auto addOpts = toAddOptions(options);
+
+    AddResult result;
+    std::vector<std::string> expandedPaths;
+    // Expand paths per-item when stopOnError is false: expandPathList throws for a missing
+    // path, which would abort the entire batch and bypass per-item error capture.
+    if (addOpts.stopOnError) {
+        expandedPaths = ddb::expandPathList(pathList, options->recursive, 0);
+    } else {
+        for (const auto &p : pathList) {
+            try {
+                auto partial = ddb::expandPathList({p}, options->recursive, 0);
+                expandedPaths.insert(expandedPaths.end(), partial.begin(), partial.end());
+            } catch (const std::exception &ex) {
+                addPathError(db.get(), p, ex, result);
+            }
+        }
+    }
+
+    addToIndexEx(db.get(), expandedPaths, addOpts, result);
+
+    utils::copyToPtr(addResultJson(result), output);
+    DDB_C_END
+}
+
+DDBErr DDBAddWithHints(const char *ddbPath, const DDBAddHint *files, int numFiles,
+                       const DDBAddOptions *options, char **output) {
+    DDB_C_BEGIN
+
+    if (files == nullptr || numFiles <= 0)
+        throw InvalidArgsException("No files provided");
+
+    validateAddArgs(ddbPath, options, output);
+
+    const auto db = ddb::open(std::string(ddbPath), true);
+    const auto addOpts = toAddOptions(options);
+
+    AddResult result;
+    std::vector<KnownFile> known;
+    known.reserve(numFiles);
+    for (int i = 0; i < numFiles; i++) {
+        const auto &f = files[i];
+        if (utils::isNullOrEmptyOrWhitespace(f.path))
+            throw InvalidArgsException("File " + std::to_string(i) + " has no path");
+
+        const std::string p(f.path);
+        if (!fs::exists(p)) {
+            // A missing file would abort the whole batch in addToIndexEx
+            const FSException ex(p + " does not exist");
+            if (addOpts.stopOnError) throw ex;
+            addPathError(db.get(), p, ex, result);
+            continue;
+        }
+
+        known.push_back({p, f.sha256 == nullptr ? std::string() : std::string(f.sha256), f.size, f.mtime});
+    }
+
+    addToIndexEx(db.get(), known, addOpts, result);
+
+    utils::copyToPtr(addResultJson(result), output);
     DDB_C_END
 }
 

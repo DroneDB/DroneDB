@@ -130,10 +130,16 @@ namespace ddb
     DDB_DLL void searchIndex(Database *db, const std::string &query, std::ostream &out, const std::string &format);
     DDB_DLL void addToIndex(Database *db, const std::vector<std::string> &paths, AddCallback callback = nullptr);
 
-    // A file (absolute path) with the SHA-256 the caller already knows; empty for folders
+    // A file (absolute path) with the SHA-256 the caller already knows; empty for folders.
+    // `size` (>= 0) and `mtime` (> 0, seconds since the epoch) are what the caller saw when it
+    // computed the hash: when set, the hash is trusted only if the file on disk still has them,
+    // otherwise the file is hashed as usual. Leave them unset only for hashes verified against
+    // the file content (applyDelta).
     struct DDB_DLL KnownFile {
         std::string path;
         std::string hash;
+        long long size = -1;
+        double mtime = 0;
     };
 
     /**
@@ -152,6 +158,14 @@ namespace ddb
      * DBBusyException, std::bad_alloc) always abort the whole call regardless of stopOnError.
      */
     DDB_DLL void addToIndexEx(Database *db, const std::vector<std::string> &paths,
+                              const AddOptions &options, AddResult &result, AddCallback callback = nullptr);
+
+    /**
+     * addToIndexEx() for files whose SHA-256 the caller computed while writing them (the
+     * Registry hashes uploads as they stream to disk). A hash whose size/mtime still match the
+     * file is used instead of reading the file again; any other file is hashed as usual.
+     */
+    DDB_DLL void addToIndexEx(Database *db, const std::vector<KnownFile> &files,
                               const AddOptions &options, AddResult &result, AddCallback callback = nullptr);
 
     DDB_DLL void removeFromIndex(Database *db, const std::vector<std::string> &paths, RemoveCallback callback = nullptr);
