@@ -25,10 +25,7 @@
 #include "exceptions.h"
 #include "fs.h"
 #include "logger.h"
-
-#ifndef M_PI
-#define M_PI 3.1415926535
-#endif
+#include "mathutil.h"
 
 #define F_EPSILON 0.000001
 
@@ -48,20 +45,39 @@
 namespace ddb {
 namespace utils {
 
+// <cctype> functions take an int that must be EOF or representable as unsigned char: a
+// plain (signed) char with the high bit set (any UTF-8 lead/continuation byte) is undefined
+// behaviour. These wrappers do the unsigned char conversion once.
+static inline char toLowerChar(char c) {
+    return static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+}
+
+static inline char toUpperChar(char c) {
+    return static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+}
+
+static inline bool isDigitChar(char c) {
+    return std::isdigit(static_cast<unsigned char>(c)) != 0;
+}
+
+static inline bool isSpaceChar(char c) {
+    return std::isspace(static_cast<unsigned char>(c)) != 0;
+}
+
 static inline void toLower(std::string& s) {
-    std::transform(s.begin(), s.end(), s.begin(), [](int ch) { return std::tolower(ch); });
+    std::transform(s.begin(), s.end(), s.begin(), toLowerChar);
 }
 
 static inline void toUpper(std::string& s) {
-    std::transform(s.begin(), s.end(), s.begin(), [](int ch) { return std::toupper(ch); });
+    std::transform(s.begin(), s.end(), s.begin(), toUpperChar);
 }
 
 static inline void ltrim(std::string& s) {
-    s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](int ch) { return !std::isspace(ch); }));
+    s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](char ch) { return !isSpaceChar(ch); }));
 }
 
 static inline void rtrim(std::string& s) {
-    s.erase(std::find_if(s.rbegin(), s.rend(), [](int ch) { return !std::isspace(ch); }).base(),
+    s.erase(std::find_if(s.rbegin(), s.rend(), [](char ch) { return !isSpaceChar(ch); }).base(),
             s.end());
 }
 
@@ -71,11 +87,11 @@ static inline void trim(std::string& s) {
 }
 
 static inline double rad2deg(double rad) {
-    return (rad * 180.0) / M_PI;
+    return (rad * 180.0) / kPi;
 }
 
 static inline double deg2rad(double deg) {
-    return (deg * M_PI) / 180.0;
+    return (deg * kPi) / 180.0;
 }
 
 static inline bool sameFloat(float a, float b) {
@@ -168,6 +184,13 @@ cpr::Header authHeader(const std::string& token);
 cpr::Header authCookie(const std::string& token);
 
 DDB_DLL void printVersions();
+
+// "Debug build ..." or "Release build ..." (from NDEBUG), compiler and build date
+DDB_DLL std::string getBuildInfo();
+
+// The value of an environment variable, or "<unset>" when it is not set (std::getenv
+// returns null, which must never be streamed)
+DDB_DLL std::string getEnvOrUnset(const char* name);
 
 DDB_DLL bool isNullOrEmptyOrWhitespace(const char* str, size_t maxLength = 0);
 DDB_DLL bool isNullOrEmptyOrWhitespace(const char** strlist, int count, size_t maxLength = 0);

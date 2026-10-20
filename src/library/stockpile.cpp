@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "stockpile.h"
+#include "mathutil.h"
 #include "exceptions.h"
 #include "json.h"
 #include "logger.h"
@@ -298,7 +299,7 @@ std::string detectStockpileJson(const std::string &rasterPath,
     double metersPerPixelX = std::fabs(gt[1]);
     double metersPerPixelY = std::fabs(gt[5]);
     if (rasterIsGeographic || !rasterSrs.h) {
-        const double d2r = M_PI / 180.0;
+        const double d2r = ddb::kPi / 180.0;
         const double mPerDeg = 111320.0; // good-enough WGS84 approximation
         metersPerPixelX = std::fabs(gt[1]) * mPerDeg * std::cos(lat * d2r);
         metersPerPixelY = std::fabs(gt[5]) * mPerDeg;
@@ -454,7 +455,7 @@ std::string detectStockpileJson(const std::string &rasterPath,
     const double areaPx = static_cast<double>(componentSize);
     const double boundaryPx = static_cast<double>(contourPx.size());
     const double compactness = (boundaryPx > 0)
-        ? std::min(1.0, (4.0 * M_PI * areaPx) / (boundaryPx * boundaryPx))
+        ? std::min(1.0, (4.0 * ddb::kPi * areaPx) / (boundaryPx * boundaryPx))
         : 0.0;
     const double windowArea = static_cast<double>(width) * height;
     const double fillRatio = std::min(1.0, areaPx / windowArea);
@@ -622,7 +623,7 @@ std::string detectAllStockpilesJson(const std::string &rasterPath,
     if (rasterIsGeographic || !rasterSrs.h) {
         // Use raster center latitude for the cosine factor.
         const double centerY = gt[3] + (rasterH / 2.0) * gt[5];
-        const double d2r = M_PI / 180.0;
+        const double d2r = ddb::kPi / 180.0;
         const double mPerDeg = 111320.0;
         metersPerPixelX = std::fabs(gt[1]) * mPerDeg * std::cos(centerY * d2r);
         metersPerPixelY = std::fabs(gt[5]) * mPerDeg;
@@ -828,7 +829,7 @@ std::string detectAllStockpilesJson(const std::string &rasterPath,
         const double areaPx = static_cast<double>(s.pixelCount);
         const double boundaryPx = static_cast<double>(contourPx.size());
         const double compactness = (boundaryPx > 0)
-            ? std::min(1.0, (4.0 * M_PI * areaPx) / (boundaryPx * boundaryPx))
+            ? std::min(1.0, (4.0 * ddb::kPi * areaPx) / (boundaryPx * boundaryPx))
             : 0.0;
         const double prominence = std::min(1.0, s.maxDiff / std::max(1e-6, meanPos * 4.0));
         const double confidence = std::clamp(0.3 + 0.4 * compactness + 0.3 * prominence, 0.0, 1.0);

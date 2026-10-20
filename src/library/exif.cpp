@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "exif.h"
 #include "logger.h"
+#include "utils.h"
 #include "timezone.h"
 #include "dsmservice.h"
 #include "sensor_data.h"
@@ -77,11 +78,11 @@ namespace ddb
 
                 // Validate that strings contain valid integer format
                 for (char c : widthStr)
-                    if (!std::isdigit(c) && c != '-' && c != '+')
+                    if (!utils::isDigitChar(c) && c != '-' && c != '+')
                         throw std::invalid_argument("Width is not a valid integer: " + widthStr);
 
                 for (char c : heightStr)
-                    if (!std::isdigit(c) && c != '-' && c != '+')
+                    if (!utils::isDigitChar(c) && c != '-' && c != '+')
                         throw std::invalid_argument("Height is not a valid integer: " + heightStr);
 
                 int width = std::stoi(widthStr);
@@ -347,7 +348,7 @@ namespace ddb
 
             for (unsigned long i = 1; i < gps.length(); i++)
             {
-                if (std::isdigit(gps[i]) || gps[i] == ',' || gps[i] == '.')
+                if (utils::isDigitChar(gps[i]) || gps[i] == ',' || gps[i] == '.')
                 {
                     buf += gps[i];
                 }

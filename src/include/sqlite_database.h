@@ -45,6 +45,10 @@ class SqliteDatabase {
     DDB_DLL int getUserVersion() const;
     DDB_DLL void setUserVersion(int version);
 
+    // True when the connection cannot write the main database (a read-only file or
+    // filesystem: SQLite then opens it read-only)
+    DDB_DLL bool isReadOnly() const;
+
     DDB_DLL std::unique_ptr<Statement> query(const std::string &query) const;
 
     DDB_DLL virtual ~SqliteDatabase();

@@ -20,6 +20,7 @@
 #include "exceptions.h"
 #include "gdal_failure_counter.h"
 #include "gdal_priv.h"
+#include "mathutil.h"
 #include "mio.h"
 #include "raster_cache.h"
 #include "test.h"
@@ -382,7 +383,7 @@ namespace
 
         EXPECT_NEAR(same.extent.MinX, g.extent.MinX, 1e-9);
         EXPECT_NEAR(same.extent.MaxY, g.extent.MaxY, 1e-9);
-        const double kmInDegrees = 1000.0 / (111320.0 * std::cos(45.46 * M_PI / 180.0));
+        const double kmInDegrees = 1000.0 / (111320.0 * std::cos(45.46 * ddb::kPi / 180.0));
         EXPECT_NEAR(east.extent.MinX - g.extent.MinX, kmInDegrees, 2e-4);
         EXPECT_NEAR(east.extent.MinY, g.extent.MinY, 2e-4);
     }
@@ -669,7 +670,7 @@ namespace
         info.geoDesignY = 200;
         info.geoReferenceX = 514000;
         info.geoReferenceY = 5034000;
-        const double phi = 30 * M_PI / 180;
+        const double phi = 30 * ddb::kPi / 180;
         info.geoNorthX = std::sin(phi); // the drawing's north, 30 degrees clockwise of its Y axis
         info.geoNorthY = std::cos(phi);
         info.geoUnitScale = 0.001; // millimetres

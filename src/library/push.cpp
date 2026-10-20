@@ -86,10 +86,6 @@ namespace ddb
                 throw AuthException("Cannot authenticate with " + reg.getUrl());
             }
         }
-        catch (const AppException &e)
-        {
-            throw;
-        }
     }
 
 } // namespace ddb

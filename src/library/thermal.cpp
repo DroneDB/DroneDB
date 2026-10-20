@@ -5,6 +5,7 @@
 #include "exif.h"
 #include "exceptions.h"
 #include "logger.h"
+#include "utils.h"
 #include "sensorprofile.h"
 
 #include <exiv2/exiv2.hpp>
@@ -40,14 +41,14 @@ static const std::vector<std::pair<std::string, std::string>> thermalSensorPatte
 bool isThermalImageFromExif(const std::string &make, const std::string &model) {
     std::string makeLower = make;
     std::string modelLower = model;
-    std::transform(makeLower.begin(), makeLower.end(), makeLower.begin(), ::tolower);
-    std::transform(modelLower.begin(), modelLower.end(), modelLower.begin(), ::tolower);
+    utils::toLower(makeLower);
+    utils::toLower(modelLower);
 
     for (const auto &pattern : thermalSensorPatterns) {
         std::string patMake = pattern.first;
         std::string patModel = pattern.second;
-        std::transform(patMake.begin(), patMake.end(), patMake.begin(), ::tolower);
-        std::transform(patModel.begin(), patModel.end(), patModel.begin(), ::tolower);
+        utils::toLower(patMake);
+        utils::toLower(patModel);
 
         if (makeLower.find(patMake) != std::string::npos) {
             if (patModel.empty()) return true;
@@ -523,10 +524,10 @@ bool isThermalImage(const std::string &filePath) {
                     allMeta += s;
                     allMeta += ' ';
                 }
-                std::transform(allMeta.begin(), allMeta.end(), allMeta.begin(), ::tolower);
+                utils::toLower(allMeta);
 
                 std::string unitLower = unitStr;
-                std::transform(unitLower.begin(), unitLower.end(), unitLower.begin(), ::tolower);
+                utils::toLower(unitLower);
 
                 // DEM negative signals - reject early
                 static const std::vector<std::string> demKeywords = {

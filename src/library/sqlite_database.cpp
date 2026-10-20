@@ -170,6 +170,13 @@ namespace ddb
         this->query("PRAGMA user_version = " + std::to_string(version))->execute();
     }
 
+    bool SqliteDatabase::isReadOnly() const
+    {
+        if (db == nullptr)
+            throw DBException("Cannot check read-only state, db is not open");
+        return sqlite3_db_readonly(db, "main") == 1;
+    }
+
     SqliteDatabase::~SqliteDatabase()
     {
         this->closeConnection();

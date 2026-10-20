@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "tiler.h"
+#include "mathutil.h"
 
 #include <mutex>
 #include <memory>
@@ -49,8 +50,7 @@ namespace ddb
     {
         if (!fs::exists(inputPath) && !utils::isNetworkPath(inputPath))
             throw FSException(inputPath + " does not exist");
-        if (tileSize <= 0 ||
-            std::ceil(std::log2(tileSize) != std::floor(std::log2(tileSize))))
+        if (!ddb::isPowerOfTwo(tileSize))
             throw GDALException("Tile size must be a power of 2 greater than 0");
 
         if (!outputFolder.empty() && !fs::exists(outputFolder))
@@ -137,8 +137,8 @@ namespace ddb
 
     GlobalMercator::GlobalMercator(int tileSize) : tileSize(tileSize)
     {
-        originShift = 2.0 * M_PI * 6378137.0 / 2.0;
-        initialResolution = 2.0 * M_PI * 6378137.0 / static_cast<double>(tileSize);
+        originShift = 2.0 * ddb::kPi * 6378137.0 / 2.0;
+        initialResolution = 2.0 * ddb::kPi * 6378137.0 / static_cast<double>(tileSize);
         maxZoomLevel = 99;
     }
 
@@ -167,8 +167,8 @@ namespace ddb
         double lon = mx / originShift * 180.0;
         double lat = my / originShift * 180.0;
 
-        lat = 180.0 / M_PI *
-              (2 * std::atan(std::exp(lat * M_PI / 180.0)) - M_PI / 2.0);
+        lat = 180.0 / ddb::kPi *
+              (2 * std::atan(std::exp(lat * ddb::kPi / 180.0)) - ddb::kPi / 2.0);
         return Geographic2D(lon, lat);
     }
 

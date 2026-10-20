@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "raster_profile.h"
+#include "mathutil.h"
 #include "raster_analysis.h"
 #include "thermal.h"
 #include "sensorprofile.h"
@@ -33,7 +34,7 @@ constexpr double WGS84_RADIUS_M = 6378137.0;
 
 // Haversine distance on WGS84 ellipsoid approximated as a sphere (meters).
 double haversineMeters(double lon1, double lat1, double lon2, double lat2) {
-    const double d2r = M_PI / 180.0;
+    const double d2r = ddb::kPi / 180.0;
     const double dLat = (lat2 - lat1) * d2r;
     const double dLon = (lon2 - lon1) * d2r;
     const double a = std::sin(dLat / 2) * std::sin(dLat / 2) +

@@ -5,6 +5,7 @@
 #include "dbops.h"
 #include "geoproject.h"
 #include "mio.h"
+#include "utils.h"
 #include "gdal_inc.h"
 
 namespace ddb
@@ -106,7 +107,7 @@ namespace ddb
                         // Validate percentage format before conversion
                         std::string percentValue = outsize.substr(0, outsize.length() - 1);
                         for (char c : percentValue)
-                            if (!std::isdigit(c) && c != '.' && c != '-' && c != '+')
+                            if (!utils::isDigitChar(c) && c != '.' && c != '-' && c != '+')
                                 throw InvalidArgsException("Invalid percentage format: " + outsize);
 
                         double value = std::stod(percentValue);
@@ -119,7 +120,7 @@ namespace ddb
                     {
                         // Validate numeric format before conversion
                         for (char c : outsize)
-                            if (!std::isdigit(c) && c != '.' && c != '-' && c != '+')
+                            if (!utils::isDigitChar(c) && c != '.' && c != '-' && c != '+')
                                 throw InvalidArgsException("Invalid numeric format: " + outsize);
 
                         double value = std::stod(outsize);

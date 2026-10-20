@@ -86,10 +86,6 @@ namespace ddb
                                     reg.getUrl());
             }
         }
-        catch (const AppException &e)
-        {
-            throw;
-        }
     }
 
 } // namespace ddb

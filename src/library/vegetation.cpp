@@ -6,6 +6,7 @@
 #include "thermal.h"
 #include "exceptions.h"
 #include "logger.h"
+#include "utils.h"
 
 #include <gdal_priv.h>
 #include <cmath>
@@ -158,7 +159,7 @@ BandFilter VegetationEngine::autoDetectFilter(const std::string &rasterPath) con
         // Map band names to filter
         for (const auto &bi : det.bands) {
             std::string nameLC = bi.name;
-            std::transform(nameLC.begin(), nameLC.end(), nameLC.begin(), ::tolower);
+            utils::toLower(nameLC);
 
             if (nameLC.find("red edge") != std::string::npos ||
                 nameLC.find("rededge") != std::string::npos) {

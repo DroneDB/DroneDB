@@ -179,7 +179,7 @@ DDB_DLL bool hasDotNotation(const std::string& path) {
 
 DDB_DLL bool isLowerCase(const std::string& str) {
     for (size_t i = 0; i < str.length(); i++) {
-        if (std::isupper(str[i]))
+        if (std::isupper(static_cast<unsigned char>(str[i])))
             return false;
     }
     return true;
@@ -251,10 +251,10 @@ cpr::Header authCookie(const std::string& token) {
     return cpr::Header{{"Cookie", "jwtToken=" + token}};
 }
 
-std::string getBuildInfo() {
+DDB_DLL std::string getBuildInfo() {
     std::ostringstream ss;
 
-#ifdef DEBUG
+#ifndef NDEBUG
     ss << "Debug";
 #else
     ss << "Release";
@@ -273,6 +273,11 @@ std::string getBuildInfo() {
     return ss.str();
 }
 
+DDB_DLL std::string getEnvOrUnset(const char* name) {
+    const char* value = std::getenv(name);
+    return value != nullptr ? std::string(value) : std::string("<unset>");
+}
+
 DDB_DLL void printVersions() {
 
     LOGV << "DDB v" << APP_VERSION;
@@ -287,13 +292,13 @@ DDB_DLL void printVersions() {
     auto pj_info = proj_info();
     LOGV << "PROJ: " << std::string(pj_info.release) + " (search path: " + pj_info.searchpath + ")";
 
-    LOGV << "PROJ_LIB = " << getenv("PROJ_LIB");
-    LOGV << "GDAL_DATA = " << getenv("GDAL_DATA");
-    LOGV << "PROJ_DATA = " << getenv("PROJ_DATA");
+    LOGV << "PROJ_LIB = " << getEnvOrUnset("PROJ_LIB");
+    LOGV << "GDAL_DATA = " << getEnvOrUnset("GDAL_DATA");
+    LOGV << "PROJ_DATA = " << getEnvOrUnset("PROJ_DATA");
 
     LOGD << "Current locale (LC_ALL): " << std::setlocale(LC_ALL, nullptr);
     LOGD << "Current locale (LC_CTYPE): " << std::setlocale(LC_CTYPE, nullptr);
-    LOGD << "LC_ALL env var: " << std::getenv("LC_ALL");
+    LOGD << "LC_ALL env var: " << getEnvOrUnset("LC_ALL");
 
 }
 

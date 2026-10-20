@@ -2,8 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-#include <regex>
 #include <cstdlib>
+#include <mutex>
 #include <ogrsf_frmts.h>
 #include "dsmservice.h"
 #include "exceptions.h"
@@ -126,10 +126,33 @@ bool DSMService::loadDiskCache(double latitude, double longitude)
     return false; // No match
 }
 
+std::optional<std::string> buildDsmServiceUrl(const std::string &urlTemplate,
+                                              const std::string &apiKey,
+                                              double west, double south,
+                                              double east, double north)
+{
+    if (apiKey.empty())
+        return std::nullopt;
+
+    std::string url = urlTemplate;
+    utils::stringReplace(url, "{west}", std::to_string(west));
+    utils::stringReplace(url, "{south}", std::to_string(south));
+    utils::stringReplace(url, "{east}", std::to_string(east));
+    utils::stringReplace(url, "{north}", std::to_string(north));
+    utils::stringReplace(url, "{key}", apiKey);
+    return url;
+}
+
+std::string dsmServiceApiKey()
+{
+    const char *key = std::getenv(DSM_SERVICE_KEY_ENV);
+    return key != nullptr ? std::string(key) : std::string();
+}
+
 std::string DSMService::loadFromNetwork(double latitude, double longitude)
 {
     // TODO: allow user to specify different service
-    std::string format = DEFAULT_DSM_SERVICE_URL;
+    const std::string format = DEFAULT_DSM_SERVICE_URL;
 
     // Estimate bounds around point by a certain radius
     double radius = 5000.0; // meters
@@ -140,10 +163,19 @@ std::string DSMService::loadFromNetwork(double latitude, double longitude)
     Geographic2D max = fromUTM(Projected2D(p.x + radius, p.y + radius), z);
     Geographic2D min = fromUTM(Projected2D(p.x - radius, p.y - radius), z);
 
-    std::string url = std::regex_replace(format, std::regex("\\{west\\}"), std::to_string(min.longitude));
-    url = std::regex_replace(url, std::regex("\\{east\\}"), std::to_string(max.longitude));
-    url = std::regex_replace(url, std::regex("\\{north\\}"), std::to_string(max.latitude));
-    url = std::regex_replace(url, std::regex("\\{south\\}"), std::to_string(min.latitude));
+    const auto url = buildDsmServiceUrl(format, dsmServiceApiKey(),
+                                        min.longitude, min.latitude, max.longitude, max.latitude);
+    if (!url)
+    {
+        // Offline fallback: getAltitude() catches the NetException and returns 0. Warn once,
+        // not for every image whose relative altitude is estimated.
+        static std::once_flag warned;
+        std::call_once(warned, [] {
+            LOGW << "DSM download skipped: set " DSM_SERVICE_KEY_ENV
+                    " to an OpenTopography API key to estimate relative altitudes from a world DSM";
+        });
+        throw NetException("No DSM service API key (" DSM_SERVICE_KEY_ENV " is not set)");
+    }
 
     // Try to download
     std::string filename = std::to_string(static_cast<int>(p.x)) + "_" +
@@ -151,9 +183,12 @@ std::string DSMService::loadFromNetwork(double latitude, double longitude)
                            std::to_string(std::chrono::system_clock::now().time_since_epoch().count()) + ".tif";
     std::string filePath = (getCacheDir() / filename).string();
 
-    LOGD << "Downloading DSM from " << url << " ...";
+    // The key stays out of the log
+    LOGD << "Downloading DSM from "
+         << *buildDsmServiceUrl(format, "<redacted>", min.longitude, min.latitude, max.longitude, max.latitude)
+         << " ...";
 
-    auto response = utils::downloadToFile(url, filePath, true);
+    auto response = utils::downloadToFile(*url, filePath, true);
 
     // Verify the downloaded file exists and has content
     if (!fs::exists(filePath) || fs::file_size(filePath) == 0) {

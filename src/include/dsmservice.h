@@ -9,6 +9,7 @@
 #include <vector>
 #include <unordered_map>
 #include <filesystem>
+#include <optional>
 #include "gdal_inc.h"
 #include "userprofile.h"
 #include "geo.h"
@@ -34,6 +35,16 @@ struct DSMCacheEntry
     DDB_DLL void loadData(GDALDatasetH hDataset);
     DDB_DLL float getElevation(double latitude, double longitude);
 };
+
+// Fills the {west}, {south}, {east}, {north} and {key} placeholders of a DSM service URL
+// template. Returns nothing when apiKey is empty: the service refuses keyless requests.
+DDB_DLL std::optional<std::string> buildDsmServiceUrl(const std::string &urlTemplate,
+                                                      const std::string &apiKey,
+                                                      double west, double south,
+                                                      double east, double north);
+
+// The DSM service API key from DSM_SERVICE_KEY_ENV, read at call time ("" when unset)
+DDB_DLL std::string dsmServiceApiKey();
 
 class DSMService
 {

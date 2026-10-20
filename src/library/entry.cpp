@@ -13,6 +13,7 @@
 #include "constants.h"
 
 #include "mio.h"
+#include "utils.h"
 #include "pointcloud.h"
 #include "ply.h"
 #include "3d.h"
@@ -990,7 +991,7 @@ namespace ddb
         {
             std::string k = it.key();
             if (k.length() > 0)
-                k[0] = std::toupper(k[0]);
+                k[0] = utils::toUpperChar(k[0]);
 
             if (k == "Bands")
             {

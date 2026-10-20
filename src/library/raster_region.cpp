@@ -432,8 +432,8 @@ namespace ddb
 
         IndexFormula resolveIndex(const std::string &n)
         {
-            std::string u; u.reserve(n.size());
-            for (char c : n) u.push_back(static_cast<char>(::toupper(c)));
+            std::string u = n;
+            utils::toUpper(u);
             if (u == "NDVI") return {5, 1, 0, 0, 0.0};        // (NIR-R)/(NIR+R)
             if (u == "NDRE") return {5, 4, 0, 0, 0.0};        // (NIR-RE)/(NIR+RE)
             if (u == "NDWI") return {2, 5, 0, 0, 0.0};        // (G-NIR)/(G+NIR)

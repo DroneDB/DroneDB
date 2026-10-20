@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "merge_multispectral.h"
+#include "mathutil.h"
 #include "gdal_inc.h"
 #include "exceptions.h"
 #include "logger.h"
@@ -15,10 +16,6 @@
 #include <sstream>
 #include <algorithm>
 #include <numeric>
-
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
 
 namespace ddb {
 
@@ -1026,13 +1023,13 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
                         //   unit vector = (cos(yaw), -sin(yaw))
                         // Image-down direction in geo = bearing (yaw+180):
                         //   unit vector = (-sin(yaw), -cos(yaw))
-                        double yawRad = yawDeg * M_PI / 180.0;
+                        double yawRad = yawDeg * ddb::kPi / 180.0;
                         double shiftE =  centerShiftXPx * std::cos(yawRad) - centerShiftYPx * std::sin(yawRad);
                         double shiftN = -centerShiftXPx * std::sin(yawRad) - centerShiftYPx * std::cos(yawRad);
 
                         double dLat = (shiftN * gsd) / 111320.0;
                         double dLon = (shiftE * gsd) /
-                            (111320.0 * std::cos(srcGps.latitude * M_PI / 180.0));
+                            (111320.0 * std::cos(srcGps.latitude * ddb::kPi / 180.0));
                         srcGps.latitude += dLat;
                         srcGps.longitude += dLon;
                         LOGD << "GPS corrected for alignment crop: dLat=" << dLat

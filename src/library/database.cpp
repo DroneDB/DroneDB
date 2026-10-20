@@ -222,9 +222,18 @@ END;
                 LOGD << "Dropped attributes table";
             }
 
-            // Mark database as migrated to current version
-            this->setUserVersion(DDB_SCHEMA_VERSION);
-            LOGD << "Database migrated to schema version " << DDB_SCHEMA_VERSION;
+            // Mark database as migrated to current version. A read-only connection (read-only
+            // file or filesystem) got here only because the schema needed no change: it
+            // cannot record the version, so it leaves it for the next writable open.
+            if (this->isReadOnly())
+            {
+                LOGD << "Read-only database, schema version left at " << dbVersion;
+            }
+            else
+            {
+                this->setUserVersion(DDB_SCHEMA_VERSION);
+                LOGD << "Database migrated to schema version " << DDB_SCHEMA_VERSION;
+            }
         }
 
         // Future migrations would be added here:

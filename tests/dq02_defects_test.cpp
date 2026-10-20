@@ -2,31 +2,66 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// DQ-02 (first half): one regression test per defect found by the survey.
+// DQ-02: one regression test per defect found by the survey. Where a defect cannot fail
+// deterministically on this platform (UB that glibc tolerates, a fallback never compiled on
+// Linux) the test is a characterisation test and says so.
 
 #include <cmath>
+#include <cstdlib>
 #include <fstream>
 #include <limits>
 #include <map>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <vector>
 
 #include "gtest/gtest.h"
 
+#include "constants.h"
+#include "databasepool.h"
 #include "dbops.h"
 #include "ddb.h"
+#include "dsmservice.h"
 #include "exceptions.h"
 #include "info.h"
+#include "mathutil.h"
 #include "sqlite_database.h"
 #include "status.h"
 #include "test.h"
 #include "testarea.h"
 #include "thermal.h"
 
+#ifdef _WIN32
+#define DDB_SETENV(name, value) _putenv_s(name, value)
+#define DDB_UNSETENV(name) _putenv_s(name, "")
+#else
+#define DDB_SETENV(name, value) setenv(name, value, 1)
+#define DDB_UNSETENV(name) unsetenv(name)
+#endif
+
 namespace
 {
     using namespace ddb;
+
+    // Saves and restores an environment variable around a test.
+    struct EnvVarGuard
+    {
+        std::string name;
+        std::optional<std::string> saved;
+        explicit EnvVarGuard(const char *n) : name(n)
+        {
+            if (const char *v = std::getenv(n))
+                saved = v;
+        }
+        ~EnvVarGuard()
+        {
+            if (saved)
+                DDB_SETENV(name.c_str(), saved->c_str());
+            else
+                DDB_UNSETENV(name.c_str());
+        }
+    };
 
     void writeText(const fs::path &p, const std::string &content)
     {
@@ -155,5 +190,173 @@ namespace
         std::ostringstream out;
 
         EXPECT_THROW(info({missing.string()}, out, "json", false, 0, "auto", false, true), FSException);
+    }
+
+    // Part 1 made Statement::step throw on SQLITE_READONLY, so a legacy (user_version 0)
+    // index on a read-only file stopped opening: its schema is current, but the final
+    // user_version stamp used to fail silently and now threw.
+    TEST(Dq02Defects, Target_LegacyIndexOnReadOnlyFileOpens)
+    {
+        TestArea ta(TEST_NAME, true);
+        const auto root = ta.getFolder("ds");
+        initIndex(root.string());
+        const auto dbFile = root / DDB_FOLDER / DDB_DATABASE_FILE;
+        DatabasePool::instance().releaseConnections(root);
+        {
+            SqliteDatabase legacy;
+            legacy.open(dbFile.string());
+            legacy.setUserVersion(0);
+        }
+
+        const auto writable = fs::status(dbFile).permissions();
+        fs::permissions(dbFile, fs::perms::owner_write | fs::perms::group_write | fs::perms::others_write,
+                        fs::perm_options::remove);
+        struct RestorePerms
+        {
+            fs::path p;
+            fs::perms perms;
+            ~RestorePerms()
+            {
+                DatabasePool::instance().releaseConnections(p.parent_path().parent_path());
+                fs::permissions(p, perms, fs::perm_options::replace);
+            }
+        } restore{dbFile, writable};
+
+        {
+            SqliteDatabase probe;
+            probe.open(dbFile.string());
+            if (!probe.isReadOnly())
+                GTEST_SKIP() << "the file is still writable (running as root?)";
+        }
+
+        std::unique_ptr<Database> db;
+        ASSERT_NO_THROW(db = ddb::open(root.string(), false));
+        EXPECT_TRUE(db->isReadOnly());
+        EXPECT_EQ(db->getUserVersion(), 0) << "a read-only connection cannot stamp the version";
+        EXPECT_TRUE(db->tableExists("entries"));
+    }
+
+    // The read-only skip must not hide real failures: on a writable index the stamp is written.
+    TEST(Dq02Defects, Target_LegacyIndexOnWritableFileIsStamped)
+    {
+        TestArea ta(TEST_NAME, true);
+        const auto root = ta.getFolder("ds");
+        initIndex(root.string());
+        const auto dbFile = root / DDB_FOLDER / DDB_DATABASE_FILE;
+        DatabasePool::instance().releaseConnections(root);
+        {
+            SqliteDatabase legacy;
+            legacy.open(dbFile.string());
+            legacy.setUserVersion(0);
+        }
+
+        const auto db = ddb::open(root.string(), false);
+        EXPECT_FALSE(db->isReadOnly());
+        EXPECT_EQ(db->getUserVersion(), DDB_SCHEMA_VERSION);
+    }
+
+    // The OpenTopography key was committed in DEFAULT_DSM_SERVICE_URL. It is now read from
+    // DDB_OPENTOPOGRAPHY_KEY at call time and filled into a keyless template.
+    TEST(Dq02Defects, Target_DsmServiceUrlTakesTheKeyFromTheEnvironment)
+    {
+        const std::string tmpl = DEFAULT_DSM_SERVICE_URL;
+        EXPECT_NE(tmpl.find("API_Key={key}"), std::string::npos) << "the template must not carry a key: " << tmpl;
+
+        const auto url = buildDsmServiceUrl(tmpl, "k3y", 1.5, -2.25, 3.0, 4.0);
+        ASSERT_TRUE(url.has_value());
+        EXPECT_NE(url->find("west=1.500000"), std::string::npos) << *url;
+        EXPECT_NE(url->find("south=-2.250000"), std::string::npos) << *url;
+        EXPECT_NE(url->find("east=3.000000"), std::string::npos) << *url;
+        EXPECT_NE(url->find("north=4.000000"), std::string::npos) << *url;
+        EXPECT_NE(url->find("API_Key=k3y"), std::string::npos) << *url;
+        EXPECT_EQ(url->find('{'), std::string::npos) << *url;
+        EXPECT_FALSE(buildDsmServiceUrl(tmpl, "", 1.5, -2.25, 3.0, 4.0).has_value());
+
+        EnvVarGuard guard(DSM_SERVICE_KEY_ENV);
+        DDB_SETENV(DSM_SERVICE_KEY_ENV, "from-env");
+        EXPECT_EQ(dsmServiceApiKey(), "from-env");
+        DDB_UNSETENV(DSM_SERVICE_KEY_ENV);
+        EXPECT_EQ(dsmServiceApiKey(), "");
+    }
+
+    // Without a key the download is skipped (no request): getAltitude() catches the
+    // NetException and falls back to 0, as when the service is unreachable.
+    TEST(Dq02Defects, Target_DsmDownloadWithoutKeyIsSkipped)
+    {
+        EnvVarGuard guard(DSM_SERVICE_KEY_ENV);
+        DDB_UNSETENV(DSM_SERVICE_KEY_ENV);
+        EXPECT_THROW(DSMService::get()->loadFromNetwork(46.84260708333, -91.99455988889), NetException);
+    }
+
+    // printVersions streamed std::getenv() results, null for unset variables.
+    TEST(Dq02Defects, Target_GetEnvOrUnsetNeverReturnsNull)
+    {
+        const char *name = "DDB_DQ02_TEST_UNSET_VARIABLE";
+        EnvVarGuard guard(name);
+        DDB_UNSETENV(name);
+        EXPECT_EQ(utils::getEnvOrUnset(name), "<unset>");
+        DDB_SETENV(name, "value");
+        EXPECT_EQ(utils::getEnvOrUnset(name), "value");
+    }
+
+    // Characterisation: the label tested DEBUG, which no build defines, so every build said
+    // "Release". This passes in the Release build used today (it would fail in Debug before
+    // the fix).
+    TEST(Dq02Defects, Target_BuildInfoLabelFollowsNdebug)
+    {
+        const std::string info = utils::getBuildInfo();
+#ifdef NDEBUG
+        EXPECT_EQ(info.rfind("Release build", 0), 0u) << info;
+#else
+        EXPECT_EQ(info.rfind("Debug build", 0), 0u) << info;
+#endif
+    }
+
+    // Characterisation: Tiler checked `ceil(log2(n) != floor(log2(n)))`, ceil of a bool. It
+    // happened to give the right answer, so this cannot fail today; it pins the integer check.
+    TEST(Dq02Defects, Target_TileSizePowerOfTwoCheck)
+    {
+        static_assert(isPowerOfTwo(1) && isPowerOfTwo(2) && isPowerOfTwo(256));
+        static_assert(!isPowerOfTwo(0) && !isPowerOfTwo(-2) && !isPowerOfTwo(3) && !isPowerOfTwo(257));
+        EXPECT_TRUE(isPowerOfTwo(1));
+        EXPECT_TRUE(isPowerOfTwo(2));
+        EXPECT_FALSE(isPowerOfTwo(3));
+        EXPECT_TRUE(isPowerOfTwo(256));
+        EXPECT_FALSE(isPowerOfTwo(257));
+        EXPECT_TRUE(isPowerOfTwo(1 << 30));
+    }
+
+    // Characterisation: utils.h fell back to M_PI = 3.1415926535 (truncated) when <cmath>
+    // did not define it (MSVC without _USE_MATH_DEFINES); glibc always defines it, so this
+    // cannot fail on Linux.
+    TEST(Dq02Defects, Target_PiIsFullPrecision)
+    {
+        static_assert(kPi == 3.14159265358979323846);
+        EXPECT_EQ(kPi, std::acos(-1.0));
+        EXPECT_EQ(utils::deg2rad(180.0), std::acos(-1.0));
+        EXPECT_EQ(utils::rad2deg(std::acos(-1.0)), 180.0);
+    }
+
+    // Characterisation: utils::toLower/toUpper passed a plain char (negative for UTF-8
+    // bytes) to std::tolower/toupper, which is undefined behaviour. glibc tolerates negative
+    // values, so this passes before the fix too; MSVC debug builds assert.
+    TEST(Dq02Defects, Target_CaseHelpersLeaveHighBitBytesUnchanged)
+    {
+        const std::string utf8 = "Caf\xc3\xa9 \xc3\x80" "BC \xe2\x82\xac" "9";  // "Café ÀBC €9"
+        std::string lower = utf8;
+        utils::toLower(lower);
+        EXPECT_EQ(lower, "caf\xc3\xa9 \xc3\x80" "bc \xe2\x82\xac" "9");
+        std::string upper = utf8;
+        utils::toUpper(upper);
+        EXPECT_EQ(upper, "CAF\xc3\xa9 \xc3\x80" "BC \xe2\x82\xac" "9");
+
+        EXPECT_EQ(utils::toUpperChar('\xc3'), '\xc3');
+        EXPECT_EQ(utils::toLowerChar('\x80'), '\x80');
+        EXPECT_FALSE(utils::isDigitChar('\xd9'));
+        EXPECT_TRUE(utils::isDigitChar('7'));
+
+        std::string padded = "\xc2\xa0 x \xc2\xa0";  // NBSP bytes are not ASCII spaces
+        utils::trim(padded);
+        EXPECT_EQ(padded, "\xc2\xa0 x \xc2\xa0");
     }
 } // namespace

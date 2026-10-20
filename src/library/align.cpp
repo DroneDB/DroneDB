@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "align.h"
+#include "mathutil.h"
 #include "gdal_inc.h"
 #include "cog.h"        // buildCog() - DRY reuse of the COG pattern
 #include "exceptions.h"
@@ -15,10 +16,6 @@
 #include <random>
 #include <utility>
 #include <vector>
-
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
 
 namespace ddb {
 
@@ -211,7 +208,7 @@ static void fft1d(std::vector<std::complex<double>> &a, bool inverse) {
         if (i < j) std::swap(a[i], a[j]);
     }
     for (size_t len = 2; len <= n; len <<= 1) {
-        double ang = 2.0 * M_PI / static_cast<double>(len) * (inverse ? 1.0 : -1.0);
+        double ang = 2.0 * ddb::kPi / static_cast<double>(len) * (inverse ? 1.0 : -1.0);
         std::complex<double> wlen(std::cos(ang), std::sin(ang));
         for (size_t i = 0; i < n; i += len) {
             std::complex<double> w(1.0, 0.0);
@@ -915,7 +912,7 @@ AlignResult alignRaster(const std::string &sourcePath,
     result.success      = true;
     result.txMapUnits   = sim.t.x;
     result.tyMapUnits   = sim.t.y;
-    result.thetaDeg     = std::atan2(sim.sinTheta, sim.cosTheta) * 180.0 / M_PI;
+    result.thetaDeg     = std::atan2(sim.sinTheta, sim.cosTheta) * 180.0 / ddb::kPi;
     result.scale        = sim.scale;
     result.inlierCount  = inlierCount;
     result.inlierRatio  = inlierRatio;
