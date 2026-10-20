@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.21)
 project(ddb LANGUAGES CXX C)
 
-# Enable C++17 standard
-set(CMAKE_CXX_STANDARD 17)
+# C++20 (DQ-01). CMAKE_CXX_EXTENSIONS is left at its default.
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(CMAKE_MESSAGE_LOG_LEVEL VERBOSE)

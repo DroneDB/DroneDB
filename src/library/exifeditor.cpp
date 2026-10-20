@@ -57,7 +57,7 @@ namespace ddb
 
     void ExifEditor::SetGPSAltitude(double altitude)
     {
-        eachFile([=](const fs::path &f, Exiv2::ExifData &exifData)
+        eachFile([this, altitude](const fs::path &f, Exiv2::ExifData &exifData)
                  {
                      exifData["Exif.GPSInfo.GPSAltitude"] = doubleToFraction(altitude, 4);
                      exifData["Exif.GPSInfo.GPSAltitudeRef"] = altitude < 0.0 ? "1" : "0";
@@ -70,7 +70,7 @@ namespace ddb
 
     void ExifEditor::SetGPSLatitude(double latitude)
     {
-        eachFile([=](const fs::path &f, Exiv2::ExifData &exifData)
+        eachFile([this, latitude](const fs::path &f, Exiv2::ExifData &exifData)
                  {
         exifData["Exif.GPSInfo.GPSLatitude"] = doubleToDMS(latitude);
         exifData["Exif.GPSInfo.GPSLatitudeRef"] = latitude >= 0.0 ? "N" : "S";
@@ -83,7 +83,7 @@ namespace ddb
 
     void ExifEditor::SetGPSLongitude(double longitude)
     {
-        eachFile([=](const fs::path &f, Exiv2::ExifData &exifData)
+        eachFile([this, longitude](const fs::path &f, Exiv2::ExifData &exifData)
                  {
         exifData["Exif.GPSInfo.GPSLongitude"] = doubleToDMS(longitude);
         exifData["Exif.GPSInfo.GPSLongitudeRef"] = longitude >= 0.0 ? "E" : "W";
@@ -95,7 +95,7 @@ namespace ddb
 
     void ExifEditor::SetGPS(double latitude, double longitude, double altitude)
     {
-        eachFile([=](const fs::path &f, Exiv2::ExifData &exifData)
+        eachFile([this, latitude, longitude, altitude](const fs::path &f, Exiv2::ExifData &exifData)
                  {
         exifData["Exif.GPSInfo.GPSAltitude"] = doubleToFraction(altitude, 3);
         exifData["Exif.GPSInfo.GPSAltitudeRef"] = altitude < 0.0 ? "1" : "0";
