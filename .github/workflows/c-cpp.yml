@@ -102,6 +102,7 @@ jobs:
           vcpkgJsonGlob: vcpkg.json
           doNotCache: false
       - name: Run CMake
+        id: configure
         uses: nick-fields/retry@v3
         with:
           timeout_minutes: 120
@@ -116,11 +117,13 @@ jobs:
             cmake -DVCPKG_OVERLAY_TRIPLETS=${{ github.workspace }}/vcpkg-triplets -DVCPKG_HOST_TRIPLET=x64-linux-release -DVCPKG_TARGET_TRIPLET=x64-linux-release -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake ..
       - name: Save vcpkg binary cache
         # Saved right after vcpkg install so a later build or test failure keeps the built ports.
-        if: steps.vcpkg-cache.outputs.cache-hit != 'true'
+        # An install that failed or was cancelled (a newer push supersedes a cold build) keeps
+        # the ports built so far under a partial key, which the next run restores first.
+        if: always() && steps.configure.outcome != 'skipped' && steps.vcpkg-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: ${{ steps.vcpkg-cache.outputs.path }}
-          key: ${{ steps.vcpkg-cache.outputs.key }}
+          key: ${{ steps.configure.outcome == 'success' && steps.vcpkg-cache.outputs.key || steps.vcpkg-cache.outputs.partial-key }}
       - name: Build C++ lib/program and tests
         run: cd build && make -j$(nproc)
       - name: Build Untwine COPC accelerator
@@ -427,6 +430,7 @@ jobs:
           vcpkgJsonGlob: vcpkg.json
           doNotCache: false
       - name: Run CMake
+        id: configure
         uses: nick-fields/retry@v3
         with:
           timeout_minutes: 120
@@ -441,11 +445,13 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "CMake configuration failed with exit code $LASTEXITCODE" }
       - name: Save vcpkg binary cache
         # Saved right after vcpkg install so a later build or test failure keeps the built ports.
-        if: steps.vcpkg-cache.outputs.cache-hit != 'true'
+        # An install that failed or was cancelled (a newer push supersedes a cold build) keeps
+        # the ports built so far under a partial key, which the next run restores first.
+        if: always() && steps.configure.outcome != 'skipped' && steps.vcpkg-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: ${{ steps.vcpkg-cache.outputs.path }}
-          key: ${{ steps.vcpkg-cache.outputs.key }}
+          key: ${{ steps.configure.outcome == 'success' && steps.vcpkg-cache.outputs.key || steps.vcpkg-cache.outputs.partial-key }}
       - name: Build C++ lib/program and tests
         uses: nick-fields/retry@v3
         with:

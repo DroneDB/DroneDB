@@ -2,7 +2,8 @@ name: vcpkg binary cache
 description: >
   Restore the vcpkg binary cache (built port archives) and point vcpkg at it.
   Pair it with actions/cache/save right after the step that runs vcpkg install,
-  using the `path` and `key` outputs, when `cache-hit` is not 'true'.
+  when `cache-hit` is not 'true': `key` when the install succeeded, `partial-key`
+  when it failed or was cancelled part way.
 
 outputs:
   path:
@@ -11,6 +12,9 @@ outputs:
   key:
     description: Exact cache key for this manifest, triplet and vcpkg version
     value: ${{ steps.vars.outputs.key }}
+  partial-key:
+    description: Key for the ports built by an install that did not finish (restored before any other match)
+    value: ${{ steps.vars.outputs.key }}-partial-${{ github.run_id }}-${{ github.run_attempt }}
   cache-hit:
     description: "'true' when the exact key was restored"
     value: ${{ steps.restore.outputs.cache-hit }}
@@ -37,5 +41,8 @@ runs:
       with:
         path: ${{ steps.vars.outputs.path }}
         key: ${{ steps.vars.outputs.key }}
-        # A partial match still helps: vcpkg rebuilds only the ports whose ABI hash changed.
-        restore-keys: ${{ steps.vars.outputs.prefix }}
+        # A partial match still helps: vcpkg builds only the ports it does not find. The ports of
+        # an unfinished install of this same key come first, then the latest other key.
+        restore-keys: |
+          ${{ steps.vars.outputs.key }}-partial-
+          ${{ steps.vars.outputs.prefix }}
