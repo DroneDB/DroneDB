@@ -6,10 +6,6 @@
   "directories": {
     "test": "test"
   },
-  "scripts": {
-    "test": "./node_modules/.bin/mocha nodejs/test/*.js",
-    "install": "node scripts/run-cmake-js.js"
-  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/DroneDB/DroneDB.git"
@@ -19,10 +15,5 @@
   "bugs": {
     "url": "https://github.com/DroneDB/DroneDB/issues"
   },
-  "homepage": "https://github.com/DroneDB/DroneDB#readme",
-  "devDependencies": {
-    "cmake-js": "^6.3.0",
-    "mocha": "^7.2.0",
-    "nan": "^2.16.0"
-  }
+  "homepage": "https://github.com/DroneDB/DroneDB#readme"
 }

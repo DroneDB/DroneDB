@@ -114,46 +114,6 @@ add_subdirectory(src)
 # Add applications (main executable)
 add_subdirectory(apps)
 
-# Node.js bindings
-if (CMAKE_JS_VERSION)
-    message(STATUS "Building Node.js bindings")
-
-    # Don't build distribution target
-    set(SKIP_DIST ON)
-
-    # Check if nan module exists, if not suggest to install it
-    if (NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/node_modules/nan")
-        message(WARNING "Node.js NAN module not found. Please run 'npm install' first.")
-    endif()
-
-    # Include necessary directories
-    include_directories(${CMAKE_JS_INC})
-
-    # Find all Node.js source files
-    file(GLOB NODE_SOURCE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/nodejs/*.cc"
-                               "${CMAKE_CURRENT_SOURCE_DIR}/nodejs/*.h")
-
-    # Create Node.js addon library
-    add_library("node-${PROJECT_NAME}" SHARED ${NODE_SOURCE_FILES} ${CMAKE_JS_SRC})
-
-    # Configure output properties for the Node.js addon
-    set_target_properties("node-${PROJECT_NAME}" PROPERTIES
-                         PREFIX ""
-                         SUFFIX ${CMAKE_SHARED_LIBRARY_SUFFIX}
-                         CXX_STANDARD 17
-                         CXX_STANDARD_REQUIRED ON)
-
-    # Link against required libraries
-    target_link_libraries("node-${PROJECT_NAME}" ${CMAKE_JS_LIB} ${PROJECT_NAME})
-
-    # Copy the Node.js addon to the build directory with the correct name
-    add_custom_command(TARGET "node-${PROJECT_NAME}" POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                $<TARGET_FILE:node-${PROJECT_NAME}>
-                ${CMAKE_BINARY_DIR}/node-${PROJECT_NAME}${CMAKE_SHARED_LIBRARY_SUFFIX}
-        COMMENT "Created ${CMAKE_BINARY_DIR}/node-${PROJECT_NAME}${CMAKE_SHARED_LIBRARY_SUFFIX}")
-endif()
-
 # Add tests
 if(BUILD_TESTING)
     enable_testing()

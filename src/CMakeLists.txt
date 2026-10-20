@@ -1,5 +1,4 @@
 # Gather source files from subdirectories into SRC_LIST
-#add_subdirectory(utilities)
 add_subdirectory(library)
 
 message(STATUS "SRC_LIST: ${SRC_LIST}")
