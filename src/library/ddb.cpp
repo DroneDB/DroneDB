@@ -559,7 +559,7 @@ DDBErr DDBReleaseConnections(const char* path, int* closed) {
         throw InvalidArgsException("No path provided");
 
     const auto count = ddb::DatabasePool::instance().releaseConnections(fs::path(path)) +
-                       ddb::RasterCache::instance().release(fs::path(path));
+                       ddb::releaseCachedFiles(fs::path(path));
     if (closed != nullptr)
         *closed = static_cast<int>(count);
 

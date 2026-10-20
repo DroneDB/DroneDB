@@ -196,6 +196,11 @@ namespace ddb
 
     using TilerLease = RasterCache::Lease<Tiler>;
     using DatasetLease = RasterCache::Lease<OpenedDataset>;
+
+    /// Releases what this process keeps of the files under path (a file or a folder):
+    /// idle rasters and tilers (RasterCache) and decoded point-cloud nodes (CopcNodeCache).
+    /// Call it before replacing or deleting those files. Returns the rasters closed.
+    DDB_DLL size_t releaseCachedFiles(const fs::path &path);
 }
 
 #endif // RASTER_CACHE_H

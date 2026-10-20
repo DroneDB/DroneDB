@@ -38,6 +38,23 @@ else()
     message(FATAL_ERROR "spz: no usable zstd target found (expected zstd::libzstd*)")
 endif()
 
+# laz-perf (Apache 2.0), the LAZ codec vendored with Untwine. PDAL keeps its own copy
+# private, so libddb links this one to decompress COPC nodes itself (DDB-06: decoded
+# nodes are cached across point-cloud tiles). Symbols stay hidden inside libddb.
+file(GLOB LAZPERF_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/untwine/lazperf/*.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/untwine/lazperf/detail/*.cpp"
+)
+add_library(lazperf STATIC ${LAZPERF_SOURCES})
+target_include_directories(lazperf PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/untwine")
+set_target_properties(lazperf PROPERTIES
+    CXX_STANDARD 17
+    CXX_STANDARD_REQUIRED ON
+    POSITION_INDEPENDENT_CODE ON
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN ON
+)
+
 set(SRC_LIST
     ${SRC_LIST}
     ${CMAKE_CURRENT_SOURCE_DIR}/zonedetect/library/zonedetect.c

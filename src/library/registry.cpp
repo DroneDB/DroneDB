@@ -474,7 +474,7 @@ std::vector<Conflict> applyDelta(const Delta& d,
         removeFromIndex(destination, indexedRemovals);
         for (const auto* rem : fileRemovals) {
             // A raster kept open by recent tile requests would block this on Windows
-            RasterCache::instance().release(destPath / rem->path);
+            releaseCachedFiles(destPath / rem->path);
             io::assureIsRemoved(destPath / rem->path);
             out << "D\t" << rem->path << std::endl;
         }
@@ -503,7 +503,7 @@ std::vector<Conflict> applyDelta(const Delta& d,
                 if (add.isDirectory()) {
                     io::createDirectories(dest);
                 } else {
-                    RasterCache::instance().release(dest);
+                    releaseCachedFiles(dest);
                     io::moveOrCopy(sourcePath / add.path, dest);
                 }
 

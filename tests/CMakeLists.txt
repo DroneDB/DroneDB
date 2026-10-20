@@ -5,6 +5,7 @@ if(BUILD_TESTING)
     find_package(GTest CONFIG REQUIRED)
     find_package(cpr CONFIG REQUIRED)
     find_package(GDAL CONFIG REQUIRED)
+    find_package(PDAL CONFIG REQUIRED)
     find_package(tinyobjloader CONFIG REQUIRED)
     find_package(OpenSSL REQUIRED)
     find_package(exiv2 CONFIG REQUIRED)
@@ -38,7 +39,7 @@ if(BUILD_TESTING)
     # (vendor/CMakeLists.txt); its PUBLIC include dir (vendor/spz/src/cc) lets the gsplat tests
     # encode/decode .spz fixtures directly. libddb is SHARED, so no duplicate objects.
     # SQLite is a PRIVATE dependency of libddb; open_test.cpp calls its C API directly.
-    target_link_libraries(ddbtest PRIVATE ${PROJECT_NAME} GTest::gtest GTest::gtest_main cpr::cpr GDAL::GDAL tinyobjloader::tinyobjloader OpenSSL::Crypto Exiv2::exiv2lib unofficial::sqlite3::sqlite3 spz)
+    target_link_libraries(ddbtest PRIVATE ${PROJECT_NAME} GTest::gtest GTest::gtest_main cpr::cpr GDAL::GDAL pdalcpp tinyobjloader::tinyobjloader OpenSSL::Crypto Exiv2::exiv2lib unofficial::sqlite3::sqlite3 spz)
 
     # set PLOG to PLOG_GLOBAL/PLOG_IMPORT to share instances across modules (and import on Windows)
     if(WIN32)

@@ -7,12 +7,14 @@
 #include <cstdlib>
 #include <iomanip>
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include <pdal/Options.hpp>
 #include <pdal/io/CopcReader.hpp>
 #include <pdal/filters/ColorinterpFilter.hpp>
 
+#include "copc_node_cache.h"
 #include "copc_utils.h"
 #include "exceptions.h"
 #include "logger.h"
@@ -59,6 +61,20 @@ namespace ddb
         toCloud = std::make_unique<CoordsTransformer>(3857, pcInfo.wktProjection);
         toMercator = std::make_unique<CoordsTransformer>(pcInfo.wktProjection, 3857);
 
+        if (hasColors && !utils::isNetworkPath(inputPath))
+        {
+            try
+            {
+                nodeReader = std::make_unique<CopcNodeReader>(inputPath);
+                if (!nodeReader->hasColor())
+                    nodeReader.reset();
+            }
+            catch (const std::exception &e)
+            {
+                LOGW << "Reading " << inputPath << " with PDAL: " << e.what();
+            }
+        }
+
 #ifdef _WIN32
         const fs::path caBundlePath = io::getDataPath("curl-ca-bundle.crt");
         if (!caBundlePath.empty())
@@ -74,9 +90,7 @@ namespace ddb
 #endif
     }
 
-    PointCloudTiler::~PointCloudTiler()
-    {
-    }
+    PointCloudTiler::~PointCloudTiler() = default;
 
     int PointCloudTiler::resolutionOffset()
     {
@@ -125,16 +139,74 @@ namespace ddb
         toCloud->transform(&bounds.min.x, &bounds.min.y);
         toCloud->transform(&bounds.max.x, &bounds.max.y);
 
-        pdal::Options copcOpts = copcReaderOptions(inputPath);
-
+        // readers.copc parses its bounds from this text: the node reader takes the same
+        // (rounded) values, so both read the same points
+        const auto asText = [](double v) {
+            std::ostringstream os;
+            os << std::setprecision(14) << v;
+            return std::stod(os.str());
+        };
+        const double minX = asText(bounds.min.x), maxX = asText(bounds.max.x);
+        const double minY = asText(bounds.min.y), maxY = asText(bounds.max.y);
         std::stringstream ss;
-        ss << std::setprecision(14) << "([" << bounds.min.x << "," << bounds.max.x << "]," << "[" << bounds.min.y << "," << bounds.max.y << "])";
-        copcOpts.add("bounds", ss.str());
+        ss << std::setprecision(14) << "([" << minX << "," << maxX << "]," << "[" << minY << "," << maxY << "])";
         LOGD << "COPC bounds: " << ss.str();
 
         const double copcResolution = mercator.resolution(tz - resolutionOffset());
-        copcOpts.add("resolution", copcResolution);
         LOGD << "COPC resolution: " << copcResolution;
+
+        // Discs of pointRadius px; the z-buffer is padded by the radius so that points
+        // just outside the tile still draw their part of a disc inside it
+        const int pointRadius = 2;
+        const double pointRadiusMeters = pointRadius * tileResolution;
+        const int paddedTileSize = tileSize + pointRadius * 2;
+
+        PixelMapping mapping;
+        mapping.originX = tileBounds.min.x;
+        mapping.shiftX = -pointRadiusMeters;
+        mapping.scaleX = paddedTileSize / (tileBounds.max.x - tileBounds.min.x + pointRadiusMeters * 2.0);
+        mapping.originY = tileBounds.min.y;
+        mapping.shiftY = pointRadiusMeters;
+        mapping.scaleY = paddedTileSize / (tileBounds.max.y - tileBounds.min.y + pointRadiusMeters * 2.0);
+        mapping.width = mapping.height = paddedTileSize;
+
+        std::optional<PointRasterizer> rasterizer;
+        const auto draw = [&](PointBatch &points) {
+            toMercator->transform(points.size(), points.x.data(), points.y.data());
+            rasterizer->add(points);
+        };
+
+        bool drawn = false;
+        if (nodeReader)
+        {
+            try
+            {
+                rasterizer.emplace(tileSize, mapping, pointRadius, pointRadius);
+                nodeReader->read(minX, minY, maxX, maxY, copcResolution, draw);
+                drawn = true;
+            }
+            catch (const std::exception &e)
+            {
+                LOGW << "COPC node read failed for " << inputPath << ", reading with PDAL: " << e.what();
+            }
+        }
+        if (!drawn)
+        {
+            rasterizer.emplace(tileSize, mapping, pointRadius, pointRadius);
+            readWithPdal(ss.str(), copcResolution, draw);
+        }
+
+        LOGD << "Drew " << rasterizer->drawn() << " points";
+
+        return writeTile(rasterizer->toImage(), format, tz, tx, ty, outBuffer, outBufferSize);
+    }
+
+    void PointCloudTiler::readWithPdal(const std::string &bounds, double resolution,
+                                       const std::function<void(PointBatch &)> &sink)
+    {
+        pdal::Options copcOpts = copcReaderOptions(inputPath);
+        copcOpts.add("bounds", bounds);
+        copcOpts.add("resolution", resolution);
 
         pdal::CopcReader copcReader;
         copcReader.setOptions(copcOpts);
@@ -166,37 +238,14 @@ namespace ddb
             }
         }
 
-        // Discs of pointRadius px; the z-buffer is padded by the radius so that points
-        // just outside the tile still draw their part of a disc inside it
-        const int pointRadius = 2;
-        const double pointRadiusMeters = pointRadius * tileResolution;
-        const int paddedTileSize = tileSize + pointRadius * 2;
-
-        PixelMapping mapping;
-        mapping.originX = tileBounds.min.x;
-        mapping.shiftX = -pointRadiusMeters;
-        mapping.scaleX = paddedTileSize / (tileBounds.max.x - tileBounds.min.x + pointRadiusMeters * 2.0);
-        mapping.originY = tileBounds.min.y;
-        mapping.shiftY = pointRadiusMeters;
-        mapping.scaleY = paddedTileSize / (tileBounds.max.y - tileBounds.min.y + pointRadiusMeters * 2.0);
-        mapping.width = mapping.height = paddedTileSize;
-
-        PointRasterizer rasterizer(tileSize, mapping, pointRadius, pointRadius);
         try
         {
-            forEachPointBatch(*main, [&](PointBatch &points) {
-                toMercator->transform(points.size(), points.x.data(), points.y.data());
-                rasterizer.add(points);
-            });
+            forEachPointBatch(*main, sink);
         }
         catch (const pdal::pdal_error &e)
         {
             throw PDALException(e.what());
         }
-
-        LOGD << "Drew " << rasterizer.drawn() << " points";
-
-        return writeTile(rasterizer.toImage(), format, tz, tx, ty, outBuffer, outBufferSize);
     }
 
 } // namespace ddb

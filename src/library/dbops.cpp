@@ -1009,7 +1009,7 @@ static std::mutex g_templateMutex;
 
                     // A GeoPackage kept open for WFS/OGC queries would block this on Windows
                     const fs::path out = db->buildDirectory() / old.hash;
-                    RasterCache::instance().release(out);
+                    releaseCachedFiles(out);
                     io::assureIsRemoved(out / "vec");
                     io::assureIsRemoved(out / "mvt");
                     LOGD << "Refreshed " << mainPath << " after a change to " << prj;
@@ -1168,7 +1168,7 @@ static std::mutex g_templateMutex;
         if (fs::exists(buildFolder))
         {
             LOGD << "Removing " << buildFolder.string();
-            RasterCache::instance().release(buildFolder);
+            releaseCachedFiles(buildFolder);
             io::assureIsRemoved(buildFolder);
         }
     }

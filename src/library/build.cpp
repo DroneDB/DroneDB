@@ -535,7 +535,7 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
             LOGD << "Build complete, moving temp folder to " << outputFolder;
             if (fs::exists(outputFolder)) {
                 // Rasters of the previous output kept open would block this on Windows
-                RasterCache::instance().release(outputFolder);
+                releaseCachedFiles(outputFolder);
                 io::assureIsRemoved(outputFolder);
             }
 

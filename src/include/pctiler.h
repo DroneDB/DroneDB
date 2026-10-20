@@ -15,24 +15,35 @@
 #include "tiler.h"
 #include "pointcloud.h"
 #include "coordstransformer.h"
+#include "point_rasterizer.h"
 
+#include <functional>
 #include <memory>
 
 namespace ddb
 {
 
     // Tiler that renders web-map raster tiles from a built COPC (.copc.laz) file
-    // using PDAL's CopcReader. Drop-in replacement for the previous EptTiler.
+    // from its octree nodes. Drop-in replacement for the previous EptTiler.
     // The constructor reads the COPC header and prepares the coordinate transforms once;
     // every tile then streams the points of its window through PointRasterizer. An
     // instance must not be used by two threads at once (RasterCache hands out one per
     // caller).
+    class CopcNodeReader;
+
     class PointCloudTiler : public Tiler
     {
         PointCloudInfo pcInfo;
         bool hasColors;
         std::unique_ptr<CoordsTransformer> toCloud;    // EPSG:3857 -> cloud CRS
         std::unique_ptr<CoordsTransformer> toMercator; // cloud CRS -> EPSG:3857
+
+        // Reads local coloured clouds through the shared cache of decoded nodes; PDAL's
+        // readers.copc reads the others (remote files, ramp-coloured clouds)
+        std::unique_ptr<CopcNodeReader> nodeReader;
+
+        void readWithPdal(const std::string &bounds, double resolution,
+                          const std::function<void(PointBatch &)> &sink);
 
     public:
         DDB_DLL PointCloudTiler(const std::string &copcPath,

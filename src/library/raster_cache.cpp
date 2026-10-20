@@ -3,6 +3,8 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "raster_cache.h"
 
+#include "copc_node_cache.h"
+
 #include <algorithm>
 #include <cstdlib>
 
@@ -295,5 +297,11 @@ namespace ddb
         }
 
         stats_.discarded += out.size() - before;
+    }
+
+    size_t releaseCachedFiles(const fs::path &path)
+    {
+        CopcNodeCache::instance().release(path);
+        return RasterCache::instance().release(path);
     }
 }

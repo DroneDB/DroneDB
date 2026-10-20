@@ -64,6 +64,7 @@ set(COMMON_LIBS
     tinyobjloader::tinyobjloader
     draco::draco
     spz
+    lazperf
     ZLIB::ZLIB
 )
 
