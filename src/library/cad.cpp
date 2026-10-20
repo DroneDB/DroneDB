@@ -210,7 +210,7 @@ namespace ddb
             {
                 io::assureIsRemoved(outDxf);
                 throw AppException("DWG conversion failed (" + version +
-                                   "): the drawing has no 2D features that can be read (3D solids are not supported)" +
+                                   "): the drawing has no 2D features that can be read (for example, a drawing of 3D solids only)" +
                                    kDxfAdvice);
             }
             LOGD << "Converted " << dwg.filename().string() << ": " << features << " features";
