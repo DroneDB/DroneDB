@@ -503,11 +503,35 @@ jobs:
         run: |
           Copy-Item libredwg-out/windows/dwg2dxf.exe, libredwg-out/windows/dwg2dxf.LICENSE.txt build/ -Force
           & build/dwg2dxf.exe --version
+      - name: Enable crash dumps for ddbtest
+        shell: pwsh
+        run: |
+          $key = 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\ddbtest.exe'
+          New-Item -Path $key -Force | Out-Null
+          New-ItemProperty -Path $key -Name DumpFolder -PropertyType ExpandString -Value "$env:RUNNER_TEMP\ddbtest-dumps" -Force | Out-Null
+          New-ItemProperty -Path $key -Name DumpType -PropertyType DWord -Value 1 -Force | Out-Null
+          New-ItemProperty -Path $key -Name DumpCount -PropertyType DWord -Value 3 -Force | Out-Null
       - name: Run C++ Tests
         env:
           DDB_DWG2DXF_PATH: ${{ github.workspace }}\build\dwg2dxf.exe
-        run: cd build && .\ddbtest.exe --gtest_shuffle
+        run: |
+          cd build
+          .\ddbtest.exe --gtest_shuffle
+          $code = $LASTEXITCODE
+          # The pwsh step wrapper turns a negative (NTSTATUS) exit code into 1: print the real one
+          "ddbtest exit code: $code (0x{0:X8})" -f $code
+          exit [int]($code -ne 0)
         shell: pwsh
+      - name: Upload ddbtest crash dumps
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ddbtest-crash-dumps
+          path: |
+            ${{ runner.temp }}/ddbtest-dumps
+            build/*.pdb
+          if-no-files-found: ignore
+          retention-days: 14
       - name: Run Program Smoke Test
         run: cd build && .\ddbcmd.exe --version --debug
         shell: pwsh
