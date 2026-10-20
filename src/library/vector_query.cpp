@@ -207,6 +207,17 @@ namespace ddb
             return column + " IN (" + in + ")";
         }
 
+        // The attribute filter of query: its feature ids and its where expression
+        std::string attributeFilter(const VectorQuery &query, const std::string &fidColumn)
+        {
+            const std::string fids = fidPredicate(query, fidColumn);
+            if (query.where.empty())
+                return fids;
+            if (fids.empty())
+                return "(" + query.where + ")";
+            return fids + " AND (" + query.where + ")";
+        }
+
         // Identifier quoted for SQL: between double quotes, embedded quotes doubled
         std::string quoteIdentifier(const std::string &name)
         {
@@ -273,7 +284,7 @@ namespace ddb
         if (query.startIndex > 0) {
             const char *fidColumn = layer->GetFIDColumn();
             const std::string where =
-                fidPredicate(query, fidColumn != nullptr && *fidColumn != '\0' ? quoteIdentifier(fidColumn) : "rowid");
+                attributeFilter(query, fidColumn != nullptr && *fidColumn != '\0' ? quoteIdentifier(fidColumn) : "rowid");
             std::string sql = "SELECT * FROM " + quoteIdentifier(layerName);
             if (!where.empty())
                 sql += " WHERE " + where;
@@ -284,7 +295,7 @@ namespace ddb
             // The result layer keeps the layer's name (and the ids their prefix)
             argStore.emplace_back("-nln"); argStore.emplace_back(layerName);
         } else {
-            const std::string where = fidPredicate(query, "FID");
+            const std::string where = attributeFilter(query, "FID");
             if (!where.empty()) {
                 argStore.emplace_back("-where"); argStore.emplace_back(where);
             }
@@ -356,12 +367,18 @@ namespace ddb
         LayerScope layer(vectorPath, query.layerName);
         if (const auto rect = layerFilterRect(layer.get(), query))
             layer->SetSpatialFilterRect(rect->MinX, rect->MinY, rect->MaxX, rect->MaxY);
-        const std::string where = fidPredicate(query, "FID");
+        const std::string where = attributeFilter(query, "FID");
         if (!where.empty() && layer->SetAttributeFilter(where.c_str()) != OGRERR_NONE)
-            throw GDALException("Cannot filter " + vectorPath + " by feature id");
+            throw GDALException("Cannot filter " + vectorPath + " with " + where);
 
-        // GeoPackage counts with its R-tree and primary key, without reading features
-        return static_cast<int64_t>(layer->GetFeatureCount(TRUE));
+        // GeoPackage counts with its R-tree and primary key, without reading features.
+        // A filter that SQLite rejects only shows as an error raised by the count.
+        CPLErrorReset();
+        const auto count = static_cast<int64_t>(layer->GetFeatureCount(TRUE));
+        if (count < 0 || CPLGetLastErrorType() == CE_Failure)
+            throw GDALException("Cannot count the features of " + vectorPath +
+                                (where.empty() ? std::string() : " with " + where) + ": " + CPLGetLastErrorMsg());
+        return count;
     }
 
     // ---------------------------------------------------------------------

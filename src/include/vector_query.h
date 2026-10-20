@@ -20,6 +20,9 @@ namespace ddb
         std::optional<std::array<double, 4>> bbox;  // [minX, minY, maxX, maxY]; none = no filter
         std::string bboxSrs;                        // empty = "EPSG:4326"
         std::vector<int64_t> fids;                  // feature ids; empty = every feature
+        std::string where;                          // attribute filter: an SQL expression over the
+                                                    // layer's fields (SQLite syntax for GeoPackage),
+                                                    // built by the caller; empty = none
         int maxFeatures = 0;                        // 0 = unbounded (query only)
         int startIndex = 0;                         // 0-based offset (query only)
         std::string outputFormat;                   // "geojson" (default, also "json") | "gml" (query only)
@@ -33,7 +36,7 @@ namespace ddb
      */
     DDB_DLL std::string queryVector(const std::string &vectorPath, const VectorQuery &query);
 
-    /** Number of features matching query's layer, bbox and fids (paging is ignored). */
+    /** Number of features matching query's layer, bbox, fids and where (paging is ignored). */
     DDB_DLL int64_t countVectorFeatures(const std::string &vectorPath, const VectorQuery &query);
     /**
      * Query a vector dataset, returning features as a string.

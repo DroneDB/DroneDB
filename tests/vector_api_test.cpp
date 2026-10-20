@@ -269,13 +269,13 @@ namespace
         // C API
         const long long fids[] = {3};
         char *out = nullptr;
-        ASSERT_EQ(DDBQueryVectorEx(gpkg.string().c_str(), nullptr, nullptr, nullptr, fids, 1, 10, 0,
+        ASSERT_EQ(DDBQueryVectorEx(gpkg.string().c_str(), nullptr, nullptr, nullptr, fids, 1, nullptr, 10, 0,
                                    "application/gml+xml", &out),
                   DDBERR_NONE)
             << DDBGetLastError();
         EXPECT_EQ(gmlIds(out), (std::vector<std::string>{"test.3"}));
         DDBFree(out);
-        EXPECT_NE(DDBQueryVectorEx(gpkg.string().c_str(), nullptr, nullptr, nullptr, nullptr, 2, 10, 0,
+        EXPECT_NE(DDBQueryVectorEx(gpkg.string().c_str(), nullptr, nullptr, nullptr, nullptr, 2, nullptr, 10, 0,
                                    "application/json", &out),
                   DDBERR_NONE);
     }
@@ -298,8 +298,60 @@ namespace
 
         long long count = -1;
         const double bbox[] = {(*q.bbox)[0], (*q.bbox)[1], (*q.bbox)[2], (*q.bbox)[3]};
-        ASSERT_EQ(DDBCountVector(gpkg.string().c_str(), nullptr, bbox, "EPSG:4326", nullptr, 0, &count), DDBERR_NONE);
+        ASSERT_EQ(DDBCountVector(gpkg.string().c_str(), nullptr, bbox, "EPSG:4326", nullptr, 0, nullptr, &count), DDBERR_NONE);
         EXPECT_EQ(count, static_cast<long long>(inBbox.size()));
+    }
+
+    // WFS filters translated to SQL: the where expression filters queries (both paths) and
+    // counts. Literals are quoted text: the column type decides the comparison (SQLite
+    // affinity), so "id" > '99999' compares numbers.
+    TEST(REG11_VectorQuery, whereFiltersQueriesAndCounts)
+    {
+        const fs::path &gpkg = sharedTest2GeoJsonGpkg();
+        const auto ids = [&](const std::string &where, int maxFeatures = 10, int startIndex = 0) {
+            auto q = gmlQuery(maxFeatures, startIndex);
+            q.where = where;
+            return gmlIds(query(gpkg, q));
+        };
+        const auto count = [&](const std::string &where, std::vector<int64_t> fids = {}) {
+            ddb::VectorQuery q;
+            q.where = where;
+            q.fids = std::move(fids);
+            return ddb::countVectorFeatures(gpkg.string(), q);
+        };
+
+        using Ids = std::vector<std::string>;
+        EXPECT_EQ(ids("\"id\" > '162900'"), (Ids{"test.1", "test.2"}));
+        EXPECT_EQ(ids("\"id\" > '99999'"), (Ids{"test.1", "test.2", "test.3", "test.4"})) << "numeric column";
+        EXPECT_EQ(ids("\"name\" LIKE 'stadsregio%'"), (Ids{"test.3", "test.4"}));
+        EXPECT_EQ(ids("\"name\" GLOB 'Regio*'"), (Ids{"test.2"}));
+        EXPECT_EQ(ids("\"name\" GLOB 'regio*'"), Ids{}) << "GLOB is case-sensitive";
+        EXPECT_EQ(ids("\"id\" > '162900'", 10, 1), (Ids{"test.2"})) << "the paged path (SQL) applies it too";
+        EXPECT_EQ(ids("\"id\" > '162900' OR \"name\" = 'Regio Twente'", 1, 0), (Ids{"test.1"}));
+
+        EXPECT_EQ(count("\"id\" > '162900'"), 2);
+        EXPECT_EQ(count("\"id\" > '162900'", {2, 3}), 1) << "with feature ids";
+        EXPECT_EQ(count("\"name\" IS NULL"), 0);
+
+        // C API
+        char *out = nullptr;
+        ASSERT_EQ(DDBQueryVectorEx(gpkg.string().c_str(), nullptr, nullptr, nullptr, nullptr, 0,
+                                   "\"name\" = 'Regio Twente'", 10, 0, "application/gml+xml", &out),
+                  DDBERR_NONE)
+            << DDBGetLastError();
+        EXPECT_EQ(gmlIds(out), (Ids{"test.2"}));
+        DDBFree(out);
+        long long n = -1;
+        ASSERT_EQ(DDBCountVector(gpkg.string().c_str(), nullptr, nullptr, nullptr, nullptr, 0,
+                                 "\"id\" < '162900'", &n),
+                  DDBERR_NONE);
+        EXPECT_EQ(n, 2);
+
+        // Malformed SQL is an error, not an empty result
+        EXPECT_ANY_THROW(ids("\"id\" >"));
+        EXPECT_ANY_THROW(ids("\"id\" >", 10, 1));
+        EXPECT_NE(DDBCountVector(gpkg.string().c_str(), nullptr, nullptr, nullptr, nullptr, 0, "\"id\" >", &n),
+                  DDBERR_NONE);
     }
 
     // The bbox used to be dropped for pages after the first (startIndex > 0 goes through SQL)

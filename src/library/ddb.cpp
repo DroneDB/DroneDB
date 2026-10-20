@@ -2872,7 +2872,7 @@ namespace {
 namespace {
 // The selection part of a vector query, validated
 VectorQuery vectorSelection(const char *vectorPath, const char *layerName, const double *bbox,
-                            const char *bboxSrs, const long long *fids, int numFids) {
+                            const char *bboxSrs, const long long *fids, int numFids, const char *where) {
     if (utils::isNullOrEmptyOrWhitespace(vectorPath))
         throw InvalidArgsException("No vector path provided");
     if (numFids < 0 || (numFids > 0 && fids == nullptr))
@@ -2884,6 +2884,7 @@ VectorQuery vectorSelection(const char *vectorPath, const char *layerName, const
         query.bbox = std::array<double, 4>{bbox[0], bbox[1], bbox[2], bbox[3]};
     query.bboxSrs = bboxSrs ? bboxSrs : "";
     query.fids.assign(fids, fids + numFids);
+    query.where = where ? where : "";
     return query;
 }
 }  // namespace
@@ -2896,7 +2897,7 @@ DDB_DLL DDBErr DDBQueryVector(const char *vectorPath,
                               int startIndex,
                               const char *outputFormat,
                               char **output) {
-    return DDBQueryVectorEx(vectorPath, layerName, bbox, bboxSrs, nullptr, 0, maxFeatures, startIndex,
+    return DDBQueryVectorEx(vectorPath, layerName, bbox, bboxSrs, nullptr, 0, nullptr, maxFeatures, startIndex,
                             outputFormat, output);
 }
 
@@ -2906,6 +2907,7 @@ DDB_DLL DDBErr DDBQueryVectorEx(const char *vectorPath,
                                 const char *bboxSrs,
                                 const long long *fids,
                                 int numFids,
+                                const char *where,
                                 int maxFeatures,
                                 int startIndex,
                                 const char *outputFormat,
@@ -2915,7 +2917,7 @@ DDB_DLL DDBErr DDBQueryVectorEx(const char *vectorPath,
     if (output == nullptr)
         throw InvalidArgsException("output is null");
 
-    auto query = vectorSelection(vectorPath, layerName, bbox, bboxSrs, fids, numFids);
+    auto query = vectorSelection(vectorPath, layerName, bbox, bboxSrs, fids, numFids, where);
     query.outputFormat = mapVectorMime(outputFormat);
 
     // Clamp maxFeatures to spec range [1, 10000]; 0 -> default 1000.
@@ -2936,13 +2938,14 @@ DDB_DLL DDBErr DDBCountVector(const char *vectorPath,
                               const char *bboxSrs,
                               const long long *fids,
                               int numFids,
+                              const char *where,
                               long long *count) {
     DDB_C_BEGIN
 
     if (count == nullptr)
         throw InvalidArgsException("count is null");
 
-    const auto query = vectorSelection(vectorPath, layerName, bbox, bboxSrs, fids, numFids);
+    const auto query = vectorSelection(vectorPath, layerName, bbox, bboxSrs, fids, numFids, where);
     *count = ddb::countVectorFeatures(std::string(vectorPath), query);
 
     DDB_C_END

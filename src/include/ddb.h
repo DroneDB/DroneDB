@@ -927,6 +927,11 @@ extern "C"
      * @param fids Feature ids to return, or NULL for every feature; a GeoPackage reads
      *             them by primary key.
      * @param numFids Number of ids in @p fids.
+     * @param where Attribute filter, or NULL: an SQL expression over the layer's fields
+     *              (SQLite syntax for a GeoPackage, e.g. "\"name\" = 'A' AND \"pop\" > '10'").
+     *              It is applied as given: build it from quoted identifiers and literals only,
+     *              and check the field names first (SQLite reads an unknown double-quoted
+     *              identifier as a string literal).
      * Other parameters and the result: see DDBQueryVector. */
     DDB_DLL DDBErr DDBQueryVectorEx(const char *vectorPath,
                                     const char *layerName,
@@ -934,16 +939,17 @@ extern "C"
                                     const char *bboxSrs,
                                     const long long *fids,
                                     int numFids,
+                                    const char *where,
                                     int maxFeatures,
                                     int startIndex,
                                     const char *outputFormat,
                                     char **output);
 
-    /** Count the features of a vector layer that match a bbox and feature ids (WFS
-     * numberMatched, OGC API numberMatched), without reading them when the format has a
-     * spatial index (GeoPackage).
+    /** Count the features of a vector layer that match a bbox, feature ids and an attribute
+     * filter (WFS numberMatched, OGC API numberMatched), without reading them when the format
+     * has a spatial index (GeoPackage) and there is no attribute filter.
      *
-     * @param vectorPath, layerName, bbox, bboxSrs, fids, numFids See DDBQueryVectorEx.
+     * @param vectorPath, layerName, bbox, bboxSrs, fids, numFids, where See DDBQueryVectorEx.
      * @param count Receives the number of matching features.
      * @return DDBERR_NONE on success, an error otherwise. */
     DDB_DLL DDBErr DDBCountVector(const char *vectorPath,
@@ -952,6 +958,7 @@ extern "C"
                                   const char *bboxSrs,
                                   const long long *fids,
                                   int numFids,
+                                  const char *where,
                                   long long *count);
 
     /** Describe a vector dataset (WFS DescribeFeatureType / OGC API collection).
