@@ -139,7 +139,7 @@ namespace ddb
             catch (const NetException &e)
             {
                 if (++retryNum >= MAX_RETRIES)
-                    throw e;
+                    throw;
                 LOGD << e.what() << ", retrying commit (attempt " << retryNum << ")";
                 utils::sleep(1000 * retryNum);
             }

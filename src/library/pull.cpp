@@ -88,7 +88,7 @@ namespace ddb
         }
         catch (const AppException &e)
         {
-            throw e;
+            throw;
         }
     }
 

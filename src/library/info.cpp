@@ -89,7 +89,7 @@ namespace ddb
             {
                 LOGD << "Cannot parse " << fp.string() << ", skipping: " << e.what();
                 if (stopOnError)
-                    throw e;
+                    throw;
             }
         }
 

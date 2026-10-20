@@ -61,13 +61,16 @@ namespace ddb
                 if (path.filename() == DDB_FOLDER)
                     i.disable_recursion_pending();
 
-                if (p.find(DDB_FOLDER) != std::string::npos)
+                // Match path components relative to the dataset root, not substrings of the
+                // absolute path: "a.ddbfile.txt" or a root under "x.ddb-y" must be reported.
+                const auto relPath = io::Path(p).relativeTo(directory);
+                if (containsDdbSegment(relPath.get()))
                 {
                     LOGD << "Skipping ddb folder";
                     continue;
                 }
 
-                cb(NotIndexed, io::Path(p).relativeTo(directory).generic());
+                cb(NotIndexed, relPath.generic());
             }
         }
         catch (const fs::filesystem_error &e)

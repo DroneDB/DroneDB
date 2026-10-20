@@ -361,10 +361,11 @@ DDBErr DDBAdd(const char* ddbPath,
 
 // Records a path that cannot be expanded as an item error, relative to the dataset like the
 // entries/unchanged buckets: Registry C# matching keys on relative paths, a caller-supplied
-// absolute path would never match the byPath lookup.
+// absolute path would never match the byPath lookup. Unclassified failures of the path
+// expansion (e.g. std::filesystem_error) are filesystem errors.
 static void addPathError(Database *db, const std::string &p, const std::exception &ex, AddResult &result) {
-    const char *code = "INDEX";
-    if (!!p.find('*') || !!p.find('?') || !!p.find('[')) code = "FS";
+    const char *code = addErrorCode(ex);
+    if (code == nullptr) code = "FS";
     const auto relPath = io::Path(p).relativeTo(db->rootDirectory()).generic();
     result.errors.push_back({relPath, code, ex.what()});
 }
@@ -1276,6 +1277,7 @@ DDBBuild(const char* ddbPath, const char* source, const char* dest, bool force, 
             build(ddb.get(), path, destPath, force);
         }
     } catch (const ddb::BuildDepMissingException& e) {
+        DDBSetLastError(e.what());
         return DDBERR_BUILDDEPMISSING;
     } catch (const ddb::BuildInProgressException& e) {
         DDBSetLastError(e.what());

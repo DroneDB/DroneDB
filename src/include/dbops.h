@@ -41,6 +41,14 @@ namespace ddb
         std::vector<AddItemError> errors;
     };
 
+    /// The AddItemError code of an item-scoped failure ("FS", "GDAL", "PDAL", "JSON" or
+    /// "INDEX"), or nullptr when ex is not one of those exception types.
+    DDB_DLL const char *addErrorCode(const std::exception &ex) noexcept;
+
+    /// True when one of the components of p is the ".ddb" folder (a substring such as
+    /// "a.ddbfile.txt" or "x.ddb-y" does not count).
+    DDB_DLL bool containsDdbSegment(const fs::path &p);
+
     DDB_DLL std::unique_ptr<Database> open(const std::string &directory, bool traverseUp);
 
     /// Moves the committed changes of the index of directory from its WAL into the database

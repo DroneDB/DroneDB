@@ -75,17 +75,17 @@ Statement &Statement::step()
     case SQLITE_ROW:
         hasRow = true;
         break;
-    case SQLITE_ERROR:
-    case SQLITE_MISUSE:
-        throw SQLException("Cannot execute step for " + query + " (error code: " + std::to_string(code) +
-                           "): " + sqlite3_errmsg(db));
     case SQLITE_CONSTRAINT:
         throw SQLException("Constraint violation executing " + query + ": " + sqlite3_errmsg(db));
     case SQLITE_BUSY:
     case SQLITE_LOCKED:
         throw DBBusyException("Database busy executing " + query + ": " + sqlite3_errmsg(db));
     default:
+        // Any other code (ERROR, MISUSE, IOERR, FULL, CORRUPT, READONLY, NOMEM...) is a
+        // failure, never "no rows".
         hasRow = done = false;
+        throw SQLException("Cannot execute step for " + query + " (error code: " + std::to_string(code) +
+                           "): " + sqlite3_errmsg(db));
     }
 
     return *this;

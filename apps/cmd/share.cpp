@@ -160,7 +160,7 @@ namespace cmd
         {
             if (!quiet)
                 pb.done();
-            throw e;
+            throw;
         }
     }
 

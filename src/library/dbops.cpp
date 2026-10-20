@@ -313,23 +313,32 @@ static std::mutex g_templateMutex;
         return result;
     }
 
+    bool containsDdbSegment(const fs::path &p)
+    {
+        for (const auto &part : p)
+        {
+            if (part == DDB_FOLDER)
+                return true;
+        }
+        return false;
+    }
+
+    const char *addErrorCode(const std::exception &ex) noexcept
+    {
+        if (dynamic_cast<const FSException *>(&ex)) return "FS";
+        if (dynamic_cast<const GDALException *>(&ex)) return "GDAL";
+        if (dynamic_cast<const PDALException *>(&ex)) return "PDAL";
+        if (dynamic_cast<const JSONException *>(&ex)) return "JSON";
+        if (dynamic_cast<const IndexException *>(&ex)) return "INDEX";
+        return nullptr;
+    }
+
     namespace
     {
         // Returns true if the pattern contains shell glob meta-characters.
         bool isGlobPattern(const std::string &p)
         {
             return p.find_first_of("*?[") != std::string::npos;
-        }
-
-        // Returns true if the path contains a `.ddb` segment.
-        bool containsDdbSegment(const fs::path &p)
-        {
-            for (const auto &part : p)
-            {
-                if (part == DDB_FOLDER)
-                    return true;
-            }
-            return false;
         }
     } // namespace
 
@@ -796,16 +805,11 @@ static std::mutex g_templateMutex;
 
             // parseEntry() skips re-hashing if checkUpdate() already set e.hash.
             parseEntry(item.absPath, directory, e, true);
-        } catch (const FSException &ex) {
-            return fail("FS", ex);
-        } catch (const GDALException &ex) {
-            return fail("GDAL", ex);
-        } catch (const PDALException &ex) {
-            return fail("PDAL", ex);
-        } catch (const JSONException &ex) {
-            return fail("JSON", ex);
-        } catch (const IndexException &ex) {
-            return fail("INDEX", ex);
+        } catch (const AppException &ex) {
+            // Only item-scoped failures become an item error; anything else aborts the batch.
+            const char *code = addErrorCode(ex);
+            if (code == nullptr) throw;
+            return fail(code, ex);
         }
 
         ComputedAddItem ci;

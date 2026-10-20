@@ -689,34 +689,32 @@ TemperatureData readTemperatureData(const std::string &filePath) {
 // ---- Helper: convert pixel to geo coordinates ----
 void pixelToGeo(double px, double py, const double geoTransform[6],
                 const std::string &projection, double &geoX, double &geoY) {
-    double mapX = geoTransform[0] + geoTransform[1] * px + geoTransform[2] * py;
-    double mapY = geoTransform[3] + geoTransform[4] * px + geoTransform[5] * py;
+    // Map coordinates are the result whenever the projection cannot be transformed to WGS84
+    geoX = geoTransform[0] + geoTransform[1] * px + geoTransform[2] * py;
+    geoY = geoTransform[3] + geoTransform[4] * px + geoTransform[5] * py;
 
-    if (!projection.empty()) {
-        OGRSpatialReferenceH hSrs = OSRNewSpatialReference(nullptr);
-        OGRSpatialReferenceH hWgs84 = OSRNewSpatialReference(nullptr);
-        char* wktPtr = const_cast<char*>(projection.c_str());
+    if (projection.empty())
+        return;
 
-        if (OSRImportFromWkt(hSrs, &wktPtr) == OGRERR_NONE &&
-            OSRImportFromEPSG(hWgs84, 4326) == OGRERR_NONE) {
-            OGRCoordinateTransformationH hCT = OCTNewCoordinateTransformation(hSrs, hWgs84);
-            if (hCT) {
-                if (OCTTransform(hCT, 1, &mapX, &mapY, nullptr)) {
-                    geoX = mapX;
-                    geoY = mapY;
-                } else {
-                    geoX = mapX;
-                    geoY = mapY;
-                }
-                OCTDestroyCoordinateTransformation(hCT);
+    OGRSpatialReferenceH hSrs = OSRNewSpatialReference(nullptr);
+    OGRSpatialReferenceH hWgs84 = OSRNewSpatialReference(nullptr);
+    char* wktPtr = const_cast<char*>(projection.c_str());
+
+    if (OSRImportFromWkt(hSrs, &wktPtr) == OGRERR_NONE &&
+        OSRImportFromEPSG(hWgs84, 4326) == OGRERR_NONE) {
+        OGRCoordinateTransformationH hCT = OCTNewCoordinateTransformation(hSrs, hWgs84);
+        if (hCT) {
+            double x = geoX;
+            double y = geoY;
+            if (OCTTransform(hCT, 1, &x, &y, nullptr)) {
+                geoX = x;
+                geoY = y;
             }
+            OCTDestroyCoordinateTransformation(hCT);
         }
-        OSRDestroySpatialReference(hWgs84);
-        OSRDestroySpatialReference(hSrs);
-    } else {
-        geoX = mapX;
-        geoY = mapY;
     }
+    OSRDestroySpatialReference(hWgs84);
+    OSRDestroySpatialReference(hSrs);
 }
 
 
