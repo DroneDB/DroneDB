@@ -972,6 +972,14 @@ extern "C"
                                      const char *layerName,
                                      char **output);
 
+    /** Content of a .prj that gives a CAD drawing the coordinate system @p crs (DDB-12).
+     *
+     * @param crs An authority code ("EPSG:32632"), WKT or PROJ string, written as ESRI WKT;
+     *            or "local" for LOCAL_CS["Drawing"] (the drawing stays in its own coordinates).
+     * @param output Receives the .prj content (caller frees with DDBFree).
+     * @return DDBERR_NONE on success, DDBERR_EXCEPTION when @p crs is not a coordinate system. */
+    DDB_DLL DDBErr DDBMakeCadPrj(const char *crs, char **output);
+
 #ifdef __cplusplus
 }
 #endif

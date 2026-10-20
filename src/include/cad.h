@@ -138,6 +138,13 @@ namespace ddb
         //   5. otherwise local (not georeferenced: shown without a globe).
         DDB_DLL CadCrs resolveCadCrs(const fs::path &originalInput, GDALDatasetH ds, const DxfInfo &info);
 
+        // Content of a .prj that gives a drawing the coordinate system `crs`: an
+        // authority code ("EPSG:32632"), WKT or a PROJ string, written as ESRI WKT (what
+        // other GIS software reads in a .prj), or "local" for LOCAL_CS["Drawing"], which
+        // keeps the drawing in its own coordinates. Throws InvalidArgsException when crs
+        // is not a coordinate system.
+        DDB_DLL std::string prjContent(const std::string &crs);
+
         // The same-name .prj of a file, if one exists ("drawing.prj" or "drawing.PRJ")
         // and is not ignored by an IgnoredSidecarScope on this thread.
         DDB_DLL std::optional<fs::path> findPrjSidecar(const fs::path &file);

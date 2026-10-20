@@ -484,6 +484,33 @@ namespace ddb
             }
         } // namespace
 
+        std::string prjContent(const std::string &crs)
+        {
+            const std::string input = trim(crs);
+            if (input == "local")
+                return "LOCAL_CS[\"Drawing\"]";
+
+            OGRSpatialReference s;
+            if (input.empty() || s.SetFromUserInput(input.c_str()) != OGRERR_NONE)
+                throw InvalidArgsException("Not a coordinate system: " + input);
+            if (s.IsLocal())
+                return "LOCAL_CS[\"Drawing\"]";
+
+            char *wkt = nullptr;
+            const char *options[] = {"FORMAT=WKT1_ESRI", nullptr};
+            const auto err = s.exportToWkt(&wkt, options);
+            std::string out = wkt ? wkt : "";
+            CPLFree(wkt);
+            if (err != OGRERR_NONE || out.empty())
+            {
+                // A CRS without an ESRI form (e.g. a derived CRS): WKT2 still reads back
+                out = toWkt(s);
+                if (out.empty())
+                    throw InvalidArgsException("Cannot write the coordinate system " + input);
+            }
+            return out;
+        }
+
         std::optional<std::string> srsFromGeoData(const DxfInfo &info)
         {
             if (info.geoDataType != 1)

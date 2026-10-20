@@ -29,6 +29,7 @@
 #include "databasepool.h"
 #include "raster_cache.h"
 #include "dbops.h"
+#include "cad.h"
 #include "delta.h"
 #include "entry.h"
 #include "entry_types.h"
@@ -2964,6 +2965,19 @@ DDB_DLL DDBErr DDBDescribeVector(const char *vectorPath,
     const std::string layer = layerName ? layerName : "";
     const std::string j = ddb::describeVector(std::string(vectorPath), layer);
     utils::copyToPtr(j, output);
+
+    DDB_C_END
+}
+
+DDB_DLL DDBErr DDBMakeCadPrj(const char *crs, char **output) {
+    DDB_C_BEGIN
+
+    if (crs == nullptr)
+        throw InvalidArgsException("No coordinate system provided");
+    if (output == nullptr)
+        throw InvalidArgsException("output is null");
+
+    utils::copyToPtr(ddb::cad::prjContent(crs), output);
 
     DDB_C_END
 }

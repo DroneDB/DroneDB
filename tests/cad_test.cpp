@@ -700,6 +700,35 @@ namespace
         EXPECT_FALSE(cad::srsFromGeoData(noScale).has_value());
     }
 
+    // The Hub's "Set coordinate system" writes this as the drawing's .prj
+    TEST(cadPrj, WrittenPrjReadsBackAsThatCrs)
+    {
+        TestArea ta(TEST_NAME, true);
+        const auto dxf = cadAsset(ta, "utm32n_site.dxf");
+
+        const auto prj = cad::prjContent("EPSG:32632");
+        EXPECT_NE(prj.find("PROJCS[\"WGS_1984_UTM_Zone_32N\""), std::string::npos) << "ESRI WKT";
+        std::ofstream(ta.getPath("utm32n_site.prj").string(), std::ios::binary) << prj;
+
+        const auto out = ta.getPath("build");
+        buildVector(dxf.string(), out.string());
+        const auto s = readGpkg(out);
+        ASSERT_TRUE(s.opened);
+        expectMilanSite(s.extent);
+
+        // "local" keeps the drawing in its own coordinates
+        EXPECT_EQ(cad::prjContent("local"), "LOCAL_CS[\"Drawing\"]");
+        EXPECT_EQ(cad::prjContent(" local "), "LOCAL_CS[\"Drawing\"]");
+        EXPECT_THROW(cad::prjContent("EPSG:999999"), InvalidArgsException);
+        EXPECT_THROW(cad::prjContent(""), InvalidArgsException);
+
+        char *out2 = nullptr;
+        ASSERT_EQ(DDBMakeCadPrj("EPSG:2193", &out2), DDBERR_NONE);
+        EXPECT_NE(std::string(out2).find("NZGD_2000"), std::string::npos);
+        DDBFree(out2);
+        EXPECT_NE(DDBMakeCadPrj("not a crs", &out2), DDBERR_NONE);
+    }
+
     TEST(cadGeoData, DwgVersionFromMagic)
     {
         TestArea ta(TEST_NAME, true);
