@@ -13,6 +13,7 @@
 #include "coordstransformer.h"
 #include "copc_utils.h"
 #include "dbops.h"
+#include "embedded_preview.h"
 #include "point_rasterizer.h"
 #include "exceptions.h"
 #include "gdal_inc.h"
@@ -150,6 +151,34 @@ GDALDatasetH openThumbSource(const fs::path& imagePath, std::string& resolvedPat
     }
     if (!hSrc)
         throw GDALException("Cannot open " + resolvedPath + " for reading");
+    return hSrc;
+}
+
+// Opens the source of an image thumbnail. A local JPEG that carries a preview of the same
+// framing at least thumbSize pixels long (MPF, e.g. the 960x720 copy in DJI photos) is
+// decoded from the preview: the entropy decoding of the full image is most of the cost of
+// a thumbnail, whatever the DCT scale. frameWidth/frameHeight receive the size of the image
+// the thumbnail represents (the main image), so both sources give the same output size.
+GDALDatasetH openImageThumbSource(const fs::path& imagePath, int thumbSize, std::string& openPath,
+                                  int& frameWidth, int& frameHeight) {
+    frameWidth = frameHeight = 0;
+    if (!utils::isNetworkPath(imagePath.string()) && io::Path(imagePath).checkExtension({"jpg", "jpeg"})) {
+        const JpegLayout layout = readJpegLayout(imagePath);
+        if (const auto preview = pickJpegPreview(layout, thumbSize)) {
+            openPath = jpegPreviewGdalPath(imagePath, *preview);
+            if (GDALDatasetH hPreview = GDALOpen(openPath.c_str(), GA_ReadOnly)) {
+                frameWidth = layout.width;
+                frameHeight = layout.height;
+                LOGD << "Thumbnail of " << imagePath.string() << " from its " << preview->width << "x"
+                     << preview->height << " preview";
+                return hPreview;
+            }
+        }
+    }
+
+    GDALDatasetH hSrc = openThumbSource(imagePath, openPath);
+    frameWidth = GDALGetRasterXSize(hSrc);
+    frameHeight = GDALGetRasterYSize(hSrc);
     return hSrc;
 }
 
@@ -296,13 +325,14 @@ void generateImageThumb(const fs::path& imagePath,
                         uint8_t** outBuffer,
                         int* outBufferSize) {
     std::string openPath;
-    GdalDatasetGuard srcGuard(openThumbSource(imagePath, openPath));
+    int frameWidth = 0, frameHeight = 0;
+    GdalDatasetGuard srcGuard(openImageThumbSource(imagePath, thumbSize, openPath, frameWidth, frameHeight));
     GDALDatasetH hSrc = srcGuard.handle;
 
     const int srcWidth = GDALGetRasterXSize(hSrc);
     const int srcHeight = GDALGetRasterYSize(hSrc);
     const int bandCount = GDALGetRasterCount(hSrc);
-    if (srcWidth <= 0 || srcHeight <= 0 || bandCount <= 0)
+    if (srcWidth <= 0 || srcHeight <= 0 || bandCount <= 0 || frameWidth <= 0 || frameHeight <= 0)
         throw GDALException("Invalid source raster dimensions in " + openPath);
 
     GDALRasterBandH hBand1 = GDALGetRasterBand(hSrc, 1);
@@ -310,7 +340,7 @@ void generateImageThumb(const fs::path& imagePath,
     const bool isByte = GDALGetRasterDataType(hBand1) == GDT_Byte;
 
     int targetWidth = 0, targetHeight = 0;
-    computeThumbTargetSize(srcWidth, srcHeight, thumbSize, targetWidth, targetHeight);
+    computeThumbTargetSize(frameWidth, frameHeight, thumbSize, targetWidth, targetHeight);
 
     // Grey (and grey + alpha) is replicated to RGB; otherwise the first three bands.
     // Only non-Byte data (DEM, thermal...) is stretched, from the raster statistics:
