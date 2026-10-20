@@ -8,12 +8,14 @@
 #include "utils.h"
 #include "testarea.h"
 #include "testfs.h"
+#include "win_crash_report.h"
 #include <fstream>
 #include <iostream>
 #include <cstring>
 
 int main(int argc, char **argv)
 {
+    installWindowsCrashReport();
 
     DDBRegisterProcess(true);
 

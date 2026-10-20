@@ -514,6 +514,8 @@ jobs:
       - name: Run C++ Tests
         env:
           DDB_DWG2DXF_PATH: ${{ github.workspace }}\build\dwg2dxf.exe
+          # The crash report resolves GDAL/GEOS frames from vcpkg's PDBs
+          _NT_SYMBOL_PATH: ${{ github.workspace }}\build\vcpkg_installed\x64-windows-release\bin
         run: |
           cd build
           .\ddbtest.exe --gtest_shuffle
@@ -530,6 +532,8 @@ jobs:
           path: |
             ${{ runner.temp }}/ddbtest-dumps
             build/*.pdb
+            build/vcpkg_installed/x64-windows-release/bin/gdal*.pdb
+            build/vcpkg_installed/x64-windows-release/bin/geos*.pdb
           if-no-files-found: ignore
           retention-days: 14
       - name: Run Program Smoke Test

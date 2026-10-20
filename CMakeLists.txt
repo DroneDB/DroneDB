@@ -91,6 +91,7 @@ endif()
 
 # Add custom CMake modules
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+include(MsvcReleaseDebugInfo)
 
 # Option to build tests
 option(BUILD_TESTING "Build unit tests" ON)

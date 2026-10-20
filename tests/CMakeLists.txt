@@ -30,6 +30,7 @@ if(BUILD_TESTING)
 
     # Create the test executable
     add_executable(ddbtest ${TEST_SOURCES})
+    ddb_msvc_release_debug_info(ddbtest)
     add_dependencies(ddbtest ddbtest_child ddbtest_signal_probe)
     target_compile_definitions(ddbtest PRIVATE DDB_TEST_CHILD_NAME="$<TARGET_FILE_NAME:ddbtest_child>"
         DDB_SIGNAL_PROBE_NAME="$<TARGET_FILE_NAME:ddbtest_signal_probe>")
@@ -44,6 +45,8 @@ if(BUILD_TESTING)
     if(WIN32)
         target_compile_definitions(ddbtest PRIVATE PLOG_EXPORT)
         set_target_properties(ddbtest PROPERTIES ENABLE_EXPORTS 1)
+        # win_crash_report.cpp walks the faulting thread's stack
+        target_link_libraries(ddbtest PRIVATE dbghelp)
     else()
         target_compile_definitions(ddbtest PRIVATE PLOG_GLOBAL)
     endif()
