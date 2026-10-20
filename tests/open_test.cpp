@@ -65,12 +65,14 @@ namespace
             Entry e;
             ASSERT_TRUE(getEntry(db.get(), "a.txt", e));
         }
+        // The pool keeps connections open: close them for real
+        DatabasePool::instance().releaseConnections(root);
 
         ASSERT_TRUE(fs::exists(walFile(root))) << "the last close deleted the WAL";
         EXPECT_EQ(fs::file_size(walFile(root)), 0u) << "checkpointed frames left in the WAL";
     }
 
-    TEST(DDB02_Open, writesAreInTheMainFileAfterClose)
+    TEST(DDB02_Open, writesAreInTheMainFileAfterCheckpoint)
     {
         const auto root = makeIndex(TEST_NAME);
 
@@ -80,6 +82,10 @@ namespace
             addToIndex(db.get(), {(root / "b.txt").string()});
             EXPECT_GT(fs::file_size(walFile(root)), 0u);
         }
+        // Closing a pooled connection does not checkpoint (no fsyncs per write): whoever
+        // copies dbase.sqlite alone checkpoints first
+        EXPECT_GT(fs::file_size(walFile(root)), 0u);
+        ASSERT_TRUE(checkpointIndex(root.string()));
         EXPECT_EQ(fs::file_size(walFile(root)), 0u);
 
         // Copying only dbase.sqlite (templates, backups, the tests' fixtures) keeps the data
@@ -97,6 +103,7 @@ namespace
     {
         const auto root = makeIndex(TEST_NAME);
         const auto snapshot = dbFile(root).string() + ".snapshot";
+        ASSERT_TRUE(checkpointIndex(root.string())); // the file alone holds a.txt
         fs::copy_file(dbFile(root), snapshot);
 
         {

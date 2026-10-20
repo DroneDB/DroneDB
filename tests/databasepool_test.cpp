@@ -114,29 +114,9 @@ namespace
         EXPECT_TRUE(has(root, "b.txt"));
     }
 
-    TEST_F(DDB02_Pool, releasedWriterLeavesAnEmptyWal)
+    // What the database file alone holds (immutable=1 ignores the WAL)
+    static int countInFileAlone(const fs::path &root, const std::string &sql)
     {
-        const auto root = makeIndex(TEST_NAME);
-        addFile(root, "b.txt", "bravo");
-
-        const auto wal = fs::path((root / DDB_FOLDER / DDB_DATABASE_FILE).string() + "-wal");
-        ASSERT_TRUE(fs::exists(wal));
-        EXPECT_EQ(fs::file_size(wal), 0u);
-        EXPECT_EQ(stats().idle, 1u) << "the writer's connection is kept";
-    }
-
-    TEST_F(DDB02_Pool, schemaOnlyWriteReachesTheDatabaseFile)
-    {
-        // total_changes does not count DDL: the release checkpoint must not rely on it
-        const auto root = makeIndex(TEST_NAME);
-        ASSERT_TRUE(has(root, "a.txt")); // leaves an idle connection, reused below
-        {
-            auto db = ddb::open(root.string(), false);
-            db->exec("CREATE TABLE pool_checkpoint_test (x INTEGER)");
-        }
-        EXPECT_EQ(stats().idle, 1u);
-
-        // immutable=1 reads the database file alone, without the WAL
         const auto file = (root / DDB_FOLDER / DDB_DATABASE_FILE).generic_string();
 #ifdef _WIN32
         const auto uri = "file:///" + file + "?immutable=1";
@@ -144,15 +124,64 @@ namespace
         const auto uri = "file:" + file + "?immutable=1";
 #endif
         sqlite3 *raw = nullptr;
-        ASSERT_EQ(sqlite3_open_v2(uri.c_str(), &raw, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, nullptr), SQLITE_OK);
+        EXPECT_EQ(sqlite3_open_v2(uri.c_str(), &raw, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, nullptr), SQLITE_OK);
         sqlite3_stmt *stmt = nullptr;
-        ASSERT_EQ(sqlite3_prepare_v2(raw, "SELECT count(*) FROM sqlite_master WHERE name = 'pool_checkpoint_test'",
-                                     -1, &stmt, nullptr),
-                  SQLITE_OK);
-        ASSERT_EQ(sqlite3_step(stmt), SQLITE_ROW);
-        EXPECT_EQ(sqlite3_column_int(stmt, 0), 1) << "the table is only in the WAL";
+        EXPECT_EQ(sqlite3_prepare_v2(raw, sql.c_str(), -1, &stmt, nullptr), SQLITE_OK);
+        int n = -1;
+        if (sqlite3_step(stmt) == SQLITE_ROW)
+            n = sqlite3_column_int(stmt, 0);
         sqlite3_finalize(stmt);
         sqlite3_close_v2(raw);
+        return n;
+    }
+
+    static fs::path walOf(const fs::path &root)
+    {
+        return fs::path((root / DDB_FOLDER / DDB_DATABASE_FILE).string() + "-wal");
+    }
+
+    TEST_F(DDB02_Pool, releasedWriterDoesNotCheckpoint)
+    {
+        // A checkpoint per write costs two or three fsyncs: the frames stay in the WAL
+        const auto root = makeIndex(TEST_NAME);
+        addFile(root, "b.txt", "bravo");
+
+        EXPECT_EQ(stats().idle, 1u) << "the writer's connection is kept";
+        ASSERT_TRUE(fs::exists(walOf(root)));
+        EXPECT_GT(fs::file_size(walOf(root)), 0u) << "the release checkpointed";
+        EXPECT_TRUE(has(root, "b.txt")) << "a pooled reader sees the write";
+    }
+
+    TEST_F(DDB02_Pool, checkpointPutsTheWritesInTheDatabaseFile)
+    {
+        const auto root = makeIndex(TEST_NAME);
+        addFile(root, "b.txt", "bravo");
+        ASSERT_TRUE(has(root, "a.txt")); // an idle connection stays open, as in a server
+        {
+            // total_changes does not count DDL: a schema-only write too
+            auto db = ddb::open(root.string(), false);
+            db->exec("CREATE TABLE pool_checkpoint_test (x INTEGER)");
+        }
+        EXPECT_EQ(countInFileAlone(root, "SELECT count(*) FROM entries WHERE path = 'b.txt'"), 0)
+            << "expected only in the WAL before the checkpoint";
+
+        EXPECT_TRUE(checkpointIndex(root.string()));
+
+        EXPECT_EQ(countInFileAlone(root, "SELECT count(*) FROM entries WHERE path = 'b.txt'"), 1);
+        EXPECT_EQ(countInFileAlone(root, "SELECT count(*) FROM sqlite_master WHERE name = 'pool_checkpoint_test'"), 1);
+        EXPECT_EQ(fs::file_size(walOf(root)), 0u);
+    }
+
+    TEST_F(DDB02_Pool, checkpointThroughTheCApi)
+    {
+        const auto root = makeIndex(TEST_NAME);
+        addFile(root, "b.txt", "bravo");
+
+        int complete = -1;
+        ASSERT_EQ(DDBCheckpoint(root.string().c_str(), &complete), DDBERR_NONE);
+        EXPECT_EQ(complete, 1);
+        EXPECT_EQ(countInFileAlone(root, "SELECT count(*) FROM entries WHERE path = 'b.txt'"), 1);
+        EXPECT_NE(DDBCheckpoint("", nullptr), DDBERR_NONE);
     }
 
     // Windows cannot delete or replace a file a connection keeps open: there
@@ -178,14 +207,35 @@ namespace
         const auto root = makeIndex(TEST_NAME);
         const auto dbFile = root / DDB_FOLDER / DDB_DATABASE_FILE;
         const auto snapshot = fs::path(dbFile.string() + ".snapshot");
+        ASSERT_TRUE(checkpointIndex(root.string())); // the file alone holds a.txt
         fs::copy_file(dbFile, snapshot);
         addFile(root, "b.txt", "bravo");
         ASSERT_TRUE(has(root, "b.txt"));
 
+        // Replacing the file needs its connections closed first (the documented contract):
+        // the last close moves b.txt out of the WAL into the old file, so the WAL left next
+        // to the new file is empty
+        DatabasePool::instance().releaseConnections(root);
         fs::rename(snapshot, dbFile); // a new file (inode) at the same path
 
         EXPECT_FALSE(has(root, "b.txt"));
         EXPECT_TRUE(has(root, "a.txt"));
+    }
+
+    TEST_F(DDB02_Pool, connectionToAReplacedFileIsNotReused)
+    {
+        const auto root = makeIndex(TEST_NAME);
+        const auto dbFile = root / DDB_FOLDER / DDB_DATABASE_FILE;
+        const auto copy = fs::path(dbFile.string() + ".copy");
+        ASSERT_TRUE(checkpointIndex(root.string()));
+        fs::copy_file(dbFile, copy);
+        ASSERT_TRUE(has(root, "a.txt")); // an idle connection to the current file
+        const auto discarded = stats().discarded;
+
+        fs::rename(copy, dbFile); // same content, new inode
+
+        EXPECT_TRUE(has(root, "a.txt"));
+        EXPECT_GE(stats().discarded - discarded, 1u) << "the idle connection to the old file was reused";
     }
 #endif
 

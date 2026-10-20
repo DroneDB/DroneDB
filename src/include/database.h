@@ -27,15 +27,13 @@ namespace ddb
 
     // Set when the connection comes from or goes back to the DatabasePool
     bool pooled = false;
-    bool pooledNew = false;
     std::string poolKey;
     std::string poolFileId;
-    sqlite3_int64 changesAtAcquire = 0;
 
     friend class DatabasePool;
     void attachPooled(sqlite3 *handle, void *cache, const std::string &file, const std::string &key, const std::string &fileId);
     void markPooled(const std::string &key, const std::string &fileId);
-    sqlite3 *detachPooled(void *&cache, std::string &key, std::string &fileId, bool &wrote);
+    sqlite3 *detachPooled(void *&cache, std::string &key, std::string &fileId);
 
     using StampEntryVisitor = std::function<void(const std::string &path, const std::string &hash)>;
     using StampMetaVisitor = std::function<void(const std::string &id)>;

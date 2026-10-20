@@ -511,6 +511,19 @@ DDBErr DDBReleaseConnections(const char* path, int* closed) {
     DDB_C_END
 }
 
+DDBErr DDBCheckpoint(const char* ddbPath, int* complete) {
+    DDB_C_BEGIN
+
+    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
+        throw InvalidArgsException("No directory provided");
+
+    const bool done = ddb::checkpointIndex(std::string(ddbPath));
+    if (complete != nullptr)
+        *complete = done ? 1 : 0;
+
+    DDB_C_END
+}
+
 DDBErr DDBGet(const char* ddbPath, const char* path, char** output) {
     DDB_C_BEGIN
 

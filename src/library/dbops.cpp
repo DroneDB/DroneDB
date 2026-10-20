@@ -1691,6 +1691,14 @@ static std::mutex g_templateMutex;
         }
     }
 
+    bool checkpointIndex(const std::string &directory)
+    {
+        const auto db = ddb::open(directory, false);
+        // One row: busy (1 when blocked), WAL frames, frames checkpointed
+        const auto q = db->query("PRAGMA wal_checkpoint(TRUNCATE)");
+        return !q->fetch() || q->getInt(0) == 0;
+    }
+
     std::string initIndex(const std::string &directory, bool fromScratch)
     {
         const fs::path dirPath = directory;

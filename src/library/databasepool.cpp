@@ -150,8 +150,7 @@ namespace ddb
     void DatabasePool::release(Database &db)
     {
         Idle connection;
-        bool wrote = false;
-        connection.handle = db.detachPooled(connection.spatialiteCache, connection.key, connection.fileId, wrote);
+        connection.handle = db.detachPooled(connection.spatialiteCache, connection.key, connection.fileId);
         if (connection.handle == nullptr)
             return;
 
@@ -160,22 +159,11 @@ namespace ddb
         bool keep = sqlite3_get_autocommit(connection.handle) != 0 &&
                     sqlite3_next_stmt(connection.handle, nullptr) == nullptr;
 
-        if (keep)
-        {
-            // Same state as when the last connection closed: changes are in the database
-            // file, so copying it alone copies the data. A connection that changed rows
-            // also empties the WAL. Any other runs a passive checkpoint, which never waits:
-            // it catches writes that total_changes does not count (schema, PRAGMA
-            // user_version). A WAL that cannot be fully checkpointed (a reader holds an
-            // old snapshot) closes the connection instead, as before pooling.
-            int logFrames = 0;
-            int checkpointed = 0;
-            const int rc = sqlite3_wal_checkpoint_v2(connection.handle, nullptr,
-                                                     wrote ? SQLITE_CHECKPOINT_TRUNCATE : SQLITE_CHECKPOINT_PASSIVE,
-                                                     &logFrames, &checkpointed);
-            if (rc != SQLITE_OK || checkpointed < logFrames)
-                keep = false;
-        }
+        // No checkpoint here: a checkpoint syncs the WAL and the database file (two or three
+        // fsyncs, 8-15 ms on an SSD, more on disks), and every index write would pay it.
+        // Committed changes stay in the WAL until SQLite's automatic checkpoint (every ~1000
+        // pages), the last connection's close, or checkpointIndex() (DDBCheckpoint), which
+        // whoever copies the database file without its WAL must call first.
 
         std::vector<Idle> stale;
         {

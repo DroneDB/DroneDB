@@ -42,6 +42,12 @@ namespace ddb
     };
 
     DDB_DLL std::unique_ptr<Database> open(const std::string &directory, bool traverseUp);
+
+    /// Moves the committed changes of the index of directory from its WAL into the database
+    /// file and empties the WAL (TRUNCATE checkpoint), so that the database file alone holds
+    /// the data, e.g. before copying it. False when a reader or a writer of another
+    /// connection kept it from completing (the WAL then still holds part of the data).
+    DDB_DLL bool checkpointIndex(const std::string &directory);
     /**
      * The absolute paths to index for `paths`: each file once, the folders (with includeDirs)
      * including the parents of every path up to rootDirectory, and with `recursive` the

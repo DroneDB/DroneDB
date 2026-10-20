@@ -152,6 +152,15 @@ extern "C"
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBReleaseConnections(const char *path, int *closed);
 
+    /** Move the committed changes of an index from its WAL into the database file and empty
+     *  the WAL. Index writes leave their changes in .ddb/dbase.sqlite-wal (no checkpoint per
+     *  call): call this before copying dbase.sqlite without its WAL.
+     * @param ddbPath path to a DroneDB database (parent of ".ddb")
+     * @param complete out (optional): 1 when the WAL was emptied, 0 when another connection
+     *        (a reader of an older snapshot, a writer) kept the checkpoint from completing
+     * @return DDBERR_NONE on success, an error otherwise */
+    DDB_DLL DDBErr DDBCheckpoint(const char *ddbPath, int *complete);
+
     /** Retrieve a single entry from the index, including its metadata
      * @param ddbPath path to a DroneDB database (parent of ".ddb")
      * @param path dataset-relative path of the entry (exact match, no wildcards)

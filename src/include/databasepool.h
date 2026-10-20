@@ -30,9 +30,10 @@ namespace ddb
      * a Database opened by ddb::open() gives its connection back when it is closed or
      * destroyed. A connection is only reused when it is back in autocommit mode with no
      * statement left open, and when the database file is still the same file (device and
-     * inode on POSIX). A connection checkpoints before it becomes idle (and truncates the
-     * WAL when it wrote), so the database file alone holds the data between calls; one
-     * whose WAL cannot be fully checkpointed is closed instead.
+     * inode on POSIX). A connection does not checkpoint when it becomes idle: committed
+     * changes can stay in the -wal file between calls (until SQLite's automatic checkpoint
+     * or the last close), so a copy of the database file alone needs checkpointIndex()
+     * (DDBCheckpoint) first; a copy of the whole .ddb folder carries the WAL with it.
      *
      * Replacing or deleting an index file of this process while its connections are idle
      * requires releaseConnections() first (DDBReleaseConnections in the C API): SQLite does
