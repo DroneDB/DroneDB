@@ -4,7 +4,7 @@ add_subdirectory(library)
 
 message(STATUS "SRC_LIST: ${SRC_LIST}")
 
-add_library(${PROJECT_NAME} SHARED ${SRC_LIST})
+add_library(${PROJECT_NAME} SHARED ${SRC_LIST} ${DDB_VERSION_SOURCE})
 ddb_msvc_release_debug_info(${PROJECT_NAME})
 
 # On Windows, ensure all symbols are exported automatically from the shared lib

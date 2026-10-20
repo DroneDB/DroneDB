@@ -69,8 +69,12 @@ else()
 endif()
 
 message("DDB Version: ${DAPP_VERSION}")
-add_compile_options("-DAPP_VERSION=\"${DAPP_VERSION}\"")
-add_compile_options("-DAPP_REVISION=\"${DAPP_REVISION}\"")
+
+# The version lives in one generated TU (ddb::version()/ddb::revision(), version.h) instead of
+# global -D defines, so a new commit recompiles that file only. configure_file rewrites it only
+# when the content changes; like the old defines, the hash is read at configure time.
+set(DDB_VERSION_SOURCE "${CMAKE_BINARY_DIR}/generated/version.cpp")
+configure_file("${CMAKE_SOURCE_DIR}/src/library/version.cpp.in" "${DDB_VERSION_SOURCE}" @ONLY)
 
 # Find PROJ data folder (vcpkg: share/proj or share/proj4)
 find_path(PROJ_DATA_DIR

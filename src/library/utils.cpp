@@ -29,6 +29,7 @@
 #include <sstream>
 
 #include "entry_types.h"
+#include "version.h"
 
 namespace ddb::utils {
 
@@ -265,8 +266,6 @@ DDB_DLL std::string getBuildInfo() {
     ss << " (MSVC " << _MSC_VER << ")";
 #endif
 
-    ss << " compiled " << __DATE__ << " " << __TIME__;
-
     return ss.str();
 }
 
@@ -277,7 +276,7 @@ DDB_DLL std::string getEnvOrUnset(const char* name) {
 
 DDB_DLL void printVersions() {
 
-    LOGV << "DDB v" << APP_VERSION;
+    LOGV << "DDB v" << ddb::version();
     LOGD << "Build info: " << getBuildInfo();
 
     LOGV << "SQLite: " << sqlite3_libversion();

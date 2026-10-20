@@ -1,12 +1,18 @@
 #ifndef VERSION_H
 #define VERSION_H
 
-#ifndef APP_VERSION
-#define APP_VERSION "dev"
-#endif
+#include "ddb_export.h"
 
-#ifndef APP_REVISION
-#define APP_REVISION "dev"
-#endif
+namespace ddb {
+
+// Defined in the CMake-generated version.cpp (template: src/library/version.cpp.in).
+
+// "X.Y.Z (git commit abc1234)", or "X.Y.Z" when git is unavailable at configure time.
+DDB_DLL const char* version();
+
+// Short git hash, or "dev" when git is unavailable at configure time.
+DDB_DLL const char* revision();
+
+}  // namespace ddb
 
 #endif // VERSION_H

@@ -295,7 +295,7 @@ void DDBRegisterProcess(bool verbose) {
 }
 
 const char* DDBGetVersion() {
-    return APP_VERSION;
+    return ddb::version();
 }
 
 DDBErr DDBInit(const char* directory, char** outPath) {

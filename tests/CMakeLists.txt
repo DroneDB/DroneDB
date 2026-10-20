@@ -34,6 +34,10 @@ if(BUILD_TESTING)
     add_dependencies(ddbtest ddbtest_child ddbtest_signal_probe)
     target_compile_definitions(ddbtest PRIVATE DDB_TEST_CHILD_NAME="$<TARGET_FILE_NAME:ddbtest_child>"
         DDB_SIGNAL_PROBE_NAME="$<TARGET_FILE_NAME:ddbtest_signal_probe>")
+    # The version test compares ddb::version() with package.json; one source file only, so
+    # no other test TU carries it on its compile line
+    set_source_files_properties(dq01_version_test.cpp PROPERTIES
+        COMPILE_DEFINITIONS DDB_PACKAGE_JSON="${PROJECT_SOURCE_DIR}/package.json")
 
     # Link the library and testing framework. "spz" is the in-tree static SPZ codec target
     # (vendor/CMakeLists.txt); its PUBLIC include dir (vendor/spz/src/cc) lets the gsplat tests

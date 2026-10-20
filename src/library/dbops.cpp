@@ -1792,7 +1792,7 @@ static std::mutex g_templateMutex;
             // "Fast" init by copying the pre-built empty database index
             // this prevents the slow table generation process
             const fs::path emptyDbPath = UserProfile::get()->getTemplatesDir() /
-                                         ("empty-dbase-" APP_REVISION ".sqlite");
+                                         (std::string("empty-dbase-") + ddb::revision() + ".sqlite");
 
             // Need to create? (checked under the lock: the file exists as soon as
             // another thread starts creating it)

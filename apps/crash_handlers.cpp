@@ -88,7 +88,7 @@ namespace {
 void handleSegv() {
     LOGE << "=== SEGMENTATION FAULT DETECTED ===";
     LOGE << "DDB Process: " << ddb::io::getExeFolderPath().string();
-    LOGE << "Version: " << APP_VERSION;
+    LOGE << "Version: " << ddb::version();
 
     // Log process state before crash
     try {
@@ -103,7 +103,7 @@ void handleSegv() {
 void handleFpe() {
     LOGE << "=== FLOATING POINT EXCEPTION DETECTED ===";
     LOGE << "DDB Process: " << ddb::io::getExeFolderPath().string();
-    LOGE << "Version: " << APP_VERSION;
+    LOGE << "Version: " << ddb::version();
 
     throw ddb::AppException("Application encountered a floating point exception");
 }
