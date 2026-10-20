@@ -9,6 +9,7 @@
 #include <vector>
 #include <unordered_map>
 #include <filesystem>
+#include <mutex>
 #include <optional>
 #include "gdal_inc.h"
 #include "userprofile.h"
@@ -48,12 +49,19 @@ DDB_DLL std::string dsmServiceApiKey();
 
 class DSMService
 {
-    std::unordered_map<std::string, DSMCacheEntry> cache; // filename --> cache entry
+    // filename --> cache entry. cacheMutex guards every access and is held only around
+    // the map itself: getAltitude() recurses through loadDiskCache()/addGeoTIFFToCache(),
+    // so no lock may be held across those calls.
+    std::unordered_map<std::string, DSMCacheEntry> cache;
+    std::mutex cacheMutex;
+
     DSMService();
     ~DSMService();
-    static DSMService *instance;
 
-    static void cleanup();
+    // The elevation from a loaded cache entry containing the point (0 when the DSM has no
+    // value there), or nothing when no loaded entry contains it.
+    std::optional<float> lookupCache(double latitude, double longitude);
+    bool isCached(const std::string &filename);
 
 public:
     DDB_DLL static DSMService *get();

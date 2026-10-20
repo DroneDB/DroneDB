@@ -36,8 +36,7 @@ namespace cmd
         {
             std::cerr << "error: missing required argument 'paths'" << std::endl
                       << std::endl;
-            printHelp(std::cerr, false);
-            exit(EXIT_FAILURE);
+            usageError();
         }
 
         const auto ddbPath = opts["working-dir"].as<std::string>();

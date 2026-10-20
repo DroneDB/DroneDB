@@ -731,7 +731,7 @@ AlignResult alignRaster(const std::string &sourcePath,
         args = CSLAddString(args, "-t_srs");
         args = CSLAddString(args, val.summary.sourceCrs.c_str());
         GDALDatasetH hR = GDALOpen(referencePath.c_str(), GA_ReadOnly);
-        if (!hR) throw GDALException("Cannot open reference for reprojection");
+        if (!hR) { CSLDestroy(args); throw GDALException("Cannot open reference for reprojection"); }
         GDALWarpAppOptions *wOpts = GDALWarpAppOptionsNew(args, nullptr);
         CSLDestroy(args);
         GDALDatasetH hOut = GDALWarp(tmpReproj.c_str(), nullptr, 1, &hR, wOpts, nullptr);
@@ -742,13 +742,13 @@ AlignResult alignRaster(const std::string &sourcePath,
     }
 
     // 3. Overlap bbox + common GSD
-    GDALDatasetH hS = GDALOpen(sourcePath.c_str(),   GA_ReadOnly);
-    GDALDatasetH hR = GDALOpen(effectiveRef.c_str(), GA_ReadOnly);
-    if (!hS || !hR) {
-        if (hS) GDALClose(hS);
-        if (hR) GDALClose(hR);
+    // Owned: readToCommonGrid throws (empty window, failed RasterIO) while both are open
+    GDALDatasetUniquePtr srcDs(GDALDataset::FromHandle(GDALOpen(sourcePath.c_str(),   GA_ReadOnly)));
+    GDALDatasetUniquePtr refDs(GDALDataset::FromHandle(GDALOpen(effectiveRef.c_str(), GA_ReadOnly)));
+    if (!srcDs || !refDs)
         throw GDALException("Cannot reopen datasets for grid extraction");
-    }
+    GDALDatasetH hS = GDALDataset::ToHandle(srcDs.get());
+    GDALDatasetH hR = GDALDataset::ToHandle(refDs.get());
     double gts[6], gtr[6];
     GDALGetGeoTransform(hS, gts); GDALGetGeoTransform(hR, gtr);
 
@@ -775,7 +775,6 @@ AlignResult alignRaster(const std::string &sourcePath,
         const double srcArea = (sX1 - sX0) * (sY1 - sY0);
         const double overlapPct = (srcArea > 0) ? 100.0 * (ovX * ovY) / srcArea : 0.0;
         if (overlapPct < 5.0) {
-            GDALClose(hS); GDALClose(hR);
             throw AppException("Insufficient overlap after reprojection (" +
                                std::to_string(static_cast<int>(overlapPct)) + "%)");
         }
@@ -787,7 +786,8 @@ AlignResult alignRaster(const std::string &sourcePath,
 
     RasterGrid srcGrid = readToCommonGrid(hS, ox0, oy0, ox1, oy1, targetGsd, isDem);
     RasterGrid refGrid = readToCommonGrid(hR, ox0, oy0, ox1, oy1, targetGsd, isDem);
-    GDALClose(hS); GDALClose(hR);
+    srcDs.reset();
+    refDs.reset();
 
     LOGD << "Common grid: " << srcGrid.width << "x" << srcGrid.height
          << " @ GSD=" << targetGsd << " type=" << (isDem ? "dem" : "ortho");

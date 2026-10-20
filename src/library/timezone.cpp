@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "timezone.h"
 
+#include <memory>
 #include <mutex>
 
 #include "exceptions.h"
@@ -13,7 +14,12 @@ using namespace ddb;
 
 bool Timezone::initialized = false;
 ZoneDetect* Timezone::db = nullptr;
-std::mutex timezoneMutex;
+
+namespace {
+// init() runs its body once per process. A throwing body leaves the flag unset, so the
+// next caller retries, as before; callers never read db while another thread writes it.
+std::once_flag timezoneInitFlag;
+}
 
 [[noreturn]] void onError(int errZD, int errNative) {
     throw TimezoneException("Timezone error: " + std::string(ZDGetErrorString(errZD)) + " (" +
@@ -21,29 +27,27 @@ std::mutex timezoneMutex;
 }
 
 void Timezone::init() {
-    if (initialized)
-        return;
-    std::lock_guard<std::mutex> guard(timezoneMutex);
-
-    ZDSetErrorHandler(onError);
-    fs::path dbPath = io::getDataPath("timezone21.bin");
-    if (dbPath.empty())
-        throw TimezoneException("Cannot find timezone database timezone21.bin");
-    db = ZDOpenDatabase(dbPath.string().c_str());
-    if (!db)
-        throw TimezoneException("Cannot open timezone database ./timezone21.bin");
+    std::call_once(timezoneInitFlag, [] {
+        ZDSetErrorHandler(onError);
+        fs::path dbPath = io::getDataPath("timezone21.bin");
+        if (dbPath.empty())
+            throw TimezoneException("Cannot find timezone database timezone21.bin");
+        db = ZDOpenDatabase(dbPath.string().c_str());
+        if (!db)
+            throw TimezoneException("Cannot open timezone database ./timezone21.bin");
 
 #ifdef _WIN32
-    // On Windows, set TZDIR environment variable to help cctz find timezone data
-    fs::path zoneInfoPath = io::getDataPath("zoneinfo");
-    if (!zoneInfoPath.empty()) {
-        std::string tzdir = "TZDIR=" + zoneInfoPath.string();
-        LOGD << "Setting TZDIR to: " << zoneInfoPath.string();
-        _putenv(tzdir.c_str());
-    }
+        // On Windows, set TZDIR environment variable to help cctz find timezone data
+        fs::path zoneInfoPath = io::getDataPath("zoneinfo");
+        if (!zoneInfoPath.empty()) {
+            std::string tzdir = "TZDIR=" + zoneInfoPath.string();
+            LOGD << "Setting TZDIR to: " << zoneInfoPath.string();
+            _putenv(tzdir.c_str());
+        }
 #endif
 
-    initialized = true;
+        initialized = true;
+    });
 }
 
 cctz::time_zone Timezone::lookupTimezone(double latitude, double longitude) {
@@ -54,10 +58,10 @@ cctz::time_zone Timezone::lookupTimezone(double latitude, double longitude) {
     float safezone = 0;
     ZoneDetectResult* results =
         ZDLookup(db, static_cast<float>(latitude), static_cast<float>(longitude), &safezone);
-    if (!results) {
-        ZDFreeResults(results);
+    if (!results)
         return cctz::utc_time_zone();
-    }
+    // ZDLookup allocates the results; they were never freed on the normal path
+    const std::unique_ptr<ZoneDetectResult, void (*)(ZoneDetectResult*)> resultsOwner(results, ZDFreeResults);
 
     unsigned int index = 0;
     cctz::time_zone tz = cctz::utc_time_zone();

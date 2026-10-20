@@ -73,8 +73,7 @@ namespace cmd
 		{
 			std::cerr << "error: " << e.what() << std::endl
 					  << std::endl;
-			printHelp(std::cerr, false);
-			exit(EXIT_FAILURE);
+			usageError();
 		}
 	}
 

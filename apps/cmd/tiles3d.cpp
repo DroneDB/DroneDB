@@ -42,7 +42,7 @@ namespace cmd
     {
         if (!opts.count("input"))
         {
-            printHelp();
+            usageError();
         }
 
         const auto input = opts["input"].as<std::string>();

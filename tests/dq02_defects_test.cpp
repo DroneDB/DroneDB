@@ -6,6 +6,7 @@
 // deterministically on this platform (UB that glibc tolerates, a fallback never compiled on
 // Linux) the test is a characterisation test and says so.
 
+#include <atomic>
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
@@ -14,11 +15,18 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <thread>
+#include <type_traits>
 #include <vector>
 
 #include "gtest/gtest.h"
 
+#include "align.h"
 #include "constants.h"
+#include "coordstransformer.h"
+#include "gdal_inc.h"
+#include "geo.h"
+#include "geoproject.h"
 #include "databasepool.h"
 #include "dbops.h"
 #include "ddb.h"
@@ -26,11 +34,15 @@
 #include "exceptions.h"
 #include "info.h"
 #include "mathutil.h"
+#include "randomutil.h"
 #include "sqlite_database.h"
 #include "status.h"
 #include "test.h"
 #include "testarea.h"
 #include "thermal.h"
+#include "tilerhelper.h"
+#include "timezone.h"
+#include "userprofile.h"
 
 #ifdef _WIN32
 #define DDB_SETENV(name, value) _putenv_s(name, value)
@@ -69,6 +81,54 @@ namespace
             fs::create_directories(p.parent_path());
         std::ofstream out(p.string(), std::ios::binary);
         out << content;
+    }
+
+    // Number of GDAL datasets open in the process (all threads).
+    int openDatasetCount()
+    {
+        GDALDatasetH *datasets = nullptr;
+        int count = 0;
+        GDALGetOpenDatasets(&datasets, &count);
+        return count;
+    }
+
+    // Writes a small single-value GeoTIFF; geoTransform == nullptr leaves it ungeoreferenced.
+    void writeGeoTiff(const fs::path &p, int bands, GDALDataType type, const double *geoTransform, int epsg)
+    {
+        GDALDriverH drv = GDALGetDriverByName("GTiff");
+        ASSERT_NE(drv, nullptr);
+        GDALDatasetH ds = GDALCreate(drv, p.string().c_str(), 64, 64, bands, type, nullptr);
+        ASSERT_NE(ds, nullptr);
+        if (geoTransform != nullptr)
+        {
+            GDALSetGeoTransform(ds, const_cast<double *>(geoTransform));
+            OGRSpatialReference srs;
+            srs.importFromEPSG(epsg);
+            char *wkt = nullptr;
+            srs.exportToWkt(&wkt);
+            GDALSetProjection(ds, wkt);
+            CPLFree(wkt);
+        }
+        for (int b = 1; b <= bands; b++)
+            GDALFillRaster(GDALGetRasterBand(ds, b), 100.0 + b, 0.0);
+        GDALClose(ds);
+    }
+
+    // Starts n threads that run fn(i) at the same moment (they spin on a shared counter).
+    template <typename Fn>
+    void runConcurrently(int n, Fn fn)
+    {
+        std::atomic<int> ready{0};
+        std::vector<std::thread> threads;
+        for (int i = 0; i < n; i++)
+            threads.emplace_back([&, i] {
+                ready.fetch_add(1);
+                while (ready.load() < n)
+                    std::this_thread::yield();
+                fn(i);
+            });
+        for (auto &t : threads)
+            t.join();
     }
 
     // Statement::step used to map every unlisted SQLite result code (READONLY, IOERR,
@@ -358,5 +418,202 @@ namespace
         std::string padded = "\xc2\xa0 x \xc2\xa0";  // NBSP bytes are not ASCII spaces
         utils::trim(padded);
         EXPECT_EQ(padded, "\xc2\xa0 x \xc2\xa0");
+    }
+    // std::rand() was called from several threads (thumbs, tiler cache cleanup, geoproject
+    // temp names). Characterisation: the shared helper gives each thread its own engine. The
+    // race itself needs TSan (DQ-01); the evidence is that no std::rand/rand( is left in src/.
+    TEST(Dq02Defects, Target_RandomHelperGivesEachThreadItsOwnEngine)
+    {
+        const std::mt19937 *engines[2] = {nullptr, nullptr};
+        std::thread([&] { engines[0] = &threadRandomEngine(); }).join();
+        std::thread([&] { engines[1] = &threadRandomEngine(); }).join();
+        EXPECT_EQ(&threadRandomEngine(), &threadRandomEngine());
+        EXPECT_NE(engines[0], &threadRandomEngine());
+        EXPECT_NE(engines[1], &threadRandomEngine());
+        for (int i = 0; i < 1000; i++)
+        {
+            const int v = randomInt(3, 7);
+            EXPECT_GE(v, 3);
+            EXPECT_LE(v, 7);
+        }
+        EXPECT_TRUE(oneIn(1));
+    }
+
+    // UserProfile::get, DSMService::get and Timezone::init initialized lazily without
+    // synchronization. Smoke test: 16 threads hit them at once and must agree. It cannot fail
+    // deterministically (earlier tests in the process may already have initialized them, and
+    // a lost race is timing-dependent); DQ-01's TSan job runs it as a race detector.
+    TEST(Dq02Defects, Target_SingletonsAgreeUnderConcurrentFirstUse)
+    {
+        constexpr int n = 16;
+        std::vector<UserProfile *> profiles(n, nullptr);
+        std::vector<DSMService *> dsms(n, nullptr);
+        std::vector<std::string> zones(n);
+        runConcurrently(n, [&](int i) {
+            profiles[i] = UserProfile::get();
+            dsms[i] = DSMService::get();
+            zones[i] = Timezone::lookupTimezone(46.842979, -91.993219).name();
+        });
+        for (int i = 0; i < n; i++)
+        {
+            EXPECT_EQ(profiles[i], UserProfile::get());
+            EXPECT_EQ(dsms[i], DSMService::get());
+            EXPECT_EQ(zones[i], "America/Chicago");
+        }
+    }
+
+    // The DSMService cache had no mutex. Concurrent lookups of a cached point must all see the
+    // loaded entry. Not deterministic without TSan (see above).
+    TEST(Dq02Defects, Target_DsmCacheConcurrentLookups)
+    {
+        TestArea ta(TEST_NAME, true);
+        const auto tif = ta.getPath("dsm.tif");
+        const double gt[6] = {10.0, 0.01, 0.0, 20.0, 0.0, -0.01};
+        writeGeoTiff(tif, 1, GDT_Float32, gt, 4326);
+        ASSERT_TRUE(DSMService::get()->addGeoTIFFToCache(tif, 19.9, 10.1));
+
+        constexpr int n = 16;
+        std::vector<float> altitudes(n, 0.0f);
+        runConcurrently(n, [&](int i) { altitudes[i] = DSMService::get()->getAltitude(19.9, 10.1); });
+        for (float a : altitudes)
+            EXPECT_FLOAT_EQ(a, 101.0f);
+    }
+
+    // toUTM/fromUTM used the OCTNewCoordinateTransformation result without a null check and
+    // leaked the SRS handles on throw. The SRS failure paths cannot be reached through the
+    // public API with a working PROJ, so this pins the behaviour: invalid zones throw
+    // GDALException, valid ones round-trip.
+    TEST(Dq02Defects, Target_UtmTransformsThrowGdalExceptionOnInvalidZone)
+    {
+        UTMZone bad;
+        bad.zone = 99;
+        bad.north = true;
+        EXPECT_THROW(toUTM(46.84, -91.99, bad), GDALException);
+        EXPECT_THROW(fromUTM(500000.0, 5000000.0, bad), GDALException);
+
+        const UTMZone zone = getUTMZone(46.842979, -91.993219);
+        const auto p = toUTM(46.842979, -91.993219, zone);
+        const auto g = fromUTM(p, zone);
+        EXPECT_NEAR(g.latitude, 46.842979, 1e-9);
+        EXPECT_NEAR(g.longitude, -91.993219, 1e-9);
+    }
+
+    // CoordsTransformer copied raw OGR handles (double free on copy) and leaked its SRS
+    // handles when a constructor threw (the destructor does not run). The leak is in OSR
+    // objects, which GDAL cannot count; the type traits fail to compile before the fix.
+    TEST(Dq02Defects, Target_CoordsTransformerIsMoveOnlyAndThrowsOnBadWkt)
+    {
+        static_assert(!std::is_copy_constructible_v<CoordsTransformer>);
+        static_assert(!std::is_copy_assignable_v<CoordsTransformer>);
+        static_assert(std::is_nothrow_move_constructible_v<CoordsTransformer>);
+
+        EXPECT_THROW(CoordsTransformer("not a wkt", 4326), GDALException);
+        EXPECT_THROW(CoordsTransformer(4326, "not a wkt"), GDALException);
+
+        CoordsTransformer a(4326, 3857);
+        CoordsTransformer b(std::move(a));
+        double x = 0.0, y = 0.0;
+        b.transform(&x, &y);
+        EXPECT_NEAR(x, 0.0, 1e-6);
+        EXPECT_NEAR(y, 0.0, 1e-6);
+    }
+
+    // DSMService::addGeoTIFFToCache leaked the dataset when the raster had no geotransform,
+    // no projection or more than one band.
+    TEST(Dq02Defects, Target_DsmCacheClosesTheDatasetOnInvalidRaster)
+    {
+        TestArea ta(TEST_NAME, true);
+        const auto noGeo = ta.getPath("nogeo.tif");
+        writeGeoTiff(noGeo, 1, GDT_Float32, nullptr, 0);
+        const double gt[6] = {10.0, 0.01, 0.0, 20.0, 0.0, -0.01};
+        const auto twoBands = ta.getPath("twobands.tif");
+        writeGeoTiff(twoBands, 2, GDT_Float32, gt, 4326);
+
+        const int before = openDatasetCount();
+        EXPECT_THROW(DSMService::get()->addGeoTIFFToCache(noGeo, 0, 0), GDALException);
+        EXPECT_THROW(DSMService::get()->addGeoTIFFToCache(twoBands, 0, 0), GDALException);
+        EXPECT_EQ(openDatasetCount(), before);
+    }
+
+    // geoProject leaked the source dataset (and the option list) when the outsize was invalid.
+    TEST(Dq02Defects, Target_GeoProjectClosesTheSourceOnInvalidOutsize)
+    {
+        TestArea ta(TEST_NAME);
+        const auto img = ta.downloadTestAsset(
+            "https://github.com/DroneDB/test_data/raw/refs/heads/master/images/DJI_0018.JPG", "DJI_0018.JPG");
+        const auto out = ta.getPath("out.tif");
+
+        const int before = openDatasetCount();
+        EXPECT_THROW(geoProject({img.string()}, out.string(), "abc", true), InvalidArgsException);
+        EXPECT_EQ(openDatasetCount(), before);
+    }
+
+    // The intermediate geoprojection dataset is now an in-memory MEM dataset instead of a
+    // /vsimem GTiff with a std::rand() name that was never unlinked.
+    TEST(Dq02Defects, Target_GeoProjectWritesAGeoreferencedRaster)
+    {
+        TestArea ta(TEST_NAME);
+        const auto img = ta.downloadTestAsset(
+            "https://github.com/DroneDB/test_data/raw/refs/heads/master/images/DJI_0018.JPG", "DJI_0018.JPG");
+        const auto out = ta.getPath("projected.tif");
+        if (fs::exists(out))
+            fs::remove(out);
+
+        const int before = openDatasetCount();
+        geoProject({img.string()}, out.string(), "10%", true);
+        EXPECT_EQ(openDatasetCount(), before);
+
+        GDALDatasetUniquePtr ds(GDALDataset::Open(out.string().c_str(), GDAL_OF_RASTER | GDAL_OF_READONLY));
+        ASSERT_TRUE(ds);
+        EXPECT_EQ(ds->GetRasterCount(), 4) << "RGB + alpha";
+        ASSERT_NE(ds->GetSpatialRef(), nullptr);
+        double gt[6];
+        EXPECT_EQ(ds->GetGeoTransform(gt), CE_None);
+        EXPECT_GT(ds->GetRasterXSize(), 0);
+    }
+
+    // alignRaster leaked both datasets when reading the common grid failed. The source is a
+    // VRT whose (lazily opened) backing file is missing, so RasterIO fails after both opens.
+    TEST(Dq02Defects, Target_AlignClosesDatasetsWhenTheGridReadFails)
+    {
+        TestArea ta(TEST_NAME, true);
+        const std::string vrt =
+            "<VRTDataset rasterXSize=\"64\" rasterYSize=\"64\">\n"
+            "  <SRS>EPSG:32615</SRS>\n"
+            "  <GeoTransform>500000, 1, 0, 4000064, 0, -1</GeoTransform>\n"
+            "  <VRTRasterBand dataType=\"Byte\" band=\"1\">\n"
+            "    <SimpleSource>\n"
+            "      <SourceFilename relativeToVRT=\"1\">missing.tif</SourceFilename>\n"
+            "      <SourceBand>1</SourceBand>\n"
+            "      <SourceProperties RasterXSize=\"64\" RasterYSize=\"64\" DataType=\"Byte\" BlockXSize=\"64\" BlockYSize=\"64\"/>\n"
+            "      <SrcRect xOff=\"0\" yOff=\"0\" xSize=\"64\" ySize=\"64\"/>\n"
+            "      <DstRect xOff=\"0\" yOff=\"0\" xSize=\"64\" ySize=\"64\"/>\n"
+            "    </SimpleSource>\n"
+            "  </VRTRasterBand>\n"
+            "</VRTDataset>\n";
+        const auto src = ta.getPath("src.vrt");
+        const auto ref = ta.getPath("ref.vrt");
+        writeText(src, vrt);
+        writeText(ref, vrt);
+
+        const int before = openDatasetCount();
+        EXPECT_THROW(alignRaster(src.string(), ref.string(), ta.getPath("out.tif").string()), GDALException);
+        EXPECT_EQ(openDatasetCount(), before);
+    }
+
+    // runTiler held the Tiler in a raw pointer, leaked (with its datasets) when the zoom
+    // range or tile coordinates did not parse.
+    TEST(Dq02Defects, Target_RunTilerFreesTheTilerOnBadZoomRange)
+    {
+        TestArea ta(TEST_NAME, true);
+        const auto tif = ta.getPath("raster.tif");
+        const double gt[6] = {1000000.0, 10.0, 0.0, 5000640.0, 0.0, -10.0};
+        writeGeoTiff(tif, 3, GDT_Byte, gt, 3857);
+        std::ostringstream out;
+
+        const int before = openDatasetCount();
+        EXPECT_THROW(TilerHelper::runTiler(tif, ta.getFolder("tiles"), 256, false, out, "text", "abc"),
+                     std::invalid_argument);
+        EXPECT_EQ(openDatasetCount(), before);
     }
 } // namespace

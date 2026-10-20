@@ -50,7 +50,7 @@ namespace cmd
     {
         if (!opts.count("input"))
         {
-            printHelp();
+            usageError();
             return;
         }
 
@@ -66,7 +66,7 @@ namespace cmd
         if (interval <= 0.0 && count <= 0)
         {
             std::cerr << "Either --interval or --count must be > 0" << std::endl;
-            printHelp();
+            usageError();
             return;
         }
 

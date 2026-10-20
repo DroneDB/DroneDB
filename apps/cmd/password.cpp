@@ -50,9 +50,9 @@ namespace cmd
 
 			if (opts.count("command") != 1)
 			{
-				std::cout << "Missing command" << std::endl
+				std::cerr << "Missing command" << std::endl
 						  << std::endl;
-				printHelp();
+				usageError();
 			}
 
 			const auto command = opts["command"].as<std::string>();
@@ -68,9 +68,9 @@ namespace cmd
 			{
 				if (argument.empty())
 				{
-					std::cout << "Missing parameter in append command" << std::endl
+					std::cerr << "Missing parameter in append command" << std::endl
 							  << std::endl;
-					printHelp();
+					usageError();
 				}
 
 				manager.append(argument);
@@ -98,7 +98,7 @@ namespace cmd
 		catch (ddb::InvalidArgsException &e)
 		{
 			std::cerr << "Error: " << e.what() << std::endl;
-			printHelp();
+			usageError();
 		}
 	}
 

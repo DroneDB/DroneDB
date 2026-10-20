@@ -11,15 +11,11 @@
 namespace ddb
 {
 
-    UserProfile *UserProfile::instance = nullptr;
-
     UserProfile *UserProfile::get()
     {
-        if (!instance)
-        {
-            instance = new UserProfile();
-        }
-
+        // Thread-safe initialization. Never destroyed (as before): code running during
+        // static destruction may still ask for the profile.
+        static UserProfile *const instance = new UserProfile();
         return instance;
     }
 

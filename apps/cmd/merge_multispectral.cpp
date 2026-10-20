@@ -35,7 +35,7 @@ namespace cmd
     {
         if (!opts.count("input"))
         {
-            printHelp();
+            usageError();
         }
 
         auto inputs = opts["input"].as<std::vector<std::string>>();
@@ -80,7 +80,7 @@ namespace cmd
 
         if (!opts.count("output"))
         {
-            printHelp();
+            usageError();
         }
 
         auto output = opts["output"].as<std::string>();

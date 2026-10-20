@@ -1785,9 +1785,11 @@ DDB_DLL DDBErr DDBGetRasterMetadata(const char* path, const char* formula,
     const std::string formulaStr = formula ? std::string(formula) : "";
     const std::string filterStr = bandFilter ? std::string(bandFilter) : "";
 
-    GDALDatasetH hDs = GDALOpen(path, GA_ReadOnly);
-    if (!hDs)
+    // Owned: the formula, statistics and sensor steps below can throw while it is open
+    GDALDatasetUniquePtr dataset(GDALDataset::FromHandle(GDALOpen(path, GA_ReadOnly)));
+    if (!dataset)
         throw GDALException("Cannot open " + std::string(path));
+    GDALDatasetH hDs = GDALDataset::ToHandle(dataset.get());
 
     auto& ve = ddb::VegetationEngine::instance();
     json result;
@@ -1836,10 +1838,8 @@ DDB_DLL DDBErr DDBGetRasterMetadata(const char* path, const char* formula,
 
         std::vector<float> formulaResult(pixCount);
         const auto* formulaObj = ve.getFormula(formulaStr);
-        if (!formulaObj) {
-            GDALClose(hDs);
+        if (!formulaObj)
             throw InvalidArgsException("Unknown formula: " + formulaStr);
-        }
         ve.applyFormula(*formulaObj, bf, bandDataPtrs, formulaResult.data(), pixCount, nodata);
 
         // Compute statistics
@@ -1939,7 +1939,7 @@ DDB_DLL DDBErr DDBGetRasterMetadata(const char* path, const char* formula,
     auto detection = spm.detectSensor(std::string(path));
     result["detectedSensor"] = detection.sensorId;
 
-    GDALClose(hDs);
+    dataset.reset();
 
     utils::copyToPtr(result.dump(), output);
 

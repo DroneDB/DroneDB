@@ -38,7 +38,7 @@ namespace cmd
     {
         if (!opts.count("command"))
         {
-            printHelp();
+            usageError();
         }
         const auto command = opts["command"].as<std::string>();
 
@@ -47,7 +47,7 @@ namespace cmd
             command != "restore" &&
             !opts.count("key"))
         {
-            printHelp();
+            usageError();
         }
 
         const auto ddbPath = opts["working-dir"].as<std::string>();

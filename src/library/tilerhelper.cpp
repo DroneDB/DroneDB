@@ -7,6 +7,7 @@
 #include "pctiler.h"
 #include "threadlock.h"
 #include "raster_cache.h"
+#include "randomutil.h"
 
 #include <functional>
 
@@ -62,7 +63,7 @@ namespace ddb
     {
         if (!fs::exists(tileablePath))
             throw FSException(tileablePath.string() + " does not exist");
-        if (std::rand() % 1000 == 0)
+        if (oneIn(1000))
             cleanupUserCache();
 
         const time_t modifiedTime = io::Path(tileablePath).getModifiedTime();
@@ -218,7 +219,7 @@ namespace ddb
             if (outputGeotiff.empty())
             {
                 // Store in user cache if user doesn't specify a preference
-                if (std::rand() % 1000 == 0)
+                if (oneIn(1000))
                     cleanupUserCache();
                 const time_t modifiedTime = io::Path(localTileablePath).getModifiedTime();
                 const fs::path tileCacheFolder =
@@ -286,18 +287,19 @@ namespace ddb
                                const std::string &format, const std::string &zRange,
                                const std::string &x, const std::string &y)
     {
-        Tiler *tiler;
+        // Owned: parseZRange, std::stoi and tile() throw on bad input or failed tiles
+        std::unique_ptr<Tiler> tiler;
 
         if (isCopcPath(input.string()))
         {
             // COPC point cloud
-            tiler = new PointCloudTiler(input.string(), output.string(), tileSize, tms);
+            tiler = std::make_unique<PointCloudTiler>(input.string(), output.string(), tileSize, tms);
         }
         else
         {
             // Assume image/geotiff
             fs::path geotiff = ddb::TilerHelper::toGeoTIFF(input, tileSize, true);
-            tiler = new GDALTiler(geotiff.string(), output.string(), tileSize, tms);
+            tiler = std::make_unique<GDALTiler>(geotiff.string(), output.string(), tileSize, tms);
         }
 
         BoundingBox<int> zb;
@@ -360,8 +362,6 @@ namespace ddb
         {
             os << "]";
         }
-
-        delete tiler;
     }
 
 } // namespace ddb

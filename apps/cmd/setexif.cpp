@@ -35,7 +35,7 @@ namespace cmd
     {
         if (!opts.count("input"))
         {
-            printHelp();
+            usageError();
         }
 
         if (opts.count("gps"))
@@ -43,7 +43,7 @@ namespace cmd
             auto gps = opts["gps"].as<std::vector<double>>();
             if (gps.size() != 3)
             {
-                printHelp();
+                usageError();
             }
         }
 

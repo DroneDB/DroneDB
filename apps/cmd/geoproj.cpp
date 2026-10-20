@@ -33,7 +33,7 @@ namespace cmd
     {
         if (!opts.count("images") || !opts.count("output"))
         {
-            printHelp();
+            usageError();
         }
 
         auto images = opts["images"].as<std::vector<std::string>>();

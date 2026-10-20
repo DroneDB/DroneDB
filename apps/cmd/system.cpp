@@ -43,7 +43,7 @@ namespace cmd
         }
         else
         {
-            printHelp();
+            usageError();
         }
     }
 

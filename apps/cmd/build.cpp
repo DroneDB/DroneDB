@@ -44,7 +44,7 @@ namespace cmd
             const auto force = opts["force"].as<bool>();
 
             if (output.length() == 0)
-                printHelp();
+                usageError();
 
             const auto db = ddb::open(ddbPath, true);
 
@@ -61,7 +61,7 @@ namespace cmd
         catch (ddb::InvalidArgsException &e)
         {
             std::cerr << "Error: " << e.what() << std::endl;
-            printHelp();
+            usageError();
         }
     }
 

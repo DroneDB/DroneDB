@@ -34,7 +34,7 @@ namespace cmd
     {
         if (!opts.count("input") || !opts.count("output"))
         {
-            printHelp();
+            usageError();
         }
 
         const auto input = opts["input"].as<std::vector<std::string>>();

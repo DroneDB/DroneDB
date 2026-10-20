@@ -20,24 +20,26 @@
 using namespace std;
 using namespace ddb;
 
-[[noreturn]] void printHelp(char *argv[])
+// Explicit help (-h/--help) goes to stdout and exits 0; a missing or unknown command is a
+// usage error: stderr and EXIT_FAILURE.
+[[noreturn]] void printHelp(char *argv[], std::ostream &out = std::cout, int exitCode = EXIT_SUCCESS)
 {
-    std::cout << "DroneDB v" << DDBGetVersion() << " - Effortless aerial data management and sharing" << std::endl
+    out << "DroneDB v" << DDBGetVersion() << " - Effortless aerial data management and sharing" << std::endl
               << "Usage:" << std::endl
               << "	" << argv[0] << " <command> [args] [PATHS]" << std::endl
               << std::endl
               << "Commands:" << std::endl;
     for (auto &cmd : cmd::commands)
     {
-        std::cout << "	" << cmd.first << " - " << cmd.second->description() << std::endl;
+        out << "	" << cmd.first << " - " << cmd.second->description() << std::endl;
     }
-    std::cout << std::endl
+    out << std::endl
               << "	-h, --help		Print help" << std::endl
               << "	--version		Print version" << std::endl
               << std::endl
               << "For detailed command help use: " << argv[0] << " <command> --help " << std::endl
               << "See https://docs.dronedb.app for more information." << std::endl;
-    exit(0);
+    exit(exitCode);
 }
 
 bool hasParam(int argc, char *argv[], const char *param)
@@ -72,7 +74,7 @@ int main(int argc, char *argv[])
     }
 
     if (argc <= 1)
-        printHelp(argv);
+        printHelp(argv, std::cerr, EXIT_FAILURE);
     else
     {
         std::string cmdKey = std::string(argv[1]);
@@ -98,7 +100,9 @@ int main(int argc, char *argv[])
             auto cmdIter = cmd::commands.find(cmdKey);
             if (cmdIter == cmd::commands.end())
             {
-                printHelp(argv);
+                std::cerr << "Unknown command: " << cmdKey << std::endl
+                          << std::endl;
+                printHelp(argv, std::cerr, EXIT_FAILURE);
             }
 
             auto command = cmdIter->second;

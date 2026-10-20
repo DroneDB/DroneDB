@@ -57,8 +57,7 @@ namespace cmd
         {
             std::cerr << "error: missing required argument 'input'" << std::endl
                       << std::endl;
-            printHelp(std::cerr, false);
-            exit(EXIT_FAILURE);
+            usageError();
         }
 
         auto rawInput = opts["input"].as<std::vector<std::string>>();

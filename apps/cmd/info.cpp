@@ -40,8 +40,7 @@ namespace cmd
         {
             std::cerr << "error: missing required argument 'input'" << std::endl
                       << std::endl;
-            printHelp(std::cerr, false);
-            exit(EXIT_FAILURE);
+            usageError();
         }
 
         auto input = opts["input"].as<std::vector<std::string>>();
@@ -81,8 +80,7 @@ namespace cmd
         {
             std::cerr << "error: " << e.what() << std::endl
                       << std::endl;
-            printHelp(std::cerr, false);
-            exit(EXIT_FAILURE);
+            usageError();
         }
     }
 

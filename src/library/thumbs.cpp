@@ -22,6 +22,7 @@
 #include "mio.h"
 #include "pointcloud.h"
 #include "rad.h"
+#include "randomutil.h"
 #include "raster_stats.h"
 #include "tile_encoder.h"
 #include "tiler.h"
@@ -36,7 +37,7 @@
 namespace ddb {
 
 fs::path getThumbFromUserCache(const fs::path& imagePath, int thumbSize, bool forceRecreate) {
-    if (std::rand() % 1000 == 0)
+    if (oneIn(1000))
         cleanupThumbsUserCache();
     if (!fs::exists(imagePath))
         throw FSException(imagePath.filename().string() + " does not exist");

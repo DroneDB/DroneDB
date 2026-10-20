@@ -33,7 +33,7 @@ namespace cmd
     void Align::run(cxxopts::ParseResult &opts)
     {
         if (!opts.count("input") || !opts.count("reference"))
-            printHelp();
+            usageError();
 
         auto source    = opts["input"].as<std::string>();
         auto reference = opts["reference"].as<std::string>();
@@ -46,7 +46,7 @@ namespace cmd
         }
 
         if (!opts.count("output"))
-            printHelp();
+            usageError();
         auto output = opts["output"].as<std::string>();
 
         ddb::AlignOptions aopts;

@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <memory>
 #include <optional>
 #include "dbops.h"
 #include "entry.h"
@@ -287,15 +288,16 @@ namespace ddb
 
                 LOGV << "Processing GeoRaster file: " << path.string();
 
-                GDALDatasetH hDataset;
-                hDataset = GDALOpen(path.string().c_str(), GA_ReadOnly);
-                if (!hDataset)
+                // Owned: the SRS checks below throw while the dataset is open
+                GDALDatasetUniquePtr dataset(GDALDataset::FromHandle(GDALOpen(path.string().c_str(), GA_ReadOnly)));
+                if (!dataset)
                 {
                     LOGV << "GDAL failed to open dataset: " << path.string();
                     throw GDALException("Cannot open " + path.string() + " for reading");
                 }
 
                 LOGV << "GDAL successfully opened dataset";
+                GDALDatasetH hDataset = GDALDataset::ToHandle(dataset.get());
 
                 int width = GDALGetRasterXSize(hDataset);
                 int height = GDALGetRasterYSize(hDataset);
@@ -335,37 +337,27 @@ namespace ddb
                             entry.properties["projection"] = wkt;
 
                             // Get lat/lon extent of raster
-                            char *wktp = const_cast<char *>(wkt.c_str());
-                            OGRSpatialReferenceH hSrs = OSRNewSpatialReference(nullptr);
-                            OGRSpatialReferenceH hWgs84 = OSRNewSpatialReference(nullptr);
-                            LOGV << "Created spatial reference objects";
+                            OGRSpatialReference srs;
+                            OGRSpatialReference wgs84;
 
-                            OGRErr importResult = OSRImportFromWkt(hSrs, &wktp);
+                            OGRErr importResult = srs.importFromWkt(wkt.c_str());
                             LOGV << "OSRImportFromWkt result: " << (importResult == OGRERR_NONE ? "Success" : "Failed");
 
                             if (importResult != OGRERR_NONE)
-                            {
-                                LOGV << "Failed to import WKT, cleaning up spatial references";
-                                OSRDestroySpatialReference(hWgs84);
-                                OSRDestroySpatialReference(hSrs);
                                 throw GDALException("Cannot read spatial reference system for " + path.string() + ". Is PROJ available?");
-                            }
 
-                            if (OSRImportFromEPSG(hWgs84, 4326) != OGRERR_NONE)
-                            {
-                                LOGV << "Failed to import WGS84 EPSG, cleaning up spatial references";
-                                OSRDestroySpatialReference(hWgs84);
-                                OSRDestroySpatialReference(hSrs);
+                            if (wgs84.importFromEPSG(4326) != OGRERR_NONE)
                                 throw GDALException("Cannot read WGS84 spatial reference system for " + path.string() + ". Is PROJ available?");
-                            }
 
                             LOGV << "OSRImportFromEPSG result: Success";
 
-                            OGRCoordinateTransformationH hTransform = OCTNewCoordinateTransformation(hSrs, hWgs84);
-                            LOGV << "Created coordinate transformation: " << (hTransform != nullptr ? "Success" : "Failed");
+                            std::unique_ptr<OGRCoordinateTransformation> transform(
+                                OGRCreateCoordinateTransformation(&srs, &wgs84));
+                            LOGV << "Created coordinate transformation: " << (transform ? "Success" : "Failed");
 
-                            if (hTransform != nullptr)
+                            if (transform)
                             {
+                                OGRCoordinateTransformationH hTransform = OGRCoordinateTransformation::ToHandle(transform.get());
                                 LOGV << "Computing corner coordinates";
 
                                 auto ul = getRasterCoordinate(hTransform, geotransform, 0.0, 0.0);
@@ -390,18 +382,11 @@ namespace ddb
                                 auto center = getRasterCoordinate(hTransform, geotransform, width / 2.0, height / 2.0);
                                 LOGV << "Center point: " << center.longitude << ", " << center.latitude;
                                 entry.point_geom.addPoint(center.longitude, center.latitude, 0.0);
-
-                                OCTDestroyCoordinateTransformation(hTransform);
-                                LOGV << "Destroyed coordinate transformation";
                             }
                             else
                             {
                                 LOGV << "Failed to create coordinate transformation";
                             }
-
-                            OSRDestroySpatialReference(hWgs84);
-                            OSRDestroySpatialReference(hSrs);
-                            LOGV << "Cleaned up spatial reference objects";
                         }
                         else
                         {
@@ -450,7 +435,7 @@ namespace ddb
                 }
 
                 LOGV << "Closing GDAL dataset";
-                GDALClose(hDataset);
+                dataset.reset();
                 LOGV << "GeoRaster processing completed successfully";
             }
             else if (entry.type == EntryType::PointCloud)

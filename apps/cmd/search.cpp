@@ -52,7 +52,7 @@ namespace cmd
 		catch (ddb::InvalidArgsException &e)
 		{
 			std::cerr << "Error: " << e.what() << std::endl;
-			printHelp();
+			usageError();
 		}
 	}
 

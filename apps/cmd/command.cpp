@@ -49,8 +49,13 @@ namespace cmd
         {
             std::cerr << "error: " << e.what() << std::endl
                       << std::endl;
-            printHelp(std::cerr, false);
-            exit(EXIT_FAILURE);
+            usageError();
+        }
+        catch (const ddb::InvalidArgsException &e)
+        {
+            std::cerr << e.what() << std::endl
+                      << std::endl;
+            usageError();
         }
         catch (const ddb::AppException &e)
         {
@@ -64,6 +69,12 @@ namespace cmd
         out << genOptions().help({""});
         if (exitAfterPrint)
             exit(0);
+    }
+
+    void Command::usageError()
+    {
+        printHelp(std::cerr, false);
+        exit(EXIT_FAILURE);
     }
 
     void Command::output(std::ostream &out, const json &j, const std::string &format)

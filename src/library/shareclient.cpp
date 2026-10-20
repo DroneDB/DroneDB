@@ -15,8 +15,6 @@
 namespace ddb
 {
 
-    const int MAX_RETRIES = 10;
-
     ShareClient::ShareClient(ddb::Registry *registry) : registry(registry)
     {
     }
@@ -63,48 +61,29 @@ namespace ddb
 
         LOGD << "Uploading " << p.string();
 
-        int retryNum = 0;
+        // No retry loop here: the old one retried NetException only, which nothing on this
+        // path throws (handleError raises AuthException/RegistryException and cpr transport
+        // errors are not converted), so it never ran. Retries for transport errors, 5xx and
+        // 429 belong in the RegistryClient + RetryPolicy seam (DQ-11).
+        this->registry->ensureTokenValidity();
 
-        while (true)
-        {
-            try
-            {
-                this->registry->ensureTokenValidity();
+        auto res = cpr::Post(cpr::Url(this->registry->getUrl("/share/upload/" + this->token)),
+                             utils::authHeader(this->registry->getAuthToken()),
+                             cpr::Multipart{{cpr::Part("file", cpr::File(filePath.string())), cpr::Part("path", path)}},
+                             cpr::Timeout{10000},
+                             cpr::ProgressCallback([&cb, &filename](size_t, size_t, size_t uploadTotal, size_t uploadNow, intptr_t) -> bool
+                                                   {
+                if (cb == nullptr) return true;
+                return cb(filename, uploadNow, uploadTotal); }),
+                             cpr::VerifySsl(this->registry->getSslVerify()));
 
-                auto res = cpr::Post(cpr::Url(this->registry->getUrl("/share/upload/" + this->token)),
-                                     utils::authHeader(this->registry->getAuthToken()),
-                                     cpr::Multipart{{cpr::Part("file", cpr::File(filePath.string())), cpr::Part("path", path)}},
-                                     cpr::Timeout{10000},
-                                     cpr::ProgressCallback([&cb, &filename](size_t, size_t, size_t uploadTotal, size_t uploadNow, intptr_t) -> bool
-                                                           {
-                        if (cb == nullptr) return true;
-                        return cb(filename, uploadNow, uploadTotal); }),
-                                     cpr::VerifySsl(this->registry->getSslVerify()));
+        if (res.status_code != 200)
+            this->registry->handleError(res);
 
+        json j = json::parse(res.text);
 
-                if (res.status_code != 200)
-                    this->registry->handleError(res);
-
-                json j = json::parse(res.text);
-
-                if (!j.contains("hash"))
-                    this->registry->handleError(res);
-
-                break; // Done
-            }
-            // TODO: We should handle retries differently
-            catch (const NetException &e)
-            {
-                if (std::string(e.what()).find("Callback aborted") != std::string::npos)
-                    throw;
-                if (++retryNum >= MAX_RETRIES)
-                    throw;
-
-                LOGD << e.what() << ", retrying upload of " << filename
-                     << " (attempt " << retryNum << ")";
-                utils::sleep(1000 * retryNum);
-            }
-        }
+        if (!j.contains("hash"))
+            this->registry->handleError(res);
     }
 
     std::string ShareClient::Commit()
@@ -112,38 +91,23 @@ namespace ddb
         if (token.empty())
             throw InvalidArgsException("Missing token, call Init first");
 
-        // Commit
-        int retryNum = 0;
-        while (true)
-        {
-            try
-            {
-                this->registry->ensureTokenValidity();
+        // No retry loop: see Upload (DQ-11)
+        this->registry->ensureTokenValidity();
 
-                auto res = cpr::Post(cpr::Url(this->registry->getUrl("/share/commit/" + this->token)),
-                                     utils::authHeader(this->registry->getAuthToken()),
-                                     cpr::VerifySsl(this->registry->getSslVerify()));
+        auto res = cpr::Post(cpr::Url(this->registry->getUrl("/share/commit/" + this->token)),
+                             utils::authHeader(this->registry->getAuthToken()),
+                             cpr::VerifySsl(this->registry->getSslVerify()));
 
-                if (res.status_code != 200)
-                    this->registry->handleError(res);
+        if (res.status_code != 200)
+            this->registry->handleError(res);
 
-                json j = json::parse(res.text);
-                if (!j.contains("url"))
-                    this->registry->handleError(res);
+        json j = json::parse(res.text);
+        if (!j.contains("url"))
+            this->registry->handleError(res);
 
-                this->resultUrl = this->registry->getUrl(j["url"]);
+        this->resultUrl = this->registry->getUrl(j["url"]);
 
-                return std::string(this->resultUrl); // Done
-            }
-            // TODO: Retries need to be handled differently
-            catch (const NetException &e)
-            {
-                if (++retryNum >= MAX_RETRIES)
-                    throw;
-                LOGD << e.what() << ", retrying commit (attempt " << retryNum << ")";
-                utils::sleep(1000 * retryNum);
-            }
-        }
+        return std::string(this->resultUrl);
     }
 
     std::string ShareClient::getToken() const { return std::string(this->token); }

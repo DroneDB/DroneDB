@@ -49,7 +49,7 @@ namespace cmd
         {
             if (opts["target"].count() != 1)
             {
-                printHelp();
+                usageError();
                 return;
             }
 
@@ -69,7 +69,7 @@ namespace cmd
         catch (ddb::InvalidArgsException &e)
         {
             std::cerr << "Error: " << e.what() << std::endl;
-            printHelp();
+            usageError();
         }
     }
 

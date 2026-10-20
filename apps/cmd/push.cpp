@@ -39,22 +39,11 @@ namespace cmd
 
     void Push::run(cxxopts::ParseResult &opts)
     {
-        try
-        {
-            const auto remote = opts["remote"].as<std::string>();
-            auto sslVerify = opts["insecure"].count() == 0;
+        // Errors reach Command::run: stderr and a non-zero exit (invalid args also print usage)
+        const auto remote = opts["remote"].as<std::string>();
+        auto sslVerify = opts["insecure"].count() == 0;
 
-            ddb::push(remote, sslVerify);
-        }
-        catch (ddb::IndexException &e)
-        {
-            std::cout << e.what() << std::endl;
-        }
-        catch (ddb::InvalidArgsException &ex)
-        {
-            std::cout << ex.what() << std::endl;
-            printHelp();
-        }
+        ddb::push(remote, sslVerify);
     }
 
 } // namespace cmd

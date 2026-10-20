@@ -87,6 +87,32 @@ if(BUILD_TESTING)
         )
     endif()
 
+    # CLI exit codes (DQ-02): usage errors and failed commands must exit non-zero,
+    # an explicit help request exits 0.
+    set(DDB_CLI_EMPTY_DIR "${CMAKE_CURRENT_BINARY_DIR}/cli_not_a_dataset")
+    file(MAKE_DIRECTORY "${DDB_CLI_EMPTY_DIR}")
+    add_test(NAME cli.UnknownCommandFails COMMAND $<TARGET_FILE:${PROJECT_NAME}cmd> nosuchcommand)
+    add_test(NAME cli.PushOutsideDatasetFails COMMAND $<TARGET_FILE:${PROJECT_NAME}cmd> push
+        WORKING_DIRECTORY "${DDB_CLI_EMPTY_DIR}")
+    add_test(NAME cli.InvalidArgsFail COMMAND $<TARGET_FILE:${PROJECT_NAME}cmd> cog)
+    # push/pull in a dataset without a remote tag used to print the error on stdout and exit 0
+    set(DDB_CLI_DATASET_DIR "${CMAKE_CURRENT_BINARY_DIR}/cli_untagged_dataset")
+    file(MAKE_DIRECTORY "${DDB_CLI_DATASET_DIR}")
+    add_test(NAME cli.setup.CleanDataset COMMAND ${CMAKE_COMMAND} -E rm -rf "${DDB_CLI_DATASET_DIR}/.ddb")
+    add_test(NAME cli.setup.InitDataset COMMAND $<TARGET_FILE:${PROJECT_NAME}cmd> init "${DDB_CLI_DATASET_DIR}")
+    set_tests_properties(cli.setup.CleanDataset PROPERTIES FIXTURES_SETUP cli_clean)
+    set_tests_properties(cli.setup.InitDataset PROPERTIES FIXTURES_REQUIRED cli_clean FIXTURES_SETUP cli_dataset)
+    add_test(NAME cli.PushWithoutTagFails COMMAND $<TARGET_FILE:${PROJECT_NAME}cmd> push
+        WORKING_DIRECTORY "${DDB_CLI_DATASET_DIR}")
+    add_test(NAME cli.PullWithoutTagFails COMMAND $<TARGET_FILE:${PROJECT_NAME}cmd> pull
+        WORKING_DIRECTORY "${DDB_CLI_DATASET_DIR}")
+    set_tests_properties(cli.PushWithoutTagFails cli.PullWithoutTagFails PROPERTIES FIXTURES_REQUIRED cli_dataset)
+    set_tests_properties(cli.UnknownCommandFails cli.PushOutsideDatasetFails cli.InvalidArgsFail
+        cli.PushWithoutTagFails cli.PullWithoutTagFails
+        PROPERTIES WILL_FAIL TRUE)
+    add_test(NAME cli.HelpSucceeds COMMAND $<TARGET_FILE:${PROJECT_NAME}cmd> --help)
+    add_test(NAME cli.CommandHelpSucceeds COMMAND $<TARGET_FILE:${PROJECT_NAME}cmd> cog --help)
+
     include(GoogleTest)
     gtest_discover_tests(ddbtest
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}

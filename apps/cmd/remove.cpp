@@ -34,7 +34,7 @@ namespace cmd
     {
         if (!opts.count("paths"))
         {
-            printHelp();
+            usageError();
         }
 
         const auto ddbPath = opts["working-dir"].as<std::string>();

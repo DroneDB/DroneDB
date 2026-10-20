@@ -14,24 +14,11 @@
 
 #pragma clang diagnostic ignored "-Wdisabled-macro-expansion"
 
-DSMService *DSMService::instance = nullptr;
-
 DSMService *DSMService::get()
 {
-    if (!instance)
-    {
-        instance = new DSMService();
-        // Register cleanup at program exit
-        std::atexit(cleanup);
-    }
-
-    return instance;
-}
-
-void DSMService::cleanup()
-{
-    delete instance;
-    instance = nullptr;
+    // Thread-safe initialization; destroyed at exit like the former atexit cleanup
+    static DSMService instance;
+    return &instance;
 }
 
 DSMService::DSMService()
@@ -42,11 +29,11 @@ DSMService::~DSMService()
 {
 }
 
-float DSMService::getAltitude(double latitude, double longitude)
+std::optional<float> DSMService::lookupCache(double latitude, double longitude)
 {
-    Point2D point(longitude, latitude);
+    const Point2D point(longitude, latitude);
+    std::lock_guard<std::mutex> lock(cacheMutex);
 
-    // Search cache
     for (auto &it : cache)
     {
         if (it.second.bbox.contains(point))
@@ -62,10 +49,25 @@ float DSMService::getAltitude(double latitude, double longitude)
             else
             {
                 LOGD << "DSM does not have a value for " << point;
-                return 0.0;
+                return 0.0f;
             }
         }
     }
+
+    return std::nullopt;
+}
+
+bool DSMService::isCached(const std::string &filename)
+{
+    std::lock_guard<std::mutex> lock(cacheMutex);
+    return cache.find(filename) != cache.end();
+}
+
+float DSMService::getAltitude(double latitude, double longitude)
+{
+    // Search cache
+    if (const auto elevation = lookupCache(latitude, longitude))
+        return *elevation;
 
     // TODO: we can probably optimize this
     // to lock based on the bounding box of the point
@@ -104,7 +106,7 @@ bool DSMService::loadDiskCache(double latitude, double longitude)
 
         // Not found in cache?
         std::string filename = entry.path().filename().string();
-        if (cache.find(filename) == cache.end())
+        if (!isCached(filename))
         {
             LOGD << "Adding " << entry.path().string() << " to DSM service cache";
             try
@@ -118,6 +120,7 @@ bool DSMService::loadDiskCache(double latitude, double longitude)
             {
                 LOGD << "Deleting " << entry.path().string() << " because we can't open it";
                 fs::remove(entry.path());
+                std::lock_guard<std::mutex> lock(cacheMutex);
                 cache.erase(filename);
             }
         }
@@ -200,9 +203,11 @@ std::string DSMService::loadFromNetwork(double latitude, double longitude)
 
 bool DSMService::addGeoTIFFToCache(const fs::path &filePath, double latitude, double longitude)
 {
-    GDALDatasetH hDataset = GDALOpen(filePath.string().c_str(), GA_ReadOnly);
-    if (hDataset == nullptr)
+    // Owned: the checks below throw while the dataset is open
+    GDALDatasetUniquePtr dataset(GDALDataset::FromHandle(GDALOpen(filePath.string().c_str(), GA_ReadOnly)));
+    if (!dataset)
         throw GDALException("Cannot open " + filePath.string());
+    GDALDatasetH hDataset = GDALDataset::ToHandle(dataset.get());
 
     DSMCacheEntry e;
     e.width = static_cast<unsigned int>(GDALGetRasterXSize(hDataset));
@@ -248,11 +253,10 @@ bool DSMService::addGeoTIFFToCache(const fs::path &filePath, double latitude, do
 
     // Always cache the entry (at least with bbox) to avoid
     // repeated GDALOpen calls for files outside query bounds
-    cache[filePath.filename().string()] = e;
-
-    GDALClose(hDataset);
-    // delete srs;
-    // delete compare;
+    {
+        std::lock_guard<std::mutex> lock(cacheMutex);
+        cache[filePath.filename().string()] = std::move(e);
+    }
 
     return contained;
 }

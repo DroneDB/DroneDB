@@ -63,7 +63,7 @@ namespace cmd
             extensions = ddb::utils::parseExtensionList(extensionsStr.c_str());
         } catch (const ddb::InvalidArgsException& e) {
             std::cerr << e.what() << std::endl;
-            printHelp();
+            usageError();
             return;
         }
 

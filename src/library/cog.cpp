@@ -106,25 +106,23 @@ namespace ddb
         // Normal rebuild process for files that need optimization
         LOGD << "Building COG from " << inputGTiff << " (requires optimization)";
 
-        GDALDatasetH hSrcDataset = GDALOpen(inputGTiff.c_str(), GA_ReadOnly);
+        // Owned: the budget, the option list and GDALWarpAppOptionsNew below can throw
+        GDALDatasetUniquePtr srcDataset(GDALDataset::FromHandle(GDALOpen(inputGTiff.c_str(), GA_ReadOnly)));
 
-        if (!hSrcDataset)
+        if (!srcDataset)
             throw GDALException("Cannot open " + inputGTiff + " for reading");
+        GDALDatasetH hSrcDataset = GDALDataset::ToHandle(srcDataset.get());
 
         // Check that the source has a valid CRS
         const char* srcProjRef = GDALGetProjectionRef(hSrcDataset);
-        if (!srcProjRef || strlen(srcProjRef) == 0) {
-            GDALClose(hSrcDataset);
+        if (!srcProjRef || strlen(srcProjRef) == 0)
             throw GDALException("Cannot build COG: input file has no coordinate reference system: " + inputGTiff);
-        }
 
         // Detect and preserve nodata from source
         int hasNoData;
         GDALRasterBandH hSrcBand1 = GDALGetRasterBand(hSrcDataset, 1);
-        if (!hSrcBand1) {
-            GDALClose(hSrcDataset);
+        if (!hSrcBand1)
             throw GDALException("Cannot read band 1 from " + inputGTiff);
-        }
         double srcNoData = GDALGetRasterNoDataValue(hSrcBand1, &hasNoData);
 
         // Some GDAL versions / code paths may fail to preserve a standalone
@@ -301,7 +299,6 @@ namespace ddb
         GDALWarpAppOptionsFree(psOptions);
 
         if (!hNewDataset) {
-            GDALClose(hSrcDataset);
             if (warpSystemError == ENOSPC)
                 throw RetryableBuildException("GDALWarp ran out of space creating COG: " + outputCog,
                                               RetryableBuildReason::NoSpaceOnDevice);
@@ -312,7 +309,7 @@ namespace ddb
         GDALClose(hNewDataset);
         const int closeSystemError = errno;
         const bool closeFailed = CPLGetLastErrorType() >= CE_Failure;
-        GDALClose(hSrcDataset);
+        srcDataset.reset();
         if (closeFailed) {
             if (closeSystemError == ENOSPC)
                 throw RetryableBuildException("COG close ran out of space: " + outputCog,

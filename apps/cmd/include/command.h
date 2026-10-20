@@ -30,7 +30,10 @@ namespace cmd
         void run(int argc, char *argv[]);
         virtual std::string description() { return ""; }
         virtual std::string extendedDescription() { return ""; }
+        // Explicit help request: usage on stdout, exit 0
         void printHelp(std::ostream &out = std::cout, bool exitAfterPrint = true);
+        // Missing or invalid arguments: usage on stderr, exit EXIT_FAILURE
+        [[noreturn]] void usageError();
     };
 
 }

@@ -25,7 +25,7 @@
 #include <proj.h>
 
 #include <pdal/pdal_features.hpp>
-#include <random>
+#include "randomutil.h"
 #include <sstream>
 
 #include "entry_types.h"
@@ -133,14 +133,11 @@ const char* charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUWXYZ012345
 
 // https://stackoverflow.com/a/50556436
 DDB_DLL std::string generateRandomString(int length) {
-    std::random_device rd;
-    std::mt19937 generator(rd());
     const int len = static_cast<int>(strlen(charset));
-    std::uniform_int_distribution<int> distribution{0, len - 1};
 
     std::string str(length, '\0');
     for (auto& dis : str)
-        dis = charset[distribution(generator)];
+        dis = charset[randomInt(0, len - 1)];
 
     return str;
 }

@@ -77,8 +77,9 @@ namespace ddb
             Point lr = e.polygon_geom.getPoint(2);
             Point ur = e.polygon_geom.getPoint(3);
 
-            GDALDatasetH hSrcDataset = GDALOpen(p.string().c_str(), GA_ReadOnly);
-            if (!hSrcDataset)
+            // Owned: the outsize parsing below throws InvalidArgsException after the open
+            GDALDatasetUniquePtr srcDataset(GDALDataset::FromHandle(GDALOpen(p.string().c_str(), GA_ReadOnly)));
+            if (!srcDataset)
             {
                 if (stopOnError)
                     throw FSException("Cannot project " + p.string() + ", cannot open raster");
@@ -87,9 +88,12 @@ namespace ddb
                 continue;
             }
 
-            char **targs = nullptr;
-            targs = CSLAddString(targs, "-a_srs");
-            targs = CSLAddString(targs, "EPSG:4326");
+            // The intermediate (GCPs + SRS) stays in a MEM dataset: no /vsimem file to name or unlink
+            CPLStringList targs;
+            targs.AddString("-of");
+            targs.AddString("MEM");
+            targs.AddString("-a_srs");
+            targs.AddString("EPSG:4326");
 
             int scaledWidth = width;
             int scaledHeight = height;
@@ -98,11 +102,12 @@ namespace ddb
             {
                 double ratio = 1.0;
 
-                targs = CSLAddString(targs, "-outsize");                targs = CSLAddString(targs, outsize.c_str());
+                targs.AddString("-outsize");
+                targs.AddString(outsize.c_str());
                 try {
                     if (outsize.back() == '%')
                     {
-                        targs = CSLAddString(targs, outsize.c_str());
+                        targs.AddString(outsize.c_str());
 
                         // Validate percentage format before conversion
                         std::string percentValue = outsize.substr(0, outsize.length() - 1);
@@ -128,7 +133,7 @@ namespace ddb
                             throw InvalidArgsException("Size must be positive: " + outsize);
 
                         ratio = value / width;
-                        targs = CSLAddString(targs, utils::toStr(ratio * height).c_str());
+                        targs.AddString(utils::toStr(ratio * height).c_str());
                     }
                 } catch (const std::invalid_argument& e) {
                     throw InvalidArgsException("Invalid size format: " + outsize);
@@ -143,40 +148,39 @@ namespace ddb
                 LOGD << "Scaled height: " << scaledHeight;
             }
 
-            targs = CSLAddString(targs, "-gcp");
-            targs = CSLAddString(targs, "0");
-            targs = CSLAddString(targs, "0");
-            targs = CSLAddString(targs, utils::toStr(ul.x, 13).c_str());
-            targs = CSLAddString(targs, utils::toStr(ul.y, 13).c_str());
+            targs.AddString("-gcp");
+            targs.AddString("0");
+            targs.AddString("0");
+            targs.AddString(utils::toStr(ul.x, 13).c_str());
+            targs.AddString(utils::toStr(ul.y, 13).c_str());
 
-            targs = CSLAddString(targs, "-gcp");
-            targs = CSLAddString(targs, "0");
-            targs = CSLAddString(targs, std::to_string(scaledHeight).c_str());
-            targs = CSLAddString(targs, utils::toStr(ll.x, 13).c_str());
-            targs = CSLAddString(targs, utils::toStr(ll.y, 13).c_str());
+            targs.AddString("-gcp");
+            targs.AddString("0");
+            targs.AddString(std::to_string(scaledHeight).c_str());
+            targs.AddString(utils::toStr(ll.x, 13).c_str());
+            targs.AddString(utils::toStr(ll.y, 13).c_str());
 
-            targs = CSLAddString(targs, "-gcp");
-            targs = CSLAddString(targs, std::to_string(scaledWidth).c_str());
-            targs = CSLAddString(targs, std::to_string(scaledHeight).c_str());
-            targs = CSLAddString(targs, utils::toStr(lr.x, 13).c_str());
-            targs = CSLAddString(targs, utils::toStr(lr.y, 13).c_str());
+            targs.AddString("-gcp");
+            targs.AddString(std::to_string(scaledWidth).c_str());
+            targs.AddString(std::to_string(scaledHeight).c_str());
+            targs.AddString(utils::toStr(lr.x, 13).c_str());
+            targs.AddString(utils::toStr(lr.y, 13).c_str());
 
-            targs = CSLAddString(targs, "-gcp");
-            targs = CSLAddString(targs, std::to_string(scaledWidth).c_str());
-            targs = CSLAddString(targs, "0");
-            targs = CSLAddString(targs, utils::toStr(ur.x, 13).c_str());
-            targs = CSLAddString(targs, utils::toStr(ur.y, 13).c_str());
+            targs.AddString("-gcp");
+            targs.AddString(std::to_string(scaledWidth).c_str());
+            targs.AddString("0");
+            targs.AddString(utils::toStr(ur.x, 13).c_str());
+            targs.AddString(utils::toStr(ur.y, 13).c_str());
 
-            GDALTranslateOptions *psOptions = GDALTranslateOptionsNew(targs, nullptr);
-            CSLDestroy(targs);
+            GDALTranslateOptions *psOptions = GDALTranslateOptionsNew(targs.List(), nullptr);
+            if (!psOptions)
+                throw GDALException("Cannot geoproject " + p.string() + ": invalid translate options");
 
-            std::string vsiFilename = "/vsimem/";
-            vsiFilename += p.filename().string() + "-" + std::to_string(rand()) + ".tif";
-            GDALDatasetH hDstDataset = GDALTranslate(vsiFilename.c_str(),
-                                                     hSrcDataset,
-                                                     psOptions,
-                                                     nullptr);
+            GDALDatasetUniquePtr dstDataset(GDALDataset::FromHandle(
+                GDALTranslate("", GDALDataset::ToHandle(srcDataset.get()), psOptions, nullptr)));
             GDALTranslateOptionsFree(psOptions);
+            if (!dstDataset)
+                throw GDALException("Cannot geoproject " + p.string() + ": " + CPLGetLastErrorMsg());
 
             // Run gdalwarp to add trasparency, apply GCPs
             char **wargs = nullptr;
@@ -187,7 +191,10 @@ namespace ddb
             wargs = CSLAddString(wargs, "-dstalpha");
             GDALWarpAppOptions *waOptions = GDALWarpAppOptionsNew(wargs, nullptr);
             CSLDestroy(wargs);
+            if (!waOptions)
+                throw GDALException("Cannot geoproject " + p.string() + ": invalid warp options");
 
+            GDALDatasetH hDstDataset = GDALDataset::ToHandle(dstDataset.get());
             GDALDatasetH hWrpDataset = GDALWarp(tmpOutFile.c_str(),
                                                 nullptr,
                                                 1,
@@ -196,8 +203,8 @@ namespace ddb
                                                 nullptr);
             GDALWarpAppOptionsFree(waOptions);
 
-            GDALClose(hSrcDataset);
-            GDALClose(hDstDataset);
+            srcDataset.reset();
+            dstDataset.reset();
 
             // Check before flush/close: GDALFlushCache(nullptr) logs a misleading
             // "NULL pointer" error that clobbers the real warp failure message

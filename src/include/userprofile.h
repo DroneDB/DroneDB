@@ -37,8 +37,6 @@ namespace ddb
 
         void createDir(const fs::path &p);
 
-        static UserProfile *instance;
-
         AuthManager *authManager;
     };
 
