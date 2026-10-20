@@ -41,7 +41,7 @@ endif()
 # laz-perf (Apache 2.0), the LAZ codec vendored with Untwine. PDAL keeps its own copy
 # private, so libddb links this one to decompress COPC nodes itself (DDB-06: decoded
 # nodes are cached across point-cloud tiles). Symbols stay hidden inside libddb.
-file(GLOB LAZPERF_SOURCES
+file(GLOB LAZPERF_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/untwine/lazperf/*.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/untwine/lazperf/detail/*.cpp"
 )

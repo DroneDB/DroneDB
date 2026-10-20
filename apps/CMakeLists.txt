@@ -7,8 +7,9 @@ add_subdirectory(cmd)
 add_executable(${PROJECT_NAME}cmd main.cpp crash_handlers.cpp
     ${CMAKE_SOURCE_DIR}/vendor/segvcatch/segvcatch.cpp ${CMD_SRC_LIST})
 
-# Link the static library version
-target_link_libraries(${PROJECT_NAME}cmd PRIVATE ${PROJECT_NAME})
+# cxxopts parses the command line; only the CLI uses it, libddb does not
+find_package(cxxopts CONFIG REQUIRED)
+target_link_libraries(${PROJECT_NAME}cmd PRIVATE ${PROJECT_NAME} cxxopts::cxxopts)
 
 message(STATUS "DDB: CUSTOM_INCLUDE_DIRS: ${CUSTOM_INCLUDE_DIRS}")
 

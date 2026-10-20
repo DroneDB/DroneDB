@@ -12,7 +12,7 @@ if(BUILD_TESTING)
     find_package(plog CONFIG REQUIRED)
     find_package(unofficial-sqlite3 CONFIG REQUIRED)
 
-    file(GLOB TEST_SOURCES "*.cpp")
+    file(GLOB TEST_SOURCES CONFIGURE_DEPENDS "*.cpp")
 
     # Keep the child helper's main outside TEST_SOURCES. Lifecycle and crash-lock
     # tests use the same executable on Windows and Linux.

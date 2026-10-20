@@ -27,7 +27,6 @@ find_package(GeoTIFF CONFIG REQUIRED)
 find_package(LibZip CONFIG REQUIRED)
 find_package(plog CONFIG REQUIRED)
 find_package(cpr CONFIG REQUIRED)
-find_package(cxxopts CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED)
 find_package(unofficial-sqlite3 CONFIG REQUIRED)
 find_package(SpatiaLite REQUIRED)
@@ -54,7 +53,6 @@ set(COMMON_LIBS
     plog::plog
     cpr::cpr
     nlohmann_json::nlohmann_json
-    cxxopts::cxxopts
     OpenSSL::Crypto
     unofficial::sqlite3::sqlite3
     spatialite::spatialite
@@ -90,9 +88,6 @@ target_include_directories(${PROJECT_NAME} PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
 )
-
-# Include paths
-find_path(BOOLINQ_INCLUDE_DIRS "boolinq/boolinq.h")
 
 set (CUSTOM_INCLUDE_DIRS
         ${BOOLINQ_INCLUDE_DIRS}
