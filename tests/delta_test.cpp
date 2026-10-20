@@ -254,10 +254,15 @@ namespace
             root = ta.getFolder("ds");
             initIndex(root.string());
             fs::create_directories(root / "dir");
-            // Names that need escaping in JSON
+            // Names that need escaping in JSON (Windows forbids quotes and control
+            // characters in file names)
             for (const auto &[rel, content] : std::vector<std::pair<std::string, std::string>>{
-                     {"a.txt", "alpha"}, {"dir/b \"quoted\".txt", "bravo"},
-                     {"dir/tab\tname.txt", "d"}, {"dir/ünïcödé.txt", "e"}})
+                     {"a.txt", "alpha"},
+#ifndef _WIN32
+                     {"dir/b \"quoted\".txt", "bravo"},
+                     {"dir/tab\tname.txt", "d"},
+#endif
+                     {"dir/ünïcödé.txt", "e"}})
             {
                 std::ofstream f(root / rel);
                 f << content;
@@ -273,7 +278,11 @@ namespace
     {
         StampFixture f(TEST_NAME);
         const auto stamp = f.db->getStamp();
+#ifdef _WIN32
+        ASSERT_EQ(stamp["entries"].size(), 3u);
+#else
         ASSERT_EQ(stamp["entries"].size(), 5u);
+#endif
         ASSERT_EQ(stamp["meta"].size(), 2u);
 
         EXPECT_EQ(f.db->getStampJson(), stamp.dump());

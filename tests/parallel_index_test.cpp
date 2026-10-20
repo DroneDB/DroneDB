@@ -17,6 +17,7 @@
 #include <unistd.h>
 #endif
 
+#include "databasepool.h"
 #include "dbops.h"
 #include "ddb.h"
 #include "exceptions.h"
@@ -212,6 +213,8 @@ namespace
     IndexRun indexWith(const fs::path &root, const char *threads)
     {
         ScopedConfigOption opt("DDB_INDEX_THREADS", threads);
+        // The previous run left its connection idle: Windows cannot delete an open file
+        DatabasePool::instance().releaseConnections(root);
         io::assureIsRemoved(root / DDB_FOLDER);
         initIndex(root.string());
         auto db = ddb::open(root.string(), true);
