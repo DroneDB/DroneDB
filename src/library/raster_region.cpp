@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cmath>
 #include <cstring>
@@ -22,6 +23,7 @@
 #include "tile_encoder.h"
 #include "exceptions.h"
 #include "logger.h"
+#include "parallel.h"
 #include "utils.h"
 #include "json.h"
 
@@ -67,6 +69,62 @@ namespace ddb
             default:
                 return {"PNG", "png", true, false, opts};
             }
+        }
+
+        // Renders running in this process
+        std::atomic<int> rendersInFlight{0};
+
+        struct RenderInFlight
+        {
+            const int count;
+            RenderInFlight() : count(++rendersInFlight) {}
+            ~RenderInFlight() { --rendersInFlight; }
+        };
+
+        // Warper threads of a render (DDB_RENDER_THREADS, default 4; 0 = every core).
+        // gdalwarp's -multi only overlaps reading with warping: the bilinear warp of a
+        // 1024x768 map takes 150 ms on one thread and 60 ms on four. Only a render that
+        // runs alone gets them: under load every render already has a core, and more
+        // threads only contend (8 at once: 31 renders/s on one thread each, 22/s on four).
+        std::vector<std::string> warpThreadArgs(const RenderInFlight &render)
+        {
+            static const int configured = parallel::threadsOption("DDB_RENDER_THREADS", 4);
+            const std::string threads = render.count > 1 ? std::string("1")
+                                        : configured == 0 ? std::string("ALL_CPUS")
+                                                          : std::to_string(configured);
+            return {"-wo", "NUM_THREADS=" + threads};
+        }
+
+        // Encodes ds in the output format into a buffer allocated by GDAL (VSIFree)
+        void encodeDataset(GDALDatasetH ds, const FormatInfo &fi, uint8_t **outBytes, int *outSize,
+                           const std::string &label)
+        {
+            GDALDriverH driver = GDALGetDriverByName(fi.driver);
+            if (!driver)
+                throw GDALException(std::string("Driver not available: ") + fi.driver);
+
+            const std::string vsiPath = "/vsimem/ddb-render-" + utils::generateRandomString(16) + "." + fi.vsiExt;
+            char **createOpts = nullptr;
+            for (const auto &co : fi.creationOptions)
+                createOpts = CSLAddString(createOpts, co.c_str());
+            GDALDatasetH hOut = GDALCreateCopy(driver, vsiPath.c_str(), ds, FALSE, createOpts, nullptr, nullptr);
+            CSLDestroy(createOpts);
+            if (!hOut)
+            {
+                VSIUnlink(vsiPath.c_str());
+                throw GDALException("Cannot encode the render of " + label);
+            }
+            GDALClose(hOut);
+
+            vsi_l_offset size = 0;
+            GByte *buf = VSIGetMemFileBuffer(vsiPath.c_str(), &size, TRUE /*unlink+steal*/);
+            if (!buf || size == 0)
+            {
+                if (buf) VSIFree(buf);
+                throw GDALException("Empty render output for " + label);
+            }
+            *outBytes = reinterpret_cast<uint8_t *>(buf);
+            *outSize = static_cast<int>(size);
         }
 
         std::string fmtDouble(double v) {
@@ -131,13 +189,17 @@ namespace ddb
             }
         }
 
+        // PNG, JPEG and WebP can only be written by CreateCopy: gdalwarp would then pull
+        // the warp block by block on one thread. Warp into memory with the warper's
+        // threads and encode the result instead.
+        const bool directOutput = std::string(fi.driver) == "GTiff";
         const std::string vsiPath =
             "/vsimem/ddb-render-" + utils::generateRandomString(16) +
             "." + fi.vsiExt;
 
         // Build GDALWarp options
         std::vector<std::string> argStore;
-        argStore.emplace_back("-of");       argStore.emplace_back(fi.driver);
+        argStore.emplace_back("-of");       argStore.emplace_back(directOutput ? fi.driver : "MEM");
         argStore.emplace_back("-t_srs");    argStore.emplace_back(tSrs);
         argStore.emplace_back("-te");
         argStore.emplace_back(fmtDouble(bbox[0]));
@@ -150,9 +212,14 @@ namespace ddb
         argStore.emplace_back(std::to_string(height));
         argStore.emplace_back("-r");        argStore.emplace_back("bilinear");
         argStore.emplace_back("-multi");
-        for (const auto &co : fi.creationOptions) {
-            argStore.emplace_back("-co");
-            argStore.emplace_back(co);
+        const RenderInFlight inFlight;
+        for (const auto &arg : warpThreadArgs(inFlight))
+            argStore.push_back(arg);
+        if (directOutput) {
+            for (const auto &co : fi.creationOptions) {
+                argStore.emplace_back("-co");
+                argStore.emplace_back(co);
+            }
         }
         for (int b : bands) {
             argStore.emplace_back("-b");
@@ -186,13 +253,24 @@ namespace ddb
             throw GDALException("Cannot build GDALWarp options");
 
         int usageErr = 0;
-        GDALDatasetH hOut = GDALWarp(vsiPath.c_str(), nullptr, 1, &hSrc, opts, &usageErr);
+        GDALDatasetH hOut = GDALWarp(directOutput ? vsiPath.c_str() : "", nullptr, 1, &hSrc, opts, &usageErr);
         GDALWarpAppOptionsFree(opts);
 
         if (!hOut || usageErr) {
             if (hOut) GDALClose(hOut);
             VSIUnlink(vsiPath.c_str());
             throw GDALException("GDALWarp failed for " + inputPath);
+        }
+
+        if (!directOutput) {
+            try {
+                encodeDataset(hOut, fi, outBytes, outSize, inputPath);
+            } catch (...) {
+                GDALClose(hOut);
+                throw;
+            }
+            GDALClose(hOut);
+            return;
         }
         GDALClose(hOut);
 
@@ -416,6 +494,9 @@ namespace ddb
             "-r", "bilinear", "-multi",
             "-ot", "Float32"
         };
+        const RenderInFlight inFlight;
+        for (const auto &arg : warpThreadArgs(inFlight))
+            argStore.push_back(arg);
         std::vector<char *> argv;
         argv.reserve(argStore.size() + 1);
         for (auto &s : argStore) argv.push_back(const_cast<char *>(s.c_str()));
@@ -517,8 +598,6 @@ namespace ddb
         // JPEG cannot carry an alpha band, so for that format we composite
         // the RGBA pixels over an opaque white background and emit a 3-band
         // RGB MEM dataset before handing off to CreateCopy.
-        const std::string vsiOut =
-            "/vsimem/ddb-idx-out-" + utils::generateRandomString(16) + "." + fi.vsiExt;
 
         const bool emitAlpha = !fi.jpegCompositing;
         const int outBandCount = emitAlpha ? 4 : 3;
@@ -564,32 +643,13 @@ namespace ddb
                 GDALSetRasterColorInterpretation(GDALGetRasterBand(hRgba, b + 1), ci[b]);
         }
 
-        GDALDriverH hOutDrv = GDALGetDriverByName(fi.driver);
-        if (!hOutDrv) {
+        try {
+            encodeDataset(hRgba, fi, outBytes, outSize, inputPath);
+        } catch (...) {
             GDALClose(hRgba);
-            throw GDALException(std::string("Driver not available: ") + fi.driver);
+            throw;
         }
-        char **createOpts = nullptr;
-        for (const auto &co : fi.creationOptions)
-            createOpts = CSLAddString(createOpts, co.c_str());
-        GDALDatasetH hOut = GDALCreateCopy(hOutDrv, vsiOut.c_str(), hRgba,
-                                           FALSE, createOpts, nullptr, nullptr);
-        CSLDestroy(createOpts);
         GDALClose(hRgba);
-        if (!hOut) {
-            VSIUnlink(vsiOut.c_str());
-            throw GDALException("CreateCopy failed for index render");
-        }
-        GDALClose(hOut);
-
-        vsi_l_offset size = 0;
-        GByte *buf = VSIGetMemFileBuffer(vsiOut.c_str(), &size, TRUE);
-        if (!buf || size == 0) {
-            if (buf) VSIFree(buf);
-            throw GDALException("Empty index render output");
-        }
-        *outBytes = reinterpret_cast<uint8_t *>(buf);
-        *outSize = static_cast<int>(size);
     }
 
 } // namespace ddb
