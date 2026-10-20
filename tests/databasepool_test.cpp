@@ -10,6 +10,11 @@
 #include <fstream>
 #include <thread>
 
+#ifndef _WIN32
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
+
 #include "gtest/gtest.h"
 
 #include "database.h"
@@ -389,4 +394,37 @@ namespace
         EXPECT_GT(after.reused - before.reused, static_cast<uint64_t>(threads * iterations / 2));
         EXPECT_LE(after.idle, 4u);
     }
+#ifndef _WIN32
+    // The pool never closes its connections (they must outlive static destruction), and an
+    // idle connection keeps the index's committed changes in dbase.sqlite-wal. A host that
+    // exited left them there, and a later process that put another database file in place
+    // (a restore, or a test copying a fresh index) had them applied to it: "database disk
+    // image is malformed". At a normal exit the pool now moves the WAL into the file.
+    TEST_F(DDB02_Pool, exitLeavesTheDataInTheDatabaseFile)
+    {
+        const auto root = makeIndex(TEST_NAME);
+        const auto wal = root / ".ddb" / "dbase.sqlite-wal";
+
+        const pid_t child = fork();
+        ASSERT_NE(child, -1);
+        if (child == 0)
+        {
+            addFile(root, "b.txt", "bravo"); // the connection goes back to the pool idle
+            std::exit(0);                     // atexit handlers run, the OS closes the handle
+        }
+        int status = 0;
+        waitpid(child, &status, 0);
+        ASSERT_TRUE(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+
+        EXPECT_TRUE(!fs::exists(wal) || fs::file_size(wal) == 0) << "WAL frames left after the host exited";
+
+        // The database file alone holds both entries
+        TestArea copyArea(std::string(TEST_NAME) + "-copy", true);
+        const auto copy = copyArea.getFolder("ds");
+        fs::create_directories(copy / ".ddb");
+        fs::copy_file(root / ".ddb" / "dbase.sqlite", copy / ".ddb" / "dbase.sqlite");
+        EXPECT_TRUE(has(copy, "a.txt"));
+        EXPECT_TRUE(has(copy, "b.txt"));
+    }
+#endif
 } // namespace

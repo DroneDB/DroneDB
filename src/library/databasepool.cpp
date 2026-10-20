@@ -62,6 +62,22 @@ namespace ddb
         options_.total = envSize("DDB_DB_POOL_MAX", options_.total);
         options_.idleTimeout = std::chrono::seconds(
             envSize("DDB_DB_POOL_IDLE_SECONDS", static_cast<size_t>(options_.idleTimeout.count())));
+
+        // Idle connections keep committed changes in the WAL and are never closed (the pool
+        // outlives static destruction): empty the WAL at exit, so that no host leaves frames
+        // that a later process would apply to a database file put in its place
+        std::atexit([] { DatabasePool::instance().checkpointIdle(); });
+    }
+
+    void DatabasePool::checkpointIdle()
+    {
+        // A thread inside the pool at exit keeps its lock: skip rather than wait forever
+        std::unique_lock<std::mutex> lock(mutex_, std::try_to_lock);
+        if (!lock.owns_lock())
+            return;
+        // SQLite only (no logging): other static objects may be gone by now
+        for (const auto &c : idle_)
+            sqlite3_wal_checkpoint_v2(c.handle, nullptr, SQLITE_CHECKPOINT_TRUNCATE, nullptr, nullptr);
     }
 
     void DatabasePool::configure(const Options &options)

@@ -33,7 +33,10 @@ namespace ddb
      * inode on POSIX). A connection does not checkpoint when it becomes idle: committed
      * changes can stay in the -wal file between calls (until SQLite's automatic checkpoint
      * or the last close), so a copy of the database file alone needs checkpointIndex()
-     * (DDBCheckpoint) first; a copy of the whole .ddb folder carries the WAL with it.
+     * (DDBCheckpoint) first; a copy of the whole .ddb folder carries the WAL with it. The
+     * pool is never destroyed (its connections must not close during static destruction),
+     * so at a normal process exit it checkpoints its idle connections instead: after the
+     * process the database file alone holds the data, as after a last close.
      *
      * Replacing or deleting an index file of this process while its connections are idle
      * requires releaseConnections() first (DDBReleaseConnections in the C API): SQLite does
@@ -86,6 +89,10 @@ namespace ddb
 
         /// Closes all idle connections
         DDB_DLL size_t clear();
+
+        /// Moves the WAL of every idle connection into its database file (TRUNCATE
+        /// checkpoint). Runs at process exit; skipped while another thread holds the pool.
+        DDB_DLL void checkpointIdle();
 
         DDB_DLL Stats stats() const;
 
