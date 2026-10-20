@@ -102,22 +102,15 @@ else()
 endif()
 
 
-set(CURL_CA_BUNDLE ${CMAKE_BINARY_DIR}/curl-ca-bundle.crt)
-
 if (WIN32)
-    set(SYSTEM_TEMP_DIR $ENV{TEMP})
     set(OUTPUT_DIR "${CMAKE_BINARY_DIR}")
     set(SRC_RELEASE_DIR "${CMAKE_BINARY_DIR}/src/$<CONFIG>")
 else()
-    set(SYSTEM_TEMP_DIR /tmp)
     set(OUTPUT_DIR "${CMAKE_BINARY_DIR}")
     set(SRC_RELEASE_DIR "${CMAKE_BINARY_DIR}/src")
 endif()
 
 find_package(Python3 REQUIRED)
-
-find_program(CURL_EXECUTABLE NAMES curl curl.exe REQUIRED)
-message(STATUS "Found curl: ${CURL_EXECUTABLE}")
 
 # Define a custom target to update sensor data using the Python script
 add_custom_target(
@@ -226,40 +219,31 @@ if (WIN32)
 endif()
 
 
-# Create a unique subdirectory in the system temp directory for our files
-set(TEMP_DIR ${SYSTEM_TEMP_DIR}/cmake_curl_temp_${PROJECT_NAME})
-file(MAKE_DIRECTORY ${TEMP_DIR})
-
-# Add custom command to download the file using curl in the temporary directory
-add_custom_command(
-    OUTPUT ${TEMP_DIR}/cacert.pem
-    COMMAND ${CURL_EXECUTABLE} --retry-all-errors --retry 5 --retry-delay 10 --etag-compare ${TEMP_DIR}/etag.txt --etag-save ${TEMP_DIR}/etag.txt --remote-name https://curl.se/ca/cacert.pem
-    COMMENT "Downloading updated CA certificate if modified"
-    WORKING_DIRECTORY ${TEMP_DIR}
-)
-
-# Copy the downloaded file to the binary directory with the desired name
-add_custom_command(
-    OUTPUT ${CURL_CA_BUNDLE}
-    COMMAND ${CMAKE_COMMAND} -E copy ${TEMP_DIR}/cacert.pem ${CURL_CA_BUNDLE}
-    DEPENDS ${TEMP_DIR}/cacert.pem
-    COMMENT "Copying CA certificate to ${CURL_CA_BUNDLE}"
-)
-
-add_custom_target(
-    download_ca_bundle ALL
-    DEPENDS ${CURL_CA_BUNDLE}
-)
-
-# Make sure the library target depends on the CA bundle
-add_dependencies(${PROJECT_NAME} download_ca_bundle)
-
-add_custom_target(
-    clean_temp
-    COMMAND ${CMAKE_COMMAND} -E remove_directory ${TEMP_DIR}
-    COMMENT "Cleaning up temporary directory in system temp folder"
-)
-
-message(STATUS "Build target 'download_ca_bundle' is ready. Temporary files are stored in ${TEMP_DIR}.")
+# CA bundle for libcurl (remote reads in thumbs.cpp and pctiler.cpp, found via getDataPath):
+# Mozilla's roots as published by curl.se, pinned by date and SHA-256 so every build ships the
+# same file. It is fetched at configure time, only when the file is missing or differs.
+# To update: take the newest dated file and its SHA-256 from https://curl.se/docs/caextract.html
+set(DDB_CA_BUNDLE_DATE "2026-10-20")
+set(DDB_CA_BUNDLE_SHA256 "796f1389bfea13c0ed78f663b765baaff54a508e5483786bd6ece73c5e3e3cbe")
+set(CURL_CA_BUNDLE "${CMAKE_BINARY_DIR}/curl-ca-bundle.crt")
+set(_ca_bundle_hash "")
+if(EXISTS "${CURL_CA_BUNDLE}")
+    file(SHA256 "${CURL_CA_BUNDLE}" _ca_bundle_hash)
+endif()
+if(NOT _ca_bundle_hash STREQUAL DDB_CA_BUNDLE_SHA256)
+    set(_ca_bundle_url "https://curl.se/ca/cacert-${DDB_CA_BUNDLE_DATE}.pem")
+    message(STATUS "Downloading CA bundle ${_ca_bundle_url}")
+    # Download next to the target and rename, so a failed download never leaves a bad bundle
+    file(DOWNLOAD "${_ca_bundle_url}" "${CURL_CA_BUNDLE}.download"
+        EXPECTED_HASH SHA256=${DDB_CA_BUNDLE_SHA256}
+        TLS_VERIFY ON
+        STATUS _ca_bundle_status)
+    list(GET _ca_bundle_status 0 _ca_bundle_code)
+    if(NOT _ca_bundle_code EQUAL 0)
+        file(REMOVE "${CURL_CA_BUNDLE}.download")
+        message(FATAL_ERROR "CA bundle download failed: ${_ca_bundle_status}")
+    endif()
+    file(RENAME "${CURL_CA_BUNDLE}.download" "${CURL_CA_BUNDLE}")
+endif()
 
 # set(OUTPUT_DIST_FILE "${PROJECT_NAME}-${APP_VERSION}-${PLATFORM_NAME}.${OUTPUT_DIST_EXT}")
