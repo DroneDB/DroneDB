@@ -18,6 +18,7 @@
 #include "dbops.h"
 #include "ddb.h"
 #include "exceptions.h"
+#include "gdal_failure_counter.h"
 #include "gdal_priv.h"
 #include "mio.h"
 #include "raster_cache.h"
@@ -169,7 +170,14 @@ namespace
         cadAsset(ta, "example_2018.prj");
         const auto out = ta.getPath("build");
 
-        ASSERT_NO_THROW(buildVector(dwg.string(), out.string()));
+        {
+            // A DWG block with a hatch is a GEOMETRYCOLLECTION holding a
+            // MULTISURFACE: the MVT writer rejected it tile by tile (and the
+            // Windows test process died there) until it was normalized.
+            GdalFailureCounter failures;
+            ASSERT_NO_THROW(buildVector(dwg.string(), out.string()));
+            EXPECT_EQ(failures.value(), 0) << "GDAL reported failures while building";
+        }
         const auto s = readGpkg(out);
         ASSERT_TRUE(s.opened);
         // 125 = what stock GDAL reads from LibreDWG 0.14's DXF (127 with the

@@ -9,7 +9,13 @@
 #include "mio.h"
 #include "ddb.h"
 #include "logger.h"
-#include "gdal_priv.h"
+#include "gdal_inc.h"
+#include "gdal_failure_counter.h"
+
+#include <algorithm>
+#include <cctype>
+#include <map>
+#include <set>
 
 namespace
 {
@@ -371,5 +377,100 @@ namespace
 
         const auto secondMtime = fs::last_write_time(gpkg);
         EXPECT_EQ(firstMtime, secondMtime) << "GPKG was rewritten on no-op call";
+    }
+
+    // Writes one feature per (name, WKT) into a GPKG layer of unknown type,
+    // the way CAD drawings arrive (one DXF layer, any geometry type).
+    void writeMixedGeometrySource(const fs::path &path,
+                                  const std::vector<std::pair<std::string, std::string>> &features)
+    {
+        GDALDriver *gpkg = GetGDALDriverManager()->GetDriverByName("GPKG");
+        ASSERT_NE(gpkg, nullptr);
+        std::unique_ptr<GDALDataset> ds(
+            gpkg->Create(path.string().c_str(), 0, 0, 0, GDT_Unknown, nullptr));
+        ASSERT_NE(ds, nullptr);
+        OGRSpatialReference wgs84;
+        wgs84.importFromEPSG(4326);
+        wgs84.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
+        OGRLayer *layer = ds->CreateLayer("drawing", &wgs84, wkbUnknown, nullptr);
+        ASSERT_NE(layer, nullptr);
+        OGRFieldDefn nameField("name", OFTString);
+        ASSERT_EQ(layer->CreateField(&nameField), OGRERR_NONE);
+        for (const auto &[name, wkt] : features)
+        {
+            OGRGeometry *geom = nullptr;
+            ASSERT_EQ(OGRGeometryFactory::createFromWkt(wkt.c_str(), &wgs84, &geom), OGRERR_NONE) << wkt;
+            OGRFeature feature(layer->GetLayerDefn());
+            feature.SetField("name", name.c_str());
+            feature.SetGeometryDirectly(geom);
+            ASSERT_EQ(layer->CreateFeature(&feature), OGRERR_NONE) << name;
+        }
+    }
+
+    // Opens the deepest zoom level of an MVT pyramid written by buildVector.
+    std::unique_ptr<GDALDataset> openMaxZoom(const fs::path &mvtDir)
+    {
+        int maxZoom = -1;
+        for (const auto &entry : fs::directory_iterator(mvtDir))
+        {
+            const auto name = entry.path().filename().string();
+            if (entry.is_directory() && !name.empty() &&
+                std::all_of(name.begin(), name.end(), [](unsigned char c) { return std::isdigit(c); }))
+                maxZoom = std::max(maxZoom, std::stoi(name));
+        }
+        if (maxZoom < 0) return nullptr;
+        const char *const drivers[] = {"MVT", nullptr};
+        return std::unique_ptr<GDALDataset>(GDALDataset::Open(
+            (mvtDir / std::to_string(maxZoom)).string().c_str(), GDAL_OF_VECTOR, drivers, nullptr, nullptr));
+    }
+
+    // Every feature reaches the MVT whatever its geometry type. GDAL's MVT
+    // writer encodes points, lines and polygons (and splits collections), and
+    // GDAL linearizes only geometries that contain real arcs: curve-typed
+    // containers with straight parts (a DWG's MULTISURFACE of polygons) and
+    // polyhedral types reached the writer as is, failed tile by tile with
+    // "Unsupported geometry type" and were missing from the tiles.
+    TEST(testVector, mvtKeepsEveryGeometryType)
+    {
+        TestArea ta(TEST_NAME, true);
+        const auto src = ta.getPath("drawing.gpkg");
+        writeMixedGeometrySource(src, {
+            {"multisurface", "MULTISURFACE Z (((9.180 45.460 0, 9.181 45.460 0, 9.181 45.461 0, 9.180 45.460 0)))"},
+            {"curvepolygon", "CURVEPOLYGON ((9.182 45.460, 9.183 45.460, 9.183 45.461, 9.182 45.460))"},
+            {"multicurve", "MULTICURVE ((9.184 45.460, 9.185 45.461))"},
+            {"collection", "GEOMETRYCOLLECTION (MULTISURFACE (((9.186 45.460, 9.187 45.460, 9.187 45.461, 9.186 45.460))),"
+                           " POINT (9.186 45.462))"},
+            {"triangle", "TRIANGLE ((9.188 45.460, 9.189 45.460, 9.189 45.461, 9.188 45.460))"},
+            {"tin", "TIN (((9.190 45.460, 9.191 45.460, 9.191 45.461, 9.190 45.460)))"},
+            {"polyhedral", "POLYHEDRALSURFACE Z (((9.192 45.460 1, 9.193 45.460 1, 9.193 45.461 1, 9.192 45.460 1)))"},
+            {"arc", "CURVEPOLYGON (CIRCULARSTRING (9.194 45.460, 9.195 45.461, 9.196 45.460, 9.195 45.459, 9.194 45.460))"},
+            {"plain", "POLYGON ((9.197 45.460, 9.198 45.460, 9.198 45.461, 9.197 45.460))"},
+        });
+        const auto out = ta.getPath("build");
+
+        GdalFailureCounter failures;
+        ASSERT_NO_THROW(buildVector(src.string(), out.string()));
+        EXPECT_EQ(failures.value(), 0) << "GDAL reported failures while building";
+
+        // name -> geometry types found in the tiles (multi folded into single)
+        std::map<std::string, std::set<OGRwkbGeometryType>> seen;
+        const auto mvt = openMaxZoom(out / "mvt");
+        ASSERT_NE(mvt, nullptr) << "Cannot open the MVT pyramid";
+        for (OGRLayer *layer : mvt->GetLayers())
+            for (const auto &feature : *layer)
+                if (const OGRGeometry *g = feature->GetGeometryRef())
+                {
+                    auto type = wkbFlatten(g->getGeometryType());
+                    if (type == wkbMultiPoint) type = wkbPoint;
+                    if (type == wkbMultiLineString) type = wkbLineString;
+                    if (type == wkbMultiPolygon) type = wkbPolygon;
+                    seen[feature->GetFieldAsString("name")].insert(type);
+                }
+
+        using Types = std::set<OGRwkbGeometryType>;
+        for (const char *name : {"multisurface", "curvepolygon", "triangle", "tin", "polyhedral", "arc", "plain"})
+            EXPECT_EQ(seen[name], (Types{wkbPolygon})) << name;
+        EXPECT_EQ(seen["multicurve"], (Types{wkbLineString}));
+        EXPECT_EQ(seen["collection"], (Types{wkbPoint, wkbPolygon}));
     }
 }

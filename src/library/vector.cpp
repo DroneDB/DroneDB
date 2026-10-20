@@ -6,6 +6,8 @@
 #include <cctype>
 #include <fstream>
 #include <limits>
+#include <memory>
+#include <numeric>
 #include <optional>
 #include <set>
 #include <vector>
@@ -298,14 +300,25 @@ namespace ddb
                                         closeStatus.systemError, closeStatus.message);
         }
 
-        // ---- MVT layer-name sanitization ------------------------------------
+        // ---- MVT source sanitization ----------------------------------------
         //
         // GDAL's MVT writer requires layer names to be plain identifiers:
         // letters, digits and underscore, not starting with a digit. Sources
         // such as KMZ commonly carry sublayers with spaces ("Western Theater")
         // which the writer skips with: "ERROR 1: The layer name may not
-        // contain special characters or spaces". To preserve every layer we
-        // expose a renamed, read-only view via an in-memory OGR VRT.
+        // contain special characters or spaces".
+        //
+        // It also encodes only points, lines and polygons (it splits
+        // GeometryCollections itself). Any other type fails tile by tile with
+        // "Unsupported geometry type" and the feature is missing from the
+        // tiles. GDAL linearizes curves before they reach a driver without
+        // curve support, but not inside collections, and polyhedral types are
+        // not curves: CAD drawings carry both (a DWG INSERT block holding a
+        // hatch becomes a GEOMETRYCOLLECTION with a MULTISURFACE inside).
+        //
+        // When a source has either problem, its layers are copied into an
+        // in-memory GPKG with sanitized names and encodable geometries, and
+        // the MVT is translated from that copy.
 
         bool isValidMvtLayerName(const std::string &name)
         {
@@ -334,6 +347,57 @@ namespace ddb
             return out;
         }
 
+        bool isMvtEncodableType(OGRwkbGeometryType type)
+        {
+            switch (wkbFlatten(type))
+            {
+            case wkbPoint:
+            case wkbMultiPoint:
+            case wkbLineString:
+            case wkbMultiLineString:
+            case wkbPolygon:
+            case wkbMultiPolygon:
+                return true;
+            default:
+                return false;
+            }
+        }
+
+        // True if the MVT writer can encode the geometry, after splitting the
+        // GeometryCollections it splits itself.
+        bool isMvtEncodable(const OGRGeometry &geom)
+        {
+            if (wkbFlatten(geom.getGeometryType()) != wkbGeometryCollection)
+                return isMvtEncodableType(geom.getGeometryType());
+            const auto *collection = geom.toGeometryCollection();
+            return std::all_of(collection->begin(), collection->end(),
+                               [](const OGRGeometry *part) { return isMvtEncodable(*part); });
+        }
+
+        // Equivalent geometry made of types the MVT writer can encode: curves
+        // are linearized and polyhedral surfaces, TINs and triangles become
+        // multipolygons, at any depth inside collections.
+        std::unique_ptr<OGRGeometry> toMvtEncodable(const OGRGeometry &geom)
+        {
+            const auto type = wkbFlatten(geom.getGeometryType());
+            std::unique_ptr<OGRGeometry> out;
+            if (type == wkbGeometryCollection)
+            {
+                auto collection = std::make_unique<OGRGeometryCollection>();
+                for (const OGRGeometry *part : *geom.toGeometryCollection())
+                    collection->addGeometryDirectly(toMvtEncodable(*part).release());
+                out = std::move(collection);
+            }
+            else if (type == wkbTriangle || OGR_GT_IsSubClassOf(type, wkbPolyhedralSurface))
+                out.reset(OGRGeometryFactory::forceToMultiPolygon(geom.clone()));
+            else if (OGR_GT_IsNonLinear(type))
+                out.reset(geom.getLinearGeometry());
+            else
+                out.reset(geom.clone());
+            out->assignSpatialReference(geom.getSpatialReference());
+            return out;
+        }
+
         // Returns true if any source layer has a name not acceptable by the
         // MVT writer.
         bool anyLayerNeedsSanitization(GDALDatasetH hSrcDS)
@@ -349,18 +413,94 @@ namespace ddb
             return false;
         }
 
+        // True if a feature of the layer holds a geometry the MVT writer
+        // cannot encode. A layer that declares an encodable type is trusted;
+        // the others (DXF, mixed GPKG or GeoJSON) are read up to the first hit.
+        bool layerNeedsGeometryNormalization(OGRLayerH hLayer)
+        {
+            OGRLayer *layer = OGRLayer::FromHandle(hLayer);
+            const auto declared = wkbFlatten(layer->GetGeomType());
+            if (declared == wkbNone || isMvtEncodableType(declared)) return false;
+
+            bool found = false;
+            layer->ResetReading();
+            while (!found)
+            {
+                const OGRFeatureUniquePtr feature(layer->GetNextFeature());
+                if (!feature) break;
+                const OGRGeometry *geom = feature->GetGeometryRef();
+                found = geom && !isMvtEncodable(*geom);
+            }
+            layer->ResetReading();
+            return found;
+        }
+
+        // Per source layer index: whether its geometries must be normalized.
+        std::vector<bool> layersNeedingGeometryNormalization(GDALDatasetH hSrcDS)
+        {
+            const int n = GDALDatasetGetLayerCount(hSrcDS);
+            std::vector<bool> result(static_cast<size_t>(std::max(n, 0)), false);
+            for (int i = 0; i < n; i++)
+                if (OGRLayerH hLayer = GDALDatasetGetLayer(hSrcDS, i))
+                    result[static_cast<size_t>(i)] = layerNeedsGeometryNormalization(hLayer);
+            return result;
+        }
+
+        // Copies a layer feature by feature into hDst, replacing the geometries
+        // the MVT writer cannot encode. Returns the new layer, or nullptr.
+        OGRLayerH copyLayerWithEncodableGeometries(GDALDatasetH hDst, OGRLayerH hSrc,
+                                                   const std::string &name)
+        {
+            GDALDataset *dst = GDALDataset::FromHandle(hDst);
+            OGRLayer *src = OGRLayer::FromHandle(hSrc);
+            OGRFeatureDefn *srcDefn = src->GetLayerDefn();
+
+            OGRLayer *out = dst->CreateLayer(name.c_str(), src->GetSpatialRef(), wkbUnknown, nullptr);
+            if (!out) return nullptr;
+            for (int i = 0; i < srcDefn->GetFieldCount(); i++)
+                if (out->CreateField(srcDefn->GetFieldDefn(i)) != OGRERR_NONE) return nullptr;
+            // The fields were created in order; map by index so names the
+            // GPKG driver launders still receive their values.
+            std::vector<int> fieldMap(static_cast<size_t>(srcDefn->GetFieldCount()));
+            std::iota(fieldMap.begin(), fieldMap.end(), 0);
+
+            const bool inTransaction = dst->StartTransaction() == OGRERR_NONE;
+            long long skipped = 0;
+            src->ResetReading();
+            for (OGRFeatureUniquePtr feature(src->GetNextFeature()); feature;
+                 feature.reset(src->GetNextFeature()))
+            {
+                OGRFeature copy(out->GetLayerDefn());
+                copy.SetFieldsFrom(feature.get(), fieldMap.data());
+                if (const OGRGeometry *geom = feature->GetGeometryRef())
+                    copy.SetGeometryDirectly(isMvtEncodable(*geom) ? geom->clone()
+                                                                   : toMvtEncodable(*geom).release());
+                if (out->CreateFeature(&copy) != OGRERR_NONE) skipped++;
+            }
+            src->ResetReading();
+            if (inTransaction) dst->CommitTransaction();
+
+            if (skipped > 0)
+                LOGD << "MVT sanitization: " << skipped << " features of layer '" << name
+                     << "' could not be copied and will be missing from the MVT output";
+            return OGRLayer::ToHandle(out);
+        }
+
         // Build a GPKG in /vsimem/ that copies each source layer with a
-        // sanitized, unique name. Uses GDALDatasetCopyLayer (per-index lookup)
-        // so it works even when the source has duplicate layer names
-        // (e.g. KMZ folders sharing a <name>).
+        // sanitized, unique name, normalizing the geometries of the layers
+        // flagged in normalizeGeometries. Layers that need no geometry work go
+        // through GDALDatasetCopyLayer (per-index lookup), so it works even
+        // when the source has duplicate layer names (e.g. KMZ folders sharing
+        // a <name>).
         //
         // Returns the /vsimem/ path of the GPKG (caller owns: must VSIUnlink).
-        std::string buildSanitizedGpkg(GDALDatasetH hSrcDS)
+        std::string buildSanitizedGpkg(GDALDatasetH hSrcDS,
+                                       const std::vector<bool> &normalizeGeometries)
         {
             GDALDriverH hGpkg = GDALGetDriverByName("GPKG");
             if (!hGpkg)
                 throw AppException(
-                    "GPKG driver not available; cannot sanitize MVT layer names");
+                    "GPKG driver not available; cannot sanitize the MVT source");
 
             const std::string vsiPath =
                 "/vsimem/ddb_mvt_" + utils::generateRandomString(16) + ".gpkg";
@@ -369,7 +509,7 @@ namespace ddb
                                             0, 0, 0, GDT_Unknown, nullptr);
             if (!hDst)
                 throw AppException(
-                    "Cannot create in-memory GPKG for MVT layer sanitization");
+                    "Cannot create in-memory GPKG for MVT source sanitization");
 
             std::set<std::string> used;
             const int n = GDALDatasetGetLayerCount(hSrcDS);
@@ -388,8 +528,11 @@ namespace ddb
                     candidate = sane + "_" + std::to_string(suffix++);
                 used.insert(candidate);
 
-                OGRLayerH hCopied = GDALDatasetCopyLayer(
-                    hDst, hLayer, candidate.c_str(), nullptr);
+                const bool normalize = static_cast<size_t>(i) < normalizeGeometries.size() &&
+                                       normalizeGeometries[static_cast<size_t>(i)];
+                OGRLayerH hCopied = normalize
+                    ? copyLayerWithEncodableGeometries(hDst, hLayer, candidate)
+                    : GDALDatasetCopyLayer(hDst, hLayer, candidate.c_str(), nullptr);
                 if (hCopied) {
                     copied++;
                 } else {
@@ -397,7 +540,7 @@ namespace ddb
                     // the omission auditable: the resulting MVT will not
                     // contain features from this source layer.
                     const char *err = CPLGetLastErrorMsg();
-                    LOGD << "MVT sanitization: GDALDatasetCopyLayer failed for "
+                    LOGD << "MVT sanitization: copying failed for "
                          << "source layer index " << i
                          << " (name='" << srcLayer
                          << "', sanitized='" << candidate << "'): "
@@ -435,16 +578,19 @@ namespace ddb
                  << " (areaDeg2=" << areaDeg2
                  << ", features=" << stats.featureCount << ")";
 
-            // If any source layer name is rejected by the MVT writer, copy
+            // If the MVT writer would reject a layer name or a geometry, copy
             // the layers into an in-memory GPKG with sanitized, unique names
-            // and translate from that instead. CopyLayer is index-based so
-            // it survives duplicate source layer names (e.g. KMZ folders).
+            // and encodable geometries, and translate from that instead.
             GDALDatasetH hTranslateSrc = hSrcDS;
             std::string sanitizedPath;
             GDALDatasetH hSanitizedDS = nullptr;
-            if (anyLayerNeedsSanitization(hSrcDS))
+            const auto normalizeGeometries = layersNeedingGeometryNormalization(hSrcDS);
+            const bool anyGeometryToNormalize =
+                std::find(normalizeGeometries.begin(), normalizeGeometries.end(), true) !=
+                normalizeGeometries.end();
+            if (anyGeometryToNormalize || anyLayerNeedsSanitization(hSrcDS))
             {
-                sanitizedPath = buildSanitizedGpkg(hSrcDS);
+                sanitizedPath = buildSanitizedGpkg(hSrcDS, normalizeGeometries);
                 hSanitizedDS = GDALOpenEx(sanitizedPath.c_str(),
                                           GDAL_OF_VECTOR | GDAL_OF_READONLY,
                                           nullptr, nullptr, nullptr);
