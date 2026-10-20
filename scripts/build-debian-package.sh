@@ -165,6 +165,12 @@ override_dh_strip:
 override_dh_dwz:
 	dh_dwz -XObj2Tiles -Xlibktx.so
 
+# The license texts of the bundled tools ship as they are, next to the other notices:
+# dh_compress would gzip those over 4 KB (dwg2dxf's GPL text), and the package checks
+# (and readers) look for them by name.
+override_dh_compress:
+	dh_compress -X.LICENSE
+
 override_dh_auto_install:
 	# Create directory structure for installed files
 	mkdir -p debian/ddb/usr/bin
