@@ -17,6 +17,7 @@
 #include "mvt.h"
 #include "logger.h"
 #include "mio.h"
+#include "raster_cache.h"
 #include "exceptions.h"
 #include "utils.h"
 
@@ -683,6 +684,10 @@ namespace ddb
             // it lacks the canonical artifact (e.g. an empty leftover from a
             // previous aborted build): otherwise the promote-rename below
             // would fail because the destination already exists.
+            // A GeoPackage of the previous build kept open for WFS/OGC queries would
+            // block the renames on Windows
+            RasterCache::instance().release(vecDir);
+            RasterCache::instance().release(mvtDir);
             const bool hadVec = fs::exists(vecDir);
             const bool hadMvt = fs::exists(mvtDir);
             io::assureFolderExists(backupDir);

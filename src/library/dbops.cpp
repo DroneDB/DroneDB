@@ -946,31 +946,32 @@ static std::mutex g_templateMutex;
 
         const auto updateQ = db->query(UPDATE_QUERY);
         for (const auto &prj : prjPaths) {
-            for (const char *ext : {".shp", ".SHP", ".dxf", ".DXF", ".dwg", ".DWG"}) {
-                const std::string mainPath = fs::path(prj).replace_extension(ext).generic_string();
+            for (const auto &mainPath : sidecarMainCandidates(prj)) {
                 Entry old;
                 if (!getEntry(db, mainPath, old))
                     continue;
 
-                Entry fresh;
-                fresh.hash = old.hash; // content unchanged: skip re-hashing
                 try {
+                    Entry fresh;
+                    fresh.hash = old.hash; // content unchanged: skip re-hashing
                     parseEntry(directory / io::Path(mainPath).get(), directory, fresh, true);
+
+                    {
+                        Transaction tx(db, Transaction::Mode::Immediate);
+                        doUpdate(updateQ.get(), fresh);
+                        tx.commit();
+                    }
+
+                    // A GeoPackage kept open for WFS/OGC queries would block this on Windows
+                    const fs::path out = db->buildDirectory() / old.hash;
+                    RasterCache::instance().release(out);
+                    io::assureIsRemoved(out / "vec");
+                    io::assureIsRemoved(out / "mvt");
+                    LOGD << "Refreshed " << mainPath << " after a change to " << prj;
                 } catch (const std::exception &e) {
-                    LOGW << "Cannot re-read " << mainPath << " after a change to " << prj << ": " << e.what();
-                    continue;
+                    // The add/remove is already committed: never report it as failed
+                    LOGW << "Cannot refresh " << mainPath << " after a change to " << prj << ": " << e.what();
                 }
-
-                {
-                    Transaction tx(db, Transaction::Mode::Immediate);
-                    doUpdate(updateQ.get(), fresh);
-                    tx.commit();
-                }
-
-                const fs::path out = db->buildDirectory() / old.hash;
-                io::assureIsRemoved(out / "vec");
-                io::assureIsRemoved(out / "mvt");
-                LOGD << "Refreshed " << mainPath << " after a change to " << prj;
             }
         }
     }

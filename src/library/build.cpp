@@ -156,14 +156,9 @@ bool isBuildableInternal(const Entry& e, std::string& subfolder) {
 
 using EntryLookup = std::function<bool(const std::string&, Entry&)>;
 
-// Main files a sidecar belongs to, in lookup order (same folder and stem;
-// entry paths are dataset-relative, so the folder is kept). .cpg/.dbf/.shx
-// belong to a shapefile; a .prj also gives a CAD drawing its CRS (DDB-12).
-static std::vector<std::string> dependencyMainCandidates(const Entry& e) {
-    if (e.type != EntryType::Generic)
-        return {};
-
-    io::Path p(e.path);
+// Entry paths are dataset-relative, so the folder is kept
+std::vector<std::string> sidecarMainCandidates(const std::string& path) {
+    io::Path p(path);
     std::vector<const char*> extensions;
     if (p.checkExtension({"cpg", "dbf", "shx"}))
         extensions = {".shp", ".SHP"};
@@ -174,8 +169,14 @@ static std::vector<std::string> dependencyMainCandidates(const Entry& e) {
 
     std::vector<std::string> candidates;
     for (const char* ext : extensions)
-        candidates.push_back(fs::path(e.path).replace_extension(ext).generic_string());
+        candidates.push_back(fs::path(path).replace_extension(ext).generic_string());
     return candidates;
+}
+
+static std::vector<std::string> dependencyMainCandidates(const Entry& e) {
+    if (e.type != EntryType::Generic)
+        return {};
+    return sidecarMainCandidates(e.path);
 }
 
 // Special case: some files are not buildable by themselves but trigger the

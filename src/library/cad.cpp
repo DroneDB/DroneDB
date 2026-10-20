@@ -428,8 +428,13 @@ namespace ddb
                 if (!fs::is_regular_file(p, ec)) continue;
                 const auto n = normalized(p);
                 bool ignored = false;
+                // equivalent(): on a case-insensitive file system ".PRJ" names the
+                // ignored ".prj" too
                 for (const auto &i : t_ignoredSidecars)
-                    ignored = ignored || i == n;
+                {
+                    std::error_code eq;
+                    ignored = ignored || i == n || fs::equivalent(i, p, eq);
+                }
                 if (!ignored) return p;
             }
             return std::nullopt;

@@ -20,6 +20,7 @@
 #include "exceptions.h"
 #include "gdal_priv.h"
 #include "mio.h"
+#include "raster_cache.h"
 #include "test.h"
 #include "testarea.h"
 #include "vector.h"
@@ -545,6 +546,25 @@ namespace
         EXPECT_TRUE(isBuildComplete(db.get(), "utm32n_site.dxf"));
         EXPECT_TRUE(fs::exists(buildDirOf("utm32n_site.dxf") / "vec" / "local.json"));
         EXPECT_FALSE(fs::exists(buildDirOf("utm32n_site.dxf") / "mvt"));
+    }
+
+    // A GeoPackage left open by a WFS/OGC query does not make the .prj removal
+    // fail on Windows: the stale artifacts are released, then removed.
+    TEST_F(CadIndex, RemovingPrjReleasesCachedVectorHandles)
+    {
+        const auto dxf = cadAsset(*ta, "utm32n_site.dxf");
+        const auto prj = cadAsset(*ta, "utm32n_site.prj");
+        ddb::addToIndex(db.get(), {dxf.string(), prj.string()});
+        ddb::build(db.get(), "utm32n_site.dxf", "");
+        const auto gpkg = buildDirOf("utm32n_site.dxf") / "vec" / "source.gpkg";
+        ASSERT_TRUE(fs::exists(gpkg));
+
+        RasterCache::instance().release(gpkg);
+        RasterCache::instance().acquireVectorDataset(gpkg.string()); // given back idle
+        ASSERT_GE(RasterCache::instance().stats().idle, 1u);
+
+        EXPECT_NO_THROW(ddb::removeFromIndex(db.get(), {prj.string()}));
+        EXPECT_FALSE(fs::exists(gpkg.parent_path()));
     }
 
     // The same rule for shapefile sidecars: no .shp, nothing to build.
