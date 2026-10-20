@@ -487,7 +487,7 @@ bool isThermalImage(const std::string &filePath) {
                 char **mdDomains = GDALGetMetadataDomainList(hDs);
                 if (mdDomains) {
                     for (int d = 0; mdDomains[d] != nullptr; d++) {
-                        char **md = GDALGetMetadata(hDs, mdDomains[d]);
+                        CSLConstList md = GDALGetMetadata(hDs, mdDomains[d]);
                         if (md) {
                             for (int k = 0; md[k] != nullptr; k++)
                                 metaStrings.push_back(md[k]);
@@ -501,7 +501,7 @@ bool isThermalImage(const std::string &filePath) {
                 const char *bandDesc = GDALGetDescription(hBand);
                 if (bandDesc && bandDesc[0]) metaStrings.push_back(bandDesc);
 
-                char **bmd = GDALGetMetadata(hBand, nullptr);
+                CSLConstList bmd = GDALGetMetadata(hBand, nullptr);
                 if (bmd) {
                     for (int k = 0; bmd[k] != nullptr; k++)
                         metaStrings.push_back(bmd[k]);

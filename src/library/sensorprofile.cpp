@@ -386,7 +386,7 @@ SensorDetectionResult SensorProfileManager::detectSensorUncached(const std::stri
     char **mdDomains = GDALGetMetadataDomainList(hDataset);
     if (mdDomains) {
         for (int i = 0; mdDomains[i] != nullptr; i++) {
-            char **md = GDALGetMetadata(hDataset, mdDomains[i]);
+            CSLConstList md = GDALGetMetadata(hDataset, mdDomains[i]);
             if (md) {
                 for (int k = 0; md[k] != nullptr; k++) {
                     allMetadata.push_back(md[k]);
@@ -399,7 +399,7 @@ SensorDetectionResult SensorProfileManager::detectSensorUncached(const std::stri
     // Also check per-band metadata
     for (int b = 1; b <= bandCount; b++) {
         GDALRasterBandH hBand = GDALGetRasterBand(hDataset, b);
-        char **bmd = GDALGetMetadata(hBand, nullptr);
+        CSLConstList bmd = GDALGetMetadata(hBand, nullptr);
         if (bmd) {
             for (int k = 0; bmd[k] != nullptr; k++) {
                 allMetadata.push_back(bmd[k]);

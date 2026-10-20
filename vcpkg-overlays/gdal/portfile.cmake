@@ -2,7 +2,7 @@ vcpkg_from_github(
     OUT_SOURCE_PATH SOURCE_PATH
     REPO OSGeo/gdal
     REF "v${VERSION}"
-    SHA512 3b915c38cc7c9eb139df9335a90a2f6fd123c54e19ecb1f22670400eac76e317c5334f95dff5875c9c3fde8a0ef0f7aea86fa58ad42afaee823a46c6616e9c17
+    SHA512 57e371c02557ed0db210a6f992648602d9a7344679069a5101b3e25a49503683487009e96ad0707c780bac15cbd78415894096728d058304ea7f305b90628f69
     HEAD_REF master
     PATCHES
         find-link-libraries.patch
@@ -12,8 +12,8 @@ vcpkg_from_github(
         sqlite3.diff
         target-is-valid.patch
         # DroneDB (DDB-12): read fit-point-only DXF SPLINEs (written by LibreDWG
-        # dwg2dxf) instead of dropping them. Drop this overlay once upstream GDAL
-        # ships the change.
+        # dwg2dxf) instead of dropping them. Not upstream as of GDAL 3.13.3;
+        # drop this patch once upstream GDAL ships the change.
         dxf-fit-point-splines.patch
 )
 file(REMOVE "${SOURCE_PATH}/cmake/modules/packages/FindIconv.cmake")
@@ -94,6 +94,7 @@ vcpkg_cmake_configure(
         -DCMAKE_DISABLE_FIND_PACKAGE_CSharp=ON
         -DCMAKE_DISABLE_FIND_PACKAGE_Java=ON
         -DCMAKE_DISABLE_FIND_PACKAGE_JNI=ON
+        -DCMAKE_DISABLE_FIND_PACKAGE_Python=ON
         -DCMAKE_DISABLE_FIND_PACKAGE_SWIG=ON
         -DGDAL_USE_INTERNAL_LIBS=OFF
         -DGDAL_USE_EXTERNAL_LIBS=OFF

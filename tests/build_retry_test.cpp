@@ -37,7 +37,11 @@ public:
         eAccess = GA_Update;
     }
     ~CloseFailingVectorDataset() override { if (underlying) GDALClose(underlying); }
+#if GDAL_VERSION_NUM >= 3130000
+    GDALDriver* GetDriver() const override { return failingVectorDriver; }
+#else
     GDALDriver* GetDriver() override { return failingVectorDriver; }
+#endif
 #if GDAL_VERSION_NUM >= 3120000
     int GetLayerCount() const override { return underlying->GetLayerCount(); }
     const OGRLayer* GetLayer(int index) const override { return underlying->GetLayer(index); }
@@ -52,7 +56,11 @@ public:
     OGRErr CommitTransaction() override { return underlying->CommitTransaction(); }
     OGRErr RollbackTransaction() override { return underlying->RollbackTransaction(); }
 #if GDAL_VERSION_NUM >= 3070000
+#if GDAL_VERSION_NUM >= 3130000
+    CPLErr Close(GDALProgressFunc, void*) override {
+#else
     CPLErr Close() override {
+#endif
         if (!underlying) return CE_None;
         GDALClose(underlying);
         underlying = nullptr;
@@ -78,8 +86,14 @@ private:
     GDALDataset* underlying;
 };
 
+#if GDAL_VERSION_NUM >= 3130000
+using CreateOptions = CSLConstList;
+#else
+using CreateOptions = char**;
+#endif
+
 GDALDataset* failingVectorCreate(const char* name, int width, int height, int bands,
-                                 GDALDataType type, char** options) {
+                                 GDALDataType type, CreateOptions options) {
     if (!failVectorClose) {
         CPLError(CE_Failure, CPLE_FileIO, "test storage rejected output creation");
         errno = ENOSPC;
