@@ -148,15 +148,21 @@ std::optional<std::string> buildDsmServiceUrl(const std::string &urlTemplate,
 
 std::string dsmServiceApiKey()
 {
-    const char *key = std::getenv(DSM_SERVICE_KEY_ENV);
-    return key != nullptr ? std::string(key) : std::string();
+    const char *value = std::getenv(DSM_SERVICE_KEY_ENV);
+    std::string key = value != nullptr ? std::string(value) : std::string();
+    // A key pasted with a trailing newline or spaces would end up in the URL
+    utils::trim(key);
+    return key;
 }
 
 std::string DSMService::loadFromNetwork(double latitude, double longitude)
 {
     // TODO: allow user to specify different service
-    const std::string format = DEFAULT_DSM_SERVICE_URL;
+    return loadFromNetwork(latitude, longitude, DEFAULT_DSM_SERVICE_URL);
+}
 
+std::string DSMService::loadFromNetwork(double latitude, double longitude, const std::string &format)
+{
     // Estimate bounds around point by a certain radius
     double radius = 5000.0; // meters
 
@@ -186,12 +192,21 @@ std::string DSMService::loadFromNetwork(double latitude, double longitude)
                            std::to_string(std::chrono::system_clock::now().time_since_epoch().count()) + ".tif";
     std::string filePath = (getCacheDir() / filename).string();
 
-    // The key stays out of the log
-    LOGD << "Downloading DSM from "
-         << *buildDsmServiceUrl(format, "<redacted>", min.longitude, min.latitude, max.longitude, max.latitude)
-         << " ...";
+    // The key stays out of the log, and out of the error message that getAltitude() logs
+    const std::string redactedUrl =
+        *buildDsmServiceUrl(format, "<redacted>", min.longitude, min.latitude, max.longitude, max.latitude);
+    LOGD << "Downloading DSM from " << redactedUrl << " ...";
 
-    auto response = utils::downloadToFile(*url, filePath, true);
+    try
+    {
+        utils::downloadToFile(*url, filePath, true);
+    }
+    catch (const NetException &e)
+    {
+        std::string message = e.what();
+        utils::stringReplace(message, *url, redactedUrl);
+        throw NetException(message);
+    }
 
     // Verify the downloaded file exists and has content
     if (!fs::exists(filePath) || fs::file_size(filePath) == 0) {

@@ -87,31 +87,45 @@ if(BUILD_TESTING)
         )
     endif()
 
-    # CLI exit codes (DQ-02): usage errors and failed commands must exit non-zero,
-    # an explicit help request exits 0.
+    # CLI exit codes (DQ-02): usage errors and failed commands must exit 1, an explicit
+    # help request exits 0. Each test checks the exact code (cli_expect_exit.cmake), so a
+    # crash or a loader failure no longer counts as an expected failure. The staged copy
+    # in the build root is the one users run and the one next to the Windows DLLs.
+    set(DDB_CLI_EXE "${CMAKE_BINARY_DIR}/$<TARGET_FILE_NAME:${PROJECT_NAME}cmd>")
+    function(ddb_add_cli_test)
+        cmake_parse_arguments(CLI "" "NAME;EXIT;WORKING_DIRECTORY" "ARGS" ${ARGN})
+        if(NOT CLI_WORKING_DIRECTORY)
+            set(CLI_WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+        endif()
+        add_test(NAME ${CLI_NAME}
+            COMMAND ${CMAKE_COMMAND} -DEXPECTED=${CLI_EXIT}
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/cli_expect_exit.cmake" -- "${DDB_CLI_EXE}" ${CLI_ARGS}
+            WORKING_DIRECTORY "${CLI_WORKING_DIRECTORY}")
+    endfunction()
+
     set(DDB_CLI_EMPTY_DIR "${CMAKE_CURRENT_BINARY_DIR}/cli_not_a_dataset")
     file(MAKE_DIRECTORY "${DDB_CLI_EMPTY_DIR}")
-    add_test(NAME cli.UnknownCommandFails COMMAND $<TARGET_FILE:${PROJECT_NAME}cmd> nosuchcommand)
-    add_test(NAME cli.PushOutsideDatasetFails COMMAND $<TARGET_FILE:${PROJECT_NAME}cmd> push
-        WORKING_DIRECTORY "${DDB_CLI_EMPTY_DIR}")
-    add_test(NAME cli.InvalidArgsFail COMMAND $<TARGET_FILE:${PROJECT_NAME}cmd> cog)
-    # push/pull in a dataset without a remote tag used to print the error on stdout and exit 0
+    ddb_add_cli_test(NAME cli.NoArgsFails EXIT 1)
+    ddb_add_cli_test(NAME cli.UnknownCommandFails EXIT 1 ARGS nosuchcommand)
+    ddb_add_cli_test(NAME cli.PushOutsideDatasetFails EXIT 1 ARGS push WORKING_DIRECTORY "${DDB_CLI_EMPTY_DIR}")
+    ddb_add_cli_test(NAME cli.InvalidArgsFail EXIT 1 ARGS cog)
+    ddb_add_cli_test(NAME cli.HelpSucceeds EXIT 0 ARGS --help)
+    ddb_add_cli_test(NAME cli.CommandHelpSucceeds EXIT 0 ARGS cog --help)
+
+    # Commands that need a dataset without a remote tag: push/pull used to print the error
+    # on stdout and exit 0, an unknown password subcommand printed nothing and exited 0
     set(DDB_CLI_DATASET_DIR "${CMAKE_CURRENT_BINARY_DIR}/cli_untagged_dataset")
     file(MAKE_DIRECTORY "${DDB_CLI_DATASET_DIR}")
     add_test(NAME cli.setup.CleanDataset COMMAND ${CMAKE_COMMAND} -E rm -rf "${DDB_CLI_DATASET_DIR}/.ddb")
-    add_test(NAME cli.setup.InitDataset COMMAND $<TARGET_FILE:${PROJECT_NAME}cmd> init "${DDB_CLI_DATASET_DIR}")
+    ddb_add_cli_test(NAME cli.setup.InitDataset EXIT 0 ARGS init "${DDB_CLI_DATASET_DIR}")
     set_tests_properties(cli.setup.CleanDataset PROPERTIES FIXTURES_SETUP cli_clean)
     set_tests_properties(cli.setup.InitDataset PROPERTIES FIXTURES_REQUIRED cli_clean FIXTURES_SETUP cli_dataset)
-    add_test(NAME cli.PushWithoutTagFails COMMAND $<TARGET_FILE:${PROJECT_NAME}cmd> push
+    ddb_add_cli_test(NAME cli.PushWithoutTagFails EXIT 1 ARGS push WORKING_DIRECTORY "${DDB_CLI_DATASET_DIR}")
+    ddb_add_cli_test(NAME cli.PullWithoutTagFails EXIT 1 ARGS pull WORKING_DIRECTORY "${DDB_CLI_DATASET_DIR}")
+    ddb_add_cli_test(NAME cli.PasswordUnknownSubcommandFails EXIT 1 ARGS password nosuchsubcommand
         WORKING_DIRECTORY "${DDB_CLI_DATASET_DIR}")
-    add_test(NAME cli.PullWithoutTagFails COMMAND $<TARGET_FILE:${PROJECT_NAME}cmd> pull
-        WORKING_DIRECTORY "${DDB_CLI_DATASET_DIR}")
-    set_tests_properties(cli.PushWithoutTagFails cli.PullWithoutTagFails PROPERTIES FIXTURES_REQUIRED cli_dataset)
-    set_tests_properties(cli.UnknownCommandFails cli.PushOutsideDatasetFails cli.InvalidArgsFail
-        cli.PushWithoutTagFails cli.PullWithoutTagFails
-        PROPERTIES WILL_FAIL TRUE)
-    add_test(NAME cli.HelpSucceeds COMMAND $<TARGET_FILE:${PROJECT_NAME}cmd> --help)
-    add_test(NAME cli.CommandHelpSucceeds COMMAND $<TARGET_FILE:${PROJECT_NAME}cmd> cog --help)
+    set_tests_properties(cli.PushWithoutTagFails cli.PullWithoutTagFails cli.PasswordUnknownSubcommandFails
+        PROPERTIES FIXTURES_REQUIRED cli_dataset)
 
     include(GoogleTest)
     gtest_discover_tests(ddbtest

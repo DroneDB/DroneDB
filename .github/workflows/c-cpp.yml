@@ -184,8 +184,11 @@ jobs:
           # Real-converter tests skip when the binary is absent (non-tag builds).
           DDB_DWG2DXF_PATH: ${{ github.workspace }}/build/dwg2dxf
         run: cd build && ./ddbtest --gtest_shuffle
+      - name: Run CLI Exit Code Tests
+        # From build/tests: the ddbcmd post-build copy of build/apps overwrites build/CTestTestfile.cmake
+        run: cd build/tests && ctest -R '^cli\.' --output-on-failure
       - name: Run Program Smoke Test
-        run: cd build && ./ddbcmd --debug
+        run: cd build && ./ddbcmd --version --debug
       - name: Build Debian Package
         run: |
           # Set DDB_VERSION env var for the package
@@ -536,6 +539,11 @@ jobs:
             build/vcpkg_installed/x64-windows-release/bin/geos*.pdb
           if-no-files-found: ignore
           retention-days: 14
+      - name: Run CLI Exit Code Tests
+        run: |
+          cd build/tests
+          ctest -C Release -R '^cli\.' --output-on-failure
+        shell: pwsh
       - name: Run Program Smoke Test
         run: cd build && .\ddbcmd.exe --version --debug
         shell: pwsh
@@ -673,7 +681,7 @@ jobs:
   #         - name: Run C++ Tests
   #           run: cd build && ctest -C Release
   #         - name: Run Program Smoke Test
-  #           run: cd build && ./ddbcmd --debug
+  #           run: cd build && ./ddbcmd --version --debug
   #         - name: Create Distribution Package
   #           run: cd build && make package
   #         - name: Upload Distribution Files

@@ -125,6 +125,8 @@ namespace
         auto expected = fromWkt("POLYGON ((0 0,10 0,10 10,0 10,0 0))");
         ASSERT_NE(expected, nullptr);
         EXPECT_TRUE(topologicallyEqual(*reduced, *expected)) << toWkt(*reduced);
+        // toPolygon() is an unchecked down_cast
+        ASSERT_EQ(wkbFlatten(reduced->getGeometryType()), wkbPolygon) << toWkt(*reduced);
         EXPECT_EQ(reduced->toPolygon()->getExteriorRing()->getNumPoints(), 5) << toWkt(*reduced);
     }
 

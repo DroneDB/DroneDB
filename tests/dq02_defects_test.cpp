@@ -348,6 +348,39 @@ namespace
         EXPECT_THROW(DSMService::get()->loadFromNetwork(46.84260708333, -91.99455988889), NetException);
     }
 
+    // A failed download threw "Failed to fetch data from <url>" with the key in the URL, and
+    // getAltitude() logs that message. Port 9 (discard) on loopback refuses the connection.
+    TEST(Dq02Defects, Target_DsmDownloadErrorDoesNotLeakTheKey)
+    {
+        const std::string key = "S3cretDsmKey0123456789";
+        EnvVarGuard guard(DSM_SERVICE_KEY_ENV);
+        DDB_SETENV(DSM_SERVICE_KEY_ENV, key.c_str());
+
+        std::string message;
+        try
+        {
+            DSMService::get()->loadFromNetwork(46.84260708333, -91.99455988889,
+                                               "http://127.0.0.1:9/globaldem?west={west}&API_Key={key}");
+            FAIL() << "the download from a closed port succeeded";
+        }
+        catch (const NetException &e)
+        {
+            message = e.what();
+        }
+        EXPECT_EQ(message.find(key), std::string::npos) << message;
+        EXPECT_NE(message.find("127.0.0.1:9"), std::string::npos) << "the error should still name the service: " << message;
+    }
+
+    // A key pasted with a trailing newline or spaces went into the URL verbatim.
+    TEST(Dq02Defects, Target_DsmServiceApiKeyIsTrimmed)
+    {
+        EnvVarGuard guard(DSM_SERVICE_KEY_ENV);
+        DDB_SETENV(DSM_SERVICE_KEY_ENV, " \tk3y \r\n");
+        EXPECT_EQ(dsmServiceApiKey(), "k3y");
+        DDB_SETENV(DSM_SERVICE_KEY_ENV, "   ");
+        EXPECT_EQ(dsmServiceApiKey(), "");
+    }
+
     // printVersions streamed std::getenv() results, null for unset variables.
     TEST(Dq02Defects, Target_GetEnvOrUnsetNeverReturnsNull)
     {

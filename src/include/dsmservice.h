@@ -44,7 +44,7 @@ DDB_DLL std::optional<std::string> buildDsmServiceUrl(const std::string &urlTemp
                                                       double west, double south,
                                                       double east, double north);
 
-// The DSM service API key from DSM_SERVICE_KEY_ENV, read at call time ("" when unset)
+// The DSM service API key from DSM_SERVICE_KEY_ENV, read at call time and trimmed ("" when unset or blank)
 DDB_DLL std::string dsmServiceApiKey();
 
 class DSMService
@@ -70,6 +70,8 @@ public:
 
     DDB_DLL bool loadDiskCache(double latitude, double longitude);
     DDB_DLL std::string loadFromNetwork(double latitude, double longitude);
+    // Same, from the given service URL template (see buildDsmServiceUrl)
+    DDB_DLL std::string loadFromNetwork(double latitude, double longitude, const std::string &urlTemplate);
     DDB_DLL bool addGeoTIFFToCache(const fs::path &filePath, double latitude, double longitude);
     DDB_DLL fs::path getCacheDir();
 };

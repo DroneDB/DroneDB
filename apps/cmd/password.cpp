@@ -94,6 +94,12 @@ namespace cmd
 				std::cout << std::endl
 						  << "Deleted all passwords" << std::endl;
 			}
+			else
+			{
+				std::cerr << "Unknown command: " << command << std::endl
+						  << std::endl;
+				usageError();
+			}
 		}
 		catch (ddb::InvalidArgsException &e)
 		{
