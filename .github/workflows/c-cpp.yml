@@ -401,8 +401,7 @@ jobs:
   # which P/Invokes every export Registry uses and fails on a missing one) against the .deb that
   # build_ubuntu just tested, installed as the Registry image installs it. Registry is checked out
   # at the commit pinned in ci/registry-ref: bump it when Registry's adapter changes. Only the
-  # adapter test project runs. It still builds Registry.Web (through Registry.Test.Common), whose
-  # PreBuild packs the Hub (ClientApp submodule, built with npm as Registry's own CI does).
+  # adapter test project runs; it does not build Registry.Web, so no Hub/npm is needed.
   # Required for v* tags: release_deb and the Docker push wait for it.
   registry_contract:
     name: Registry contract (Registry.Adapters.Ddb.Test on the .deb)
@@ -431,21 +430,10 @@ jobs:
           repository: DroneDB/Registry
           ref: ${{ env.REGISTRY_REF }}
           path: registry
-          # The Hub commit this Registry pins (Registry.Web/ClientApp)
-          submodules: recursive
       - name: Setup .NET (registry/global.json)
         uses: actions/setup-dotnet@v4
         with:
           global-json-file: registry/global.json
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: registry/Registry.Web/ClientApp/package-lock.json
-      - name: Build the Hub (Registry.Web PreBuild packs ClientApp/build)
-        working-directory: registry/Registry.Web/ClientApp
-        run: npm ci && npm run build
       - name: Cache Registry test downloads
         # The suite downloads DroneDB/test_data files once into the temp folder (TMPDIR below)
         uses: actions/cache@v4
