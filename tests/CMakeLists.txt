@@ -64,6 +64,18 @@ if(BUILD_TESTING)
         target_link_libraries(ddb_test_support PUBLIC dbghelp)
     endif()
 
+    # The DroneDB/test_data commit the tests download their assets from (testDataUrl, testfs.h).
+    # One file, read here and by CI (.github/workflows/c-cpp.yml), so both use the same assets.
+    set(DDB_TEST_DATA_SHA_FILE "${CMAKE_CURRENT_SOURCE_DIR}/test-data.sha")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${DDB_TEST_DATA_SHA_FILE}")
+    file(STRINGS "${DDB_TEST_DATA_SHA_FILE}" DDB_TEST_DATA_SHA LIMIT_COUNT 1)
+    string(LENGTH "${DDB_TEST_DATA_SHA}" _sha_length)
+    if(NOT _sha_length EQUAL 40 OR NOT DDB_TEST_DATA_SHA MATCHES "^[0-9a-f]+$")
+        message(FATAL_ERROR "${DDB_TEST_DATA_SHA_FILE} must hold a full commit SHA, found '${DDB_TEST_DATA_SHA}'")
+    endif()
+    set_source_files_properties(testfs.cpp PROPERTIES
+        COMPILE_DEFINITIONS DDB_TEST_DATA_SHA="${DDB_TEST_DATA_SHA}")
+
     # The version test compares ddb::version() with package.json; one source file only, so
     # no other test TU carries it on its compile line
     set_source_files_properties(unit/dq01_version_test.cpp PROPERTIES
@@ -148,6 +160,13 @@ if(BUILD_TESTING)
         SLOW thumbnail.orthoEdgeBatch EdgeRasterTest.NodataInfinity52Bands
     )
     ddb_stage_runtime_dlls(ddbtest)
+
+    # Every export of ddb.h is called by a test (DQ-03): a new export without one fails here
+    add_test(NAME c_abi.ExportsHaveTests
+        COMMAND ${CMAKE_COMMAND} "-DDDB_HEADER=${PROJECT_SOURCE_DIR}/src/include/ddb.h"
+            "-DDDB_TESTS=${CMAKE_CURRENT_SOURCE_DIR}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/c_abi_coverage.cmake")
+    set_tests_properties(c_abi.ExportsHaveTests PROPERTIES LABELS unit TIMEOUT 60)
 
     # CLI exit codes (DQ-02): usage errors and failed commands must exit 1, an explicit
     # help request exits 0. Each test checks the exact code (cli_expect_exit.cmake), so a

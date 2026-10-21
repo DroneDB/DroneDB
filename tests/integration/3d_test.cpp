@@ -10,6 +10,7 @@
 #include "test.h"
 #include "testfs.h"
 #include "testarea.h"
+#include "utils.h"
 #include <cpr/cpr.h>
 #include <cstdint>
 #include <cstring>
@@ -61,11 +62,6 @@ namespace
         std::vector<uint8_t> out(values.size() * sizeof(T));
         std::memcpy(out.data(), values.data(), out.size());
         return out;
-    }
-
-    void writeTextFile(const fs::path& path, const std::string& content) {
-        std::ofstream out(path.string(), std::ios::binary);
-        out << content;
     }
 
     // Wraps a glTF JSON string in a minimal, spec-valid GLB container (single JSON chunk).
@@ -284,7 +280,7 @@ namespace
         try
         {
             // URL of the test archive
-            std::string archiveUrl = "https://github.com/DroneDB/test_data/raw/refs/heads/master/3d/odm_texturing.zip";
+            std::string archiveUrl = testDataUrl("3d/odm_texturing.zip");
 
             // Create an instance of TestFS
             TestFS testFS(archiveUrl, "odm_texturing", true);
@@ -309,7 +305,7 @@ namespace
         try
         {
             // URL of the test archive
-            std::string archiveUrl = "https://github.com/DroneDB/test_data/raw/refs/heads/master/3d/odm_texturing_leading_spaces.zip";
+            std::string archiveUrl = testDataUrl("3d/odm_texturing_leading_spaces.zip");
 
             // Create an instance of TestFS
             TestFS testFS(archiveUrl, "odm_texturing_leading_spaces", true);
@@ -334,7 +330,7 @@ namespace
         try
         {
             // URL of the test archive
-            std::string archiveUrl = "https://github.com/DroneDB/test_data/raw/refs/heads/master/3d/odm_texturing_multiple.zip";
+            std::string archiveUrl = testDataUrl("3d/odm_texturing_multiple.zip");
 
             // Create an instance of TestFS
             TestFS testFS(archiveUrl, "odm_texturing_multiple", true);
@@ -379,7 +375,7 @@ namespace
         try
         {
             // URL of the test archive
-            std::string archiveUrl = "https://github.com/DroneDB/test_data/raw/refs/heads/master/3d/metashape_obj.zip";
+            std::string archiveUrl = testDataUrl("3d/metashape_obj.zip");
 
             // Create an instance of TestFS
             TestFS testFS(archiveUrl, "metashape_obj", true);
@@ -403,7 +399,7 @@ namespace
         try
         {
             // URL of the test archive
-            std::string archiveUrl = "https://github.com/DroneDB/test_data/raw/refs/heads/master/3d/metashape_obj_with_spaces.zip";
+            std::string archiveUrl = testDataUrl("3d/metashape_obj_with_spaces.zip");
 
             // Create an instance of TestFS
             TestFS testFS(archiveUrl, "metashape_obj_with_spaces", true);
@@ -427,7 +423,7 @@ namespace
         try
         {
             // URL of the test archive containing model.gltf and model.bin
-            std::string archiveUrl = "https://github.com/DroneDB/test_data/raw/refs/heads/master/3d/model-gltf.zip";
+            std::string archiveUrl = testDataUrl("3d/model-gltf.zip");
 
             // Create an instance of TestFS
             TestFS testFS(archiveUrl, "model-gltf", true);
@@ -485,7 +481,7 @@ namespace
         try
         {
             // URL of the test GLB file
-            std::string glbUrl = "https://github.com/DroneDB/test_data/raw/refs/heads/master/3d/model.glb";
+            std::string glbUrl = testDataUrl("3d/model.glb");
 
             // Create an instance of TestArea
             TestArea testArea("model-glb");
@@ -544,7 +540,7 @@ namespace
         try
         {
             // URL of the test GLB file
-            std::string glbUrl = "https://github.com/DroneDB/test_data/raw/refs/heads/master/3d/SunglassesKhronos.glb";
+            std::string glbUrl = testDataUrl("3d/SunglassesKhronos.glb");
 
             // Create an instance of TestArea
             TestArea testArea("sunglasses-glb");
@@ -603,7 +599,7 @@ namespace
         try
         {
             // URL of the test GLB file
-            std::string glbUrl = "https://github.com/DroneDB/test_data/raw/refs/heads/master/3d/IridescentDishWithOlives.glb";
+            std::string glbUrl = testDataUrl("3d/IridescentDishWithOlives.glb");
 
             // Create an instance of TestArea
             TestArea testArea("dish-glb");
@@ -662,7 +658,7 @@ namespace
         try
         {
             // URL of the test GLB file
-            std::string glbUrl = "https://github.com/DroneDB/test_data/raw/refs/heads/master/3d/ToyCar.glb";
+            std::string glbUrl = testDataUrl("3d/ToyCar.glb");
 
             // Create an instance of TestArea
             TestArea testArea("toycar-glb");
@@ -721,7 +717,7 @@ namespace
         try
         {
             // URL of the test GLB file with Draco mesh compression
-            std::string glbUrl = "https://raw.githubusercontent.com/DroneDB/test_data/refs/heads/master/3d/draco_model.glb";
+            std::string glbUrl = testDataUrl("3d/draco_model.glb");
 
             // Create an instance of TestArea
             TestArea testArea("draco-glb");
@@ -783,7 +779,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
         const fs::path gltf = ta.getPath("triangle.gltf");
-        writeTextFile(gltf, triangleGltfJson(nullptr));
+        writeFile(gltf, triangleGltfJson(nullptr));
         EXPECT_EQ(ddb::fingerprint(gltf), EntryType::Model);
     }
 
@@ -791,11 +787,11 @@ namespace
     {
         TestArea ta(TEST_NAME);
         const fs::path strip = ta.getPath("strip.gltf");
-        writeTextFile(strip, triangleGltfJson("5"));
+        writeFile(strip, triangleGltfJson("5"));
         EXPECT_EQ(ddb::fingerprint(strip), EntryType::Model);
 
         const fs::path fan = ta.getPath("fan.gltf");
-        writeTextFile(fan, triangleGltfJson("6"));
+        writeFile(fan, triangleGltfJson("6"));
         EXPECT_EQ(ddb::fingerprint(fan), EntryType::Model);
     }
 
@@ -803,7 +799,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
         const fs::path gltf = ta.getPath("points.gltf");
-        writeTextFile(gltf, triangleGltfJson("0"));
+        writeFile(gltf, triangleGltfJson("0"));
         EXPECT_EQ(ddb::fingerprint(gltf), EntryType::Generic);
     }
 
@@ -811,7 +807,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
         const fs::path lines = ta.getPath("lines.gltf");
-        writeTextFile(lines, triangleGltfJson("1"));
+        writeFile(lines, triangleGltfJson("1"));
         EXPECT_EQ(ddb::fingerprint(lines), EntryType::Generic);
     }
 
@@ -819,7 +815,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
         const fs::path gltf = ta.getPath("garbage.gltf");
-        writeTextFile(gltf, "{ this is not valid json ");
+        writeFile(gltf, "{ this is not valid json ");
         EntryType type = EntryType::Undefined;
         ASSERT_NO_THROW(type = ddb::fingerprint(gltf));
         EXPECT_EQ(type, EntryType::Generic);
@@ -829,7 +825,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
         const fs::path gltf = ta.getPath("nomeshes.gltf");
-        writeTextFile(gltf, "{\"asset\":{\"version\":\"2.0\"},\"meshes\":[]}");
+        writeFile(gltf, "{\"asset\":{\"version\":\"2.0\"},\"meshes\":[]}");
         EXPECT_EQ(ddb::fingerprint(gltf), EntryType::Generic);
     }
 
@@ -838,7 +834,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
         const fs::path gltf = ta.getPath("gltf1.gltf");
-        writeTextFile(gltf,
+        writeFile(gltf,
             "{\"asset\":{\"version\":\"1.0\"},"
             "\"meshes\":{\"mesh0\":{\"primitives\":[{\"attributes\":{\"POSITION\":\"a\"},\"mode\":4}]}}}");
         EXPECT_EQ(ddb::fingerprint(gltf), EntryType::Model);
@@ -918,7 +914,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
         const fs::path gltf = ta.getPath("POINTS.GLTF");
-        writeTextFile(gltf, triangleGltfJson("0"));
+        writeFile(gltf, triangleGltfJson("0"));
         EXPECT_EQ(ddb::fingerprint(gltf), EntryType::Generic);
 
         const fs::path glb = ta.getPath("TRIANGLE.GLB");
@@ -932,7 +928,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
         const fs::path gltf = ta.getPath("badprimitive.gltf");
-        writeTextFile(gltf,
+        writeFile(gltf,
             "{\"asset\":{\"version\":\"2.0\"},\"meshes\":[{\"primitives\":[\"nonsense\",42,null]}]}");
         EXPECT_EQ(ddb::fingerprint(gltf), EntryType::Generic);
     }
@@ -945,7 +941,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
         const fs::path gltf = ta.getPath("mixed.gltf");
-        writeTextFile(gltf, mixedTrianglePointGltfJson());
+        writeFile(gltf, mixedTrianglePointGltfJson());
 
         // The classifier only requires one triangle primitive to declare the asset a Model.
         EXPECT_EQ(ddb::fingerprint(gltf), EntryType::Model);
@@ -1012,38 +1008,20 @@ namespace
         return j.str();
     }
 
-    void writeBytes(const fs::path& path, const std::vector<uint8_t>& data) {
-        fs::create_directories(path.parent_path());
-        std::ofstream out(path.string(), std::ios::binary);
-        out.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
-    }
-
-    struct GltfDataset {
-        explicit GltfDataset(const std::string& name) : ta(name, true) {
-            root = ta.getFolder("");
-            ddb::initIndex(root.string());
-            db = ddb::open(root.string(), true);
-        }
+    struct GltfDataset : IndexFixture {
+        explicit GltfDataset(const std::string& name) : IndexFixture(name, "") {}
         void add(const std::vector<std::string>& rels) {
             std::vector<std::string> abs;
             for (const auto& r : rels)
                 abs.push_back((root / r).string());
             ddb::addToIndex(db.get(), abs);
         }
-        std::string hashOf(const std::string& rel) {
-            Entry e;
-            EXPECT_TRUE(ddb::getEntry(db.get(), rel, e));
-            return e.hash;
-        }
-        TestArea ta;
-        fs::path root;
-        std::unique_ptr<Database> db;
     };
 
     void writeGltfWithExternalTexture(const fs::path& gltf) {
         const auto bin = texturedQuadBin();
         fs::create_directories(gltf.parent_path());
-        writeTextFile(gltf, texturedQuadGltfJson(bin.size(), ",\"uri\":\"" + dataUri(bin) + "\"",
+        writeFile(gltf, texturedQuadGltfJson(bin.size(), ",\"uri\":\"" + dataUri(bin) + "\"",
                                                  "{\"uri\":\"tex.png\"}", ""));
     }
 
@@ -1051,7 +1029,7 @@ namespace
     {
         GltfDataset ds(TEST_NAME);
         writeGltfWithExternalTexture(ds.root / "sub" / "model.gltf");
-        writeBytes(ds.root / "sub" / "tex.png", kTinyPng);
+        writeFile(ds.root / "sub" / "tex.png", kTinyPng);
         ds.add({"sub/model.gltf", "sub/tex.png"});
 
         Entry e;
@@ -1078,14 +1056,14 @@ namespace
             EXPECT_NE(std::string(e.what()).find(mentions), std::string::npos) << e.what();
         }
         EXPECT_FALSE(ddb::isBuildPending(ds.db.get()));
-        EXPECT_FALSE(fs::exists(ds.db->buildDirectory() / (ds.hashOf(rel) + ".pending")));
+        EXPECT_FALSE(fs::exists(ds.db->buildDirectory() / (indexedHash(ds.db.get(), rel) + ".pending")));
         EXPECT_FALSE(ddb::isBuildComplete(ds.db.get(), rel));
     }
 
     void writeGltfWithImageUri(const fs::path& gltf, const std::string& imageUri) {
         const auto bin = texturedQuadBin();
         fs::create_directories(gltf.parent_path());
-        writeTextFile(gltf, texturedQuadGltfJson(bin.size(), ",\"uri\":\"" + dataUri(bin) + "\"",
+        writeFile(gltf, texturedQuadGltfJson(bin.size(), ",\"uri\":\"" + dataUri(bin) + "\"",
                                                  "{\"uri\":\"" + imageUri + "\"}", ""));
     }
 
@@ -1095,7 +1073,7 @@ namespace
     {
         GltfDataset ds(TEST_NAME);
         writeGltfWithImageUri(ds.root / "sub" / "model.gltf", "../shared/tex.png");
-        writeBytes(ds.root / "shared" / "tex.png", kTinyPng);
+        writeFile(ds.root / "shared" / "tex.png", kTinyPng);
         ds.add({"sub/model.gltf", "shared/tex.png"});
 
         Entry e;
@@ -1113,9 +1091,9 @@ namespace
     {
         GltfDataset ds(TEST_NAME);
         const auto bin = texturedQuadBin();
-        writeBytes(ds.root / "shared" / "quad.bin", bin);
-        writeBytes(ds.root / "sub" / "tex.png", kTinyPng);
-        writeTextFile(ds.root / "sub" / "buffer.gltf",
+        writeFile(ds.root / "shared" / "quad.bin", bin);
+        writeFile(ds.root / "sub" / "tex.png", kTinyPng);
+        writeFile(ds.root / "sub" / "buffer.gltf",
                       texturedQuadGltfJson(bin.size(), ",\"uri\":\"../shared/quad.bin\"",
                                            "{\"uri\":\"tex.png\"}", ""));
         writeGltfWithImageUri(ds.root / "sub" / "abs.gltf", "/abs/tex.png");
@@ -1152,7 +1130,7 @@ namespace
         ASSERT_EQ(pending.size(), 1u);
         EXPECT_EQ(pending[0].missingDependencies, std::vector<std::string>{"sub/tex.png"});
 
-        writeBytes(ds.root / "sub" / "tex.png", kTinyPng);
+        writeFile(ds.root / "sub" / "tex.png", kTinyPng);
         ds.add({"sub/tex.png"});
         ddb::buildPending(ds.db.get(), "", true);
         EXPECT_FALSE(ddb::isBuildPending(ds.db.get()));

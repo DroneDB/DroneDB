@@ -10,6 +10,7 @@
 #include "pointcloud.h"
 #include "test.h"
 #include "testarea.h"
+#include "testfs.h"
 #include "tilerhelper.h"
 #include "userprofile.h"
 #include <algorithm>
@@ -32,7 +33,7 @@ using namespace ddb;
 TEST(testTiler, RGB) {
     TestArea ta(TEST_NAME);
     fs::path ortho = ta.downloadTestAsset(
-        "https://github.com/DroneDB/test_data/raw/master/brighton/odm_orthophoto.tif",
+        testDataUrl("brighton/odm_orthophoto.tif"),
         "ortho.tif");
     fs::path tileDir = ta.getFolder("tiles");
 
@@ -46,7 +47,7 @@ TEST(testTiler, RGB) {
 TEST(testTiler, DSM) {
     TestArea ta(TEST_NAME);
     fs::path dsm =
-        ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/brighton/dsm.tif",
+        ta.downloadTestAsset(testDataUrl("brighton/dsm.tif"),
                              "dsm.tif");
     fs::path tileDir = ta.getFolder("tiles");
 
@@ -74,7 +75,7 @@ TEST(testTiler, DSM) {
 TEST(testTiler, DeepZoomNotBlank) {
     TestArea ta(TEST_NAME);
     fs::path ortho = ta.downloadTestAsset(
-        "https://github.com/DroneDB/test_data/raw/master/brighton/odm_orthophoto.tif",
+        testDataUrl("brighton/odm_orthophoto.tif"),
         "ortho.tif");
 
     for (const auto &[tz, tileSize] : std::vector<std::pair<int, int>>{{24, 256}, {23, 512}, {26, 256}}) {
@@ -108,7 +109,7 @@ TEST(testTiler, DeepZoomNotBlank) {
 TEST(testTiler, image) {
     TestArea ta(TEST_NAME);
     fs::path pc = ta.downloadTestAsset(
-        "https://github.com/DroneDB/test_data/raw/master/brighton/point_cloud.laz",
+        testDataUrl("brighton/point_cloud.laz"),
         "point_cloud.laz");
 
     ddb::buildCopc({pc.string()}, ta.getFolder("copc").string());
@@ -147,7 +148,7 @@ TEST(testTiler, image) {
 TEST(testTiler, toledoPointCloud) {
     TestArea ta(TEST_NAME);
     fs::path pc = ta.downloadTestAsset(
-        "https://github.com/DroneDB/test_data/raw/refs/heads/master/point-clouds/toledo.laz",
+        testDataUrl("point-clouds/toledo.laz"),
         "point_cloud.laz");
 
     ddb::buildCopc({pc.string()}, ta.getFolder("copc").string());
@@ -176,7 +177,7 @@ TEST(testTiler, toledoPointCloud) {
 MANUAL_TEST(tilerBenchmark, lewis) {
     TestArea ta(TEST_NAME);
     fs::path pc = ta.downloadTestAsset(
-        "https://github.com/DroneDB/test_data/raw/refs/heads/master/point-clouds/lewis.laz",
+        testDataUrl("point-clouds/lewis.laz"),
         "point_cloud.laz");
 
     std::chrono::high_resolution_clock::time_point start = std::chrono::high_resolution_clock::now();
@@ -232,8 +233,7 @@ MANUAL_TEST(tilerBenchmark, lewis) {
 TEST(testTiler, userCache) {
     TestArea ta(TEST_NAME);
     fs::path image = ta.downloadTestAsset(
-        "https://github.com/DroneDB/test_data/raw/master/test-datasets/"
-        "drone_dataset_brighton_beach/DJI_0018.JPG",
+        testDataUrl("test-datasets/drone_dataset_brighton_beach/DJI_0018.JPG"),
         "DJI_0032.JPG");
     fs::path tileDir = ta.getFolder("tiles");
     fs::path tile = TilerHelper::getFromUserCache(image, 20, 256335, 369483, 512, true, true, "");
@@ -244,7 +244,7 @@ TEST(testTiler, userCache) {
 TEST(testTiler, MultipleZoomLevels) {
     TestArea ta(TEST_NAME);
     fs::path ortho = ta.downloadTestAsset(
-        "https://github.com/DroneDB/test_data/raw/refs/heads/master/ortho/wro.tif",
+        testDataUrl("ortho/wro.tif"),
         "wro.tif");
     fs::path tileDir = ta.getFolder("tiles");
 
@@ -288,7 +288,7 @@ TEST(testTiler, MultipleZoomLevels) {
  */
 TEST(testTilerHelper, FailedDownloadIsNotCached) {
     const std::string url =
-        "https://github.com/DroneDB/test_data/raw/master/brighton/odm_orthophoto.tif";
+        testDataUrl("brighton/odm_orthophoto.tif");
     const fs::path cached = UserProfile::get()->getTilesDir() /
                             fs::path(Hash::strCRC64(url) + ".tif");
     io::assureIsRemoved(cached);

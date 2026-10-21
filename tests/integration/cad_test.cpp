@@ -25,6 +25,8 @@
 #include "raster_cache.h"
 #include "test.h"
 #include "testarea.h"
+#include "testfs.h"
+#include "utils.h"
 #include "vector.h"
 #include "vector_query.h"
 
@@ -37,8 +39,7 @@ namespace
 
     using namespace ddb;
 
-    const char *kAssetBaseUrl =
-        "https://github.com/DroneDB/test_data/raw/refs/heads/master/vector/autocad/";
+    const std::string kAssetBaseUrl = testDataUrl("vector/autocad/");
 
     fs::path cadAsset(TestArea &ta, const std::string &name)
     {
@@ -49,30 +50,12 @@ namespace
             fs::copy_file(src, dst, fs::copy_options::overwrite_existing);
             return dst;
         }
-        return ta.downloadTestAsset(std::string(kAssetBaseUrl) + name, name);
+        return ta.downloadTestAsset(kAssetBaseUrl + name, name);
     }
 
     bool converterAvailable()
     {
         return !cad::findDwg2DxfBinary().empty();
-    }
-
-    void setEnv(const char *name, const std::string &value)
-    {
-#ifdef _WIN32
-        _putenv_s(name, value.c_str());
-#else
-        setenv(name, value.c_str(), 1);
-#endif
-    }
-
-    void unsetEnv(const char *name)
-    {
-#ifdef _WIN32
-        _putenv_s(name, "");
-#else
-        unsetenv(name);
-#endif
     }
 
 #define REQUIRE_CONVERTER()                                                    \
@@ -246,14 +229,9 @@ namespace
         const auto dwg = cadAsset(ta, "example_2018.dwg");
         cadAsset(ta, "example_2018.prj");
 
-        const char *prev = std::getenv("DDB_DWG2DXF_PATH");
-        const std::string saved = prev ? prev : "";
-        setEnv("DDB_DWG2DXF_PATH", ta.getPath("missing/dwg2dxf").string());
+        EnvVarGuard noConverter("DDB_DWG2DXF_PATH", ta.getPath("missing/dwg2dxf").string());
         const auto msg = buildError(dwg, ta.getPath("build"));
-        if (prev)
-            setEnv("DDB_DWG2DXF_PATH", saved);
-        else
-            unsetEnv("DDB_DWG2DXF_PATH");
+        noConverter.restore();
 
         EXPECT_NE(msg.find("dwg2dxf"), std::string::npos) << msg;
         EXPECT_NE(msg.find("DDB_DWG2DXF_PATH"), std::string::npos) << msg;
@@ -394,7 +372,7 @@ namespace
     TEST(cadVector, CadWithoutCrsInsideLonLatStillBuilds)
     {
         TestArea ta(TEST_NAME, true);
-        const auto dxf = ta.downloadTestAsset(std::string(kAssetBaseUrl) + "autocad.dxf", "autocad.dxf");
+        const auto dxf = ta.downloadTestAsset(kAssetBaseUrl + "autocad.dxf", "autocad.dxf");
         const auto out = ta.getPath("build");
 
         ASSERT_NO_THROW(buildVector(dxf.string(), out.string()));
@@ -751,14 +729,9 @@ namespace
     TEST_F(CadIndex, DwgWithoutConverterIsIndexedWithWarning)
     {
         const auto dwg = cadAsset(*ta, "utm32n_site_dwg.dwg");
-        const char *prev = std::getenv("DDB_DWG2DXF_PATH");
-        const std::string saved = prev ? prev : "";
-        setEnv("DDB_DWG2DXF_PATH", ta->getPath("missing/dwg2dxf").string());
+        EnvVarGuard noConverter("DDB_DWG2DXF_PATH", ta->getPath("missing/dwg2dxf").string());
         ddb::addToIndex(db.get(), {dwg.string()});
-        if (prev)
-            setEnv("DDB_DWG2DXF_PATH", saved);
-        else
-            unsetEnv("DDB_DWG2DXF_PATH");
+        noConverter.restore();
 
         Entry e;
         ASSERT_TRUE(ddb::getEntry(db.get(), "utm32n_site_dwg.dwg", e));

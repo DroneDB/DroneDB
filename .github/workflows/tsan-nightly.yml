@@ -54,9 +54,9 @@ jobs:
           max_attempts: 3
           retry_wait_seconds: 30
           command: |
-            # RelWithDebInfo, not Debug: the CI triplet is release-only, and a Debug config selects
-            # the (missing) debug link interfaces of the static Qt/vcpkg targets
-            cmake -S . -B build-tsan -DVCPKG_OVERLAY_TRIPLETS=${{ github.workspace }}/vcpkg-triplets -DVCPKG_HOST_TRIPLET=x64-linux-release -DVCPKG_TARGET_TRIPLET=x64-linux-release -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_BUILD_TYPE=RelWithDebInfo "-DCMAKE_CXX_FLAGS_RELWITHDEBINFO=-g -O1" "-DCMAKE_C_FLAGS_RELWITHDEBINFO=-g -O1" -DCMAKE_MAP_IMPORTED_CONFIG_RELWITHDEBINFO=Release -DDDB_ENABLE_TSAN=ON
+            # Release with -g -O1 (assertions on, no NDEBUG): the CI triplet is release-only, and any other config selects
+            # link interfaces or imported locations the static Qt/vcpkg targets do not provide
+            cmake -S . -B build-tsan -DVCPKG_OVERLAY_TRIPLETS=${{ github.workspace }}/vcpkg-triplets -DVCPKG_HOST_TRIPLET=x64-linux-release -DVCPKG_TARGET_TRIPLET=x64-linux-release -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_BUILD_TYPE=Release "-DCMAKE_CXX_FLAGS_RELEASE=-g -O1" "-DCMAKE_C_FLAGS_RELEASE=-g -O1" -DDDB_ENABLE_TSAN=ON
       - name: Build the test binaries
         # The library objects are compiled once for both binaries (src/CMakeLists.txt)
         run: cmake --build build-tsan --target ddb_unit_tests ddbtest -j$(nproc)

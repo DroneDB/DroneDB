@@ -10,17 +10,10 @@
 #include "gtest/gtest.h"
 #include "test.h"
 #include "testarea.h"
+#include "testfs.h"
+#include "utils.h"
 #include "untwine_runner.h"
 
-#ifdef _WIN32
-#include <stdlib.h>
-#define DDB_SETENV(name, value) _putenv_s(name, value)
-#define DDB_UNSETENV(name) _putenv_s(name, "")
-#else
-#include <stdlib.h>
-#define DDB_SETENV(name, value) setenv(name, value, 1)
-#define DDB_UNSETENV(name) unsetenv(name)
-#endif
 
 namespace {
 
@@ -29,9 +22,9 @@ namespace {
 struct UntwineEnvReset {
     UntwineEnvReset() { ddb::untwine::findUntwineBinary(true); }
     ~UntwineEnvReset() {
-        DDB_UNSETENV("DDB_UNTWINE_PATH");
-        DDB_UNSETENV("DDB_USE_PDAL_COPC");
-        DDB_UNSETENV("DDB_COPC_BACKEND");
+        unsetEnv("DDB_UNTWINE_PATH");
+        unsetEnv("DDB_USE_PDAL_COPC");
+        unsetEnv("DDB_COPC_BACKEND");
         ddb::untwine::findUntwineBinary(true);
     }
 };
@@ -41,7 +34,7 @@ using namespace ddb;
 TEST(pointcloud, parse) {
     TestArea ta(TEST_NAME);
     fs::path pc = ta.downloadTestAsset(
-        "https://github.com/DroneDB/test_data/raw/master/brighton/point_cloud.laz",
+        testDataUrl("brighton/point_cloud.laz"),
         "point_cloud.laz");
 
     auto fp = ddb::fingerprint(pc);
@@ -55,7 +48,7 @@ TEST(pointcloud, parse) {
 TEST(pointcloud, copc) {
     TestArea ta(TEST_NAME);
     fs::path pc = ta.downloadTestAsset(
-        "https://github.com/DroneDB/test_data/raw/master/brighton/point_cloud.laz",
+        testDataUrl("brighton/point_cloud.laz"),
         "point_cloud.laz");
 
     ddb::buildCopc({pc.string()}, ta.getFolder("copc").string());
@@ -65,7 +58,7 @@ TEST(pointcloud, copc) {
 TEST(pointcloud, toledoInfo) {
     TestArea ta(TEST_NAME);
     fs::path pc = ta.downloadTestAsset(
-        "https://github.com/DroneDB/test_data/raw/refs/heads/master/point-clouds/toledo.laz",
+        testDataUrl("point-clouds/toledo.laz"),
         "point_cloud.laz");
 
     auto fp = ddb::fingerprint(pc);
@@ -82,7 +75,7 @@ TEST(pointcloud, toledoInfo) {
 TEST(pointcloud, copcFromPly) {
     TestArea ta(TEST_NAME);
     fs::path pc = ta.downloadTestAsset(
-        "https://github.com/DroneDB/test_data/raw/refs/heads/master/point-clouds/point_cloud.ply",
+        testDataUrl("point-clouds/point_cloud.ply"),
         "point_cloud.ply");
 
     auto fp = ddb::fingerprint(pc);
@@ -108,7 +101,7 @@ TEST(pointcloud, copcFromPly) {
 TEST(pointcloud, nexusFromPlyMesh) {
     TestArea ta(TEST_NAME);
     fs::path pc = ta.downloadTestAsset(
-        "https://github.com/DroneDB/test_data/raw/refs/heads/master/point-clouds/odm_25dmesh.ply",
+        testDataUrl("point-clouds/odm_25dmesh.ply"),
         "odm_25dmesh.ply");
 
     // Verify the file is correctly identified as a Model (mesh), not PointCloud
@@ -132,7 +125,7 @@ TEST(pointcloud, nexusFromPlyMesh) {
 TEST(pointcloud, ptsInfo) {
     TestArea ta(TEST_NAME);
     fs::path pc = ta.downloadTestAsset(
-        "https://github.com/DroneDB/test_data/raw/refs/heads/master/point-clouds/test.pts",
+        testDataUrl("point-clouds/test.pts"),
         "test.pts");
 
     auto fp = ddb::fingerprint(pc);
@@ -148,7 +141,7 @@ TEST(pointcloud, ptsInfo) {
 TEST(pointcloud, xyzInfo) {
     TestArea ta(TEST_NAME);
     fs::path pc = ta.downloadTestAsset(
-        "https://github.com/DroneDB/test_data/raw/refs/heads/master/point-clouds/autzen-bmx-largersample.xyz",
+        testDataUrl("point-clouds/autzen-bmx-largersample.xyz"),
         "autzen-bmx-largersample.xyz");
 
     auto fp = ddb::fingerprint(pc);
@@ -164,7 +157,7 @@ TEST(pointcloud, xyzInfo) {
 TEST(pointcloud, copcFromPts) {
     TestArea ta(TEST_NAME);
     fs::path pc = ta.downloadTestAsset(
-        "https://github.com/DroneDB/test_data/raw/refs/heads/master/point-clouds/test.pts",
+        testDataUrl("point-clouds/test.pts"),
         "test.pts");
 
     auto fp = ddb::fingerprint(pc);
@@ -184,7 +177,7 @@ TEST(pointcloud, copcFromPts) {
 TEST(pointcloud, copcFromXyz) {
     TestArea ta(TEST_NAME);
     fs::path pc = ta.downloadTestAsset(
-        "https://github.com/DroneDB/test_data/raw/refs/heads/master/point-clouds/autzen-bmx-largersample.xyz",
+        testDataUrl("point-clouds/autzen-bmx-largersample.xyz"),
         "autzen-bmx-largersample.xyz");
 
     auto fp = ddb::fingerprint(pc);
@@ -204,7 +197,7 @@ TEST(pointcloud, copcFromXyz) {
 TEST(pointcloud, e57Info) {
     TestArea ta(TEST_NAME);
     fs::path pc = ta.downloadTestAsset(
-        "https://github.com/DroneDB/test_data/raw/refs/heads/master/point-clouds/A4.e57",
+        testDataUrl("point-clouds/A4.e57"),
         "A4.e57");
 
     auto fp = ddb::fingerprint(pc);
@@ -218,7 +211,7 @@ TEST(pointcloud, e57Info) {
 TEST(pointcloud, copcFromE57) {
     TestArea ta(TEST_NAME);
     fs::path pc = ta.downloadTestAsset(
-        "https://github.com/DroneDB/test_data/raw/refs/heads/master/point-clouds/A4.e57",
+        testDataUrl("point-clouds/A4.e57"),
         "A4.e57");
 
     auto fp = ddb::fingerprint(pc);
@@ -284,7 +277,7 @@ TEST(pointcloud, xyzCommaSeparated) {
     // Test standard comma-separated format (existing test data)
     TestArea ta(TEST_NAME);
     fs::path pc = ta.downloadTestAsset(
-        "https://github.com/DroneDB/test_data/raw/master/point-clouds/utm17_1.xyz",
+        testDataUrl("point-clouds/utm17_1.xyz"),
         "utm17_1.xyz");
 
     ddb::PointCloudInfo info;
@@ -346,7 +339,7 @@ TEST(pointcloud, xyzSemicolonSeparated) {
 TEST(pointcloud, copcBackendForcePdal) {
     // DDB_USE_PDAL_COPC=1 must always select PDAL, regardless of binary.
     UntwineEnvReset reset;
-    DDB_SETENV("DDB_USE_PDAL_COPC", "1");
+    setEnv("DDB_USE_PDAL_COPC", "1");
     EXPECT_EQ(ddb::untwine::resolveBackend(ddb::CopcBackend::Auto), ddb::CopcBackend::Pdal);
     EXPECT_EQ(ddb::untwine::resolveBackend(ddb::CopcBackend::Untwine), ddb::CopcBackend::Pdal);
 }
@@ -354,7 +347,7 @@ TEST(pointcloud, copcBackendForcePdal) {
 TEST(pointcloud, copcBackendMissingBinaryFallsBackToPdal) {
     // Pointing DDB_UNTWINE_PATH to a non-existent file must fall back to PDAL on Auto.
     UntwineEnvReset reset;
-    DDB_SETENV("DDB_UNTWINE_PATH", "/nonexistent/path/to/untwine_does_not_exist");
+    setEnv("DDB_UNTWINE_PATH", "/nonexistent/path/to/untwine_does_not_exist");
     EXPECT_TRUE(ddb::untwine::findUntwineBinary(true).empty());
     EXPECT_EQ(ddb::untwine::resolveBackend(ddb::CopcBackend::Auto), ddb::CopcBackend::Pdal);
 }
@@ -362,7 +355,7 @@ TEST(pointcloud, copcBackendMissingBinaryFallsBackToPdal) {
 TEST(pointcloud, copcBackendForceUntwineMissingThrows) {
     // Forcing Untwine when no binary is present must raise UntwineException.
     UntwineEnvReset reset;
-    DDB_SETENV("DDB_UNTWINE_PATH", "/nonexistent/path/to/untwine_does_not_exist");
+    setEnv("DDB_UNTWINE_PATH", "/nonexistent/path/to/untwine_does_not_exist");
     ddb::untwine::findUntwineBinary(true);
     EXPECT_THROW(ddb::untwine::resolveBackend(ddb::CopcBackend::Untwine), ddb::UntwineException);
 }
@@ -371,12 +364,12 @@ TEST(pointcloud, copcBuildFallbackWhenUntwineUnavailable) {
     // End-to-end: even with a fake binary path, buildCopc should produce a valid COPC
     // by falling back to the PDAL pipeline.
     UntwineEnvReset reset;
-    DDB_SETENV("DDB_UNTWINE_PATH", "/nonexistent/path/to/untwine_does_not_exist");
+    setEnv("DDB_UNTWINE_PATH", "/nonexistent/path/to/untwine_does_not_exist");
     ddb::untwine::findUntwineBinary(true);
 
     TestArea ta(TEST_NAME);
     fs::path pc = ta.downloadTestAsset(
-        "https://github.com/DroneDB/test_data/raw/master/brighton/point_cloud.laz",
+        testDataUrl("brighton/point_cloud.laz"),
         "point_cloud.laz");
 
     ddb::buildCopc({pc.string()}, ta.getFolder("copc").string());
@@ -385,11 +378,11 @@ TEST(pointcloud, copcBuildFallbackWhenUntwineUnavailable) {
 
 TEST(pointcloud, copcBuildForcePdalProducesValidOutput) {
     UntwineEnvReset reset;
-    DDB_SETENV("DDB_USE_PDAL_COPC", "1");
+    setEnv("DDB_USE_PDAL_COPC", "1");
 
     TestArea ta(TEST_NAME);
     fs::path pc = ta.downloadTestAsset(
-        "https://github.com/DroneDB/test_data/raw/master/brighton/point_cloud.laz",
+        testDataUrl("brighton/point_cloud.laz"),
         "point_cloud.laz");
 
     ddb::buildCopc({pc.string()}, ta.getFolder("copc").string());
@@ -412,7 +405,7 @@ TEST(pointcloud, copcBuildWithUntwineWhenAvailable) {
 
     TestArea ta(TEST_NAME);
     fs::path pc = ta.downloadTestAsset(
-        "https://github.com/DroneDB/test_data/raw/master/brighton/point_cloud.laz",
+        testDataUrl("brighton/point_cloud.laz"),
         "point_cloud.laz");
 
     ddb::buildCopc({pc.string()}, ta.getFolder("copc").string());

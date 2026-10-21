@@ -7,6 +7,7 @@
 #include "exif.h"
 #include "test.h"
 #include "testarea.h"
+#include "testfs.h"
 
 namespace
 {
@@ -61,7 +62,7 @@ namespace
         // images-gps-acc contains senseFly/Parrot images with Xmp.Camera.GPSXYAccuracy/GPSZAccuracy
         TestArea ta(TEST_NAME);
         fs::path imagePath = ta.downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/refs/heads/master/images-gps-acc/IMG_1297_RGB.jpg",
+            testDataUrl("images-gps-acc/IMG_1297_RGB.jpg"),
             "IMG_1297_RGB.jpg");
 
         ASSERT_TRUE(fs::exists(imagePath)) << "Test image not found";
@@ -93,13 +94,13 @@ namespace
         TestArea ta(TEST_NAME);
 
         fs::path img1 = ta.downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/refs/heads/master/images-gps-acc/IMG_1297_RGB.jpg",
+            testDataUrl("images-gps-acc/IMG_1297_RGB.jpg"),
             "IMG_1297_RGB.jpg");
         fs::path img2 = ta.downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/refs/heads/master/images-gps-acc/IMG_1298_RGB.jpg",
+            testDataUrl("images-gps-acc/IMG_1298_RGB.jpg"),
             "IMG_1298_RGB.jpg");
         fs::path img3 = ta.downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/refs/heads/master/images-gps-acc/IMG_1299_RGB.jpg",
+            testDataUrl("images-gps-acc/IMG_1299_RGB.jpg"),
             "IMG_1299_RGB.jpg");
 
         ASSERT_TRUE(fs::exists(img1));
@@ -135,7 +136,7 @@ namespace
         // Standard DJI images should NOT have GPS accuracy properties
         TestArea ta(TEST_NAME);
         fs::path imagePath = ta.downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/refs/heads/master/images/DJI_0018.JPG",
+            testDataUrl("images/DJI_0018.JPG"),
             "DJI_0018.JPG");
 
         ASSERT_TRUE(fs::exists(imagePath)) << "Test image not found";
@@ -163,7 +164,7 @@ namespace
         // Standard DJI images should have captureTime even without GPSDateStamp/GPSTimeStamp
         TestArea ta(TEST_NAME);
         fs::path imagePath = ta.downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/refs/heads/master/images/DJI_0018.JPG",
+            testDataUrl("images/DJI_0018.JPG"),
             "DJI_0018.JPG");
 
         ASSERT_TRUE(fs::exists(imagePath)) << "Test image not found";
@@ -185,7 +186,7 @@ namespace
         // senseFly images should have captureTime
         TestArea ta(TEST_NAME);
         fs::path imagePath = ta.downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/refs/heads/master/images-gps-acc/IMG_1297_RGB.jpg",
+            testDataUrl("images-gps-acc/IMG_1297_RGB.jpg"),
             "IMG_1297_RGB.jpg");
 
         ASSERT_TRUE(fs::exists(imagePath)) << "Test image not found";
@@ -214,7 +215,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
         fs::path imagePath = ta.downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/refs/heads/master/images-gps-acc/IMG_1297_RGB.jpg",
+            testDataUrl("images-gps-acc/IMG_1297_RGB.jpg"),
             "IMG_1297_RGB.jpg");
 
         ASSERT_TRUE(fs::exists(imagePath)) << "Test image not found";

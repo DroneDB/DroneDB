@@ -5,6 +5,7 @@
 #include "gtest/gtest.h"
 #include "test.h"
 #include "testarea.h"
+#include "testfs.h"
 
 #include "thermal.h"
 #include "raster_analysis.h"
@@ -18,7 +19,7 @@ namespace {
 
 using namespace ddb;
 
-const std::string THERMAL_BASE_URL = "https://github.com/DroneDB/test_data/raw/refs/heads/master/thermal/";
+const std::string THERMAL_BASE_URL = testDataUrl("thermal/");
 
 // ============================================================
 // Detection Tests

@@ -29,6 +29,7 @@
 #include "pointcloud.h"
 #include "test.h"
 #include "testarea.h"
+#include "testfs.h"
 #include "thumbs.h"
 
 namespace
@@ -112,7 +113,7 @@ namespace
     {
         TestArea ta(TEST_NAME, true);
         const fs::path jpg = ta.downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/master/images/DJI_0027.JPG", "DJI_0027.JPG");
+            testDataUrl("images/DJI_0027.JPG"), "DJI_0027.JPG");
         // Patch the SOF0 frame header height to 0 so Exiv2 reports pixelHeight()==0.
         std::ifstream in(jpg, std::ios::binary);
         std::vector<unsigned char> bytes((std::istreambuf_iterator<char>(in)), {});
@@ -192,7 +193,7 @@ namespace
     {
         TestArea ta(TEST_NAME, true);
         const fs::path laz = ta.downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/master/brighton/point_cloud.laz", "point_cloud.laz");
+            testDataUrl("brighton/point_cloud.laz"), "point_cloud.laz");
         buildCopc({laz.string()}, ta.getFolder("copc").string());
         const fs::path copc = ta.getFolder("copc") / "cloud.copc.laz";
         ASSERT_TRUE(fs::exists(copc));

@@ -5,13 +5,13 @@
 // DDB-10: JPEG thumbnails decode an embedded MPF preview of the same framing when it is
 // large enough
 
-#include <fstream>
 
 #include "embedded_preview.h"
 #include "raster_test_utils.h"
 #include "test.h"
 #include "testarea.h"
 #include "thumbs.h"
+#include "utils.h"
 
 namespace
 {
@@ -79,13 +79,6 @@ namespace
         EXPECT_EQ(file.size(), mainSize);
         file.insert(file.end(), preview.begin(), preview.end());
         return file;
-    }
-
-    fs::path writeFile(const fs::path &path, const std::vector<uint8_t> &bytes)
-    {
-        std::ofstream out(path, std::ios::binary);
-        out.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
-        return path;
     }
 
     DecodedImage thumbnail(const fs::path &image, int size)
@@ -175,7 +168,7 @@ namespace
         EXPECT_EQ(layout.height, 480);
         EXPECT_TRUE(layout.previews.empty());
 
-        const auto text = writeFile(ta.getPath("text.jpg"), {'h', 'e', 'l', 'l', 'o'});
+        const auto text = writeFile(ta.getPath("text.jpg"), std::string("hello"));
         EXPECT_EQ(readJpegLayout(text).width, 0);
     }
 }

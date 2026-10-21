@@ -86,7 +86,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
         fs::path vector = ta.downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/refs/heads/master/vector/test2.geojson",
+            testDataUrl("vector/test2.geojson"),
             "test.geojson");
         fs::path baseDir = ta.getPath("build");
 
@@ -98,7 +98,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
         fs::path vector = ta.downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/refs/heads/master/vector/eiffel.geojson",
+            testDataUrl("vector/eiffel.geojson"),
             "eiffel.geojson");
         fs::path baseDir = ta.getPath("build");
 
@@ -109,7 +109,7 @@ namespace
     MANUAL_TEST(testVector, geoJsonIta)
     {
         TestFS testFS(
-            "https://github.com/DroneDB/test_data/raw/refs/heads/master/vector/ita.zip",
+            testDataUrl("vector/ita.zip"),
             "ita", true);
 
         const std::string vector = "ita.geojson";
@@ -122,7 +122,7 @@ namespace
     TEST(testVector, shapeFileComplete)
     {
         TestFS testFS(
-            "https://github.com/DroneDB/test_data/raw/refs/heads/master/vector/shapefile/shape_shape_complete.zip",
+            testDataUrl("vector/shapefile/shape_shape_complete.zip"),
             "shape_shape_complete", true);
 
         buildVector("shape.shp", "build");
@@ -132,7 +132,7 @@ namespace
     TEST(testVector, shapeLineComplete)
     {
         TestFS testFS(
-            "https://github.com/DroneDB/test_data/raw/refs/heads/master/vector/shapefile/shape_line_complete2.zip",
+            testDataUrl("vector/shapefile/shape_line_complete2.zip"),
             "shape_line_complete", true);
 
         buildVector("line.shp", "build");
@@ -142,7 +142,7 @@ namespace
     TEST(testVector, shapeIta)
     {
         TestFS testFS(
-            "https://github.com/DroneDB/test_data/raw/refs/heads/master/vector/shapefile/shape_ita.zip",
+            testDataUrl("vector/shapefile/shape_ita.zip"),
             "shape_ita", true);
 
         buildVector("ita.shp", "build");
@@ -153,7 +153,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
         fs::path linePack = ta.downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/refs/heads/master/vector/shapefile/line-pack.shz",
+            testDataUrl("vector/shapefile/line-pack.shz"),
             "line-pack.shz");
         const auto input = ta.getPath("line-pack.shz");
         const auto baseDir = ta.getPath("build");
@@ -166,7 +166,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
         ta.downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/refs/heads/master/vector/shapefile/point-pack.shz",
+            testDataUrl("vector/shapefile/point-pack.shz"),
             "point-pack.shz");
         buildVector(ta.getPath("point-pack.shz").string(),
                     ta.getPath("build").string());
@@ -177,7 +177,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
         ta.downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/refs/heads/master/vector/shapefile/shape-pack.shz",
+            testDataUrl("vector/shapefile/shape-pack.shz"),
             "shape-pack.shz");
         buildVector(ta.getPath("shape-pack.shz").string(),
                     ta.getPath("build").string());
@@ -188,7 +188,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
         ta.downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/refs/heads/master/vector/autocad/autocad.dxf",
+            testDataUrl("vector/autocad/autocad.dxf"),
             "autocad.dxf");
         buildVector(ta.getPath("autocad.dxf").string(),
                     ta.getPath("build").string());
@@ -199,7 +199,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
         ta.downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/refs/heads/master/vector/autocad/civil_war_by_campaign.dxf",
+            testDataUrl("vector/autocad/civil_war_by_campaign.dxf"),
             "civil_war_by_campaign.dxf");
         buildVector(ta.getPath("civil_war_by_campaign.dxf").string(),
                     ta.getPath("build").string());
@@ -210,7 +210,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
         ta.downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/refs/heads/master/vector/test.gpkg",
+            testDataUrl("vector/test.gpkg"),
             "test.gpkg");
         buildVector(ta.getPath("test.gpkg").string(),
                     ta.getPath("build").string());
@@ -221,7 +221,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
         ta.downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/refs/heads/master/vector/test.gml",
+            testDataUrl("vector/test.gml"),
             "test.gml");
         buildVector(ta.getPath("test.gml").string(),
                     ta.getPath("build").string());
@@ -232,7 +232,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
         ta.downloadTestAsset(
-            "https://raw.githubusercontent.com/DroneDB/test_data/refs/heads/master/vector/cornishlight.kml",
+            testDataUrl("vector/cornishlight.kml"),
             "cornishlight.kml");
         buildVector(ta.getPath("cornishlight.kml").string(),
                     ta.getPath("build").string());
@@ -243,7 +243,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
         ta.downloadTestAsset(
-            "https://raw.githubusercontent.com/DroneDB/test_data/refs/heads/master/vector/tour_de_france.kml",
+            testDataUrl("vector/tour_de_france.kml"),
             "tour_de_france.kml");
         buildVector(ta.getPath("tour_de_france.kml").string(),
                     ta.getPath("build").string());
@@ -266,7 +266,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
         ta.downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/refs/heads/master/vector/blackbirds.kmz",
+            testDataUrl("vector/blackbirds.kmz"),
             "blackbirds.kmz");
         buildVector(ta.getPath("blackbirds.kmz").string(),
                     ta.getPath("build").string());
@@ -277,7 +277,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
         ta.downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/refs/heads/master/vector/civil_war_by_campaign.kmz",
+            testDataUrl("vector/civil_war_by_campaign.kmz"),
             "civil_war_by_campaign.kmz");
         buildVector(ta.getPath("civil_war_by_campaign.kmz").string(),
                     ta.getPath("build").string());
@@ -288,7 +288,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
         ta.downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/refs/heads/master/vector/tour_de_france.kmz",
+            testDataUrl("vector/tour_de_france.kmz"),
             "tour_de_france.kmz");
         buildVector(ta.getPath("tour_de_france.kmz").string(),
                     ta.getPath("build").string());
@@ -302,7 +302,7 @@ namespace
     MANUAL_TEST(testVector, bigShapefileMilan)
     {
         TestFS testFS(
-            "https://github.com/DroneDB/test_data/raw/refs/heads/master/vector/A010101.zip",
+            testDataUrl("vector/A010101.zip"),
             "A010101", true);
 
         buildVector("A010101.shp", "build");
@@ -334,7 +334,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
         ta.downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/refs/heads/master/vector/test2.geojson",
+            testDataUrl("vector/test2.geojson"),
             "test.geojson");
         const auto baseDir = ta.getPath("build");
         buildVector(ta.getPath("test.geojson").string(), baseDir.string());
@@ -361,7 +361,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
         ta.downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/refs/heads/master/vector/test2.geojson",
+            testDataUrl("vector/test2.geojson"),
             "test.geojson");
         const auto baseDir = ta.getPath("build");
 

@@ -23,6 +23,7 @@
 #include "rad.h"
 #include "test.h"
 #include "testarea.h"
+#include "utils.h"
 #include "thumbs.h"
 
 namespace {
@@ -643,28 +644,12 @@ TEST(gsplat, malformedRadThrows) {
 // RAII guard: sets an environment variable on construction and restores it (plus refreshes
 // the build-lod discovery cache) on destruction, even when the test body throws.
 struct BuildLodEnvRestorer {
-    std::string key, prev;
-    bool hadPrev = false;
-    BuildLodEnvRestorer(const char* k, const char* v) : key(k) {
-        const char* old = std::getenv(k);
-        hadPrev = old != nullptr;
-        prev = old ? old : "";
-#ifdef _WIN32
-        _putenv_s(k, v);
-#else
-        setenv(k, v, 1);
-#endif
+    EnvVarGuard env;
+    BuildLodEnvRestorer(const char* k, const char* v) : env(k, v) {
         ddb::buildlod::findBuildLodBinary(/*forceRefresh=*/true);
     }
     ~BuildLodEnvRestorer() {
-#ifdef _WIN32
-        _putenv_s(key.c_str(), prev.c_str());
-#else
-        if (hadPrev)
-            setenv(key.c_str(), prev.c_str(), 1);
-        else
-            unsetenv(key.c_str());
-#endif
+        env.restore();  // before the refresh, which reads it
         ddb::buildlod::findBuildLodBinary(/*forceRefresh=*/true);
     }
 };

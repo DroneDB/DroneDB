@@ -16,6 +16,7 @@
 #include "gdal_inc.h"
 #include "test.h"
 #include "testarea.h"
+#include "testfs.h"
 
 namespace
 {
@@ -150,7 +151,7 @@ namespace
     {
         TestArea ta(TEST_NAME, true);
         const fs::path input = ta.downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/master/ortho/brighton-beach.tif", "brighton-beach.tif");
+            testDataUrl("ortho/brighton-beach.tif"), "brighton-beach.tif");
 
         ConfigSnapshot snap({"DDB_COG_CACHE_MB", "CPL_DEBUG"});
         CPLSetConfigOption("DDB_COG_CACHE_MB", "64");

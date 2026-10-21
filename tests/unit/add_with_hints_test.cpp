@@ -36,7 +36,8 @@ fs::path initDataset(TestArea &ta) {
     return root;
 }
 
-HintedFile writeFile(const fs::path &path, const std::string &content) {
+// Writes the file and returns what a caller would hint for it
+HintedFile writeHintedFile(const fs::path &path, const std::string &content) {
     fileWriteAllText(path, content);
     return {path, static_cast<long long>(fs::file_size(path)), io::Path(path).getModifiedTimePrecise()};
 }
@@ -56,7 +57,7 @@ json addWithHint(const fs::path &root, const HintedFile &f, const char *sha256, 
 TEST(DDBAddWithHints, matchingHintIsUsedWithoutReadingTheFile) {
     TestArea ta(TEST_NAME, true);
     const auto root = initDataset(ta);
-    const auto f = writeFile(root / "a.bin", "the content");
+    const auto f = writeHintedFile(root / "a.bin", "the content");
 
     // The fake digest can only come from the hint: the file was not read
     const auto j = addWithHint(root, f, FakeHash);
@@ -69,7 +70,7 @@ TEST(DDBAddWithHints, matchingHintIsUsedWithoutReadingTheFile) {
 TEST(DDBAddWithHints, sizeMismatchHashesTheFile) {
     TestArea ta(TEST_NAME, true);
     const auto root = initDataset(ta);
-    auto f = writeFile(root / "a.bin", "the content");
+    auto f = writeHintedFile(root / "a.bin", "the content");
     f.size += 1; // the writer saw another size: the hint is stale
 
     const auto j = addWithHint(root, f, FakeHash);
@@ -81,7 +82,7 @@ TEST(DDBAddWithHints, sizeMismatchHashesTheFile) {
 TEST(DDBAddWithHints, mtimeMismatchHashesTheFile) {
     TestArea ta(TEST_NAME, true);
     const auto root = initDataset(ta);
-    auto f = writeFile(root / "a.bin", "the content");
+    auto f = writeHintedFile(root / "a.bin", "the content");
     f.mtime -= 10; // written again after the hash was computed
 
     const auto j = addWithHint(root, f, FakeHash);
@@ -93,7 +94,7 @@ TEST(DDBAddWithHints, mtimeMismatchHashesTheFile) {
 TEST(DDBAddWithHints, noDigestHashesTheFile) {
     TestArea ta(TEST_NAME, true);
     const auto root = initDataset(ta);
-    const auto f = writeFile(root / "a.bin", "the content");
+    const auto f = writeHintedFile(root / "a.bin", "the content");
 
     const auto j = addWithHint(root, f, nullptr);
 
@@ -104,11 +105,11 @@ TEST(DDBAddWithHints, noDigestHashesTheFile) {
 TEST(DDBAddWithHints, replacedFileWithNewHintIsUpdated) {
     TestArea ta(TEST_NAME, true);
     const auto root = initDataset(ta);
-    const auto first = writeFile(root / "a.bin", "first");
+    const auto first = writeHintedFile(root / "a.bin", "first");
     const auto firstHash = Hash::fileSHA256(first.path.string());
     ASSERT_EQ(addWithHint(root, first, firstHash.c_str())["entries"].size(), 1u);
 
-    const auto second = writeFile(root / "a.bin", "second, longer");
+    const auto second = writeHintedFile(root / "a.bin", "second, longer");
     const auto secondHash = Hash::fileSHA256(second.path.string());
     const auto j = addWithHint(root, second, secondHash.c_str());
 
@@ -120,7 +121,7 @@ TEST(DDBAddWithHints, replacedFileWithNewHintIsUpdated) {
 TEST(DDBAddWithHints, missingFileFailsOnlyItselfWithoutStopOnError) {
     TestArea ta(TEST_NAME, true);
     const auto root = initDataset(ta);
-    const auto good = writeFile(root / "good.bin", "good");
+    const auto good = writeHintedFile(root / "good.bin", "good");
     const std::string goodPath = good.path.string();
     const std::string gonePath = (root / "gone.bin").string();
 

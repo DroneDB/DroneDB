@@ -5,6 +5,7 @@
 #include "ddb.h"
 #include "test.h"
 #include "testarea.h"
+#include "testfs.h"
 #include "vector.h"
 #include "vector_query.h"
 #include "raster_cache.h"
@@ -42,7 +43,7 @@ namespace
         static TestArea ta("testVectorApi_shared");
         static const fs::path gpkg = BuildAndGetGpkg(
             ta,
-            "https://github.com/DroneDB/test_data/raw/refs/heads/master/vector/test2.geojson",
+            testDataUrl("vector/test2.geojson"),
             "test.geojson");
         return gpkg;
     }

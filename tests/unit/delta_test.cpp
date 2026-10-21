@@ -25,6 +25,7 @@
 #include "metamanager.h"
 #include "test.h"
 #include "testarea.h"
+#include "utils.h"
 
 namespace
 {
@@ -243,16 +244,10 @@ namespace
         EXPECT_LT(ms, 1000);
     }
 
-    struct StampFixture
+    struct StampFixture : IndexFixture
     {
-        fs::path root;
-        std::unique_ptr<Database> db;
-
-        explicit StampFixture(const std::string &name)
+        explicit StampFixture(const std::string &name) : IndexFixture(name)
         {
-            TestArea ta(name, true);
-            root = ta.getFolder("ds");
-            initIndex(root.string());
             fs::create_directories(root / "dir");
             // Names that need escaping in JSON (Windows forbids quotes and control
             // characters in file names)
@@ -263,11 +258,7 @@ namespace
                      {"dir/tab\tname.txt", "d"},
 #endif
                      {"dir/ünïcödé.txt", "e"}})
-            {
-                std::ofstream f(root / rel);
-                f << content;
-            }
-            db = ddb::open(root.string(), false);
+                writeFile(root / rel, content);
             addToIndex(db.get(), {(root / "a.txt").string(), (root / "dir").string()});
             db->getMetaManager()->add("annotations", R"({"note":"x"})", "a.txt", root.string());
             db->getMetaManager()->add("annotations", R"({"note":"y"})", "", root.string());

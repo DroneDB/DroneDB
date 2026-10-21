@@ -31,17 +31,11 @@
 #include "registry.h"
 #include "test.h"
 #include "testarea.h"
+#include "utils.h"
 
 namespace
 {
     using namespace ddb;
-
-    void writeFile(const fs::path &p, const std::string &content)
-    {
-        fs::create_directories(p.parent_path());
-        std::ofstream f(p, std::ios::binary);
-        f << content;
-    }
 
     std::string readFile(const fs::path &p)
     {
@@ -83,32 +77,20 @@ namespace
         explicit LineHook(std::function<void(const std::string &)> onLine) : onLine(std::move(onLine)) {}
     };
 
-    struct Fixture
+    struct Fixture : IndexFixture
     {
-        fs::path root;
         fs::path source; // like the Registry push folder: inside .ddb/tmp, same volume
-        std::unique_ptr<Database> db;
 
-        explicit Fixture(const std::string &name)
+        explicit Fixture(const std::string &name) : IndexFixture(name)
         {
-            TestArea ta(name, true);
-            root = ta.getFolder("ds");
-            initIndex(root.string());
             source = root / ".ddb" / "tmp" / "push-test" / "add";
             fs::create_directories(source);
 
             writeFile(root / "keep.txt", "keep");
             writeFile(root / "old.txt", "old");
             writeFile(root / "dir" / "gone.txt", "gone");
-            db = ddb::open(root.string(), false);
             addToIndex(db.get(), {(root / "keep.txt").string(), (root / "old.txt").string(),
                                   (root / "dir").string()});
-        }
-
-        std::string hashOf(const std::string &rel) const
-        {
-            Entry e;
-            return getEntry(db.get(), rel, e) ? e.hash : "<missing>";
         }
 
         // A file the remote side adds, staged in the source folder
@@ -132,7 +114,7 @@ namespace
         d.adds.push_back(AddAction("new", ""));
         d.adds.push_back(f.stage("new/a.txt", "alpha"));
         d.adds.push_back(f.stage("old.txt", "old, modified"));
-        d.removes.push_back(RemoveAction("dir/gone.txt", f.hashOf("dir/gone.txt")));
+        d.removes.push_back(RemoveAction("dir/gone.txt", hashOf(f.db.get(), "dir/gone.txt")));
         d.removes.push_back(RemoveAction("dir", ""));
 
         std::ostringstream out;
@@ -143,12 +125,12 @@ namespace
         EXPECT_EQ(readFile(f.root / "old.txt"), "old, modified");
         EXPECT_FALSE(fs::exists(f.root / "dir"));
 
-        EXPECT_EQ(f.hashOf("new"), "");
-        EXPECT_EQ(f.hashOf("new/a.txt"), Hash::fileSHA256((f.root / "new" / "a.txt").string()));
-        EXPECT_EQ(f.hashOf("old.txt"), Hash::fileSHA256((f.root / "old.txt").string()));
-        EXPECT_EQ(f.hashOf("dir"), "<missing>");
-        EXPECT_EQ(f.hashOf("dir/gone.txt"), "<missing>");
-        EXPECT_NE(f.hashOf("keep.txt"), "<missing>");
+        EXPECT_EQ(hashOf(f.db.get(), "new"), "");
+        EXPECT_EQ(hashOf(f.db.get(), "new/a.txt"), Hash::fileSHA256((f.root / "new" / "a.txt").string()));
+        EXPECT_EQ(hashOf(f.db.get(), "old.txt"), Hash::fileSHA256((f.root / "old.txt").string()));
+        EXPECT_EQ(hashOf(f.db.get(), "dir"), "<missing>");
+        EXPECT_EQ(hashOf(f.db.get(), "dir/gone.txt"), "<missing>");
+        EXPECT_NE(hashOf(f.db.get(), "keep.txt"), "<missing>");
 
         const auto log = out.str();
         EXPECT_NE(log.find("D\tdir/gone.txt\n"), std::string::npos) << log;
@@ -181,7 +163,7 @@ namespace
         // (computeDeltaLocals): it must not end up sharing its data with the original.
         Fixture f(TEST_NAME);
         Delta d;
-        d.adds.push_back(AddAction("copy-of-keep.txt", f.hashOf("keep.txt")));
+        d.adds.push_back(AddAction("copy-of-keep.txt", hashOf(f.db.get(), "keep.txt")));
         computeDeltaLocals(d, f.db.get(), f.source.string());
         ASSERT_TRUE(fs::exists(f.source / "copy-of-keep.txt"));
 
@@ -191,7 +173,7 @@ namespace
         EXPECT_EQ(readFile(f.root / "keep.txt"), "keep");
         EXPECT_EQ(fs::hard_link_count(f.root / "keep.txt"), 1u);
         EXPECT_EQ(fs::hard_link_count(f.root / "copy-of-keep.txt"), 1u);
-        EXPECT_EQ(f.hashOf("copy-of-keep.txt"), f.hashOf("keep.txt"));
+        EXPECT_EQ(hashOf(f.db.get(), "copy-of-keep.txt"), hashOf(f.db.get(), "keep.txt"));
     }
 
     TEST(DDB04_ApplyDelta, doesNotRehashWithoutVerification)
@@ -204,7 +186,7 @@ namespace
 
         f.apply(d, MergeStrategy::KeepTheirs, false);
 
-        EXPECT_EQ(f.hashOf("a.txt"), "declared-hash");
+        EXPECT_EQ(hashOf(f.db.get(), "a.txt"), "declared-hash");
     }
 
     TEST(DDB04_ApplyDelta, verificationRejectsMismatchBeforeAnyChange)
@@ -214,16 +196,16 @@ namespace
         d.adds.push_back(f.stage("a.txt", "alpha"));
         writeFile(f.source / "b.txt", "bravo");
         d.adds.push_back(AddAction("b.txt", "not-the-hash-of-bravo"));
-        d.removes.push_back(RemoveAction("keep.txt", f.hashOf("keep.txt")));
+        d.removes.push_back(RemoveAction("keep.txt", hashOf(f.db.get(), "keep.txt")));
 
         EXPECT_THROW(f.apply(d), AppException);
 
         // Nothing changed: no add moved or indexed, no remove applied
         EXPECT_TRUE(fs::exists(f.source / "a.txt"));
         EXPECT_FALSE(fs::exists(f.root / "a.txt"));
-        EXPECT_EQ(f.hashOf("a.txt"), "<missing>");
+        EXPECT_EQ(hashOf(f.db.get(), "a.txt"), "<missing>");
         EXPECT_TRUE(fs::exists(f.root / "keep.txt"));
-        EXPECT_NE(f.hashOf("keep.txt"), "<missing>");
+        EXPECT_NE(hashOf(f.db.get(), "keep.txt"), "<missing>");
     }
 
     TEST(DDB04_ApplyDelta, addsInOneTransaction)
@@ -266,9 +248,9 @@ namespace
 
         f.apply(d);
 
-        EXPECT_EQ(f.hashOf("new"), "");
-        EXPECT_NE(f.hashOf("new/a.txt"), "<missing>");
-        EXPECT_EQ(f.hashOf("new/unrelated.txt"), "<missing>");
+        EXPECT_EQ(hashOf(f.db.get(), "new"), "");
+        EXPECT_NE(hashOf(f.db.get(), "new/a.txt"), "<missing>");
+        EXPECT_EQ(hashOf(f.db.get(), "new/unrelated.txt"), "<missing>");
     }
 
     TEST(DDB04_IndexPathList, eachFileOnceAndOptionalRecursion)
@@ -299,19 +281,19 @@ namespace
         Fixture f(TEST_NAME);
         Delta d;
         d.removes.push_back(RemoveAction("dir", ""));
-        d.removes.push_back(RemoveAction("dir/gone.txt", f.hashOf("dir/gone.txt")));
+        d.removes.push_back(RemoveAction("dir/gone.txt", hashOf(f.db.get(), "dir/gone.txt")));
 
         EXPECT_TRUE(f.apply(d).empty());
         EXPECT_FALSE(fs::exists(f.root / "dir"));
-        EXPECT_EQ(f.hashOf("dir"), "<missing>");
-        EXPECT_EQ(f.hashOf("dir/gone.txt"), "<missing>");
+        EXPECT_EQ(hashOf(f.db.get(), "dir"), "<missing>");
+        EXPECT_EQ(hashOf(f.db.get(), "dir/gone.txt"), "<missing>");
     }
 
     TEST(DDB04_ApplyDelta, typeFlipFolderToFile)
     {
         Fixture f(TEST_NAME);
         Delta d;
-        d.removes.push_back(RemoveAction("dir/gone.txt", f.hashOf("dir/gone.txt")));
+        d.removes.push_back(RemoveAction("dir/gone.txt", hashOf(f.db.get(), "dir/gone.txt")));
         d.removes.push_back(RemoveAction("dir", ""));
         d.adds.push_back(f.stage("dir", "now a file"));
 
@@ -319,8 +301,8 @@ namespace
 
         EXPECT_TRUE(conflicts.empty());
         EXPECT_TRUE(fs::is_regular_file(f.root / "dir"));
-        EXPECT_EQ(f.hashOf("dir"), Hash::fileSHA256((f.root / "dir").string()));
-        EXPECT_EQ(f.hashOf("dir/gone.txt"), "<missing>");
+        EXPECT_EQ(hashOf(f.db.get(), "dir"), Hash::fileSHA256((f.root / "dir").string()));
+        EXPECT_EQ(hashOf(f.db.get(), "dir/gone.txt"), "<missing>");
     }
 
     TEST(DDB04_ApplyDelta, conflicts)
@@ -337,7 +319,7 @@ namespace
 
         {
             Fixture f(TEST_NAME + "-dontmerge");
-            const auto ours = f.hashOf("old.txt");
+            const auto ours = hashOf(f.db.get(), "old.txt");
             const auto conflicts = f.apply(makeDelta(f), MergeStrategy::DontMerge);
             ASSERT_EQ(conflicts.size(), 2u);
             EXPECT_EQ(conflicts[0].path, "keep.txt");
@@ -345,7 +327,7 @@ namespace
             EXPECT_EQ(conflicts[1].path, "old.txt");
             EXPECT_EQ(conflicts[1].type, ConflictType::BothModified);
             EXPECT_EQ(readFile(f.root / "old.txt"), "old");
-            EXPECT_EQ(f.hashOf("old.txt"), ours);
+            EXPECT_EQ(hashOf(f.db.get(), "old.txt"), ours);
             EXPECT_TRUE(fs::exists(f.root / "keep.txt"));
         }
         {
@@ -360,9 +342,9 @@ namespace
             const auto conflicts = f.apply(makeDelta(f), MergeStrategy::KeepTheirs);
             EXPECT_TRUE(conflicts.empty());
             EXPECT_EQ(readFile(f.root / "old.txt"), "theirs");
-            EXPECT_EQ(f.hashOf("old.txt"), Hash::fileSHA256((f.root / "old.txt").string()));
+            EXPECT_EQ(hashOf(f.db.get(), "old.txt"), Hash::fileSHA256((f.root / "old.txt").string()));
             EXPECT_FALSE(fs::exists(f.root / "keep.txt"));
-            EXPECT_EQ(f.hashOf("keep.txt"), "<missing>");
+            EXPECT_EQ(hashOf(f.db.get(), "keep.txt"), "<missing>");
         }
     }
 
@@ -371,7 +353,7 @@ namespace
         // The delta of a pull is computed against the last synced stamp: a file modified on
         // the remote and unchanged locally since then is no conflict
         Fixture f(TEST_NAME);
-        const auto base = f.hashOf("old.txt");
+        const auto base = hashOf(f.db.get(), "old.txt");
         auto add = f.stage("old.txt", "remote edit");
         add.baseHash = base;
         Delta d;
@@ -379,7 +361,7 @@ namespace
 
         EXPECT_TRUE(f.apply(d, MergeStrategy::DontMerge).empty());
         EXPECT_EQ(readFile(f.root / "old.txt"), "remote edit");
-        EXPECT_EQ(f.hashOf("old.txt"), add.hash);
+        EXPECT_EQ(hashOf(f.db.get(), "old.txt"), add.hash);
     }
 
     TEST(ApplyDelta, localChangeSinceTheBaseIsAConflict)
@@ -408,7 +390,7 @@ namespace
         EXPECT_TRUE(f.apply(d).empty());
         EXPECT_TRUE(fs::exists(f.root / "keep.txt"));
         EXPECT_TRUE(fs::exists(f.root / DDB_FOLDER));
-        EXPECT_EQ(f.hashOf(""), "<missing>");
+        EXPECT_EQ(hashOf(f.db.get(), ""), "<missing>");
     }
 
     TEST(ApplyDelta, pathsOutsideTheDatasetAreRejected)
@@ -417,7 +399,7 @@ namespace
         for (const std::string bad : {"../outside.txt", "dir/../../outside.txt", "/etc/passwd"})
         {
             Delta d;
-            d.removes.push_back(RemoveAction("keep.txt", f.hashOf("keep.txt")));
+            d.removes.push_back(RemoveAction("keep.txt", hashOf(f.db.get(), "keep.txt")));
             d.removes.push_back(RemoveAction(bad, "h"));
             EXPECT_THROW(f.apply(d, MergeStrategy::KeepTheirs, false), InvalidArgsException) << bad;
             EXPECT_TRUE(fs::exists(f.root / "keep.txt")) << "nothing changes";
@@ -456,7 +438,7 @@ namespace
                                      [&removed](const std::string &p)
                                      { removed.push_back(p); }),
                      FSException);
-        EXPECT_NE(f.hashOf("keep.txt"), "<missing>");
+        EXPECT_NE(hashOf(f.db.get(), "keep.txt"), "<missing>");
         EXPECT_TRUE(removed.empty()) << "a rolled-back removal was reported";
 
         removeFromIndex(f.db.get(), {(f.root / "keep.txt").string(), (f.root / "dir").string()},
@@ -464,8 +446,8 @@ namespace
                         { removed.push_back(p); });
         std::sort(removed.begin(), removed.end());
         EXPECT_EQ(removed, (std::vector<std::string>{"dir", "dir/gone.txt", "keep.txt"}));
-        EXPECT_EQ(f.hashOf("keep.txt"), "<missing>");
-        EXPECT_EQ(f.hashOf("dir/gone.txt"), "<missing>");
+        EXPECT_EQ(hashOf(f.db.get(), "keep.txt"), "<missing>");
+        EXPECT_EQ(hashOf(f.db.get(), "dir/gone.txt"), "<missing>");
     }
 
     TEST(DDB04_RemoveFromIndex, pathListedTwiceOrInsideAListedFolder)
@@ -480,22 +462,22 @@ namespace
                         { removed.push_back(p); });
         std::sort(removed.begin(), removed.end());
         EXPECT_EQ(removed, (std::vector<std::string>{"dir", "dir/gone.txt", "keep.txt"}));
-        EXPECT_EQ(f.hashOf("keep.txt"), "<missing>");
-        EXPECT_EQ(f.hashOf("dir/gone.txt"), "<missing>");
-        EXPECT_NE(f.hashOf("old.txt"), "<missing>");
+        EXPECT_EQ(hashOf(f.db.get(), "keep.txt"), "<missing>");
+        EXPECT_EQ(hashOf(f.db.get(), "dir/gone.txt"), "<missing>");
+        EXPECT_NE(hashOf(f.db.get(), "old.txt"), "<missing>");
     }
 
     TEST(DDB04_ApplyDelta, removeListedTwice)
     {
         Fixture f(TEST_NAME);
-        const auto hash = f.hashOf("old.txt");
+        const auto hash = hashOf(f.db.get(), "old.txt");
         Delta d;
         d.removes.push_back(RemoveAction("old.txt", hash));
         d.removes.push_back(RemoveAction("old.txt", hash));
 
         EXPECT_TRUE(f.apply(d).empty());
         EXPECT_FALSE(fs::exists(f.root / "old.txt"));
-        EXPECT_EQ(f.hashOf("old.txt"), "<missing>");
+        EXPECT_EQ(hashOf(f.db.get(), "old.txt"), "<missing>");
     }
 
     TEST(DDB04_ApplyDelta, failedAddStillIndexesTheFilesAlreadyMoved)
@@ -512,8 +494,8 @@ namespace
         // bring the dataset and the index back in step
         EXPECT_FALSE(fs::exists(f.source / "a.txt"));
         EXPECT_EQ(readFile(f.root / "a.txt"), "alpha");
-        EXPECT_EQ(f.hashOf("a.txt"), Hash::fileSHA256((f.root / "a.txt").string()));
-        EXPECT_EQ(f.hashOf("blocker/c.txt"), "<missing>");
+        EXPECT_EQ(hashOf(f.db.get(), "a.txt"), Hash::fileSHA256((f.root / "a.txt").string()));
+        EXPECT_EQ(hashOf(f.db.get(), "blocker/c.txt"), "<missing>");
     }
 
     TEST(DDB04_MoveOrCopy, renamesSingleLinkAndCopiesSharedData)

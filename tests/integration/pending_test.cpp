@@ -37,25 +37,6 @@ namespace {
 
 using namespace ddb;
 
-class ScopedRetryEnv {
-public:
-    ScopedRetryEnv(const char* name, const char* value) : name_(name) {
-        if (const char* old = std::getenv(name)) { hadValue_ = true; previous_ = old; }
-        set(value);
-    }
-    ~ScopedRetryEnv() { set(hadValue_ ? previous_.c_str() : nullptr); }
-private:
-    void set(const char* value) {
-#ifdef _WIN32
-        _putenv_s(name_.c_str(), value ? value : "");
-#else
-        if (value) setenv(name_.c_str(), value, 1); else unsetenv(name_.c_str());
-#endif
-    }
-    std::string name_, previous_;
-    bool hadValue_ = false;
-};
-
 std::string markerContents(const fs::path& path) {
     std::ifstream in(path, std::ios::binary);
     return std::string(std::istreambuf_iterator<char>(in), {});
@@ -71,18 +52,8 @@ const std::vector<uint8_t> kPng = {
     0xa9, 0xad, 0xeb, 0x67, 0x32, 0x3b, 0x37, 0x0f, 0xa7, 0x63, 0x13, 0x41, 0x06, 0x1a,
     0x2b, 0x55, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82};
 
-void writeText(const fs::path& p, const std::string& content) {
-    if (p.has_parent_path())
-        fs::create_directories(p.parent_path());
-    std::ofstream out(p.string(), std::ios::binary);
-    out << content;
-}
-
 void writePng(const fs::path& p) {
-    if (p.has_parent_path())
-        fs::create_directories(p.parent_path());
-    std::ofstream out(p.string(), std::ios::binary);
-    out.write(reinterpret_cast<const char*>(kPng.data()), static_cast<std::streamsize>(kPng.size()));
+    writeFile(p, kPng);
 }
 
 // A textured two-triangle OBJ referencing the given mtllib line (verbatim).
@@ -99,12 +70,8 @@ std::string mtlWithTexture(const std::string& mapKdLine) {
 }
 
 // An initialised dataset in a fresh TestArea.
-struct Dataset {
-    explicit Dataset(const std::string& name) : ta(name, true) {
-        root = ta.getFolder("");
-        ddb::initIndex(root.string());
-        db = ddb::open(root.string(), true);
-    }
+struct Dataset : IndexFixture {
+    explicit Dataset(const std::string& name) : IndexFixture(name, "") {}
 
     fs::path path(const std::string& rel) const { return root / fs::path(rel); }
 
@@ -115,18 +82,12 @@ struct Dataset {
         ddb::addToIndex(db.get(), abs);
     }
 
-    std::string hashOf(const std::string& rel) {
-        Entry e;
-        EXPECT_TRUE(ddb::getEntry(db.get(), rel, e)) << rel << " is not indexed";
-        return e.hash;
-    }
-
     fs::path pendingFile(const std::string& rel) {
-        return db->buildDirectory() / (hashOf(rel) + ".pending");
+        return db->buildDirectory() / (indexedHash(db.get(), rel) + ".pending");
     }
 
     std::vector<std::string> pendingDeps(const std::string& rel) {
-        const auto hash = hashOf(rel);
+        const auto hash = indexedHash(db.get(), rel);
         for (const auto& p : ddb::getPendingBuildInfo(db.get()))
             if (p.hash == hash)
                 return p.missingDependencies;
@@ -160,12 +121,8 @@ struct Dataset {
     }
 
     bool nxzBuilt(const std::string& rel) {
-        return fs::exists(db->buildDirectory() / hashOf(rel) / "nxs" / "model.nxz");
+        return fs::exists(db->buildDirectory() / indexedHash(db.get(), rel) / "nxs" / "model.nxz");
     }
-
-    TestArea ta;
-    fs::path root;
-    std::unique_ptr<Database> db;
 };
 
 // Builds a single entry and asserts it is deferred (not failed).
@@ -196,14 +153,14 @@ void runCompanionsArriveLater(const std::string& folder) {
     const std::string prefix = folder.empty() ? "" : folder + "/";
     const std::string obj = prefix + "m.obj";
 
-    writeText(ds.path(obj), objWithMtllib("mtllib m.mtl"));
+    writeFile(ds.path(obj), objWithMtllib("mtllib m.mtl"));
     ds.add({obj});
 
     expectDeferred(ds, obj);
     EXPECT_EQ(ds.pendingDeps(obj), std::vector<std::string>{prefix + "m.mtl"});
 
     // MTL arrives, texture still missing: still pending, now on the texture.
-    writeText(ds.path(prefix + "m.mtl"), mtlWithTexture("map_Kd tex.png"));
+    writeFile(ds.path(prefix + "m.mtl"), mtlWithTexture("map_Kd tex.png"));
     ds.add({prefix + "m.mtl"});
     ds.backdatePending(obj);
     ddb::buildPending(ds.db.get(), "", false);
@@ -238,8 +195,8 @@ TEST(PendingBuild, ObjInNestedSubfolderClearsOnceCompanionsExist) {
 // They are informational: the retry rebuilds and re-validates on disk.
 TEST(PendingBuild, OldFormatPendingClearsOnceDependencyExists) {
     Dataset ds(TEST_NAME);
-    writeText(ds.path("sub/m.obj"), objWithMtllib("mtllib m.mtl"));
-    writeText(ds.path("sub/m.mtl"), mtlWithTexture("map_Kd tex/a.png"));
+    writeFile(ds.path("sub/m.obj"), objWithMtllib("mtllib m.mtl"));
+    writeFile(ds.path("sub/m.mtl"), mtlWithTexture("map_Kd tex/a.png"));
     ds.add({"sub/m.obj", "sub/m.mtl"});
 
     ds.writePendingMarker("sub/m.obj", utils::currentUnixTimestamp() - 900, {"tex/a.png"});
@@ -261,8 +218,8 @@ TEST(PendingBuild, OldFormatPendingClearsOnceDependencyExists) {
 // The retry backoff is 60 s since the last attempt; force bypasses it.
 TEST(PendingBuild, BackoffIsSixtySecondsAndForceBypassesIt) {
     Dataset ds(TEST_NAME);
-    writeText(ds.path("m.obj"), objWithMtllib("mtllib m.mtl"));
-    writeText(ds.path("m.mtl"), mtlWithTexture("map_Kd tex.png"));
+    writeFile(ds.path("m.obj"), objWithMtllib("mtllib m.mtl"));
+    writeFile(ds.path("m.mtl"), mtlWithTexture("map_Kd tex.png"));
     writePng(ds.path("tex.png"));
     ds.add({"m.obj", "m.mtl", "tex.png"});
 
@@ -289,8 +246,8 @@ TEST(PendingBuild, BackoffIsSixtySecondsAndForceBypassesIt) {
 // whatever the marker lists.
 TEST(PendingBuild, CompleteOutputConsumesPendingMarker) {
     Dataset ds(TEST_NAME);
-    writeText(ds.path("m.obj"), objWithMtllib("mtllib m.mtl"));
-    writeText(ds.path("m.mtl"), mtlWithTexture("map_Kd tex.png"));
+    writeFile(ds.path("m.obj"), objWithMtllib("mtllib m.mtl"));
+    writeFile(ds.path("m.mtl"), mtlWithTexture("map_Kd tex.png"));
     writePng(ds.path("tex.png"));
     ds.add({"m.obj", "m.mtl", "tex.png"});
 
@@ -309,12 +266,12 @@ TEST(PendingBuild, CompleteOutputConsumesPendingMarker) {
 // failure is logged; DDBBuild(pendingOnly) still succeeds).
 TEST(PendingBuild, NonDependencyFailureConsumesMarker) {
     Dataset ds(TEST_NAME);
-    writeText(ds.path("m.obj"), objWithMtllib("mtllib m.mtl"));
+    writeFile(ds.path("m.obj"), objWithMtllib("mtllib m.mtl"));
     ds.add({"m.obj"});
     expectDeferred(ds, "m.obj");
 
     // The MTL now references an absolute texture: unsatisfiable.
-    writeText(ds.path("m.mtl"), mtlWithTexture("map_Kd /nonexistent/tex.png"));
+    writeFile(ds.path("m.mtl"), mtlWithTexture("map_Kd /nonexistent/tex.png"));
     ds.add({"m.mtl"});
     ds.backdatePending("m.obj");
 
@@ -326,18 +283,18 @@ TEST(PendingBuild, NonDependencyFailureConsumesMarker) {
 // Only top-level "<hash>.pending" files are markers; anything else is ignored.
 TEST(PendingBuild, IgnoresNonHashAndNestedPendingFiles) {
     Dataset ds(TEST_NAME);
-    writeText(ds.path("m.obj"), objWithMtllib("mtllib m.mtl"));
+    writeFile(ds.path("m.obj"), objWithMtllib("mtllib m.mtl"));
     ds.add({"m.obj"});
 
     const fs::path buildDir = ds.db->buildDirectory();
     fs::create_directories(buildDir / "somefolder");
-    writeText(buildDir / "notes.pending", "0\n");
-    writeText(buildDir / "somefolder" / (ds.hashOf("m.obj") + ".pending"), "0\nm.mtl\n");
+    writeFile(buildDir / "notes.pending", "0\n");
+    writeFile(buildDir / "somefolder" / (indexedHash(ds.db.get(), "m.obj") + ".pending"), "0\nm.mtl\n");
 
     ddb::buildPending(ds.db.get(), "", false);
 
     EXPECT_TRUE(fs::exists(buildDir / "notes.pending"));
-    EXPECT_TRUE(fs::exists(buildDir / "somefolder" / (ds.hashOf("m.obj") + ".pending")));
+    EXPECT_TRUE(fs::exists(buildDir / "somefolder" / (indexedHash(ds.db.get(), "m.obj") + ".pending")));
     EXPECT_FALSE(fs::exists(ds.pendingFile("m.obj"))) << "nested marker must not be retried";
 }
 
@@ -348,8 +305,8 @@ TEST(PendingBuild, IgnoresNonHashAndNestedPendingFiles) {
 // mtllib mats/m.mtl + map_Kd tex.png: satisfied by mats/tex.png (MTL folder) ...
 TEST(PendingBuild, MtlTextureFoundInMtlFolder) {
     Dataset ds(TEST_NAME);
-    writeText(ds.path("sub/m.obj"), objWithMtllib("mtllib mats/m.mtl"));
-    writeText(ds.path("sub/mats/m.mtl"), mtlWithTexture("map_Kd tex.png"));
+    writeFile(ds.path("sub/m.obj"), objWithMtllib("mtllib mats/m.mtl"));
+    writeFile(ds.path("sub/mats/m.mtl"), mtlWithTexture("map_Kd tex.png"));
     writePng(ds.path("sub/mats/tex.png"));
     ds.add({"sub/m.obj", "sub/mats/m.mtl", "sub/mats/tex.png"});
 
@@ -363,8 +320,8 @@ TEST(PendingBuild, MtlTextureFoundInMtlFolder) {
 // ... and by <OBJ folder>/tex.png ...
 TEST(PendingBuild, MtlTextureFoundInObjFolder) {
     Dataset ds(TEST_NAME);
-    writeText(ds.path("sub/m.obj"), objWithMtllib("mtllib mats/m.mtl"));
-    writeText(ds.path("sub/mats/m.mtl"), mtlWithTexture("map_Kd tex.png"));
+    writeFile(ds.path("sub/m.obj"), objWithMtllib("mtllib mats/m.mtl"));
+    writeFile(ds.path("sub/mats/m.mtl"), mtlWithTexture("map_Kd tex.png"));
     writePng(ds.path("sub/tex.png"));
     ds.add({"sub/m.obj", "sub/mats/m.mtl", "sub/tex.png"});
 
@@ -377,10 +334,10 @@ TEST(PendingBuild, MtlTextureFoundInObjFolder) {
 // relative to the MTL's folder.
 TEST(PendingBuild, MissingMtlTextureListedDatasetRelative) {
     Dataset ds(TEST_NAME);
-    writeText(ds.path("m.obj"), objWithMtllib("mtllib mats/m.mtl"));
-    writeText(ds.path("mats/m.mtl"), mtlWithTexture("map_Kd tex.png"));
-    writeText(ds.path("sub/m.obj"), objWithMtllib("mtllib mats/m.mtl"));
-    writeText(ds.path("sub/mats/m.mtl"), mtlWithTexture("map_Kd tex.png"));
+    writeFile(ds.path("m.obj"), objWithMtllib("mtllib mats/m.mtl"));
+    writeFile(ds.path("mats/m.mtl"), mtlWithTexture("map_Kd tex.png"));
+    writeFile(ds.path("sub/m.obj"), objWithMtllib("mtllib mats/m.mtl"));
+    writeFile(ds.path("sub/mats/m.mtl"), mtlWithTexture("map_Kd tex.png"));
     ds.add({"m.obj", "mats/m.mtl", "sub/m.obj", "sub/mats/m.mtl"});
 
     expectDeferred(ds, "m.obj");
@@ -392,8 +349,8 @@ TEST(PendingBuild, MissingMtlTextureListedDatasetRelative) {
 
 TEST(PendingBuild, BackslashReferencesAreNormalised) {
     Dataset ds(TEST_NAME);
-    writeText(ds.path("sub/m.obj"), objWithMtllib("mtllib mats\\m.mtl"));
-    writeText(ds.path("sub/mats/m.mtl"), mtlWithTexture("map_Kd tex\\a.png"));
+    writeFile(ds.path("sub/m.obj"), objWithMtllib("mtllib mats\\m.mtl"));
+    writeFile(ds.path("sub/mats/m.mtl"), mtlWithTexture("map_Kd tex\\a.png"));
     ds.add({"sub/m.obj", "sub/mats/m.mtl"});
 
     EXPECT_EQ(getObjDependencies(ds.path("sub/m.obj").string(), ds.root.string()),
@@ -411,7 +368,7 @@ TEST(PendingBuild, BackslashReferencesAreNormalised) {
 // "../" that stays inside the dataset is a normal dependency.
 TEST(PendingBuild, ParentReferenceInsideDatasetAllowed) {
     Dataset ds(TEST_NAME);
-    writeText(ds.path("sub/m.obj"), objWithMtllib("mtllib ../shared/m.mtl"));
+    writeFile(ds.path("sub/m.obj"), objWithMtllib("mtllib ../shared/m.mtl"));
     ds.add({"sub/m.obj"});
 
     EXPECT_EQ(getObjDependencies(ds.path("sub/m.obj").string(), ds.root.string()),
@@ -420,7 +377,7 @@ TEST(PendingBuild, ParentReferenceInsideDatasetAllowed) {
     expectDeferred(ds, "sub/m.obj");
     EXPECT_EQ(ds.pendingDeps("sub/m.obj"), std::vector<std::string>{"shared/m.mtl"});
 
-    writeText(ds.path("shared/m.mtl"), mtlWithTexture("map_Kd ../shared/tex.png"));
+    writeFile(ds.path("shared/m.mtl"), mtlWithTexture("map_Kd ../shared/tex.png"));
     writePng(ds.path("shared/tex.png"));
     ds.add({"shared/m.mtl", "shared/tex.png"});
     ds.backdatePending("sub/m.obj");
@@ -432,22 +389,22 @@ TEST(PendingBuild, ParentReferenceInsideDatasetAllowed) {
 
 TEST(PendingBuild, AbsoluteMtllibFailsWithoutPending) {
     Dataset ds(TEST_NAME);
-    writeText(ds.path("m.obj"), objWithMtllib("mtllib /nonexistent/m.mtl"));
+    writeFile(ds.path("m.obj"), objWithMtllib("mtllib /nonexistent/m.mtl"));
     ds.add({"m.obj"});
     expectFailedWithoutPending(ds, "m.obj", "/nonexistent/m.mtl");
 }
 
 TEST(PendingBuild, WindowsAbsoluteTextureFailsWithoutPending) {
     Dataset ds(TEST_NAME);
-    writeText(ds.path("m.obj"), objWithMtllib("mtllib m.mtl"));
-    writeText(ds.path("m.mtl"), mtlWithTexture("map_Kd C:\\textures\\tex.png"));
+    writeFile(ds.path("m.obj"), objWithMtllib("mtllib m.mtl"));
+    writeFile(ds.path("m.mtl"), mtlWithTexture("map_Kd C:\\textures\\tex.png"));
     ds.add({"m.obj", "m.mtl"});
     expectFailedWithoutPending(ds, "m.obj", "C:\\textures\\tex.png");
 }
 
 TEST(PendingBuild, RootEscapingReferenceFailsWithoutPending) {
     Dataset ds(TEST_NAME);
-    writeText(ds.path("sub/m.obj"), objWithMtllib("mtllib ../../m.mtl"));
+    writeFile(ds.path("sub/m.obj"), objWithMtllib("mtllib ../../m.mtl"));
     ds.add({"sub/m.obj"});
 
     // Without a dataset root the reference is just a relative path.
@@ -460,16 +417,16 @@ TEST(PendingBuild, RootEscapingReferenceFailsWithoutPending) {
 
 TEST(PendingBuild, RootEscapingTextureFailsWithoutPending) {
     Dataset ds(TEST_NAME);
-    writeText(ds.path("m.obj"), objWithMtllib("mtllib m.mtl"));
-    writeText(ds.path("m.mtl"), mtlWithTexture("map_Kd ../outside/tex.png"));
+    writeFile(ds.path("m.obj"), objWithMtllib("mtllib m.mtl"));
+    writeFile(ds.path("m.mtl"), mtlWithTexture("map_Kd ../outside/tex.png"));
     ds.add({"m.obj", "m.mtl"});
     expectFailedWithoutPending(ds, "m.obj", "../outside/tex.png");
 }
 
 TEST(PendingBuild, QuotedNamesWithSpaces) {
     Dataset ds(TEST_NAME);
-    writeText(ds.path("sub/my model.obj"), objWithMtllib("mtllib \"my mats/my model.mtl\""));
-    writeText(ds.path("sub/my mats/my model.mtl"), mtlWithTexture("map_Kd \"my tex.png\""));
+    writeFile(ds.path("sub/my model.obj"), objWithMtllib("mtllib \"my mats/my model.mtl\""));
+    writeFile(ds.path("sub/my mats/my model.mtl"), mtlWithTexture("map_Kd \"my tex.png\""));
     ds.add({"sub/my model.obj", "sub/my mats/my model.mtl"});
 
     EXPECT_EQ(getObjDependencies(ds.path("sub/my model.obj").string(), ds.root.string()),
@@ -489,8 +446,8 @@ TEST(PendingBuild, QuotedNamesWithSpaces) {
 TEST(PendingBuild, ValidateDependenciesReportsMissingFile) {
     TestArea ta(TEST_NAME, true);
     const fs::path obj = ta.getPath("m.obj");
-    writeText(obj, objWithMtllib("mtllib m.mtl"));
-    writeText(ta.getPath("m.mtl"), mtlWithTexture("map_Kd tex.png\nmap_bump tex.png"));
+    writeFile(obj, objWithMtllib("mtllib m.mtl"));
+    writeFile(ta.getPath("m.mtl"), mtlWithTexture("map_Kd tex.png\nmap_bump tex.png"));
 
     try {
         buildNexus(obj.string(), ta.getPath("m.nxz").string(), true);
@@ -574,7 +531,7 @@ TEST(PendingBuild, ShapefileSidecarInSubfolderBuildsMainFile) {
     EXPECT_FALSE(ddb::isBuildPending(ds.db.get()));
     EXPECT_TRUE(ddb::isBuildComplete(ds.db.get(), "sub/layer.shp"));
     EXPECT_TRUE(ddb::isBuildComplete(ds.db.get(), "sub/layer.shx"));
-    const fs::path out = ds.db->buildDirectory() / ds.hashOf("sub/layer.shp");
+    const fs::path out = ds.db->buildDirectory() / indexedHash(ds.db.get(), "sub/layer.shp");
     EXPECT_TRUE(fs::exists(out / "vec" / "source.gpkg"));
     EXPECT_TRUE(fs::exists(out / "mvt" / "metadata.json"));
 }
@@ -590,7 +547,7 @@ TEST(PendingBuild, VectorNoSpaceRetainsExistingPendingHintsAndFreshTimestamp) {
             ds.backdatePending("sub/layer.shp");
             const auto before = utils::currentUnixTimestamp();
             {
-                ScopedRetryEnv enoughDisk("DDB_MIN_FREE_DISK_MB", "0");
+                EnvVarGuard enoughDisk("DDB_MIN_FREE_DISK_MB", "0");
                 ddb_test::withVectorWriteFailure(driver.c_str(), onClose, [&] {
                     EXPECT_THROW(ddb::build(ds.db.get(), "sub/layer.shp", "", false), RetryableBuildException);
                 });
@@ -602,7 +559,7 @@ TEST(PendingBuild, VectorNoSpaceRetainsExistingPendingHintsAndFreshTimestamp) {
             EXPECT_FALSE(isBuildComplete(ds.db.get(), "sub/layer.shp"));
             // The restored real driver can complete the same pending entry.
             ds.backdatePending("sub/layer.shp", 60);
-            ScopedRetryEnv enoughDisk("DDB_MIN_FREE_DISK_MB", "0");
+            EnvVarGuard enoughDisk("DDB_MIN_FREE_DISK_MB", "0");
             EXPECT_NO_THROW(buildPending(ds.db.get(), "", false));
             EXPECT_FALSE(fs::exists(ds.pendingFile("sub/layer.shp")));
             EXPECT_TRUE(isBuildComplete(ds.db.get(), "sub/layer.shp"));
@@ -629,10 +586,10 @@ TEST(PendingBuild, PrimaryIdleTimeoutRetainsMarkerThroughFailedEntryBuild) {
     const auto before = utils::currentUnixTimestamp();
     const auto start = std::chrono::steady_clock::now();
     {
-        ScopedRetryEnv tool("DDB_BUILDLOD_PATH", testChildPath().string().c_str());
-        ScopedRetryEnv mode("DDB_TEST_CHILD_MODE", "idle");
-        ScopedRetryEnv deadline("DDB_BUILDLOD_IDLE_TIMEOUT_SECONDS", "1");
-        ScopedRetryEnv enoughDisk("DDB_MIN_FREE_DISK_MB", "0");
+        EnvVarGuard tool("DDB_BUILDLOD_PATH", testChildPath().string().c_str());
+        EnvVarGuard mode("DDB_TEST_CHILD_MODE", "idle");
+        EnvVarGuard deadline("DDB_BUILDLOD_IDLE_TIMEOUT_SECONDS", "1");
+        EnvVarGuard enoughDisk("DDB_MIN_FREE_DISK_MB", "0");
         buildlod::findBuildLodBinary(true);
         try {
             build(ds.db.get(), "sample.splat", "", false);
@@ -654,8 +611,8 @@ TEST(PendingBuild, PrimaryIdleTimeoutRetainsMarkerThroughFailedEntryBuild) {
     for (const auto& child : fs::directory_iterator(output))
         EXPECT_EQ(child.path().filename().string().find("gsplat-temp-"), std::string::npos);
     if (!realTool.empty()) {
-        ScopedRetryEnv tool("DDB_BUILDLOD_PATH", realTool.string().c_str());
-        ScopedRetryEnv enoughDisk("DDB_MIN_FREE_DISK_MB", "0");
+        EnvVarGuard tool("DDB_BUILDLOD_PATH", realTool.string().c_str());
+        EnvVarGuard enoughDisk("DDB_MIN_FREE_DISK_MB", "0");
         buildlod::findBuildLodBinary(true);
         ds.backdatePending("sample.splat", 60);
         EXPECT_NO_THROW(buildPending(ds.db.get(), "", false));
@@ -668,14 +625,14 @@ TEST(PendingBuild, PrimaryIdleTimeoutRetainsMarkerThroughFailedEntryBuild) {
 TEST(PendingBuild, InvalidBuildLodDeadlineIsPermanentAndDoesNotTouchRunnerOutputs) {
     Dataset ds(TEST_NAME);
     const fs::path input = ds.path("sample.splat");
-    writeText(input, std::string(32, '\0'));
+    writeFile(input, std::string(32, '\0'));
     const fs::path output = ds.path("previous.rad");
     const fs::path adjacent = ds.path("sample-lod.rad");
     for (const char* invalid : {"0", "-1", "+1", "1.5", " 1", "1 ", "abc", "86401", "9223372037", "18446744073709551616"}) {
         SCOPED_TRACE(invalid);
-        writeText(output, "previous output");
-        writeText(adjacent, "adjacent output");
-        ScopedRetryEnv deadline("DDB_BUILDLOD_IDLE_TIMEOUT_SECONDS", invalid);
+        writeFile(output, "previous output");
+        writeFile(adjacent, "adjacent output");
+        EnvVarGuard deadline("DDB_BUILDLOD_IDLE_TIMEOUT_SECONDS", invalid);
         const auto result = buildlod::runBuildLodResult(input, output, true, 1, testChildPath());
         EXPECT_FALSE(result.succeeded);
         EXPECT_FALSE(result.timedOut);
@@ -687,9 +644,9 @@ TEST(PendingBuild, InvalidBuildLodDeadlineIsPermanentAndDoesNotTouchRunnerOutput
     ds.add({"sample.splat"});
     ds.writePendingMarker("sample.splat", 1, {"previous hint"});
     {
-        ScopedRetryEnv tool("DDB_BUILDLOD_PATH", testChildPath().string().c_str());
-        ScopedRetryEnv deadline("DDB_BUILDLOD_IDLE_TIMEOUT_SECONDS", "invalid");
-        ScopedRetryEnv enoughDisk("DDB_MIN_FREE_DISK_MB", "0");
+        EnvVarGuard tool("DDB_BUILDLOD_PATH", testChildPath().string().c_str());
+        EnvVarGuard deadline("DDB_BUILDLOD_IDLE_TIMEOUT_SECONDS", "invalid");
+        EnvVarGuard enoughDisk("DDB_MIN_FREE_DISK_MB", "0");
         buildlod::findBuildLodBinary(true);
         EXPECT_EQ(DDBBuild(ds.root.string().c_str(), "sample.splat", nullptr, false), DDBERR_EXCEPTION);
         EXPECT_FALSE(fs::exists(ds.pendingFile("sample.splat")));
@@ -701,8 +658,8 @@ TEST(PendingBuild, MaximumBuildLodDeadlineParsesAndLaunchesTool) {
     Dataset ds(TEST_NAME);
     const fs::path input = ds.path("sample.splat");
     const fs::path output = ds.path("model.rad");
-    writeText(input, std::string(32, '\0'));
-    ScopedRetryEnv deadline("DDB_BUILDLOD_IDLE_TIMEOUT_SECONDS", "86400");
+    writeFile(input, std::string(32, '\0'));
+    EnvVarGuard deadline("DDB_BUILDLOD_IDLE_TIMEOUT_SECONDS", "86400");
     process::Options options;
     options.envOverrides.emplace_back("DDB_TEST_CHILD_MODE", "no-output");
     const auto started = std::chrono::steady_clock::now();
@@ -720,16 +677,16 @@ TEST(PendingBuild, MaximumBuildLodDeadlineParsesAndLaunchesTool) {
 // hints and refreshed timestamp let a delayed coordinator retry the same entry.
 TEST(PendingBuild, LowDiskRetainsPendingThenSucceedsAtSixtySecondBoundary) {
     Dataset ds(TEST_NAME);
-    writeText(ds.path("m.obj"), objWithMtllib("mtllib m.mtl"));
+    writeFile(ds.path("m.obj"), objWithMtllib("mtllib m.mtl"));
     ds.add({"m.obj"});
     expectDeferred(ds, "m.obj");
-    writeText(ds.path("m.mtl"), mtlWithTexture("map_Kd tex.png"));
+    writeFile(ds.path("m.mtl"), mtlWithTexture("map_Kd tex.png"));
     writePng(ds.path("tex.png"));
     ds.add({"m.mtl", "tex.png"});
     ds.backdatePending("m.obj");
     const auto beforeAttempt = utils::currentUnixTimestamp();
     {
-        ScopedRetryEnv lowDisk("DDB_MIN_FREE_DISK_MB", "100000000000");
+        EnvVarGuard lowDisk("DDB_MIN_FREE_DISK_MB", "100000000000");
         EXPECT_THROW(ddb::build(ds.db.get(), "m.obj", "", false), RetryableBuildException);
         // The C ABI still signals an ordinary failed entry job.
         EXPECT_EQ(DDBBuild(ds.root.string().c_str(), "m.obj", nullptr, false, false), DDBERR_EXCEPTION);
@@ -740,7 +697,7 @@ TEST(PendingBuild, LowDiskRetainsPendingThenSucceedsAtSixtySecondBoundary) {
     EXPECT_EQ(pending[0].missingDependencies, (std::vector<std::string>{"m.mtl"}));
     EXPECT_FALSE(ds.nxzBuilt("m.obj"));
 
-    ScopedRetryEnv enoughDisk("DDB_MIN_FREE_DISK_MB", "0");
+    EnvVarGuard enoughDisk("DDB_MIN_FREE_DISK_MB", "0");
     ddb::buildPending(ds.db.get(), "", false);
     EXPECT_TRUE(fs::exists(ds.pendingFile("m.obj"))) << "fresh attempt is inside 60-second backoff";
     ds.backdatePending("m.obj", 60);
@@ -751,20 +708,20 @@ TEST(PendingBuild, LowDiskRetainsPendingThenSucceedsAtSixtySecondBoundary) {
 
 TEST(PendingBuild, FreshLowDiskFailureDoesNotCreatePendingMarker) {
     Dataset ds(TEST_NAME);
-    writeText(ds.path("m.obj"), objWithMtllib("mtllib missing.mtl"));
+    writeFile(ds.path("m.obj"), objWithMtllib("mtllib missing.mtl"));
     ds.add({"m.obj"});
-    ScopedRetryEnv lowDisk("DDB_MIN_FREE_DISK_MB", "100000000000");
+    EnvVarGuard lowDisk("DDB_MIN_FREE_DISK_MB", "100000000000");
     EXPECT_THROW(ddb::build(ds.db.get(), "m.obj", "", false), RetryableBuildException);
     EXPECT_FALSE(fs::exists(ds.pendingFile("m.obj")));
 }
 
 TEST(PendingBuild, PrimaryLockContentionLeavesMarkerByteForByteUnchanged) {
     Dataset ds(TEST_NAME);
-    writeText(ds.path("m.obj"), objWithMtllib("mtllib missing.mtl"));
+    writeFile(ds.path("m.obj"), objWithMtllib("mtllib missing.mtl"));
     ds.add({"m.obj"});
     ds.writePendingMarker("m.obj", 1, {"missing.mtl", "older hint.png"});
     const auto original = markerContents(ds.pendingFile("m.obj"));
-    const auto base = ds.db->buildDirectory() / ds.hashOf("m.obj");
+    const auto base = ds.db->buildDirectory() / indexedHash(ds.db.get(), "m.obj");
     fs::create_directories(base);
     BuildLock lock((base / "nxs").string());
     EXPECT_THROW(ddb::build(ds.db.get(), "m.obj", "", false), BuildInProgressException);
@@ -773,11 +730,11 @@ TEST(PendingBuild, PrimaryLockContentionLeavesMarkerByteForByteUnchanged) {
 
 TEST(PendingBuild, TilesLockContentionLeavesMarkerByteForByteUnchanged) {
     Dataset ds(TEST_NAME);
-    writeText(ds.path("m.obj"), objWithMtllib("mtllib missing.mtl"));
+    writeFile(ds.path("m.obj"), objWithMtllib("mtllib missing.mtl"));
     ds.add({"m.obj"});
     ds.writePendingMarker("m.obj", 1, {"missing.mtl"});
     const auto original = markerContents(ds.pendingFile("m.obj"));
-    const auto base = ds.db->buildDirectory() / ds.hashOf("m.obj");
+    const auto base = ds.db->buildDirectory() / indexedHash(ds.db.get(), "m.obj");
     fs::create_directories(base);
     BuildLock lock((base / "3dtiles").string());
     EXPECT_THROW(ddb::build(ds.db.get(), "m.obj", "", false), BuildInProgressException);
@@ -787,11 +744,11 @@ TEST(PendingBuild, TilesLockContentionLeavesMarkerByteForByteUnchanged) {
 #ifndef _WIN32
 TEST(PendingBuild, FailedAtomicTimestampReplacementPreservesOriginalMarker) {
     Dataset ds(TEST_NAME);
-    writeText(ds.path("m.obj"), objWithMtllib("mtllib missing.mtl"));
+    writeFile(ds.path("m.obj"), objWithMtllib("mtllib missing.mtl"));
     ds.add({"m.obj"});
     ds.writePendingMarker("m.obj", 1, {"missing.mtl"});
     const auto original = markerContents(ds.pendingFile("m.obj"));
-    fs::create_directories(ds.db->buildDirectory() / ds.hashOf("m.obj"));
+    fs::create_directories(ds.db->buildDirectory() / indexedHash(ds.db.get(), "m.obj"));
     const auto permissions = fs::status(ds.db->buildDirectory()).permissions();
     struct RestorePermissions {
         fs::path path;
@@ -807,7 +764,7 @@ TEST(PendingBuild, FailedAtomicTimestampReplacementPreservesOriginalMarker) {
         fs::remove(ds.db->buildDirectory() / "permission-probe");
         GTEST_SKIP() << "Current user bypasses write permissions";
     }
-    ScopedRetryEnv lowDisk("DDB_MIN_FREE_DISK_MB", "100000000000");
+    EnvVarGuard lowDisk("DDB_MIN_FREE_DISK_MB", "100000000000");
     EXPECT_THROW(ddb::build(ds.db.get(), "m.obj", "", false), RetryableBuildException);
     EXPECT_EQ(markerContents(ds.pendingFile("m.obj")), original);
 }

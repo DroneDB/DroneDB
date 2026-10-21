@@ -17,6 +17,7 @@
 #include "raster_test_utils.h"
 #include "test.h"
 #include "testarea.h"
+#include "testfs.h"
 #include "tilerhelper.h"
 
 namespace
@@ -32,7 +33,7 @@ namespace
         if (!fs::exists(copc))
         {
             const auto pc = ta.downloadTestAsset(
-                "https://github.com/DroneDB/test_data/raw/master/brighton/point_cloud.laz", "point_cloud.laz");
+                testDataUrl("brighton/point_cloud.laz"), "point_cloud.laz");
             buildCopc({pc.string()}, ta.getFolder("copc").string());
         }
         return copc;

@@ -5,6 +5,7 @@
 #include "ddb.h"
 #include "test.h"
 #include "testarea.h"
+#include "testfs.h"
 #include "fs.h"
 #include <nlohmann/json.hpp>
 #include <vector>
@@ -18,11 +19,9 @@ namespace
     using json = nlohmann::json;
 
     // Brighton orthophoto: a well-known small RGB GeoTIFF in WebMercator.
-    static constexpr const char *kOrthoUrl =
-        "https://github.com/DroneDB/test_data/raw/master/brighton/odm_orthophoto.tif";
+    const std::string kOrthoUrl = testDataUrl("brighton/odm_orthophoto.tif");
     // Brighton DSM: single-band float32 elevation GeoTIFF (UTM/WebMercator).
-    static constexpr const char *kDsmUrl =
-        "https://github.com/DroneDB/test_data/raw/master/brighton/dsm.tif";
+    const std::string kDsmUrl = testDataUrl("brighton/dsm.tif");
 
     TEST(testRasterRegionApi, RenderPng)
     {

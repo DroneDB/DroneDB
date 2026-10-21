@@ -24,6 +24,7 @@
 #include "sanitizer_hooks.h"
 #include "test.h"
 #include "testarea.h"
+#include "utils.h"
 
 namespace
 {
@@ -46,15 +47,6 @@ namespace
         {
             DatabasePool::instance().clear();
             DatabasePool::instance().configure(saved);
-        }
-
-        static fs::path makeIndex(const std::string &name, const std::string &folder = "ds")
-        {
-            TestArea ta(name, folder == "ds");
-            const auto root = ta.getFolder(folder);
-            initIndex(root.string());
-            addFile(root, "a.txt", "alpha");
-            return root;
         }
 
         static void addFile(const fs::path &root, const std::string &name, const std::string &content)
@@ -277,7 +269,7 @@ namespace
     {
         DatabasePool::instance().configure({2, 3, std::chrono::seconds(60)});
         const auto a = makeIndex(TEST_NAME);
-        const auto b = makeIndex(TEST_NAME, "ds2");
+        const auto b = makeIndex(TEST_NAME, "ds2", false);
         DatabasePool::instance().clear();
 
         {
@@ -312,7 +304,7 @@ namespace
     TEST_F(DDB02_Pool, releaseConnectionsClosesOnlyThatFolder)
     {
         const auto ds = makeIndex(TEST_NAME);
-        const auto sibling = makeIndex(TEST_NAME, "ds2"); // same prefix "ds"
+        const auto sibling = makeIndex(TEST_NAME, "ds2", false); // same prefix "ds"
         ASSERT_TRUE(has(ds, "a.txt"));
         ASSERT_TRUE(has(sibling, "a.txt"));
         ASSERT_EQ(stats().idle, 2u);

@@ -22,16 +22,8 @@
 #include "obj2tiles_runner.h"
 #include "test.h"
 #include "testarea.h"
+#include "utils.h"
 
-#ifdef _WIN32
-#include <stdlib.h>
-#define DDB_SETENV(name, value) _putenv_s(name, value)
-#define DDB_UNSETENV(name) _putenv_s(name, "")
-#else
-#include <stdlib.h>
-#define DDB_SETENV(name, value) setenv(name, value, 1)
-#define DDB_UNSETENV(name) unsetenv(name)
-#endif
 
 namespace {
 
@@ -49,29 +41,23 @@ constexpr const char* kBogusBinary = "/nonexistent/Obj2Tiles_missing";
 struct Obj2TilesEnvReset {
     Obj2TilesEnvReset() { ddb::obj2tiles::findObj2TilesBinary(true); }
     ~Obj2TilesEnvReset() {
-        DDB_UNSETENV("DDB_OBJ2TILES_PATH");
+        unsetEnv("DDB_OBJ2TILES_PATH");
         ddb::obj2tiles::findObj2TilesBinary(true);
     }
 };
-
-// Writes a small text/JSON sidecar (used to seed OBJ files and georef sidecars).
-void writeSidecar(const fs::path& path, const std::string& body) {
-    std::ofstream o(path.string());
-    o << body;
-}
 
 // An authoritative, non-executable DDB_OBJ2TILES_PATH makes discovery return
 // empty regardless of any real Obj2Tiles binary on PATH.
 TEST(obj2tiles, binaryNotFoundWithBogusEnv) {
     Obj2TilesEnvReset reset;
-    DDB_SETENV("DDB_OBJ2TILES_PATH", kBogusBinary);
+    setEnv("DDB_OBJ2TILES_PATH", kBogusBinary);
     EXPECT_TRUE(ddb::obj2tiles::findObj2TilesBinary(true).empty());
 }
 
 // runObj2Tiles must fail gracefully (false + message) when no binary is available.
 TEST(obj2tiles, runReturnsFalseWhenBinaryMissing) {
     Obj2TilesEnvReset reset;
-    DDB_SETENV("DDB_OBJ2TILES_PATH", kBogusBinary);
+    setEnv("DDB_OBJ2TILES_PATH", kBogusBinary);
     ddb::obj2tiles::findObj2TilesBinary(true);
 
     TestArea ta(TEST_NAME);
@@ -87,8 +73,8 @@ TEST(obj2tiles, runReturnsFalseWhenBinaryMissing) {
 TEST(obj2tiles, seededOutputRejectedBeforeToolRuns) {
     TestArea ta(TEST_NAME, true);
     const fs::path output = ta.getFolder("out");
-    writeSidecar(output / "tileset.json", "old tileset");
-    writeSidecar(output / "keep.bin", "old artifact");
+    writeFile(output / "tileset.json", "old tileset");
+    writeFile(output / "keep.bin", "old artifact");
     obj2tiles::Obj2TilesOptions opts;
     std::string error;
     // A bogus executable/input proves validation precedes any tool launch.
@@ -121,7 +107,7 @@ TEST(obj2tiles, buildThrowsWhenBinaryMissing) {
           << "f 1 2 3\n";
     }
 
-    DDB_SETENV("DDB_OBJ2TILES_PATH", kBogusBinary);
+    setEnv("DDB_OBJ2TILES_PATH", kBogusBinary);
     ddb::obj2tiles::findObj2TilesBinary(true);
 
     const fs::path out = ta.getPath("out3dtiles");
@@ -138,7 +124,7 @@ MANUAL_TEST(obj2tiles, endToEndGeneration) {
 
     TestArea ta(TEST_NAME);
     const fs::path obj = ta.getPath("model.obj");
-    writeSidecar(obj, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
+    writeFile(obj, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
 
     const fs::path out = ta.getPath("out3dtiles");
     const std::string tileset = ddb::buildModel3DTiles(obj.string(), out.string(), true);
@@ -161,15 +147,15 @@ MANUAL_TEST(obj2tiles, endToEndGeneration) {
 TEST(obj2tiles, detectGeorefNoneWhenNoSidecar) {
     TestArea ta(TEST_NAME);
     const fs::path obj = ta.getPath("model.obj");
-    writeSidecar(obj, "v 0 0 0\nf 1 1 1\n");  // not JSON, just a placeholder OBJ
+    writeFile(obj, "v 0 0 0\nf 1 1 1\n");  // not JSON, just a placeholder OBJ
     EXPECT_FALSE(detectModelGeoref(obj.string()).has_value());
 }
 
 TEST(obj2tiles, detectGeorefFromGeorefJson) {
     TestArea ta(TEST_NAME);
     const fs::path obj = ta.getPath("model.obj");
-    writeSidecar(obj, "v 0 0 0\n");
-    writeSidecar(ta.getPath("georef.json"),
+    writeFile(obj, "v 0 0 0\n");
+    writeFile(ta.getPath("georef.json"),
                  R"({"latitude": 45.5, "longitude": 9.25, "altitude": 120.0})");
 
     const auto g = detectModelGeoref(obj.string());
@@ -182,9 +168,9 @@ TEST(obj2tiles, detectGeorefFromGeorefJson) {
 TEST(obj2tiles, detectGeorefFromReferenceLla) {
     TestArea ta(TEST_NAME);
     const fs::path obj = ta.getPath("model.obj");
-    writeSidecar(obj, "v 0 0 0\n");
+    writeFile(obj, "v 0 0 0\n");
     // ODM convention; altitude omitted -> defaults to 0.
-    writeSidecar(ta.getPath("reference_lla.json"),
+    writeFile(ta.getPath("reference_lla.json"),
                  R"({"latitude": -33.86, "longitude": 151.21})");
 
     const auto g = detectModelGeoref(obj.string());
@@ -197,9 +183,9 @@ TEST(obj2tiles, detectGeorefFromReferenceLla) {
 TEST(obj2tiles, detectGeorefFromPerModelSidecar) {
     TestArea ta(TEST_NAME);
     const fs::path obj = ta.getPath("mymodel.obj");
-    writeSidecar(obj, "v 0 0 0\n");
+    writeFile(obj, "v 0 0 0\n");
     // <stem>.geo.json takes precedence and uses short keys.
-    writeSidecar(ta.getPath("mymodel.geo.json"),
+    writeFile(ta.getPath("mymodel.geo.json"),
                  R"({"lat": 10.0, "lon": 20.0, "alt": 5.0})");
 
     const auto g = detectModelGeoref(obj.string());
@@ -212,8 +198,8 @@ TEST(obj2tiles, detectGeorefFromPerModelSidecar) {
 TEST(obj2tiles, detectGeorefRejectsOutOfRange) {
     TestArea ta(TEST_NAME);
     const fs::path obj = ta.getPath("model.obj");
-    writeSidecar(obj, "v 0 0 0\n");
-    writeSidecar(ta.getPath("georef.json"),
+    writeFile(obj, "v 0 0 0\n");
+    writeFile(ta.getPath("georef.json"),
                  R"({"latitude": 999.0, "longitude": 9.0})");
     EXPECT_FALSE(detectModelGeoref(obj.string()).has_value());
 }
@@ -224,7 +210,7 @@ TEST(obj2tiles, detectGeorefRejectsOutOfRange) {
 TEST(obj2tiles, getModelInfoBounds) {
     TestArea ta(TEST_NAME);
     const fs::path obj = ta.getPath("box.obj");
-    writeSidecar(obj,
+    writeFile(obj,
                  "v 0 0 0\n"
                  "v 10 0 0\n"
                  "v 0 20 0\n"
@@ -365,39 +351,28 @@ TEST(obj2tiles, forceDefaultsEnvVarParsing) {
         return env && env[0] != '0' && env[0] != '\0';
     };
 
-    // Save pre-existing value to restore afterwards
-    const char* saved = std::getenv("DDB_OBJ2TILES_FORCE_DEFAULTS");
+    // Restores the pre-existing value afterwards
+    EnvVarGuard guard("DDB_OBJ2TILES_FORCE_DEFAULTS");
 
     // Default: not set → false
-    DDB_UNSETENV("DDB_OBJ2TILES_FORCE_DEFAULTS");
+    unsetEnv("DDB_OBJ2TILES_FORCE_DEFAULTS");
     EXPECT_FALSE(checkEnv());
 
     // Set to "1" → true
-    DDB_SETENV("DDB_OBJ2TILES_FORCE_DEFAULTS", "1");
+    setEnv("DDB_OBJ2TILES_FORCE_DEFAULTS", "1");
     EXPECT_TRUE(checkEnv());
 
     // Set to "true" → true
-    DDB_SETENV("DDB_OBJ2TILES_FORCE_DEFAULTS", "true");
+    setEnv("DDB_OBJ2TILES_FORCE_DEFAULTS", "true");
     EXPECT_TRUE(checkEnv());
 
     // Set to "0" → false (explicitly disabled)
-    DDB_SETENV("DDB_OBJ2TILES_FORCE_DEFAULTS", "0");
+    setEnv("DDB_OBJ2TILES_FORCE_DEFAULTS", "0");
     EXPECT_FALSE(checkEnv());
 
     // Set to empty string → false
-    DDB_SETENV("DDB_OBJ2TILES_FORCE_DEFAULTS", "");
+    setEnv("DDB_OBJ2TILES_FORCE_DEFAULTS", "");
     EXPECT_FALSE(checkEnv());
-
-    // Restore pre-existing value
-    if (saved) {
-        if (saved[0] == '\0') {
-            DDB_UNSETENV("DDB_OBJ2TILES_FORCE_DEFAULTS");
-        } else {
-            DDB_SETENV("DDB_OBJ2TILES_FORCE_DEFAULTS", saved);
-        }
-    } else {
-        DDB_UNSETENV("DDB_OBJ2TILES_FORCE_DEFAULTS");
-    }
 }
 
 // When force-defaults is active, a model that would normally get "Tiny" params
@@ -435,8 +410,8 @@ MANUAL_TEST(obj2tiles, endToEndGeoreferenced) {
 
     TestArea ta(TEST_NAME);
     const fs::path obj = ta.getPath("model.obj");
-    writeSidecar(obj, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
-    writeSidecar(ta.getPath("georef.json"),
+    writeFile(obj, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
+    writeFile(ta.getPath("georef.json"),
                  R"({"latitude": 45.46, "longitude": 9.19, "altitude": 120.0})");
 
     const fs::path out = ta.getPath("out3dtiles");
@@ -469,28 +444,13 @@ MANUAL_TEST(obj2tiles, endToEndGeoreferenced) {
     } while (0)
 #endif
 
-// Saves and restores an environment variable around a test.
-struct EnvVarGuard {
-    std::string name;
-    std::optional<std::string> saved;
-    explicit EnvVarGuard(const char* n) : name(n) {
-        if (const char* v = std::getenv(n)) saved = v;
-    }
-    ~EnvVarGuard() {
-        if (saved)
-            DDB_SETENV(name.c_str(), saved->c_str());
-        else
-            DDB_UNSETENV(name.c_str());
-    }
-};
-
 TEST(obj2tiles, emptyDestinationCannotReportOldSuccessFromNoOutputTool) {
     TestArea ta(TEST_NAME, true);
     EnvVarGuard guard("DDB_TEST_CHILD_MODE");
-    DDB_SETENV("DDB_TEST_CHILD_MODE", "no-output");
+    setEnv("DDB_TEST_CHILD_MODE", "no-output");
     ASSERT_TRUE(fs::is_regular_file(testChildPath())) << testChildPath();
     const fs::path obj = ta.getPath("model.obj");
-    writeSidecar(obj, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
+    writeFile(obj, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
     obj2tiles::Obj2TilesOptions opts;
     std::string error;
     const fs::path output = ta.getFolder("out");
@@ -503,7 +463,7 @@ TEST(obj2tiles, emptyDestinationCannotReportOldSuccessFromNoOutputTool) {
 // writes a tileset.json (argv: input output ...).
 fs::path writeEnvDumpingObj2Tiles(const fs::path& dir) {
     const fs::path script = dir / "fake_obj2tiles_env.sh";
-    writeSidecar(script,
+    writeFile(script,
                  "#!/bin/sh\n"
                  "out=\"$2\"\n"
                  "mkdir -p \"$out\"\n"
@@ -519,14 +479,14 @@ fs::path writeEnvDumpingObj2Tiles(const fs::path& dir) {
 std::vector<std::string> childProcessorCounts(TestArea& ta, const std::string& label,
                                               const std::optional<std::string>& cap) {
     if (cap)
-        DDB_SETENV("DDB_OBJ2TILES_MAX_CORES", cap->c_str());
+        setEnv("DDB_OBJ2TILES_MAX_CORES", *cap);
     else
-        DDB_UNSETENV("DDB_OBJ2TILES_MAX_CORES");
+        unsetEnv("DDB_OBJ2TILES_MAX_CORES");
 
     const fs::path dir = ta.getFolder("env_" + label);
     const fs::path script = writeEnvDumpingObj2Tiles(dir);
     const fs::path obj = dir / "model.obj";
-    writeSidecar(obj, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
+    writeFile(obj, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
     const fs::path out = dir / "out";
     io::assureIsRemoved(out);
 
@@ -553,7 +513,7 @@ TEST(obj2tiles, maxCoresValidDecimalReachesChild) {
     SKIP_WITHOUT_POSIX_SHELL();
     EnvVarGuard capGuard("DDB_OBJ2TILES_MAX_CORES");
     EnvVarGuard dotnetGuard("DOTNET_PROCESSOR_COUNT");
-    DDB_UNSETENV("DOTNET_PROCESSOR_COUNT");
+    unsetEnv("DOTNET_PROCESSOR_COUNT");
     TestArea ta(TEST_NAME);
 
     EXPECT_EQ(childProcessorCounts(ta, "one", std::string("1")), std::vector<std::string>{"1"});
@@ -568,7 +528,7 @@ TEST(obj2tiles, maxCoresInvalidValuesAddNothing) {
     SKIP_WITHOUT_POSIX_SHELL();
     EnvVarGuard capGuard("DDB_OBJ2TILES_MAX_CORES");
     EnvVarGuard dotnetGuard("DOTNET_PROCESSOR_COUNT");
-    DDB_UNSETENV("DOTNET_PROCESSOR_COUNT");
+    unsetEnv("DOTNET_PROCESSOR_COUNT");
     TestArea ta(TEST_NAME);
 
     EXPECT_TRUE(childProcessorCounts(ta, "unset", std::nullopt).empty());
@@ -583,7 +543,7 @@ TEST(obj2tiles, maxCoresInheritedValuePassesThroughWhenUnsetOrInvalid) {
     SKIP_WITHOUT_POSIX_SHELL();
     EnvVarGuard capGuard("DDB_OBJ2TILES_MAX_CORES");
     EnvVarGuard dotnetGuard("DOTNET_PROCESSOR_COUNT");
-    DDB_SETENV("DOTNET_PROCESSOR_COUNT", "5");
+    setEnv("DOTNET_PROCESSOR_COUNT", "5");
     TestArea ta(TEST_NAME);
 
     EXPECT_EQ(childProcessorCounts(ta, "unset", std::nullopt), std::vector<std::string>{"5"});
@@ -598,7 +558,7 @@ TEST(obj2tiles, maxCoresOverridesInheritedValue) {
     SKIP_WITHOUT_POSIX_SHELL();
     EnvVarGuard capGuard("DDB_OBJ2TILES_MAX_CORES");
     EnvVarGuard dotnetGuard("DOTNET_PROCESSOR_COUNT");
-    DDB_SETENV("DOTNET_PROCESSOR_COUNT", "64");
+    setEnv("DOTNET_PROCESSOR_COUNT", "64");
     TestArea ta(TEST_NAME);
 
     // Exactly one DOTNET_PROCESSOR_COUNT entry, with the cap's value.
@@ -614,7 +574,7 @@ TEST(obj2tiles, maxCoresClampedToHardwareConcurrency) {
     if (hw == 0) GTEST_SKIP() << "hardware_concurrency() unknown: no clamp applies";
     EnvVarGuard capGuard("DDB_OBJ2TILES_MAX_CORES");
     EnvVarGuard dotnetGuard("DOTNET_PROCESSOR_COUNT");
-    DDB_UNSETENV("DOTNET_PROCESSOR_COUNT");
+    unsetEnv("DOTNET_PROCESSOR_COUNT");
     TestArea ta(TEST_NAME);
 
     EXPECT_EQ(childProcessorCounts(ta, "above", std::to_string(hw + 7)),
@@ -635,7 +595,7 @@ std::vector<std::string> childArgs(TestArea& ta, const std::string& label,
                                    const obj2tiles::Obj2TilesOptions& opts) {
     const fs::path dir = ta.getFolder("args_" + label);
     const fs::path script = dir / "fake_obj2tiles_args.sh";
-    writeSidecar(script,
+    writeFile(script,
                  "#!/bin/sh\n"
                  "out=\"$2\"\n"
                  "mkdir -p \"$out\"\n"
@@ -644,7 +604,7 @@ std::vector<std::string> childArgs(TestArea& ta, const std::string& label,
                  "\"$out/tileset.json\"\n");
     fs::permissions(script, fs::perms::owner_all, fs::perm_options::replace);
     const fs::path obj = dir / "model.obj";
-    writeSidecar(obj, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
+    writeFile(obj, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
     const fs::path out = dir / "out";
     io::assureIsRemoved(out);
 
@@ -675,8 +635,8 @@ TEST(obj2tiles, ktx2ThreadsReachChildWithoutCoreCap) {
     SKIP_WITHOUT_POSIX_SHELL();
     EnvVarGuard capGuard("DDB_OBJ2TILES_MAX_CORES");
     EnvVarGuard dotnetGuard("DOTNET_PROCESSOR_COUNT");
-    DDB_UNSETENV("DDB_OBJ2TILES_MAX_CORES");
-    DDB_UNSETENV("DOTNET_PROCESSOR_COUNT");
+    unsetEnv("DDB_OBJ2TILES_MAX_CORES");
+    unsetEnv("DOTNET_PROCESSOR_COUNT");
     TestArea ta(TEST_NAME);
 
     EXPECT_EQ(argValue(childArgs(ta, "four", ktx2Opts(4)), "--ktx2-threads"), std::optional<std::string>("4"));
@@ -688,8 +648,8 @@ TEST(obj2tiles, ktx2ThreadsNeverSentWithoutKtx2Textures) {
     SKIP_WITHOUT_POSIX_SHELL();
     EnvVarGuard capGuard("DDB_OBJ2TILES_MAX_CORES");
     EnvVarGuard dotnetGuard("DOTNET_PROCESSOR_COUNT");
-    DDB_UNSETENV("DDB_OBJ2TILES_MAX_CORES");
-    DDB_UNSETENV("DOTNET_PROCESSOR_COUNT");
+    unsetEnv("DDB_OBJ2TILES_MAX_CORES");
+    unsetEnv("DOTNET_PROCESSOR_COUNT");
     TestArea ta(TEST_NAME);
 
     // Obj2Tiles rejects --ktx2-threads without --texture-format Ktx2.
@@ -707,20 +667,20 @@ TEST(obj2tiles, ktx2ThreadsDroppedUnderCoreCap) {
     TestArea ta(TEST_NAME);
 
     // Explicit DroneDB cap.
-    DDB_UNSETENV("DOTNET_PROCESSOR_COUNT");
-    DDB_SETENV("DDB_OBJ2TILES_MAX_CORES", "2");
+    unsetEnv("DOTNET_PROCESSOR_COUNT");
+    setEnv("DDB_OBJ2TILES_MAX_CORES", "2");
     auto args = childArgs(ta, "ddbcap", ktx2Opts(4));
     EXPECT_EQ(argValue(args, "--ktx2-threads"), std::nullopt);
     EXPECT_EQ(argValue(args, "--ktx2-quality"), std::optional<std::string>("128")); // rest of KTX2 args intact
 
     // Cap inherited from the environment.
-    DDB_UNSETENV("DDB_OBJ2TILES_MAX_CORES");
-    DDB_SETENV("DOTNET_PROCESSOR_COUNT", "2");
+    unsetEnv("DDB_OBJ2TILES_MAX_CORES");
+    setEnv("DOTNET_PROCESSOR_COUNT", "2");
     EXPECT_EQ(argValue(childArgs(ta, "inherited", ktx2Opts(4)), "--ktx2-threads"), std::nullopt);
 
     // An invalid DroneDB cap is ignored, so it does not count as a cap.
-    DDB_UNSETENV("DOTNET_PROCESSOR_COUNT");
-    DDB_SETENV("DDB_OBJ2TILES_MAX_CORES", "abc");
+    unsetEnv("DOTNET_PROCESSOR_COUNT");
+    setEnv("DDB_OBJ2TILES_MAX_CORES", "abc");
     EXPECT_EQ(argValue(childArgs(ta, "invalid", ktx2Opts(4)), "--ktx2-threads"), std::optional<std::string>("4"));
 }
 
@@ -729,10 +689,10 @@ TEST(obj2tiles, runReportsExitCodeSignalAndTail) {
     SKIP_WITHOUT_POSIX_SHELL();
     TestArea ta(TEST_NAME);
     const fs::path obj = ta.getPath("model.obj");
-    writeSidecar(obj, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
+    writeFile(obj, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
 
     const fs::path failing = ta.getPath("fake_fail.sh");
-    writeSidecar(failing, "#!/bin/sh\necho 'first line'\necho 'fake Obj2Tiles failure' >&2\nexit 3\n");
+    writeFile(failing, "#!/bin/sh\necho 'first line'\necho 'fake Obj2Tiles failure' >&2\nexit 3\n");
     fs::permissions(failing, fs::perms::owner_all, fs::perm_options::replace);
 
     obj2tiles::Obj2TilesOptions opts;
@@ -742,7 +702,7 @@ TEST(obj2tiles, runReportsExitCodeSignalAndTail) {
     EXPECT_NE(err.find("fake Obj2Tiles failure"), std::string::npos) << err;
 
     const fs::path killed = ta.getPath("fake_killed.sh");
-    writeSidecar(killed, "#!/bin/sh\necho 'about to die'\nkill -9 $$\n");
+    writeFile(killed, "#!/bin/sh\necho 'about to die'\nkill -9 $$\n");
     fs::permissions(killed, fs::perms::owner_all, fs::perm_options::replace);
     err.clear();
     EXPECT_FALSE(obj2tiles::runObj2Tiles(obj, ta.getPath("out_killed"), opts, err, killed));
@@ -751,7 +711,7 @@ TEST(obj2tiles, runReportsExitCodeSignalAndTail) {
 
     // Exit 0 without a tileset is still a failure.
     const fs::path noTileset = ta.getPath("fake_no_tileset.sh");
-    writeSidecar(noTileset, "#!/bin/sh\nexit 0\n");
+    writeFile(noTileset, "#!/bin/sh\nexit 0\n");
     fs::permissions(noTileset, fs::perms::owner_all, fs::perm_options::replace);
     err.clear();
     EXPECT_FALSE(obj2tiles::runObj2Tiles(obj, ta.getPath("out_none"), opts, err, noTileset));
@@ -763,10 +723,10 @@ TEST(obj2tiles, runReportsTailWhenTilesetMissing) {
     SKIP_WITHOUT_POSIX_SHELL();
     TestArea ta(TEST_NAME);
     const fs::path obj = ta.getPath("model.obj");
-    writeSidecar(obj, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
+    writeFile(obj, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
 
     const fs::path script = ta.getPath("fake_silent_failure.sh");
-    writeSidecar(script,
+    writeFile(script,
                  "#!/bin/sh\n"
                  "echo 'Loading model'\n"
                  "echo 'Unhandled: could not write tiles' >&2\n"

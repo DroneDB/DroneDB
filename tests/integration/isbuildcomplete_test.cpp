@@ -9,6 +9,7 @@
 #include "gtest/gtest.h"
 #include "test.h"
 #include "testarea.h"
+#include "testfs.h"
 #include "utils.h"
 
 #include <chrono>
@@ -33,15 +34,15 @@ protected:
         // Download real, type-detectable test assets so getEntry() returns the
         // proper EntryType (Vector / PointCloud / GeoRaster / Model).
         vectorPath = testArea->downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/refs/heads/master/vector/test2.geojson",
+            testDataUrl("vector/test2.geojson"),
             "test.geojson");
 
         orthoPath = testArea->downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/master/brighton/odm_orthophoto.tif",
+            testDataUrl("brighton/odm_orthophoto.tif"),
             "ortho.tif");
 
         pointCloudPath = testArea->downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/master/brighton/point_cloud.laz",
+            testDataUrl("brighton/point_cloud.laz"),
             "point_cloud.laz");
 
         // A non-buildable plain text file
@@ -58,18 +59,9 @@ protected:
         testArea.reset();
     }
 
-    // Resolve the hash of an indexed entry by relative path.
-    std::string hashOf(const fs::path& absolutePath) {
-        Entry e;
-        const auto rel = fs::relative(absolutePath, dbPath);
-        EXPECT_TRUE(ddb::getEntry(db.get(), rel.string(), e));
-        return e.hash;
-    }
-
-    // Convenience: create a file with the given content (defaults non-empty).
-    static void writeFile(const fs::path& p, const std::string& content = "x") {
-        fs::create_directories(p.parent_path());
-        std::ofstream(p) << content;
+    // Hash of the indexed file at `absolutePath` (utils.h indexedHash)
+    std::string indexedHash(const fs::path& absolutePath) {
+        return ::indexedHash(db.get(), fs::relative(absolutePath, dbPath).string());
     }
 
     std::unique_ptr<TestArea> testArea;
@@ -98,7 +90,7 @@ TEST_F(IsBuildCompleteTest, NoArtifactsReturnsFalse) {
 // --- Generic types: copc/cog/nxs ---
 
 TEST_F(IsBuildCompleteTest, RasterEmptyFolderReturnsFalse) {
-    const auto hash = hashOf(orthoPath);
+    const auto hash = indexedHash(orthoPath);
     const fs::path out = fs::path(db->buildDirectory()) / hash / "cog";
     fs::create_directories(out);  // empty folder
 
@@ -107,7 +99,7 @@ TEST_F(IsBuildCompleteTest, RasterEmptyFolderReturnsFalse) {
 }
 
 TEST_F(IsBuildCompleteTest, RasterFolderWithEmptyFileReturnsFalse) {
-    const auto hash = hashOf(orthoPath);
+    const auto hash = indexedHash(orthoPath);
     const fs::path out = fs::path(db->buildDirectory()) / hash / "cog";
     writeFile(out / "cog.tif", "");  // zero-byte file
 
@@ -116,7 +108,7 @@ TEST_F(IsBuildCompleteTest, RasterFolderWithEmptyFileReturnsFalse) {
 }
 
 TEST_F(IsBuildCompleteTest, RasterFolderWithContentReturnsTrue) {
-    const auto hash = hashOf(orthoPath);
+    const auto hash = indexedHash(orthoPath);
     const fs::path out = fs::path(db->buildDirectory()) / hash / "cog";
     writeFile(out / "cog.tif", "some COG bytes");
 
@@ -125,7 +117,7 @@ TEST_F(IsBuildCompleteTest, RasterFolderWithContentReturnsTrue) {
 }
 
 TEST_F(IsBuildCompleteTest, PointCloudFolderWithContentReturnsTrue) {
-    const auto hash = hashOf(pointCloudPath);
+    const auto hash = indexedHash(pointCloudPath);
     const fs::path out = fs::path(db->buildDirectory()) / hash / "copc";
     writeFile(out / "point_cloud.copc.laz", "some COPC bytes");
 
@@ -135,7 +127,7 @@ TEST_F(IsBuildCompleteTest, PointCloudFolderWithContentReturnsTrue) {
 
 TEST_F(IsBuildCompleteTest, PointCloudWithNestedContentReturnsTrue) {
     // Recursive scan must traverse subdirectories
-    const auto hash = hashOf(pointCloudPath);
+    const auto hash = indexedHash(pointCloudPath);
     const fs::path out = fs::path(db->buildDirectory()) / hash / "copc";
     writeFile(out / "nested" / "deeper" / "file.bin", "deep content");
 
@@ -146,7 +138,7 @@ TEST_F(IsBuildCompleteTest, PointCloudWithNestedContentReturnsTrue) {
 // --- Vector: requires BOTH source.gpkg AND mvt/metadata.json non-empty ---
 
 TEST_F(IsBuildCompleteTest, VectorMissingMvtReturnsFalse) {
-    const auto hash = hashOf(vectorPath);
+    const auto hash = indexedHash(vectorPath);
     const fs::path base = fs::path(db->buildDirectory()) / hash;
     writeFile(base / "vec" / "source.gpkg", "gpkg bytes");
     // No mvt/metadata.json
@@ -156,7 +148,7 @@ TEST_F(IsBuildCompleteTest, VectorMissingMvtReturnsFalse) {
 }
 
 TEST_F(IsBuildCompleteTest, VectorMissingGpkgReturnsFalse) {
-    const auto hash = hashOf(vectorPath);
+    const auto hash = indexedHash(vectorPath);
     const fs::path base = fs::path(db->buildDirectory()) / hash;
     writeFile(base / "mvt" / "metadata.json", "{}");
     // No vec/source.gpkg
@@ -168,7 +160,7 @@ TEST_F(IsBuildCompleteTest, VectorMissingGpkgReturnsFalse) {
 TEST_F(IsBuildCompleteTest, VectorWithLegacyFgbOnlyReturnsFalse) {
     // Pre-migration installations have vec/vector.fgb but neither source.gpkg
     // nor mvt/. This is exactly the case the artifact checker must detect.
-    const auto hash = hashOf(vectorPath);
+    const auto hash = indexedHash(vectorPath);
     const fs::path base = fs::path(db->buildDirectory()) / hash;
     writeFile(base / "vec" / "vector.fgb", "legacy fgb bytes");
 
@@ -177,7 +169,7 @@ TEST_F(IsBuildCompleteTest, VectorWithLegacyFgbOnlyReturnsFalse) {
 }
 
 TEST_F(IsBuildCompleteTest, VectorWithEmptyMvtMetadataReturnsFalse) {
-    const auto hash = hashOf(vectorPath);
+    const auto hash = indexedHash(vectorPath);
     const fs::path base = fs::path(db->buildDirectory()) / hash;
     writeFile(base / "vec" / "source.gpkg", "gpkg bytes");
     writeFile(base / "mvt" / "metadata.json", "");  // zero-byte
@@ -187,7 +179,7 @@ TEST_F(IsBuildCompleteTest, VectorWithEmptyMvtMetadataReturnsFalse) {
 }
 
 TEST_F(IsBuildCompleteTest, VectorWithBothArtifactsReturnsTrue) {
-    const auto hash = hashOf(vectorPath);
+    const auto hash = indexedHash(vectorPath);
     const fs::path base = fs::path(db->buildDirectory()) / hash;
     writeFile(base / "vec" / "source.gpkg", "gpkg bytes");
     writeFile(base / "mvt" / "metadata.json", "{\"name\":\"layer\"}");
@@ -218,21 +210,21 @@ TEST_F(IsBuildCompleteTest, ModelWithoutArtifactsReturnsFalse) {
 
 TEST_F(IsBuildCompleteTest, ModelEmptyNxsReturnsFalse) {
     const auto rel = addModel(db.get(), dbPath);
-    const fs::path base = fs::path(db->buildDirectory()) / hashOf(dbPath / rel);
+    const fs::path base = fs::path(db->buildDirectory()) / indexedHash(dbPath / rel);
     writeFile(base / "nxs" / "model.nxz", "");
     EXPECT_FALSE(ddb::isBuildComplete(db.get(), rel));
 }
 
 TEST_F(IsBuildCompleteTest, ModelTilesOnlyReturnsFalse) {
     const auto rel = addModel(db.get(), dbPath);
-    const fs::path base = fs::path(db->buildDirectory()) / hashOf(dbPath / rel);
+    const fs::path base = fs::path(db->buildDirectory()) / indexedHash(dbPath / rel);
     writeFile(base / "3dtiles" / "tileset.json", "{}");
     EXPECT_FALSE(ddb::isBuildComplete(db.get(), rel));
 }
 
 TEST_F(IsBuildCompleteTest, ModelNxsWithoutTilesReturnsTrue) {
     const auto rel = addModel(db.get(), dbPath);
-    const fs::path base = fs::path(db->buildDirectory()) / hashOf(dbPath / rel);
+    const fs::path base = fs::path(db->buildDirectory()) / indexedHash(dbPath / rel);
     writeFile(base / "nxs" / "model.nxz", "some NXZ bytes");
     EXPECT_TRUE(ddb::isBuildComplete(db.get(), rel));
 
@@ -277,7 +269,7 @@ TEST(isBuildComplete, modelSwapExceptionIsNarrowAndReadOnly) {
 }
 
 TEST_F(IsBuildCompleteTest, DDBIsBuildCompleteCAPI) {
-    const auto hash = hashOf(orthoPath);
+    const auto hash = indexedHash(orthoPath);
     const fs::path out = fs::path(db->buildDirectory()) / hash / "cog";
     writeFile(out / "cog.tif", "content");
 

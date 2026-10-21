@@ -29,7 +29,7 @@ export VCPKG_ROOT=$PWD/vcpkg
 cmake -S . -B build-asan \
   -DCMAKE_TOOLCHAIN_FILE=$PWD/vcpkg/scripts/buildsystems/vcpkg.cmake \
   -DVCPKG_INSTALLED_DIR=$PWD/build/vcpkg_installed -DVCPKG_MANIFEST_INSTALL=OFF \
-  -DCMAKE_BUILD_TYPE=RelWithDebInfo "-DCMAKE_CXX_FLAGS_RELWITHDEBINFO=-g -O1" "-DCMAKE_C_FLAGS_RELWITHDEBINFO=-g -O1" -DCMAKE_MAP_IMPORTED_CONFIG_RELWITHDEBINFO=Release \
+  -DCMAKE_BUILD_TYPE=Release "-DCMAKE_CXX_FLAGS_RELEASE=-g -O1" "-DCMAKE_C_FLAGS_RELEASE=-g -O1" \
   -DDDB_ENABLE_ASAN=ON -DDDB_ENABLE_UBSAN=ON
 cmake --build build-asan --target ddb_unit_tests ddbcmd -j$(nproc)
 ```
@@ -61,8 +61,7 @@ export DDB03_SKIP_TIMING=1 \
 ctest -L unit --output-on-failure && ctest -R '^cli\.' --output-on-failure
 ```
 
-The integration tests, with the same environment: `./ddbtest --gtest_shuffle` (see the libnexus
-report below).
+The integration tests, with the same environment: `./ddbtest --gtest_shuffle`.
 
 ctest runs each test in its own process, so a leak report names the test that caused it. Run as
 one process (`./ddb_unit_tests`, `./ddbtest`), LeakSanitizer checks at process exit: a leak fails
@@ -99,18 +98,3 @@ cmake --build build-cov --target ddb_unit_tests ddbtest -j$(nproc)
 (cd build-cov && ./ddb_unit_tests && ./ddbtest)
 gcovr -r . build-cov --filter src/ --html-details -o coverage.html   # or lcov
 ```
-
-## Known reports outside this repository
-
-This one comes from the nexus fork (DroneDB/nexus, a submodule of vendor/libnexus) and is not
-suppressed, because it is in code we maintain; it is fixed there, not here:
-
-* LeakSanitizer: when a mesh loader throws while the input is read (`Stream::load`,
-  `StreamSoup::loadMesh` in `vendor/libnexus/vendor/nexus/src/nxsbuild/meshstream.cpp`), the
-  loader and the 80 MB triangle buffer are not freed. `tiles3dBuild.untexturedPlyGoesToNexusUnconverted`
-  triggers it (the PLY loader rejects the file with "Bad index in triangle list."). Exclude that
-  test (`--gtest_filter=-tiles3dBuild.untexturedPlyGoesToNexusUnconverted`) until the submodule
-  is fixed.
-
-It comes from a 3D (Nexus) build, an integration test: the unit tests, and so the CI ASan + UBSan
-job, do not reach it.

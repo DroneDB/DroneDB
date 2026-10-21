@@ -28,6 +28,7 @@
 #include "parallel.h"
 #include "test.h"
 #include "testarea.h"
+#include "testfs.h"
 #include "utils.h"
 
 namespace
@@ -203,7 +204,6 @@ namespace
     // A folder with every kind of file the parser handles differently
     fs::path makeMixedFolder(TestArea &ta)
     {
-        const std::string base = "https://github.com/DroneDB/test_data/raw/refs/heads/master/";
         const auto root = ta.getFolder("ds");
         for (const auto &[url, name] : std::vector<std::pair<std::string, std::string>>{
                  {"images/DJI_0018.JPG", "DJI_0018.JPG"},
@@ -213,7 +213,7 @@ namespace
                  {"brighton/point_cloud.laz", "sub/deeper/point_cloud.laz"},
                  {"vector/test.geojson", "test.geojson"}})
         {
-            const auto file = ta.downloadTestAsset(base + url, fs::path(url).filename().string());
+            const auto file = ta.downloadTestAsset(testDataUrl(url), fs::path(url).filename().string());
             fs::create_directories((root / name).parent_path());
             if (!fs::exists(root / name))
                 fs::copy_file(file, root / name);

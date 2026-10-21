@@ -39,49 +39,17 @@
 #include "status.h"
 #include "test.h"
 #include "testarea.h"
+#include "testfs.h"
+#include "utils.h"
 #include "thermal.h"
 #include "tilerhelper.h"
 #include "timezone.h"
 #include "userprofile.h"
 
-#ifdef _WIN32
-#define DDB_SETENV(name, value) _putenv_s(name, value)
-#define DDB_UNSETENV(name) _putenv_s(name, "")
-#else
-#define DDB_SETENV(name, value) setenv(name, value, 1)
-#define DDB_UNSETENV(name) unsetenv(name)
-#endif
 
 namespace
 {
     using namespace ddb;
-
-    // Saves and restores an environment variable around a test.
-    struct EnvVarGuard
-    {
-        std::string name;
-        std::optional<std::string> saved;
-        explicit EnvVarGuard(const char *n) : name(n)
-        {
-            if (const char *v = std::getenv(n))
-                saved = v;
-        }
-        ~EnvVarGuard()
-        {
-            if (saved)
-                DDB_SETENV(name.c_str(), saved->c_str());
-            else
-                DDB_UNSETENV(name.c_str());
-        }
-    };
-
-    void writeText(const fs::path &p, const std::string &content)
-    {
-        if (p.has_parent_path())
-            fs::create_directories(p.parent_path());
-        std::ofstream out(p.string(), std::ios::binary);
-        out << content;
-    }
 
     // Number of GDAL datasets open in the process (all threads).
     int openDatasetCount()
@@ -170,8 +138,8 @@ namespace
         // The dataset root itself sits under a folder whose name contains ".ddb".
         const auto root = ta.getFolder("x.ddb-y");
         initIndex(root.string());
-        writeText(root / "a.ddbfile.txt", "a");
-        writeText(root / "notes.ddb.d" / "b.txt", "b");
+        writeFile(root / "a.ddbfile.txt", "a");
+        writeFile(root / "notes.ddb.d" / "b.txt", "b");
 
         const auto db = ddb::open(root.string(), false);
         std::map<std::string, FileStatus> seen;
@@ -209,7 +177,7 @@ namespace
         const auto root = ta.getFolder("ds");
         initIndex(root.string());
         // A textured OBJ whose MTL is missing: the build is deferred (BuildDepMissing).
-        writeText(root / "m.obj", "mtllib m.mtl\n"
+        writeFile(root / "m.obj", "mtllib m.mtl\n"
                                   "v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\n"
                                   "vt 0 0\nvt 1 0\nvt 1 1\nvt 0 1\n"
                                   "usemtl mat\n"
@@ -333,9 +301,9 @@ namespace
         EXPECT_FALSE(buildDsmServiceUrl(tmpl, "", 1.5, -2.25, 3.0, 4.0).has_value());
 
         EnvVarGuard guard(DSM_SERVICE_KEY_ENV);
-        DDB_SETENV(DSM_SERVICE_KEY_ENV, "from-env");
+        setEnv(DSM_SERVICE_KEY_ENV, "from-env");
         EXPECT_EQ(dsmServiceApiKey(), "from-env");
-        DDB_UNSETENV(DSM_SERVICE_KEY_ENV);
+        unsetEnv(DSM_SERVICE_KEY_ENV);
         EXPECT_EQ(dsmServiceApiKey(), "");
     }
 
@@ -344,7 +312,7 @@ namespace
     TEST(Dq02Defects, Target_DsmDownloadWithoutKeyIsSkipped)
     {
         EnvVarGuard guard(DSM_SERVICE_KEY_ENV);
-        DDB_UNSETENV(DSM_SERVICE_KEY_ENV);
+        unsetEnv(DSM_SERVICE_KEY_ENV);
         EXPECT_THROW(DSMService::get()->loadFromNetwork(46.84260708333, -91.99455988889), NetException);
     }
 
@@ -354,7 +322,7 @@ namespace
     {
         const std::string key = "S3cretDsmKey0123456789";
         EnvVarGuard guard(DSM_SERVICE_KEY_ENV);
-        DDB_SETENV(DSM_SERVICE_KEY_ENV, key.c_str());
+        setEnv(DSM_SERVICE_KEY_ENV, key);
 
         std::string message;
         try
@@ -375,9 +343,9 @@ namespace
     TEST(Dq02Defects, Target_DsmServiceApiKeyIsTrimmed)
     {
         EnvVarGuard guard(DSM_SERVICE_KEY_ENV);
-        DDB_SETENV(DSM_SERVICE_KEY_ENV, " \tk3y \r\n");
+        setEnv(DSM_SERVICE_KEY_ENV, " \tk3y \r\n");
         EXPECT_EQ(dsmServiceApiKey(), "k3y");
-        DDB_SETENV(DSM_SERVICE_KEY_ENV, "   ");
+        setEnv(DSM_SERVICE_KEY_ENV, "   ");
         EXPECT_EQ(dsmServiceApiKey(), "");
     }
 
@@ -386,9 +354,9 @@ namespace
     {
         const char *name = "DDB_DQ02_TEST_UNSET_VARIABLE";
         EnvVarGuard guard(name);
-        DDB_UNSETENV(name);
+        unsetEnv(name);
         EXPECT_EQ(utils::getEnvOrUnset(name), "<unset>");
-        DDB_SETENV(name, "value");
+        setEnv(name, "value");
         EXPECT_EQ(utils::getEnvOrUnset(name), "value");
     }
 
@@ -573,7 +541,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
         const auto img = ta.downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/refs/heads/master/images/DJI_0018.JPG", "DJI_0018.JPG");
+            testDataUrl("images/DJI_0018.JPG"), "DJI_0018.JPG");
         const auto out = ta.getPath("out.tif");
 
         const int before = openDatasetCount();
@@ -587,7 +555,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
         const auto img = ta.downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/refs/heads/master/images/DJI_0018.JPG", "DJI_0018.JPG");
+            testDataUrl("images/DJI_0018.JPG"), "DJI_0018.JPG");
         const auto out = ta.getPath("projected.tif");
         if (fs::exists(out))
             fs::remove(out);
@@ -626,8 +594,8 @@ namespace
             "</VRTDataset>\n";
         const auto src = ta.getPath("src.vrt");
         const auto ref = ta.getPath("ref.vrt");
-        writeText(src, vrt);
-        writeText(ref, vrt);
+        writeFile(src, vrt);
+        writeFile(ref, vrt);
 
         const int before = openDatasetCount();
         EXPECT_THROW(alignRaster(src.string(), ref.string(), ta.getPath("out.tif").string()), GDALException);

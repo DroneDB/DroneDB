@@ -7,6 +7,7 @@
 #include "exceptions.h"
 #include "test.h"
 #include "testarea.h"
+#include "testfs.h"
 #include "constants.h"
 
 namespace
@@ -66,7 +67,7 @@ namespace
 
         // Download old database that doesn't have the new indexes
         const auto sqlite = ta.downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite",
+            testDataUrl("ddb-remove-test/.ddb/dbase.sqlite"),
             DDB_DATABASE_FILE);
 
         const auto testFolder = ta.getFolder("test");
@@ -150,7 +151,7 @@ namespace
         TestArea ta(TEST_NAME, true);
 
         const auto sqlite = ta.downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite",
+            testDataUrl("ddb-remove-test/.ddb/dbase.sqlite"),
             DDB_DATABASE_FILE);
 
         const auto testFolder = ta.getFolder("test");

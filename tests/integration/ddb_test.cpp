@@ -8,6 +8,7 @@
 #include "metamanager.h"
 #include "test.h"
 #include "testarea.h"
+#include "testfs.h"
 #include "utils.h"
 #include "constants.h"
 
@@ -85,7 +86,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
 
-        const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", DDB_DATABASE_FILE);
+        const auto sqlite = ta.downloadTestAsset(testDataUrl("ddb-remove-test/.ddb/dbase.sqlite"), DDB_DATABASE_FILE);
 
         const auto testFolder = ta.getFolder("test");
         create_directory(testFolder / ".ddb");
@@ -107,7 +108,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
 
-        const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", DDB_DATABASE_FILE);
+        const auto sqlite = ta.downloadTestAsset(testDataUrl("ddb-remove-test/.ddb/dbase.sqlite"), DDB_DATABASE_FILE);
 
         const auto testFolder = ta.getFolder("test");
         create_directory(testFolder / ".ddb");
@@ -129,7 +130,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
 
-        const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", DDB_DATABASE_FILE);
+        const auto sqlite = ta.downloadTestAsset(testDataUrl("ddb-remove-test/.ddb/dbase.sqlite"), DDB_DATABASE_FILE);
 
         const auto testFolder = ta.getFolder("test");
         create_directory(testFolder / ".ddb");
@@ -150,7 +151,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
 
-        const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", DDB_DATABASE_FILE);
+        const auto sqlite = ta.downloadTestAsset(testDataUrl("ddb-remove-test/.ddb/dbase.sqlite"), DDB_DATABASE_FILE);
 
         const auto testFolder = ta.getFolder("test");
         create_directory(testFolder / ".ddb");
@@ -171,7 +172,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
 
-        const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", DDB_DATABASE_FILE);
+        const auto sqlite = ta.downloadTestAsset(testDataUrl("ddb-remove-test/.ddb/dbase.sqlite"), DDB_DATABASE_FILE);
 
         const auto testFolder = ta.getFolder("test");
         create_directory(testFolder / ".ddb");
@@ -192,7 +193,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
 
-        const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", DDB_DATABASE_FILE);
+        const auto sqlite = ta.downloadTestAsset(testDataUrl("ddb-remove-test/.ddb/dbase.sqlite"), DDB_DATABASE_FILE);
 
         const auto testFolder = ta.getFolder("test");
         create_directory(testFolder / ".ddb");
@@ -213,7 +214,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
 
-        const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", DDB_DATABASE_FILE);
+        const auto sqlite = ta.downloadTestAsset(testDataUrl("ddb-remove-test/.ddb/dbase.sqlite"), DDB_DATABASE_FILE);
 
         const auto testFolder = ta.getFolder("test");
         create_directory(testFolder / ".ddb");
@@ -240,7 +241,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
 
-        const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", DDB_DATABASE_FILE);
+        const auto sqlite = ta.downloadTestAsset(testDataUrl("ddb-remove-test/.ddb/dbase.sqlite"), DDB_DATABASE_FILE);
 
         const auto testFolder = ta.getFolder("test");
         create_directory(testFolder / ".ddb");
@@ -261,7 +262,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
 
-        const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", DDB_DATABASE_FILE);
+        const auto sqlite = ta.downloadTestAsset(testDataUrl("ddb-remove-test/.ddb/dbase.sqlite"), DDB_DATABASE_FILE);
 
         const auto testFolder = ta.getFolder("test");
         create_directory(testFolder / ".ddb");
@@ -296,7 +297,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
 
-        const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", DDB_DATABASE_FILE);
+        const auto sqlite = ta.downloadTestAsset(testDataUrl("ddb-remove-test/.ddb/dbase.sqlite"), DDB_DATABASE_FILE);
 
         const auto testFolder = ta.getFolder("test");
         create_directory(testFolder / ".ddb");
@@ -329,7 +330,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
 
-        const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", DDB_DATABASE_FILE);
+        const auto sqlite = ta.downloadTestAsset(testDataUrl("ddb-remove-test/.ddb/dbase.sqlite"), DDB_DATABASE_FILE);
 
         const auto testFolder = ta.getFolder("test");
         create_directory(testFolder / ".ddb");
@@ -363,7 +364,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
 
-        const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", DDB_DATABASE_FILE);
+        const auto sqlite = ta.downloadTestAsset(testDataUrl("ddb-remove-test/.ddb/dbase.sqlite"), DDB_DATABASE_FILE);
 
         const auto testFolder = ta.getFolder("test");
         create_directory(testFolder / ".ddb");
@@ -405,7 +406,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
 
-        const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", DDB_DATABASE_FILE);
+        const auto sqlite = ta.downloadTestAsset(testDataUrl("ddb-remove-test/.ddb/dbase.sqlite"), DDB_DATABASE_FILE);
 
         const auto testFolder = ta.getFolder("test");
         create_directory(testFolder / ".ddb");
@@ -453,7 +454,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
 
-        const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", DDB_DATABASE_FILE);
+        const auto sqlite = ta.downloadTestAsset(testDataUrl("ddb-remove-test/.ddb/dbase.sqlite"), DDB_DATABASE_FILE);
 
         const auto testFolder = ta.getFolder("test");
         create_directory(testFolder / ".ddb");
@@ -477,7 +478,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
 
-        const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", DDB_DATABASE_FILE);
+        const auto sqlite = ta.downloadTestAsset(testDataUrl("ddb-remove-test/.ddb/dbase.sqlite"), DDB_DATABASE_FILE);
 
         const auto testFolder = ta.getFolder("test");
         create_directory(testFolder / ".ddb");
@@ -502,7 +503,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
 
-        const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", DDB_DATABASE_FILE);
+        const auto sqlite = ta.downloadTestAsset(testDataUrl("ddb-remove-test/.ddb/dbase.sqlite"), DDB_DATABASE_FILE);
 
         const auto testFolder = ta.getFolder("test");
         create_directory(testFolder / ".ddb");
@@ -526,7 +527,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
 
-        const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", DDB_DATABASE_FILE);
+        const auto sqlite = ta.downloadTestAsset(testDataUrl("ddb-remove-test/.ddb/dbase.sqlite"), DDB_DATABASE_FILE);
 
         const auto testFolder = ta.getFolder("test");
         create_directory(testFolder / ".ddb");
@@ -552,7 +553,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
 
-        const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", DDB_DATABASE_FILE);
+        const auto sqlite = ta.downloadTestAsset(testDataUrl("ddb-remove-test/.ddb/dbase.sqlite"), DDB_DATABASE_FILE);
 
         const auto testFolder = ta.getFolder("test");
         create_directory(testFolder / ".ddb");
@@ -576,7 +577,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
 
-        const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", DDB_DATABASE_FILE);
+        const auto sqlite = ta.downloadTestAsset(testDataUrl("ddb-remove-test/.ddb/dbase.sqlite"), DDB_DATABASE_FILE);
 
         const auto testFolder = ta.getFolder("test");
         create_directory(testFolder / ".ddb");
@@ -601,7 +602,7 @@ namespace
 
         TestArea ta(TEST_NAME);
 
-        const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/registry/DdbFactoryTest/dbase.sqlite", DDB_DATABASE_FILE);
+        const auto sqlite = ta.downloadTestAsset(testDataUrl("registry/DdbFactoryTest/dbase.sqlite"), DDB_DATABASE_FILE);
 
         const auto testFolder = ta.getFolder("test");
         create_directory(testFolder / ".ddb");
@@ -633,7 +634,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
 
-        const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", DDB_DATABASE_FILE);
+        const auto sqlite = ta.downloadTestAsset(testDataUrl("ddb-remove-test/.ddb/dbase.sqlite"), DDB_DATABASE_FILE);
 
         const auto testFolder = ta.getFolder("test");
         create_directory(testFolder / ".ddb");
@@ -657,7 +658,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
 
-        const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", DDB_DATABASE_FILE);
+        const auto sqlite = ta.downloadTestAsset(testDataUrl("ddb-remove-test/.ddb/dbase.sqlite"), DDB_DATABASE_FILE);
 
         const auto testFolder = ta.getFolder("test");
         create_directory(testFolder / ".ddb");
@@ -681,7 +682,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
 
-        const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", DDB_DATABASE_FILE);
+        const auto sqlite = ta.downloadTestAsset(testDataUrl("ddb-remove-test/.ddb/dbase.sqlite"), DDB_DATABASE_FILE);
 
         const auto testFolder = ta.getFolder("test");
         create_directory(testFolder / ".ddb");
@@ -705,7 +706,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
 
-        const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", DDB_DATABASE_FILE);
+        const auto sqlite = ta.downloadTestAsset(testDataUrl("ddb-remove-test/.ddb/dbase.sqlite"), DDB_DATABASE_FILE);
 
         const auto testFolder = ta.getFolder("test");
         create_directory(testFolder / ".ddb");
@@ -729,7 +730,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
 
-        const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", DDB_DATABASE_FILE);
+        const auto sqlite = ta.downloadTestAsset(testDataUrl("ddb-remove-test/.ddb/dbase.sqlite"), DDB_DATABASE_FILE);
 
         const auto testFolder = ta.getFolder("test");
         create_directory(testFolder / ".ddb");
@@ -753,7 +754,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
 
-        const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", DDB_DATABASE_FILE);
+        const auto sqlite = ta.downloadTestAsset(testDataUrl("ddb-remove-test/.ddb/dbase.sqlite"), DDB_DATABASE_FILE);
 
         const auto testFolder = ta.getFolder("test");
         create_directory(testFolder / ".ddb");
@@ -777,7 +778,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
 
-        const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", DDB_DATABASE_FILE);
+        const auto sqlite = ta.downloadTestAsset(testDataUrl("ddb-remove-test/.ddb/dbase.sqlite"), DDB_DATABASE_FILE);
 
         const auto testFolder = ta.getFolder("test");
         create_directory(testFolder / ".ddb");
@@ -801,7 +802,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
 
-        const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", DDB_DATABASE_FILE);
+        const auto sqlite = ta.downloadTestAsset(testDataUrl("ddb-remove-test/.ddb/dbase.sqlite"), DDB_DATABASE_FILE);
 
         const auto testFolder = ta.getFolder("test");
         create_directory(testFolder / ".ddb");
@@ -824,7 +825,7 @@ namespace
     TEST(fingerprint, fileHandle)
     {
         TestArea ta(TEST_NAME);
-        fs::path ortho = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/brighton/odm_orthophoto.tif",
+        fs::path ortho = ta.downloadTestAsset(testDataUrl("brighton/odm_orthophoto.tif"),
                                               "ortho.tif");
 
         auto fp = ddb::fingerprint(ortho);
@@ -850,7 +851,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
 
-        const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", DDB_DATABASE_FILE);
+        const auto sqlite = ta.downloadTestAsset(testDataUrl("ddb-remove-test/.ddb/dbase.sqlite"), DDB_DATABASE_FILE);
 
         const auto testFolder = ta.getFolder("test");
         create_directory(testFolder / ".ddb");
@@ -871,7 +872,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
 
-        const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", DDB_DATABASE_FILE);
+        const auto sqlite = ta.downloadTestAsset(testDataUrl("ddb-remove-test/.ddb/dbase.sqlite"), DDB_DATABASE_FILE);
 
         const auto testFolder = ta.getFolder("test");
         create_directory(testFolder / ".ddb");
@@ -892,7 +893,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
 
-        const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", DDB_DATABASE_FILE);
+        const auto sqlite = ta.downloadTestAsset(testDataUrl("ddb-remove-test/.ddb/dbase.sqlite"), DDB_DATABASE_FILE);
 
         const auto testFolder = ta.getFolder("test");
         create_directory(testFolder / ".ddb");
@@ -913,7 +914,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
 
-        const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", DDB_DATABASE_FILE);
+        const auto sqlite = ta.downloadTestAsset(testDataUrl("ddb-remove-test/.ddb/dbase.sqlite"), DDB_DATABASE_FILE);
 
         const auto testFolder = ta.getFolder("test");
         create_directory(testFolder / ".ddb");
@@ -930,7 +931,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
 
-        const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", DDB_DATABASE_FILE);
+        const auto sqlite = ta.downloadTestAsset(testDataUrl("ddb-remove-test/.ddb/dbase.sqlite"), DDB_DATABASE_FILE);
 
         const auto testFolder = ta.getFolder("test");
         create_directory(testFolder / ".ddb");
@@ -950,7 +951,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
 
-        const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", DDB_DATABASE_FILE);
+        const auto sqlite = ta.downloadTestAsset(testDataUrl("ddb-remove-test/.ddb/dbase.sqlite"), DDB_DATABASE_FILE);
 
         const auto testFolder = ta.getFolder("test");
         create_directory(testFolder / ".ddb");
@@ -968,7 +969,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
 
-        const auto sqlite = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/master/ddb-remove-test/.ddb/dbase.sqlite", DDB_DATABASE_FILE);
+        const auto sqlite = ta.downloadTestAsset(testDataUrl("ddb-remove-test/.ddb/dbase.sqlite"), DDB_DATABASE_FILE);
 
         const auto testFolder = ta.getFolder("test");
         create_directory(testFolder / ".ddb");

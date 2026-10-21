@@ -37,15 +37,9 @@
 #include "plyconv.h"
 #include "test.h"
 #include "testarea.h"
+#include "testfs.h"
+#include "utils.h"
 
-#include <stdlib.h>
-#ifdef _WIN32
-#define DDB_SETENV(name, value) _putenv_s(name, value)
-#define DDB_UNSETENV(name) _putenv_s(name, "")
-#else
-#define DDB_SETENV(name, value) setenv(name, value, 1)
-#define DDB_UNSETENV(name) unsetenv(name)
-#endif
 
 namespace {
 
@@ -62,21 +56,14 @@ constexpr const char* kBogusBinary = "/nonexistent/Obj2Tiles_missing";
 struct Obj2TilesEnvReset {
     Obj2TilesEnvReset() { obj2tiles::findObj2TilesBinary(true); }
     ~Obj2TilesEnvReset() {
-        DDB_UNSETENV("DDB_OBJ2TILES_PATH");
+        unsetEnv("DDB_OBJ2TILES_PATH");
         obj2tiles::findObj2TilesBinary(true);
     }
 };
 
 void usePath(const fs::path& binary) {
-    DDB_SETENV("DDB_OBJ2TILES_PATH", binary.string().c_str());
+    setEnv("DDB_OBJ2TILES_PATH", binary.string());
     obj2tiles::findObj2TilesBinary(true);
-}
-
-void writeText(const fs::path& p, const std::string& content) {
-    if (p.has_parent_path())
-        fs::create_directories(p.parent_path());
-    std::ofstream out(p.string(), std::ios::binary);
-    out << content;
 }
 
 std::string readText(const fs::path& p) {
@@ -100,7 +87,7 @@ std::vector<std::string> readLines(const fs::path& p) {
 fs::path writeFakeObj2Tiles(const fs::path& dir, bool succeed) {
     const fs::path script = dir / (succeed ? "fake_obj2tiles_ok.sh" : "fake_obj2tiles_fail.sh");
     if (succeed)
-        writeText(script,
+        writeFile(script,
                   "#!/bin/sh\n"
                   "out=\"$2\"\n"
                   "mkdir -p \"$out\"\n"
@@ -109,7 +96,7 @@ fs::path writeFakeObj2Tiles(const fs::path& dir, bool succeed) {
                   "echo '{\"asset\":{\"version\":\"1.0\"},\"geometricError\":0,\"root\":{}}' > "
                   "\"$out/tileset.json\"\n");
     else
-        writeText(script,
+        writeFile(script,
                   "#!/bin/sh\n"
                   "echo 'fake Obj2Tiles failure' >&2\n"
                   "exit 3\n");
@@ -177,7 +164,7 @@ void writeNoUvGltf(const fs::path& gltf) {
     bin.append(reinterpret_cast<const char*>(col), sizeof(col));
     bin.append(reinterpret_cast<const char*>(idx), sizeof(idx));
     const fs::path binPath = fs::path(gltf).replace_extension(".bin");
-    writeText(binPath, bin);
+    writeFile(binPath, bin);
 
     json j;
     j["asset"] = {{"version", "2.0"}};
@@ -199,7 +186,7 @@ void writeNoUvGltf(const fs::path& gltf) {
                                    {"max", json::array({1, 1, 0.5})}},
                                   {{"bufferView", 1}, {"componentType", 5126}, {"count", 4}, {"type", "VEC3"}},
                                   {{"bufferView", 2}, {"componentType", 5123}, {"count", 6}, {"type", "SCALAR"}}});
-    writeText(gltf, j.dump(2));
+    writeFile(gltf, j.dump(2));
 }
 
 // Folder names inside dir (non-recursive).
@@ -238,12 +225,12 @@ TEST(tiles3dBuild, failedRebuildKeepsPreviousTiles) {
     Obj2TilesEnvReset reset;
     TestArea ta(TEST_NAME);
     const fs::path obj = ta.getPath("model.obj");
-    writeText(obj, gridObj());
+    writeFile(obj, gridObj());
     const fs::path out = ta.getPath("3dtiles");
 
     usePath(writeFakeObj2Tiles(ta.getFolder(), true));
     ASSERT_EQ(buildModel3DTiles(obj.string(), out.string(), true), (out / "tileset.json").string());
-    writeText(out / "marker.txt", "previous");
+    writeFile(out / "marker.txt", "previous");
 
     usePath(writeFakeObj2Tiles(ta.getFolder(), false));
     EXPECT_THROW(buildModel3DTiles(obj.string(), out.string(), true), Obj2TilesException);
@@ -260,7 +247,7 @@ TEST(tiles3dBuild, failedRebuildKeepsPreviousTiles) {
     // Invalid input (missing MTL): the previous tiles stay as well.
     usePath(writeFakeObj2Tiles(ta.getFolder(), true));
     const fs::path broken = ta.getPath("broken.obj");
-    writeText(broken, "mtllib broken.mtl\n" + gridObj());
+    writeFile(broken, "mtllib broken.mtl\n" + gridObj());
     EXPECT_THROW(buildModel3DTiles(broken.string(), out.string(), true), BuildDepMissingException);
     EXPECT_EQ(readText(out / "marker.txt"), "previous");
     expectNoLeftovers(out);
@@ -271,10 +258,10 @@ TEST(tiles3dBuild, successfulRebuildReplacesTiles) {
     Obj2TilesEnvReset reset;
     TestArea ta(TEST_NAME);
     const fs::path obj = ta.getPath("model.obj");
-    writeText(obj, gridObj());
+    writeFile(obj, gridObj());
     const fs::path out = ta.getPath("3dtiles");
-    writeText(out / "tileset.json", "{}");
-    writeText(out / "marker.txt", "previous");
+    writeFile(out / "tileset.json", "{}");
+    writeFile(out / "marker.txt", "previous");
 
     usePath(writeFakeObj2Tiles(ta.getFolder(), true));
     buildModel3DTiles(obj.string(), out.string(), true);
@@ -293,12 +280,12 @@ TEST(tiles3dBuild, restoresOldWhenOnlyOldExists) {
     Obj2TilesEnvReset reset;
     TestArea ta(TEST_NAME);
     const fs::path obj = ta.getPath("model.obj");
-    writeText(obj, gridObj());
+    writeFile(obj, gridObj());
     const fs::path out = ta.getPath("3dtiles");
     const fs::path old = ta.getPath("3dtiles-old");
     // A crash between the two renames of the swap.
-    writeText(old / "tileset.json", "{}");
-    writeText(old / "marker.txt", "previous");
+    writeFile(old / "tileset.json", "{}");
+    writeFile(old / "marker.txt", "previous");
 
     // The restore happens under the lock before Obj2Tiles runs, so it holds even
     // when the rebuild then fails.
@@ -315,14 +302,14 @@ TEST(tiles3dBuild, deletesOldWhenBothExistThenRebuildSucceeds) {
     Obj2TilesEnvReset reset;
     TestArea ta(TEST_NAME);
     const fs::path obj = ta.getPath("model.obj");
-    writeText(obj, gridObj());
+    writeFile(obj, gridObj());
     const fs::path out = ta.getPath("3dtiles");
     const fs::path old = ta.getPath("3dtiles-old");
     // A crash before the final delete of the swap: out is the newer tileset.
-    writeText(out / "tileset.json", "{}");
-    writeText(out / "marker.txt", "newer");
-    writeText(old / "tileset.json", "{}");
-    writeText(old / "marker.txt", "older");
+    writeFile(out / "tileset.json", "{}");
+    writeFile(out / "marker.txt", "newer");
+    writeFile(old / "tileset.json", "{}");
+    writeFile(old / "marker.txt", "older");
 
     usePath(writeFakeObj2Tiles(ta.getFolder(), true));
     buildModel3DTiles(obj.string(), out.string(), true);
@@ -338,13 +325,13 @@ TEST(tiles3dBuild, bothExistAndRebuildFailsKeepsNewerTiles) {
     Obj2TilesEnvReset reset;
     TestArea ta(TEST_NAME);
     const fs::path obj = ta.getPath("model.obj");
-    writeText(obj, gridObj());
+    writeFile(obj, gridObj());
     const fs::path out = ta.getPath("3dtiles");
     const fs::path old = ta.getPath("3dtiles-old");
-    writeText(out / "tileset.json", "{}");
-    writeText(old / "tileset.json", "{}");
-    writeText(out / "marker.txt", "newer");
-    writeText(old / "marker.txt", "older");
+    writeFile(out / "tileset.json", "{}");
+    writeFile(old / "tileset.json", "{}");
+    writeFile(out / "marker.txt", "newer");
+    writeFile(old / "marker.txt", "older");
 
     usePath(writeFakeObj2Tiles(ta.getFolder(), false));
     EXPECT_THROW(buildModel3DTiles(obj.string(), out.string(), true), Obj2TilesException);
@@ -357,14 +344,14 @@ TEST(tiles3dBuild, trailingSeparatorOutputDir) {
     Obj2TilesEnvReset reset;
     TestArea ta(TEST_NAME);
     const fs::path obj = ta.getPath("model.obj");
-    writeText(obj, gridObj());
+    writeFile(obj, gridObj());
     const fs::path out = ta.getPath("3dtiles");
 
     usePath(writeFakeObj2Tiles(ta.getFolder(), true));
     const std::string tileset = buildModel3DTiles(obj.string(), out.string() + "/", true);
     EXPECT_EQ(fs::path(tileset), out / "tileset.json");
     EXPECT_TRUE(fs::exists(out / "tileset.json"));
-    writeText(out / "marker.txt", "previous");
+    writeFile(out / "marker.txt", "previous");
 
     // The siblings are derived from the folder name, not created inside it.
     usePath(writeFakeObj2Tiles(ta.getFolder(), false));
@@ -385,10 +372,10 @@ TEST(tiles3dBuild, busyTilesLockLeavesOutputAlone) {
     Obj2TilesEnvReset reset;
     TestArea ta(TEST_NAME);
     const fs::path obj = ta.getPath("model.obj");
-    writeText(obj, gridObj());
+    writeFile(obj, gridObj());
     const fs::path out = ta.getPath("3dtiles");
-    writeText(out / "marker.txt", "previous");
-    writeText(ta.getPath("3dtiles-temp-0123456789abcdef/partial"), "in flight");
+    writeFile(out / "marker.txt", "previous");
+    writeFile(ta.getPath("3dtiles-temp-0123456789abcdef/partial"), "in flight");
 
     usePath(writeFakeObj2Tiles(ta.getFolder(), true));
     {
@@ -410,7 +397,7 @@ TEST(tiles3dBuild, plyIsConvertedToObjForTiles) {
     Obj2TilesEnvReset reset;
     TestArea ta(TEST_NAME);
     const fs::path ply = ta.getPath("mesh  with  spaces.ply");
-    writeText(ply, gridPly(6));
+    writeFile(ply, gridPly(6));
     const fs::path out = ta.getPath("3dtiles");
 
     usePath(writeFakeObj2Tiles(ta.getFolder(), true));
@@ -514,7 +501,7 @@ TEST(tiles3dBuild, realObj2TilesFromPly) {
     SKIP_WITHOUT_OBJ2TILES();
     TestArea ta(TEST_NAME);
     const fs::path ply = ta.getPath("mesh.ply");
-    writeText(ply, gridPly(12));
+    writeFile(ply, gridPly(12));
     const fs::path out = ta.getPath("3dtiles");
 
     const std::string tileset = buildModel3DTiles(ply.string(), out.string(), true);
@@ -548,7 +535,7 @@ MANUAL_TEST(tiles3dBuild, realObj2TilesFromBrightonPly) {
     SKIP_WITHOUT_OBJ2TILES();
     TestArea ta(TEST_NAME);
     const fs::path ply = ta.downloadTestAsset(
-        "https://github.com/DroneDB/test_data/raw/refs/heads/master/3d/brighton.ply", "brighton.ply");
+        testDataUrl("3d/brighton.ply"), "brighton.ply");
     const fs::path out = ta.getPath("3dtiles");
 
     const std::string tileset = buildModel3DTiles(ply.string(), out.string(), true);
@@ -560,15 +547,11 @@ MANUAL_TEST(tiles3dBuild, realObj2TilesFromBrightonPly) {
 // D-A2: buildInternal for a Model (Nexus + best-effort tiles)
 // ---------------------------------------------------------------------------
 
-struct ModelDataset {
-    explicit ModelDataset(const std::string& name) : ta(name, true) {
-        root = ta.getFolder("");
-        ddb::initIndex(root.string());
-        db = ddb::open(root.string(), true);
-    }
+struct ModelDataset : IndexFixture {
+    explicit ModelDataset(const std::string& name) : IndexFixture(name, "") {}
 
     void add(const std::string& rel, const std::string& content) {
-        writeText(root / rel, content);
+        writeFile(root / rel, content);
         ddb::addToIndex(db.get(), {(root / rel).string()});
         Entry e;
         ASSERT_TRUE(ddb::getEntry(db.get(), rel, e));
@@ -578,9 +561,6 @@ struct ModelDataset {
 
     fs::path out(const std::string& rel) const { return db->buildDirectory() / hashes.at(rel); }
 
-    TestArea ta;
-    fs::path root;
-    std::unique_ptr<Database> db;
     std::map<std::string, std::string> hashes;
 };
 
@@ -593,19 +573,19 @@ TEST(tiles3dBuild, completeModelRecoversTilesBeforeReturningWithoutTools) {
     const fs::path nxs = base / "nxs" / "model.nxz";
     const fs::path tiles = base / "3dtiles";
     const fs::path old = base / "3dtiles-old";
-    writeText(nxs, "existing Nexus bytes");
+    writeFile(nxs, "existing Nexus bytes");
     const auto nxsTime = fs::last_write_time(nxs);
 
     // Recovery is reached through the public API, even with no converter tool.
     for (const std::string state : {"missing", "empty", "partial", "sentinel-directory"}) {
         SCOPED_TRACE(state);
         fs::remove_all(tiles);
-        writeText(old / "tileset.json", "{}");
-        writeText(old / "marker", "usable backup");
+        writeFile(old / "tileset.json", "{}");
+        writeFile(old / "marker", "usable backup");
         if (state == "empty")
-            writeText(tiles / "tileset.json", "");
+            writeFile(tiles / "tileset.json", "");
         else if (state == "partial")
-            writeText(tiles / "unfinished.bin", "partial");
+            writeFile(tiles / "unfinished.bin", "partial");
         else if (state == "sentinel-directory")
             fs::create_directories(tiles / "tileset.json");
         bool complete = true;
@@ -623,8 +603,8 @@ TEST(tiles3dBuild, completeModelRecoversTilesBeforeReturningWithoutTools) {
     }
 
     // A complete final wins; ordinary Nexus-only models remain complete.
-    writeText(tiles / "marker", "newer");
-    writeText(old / "tileset.json", "{}");
+    writeFile(tiles / "marker", "newer");
+    writeFile(old / "tileset.json", "{}");
     ASSERT_EQ(DDBBuild(ds.root.string().c_str(), "model.obj", nullptr, false), DDBERR_NONE);
     EXPECT_EQ(readText(tiles / "marker"), "newer");
     EXPECT_FALSE(fs::exists(old));
@@ -638,12 +618,12 @@ TEST(tiles3dBuild, completeModelDefersRecoveryUnderLiveTilesLock) {
     const fs::path base = ds.out("model.obj");
     const fs::path tiles = base / "3dtiles";
     const fs::path old = base / "3dtiles-old";
-    writeText(base / "nxs" / "model.nxz", "existing Nexus");
-    writeText(old / "tileset.json", "{}");
-    writeText(old / "marker", "previous");
-    writeText(tiles / "unfinished", "in flight");
+    writeFile(base / "nxs" / "model.nxz", "existing Nexus");
+    writeFile(old / "tileset.json", "{}");
+    writeFile(old / "marker", "previous");
+    writeFile(tiles / "unfinished", "in flight");
     const fs::path pending(base.string() + ".pending");
-    writeText(pending, "original marker\n");
+    writeFile(pending, "original marker\n");
     {
         BuildLock holder(tiles.string());
         EXPECT_THROW(build(ds.db.get(), "model.obj", "", false), BuildInProgressException);
@@ -662,8 +642,8 @@ TEST(tiles3dBuild, recoveryInspectionErrorPreservesUsableBackup) {
     TestArea ta(TEST_NAME, true);
     const fs::path tiles = ta.getFolder("3dtiles");
     const fs::path old = ta.getPath("3dtiles-old");
-    writeText(old / "tileset.json", "{}");
-    writeText(old / "marker", "last usable copy");
+    writeFile(old / "tileset.json", "{}");
+    writeFile(old / "marker", "last usable copy");
     std::error_code error;
     fs::create_symlink("tileset.json", tiles / "tileset.json", error);
     if (error)
@@ -691,7 +671,7 @@ TEST(tiles3dBuild, modelBuildProducesNexusAndTiles) {
 
     // A forced rebuild whose tiles step fails still publishes Nexus and keeps the
     // previous tiles.
-    writeText(ds.out("model.obj") / "3dtiles" / "marker.txt", "previous");
+    writeFile(ds.out("model.obj") / "3dtiles" / "marker.txt", "previous");
     usePath(writeFakeObj2Tiles(ds.ta.getFolder(), false));
     EXPECT_NO_THROW(ddb::build(ds.db.get(), "model.obj", "", true));
     EXPECT_TRUE(fs::exists(ds.out("model.obj") / "nxs" / "model.nxz"));
@@ -740,7 +720,7 @@ TEST(tiles3dBuild, cleanupNeverStripsTilesFromConcurrentModelBuild) {
 
     int refused = 0, built = 0;
     for (int i = 0; i < 20; ++i) {
-        writeText(tiles / "stale.marker", "iteration " + std::to_string(i));
+        writeFile(tiles / "stale.marker", "iteration " + std::to_string(i));
         try {
             ddb::build(ds.db.get(), "model.obj", "", true);
         } catch (const BuildInProgressException&) {
@@ -820,7 +800,7 @@ TEST(tiles3dBuild, untexturedPlyBuildsNexus) {
 TEST(tiles3dBuild, untexturedPlyGoesToNexusUnconverted) {
     TestArea ta(TEST_NAME, true);
     const fs::path ply = ta.getPath("mesh.ply");
-    writeText(ply,
+    writeFile(ply,
               "ply\nformat ascii 1.0\nelement face 1\nproperty list uchar int vertex_indices\n"
               "element vertex 3\nproperty float x\nproperty float y\nproperty float z\nend_header\n"
               "3 0 1 2\n0 0 0\n1 0 0\n0 1 0\n");
@@ -889,7 +869,7 @@ TEST(tiles3dBuild, converterInfoSkipsGetModelInfo) {
     usePath(writeFakeObj2Tiles(ta.getFolder(), true));
 
     const fs::path ply = ta.getPath("mesh.ply");
-    writeText(ply, gridPly(6));
+    writeFile(ply, gridPly(6));
     {
         CaptureScope cap(plog::debug);
         buildModel3DTiles(ply.string(), ta.getPath("t_ply").string(), true);
@@ -897,7 +877,7 @@ TEST(tiles3dBuild, converterInfoSkipsGetModelInfo) {
         EXPECT_FALSE(cap.contains("getModelInfo failed"));
     }
     const fs::path obj = ta.getPath("mesh.obj");
-    writeText(obj, gridObj(6));
+    writeFile(obj, gridObj(6));
     {
         CaptureScope cap(plog::debug);
         buildModel3DTiles(obj.string(), ta.getPath("t_obj").string(), true);

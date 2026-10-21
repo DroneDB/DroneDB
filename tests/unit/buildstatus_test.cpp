@@ -6,7 +6,6 @@
 // isBuildComplete() for a whole listing with one index open (the Registry used to
 // make two native calls, i.e. two opens, per buildable entry).
 
-#include <fstream>
 
 #include "gtest/gtest.h"
 
@@ -16,6 +15,7 @@
 #include "exceptions.h"
 #include "test.h"
 #include "testarea.h"
+#include "utils.h"
 
 namespace
 {
@@ -26,18 +26,10 @@ namespace
     const std::string H_CLOUD(64, 'c');
     const std::string H_ROADS(64, 'd');
 
-    struct Fixture
+    struct Fixture : IndexFixture
     {
-        fs::path root;
-        std::unique_ptr<Database> db;
-
-        explicit Fixture(const std::string &name)
+        explicit Fixture(const std::string &name) : IndexFixture(name)
         {
-            TestArea ta(name, true);
-            root = ta.getFolder("ds");
-            initIndex(root.string());
-            db = ddb::open(root.string(), false);
-
             insert("ortho.tif", H_ORTHO, GeoRaster);     // complete build
             insert("dsm.tif", H_DSM, GeoRaster);         // never built
             insert("cloud.laz", H_CLOUD, PointCloud);    // empty stub left by an aborted build
@@ -48,10 +40,10 @@ namespace
             insert("orphan.dbf", std::string(64, '2'), Generic); // dependency without main file
             insert("dir", "", Directory);
 
-            writeFile(db->buildDirectory() / H_ORTHO / "cog" / "cog.tif");
+            writeFile(db->buildDirectory() / H_ORTHO / "cog" / "cog.tif", "x");
             fs::create_directories(db->buildDirectory() / H_CLOUD / "copc");
-            writeFile(db->buildDirectory() / H_ROADS / "vec" / "source.gpkg");
-            writeFile(db->buildDirectory() / H_ROADS / "mvt" / "metadata.json");
+            writeFile(db->buildDirectory() / H_ROADS / "vec" / "source.gpkg", "x");
+            writeFile(db->buildDirectory() / H_ROADS / "mvt" / "metadata.json", "x");
         }
 
         void insert(const std::string &path, const std::string &hash, EntryType type) const
@@ -63,12 +55,6 @@ namespace
             q->bind(3, static_cast<int>(type));
             q->bind(4, static_cast<int>(std::count(path.begin(), path.end(), '/')));
             q->execute();
-        }
-
-        static void writeFile(const fs::path &p)
-        {
-            fs::create_directories(p.parent_path());
-            std::ofstream(p) << "x";
         }
     };
 

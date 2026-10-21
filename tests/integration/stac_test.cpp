@@ -8,6 +8,7 @@
 #include "ddb.h"
 #include "test.h"
 #include "testarea.h"
+#include "testfs.h"
 
 namespace
 {
@@ -27,12 +28,12 @@ namespace
 
             // Download a GeoRaster (has geotransform + projection, no captureTime)
             orthoPath = ta->downloadTestAsset(
-                "https://github.com/DroneDB/test_data/raw/master/brighton/odm_orthophoto.tif",
+                testDataUrl("brighton/odm_orthophoto.tif"),
                 "ortho.tif");
 
             // Download a GeoImage (has captureTime from EXIF)
             imagePath = ta->downloadTestAsset(
-                "https://github.com/DroneDB/test_data/raw/master/images/DJI_0018.JPG",
+                testDataUrl("images/DJI_0018.JPG"),
                 "DJI_0018.JPG");
         }
     };
@@ -591,7 +592,7 @@ TEST(stacCApi, invalidArgsBadBbox) {
 TEST(stacCApi, successReturnsFeatureCollection) {
     TestArea ta(TEST_NAME);
     fs::path ortho = ta.downloadTestAsset(
-        "https://github.com/DroneDB/test_data/raw/master/brighton/odm_orthophoto.tif",
+        testDataUrl("brighton/odm_orthophoto.tif"),
         "ortho.tif");
 
     // Ensure .ddb is removed (stale leftovers from previous runs on Windows)

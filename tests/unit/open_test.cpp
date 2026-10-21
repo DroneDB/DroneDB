@@ -24,24 +24,11 @@
 #include "ddb.h"
 #include "test.h"
 #include "testarea.h"
+#include "utils.h"
 
 namespace
 {
     using namespace ddb;
-
-    fs::path makeIndex(const std::string &name)
-    {
-        TestArea ta(name, true);
-        const auto root = ta.getFolder("ds");
-        initIndex(root.string());
-        {
-            std::ofstream f(root / "a.txt");
-            f << "alpha";
-        }
-        auto db = ddb::open(root.string(), false);
-        addToIndex(db.get(), {(root / "a.txt").string()});
-        return root;
-    }
 
     fs::path dbFile(const fs::path &root) { return root / DDB_FOLDER / DDB_DATABASE_FILE; }
     fs::path walFile(const fs::path &root) { return fs::path(dbFile(root).string() + "-wal"); }

@@ -7,6 +7,7 @@
 #include "json.h"
 #include "test.h"
 #include "testarea.h"
+#include "testfs.h"
 #include <cmath>
 #include <fstream>
 
@@ -41,7 +42,7 @@ namespace
     TEST(parseEntry, wro_EPSG2193)
     {
         TestArea ta(TEST_NAME);
-        fs::path pc = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/refs/heads/master/ortho/wro.tif",
+        fs::path pc = ta.downloadTestAsset(testDataUrl("ortho/wro.tif"),
                                            "wro.tif");
 
         Entry e;
@@ -137,7 +138,7 @@ namespace
     TEST(parseEntry, copr_EPSG32611)
     {
         TestArea ta(TEST_NAME);
-        fs::path pc = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/refs/heads/master/ortho/copr.tif",
+        fs::path pc = ta.downloadTestAsset(testDataUrl("ortho/copr.tif"),
                                            "copr.tif");
 
         Entry e;
@@ -171,7 +172,7 @@ namespace
     TEST(parseEntry, mygla_EPSG4326)
     {
         TestArea ta(TEST_NAME);
-        fs::path pc = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/refs/heads/master/ortho/mygla.tif",
+        fs::path pc = ta.downloadTestAsset(testDataUrl("ortho/mygla.tif"),
                                            "mygla.tif");
 
         Entry e;
@@ -205,7 +206,7 @@ namespace
     TEST(parseEntry, aukerman_EPSG32617)
     {
         TestArea ta(TEST_NAME);
-        fs::path pc = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/refs/heads/master/ortho/aukerman.tif",
+        fs::path pc = ta.downloadTestAsset(testDataUrl("ortho/aukerman.tif"),
                                            "aukerman.tif");
 
         Entry e;
@@ -236,7 +237,7 @@ namespace
     TEST(parseEntry, brighton_beach_EPSG32615)
     {
         TestArea ta(TEST_NAME);
-        fs::path pc = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/refs/heads/master/ortho/brighton-beach.tif",
+        fs::path pc = ta.downloadTestAsset(testDataUrl("ortho/brighton-beach.tif"),
                                            "brighton-beach.tif");
 
         Entry e;
@@ -267,7 +268,7 @@ namespace
     TEST(parseEntry, caliterra_EPSG32614)
     {
         TestArea ta(TEST_NAME);
-        fs::path pc = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/refs/heads/master/ortho/caliterra.tif",
+        fs::path pc = ta.downloadTestAsset(testDataUrl("ortho/caliterra.tif"),
                                            "caliterra.tif");
 
         Entry e;
@@ -298,7 +299,7 @@ namespace
     TEST(parseEntry, sheffield_park_3_EPSG32617)
     {
         TestArea ta(TEST_NAME);
-        fs::path pc = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/refs/heads/master/ortho/sheffield-park-3.tif",
+        fs::path pc = ta.downloadTestAsset(testDataUrl("ortho/sheffield-park-3.tif"),
                                            "sheffield-park-3.tif");
 
         Entry e;
@@ -329,7 +330,7 @@ namespace
     TEST(parseEntry, vo_EPSG31370)
     {
         TestArea ta(TEST_NAME);
-        fs::path pc = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/refs/heads/master/ortho/vo.tif",
+        fs::path pc = ta.downloadTestAsset(testDataUrl("ortho/vo.tif"),
                                            "vo.tif");
 
         Entry e;
@@ -357,7 +358,7 @@ namespace
     TEST(parseEntry, w5s_EPSG32615)
     {
         TestArea ta(TEST_NAME);
-        fs::path pc = ta.downloadTestAsset("https://github.com/DroneDB/test_data/raw/refs/heads/master/ortho/w5s.tif",
+        fs::path pc = ta.downloadTestAsset(testDataUrl("ortho/w5s.tif"),
                                            "w5s.tif");
 
         Entry e;
@@ -396,7 +397,7 @@ namespace
         // Width and height should still be extracted from the file structure.
         TestArea ta(TEST_NAME);
         fs::path imagePath = ta.downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/refs/heads/master/images/test.png",
+            testDataUrl("images/test.png"),
             "test.png");
 
         ASSERT_TRUE(fs::exists(imagePath)) << "Test image not found";
@@ -421,7 +422,7 @@ namespace
         // Regression test: GeoImage (with EXIF) must still have width/height
         TestArea ta(TEST_NAME);
         fs::path imagePath = ta.downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/refs/heads/master/images/DJI_0018.JPG",
+            testDataUrl("images/DJI_0018.JPG"),
             "DJI_0018.JPG");
 
         ASSERT_TRUE(fs::exists(imagePath)) << "Test image not found";

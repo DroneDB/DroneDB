@@ -5,6 +5,7 @@
 #include "gtest/gtest.h"
 #include "test.h"
 #include "testarea.h"
+#include "testfs.h"
 
 #include "ddb.h"
 #include "sensorprofile.h"
@@ -827,7 +828,7 @@ TEST(multispectral, mergePreservesGpsWithRealData) {
     TestArea ta(TEST_NAME, true);
 
     // Download real multispectral band files from test_data repo
-    std::string baseUrl = "https://github.com/DroneDB/test_data/raw/master/multispectral/";
+    std::string baseUrl = testDataUrl("multispectral/");
     std::vector<std::string> inputs;
     for (int i = 1; i <= 5; i++) {
         std::string filename = "IMG_0180_" + std::to_string(i) + ".tif";
@@ -906,7 +907,7 @@ TEST(multispectral, mergeNoGpsDoesNotFail) {
 TEST(multispectral, detectAlignmentMicaSense) {
     TestArea ta(TEST_NAME);
 
-    std::string baseUrl = "https://github.com/DroneDB/test_data/raw/master/multispectral/";
+    std::string baseUrl = testDataUrl("multispectral/");
     std::vector<std::string> inputs;
     for (int i = 1; i <= 5; i++) {
         std::string filename = "IMG_0180_" + std::to_string(i) + ".tif";
@@ -962,7 +963,7 @@ TEST(multispectral, detectAlignmentNoXmpCamera) {
 TEST(multispectral, detectAlignmentSingleFile) {
     TestArea ta(TEST_NAME);
 
-    std::string baseUrl = "https://github.com/DroneDB/test_data/raw/master/multispectral/";
+    std::string baseUrl = testDataUrl("multispectral/");
     fs::path bandPath = ta.downloadTestAsset(baseUrl + "IMG_0180_1.tif", "IMG_0180_1.tif");
     std::vector<std::string> inputs = {bandPath.string()};
 
@@ -976,7 +977,7 @@ TEST(multispectral, detectAlignmentSingleFile) {
 TEST(multispectral, validateAlignmentWarningMicaSense) {
     TestArea ta(TEST_NAME);
 
-    std::string baseUrl = "https://github.com/DroneDB/test_data/raw/master/multispectral/";
+    std::string baseUrl = testDataUrl("multispectral/");
     std::vector<std::string> inputs;
     for (int i = 1; i <= 5; i++) {
         std::string filename = "IMG_0180_" + std::to_string(i) + ".tif";
@@ -1000,7 +1001,7 @@ TEST(multispectral, validateAlignmentWarningMicaSense) {
 TEST(multispectral, mergeWithAlignmentCorrection) {
     TestArea ta(TEST_NAME, true);
 
-    std::string baseUrl = "https://github.com/DroneDB/test_data/raw/master/multispectral/";
+    std::string baseUrl = testDataUrl("multispectral/");
     std::vector<std::string> inputs;
     for (int i = 1; i <= 5; i++) {
         std::string filename = "IMG_0180_" + std::to_string(i) + ".tif";
@@ -1066,7 +1067,7 @@ TEST(multispectral, mergeGeorefNoShift) {
 TEST(multispectral, detectAlignmentParrotSequoia) {
     TestArea ta(TEST_NAME);
 
-    std::string baseUrl = "https://github.com/DroneDB/test_data/raw/master/multispectral/parrot_sequoia/";
+    std::string baseUrl = testDataUrl("multispectral/parrot_sequoia/");
     std::vector<std::string> suffixes = {"_GRE.TIF", "_RED.TIF", "_REG.TIF", "_NIR.TIF"};
     std::vector<std::string> inputs;
     for (const auto &s : suffixes) {
@@ -1096,7 +1097,7 @@ TEST(multispectral, detectAlignmentParrotSequoia) {
 TEST(multispectral, detectAlignmentDjiM3M) {
     TestArea ta(TEST_NAME);
 
-    std::string baseUrl = "https://github.com/DroneDB/test_data/raw/master/multispectral/dji/";
+    std::string baseUrl = testDataUrl("multispectral/dji/");
     std::vector<std::string> suffixes = {"_MS_G.TIF", "_MS_R.TIF", "_MS_RE.TIF", "_MS_NIR.TIF"};
     std::vector<std::string> inputs;
     for (const auto &s : suffixes) {
@@ -1126,7 +1127,7 @@ TEST(multispectral, detectAlignmentDjiM3M) {
 TEST(multispectral, detectAlignmentDjiP4MS) {
     TestArea ta(TEST_NAME);
 
-    std::string baseUrl = "https://github.com/DroneDB/test_data/raw/master/multispectral/dji_p4/";
+    std::string baseUrl = testDataUrl("multispectral/dji_p4/");
     std::vector<std::string> inputs;
     for (int i = 21; i <= 25; i++) {
         std::string filename = "DJI_00" + std::to_string(i) + ".TIF";
@@ -1156,7 +1157,7 @@ TEST(multispectral, detectAlignmentDjiP4MS) {
 TEST(multispectral, detectAlignmentSentera6X) {
     TestArea ta(TEST_NAME);
 
-    std::string baseUrl = "https://github.com/DroneDB/test_data/raw/master/multispectral/sentera_6x/";
+    std::string baseUrl = testDataUrl("multispectral/sentera_6x/");
     std::vector<std::string> filenames = {
         "IMG_0013_475_30.tif", "IMG_0013_550_20.tif", "IMG_0013_670_30.tif",
         "IMG_0013_715_10.tif", "IMG_0013_840_20.tif"

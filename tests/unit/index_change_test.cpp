@@ -24,36 +24,15 @@
 #include "status.h"
 #include "test.h"
 #include "testarea.h"
+#include "utils.h"
 
 namespace
 {
     using namespace ddb;
 
-    void writeFile(const fs::path &p, const std::string &content)
+    struct Fixture : IndexFixture
     {
-        fs::create_directories(p.parent_path());
-        std::ofstream f(p, std::ios::binary);
-        f << content;
-    }
-
-    struct Fixture
-    {
-        fs::path root;
-        std::unique_ptr<Database> db;
-
-        explicit Fixture(const std::string &name)
-        {
-            TestArea ta(name, true);
-            root = ta.getFolder("ds");
-            initIndex(root.string());
-            db = ddb::open(root.string(), false);
-        }
-
-        std::string hashOf(const std::string &rel) const
-        {
-            Entry e;
-            return getEntry(db.get(), rel, e) ? e.hash : "<missing>";
-        }
+        using IndexFixture::IndexFixture;
 
         // The stored mtime and its SQLite type
         std::pair<double, std::string> storedMtime(const std::string &rel) const
@@ -78,14 +57,14 @@ namespace
         Fixture f(TEST_NAME);
         writeFile(f.root / "a.txt", "hello2");
         f.add("a.txt");
-        const auto before = f.hashOf("a.txt");
+        const auto before = hashOf(f.db.get(), "a.txt");
 
         // Same size, right away: the whole-second mtime is almost always the same
         writeFile(f.root / "a.txt", "hello3");
         EXPECT_EQ(f.add("a.txt"), std::vector<std::string>{"a.txt"});
 
-        EXPECT_NE(f.hashOf("a.txt"), before);
-        EXPECT_EQ(f.hashOf("a.txt"), Hash::fileSHA256((f.root / "a.txt").string()));
+        EXPECT_NE(hashOf(f.db.get(), "a.txt"), before);
+        EXPECT_EQ(hashOf(f.db.get(), "a.txt"), Hash::fileSHA256((f.root / "a.txt").string()));
     }
 
     TEST(IndexChange, storesSubSecondTimeButReportsSeconds)
@@ -125,8 +104,8 @@ namespace
         EXPECT_EQ(f.storedMtime("a.txt").second, "integer");
 
         Entry e;
-        EXPECT_EQ(checkUpdate(e, f.root / "a.txt", static_cast<double>(seconds), f.hashOf("a.txt")), NotModified);
-        EXPECT_EQ(checkUpdate(e, f.root / "a.txt", static_cast<double>(seconds - 1), f.hashOf("a.txt")), NotModified);
+        EXPECT_EQ(checkUpdate(e, f.root / "a.txt", static_cast<double>(seconds), hashOf(f.db.get(), "a.txt")), NotModified);
+        EXPECT_EQ(checkUpdate(e, f.root / "a.txt", static_cast<double>(seconds - 1), hashOf(f.db.get(), "a.txt")), NotModified);
         EXPECT_EQ(checkUpdate(e, f.root / "a.txt", static_cast<double>(seconds - 1), "other"), Modified);
     }
 
@@ -165,9 +144,9 @@ namespace
         addToIndex(f.db.get(), {f.root.string()});
         addToIndex(f.db.get(), {(f.root / ".").string()});
 
-        EXPECT_EQ(f.hashOf(""), "<missing>");
-        EXPECT_NE(f.hashOf("dir/a.txt"), "<missing>");
-        EXPECT_EQ(f.hashOf("dir"), "");
+        EXPECT_EQ(hashOf(f.db.get(), ""), "<missing>");
+        EXPECT_NE(hashOf(f.db.get(), "dir/a.txt"), "<missing>");
+        EXPECT_EQ(hashOf(f.db.get(), "dir"), "");
     }
 
     TEST(IndexChange, rootEntryIsRemovedOnOpen)
@@ -177,13 +156,13 @@ namespace
         f.add("a.txt");
         f.db->exec("INSERT INTO entries (path, hash, type, properties, mtime, size, depth) "
                    "VALUES ('', '', 7, '{}', 0, 0, 0)");
-        ASSERT_EQ(f.hashOf(""), "");
+        ASSERT_EQ(hashOf(f.db.get(), ""), "");
         f.db->close();
         DatabasePool::instance().releaseConnections(f.root);
 
         f.db = ddb::open(f.root.string(), false);
-        EXPECT_EQ(f.hashOf(""), "<missing>");
-        EXPECT_NE(f.hashOf("a.txt"), "<missing>");
+        EXPECT_EQ(hashOf(f.db.get(), ""), "<missing>");
+        EXPECT_NE(hashOf(f.db.get(), "a.txt"), "<missing>");
     }
 
     TEST(IndexChange, parentNeedsASeparator)

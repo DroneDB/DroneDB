@@ -4,6 +4,7 @@
 #include "cog.h"
 #include "logger.h"
 #include "testarea.h"
+#include "testfs.h"
 #include "ddb.h"
 #include <chrono>
 
@@ -22,12 +23,12 @@ TEST_F(CogOptimizationTest, TestCogDetection) {
 
     // Download test files from DroneDB test data repository
     fs::path cogFile = ta.downloadTestAsset(
-        "https://github.com/DroneDB/test_data/raw/master/ortho/brighton-beach-cog.tif",
+        testDataUrl("ortho/brighton-beach-cog.tif"),
         "brighton-beach-cog.tif"
     );
 
     fs::path nonCogFile = ta.downloadTestAsset(
-        "https://github.com/DroneDB/test_data/raw/master/ortho/brighton-beach.tif",
+        testDataUrl("ortho/brighton-beach.tif"),
         "brighton-beach.tif"
     );
 
@@ -44,7 +45,7 @@ TEST_F(CogOptimizationTest, TestBuildCogOptimization) {
 
     // Download COG test file
     fs::path cogFile = ta.downloadTestAsset(
-        "https://github.com/DroneDB/test_data/raw/master/ortho/brighton-beach-cog.tif",
+        testDataUrl("ortho/brighton-beach-cog.tif"),
         "brighton-beach-cog.tif"
     );
 
@@ -76,7 +77,7 @@ TEST_F(CogOptimizationTest, TestBuildCogFromNonOptimized) {
 
     // Download non-COG test file
     fs::path nonCogFile = ta.downloadTestAsset(
-        "https://github.com/DroneDB/test_data/raw/master/ortho/brighton-beach.tif",
+        testDataUrl("ortho/brighton-beach.tif"),
         "brighton-beach.tif"
     );
 

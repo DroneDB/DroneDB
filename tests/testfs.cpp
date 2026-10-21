@@ -8,10 +8,27 @@
 #include <cpr/cpr.h>
 #include "mzip.h"
 #include <utils.h>
+#include <cstdlib>
 #include <thread>
 #include <chrono>
 #include <fstream>
 #include <functional>
+
+namespace
+{
+    // Downloads verify the server certificate against the CA bundle libddb ships next to the
+    // library (curl-ca-bundle.crt, found like thumbs.cpp and pctiler.cpp find it), so they do not
+    // depend on the system store libcurl was built for (none on Windows CI). Without the bundle
+    // libcurl's default store is used, still verified.
+    cpr::SslOptions verifiedSslOptions()
+    {
+        auto options = cpr::Ssl(cpr::ssl::VerifyPeer{true}, cpr::ssl::VerifyHost{true});
+        const auto caBundle = ddb::io::getDataPath("curl-ca-bundle.crt");
+        if (!caBundle.empty())
+            options.SetOption(cpr::ssl::CaInfo{caBundle.string()});
+        return options;
+    }
+}
 
 TestFS::TestFS(const std::string &testArchivePath, const std::string &baseTestFolder, bool setCurrentDirectory)
     : testArchivePath(testArchivePath), baseTestFolder(baseTestFolder), oldCurrentDirectory_(std::filesystem::current_path())
@@ -24,7 +41,10 @@ TestFS::TestFS(const std::string &testArchivePath, const std::string &baseTestFo
     if (!isLocalPath(testArchivePath))
     {
         // Handle remote URL
-        auto tempPath = std::filesystem::temp_directory_path() / baseTestFolder / extractFileName(testArchivePath);
+        const auto tempPath = downloadCacheFolder().empty()
+                                  ? std::filesystem::temp_directory_path() / baseTestFolder / extractFileName(testArchivePath)
+                                  : cachedAssetPath(testArchivePath);
+        std::filesystem::create_directories(tempPath.parent_path());
         if (!std::filesystem::exists(tempPath))
         {
             std::cout << "Downloading archive...\n";
@@ -48,6 +68,24 @@ TestFS::TestFS(const std::string &testArchivePath, const std::string &baseTestFo
         std::filesystem::current_path(testFolder);
         std::cout << "Set current directory to '" << testFolder << "'\n";
     }
+}
+
+std::string testDataUrl(const std::string &path)
+{
+    return std::string("https://raw.githubusercontent.com/DroneDB/test_data/") + DDB_TEST_DATA_SHA + "/" + path;
+}
+
+std::filesystem::path TestFS::downloadCacheFolder()
+{
+    const char *folder = std::getenv("DDB_TEST_CACHE_DIR");
+    return folder != nullptr && *folder != '\0' ? std::filesystem::path(folder) : std::filesystem::path();
+}
+
+std::filesystem::path TestFS::cachedAssetPath(const std::string &url)
+{
+    const auto scheme = url.find("://");
+    const auto hostAndPath = scheme == std::string::npos ? url : url.substr(scheme + 3);
+    return downloadCacheFolder() / std::filesystem::path(hostAndPath).relative_path();
 }
 
 /**
@@ -143,7 +181,7 @@ std::filesystem::path TestFS::downloadTestAsset(const std::string &url, const st
         if (!ofs)
             throw ddb::FSException("Cannot create file: " + destination.string());
 
-        auto request = cpr::Download(ofs, cpr::Url{url}, cpr::VerifySsl(false));
+        auto request = cpr::Download(ofs, cpr::Url{url}, cpr::VerifySsl(true), verifiedSslOptions());
         ofs.close();
 
         // Check for network errors

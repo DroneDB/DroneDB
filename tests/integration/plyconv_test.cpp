@@ -35,6 +35,8 @@
 #include "plyconv.h"
 #include "test.h"
 #include "testarea.h"
+#include "testfs.h"
+#include "utils.h"
 
 namespace {
 
@@ -1349,12 +1351,8 @@ TEST(plyconv, texturedPlyBuildsNexusF1) {
 
 // B4 through build(): a textured PLY is indexed as a Model, its texture is a
 // dependency (header-only check inside buildNexus, before Nexus runs).
-struct PlyDataset {
-    explicit PlyDataset(const std::string& name) : ta(name, true) {
-        root = ta.getFolder("ds");
-        ddb::initIndex(root.string());
-        db = ddb::open(root.string(), true);
-    }
+struct PlyDataset : IndexFixture {
+    explicit PlyDataset(const std::string& name) : IndexFixture(name) {}
     void add(const std::string& rel) { ddb::addToIndex(db.get(), {(root / rel).string()}); }
     Entry entry(const std::string& rel) {
         Entry e;
@@ -1362,10 +1360,6 @@ struct PlyDataset {
         return e;
     }
     fs::path out(const std::string& rel) { return db->buildDirectory() / entry(rel).hash; }
-
-    TestArea ta;
-    fs::path root;
-    std::unique_ptr<Database> db;
 };
 
 TEST(plyconv, texturedPlyBuildDefersUntilTextureExists) {
@@ -1486,7 +1480,7 @@ TEST(plyconv, differentialFixtures) {
 TEST(plyconv, differentialBrighton) {
     TestArea ta(TEST_NAME);
     const fs::path ply = ta.downloadTestAsset(
-        "https://github.com/DroneDB/test_data/raw/refs/heads/master/3d/brighton.ply", "brighton.ply");
+        testDataUrl("3d/brighton.ply"), "brighton.ply");
     differential(ply, ta.getPath("out/brighton"));
     PlyInfo info;
     ASSERT_TRUE(getPlyInfo(ply, info));
@@ -1496,7 +1490,7 @@ TEST(plyconv, differentialBrighton) {
 TEST(plyconv, differentialOdm25dMesh) {
     TestArea ta(TEST_NAME);
     const fs::path ply = ta.downloadTestAsset(
-        "https://github.com/DroneDB/test_data/raw/refs/heads/master/point-clouds/odm_25dmesh.ply", "odm_25dmesh.ply");
+        testDataUrl("point-clouds/odm_25dmesh.ply"), "odm_25dmesh.ply");
     differential(ply, ta.getPath("out/odm_25dmesh"));
 }
 
@@ -1505,7 +1499,7 @@ TEST(plyconv, differentialOdm25dMesh) {
 MANUAL_TEST(plyconv, convertBrighton) {
     TestArea ta(TEST_NAME);
     const fs::path ply = ta.downloadTestAsset(
-        "https://github.com/DroneDB/test_data/raw/refs/heads/master/3d/brighton.ply", "brighton.ply");
+        testDataUrl("3d/brighton.ply"), "brighton.ply");
     const auto r = convertPlyToObj(ply.string(), ta.getPath("out/brighton").string());
     EXPECT_EQ(r.info.faceCount, 772263u);
     EXPECT_TRUE(r.hasColors);

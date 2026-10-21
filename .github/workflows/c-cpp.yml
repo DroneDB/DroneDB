@@ -103,6 +103,18 @@ jobs:
           echo "GITHUB_RUN_NUMBER=${GITHUB_RUN_NUMBER}"
           echo "GITHUB_SHA=${GITHUB_SHA}"
           ls -la
+      - name: Pin test_data (tests/test-data.sha)
+        # The DroneDB/test_data commit the tests read their assets from (testDataUrl, tests/testfs.h);
+        # the smoke tests below download from the same commit
+        shell: bash
+        run: echo "TEST_DATA_SHA=$(head -n 1 tests/test-data.sha)" >> "$GITHUB_ENV"
+      - name: Cache test_data downloads
+        # DDB_TEST_CACHE_DIR (integration tests): every download once, under its URL; the URLs
+        # name the pinned commit, so the content never changes for a key
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/ddb-test-cache
+          key: test-data-${{ runner.os }}-${{ hashFiles('tests/test-data.sha') }}
       - name: Restore vcpkg binary cache
         id: vcpkg-cache
         uses: ./.github/actions/vcpkg-binary-cache
@@ -228,6 +240,7 @@ jobs:
         env:
           # Real-converter tests skip when the binary is absent (non-tag builds).
           DDB_DWG2DXF_PATH: ${{ github.workspace }}/build/dwg2dxf
+          DDB_TEST_CACHE_DIR: ${{ runner.temp }}/ddb-test-cache
         run: cd build && ./ddbtest --gtest_shuffle
       - name: Run CLI Exit Code Tests
         run: cd build && ctest -R '^cli\.' --output-on-failure
@@ -345,13 +358,14 @@ jobs:
           echo "Running E57 package smoke test in clean ubuntu:24.04..."
           docker run --rm \
             -v "$GITHUB_WORKSPACE/build/package:/pkg:ro" \
+            -e TEST_DATA_SHA \
             ubuntu:24.04 bash -ec '
               export DEBIAN_FRONTEND=noninteractive
               apt-get update -qq
               apt-get install -y -qq /pkg/ddb_*.deb curl ca-certificates >/dev/null
               mkdir -p /tmp/e57smoke && cd /tmp/e57smoke
               ddb --version
-              curl -fsSL --retry 3 -o a4.e57 https://github.com/DroneDB/test_data/raw/refs/heads/master/point-clouds/A4.e57
+              curl -fsSL --retry 3 -o a4.e57 https://raw.githubusercontent.com/DroneDB/test_data/$TEST_DATA_SHA/point-clouds/A4.e57
               ddb init . > /dev/null
               ddb add a4.e57
               ddb list | grep -q "a4\.e57"
@@ -359,7 +373,7 @@ jobs:
               echo "  ✓ packaged ddb indexed an E57 file in a clean Ubuntu 24.04"
               if [ -x /usr/bin/dwg2dxf ]; then
                 mkdir -p /tmp/dwgsmoke && cd /tmp/dwgsmoke
-                base=https://github.com/DroneDB/test_data/raw/refs/heads/master/vector/autocad
+                base=https://raw.githubusercontent.com/DroneDB/test_data/$TEST_DATA_SHA/vector/autocad
                 curl -fsSL --retry 3 -o site.dwg $base/utm32n_site_dwg.dwg
                 curl -fsSL --retry 3 -o site.prj $base/utm32n_site_dwg.prj
                 ddb init . > /dev/null
@@ -434,9 +448,9 @@ jobs:
           max_attempts: 3
           retry_wait_seconds: 30
           command: |
-            # RelWithDebInfo, not Debug: the CI triplet is release-only, and a Debug config selects
-            # the (missing) debug link interfaces of the static Qt/vcpkg targets
-            cmake -S . -B build-asan -DVCPKG_OVERLAY_TRIPLETS=${{ github.workspace }}/vcpkg-triplets -DVCPKG_HOST_TRIPLET=x64-linux-release -DVCPKG_TARGET_TRIPLET=x64-linux-release -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_BUILD_TYPE=RelWithDebInfo "-DCMAKE_CXX_FLAGS_RELWITHDEBINFO=-g -O1" "-DCMAKE_C_FLAGS_RELWITHDEBINFO=-g -O1" -DCMAKE_MAP_IMPORTED_CONFIG_RELWITHDEBINFO=Release -DDDB_ENABLE_ASAN=ON -DDDB_ENABLE_UBSAN=ON
+            # Release with -g -O1 (assertions on, no NDEBUG): the CI triplet is release-only, and any other config selects
+            # link interfaces or imported locations the static Qt/vcpkg targets do not provide
+            cmake -S . -B build-asan -DVCPKG_OVERLAY_TRIPLETS=${{ github.workspace }}/vcpkg-triplets -DVCPKG_HOST_TRIPLET=x64-linux-release -DVCPKG_TARGET_TRIPLET=x64-linux-release -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_BUILD_TYPE=Release "-DCMAKE_CXX_FLAGS_RELEASE=-g -O1" "-DCMAKE_C_FLAGS_RELEASE=-g -O1" -DDDB_ENABLE_ASAN=ON -DDDB_ENABLE_UBSAN=ON
       - name: Build ddb_unit_tests and ddbcmd
         run: cmake --build build-asan --target ddb_unit_tests ddbcmd -j$(nproc)
       - name: Allow the sanitizer runtimes' memory layout
@@ -531,6 +545,18 @@ jobs:
         with:
           submodules: 'recursive'
           fetch-depth: 0
+      - name: Pin test_data (tests/test-data.sha)
+        # The DroneDB/test_data commit the tests read their assets from (testDataUrl, tests/testfs.h);
+        # the smoke tests below download from the same commit
+        shell: bash
+        run: echo "TEST_DATA_SHA=$(head -n 1 tests/test-data.sha)" >> "$GITHUB_ENV"
+      - name: Cache test_data downloads
+        # DDB_TEST_CACHE_DIR (integration tests): every download once, under its URL; the URLs
+        # name the pinned commit, so the content never changes for a key
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/ddb-test-cache
+          key: test-data-${{ runner.os }}-${{ hashFiles('tests/test-data.sha') }}
       - name: Restore vcpkg binary cache
         id: vcpkg-cache
         uses: ./.github/actions/vcpkg-binary-cache
@@ -636,6 +662,7 @@ jobs:
       - name: Run integration tests
         env:
           DDB_DWG2DXF_PATH: ${{ github.workspace }}\build\dwg2dxf.exe
+          DDB_TEST_CACHE_DIR: ${{ runner.temp }}\ddb-test-cache
           # The crash report resolves GDAL/GEOS frames from vcpkg's PDBs
           _NT_SYMBOL_PATH: ${{ github.workspace }}\build\vcpkg_installed\x64-windows-release\bin
         run: |
@@ -733,7 +760,7 @@ jobs:
                 if ($LASTEXITCODE -ne 0) { throw "dwg2dxf.exe --version failed ($LASTEXITCODE)" }
                 $smoke = Join-Path $env:RUNNER_TEMP 'dwg-smoke'
                 New-Item -ItemType Directory -Force -Path $smoke | Out-Null
-                $base = 'https://github.com/DroneDB/test_data/raw/refs/heads/master/vector/autocad'
+                $base = "https://raw.githubusercontent.com/DroneDB/test_data/$env:TEST_DATA_SHA/vector/autocad"
                 Invoke-WebRequest "$base/utm32n_site_dwg.dwg" -OutFile (Join-Path $smoke 'site.dwg')
                 Invoke-WebRequest "$base/utm32n_site_dwg.prj" -OutFile (Join-Path $smoke 'site.prj')
                 Push-Location $smoke

@@ -43,11 +43,9 @@ protected:
         testArea.reset();
     }
 
-    std::string hashOf(const fs::path& absolutePath) {
-        Entry e;
-        const auto rel = fs::relative(absolutePath, dbPath);
-        EXPECT_TRUE(ddb::getEntry(db.get(), rel.string(), e));
-        return e.hash;
+    // Hash of the indexed file at `absolutePath` (utils.h indexedHash)
+    std::string indexedHash(const fs::path& absolutePath) {
+        return ::indexedHash(db.get(), fs::relative(absolutePath, dbPath).string());
     }
 
     // Writes a ".pending" marker file with the given timestamp and missing
@@ -82,7 +80,7 @@ TEST_F(GetPendingBuildInfoTest, NoPendingFilesReturnsEmpty) {
 }
 
 TEST_F(GetPendingBuildInfoTest, ReturnsHashPathDepsAndTimestamp) {
-    const auto hash = hashOf(vectorPath);
+    const auto hash = indexedHash(vectorPath);
     const time_t ts = 1721612345;
     writePendingFile(db->buildDirectory(), hash, std::to_string(ts), {"layer.dbf", "layer.prj"});
 
@@ -99,7 +97,7 @@ TEST_F(GetPendingBuildInfoTest, ReturnsHashPathDepsAndTimestamp) {
 }
 
 TEST_F(GetPendingBuildInfoTest, DoesNotConsumeOrModifyThePendingFile) {
-    const auto hash = hashOf(vectorPath);
+    const auto hash = indexedHash(vectorPath);
     const auto pendingPath = writePendingFile(db->buildDirectory(), hash, "0", {"layer.dbf"});
 
     ddb::getPendingBuildInfo(db.get());
@@ -123,7 +121,7 @@ TEST_F(GetPendingBuildInfoTest, EntryNoLongerInDbIsSkipped) {
 // Nested markers (e.g. inside an output folder) and non-hash names are ignored
 // by getPendingBuildInfo() and isBuildPending() alike.
 TEST_F(GetPendingBuildInfoTest, OnlyTopLevelHashMarkersCount) {
-    const auto hash = hashOf(vectorPath);
+    const auto hash = indexedHash(vectorPath);
     const fs::path buildDir = db->buildDirectory();
 
     writePendingFile(buildDir / hash, hash, "0", {"nested.dbf"});
@@ -145,7 +143,7 @@ TEST_F(GetPendingBuildInfoTest, OnlyTopLevelHashMarkersCount) {
 }
 
 TEST_F(GetPendingBuildInfoTest, MalformedTimestampToleratedAsZero) {
-    const auto hash = hashOf(vectorPath);
+    const auto hash = indexedHash(vectorPath);
     writePendingFile(db->buildDirectory(), hash, "not-a-timestamp", {"layer.dbf"});
 
     const auto pending = ddb::getPendingBuildInfo(db.get());
@@ -159,7 +157,7 @@ TEST_F(GetPendingBuildInfoTest, DoesNotTriggerBuildOrApplyBackoff) {
     // Even a very recent timestamp (well within the 60-second retry backoff
     // used by buildPending()) must still be reported: this is a pure query,
     // not a retry attempt.
-    const auto hash = hashOf(vectorPath);
+    const auto hash = indexedHash(vectorPath);
     const time_t now = utils::currentUnixTimestamp();
     writePendingFile(db->buildDirectory(), hash, std::to_string(now), {"layer.dbf"});
 
@@ -171,7 +169,7 @@ TEST_F(GetPendingBuildInfoTest, DoesNotTriggerBuildOrApplyBackoff) {
 // --- C API round-trip ---
 
 TEST_F(GetPendingBuildInfoTest, CApiReturnsValidJson) {
-    const auto hash = hashOf(vectorPath);
+    const auto hash = indexedHash(vectorPath);
     writePendingFile(db->buildDirectory(), hash, "1721612345", {"layer.dbf"});
 
     char* output = nullptr;

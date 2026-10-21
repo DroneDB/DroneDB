@@ -8,6 +8,7 @@
 #include "entry.h"
 #include "test.h"
 #include "testarea.h"
+#include "testfs.h"
 #include "logger.h"
 
 namespace
@@ -30,8 +31,7 @@ namespace
 
         // Download a geo-referenced image with EXIF data
         fs::path imagePath = ta.downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/master/test-datasets/"
-            "drone_dataset_brighton_beach/DJI_0018.JPG",
+            testDataUrl("test-datasets/drone_dataset_brighton_beach/DJI_0018.JPG"),
             "DJI_0018.JPG");
 
         ASSERT_TRUE(fs::exists(imagePath)) << "Test image not found";
@@ -109,20 +109,17 @@ namespace
         std::vector<fs::path> images;
 
         fs::path img1 = ta.downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/master/test-datasets/"
-            "drone_dataset_brighton_beach/DJI_0018.JPG",
+            testDataUrl("test-datasets/drone_dataset_brighton_beach/DJI_0018.JPG"),
             "DJI_0018.JPG");
         images.push_back(img1);
 
         fs::path img2 = ta.downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/master/test-datasets/"
-            "drone_dataset_brighton_beach/DJI_0019.JPG",
+            testDataUrl("test-datasets/drone_dataset_brighton_beach/DJI_0019.JPG"),
             "DJI_0019.JPG");
         images.push_back(img2);
 
         fs::path img3 = ta.downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/master/test-datasets/"
-            "drone_dataset_brighton_beach/DJI_0020.JPG",
+            testDataUrl("test-datasets/drone_dataset_brighton_beach/DJI_0020.JPG"),
             "DJI_0020.JPG");
         images.push_back(img3);
 
@@ -188,8 +185,7 @@ namespace
         TestArea ta(TEST_NAME, true);
 
         fs::path imagePath = ta.downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/master/test-datasets/"
-            "drone_dataset_brighton_beach/DJI_0018.JPG",
+            testDataUrl("test-datasets/drone_dataset_brighton_beach/DJI_0018.JPG"),
             "DJI_0018.JPG");
 
         ASSERT_TRUE(fs::exists(imagePath)) << "Test image not found";
@@ -235,7 +231,7 @@ namespace
         // Download or create a test image without GPS data
         // Using a PNG which typically doesn't have EXIF GPS data
         fs::path imagePath = ta.downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/master/images/test.png",
+            testDataUrl("images/test.png"),
             "test.png", true);
 
         if (!fs::exists(imagePath))

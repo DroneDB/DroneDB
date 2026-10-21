@@ -16,6 +16,7 @@
 #include "mio.h"
 #include "test.h"
 #include "testarea.h"
+#include "testfs.h"
 
 // OpenSSL for comparison
 #include <openssl/evp.h>
@@ -63,7 +64,7 @@ MANUAL_TEST(hashBenchmark, largeFile) {
 
     // Download large orthophoto (~54 MB)
     fs::path largeFile = ta.downloadTestAsset(
-        "https://github.com/DroneDB/test_data/raw/refs/heads/master/ortho/aukerman.tif",
+        testDataUrl("ortho/aukerman.tif"),
         "aukerman.tif");
 
     ASSERT_TRUE(fs::exists(largeFile)) << "Failed to download test file";
@@ -147,8 +148,7 @@ MANUAL_TEST(hashBenchmark, manyImageFiles) {
     uint64_t totalSize = 0;
 
     for (const auto& imageName : imageNames) {
-        std::string url = "https://github.com/DroneDB/test_data/raw/refs/heads/master/"
-                          "test-datasets/drone_dataset_brighton_beach/" + imageName;
+        std::string url = testDataUrl("test-datasets/drone_dataset_brighton_beach/") + imageName;
         fs::path imagePath = ta.downloadTestAsset(url, imageName);
         ASSERT_TRUE(fs::exists(imagePath)) << "Failed to download " << imageName;
         imagePaths.push_back(imagePath);

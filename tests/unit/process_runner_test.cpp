@@ -20,6 +20,7 @@
 #include "process_runner.h"
 #include "test.h"
 #include "testarea.h"
+#include "utils.h"
 #include "helpers/process_test_utils.h"
 
 #ifdef _WIN32
@@ -360,9 +361,9 @@ TEST(processRunner, ringBufferKeepsTail) {
 TEST(processRunner, envOverrideReplacesInheritedValue) {
     SKIP_ON_WINDOWS();
 #ifndef _WIN32
-    ::setenv("DDB_PR_TEST_A", "inherited", 1);
-    ::setenv("DDB_PR_TEST_B", "kept", 1);
-    ::unsetenv("DDB_PR_TEST_C");
+    setEnv("DDB_PR_TEST_A", "inherited");
+    setEnv("DDB_PR_TEST_B", "kept");
+    unsetEnv("DDB_PR_TEST_C");
 
     process::Options opts;
     opts.envOverrides = {{"DDB_PR_TEST_A", "override"}, {"DDB_PR_TEST_C", "added"}};
@@ -372,17 +373,17 @@ TEST(processRunner, envOverrideReplacesInheritedValue) {
     EXPECT_STREQ(std::getenv("DDB_PR_TEST_A"), "inherited");
     EXPECT_EQ(std::getenv("DDB_PR_TEST_C"), nullptr);
 
-    ::unsetenv("DDB_PR_TEST_A");
-    ::unsetenv("DDB_PR_TEST_B");
+    unsetEnv("DDB_PR_TEST_A");
+    unsetEnv("DDB_PR_TEST_B");
 
     ASSERT_TRUE(r.success()) << r.describe();
     EXPECT_EQ(splitLines(r.outputTail),
               (std::vector<std::string>{"DDB_PR_TEST_A=override", "DDB_PR_TEST_B=kept", "DDB_PR_TEST_C=added"}));
 
     // Without overrides the environment is inherited unchanged.
-    ::setenv("DDB_PR_TEST_A", "plain", 1);
+    setEnv("DDB_PR_TEST_A", "plain");
     const auto r2 = sh("printf '%s' \"$DDB_PR_TEST_A\"");
-    ::unsetenv("DDB_PR_TEST_A");
+    unsetEnv("DDB_PR_TEST_A");
     EXPECT_EQ(r2.outputTail, "plain");
 #endif
 }

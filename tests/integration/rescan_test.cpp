@@ -10,6 +10,7 @@
 #include "exceptions.h"
 #include "test.h"
 #include "testarea.h"
+#include "testfs.h"
 #include "utils.h"
 
 #include <algorithm>
@@ -265,7 +266,7 @@ namespace
 
         // Download a real geo-referenced image
         fs::path orthoPath = ta.downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/master/brighton/odm_orthophoto.tif",
+            testDataUrl("brighton/odm_orthophoto.tif"),
             "ortho.tif");
 
         // Initialize database and add file

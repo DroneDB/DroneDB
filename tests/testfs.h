@@ -9,6 +9,16 @@
 #include "fs.h"
 
 /**
+ * @brief URL of a file of the DroneDB/test_data repository at the pinned commit.
+ *
+ * Every test asset is read at one commit (tests/test-data.sha, also read by CI), so a test never
+ * sees an asset change under it and a cached download stays valid. To move to newer assets,
+ * update the SHA in that file.
+ * @param path Path of the file from the root of the repository, e.g. "brighton/point_cloud.laz".
+ */
+std::string testDataUrl(const std::string &path);
+
+/**
  * @class TestFS
  * @brief This class is used to set up a test file system contained in a zip file.
  */
@@ -47,6 +57,20 @@ public:
         const std::filesystem::path &destination,
         bool overwrite = false,
         std::function<bool(const std::filesystem::path &)> validator = nullptr);
+
+    /**
+     * @brief Folder of the shared download cache: $DDB_TEST_CACHE_DIR, or empty when it is not set.
+     *
+     * With the cache, every download (TestFS archives, TestArea::downloadTestAsset) is kept once,
+     * under the URL's host and path, and copied to the test from there; CI keeps the folder
+     * between runs. Without it, downloads stay where they always were (the system temp folder).
+     */
+    static std::filesystem::path downloadCacheFolder();
+
+    /**
+     * @brief Path of a URL in the shared download cache (downloadCacheFolder() must be set).
+     */
+    static std::filesystem::path cachedAssetPath(const std::string &url);
 
     /**
      * @brief Path of the test archive (zip file).

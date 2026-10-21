@@ -5,6 +5,7 @@
 #include "tilerhelper.h"
 #include "logger.h"
 #include "testarea.h"
+#include "testfs.h"
 #include "ddb.h"
 #include "exceptions.h"
 #include "gdal_inc.h"
@@ -14,7 +15,7 @@
 namespace {
 
 const std::string EDGE_BASE_URL =
-    "https://github.com/DroneDB/test_data/raw/master/ortho/edge/";
+    testDataUrl("ortho/edge/");
 
 class EdgeRasterTest : public ::testing::Test {
  protected:

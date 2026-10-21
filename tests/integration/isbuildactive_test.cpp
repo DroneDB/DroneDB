@@ -9,6 +9,7 @@
 #include "gtest/gtest.h"
 #include "test.h"
 #include "testarea.h"
+#include "testfs.h"
 #include "utils.h"
 
 #include <chrono>
@@ -34,11 +35,11 @@ protected:
 
         // Download real test files
         orthoPath = testArea->downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/master/brighton/odm_orthophoto.tif",
+            testDataUrl("brighton/odm_orthophoto.tif"),
             "ortho.tif");
 
         pointCloudPath = testArea->downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/master/brighton/point_cloud.laz",
+            testDataUrl("brighton/point_cloud.laz"),
             "point_cloud.laz");
 
         // Create a non-buildable test file

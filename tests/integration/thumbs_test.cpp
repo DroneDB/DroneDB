@@ -19,6 +19,7 @@
 #include "pointcloud.h"
 #include "test.h"
 #include "testarea.h"
+#include "testfs.h"
 
 namespace {
 
@@ -27,7 +28,7 @@ using namespace ddb;
 TEST(thumbnail, ortho) {
     TestArea ta(TEST_NAME);
     fs::path ortho = ta.downloadTestAsset(
-        "https://github.com/DroneDB/test_data/raw/master/brighton/odm_orthophoto.tif",
+        testDataUrl("brighton/odm_orthophoto.tif"),
         "odm_orthophoto.tif");
 
     fs::path outFile = ta.getPath("output.webp");
@@ -54,7 +55,7 @@ TEST(thumbnail, ortho) {
 TEST(thumbnail, copc_file) {
     TestArea ta(TEST_NAME);
     fs::path pc = ta.downloadTestAsset(
-        "https://github.com/DroneDB/test_data/raw/master/brighton/point_cloud.laz",
+        testDataUrl("brighton/point_cloud.laz"),
         "point_cloud.laz");
 
     ddb::buildCopc({pc.string()}, ta.getFolder("copc").string());
@@ -71,7 +72,7 @@ TEST(thumbnail, copc_file) {
 TEST(thumbnail, copc_memory) {
     TestArea ta(TEST_NAME);
     fs::path pc = ta.downloadTestAsset(
-        "https://github.com/DroneDB/test_data/raw/master/brighton/point_cloud.laz",
+        testDataUrl("brighton/point_cloud.laz"),
         "point_cloud.laz");
 
     ddb::buildCopc({pc.string()}, ta.getFolder("copc").string());
@@ -99,7 +100,7 @@ TEST(thumbnail, copc_memory) {
 TEST(thumbnail, lewis_file) {
     TestArea ta(TEST_NAME);
     fs::path pc = ta.downloadTestAsset(
-        "https://github.com/DroneDB/test_data/raw/refs/heads/master/point-clouds/lewis.laz",
+        testDataUrl("point-clouds/lewis.laz"),
         "lewis.laz");
 
     ddb::buildCopc({pc.string()}, ta.getFolder("copc").string());
@@ -143,7 +144,7 @@ bool isWebPImageNonEmpty(const fs::path& webpPath) {
 TEST(thumbnail, brightonsLazCopc) {
     TestArea ta(TEST_NAME);
     fs::path pc = ta.downloadTestAsset(
-        "https://github.com/DroneDB/test_data/raw/master/brighton/point_cloud.laz",
+        testDataUrl("brighton/point_cloud.laz"),
         "point_cloud.laz");
 
     // Build COPC from LAZ file
@@ -165,7 +166,7 @@ TEST(thumbnail, brightonsLazCopc) {
 TEST(thumbnail, toledoLazCopc) {
     TestArea ta(TEST_NAME);
     fs::path pc = ta.downloadTestAsset(
-        "https://github.com/DroneDB/test_data/raw/refs/heads/master/point-clouds/toledo.laz",
+        testDataUrl("point-clouds/toledo.laz"),
         "toledo_point_cloud.laz");
 
     // Build COPC from Toledo LAZ file
@@ -217,7 +218,7 @@ TEST(thumbnail, toledoLazCopc) {
 TEST(thumbnail, pointCloudScalarField) {
     TestArea ta(TEST_NAME);
     fs::path pc = ta.downloadTestAsset(
-        "https://github.com/DroneDB/test_data/raw/master/point-clouds/point-cloud-scalar-field.laz",
+        testDataUrl("point-clouds/point-cloud-scalar-field.laz"),
         "point_cloud.laz");
 
     // Build COPC from LAZ file
@@ -239,7 +240,7 @@ TEST(thumbnail, pointCloudScalarField) {
 TEST(thumbnail, pointCloudComplex) {
     TestArea ta(TEST_NAME);
     fs::path pc = ta.downloadTestAsset(
-        "https://github.com/DroneDB/test_data/raw/master/point-clouds/point-cloud-complex.laz",
+        testDataUrl("point-clouds/point-cloud-complex.laz"),
         "point_cloud.laz");
 
     // Build COPC from LAZ file
@@ -265,7 +266,7 @@ TEST(thumbnail, pointCloudComplex) {
 TEST(thumbnail, paletteImage) {
     TestArea ta(TEST_NAME);
     fs::path img = ta.downloadTestAsset(
-        "https://github.com/DroneDB/test_data/raw/refs/heads/master/images/img-palette.png",
+        testDataUrl("images/img-palette.png"),
         "img-palette.png");
 
     // Generate WebP thumbnail to file
@@ -296,7 +297,7 @@ TEST(thumbnail, paletteImage) {
 TEST(thumbnail, singleBandDem) {
     TestArea ta(TEST_NAME);
     fs::path dem = ta.downloadTestAsset(
-        "https://github.com/DroneDB/test_data/raw/refs/heads/master/dem/test_dem.tiff",
+        testDataUrl("dem/test_dem.tiff"),
         "test_dem.tiff");
 
     // Generate WebP thumbnail to file
@@ -330,7 +331,7 @@ TEST(thumbnail, singleBandDem) {
 TEST(thumbnail, invalidThumbSize) {
     TestArea ta(TEST_NAME);
     fs::path ortho = ta.downloadTestAsset(
-        "https://github.com/DroneDB/test_data/raw/master/brighton/odm_orthophoto.tif",
+        testDataUrl("brighton/odm_orthophoto.tif"),
         "odm_orthophoto.tif");
 
     fs::path outFile = ta.getPath("output.webp");
@@ -395,7 +396,7 @@ TEST(thumbnail, emptyFile) {
 TEST(thumbnail, verySmallThumbSize) {
     TestArea ta(TEST_NAME);
     fs::path ortho = ta.downloadTestAsset(
-        "https://github.com/DroneDB/test_data/raw/master/brighton/odm_orthophoto.tif",
+        testDataUrl("brighton/odm_orthophoto.tif"),
         "odm_orthophoto.tif");
 
     // Test with minimum valid size (1 pixel)
@@ -424,7 +425,7 @@ TEST(thumbnail, verySmallThumbSize) {
 TEST(thumbnail, veryLargeThumbSize) {
     TestArea ta(TEST_NAME);
     fs::path ortho = ta.downloadTestAsset(
-        "https://github.com/DroneDB/test_data/raw/master/brighton/odm_orthophoto.tif",
+        testDataUrl("brighton/odm_orthophoto.tif"),
         "odm_orthophoto.tif");
 
     // Test with large size (4096 pixels) - larger than most source images
@@ -439,7 +440,7 @@ TEST(thumbnail, veryLargeThumbSize) {
 TEST(thumbnail, forceRecreateFlag) {
     TestArea ta(TEST_NAME);
     fs::path ortho = ta.downloadTestAsset(
-        "https://github.com/DroneDB/test_data/raw/master/brighton/odm_orthophoto.tif",
+        testDataUrl("brighton/odm_orthophoto.tif"),
         "odm_orthophoto.tif");
 
     fs::path outFile = ta.getPath("recreate_test.webp");
@@ -470,7 +471,7 @@ TEST(thumbnail, forceRecreateFlag) {
 TEST(thumbnail, inMemoryNullPointers) {
     TestArea ta(TEST_NAME);
     fs::path ortho = ta.downloadTestAsset(
-        "https://github.com/DroneDB/test_data/raw/master/brighton/odm_orthophoto.tif",
+        testDataUrl("brighton/odm_orthophoto.tif"),
         "odm_orthophoto.tif");
 
     // When outImagePath is empty but outBuffer is nullptr, it should still work
@@ -493,7 +494,7 @@ TEST(thumbnail, inMemoryNullPointers) {
 // =============================================================================
 
 // Base URL for test data files in DroneDB/test_data repository
-const std::string TEST_DATA_BASE_URL = "https://github.com/DroneDB/test_data/raw/master/testdata/";
+const std::string TEST_DATA_BASE_URL = testDataUrl("testdata/");
 
 // Helper to download a test data file from the test_data repository
 fs::path downloadTestDataFile(TestArea& ta, const std::string& relativePath) {
@@ -564,8 +565,7 @@ void runThumbnailBatch(const std::string& testName,
 
     for (const auto& fname : filenames) {
         const std::string url =
-            "https://github.com/DroneDB/test_data/raw/master/" +
-            remoteFolder + "/" + fname;
+            testDataUrl(remoteFolder + "/" + fname);
         try {
             fs::path src = ta.downloadTestAsset(url, fname);
             // Sanitize output name: replace separators so path nesting in
@@ -619,7 +619,7 @@ void runThumbnailBatch(const std::string& testName,
 TEST(thumbnail, rgbWithNodataRepr3) {
     TestArea ta(TEST_NAME);
     fs::path src = ta.downloadTestAsset(
-        "https://github.com/DroneDB/test_data/raw/master/ortho/repr3.tif",
+        testDataUrl("ortho/repr3.tif"),
         "repr3.tif");
 
     fs::path outFile = ta.getPath("repr3-thumb.webp");

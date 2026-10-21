@@ -7,6 +7,7 @@
 #include "exif.h"
 #include "test.h"
 #include "testarea.h"
+#include "testfs.h"
 
 namespace
 {
@@ -80,7 +81,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
         fs::path imagePath = ta.downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/refs/heads/master/images/DJI_0018.JPG",
+            testDataUrl("images/DJI_0018.JPG"),
             "DJI_0018.JPG");
 
         ASSERT_TRUE(fs::exists(imagePath)) << "Test image not found";
@@ -111,13 +112,13 @@ namespace
         TestArea ta(TEST_NAME);
 
         fs::path img1 = ta.downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/refs/heads/master/images/DJI_0018.JPG",
+            testDataUrl("images/DJI_0018.JPG"),
             "DJI_0018.JPG");
         fs::path img2 = ta.downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/refs/heads/master/images/DJI_0022.JPG",
+            testDataUrl("images/DJI_0022.JPG"),
             "DJI_0022.JPG");
         fs::path img3 = ta.downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/refs/heads/master/images/DJI_0032.JPG",
+            testDataUrl("images/DJI_0032.JPG"),
             "DJI_0032.JPG");
 
         ASSERT_TRUE(fs::exists(img1));
@@ -149,7 +150,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
         fs::path imagePath = ta.downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/refs/heads/master/images/test.png",
+            testDataUrl("images/test.png"),
             "test.png");
 
         ASSERT_TRUE(fs::exists(imagePath)) << "Test image not found";
@@ -175,7 +176,7 @@ namespace
         // so flightSpeed properties should NOT be written
         TestArea ta(TEST_NAME);
         fs::path imagePath = ta.downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/refs/heads/master/images/DJI_0022.JPG",
+            testDataUrl("images/DJI_0022.JPG"),
             "DJI_0022.JPG");
 
         ASSERT_TRUE(fs::exists(imagePath)) << "Test image not found";
@@ -206,7 +207,7 @@ namespace
     {
         TestArea ta(TEST_NAME);
         fs::path imagePath = ta.downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/refs/heads/master/images/DJI_0022.JPG",
+            testDataUrl("images/DJI_0022.JPG"),
             "DJI_0022.JPG");
 
         ASSERT_TRUE(fs::exists(imagePath)) << "Test image not found";
@@ -246,7 +247,7 @@ namespace
         // DJI_0164: has XMP FlightXSpeed/YSpeed/ZSpeed tags
         TestArea ta(TEST_NAME);
         fs::path imagePath = ta.downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/refs/heads/master/images-flight-speed/DJI_0164.JPG",
+            testDataUrl("images-flight-speed/DJI_0164.JPG"),
             "DJI_0164.JPG");
 
         ASSERT_TRUE(fs::exists(imagePath)) << "Test image not found";
@@ -286,7 +287,7 @@ namespace
         // DJI_0166: has non-zero Z speed component
         TestArea ta(TEST_NAME);
         fs::path imagePath = ta.downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/refs/heads/master/images-flight-speed/DJI_0166.JPG",
+            testDataUrl("images-flight-speed/DJI_0166.JPG"),
             "DJI_0166.JPG");
 
         ASSERT_TRUE(fs::exists(imagePath)) << "Test image not found";
@@ -320,7 +321,7 @@ namespace
         // All 5 images in images-flight-speed should have flight speed
         TestArea ta(TEST_NAME);
 
-        const std::string baseUrl = "https://github.com/DroneDB/test_data/raw/refs/heads/master/images-flight-speed/";
+        const std::string baseUrl = testDataUrl("images-flight-speed/");
         std::vector<std::string> filenames = {
             "DJI_0164.JPG", "DJI_0165.JPG", "DJI_0166.JPG",
             "DJI_0167.JPG", "DJI_0168.JPG"};
@@ -361,7 +362,7 @@ namespace
         // Parrot Sequoia image with EXIF GPSSpeed tag
         TestArea ta(TEST_NAME);
         fs::path imagePath = ta.downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/refs/heads/master/images-gps-speed/IMG_161122_163234_0000_RGB.JPG",
+            testDataUrl("images-gps-speed/IMG_161122_163234_0000_RGB.JPG"),
             "IMG_161122_163234_0000_RGB.JPG");
 
         ASSERT_TRUE(fs::exists(imagePath)) << "Test image not found";
@@ -400,7 +401,7 @@ namespace
         // Another Parrot Sequoia image with different speed
         TestArea ta(TEST_NAME);
         fs::path imagePath = ta.downloadTestAsset(
-            "https://github.com/DroneDB/test_data/raw/refs/heads/master/images-gps-speed/IMG_161122_163249_0003_RGB.JPG",
+            testDataUrl("images-gps-speed/IMG_161122_163249_0003_RGB.JPG"),
             "IMG_161122_163249_0003_RGB.JPG");
 
         ASSERT_TRUE(fs::exists(imagePath)) << "Test image not found";
@@ -424,7 +425,7 @@ namespace
         // All 6 images in images-gps-speed should have flight speed from GPSSpeed
         TestArea ta(TEST_NAME);
 
-        const std::string baseUrl = "https://github.com/DroneDB/test_data/raw/refs/heads/master/images-gps-speed/";
+        const std::string baseUrl = testDataUrl("images-gps-speed/");
         std::vector<std::string> filenames = {
             "IMG_161122_163234_0000_RGB.JPG",
             "IMG_161122_163239_0001_RGB.JPG",

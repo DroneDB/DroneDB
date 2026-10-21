@@ -21,41 +21,27 @@
 #include "metamanager.h"
 #include "test.h"
 #include "testarea.h"
+#include "utils.h"
 
 namespace
 {
     using namespace ddb;
 
-    struct Fixture
+    struct Fixture : IndexFixture
     {
-        fs::path root;
-        std::unique_ptr<Database> db;
-
-        explicit Fixture(const std::string &name)
+        explicit Fixture(const std::string &name) : IndexFixture(name)
         {
-            TestArea ta(name, true);
-            root = ta.getFolder("ds");
-            initIndex(root.string());
-            writeFile("a.txt", "alpha");
-            fs::create_directories(root / "dir");
-            fs::create_directories(root / "dir2");
-            writeFile("dir/b.txt", "bravo");
-            writeFile("dir/c.txt", "charlie");
-            writeFile("dir2/d.txt", "delta");
-            db = ddb::open(root.string(), false);
+            writeFile(root / "a.txt", "alpha");
+            writeFile(root / "dir/b.txt", "bravo");
+            writeFile(root / "dir/c.txt", "charlie");
+            writeFile(root / "dir2/d.txt", "delta");
             addToIndex(db.get(), {(root / "a.txt").string(), (root / "dir").string(),
                                   (root / "dir2").string()});
         }
 
-        void writeFile(const std::string &rel, const std::string &content) const
-        {
-            std::ofstream f(root / rel);
-            f << content;
-        }
-
         void add(const std::string &rel, const std::string &content)
         {
-            writeFile(rel, content);
+            writeFile(root / rel, content);
             addToIndex(db.get(), {(root / rel).string()});
         }
 
