@@ -29,7 +29,7 @@ export VCPKG_ROOT=$PWD/vcpkg
 cmake -S . -B build-asan \
   -DCMAKE_TOOLCHAIN_FILE=$PWD/vcpkg/scripts/buildsystems/vcpkg.cmake \
   -DVCPKG_INSTALLED_DIR=$PWD/build/vcpkg_installed -DVCPKG_MANIFEST_INSTALL=OFF \
-  -DCMAKE_BUILD_TYPE=Debug "-DCMAKE_CXX_FLAGS_DEBUG=-g -O1" "-DCMAKE_C_FLAGS_DEBUG=-g -O1" \
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo "-DCMAKE_CXX_FLAGS_RELWITHDEBINFO=-g -O1" "-DCMAKE_C_FLAGS_RELWITHDEBINFO=-g -O1" -DCMAKE_MAP_IMPORTED_CONFIG_RELWITHDEBINFO=Release \
   -DDDB_ENABLE_ASAN=ON -DDDB_ENABLE_UBSAN=ON
 cmake --build build-asan --target ddb_unit_tests ddbcmd -j$(nproc)
 ```
