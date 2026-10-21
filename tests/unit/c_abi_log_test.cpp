@@ -19,6 +19,8 @@
 #include <atomic>
 #include <latch>
 #include <mutex>
+#include <regex>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -305,11 +307,17 @@ TEST(CAbiLogProcess, callbackBeforeRegisterProcess) {
     const process::Result r = process::run(probe, {});
     // 3: the callback ran during the exit
     EXPECT_TRUE(r.success()) << r.describe() << "\n" << r.outputTail;
-    // The callback replaces the console: the probe's own success line is all that is printed
-    std::string output = r.outputTail;
-    while (!output.empty() && (output.back() == '\n' || output.back() == '\r'))
-        output.pop_back();
-    EXPECT_EQ(output, "log probe ok") << "the probe printed while its callback was registered";
+    // The callback replaces the console: the probe prints its own success line and no log record.
+    // Other lines are allowed: stderr is captured too, where a sanitizer runtime reports at exit
+    // (LSan's "Suppressions used" table in the ASan job).
+    std::istringstream lines(r.outputTail);
+    std::string first;
+    std::getline(lines, first);
+    EXPECT_EQ(first, "log probe ok") << r.outputTail;
+    const std::regex logRecord(R"(^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3} )");
+    for (std::string line; std::getline(lines, line);)
+        EXPECT_FALSE(std::regex_search(line, logRecord))
+            << "the probe printed a log record while its callback was registered: " << line;
 }
 
 }  // namespace
