@@ -219,7 +219,12 @@ jobs:
         run: |
           echo "Checking vendor/spark/rust/spark-lib/src/rad.rs against the reviewed pin..."
           sha256sum -c tests/data/spark-rad-format.sha256 || { echo "::error::rad.rs changed since the last verified pin: review encoding handling in src/library/rad.cpp, then refresh with: (cd $GITHUB_WORKSPACE && sha256sum vendor/spark/rust/spark-lib/src/rad.rs > tests/data/spark-rad-format.sha256)"; exit 1; }
-      - name: Run C++ Tests
+      - name: Run unit tests
+        # ddb_unit_tests: offline, self-contained tests (tests/unit/), one process per test in random
+        # order. Serial on purpose: on a fresh user profile, parallel processes race to create the
+        # empty-index template (initIndex, ~/.ddb/templates) and copy a half-written one.
+        run: cd build && ctest -L unit --output-on-failure --schedule-random
+      - name: Run integration tests
         env:
           # Real-converter tests skip when the binary is absent (non-tag builds).
           DDB_DWG2DXF_PATH: ${{ github.workspace }}/build/dwg2dxf
@@ -385,6 +390,68 @@ jobs:
           tag: ${{ github.ref }}
           overwrite: true
 
+  # AddressSanitizer + UndefinedBehaviorSanitizer (DQ-01, docs/sanitizers.md): a Debug -O1 build of
+  # the unit tests and the CLI, run under LeakSanitizer too. Suppression files list third-party
+  # frames only. The known libnexus reports (docs/sanitizers.md) come from 3D builds, which are
+  # integration tests, so no unit test is excluded.
+  sanitizers_asan_ubsan:
+    name: ASan + UBSan (unit and CLI tests)
+    if: github.ref_type != 'tag'
+    runs-on: ubuntu-24.04
+    env:
+      VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+      VCPKG_DEFAULT_TRIPLET: x64-linux-release
+      VCPKG_BUILD_TYPE: release
+      VCPKG_FEATURE_FLAGS: "binarycaching,manifests,versions"
+    steps:
+      - name: Free Disk Space
+        uses: ShubhamTatvamasi/free-disk-space-action@master
+      - uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+          fetch-depth: 0
+      - name: Restore vcpkg binary cache
+        uses: ./.github/actions/vcpkg-binary-cache
+      - name: Setup ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ccache-ubuntu-asan
+          max-size: 500M
+      - name: Install Linux dependencies
+        run: |
+          chmod +x ./scripts/install-dependencies.sh
+          ./scripts/install-dependencies.sh
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgDirectory: '${{ github.workspace }}/vcpkg'
+          vcpkgJsonGlob: vcpkg.json
+          doNotCache: false
+      - name: Configure (Debug -O1, ASan + UBSan)
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 120
+          max_attempts: 3
+          retry_wait_seconds: 30
+          command: |
+            cmake -S . -B build-asan -DVCPKG_OVERLAY_TRIPLETS=${{ github.workspace }}/vcpkg-triplets -DVCPKG_HOST_TRIPLET=x64-linux-release -DVCPKG_TARGET_TRIPLET=x64-linux-release -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_BUILD_TYPE=Debug "-DCMAKE_CXX_FLAGS_DEBUG=-g -O1" "-DCMAKE_C_FLAGS_DEBUG=-g -O1" -DDDB_ENABLE_ASAN=ON -DDDB_ENABLE_UBSAN=ON
+      - name: Build ddb_unit_tests and ddbcmd
+        run: cmake --build build-asan --target ddb_unit_tests ddbcmd -j$(nproc)
+      - name: Allow the sanitizer runtimes' memory layout
+        # The runner kernel randomizes mmap with 32 bits; the GCC 13 sanitizer runtimes expect at
+        # most 28 and fail at start-up ("unexpected memory mapping") otherwise.
+        run: sudo sysctl -w vm.mmap_rnd_bits=28
+      - name: Run unit and CLI tests
+        env:
+          # Timing assertions mean nothing under instrumentation
+          DDB03_SKIP_TIMING: "1"
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          LSAN_OPTIONS: suppressions=${{ github.workspace }}/tests/lsan.supp
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1:suppressions=${{ github.workspace }}/tests/ubsan.supp
+        run: |
+          cd build-asan
+          ctest -L unit --output-on-failure && ctest -R '^cli\.' --output-on-failure
+
   # The dronedb/dronedb image installs the .deb that build_ubuntu just tested, so the
   # binary that ships is the binary that was tested and nothing is compiled twice.
   docker_image:
@@ -545,15 +612,26 @@ jobs:
         run: |
           Copy-Item libredwg-out/windows/dwg2dxf.exe, libredwg-out/windows/dwg2dxf.LICENSE.txt build/ -Force
           & build/dwg2dxf.exe --version
-      - name: Enable crash dumps for ddbtest
+      - name: Enable crash dumps for the test binaries
         shell: pwsh
         run: |
-          $key = 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\ddbtest.exe'
-          New-Item -Path $key -Force | Out-Null
-          New-ItemProperty -Path $key -Name DumpFolder -PropertyType ExpandString -Value "$env:RUNNER_TEMP\ddbtest-dumps" -Force | Out-Null
-          New-ItemProperty -Path $key -Name DumpType -PropertyType DWord -Value 1 -Force | Out-Null
-          New-ItemProperty -Path $key -Name DumpCount -PropertyType DWord -Value 3 -Force | Out-Null
-      - name: Run C++ Tests
+          foreach ($exe in 'ddbtest.exe', 'ddb_unit_tests.exe') {
+            $key = "HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\$exe"
+            New-Item -Path $key -Force | Out-Null
+            New-ItemProperty -Path $key -Name DumpFolder -PropertyType ExpandString -Value "$env:RUNNER_TEMP\ddbtest-dumps" -Force | Out-Null
+            New-ItemProperty -Path $key -Name DumpType -PropertyType DWord -Value 1 -Force | Out-Null
+            New-ItemProperty -Path $key -Name DumpCount -PropertyType DWord -Value 3 -Force | Out-Null
+          }
+      - name: Run unit tests
+        # Serial for the reason given in the Linux job (empty-index template race on a fresh profile)
+        env:
+          _NT_SYMBOL_PATH: ${{ github.workspace }}\build\vcpkg_installed\x64-windows-release\bin
+        run: |
+          cd build
+          ctest -C Release -L unit --output-on-failure --schedule-random
+          exit $LASTEXITCODE
+        shell: pwsh
+      - name: Run integration tests
         env:
           DDB_DWG2DXF_PATH: ${{ github.workspace }}\build\dwg2dxf.exe
           # The crash report resolves GDAL/GEOS frames from vcpkg's PDBs

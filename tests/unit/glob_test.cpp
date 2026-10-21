@@ -27,13 +27,15 @@ namespace
         GlobSandbox()
         {
             const auto base = fs::temp_directory_path() / "ddb_glob_test";
+            fs::create_directories(base);
+            // create_directory is the claim: it returns false when another sandbox (another
+            // test process under "ctest -j") already owns the name, so two never share one
             unsigned counter = 0;
             do
             {
                 root_ = base / ("run_" + std::to_string(::time(nullptr)) +
                                 "_" + std::to_string(counter++));
-            } while (fs::exists(root_));
-            fs::create_directories(root_);
+            } while (!fs::create_directory(root_));
 
             previous_ = fs::current_path();
             fs::current_path(root_);

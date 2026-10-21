@@ -24,6 +24,7 @@
 #include "ddb.h"
 #include "exceptions.h"
 #include "gdal_priv.h"
+#include "gdal_write_failure.h"
 #include "gtest/gtest.h"
 #include "helpers/process_test_utils.h"
 #include "ogr_api.h"
@@ -31,10 +32,6 @@
 #include "test.h"
 #include "testarea.h"
 #include "utils.h"
-
-namespace ddb_test {
-void withVectorWriteFailure(const char* driver, bool onClose, const std::function<void()>& operation);
-}
 
 namespace {
 
