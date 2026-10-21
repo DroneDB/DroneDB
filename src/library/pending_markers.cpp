@@ -205,11 +205,8 @@ std::vector<fs::path> collectPendingFiles(const fs::path& buildDir) {
 
 }  // namespace
 
-// Minimum delay between two attempts of the same pending build (seconds since
-// the timestamp on the first line of its ".pending" file). force bypasses it.
-static constexpr time_t PendingRetryBackoffSeconds = 60;
-
-// Retries every deferred build. A retry is a full build attempt: the dependency
+// Retries every deferred build whose retry is due (pendingRetryAfter(), build_internal.h; force
+// retries them all). A retry is a full build attempt: the dependency
 // names stored in ".pending" are for display only and are never matched against
 // the index (they used to be, which left models in subfolders pending forever).
 // Each builder validates its dependencies on disk first; one still missing
@@ -233,10 +230,11 @@ void buildPending(Database* db, const std::string& outputPath, bool force) {
         const auto hash = io::toUtf8(pendingPath.stem());
         const PendingMarker pending = parsePendingFile(pendingPath);
 
-        const time_t timeSinceLastAttempt = utils::currentUnixTimestamp() - pending.lastAttempt;
-        if (timeSinceLastAttempt < PendingRetryBackoffSeconds && !force) {
-            LOGD << "Skipping build attempt for hash " << hash
-                 << " (last attempt " << timeSinceLastAttempt << " seconds ago)";
+        const time_t now = utils::currentUnixTimestamp();
+        const time_t retryAfter = pendingRetryAfter(pending.lastAttempt);
+        if (!force && now < retryAfter) {
+            LOGD << "Skipping build attempt for hash " << hash << " (last attempt "
+                 << now - pending.lastAttempt << " seconds ago, retry after " << retryAfter << ")";
             continue;
         }
 
@@ -305,6 +303,7 @@ std::vector<PendingBuildInfo> getPendingBuildInfo(Database* db) {
         info.path = q->getText(0);
         info.missingDependencies = pending.missingDependencies;
         info.lastAttempt = pending.lastAttempt;
+        info.retryAfter = pendingRetryAfter(pending.lastAttempt);
 
         result.push_back(std::move(info));
     }

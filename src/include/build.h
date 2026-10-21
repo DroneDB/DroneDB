@@ -64,6 +64,9 @@ namespace ddb
         std::vector<std::string> missingDependencies;
         /// Unix timestamp of the last build attempt (0 if unknown/malformed)
         time_t lastAttempt = 0;
+        /// First Unix second at which buildPending() (without force) retries this build:
+        /// lastAttempt + the retry backoff (60 s). Due when the current time is at or past it.
+        time_t retryAfter = 0;
     };
 
     /**

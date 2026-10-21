@@ -6,7 +6,8 @@
       "<root>"
     ],
     "volatileKeys": [
-      "lastAttempt"
+      "lastAttempt",
+      "retryAfter"
     ]
   },
   "output": [
@@ -19,6 +20,7 @@
         "missingDependencies": [
           "roads.shx"
         ],
+        "retryAfter": 0,
         "root": "<root>/.ddb/build/afe1bd97fb41ff4dd3fc4134a9c32e95ed6a1a0af81c20e88e20b92bbc73a30c",
         "source": "roads.shp",
         "state": "pending"

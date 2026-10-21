@@ -1171,6 +1171,7 @@ DDBErr DDBGetPendingBuildInfo(const char* ddbPath, char** output) {
             j["path"] = p.path;
             j["missingDependencies"] = p.missingDependencies;
             j["lastAttempt"] = p.lastAttempt;
+            j["retryAfter"] = p.retryAfter;
             outJson.push_back(j);
         }
         return outJson;

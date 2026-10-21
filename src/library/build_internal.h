@@ -10,6 +10,7 @@
 #include <chrono>
 #include <ctime>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -155,6 +156,20 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
 void ensureSufficientDiskSpace(const fs::path& dir);
 
 // ---- Pending markers (pending_markers.cpp) --------------------------------
+
+// Minimum delay between two attempts of the same pending build, in seconds since the
+// timestamp on the first line of its ".pending" file (buildPending(); force bypasses it).
+inline constexpr time_t PendingRetryBackoffSeconds = 60;
+
+// The first Unix second at which buildPending() (without force) retries a pending build last
+// attempted at lastAttempt: lastAttempt + PendingRetryBackoffSeconds, saturated at the largest
+// time_t. The one retry rule: buildPending() skips a marker while now < pendingRetryAfter(), and
+// the build manifest and getPendingBuildInfo() report it as "retryAfter".
+constexpr time_t pendingRetryAfter(time_t lastAttempt) {
+    return lastAttempt > std::numeric_limits<time_t>::max() - PendingRetryBackoffSeconds
+               ? std::numeric_limits<time_t>::max()
+               : lastAttempt + PendingRetryBackoffSeconds;
+}
 
 // Replaces "<hash>.pending" with a fresh timestamp and the given dependency
 // lines, through an atomic rename of a sibling. A failed write or rename is

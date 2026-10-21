@@ -9,7 +9,8 @@
       "hash",
       "path",
       "missingDependencies",
-      "lastAttempt"
+      "lastAttempt",
+      "retryAfter"
     ],
     "additionalProperties": false,
     "properties": {
@@ -31,6 +32,11 @@
         "type": "integer",
         "minimum": 0,
         "description": "Unix epoch seconds (integer)"
+      },
+      "retryAfter": {
+        "type": "integer",
+        "minimum": 0,
+        "description": "When DDBBuild with pendingOnly (and no force) retries the build: lastAttempt + libddb's retry backoff, Unix epoch seconds (integer); due when now >= retryAfter"
       }
     }
   }

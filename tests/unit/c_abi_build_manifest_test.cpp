@@ -179,6 +179,7 @@ namespace
         const json state = json::parse(take(out));
         EXPECT_EQ(state[0]["build"]["state"], "pending");
         EXPECT_EQ(state[0]["build"]["lastAttempt"], 1700000000);
+        EXPECT_EQ(state[0]["build"]["retryAfter"], 1700000060) << "the copied marker keeps its retry time";
     }
 
     // The options struct (XI-03): structSize first, at least the ABI 1.1 size; a newer caller's

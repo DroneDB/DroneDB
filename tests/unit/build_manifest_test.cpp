@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <fstream>
+#include <limits>
 #include <map>
 #include <memory>
 #include <set>
@@ -162,6 +163,8 @@ TEST(BuildManifest, StatesAndExistingArtifacts) {
     EXPECT_EQ(b["dsm.tif"].state, BuildState::None);
     EXPECT_TRUE(b["dsm.tif"].artifacts.empty());
     EXPECT_FALSE(b["dsm.tif"].lastAttempt.has_value());
+    EXPECT_FALSE(b["dsm.tif"].retryAfter.has_value()) << "no marker, no retry time";
+    EXPECT_FALSE(b["ortho.tif"].retryAfter.has_value());
 
     // The legacy EPT is served only while there is no COPC (Registry's fallback, now in libddb)
     EXPECT_EQ(roles(b["cloud.laz"]), (std::vector<std::string>{"pointcloud.copc"}));
@@ -184,6 +187,7 @@ TEST(BuildManifest, StatesAndExistingArtifacts) {
     EXPECT_EQ(b["pending.shp"].missingDependencies,
               (std::vector<std::string>{"sub/pending.shx", "sub/pending.dbf"}));
     EXPECT_EQ(b["pending.shp"].lastAttempt, std::optional<time_t>(1700000000));
+    EXPECT_EQ(b["pending.shp"].retryAfter, std::optional<time_t>(1700000060)) << "lastAttempt + the 60 s backoff";
 
     EXPECT_EQ(b["busy.tif"].state, BuildState::Building);
     EXPECT_EQ(b["stale.tif"].state, BuildState::Complete) << "a lock file without a live holder is no build";
@@ -305,6 +309,7 @@ TEST(BuildManifest, Json) {
     EXPECT_EQ(cog["state"], "complete");
     EXPECT_EQ(cog["root"], io::toUtf8(fx.build / H_COG));
     EXPECT_TRUE(cog["lastAttempt"].is_null());
+    EXPECT_TRUE(cog["retryAfter"].is_null());
     EXPECT_EQ(cog["artifacts"],
               json::parse(R"([{"role": "raster.cog", "path": "cog/cog.tif", "kind": "file",
                   "mediaType": "image/tiff; application=geotiff; profile=cloud-optimized",
@@ -312,12 +317,26 @@ TEST(BuildManifest, Json) {
 
     EXPECT_EQ(out[1]["build"]["state"], "pending");
     EXPECT_EQ(out[1]["build"]["lastAttempt"], 1700000000);
+    EXPECT_EQ(out[1]["build"]["retryAfter"], 1700000060);
 
     EXPECT_TRUE(out[2]["hash"].is_null());
     EXPECT_EQ(out[2]["build"], json::parse(R"({"buildable": false, "source": null, "hash": null, "root": null,
-        "state": "none", "missingDependencies": [], "lastAttempt": null, "artifacts": []})"));
+        "state": "none", "missingDependencies": [], "lastAttempt": null, "retryAfter": null,
+        "artifacts": []})"));
 
     EXPECT_EQ(out[3], json::parse(R"({"path": "missing.tif", "exists": false})"));
+}
+
+// "retryAfter" is the retry rule of buildPending(): the backoff after the last attempt, never
+// past the largest time_t
+TEST(BuildManifest, RetryAfterIsLastAttemptPlusTheBackoff) {
+    static_assert(PendingRetryBackoffSeconds == 60);
+    static_assert(pendingRetryAfter(1700000000) == 1700000060);
+    EXPECT_EQ(pendingRetryAfter(0), 60) << "a marker without a time (0) is long due";
+    constexpr time_t latest = std::numeric_limits<time_t>::max();
+    EXPECT_EQ(pendingRetryAfter(latest - 61), latest - 1);
+    EXPECT_EQ(pendingRetryAfter(latest - 60), latest);
+    EXPECT_EQ(pendingRetryAfter(latest), latest) << "saturated, not overflowed";
 }
 
 // DDBListEntriesEx without builds is DDBListEntries, byte for byte; with builds each entry gets

@@ -45,6 +45,11 @@ json stringOrNull(const std::string& s) {
     return s.empty() ? json(nullptr) : json(s);
 }
 
+// Integer Unix epoch seconds (XI-09), or null
+json unixSecondsOrNull(const std::optional<time_t>& t) {
+    return t ? json(static_cast<long long>(*t)) : json(nullptr);
+}
+
 std::string_view thumbnailName(ThumbnailSource source) {
     switch (source) {
         case ThumbnailSource::File: return "file";
@@ -80,7 +85,8 @@ json entryBuildJson(const EntryBuild& build) {
             {"root", build.root.empty() ? json(nullptr) : json(io::toUtf8(build.root))},
             {"state", std::string(buildStateName(build.state))},
             {"missingDependencies", build.missingDependencies},
-            {"lastAttempt", build.lastAttempt ? json(static_cast<long long>(*build.lastAttempt)) : json(nullptr)},
+            {"lastAttempt", unixSecondsOrNull(build.lastAttempt)},
+            {"retryAfter", unixSecondsOrNull(build.retryAfter)},
             {"artifacts", std::move(artifacts)}};
 }
 
@@ -239,6 +245,7 @@ EntryBuild BuildStateReader::read(const Entry& e) {
     if (marker) {
         build.missingDependencies = marker->missingDependencies;
         build.lastAttempt = marker->lastAttempt;
+        build.retryAfter = pendingRetryAfter(marker->lastAttempt);
     }
     // The lock of the whole build is the one of the primary output folder (buildInternal). Its
     // file exists while a build runs; a file without a live holder is a crashed build's leftover.

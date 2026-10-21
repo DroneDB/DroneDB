@@ -10,7 +10,7 @@ renamed or retyped for them, including the mixed casing:
 
 * `point_geom` and `polygon_geom` are snake_case; the entry `properties` keys (`captureTime`,
   `bandCount`, ...) are camelCase; STAC keeps its own `stac_version` and `stac_extensions`.
-* `mtime` (entries and meta items) and `lastAttempt` are integer Unix epoch **seconds**.
+* `mtime` (entries and meta items), `lastAttempt` and `retryAfter` are integer Unix epoch **seconds**.
 * An image's `captureTime` is epoch **milliseconds**, written as a float (`1714972089000.0`).
 * `DDBInfo` writes `path` as `file://` + the absolute path, and `depth` as the number of folders
   in that absolute path. `DDBGet`/`DDBList` write dataset-relative paths and depths.
@@ -74,7 +74,7 @@ with ddb).
 | `meta-unset`, `meta-remove` | `DDBMetaUnset`, `DDBMetaRemove` | `meta-count` | - |
 | `build-status` | `DDBBuild(<root>, "ortho.tif")`, then `DDBGetBuildStatus` of a built, a buildable, a non-buildable and a missing path | `build-status` | - |
 | `pending-build-info-none` | `DDBGetPendingBuildInfo(<root>)`, nothing pending | `pending-build-info` | - |
-| `pending-build-info` | A Shapefile without `.shx`/`.dbf`: `DDBBuild` returns `DDBERR_BUILDDEPMISSING`, then `DDBGetPendingBuildInfo` | `pending-build-info` | `lastAttempt` |
+| `pending-build-info` | A Shapefile without `.shx`/`.dbf`: `DDBBuild` returns `DDBERR_BUILDDEPMISSING`, then `DDBGetPendingBuildInfo` | `pending-build-info` | `lastAttempt`, `retryAfter` |
 | `stac-collection` | `DDBStac(<root>, "", <collection URL>, "contract", <catalog URL>)` | `stac-collection` | - |
 | `stac-item-georaster`, `stac-item-image` | `DDBStac(<root>, "ortho.tif" / "sub/img.jpg", ...)` | `stac-item` | - |
 | `stac-item-collection` | `DDBStacItemCollection(<root>, ..., limit=10, offset=0)` | `stac-item-collection` | - |
@@ -85,7 +85,7 @@ with ddb).
 | `raster-metadata` | `DDBGetRasterMetadata(<root>/ortho.tif, NULL, NULL)`: per-band statistics | `raster-metadata` | - |
 | `raster-metadata-formula` | `DDBGetRasterMetadata(<root>/ortho.tif, "VARI", "RGB")`: formula statistics and histogram | `raster-metadata` | - |
 | `build-artifacts` | `DDBBuild(<root>, "ortho.tif")`, then `DDBGetBuildArtifacts` of a built (COG), two buildable and not built, a non-buildable file, a folder and a missing path (see [Build manifest](#build-manifest)) | `build-artifacts` | - |
-| `build-artifacts-pending` | The `pending-build-info` dataset (`roads.shp` deferred), then `DDBGetBuildArtifacts(<root>, ["roads.shp"])` | `build-artifacts` | `lastAttempt` |
+| `build-artifacts-pending` | The `pending-build-info` dataset (`roads.shp` deferred), then `DDBGetBuildArtifacts(<root>, ["roads.shp"])` | `build-artifacts` | `lastAttempt`, `retryAfter` |
 | `list-entries-ex` | `DDBBuild(<root>, "ortho.tif")`, then `DDBListEntriesEx(<root>, "", "", "", {recursive=true, withDetails=false, withBuild=true})` | `list-entries-ex` | - |
 | `resolve-build-file` | `DDBResolveBuildFile(<root>, <hash of ortho.tif>, "cog/cog.tif")` after its build: a path, held as a JSON string | `build-file` | - |
 | `copy-build-artifacts` | `DDBCopyBuildArtifacts(<root>, <root2>, <hash of ortho.tif>)` after its build, `<root2>` a dataset with `ortho.tif` | `copy-build-artifacts` | - |
@@ -149,6 +149,11 @@ entry, also embedded by `DDBListEntriesEx`) and `$defs/artifact`.
   `cloud.copc.laz`, `source.gpkg`.
 * `state` reads the build lock without reclaiming it (`BuildLock::isHeld`), so a listing never
   changes the dataset.
+* `retryAfter` is the Unix second from which a pending build is retried by `DDBBuild` with
+  `pendingOnly` (and no `force`): `lastAttempt` + libddb's retry backoff (60 s). It is null exactly
+  when `lastAttempt` is, and is a time, not a "due now" flag: the retry is due when the current
+  time is at or past it. `DDBGetPendingBuildInfo` reports the same value. A host compares it with
+  its clock and keeps no copy of the backoff.
 
 `DDBResolveBuildFile` returns a plain string, not JSON: its fixture holds it as a JSON string
 under the `<root>` placeholder.
@@ -197,7 +202,7 @@ normalised output keeps the JSON types, so it still matches its schema.
 | `<root>` placeholder: the absolute dataset folder, in its native and generic form, in every string; after it `\` becomes `/` | every fixture (in practice the `DDBInfo` paths) | the test area is a temporary folder |
 | volatile key `depth`: value 0 | `info-*` | `DDBInfo` counts the folders of the absolute path |
 | volatile keys `id` (`"<volatile>"`) and `mtime` (0) | meta items, meta dump | a new random UUID and the current time on every write |
-| volatile key `lastAttempt`: value 0 | `pending-build-info` | the time of the build attempt |
+| volatile keys `lastAttempt` and `retryAfter`: value 0 | `pending-build-info`, `build-artifacts-pending` | the time of the build attempt, and the retry time derived from it (the tests check `retryAfter` = `lastAttempt` + 60 before normalising) |
 | volatile key `version`: `"<volatile>"` | `capabilities` | the library version and git commit of the build |
 | `<cache>` placeholder, volatile key `hardwareThreads`: value 0 | `effective-config` | the cache folder is a temporary folder; the cores of the machine |
 | sorted by `path`, `key`, `data` | `meta-dump` | libddb orders the dump by `id`, a random UUID |
@@ -276,6 +281,13 @@ Registry has to adopt first.
 * 2026-10-21: `capabilities` lists the new export `DDBApplyDeltaEx` (XI-05, ABI 1.1). Its output
   is the conflict list of `DDBApplyDelta` (a JSON array of paths), so it has no fixture of its
   own. The other fixtures did not change.
+
+* 2026-10-22: the build object (`build-artifacts`, `build-artifacts-pending`, `list-entries-ex`)
+  and `pending-build-info` gain `retryAfter` (XI-04, XI-09): when the pending build is retried
+  (`lastAttempt` + the 60 s backoff of `buildPending`), integer Unix seconds, null when
+  `lastAttempt` is. Additive: no other field changed. In the two pending fixtures it is a volatile
+  key next to `lastAttempt`. Registry's exact-JSON adapter tests of these outputs
+  (`Abi11ContractTests`) need the field before `ci/registry-ref` moves past them.
 
 ## Cross-repository CI
 

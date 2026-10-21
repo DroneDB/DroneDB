@@ -67,6 +67,7 @@
         "state",
         "missingDependencies",
         "lastAttempt",
+        "retryAfter",
         "artifacts"
       ],
       "additionalProperties": false,
@@ -118,6 +119,14 @@
           ],
           "minimum": 0,
           "description": "From the pending marker: Unix epoch seconds (integer); null without a marker"
+        },
+        "retryAfter": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "description": "From the pending marker: when DDBBuild with pendingOnly (and no force) retries the build, lastAttempt + libddb's retry backoff, Unix epoch seconds (integer); due when now >= retryAfter; null exactly when lastAttempt is"
         },
         "artifacts": {
           "type": "array",

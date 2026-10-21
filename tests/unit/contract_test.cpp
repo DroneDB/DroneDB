@@ -253,7 +253,7 @@ namespace
     }
 
     // A build deferred for a missing dependency: a Shapefile without its .shx and .dbf. The
-    // marker records the time of the attempt ("lastAttempt", normalised).
+    // marker records the time of the attempt ("lastAttempt" and "retryAfter", normalised).
     TEST(ContractFixturesPending, PendingBuildInfo)
     {
         TestArea ta(TEST_NAME, true);
@@ -268,12 +268,17 @@ namespace
         EXPECT_EQ(DDBBuild(r.c_str(), "roads.shp", nullptr, false, false), DDBERR_BUILDDEPMISSING) << DDBGetLastError();
         char *out = nullptr;
         ASSERT_DDB_OK(DDBGetPendingBuildInfo(r.c_str(), &out));
+        const json pending = contract::takeJson(out);
+        ASSERT_EQ(pending.size(), 1u);
+        EXPECT_EQ(pending[0]["retryAfter"], pending[0]["lastAttempt"].get<long long>() + 60)
+            << "the retry is due 60 s after the attempt";
         contract::expectMatchesFixture(
             {"pending-build-info",
              "A dataset with roads.shp only (no .shx, .dbf), mtime 1700000000; DDBBuild deferred it",
              "DDBBuild(<root>, \"roads.shp\") -> DDBERR_BUILDDEPMISSING, then DDBGetPendingBuildInfo(<root>)",
-             "pending-build-info.schema.json", contract::pathPlaceholders(root, "<root>"), {"lastAttempt"}, {}},
-            contract::takeJson(out));
+             "pending-build-info.schema.json", contract::pathPlaceholders(root, "<root>"), {"lastAttempt", "retryAfter"},
+             {}},
+            pending);
         DDBReleaseConnections(r.c_str(), nullptr);
     }
 
@@ -330,8 +335,8 @@ namespace
         DDBReleaseConnections(r2.c_str(), nullptr);
     }
 
-    // A pending build in the manifest: a Shapefile without its .shx and .dbf ("lastAttempt",
-    // normalised)
+    // A pending build in the manifest: a Shapefile without its .shx and .dbf ("lastAttempt" and
+    // "retryAfter", normalised)
     TEST(ContractFixturesPending, BuildArtifactsPending)
     {
         TestArea ta(TEST_NAME, true);
@@ -347,13 +352,19 @@ namespace
         const char *paths[] = {"roads.shp"};
         char *out = nullptr;
         ASSERT_DDB_OK(DDBGetBuildArtifacts(r.c_str(), paths, 1, &out));
+        const json artifacts = contract::takeJson(out);
+        ASSERT_EQ(artifacts.size(), 1u);
+        const json &build = artifacts[0]["build"];
+        EXPECT_EQ(build["retryAfter"], build["lastAttempt"].get<long long>() + 60)
+            << "the retry is due 60 s after the attempt";
         contract::expectMatchesFixture(
             {"build-artifacts-pending",
              "A dataset with roads.shp only (no .shx, .dbf), mtime 1700000000; DDBBuild deferred it",
              "DDBBuild(<root>, \"roads.shp\") -> DDBERR_BUILDDEPMISSING, then DDBGetBuildArtifacts(<root>, "
              "[\"roads.shp\"])",
-             "build-artifacts.schema.json", contract::pathPlaceholders(root, "<root>"), {"lastAttempt"}, {}},
-            contract::takeJson(out));
+             "build-artifacts.schema.json", contract::pathPlaceholders(root, "<root>"), {"lastAttempt", "retryAfter"},
+             {}},
+            artifacts);
         DDBReleaseConnections(r.c_str(), nullptr);
     }
 

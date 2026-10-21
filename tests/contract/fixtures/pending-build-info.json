@@ -6,7 +6,8 @@
       "<root>"
     ],
     "volatileKeys": [
-      "lastAttempt"
+      "lastAttempt",
+      "retryAfter"
     ]
   },
   "output": [
@@ -16,7 +17,8 @@
       "missingDependencies": [
         "roads.shx"
       ],
-      "path": "roads.shp"
+      "path": "roads.shp",
+      "retryAfter": 0
     }
   ],
   "schema": "pending-build-info.schema.json"

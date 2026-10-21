@@ -53,6 +53,9 @@ struct EntryBuild {
     // From "<hash>.pending", when it exists
     std::vector<std::string> missingDependencies;
     std::optional<time_t> lastAttempt;
+    // The first Unix second at which buildPending() (without force) retries the pending build:
+    // lastAttempt + the retry backoff (60 s); set exactly when lastAttempt is
+    std::optional<time_t> retryAfter;
     // The artifacts that exist, in the type's manifest order (EntryHandler::artifacts()); the
     // primary output first
     std::vector<BuildArtifact> artifacts;
@@ -61,7 +64,8 @@ struct EntryBuild {
 // {"role", "path", "kind": "file"|"dir", "mediaType", "downloadName"?, "index"?, "legacy"?}
 DDB_DLL json buildArtifactJson(const BuildArtifact& artifact);
 // {"buildable", "source", "hash", "root", "state", "missingDependencies", "lastAttempt",
-// "artifacts"}; source, hash, root and lastAttempt are null when they do not apply
+// "retryAfter", "artifacts"}; source, hash, root, lastAttempt and retryAfter are null when they
+// do not apply
 DDB_DLL json entryBuildJson(const EntryBuild& build);
 
 // DDBGetEntryTypes: one object per registered entry type, by id

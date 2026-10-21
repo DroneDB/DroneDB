@@ -721,8 +721,12 @@ extern "C"
      * @param ddbPath path to the source DroneDB database (parent of ".ddb")
      * @param output pointer to C-string where to store result (JSON array).
      *               Each element: { "hash": "...", "path": "...",
-     *               "missingDependencies": ["..."], "lastAttempt": 1721612345 }
-     *               (caller must free with DDBFree)
+     *               "missingDependencies": ["..."], "lastAttempt": 1721612345,
+     *               "retryAfter": 1721612405 }
+     *               (caller must free with DDBFree). lastAttempt and retryAfter are Unix
+     *               seconds: retryAfter is when DDBBuild with pendingOnly (and no force)
+     *               retries the build, as in the build object of DDBGetBuildArtifacts (see
+     *               "Build manifest")
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBGetPendingBuildInfo(const char *ddbPath, char **output);
 
@@ -789,7 +793,7 @@ extern "C"
      * The build object of an entry (DDBGetBuildArtifacts, DDBListEntriesEx):
      *   {"buildable": bool, "source": string|null, "hash": string|null, "root": string|null,
      *    "state": "none"|"pending"|"building"|"complete", "missingDependencies": [string],
-     *    "lastAttempt": integer|null, "artifacts": [artifact]}
+     *    "lastAttempt": integer|null, "retryAfter": integer|null, "artifacts": [artifact]}
      *   buildable  the entry is built, by itself or as a sidecar of its main file (a .dbf of a .shp)
      *   source     dataset-relative path of the entry the artifacts belong to: the entry itself,
      *              or the main file of a sidecar
@@ -802,6 +806,12 @@ extern "C"
      *              from the pending marker when there is one (a pending or a building entry),
      *              [] and null otherwise: dataset-relative names, and the time of the last
      *              attempt in Unix seconds (0 when the marker's time is unreadable)
+     *   retryAfter the Unix second from which DDBBuild with pendingOnly (and no force) retries it:
+     *              lastAttempt + the retry backoff (60 s, libddb's rule; a host must not keep a
+     *              copy of it). The retry is due when the current time is at or past it, so an
+     *              unreadable marker time (lastAttempt 0) is due at once. Null exactly when
+     *              lastAttempt is; a value, not a "due now" flag, so a listing stays the same
+     *              until the marker changes
      *   artifacts  the artifacts that exist (a directory when its index exists), in the order
      *              of the entry type, its primary output first: the file thumbnails and tiles
      *              are made from (raster.cog, pointcloud.copc or pointcloud.ept, vector.gpkg,

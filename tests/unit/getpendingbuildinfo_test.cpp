@@ -91,6 +91,7 @@ TEST_F(GetPendingBuildInfoTest, ReturnsHashPathDepsAndTimestamp) {
     EXPECT_EQ(pending[0].hash, hash);
     EXPECT_EQ(pending[0].path, rel);
     EXPECT_EQ(pending[0].lastAttempt, ts);
+    EXPECT_EQ(pending[0].retryAfter, ts + 60) << "lastAttempt + the 60 s backoff of buildPending()";
     ASSERT_EQ(pending[0].missingDependencies.size(), 2u);
     EXPECT_EQ(pending[0].missingDependencies[0], "layer.dbf");
     EXPECT_EQ(pending[0].missingDependencies[1], "layer.prj");
@@ -149,6 +150,8 @@ TEST_F(GetPendingBuildInfoTest, MalformedTimestampToleratedAsZero) {
     const auto pending = ddb::getPendingBuildInfo(db.get());
     ASSERT_EQ(pending.size(), 1u);
     EXPECT_EQ(pending[0].lastAttempt, 0);
+    EXPECT_EQ(pending[0].retryAfter, 60);
+    EXPECT_LE(pending[0].retryAfter, utils::currentUnixTimestamp()) << "a marker without a time is due at once";
     ASSERT_EQ(pending[0].missingDependencies.size(), 1u);
     EXPECT_EQ(pending[0].missingDependencies[0], "layer.dbf");
 }
@@ -164,6 +167,40 @@ TEST_F(GetPendingBuildInfoTest, DoesNotTriggerBuildOrApplyBackoff) {
     const auto pending = ddb::getPendingBuildInfo(db.get());
     ASSERT_EQ(pending.size(), 1u);
     EXPECT_EQ(pending[0].missingDependencies.size(), 1u);
+}
+
+// retryAfter is when buildPending() retries: not before it, and at it. layer.shp still lacks its
+// .shx, so a retry defers it again and refreshes the marker.
+TEST_F(GetPendingBuildInfoTest, RetryAfterTellsWhenBuildPendingRetries) {
+    const auto hash = indexedHash(vectorPath);
+
+    // Attempted 10 s ago: the retry is 50 s away, and buildPending() leaves the marker alone
+    const time_t recent = utils::currentUnixTimestamp() - 10;
+    writePendingFile(db->buildDirectory(), hash, std::to_string(recent), {"old.dbf"});
+    auto pending = ddb::getPendingBuildInfo(db.get());
+    ASSERT_EQ(pending.size(), 1u);
+    EXPECT_EQ(pending[0].retryAfter, recent + 60);
+    EXPECT_GT(pending[0].retryAfter, utils::currentUnixTimestamp());
+    ddb::buildPending(db.get(), "", false);
+    pending = ddb::getPendingBuildInfo(db.get());
+    ASSERT_EQ(pending.size(), 1u);
+    EXPECT_EQ(pending[0].lastAttempt, recent) << "retried before retryAfter";
+    EXPECT_EQ(pending[0].missingDependencies, std::vector<std::string>{"old.dbf"});
+
+    // Attempted exactly the backoff ago: retryAfter has come, and buildPending() retries
+    const time_t due = utils::currentUnixTimestamp() - 60;
+    writePendingFile(db->buildDirectory(), hash, std::to_string(due), {"old.dbf"});
+    pending = ddb::getPendingBuildInfo(db.get());
+    ASSERT_EQ(pending.size(), 1u);
+    EXPECT_EQ(pending[0].retryAfter, due + 60);
+    EXPECT_LE(pending[0].retryAfter, utils::currentUnixTimestamp());
+    const time_t beforeRetry = utils::currentUnixTimestamp();
+    ddb::buildPending(db.get(), "", false);
+    pending = ddb::getPendingBuildInfo(db.get());
+    ASSERT_EQ(pending.size(), 1u);
+    EXPECT_GE(pending[0].lastAttempt, beforeRetry) << "not retried at retryAfter";
+    EXPECT_EQ(pending[0].missingDependencies, std::vector<std::string>{"layer.shx"});
+    EXPECT_EQ(pending[0].retryAfter, pending[0].lastAttempt + 60);
 }
 
 // --- C API round-trip ---
@@ -183,6 +220,8 @@ TEST_F(GetPendingBuildInfoTest, CApiReturnsValidJson) {
     ASSERT_EQ(j.size(), 1u);
     EXPECT_EQ(j[0]["hash"].get<std::string>(), hash);
     EXPECT_EQ(j[0]["lastAttempt"].get<long long>(), 1721612345LL);
+    ASSERT_TRUE(j[0]["retryAfter"].is_number_integer());
+    EXPECT_EQ(j[0]["retryAfter"].get<long long>(), 1721612405LL);
     ASSERT_TRUE(j[0]["missingDependencies"].is_array());
     EXPECT_EQ(j[0]["missingDependencies"][0].get<std::string>(), "layer.dbf");
 }
