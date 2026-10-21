@@ -99,6 +99,7 @@ DDBResolveBuildFile
 DDBSearch
 DDBSetLastError
 DDBSetTag
+DDBShutdown
 DDBStac
 DDBStacData
 DDBStacItemCollection

@@ -94,6 +94,11 @@ namespace ddb
         /// checkpoint). Runs at process exit; skipped while another thread holds the pool.
         DDB_DLL void checkpointIdle();
 
+        /// DDBShutdown (XI-07): a TRUNCATE checkpoint of every idle connection, then closes
+        /// them all. Unlike checkpointIdle it waits for the pool, and leaves nothing for the
+        /// exit-time checkpoint. Returns how many were closed.
+        DDB_DLL size_t shutdown();
+
         DDB_DLL Stats stats() const;
 
     private:

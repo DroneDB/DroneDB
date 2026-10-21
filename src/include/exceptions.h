@@ -153,6 +153,11 @@ namespace ddb
     {
         using AppException::AppException;
     };
+    // The work stopped because the library is shutting down (DDBShutdown): DDBERR_SHUTDOWN
+    class ShutdownException : public CanceledException
+    {
+        using CanceledException::CanceledException;
+    };
 
     // Build lock specific exceptions
     class BuildLockException : public AppException

@@ -156,7 +156,8 @@ extern "C"
      * the CPU pool decides how many of them run. */
 
     /** Changes settings of the process configuration (see above). Callable at any time, from any
-     * thread, before DDBRegisterProcess too and concurrently with any other call; a host
+     * thread, before DDBRegisterProcess too and concurrently with any other call (until
+     * DDBShutdown); a host
      * normally calls it once, before DDBRegisterProcess. A change applies to the work that reads
      * the setting after this call returned: a parallel section that is running keeps the tokens
      * it holds (after the pool shrank, given-back tokens are handed out again only below the new
@@ -181,6 +182,38 @@ extern "C"
      * @return DDBERR_NONE; DDBERR_INVALIDARGS when output is NULL; DDBERR_EXCEPTION when the
      *         default cache folder cannot be found (no DDB_HOME, HOME or USERPROFILE) */
     DDB_DLL DDBErr DDBGetEffectiveConfig(char **output);
+
+    /* Shutdown (DQ-15, XI-07, ABI 1.1). A host calls DDBShutdown once, when it stops (after it
+     * stopped sending work), so that the index files are left whole and the log is written out
+     * before the process exits. The library has three states:
+     *   running        every call works;
+     *   shutting down  DDBShutdown started: every call but the exempt ones returns
+     *                  DDBERR_SHUTDOWN without running (DDBRegisterProcess and DDBConfigure
+     *                  too), and the calls in flight are asked to stop: they return
+     *                  DDBERR_SHUTDOWN, or finish;
+     *   shut down      no call is in flight any more and the teardown ran.
+     * The exempt calls work in every state: DDBGetLastError, DDBGetLastErrorReason,
+     * DDBGetVersion, DDBGetAbiVersion, DDBGetCapabilities, DDBFree and DDBVSIFree. There is no
+     * way back to running: the process exits after it. Without DDBShutdown, the exit-time
+     * checkpoint of the idle index connections stays the fallback. */
+
+    /** Shuts the library down: refuses new calls (DDBERR_SHUTDOWN), waits up to timeoutMs for
+     * the calls in flight on other threads to return, then runs a TRUNCATE checkpoint on every
+     * pooled index connection and closes them, closes the cached rasters and flushes the log.
+     * Idempotent: once shut down it returns DDBERR_NONE at once; concurrent calls wait for each
+     * other within their timeouts. Never counted in flight itself; callable from any thread,
+     * but not from inside a libddb call or callback.
+     * @param timeoutMs how long to wait for the calls in flight, in milliseconds; < 0 waits
+     *                  without a limit, 0 does not wait
+     * @return DDBERR_NONE when the library is shut down;
+     *         DDBERR_BUSY when calls were still running after timeoutMs: the library is shutting
+     *         down (new calls are refused, the log is flushed) but the connections and rasters
+     *         are left open for the calls still running; a later DDBShutdown finishes the
+     *         shutdown, and at exit the exit-time checkpoint covers the idle connections;
+     *         DDBERR_INVALIDARGS when called from inside a libddb call (a progress callback);
+     *         DDBERR_EXCEPTION when a teardown step failed (see DDBGetLastError): the library is
+     *         shut down all the same */
+    DDB_DLL DDBErr DDBShutdown(int timeoutMs);
 
     /** Normalize a dataset-relative entry path, or reject it, with libddb's path rules (XI-09,
      * entry_path.h; golden vectors in tests/contract/vectors/entry-paths.json):

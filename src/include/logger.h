@@ -28,5 +28,7 @@
 DDB_DLL void init_logger(bool logToFile = false);
 DDB_DLL void set_logger_verbose();
 DDB_DLL bool is_logger_verbose();
+// Writes out what the log appenders buffered (stdout, stderr): before the host exits (DDBShutdown)
+DDB_DLL void flush_logger();
 
 #endif // LOGGER_H

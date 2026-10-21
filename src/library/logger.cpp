@@ -4,6 +4,9 @@
 
 #include "logger.h"
 
+#include <cstdio>
+#include <iostream>
+
 void init_logger(bool logToFile) {
 	static plog::ConsoleAppender<plog::TxtFormatter> consoleAppender;
 
@@ -20,4 +23,12 @@ void set_logger_verbose() {
 
 bool is_logger_verbose(){
     return plog::get()->getMaxSeverity() == plog::verbose;
+}
+
+void flush_logger() {
+    // The console appender writes to std::cout; GDAL's default handler and the C stdio of the
+    // other libraries to stderr and stdout
+    std::cout.flush();
+    std::cerr.flush();
+    std::fflush(nullptr);
 }

@@ -121,6 +121,7 @@
       "DDBSearch",
       "DDBSetLastError",
       "DDBSetTag",
+      "DDBShutdown",
       "DDBStac",
       "DDBStacData",
       "DDBStacItemCollection",

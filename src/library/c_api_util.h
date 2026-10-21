@@ -104,6 +104,7 @@ struct Failure {
 //   EntryNotFoundException     NOTFOUND
 //   BuildDepMissingException   BUILDDEPMISSING
 //   BuildInProgressException   BUILDINPROGRESS
+//   ShutdownException          SHUTDOWN (a call stopped by DDBShutdown)
 //   CanceledException          CANCELED
 //   InvalidArgsException       INVALIDARGS
 //   RetryableBuildException    RETRYABLE, reason from kRetryableReasons
@@ -124,10 +125,72 @@ constexpr DDBErr restrictCode(DDBErr code, CodeSet allowed) noexcept {
 // reason.
 DDBErr reportCurrentException(CodeSet allowed) noexcept;
 
+// Sets the last error of a call refused because DDBShutdown started; returns DDBERR_SHUTDOWN
+DDBErr reportShutdown() noexcept;
+
+// ------------------------------------------------------------------ calls in flight and shutdown (XI-07)
+
+// What a guarded call is to the shutdown (DDBShutdown)
+enum class CallKind {
+    // An export that works on data: refused with DDBERR_SHUTDOWN once DDBShutdown started,
+    // counted in flight while it runs (DDBShutdown waits for it)
+    Operation,
+    // An export that only changes a setting (DDBSetLogCallback, DDBSetThreadOperation, ...):
+    // refused and counted like an operation, but it is not "the call" that a thread's
+    // per-call state is for, so its exit does not reset that state
+    Setting,
+    // Works in any state and is not counted (DDBCancel: a host cancels while it shuts down)
+    Unrestricted,
+};
+
+// One guarded call on this thread (RAII). The outermost call of a thread is admitted unless
+// DDBShutdown started, and counted while it runs; a call nested in it (an export called from
+// a progress callback) is admitted with it.
+class CallScope {
+   public:
+    explicit CallScope(CallKind kind) noexcept;
+    ~CallScope();
+    CallScope(const CallScope&) = delete;
+    CallScope& operator=(const CallScope&) = delete;
+
+    // False when the call must return DDBERR_SHUTDOWN without running
+    bool admitted() const noexcept { return admitted_; }
+
+    // The guarded calls running on this thread (0 outside any)
+    static int depth() noexcept;
+
+   private:
+    CallKind kind_;
+    bool admitted_ = false;
+    bool counted_ = false;
+};
+
+// Guarded calls admitted and still running, on every thread (diagnostics and tests)
+int callsInFlight() noexcept;
+
+// What DDBShutdown does once no call is in flight, before it returns DDBERR_NONE: the
+// destructive part (closing the pooled connections and the raster cache). It may throw.
+using Teardown = void (*)();
+
+// DDBShutdown(timeoutMs), see ddb.h: refuses new calls, waits up to timeoutMs (< 0: without a
+// limit) for the calls in flight, then runs teardown once and flushes the log. On timeout it
+// flushes the log and returns DDBERR_BUSY without the teardown, which a later DDBShutdown
+// finishes. Called from inside a guarded call (a progress callback): DDBERR_INVALIDARGS.
+// Never counted in flight itself.
+DDBErr shutdown(int timeoutMs, Teardown teardown) noexcept;
+
+// True once DDBShutdown started
+bool shutdownStarted() noexcept;
+
+// Unit tests only: back to the running state after a test called DDBShutdown (the teardown
+// leaves nothing that a later call cannot recreate). Never called by the library.
+void resetShutdownForTests() noexcept;
+
 // ------------------------------------------------------------------ process initialization
 
 // DDBRegisterProcess: runs init(verbose). A failure is sticky: this call and every later guarded
-// call (DDBRegisterProcess too) return DDBERR_EXCEPTION with the initialization message.
+// call (DDBRegisterProcess too) return DDBERR_EXCEPTION with the initialization message. After
+// DDBShutdown it returns DDBERR_SHUTDOWN, like every guarded call.
 using ProcessInit = void (*)(bool verbose);
 DDBErr initializeProcess(ProcessInit init, bool verbose) noexcept;
 // The message of a failed initialization, or nullptr
@@ -136,12 +199,16 @@ const std::string* initFailure() noexcept;
 // ------------------------------------------------------------------ the mapper
 
 // Runs body and returns DDBERR_NONE, or the code of the exception it threw (restricted to
-// Allowed). The last error is cleared on entry and set for every other code.
-template <CodeSet Allowed = kFrozenCodes, typename Body>
+// Allowed, plus DDBERR_SHUTDOWN, which every export returns once DDBShutdown started). The last
+// error is cleared on entry and set for every other code.
+template <CodeSet Allowed = kFrozenCodes, CallKind Kind = CallKind::Operation, typename Body>
 DDBErr guarded(Body&& body) noexcept {
     static_assert(std::is_void_v<std::invoke_result_t<Body&&>>,
                   "a guarded body reports a failure by throwing; use guardedOutput for a result");
     clearLastError();
+    const CallScope scope(Kind);
+    if (!scope.admitted())
+        return reportShutdown();
     if (const std::string* failure = initFailure()) {
         setLastError(*failure);
         return DDBERR_EXCEPTION;
@@ -150,7 +217,7 @@ DDBErr guarded(Body&& body) noexcept {
         std::forward<Body>(body)();
         return DDBERR_NONE;
     } catch (...) {
-        return reportCurrentException(Allowed);
+        return reportCurrentException(Allowed | codeBit(DDBERR_SHUTDOWN));
     }
 }
 

@@ -165,6 +165,9 @@ TEST(ErrorMapper, codeTable) {
                   {DDBERR_EXCEPTION, DDBERR_BUILDINPROGRESS, "locked", ""});
     expectMapping("CanceledException", [] { throw CanceledException("stop"); },
                   {DDBERR_EXCEPTION, DDBERR_CANCELED, "stop", ""});
+    // Every export returns SHUTDOWN once DDBShutdown started (ABI 1.1)
+    expectMapping("ShutdownException", [] { throw ShutdownException("shutting down"); },
+                  {DDBERR_SHUTDOWN, DDBERR_SHUTDOWN, "shutting down", ""});
     expectMapping("InvalidArgsException", [] { throw InvalidArgsException("bad"); },
                   {DDBERR_EXCEPTION, DDBERR_INVALIDARGS, "bad", ""});
     expectMapping("RetryableBuildException(LowDiskSpace)",

@@ -5,10 +5,13 @@
 #include "c_api_util.h"
 
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <mutex>
 #include <new>
 
 #include "gdal_inc.h"
+#include "logger.h"
 #include "mio.h"
 #include "utils.h"
 
@@ -47,7 +50,7 @@ const char* defaultMessage(DDBErr code) noexcept {
         case DDBERR_RETRYABLE:
             return "Transient failure: retry later";
         case DDBERR_SHUTDOWN:
-            return "libddb is shut down";
+            return "libddb is shut down (DDBShutdown): the call did not run";
         case DDBERR_EXCEPTION:
             break;
     }
@@ -73,6 +76,59 @@ Failure makeFailure(DDBErr code, const char* message, std::string_view reason = 
 std::mutex initMutex;
 std::string initFailureMessage;
 std::atomic<bool> initFailed{false};
+
+// ---- calls in flight and shutdown
+//
+// One atomic word: the guarded calls in flight in the low bits, kShutdownBit once DDBShutdown
+// started. A call is admitted by a compare-exchange that fails once the bit is set, so
+// admission and the shutdown are totally ordered: once DDBShutdown has set the bit, the count
+// it reads only goes down.
+constexpr std::uint64_t kShutdownBit = std::uint64_t{1} << 63;
+std::atomic<std::uint64_t> callWord{0};
+
+// DDBShutdown waits on drained for the count to reach 0; a call leaving after the bit was set
+// notifies it under drainMutex, so the wakeup cannot fall between the waiter's check and wait
+std::mutex drainMutex;
+std::condition_variable drained;
+
+// Serializes DDBShutdown calls; tornDown (under it) once the teardown ran
+std::timed_mutex shutdownMutex;
+bool tornDown = false;
+
+thread_local int callDepth = 0;
+
+std::uint64_t callsOf(std::uint64_t word) noexcept {
+    return word & ~kShutdownBit;
+}
+
+// Takes a call out of the count; wakes DDBShutdown when it is waiting for the count
+void leaveCall() noexcept {
+    const std::uint64_t before = callWord.fetch_sub(1);
+    if ((before & kShutdownBit) != 0) {
+        // std::mutex::lock throws only on a system error (EDEADLK, EINVAL), never here
+        const std::lock_guard lock(drainMutex);
+        drained.notify_all();
+    }
+}
+
+// Waits until no call is in flight: up to timeoutMs, without a limit when it is negative.
+// True when none is left.
+bool waitForCalls(int timeoutMs) {
+    const auto none = [] { return callsOf(callWord.load()) == 0; };
+    std::unique_lock lock(drainMutex);
+    if (timeoutMs < 0) {
+        drained.wait(lock, none);
+        return true;
+    }
+    return drained.wait_for(lock, std::chrono::milliseconds(timeoutMs), none);
+}
+
+std::string callsLeftMessage(int timeoutMs) {
+    const auto left = callsOf(callWord.load());
+    return "libddb is shutting down: " + std::to_string(left) + (left == 1 ? " call" : " calls") +
+           " still running after " + std::to_string(timeoutMs) +
+           " ms; new calls are refused, and a later DDBShutdown finishes the shutdown";
+}
 
 }  // namespace
 
@@ -117,6 +173,8 @@ Failure classifyCurrentException() {
         return makeFailure(DDBERR_BUILDDEPMISSING, e.what());
     } catch (const BuildInProgressException& e) {
         return makeFailure(DDBERR_BUILDINPROGRESS, e.what());
+    } catch (const ShutdownException& e) {
+        return makeFailure(DDBERR_SHUTDOWN, e.what());
     } catch (const CanceledException& e) {
         return makeFailure(DDBERR_CANCELED, e.what());
     } catch (const InvalidArgsException& e) {
@@ -144,8 +202,105 @@ DDBErr reportCurrentException(CodeSet allowed) noexcept {
     }
 }
 
+DDBErr reportShutdown() noexcept {
+    setLastError(defaultMessage(DDBERR_SHUTDOWN));
+    return DDBERR_SHUTDOWN;
+}
+
+CallScope::CallScope(CallKind kind) noexcept : kind_(kind) {
+    ++callDepth;
+    if (kind_ == CallKind::Unrestricted || callDepth > 1) {
+        // Nested in an admitted call, which is counted already
+        admitted_ = true;
+        return;
+    }
+    // A refused call never touches the count, so refused calls cannot keep DDBShutdown waiting
+    std::uint64_t word = callWord.load();
+    do {
+        if ((word & kShutdownBit) != 0)
+            return;
+    } while (!callWord.compare_exchange_weak(word, word + 1));
+    admitted_ = true;
+    counted_ = true;
+}
+
+CallScope::~CallScope() {
+    if (counted_)
+        leaveCall();
+    --callDepth;
+}
+
+int CallScope::depth() noexcept {
+    return callDepth;
+}
+
+int callsInFlight() noexcept {
+    return static_cast<int>(callsOf(callWord.load()));
+}
+
+bool shutdownStarted() noexcept {
+    return (callWord.load() & kShutdownBit) != 0;
+}
+
+DDBErr shutdown(int timeoutMs, Teardown teardown) noexcept {
+    clearLastError();
+    if (CallScope::depth() > 0) {
+        // It would wait for the call it runs in
+        setLastError("DDBShutdown cannot be called from inside a libddb call (a progress callback)");
+        return DDBERR_INVALIDARGS;
+    }
+    try {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(std::max(timeoutMs, 0));
+        // A concurrent DDBShutdown holds it while it waits or tears down: wait for it in the
+        // same time budget
+        std::unique_lock serialize(shutdownMutex, std::defer_lock);
+        if (timeoutMs < 0)
+            serialize.lock();
+        else if (!serialize.try_lock_until(deadline)) {
+            setLastError(callsLeftMessage(timeoutMs));
+            return DDBERR_BUSY;
+        }
+        if (tornDown)
+            return DDBERR_NONE;
+
+        callWord.fetch_or(kShutdownBit);
+        const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
+            deadline - std::chrono::steady_clock::now());
+        if (!waitForCalls(timeoutMs < 0 ? -1 : static_cast<int>(std::max<long long>(left.count(), 0)))) {
+            // Not destructive: the calls still running keep their connections and datasets
+            flush_logger();
+            setLastError(callsLeftMessage(timeoutMs));
+            return DDBERR_BUSY;
+        }
+
+        // Once, even when a step fails: a retry would find half of it done
+        tornDown = true;
+        DDBErr result = DDBERR_NONE;
+        try {
+            teardown();
+        } catch (...) {
+            result = reportCurrentException(codeSet());
+        }
+        flush_logger();
+        return result;
+    } catch (...) {
+        // The mutex (a system error) or the message: the shutdown flag may be set
+        setLastError("DDBShutdown failed: out of memory or system error");
+        return DDBERR_EXCEPTION;
+    }
+}
+
+void resetShutdownForTests() noexcept {
+    const std::lock_guard serialize(shutdownMutex);
+    callWord.fetch_and(~kShutdownBit);
+    tornDown = false;
+}
+
 DDBErr initializeProcess(ProcessInit init, bool verbose) noexcept {
     clearLastError();
+    const CallScope scope(CallKind::Operation);
+    if (!scope.admitted())
+        return reportShutdown();
     try {
         const std::lock_guard lock(initMutex);
         if (const std::string* failure = initFailure()) {

@@ -226,6 +226,24 @@ DDBErr DDBGetEffectiveConfig(char** output) {
     });
 }
 
+// ------------------------------------------------------------------ shutdown (XI-07)
+
+namespace {
+
+// What DDBShutdown closes once no call is in flight: what the process keeps open between calls
+void closeKeptResources() {
+    const size_t connections = DatabasePool::instance().shutdown();
+    const size_t rasters = RasterCache::instance().clear();
+    LOGD << "Shutdown: closed " << connections << " pooled index connections and " << rasters
+         << " cached rasters";
+}
+
+}  // namespace
+
+DDBErr DDBShutdown(int timeoutMs) {
+    return capi::shutdown(timeoutMs, &closeKeptResources);
+}
+
 // ------------------------------------------------------------------ files and index
 
 DDBErr DDBNormalizePath(const char* path, const char* reservedJson, char** output) {

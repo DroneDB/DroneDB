@@ -79,6 +79,27 @@ namespace ddb
             sqlite3_wal_checkpoint_v2(c.handle, nullptr, SQLITE_CHECKPOINT_TRUNCATE, nullptr, nullptr);
     }
 
+    size_t DatabasePool::shutdown()
+    {
+        std::vector<Idle> closing;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            for (const auto &c : idle_)
+            {
+                const int rc = sqlite3_wal_checkpoint_v2(c.handle, nullptr, SQLITE_CHECKPOINT_TRUNCATE, nullptr, nullptr);
+                if (rc != SQLITE_OK)
+                    LOGW << "Cannot checkpoint " << c.key << " at shutdown (" << sqlite3_errstr(rc)
+                         << "): its last close checkpoints it";
+            }
+            closing.assign(idle_.begin(), idle_.end());
+            idle_.clear();
+            stats_.discarded += closing.size();
+        }
+        const auto count = closing.size();
+        closeAll(closing);
+        return count;
+    }
+
     void DatabasePool::configure(const Options &options)
     {
         std::vector<Idle> stale;
