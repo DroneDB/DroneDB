@@ -14,6 +14,7 @@
 #include <type_traits>
 #include <algorithm>
 #include <array>
+#include <initializer_list>
 #include <span>
 #include <string_view>
 #include <utility>
@@ -26,6 +27,7 @@
 
 #include "build.h"
 #include "build_budget.h"
+#include "c_api_util.h"
 #include "database.h"
 #include "databasepool.h"
 #include "raster_cache.h"
@@ -68,17 +70,61 @@
 #include "version.h"
 
 using namespace ddb;
+// Every export is one call of the mapper (c_api_util.h): guarded, guardedOutput or guardedBuffer.
+// The template argument names the codes besides NONE and EXCEPTION it may return: none means
+// kFrozenCodes (ABI 1.0 exports), kAbi11Codes is for the exports added in ABI 1.1.
+using capi::codeBit;
+using capi::guarded;
+using capi::guardedBuffer;
+using capi::guardedOutput;
+using capi::kAbi11Codes;
+using capi::kFrozenCodes;
+using capi::optStr;
+using capi::parseJsonArg;
+using capi::pathArg;
+using capi::requireDdbPath;
+using capi::requireOutput;
+using capi::requirePathList;
+using capi::requireText;
 
-// thread_local: each thread's failing call gets its own buffer, so a cross-thread failure never
-// clobbers another thread's error message (was a plain global; a real data race under concurrency).
-thread_local char ddbLastError[255];
-
-void DDBRegisterProcess(bool verbose) {
-    ddb::registerProcess(verbose);
+DDBErr DDBRegisterProcess(bool verbose) {
+    return capi::initializeProcess(&ddb::registerProcess, verbose);
 }
+
+// ------------------------------------------------------------------ exempt accessors
+// They never read or change the last error, and work in any state of the library
 
 const char* DDBGetVersion() {
     return ddb::version();
+}
+
+const char* DDBGetLastError() {
+    return capi::lastErrorMessage();
+}
+
+const char* DDBGetLastErrorReason() {
+    return capi::lastErrorReason();
+}
+
+DDBErr DDBVSIFree(uint8_t* buffer) {
+    // nullptr is allowed - matches C free() semantics (no-op)
+    if (buffer != nullptr)
+        VSIFree(buffer);
+    return DDBERR_NONE;
+}
+
+DDBErr DDBFree(char* ptr) {
+    // ptr == nullptr is allowed (no-op, matches standard free behaviour)
+    free(ptr);
+    return DDBERR_NONE;
+}
+
+// Deprecated: the library sets and clears the last error itself
+void DDBSetLastError(const char* err) {
+    if (err == nullptr)
+        capi::clearLastError();
+    else
+        capi::setLastError(err);
 }
 
 namespace {
@@ -98,7 +144,10 @@ constexpr std::array kErrorCodes = {DDB_ERROR_CODE(NONE),
                                     DDB_ERROR_CODE(BUILDINPROGRESS),
                                     DDB_ERROR_CODE(CANCELED),
                                     DDB_ERROR_CODE(BUSY),
-                                    DDB_ERROR_CODE(NOTFOUND)};
+                                    DDB_ERROR_CODE(NOTFOUND),
+                                    DDB_ERROR_CODE(INVALIDARGS),
+                                    DDB_ERROR_CODE(RETRYABLE),
+                                    DDB_ERROR_CODE(SHUTDOWN)};
 #undef DDB_ERROR_CODE
 
 // The exports that return DDBERR_CANCELED when their DDBProgressCallback asks to stop
@@ -130,9 +179,13 @@ std::string buildCapabilities() {
     json errorCodes = json::object();
     for (const auto& [name, code] : kErrorCodes)
         errorCodes[std::string(name)] = static_cast<int>(code);
+    json errorReasons = json::array();
+    for (const auto& reason : capi::kRetryableReasons)
+        errorReasons.push_back(reason.second);
     return json{{"abi", {{"major", DDB_ABI_MAJOR}, {"minor", DDB_ABI_MINOR}}},
                 {"version", ddb::version()},
                 {"errorCodes", std::move(errorCodes)},
+                {"errorReasons", std::move(errorReasons)},
                 {"cancellable", stringArray(kCancellable)},
                 {"symbols", stringArray(kExportedSymbols)}}
         .dump();
@@ -140,7 +193,6 @@ std::string buildCapabilities() {
 
 }  // namespace
 
-// Exempt accessors (no DDB_C_BEGIN): they never read or change the last error
 uint32_t DDBGetAbiVersion() {
     return (static_cast<uint32_t>(DDB_ABI_MAJOR) << 16) | static_cast<uint32_t>(DDB_ABI_MINOR);
 }
@@ -157,40 +209,27 @@ const char* DDBGetCapabilities() {
     }
 }
 
+// ------------------------------------------------------------------ files and index
+
 DDBErr DDBNormalizePath(const char* path, const char* reservedJson, char** output) {
-    DDB_C_BEGIN
-    if (path == nullptr)
-        throw InvalidArgsException("No path provided");
+    return guardedOutput<kAbi11Codes>(output, [&] {
+        if (path == nullptr)
+            throw InvalidArgsException("No path provided");
+        requireOutput(output);
 
-    if (output == nullptr)
-        throw InvalidArgsException("Output pointer is null");
-
-    const auto rules = ReservedRules::fromJson(reservedJson);
-    utils::copyToPtr(normalizeEntryPath(path, rules).toJson().dump(), output);
-    DDB_C_END
+        const auto rules = ReservedRules::fromJson(reservedJson);
+        return normalizeEntryPath(path, rules).toJson();
+    });
 }
 
 DDBErr DDBInit(const char* directory, char** outPath) {
-    DDB_C_BEGIN
-    if (directory == nullptr)
-        throw InvalidArgsException("No directory provided");
+    return guardedOutput(outPath, [&] {
+        if (directory == nullptr)
+            throw InvalidArgsException("No directory provided");
+        requireOutput(outPath, "No output provided");
 
-    if (outPath == nullptr)
-        throw InvalidArgsException("No output provided");
-
-    const std::string ddbDirPath = initIndex(directory);
-    utils::copyToPtr(ddbDirPath, outPath);
-
-    DDB_C_END
-}
-
-const char* DDBGetLastError() {
-    return ddbLastError;
-}
-
-void DDBSetLastError(const char* err) {
-    strncpy(ddbLastError, err, 255);
-    ddbLastError[254] = '\0';
+        return initIndex(directory);
+    });
 }
 
 DDBErr DDBAdd(const char* ddbPath,
@@ -198,37 +237,23 @@ DDBErr DDBAdd(const char* ddbPath,
               int numPaths,
               char** output,
               bool recursive) {
-    DDB_C_BEGIN
+    return guardedOutput(output, [&] {
+        requireDdbPath(ddbPath);
+        const auto pathList = requirePathList(paths, numPaths);
+        requireOutput(output);
 
-    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
-        throw InvalidArgsException("No directory provided");
-
-    if (!utils::isValidArrayParam(paths, numPaths))
-        throw InvalidArgsException("Invalid paths array parameter");
-
-    if (utils::isNullOrEmptyOrWhitespace(paths, numPaths))
-        throw InvalidArgsException("No paths provided");
-
-    if (utils::hasNullStringInArray(paths, numPaths))
-        throw InvalidArgsException("Path array contains null elements");
-
-    if (output == nullptr)
-        throw InvalidArgsException("Output pointer is null");
-
-    const auto db = ddb::open(std::string(ddbPath), true);
-    const std::vector<std::string> pathList(paths, paths + numPaths);
-    auto outJson = json::array();
-    addToIndex(db.get(),
-               ddb::expandPathList(pathList, recursive, 0),
-               [&outJson](const Entry& e, bool) {
-                   json j;
-                   e.toJSON(j);
-                   outJson.push_back(j);
-                   return true;
-               });
-
-    utils::copyToPtr(outJson.dump(), output);
-    DDB_C_END
+        const auto db = ddb::open(std::string(ddbPath), true);
+        auto outJson = json::array();
+        addToIndex(db.get(),
+                   ddb::expandPathList(pathList, recursive, 0),
+                   [&outJson](const Entry& e, bool) {
+                       json j;
+                       e.toJSON(j);
+                       outJson.push_back(j);
+                       return true;
+                   });
+        return outJson;
+    });
 }
 
 // Records a path that cannot be expanded as an item error, relative to the dataset like the
@@ -250,18 +275,13 @@ static AddOptions toAddOptions(const DDBAddOptions *options) {
 }
 
 static void validateAddArgs(const char *ddbPath, const DDBAddOptions *options, char **output) {
-    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
-        throw InvalidArgsException("No directory provided");
-
-    if (options == nullptr)
-        throw InvalidArgsException("Options pointer is null");
-
-    if (output == nullptr)
-        throw InvalidArgsException("Output pointer is null");
+    requireDdbPath(ddbPath);
+    requireOutput(options, "Options pointer is null");
+    requireOutput(output);
 }
 
 // { "entries": [...], "unchanged": [...], "errors": [...] }
-static std::string addResultJson(const AddResult &result) {
+static json addResultJson(const AddResult &result) {
     auto outJson = json::object();
     outJson["entries"] = json::array();
     for (auto& [entry, isUpdate] : result.entries) {
@@ -279,7 +299,7 @@ static std::string addResultJson(const AddResult &result) {
     for (auto& err : result.errors)
         outJson["errors"].push_back(json{{"path", err.path}, {"code", err.code}, {"message", err.message}});
 
-    return outJson.dump();
+    return outJson;
 }
 
 DDBErr DDBAddWithOptions(const char* ddbPath,
@@ -287,104 +307,79 @@ DDBErr DDBAddWithOptions(const char* ddbPath,
                          int numPaths,
                          const DDBAddOptions* options,
                          char** output) {
-    DDB_C_BEGIN
+    return guardedOutput(output, [&] {
+        const auto pathList = requirePathList(paths, numPaths);
+        validateAddArgs(ddbPath, options, output);
 
-    if (!utils::isValidArrayParam(paths, numPaths))
-        throw InvalidArgsException("Invalid paths array parameter");
+        const auto db = ddb::open(std::string(ddbPath), true);
+        const auto addOpts = toAddOptions(options);
 
-    if (utils::isNullOrEmptyOrWhitespace(paths, numPaths))
-        throw InvalidArgsException("No paths provided");
-
-    if (utils::hasNullStringInArray(paths, numPaths))
-        throw InvalidArgsException("Path array contains null elements");
-
-    validateAddArgs(ddbPath, options, output);
-
-    const auto db = ddb::open(std::string(ddbPath), true);
-    const std::vector<std::string> pathList(paths, paths + numPaths);
-    const auto addOpts = toAddOptions(options);
-
-    AddResult result;
-    std::vector<std::string> expandedPaths;
-    // Expand paths per-item when stopOnError is false: expandPathList throws for a missing
-    // path, which would abort the entire batch and bypass per-item error capture.
-    if (addOpts.stopOnError) {
-        expandedPaths = ddb::expandPathList(pathList, options->recursive, 0);
-    } else {
-        for (const auto &p : pathList) {
-            try {
-                auto partial = ddb::expandPathList({p}, options->recursive, 0);
-                expandedPaths.insert(expandedPaths.end(), partial.begin(), partial.end());
-            } catch (const std::exception &ex) {
-                addPathError(db.get(), p, ex, result);
+        AddResult result;
+        std::vector<std::string> expandedPaths;
+        // Expand paths per-item when stopOnError is false: expandPathList throws for a missing
+        // path, which would abort the entire batch and bypass per-item error capture.
+        if (addOpts.stopOnError) {
+            expandedPaths = ddb::expandPathList(pathList, options->recursive, 0);
+        } else {
+            for (const auto &p : pathList) {
+                try {
+                    auto partial = ddb::expandPathList({p}, options->recursive, 0);
+                    expandedPaths.insert(expandedPaths.end(), partial.begin(), partial.end());
+                } catch (const std::exception &ex) {
+                    addPathError(db.get(), p, ex, result);
+                }
             }
         }
-    }
 
-    addToIndexEx(db.get(), expandedPaths, addOpts, result);
-
-    utils::copyToPtr(addResultJson(result), output);
-    DDB_C_END
+        addToIndexEx(db.get(), expandedPaths, addOpts, result);
+        return addResultJson(result);
+    });
 }
 
 DDBErr DDBAddWithHints(const char *ddbPath, const DDBAddHint *files, int numFiles,
                        const DDBAddOptions *options, char **output) {
-    DDB_C_BEGIN
+    return guardedOutput(output, [&] {
+        if (files == nullptr || numFiles <= 0)
+            throw InvalidArgsException("No files provided");
 
-    if (files == nullptr || numFiles <= 0)
-        throw InvalidArgsException("No files provided");
+        validateAddArgs(ddbPath, options, output);
 
-    validateAddArgs(ddbPath, options, output);
+        const auto db = ddb::open(std::string(ddbPath), true);
+        const auto addOpts = toAddOptions(options);
 
-    const auto db = ddb::open(std::string(ddbPath), true);
-    const auto addOpts = toAddOptions(options);
+        AddResult result;
+        std::vector<KnownFile> known;
+        known.reserve(static_cast<size_t>(numFiles));
+        for (int i = 0; i < numFiles; i++) {
+            const auto &f = files[i];
+            if (utils::isNullOrEmptyOrWhitespace(f.path))
+                throw InvalidArgsException("File " + std::to_string(i) + " has no path");
 
-    AddResult result;
-    std::vector<KnownFile> known;
-    known.reserve(numFiles);
-    for (int i = 0; i < numFiles; i++) {
-        const auto &f = files[i];
-        if (utils::isNullOrEmptyOrWhitespace(f.path))
-            throw InvalidArgsException("File " + std::to_string(i) + " has no path");
+            const std::string p(f.path);
+            if (!fs::exists(pathArg(f.path))) {
+                // A missing file would abort the whole batch in addToIndexEx
+                const FSException ex(p + " does not exist");
+                if (addOpts.stopOnError) throw ex;
+                addPathError(db.get(), p, ex, result);
+                continue;
+            }
 
-        const std::string p(f.path);
-        if (!fs::exists(p)) {
-            // A missing file would abort the whole batch in addToIndexEx
-            const FSException ex(p + " does not exist");
-            if (addOpts.stopOnError) throw ex;
-            addPathError(db.get(), p, ex, result);
-            continue;
+            known.push_back({p, optStr(f.sha256), f.size, f.mtime});
         }
 
-        known.push_back({p, f.sha256 == nullptr ? std::string() : std::string(f.sha256), f.size, f.mtime});
-    }
-
-    addToIndexEx(db.get(), known, addOpts, result);
-
-    utils::copyToPtr(addResultJson(result), output);
-    DDB_C_END
+        addToIndexEx(db.get(), known, addOpts, result);
+        return addResultJson(result);
+    });
 }
 
 DDBErr DDBRemove(const char* ddbPath, const char** paths, int numPaths) {
-    DDB_C_BEGIN
+    return guarded([&] {
+        requireDdbPath(ddbPath);
+        const auto pathList = requirePathList(paths, numPaths);
 
-    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
-        throw InvalidArgsException("No directory provided");
-
-    if (!utils::isValidArrayParam(paths, numPaths))
-        throw InvalidArgsException("Invalid paths array parameter");
-
-    if (utils::isNullOrEmptyOrWhitespace(paths, numPaths))
-        throw InvalidArgsException("No paths provided");
-
-    if (utils::hasNullStringInArray(paths, numPaths))
-        throw InvalidArgsException("Path array contains null elements");
-
-    const auto db = ddb::open(std::string(ddbPath), true);
-    const std::vector<std::string> pathList(paths, paths + numPaths);
-
-    removeFromIndex(db.get(), pathList);
-    DDB_C_END
+        const auto db = ddb::open(std::string(ddbPath), true);
+        removeFromIndex(db.get(), pathList);
+    });
 }
 
 DDBErr DDBInfo(const char** paths,
@@ -396,82 +391,56 @@ DDBErr DDBInfo(const char** paths,
                const char* geometry,
                bool withHash,
                bool stopOnError) {
-    DDB_C_BEGIN
+    return guardedOutput(output, [&] {
+        if (!utils::isValidNonEmptyStringParam(format))
+            throw InvalidArgsException("No format provided");
 
-    if (!utils::isValidNonEmptyStringParam(format))
-        throw InvalidArgsException("No format provided");
+        if (!utils::isValidNonEmptyStringParam(geometry))
+            throw InvalidArgsException("No geometry provided");
 
-    if (!utils::isValidNonEmptyStringParam(geometry))
-        throw InvalidArgsException("No geometry provided");
+        const auto input = requirePathList(paths, numPaths);
+        requireOutput(output);
 
-    if (!utils::isValidArrayParam(paths, numPaths))
-        throw InvalidArgsException("Invalid paths array parameter");
+        if (maxRecursionDepth < 0)
+            throw InvalidArgsException("Invalid max recursion depth");
 
-    if (utils::isNullOrEmptyOrWhitespace(paths, numPaths))
-        throw InvalidArgsException("No paths provided");
-
-    if (utils::hasNullStringInArray(paths, numPaths))
-        throw InvalidArgsException("Path array contains null elements");
-
-    if (output == nullptr)
-        throw InvalidArgsException("Output pointer is null");
-
-    if (maxRecursionDepth < 0)
-        throw InvalidArgsException("Invalid max recursion depth");
-
-    const std::vector<std::string> input(paths, paths + numPaths);
-    std::ostringstream ss;
-    info(input, ss, format, recursive, maxRecursionDepth, geometry, withHash, stopOnError);
-    utils::copyToPtr(ss.str(), output);
-    DDB_C_END
+        std::ostringstream ss;
+        info(input, ss, format, recursive, maxRecursionDepth, geometry, withHash, stopOnError);
+        return ss.str();
+    });
 }
 
 DDBErr DDBReleaseConnections(const char* path, int* closed) {
-    DDB_C_BEGIN
+    return guardedOutput(closed, [&] {
+        requireText(path, "No path provided");
 
-    if (utils::isNullOrEmptyOrWhitespace(path))
-        throw InvalidArgsException("No path provided");
-
-    const auto count = ddb::DatabasePool::instance().releaseConnections(fs::path(path)) +
-                       ddb::releaseCachedFiles(fs::path(path));
-    if (closed != nullptr)
-        *closed = static_cast<int>(count);
-
-    DDB_C_END
+        const auto folder = pathArg(path);
+        const auto count = ddb::DatabasePool::instance().releaseConnections(folder) +
+                           ddb::releaseCachedFiles(folder);
+        return static_cast<int>(count);
+    });
 }
 
 DDBErr DDBCheckpoint(const char* ddbPath, int* complete) {
-    DDB_C_BEGIN
+    return guardedOutput(complete, [&] {
+        requireDdbPath(ddbPath);
 
-    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
-        throw InvalidArgsException("No directory provided");
-
-    const bool done = ddb::checkpointIndex(std::string(ddbPath));
-    if (complete != nullptr)
-        *complete = done ? 1 : 0;
-
-    DDB_C_END
+        return ddb::checkpointIndex(std::string(ddbPath)) ? 1 : 0;
+    });
 }
 
 DDBErr DDBGet(const char* ddbPath, const char* path, char** output) {
-    DDB_C_BEGIN
+    return guardedOutput<kFrozenCodes | codeBit(DDBERR_NOTFOUND)>(output, [&] {
+        requireDdbPath(ddbPath);
+        requireText(path, "No path provided");
 
-    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
-        throw InvalidArgsException("No directory provided");
+        const auto db = ddb::open(std::string(ddbPath), false);
 
-    if (utils::isNullOrEmptyOrWhitespace(path))
-        throw InvalidArgsException("No path provided");
-
-    const auto db = ddb::open(std::string(ddbPath), false);
-
-    ddb::Entry entry;
-    if (!ddb::getEntryWithMeta(db.get(), std::string(path), entry)) {
-        DDBSetLastError(("No entry " + std::string(path)).c_str());
-        return DDBERR_NOTFOUND;
-    }
-    utils::copyToPtr(entry.toJSONString(), output);
-
-    DDB_C_END
+        ddb::Entry entry;
+        if (!ddb::getEntryWithMeta(db.get(), std::string(path), entry))
+            throw EntryNotFoundException("No entry " + std::string(path));
+        return entry.toJSONString();
+    });
 }
 
 DDBErr DDBList(const char* ddbPath,
@@ -481,202 +450,151 @@ DDBErr DDBList(const char* ddbPath,
                const char* format,
                bool recursive,
                int maxRecursionDepth) {
-    DDB_C_BEGIN
+    return guardedOutput(output, [&] {
+        requireDdbPath(ddbPath);
 
-    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
-        throw InvalidArgsException("No directory provided");
+        if (!utils::isValidNonEmptyStringParam(format))
+            throw InvalidArgsException("No format provided");
 
-    if (!utils::isValidNonEmptyStringParam(format))
-        throw InvalidArgsException("No format provided");
+        const auto pathList = requirePathList(paths, numPaths);
+        requireOutput(output);
 
-    if (!utils::isValidArrayParam(paths, numPaths))
-        throw InvalidArgsException("Invalid paths array parameter");
+        if (maxRecursionDepth < 0)
+            throw InvalidArgsException("Invalid max recursion depth");
 
-    if (utils::isNullOrEmptyOrWhitespace(paths, numPaths))
-        throw InvalidArgsException("No paths provided");
+        const auto db = ddb::open(std::string(ddbPath), true);
 
-    if (utils::hasNullStringInArray(paths, numPaths))
-        throw InvalidArgsException("Path array contains null elements");
-
-    if (output == nullptr)
-        throw InvalidArgsException("Output pointer is null");
-
-    if (maxRecursionDepth < 0)
-        throw InvalidArgsException("Invalid max recursion depth");
-
-    const auto db = ddb::open(std::string(ddbPath), true);
-    const std::vector<std::string> pathList(paths, paths + numPaths);
-
-    std::ostringstream ss;
-    listIndex(db.get(), pathList, ss, format, recursive, maxRecursionDepth);
-
-    utils::copyToPtr(ss.str(), output);
-
-    DDB_C_END
+        std::ostringstream ss;
+        listIndex(db.get(), pathList, ss, format, recursive, maxRecursionDepth);
+        return ss.str();
+    });
 }
 
 DDBErr DDBListEntries(const char* ddbPath, const char* folder, bool recursive, const char* namePattern,
                       const char* types, bool withDetails, char** output) {
-    DDB_C_BEGIN
+    return guardedOutput(output, [&] {
+        requireDdbPath(ddbPath);
+        requireOutput(output);
 
-    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
-        throw InvalidArgsException("No directory provided");
+        EntryQuery query;
+        query.folder = optStr(folder);
+        query.recursive = recursive;
+        query.namePattern = optStr(namePattern);
+        query.types = utils::parseEntryTypeList(types, /*allowDirectory=*/true);
+        query.withDetails = withDetails;
 
-    if (output == nullptr)
-        throw InvalidArgsException("Output pointer is null");
+        const auto db = ddb::open(std::string(ddbPath), false);
 
-    EntryQuery query;
-    query.folder = folder != nullptr ? folder : "";
-    query.recursive = recursive;
-    query.namePattern = namePattern != nullptr ? namePattern : "";
-    query.types = utils::parseEntryTypeList(types, /*allowDirectory=*/true);
-    query.withDetails = withDetails;
-
-    const auto db = ddb::open(std::string(ddbPath), false);
-
-    std::ostringstream ss;
-    writeEntries(ss, listEntries(db.get(), query), "json");
-    utils::copyToPtr(ss.str(), output);
-
-    DDB_C_END
+        std::ostringstream ss;
+        writeEntries(ss, listEntries(db.get(), query), "json");
+        return ss.str();
+    });
 }
 
 DDBErr DDBSearch(const char* ddbPath, const char* query, char** output, const char* format) {
-    DDB_C_BEGIN
+    return guardedOutput(output, [&] {
+        requireDdbPath(ddbPath);
 
-    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
-        throw InvalidArgsException("No directory provided");
+        if (!utils::isValidStringParam(query))
+            throw InvalidArgsException("No query provided");
 
-    if (!utils::isValidStringParam(query))
-        throw InvalidArgsException("No query provided");
+        if (!utils::isValidNonEmptyStringParam(format))
+            throw InvalidArgsException("No format provided");
 
-    if (!utils::isValidNonEmptyStringParam(format))
-        throw InvalidArgsException("No format provided");
+        requireOutput(output);
 
-    if (output == nullptr)
-        throw InvalidArgsException("Output pointer is null");
+        const auto db = ddb::open(std::string(ddbPath), false);
 
-    const auto db = ddb::open(std::string(ddbPath), false);
-
-    std::ostringstream ss;
-    searchIndex(db.get(), query, ss, format);
-
-    utils::copyToPtr(ss.str(), output);
-
-    DDB_C_END
+        std::ostringstream ss;
+        searchIndex(db.get(), query, ss, format);
+        return ss.str();
+    });
 }
 
 DDBErr DDBAppendPassword(const char* ddbPath, const char* password) {
-    DDB_C_BEGIN
+    return guarded([&] {
+        requireDdbPath(ddbPath);
 
-    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
-        throw InvalidArgsException("No directory provided");
+        if (!utils::isValidNonEmptyStringParam(password))
+            throw InvalidArgsException("No password provided");
 
-    if (!utils::isValidNonEmptyStringParam(password))
-        throw InvalidArgsException("No password provided");
-
-    const auto db = ddb::open(std::string(ddbPath), true);
-
-    PasswordManager manager(db.get());
-
-    manager.append(std::string(password));
-
-    DDB_C_END
+        const auto db = ddb::open(std::string(ddbPath), true);
+        PasswordManager manager(db.get());
+        manager.append(std::string(password));
+    });
 }
 
 DDBErr DDBVerifyPassword(const char* ddbPath, const char* password, bool* verified) {
-    DDB_C_BEGIN
+    return guardedOutput(verified, [&] {
+        requireDdbPath(ddbPath);
 
-    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
-        throw InvalidArgsException("No directory provided");
+        // We allow empty password verification
+        if (password == nullptr)
+            throw InvalidArgsException("No password provided");
 
-    // We allow empty password verification
-    if (password == nullptr)
-        throw InvalidArgsException("No password provided");
+        requireOutput(verified, "Output parameter pointer is null");
 
-    if (verified == nullptr)
-        throw InvalidArgsException("Output parameter pointer is null");
-
-    const auto db = ddb::open(std::string(ddbPath), true);
-
-    PasswordManager manager(db.get());
-
-    *verified = manager.verify(std::string(password));
-
-    DDB_C_END
+        const auto db = ddb::open(std::string(ddbPath), true);
+        PasswordManager manager(db.get());
+        return manager.verify(std::string(password));
+    });
 }
 
 DDBErr DDBClearPasswords(const char* ddbPath) {
-    DDB_C_BEGIN
+    return guarded([&] {
+        requireDdbPath(ddbPath);
 
-    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
-        throw InvalidArgsException("No directory provided");
-
-    const auto db = ddb::open(std::string(ddbPath), true);
-
-    PasswordManager manager(db.get());
-
-    manager.clearAll();
-
-    DDB_C_END
+        const auto db = ddb::open(std::string(ddbPath), true);
+        PasswordManager manager(db.get());
+        manager.clearAll();
+    });
 }
 
-DDB_DLL DDBErr DDBStatus(const char* ddbPath, char** output) {
-    DDB_C_BEGIN
+DDBErr DDBStatus(const char* ddbPath, char** output) {
+    return guardedOutput(output, [&] {
+        requireDdbPath(ddbPath);
+        requireOutput(output, "No output provided");
 
-    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
-        throw InvalidArgsException("No directory provided");
+        const auto db = ddb::open(std::string(ddbPath), true);
 
-    if (output == nullptr)
-        throw InvalidArgsException("No output provided");
+        std::ostringstream ss;
 
-    const auto db = ddb::open(std::string(ddbPath), true);
+        const auto cb = [&ss](ddb::FileStatus status, const std::string&) {
+            switch (status) {
+                case NotIndexed:
+                    ss << "?\t";
+                    break;
+                case Deleted:
+                    ss << "!\t";
+                    break;
+                case Modified:
+                    ss << "M\t";
+                    break;
+                case NotModified:
+                    break;
+            }
+        };
 
-    std::ostringstream ss;
-
-    const auto cb = [&ss](ddb::FileStatus status, const std::string&) {
-        switch (status) {
-            case NotIndexed:
-                ss << "?\t";
-                break;
-            case Deleted:
-                ss << "!\t";
-                break;
-            case Modified:
-                ss << "M\t";
-                break;
-            case NotModified:
-                break;
-        }
-    };
-
-    statusIndex(db.get(), cb);
-
-    utils::copyToPtr(ss.str(), output);
-
-    DDB_C_END
+        statusIndex(db.get(), cb);
+        return ss.str();
+    });
 }
 
-// @deprecated
 // @deprecated
 DDBErr DDBChattr(const char* ddbPath, const char* attrsJson, char** output) {
-    DDB_C_BEGIN
+    return guardedOutput(output, [&] {
+        requireDdbPath(ddbPath);
 
-    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
-        throw InvalidArgsException("No directory provided");
+        if (!utils::isValidStringParam(attrsJson))
+            throw InvalidArgsException("No attributes JSON provided");
 
-    if (!utils::isValidStringParam(attrsJson))
-        throw InvalidArgsException("No attributes JSON provided");
+        requireOutput(output);
 
-    if (output == nullptr)
-        throw InvalidArgsException("Output pointer is null");
+        LOGD << "Deprecated DDBChattr call: please use DDBMetaSet instead as DDBChattr will be removed "
+                "in the near future.";
 
-    LOGD << "Deprecated DDBChattr call: please use DDBMetaSet instead as DDBChattr will be removed "
-            "in the near future.";
-
-    const auto db = ddb::open(std::string(ddbPath), true);
-    try {
-        const json j = json::parse(attrsJson);
+        const auto db = ddb::open(std::string(ddbPath), true);
+        const json j = parseJsonArg(attrsJson);
         for (auto& el : j.items()) {
             if (el.key() == "public" && el.value().is_boolean()) {
                 db->getMetaManager()->set("visibility", el.value() ? "1" : "0");
@@ -684,104 +602,77 @@ DDBErr DDBChattr(const char* ddbPath, const char* attrsJson, char** output) {
                 throw InvalidArgsException("Invalid attribute " + el.key());
             }
         }
-        utils::copyToPtr(db->getProperties().dump(), output);
-    } catch (const json::parse_error& e) {
-        throw InvalidArgsException(e.what());
-    }
-    DDB_C_END
+        return db->getProperties();
+    });
 }
+
+// ------------------------------------------------------------------ thumbnails and tiles
 
 DDBErr DDBGenerateThumbnail(const char* filePath, int size, const char* destPath) {
-    DDB_C_BEGIN
+    return guarded([&] {
+        requireText(filePath, "No file path provided");
+        requireText(destPath, "No destination path provided");
 
-    if (utils::isNullOrEmptyOrWhitespace(filePath))
-        throw InvalidArgsException("No file path provided");
+        if (size < 0)
+            throw InvalidArgsException("Invalid size parameter");
 
-    if (utils::isNullOrEmptyOrWhitespace(destPath))
-        throw InvalidArgsException("No destination path provided");
-
-    if (size < 0)
-        throw InvalidArgsException("Invalid size parameter");
-
-    const auto imagePath = fs::path(filePath);
-    const auto thumbPath = fs::path(destPath);
-
-    generateThumb(imagePath, size, thumbPath, true, nullptr, nullptr);
-
-    DDB_C_END
+        generateThumb(pathArg(filePath), size, pathArg(destPath), true, nullptr, nullptr);
+    });
 }
 
-DDB_DLL DDBErr DDBGenerateMemoryThumbnail(const char* filePath,
-                                          int size,
-                                          uint8_t** outBuffer,
-                                          int* outBufferSize) {
-    DDB_C_BEGIN
-
-    if (utils::isNullOrEmptyOrWhitespace(filePath))
-        throw InvalidArgsException("No file path provided");
-
-    if (size < 0)
-        throw InvalidArgsException("Invalid size parameter");
-
-    if (outBuffer == nullptr)
-        throw InvalidArgsException("Output buffer pointer is null");
-
-    if (outBufferSize == nullptr)
-        throw InvalidArgsException("Output buffer size pointer is null");
-
-    const auto imagePath = fs::path(filePath);
-
-    generateThumb(imagePath, size, "", true, outBuffer, outBufferSize);
-
-    DDB_C_END
+// The checks of an export with a buffer output
+static void requireBufferOutput(uint8_t** outBuffer, int* outBufferSize) {
+    requireOutput(outBuffer, "Output buffer pointer is null");
+    requireOutput(outBufferSize, "Output buffer size pointer is null");
 }
 
-DDBErr DDBVSIFree(uint8_t* buffer) {
-    DDB_C_BEGIN
-    // nullptr is allowed - matches C free() semantics (no-op)
-    if (buffer != nullptr)
-        VSIFree(buffer);
-    DDB_C_END
-}
-
-DDBErr DDBFree(char* ptr) {
-    DDB_C_BEGIN
-    // ptr == nullptr is allowed (no-op, matches standard free behaviour)
-    free(ptr);
-    DDB_C_END
-}
-
-DDB_DLL DDBErr DDBTile(const char* inputPath,
-                       int tz,
-                       int tx,
-                       int ty,
-                       char** outputTilePath,
-                       int tileSize,
-                       bool tms,
-                       bool forceRecreate) {
-    DDB_C_BEGIN
-
-    if (utils::isNullOrEmptyOrWhitespace(inputPath))
-        throw InvalidArgsException("No input path provided");
-
-    if (outputTilePath == nullptr)
-        throw InvalidArgsException("Output tile path pointer is null");
-
+// The checks of the tile exports
+static void requireTileArgs(int tz, int tx, int ty, int tileSize) {
     if (tileSize < 0)
         throw InvalidArgsException("Invalid tile size parameter");
 
     if (tz < 0 || tx < 0 || ty < 0)
         throw InvalidArgsException("Invalid tile coordinates");
+}
 
-    const auto tilePath = ddb::TilerHelper::getFromUserCache(std::string(inputPath),
-                                                             tz,
-                                                             tx,
-                                                             ty,
-                                                             tileSize,
-                                                             tms,
-                                                             forceRecreate);
-    utils::copyToPtr(tilePath.string(), outputTilePath);
-    DDB_C_END
+DDBErr DDBGenerateMemoryThumbnail(const char* filePath,
+                                  int size,
+                                  uint8_t** outBuffer,
+                                  int* outBufferSize) {
+    return guardedBuffer(outBuffer, outBufferSize, [&](uint8_t** buffer, int* bufferSize) {
+        requireText(filePath, "No file path provided");
+
+        if (size < 0)
+            throw InvalidArgsException("Invalid size parameter");
+
+        requireBufferOutput(outBuffer, outBufferSize);
+
+        generateThumb(pathArg(filePath), size, "", true, buffer, bufferSize);
+    });
+}
+
+DDBErr DDBTile(const char* inputPath,
+               int tz,
+               int tx,
+               int ty,
+               char** outputTilePath,
+               int tileSize,
+               bool tms,
+               bool forceRecreate) {
+    return guardedOutput(outputTilePath, [&] {
+        requireText(inputPath, "No input path provided");
+        requireOutput(outputTilePath, "Output tile path pointer is null");
+        requireTileArgs(tz, tx, ty, tileSize);
+
+        const auto tilePath = ddb::TilerHelper::getFromUserCache(pathArg(inputPath),
+                                                                 tz,
+                                                                 tx,
+                                                                 ty,
+                                                                 tileSize,
+                                                                 tms,
+                                                                 forceRecreate);
+        return io::toUtf8(tilePath);
+    });
 }
 
 DDBErr DDBMemoryTile(const char* inputPath,
@@ -794,38 +685,24 @@ DDBErr DDBMemoryTile(const char* inputPath,
                      bool tms,
                      bool forceRecreate,
                      const char* inputPathHash) {
-    DDB_C_BEGIN
+    return guardedBuffer(outBuffer, outBufferSize, [&](uint8_t** buffer, int* bufferSize) {
+        requireText(inputPath, "No input path provided");
+        requireBufferOutput(outBuffer, outBufferSize);
+        requireTileArgs(tz, tx, ty, tileSize);
 
-    if (utils::isNullOrEmptyOrWhitespace(inputPath))
-        throw InvalidArgsException("No input path provided");
-
-    if (outBuffer == nullptr)
-        throw InvalidArgsException("Output buffer pointer is null");
-
-    if (outBufferSize == nullptr)
-        throw InvalidArgsException("Output buffer size pointer is null");
-
-    if (tileSize < 0)
-        throw InvalidArgsException("Invalid tile size parameter");
-
-    if (tz < 0 || tx < 0 || ty < 0)
-        throw InvalidArgsException("Invalid tile coordinates");
-
-    // inputPathHash can be null or empty, it's optional
-    const std::string hashStr = inputPathHash ? std::string(inputPathHash) : "";
-
-    ddb::TilerHelper::getTile(std::string(inputPath),
-                              tz,
-                              tx,
-                              ty,
-                              tileSize,
-                              tms,
-                              forceRecreate,
-                              "",
-                              outBuffer,
-                              outBufferSize,
-                              hashStr);
-    DDB_C_END
+        // inputPathHash can be null or empty, it's optional
+        ddb::TilerHelper::getTile(pathArg(inputPath),
+                                  tz,
+                                  tx,
+                                  ty,
+                                  tileSize,
+                                  tms,
+                                  forceRecreate,
+                                  "",
+                                  buffer,
+                                  bufferSize,
+                                  optStr(inputPathHash));
+    });
 }
 
 DDBErr DDBMemoryTileFmt(const char* inputPath,
@@ -839,306 +716,226 @@ DDBErr DDBMemoryTileFmt(const char* inputPath,
                         bool forceRecreate,
                         const char* inputPathHash,
                         const char* outputFormat) {
-    DDB_C_BEGIN
+    return guardedBuffer(outBuffer, outBufferSize, [&](uint8_t** buffer, int* bufferSize) {
+        requireText(inputPath, "No input path provided");
+        requireBufferOutput(outBuffer, outBufferSize);
+        requireTileArgs(tz, tx, ty, tileSize);
 
-    if (utils::isNullOrEmptyOrWhitespace(inputPath))
-        throw InvalidArgsException("No input path provided");
-    if (outBuffer == nullptr)
-        throw InvalidArgsException("Output buffer pointer is null");
-    if (outBufferSize == nullptr)
-        throw InvalidArgsException("Output buffer size pointer is null");
-    if (tileSize < 0)
-        throw InvalidArgsException("Invalid tile size parameter");
-    if (tz < 0 || tx < 0 || ty < 0)
-        throw InvalidArgsException("Invalid tile coordinates");
+        const std::string fmtStr =
+            (outputFormat && *outputFormat) ? std::string(outputFormat) : std::string("png");
 
-    const std::string hashStr = inputPathHash ? std::string(inputPathHash) : "";
-    const std::string fmtStr = (outputFormat && *outputFormat) ? std::string(outputFormat) : std::string("png");
-
-    ddb::TilerHelper::getTile(std::string(inputPath),
-                              tz,
-                              tx,
-                              ty,
-                              tileSize,
-                              tms,
-                              forceRecreate,
-                              "",
-                              fmtStr,
-                              outBuffer,
-                              outBufferSize,
-                              hashStr);
-    DDB_C_END
+        ddb::TilerHelper::getTile(pathArg(inputPath),
+                                  tz,
+                                  tx,
+                                  ty,
+                                  tileSize,
+                                  tms,
+                                  forceRecreate,
+                                  "",
+                                  fmtStr,
+                                  buffer,
+                                  bufferSize,
+                                  optStr(inputPathHash));
+    });
 }
+
+// ------------------------------------------------------------------ delta and sync
 
 DDBErr DDBDelta(const char* ddbSourceStamp,
                 const char* ddbTargetStamp,
                 char** output,
                 const char* format) {
-    DDB_C_BEGIN
+    return guardedOutput(output, [&] {
+        if (ddbSourceStamp == nullptr)
+            throw InvalidArgsException("No ddb source path provided");
 
-    if (ddbSourceStamp == nullptr)
-        throw InvalidArgsException("No ddb source path provided");
+        if (ddbTargetStamp == nullptr)
+            throw InvalidArgsException("No ddb path provided");
 
-    if (ddbTargetStamp == nullptr)
-        throw InvalidArgsException("No ddb path provided");
+        if (!utils::isValidNonEmptyStringParam(format))
+            throw InvalidArgsException("No format provided");
 
-    if (format == nullptr || strlen(format) == 0)
-        throw InvalidArgsException("No format provided");
+        requireOutput(output, "No output provided");
 
-    if (output == nullptr)
-        throw InvalidArgsException("No output provided");
+        const json source = parseJsonArg(ddbSourceStamp);
+        const json dest = parseJsonArg(ddbTargetStamp);
 
-    std::ostringstream ss;
-
-    try {
-        const json source = json::parse(ddbSourceStamp);
-        const json dest = json::parse(ddbTargetStamp);
-
+        std::ostringstream ss;
         delta(source, dest, ss, format);
-
-        utils::copyToPtr(ss.str(), output);
-    } catch (const json::parse_error& e) {
-        throw InvalidArgsException(e.what());
-    }
-
-    DDB_C_END
+        return ss.str();
+    });
 }
 
-DDB_DLL DDBErr DDBApplyDelta(const char* delta,
-                             const char* sourcePath,
-                             const char* ddbPath,
-                             int mergeStrategy,
-                             const char* sourceMetaDump,
-                             char** conflicts) {
-    DDB_C_BEGIN
+DDBErr DDBApplyDelta(const char* delta,
+                     const char* sourcePath,
+                     const char* ddbPath,
+                     int mergeStrategy,
+                     const char* sourceMetaDump,
+                     char** conflicts) {
+    return guardedOutput(conflicts, [&] {
+        requireText(delta, "No delta provided");
+        requireText(sourcePath, "No source path provided");
+        requireText(ddbPath, "No ddb path provided");
+        requireText(sourceMetaDump, "No source meta dump provided");
+        requireOutput(conflicts, "Conflicts output pointer is null");
 
-    if (utils::isNullOrEmptyOrWhitespace(delta))
-        throw InvalidArgsException("No delta provided");
+        if (mergeStrategy < 0)
+            throw InvalidArgsException("Invalid merge strategy");
 
-    if (utils::isNullOrEmptyOrWhitespace(sourcePath))
-        throw InvalidArgsException("No source path provided");
+        const Delta d = parseJsonArg(delta);
+        const json metaDump = parseJsonArg(sourceMetaDump);
 
-    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
-        throw InvalidArgsException("No ddb path provided");
+        // The added files must match the hashes of the delta (DDB_VERIFY_PUSH_HASHES=0 skips the
+        // check, for hosts that verify the uploaded bytes themselves)
+        const bool verifyHashes = [] {
+            const char* env = std::getenv("DDB_VERIFY_PUSH_HASHES");
+            return env == nullptr || (env[0] != '0' && env[0] != '\0');
+        }();
 
-    if (utils::isNullOrEmptyOrWhitespace(sourceMetaDump))
-        throw InvalidArgsException("No source meta dump provided");
+        const auto ddb = ddb::open(std::string(ddbPath), false);
+        std::stringstream ss;
+        const auto adc = applyDelta(d,
+                                    pathArg(sourcePath),
+                                    ddb.get(),
+                                    static_cast<MergeStrategy>(mergeStrategy),
+                                    metaDump,
+                                    ss,
+                                    verifyHashes);
 
-    if (conflicts == nullptr)
-        throw InvalidArgsException("Conflicts output pointer is null");
-
-    if (mergeStrategy < 0)
-        throw InvalidArgsException("Invalid merge strategy");
-
-    Delta d;
-    json metaDump;
-    try {
-        d = json::parse(delta);
-        metaDump = json::parse(sourceMetaDump);
-    } catch (const json::parse_error& e) {
-        throw InvalidArgsException(e.what());
-    }
-
-    // The added files must match the hashes of the delta (DDB_VERIFY_PUSH_HASHES=0 skips the
-    // check, for hosts that verify the uploaded bytes themselves)
-    const bool verifyHashes = [] {
-        const char* env = std::getenv("DDB_VERIFY_PUSH_HASHES");
-        return env == nullptr || (env[0] != '0' && env[0] != '\0');
-    }();
-
-    const auto ddb = ddb::open(std::string(ddbPath), false);
-    std::stringstream ss;
-    const auto adc = applyDelta(d,
-                                fs::path(std::string(sourcePath)),
-                                ddb.get(),
-                                static_cast<MergeStrategy>(mergeStrategy),
-                                metaDump,
-                                ss,
-                                verifyHashes);
-
-    json j = json::array();
-    for (auto& c : adc)
-        j.push_back(c.path);
-    utils::copyToPtr(j.dump(), conflicts);
-
-    DDB_C_END
+        json j = json::array();
+        for (auto& c : adc)
+            j.push_back(c.path);
+        return j;
+    });
 }
 
 DDBErr DDBComputeDeltaLocals(const char* delta,
                              const char* ddbPath,
                              const char* hlDestFolder,
                              char** output) {
-    DDB_C_BEGIN
+    return guardedOutput(output, [&] {
+        requireText(delta, "No delta provided");
+        requireDdbPath(ddbPath);
+        requireOutput(output);
 
-    if (utils::isNullOrEmptyOrWhitespace(delta))
-        throw InvalidArgsException("No delta provided");
+        // hlDestFolder can be empty string, but not null
+        if (hlDestFolder == nullptr)
+            throw InvalidArgsException("Destination folder parameter is null");
 
-    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
-        throw InvalidArgsException("No directory provided");
+        const Delta d = parseJsonArg(delta);
+        const auto ddb = ddb::open(std::string(ddbPath), false);
 
-    if (output == nullptr)
-        throw InvalidArgsException("Output pointer is null");
-
-    // hlDestFolder can be empty string, but not null
-    if (hlDestFolder == nullptr)
-        throw InvalidArgsException("Destination folder parameter is null");
-
-    Delta d;
-    try {
-        d = json::parse(delta);
-    } catch (const json::parse_error& e) {
-        throw InvalidArgsException(e.what());
-    }
-    const auto ddb = ddb::open(std::string(ddbPath), false);
-
-    auto cdl = computeDeltaLocals(d, ddb.get(), std::string(hlDestFolder));
-    json j = json::object();
-    for (auto& el : cdl)
-        j[el.first] = el.second;
-    utils::copyToPtr(j.dump(), output);
-
-    DDB_C_END
+        auto cdl = computeDeltaLocals(d, ddb.get(), std::string(hlDestFolder));
+        json j = json::object();
+        for (auto& el : cdl)
+            j[el.first] = el.second;
+        return j;
+    });
 }
 
-DDB_DLL DDBErr DDBSetTag(const char* ddbPath, const char* newTag) {
-    DDB_C_BEGIN
+DDBErr DDBSetTag(const char* ddbPath, const char* newTag) {
+    return guarded([&] {
+        requireText(ddbPath, "No ddb path provided");
 
-    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
-        throw InvalidArgsException("No ddb path provided");
+        if (!utils::isValidStringParam(newTag))
+            throw InvalidArgsException("No tag provided");
 
-    if (!utils::isValidStringParam(newTag))
-        throw InvalidArgsException("No tag provided");
-
-    const auto ddb = ddb::open(std::string(ddbPath), true);
-    TagManager manager(ddb.get());
-    manager.setTag(newTag);
-
-    DDB_C_END
+        const auto ddb = ddb::open(std::string(ddbPath), true);
+        TagManager manager(ddb.get());
+        manager.setTag(newTag);
+    });
 }
 
-DDB_DLL DDBErr DDBGetTag(const char* ddbPath, char** outTag) {
-    DDB_C_BEGIN
+DDBErr DDBGetTag(const char* ddbPath, char** outTag) {
+    return guardedOutput(outTag, [&] {
+        requireDdbPath(ddbPath);
+        requireOutput(outTag, "Output tag pointer is null");
 
-    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
-        throw InvalidArgsException("No directory provided");
-
-    if (outTag == nullptr)
-        throw InvalidArgsException("Output tag pointer is null");
-
-    const auto ddb = ddb::open(std::string(ddbPath), true);
-    TagManager manager(ddb.get());
-    const auto tag = manager.getTag();
-
-    utils::copyToPtr(tag, outTag);
-
-    DDB_C_END
+        const auto ddb = ddb::open(std::string(ddbPath), true);
+        TagManager manager(ddb.get());
+        return manager.getTag();
+    });
 }
 
-DDB_DLL DDBErr DDBGetStamp(const char* ddbPath, char** output) {
-    DDB_C_BEGIN
+DDBErr DDBGetStamp(const char* ddbPath, char** output) {
+    return guardedOutput(output, [&] {
+        requireDdbPath(ddbPath);
+        requireOutput(output, "No output provided");
 
-    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
-        throw InvalidArgsException("No directory provided");
-
-    if (output == nullptr)
-        throw InvalidArgsException("No output provided");
-
-    const auto ddb = ddb::open(std::string(ddbPath), true);
-    utils::copyToPtr(ddb->getStampJson(), output);
-
-    DDB_C_END
+        const auto ddb = ddb::open(std::string(ddbPath), true);
+        return ddb->getStampJson();
+    });
 }
 
-DDB_DLL DDBErr DDBGetStampChecksum(const char* ddbPath, char** output) {
-    DDB_C_BEGIN
+DDBErr DDBGetStampChecksum(const char* ddbPath, char** output) {
+    return guardedOutput(output, [&] {
+        requireDdbPath(ddbPath);
+        requireOutput(output, "No output provided");
 
-    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
-        throw InvalidArgsException("No directory provided");
-
-    if (output == nullptr)
-        throw InvalidArgsException("No output provided");
-
-    const auto ddb = ddb::open(std::string(ddbPath), true);
-    utils::copyToPtr(ddb->getStampChecksum(), output);
-
-    DDB_C_END
+        const auto ddb = ddb::open(std::string(ddbPath), true);
+        return ddb->getStampChecksum();
+    });
 }
 
-DDB_DLL DDBErr DDBRescan(const char* ddbPath, char** output, const char* types, bool stopOnError) {
+DDBErr DDBRescan(const char* ddbPath, char** output, const char* types, bool stopOnError) {
     return DDBRescanEx(ddbPath, output, types, "", stopOnError);
 }
 
-DDB_DLL DDBErr DDBRescanEx(const char* ddbPath, char** output, const char* types, const char* extensions,
-                           bool stopOnError) {
-    DDB_C_BEGIN
+DDBErr DDBRescanEx(const char* ddbPath, char** output, const char* types, const char* extensions,
+                   bool stopOnError) {
+    return guardedOutput(output, [&] {
+        requireDdbPath(ddbPath);
+        requireOutput(output);
 
-    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
-        throw InvalidArgsException("No directory provided");
+        // Parse filter strings into vectors
+        const std::vector<EntryType> typeFilter = utils::parseEntryTypeList(types);
+        const std::vector<std::string> extensionFilter = utils::parseExtensionList(extensions);
 
-    if (output == nullptr)
-        throw InvalidArgsException("Output pointer is null");
+        const auto db = ddb::open(std::string(ddbPath), true);
+        auto outJson = json::array();
 
-    // Parse filter strings into vectors
-    const std::vector<EntryType> typeFilter = utils::parseEntryTypeList(types);
-    const std::vector<std::string> extensionFilter = utils::parseExtensionList(extensions);
-
-    const auto db = ddb::open(std::string(ddbPath), true);
-    auto outJson = json::array();
-
-    rescanIndex(db.get(), typeFilter, extensionFilter, stopOnError,
-                [&outJson](const Entry& e, bool success, const std::string& error) {
-                    json j;
-                    j["path"] = e.path;
-                    j["success"] = success;
-                    if (!success)
-                        j["error"] = error;
-                    if (success)
-                        e.toJSON(j);
-                    outJson.push_back(j);
-                    return true; // continue processing
-                });
-
-    utils::copyToPtr(outJson.dump(), output);
-
-    DDB_C_END
+        rescanIndex(db.get(), typeFilter, extensionFilter, stopOnError,
+                    [&outJson](const Entry& e, bool success, const std::string& error) {
+                        json j;
+                        j["path"] = e.path;
+                        j["success"] = success;
+                        if (!success)
+                            j["error"] = error;
+                        if (success)
+                            e.toJSON(j);
+                        outJson.push_back(j);
+                        return true; // continue processing
+                    });
+        return outJson;
+    });
 }
 
-DDB_DLL DDBErr DDBMoveEntry(const char* ddbPath, const char* source, const char* dest) {
-    DDB_C_BEGIN
+DDBErr DDBMoveEntry(const char* ddbPath, const char* source, const char* dest) {
+    return guarded([&] {
+        requireDdbPath(ddbPath);
+        requireText(source, "No source path provided");
+        requireText(dest, "No dest path provided");
 
-    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
-        throw InvalidArgsException("No directory provided");
-
-    if (utils::isNullOrEmptyOrWhitespace(source))
-        throw InvalidArgsException("No source path provided");
-    if (utils::isNullOrEmptyOrWhitespace(dest))
-        throw InvalidArgsException("No dest path provided");
-
-    const auto ddb = ddb::open(std::string(ddbPath), true);
-
-    moveEntry(ddb.get(), std::string(source), std::string(dest));
-
-    DDB_C_END
+        const auto ddb = ddb::open(std::string(ddbPath), true);
+        moveEntry(ddb.get(), std::string(source), std::string(dest));
+    });
 }
 
-DDB_DLL DDBErr
-DDBBuild(const char* ddbPath, const char* source, const char* dest, bool force, bool pendingOnly) {
-    DDB_C_BEGIN
+// ------------------------------------------------------------------ builds
 
-    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
-        throw InvalidArgsException("No ddb path provided");
+DDBErr DDBBuild(const char* ddbPath, const char* source, const char* dest, bool force, bool pendingOnly) {
+    // The two build codes DDBBuild has always returned (ABI 1.0)
+    constexpr auto kBuildCodes =
+        kFrozenCodes | codeBit(DDBERR_BUILDDEPMISSING) | codeBit(DDBERR_BUILDINPROGRESS);
+    return guarded<kBuildCodes>([&] {
+        requireText(ddbPath, "No ddb path provided");
 
-    const auto ddb = ddb::open(std::string(ddbPath), true);
+        const auto ddb = ddb::open(std::string(ddbPath), true);
 
-    // dest can be null (optional parameter)
-    const auto destPath = dest != nullptr ? std::string(dest) : "";
+        // dest and source can be null (optional parameters)
+        const auto destPath = optStr(dest);
+        const auto path = optStr(source);
 
-    // source can be null (optional parameter)
-    std::string path;
-    if (source != nullptr)
-        path = std::string(source);
-
-    try {
         if (path.empty()) {
             if (pendingOnly)
                 buildPending(ddb.get(), destPath, force);
@@ -1147,165 +944,119 @@ DDBBuild(const char* ddbPath, const char* source, const char* dest, bool force, 
         } else {
             build(ddb.get(), path, destPath, force);
         }
-    } catch (const ddb::BuildDepMissingException& e) {
-        DDBSetLastError(e.what());
-        return DDBERR_BUILDDEPMISSING;
-    } catch (const ddb::BuildInProgressException& e) {
-        DDBSetLastError(e.what());
-        return DDBERR_BUILDINPROGRESS;
-    }
-
-    DDB_C_END
+    });
 }
 
-DDB_DLL DDBErr DDBCleanup(const char* ddbPath, char** output) {
-    DDB_C_BEGIN
+DDBErr DDBCleanup(const char* ddbPath, char** output) {
+    return guardedOutput(output, [&] {
+        requireText(ddbPath, "No ddb path provided");
+        requireOutput(output);
 
-    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
-        throw InvalidArgsException("No ddb path provided");
+        const auto ddb = ddb::open(std::string(ddbPath), true);
+        const auto result = cleanupBuild(ddb.get(), "");
 
-    if (output == nullptr)
-        throw InvalidArgsException("Output pointer is null");
-
-    const auto ddb = ddb::open(std::string(ddbPath), true);
-
-    const auto result = cleanupBuild(ddb.get(), "");
-
-    json j;
-    j["entries"] = result.removedEntries;
-    j["builds"] = result.removedBuilds;
-
-    utils::copyToPtr(j.dump(), output);
-
-    DDB_C_END
-}
-
-DDB_DLL DDBErr DDBIsBuildable(const char* ddbPath, const char* path, bool* isBuildable) {
-    DDB_C_BEGIN
-
-    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
-        throw InvalidArgsException("No directory provided");
-
-    if (!utils::isValidStringParam(path))
-        throw InvalidArgsException("No path provided");
-
-    if (isBuildable == nullptr)
-        throw InvalidArgsException("Buildable parameter is null");
-
-    const auto ddbPathStr = std::string(ddbPath);
-
-    const auto ddb = ddb::open(ddbPathStr, true);
-
-    std::string subfolder;
-
-    *isBuildable = ddb::isBuildable(ddb.get(), std::string(path), subfolder);
-
-    DDB_C_END
-}
-
-DDB_DLL DDBErr DDBIsBuildPending(const char* ddbPath, bool* isBuildPending) {
-    DDB_C_BEGIN
-
-    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
-        throw InvalidArgsException("No directory provided");
-
-    if (isBuildPending == nullptr)
-        throw InvalidArgsException("isBuildPending parameter is null");
-
-    const auto ddb = ddb::open(std::string(ddbPath), true);
-    *isBuildPending = ddb::isBuildPending(ddb.get());
-
-    DDB_C_END
-}
-
-DDB_DLL DDBErr DDBGetPendingBuildInfo(const char* ddbPath, char** output) {
-    DDB_C_BEGIN
-
-    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
-        throw InvalidArgsException("No directory provided");
-
-    if (output == nullptr)
-        throw InvalidArgsException("Output pointer is null");
-
-    const auto db = ddb::open(std::string(ddbPath), true);
-    const auto pending = ddb::getPendingBuildInfo(db.get());
-
-    auto outJson = json::array();
-    for (const auto& p : pending) {
         json j;
-        j["hash"] = p.hash;
-        j["path"] = p.path;
-        j["missingDependencies"] = p.missingDependencies;
-        j["lastAttempt"] = p.lastAttempt;
-        outJson.push_back(j);
-    }
-
-    utils::copyToPtr(outJson.dump(), output);
-
-    DDB_C_END
+        j["entries"] = result.removedEntries;
+        j["builds"] = result.removedBuilds;
+        return j;
+    });
 }
 
-DDB_DLL DDBErr DDBIsBuildActive(const char* ddbPath, const char* path, bool* isBuildActive) {
-    DDB_C_BEGIN
+DDBErr DDBIsBuildable(const char* ddbPath, const char* path, bool* isBuildable) {
+    return guardedOutput(isBuildable, [&] {
+        requireDdbPath(ddbPath);
 
-    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
-        throw InvalidArgsException("No directory provided");
+        if (!utils::isValidStringParam(path))
+            throw InvalidArgsException("No path provided");
 
-    if (utils::isNullOrEmptyOrWhitespace(path))
-        throw InvalidArgsException("No path provided");
+        requireOutput(isBuildable, "Buildable parameter is null");
 
-    if (isBuildActive == nullptr)
-        throw InvalidArgsException("isBuildActive parameter is null");
-
-    const auto ddb = ddb::open(std::string(ddbPath), true);
-    *isBuildActive = ddb::isBuildActive(ddb.get(), std::string(path));
-
-    DDB_C_END
+        const auto ddb = ddb::open(std::string(ddbPath), true);
+        std::string subfolder;
+        return ddb::isBuildable(ddb.get(), std::string(path), subfolder);
+    });
 }
 
-DDB_DLL DDBErr DDBIsBuildComplete(const char* ddbPath, const char* path, bool* isBuildComplete) {
-    DDB_C_BEGIN
+DDBErr DDBIsBuildPending(const char* ddbPath, bool* isBuildPending) {
+    return guardedOutput(isBuildPending, [&] {
+        requireDdbPath(ddbPath);
+        requireOutput(isBuildPending, "isBuildPending parameter is null");
 
-    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
-        throw InvalidArgsException("No directory provided");
-
-    if (utils::isNullOrEmptyOrWhitespace(path))
-        throw InvalidArgsException("No path provided");
-
-    if (isBuildComplete == nullptr)
-        throw InvalidArgsException("isBuildComplete parameter is null");
-
-    const auto ddb = ddb::open(std::string(ddbPath), true);
-    *isBuildComplete = ddb::isBuildComplete(ddb.get(), std::string(path));
-
-    DDB_C_END
+        const auto ddb = ddb::open(std::string(ddbPath), true);
+        return ddb::isBuildPending(ddb.get());
+    });
 }
 
-DDB_DLL DDBErr DDBGetBuildStatus(const char* ddbPath, const char** paths, int numPaths, char** output) {
-    DDB_C_BEGIN
+DDBErr DDBGetPendingBuildInfo(const char* ddbPath, char** output) {
+    return guardedOutput(output, [&] {
+        requireDdbPath(ddbPath);
+        requireOutput(output);
 
-    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
-        throw InvalidArgsException("No directory provided");
+        const auto db = ddb::open(std::string(ddbPath), true);
+        const auto pending = ddb::getPendingBuildInfo(db.get());
 
-    if (!utils::isValidArrayParam(paths, numPaths))
-        throw InvalidArgsException("Invalid paths array parameter");
+        auto outJson = json::array();
+        for (const auto& p : pending) {
+            json j;
+            j["hash"] = p.hash;
+            j["path"] = p.path;
+            j["missingDependencies"] = p.missingDependencies;
+            j["lastAttempt"] = p.lastAttempt;
+            outJson.push_back(j);
+        }
+        return outJson;
+    });
+}
 
-    if (utils::hasNullStringInArray(paths, numPaths))
-        throw InvalidArgsException("Path array contains null elements");
+DDBErr DDBIsBuildActive(const char* ddbPath, const char* path, bool* isBuildActive) {
+    return guardedOutput(isBuildActive, [&] {
+        requireDdbPath(ddbPath);
+        requireText(path, "No path provided");
+        requireOutput(isBuildActive, "isBuildActive parameter is null");
 
-    if (output == nullptr)
-        throw InvalidArgsException("Output pointer is null");
+        const auto ddb = ddb::open(std::string(ddbPath), true);
+        return ddb::isBuildActive(ddb.get(), std::string(path));
+    });
+}
 
-    const auto ddb = ddb::open(std::string(ddbPath), true);
-    const auto statuses = ddb::getBuildStatus(ddb.get(), std::vector<std::string>(paths, paths + numPaths));
+DDBErr DDBIsBuildComplete(const char* ddbPath, const char* path, bool* isBuildComplete) {
+    return guardedOutput(isBuildComplete, [&] {
+        requireDdbPath(ddbPath);
+        requireText(path, "No path provided");
+        requireOutput(isBuildComplete, "isBuildComplete parameter is null");
 
-    json j = json::array();
-    for (const auto& s : statuses)
-        j.push_back({{"path", s.path}, {"exists", s.exists}, {"buildable", s.buildable}, {"complete", s.complete}});
+        const auto ddb = ddb::open(std::string(ddbPath), true);
+        return ddb::isBuildComplete(ddb.get(), std::string(path));
+    });
+}
 
-    utils::copyToPtr(j.dump(), output);
+DDBErr DDBGetBuildStatus(const char* ddbPath, const char** paths, int numPaths, char** output) {
+    return guardedOutput(output, [&] {
+        requireDdbPath(ddbPath);
+        const auto pathList = capi::toStringList(paths, numPaths);
+        requireOutput(output);
 
-    DDB_C_END
+        const auto ddb = ddb::open(std::string(ddbPath), true);
+        const auto statuses = ddb::getBuildStatus(ddb.get(), pathList);
+
+        json j = json::array();
+        for (const auto& s : statuses)
+            j.push_back({{"path", s.path}, {"exists", s.exists}, {"buildable", s.buildable}, {"complete", s.complete}});
+        return j;
+    });
+}
+
+// ------------------------------------------------------------------ metadata
+
+// The checks of the metadata exports: the dataset, then each string argument, then the output
+static void requireMetaArgs(const char* ddbPath,
+                            std::initializer_list<std::pair<const char*, const char*>> strings,
+                            char** output) {
+    requireDdbPath(ddbPath);
+    for (const auto& [value, message] : strings)
+        if (!utils::isValidStringParam(value))
+            throw InvalidArgsException(message);
+    requireOutput(output);
 }
 
 DDBErr DDBMetaAdd(const char* ddbPath,
@@ -1313,34 +1064,18 @@ DDBErr DDBMetaAdd(const char* ddbPath,
                   const char* key,
                   const char* data,
                   char** output) {
-    DDB_C_BEGIN
+    return guardedOutput(output, [&] {
+        requireMetaArgs(ddbPath,
+                        {{path, "No path provided"}, {key, "No key provided"}, {data, "No data provided"}},
+                        output);
 
-    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
-        throw InvalidArgsException("No directory provided");
-
-    if (!utils::isValidStringParam(path))
-        throw InvalidArgsException("No path provided");
-
-    if (!utils::isValidStringParam(key))
-        throw InvalidArgsException("No key provided");
-
-    if (!utils::isValidStringParam(data))
-        throw InvalidArgsException("No data provided");
-
-    if (output == nullptr)
-        throw InvalidArgsException("Output pointer is null");
-
-    const auto ddbPathStr = std::string(ddbPath);
-
-    const auto ddb = ddb::open(ddbPathStr, true);
-    auto json = ddb->getMetaManager()->add(std::string(key),
-                                           std::string(data),
-                                           std::string(path),
-                                           ddbPathStr);
-
-    utils::copyToPtr(json.dump(), output);
-
-    DDB_C_END
+        const auto ddbPathStr = std::string(ddbPath);
+        const auto ddb = ddb::open(ddbPathStr, true);
+        return ddb->getMetaManager()->add(std::string(key),
+                                          std::string(data),
+                                          std::string(path),
+                                          ddbPathStr);
+    });
 }
 
 DDBErr DDBMetaSet(const char* ddbPath,
@@ -1348,180 +1083,79 @@ DDBErr DDBMetaSet(const char* ddbPath,
                   const char* key,
                   const char* data,
                   char** output) {
-    DDB_C_BEGIN
+    return guardedOutput(output, [&] {
+        requireMetaArgs(ddbPath,
+                        {{path, "No path provided"}, {key, "No key provided"}, {data, "No data provided"}},
+                        output);
 
-    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
-        throw InvalidArgsException("No directory provided");
-
-    if (!utils::isValidStringParam(path))
-        throw InvalidArgsException("No path provided");
-
-    if (!utils::isValidStringParam(key))
-        throw InvalidArgsException("No key provided");
-
-    if (!utils::isValidStringParam(data))
-        throw InvalidArgsException("No data provided");
-
-    if (output == nullptr)
-        throw InvalidArgsException("Output pointer is null");
-
-    const auto ddbPathStr = std::string(ddbPath);
-
-    const auto ddb = ddb::open(ddbPathStr, true);
-    auto json = ddb->getMetaManager()->set(std::string(key),
-                                           std::string(data),
-                                           std::string(path),
-                                           ddbPathStr);
-
-    utils::copyToPtr(json.dump(), output);
-
-    DDB_C_END
+        const auto ddbPathStr = std::string(ddbPath);
+        const auto ddb = ddb::open(ddbPathStr, true);
+        return ddb->getMetaManager()->set(std::string(key),
+                                          std::string(data),
+                                          std::string(path),
+                                          ddbPathStr);
+    });
 }
 
 DDBErr DDBMetaRemove(const char* ddbPath, const char* id, char** output) {
-    DDB_C_BEGIN
+    return guardedOutput(output, [&] {
+        requireMetaArgs(ddbPath, {{id, "No id provided"}}, output);
 
-    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
-        throw InvalidArgsException("No directory provided");
-
-    if (!utils::isValidStringParam(id))
-        throw InvalidArgsException("No id provided");
-
-    if (output == nullptr)
-        throw InvalidArgsException("Output pointer is null");
-
-    const auto ddb = ddb::open(std::string(ddbPath), true);
-    auto json = ddb->getMetaManager()->remove(std::string(id));
-
-    utils::copyToPtr(json.dump(), output);
-
-    DDB_C_END
+        const auto ddb = ddb::open(std::string(ddbPath), true);
+        return ddb->getMetaManager()->remove(std::string(id));
+    });
 }
 
-DDB_DLL DDBErr DDBMetaGet(const char* ddbPath, const char* path, const char* key, char** output) {
-    DDB_C_BEGIN
+DDBErr DDBMetaGet(const char* ddbPath, const char* path, const char* key, char** output) {
+    return guardedOutput(output, [&] {
+        requireMetaArgs(ddbPath, {{path, "No path provided"}, {key, "No key provided"}}, output);
 
-    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
-        throw InvalidArgsException("No directory provided");
-
-    if (!utils::isValidStringParam(path))
-        throw InvalidArgsException("No path provided");
-
-    if (!utils::isValidStringParam(key))
-        throw InvalidArgsException("No key provided");
-
-    if (output == nullptr)
-        throw InvalidArgsException("Output pointer is null");
-
-    const auto ddbPathStr = std::string(ddbPath);
-
-    const auto ddb = ddb::open(ddbPathStr, true);
-    auto json = ddb->getMetaManager()->get(std::string(key), std::string(path), ddbPathStr);
-
-    utils::copyToPtr(json.dump(), output);
-
-    DDB_C_END
+        const auto ddbPathStr = std::string(ddbPath);
+        const auto ddb = ddb::open(ddbPathStr, true);
+        return ddb->getMetaManager()->get(std::string(key), std::string(path), ddbPathStr);
+    });
 }
 
-DDB_DLL DDBErr DDBMetaUnset(const char* ddbPath, const char* path, const char* key, char** output) {
-    DDB_C_BEGIN
+DDBErr DDBMetaUnset(const char* ddbPath, const char* path, const char* key, char** output) {
+    return guardedOutput(output, [&] {
+        requireMetaArgs(ddbPath, {{path, "No path provided"}, {key, "No key provided"}}, output);
 
-    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
-        throw InvalidArgsException("No directory provided");
-
-    if (!utils::isValidStringParam(path))
-        throw InvalidArgsException("No path provided");
-
-    if (!utils::isValidStringParam(key))
-        throw InvalidArgsException("No key provided");
-
-    if (output == nullptr)
-        throw InvalidArgsException("Output pointer is null");
-
-    const auto ddb = ddb::open(std::string(ddbPath), true);
-    auto json =
-        ddb->getMetaManager()->unset(std::string(key), std::string(path), std::string(ddbPath));
-
-    utils::copyToPtr(json.dump(), output);
-
-    DDB_C_END
+        const auto ddb = ddb::open(std::string(ddbPath), true);
+        return ddb->getMetaManager()->unset(std::string(key), std::string(path), std::string(ddbPath));
+    });
 }
 
-DDB_DLL DDBErr DDBMetaList(const char* ddbPath, const char* path, char** output) {
-    DDB_C_BEGIN
+DDBErr DDBMetaList(const char* ddbPath, const char* path, char** output) {
+    return guardedOutput(output, [&] {
+        requireMetaArgs(ddbPath, {{path, "No path provided"}}, output);
 
-    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
-        throw InvalidArgsException("No directory provided");
-
-    if (!utils::isValidStringParam(path))
-        throw InvalidArgsException("No path provided");
-
-    if (output == nullptr)
-        throw InvalidArgsException("Output pointer is null");
-
-    const auto ddbPathStr = std::string(ddbPath);
-
-    const auto ddb = ddb::open(ddbPathStr, true);
-    auto json = ddb->getMetaManager()->list(std::string(path), ddbPathStr);
-
-    utils::copyToPtr(json.dump(), output);
-
-    DDB_C_END
+        const auto ddbPathStr = std::string(ddbPath);
+        const auto ddb = ddb::open(ddbPathStr, true);
+        return ddb->getMetaManager()->list(std::string(path), ddbPathStr);
+    });
 }
 
-DDB_DLL DDBErr DDBMetaDump(const char* ddbPath, const char* ids, char** output) {
-    DDB_C_BEGIN
+DDBErr DDBMetaDump(const char* ddbPath, const char* ids, char** output) {
+    return guardedOutput(output, [&] {
+        requireMetaArgs(ddbPath, {{ids, "No ids provided"}}, output);
 
-    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
-        throw InvalidArgsException("No directory provided");
-
-    if (!utils::isValidStringParam(ids))
-        throw InvalidArgsException("No ids provided");
-
-    if (output == nullptr)
-        throw InvalidArgsException("Output pointer is null");
-
-    json jIds;
-    try {
-        jIds = json::parse(ids);
-    } catch (const json::parse_error& e) {
-        throw InvalidArgsException(e.what());
-    }
-
-    const auto ddb = ddb::open(std::string(ddbPath), true);
-    auto json = ddb->getMetaManager()->dump(jIds);
-
-    utils::copyToPtr(json.dump(), output);
-
-    DDB_C_END
+        const json jIds = parseJsonArg(ids);
+        const auto ddb = ddb::open(std::string(ddbPath), true);
+        return ddb->getMetaManager()->dump(jIds);
+    });
 }
 
-DDB_DLL DDBErr DDBMetaRestore(const char* ddbPath, const char* dump, char** output) {
-    DDB_C_BEGIN
+DDBErr DDBMetaRestore(const char* ddbPath, const char* dump, char** output) {
+    return guardedOutput(output, [&] {
+        requireMetaArgs(ddbPath, {{dump, "No dump provided"}}, output);
 
-    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
-        throw InvalidArgsException("No directory provided");
-
-    if (!utils::isValidStringParam(dump))
-        throw InvalidArgsException("No dump provided");
-
-    if (output == nullptr)
-        throw InvalidArgsException("Output pointer is null");
-
-    json jDump;
-    try {
-        jDump = json::parse(dump);
-    } catch (const json::parse_error& e) {
-        throw InvalidArgsException(e.what());
-    }
-
-    const auto ddb = ddb::open(std::string(ddbPath), true);
-    auto json = ddb->getMetaManager()->restore(jDump);
-
-    utils::copyToPtr(json.dump(), output);
-
-    DDB_C_END
+        const json jDump = parseJsonArg(dump);
+        const auto ddb = ddb::open(std::string(ddbPath), true);
+        return ddb->getMetaManager()->restore(jDump);
+    });
 }
+
+// ------------------------------------------------------------------ STAC
 
 namespace {
 
@@ -1573,99 +1207,62 @@ StacDatetimeRange parseStacDatetime(const char* datetime) {
 
 }  // namespace
 
-DDB_DLL DDBErr DDBStac(const char* ddbPath,
-                       const char* entry,
-                       const char* stacCollectionRoot,
-                       const char* id,
-                       const char* stacCatalogRoot,
-                       char** output) {
-    DDB_C_BEGIN
+DDBErr DDBStac(const char* ddbPath,
+               const char* entry,
+               const char* stacCollectionRoot,
+               const char* id,
+               const char* stacCatalogRoot,
+               char** output) {
+    return guardedOutput(output, [&] {
+        requireDdbPath(ddbPath);
+        requireOutput(output);
 
-    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
-        throw InvalidArgsException("No directory provided");
-
-    if (output == nullptr)
-        throw InvalidArgsException("Output pointer is null");
-
-    // entry, stacCollectionRoot, id, stacCatalogRoot can be null/empty - they are optional
-    // parameters
-    const std::string entryStr = entry ? std::string(entry) : "";
-    const std::string stacCollectionRootStr =
-        stacCollectionRoot ? std::string(stacCollectionRoot) : "";
-    const std::string idStr = id ? std::string(id) : "";
-    const std::string stacCatalogRootStr = stacCatalogRoot ? std::string(stacCatalogRoot) : "";
-
-    const auto ddb = ddb::open(std::string(ddbPath), false);
-    auto json = ddb::generateStac(std::string(ddbPath),
-                                  entryStr,
-                                  stacCollectionRootStr,
-                                  idStr,
-                                  stacCatalogRootStr);
-
-    utils::copyToPtr(json.dump(), output);
-
-    DDB_C_END
+        // entry, stacCollectionRoot, id, stacCatalogRoot can be null/empty - they are optional
+        // parameters
+        const auto ddb = ddb::open(std::string(ddbPath), false);
+        return ddb::generateStac(std::string(ddbPath),
+                                 optStr(entry),
+                                 optStr(stacCollectionRoot),
+                                 optStr(id),
+                                 optStr(stacCatalogRoot));
+    });
 }
 
-DDB_DLL DDBErr DDBStacItemCollection(const char* ddbPath,
-                                     const char* stacCollectionRoot,
-                                     const char* id,
-                                     const char* stacCatalogRoot,
-                                     const char* bbox,
-                                     const char* datetime,
-                                     int limit,
-                                     int offset,
-                                     char** output) {
-    DDB_C_BEGIN
+DDBErr DDBStacItemCollection(const char* ddbPath,
+                             const char* stacCollectionRoot,
+                             const char* id,
+                             const char* stacCatalogRoot,
+                             const char* bbox,
+                             const char* datetime,
+                             int limit,
+                             int offset,
+                             char** output) {
+    return guardedOutput(output, [&] {
+        requireDdbPath(ddbPath);
+        requireOutput(output);
 
-    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
-        throw InvalidArgsException("No directory provided");
+        const auto bboxVec = parseStacBbox(bbox);
+        const auto datetimeRange = parseStacDatetime(datetime);
 
-    if (output == nullptr)
-        throw InvalidArgsException("Output pointer is null");
-
-    const std::string stacCollectionRootStr =
-        stacCollectionRoot ? std::string(stacCollectionRoot) : "";
-    const std::string idStr = id ? std::string(id) : "";
-    const std::string stacCatalogRootStr = stacCatalogRoot ? std::string(stacCatalogRoot) : "";
-
-    const auto bboxVec = parseStacBbox(bbox);
-    const auto datetimeRange = parseStacDatetime(datetime);
-
-    auto json = ddb::generateStacItemCollection(std::string(ddbPath),
-                                                stacCollectionRootStr,
-                                                idStr,
-                                                stacCatalogRootStr,
-                                                bboxVec,
-                                                datetimeRange.start,
-                                                datetimeRange.end,
-                                                limit,
-                                                offset);
-
-    utils::copyToPtr(json.dump(), output);
-
-    DDB_C_END
+        return ddb::generateStacItemCollection(std::string(ddbPath),
+                                               optStr(stacCollectionRoot),
+                                               optStr(id),
+                                               optStr(stacCatalogRoot),
+                                               bboxVec,
+                                               datetimeRange.start,
+                                               datetimeRange.end,
+                                               limit,
+                                               offset);
+    });
 }
 
 DDBErr DDBStacData(const char* ddbPath, const char* entry, char** output) {
-    DDB_C_BEGIN
+    return guardedOutput<kAbi11Codes>(output, [&] {
+        requireDdbPath(ddbPath);
+        requireOutput(output);
 
-    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
-        throw InvalidArgsException("No directory provided");
-
-    if (output == nullptr)
-        throw InvalidArgsException("Output pointer is null");
-
-    try {
-        const auto stac =
-            ddb::generateStacData(std::string(ddbPath), entry != nullptr ? entry : "");
-        utils::copyToPtr(stac.dump(), output);
-    } catch (const EntryNotFoundException& e) {
-        DDBSetLastError(e.what());
-        return DDBERR_NOTFOUND;
-    }
-
-    DDB_C_END
+        return ddb::generateStacData(std::string(ddbPath), optStr(entry));
+    });
 }
 
 DDBErr DDBStacItemCollectionData(const char* ddbPath,
@@ -1674,457 +1271,406 @@ DDBErr DDBStacItemCollectionData(const char* ddbPath,
                                  int limit,
                                  int offset,
                                  char** output) {
-    DDB_C_BEGIN
+    return guardedOutput<kAbi11Codes>(output, [&] {
+        requireDdbPath(ddbPath);
+        requireOutput(output);
 
-    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
-        throw InvalidArgsException("No directory provided");
-
-    if (output == nullptr)
-        throw InvalidArgsException("Output pointer is null");
-
-    const auto datetimeRange = parseStacDatetime(datetime);
-    const auto stac = ddb::generateStacItemCollectionData(std::string(ddbPath),
-                                                          parseStacBbox(bbox),
-                                                          datetimeRange.start,
-                                                          datetimeRange.end,
-                                                          limit,
-                                                          offset);
-    utils::copyToPtr(stac.dump(), output);
-
-    DDB_C_END
+        const auto bboxVec = parseStacBbox(bbox);
+        const auto datetimeRange = parseStacDatetime(datetime);
+        return ddb::generateStacItemCollectionData(std::string(ddbPath),
+                                                   bboxVec,
+                                                   datetimeRange.start,
+                                                   datetimeRange.end,
+                                                   limit,
+                                                   offset);
+    });
 }
 
-DDB_DLL DDBErr DDBGetRasterInfo(const char* path, char** output) {
-    DDB_C_BEGIN
+// ------------------------------------------------------------------ rasters
 
-    if (utils::isNullOrEmptyOrWhitespace(path))
-        throw InvalidArgsException("No path provided");
-    if (output == nullptr)
-        throw InvalidArgsException("Output pointer is null");
+DDBErr DDBGetRasterInfo(const char* path, char** output) {
+    return guardedOutput(output, [&] {
+        requireText(path, "No path provided");
+        requireOutput(output);
 
-    auto& spm = ddb::SensorProfileManager::instance();
-    std::string jsonStr = spm.getRasterInfoJson(std::string(path));
-    utils::copyToPtr(jsonStr, output);
-
-    DDB_C_END
+        auto& spm = ddb::SensorProfileManager::instance();
+        std::string jsonStr = spm.getRasterInfoJson(std::string(path));
+        return jsonStr;
+    });
 }
 
-DDB_DLL DDBErr DDBGetRasterMetadata(const char* path, const char* formula,
-                                     const char* bandFilter, char** output) {
-    DDB_C_BEGIN
+DDBErr DDBGetRasterMetadata(const char* path, const char* formula,
+                            const char* bandFilter, char** output) {
+    return guardedOutput(output, [&] {
+        requireText(path, "No path provided");
+        requireOutput(output);
 
-    if (utils::isNullOrEmptyOrWhitespace(path))
-        throw InvalidArgsException("No path provided");
-    if (output == nullptr)
-        throw InvalidArgsException("Output pointer is null");
+        const std::string formulaStr = optStr(formula);
+        const std::string filterStr = optStr(bandFilter);
 
-    const std::string formulaStr = formula ? std::string(formula) : "";
-    const std::string filterStr = bandFilter ? std::string(bandFilter) : "";
+        // Owned: the formula, statistics and sensor steps below can throw while it is open
+        auto dataset = adoptDataset(GDALOpen(path, GA_ReadOnly));
+        if (!dataset)
+            throw GDALException("Cannot open " + std::string(path));
+        GDALDatasetH hDs = datasetHandle(dataset);
 
-    // Owned: the formula, statistics and sensor steps below can throw while it is open
-    auto dataset = adoptDataset(GDALOpen(path, GA_ReadOnly));
-    if (!dataset)
-        throw GDALException("Cannot open " + std::string(path));
-    GDALDatasetH hDs = datasetHandle(dataset);
+        auto& ve = ddb::VegetationEngine::instance();
+        json result;
 
-    auto& ve = ddb::VegetationEngine::instance();
-    json result;
+        int nBands = GDALGetRasterCount(hDs);
 
-    int nBands = GDALGetRasterCount(hDs);
-
-    // Determine effective band filter
-    ddb::BandFilter effectiveFilter;
-    if (!filterStr.empty()) {
-        effectiveFilter = ddb::VegetationEngine::parseFilter(filterStr, nBands);
-    } else {
-        effectiveFilter = ve.autoDetectFilter(std::string(path));
-    }
-
-    // Statistics
-    json statsJson;
-
-    if (!formulaStr.empty()) {
-        // Formula statistics: compute on-demand
-        const ddb::BandFilter &bf = effectiveFilter;
-        int width = GDALGetRasterXSize(hDs);
-        int height = GDALGetRasterYSize(hDs);
-
-        // Sample at reduced resolution for performance
-        int sampleW = std::min(width, 512);
-        int sampleH = std::min(height, 512);
-        size_t pixCount = static_cast<size_t>(sampleW) * sampleH;
-
-        std::vector<std::vector<float>> bandDataStorage(nBands);
-        std::vector<float*> bandDataPtrs(nBands);
-
-        // Read GDAL nodata values and detect alpha band
-        auto nodataInfo = detectBandNodata(hDs, nBands);
-        for (int b = 0; b < nBands; b++) {
-            bandDataStorage[b].resize(pixCount);
-            bandDataPtrs[b] = bandDataStorage[b].data();
-            GDALRasterBandH hBand = GDALGetRasterBand(hDs, b + 1);
-            GDALRasterIO(hBand, GF_Read, 0, 0, width, height,
-                         bandDataPtrs[b], sampleW, sampleH, GDT_Float32, 0, 0);
+        // Determine effective band filter
+        ddb::BandFilter effectiveFilter;
+        if (!filterStr.empty()) {
+            effectiveFilter = ddb::VegetationEngine::parseFilter(filterStr, nBands);
+        } else {
+            effectiveFilter = ve.autoDetectFilter(std::string(path));
         }
 
-        // Pre-mask: set pixels to output nodata where alpha=0 or any band
-        // matches its GDAL nodata value, so applyFormula excludes them
-        float nodata = NODATA_SENTINEL;
-        premaskNodata(bandDataPtrs, pixCount, nBands, nodataInfo, nodata);
+        // Statistics
+        json statsJson;
 
-        std::vector<float> formulaResult(pixCount);
-        const auto* formulaObj = ve.getFormula(formulaStr);
-        if (!formulaObj)
-            throw InvalidArgsException("Unknown formula: " + formulaStr);
-        ve.applyFormula(*formulaObj, bf, bandDataPtrs, formulaResult.data(), pixCount, nodata);
+        if (!formulaStr.empty()) {
+            // Formula statistics: compute on-demand
+            const ddb::BandFilter &bf = effectiveFilter;
+            int width = GDALGetRasterXSize(hDs);
+            int height = GDALGetRasterYSize(hDs);
 
-        // Compute statistics
-        std::vector<double> valid;
-        valid.reserve(pixCount);
-        double sum = 0, sumSq = 0;
-        double fMin = std::numeric_limits<double>::max();
-        double fMax = std::numeric_limits<double>::lowest();
-        for (size_t i = 0; i < pixCount; i++) {
-            if (formulaResult[i] != nodata) {
-                double v = static_cast<double>(formulaResult[i]);
-                valid.push_back(v);
-                sum += v;
-                sumSq += v * v;
-                fMin = std::min(fMin, v);
-                fMax = std::max(fMax, v);
-            }
-        }
+            // Sample at reduced resolution for performance
+            int sampleW = std::min(width, 512);
+            int sampleH = std::min(height, 512);
+            size_t pixCount = static_cast<size_t>(sampleW) * sampleH;
 
-        if (!valid.empty()) {
-            double mean = sum / valid.size();
-            double variance = (sumSq / valid.size()) - (mean * mean);
-            double stddev = std::sqrt(std::max(0.0, variance));
+            std::vector<std::vector<float>> bandDataStorage(nBands);
+            std::vector<float*> bandDataPtrs(nBands);
 
-            std::sort(valid.begin(), valid.end());
-            double p2 = valid[static_cast<size_t>(valid.size() * 0.02)];
-            double p98 = valid[std::min(valid.size() - 1, static_cast<size_t>(valid.size() * 0.98))];
-
-            // Histogram
-            int bins = 255;
-            std::vector<int> counts(bins, 0);
-            std::vector<double> edges(bins + 1);
-            double range = fMax - fMin;
-            if (range <= 0) range = 1.0;
-            for (int i = 0; i <= bins; i++) {
-                edges[i] = fMin + (range * i / bins);
-            }
-            for (double v : valid) {
-                int idx = static_cast<int>((v - fMin) / range * (bins - 1));
-                idx = std::max(0, std::min(bins - 1, idx));
-                counts[idx]++;
+            // Read GDAL nodata values and detect alpha band
+            auto nodataInfo = detectBandNodata(hDs, nBands);
+            for (int b = 0; b < nBands; b++) {
+                bandDataStorage[b].resize(pixCount);
+                bandDataPtrs[b] = bandDataStorage[b].data();
+                GDALRasterBandH hBand = GDALGetRasterBand(hDs, b + 1);
+                GDALRasterIO(hBand, GF_Read, 0, 0, width, height,
+                             bandDataPtrs[b], sampleW, sampleH, GDT_Float32, 0, 0);
             }
 
-            statsJson["1"] = {
-                {"min", fMin}, {"max", fMax}, {"mean", mean}, {"std", stddev},
-                {"percentiles", {{"p2", p2}, {"p98", p98}}},
-                {"histogram", {{"counts", counts}, {"edges", edges}, {"bins", bins}}}
-            };
-        }
-    } else {
-        // Per-band statistics
-        for (int i = 1; i <= nBands; i++) {
-            GDALRasterBandH hBand = GDALGetRasterBand(hDs, i);
-            double bMin, bMax, bMean, bStdDev;
-            if (GDALComputeRasterStatistics(hBand, TRUE, &bMin, &bMax, &bMean, &bStdDev, nullptr, nullptr) == CE_None) {
-                statsJson[std::to_string(i)] = {
-                    {"min", bMin}, {"max", bMax}, {"mean", bMean}, {"std", bStdDev},
-                    {"percentiles", {{"p2", bMean - 2.33 * bStdDev}, {"p98", bMean + 2.33 * bStdDev}}}
+            // Pre-mask: set pixels to output nodata where alpha=0 or any band
+            // matches its GDAL nodata value, so applyFormula excludes them
+            float nodata = NODATA_SENTINEL;
+            premaskNodata(bandDataPtrs, pixCount, nBands, nodataInfo, nodata);
+
+            std::vector<float> formulaResult(pixCount);
+            const auto* formulaObj = ve.getFormula(formulaStr);
+            if (!formulaObj)
+                throw InvalidArgsException("Unknown formula: " + formulaStr);
+            ve.applyFormula(*formulaObj, bf, bandDataPtrs, formulaResult.data(), pixCount, nodata);
+
+            // Compute statistics
+            std::vector<double> valid;
+            valid.reserve(pixCount);
+            double sum = 0, sumSq = 0;
+            double fMin = std::numeric_limits<double>::max();
+            double fMax = std::numeric_limits<double>::lowest();
+            for (size_t i = 0; i < pixCount; i++) {
+                if (formulaResult[i] != nodata) {
+                    double v = static_cast<double>(formulaResult[i]);
+                    valid.push_back(v);
+                    sum += v;
+                    sumSq += v * v;
+                    fMin = std::min(fMin, v);
+                    fMax = std::max(fMax, v);
+                }
+            }
+
+            if (!valid.empty()) {
+                double mean = sum / valid.size();
+                double variance = (sumSq / valid.size()) - (mean * mean);
+                double stddev = std::sqrt(std::max(0.0, variance));
+
+                std::sort(valid.begin(), valid.end());
+                double p2 = valid[static_cast<size_t>(valid.size() * 0.02)];
+                double p98 = valid[std::min(valid.size() - 1, static_cast<size_t>(valid.size() * 0.98))];
+
+                // Histogram
+                int bins = 255;
+                std::vector<int> counts(bins, 0);
+                std::vector<double> edges(bins + 1);
+                double range = fMax - fMin;
+                if (range <= 0) range = 1.0;
+                for (int i = 0; i <= bins; i++) {
+                    edges[i] = fMin + (range * i / bins);
+                }
+                for (double v : valid) {
+                    int idx = static_cast<int>((v - fMin) / range * (bins - 1));
+                    idx = std::max(0, std::min(bins - 1, idx));
+                    counts[idx]++;
+                }
+
+                statsJson["1"] = {
+                    {"min", fMin}, {"max", fMax}, {"mean", mean}, {"std", stddev},
+                    {"percentiles", {{"p2", p2}, {"p98", p98}}},
+                    {"histogram", {{"counts", counts}, {"edges", edges}, {"bins", bins}}}
                 };
             }
-        }
-    }
-
-    result["statistics"] = statsJson;
-
-    // Available algorithms for this band filter
-    // Include all formulas, mark incompatible ones as disabled
-    auto compatibleFormulas = ve.getFormulasForFilter(effectiveFilter);
-    auto allFormulas = ve.getAllFormulas();
-    json algJson = json::array();
-    for (const auto& f : allFormulas) {
-        json fj = {
-            {"id", f.id}, {"name", f.name}, {"expr", f.expr},
-            {"help", f.help}
-        };
-        if (f.hasRange) {
-            fj["range"] = {f.rangeMin, f.rangeMax};
-        }
-        bool compatible = false;
-        for (const auto& cf : compatibleFormulas) {
-            if (cf.id == f.id) { compatible = true; break; }
-        }
-        if (!compatible) {
-            fj["disabled"] = true;
-            fj["disabledReason"] = "Requires bands: " + f.requiredBands;
-        }
-        algJson.push_back(fj);
-    }
-    result["algorithms"] = algJson;
-
-    // Colormaps
-    result["colormaps"] = ve.getColormapsJson();
-
-    result["autoBands"] = {{"filter", effectiveFilter.id}, {"match", !effectiveFilter.id.empty()}};
-
-    auto& spm = ddb::SensorProfileManager::instance();
-    auto detection = spm.detectSensor(std::string(path));
-    result["detectedSensor"] = detection.sensorId;
-
-    dataset.reset();
-
-    utils::copyToPtr(result.dump(), output);
-
-    DDB_C_END
-}
-
-DDB_DLL DDBErr DDBGenerateMemoryThumbnailEx(const char* filePath, int size,
-                                             const char* preset, const char* bands,
-                                             const char* formula, const char* bandFilter,
-                                             const char* colormap, const char* rescale,
-                                             uint8_t** outBuffer, int* outBufferSize) {
-    DDB_C_BEGIN
-
-    if (utils::isNullOrEmptyOrWhitespace(filePath))
-        throw InvalidArgsException("No file path provided");
-    if (size < 0)
-        throw InvalidArgsException("Invalid size parameter");
-    if (outBuffer == nullptr)
-        throw InvalidArgsException("Output buffer pointer is null");
-    if (outBufferSize == nullptr)
-        throw InvalidArgsException("Output buffer size pointer is null");
-
-    ddb::ThumbVisParams visParams;
-    if (preset) visParams.preset = std::string(preset);
-    if (bands) visParams.bands = std::string(bands);
-    if (formula) visParams.formula = std::string(formula);
-    if (bandFilter) visParams.bandFilter = std::string(bandFilter);
-    if (colormap) visParams.colormap = std::string(colormap);
-    if (rescale) visParams.rescale = std::string(rescale);
-
-    ddb::generateImageThumbEx(fs::path(filePath), size, "", outBuffer, outBufferSize, visParams);
-
-    DDB_C_END
-}
-
-DDB_DLL DDBErr DDBMemoryTileEx(const char* inputPath,
-                                int tz, int tx, int ty,
-                                int tileSize, bool tms,
-                                bool forceRecreate, const char* inputPathHash,
-                                const char* preset, const char* bands,
-                                const char* formula, const char* bandFilter,
-                                const char* colormap, const char* rescale,
-                                uint8_t** outBuffer, int* outBufferSize) {
-    DDB_C_BEGIN
-
-    if (utils::isNullOrEmptyOrWhitespace(inputPath))
-        throw InvalidArgsException("No input path provided");
-    if (outBuffer == nullptr)
-        throw InvalidArgsException("Output buffer pointer is null");
-    if (outBufferSize == nullptr)
-        throw InvalidArgsException("Output buffer size pointer is null");
-    if (tileSize < 0)
-        throw InvalidArgsException("Invalid tile size parameter");
-    if (tz < 0 || tx < 0 || ty < 0)
-        throw InvalidArgsException("Invalid tile coordinates");
-
-    // Build vizKey from params for cache differentiation
-    std::string vizKey;
-    if (preset) vizKey += std::string("p:") + preset;
-    if (bands) vizKey += std::string(",b:") + bands;
-    if (formula) vizKey += std::string(",f:") + formula;
-    if (bandFilter) vizKey += std::string(",bf:") + bandFilter;
-    if (colormap) vizKey += std::string(",cm:") + colormap;
-    if (rescale) vizKey += std::string(",rs:") + rescale;
-
-    const std::string hashStr = inputPathHash ? std::string(inputPathHash) : "";
-
-    ddb::ThumbVisParams visParams;
-    if (preset) visParams.preset = std::string(preset);
-    if (bands) visParams.bands = std::string(bands);
-    if (formula) visParams.formula = std::string(formula);
-    if (bandFilter) visParams.bandFilter = std::string(bandFilter);
-    if (colormap) visParams.colormap = std::string(colormap);
-    if (rescale) visParams.rescale = std::string(rescale);
-
-    ddb::TilerHelper::getTile(std::string(inputPath),
-                              tz, tx, ty,
-                              tileSize, tms,
-                              forceRecreate,
-                              "",
-                              visParams,
-                              outBuffer, outBufferSize,
-                              hashStr + vizKey);
-
-    DDB_C_END
-}
-
-DDB_DLL DDBErr DDBValidateMergeMultispectral(const char** paths, int numPaths, char** output) {
-    DDB_C_BEGIN
-
-    if (paths == nullptr || numPaths < 1)
-        throw InvalidArgsException("No input paths provided");
-    if (output == nullptr)
-        throw InvalidArgsException("Output pointer is null");
-
-    std::vector<std::string> inputPaths;
-    for (int i = 0; i < numPaths; i++) {
-        if (paths[i]) inputPaths.emplace_back(paths[i]);
-    }
-
-    auto validationResult = ddb::validateMergeMultispectral(inputPaths);
-
-    json j;
-    j["ok"] = validationResult.ok;
-    j["errors"] = validationResult.errors;
-    j["warnings"] = validationResult.warnings;
-    j["summary"] = {
-        {"totalBands", validationResult.summary.totalBands},
-        {"dataType", validationResult.summary.dataType},
-        {"width", validationResult.summary.width},
-        {"height", validationResult.summary.height},
-        {"crs", validationResult.summary.crs},
-        {"pixelSizeX", validationResult.summary.pixelSizeX},
-        {"pixelSizeY", validationResult.summary.pixelSizeY},
-        {"estimatedSize", validationResult.summary.estimatedSize}
-    };
-
-    // Alignment info
-    json alignmentJson;
-    alignmentJson["detected"] = validationResult.alignment.detected;
-    alignmentJson["maxShiftPixels"] = validationResult.alignment.maxShiftPixels;
-    alignmentJson["correctionApplied"] = validationResult.alignment.correctionApplied;
-    alignmentJson["shiftSource"] = validationResult.alignment.shiftSource;
-
-    json bandsJson = json::array();
-    for (size_t i = 0; i < validationResult.alignment.bands.size(); i++) {
-        const auto &b = validationResult.alignment.bands[i];
-        bandsJson.push_back({
-            {"index", i},
-            {"name", b.bandName},
-            {"wavelength", b.centralWavelength},
-            {"shiftX", b.shiftX},
-            {"shiftY", b.shiftY}
-        });
-    }
-    alignmentJson["bands"] = bandsJson;
-    j["alignment"] = alignmentJson;
-
-    utils::copyToPtr(j.dump(), output);
-
-    DDB_C_END
-}
-
-DDB_DLL DDBErr DDBPreviewMergeMultispectral(const char** paths, int numPaths,
-                                             const char* previewBands, int thumbSize,
-                                             uint8_t** outBuffer, int* outBufferSize) {
-    DDB_C_BEGIN
-
-    if (paths == nullptr || numPaths < 1)
-        throw InvalidArgsException("No input paths provided");
-    if (outBuffer == nullptr)
-        throw InvalidArgsException("Output buffer pointer is null");
-    if (outBufferSize == nullptr)
-        throw InvalidArgsException("Output buffer size pointer is null");
-
-    std::vector<std::string> inputPaths;
-    for (int i = 0; i < numPaths; i++) {
-        if (paths[i]) inputPaths.emplace_back(paths[i]);
-    }
-
-    std::vector<int> bandsVec;
-    if (previewBands) {
-        std::istringstream ss(previewBands);
-        std::string token;
-        while (std::getline(ss, token, ',')) {
-            try {
-                bandsVec.push_back(std::stoi(token));
-            } catch (const std::exception&) {
-                throw InvalidArgsException("Invalid preview band value: '" + token + "'");
+        } else {
+            // Per-band statistics
+            for (int i = 1; i <= nBands; i++) {
+                GDALRasterBandH hBand = GDALGetRasterBand(hDs, i);
+                double bMin, bMax, bMean, bStdDev;
+                if (GDALComputeRasterStatistics(hBand, TRUE, &bMin, &bMax, &bMean, &bStdDev, nullptr, nullptr) == CE_None) {
+                    statsJson[std::to_string(i)] = {
+                        {"min", bMin}, {"max", bMax}, {"mean", bMean}, {"std", bStdDev},
+                        {"percentiles", {{"p2", bMean - 2.33 * bStdDev}, {"p98", bMean + 2.33 * bStdDev}}}
+                    };
+                }
             }
         }
-    }
-    if (bandsVec.size() < 3) {
-        bandsVec = {1, 2, 3};
-    }
 
-    ddb::previewMergeMultispectral(inputPaths, bandsVec, thumbSize > 0 ? thumbSize : 512, outBuffer, outBufferSize);
+        result["statistics"] = statsJson;
 
-    DDB_C_END
+        // Available algorithms for this band filter
+        // Include all formulas, mark incompatible ones as disabled
+        auto compatibleFormulas = ve.getFormulasForFilter(effectiveFilter);
+        auto allFormulas = ve.getAllFormulas();
+        json algJson = json::array();
+        for (const auto& f : allFormulas) {
+            json fj = {
+                {"id", f.id}, {"name", f.name}, {"expr", f.expr},
+                {"help", f.help}
+            };
+            if (f.hasRange) {
+                fj["range"] = {f.rangeMin, f.rangeMax};
+            }
+            bool compatible = false;
+            for (const auto& cf : compatibleFormulas) {
+                if (cf.id == f.id) { compatible = true; break; }
+            }
+            if (!compatible) {
+                fj["disabled"] = true;
+                fj["disabledReason"] = "Requires bands: " + f.requiredBands;
+            }
+            algJson.push_back(fj);
+        }
+        result["algorithms"] = algJson;
+
+        // Colormaps
+        result["colormaps"] = ve.getColormapsJson();
+
+        result["autoBands"] = {{"filter", effectiveFilter.id}, {"match", !effectiveFilter.id.empty()}};
+
+        auto& spm = ddb::SensorProfileManager::instance();
+        auto detection = spm.detectSensor(std::string(path));
+        result["detectedSensor"] = detection.sensorId;
+
+        dataset.reset();
+
+        return result;
+    });
 }
 
-DDB_DLL DDBErr DDBMergeMultispectral(const char** paths, int numPaths, const char* outputPath) {
-    DDB_C_BEGIN
+namespace {
 
-    if (paths == nullptr || numPaths < 2)
-        throw InvalidArgsException("At least 2 input paths required");
-    if (utils::isNullOrEmptyOrWhitespace(outputPath))
-        throw InvalidArgsException("No output path provided");
+// The visualization parameters of the Ex thumbnail and tile exports; NULL leaves one unset
+ddb::ThumbVisParams visParams(const char* preset, const char* bands, const char* formula,
+                              const char* bandFilter, const char* colormap, const char* rescale) {
+    ddb::ThumbVisParams params;
+    params.preset = optStr(preset);
+    params.bands = optStr(bands);
+    params.formula = optStr(formula);
+    params.bandFilter = optStr(bandFilter);
+    params.colormap = optStr(colormap);
+    params.rescale = optStr(rescale);
+    return params;
+}
 
+// The non-NULL elements of a list of input paths (the merge-multispectral exports skip NULL)
+std::vector<std::string> nonNullPaths(const char** paths, int numPaths) {
     std::vector<std::string> inputPaths;
     for (int i = 0; i < numPaths; i++) {
         if (paths[i]) inputPaths.emplace_back(paths[i]);
     }
-
-    ddb::mergeMultispectral(inputPaths, std::string(outputPath));
-
-    DDB_C_END
+    return inputPaths;
 }
 
-DDB_DLL DDBErr DDBValidateAlignRaster(const char* sourcePath,
-                                      const char* referencePath,
-                                      char** output) {
-    DDB_C_BEGIN
+}  // namespace
 
-    if (utils::isNullOrEmptyOrWhitespace(sourcePath))
-        throw InvalidArgsException("sourcePath is required");
-    if (utils::isNullOrEmptyOrWhitespace(referencePath))
-        throw InvalidArgsException("referencePath is required");
-    if (output == nullptr)
-        throw InvalidArgsException("Output pointer is null");
 
-    auto r = ddb::validateAlignRaster(std::string(sourcePath),
-                                      std::string(referencePath));
-    utils::copyToPtr(ddb::alignValidationToJson(r), output);
+DDBErr DDBGenerateMemoryThumbnailEx(const char* filePath, int size,
+                                    const char* preset, const char* bands,
+                                    const char* formula, const char* bandFilter,
+                                    const char* colormap, const char* rescale,
+                                    uint8_t** outBuffer, int* outBufferSize) {
+    return guardedBuffer(outBuffer, outBufferSize, [&](uint8_t** buffer, int* bufferSize) {
+        requireText(filePath, "No file path provided");
+        if (size < 0)
+            throw InvalidArgsException("Invalid size parameter");
+        requireBufferOutput(outBuffer, outBufferSize);
 
-    DDB_C_END
+        ddb::generateImageThumbEx(pathArg(filePath), size, "", buffer, bufferSize,
+                                  visParams(preset, bands, formula, bandFilter, colormap, rescale));
+    });
 }
 
-DDB_DLL DDBErr DDBAlignRaster(const char* sourcePath,
+DDBErr DDBMemoryTileEx(const char* inputPath,
+                       int tz, int tx, int ty,
+                       int tileSize, bool tms,
+                       bool forceRecreate, const char* inputPathHash,
+                       const char* preset, const char* bands,
+                       const char* formula, const char* bandFilter,
+                       const char* colormap, const char* rescale,
+                       uint8_t** outBuffer, int* outBufferSize) {
+    return guardedBuffer(outBuffer, outBufferSize, [&](uint8_t** buffer, int* bufferSize) {
+        requireText(inputPath, "No input path provided");
+        requireBufferOutput(outBuffer, outBufferSize);
+        requireTileArgs(tz, tx, ty, tileSize);
+
+        // Build vizKey from params for cache differentiation
+        std::string vizKey;
+        if (preset) vizKey += std::string("p:") + preset;
+        if (bands) vizKey += std::string(",b:") + bands;
+        if (formula) vizKey += std::string(",f:") + formula;
+        if (bandFilter) vizKey += std::string(",bf:") + bandFilter;
+        if (colormap) vizKey += std::string(",cm:") + colormap;
+        if (rescale) vizKey += std::string(",rs:") + rescale;
+
+        ddb::TilerHelper::getTile(pathArg(inputPath),
+                                  tz, tx, ty,
+                                  tileSize, tms,
+                                  forceRecreate,
+                                  "",
+                                  visParams(preset, bands, formula, bandFilter, colormap, rescale),
+                                  buffer, bufferSize,
+                                  optStr(inputPathHash) + vizKey);
+    });
+}
+
+DDBErr DDBValidateMergeMultispectral(const char** paths, int numPaths, char** output) {
+    return guardedOutput(output, [&] {
+        if (paths == nullptr || numPaths < 1)
+            throw InvalidArgsException("No input paths provided");
+        requireOutput(output);
+
+        auto validationResult = ddb::validateMergeMultispectral(nonNullPaths(paths, numPaths));
+
+        json j;
+        j["ok"] = validationResult.ok;
+        j["errors"] = validationResult.errors;
+        j["warnings"] = validationResult.warnings;
+        j["summary"] = {
+            {"totalBands", validationResult.summary.totalBands},
+            {"dataType", validationResult.summary.dataType},
+            {"width", validationResult.summary.width},
+            {"height", validationResult.summary.height},
+            {"crs", validationResult.summary.crs},
+            {"pixelSizeX", validationResult.summary.pixelSizeX},
+            {"pixelSizeY", validationResult.summary.pixelSizeY},
+            {"estimatedSize", validationResult.summary.estimatedSize}
+        };
+
+        // Alignment info
+        json alignmentJson;
+        alignmentJson["detected"] = validationResult.alignment.detected;
+        alignmentJson["maxShiftPixels"] = validationResult.alignment.maxShiftPixels;
+        alignmentJson["correctionApplied"] = validationResult.alignment.correctionApplied;
+        alignmentJson["shiftSource"] = validationResult.alignment.shiftSource;
+
+        json bandsJson = json::array();
+        for (size_t i = 0; i < validationResult.alignment.bands.size(); i++) {
+            const auto &b = validationResult.alignment.bands[i];
+            bandsJson.push_back({
+                {"index", i},
+                {"name", b.bandName},
+                {"wavelength", b.centralWavelength},
+                {"shiftX", b.shiftX},
+                {"shiftY", b.shiftY}
+            });
+        }
+        alignmentJson["bands"] = bandsJson;
+        j["alignment"] = alignmentJson;
+
+        return j;
+    });
+}
+
+DDBErr DDBPreviewMergeMultispectral(const char** paths, int numPaths,
+                                    const char* previewBands, int thumbSize,
+                                    uint8_t** outBuffer, int* outBufferSize) {
+    return guardedBuffer(outBuffer, outBufferSize, [&](uint8_t** buffer, int* bufferSize) {
+        if (paths == nullptr || numPaths < 1)
+            throw InvalidArgsException("No input paths provided");
+        requireBufferOutput(outBuffer, outBufferSize);
+
+        const auto inputPaths = nonNullPaths(paths, numPaths);
+
+        std::vector<int> bandsVec;
+        if (previewBands) {
+            std::istringstream ss(previewBands);
+            std::string token;
+            while (std::getline(ss, token, ',')) {
+                try {
+                    bandsVec.push_back(std::stoi(token));
+                } catch (const std::exception&) {
+                    throw InvalidArgsException("Invalid preview band value: '" + token + "'");
+                }
+            }
+        }
+        if (bandsVec.size() < 3) {
+            bandsVec = {1, 2, 3};
+        }
+
+        ddb::previewMergeMultispectral(inputPaths, bandsVec, thumbSize > 0 ? thumbSize : 512, buffer, bufferSize);
+    });
+}
+
+DDBErr DDBMergeMultispectral(const char** paths, int numPaths, const char* outputPath) {
+    return guarded([&] {
+        if (paths == nullptr || numPaths < 2)
+            throw InvalidArgsException("At least 2 input paths required");
+        requireText(outputPath, "No output path provided");
+
+        ddb::mergeMultispectral(nonNullPaths(paths, numPaths), std::string(outputPath));
+    });
+}
+
+DDBErr DDBValidateAlignRaster(const char* sourcePath,
                               const char* referencePath,
-                              const char* outputPath,
-                              const char* mode,
                               char** output) {
-    DDB_C_BEGIN
+    return guardedOutput(output, [&] {
+        requireText(sourcePath, "sourcePath is required");
+        requireText(referencePath, "referencePath is required");
+        requireOutput(output);
 
-    if (utils::isNullOrEmptyOrWhitespace(sourcePath))
-        throw InvalidArgsException("sourcePath is required");
-    if (utils::isNullOrEmptyOrWhitespace(referencePath))
-        throw InvalidArgsException("referencePath is required");
-    if (utils::isNullOrEmptyOrWhitespace(outputPath))
-        throw InvalidArgsException("outputPath is required");
-    if (output == nullptr)
-        throw InvalidArgsException("Output pointer is null");
+        auto r = ddb::validateAlignRaster(std::string(sourcePath),
+                                          std::string(referencePath));
+        return ddb::alignValidationToJson(r);
+    });
+}
 
-    ddb::AlignOptions opts;
-    if (mode) {
-        std::string modeStr(mode);
-        if (modeStr == "translation")
-            opts.mode = ddb::AlignMode::Translation;
-        else if (!modeStr.empty() && modeStr != "similarity")
-            throw InvalidArgsException("Unknown mode '" + modeStr + "'. Use: similarity | translation");
-    }
+DDBErr DDBAlignRaster(const char* sourcePath,
+                      const char* referencePath,
+                      const char* outputPath,
+                      const char* mode,
+                      char** output) {
+    return guardedOutput(output, [&] {
+        requireText(sourcePath, "sourcePath is required");
+        requireText(referencePath, "referencePath is required");
+        requireText(outputPath, "outputPath is required");
+        requireOutput(output);
 
-    auto r = ddb::alignRaster(std::string(sourcePath),
-                              std::string(referencePath),
-                              std::string(outputPath), opts);
-    utils::copyToPtr(ddb::alignResultToJson(r), output);
+        ddb::AlignOptions opts;
+        if (mode) {
+            std::string modeStr(mode);
+            if (modeStr == "translation")
+                opts.mode = ddb::AlignMode::Translation;
+            else if (!modeStr.empty() && modeStr != "similarity")
+                throw InvalidArgsException("Unknown mode '" + modeStr + "'. Use: similarity | translation");
+        }
 
-    DDB_C_END
+        auto r = ddb::alignRaster(std::string(sourcePath),
+                                  std::string(referencePath),
+                                  std::string(outputPath), opts);
+        return ddb::alignResultToJson(r);
+    });
 }
 
 // Build internal, power-of-two overviews on a freshly written GeoTIFF so the
@@ -2184,19 +1730,17 @@ static int computeExportTileSize(GDALDatasetH hSrcDs, int bandCount, int tileSiz
 
 // Internal block-windowed raster export shared by DDBExportRaster (legacy ABI)
 // and DDBExportRaster2. Returns 0 on success, 1 if canceled by the progress
-// callback. Throws on errors (translated by the DDB_C_END macro in the callers).
+// callback. Throws on errors (mapped to a DDBErr by guarded() in the callers).
 static int exportRasterImpl(const char* inputPath, const char* outputPath,
                             const char* preset, const char* bands,
                             const char* formula, const char* bandFilter,
                             const char* colormap, const char* rescale,
                             int tileSize,
                             DDBProgressCallback progress, void* progressUserData) {
-    if (utils::isNullOrEmptyOrWhitespace(inputPath))
-        throw InvalidArgsException("No input path provided");
-    if (utils::isNullOrEmptyOrWhitespace(outputPath))
-        throw InvalidArgsException("No output path provided");
+    requireText(inputPath, "No input path provided");
+    requireText(outputPath, "No output path provided");
     // Creating the output truncates an existing file, so it must not be the input
-    io::assureDistinctOutput(inputPath, outputPath);
+    io::assureDistinctOutput(pathArg(inputPath), pathArg(outputPath));
 
     // Returns true if the operation should be canceled.
     auto reportProgress = [&](double fraction, const char* phase) -> bool {
@@ -2214,12 +1758,12 @@ static int exportRasterImpl(const char* inputPath, const char* outputPath,
     const int height = GDALGetRasterYSize(hSrcDs);
     const int bandCount = GDALGetRasterCount(hSrcDs);
 
-    const std::string formulaStr = formula ? std::string(formula) : "";
-    const std::string bandsStr = bands ? std::string(bands) : "";
-    const std::string presetStr = preset ? std::string(preset) : "";
-    const std::string filterStr = bandFilter ? std::string(bandFilter) : "";
-    const std::string colormapStr = colormap ? std::string(colormap) : "";
-    const std::string rescaleStr = rescale ? std::string(rescale) : "";
+    const std::string formulaStr = optStr(formula);
+    const std::string bandsStr = optStr(bands);
+    const std::string presetStr = optStr(preset);
+    const std::string filterStr = optStr(bandFilter);
+    const std::string colormapStr = optStr(colormap);
+    const std::string rescaleStr = optStr(rescale);
 
     // Get source geotransform and projection
     double geoTransform[6];
@@ -2498,186 +2042,164 @@ static int exportRasterImpl(const char* inputPath, const char* outputPath,
     }
 }
 
-DDB_DLL DDBErr DDBExportRaster(const char* inputPath, const char* outputPath,
-                                const char* preset, const char* bands,
-                                const char* formula, const char* bandFilter,
-                                const char* colormap, const char* rescale) {
-    DDB_C_BEGIN
-    // Legacy ABI: forward to the block-windowed implementation with auto tile
-    // size and no progress callback (so it can never be canceled).
-    exportRasterImpl(inputPath, outputPath, preset, bands, formula, bandFilter,
-                     colormap, rescale, 0, nullptr, nullptr);
-    DDB_C_END
+DDBErr DDBExportRaster(const char* inputPath, const char* outputPath,
+                       const char* preset, const char* bands,
+                       const char* formula, const char* bandFilter,
+                       const char* colormap, const char* rescale) {
+    return guarded([&] {
+        // Legacy ABI: forward to the block-windowed implementation with auto tile
+        // size and no progress callback (so it can never be canceled).
+        exportRasterImpl(inputPath, outputPath, preset, bands, formula, bandFilter,
+                         colormap, rescale, 0, nullptr, nullptr);
+    });
 }
 
-DDB_DLL DDBErr DDBExportRaster2(const char* inputPath, const char* outputPath,
-                                 const char* preset, const char* bands,
-                                 const char* formula, const char* bandFilter,
-                                 const char* colormap, const char* rescale,
-                                 int tileSize,
-                                 DDBProgressCallback progress, void* progressUserData) {
-    DDB_C_BEGIN
-    const int canceled = exportRasterImpl(inputPath, outputPath, preset, bands,
-                                          formula, bandFilter, colormap, rescale,
-                                          tileSize, progress, progressUserData);
-    if (canceled)
-        return DDBERR_CANCELED;
-    DDB_C_END
+DDBErr DDBExportRaster2(const char* inputPath, const char* outputPath,
+                        const char* preset, const char* bands,
+                        const char* formula, const char* bandFilter,
+                        const char* colormap, const char* rescale,
+                        int tileSize,
+                        DDBProgressCallback progress, void* progressUserData) {
+    // DDBExportRaster2 has always returned DDBERR_CANCELED (ABI 1.0)
+    return guarded<kFrozenCodes | codeBit(DDBERR_CANCELED)>([&] {
+        const int canceled = exportRasterImpl(inputPath, outputPath, preset, bands,
+                                              formula, bandFilter, colormap, rescale,
+                                              tileSize, progress, progressUserData);
+        if (canceled)
+            throw CanceledException("Export canceled by the progress callback");
+    });
 }
 
 
-DDB_DLL DDBErr DDBGetRasterValueInfo(const char *filePath, char **output) {
-    DDB_C_BEGIN
-    if (utils::isNullOrEmptyOrWhitespace(filePath))
-        throw InvalidArgsException("No file path provided");
-    if (output == nullptr)
-        throw InvalidArgsException("Output pointer is null");
+DDBErr DDBGetRasterValueInfo(const char *filePath, char **output) {
+    return guardedOutput(output, [&] {
+        requireText(filePath, "No file path provided");
+        requireOutput(output);
 
-    std::string jsonStr = ddb::getRasterValueInfoJson(std::string(filePath));
-    utils::copyToPtr(jsonStr, output);
-    DDB_C_END
+        std::string jsonStr = ddb::getRasterValueInfoJson(std::string(filePath));
+        return jsonStr;
+    });
 }
 
-DDB_DLL DDBErr DDBGetRasterPointValue(const char *filePath, int x, int y, char **output) {
-    DDB_C_BEGIN
-    if (utils::isNullOrEmptyOrWhitespace(filePath))
-        throw InvalidArgsException("No file path provided");
-    if (output == nullptr)
-        throw InvalidArgsException("Output pointer is null");
+DDBErr DDBGetRasterPointValue(const char *filePath, int x, int y, char **output) {
+    return guardedOutput(output, [&] {
+        requireText(filePath, "No file path provided");
+        requireOutput(output);
 
-    std::string jsonStr = ddb::getRasterPointJson(std::string(filePath), x, y);
-    utils::copyToPtr(jsonStr, output);
-    DDB_C_END
+        std::string jsonStr = ddb::getRasterPointJson(std::string(filePath), x, y);
+        return jsonStr;
+    });
 }
 
-DDB_DLL DDBErr DDBGetRasterAreaStats(const char *filePath, int x0, int y0, int x1, int y1, char **output) {
-    DDB_C_BEGIN
-    if (utils::isNullOrEmptyOrWhitespace(filePath))
-        throw InvalidArgsException("No file path provided");
-    if (output == nullptr)
-        throw InvalidArgsException("Output pointer is null");
+DDBErr DDBGetRasterAreaStats(const char *filePath, int x0, int y0, int x1, int y1, char **output) {
+    return guardedOutput(output, [&] {
+        requireText(filePath, "No file path provided");
+        requireOutput(output);
 
-    std::string jsonStr = ddb::getRasterAreaStatsJson(std::string(filePath), x0, y0, x1, y1);
-    utils::copyToPtr(jsonStr, output);
-    DDB_C_END
+        std::string jsonStr = ddb::getRasterAreaStatsJson(std::string(filePath), x0, y0, x1, y1);
+        return jsonStr;
+    });
 }
 
-DDB_DLL DDBErr DDBGetRasterProfile(const char *filePath, const char *geoJsonLineString,
-                                   int samples, char **output) {
-    DDB_C_BEGIN
-    if (utils::isNullOrEmptyOrWhitespace(filePath))
-        throw InvalidArgsException("No file path provided");
-    if (utils::isNullOrEmptyOrWhitespace(geoJsonLineString))
-        throw InvalidArgsException("No GeoJSON LineString provided");
-    if (output == nullptr)
-        throw InvalidArgsException("Output pointer is null");
+DDBErr DDBGetRasterProfile(const char *filePath, const char *geoJsonLineString,
+                           int samples, char **output) {
+    return guardedOutput(output, [&] {
+        requireText(filePath, "No file path provided");
+        requireText(geoJsonLineString, "No GeoJSON LineString provided");
+        requireOutput(output);
 
-    std::string jsonStr = ddb::getRasterProfileJson(std::string(filePath),
-                                                    std::string(geoJsonLineString),
-                                                    samples);
-    utils::copyToPtr(jsonStr, output);
-    DDB_C_END
+        std::string jsonStr = ddb::getRasterProfileJson(std::string(filePath),
+                                                        std::string(geoJsonLineString),
+                                                        samples);
+        return jsonStr;
+    });
 }
 
-DDB_DLL DDBErr DDBCalculateVolume(const char *rasterPath,
-                                  const char *polygonGeoJSON,
-                                  const char *baseMethod,
-                                  double flatElevation,
-                                  char **output) {
-    DDB_C_BEGIN
-    if (utils::isNullOrEmptyOrWhitespace(rasterPath))
-        throw InvalidArgsException("No raster path provided");
-    if (utils::isNullOrEmptyOrWhitespace(polygonGeoJSON))
-        throw InvalidArgsException("No polygon GeoJSON provided");
-    if (output == nullptr)
-        throw InvalidArgsException("Output pointer is null");
+DDBErr DDBCalculateVolume(const char *rasterPath,
+                          const char *polygonGeoJSON,
+                          const char *baseMethod,
+                          double flatElevation,
+                          char **output) {
+    return guardedOutput(output, [&] {
+        requireText(rasterPath, "No raster path provided");
+        requireText(polygonGeoJSON, "No polygon GeoJSON provided");
+        requireOutput(output);
 
-    const std::string method = (baseMethod == nullptr) ? std::string()
-                                                       : std::string(baseMethod);
-    std::string jsonStr = ddb::calculateVolumeJson(std::string(rasterPath),
-                                                   std::string(polygonGeoJSON),
-                                                   method,
-                                                   flatElevation);
-    utils::copyToPtr(jsonStr, output);
-    DDB_C_END
+        const std::string method = optStr(baseMethod);
+        std::string jsonStr = ddb::calculateVolumeJson(std::string(rasterPath),
+                                                       std::string(polygonGeoJSON),
+                                                       method,
+                                                       flatElevation);
+        return jsonStr;
+    });
 }
 
-DDB_DLL DDBErr DDBDetectStockpile(const char *rasterPath,
-                                  double lat, double lon,
-                                  double radius,
-                                  float sensitivity,
-                                  char **output) {
-    DDB_C_BEGIN
-    if (utils::isNullOrEmptyOrWhitespace(rasterPath))
-        throw InvalidArgsException("No raster path provided");
-    if (output == nullptr)
-        throw InvalidArgsException("Output pointer is null");
+DDBErr DDBDetectStockpile(const char *rasterPath,
+                          double lat, double lon,
+                          double radius,
+                          float sensitivity,
+                          char **output) {
+    return guardedOutput(output, [&] {
+        requireText(rasterPath, "No raster path provided");
+        requireOutput(output);
 
-    std::string jsonStr = ddb::detectStockpileJson(std::string(rasterPath),
-                                                   lat, lon, radius, sensitivity);
-    utils::copyToPtr(jsonStr, output);
-    DDB_C_END
+        std::string jsonStr = ddb::detectStockpileJson(std::string(rasterPath),
+                                                       lat, lon, radius, sensitivity);
+        return jsonStr;
+    });
 }
 
-DDB_DLL DDBErr DDBDetectAllStockpiles(const char *rasterPath,
-                                      float sensitivity,
-                                      double minAreaM2,
-                                      int maxResults,
-                                      char **output) {
-    DDB_C_BEGIN
-    if (utils::isNullOrEmptyOrWhitespace(rasterPath))
-        throw InvalidArgsException("No raster path provided");
-    if (output == nullptr)
-        throw InvalidArgsException("Output pointer is null");
+DDBErr DDBDetectAllStockpiles(const char *rasterPath,
+                              float sensitivity,
+                              double minAreaM2,
+                              int maxResults,
+                              char **output) {
+    return guardedOutput(output, [&] {
+        requireText(rasterPath, "No raster path provided");
+        requireOutput(output);
 
-    std::string jsonStr = ddb::detectAllStockpilesJson(std::string(rasterPath),
-                                                       sensitivity,
-                                                       minAreaM2,
-                                                       maxResults);
-    utils::copyToPtr(jsonStr, output);
-    DDB_C_END
+        std::string jsonStr = ddb::detectAllStockpilesJson(std::string(rasterPath),
+                                                           sensitivity,
+                                                           minAreaM2,
+                                                           maxResults);
+        return jsonStr;
+    });
 }
 
-DDB_DLL DDBErr DDBGenerateContours(const char *rasterPath,
-                                   double interval,
-                                   int count,
-                                   double baseOffset,
-                                   double minElev,
-                                   double maxElev,
-                                   double simplifyTolerance,
-                                   int bandIndex,
-                                   char **output) {
-    DDB_C_BEGIN
-    if (utils::isNullOrEmptyOrWhitespace(rasterPath))
-        throw InvalidArgsException("No raster path provided");
-    if (output == nullptr)
-        throw InvalidArgsException("Output pointer is null");
+DDBErr DDBGenerateContours(const char *rasterPath,
+                           double interval,
+                           int count,
+                           double baseOffset,
+                           double minElev,
+                           double maxElev,
+                           double simplifyTolerance,
+                           int bandIndex,
+                           char **output) {
+    return guardedOutput(output, [&] {
+        requireText(rasterPath, "No raster path provided");
+        requireOutput(output);
 
-    ContourOptions opts;
-    if (interval > 0.0) opts.interval = interval;
-    if (count > 0) opts.count = count;
-    opts.baseOffset = baseOffset;
-    if (std::isfinite(minElev)) opts.minElev = minElev;
-    if (std::isfinite(maxElev)) opts.maxElev = maxElev;
-    opts.simplifyTolerance = std::max(0.0, simplifyTolerance);
-    opts.bandIndex = (bandIndex > 0) ? bandIndex : 1;
+        ContourOptions opts;
+        if (interval > 0.0) opts.interval = interval;
+        if (count > 0) opts.count = count;
+        opts.baseOffset = baseOffset;
+        if (std::isfinite(minElev)) opts.minElev = minElev;
+        if (std::isfinite(maxElev)) opts.maxElev = maxElev;
+        opts.simplifyTolerance = std::max(0.0, simplifyTolerance);
+        opts.bandIndex = (bandIndex > 0) ? bandIndex : 1;
 
-    std::string jsonStr = ddb::generateContoursJson(std::string(rasterPath), opts);
-    utils::copyToPtr(jsonStr, output);
-    DDB_C_END
+        std::string jsonStr = ddb::generateContoursJson(std::string(rasterPath), opts);
+        return jsonStr;
+    });
 }
 
-DDB_DLL DDBErr DDBMaskBorders(const char *input, const char *output, int nearDist, bool white) {
-    DDB_C_BEGIN
+DDBErr DDBMaskBorders(const char *input, const char *output, int nearDist, bool white) {
+    return guarded([&] {
+        requireText(input, "No input path provided");
+        requireText(output, "No output path provided");
 
-    if (utils::isNullOrEmptyOrWhitespace(input))
-        throw InvalidArgsException("No input path provided");
-    if (utils::isNullOrEmptyOrWhitespace(output))
-        throw InvalidArgsException("No output path provided");
-
-    ddb::maskBorders(std::string(input), std::string(output), nearDist, white);
-
-    DDB_C_END
+        ddb::maskBorders(std::string(input), std::string(output), nearDist, white);
+    });
 }
 
 
@@ -2685,13 +2207,13 @@ DDB_DLL DDBErr DDBMaskBorders(const char *input, const char *output, int nearDis
 // OGC services C API (raster region rendering + vector query/describe).
 // =====================================================================
 
-DDB_DLL DDBErr DDBRenderRasterRegion(const char *inputPath,
-                                     const double *bbox,
-                                     const char *bboxSrs,
-                                     int width, int height,
-                                     const char *format,
-                                     uint8_t **outBuffer,
-                                     int *outBufferSize) {
+DDBErr DDBRenderRasterRegion(const char *inputPath,
+                             const double *bbox,
+                             const char *bboxSrs,
+                             int width, int height,
+                             const char *format,
+                             uint8_t **outBuffer,
+                             int *outBufferSize) {
     // Legacy entry point: delegate to the extended variant with no band
     // selection and no explicit output CRS (target SRS = bbox SRS).
     return DDBRenderRasterRegionEx(inputPath, bbox, bboxSrs, nullptr,
@@ -2700,88 +2222,68 @@ DDB_DLL DDBErr DDBRenderRasterRegion(const char *inputPath,
                                    outBuffer, outBufferSize);
 }
 
-DDB_DLL DDBErr DDBRenderRasterRegionEx(const char *inputPath,
-                                       const double *bbox,
-                                       const char *bboxSrs,
-                                       const char *outputCrs,
-                                       const int *bands,
-                                       int bandCount,
-                                       int width, int height,
-                                       const char *format,
-                                       uint8_t **outBuffer,
-                                       int *outBufferSize) {
-    DDB_C_BEGIN
+DDBErr DDBRenderRasterRegionEx(const char *inputPath,
+                               const double *bbox,
+                               const char *bboxSrs,
+                               const char *outputCrs,
+                               const int *bands,
+                               int bandCount,
+                               int width, int height,
+                               const char *format,
+                               uint8_t **outBuffer,
+                               int *outBufferSize) {
+    return guardedBuffer(outBuffer, outBufferSize, [&](uint8_t** buffer, int* bufferSize) {
+        requireText(inputPath, "No input path provided");
+        requireOutput(bbox, "No bbox provided");
+        requireOutput(outBuffer, "outBuffer is null");
+        requireOutput(outBufferSize, "outBufferSize is null");
+        if (bandCount < 0)
+            throw InvalidArgsException("bandCount is negative");
+        if (bandCount > 0 && bands == nullptr)
+            throw InvalidArgsException("bands is null but bandCount > 0");
 
-    if (utils::isNullOrEmptyOrWhitespace(inputPath))
-        throw InvalidArgsException("No input path provided");
-    if (bbox == nullptr)
-        throw InvalidArgsException("No bbox provided");
-    if (outBuffer == nullptr)
-        throw InvalidArgsException("outBuffer is null");
-    if (outBufferSize == nullptr)
-        throw InvalidArgsException("outBufferSize is null");
-    if (bandCount < 0)
-        throw InvalidArgsException("bandCount is negative");
-    if (bandCount > 0 && bands == nullptr)
-        throw InvalidArgsException("bands is null but bandCount > 0");
+        std::vector<int> bandVec;
+        if (bandCount > 0) bandVec.assign(bands, bands + bandCount);
 
-    const std::string srs = bboxSrs ? bboxSrs : "";
-    const std::string fmt = format  ? format  : "";
-    const std::string oSrs = outputCrs ? outputCrs : "";
-    std::vector<int> bandVec;
-    if (bandCount > 0) bandVec.assign(bands, bands + bandCount);
-
-    ddb::renderRasterRegion(std::string(inputPath), bbox, srs,
-                            width, height, fmt, outBuffer, outBufferSize,
-                            oSrs, bandVec);
-
-    DDB_C_END
+        ddb::renderRasterRegion(std::string(inputPath), bbox, optStr(bboxSrs),
+                                width, height, optStr(format), buffer, bufferSize,
+                                optStr(outputCrs), bandVec);
+    });
 }
 
-DDB_DLL DDBErr DDBRenderRasterIndex(const char *inputPath,
-                                    const char *indexName,
-                                    const double *bbox,
-                                    const char *bboxSrs,
-                                    int width, int height,
-                                    const char *format,
-                                    uint8_t **outBuffer,
-                                    int *outBufferSize) {
-    DDB_C_BEGIN
+DDBErr DDBRenderRasterIndex(const char *inputPath,
+                            const char *indexName,
+                            const double *bbox,
+                            const char *bboxSrs,
+                            int width, int height,
+                            const char *format,
+                            uint8_t **outBuffer,
+                            int *outBufferSize) {
+    return guardedBuffer(outBuffer, outBufferSize, [&](uint8_t** buffer, int* bufferSize) {
+        requireText(inputPath, "No input path provided");
+        requireText(indexName, "No indexName provided");
+        requireOutput(bbox, "No bbox provided");
+        if (outBuffer == nullptr || outBufferSize == nullptr)
+            throw InvalidArgsException("outBuffer/outBufferSize is null");
 
-    if (utils::isNullOrEmptyOrWhitespace(inputPath))
-        throw InvalidArgsException("No input path provided");
-    if (utils::isNullOrEmptyOrWhitespace(indexName))
-        throw InvalidArgsException("No indexName provided");
-    if (bbox == nullptr)
-        throw InvalidArgsException("No bbox provided");
-    if (outBuffer == nullptr || outBufferSize == nullptr)
-        throw InvalidArgsException("outBuffer/outBufferSize is null");
-
-    const std::string srs = bboxSrs ? bboxSrs : "";
-    const std::string fmt = format ? format : "";
-    ddb::renderRasterIndex(std::string(inputPath), std::string(indexName),
-                           bbox, srs, width, height, fmt,
-                           outBuffer, outBufferSize);
-
-    DDB_C_END
+        ddb::renderRasterIndex(std::string(inputPath), std::string(indexName),
+                               bbox, optStr(bboxSrs), width, height, optStr(format),
+                               buffer, bufferSize);
+    });
 }
 
-DDB_DLL DDBErr DDBQueryRasterPoint(const char *inputPath,
-                                   double x, double y,
-                                   const char *srs,
-                                   char **output) {
-    DDB_C_BEGIN
+DDBErr DDBQueryRasterPoint(const char *inputPath,
+                           double x, double y,
+                           const char *srs,
+                           char **output) {
+    return guardedOutput(output, [&] {
+        requireText(inputPath, "No input path provided");
+        requireOutput(output, "output is null");
 
-    if (utils::isNullOrEmptyOrWhitespace(inputPath))
-        throw InvalidArgsException("No input path provided");
-    if (output == nullptr)
-        throw InvalidArgsException("output is null");
-
-    const std::string s = srs ? srs : "";
-    const std::string j = ddb::queryRasterPoint(std::string(inputPath), x, y, s);
-    utils::copyToPtr(j, output);
-
-    DDB_C_END
+        const std::string s = optStr(srs);
+        const std::string j = ddb::queryRasterPoint(std::string(inputPath), x, y, s);
+        return j;
+    });
 }
 
 namespace {
@@ -2802,110 +2304,95 @@ namespace {
 // The selection part of a vector query, validated
 VectorQuery vectorSelection(const char *vectorPath, const char *layerName, const double *bbox,
                             const char *bboxSrs, const long long *fids, int numFids, const char *where) {
-    if (utils::isNullOrEmptyOrWhitespace(vectorPath))
-        throw InvalidArgsException("No vector path provided");
+    requireText(vectorPath, "No vector path provided");
     if (numFids < 0 || (numFids > 0 && fids == nullptr))
         throw InvalidArgsException("Invalid feature id list");
 
     VectorQuery query;
-    query.layerName = layerName ? layerName : "";
+    query.layerName = optStr(layerName);
     if (bbox != nullptr)
         query.bbox = std::array<double, 4>{bbox[0], bbox[1], bbox[2], bbox[3]};
-    query.bboxSrs = bboxSrs ? bboxSrs : "";
+    query.bboxSrs = optStr(bboxSrs);
     query.fids.assign(fids, fids + numFids);
-    query.where = where ? where : "";
+    query.where = optStr(where);
     return query;
 }
 }  // namespace
 
-DDB_DLL DDBErr DDBQueryVector(const char *vectorPath,
-                              const char *layerName,
-                              const double *bbox,
-                              const char *bboxSrs,
-                              int maxFeatures,
-                              int startIndex,
-                              const char *outputFormat,
-                              char **output) {
+DDBErr DDBQueryVector(const char *vectorPath,
+                      const char *layerName,
+                      const double *bbox,
+                      const char *bboxSrs,
+                      int maxFeatures,
+                      int startIndex,
+                      const char *outputFormat,
+                      char **output) {
     return DDBQueryVectorEx(vectorPath, layerName, bbox, bboxSrs, nullptr, 0, nullptr, maxFeatures, startIndex,
                             outputFormat, output);
 }
 
-DDB_DLL DDBErr DDBQueryVectorEx(const char *vectorPath,
-                                const char *layerName,
-                                const double *bbox,
-                                const char *bboxSrs,
-                                const long long *fids,
-                                int numFids,
-                                const char *where,
-                                int maxFeatures,
-                                int startIndex,
-                                const char *outputFormat,
-                                char **output) {
-    DDB_C_BEGIN
+DDBErr DDBQueryVectorEx(const char *vectorPath,
+                        const char *layerName,
+                        const double *bbox,
+                        const char *bboxSrs,
+                        const long long *fids,
+                        int numFids,
+                        const char *where,
+                        int maxFeatures,
+                        int startIndex,
+                        const char *outputFormat,
+                        char **output) {
+    return guardedOutput(output, [&] {
+        requireOutput(output, "output is null");
 
-    if (output == nullptr)
-        throw InvalidArgsException("output is null");
+        auto query = vectorSelection(vectorPath, layerName, bbox, bboxSrs, fids, numFids, where);
+        query.outputFormat = mapVectorMime(outputFormat);
 
-    auto query = vectorSelection(vectorPath, layerName, bbox, bboxSrs, fids, numFids, where);
-    query.outputFormat = mapVectorMime(outputFormat);
+        // Clamp maxFeatures to spec range [1, 10000]; 0 -> default 1000.
+        int mf = maxFeatures;
+        if (mf <= 0) mf = 1000;
+        if (mf > 10000) mf = 10000;
+        query.maxFeatures = mf;
+        query.startIndex = startIndex < 0 ? 0 : startIndex;
 
-    // Clamp maxFeatures to spec range [1, 10000]; 0 -> default 1000.
-    int mf = maxFeatures;
-    if (mf <= 0) mf = 1000;
-    if (mf > 10000) mf = 10000;
-    query.maxFeatures = mf;
-    query.startIndex = startIndex < 0 ? 0 : startIndex;
-
-    utils::copyToPtr(ddb::queryVector(std::string(vectorPath), query), output);
-
-    DDB_C_END
+        return ddb::queryVector(std::string(vectorPath), query);
+    });
 }
 
-DDB_DLL DDBErr DDBCountVector(const char *vectorPath,
-                              const char *layerName,
-                              const double *bbox,
-                              const char *bboxSrs,
-                              const long long *fids,
-                              int numFids,
-                              const char *where,
-                              long long *count) {
-    DDB_C_BEGIN
+DDBErr DDBCountVector(const char *vectorPath,
+                      const char *layerName,
+                      const double *bbox,
+                      const char *bboxSrs,
+                      const long long *fids,
+                      int numFids,
+                      const char *where,
+                      long long *count) {
+    return guardedOutput(count, [&] {
+        requireOutput(count, "count is null");
 
-    if (count == nullptr)
-        throw InvalidArgsException("count is null");
-
-    const auto query = vectorSelection(vectorPath, layerName, bbox, bboxSrs, fids, numFids, where);
-    *count = ddb::countVectorFeatures(std::string(vectorPath), query);
-
-    DDB_C_END
+        const auto query = vectorSelection(vectorPath, layerName, bbox, bboxSrs, fids, numFids, where);
+        return ddb::countVectorFeatures(std::string(vectorPath), query);
+    });
 }
 
-DDB_DLL DDBErr DDBDescribeVector(const char *vectorPath,
-                                 const char *layerName,
-                                 char **output) {
-    DDB_C_BEGIN
+DDBErr DDBDescribeVector(const char *vectorPath,
+                         const char *layerName,
+                         char **output) {
+    return guardedOutput(output, [&] {
+        requireText(vectorPath, "No vector path provided");
+        requireOutput(output, "output is null");
 
-    if (utils::isNullOrEmptyOrWhitespace(vectorPath))
-        throw InvalidArgsException("No vector path provided");
-    if (output == nullptr)
-        throw InvalidArgsException("output is null");
-
-    const std::string layer = layerName ? layerName : "";
-    const std::string j = ddb::describeVector(std::string(vectorPath), layer);
-    utils::copyToPtr(j, output);
-
-    DDB_C_END
+        const std::string layer = optStr(layerName);
+        const std::string j = ddb::describeVector(std::string(vectorPath), layer);
+        return j;
+    });
 }
 
-DDB_DLL DDBErr DDBMakeCadPrj(const char *crs, char **output) {
-    DDB_C_BEGIN
+DDBErr DDBMakeCadPrj(const char *crs, char **output) {
+    return guardedOutput(output, [&] {
+        requireOutput(crs, "No coordinate system provided");
+        requireOutput(output, "output is null");
 
-    if (crs == nullptr)
-        throw InvalidArgsException("No coordinate system provided");
-    if (output == nullptr)
-        throw InvalidArgsException("output is null");
-
-    utils::copyToPtr(ddb::cad::prjContent(crs), output);
-
-    DDB_C_END
+        return ddb::cad::prjContent(crs);
+    });
 }

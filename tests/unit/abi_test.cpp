@@ -116,8 +116,19 @@ namespace
         EXPECT_CODE(CANCELED);
         EXPECT_CODE(BUSY);
         EXPECT_CODE(NOTFOUND);
+        EXPECT_CODE(INVALIDARGS);
+        EXPECT_CODE(RETRYABLE);
+        EXPECT_CODE(SHUTDOWN);
 #undef EXPECT_CODE
         EXPECT_EQ(capabilities()["errorCodes"], expected);
+    }
+
+    // The reasons DDBGetLastErrorReason returns (ABI 1.1): sorted, unique, the documented names
+    TEST(Capabilities, errorReasonsAreTheDocumentedNames)
+    {
+        const json reasons = capabilities()["errorReasons"];
+        ASSERT_TRUE(reasons.is_array()) << reasons.dump();
+        EXPECT_EQ(reasons, json({"idleTimeout", "lowDiskSpace", "noSpaceOnDevice"}));
     }
 
     TEST(Capabilities, cancellableAreExportsWithAProgressCallback)

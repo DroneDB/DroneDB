@@ -6,11 +6,12 @@ message(STATUS "SRC_LIST: ${SRC_LIST}")
 # libddb is assembled from two object libraries (DQ-03), each compiled once:
 #   ddb_core  every library source except the C API, plus the generated version TU (and the
 #             process initialization, ddb::registerProcess in process_init.cpp)
-#   ddb_capi  the C API: ddb.cpp, the only TU that implements the extern "C" functions of ddb.h
+#   ddb_capi  the C API: ddb.cpp, the only TU that implements the extern "C" functions of ddb.h,
+#             and c_api_util.cpp, its error mapper and argument helpers (c_api_util.h, private)
 # libddb (SHARED) = ddb_core + ddb_capi. ddb_unit_tests (tests/CMakeLists.txt) links the same
 # objects statically and never libddb: no binary may contain both, otherwise the plog instance
 # (PLOG_GLOBAL) and the library's singletons would exist twice in one process.
-set(DDB_CAPI_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/library/ddb.cpp")
+set(DDB_CAPI_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/library/ddb.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/library/c_api_util.cpp")
 set(DDB_CORE_SOURCES ${SRC_LIST})
 list(REMOVE_ITEM DDB_CORE_SOURCES ${DDB_CAPI_SOURCES})
 

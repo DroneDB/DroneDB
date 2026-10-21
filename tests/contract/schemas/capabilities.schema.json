@@ -1,12 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "libddb capabilities",
-  "description": "DDBGetCapabilities (XI-01): ABI version, library version, error codes, cancellable exports and the exported symbols (src/include/ddb.symbols)",
+  "description": "DDBGetCapabilities (XI-01): ABI version, library version, error codes, error reasons, cancellable exports and the exported symbols (src/include/ddb.symbols)",
   "type": "object",
   "required": [
     "abi",
     "version",
     "errorCodes",
+    "errorReasons",
     "cancellable",
     "symbols"
   ],
@@ -44,7 +45,10 @@
         "BUILDINPROGRESS",
         "CANCELED",
         "BUSY",
-        "NOTFOUND"
+        "NOTFOUND",
+        "INVALIDARGS",
+        "RETRYABLE",
+        "SHUTDOWN"
       ],
       "properties": {
         "NONE": {
@@ -67,11 +71,28 @@
         },
         "NOTFOUND": {
           "const": 6
+        },
+        "INVALIDARGS": {
+          "const": 7
+        },
+        "RETRYABLE": {
+          "const": 8
+        },
+        "SHUTDOWN": {
+          "const": 9
         }
       },
       "additionalProperties": {
         "type": "integer",
         "minimum": 0
+      }
+    },
+    "errorReasons": {
+      "description": "Every reason DDBGetLastErrorReason returns (ABI 1.1), sorted; reasons are only added",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][A-Za-z0-9]*$"
       }
     },
     "cancellable": {

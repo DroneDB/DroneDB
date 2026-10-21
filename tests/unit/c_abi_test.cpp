@@ -34,13 +34,16 @@ namespace
     using namespace ddb;
     using testutils::GeoRasterSpec;
 
-    // Expects the call to fail with DDBERR_EXCEPTION and a message in DDBGetLastError()
+    // Expects the call to fail with DDBERR_EXCEPTION (ABI 1.0 exports keep it for an invalid
+    // argument in ABI 1.1, see ddb.h) and a message of its own in DDBGetLastError(): the call
+    // replaces a stale message
 #define EXPECT_DDB_INVALID(call)                                       \
     do                                                                 \
     {                                                                  \
-        DDBSetLastError("");                                           \
+        DDBSetLastError("stale");                                      \
         EXPECT_EQ((call), DDBERR_EXCEPTION) << #call;                  \
         EXPECT_STRNE(DDBGetLastError(), "") << #call;                  \
+        EXPECT_STRNE(DDBGetLastError(), "stale") << #call;             \
     } while (0)
 
     // Expects the call to succeed, printing the last error otherwise

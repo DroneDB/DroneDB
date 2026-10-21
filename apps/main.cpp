@@ -63,7 +63,11 @@ int main(int argc, char *argv[])
 #else
     setenv("DDB_DB_POOL_SIZE", "0", 0);
 #endif
-    DDBRegisterProcess(hasParam(argc, argv, "--debug"));
+    if (DDBRegisterProcess(hasParam(argc, argv, "--debug")) != DDBERR_NONE)
+    {
+        std::cerr << DDBGetLastError() << std::endl;
+        return EXIT_FAILURE;
+    }
     installCrashHandlers();
 
     // Super secret command to generate docs

@@ -401,7 +401,6 @@ namespace
         const std::string r = root.string();
         char* out = nullptr;
 
-        DDBSetLastError("");
         EXPECT_EQ(DDBStacData(r.c_str(), "missing.tif", &out), DDBERR_NOTFOUND);
         EXPECT_STRNE(DDBGetLastError(), "");
         EXPECT_EQ(out, nullptr);
@@ -409,13 +408,18 @@ namespace
         EXPECT_EQ(DDBStac(r.c_str(), "missing.tif", kCollectionRoot, nullptr, kCatalogRoot, &out),
                   DDBERR_EXCEPTION);
 
-        EXPECT_EQ(DDBStacData(nullptr, "", &out), DDBERR_EXCEPTION);
-        EXPECT_EQ(DDBStacData(r.c_str(), "", nullptr), DDBERR_EXCEPTION);
-        EXPECT_EQ(DDBStacItemCollectionData(nullptr, "", "", 10, 0, &out), DDBERR_EXCEPTION);
-        EXPECT_EQ(DDBStacItemCollectionData(r.c_str(), "", "", 10, 0, nullptr), DDBERR_EXCEPTION);
-        EXPECT_EQ(DDBStacItemCollectionData(r.c_str(), "1,2,3", "", 10, 0, &out), DDBERR_EXCEPTION);
+        // ABI 1.1 exports: an invalid argument is DDBERR_INVALIDARGS
+        EXPECT_EQ(DDBStacData(nullptr, "", &out), DDBERR_INVALIDARGS);
+        EXPECT_EQ(DDBStacData(r.c_str(), "", nullptr), DDBERR_INVALIDARGS);
+        EXPECT_EQ(DDBStacItemCollectionData(nullptr, "", "", 10, 0, &out), DDBERR_INVALIDARGS);
+        EXPECT_EQ(DDBStacItemCollectionData(r.c_str(), "", "", 10, 0, nullptr), DDBERR_INVALIDARGS);
+        EXPECT_EQ(DDBStacItemCollectionData(r.c_str(), "1,2,3", "", 10, 0, &out), DDBERR_INVALIDARGS);
         EXPECT_EQ(DDBStacItemCollectionData(r.c_str(), "a,b,c,d", "", 10, 0, &out),
-                  DDBERR_EXCEPTION);
+                  DDBERR_INVALIDARGS);
+        EXPECT_STRNE(DDBGetLastError(), "");
+        EXPECT_EQ(out, nullptr);
+        // Not a dataset: not an argument error
+        EXPECT_EQ(DDBStacData((root / "missing").string().c_str(), "", &out), DDBERR_EXCEPTION);
         EXPECT_EQ(out, nullptr);
     }
 

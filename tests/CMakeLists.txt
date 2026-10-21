@@ -164,6 +164,9 @@ if(BUILD_TESTING)
         LINK ddb_core_usage
         SERIAL DDB03_Delta.isLinear
     )
+    # The C API's private headers (src/library/c_api_util.h), for the unit tests of its mapper;
+    # after tests/ and the public headers, so no name there is shadowed
+    target_include_directories(ddb_unit_tests PRIVATE "${PROJECT_SOURCE_DIR}/src/library")
     # Same runtime files as libddb (data files, Windows DLLs): the unit binary does not depend
     # on the ddb target
     ddb_stage_runtime_files(ddb_unit_tests)

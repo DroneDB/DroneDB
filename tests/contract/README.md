@@ -84,7 +84,7 @@ with ddb).
 | `raster-info` | `DDBGetRasterInfo(<root>/ortho.tif)` | `raster-info` | - |
 | `raster-metadata` | `DDBGetRasterMetadata(<root>/ortho.tif, NULL, NULL)`: per-band statistics | `raster-metadata` | - |
 | `raster-metadata-formula` | `DDBGetRasterMetadata(<root>/ortho.tif, "VARI", "RGB")`: formula statistics and histogram | `raster-metadata` | - |
-| `capabilities` | `DDBGetCapabilities()` (no dataset): ABI version, error codes, cancellable exports, the symbol manifest | `capabilities` | `version` |
+| `capabilities` | `DDBGetCapabilities()` (no dataset): ABI version, error codes, error reasons, cancellable exports, the symbol manifest | `capabilities` | `version` |
 | `normalize-path`, `normalize-path-rejected` | `DDBNormalizePath("photos\\2024/./a.jpg", "[\".uploads\"]")`, `DDBNormalizePath(".uploads/x", "[\".uploads\"]")` (no dataset) | `normalize-path` | - |
 | `info-drone-image`, `get-drone-image`, `stac-item-drone-image` | `DDBInfo`, `DDBGet`, `DDBStac` of `DJI_0018.JPG` (integration) | `entries`, `entry`, `stac-item` | `depth` (info) |
 
@@ -216,6 +216,9 @@ Registry has to adopt first.
   `stac-item.schema.json` (`stacExtensions`, `geometry`, `bbox`, `properties`) and
   `stac-collection.schema.json` (`extent`) moved to their `$defs`, unchanged, so the data-only
   schemas reference them.
+* 2026-10-21: `capabilities` gains the error codes `INVALIDARGS` (7), `RETRYABLE` (8) and
+  `SHUTDOWN` (9), the `errorReasons` array (the reasons of `DDBGetLastErrorReason`) and the new
+  export `DDBGetLastErrorReason` (XI-02, DQ-10, ABI 1.1).
 
 ## Cross-repository CI
 

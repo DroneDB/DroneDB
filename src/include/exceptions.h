@@ -40,8 +40,9 @@ namespace ddb
         std::error_code code_;
     };
 
-    // Only these classified failures can preserve an existing pending build.
-    // This is internal to native builds; the C API still reports a failed job.
+    // Only these classified failures can preserve an existing pending build. The C API reports
+    // the reason (DDBGetLastErrorReason, c_api_util.h): with DDBERR_EXCEPTION from the ABI 1.0
+    // exports (DDBBuild), with DDBERR_RETRYABLE from the ABI 1.1 ones.
     enum class RetryableBuildReason { LowDiskSpace, NoSpaceOnDevice, IdleTimeout };
     class RetryableBuildException : public AppException
     {
@@ -143,6 +144,12 @@ namespace ddb
         std::vector<std::string> missingDependencies;
     };
     class NotImplementedException : public AppException
+    {
+        using AppException::AppException;
+    };
+    // A progress callback asked to stop: the C API returns DDBERR_CANCELED from the exports
+    // listed as cancellable in DDBGetCapabilities()
+    class CanceledException : public AppException
     {
         using AppException::AppException;
     };

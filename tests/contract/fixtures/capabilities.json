@@ -21,9 +21,17 @@
       "BUSY": 5,
       "CANCELED": 4,
       "EXCEPTION": 1,
+      "INVALIDARGS": 7,
       "NONE": 0,
-      "NOTFOUND": 6
+      "NOTFOUND": 6,
+      "RETRYABLE": 8,
+      "SHUTDOWN": 9
     },
+    "errorReasons": [
+      "idleTimeout",
+      "lowDiskSpace",
+      "noSpaceOnDevice"
+    ],
     "symbols": [
       "DDBAdd",
       "DDBAddWithHints",
@@ -55,6 +63,7 @@
       "DDBGetBuildStatus",
       "DDBGetCapabilities",
       "DDBGetLastError",
+      "DDBGetLastErrorReason",
       "DDBGetPendingBuildInfo",
       "DDBGetRasterAreaStats",
       "DDBGetRasterInfo",

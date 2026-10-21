@@ -41,6 +41,7 @@ DDBGetAbiVersion
 DDBGetBuildStatus
 DDBGetCapabilities
 DDBGetLastError
+DDBGetLastErrorReason
 DDBGetPendingBuildInfo
 DDBGetRasterAreaStats
 DDBGetRasterInfo

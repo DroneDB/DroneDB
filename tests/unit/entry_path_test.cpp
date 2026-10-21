@@ -27,12 +27,14 @@ using namespace ddb;
 
 #define ASSERT_DDB_OK(call) ASSERT_EQ((call), DDBERR_NONE) << #call << ": " << DDBGetLastError()
 
-// Expects the call to fail with DDBERR_EXCEPTION and a message in DDBGetLastError()
-#define EXPECT_DDB_INVALID(call)                      \
-    do {                                              \
-        DDBSetLastError("");                          \
-        EXPECT_EQ((call), DDBERR_EXCEPTION) << #call; \
-        EXPECT_STRNE(DDBGetLastError(), "") << #call; \
+// Expects the call to fail with DDBERR_INVALIDARGS (DDBNormalizePath is an ABI 1.1 export) and a
+// message of its own in DDBGetLastError()
+#define EXPECT_DDB_INVALIDARGS(call)                    \
+    do {                                                \
+        DDBSetLastError("stale");                       \
+        EXPECT_EQ((call), DDBERR_INVALIDARGS) << #call; \
+        EXPECT_STRNE(DDBGetLastError(), "") << #call;   \
+        EXPECT_STRNE(DDBGetLastError(), "stale") << #call; \
     } while (0)
 
 json readVectors() {
@@ -147,15 +149,15 @@ TEST(EntryPath, reservedJsonIsAnArrayOfSegments) {
                                 "[\"a\\u0000\"]"}) {
         SCOPED_TRACE(invalid);
         EXPECT_THROW(ReservedRules::fromJson(invalid), InvalidArgsException);
-        EXPECT_DDB_INVALID(DDBNormalizePath("a", invalid, &out));
+        EXPECT_DDB_INVALIDARGS(DDBNormalizePath("a", invalid, &out));
         EXPECT_EQ(out, nullptr);
     }
 }
 
 TEST(EntryPath, cApiArguments) {
     char* out = nullptr;
-    EXPECT_DDB_INVALID(DDBNormalizePath(nullptr, nullptr, &out));
-    EXPECT_DDB_INVALID(DDBNormalizePath("a", nullptr, nullptr));
+    EXPECT_DDB_INVALIDARGS(DDBNormalizePath(nullptr, nullptr, &out));
+    EXPECT_DDB_INVALIDARGS(DDBNormalizePath("a", nullptr, nullptr));
     EXPECT_EQ(out, nullptr);
 
     // A rejection is a result, not an error: the last error is left alone

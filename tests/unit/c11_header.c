@@ -52,10 +52,10 @@ int ddbTestCCalls(void)
     if (DDBFree(NULL) != DDBERR_NONE || DDBVSIFree(NULL) != DDBERR_NONE)
         return 3;
 
-    /* A failing call: its code, a message, the output left alone */
-    if (DDBNormalizePath(NULL, NULL, &out) != DDBERR_EXCEPTION || out != NULL)
+    /* A failing call: its code, a message, no reason, the output left alone */
+    if (DDBNormalizePath(NULL, NULL, &out) != DDBERR_INVALIDARGS || out != NULL)
         return 4;
-    if (DDBGetLastError()[0] == '\0')
+    if (DDBGetLastError()[0] == '\0' || DDBGetLastErrorReason()[0] != '\0')
         return 5;
 
     /* bool, struct and callback arguments from C */
@@ -66,9 +66,11 @@ int ddbTestCCalls(void)
     if (DDBExportRaster2(NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0, progress, NULL) != DDBERR_EXCEPTION)
         return 8;
 
-    /* A successful call */
+    /* A successful call clears the last error */
     if (DDBNormalizePath("a/b", NULL, &out) != DDBERR_NONE || out == NULL)
         return 9;
     DDBFree(out);
+    if (DDBGetLastError()[0] != '\0')
+        return 10;
     return 0;
 }

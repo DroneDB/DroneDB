@@ -37,7 +37,12 @@ extern "C"
 #define DDB_ABI_MAJOR 1
 #define DDB_ABI_MINOR 1
 
-    /* Error codes. A new code is also listed in DDBGetCapabilities() (kErrorCodes, ddb.cpp). */
+    /* Error codes. A new code is also listed in DDBGetCapabilities() (kErrorCodes, ddb.cpp).
+     * Every code but DDBERR_NONE comes with a message (DDBGetLastError). An export returns the
+     * codes its documentation names, DDBERR_NONE and DDBERR_EXCEPTION. In ABI 1.1 the exports
+     * that existed before it keep the codes they always returned: an invalid argument and a
+     * retryable failure are DDBERR_EXCEPTION there; DDBERR_INVALIDARGS and DDBERR_RETRYABLE are
+     * returned by the exports added in ABI 1.1 only. */
     typedef enum DDBErr
     {
         DDBERR_NONE = 0,            // No error
@@ -46,7 +51,10 @@ extern "C"
         DDBERR_BUILDINPROGRESS = 3, // Build skipped: another process holds the lock
         DDBERR_CANCELED = 4,        // Operation canceled by the progress callback
         DDBERR_BUSY = 5,            // Transient DB contention (SQLITE_BUSY/LOCKED); safe to retry
-        DDBERR_NOTFOUND = 6         // The requested entry does not exist
+        DDBERR_NOTFOUND = 6,        // The requested entry does not exist
+        DDBERR_INVALIDARGS = 7,     // An argument is invalid: fix the call, do not retry (ABI 1.1)
+        DDBERR_RETRYABLE = 8,       // A transient failure (DDBGetLastErrorReason): retry later (ABI 1.1)
+        DDBERR_SHUTDOWN = 9         // The library is shut down (DDBShutdown): no call is accepted (ABI 1.1)
     } DDBErr;
 
     DDB_STATIC_ASSERT(sizeof(bool) == 1, "bool is 1 byte (marshal it as U1)");
@@ -59,53 +67,42 @@ extern "C"
      * @return 0 to continue, non-zero to request cancellation */
     typedef int (*DDBProgressCallback)(double fraction, const char *phase, void *userData);
 
-#define DDB_C_BEGIN \
-    try             \
-    {
-#define DDB_C_END                  \
-    }                              \
-    catch (const DBBusyException &e) \
-    {                              \
-        DDBSetLastError(e.what()); \
-        return DDBERR_BUSY;        \
-    }                              \
-    catch (const AppException &e)  \
-    {                              \
-        DDBSetLastError(e.what()); \
-        return DDBERR_EXCEPTION;   \
-    }                              \
-    catch (const std::bad_alloc &e) \
-    {                              \
-        DDBSetLastError("Out of memory"); \
-        return DDBERR_EXCEPTION;   \
-    }                              \
-    catch (const std::exception &e) \
-    {                              \
-        DDBSetLastError(e.what()); \
-        return DDBERR_EXCEPTION;   \
-    }                              \
-    catch (...)                    \
-    {                              \
-        DDBSetLastError("Unknown error occurred"); \
-        return DDBERR_EXCEPTION;   \
-    }                              \
-    return DDBERR_NONE;
+    /* The last error (XI-02) belongs to the calling thread. Every call clears it on entry and
+     * sets it when it returns a code other than DDBERR_NONE, except the accessors that never
+     * touch it: DDBGetLastError, DDBGetLastErrorReason, DDBGetVersion, DDBGetAbiVersion,
+     * DDBGetCapabilities, DDBFree and DDBVSIFree. Read it on the thread that made the failing
+     * call, before any other libddb call on that thread (no await or thread hop in between).
+     * Outputs are written only on DDBERR_NONE: on another code an output pointer is left
+     * untouched (or set to NULL). */
 
-#ifdef __cplusplus
-    extern thread_local char ddbLastError[255];
-#endif
-    // thread_local (src/library/ddb.cpp): DDBGetLastError() must be called on the same thread
-    // that made the failing call, before any await/thread-hop - see DDBSetLastError.
-    void DDBSetLastError(const char *err);
-
-    /** Get the last error message
-     * @return last error message */
+    /** The message of the last failed call on this thread, whole (UTF-8): never NULL, "" when
+     * the last call succeeded. The string is owned by the library and stays valid until the
+     * next libddb call on the same thread. */
     DDB_DLL const char *DDBGetLastError(void);
 
-    /** This must be called as the very first function
-     * of every DDB process/program
-     * @param verbose whether the program should output log messages to stdout */
-    DDB_DLL void DDBRegisterProcess(bool verbose);
+    /** The machine-readable reason of the last failed call on this thread, next to its message
+     * (ABI 1.1): never NULL, "" when the failure has no reason or the last call succeeded.
+     * Valid like DDBGetLastError(). A reason is a stable camelCase name; names are only ever
+     * added (DDBGetCapabilities() lists them as "errorReasons"), so treat an unknown one like "".
+     * Defined today, for a transient failure (the disk or a tool, not the input) after which the
+     * same call can succeed later:
+     *   "lowDiskSpace"     free disk space fell below the build budget
+     *   "noSpaceOnDevice"  a write failed because the disk is full
+     *   "idleTimeout"      an external tool stopped producing output and was stopped
+     * An export added in ABI 1.1 returns DDBERR_RETRYABLE for them; an older export (DDBBuild)
+     * returns DDBERR_EXCEPTION with the same reason. */
+    DDB_DLL const char *DDBGetLastErrorReason(void);
+
+    /** @deprecated (ABI 1.1): libddb sets and clears the last error itself. Replaces the last
+     * error message of this thread with err (NULL clears it) and clears the reason. */
+    DDB_DLL void DDBSetLastError(const char *err);
+
+    /** This must be called as the very first function of every DDB process/program, before any
+     * other call but the exempt accessors. A failed initialization is final: this and every
+     * later call return DDBERR_EXCEPTION with its message (ABI 1.1; returned void before).
+     * @param verbose whether the program should output log messages to stdout
+     * @return DDBERR_NONE on success, DDBERR_EXCEPTION when the initialization failed */
+    DDB_DLL DDBErr DDBRegisterProcess(bool verbose);
 
     /** Get library version */
     DDB_DLL const char *DDBGetVersion(void);
@@ -118,6 +115,7 @@ extern "C"
      *   "abi"          {"major": DDB_ABI_MAJOR, "minor": DDB_ABI_MINOR}
      *   "version"      DDBGetVersion()
      *   "errorCodes"   every DDBErr code by name without the prefix: {"NONE": 0, "EXCEPTION": 1, ...}
+     *   "errorReasons" every reason DDBGetLastErrorReason() returns, sorted
      *   "cancellable"  the exports whose DDBProgressCallback can cancel them (DDBERR_CANCELED)
      *   "symbols"      every exported DDB* function, sorted (ddb.symbols)
      * Fields are only ever added. The string is built once and owned by the library: it stays
@@ -143,8 +141,8 @@ extern "C"
      *                     "", "." or "..")
      * @param output pointer to C-string where to store the JSON (free with DDBFree):
      *               {"path": "a/b"} when accepted, {"rejected": "<code>"} when rejected
-     * @return DDBERR_NONE for an accepted and for a rejected path; DDBERR_EXCEPTION when path or
-     *         output is NULL or reservedJson is invalid (see DDBGetLastError) */
+     * @return DDBERR_NONE for an accepted and for a rejected path; DDBERR_INVALIDARGS when path
+     *         or output is NULL or reservedJson is invalid (see DDBGetLastError) */
     DDB_DLL DDBErr DDBNormalizePath(const char* path, const char* reservedJson, char** output);
 
     /** Initialize a DroneDB database
@@ -626,15 +624,17 @@ extern "C"
      *  @param ddbPath path to the source DroneDB database (parent of ".ddb")
      *  @param entry path of the entry to generate a STAC Item for; NULL or "" for the Collection
      *  @param output pointer to C-string where to store result (JSON, free with DDBFree)
-     *  @return DDBERR_NONE on success, DDBERR_NOTFOUND if no entry has this path, an error
-     *          otherwise */
+     *  @return DDBERR_NONE on success, DDBERR_NOTFOUND if no entry has this path,
+     *          DDBERR_INVALIDARGS when ddbPath or output is NULL, an error otherwise */
     DDB_DLL DDBErr DDBStacData(const char* ddbPath, const char* entry, char** output);
 
     /** Data-only STAC ItemCollection (XI-09, ABI 1.1): the document of DDBStacItemCollection
      *  without "links", and with data-only features (DDBStacData). numberMatched and
      *  numberReturned are kept. bbox, datetime, limit and offset are those of
      *  DDBStacItemCollection.
-     *  @param output pointer to C-string where to store result (JSON, free with DDBFree) */
+     *  @param output pointer to C-string where to store result (JSON, free with DDBFree)
+     *  @return DDBERR_NONE on success, DDBERR_INVALIDARGS when ddbPath or output is NULL or bbox
+     *          is not 4 numbers, an error otherwise */
     DDB_DLL DDBErr DDBStacItemCollectionData(const char* ddbPath,
                                              const char* bbox,
                                              const char* datetime,
