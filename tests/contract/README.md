@@ -27,10 +27,12 @@ renamed or retyped for them, including the mixed casing:
 | `inputs/` | The committed input files (byte for byte, see `.gitattributes`) |
 | `schemas/` | JSON Schemas (draft 2020-12), one per output shape |
 | `fixtures/` | One golden file per output: `<name>.json` |
+| `vectors/entry-paths.json` | The golden path vectors: input → normalized path or rejection (see [Path vectors](#path-vectors)) |
 | `check_schemas.py` | Optional cross-check with python-jsonschema |
 | `../contract_fixtures.{h,cpp}` | The test harness: normalise, validate, compare or rewrite |
 | `../json_schema_check.{h,cpp}` | The schema checker the C++ tests use |
 | `../unit/contract_test.cpp` | The offline fixtures (unit binary) |
+| `../unit/entry_path_test.cpp` | The path vectors, through `ddb::normalizeEntryPath` and `DDBNormalizePath` |
 | `../integration/contract_drone_image_test.cpp` | The drone image fixtures (downloads one asset) |
 
 ## Inputs
@@ -80,6 +82,7 @@ with ddb).
 | `raster-metadata` | `DDBGetRasterMetadata(<root>/ortho.tif, NULL, NULL)`: per-band statistics | `raster-metadata` | - |
 | `raster-metadata-formula` | `DDBGetRasterMetadata(<root>/ortho.tif, "VARI", "RGB")`: formula statistics and histogram | `raster-metadata` | - |
 | `capabilities` | `DDBGetCapabilities()` (no dataset): ABI version, error codes, cancellable exports, the symbol manifest | `capabilities` | `version` |
+| `normalize-path`, `normalize-path-rejected` | `DDBNormalizePath("photos\\2024/./a.jpg", "[\".uploads\"]")`, `DDBNormalizePath(".uploads/x", "[\".uploads\"]")` (no dataset) | `normalize-path` | - |
 | `info-drone-image`, `get-drone-image`, `stac-item-drone-image` | `DDBInfo`, `DDBGet`, `DDBStac` of `DJI_0018.JPG` (integration) | `entries`, `entry`, `stac-item` | `depth` (info) |
 
 Each fixture file holds:
@@ -93,6 +96,40 @@ Each fixture file holds:
   "output": "the normalised output"
 }
 ```
+
+## Path vectors
+
+`vectors/entry-paths.json` pins libddb's dataset path rules (XI-09, `src/include/entry_path.h`,
+`DDBNormalizePath` in `ddb.h`). libddb's unit tests run every vector, and Registry's
+`DatasetPathPolicy` tests are meant to run the same file against `DDBNormalizePath`, so both
+sides accept and reject the same paths.
+
+```json
+{
+  "description": "...",
+  "vectors": [
+    {"input": "sub/.ddb/x", "expected": {"rejected": "reserved"}, "note": "optional, for humans"},
+    {"input": ".uploads/x", "reserved": [".uploads"], "expected": {"rejected": "reserved"}},
+    {"input": "a\u0000b", "cString": false, "expected": {"rejected": "nul"}}
+  ]
+}
+```
+
+| Key | Meaning |
+| --- | --- |
+| `input` | The path, a JSON string (UTF-8) |
+| `reserved` | Optional: the `reservedJson` argument, an array of names reserved as the first segment only. Absent: `NULL` |
+| `cString` | Optional, default `true`. `false` for an input with a NUL byte: the C API takes a NUL-terminated string and cannot receive it, so only `ddb::normalizeEntryPath` runs it (Registry rejects NUL before it calls libddb) |
+| `expected` | The exact output of `DDBNormalizePath`: `{"path": "<normalized>"}` or `{"rejected": "<code>"}` (`schemas/normalize-path.schema.json`) |
+| `note` | Optional explanation |
+
+The rules, checked in this order: `empty` (the input is ""), `nul`, `encoding` (not valid UTF-8),
+`absolute` (a leading `/` or `\`, which covers POSIX roots, UNC and device paths, or a drive
+`X:`), `traversal` (a `..` segment), `empty` (nothing left once empty and `.` segments are
+dropped), `reserved` (a `.ddb` segment at any depth, or a caller name as the first segment). `/`
+and `\` both separate segments, as in Registry. Names are compared byte for byte (`.DDB`,
+`.ddbx` and `photos/.uploads/x` are ordinary) and are not Unicode-normalized. A JSON string
+cannot hold invalid UTF-8, so the `encoding` rejection is tested in `entry_path_test.cpp` only.
 
 ## Normalisation
 
@@ -150,6 +187,8 @@ Registry has to adopt first.
 * 2026-10-21: baseline (DroneDB `fixes-and-optimizations` after `7ee39d2`).
 * 2026-10-21: `capabilities` added (XI-01, ABI 1.1). Its `symbols` list is
   `src/include/ddb.symbols`, so every new export updates this fixture too.
+* 2026-10-21: `normalize-path`, `normalize-path-rejected` and `vectors/entry-paths.json` added
+  (XI-09, ABI 1.1: `DDBNormalizePath`); `capabilities` lists the new export.
 
 ## Cross-repository CI
 

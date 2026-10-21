@@ -113,6 +113,26 @@ extern "C"
      * @return the JSON, or NULL only if the process ran out of memory while building it */
     DDB_DLL const char *DDBGetCapabilities(void);
 
+    /** Normalize a dataset-relative entry path, or reject it, with libddb's path rules (XI-09,
+     * entry_path.h; golden vectors in tests/contract/vectors/entry-paths.json):
+     * '/' and '\' both separate segments; empty and "." segments are dropped; the result uses '/'
+     * with no leading or trailing separator. Names are compared byte for byte, without Unicode
+     * normalization. ".ddb" is reserved as a segment at any depth.
+     * The rejection codes, checked in this order: "empty" (""), "nul" (unreachable through this
+     * NUL-terminated API), "encoding" (not valid UTF-8), "absolute" (leading '/' or '\', a UNC
+     * path, a drive "X:"), "traversal" (a ".." segment), "empty" (nothing left, e.g. "./"),
+     * "reserved". New codes may be added; treat an unknown code as a rejection.
+     * The existing exports do not apply these rules yet (ABI 1.1).
+     * @param path the path (UTF-8)
+     * @param reservedJson NULL, "" or a JSON array of extra names reserved as the FIRST segment
+     *                     only, e.g. [".uploads"]; each name is one segment (no separator, not
+     *                     "", "." or "..")
+     * @param output pointer to C-string where to store the JSON (free with DDBFree):
+     *               {"path": "a/b"} when accepted, {"rejected": "<code>"} when rejected
+     * @return DDBERR_NONE for an accepted and for a rejected path; DDBERR_EXCEPTION when path or
+     *         output is NULL or reservedJson is invalid (see DDBGetLastError) */
+    DDB_DLL DDBErr DDBNormalizePath(const char* path, const char* reservedJson, char** output);
+
     /** Initialize a DroneDB database
      * @param directory Path to directory where to initialize the database
      * @return DDBERR_NONE on success, an error otherwise */

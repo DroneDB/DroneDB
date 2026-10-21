@@ -341,6 +341,32 @@ namespace
                                         "DDBGetCapabilities()", "capabilities.schema.json", {}, {"version"}, {}},
                                        json::parse(caps));
     }
+
+    // XI-09: DDBNormalizePath, accepted and rejected (no dataset). The rules themselves are the
+    // golden vectors of tests/contract/vectors/entry-paths.json (entry_path_test.cpp).
+    TEST(ContractFixturesNormalizePath, NormalizePath) {
+        char* out = nullptr;
+        ASSERT_DDB_OK(DDBNormalizePath("photos\\2024/./a.jpg", R"([".uploads"])", &out));
+        contract::expectMatchesFixture(
+            {"normalize-path",
+             "No dataset: a path with '\\' and '.' segments",
+             R"(DDBNormalizePath("photos\\2024/./a.jpg", "[\".uploads\"]"))",
+             "normalize-path.schema.json",
+             {},
+             {},
+             {}},
+            contract::takeJson(out));
+
+        ASSERT_DDB_OK(DDBNormalizePath(".uploads/x", R"([".uploads"])", &out));
+        contract::expectMatchesFixture({"normalize-path-rejected",
+                                        "No dataset: a path under a reserved first segment",
+                                        R"(DDBNormalizePath(".uploads/x", "[\".uploads\"]"))",
+                                        "normalize-path.schema.json",
+                                        {},
+                                        {},
+                                        {}},
+                                       contract::takeJson(out));
+    }
 }
 
 namespace

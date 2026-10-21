@@ -89,6 +89,7 @@
       "DDBMetaSet",
       "DDBMetaUnset",
       "DDBMoveEntry",
+      "DDBNormalizePath",
       "DDBPreviewMergeMultispectral",
       "DDBQueryRasterPoint",
       "DDBQueryVector",

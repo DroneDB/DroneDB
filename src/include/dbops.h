@@ -45,8 +45,8 @@ namespace ddb
     /// "INDEX"), or nullptr when ex is not one of those exception types.
     DDB_DLL const char *addErrorCode(const std::exception &ex) noexcept;
 
-    /// True when one of the components of p is the ".ddb" folder (a substring such as
-    /// "a.ddbfile.txt" or "x.ddb-y" does not count).
+    /// True when one of the components of p is the ".ddb" folder (isReservedSegment, entry_path.h;
+    /// a substring such as "a.ddbfile.txt" or "x.ddb-y" does not count).
     DDB_DLL bool containsDdbSegment(const fs::path &p);
 
     DDB_DLL std::unique_ptr<Database> open(const std::string &directory, bool traverseUp);

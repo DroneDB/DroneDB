@@ -33,6 +33,7 @@
 #include "cad.h"
 #include "delta.h"
 #include "entry.h"
+#include "entry_path.h"
 #include "entry_types.h"
 #include "exceptions.h"
 #include "gdal_inc.h"
@@ -154,6 +155,19 @@ const char* DDBGetCapabilities() {
         // next call builds it again
         return nullptr;
     }
+}
+
+DDBErr DDBNormalizePath(const char* path, const char* reservedJson, char** output) {
+    DDB_C_BEGIN
+    if (path == nullptr)
+        throw InvalidArgsException("No path provided");
+
+    if (output == nullptr)
+        throw InvalidArgsException("Output pointer is null");
+
+    const auto rules = ReservedRules::fromJson(reservedJson);
+    utils::copyToPtr(normalizeEntryPath(path, rules).toJson().dump(), output);
+    DDB_C_END
 }
 
 DDBErr DDBInit(const char* directory, char** outPath) {

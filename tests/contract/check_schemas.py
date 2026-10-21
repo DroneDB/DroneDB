@@ -7,7 +7,8 @@
 The C++ tests validate with the subset checker in tests/json_schema_check.h (no JSON Schema
 library is among the vcpkg dependencies). This script, optional and not run by ctest, checks the
 same files with python-jsonschema (pip install jsonschema): every schema is a valid draft 2020-12
-schema and every fixture output matches the schema it names.
+schema, every fixture output matches the schema it names, and every "expected" value of the path
+vectors (vectors/entry-paths.json) matches normalize-path.schema.json.
 
 Usage: python3 -I tests/contract/check_schemas.py [tests/contract]
 """
@@ -45,7 +46,14 @@ def main() -> int:
             print(f"fixtures/{path.name}: {'/'.join(map(str, error.absolute_path))}: {error.message}")
             failures += 1
 
-    print(f"{len(schemas)} schemas, {len(fixtures)} fixtures, {failures} problems")
+    vectors = json.loads((root / "vectors" / "entry-paths.json").read_text(encoding="utf-8"))["vectors"]
+    validator = Draft202012Validator({"$ref": "normalize-path.schema.json"}, registry=registry)
+    for index, vector in enumerate(vectors):
+        for error in validator.iter_errors(vector["expected"]):
+            print(f"vectors/entry-paths.json: vector {index} ({vector['input']!r}): {error.message}")
+            failures += 1
+
+    print(f"{len(schemas)} schemas, {len(fixtures)} fixtures, {len(vectors)} path vectors, {failures} problems")
     return 1 if failures else 0
 
 

@@ -19,6 +19,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "entry_path.h"
 #include "entry_types.h"
 #include "exceptions.h"
 #include "exif.h"
@@ -194,7 +195,7 @@ namespace
 
         for (fs::path p : paths)
         {
-            if (p.filename() == DDB_FOLDER)
+            if (isReservedSegment(p.filename()))
                 continue;
 
             if (fs::is_directory(p))
@@ -211,8 +212,7 @@ namespace
 
                             // Skip .ddb (do not recurse into it and do not record
                             // it as an indexable directory entry).
-                            if (rp.filename() == DDB_FOLDER)
-                            {
+                            if (isReservedSegment(rp.filename())) {
                                 i.disable_recursion_pending();
                                 continue;
                             }
@@ -273,7 +273,7 @@ namespace
 
         for (fs::path p : paths)
         {
-            if (p.filename() == DDB_FOLDER)
+            if (isReservedSegment(p.filename()))
                 continue;
 
             try
@@ -299,8 +299,7 @@ namespace
 #endif
 
                         // Skip .ddb recursion (and don't record it as an entry)
-                        if (rp.filename() == DDB_FOLDER)
-                        {
+                        if (isReservedSegment(rp.filename())) {
                             i.disable_recursion_pending();
                             continue;
                         }
@@ -370,7 +369,7 @@ namespace
     {
         for (const auto &part : p)
         {
-            if (part == DDB_FOLDER)
+            if (isReservedSegment(part))
                 return true;
         }
         return false;
@@ -485,8 +484,7 @@ namespace
                          fs::directory_options::skip_permission_denied);
                          it != fs::recursive_directory_iterator(); ++it)
                     {
-                        if (it->path().filename() == DDB_FOLDER)
-                        {
+                        if (isReservedSegment(it->path().filename())) {
                             it.disable_recursion_pending();
                             continue;
                         }
@@ -775,7 +773,7 @@ namespace
 
             if (p.has_filename()) {
                 const auto fileName = p.filename().generic_string();
-                if (fileName.find('\\') != std::string::npos) {
+                if (std::any_of(fileName.begin(), fileName.end(), isEntryPathSeparator)) {
                     LOGD << "Skipping '" << p << "'";
                     continue; // Skip file
                 }

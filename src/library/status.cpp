@@ -6,6 +6,7 @@
 #include "status.h"
 
 #include "ddb.h"
+#include "entry_path.h"
 #include "mio.h"
 
 #include "exceptions.h"
@@ -58,7 +59,7 @@ namespace ddb
                 }
 
                 // Skip .ddb
-                if (path.filename() == DDB_FOLDER)
+                if (isReservedSegment(path.filename()))
                     i.disable_recursion_pending();
 
                 // Match path components relative to the dataset root, not substrings of the
