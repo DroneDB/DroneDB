@@ -15,6 +15,7 @@
 #include "json.h"
 #include "test.h"
 #include "testarea.h"
+#include "utf8.h"
 #include "utils.h"
 
 namespace
@@ -177,5 +178,126 @@ namespace
         EXPECT_FALSE(j[0].contains("properties"));
 
         EXPECT_EQ(DDBListEntries(ddbPath.c_str(), "", true, "", "nosuchtype", false, &found), DDBERR_EXCEPTION);
+    }
+
+    // XI-09: letters match regardless of case for every script (Unicode simple case folding),
+    // not only ASCII; a name or pattern that is not valid UTF-8 is compared byte for byte, with
+    // ASCII letters in any case (as before)
+    TEST(XI09_NamePatternCaseFolding, foldsNonAsciiLetters) {
+        EXPECT_TRUE(utils::matchesNamePattern("Überflug.JPG", "über*.jpg"));
+        EXPECT_TRUE(utils::matchesNamePattern("überflug.jpg", "ÜBER*"));
+        EXPECT_TRUE(utils::matchesNamePattern("ÉTÉ.tif", "été.TIF"));
+        EXPECT_TRUE(utils::matchesNamePattern("ΑΘΗΝΑ_01.jpg", "αθηνα_??.jpg"));
+        EXPECT_TRUE(utils::matchesNamePattern("ΟΔΟΣ.txt", "οδος.txt"))
+            << "final sigma folds to sigma";
+        EXPECT_TRUE(utils::matchesNamePattern("МОСКВА.las", "*москва*"));
+        EXPECT_TRUE(utils::matchesNamePattern("Straße", "STRAẞE"))
+            << "U+1E9E folds to U+00DF (simple folding; the full folding to \"ss\" is not used)";
+        EXPECT_TRUE(
+            utils::matchesNamePattern("\xE2\x84\xAA"
+                                      "elvin.txt",
+                                      "kelvin.*"))
+            << "KELVIN SIGN folds to k";
+        EXPECT_TRUE(utils::matchesNamePattern("a\xC5\xBF.txt", "AS.TXT")) << "LONG S folds to s";
+        EXPECT_TRUE(utils::matchesNamePattern("Ü", "?")) << "'?' is one character";
+
+        EXPECT_FALSE(utils::matchesNamePattern("über", "uber")) << "no accent stripping";
+        EXPECT_FALSE(utils::matchesNamePattern("Straße", "STRASSE")) << "no full folding";
+        EXPECT_FALSE(utils::matchesNamePattern("ΑΘΗΝΑ.jpg", "αθηνα"));
+        EXPECT_FALSE(utils::matchesNamePattern("ÜÜ", "?"));
+    }
+
+    TEST(XI09_NamePatternCaseFolding, simpleCaseFoldingTable) {
+        EXPECT_EQ(utf8::foldCase(U'A'), U'a');
+        EXPECT_EQ(utf8::foldCase(U'a'), U'a');
+        EXPECT_EQ(utf8::foldCase(U'1'), U'1');
+        EXPECT_EQ(utf8::foldCase(U'\u00C9'), U'\u00E9');          // É
+        EXPECT_EQ(utf8::foldCase(U'\u03A3'), U'\u03C3');          // Σ
+        EXPECT_EQ(utf8::foldCase(U'\u03C2'), U'\u03C3');          // ς (status C)
+        EXPECT_EQ(utf8::foldCase(U'\u1E9E'), U'\u00DF');          // ẞ (status S; F would give "ss")
+        EXPECT_EQ(utf8::foldCase(U'\u212A'), U'k');               // KELVIN SIGN
+        EXPECT_EQ(utf8::foldCase(U'\U00010400'), U'\U00010428');  // Deseret, 4 UTF-8 bytes
+        EXPECT_EQ(utf8::foldCase(U'\u0130'), U'\u0130');          // İ: statuses F and T only
+        EXPECT_EQ(utf8::foldCase(U'\u0131'), U'\u0131');          // ı
+        EXPECT_EQ(utf8::foldCase(U'\u6771'), U'\u6771');          // 東: no case
+
+        std::u32string folded;
+        EXPECT_TRUE(utf8::foldedCodePoints("ÜBER", folded));
+        EXPECT_EQ(folded, U"\u00FCber");
+        EXPECT_FALSE(utf8::foldedCodePoints("a\xFF", folded));
+
+        EXPECT_TRUE(utf8::hasNonAsciiFoldVariant('K'));
+        EXPECT_TRUE(utf8::hasNonAsciiFoldVariant('s'));
+        EXPECT_FALSE(utf8::hasNonAsciiFoldVariant('a'));
+        EXPECT_FALSE(utf8::hasNonAsciiFoldVariant('\0'));
+    }
+
+    TEST(XI09_NamePatternCaseFolding, invalidUtf8ComparesBytes) {
+        EXPECT_TRUE(
+            utils::matchesNamePattern("\xFF"
+                                      "photo.JPG",
+                                      "*.jpg"));
+        EXPECT_TRUE(utils::matchesNamePattern("\xFF", "\xFF"));
+        EXPECT_TRUE(utils::matchesNamePattern("\xC3", "?"));
+        EXPECT_TRUE(
+            utils::matchesNamePattern("\xFF"
+                                      "ü",
+                                      "*ü"));
+        EXPECT_FALSE(
+            utils::matchesNamePattern("\xFF"
+                                      "Ü",
+                                      "*ü"))
+            << "no folding without valid UTF-8";
+        EXPECT_FALSE(utils::matchesNamePattern("Ü", "\xFF"));
+    }
+
+    // The index query selects the case variants too (its LIKE pre-filter folds ASCII only). The
+    // rows are inserted directly: Windows converts narrow file names with the ANSI code page.
+    TEST(XI09_NamePatternCaseFolding, listEntriesSelectsNonAsciiCaseVariants) {
+        TestArea area(TEST_NAME, true);
+        const fs::path root = area.getFolder("ds");
+        initIndex(root.string());
+        {
+            const auto db = ddb::open(root.string(), false);
+            auto q = db->query(
+                "INSERT INTO entries (path, hash, type, properties, mtime, size, depth) "
+                "VALUES (?, '', 2, '{}', 0, 0, 0)");
+            for (const std::string path : {"Überflug.txt",
+                                           "überflug2.txt",
+                                           "uberflug.txt",
+                                           "ÉTÉ.txt",
+                                           "МОСКВА.txt",
+                                           "\xE2\x84\xAA"
+                                           "elvin.txt",
+                                           "kelvin.txt",
+                                           "a\xC5\xBF.txt",
+                                           "as.txt"}) {
+                q->bind(1, path);
+                q->execute();
+            }
+        }
+
+        const auto list = [&root](const char* pattern) {
+            char* found = nullptr;
+            EXPECT_EQ(DDBListEntries(root.string().c_str(), "", true, pattern, "", false, &found),
+                      DDBERR_NONE)
+                << DDBGetLastError();
+            Paths result;
+            for (const auto& e : json::parse(found != nullptr ? found : "[]"))
+                result.push_back(e["path"].get<std::string>());
+            DDBFree(found);
+            return result;
+        };
+
+        EXPECT_EQ(list("ÜBERFLUG*"), (Paths{"Überflug.txt", "überflug2.txt"}));
+        EXPECT_EQ(list("*été*"), (Paths{"ÉTÉ.txt"}));
+        EXPECT_EQ(list("москва.TXT"), (Paths{"МОСКВА.txt"}));
+        // ASCII letters of the pattern that a non-ASCII letter folds to as well
+        EXPECT_EQ(list("KELVIN.txt"),
+                  (Paths{"kelvin.txt",
+                         "\xE2\x84\xAA"
+                         "elvin.txt"}));
+        EXPECT_EQ(list("AS.*"), (Paths{"as.txt", "a\xC5\xBF.txt"}));
+        DDBReleaseConnections(root.string().c_str(), nullptr);
     }
 } // namespace

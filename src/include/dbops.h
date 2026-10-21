@@ -111,8 +111,8 @@ namespace ddb
         std::string folder;
         // The whole subtree of the folder, or its children only
         bool recursive = true;
-        // File name pattern: '*' matches any characters, '?' one character; ASCII letters
-        // match regardless of case. Empty matches every name.
+        // File name pattern: '*' matches any characters, '?' one character; letters match
+        // regardless of case (utils::matchesNamePattern). Empty matches every name.
         std::string namePattern;
         // Entry types to return; empty returns every type
         std::vector<EntryType> types;

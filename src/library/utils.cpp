@@ -29,6 +29,7 @@
 #include <sstream>
 
 #include "entry_types.h"
+#include "utf8.h"
 #include "version.h"
 
 namespace ddb::utils {
@@ -391,12 +392,13 @@ DDB_DLL std::vector<ddb::EntryType> parseEntryTypeList(const char* types, bool a
     return typeFilter;
 }
 
-DDB_DLL bool matchesNamePattern(const std::string& name, const std::string& pattern) {
-    const auto same = [](char a, char b) {
-        return std::tolower(static_cast<unsigned char>(a)) == std::tolower(static_cast<unsigned char>(b));
-    };
+namespace {
 
-    // Greedy match; on a mismatch the last '*' takes one more character
+// Greedy wildcard match: '*' matches any characters (also none), '?' one. `next(text, n)` is
+// the index after the character at text[n], `same(p, c)` whether the pattern character p
+// matches the text character c. On a mismatch the last '*' takes one more character.
+template <typename Text, typename Next, typename Same>
+bool wildcardMatch(const Text& name, const Text& pattern, Next next, Same same) {
     size_t n = 0, p = 0;
     size_t starP = std::string::npos, starN = 0;
     while (n < name.size()) {
@@ -404,11 +406,8 @@ DDB_DLL bool matchesNamePattern(const std::string& name, const std::string& patt
             starP = p++;
             starN = n;
         } else if (p < pattern.size() && pattern[p] == '?') {
-            // One character: a UTF-8 lead byte and its continuation bytes
             p++;
-            n++;
-            while (n < name.size() && (static_cast<unsigned char>(name[n]) & 0xC0) == 0x80)
-                n++;
+            n = next(name, n);
         } else if (p < pattern.size() && same(pattern[p], name[n])) {
             p++;
             n++;
@@ -422,6 +421,40 @@ DDB_DLL bool matchesNamePattern(const std::string& name, const std::string& patt
     while (p < pattern.size() && pattern[p] == '*')
         p++;
     return p == pattern.size();
+}
+
+bool isAscii(const std::string& s) {
+    return std::all_of(s.begin(), s.end(), [](char c) {
+        return static_cast<unsigned char>(c) < 0x80;
+    });
+}
+
+}  // namespace
+
+// XI-09: the comparison folds case for every script (Unicode simple case folding, utf8.h) when
+// both strings are valid UTF-8; libddb 1.12 and earlier folded ASCII letters only. Otherwise
+// (and for ASCII-only strings, where both rules agree) it compares bytes, ASCII letters in any
+// case, and '?' takes a UTF-8 lead byte with its continuation bytes.
+DDB_DLL bool matchesNamePattern(const std::string& name, const std::string& pattern) {
+    std::u32string foldedName, foldedPattern;
+    if ((!isAscii(name) || !isAscii(pattern)) && utf8::foldedCodePoints(name, foldedName) &&
+        utf8::foldedCodePoints(pattern, foldedPattern))
+        return wildcardMatch(
+            foldedName,
+            foldedPattern,
+            [](const std::u32string&, size_t n) { return n + 1; },
+            [](char32_t a, char32_t b) { return a == b; });
+
+    return wildcardMatch(
+        name,
+        pattern,
+        [](const std::string& text, size_t n) {
+            n++;
+            while (n < text.size() && (static_cast<unsigned char>(text[n]) & 0xC0) == 0x80)
+                n++;
+            return n;
+        },
+        [](char a, char b) { return toLowerChar(a) == toLowerChar(b); });
 }
 
 DDB_DLL std::vector<std::string> parseExtensionList(const char* extensions) {

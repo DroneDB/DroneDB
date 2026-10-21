@@ -213,7 +213,9 @@ DDB_DLL bool isValidNonEmptyStringParam(const char* str);
 DDB_DLL std::vector<ddb::EntryType> parseEntryTypeList(const char* types, bool allowDirectory = false);
 
 // True if name matches pattern, where '*' matches any characters (also none) and '?' one
-// (UTF-8) character. ASCII letters match regardless of case.
+// (UTF-8) character. Letters match regardless of case: Unicode simple case folding
+// (utf8::foldCase) when both are valid UTF-8, else a byte comparison with ASCII letters in any
+// case.
 DDB_DLL bool matchesNamePattern(const std::string& name, const std::string& pattern);
 
 // Parse a comma-separated list of file extensions ("dwg,.DXF,copc.laz") into

@@ -250,8 +250,10 @@ extern "C"
      * @param ddbPath path to a DroneDB database (parent of ".ddb")
      * @param folder dataset-relative folder, "" for the dataset root; a file selects itself
      * @param recursive the whole subtree of the folder (true) or its children only (false)
-     * @param namePattern file name pattern ('*' any characters, '?' one character, ASCII letters
-     *                    in any case), or "" for every name
+     * @param namePattern file name pattern ('*' any characters, '?' one character, letters in any
+     *                    case: Unicode simple case folding since ABI 1.1, ASCII only before; a
+     *                    name or pattern that is not valid UTF-8 folds ASCII only), or "" for
+     *                    every name
      * @param types comma-separated entry types (see DDBRescan, "directory" allowed), or "" for all
      * @param withDetails true: full entries as DDBList's "json" format; false: path, hash, type,
      *                    mtime, size and depth only

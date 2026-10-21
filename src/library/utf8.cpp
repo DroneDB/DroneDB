@@ -3,7 +3,19 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "utf8.h"
 
+#include <algorithm>
+#include <cstring>
+#include <iterator>
+
+#include "case_folding_table.h"
+
 namespace ddb::utf8 {
+
+static_assert(std::is_sorted(std::begin(detail::kCaseFolding),
+                             std::end(detail::kCaseFolding),
+                             [](const detail::CaseFoldingPair& a,
+                                const detail::CaseFoldingPair& b) { return a.from < b.from; }),
+              "foldCase searches the table: it must be sorted by code point");
 
 bool decode(std::string_view s, size_t& i, char32_t& cp) noexcept {
     if (i >= s.size())
@@ -60,6 +72,36 @@ bool isValid(std::string_view s) noexcept {
         if (!decode(s, i, cp))
             return false;
     return true;
+}
+
+char32_t foldCase(char32_t cp) noexcept {
+    if (cp < 0x80)
+        return cp >= 'A' && cp <= 'Z' ? cp + ('a' - 'A') : cp;
+
+    const auto* begin = std::begin(detail::kCaseFolding);
+    const auto* end = std::end(detail::kCaseFolding);
+    const auto* it =
+        std::lower_bound(begin, end, cp, [](const detail::CaseFoldingPair& pair, char32_t c) {
+            return pair.from < c;
+        });
+    return it != end && it->from == cp ? it->to : cp;
+}
+
+bool foldedCodePoints(std::string_view s, std::u32string& out) {
+    out.clear();
+    out.reserve(s.size());
+    size_t i = 0;
+    char32_t cp;
+    while (i < s.size()) {
+        if (!decode(s, i, cp))
+            return false;
+        out.push_back(foldCase(cp));
+    }
+    return true;
+}
+
+bool hasNonAsciiFoldVariant(char c) noexcept {
+    return c != '\0' && std::strchr(detail::kAsciiWithNonAsciiFoldVariants, c) != nullptr;
 }
 
 }  // namespace ddb::utf8

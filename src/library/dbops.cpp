@@ -29,6 +29,7 @@
 #include "parallel.h"
 
 #include "userprofile.h"
+#include "utf8.h"
 #include "utils.h"
 #include "version.h"
 #include "constants.h"
@@ -1504,14 +1505,26 @@ namespace
 
         // LIKE pattern (escape character '/') matching every path whose file name may match
         // namePattern; matchesNamePattern() decides. '%' can span folders, so it selects more.
+        // SQLite's LIKE folds ASCII letters only, so when matchesNamePattern() folds Unicode (a
+        // valid UTF-8 pattern) a non-ASCII character, and an ASCII letter that a non-ASCII one
+        // folds to as well (K, S), becomes '_' (one character: simple folding keeps the count).
         std::string namePatternToLike(const std::string &namePattern)
         {
+            const bool unicodeFolding = utf8::isValid(namePattern);
             std::string like = "%//";
-            for (const char c : namePattern)
-            {
+            size_t i = 0;
+            while (i < namePattern.size()) {
+                const char c = namePattern[i];
+                char32_t cp;
+                if (unicodeFolding && static_cast<unsigned char>(c) >= 0x80 &&
+                    utf8::decode(namePattern, i, cp)) {
+                    like += '_';
+                    continue;
+                }
+                i++;
                 if (c == '*')
                     like += '%';
-                else if (c == '?')
+                else if (c == '?' || (unicodeFolding && utf8::hasNonAsciiFoldVariant(c)))
                     like += '_';
                 else
                 {
