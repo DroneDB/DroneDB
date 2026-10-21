@@ -14,9 +14,26 @@ namespace ddb {
 
 namespace {
 
+void parsePointCloudMetadata(const fs::path &path, Entry &entry)
+{
+    PointCloudInfo info;
+    if (getPointCloudInfo(path.string(), info))
+    {
+        entry.properties = info.toJSON();
+        entry.polygon_geom = info.polyBounds;
+        entry.point_geom = info.centroid;
+    }
+}
+
 class PointCloudEntryHandler : public EntryHandler {
   public:
     PointCloudEntryHandler() : EntryHandler(EntryType::PointCloud, "PointCloud") {}
+
+    std::vector<std::string> extensions() const override { return {"laz", "las", "e57", "pts", "xyz"}; }
+
+    void parseMetadata(const fs::path& path, Entry& entry, FingerprintContext& /*ctx*/) const override {
+        parsePointCloudMetadata(path, entry);
+    }
 
     std::string subfolder() const override { return CopcBuildSubfolder; }
 

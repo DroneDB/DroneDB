@@ -5,20 +5,97 @@
 // Model entries: textured meshes (OBJ, PLY, glTF), built into Nexus plus an additive OGC 3D
 // Tiles tileset.
 
+#include <algorithm>
+#include <cmath>
 #include <optional>
 
 #include "3d.h"
 #include "build_layout.h"
 #include "entry.h"
 #include "entry_handlers_builtin.h"
+#include "mio.h"
+#include "ply.h"
 
 namespace ddb {
 
 namespace {
 
+void parseModelMetadata(const fs::path &path, Entry &entry)
+{
+    // Georeferencing for 3D models is optional and lives in a sidecar (the
+    // OpenDroneMap reference_lla.json and friends resolved by detectModelGeoref).
+    // When present we flag the model as georeferenced and derive a WGS84 footprint
+    // from its local bounds, so it behaves like every other geo entry (footprint on
+    // the dataset map, globe in the unified viewer). Best-effort: any failure leaves
+    // the model indexed in local space rather than aborting the parse.
+    try
+    {
+        const auto georef = detectModelGeoref(path.string());
+        if (!georef.has_value())
+        {
+            entry.properties["georeferenced"] = false;
+            return;
+        }
+
+        entry.properties["georeferenced"] = true;
+
+        // Origin point: the model's local ENU frame is centered here.
+        entry.point_geom.clear();
+        entry.point_geom.addPoint(georef->longitude, georef->latitude, georef->altitude);
+
+        // Footprint: offset the model's local X/Y bounds (East/North meters) around
+        // the origin with an equirectangular approximation (accurate at model scale).
+        ModelInfo info;
+        if (getModelInfo(path.string(), info) && info.hasBounds)
+        {
+            constexpr double DEG2RAD = 0.017453292519943295;
+            constexpr double METERS_PER_DEG_LAT = 111320.0;
+            const double cosLat = std::cos(georef->latitude * DEG2RAD);
+            // Guard against the poles (cosLat -> 0) to keep the longitude span finite.
+            const double metersPerDegLon = METERS_PER_DEG_LAT * std::max(0.01, std::abs(cosLat));
+
+            const double west = georef->longitude + info.minX / metersPerDegLon;
+            const double east = georef->longitude + info.maxX / metersPerDegLon;
+            const double south = georef->latitude + info.minY / METERS_PER_DEG_LAT;
+            const double north = georef->latitude + info.maxY / METERS_PER_DEG_LAT;
+
+            // 5-point closed ring in CCW order, matching point-cloud/vector footprints.
+            entry.polygon_geom.clear();
+            entry.polygon_geom.addPoint(west, south, 0.0);
+            entry.polygon_geom.addPoint(east, south, 0.0);
+            entry.polygon_geom.addPoint(east, north, 0.0);
+            entry.polygon_geom.addPoint(west, north, 0.0);
+            entry.polygon_geom.addPoint(west, south, 0.0);
+        }
+    }
+    catch (const std::exception &e)
+    {
+        LOGD << "Model parse warning: " << e.what();
+        entry.properties["warning"] = std::string("model parse failed: ") + e.what();
+    }
+}
+
 class ModelEntryHandler : public EntryHandler {
   public:
     ModelEntryHandler() : EntryHandler(EntryType::Model, "Model") {}
+
+    // A .ply can be a mesh, a plain point cloud or a Gaussian Splat; a .gltf/.glb can also
+    // carry point geometry (3D Gaussian Splat tiles) or lines, neither of which yields a
+    // buildable model: both are classified from their content.
+    std::vector<std::string> extensions() const override { return {"obj", "ply", "gltf", "glb"}; }
+
+    EntryType detect(const fs::path& path, FingerprintContext& /*ctx*/) const override {
+        io::Path p(path);
+        if (p.checkExtension({"ply"}))
+            return identifyPly(path);
+        if (p.checkExtension({"gltf", "glb"}))
+            return identifyGltf(path);
+        return EntryType::Model;
+    }
+
+    void parseMetadata(const fs::path& path, Entry& entry, FingerprintContext& /*ctx*/) const override {
+        parseModelMetadata(path, entry);
+    }
 
     std::string subfolder() const override { return NexusBuildSubfolder; }
 

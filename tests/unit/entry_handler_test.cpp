@@ -224,10 +224,17 @@ std::string slurp(const fs::path& p) {
     return content.str();
 }
 
-// Builds "<scratch>/out.txt" (the input's bytes); complete when fake/out.txt is not empty
+// Claims ".ddbfake" files, records their content as a property, builds "<scratch>/out.txt"
+// (the input's bytes) and is complete when fake/out.txt is not empty
 class FakeEntryHandler : public EntryHandler {
   public:
     FakeEntryHandler() : EntryHandler(FakeType, "FakeType") {}
+
+    std::vector<std::string> extensions() const override { return {"ddbfake"}; }
+
+    void parseMetadata(const fs::path& path, Entry& entry, FingerprintContext&) const override {
+        entry.properties["content"] = slurp(path);
+    }
 
     std::string subfolder() const override { return "fake"; }
 
@@ -244,51 +251,45 @@ class FakeEntryHandler : public EntryHandler {
     }
 };
 
-void insertEntry(Database* db, const std::string& path, const std::string& hash, EntryType type) {
-    auto q = db->query("INSERT INTO entries (path, hash, type, properties, mtime, size, depth) "
-                       "VALUES (?, ?, ?, '{}', 0, 1, 0)");
-    q->bind(1, path);
-    q->bind(2, hash);
-    q->bind(3, static_cast<int>(type));
-    q->execute();
-}
-
-TEST(entryHandler, FakeTypeIsBuiltWithoutAnyOtherChange) {
+TEST(entryHandler, FakeTypeIsDetectedParsedAndBuiltWithoutAnyOtherChange) {
     EnvVarGuard noDiskFloor("DDB_MIN_FREE_DISK_MB", "0");
     IndexFixture fx(TEST_NAME);
-    const std::string hashA(64, 'a');
-    const std::string hashB(64, 'b');
-    writeFile(fx.root / "a.fake", "alpha");
-    writeFile(fx.root / "b.fake", "beta");
+    writeFile(fx.root / "a.ddbfake", "alpha");
+    writeFile(fx.root / "b.DDBFAKE", "beta");
 
     {
         ScopedEntryHandler registration(std::make_unique<FakeEntryHandler>());
         EXPECT_EQ(typeToHuman(FakeType), "FakeType");
         EXPECT_EQ(typeFromHuman("faketype"), FakeType);
-        EXPECT_NE(std::find(buildableEntryTypes().begin(), buildableEntryTypes().end(), FakeType),
-                  buildableEntryTypes().end());
+        const auto buildable = buildableEntryTypes();
+        EXPECT_NE(std::find(buildable.begin(), buildable.end(), FakeType), buildable.end());
 
-        insertEntry(fx.db.get(), "a.fake", hashA, FakeType);
-        insertEntry(fx.db.get(), "b.fake", hashB, FakeType);
+        // Detected by its extension (any letter case) and parsed by its handler
+        EXPECT_EQ(fingerprint(fx.root / "b.DDBFAKE"), FakeType);
+        addToIndex(fx.db.get(), {(fx.root / "a.ddbfake").string(), (fx.root / "b.DDBFAKE").string()});
+        Entry a;
+        ASSERT_TRUE(getEntry(fx.db.get(), "a.ddbfake", a));
+        EXPECT_EQ(a.type, FakeType);
+        EXPECT_EQ(a.properties.value("content", ""), "alpha");
 
         std::string subfolder;
-        ASSERT_TRUE(isBuildable(fx.db.get(), "a.fake", subfolder));
+        ASSERT_TRUE(isBuildable(fx.db.get(), "a.ddbfake", subfolder));
         EXPECT_EQ(subfolder, "fake");
-        EXPECT_FALSE(isBuildComplete(fx.db.get(), "a.fake"));
+        EXPECT_FALSE(isBuildComplete(fx.db.get(), "a.ddbfake"));
 
-        build(fx.db.get(), "a.fake", "", false);
-        const fs::path outA = fx.db->buildDirectory() / hashA / "fake" / "out.txt";
+        build(fx.db.get(), "a.ddbfake", "", false);
+        const fs::path outA = fx.db->buildDirectory() / a.hash / "fake" / "out.txt";
         ASSERT_TRUE(fs::exists(outA));
         EXPECT_EQ(slurp(outA), "alpha");
-        EXPECT_TRUE(isBuildComplete(fx.db.get(), "a.fake"));
-        EXPECT_FALSE(fs::exists(fx.db->buildDirectory() / (hashA + ".pending")));
+        EXPECT_TRUE(isBuildComplete(fx.db.get(), "a.ddbfake"));
+        EXPECT_FALSE(fs::exists(fx.db->buildDirectory() / (a.hash + ".pending")));
 
         // buildAll takes its type list from the registry
-        EXPECT_FALSE(isBuildComplete(fx.db.get(), "b.fake"));
+        EXPECT_FALSE(isBuildComplete(fx.db.get(), "b.DDBFAKE"));
         buildAll(fx.db.get(), "", false);
-        EXPECT_TRUE(isBuildComplete(fx.db.get(), "b.fake"));
+        EXPECT_TRUE(isBuildComplete(fx.db.get(), "b.DDBFAKE"));
 
-        const auto statuses = getBuildStatus(fx.db.get(), {"a.fake", "b.fake"});
+        const auto statuses = getBuildStatus(fx.db.get(), {"a.ddbfake", "b.DDBFAKE"});
         ASSERT_EQ(statuses.size(), 2u);
         for (const auto& s : statuses) {
             EXPECT_TRUE(s.buildable) << s.path;
@@ -296,11 +297,54 @@ TEST(entryHandler, FakeTypeIsBuiltWithoutAnyOtherChange) {
         }
     }
 
-    // Unregistered again: the entries are no longer buildable
+    // Unregistered again: the files are Generic and the entries are no longer buildable
     EXPECT_EQ(findEntryHandler(FakeType), nullptr);
     EXPECT_EQ(typeToHuman(FakeType), "?");
+    EXPECT_EQ(fingerprint(fx.root / "a.ddbfake"), Generic);
     std::string subfolder;
-    EXPECT_FALSE(isBuildable(fx.db.get(), "a.fake", subfolder));
+    EXPECT_FALSE(isBuildable(fx.db.get(), "a.ddbfake", subfolder));
+}
+
+// The extension table fingerprint() used to spell out, now declared by the handlers
+TEST(entryHandler, ExtensionsArePinned) {
+    const std::map<EntryType, std::vector<std::string>> expected = {
+        {Markdown, {"md"}},
+        {PointCloud, {"laz", "las", "e57", "pts", "xyz"}},
+        {GaussianSplat, {"spz", "splat", "ksplat"}},
+        {Model, {"obj", "ply", "gltf", "glb"}},
+        {Tiles3D, {"3tz"}},
+        {Vector, {"geojson", "dxf", "dwg", "shp", "shz", "fgb", "topojson", "kml", "kmz", "gpkg"}},
+        {Image, {"jpg", "jpeg", "dng", "tif", "tiff", "png", "gif", "webp", "mp4", "mov", "webm", "m4v", "avi",
+                 "mkv"}}};
+    for (const auto t : AllBuiltinTypes) {
+        const auto it = expected.find(t);
+        EXPECT_EQ(entryHandler(t).extensions(), it != expected.end() ? it->second : std::vector<std::string>{})
+            << typeToHuman(t);
+    }
+
+    EXPECT_EQ(findEntryHandlerByExtension("a/b/notes.MD"), findEntryHandler(Markdown));
+    EXPECT_EQ(findEntryHandlerByExtension("photo.JPG"), findEntryHandler(Image));
+    EXPECT_EQ(findEntryHandlerByExtension("noext"), nullptr);
+    EXPECT_EQ(findEntryHandlerByExtension(".md"), nullptr);  // a hidden file, no extension
+    EXPECT_EQ(findEntryHandlerByExtension("archive.zip"), nullptr);
+}
+
+// Content-free detection through the registry (files that need no reading)
+TEST(entryHandler, FingerprintByExtension) {
+    TestArea ta(TEST_NAME, true);
+    const auto file = [&](const std::string& name) { return writeFile(ta.getFolder() / name, "x"); };
+
+    EXPECT_EQ(fingerprint(file("readme.md")), Markdown);
+    EXPECT_EQ(fingerprint(file("cloud.LAZ")), PointCloud);
+    EXPECT_EQ(fingerprint(file("model.obj")), Model);
+    EXPECT_EQ(fingerprint(file("city.3tz")), Tiles3D);
+    EXPECT_EQ(fingerprint(file("roads.shp")), Vector);
+    EXPECT_EQ(fingerprint(file("roads.dbf")), Generic);
+    EXPECT_EQ(fingerprint(file("splat.ksplat")), GaussianSplat);
+    EXPECT_EQ(fingerprint(file("noext")), Generic);
+    // Unreadable content: the Image handler falls back to Image, a broken .ply to Generic
+    EXPECT_EQ(fingerprint(file("photo.png")), Image);
+    EXPECT_EQ(fingerprint(file("broken.ply")), Generic);
 }
 
 TEST(entryHandler, ScopedHandlerPutsBackTheOneItReplaced) {

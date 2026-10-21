@@ -6,18 +6,240 @@
 // built into a GeoPackage copy plus an MVT pyramid (or the drawing-coordinate metadata of a CAD
 // drawing without CRS).
 
+#include <algorithm>
+#include <limits>
+#include <optional>
+
 #include "build_layout.h"
+#include "cad.h"
 #include "entry.h"
 #include "entry_handlers_builtin.h"
+#include "gdal_raii.h"
+#include "ogr_api.h"
+#include "ogr_spatialref.h"
 #include "vector.h"
 
 namespace ddb {
 
 namespace {
 
+void parseVectorMetadata(const fs::path &path, Entry &entry)
+{
+    // Compute polygon_geom (WGS84) and properties.vector multi-layer metadata.
+    // Best-effort: any failure leaves the entry indexed without geometry but
+    // never aborts the parse (a corrupted vector file should not block ddb add).
+    // Declared outside try: the CAD source outlives the dataset (a converted DXF is
+    // deleted only once closed).
+    std::optional<cad::CadSource> cadSource;
+    try
+    {
+        // CAD drawings: a DWG is read through a temporary DXF, and the CRS
+        // comes from the drawing (the same rule the build uses, cad.h).
+        const bool isCad = cad::isCadFile(path);
+        if (isCad)
+            cadSource.emplace(path);
+        const fs::path openPath = isCad ? cadSource->dxfPath() : path;
+
+        const auto dataset = adoptDataset(GDALOpenEx(openPath.string().c_str(),
+                                                    GDAL_OF_VECTOR | GDAL_OF_READONLY,
+                                                    nullptr, nullptr, nullptr));
+        if (!dataset)
+        {
+            LOGD << "Vector parse: GDAL cannot open " << path.string();
+            return;
+        }
+        GDALDatasetH hDS = datasetHandle(dataset);
+        SrsPtr cadSrs;
+
+        json cadJson;
+        if (isCad)
+        {
+            const auto info = cad::readDxfInfo(openPath);
+            const auto crs = cad::resolveCadCrs(path, hDS, info);
+            cadJson = {{"crs", {{"source", crs.source}, {"label", crs.label}}},
+                       {"units", cad::insUnitsName(info.insUnits)}};
+            if (cadSource->converted()) cadJson["converter"] = "dwg2dxf";
+            entry.properties["georeferenced"] = crs.georeferenced;
+
+            if (!crs.georeferenced)
+            {
+                // Local drawing: no footprint (nothing to place on a map); the
+                // layer extents stay in drawing coordinates.
+                auto layers = json::array();
+                for (int i = 0; i < GDALDatasetGetLayerCount(hDS); i++)
+                {
+                    OGRLayerH hLayer = GDALDatasetGetLayer(hDS, i);
+                    if (hLayer == nullptr) continue;
+                    const char *layerName = OGR_L_GetName(hLayer);
+                    auto layerJson = json::object();
+                    layerJson["name"] = layerName ? layerName : ("layer_" + std::to_string(i));
+                    layerJson["geometryType"] = OGRGeometryTypeToName(OGR_L_GetGeomType(hLayer));
+                    layerJson["featureCount"] = static_cast<int64_t>(OGR_L_GetFeatureCount(hLayer, FALSE));
+                    layers.push_back(layerJson);
+                }
+                entry.properties["vector"] = {
+                    {"driver", GDALGetDriverShortName(GDALGetDatasetDriver(hDS))},
+                    {"layers", layers}};
+                entry.properties["vector"].update(cadJson);
+                if (crs.hasExtent)
+                    entry.properties["vector"]["localExtent"] = {crs.extent.MinX, crs.extent.MinY,
+                                                                 crs.extent.MaxX, crs.extent.MaxY};
+                return;
+            }
+
+            if (!crs.srs.empty())
+            {
+                cadSrs.reset(OSRNewSpatialReference(nullptr));
+                if (OSRSetFromUserInput(cadSrs.get(), crs.srs.c_str()) != OGRERR_NONE)
+                    throw GDALException("Invalid CAD coordinate system " + crs.label);
+            }
+        }
+
+        // Lazy WGS84 SRS - only allocate when needed (first layer with SRS).
+        SrsPtr wgs84;
+        // Convex envelope in WGS84 across all layers.
+        OGREnvelope totalEnv;
+        totalEnv.MinX = totalEnv.MinY =  std::numeric_limits<double>::max();
+        totalEnv.MaxX = totalEnv.MaxY = -std::numeric_limits<double>::max();
+        bool haveEnv = false;
+
+        const int layerCount = GDALDatasetGetLayerCount(hDS);
+        auto layersArr = json::array();
+
+        for (int i = 0; i < layerCount; i++)
+        {
+            OGRLayerH hLayer = GDALDatasetGetLayer(hDS, i);
+            if (hLayer == nullptr) continue;
+
+            OGREnvelope env;
+            if (OGR_L_GetExtent(hLayer, &env, TRUE) != OGRERR_NONE)
+            {
+                LOGD << "Vector parse: layer " << i << " has no extent";
+                continue;
+            }
+
+            OGRSpatialReferenceH hSrs = OGR_L_GetSpatialRef(hLayer);
+            if (hSrs == nullptr) hSrs = cadSrs.get(); // CAD layers carry no SRS
+            OGREnvelope envWgs84 = env;
+
+            if (hSrs != nullptr)
+            {
+                OSRSetAxisMappingStrategy(hSrs, OAMS_TRADITIONAL_GIS_ORDER);
+
+                // Check if reprojection is needed (skip if already WGS84).
+                const char *authCode = OSRGetAuthorityCode(hSrs, nullptr);
+                const char *authName = OSRGetAuthorityName(hSrs, nullptr);
+                bool isWgs84 = (authName && authCode &&
+                                std::string(authName) == "EPSG" &&
+                                std::string(authCode) == "4326");
+
+                if (!isWgs84)
+                {
+                    if (!wgs84)
+                    {
+                        wgs84 = srsFromEpsg(4326);
+                        if (!wgs84)
+                        {
+                            LOGD << "Vector parse: failed to import EPSG:4326";
+                        }
+                    }
+
+                    if (wgs84)
+                    {
+                        const CoordTransformPtr hT(
+                            OCTNewCoordinateTransformation(hSrs, wgs84.get()));
+                        if (hT)
+                        {
+                            // Transform all 4 corners (a single rectangle in src
+                            // CRS can become a curved quadrilateral in WGS84).
+                            double xs[4] = {env.MinX, env.MaxX, env.MaxX, env.MinX};
+                            double ys[4] = {env.MinY, env.MinY, env.MaxY, env.MaxY};
+                            if (OCTTransform(hT.get(), 4, xs, ys, nullptr))
+                            {
+                                envWgs84.MinX = std::min({xs[0], xs[1], xs[2], xs[3]});
+                                envWgs84.MaxX = std::max({xs[0], xs[1], xs[2], xs[3]});
+                                envWgs84.MinY = std::min({ys[0], ys[1], ys[2], ys[3]});
+                                envWgs84.MaxY = std::max({ys[0], ys[1], ys[2], ys[3]});
+                            }
+                            else
+                            {
+                                LOGD << "Vector parse: layer " << i << " transform failed";
+                            }
+                        }
+                    }
+                }
+            }
+            else
+            {
+                LOGD << "Vector parse: layer " << i << " has no SRS, assuming WGS84";
+            }
+
+            // Per-layer metadata
+            auto layerJson = json::object();
+            const char *layerName = OGR_L_GetName(hLayer);
+            layerJson["name"] = layerName ? layerName : ("layer_" + std::to_string(i));
+
+            OGRwkbGeometryType gType = OGR_L_GetGeomType(hLayer);
+            layerJson["geometryType"] = OGRGeometryTypeToName(gType);
+
+            GIntBig fc = OGR_L_GetFeatureCount(hLayer, FALSE);
+            layerJson["featureCount"] = static_cast<int64_t>(fc);
+            layerJson["extent"] = {envWgs84.MinX, envWgs84.MinY, envWgs84.MaxX, envWgs84.MaxY};
+
+            layersArr.push_back(layerJson);
+
+            // Accumulate global envelope
+            if (!haveEnv)
+            {
+                totalEnv = envWgs84;
+                haveEnv = true;
+            }
+            else
+            {
+                totalEnv.MinX = std::min(totalEnv.MinX, envWgs84.MinX);
+                totalEnv.MinY = std::min(totalEnv.MinY, envWgs84.MinY);
+                totalEnv.MaxX = std::max(totalEnv.MaxX, envWgs84.MaxX);
+                totalEnv.MaxY = std::max(totalEnv.MaxY, envWgs84.MaxY);
+            }
+        }
+
+        entry.properties["vector"] = {
+            {"driver", GDALGetDriverShortName(GDALGetDatasetDriver(hDS))},
+            {"layers", layersArr}};
+        if (!cadJson.is_null()) entry.properties["vector"].update(cadJson);
+
+        if (haveEnv)
+        {
+            // Populate polygon_geom as 5-point closed ring in CCW order.
+            entry.polygon_geom.addPoint(totalEnv.MinX, totalEnv.MinY, 0.0);
+            entry.polygon_geom.addPoint(totalEnv.MaxX, totalEnv.MinY, 0.0);
+            entry.polygon_geom.addPoint(totalEnv.MaxX, totalEnv.MaxY, 0.0);
+            entry.polygon_geom.addPoint(totalEnv.MinX, totalEnv.MaxY, 0.0);
+            entry.polygon_geom.addPoint(totalEnv.MinX, totalEnv.MinY, 0.0);
+
+            entry.point_geom.addPoint((totalEnv.MinX + totalEnv.MaxX) / 2.0,
+                                      (totalEnv.MinY + totalEnv.MaxY) / 2.0,
+                                      0.0);
+        }
+    }
+    catch (const std::exception &e)
+    {
+        LOGD << "Vector parse warning: " << e.what();
+        entry.properties["warning"] = std::string("vector parse failed: ") + e.what();
+    }
+}
+
 class VectorEntryHandler : public EntryHandler {
   public:
     VectorEntryHandler() : EntryHandler(EntryType::Vector, "Vector") {}
+
+    std::vector<std::string> extensions() const override {
+        return {"geojson", "dxf", "dwg", "shp", "shz", "fgb", "topojson", "kml", "kmz", "gpkg"};
+    }
+
+    void parseMetadata(const fs::path& path, Entry& entry, FingerprintContext& /*ctx*/) const override {
+        parseVectorMetadata(path, entry);
+    }
 
     std::string subfolder() const override { return VectorBuildSubfolder; }
 
