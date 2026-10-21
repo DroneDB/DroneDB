@@ -137,10 +137,12 @@ TEST(entryHandler, ThumbnailGeneratorsAndTilerFactoriesArePinned) {
     for (const auto t : AllBuiltinTypes) {
         SCOPED_TRACE(typeToHuman(t));
         EXPECT_EQ(entryHandler(t).tilesWithoutReprojection(), t == GeoRaster);
-        if (t != PointCloud && t != GaussianSplat)
+        if (t != PointCloud && t != GaussianSplat) {
             EXPECT_EQ(entryHandler(t).thumbnailGenerator(), nullptr);
-        if (t != PointCloud)
+        }
+        if (t != PointCloud) {
             EXPECT_EQ(entryHandler(t).tilerFactory(), nullptr);
+        }
     }
 }
 
@@ -186,9 +188,11 @@ TEST(entryHandler, ArtifactManifestIsPinned) {
 TEST(entryHandler, SidecarRulesArePinned) {
     EXPECT_EQ(entryHandler(Vector).sidecarExtensions(),
               (std::vector<std::string>{"cpg", "dbf", "shx", "prj"}));
-    for (const auto t : AllBuiltinTypes)
-        if (t != Vector)
+    for (const auto t : AllBuiltinTypes) {
+        if (t != Vector) {
             EXPECT_TRUE(entryHandler(t).sidecarRules().empty()) << typeToHuman(t);
+        }
+    }
 
     EXPECT_EQ(sidecarMainExtensions("a/roads.dbf"), (std::vector<std::string>{"shp"}));
     EXPECT_EQ(sidecarMainExtensions("a/roads.CPG"), (std::vector<std::string>{"shp"}));

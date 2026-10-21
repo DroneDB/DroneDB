@@ -57,10 +57,11 @@ class GaussianSplatEntryHandler : public EntryHandler {
     // warning when the bytes look unexpected, never reclassifies the file.
     EntryType detect(const fs::path& path, FingerprintContext& /*ctx*/) const override {
         io::Path p(path);
-        if (p.checkExtension({"spz"}) && !looksLikeSpz(path))
+        if (p.checkExtension({"spz"}) && !looksLikeSpz(path)) {
             LOGD << "File has .spz extension but no NGSP/gzip magic: " << path.string();
-        else if (p.checkExtension({"splat"}) && !looksLikeSplatBinary(path))
+        } else if (p.checkExtension({"splat"}) && !looksLikeSplatBinary(path)) {
             LOGD << "File has .splat extension but size is not a multiple of 32: " << path.string();
+        }
         return EntryType::GaussianSplat;
     }
 

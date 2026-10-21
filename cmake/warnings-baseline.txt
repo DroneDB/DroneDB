@@ -80,7 +80,6 @@ src/library/ddb.cpp -Wshadow 10
 src/library/ddb.cpp -Wunused-result 2
 src/library/dsmservice.cpp -Wcatch-value= 1
 src/library/dsmservice.cpp -Wunknown-pragmas 1
-src/library/entry.cpp -Wdangling-else 1
 src/library/entry.cpp -Wshadow 1
 src/library/exif.cpp -Wconversion 5
 src/library/exifeditor.cpp -Wold-style-cast 4
