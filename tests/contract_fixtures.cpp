@@ -156,7 +156,9 @@ namespace contract
         fs::create_directories(to.parent_path());
         fs::copy(from, to, fs::copy_options::recursive | fs::copy_options::overwrite_existing);
 
-        const auto fixed = std::chrono::file_clock::from_sys(std::chrono::system_clock::from_time_t(kInputMtime));
+        // clock_cast is the portable C++20 spelling (MSVC has no file_clock::from_sys); libstdc++ has both
+        const auto fixed = std::chrono::clock_cast<std::chrono::file_clock>(
+            std::chrono::system_clock::from_time_t(kInputMtime));
         fs::last_write_time(to, fixed);
         if (fs::is_directory(to))
             for (const auto &e : fs::recursive_directory_iterator(to))
