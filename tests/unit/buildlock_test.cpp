@@ -14,6 +14,8 @@
 #include <chrono>
 #include <fstream>
 #include <future>
+#include <latch>
+#include <memory>
 #include <mutex>
 #include <vector>
 #include <string>
@@ -185,20 +187,25 @@ TEST_F(BuildLockTest, ThreadSafety) {
     const int numThreads = 10;
     std::vector<std::future<bool>> futures;
     std::atomic<int> successCount{0};
+    // The holder keeps the lock until every thread has tried once: otherwise a thread that
+    // starts late (a loaded machine) tries after the release and acquires it too. BuildLock
+    // never blocks, so every thread reaches the latch.
+    std::latch attempted(numThreads);
 
     // Launch multiple threads trying to acquire the same lock
     for (int i = 0; i < numThreads; ++i) {
-        futures.push_back(std::async(std::launch::async, [&outputPath, &successCount]() -> bool {
+        futures.push_back(std::async(std::launch::async, [&outputPath, &successCount, &attempted]() -> bool {
+            std::unique_ptr<BuildLock> lock;
             try {
-                BuildLock lock(outputPath.string());
-                if (lock.isHolding()) {
-                    // Simulate some work
-                    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-                    successCount++;
-                    return true;
-                }
+                lock = std::make_unique<BuildLock>(outputPath.string());
             } catch (const AppException&) {
                 // Expected - lock acquisition failed
+            }
+            attempted.count_down();
+            if (lock && lock->isHolding()) {
+                attempted.wait();
+                successCount++;
+                return true;
             }
             return false;
         }));
