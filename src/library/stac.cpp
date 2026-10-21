@@ -86,7 +86,7 @@ namespace ddb
     // Get MIME type from file extension for STAC assets
     static std::string getStacMimeType(const std::string &path)
     {
-        auto ext = fs::path(path).extension().string();
+        auto ext = io::toUtf8(io::fromUtf8(path).extension());
         std::transform(ext.begin(), ext.end(), ext.begin(),
                        [](unsigned char c) { return std::tolower(c); });
 
@@ -344,7 +344,7 @@ namespace ddb
 
     // The STAC id of the dataset: `id`, else the name of the dataset folder
     static std::string datasetRootId(Database* db, const std::string& id) {
-        return !id.empty() ? id : fs::weakly_canonical(db->rootDirectory()).filename().string();
+        return !id.empty() ? id : io::toUtf8(fs::weakly_canonical(db->rootDirectory()).filename());
     }
 
     // Build a complete STAC Item (Feature) JSON for a single entry row.

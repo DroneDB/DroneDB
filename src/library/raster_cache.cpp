@@ -13,6 +13,7 @@
 #include "gdal_raii.h"
 #include "logger.h"
 #include "tiler.h"
+#include "mio.h"
 
 namespace ddb
 {
@@ -73,14 +74,14 @@ namespace ddb
 
     RasterCache::Lease<Tiler> RasterCache::acquireTiler(const TilerKey &key, const TilerFactory &create)
     {
-        const auto version = fileVersion(key.path);
+        const auto version = fileVersion(io::fromUtf8(key.path));
         if (version.empty())
         {
             // Not a local file (or gone): nothing to key on, build one for this call only
             return Lease<Tiler>(nullptr, "", "", "", std::shared_ptr<Tiler>(create()));
         }
 
-        const auto path = cacheKeyPath(key.path);
+        const auto path = cacheKeyPath(io::fromUtf8(key.path));
         const auto k = tilerKey(key, path);
         if (auto idle = take(k, version))
             return Lease<Tiler>(this, k, path, version, std::static_pointer_cast<Tiler>(idle));
@@ -105,11 +106,11 @@ namespace ddb
 
     RasterCache::Lease<OpenedDataset> RasterCache::acquireOpened(const std::string &file, OpenedDataset::Kind kind)
     {
-        const auto version = fileVersion(file);
+        const auto version = fileVersion(io::fromUtf8(file));
         if (version.empty())
             return Lease<OpenedDataset>(nullptr, "", "", "", std::make_shared<OpenedDataset>(file, kind));
 
-        const auto path = cacheKeyPath(file);
+        const auto path = cacheKeyPath(io::fromUtf8(file));
         const auto k = (kind == OpenedDataset::Kind::Raster ? "dataset|" : "vector|") + path;
         if (auto idle = take(k, version))
             return Lease<OpenedDataset>(this, k, path, version, std::static_pointer_cast<OpenedDataset>(idle));
@@ -164,7 +165,7 @@ namespace ddb
                                std::shared_ptr<void> object)
     {
         // An instance that saw its file change while in use is not kept
-        const bool current = fileVersion(path) == version;
+        const bool current = fileVersion(io::fromUtf8(path)) == version;
 
         std::vector<std::shared_ptr<void>> stale;
         {

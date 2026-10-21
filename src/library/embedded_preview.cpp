@@ -8,6 +8,7 @@
 #include <fstream>
 
 #include "exceptions.h"
+#include "mio.h"
 
 namespace ddb {
 
@@ -152,7 +153,7 @@ std::vector<std::pair<uint64_t, uint64_t>> mpfImages(const MpfIndex& mpf) {
 JpegLayout readJpegLayout(const fs::path& path) {
     std::ifstream in(path, std::ios::binary);
     if (!in)
-        throw FSException("Cannot read " + path.string());
+        throw FSException("Cannot read " + io::toUtf8(path));
     in.seekg(0, std::ios::end);
     const auto fileSize = static_cast<uint64_t>(in.tellg());
 
@@ -195,7 +196,7 @@ std::optional<JpegPreview> pickJpegPreview(const JpegLayout& layout, int minLong
 
 std::string jpegPreviewGdalPath(const fs::path& path, const JpegPreview& preview) {
     return "/vsisubfile/" + std::to_string(preview.offset) + "_" + std::to_string(preview.size) + "," +
-           path.string();
+           io::toUtf8(path);
 }
 
 }  // namespace ddb

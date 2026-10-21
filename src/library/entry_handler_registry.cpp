@@ -15,6 +15,7 @@
 
 #include "entry_handlers_builtin.h"
 #include "utils.h"
+#include "mio.h"
 
 namespace ddb {
 
@@ -69,7 +70,7 @@ class PlainEntryHandler : public EntryHandler {
 // The extension of path as the handlers declare it: lowercase, without the dot (the rule of
 // io::Path::checkExtension)
 std::string lowerExtension(const fs::path& path) {
-    std::string ext = path.extension().string();
+    std::string ext = io::toUtf8(path.extension());
     if (ext.empty())
         return ext;
     ext.erase(0, 1);
@@ -226,7 +227,7 @@ const TilerFactory* findTilerFactory(const fs::path& tileablePath) {
 }
 
 std::vector<std::string> sidecarMainExtensions(const std::string& path) {
-    const std::string ext = lowerExtension(fs::path(path));
+    const std::string ext = lowerExtension(io::fromUtf8(path));
     std::vector<std::string> mains;
     if (ext.empty())
         return mains;

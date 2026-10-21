@@ -24,7 +24,7 @@ void parseTiles3DMetadata(const fs::path &path, Entry &entry)
     try
     {
         Tiles3DInfo info;
-        if (!getTiles3DInfo(path.string(), info))
+        if (!getTiles3DInfo(io::toUtf8(path), info))
         {
             entry.properties["georeferenced"] = false;
             return;
@@ -84,7 +84,7 @@ class Tiles3DEntryHandler : public EntryHandler {
     // archive is only valid when tileset.json is present at its root; the temp folder is
     // then renamed onto build/{hash}/3dtiles/ by the dispatcher.
     void build(const BuildContext& ctx) const override {
-        zip::extractAll(ctx.inputPath.string(), ctx.tempFolder.string());
+        zip::extractAll(io::toUtf8(ctx.inputPath), io::toUtf8(ctx.tempFolder));
         if (!fileExistsAndNonEmpty(ctx.tempFolder / TilesetFileName))
             throw AppException("Invalid .3tz archive: tileset.json not found at root");
     }

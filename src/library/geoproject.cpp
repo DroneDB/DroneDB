@@ -14,27 +14,27 @@ namespace ddb
 
     void geoProject(const std::vector<std::string> &images, const std::string &output, const std::string &outsize, bool stopOnError, const GeoProjectCallback &callback)
     {
-        bool isDirectory = fs::is_directory(output);
+        bool isDirectory = fs::is_directory(io::fromUtf8(output));
         bool outputToDir = images.size() > 1 || isDirectory;
         if (outputToDir)
         {
             if (!isDirectory)
             {
                 // Bad input?
-                if (fs::is_regular_file(output))
+                if (fs::is_regular_file(io::fromUtf8(output)))
                 {
                     throw FSException(output + " is a file. (Did you switch the input and output parameters?)");
                 }
-                io::createDirectories(output);
+                io::createDirectories(io::fromUtf8(output));
             }
         }
 
         for (const std::string &img : images)
         {
-            fs::path p = img;
+            fs::path p = io::fromUtf8(img);
             if (!fs::exists(p))
             {
-                throw FSException("Cannot project " + p.string() + " (does not exist)");
+                throw FSException("Cannot project " + io::toUtf8(p) + " (does not exist)");
             }
 
             Entry e;
@@ -43,17 +43,17 @@ namespace ddb
             if (e.type != EntryType::GeoImage)
             {
                 if (stopOnError)
-                    throw FSException("Cannot geoproject " + p.string() + ", not a GeoImage");
+                    throw FSException("Cannot geoproject " + io::toUtf8(p) + ", not a GeoImage");
                 else
-                    std::cerr << "Cannot geoproject " << p.string() << ", not a GeoImage, skipping..." << std::endl;
+                    std::cerr << "Cannot geoproject " << io::toUtf8(p) << ", not a GeoImage, skipping..." << std::endl;
                 continue;
             }
             if (e.polygon_geom.size() < 4 || e.properties.find("width") == e.properties.end() || e.properties.find("height") == e.properties.end())
             {
                 if (stopOnError)
-                    throw FSException("Cannot geoproject " + p.string() + ", the image does not have sufficient information");
+                    throw FSException("Cannot geoproject " + io::toUtf8(p) + ", the image does not have sufficient information");
                 else
-                    std::cerr << "Cannot geoproject " << p.string() << ", the image does not have sufficient information: skipping" << std::endl;
+                    std::cerr << "Cannot geoproject " << io::toUtf8(p) << ", the image does not have sufficient information: skipping" << std::endl;
                 continue;
             }
 
@@ -63,7 +63,7 @@ namespace ddb
             std::string outFile;
             if (outputToDir)
             {
-                outFile = (fs::path(output) / p.filename().replace_extension(".tif")).string();
+                outFile = io::toUtf8(io::fromUtf8(output) / p.filename().replace_extension(".tif"));
             }
             else
             {
@@ -71,7 +71,7 @@ namespace ddb
             }
 
             // Unique per call so concurrent processes sharing a cache don't clobber each other
-            std::string tmpOutFile = fs::path(outFile).replace_extension("." + utils::generateRandomString(8) + ".tif.tmp").string();
+            std::string tmpOutFile = io::toUtf8(io::fromUtf8(outFile).replace_extension("." + utils::generateRandomString(8) + ".tif.tmp"));
 
             Point ul = e.polygon_geom.getPoint(0);
             Point ll = e.polygon_geom.getPoint(1);
@@ -79,13 +79,13 @@ namespace ddb
             Point ur = e.polygon_geom.getPoint(3);
 
             // Owned: the outsize parsing below throws InvalidArgsException after the open
-            auto srcDataset = adoptDataset(GDALOpen(p.string().c_str(), GA_ReadOnly));
+            auto srcDataset = adoptDataset(GDALOpen(io::toUtf8(p).c_str(), GA_ReadOnly));
             if (!srcDataset)
             {
                 if (stopOnError)
-                    throw FSException("Cannot project " + p.string() + ", cannot open raster");
+                    throw FSException("Cannot project " + io::toUtf8(p) + ", cannot open raster");
                 else
-                    std::cout << "Cannot project " << p.string() << ", cannot open raster: skipping" << std::endl;
+                    std::cout << "Cannot project " << io::toUtf8(p) << ", cannot open raster: skipping" << std::endl;
                 continue;
             }
 
@@ -176,7 +176,7 @@ namespace ddb
             const GdalOptionsPtr<GDALTranslateOptions> psOptions(
                 GDALTranslateOptionsNew(targs.List(), nullptr));
             if (!psOptions)
-                throw GDALException("Cannot geoproject " + p.string() + ": invalid translate options");
+                throw GDALException("Cannot geoproject " + io::toUtf8(p) + ": invalid translate options");
             // Both steps stop when the call is canceled (DQ-15)
             cancel::GdalProgress progress;
             progress.attach(psOptions.get());
@@ -186,7 +186,7 @@ namespace ddb
             if (!dstDataset)
             {
                 cancel::throwIfCanceled();
-                throw GDALException("Cannot geoproject " + p.string() + ": " + CPLGetLastErrorMsg());
+                throw GDALException("Cannot geoproject " + io::toUtf8(p) + ": " + CPLGetLastErrorMsg());
             }
 
             // Run gdalwarp to add trasparency, apply GCPs
@@ -199,7 +199,7 @@ namespace ddb
             const GdalOptionsPtr<GDALWarpAppOptions> waOptions(
                 GDALWarpAppOptionsNew(wargs.List(), nullptr));
             if (!waOptions)
-                throw GDALException("Cannot geoproject " + p.string() + ": invalid warp options");
+                throw GDALException("Cannot geoproject " + io::toUtf8(p) + ": invalid warp options");
             progress.attach(waOptions.get());
 
             GDALDatasetH hDstDataset = datasetHandle(dstDataset);
@@ -217,15 +217,15 @@ namespace ddb
             // "NULL pointer" error that clobbers the real warp failure message
             if (!wrpDataset)
             {
-                io::assureIsRemoved(tmpOutFile);
+                io::assureIsRemoved(io::fromUtf8(tmpOutFile));
                 cancel::throwIfCanceled();
-                throw GDALException("Cannot geoproject " + p.string() + ": " + CPLGetLastErrorMsg());
+                throw GDALException("Cannot geoproject " + io::toUtf8(p) + ": " + CPLGetLastErrorMsg());
             }
 
             GDALFlushCache(datasetHandle(wrpDataset));
             wrpDataset.reset();
 
-            io::rename(tmpOutFile, outFile);
+            io::rename(io::fromUtf8(tmpOutFile), io::fromUtf8(outFile));
 
             if (callback)
             {

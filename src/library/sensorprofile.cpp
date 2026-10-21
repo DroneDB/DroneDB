@@ -148,15 +148,15 @@ void SensorProfileManager::ensureLoaded() const {
     // Lazy-load defaults (mutex already held by caller)
     std::string path;
     fs::path dataFile = io::getDataPath("sensor-profiles.json");
-    path = dataFile.string();
+    path = io::toUtf8(dataFile);
 
-    if (path.empty() || !fs::exists(path)) {
+    if (path.empty() || !fs::exists(io::fromUtf8(path))) {
         LOGD << "Sensor profiles file not found, using empty profiles";
         loaded_ = true;
         return;
     }
 
-    std::ifstream ifs(path);
+    std::ifstream ifs(io::fromUtf8(path));
     if (!ifs.is_open()) {
         LOGW << "Cannot open sensor profiles file: " << path;
         loaded_ = true;
@@ -188,16 +188,16 @@ void SensorProfileManager::loadDefaults(const std::string &jsonPath) {
     std::string path = jsonPath;
     if (path.empty()) {
         fs::path dataFile = io::getDataPath("sensor-profiles.json");
-        path = dataFile.string();
+        path = io::toUtf8(dataFile);
     }
 
-    if (path.empty() || !fs::exists(path)) {
+    if (path.empty() || !fs::exists(io::fromUtf8(path))) {
         LOGD << "Sensor profiles file not found, using empty profiles";
         loaded_ = true;
         return;
     }
 
-    std::ifstream ifs(path);
+    std::ifstream ifs(io::fromUtf8(path));
     if (!ifs.is_open()) {
         throw AppException("Cannot open sensor profiles file: " + path);
     }
@@ -297,7 +297,7 @@ bool SensorProfileManager::matchesProfile(const SensorProfile &profile, int band
 SensorDetectionResult SensorProfileManager::detectSensor(const std::string &rasterPath) const {
     // Memoised per file version: a tile or thumbnail request does not reopen the raster
     // and rescan its metadata, and the lock is not held during the GDAL work
-    const auto version = fileVersion(rasterPath);
+    const auto version = fileVersion(io::fromUtf8(rasterPath));
     std::vector<SensorProfile> profiles;
     uint64_t generation;
     {

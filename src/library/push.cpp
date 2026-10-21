@@ -22,7 +22,7 @@ namespace ddb
     DDB_DLL void push(const std::string &registry, bool sslVerify)
     {
 
-        const auto currentPath = fs::current_path().string();
+        const auto currentPath = io::toUtf8(fs::current_path());
 
         const auto db = open(currentPath, true);
 

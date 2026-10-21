@@ -84,7 +84,7 @@ float DSMService::getAltitude(double latitude, double longitude)
         // Attempt to load from the network and recurse
         try
         {
-            if (addGeoTIFFToCache(loadFromNetwork(latitude, longitude), latitude, longitude))
+            if (addGeoTIFFToCache(ddb::io::fromUtf8(loadFromNetwork(latitude, longitude)), latitude, longitude))
             {
                 return getAltitude(latitude, longitude);
             }
@@ -106,10 +106,10 @@ bool DSMService::loadDiskCache(double latitude, double longitude)
     {
 
         // Not found in cache?
-        std::string filename = entry.path().filename().string();
+        std::string filename = ddb::io::toUtf8(entry.path().filename());
         if (!isCached(filename))
         {
-            LOGD << "Adding " << entry.path().string() << " to DSM service cache";
+            LOGD << "Adding " << ddb::io::toUtf8(entry.path()) << " to DSM service cache";
             try
             {
                 if (addGeoTIFFToCache(entry.path(), latitude, longitude))
@@ -119,7 +119,7 @@ bool DSMService::loadDiskCache(double latitude, double longitude)
             }
             catch (const GDALException)
             {
-                LOGD << "Deleting " << entry.path().string() << " because we can't open it";
+                LOGD << "Deleting " << ddb::io::toUtf8(entry.path()) << " because we can't open it";
                 fs::remove(entry.path());
                 std::lock_guard<std::mutex> lock(cacheMutex);
                 cache.erase(filename);
@@ -191,7 +191,7 @@ std::string DSMService::loadFromNetwork(double latitude, double longitude, const
     std::string filename = std::to_string(static_cast<int>(p.x)) + "_" +
                            std::to_string(static_cast<int>(p.y)) + "_" +
                            std::to_string(std::chrono::system_clock::now().time_since_epoch().count()) + ".tif";
-    std::string filePath = (getCacheDir() / filename).string();
+    std::string filePath = ddb::io::toUtf8(getCacheDir() / ddb::io::fromUtf8(filename));
 
     // The key stays out of the log, and out of the error message that getAltitude() logs
     const std::string redactedUrl =
@@ -210,7 +210,7 @@ std::string DSMService::loadFromNetwork(double latitude, double longitude, const
     }
 
     // Verify the downloaded file exists and has content
-    if (!fs::exists(filePath) || fs::file_size(filePath) == 0) {
+    if (!fs::exists(ddb::io::fromUtf8(filePath)) || fs::file_size(ddb::io::fromUtf8(filePath)) == 0) {
         throw NetException("Downloaded DSM file is empty or does not exist: " + filePath);
     }
 
@@ -220,9 +220,9 @@ std::string DSMService::loadFromNetwork(double latitude, double longitude, const
 bool DSMService::addGeoTIFFToCache(const fs::path &filePath, double latitude, double longitude)
 {
     // Owned: the checks below throw while the dataset is open
-    const auto dataset = adoptDataset(GDALOpen(filePath.string().c_str(), GA_ReadOnly));
+    const auto dataset = adoptDataset(GDALOpen(ddb::io::toUtf8(filePath).c_str(), GA_ReadOnly));
     if (!dataset)
-        throw GDALException("Cannot open " + filePath.string());
+        throw GDALException("Cannot open " + ddb::io::toUtf8(filePath));
     GDALDatasetH hDataset = datasetHandle(dataset);
 
     DSMCacheEntry e;
@@ -230,11 +230,11 @@ bool DSMService::addGeoTIFFToCache(const fs::path &filePath, double latitude, do
     e.height = static_cast<unsigned int>(GDALGetRasterYSize(hDataset));
 
     if (GDALGetGeoTransform(hDataset, e.geoTransform) != CE_None)
-        throw GDALException("Cannot get geotransform for " + filePath.string());
+        throw GDALException("Cannot get geotransform for " + ddb::io::toUtf8(filePath));
 
     std::string wkt = GDALGetProjectionRef(hDataset);
     if (wkt.empty())
-        throw GDALException("Cannot get projection ref for " + filePath.string());
+        throw GDALException("Cannot get projection ref for " + ddb::io::toUtf8(filePath));
     //    char *wktp = const_cast<char *>(wkt.c_str());
     // OGRSpatialReference *srs = new OGRSpatialReference();
     // if (srs->importFromWkt(&wktp) != OGRERR_NONE) throw GDALException("Cannot read spatial reference system for " + filePath.string() + ". Is PROJ installed?");
@@ -245,7 +245,7 @@ bool DSMService::addGeoTIFFToCache(const fs::path &filePath, double latitude, do
     // TODO: support for DSM with EPSG different than 4326
     // if (!srs->IsSame(compare)) throw GDALException("Cannot read DSM values from raster: " + filePath.string() + " (EPSG != 4326)");
     if (GDALGetRasterCount(hDataset) != 1)
-        throw GDALException("More than 1 raster band found in elevation raster: " + filePath.string());
+        throw GDALException("More than 1 raster band found in elevation raster: " + ddb::io::toUtf8(filePath));
 
     GDALRasterBandH hBand = GDALGetRasterBand(hDataset, 1);
     e.nodata = static_cast<float>(GDALGetRasterNoDataValue(hBand, &e.hasNodata));
@@ -263,7 +263,7 @@ bool DSMService::addGeoTIFFToCache(const fs::path &filePath, double latitude, do
     if (contained)
     {
         // Inside the boundaries, load data
-        LOGD << position << " inside raster boundary, loading data from " << filePath.string();
+        LOGD << position << " inside raster boundary, loading data from " << ddb::io::toUtf8(filePath);
         e.loadData(hDataset);
     }
 
@@ -271,7 +271,7 @@ bool DSMService::addGeoTIFFToCache(const fs::path &filePath, double latitude, do
     // repeated GDALOpen calls for files outside query bounds
     {
         std::lock_guard<std::mutex> lock(cacheMutex);
-        cache[filePath.filename().string()] = std::move(e);
+        cache[ddb::io::toUtf8(filePath.filename())] = std::move(e);
     }
 
     return contained;

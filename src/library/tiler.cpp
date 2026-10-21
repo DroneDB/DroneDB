@@ -35,28 +35,28 @@ namespace ddb
                 io::createDirectories(dir);
             }
 
-            fs::path p = dir / fs::path(std::to_string(y) + ".png");
-            return p.string();
+            fs::path p = dir / (std::to_string(y) + ".png");
+            return io::toUtf8(p);
         }
     }
 
     Tiler::Tiler(const std::string &inputPath, const std::string &outputFolder,
                  int tileSize, bool tms)
         : inputPath(inputPath),
-          outputFolder(outputFolder),
+          outputFolder(io::fromUtf8(outputFolder)),
           tileSize(tileSize),
           tms(tms),
           mercator(GlobalMercator(tileSize))
     {
-        if (!fs::exists(inputPath) && !utils::isNetworkPath(inputPath))
+        if (!fs::exists(io::fromUtf8(inputPath)) && !utils::isNetworkPath(inputPath))
             throw FSException(inputPath + " does not exist");
         if (!ddb::isPowerOfTwo(tileSize))
             throw GDALException("Tile size must be a power of 2 greater than 0");
 
-        if (!outputFolder.empty() && !fs::exists(outputFolder))
+        if (!outputFolder.empty() && !fs::exists(io::fromUtf8(outputFolder)))
         {
             // Try to create
-            io::createDirectories(outputFolder);
+            io::createDirectories(io::fromUtf8(outputFolder));
         }
     }
 

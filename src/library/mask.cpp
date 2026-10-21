@@ -20,18 +20,18 @@ namespace ddb
                  const std::string &color)
     {
         // The existing output is deleted below, before the input is read
-        io::assureDistinctOutput(input, output);
+        io::assureDistinctOutput(io::fromUtf8(input), io::fromUtf8(output));
 
-        if (fs::exists(output)) {
+        if (fs::exists(io::fromUtf8(output))) {
             LOGD << "Output file " << output << " already exists, deleting it";
-            fs::remove(output);
+            fs::remove(io::fromUtf8(output));
         }
 
         // Clean possible stale external mask from previous runs.
         const std::string externalMask = output + ".msk";
-        if (fs::exists(externalMask)) {
+        if (fs::exists(io::fromUtf8(externalMask))) {
             LOGD << "External mask file " << externalMask << " already exists, deleting it";
-            fs::remove(externalMask);
+            fs::remove(io::fromUtf8(externalMask));
         }
 
         const auto srcDataset = adoptDataset(GDALOpen(input.c_str(), GA_ReadOnly));

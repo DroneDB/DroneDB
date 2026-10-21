@@ -5,6 +5,7 @@
 #include "dbops.h"
 #include "info.h"
 #include "exceptions.h"
+#include "mio.h"
 
 namespace ddb
 {
@@ -21,7 +22,7 @@ namespace ddb
         }
         else
         {
-            filePaths = std::vector<fs::path>(input.begin(), input.end());
+            filePaths = io::fromUtf8(input);
         }
 
         if (format == "json")
@@ -45,7 +46,7 @@ namespace ddb
 
         for (auto &fp : filePaths)
         {
-            LOGD << "Parsing entry " << fp.string();
+            LOGD << "Parsing entry " << io::toUtf8(fp);
 
             try
             {
@@ -53,7 +54,7 @@ namespace ddb
                 parseEntry(fp, "/", e, withHash);
                 // We override e.path because it's relative
                 // But we want the absolute path (in the unix path format)
-                e.path = "file://" + fs::absolute(fp).generic_string();
+                e.path = "file://" + io::toGenericUtf8(fs::absolute(fp));
 
                 if (format == "json")
                 {
@@ -75,7 +76,7 @@ namespace ddb
                     }
                     else
                     {
-                        LOGD << "No geometries in " << fp.string() << ", skipping from GeoJSON export";
+                        LOGD << "No geometries in " << io::toUtf8(fp) << ", skipping from GeoJSON export";
                     }
                 }
                 else
@@ -87,7 +88,7 @@ namespace ddb
             }
             catch (const AppException &e)
             {
-                LOGD << "Cannot parse " << fp.string() << ", skipping: " << e.what();
+                LOGD << "Cannot parse " << io::toUtf8(fp) << ", skipping: " << e.what();
                 if (stopOnError)
                     throw;
             }

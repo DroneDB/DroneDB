@@ -28,7 +28,7 @@ namespace ddb
             if (dbPath.empty())
                 throw DBException("Cannot find sensor database sensor_data.sqlite");
 
-            db->open(dbPath.string());
+            db->open(io::toUtf8(dbPath));
         }
     }
 

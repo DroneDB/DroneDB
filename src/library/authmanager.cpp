@@ -4,6 +4,7 @@
 #include "../../vendor/base64/base64.h"
 #include "authmanager.h"
 #include "logger.h"
+#include "mio.h"
 
 namespace ddb
 {
@@ -15,12 +16,12 @@ namespace ddb
             std::ifstream fin(authFile);
             try
             {
-                LOGD << "Read " << authFile.string();
+                LOGD << "Read " << io::toUtf8(authFile);
                 fin >> auth;
             }
             catch (const json::exception &e)
             {
-                LOGD << "Error reading " << authFile.string() << ": " << e.what();
+                LOGD << "Error reading " << io::toUtf8(authFile) << ": " << e.what();
             }
         }
     }

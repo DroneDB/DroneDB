@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "fileversion.h"
+#include "mio.h"
 
 #ifndef _WIN32
 #include <sys/stat.h>
@@ -63,7 +64,7 @@ namespace ddb
             if (ec)
                 canonical = path;
         }
-        return canonical.lexically_normal().generic_string();
+        return io::toGenericUtf8(canonical.lexically_normal());
     }
 
     bool isCacheKeyUnder(const std::string &key, const std::string &prefix)

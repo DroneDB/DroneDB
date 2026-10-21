@@ -40,12 +40,12 @@ void parseVectorMetadata(const fs::path &path, Entry &entry)
             cadSource.emplace(path);
         const fs::path openPath = isCad ? cadSource->dxfPath() : path;
 
-        const auto dataset = adoptDataset(GDALOpenEx(openPath.string().c_str(),
+        const auto dataset = adoptDataset(GDALOpenEx(io::toUtf8(openPath).c_str(),
                                                     GDAL_OF_VECTOR | GDAL_OF_READONLY,
                                                     nullptr, nullptr, nullptr));
         if (!dataset)
         {
-            LOGD << "Vector parse: GDAL cannot open " << path.string();
+            LOGD << "Vector parse: GDAL cannot open " << io::toUtf8(path);
             return;
         }
         GDALDatasetH hDS = datasetHandle(dataset);
@@ -270,7 +270,7 @@ class VectorEntryHandler : public EntryHandler {
     void build(const BuildContext& ctx) const override {
         // Propagate the force flag so a partial build (e.g. vec/ present but mvt/ missing) is
         // fully rebuilt instead of being silently treated as up-to-date inside buildVector.
-        buildVector(ctx.inputPath.string(), ctx.baseOutputPath.string(), ctx.force);
+        buildVector(io::toUtf8(ctx.inputPath), io::toUtf8(ctx.baseOutputPath), ctx.force);
     }
 
     // The .dbf/.shx/.cpg of a shapefile; a .prj also gives a CAD drawing its CRS (DDB-12)

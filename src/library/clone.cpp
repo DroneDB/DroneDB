@@ -20,7 +20,7 @@ namespace ddb
 
     void clone(const TagComponents &tag, const std::string &folder, bool sslVerify)
     {
-        if (fs::exists(folder) && !fs::is_empty(folder))
+        if (fs::exists(io::fromUtf8(folder)) && !fs::is_empty(io::fromUtf8(folder)))
         {
             std::cout << "Cannot clone in folder '" + folder +
                              "' because it already exists"
@@ -47,7 +47,7 @@ namespace ddb
         }
         catch (const AuthException &)
         {
-            io::assureIsRemoved(folder);
+            io::assureIsRemoved(io::fromUtf8(folder));
             const auto username = utils::getPrompt("Username: ");
             const auto password = utils::getPass("Password: ");
 

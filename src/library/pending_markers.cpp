@@ -35,27 +35,27 @@ namespace {
 // (especially ENOSPC: a full disk must never remove the last pending marker).
 void writeMarkerAtomically(const fs::path& pendingPath, const std::string& content) {
     const fs::path temporary =
-        pendingPath.string() + PendingMarkerTempTag + utils::generateRandomString(16);
+        io::concat(pendingPath, PendingMarkerTempTag + utils::generateRandomString(16));
     try {
         std::ofstream out;
         errno = 0;
-        out.open(temporary.string(), std::ios::binary | std::ios::trunc);
+        out.open(temporary, std::ios::binary | std::ios::trunc);
         const int openError = errno;
         if (!out.is_open())
-            throw FSException("Cannot open pending marker " + temporary.string(),
+            throw FSException("Cannot open pending marker " + io::toUtf8(temporary),
                               std::error_code(openError, std::generic_category()));
         errno = 0;
         out << content;
         out.flush();
         const int writeError = errno;
         if (!out)
-            throw FSException("Cannot write pending marker " + temporary.string(),
+            throw FSException("Cannot write pending marker " + io::toUtf8(temporary),
                               std::error_code(writeError, std::generic_category()));
         errno = 0;
         out.close();
         const int closeError = errno;
         if (out.fail())
-            throw FSException("Cannot close pending marker " + temporary.string(),
+            throw FSException("Cannot close pending marker " + io::toUtf8(temporary),
                               std::error_code(closeError, std::generic_category()));
 #ifdef _WIN32
         // std::filesystem::rename does not replace an existing file on Windows.
@@ -83,24 +83,24 @@ bool replacePendingMarker(const fs::path& pendingPath, const std::string& depend
         writeMarkerAtomically(pendingPath, std::to_string(utils::currentUnixTimestamp()) + "\n" + dependencyLines);
         return true;
     } catch (const std::exception& ex) {
-        LOGW << "Cannot refresh pending marker '" << pendingPath.string()
+        LOGW << "Cannot refresh pending marker '" << io::toUtf8(pendingPath)
              << "'; original marker retained: " << ex.what();
         return false;
     }
 }
 
 void copyPendingMarker(const fs::path& from, const fs::path& to) {
-    std::ifstream in(from.string(), std::ios::binary);
+    std::ifstream in(from, std::ios::binary);
     if (!in.is_open())
-        throw FSException("Cannot read pending marker " + from.string());
+        throw FSException("Cannot read pending marker " + io::toUtf8(from));
     const std::string content(std::istreambuf_iterator<char>(in), {});
     if (in.bad())
-        throw FSException("Cannot read pending marker " + from.string());
+        throw FSException("Cannot read pending marker " + io::toUtf8(from));
     writeMarkerAtomically(to, content);
 }
 
 std::optional<PendingMarker> readPendingMarker(const fs::path& pendingFilePath) {
-    std::ifstream pendingFile(pendingFilePath.string());
+    std::ifstream pendingFile(pendingFilePath);
     if (!pendingFile)
         return std::nullopt;
 
@@ -184,19 +184,19 @@ std::vector<fs::path> collectPendingFiles(const fs::path& buildDir) {
 
     fs::directory_iterator it(buildDir, ec);
     if (ec) {
-        LOGW << "Cannot open build directory '" << buildDir.string() << "': " << ec.message();
+        LOGW << "Cannot open build directory '" << io::toUtf8(buildDir) << "': " << ec.message();
         return pendingFiles;
     }
     for (const fs::directory_iterator end; it != end; it.increment(ec)) {
         if (ec) {
-            LOGW << "Error iterating build directory '" << buildDir.string() << "': " << ec.message();
+            LOGW << "Error iterating build directory '" << io::toUtf8(buildDir) << "': " << ec.message();
             break;
         }
         const fs::path& p = it->path();
         std::error_code typeErr;
         if (p.extension() != PendingMarkerExtension || !it->is_regular_file(typeErr) || typeErr)
             continue;
-        if (!isHashLike(p.stem().string()))
+        if (!isHashLike(io::toUtf8(p.stem())))
             continue;
         pendingFiles.push_back(p);
     }
@@ -218,19 +218,19 @@ static constexpr time_t PendingRetryBackoffSeconds = 60;
 // permanent failures consume it. Build-lock contention leaves it untouched.
 // Failures remain logged at warning level for the next bounded coordinator/sweep.
 void buildPending(Database* db, const std::string& outputPath, bool force) {
-    const fs::path buildDir = outputPath.empty() ? db->buildDirectory() : fs::path(outputPath);
+    const fs::path buildDir = outputPath.empty() ? db->buildDirectory() : io::fromUtf8(outputPath);
     std::error_code ec;
     if (!fs::exists(buildDir, ec) || ec)
         return;
 
-    const std::string outPath = buildDir.string();
+    const std::string outPath = io::toUtf8(buildDir);
 
     // Collect first: building creates and removes files in this directory, which
     // must not happen under a live directory iterator.
     const std::vector<fs::path> pendingFiles = collectPendingFiles(buildDir);
 
     for (const auto& pendingPath : pendingFiles) {
-        const auto hash = pendingPath.stem().string();
+        const auto hash = io::toUtf8(pendingPath.stem());
         const PendingMarker pending = parsePendingFile(pendingPath);
 
         const time_t timeSinceLastAttempt = utils::currentUnixTimestamp() - pending.lastAttempt;
@@ -292,7 +292,7 @@ std::vector<PendingBuildInfo> getPendingBuildInfo(Database* db) {
     std::vector<PendingBuildInfo> result;
 
     for (const auto& pendingPath : collectPendingFiles(db->buildDirectory())) {
-        const auto hash = pendingPath.stem().string();
+        const auto hash = io::toUtf8(pendingPath.stem());
         const PendingMarker pending = parsePendingFile(pendingPath);
 
         auto q = db->query("SELECT path FROM entries WHERE hash = ?");

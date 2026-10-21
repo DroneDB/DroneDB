@@ -6,6 +6,7 @@
 #include <vector>
 #include "hash.h"
 #include "exceptions.h"
+#include "mio.h"
 
 using namespace ddb;
 
@@ -21,7 +22,7 @@ namespace {
 }
 
 std::string Hash::fileSHA256(const std::string &path) {
-    std::ifstream f(path, std::ios::binary);
+    std::ifstream f(io::fromUtf8(path), std::ios::binary);
 
     if (!f.is_open())
         throw FSException("Cannot open " + path + " for hashing");

@@ -23,14 +23,14 @@ namespace {
 // Size, geotransform, projection, WGS84 footprint and bands
 void parseGeoRasterMetadata(const fs::path &path, Entry &entry)
 {
-    LOGV << "Processing GeoRaster file: " << path.string();
+    LOGV << "Processing GeoRaster file: " << io::toUtf8(path);
 
     // Owned: the SRS checks below throw while the dataset is open
-    auto dataset = adoptDataset(GDALOpen(path.string().c_str(), GA_ReadOnly));
+    auto dataset = adoptDataset(GDALOpen(io::toUtf8(path).c_str(), GA_ReadOnly));
     if (!dataset)
     {
-        LOGV << "GDAL failed to open dataset: " << path.string();
-        throw GDALException("Cannot open " + path.string() + " for reading");
+        LOGV << "GDAL failed to open dataset: " << io::toUtf8(path);
+        throw GDALException("Cannot open " + io::toUtf8(path) + " for reading");
     }
 
     LOGV << "GDAL successfully opened dataset";
@@ -81,10 +81,10 @@ void parseGeoRasterMetadata(const fs::path &path, Entry &entry)
                 LOGV << "OSRImportFromWkt result: " << (importResult == OGRERR_NONE ? "Success" : "Failed");
 
                 if (importResult != OGRERR_NONE)
-                    throw GDALException("Cannot read spatial reference system for " + path.string() + ". Is PROJ available?");
+                    throw GDALException("Cannot read spatial reference system for " + io::toUtf8(path) + ". Is PROJ available?");
 
                 if (wgs84.importFromEPSG(4326) != OGRERR_NONE)
-                    throw GDALException("Cannot read WGS84 spatial reference system for " + path.string() + ". Is PROJ available?");
+                    throw GDALException("Cannot read WGS84 spatial reference system for " + io::toUtf8(path) + ". Is PROJ available?");
 
                 LOGV << "OSRImportFromEPSG result: Success";
 
@@ -192,7 +192,7 @@ class GeoRasterEntryHandler : public EntryHandler {
     }
 
     void build(const BuildContext& ctx) const override {
-        buildCog(ctx.inputPath.string(), (ctx.tempFolder / CogFileName).string());
+        buildCog(io::toUtf8(ctx.inputPath), io::toUtf8(ctx.tempFolder / CogFileName));
     }
 
     ThumbnailSource thumbnailSource() const override { return ThumbnailSource::File; }

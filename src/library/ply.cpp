@@ -8,6 +8,7 @@
 #include "logger.h"
 #include "ply.h"
 #include "exceptions.h"
+#include "mio.h"
 
 namespace ddb
 {
@@ -335,9 +336,9 @@ namespace ddb
 
     bool parsePlyHeader(const fs::path &plyFile, PlyHeader &header, std::string *error)
     {
-        std::ifstream in(plyFile.string(), std::ios::binary);
+        std::ifstream in(plyFile, std::ios::binary);
         if (!in.is_open())
-            throw FSException("Cannot open " + plyFile.string());
+            throw FSException("Cannot open " + io::toUtf8(plyFile));
 
         std::string err;
         const bool ok = parseHeaderStream(in, header, err);
@@ -351,7 +352,7 @@ namespace ddb
         PlyHeader h;
         std::string err;
         if (!parsePlyHeader(plyFile, h, &err))
-            throw AppException("Invalid PLY header in " + plyFile.string() + ": " + err);
+            throw AppException("Invalid PLY header in " + io::toUtf8(plyFile) + ": " + err);
         return h;
     }
 
@@ -383,7 +384,7 @@ namespace ddb
         std::string err;
         if (!parsePlyHeader(plyFile, h, &err))
         {
-            LOGD << "Cannot read PLY header of " << plyFile.string() << ": " << err;
+            LOGD << "Cannot read PLY header of " << io::toUtf8(plyFile) << ": " << err;
             return false;
         }
 
@@ -420,7 +421,7 @@ namespace ddb
                 // stay Generic, like any other unsupported textured PLY.
                 if (!info.unsupportedTextureReason.empty())
                 {
-                    LOGD << "PLY " << plyFile.string() << " is not built as a Model: "
+                    LOGD << "PLY " << io::toUtf8(plyFile) << " is not built as a Model: "
                          << info.unsupportedTextureReason;
                     return Generic;
                 }

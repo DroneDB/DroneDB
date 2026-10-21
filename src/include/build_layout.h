@@ -8,6 +8,7 @@
 #include <string_view>
 
 #include "fs.h"
+#include "mio.h"
 
 /**
  * On-disk layout of the build artifacts (DQ-08, decision D8): every folder, file and marker
@@ -106,7 +107,7 @@ inline std::string buildLockPath(const std::string& outputPath) {
 
 // "<build root>/<hash>.pending" for the entry folder "<build root>/<hash>"
 inline fs::path pendingMarkerPath(const fs::path& entryBuildDir) {
-    return entryBuildDir.string() + PendingMarkerExtension;
+    return io::concat(entryBuildDir, PendingMarkerExtension);
 }
 
 // ".pending.tmp-": the infix of a marker being replaced, after the 64-character hash
@@ -116,7 +117,7 @@ inline std::string pendingMarkerTempInfix() {
 
 // "<dir>-old", next to <dir>
 inline fs::path backupFolderPath(const fs::path& dir) {
-    return dir.parent_path() / (dir.filename().string() + BackupFolderSuffix);
+    return dir.parent_path() / io::concat(dir.filename(), BackupFolderSuffix);
 }
 
 // "3dtiles-old"

@@ -33,7 +33,7 @@ namespace ddb
         try
         {
             if (!fs::exists(path))
-                throw FSException(path.string() + " does not exist");
+                throw FSException(io::toUtf8(path) + " does not exist");
         }
         catch (const fs::filesystem_error &e)
         {
@@ -66,13 +66,13 @@ namespace ddb
             }
             catch (const fs::filesystem_error &e)
             {
-                LOGD << "Cannot check " << path.string() << " .ddb presence: " << e.what();
+                LOGD << "Cannot check " << io::toUtf8(path) << " .ddb presence: " << e.what();
             }
         }
         else
         {
             if (entry.hash == "" && withHash)
-                entry.hash = Hash::fileSHA256(path.string());
+                entry.hash = Hash::fileSHA256(io::toUtf8(path));
 
             entry.size = p.getSize();
             entry.type = fingerprint(p.get(), ctx);
@@ -293,7 +293,7 @@ namespace ddb
     {
         try
         {
-            const auto db = ddb::open(ddbPath.string(), false);
+            const auto db = ddb::open(io::toUtf8(ddbPath), false);
 
             // The size of the database is the sum of all entries' sizes
             auto q = db->query("SELECT SUM(size) FROM entries");

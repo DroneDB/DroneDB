@@ -35,7 +35,7 @@ namespace ddb
 
             std::string lowerExt(const fs::path &p)
             {
-                auto ext = p.extension().string();
+                auto ext = io::toUtf8(p.extension());
                 utils::toLower(ext);
                 return ext;
             }
@@ -147,12 +147,12 @@ namespace ddb
         std::string dwgVersion(const fs::path &dwg)
         {
             char magic[6] = {0};
-            std::ifstream in(dwg.string(), std::ios::binary);
+            std::ifstream in(dwg, std::ios::binary);
             in.read(magic, sizeof(magic));
             const auto got = in.gcount();
             if (got < 6 || magic[0] != 'A' || magic[1] != 'C' ||
                 !std::isdigit(static_cast<unsigned char>(magic[2])))
-                throw AppException(dwg.filename().string() + " is not a valid DWG file");
+                throw AppException(io::toUtf8(dwg.filename()) + " is not a valid DWG file");
 
             const std::string code(magic, 6);
             static const std::pair<const char *, const char *> names[] = {
@@ -179,8 +179,8 @@ namespace ddb
             opts.idleTimeout = kIdleTimeout;
             opts.maxRuntime = maxRuntime();
 
-            LOGD << "Converting " << dwg.string() << " (" << version << ") to DXF with " << bin.string();
-            const auto r = process::run(bin, {"-y", "-o", outDxf.string(), dwg.string()}, opts);
+            LOGD << "Converting " << io::toUtf8(dwg) << " (" << version << ") to DXF with " << io::toUtf8(bin);
+            const auto r = process::run(bin, {"-y", "-o", io::toUtf8(outDxf), io::toUtf8(dwg)}, opts);
             if (!r.success())
             {
                 io::assureIsRemoved(outDxf);
@@ -193,7 +193,7 @@ namespace ddb
             // dwg2dxf exits 0 on files it could not decode (DDB-12 RESULTS §2, §5):
             // only a DXF that GDAL opens and that has features counts as converted.
             const char *drivers[] = {"DXF", nullptr};
-            auto dataset = adoptDataset(GDALOpenEx(outDxf.string().c_str(),
+            auto dataset = adoptDataset(GDALOpenEx(io::toUtf8(outDxf).c_str(),
                                                    GDAL_OF_VECTOR | GDAL_OF_READONLY, drivers,
                                                    nullptr, nullptr));
             if (!dataset)
@@ -217,7 +217,7 @@ namespace ddb
                                    "): the drawing has no 2D features that can be read (for example, a drawing of 3D solids only)" +
                                    kDxfAdvice);
             }
-            LOGD << "Converted " << dwg.filename().string() << ": " << features << " features";
+            LOGD << "Converted " << io::toUtf8(dwg.filename()) << ": " << features << " features";
         }
 
         CadSource::CadSource(const fs::path &input, const ICadConverter *converter, const fs::path &workDir)
@@ -231,7 +231,7 @@ namespace ddb
             // A member: removed when the conversion throws, as when the source is destroyed
             const fs::path parent = workDir.empty() ? fs::temp_directory_path() : workDir;
             tempDir = io::ScopedTempDir::create(parent, "ddb-cad-");
-            dxf = tempDir.path() / (input.stem().string() + ".dxf");
+            dxf = tempDir.path() / io::concat(input.stem(), ".dxf");
 
             if (converter)
                 converter->toDxf(input, dxf);
@@ -244,7 +244,7 @@ namespace ddb
         DxfInfo readDxfInfo(const fs::path &dxf)
         {
             DxfInfo info;
-            std::ifstream in(dxf.string(), std::ios::binary);
+            std::ifstream in(dxf, std::ios::binary);
             if (!in.is_open()) return info;
 
             char head[18] = {0};
@@ -537,7 +537,7 @@ namespace ddb
             for (const char *ext : {".prj", ".PRJ", ".Prj"})
             {
                 fs::path p = file;
-                p.replace_extension(ext);
+                p.replace_extension(io::fromUtf8(ext));
                 std::error_code ec;
                 if (!fs::is_regular_file(p, ec)) continue;
                 const auto n = normalized(p);
@@ -585,7 +585,7 @@ namespace ddb
             // 2. An optional same-name .prj.
             if (const auto prj = findPrjSidecar(originalInput))
             {
-                std::ifstream in(prj->string(), std::ios::binary);
+                std::ifstream in(*prj, std::ios::binary);
                 std::stringstream ss;
                 ss << in.rdbuf();
                 const std::string content = trim(ss.str());
@@ -593,7 +593,7 @@ namespace ddb
                 if (content.empty() ||
                     (s.SetFromUserInput(content.c_str()) != OGRERR_NONE &&
                      s.SetFromUserInput(("ESRI::" + content).c_str()) != OGRERR_NONE))
-                    throw AppException("Cannot read the coordinate system in " + prj->filename().string());
+                    throw AppException("Cannot read the coordinate system in " + io::toUtf8(prj->filename()));
                 crs.source = "prj";
                 // A local (engineering) CRS, e.g. LOCAL_CS["Drawing"], says "these are
                 // drawing coordinates": the explicit way to keep a drawing off the map.

@@ -12,6 +12,7 @@
 #include "logger.h"
 #include "parallel.h"
 #include "utils.h"
+#include "mio.h"
 
 namespace ddb
 {
@@ -173,7 +174,7 @@ namespace ddb
     }
 
     CopcNodeReader::CopcNodeReader(const std::string &copcPath)
-        : path_(copcPath), cacheFile_(cacheKeyPath(copcPath)), version_(fileVersion(copcPath))
+        : path_(copcPath), cacheFile_(cacheKeyPath(io::fromUtf8(copcPath))), version_(fileVersion(io::fromUtf8(copcPath)))
     {
         if (utils::isNetworkPath(copcPath))
             throw InvalidArgsException("CopcNodeReader reads local files only: " + copcPath);

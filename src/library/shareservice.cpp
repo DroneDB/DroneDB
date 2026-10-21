@@ -33,12 +33,12 @@ namespace ddb
         std::vector<fs::path> filePaths;
         for (const auto &s : input)
         {
-            fs::path p(s);
+            fs::path p = io::fromUtf8(s);
             // Resolve relative paths against cwd before existence check,
             // so we don't incorrectly drop valid files when cwd is set.
             fs::path resolvedPath = p;
             if (!cwd.empty() && p.is_relative())
-                resolvedPath = fs::path(cwd) / p;
+                resolvedPath = io::fromUtf8(cwd) / p;
 
             if (fs::exists(resolvedPath) && !fs::is_directory(resolvedPath))
                 filePaths.push_back(resolvedPath);
@@ -67,7 +67,7 @@ namespace ddb
         io::Path wd;
         if (cwd.empty())
         {
-            std::vector<fs::path> paths(input.begin(), input.end());
+            std::vector<fs::path> paths = io::fromUtf8(input);
 
             if (paths.size() == 1)
             {
@@ -85,7 +85,7 @@ namespace ddb
         }
         else
         {
-            wd = io::Path(fs::path(cwd));
+            wd = io::Path(io::fromUtf8(cwd));
         }
 
         std::vector<ShareFileProgress *> files;
@@ -108,7 +108,7 @@ namespace ddb
         {
             auto p = io::Path(fp);
             auto fileSize = p.getSize();
-            auto fileName = fp.filename().string();
+            auto fileName = io::toUtf8(fp.filename());
 
             LOGD << "Current Path = " << fp;
 
@@ -118,7 +118,7 @@ namespace ddb
 
             p = p.isAbsolute() && !wd.isParentOf(p.get()) ? p.withoutRoot() : p.relativeTo(wd.get());
 
-            LOGD << "Uploading " << p.string();
+            LOGD << "Uploading " << io::toUtf8(p.get());
 
             client.Upload(
                 p.generic(), fp,

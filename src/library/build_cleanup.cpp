@@ -25,11 +25,11 @@ static void removeOrphanFolder(const fs::path& p, CleanupResult& result) {
     std::error_code rmErr;
     fs::remove_all(p, rmErr);
     if (rmErr) {
-        LOGW << "Failed to remove orphan temp folder '" << p.string()
+        LOGW << "Failed to remove orphan temp folder '" << io::toUtf8(p)
              << "': " << rmErr.message();
     } else {
-        result.removedBuilds.push_back(p.string());
-        LOGD << "Removed orphan build temp folder: " << p.string();
+        result.removedBuilds.push_back(io::toUtf8(p));
+        LOGD << "Removed orphan build temp folder: " << io::toUtf8(p);
     }
 }
 
@@ -81,22 +81,22 @@ static void removeOrphanTilesFolders(const fs::path& hashDir,
         std::optional<BuildLock> primaryLock;
         std::optional<BuildLock> tilesLock;
         try {
-            primaryLock.emplace(primaryDir.string(), false);
+            primaryLock.emplace(io::toUtf8(primaryDir), false);
         } catch (const BuildInProgressException&) {
             LOGD << "Skipping 3D Tiles temp folders: a Model build is in progress in "
-                 << hashDir.string();
+                 << io::toUtf8(hashDir);
         } catch (const AppException& e) {
-            LOGW << "Cannot lock " << primaryDir.string() << " (" << e.what()
+            LOGW << "Cannot lock " << io::toUtf8(primaryDir) << " (" << e.what()
                  << "); skipping 3D Tiles temp folders";
         }
         if (primaryLock) {
             try {
-                tilesLock.emplace(tilesDir.string(), false);
+                tilesLock.emplace(io::toUtf8(tilesDir), false);
             } catch (const BuildInProgressException&) {
                 LOGD << "Skipping 3D Tiles temp folders with active tiles build lock in: "
-                     << hashDir.string();
+                     << io::toUtf8(hashDir);
             } catch (const AppException& e) {
-                LOGW << "Cannot lock " << tilesDir.string() << " (" << e.what()
+                LOGW << "Cannot lock " << io::toUtf8(tilesDir) << " (" << e.what()
                      << "); skipping 3D Tiles temp folders";
             }
         }
@@ -107,7 +107,7 @@ static void removeOrphanTilesFolders(const fs::path& hashDir,
                 std::error_code ec;
                 fs::rename(p, trash, ec);
                 if (ec) {
-                    LOGW << "Cannot move orphan folder '" << p.string() << "' aside for deletion: "
+                    LOGW << "Cannot move orphan folder '" << io::toUtf8(p) << "' aside for deletion: "
                          << ec.message();
                     return;
                 }
@@ -121,7 +121,7 @@ static void removeOrphanTilesFolders(const fs::path& hashDir,
                 if (isModel3DTilesComplete(tilesDir))
                     moveAside(oldFolder);
                 else
-                    LOGD << "Keeping " << oldFolder.string() << ": " << tilesDir.string()
+                    LOGD << "Keeping " << io::toUtf8(oldFolder) << ": " << io::toUtf8(tilesDir)
                          << " has no complete tiles sentinel; a build can restore it";
             }
         }
@@ -132,11 +132,11 @@ static void removeOrphanTilesFolders(const fs::path& hashDir,
         std::error_code rmErr;
         fs::remove_all(trash, rmErr);
         if (rmErr) {
-            LOGW << "Failed to remove orphan temp folder '" << trash.string()
+            LOGW << "Failed to remove orphan temp folder '" << io::toUtf8(trash)
                  << "' (the next cleanup retries): " << rmErr.message();
         } else {
-            result.removedBuilds.push_back(reported.string());
-            LOGD << "Removed orphan build temp folder: " << reported.string();
+            result.removedBuilds.push_back(io::toUtf8(reported));
+            LOGD << "Removed orphan build temp folder: " << io::toUtf8(reported);
         }
     }
 }
@@ -171,7 +171,7 @@ static void removeOrphanTempFolders(const fs::path& hashDir, CleanupResult& resu
         if (!it->is_directory(typeErr) || typeErr)
             continue;
 
-        const std::string name = it->path().filename().string();
+        const std::string name = io::toUtf8(it->path().filename());
         if (name == tilesOldName) {
             tilesOldFolder = it->path();
             continue;
@@ -193,9 +193,9 @@ static void removeOrphanTempFolders(const fs::path& hashDir, CleanupResult& resu
         }
 
         // A stale lock file is removed with the folder it guarded (Unix always did so).
-        const std::string outputFolder = (hashDir / subfolder).string();
-        if (fs::exists(buildLockPath(outputFolder)) && !BuildLock::removeIfStale(outputFolder)) {
-            LOGD << "Skipping temp folder with active build lock: " << it->path().string();
+        const std::string outputFolder = io::toUtf8(hashDir / subfolder);
+        if (fs::exists(io::fromUtf8(buildLockPath(outputFolder))) && !BuildLock::removeIfStale(outputFolder)) {
+            LOGD << "Skipping temp folder with active build lock: " << io::toUtf8(it->path());
             continue;
         }
 
@@ -220,7 +220,7 @@ CleanupResult cleanupBuild(Database* db, const std::string& outputPath) {
         while (qEntries->fetch()) {
             const std::string entryPath = qEntries->getText(0);
             std::error_code existsErr;
-            const bool present = fs::exists(rootDir / entryPath, existsErr);
+            const bool present = fs::exists(rootDir / io::fromUtf8(entryPath), existsErr);
             if (existsErr) {
                 LOGW << "Cannot stat '" << entryPath
                      << "' (skipping): " << existsErr.message();
@@ -239,7 +239,7 @@ CleanupResult cleanupBuild(Database* db, const std::string& outputPath) {
         // removeFromIndex expects absolute paths (it computes the relative
         // form internally via io::Path::relativeTo).
         for (const auto& rel : missingPaths) {
-            const std::string absPath = (rootDir / rel).string();
+            const std::string absPath = io::toUtf8(rootDir / io::fromUtf8(rel));
             try {
                 removeFromIndex(db, std::vector<std::string>{absPath});
                 result.removedEntries.push_back(rel);
@@ -251,14 +251,14 @@ CleanupResult cleanupBuild(Database* db, const std::string& outputPath) {
     }
 
     // -------- Phase 2: remove orphan build artifacts --------
-    const fs::path buildDir = outputPath.empty() ? db->buildDirectory() : fs::path(outputPath);
+    const fs::path buildDir = outputPath.empty() ? db->buildDirectory() : io::fromUtf8(outputPath);
     std::error_code dirExistsErr;
     if (!fs::exists(buildDir, dirExistsErr)) {
         if (dirExistsErr)
-            LOGW << "Cannot check build directory '" << buildDir.string()
+            LOGW << "Cannot check build directory '" << io::toUtf8(buildDir)
                  << "': " << dirExistsErr.message();
         else
-            LOGD << "Build directory does not exist: " << buildDir.string();
+            LOGD << "Build directory does not exist: " << io::toUtf8(buildDir);
         return result;
     }
 
@@ -272,7 +272,7 @@ CleanupResult cleanupBuild(Database* db, const std::string& outputPath) {
     }
 
     LOGD << "cleanupBuild: " << validHashes.size() << " valid hash(es) in DB; scanning "
-         << buildDir.string();
+         << io::toUtf8(buildDir);
 
     // Artifact names are validated with isHashLike() before deleting so we never
     // wipe unrelated files/directories that may live in a user-specified output path.
@@ -280,7 +280,7 @@ CleanupResult cleanupBuild(Database* db, const std::string& outputPath) {
     std::error_code iterErr;
     fs::directory_iterator it(buildDir, iterErr);
     if (iterErr) {
-        LOGW << "Cannot open build directory '" << buildDir.string()
+        LOGW << "Cannot open build directory '" << io::toUtf8(buildDir)
              << "': " << iterErr.message();
         return result;
     }
@@ -288,21 +288,21 @@ CleanupResult cleanupBuild(Database* db, const std::string& outputPath) {
     const fs::directory_iterator end;
     for (; it != end; it.increment(iterErr)) {
         if (iterErr) {
-            LOGW << "Error iterating build directory '" << buildDir.string()
+            LOGW << "Error iterating build directory '" << io::toUtf8(buildDir)
                  << "': " << iterErr.message();
             break;
         }
 
         const auto& entry = *it;
         const auto& p = entry.path();
-        const std::string name = p.filename().string();
+        const std::string name = io::toUtf8(p.filename());
 
         std::error_code typeErr;
         if (entry.is_directory(typeErr)) {
             // Directory name is expected to be a content hash. Skip anything
             // that doesn't look like one to avoid clobbering unrelated dirs.
             if (!isHashLike(name)) {
-                LOGD << "Skipping non-hash directory: " << p.string();
+                LOGD << "Skipping non-hash directory: " << io::toUtf8(p);
                 continue;
             }
             if (validHashes.find(name) != validHashes.end()) {
@@ -322,7 +322,7 @@ CleanupResult cleanupBuild(Database* db, const std::string& outputPath) {
             std::error_code subErr;
             fs::directory_iterator subIt(p, subErr);
             if (subErr) {
-                LOGW << "Cannot scan orphan '" << p.string()
+                LOGW << "Cannot scan orphan '" << io::toUtf8(p)
                      << "' for active locks (" << subErr.message()
                      << "); skipping removal as a precaution";
                 skip = true;
@@ -330,7 +330,7 @@ CleanupResult cleanupBuild(Database* db, const std::string& outputPath) {
                 const fs::directory_iterator subEnd;
                 for (; !skip && subIt != subEnd; subIt.increment(subErr)) {
                     if (subErr) {
-                        LOGW << "Iteration error inside '" << p.string()
+                        LOGW << "Iteration error inside '" << io::toUtf8(p)
                              << "': " << subErr.message()
                              << "; skipping removal as a precaution";
                         skip = true;
@@ -338,8 +338,8 @@ CleanupResult cleanupBuild(Database* db, const std::string& outputPath) {
                     }
                     // "<subfolder>.building" is the lock of "<subfolder>"
                     if (subIt->path().extension() == BuildLockSuffix &&
-                        BuildLock::isHeld((p / subIt->path().stem()).string())) {
-                        LOGD << "Skipping orphan with active build lock: " << p.string();
+                        BuildLock::isHeld(io::toUtf8(p / subIt->path().stem()))) {
+                        LOGD << "Skipping orphan with active build lock: " << io::toUtf8(p);
                         skip = true;
                         break;
                     }
@@ -352,18 +352,18 @@ CleanupResult cleanupBuild(Database* db, const std::string& outputPath) {
             std::error_code rmErr;
             fs::remove_all(p, rmErr);
             if (rmErr) {
-                LOGW << "Failed to remove orphan build directory '" << p.string()
+                LOGW << "Failed to remove orphan build directory '" << io::toUtf8(p)
                      << "': " << rmErr.message();
             } else {
-                result.removedBuilds.push_back(p.string());
-                LOGD << "Removed orphan build directory: " << p.string();
+                result.removedBuilds.push_back(io::toUtf8(p));
+                LOGD << "Removed orphan build directory: " << io::toUtf8(p);
             }
         } else if (entry.is_regular_file(typeErr) && p.extension() == PendingMarkerExtension) {
             // .pending file naming convention: <hash>.pending. Validate the
             // stem before deleting so we never touch unrelated *.pending files.
-            const std::string hash = p.stem().string();
+            const std::string hash = io::toUtf8(p.stem());
             if (!isHashLike(hash)) {
-                LOGD << "Skipping non-hash pending file: " << p.string();
+                LOGD << "Skipping non-hash pending file: " << io::toUtf8(p);
                 continue;
             }
             if (validHashes.find(hash) != validHashes.end())
@@ -372,11 +372,11 @@ CleanupResult cleanupBuild(Database* db, const std::string& outputPath) {
             std::error_code rmErr;
             fs::remove(p, rmErr);
             if (rmErr) {
-                LOGW << "Failed to remove orphan pending file '" << p.string()
+                LOGW << "Failed to remove orphan pending file '" << io::toUtf8(p)
                      << "': " << rmErr.message();
             } else {
-                result.removedBuilds.push_back(p.string());
-                LOGD << "Removed orphan pending file: " << p.string();
+                result.removedBuilds.push_back(io::toUtf8(p));
+                LOGD << "Removed orphan pending file: " << io::toUtf8(p);
             }
         } else if (entry.is_regular_file(typeErr) && isPendingMarkerTempName(name)) {
             // Leftover of replacePendingMarker() interrupted between write and
@@ -385,23 +385,23 @@ CleanupResult cleanupBuild(Database* db, const std::string& outputPath) {
             std::error_code timeErr;
             const auto writeTime = fs::last_write_time(p, timeErr);
             if (timeErr) {
-                LOGW << "Cannot read the age of pending marker temp file '" << p.string()
+                LOGW << "Cannot read the age of pending marker temp file '" << io::toUtf8(p)
                      << "' (" << timeErr.message() << "); keeping it";
                 continue;
             }
             if (fs::file_time_type::clock::now() - writeTime < PendingMarkerTempMinAge) {
-                LOGD << "Keeping recent pending marker temp file: " << p.string();
+                LOGD << "Keeping recent pending marker temp file: " << io::toUtf8(p);
                 continue;
             }
 
             std::error_code rmErr;
             fs::remove(p, rmErr);
             if (rmErr) {
-                LOGW << "Failed to remove pending marker temp file '" << p.string()
+                LOGW << "Failed to remove pending marker temp file '" << io::toUtf8(p)
                      << "': " << rmErr.message();
             } else {
-                result.removedBuilds.push_back(p.string());
-                LOGD << "Removed stale pending marker temp file: " << p.string();
+                result.removedBuilds.push_back(io::toUtf8(p));
+                LOGD << "Removed stale pending marker temp file: " << io::toUtf8(p);
             }
         }
     }

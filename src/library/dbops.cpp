@@ -51,8 +51,8 @@ namespace
         std::error_code ignored;
         if (!keepMainFile)
             fs::remove(file, ignored);
-        fs::remove(file.string() + "-wal", ignored);
-        fs::remove(file.string() + "-shm", ignored);
+        fs::remove(io::concat(file, "-wal"), ignored);
+        fs::remove(io::concat(file, "-shm"), ignored);
     }
 
     // A database file under construction: removed with its -wal/-shm files when the owner
@@ -99,12 +99,11 @@ namespace
         if (exists(templatePath))
             return;
 
-        LOGD << "Creating " << templatePath.string();
-        TemporaryDatabaseFile temporary(templatePath.string() + ".tmp-" +
-                                        utils::generateRandomString(16));
+        LOGD << "Creating " << io::toUtf8(templatePath);
+        TemporaryDatabaseFile temporary(io::concat(templatePath, ".tmp-" + utils::generateRandomString(16)));
         {
             Database db;
-            db.open(temporary.path().string());
+            db.open(io::toUtf8(temporary.path()));
             db.createTables();
             db.close();
         }
@@ -113,9 +112,9 @@ namespace
         if (!temporary.publish(templatePath, e))
         {
             if (!exists(templatePath))
-                throw FSException("Cannot publish " + templatePath.string() + " (" +
+                throw FSException("Cannot publish " + io::toUtf8(templatePath) + " (" +
                                   e.message() + ")", e);
-            LOGD << templatePath.string() << " was published by another process";
+            LOGD << io::toUtf8(templatePath) << " was published by another process";
         }
     }
 }
@@ -128,7 +127,7 @@ namespace
     std::unique_ptr<Database> open(const std::string &directory,
                                    bool traverseUp = false)
     {
-        const fs::path dirPath = fs::absolute(directory);
+        const fs::path dirPath = fs::absolute(io::fromUtf8(directory));
         const fs::path ddbDirPath = dirPath / DDB_FOLDER;
         const fs::path dbasePath = ddbDirPath / DDB_DATABASE_FILE;
 
@@ -139,10 +138,10 @@ namespace
                     "Not a valid DroneDB directory, .ddb does not exist. Did you "
                     "run ddb init?");
 
-            return open(dirPath.parent_path().string(), true);
+            return open(io::toUtf8(dirPath.parent_path()), true);
         }
 
-        LOGD << dbasePath.string() + " exists";
+        LOGD << io::toUtf8(dbasePath) + " exists";
 
         auto db = std::make_unique<Database>();
 
@@ -152,11 +151,11 @@ namespace
         if (pool.acquire(dbasePath, *db))
             return db;
 
-        db->open(dbasePath.string());
+        db->open(io::toUtf8(dbasePath));
 
         if (!db->tableExists("entries"))
             throw DBException("Table 'entries' not found (not a valid database: " +
-                              dbasePath.string() + ")");
+                              io::toUtf8(dbasePath) + ")");
 
         db->ensureSchemaConsistency();
         db->removeRootEntry();
@@ -185,7 +184,7 @@ namespace
         std::unordered_set<std::string> files;
         const auto addFile = [&result, &files](const fs::path &f)
         {
-            if (files.insert(f.string()).second)
+            if (files.insert(io::toUtf8(f)).second)
                 result.push_back(f);
         };
 
@@ -198,9 +197,9 @@ namespace
             while (path.has_parent_path() && path != path.parent_path())
             {
                 path = path.parent_path();
-                if (directories.count(path.string()) > 0 || !rootDir.isParentOf(path))
+                if (directories.count(io::toUtf8(path)) > 0 || !rootDir.isParentOf(path))
                     break;
-                directories[path.string()] = true;
+                directories[io::toUtf8(path)] = true;
             }
         };
 
@@ -213,11 +212,12 @@ namespace
         if (!io::Path(rootDirectory).hasChildren(paths))
         {
             throw FSException("Some paths are not contained within: " +
-                              rootDirectory.string() + ". Did you run ddb init?");
+                              io::toUtf8(rootDirectory) + ". Did you run ddb init?");
         }
 
-        for (fs::path p : paths)
+        for (const auto &pathUtf8 : paths)
         {
+            fs::path p = io::fromUtf8(pathUtf8);
             if (isReservedSegment(p.filename()))
                 continue;
 
@@ -243,7 +243,7 @@ namespace
                             // The iterator knows the type from the directory listing: no stat
                             if (i->is_directory() && includeDirs)
                             {
-                                directories[rp.string()] = true;
+                                directories[io::toUtf8(rp)] = true;
                             }
                             else
                             {
@@ -262,7 +262,7 @@ namespace
 
                 // The dataset root is not an entry (`ddb add .` used to index it as "")
                 if (rootDir.isParentOf(p))
-                    directories[p.string()] = true;
+                    directories[io::toUtf8(p)] = true;
                 if (includeDirs)
                     addParents(p);
             }
@@ -276,13 +276,13 @@ namespace
             }
             else
             {
-                throw FSException("Path does not exist: " + p.string());
+                throw FSException("Path does not exist: " + io::toUtf8(p));
             }
         }
 
         for (auto [fst, snd] : directories)
         {
-            result.emplace_back(fst);
+            result.push_back(io::fromUtf8(fst));
         }
 
         return result;
@@ -294,8 +294,9 @@ namespace
         std::vector<fs::path> result;
         std::unordered_map<std::string, bool> directories;
 
-        for (fs::path p : paths)
+        for (const auto &pathUtf8 : paths)
         {
+            fs::path p = io::fromUtf8(pathUtf8);
             if (isReservedSegment(p.filename()))
                 continue;
 
@@ -352,7 +353,7 @@ namespace
                 }
                 else
                 {
-                    throw FSException("Path does not exist: " + p.string());
+                    throw FSException("Path does not exist: " + io::toUtf8(p));
                 }
             }
             catch (const fs::filesystem_error &e)
@@ -373,7 +374,7 @@ namespace
         {
             for (auto &p : paths)
             {
-                result.push_back(fs::absolute(p).string());
+                result.push_back(io::toUtf8(fs::absolute(io::fromUtf8(p))));
             }
         }
         else
@@ -381,7 +382,7 @@ namespace
             auto pl = getPathList(paths, true, maxRecursionDepth);
             for (auto &p : pl)
             {
-                result.push_back(fs::absolute(p).string());
+                result.push_back(io::toUtf8(fs::absolute(p)));
             }
         }
 
@@ -427,7 +428,7 @@ namespace
         const auto pushUnique = [&](const fs::path &p) {
             if (containsDdbSegment(p))
                 return;
-            std::string abs = fs::absolute(p).string();
+            std::string abs = io::toUtf8(fs::absolute(p));
             if (seen.insert(abs).second)
                 result.push_back(std::move(abs));
         };
@@ -489,7 +490,7 @@ namespace
             }
             else
             {
-                fs::path p(pattern);
+                fs::path p = io::fromUtf8(pattern);
                 if (!fs::exists(p))
                     throw FSException("Path does not exist: " + pattern);
 
@@ -557,14 +558,14 @@ namespace
 
         if (!io::sameModifiedTime(dbMtime, mtime))
         {
-            LOGD << p.string() << " modified time ( " << std::fixed << dbMtime
+            LOGD << io::toUtf8(p) << " modified time ( " << std::fixed << dbMtime
                  << " ) differs from file value: " << mtime;
 
-            e.hash = Hash::fileSHA256(p.string());
+            e.hash = Hash::fileSHA256(io::toUtf8(p));
 
             if (dbHash != e.hash)
             {
-                LOGD << p.string() << " hash differs (old: " << dbHash
+                LOGD << io::toUtf8(p) << " hash differs (old: " << dbHash
                      << " | new: " << e.hash << ")";
                 return Modified;
             }
@@ -613,10 +614,10 @@ namespace
             // otherwise we should reset to root folder
             // I.E: \home\tmp\ddb ls -w \home\img
 
-            pathList.emplace_back(root.isParentOf(fs::current_path()) ? io::Path(currentPath).generic() : directory.string());
+            pathList.push_back(root.isParentOf(fs::current_path()) ? io::fromUtf8(io::Path(currentPath).generic()) : directory);
         }
         else
-            pathList = std::vector<fs::path>(paths.begin(), paths.end());
+            pathList = io::fromUtf8(paths);
 
         std::vector<Entry> baseEntries;
         bool expandFolders = recursive;
@@ -631,7 +632,7 @@ namespace
             expandFolders = expandFolders || pathStr.length() > 0;
 
             const auto depth = static_cast<int>(count(pathStr.begin(), pathStr.end(), '/'));
-            std::vector<Entry> matches = getMatchingEntries(db, relPath.generic(), depth + 1);
+            std::vector<Entry> matches = getMatchingEntries(db, io::fromUtf8(relPath.generic()), depth + 1);
             baseEntries.insert(baseEntries.end(), matches.begin(), matches.end());
         }
 
@@ -662,7 +663,7 @@ namespace
                 if (expandFolders)
                 {
                     const auto depth = recursive ? maxRecursionDepth : entry.depth + 2;
-                    std::vector<Entry> entries = getMatchingEntries(db, entry.path, depth, true);
+                    std::vector<Entry> entries = getMatchingEntries(db, io::fromUtf8(entry.path), depth, true);
                     for (const Entry &e : entries)
                         outputEntries.emplace_back(Entry(e));
                 }
@@ -678,7 +679,7 @@ namespace
 
     void searchIndex(Database *db, const std::string &query, std::ostream &out, const std::string &format)
     {
-        auto entries = getMatchingEntries(db, query, 0, false);
+        auto entries = getMatchingEntries(db, io::fromUtf8(query), 0, false);
         std::sort(entries.begin(), entries.end(), [](const Entry &l, const Entry &r)
                   { return l.path < r.path; });
 
@@ -725,7 +726,7 @@ namespace
         KnownHashes known;
         for (const auto &f : files)
             if (!f.hash.empty())
-                known[io::Path(f.path).relativeTo(directory).generic()] = f;
+                known[io::Path(io::fromUtf8(f.path)).relativeTo(directory).generic()] = f;
         return known;
     }
 
@@ -798,7 +799,7 @@ namespace
             io::Path relPath = io::Path(p).relativeTo(directory);
 
             if (p.has_filename()) {
-                const auto fileName = p.filename().generic_string();
+                const auto fileName = io::toGenericUtf8(p.filename());
                 if (std::any_of(fileName.begin(), fileName.end(), isEntryPathSeparator)) {
                     LOGD << "Skipping '" << p << "'";
                     continue; // Skip file
@@ -966,7 +967,7 @@ namespace
         std::vector<std::pair<Entry, bool>> tentative;
 
         for (auto &ci : computed) {
-            const fs::path absPath = directory / io::Path(ci.entry.path).get();
+            const fs::path absPath = directory / io::Path(io::fromUtf8(ci.entry.path)).get();
 
             // Re-validate filesystem state (mtime/size) between COMPUTE and COMMIT, with one
             // stat. Directories use logical size (0, or aggregate for nested DroneDBs), so
@@ -1067,7 +1068,7 @@ namespace
         std::vector<fs::path> ignored;
         if (removed)
             for (const auto &prj : prjPaths)
-                ignored.push_back(directory / io::Path(prj).get());
+                ignored.push_back(directory / io::Path(io::fromUtf8(prj)).get());
         cad::IgnoredSidecarScope ignore(ignored);
 
         const auto updateQ = db->query(UPDATE_QUERY);
@@ -1080,7 +1081,7 @@ namespace
                 try {
                     Entry fresh;
                     fresh.hash = old.hash; // content unchanged: skip re-hashing
-                    parseEntry(directory / io::Path(mainPath).get(), directory, fresh, true);
+                    parseEntry(directory / io::Path(io::fromUtf8(mainPath)).get(), directory, fresh, true);
 
                     {
                         Transaction tx(db, Transaction::Mode::Immediate);
@@ -1103,7 +1104,7 @@ namespace
     }
 
     bool isPrjPath(const std::string &path) {
-        return io::Path(path).checkExtension({"prj"});
+        return io::Path(io::fromUtf8(path)).checkExtension({"prj"});
     }
 
     // addToIndex() with optional trusted hashes (see computeAddEntries)
@@ -1248,7 +1249,7 @@ namespace
     {
         if (fs::exists(buildFolder))
         {
-            LOGD << "Removing " << buildFolder.string();
+            LOGD << "Removing " << io::toUtf8(buildFolder);
             releaseCachedFiles(buildFolder);
             io::assureIsRemoved(buildFolder);
         }
@@ -1406,7 +1407,7 @@ namespace
             {
                 LOGD << "Deleting path: " << p;
 
-                auto relPath = io::Path(p).relativeTo(directory);
+                auto relPath = io::Path(io::fromUtf8(p)).relativeTo(directory);
 
                 LOGD << "Rel path: " << relPath.generic();
 
@@ -1477,7 +1478,7 @@ namespace
         if (maxRecursionDepth < 0)
             throw FSException("Max recursion depth cannot be negative");
 
-        const auto query = path.string();
+        const auto query = io::toUtf8(path);
 
         LOGD << "Query: " << query;
 
@@ -1517,13 +1518,13 @@ namespace
         // Dataset-relative folder without "." parts and trailing separators ("" = root)
         std::string normalizeFolder(const std::string &folder)
         {
-            std::string normalized = fs::path(folder).lexically_normal().generic_string();
+            std::string normalized = io::toGenericUtf8(io::fromUtf8(folder).lexically_normal());
             while (!normalized.empty() && normalized.back() == '/')
                 normalized.pop_back();
             if (normalized == ".")
                 normalized.clear();
 
-            const fs::path p(normalized);
+            const fs::path p = io::fromUtf8(normalized);
             if (p.is_absolute() || p.has_root_name() || (!normalized.empty() && *p.begin() == ".."))
                 throw InvalidArgsException("Invalid folder: " + folder);
             return normalized;
@@ -1657,7 +1658,7 @@ namespace
 
         while (q->fetch())
         {
-            io::Path relPath = fs::path(q->getText(0));
+            io::Path relPath = io::fromUtf8(q->getText(0));
             fs::path p = directory / relPath.get();
             Entry e;
             const auto mtime = q->getDouble(1);
@@ -1743,13 +1744,13 @@ namespace
             if (!extensions.empty() && !utils::hasAnyExtension(path, extensions))
                 continue;
 
-            io::Path relPath = fs::path(path);
+            io::Path relPath = io::fromUtf8(path);
             fs::path fullPath = directory / relPath.get();
 
             // Check if file still exists (outside try-catch to handle stopOnError correctly)
             if (!fs::exists(fullPath))
             {
-                std::string error = "File not found: " + fullPath.string();
+                std::string error = "File not found: " + io::toUtf8(fullPath);
                 LOGD << error;
 
                 if (callback != nullptr)
@@ -1826,10 +1827,10 @@ namespace
 
         while (q->fetch())
         {
-            io::Path fullPath = directory / fs::path(q->getText(0));
+            io::Path fullPath = directory / io::fromUtf8(q->getText(0));
             if (fullPath.setModifiedTimePrecise(q->getDouble(1)))
             {
-                LOGD << "Updated mtime for " << fullPath.string();
+                LOGD << "Updated mtime for " << io::toUtf8(fullPath.get());
             }
         }
     }
@@ -1844,9 +1845,9 @@ namespace
 
     std::string initIndex(const std::string &directory, bool fromScratch)
     {
-        const fs::path dirPath = directory;
+        const fs::path dirPath = io::fromUtf8(directory);
         if (!exists(dirPath))
-            throw FSException("Invalid directory: " + dirPath.string() +
+            throw FSException("Invalid directory: " + io::toUtf8(dirPath) +
                               " (does not exist)");
 
         auto ddbDirPath = dirPath / DDB_FOLDER;
@@ -1857,24 +1858,24 @@ namespace
         LOGD << "Checking if .ddb directory exists...";
         if (exists(ddbDirPath))
         {
-            throw FSException("Cannot initialize database: " + ddbDirPath.string() +
+            throw FSException("Cannot initialize database: " + io::toUtf8(ddbDirPath) +
                               " already exists");
         }
 
         if (create_directory(ddbDirPath))
         {
-            LOGD << ddbDirPath.string() + " created";
+            LOGD << io::toUtf8(ddbDirPath) + " created";
         }
         else
         {
-            throw FSException("Cannot create directory: " + ddbDirPath.string() +
+            throw FSException("Cannot create directory: " + io::toUtf8(ddbDirPath) +
                               ". Check that you have the proper permissions?");
         }
 
         LOGD << "Checking if database exists...";
         if (exists(dbasePath))
         {
-            throw FSException(ddbDirPath.string() + " already exists");
+            throw FSException(io::toUtf8(ddbDirPath) + " already exists");
         }
 
         if (!fromScratch)
@@ -1898,13 +1899,13 @@ namespace
                     throw FSException(e.what());
                 }
 
-                LOGD << "Copied " << emptyDbPath.string() << " to "
-                     << dbasePath.string();
+                LOGD << "Copied " << io::toUtf8(emptyDbPath) << " to "
+                     << io::toUtf8(dbasePath);
             }
             else
             {
                 // For some reason it's missing, generate from scratch
-                LOGD << "Cannot find " << emptyDbPath.string()
+                LOGD << "Cannot find " << io::toUtf8(emptyDbPath)
                      << " in data path, strange! Building from scratch instead";
                 fromScratch = true;
             }
@@ -1912,16 +1913,16 @@ namespace
 
         if (fromScratch)
         {
-            LOGD << "Creating " << dbasePath.string();
+            LOGD << "Creating " << io::toUtf8(dbasePath);
 
             // Create database
             Database db;
-            db.open(dbasePath.string());
+            db.open(io::toUtf8(dbasePath));
             db.createTables();
             db.close();
         }
 
-        return ddbDirPath.string();
+        return io::toUtf8(ddbDirPath);
     }
 
     void deleteEntry(Database *db, const std::string &path)
@@ -1946,7 +1947,7 @@ namespace
         const auto q = db->query(CREATE_FOLDER_QUERY);
         q->bind(1, path);
         q->bind(2, static_cast<long long>(mtime));
-        q->bind(3, ddb::io::Path(path).depth());
+        q->bind(3, ddb::io::Path(io::fromUtf8(path)).depth());
         executeWithRetry([&q] { q->execute(); }, "addFolder");
     }
 
@@ -2032,7 +2033,7 @@ namespace
 
         LOGD << "Replacing '" << source << "' to '" << dest << "'";
 
-        const auto depth = io::Path(dest).depth();
+        const auto depth = io::Path(io::fromUtf8(dest)).depth();
 
         auto update = db->query("UPDATE entries SET path = ?, depth = ? WHERE path = ?");
         update->bind(1, dest);
@@ -2106,12 +2107,12 @@ namespace
             replacePath(db, source, dest);
 
             // If the file extension changed, re-detect the entry type
-            const auto sourceExt = fs::path(source).extension();
-            const auto destExt = fs::path(dest).extension();
+            const auto sourceExt = io::fromUtf8(source).extension();
+            const auto destExt = io::fromUtf8(dest).extension();
 
             if (sourceExt != destExt)
             {
-                const auto newType = fingerprint(directory / dest);
+                const auto newType = fingerprint(directory / io::fromUtf8(dest));
                 if (newType != sourceEntry.type)
                 {
                     auto typeUpdate = db->query("UPDATE entries SET type = ? WHERE path = ?");

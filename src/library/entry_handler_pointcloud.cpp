@@ -19,7 +19,7 @@ namespace {
 // The COPC artifact of a point cloud: its thumbnail and its tiles
 class CopcThumbnailGenerator : public ThumbnailGenerator {
   public:
-    bool accepts(const fs::path& input) const override { return isCopcPath(input.string()); }
+    bool accepts(const fs::path& input) const override { return isCopcPath(io::toUtf8(input)); }
     void generate(const fs::path& input, int thumbSize, const fs::path& outImagePath, uint8_t** outBuffer,
                   int* outBufferSize) const override {
         generatePointCloudThumb(input, thumbSize, outImagePath, outBuffer, outBufferSize);
@@ -28,17 +28,17 @@ class CopcThumbnailGenerator : public ThumbnailGenerator {
 
 class CopcTilerFactory : public TilerFactory {
   public:
-    bool accepts(const fs::path& tileablePath) const override { return isCopcPath(tileablePath.string()); }
+    bool accepts(const fs::path& tileablePath) const override { return isCopcPath(io::toUtf8(tileablePath)); }
     std::unique_ptr<Tiler> create(const fs::path& input, const fs::path& outputFolder, int tileSize,
                                   bool tms) const override {
-        return std::make_unique<PointCloudTiler>(input.string(), outputFolder.string(), tileSize, tms);
+        return std::make_unique<PointCloudTiler>(io::toUtf8(input), io::toUtf8(outputFolder), tileSize, tms);
     }
 };
 
 void parsePointCloudMetadata(const fs::path &path, Entry &entry)
 {
     PointCloudInfo info;
-    if (getPointCloudInfo(path.string(), info))
+    if (getPointCloudInfo(io::toUtf8(path), info))
     {
         entry.properties = info.toJSON();
         entry.polygon_geom = info.polyBounds;
@@ -61,7 +61,7 @@ class PointCloudEntryHandler : public EntryHandler {
     // A leaf inside a built EPT dataset is not built: the guard skips residual ept-data
     // folders from older builds.
     bool isBuildable(const Entry& e) const override {
-        return fs::path(e.path).parent_path().filename().string() != LegacyEptDataFolder;
+        return io::toUtf8(io::fromUtf8(e.path).parent_path().filename()) != LegacyEptDataFolder;
     }
 
     std::vector<BuildArtifact> artifacts() const override {
@@ -72,10 +72,10 @@ class PointCloudEntryHandler : public EntryHandler {
     }
 
     void build(const BuildContext& ctx) const override {
-        const std::vector vec = {ctx.inputPath.string()};
+        const std::vector vec = {io::toUtf8(ctx.inputPath)};
         // Defensive cleanup: remove any legacy EPT artifacts from previous builds
         io::assureIsRemoved(ctx.baseOutputPath / LegacyEptBuildSubfolder);
-        buildCopc(vec, ctx.tempFolder.string());
+        buildCopc(vec, io::toUtf8(ctx.tempFolder));
     }
 
     ThumbnailSource thumbnailSource() const override { return ThumbnailSource::BuildArtifact; }

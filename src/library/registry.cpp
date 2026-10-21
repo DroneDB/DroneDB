@@ -132,11 +132,11 @@ void Registry::clone(const std::string& organization,
                      const std::string& dataset,
                      const std::string& folder,
                      std::ostream& out) {
-    if (fs::exists(folder) && !fs::is_empty(folder)) {
+    if (fs::exists(io::fromUtf8(folder)) && !fs::is_empty(io::fromUtf8(folder))) {
         throw FSException(folder + " already exists");
     }
 
-    io::assureFolderExists(folder);
+    io::assureFolderExists(io::fromUtf8(folder));
 
     this->ensureTokenValidity();
 
@@ -278,7 +278,7 @@ void Registry::downloadFiles(const std::string& organization,
     if (files.size() == 1) {
         downloadUrl += "?path=" + files[0];
 
-        const auto destPath = fs::path(folder) / files[0];
+        const auto destPath = io::fromUtf8(folder) / io::fromUtf8(files[0]);
 
         io::createDirectories(destPath.parent_path());
 
@@ -292,7 +292,7 @@ void Registry::downloadFiles(const std::string& organization,
         if (res.status_code != 200)
             this->handleError(res);
     } else {
-        const auto tempFile = (fs::path(folder) / (utils::generateRandomString(8) + ".tmp"));
+        const auto tempFile = (io::fromUtf8(folder) / (utils::generateRandomString(8) + ".tmp"));
         io::assureFolderExists(tempFile.parent_path());
 
         // Joins path list
@@ -320,7 +320,7 @@ void Registry::downloadFiles(const std::string& organization,
         // LOGD << "Files archive downloaded, extracting";
 
         try {
-            zip::extractAll(tempFile.string(), folder);
+            zip::extractAll(io::toUtf8(tempFile), folder);
             io::assureIsRemoved(tempFile);
 
             // LOGD << "Done";
@@ -399,7 +399,7 @@ void verifyDeltaHashes(const std::vector<const AddAction*>& files, const fs::pat
 
     parallel::forEachIndexIo(files.size(), [&](size_t i) {
         const auto& add = *files[i];
-        const auto actual = Hash::fileSHA256((sourcePath / add.path).string());
+        const auto actual = Hash::fileSHA256(io::toUtf8(sourcePath / io::fromUtf8(add.path)));
         if (actual != add.hash)
             throw AppException("Hash mismatch for " + add.path + ": expected " + add.hash + ", got " + actual);
     });
@@ -408,7 +408,7 @@ void verifyDeltaHashes(const std::vector<const AddAction*>& files, const fs::pat
 // A delta path must name something inside the dataset
 void checkDeltaPaths(const Delta& d) {
     const auto check = [](const std::string& path) {
-        const fs::path p(path);
+        const fs::path p = io::fromUtf8(path);
         const bool escapes = std::any_of(p.begin(), p.end(), [](const fs::path& part) { return part == ".."; });
         if (p.is_absolute() || p.has_root_name() || p.has_root_directory() || escapes)
             throw InvalidArgsException("Invalid path in delta: " + path);
@@ -482,10 +482,10 @@ std::vector<Conflict> applyDelta(const Delta& d,
                           ConflictType::RemoteDeleteLocalModified, conflicts, indexed))
                 continue;
 
-            const auto dest = destPath / rem.path;
+            const auto dest = destPath / io::fromUtf8(rem.path);
             if (fs::exists(dest)) {
                 if (indexed)
-                    indexedRemovals.push_back(dest.string());
+                    indexedRemovals.push_back(io::toUtf8(dest));
                 fileRemovals.push_back(&rem);
             }
         }
@@ -499,8 +499,8 @@ std::vector<Conflict> applyDelta(const Delta& d,
         removeFromIndex(destination, indexedRemovals);
         for (const auto* rem : fileRemovals) {
             // A raster kept open by recent tile requests would block this on Windows
-            releaseCachedFiles(destPath / rem->path);
-            io::assureIsRemoved(destPath / rem->path);
+            releaseCachedFiles(destPath / io::fromUtf8(rem->path));
+            io::assureIsRemoved(destPath / io::fromUtf8(rem->path));
             out << "D\t" << rem->path << std::endl;
         }
 
@@ -524,15 +524,15 @@ std::vector<Conflict> applyDelta(const Delta& d,
                               ConflictType::BothModified, conflicts, indexed))
                     continue;
 
-                const auto dest = destPath / add.path;
+                const auto dest = destPath / io::fromUtf8(add.path);
                 if (add.isDirectory()) {
                     io::createDirectories(dest);
                 } else {
                     releaseCachedFiles(dest);
-                    io::moveOrCopy(sourcePath / add.path, dest);
+                    io::moveOrCopy(sourcePath / io::fromUtf8(add.path), dest);
                 }
 
-                addedFiles.push_back({dest.string(), add.hash});
+                addedFiles.push_back({io::toUtf8(dest), add.hash});
             }
         } catch (const std::exception& e) {
             // The files already moved are gone from the source folder: index them, so the
@@ -603,7 +603,7 @@ void Registry::pull(const std::string& path, const MergeStrategy mergeStrategy, 
     out << "Pulling from '" << tag << "'" << std::endl;
 
     const auto tempDdbFolder =
-        db->ddbDirectory() / "tmp" / "pull_cache" / (tagInfo.organization + "-" + tagInfo.dataset);
+        db->ddbDirectory() / "tmp" / "pull_cache" / io::fromUtf8(tagInfo.organization + "-" + tagInfo.dataset);
 
     if (fs::exists(tempDdbFolder)) {
         // TODO: there might be ways to resume downloads if a user CTRL+Cs
@@ -636,7 +636,7 @@ void Registry::pull(const std::string& path, const MergeStrategy mergeStrategy, 
     if (!delta.adds.empty()) {
         // LOGD << "Temp new folder = " << tempNewFolder;
 
-        auto localMap = computeDeltaLocals(delta, db.get(), tempNewFolder.string());
+        auto localMap = computeDeltaLocals(delta, db.get(), io::toUtf8(tempNewFolder));
 
         const auto filesToDownload =
             boolinq::from(delta.adds)
@@ -650,7 +650,7 @@ void Registry::pull(const std::string& path, const MergeStrategy mergeStrategy, 
         this->downloadFiles(tagInfo.organization,
                             tagInfo.dataset,
                             filesToDownload,
-                            tempNewFolder.string(),
+                            io::toUtf8(tempNewFolder),
                             out);
 
         // LOGD << "Files downloaded";
@@ -719,19 +719,19 @@ std::unordered_map<std::string, bool> computeDeltaLocals(Delta d,
         if (q->fetch()) {
             auto ePath = q->getText(0);
             // Check the filesystem to make sure this hasn't been modified
-            io::Path p(db->rootDirectory() / ePath);
+            io::Path p(db->rootDirectory() / io::fromUtf8(ePath));
             const double eMtime = q->getDouble(1);
             bool valid = false;
             if (io::sameModifiedTime(eMtime, p.getModifiedTimePrecise())) {
                 valid = true;
             } else {
                 // Actually compute hash
-                valid = Hash::fileSHA256(p.get().string()) == add.hash;
+                valid = Hash::fileSHA256(io::toUtf8(p.get())) == add.hash;
             }
 
             if (valid) {
                 if (!hlDestFolder.empty()) {
-                    const auto destPath = fs::path(hlDestFolder) / add.path;
+                    const auto destPath = io::fromUtf8(hlDestFolder) / io::fromUtf8(add.path);
                     io::createDirectories(destPath.parent_path());
 
                     // We can leverage hard links ONLY
@@ -806,12 +806,12 @@ void Registry::push(const std::string& path, std::ostream& out) {
     const auto basePath = db->rootDirectory();
 
     for (const auto& file : pir.neededFiles) {
-        const auto fullPath = basePath / file;
+        const auto fullPath = basePath / io::fromUtf8(file);
 
         out << "Transfering '" << file << "'" << std::endl;
 
         // Foreach of the needed files call POST endpoint
-        pushManager.upload(fullPath.generic_string(), file, pir.token);
+        pushManager.upload(io::toGenericUtf8(fullPath), file, pir.token);
     }
 
     // When done call commit endpoint

@@ -491,12 +491,12 @@ END;
 
     fs::path Database::rootDirectory() const
     {
-        return fs::path(this->getOpenFile()).parent_path().parent_path();
+        return io::fromUtf8(this->getOpenFile()).parent_path().parent_path();
     }
 
     fs::path Database::ddbDirectory() const
     {
-        return fs::path(this->getOpenFile()).parent_path();
+        return io::fromUtf8(this->getOpenFile()).parent_path();
     }
 
     fs::path Database::buildDirectory() const
@@ -514,7 +514,7 @@ END;
             const std::string p = q->getText(0);
             if (p == "README.md")
             {
-                std::ifstream f((this->rootDirectory() / p).string());
+                std::ifstream f(this->rootDirectory() / io::fromUtf8(p));
                 if (f.is_open())
                 {
                     std::stringstream buffer;

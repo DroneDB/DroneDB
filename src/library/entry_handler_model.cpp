@@ -30,7 +30,7 @@ void parseModelMetadata(const fs::path &path, Entry &entry)
     // the model indexed in local space rather than aborting the parse.
     try
     {
-        const auto georef = detectModelGeoref(path.string());
+        const auto georef = detectModelGeoref(io::toUtf8(path));
         if (!georef.has_value())
         {
             entry.properties["georeferenced"] = false;
@@ -46,7 +46,7 @@ void parseModelMetadata(const fs::path &path, Entry &entry)
         // Footprint: offset the model's local X/Y bounds (East/North meters) around
         // the origin with an equirectangular approximation (accurate at model scale).
         ModelInfo info;
-        if (getModelInfo(path.string(), info) && info.hasBounds)
+        if (getModelInfo(io::toUtf8(path), info) && info.hasBounds)
         {
             constexpr double DEG2RAD = 0.017453292519943295;
             constexpr double METERS_PER_DEG_LAT = 111320.0;
@@ -109,7 +109,7 @@ class ModelEntryHandler : public EntryHandler {
     // Lock order is primary Model lock then tiles lock. Recovery runs before the complete
     // Nexus check of a build, without recursively taking the tiles lock.
     void recoverOutput(const fs::path& baseOutputPath) const override {
-        recoverModel3DTilesSwap((baseOutputPath / Tiles3DBuildSubfolder).string());
+        recoverModel3DTilesSwap(io::toUtf8(baseOutputPath / Tiles3DBuildSubfolder));
     }
 
     // The 3D Tiles tileset is intentionally optional for completeness. The sole exception is
@@ -123,9 +123,9 @@ class ModelEntryHandler : public EntryHandler {
     }
 
     void build(const BuildContext& ctx) const override {
-        const std::string inputPath = ctx.inputPath.string();
-        const std::string datasetRoot = ctx.datasetRoot.string();
-        buildNexus(inputPath, (ctx.tempFolder / NexusFileName).string(), false, datasetRoot);
+        const std::string inputPath = io::toUtf8(ctx.inputPath);
+        const std::string datasetRoot = io::toUtf8(ctx.datasetRoot);
+        buildNexus(inputPath, io::toUtf8(ctx.tempFolder / NexusFileName), false, datasetRoot);
 
         // Additive, best-effort OGC 3D Tiles output for the unified Giro3D viewer.
         // Written directly to a sibling 3dtiles/ folder (buildModel3DTiles performs
@@ -142,10 +142,10 @@ class ModelEntryHandler : public EntryHandler {
         // "ddb tiles3d" command on this output folder).
         const fs::path tilesFolder = ctx.baseOutputPath / Tiles3DBuildSubfolder;
         try {
-            buildModel3DTiles(inputPath, tilesFolder.string(), true, std::nullopt, true, datasetRoot);
+            buildModel3DTiles(inputPath, io::toUtf8(tilesFolder), true, std::nullopt, true, datasetRoot);
         } catch (const BuildInProgressException& tilesEx) {
             LOGW << "3D Tiles for " << ctx.entry.path << " not generated: another tiles build holds "
-                 << buildLockPath(tilesFolder.string())
+                 << buildLockPath(io::toUtf8(tilesFolder))
                  << " (for example 'ddb tiles3d'): "
                  << tilesEx.what() << ". The Nexus output is published; rebuild with force to "
                  << "produce the tiles";

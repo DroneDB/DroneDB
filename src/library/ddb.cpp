@@ -369,7 +369,7 @@ DDBErr DDBAdd(const char* ddbPath,
 static void addPathError(Database *db, const std::string &p, const std::exception &ex, AddResult &result) {
     const char *code = addErrorCode(ex);
     if (code == nullptr) code = "FS";
-    const auto relPath = io::Path(p).relativeTo(db->rootDirectory()).generic();
+    const auto relPath = io::Path(io::fromUtf8(p)).relativeTo(db->rootDirectory()).generic();
     result.errors.push_back({relPath, code, ex.what()});
 }
 

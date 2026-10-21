@@ -20,6 +20,7 @@
 #include "exceptions.h"
 #include "gdal_raii.h"
 #include "utils.h"
+#include "mio.h"
 
 namespace ddb
 {
@@ -292,8 +293,8 @@ namespace ddb
     pdal::Options copcReaderOptions(const std::string &copcPath, const parallel::CpuTokens &threads)
     {
         pdal::Options options;
-        const fs::path path(copcPath);
-        options.add("filename", (!utils::isNetworkPath(copcPath) && path.is_relative()) ? ("." / path).string()
+        const fs::path path = io::fromUtf8(copcPath);
+        options.add("filename", (!utils::isNetworkPath(copcPath) && path.is_relative()) ? io::toUtf8("." / path)
                                                                                          : copcPath);
         options.add("nosrs", true);
         if (!utils::isNetworkPath(copcPath))

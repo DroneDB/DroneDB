@@ -71,7 +71,7 @@ namespace ddb
 
         std::string toLowerExt(const std::string &input)
         {
-            auto ext = fs::path(input).extension().string();
+            auto ext = io::toUtf8(io::fromUtf8(input).extension());
             ddb::utils::toLower(ext);
             return ext;
         }
@@ -208,10 +208,10 @@ namespace ddb
         {
             const auto deps = getVectorDependencies(input);
             std::vector<std::string> missing;
-            const fs::path p(input);
+            const fs::path p = io::fromUtf8(input);
             for (const auto &d : deps)
             {
-                if (!fs::exists(p.parent_path() / d))
+                if (!fs::exists(p.parent_path() / io::fromUtf8(d)))
                     missing.push_back(d);
             }
             if (!missing.empty())
@@ -670,17 +670,17 @@ namespace ddb
     {
         std::vector<std::string> deps;
 
-        if (!fs::exists(input))
+        if (!fs::exists(io::fromUtf8(input)))
             throw FSException(input + " does not exist");
 
         const auto ext = toLowerExt(input);
         if (ext == ".shp")
         {
-            deps.push_back(fs::path(input).replace_extension(".shx").filename().string());
+            deps.push_back(io::toUtf8(io::fromUtf8(input).replace_extension(".shx").filename()));
         }
         else if (ext == ".shx")
         {
-            deps.push_back(fs::path(input).replace_extension(".shp").filename().string());
+            deps.push_back(io::toUtf8(io::fromUtf8(input).replace_extension(".shp").filename()));
         }
         return deps;
     }
@@ -696,22 +696,22 @@ namespace ddb
             throw InvalidArgsException("buildVector: input is empty");
         if (baseOutputPath.empty())
             throw InvalidArgsException("buildVector: baseOutputPath is empty");
-        if (!fs::exists(input))
+        if (!fs::exists(io::fromUtf8(input)))
             throw FSException(input + " does not exist");
 
         // Step 1: verify sidecar deps (.shx for .shp)
         checkDependencies(input);
 
-        const fs::path basePath(baseOutputPath);
+        const fs::path basePath = io::fromUtf8(baseOutputPath);
         io::assureFolderExists(basePath);
 
         // Step 2: CAD drawings: a DWG is converted to a temporary DXF (staged
         // next to the outputs), and the CRS comes from the drawing (cad.h).
-        const bool isCad = cad::isCadFile(input);
+        const bool isCad = cad::isCadFile(io::fromUtf8(input));
         std::optional<cad::CadSource> cadSource;
         if (isCad)
-            cadSource.emplace(fs::path(input), nullptr, basePath);
-        const std::string openPath = isCad ? cadSource->dxfPath().string() : input;
+            cadSource.emplace(io::fromUtf8(input), nullptr, basePath);
+        const std::string openPath = isCad ? io::toUtf8(cadSource->dxfPath()) : input;
 
         // Step 3: open source once, reuse for both branches
         const auto srcDS = adoptDataset(GDALOpenEx(openPath.c_str(),
@@ -729,8 +729,8 @@ namespace ddb
         std::string units;
         if (isCad)
         {
-            const auto info = cad::readDxfInfo(openPath);
-            crs = cad::resolveCadCrs(fs::path(input), hSrcDS, info);
+            const auto info = cad::readDxfInfo(io::fromUtf8(openPath));
+            crs = cad::resolveCadCrs(io::fromUtf8(input), hSrcDS, info);
             units = cad::insUnitsName(info.insUnits);
             local = !crs.georeferenced;
             if (!crs.srs.empty()) sourceSrs = crs.srs;
@@ -770,7 +770,7 @@ namespace ddb
         // and the target child does not (pre-empt leftovers).
         io::assureIsRemoved(stagingMvt);
 
-        const auto gpkgOut = (stagingVec / VectorGpkgFileName).string();
+        const auto gpkgOut = io::toUtf8(stagingVec / VectorGpkgFileName);
         if (local)
         {
             // Drawing coordinates, no SRS and no MVT pyramid: there is
@@ -780,10 +780,10 @@ namespace ddb
             if (crs.hasExtent)
                 localInfo["extent"] = {crs.extent.MinX, crs.extent.MinY,
                                        crs.extent.MaxX, crs.extent.MaxY};
-            std::ofstream out((stagingVec / VectorLocalFileName).string(), std::ios::binary);
+            std::ofstream out(stagingVec / VectorLocalFileName, std::ios::binary);
             out << localInfo.dump();
             if (!out)
-                throw FSException("Cannot write " + (stagingVec / VectorLocalFileName).string());
+                throw FSException("Cannot write " + io::toUtf8(stagingVec / VectorLocalFileName));
         }
         else
         {
@@ -792,7 +792,7 @@ namespace ddb
                  << " envelope=[" << stats.minX << "," << stats.minY << ","
                  << stats.maxX << "," << stats.maxY << "]";
             // Branch A: MVT first (cheaper to roll back).
-            convertToMvt(hSrcDS, input, stagingMvt.string(), stats, sourceSrs);
+            convertToMvt(hSrcDS, input, io::toUtf8(stagingMvt), stats, sourceSrs);
             // Branch B: GPKG sidecar.
             convertToGpkg(hSrcDS, gpkgOut, sourceSrs, true);
         }
@@ -818,10 +818,10 @@ namespace ddb
         io::assureFolderExists(backupDir);
         try
         {
-            if (hadVec) io::rename(vecDir.string(), backupVec.string());
-            if (hadMvt) io::rename(mvtDir.string(), backupMvt.string());
-            io::rename(stagingVec.string(), vecDir.string());
-            if (!local) io::rename(stagingMvt.string(), mvtDir.string());
+            if (hadVec) io::rename(vecDir, backupVec);
+            if (hadMvt) io::rename(mvtDir, backupMvt);
+            io::rename(stagingVec, vecDir);
+            if (!local) io::rename(stagingMvt, mvtDir);
         }
         catch (...)
         {
@@ -830,9 +830,9 @@ namespace ddb
             io::assureIsRemoved(vecDir);
             io::assureIsRemoved(mvtDir);
             if (hadVec && fs::exists(backupVec))
-                io::rename(backupVec.string(), vecDir.string());
+                io::rename(backupVec, vecDir);
             if (hadMvt && fs::exists(backupMvt))
-                io::rename(backupMvt.string(), mvtDir.string());
+                io::rename(backupMvt, mvtDir);
             io::assureIsRemoved(backupDir);
             throw;
         }

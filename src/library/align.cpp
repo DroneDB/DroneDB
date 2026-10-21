@@ -505,7 +505,7 @@ static void applyWarp(const std::string &sourcePath,
 {
     // Resolve to an absolute path so the VRT SimpleSource can find the file
     // regardless of any cwd change between the VRT creation and the warp read.
-    const std::string absSrcPath = fs::absolute(sourcePath).string();
+    const std::string absSrcPath = io::toUtf8(fs::absolute(io::fromUtf8(sourcePath)));
     const auto src = adoptDataset(GDALOpen(absSrcPath.c_str(), GA_ReadOnly));
     if (!src) throw GDALException("Cannot open " + sourcePath);
     GDALDatasetH hSrc = datasetHandle(src);
@@ -725,7 +725,7 @@ AlignResult alignRaster(const std::string &sourcePath,
 
     if (val.summary.crsMismatch) {
         tmpReproj = outputPath + ".ref_reproj_tmp.tif";
-        refGuard.reset(tmpReproj);
+        refGuard.reset(io::fromUtf8(tmpReproj));
         LOGD << "Reprojecting reference to source CRS";
         CPLStringList args;
         args.AddString("-t_srs");
@@ -805,7 +805,7 @@ AlignResult alignRaster(const std::string &sourcePath,
              << " → tx=" << sim.t.x << " ty=" << sim.t.y << " m";
 
         std::string tmpWarp = outputPath + ".warp_tmp.tif";
-        const io::ScopedTempDir warpGuard(tmpWarp);
+        const io::ScopedTempDir warpGuard(io::fromUtf8(tmpWarp));
         applyWarp(sourcePath, tmpWarp, sim, val.summary.sourceCrs);
         if (isDem) {
             result.shiftZ = computeZOffset(tmpWarp, effectiveRef);
@@ -899,7 +899,7 @@ AlignResult alignRaster(const std::string &sourcePath,
 
     // Apply and write output
     std::string tmpWarp = outputPath + ".warp_tmp.tif";
-    const io::ScopedTempDir warpGuard(tmpWarp);
+    const io::ScopedTempDir warpGuard(io::fromUtf8(tmpWarp));
     applyWarp(sourcePath, tmpWarp, sim, val.summary.sourceCrs);
     if (isDem) {
         result.shiftZ = computeZOffset(tmpWarp, effectiveRef);

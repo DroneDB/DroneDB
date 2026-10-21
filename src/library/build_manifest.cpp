@@ -116,7 +116,7 @@ std::optional<std::vector<DirectoryName>> BuildProbe::list(const fs::path& dir) 
         names.push_back({io::toUtf8(it->path().filename()), directory});
     }
     if (ec) {
-        LOGD << "Cannot list " << dir.string() << " to the end: " << ec.message();
+        LOGD << "Cannot list " << io::toUtf8(dir) << " to the end: " << ec.message();
     }
     return names;
 }
@@ -131,7 +131,7 @@ std::optional<PendingMarker> BuildProbe::readPendingMarker(const fs::path& path)
 }
 
 bool BuildProbe::isLockHeld(const fs::path& outputFolder) const {
-    return BuildLock::isHeld(outputFolder.string());
+    return BuildLock::isHeld(io::toUtf8(outputFolder));
 }
 
 bool BuildProbe::isComplete(const EntryHandler& handler, const fs::path& root) const {
@@ -364,11 +364,11 @@ void appendUnique(std::vector<std::string>& list, const std::string& value) {
 // folder "<to>-temp-<rand16>" (removed on failure), then renamed onto to, so a reader never sees
 // a half-copied folder under the artifact's name.
 void copyFolderReplacing(const fs::path& from, const fs::path& to) {
-    io::ScopedTempDir scratch(fs::path(to.string() + TempFolderInfix + utils::generateRandomString(16)));
+    io::ScopedTempDir scratch(io::concat(to, TempFolderInfix + utils::generateRandomString(16)));
     std::error_code ec;
     fs::copy(from, scratch.path(), fs::copy_options::recursive, ec);
     if (ec)
-        throw FSException("Cannot copy " + from.string() + " to " + scratch.path().string() + " (" +
+        throw FSException("Cannot copy " + io::toUtf8(from) + " to " + io::toUtf8(scratch.path()) + " (" +
                               ec.message() + ")",
                           ec);
     if (fs::exists(to)) {
@@ -411,7 +411,7 @@ json copyBuildArtifacts(Database* source, Database* destination, const std::stri
 
     // A build running in the source may be publishing its output: copy nothing
     for (const auto& folder : lockFolders)
-        if (BuildLock::isHeld((sourceRoot / folder).string()))
+        if (BuildLock::isHeld(io::toUtf8(sourceRoot / folder)))
             throw BuildInProgressException("A build of " + hash + " runs in the source dataset");
 
     try {
@@ -420,7 +420,7 @@ json copyBuildArtifacts(Database* source, Database* destination, const std::stri
         std::vector<BuildLock> locks;
         locks.reserve(lockFolders.size());
         for (const auto& folder : lockFolders)
-            locks.emplace_back((destinationRoot / folder).string());
+            locks.emplace_back(io::toUtf8(destinationRoot / folder));
 
         ensureSufficientDiskSpace(destinationRoot);
         for (const auto& folder : copyFolders) {

@@ -222,14 +222,14 @@ bool isBuildActive(Database* db, const std::string& path) {
         return false;
 
     // Construct the output folder path
-    std::string outPath = db->buildDirectory().string();
-    fs::path baseOutputPath = fs::path(outPath) / target->entry.hash;
-    std::string outputFolder = (baseOutputPath / target->subfolder).string();
+    std::string outPath = io::toUtf8(db->buildDirectory());
+    fs::path baseOutputPath = io::fromUtf8(outPath) / target->entry.hash;
+    std::string outputFolder = io::toUtf8(baseOutputPath / target->subfolder);
     std::string lockFile = buildLockPath(outputFolder);
 
     LOGD << "Checking for active build in: " << outputFolder;
 
-    if (!fs::exists(lockFile)) {
+    if (!fs::exists(io::fromUtf8(lockFile))) {
         return false;  // No lock file means no active build
     }
 

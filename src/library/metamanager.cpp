@@ -15,9 +15,9 @@ namespace ddb
         if (path.empty())
             return "";
 
-        auto p = io::Path(path);
+        auto p = io::Path(io::fromUtf8(path));
         if (!cwd.empty() && p.isRelative())
-            p = io::Path(fs::path(cwd) / fs::path(path));
+            p = io::Path(io::fromUtf8(cwd) / io::fromUtf8(path));
 
         std::string relPath = p.relativeTo(db->rootDirectory()).generic();
 

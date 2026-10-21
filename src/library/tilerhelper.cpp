@@ -53,7 +53,7 @@ namespace ddb
                                              time_t modifiedTime, int tileSize)
     {
         std::ostringstream os;
-        os << tileablePath.string() << "*" << modifiedTime << "*" << tileSize;
+        os << io::toUtf8(tileablePath) << "*" << modifiedTime << "*" << tileSize;
         return Hash::strCRC64(os.str());
     }
 
@@ -63,7 +63,7 @@ namespace ddb
                                            const std::string &tileablePathHash)
     {
         if (!fs::exists(tileablePath))
-            throw FSException(tileablePath.string() + " does not exist");
+            throw FSException(io::toUtf8(tileablePath) + " does not exist");
         if (oneIn(1000))
             cleanupUserCache();
 
@@ -99,13 +99,13 @@ namespace ddb
         if (forceRecreate)
             RasterCache::instance().release(localPath);
 
-        const TilerKey key{localPath.string(), tileSize, tms, outputFolder.string()};
+        const TilerKey key{io::toUtf8(localPath), tileSize, tms, io::toUtf8(outputFolder)};
         auto tiler = RasterCache::instance().acquireTiler(key, [&]() -> std::unique_ptr<Tiler> {
             if (factory != nullptr)
                 return factory->create(localPath, outputFolder, tileSize, tms);
 
             const fs::path fileToTile = toGeoTIFF(localPath, tileSize, forceRecreate, "", tileablePathHash);
-            return std::make_unique<GDALTiler>(fileToTile.string(), outputFolder.string(), tileSize, tms);
+            return std::make_unique<GDALTiler>(io::toUtf8(fileToTile), io::toUtf8(outputFolder), tileSize, tms);
         });
         cancel::throwIfCanceled();
         return render(*tiler);
@@ -120,29 +120,29 @@ namespace ddb
     fs::path TilerHelper::getTile(const fs::path &tileablePath, int tz, int tx, int ty, int tileSize, bool tms, bool forceRecreate, const fs::path &outputFolder, const std::string &outputFormat, uint8_t **outBuffer, int *outBufferSize, const std::string &tileablePathHash)
     {
         const ImageFormat format = parseImageFormat(outputFormat);
-        return withTiler(tileablePath, tileSize, tms, forceRecreate, outputFolder, tileablePathHash,
-                         [&](Tiler &t) { return t.tile(tz, tx, ty, format, outBuffer, outBufferSize); });
+        return io::fromUtf8(withTiler(tileablePath, tileSize, tms, forceRecreate, outputFolder, tileablePathHash,
+                                      [&](Tiler &t) { return t.tile(tz, tx, ty, format, outBuffer, outBufferSize); }));
     }
 
     fs::path TilerHelper::getTile(const fs::path &tileablePath, int tz, int tx, int ty, int tileSize, bool tms, bool forceRecreate, const fs::path &outputFolder, const ThumbVisParams &visParams, uint8_t **outBuffer, int *outBufferSize, const std::string &tileablePathHash)
     {
-        return withTiler(tileablePath, tileSize, tms, forceRecreate, outputFolder, tileablePathHash,
-                         [&](Tiler &t) {
-                             // Visualization parameters apply to rasters; point clouds render as usual
-                             if (auto *raster = dynamic_cast<GDALTiler *>(&t))
-                                 return raster->tile(tz, tx, ty, visParams, outBuffer, outBufferSize);
-                             return t.tile(tz, tx, ty, outBuffer, outBufferSize);
-                         });
+        return io::fromUtf8(withTiler(tileablePath, tileSize, tms, forceRecreate, outputFolder, tileablePathHash,
+                                      [&](Tiler &t) {
+                                          // Visualization parameters apply to rasters; point clouds render as usual
+                                          if (auto *raster = dynamic_cast<GDALTiler *>(&t))
+                                              return raster->tile(tz, tx, ty, visParams, outBuffer, outBufferSize);
+                                          return t.tile(tz, tx, ty, outBuffer, outBufferSize);
+                                      }));
     }
 
     fs::path TilerHelper::toLocalFile(const fs::path &tileablePath, const std::string &tileablePathHash)
     {
         fs::path localTileablePath;
 
-        if (utils::isNetworkPath(tileablePath.string()))
+        if (utils::isNetworkPath(io::toUtf8(tileablePath)))
         {
             // Download file to user cache
-            const std::string ext = fs::path(tileablePath).extension().string();
+            const std::string ext = io::toUtf8(fs::path(tileablePath).extension());
 
             // If we know a priori the hash of the remote resource,
             // we use that value to search our local cache (to avoid
@@ -151,32 +151,32 @@ namespace ddb
             if (!tileablePathHash.empty())
             {
                 localTileablePath = UserProfile::get()->getTilesDir() /
-                                    fs::path(tileablePathHash + ext);
+                                    io::fromUtf8(tileablePathHash + ext);
 
                 // Download only if not exists
                 alwaysDownload = false;
             }
             else
             {
-                std::string crc = Hash::strCRC64(tileablePath.string());
-                localTileablePath = UserProfile::get()->getTilesDir() / fs::path(crc + ext);
+                std::string crc = Hash::strCRC64(io::toUtf8(tileablePath));
+                localTileablePath = UserProfile::get()->getTilesDir() / io::fromUtf8(crc + ext);
                 alwaysDownload = true; // always download, content could have changed
             }
 
             // One thread at a time
             {
-                ThreadLock lock(localTileablePath.string());
+                ThreadLock lock(io::toUtf8(localTileablePath));
 
                 bool download = alwaysDownload || !fs::exists(localTileablePath);
                 if (download)
                 {
                     // Download to a temp file so a failed transfer never lands in the cache
-                    const fs::path tmpPath = localTileablePath.string() + ".download-" + utils::generateRandomString(16);
+                    const fs::path tmpPath = io::concat(localTileablePath, ".download-" + utils::generateRandomString(16));
                     cpr::Response res;
                     bool writeOk = false;
                     {
-                        std::ofstream of(tmpPath.string(), std::ios::binary);
-                        res = cpr::Download(of, cpr::Url(tileablePath.string()));
+                        std::ofstream of(tmpPath, std::ios::binary);
+                        res = cpr::Download(of, cpr::Url(io::toUtf8(tileablePath)));
                         // cpr's write callback ignores stream errors, so a disk-full
                         // or I/O failure only shows up on the stream state
                         of.close();
@@ -186,7 +186,7 @@ namespace ddb
                     if (!writeOk || res.error || res.status_code < 200 || res.status_code >= 300)
                     {
                         io::assureIsRemoved(tmpPath);
-                        throw NetException("Cannot download " + tileablePath.string() + " (HTTP " +
+                        throw NetException("Cannot download " + io::toUtf8(tileablePath) + " (HTTP " +
                                            std::to_string(res.status_code) + "): " +
                                            (writeOk ? res.error.message : std::string("write error")));
                     }
@@ -246,13 +246,13 @@ namespace ddb
                 // Multiple threads could be generating the geoprojected
                 // file at the same time, so we place a lock
                 {
-                    ThreadLock lock(outputPath.string());
+                    ThreadLock lock(io::toUtf8(outputPath));
 
                     // Another thread may have generated the file while we waited
                     // (geoProject publishes it via an atomic rename)
                     if (forceRecreate || !fs::exists(outputPath))
                     {
-                        ddb::geoProject({localTileablePath.string()}, outputPath.string(),
+                        ddb::geoProject({io::toUtf8(localTileablePath)}, io::toUtf8(outputPath),
                                         "100%", true);
                     }
                 }
@@ -304,7 +304,7 @@ namespace ddb
         {
             // Assume image/geotiff
             fs::path geotiff = ddb::TilerHelper::toGeoTIFF(input, tileSize, true);
-            tiler = std::make_unique<GDALTiler>(geotiff.string(), output.string(), tileSize, tms);
+            tiler = std::make_unique<GDALTiler>(io::toUtf8(geotiff), io::toUtf8(output), tileSize, tms);
         }
 
         BoundingBox<int> zb;

@@ -21,11 +21,11 @@ namespace {
 class SplatThumbnailGenerator : public ThumbnailGenerator {
   public:
     bool accepts(const fs::path& input) const override {
-        return isRadPath(input.string()) || isSpzPath(input.string());
+        return isRadPath(io::toUtf8(input)) || isSpzPath(io::toUtf8(input));
     }
     void generate(const fs::path& input, int thumbSize, const fs::path& outImagePath, uint8_t** outBuffer,
                   int* outBufferSize) const override {
-        if (isRadPath(input.string()))
+        if (isRadPath(io::toUtf8(input)))
             generateSplatThumbFromRad(input, thumbSize, outImagePath, outBuffer, outBufferSize);
         else
             generateSplatThumb(input, thumbSize, outImagePath, outBuffer, outBufferSize);
@@ -39,7 +39,7 @@ void parseGaussianSplatMetadata(const fs::path &path, Entry &entry)
     // build time from an ODX coords file; a freshly indexed splat renders
     // in local space until then.
     GaussianSplatInfo info;
-    if (getGaussianSplatInfo(path.string(), info))
+    if (getGaussianSplatInfo(io::toUtf8(path), info))
     {
         entry.properties = info.toJSON();
         entry.properties["georeferenced"] = false;
@@ -58,9 +58,9 @@ class GaussianSplatEntryHandler : public EntryHandler {
     EntryType detect(const fs::path& path, FingerprintContext& /*ctx*/) const override {
         io::Path p(path);
         if (p.checkExtension({"spz"}) && !looksLikeSpz(path)) {
-            LOGD << "File has .spz extension but no NGSP/gzip magic: " << path.string();
+            LOGD << "File has .spz extension but no NGSP/gzip magic: " << io::toUtf8(path);
         } else if (p.checkExtension({"splat"}) && !looksLikeSplatBinary(path)) {
-            LOGD << "File has .splat extension but size is not a multiple of 32: " << path.string();
+            LOGD << "File has .splat extension but size is not a multiple of 32: " << io::toUtf8(path);
         }
         return EntryType::GaussianSplat;
     }
@@ -90,7 +90,7 @@ class GaussianSplatEntryHandler : public EntryHandler {
     // plain AppException if build-lod is unavailable: a missing tool is not a missing
     // dependency, so the build fails instead of staying pending.
     void build(const BuildContext& ctx) const override {
-        buildGsplat(ctx.inputPath.string(), ctx.tempFolder.string());
+        buildGsplat(io::toUtf8(ctx.inputPath), io::toUtf8(ctx.tempFolder));
     }
 
     ThumbnailSource thumbnailSource() const override { return ThumbnailSource::BuildArtifact; }

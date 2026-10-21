@@ -24,6 +24,7 @@
 #include <system_error>
 
 #include "fs.h"
+#include "mio.h"
 
 namespace ddb {
 namespace deppath {
@@ -36,7 +37,7 @@ inline std::string normalize(const std::string& ref) {
         if (c == '\\')
             c = '/';
 
-    std::string out = fs::path(s).lexically_normal().generic_string();
+    std::string out = io::toGenericUtf8(io::fromUtf8(s).lexically_normal());
 
     // lexically_normal keeps a trailing separator ("dir/" -> "dir/"); a file
     // reference never needs it.
@@ -62,7 +63,7 @@ inline bool isAbsolute(const std::string& ref) {
         if (scheme == "file:")
             return true;
     }
-    const fs::path p(ref);
+    const fs::path p = io::fromUtf8(ref);
     return p.is_absolute() || p.has_root_name() || p.has_root_directory();
 }
 
@@ -93,11 +94,11 @@ inline bool isInside(const fs::path& p, const fs::path& root) {
 // form stored in ".pending" (e.g. "sub/m.mtl", "sub/mats/tex.png").
 // `sourceEntryPath` is the dataset-relative path of the source file.
 inline std::string toDatasetRelative(const std::string& sourceEntryPath, const std::string& name) {
-    const fs::path parent = fs::path(normalize(sourceEntryPath)).parent_path();
+    const fs::path parent = io::fromUtf8(normalize(sourceEntryPath)).parent_path();
     const std::string n = normalize(name);
     if (parent.empty())
         return n;
-    return normalize((parent / fs::path(n)).generic_string());
+    return normalize(io::toGenericUtf8(parent / io::fromUtf8(n)));
 }
 
 }  // namespace deppath

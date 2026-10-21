@@ -11,6 +11,7 @@
 #include "fileversion.h"
 #include "json.h"
 #include "logger.h"
+#include "mio.h"
 
 namespace ddb
 {
@@ -36,7 +37,7 @@ namespace ddb
 
     std::shared_ptr<RasterStatsProvider::Entry> RasterStatsProvider::entryFor(const std::string &path)
     {
-        const auto version = fileVersion(path);
+        const auto version = fileVersion(io::fromUtf8(path));
         if (version.empty())
             return std::make_shared<Entry>(); // Not a local file: nothing to key a cache on
 
@@ -136,8 +137,8 @@ namespace ddb
 
     bool readStatsSidecar(const std::string &path, int band, BandStatistics &out)
     {
-        const fs::path rasterPath(path);
-        const fs::path sidecar = rasterPath.parent_path() / (rasterPath.filename().string() + ".stats.json");
+        const fs::path rasterPath = io::fromUtf8(path);
+        const fs::path sidecar = rasterPath.parent_path() / io::concat(rasterPath.filename(), ".stats.json");
 
         std::error_code ec;
         const auto sidecarTime = fs::last_write_time(sidecar, ec);
@@ -151,7 +152,7 @@ namespace ddb
 
         try
         {
-            std::ifstream in(sidecar.string());
+            std::ifstream in(sidecar);
             if (!in.is_open())
                 return false;
             const auto j = json::parse(in);
@@ -170,7 +171,7 @@ namespace ddb
         }
         catch (const std::exception &e)
         {
-            LOGW << "Ignoring unreadable statistics sidecar " << sidecar.string() << ": " << e.what();
+            LOGW << "Ignoring unreadable statistics sidecar " << io::toUtf8(sidecar) << ": " << e.what();
             return false;
         }
     }

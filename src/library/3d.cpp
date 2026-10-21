@@ -26,21 +26,21 @@ namespace ddb {
 namespace {
 // Check if file extension is GLTF or GLB
 bool isGltfFile(const fs::path& filePath) {
-    std::string ext = filePath.extension().string();
+    std::string ext = io::toUtf8(filePath.extension());
     utils::toLower(ext);
     return ext == ".gltf" || ext == ".glb";
 }
 
 // Check if file extension is GLB (binary format with embedded resources)
 bool isGlbFile(const fs::path& filePath) {
-    std::string ext = filePath.extension().string();
+    std::string ext = io::toUtf8(filePath.extension());
     utils::toLower(ext);
     return ext == ".glb";
 }
 
 // Check if file extension is PLY
 bool isPlyFile(const fs::path& filePath) {
-    std::string ext = filePath.extension().string();
+    std::string ext = io::toUtf8(filePath.extension());
     utils::toLower(ext);
     return ext == ".ply";
 }
@@ -59,7 +59,7 @@ bool isAbsoluteUri(const std::string& uri) {
 bool isSafePath(const std::string& path, const fs::path& parentPath) {
     try {
         // Resolve the path relative to parent
-        fs::path resolvedPath = (parentPath / path).lexically_normal();
+        fs::path resolvedPath = (parentPath / io::fromUtf8(path)).lexically_normal();
         fs::path canonicalParent = parentPath.lexically_normal();
 
         // Check if resolved path is within parent directory
@@ -130,7 +130,7 @@ std::vector<std::string> parseGltfJson(const json& gltfJson, const fs::path& par
 
 // Read and parse GLB file to extract JSON chunk
 json readGlbJson(const std::string& glbPath) {
-    std::ifstream file(glbPath, std::ios::binary);
+    std::ifstream file(io::fromUtf8(glbPath), std::ios::binary);
     if (!file.is_open())
         throw FSException("Cannot open GLB file: " + glbPath);
 
@@ -173,7 +173,7 @@ json readGlbJson(const std::string& glbPath) {
     constexpr uint64_t GlbChunkHeaderSize = 8;
 
     std::error_code sizeErr;
-    const auto fileSize = fs::file_size(glbPath, sizeErr);
+    const auto fileSize = fs::file_size(io::fromUtf8(glbPath), sizeErr);
     if (sizeErr)
         throw FSException("Cannot determine size of GLB file: " + glbPath);
 
@@ -205,11 +205,11 @@ json readGlbJson(const std::string& glbPath) {
 // @throws FSException if the file does not exist or cannot be opened.
 // @throws AppException if it is not a valid glTF/GLB.
 json readGltfDocument(const std::string& gltf) {
-    if (!fs::exists(gltf))
+    if (!fs::exists(io::fromUtf8(gltf)))
         throw FSException(gltf + " does not exist");
 
     // Determine if GLTF (text JSON) or GLB (binary)
-    std::string ext = fs::path(gltf).extension().string();
+    std::string ext = io::toUtf8(io::fromUtf8(gltf).extension());
     utils::toLower(ext);
 
     json gltfJson;
@@ -217,7 +217,7 @@ json readGltfDocument(const std::string& gltf) {
     try {
         if (ext == ".gltf") {
             // Read as text JSON file
-            std::ifstream file(gltf);
+            std::ifstream file(io::fromUtf8(gltf));
             if (!file.is_open())
                 throw FSException("Cannot open GLTF file: " + gltf);
 
@@ -283,13 +283,13 @@ void validateGltfDependencies(const std::string& gltfFile, const fs::path& paren
         const std::string name = deppath::normalize(uri);
         if (name.empty() || name == ".")
             return;
-        if (deppath::isAbsolute(name) || !deppath::isInside(baseDir / fs::path(name), baseDir))
+        if (deppath::isAbsolute(name) || !deppath::isInside(baseDir / io::fromUtf8(name), baseDir))
             throw AppException(gltfFile + " references the " + kind + " '" + uri +
                                "' outside its folder, which can never be satisfied (only files in "
                                "the glTF's folder or its subfolders are used)");
 
         std::error_code ec;
-        if (!fs::exists(baseDir / fs::path(name), ec) || ec) {
+        if (!fs::exists(baseDir / io::fromUtf8(name), ec) || ec) {
             if (std::find(missingDeps.begin(), missingDeps.end(), name) == missingDeps.end())
                 missingDeps.push_back(name);
         }
@@ -410,10 +410,10 @@ std::optional<std::string> parseTextureArgument(const std::string& args) {
 //     throw AppException.
 std::vector<ObjDependency> collectObjDependencies(const std::string& obj,
                                                   const fs::path& datasetRoot) {
-    if (!fs::exists(obj))
+    if (!fs::exists(io::fromUtf8(obj)))
         throw FSException(obj + " does not exist");
 
-    const fs::path objDir = fs::path(obj).parent_path();
+    const fs::path objDir = io::fromUtf8(obj).parent_path();
     const bool checkRoot = !datasetRoot.empty();
 
     std::vector<ObjDependency> deps;
@@ -429,7 +429,7 @@ std::vector<ObjDependency> collectObjDependencies(const std::string& obj,
                                                          "map_bump", "refl", "map_Pr", "map_Pm",
                                                          "map_Ps", "map_Ke"};
 
-    std::ifstream fin(obj);
+    std::ifstream fin(io::fromUtf8(obj));
     std::string line;
     while (std::getline(fin, line)) {
         std::string mtlRef;
@@ -446,7 +446,7 @@ std::vector<ObjDependency> collectObjDependencies(const std::string& obj,
         if (deppath::isAbsolute(mtlName))
             throwUnsatisfiable(obj, mtlRef, "is an absolute path");
 
-        const fs::path mtlPath = objDir / fs::path(mtlName);
+        const fs::path mtlPath = objDir / io::fromUtf8(mtlName);
         if (checkRoot && !deppath::isInside(mtlPath, datasetRoot))
             throwUnsatisfiable(obj, mtlRef, "points outside the dataset");
 
@@ -455,12 +455,12 @@ std::vector<ObjDependency> collectObjDependencies(const std::string& obj,
         if (!fs::exists(mtlPath))
             continue;
 
-        const fs::path mtlRelDir = fs::path(mtlName).parent_path();
+        const fs::path mtlRelDir = io::fromUtf8(mtlName).parent_path();
         const fs::path mtlDir = mtlPath.parent_path();
 
         // Parse MTL
         std::string mtlLine;
-        std::ifstream mtlFin(mtlPath.string());
+        std::ifstream mtlFin(mtlPath);
         while (std::getline(mtlFin, mtlLine)) {
             std::string rest;
             const std::string key = splitKeyword(mtlLine, rest);
@@ -475,13 +475,13 @@ std::vector<ObjDependency> collectObjDependencies(const std::string& obj,
             if (tex.empty() || tex == ".")
                 continue;
             if (deppath::isAbsolute(tex))
-                throwUnsatisfiable(mtlPath.string(), textureRef.value(), "is an absolute path");
+                throwUnsatisfiable(io::toUtf8(mtlPath), textureRef.value(), "is an absolute path");
 
             ObjDependency d;
             d.name = mtlRelDir.empty()
                          ? tex
-                         : deppath::normalize((mtlRelDir / fs::path(tex)).generic_string());
-            for (const auto& c : {mtlDir / fs::path(tex), objDir / fs::path(tex)}) {
+                         : deppath::normalize(io::toGenericUtf8(mtlRelDir / io::fromUtf8(tex)));
+            for (const auto& c : {mtlDir / io::fromUtf8(tex), objDir / io::fromUtf8(tex)}) {
                 if (checkRoot && !deppath::isInside(c, datasetRoot))
                     continue;
                 if (std::find(d.candidates.begin(), d.candidates.end(), c) == d.candidates.end())
@@ -489,7 +489,7 @@ std::vector<ObjDependency> collectObjDependencies(const std::string& obj,
             }
             if (d.candidates.empty())
                 throwUnsatisfiable(
-                    mtlPath.string(), textureRef.value(), "points outside the dataset");
+                    io::toUtf8(mtlPath), textureRef.value(), "points outside the dataset");
 
             add(std::move(d));
         }
@@ -537,7 +537,7 @@ void validateDependencies(const std::string& objFile, const fs::path& datasetRoo
 // staged, matching validateGltfDependencies. Images are copied, never linked, so
 // nothing writing into the temp folder can alter the dataset's files.
 void stageGltfTextures(const fs::path& gltfDir, const std::string& convertedObj) {
-    const fs::path tempDir = fs::path(convertedObj).parent_path();
+    const fs::path tempDir = io::fromUtf8(convertedObj).parent_path();
 
     for (const auto& d : collectObjDependencies(convertedObj, fs::path())) {
         bool present = false;
@@ -551,12 +551,12 @@ void stageGltfTextures(const fs::path& gltfDir, const std::string& convertedObj)
         if (present || !isSafePath(d.name, gltfDir))
             continue;
 
-        const fs::path src = gltfDir / fs::path(d.name);
+        const fs::path src = gltfDir / io::fromUtf8(d.name);
         std::error_code ec;
         if (!fs::is_regular_file(src, ec) || ec)
             continue;
 
-        const fs::path dst = tempDir / fs::path(d.name);
+        const fs::path dst = tempDir / io::fromUtf8(d.name);
         if (!deppath::isInside(dst, tempDir))
             continue;
 
@@ -564,10 +564,10 @@ void stageGltfTextures(const fs::path& gltfDir, const std::string& convertedObj)
         ec.clear();
         fs::copy_file(src, dst, fs::copy_options::overwrite_existing, ec);
         if (ec)
-            LOGW << "Cannot stage texture " << src.string() << " for the converted model: "
+            LOGW << "Cannot stage texture " << io::toUtf8(src) << " for the converted model: "
                  << ec.message();
         else
-            LOGD << "Staged texture " << src.string() << " -> " << dst.string();
+            LOGD << "Staged texture " << io::toUtf8(src) << " -> " << io::toUtf8(dst);
     }
 }
 
@@ -579,7 +579,7 @@ std::string convertGltfToObj(const std::string& inputGltf, io::ScopedTempDir& te
                              bool preferPLYIfNoUV) {
     LOGD << "Input is GLTF/GLB, converting to OBJ first";
 
-    fs::path inputPath(inputGltf);
+    fs::path inputPath = io::fromUtf8(inputGltf);
     fs::path tempDir =
         fs::temp_directory_path() / ("ddb_gltf_convert_" + utils::generateRandomString(16));
     fs::create_directories(tempDir);
@@ -587,7 +587,7 @@ std::string convertGltfToObj(const std::string& inputGltf, io::ScopedTempDir& te
 
     std::string outGeomPath;
     std::string outMtlPath;
-    std::string outputBasePath = (tempDir / inputPath.stem()).string();
+    std::string outputBasePath = io::toUtf8(tempDir / inputPath.stem());
 
     convertGltfTo3dModel(inputGltf, outputBasePath, outGeomPath, outMtlPath, false,
                          preferPLYIfNoUV);
@@ -641,14 +641,14 @@ void validateConvertedDependencies(const std::string& convertedObj, const std::s
 // temp folder are validated without it (P3). tempGuard owns that temp folder.
 PreparedModel prepareModelInput(const std::string& input, ModelConsumer consumer,
                                 const std::string& datasetRoot, io::ScopedTempDir& tempGuard) {
-    const fs::path inputPath(input);
+    const fs::path inputPath = io::fromUtf8(input);
 
     if (isGltfFile(inputPath)) {
         validateGltfDependencies(input, inputPath.parent_path());
         PreparedModel m;
         m.path = convertGltfToObj(input, tempGuard, consumer == ModelConsumer::Nexus);
         // An Assimp-exported PLY has no file dependencies.
-        if (!isPlyFile(m.path))
+        if (!isPlyFile(io::fromUtf8(m.path)))
             validateConvertedDependencies(m.path, input);
         return m;
     }
@@ -672,7 +672,7 @@ PreparedModel prepareModelInput(const std::string& input, ModelConsumer consumer
         opts.withTexture = true;
         opts.datasetRoot = datasetRoot;
         const PlyToObjResult res =
-            convertPlyToObj(input, (tempDir / "model").string(), opts);
+            convertPlyToObj(input, io::toUtf8(tempDir / "model"), opts);
         LOGD << "PLY converted to " << res.objPath << " (" << res.info.faceCount << " faces"
              << (res.mtlPath.empty() ? "" : ", textured") << ")";
 
@@ -685,14 +685,14 @@ PreparedModel prepareModelInput(const std::string& input, ModelConsumer consumer
         return m;
     }
 
-    validateDependencies(input, fs::path(datasetRoot));
+    validateDependencies(input, io::fromUtf8(datasetRoot));
     return {input, std::nullopt};
 }
 
 // "out/3dtiles/" and "out/3dtiles//" -> "out/3dtiles", so the lock, the temp and
 // the -old siblings are derived from the folder name (P8).
 fs::path stripTrailingSeparators(const std::string& dir) {
-    fs::path p(dir);
+    fs::path p = io::fromUtf8(dir);
     while (!p.empty() && !p.has_filename() && p.has_relative_path())
         p = p.parent_path();
     return p;
@@ -712,16 +712,16 @@ void recoverTilesSwap(const fs::path& outDir, const fs::path& oldDir) {
         return;
 
     if (tilesSentinelComplete(outDir)) {
-        LOGD << "Removing superseded 3D Tiles " << oldDir.string();
+        LOGD << "Removing superseded 3D Tiles " << io::toUtf8(oldDir);
         io::assureIsRemoved(oldDir);
     } else if (tilesSentinelComplete(oldDir)) {
         // Remove the incomplete final first: if either operation fails, the
         // last usable tileset still resides in oldDir.
         io::assureIsRemoved(outDir);
-        LOGI << "Restoring previous 3D Tiles from " << oldDir.string();
+        LOGI << "Restoring previous 3D Tiles from " << io::toUtf8(oldDir);
         io::rename(oldDir, outDir);
     } else {
-        LOGW << "Keeping incomplete 3D Tiles backup " << oldDir.string()
+        LOGW << "Keeping incomplete 3D Tiles backup " << io::toUtf8(oldDir)
              << " until a complete replacement is published";
     }
 }
@@ -751,7 +751,7 @@ bool isModel3DTilesComplete(const fs::path& outputDir) {
     try {
         return tilesSentinelComplete(outputDir);
     } catch (const fs::filesystem_error& e) {
-        LOGW << "Cannot inspect 3D Tiles sentinel in " << outputDir.string() << ": " << e.what();
+        LOGW << "Cannot inspect 3D Tiles sentinel in " << io::toUtf8(outputDir) << ": " << e.what();
         return false;
     }
 }
@@ -763,7 +763,7 @@ bool hasRecoverableModel3DTilesSwap(const fs::path& outputDir) {
 
 void recoverModel3DTilesSwap(const std::string& outputDir) {
     const fs::path outDir = stripTrailingSeparators(outputDir);
-    BuildLock tilesLock(outDir.string());
+    BuildLock tilesLock(io::toUtf8(outDir));
     const fs::path oldDir = backupFolderPath(outDir);
     recoverTilesSwap(outDir, oldDir);
 }
@@ -772,13 +772,13 @@ std::string buildNexus(const std::string& inputObj, const std::string& outputNxs
                        const std::string& datasetRoot) {
     // Default output: next to the original input (never inside a conversion temp folder).
     const auto outFile =
-        outputNxs.empty() ? fs::path(inputObj).replace_extension(".nxz").string() : outputNxs;
+        outputNxs.empty() ? io::toUtf8(io::fromUtf8(inputObj).replace_extension(".nxz")) : outputNxs;
 
     // Check if output file already exists (overwrite deletes it, so it must not be the input)
-    io::assureDistinctOutput(inputObj, outFile);
-    if (fs::exists(outFile)) {
+    io::assureDistinctOutput(io::fromUtf8(inputObj), io::fromUtf8(outFile));
+    if (fs::exists(io::fromUtf8(outFile))) {
         if (overwrite)
-            io::assureIsRemoved(outFile);
+            io::assureIsRemoved(io::fromUtf8(outFile));
         else
             throw AppException("File " + outFile + " already exists (delete it first)");
     }
@@ -796,16 +796,16 @@ std::string buildNexus(const std::string& inputObj, const std::string& outputNxs
 }
 
 std::optional<ModelGeoref> detectModelGeoref(const std::string& inputObj) {
-    const fs::path objPath(inputObj);
+    const fs::path objPath = io::fromUtf8(inputObj);
     const fs::path dir = objPath.parent_path();
     const fs::path parent = dir.parent_path();
-    const std::string stem = objPath.stem().string();
+    const std::string stem = io::toUtf8(objPath.stem());
 
     // Search order: explicit per-model sidecar, generic dataset sidecar, then the
     // OpenDroneMap reference_lla.json (co-located, one level up, or in an opensfm/
     // sibling for full ODM project layouts).
     const std::vector<fs::path> candidates = {
-        dir / (stem + ".geo.json"),
+        dir / io::fromUtf8(stem + ".geo.json"),
         dir / "georef.json",
         dir / "reference_lla.json",
         parent / "reference_lla.json",
@@ -828,7 +828,7 @@ std::optional<ModelGeoref> detectModelGeoref(const std::string& inputObj) {
             continue;
 
         try {
-            std::ifstream in(c.string());
+            std::ifstream in(c);
             if (!in.good())
                 continue;
 
@@ -843,16 +843,16 @@ std::optional<ModelGeoref> detectModelGeoref(const std::string& inputObj) {
                 continue;
 
             if (*lat < -90.0 || *lat > 90.0 || *lon < -180.0 || *lon > 180.0) {
-                LOGD << "Ignoring out-of-range georeference in " << c.string() << " (lat=" << *lat
+                LOGD << "Ignoring out-of-range georeference in " << io::toUtf8(c) << " (lat=" << *lat
                      << ", lon=" << *lon << ")";
                 continue;
             }
 
-            LOGD << "Model georeference found in " << c.string() << ": lat=" << *lat
+            LOGD << "Model georeference found in " << io::toUtf8(c) << ": lat=" << *lat
                  << " lon=" << *lon << " alt=" << *alt;
             return ModelGeoref{*lat, *lon, alt.value_or(0.0)};
         } catch (const std::exception& e) {
-            LOGD << "Could not parse georeference sidecar " << c.string() << ": " << e.what();
+            LOGD << "Could not parse georeference sidecar " << io::toUtf8(c) << ": " << e.what();
         }
     }
 
@@ -872,7 +872,7 @@ std::string buildModel3DTiles(const std::string& inputObj, const std::string& ou
 
     fs::path outDir = stripTrailingSeparators(outputDir);
     {
-        const std::string name = outDir.filename().string();
+        const std::string name = io::toUtf8(outDir.filename());
         if (name.empty() || name == "." || name == "..")
             throw AppException("Invalid 3D Tiles output directory: " + outputDir);
     }
@@ -881,18 +881,18 @@ std::string buildModel3DTiles(const std::string& inputObj, const std::string& ou
     const fs::path parent = outDir.parent_path();
     io::assureFolderExists(parent);
 
-    const std::string outName = outDir.filename().string();
+    const std::string outName = io::toUtf8(outDir.filename());
     const fs::path oldDir = backupFolderPath(outDir);
 
     // One tiles build per output folder ("<outDir>.building"), held until return.
     // It also gates removeOrphanTempFolders (cleanupBuild) for the -temp-/-old
     // siblings. Throws BuildInProgressException when another build holds it.
-    BuildLock tilesLock(outDir.string());
+    BuildLock tilesLock(io::toUtf8(outDir));
 
     recoverTilesSwap(outDir, oldDir);
 
     if (!overwrite && fs::exists(outDir) && !fs::is_empty(outDir))
-        throw AppException("Directory " + outDir.string() + " already exists (delete it first)");
+        throw AppException("Directory " + io::toUtf8(outDir) + " already exists (delete it first)");
 
     // Resolve georeferencing from sidecars next to the ORIGINAL input (before any
     // conversion moves us into a temp directory). An explicit georef argument
@@ -908,7 +908,7 @@ std::string buildModel3DTiles(const std::string& inputObj, const std::string& ou
 
     // Produce into a sibling temporary directory; outDir is untouched until
     // Obj2Tiles succeeds. The guard removes the temp folder on any failure.
-    const fs::path tempOut = parent / (outName + TempFolderInfix + utils::generateRandomString(16));
+    const fs::path tempOut = parent / io::fromUtf8(outName + TempFolderInfix + utils::generateRandomString(16));
     io::ScopedTempDir outGuard;
     io::assureIsRemoved(tempOut);
     io::assureFolderExists(tempOut);
@@ -977,7 +977,7 @@ std::string buildModel3DTiles(const std::string& inputObj, const std::string& ou
     }
 
     std::string err;
-    if (!obj2tiles::runObj2Tiles(actualInputObj, tempOut, opts, err))
+    if (!obj2tiles::runObj2Tiles(io::fromUtf8(actualInputObj), tempOut, opts, err))
         throw Obj2TilesException("Could not build 3D Tiles for " + inputObj + ": " + err);
 
     // Two-step swap (A3): outDir -> "<outDir>-old", temp -> outDir, drop -old.
@@ -1009,7 +1009,7 @@ std::string buildModel3DTiles(const std::string& inputObj, const std::string& ou
                 restored = "; previous tiles restored";
             } catch (const std::exception& re) {
                 // recoverTilesSwap restores them on the next run.
-                restored = "; previous tiles left in " + oldDir.string() + " (" + re.what() + ")";
+                restored = "; previous tiles left in " + io::toUtf8(oldDir) + " (" + re.what() + ")";
             }
         }
         throw AppException("Cannot move the new 3D Tiles into place (" + std::string(e.what()) +
@@ -1022,17 +1022,17 @@ std::string buildModel3DTiles(const std::string& inputObj, const std::string& ou
             io::assureIsRemoved(oldDir);
         } catch (const std::exception& e) {
             // The new tileset is in place; the next run or cleanupBuild drops -old.
-            LOGW << "Cannot remove previous 3D Tiles " << oldDir.string() << ": " << e.what();
+            LOGW << "Cannot remove previous 3D Tiles " << io::toUtf8(oldDir) << ": " << e.what();
         }
     }
 
-    return (outDir / TilesetFileName).string();
+    return io::toUtf8(outDir / TilesetFileName);
 }
 
 std::vector<std::string> getObjDependencies(const std::string& obj,
                                             const std::string& datasetRoot) {
     std::vector<std::string> deps;
-    for (const auto& d : collectObjDependencies(obj, fs::path(datasetRoot)))
+    for (const auto& d : collectObjDependencies(obj, io::fromUtf8(datasetRoot)))
         deps.push_back(d.name);
     return deps;
 }
@@ -1040,7 +1040,7 @@ std::vector<std::string> getObjDependencies(const std::string& obj,
 std::vector<std::string> getGltfDependencies(const std::string& gltf) {
     const json gltfJson = readGltfDocument(gltf);
     try {
-        return parseGltfJson(gltfJson, fs::path(gltf).parent_path());
+        return parseGltfJson(gltfJson, io::fromUtf8(gltf).parent_path());
     } catch (const AppException&) {
         throw;  // Re-throw our exceptions
     } catch (const std::exception& e) {
@@ -1057,7 +1057,7 @@ EntryType identifyGltf(const fs::path& gltfFile) {
 
     try {
         if (isGlbFile(gltfFile)) {
-            gltfJson = readGlbJson(gltfFile.string());
+            gltfJson = readGlbJson(io::toUtf8(gltfFile));
         } else {
             std::error_code sizeErr;
             const auto fileSize = fs::file_size(gltfFile, sizeErr);
@@ -1065,18 +1065,18 @@ EntryType identifyGltf(const fs::path& gltfFile) {
                 return EntryType::Generic;
 
             if (fileSize > MaxClassifiableGltfSize) {
-                LOGD << gltfFile.string() << " is too large to classify (" << fileSize
+                LOGD << io::toUtf8(gltfFile) << " is too large to classify (" << fileSize
                      << " bytes), assuming it is a model";
                 return EntryType::Model;
             }
 
-            std::ifstream file(gltfFile.string());
+            std::ifstream file(gltfFile);
             if (!file.is_open())
                 return EntryType::Generic;
             file >> gltfJson;
         }
     } catch (const std::exception& e) {
-        LOGD << "Cannot classify " << gltfFile.string() << ", not a readable glTF: " << e.what();
+        LOGD << "Cannot classify " << io::toUtf8(gltfFile) << ", not a readable glTF: " << e.what();
         return EntryType::Generic;
     }
 
@@ -1084,7 +1084,7 @@ EntryType identifyGltf(const fs::path& gltfFile) {
     // keyed by mesh id. Both wrap mesh entries shaped the same way otherwise.
     if (!gltfJson.contains("meshes") ||
         (!gltfJson["meshes"].is_array() && !gltfJson["meshes"].is_object())) {
-        LOGD << gltfFile.string() << " declares no meshes, treating as generic";
+        LOGD << io::toUtf8(gltfFile) << " declares no meshes, treating as generic";
         return EntryType::Generic;
     }
 
@@ -1107,7 +1107,7 @@ EntryType identifyGltf(const fs::path& gltfFile) {
         }
     }
 
-    LOGD << gltfFile.string() << " has no triangle primitives, treating as generic";
+    LOGD << io::toUtf8(gltfFile) << " has no triangle primitives, treating as generic";
     return EntryType::Generic;
 }
 

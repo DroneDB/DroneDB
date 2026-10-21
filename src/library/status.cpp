@@ -25,11 +25,11 @@ namespace ddb
 
         while (q->fetch())
         {
-            io::Path relPath = fs::path(q->getText(0));
+            io::Path relPath = io::fromUtf8(q->getText(0));
             auto p = directory / relPath.get(); // TODO: does this work on Windows?
             Entry e;
 
-            auto path = p.generic_string();
+            auto path = io::toGenericUtf8(p);
 
             checkedPaths.insert(path);
 
@@ -46,13 +46,13 @@ namespace ddb
             {
 
                 auto path = i->path();
-                auto p = path.generic_string();
+                auto p = io::toGenericUtf8(path);
 
                 // Skips already checked folders
                 if (checkedPaths.count(p) == 1)
                     continue;
 
-                if (p == directory.generic_string())
+                if (p == io::toGenericUtf8(directory))
                 {
                     LOGD << "Skipping parent folder";
                     continue;
@@ -64,7 +64,7 @@ namespace ddb
 
                 // Match path components relative to the dataset root, not substrings of the
                 // absolute path: "a.ddbfile.txt" or a root under "x.ddb-y" must be reported.
-                const auto relPath = io::Path(p).relativeTo(directory);
+                const auto relPath = io::Path(io::fromUtf8(p)).relativeTo(directory);
                 if (containsDdbSegment(relPath.get()))
                 {
                     LOGD << "Skipping ddb folder";

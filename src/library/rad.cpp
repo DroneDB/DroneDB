@@ -367,23 +367,23 @@ namespace ddb
 
     bool isRadPath(const std::string &filename)
     {
-        return io::Path(filename).checkExtension({"rad"});
+        return io::Path(io::fromUtf8(filename)).checkExtension({"rad"});
     }
 
     RadCoarseSplats readRadCoarseSplats(const fs::path &radPath, int maxChunks)
     {
-        std::ifstream in(radPath.string(), std::ios::binary);
+        std::ifstream in(radPath, std::ios::binary);
         if (!in.good())
-            throw AppException("RAD: cannot open " + radPath.string());
+            throw AppException("RAD: cannot open " + io::toUtf8(radPath));
 
-        const RadHeader header = readHeader(in, radPath.string());
+        const RadHeader header = readHeader(in, io::toUtf8(radPath));
 
         RadCoarseSplats result;
         const int limit = maxChunks <= 0 ? static_cast<int>(header.chunks.size())
                                          : std::min<int>(maxChunks, static_cast<int>(header.chunks.size()));
         for (int i = 0; i < limit; ++i)
         {
-            DecodedChunk chunk = decodeChunk(in, header.chunks[i], radPath.string(), /*wantColor=*/true);
+            DecodedChunk chunk = decodeChunk(in, header.chunks[i], io::toUtf8(radPath), /*wantColor=*/true);
             if (chunk.count == 0)
                 continue;
 
@@ -407,18 +407,18 @@ namespace ddb
         }
 
         if (result.count == 0)
-            throw AppException("RAD: no splats decoded from " + radPath.string());
+            throw AppException("RAD: no splats decoded from " + io::toUtf8(radPath));
         return result;
     }
 
     bool computeRadBounds(const fs::path &radPath, std::array<double, 3> &outMin,
                           std::array<double, 3> &outMax)
     {
-        std::ifstream in(radPath.string(), std::ios::binary);
+        std::ifstream in(radPath, std::ios::binary);
         if (!in.good())
-            throw AppException("RAD: cannot open " + radPath.string());
+            throw AppException("RAD: cannot open " + io::toUtf8(radPath));
 
-        const RadHeader header = readHeader(in, radPath.string());
+        const RadHeader header = readHeader(in, io::toUtf8(radPath));
 
         outMin = {std::numeric_limits<double>::max(), std::numeric_limits<double>::max(),
                   std::numeric_limits<double>::max()};
@@ -428,7 +428,7 @@ namespace ddb
         bool any = false;
         for (const auto &ref : header.chunks)
         {
-            DecodedChunk chunk = decodeChunk(in, ref, radPath.string(), /*wantColor=*/false);
+            DecodedChunk chunk = decodeChunk(in, ref, io::toUtf8(radPath), /*wantColor=*/false);
             for (size_t i = 0; i < chunk.count; ++i)
             {
                 for (int k = 0; k < 3; ++k)

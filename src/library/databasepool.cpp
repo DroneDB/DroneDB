@@ -9,6 +9,7 @@
 #include "database.h"
 #include "fileversion.h"
 #include "logger.h"
+#include "mio.h"
 
 namespace ddb
 {
@@ -171,7 +172,7 @@ namespace ddb
         if (!hit)
             return false;
 
-        db.attachPooled(found.handle, found.spatialiteCache, dbFile.string(), key, found.fileId);
+        db.attachPooled(found.handle, found.spatialiteCache, io::toUtf8(dbFile), key, found.fileId);
         return true;
     }
 

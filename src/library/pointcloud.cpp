@@ -161,7 +161,7 @@ static std::string mapColumnName(const std::string& raw) {
 // Read up to maxLines lines from a file into memory
 static std::vector<std::string> readLeadingLines(const std::string& filename, size_t maxLines) {
     std::vector<std::string> lines;
-    std::ifstream file(filename);
+    std::ifstream file(io::fromUtf8(filename));
     if (!file.is_open())
         return lines;
     std::string line;
@@ -352,7 +352,7 @@ TextReaderConfig detectTextFormat(const std::string& filename) {
 }
 
 std::string resolvePointCloudReaderDriver(const std::string& filename) {
-    const io::Path path(filename);
+    const io::Path path(io::fromUtf8(filename));
 
     if (path.checkExtension({"pts"}))
         return "readers.pts";
@@ -533,11 +533,11 @@ bool populatePointCloudInfoFromReaderExecution(pdal::Stage& reader, PointCloudIn
 }  // namespace
 
 bool getPointCloudInfo(const std::string& filename, PointCloudInfo& info, int polyBoundsSrs) {
-    const io::Path path(filename);
+    const io::Path path(io::fromUtf8(filename));
 
     if (path.checkExtension({"ply"})) {
         PlyInfo plyInfo;
-        if (!getPlyInfo(filename, plyInfo))
+        if (!getPlyInfo(io::fromUtf8(filename), plyInfo))
             return false;
         else {
             info.bounds.clear();
@@ -671,11 +671,11 @@ static void buildCopcPdal(const std::vector<std::string>& inputFiles,
         }
 
         pdal::Options wo;
-        wo.add("filename", outPath.string());
+        wo.add("filename", io::toUtf8(outPath));
         wo.add("forward", "all");
         // Preserve any extra dimensions present in the source.
         wo.add("extra_dims", "all");
-        pdal::Stage& writer = mgr.makeWriter(outPath.string(), "writers.copc", *tail, wo);
+        pdal::Stage& writer = mgr.makeWriter(io::toUtf8(outPath), "writers.copc", *tail, wo);
         (void)writer;
 
         mgr.execute();
@@ -696,11 +696,11 @@ static void buildCopcPdal(const std::vector<std::string>& inputFiles,
     }
 
     if (!fs::exists(outPath))
-        throw PDALException("COPC build did not produce output file: " + outPath.string());
+        throw PDALException("COPC build did not produce output file: " + io::toUtf8(outPath));
 }
 
 void buildCopc(const std::vector<std::string>& filenames, const std::string& outdir) {
-    fs::path dest = outdir;
+    fs::path dest = io::fromUtf8(outdir);
     io::assureFolderExists(dest);
 
     fs::path tmpDir = dest / "tmp";
@@ -718,10 +718,10 @@ void buildCopc(const std::vector<std::string>& filenames, const std::string& out
     double globalMaxY = std::numeric_limits<double>::lowest();
 
     for (const std::string& f : filenames) {
-        if (!fs::exists(f))
+        if (!fs::exists(io::fromUtf8(f)))
             throw FSException(f + " does not exist");
 
-        const EntryType type = fingerprint(f);
+        const EntryType type = fingerprint(io::fromUtf8(f));
         if (type != PointCloud)
             throw InvalidArgsException(f + " is not a supported point cloud file");
 
@@ -744,9 +744,9 @@ void buildCopc(const std::vector<std::string>& filenames, const std::string& out
     // formats supported by PDAL's LAS reader (LAS/LAZ natively).
     std::vector<std::string> inputFiles;
     for (const auto& f : filenames) {
-        auto p = io::Path(f);
+        auto p = io::Path(io::fromUtf8(f));
         if (p.checkExtension({"ply", "e57", "pts", "xyz"})) {
-            std::string lasF = (tmpDir / Hash::strCRC64(f)).string() + ".las";
+            std::string lasF = io::toUtf8(tmpDir / Hash::strCRC64(f)) + ".las";
             LOGD << "Converting " << f << " to " << lasF;
             translateToLas(f, lasF);
             inputFiles.push_back(lasF);
@@ -811,7 +811,7 @@ json PointCloudInfo::toJSON() {
 }
 
 void translateToLas(const std::string& input, const std::string& outputLas) {
-    if (!fs::exists(input))
+    if (!fs::exists(io::fromUtf8(input)))
         throw FSException(input + " does not exist");
 
     try {

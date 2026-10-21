@@ -44,7 +44,7 @@ void ensureSufficientDiskSpace(const fs::path& dir) {
         throw RetryableBuildException(
             "Insufficient free disk space to build: " +
             std::to_string(si.available / (1024ULL * 1024ULL)) + " MB available, " +
-            std::to_string(minMb) + " MB required on " + dir.string() +
+            std::to_string(minMb) + " MB required on " + io::toUtf8(dir) +
             ". Free up space or lower minFreeDiskMb (DDBConfigure, DDB_MIN_FREE_DISK_MB).",
             RetryableBuildReason::LowDiskSpace);
     }
@@ -53,7 +53,7 @@ void ensureSufficientDiskSpace(const fs::path& dir) {
 void buildInternal(Database* db, const Entry& e, const std::string& outputPath, bool force) {
     std::string outPath = outputPath;
     if (outPath.empty())
-        outPath = db->buildDirectory().string();
+        outPath = io::toUtf8(db->buildDirectory());
 
     LOGD << "Building entry " << e.path << " type " << e.type;
     cancel::throwIfCanceled();
@@ -77,8 +77,8 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
         LOGD << "Triggering build of " << target.path << " because of " << e.path;
     }
 
-    const fs::path baseOutputPath = fs::path(outPath) / target.hash;
-    const std::string outputFolder = (baseOutputPath / subfolder).string();
+    const fs::path baseOutputPath = io::fromUtf8(outPath) / target.hash;
+    const std::string outputFolder = io::toUtf8(baseOutputPath / subfolder);
 
     // Ensure the output directory structure exists before attempting to acquire the lock
     // This prevents BuildLockDirectoryException when multiple processes race to build
@@ -106,7 +106,7 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
     const auto tempFolder = outputFolder + TempFolderInfix + utils::generateRandomString(16);
     auto cleanupTemporary = [&]() {
         try {
-            io::assureIsRemoved(tempFolder);
+            io::assureIsRemoved(io::fromUtf8(tempFolder));
         } catch (const std::exception& cleanupError) {
             LOGW << "Cannot remove build scratch '" << tempFolder << "': " << cleanupError.what();
         }
@@ -121,9 +121,9 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
         try {
             wasPending = fs::is_regular_file(pendFile);
             if (wasPending) {
-                std::ifstream pending(pendFile.string(), std::ios::binary);
+                std::ifstream pending(pendFile, std::ios::binary);
                 if (!pending.is_open())
-                    throw FSException("Cannot read pending marker " + pendFile.string());
+                    throw FSException("Cannot read pending marker " + io::toUtf8(pendFile));
                 std::string timestamp;
                 std::getline(pending, timestamp);
                 pendingDependencyLines.assign(std::istreambuf_iterator<char>(pending), {});
@@ -145,32 +145,32 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
                 replacePendingMarker(pendFile, pendingDependencyLines);
             // Both preflight and scratch creation are inside the classified attempt.
             ensureSufficientDiskSpace(baseOutputPath);
-            io::assureFolderExists(tempFolder);
+            io::assureFolderExists(io::fromUtf8(tempFolder));
 
             const BuildContext context{db,
                                        target,
-                                       db->rootDirectory() / target.path,
+                                       db->rootDirectory() / io::fromUtf8(target.path),
                                        db->rootDirectory(),
                                        baseOutputPath,
-                                       fs::path(outputFolder),
-                                       fs::path(tempFolder),
+                                       io::fromUtf8(outputFolder),
+                                       io::fromUtf8(tempFolder),
                                        force};
             handler.build(context);
 
             // A handler that publishes its own outputs (Vector) skips the standard rename
             if (handler.usesTempFolder()) {
                 LOGD << "Build complete, moving temp folder to " << outputFolder;
-                if (fs::exists(outputFolder)) {
+                if (fs::exists(io::fromUtf8(outputFolder))) {
                     // Rasters of the previous output kept open would block this on Windows
-                    releaseCachedFiles(outputFolder);
-                    io::assureIsRemoved(outputFolder);
+                    releaseCachedFiles(io::fromUtf8(outputFolder));
+                    io::assureIsRemoved(io::fromUtf8(outputFolder));
                 }
 
-                io::assureFolderExists(fs::path(outputFolder).parent_path());
-                io::rename(tempFolder, outputFolder);
+                io::assureFolderExists(io::fromUtf8(outputFolder).parent_path());
+                io::rename(io::fromUtf8(tempFolder), io::fromUtf8(outputFolder));
             }
 
-            io::assureIsRemoved(tempFolder);
+            io::assureIsRemoved(io::fromUtf8(tempFolder));
             io::assureIsRemoved(pendFile);
         } catch (const CanceledException&) {
             throw;
@@ -225,14 +225,14 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
         io::assureIsRemoved(pendFile);
         cleanupTemporary();
         throw AppException("Unknown build error failure for " + target.path + " (" +
-                           baseOutputPath.string() + ")");
+                           io::toUtf8(baseOutputPath) + ")");
     }
 }
 
 void buildAll(Database* db, const std::string& outputPath, bool force) {
     std::string outPath = outputPath;
     if (outPath.empty())
-        outPath = db->buildDirectory().string();
+        outPath = io::toUtf8(db->buildDirectory());
 
     LOGD << "In buildAll('" << outputPath << "')";
 

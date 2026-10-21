@@ -45,7 +45,7 @@ namespace ddb
             try {
                 // The filesystem wrapper carries the actual write error code.
                 // A full disk must escape the fallback and preserve pending work.
-                io::copy(inputGTiff, outputCog);
+                io::copy(io::fromUtf8(inputGTiff), io::fromUtf8(outputCog));
 
                 LOGD << "Successfully copied optimized COG from " << inputGTiff << " to " << outputCog;
                 generateCogStats(outputCog);
@@ -236,7 +236,7 @@ namespace ddb
         // Here they stay on the (large) datasets volume and are removed together with the
         // build temp folder. Thread-local: safe under concurrent builds. Not set for a bare
         // output filename (e.g. some CLI invocations).
-        const std::string outputFolder = fs::path(outputCog).parent_path().string();
+        const std::string outputFolder = io::toUtf8(io::fromUtf8(outputCog).parent_path());
         std::optional<ScopedThreadConfigOption> gdalTmpGuard;
         if (!outputFolder.empty())
             gdalTmpGuard.emplace("CPL_TMPDIR", outputFolder.c_str());
@@ -365,14 +365,14 @@ namespace ddb
             statsJson["bands"] = bandsJson;
             statsJson["computedAt"] = oss.str();
 
-            fs::path cogFsPath(cogPath);
-            fs::path statsPath = cogFsPath.parent_path() / (cogFsPath.filename().string() + ".stats.json");
-            std::ofstream out(statsPath.string());
+            fs::path cogFsPath = io::fromUtf8(cogPath);
+            fs::path statsPath = cogFsPath.parent_path() / io::concat(cogFsPath.filename(), ".stats.json");
+            std::ofstream out(statsPath);
             if (out.is_open()) {
                 out << statsJson.dump(2);
-                LOGD << "Wrote stats sidecar: " << statsPath.string();
+                LOGD << "Wrote stats sidecar: " << io::toUtf8(statsPath);
             } else {
-                LOGW << "Cannot write stats sidecar: " << statsPath.string();
+                LOGW << "Cannot write stats sidecar: " << io::toUtf8(statsPath);
             }
         }
     }
