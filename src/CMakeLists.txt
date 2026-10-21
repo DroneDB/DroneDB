@@ -44,7 +44,6 @@ find_path(BOOLINQ_INCLUDE_DIRS "boolinq/boolinq.h" REQUIRED)
 set(COMMON_LIBS
     pdalcpp
     Threads::Threads
-    cctz::cctz
     Exiv2::exiv2lib
     GDAL::GDAL
     PROJ::proj
@@ -68,6 +67,8 @@ set(COMMON_LIBS
 
 
 target_link_libraries(${PROJECT_NAME} PRIVATE ${COMMON_LIBS} ddb_warnings)
+# timezone.h exposes cctz::time_zone in the public API, so consumers (ddbtest) link cctz too
+target_link_libraries(${PROJECT_NAME} PUBLIC cctz::cctz)
 
 # Third-party include directories are SYSTEM: their warnings are not ours (cmake/Warnings.cmake)
 target_include_directories(${PROJECT_NAME} SYSTEM PRIVATE ${GEOTIFF_INCLUDE_DIR} ${Stb_INCLUDE_DIR})
