@@ -17,6 +17,16 @@ extern "C"
 
 #define DDB_FOLDER ".ddb"
 
+/* ABI version of this header (XI-01). The MINOR grows with every additive change (a new export,
+ * a new error code, a new field in a JSON output); the MAJOR grows when an export is removed or
+ * changes its signature or meaning. The exported DDB* symbols are listed in ddb.symbols, next to
+ * this header: CI fails when the library exports a different list, or when the list changes
+ * without a version bump (scripts/check-abi.py). A caller checks DDBGetAbiVersion() against the
+ * version it was built for: the same MAJOR and a MINOR at least as large. */
+#define DDB_ABI_MAJOR 1
+#define DDB_ABI_MINOR 1
+
+    /* Error codes. A new code is also listed in DDBGetCapabilities() (kErrorCodes, ddb.cpp). */
     enum DDBErr
     {
         DDBERR_NONE = 0,            // No error
@@ -85,6 +95,23 @@ extern "C"
 
     /** Get library version */
     DDB_DLL const char *DDBGetVersion();
+
+    /** ABI version of the loaded library: (DDB_ABI_MAJOR << 16) | DDB_ABI_MINOR.
+     * Callable at any time, before DDBRegisterProcess too; it never changes DDBGetLastError(). */
+    DDB_DLL uint32_t DDBGetAbiVersion(void);
+
+    /** What the loaded library supports, as a JSON object:
+     *   "abi"          {"major": DDB_ABI_MAJOR, "minor": DDB_ABI_MINOR}
+     *   "version"      DDBGetVersion()
+     *   "errorCodes"   every DDBErr code by name without the prefix: {"NONE": 0, "EXCEPTION": 1, ...}
+     *   "cancellable"  the exports whose DDBProgressCallback can cancel them (DDBERR_CANCELED)
+     *   "symbols"      every exported DDB* function, sorted (ddb.symbols)
+     * Fields are only ever added. The string is built once and owned by the library: it stays
+     * valid for the life of the process and is the same pointer on every call and every thread;
+     * do not free it. Callable at any time, before DDBRegisterProcess too; it never changes
+     * DDBGetLastError().
+     * @return the JSON, or NULL only if the process ran out of memory while building it */
+    DDB_DLL const char *DDBGetCapabilities(void);
 
     /** Initialize a DroneDB database
      * @param directory Path to directory where to initialize the database

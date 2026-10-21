@@ -14,6 +14,9 @@
 #include <type_traits>
 #include <algorithm>
 #include <array>
+#include <span>
+#include <string_view>
+#include <utility>
 
 #include <sstream>
 
@@ -75,6 +78,82 @@ void DDBRegisterProcess(bool verbose) {
 
 const char* DDBGetVersion() {
     return ddb::version();
+}
+
+namespace {
+
+// Every exported DDB* function, one string literal per line of src/include/ddb.symbols:
+// src/CMakeLists.txt generates the list from the manifest, which stays the only copy (XI-01)
+constexpr std::string_view kExportedSymbols[] = {
+#include "ddb_symbols.inc"
+};
+
+// Every DDBErr code under its enumerator name without the DDBERR_ prefix (the same token, so a
+// name cannot drift from its code), in value order
+#define DDB_ERROR_CODE(name) std::pair<std::string_view, DDBErr>{#name, DDBERR_##name}
+constexpr std::array kErrorCodes = {DDB_ERROR_CODE(NONE),
+                                    DDB_ERROR_CODE(EXCEPTION),
+                                    DDB_ERROR_CODE(BUILDDEPMISSING),
+                                    DDB_ERROR_CODE(BUILDINPROGRESS),
+                                    DDB_ERROR_CODE(CANCELED),
+                                    DDB_ERROR_CODE(BUSY),
+                                    DDB_ERROR_CODE(NOTFOUND)};
+#undef DDB_ERROR_CODE
+
+// The exports that return DDBERR_CANCELED when their DDBProgressCallback asks to stop
+constexpr std::string_view kCancellable[] = {"DDBExportRaster2"};
+
+static_assert(
+    [] {
+        for (size_t i = 0; i < kErrorCodes.size(); i++)
+            if (static_cast<size_t>(kErrorCodes[i].second) != i)
+                return false;
+        return true;
+    }(),
+    "kErrorCodes must list the DDBErr codes in value order, without gaps");
+static_assert(std::ranges::all_of(kCancellable,
+                                  [](std::string_view name) {
+                                      return std::ranges::find(kExportedSymbols, name) !=
+                                             std::end(kExportedSymbols);
+                                  }),
+              "a cancellable function must be an export listed in ddb.symbols");
+
+json stringArray(std::span<const std::string_view> items) {
+    json out = json::array();
+    for (const auto item : items)
+        out.push_back(item);
+    return out;
+}
+
+std::string buildCapabilities() {
+    json errorCodes = json::object();
+    for (const auto& [name, code] : kErrorCodes)
+        errorCodes[std::string(name)] = static_cast<int>(code);
+    return json{{"abi", {{"major", DDB_ABI_MAJOR}, {"minor", DDB_ABI_MINOR}}},
+                {"version", ddb::version()},
+                {"errorCodes", std::move(errorCodes)},
+                {"cancellable", stringArray(kCancellable)},
+                {"symbols", stringArray(kExportedSymbols)}}
+        .dump();
+}
+
+}  // namespace
+
+// Exempt accessors (no DDB_C_BEGIN): they never read or change the last error
+uint32_t DDBGetAbiVersion() {
+    return (static_cast<uint32_t>(DDB_ABI_MAJOR) << 16) | static_cast<uint32_t>(DDB_ABI_MINOR);
+}
+
+const char* DDBGetCapabilities() {
+    try {
+        // Built on the first call; C++ guarantees one thread builds it while the others wait
+        static const std::string capabilities = buildCapabilities();
+        return capabilities.c_str();
+    } catch (...) {
+        // Out of memory while building: no exception may cross the C boundary, and the
+        // next call builds it again
+        return nullptr;
+    }
 }
 
 DDBErr DDBInit(const char* directory, char** outPath) {

@@ -79,6 +79,7 @@ with ddb).
 | `raster-info` | `DDBGetRasterInfo(<root>/ortho.tif)` | `raster-info` | - |
 | `raster-metadata` | `DDBGetRasterMetadata(<root>/ortho.tif, NULL, NULL)`: per-band statistics | `raster-metadata` | - |
 | `raster-metadata-formula` | `DDBGetRasterMetadata(<root>/ortho.tif, "VARI", "RGB")`: formula statistics and histogram | `raster-metadata` | - |
+| `capabilities` | `DDBGetCapabilities()` (no dataset): ABI version, error codes, cancellable exports, the symbol manifest | `capabilities` | `version` |
 | `info-drone-image`, `get-drone-image`, `stac-item-drone-image` | `DDBInfo`, `DDBGet`, `DDBStac` of `DJI_0018.JPG` (integration) | `entries`, `entry`, `stac-item` | `depth` (info) |
 
 Each fixture file holds:
@@ -104,6 +105,7 @@ normalised output keeps the JSON types, so it still matches its schema.
 | volatile key `depth`: value 0 | `info-*` | `DDBInfo` counts the folders of the absolute path |
 | volatile keys `id` (`"<volatile>"`) and `mtime` (0) | meta items, meta dump | a new random UUID and the current time on every write |
 | volatile key `lastAttempt`: value 0 | `pending-build-info` | the time of the build attempt |
+| volatile key `version`: `"<volatile>"` | `capabilities` | the library version and git commit of the build |
 | sorted by `path`, `key`, `data` | `meta-dump` | libddb orders the dump by `id`, a random UUID |
 
 Not normalised, fixed at the source instead: mtimes (set on the inputs), hashes and sizes
@@ -146,6 +148,8 @@ Registry has to adopt first.
 ### Changes
 
 * 2026-10-21: baseline (DroneDB `fixes-and-optimizations` after `7ee39d2`).
+* 2026-10-21: `capabilities` added (XI-01, ABI 1.1). Its `symbols` list is
+  `src/include/ddb.symbols`, so every new export updates this fixture too.
 
 ## Cross-repository CI
 

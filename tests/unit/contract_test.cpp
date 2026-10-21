@@ -329,6 +329,18 @@ namespace
                     "raster-metadata.schema.json"),
             contract::takeJson(out));
     }
+
+    // XI-01: the ABI handshake Registry reads at startup. The library version changes with every
+    // build ("version", normalised); a new export or error code changes the fixture on purpose.
+    // The string is owned by the library: no DDBFree.
+    TEST(ContractFixturesCapabilities, Capabilities)
+    {
+        const char *caps = DDBGetCapabilities();
+        ASSERT_NE(caps, nullptr);
+        contract::expectMatchesFixture({"capabilities", "No input: what the loaded library supports",
+                                        "DDBGetCapabilities()", "capabilities.schema.json", {}, {"version"}, {}},
+                                       json::parse(caps));
+    }
 }
 
 namespace

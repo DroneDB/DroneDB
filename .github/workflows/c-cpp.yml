@@ -93,6 +93,17 @@ jobs:
           echo "GITHUB_RUN_NUMBER=${GITHUB_RUN_NUMBER}"
           echo "GITHUB_SHA=${GITHUB_SHA}"
           ls -la
+      - name: Check the ABI version and the release tag
+        # XI-01 (scripts/check-abi.py), before the build so a bad tag fails fast: a change to
+        # src/include/ddb.symbols since the previous release tag needs a DDB_ABI_MINOR bump (a
+        # removed symbol a DDB_ABI_MAJOR bump), and a v* tag must equal package.json "version".
+        # fetch-depth: 0 above fetches the tags the base is found from.
+        shell: bash
+        run: |
+          python3 scripts/check-abi.py bump
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            python3 scripts/check-abi.py tag --tag "${GITHUB_REF_NAME}"
+          fi
       - name: Pin test_data (tests/test-data.sha)
         # The DroneDB/test_data commit the tests read their assets from (testDataUrl, tests/testfs.h);
         # the smoke tests below download from the same commit
@@ -162,6 +173,10 @@ jobs:
         # Linux only: Windows (MSVC /W4) warnings are in its build log, not ratcheted, until a
         # Windows baseline exists.
         run: python3 scripts/check-warnings.py build/build.log --build-dir build
+      - name: Check the exported symbols (libddb.so == src/include/ddb.symbols)
+        # XI-01: the defined DDB* dynamic symbols (nm -D) equal the manifest, which also matches
+        # ddb.h (its '# abi' line, every DDB_DLL declaration)
+        run: python3 scripts/check-abi.py exports --library build/libddb.so
       - name: clang-tidy on changed lines (report-only)
         # Findings are annotated on the PR but do not fail the job yet (scripts/lint-changed-lines.py).
         if: github.ref_type != 'tag'
@@ -439,9 +454,9 @@ jobs:
           mkdir -p "$TMPDIR"
           dotnet test Registry.Adapters.Ddb.Test/Registry.Adapters.Ddb.Test.csproj -c Release
 
-  # Every release asset (the .deb, the Windows zip, the LibreDWG source) goes to the release
-  # only after the Registry contract passed on the .deb: the build jobs upload artifacts only,
-  # this job is the one that writes to the release.
+  # Every release asset (the .deb, the Windows zip, the LibreDWG source, ddb.h, ddb.symbols and
+  # SHA256SUMS) goes to the release only after the Registry contract passed on the .deb: the build
+  # jobs upload artifacts only, this job is the one that writes to the release.
   release_assets:
     name: Upload Release Assets
     needs: [build_ubuntu, build_windows, build_libredwg, registry_contract]
@@ -463,6 +478,28 @@ jobs:
         with:
           name: libredwg
           path: ${{ runner.temp }}/libredwg-out
+      - name: Checkout (ddb.h and the symbol manifest of the tag)
+        uses: actions/checkout@v4
+      - name: Collect the ABI files and write SHA256SUMS
+        # XI-01: every release publishes the C header, the symbol manifest and SHA256SUMS, one line
+        # per release asset (the globs of the upload steps), by file name, so a consumer pins the
+        # exact download and checks it with sha256sum -c. Written before any upload: a missing
+        # asset or a duplicate name fails the job before the release changes.
+        shell: bash
+        run: |
+          set -euo pipefail
+          abi="${RUNNER_TEMP}/ddb-abi"
+          mkdir -p "$abi"
+          cp src/include/ddb.h src/include/ddb.symbols "$abi/"
+          assets=("${RUNNER_TEMP}"/libredwg-out/source/* "${RUNNER_TEMP}"/ddb-windows/*.zip
+                  "${RUNNER_TEMP}"/ddb-package/*.deb "$abi/ddb.h" "$abi/ddb.symbols")
+          for f in "${assets[@]}"; do
+            (cd "$(dirname "$f")" && sha256sum -- "$(basename "$f")")
+          done > "${RUNNER_TEMP}/SHA256SUMS"
+          duplicates=$(awk '{print $2}' "${RUNNER_TEMP}/SHA256SUMS" | sort | uniq -d)
+          if [ -n "$duplicates" ]; then echo "::error::duplicate release asset names: $duplicates"; exit 1; fi
+          mv "${RUNNER_TEMP}/SHA256SUMS" "$abi/"
+          cat "$abi/SHA256SUMS"
       - name: Attach LibreDWG Corresponding Source to Release
         # GPL-3.0 section 6: releases that ship dwg2dxf offer the exact source they were built from.
         uses: svenstaro/upload-release-action@v2
@@ -485,6 +522,14 @@ jobs:
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: ${{ runner.temp }}/ddb-package/*.deb
+          file_glob: true
+          tag: ${{ github.ref }}
+          overwrite: true
+      - name: Upload ddb.h, ddb.symbols and SHA256SUMS to Release
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: ${{ runner.temp }}/ddb-abi/*
           file_glob: true
           tag: ${{ github.ref }}
           overwrite: true
@@ -690,6 +735,11 @@ jobs:
             cmake --build . --config Release --target ALL_BUILD -- /maxcpucount:$env:NUMBER_OF_PROCESSORS
             if ($LASTEXITCODE -ne 0) { throw "Build failed with exit code $LASTEXITCODE" }
             dir
+      - name: Check the exported symbols (ddb.dll == src/include/ddb.symbols)
+        # XI-01: the DDB* names in the export table of ddb.dll (read from the PE file, so no
+        # Visual Studio environment is needed for dumpbin) equal the manifest, as on Linux
+        run: python scripts/check-abi.py exports --library build/ddb.dll
+        shell: pwsh
       - name: Build Untwine COPC accelerator
         # Optional on PR/master pushes (DroneDB falls back to PDAL writers.copc),
         # but MUST succeed on release tags so the zip ships with untwine.exe.

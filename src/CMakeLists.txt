@@ -126,6 +126,29 @@ endfunction()
 ddb_add_library_objects(ddb_core ${DDB_CORE_SOURCES} ${DDB_VERSION_SOURCE})
 ddb_add_library_objects(ddb_capi ${DDB_CAPI_SOURCES})
 
+# The symbol manifest (XI-01): include/ddb.symbols lists every exported DDB* function, one per
+# line ('#' starts a comment line). It is the only copy of the list: DDBGetCapabilities() (ddb.cpp)
+# includes it as generated/ddb_symbols.inc, one string literal per name, and scripts/check-abi.py
+# compares it with the symbols libddb exports. A change to the manifest re-runs CMake;
+# file(CONFIGURE) rewrites the include only when its content changes.
+set(DDB_SYMBOLS_MANIFEST "${CMAKE_CURRENT_SOURCE_DIR}/include/ddb.symbols")
+set(DDB_SYMBOLS_MANIFEST "${DDB_SYMBOLS_MANIFEST}" PARENT_SCOPE)  # tests/CMakeLists.txt reads it too
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${DDB_SYMBOLS_MANIFEST}")
+# Every line that is not empty or a comment (a comment may hold ';', a list separator)
+file(STRINGS "${DDB_SYMBOLS_MANIFEST}" _ddb_symbols REGEX "^[^#]")
+set(_ddb_symbols_inc "")
+foreach(_symbol IN LISTS _ddb_symbols)
+    if(NOT _symbol MATCHES "^DDB[A-Za-z0-9_]+$")
+        message(FATAL_ERROR "${DDB_SYMBOLS_MANIFEST}: '${_symbol}' is not a DDB* symbol name")
+    endif()
+    string(APPEND _ddb_symbols_inc "\"${_symbol}\",\n")
+endforeach()
+if(_ddb_symbols_inc STREQUAL "")
+    message(FATAL_ERROR "${DDB_SYMBOLS_MANIFEST} lists no symbol")
+endif()
+file(CONFIGURE OUTPUT "${CMAKE_BINARY_DIR}/generated/ddb_symbols.inc" CONTENT "${_ddb_symbols_inc}")
+target_include_directories(ddb_capi PRIVATE "${CMAKE_BINARY_DIR}/generated")
+
 add_library(${PROJECT_NAME} SHARED $<TARGET_OBJECTS:ddb_core> $<TARGET_OBJECTS:ddb_capi>)
 ddb_msvc_release_debug_info(${PROJECT_NAME})
 

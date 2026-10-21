@@ -84,6 +84,9 @@ if(BUILD_TESTING)
     # no other test TU carries it on its compile line
     set_source_files_properties(unit/dq01_version_test.cpp PROPERTIES
         COMPILE_DEFINITIONS DDB_PACKAGE_JSON="${PROJECT_SOURCE_DIR}/package.json")
+    # The ABI test compares DDBGetCapabilities() with the symbol manifest (src/CMakeLists.txt)
+    set_source_files_properties(unit/abi_test.cpp PROPERTIES
+        COMPILE_DEFINITIONS DDB_SYMBOLS_MANIFEST="${DDB_SYMBOLS_MANIFEST}")
     # The initIndex race test runs its own binary as the racing child processes
     set_source_files_properties(unit/init_index_template_test.cpp PROPERTIES
         COMPILE_DEFINITIONS DDB_UNIT_TESTS_NAME="$<TARGET_FILE_NAME:ddb_unit_tests>")

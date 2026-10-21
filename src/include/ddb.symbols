@@ -1,0 +1,100 @@
+# libddb symbol manifest (XI-01): every function libddb exports whose name starts with DDB.
+#
+# Format: one symbol name per line, sorted in byte order (LC_ALL=C sort), no duplicates. Lines
+# starting with '#' are comments; the '# abi MAJOR.MINOR' line must equal DDB_ABI_MAJOR and
+# DDB_ABI_MINOR in ddb.h.
+#
+# This file is the only copy of the list. DDBGetCapabilities() returns it ("symbols", embedded by
+# src/CMakeLists.txt) and every release publishes it next to ddb.h. scripts/check-abi.py (CI)
+# fails when the library exports a different list, when the list changes without an ABI version
+# bump since the previous release, and when a symbol is removed without a MAJOR bump.
+# Adding an export: declare it in ddb.h, list it here, bump DDB_ABI_MINOR once per release.
+#
+# abi 1.1
+DDBAdd
+DDBAddWithHints
+DDBAddWithOptions
+DDBAlignRaster
+DDBAppendPassword
+DDBApplyDelta
+DDBBuild
+DDBCalculateVolume
+DDBChattr
+DDBCheckpoint
+DDBCleanup
+DDBClearPasswords
+DDBComputeDeltaLocals
+DDBCountVector
+DDBDelta
+DDBDescribeVector
+DDBDetectAllStockpiles
+DDBDetectStockpile
+DDBExportRaster
+DDBExportRaster2
+DDBFree
+DDBGenerateContours
+DDBGenerateMemoryThumbnail
+DDBGenerateMemoryThumbnailEx
+DDBGenerateThumbnail
+DDBGet
+DDBGetAbiVersion
+DDBGetBuildStatus
+DDBGetCapabilities
+DDBGetLastError
+DDBGetPendingBuildInfo
+DDBGetRasterAreaStats
+DDBGetRasterInfo
+DDBGetRasterMetadata
+DDBGetRasterPointValue
+DDBGetRasterProfile
+DDBGetRasterValueInfo
+DDBGetStamp
+DDBGetStampChecksum
+DDBGetTag
+DDBGetVersion
+DDBInfo
+DDBInit
+DDBIsBuildActive
+DDBIsBuildComplete
+DDBIsBuildPending
+DDBIsBuildable
+DDBList
+DDBListEntries
+DDBMakeCadPrj
+DDBMaskBorders
+DDBMemoryTile
+DDBMemoryTileEx
+DDBMemoryTileFmt
+DDBMergeMultispectral
+DDBMetaAdd
+DDBMetaDump
+DDBMetaGet
+DDBMetaList
+DDBMetaRemove
+DDBMetaRestore
+DDBMetaSet
+DDBMetaUnset
+DDBMoveEntry
+DDBPreviewMergeMultispectral
+DDBQueryRasterPoint
+DDBQueryVector
+DDBQueryVectorEx
+DDBRegisterProcess
+DDBReleaseConnections
+DDBRemove
+DDBRenderRasterIndex
+DDBRenderRasterRegion
+DDBRenderRasterRegionEx
+DDBRescan
+DDBRescanEx
+DDBSearch
+DDBSetLastError
+DDBSetTag
+DDBStac
+DDBStacItemCollection
+DDBStatus
+DDBTile
+DDBVSIFree
+DDBValidateAlignRaster
+DDBValidateMergeMultispectral
+DDBVerifyPassword
