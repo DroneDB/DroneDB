@@ -273,8 +273,8 @@ namespace
         // A "stale" lock file is just a leftover from a crashed process: the
         // file exists on disk but the kernel lock was released when the holder
         // died. We simulate that by writing a fake PID into the file with no
-        // open fd attached. The new isLockFileStale uses a non-blocking probe
-        // BuildLock to discover that no live process holds the lock.
+        // open fd attached. BuildLock::isHeld queries the kernel lock to
+        // discover that no live process holds it.
         fs::path lockFile = orphanDir / "cog.building";
         writeLockFile(lockFile, 2147483646L);
 

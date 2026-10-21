@@ -485,9 +485,10 @@ bool BuildLock::isHeld(const std::string& outputPath) {
             return false;
         // ERROR_ACCESS_DENIED is also what a holder's file reports while its delete-on-close
         // is pending (the holder is releasing): still held at this instant.
-        if (error != ERROR_SHARING_VIOLATION && error != ERROR_ACCESS_DENIED)
+        if (error != ERROR_SHARING_VIOLATION && error != ERROR_ACCESS_DENIED) {
             LOGD << "Cannot probe build lock " << lockFile << " (Windows error " << error
                  << "), assuming a live holder";
+        }
         return true;
     }
     CloseHandle(h);
@@ -510,9 +511,10 @@ bool BuildLock::isHeld(const std::string& outputPath) {
     // Closing this descriptor releases nothing of a holder: OFD locks and flock() belong to
     // the open file description that took them.
     close(fd);
-    if (state == LockQuery::Unknown)
+    if (state == LockQuery::Unknown) {
         LOGD << "Cannot query build lock " << lockFile << " (" << strerror(queryErrno)
              << "), assuming a live holder";
+    }
     return state != LockQuery::Free;
 #endif
 }

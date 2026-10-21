@@ -68,7 +68,6 @@ src/library/align.cpp -Wold-style-cast 40
 src/library/align.cpp -Wunused-result 2
 src/library/authcredentials.cpp -Wshadow 2
 src/library/authmanager.cpp -Wshadow 1
-src/library/build.cpp -Wdangling-else 1
 src/library/buildlod_runner.cpp -Wdangling-else 1
 src/library/cad.cpp -Wshadow 1
 src/library/cog.cpp -Wconversion 2

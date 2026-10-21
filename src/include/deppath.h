@@ -17,7 +17,7 @@
 //     produced by a converter in a temp folder are checked for absolute
 //     references only.
 // Unsatisfiable references fail the build (plain AppException) instead of
-// leaving it pending; see buildInternal() in build.cpp.
+// leaving it pending; see buildInternal() in build_dispatch.cpp.
 
 #include <cctype>
 #include <string>

@@ -1,0 +1,81 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+#ifndef BUILD_INTERNAL_H
+#define BUILD_INTERNAL_H
+
+// Private to the build implementation (build.cpp, build_dispatch.cpp,
+// pending_markers.cpp, build_cleanup.cpp): not installed, not part of the API.
+
+#include <chrono>
+#include <functional>
+#include <optional>
+#include <string>
+
+#include "dbops.h"
+#include "fs.h"
+
+namespace ddb {
+
+// Reads an indexed entry by path; false when there is none.
+using EntryLookup = std::function<bool(const std::string&, Entry&)>;
+
+// ---- Build rules (build.cpp) ----------------------------------------------
+
+// What a build of an entry produces, and where.
+struct BuildTarget {
+    // The entry whose artifacts are built: the entry itself, or the main file a
+    // sidecar belongs to (the .shp of a .dbf). Type dispatch, the input path and
+    // the output hash all come from it.
+    Entry entry;
+    // Output subfolder in "<build root>/<entry.hash>/" (see build_layout.h)
+    std::string subfolder;
+    // The requested entry is a sidecar of `entry` (its build is forced)
+    bool viaDependency = false;
+};
+
+// True if the entry type is built by itself; sets the output subfolder.
+bool isBuildableInternal(const Entry& e, std::string& subfolder);
+
+// The build target of an entry, or nothing when neither the entry nor a main
+// file it is a sidecar of is buildable. lookup reads the main file candidates.
+std::optional<BuildTarget> resolveBuildTarget(const Entry& e, const EntryLookup& lookup);
+// Same, reading the main file candidates with getEntry().
+std::optional<BuildTarget> resolveBuildTarget(Database* db, const Entry& e);
+
+bool fileExistsAndNonEmpty(const fs::path& p);
+
+// The artifacts of `e` (a build target) in baseOutputPath ("<build root>/<hash>")
+// exist and are not empty. checkTilesSwap: a Model with an interrupted 3D Tiles
+// swap is reported incomplete.
+bool isBuildOutputComplete(const fs::path& baseOutputPath,
+                           const Entry& e,
+                           const std::string& subfolder,
+                           bool checkTilesSwap = true);
+
+// ---- Build dispatch (build_dispatch.cpp) ----------------------------------
+
+// One build attempt of an entry (or of the main file it is a sidecar of).
+void buildInternal(Database* db, const Entry& e, const std::string& outputPath, bool force);
+
+// ---- Pending markers (pending_markers.cpp) --------------------------------
+
+// Replaces "<hash>.pending" with a fresh timestamp and the given dependency
+// lines, through an atomic rename of a sibling. A failed write or rename is
+// logged and returns false; the previous marker is then kept.
+bool replacePendingMarker(const fs::path& pendingPath, const std::string& dependencyLines);
+
+// The sibling written by replacePendingMarker() before the atomic rename is
+// "<hash>.pending.tmp-<rand16>" (pendingMarkerTempInfix()). A crash between write
+// and rename leaves it behind; cleanupBuild removes such leftovers once they are old.
+// True for "<64 hex>.pending.tmp-<non-empty suffix>".
+bool isPendingMarkerTempName(const std::string& name);
+
+// A pending marker temp file younger than this may belong to a live
+// replacePendingMarker() call (its rename follows the close within
+// microseconds); only older leftovers are collected.
+inline constexpr std::chrono::hours PendingMarkerTempMinAge{1};
+
+}  // namespace ddb
+
+#endif  // BUILD_INTERNAL_H
