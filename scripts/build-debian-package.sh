@@ -22,7 +22,7 @@ if [ -z "$DDB_VERSION" ]; then
   # Not a release tag: package.json (the version source, as for libddb itself) plus the commit,
   # as a Debian pre-release ("2.0.0~git19ab8e1" sorts before "2.0.0"). The last tag would name
   # the package after the previous release.
-  DDB_VERSION="$(grep -o '"version": "[^"]*' package.json | cut -d'"' -f4)~git$(git rev-parse --short HEAD)"
+  DDB_VERSION="$(grep -o '"version": "[^"]*' package.json | cut -d'"' -f4)~git$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 fi
 
 # Set VCPKG triplet (can be overridden by environment variable)
