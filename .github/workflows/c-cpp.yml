@@ -260,12 +260,10 @@ jobs:
         run: cd build && ./ddbcmd --version --debug
       - name: Build Debian Package
         run: |
-          # Set DDB_VERSION env var for the package
+          # A release tag names the package; otherwise build-debian-package.sh uses package.json
+          # plus the commit (a Debian pre-release such as 2.0.0~git19ab8e1)
           if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
             echo "DDB_VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
-          else
-            # Use commit hash for non-tag builds
-            echo "DDB_VERSION=$(git describe --always)" >> $GITHUB_ENV
           fi
 
           # Set VCPKG_HOST_TRIPLET for the build script

@@ -19,12 +19,10 @@ run_with_privilege() {
 # Set necessary environment variables
 echo "Setting up environment variables..."
 if [ -z "$DDB_VERSION" ]; then
-  # If not in a tag, use the git describe output
-  DDB_VERSION=$(git describe --tags --abbrev=0 | sed 's/^v//')
-  if [ -z "$DDB_VERSION" ]; then
-    # Fallback to package.json version if no tag is available
-    DDB_VERSION=$(grep -o '"version": "[^"]*' package.json | cut -d'"' -f4)
-  fi
+  # Not a release tag: package.json (the version source, as for libddb itself) plus the commit,
+  # as a Debian pre-release ("2.0.0~git19ab8e1" sorts before "2.0.0"). The last tag would name
+  # the package after the previous release.
+  DDB_VERSION="$(grep -o '"version": "[^"]*' package.json | cut -d'"' -f4)~git$(git rev-parse --short HEAD)"
 fi
 
 # Set VCPKG triplet (can be overridden by environment variable)
