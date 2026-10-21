@@ -8,6 +8,7 @@
 
 #include <chrono>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "fs.h"
@@ -113,12 +114,19 @@ namespace ddb
                                  const std::vector<std::string> &ids);
     };
 
+    // The files of a delta whose content the caller already checked (XI-05): delta path ->
+    // the SHA-256 the caller computed (e.g. while it received the file)
+    using VerifiedHashes = std::unordered_map<std::string, std::string>;
+
     /**
      * Applies a delta to `destination`, taking the added files from `sourcePath` (moved, not
      * copied). With verifyHashes, every added file is checked against the hash in the delta
      * before anything changes, and a mismatch throws; the index stores the delta's hashes.
+     * A file in verifiedHashes is not read again: its entry must name a file the delta adds,
+     * with the delta's hash, or applyDelta throws InvalidArgsException before anything
+     * changes (also without verifyHashes).
      */
-    DDB_DLL std::vector<Conflict> applyDelta(const Delta &d, const fs::path &sourcePath, Database *destination, const MergeStrategy mergeStrategy, const json &sourceMetaDump, std::ostream &out = std::cout, bool verifyHashes = true);
+    DDB_DLL std::vector<Conflict> applyDelta(const Delta &d, const fs::path &sourcePath, Database *destination, const MergeStrategy mergeStrategy, const json &sourceMetaDump, std::ostream &out = std::cout, bool verifyHashes = true, const VerifiedHashes &verifiedHashes = {});
     DDB_DLL void ensureParentFolderExists(const fs::path &folder);
     DDB_DLL std::unordered_map<std::string, bool> computeDeltaLocals(Delta d, Database *destination, const std::string &hlDestFolder);
 

@@ -584,7 +584,7 @@ extern "C"
 
     /** Apply a delta on a database. The added files are moved out of sourcePath, and each
      * must match the hash in the delta (checked before any change; set the environment
-     * variable DDB_VERIFY_PUSH_HASHES=0 to skip the check)
+     * variable DDB_VERIFY_PUSH_HASHES=0 to skip the check; DDBApplyDeltaEx skips it per file)
      * @param delta JSON delta between databases
      * @param sourcePath path to source database (or path to partial files to be added)
      * @param ddbPath path to DroneDB database to which the delta should be applied
@@ -593,6 +593,25 @@ extern "C"
      * @param conflicts pointer to C-string where to store list of conflicts (if any) in JSON
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBApplyDelta(const char *delta, const char *sourcePath, const char *ddbPath, int mergeStrategy, const char *sourceMetaDump, char **conflicts);
+
+    /** DDBApplyDelta for a host that checked the hashes of the added files itself, e.g. while
+     * it received them (XI-05, ABI 1.1): libddb does not read those files again.
+     * verifiedHashesJson NULL: as DDBApplyDelta (every added file is hashed, unless
+     * DDB_VERIFY_PUSH_HASHES=0). Otherwise a JSON object {"<delta path>": "<sha256>"} of the
+     * files the caller verified, and DDB_VERIFY_PUSH_HASHES is ignored: a listed file is
+     * trusted, every other added file is hashed ({} hashes them all). Each entry must name a
+     * file the delta adds, with exactly the delta's hash (lowercase hex), or the call fails with
+     * DDBERR_INVALIDARGS before anything changes: a hash the caller did not verify for this
+     * delta is never trusted, and a different hash means the received bytes are not the delta's.
+     * @param delta, sourcePath, ddbPath, mergeStrategy, sourceMetaDump as DDBApplyDelta
+     * @param verifiedHashesJson the files the caller verified (JSON object), or NULL
+     * @param conflicts as DDBApplyDelta: the conflicting paths (JSON array), freed with DDBFree
+     * @return DDBERR_NONE on success; DDBERR_INVALIDARGS for a missing argument, malformed JSON,
+     *         a delta path outside the dataset or a bad verifiedHashesJson (not a JSON object of
+     *         strings, an entry that is not a file add of the delta or has another hash);
+     *         DDBERR_BUSY when the database is locked; DDBERR_EXCEPTION when an added file that
+     *         was hashed does not have its delta hash, or the apply fails */
+    DDB_DLL DDBErr DDBApplyDeltaEx(const char *delta, const char *sourcePath, const char *ddbPath, int mergeStrategy, const char *sourceMetaDump, const char *verifiedHashesJson, char **conflicts);
 
     /** Compute map of local files that are available for delta adds operations
      * @param delta JSON delta between databases

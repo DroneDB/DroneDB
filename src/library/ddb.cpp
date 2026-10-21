@@ -159,7 +159,7 @@ constexpr std::array kErrorCodes = {DDB_ERROR_CODE(NONE),
 // The exports whose work checks the caller's cancel token while it runs (DQ-15, XI-07): their
 // steps check cancel::throwIfCanceled() or run through a checkpoint (GDAL progress, raster
 // reads, forEachIndex items, SQLite statements, external tools). Sorted, so the capabilities
-// list is stable. Rollout: the render paths, then DDBBuild; raster analysis and DDBApplyDelta
+// list is stable. Rollout: the render paths, then DDBBuild; raster analysis and DDBApplyDelta(Ex)
 // come later. DDBExportRaster2 also stops when its progress callback asks to.
 constexpr std::string_view kCancellable[] = {
     "DDBBuild",
@@ -888,6 +888,70 @@ DDBErr DDBDelta(const char* ddbSourceStamp,
     });
 }
 
+// The files a DDBApplyDeltaEx caller verified: a JSON object, delta path -> SHA-256 text
+static VerifiedHashes parseVerifiedHashes(const char* verifiedHashesJson) {
+    const json j = parseJsonArg(verifiedHashesJson);
+    if (!j.is_object())
+        throw InvalidArgsException("verifiedHashes must be a JSON object (path: SHA-256)");
+    VerifiedHashes hashes;
+    for (const auto& [path, hash] : j.items()) {
+        if (!hash.is_string())
+            throw InvalidArgsException("The verified hash of " + path + " must be a string");
+        hashes.emplace(path, hash.get<std::string>());
+    }
+    return hashes;
+}
+
+// DDBApplyDelta and DDBApplyDeltaEx: the conflicts (JSON array of paths). verifiedHashesJson
+// NULL: every added file is hashed unless DDB_VERIFY_PUSH_HASHES=0; otherwise the files it
+// lists are trusted (once applyDelta checked them against the delta) and the others are
+// hashed, whatever the environment
+static json applyDeltaConflicts(const char* delta,
+                                const char* sourcePath,
+                                const char* ddbPath,
+                                int mergeStrategy,
+                                const char* sourceMetaDump,
+                                const char* verifiedHashesJson,
+                                char** conflicts) {
+    requireText(delta, "No delta provided");
+    requireText(sourcePath, "No source path provided");
+    requireText(ddbPath, "No ddb path provided");
+    requireText(sourceMetaDump, "No source meta dump provided");
+    requireOutput(conflicts, "Conflicts output pointer is null");
+
+    if (mergeStrategy < 0)
+        throw InvalidArgsException("Invalid merge strategy");
+
+    const Delta d = parseJsonArg(delta);
+    const json metaDump = parseJsonArg(sourceMetaDump);
+
+    // The added files must match the hashes of the delta. A host that checked the uploaded
+    // bytes itself says which (verifiedHashes); without it DDB_VERIFY_PUSH_HASHES=0 skips the
+    // check of every file
+    const bool explicitHashes = verifiedHashesJson != nullptr;
+    const VerifiedHashes verified = explicitHashes ? parseVerifiedHashes(verifiedHashesJson) : VerifiedHashes{};
+    const bool verifyHashes = explicitHashes || [] {
+        const char* env = std::getenv("DDB_VERIFY_PUSH_HASHES");
+        return env == nullptr || (env[0] != '0' && env[0] != '\0');
+    }();
+
+    const auto ddb = ddb::open(std::string(ddbPath), false);
+    std::stringstream ss;
+    const auto adc = applyDelta(d,
+                                pathArg(sourcePath),
+                                ddb.get(),
+                                static_cast<MergeStrategy>(mergeStrategy),
+                                metaDump,
+                                ss,
+                                verifyHashes,
+                                verified);
+
+    json j = json::array();
+    for (auto& c : adc)
+        j.push_back(c.path);
+    return j;
+}
+
 DDBErr DDBApplyDelta(const char* delta,
                      const char* sourcePath,
                      const char* ddbPath,
@@ -895,39 +959,20 @@ DDBErr DDBApplyDelta(const char* delta,
                      const char* sourceMetaDump,
                      char** conflicts) {
     return guardedOutput(conflicts, [&] {
-        requireText(delta, "No delta provided");
-        requireText(sourcePath, "No source path provided");
-        requireText(ddbPath, "No ddb path provided");
-        requireText(sourceMetaDump, "No source meta dump provided");
-        requireOutput(conflicts, "Conflicts output pointer is null");
+        return applyDeltaConflicts(delta, sourcePath, ddbPath, mergeStrategy, sourceMetaDump, nullptr, conflicts);
+    });
+}
 
-        if (mergeStrategy < 0)
-            throw InvalidArgsException("Invalid merge strategy");
-
-        const Delta d = parseJsonArg(delta);
-        const json metaDump = parseJsonArg(sourceMetaDump);
-
-        // The added files must match the hashes of the delta (DDB_VERIFY_PUSH_HASHES=0 skips the
-        // check, for hosts that verify the uploaded bytes themselves)
-        const bool verifyHashes = [] {
-            const char* env = std::getenv("DDB_VERIFY_PUSH_HASHES");
-            return env == nullptr || (env[0] != '0' && env[0] != '\0');
-        }();
-
-        const auto ddb = ddb::open(std::string(ddbPath), false);
-        std::stringstream ss;
-        const auto adc = applyDelta(d,
-                                    pathArg(sourcePath),
-                                    ddb.get(),
-                                    static_cast<MergeStrategy>(mergeStrategy),
-                                    metaDump,
-                                    ss,
-                                    verifyHashes);
-
-        json j = json::array();
-        for (auto& c : adc)
-            j.push_back(c.path);
-        return j;
+DDBErr DDBApplyDeltaEx(const char* delta,
+                       const char* sourcePath,
+                       const char* ddbPath,
+                       int mergeStrategy,
+                       const char* sourceMetaDump,
+                       const char* verifiedHashesJson,
+                       char** conflicts) {
+    return guardedOutput<kAbi11Codes>(conflicts, [&] {
+        return applyDeltaConflicts(delta, sourcePath, ddbPath, mergeStrategy, sourceMetaDump, verifiedHashesJson,
+                                   conflicts);
     });
 }
 

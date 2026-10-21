@@ -51,6 +51,7 @@
       "DDBAlignRaster",
       "DDBAppendPassword",
       "DDBApplyDelta",
+      "DDBApplyDeltaEx",
       "DDBBuild",
       "DDBCalculateVolume",
       "DDBCancel",

@@ -273,6 +273,10 @@ Registry has to adopt first.
   `DDBExportRaster`/`DDBExportRaster2`, `DDBBuild`) instead of `DDBExportRaster2` only; the
   schema describes it so. The other fixtures did not change.
 
+* 2026-10-21: `capabilities` lists the new export `DDBApplyDeltaEx` (XI-05, ABI 1.1). Its output
+  is the conflict list of `DDBApplyDelta` (a JSON array of paths), so it has no fixture of its
+  own. The other fixtures did not change.
+
 ## Cross-repository CI
 
 The `registry_contract` job of `.github/workflows/c-cpp.yml` installs the `.deb` that

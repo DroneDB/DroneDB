@@ -12,6 +12,7 @@
 //  - conflict handling (DontMerge / KeepOurs / KeepTheirs) is unchanged.
 
 #include <algorithm>
+#include <cctype>
 #include <fstream>
 #include <functional>
 #include <sstream>
@@ -105,7 +106,46 @@ namespace
         {
             return applyDelta(d, source, db.get(), strategy, json::array(), out, verify);
         }
+
+        // applyDelta for a caller that verified `verified` itself (XI-05)
+        std::vector<Conflict> applyVerified(const Delta &d, const VerifiedHashes &verified, bool verify = true)
+        {
+            std::ostringstream out;
+            return applyDelta(d, source, db.get(), MergeStrategy::KeepTheirs, json::array(), out, verify, verified);
+        }
+
+        // DDBApplyDeltaEx on this dataset (the fixture's connection is closed first); the
+        // conflicts (JSON text) go to *conflicts when it succeeds
+        DDBErr applyEx(const Delta &d, const char *verifiedHashesJson, std::string *conflicts = nullptr)
+        {
+            db->close();
+            const auto deltaJson = json(d).dump();
+            char *out = nullptr;
+            const DDBErr err = DDBApplyDeltaEx(deltaJson.c_str(), source.string().c_str(), root.string().c_str(),
+                                               MergeStrategy::KeepTheirs, "[]", verifiedHashesJson, &out);
+            if (out != nullptr && conflicts != nullptr)
+                *conflicts = out;
+            DDBFree(out);
+            db = ddb::open(root.string(), false);
+            return err;
+        }
     };
+
+#ifdef __linux__
+    // Bytes this process read with read(2) and friends so far, all threads (/proc/self/io
+    // rchar): page-cache hits included, so it counts what a cold cache reads from the disk
+    unsigned long long bytesReadByProcess()
+    {
+        std::ifstream io("/proc/self/io");
+        std::string key;
+        unsigned long long value = 0;
+        while (io >> key >> value)
+            if (key == "rchar:")
+                return value;
+        ADD_FAILURE() << "no rchar in /proc/self/io";
+        return 0;
+    }
+#endif
 
     TEST(DDB04_ApplyDelta, addsRemovesAndUpdates)
     {
@@ -428,6 +468,245 @@ namespace
             << DDBGetLastError();
         EXPECT_TRUE(fs::exists(f.source / "a.txt"));
     }
+
+    // ------------------------------------------------------------------ XI-05: verified hashes
+
+    TEST(XI05_ApplyDelta, verifiedFilesAreNotReadAgain)
+    {
+        // b.txt does not have the hash the delta declares: trusted, it is indexed with the
+        // delta's hash, so its bytes were never read
+        Fixture f(TEST_NAME);
+        Delta d;
+        d.adds.push_back(f.stage("a.txt", "alpha"));
+        writeFile(f.source / "b.txt", "not what the caller verified");
+        const auto declared = Hash::strSHA256("bravo");
+        d.adds.push_back(AddAction("b.txt", declared));
+
+        EXPECT_TRUE(f.applyVerified(d, {{"b.txt", declared}}).empty());
+
+        EXPECT_EQ(hashOf(f.db.get(), "a.txt"), d.adds[0].hash);
+        EXPECT_EQ(hashOf(f.db.get(), "b.txt"), declared);
+    }
+
+    TEST(XI05_ApplyDelta, filesNotListedAreStillHashed)
+    {
+        Fixture f(TEST_NAME);
+        Delta d;
+        d.adds.push_back(f.stage("a.txt", "alpha"));
+        writeFile(f.source / "b.txt", "bravo");
+        d.adds.push_back(AddAction("b.txt", Hash::strSHA256("not bravo")));
+
+        try
+        {
+            f.applyVerified(d, {{"a.txt", d.adds[0].hash}});
+            FAIL() << "the unlisted b.txt was not hashed";
+        }
+        catch (const AppException &e)
+        {
+            EXPECT_NE(std::string(e.what()).find("Hash mismatch for b.txt"), std::string::npos) << e.what();
+        }
+        EXPECT_TRUE(fs::exists(f.source / "a.txt")) << "nothing changes";
+        EXPECT_EQ(hashOf(f.db.get(), "a.txt"), "<missing>");
+    }
+
+    TEST(XI05_ApplyDelta, verifiedHashMustBeTheDeltaHash)
+    {
+        // The caller verified other bytes than the delta declares: rejected before any change,
+        // with or without the hash check of the other files
+        for (const bool verify : {true, false})
+        {
+            Fixture f(TEST_NAME + (verify ? "-verify" : "-noverify"));
+            Delta d;
+            d.adds.push_back(f.stage("a.txt", "alpha"));
+            d.removes.push_back(RemoveAction("keep.txt", hashOf(f.db.get(), "keep.txt")));
+
+            try
+            {
+                f.applyVerified(d, {{"a.txt", Hash::strSHA256("something else")}}, verify);
+                FAIL() << "a different verified hash was trusted";
+            }
+            catch (const InvalidArgsException &e)
+            {
+                EXPECT_NE(std::string(e.what()).find("Verified hash mismatch for a.txt"), std::string::npos)
+                    << e.what();
+            }
+            EXPECT_TRUE(fs::exists(f.source / "a.txt"));
+            EXPECT_EQ(hashOf(f.db.get(), "a.txt"), "<missing>");
+            EXPECT_TRUE(fs::exists(f.root / "keep.txt"));
+            EXPECT_NE(hashOf(f.db.get(), "keep.txt"), "<missing>");
+        }
+    }
+
+    TEST(XI05_ApplyDelta, verifiedHashOfAPathTheDeltaDoesNotAddIsRejected)
+    {
+        Fixture f(TEST_NAME);
+        Delta d;
+        d.adds.push_back(AddAction("new", ""));
+        d.adds.push_back(f.stage("new/a.txt", "alpha"));
+        const auto h = d.adds[1].hash;
+
+        // Another file, a folder add (no hash), a path of the delta spelled differently
+        for (const VerifiedHashes &bad : {VerifiedHashes{{"other.txt", h}}, VerifiedHashes{{"new", ""}},
+                                          VerifiedHashes{{"new\\a.txt", h}}})
+        {
+            EXPECT_THROW(f.applyVerified(d, bad), InvalidArgsException) << bad.begin()->first;
+            EXPECT_THROW(f.applyVerified(d, bad, false), InvalidArgsException) << bad.begin()->first;
+            EXPECT_TRUE(fs::exists(f.source / "new" / "a.txt"));
+        }
+
+        // Also for a delta without file operations
+        EXPECT_THROW(f.applyVerified(Delta(), {{"new/a.txt", h}}), InvalidArgsException);
+    }
+
+    TEST(XI05_ApplyDeltaEx, nullVerifiedHashesIsDDBApplyDelta)
+    {
+        Fixture f(TEST_NAME);
+        writeFile(f.source / "a.txt", "alpha");
+        Delta d;
+        d.adds.push_back(AddAction("a.txt", Hash::strSHA256("not alpha")));
+
+        // Every file hashed: the same failure as DDBApplyDelta
+        EXPECT_EQ(f.applyEx(d, nullptr), DDBERR_EXCEPTION);
+        EXPECT_NE(std::string(DDBGetLastError()).find("Hash mismatch for a.txt"), std::string::npos)
+            << DDBGetLastError();
+        EXPECT_TRUE(fs::exists(f.source / "a.txt"));
+
+        // DDB_VERIFY_PUSH_HASHES=0 still skips the check when no hashes are given
+        EnvVarGuard noVerify("DDB_VERIFY_PUSH_HASHES", "0");
+        std::string conflicts;
+        EXPECT_EQ(f.applyEx(d, nullptr, &conflicts), DDBERR_NONE) << DDBGetLastError();
+        EXPECT_EQ(conflicts, "[]");
+        EXPECT_EQ(hashOf(f.db.get(), "a.txt"), d.adds[0].hash);
+    }
+
+    TEST(XI05_ApplyDeltaEx, explicitHashesIgnoreTheEnvironment)
+    {
+        // An empty object: the caller verified nothing, every file is hashed even with
+        // DDB_VERIFY_PUSH_HASHES=0
+        Fixture f(TEST_NAME);
+        EnvVarGuard noVerify("DDB_VERIFY_PUSH_HASHES", "0");
+        writeFile(f.source / "a.txt", "alpha");
+        Delta d;
+        d.adds.push_back(AddAction("a.txt", Hash::strSHA256("not alpha")));
+
+        EXPECT_EQ(f.applyEx(d, "{}"), DDBERR_EXCEPTION);
+        EXPECT_NE(std::string(DDBGetLastError()).find("Hash mismatch for a.txt"), std::string::npos)
+            << DDBGetLastError();
+        EXPECT_TRUE(fs::exists(f.source / "a.txt"));
+    }
+
+    TEST(XI05_ApplyDeltaEx, trustsTheVerifiedFiles)
+    {
+        Fixture f(TEST_NAME);
+        Delta d;
+        d.adds.push_back(f.stage("a.txt", "alpha"));
+        writeFile(f.source / "b.txt", "bytes nobody reads");
+        d.adds.push_back(AddAction("b.txt", Hash::strSHA256("bravo")));
+        const json verified = {{"b.txt", d.adds[1].hash}};
+
+        std::string conflicts;
+        EXPECT_EQ(f.applyEx(d, verified.dump().c_str(), &conflicts), DDBERR_NONE) << DDBGetLastError();
+        EXPECT_EQ(conflicts, "[]");
+        EXPECT_EQ(hashOf(f.db.get(), "a.txt"), d.adds[0].hash);
+        EXPECT_EQ(hashOf(f.db.get(), "b.txt"), d.adds[1].hash);
+        EXPECT_FALSE(fs::exists(f.source / "b.txt"));
+    }
+
+    TEST(XI05_ApplyDeltaEx, invalidVerifiedHashesAreInvalidArgs)
+    {
+        Fixture f(TEST_NAME);
+        Delta d;
+        d.adds.push_back(f.stage("a.txt", "alpha"));
+        const auto h = d.adds[0].hash;
+        std::string upper = h;
+        std::transform(upper.begin(), upper.end(), upper.begin(), [](unsigned char c) { return std::toupper(c); });
+
+        const std::vector<std::string> bad = {
+            "not json",
+            "[\"a.txt\"]",
+            json({{"a.txt", 1}}).dump(),
+            json({{"a.txt", nullptr}}).dump(),
+            json({{"a.txt", Hash::strSHA256("other")}}).dump(), // not the delta's hash
+            json({{"a.txt", upper}}).dump(),                     // exactly the delta's hash only
+            json({{"a.txt", h}, {"b.txt", h}}).dump(),           // b.txt is not in the delta
+        };
+        for (const auto &v : bad)
+        {
+            EXPECT_EQ(f.applyEx(d, v.c_str()), DDBERR_INVALIDARGS) << v << ": " << DDBGetLastError();
+            EXPECT_TRUE(fs::exists(f.source / "a.txt")) << v;
+            EXPECT_EQ(hashOf(f.db.get(), "a.txt"), "<missing>") << v;
+        }
+
+        // The other arguments: as DDBApplyDelta, with the ABI 1.1 code
+        const auto deltaJson = json(d).dump();
+        const auto root = f.root.string();
+        const auto source = f.source.string();
+        const auto verified = json({{"a.txt", h}}).dump();
+        char *out = nullptr;
+        EXPECT_EQ(DDBApplyDeltaEx(deltaJson.c_str(), source.c_str(), root.c_str(), MergeStrategy::KeepTheirs, "[]",
+                                  verified.c_str(), nullptr),
+                  DDBERR_INVALIDARGS);
+        EXPECT_EQ(DDBApplyDeltaEx(nullptr, source.c_str(), root.c_str(), MergeStrategy::KeepTheirs, "[]",
+                                  verified.c_str(), &out),
+                  DDBERR_INVALIDARGS);
+        EXPECT_EQ(DDBApplyDeltaEx(deltaJson.c_str(), source.c_str(), root.c_str(), -1, "[]", verified.c_str(), &out),
+                  DDBERR_INVALIDARGS);
+        EXPECT_EQ(out, nullptr);
+        EXPECT_TRUE(fs::exists(f.source / "a.txt"));
+    }
+
+#ifdef __linux__
+    TEST(XI05_ApplyDeltaEx, pushReadsEachFileOnce)
+    {
+        // A push of N files: DDBApplyDelta reads every added byte again to hash it, the
+        // caller that hashed the stream passes the hashes and libddb reads none of them
+        constexpr int kFiles = 16;
+        constexpr size_t kFileSize = 1024 * 1024;
+        constexpr unsigned long long kPushBytes = static_cast<unsigned long long>(kFiles) * kFileSize;
+
+        const auto stagePush = [&](Fixture &f, Delta &d, json &verified)
+        {
+            d.adds.push_back(AddAction("push", ""));
+            for (int i = 0; i < kFiles; i++)
+            {
+                const auto add = f.stage("push/f" + std::to_string(i) + ".bin",
+                                         std::string(kFileSize, static_cast<char>('a' + i)));
+                d.adds.push_back(add);
+                verified[add.path] = add.hash;
+            }
+        };
+        const auto measure = [](Fixture &f, const Delta &d, const char *verifiedHashesJson)
+        {
+            const auto before = bytesReadByProcess();
+            EXPECT_EQ(f.applyEx(d, verifiedHashesJson), DDBERR_NONE) << DDBGetLastError();
+            return bytesReadByProcess() - before;
+        };
+
+        Fixture hashed(TEST_NAME + "-hashed");
+        Delta hashedDelta;
+        json unused = json::object();
+        stagePush(hashed, hashedDelta, unused);
+        const auto readHashing = measure(hashed, hashedDelta, nullptr);
+
+        Fixture trusted(TEST_NAME + "-verified");
+        Delta trustedDelta;
+        json verified = json::object();
+        stagePush(trusted, trustedDelta, verified);
+        const auto readVerified = measure(trusted, trustedDelta, verified.dump().c_str());
+
+        std::cout << "push of " << kFiles << " x " << kFileSize << " bytes (" << kPushBytes
+                  << "): read " << readHashing << " bytes when libddb hashes, " << readVerified
+                  << " with verified hashes" << std::endl;
+        RecordProperty("pushBytes", std::to_string(kPushBytes));
+        RecordProperty("bytesReadHashing", std::to_string(readHashing));
+        RecordProperty("bytesReadVerified", std::to_string(readVerified));
+
+        EXPECT_GE(readHashing, kPushBytes) << "every added byte is read once to hash it";
+        EXPECT_LT(readVerified, kFileSize) << "a verified file was read again";
+        for (const auto &add : trustedDelta.adds)
+            EXPECT_EQ(hashOf(trusted.db.get(), add.path), add.hash);
+    }
+#endif
 
     TEST(DDB04_RemoveFromIndex, oneTransaction)
     {

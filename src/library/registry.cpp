@@ -7,6 +7,8 @@
 #include <boolinq/boolinq.h>
 
 #include <algorithm>
+#include <string_view>
+#include <unordered_set>
 
 #include <cpr/cpr.h>
 
@@ -361,14 +363,37 @@ void ensureParentFolderExists(const fs::path& folder) {
 
 namespace {
 
-// Checks that every file add in `sourcePath` has the hash the delta declares. Runs before
-// applyDelta changes anything, on the I/O threads (ioThreads: the reads dominate), with no
-// transaction open.
-void verifyDeltaHashes(const Delta& d, const fs::path& sourcePath) {
+// The file adds of `d` whose hash applyDelta checks: all but those in `verified` (XI-05). An
+// entry of `verified` must name a file the delta adds and carry the delta's hash for it: the
+// caller checked other bytes than the delta declares, or another file, and a hash it did not
+// verify is never trusted. Both throw InvalidArgsException, before anything changes.
+std::vector<const AddAction*> filesToVerify(const Delta& d, const VerifiedHashes& verified) {
     std::vector<const AddAction*> files;
-    for (const auto& add : d.adds)
-        if (!add.isDirectory())
+    std::unordered_set<std::string_view> matched;
+    for (const auto& add : d.adds) {
+        if (add.isDirectory())
+            continue;
+        const auto it = verified.find(add.path);
+        if (it == verified.end()) {
             files.push_back(&add);
+            continue;
+        }
+        if (it->second != add.hash)
+            throw InvalidArgsException("Verified hash mismatch for " + add.path + ": the delta has " + add.hash +
+                                       ", the caller verified " + it->second);
+        matched.insert(it->first);
+    }
+    if (matched.size() != verified.size())
+        for (const auto& [path, hash] : verified)
+            if (!matched.contains(path))
+                throw InvalidArgsException("Verified hash for " + path + ", which the delta does not add as a file");
+    return files;
+}
+
+// Checks that every file in `files` has, in `sourcePath`, the hash the delta declares. Runs
+// before applyDelta changes anything, on the I/O threads (ioThreads: the reads dominate), with
+// no transaction open.
+void verifyDeltaHashes(const std::vector<const AddAction*>& files, const fs::path& sourcePath) {
     if (files.empty())
         return;
 
@@ -430,8 +455,10 @@ std::vector<Conflict> applyDelta(const Delta& d,
                                  const MergeStrategy mergeStrategy,
                                  const json& sourceMetaDump,
                                  std::ostream& out,
-                                 bool verifyHashes) {
+                                 bool verifyHashes,
+                                 const VerifiedHashes& verifiedHashes) {
     std::vector<Conflict> conflicts;
+    const auto unverifiedFiles = filesToVerify(d, verifiedHashes);
 
     // File operations
     if (d.adds.size() > 0 || d.removes.size() > 0) {
@@ -439,7 +466,7 @@ std::vector<Conflict> applyDelta(const Delta& d,
 
         checkDeltaPaths(d);
         if (verifyHashes)
-            verifyDeltaHashes(d, sourcePath);
+            verifyDeltaHashes(unverifiedFiles, sourcePath);
 
         // Removes. We don't check whether the file has been modified on the FS, perhaps we should?
         std::vector<std::string> indexedRemovals;
