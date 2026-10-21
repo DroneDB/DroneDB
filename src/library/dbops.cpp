@@ -54,6 +54,37 @@ namespace
         fs::remove(file.string() + "-shm", ignored);
     }
 
+    // A database file under construction: removed with its -wal/-shm files when the owner
+    // goes out of scope, unless it was published (renamed into place) first
+    class TemporaryDatabaseFile
+    {
+        fs::path file_;
+        bool published_ = false;
+
+      public:
+        explicit TemporaryDatabaseFile(fs::path file) : file_(std::move(file)) {}
+        ~TemporaryDatabaseFile()
+        {
+            if (!published_)
+                removeDatabaseFiles(file_);
+        }
+        TemporaryDatabaseFile(const TemporaryDatabaseFile &) = delete;
+        TemporaryDatabaseFile &operator=(const TemporaryDatabaseFile &) = delete;
+
+        const fs::path &path() const { return file_; }
+
+        // Renames the closed database to target (its -wal/-shm files are removed). False when
+        // the rename fails: the file stays owned and is removed on scope exit.
+        bool publish(const fs::path &target, std::error_code &error)
+        {
+            // Closed by its only connection: checkpointed, the WAL is empty
+            removeDatabaseFiles(file_, true);
+            fs::rename(file_, target, error);
+            published_ = !error;
+            return published_;
+        }
+    };
+
     // Creates the empty index template that initIndex() copies, unless it exists.
     //
     // Threads and processes sharing a profile can get here together on a fresh profile. Each
@@ -68,28 +99,18 @@ namespace
             return;
 
         LOGD << "Creating " << templatePath.string();
-        const fs::path temporary =
-            templatePath.string() + ".tmp-" + utils::generateRandomString(16);
-        try
+        TemporaryDatabaseFile temporary(templatePath.string() + ".tmp-" +
+                                        utils::generateRandomString(16));
         {
             Database db;
-            db.open(temporary.string());
+            db.open(temporary.path().string());
             db.createTables();
             db.close();
         }
-        catch (...)
-        {
-            removeDatabaseFiles(temporary);
-            throw;
-        }
-        // Closed by its only connection: checkpointed, the WAL is empty
-        removeDatabaseFiles(temporary, true);
 
         std::error_code e;
-        fs::rename(temporary, templatePath, e);
-        if (e)
+        if (!temporary.publish(templatePath, e))
         {
-            removeDatabaseFiles(temporary);
             if (!exists(templatePath))
                 throw FSException("Cannot publish " + templatePath.string() + " (" +
                                   e.message() + ")", e);
