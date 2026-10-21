@@ -104,4 +104,21 @@ public:
     void restore();
 };
 
+// ------------------------------------------------------------------- process configuration
+
+// Applies a DDBConfigure JSON object (failing the test when DDBConfigure fails) and, on scope
+// exit, puts every setting it named back to its environment variable or default (null), so a
+// test never leaves its configuration to the next one.
+class ScopedProcessConfig
+{
+    std::vector<std::string> names_;
+
+public:
+    explicit ScopedProcessConfig(const std::string &configJson);
+    ~ScopedProcessConfig();
+
+    ScopedProcessConfig(const ScopedProcessConfig &) = delete;
+    ScopedProcessConfig &operator=(const ScopedProcessConfig &) = delete;
+};
+
 #endif // TEST_UTILS_H

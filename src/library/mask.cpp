@@ -7,6 +7,7 @@
 #include "exceptions.h"
 #include "fs.h"
 #include "mio.h"
+#include "parallel.h"
 #include <cstdint>
 
 namespace ddb
@@ -194,8 +195,11 @@ namespace ddb
         targs.AddString("-co");
         targs.AddString("BLOCKYSIZE=512");
 
+        // Compression threads: this one and those the CPU pool allows (DQ-15), held until
+        // the output is closed
+        const auto cpu = parallel::tryAcquireThreads(parallel::hardwareThreads());
         targs.AddString("-co");
-        targs.AddString("NUM_THREADS=ALL_CPUS");
+        targs.AddString(parallel::gdalNumThreads(cpu).c_str());
 
         int bUsageError = FALSE;
 

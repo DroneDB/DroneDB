@@ -24,6 +24,7 @@ DDBCheckpoint
 DDBCleanup
 DDBClearPasswords
 DDBComputeDeltaLocals
+DDBConfigure
 DDBCopyBuildArtifacts
 DDBCountVector
 DDBDelta
@@ -42,6 +43,7 @@ DDBGetAbiVersion
 DDBGetBuildArtifacts
 DDBGetBuildStatus
 DDBGetCapabilities
+DDBGetEffectiveConfig
 DDBGetEntryTypes
 DDBGetLastError
 DDBGetLastErrorReason

@@ -17,6 +17,7 @@
 #include "exceptions.h"
 #include "logger.h"
 #include "mio.h"
+#include "parallel.h"
 #include "process_runner.h"
 
 namespace ddb
@@ -322,6 +323,13 @@ namespace ddb
 
             LOGD << "Spawning untwine (" << inputFiles.size() << " input file(s)): "
                  << process::formatCommandLine(bin, args);
+            // untwine has no thread option: it runs up to 10 threads of its own (8 file readers,
+            // then a pool of 10). They are counted as CPU tokens while it runs (DQ-15), so the
+            // other parallel sections of the process take fewer.
+            constexpr size_t UntwineThreads = 10;
+            const auto cpu = parallel::tryAcquireThreads(UntwineThreads);
+            LOGD << "untwine CPU tokens: " << cpu.count();
+
             ProgressDecoder progress;
             process::Options popts = options;
             popts.extraChannel = true;

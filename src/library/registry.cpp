@@ -362,7 +362,7 @@ void ensureParentFolderExists(const fs::path& folder) {
 namespace {
 
 // Checks that every file add in `sourcePath` has the hash the delta declares. Runs before
-// applyDelta changes anything, a few files at a time (the reads dominate), with no
+// applyDelta changes anything, on the I/O threads (ioThreads: the reads dominate), with no
 // transaction open.
 void verifyDeltaHashes(const Delta& d, const fs::path& sourcePath) {
     std::vector<const AddAction*> files;
@@ -372,8 +372,7 @@ void verifyDeltaHashes(const Delta& d, const fs::path& sourcePath) {
     if (files.empty())
         return;
 
-    // A few parallel readers help on a RAID array without thrashing a single disk
-    parallel::forEachIndex(files.size(), 4, [&](size_t i) {
+    parallel::forEachIndexIo(files.size(), [&](size_t i) {
         const auto& add = *files[i];
         const auto actual = Hash::fileSHA256((sourcePath / add.path).string());
         if (actual != add.hash)

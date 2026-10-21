@@ -13,13 +13,13 @@
 #include <sstream>
 #include <string>
 #include <system_error>
-#include <thread>
 #include <utility>
 #include <vector>
 
 #include "build_layout.h"
 #include "logger.h"
 #include "mio.h"
+#include "parallel.h"
 #include "process_runner.h"
 
 namespace ddb
@@ -161,43 +161,42 @@ namespace ddb
             // Tail of the captured output included in errorOut.
             constexpr size_t kErrorTailLength = 600;
 
-            // Reads DDB_OBJ2TILES_MAX_CORES (spec C1). Valid values are non-empty
-            // strings of decimal digits with a value >= 1; anything else (0,
-            // negative, hex, non-numeric, overflow) is logged and treated as unset.
-            // The value is clamped to the hardware concurrency when known.
-            // Returns the effective cap, or nullopt for "no cap".
+            // A core count: a non-empty string of decimal digits with a value from 1 to
+            // INT32_MAX; anything else (0, negative, hex, non-numeric, overflow) is nullopt.
+            std::optional<unsigned int> parseCoreCount(const std::string &value)
+            {
+                if (value.empty()) return std::nullopt;
+                uint64_t n = 0;
+                for (char c : value)
+                {
+                    if (c < '0' || c > '9') return std::nullopt;
+                    n = n * 10 + static_cast<uint64_t>(c - '0');
+                    if (n > static_cast<uint64_t>(INT32_MAX)) return std::nullopt; // overflow
+                }
+                if (n == 0) return std::nullopt;
+                return static_cast<unsigned int>(n);
+            }
+
+            // Reads DDB_OBJ2TILES_MAX_CORES (spec C1): a core count (parseCoreCount);
+            // anything else is logged and treated as unset. The value is clamped to the
+            // hardware concurrency. Returns the effective cap, or nullopt for "no cap".
             std::optional<unsigned int> readMaxCores()
             {
                 const char *raw = std::getenv("DDB_OBJ2TILES_MAX_CORES");
                 if (!raw || raw[0] == '\0') return std::nullopt;
 
                 const std::string value(raw);
-                uint64_t n = 0;
-                bool valid = true;
-                for (char c : value)
-                {
-                    if (c < '0' || c > '9')
-                    {
-                        valid = false;
-                        break;
-                    }
-                    n = n * 10 + static_cast<uint64_t>(c - '0');
-                    if (n > static_cast<uint64_t>(INT32_MAX))
-                    {
-                        valid = false; // overflow
-                        break;
-                    }
-                }
-                if (!valid || n == 0)
+                const auto n = parseCoreCount(value);
+                if (!n)
                 {
                     LOGW << "Ignoring invalid DDB_OBJ2TILES_MAX_CORES=\"" << value
                          << "\" (expected a positive decimal integer)";
                     return std::nullopt;
                 }
 
-                unsigned int cap = static_cast<unsigned int>(n);
-                const unsigned int hw = std::thread::hardware_concurrency();
-                if (hw > 0 && cap > hw)
+                unsigned int cap = *n;
+                const auto hw = static_cast<unsigned int>(parallel::hardwareThreads());
+                if (cap > hw)
                 {
                     LOGD << "DDB_OBJ2TILES_MAX_CORES=" << value << " exceeds the " << hw
                          << " available cores; clamping";
@@ -322,9 +321,26 @@ namespace ddb
                 return false;
             }
 
-            // Per-child core cap (C1): only the child's environment is changed.
-            const auto maxCores = readMaxCores();
+            // Per-child core cap (C1): only the child's environment is changed. The child's
+            // cores are CPU tokens (DQ-15), held while it runs: DDB_OBJ2TILES_MAX_CORES (else
+            // every core) bounded by what the pool has free. A cap is set when the variable is
+            // or when the pool gives fewer cores than the host has.
+            const auto requestedCap = readMaxCores();
+            const auto hw = static_cast<unsigned int>(parallel::hardwareThreads());
+            const auto cpu = parallel::tryAcquireThreads(requestedCap ? *requestedCap : hw);
+            const auto cores = static_cast<unsigned int>(cpu.threads());
             const char *inheritedCount = std::getenv("DOTNET_PROCESSOR_COUNT");
+            std::optional<unsigned int> maxCores;
+            if (requestedCap || cores < hw)
+                maxCores = cores;
+            // Without DDB_OBJ2TILES_MAX_CORES, an inherited count at or below the pool's keeps
+            // its value
+            if (maxCores && !requestedCap && inheritedCount)
+            {
+                const auto inherited = parseCoreCount(inheritedCount);
+                if (inherited && *inherited <= cores)
+                    maxCores.reset();
+            }
             const bool coreCapped = maxCores || (inheritedCount && inheritedCount[0] != '\0');
 
             // libktx encoder threads are native: DOTNET_PROCESSOR_COUNT does not

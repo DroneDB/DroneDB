@@ -823,11 +823,11 @@ namespace
         return planned;
     }
 
-    // Threads that hash and parse files while indexing (DDB_INDEX_THREADS: N, 0 = every
-    // core, default min(8, cores); 1 = serial)
+    // Threads wanted to hash and parse files while indexing (DDB_INDEX_THREADS: N, 0 = every
+    // core, default min(8, cores); 1 = serial). Parsing is CPU work: the threads beyond the
+    // calling one take CPU tokens (forEachIndex).
     size_t indexThreads() {
-        const int threads = parallel::threadsOption("DDB_INDEX_THREADS", 8);
-        return threads == 0 ? parallel::hardwareThreads() : static_cast<size_t>(threads);
+        return static_cast<size_t>(parallel::threadsOption("DDB_INDEX_THREADS", 8));
     }
 
     // What COMPUTE did with one planned item: an entry to write, no change, or an error
@@ -1315,15 +1315,16 @@ namespace
         return matches;
     }
 
-    // Removes the build folders of deleted entries, in parallel, outside any transaction.
+    // Removes the build folders of deleted entries, on the I/O threads (ioThreads), outside any
+    // transaction.
     void deleteBuildFolders(Database *db, const std::vector<std::string> &hashes)
     {
         if (hashes.empty())
             return;
 
         const auto buildDir = db->buildDirectory();
-        parallel::forEachIndex(hashes.size(), parallel::hardwareThreads(), [&](size_t i)
-                               {
+        parallel::forEachIndexIo(hashes.size(), [&](size_t i)
+                                 {
             try
             {
                 removeBuildFolder(buildDir / hashes[i]);

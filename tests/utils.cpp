@@ -11,9 +11,11 @@
 #include <boolinq/boolinq.h>
 
 #include "dbops.h"
+#include "ddb.h"
 #include "gdal_inc.h"
 #include "gtest/gtest.h"
 #include "hash.h"
+#include "json.h"
 
 std::filesystem::path writeFile(const std::filesystem::path &path, const std::string &content)
 {
@@ -288,4 +290,20 @@ void EnvVarGuard::restore()
         setEnv(name_, *saved_);
     else
         unsetEnv(name_);
+}
+
+ScopedProcessConfig::ScopedProcessConfig(const std::string &configJson)
+{
+    const json config = json::parse(configJson);
+    for (const auto &item : config.items())
+        names_.push_back(item.key());
+    EXPECT_EQ(DDBConfigure(configJson.c_str()), DDBERR_NONE) << configJson << ": " << DDBGetLastError();
+}
+
+ScopedProcessConfig::~ScopedProcessConfig()
+{
+    json reset = json::object();
+    for (const auto &name : names_)
+        reset[name] = nullptr;
+    EXPECT_EQ(DDBConfigure(reset.dump().c_str()), DDBERR_NONE) << DDBGetLastError();
 }

@@ -19,23 +19,16 @@
 #include "entry_handler.h"
 #include "exceptions.h"
 #include "mio.h"
+#include "process_config.h"
 #include "raster_cache.h"
 
 namespace ddb {
 
-// Minimum free disk space (in MB) required on the build scratch filesystem
-// before a build is started. Configurable via the DDB_MIN_FREE_DISK_MB
-// environment variable; set it to 0 to disable the check. Defaults to 512 MB,
-// low enough never to trip on a healthy host yet high enough to stop a build
-// from beginning on an essentially full disk.
+// Free disk space required on the build scratch filesystem before a build is started: the
+// free-disk floor of the process configuration (DDBConfigure "minFreeDiskMb", else
+// DDB_MIN_FREE_DISK_MB, else 512 MiB); 0 turns the check off.
 void ensureSufficientDiskSpace(const fs::path& dir) {
-    long long minMb = 512;
-    if (const char* env = std::getenv("DDB_MIN_FREE_DISK_MB"); env && *env) {
-        char* endp = nullptr;
-        const long long v = std::strtoll(env, &endp, 10);
-        if (endp != env && v >= 0)
-            minMb = v;
-    }
+    const uint64_t minMb = ProcessConfig::get().minFreeDiskMb();
     if (minMb == 0)
         return;  // explicitly disabled
 
@@ -51,7 +44,8 @@ void ensureSufficientDiskSpace(const fs::path& dir) {
             "Insufficient free disk space to build: " +
             std::to_string(si.available / (1024ULL * 1024ULL)) + " MB available, " +
             std::to_string(minMb) + " MB required on " + dir.string() +
-            ". Free up space or adjust DDB_MIN_FREE_DISK_MB.", RetryableBuildReason::LowDiskSpace);
+            ". Free up space or lower minFreeDiskMb (DDBConfigure, DDB_MIN_FREE_DISK_MB).",
+            RetryableBuildReason::LowDiskSpace);
     }
 }
 

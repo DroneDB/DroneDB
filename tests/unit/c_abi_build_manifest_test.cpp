@@ -160,6 +160,12 @@ namespace
             EXPECT_DDB_FAILS(DDBERR_RETRYABLE, DDBCopyBuildArtifacts(s, d, H_COG.c_str(), &out), out);
             EXPECT_STREQ(DDBGetLastErrorReason(), "lowDiskSpace");
         }
+        {
+            // The DDBConfigure floor wins over DDB_MIN_FREE_DISK_MB=0 (DQ-15)
+            const ScopedProcessConfig floor(R"({"minFreeDiskMb": 10000000000000})");
+            EXPECT_DDB_FAILS(DDBERR_RETRYABLE, DDBCopyBuildArtifacts(s, d, H_COG.c_str(), &out), out);
+            EXPECT_STREQ(DDBGetLastErrorReason(), "lowDiskSpace");
+        }
 
         ASSERT_DDB_OK(DDBCopyBuildArtifacts(s, d, H_COG.c_str(), &out));
         const json copied = json::parse(take(out));

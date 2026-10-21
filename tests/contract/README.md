@@ -91,6 +91,7 @@ with ddb).
 | `copy-build-artifacts` | `DDBCopyBuildArtifacts(<root>, <root2>, <hash of ortho.tif>)` after its build, `<root2>` a dataset with `ortho.tif` | `copy-build-artifacts` | - |
 | `entry-types` | `DDBGetEntryTypes()` (no dataset) | `entry-types` | - |
 | `capabilities` | `DDBGetCapabilities()` (no dataset): ABI version, error codes, error reasons, cancellable exports, the symbol manifest | `capabilities` | `version` |
+| `effective-config` | `DDBConfigure({"cacheDir": <cache>, "cpuPoolSize": 3, "ioThreads": 2, "minFreeDiskMb": 256})`, then `DDBGetEffectiveConfig()` (no dataset; see `ddb.h`, "Process configuration") | `effective-config` | `hardwareThreads` |
 | `normalize-path`, `normalize-path-rejected` | `DDBNormalizePath("photos\\2024/./a.jpg", "[\".uploads\"]")`, `DDBNormalizePath(".uploads/x", "[\".uploads\"]")` (no dataset) | `normalize-path` | - |
 | `info-drone-image`, `get-drone-image`, `stac-item-drone-image` | `DDBInfo`, `DDBGet`, `DDBStac` of `DJI_0018.JPG` (integration) | `entries`, `entry`, `stac-item` | `depth` (info) |
 
@@ -198,6 +199,7 @@ normalised output keeps the JSON types, so it still matches its schema.
 | volatile keys `id` (`"<volatile>"`) and `mtime` (0) | meta items, meta dump | a new random UUID and the current time on every write |
 | volatile key `lastAttempt`: value 0 | `pending-build-info` | the time of the build attempt |
 | volatile key `version`: `"<volatile>"` | `capabilities` | the library version and git commit of the build |
+| `<cache>` placeholder, volatile key `hardwareThreads`: value 0 | `effective-config` | the cache folder is a temporary folder; the cores of the machine |
 | sorted by `path`, `key`, `data` | `meta-dump` | libddb orders the dump by `id`, a random UUID |
 
 Not normalised, fixed at the source instead: mtimes (set on the inputs), hashes and sizes
@@ -259,6 +261,10 @@ Registry has to adopt first.
   (XI-04, ABI 1.1: `DDBGetBuildArtifacts`, `DDBListEntriesEx`, `DDBResolveBuildFile`,
   `DDBCopyBuildArtifacts`, `DDBGetEntryTypes`; see [Build manifest](#build-manifest));
   `capabilities` lists the new exports. The existing fixtures did not change.
+
+* 2026-10-21: `effective-config` added with its schema (DQ-15, XI-06, ABI 1.1: `DDBConfigure`,
+  `DDBGetEffectiveConfig`); `capabilities` lists the new exports. The existing fixtures did not
+  change.
 
 ## Cross-repository CI
 

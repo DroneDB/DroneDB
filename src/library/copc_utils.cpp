@@ -8,7 +8,6 @@
 #include <sstream>
 #include <cstring>
 #include <algorithm>
-#include <thread>
 
 #include <pdal/Options.hpp>
 #include <pdal/PointTable.hpp>
@@ -281,24 +280,31 @@ namespace ddb
         return spacing / std::pow(2.0, depth) * 1.5;
     }
 
-    pdal::Options copcReaderOptions(const std::string &copcPath)
+    parallel::CpuTokens copcReadThreads(const std::string &copcPath)
+    {
+        // Reads are LAZ-decompression bound: 4 threads instead of PDAL's 2 for local
+        // files cut a z18 tile by a quarter (remote files keep PDAL's 10)
+        constexpr size_t LocalReadThreads = 4;
+        return utils::isNetworkPath(copcPath) ? parallel::CpuTokens()
+                                              : parallel::tryAcquireThreads(LocalReadThreads);
+    }
+
+    pdal::Options copcReaderOptions(const std::string &copcPath, const parallel::CpuTokens &threads)
     {
         pdal::Options options;
         const fs::path path(copcPath);
         options.add("filename", (!utils::isNetworkPath(copcPath) && path.is_relative()) ? ("." / path).string()
                                                                                          : copcPath);
         options.add("nosrs", true);
-        // Reads are LAZ-decompression bound: 4 threads instead of PDAL's 2 for local
-        // files cut a z18 tile by a quarter (remote files keep PDAL's 10)
         if (!utils::isNetworkPath(copcPath))
-            options.add("threads", static_cast<int>(std::clamp(std::thread::hardware_concurrency(), 1u, 4u)));
+            options.add("threads", static_cast<int>(threads.threads()));
         return options;
     }
 
-    pdal::Options copcWindowOptions(const std::string &copcPath, double minX, double minY, double maxX, double maxY,
-                                    double resolution)
+    pdal::Options copcWindowOptions(const std::string &copcPath, const parallel::CpuTokens &threads, double minX,
+                                    double minY, double maxX, double maxY, double resolution)
     {
-        pdal::Options options = copcReaderOptions(copcPath);
+        pdal::Options options = copcReaderOptions(copcPath, threads);
         std::ostringstream bounds;
         bounds << std::setprecision(17) << "([" << minX << "," << maxX << "],[" << minY << "," << maxY << "])";
         options.add("bounds", bounds.str());
@@ -309,8 +315,9 @@ namespace ddb
     void readCopcWindow(const std::string &copcPath, double minX, double minY, double maxX, double maxY,
                         double resolution, const std::function<void(PointBatch &)> &sink)
     {
+        const auto threads = copcReadThreads(copcPath);
         pdal::CopcReader reader;
-        reader.setOptions(copcWindowOptions(copcPath, minX, minY, maxX, maxY, resolution));
+        reader.setOptions(copcWindowOptions(copcPath, threads, minX, minY, maxX, maxY, resolution));
         forEachPointBatch(reader, sink);
     }
 

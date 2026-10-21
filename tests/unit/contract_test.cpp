@@ -21,6 +21,7 @@
 #include "gtest/gtest.h"
 #include "json.h"
 #include "json_schema_check.h"
+#include "mio.h"
 #include "test.h"
 #include "testarea.h"
 #include "utils.h"
@@ -364,6 +365,26 @@ namespace
         contract::expectMatchesFixture(
             {"entry-types", "No input: the registered entry types", "DDBGetEntryTypes()", "entry-types.schema.json",
              {}, {}, {}},
+            contract::takeJson(out));
+    }
+
+    // DQ-15: the process configuration after a host set every setting (no dataset)
+    TEST(ContractFixturesConfig, EffectiveConfig)
+    {
+        TestArea ta(TEST_NAME, true);
+        const fs::path cache = ta.getFolder("cache");
+        const json settings = {{"cacheDir", ddb::io::toUtf8(cache)},
+                               {"cpuPoolSize", 3},
+                               {"ioThreads", 2},
+                               {"minFreeDiskMb", 256}};
+        const ScopedProcessConfig configured(settings.dump());
+        char *out = nullptr;
+        ASSERT_DDB_OK(DDBGetEffectiveConfig(&out));
+        contract::expectMatchesFixture(
+            {"effective-config", "Every setting set with DDBConfigure, cacheDir an absolute folder <cache>",
+             "DDBConfigure({\"cacheDir\": \"<cache>\", \"cpuPoolSize\": 3, \"ioThreads\": 2, \"minFreeDiskMb\": "
+             "256}), then DDBGetEffectiveConfig()",
+             "effective-config.schema.json", contract::pathPlaceholders(cache, "<cache>"), {"hardwareThreads"}, {}},
             contract::takeJson(out));
     }
 

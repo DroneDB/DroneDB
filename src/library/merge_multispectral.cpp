@@ -7,6 +7,7 @@
 #include "exceptions.h"
 #include "logger.h"
 #include "mio.h"
+#include "parallel.h"
 #include "utils.h"
 #include "exif.h"
 #include "exifeditor.h"
@@ -667,15 +668,17 @@ SeparateVrt buildSeparateVrt(std::vector<GDALDatasetUniquePtr> sources,
     return v;
 }
 
-// Options of the tiled GTiff that GDALTranslate writes for a merge
-GdalOptionsPtr<GDALTranslateOptions> mergeTranslateOptions(const char *predictor, bool useJpeg) {
+// Options of the tiled GTiff that GDALTranslate writes for a merge; numThreads is the GDAL
+// thread option of the merge's CPU tokens (parallel::gdalNumThreads)
+GdalOptionsPtr<GDALTranslateOptions> mergeTranslateOptions(const char *predictor, bool useJpeg,
+                                                           const std::string &numThreads) {
     CPLStringList transArgs;
     transArgs.AddString("-of");
     transArgs.AddString("GTiff");
     transArgs.AddString("-co");
     transArgs.AddString("TILED=YES");
     transArgs.AddString("-co");
-    transArgs.AddString("NUM_THREADS=ALL_CPUS");
+    transArgs.AddString(numThreads.c_str());
     transArgs.AddString("-co");
     transArgs.AddString("BIGTIFF=IF_SAFER");
     transArgs.AddString("-co");
@@ -790,6 +793,10 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
     int nBands = GDALGetRasterCount(hVrt);
     bool useJpeg = (dt == GDT_Byte && (nBands == 3 || nBands == 4));
 
+    // Warp and compression threads: this one and those the CPU pool allows (DQ-15), held
+    // until the output is closed
+    const auto cpu = parallel::tryAcquireThreads(parallel::hardwareThreads());
+    const std::string numThreads = parallel::gdalNumThreads(cpu);
     GDALDatasetUniquePtr out;
 
     // Determine predictor type based on data type
@@ -804,9 +811,9 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
         warpArgs.AddString("GTiff");
         warpArgs.AddString("-multi");
         warpArgs.AddString("-wo");
-        warpArgs.AddString("NUM_THREADS=ALL_CPUS");
+        warpArgs.AddString(numThreads.c_str());
         warpArgs.AddString("-co");
-        warpArgs.AddString("NUM_THREADS=ALL_CPUS");
+        warpArgs.AddString(numThreads.c_str());
         warpArgs.AddString("-co");
         warpArgs.AddString("TILED=YES");
         warpArgs.AddString("-co");
@@ -943,7 +950,7 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
                                      "_aligned.vrt", "Cannot build VRT for aligned merge");
 
                 // Translate to output
-                const auto transOpts = mergeTranslateOptions(predictor, useJpeg);
+                const auto transOpts = mergeTranslateOptions(predictor, useJpeg, numThreads);
                 out = adoptDataset(
                     GDALTranslate(outputPath.c_str(), aligned.handle(), transOpts.get(), nullptr));
                 aligned.close();
@@ -1021,7 +1028,7 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
 
         if (!applyShift) {
             // Standard non-shifted merge path
-            const auto transOpts = mergeTranslateOptions(predictor, useJpeg);
+            const auto transOpts = mergeTranslateOptions(predictor, useJpeg, numThreads);
             out = adoptDataset(
                 GDALTranslate(outputPath.c_str(), merged.handle(), transOpts.get(), nullptr));
         }

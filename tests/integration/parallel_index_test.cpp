@@ -189,8 +189,9 @@ namespace
             EXPECT_EQ(parallel::threadsOption("DDB_TEST_THREADS", 8), 3);
         }
         {
+            // Every core, as a count (DQ-15: no "ALL_CPUS"; the CPU pool bounds what runs)
             ScopedConfigOption opt("DDB_TEST_THREADS", "0");
-            EXPECT_EQ(parallel::threadsOption("DDB_TEST_THREADS", 8), 0);
+            EXPECT_EQ(parallel::threadsOption("DDB_TEST_THREADS", 8), cores);
         }
         for (const char *invalid : {"-1", "abc", "4x", ""})
         {

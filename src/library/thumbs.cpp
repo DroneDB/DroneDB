@@ -513,7 +513,8 @@ void generatePointCloudThumb(const fs::path& copcPath,
         resolution = tz < 0 ? 1 : mercator.resolution(tz);
     }
 
-    pdal::Options copcOpts = copcReaderOptions(copcPath.string());
+    const auto copcThreads = copcReadThreads(copcPath.string());  // until the reader has run
+    pdal::Options copcOpts = copcReaderOptions(copcPath.string(), copcThreads);
     copcOpts.add("resolution", resolution);
 
     pdal::CopcReader copcReader;

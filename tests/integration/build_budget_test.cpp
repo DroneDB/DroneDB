@@ -14,6 +14,7 @@
 #include "build_budget.h"
 #include "cog.h"
 #include "gdal_inc.h"
+#include "parallel.h"
 #include "test.h"
 #include "testarea.h"
 #include "testfs.h"
@@ -61,7 +62,6 @@ namespace
         EXPECT_EQ(b.warpMemoryMb, 512);
         EXPECT_GE(b.threads, 1);
         EXPECT_LE(b.threads, 8);
-        EXPECT_EQ(b.gdalNumThreads(), std::to_string(b.threads));
 
         CPLSetConfigOption("DDB_COG_CACHE_MB", "256");
         CPLSetConfigOption("DDB_WARP_MEMORY_MB", "128");
@@ -69,7 +69,8 @@ namespace
         b = BuildResourceBudget::fromConfig();
         EXPECT_EQ(b.cacheBytes, 256 * MiB);
         EXPECT_EQ(b.warpMemoryMb, 128);
-        EXPECT_EQ(b.gdalNumThreads(), "ALL_CPUS");
+        // 0 is every core, as a count: the CPU pool decides how many run (DQ-15, no ALL_CPUS)
+        EXPECT_EQ(b.threads, static_cast<int>(parallel::hardwareThreads()));
 
         // Invalid values fall back to the defaults.
         CPLSetConfigOption("DDB_COG_CACHE_MB", "-5");

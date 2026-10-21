@@ -7,6 +7,7 @@
 //#include "ddb.h"
 
 #include "exceptions.h"
+#include "process_config.h"
 
 namespace ddb
 {
@@ -19,20 +20,11 @@ namespace ddb
         return instance;
     }
 
-    UserProfile::UserProfile()
-    {
-        // Initialize directories
-        createDir(getProfileDir());
-
-        // Initialize auth manager
-        authManager = new AuthManager(getAuthFile());
-    }
-
     void UserProfile::createDir(const fs::path &dir)
     {
         if (!fs::exists(dir))
         {
-            if (fs::create_directory(dir))
+            if (fs::create_directories(dir))
             {
                 LOGD << "Created " << dir.string();
             }
@@ -50,32 +42,46 @@ namespace ddb
         }
     }
 
-    fs::path UserProfile::getHomeDir()
+    namespace
     {
-        const char *ddb_home = std::getenv("DDB_HOME");
-        if (ddb_home)
-            return std::string(ddb_home);
-
-        const char *home = std::getenv("HOME");
-        if (home)
-            return std::string(home);
-
-        home = std::getenv("USERPROFILE");
-        if (home)
-            return std::string(home);
-
-        home = std::getenv("HOMEDRIVE");
-        const char *homePath = std::getenv("HOMEPATH");
-
-        if (!home || !homePath)
+        // DDB_HOME (*fromDdbHome = true), else the user's home folder
+        fs::path homeDir(bool *fromDdbHome)
         {
-            throw AppException("Cannot find home directory. Make sure that either your HOME or USERPROFILE environment variable is set and points to the current user's home directory.");
+            if (fromDdbHome != nullptr)
+                *fromDdbHome = false;
+            const char *ddb_home = std::getenv("DDB_HOME");
+            if (ddb_home)
+            {
+                if (fromDdbHome != nullptr)
+                    *fromDdbHome = true;
+                return std::string(ddb_home);
+            }
+
+            const char *home = std::getenv("HOME");
+            if (home)
+                return std::string(home);
+
+            home = std::getenv("USERPROFILE");
+            if (home)
+                return std::string(home);
+
+            home = std::getenv("HOMEDRIVE");
+            const char *homePath = std::getenv("HOMEPATH");
+
+            if (!home || !homePath)
+            {
+                throw AppException("Cannot find home directory. Make sure that either your HOME or USERPROFILE environment variable is set and points to the current user's home directory.");
+            }
+
+            return fs::path(std::string(home)) / fs::path(std::string(homePath));
         }
+    } // namespace
 
-        return fs::path(std::string(home)) / fs::path(std::string(homePath));
-    }
+    fs::path UserProfile::defaultProfileDir(bool *fromDdbHome) { return homeDir(fromDdbHome) / DDB_FOLDER; }
 
-    fs::path UserProfile::getProfileDir() { return getHomeDir() / DDB_FOLDER; }
+    fs::path UserProfile::getHomeDir() { return homeDir(nullptr); }
+
+    fs::path UserProfile::getProfileDir() { return defaultProfileDir(); }
 
     fs::path UserProfile::getProfilePath(const fs::path &p, bool createIfNeeded = true)
     {
@@ -85,9 +91,23 @@ namespace ddb
         return profilePath;
     }
 
+    fs::path UserProfile::getCacheDir()
+    {
+        const fs::path cacheDir = ProcessConfig::get().cacheDir();
+        createDir(cacheDir);
+        return cacheDir;
+    }
+
+    fs::path UserProfile::getCachePath(const fs::path &p)
+    {
+        const fs::path cachePath = getCacheDir() / p;
+        createDir(cachePath);
+        return cachePath;
+    }
+
     fs::path UserProfile::getThumbsDir()
     {
-        const fs::path thumbsDir = getProfileDir() / fs::path("thumbs");
+        const fs::path thumbsDir = getCacheDir() / fs::path("thumbs");
         createDir(thumbsDir);
         return thumbsDir;
     }
@@ -101,16 +121,16 @@ namespace ddb
 
     fs::path UserProfile::getTilesDir()
     {
-        const fs::path tilesDir = getProfileDir() / fs::path("tiles");
+        const fs::path tilesDir = getCacheDir() / fs::path("tiles");
         createDir(tilesDir);
         return tilesDir;
     }
 
     fs::path UserProfile::getTemplatesDir()
     {
-        const fs::path tilesDir = getProfileDir() / fs::path("templates");
-        createDir(tilesDir);
-        return tilesDir;
+        const fs::path templatesDir = getCacheDir() / fs::path("templates");
+        createDir(templatesDir);
+        return templatesDir;
     }
 
     fs::path UserProfile::getAuthFile()
@@ -120,6 +140,10 @@ namespace ddb
 
     AuthManager *UserProfile::getAuthManager()
     {
+        std::call_once(authOnce, [this]() {
+            createDir(getProfileDir());
+            authManager = new AuthManager(getAuthFile());
+        });
         return authManager;
     }
 

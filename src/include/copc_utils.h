@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "ddb_export.h"
+#include "parallel.h"
 #include "point_rasterizer.h"
 
 namespace pdal
@@ -92,15 +93,21 @@ namespace ddb
     /// so the value is taken between two levels, never on one.
     DDB_DLL double copcResolutionForDepth(double spacing, int depth);
 
+    /// CPU tokens for the decompression threads of a local COPC file: up to 4 threads, the
+    /// calling one included (parallel::tryAcquireThreads). None for a remote file, which keeps
+    /// PDAL's own thread count (network-bound). Keep them until the reader has run.
+    DDB_DLL parallel::CpuTokens copcReadThreads(const std::string &copcPath);
+
     /// readers.copc options shared by tiles and thumbnails: the file (relative paths
     /// made explicit for PDAL), no SRS processing (callers work with the WKT of
-    /// getCopcInfo and pass bounds in the cloud CRS) and up to 4 decompression threads
-    DDB_DLL pdal::Options copcReaderOptions(const std::string &copcPath);
+    /// getCopcInfo and pass bounds in the cloud CRS) and, for a local file, the
+    /// decompression threads that `threads` (copcReadThreads) allows
+    DDB_DLL pdal::Options copcReaderOptions(const std::string &copcPath, const parallel::CpuTokens &threads);
 
     /// readers.copc options for the points of a 2D window (cloud CRS, bounds included) down to
     /// the depth for resolution; the bounds text keeps every bit of the doubles
-    DDB_DLL pdal::Options copcWindowOptions(const std::string &copcPath, double minX, double minY, double maxX,
-                                            double maxY, double resolution);
+    DDB_DLL pdal::Options copcWindowOptions(const std::string &copcPath, const parallel::CpuTokens &threads,
+                                            double minX, double minY, double maxX, double maxY, double resolution);
 
     /// The points readers.copc returns for that window and resolution, in batches (the
     /// reference CopcNodeReader matches)

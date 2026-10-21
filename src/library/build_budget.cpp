@@ -52,10 +52,6 @@ BuildResourceBudget BuildResourceBudget::fromConfig() {
     return budget;
 }
 
-std::string BuildResourceBudget::gdalNumThreads() const {
-    return threads == 0 ? "ALL_CPUS" : std::to_string(threads);
-}
-
 void applyDefaultGdalCacheBound() {
     if (CPLGetConfigOption("GDAL_CACHEMAX", nullptr) != nullptr) {
         LOGD << "GDAL_CACHEMAX is set, keeping GDAL block cache at " << GDALGetCacheMax64() / MiB << " MB";

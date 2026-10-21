@@ -5,7 +5,6 @@
 #define BUILD_BUDGET_H
 
 #include <cstdint>
-#include <string>
 
 #include "ddb_export.h"
 
@@ -15,16 +14,14 @@ namespace ddb {
 // options below (environment variables or CPLSetConfigOption):
 //   DDB_COG_CACHE_MB    GDAL block cache while the build runs (default 1024)
 //   DDB_WARP_MEMORY_MB  GDALWarp working memory, -wm (default 512)
-//   DDB_BUILD_THREADS   GDAL NUM_THREADS; 0 = all cores (default min(8, cores))
+//   DDB_BUILD_THREADS   GDAL threads wanted; 0 = all cores (default min(8, cores)).
+//                       The CPU token pool (parallel.h) decides how many run.
 struct BuildResourceBudget {
     int64_t cacheBytes;
     int warpMemoryMb;
-    int threads;
+    int threads;  // >= 1
 
     DDB_DLL static BuildResourceBudget fromConfig();
-
-    // Value for the GDAL NUM_THREADS option: "ALL_CPUS" or the thread count.
-    DDB_DLL std::string gdalNumThreads() const;
 };
 
 // Bounds GDAL's process-wide block cache (GDAL default: 5% of RAM) to

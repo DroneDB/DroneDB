@@ -4,6 +4,7 @@
 #include "gdal_raii.h"
 #include "cog.h"
 #include "build_budget.h"
+#include "parallel.h"
 #include "cog_utils.h"
 #include "logger.h"
 #include "mio.h"
@@ -104,9 +105,12 @@ namespace ddb
             (srcMaskFlags & GMF_NODATA) == 0;
 
         // Threads, warp memory and block cache come from one budget (DDB-08) so
-        // that several builds running in one process stay within known bounds.
+        // that several builds running in one process stay within known bounds;
+        // the threads beyond this one take CPU tokens (DQ-15), held until the
+        // output is closed.
         const BuildResourceBudget budget = BuildResourceBudget::fromConfig();
-        const std::string numThreads = "NUM_THREADS=" + budget.gdalNumThreads();
+        const auto cpu = parallel::tryAcquireThreads(static_cast<size_t>(budget.threads));
+        const std::string numThreads = parallel::gdalNumThreads(cpu);
 
         CPLStringList targs;
         targs.AddString("-of");

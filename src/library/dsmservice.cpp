@@ -279,7 +279,7 @@ bool DSMService::addGeoTIFFToCache(const fs::path &filePath, double latitude, do
 
 fs::path DSMService::getCacheDir()
 {
-    return UserProfile::get()->getProfilePath("dsm_service_cache", true);
+    return UserProfile::get()->getCachePath("dsm_service_cache");
 }
 
 void DSMCacheEntry::loadData(GDALDatasetH hDataset)

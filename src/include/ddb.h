@@ -125,6 +125,63 @@ extern "C"
      * @return the JSON, or NULL only if the process ran out of memory while building it */
     DDB_DLL const char *DDBGetCapabilities(void);
 
+    /* Process configuration (DQ-15, XI-06, ABI 1.1). One set of settings for the whole process,
+     * which a host sets with DDBConfigure and reads back with DDBGetEffectiveConfig. Each setting
+     * takes, by precedence: the DDBConfigure value, else its environment variable, else the
+     * built-in default. An environment variable that is not a valid value is ignored.
+     *
+     *   "cpuPoolSize"    integer 0..4096, env DDB_CPU_POOL_SIZE, default cores - 1.
+     *                    The process-wide CPU token pool: the worker threads libddb may run at
+     *                    once beside the calling threads, across every call (parallel indexing,
+     *                    GDAL NUM_THREADS, PDAL readers, the cores given to Obj2Tiles and those
+     *                    counted for untwine). A calling thread always works and never needs a
+     *                    token; a section gets the tokens that are free and never waits for one,
+     *                    so 0 runs every call on its calling thread only. The calls a host runs
+     *                    at once plus cpuPoolSize bound libddb's busy CPU threads.
+     *   "ioThreads"      integer 1..256, env DDB_IO_THREADS, default 4.
+     *                    The threads of one disk-bound section (hashing the files of a delta,
+     *                    deleting build folders); they take no CPU token.
+     *   "minFreeDiskMb"  integer 0..10^13, env DDB_MIN_FREE_DISK_MB, default 512.
+     *                    The free space in MiB a build or a copy of build artifacts needs on the
+     *                    volume it writes to; below it the call fails with the reason
+     *                    "lowDiskSpace". 0 turns the check off.
+     *   "cacheDir"       absolute folder path (UTF-8), default the profile folder: DDB_HOME/.ddb
+     *                    when DDB_HOME is set (source "environment"), else the home folder's .ddb.
+     *                    Where libddb caches thumbnails, tiles, index templates and DSM tiles
+     *                    (created when first needed). The registry credentials of the ddb command
+     *                    line stay in the profile folder.
+     *
+     * The per-section thread counts DDB_INDEX_THREADS, DDB_BUILD_THREADS, DDB_RENDER_THREADS and
+     * DDB_OBJ2TILES_MAX_CORES (environment or GDAL config options) stay what a section asks for;
+     * the CPU pool decides how many of them run. */
+
+    /** Changes settings of the process configuration (see above). Callable at any time, from any
+     * thread, before DDBRegisterProcess too and concurrently with any other call; a host
+     * normally calls it once, before DDBRegisterProcess. A change applies to the work that reads
+     * the setting after this call returned: a parallel section that is running keeps the tokens
+     * it holds (after the pool shrank, given-back tokens are handed out again only below the new
+     * size), a call that is running keeps the cache folder it opened, and files in a previous
+     * cache folder are neither moved nor deleted.
+     * @param configJson a JSON object with the settings to change, by name: a value sets the
+     *                   setting, null puts it back to its environment variable or default;
+     *                   settings not named keep their value. "{}" changes nothing.
+     * @return DDBERR_NONE; DDBERR_INVALIDARGS when configJson is NULL, not a JSON object, names an
+     *         unknown setting or has an invalid value (see DDBGetLastError). An invalid call
+     *         changes nothing: every member is checked before any is applied. An unknown name
+     *         is an error, not ignored, so a misspelled budget never goes unnoticed; a host
+     *         finds the names a library knows in DDBGetEffectiveConfig's "settings". */
+    DDB_DLL DDBErr DDBConfigure(const char *configJson);
+
+    /** The process configuration in effect (see above), as a JSON object:
+     *   "settings"         every setting by name, with its value (an object DDBConfigure accepts)
+     *   "sources"          every setting by name: "configure", "environment" or "default"
+     *   "hardwareThreads"  the cores libddb sees (at least 1)
+     * Fields and settings are only ever added. Callable at any time, like DDBConfigure.
+     * @param output pointer to C-string where to store the JSON (free with DDBFree)
+     * @return DDBERR_NONE; DDBERR_INVALIDARGS when output is NULL; DDBERR_EXCEPTION when the
+     *         default cache folder cannot be found (no DDB_HOME, HOME or USERPROFILE) */
+    DDB_DLL DDBErr DDBGetEffectiveConfig(char **output);
+
     /** Normalize a dataset-relative entry path, or reject it, with libddb's path rules (XI-09,
      * entry_path.h; golden vectors in tests/contract/vectors/entry-paths.json):
      * '/' and '\' both separate segments; empty and "." segments are dropped; the result uses '/'

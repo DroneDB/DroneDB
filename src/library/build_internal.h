@@ -149,8 +149,9 @@ std::vector<BuildArtifact> existingArtifacts(const EntryHandler& handler, const 
 void buildInternal(Database* db, const Entry& e, const std::string& outputPath, bool force);
 
 // Throws RetryableBuildException(LowDiskSpace) when the filesystem of dir has less free space
-// than DDB_MIN_FREE_DISK_MB (default 512; 0 disables the check) before a build or a copy of
-// build artifacts writes to it.
+// than the free-disk floor (ProcessConfig::minFreeDiskMb: DDBConfigure "minFreeDiskMb", else
+// DDB_MIN_FREE_DISK_MB, else 512 MiB; 0 disables the check) before a build or a copy of build
+// artifacts writes to it.
 void ensureSufficientDiskSpace(const fs::path& dir);
 
 // ---- Pending markers (pending_markers.cpp) --------------------------------

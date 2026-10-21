@@ -48,7 +48,9 @@
 #include "align.h"
 #include "merge_multispectral.h"
 #include "mio.h"
+#include "parallel.h"
 #include "passwordmanager.h"
+#include "process_config.h"
 #include "process_init.h"
 #include "raster_region.h"
 #include "raster_utils.h"
@@ -209,6 +211,19 @@ const char* DDBGetCapabilities() {
         // next call builds it again
         return nullptr;
     }
+}
+
+// ------------------------------------------------------------------ process configuration
+
+DDBErr DDBConfigure(const char* configJson) {
+    return guarded<kAbi11Codes>([&] { ProcessConfig::get().configure(parseJsonArg(configJson)); });
+}
+
+DDBErr DDBGetEffectiveConfig(char** output) {
+    return guardedOutput<kAbi11Codes>(output, [&] {
+        requireOutput(output);
+        return ProcessConfig::get().effective();
+    });
 }
 
 // ------------------------------------------------------------------ files and index
@@ -1957,7 +1972,10 @@ static int exportRasterImpl(const char* inputPath, const char* outputPath,
         createOpts.AddString("COMPRESS=DEFLATE");
         createOpts.AddString("PREDICTOR=2");
         createOpts.AddString("BIGTIFF=IF_SAFER");
-        createOpts.AddString("NUM_THREADS=ALL_CPUS");
+        // Compression threads: this one and those the CPU pool allows (DQ-15), held until
+        // the output is closed
+        const auto cpu = parallel::tryAcquireThreads(parallel::hardwareThreads());
+        createOpts.AddString(parallel::gdalNumThreads(cpu).c_str());
 
         // Closed on any throw. On success or cancel we close it explicitly after the
         // appropriate finalization.

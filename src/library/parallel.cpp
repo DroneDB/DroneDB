@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "gdal_inc.h"
+#include "process_config.h"
 
 namespace ddb::parallel
 {
@@ -33,45 +34,41 @@ namespace ddb::parallel
             ThreadGdalErrorHandler(const ThreadGdalErrorHandler &) = delete;
             ThreadGdalErrorHandler &operator=(const ThreadGdalErrorHandler &) = delete;
         };
-    }
 
-    size_t hardwareThreads()
-    {
-        return std::max(1u, std::thread::hardware_concurrency());
-    }
-
-    int threadsOption(const char *name, int defaultMax)
-    {
-        if (const char *value = CPLGetConfigOption(name, nullptr))
+        // The CPU token pool. Never destroyed: threads may still give tokens back while the
+        // process exits.
+        struct CpuPool
         {
-            char *end = nullptr;
-            const long parsed = std::strtol(value, &end, 10);
-            if (end != value && *end == '\0' && parsed >= 0 && parsed <= std::numeric_limits<int>::max())
-                return static_cast<int>(parsed);
-        }
-        return static_cast<int>(std::min(hardwareThreads(), static_cast<size_t>(std::max(1, defaultMax))));
-    }
+            std::mutex mutex;
+            size_t inUse = 0;
+        };
 
-    void forEachIndex(size_t count, size_t maxThreads, const std::function<void(size_t)> &fn)
-    {
-        const ThreadGdalErrorHandler callerGdalErrors; // the calling thread runs calls too
-        const size_t threads = std::min(count, std::max<size_t>(1, maxThreads));
-        if (threads <= 1)
+        CpuPool &cpuPool()
         {
-            for (size_t i = 0; i < count; i++)
-                fn(i);
-            return;
+            static CpuPool *const pool = new CpuPool();
+            return *pool;
         }
 
-        std::atomic<size_t> next{0};
-        // Lowest failed index; indexes below it still run, so the error kept is the serial one
-        std::atomic<size_t> firstFailed{count};
-        std::mutex errorMutex;
-        std::exception_ptr error;
-
-        const auto work = [&]()
+        // Runs fn(i) for every i in [0, count) on up to `threads` threads (forEachIndex). With
+        // `pooled`, every thread beyond the calling one holds a CPU token.
+        void runParallel(size_t count, size_t threads, bool pooled, const std::function<void(size_t)> &fn)
         {
-            for (size_t i = next++; i < firstFailed; i = next++)
+            const ThreadGdalErrorHandler callerGdalErrors; // the calling thread runs calls too
+            threads = std::min(count, std::max<size_t>(1, threads));
+            if (threads <= 1)
+            {
+                for (size_t i = 0; i < count; i++)
+                    fn(i);
+                return;
+            }
+
+            std::atomic<size_t> next{0};
+            // Lowest failed index; indexes below it still run, so the error kept is the serial one
+            std::atomic<size_t> firstFailed{count};
+            std::mutex errorMutex;
+            std::exception_ptr error;
+
+            const auto runOne = [&](size_t i)
             {
                 try
                 {
@@ -86,31 +83,157 @@ namespace ddb::parallel
                         error = std::current_exception();
                     }
                 }
-            }
-        };
+            };
+            const auto work = [&]()
+            {
+                for (size_t i = next++; i < firstFailed; i = next++)
+                    runOne(i);
+            };
 
-        std::vector<std::thread> workers;
-        workers.reserve(threads - 1);
+            const size_t wantedWorkers = threads - 1;
+            CpuTokens tokens; // outlives the workers: given back once they are joined
+            std::vector<std::thread> workers;
+            workers.reserve(wantedWorkers);
+
+            // Starts up to n more workers, each with a token when pooled. False when a thread
+            // could not start: the ones already running and this one do the work.
+            const auto grow = [&](size_t n)
+            {
+                const size_t granted = pooled ? tokens.tryAcquire(n) : n;
+                size_t started = 0;
+                try
+                {
+                    for (; started < granted; started++)
+                        workers.emplace_back([&work]()
+                                             {
+                                                 const ThreadGdalErrorHandler workerGdalErrors;
+                                                 work();
+                                             });
+                }
+                catch (...)
+                {
+                }
+                if (pooled)
+                    tokens.release(granted - started);
+                return started == granted;
+            };
+
+            bool canGrow = grow(wantedWorkers);
+            // Between its own calls the calling thread takes the tokens other sections gave back
+            for (size_t i = next++; i < firstFailed; i = next++)
+            {
+                runOne(i);
+                if (pooled && canGrow && workers.size() < wantedWorkers && next < firstFailed)
+                    canGrow = grow(1);
+            }
+            for (auto &w : workers)
+                w.join();
+
+            if (error)
+                std::rethrow_exception(error);
+        }
+    }
+
+    size_t hardwareThreads()
+    {
+        return std::max(1u, std::thread::hardware_concurrency());
+    }
+
+    int threadsOption(const char *name, int defaultMax)
+    {
+        if (const char *value = CPLGetConfigOption(name, nullptr))
+        {
+            char *end = nullptr;
+            const long parsed = std::strtol(value, &end, 10);
+            if (end != value && *end == '\0' && parsed >= 0 && parsed <= std::numeric_limits<int>::max())
+                return parsed == 0 ? static_cast<int>(hardwareThreads()) : static_cast<int>(parsed);
+        }
+        return static_cast<int>(std::min(hardwareThreads(), static_cast<size_t>(std::max(1, defaultMax))));
+    }
+
+    CpuTokens::~CpuTokens()
+    {
+        release(count_);
+    }
+
+    CpuTokens::CpuTokens(CpuTokens &&other) noexcept : count_(other.count_)
+    {
+        other.count_ = 0;
+    }
+
+    CpuTokens &CpuTokens::operator=(CpuTokens &&other) noexcept
+    {
+        if (this != &other)
+        {
+            release(count_);
+            count_ = other.count_;
+            other.count_ = 0;
+        }
+        return *this;
+    }
+
+    size_t CpuTokens::tryAcquire(size_t n) noexcept
+    {
+        if (n == 0)
+            return 0;
         try
         {
-            for (size_t t = 1; t < threads; t++)
-                workers.emplace_back([&work]()
-                                     {
-                                         const ThreadGdalErrorHandler workerGdalErrors;
-                                         work();
-                                     });
+            const size_t size = ProcessConfig::get().cpuPoolSize();
+            auto &pool = cpuPool();
+            std::lock_guard<std::mutex> lock(pool.mutex);
+            // After the pool shrank, more tokens may be in use than it holds: none is free
+            const size_t free = size > pool.inUse ? size - pool.inUse : 0;
+            const size_t granted = std::min(n, free);
+            pool.inUse += granted;
+            count_ += granted;
+            return granted;
         }
         catch (...)
         {
-            // Could not start a thread: the ones already running and this one do the work
+            return 0; // no token: the section runs on fewer threads
         }
+    }
 
-        work();
-        for (auto &w : workers)
-            w.join();
+    void CpuTokens::release(size_t n) noexcept
+    {
+        n = std::min(n, count_);
+        if (n == 0)
+            return;
+        auto &pool = cpuPool();
+        // std::mutex::lock throws only on a system error (EDEADLK, EINVAL), never here
+        std::lock_guard<std::mutex> lock(pool.mutex);
+        pool.inUse -= n;
+        count_ -= n;
+    }
 
-        if (error)
-            std::rethrow_exception(error);
+    CpuTokens tryAcquireThreads(size_t threads) noexcept
+    {
+        CpuTokens tokens;
+        if (threads > 1)
+            tokens.tryAcquire(threads - 1);
+        return tokens;
+    }
+
+    std::string gdalNumThreads(const CpuTokens &tokens)
+    {
+        return "NUM_THREADS=" + std::to_string(tokens.threads());
+    }
+
+    size_t cpuTokensInUse() noexcept
+    {
+        auto &pool = cpuPool();
+        std::lock_guard<std::mutex> lock(pool.mutex);
+        return pool.inUse;
+    }
+
+    void forEachIndex(size_t count, size_t maxThreads, const std::function<void(size_t)> &fn)
+    {
+        runParallel(count, maxThreads, true, fn);
+    }
+
+    void forEachIndexIo(size_t count, const std::function<void(size_t)> &fn)
+    {
+        runParallel(count, ProcessConfig::get().ioThreads(), false, fn);
     }
 
 } // namespace ddb::parallel

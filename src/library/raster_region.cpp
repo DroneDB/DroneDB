@@ -86,13 +86,13 @@ namespace ddb
         // 1024x768 map takes 150 ms on one thread and 60 ms on four. Only a render that
         // runs alone gets them: under load every render already has a core, and more
         // threads only contend (8 at once: 31 renders/s on one thread each, 22/s on four).
-        std::vector<std::string> warpThreadArgs(const RenderInFlight &render)
+        // The threads beyond the calling one take CPU tokens into `tokens`: keep it until
+        // the warp ends.
+        std::vector<std::string> warpThreadArgs(const RenderInFlight &render, parallel::CpuTokens &tokens)
         {
             static const int configured = parallel::threadsOption("DDB_RENDER_THREADS", 4);
-            const std::string threads = render.count > 1 ? std::string("1")
-                                        : configured == 0 ? std::string("ALL_CPUS")
-                                                          : std::to_string(configured);
-            return {"-wo", "NUM_THREADS=" + threads};
+            tokens = parallel::tryAcquireThreads(render.count > 1 ? 1 : static_cast<size_t>(configured));
+            return {"-wo", parallel::gdalNumThreads(tokens)};
         }
 
         // Hands the bytes of a written /vsimem/ render to the caller (VSIFree); the file is gone
@@ -211,7 +211,8 @@ namespace ddb
         argStore.emplace_back("-r");        argStore.emplace_back("bilinear");
         argStore.emplace_back("-multi");
         const RenderInFlight inFlight;
-        for (const auto &arg : warpThreadArgs(inFlight))
+        parallel::CpuTokens warpTokens;
+        for (const auto &arg : warpThreadArgs(inFlight, warpTokens))
             argStore.push_back(arg);
         if (directOutput) {
             for (const auto &co : fi.creationOptions) {
@@ -458,7 +459,8 @@ namespace ddb
             "-ot", "Float32"
         };
         const RenderInFlight inFlight;
-        for (const auto &arg : warpThreadArgs(inFlight))
+        parallel::CpuTokens warpTokens;
+        for (const auto &arg : warpThreadArgs(inFlight, warpTokens))
             argStore.push_back(arg);
         std::vector<char *> argv;
         argv.reserve(argStore.size() + 1);

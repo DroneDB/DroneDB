@@ -196,8 +196,9 @@ namespace ddb
     void PointCloudTiler::readWithPdal(double minX, double minY, double maxX, double maxY, double resolution,
                                        const std::function<void(PointBatch &)> &sink)
     {
+        const auto copcThreads = copcReadThreads(inputPath);  // until the reader has run
         pdal::CopcReader copcReader;
-        copcReader.setOptions(copcWindowOptions(inputPath, minX, minY, maxX, maxY, resolution));
+        copcReader.setOptions(copcWindowOptions(inputPath, copcThreads, minX, minY, maxX, maxY, resolution));
         pdal::Stage *main = &copcReader;
 
         std::unique_ptr<pdal::ColorinterpFilter> colorFilter;

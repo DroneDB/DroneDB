@@ -48,6 +48,11 @@ if(BUILD_TESTING)
     add_executable(ddbtest_signal_probe helpers/signal_probe.cpp)
     target_link_libraries(ddbtest_signal_probe PRIVATE ${PROJECT_NAME} ddb_warnings)
 
+    # DQ-15 probe: DDBConfigure before DDBRegisterProcess, in a process of its own for the same
+    # reason (CAbiConfig.ConfigureBeforeRegisterProcess runs it).
+    add_executable(ddbtest_config_probe helpers/config_probe.cpp)
+    target_link_libraries(ddbtest_config_probe PRIVATE ${PROJECT_NAME} ddb_warnings)
+
     # Shared test code. It compiles against the library headers only (ddb_headers): each test
     # binary supplies the library itself. testfs.cpp uses cpr, raster_test_utils.cpp GDAL,
     # utils.cpp boolinq (header-only INTERFACE target, src/CMakeLists.txt).
@@ -56,7 +61,8 @@ if(BUILD_TESTING)
     target_include_directories(ddb_test_support PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
     target_compile_definitions(ddb_test_support PUBLIC
         DDB_TEST_CHILD_NAME="$<TARGET_FILE_NAME:ddbtest_child>"
-        DDB_SIGNAL_PROBE_NAME="$<TARGET_FILE_NAME:ddbtest_signal_probe>")
+        DDB_SIGNAL_PROBE_NAME="$<TARGET_FILE_NAME:ddbtest_signal_probe>"
+        DDB_CONFIG_PROBE_NAME="$<TARGET_FILE_NAME:ddbtest_config_probe>")
     target_link_libraries(ddb_test_support PUBLIC ddb_headers GTest::gtest cpr::cpr GDAL::GDAL boolinq
         PRIVATE ddb_warnings)
     if(WIN32)
@@ -112,7 +118,7 @@ if(BUILD_TESTING)
         # LINK first: ddbtest must resolve symbols that libddb exports (cpr, spz) from libddb,
         # before a static archive of the same library is searched
         target_link_libraries(${name} PRIVATE ${T_LINK} ddb_test_support ddb_warnings)
-        add_dependencies(${name} ddbtest_child ddbtest_signal_probe)
+        add_dependencies(${name} ddbtest_child ddbtest_signal_probe ddbtest_config_probe)
         if(WIN32)
             set_target_properties(${name} PROPERTIES ENABLE_EXPORTS 1)
         endif()
