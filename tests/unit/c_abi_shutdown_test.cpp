@@ -80,7 +80,12 @@ class CallInFlight {
         if (thread_.joinable())
             thread_.join();
     }
-    void release() { release_.count_down(); }
+    // Idempotent: the test releases it, and the destructor does when an assertion returned
+    // early. A latch must not be counted down below zero (MSVC's STL fails fast on it).
+    void release() {
+        if (!released_.exchange(true))
+            release_.count_down();
+    }
     DDBErr join() {
         thread_.join();
         return result_;
@@ -90,6 +95,7 @@ class CallInFlight {
    private:
     std::latch entered_{1};
     std::latch release_{1};
+    std::atomic<bool> released_{false};
     std::atomic<bool> finished_{false};
     DDBErr result_ = DDBERR_EXCEPTION;
     std::thread thread_;

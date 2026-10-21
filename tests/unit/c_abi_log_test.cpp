@@ -17,18 +17,11 @@
 // Threads meet on latches; no test sleeps nor asserts on a duration.
 
 #include <atomic>
-#include <cstdlib>
-#include <fstream>
 #include <latch>
 #include <mutex>
-#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
-
-#ifndef _WIN32
-#include <sys/wait.h>
-#endif
 
 #include "c_api_util.h"
 #include "ddb.h"
@@ -38,8 +31,8 @@
 #include "logger.h"
 #include "mio.h"
 #include "parallel.h"
+#include "process_runner.h"
 #include "test.h"
-#include "testarea.h"
 
 namespace {
 
@@ -303,24 +296,20 @@ TEST_F(CAbiLog, concurrentLoggingAndReplacement) {
     EXPECT_EQ(b.matching("log-test concurrent").size(), bCount);
 }
 
-// Registered before DDBRegisterProcess (its own process: this one registered in main)
+// Registered before DDBRegisterProcess (its own process: this one registered in main). Started
+// with the library's process runner, like every child process of the tests: stdout and stderr
+// are captured together.
 TEST(CAbiLogProcess, callbackBeforeRegisterProcess) {
-    TestArea ta(TEST_NAME, true);
     const fs::path probe = io::getExeFolderPath() / DDB_LOG_PROBE_NAME;
     ASSERT_TRUE(fs::exists(probe)) << probe;
-    const fs::path stdoutFile = ta.getPath("stdout.txt");
-    const int rc = std::system(("\"" + probe.string() + "\" > \"" + stdoutFile.string() + "\"").c_str());
-#ifdef _WIN32
-    EXPECT_EQ(rc, 0) << "see the probe's stderr";
-#else
-    ASSERT_TRUE(WIFEXITED(rc)) << "probe did not exit normally: " << rc;
-    EXPECT_EQ(WEXITSTATUS(rc), 0) << "see the probe's stderr (3: the callback ran during the exit)";
-#endif
-    // The callback replaces the console
-    std::ifstream in(stdoutFile.string());
-    std::stringstream text;
-    text << in.rdbuf();
-    EXPECT_EQ(text.str(), "") << "the probe printed while its callback was registered";
+    const process::Result r = process::run(probe, {});
+    // 3: the callback ran during the exit
+    EXPECT_TRUE(r.success()) << r.describe() << "\n" << r.outputTail;
+    // The callback replaces the console: the probe's own success line is all that is printed
+    std::string output = r.outputTail;
+    while (!output.empty() && (output.back() == '\n' || output.back() == '\r'))
+        output.pop_back();
+    EXPECT_EQ(output, "log probe ok") << "the probe printed while its callback was registered";
 }
 
 }  // namespace

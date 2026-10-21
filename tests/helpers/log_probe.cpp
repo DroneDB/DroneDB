@@ -10,7 +10,8 @@
 //   - a GDAL error reaches the callback with source "gdal" and the thread's operation id;
 //   - the callback is never called once main has returned (libddb's exit-time handlers);
 // 1 otherwise (and says why on stderr), 3 when the callback ran during the exit. The test also
-// checks that nothing went to stdout: the callback replaces the console.
+// checks that nothing but "log probe ok" is printed (stdout and stderr): the callback replaces
+// the console.
 
 #include <atomic>
 #include <cstdio>
