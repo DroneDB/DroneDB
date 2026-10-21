@@ -8,6 +8,7 @@
 #include <stdexcept>
 
 #include "utils.h"
+#include "mio.h"
 
 namespace testutils
 {
@@ -28,10 +29,10 @@ namespace testutils
     {
         GDALDriverH drv = GDALGetDriverByName("GTiff");
         char **opts = CSLSetNameValue(nullptr, "TILED", "YES");
-        GDALDatasetH ds = GDALCreate(drv, path.string().c_str(), spec.width, spec.height, spec.bands, spec.type, opts);
+        GDALDatasetH ds = GDALCreate(drv, ddb::io::toUtf8(path).c_str(), spec.width, spec.height, spec.bands, spec.type, opts);
         CSLDestroy(opts);
         if (ds == nullptr)
-            throw std::runtime_error("Cannot create " + path.string());
+            throw std::runtime_error("Cannot create " + ddb::io::toUtf8(path));
 
         double gt[6] = {spec.originX, spec.pixelSize, 0.0, spec.originY, 0.0, -spec.pixelSize};
         GDALSetGeoTransform(ds, gt);
@@ -56,7 +57,7 @@ namespace testutils
                     row[x] = alpha ? 255.0 : spec.value(b, x, y);
                 if (GDALRasterIO(band, GF_Write, 0, y, spec.width, 1, row.data(), spec.width, 1, GDT_Float64, 0, 0) !=
                     CE_None)
-                    throw std::runtime_error("Cannot write " + path.string());
+                    throw std::runtime_error("Cannot write " + ddb::io::toUtf8(path));
             }
         }
         GDALClose(ds);
@@ -99,9 +100,9 @@ namespace testutils
 
     DecodedImage decodeImageFile(const fs::path &path)
     {
-        VSILFILE *f = VSIFOpenL(path.string().c_str(), "rb");
+        VSILFILE *f = VSIFOpenL(ddb::io::toUtf8(path).c_str(), "rb");
         if (f == nullptr)
-            throw std::runtime_error("Cannot open " + path.string());
+            throw std::runtime_error("Cannot open " + ddb::io::toUtf8(path));
         std::vector<uint8_t> data;
         uint8_t chunk[65536];
         size_t n;

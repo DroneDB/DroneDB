@@ -216,12 +216,16 @@ if(BUILD_TESTING)
     # the build root, next to the Windows DLLs: the binary users run.
     set(DDB_CLI_EXE "$<TARGET_FILE:${PROJECT_NAME}cmd>")
     function(ddb_add_cli_test)
-        cmake_parse_arguments(CLI "" "NAME;EXIT;WORKING_DIRECTORY" "ARGS" ${ARGN})
+        cmake_parse_arguments(CLI "" "NAME;EXIT;WORKING_DIRECTORY;STDOUT" "ARGS" ${ARGN})
         if(NOT CLI_WORKING_DIRECTORY)
             set(CLI_WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
         endif()
+        set(CLI_STDOUT_ARG "")
+        if(DEFINED CLI_STDOUT)
+            set(CLI_STDOUT_ARG "-DEXPECTED_STDOUT=${CLI_STDOUT}")
+        endif()
         add_test(NAME ${CLI_NAME}
-            COMMAND ${CMAKE_COMMAND} -DEXPECTED=${CLI_EXIT}
+            COMMAND ${CMAKE_COMMAND} -DEXPECTED=${CLI_EXIT} ${CLI_STDOUT_ARG}
                 -P "${CMAKE_CURRENT_SOURCE_DIR}/cli_expect_exit.cmake" -- "${DDB_CLI_EXE}" ${CLI_ARGS}
             WORKING_DIRECTORY "${CLI_WORKING_DIRECTORY}")
         set_tests_properties(${CLI_NAME} PROPERTIES LABELS cli TIMEOUT 120)
@@ -250,5 +254,25 @@ if(BUILD_TESTING)
         WORKING_DIRECTORY "${DDB_CLI_DATASET_DIR}")
     set_tests_properties(cli.PushWithoutTagFails cli.PullWithoutTagFails cli.PasswordUnknownSubcommandFails
         PROPERTIES FIXTURES_REQUIRED cli_dataset)
+
+    # UTF-8 paths (src/include/mio.h, "Path encoding"): a dataset under a non-ASCII folder with a
+    # non-ASCII file name. On Windows the CLI reads its arguments in UTF-16 (wmain): main's argv
+    # is in the ANSI code page.
+    set(DDB_CLI_UTF8_DIR "${CMAKE_CURRENT_BINARY_DIR}/cli_città_ü")
+    set(DDB_CLI_UTF8_FILE "ä_日.txt")
+    file(MAKE_DIRECTORY "${DDB_CLI_UTF8_DIR}")
+    file(WRITE "${DDB_CLI_UTF8_DIR}/${DDB_CLI_UTF8_FILE}" "alpha")
+    add_test(NAME cli.setup.CleanUtf8Dataset COMMAND ${CMAKE_COMMAND} -E rm -rf "${DDB_CLI_UTF8_DIR}/.ddb")
+    ddb_add_cli_test(NAME cli.setup.InitUtf8Dataset EXIT 0 ARGS init "${DDB_CLI_UTF8_DIR}")
+    set_tests_properties(cli.setup.CleanUtf8Dataset PROPERTIES FIXTURES_SETUP cli_utf8_clean LABELS cli)
+    set_tests_properties(cli.setup.InitUtf8Dataset PROPERTIES FIXTURES_REQUIRED cli_utf8_clean
+        FIXTURES_SETUP cli_utf8_dataset)
+    ddb_add_cli_test(NAME cli.Utf8Add EXIT 0 STDOUT "${DDB_CLI_UTF8_FILE}"
+        ARGS add "${DDB_CLI_UTF8_DIR}/${DDB_CLI_UTF8_FILE}" WORKING_DIRECTORY "${DDB_CLI_UTF8_DIR}")
+    ddb_add_cli_test(NAME cli.Utf8List EXIT 0 STDOUT "${DDB_CLI_UTF8_FILE}"
+        ARGS list WORKING_DIRECTORY "${DDB_CLI_UTF8_DIR}")
+    set_tests_properties(cli.Utf8Add PROPERTIES FIXTURES_REQUIRED cli_utf8_dataset
+        FIXTURES_SETUP cli_utf8_added)
+    set_tests_properties(cli.Utf8List PROPERTIES FIXTURES_REQUIRED "cli_utf8_dataset;cli_utf8_added")
 
 endif()

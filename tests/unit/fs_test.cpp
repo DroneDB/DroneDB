@@ -6,6 +6,12 @@
 #include "fs.h"
 #include "mio.h"
 #include "logger.h"
+#include "test.h"
+#include "testarea.h"
+#include "exceptions.h"
+#include <cstdlib>
+#include <fstream>
+#include <optional>
 #include <vector>
 #include <string>
 
@@ -246,6 +252,63 @@ namespace
         const std::string invalid = "bad\xFF\xFE";
         EXPECT_EQ(io::toUtf8(io::fromUtf8(invalid)), invalid);
 #endif
+    }
+
+    // The other helpers of mio.h "Path encoding": same characters, whatever the code page
+    TEST(utf8Path, Helpers)
+    {
+        const std::string folder = "citt\xC3\xA0";  // "città"
+        const std::string name = "\xC3\xA9.tif";    // "é.tif"
+        const fs::path p = io::fromUtf8(folder) / io::fromUtf8(name);
+
+        // '/' separators on every platform
+        EXPECT_EQ(io::toGenericUtf8(p), folder + "/" + name);
+        EXPECT_EQ(io::toGenericUtf8(io::fromUtf8(folder + "/" + name)), folder + "/" + name);
+
+        // UTF-8 text appended to the last component
+        EXPECT_EQ(io::toGenericUtf8(io::concat(p, ".stats_\xC3\xBC.json")), folder + "/" + name + ".stats_\xC3\xBC.json");
+        EXPECT_EQ(io::concat(p, ""), p);
+
+        const std::vector<fs::path> paths = io::fromUtf8(std::vector<std::string>{folder, name});
+        ASSERT_EQ(paths.size(), 2u);
+        EXPECT_EQ(paths[0], io::fromUtf8(folder));
+        EXPECT_EQ(paths[1], io::fromUtf8(name));
+
+#ifdef _WIN32
+        // UTF-16 for the W functions: "città" is 5 UTF-16 units, 6 UTF-8 bytes
+        EXPECT_EQ(io::toWide(folder), std::wstring(L"citt\u00E0"));
+        EXPECT_EQ(io::fromWide(L"citt\u00E0"), folder);
+#endif
+    }
+
+    TEST(utf8Path, EnvironmentVariable)
+    {
+        const char *name = "DDB_TEST_UTF8_ENV";
+        const std::string value = "C:/dati/citt\xC3\xA0_\xE6\x97\xA5";  // "C:/dati/città_日"
+#ifdef _WIN32
+        ASSERT_EQ(_wputenv_s(io::toWide(name).c_str(), io::toWide(value).c_str()), 0);
+#else
+        ASSERT_EQ(setenv(name, value.c_str(), 1), 0);
+#endif
+        EXPECT_EQ(io::getEnvUtf8(name), value);
+#ifdef _WIN32
+        ASSERT_EQ(_wputenv_s(io::toWide(name).c_str(), L""), 0);
+#else
+        ASSERT_EQ(unsetenv(name), 0);
+#endif
+        EXPECT_FALSE(io::getEnvUtf8(name).has_value());
+    }
+
+    TEST(utf8Path, ReadAllBytes)
+    {
+        TestArea ta(TEST_NAME);
+        const fs::path file = ta.getFolder() / io::fromUtf8("\xC3\xA4.bin");  // "ä.bin"
+        {
+            std::ofstream out(file, std::ios::binary);
+            out << std::string("a\0b", 3);
+        }
+        EXPECT_EQ(io::readAllBytes(file), (std::vector<uint8_t>{'a', 0, 'b'}));
+        EXPECT_THROW(io::readAllBytes(ta.getFolder() / "missing.bin"), FSException);
     }
 
 }

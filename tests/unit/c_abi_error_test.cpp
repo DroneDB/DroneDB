@@ -23,13 +23,18 @@
 #include <string>
 #include <thread>
 
+#include "build_layout.h"
+#include "buildlock.h"
 #include "c_api_util.h"
 #include "ddb.h"
+#include "entry_types.h"
+#include "exifeditor.h"
 #include "gdal_inc.h"
 #include "gtest/gtest.h"
 #include "json.h"
 #include "mio.h"
 #include "raster_test_utils.h"
+#include "registry.h"
 #include "test.h"
 #include "testarea.h"
 #include "utils.h"
@@ -385,47 +390,130 @@ struct LocaleGuard {
     ~LocaleGuard() { std::setlocale(LC_ALL, saved.c_str()); }
 };
 
-// A dataset under a non-ASCII folder, with the "C" locale: a host (.NET, another library) may
-// change the process locale after DDBRegisterProcess
+// A JPEG of width x height pixels (GDAL), without EXIF
+void writeJpeg(const fs::path& path, int width, int height) {
+    GDALDatasetH mem = GDALCreate(GDALGetDriverByName("MEM"), "", width, height, 3, GDT_Byte, nullptr);
+    ASSERT_NE(mem, nullptr);
+    for (int b = 1; b <= 3; b++)
+        ASSERT_EQ(GDALFillRaster(GDALGetRasterBand(mem, b), 40.0 * b, 0.0), CE_None);
+    GDALDatasetH jpeg = GDALCreateCopy(GDALGetDriverByName("JPEG"), io::toUtf8(path).c_str(), mem, FALSE,
+                                       nullptr, nullptr, nullptr);
+    ASSERT_NE(jpeg, nullptr) << CPLGetLastErrorMsg();
+    GDALClose(jpeg);
+    GDALClose(mem);
+}
+
+const json* findPath(const json& entries, const std::string& path) {
+    for (const auto& e : entries)
+        if (e.contains("path") && e["path"] == path)
+            return &e;
+    return nullptr;
+}
+
+// A dataset under a non-ASCII folder, with non-ASCII file names and the "C" locale (a host,
+// .NET or another library, may change the process locale after DDBRegisterProcess): every
+// path goes through io::fromUtf8 / io::toUtf8 (mio.h, "Path encoding"), never the ANSI code
+// page of Windows. Covers the index (init, add, list, get), GDAL (GeoTIFF, COG build, thumbnail),
+// Exiv2 (EXIF write and read of a JPEG), the build lock and delta/apply.
 TEST(Utf8Paths, datasetUnderANonAsciiFolderWithTheCLocale) {
-#ifdef _WIN32
-    GTEST_SKIP() << "the C API converts its path arguments from UTF-8 (io::fromUtf8), but the core "
-                    "still converts std::string paths with the narrow code page on Windows "
-                    "(DQ-10 follow-up)";
-#endif
     TestArea ta(TEST_NAME, true);
     const std::string folderName = "ddb_citt\xC3\xA0_\xC3\xBC";  // "ddb_città_ü"
     const std::string fileName = "\xC3\xA4.txt";                  // "ä.txt"
+    const std::string rasterName = "ortho_\xC3\xA9.tif";          // "ortho_é.tif"
+    const std::string imageName = "pano_\xC3\xB6.jpg";            // "pano_ö.jpg"
     const fs::path folder = ta.getFolder() / io::fromUtf8(folderName);
     fs::create_directories(folder);
     writeFile(folder / io::fromUtf8(fileName), "alpha");
+    testutils::GeoRasterSpec spec;
+    spec.width = spec.height = 64;
+    spec.value = [](int band, int x, int y) { return 20.0 + band * 30.0 + x + y; };
+    testutils::createGeoRaster(folder / io::fromUtf8(rasterName), spec);
+    // Twice as wide as high, with a GPS position: a GeoPanorama only when Exiv2 reads the file
+    writeJpeg(folder / io::fromUtf8(imageName), 64, 16);
     const std::string folderUtf8 = io::toUtf8(folder);
     const std::string fileUtf8 = io::toUtf8(folder / io::fromUtf8(fileName));
+    const std::string rasterUtf8 = io::toUtf8(folder / io::fromUtf8(rasterName));
+    const std::string imageUtf8 = io::toUtf8(folder / io::fromUtf8(imageName));
 
     const LocaleGuard locale;
     ASSERT_NE(std::setlocale(LC_ALL, "C"), nullptr);
+
+    ExifEditor(imageUtf8).SetGPS(46.0667, 11.1167, 194.0);
 
     char* out = nullptr;
     ASSERT_DDB_OK(DDBInit(folderUtf8.c_str(), &out));
     EXPECT_EQ(io::fromUtf8(take(out)), folder / ".ddb");
 
-    const char* paths[] = {fileUtf8.c_str()};
-    ASSERT_DDB_OK(DDBAdd(folderUtf8.c_str(), paths, 1, &out, false));
+    const char* paths[] = {fileUtf8.c_str(), rasterUtf8.c_str(), imageUtf8.c_str()};
+    ASSERT_DDB_OK(DDBAdd(folderUtf8.c_str(), paths, 3, &out, false));
     const json added = json::parse(take(out));
-    ASSERT_EQ(added.size(), 1u) << added.dump();
-    EXPECT_EQ(added[0]["path"], fileName);
+    ASSERT_EQ(added.size(), 3u) << added.dump();
+    const json* text = findPath(added, fileName);
+    const json* raster = findPath(added, rasterName);
+    const json* image = findPath(added, imageName);
+    ASSERT_TRUE(text != nullptr && raster != nullptr && image != nullptr) << added.dump();
+    EXPECT_EQ((*text)["type"], static_cast<int>(EntryType::Generic));
+    EXPECT_EQ((*raster)["type"], static_cast<int>(EntryType::GeoRaster)) << raster->dump();
+    EXPECT_EQ((*image)["type"], static_cast<int>(EntryType::GeoPanorama)) << image->dump();
+    const std::string rasterHash = (*raster)["hash"];
 
     const char* listPaths[] = {folderUtf8.c_str()};
     ASSERT_DDB_OK(DDBList(folderUtf8.c_str(), listPaths, 1, &out, "json", true, 0));
     const json listed = json::parse(take(out));
-    ASSERT_EQ(listed.size(), 1u) << listed.dump();
-    EXPECT_EQ(listed[0]["path"], fileName);
+    ASSERT_EQ(listed.size(), 3u) << listed.dump();
+    EXPECT_NE(findPath(listed, fileName), nullptr);
+    EXPECT_NE(findPath(listed, rasterName), nullptr);
+    EXPECT_NE(findPath(listed, imageName), nullptr);
 
     ASSERT_DDB_OK(DDBGet(folderUtf8.c_str(), fileName.c_str(), &out));
     EXPECT_EQ(json::parse(take(out))["path"], fileName);
 
+    // The COG build of the GeoTIFF, in the build folder of the non-ASCII dataset
+    ASSERT_DDB_OK(DDBBuild(folderUtf8.c_str(), rasterName.c_str(), nullptr, false, false));
+    ASSERT_DDB_OK(DDBResolveBuildFile(folderUtf8.c_str(), rasterHash.c_str(), "cog/cog.tif", &out));
+    const fs::path cog = io::fromUtf8(take(out));
+    EXPECT_EQ(cog, fs::absolute(folder / ".ddb" / "build" / rasterHash / "cog" / "cog.tif"));
+    EXPECT_GT(fs::file_size(cog), 0u);
+
+    // A thumbnail of the GeoTIFF, written to a non-ASCII file name
+    const fs::path thumb = folder / io::fromUtf8("thumb_\xC3\xA7.webp");  // "thumb_ç.webp"
+    ASSERT_DDB_OK(DDBGenerateThumbnail(rasterUtf8.c_str(), 32, io::toUtf8(thumb).c_str()));
+    EXPECT_GT(fs::file_size(thumb), 0u);
+
+    // A build lock in the non-ASCII folder is seen by the probe, and released
+    const std::string lockedUtf8 = io::toUtf8(folder / io::fromUtf8("out_\xC3\xB1"));  // "out_ñ"
+    fs::create_directories(io::fromUtf8(lockedUtf8));
+    {
+        const BuildLock lock(lockedUtf8, false);
+        EXPECT_TRUE(fs::exists(io::fromUtf8(buildLockPath(lockedUtf8))));
+        EXPECT_TRUE(BuildLock::isHeld(lockedUtf8));
+    }
+    EXPECT_FALSE(BuildLock::isHeld(lockedUtf8));
+
+    // Delta and apply: a second dataset under the non-ASCII folder receives the files
+    const fs::path target = folder / io::fromUtf8("copia_\xC3\xA8");  // "copia_è"
+    fs::create_directories(target);
+    const std::string targetUtf8 = io::toUtf8(target);
+    ASSERT_DDB_OK(DDBInit(targetUtf8.c_str(), &out));
+    take(out);
+    ASSERT_DDB_OK(DDBGetStamp(folderUtf8.c_str(), &out));
+    const std::string sourceStamp = take(out);
+    ASSERT_DDB_OK(DDBGetStamp(targetUtf8.c_str(), &out));
+    const std::string targetStamp = take(out);
+    ASSERT_DDB_OK(DDBDelta(sourceStamp.c_str(), targetStamp.c_str(), &out, "json"));
+    const std::string delta = take(out);
+    EXPECT_EQ(json::parse(delta)["adds"].size(), 3u) << delta;
+    ASSERT_DDB_OK(DDBApplyDelta(delta.c_str(), folderUtf8.c_str(), targetUtf8.c_str(), MergeStrategy::KeepTheirs,
+                                "[]", &out));
+    EXPECT_EQ(json::parse(take(out)), json::array());
+    EXPECT_TRUE(fs::exists(target / io::fromUtf8(fileName)));
+    EXPECT_TRUE(fs::exists(target / io::fromUtf8(rasterName)));
+    ASSERT_DDB_OK(DDBGet(targetUtf8.c_str(), imageName.c_str(), &out));
+    EXPECT_EQ(json::parse(take(out))["type"], static_cast<int>(EntryType::GeoPanorama));
+
     int closed = 0;
     ASSERT_DDB_OK(DDBReleaseConnections(folderUtf8.c_str(), &closed));
+    ASSERT_DDB_OK(DDBReleaseConnections(targetUtf8.c_str(), &closed));
 }
 
 }  // namespace
