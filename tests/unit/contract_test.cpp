@@ -296,7 +296,7 @@ namespace
                     "build-artifacts.schema.json"),
             artifacts);
 
-        DDBListEntriesOptions options{sizeof(DDBListEntriesOptions), true, false, true};
+        DDBListEntriesOptions options{sizeof(DDBListEntriesOptions), true, false, true, 0};
         ASSERT_DDB_OK(DDBListEntriesEx(r.c_str(), "", "", "", &options, &out));
         contract::expectMatchesFixture(
             fixture("list-entries-ex",

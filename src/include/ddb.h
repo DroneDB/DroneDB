@@ -895,6 +895,7 @@ extern "C"
         bool recursive;      // the whole subtree of the folder (true) or its children only (false)
         bool withDetails;    // full entries (true) or path, hash, type, mtime, size, depth (false)
         bool withBuild;      // each entry gets its "build" object (see the build manifest above)
+        uint8_t reserved;    // must be 0: a later ABI may give it a meaning (DDBERR_INVALIDARGS otherwise)
     } DDBListEntriesOptions;
 
     DDB_STATIC_ASSERT(sizeof(DDBListEntriesOptions) == 8, "DDBListEntriesOptions layout");
@@ -902,6 +903,7 @@ extern "C"
     DDB_STATIC_ASSERT(offsetof(DDBListEntriesOptions, recursive) == 4, "DDBListEntriesOptions layout");
     DDB_STATIC_ASSERT(offsetof(DDBListEntriesOptions, withDetails) == 5, "DDBListEntriesOptions layout");
     DDB_STATIC_ASSERT(offsetof(DDBListEntriesOptions, withBuild) == 6, "DDBListEntriesOptions layout");
+    DDB_STATIC_ASSERT(offsetof(DDBListEntriesOptions, reserved) == 7, "DDBListEntriesOptions layout");
 
     /** DDBListEntries with options (ABI 1.1): with withBuild false the output is DDBListEntries',
      * byte for byte; with withBuild true every entry also has "build", its build object (see
@@ -915,7 +917,8 @@ extern "C"
      * @param output pointer to C-string where to store the JSON array, sorted by path (free
      *               with DDBFree)
      * @return DDBERR_NONE on success; DDBERR_INVALIDARGS when ddbPath is empty, options is NULL
-     *         or has a structSize below 8 or unknown non-zero fields, types holds an unknown type
+     *         or has a structSize below 8, a non-zero reserved byte or unknown non-zero fields,
+     *         types holds an unknown type
      *         or output is NULL; DDBERR_BUSY on database contention */
     DDB_DLL DDBErr DDBListEntriesEx(const char *ddbPath, const char *folder, const char *namePattern,
                                     const char *types, const DDBListEntriesOptions *options, char **output);

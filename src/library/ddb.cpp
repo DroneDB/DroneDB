@@ -605,6 +605,8 @@ DDBErr DDBListEntriesEx(const char* ddbPath, const char* folder, const char* nam
     return guardedOutput<kAbi11Codes>(output, [&] {
         requireDdbPath(ddbPath);
         const auto opts = requireOptions(options, sizeof(DDBListEntriesOptions), "options");
+        if (opts.reserved != 0)
+            throw InvalidArgsException("options->reserved must be 0");
         requireOutput(output);
 
         const EntryQuery query = entryQuery(folder, opts.recursive, namePattern, types, opts.withDetails);

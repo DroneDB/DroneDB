@@ -204,6 +204,11 @@ namespace
         DDBListEntriesOptions tooSmall = options;
         tooSmall.structSize = 4;
         EXPECT_DDB_FAILS(DDBERR_INVALIDARGS, DDBListEntriesEx(r, "", "", "", &tooSmall, &out), out);
+        // The padding byte is reserved: a later ABI may put a 1-byte field there, which this
+        // library must refuse rather than ignore
+        DDBListEntriesOptions reservedSet = options;
+        reservedSet.reserved = 1;
+        EXPECT_DDB_FAILS(DDBERR_INVALIDARGS, DDBListEntriesEx(r, "", "", "", &reservedSet, &out), out);
 
         // A struct of a later ABI: accepted while its unknown fields are zero
         struct Later
