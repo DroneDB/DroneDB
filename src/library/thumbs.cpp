@@ -69,8 +69,9 @@ void generateThumbs(const std::vector<std::string>& input,
         const EntryType type = fingerprint(fp);
         io::Path p(fp);
 
-        // Point clouds are recognized by the .copc.laz suffix produced by buildCopc().
-        if (supportsThumbnails(type) || isCopcPath(fp.string())) {
+        // Files rendered by the thumbnail generator of an entry handler: build artifacts
+        // (the .copc.laz of buildCopc(), the .rad of buildGsplat()) and .spz splats
+        if (supportsThumbnails(type) || findThumbnailGenerator(fp) != nullptr) {
             fs::path outImagePath;
             if (useCrc) {
                 outImagePath = output / getThumbFilename(fp, p.getModifiedTime(), thumbSize);
@@ -784,12 +785,10 @@ fs::path generateThumb(const fs::path& inputPath,
     LOGD << "OutImagePath = " << outImagePath;
     LOGD << "Size = " << thumbSize;
 
-    if (isCopcPath(inputPath.string()))
-        generatePointCloudThumb(inputPath, thumbSize, outImagePath, outBuffer, outBufferSize);
-    else if (isRadPath(inputPath.string()))
-        generateSplatThumbFromRad(inputPath, thumbSize, outImagePath, outBuffer, outBufferSize);
-    else if (isSpzPath(inputPath.string()))
-        generateSplatThumb(inputPath, thumbSize, outImagePath, outBuffer, outBufferSize);
+    // COPC, RAD and SPZ files are rendered by their entry handler's generator, every other
+    // file as an image
+    if (const ThumbnailGenerator* generator = findThumbnailGenerator(inputPath))
+        generator->generate(inputPath, thumbSize, outImagePath, outBuffer, outBufferSize);
     else
         generateImageThumb(inputPath, thumbSize, outImagePath, outBuffer, outBufferSize);
 

@@ -10,10 +10,27 @@
 #include "entry_handlers_builtin.h"
 #include "gsplat.h"
 #include "mio.h"
+#include "rad.h"
+#include "thumbs.h"
 
 namespace ddb {
 
 namespace {
+
+// On-demand thumbnails of the .rad artifact and of .spz files
+class SplatThumbnailGenerator : public ThumbnailGenerator {
+  public:
+    bool accepts(const fs::path& input) const override {
+        return isRadPath(input.string()) || isSpzPath(input.string());
+    }
+    void generate(const fs::path& input, int thumbSize, const fs::path& outImagePath, uint8_t** outBuffer,
+                  int* outBufferSize) const override {
+        if (isRadPath(input.string()))
+            generateSplatThumbFromRad(input, thumbSize, outImagePath, outBuffer, outBufferSize);
+        else
+            generateSplatThumb(input, thumbSize, outImagePath, outBuffer, outBufferSize);
+    }
+};
 
 void parseGaussianSplatMetadata(const fs::path &path, Entry &entry)
 {
@@ -76,6 +93,11 @@ class GaussianSplatEntryHandler : public EntryHandler {
     }
 
     ThumbnailSource thumbnailSource() const override { return ThumbnailSource::BuildArtifact; }
+
+    const ThumbnailGenerator* thumbnailGenerator() const override { return &thumbnails_; }
+
+  private:
+    SplatThumbnailGenerator thumbnails_;
 };
 
 }  // namespace

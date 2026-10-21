@@ -115,6 +115,35 @@ TEST(entryHandler, ThumbnailSourcesArePinned) {
     }
 }
 
+// generateThumb() and the tilers dispatched on these suffixes before the registry
+TEST(entryHandler, ThumbnailGeneratorsAndTilerFactoriesArePinned) {
+    const ThumbnailGenerator* copc = entryHandler(PointCloud).thumbnailGenerator();
+    const ThumbnailGenerator* splat = entryHandler(GaussianSplat).thumbnailGenerator();
+    ASSERT_NE(copc, nullptr);
+    ASSERT_NE(splat, nullptr);
+    EXPECT_EQ(findThumbnailGenerator("build/h/copc/cloud.copc.laz"), copc);
+    EXPECT_EQ(findThumbnailGenerator("build/h/gsplat/model.rad"), splat);
+    EXPECT_EQ(findThumbnailGenerator("scene.SPZ"), splat);
+    EXPECT_EQ(findThumbnailGenerator("cloud.laz"), nullptr);
+    EXPECT_EQ(findThumbnailGenerator("photo.jpg"), nullptr);
+    EXPECT_EQ(findThumbnailGenerator("ortho.tif"), nullptr);
+
+    const TilerFactory* copcTiles = entryHandler(PointCloud).tilerFactory();
+    ASSERT_NE(copcTiles, nullptr);
+    EXPECT_EQ(findTilerFactory("build/h/copc/cloud.copc.laz"), copcTiles);
+    EXPECT_EQ(findTilerFactory("ortho.tif"), nullptr);
+    EXPECT_EQ(findTilerFactory("cloud.laz"), nullptr);
+
+    for (const auto t : AllBuiltinTypes) {
+        SCOPED_TRACE(typeToHuman(t));
+        EXPECT_EQ(entryHandler(t).tilesWithoutReprojection(), t == GeoRaster);
+        if (t != PointCloud && t != GaussianSplat)
+            EXPECT_EQ(entryHandler(t).thumbnailGenerator(), nullptr);
+        if (t != PointCloud)
+            EXPECT_EQ(entryHandler(t).tilerFactory(), nullptr);
+    }
+}
+
 // The XI-04 role vocabulary, with paths composed from build_layout.h
 TEST(entryHandler, ArtifactManifestIsPinned) {
     using Row = std::tuple<std::string, std::string, ArtifactKind, std::string, bool>;  // role, path, kind, index, legacy

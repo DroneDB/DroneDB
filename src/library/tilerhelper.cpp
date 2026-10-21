@@ -4,7 +4,6 @@
 
 #include "tilerhelper.h"
 #include "gdaltiler.h"
-#include "pctiler.h"
 #include "threadlock.h"
 #include "raster_cache.h"
 #include "randomutil.h"
@@ -15,6 +14,7 @@
 #include <vector>
 
 #include "entry.h"
+#include "entry_handler.h"
 #include "exceptions.h"
 #include "geoproject.h"
 #include "hash.h"
@@ -86,8 +86,10 @@ namespace ddb
                                        const fs::path &outputFolder, const std::string &tileablePathHash,
                                        const std::function<std::string(Tiler &)> &render)
     {
-        const bool copc = isCopcPath(tileablePath.string());
-        const fs::path localPath = copc ? tileablePath : toLocalFile(tileablePath, tileablePathHash);
+        // Files an entry handler tiles itself (COPC point clouds) are read in place; the
+        // others are downloaded when remote and tiled by GDAL
+        const TilerFactory *factory = findTilerFactory(tileablePath);
+        const fs::path localPath = factory != nullptr ? tileablePath : toLocalFile(tileablePath, tileablePathHash);
 
         // A forced recreation must not be served by a tiler prepared before it
         if (forceRecreate)
@@ -95,8 +97,8 @@ namespace ddb
 
         const TilerKey key{localPath.string(), tileSize, tms, outputFolder.string()};
         auto tiler = RasterCache::instance().acquireTiler(key, [&]() -> std::unique_ptr<Tiler> {
-            if (copc)
-                return std::make_unique<PointCloudTiler>(localPath.string(), outputFolder.string(), tileSize, tms);
+            if (factory != nullptr)
+                return factory->create(localPath, outputFolder, tileSize, tms);
 
             const fs::path fileToTile = toGeoTIFF(localPath, tileSize, forceRecreate, "", tileablePathHash);
             return std::make_unique<GDALTiler>(fileToTile.string(), outputFolder.string(), tileSize, tms);
@@ -205,9 +207,7 @@ namespace ddb
     {
         const fs::path localTileablePath = toLocalFile(tileablePath, tileablePathHash);
 
-        const EntryType type = fingerprint(localTileablePath);
-
-        if (type == EntryType::GeoRaster)
+        if (entryHandler(fingerprint(localTileablePath)).tilesWithoutReprojection())
         {
             // Georasters can be tiled directly
             return localTileablePath;
@@ -290,10 +290,10 @@ namespace ddb
         // Owned: parseZRange, std::stoi and tile() throw on bad input or failed tiles
         std::unique_ptr<Tiler> tiler;
 
-        if (isCopcPath(input.string()))
+        if (const TilerFactory *factory = findTilerFactory(input))
         {
-            // COPC point cloud
-            tiler = std::make_unique<PointCloudTiler>(input.string(), output.string(), tileSize, tms);
+            // Tiled by its entry handler (COPC point cloud)
+            tiler = factory->create(input, output, tileSize, tms);
         }
         else
         {

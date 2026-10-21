@@ -979,6 +979,24 @@ TEST(gsplat, thumbnailFromSpzAtTwoSizes) {
     EXPECT_GT(fileSize(thumb512), fileSize(thumb128));
 }
 
+// generateThumbs ("ddb thumbs") renders every file a thumbnail generator of the entry handler
+// registry accepts, as generateThumb (DDBThumbnail) does: a .spz is no longer skipped.
+TEST(gsplat, generateThumbsRendersSpz) {
+    TestArea ta(TEST_NAME, true);
+    const fs::path ply = ta.getPath("scene.ply");
+    writeSplatPly(ply, 400, 1);
+    const fs::path spz = ta.getPath("scene.spz");
+    ddb::convertToSpz(ply.string(), spz.string());
+    ASSERT_TRUE(fs::exists(spz));
+
+    const fs::path outdir = ta.getFolder("thumbs");
+    ddb::generateThumbs({spz.string()}, outdir, 128, false);
+
+    const fs::path thumb = outdir / "scene.webp";
+    ASSERT_TRUE(fs::exists(thumb));
+    EXPECT_TRUE(isWebp(thumb));
+}
+
 // ---------------------------------------------------------------------------
 // Build-pipeline integration (DB -> isBuildable -> build -> isBuildComplete)
 // ---------------------------------------------------------------------------

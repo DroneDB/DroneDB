@@ -8,11 +8,32 @@
 #include "entry.h"
 #include "entry_handlers_builtin.h"
 #include "mio.h"
+#include "pctiler.h"
 #include "pointcloud.h"
+#include "thumbs.h"
 
 namespace ddb {
 
 namespace {
+
+// The COPC artifact of a point cloud: its thumbnail and its tiles
+class CopcThumbnailGenerator : public ThumbnailGenerator {
+  public:
+    bool accepts(const fs::path& input) const override { return isCopcPath(input.string()); }
+    void generate(const fs::path& input, int thumbSize, const fs::path& outImagePath, uint8_t** outBuffer,
+                  int* outBufferSize) const override {
+        generatePointCloudThumb(input, thumbSize, outImagePath, outBuffer, outBufferSize);
+    }
+};
+
+class CopcTilerFactory : public TilerFactory {
+  public:
+    bool accepts(const fs::path& tileablePath) const override { return isCopcPath(tileablePath.string()); }
+    std::unique_ptr<Tiler> create(const fs::path& input, const fs::path& outputFolder, int tileSize,
+                                  bool tms) const override {
+        return std::make_unique<PointCloudTiler>(input.string(), outputFolder.string(), tileSize, tms);
+    }
+};
 
 void parsePointCloudMetadata(const fs::path &path, Entry &entry)
 {
@@ -58,6 +79,14 @@ class PointCloudEntryHandler : public EntryHandler {
     }
 
     ThumbnailSource thumbnailSource() const override { return ThumbnailSource::BuildArtifact; }
+
+    const ThumbnailGenerator* thumbnailGenerator() const override { return &thumbnails_; }
+
+    const TilerFactory* tilerFactory() const override { return &tiler_; }
+
+  private:
+    CopcThumbnailGenerator thumbnails_;
+    CopcTilerFactory tiler_;
 };
 
 }  // namespace

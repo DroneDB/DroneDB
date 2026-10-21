@@ -39,6 +39,13 @@ namespace ddb
                                          const fs::path &outImagePath,
                                          uint8_t **outBuffer, int *outBufferSize,
                                          uint64_t pointBudget = 0);
+    // Thumbnails of a Gaussian Splat, from a .spz file or from the level-of-detail .rad artifact
+    DDB_DLL void generateSplatThumb(const fs::path &spzPath, int thumbSize,
+                                    const fs::path &outImagePath,
+                                    uint8_t **outBuffer, int *outBufferSize);
+    DDB_DLL void generateSplatThumbFromRad(const fs::path &radPath, int thumbSize,
+                                           const fs::path &outImagePath,
+                                           uint8_t **outBuffer, int *outBufferSize);
     DDB_DLL void cleanupThumbsUserCache();
 
 }
