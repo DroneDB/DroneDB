@@ -680,7 +680,6 @@ DDB_DLL DDBErr DDBTile(const char* inputPath,
     if (tz < 0 || tx < 0 || ty < 0)
         throw InvalidArgsException("Invalid tile coordinates");
 
-    utils::copyToPtr("", outputTilePath);
     const auto tilePath = ddb::TilerHelper::getFromUserCache(std::string(inputPath),
                                                              tz,
                                                              tx,

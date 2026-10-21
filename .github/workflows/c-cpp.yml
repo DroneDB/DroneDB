@@ -163,7 +163,9 @@ jobs:
           LC_MESSAGES: C  # untranslated "warning:" lines for the ratchet
         run: |
           set -o pipefail
-          cd build && make -j$(nproc) 2>&1 | tee build.log
+          # --output-sync=target: parallel compilers must not interleave diagnostics, or the
+          # warning ratchet reads cut lines (seen as "-W(no-flag)")
+          cd build && make -j$(nproc) --output-sync=target 2>&1 | tee build.log
       - name: Check compiler warnings (ratchet)
         # Fails on a new warning in src/, apps/ or tests/ (cmake/warnings-baseline.txt, measured with
         # this job's GCC), and on a large unexplained drop (the baseline must then be updated).

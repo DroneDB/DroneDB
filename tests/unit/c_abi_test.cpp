@@ -564,8 +564,7 @@ namespace
         EXPECT_DDB_INVALID(DDBMemoryTile(raster.c_str(), z, x, -1, &buf, &size));
         EXPECT_DDB_INVALID(DDBMemoryTile(raster.c_str(), z, x, y, &buf, &size, 0)); // not a power of 2
         EXPECT_DDB_INVALID(DDBTile(ta.getPath("missing.tif").string().c_str(), z, x, y, &tilePath));
-        DDBFree(tilePath); // DDBTile sets the output to "" before it fails
-        tilePath = nullptr;
+        EXPECT_EQ(tilePath, nullptr) << "a failed DDBTile leaves the output untouched";
 
         ASSERT_DDB_OK(DDBTile(raster.c_str(), z, x, y, &tilePath));
         const auto path = take(tilePath);
