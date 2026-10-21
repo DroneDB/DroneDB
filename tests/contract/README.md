@@ -84,6 +84,12 @@ with ddb).
 | `raster-info` | `DDBGetRasterInfo(<root>/ortho.tif)` | `raster-info` | - |
 | `raster-metadata` | `DDBGetRasterMetadata(<root>/ortho.tif, NULL, NULL)`: per-band statistics | `raster-metadata` | - |
 | `raster-metadata-formula` | `DDBGetRasterMetadata(<root>/ortho.tif, "VARI", "RGB")`: formula statistics and histogram | `raster-metadata` | - |
+| `build-artifacts` | `DDBBuild(<root>, "ortho.tif")`, then `DDBGetBuildArtifacts` of a built (COG), two buildable and not built, a non-buildable file, a folder and a missing path (see [Build manifest](#build-manifest)) | `build-artifacts` | - |
+| `build-artifacts-pending` | The `pending-build-info` dataset (`roads.shp` deferred), then `DDBGetBuildArtifacts(<root>, ["roads.shp"])` | `build-artifacts` | `lastAttempt` |
+| `list-entries-ex` | `DDBBuild(<root>, "ortho.tif")`, then `DDBListEntriesEx(<root>, "", "", "", {recursive=true, withDetails=false, withBuild=true})` | `list-entries-ex` | - |
+| `resolve-build-file` | `DDBResolveBuildFile(<root>, <hash of ortho.tif>, "cog/cog.tif")` after its build: a path, held as a JSON string | `build-file` | - |
+| `copy-build-artifacts` | `DDBCopyBuildArtifacts(<root>, <root2>, <hash of ortho.tif>)` after its build, `<root2>` a dataset with `ortho.tif` | `copy-build-artifacts` | - |
+| `entry-types` | `DDBGetEntryTypes()` (no dataset) | `entry-types` | - |
 | `capabilities` | `DDBGetCapabilities()` (no dataset): ABI version, error codes, error reasons, cancellable exports, the symbol manifest | `capabilities` | `version` |
 | `normalize-path`, `normalize-path-rejected` | `DDBNormalizePath("photos\\2024/./a.jpg", "[\".uploads\"]")`, `DDBNormalizePath(".uploads/x", "[\".uploads\"]")` (no dataset) | `normalize-path` | - |
 | `info-drone-image`, `get-drone-image`, `stac-item-drone-image` | `DDBInfo`, `DDBGet`, `DDBStac` of `DJI_0018.JPG` (integration) | `entries`, `entry`, `stac-item` | `depth` (info) |
@@ -117,6 +123,34 @@ caller builds the rest from what is left:
 
 The existing `DDBStac` and `DDBStacItemCollection` outputs are unchanged (their fixtures did not
 change).
+
+## Build manifest
+
+`DDBGetEntryTypes`, `DDBGetBuildArtifacts`, `DDBResolveBuildFile`, `DDBCopyBuildArtifacts` and
+`DDBListEntriesEx` (XI-04, ABI 1.1) let a host serve builds without knowing their layout
+(decision D8). The vocabulary and the fields are documented in `ddb.h` ("Build manifest");
+`build-artifacts.schema.json` holds the shared shapes: `$defs/build` (the build object of an
+entry, also embedded by `DDBListEntriesEx`) and `$defs/artifact`.
+
+* An artifact is identified by its `role`; its `path` is relative to the build `root` and to the
+  URL `.../build/{hash}/`. A host never composes `cog/cog.tif` itself.
+* Only artifacts that exist are listed; a directory artifact (`kind: "dir"`) exists when its
+  `index` does. A `legacy` artifact (`pointcloud.ept`) is listed only when none of the type's
+  current artifacts exists.
+* `mediaType` is the media type of the file a client opens: the file itself, or the index of a
+  directory (so `vector.mvt` is `application/json`, its TileJSON; the tiles are served by file
+  name). The values: `raster.cog` `image/tiff; application=geotiff; profile=cloud-optimized`,
+  `pointcloud.copc` `application/vnd.laszip+copc`, `vector.gpkg`
+  `application/geopackage+sqlite3` (the IANA registration), `model.nexus`, `gsplat.lod`,
+  `gsplat.spz` `application/octet-stream`, the JSON artifacts and directory indexes
+  `application/json`.
+* `downloadName` is set for the three artifacts a download offers today: `cog.tif`,
+  `cloud.copc.laz`, `source.gpkg`.
+* `state` reads the build lock without reclaiming it (`BuildLock::isHeld`), so a listing never
+  changes the dataset.
+
+`DDBResolveBuildFile` returns a plain string, not JSON: its fixture holds it as a JSON string
+under the `<root>` placeholder.
 
 ## Path vectors
 
@@ -219,6 +253,12 @@ Registry has to adopt first.
 * 2026-10-21: `capabilities` gains the error codes `INVALIDARGS` (7), `RETRYABLE` (8) and
   `SHUTDOWN` (9), the `errorReasons` array (the reasons of `DDBGetLastErrorReason`) and the new
   export `DDBGetLastErrorReason` (XI-02, DQ-10, ABI 1.1).
+
+* 2026-10-21: `build-artifacts`, `build-artifacts-pending`, `list-entries-ex`,
+  `resolve-build-file`, `copy-build-artifacts` and `entry-types` added with their schemas
+  (XI-04, ABI 1.1: `DDBGetBuildArtifacts`, `DDBListEntriesEx`, `DDBResolveBuildFile`,
+  `DDBCopyBuildArtifacts`, `DDBGetEntryTypes`; see [Build manifest](#build-manifest));
+  `capabilities` lists the new exports. The existing fixtures did not change.
 
 ## Cross-repository CI
 

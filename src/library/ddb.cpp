@@ -27,6 +27,7 @@
 
 #include "build.h"
 #include "build_budget.h"
+#include "build_manifest.h"
 #include "c_api_util.h"
 #include "database.h"
 #include "databasepool.h"
@@ -83,6 +84,7 @@ using capi::optStr;
 using capi::parseJsonArg;
 using capi::pathArg;
 using capi::requireDdbPath;
+using capi::requireOptions;
 using capi::requireOutput;
 using capi::requirePathList;
 using capi::requireText;
@@ -470,24 +472,40 @@ DDBErr DDBList(const char* ddbPath,
     });
 }
 
+// The query of DDBListEntries and DDBListEntriesEx
+static EntryQuery entryQuery(const char* folder, bool recursive, const char* namePattern, const char* types,
+                             bool withDetails) {
+    EntryQuery query;
+    query.folder = optStr(folder);
+    query.recursive = recursive;
+    query.namePattern = optStr(namePattern);
+    query.types = utils::parseEntryTypeList(types, /*allowDirectory=*/true);
+    query.withDetails = withDetails;
+    return query;
+}
+
 DDBErr DDBListEntries(const char* ddbPath, const char* folder, bool recursive, const char* namePattern,
                       const char* types, bool withDetails, char** output) {
     return guardedOutput(output, [&] {
         requireDdbPath(ddbPath);
         requireOutput(output);
 
-        EntryQuery query;
-        query.folder = optStr(folder);
-        query.recursive = recursive;
-        query.namePattern = optStr(namePattern);
-        query.types = utils::parseEntryTypeList(types, /*allowDirectory=*/true);
-        query.withDetails = withDetails;
-
+        const EntryQuery query = entryQuery(folder, recursive, namePattern, types, withDetails);
         const auto db = ddb::open(std::string(ddbPath), false);
+        return listEntriesJson(db.get(), query, false);
+    });
+}
 
-        std::ostringstream ss;
-        writeEntries(ss, listEntries(db.get(), query), "json");
-        return ss.str();
+DDBErr DDBListEntriesEx(const char* ddbPath, const char* folder, const char* namePattern, const char* types,
+                        const DDBListEntriesOptions* options, char** output) {
+    return guardedOutput<kAbi11Codes>(output, [&] {
+        requireDdbPath(ddbPath);
+        const auto opts = requireOptions(options, sizeof(DDBListEntriesOptions), "options");
+        requireOutput(output);
+
+        const EntryQuery query = entryQuery(folder, opts.recursive, namePattern, types, opts.withDetails);
+        const auto db = ddb::open(std::string(ddbPath), false);
+        return listEntriesJson(db.get(), query, opts.withBuild);
     });
 }
 
@@ -1043,6 +1061,52 @@ DDBErr DDBGetBuildStatus(const char* ddbPath, const char** paths, int numPaths, 
         for (const auto& s : statuses)
             j.push_back({{"path", s.path}, {"exists", s.exists}, {"buildable", s.buildable}, {"complete", s.complete}});
         return j;
+    });
+}
+
+// ------------------------------------------------------------------ build manifest (XI-04)
+
+DDBErr DDBGetEntryTypes(char** output) {
+    return guardedOutput<kAbi11Codes>(output, [&] {
+        requireOutput(output);
+        return entryTypesJson();
+    });
+}
+
+DDBErr DDBGetBuildArtifacts(const char* ddbPath, const char** paths, int numPaths, char** output) {
+    return guardedOutput<kAbi11Codes>(output, [&] {
+        requireDdbPath(ddbPath);
+        const auto pathList = capi::toStringList(paths, numPaths);
+        requireOutput(output);
+
+        const auto db = ddb::open(std::string(ddbPath), false);
+        return getBuildArtifactsJson(db.get(), pathList);
+    });
+}
+
+DDBErr DDBResolveBuildFile(const char* ddbPath, const char* hash, const char* path, char** outPath) {
+    return guardedOutput<kAbi11Codes>(outPath, [&] {
+        requireDdbPath(ddbPath);
+        requireText(hash, "No hash provided");
+        requireText(path, "No path provided");
+        requireOutput(outPath);
+
+        const auto db = ddb::open(std::string(ddbPath), false);
+        return io::toUtf8(resolveBuildFile(db.get(), hash, path));
+    });
+}
+
+DDBErr DDBCopyBuildArtifacts(const char* sourceDdbPath, const char* destinationDdbPath, const char* hash,
+                             char** output) {
+    return guardedOutput<kAbi11Codes>(output, [&] {
+        requireText(sourceDdbPath, "No source directory provided");
+        requireText(destinationDdbPath, "No destination directory provided");
+        requireText(hash, "No hash provided");
+        requireOutput(output);
+
+        const auto source = ddb::open(std::string(sourceDdbPath), false);
+        const auto destination = ddb::open(std::string(destinationDdbPath), false);
+        return copyBuildArtifacts(source.get(), destination.get(), hash);
     });
 }
 

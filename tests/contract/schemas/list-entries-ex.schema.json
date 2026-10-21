@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "libddb entry list with builds",
+  "description": "DDBListEntriesEx with withBuild=true (XI-04, ABI 1.1), sorted by path: the entries of DDBListEntries (entry.schema.json; with withDetails=false only path, hash, type, mtime, size and depth), each with its build object",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": [
+      "path",
+      "type",
+      "mtime",
+      "size",
+      "depth",
+      "build"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "path": {
+        "$ref": "entry.schema.json#/properties/path"
+      },
+      "hash": {
+        "$ref": "entry.schema.json#/properties/hash"
+      },
+      "type": {
+        "$ref": "entry.schema.json#/properties/type"
+      },
+      "properties": {
+        "$ref": "entry.schema.json#/properties/properties"
+      },
+      "mtime": {
+        "$ref": "entry.schema.json#/properties/mtime"
+      },
+      "size": {
+        "$ref": "entry.schema.json#/properties/size"
+      },
+      "depth": {
+        "$ref": "entry.schema.json#/properties/depth"
+      },
+      "point_geom": {
+        "$ref": "entry.schema.json#/properties/point_geom"
+      },
+      "polygon_geom": {
+        "$ref": "entry.schema.json#/properties/polygon_geom"
+      },
+      "meta": {
+        "$ref": "entry.schema.json#/properties/meta"
+      },
+      "build": {
+        "$ref": "build-artifacts.schema.json#/$defs/build"
+      }
+    }
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "call": "DDBBuild(<root>, \"roads.shp\") -> DDBERR_BUILDDEPMISSING, then DDBGetBuildArtifacts(<root>, [\"roads.shp\"])",
+  "description": "A dataset with roads.shp only (no .shx, .dbf), mtime 1700000000; DDBBuild deferred it",
+  "normalisation": {
+    "placeholders": [
+      "<root>"
+    ],
+    "volatileKeys": [
+      "lastAttempt"
+    ]
+  },
+  "output": [
+    {
+      "build": {
+        "artifacts": [],
+        "buildable": true,
+        "hash": "afe1bd97fb41ff4dd3fc4134a9c32e95ed6a1a0af81c20e88e20b92bbc73a30c",
+        "lastAttempt": 0,
+        "missingDependencies": [
+          "roads.shx"
+        ],
+        "root": "<root>/.ddb/build/afe1bd97fb41ff4dd3fc4134a9c32e95ed6a1a0af81c20e88e20b92bbc73a30c",
+        "source": "roads.shp",
+        "state": "pending"
+      },
+      "exists": true,
+      "hash": "afe1bd97fb41ff4dd3fc4134a9c32e95ed6a1a0af81c20e88e20b92bbc73a30c",
+      "path": "roads.shp",
+      "type": 14
+    }
+  ],
+  "schema": "build-artifacts.schema.json"
+}

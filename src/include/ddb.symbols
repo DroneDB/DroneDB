@@ -24,6 +24,7 @@ DDBCheckpoint
 DDBCleanup
 DDBClearPasswords
 DDBComputeDeltaLocals
+DDBCopyBuildArtifacts
 DDBCountVector
 DDBDelta
 DDBDescribeVector
@@ -38,8 +39,10 @@ DDBGenerateMemoryThumbnailEx
 DDBGenerateThumbnail
 DDBGet
 DDBGetAbiVersion
+DDBGetBuildArtifacts
 DDBGetBuildStatus
 DDBGetCapabilities
+DDBGetEntryTypes
 DDBGetLastError
 DDBGetLastErrorReason
 DDBGetPendingBuildInfo
@@ -61,6 +64,7 @@ DDBIsBuildPending
 DDBIsBuildable
 DDBList
 DDBListEntries
+DDBListEntriesEx
 DDBMakeCadPrj
 DDBMaskBorders
 DDBMemoryTile
@@ -89,6 +93,7 @@ DDBRenderRasterRegion
 DDBRenderRasterRegionEx
 DDBRescan
 DDBRescanEx
+DDBResolveBuildFile
 DDBSearch
 DDBSetLastError
 DDBSetTag

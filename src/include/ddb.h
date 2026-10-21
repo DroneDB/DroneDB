@@ -541,6 +541,171 @@ extern "C"
      * @return DDBERR_NONE on success, an error otherwise */
     DDB_DLL DDBErr DDBGetBuildStatus(const char *ddbPath, const char **paths, int numPaths, char **output);
 
+    /* ---- Build manifest (XI-04, ABI 1.1) -------------------------------------------------------
+     * libddb owns the build layout, the build state and the entry type rules: a host serves the
+     * roles, paths and states these exports return, and never composes a build path, names an
+     * artifact file or keeps its own list of buildable types.
+     *
+     * Artifact roles say what an artifact is for, never where it is. They are only ever added:
+     * pass an unknown role through, and ignore it where it has no use.
+     *   raster.cog       Cloud Optimized GeoTIFF of a GeoRaster (downloadable)
+     *   vector.gpkg      GeoPackage of a Vector (downloadable)
+     *   vector.mvt       Mapbox Vector Tiles of a Vector: a directory, its index the TileJSON
+     *   vector.local     drawing-coordinate metadata of a CAD drawing without a CRS (it has no MVT)
+     *   pointcloud.copc  Cloud Optimized Point Cloud (downloadable)
+     *   pointcloud.ept   Entwine Point Tiles of datasets built before COPC: a directory, legacy
+     *   model.nexus      Nexus multiresolution mesh of a Model
+     *   model.3dtiles    OGC 3D Tiles of a Model or a .3tz: a directory, its index tileset.json
+     *   gsplat.lod       level-of-detail Gaussian Splat (Spark RAD, streamed with range requests)
+     *   gsplat.spz       Gaussian Splat in SPZ
+     *   gsplat.bounds    local bounding box of a splat (JSON)
+     *   gsplat.georef    georeference of a splat (JSON)
+     *
+     * An artifact: {"role", "path", "kind", "mediaType", "downloadName"?, "index"?, "legacy"?}
+     *   path          relative to the build root ("root" below), '/'-separated; URLs append it
+     *                 to ".../build/{hash}/" and DDBResolveBuildFile takes it
+     *   kind          "file", or "dir" for a directory (index names its descriptor file; its
+     *                 other files, e.g. tiles, are "<path>/<file>")
+     *   mediaType     of the file a client opens: the file, or the index of a directory
+     *   downloadName  the file name to offer for a download; absent when the artifact is not one
+     *   index         the descriptor file of a directory, relative to path
+     *   legacy        true for an output of an older layout: read when present, never written;
+     *                 listed only when the entry has none of its current artifacts
+     *
+     * The build object of an entry (DDBGetBuildArtifacts, DDBListEntriesEx):
+     *   {"buildable": bool, "source": string|null, "hash": string|null, "root": string|null,
+     *    "state": "none"|"pending"|"building"|"complete", "missingDependencies": [string],
+     *    "lastAttempt": integer|null, "artifacts": [artifact]}
+     *   buildable  the entry is built, by itself or as a sidecar of its main file (a .dbf of a .shp)
+     *   source     dataset-relative path of the entry the artifacts belong to: the entry itself,
+     *              or the main file of a sidecar
+     *   hash       the hash of source, which names its build (URLs: ".../build/{hash}/{path}")
+     *   root       the absolute build root of source (UTF-8); it may not exist yet
+     *   state      in this order: "building" a live build holds the build lock of the entry;
+     *              "pending" a build waits for missing dependencies; "complete" the artifacts
+     *              are complete (as DDBIsBuildComplete); "none" not built, failed or incomplete
+     *   missingDependencies, lastAttempt
+     *              from the pending marker when there is one (a pending or a building entry),
+     *              [] and null otherwise: dataset-relative names, and the time of the last
+     *              attempt in Unix seconds (0 when the marker's time is unreadable)
+     *   artifacts  the artifacts that exist (a directory when its index exists), in the order
+     *              of the entry type, its primary output first: the file thumbnails and tiles
+     *              are made from (raster.cog, pointcloud.copc or pointcloud.ept, vector.gpkg,
+     *              model.nexus, gsplat.lod, model.3dtiles of a .3tz)
+     *   source, hash and root are null, state "none", the arrays empty for an entry that is not
+     *   buildable.
+     * Reading build objects changes nothing on disk: a stale lock left by a crashed build is not
+     * a build and stays in place (DDBIsBuildActive removes it). A call opens the index once; an
+     * entry that is not buildable costs no filesystem access. */
+
+    /** The entry types of libddb and what it does with them (XI-04, ABI 1.1).
+     * @param output pointer to C-string where to store the JSON array, by id (free with DDBFree).
+     *               Each element: {"id": int, "name": string, "buildable": bool,
+     *               "thumbnail": "none"|"file"|"build", "sidecarExtensions": [string],
+     *               "roles": [string]}
+     *                 id                 the entry type value (entries' "type")
+     *                 name               its name, as DDBRescan takes it (case-insensitive)
+     *                 thumbnail          "file": rendered from the entry's file; "build": from
+     *                                    one of its artifacts, once built; "none": no thumbnail
+     *                 sidecarExtensions  lowercase extensions, without the dot, of the files that
+     *                                    belong to a main file of this type (same folder and
+     *                                    stem; the main file's extension in any letter case): a
+     *                                    sidecar's build is the main file's
+     *                 roles              every artifact role a build of this type can produce,
+     *                                    legacy ones included
+     * @return DDBERR_NONE on success, DDBERR_INVALIDARGS when output is NULL */
+    DDB_DLL DDBErr DDBGetEntryTypes(char **output);
+
+    /** The build state and the existing artifacts of several entries, with one index open
+     * (XI-04, ABI 1.1). For a host it replaces DDBIsBuildable, DDBIsBuildActive,
+     * DDBIsBuildComplete, DDBIsBuildPending, DDBGetPendingBuildInfo and DDBGetBuildStatus.
+     * @param ddbPath path to a DroneDB database (parent of ".ddb")
+     * @param paths array of dataset-relative entry paths (exact match)
+     * @param numPaths number of paths (0 is allowed)
+     * @param output pointer to C-string where to store the JSON array, one element per input
+     *               path, in input order (free with DDBFree):
+     *               {"path", "exists": false} for a path that is not indexed, otherwise
+     *               {"path", "exists": true, "hash": string|null (null for a folder),
+     *                "type": int, "build": <the build object above>}
+     * @return DDBERR_NONE on success; DDBERR_INVALIDARGS when ddbPath is empty, paths is NULL
+     *         or holds a NULL, numPaths is negative or output is NULL; DDBERR_BUSY on database
+     *         contention; DDBERR_EXCEPTION otherwise (no database at ddbPath, ...) */
+    DDB_DLL DDBErr DDBGetBuildArtifacts(const char *ddbPath, const char **paths, int numPaths, char **output);
+
+    /** The absolute path of a file of a build, checked (XI-04, ABI 1.1): it serves the
+     * ".../build/{hash}/{path}" URLs, tiles included.
+     * @param ddbPath path to a DroneDB database (parent of ".ddb")
+     * @param hash the hash of the build ("hash" of a build object): 64 hexadecimal characters
+     * @param path the file, relative to the build root: an artifact's path, or a file below a
+     *             directory artifact ("mvt/3/4/2.pbf"). The dataset path rules apply
+     *             (DDBNormalizePath: '/' or '\' separators, no "..", not absolute).
+     * @param outPath pointer to C-string where to store the absolute path (UTF-8, free with
+     *                DDBFree)
+     * @return DDBERR_NONE on success; DDBERR_INVALIDARGS when an argument is NULL or empty, the
+     *         hash is malformed or the path breaks the path rules (traversal, absolute, ...);
+     *         DDBERR_NOTFOUND when no entry has this hash, the path is not inside one of its
+     *         artifacts (lock files and scratch folders are not served), the file does not
+     *         exist, or a link leads it out of the build root; DDBERR_BUSY on database
+     *         contention */
+    DDB_DLL DDBErr DDBResolveBuildFile(const char *ddbPath, const char *hash, const char *path, char **outPath);
+
+    /** Copy the build of an entry to another dataset, with its pending marker (XI-04, ABI 1.1):
+     * after copying or moving a file between datasets, its artifacts need no rebuild and a
+     * deferred build stays deferred. Copies the artifact folders of the types of the source
+     * entries with this hash (legacy ones included), each through a scratch folder renamed onto
+     * the destination's, which it replaces; the destination's other files are left alone. Holds
+     * the destination's build locks while it copies. The destination needs no entry with this
+     * hash yet.
+     * @param sourceDdbPath path to the DroneDB database the build is copied from
+     * @param destinationDdbPath path to the DroneDB database it is copied to (another dataset)
+     * @param hash the hash of the build ("hash" of a build object)
+     * @param output pointer to C-string where to store the JSON (free with DDBFree):
+     *               {"hash": string, "artifacts": [artifact], "pending": bool}: the artifacts
+     *               of the destination after the copy (as in a build object) and whether it has
+     *               a pending marker
+     * @return DDBERR_NONE on success, also when the source has nothing built (nothing copied);
+     *         DDBERR_INVALIDARGS when an argument is NULL or empty, the hash is malformed or
+     *         both paths are the same dataset; DDBERR_NOTFOUND when no buildable entry of the
+     *         source has this hash; DDBERR_BUILDINPROGRESS when a build of it runs in either
+     *         dataset (nothing copied: the destination can build it itself);
+     *         DDBERR_RETRYABLE when the destination's disk is (nearly) full
+     *         (DDBGetLastErrorReason); DDBERR_BUSY on database contention */
+    DDB_DLL DDBErr DDBCopyBuildArtifacts(const char *sourceDdbPath, const char *destinationDdbPath, const char *hash,
+                                         char **output);
+
+    /** Options for DDBListEntriesEx (ABI 1.1). Set structSize to sizeof(DDBListEntriesOptions)
+     * and every other field explicitly. A later ABI may append fields: a library that does not
+     * know them rejects a struct whose unknown bytes are not zero (DDBERR_INVALIDARGS). */
+    typedef struct {
+        uint32_t structSize; // sizeof(DDBListEntriesOptions)
+        bool recursive;      // the whole subtree of the folder (true) or its children only (false)
+        bool withDetails;    // full entries (true) or path, hash, type, mtime, size, depth (false)
+        bool withBuild;      // each entry gets its "build" object (see the build manifest above)
+    } DDBListEntriesOptions;
+
+    DDB_STATIC_ASSERT(sizeof(DDBListEntriesOptions) == 8, "DDBListEntriesOptions layout");
+    DDB_STATIC_ASSERT(offsetof(DDBListEntriesOptions, structSize) == 0, "DDBListEntriesOptions layout");
+    DDB_STATIC_ASSERT(offsetof(DDBListEntriesOptions, recursive) == 4, "DDBListEntriesOptions layout");
+    DDB_STATIC_ASSERT(offsetof(DDBListEntriesOptions, withDetails) == 5, "DDBListEntriesOptions layout");
+    DDB_STATIC_ASSERT(offsetof(DDBListEntriesOptions, withBuild) == 6, "DDBListEntriesOptions layout");
+
+    /** DDBListEntries with options (ABI 1.1): with withBuild false the output is DDBListEntries',
+     * byte for byte; with withBuild true every entry also has "build", its build object (see
+     * the build manifest above), read with the same index connection, so a listing with build
+     * states is one call.
+     * @param ddbPath path to a DroneDB database (parent of ".ddb")
+     * @param folder dataset-relative folder, "" or NULL for the dataset root; a file selects itself
+     * @param namePattern file name pattern as DDBListEntries takes it, "" or NULL for every name
+     * @param types comma-separated entry types as DDBListEntries takes them, "" or NULL for all
+     * @param options see DDBListEntriesOptions
+     * @param output pointer to C-string where to store the JSON array, sorted by path (free
+     *               with DDBFree)
+     * @return DDBERR_NONE on success; DDBERR_INVALIDARGS when ddbPath is empty, options is NULL
+     *         or has a structSize below 8 or unknown non-zero fields, types holds an unknown type
+     *         or output is NULL; DDBERR_BUSY on database contention */
+    DDB_DLL DDBErr DDBListEntriesEx(const char *ddbPath, const char *folder, const char *namePattern,
+                                    const char *types, const DDBListEntriesOptions *options, char **output);
+
     /** Add metadata
      *  @param ddbPath path to the source DroneDB database (parent of ".ddb")
      *  @param path Entry path to associate metadata with (or "" to add metadata to the DroneDB database itself)

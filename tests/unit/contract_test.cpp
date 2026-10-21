@@ -276,6 +276,97 @@ namespace
         DDBReleaseConnections(r.c_str(), nullptr);
     }
 
+    // XI-04: the build manifest. ortho.tif built (COG), layer.geojson and cloud.las buildable and
+    // not built, a.txt and the folder sub not buildable, a path that is not indexed
+    TEST_F(ContractFixtures, BuildArtifacts)
+    {
+        EnvVarGuard noDiskFloor("DDB_MIN_FREE_DISK_MB", "0");
+        const std::string r = root.string();
+        ASSERT_DDB_OK(DDBBuild(r.c_str(), "ortho.tif", nullptr, false, false));
+
+        const char *paths[] = {"ortho.tif", "layer.geojson", "cloud.las", "a.txt", "sub", "missing.tif"};
+        char *out = nullptr;
+        ASSERT_DDB_OK(DDBGetBuildArtifacts(r.c_str(), paths, 6, &out));
+        const json artifacts = contract::takeJson(out);
+        contract::expectMatchesFixture(
+            fixture("build-artifacts",
+                    "DDBBuild(<root>, \"ortho.tif\"), then DDBGetBuildArtifacts(<root>, [\"ortho.tif\", "
+                    "\"layer.geojson\", \"cloud.las\", \"a.txt\", \"sub\", \"missing.tif\"])",
+                    "build-artifacts.schema.json"),
+            artifacts);
+
+        DDBListEntriesOptions options{sizeof(DDBListEntriesOptions), true, false, true};
+        ASSERT_DDB_OK(DDBListEntriesEx(r.c_str(), "", "", "", &options, &out));
+        contract::expectMatchesFixture(
+            fixture("list-entries-ex",
+                    "DDBBuild(<root>, \"ortho.tif\"), then DDBListEntriesEx(<root>, \"\", \"\", \"\", "
+                    "{recursive=true, withDetails=false, withBuild=true})",
+                    "list-entries-ex.schema.json"),
+            contract::takeJson(out));
+
+        const std::string hash = artifacts[0]["hash"].get<std::string>();
+        ASSERT_DDB_OK(DDBResolveBuildFile(r.c_str(), hash.c_str(), "cog/cog.tif", &out));
+        const std::string resolved = out;  // a path, not JSON
+        DDBFree(out);
+        contract::expectMatchesFixture(
+            fixture("resolve-build-file",
+                    "DDBBuild(<root>, \"ortho.tif\"), then DDBResolveBuildFile(<root>, <hash of ortho.tif>, "
+                    "\"cog/cog.tif\")",
+                    "build-file.schema.json"),
+            json(resolved));
+
+        // A second dataset with ortho.tif only: the build travels with the file
+        const fs::path root2 = ta->getFolder("dataset2");
+        contract::makeDataset(root2, {contract::inputsDir() / "ortho.tif"});
+        const std::string r2 = root2.string();
+        ASSERT_DDB_OK(DDBCopyBuildArtifacts(r.c_str(), r2.c_str(), hash.c_str(), &out));
+        contract::expectMatchesFixture(
+            fixture("copy-build-artifacts",
+                    "DDBBuild(<root>, \"ortho.tif\"), then DDBCopyBuildArtifacts(<root>, <root2>, <hash of "
+                    "ortho.tif>), <root2> a dataset with ortho.tif",
+                    "copy-build-artifacts.schema.json"),
+            contract::takeJson(out));
+        DDBReleaseConnections(r2.c_str(), nullptr);
+    }
+
+    // A pending build in the manifest: a Shapefile without its .shx and .dbf ("lastAttempt",
+    // normalised)
+    TEST(ContractFixturesPending, BuildArtifactsPending)
+    {
+        TestArea ta(TEST_NAME, true);
+        const fs::path root = ta.getFolder("dataset");
+        const fs::path shp = ta.getPath("roads.shp");
+        {
+            std::ofstream(shp, std::ios::binary) << "not a real shapefile: its .shx and .dbf are missing";
+        }
+        contract::makeDataset(root, {shp});
+
+        const std::string r = root.string();
+        EXPECT_EQ(DDBBuild(r.c_str(), "roads.shp", nullptr, false, false), DDBERR_BUILDDEPMISSING) << DDBGetLastError();
+        const char *paths[] = {"roads.shp"};
+        char *out = nullptr;
+        ASSERT_DDB_OK(DDBGetBuildArtifacts(r.c_str(), paths, 1, &out));
+        contract::expectMatchesFixture(
+            {"build-artifacts-pending",
+             "A dataset with roads.shp only (no .shx, .dbf), mtime 1700000000; DDBBuild deferred it",
+             "DDBBuild(<root>, \"roads.shp\") -> DDBERR_BUILDDEPMISSING, then DDBGetBuildArtifacts(<root>, "
+             "[\"roads.shp\"])",
+             "build-artifacts.schema.json", contract::pathPlaceholders(root, "<root>"), {"lastAttempt"}, {}},
+            contract::takeJson(out));
+        DDBReleaseConnections(r.c_str(), nullptr);
+    }
+
+    // XI-04: the entry types and what libddb does with them (no dataset)
+    TEST(ContractFixturesEntryTypes, EntryTypes)
+    {
+        char *out = nullptr;
+        ASSERT_DDB_OK(DDBGetEntryTypes(&out));
+        contract::expectMatchesFixture(
+            {"entry-types", "No input: the registered entry types", "DDBGetEntryTypes()", "entry-types.schema.json",
+             {}, {}, {}},
+            contract::takeJson(out));
+    }
+
     TEST_F(ContractFixtures, Stac)
     {
         const std::string r = root.string();

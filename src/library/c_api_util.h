@@ -21,8 +21,10 @@
 // The mapper clears the last error on entry, catches every exception, sets a message for every
 // code but DDBERR_NONE, and writes the outputs only after the body returned.
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstring>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -221,6 +223,28 @@ template <typename T>
 void requireOutput(T* output, const char* message = "Output pointer is null") {
     if (output == nullptr)
         throw InvalidArgsException(message);
+}
+
+// An options struct that starts with uint32_t structSize (XI-03), copied: the caller's
+// structSize must cover every field of the first version of the struct (minSize), and the
+// bytes a newer caller adds beyond sizeof(T) must be zero, since this library cannot honour an
+// option it does not know. Throws InvalidArgsException otherwise, or when options is NULL.
+template <typename T>
+T requireOptions(const T* options, size_t minSize, const char* name) {
+    if (options == nullptr)
+        throw InvalidArgsException(std::string("No ") + name + " provided");
+    const size_t size = options->structSize;
+    if (size < minSize)
+        throw InvalidArgsException(std::string(name) + "->structSize is " + std::to_string(size) +
+                                   ", expected at least " + std::to_string(minSize));
+    const auto* bytes = reinterpret_cast<const unsigned char*>(options);
+    for (size_t i = sizeof(T); i < size; i++)
+        if (bytes[i] != 0)
+            throw InvalidArgsException(std::string(name) + " sets a field this libddb does not know (structSize " +
+                                       std::to_string(size) + ", known " + std::to_string(sizeof(T)) + ")");
+    T copy{};
+    std::memcpy(&copy, options, std::min(size, sizeof(T)));
+    return copy;
 }
 
 // An optional string: "" for NULL

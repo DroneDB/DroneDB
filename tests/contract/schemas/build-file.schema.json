@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "libddb build file",
+  "description": "DDBResolveBuildFile (XI-04, ABI 1.1): the absolute path (UTF-8) of a file inside an artifact of a build. A plain string, not JSON; the fixture holds it as a JSON string.",
+  "type": "string",
+  "minLength": 1
+}
