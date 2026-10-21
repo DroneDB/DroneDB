@@ -164,7 +164,7 @@ namespace
         const auto dir = (root / "dir1").string();
         const char *paths[] = {dir.c_str()};
         char *listed = nullptr;
-        ASSERT_EQ(DDBList(ddbPath.c_str(), paths, 1, &listed, "json", true), DDBERR_NONE);
+        ASSERT_EQ(DDBList(ddbPath.c_str(), paths, 1, &listed, "json", true, 0), DDBERR_NONE);
         char *found = nullptr;
         ASSERT_EQ(DDBListEntries(ddbPath.c_str(), "dir1", true, "", "", true, &found), DDBERR_NONE);
         EXPECT_EQ(json::parse(found), json::parse(listed));

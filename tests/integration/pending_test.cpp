@@ -597,7 +597,7 @@ TEST(PendingBuild, PrimaryIdleTimeoutRetainsMarkerThroughFailedEntryBuild) {
         } catch (const RetryableBuildException& exception) {
             EXPECT_EQ(exception.reason(), RetryableBuildReason::IdleTimeout);
         }
-        EXPECT_EQ(DDBBuild(ds.root.string().c_str(), "sample.splat", nullptr, false), DDBERR_EXCEPTION);
+        EXPECT_EQ(DDBBuild(ds.root.string().c_str(), "sample.splat", nullptr, false, false), DDBERR_EXCEPTION);
     }
     buildlod::findBuildLodBinary(true);
     EXPECT_LT(std::chrono::steady_clock::now() - start, std::chrono::seconds(15));
@@ -648,7 +648,7 @@ TEST(PendingBuild, InvalidBuildLodDeadlineIsPermanentAndDoesNotTouchRunnerOutput
         EnvVarGuard deadline("DDB_BUILDLOD_IDLE_TIMEOUT_SECONDS", "invalid");
         EnvVarGuard enoughDisk("DDB_MIN_FREE_DISK_MB", "0");
         buildlod::findBuildLodBinary(true);
-        EXPECT_EQ(DDBBuild(ds.root.string().c_str(), "sample.splat", nullptr, false), DDBERR_EXCEPTION);
+        EXPECT_EQ(DDBBuild(ds.root.string().c_str(), "sample.splat", nullptr, false, false), DDBERR_EXCEPTION);
         EXPECT_FALSE(fs::exists(ds.pendingFile("sample.splat")));
     }
     buildlod::findBuildLodBinary(true);

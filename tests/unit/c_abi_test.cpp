@@ -127,16 +127,16 @@ namespace
         const char *nullPath[] = {nullptr};
         char *out = nullptr;
 
-        EXPECT_DDB_INVALID(DDBInfo(nullptr, 1, &out, "json"));
-        EXPECT_DDB_INVALID(DDBInfo(paths, 0, &out, "json"));
-        EXPECT_DDB_INVALID(DDBInfo(paths, -1, &out, "json"));
-        EXPECT_DDB_INVALID(DDBInfo(nullPath, 1, &out, "json"));
-        EXPECT_DDB_INVALID(DDBInfo(paths, 1, nullptr, "json"));
-        EXPECT_DDB_INVALID(DDBInfo(paths, 1, &out, nullptr));
-        EXPECT_DDB_INVALID(DDBInfo(paths, 1, &out, "json", false, 0, nullptr));
-        EXPECT_DDB_INVALID(DDBInfo(paths, 1, &out, "json", false, -1));
+        EXPECT_DDB_INVALID(DDBInfo(nullptr, 1, &out, "json", false, 0, "auto", false, true));
+        EXPECT_DDB_INVALID(DDBInfo(paths, 0, &out, "json", false, 0, "auto", false, true));
+        EXPECT_DDB_INVALID(DDBInfo(paths, -1, &out, "json", false, 0, "auto", false, true));
+        EXPECT_DDB_INVALID(DDBInfo(nullPath, 1, &out, "json", false, 0, "auto", false, true));
+        EXPECT_DDB_INVALID(DDBInfo(paths, 1, nullptr, "json", false, 0, "auto", false, true));
+        EXPECT_DDB_INVALID(DDBInfo(paths, 1, &out, nullptr, false, 0, "auto", false, true));
+        EXPECT_DDB_INVALID(DDBInfo(paths, 1, &out, "json", false, 0, nullptr, false, true));
+        EXPECT_DDB_INVALID(DDBInfo(paths, 1, &out, "json", false, -1, "auto", false, true));
 
-        ASSERT_DDB_OK(DDBInfo(paths, 1, &out, "json"));
+        ASSERT_DDB_OK(DDBInfo(paths, 1, &out, "json", false, 0, "auto", false, true));
         const auto j = json::parse(take(out));
         ASSERT_TRUE(j.is_array());
         ASSERT_EQ(j.size(), 1u);
@@ -224,11 +224,11 @@ namespace
         Dataset ds(TEST_NAME);
         char *out = nullptr;
 
-        EXPECT_DDB_INVALID(DDBRescan(nullptr, &out));
-        EXPECT_DDB_INVALID(DDBRescan(ds.path().c_str(), nullptr));
-        EXPECT_DDB_INVALID(DDBRescan(ds.path().c_str(), &out, "nosuchtype"));
+        EXPECT_DDB_INVALID(DDBRescan(nullptr, &out, "", true));
+        EXPECT_DDB_INVALID(DDBRescan(ds.path().c_str(), nullptr, "", true));
+        EXPECT_DDB_INVALID(DDBRescan(ds.path().c_str(), &out, "nosuchtype", true));
 
-        ASSERT_DDB_OK(DDBRescan(ds.path().c_str(), &out, nullptr));
+        ASSERT_DDB_OK(DDBRescan(ds.path().c_str(), &out, nullptr, true));
         const auto j = json::parse(take(out));
         ASSERT_EQ(j.size(), 1u);
         EXPECT_EQ(j[0]["path"], "a.txt");
@@ -551,22 +551,22 @@ namespace
         uint8_t *buf = nullptr;
         int size = 0;
 
-        EXPECT_DDB_INVALID(DDBTile(nullptr, z, x, y, &tilePath));
-        EXPECT_DDB_INVALID(DDBTile(raster.c_str(), z, x, y, nullptr));
-        EXPECT_DDB_INVALID(DDBTile(raster.c_str(), z, x, y, &tilePath, -1));
-        EXPECT_DDB_INVALID(DDBTile(raster.c_str(), -1, x, y, &tilePath));
-        EXPECT_DDB_INVALID(DDBTile(raster.c_str(), z, -1, y, &tilePath));
+        EXPECT_DDB_INVALID(DDBTile(nullptr, z, x, y, &tilePath, 256, false, false));
+        EXPECT_DDB_INVALID(DDBTile(raster.c_str(), z, x, y, nullptr, 256, false, false));
+        EXPECT_DDB_INVALID(DDBTile(raster.c_str(), z, x, y, &tilePath, -1, false, false));
+        EXPECT_DDB_INVALID(DDBTile(raster.c_str(), -1, x, y, &tilePath, 256, false, false));
+        EXPECT_DDB_INVALID(DDBTile(raster.c_str(), z, -1, y, &tilePath, 256, false, false));
 
-        EXPECT_DDB_INVALID(DDBMemoryTile(nullptr, z, x, y, &buf, &size));
-        EXPECT_DDB_INVALID(DDBMemoryTile(raster.c_str(), z, x, y, nullptr, &size));
-        EXPECT_DDB_INVALID(DDBMemoryTile(raster.c_str(), z, x, y, &buf, nullptr));
-        EXPECT_DDB_INVALID(DDBMemoryTile(raster.c_str(), z, x, y, &buf, &size, -1));
-        EXPECT_DDB_INVALID(DDBMemoryTile(raster.c_str(), z, x, -1, &buf, &size));
-        EXPECT_DDB_INVALID(DDBMemoryTile(raster.c_str(), z, x, y, &buf, &size, 0)); // not a power of 2
-        EXPECT_DDB_INVALID(DDBTile(ta.getPath("missing.tif").string().c_str(), z, x, y, &tilePath));
+        EXPECT_DDB_INVALID(DDBMemoryTile(nullptr, z, x, y, &buf, &size, 256, false, false, ""));
+        EXPECT_DDB_INVALID(DDBMemoryTile(raster.c_str(), z, x, y, nullptr, &size, 256, false, false, ""));
+        EXPECT_DDB_INVALID(DDBMemoryTile(raster.c_str(), z, x, y, &buf, nullptr, 256, false, false, ""));
+        EXPECT_DDB_INVALID(DDBMemoryTile(raster.c_str(), z, x, y, &buf, &size, -1, false, false, ""));
+        EXPECT_DDB_INVALID(DDBMemoryTile(raster.c_str(), z, x, -1, &buf, &size, 256, false, false, ""));
+        EXPECT_DDB_INVALID(DDBMemoryTile(raster.c_str(), z, x, y, &buf, &size, 0, false, false, "")); // not a power of 2
+        EXPECT_DDB_INVALID(DDBTile(ta.getPath("missing.tif").string().c_str(), z, x, y, &tilePath, 256, false, false));
         EXPECT_EQ(tilePath, nullptr) << "a failed DDBTile leaves the output untouched";
 
-        ASSERT_DDB_OK(DDBTile(raster.c_str(), z, x, y, &tilePath));
+        ASSERT_DDB_OK(DDBTile(raster.c_str(), z, x, y, &tilePath, 256, false, false));
         const auto path = take(tilePath);
         EXPECT_TRUE(fs::exists(path)) << path;
 

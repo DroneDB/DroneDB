@@ -179,10 +179,10 @@ namespace
         }
 
         // Leave a known stale message behind.
-        ASSERT_EQ(DDBBuild(nullptr), DDBERR_EXCEPTION);
+        ASSERT_EQ(DDBBuild(nullptr, nullptr, nullptr, false, false), DDBERR_EXCEPTION);
         const std::string stale = DDBGetLastError();
 
-        EXPECT_EQ(DDBBuild(root.string().c_str(), "m.obj"), DDBERR_BUILDDEPMISSING);
+        EXPECT_EQ(DDBBuild(root.string().c_str(), "m.obj", nullptr, false, false), DDBERR_BUILDDEPMISSING);
         const std::string err = DDBGetLastError();
         EXPECT_NE(err, stale);
         EXPECT_NE(err.find("m.mtl"), std::string::npos) << err;

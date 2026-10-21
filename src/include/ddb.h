@@ -5,11 +5,22 @@
 #define DDB_H
 
 #include "ddb_export.h"
+#include <stddef.h>
 #include <stdint.h>
+#ifndef __cplusplus
+#include <stdbool.h>
+#endif
+
+/* ddb.h is valid C11 as well as C++ (XI-03): tests/unit/c11_header.c includes it with -std=c11
+ * -pedantic -Werror (MSVC: /std:c11 /W4 /WX). No default arguments, (void) for an empty
+ * parameter list, bool from <stdbool.h> (1 byte: marshal it as U1), typedef'd types. */
 
 #ifdef __cplusplus
+#define DDB_STATIC_ASSERT(condition, message) static_assert(condition, message)
 extern "C"
 {
+#else
+#define DDB_STATIC_ASSERT(condition, message) _Static_assert(condition, message)
 #endif
 
 #define DDB_LOG_ENV "DDB_LOG"
@@ -27,7 +38,7 @@ extern "C"
 #define DDB_ABI_MINOR 1
 
     /* Error codes. A new code is also listed in DDBGetCapabilities() (kErrorCodes, ddb.cpp). */
-    enum DDBErr
+    typedef enum DDBErr
     {
         DDBERR_NONE = 0,            // No error
         DDBERR_EXCEPTION = 1,       // Generic app exception
@@ -36,7 +47,10 @@ extern "C"
         DDBERR_CANCELED = 4,        // Operation canceled by the progress callback
         DDBERR_BUSY = 5,            // Transient DB contention (SQLITE_BUSY/LOCKED); safe to retry
         DDBERR_NOTFOUND = 6         // The requested entry does not exist
-    };
+    } DDBErr;
+
+    DDB_STATIC_ASSERT(sizeof(bool) == 1, "bool is 1 byte (marshal it as U1)");
+    DDB_STATIC_ASSERT(sizeof(DDBErr) == 4, "DDBErr is 4 bytes");
 
     /** Progress callback for long-running operations.
      * @param fraction progress in [0,1], or -1 for indeterminate
@@ -86,15 +100,15 @@ extern "C"
 
     /** Get the last error message
      * @return last error message */
-    DDB_DLL const char *DDBGetLastError();
+    DDB_DLL const char *DDBGetLastError(void);
 
     /** This must be called as the very first function
      * of every DDB process/program
      * @param verbose whether the program should output log messages to stdout */
-    DDB_DLL void DDBRegisterProcess(bool verbose = false);
+    DDB_DLL void DDBRegisterProcess(bool verbose);
 
     /** Get library version */
-    DDB_DLL const char *DDBGetVersion();
+    DDB_DLL const char *DDBGetVersion(void);
 
     /** ABI version of the loaded library: (DDB_ABI_MAJOR << 16) | DDB_ABI_MINOR.
      * Callable at any time, before DDBRegisterProcess too; it never changes DDBGetLastError(). */
@@ -145,7 +159,7 @@ extern "C"
      * @param output pointer to C-string where to store output
      * @param recursive whether to recursively add folders
      * @return DDBERR_NONE on success, an error otherwise */
-    DDB_DLL DDBErr DDBAdd(const char *ddbPath, const char **paths, int numPaths, char **output, bool recursive = false);
+    DDB_DLL DDBErr DDBAdd(const char *ddbPath, const char **paths, int numPaths, char **output, bool recursive);
 
     /** Options for DDBAddWithOptions. Caller must
      * initialize every field explicitly; these are semantic defaults, not enforced ones. */
@@ -154,6 +168,11 @@ extern "C"
         bool stopOnError;        // default true == DDBAdd's semantics
         int maxConflictRetries;  // default 2
     } DDBAddOptions;
+
+    DDB_STATIC_ASSERT(sizeof(DDBAddOptions) == 8, "DDBAddOptions layout");
+    DDB_STATIC_ASSERT(offsetof(DDBAddOptions, recursive) == 0, "DDBAddOptions layout");
+    DDB_STATIC_ASSERT(offsetof(DDBAddOptions, stopOnError) == 1, "DDBAddOptions layout");
+    DDB_STATIC_ASSERT(offsetof(DDBAddOptions, maxConflictRetries) == 4, "DDBAddOptions layout");
 
     /** Add one or more files to a DroneDB database with per-item error isolation.
      * @param ddbPath path to a DroneDB database (parent of ".ddb")
@@ -176,6 +195,12 @@ extern "C"
         long long size;     // bytes written; < 0 = not checked
         double mtime;       // modification time after the write (seconds since the epoch); <= 0 = not checked
     } DDBAddHint;
+
+    /* 64-bit layout (the one Registry marshals) */
+    DDB_STATIC_ASSERT(sizeof(void *) != 8 || sizeof(DDBAddHint) == 32, "DDBAddHint layout");
+    DDB_STATIC_ASSERT(sizeof(void *) != 8 || offsetof(DDBAddHint, sha256) == 8, "DDBAddHint layout");
+    DDB_STATIC_ASSERT(sizeof(void *) != 8 || offsetof(DDBAddHint, size) == 16, "DDBAddHint layout");
+    DDB_STATIC_ASSERT(sizeof(void *) != 8 || offsetof(DDBAddHint, mtime) == 24, "DDBAddHint layout");
 
     /** DDBAddWithOptions for files whose SHA-256 the caller computed while writing them.
      * A hint is used only when the file still has its size and mtime; otherwise the file is
@@ -206,8 +231,8 @@ extern "C"
      * @param withHash whether to compute SHA256 hashes
      * @param stopOnError whether to stop on failure
      * @return DDBERR_NONE on success, an error otherwise */
-    DDB_DLL DDBErr DDBInfo(const char **paths, int numPaths, char **output, const char *format = "text", bool recursive = false, int maxRecursionDepth = 0,
-                           const char *geometry = "auto", bool withHash = false, bool stopOnError = true);
+    DDB_DLL DDBErr DDBInfo(const char **paths, int numPaths, char **output, const char *format, bool recursive, int maxRecursionDepth,
+                           const char *geometry, bool withHash, bool stopOnError);
 
     /** Close the idle pooled index connections and the idle cached rasters (tilers and
      *  datasets kept open between tile/render calls) of the files under a folder.
@@ -243,7 +268,7 @@ extern "C"
      * @param recursive whether to recursively scan folders
      * @param maxRecursionDepth limit the depth of recursion
      * @return DDBERR_NONE on success, an error otherwise */
-    DDB_DLL DDBErr DDBList(const char *ddbPath, const char **paths, int numPaths, char **output, const char *format, bool recursive = false, int maxRecursionDepth = 0);
+    DDB_DLL DDBErr DDBList(const char *ddbPath, const char **paths, int numPaths, char **output, const char *format, bool recursive, int maxRecursionDepth);
 
     /** List the entries below a folder that match a file name pattern and entry types. The
      * filters run in the index query, so non-matching entries are never read or serialized.
@@ -335,7 +360,7 @@ extern "C"
      * @param tms Generate TMS-style tiles instead of XYZ
      * @param forceRecreate ignore cache and always recreate the tile
      * @return DDBERR_NONE on success, an error otherwise */
-    DDB_DLL DDBErr DDBTile(const char *inputPath, int tz, int tx, int ty, char **outputTilePath, int tileSize = 256, bool tms = false, bool forceRecreate = false);
+    DDB_DLL DDBErr DDBTile(const char *inputPath, int tz, int tx, int ty, char **outputTilePath, int tileSize, bool tms, bool forceRecreate);
 
     /** Generate image/orthophoto/EPT tiles in memory
      * @param inputPath path to the input geoTIFF/EPT
@@ -349,12 +374,12 @@ extern "C"
      * @param forceRecreate ignore cache and always recreate the tile
      * @param inputPathHash Optional hash of the resource to tile (if available), allowing smarter decisions about file downloads for certain resource types.
      * @return DDBERR_NONE on success, an error otherwise */
-    DDB_DLL DDBErr DDBMemoryTile(const char *inputPath, int tz, int tx, int ty, uint8_t **outBuffer, int *outBufferSize, int tileSize = 256, bool tms = false, bool forceRecreate = false, const char *inputPathHash = "");
+    DDB_DLL DDBErr DDBMemoryTile(const char *inputPath, int tz, int tx, int ty, uint8_t **outBuffer, int *outBufferSize, int tileSize, bool tms, bool forceRecreate, const char *inputPathHash);
 
     /** Generate a tile in memory with explicit output format: "png", "jpeg" or "webp"
      *  (or their MIME types). PNG tiles are written at zlib level 1, WebP tiles lossy at
      *  quality 80; tiles without transparent pixels have no alpha band. */
-    DDB_DLL DDBErr DDBMemoryTileFmt(const char *inputPath, int tz, int tx, int ty, uint8_t **outBuffer, int *outBufferSize, int tileSize = 256, bool tms = false, bool forceRecreate = false, const char *inputPathHash = "", const char *outputFormat = "png");
+    DDB_DLL DDBErr DDBMemoryTileFmt(const char *inputPath, int tz, int tx, int ty, uint8_t **outBuffer, int *outBufferSize, int tileSize, bool tms, bool forceRecreate, const char *inputPathHash, const char *outputFormat);
 
     /** Generate delta between two ddbs
      * @param ddbSourceStamp JSON stamp of the source DroneDB database
@@ -416,7 +441,7 @@ extern "C"
      *              Valid types: generic, geoimage, georaster, pointcloud, image, dronedb, markdown, video, geovideo, model, panorama, geopanorama, vector, gaussiansplat
      * @param stopOnError whether to stop processing on first error (default true)
      * @return DDBERR_NONE on success, an error otherwise */
-    DDB_DLL DDBErr DDBRescan(const char *ddbPath, char **output, const char *types = "", bool stopOnError = true);
+    DDB_DLL DDBErr DDBRescan(const char *ddbPath, char **output, const char *types, bool stopOnError);
 
     /** Rescan the files in the index that match both a type and an extension filter
      * @param ddbPath path to a DroneDB database (parent of ".ddb")
@@ -426,8 +451,8 @@ extern "C"
      *                   leading dot are ignored), or empty for all
      * @param stopOnError whether to stop processing on first error (default true)
      * @return DDBERR_NONE on success, an error otherwise */
-    DDB_DLL DDBErr DDBRescanEx(const char *ddbPath, char **output, const char *types = "",
-                               const char *extensions = "", bool stopOnError = true);
+    DDB_DLL DDBErr DDBRescanEx(const char *ddbPath, char **output, const char *types,
+                               const char *extensions, bool stopOnError);
 
     /** Move entry
      * @param ddbPath path to the source DroneDB database (parent of ".ddb")
@@ -449,7 +474,7 @@ extern "C"
      *         written), an error otherwise. Missing external tools and dependency
      *         references that can never be satisfied (absolute, or outside the dataset)
      *         are errors, not deferrals. */
-    DDB_DLL DDBErr DDBBuild(const char *ddbPath, const char *source = nullptr, const char *dest = nullptr, bool force = false, bool pendingOnly = false);
+    DDB_DLL DDBErr DDBBuild(const char *ddbPath, const char *source, const char *dest, bool force, bool pendingOnly);
 
     /** Cleanup a dataset:
      *   1. Remove from the database all (non-directory) entries whose underlying

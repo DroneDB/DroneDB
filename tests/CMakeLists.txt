@@ -141,12 +141,26 @@ if(BUILD_TESTING)
         endif()
     endfunction()
 
+    # ddb.h is valid C (DQ-10, XI-03): unit/c11_header.c includes it as C11 with warnings as
+    # errors, and is linked into ddb_unit_tests (unit/c_header_test.cpp calls it), so a header
+    # that is not valid C fails the build of the unit tests. Only the public include folder: no
+    # flag or define of the C++ targets reaches it.
+    add_library(ddb_c11_header OBJECT unit/c11_header.c)
+    set_target_properties(ddb_c11_header PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+    target_include_directories(ddb_c11_header PRIVATE "${PROJECT_SOURCE_DIR}/src/include")
+    if(MSVC)
+        target_compile_options(ddb_c11_header PRIVATE /W4 /WX)
+    else()
+        target_compile_options(ddb_c11_header PRIVATE -Wall -Wextra -Wpedantic -Wstrict-prototypes -Werror)
+    endif()
+
     # The library objects and all their dependencies, linked once: one copy of every static
     # library in the process
     ddb_add_test_binary(ddb_unit_tests
         LABEL unit
         TIMEOUT 300
         SOURCES ${DDB_UNIT_TEST_SOURCES} $<TARGET_OBJECTS:ddb_core> $<TARGET_OBJECTS:ddb_capi>
+            $<TARGET_OBJECTS:ddb_c11_header>
         LINK ddb_core_usage
         SERIAL DDB03_Delta.isLinear
     )

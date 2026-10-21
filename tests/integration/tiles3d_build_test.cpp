@@ -592,7 +592,7 @@ TEST(tiles3dBuild, completeModelRecoversTilesBeforeReturningWithoutTools) {
         ASSERT_EQ(DDBIsBuildComplete(ds.root.string().c_str(), "model.obj", &complete), DDBERR_NONE);
         EXPECT_FALSE(complete);
         EXPECT_TRUE(fs::exists(old / "marker")); // completeness is read-only
-        ASSERT_EQ(DDBBuild(ds.root.string().c_str(), "model.obj", nullptr, false), DDBERR_NONE)
+        ASSERT_EQ(DDBBuild(ds.root.string().c_str(), "model.obj", nullptr, false, false), DDBERR_NONE)
             << DDBGetLastError();
         EXPECT_EQ(readText(tiles / "marker"), "usable backup");
         EXPECT_FALSE(fs::exists(old));
@@ -605,7 +605,7 @@ TEST(tiles3dBuild, completeModelRecoversTilesBeforeReturningWithoutTools) {
     // A complete final wins; ordinary Nexus-only models remain complete.
     writeFile(tiles / "marker", "newer");
     writeFile(old / "tileset.json", "{}");
-    ASSERT_EQ(DDBBuild(ds.root.string().c_str(), "model.obj", nullptr, false), DDBERR_NONE);
+    ASSERT_EQ(DDBBuild(ds.root.string().c_str(), "model.obj", nullptr, false, false), DDBERR_NONE);
     EXPECT_EQ(readText(tiles / "marker"), "newer");
     EXPECT_FALSE(fs::exists(old));
     fs::remove_all(tiles);
@@ -627,7 +627,7 @@ TEST(tiles3dBuild, completeModelDefersRecoveryUnderLiveTilesLock) {
     {
         BuildLock holder(tiles.string());
         EXPECT_THROW(build(ds.db.get(), "model.obj", "", false), BuildInProgressException);
-        EXPECT_EQ(DDBBuild(ds.root.string().c_str(), "model.obj", nullptr, false), DDBERR_BUILDINPROGRESS);
+        EXPECT_EQ(DDBBuild(ds.root.string().c_str(), "model.obj", nullptr, false, false), DDBERR_BUILDINPROGRESS);
         EXPECT_EQ(readText(old / "marker"), "previous");
         EXPECT_EQ(readText(tiles / "unfinished"), "in flight");
         EXPECT_EQ(readText(pending), "original marker\n");
