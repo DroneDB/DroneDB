@@ -152,4 +152,4 @@ Registry has to adopt first.
 The `registry_contract` job of `.github/workflows/c-cpp.yml` installs the `.deb` that
 `build_ubuntu` tested, checks out DroneDB/Registry at the commit in `ci/registry-ref` and runs
 `Registry.Adapters.Ddb.Test`, which fails on a missing export. On `v*` tags the release upload
-of the `.deb` (`release_deb`) and the Docker image wait for it.
+of the `.deb` (`release_assets`) and the Docker image wait for it.
