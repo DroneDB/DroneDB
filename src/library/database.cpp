@@ -631,21 +631,13 @@ END;
     MetaManager *Database::getMetaManager()
     {
         if (metaManager == nullptr)
-        {
-            metaManager = new MetaManager(this);
-        }
-        return metaManager;
+            metaManager = std::make_unique<MetaManager>(this);
+        return metaManager.get();
     }
 
     Database::~Database()
     {
         this->close();
-
-        if (metaManager != nullptr)
-        {
-            delete metaManager;
-            metaManager = nullptr;
-        }
     }
 
     SqliteDatabase &Database::close()

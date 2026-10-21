@@ -13,7 +13,7 @@
 namespace ddb
 {
 
-    SqliteDatabase::SqliteDatabase() : db(nullptr) {}
+    SqliteDatabase::SqliteDatabase() = default;
 
     SqliteDatabase &SqliteDatabase::open(const std::string &file)
     {

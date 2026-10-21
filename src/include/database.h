@@ -13,16 +13,19 @@
 #include "constants.h"
 
 #include <functional>
+#include <memory>
 
 namespace ddb
 {
 
   class DatabasePool;
 
+  /// Neither copyable nor movable (see SqliteDatabase): the MetaManager points back to this
+  /// object and DatabasePool hands the connection over by reference
   class Database : public SqliteDatabase
   {
   private:
-    MetaManager *metaManager = nullptr;
+    std::unique_ptr<MetaManager> metaManager;
     void *spatialiteCache = nullptr;
 
     // Set when the connection comes from or goes back to the DatabasePool
@@ -45,7 +48,12 @@ namespace ddb
     /// explicit Transaction; RetryPolicy owns the wait budget (retrypolicy.h)
     static constexpr int busyTimeoutMs = 200;
 
+    Database() = default;
     DDB_DLL ~Database() override;
+    Database(const Database &) = delete;
+    Database &operator=(const Database &) = delete;
+    Database(Database &&) = delete;
+    Database &operator=(Database &&) = delete;
 
     /// Gives a connection opened by ddb::open() back to the DatabasePool, otherwise closes it
     DDB_DLL SqliteDatabase &close() override;
@@ -71,6 +79,7 @@ namespace ddb
     DDB_DLL std::string getReadme() const;
     DDB_DLL json getExtent() const;
 
+    /// Created on first use; owned by this Database, which outlives the returned pointer
     DDB_DLL MetaManager *getMetaManager();
   };
 

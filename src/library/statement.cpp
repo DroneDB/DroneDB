@@ -2,13 +2,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include <assert.h>
+#include <utility>
 #include "statement.h"
 #include "exceptions.h"
 
 using namespace ddb;
 
 Statement::Statement(sqlite3 *db, const std::string &query)
-    : db(db), query(query), hasRow(false), done(false)
+    : db(db), query(query)
 {
     if (sqlite3_prepare_v2(db, query.c_str(), static_cast<int>(query.length()), &stmt, nullptr) != SQLITE_OK)
     {
@@ -31,6 +32,28 @@ Statement::~Statement()
         sqlite3_finalize(stmt);
         stmt = nullptr;
     }
+}
+
+Statement::Statement(Statement &&other) noexcept
+    : db(std::exchange(other.db, nullptr)), query(std::move(other.query)),
+      hasRow(std::exchange(other.hasRow, false)), done(std::exchange(other.done, false)),
+      stmt(std::exchange(other.stmt, nullptr))
+{
+}
+
+Statement &Statement::operator=(Statement &&other) noexcept
+{
+    if (this != &other)
+    {
+        if (stmt != nullptr)
+            sqlite3_finalize(stmt);
+        db = std::exchange(other.db, nullptr);
+        query = std::move(other.query);
+        hasRow = std::exchange(other.hasRow, false);
+        done = std::exchange(other.done, false);
+        stmt = std::exchange(other.stmt, nullptr);
+    }
+    return *this;
 }
 
 Statement &Statement::bind(int paramNum, const std::string &value)
