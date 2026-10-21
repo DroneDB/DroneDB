@@ -25,6 +25,8 @@ namespace ddb::parallel
     // Indexes are handed out in increasing order. When a call throws, no new
     // index starts, the calls already running finish, and the exception of the
     // lowest failed index is rethrown: the same one a serial loop would throw.
+    // GDAL errors raised by fn go to GDAL's default handler on every thread, not
+    // to the process-wide handler (which PDAL replaces while its stages run).
     DDB_DLL void forEachIndex(size_t count, size_t maxThreads, const std::function<void(size_t)> &fn);
 
 } // namespace ddb::parallel

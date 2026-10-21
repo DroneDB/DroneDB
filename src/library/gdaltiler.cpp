@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <sstream>
 #include <cmath>
+#include <type_traits>
 #include <cstring>
 
 #include "entry.h"
@@ -71,11 +72,14 @@ namespace ddb
     }
     namespace
     {
+        // OGRSpatialReferenceH is void* in release GDAL builds but a typed pointer when GDAL's
+        // DEBUG define is on (its Debug configuration): the deleter names the handle type itself
         struct SrsDeleter
         {
-            void operator()(void *srs) const { OSRDestroySpatialReference(static_cast<OGRSpatialReferenceH>(srs)); }
+            using pointer = OGRSpatialReferenceH;
+            void operator()(OGRSpatialReferenceH srs) const { OSRDestroySpatialReference(srs); }
         };
-        using SrsPtr = std::unique_ptr<void, SrsDeleter>;
+        using SrsPtr = std::unique_ptr<std::remove_pointer_t<OGRSpatialReferenceH>, SrsDeleter>;
 
         // Maps the values of a window (band-sequential, windowPixels per band) to 0-255
         // over [bMin, bMax] and writes them at their place in the tile image

@@ -11,7 +11,9 @@
 
 // Counts GDAL failures (CE_Failure and above) raised on any thread while in
 // scope. Installs a global handler on purpose: drivers such as the MVT writer
-// work on a thread pool, where a thread-local handler would miss them.
+// work on a thread pool, where a thread-local handler would miss them. Calls run
+// by parallel::forEachIndex are not counted: its threads use GDAL's default
+// handler (parallel.h).
 class GdalFailureCounter
 {
 public:

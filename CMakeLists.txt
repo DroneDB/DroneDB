@@ -101,6 +101,9 @@ endif()
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 include(MsvcReleaseDebugInfo)
 include(Warnings)
+# DDB_ENABLE_ASAN/UBSAN/TSAN/COVERAGE (DQ-01). Directory-wide options: must stay before
+# add_subdirectory(vendor) so the vendored code built in this tree is instrumented too.
+include(Sanitizers)
 
 # compile_commands.json for clang-tidy and editors (DQ-01); ignored by the Visual Studio generators
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)

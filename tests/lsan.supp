@@ -1,0 +1,17 @@
+# LeakSanitizer suppressions for the ASan build (DQ-01, docs/sanitizers.md).
+#
+# Third-party one-time allocations only. A leak whose allocation stack goes through our own
+# code to our own allocation is a bug to fix, not to list here. Each entry says why it is not
+# ours and why it is bounded.
+
+# Exiv2 keeps custom XMP namespaces (DDBRegisterProcess registers FLIR once per process) in a
+# static registry whose destructor does not free the copied strings; only
+# XmpProperties::unregisterNs() does. libddb runs inside host processes, so it cannot tear
+# Exiv2 down at exit while host threads may still read metadata. 2 allocations, once.
+leak:Exiv2::XmpProperties::registerNs
+
+# corto (vendor/libnexus/vendor/nexus/src/corto, upstream cnr-isti-vclab/corto): when a nexus
+# node has fewer than 4 vertices, Encoder::encodeMesh() calls BitStream::reserve(nvert/4 == 0),
+# which allocates new uint32_t[0] but records allocated = 0, so ~BitStream never frees it.
+# One empty allocation per such node.
+leak:crt::BitStream::reserve

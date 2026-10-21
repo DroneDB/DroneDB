@@ -44,44 +44,57 @@
 namespace cmd
 {
 
+  namespace
+  {
+    // Commands are stateless and live as long as the process: one object with static
+    // storage per command type, destroyed at exit, instead of a heap object that was never
+    // freed (LeakSanitizer, DQ-01)
+    template <typename T>
+    Command *instance()
+    {
+      static T command;
+      return &command;
+    }
+  }
+
   std::map<std::string, Command *> commands = {
-      {"build", new Build()},
-      {"init", new Init()},
-      {"add", new Add()},
-      {"align", new Align()},
-      {"remove", new Remove()},
-      {"sync", new Sync()},
-      {"rescan", new Rescan()},
-      {"geoproj", new GeoProj()},
-      {"info", new Info()},
-      {"list", new List()},
-      {"thumbs", new Thumbs()},
-      {"setexif", new SetExif()},
-      {"login", new Login()},
-      {"logout", new Logout()},
-      {"tile", new Tile()},
-      {"share", new Share()},
-      {"system", new System()},
-      {"status", new Status()},
-      {"password", new Password()},
-      {"delta", new Delta()},
-      {"clone", new Clone()},
-      {"tag", new Tag()},
-      {"copc", new Copc()},
-      {"push", new Push()},
-      {"pull", new Pull()},
-      {"meta", new Meta()},
-      {"stamp", new Stamp()},
-      {"cog", new Cog()},
-      {"contour", new Contour()},
-      {"nxs", new Nxs()},
-      {"3dtiles", new Tiles3d()},
-      {"gsplat", new Gsplat()},
-      {"search", new Search()},
-      {"stac", new Stac()},
-      {"mask", new Mask()},
-      {"merge-multispectral", new MergeMultispectral()},
-      {"cleanup", new Cleanup()}};
+      {"build", instance<Build>()},
+      {"init", instance<Init>()},
+      {"add", instance<Add>()},
+      {"align", instance<Align>()},
+      {"remove", instance<Remove>()},
+      {"sync", instance<Sync>()},
+      {"rescan", instance<Rescan>()},
+      {"geoproj", instance<GeoProj>()},
+      {"info", instance<Info>()},
+      {"list", instance<List>()},
+      {"thumbs", instance<Thumbs>()},
+      {"setexif", instance<SetExif>()},
+      {"login", instance<Login>()},
+      {"logout", instance<Logout>()},
+      {"tile", instance<Tile>()},
+      {"share", instance<Share>()},
+      {"system", instance<System>()},
+      {"status", instance<Status>()},
+      {"password", instance<Password>()},
+      {"delta", instance<Delta>()},
+      {"clone", instance<Clone>()},
+      {"tag", instance<Tag>()},
+      {"copc", instance<Copc>()},
+      {"push", instance<Push>()},
+      {"pull", instance<Pull>()},
+      {"meta", instance<Meta>()},
+      {"stamp", instance<Stamp>()},
+      {"cog", instance<Cog>()},
+      {"contour", instance<Contour>()},
+      {"nxs", instance<Nxs>()},
+      {"3dtiles", instance<Tiles3d>()},
+      {"gsplat", instance<Gsplat>()},
+      {"search", instance<Search>()},
+      {"stac", instance<Stac>()},
+      {"mask", instance<Mask>()},
+      {"merge-multispectral", instance<MergeMultispectral>()},
+      {"cleanup", instance<Cleanup>()}};
 
   std::map<std::string, std::string> aliases = {
       {"rm", "remove"},

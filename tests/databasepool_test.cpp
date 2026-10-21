@@ -21,6 +21,7 @@
 #include "databasepool.h"
 #include "dbops.h"
 #include "ddb.h"
+#include "sanitizer_hooks.h"
 #include "test.h"
 #include "testarea.h"
 
@@ -410,6 +411,7 @@ namespace
         if (child == 0)
         {
             addFile(root, "b.txt", "bravo"); // the connection goes back to the pool idle
+            disableLeakCheckAtExit();         // the parent's live objects are not this child's leaks
             std::exit(0);                     // atexit handlers run, the OS closes the handle
         }
         int status = 0;

@@ -16,6 +16,25 @@
 
 namespace ddb::parallel
 {
+    namespace
+    {
+        // Sends the GDAL errors raised on this thread to GDAL's default handler (stderr, CPL_LOG)
+        // while in scope, whatever process-wide handler is installed: a thread-local handler
+        // takes precedence over the process-wide one. While any PDAL stage runs, PDAL installs
+        // its own process-wide GDAL handler (pdal::Stage::startLogging), which writes into that
+        // stage's Log; that Log is not synchronized with the stage's thread, so a GDAL error
+        // raised by another thread at the same time races with it (TSan, DQ-01). Parallel
+        // sections parse rasters while other threads run PDAL readers.
+        class ThreadGdalErrorHandler
+        {
+        public:
+            ThreadGdalErrorHandler() { CPLPushErrorHandler(CPLDefaultErrorHandler); }
+            ~ThreadGdalErrorHandler() { CPLPopErrorHandler(); }
+            ThreadGdalErrorHandler(const ThreadGdalErrorHandler &) = delete;
+            ThreadGdalErrorHandler &operator=(const ThreadGdalErrorHandler &) = delete;
+        };
+    }
+
     size_t hardwareThreads()
     {
         return std::max(1u, std::thread::hardware_concurrency());
@@ -35,6 +54,7 @@ namespace ddb::parallel
 
     void forEachIndex(size_t count, size_t maxThreads, const std::function<void(size_t)> &fn)
     {
+        const ThreadGdalErrorHandler callerGdalErrors; // the calling thread runs calls too
         const size_t threads = std::min(count, std::max<size_t>(1, maxThreads));
         if (threads <= 1)
         {
@@ -74,7 +94,11 @@ namespace ddb::parallel
         try
         {
             for (size_t t = 1; t < threads; t++)
-                workers.emplace_back(work);
+                workers.emplace_back([&work]()
+                                     {
+                                         const ThreadGdalErrorHandler workerGdalErrors;
+                                         work();
+                                     });
         }
         catch (...)
         {

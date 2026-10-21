@@ -140,6 +140,42 @@ namespace
             EXPECT_EQ(ran[i].load(), 1) << "index " << i << " must run: it comes before the failure";
     }
 
+    // PDAL replaces GDAL's process-wide error handler while one of its stages runs, and that
+    // handler writes into the running stage's log without synchronization: a GDAL error raised
+    // by an indexing thread at that moment raced with the PDAL thread (TSan, DQ-01). The calls
+    // run by forEachIndex, on every thread, must not reach the process-wide handler; the error
+    // itself is still recorded for the thread that raised it.
+    std::atomic<int> processWideGdalErrors{0};
+    void CPL_STDCALL countProcessWideGdalError(CPLErr, CPLErrorNum, const char *) { processWideGdalErrors++; }
+
+    TEST(DDB09_Parallel, gdalErrorsBypassTheProcessWideHandler)
+    {
+        processWideGdalErrors = 0;
+        const CPLErrorHandler previous = CPLSetErrorHandler(&countProcessWideGdalError);
+
+        constexpr size_t count = 16;
+        std::atomic<int> recorded{0};
+        for (const size_t threads : {size_t{1}, size_t{8}})
+            parallel::forEachIndex(count, threads, [&](size_t i)
+                                   {
+                                       CPLError(CE_Failure, CPLE_AppDefined, "DDB09 expected error %d",
+                                                static_cast<int>(i));
+                                       if (CPLGetLastErrorType() == CE_Failure)
+                                           recorded++;
+                                   });
+        const int fromParallel = processWideGdalErrors.load();
+
+        // The handler is back once forEachIndex returns
+        CPLError(CE_Failure, CPLE_AppDefined, "DDB09 expected error after forEachIndex");
+        const int afterwards = processWideGdalErrors.load();
+        CPLSetErrorHandler(previous);
+        CPLErrorReset();
+
+        EXPECT_EQ(fromParallel, 0);
+        EXPECT_EQ(recorded.load(), static_cast<int>(2 * count));
+        EXPECT_EQ(afterwards, 1);
+    }
+
     TEST(DDB09_Parallel, threadsOption)
     {
         const int cores = static_cast<int>(parallel::hardwareThreads());
