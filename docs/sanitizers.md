@@ -77,7 +77,7 @@ TSan, concurrency tests (what the nightly `TSan (nightly)` workflow runs, report
 ```bash
 cd build-tsan
 export TSAN_OPTIONS=halt_on_error=0:second_deadlock_stack=1:suppressions=$PWD/../tests/tsan.supp
-./ddb_unit_tests --gtest_filter='BuildLockTest.*:concurrentAdd.*:DDB02_Pool.*:DDB02_Open.concurrent*:DDB05_Tiler.concurrent*'
+./ddb_unit_tests --gtest_filter='BuildLockTest.*:concurrentAdd.*:DDB02_Pool.*:DDB02_Open.concurrent*:DDB05_Tiler.concurrent*:Shutdown.*:CancelToken.*:Cancellation.*:CAbiLog.*'
 ./ddbtest --gtest_filter='DDB06_*.concurrent*:DDB09_Parallel.*:DDB09_Index.*:IsBuildActiveTest.RealBuildInThread:tiles3dBuild.cleanupNeverStripsTilesFromConcurrentModelBuild:Dq02Defects.Target_RandomHelperGivesEachThreadItsOwnEngine:Dq02Defects.Target_SingletonsAgreeUnderConcurrentFirstUse:Dq02Defects.Target_DsmCache*'
 ```
 

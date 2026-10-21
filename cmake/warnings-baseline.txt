@@ -83,7 +83,6 @@ src/library/entry.cpp -Wshadow 1
 src/library/exif.cpp -Wconversion 5
 src/library/exifeditor.cpp -Wold-style-cast 4
 src/library/exifeditor.cpp -Wshadow 1
-src/library/gdaltiler.cpp -Wconversion 1
 src/library/gdaltiler.cpp -Wshadow 4
 src/library/geo.cpp -Wold-style-cast 1
 src/library/geoproject.cpp -Wshadow 2

@@ -67,7 +67,7 @@ jobs:
       - name: Concurrency tests (unit binary)
         run: |
           cd build-tsan
-          ./ddb_unit_tests --gtest_filter='BuildLockTest.*:concurrentAdd.*:DDB02_Pool.*:DDB02_Open.concurrent*:DDB05_Tiler.concurrent*'
+          ./ddb_unit_tests --gtest_filter='BuildLockTest.*:concurrentAdd.*:DDB02_Pool.*:DDB02_Open.concurrent*:DDB05_Tiler.concurrent*:Shutdown.*:CancelToken.*:Cancellation.*:CAbiLog.*'
       - name: Concurrency tests (integration binary)
         # These test files download their inputs, so they are integration tests (tests/CMakeLists.txt)
         if: always()
