@@ -11,6 +11,7 @@
 #include <boolinq/boolinq.h>
 
 #include "dbops.h"
+#include "gdal_inc.h"
 #include "gtest/gtest.h"
 #include "hash.h"
 
@@ -223,6 +224,14 @@ std::string indexedHash(ddb::Database *db, const std::string &path)
     ddb::Entry e;
     EXPECT_TRUE(ddb::getEntry(db, path, e)) << path << " is not indexed";
     return e.hash;
+}
+
+int openDatasetCount()
+{
+    GDALDatasetH *datasets = nullptr;
+    int count = 0;
+    GDALGetOpenDatasets(&datasets, &count);
+    return count;
 }
 
 void setEnv(const std::string &name, const std::string &value)

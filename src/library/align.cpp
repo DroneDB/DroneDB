@@ -655,7 +655,11 @@ AlignValidationResult validateAlignRaster(const std::string &sourcePath,
 
     GDALDatasetH hS = GDALOpen(sourcePath.c_str(),    GA_ReadOnly);
     GDALDatasetH hR = GDALOpen(referencePath.c_str(), GA_ReadOnly);
-    if (!hS) { r.errors.push_back("Cannot open source: " + sourcePath); return r; }
+    if (!hS) {
+        if (hR) GDALClose(hR);
+        r.errors.push_back("Cannot open source: " + sourcePath);
+        return r;
+    }
     if (!hR) { GDALClose(hS); r.errors.push_back("Cannot open reference: " + referencePath); return r; }
 
     auto cleanup = [&] { GDALClose(hS); GDALClose(hR); };

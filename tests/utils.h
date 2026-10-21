@@ -65,6 +65,12 @@ std::string hashOf(ddb::Database *db, const std::string &path);
 // empty string when it is not
 std::string indexedHash(ddb::Database *db, const std::string &path);
 
+// -------------------------------------------------------------------------------- GDAL
+
+// Number of GDAL datasets open in the process (all threads): a resource leak test compares it
+// before and after the call under test.
+int openDatasetCount();
+
 // ------------------------------------------------------------------------- environment
 
 // setenv/unsetenv on every platform. On Windows an empty value removes the variable

@@ -51,15 +51,6 @@ namespace
 {
     using namespace ddb;
 
-    // Number of GDAL datasets open in the process (all threads).
-    int openDatasetCount()
-    {
-        GDALDatasetH *datasets = nullptr;
-        int count = 0;
-        GDALGetOpenDatasets(&datasets, &count);
-        return count;
-    }
-
     // Writes a small single-value GeoTIFF; geoTransform == nullptr leaves it ungeoreferenced.
     void writeGeoTiff(const fs::path &p, int bands, GDALDataType type, const double *geoTransform, int epsg)
     {
