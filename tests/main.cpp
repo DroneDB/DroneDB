@@ -4,7 +4,7 @@
 
 #include <gtest/gtest.h>
 #include "logger.h"
-#include "ddb.h"
+#include "process_init.h"
 #include "utils.h"
 #include "testarea.h"
 #include "testfs.h"
@@ -17,7 +17,7 @@ int main(int argc, char **argv)
 {
     installWindowsCrashReport();
 
-    DDBRegisterProcess(true);
+    ddb::registerProcess(true);
 
 
     bool cleanTestData = false;

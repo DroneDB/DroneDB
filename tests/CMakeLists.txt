@@ -23,7 +23,9 @@ if(BUILD_TESTING)
     #                   model (Nexus/3D Tiles: libnexus and Obj2Tiles). Whole files are
     #                   classified, so a file with one such test is an integration file.
     #                   Links the library objects (ddb_core + ddb_capi, src/CMakeLists.txt)
-    #                   and never libddb.
+    #                   and never libddb. main.cpp initializes the process through the core
+    #                   (ddb::registerProcess); ddb_capi is linked for the unit tests of the C
+    #                   API functions (DDBGet, DDBList, DDBCalculateVolume, ...).
     #   ddbtest         tests/integration/: every other test; links libddb. The name is kept
     #                   (CI, packaging docs, the Windows crash-dump key).
     #
@@ -66,6 +68,9 @@ if(BUILD_TESTING)
     # no other test TU carries it on its compile line
     set_source_files_properties(unit/dq01_version_test.cpp PROPERTIES
         COMPILE_DEFINITIONS DDB_PACKAGE_JSON="${PROJECT_SOURCE_DIR}/package.json")
+    # The initIndex race test runs its own binary as the racing child processes
+    set_source_files_properties(unit/init_index_template_test.cpp PROPERTIES
+        COMPILE_DEFINITIONS DDB_UNIT_TESTS_NAME="$<TARGET_FILE_NAME:ddb_unit_tests>")
 
     include(GoogleTest)
 

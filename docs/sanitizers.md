@@ -62,7 +62,7 @@ ctest -L unit --output-on-failure && ctest -R '^cli\.' --output-on-failure
 ```
 
 The integration tests, with the same environment: `./ddbtest --gtest_shuffle` (see the libnexus
-reports below).
+report below).
 
 ctest runs each test in its own process, so a leak report names the test that caused it. Run as
 one process (`./ddb_unit_tests`, `./ddbtest`), LeakSanitizer checks at process exit: a leak fails
@@ -102,16 +102,15 @@ gcovr -r . build-cov --filter src/ --html-details -o coverage.html   # or lcov
 
 ## Known reports outside this repository
 
-These come from the libnexus submodule (DroneDB/libnexus and its nexus fork) and are not
-suppressed, because they are in code we maintain; they are fixed there, not here:
+This one comes from the nexus fork (DroneDB/nexus, a submodule of vendor/libnexus) and is not
+suppressed, because it is in code we maintain; it is fixed there, not here:
 
-* LeakSanitizer: `doNexusBuild` (`vendor/libnexus/nxs.cpp`) assigns `nexus.file = new
-  QTNexusFile()` although the `NexusData` constructor already created one, leaking a file
-  object per `.nxz` build.
-* AddressSanitizer: `NexusBuilder::save` reads past the node array (`Node::last_patch()`)
-  when the input mesh produces a single node; `tiles3dBuild.untexturedPlyGoesToNexusUnconverted`
-  triggers it. Exclude that test (`--gtest_filter=-tiles3dBuild.untexturedPlyGoesToNexusUnconverted`)
-  until the submodule is fixed.
+* LeakSanitizer: when a mesh loader throws while the input is read (`Stream::load`,
+  `StreamSoup::loadMesh` in `vendor/libnexus/vendor/nexus/src/nxsbuild/meshstream.cpp`), the
+  loader and the 80 MB triangle buffer are not freed. `tiles3dBuild.untexturedPlyGoesToNexusUnconverted`
+  triggers it (the PLY loader rejects the file with "Bad index in triangle list."). Exclude that
+  test (`--gtest_filter=-tiles3dBuild.untexturedPlyGoesToNexusUnconverted`) until the submodule
+  is fixed.
 
-Both come from 3D (Nexus) builds, which are integration tests: the unit tests, and so the CI
-ASan + UBSan job, do not reach them.
+It comes from a 3D (Nexus) build, an integration test: the unit tests, and so the CI ASan + UBSan
+job, do not reach it.

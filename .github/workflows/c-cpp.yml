@@ -221,9 +221,9 @@ jobs:
           sha256sum -c tests/data/spark-rad-format.sha256 || { echo "::error::rad.rs changed since the last verified pin: review encoding handling in src/library/rad.cpp, then refresh with: (cd $GITHUB_WORKSPACE && sha256sum vendor/spark/rust/spark-lib/src/rad.rs > tests/data/spark-rad-format.sha256)"; exit 1; }
       - name: Run unit tests
         # ddb_unit_tests: offline, self-contained tests (tests/unit/), one process per test in random
-        # order. Serial on purpose: on a fresh user profile, parallel processes race to create the
-        # empty-index template (initIndex, ~/.ddb/templates) and copy a half-written one.
-        run: cd build && ctest -L unit --output-on-failure --schedule-random
+        # order, in parallel (initIndex publishes the empty-index template of a fresh profile
+        # atomically: InitIndexTemplate.concurrentProcessesOnFreshProfile)
+        run: cd build && ctest -L unit -j$(nproc) --output-on-failure --schedule-random
       - name: Run integration tests
         env:
           # Real-converter tests skip when the binary is absent (non-tag builds).
@@ -623,12 +623,12 @@ jobs:
             New-ItemProperty -Path $key -Name DumpCount -PropertyType DWord -Value 3 -Force | Out-Null
           }
       - name: Run unit tests
-        # Serial for the reason given in the Linux job (empty-index template race on a fresh profile)
+        # In parallel, as in the Linux job
         env:
           _NT_SYMBOL_PATH: ${{ github.workspace }}\build\vcpkg_installed\x64-windows-release\bin
         run: |
           cd build
-          ctest -C Release -L unit --output-on-failure --schedule-random
+          ctest -C Release -L unit -j $env:NUMBER_OF_PROCESSORS --output-on-failure --schedule-random
           exit $LASTEXITCODE
         shell: pwsh
       - name: Run integration tests

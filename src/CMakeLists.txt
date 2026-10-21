@@ -4,9 +4,9 @@ add_subdirectory(library)
 message(STATUS "SRC_LIST: ${SRC_LIST}")
 
 # libddb is assembled from two object libraries (DQ-03), each compiled once:
-#   ddb_core  every library source except the C API, plus the generated version TU
+#   ddb_core  every library source except the C API, plus the generated version TU (and the
+#             process initialization, ddb::registerProcess in process_init.cpp)
 #   ddb_capi  the C API: ddb.cpp, the only TU that implements the extern "C" functions of ddb.h
-#             (it also holds DDBRegisterProcess, the process initialization)
 # libddb (SHARED) = ddb_core + ddb_capi. ddb_unit_tests (tests/CMakeLists.txt) links the same
 # objects statically and never libddb: no binary may contain both, otherwise the plog instance
 # (PLOG_GLOBAL) and the library's singletons would exist twice in one process.

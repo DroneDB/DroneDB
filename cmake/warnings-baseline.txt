@@ -77,7 +77,6 @@ src/library/database.cpp -Wcatch-value= 1
 src/library/database.cpp -Wold-style-cast 1
 src/library/dbops.cpp -Wconversion 1
 src/library/ddb.cpp -Wconversion 8
-src/library/ddb.cpp -Wdangling-else 2
 src/library/ddb.cpp -Wshadow 10
 src/library/ddb.cpp -Wunused-result 2
 src/library/dsmservice.cpp -Wcatch-value= 1

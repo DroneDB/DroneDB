@@ -23,17 +23,6 @@ namespace ddb
 
     void Database::afterOpen()
     {
-        // Busy timeout FIRST: journal-mode conversion needs to acquire an exclusive lock and
-        // must be able to wait for it. Kept small (~200ms): transaction-acquisition retry/jitter
-        // is owned by RetryPolicy, not by this floor — a
-        // larger floor here would reintroduce the unjittered wait RetryPolicy is meant to remove.
-        // This is only a floor for statements executed outside an explicit Transaction.
-        constexpr int busyTimeoutMs = 200;
-        if (sqlite3_busy_timeout(db, busyTimeoutMs) != SQLITE_OK)
-        {
-            LOGD << "Cannot set busy timeout";
-        }
-
         // spatialite_initialize() sets an unguarded global flag (and initializes libxml2) on
         // its first call, which spatialite_alloc_connection() makes implicitly: run it once.
         // With a reentrant GEOS build (GEOS_REENTRANT) the rest of the per-connection setup
@@ -46,6 +35,17 @@ namespace ddb
             spatialite_cleanup_ex(spatialiteCache);
         spatialiteCache = spatialite_alloc_connection();
         spatialite_init_ex(db, spatialiteCache, 0);
+
+        // Busy timeout after spatialite_init_ex(), which sets its own (5 s), and before any
+        // statement: journal-mode conversion needs to acquire an exclusive lock and must be
+        // able to wait for it. Kept small (busyTimeoutMs): transaction-acquisition retry/jitter
+        // is owned by RetryPolicy, not by this floor — a
+        // larger floor here would reintroduce the unjittered wait RetryPolicy is meant to remove.
+        // This is only a floor for statements executed outside an explicit Transaction.
+        if (sqlite3_busy_timeout(db, busyTimeoutMs) != SQLITE_OK)
+        {
+            LOGD << "Cannot set busy timeout";
+        }
 
         // Indexes are created in WAL mode: only legacy databases need the switch (which
         // takes an exclusive lock)

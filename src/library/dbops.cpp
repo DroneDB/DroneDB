@@ -14,7 +14,6 @@
 #include <cmath>
 #include <cstdlib>
 #include <map>
-#include <mutex>
 #include <optional>
 #include <system_error>
 #include <unordered_map>
@@ -40,8 +39,62 @@
 namespace ddb
 {
 
-// Serializes the creation of the empty database template shared by initIndex() calls
-static std::mutex g_templateMutex;
+namespace
+{
+    // Removes a closed SQLite database and the -wal/-shm files SQLite keeps next to it
+    // (Database::afterOpen sets SQLITE_FCNTL_PERSIST_WAL). Best effort.
+    void removeDatabaseFiles(const fs::path &file, bool keepMainFile = false)
+    {
+        std::error_code ignored;
+        if (!keepMainFile)
+            fs::remove(file, ignored);
+        fs::remove(file.string() + "-wal", ignored);
+        fs::remove(file.string() + "-shm", ignored);
+    }
+
+    // Creates the empty index template that initIndex() copies, unless it exists.
+    //
+    // Threads and processes sharing a profile can get here together on a fresh profile. Each
+    // builds the template in a temporary file of its own, closes it and renames it to
+    // templatePath: the rename is atomic, so templatePath only ever names a complete
+    // database. The last rename wins on POSIX (all candidates are identical); where the
+    // rename does not replace an existing file (Windows), the caller that loses discards
+    // its copy.
+    void ensureEmptyIndexTemplate(const fs::path &templatePath)
+    {
+        if (exists(templatePath))
+            return;
+
+        LOGD << "Creating " << templatePath.string();
+        const fs::path temporary =
+            templatePath.string() + ".tmp-" + utils::generateRandomString(16);
+        try
+        {
+            Database db;
+            db.open(temporary.string());
+            db.createTables();
+            db.close();
+        }
+        catch (...)
+        {
+            removeDatabaseFiles(temporary);
+            throw;
+        }
+        // Closed by its only connection: checkpointed, the WAL is empty
+        removeDatabaseFiles(temporary, true);
+
+        std::error_code e;
+        fs::rename(temporary, templatePath, e);
+        if (e)
+        {
+            removeDatabaseFiles(temporary);
+            if (!exists(templatePath))
+                throw FSException("Cannot publish " + templatePath.string() + " (" +
+                                  e.message() + ")", e);
+            LOGD << templatePath.string() << " was published by another process";
+        }
+    }
+}
 
 #define UPDATE_QUERY                                                              \
     "UPDATE entries SET hash=?, type=?, properties=?, mtime=?, size=?, depth=?, " \
@@ -1794,20 +1847,7 @@ static std::mutex g_templateMutex;
             const fs::path emptyDbPath = UserProfile::get()->getTemplatesDir() /
                                          (std::string("empty-dbase-") + ddb::revision() + ".sqlite");
 
-            // Need to create? (checked under the lock: the file exists as soon as
-            // another thread starts creating it)
-            {
-                std::lock_guard<std::mutex> lock(g_templateMutex);
-                if (!exists(emptyDbPath))
-                {
-                    LOGD << "Creating " << emptyDbPath.string();
-
-                    Database db;
-                    db.open(emptyDbPath.string());
-                    db.createTables();
-                    db.close();
-                }
-            }
+            ensureEmptyIndexTemplate(emptyDbPath);
 
             if (exists(emptyDbPath))
             {

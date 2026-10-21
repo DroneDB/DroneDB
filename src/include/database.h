@@ -41,6 +41,10 @@ namespace ddb
     std::string readStamp(const StampEntryVisitor &onEntry, const StampMetaVisitor &onMeta) const;
 
   public:
+    /// Busy timeout of every index connection: only a floor for statements run outside an
+    /// explicit Transaction; RetryPolicy owns the wait budget (retrypolicy.h)
+    static constexpr int busyTimeoutMs = 200;
+
     DDB_DLL ~Database() override;
 
     /// Gives a connection opened by ddb::open() back to the DatabasePool, otherwise closes it

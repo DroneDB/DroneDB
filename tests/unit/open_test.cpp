@@ -9,7 +9,8 @@
 //  - the -wal/-shm files are kept when the last connection closes (they used to be
 //    deleted and recreated by every read-only call) and the WAL is truncated to zero
 //    bytes once checkpointed, so no stale frames sit next to the database file;
-//  - the journal mode is only written when the database is not in WAL mode yet.
+//  - the journal mode is only written when the database is not in WAL mode yet;
+//  - the busy timeout is DroneDB's floor, not the one SpatiaLite sets (D2-7a).
 
 #include <atomic>
 #include <fstream>
@@ -54,6 +55,25 @@ namespace
 
         // Tracked only when SQLITE_CONFIG_MEMSTATUS is on (the global allocator mutex)
         EXPECT_EQ(sqlite3_memory_used(), 0);
+    }
+
+    // spatialite_init_ex() sets a 5 s busy timeout on the connection it initializes: the
+    // DroneDB floor must be applied after it, on every connection
+    TEST(DDB02_Open, busyTimeoutIsDroneDbFloor)
+    {
+        const auto root = makeIndex(TEST_NAME);
+        const auto busyTimeout = [](const Database &db) {
+            const auto q = db.query("PRAGMA busy_timeout");
+            return q->fetch() ? q->getInt(0) : -1;
+        };
+
+        Database db;
+        db.open(dbFile(root).string());
+        EXPECT_EQ(busyTimeout(db), Database::busyTimeoutMs);
+        db.close();
+
+        const auto pooled = ddb::open(root.string(), false);
+        EXPECT_EQ(busyTimeout(*pooled), Database::busyTimeoutMs);
     }
 
     TEST(DDB02_Open, walIsKeptAndEmptyAfterLastClose)
