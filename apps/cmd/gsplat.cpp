@@ -43,7 +43,7 @@ namespace cmd
         if (opts.count("output"))
             output = opts["output"].as<std::string>();
         else
-            output = fs::path(input).replace_extension(".spz").string();
+            output = ddb::io::toUtf8(ddb::io::fromUtf8(input).replace_extension(".spz"));
 
         ddb::convertToSpz(input, output);
         std::cout << output << std::endl;

@@ -9,6 +9,7 @@
 #include "exceptions.h"
 #include "basicgeometry.h"
 #include "dbops.h"
+#include "mio.h"
 
 namespace cmd
 {
@@ -61,7 +62,7 @@ namespace cmd
             if (opts.count("output"))
             {
                 std::string filename = opts["output"].as<std::string>();
-                std::ofstream file(filename, std::ios::out | std::ios::trunc | std::ios::binary);
+                std::ofstream file(ddb::io::fromUtf8(filename), std::ios::out | std::ios::trunc | std::ios::binary);
                 if (!file.is_open())
                     throw ddb::FSException("Cannot open " + filename);
 

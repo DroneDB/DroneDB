@@ -9,6 +9,7 @@
 #include "tagmanager.h"
 #include "dbops.h"
 #include "fs.h"
+#include "mio.h"
 
 namespace cmd
 {
@@ -36,7 +37,7 @@ namespace cmd
 
         const auto currentPath = std::filesystem::current_path();
 
-        const auto db = ddb::open(currentPath.string(), true);
+        const auto db = ddb::open(ddb::io::toUtf8(currentPath), true);
 
         ddb::TagManager manager(db.get());
 

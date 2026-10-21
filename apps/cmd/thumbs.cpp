@@ -6,6 +6,7 @@
 #include "include/thumbs.h"
 #include "thumbs.h"
 #include "exceptions.h"
+#include "mio.h"
 
 namespace cmd
 {
@@ -42,7 +43,7 @@ namespace cmd
         const auto thumbSize = opts["size"].as<int>();
         const auto useCrc = opts["use-crc"].count();
 
-        ddb::generateThumbs(input, output, thumbSize, useCrc);
+        ddb::generateThumbs(input, ddb::io::fromUtf8(output), thumbSize, useCrc);
     }
 
 }

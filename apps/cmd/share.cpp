@@ -72,7 +72,7 @@ namespace cmd
         auto quiet = opts["quiet"].count() > 0;
         auto sslVerify = opts["insecure"].count() == 0;
         auto nonInteractive = opts["non-interactive"].count() > 0;
-        auto cwd = ddb::io::getCwd().string();
+        auto cwd = ddb::io::toUtf8(ddb::io::getCwd());
 
         ProgressBar pb;
         ddb::ShareCallback showProgress =

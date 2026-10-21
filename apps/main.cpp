@@ -4,6 +4,8 @@
 
 #include <cstdlib>
 #include <iostream>
+#include <string>
+#include <vector>
 #include "gdal_inc.h"
 
 #include "cmd/include/cmdlist.h"
@@ -52,7 +54,8 @@ bool hasParam(int argc, char *argv[], const char *param)
     return false;
 }
 
-int main(int argc, char *argv[])
+// argv in UTF-8 (mio.h, "Path encoding")
+static int ddbMain(int argc, char *argv[])
 {
     memcpy(argv[0], "ddb\0", 4);
 
@@ -126,3 +129,32 @@ int main(int argc, char *argv[])
 
     return 0;
 }
+
+#ifdef _WIN32
+// The CRT passes main its arguments in the ANSI code page: wmain receives them in UTF-16 (split
+// by the same CRT rules) and hands them to ddbMain in UTF-8
+int wmain(int argc, wchar_t *wargv[])
+{
+    std::vector<std::string> args;
+    try
+    {
+        for (int i = 0; i < argc; i++)
+            args.push_back(ddb::io::fromWide(wargv[i]));
+    }
+    catch (const std::exception &e)
+    {
+        std::cerr << "Invalid command line: " << e.what() << std::endl;
+        return EXIT_FAILURE;
+    }
+    std::vector<char *> argv;
+    for (auto &arg : args)
+        argv.push_back(arg.data());
+    argv.push_back(nullptr);
+    return ddbMain(argc, argv.data());
+}
+#else
+int main(int argc, char *argv[])
+{
+    return ddbMain(argc, argv);
+}
+#endif

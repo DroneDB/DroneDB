@@ -10,6 +10,7 @@
 #include "contour.h"
 #include "include/contour.h"
 #include "exceptions.h"
+#include "mio.h"
 
 namespace cmd
 {
@@ -84,7 +85,7 @@ namespace cmd
         if (opts.count("output"))
         {
             const auto outPath = opts["output"].as<std::string>();
-            std::ofstream out(outPath);
+            std::ofstream out(ddb::io::fromUtf8(outPath));
             if (!out)
                 throw ddb::AppException("Cannot open output file: " + outPath);
             out << json;

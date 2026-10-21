@@ -10,6 +10,7 @@
 
 #include "3d.h"
 #include "fs.h"
+#include "mio.h"
 
 namespace cmd
 {
@@ -51,7 +52,7 @@ namespace cmd
         if (opts.count("output"))
             output = opts["output"].as<std::string>();
         else
-            output = (fs::path(input).parent_path() / "3dtiles").string();
+            output = ddb::io::toUtf8(ddb::io::fromUtf8(input).parent_path() / "3dtiles");
 
         const bool overwrite = opts["overwrite"].as<bool>();
         const bool forceLocal = opts["local"].as<bool>();

@@ -87,12 +87,12 @@ namespace {
 
 void handleSegv() {
     LOGE << "=== SEGMENTATION FAULT DETECTED ===";
-    LOGE << "DDB Process: " << ddb::io::getExeFolderPath().string();
+    LOGE << "DDB Process: " << ddb::io::toUtf8(ddb::io::getExeFolderPath());
     LOGE << "Version: " << ddb::version();
 
     // Log process state before crash
     try {
-        LOGE << "Current working directory: " << fs::current_path().string();
+        LOGE << "Current working directory: " << ddb::io::toUtf8(fs::current_path());
     } catch (...) {
         LOGE << "Could not determine current directory";
     }
@@ -102,7 +102,7 @@ void handleSegv() {
 
 void handleFpe() {
     LOGE << "=== FLOATING POINT EXCEPTION DETECTED ===";
-    LOGE << "DDB Process: " << ddb::io::getExeFolderPath().string();
+    LOGE << "DDB Process: " << ddb::io::toUtf8(ddb::io::getExeFolderPath());
     LOGE << "Version: " << ddb::version();
 
     throw ddb::AppException("Application encountered a floating point exception");

@@ -58,13 +58,13 @@ namespace cmd
 
             const auto folderRaw = opts["folder"].as<std::string>();
 
-            const auto folder = fs::absolute(folderRaw.length() > 0 ? folderRaw : tag.dataset);
+            const auto folder = fs::absolute(ddb::io::fromUtf8(folderRaw.length() > 0 ? folderRaw : tag.dataset));
 
             auto sslVerify = opts["insecure"].count() == 0;
 
-            LOGD << "Normalized folder = " << folder.generic_string();
+            LOGD << "Normalized folder = " << ddb::io::toGenericUtf8(folder);
 
-            clone(tag, folder.generic_string(), sslVerify);
+            clone(tag, ddb::io::toGenericUtf8(folder), sslVerify);
         }
         catch (ddb::InvalidArgsException &e)
         {

@@ -5,6 +5,7 @@
 #include <iostream>
 #include "include/sync.h"
 #include "dbops.h"
+#include "mio.h"
 
 namespace cmd
 {
@@ -29,7 +30,7 @@ namespace cmd
     {
         const auto workingDir = opts["working-dir"].as<std::string>();
 
-        fs::current_path(workingDir);
+        fs::current_path(ddb::io::fromUtf8(workingDir));
 
         const auto db = ddb::open(workingDir, true);
         syncIndex(db.get());

@@ -47,7 +47,7 @@ namespace cmd
         if (!opts.count("output"))
         {
             // Set as filename_tiles
-            output = fs::path(input).stem().string() + "_tiles";
+            output = ddb::io::toUtf8(ddb::io::fromUtf8(input).stem()) + "_tiles";
         }
 
         bool tms = opts["tms"].count() > 0;
@@ -57,7 +57,7 @@ namespace cmd
         auto y = opts["y"].as<std::string>();
         auto tileSize = opts["size"].as<int>();
 
-        ddb::TilerHelper::runTiler(input, output, tileSize, tms, std::cout, format, z, x, y);
+        ddb::TilerHelper::runTiler(ddb::io::fromUtf8(input), ddb::io::fromUtf8(output), tileSize, tms, std::cout, format, z, x, y);
     }
 
 }
