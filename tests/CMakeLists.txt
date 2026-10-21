@@ -94,15 +94,16 @@ if(BUILD_TESTING)
     include(GoogleTest)
 
     # ddb_add_test_binary(<name> LABEL <label> TIMEOUT <seconds> SOURCES <src>... LINK <lib>...
-    #                     [SLOW <test>...])
+    #                     [SLOW <test>...] [SERIAL <test>...])
     # A gtest binary built in DDB_RUNTIME_DIR (root CMakeLists.txt), next to libddb and the data
     # files, with the shared test code, registered in ctest with gtest_discover_tests: each test
     # gets LABELS <label> and TIMEOUT <seconds>, run from the build root. The SLOW tests (over
     # about 20 s on a fast machine, measured with --gtest_print_time) also get the label "slow"
-    # and a longer timeout, so "ctest -LE slow" skips them.
+    # and a longer timeout, so "ctest -LE slow" skips them. The SERIAL tests (wall-clock
+    # complexity checks) run alone (RUN_SERIAL), so a parallel "ctest -j" does not slow them.
     set(DDB_SLOW_TEST_TIMEOUT 3600)
     function(ddb_add_test_binary name)
-        cmake_parse_arguments(T "" "LABEL;TIMEOUT" "SOURCES;LINK;SLOW" ${ARGN})
+        cmake_parse_arguments(T "" "LABEL;TIMEOUT" "SOURCES;LINK;SLOW;SERIAL" ${ARGN})
         add_executable(${name} ${T_SOURCES})
         ddb_msvc_release_debug_info(${name})
         # tests/ before the library headers: tests/utils.h has the same name as
@@ -122,18 +123,21 @@ if(BUILD_TESTING)
             DISCOVERY_MODE PRE_TEST
             PROPERTIES LABELS ${T_LABEL} TIMEOUT ${T_TIMEOUT}
         )
-        if(T_SLOW)
-            # Applied after the discovered tests are defined (TEST_INCLUDE_FILES are read in
-            # order, and gtest_discover_tests has just added its own); ctest ignores a name
-            # that no longer exists.
-            set(_slow_file "${CMAKE_CURRENT_BINARY_DIR}/${name}_slow_tests.cmake")
-            set(_slow_content "")
-            foreach(_test IN LISTS T_SLOW)
-                string(APPEND _slow_content
-                    "set_tests_properties([==[${_test}]==] PROPERTIES LABELS \"${T_LABEL};slow\" TIMEOUT ${DDB_SLOW_TEST_TIMEOUT})\n")
-            endforeach()
-            file(WRITE "${_slow_file}" "${_slow_content}")
-            set_property(DIRECTORY APPEND PROPERTY TEST_INCLUDE_FILES "${_slow_file}")
+        # Applied after the discovered tests are defined (TEST_INCLUDE_FILES are read in order,
+        # and gtest_discover_tests has just added its own); ctest ignores a name that no longer
+        # exists.
+        set(_extra_content "")
+        foreach(_test IN LISTS T_SLOW)
+            string(APPEND _extra_content
+                "set_tests_properties([==[${_test}]==] PROPERTIES LABELS \"${T_LABEL};slow\" TIMEOUT ${DDB_SLOW_TEST_TIMEOUT})\n")
+        endforeach()
+        foreach(_test IN LISTS T_SERIAL)
+            string(APPEND _extra_content "set_tests_properties([==[${_test}]==] PROPERTIES RUN_SERIAL TRUE)\n")
+        endforeach()
+        if(_extra_content)
+            set(_extra_file "${CMAKE_CURRENT_BINARY_DIR}/${name}_extra_test_properties.cmake")
+            file(WRITE "${_extra_file}" "${_extra_content}")
+            set_property(DIRECTORY APPEND PROPERTY TEST_INCLUDE_FILES "${_extra_file}")
         endif()
     endfunction()
 
@@ -144,6 +148,7 @@ if(BUILD_TESTING)
         TIMEOUT 300
         SOURCES ${DDB_UNIT_TEST_SOURCES} $<TARGET_OBJECTS:ddb_core> $<TARGET_OBJECTS:ddb_capi>
         LINK ddb_core_usage
+        SERIAL DDB03_Delta.isLinear
     )
     # Same runtime files as libddb (data files, Windows DLLs): the unit binary does not depend
     # on the ddb target

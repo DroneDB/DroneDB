@@ -215,22 +215,12 @@ namespace
                    std::chrono::steady_clock::now() - t0).count();
     }
 
+    // Tells a linear diff from a quadratic one, on any machine: 200k vs 200k takes about 0.1 s
+    // on the dev box and up to 1.3 s on a loaded Windows runner; the quadratic diff took 5 s at
+    // 50k (16 times that at 200k). The bound sits between the two, with a wide margin on both
+    // sides: this test checks the complexity, not the speed of the machine. It runs serially
+    // (tests/CMakeLists.txt), so other tests do not take its CPU.
     TEST(DDB03_Delta, isLinear)
-    {
-        if (std::getenv("DDB03_SKIP_TIMING") != nullptr)
-            GTEST_SKIP() << "timing test disabled";
-
-        const auto [s, t] = scalingStamps(50000);
-        Delta d;
-        const auto ms = timeDelta(s, t, d);
-
-        EXPECT_EQ(d.adds.size(), 1000u);  // 500 missing in dst + 500 modified
-        EXPECT_EQ(d.removes.size(), 0u);
-        std::cout << "[ DDB03 ] getDelta(50k, 50k) took " << ms << " ms" << std::endl;
-        EXPECT_LT(ms, 200) << "getDelta is quadratic (it took ~5 s before the merge-join)";
-    }
-
-    TEST(DDB03_Delta, isLinear200k)
     {
         if (std::getenv("DDB03_SKIP_TIMING") != nullptr)
             GTEST_SKIP() << "timing test disabled";
@@ -239,9 +229,10 @@ namespace
         Delta d;
         const auto ms = timeDelta(s, t, d);
 
-        EXPECT_EQ(d.adds.size(), 4000u);
+        EXPECT_EQ(d.adds.size(), 4000u);  // 2000 missing in dst + 2000 modified
+        EXPECT_EQ(d.removes.size(), 0u);
         std::cout << "[ DDB03 ] getDelta(200k, 200k) took " << ms << " ms" << std::endl;
-        EXPECT_LT(ms, 1000);
+        EXPECT_LT(ms, 10000) << "getDelta is quadratic (about 80 s at 200k before the merge-join)";
     }
 
     struct StampFixture : IndexFixture
