@@ -397,16 +397,6 @@ TEST(entryHandler, ScopedHandlerPutsBackTheOneItReplaced) {
 
 // ---- Sidecars ------------------------------------------------------------------------------
 
-void insertEntry(Database* db, const std::string& path, const std::string& hash, EntryType type) {
-    auto q = db->query("INSERT INTO entries (path, hash, type, properties, mtime, size, depth) "
-                       "VALUES (?, ?, ?, '{}', 0, 1, ?)");
-    q->bind(1, path);
-    q->bind(2, hash);
-    q->bind(3, static_cast<int>(type));
-    q->bind(4, static_cast<int>(std::count(path.begin(), path.end(), '/')));
-    q->execute();
-}
-
 // The main file of a sidecar matches whatever the letter case of its extension (Registry's
 // rule, XI-04); it used to be found only as .shp or .SHP. The stem stays exact.
 TEST(entryHandler, SidecarMainExtensionMatchesAnyLetterCase) {

@@ -48,13 +48,7 @@ namespace
 
         void insert(const std::string &path, const std::string &hash, EntryType type) const
         {
-            auto q = db->query("INSERT INTO entries (path, hash, type, properties, mtime, size, depth) "
-                               "VALUES (?, ?, ?, '{}', 0, 1, ?)");
-            q->bind(1, path);
-            q->bind(2, hash);
-            q->bind(3, static_cast<int>(type));
-            q->bind(4, static_cast<int>(std::count(path.begin(), path.end(), '/')));
-            q->execute();
+            insertEntry(db.get(), path, hash, type);
         }
     };
 

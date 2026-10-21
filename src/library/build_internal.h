@@ -8,14 +8,18 @@
 // pending_markers.cpp, build_cleanup.cpp): not installed, not part of the API.
 
 #include <chrono>
+#include <ctime>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
 
+#include "build_manifest.h"
 #include "dbops.h"
 #include "entry_handler.h"
 #include "fs.h"
+#include "statement.h"
 
 namespace ddb {
 
@@ -55,10 +59,99 @@ std::optional<BuildTarget> resolveBuildTarget(Database* db, const Entry& e);
 // The indexed paths of db that start with prefix (one range scan of the path index)
 std::vector<std::string> indexedPathsWithPrefix(Database* db, const std::string& prefix);
 
+// The build targets of many entries of one index, with two prepared statements reused for
+// every lookup (getBuildStatus, the XI-04 manifest): only path, hash and type are read.
+class IndexBuildTargets {
+  public:
+    explicit IndexBuildTargets(Database* db);
+    // Reads path, hash and type of the entry at path; false when there is none
+    bool lookup(const std::string& path, Entry& out);
+    // resolveBuildTarget() over this index
+    std::optional<BuildTarget> resolve(const Entry& e);
+
+  private:
+    std::unique_ptr<Statement> byPath_;
+    std::unique_ptr<Statement> byPrefix_;
+};
+
+// ---- Artifact manifest (build_manifest.cpp, XI-04) -------------------------
+
+// One name in a directory listing
+struct DirectoryName {
+    std::string name;  // UTF-8 (io::toUtf8)
+    bool directory = false;
+};
+
+// The content of a "<hash>.pending" marker (pending_markers.cpp)
+struct PendingMarker {
+    // Unix time of the last attempt; 0 when the first line is not a valid timestamp
+    time_t lastAttempt = 0;
+    // Dependency names still missing at that attempt (dataset-relative, see PendingBuildInfo)
+    std::vector<std::string> missingDependencies;
+};
+
+// The filesystem queries of a build state read, one virtual call each, so a test can count
+// them (the probe budget of DDBGetBuildArtifacts) or fake them. Every query is side-effect
+// free: nothing is created, written, locked or removed.
+class BuildProbe {
+  public:
+    virtual ~BuildProbe() = default;
+    // The names directly inside dir; nothing when dir does not exist or cannot be read
+    virtual std::optional<std::vector<DirectoryName>> list(const fs::path& dir) const;
+    // A regular file exists at path
+    virtual bool isFile(const fs::path& path) const;
+    // The pending marker at path; nothing when there is none
+    virtual std::optional<PendingMarker> readPendingMarker(const fs::path& path) const;
+    // BuildLock::isHeld(outputFolder): never reclaims a stale lock
+    virtual bool isLockHeld(const fs::path& outputFolder) const;
+    // handler.isComplete(root): the rule of isBuildComplete() and getBuildStatus()
+    virtual bool isComplete(const EntryHandler& handler, const fs::path& root) const;
+};
+
+// The real filesystem
+const BuildProbe& filesystemBuildProbe();
+
+// Reads the build state of entries of one index (one connection for a whole batch).
+// A non-buildable entry costs no filesystem query. A buildable one costs:
+//   1 listing of its build root "<build root>/<hash>" (which also tells whether a lock file
+//     exists, and which artifact folders do);
+//   1 read of "<hash>.pending";
+//   1 lock probe, only when "<subfolder>.building" exists;
+//   1 query per artifact folder that exists (a listing for file artifacts, the index file of
+//     a directory artifact), legacy artifacts only when no current one exists;
+//   the completeness check of getBuildStatus(), only when the state is neither building nor
+//     pending and the build root exists.
+class BuildStateReader {
+  public:
+    explicit BuildStateReader(Database* db, const BuildProbe& probe = filesystemBuildProbe());
+
+    // Reads path, hash and type of the entry at path; false when there is none
+    bool lookup(const std::string& path, Entry& out) { return targets_.lookup(path, out); }
+    // The build state of an indexed entry (path, hash and type are read)
+    EntryBuild read(const Entry& e);
+
+  private:
+    IndexBuildTargets targets_;
+    fs::path buildDirectory_;
+    const BuildProbe& probe_;
+};
+
+// The artifacts of handler that exist under root, in manifest order: a file artifact when
+// its file exists, a directory artifact when its index file exists; a legacy artifact only
+// when no current one exists. rootNames is the listing of root (probe.list(root)).
+std::vector<BuildArtifact> existingArtifacts(const EntryHandler& handler, const fs::path& root,
+                                             const std::vector<DirectoryName>& rootNames,
+                                             const BuildProbe& probe);
+
 // ---- Build dispatch (build_dispatch.cpp) ----------------------------------
 
 // One build attempt of an entry (or of the main file it is a sidecar of).
 void buildInternal(Database* db, const Entry& e, const std::string& outputPath, bool force);
+
+// Throws RetryableBuildException(LowDiskSpace) when the filesystem of dir has less free space
+// than DDB_MIN_FREE_DISK_MB (default 512; 0 disables the check) before a build or a copy of
+// build artifacts writes to it.
+void ensureSufficientDiskSpace(const fs::path& dir);
 
 // ---- Pending markers (pending_markers.cpp) --------------------------------
 
@@ -66,6 +159,15 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
 // lines, through an atomic rename of a sibling. A failed write or rename is
 // logged and returns false; the previous marker is then kept.
 bool replacePendingMarker(const fs::path& pendingPath, const std::string& dependencyLines);
+
+// Replaces the marker at to with a copy of the marker at from (its timestamp and dependency
+// lines), through the same atomic rename as replacePendingMarker(). Throws FSException when
+// from cannot be read or to cannot be written; the previous marker at to is then kept.
+void copyPendingMarker(const fs::path& from, const fs::path& to);
+
+// Reads the marker at pendingPath without consuming it; nothing when it cannot be opened (no
+// marker). A malformed timestamp reads as 0 (the build is due), as buildPending() treats it.
+std::optional<PendingMarker> readPendingMarker(const fs::path& pendingPath);
 
 // The sibling written by replacePendingMarker() before the atomic rename is
 // "<hash>.pending.tmp-<rand16>" (pendingMarkerTempInfix()). A crash between write

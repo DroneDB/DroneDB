@@ -38,12 +38,16 @@ struct FingerprintContext;
 
 enum class ArtifactKind { File, Directory };
 
+// The artifacts of a type are listed in the order of artifacts(), its primary output first:
+// the file thumbnails and tiles are made from.
 struct BuildArtifact {
     // What the artifact is for, never where it is: "raster.cog", "vector.mvt", ...
     std::string role;
     // Relative to the entry's build root "<build root>/<hash>/", '/'-separated
     std::string path;
     ArtifactKind kind = ArtifactKind::File;
+    // Of the file a client opens: the file itself, or the index of a Directory. Hosts send it
+    // as the Content-Type of the artifact (tests/contract pins the values)
     std::string mediaType;
     // File name offered for a download of the artifact; empty when it is not downloadable
     std::string downloadName;

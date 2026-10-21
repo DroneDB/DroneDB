@@ -4,6 +4,8 @@
 #ifndef DBOPS_H
 #define DBOPS_H
 
+#include <functional>
+
 #include "database.h"
 #include "statement.h"
 #include "entry.h"
@@ -124,8 +126,13 @@ namespace ddb
     // The entries selected by `query`, sorted by path
     DDB_DLL std::vector<Entry> listEntries(Database *db, const EntryQuery &query);
 
-    // Writes entries in "text" (one path per line) or "json" (array of Entry::toJSON) format
-    DDB_DLL void writeEntries(std::ostream &out, const std::vector<Entry> &entries, const std::string &format);
+    // Adds members to the JSON of an entry before writeEntries writes it
+    using EntryJsonDecorator = std::function<void(const Entry &, json &)>;
+
+    // Writes entries in "text" (one path per line) or "json" (array of Entry::toJSON) format,
+    // one entry at a time; decorate (json only) adds members to each entry's JSON
+    DDB_DLL void writeEntries(std::ostream &out, const std::vector<Entry> &entries, const std::string &format,
+                              const EntryJsonDecorator &decorate = nullptr);
     DDB_DLL void checkDeleteBuild(Database *db, const std::string &hash);
     DDB_DLL void checkDeleteMeta(Database *db, const std::string &path);
     DDB_DLL int deleteFromIndex(Database *db, const std::string &query, bool isFolder = false, RemoveCallback callback = nullptr);

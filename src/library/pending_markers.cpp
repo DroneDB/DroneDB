@@ -11,6 +11,8 @@
 #include <cctype>
 #include <cerrno>
 #include <fstream>
+#include <iterator>
+#include <optional>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -24,10 +26,13 @@
 
 namespace ddb {
 
-// Write the complete marker into a sibling file before replacing the old one.
-// Failure (especially ENOSPC) must never remove the last pending marker.
-bool replacePendingMarker(const fs::path& pendingPath, const std::string& dependencyLines) {
-    // "<hash>.pending.tmp-<rand16>", see pendingMarkerTempInfix().
+namespace {
+
+// Writes content into a sibling "<marker>.tmp-<rand16>" (see pendingMarkerTempInfix()) and
+// renames it onto pendingPath, so a reader sees the old marker or the new one, never a part.
+// Throws FSException; the sibling is removed and the previous marker kept on any failure
+// (especially ENOSPC: a full disk must never remove the last pending marker).
+void writeMarkerAtomically(const fs::path& pendingPath, const std::string& content) {
     const fs::path temporary =
         pendingPath.string() + PendingMarkerTempTag + utils::generateRandomString(16);
     try {
@@ -39,7 +44,7 @@ bool replacePendingMarker(const fs::path& pendingPath, const std::string& depend
             throw FSException("Cannot open pending marker " + temporary.string(),
                               std::error_code(openError, std::generic_category()));
         errno = 0;
-        out << utils::currentUnixTimestamp() << "\n" << dependencyLines;
+        out << content;
         out.flush();
         const int writeError = errno;
         if (!out)
@@ -61,51 +66,44 @@ bool replacePendingMarker(const fs::path& pendingPath, const std::string& depend
 #else
         io::rename(temporary, pendingPath);
 #endif
+    } catch (...) {
+        std::error_code ignored;
+        fs::remove(temporary, ignored);
+        throw;
+    }
+}
+
+}  // namespace
+
+// Write the complete marker into a sibling file before replacing the old one.
+// Failure (especially ENOSPC) must never remove the last pending marker.
+bool replacePendingMarker(const fs::path& pendingPath, const std::string& dependencyLines) {
+    try {
+        writeMarkerAtomically(pendingPath, std::to_string(utils::currentUnixTimestamp()) + "\n" + dependencyLines);
         return true;
     } catch (const std::exception& ex) {
         LOGW << "Cannot refresh pending marker '" << pendingPath.string()
              << "'; original marker retained: " << ex.what();
-        std::error_code ignored;
-        fs::remove(temporary, ignored);
         return false;
     }
 }
 
-bool isPendingMarkerTempName(const std::string& name) {
-    const std::string infix = pendingMarkerTempInfix();
-    const size_t infixAt = 64;
-    if (name.size() <= infixAt + infix.size())
-        return false;
-    if (name.compare(infixAt, infix.size(), infix) != 0)
-        return false;
-    return isHashLike(name.substr(0, infixAt));
+void copyPendingMarker(const fs::path& from, const fs::path& to) {
+    std::ifstream in(from.string(), std::ios::binary);
+    if (!in.is_open())
+        throw FSException("Cannot read pending marker " + from.string());
+    const std::string content(std::istreambuf_iterator<char>(in), {});
+    if (in.bad())
+        throw FSException("Cannot read pending marker " + from.string());
+    writeMarkerAtomically(to, content);
 }
 
-namespace {
-
-// Parsed contents of a ".pending" marker file created by buildInternal() when
-// a build is deferred due to missing dependencies (see its BuildDepMissingException
-// handler in build_dispatch.cpp). Format: first line is a Unix timestamp of the last
-// attempt, following lines are missing dependency names (one per line).
-// Names are dataset-root-relative paths of companion files (e.g. "sub/m.mtl",
-// "sub/mats/tex.png"); markers written by older versions may hold names
-// relative to the source file's folder. They are informational only: a retry
-// never matches them against the index.
-struct PendingFileData {
-    time_t lastAttempt = 0;
-    std::vector<std::string> missingDependencies;
-};
-
-// Reads and parses a ".pending" file without consuming it. Malformed or
-// unreadable timestamps are tolerated (lastAttempt stays 0, i.e. the build is
-// due immediately) to preserve the historical, lenient behavior of buildPending().
-PendingFileData parsePendingFile(const fs::path& pendingFilePath) {
-    PendingFileData data;
-
+std::optional<PendingMarker> readPendingMarker(const fs::path& pendingFilePath) {
     std::ifstream pendingFile(pendingFilePath.string());
     if (!pendingFile)
-        return data;
+        return std::nullopt;
 
+    PendingMarker data;
     std::string line;
     // First line is the timestamp
     std::getline(pendingFile, line);
@@ -144,6 +142,32 @@ PendingFileData parsePendingFile(const fs::path& pendingFilePath) {
     }
 
     return data;
+}
+
+bool isPendingMarkerTempName(const std::string& name) {
+    const std::string infix = pendingMarkerTempInfix();
+    const size_t infixAt = 64;
+    if (name.size() <= infixAt + infix.size())
+        return false;
+    if (name.compare(infixAt, infix.size(), infix) != 0)
+        return false;
+    return isHashLike(name.substr(0, infixAt));
+}
+
+namespace {
+
+// Format of a ".pending" marker file, created by buildInternal() when a build is deferred due
+// to missing dependencies (see its BuildDepMissingException handler in build_dispatch.cpp):
+// the first line is a Unix timestamp of the last attempt, the following lines are missing
+// dependency names (one per line). Names are dataset-root-relative paths of companion files
+// (e.g. "sub/m.mtl", "sub/mats/tex.png"); markers written by older versions may hold names
+// relative to the source file's folder. They are informational only: a retry never matches
+// them against the index.
+
+// A marker that cannot be read counts as one with no timestamp and no dependency (the build is
+// due immediately), the historical, lenient behavior of buildPending().
+PendingMarker parsePendingFile(const fs::path& pendingFilePath) {
+    return readPendingMarker(pendingFilePath).value_or(PendingMarker{});
 }
 
 // Collects the ".pending" markers of a build directory: only top-level
@@ -206,7 +230,7 @@ void buildPending(Database* db, const std::string& outputPath, bool force) {
 
     for (const auto& pendingPath : pendingFiles) {
         const auto hash = pendingPath.stem().string();
-        const PendingFileData pending = parsePendingFile(pendingPath);
+        const PendingMarker pending = parsePendingFile(pendingPath);
 
         const time_t timeSinceLastAttempt = utils::currentUnixTimestamp() - pending.lastAttempt;
         if (timeSinceLastAttempt < PendingRetryBackoffSeconds && !force) {
@@ -264,7 +288,7 @@ std::vector<PendingBuildInfo> getPendingBuildInfo(Database* db) {
 
     for (const auto& pendingPath : collectPendingFiles(db->buildDirectory())) {
         const auto hash = pendingPath.stem().string();
-        const PendingFileData pending = parsePendingFile(pendingPath);
+        const PendingMarker pending = parsePendingFile(pendingPath);
 
         auto q = db->query("SELECT path FROM entries WHERE hash = ?");
         q->bind(1, hash);

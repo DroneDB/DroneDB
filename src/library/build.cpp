@@ -162,23 +162,31 @@ bool isBuildComplete(Database* db, const std::string& path) {
     return target && isTargetBuildComplete(db->buildDirectory(), *target);
 }
 
-std::vector<BuildStatus> getBuildStatus(Database* db, const std::vector<std::string>& paths) {
-    // One prepared statement per kind of lookup; only the columns the build rules read
-    auto q = db->query("SELECT path, hash, type FROM entries WHERE path = ?");
-    auto qPrefix = db->query(PathsWithPrefixQuery);
-    const auto siblings = [&qPrefix](const std::string& prefix) { return fetchPathsWithPrefix(*qPrefix, prefix); };
-    const auto lookup = [&q](const std::string& p, Entry& out) {
-        q->bind(1, p);
-        const bool found = q->fetch();
-        if (found) {
-            out.path = q->getText(0);
-            out.hash = q->getText(1);
-            out.type = static_cast<EntryType>(q->getInt(2));
-        }
-        q->reset();
-        return found;
-    };
+IndexBuildTargets::IndexBuildTargets(Database* db)
+    // Only the columns the build rules read
+    : byPath_(db->query("SELECT path, hash, type FROM entries WHERE path = ?")),
+      byPrefix_(db->query(PathsWithPrefixQuery)) {}
 
+bool IndexBuildTargets::lookup(const std::string& path, Entry& out) {
+    byPath_->bind(1, path);
+    const bool found = byPath_->fetch();
+    if (found) {
+        out.path = byPath_->getText(0);
+        out.hash = byPath_->getText(1);
+        out.type = static_cast<EntryType>(byPath_->getInt(2));
+    }
+    byPath_->reset();
+    return found;
+}
+
+std::optional<BuildTarget> IndexBuildTargets::resolve(const Entry& e) {
+    return resolveBuildTarget(
+        e, [this](const std::string& p, Entry& out) { return lookup(p, out); },
+        [this](const std::string& prefix) { return fetchPathsWithPrefix(*byPrefix_, prefix); });
+}
+
+std::vector<BuildStatus> getBuildStatus(Database* db, const std::vector<std::string>& paths) {
+    IndexBuildTargets targets(db);
     const fs::path buildDirectory = db->buildDirectory();
     std::vector<BuildStatus> result;
     result.reserve(paths.size());
@@ -188,10 +196,10 @@ std::vector<BuildStatus> getBuildStatus(Database* db, const std::vector<std::str
         status.path = path;
 
         Entry e;
-        if (lookup(path, e)) {
+        if (targets.lookup(path, e)) {
             status.exists = true;
 
-            const auto target = resolveBuildTarget(e, lookup, siblings);
+            const auto target = targets.resolve(e);
             status.buildable = target.has_value();
             status.complete = target && isTargetBuildComplete(buildDirectory, *target);
         }

@@ -685,7 +685,8 @@ namespace
         writeEntries(out, entries, format);
     }
 
-    void writeEntries(std::ostream &out, const std::vector<Entry> &entries, const std::string &format)
+    void writeEntries(std::ostream &out, const std::vector<Entry> &entries, const std::string &format,
+                      const EntryJsonDecorator &decorate)
     {
         if (format == "text")
         {
@@ -700,6 +701,8 @@ namespace
             {
                 json j;
                 e.toJSON(j);
+                if (decorate)
+                    decorate(e, j);
                 if (!first)
                     out << ",";
                 out << j.dump();

@@ -246,8 +246,10 @@ class VectorEntryHandler : public EntryHandler {
     std::vector<BuildArtifact> artifacts() const override {
         return {{"vector.gpkg", artifactPath(VectorBuildSubfolder, VectorGpkgFileName), ArtifactKind::File,
                  "application/geopackage+sqlite3", VectorGpkgFileName, "", false},
-                {"vector.mvt", MvtBuildSubfolder, ArtifactKind::Directory, "application/vnd.mapbox-vector-tile",
-                 "", MvtMetadataFileName, false},
+                // The media type of a directory artifact is its index's: the TileJSON (the tiles
+                // themselves, "<z>/<x>/<y>.pbf", are application/vnd.mapbox-vector-tile)
+                {"vector.mvt", MvtBuildSubfolder, ArtifactKind::Directory, "application/json", "",
+                 MvtMetadataFileName, false},
                 {"vector.local", artifactPath(VectorBuildSubfolder, VectorLocalFileName), ArtifactKind::File,
                  "application/json", "", "", false}};
     }

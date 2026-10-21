@@ -28,7 +28,7 @@ namespace ddb {
 // environment variable; set it to 0 to disable the check. Defaults to 512 MB,
 // low enough never to trip on a healthy host yet high enough to stop a build
 // from beginning on an essentially full disk.
-static void ensureSufficientDiskSpace(const fs::path& dir) {
+void ensureSufficientDiskSpace(const fs::path& dir) {
     long long minMb = 512;
     if (const char* env = std::getenv("DDB_MIN_FREE_DISK_MB"); env && *env) {
         char* endp = nullptr;

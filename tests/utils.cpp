@@ -213,6 +213,17 @@ std::filesystem::path makeIndex(const std::string &testArea, const std::filesyst
     return index.root;
 }
 
+void insertEntry(ddb::Database *db, const std::string &path, const std::string &hash, ddb::EntryType type)
+{
+    auto q = db->query("INSERT INTO entries (path, hash, type, properties, mtime, size, depth) "
+                       "VALUES (?, ?, ?, '{}', 0, 1, ?)");
+    q->bind(1, path);
+    q->bind(2, hash);
+    q->bind(3, static_cast<int>(type));
+    q->bind(4, static_cast<int>(std::count(path.begin(), path.end(), '/')));
+    q->execute();
+}
+
 std::string hashOf(ddb::Database *db, const std::string &path)
 {
     ddb::Entry e;

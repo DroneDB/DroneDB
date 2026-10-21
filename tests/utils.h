@@ -16,6 +16,7 @@
 
 #include "database.h"
 #include "delta.h"
+#include "entry_types.h"
 #include "testarea.h"
 
 // ------------------------------------------------------------------------------- files
@@ -57,6 +58,11 @@ struct IndexFixture
 // An index like IndexFixture's with "a.txt" ("alpha") added, closed. Returns its root.
 std::filesystem::path makeIndex(const std::string &testArea, const std::filesystem::path &folder = "ds",
                                 bool recreateArea = true);
+
+// Inserts an index row directly (no file needed): `path` with `hash` and `type`, properties
+// "{}", mtime 0, size 1 and the depth of the path. For tests of the build rules, which read
+// path, hash and type only.
+void insertEntry(ddb::Database *db, const std::string &path, const std::string &hash, ddb::EntryType type);
 
 // Hash of the entry `path` (relative to the dataset root), "<missing>" when it is not indexed
 std::string hashOf(ddb::Database *db, const std::string &path);
