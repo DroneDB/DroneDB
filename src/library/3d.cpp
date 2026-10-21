@@ -11,6 +11,7 @@
 #include <sstream>
 #include <system_error>
 
+#include "build_layout.h"
 #include "buildlock.h"
 #include "deppath.h"
 #include "exceptions.h"
@@ -701,7 +702,7 @@ fs::path stripTrailingSeparators(const std::string& dir) {
 // itself be a partial output. Throwing filesystem calls keep inspection errors
 // from being mistaken for permission to delete the backup.
 bool tilesSentinelComplete(const fs::path& dir) {
-    const fs::path sentinel = dir / "tileset.json";
+    const fs::path sentinel = dir / TilesetFileName;
     return fs::is_regular_file(sentinel) && fs::file_size(sentinel) > 0;
 }
 
@@ -756,14 +757,14 @@ bool isModel3DTilesComplete(const fs::path& outputDir) {
 }
 
 bool hasRecoverableModel3DTilesSwap(const fs::path& outputDir) {
-    const fs::path oldDir = outputDir.parent_path() / (outputDir.filename().string() + "-old");
+    const fs::path oldDir = backupFolderPath(outputDir);
     return isModel3DTilesComplete(oldDir) && !isModel3DTilesComplete(outputDir);
 }
 
 void recoverModel3DTilesSwap(const std::string& outputDir) {
     const fs::path outDir = stripTrailingSeparators(outputDir);
     BuildLock tilesLock(outDir.string());
-    const fs::path oldDir = outDir.parent_path() / (outDir.filename().string() + "-old");
+    const fs::path oldDir = backupFolderPath(outDir);
     recoverTilesSwap(outDir, oldDir);
 }
 
@@ -881,7 +882,7 @@ std::string buildModel3DTiles(const std::string& inputObj, const std::string& ou
     io::assureFolderExists(parent);
 
     const std::string outName = outDir.filename().string();
-    const fs::path oldDir = parent / (outName + "-old");
+    const fs::path oldDir = backupFolderPath(outDir);
 
     // One tiles build per output folder ("<outDir>.building"), held until return.
     // It also gates removeOrphanTempFolders (cleanupBuild) for the -temp-/-old
@@ -907,7 +908,7 @@ std::string buildModel3DTiles(const std::string& inputObj, const std::string& ou
 
     // Produce into a sibling temporary directory; outDir is untouched until
     // Obj2Tiles succeeds. The guard removes the temp folder on any failure.
-    const fs::path tempOut = parent / (outName + "-temp-" + utils::generateRandomString(16));
+    const fs::path tempOut = parent / (outName + TempFolderInfix + utils::generateRandomString(16));
     io::ScopedTempDir outGuard;
     io::assureIsRemoved(tempOut);
     io::assureFolderExists(tempOut);
@@ -1025,7 +1026,7 @@ std::string buildModel3DTiles(const std::string& inputObj, const std::string& ou
         }
     }
 
-    return (outDir / "tileset.json").string();
+    return (outDir / TilesetFileName).string();
 }
 
 std::vector<std::string> getObjDependencies(const std::string& obj,

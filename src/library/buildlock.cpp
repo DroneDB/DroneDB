@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "buildlock.h"
+#include "build_layout.h"
 #include "exceptions.h"
 #include "logger.h"
 #include "fs.h"
@@ -108,7 +109,7 @@ bool probeDirectoryWritable(const fs::path& dir) {
 namespace ddb {
 
 BuildLock::BuildLock(const std::string& outputPath)
-    : lockFilePath(outputPath + ".building")
+    : lockFilePath(buildLockPath(outputPath))
     , isLocked(false)
 #ifdef WIN32
     , fileHandle(INVALID_HANDLE_VALUE)
@@ -120,7 +121,7 @@ BuildLock::BuildLock(const std::string& outputPath)
 }
 
 BuildLock::BuildLock(const std::string& outputPath, bool wait)
-    : lockFilePath(outputPath + ".building")
+    : lockFilePath(buildLockPath(outputPath))
     , isLocked(false)
 #ifdef WIN32
     , fileHandle(INVALID_HANDLE_VALUE)

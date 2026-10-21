@@ -8,6 +8,7 @@
 #include <vector>
 #include <zip.h>
 
+#include "build_layout.h"
 #include "gdal_raii.h"
 #include "json.h"
 #include "logger.h"
@@ -131,7 +132,7 @@ namespace ddb
     bool getTiles3DInfo(const std::string &ttzPath, Tiles3DInfo &info)
     {
         std::string jsonStr;
-        if (!readEntryFromZip(ttzPath, "tileset.json", jsonStr))
+        if (!readEntryFromZip(ttzPath, TilesetFileName, jsonStr))
         {
             LOGD << "Tiles3D: tileset.json not found at root of " << ttzPath;
             return false;

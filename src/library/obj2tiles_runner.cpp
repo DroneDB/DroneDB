@@ -17,6 +17,7 @@
 #include <utility>
 #include <vector>
 
+#include "build_layout.h"
 #include "logger.h"
 #include "mio.h"
 #include "process_runner.h"
@@ -379,7 +380,7 @@ namespace ddb
                 LOGI << oss.str();
             }
 
-            const fs::path tilesetPath = outDir / "tileset.json";
+            const fs::path tilesetPath = outDir / TilesetFileName;
             if (!fs::is_regular_file(tilesetPath, ec) || ec || fs::file_size(tilesetPath, ec) == 0 || ec)
             {
                 std::ostringstream oss;

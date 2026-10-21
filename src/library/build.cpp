@@ -20,6 +20,7 @@
 #endif
 
 #include "3d.h"
+#include "build_layout.h"
 #include "buildlock.h"
 #include "cog.h"
 #include "dbops.h"
@@ -44,8 +45,9 @@ static void ensureSufficientDiskSpace(const fs::path& dir);
 // Write the complete marker into a sibling file before replacing the old one.
 // Failure (especially ENOSPC) must never remove the last pending marker.
 static bool replacePendingMarker(const fs::path& pendingPath, const std::string& dependencyLines) {
-    // "<hash>.pending.tmp-<rand16>", see PendingMarkerTempInfix.
-    const fs::path temporary = pendingPath.string() + ".tmp-" + utils::generateRandomString(16);
+    // "<hash>.pending.tmp-<rand16>", see pendingMarkerTempInfix().
+    const fs::path temporary =
+        pendingPath.string() + PendingMarkerTempTag + utils::generateRandomString(16);
     try {
         std::ofstream out;
         errno = 0;
@@ -87,35 +89,16 @@ static bool replacePendingMarker(const fs::path& pendingPath, const std::string&
     }
 }
 
-// Build-artifact names are content hashes (currently SHA-256 hex, 64 chars).
-// Callers validate a candidate name before acting on it so unrelated files or
-// directories living in a user-specified output path are never touched.
-static bool isHashLike(const std::string& s) {
-    if (s.size() != 64)
-        return false;
-    for (unsigned char c : s) {
-        if (!std::isxdigit(c))
-            return false;
-    }
-    return true;
-}
-
-// Primary output subfolder of a Model build. Its ".building" lock is the one a
-// Model build holds for its whole duration; cleanupBuild takes the same lock
-// before touching the 3D Tiles siblings so it is serialized with builds.
-static const char* const ModelSubfolder = "nxs";
-
-// Infix of the sibling written by replacePendingMarker() before the atomic
-// rename: "<hash>.pending.tmp-<rand16>". A crash between write and rename
-// leaves it behind; cleanupBuild removes such leftovers once they are old.
-static const std::string PendingMarkerTempInfix = ".pending.tmp-";
-
+// The sibling written by replacePendingMarker() before the atomic rename is
+// "<hash>.pending.tmp-<rand16>" (pendingMarkerTempInfix()). A crash between write
+// and rename leaves it behind; cleanupBuild removes such leftovers once they are old.
 // True for "<64 hex>.pending.tmp-<non-empty suffix>".
 static bool isPendingMarkerTempName(const std::string& name) {
+    const std::string infix = pendingMarkerTempInfix();
     const size_t infixAt = 64;
-    if (name.size() <= infixAt + PendingMarkerTempInfix.size())
+    if (name.size() <= infixAt + infix.size())
         return false;
-    if (name.compare(infixAt, PendingMarkerTempInfix.size(), PendingMarkerTempInfix) != 0)
+    if (name.compare(infixAt, infix.size(), infix) != 0)
         return false;
     return isHashLike(name.substr(0, infixAt));
 }
@@ -129,25 +112,25 @@ bool isBuildableInternal(const Entry& e, std::string& subfolder) {
     if (e.type == EntryType::PointCloud) {
         // Special case: do not build if this entry is a leaf inside a built EPT dataset.
         // We keep this guard to skip residual ept-data folders from older builds.
-        if (fs::path(e.path).parent_path().filename().string() == "ept-data")
+        if (fs::path(e.path).parent_path().filename().string() == LegacyEptDataFolder)
             return false;
 
-        subfolder = "copc";
+        subfolder = CopcBuildSubfolder;
         return true;
     } else if (e.type == EntryType::GeoRaster) {
-        subfolder = "cog";
+        subfolder = CogBuildSubfolder;
         return true;
     } else if (e.type == EntryType::Model) {
-        subfolder = ModelSubfolder;
+        subfolder = NexusBuildSubfolder;
         return true;
     } else if (e.type == EntryType::Vector) {
-        subfolder = "vec";
+        subfolder = VectorBuildSubfolder;
         return true;
     } else if (e.type == EntryType::GaussianSplat) {
-        subfolder = "gsplat";
+        subfolder = GsplatBuildSubfolder;
         return true;
     } else if (e.type == EntryType::Tiles3D) {
-        subfolder = "3dtiles";
+        subfolder = Tiles3DBuildSubfolder;
         return true;
     }
 
@@ -272,18 +255,18 @@ static bool isBuildOutputComplete(const fs::path& baseOutputPath,
                                   const std::string& subfolder,
                                   bool checkTilesSwap = true) {
     if (e.type == EntryType::Vector)
-        return fileExistsAndNonEmpty(baseOutputPath / "vec" / "source.gpkg") &&
-               (fileExistsAndNonEmpty(baseOutputPath / "mvt" / "metadata.json") ||
-                fileExistsAndNonEmpty(baseOutputPath / "vec" / "local.json"));
+        return fileExistsAndNonEmpty(baseOutputPath / VectorBuildSubfolder / VectorGpkgFileName) &&
+               (fileExistsAndNonEmpty(baseOutputPath / MvtBuildSubfolder / MvtMetadataFileName) ||
+                fileExistsAndNonEmpty(baseOutputPath / VectorBuildSubfolder / VectorLocalFileName));
 
     if (e.type == EntryType::GaussianSplat)
-        return fileExistsAndNonEmpty(baseOutputPath / "gsplat" / "model.rad");
+        return fileExistsAndNonEmpty(baseOutputPath / GsplatBuildSubfolder / GsplatRadFileName);
 
     if (e.type == EntryType::Tiles3D)
-        return fileExistsAndNonEmpty(baseOutputPath / "3dtiles" / "tileset.json");
+        return fileExistsAndNonEmpty(baseOutputPath / Tiles3DBuildSubfolder / TilesetFileName);
 
     if (checkTilesSwap && e.type == EntryType::Model &&
-        hasRecoverableModel3DTilesSwap(baseOutputPath / "3dtiles"))
+        hasRecoverableModel3DTilesSwap(baseOutputPath / Tiles3DBuildSubfolder))
         return false;
 
     return directoryHasNonEmptyContent(baseOutputPath / subfolder);
@@ -413,11 +396,11 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
     // Marker snapshot is read after exclusive primary ownership. Mutation waits
     // until serialized Model recovery has finished, so a busy tiles holder leaves
     // the original attempt timestamp untouched.
-    const fs::path pendFile = baseOutputPath.string() + ".pending";
+    const fs::path pendFile = pendingMarkerPath(baseOutputPath);
     bool wasPending = false;
     std::string pendingDependencyLines;
 
-    const auto tempFolder = outputFolder + "-temp-" + utils::generateRandomString(16);
+    const auto tempFolder = outputFolder + TempFolderInfix + utils::generateRandomString(16);
     auto cleanupTemporary = [&]() {
         try {
             io::assureIsRemoved(tempFolder);
@@ -448,7 +431,7 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
         // Lock order is primary Model lock then tiles lock. Recovery must run
         // before the complete Nexus return, without recursively taking tiles lock.
         if (target.type == EntryType::Model)
-            recoverModel3DTilesSwap((baseOutputPath / "3dtiles").string());
+            recoverModel3DTilesSwap((baseOutputPath / Tiles3DBuildSubfolder).string());
 
         // Recheck primary artifacts after serialized recovery. Success consumes
         // pending work even when Nexus was already complete before this attempt.
@@ -469,14 +452,14 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
         if (target.type == EntryType::PointCloud) {
             const std::vector vec = {relativePath};
             // Defensive cleanup: remove any legacy EPT artifacts from previous builds
-            io::assureIsRemoved(baseOutputPath / "ept");
+            io::assureIsRemoved(baseOutputPath / LegacyEptBuildSubfolder);
             buildCopc(vec, tempFolder);
             built = true;
         } else if (target.type == EntryType::GeoRaster) {
-            buildCog(relativePath, (fs::path(tempFolder) / "cog.tif").string());
+            buildCog(relativePath, (fs::path(tempFolder) / CogFileName).string());
             built = true;
         } else if (target.type == EntryType::Model) {
-            buildNexus(relativePath, (fs::path(tempFolder) / "model.nxz").string(), false,
+            buildNexus(relativePath, (fs::path(tempFolder) / NexusFileName).string(), false,
                        datasetRoot);
             built = true;
 
@@ -494,11 +477,12 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
             // tiles lock is a tiles build started outside a Model build (the
             // "ddb tiles3d" command on this output folder).
             try {
-                buildModel3DTiles(relativePath, (baseOutputPath / "3dtiles").string(), true,
+                buildModel3DTiles(relativePath, (baseOutputPath / Tiles3DBuildSubfolder).string(), true,
                                   std::nullopt, true, datasetRoot);
             } catch (const BuildInProgressException& tilesEx) {
                 LOGW << "3D Tiles for " << target.path << " not generated: another tiles build holds "
-                     << (baseOutputPath / "3dtiles").string() << ".building (for example 'ddb tiles3d'): "
+                     << buildLockPath((baseOutputPath / Tiles3DBuildSubfolder).string())
+                     << " (for example 'ddb tiles3d'): "
                      << tilesEx.what() << ". The Nexus output is published; rebuild with force to "
                      << "produce the tiles";
             } catch (const std::exception& tilesEx) {
@@ -526,7 +510,7 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
             // archive is only valid when tileset.json is present at its root; the temp
             // folder is then renamed onto build/{hash}/3dtiles/ by the shared block below.
             zip::extractAll(relativePath, tempFolder);
-            if (!fileExistsAndNonEmpty(fs::path(tempFolder) / "tileset.json"))
+            if (!fileExistsAndNonEmpty(fs::path(tempFolder) / TilesetFileName))
                 throw AppException("Invalid .3tz archive: tileset.json not found at root");
             built = true;
         }
@@ -725,7 +709,7 @@ std::vector<fs::path> collectPendingFiles(const fs::path& buildDir) {
         }
         const fs::path& p = it->path();
         std::error_code typeErr;
-        if (p.extension() != ".pending" || !it->is_regular_file(typeErr) || typeErr)
+        if (p.extension() != PendingMarkerExtension || !it->is_regular_file(typeErr) || typeErr)
             continue;
         if (!isHashLike(p.stem().string()))
             continue;
@@ -885,12 +869,12 @@ static void removeOrphanFolder(const fs::path& p, CleanupResult& result) {
     }
 }
 
-// Prefix of 3D Tiles leftovers already moved aside by a cleanup. It still
-// matches "3dtiles-temp-*", so a trash folder whose deletion failed is picked up
-// by the next cleanup. No build ever uses such a folder (buildModel3DTiles names
-// its temp folders "3dtiles-temp-<rand16>", without dashes in the suffix), so it
-// is deleted without holding the "3dtiles" lock.
-static const std::string TilesTrashPrefix = "3dtiles-temp-trash-";
+// Prefix of 3D Tiles leftovers already moved aside by a cleanup
+// (tiles3DTrashPrefix(), "3dtiles-temp-trash-"). It still matches "3dtiles-temp-*",
+// so a trash folder whose deletion failed is picked up by the next cleanup. No
+// build ever uses such a folder (buildModel3DTiles names its temp folders
+// "3dtiles-temp-<rand16>", without dashes in the suffix), so it is deleted
+// without holding the "3dtiles" lock.
 
 // The 3D Tiles siblings "3dtiles-temp-<rand>" and "3dtiles-old" belong to
 // buildModel3DTiles, which runs under the "3dtiles" lock inside a Model build
@@ -919,8 +903,8 @@ static void removeOrphanTilesFolders(const fs::path& hashDir,
                                      const fs::path& oldFolder,
                                      const std::vector<fs::path>& trashFolders,
                                      CleanupResult& result) {
-    const fs::path primaryDir = hashDir / ModelSubfolder;
-    const fs::path tilesDir = hashDir / "3dtiles";
+    const fs::path primaryDir = hashDir / NexusBuildSubfolder;
+    const fs::path tilesDir = hashDir / Tiles3DBuildSubfolder;
 
     // (trash path, path to report once deleted)
     std::vector<std::pair<fs::path, fs::path>> toDelete;
@@ -955,7 +939,7 @@ static void removeOrphanTilesFolders(const fs::path& hashDir,
 
         if (tilesLock) {
             const auto moveAside = [&](const fs::path& p) {
-                const fs::path trash = hashDir / (TilesTrashPrefix + utils::generateRandomString(16));
+                const fs::path trash = hashDir / (tiles3DTrashPrefix() + utils::generateRandomString(16));
                 std::error_code ec;
                 fs::rename(p, trash, ec);
                 if (ec) {
@@ -1010,6 +994,9 @@ static void removeOrphanTempFolders(const fs::path& hashDir, CleanupResult& resu
     std::vector<fs::path> tilesTempFolders;
     std::vector<fs::path> tilesTrashFolders;
     fs::path tilesOldFolder;
+    const std::string tilesOldName = tiles3DBackupFolderName();
+    const std::string tilesTrashPrefix = tiles3DTrashPrefix();
+    const std::string_view tempInfix = TempFolderInfix;
 
     const fs::directory_iterator end;
     for (; it != end; it.increment(ec)) {
@@ -1021,27 +1008,27 @@ static void removeOrphanTempFolders(const fs::path& hashDir, CleanupResult& resu
             continue;
 
         const std::string name = it->path().filename().string();
-        if (name == "3dtiles-old") {
+        if (name == tilesOldName) {
             tilesOldFolder = it->path();
             continue;
         }
 
-        const auto pos = name.find("-temp-");
+        const auto pos = name.find(tempInfix);
         // Require a non-empty subfolder prefix and a non-empty random suffix so
         // unrelated directory names are never matched.
-        if (pos == std::string::npos || pos == 0 || name.size() <= pos + 6)
+        if (pos == std::string::npos || pos == 0 || name.size() <= pos + tempInfix.size())
             continue;
 
         const std::string subfolder = name.substr(0, pos);
-        if (subfolder == "3dtiles") {
-            if (name.rfind(TilesTrashPrefix, 0) == 0)
+        if (subfolder == Tiles3DBuildSubfolder) {
+            if (name.rfind(tilesTrashPrefix, 0) == 0)
                 tilesTrashFolders.push_back(it->path());
             else
                 tilesTempFolders.push_back(it->path());
             continue;
         }
 
-        const fs::path lockPath = hashDir / (subfolder + ".building");
+        const fs::path lockPath = hashDir / buildLockPath(subfolder);
         if (fs::exists(lockPath) && !isLockFileStale(lockPath.string())) {
             LOGD << "Skipping temp folder with active build lock: " << it->path().string();
             continue;
@@ -1184,7 +1171,7 @@ CleanupResult cleanupBuild(Database* db, const std::string& outputPath) {
                         skip = true;
                         break;
                     }
-                    if (subIt->path().extension() == ".building" &&
+                    if (subIt->path().extension() == BuildLockSuffix &&
                         !isLockFileStale(subIt->path().string())) {
                         LOGD << "Skipping orphan with active build lock: " << p.string();
                         skip = true;
@@ -1205,7 +1192,7 @@ CleanupResult cleanupBuild(Database* db, const std::string& outputPath) {
                 result.removedBuilds.push_back(p.string());
                 LOGD << "Removed orphan build directory: " << p.string();
             }
-        } else if (entry.is_regular_file(typeErr) && p.extension() == ".pending") {
+        } else if (entry.is_regular_file(typeErr) && p.extension() == PendingMarkerExtension) {
             // .pending file naming convention: <hash>.pending. Validate the
             // stem before deleting so we never touch unrelated *.pending files.
             const std::string hash = p.stem().string();
@@ -1311,7 +1298,7 @@ static bool isLockFileStale(const std::string& lockFilePath) {
 #else
     // The lock file path is "<outputFolder>.building"; BuildLock appends the
     // ".building" suffix internally, so we must strip it before constructing.
-    const std::string suffix = ".building";
+    const std::string suffix = BuildLockSuffix;
     if (lockFilePath.size() <= suffix.size() ||
         lockFilePath.compare(lockFilePath.size() - suffix.size(), suffix.size(), suffix) != 0) {
         LOGD << "Unexpected lock file name (no .building suffix): " << lockFilePath;
@@ -1359,7 +1346,7 @@ bool isBuildActive(Database* db, const std::string& path) {
     std::string outPath = db->buildDirectory().string();
     fs::path baseOutputPath = fs::path(outPath) / e.hash;
     std::string outputFolder = (baseOutputPath / subfolder).string();
-    std::string lockFile = outputFolder + ".building";
+    std::string lockFile = buildLockPath(outputFolder);
 
     LOGD << "Checking for active build in: " << outputFolder;
 

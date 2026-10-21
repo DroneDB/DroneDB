@@ -9,33 +9,15 @@
 #include <vector>
 
 #include "basicgeometry.h"
+#include "build_layout.h"
 #include "ddb_export.h"
 #include "fs.h"
 #include "json.h"
 
 namespace ddb
 {
-    // Standard layout of the Gaussian Splat build artifact within an entry's build folder.
-    // Mirrors the COPC/COG/NXS conventions (see pointcloud.h).
-    constexpr const char *GsplatBuildSubfolder = "gsplat";
-    constexpr const char *GsplatFileName = "model.spz";
-    constexpr const char *GsplatGeorefFileName = "georef.json";
-    // Level-of-detail delivery artifact (Spark "RAD" container). Produced by the vendored
-    // build-lod tool; streamed progressively by the viewer via HTTP range requests (paged: true).
-    // This is the sole delivery artifact - the intermediate .spz is not kept after a successful build.
-    constexpr const char *GsplatRadFileName = "model.rad";
-
-    // Tiny sidecar with the splat's local-space axis-aligned bounding box, written at build
-    // time. The viewer uses it to frame the camera deterministically. This is essential for the
-    // paged .rad path: a streamed mesh has no resident splats (hence no computable bounds) when
-    // it first initializes, so client-side auto-framing cannot work without this hint.
-    constexpr const char *GsplatBoundsFileName = "bounds.json";
-
-    // Thumbnail filename constant (kept for reference in test assertions).
-    // Thumbnails are generated on demand from the .rad/.spz at request time - no build-time
-    // thumbnail artifact is produced. The constant is used to verify that buildGsplat does
-    // not write a thumbnail file alongside the delivery artifact.
-    constexpr const char *GsplatThumbFileName = "thumbnail.webp";
+    // The Gaussian Splat artifact names (GsplatBuildSubfolder, GsplatRadFileName,
+    // GsplatBoundsFileName, GsplatGeorefFileName, ...) are in build_layout.h.
 
     constexpr int GsplatThumbSize = 2048; // pixels, square
 

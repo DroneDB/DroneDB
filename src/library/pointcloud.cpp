@@ -775,9 +775,9 @@ void buildCopc(const std::vector<std::string>& filenames, const std::string& out
 
     // Legacy EPT cleanup: if a previous EPT build is in this folder, remove it. The
     // build pipeline already does this on its side, but we are defensive here too.
-    io::assureIsRemoved(dest / "ept.json");
-    io::assureIsRemoved(dest / "ept-data");
-    io::assureIsRemoved(dest / "ept-hierarchy");
+    io::assureIsRemoved(dest / LegacyEptFileName);
+    io::assureIsRemoved(dest / LegacyEptDataFolder);
+    io::assureIsRemoved(dest / LegacyEptHierarchyFolder);
 
     CopcBackend backend = untwine::resolveBackend(CopcBackend::Auto);
 

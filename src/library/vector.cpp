@@ -12,6 +12,7 @@
 #include <set>
 #include <vector>
 
+#include "build_layout.h"
 #include "cad.h"
 #include "gdal_inc.h"
 #include "json.h"
@@ -728,17 +729,17 @@ namespace ddb
                  << " label=" << crs.label << (local ? " (local)" : "");
         }
 
-        const fs::path vecDir = basePath / "vec";
-        const fs::path mvtDir = basePath / "mvt";
+        const fs::path vecDir = basePath / VectorBuildSubfolder;
+        const fs::path mvtDir = basePath / MvtBuildSubfolder;
 
         // A previous aborted build can leave empty vec/ or mvt/ directories
         // behind. Check for the actual artifacts inside (source.gpkg and
         // the MVT tileset metadata.json, or local.json for a local drawing)
         // so we don't silently skip and produce a broken state.
-        const bool vecExists = fs::exists(vecDir / "source.gpkg");
-        const bool upToDate = local ? fs::exists(vecDir / "local.json")
-                                    : fs::exists(mvtDir / "metadata.json") &&
-                                          !fs::exists(vecDir / "local.json");
+        const bool vecExists = fs::exists(vecDir / VectorGpkgFileName);
+        const bool upToDate = local ? fs::exists(vecDir / VectorLocalFileName)
+                                    : fs::exists(mvtDir / MvtMetadataFileName) &&
+                                          !fs::exists(vecDir / VectorLocalFileName);
 
         if (vecExists && upToDate && !overwrite)
         {
@@ -751,16 +752,16 @@ namespace ddb
         // clean up. The publish step then promotes the children with a
         // best-effort rollback if a rename fails.
         // Removed on any throw from here on.
-        const io::ScopedTempDir staging = io::ScopedTempDir::create(basePath, ".vec-stage-");
+        const io::ScopedTempDir staging = io::ScopedTempDir::create(basePath, VectorStagingPrefix);
         const fs::path &stagingDir = staging.path();
-        const fs::path stagingVec = stagingDir / "vec";
-        const fs::path stagingMvt = stagingDir / "mvt";
+        const fs::path stagingVec = stagingDir / VectorBuildSubfolder;
+        const fs::path stagingMvt = stagingDir / MvtBuildSubfolder;
         io::assureFolderExists(stagingVec);
         // MVT driver creates its own output dir; ensure parent exists
         // and the target child does not (pre-empt leftovers).
         io::assureIsRemoved(stagingMvt);
 
-        const auto gpkgOut = (stagingVec / "source.gpkg").string();
+        const auto gpkgOut = (stagingVec / VectorGpkgFileName).string();
         if (local)
         {
             // Drawing coordinates, no SRS and no MVT pyramid: there is
@@ -770,10 +771,10 @@ namespace ddb
             if (crs.hasExtent)
                 localInfo["extent"] = {crs.extent.MinX, crs.extent.MinY,
                                        crs.extent.MaxX, crs.extent.MaxY};
-            std::ofstream out((stagingVec / "local.json").string(), std::ios::binary);
+            std::ofstream out((stagingVec / VectorLocalFileName).string(), std::ios::binary);
             out << localInfo.dump();
             if (!out)
-                throw FSException("Cannot write " + (stagingVec / "local.json").string());
+                throw FSException("Cannot write " + (stagingVec / VectorLocalFileName).string());
         }
         else
         {
@@ -792,9 +793,9 @@ namespace ddb
         // the backup so users never observe a half-published state. A
         // local build publishes no mvt/, so an old pyramid is retired.
         const fs::path backupDir = basePath /
-            (".vec-backup-" + utils::generateRandomString(16));
-        const fs::path backupVec = backupDir / "vec";
-        const fs::path backupMvt = backupDir / "mvt";
+            (VectorBackupPrefix + utils::generateRandomString(16));
+        const fs::path backupVec = backupDir / VectorBuildSubfolder;
+        const fs::path backupMvt = backupDir / MvtBuildSubfolder;
         // Back up any existing directory at the publish target, even if
         // it lacks the canonical artifact (e.g. an empty leftover from a
         // previous aborted build): otherwise the promote-rename below

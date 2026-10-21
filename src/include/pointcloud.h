@@ -6,6 +6,7 @@
 
 #include <string>
 #include <vector>
+#include "build_layout.h"
 #include "ddb_export.h"
 #include "json.h"
 #include "basicgeometry.h"
@@ -38,9 +39,7 @@ namespace ddb
 
     DDB_DLL void translateToLas(const std::string &input, const std::string &outputLas);
 
-    // Standard layout of the COPC build artifact within an entry's build folder.
-    constexpr const char* CopcBuildSubfolder = "copc";
-    constexpr const char* CopcFileName = "cloud.copc.laz";
+    // The COPC artifact names (CopcBuildSubfolder, CopcFileName) are in build_layout.h.
 
     // Returns true if the path looks like a COPC file (i.e. ends with .copc.laz).
     DDB_DLL bool isCopcPath(const std::string &filename);

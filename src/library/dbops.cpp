@@ -4,6 +4,7 @@
 #include "dbops.h"
 
 #include "build.h"
+#include "build_layout.h"
 #include "cad.h"
 #include "databasepool.h"
 #include "raster_cache.h"
@@ -1087,8 +1088,8 @@ namespace
                     // A GeoPackage kept open for WFS/OGC queries would block this on Windows
                     const fs::path out = db->buildDirectory() / old.hash;
                     releaseCachedFiles(out);
-                    io::assureIsRemoved(out / "vec");
-                    io::assureIsRemoved(out / "mvt");
+                    io::assureIsRemoved(out / VectorBuildSubfolder);
+                    io::assureIsRemoved(out / MvtBuildSubfolder);
                     LOGD << "Refreshed " << mainPath << " after a change to " << prj;
                 } catch (const std::exception &e) {
                     // The add/remove is already committed: never report it as failed
