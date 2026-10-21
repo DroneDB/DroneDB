@@ -75,6 +75,40 @@ void releaseKernelLock(int fd) {
 #  endif
 }
 
+/** @brief Outcome of a lock query on an open descriptor. */
+enum class LockQuery { Free, Held, Unknown };
+
+/**
+ * @brief Ask whether another open file description holds the advisory lock, without keeping one.
+ *
+ * Linux: F_OFD_GETLK takes no lock at all. flock() has no query: a non-blocking shared lock
+ * is taken and released at once. `outErrno` is set when the answer is Unknown.
+ */
+LockQuery queryKernelLock(int fd, int* outErrno) {
+    *outErrno = 0;
+#  ifdef DDB_USE_OFD_LOCKS
+    struct flock fl{};
+    fl.l_type   = F_WRLCK;   // "could I take the lock BuildLock takes?"
+    fl.l_whence = SEEK_SET;
+    fl.l_start  = 0;
+    fl.l_len    = 0;         // whole file
+    fl.l_pid    = 0;         // required by OFD commands
+    if (fcntl(fd, F_OFD_GETLK, &fl) == -1) {
+        *outErrno = errno;
+        return LockQuery::Unknown;
+    }
+    return fl.l_type == F_UNLCK ? LockQuery::Free : LockQuery::Held;
+#  else
+    if (flock(fd, LOCK_SH | LOCK_NB) == 0) {
+        (void)flock(fd, LOCK_UN);
+        return LockQuery::Free;
+    }
+    if (errno == EWOULDBLOCK || errno == EAGAIN) return LockQuery::Held;
+    *outErrno = errno;
+    return LockQuery::Unknown;
+#  endif
+}
+
 /** @brief True if the file behind `fd` is still the one linked at `path` (not unlinked by a previous holder). */
 bool isStillLinked(int fd, const std::string& path) {
     struct stat fdStat{};
@@ -432,6 +466,74 @@ void BuildLock::acquireLock(bool waitForLock) {
     } catch (const std::exception& e) {
         // Non-fatal error - lock is still valid even if we can't write info
         LOGW << "Failed to write lock info to " << lockFilePath << ": " << e.what();
+    }
+}
+
+bool BuildLock::isHeld(const std::string& outputPath) {
+    const std::string lockFile = buildLockPath(outputPath);
+
+#ifdef WIN32
+    // A live holder has the file open with GENERIC_WRITE, no sharing and delete-on-close, so
+    // any open asking for data access fails. All share modes are granted here so that two
+    // probes never see each other as holders; OPEN_EXISTING never creates the file.
+    HANDLE h = CreateFileA(lockFile.c_str(), GENERIC_READ,
+                           FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                           OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) {
+        const DWORD error = GetLastError();
+        if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND)
+            return false;
+        // ERROR_ACCESS_DENIED is also what a holder's file reports while its delete-on-close
+        // is pending (the holder is releasing): still held at this instant.
+        if (error != ERROR_SHARING_VIOLATION && error != ERROR_ACCESS_DENIED)
+            LOGD << "Cannot probe build lock " << lockFile << " (Windows error " << error
+                 << "), assuming a live holder";
+        return true;
+    }
+    CloseHandle(h);
+    return false;
+#else
+    // No O_CREAT: a missing file is "not held" and stays missing. Read-only: F_OFD_GETLK and
+    // flock() do not need write access, and the file is never modified.
+    const int fd = open(lockFile.c_str(), O_RDONLY | O_CLOEXEC | O_NOCTTY);
+    if (fd == -1) {
+        const int error = errno;
+        if (error == ENOENT || error == ENOTDIR)
+            return false;
+        LOGD << "Cannot open build lock " << lockFile << " (" << strerror(error)
+             << "), assuming a live holder";
+        return true;
+    }
+
+    int queryErrno = 0;
+    const LockQuery state = queryKernelLock(fd, &queryErrno);
+    // Closing this descriptor releases nothing of a holder: OFD locks and flock() belong to
+    // the open file description that took them.
+    close(fd);
+    if (state == LockQuery::Unknown)
+        LOGD << "Cannot query build lock " << lockFile << " (" << strerror(queryErrno)
+             << "), assuming a live holder";
+    return state != LockQuery::Free;
+#endif
+}
+
+bool BuildLock::removeIfStale(const std::string& outputPath) {
+    std::error_code ec;
+    if (!fs::exists(buildLockPath(outputPath), ec))
+        return !ec;  // nothing to remove; a stat error leaves the state unknown
+
+    try {
+        // Succeeds only without a live holder. The destructor then removes the file while the
+        // lock is still held (Unix) or closes the delete-on-close handle (Windows), so a build
+        // that starts at the same moment can never lose its lock file.
+        BuildLock reclaim(outputPath, false);
+        LOGD << "Removing stale build lock (no live holder): " << reclaim.getLockFilePath();
+        return true;
+    } catch (const BuildInProgressException&) {
+        return false;
+    } catch (const AppException& e) {
+        LOGD << "Cannot determine build lock status (" << e.what() << "), assuming a live holder";
+        return false;
     }
 }
 

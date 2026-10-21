@@ -11,6 +11,7 @@
 #include "helpers/process_test_utils.h"
 
 #include <thread>
+#include <iterator>
 #include <chrono>
 #include <fstream>
 #include <future>
@@ -696,5 +697,198 @@ TEST_F(BuildLockTest, LockFdNotInheritedByChildren) {
     EXPECT_EQ(targets.find(lockFile), std::string::npos) << "child inherited the lock fd:\n" << targets;
 }
 #endif
+
+// ---- BuildLock::isHeld / removeIfStale (DQ-08) -----------------------------------------
+
+std::string readWholeFile(const fs::path& p) {
+    std::ifstream in(p.string(), std::ios::binary);
+    return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+}
+
+// Lock file of `outputPath` with known diagnostic contents and no live holder: what a holder
+// killed with SIGKILL (or a copied dataset) leaves behind.
+fs::path writeOrphanLockFile(const fs::path& outputPath, const std::string& contents) {
+    const fs::path lockFile = outputPath.string() + ".building";
+    std::ofstream(lockFile.string(), std::ios::binary) << contents;
+    return lockFile;
+}
+
+// The test child in "hold-lock" mode: another process holding the BuildLock of an output path
+// until it is killed (the kernel then releases the lock, as for a crashed build).
+class LockHolderChild {
+public:
+    explicit LockHolderChild(const fs::path& outputPath)
+        : ready_(outputPath.string() + ".child-ready") {
+        io::assureIsRemoved(ready_);
+        const auto helper = testChildPath();
+#ifdef WIN32
+        std::wstring command = L"\"" + helper.wstring() + L"\" hold-lock \"" +
+                               outputPath.wstring() + L"\" \"" + ready_.wstring() + L"\"";
+        STARTUPINFOW startup{};
+        startup.cb = sizeof(startup);
+        started_ = CreateProcessW(helper.wstring().c_str(), command.data(), nullptr, nullptr,
+                                  FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &startup, &info_) != 0;
+#else
+        std::vector<std::string> args = {helper.string(), "hold-lock", outputPath.string(),
+                                         ready_.string()};
+        std::vector<char*> argv;
+        for (auto& a : args) argv.push_back(a.data());
+        argv.push_back(nullptr);
+        started_ = ::posix_spawn(&pid_, helper.c_str(), nullptr, nullptr, argv.data(), environ) == 0;
+#endif
+    }
+
+    ~LockHolderChild() { kill(); }
+
+    LockHolderChild(const LockHolderChild&) = delete;
+    LockHolderChild& operator=(const LockHolderChild&) = delete;
+
+    // The child writes the ready file only after it acquired the lock.
+    bool waitUntilHolding() const {
+        if (!started_) return false;
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        while (!fs::exists(ready_) && std::chrono::steady_clock::now() < deadline)
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        return fs::exists(ready_);
+    }
+
+    // Forced exit (no destructors run) and reap: the lock is released by the kernel.
+    void kill() {
+#ifdef WIN32
+        if (info_.hProcess) {
+            TerminateProcess(info_.hProcess, 1);
+            WaitForSingleObject(info_.hProcess, 5000);
+            CloseHandle(info_.hProcess);
+            info_.hProcess = nullptr;
+        }
+        if (info_.hThread) {
+            CloseHandle(info_.hThread);
+            info_.hThread = nullptr;
+        }
+#else
+        if (pid_ > 0) {
+            ::kill(pid_, SIGKILL);
+            int status = 0;
+            ::waitpid(pid_, &status, 0);
+            pid_ = 0;
+        }
+#endif
+    }
+
+private:
+    fs::path ready_;
+    bool started_ = false;
+#ifdef WIN32
+    PROCESS_INFORMATION info_{};
+#else
+    pid_t pid_ = 0;
+#endif
+};
+
+TEST_F(BuildLockTest, IsHeld_NoLockFile_NotHeldAndNothingCreated) {
+    const auto outputPath = testArea->getPath("is_held_absent");
+    const fs::path lockFile = outputPath.string() + ".building";
+    io::assureIsRemoved(lockFile);
+
+    EXPECT_FALSE(BuildLock::isHeld(outputPath.string()));
+    EXPECT_FALSE(fs::exists(lockFile)) << "probing must not create the lock file";
+
+    // A missing parent folder is "not held" too, not an error
+    EXPECT_FALSE(BuildLock::isHeld((outputPath / "missing" / "cog").string()));
+    EXPECT_FALSE(fs::exists(outputPath / "missing"));
+}
+
+TEST_F(BuildLockTest, IsHeld_StaleLockFile_NotHeldAndLeftUntouched) {
+    const auto outputPath = testArea->getPath("is_held_stale");
+    const std::string diagnostic = "PID: 99\nProcess: crashed build\n";
+    const fs::path lockFile = writeOrphanLockFile(outputPath, diagnostic);
+    const auto writeTime = fs::last_write_time(lockFile);
+
+    EXPECT_FALSE(BuildLock::isHeld(outputPath.string()));
+    EXPECT_FALSE(BuildLock::isHeld(outputPath.string()));
+
+    ASSERT_TRUE(fs::exists(lockFile)) << "probing must not remove a stale lock file";
+    EXPECT_EQ(readWholeFile(lockFile), diagnostic) << "probing must not truncate or rewrite it";
+    EXPECT_EQ(fs::last_write_time(lockFile), writeTime);
+
+    // The stale file stays reclaimable by a real acquisition
+    BuildLock lock(outputPath.string(), false);
+    EXPECT_TRUE(lock.isHolding());
+}
+
+TEST_F(BuildLockTest, IsHeld_HolderInThisProcess) {
+    const auto outputPath = testArea->getPath("is_held_in_process");
+    io::assureIsRemoved(outputPath.string() + ".building");
+    {
+        BuildLock lock(outputPath.string(), false);
+#ifndef WIN32
+        // (On Windows the holder's no-share handle keeps everyone else from reading it)
+        const std::string diagnostic = readWholeFile(lock.getLockFilePath());
+        EXPECT_FALSE(diagnostic.empty());
+#endif
+
+        EXPECT_TRUE(BuildLock::isHeld(outputPath.string()));
+        EXPECT_TRUE(lock.isHolding());
+#ifndef WIN32
+        EXPECT_EQ(readWholeFile(lock.getLockFilePath()), diagnostic);
+#endif
+        // Probing never steals or weakens the lock: a second acquisition still fails
+        EXPECT_THROW({ BuildLock second(outputPath.string(), false); }, BuildInProgressException);
+    }
+    EXPECT_FALSE(BuildLock::isHeld(outputPath.string()));
+}
+
+TEST_F(BuildLockTest, IsHeld_HolderInAnotherProcessThenReleased) {
+    const auto outputPath = testArea->getPath("is_held_other_process");
+    const fs::path lockFile = outputPath.string() + ".building";
+    io::assureIsRemoved(lockFile);
+
+    LockHolderChild child(outputPath);
+    ASSERT_TRUE(child.waitUntilHolding()) << "child did not acquire the lock in time";
+#ifndef WIN32
+    // (On Windows the holder's no-share handle keeps everyone else from reading it)
+    const std::string diagnostic = readWholeFile(lockFile);
+    EXPECT_FALSE(diagnostic.empty());
+#endif
+
+    EXPECT_TRUE(BuildLock::isHeld(outputPath.string()));
+    EXPECT_TRUE(BuildLock::isHeld(outputPath.string()));
+#ifndef WIN32
+    EXPECT_EQ(readWholeFile(lockFile), diagnostic) << "probing must not touch the holder's file";
+#endif
+    EXPECT_THROW({ BuildLock concurrent(outputPath.string(), false); }, BuildInProgressException);
+
+    // Kill the holder: the kernel releases the lock (and on Windows deletes the file).
+    child.kill();
+    EXPECT_FALSE(BuildLock::isHeld(outputPath.string()));
+#ifndef WIN32
+    // On Unix the killed holder leaves its file behind; the probe keeps it
+    ASSERT_TRUE(fs::exists(lockFile));
+    EXPECT_EQ(readWholeFile(lockFile), diagnostic);
+#endif
+    BuildLock recovered(outputPath.string(), false);
+    EXPECT_TRUE(recovered.isHolding());
+}
+
+TEST_F(BuildLockTest, RemoveIfStale_RemovesOnlyAStaleLockFile) {
+    const auto outputPath = testArea->getPath("remove_if_stale");
+    const fs::path lockFile = outputPath.string() + ".building";
+    io::assureIsRemoved(lockFile);
+
+    // Nothing to remove, nothing created
+    EXPECT_TRUE(BuildLock::removeIfStale(outputPath.string()));
+    EXPECT_FALSE(fs::exists(lockFile));
+
+    // Stale: removed
+    writeOrphanLockFile(outputPath, "PID: 99\n");
+    EXPECT_TRUE(BuildLock::removeIfStale(outputPath.string()));
+    EXPECT_FALSE(fs::exists(lockFile));
+
+    // Live: kept, and the holder keeps the lock
+    BuildLock lock(outputPath.string(), false);
+    EXPECT_FALSE(BuildLock::removeIfStale(outputPath.string()));
+    EXPECT_TRUE(fs::exists(lockFile));
+    EXPECT_TRUE(BuildLock::isHeld(outputPath.string()));
+}
 
 } // anonymous namespace

@@ -36,9 +36,6 @@
 
 namespace ddb {
 
-// Forward declaration for stale lock detection helper (defined later in this file)
-static bool isLockFileStale(const std::string& lockFilePath);
-
 // Forward declaration for the disk-space preflight helper (defined later in this file)
 static void ensureSufficientDiskSpace(const fs::path& dir);
 
@@ -1029,7 +1026,8 @@ static void removeOrphanTempFolders(const fs::path& hashDir, CleanupResult& resu
         }
 
         const fs::path lockPath = hashDir / buildLockPath(subfolder);
-        if (fs::exists(lockPath) && !isLockFileStale(lockPath.string())) {
+        // A stale lock file is removed with the folder it guarded (Unix always did so).
+        if (fs::exists(lockPath) && !BuildLock::removeIfStale((hashDir / subfolder).string())) {
             LOGD << "Skipping temp folder with active build lock: " << it->path().string();
             continue;
         }
@@ -1171,8 +1169,9 @@ CleanupResult cleanupBuild(Database* db, const std::string& outputPath) {
                         skip = true;
                         break;
                     }
+                    // "<subfolder>.building" is the lock of "<subfolder>"
                     if (subIt->path().extension() == BuildLockSuffix &&
-                        !isLockFileStale(subIt->path().string())) {
+                        BuildLock::isHeld((p / subIt->path().stem()).string())) {
                         LOGD << "Skipping orphan with active build lock: " << p.string();
                         skip = true;
                         break;
@@ -1243,88 +1242,6 @@ CleanupResult cleanupBuild(Database* db, const std::string& outputPath) {
     return result;
 }
 
-// Helper function for stale lock detection.
-//
-// Background: a ".building" file may persist on disk after a crash, but the
-// OS-level lock held by the dead process is gone (the kernel releases it
-// automatically). The most reliable way to tell "is anyone really holding
-// this lock?" is to attempt a non-blocking acquisition - if it succeeds the
-// previous holder is dead (stale), if it throws BuildInProgressException the
-// holder is alive. We immediately release the lock we just took (via RAII)
-// without removing the file, so a subsequent legitimate caller of BuildLock
-// gets a clean state.
-
-/**
- * @brief Check if a build lock file is stale (no live process holds the lock)
- * @param lockFilePath Path to the .building lock file
- * @return true if lock is stale (and can be safely removed), false if lock is
- *         still held by an active process or status is uncertain
- */
-static bool isLockFileStale(const std::string& lockFilePath) {
-    if (!fs::exists(lockFilePath)) {
-        return false;  // Nothing to check
-    }
-
-#ifdef _WIN32
-    // On Windows the BuildLock implementation holds the file with no sharing
-    // (dwShareMode = 0) and FILE_FLAG_DELETE_ON_CLOSE. So if we can open it
-    // exclusively for read with OPEN_EXISTING, no process currently owns the
-    // lock -> it is stale and the file can be removed safely. We do not pass
-    // FILE_FLAG_DELETE_ON_CLOSE here: cleanupBuild will remove the parent
-    // directory itself.
-    HANDLE h = CreateFileA(
-        lockFilePath.c_str(),
-        GENERIC_READ,
-        0,  // No sharing - matches the lock holder's request
-        nullptr,
-        OPEN_EXISTING,
-        FILE_ATTRIBUTE_NORMAL,
-        nullptr);
-    if (h == INVALID_HANDLE_VALUE) {
-        const DWORD err = GetLastError();
-        if (err == ERROR_SHARING_VIOLATION || err == ERROR_ACCESS_DENIED) {
-            LOGD << "Lock file is valid (live holder exists): " << lockFilePath;
-            return false;
-        }
-        if (err == ERROR_FILE_NOT_FOUND || err == ERROR_PATH_NOT_FOUND) {
-            return false;  // Race: file vanished
-        }
-        LOGD << "Cannot determine Windows lock status (err " << err << "), assuming valid: " << lockFilePath;
-        return false;
-    }
-    CloseHandle(h);
-    LOGD << "Lock file is stale (no live holder on Windows): " << lockFilePath;
-    return true;
-#else
-    // The lock file path is "<outputFolder>.building"; BuildLock appends the
-    // ".building" suffix internally, so we must strip it before constructing.
-    const std::string suffix = BuildLockSuffix;
-    if (lockFilePath.size() <= suffix.size() ||
-        lockFilePath.compare(lockFilePath.size() - suffix.size(), suffix.size(), suffix) != 0) {
-        LOGD << "Unexpected lock file name (no .building suffix): " << lockFilePath;
-        return false;
-    }
-    const std::string outputFolder =
-        lockFilePath.substr(0, lockFilePath.size() - suffix.size());
-
-    try {
-        // Non-blocking acquisition; success means the previous holder is dead.
-        BuildLock probe(outputFolder, false);
-        LOGD << "Lock file is stale (kernel reports no live holder): " << lockFilePath;
-        // RAII releases the probe lock and unlinks the file on destruction.
-        // The caller of isLockFileStale (cleanupBuild) expects the file to be
-        // safely removable, which it now is.
-        return true;
-    } catch (const BuildInProgressException&) {
-        LOGD << "Lock file is valid (live holder exists): " << lockFilePath;
-        return false;
-    } catch (const AppException& e) {
-        LOGD << "Cannot determine lock status (" << e.what() << "), assuming valid";
-        return false;
-    }
-#endif
-}
-
 bool isBuildActive(Database* db, const std::string& path) {
     Entry e;
     const bool entryExists = getEntry(db, path, e);
@@ -1354,20 +1271,15 @@ bool isBuildActive(Database* db, const std::string& path) {
         return false;  // No lock file means no active build
     }
 
-    // Reuse the cross-platform stale detection. If the lock file is stale
-    // (no kernel-level holder), clean it up and report no active build.
-    if (isLockFileStale(lockFile)) {
-        LOGD << "Removing stale lock file: " << lockFile;
-        std::error_code ec;
-        fs::remove(lockFile, ec);
-        if (ec) {
-            LOGD << "Failed to remove stale lock file (" << ec.message() << "): " << lockFile;
-        }
-        return false;
+    if (BuildLock::isHeld(outputFolder)) {
+        LOGD << "Active build detected (kernel lock held): " << lockFile;
+        return true;
     }
 
-    LOGD << "Active build detected (kernel lock held): " << lockFile;
-    return true;
+    // No live holder: the file is the leftover of a crashed build. It is removed here, as it
+    // always was; a pure probe is BuildLock::isHeld. A build that took the lock since the probe
+    // keeps it (removeIfStale fails) and is reported active.
+    return !BuildLock::removeIfStale(outputFolder);
 }
 
 }  // namespace ddb
