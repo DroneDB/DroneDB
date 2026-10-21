@@ -3,12 +3,13 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "align.h"
 #include "mathutil.h"
-#include "gdal_inc.h"
+#include "gdal_raii.h"
 #include "cog.h"        // buildCog() - DRY reuse of the COG pattern
 #include "exceptions.h"
 #include "logger.h"
 #include "json.h"
 #include "fs.h"          // fs::absolute - used by applyWarp() for VRT path resolution
+#include "mio.h"
 
 #include <algorithm>
 #include <cmath>
@@ -505,8 +506,9 @@ static void applyWarp(const std::string &sourcePath,
     // Resolve to an absolute path so the VRT SimpleSource can find the file
     // regardless of any cwd change between the VRT creation and the warp read.
     const std::string absSrcPath = fs::absolute(sourcePath).string();
-    GDALDatasetH hSrc = GDALOpen(absSrcPath.c_str(), GA_ReadOnly);
-    if (!hSrc) throw GDALException("Cannot open " + sourcePath);
+    const auto src = adoptDataset(GDALOpen(absSrcPath.c_str(), GA_ReadOnly));
+    if (!src) throw GDALException("Cannot open " + sourcePath);
+    GDALDatasetH hSrc = datasetHandle(src);
 
     double gt[6];
     GDALGetGeoTransform(hSrc, gt);
@@ -527,29 +529,27 @@ static void applyWarp(const std::string &sourcePath,
     // size). The VRT driver stores the source path as a SimpleSource reference;
     // hSrc is kept open until after GDALWarp so the file remains accessible.
     GDALDriverH hVrtDrv = GDALGetDriverByName("VRT");
-    if (!hVrtDrv) { GDALClose(hSrc); throw GDALException("VRT driver unavailable"); }
-    GDALDatasetH hVrt = GDALCreateCopy(hVrtDrv, "", hSrc, FALSE,
-                                       nullptr, nullptr, nullptr);
-    if (!hVrt) { GDALClose(hSrc); throw GDALException("Cannot create VRT wrapper for warp"); }
+    if (!hVrtDrv) throw GDALException("VRT driver unavailable");
+    // Declared after src: closed before it
+    auto vrt = adoptDataset(GDALCreateCopy(hVrtDrv, "", hSrc, FALSE,
+                                           nullptr, nullptr, nullptr));
+    if (!vrt) throw GDALException("Cannot create VRT wrapper for warp");
+    GDALDatasetH hVrt = datasetHandle(vrt);
     GDALSetGeoTransform(hVrt, ngt);
     GDALSetProjection(hVrt, targetCrs.c_str());
 
     // GDALWarp → temporary LZW GTiff
-    char **args = nullptr;
-    args = CSLAddString(args, "-of");    args = CSLAddString(args, "GTiff");
-    args = CSLAddString(args, "-t_srs"); args = CSLAddString(args, targetCrs.c_str());
-    args = CSLAddString(args, "-r");     args = CSLAddString(args, "bilinear");
-    args = CSLAddString(args, "-co");    args = CSLAddString(args, "COMPRESS=LZW");
-    args = CSLAddString(args, "-co");    args = CSLAddString(args, "BIGTIFF=IF_SAFER");
+    CPLStringList args;
+    args.AddString("-of");    args.AddString("GTiff");
+    args.AddString("-t_srs"); args.AddString(targetCrs.c_str());
+    args.AddString("-r");     args.AddString("bilinear");
+    args.AddString("-co");    args.AddString("COMPRESS=LZW");
+    args.AddString("-co");    args.AddString("BIGTIFF=IF_SAFER");
 
-    GDALWarpAppOptions *wOpts = GDALWarpAppOptionsNew(args, nullptr);
-    CSLDestroy(args);
-    GDALDatasetH hOut = GDALWarp(tmpPath.c_str(), nullptr, 1, &hVrt, wOpts, nullptr);
-    GDALWarpAppOptionsFree(wOpts);
-    GDALClose(hVrt);
-    GDALClose(hSrc);
-    if (!hOut) throw GDALException("GDALWarp failed for aligned output: " + tmpPath);
-    GDALClose(hOut);
+    const GdalOptionsPtr<GDALWarpAppOptions> wOpts(GDALWarpAppOptionsNew(args.List(), nullptr));
+    const auto out = adoptDataset(
+        GDALWarp(tmpPath.c_str(), nullptr, 1, &hVrt, wOpts.get(), nullptr));
+    if (!out) throw GDALException("GDALWarp failed for aligned output: " + tmpPath);
 }
 
 // ─── J  DEM Z offset ────────────────────────────────────────────────────────
@@ -557,9 +557,11 @@ static void applyWarp(const std::string &sourcePath,
 static double computeZOffset(const std::string &alignedPath,
                              const std::string &referencePath)
 {
-    GDALDatasetH hA = GDALOpen(alignedPath.c_str(),   GA_ReadOnly);
-    GDALDatasetH hR = GDALOpen(referencePath.c_str(), GA_ReadOnly);
-    if (!hA || !hR) { if (hA) GDALClose(hA); if (hR) GDALClose(hR); return 0.0; }
+    auto alignedDs = adoptDataset(GDALOpen(alignedPath.c_str(),   GA_ReadOnly));
+    auto refDs     = adoptDataset(GDALOpen(referencePath.c_str(), GA_ReadOnly));
+    if (!alignedDs || !refDs) return 0.0;
+    GDALDatasetH hA = datasetHandle(alignedDs);
+    GDALDatasetH hR = datasetHandle(refDs);
 
     // Both rasters share the source CRS at this point (the reference is
     // reprojected upstream when needed). Sample the *geographic* overlap on a
@@ -569,7 +571,7 @@ static double computeZOffset(const std::string &alignedPath,
     // extents differ, biasing the median offset.
     double gtA[6], gtR[6];
     if (GDALGetGeoTransform(hA, gtA) != CE_None || GDALGetGeoTransform(hR, gtR) != CE_None) {
-        GDALClose(hA); GDALClose(hR); return 0.0;
+        return 0.0;
     }
 
     double aX0 = gtA[0], aX1 = gtA[0] + gtA[1] * GDALGetRasterXSize(hA);
@@ -582,7 +584,7 @@ static double computeZOffset(const std::string &alignedPath,
     if (rY1 < rY0) std::swap(rY0, rY1);
     const double ox0 = std::max(aX0, rX0), ox1 = std::min(aX1, rX1);
     const double oy0 = std::max(aY0, rY0), oy1 = std::min(aY1, rY1);
-    if (ox1 <= ox0 || oy1 <= oy0) { GDALClose(hA); GDALClose(hR); return 0.0; }
+    if (ox1 <= ox0 || oy1 <= oy0) return 0.0;
 
     double gsd = std::max(std::abs(gtA[1]), std::abs(gtR[1]));
     if (gsd <= 0) gsd = std::max(ox1 - ox0, oy1 - oy0) / 512.0;
@@ -612,7 +614,7 @@ static double computeZOffset(const std::string &alignedPath,
     const bool readOk = readOverlap(hA, gtA, bufA) && readOverlap(hR, gtR, bufR);
     int hasNdA; const double ndA = GDALGetRasterNoDataValue(GDALGetRasterBand(hA, 1), &hasNdA);
     int hasNdR; const double ndR = GDALGetRasterNoDataValue(GDALGetRasterBand(hR, 1), &hasNdR);
-    GDALClose(hA); GDALClose(hR);
+    alignedDs.reset(); refDs.reset();
     if (!readOk) return 0.0;
 
     std::vector<float> diffs;
@@ -630,8 +632,9 @@ static double computeZOffset(const std::string &alignedPath,
 
 static void addZOffset(const std::string &path, double zOffset) {
     if (std::abs(zOffset) < 1e-6) return;
-    GDALDatasetH hDs = GDALOpen(path.c_str(), GA_Update);
-    if (!hDs) return;
+    const auto dataset = adoptDataset(GDALOpen(path.c_str(), GA_Update));
+    if (!dataset) return;
+    GDALDatasetH hDs = datasetHandle(dataset);
     GDALRasterBandH hBand = GDALGetRasterBand(hDs, 1);
     int W = GDALGetRasterXSize(hDs), H = GDALGetRasterYSize(hDs);
     int hasNd; double nd = GDALGetRasterNoDataValue(hBand, &hasNd);
@@ -643,7 +646,6 @@ static void addZOffset(const std::string &path, double zOffset) {
                 v += static_cast<float>(zOffset);
         GDALRasterIO(hBand, GF_Write, 0, r, W, 1, row.data(), W, 1, GDT_Float32, 0, 0);
     }
-    GDALClose(hDs);
 }
 
 // ─── K  Public API ──────────────────────────────────────────────────────────
@@ -653,16 +655,12 @@ AlignValidationResult validateAlignRaster(const std::string &sourcePath,
 {
     AlignValidationResult r;
 
-    GDALDatasetH hS = GDALOpen(sourcePath.c_str(),    GA_ReadOnly);
-    GDALDatasetH hR = GDALOpen(referencePath.c_str(), GA_ReadOnly);
-    if (!hS) {
-        if (hR) GDALClose(hR);
-        r.errors.push_back("Cannot open source: " + sourcePath);
-        return r;
-    }
-    if (!hR) { GDALClose(hS); r.errors.push_back("Cannot open reference: " + referencePath); return r; }
-
-    auto cleanup = [&] { GDALClose(hS); GDALClose(hR); };
+    const auto srcDs = adoptDataset(GDALOpen(sourcePath.c_str(),    GA_ReadOnly));
+    const auto refDs = adoptDataset(GDALOpen(referencePath.c_str(), GA_ReadOnly));
+    if (!srcDs) { r.errors.push_back("Cannot open source: " + sourcePath); return r; }
+    if (!refDs) { r.errors.push_back("Cannot open reference: " + referencePath); return r; }
+    GDALDatasetH hS = datasetHandle(srcDs);
+    GDALDatasetH hR = datasetHandle(refDs);
 
     r.summary.sourceCrs    = GDALGetProjectionRef(hS) ? GDALGetProjectionRef(hS) : "";
     r.summary.referenceCrs = GDALGetProjectionRef(hR) ? GDALGetProjectionRef(hR) : "";
@@ -704,7 +702,6 @@ AlignValidationResult validateAlignRaster(const std::string &sourcePath,
         r.errors.push_back("Insufficient overlap (" +
                            std::to_string(static_cast<int>(r.summary.overlapPercent)) + "%)");
 
-    cleanup();
     r.ok = r.errors.empty();
     return r;
 }
@@ -724,35 +721,32 @@ AlignResult alignRaster(const std::string &sourcePath,
     // 2. Optional reprojection of the reference into the source CRS
     std::string effectiveRef = referencePath;
     std::string tmpReproj;
-    struct TmpGuard { std::string f; ~TmpGuard() { if (!f.empty()) VSIUnlink(f.c_str()); } };
-    TmpGuard refGuard;
+    io::ScopedTempDir refGuard;
 
     if (val.summary.crsMismatch) {
         tmpReproj = outputPath + ".ref_reproj_tmp.tif";
-        refGuard.f = tmpReproj;
+        refGuard.reset(tmpReproj);
         LOGD << "Reprojecting reference to source CRS";
-        char **args = nullptr;
-        args = CSLAddString(args, "-t_srs");
-        args = CSLAddString(args, val.summary.sourceCrs.c_str());
-        GDALDatasetH hR = GDALOpen(referencePath.c_str(), GA_ReadOnly);
-        if (!hR) { CSLDestroy(args); throw GDALException("Cannot open reference for reprojection"); }
-        GDALWarpAppOptions *wOpts = GDALWarpAppOptionsNew(args, nullptr);
-        CSLDestroy(args);
-        GDALDatasetH hOut = GDALWarp(tmpReproj.c_str(), nullptr, 1, &hR, wOpts, nullptr);
-        GDALWarpAppOptionsFree(wOpts); GDALClose(hR);
-        if (!hOut) throw GDALException("Reference reprojection failed");
-        GDALClose(hOut);
+        CPLStringList args;
+        args.AddString("-t_srs");
+        args.AddString(val.summary.sourceCrs.c_str());
+        const auto refSrc = adoptDataset(GDALOpen(referencePath.c_str(), GA_ReadOnly));
+        if (!refSrc) throw GDALException("Cannot open reference for reprojection");
+        GDALDatasetH hR = datasetHandle(refSrc);
+        const GdalOptionsPtr<GDALWarpAppOptions> wOpts(GDALWarpAppOptionsNew(args.List(), nullptr));
+        if (!adoptDataset(GDALWarp(tmpReproj.c_str(), nullptr, 1, &hR, wOpts.get(), nullptr)))
+            throw GDALException("Reference reprojection failed");
         effectiveRef = tmpReproj;
     }
 
     // 3. Overlap bbox + common GSD
     // Owned: readToCommonGrid throws (empty window, failed RasterIO) while both are open
-    GDALDatasetUniquePtr srcDs(GDALDataset::FromHandle(GDALOpen(sourcePath.c_str(),   GA_ReadOnly)));
-    GDALDatasetUniquePtr refDs(GDALDataset::FromHandle(GDALOpen(effectiveRef.c_str(), GA_ReadOnly)));
+    auto srcDs = adoptDataset(GDALOpen(sourcePath.c_str(),   GA_ReadOnly));
+    auto refDs = adoptDataset(GDALOpen(effectiveRef.c_str(), GA_ReadOnly));
     if (!srcDs || !refDs)
         throw GDALException("Cannot reopen datasets for grid extraction");
-    GDALDatasetH hS = GDALDataset::ToHandle(srcDs.get());
-    GDALDatasetH hR = GDALDataset::ToHandle(refDs.get());
+    GDALDatasetH hS = datasetHandle(srcDs);
+    GDALDatasetH hR = datasetHandle(refDs);
     double gts[6], gtr[6];
     GDALGetGeoTransform(hS, gts); GDALGetGeoTransform(hR, gtr);
 
@@ -811,7 +805,7 @@ AlignResult alignRaster(const std::string &sourcePath,
              << " → tx=" << sim.t.x << " ty=" << sim.t.y << " m";
 
         std::string tmpWarp = outputPath + ".warp_tmp.tif";
-        TmpGuard warpGuard{tmpWarp};
+        const io::ScopedTempDir warpGuard(tmpWarp);
         applyWarp(sourcePath, tmpWarp, sim, val.summary.sourceCrs);
         if (isDem) {
             result.shiftZ = computeZOffset(tmpWarp, effectiveRef);
@@ -905,7 +899,7 @@ AlignResult alignRaster(const std::string &sourcePath,
 
     // Apply and write output
     std::string tmpWarp = outputPath + ".warp_tmp.tif";
-    TmpGuard warpGuard{tmpWarp};
+    const io::ScopedTempDir warpGuard(tmpWarp);
     applyWarp(sourcePath, tmpWarp, sim, val.summary.sourceCrs);
     if (isDem) {
         result.shiftZ = computeZOffset(tmpWarp, effectiveRef);

@@ -23,38 +23,6 @@
 
 namespace ddb {
 namespace {
-// RAII helper class for automatic cleanup of temporary directories
-class TempDirGuard {
-    fs::path dir;
-    bool shouldCleanup;
-
-public:
-    TempDirGuard() : shouldCleanup(false) {}
-
-    void set(const fs::path& path) {
-        dir = path;
-        shouldCleanup = true;
-    }
-
-    // The directory was moved into place (or is otherwise owned elsewhere now).
-    void release() { shouldCleanup = false; }
-
-    ~TempDirGuard() {
-        if (!shouldCleanup)
-            return;
-        // Never throw from a destructor (it may run during stack unwinding).
-        try {
-            std::error_code ec;
-            if (fs::exists(dir, ec)) {
-                LOGD << "Cleaning up temporary directory: " << dir;
-                io::assureIsRemoved(dir);
-            }
-        } catch (const std::exception& e) {
-            LOGW << "Cannot remove temporary directory " << dir << ": " << e.what();
-        }
-    }
-};
-
 // Check if file extension is GLTF or GLB
 bool isGltfFile(const fs::path& filePath) {
     std::string ext = filePath.extension().string();
@@ -606,7 +574,7 @@ void stageGltfTextures(const fs::path& gltfDir, const std::string& convertedObj)
 // without texture coordinates is written as PLY instead (keeps vertex colours for
 // Nexus, whose OBJ reader ignores them); Obj2Tiles reads OBJ only, and the OBJ
 // exporter writes vertex colours as `v x y z r g b`.
-std::string convertGltfToObj(const std::string& inputGltf, TempDirGuard& tempGuard,
+std::string convertGltfToObj(const std::string& inputGltf, io::ScopedTempDir& tempGuard,
                              bool preferPLYIfNoUV) {
     LOGD << "Input is GLTF/GLB, converting to OBJ first";
 
@@ -614,7 +582,7 @@ std::string convertGltfToObj(const std::string& inputGltf, TempDirGuard& tempGua
     fs::path tempDir =
         fs::temp_directory_path() / ("ddb_gltf_convert_" + utils::generateRandomString(16));
     fs::create_directories(tempDir);
-    tempGuard.set(tempDir);
+    tempGuard.reset(tempDir);
 
     std::string outGeomPath;
     std::string outMtlPath;
@@ -671,7 +639,7 @@ void validateConvertedDependencies(const std::string& convertedObj, const std::s
 // The dataset root applies to the original input only; converted outputs in a
 // temp folder are validated without it (P3). tempGuard owns that temp folder.
 PreparedModel prepareModelInput(const std::string& input, ModelConsumer consumer,
-                                const std::string& datasetRoot, TempDirGuard& tempGuard) {
+                                const std::string& datasetRoot, io::ScopedTempDir& tempGuard) {
     const fs::path inputPath(input);
 
     if (isGltfFile(inputPath)) {
@@ -697,7 +665,7 @@ PreparedModel prepareModelInput(const std::string& input, ModelConsumer consumer
         const fs::path tempDir =
             fs::temp_directory_path() / ("ddb_ply_convert_" + utils::generateRandomString(16));
         fs::create_directories(tempDir);
-        tempGuard.set(tempDir);
+        tempGuard.reset(tempDir);
 
         PlyToObjOptions opts;
         opts.withTexture = true;
@@ -816,7 +784,7 @@ std::string buildNexus(const std::string& inputObj, const std::string& outputNxs
 
     // Validate dependencies and convert when needed (glTF/GLB, textured PLY).
     // Throws before Nexus runs, so a missing dependency never produces output.
-    TempDirGuard tempGuard;
+    io::ScopedTempDir tempGuard;
     const PreparedModel model =
         prepareModelInput(inputObj, ModelConsumer::Nexus, datasetRoot, tempGuard);
 
@@ -932,7 +900,7 @@ std::string buildModel3DTiles(const std::string& inputObj, const std::string& ou
         georef = detectModelGeoref(inputObj);
 
     // Validate dependencies and convert to OBJ when needed (glTF/GLB, PLY).
-    TempDirGuard inputGuard;
+    io::ScopedTempDir inputGuard;
     const PreparedModel model =
         prepareModelInput(inputObj, ModelConsumer::Tiles, datasetRoot, inputGuard);
     const std::string& actualInputObj = model.path;
@@ -940,10 +908,10 @@ std::string buildModel3DTiles(const std::string& inputObj, const std::string& ou
     // Produce into a sibling temporary directory; outDir is untouched until
     // Obj2Tiles succeeds. The guard removes the temp folder on any failure.
     const fs::path tempOut = parent / (outName + "-temp-" + utils::generateRandomString(16));
-    TempDirGuard outGuard;
+    io::ScopedTempDir outGuard;
     io::assureIsRemoved(tempOut);
     io::assureFolderExists(tempOut);
-    outGuard.set(tempOut);
+    outGuard.reset(tempOut);
 
     // Compute Obj2Tiles parameters based on model face count.
     // Face count → (divisions, lods, octree) heuristic selects the right tile

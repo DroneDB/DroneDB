@@ -6,7 +6,7 @@
 #include "geoproject.h"
 #include "mio.h"
 #include "utils.h"
-#include "gdal_inc.h"
+#include "gdal_raii.h"
 
 namespace ddb
 {
@@ -78,7 +78,7 @@ namespace ddb
             Point ur = e.polygon_geom.getPoint(3);
 
             // Owned: the outsize parsing below throws InvalidArgsException after the open
-            GDALDatasetUniquePtr srcDataset(GDALDataset::FromHandle(GDALOpen(p.string().c_str(), GA_ReadOnly)));
+            auto srcDataset = adoptDataset(GDALOpen(p.string().c_str(), GA_ReadOnly));
             if (!srcDataset)
             {
                 if (stopOnError)
@@ -172,50 +172,49 @@ namespace ddb
             targs.AddString(utils::toStr(ur.x, 13).c_str());
             targs.AddString(utils::toStr(ur.y, 13).c_str());
 
-            GDALTranslateOptions *psOptions = GDALTranslateOptionsNew(targs.List(), nullptr);
+            const GdalOptionsPtr<GDALTranslateOptions> psOptions(
+                GDALTranslateOptionsNew(targs.List(), nullptr));
             if (!psOptions)
                 throw GDALException("Cannot geoproject " + p.string() + ": invalid translate options");
 
-            GDALDatasetUniquePtr dstDataset(GDALDataset::FromHandle(
-                GDALTranslate("", GDALDataset::ToHandle(srcDataset.get()), psOptions, nullptr)));
-            GDALTranslateOptionsFree(psOptions);
+            auto dstDataset = adoptDataset(
+                GDALTranslate("", datasetHandle(srcDataset), psOptions.get(), nullptr));
             if (!dstDataset)
                 throw GDALException("Cannot geoproject " + p.string() + ": " + CPLGetLastErrorMsg());
 
             // Run gdalwarp to add trasparency, apply GCPs
-            char **wargs = nullptr;
-            wargs = CSLAddString(wargs, "-of");
-            wargs = CSLAddString(wargs, "GTiff");
-            wargs = CSLAddString(wargs, "-co");
-            wargs = CSLAddString(wargs, "COMPRESS=JPEG");
-            wargs = CSLAddString(wargs, "-dstalpha");
-            GDALWarpAppOptions *waOptions = GDALWarpAppOptionsNew(wargs, nullptr);
-            CSLDestroy(wargs);
+            CPLStringList wargs;
+            wargs.AddString("-of");
+            wargs.AddString("GTiff");
+            wargs.AddString("-co");
+            wargs.AddString("COMPRESS=JPEG");
+            wargs.AddString("-dstalpha");
+            const GdalOptionsPtr<GDALWarpAppOptions> waOptions(
+                GDALWarpAppOptionsNew(wargs.List(), nullptr));
             if (!waOptions)
                 throw GDALException("Cannot geoproject " + p.string() + ": invalid warp options");
 
-            GDALDatasetH hDstDataset = GDALDataset::ToHandle(dstDataset.get());
-            GDALDatasetH hWrpDataset = GDALWarp(tmpOutFile.c_str(),
-                                                nullptr,
-                                                1,
-                                                &hDstDataset,
-                                                waOptions,
-                                                nullptr);
-            GDALWarpAppOptionsFree(waOptions);
+            GDALDatasetH hDstDataset = datasetHandle(dstDataset);
+            auto wrpDataset = adoptDataset(GDALWarp(tmpOutFile.c_str(),
+                                                   nullptr,
+                                                   1,
+                                                   &hDstDataset,
+                                                   waOptions.get(),
+                                                   nullptr));
 
             srcDataset.reset();
             dstDataset.reset();
 
             // Check before flush/close: GDALFlushCache(nullptr) logs a misleading
             // "NULL pointer" error that clobbers the real warp failure message
-            if (hWrpDataset == nullptr)
+            if (!wrpDataset)
             {
                 io::assureIsRemoved(tmpOutFile);
                 throw GDALException("Cannot geoproject " + p.string() + ": " + CPLGetLastErrorMsg());
             }
 
-            GDALFlushCache(hWrpDataset);
-            GDALClose(hWrpDataset);
+            GDALFlushCache(datasetHandle(wrpDataset));
+            wrpDataset.reset();
 
             io::rename(tmpOutFile, outFile);
 

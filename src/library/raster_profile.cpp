@@ -7,6 +7,7 @@
 #include "thermal.h"
 #include "sensorprofile.h"
 #include "exceptions.h"
+#include "gdal_raii.h"
 #include "logger.h"
 #include "utils.h"
 
@@ -59,27 +60,6 @@ bool detectIsThermalProfile(const std::string &filePath) {
     return isThermalImage(filePath) || isDirectTemperatureRaster(filePath);
 }
 
-// Simple RAII helpers for OGR/GDAL handles used inside this translation unit.
-struct OgrGeometryDeleter {
-    void operator()(OGRGeometry *g) const {
-        if (g) OGRGeometryFactory::destroyGeometry(g);
-    }
-};
-using OgrGeometryPtr = std::unique_ptr<OGRGeometry, OgrGeometryDeleter>;
-
-struct SrsHandle {
-    OGRSpatialReferenceH h = nullptr;
-    explicit SrsHandle(OGRSpatialReferenceH handle = nullptr) : h(handle) {}
-    ~SrsHandle() { if (h) OSRDestroySpatialReference(h); }
-    SrsHandle(const SrsHandle &) = delete;
-    SrsHandle &operator=(const SrsHandle &) = delete;
-};
-
-struct CtHandle {
-    OGRCoordinateTransformationH h = nullptr;
-    ~CtHandle() { if (h) OCTDestroyCoordinateTransformation(h); }
-};
-
 } // anonymous namespace
 
 std::string getRasterProfileJson(const std::string &filePath,
@@ -94,7 +74,7 @@ std::string getRasterProfileJson(const std::string &filePath,
     if (hRawGeom == nullptr)
         throw InvalidArgsException("Cannot parse GeoJSON geometry");
 
-    OgrGeometryPtr geom(reinterpret_cast<OGRGeometry *>(hRawGeom));
+    OGRGeometryUniquePtr geom(OGRGeometry::FromHandle(hRawGeom));
     const OGRwkbGeometryType gType = wkbFlatten(geom->getGeometryType());
     if (gType != wkbLineString)
         throw InvalidArgsException("Profile geometry must be a LineString");
@@ -105,15 +85,10 @@ std::string getRasterProfileJson(const std::string &filePath,
         throw InvalidArgsException("LineString must have at least 2 points");
 
     // --- Open raster and inspect metadata ---
-    GDALDatasetH hDs = GDALOpen(filePath.c_str(), GA_ReadOnly);
-    if (!hDs)
+    const auto dataset = adoptDataset(GDALOpen(filePath.c_str(), GA_ReadOnly));
+    if (!dataset)
         throw AppException("Cannot open raster: " + filePath);
-
-    // Use a scope guard for GDALClose so we can early-return on errors.
-    struct DsGuard {
-        GDALDatasetH h;
-        ~DsGuard() { if (h) GDALClose(h); }
-    } dsGuard{hDs};
+    GDALDatasetH hDs = datasetHandle(dataset);
 
     double gt[6];
     if (GDALGetGeoTransform(hDs, gt) != CE_None)
@@ -148,27 +123,14 @@ std::string getRasterProfileJson(const std::string &filePath,
     if (unit.empty() && isThermal) unit = "\xC2\xB0\x43"; // UTF-8 "°C"
 
     // --- Setup coordinate transforms (WGS84 <-> raster CRS) ---
-    SrsHandle wgs84(OSRNewSpatialReference(nullptr));
-    OSRImportFromEPSG(wgs84.h, 4326);
-    OSRSetAxisMappingStrategy(wgs84.h, OAMS_TRADITIONAL_GIS_ORDER);
+    const SrsPtr wgs84 = srsFromEpsg(4326);
 
-    SrsHandle rasterSrs;
-    bool rasterIsGeographic = false;
-    if (!projection.empty()) {
-        rasterSrs.h = OSRNewSpatialReference(nullptr);
-        char *wktPtr = const_cast<char *>(projection.c_str());
-        if (OSRImportFromWkt(rasterSrs.h, &wktPtr) != OGRERR_NONE) {
-            OSRDestroySpatialReference(rasterSrs.h);
-            rasterSrs.h = nullptr;
-        } else {
-            OSRSetAxisMappingStrategy(rasterSrs.h, OAMS_TRADITIONAL_GIS_ORDER);
-            rasterIsGeographic = (OSRIsGeographic(rasterSrs.h) != 0);
-        }
-    }
+    const SrsPtr rasterSrs = srsFromWkt(projection.c_str());
+    const bool rasterIsGeographic = rasterSrs && OSRIsGeographic(rasterSrs.get()) != 0;
 
-    CtHandle wgsToRaster;
-    if (rasterSrs.h) {
-        wgsToRaster.h = OCTNewCoordinateTransformation(wgs84.h, rasterSrs.h);
+    CoordTransformPtr wgsToRaster;
+    if (rasterSrs) {
+        wgsToRaster.reset(OCTNewCoordinateTransformation(wgs84.get(), rasterSrs.get()));
     }
 
     // --- Transform vertices WGS84 -> raster map coords ---
@@ -177,8 +139,8 @@ std::string getRasterProfileJson(const std::string &filePath,
     for (int i = 0; i < nVertices; i++) {
         double mx = line->getX(i); // lon
         double my = line->getY(i); // lat
-        if (wgsToRaster.h) {
-            if (!OCTTransform(wgsToRaster.h, 1, &mx, &my, nullptr))
+        if (wgsToRaster) {
+            if (!OCTTransform(wgsToRaster.get(), 1, &mx, &my, nullptr))
                 throw AppException("Cannot transform profile vertex to raster CRS");
         }
         mapX[i] = mx;
@@ -190,7 +152,7 @@ std::string getRasterProfileJson(const std::string &filePath,
     double totalLengthMeters = 0.0;
     for (int i = 0; i < nVertices - 1; i++) {
         double len;
-        if (!rasterSrs.h || rasterIsGeographic) {
+        if (!rasterSrs || rasterIsGeographic) {
             len = haversineMeters(line->getX(i), line->getY(i),
                                   line->getX(i + 1), line->getY(i + 1));
         } else {

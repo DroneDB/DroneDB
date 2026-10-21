@@ -10,11 +10,11 @@
 #include <algorithm>
 #include <sstream>
 #include <cmath>
-#include <type_traits>
 #include <cstring>
 
 #include "entry.h"
 #include "exceptions.h"
+#include "gdal_raii.h"
 #include "logger.h"
 #include "mio.h"
 #include "vis_render.h"
@@ -37,22 +37,17 @@ namespace ddb
                                    const OGRSpatialReferenceH &b)
     {
         char *aProj = nullptr;
+        const OGRErr aErr = OSRExportToProj4(a, &aProj);
+        const VsiFreePtr<char> aOwned(aProj);
+        if (aErr != CE_None)
+            throw GDALException("Cannot export proj4");
         char *bProj = nullptr;
-
-        if (OSRExportToProj4(a, &aProj) != CE_None)
+        const OGRErr bErr = OSRExportToProj4(b, &bProj);
+        const VsiFreePtr<char> bOwned(bProj);
+        if (bErr != CE_None)
             throw GDALException("Cannot export proj4");
-        if (OSRExportToProj4(b, &bProj) != CE_None)
-        {
-            CPLFree(aProj);
-            throw GDALException("Cannot export proj4");
-        }
 
-        bool result = std::string(aProj) == std::string(bProj);
-
-        CPLFree(aProj);
-        CPLFree(bProj);
-
-        return result;
+        return std::string(aProj) == std::string(bProj);
     }
 
     int GDALTiler::dataBandsCount(const GDALDatasetH &dataset)
@@ -72,15 +67,6 @@ namespace ddb
     }
     namespace
     {
-        // OGRSpatialReferenceH is void* in release GDAL builds but a typed pointer when GDAL's
-        // DEBUG define is on (its Debug configuration): the deleter names the handle type itself
-        struct SrsDeleter
-        {
-            using pointer = OGRSpatialReferenceH;
-            void operator()(OGRSpatialReferenceH srs) const { OSRDestroySpatialReference(srs); }
-        };
-        using SrsPtr = std::unique_ptr<std::remove_pointer_t<OGRSpatialReferenceH>, SrsDeleter>;
-
         // Maps the values of a window (band-sequential, windowPixels per band) to 0-255
         // over [bMin, bMax] and writes them at their place in the tile image
         template <typename T>
@@ -131,19 +117,8 @@ namespace ddb
                          int tileSize, bool tms)
         : Tiler(inputPath, outputFolder, tileSize, tms)
     {
-        try
-        {
-            open();
-        }
-        catch (...)
-        {
-            // The destructor does not run when the constructor throws
-            if (inputDataset && inputDataset != origDataset)
-                GDALClose(inputDataset);
-            if (origDataset)
-                GDALClose(origDataset);
-            throw;
-        }
+        // The datasets are members that own themselves: a throw in open() closes them
+        open();
     }
 
     void GDALTiler::open()
@@ -157,9 +132,10 @@ namespace ddb
             openPath = "/vsicurl/" + openPath;
         }
 
-        inputDataset = GDALOpen(openPath.c_str(), GA_ReadOnly);
-        if (inputDataset == nullptr)
+        fileDataset = adoptDataset(GDALOpen(openPath.c_str(), GA_ReadOnly));
+        if (!fileDataset)
             throw GDALException("Cannot open " + openPath);
+        inputDataset = datasetHandle(fileDataset);
 
         rasterCount = GDALGetRasterCount(inputDataset);
         if (rasterCount == 0)
@@ -195,8 +171,8 @@ namespace ddb
         // Check if we need to reproject
         if (!sameProjection(inputSrs.get(), outputSrs.get()))
         {
-            origDataset = inputDataset;
-            inputDataset = createWarpedVRT(inputDataset, outputSrs.get());
+            warpedDataset = createWarpedVRT(inputDataset, outputSrs.get());
+            inputDataset = datasetHandle(warpedDataset);
         }
 
         nBands = dataBandsCount(inputDataset);
@@ -232,13 +208,7 @@ namespace ddb
         LOGD << "Num bands: " << nBands;
     }
 
-    GDALTiler::~GDALTiler()
-    {
-        if (inputDataset && inputDataset != origDataset)
-            GDALClose(inputDataset);
-        if (origDataset)
-            GDALClose(origDataset);
-    }
+    GDALTiler::~GDALTiler() = default;
 
     bool GDALTiler::tileWindow(int tz, int tx, int ty, GQResult &g)
     {
@@ -264,8 +234,7 @@ namespace ddb
     BandStatistics GDALTiler::bandStatistics(int band)
     {
         // The statistics of the file, not of the warped VRT
-        const GDALDatasetH ds = origDataset != nullptr ? origDataset : inputDataset;
-        return RasterStatsProvider::instance().get(inputPath, ds, band);
+        return RasterStatsProvider::instance().get(inputPath, datasetHandle(fileDataset), band);
     }
 
     void GDALTiler::readBands(const GQResult &g, int bands, RasterImage &image)
@@ -461,17 +430,20 @@ namespace ddb
         }
     }
 
-    GDALDatasetH GDALTiler::createWarpedVRT(const GDALDatasetH &src,
-                                            const OGRSpatialReferenceH &srs,
-                                            GDALResampleAlg resampling)
+    GDALDatasetUniquePtr GDALTiler::createWarpedVRT(const GDALDatasetH &src,
+                                                    const OGRSpatialReferenceH &srs,
+                                                    GDALResampleAlg resampling)
     {
-        char *dstWkt = nullptr;
-        if (OSRExportToWkt(srs, &dstWkt) != OGRERR_NONE)
+        char *dstWktRaw = nullptr;
+        const OGRErr wktErr = OSRExportToWkt(srs, &dstWktRaw);
+        const VsiFreePtr<char> dstWkt(dstWktRaw);
+        if (wktErr != OGRERR_NONE)
             throw GDALException("Cannot export dst WKT " + inputPath +
                                 ". Is PROJ available?");
         const char *srcWkt = GDALGetProjectionRef(src);
 
-        GDALWarpOptions *opts = GDALCreateWarpOptions();
+        // GDALAutoCreateWarpedVRT copies the options
+        const GdalOptionsPtr<GDALWarpOptions> opts(GDALCreateWarpOptions());
 
         // If the dataset does not have alpha, add it
         bool hasAlpha = FindAlphaBand(src) != nullptr;
@@ -480,18 +452,10 @@ namespace ddb
             opts->nDstAlphaBand = GDALGetRasterCount(src) + 1;
         }
 
-        const GDALDatasetH warpedVrt = GDALAutoCreateWarpedVRT(
-            src, srcWkt, dstWkt, resampling, 0.001, opts);
-
-        CPLFree(dstWkt);
-
-        if (warpedVrt == nullptr)
-        {
-            GDALDestroyWarpOptions(opts);
+        auto warpedVrt = adoptDataset(GDALAutoCreateWarpedVRT(
+            src, srcWkt, dstWkt.get(), resampling, 0.001, opts.get()));
+        if (!warpedVrt)
             throw GDALException("Cannot create warped VRT");
-        }
-
-        GDALDestroyWarpOptions(opts);
 
         return warpedVrt;
     }

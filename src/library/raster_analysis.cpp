@@ -5,6 +5,7 @@
 #include "thermal.h"
 #include "sensorprofile.h"
 #include "exceptions.h"
+#include "gdal_raii.h"
 #include "logger.h"
 
 #include <gdal_priv.h>
@@ -61,8 +62,9 @@ bool detectIsThermal(const std::string &filePath, std::string &outSensorId) {
 } // anonymous namespace
 
 std::string readGdalUnitType(const std::string &filePath) {
-    GDALDatasetH hDs = GDALOpen(filePath.c_str(), GA_ReadOnly);
-    if (!hDs) return std::string();
+    const auto dataset = adoptDataset(GDALOpen(filePath.c_str(), GA_ReadOnly));
+    if (!dataset) return std::string();
+    GDALDatasetH hDs = datasetHandle(dataset);
 
     std::string unit;
     if (GDALGetRasterCount(hDs) >= 1) {
@@ -71,7 +73,6 @@ std::string readGdalUnitType(const std::string &filePath) {
         if (u != nullptr) unit = u;
     }
 
-    GDALClose(hDs);
     return unit;
 }
 
@@ -89,8 +90,8 @@ std::string getRasterValueInfoJson(const std::string &filePath) {
     float vMin = 0.f, vMax = 0.f;
     bool hasStats = false;
 
-    GDALDatasetH hDs = GDALOpen(filePath.c_str(), GA_ReadOnly);
-    if (hDs) {
+    if (const auto dataset = adoptDataset(GDALOpen(filePath.c_str(), GA_ReadOnly))) {
+        GDALDatasetH hDs = datasetHandle(dataset);
         width = GDALGetRasterXSize(hDs);
         height = GDALGetRasterYSize(hDs);
         bandCount = GDALGetRasterCount(hDs);
@@ -116,7 +117,6 @@ std::string getRasterValueInfoJson(const std::string &filePath) {
                 hasStats = true;
             }
         }
-        GDALClose(hDs);
     }
 
     // Fallback for small R-JPEG thermal images not fully handled by GDAL stats.
@@ -181,13 +181,12 @@ std::string getRasterPointJson(const std::string &filePath, int x, int y) {
     std::string sensorId;
     const bool isThermal = detectIsThermal(filePath, sensorId);
 
-    GDALDatasetH hDs = GDALOpen(filePath.c_str(), GA_ReadOnly);
-    if (hDs) {
+    if (const auto dataset = adoptDataset(GDALOpen(filePath.c_str(), GA_ReadOnly))) {
+        GDALDatasetH hDs = datasetHandle(dataset);
         const int w = GDALGetRasterXSize(hDs);
         const int h = GDALGetRasterYSize(hDs);
 
         if (x < 0 || x >= w || y < 0 || y >= h) {
-            GDALClose(hDs);
             throw InvalidArgsException("Pixel coordinates out of bounds: (" +
                 std::to_string(x) + ", " + std::to_string(y) + ") for image " +
                 std::to_string(w) + "x" + std::to_string(h));
@@ -263,11 +262,9 @@ std::string getRasterPointJson(const std::string &filePath, int x, int y) {
                     result["hasGeo"] = false;
                 }
 
-                GDALClose(hDs);
                 return result.dump();
             }
         }
-        GDALClose(hDs);
     }
 
     // Fallback: R-JPEG (small thermal images).
@@ -320,8 +317,8 @@ std::string getRasterAreaStatsJson(const std::string &filePath,
     std::string sensorId;
     const bool isThermal = detectIsThermal(filePath, sensorId);
 
-    GDALDatasetH hDs = GDALOpen(filePath.c_str(), GA_ReadOnly);
-    if (hDs) {
+    if (const auto dataset = adoptDataset(GDALOpen(filePath.c_str(), GA_ReadOnly))) {
+        GDALDatasetH hDs = datasetHandle(dataset);
         const int w = GDALGetRasterXSize(hDs);
         const int h = GDALGetRasterYSize(hDs);
         const int nBands = GDALGetRasterCount(hDs);
@@ -387,8 +384,6 @@ std::string getRasterAreaStatsJson(const std::string &filePath,
                     values.push_back(v);
                 }
 
-                GDALClose(hDs);
-
                 if (values.empty()) {
                     throw AppException("No valid data in the specified area");
                 }
@@ -433,7 +428,6 @@ std::string getRasterAreaStatsJson(const std::string &filePath,
                 return result.dump();
             }
         }
-        GDALClose(hDs);
     }
 
     // Fallback: R-JPEG thermal only.

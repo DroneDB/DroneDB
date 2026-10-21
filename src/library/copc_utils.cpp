@@ -19,7 +19,7 @@
 #include <lazperf/readers.hpp>
 
 #include "exceptions.h"
-#include "gdal_inc.h"
+#include "gdal_raii.h"
 #include "utils.h"
 
 namespace ddb
@@ -40,24 +40,22 @@ namespace ddb
 
         class VsiFile
         {
-            VSILFILE *f_;
+            VsiFilePtr f_;
             std::string path_;
 
         public:
-            explicit VsiFile(const std::string &path) : path_(path)
+            explicit VsiFile(const std::string &path)
+                : f_(VSIFOpenL(path.c_str(), "rb")), path_(path)
             {
-                f_ = VSIFOpenL(path.c_str(), "rb");
-                if (f_ == nullptr)
+                if (!f_)
                     throw AppException("Cannot open " + path);
             }
-            ~VsiFile() { VSIFCloseL(f_); }
-            VsiFile(const VsiFile &) = delete;
-            VsiFile &operator=(const VsiFile &) = delete;
 
             std::vector<uint8_t> read(uint64_t offset, size_t size)
             {
                 std::vector<uint8_t> buf(size);
-                if (VSIFSeekL(f_, offset, SEEK_SET) != 0 || VSIFReadL(buf.data(), 1, size, f_) != size)
+                if (VSIFSeekL(f_.get(), offset, SEEK_SET) != 0 ||
+                    VSIFReadL(buf.data(), 1, size, f_.get()) != size)
                     throw AppException("Cannot read " + std::to_string(size) + " bytes at " +
                                        std::to_string(offset) + " of " + path_);
                 return buf;

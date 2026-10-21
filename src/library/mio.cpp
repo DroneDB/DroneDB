@@ -678,6 +678,55 @@ namespace ddb
             }
         }
 
+        ScopedTempDir::~ScopedTempDir()
+        {
+            reset();
+        }
+
+        ScopedTempDir::ScopedTempDir(ScopedTempDir &&other) noexcept : path_(other.release())
+        {
+        }
+
+        ScopedTempDir &ScopedTempDir::operator=(ScopedTempDir &&other) noexcept
+        {
+            if (this != &other)
+                reset(other.release());
+            return *this;
+        }
+
+        ScopedTempDir ScopedTempDir::create(const fs::path &parent, const std::string &prefix)
+        {
+            ScopedTempDir dir(parent / (prefix + utils::generateRandomString(16)));
+            createDirectories(dir.path());
+            return dir;
+        }
+
+        void ScopedTempDir::reset(fs::path p) noexcept
+        {
+            const fs::path old = std::exchange(path_, std::move(p));
+            if (old.empty())
+                return;
+            // Runs during stack unwinding too: never throw
+            try
+            {
+                std::error_code ec;
+                if (fs::exists(old, ec))
+                {
+                    LOGD << "Removing temporary " << old.string();
+                    assureIsRemoved(old);
+                }
+            }
+            catch (const std::exception &e)
+            {
+                LOGW << "Cannot remove temporary " << old.string() << ": " << e.what();
+            }
+        }
+
+        fs::path ScopedTempDir::release() noexcept
+        {
+            return std::exchange(path_, fs::path());
+        }
+
         void copy(const fs::path &from, const fs::path &to)
         {
             std::error_code e;

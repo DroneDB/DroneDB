@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-#include "gdal_inc.h"
+#include "gdal_raii.h"
 #include "gdal_priv.h"
 #include "gdal_utils.h"
 #include "ogrsf_frmts.h"
@@ -76,9 +76,7 @@ namespace ddb
                 return std::string(authName) + ":" + authCode;
             char *wkt = nullptr;
             srs->exportToWkt(&wkt);
-            std::string out = wkt ? wkt : "";
-            CPLFree(wkt);
-            return out;
+            return takeGdalString(wkt);
         }
 
         json layerToJson(OGRLayer *layer, bool includeFields)
@@ -251,9 +249,7 @@ namespace ddb
         const std::string layerName = layer->GetName();
 
         // Build GDALVectorTranslate options for selected layer + paging.
-        const std::string vsiPath = "/vsimem/ddb-vquery-" +
-                                    utils::generateRandomString(16) +
-                                    "." + fmt.vsiExt;
+        const VsiMemFile out = VsiMemFile::unique("ddb-vquery-", std::string(".") + fmt.vsiExt);
 
         // A layer without an SRS (a local CAD drawing, DDB-12) cannot be
         // reprojected: return its own coordinates, as plain GeoJSON (RFC 7946
@@ -312,32 +308,25 @@ namespace ddb
         for (auto &arg : argStore) argv.push_back(const_cast<char *>(arg.c_str()));
         argv.push_back(nullptr);
 
-        std::unique_ptr<GDALVectorTranslateOptions, decltype(&GDALVectorTranslateOptionsFree)> opts(
-            GDALVectorTranslateOptionsNew(argv.data(), nullptr), &GDALVectorTranslateOptionsFree);
+        const GdalOptionsPtr<GDALVectorTranslateOptions> opts(
+            GDALVectorTranslateOptionsNew(argv.data(), nullptr));
         if (!opts)
             throw GDALException("Cannot build GDALVectorTranslate options");
 
         GDALDatasetH srcArr[1] = {layer.dataset()};
         int usageErr = 0;
-        GDALDatasetH hOut = GDALVectorTranslate(vsiPath.c_str(), nullptr, 1, srcArr, opts.get(), &usageErr);
-
-        if (!hOut || usageErr) {
-            if (hOut) GDALClose(hOut);
-            VSIUnlink(vsiPath.c_str());
+        // Closed at the end of the statement, before its bytes are taken: closing writes them
+        const bool written = adoptDataset(GDALVectorTranslate(out.c_str(), nullptr, 1, srcArr,
+                                                              opts.get(), &usageErr)) != nullptr;
+        if (!written || usageErr)
             throw GDALException("Vector translate failed for " + vectorPath);
-        }
-        GDALClose(hOut);
 
         vsi_l_offset size = 0;
-        GByte *buf = VSIGetMemFileBuffer(vsiPath.c_str(), &size, TRUE);
+        const auto buf = stealMemFileBuffer(out.path(), size);
         if (!buf) {
             throw GDALException("Empty vector query result");
         }
-        std::string result(reinterpret_cast<char *>(buf),
-                           static_cast<size_t>(size));
-        VSIFree(buf);
-
-        return result;
+        return std::string(reinterpret_cast<char *>(buf.get()), static_cast<size_t>(size));
     }
 
     std::string queryVector(const std::string &vectorPath,

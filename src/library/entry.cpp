@@ -9,6 +9,7 @@
 #include <optional>
 #include "dbops.h"
 #include "entry.h"
+#include "gdal_raii.h"
 
 #include "ddb.h"
 #include "constants.h"
@@ -289,7 +290,7 @@ namespace ddb
                 LOGV << "Processing GeoRaster file: " << path.string();
 
                 // Owned: the SRS checks below throw while the dataset is open
-                GDALDatasetUniquePtr dataset(GDALDataset::FromHandle(GDALOpen(path.string().c_str(), GA_ReadOnly)));
+                auto dataset = adoptDataset(GDALOpen(path.string().c_str(), GA_ReadOnly));
                 if (!dataset)
                 {
                     LOGV << "GDAL failed to open dataset: " << path.string();
@@ -297,7 +298,7 @@ namespace ddb
                 }
 
                 LOGV << "GDAL successfully opened dataset";
-                GDALDatasetH hDataset = GDALDataset::ToHandle(dataset.get());
+                GDALDatasetH hDataset = datasetHandle(dataset);
 
                 int width = GDALGetRasterXSize(hDataset);
                 int height = GDALGetRasterYSize(hDataset);
@@ -481,12 +482,9 @@ namespace ddb
         // Compute polygon_geom (WGS84) and properties.vector multi-layer metadata.
         // Best-effort: any failure leaves the entry indexed without geometry but
         // never aborts the parse (a corrupted vector file should not block ddb add).
-        // Declared outside try so that the catch block can release them on error;
-        // the CAD source outlives hDS (a converted DXF is deleted only once closed).
+        // Declared outside try: the CAD source outlives the dataset (a converted DXF is
+        // deleted only once closed).
         std::optional<cad::CadSource> cadSource;
-        GDALDatasetH hDS = nullptr;
-        OGRSpatialReferenceH hWgs84 = nullptr;
-        OGRSpatialReferenceH hCadSrs = nullptr;
         try
         {
             // CAD drawings: a DWG is read through a temporary DXF, and the CRS
@@ -496,14 +494,16 @@ namespace ddb
                 cadSource.emplace(path);
             const fs::path openPath = isCad ? cadSource->dxfPath() : path;
 
-            hDS = GDALOpenEx(openPath.string().c_str(),
-                             GDAL_OF_VECTOR | GDAL_OF_READONLY,
-                             nullptr, nullptr, nullptr);
-            if (hDS == nullptr)
+            const auto dataset = adoptDataset(GDALOpenEx(openPath.string().c_str(),
+                                                        GDAL_OF_VECTOR | GDAL_OF_READONLY,
+                                                        nullptr, nullptr, nullptr));
+            if (!dataset)
             {
                 LOGD << "Vector parse: GDAL cannot open " << path.string();
                 return;
             }
+            GDALDatasetH hDS = datasetHandle(dataset);
+            SrsPtr cadSrs;
 
             json cadJson;
             if (isCad)
@@ -538,20 +538,19 @@ namespace ddb
                     if (crs.hasExtent)
                         entry.properties["vector"]["localExtent"] = {crs.extent.MinX, crs.extent.MinY,
                                                                      crs.extent.MaxX, crs.extent.MaxY};
-                    GDALClose(hDS);
-                    hDS = nullptr;
                     return;
                 }
 
                 if (!crs.srs.empty())
                 {
-                    hCadSrs = OSRNewSpatialReference(nullptr);
-                    if (OSRSetFromUserInput(hCadSrs, crs.srs.c_str()) != OGRERR_NONE)
+                    cadSrs.reset(OSRNewSpatialReference(nullptr));
+                    if (OSRSetFromUserInput(cadSrs.get(), crs.srs.c_str()) != OGRERR_NONE)
                         throw GDALException("Invalid CAD coordinate system " + crs.label);
                 }
             }
 
             // Lazy WGS84 SRS - only allocate when needed (first layer with SRS).
+            SrsPtr wgs84;
             // Convex envelope in WGS84 across all layers.
             OGREnvelope totalEnv;
             totalEnv.MinX = totalEnv.MinY =  std::numeric_limits<double>::max();
@@ -574,7 +573,7 @@ namespace ddb
                 }
 
                 OGRSpatialReferenceH hSrs = OGR_L_GetSpatialRef(hLayer);
-                if (hSrs == nullptr) hSrs = hCadSrs; // CAD layers carry no SRS
+                if (hSrs == nullptr) hSrs = cadSrs.get(); // CAD layers carry no SRS
                 OGREnvelope envWgs84 = env;
 
                 if (hSrs != nullptr)
@@ -590,32 +589,26 @@ namespace ddb
 
                     if (!isWgs84)
                     {
-                        if (hWgs84 == nullptr)
+                        if (!wgs84)
                         {
-                            hWgs84 = OSRNewSpatialReference(nullptr);
-                            if (OSRImportFromEPSG(hWgs84, 4326) != OGRERR_NONE)
+                            wgs84 = srsFromEpsg(4326);
+                            if (!wgs84)
                             {
                                 LOGD << "Vector parse: failed to import EPSG:4326";
-                                OSRDestroySpatialReference(hWgs84);
-                                hWgs84 = nullptr;
-                            }
-                            else
-                            {
-                                OSRSetAxisMappingStrategy(hWgs84, OAMS_TRADITIONAL_GIS_ORDER);
                             }
                         }
 
-                        if (hWgs84 != nullptr)
+                        if (wgs84)
                         {
-                            OGRCoordinateTransformationH hT =
-                                OCTNewCoordinateTransformation(hSrs, hWgs84);
-                            if (hT != nullptr)
+                            const CoordTransformPtr hT(
+                                OCTNewCoordinateTransformation(hSrs, wgs84.get()));
+                            if (hT)
                             {
                                 // Transform all 4 corners (a single rectangle in src
                                 // CRS can become a curved quadrilateral in WGS84).
                                 double xs[4] = {env.MinX, env.MaxX, env.MaxX, env.MinX};
                                 double ys[4] = {env.MinY, env.MinY, env.MaxY, env.MaxY};
-                                if (OCTTransform(hT, 4, xs, ys, nullptr))
+                                if (OCTTransform(hT.get(), 4, xs, ys, nullptr))
                                 {
                                     envWgs84.MinX = std::min({xs[0], xs[1], xs[2], xs[3]});
                                     envWgs84.MaxX = std::max({xs[0], xs[1], xs[2], xs[3]});
@@ -626,7 +619,6 @@ namespace ddb
                                 {
                                     LOGD << "Vector parse: layer " << i << " transform failed";
                                 }
-                                OCTDestroyCoordinateTransformation(hT);
                             }
                         }
                     }
@@ -665,18 +657,10 @@ namespace ddb
                 }
             }
 
-            if (hWgs84 != nullptr) OSRDestroySpatialReference(hWgs84);
-            hWgs84 = nullptr;
-            if (hCadSrs != nullptr) OSRDestroySpatialReference(hCadSrs);
-            hCadSrs = nullptr;
-
             entry.properties["vector"] = {
                 {"driver", GDALGetDriverShortName(GDALGetDatasetDriver(hDS))},
                 {"layers", layersArr}};
             if (!cadJson.is_null()) entry.properties["vector"].update(cadJson);
-
-            GDALClose(hDS);
-            hDS = nullptr;
 
             if (haveEnv)
             {
@@ -694,10 +678,6 @@ namespace ddb
         }
         catch (const std::exception &e)
         {
-            // Release GDAL/OSR resources that may have been opened before the exception.
-            if (hWgs84 != nullptr) OSRDestroySpatialReference(hWgs84);
-            if (hCadSrs != nullptr) OSRDestroySpatialReference(hCadSrs);
-            if (hDS != nullptr) GDALClose(hDS);
             LOGD << "Vector parse warning: " << e.what();
             entry.properties["warning"] = std::string("vector parse failed: ") + e.what();
         }
@@ -1099,16 +1079,14 @@ namespace ddb
 
         if (tif)
         {
-            GDALDatasetH hDataset;
-            hDataset = GDALOpen(p.string().c_str(), GA_ReadOnly);
-            if (hDataset != NULL)
+            const auto dataset = adoptDataset(GDALOpen(p.string().c_str(), GA_ReadOnly));
+            if (dataset)
             {
-                const char *proj = GDALGetProjectionRef(hDataset);
+                const char *proj = GDALGetProjectionRef(datasetHandle(dataset));
                 if (proj != NULL)
                 {
                     georaster = std::string(proj) != "";
                 }
-                GDALClose(hDataset);
             }
             else
             {

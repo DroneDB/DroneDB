@@ -4,6 +4,7 @@
 #include "stockpile.h"
 #include "mathutil.h"
 #include "exceptions.h"
+#include "gdal_raii.h"
 #include "json.h"
 #include "logger.h"
 #include "utils.h"
@@ -28,24 +29,6 @@
 namespace ddb {
 
 namespace {
-
-struct SrsHandle {
-    OGRSpatialReferenceH h = nullptr;
-    explicit SrsHandle(OGRSpatialReferenceH handle = nullptr) : h(handle) {}
-    ~SrsHandle() { if (h) OSRDestroySpatialReference(h); }
-    SrsHandle(const SrsHandle &) = delete;
-    SrsHandle &operator=(const SrsHandle &) = delete;
-};
-
-struct CtHandle {
-    OGRCoordinateTransformationH h = nullptr;
-    ~CtHandle() { if (h) OCTDestroyCoordinateTransformation(h); }
-};
-
-struct DsGuard {
-    GDALDatasetH h = nullptr;
-    ~DsGuard() { if (h) GDALClose(h); }
-};
 
 // Separable 1-D gaussian blur, applied in place on a float grid.
 void gaussianFilter(std::vector<float> &data, int width, int height, float sigma) {
@@ -235,9 +218,9 @@ std::string detectStockpileJson(const std::string &rasterPath,
          << " r=" << radiusMeters << " s=" << sensitivity;
 
     // --- Open raster ---
-    GDALDatasetH hDs = GDALOpen(rasterPath.c_str(), GA_ReadOnly);
-    if (!hDs) throw AppException("Cannot open raster: " + rasterPath);
-    DsGuard dsGuard{hDs};
+    const auto dataset = adoptDataset(GDALOpen(rasterPath.c_str(), GA_ReadOnly));
+    if (!dataset) throw AppException("Cannot open raster: " + rasterPath);
+    GDALDatasetH hDs = datasetHandle(dataset);
 
     double gt[6];
     if (GDALGetGeoTransform(hDs, gt) != CE_None)
@@ -255,30 +238,17 @@ std::string detectStockpileJson(const std::string &rasterPath,
     const std::string projection = projRef ? projRef : "";
 
     // --- CRS setup (WGS84 <-> raster, WGS84 <-> raster) ---
-    SrsHandle wgs84(OSRNewSpatialReference(nullptr));
-    OSRImportFromEPSG(wgs84.h, 4326);
-    OSRSetAxisMappingStrategy(wgs84.h, OAMS_TRADITIONAL_GIS_ORDER);
+    const SrsPtr wgs84 = srsFromEpsg(4326);
 
-    SrsHandle rasterSrs;
-    bool rasterIsGeographic = false;
-    if (!projection.empty()) {
-        rasterSrs.h = OSRNewSpatialReference(nullptr);
-        char *wktPtr = const_cast<char *>(projection.c_str());
-        if (OSRImportFromWkt(rasterSrs.h, &wktPtr) != OGRERR_NONE) {
-            OSRDestroySpatialReference(rasterSrs.h);
-            rasterSrs.h = nullptr;
-        } else {
-            OSRSetAxisMappingStrategy(rasterSrs.h, OAMS_TRADITIONAL_GIS_ORDER);
-            rasterIsGeographic = (OSRIsGeographic(rasterSrs.h) != 0);
-        }
-    }
+    const SrsPtr rasterSrs = srsFromWkt(projection.c_str());
+    const bool rasterIsGeographic = rasterSrs && OSRIsGeographic(rasterSrs.get()) != 0;
 
     // Click coordinates in raster CRS.
     double clickX = lon, clickY = lat;
-    if (rasterSrs.h) {
-        CtHandle wgsToRaster;
-        wgsToRaster.h = OCTNewCoordinateTransformation(wgs84.h, rasterSrs.h);
-        if (!wgsToRaster.h || !OCTTransform(wgsToRaster.h, 1, &clickX, &clickY, nullptr))
+    if (rasterSrs) {
+        const CoordTransformPtr wgsToRaster(
+            OCTNewCoordinateTransformation(wgs84.get(), rasterSrs.get()));
+        if (!wgsToRaster || !OCTTransform(wgsToRaster.get(), 1, &clickX, &clickY, nullptr))
             throw AppException("Cannot project click coordinates into raster CRS");
     }
 
@@ -298,7 +268,7 @@ std::string detectStockpileJson(const std::string &rasterPath,
     // already in meters; for geographic CRS we approximate using lat.
     double metersPerPixelX = std::fabs(gt[1]);
     double metersPerPixelY = std::fabs(gt[5]);
-    if (rasterIsGeographic || !rasterSrs.h) {
+    if (rasterIsGeographic || !rasterSrs) {
         const double d2r = ddb::kPi / 180.0;
         const double mPerDeg = 111320.0; // good-enough WGS84 approximation
         metersPerPixelX = std::fabs(gt[1]) * mPerDeg * std::cos(lat * d2r);
@@ -429,14 +399,14 @@ std::string detectStockpileJson(const std::string &rasterPath,
     // Back to WGS84 for GeoJSON output.
     std::vector<std::pair<double, double>> ring;
     ring.reserve(simplified.size());
-    if (rasterSrs.h) {
-        CtHandle rasterToWgs;
-        rasterToWgs.h = OCTNewCoordinateTransformation(rasterSrs.h, wgs84.h);
-        if (!rasterToWgs.h)
+    if (rasterSrs) {
+        const CoordTransformPtr rasterToWgs(
+            OCTNewCoordinateTransformation(rasterSrs.get(), wgs84.get()));
+        if (!rasterToWgs)
             throw AppException("Cannot build transform to WGS84");
         for (auto &p : simplified) {
             double x = p.first, y = p.second;
-            if (!OCTTransform(rasterToWgs.h, 1, &x, &y, nullptr))
+            if (!OCTTransform(rasterToWgs.get(), 1, &x, &y, nullptr))
                 throw AppException("Cannot transform contour to WGS84");
             ring.push_back({x, y}); // lon, lat (traditional GIS order)
         }
@@ -579,9 +549,9 @@ std::string detectAllStockpilesJson(const std::string &rasterPath,
          << " maxResults=" << maxResults;
 
     // --- Open raster ---
-    GDALDatasetH hDs = GDALOpen(rasterPath.c_str(), GA_ReadOnly);
-    if (!hDs) throw AppException("Cannot open raster: " + rasterPath);
-    DsGuard dsGuard{hDs};
+    const auto dataset = adoptDataset(GDALOpen(rasterPath.c_str(), GA_ReadOnly));
+    if (!dataset) throw AppException("Cannot open raster: " + rasterPath);
+    GDALDatasetH hDs = datasetHandle(dataset);
 
     double gt[6];
     if (GDALGetGeoTransform(hDs, gt) != CE_None)
@@ -599,28 +569,15 @@ std::string detectAllStockpilesJson(const std::string &rasterPath,
     const std::string projection = projRef ? projRef : "";
 
     // --- CRS setup ---
-    SrsHandle wgs84(OSRNewSpatialReference(nullptr));
-    OSRImportFromEPSG(wgs84.h, 4326);
-    OSRSetAxisMappingStrategy(wgs84.h, OAMS_TRADITIONAL_GIS_ORDER);
+    const SrsPtr wgs84 = srsFromEpsg(4326);
 
-    SrsHandle rasterSrs;
-    bool rasterIsGeographic = false;
-    if (!projection.empty()) {
-        rasterSrs.h = OSRNewSpatialReference(nullptr);
-        char *wktPtr = const_cast<char *>(projection.c_str());
-        if (OSRImportFromWkt(rasterSrs.h, &wktPtr) != OGRERR_NONE) {
-            OSRDestroySpatialReference(rasterSrs.h);
-            rasterSrs.h = nullptr;
-        } else {
-            OSRSetAxisMappingStrategy(rasterSrs.h, OAMS_TRADITIONAL_GIS_ORDER);
-            rasterIsGeographic = (OSRIsGeographic(rasterSrs.h) != 0);
-        }
-    }
+    const SrsPtr rasterSrs = srsFromWkt(projection.c_str());
+    const bool rasterIsGeographic = rasterSrs && OSRIsGeographic(rasterSrs.get()) != 0;
 
     // Approx pixel size in meters (for area/volume).
     double metersPerPixelX = std::fabs(gt[1]);
     double metersPerPixelY = std::fabs(gt[5]);
-    if (rasterIsGeographic || !rasterSrs.h) {
+    if (rasterIsGeographic || !rasterSrs) {
         // Use raster center latitude for the cosine factor.
         const double centerY = gt[3] + (rasterH / 2.0) * gt[5];
         const double d2r = ddb::kPi / 180.0;
@@ -758,11 +715,10 @@ std::string detectAllStockpilesJson(const std::string &rasterPath,
     }
 
     // --- Build coord transformer raster->WGS84 (reused for all components) ---
-    std::unique_ptr<CtHandle> rasterToWgs;
-    if (rasterSrs.h) {
-        rasterToWgs = std::make_unique<CtHandle>();
-        rasterToWgs->h = OCTNewCoordinateTransformation(rasterSrs.h, wgs84.h);
-        if (!rasterToWgs->h)
+    CoordTransformPtr rasterToWgs;
+    if (rasterSrs) {
+        rasterToWgs.reset(OCTNewCoordinateTransformation(rasterSrs.get(), wgs84.get()));
+        if (!rasterToWgs)
             throw AppException("Cannot build transform to WGS84");
     }
 
@@ -776,8 +732,8 @@ std::string detectAllStockpilesJson(const std::string &rasterPath,
 
     auto mapToWgs = [&](double mx, double my, double &lon, double &lat) {
         lon = mx; lat = my;
-        if (rasterToWgs && rasterToWgs->h) {
-            if (!OCTTransform(rasterToWgs->h, 1, &lon, &lat, nullptr))
+        if (rasterToWgs) {
+            if (!OCTTransform(rasterToWgs.get(), 1, &lon, &lat, nullptr))
                 throw AppException("Cannot transform to WGS84");
         }
     };

@@ -1,7 +1,7 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
-#include "gdal_inc.h"
+#include "gdal_raii.h"
 #include "cog.h"
 #include "build_budget.h"
 #include "cog_utils.h"
@@ -11,6 +11,7 @@
 #include "json.h"
 
 #include <fstream>
+#include <optional>
 #include <cerrno>
 #include <atomic>
 #include <cmath>
@@ -35,47 +36,6 @@ namespace ddb
         }
         return TRUE;
     }
-
-    namespace {
-        // RAII guard that scopes GDAL's CPL_TMPDIR to a directory for the current
-        // thread only. The COG driver writes its overview/intermediate scratch into
-        // the directory of the final file only when CPL_TMPDIR is unset; the
-        // cog.tif_<pid>_<counter> intermediates come from CPLGenerateTempFilename(),
-        // which defaults to the process working directory. On the Registry
-        // containers that working directory is an anonymous Docker volume on the
-        // host root filesystem, so multi-GB COG scratch files accumulate on root.
-        // Pointing CPL_TMPDIR at the per-build temp folder keeps that scratch on the
-        // (large) datasets volume and ensures it is reclaimed together with the temp
-        // folder by the normal build cleanup. Thread-local so concurrent builds in
-        // the same process never clobber each other's setting. A no-op when given an
-        // empty directory (e.g. a bare output filename), preserving CLI behaviour.
-        class ScopedGdalTmpDir {
-        public:
-            explicit ScopedGdalTmpDir(const std::string& dir) : active_(!dir.empty()) {
-                if (!active_)
-                    return;
-                const char* prev = CPLGetThreadLocalConfigOption("CPL_TMPDIR", nullptr);
-                if (prev) {
-                    hadPrev_ = true;
-                    prev_ = prev;
-                }
-                CPLSetThreadLocalConfigOption("CPL_TMPDIR", dir.c_str());
-            }
-            ~ScopedGdalTmpDir() {
-                if (!active_)
-                    return;
-                CPLSetThreadLocalConfigOption("CPL_TMPDIR",
-                                              hadPrev_ ? prev_.c_str() : nullptr);
-            }
-            ScopedGdalTmpDir(const ScopedGdalTmpDir&) = delete;
-            ScopedGdalTmpDir& operator=(const ScopedGdalTmpDir&) = delete;
-
-        private:
-            bool active_;
-            bool hadPrev_ = false;
-            std::string prev_;
-        };
-    }  // namespace
 
     void buildCog(const std::string &inputGTiff, const std::string &outputCog)
     {
@@ -107,11 +67,11 @@ namespace ddb
         LOGD << "Building COG from " << inputGTiff << " (requires optimization)";
 
         // Owned: the budget, the option list and GDALWarpAppOptionsNew below can throw
-        GDALDatasetUniquePtr srcDataset(GDALDataset::FromHandle(GDALOpen(inputGTiff.c_str(), GA_ReadOnly)));
+        auto srcDataset = adoptDataset(GDALOpen(inputGTiff.c_str(), GA_ReadOnly));
 
         if (!srcDataset)
             throw GDALException("Cannot open " + inputGTiff + " for reading");
-        GDALDatasetH hSrcDataset = GDALDataset::ToHandle(srcDataset.get());
+        GDALDatasetH hSrcDataset = datasetHandle(srcDataset);
 
         // Check that the source has a valid CRS
         const char* srcProjRef = GDALGetProjectionRef(hSrcDataset);
@@ -148,41 +108,41 @@ namespace ddb
         const BuildResourceBudget budget = BuildResourceBudget::fromConfig();
         const std::string numThreads = "NUM_THREADS=" + budget.gdalNumThreads();
 
-        char **targs = nullptr;
-        targs = CSLAddString(targs, "-of");
-        targs = CSLAddString(targs, "COG");
-        targs = CSLAddString(targs, "-t_srs");
-        targs = CSLAddString(targs, "EPSG:3857");
-        targs = CSLAddString(targs, "-multi");
-        targs = CSLAddString(targs, "-wo");
-        targs = CSLAddString(targs, numThreads.c_str());
-        targs = CSLAddString(targs, "-co");
-        targs = CSLAddString(targs, numThreads.c_str());
-        targs = CSLAddString(targs, "-r");
-        targs = CSLAddString(targs, "bilinear");
-        targs = CSLAddString(targs, "-co");
-        targs = CSLAddString(targs, "TILING_SCHEME=GoogleMapsCompatible");
+        CPLStringList targs;
+        targs.AddString("-of");
+        targs.AddString("COG");
+        targs.AddString("-t_srs");
+        targs.AddString("EPSG:3857");
+        targs.AddString("-multi");
+        targs.AddString("-wo");
+        targs.AddString(numThreads.c_str());
+        targs.AddString("-co");
+        targs.AddString(numThreads.c_str());
+        targs.AddString("-r");
+        targs.AddString("bilinear");
+        targs.AddString("-co");
+        targs.AddString("TILING_SCHEME=GoogleMapsCompatible");
         // UPPER strategy: when the theoretical zoom level is non-integer,
         // select the higher (more detailed) zoom level rather than rounding
         // to the nearest. This preserves detail for high-res drone imagery
-        targs = CSLAddString(targs, "-co");
-        targs = CSLAddString(targs, "ZOOM_LEVEL_STRATEGY=UPPER");
+        targs.AddString("-co");
+        targs.AddString("ZOOM_LEVEL_STRATEGY=UPPER");
 
         // Warp memory buffer: larger values reduce chunk overhead, especially with NUM_THREADS>1.
-        targs = CSLAddString(targs, "-wm");
-        targs = CSLAddString(targs, std::to_string(budget.warpMemoryMb).c_str());
+        targs.AddString("-wm");
+        targs.AddString(std::to_string(budget.warpMemoryMb).c_str());
 
         // Preserve nodata values for transparency
         if (hasNoData) {
             // Skip nodata preservation for special float values that cannot
             // be reliably serialized (infinity, NaN, extreme floats)
             if (std::isfinite(srcNoData) && std::fabs(srcNoData) < 1e+30) {
-                targs = CSLAddString(targs, "-wo");
-                targs = CSLAddString(targs, "UNIFIED_SRC_NODATA=YES");
-                targs = CSLAddString(targs, "-dstnodata");
+                targs.AddString("-wo");
+                targs.AddString("UNIFIED_SRC_NODATA=YES");
+                targs.AddString("-dstnodata");
                 std::ostringstream oss;
                 oss << std::setprecision(15) << srcNoData;
-                targs = CSLAddString(targs, oss.str().c_str());
+                targs.AddString(oss.str().c_str());
             } else {
                 // The nodata value cannot be reliably serialized as a
                 // -dstnodata string (NaN/Inf/extreme float). Materialize the
@@ -191,7 +151,7 @@ namespace ddb
                 // reads the source nodata from the band itself to drive the mask.
                 LOGW << "Nodata value cannot be serialized (" << srcNoData
                      << "); using -dstalpha to preserve transparency";
-                targs = CSLAddString(targs, "-dstalpha");
+                targs.AddString("-dstalpha");
             }
         } else if (hasPerDatasetMask) {
             // Materialize the source PER_DATASET mask as a destination alpha
@@ -199,7 +159,7 @@ namespace ddb
             // driver converts the alpha back into an internal 1-bit mask for
             // JPEG output (no alpha-in-JPEG cost) and into a 4th band for LZW.
             LOGD << "Source has PER_DATASET mask; forcing -dstalpha to preserve transparency";
-            targs = CSLAddString(targs, "-dstalpha");
+            targs.AddString("-dstalpha");
         }
 
         // We can compress to JPG if these are 8bit bands (3 or 4) and no nodata
@@ -231,8 +191,8 @@ namespace ddb
             }
             if (jpegEligible)
             {
-                targs = CSLAddString(targs, "-co");
-                targs = CSLAddString(targs, "COMPRESS=JPEG");
+                targs.AddString("-co");
+                targs.AddString("COMPRESS=JPEG");
                 // JPEG quality: configurable via DDB_COG_JPEG_QUALITY (default: 75, matching GDAL default).
                 // PREDICTOR is not valid for JPEG and is intentionally omitted.
                 int jpegQuality = 75;
@@ -240,41 +200,48 @@ namespace ddb
                 if (envQuality) {
                     jpegQuality = std::clamp(std::atoi(envQuality), 1, 100);
                 }
-                targs = CSLAddString(targs, "-co");
-                targs = CSLAddString(targs, ("QUALITY=" + std::to_string(jpegQuality)).c_str());
+                targs.AddString("-co");
+                targs.AddString(("QUALITY=" + std::to_string(jpegQuality)).c_str());
             }
             else
             {
                 // LZW by default for non-8bit data
-                targs = CSLAddString(targs, "-co");
-                targs = CSLAddString(targs, "COMPRESS=LZW");
-                targs = CSLAddString(targs, "-co");
-                targs = CSLAddString(targs, "PREDICTOR=YES");
+                targs.AddString("-co");
+                targs.AddString("COMPRESS=LZW");
+                targs.AddString("-co");
+                targs.AddString("PREDICTOR=YES");
             }
         }
         else
         {
             // LZW by default for data with nodata values or other band counts
-            targs = CSLAddString(targs, "-co");
-            targs = CSLAddString(targs, "COMPRESS=LZW");
-            targs = CSLAddString(targs, "-co");
-            targs = CSLAddString(targs, "PREDICTOR=YES");
+            targs.AddString("-co");
+            targs.AddString("COMPRESS=LZW");
+            targs.AddString("-co");
+            targs.AddString("PREDICTOR=YES");
         }
 
         // BigTIFF
-        targs = CSLAddString(targs, "-co");
-        targs = CSLAddString(targs, "BIGTIFF=IF_SAFER");
+        targs.AddString("-co");
+        targs.AddString("BIGTIFF=IF_SAFER");
 
-        // Scope GDAL's temporary directory to the output's own folder (the
-        // per-build temp folder when called from the build pipeline) so the COG
-        // overview/intermediate scratch and any cog.tif_<pid>_<counter> files are
-        // created there instead of the process working directory, and are removed
-        // together with the build temp folder. Thread-local: safe under concurrent
-        // builds. No-op for a bare output filename (e.g. some CLI invocations).
-        const ScopedGdalTmpDir gdalTmpGuard(fs::path(outputCog).parent_path().string());
+        // Scope GDAL's temporary directory (CPL_TMPDIR) to the output's own folder (the
+        // per-build temp folder when called from the build pipeline). The COG driver
+        // writes its overview/intermediate scratch into the directory of the final file
+        // only when CPL_TMPDIR is unset; the cog.tif_<pid>_<counter> intermediates come
+        // from CPLGenerateTempFilename(), which defaults to the process working directory.
+        // On the Registry containers that working directory is an anonymous Docker volume
+        // on the host root filesystem, so multi-GB COG scratch files accumulated on root.
+        // Here they stay on the (large) datasets volume and are removed together with the
+        // build temp folder. Thread-local: safe under concurrent builds. Not set for a bare
+        // output filename (e.g. some CLI invocations).
+        const std::string outputFolder = fs::path(outputCog).parent_path().string();
+        std::optional<ScopedThreadConfigOption> gdalTmpGuard;
+        if (!outputFolder.empty())
+            gdalTmpGuard.emplace("CPL_TMPDIR", outputFolder.c_str());
 
-        GDALWarpAppOptions *psOptions = GDALWarpAppOptionsNew(targs, nullptr);
-        CSLDestroy(targs);
+        const GdalOptionsPtr<GDALWarpAppOptions> psOptions(
+            GDALWarpAppOptionsNew(targs.List(), nullptr));
         if (!psOptions) throw GDALException("GDALWarpAppOptionsNew returned null");
 
         // Set the GDAL block cache to exactly the budget for the rest of the build:
@@ -284,21 +251,20 @@ namespace ddb
 
         // Attach progress callback for diagnostic logging during long warp operations
         std::atomic<int> warpPct{0};
-        GDALWarpAppOptionsSetProgress(psOptions, cogWarpProgress, &warpPct);
+        GDALWarpAppOptionsSetProgress(psOptions.get(), cogWarpProgress, &warpPct);
 
         // Capture the OS write error immediately, before cleanup or logging can
         // replace it. Clearing errno before each write API avoids stale errors.
         errno = 0;
-        GDALDatasetH hNewDataset = GDALWarp(outputCog.c_str(),
-                                            nullptr,
-                                            1,
-                                            &hSrcDataset,
-                                            psOptions,
-                                            nullptr);
+        auto newDataset = adoptDataset(GDALWarp(outputCog.c_str(),
+                                               nullptr,
+                                               1,
+                                               &hSrcDataset,
+                                               psOptions.get(),
+                                               nullptr));
         const int warpSystemError = errno;
-        GDALWarpAppOptionsFree(psOptions);
 
-        if (!hNewDataset) {
+        if (!newDataset) {
             if (warpSystemError == ENOSPC)
                 throw RetryableBuildException("GDALWarp ran out of space creating COG: " + outputCog,
                                               RetryableBuildReason::NoSpaceOnDevice);
@@ -306,7 +272,7 @@ namespace ddb
         }
         CPLErrorReset();
         errno = 0;
-        GDALClose(hNewDataset);
+        newDataset.reset();
         const int closeSystemError = errno;
         const bool closeFailed = CPLGetLastErrorType() >= CE_Failure;
         srcDataset.reset();
@@ -322,11 +288,12 @@ namespace ddb
     }
 
     void generateCogStats(const std::string &cogPath) {
-        GDALDatasetH hDs = GDALOpen(cogPath.c_str(), GA_ReadOnly);
-        if (!hDs) {
+        auto dataset = adoptDataset(GDALOpen(cogPath.c_str(), GA_ReadOnly));
+        if (!dataset) {
             LOGW << "Cannot open COG for stats generation: " << cogPath;
             return;
         }
+        GDALDatasetH hDs = datasetHandle(dataset);
 
         json statsJson;
         json bandsJson;
@@ -344,10 +311,13 @@ namespace ddb
             // Approximate percentiles from histogram
             double p2 = bMin, p98 = bMax;
             int nBuckets = 256;
-            GUIntBig *histogram = nullptr;
+            GUIntBig *histogramRaw = nullptr;
             double hMin = bMin, hMax = bMax;
+            const CPLErr histErr = GDALGetDefaultHistogramEx(hBand, &hMin, &hMax, &nBuckets,
+                                                             &histogramRaw, FALSE, nullptr, nullptr);
+            const VsiFreePtr<GUIntBig[]> histogram(histogramRaw);
 
-            if (GDALGetDefaultHistogramEx(hBand, &hMin, &hMax, &nBuckets, &histogram, FALSE, nullptr, nullptr) == CE_None && histogram) {
+            if (histErr == CE_None && histogram) {
                 GUIntBig totalPixels = 0;
                 for (int b = 0; b < nBuckets; b++) totalPixels += histogram[b];
 
@@ -366,7 +336,6 @@ namespace ddb
                         break;
                     }
                 }
-                VSIFree(histogram);
             }
 
             bandsJson[std::to_string(i)] = {
@@ -375,7 +344,7 @@ namespace ddb
             };
         }
 
-        GDALClose(hDs);
+        dataset.reset();
 
         if (!bandsJson.empty()) {
             auto now = std::chrono::system_clock::now();

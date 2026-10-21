@@ -16,7 +16,7 @@
 #include "embedded_preview.h"
 #include "point_rasterizer.h"
 #include "exceptions.h"
-#include "gdal_inc.h"
+#include "gdal_raii.h"
 #include "gsplat.h"
 #include "hash.h"
 #include "mio.h"
@@ -104,15 +104,6 @@ constexpr int ThumbnailWebpQuality = 80;
 // the 2-px discs to cover the footprint, a fraction of the cloud
 constexpr uint64_t PointsPerThumbnailPixel = 2;
 
-// RAII guard that closes a GDAL dataset on scope exit. Does nothing if released.
-struct GdalDatasetGuard {
-    GDALDatasetH handle;
-    explicit GdalDatasetGuard(GDALDatasetH h = nullptr) : handle(h) {}
-    ~GdalDatasetGuard() { if (handle) GDALClose(handle); }
-    GdalDatasetGuard(const GdalDatasetGuard&) = delete;
-    GdalDatasetGuard& operator=(const GdalDatasetGuard&) = delete;
-};
-
 // Range of source values mapped to 0-255 for one output band
 struct ScaleRange {
     double min;
@@ -136,7 +127,7 @@ void writeThumbnail(const RasterImage& image,
 
 // Open a source raster, transparently falling back between a /vsicurl/ URL
 // and the raw path when the input looks like a remote TIFF.
-GDALDatasetH openThumbSource(const fs::path& imagePath, std::string& resolvedPath) {
+GDALDatasetUniquePtr openThumbSource(const fs::path& imagePath, std::string& resolvedPath) {
     resolvedPath = imagePath.string();
     bool tryReopen = false;
     if (utils::isNetworkPath(resolvedPath) &&
@@ -145,14 +136,14 @@ GDALDatasetH openThumbSource(const fs::path& imagePath, std::string& resolvedPat
         tryReopen = true;
     }
 
-    GDALDatasetH hSrc = GDALOpen(resolvedPath.c_str(), GA_ReadOnly);
-    if (!hSrc && tryReopen) {
+    auto src = adoptDataset(GDALOpen(resolvedPath.c_str(), GA_ReadOnly));
+    if (!src && tryReopen) {
         resolvedPath = imagePath.string();
-        hSrc = GDALOpen(resolvedPath.c_str(), GA_ReadOnly);
+        src = adoptDataset(GDALOpen(resolvedPath.c_str(), GA_ReadOnly));
     }
-    if (!hSrc)
+    if (!src)
         throw GDALException("Cannot open " + resolvedPath + " for reading");
-    return hSrc;
+    return src;
 }
 
 // Opens the source of an image thumbnail. A local JPEG that carries a preview of the same
@@ -160,27 +151,27 @@ GDALDatasetH openThumbSource(const fs::path& imagePath, std::string& resolvedPat
 // decoded from the preview: the entropy decoding of the full image is most of the cost of
 // a thumbnail, whatever the DCT scale. frameWidth/frameHeight receive the size of the image
 // the thumbnail represents (the main image), so both sources give the same output size.
-GDALDatasetH openImageThumbSource(const fs::path& imagePath, int thumbSize, std::string& openPath,
-                                  int& frameWidth, int& frameHeight) {
+GDALDatasetUniquePtr openImageThumbSource(const fs::path& imagePath, int thumbSize, std::string& openPath,
+                                          int& frameWidth, int& frameHeight) {
     frameWidth = frameHeight = 0;
     if (!utils::isNetworkPath(imagePath.string()) && io::Path(imagePath).checkExtension({"jpg", "jpeg"})) {
         const JpegLayout layout = readJpegLayout(imagePath);
         if (const auto preview = pickJpegPreview(layout, thumbSize)) {
             openPath = jpegPreviewGdalPath(imagePath, *preview);
-            if (GDALDatasetH hPreview = GDALOpen(openPath.c_str(), GA_ReadOnly)) {
+            if (auto previewDs = adoptDataset(GDALOpen(openPath.c_str(), GA_ReadOnly))) {
                 frameWidth = layout.width;
                 frameHeight = layout.height;
                 LOGD << "Thumbnail of " << imagePath.string() << " from its " << preview->width << "x"
                      << preview->height << " preview";
-                return hPreview;
+                return previewDs;
             }
         }
     }
 
-    GDALDatasetH hSrc = openThumbSource(imagePath, openPath);
-    frameWidth = GDALGetRasterXSize(hSrc);
-    frameHeight = GDALGetRasterYSize(hSrc);
-    return hSrc;
+    auto src = openThumbSource(imagePath, openPath);
+    frameWidth = src->GetRasterXSize();
+    frameHeight = src->GetRasterYSize();
+    return src;
 }
 
 // Compute thumbnail target dimensions preserving aspect ratio.
@@ -296,17 +287,17 @@ RasterImage translateToImage(GDALDatasetH hSrc,
     for (auto& s : argStore) argv.push_back(const_cast<char*>(s.c_str()));
     argv.push_back(nullptr);
 
-    GDALTranslateOptions* psOptions = GDALTranslateOptionsNew(argv.data(), nullptr);
+    const GdalOptionsPtr<GDALTranslateOptions> psOptions(
+        GDALTranslateOptionsNew(argv.data(), nullptr));
     if (!psOptions)
         throw GDALException("Failed to create GDAL translate options for " + sourceLabel);
 
-    GdalDatasetGuard translated(GDALTranslate("", hSrc, psOptions, nullptr));
-    GDALTranslateOptionsFree(psOptions);
-    if (!translated.handle)
+    const auto translated = adoptDataset(GDALTranslate("", hSrc, psOptions.get(), nullptr));
+    if (!translated)
         throw GDALException("Failed to normalize " + sourceLabel + " for thumbnail: " + CPLGetLastErrorMsg());
 
     RasterImage image(width, height, 3, false);
-    if (GDALDatasetRasterIO(translated.handle, GF_Read, 0, 0, width, height, image.color.data(), width, height,
+    if (GDALDatasetRasterIO(datasetHandle(translated), GF_Read, 0, 0, width, height, image.color.data(), width, height,
                             GDT_Byte, 3, nullptr, 0, 0, 0) != CE_None)
         throw GDALException(std::string("Failed to read thumbnail pixels: ") + CPLGetLastErrorMsg());
     return image;
@@ -327,8 +318,8 @@ void generateImageThumb(const fs::path& imagePath,
                         int* outBufferSize) {
     std::string openPath;
     int frameWidth = 0, frameHeight = 0;
-    GdalDatasetGuard srcGuard(openImageThumbSource(imagePath, thumbSize, openPath, frameWidth, frameHeight));
-    GDALDatasetH hSrc = srcGuard.handle;
+    const auto src = openImageThumbSource(imagePath, thumbSize, openPath, frameWidth, frameHeight);
+    GDALDatasetH hSrc = datasetHandle(src);
 
     const int srcWidth = GDALGetRasterXSize(hSrc);
     const int srcHeight = GDALGetRasterYSize(hSrc);
@@ -368,10 +359,10 @@ void generateImageThumbEx(const fs::path& imagePath,
                           uint8_t** outBuffer,
                           int* outBufferSize,
                           const ThumbVisParams& visParams) {
-    GdalDatasetGuard srcGuard(GDALOpen(imagePath.string().c_str(), GA_ReadOnly));
-    GDALDatasetH hSrc = srcGuard.handle;
-    if (!hSrc)
+    const auto src = adoptDataset(GDALOpen(imagePath.string().c_str(), GA_ReadOnly));
+    if (!src)
         throw GDALException("Cannot open " + imagePath.string() + " for reading");
+    GDALDatasetH hSrc = datasetHandle(src);
 
     const int width = GDALGetRasterXSize(hSrc);
     const int height = GDALGetRasterYSize(hSrc);

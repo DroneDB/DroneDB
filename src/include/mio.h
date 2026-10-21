@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <utility>
 #include <fcntl.h>
 #include <vector>
 #include "fs.h"
@@ -109,6 +110,37 @@ namespace ddb
         // emulate flock
         int flock(int fd, int operation);
 #endif
+
+        // Owns a temporary path (a directory tree, or a single file) and removes it when the
+        // scope exits, on success and on a throw alike, unless release()d (the path was moved
+        // into place or handed to another owner). The destructor never throws: a removal
+        // failure is logged. Movable, not copyable.
+        class DDB_DLL ScopedTempDir
+        {
+            fs::path path_;
+
+        public:
+            ScopedTempDir() = default;
+            // Takes ownership of p (it need not exist yet)
+            explicit ScopedTempDir(fs::path p) noexcept : path_(std::move(p)) {}
+            ~ScopedTempDir();
+
+            ScopedTempDir(const ScopedTempDir &) = delete;
+            ScopedTempDir &operator=(const ScopedTempDir &) = delete;
+            ScopedTempDir(ScopedTempDir &&other) noexcept;
+            ScopedTempDir &operator=(ScopedTempDir &&other) noexcept;
+
+            // Creates the folder <parent>/<prefix><16 random characters> and owns it
+            static ScopedTempDir create(const fs::path &parent, const std::string &prefix);
+
+            // Removes the owned path (if any; never throws), then owns p
+            void reset(fs::path p = fs::path()) noexcept;
+            // Gives up ownership: the path is kept and returned
+            fs::path release() noexcept;
+
+            const fs::path &path() const noexcept { return path_; }
+            bool empty() const noexcept { return path_.empty(); }
+        };
 
         // Whether a modification time stored in an index matches the file's (getModifiedTimePrecise).
         // A whole number is compared to the second (rows written before sub-second times were

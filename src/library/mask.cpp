@@ -1,7 +1,7 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
-#include "gdal_inc.h"
+#include "gdal_raii.h"
 #include "mask.h"
 #include "logger.h"
 #include "exceptions.h"
@@ -33,9 +33,10 @@ namespace ddb
             fs::remove(externalMask);
         }
 
-        GDALDatasetH hSrcDataset = GDALOpen(input.c_str(), GA_ReadOnly);
-        if (!hSrcDataset)
+        const auto srcDataset = adoptDataset(GDALOpen(input.c_str(), GA_ReadOnly));
+        if (!srcDataset)
             throw GDALException("Cannot open " + input + " for reading");
+        GDALDatasetH hSrcDataset = datasetHandle(srcDataset);
 
         const int srcWidth = GDALGetRasterXSize(hSrcDataset);
         const int srcHeight = GDALGetRasterYSize(hSrcDataset);
@@ -50,7 +51,6 @@ namespace ddb
         // Anything else (multispectral, mixed types) is out of scope: refusing here
         // avoids silently producing a corrupt or oversized output.
         if (srcBands != 1 && srcBands != 3 && srcBands != 4) {
-            GDALClose(hSrcDataset);
             throw InvalidArgsException(
                 "Mask borders supports only 1-band (DEM/thermal/greyscale), 3-band RGB "
                 "or 4-band RGBA rasters; input has " + std::to_string(srcBands) + " bands");
@@ -58,20 +58,17 @@ namespace ddb
 
         GDALRasterBandH hBand1 = GDALGetRasterBand(hSrcDataset, 1);
         if (!hBand1) {
-            GDALClose(hSrcDataset);
             throw GDALException("Cannot read band 1 from " + input);
         }
         const GDALDataType srcType = GDALGetRasterDataType(hBand1);
         const int bytesPerSample = GDALGetDataTypeSizeBytes(srcType);
         if (bytesPerSample <= 0) {
-            GDALClose(hSrcDataset);
             throw InvalidArgsException(
                 std::string("Unsupported band data type: ") + GDALGetDataTypeName(srcType));
         }
 
         // 3-/4-band paths are supported only for 8-bit (true RGB / RGBA orthophotos).
         if ((srcBands == 3 || srcBands == 4) && srcType != GDT_Byte) {
-            GDALClose(hSrcDataset);
             throw InvalidArgsException(
                 std::string("3- and 4-band masking require 8-bit Byte input (RGB/RGBA "
                             "orthophoto); got ") + GDALGetDataTypeName(srcType));
@@ -83,11 +80,9 @@ namespace ddb
         if (srcBands == 4) {
             GDALRasterBandH hBand4 = GDALGetRasterBand(hSrcDataset, 4);
             if (!hBand4) {
-                GDALClose(hSrcDataset);
                 throw GDALException("Cannot read band 4 from " + input);
             }
             if (GDALGetRasterColorInterpretation(hBand4) != GCI_AlphaBand) {
-                GDALClose(hSrcDataset);
                 throw InvalidArgsException(
                     "4-band input must be RGBA (band 4 must be an alpha channel); "
                     "for multispectral rasters (e.g. RGB+NIR) use the multispectral pipeline");
@@ -113,29 +108,29 @@ namespace ddb
             << (estimatedBytes >> 20) << " MiB"
             << (logBigTiffLikely ? " (BigTIFF may be needed; final decision uses BIGTIFF=IF_SAFER)" : "");
 
-        char **targs = nullptr;
+        CPLStringList targs;
 
         // IMPORTANT: use mask, not alpha.
         // Alpha would create an extra Byte band and break JPEG/YCBCR layout.
-        targs = CSLAddString(targs, "-setmask");
+        targs.AddString("-setmask");
 
-        targs = CSLAddString(targs, "-alg");
-        targs = CSLAddString(targs, "floodfill");
+        targs.AddString("-alg");
+        targs.AddString("floodfill");
         // Faster alternative but doesn't handle concave collars
-        // targs = CSLAddString(targs, "twopasses");
+        // targs.AddString("twopasses");
 
-        targs = CSLAddString(targs, "-near");
-        targs = CSLAddString(targs, std::to_string(nearDist).c_str());
+        targs.AddString("-near");
+        targs.AddString(std::to_string(nearDist).c_str());
 
         if (!color.empty()) {
-            targs = CSLAddString(targs, "-color");
-            targs = CSLAddString(targs, color.c_str());
+            targs.AddString("-color");
+            targs.AddString(color.c_str());
         } else if (white) {
-            targs = CSLAddString(targs, "-white");
+            targs.AddString("-white");
         }
 
-        targs = CSLAddString(targs, "-of");
-        targs = CSLAddString(targs, "GTiff");
+        targs.AddString("-of");
+        targs.AddString("GTiff");
 
         // Compression policy:
         //   * 3-band Byte (RGB ortho)  -> JPEG + YCBCR (small, fast, perceptually fine)
@@ -171,82 +166,60 @@ namespace ddb
                                : "PREDICTOR=2";
         }
 
-        targs = CSLAddString(targs, "-co");
-        targs = CSLAddString(targs, compressOpt);
+        targs.AddString("-co");
+        targs.AddString(compressOpt);
         if (photometricOpt) {
-            targs = CSLAddString(targs, "-co");
-            targs = CSLAddString(targs, photometricOpt);
+            targs.AddString("-co");
+            targs.AddString(photometricOpt);
         }
         if (predictorOpt) {
-            targs = CSLAddString(targs, "-co");
-            targs = CSLAddString(targs, predictorOpt);
+            targs.AddString("-co");
+            targs.AddString(predictorOpt);
         }
-        targs = CSLAddString(targs, "-co");
-        targs = CSLAddString(targs, qualityOrZlevelOpt);
+        targs.AddString("-co");
+        targs.AddString(qualityOrZlevelOpt);
 
         // BIGTIFF=IF_SAFER lets the GTiff driver decide whether BigTIFF is needed.
         // The estimate logged above is informational only.
-        targs = CSLAddString(targs, "-co");
-        targs = CSLAddString(targs, "BIGTIFF=IF_SAFER");
+        targs.AddString("-co");
+        targs.AddString("BIGTIFF=IF_SAFER");
 
         // TILED + 512px blocks avoid giant-strip scratch buffers and match the COG
         // pipeline. We do not generate overviews here; mask output is treated as an
         // intermediate and overview generation is left to the build/COG pipeline.
-        targs = CSLAddString(targs, "-co");
-        targs = CSLAddString(targs, "TILED=YES");
-        targs = CSLAddString(targs, "-co");
-        targs = CSLAddString(targs, "BLOCKXSIZE=512");
-        targs = CSLAddString(targs, "-co");
-        targs = CSLAddString(targs, "BLOCKYSIZE=512");
+        targs.AddString("-co");
+        targs.AddString("TILED=YES");
+        targs.AddString("-co");
+        targs.AddString("BLOCKXSIZE=512");
+        targs.AddString("-co");
+        targs.AddString("BLOCKYSIZE=512");
 
-        targs = CSLAddString(targs, "-co");
-        targs = CSLAddString(targs, "NUM_THREADS=ALL_CPUS");
+        targs.AddString("-co");
+        targs.AddString("NUM_THREADS=ALL_CPUS");
 
         int bUsageError = FALSE;
 
-        // Force internal GeoTIFF mask instead of .msk sidecar, especially for GDAL < 3.9.
-        const char *prevInternalMask =
-            CPLGetThreadLocalConfigOption("GDAL_TIFF_INTERNAL_MASK", nullptr);
-        const std::string prevInternalMaskValue =
-            prevInternalMask ? prevInternalMask : "";
+        GDALDatasetUniquePtr outDataset;
+        {
+            // Force internal GeoTIFF mask instead of .msk sidecar, especially for GDAL < 3.9.
+            const ScopedThreadConfigOption internalMask("GDAL_TIFF_INTERNAL_MASK", "YES");
 
-        CPLSetThreadLocalConfigOption("GDAL_TIFF_INTERNAL_MASK", "YES");
+            const GdalOptionsPtr<GDALNearblackOptions> psOptions(
+                GDALNearblackOptionsNew(targs.List(), nullptr));
+            if (!psOptions)
+                throw GDALException("Failed to create nearblack options");
 
-        GDALNearblackOptions *psOptions = GDALNearblackOptionsNew(targs, nullptr);
-        CSLDestroy(targs);
-
-        if (!psOptions) {
-            CPLSetThreadLocalConfigOption(
-                "GDAL_TIFF_INTERNAL_MASK",
-                prevInternalMask ? prevInternalMaskValue.c_str() : nullptr
-            );
-            GDALClose(hSrcDataset);
-            throw GDALException("Failed to create nearblack options");
+            outDataset = adoptDataset(
+                GDALNearblack(output.c_str(), nullptr, hSrcDataset, psOptions.get(), &bUsageError));
         }
 
-        GDALDatasetH hOutDataset =
-            GDALNearblack(output.c_str(), nullptr, hSrcDataset, psOptions, &bUsageError);
-
-        GDALNearblackOptionsFree(psOptions);
-
-        CPLSetThreadLocalConfigOption(
-            "GDAL_TIFF_INTERNAL_MASK",
-            prevInternalMask ? prevInternalMaskValue.c_str() : nullptr
-        );
-
-        if (bUsageError) {
-            GDALClose(hSrcDataset);
-            if (hOutDataset) GDALClose(hOutDataset);
+        if (bUsageError)
             throw GDALException("GDALNearblack usage error");
-        }
 
-        if (!hOutDataset) {
-            GDALClose(hSrcDataset);
+        if (!outDataset)
             throw GDALException("GDALNearblack failed to create output: " + output);
-        }
 
-        GDALClose(hOutDataset);
-        GDALClose(hSrcDataset);
+        outDataset.reset();
 
         LOGD << "Masked borders: " << input << " -> " << output;
     }

@@ -4,6 +4,7 @@
 #include "thermal.h"
 #include "exif.h"
 #include "exceptions.h"
+#include "gdal_raii.h"
 #include "logger.h"
 #include "utils.h"
 #include "sensorprofile.h"
@@ -248,8 +249,9 @@ RawThermalData extractRawThermalData(const std::string &filePath) {
     // Method 2: GDAL fallback (DJI R-JPEG, thermal GeoTIFF, etc.)
     LOGD << "No FLIR segment found, trying GDAL fallback for " << filePath;
 
-    GDALDatasetH hDs = GDALOpen(filePath.c_str(), GA_ReadOnly);
-    if (!hDs) return result;
+    const auto dataset = adoptDataset(GDALOpen(filePath.c_str(), GA_ReadOnly));
+    if (!dataset) return result;
+    GDALDatasetH hDs = datasetHandle(dataset);
 
     int w = GDALGetRasterXSize(hDs);
     int h = GDALGetRasterYSize(hDs);
@@ -284,7 +286,6 @@ RawThermalData extractRawThermalData(const std::string &filePath) {
         }
     }
 
-    GDALClose(hDs);
     return result;
 }
 
@@ -423,8 +424,9 @@ std::vector<float> rawToTemperatureMap(const RawThermalData &raw, const ThermalC
 bool isDirectTemperatureRaster(const std::string &filePath) {
     if (!isThermalImage(filePath)) return false;
 
-    GDALDatasetH hDs = GDALOpen(filePath.c_str(), GA_ReadOnly);
-    if (!hDs) return false;
+    const auto dataset = adoptDataset(GDALOpen(filePath.c_str(), GA_ReadOnly));
+    if (!dataset) return false;
+    GDALDatasetH hDs = datasetHandle(dataset);
 
     bool isDirect = false;
     if (GDALGetRasterCount(hDs) == 1) {
@@ -433,7 +435,6 @@ bool isDirectTemperatureRaster(const std::string &filePath) {
         isDirect = (dt == GDT_Float32 || dt == GDT_Float64);
     }
 
-    GDALClose(hDs);
     return isDirect;
 }
 
@@ -476,24 +477,21 @@ bool isThermalImage(const std::string &filePath) {
     // Uses explicit metadata signals; avoids value-range heuristics to prevent
     // false positives on DEMs or other single-band Float32 rasters.
     {
-        GDALDatasetH hDs = GDALOpen(filePath.c_str(), GA_ReadOnly);
-        if (hDs) {
+        if (auto dataset = adoptDataset(GDALOpen(filePath.c_str(), GA_ReadOnly))) {
+            GDALDatasetH hDs = datasetHandle(dataset);
             int nBands = GDALGetRasterCount(hDs);
             if (nBands == 1) {
                 // Collect all metadata strings for keyword scanning
                 std::vector<std::string> metaStrings;
 
                 // Dataset-level metadata across all domains
-                char **mdDomains = GDALGetMetadataDomainList(hDs);
-                if (mdDomains) {
-                    for (int d = 0; mdDomains[d] != nullptr; d++) {
-                        CSLConstList md = GDALGetMetadata(hDs, mdDomains[d]);
-                        if (md) {
-                            for (int k = 0; md[k] != nullptr; k++)
-                                metaStrings.push_back(md[k]);
-                        }
+                const CPLStringList mdDomains(GDALGetMetadataDomainList(hDs), TRUE);
+                for (int d = 0; d < mdDomains.size(); d++) {
+                    CSLConstList md = GDALGetMetadata(hDs, mdDomains[d]);
+                    if (md) {
+                        for (int k = 0; md[k] != nullptr; k++)
+                            metaStrings.push_back(md[k]);
                     }
-                    CSLDestroy(mdDomains);
                 }
 
                 // Band-level metadata and description
@@ -516,7 +514,7 @@ bool isThermalImage(const std::string &filePath) {
                 double scale = GDALGetRasterScale(hBand, &hasScale);
                 double offset = GDALGetRasterOffset(hBand, &hasOffset);
 
-                GDALClose(hDs);
+                dataset.reset();
 
                 // Build a single lowercase string for keyword search
                 std::string allMeta;
@@ -593,8 +591,6 @@ bool isThermalImage(const std::string &filePath) {
                          << ") consistent with Landsat thermal encoding";
                     return true;
                 }
-            } else {
-                GDALClose(hDs);
             }
         }
     }
@@ -609,8 +605,8 @@ TemperatureData readTemperatureData(const std::string &filePath) {
     TemperatureData td;
 
     // Try as GeoTIFF first (direct temperature or GDAL-readable)
-    GDALDatasetH hDs = GDALOpen(filePath.c_str(), GA_ReadOnly);
-    if (hDs) {
+    if (const auto dataset = adoptDataset(GDALOpen(filePath.c_str(), GA_ReadOnly))) {
+        GDALDatasetH hDs = datasetHandle(dataset);
         int nBands = GDALGetRasterCount(hDs);
         td.width = GDALGetRasterXSize(hDs);
         td.height = GDALGetRasterYSize(hDs);
@@ -631,7 +627,6 @@ TemperatureData readTemperatureData(const std::string &filePath) {
                 if (GDALRasterIO(hBand, GF_Read, 0, 0, td.width, td.height,
                                  td.temperatures.data(), td.width, td.height,
                                  GDT_Float32, 0, 0) == CE_None) {
-                    GDALClose(hDs);
                     return td;
                 }
             } else if (dt == GDT_UInt16) {
@@ -656,12 +651,10 @@ TemperatureData readTemperatureData(const std::string &filePath) {
                             td.temperatures[p] = static_cast<float>(raw.data[p]);
                         }
                     }
-                    GDALClose(hDs);
                     return td;
                 }
             }
         }
-        GDALClose(hDs);
     }
 
     // Try R-JPEG extraction
@@ -697,25 +690,22 @@ void pixelToGeo(double px, double py, const double geoTransform[6],
     if (projection.empty())
         return;
 
-    OGRSpatialReferenceH hSrs = OSRNewSpatialReference(nullptr);
-    OGRSpatialReferenceH hWgs84 = OSRNewSpatialReference(nullptr);
+    const SrsPtr hSrs(OSRNewSpatialReference(nullptr));
+    const SrsPtr hWgs84(OSRNewSpatialReference(nullptr));
     char* wktPtr = const_cast<char*>(projection.c_str());
 
-    if (OSRImportFromWkt(hSrs, &wktPtr) == OGRERR_NONE &&
-        OSRImportFromEPSG(hWgs84, 4326) == OGRERR_NONE) {
-        OGRCoordinateTransformationH hCT = OCTNewCoordinateTransformation(hSrs, hWgs84);
+    if (OSRImportFromWkt(hSrs.get(), &wktPtr) == OGRERR_NONE &&
+        OSRImportFromEPSG(hWgs84.get(), 4326) == OGRERR_NONE) {
+        const CoordTransformPtr hCT(OCTNewCoordinateTransformation(hSrs.get(), hWgs84.get()));
         if (hCT) {
             double x = geoX;
             double y = geoY;
-            if (OCTTransform(hCT, 1, &x, &y, nullptr)) {
+            if (OCTTransform(hCT.get(), 1, &x, &y, nullptr)) {
                 geoX = x;
                 geoY = y;
             }
-            OCTDestroyCoordinateTransformation(hCT);
         }
     }
-    OSRDestroySpatialReference(hWgs84);
-    OSRDestroySpatialReference(hSrs);
 }
 
 

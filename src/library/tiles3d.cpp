@@ -8,6 +8,7 @@
 #include <vector>
 #include <zip.h>
 
+#include "gdal_raii.h"
 #include "json.h"
 #include "logger.h"
 #include "ogr_spatialref.h"
@@ -90,31 +91,18 @@ namespace ddb
         bool ecefToWgs84(double ecefX, double ecefY, double ecefZ,
                          double &lon, double &lat, double &alt)
         {
-            OGRSpatialReferenceH hEcef = OSRNewSpatialReference(nullptr);
-            OGRSpatialReferenceH hWgs84 = OSRNewSpatialReference(nullptr);
-            bool ok = false;
+            const SrsPtr ecef = srsFromEpsg(4978);
+            const SrsPtr wgs84 = srsFromEpsg(4326);
+            if (!ecef || !wgs84)
+                return false;
 
-            if (OSRImportFromEPSG(hEcef, 4978) == OGRERR_NONE &&
-                OSRImportFromEPSG(hWgs84, 4326) == OGRERR_NONE)
-            {
-                OSRSetAxisMappingStrategy(hEcef, OAMS_TRADITIONAL_GIS_ORDER);
-                OSRSetAxisMappingStrategy(hWgs84, OAMS_TRADITIONAL_GIS_ORDER);
-
-                OGRCoordinateTransformationH hT =
-                    OCTNewCoordinateTransformation(hEcef, hWgs84);
-                if (hT != nullptr)
-                {
-                    lon = ecefX;
-                    lat = ecefY;
-                    alt = ecefZ;
-                    ok = OCTTransform(hT, 1, &lon, &lat, &alt) == TRUE;
-                    OCTDestroyCoordinateTransformation(hT);
-                }
-            }
-
-            OSRDestroySpatialReference(hWgs84);
-            OSRDestroySpatialReference(hEcef);
-            return ok;
+            const CoordTransformPtr hT(OCTNewCoordinateTransformation(ecef.get(), wgs84.get()));
+            if (!hT)
+                return false;
+            lon = ecefX;
+            lat = ecefY;
+            alt = ecefZ;
+            return OCTTransform(hT.get(), 1, &lon, &lat, &alt) == TRUE;
         }
 
         // Builds an equirectangular footprint (approximate at tileset scale) of the given

@@ -19,7 +19,7 @@
 
 #include "build_budget.h"
 #include "ddb.h"
-#include "gdal_inc.h"
+#include "gdal_raii.h"
 #include "hash.h"
 #include "logger.h"
 #include "mio.h"
@@ -207,9 +207,7 @@ void initializeGDALandPROJ() {
     LOGD << "GDAL and PROJ initialization completed";
 
     // Check PROJ availability
-    OGRSpatialReferenceH hSRS = OSRNewSpatialReference(nullptr);
-    if (hSRS) {
-        OSRDestroySpatialReference(hSRS);
+    if (const SrsPtr hSRS{OSRNewSpatialReference(nullptr)}) {
         LOGD << "PROJ is working and available for coordinate transformations";
     } else {
         LOGW << "PROJ is not available, coordinate transformations may fail";

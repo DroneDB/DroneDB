@@ -36,7 +36,7 @@
 #include "entry_path.h"
 #include "entry_types.h"
 #include "exceptions.h"
-#include "gdal_inc.h"
+#include "gdal_raii.h"
 #include "hash.h"
 #include "info.h"
 #include "json.h"
@@ -1722,10 +1722,10 @@ DDB_DLL DDBErr DDBGetRasterMetadata(const char* path, const char* formula,
     const std::string filterStr = bandFilter ? std::string(bandFilter) : "";
 
     // Owned: the formula, statistics and sensor steps below can throw while it is open
-    GDALDatasetUniquePtr dataset(GDALDataset::FromHandle(GDALOpen(path, GA_ReadOnly)));
+    auto dataset = adoptDataset(GDALOpen(path, GA_ReadOnly));
     if (!dataset)
         throw GDALException("Cannot open " + std::string(path));
-    GDALDatasetH hDs = GDALDataset::ToHandle(dataset.get());
+    GDALDatasetH hDs = datasetHandle(dataset);
 
     auto& ve = ddb::VegetationEngine::instance();
     json result;
@@ -2141,12 +2141,10 @@ static void buildInternalOverviews(GDALDatasetH hDs, int width, int height) {
     }
     if (levels.empty()) return;
     // Thread-local config so concurrent exports do not clobber global GDAL state.
-    CPLSetThreadLocalConfigOption("COMPRESS_OVERVIEW", "DEFLATE");
-    CPLSetThreadLocalConfigOption("PREDICTOR_OVERVIEW", "2");
+    const ScopedThreadConfigOption compress("COMPRESS_OVERVIEW", "DEFLATE");
+    const ScopedThreadConfigOption predictor("PREDICTOR_OVERVIEW", "2");
     GDALBuildOverviews(hDs, "AVERAGE", static_cast<int>(levels.size()),
                        levels.data(), 0, nullptr, nullptr, nullptr);
-    CPLSetThreadLocalConfigOption("COMPRESS_OVERVIEW", nullptr);
-    CPLSetThreadLocalConfigOption("PREDICTOR_OVERVIEW", nullptr);
 }
 
 // Auto-compute a windowed tile size for the formula export branch.
@@ -2206,9 +2204,11 @@ static int exportRasterImpl(const char* inputPath, const char* outputPath,
         return progress(fraction, phase, progressUserData) != 0;
     };
 
-    GDALDatasetH hSrcDs = GDALOpen(inputPath, GA_ReadOnly);
-    if (!hSrcDs)
+    // Closed on any return or throw
+    auto srcGuard = adoptDataset(GDALOpen(inputPath, GA_ReadOnly));
+    if (!srcGuard)
         throw GDALException("Cannot open " + std::string(inputPath));
+    GDALDatasetH hSrcDs = datasetHandle(srcGuard);
 
     const int width = GDALGetRasterXSize(hSrcDs);
     const int height = GDALGetRasterYSize(hSrcDs);
@@ -2226,11 +2226,6 @@ static int exportRasterImpl(const char* inputPath, const char* outputPath,
     bool hasGeoTransform = (GDALGetGeoTransform(hSrcDs, geoTransform) == CE_None);
     const char* projRef = GDALGetProjectionRef(hSrcDs);
     std::string projection = projRef ? std::string(projRef) : "";
-
-    // RAII guard so the source dataset is always closed on any return or throw.
-    auto gdalCloser = [](GDALDatasetH h) { if (h) GDALClose(h); };
-    std::unique_ptr<std::remove_pointer_t<GDALDatasetH>, decltype(gdalCloser)>
-        srcGuard(hSrcDs, gdalCloser);
 
     if (!formulaStr.empty()) {
         // Formula mode: apply formula + colormap, export as RGBA GeoTIFF.
@@ -2347,24 +2342,22 @@ static int exportRasterImpl(const char* inputPath, const char* outputPath,
         if (!gtiffDrv)
             throw GDALException("GTiff driver not available");
 
-        char** createOpts = nullptr;
-        createOpts = CSLAddString(createOpts, "TILED=YES");
-        createOpts = CSLAddString(createOpts, ("BLOCKXSIZE=" + std::to_string(tw)).c_str());
-        createOpts = CSLAddString(createOpts, ("BLOCKYSIZE=" + std::to_string(th)).c_str());
-        createOpts = CSLAddString(createOpts, "COMPRESS=DEFLATE");
-        createOpts = CSLAddString(createOpts, "PREDICTOR=2");
-        createOpts = CSLAddString(createOpts, "BIGTIFF=IF_SAFER");
-        createOpts = CSLAddString(createOpts, "NUM_THREADS=ALL_CPUS");
+        CPLStringList createOpts;
+        createOpts.AddString("TILED=YES");
+        createOpts.AddString(("BLOCKXSIZE=" + std::to_string(tw)).c_str());
+        createOpts.AddString(("BLOCKYSIZE=" + std::to_string(th)).c_str());
+        createOpts.AddString("COMPRESS=DEFLATE");
+        createOpts.AddString("PREDICTOR=2");
+        createOpts.AddString("BIGTIFF=IF_SAFER");
+        createOpts.AddString("NUM_THREADS=ALL_CPUS");
 
-        GDALDatasetH hOut = GDALCreate(gtiffDrv, outputPath, width, height, 4, GDT_Byte, createOpts);
-        CSLDestroy(createOpts);
-        if (!hOut)
+        // Closed on any throw. On success or cancel we close it explicitly after the
+        // appropriate finalization.
+        auto outGuard = adoptDataset(
+            GDALCreate(gtiffDrv, outputPath, width, height, 4, GDT_Byte, createOpts.List()));
+        if (!outGuard)
             throw GDALException("Cannot create output GeoTIFF");
-
-        // RAII guard for the output dataset: closed on any throw. On success or
-        // cancel we release it explicitly after the appropriate finalization.
-        std::unique_ptr<std::remove_pointer_t<GDALDatasetH>, decltype(gdalCloser)>
-            outGuard(hOut, gdalCloser);
+        GDALDatasetH hOut = datasetHandle(outGuard);
 
         if (hasGeoTransform) GDALSetGeoTransform(hOut, geoTransform);
         if (!projection.empty()) GDALSetProjection(hOut, projection.c_str());
@@ -2449,13 +2442,13 @@ static int exportRasterImpl(const char* inputPath, const char* outputPath,
         // via its options API, so callers will only receive progress at 0.0 and
         // 1.0. Cancellation is only possible before the translate starts.
         if (reportProgress(0.0, "converting")) return 1;
-        char** targs = nullptr;
-        targs = CSLAddString(targs, "-ot");
-        targs = CSLAddString(targs, "Byte");
+        CPLStringList targs;
+        targs.AddString("-ot");
+        targs.AddString("Byte");
 
         for (int b : selectedBands) {
-            targs = CSLAddString(targs, "-b");
-            targs = CSLAddString(targs, std::to_string(b).c_str());
+            targs.AddString("-b");
+            targs.AddString(std::to_string(b).c_str());
         }
 
         GDALDataType srcType = GDALGetRasterDataType(GDALGetRasterBand(hSrcDs, 1));
@@ -2463,47 +2456,42 @@ static int exportRasterImpl(const char* inputPath, const char* outputPath,
             if (!rescaleStr.empty()) {
                 auto commaPos = rescaleStr.find(',');
                 if (commaPos != std::string::npos) {
-                    targs = CSLAddString(targs, "-scale");
-                    targs = CSLAddString(targs, rescaleStr.substr(0, commaPos).c_str());
-                    targs = CSLAddString(targs, rescaleStr.substr(commaPos + 1).c_str());
-                    targs = CSLAddString(targs, "0");
-                    targs = CSLAddString(targs, "255");
+                    targs.AddString("-scale");
+                    targs.AddString(rescaleStr.substr(0, commaPos).c_str());
+                    targs.AddString(rescaleStr.substr(commaPos + 1).c_str());
+                    targs.AddString("0");
+                    targs.AddString("255");
                 }
             } else {
-                targs = CSLAddString(targs, "-scale");
+                targs.AddString("-scale");
             }
         }
 
-        targs = CSLAddString(targs, "-of");
-        targs = CSLAddString(targs, "GTiff");
-        targs = CSLAddString(targs, "-co");
-        targs = CSLAddString(targs, "TILED=YES");
-        targs = CSLAddString(targs, "-co");
-        targs = CSLAddString(targs, "COMPRESS=DEFLATE");
+        targs.AddString("-of");
+        targs.AddString("GTiff");
+        targs.AddString("-co");
+        targs.AddString("TILED=YES");
+        targs.AddString("-co");
+        targs.AddString("COMPRESS=DEFLATE");
 
-        auto psOptions = GDALTranslateOptionsNew(targs, nullptr);
-        CSLDestroy(targs);
+        const GdalOptionsPtr<GDALTranslateOptions> psOptions(
+            GDALTranslateOptionsNew(targs.List(), nullptr));
         if (!psOptions)
             throw GDALException("Cannot create GDALTranslate options");
 
         int bUsageError = FALSE;
-        GDALDatasetH hOut = GDALTranslate(outputPath, hSrcDs, psOptions, &bUsageError);
-        GDALTranslateOptionsFree(psOptions);
+        auto out = adoptDataset(GDALTranslate(outputPath, hSrcDs, psOptions.get(), &bUsageError));
         srcGuard.reset();  // closes hSrcDs
 
-        if (!hOut || bUsageError) {
-            if (hOut) GDALClose(hOut);
+        if (!out || bUsageError)
             throw GDALException("Cannot create output GeoTIFF");
-        }
 
-        GDALFlushCache(hOut);
-        GDALClose(hOut);
+        GDALFlushCache(datasetHandle(out));
+        out.reset();
         // Reopen in update mode to add internal overviews (efficient zoomed
         // reads). Best-effort: a failure here is non-fatal.
-        GDALDatasetH hOvr = GDALOpen(outputPath, GA_Update);
-        if (hOvr) {
-            buildInternalOverviews(hOvr, width, height);
-            GDALClose(hOvr);
+        if (const auto ovr = adoptDataset(GDALOpen(outputPath, GA_Update))) {
+            buildInternalOverviews(datasetHandle(ovr), width, height);
         }
         reportProgress(1.0, "converting");
         return 0;

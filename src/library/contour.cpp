@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "contour.h"
 #include "exceptions.h"
+#include "gdal_raii.h"
 #include "json.h"
 #include "logger.h"
 
@@ -30,27 +31,6 @@ namespace {
 constexpr int    MAX_LEVELS               = 1000;
 constexpr int    DEFAULT_COUNT            = 20;
 constexpr double MIN_INTERVAL             = 1e-9;
-
-// --- RAII helpers ---------------------------------------------------------
-
-struct DatasetGuard {
-    GDALDatasetH h = nullptr;
-    ~DatasetGuard() { if (h) GDALClose(h); }
-};
-
-struct SrsHandle {
-    OGRSpatialReferenceH h = nullptr;
-    SrsHandle() = default;
-    explicit SrsHandle(OGRSpatialReferenceH handle) : h(handle) {}
-    ~SrsHandle() { if (h) OSRDestroySpatialReference(h); }
-    SrsHandle(const SrsHandle &) = delete;
-    SrsHandle &operator=(const SrsHandle &) = delete;
-};
-
-struct CtHandle {
-    OGRCoordinateTransformationH h = nullptr;
-    ~CtHandle() { if (h) OCTDestroyCoordinateTransformation(h); }
-};
 
 // Convert an OGRGeometry to GeoJSON coordinates (LineString or
 // MultiLineString) and append the resulting Feature(s) to `out`.
@@ -129,21 +109,21 @@ std::string generateContoursJson(const std::string &rasterPath,
         throw InvalidArgsException("'simplifyTolerance' must be >= 0");
 
     // --- Open raster ------------------------------------------------------
-    DatasetGuard dsGuard;
-    dsGuard.h = GDALOpen(rasterPath.c_str(), GA_ReadOnly);
-    if (!dsGuard.h)
+    const auto dataset = adoptDataset(GDALOpen(rasterPath.c_str(), GA_ReadOnly));
+    if (!dataset)
         throw GDALException("Cannot open raster: " + rasterPath);
+    GDALDatasetH hDs = datasetHandle(dataset);
 
     double gt[6];
-    if (GDALGetGeoTransform(dsGuard.h, gt) != CE_None)
+    if (GDALGetGeoTransform(hDs, gt) != CE_None)
         throw GDALException("Raster has no geotransform: " + rasterPath);
 
-    const int bandCount = GDALGetRasterCount(dsGuard.h);
+    const int bandCount = GDALGetRasterCount(hDs);
     if (options.bandIndex < 1 || options.bandIndex > bandCount)
         throw InvalidArgsException("Invalid band index: " +
                                    std::to_string(options.bandIndex));
 
-    GDALRasterBandH hBand = GDALGetRasterBand(dsGuard.h, options.bandIndex);
+    GDALRasterBandH hBand = GDALGetRasterBand(hDs, options.bandIndex);
     if (!hBand) throw GDALException("Cannot access raster band");
 
     const char *unitCStr = GDALGetRasterUnitType(hBand);
@@ -159,32 +139,19 @@ std::string generateContoursJson(const std::string &rasterPath,
     const double interval = resolveInterval(options, bMin, bMax);
 
     // --- Build in-memory OGR layer to collect contours --------------------
-    SrsHandle rasterSrs;
-    bool rasterHasSrs = false;
-    {
-        const char *projRef = GDALGetProjectionRef(dsGuard.h);
-        if (projRef && projRef[0] != '\0') {
-            rasterSrs.h = OSRNewSpatialReference(nullptr);
-            char *wktPtr = const_cast<char *>(projRef);
-            if (OSRImportFromWkt(rasterSrs.h, &wktPtr) != OGRERR_NONE) {
-                OSRDestroySpatialReference(rasterSrs.h);
-                rasterSrs.h = nullptr;
-            } else {
-                OSRSetAxisMappingStrategy(rasterSrs.h, OAMS_TRADITIONAL_GIS_ORDER);
-                rasterHasSrs = true;
-            }
-        }
-    }
+    const SrsPtr rasterSrs = srsFromWkt(GDALGetProjectionRef(hDs));
+    const bool rasterHasSrs = rasterSrs != nullptr;
 
     GDALDriverH memDrv = GDALGetDriverByName("Memory");
     if (!memDrv) throw GDALException("Memory OGR driver not available");
 
-    GDALDatasetH hMemDs = GDALCreate(memDrv, "contours_mem", 0, 0, 0, GDT_Unknown, nullptr);
-    if (!hMemDs) throw GDALException("Cannot create in-memory dataset");
-    DatasetGuard memGuard{hMemDs};
+    const auto memDs = adoptDataset(
+        GDALCreate(memDrv, "contours_mem", 0, 0, 0, GDT_Unknown, nullptr));
+    if (!memDs) throw GDALException("Cannot create in-memory dataset");
+    GDALDatasetH hMemDs = datasetHandle(memDs);
 
     OGRLayerH hLayer = GDALDatasetCreateLayer(hMemDs, "contours",
-                                              rasterHasSrs ? rasterSrs.h : nullptr,
+                                              rasterHasSrs ? rasterSrs.get() : nullptr,
                                               wkbLineString, nullptr);
     if (!hLayer) throw GDALException("Cannot create contour layer");
 
@@ -203,36 +170,28 @@ std::string generateContoursJson(const std::string &rasterPath,
     int hasNoData = FALSE;
     const double noData = GDALGetRasterNoDataValue(hBand, &hasNoData);
 
-    char **opts = nullptr;
-    opts = CSLSetNameValue(opts, "ELEV_FIELD",
-                           std::to_string(elevFieldIdx).c_str());
-    opts = CSLSetNameValue(opts, "ID_FIELD",
-                           std::to_string(idFieldIdx).c_str());
-    opts = CSLSetNameValue(opts, "LEVEL_INTERVAL",
-                           std::to_string(interval).c_str());
-    opts = CSLSetNameValue(opts, "LEVEL_BASE",
-                           std::to_string(options.baseOffset).c_str());
+    CPLStringList opts;
+    opts.SetNameValue("ELEV_FIELD", std::to_string(elevFieldIdx).c_str());
+    opts.SetNameValue("ID_FIELD", std::to_string(idFieldIdx).c_str());
+    opts.SetNameValue("LEVEL_INTERVAL", std::to_string(interval).c_str());
+    opts.SetNameValue("LEVEL_BASE", std::to_string(options.baseOffset).c_str());
     if (hasNoData) {
-        opts = CSLSetNameValue(opts, "NODATA",
-                               std::to_string(noData).c_str());
+        opts.SetNameValue("NODATA", std::to_string(noData).c_str());
     }
 
-    const CPLErr cErr = GDALContourGenerateEx(hBand, hLayer, opts,
+    const CPLErr cErr = GDALContourGenerateEx(hBand, hLayer, opts.List(),
                                               nullptr, nullptr);
-    CSLDestroy(opts);
 
     if (cErr != CE_None)
         throw GDALException("GDAL contour generation failed");
 
     // --- Build coordinate transform back to WGS84 -------------------------
-    SrsHandle wgs84(OSRNewSpatialReference(nullptr));
-    OSRImportFromEPSG(wgs84.h, 4326);
-    OSRSetAxisMappingStrategy(wgs84.h, OAMS_TRADITIONAL_GIS_ORDER);
+    const SrsPtr wgs84 = srsFromEpsg(4326);
 
-    CtHandle rasterToWgs;
+    CoordTransformPtr rasterToWgs;
     if (rasterHasSrs) {
-        rasterToWgs.h = OCTNewCoordinateTransformation(rasterSrs.h, wgs84.h);
-        if (!rasterToWgs.h)
+        rasterToWgs.reset(OCTNewCoordinateTransformation(rasterSrs.get(), wgs84.get()));
+        if (!rasterToWgs)
             throw GDALException("Cannot build raster -> WGS84 transform");
     }
 
@@ -244,13 +203,9 @@ std::string generateContoursJson(const std::string &rasterPath,
 
     OGR_L_ResetReading(hLayer);
     while (true) {
-        OGRFeatureH hFeat = OGR_L_GetNextFeature(hLayer);
-        if (!hFeat) break;
-
-        struct FeatGuard {
-            OGRFeatureH h;
-            ~FeatGuard() { if (h) OGR_F_Destroy(h); }
-        } featGuard{hFeat};
+        const FeaturePtr feature(OGR_L_GetNextFeature(hLayer));
+        if (!feature) break;
+        OGRFeatureH hFeat = feature.get();
 
         const double elev = OGR_F_GetFieldAsDouble(hFeat, elevFieldIdx);
 
@@ -262,9 +217,7 @@ std::string generateContoursJson(const std::string &rasterPath,
 
         // Optional simplification in raster CRS units.
         OGRGeometry *workGeom = reinterpret_cast<OGRGeometry *>(hGeom);
-        std::unique_ptr<OGRGeometry, void(*)(OGRGeometry *)> ownedSimplified(
-            nullptr,
-            [](OGRGeometry *g) { if (g) OGRGeometryFactory::destroyGeometry(g); });
+        OGRGeometryUniquePtr ownedSimplified;
         if (options.simplifyTolerance > 0.0) {
             OGRGeometry *simp = workGeom->SimplifyPreserveTopology(
                 options.simplifyTolerance);
@@ -276,19 +229,15 @@ std::string generateContoursJson(const std::string &rasterPath,
 
         // Reproject in-place to WGS84 (operate on a clone so we don't
         // mutate features still owned by the layer).
-        std::unique_ptr<OGRGeometry, void(*)(OGRGeometry *)> ownedTransformed(
-            nullptr,
-            [](OGRGeometry *g) { if (g) OGRGeometryFactory::destroyGeometry(g); });
-        if (rasterToWgs.h) {
-            OGRGeometry *clone = workGeom->clone();
-            if (!clone) continue;
-            if (clone->transform(reinterpret_cast<OGRCoordinateTransformation *>(
-                    rasterToWgs.h)) != OGRERR_NONE) {
-                OGRGeometryFactory::destroyGeometry(clone);
+        OGRGeometryUniquePtr ownedTransformed;
+        if (rasterToWgs) {
+            ownedTransformed.reset(workGeom->clone());
+            if (!ownedTransformed) continue;
+            if (ownedTransformed->transform(OGRCoordinateTransformation::FromHandle(
+                    rasterToWgs.get())) != OGRERR_NONE) {
                 continue;
             }
-            ownedTransformed.reset(clone);
-            workGeom = clone;
+            workGeom = ownedTransformed.get();
         }
 
         const size_t before = features.size();

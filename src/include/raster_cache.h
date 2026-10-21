@@ -25,7 +25,7 @@ namespace ddb
     /// A raster or vector file opened read-only with GDAL, closed when destroyed
     class OpenedDataset
     {
-        GDALDatasetH handle_ = nullptr;
+        GDALDatasetUniquePtr dataset_;
 
     public:
         enum class Kind
@@ -39,7 +39,7 @@ namespace ddb
         OpenedDataset(const OpenedDataset &) = delete;
         OpenedDataset &operator=(const OpenedDataset &) = delete;
 
-        GDALDatasetH handle() const { return handle_; }
+        GDALDatasetH handle() const { return GDALDataset::ToHandle(dataset_.get()); }
     };
 
     /// What a cached tiler was built for: the same file tiled with other settings is

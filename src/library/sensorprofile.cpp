@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "sensorprofile.h"
-#include "gdal_inc.h"
+#include "gdal_raii.h"
 #include "exceptions.h"
 #include "logger.h"
 #include "mio.h"
@@ -340,12 +340,12 @@ SensorDetectionResult SensorProfileManager::detectSensorUncached(const std::stri
                                                                  const std::vector<SensorProfile> &profiles) const {
     SensorDetectionResult result;
 
-    GDALDatasetH hDataset = GDALOpen(rasterPath.c_str(), GA_ReadOnly);
-    if (!hDataset) return result;
+    auto dataset = adoptDataset(GDALOpen(rasterPath.c_str(), GA_ReadOnly));
+    if (!dataset) return result;
+    GDALDatasetH hDataset = datasetHandle(dataset);
 
     int bandCount = GDALGetRasterCount(hDataset);
     if (bandCount == 0) {
-        GDALClose(hDataset);
         return result;
     }
 
@@ -363,14 +363,12 @@ SensorDetectionResult SensorProfileManager::detectSensorUncached(const std::stri
 
     // RGBA disambiguation: 4-band Byte with alpha → not multispectral
     if (bandCount == 4 && dt == GDT_Byte && lastBandIsAlpha) {
-        GDALClose(hDataset);
         result.detected = false;
         return result;
     }
 
     // 3-band Byte with no wavelength metadata → standard RGB
     if (bandCount == 3 && dt == GDT_Byte) {
-        GDALClose(hDataset);
         result.detected = false;
         return result;
     }
@@ -383,17 +381,14 @@ SensorDetectionResult SensorProfileManager::detectSensorUncached(const std::stri
     if (mdItem) allMetadata.push_back(mdItem);
 
     // Collect all metadata domains
-    char **mdDomains = GDALGetMetadataDomainList(hDataset);
-    if (mdDomains) {
-        for (int i = 0; mdDomains[i] != nullptr; i++) {
-            CSLConstList md = GDALGetMetadata(hDataset, mdDomains[i]);
-            if (md) {
-                for (int k = 0; md[k] != nullptr; k++) {
-                    allMetadata.push_back(md[k]);
-                }
+    const CPLStringList mdDomains(GDALGetMetadataDomainList(hDataset), TRUE);
+    for (int i = 0; i < mdDomains.size(); i++) {
+        CSLConstList md = GDALGetMetadata(hDataset, mdDomains[i]);
+        if (md) {
+            for (int k = 0; md[k] != nullptr; k++) {
+                allMetadata.push_back(md[k]);
             }
         }
-        CSLDestroy(mdDomains);
     }
 
     // Also check per-band metadata
@@ -456,7 +451,6 @@ SensorDetectionResult SensorProfileManager::detectSensorUncached(const std::stri
                 }
             }
 
-            GDALClose(hDataset);
             return result;
         }
     }
@@ -488,12 +482,11 @@ SensorDetectionResult SensorProfileManager::detectSensorUncached(const std::stri
             result.bands.push_back(bi);
         }
 
-        GDALClose(hDataset);
+        dataset.reset();
         result.defaultBandMapping = getFallbackMapping(rasterPath, bandCount);
         return result;
     }
 
-    GDALClose(hDataset);
     return result;
 }
 
@@ -520,8 +513,9 @@ BandMapping SensorProfileManager::getBandMappingForPreset(const std::string &ras
 BandMapping SensorProfileManager::getFallbackMapping(const std::string &rasterPath, int bandCount) const {
     BandMapping bm;
 
-    GDALDatasetH hDataset = GDALOpen(rasterPath.c_str(), GA_ReadOnly);
-    if (!hDataset) return bm;
+    auto dataset = adoptDataset(GDALOpen(rasterPath.c_str(), GA_ReadOnly));
+    if (!dataset) return bm;
+    GDALDatasetH hDataset = datasetHandle(dataset);
 
     int nBands = (bandCount > 0) ? bandCount : GDALGetRasterCount(hDataset);
 
@@ -535,7 +529,7 @@ BandMapping SensorProfileManager::getFallbackMapping(const std::string &rasterPa
         else if (ci == GCI_BlueBand && bBand == 0) bBand = i;
     }
 
-    GDALClose(hDataset);
+    dataset.reset();
 
     if (rBand > 0 && gBand > 0 && bBand > 0) {
         bm.r = rBand;
@@ -556,8 +550,9 @@ BandMapping SensorProfileManager::getFallbackMapping(const std::string &rasterPa
 std::string SensorProfileManager::getRasterInfoJson(const std::string &rasterPath) const {
     auto det = detectSensor(rasterPath);
 
-    GDALDatasetH hDataset = GDALOpen(rasterPath.c_str(), GA_ReadOnly);
-    if (!hDataset) throw GDALException("Cannot open " + rasterPath);
+    const auto dataset = adoptDataset(GDALOpen(rasterPath.c_str(), GA_ReadOnly));
+    if (!dataset) throw GDALException("Cannot open " + rasterPath);
+    GDALDatasetH hDataset = datasetHandle(dataset);
 
     int bandCount = GDALGetRasterCount(hDataset);
     GDALRasterBandH hBand1 = GDALGetRasterBand(hDataset, 1);
@@ -579,16 +574,15 @@ std::string SensorProfileManager::getRasterInfoJson(const std::string &rasterPat
         const char *wkt = GDALGetProjectionRef(hDataset);
         std::string crs;
         if (wkt && *wkt) {
-            OGRSpatialReferenceH hSrs = OSRNewSpatialReference(wkt);
+            const SrsPtr hSrs(OSRNewSpatialReference(wkt));
             if (hSrs) {
-                const char *authName = OSRGetAuthorityName(hSrs, nullptr);
-                const char *authCode = OSRGetAuthorityCode(hSrs, nullptr);
+                const char *authName = OSRGetAuthorityName(hSrs.get(), nullptr);
+                const char *authCode = OSRGetAuthorityCode(hSrs.get(), nullptr);
                 if (authName && *authName && authCode && *authCode) {
                     crs = std::string(authName) + ":" + authCode;
                 } else {
                     crs = wkt;
                 }
-                OSRDestroySpatialReference(hSrs);
             }
         }
         result["crs"] = crs;
@@ -650,8 +644,6 @@ std::string SensorProfileManager::getRasterInfoJson(const std::string &rasterPat
         result["defaultPreset"] = nullptr;
         result["detectedSensor"] = nullptr;
     }
-
-    GDALClose(hDataset);
 
     return result.dump();
 }

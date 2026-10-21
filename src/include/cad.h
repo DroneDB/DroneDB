@@ -10,6 +10,7 @@
 #include "ddb_export.h"
 #include "fs.h"
 #include "gdal_inc.h"
+#include "mio.h"
 
 // CAD drawings (DXF, DWG) as vector sources.
 //
@@ -75,7 +76,7 @@ namespace ddb
 
           private:
             fs::path dxf;
-            fs::path tempDir;
+            io::ScopedTempDir tempDir;
         };
 
         // Metadata GDAL does not expose, read from an ASCII DXF.

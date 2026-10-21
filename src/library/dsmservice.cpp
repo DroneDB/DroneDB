@@ -7,6 +7,7 @@
 #include <ogrsf_frmts.h>
 #include "dsmservice.h"
 #include "exceptions.h"
+#include "gdal_raii.h"
 #include "utils.h"
 #include <cpr/cpr.h>
 #include "mio.h"
@@ -219,10 +220,10 @@ std::string DSMService::loadFromNetwork(double latitude, double longitude, const
 bool DSMService::addGeoTIFFToCache(const fs::path &filePath, double latitude, double longitude)
 {
     // Owned: the checks below throw while the dataset is open
-    GDALDatasetUniquePtr dataset(GDALDataset::FromHandle(GDALOpen(filePath.string().c_str(), GA_ReadOnly)));
+    const auto dataset = adoptDataset(GDALOpen(filePath.string().c_str(), GA_ReadOnly));
     if (!dataset)
         throw GDALException("Cannot open " + filePath.string());
-    GDALDatasetH hDataset = GDALDataset::ToHandle(dataset.get());
+    GDALDatasetH hDataset = datasetHandle(dataset);
 
     DSMCacheEntry e;
     e.width = static_cast<unsigned int>(GDALGetRasterXSize(hDataset));

@@ -5,6 +5,7 @@
 #include "sensorprofile.h"
 #include "thermal.h"
 #include "exceptions.h"
+#include "gdal_raii.h"
 #include "logger.h"
 #include "utils.h"
 
@@ -194,10 +195,9 @@ BandFilter VegetationEngine::autoDetectFilter(const std::string &rasterPath) con
     BandFilter bf;
 
     // Check if single-band thermal raster
-    GDALDatasetH hDs = GDALOpen(rasterPath.c_str(), GA_ReadOnly);
-    if (hDs) {
-        int nBands = GDALGetRasterCount(hDs);
-        GDALClose(hDs);
+    if (auto dataset = adoptDataset(GDALOpen(rasterPath.c_str(), GA_ReadOnly))) {
+        const int nBands = dataset->GetRasterCount();
+        dataset.reset();
         if (nBands == 1 && isThermalImage(rasterPath)) {
             bf.id = "T";
             bf.T = 0;

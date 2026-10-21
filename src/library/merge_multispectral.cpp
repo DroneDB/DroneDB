@@ -3,7 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "merge_multispectral.h"
 #include "mathutil.h"
-#include "gdal_inc.h"
+#include "gdal_raii.h"
 #include "exceptions.h"
 #include "logger.h"
 #include "mio.h"
@@ -377,11 +377,12 @@ MergeValidationResult validateMergeMultispectral(const std::vector<std::string> 
     }
 
     // Open first file as reference
-    GDALDatasetH hRef = GDALOpen(inputPaths[0].c_str(), GA_ReadOnly);
-    if (!hRef) {
+    auto refDs = adoptDataset(GDALOpen(inputPaths[0].c_str(), GA_ReadOnly));
+    if (!refDs) {
         result.errors.push_back("Cannot open " + displayNames[0]);
         return result;
     }
+    GDALDatasetH hRef = datasetHandle(refDs);
 
     int refWidth = GDALGetRasterXSize(hRef);
     int refHeight = GDALGetRasterYSize(hRef);
@@ -394,7 +395,7 @@ MergeValidationResult validateMergeMultispectral(const std::vector<std::string> 
     }
 
     const char *refProj = GDALGetProjectionRef(hRef);
-    OGRSpatialReferenceH refSrs = OSRNewSpatialReference(refProj);
+    SrsPtr refSrs(OSRNewSpatialReference(refProj));
 
     result.summary.crs = refProj ? std::string(refProj) : "";
     result.summary.width = refWidth;
@@ -416,19 +417,19 @@ MergeValidationResult validateMergeMultispectral(const std::vector<std::string> 
     }
 
     for (size_t i = 1; i < inputPaths.size(); i++) {
-        GDALDatasetH hDs = GDALOpen(inputPaths[i].c_str(), GA_ReadOnly);
-        if (!hDs) {
+        const auto dataset = adoptDataset(GDALOpen(inputPaths[i].c_str(), GA_ReadOnly));
+        if (!dataset) {
             result.errors.push_back("Cannot open " + displayNames[i]);
             continue;
         }
+        GDALDatasetH hDs = datasetHandle(dataset);
 
         // CRS check
         const char *proj = GDALGetProjectionRef(hDs);
-        OGRSpatialReferenceH srs = OSRNewSpatialReference(proj);
-        if (!OSRIsSame(refSrs, srs)) {
+        const SrsPtr srs(OSRNewSpatialReference(proj));
+        if (!OSRIsSame(refSrs.get(), srs.get())) {
             result.errors.push_back("CRS mismatch: " + displayNames[i]);
         }
-        OSRDestroySpatialReference(srs);
 
         // Dimension check
         if (GDALGetRasterXSize(hDs) != refWidth || GDALGetRasterYSize(hDs) != refHeight) {
@@ -479,11 +480,10 @@ MergeValidationResult validateMergeMultispectral(const std::vector<std::string> 
         }
 
         totalBands += GDALGetRasterCount(hDs);
-        GDALClose(hDs);
     }
 
-    OSRDestroySpatialReference(refSrs);
-    GDALClose(hRef);
+    refSrs.reset();
+    refDs.reset();
 
     result.summary.totalBands = totalBands;
     result.summary.estimatedSize = static_cast<size_t>(refWidth) * refHeight * totalBands * GDALGetDataTypeSizeBytes(refType);
@@ -605,6 +605,97 @@ MergeValidationResult validateMergeMultispectral(const std::vector<std::string> 
     return result;
 }
 
+namespace {
+
+// Opens every path; throws GDALException naming the first that cannot be opened
+std::vector<GDALDatasetUniquePtr> openAll(const std::vector<std::string> &paths) {
+    std::vector<GDALDatasetUniquePtr> datasets;
+    datasets.reserve(paths.size());
+    for (const auto &p : paths) {
+        auto ds = adoptDataset(GDALOpen(p.c_str(), GA_ReadOnly));
+        if (!ds) throw GDALException("Cannot open " + p);
+        datasets.push_back(std::move(ds));
+    }
+    return datasets;
+}
+
+// The bands of a merge as one /vsimem/ VRT (-separate) with the sources it reads. The members
+// are declared so that the VRT closes first, then its file goes, then the sources and their
+// /vsimem/ files (the shifted bands). Movable, not assignable: a member-wise assignment would
+// close them in the wrong order; close() does it in the right one.
+struct SeparateVrt {
+    std::vector<VsiMemFile> sourceFiles;
+    std::vector<GDALDatasetUniquePtr> sources;
+    VsiMemFile file;
+    GDALDatasetUniquePtr vrt;
+
+    SeparateVrt() = default;
+    SeparateVrt(SeparateVrt &&) = default;
+    SeparateVrt &operator=(SeparateVrt &&) = delete;
+
+    GDALDatasetH handle() const { return datasetHandle(vrt); }
+
+    void close() {
+        vrt.reset();
+        file.reset();
+        sources.clear();
+        sourceFiles.clear();
+    }
+};
+
+// Builds the VRT over the sources (taking them and their files); the VRT file name ends with
+// suffix. Throws GDALException(error) when GDAL cannot build it.
+SeparateVrt buildSeparateVrt(std::vector<GDALDatasetUniquePtr> sources,
+                             std::vector<VsiMemFile> sourceFiles, const std::string &suffix,
+                             const std::string &error) {
+    SeparateVrt v;
+    v.sourceFiles = std::move(sourceFiles);
+    v.sources = std::move(sources);
+
+    CPLStringList args;
+    args.AddString("-separate");
+    args.AddString("-r");
+    args.AddString("average");
+    const GdalOptionsPtr<GDALBuildVRTOptions> opts(GDALBuildVRTOptionsNew(args.List(), nullptr));
+
+    v.file = VsiMemFile::unique("", suffix);
+    auto handles = datasetHandles(v.sources);
+    v.vrt = adoptDataset(GDALBuildVRT(v.file.c_str(), static_cast<int>(handles.size()),
+                                      handles.data(), nullptr, opts.get(), nullptr));
+    if (!v.vrt) throw GDALException(error);
+    GDALFlushCache(v.handle());
+    return v;
+}
+
+// Options of the tiled GTiff that GDALTranslate writes for a merge
+GdalOptionsPtr<GDALTranslateOptions> mergeTranslateOptions(const char *predictor, bool useJpeg) {
+    CPLStringList transArgs;
+    transArgs.AddString("-of");
+    transArgs.AddString("GTiff");
+    transArgs.AddString("-co");
+    transArgs.AddString("TILED=YES");
+    transArgs.AddString("-co");
+    transArgs.AddString("NUM_THREADS=ALL_CPUS");
+    transArgs.AddString("-co");
+    transArgs.AddString("BIGTIFF=IF_SAFER");
+    transArgs.AddString("-co");
+    transArgs.AddString(predictor);
+
+    if (useJpeg) {
+        transArgs.AddString("-co");
+        transArgs.AddString("COMPRESS=JPEG");
+        transArgs.AddString("-co");
+        transArgs.AddString("QUALITY=90");
+    } else {
+        transArgs.AddString("-co");
+        transArgs.AddString("COMPRESS=LZW");
+    }
+
+    return GdalOptionsPtr<GDALTranslateOptions>(GDALTranslateOptionsNew(transArgs.List(), nullptr));
+}
+
+}  // namespace
+
 void previewMergeMultispectral(const std::vector<std::string> &inputPaths,
                                 const std::vector<int> &previewBands,
                                 int thumbSize,
@@ -613,77 +704,40 @@ void previewMergeMultispectral(const std::vector<std::string> &inputPaths,
     if (previewBands.size() < 3) throw InvalidArgsException("Need at least 3 preview bands");
 
     // Build VRT with separate=TRUE
-    char **vrtArgs = nullptr;
-    vrtArgs = CSLAddString(vrtArgs, "-separate");
-    vrtArgs = CSLAddString(vrtArgs, "-r");
-    vrtArgs = CSLAddString(vrtArgs, "average");
-
-    GDALBuildVRTOptions *vrtOpts = GDALBuildVRTOptionsNew(vrtArgs, nullptr);
-    CSLDestroy(vrtArgs);
-
-    std::vector<GDALDatasetH> datasets;
-    for (const auto &p : inputPaths) {
-        GDALDatasetH ds = GDALOpen(p.c_str(), GA_ReadOnly);
-        if (!ds) {
-            for (auto d : datasets) GDALClose(d);
-            GDALBuildVRTOptionsFree(vrtOpts);
-            throw GDALException("Cannot open " + p);
-        }
-        datasets.push_back(ds);
-    }
-
-    std::string vsiVrtPath = "/vsimem/" + utils::generateRandomString(16) + ".vrt";
-    GDALDatasetH hVrt = GDALBuildVRT(vsiVrtPath.c_str(), static_cast<int>(datasets.size()),
-                                      datasets.data(), nullptr, vrtOpts, nullptr);
-    GDALBuildVRTOptionsFree(vrtOpts);
-
-    if (!hVrt) {
-        for (auto d : datasets) GDALClose(d);
-        throw GDALException("Cannot build VRT");
-    }
-    GDALFlushCache(hVrt);
+    const SeparateVrt merged = buildSeparateVrt(openAll(inputPaths), {}, ".vrt", "Cannot build VRT");
 
     // Translate with band selection and scaling
-    char **tArgs = nullptr;
-    tArgs = CSLAddString(tArgs, "-of");
-    tArgs = CSLAddString(tArgs, "WEBP");
-    tArgs = CSLAddString(tArgs, "-outsize");
-    tArgs = CSLAddString(tArgs, std::to_string(thumbSize).c_str());
-    tArgs = CSLAddString(tArgs, std::to_string(thumbSize).c_str());
-    tArgs = CSLAddString(tArgs, "-ot");
-    tArgs = CSLAddString(tArgs, "Byte");
-    tArgs = CSLAddString(tArgs, "-scale");
+    CPLStringList tArgs;
+    tArgs.AddString("-of");
+    tArgs.AddString("WEBP");
+    tArgs.AddString("-outsize");
+    tArgs.AddString(std::to_string(thumbSize).c_str());
+    tArgs.AddString(std::to_string(thumbSize).c_str());
+    tArgs.AddString("-ot");
+    tArgs.AddString("Byte");
+    tArgs.AddString("-scale");
 
     for (int band : previewBands) {
-        tArgs = CSLAddString(tArgs, "-b");
-        tArgs = CSLAddString(tArgs, std::to_string(band).c_str());
+        tArgs.AddString("-b");
+        tArgs.AddString(std::to_string(band).c_str());
     }
 
-    GDALTranslateOptions *transOpts = GDALTranslateOptionsNew(tArgs, nullptr);
-    CSLDestroy(tArgs);
+    const GdalOptionsPtr<GDALTranslateOptions> transOpts(
+        GDALTranslateOptionsNew(tArgs.List(), nullptr));
 
-    std::string vsiOutPath = "/vsimem/" + utils::generateRandomString(16) + ".webp";
-    GDALDatasetH hOut = GDALTranslate(vsiOutPath.c_str(), hVrt, transOpts, nullptr);
-    GDALTranslateOptionsFree(transOpts);
-
-    if (!hOut) {
-        GDALClose(hVrt);
-        for (auto d : datasets) GDALClose(d);
-        VSIUnlink(vsiVrtPath.c_str());
+    const VsiMemFile outFile = VsiMemFile::unique("", ".webp");
+    auto out = adoptDataset(
+        GDALTranslate(outFile.c_str(), merged.handle(), transOpts.get(), nullptr));
+    if (!out)
         throw GDALException("Cannot generate preview");
-    }
 
-    GDALFlushCache(hOut);
-    GDALClose(hOut);
-    GDALClose(hVrt);
-    for (auto d : datasets) GDALClose(d);
+    GDALFlushCache(datasetHandle(out));
+    out.reset();
 
     // Read memory buffer
-    vsi_l_offset bufSize;
-    *outBuffer = VSIGetMemFileBuffer(vsiOutPath.c_str(), &bufSize, TRUE);
-    *outBufferSize = static_cast<int>(bufSize);
-
-    VSIUnlink(vsiVrtPath.c_str());
+    int bufSize = 0;
+    *outBuffer = stealMemFileBuffer(outFile.path(), bufSize).release();
+    *outBufferSize = bufSize;
 }
 
 void mergeMultispectral(const std::vector<std::string> &inputPaths,
@@ -723,35 +777,9 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
     }
 
     // Build VRT with separate=TRUE
-    char **vrtArgs = nullptr;
-    vrtArgs = CSLAddString(vrtArgs, "-separate");
-    vrtArgs = CSLAddString(vrtArgs, "-r");
-    vrtArgs = CSLAddString(vrtArgs, "average");
-
-    GDALBuildVRTOptions *vrtOpts = GDALBuildVRTOptionsNew(vrtArgs, nullptr);
-    CSLDestroy(vrtArgs);
-
-    std::vector<GDALDatasetH> datasets;
-    for (const auto &p : inputPaths) {
-        GDALDatasetH ds = GDALOpen(p.c_str(), GA_ReadOnly);
-        if (!ds) {
-            for (auto d : datasets) GDALClose(d);
-            GDALBuildVRTOptionsFree(vrtOpts);
-            throw GDALException("Cannot open " + p);
-        }
-        datasets.push_back(ds);
-    }
-
-    std::string vsiVrtPath = "/vsimem/" + utils::generateRandomString(16) + ".vrt";
-    GDALDatasetH hVrt = GDALBuildVRT(vsiVrtPath.c_str(), static_cast<int>(datasets.size()),
-                                      datasets.data(), nullptr, vrtOpts, nullptr);
-    GDALBuildVRTOptionsFree(vrtOpts);
-
-    if (!hVrt) {
-        for (auto d : datasets) GDALClose(d);
-        throw GDALException("Cannot build VRT for merge");
-    }
-    GDALFlushCache(hVrt);
+    SeparateVrt merged =
+        buildSeparateVrt(openAll(inputPaths), {}, ".vrt", "Cannot build VRT for merge");
+    GDALDatasetH hVrt = merged.handle();
 
     // Check if inputs have geotransform
     double checkGt[6];
@@ -762,7 +790,7 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
     int nBands = GDALGetRasterCount(hVrt);
     bool useJpeg = (dt == GDT_Byte && (nBands == 3 || nBands == 4));
 
-    GDALDatasetH hOut = nullptr;
+    GDALDatasetUniquePtr out;
 
     // Determine predictor type based on data type
     // PREDICTOR=2 (horizontal differencing) for integer types
@@ -771,36 +799,36 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
 
     if (hasGeoTransform) {
         // Use GDALWarp for georeferenced data (supports reprojection)
-        char **warpArgs = nullptr;
-        warpArgs = CSLAddString(warpArgs, "-of");
-        warpArgs = CSLAddString(warpArgs, "GTiff");
-        warpArgs = CSLAddString(warpArgs, "-multi");
-        warpArgs = CSLAddString(warpArgs, "-wo");
-        warpArgs = CSLAddString(warpArgs, "NUM_THREADS=ALL_CPUS");
-        warpArgs = CSLAddString(warpArgs, "-co");
-        warpArgs = CSLAddString(warpArgs, "NUM_THREADS=ALL_CPUS");
-        warpArgs = CSLAddString(warpArgs, "-co");
-        warpArgs = CSLAddString(warpArgs, "TILED=YES");
-        warpArgs = CSLAddString(warpArgs, "-co");
-        warpArgs = CSLAddString(warpArgs, "BIGTIFF=IF_SAFER");
-        warpArgs = CSLAddString(warpArgs, "-co");
-        warpArgs = CSLAddString(warpArgs, predictor);
+        CPLStringList warpArgs;
+        warpArgs.AddString("-of");
+        warpArgs.AddString("GTiff");
+        warpArgs.AddString("-multi");
+        warpArgs.AddString("-wo");
+        warpArgs.AddString("NUM_THREADS=ALL_CPUS");
+        warpArgs.AddString("-co");
+        warpArgs.AddString("NUM_THREADS=ALL_CPUS");
+        warpArgs.AddString("-co");
+        warpArgs.AddString("TILED=YES");
+        warpArgs.AddString("-co");
+        warpArgs.AddString("BIGTIFF=IF_SAFER");
+        warpArgs.AddString("-co");
+        warpArgs.AddString(predictor);
 
         if (useJpeg) {
-            warpArgs = CSLAddString(warpArgs, "-co");
-            warpArgs = CSLAddString(warpArgs, "COMPRESS=JPEG");
-            warpArgs = CSLAddString(warpArgs, "-co");
-            warpArgs = CSLAddString(warpArgs, "QUALITY=90");
+            warpArgs.AddString("-co");
+            warpArgs.AddString("COMPRESS=JPEG");
+            warpArgs.AddString("-co");
+            warpArgs.AddString("QUALITY=90");
         } else {
-            warpArgs = CSLAddString(warpArgs, "-co");
-            warpArgs = CSLAddString(warpArgs, "COMPRESS=LZW");
+            warpArgs.AddString("-co");
+            warpArgs.AddString("COMPRESS=LZW");
         }
 
-        GDALWarpAppOptions *warpOpts = GDALWarpAppOptionsNew(warpArgs, nullptr);
-        CSLDestroy(warpArgs);
+        const GdalOptionsPtr<GDALWarpAppOptions> warpOpts(
+            GDALWarpAppOptionsNew(warpArgs.List(), nullptr));
 
-        hOut = GDALWarp(outputPath.c_str(), nullptr, 1, &hVrt, warpOpts, nullptr);
-        GDALWarpAppOptionsFree(warpOpts);
+        out = adoptDataset(
+            GDALWarp(outputPath.c_str(), nullptr, 1, &hVrt, warpOpts.get(), nullptr));
     } else {
         // Use GDALTranslate for non-georeferenced data (no geotransform needed)
         LOGD << "No geotransform found, using GDALTranslate for merge";
@@ -857,22 +885,19 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
                 applyShift = false;
             } else {
                 // Close the original VRT and datasets; we'll create shifted ones
-                GDALClose(hVrt);
-                for (auto d : datasets) GDALClose(d);
-                VSIUnlink(vsiVrtPath.c_str());
-                datasets.clear();
+                merged.close();
 
-                // Create shifted datasets via GDALTranslate with -srcwin
-                std::vector<GDALDatasetH> shiftedDatasets;
-                std::vector<std::string> shiftedPaths;
+                // Create shifted datasets via GDALTranslate with -srcwin (declared after
+                // their files: closed before they go)
+                std::vector<VsiMemFile> shiftedFiles;
+                std::vector<GDALDatasetUniquePtr> shiftedDatasets;
 
                 for (size_t i = 0; i < N; i++) {
-                    GDALDatasetH srcDs = GDALOpen(inputPaths[i].c_str(), GA_ReadOnly);
-                    if (!srcDs) {
-                        for (auto d : shiftedDatasets) GDALClose(d);
-                        for (const auto &p : shiftedPaths) VSIUnlink(p.c_str());
+                    const auto src = adoptDataset(GDALOpen(inputPaths[i].c_str(), GA_ReadOnly));
+                    if (!src) {
                         throw GDALException("Cannot open " + inputPaths[i]);
                     }
+                    GDALDatasetH srcDs = datasetHandle(src);
 
                     int srcX = padLeft - dxVec[i];
                     int srcY = padTop - dyVec[i];
@@ -885,94 +910,43 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
                              << ": srcwin=(" << srcX << ", " << srcY << ", "
                              << outW << ", " << outH << "), dataset=("
                              << srcW << ", " << srcH << ")";
-                        GDALClose(srcDs);
-                        for (auto d : shiftedDatasets) GDALClose(d);
-                        for (const auto &p : shiftedPaths) VSIUnlink(p.c_str());
                         throw GDALException("Invalid aligned crop window for band " + std::to_string(i));
                     }
 
-                    std::string shiftedPath = "/vsimem/shifted_" +
-                        utils::generateRandomString(8) + "_" + std::to_string(i) + ".tif";
+                    VsiMemFile shiftedFile =
+                        VsiMemFile::unique("shifted_", "_" + std::to_string(i) + ".tif");
 
-                    char **tArgs = nullptr;
-                    tArgs = CSLAddString(tArgs, "-srcwin");
-                    tArgs = CSLAddString(tArgs, std::to_string(srcX).c_str());
-                    tArgs = CSLAddString(tArgs, std::to_string(srcY).c_str());
-                    tArgs = CSLAddString(tArgs, std::to_string(outW).c_str());
-                    tArgs = CSLAddString(tArgs, std::to_string(outH).c_str());
+                    CPLStringList tArgs;
+                    tArgs.AddString("-srcwin");
+                    tArgs.AddString(std::to_string(srcX).c_str());
+                    tArgs.AddString(std::to_string(srcY).c_str());
+                    tArgs.AddString(std::to_string(outW).c_str());
+                    tArgs.AddString(std::to_string(outH).c_str());
 
-                    GDALTranslateOptions *srcOpts = GDALTranslateOptionsNew(tArgs, nullptr);
-                    CSLDestroy(tArgs);
+                    const GdalOptionsPtr<GDALTranslateOptions> srcOpts(
+                        GDALTranslateOptionsNew(tArgs.List(), nullptr));
 
-                    GDALDatasetH shiftedDs = GDALTranslate(shiftedPath.c_str(), srcDs, srcOpts, nullptr);
-                    GDALTranslateOptionsFree(srcOpts);
-                    GDALClose(srcDs);
-
+                    auto shiftedDs = adoptDataset(
+                        GDALTranslate(shiftedFile.c_str(), srcDs, srcOpts.get(), nullptr));
                     if (!shiftedDs) {
-                        for (auto d : shiftedDatasets) GDALClose(d);
-                        for (const auto &p : shiftedPaths) VSIUnlink(p.c_str());
                         throw GDALException("Cannot create shifted dataset for band " + std::to_string(i));
                     }
 
-                    GDALFlushCache(shiftedDs);
-                    shiftedDatasets.push_back(shiftedDs);
-                    shiftedPaths.push_back(shiftedPath);
+                    GDALFlushCache(datasetHandle(shiftedDs));
+                    shiftedFiles.push_back(std::move(shiftedFile));
+                    shiftedDatasets.push_back(std::move(shiftedDs));
                 }
 
                 // Build VRT from shifted datasets
-                char **vrtArgs2 = nullptr;
-                vrtArgs2 = CSLAddString(vrtArgs2, "-separate");
-                vrtArgs2 = CSLAddString(vrtArgs2, "-r");
-                vrtArgs2 = CSLAddString(vrtArgs2, "average");
-
-                GDALBuildVRTOptions *vrtOpts2 = GDALBuildVRTOptionsNew(vrtArgs2, nullptr);
-                CSLDestroy(vrtArgs2);
-
-                vsiVrtPath = "/vsimem/" + utils::generateRandomString(16) + "_aligned.vrt";
-                hVrt = GDALBuildVRT(vsiVrtPath.c_str(), static_cast<int>(shiftedDatasets.size()),
-                                    shiftedDatasets.data(), nullptr, vrtOpts2, nullptr);
-                GDALBuildVRTOptionsFree(vrtOpts2);
-
-                if (!hVrt) {
-                    for (auto d : shiftedDatasets) GDALClose(d);
-                    for (const auto &p : shiftedPaths) VSIUnlink(p.c_str());
-                    throw GDALException("Cannot build VRT for aligned merge");
-                }
-                GDALFlushCache(hVrt);
+                SeparateVrt aligned =
+                    buildSeparateVrt(std::move(shiftedDatasets), std::move(shiftedFiles),
+                                     "_aligned.vrt", "Cannot build VRT for aligned merge");
 
                 // Translate to output
-                char **transArgs = nullptr;
-                transArgs = CSLAddString(transArgs, "-of");
-                transArgs = CSLAddString(transArgs, "GTiff");
-                transArgs = CSLAddString(transArgs, "-co");
-                transArgs = CSLAddString(transArgs, "TILED=YES");
-                transArgs = CSLAddString(transArgs, "-co");
-                transArgs = CSLAddString(transArgs, "NUM_THREADS=ALL_CPUS");
-                transArgs = CSLAddString(transArgs, "-co");
-                transArgs = CSLAddString(transArgs, "BIGTIFF=IF_SAFER");
-                transArgs = CSLAddString(transArgs, "-co");
-                transArgs = CSLAddString(transArgs, predictor);
-
-                if (useJpeg) {
-                    transArgs = CSLAddString(transArgs, "-co");
-                    transArgs = CSLAddString(transArgs, "COMPRESS=JPEG");
-                    transArgs = CSLAddString(transArgs, "-co");
-                    transArgs = CSLAddString(transArgs, "QUALITY=90");
-                } else {
-                    transArgs = CSLAddString(transArgs, "-co");
-                    transArgs = CSLAddString(transArgs, "COMPRESS=LZW");
-                }
-
-                GDALTranslateOptions *transOpts = GDALTranslateOptionsNew(transArgs, nullptr);
-                CSLDestroy(transArgs);
-
-                hOut = GDALTranslate(outputPath.c_str(), hVrt, transOpts, nullptr);
-                GDALTranslateOptionsFree(transOpts);
-
-                GDALClose(hVrt);
-                for (auto d : shiftedDatasets) GDALClose(d);
-                for (const auto &p : shiftedPaths) VSIUnlink(p.c_str());
-                VSIUnlink(vsiVrtPath.c_str());
+                const auto transOpts = mergeTranslateOptions(predictor, useJpeg);
+                out = adoptDataset(
+                    GDALTranslate(outputPath.c_str(), aligned.handle(), transOpts.get(), nullptr));
+                aligned.close();
 
                 // GPS correction for center shift
                 if (hasGps) {
@@ -1040,61 +1014,28 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
                     }
                 }
 
-                // hOut is set, datasets already cleaned up in shift path
+                // out is set, datasets already cleaned up in shift path
                 // Fall through to GPS writing below
             }
         }
 
         if (!applyShift) {
             // Standard non-shifted merge path
-            char **transArgs = nullptr;
-            transArgs = CSLAddString(transArgs, "-of");
-            transArgs = CSLAddString(transArgs, "GTiff");
-            transArgs = CSLAddString(transArgs, "-co");
-            transArgs = CSLAddString(transArgs, "TILED=YES");
-            transArgs = CSLAddString(transArgs, "-co");
-            transArgs = CSLAddString(transArgs, "NUM_THREADS=ALL_CPUS");
-            transArgs = CSLAddString(transArgs, "-co");
-            transArgs = CSLAddString(transArgs, "BIGTIFF=IF_SAFER");
-            transArgs = CSLAddString(transArgs, "-co");
-            transArgs = CSLAddString(transArgs, predictor);
-
-            if (useJpeg) {
-                transArgs = CSLAddString(transArgs, "-co");
-                transArgs = CSLAddString(transArgs, "COMPRESS=JPEG");
-                transArgs = CSLAddString(transArgs, "-co");
-                transArgs = CSLAddString(transArgs, "QUALITY=90");
-            } else {
-                transArgs = CSLAddString(transArgs, "-co");
-                transArgs = CSLAddString(transArgs, "COMPRESS=LZW");
-            }
-
-            GDALTranslateOptions *transOpts = GDALTranslateOptionsNew(transArgs, nullptr);
-            CSLDestroy(transArgs);
-
-            hOut = GDALTranslate(outputPath.c_str(), hVrt, transOpts, nullptr);
-            GDALTranslateOptionsFree(transOpts);
+            const auto transOpts = mergeTranslateOptions(predictor, useJpeg);
+            out = adoptDataset(
+                GDALTranslate(outputPath.c_str(), merged.handle(), transOpts.get(), nullptr));
         }
     }
 
-    if (!hOut) {
-        if (!datasets.empty()) {
-            if (hVrt) GDALClose(hVrt);
-            for (auto d : datasets) GDALClose(d);
-        }
-        VSIUnlink(vsiVrtPath.c_str());
+    if (!out) {
         throw GDALException("Cannot create merged output: " + outputPath);
     }
 
-    GDALFlushCache(hOut);
-    GDALClose(hOut);
+    GDALFlushCache(datasetHandle(out));
+    out.reset();
 
-    // Clean up only if datasets haven't been cleaned up by the shift path
-    if (!datasets.empty()) {
-        if (hVrt) GDALClose(hVrt);
-        for (auto d : datasets) GDALClose(d);
-        VSIUnlink(vsiVrtPath.c_str());
-    }
+    // A no-op when the shift path already closed them
+    merged.close();
 
     // Write GPS coordinates from source to merged output
     if (hasGps) {

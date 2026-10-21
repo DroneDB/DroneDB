@@ -21,6 +21,7 @@
 #include "mio.h"
 #include "raster_cache.h"
 #include "exceptions.h"
+#include "gdal_raii.h"
 #include "utils.h"
 
 namespace ddb
@@ -40,20 +41,15 @@ namespace ddb
 
         // Capture output close/flush failures before freeing options, releasing
         // source datasets or deleting staging files can replace GDAL/OS errors.
-        VectorCloseStatus closeVectorOutput(GDALDatasetH dataset)
+        VectorCloseStatus closeVectorOutput(GDALDatasetUniquePtr dataset)
         {
             VectorCloseStatus result;
             if (!dataset) return result;
             CPLErrorReset();
             errno = 0;
-#if GDAL_VERSION_NUM >= 3070000
-            const CPLErr closeResult = GDALClose(dataset);
+            const CPLErr closeResult = closeDataset(std::move(dataset));
             result.systemError = errno;
             result.failed = closeResult >= CE_Failure;
-#else
-            GDALClose(dataset);
-            result.systemError = errno;
-#endif
             result.failed = result.failed || CPLGetLastErrorType() >= CE_Failure;
             const char *error = CPLGetLastErrorMsg();
             result.message = error && *error ? error : "<no GDAL error>";
@@ -102,26 +98,20 @@ namespace ddb
         {
             VectorStats s;
 
-            OGRSpatialReferenceH hWgs84 = OSRNewSpatialReference(nullptr);
-            if (OSRImportFromEPSG(hWgs84, 4326) != OGRERR_NONE)
-            {
-                OSRDestroySpatialReference(hWgs84);
+            const SrsPtr wgs84 = srsFromEpsg(4326);
+            if (!wgs84)
                 throw GDALException("computeStats: failed to import EPSG:4326 - PROJ database may be missing or corrupted");
-            }
-            OSRSetAxisMappingStrategy(hWgs84, OAMS_TRADITIONAL_GIS_ORDER);
+            OGRSpatialReferenceH hWgs84 = wgs84.get();
 
-            OGRSpatialReferenceH hSource = nullptr;
+            SrsPtr source;
             if (!sourceSrs.empty())
             {
-                hSource = OSRNewSpatialReference(nullptr);
-                if (OSRSetFromUserInput(hSource, sourceSrs.c_str()) != OGRERR_NONE)
-                {
-                    OSRDestroySpatialReference(hSource);
-                    OSRDestroySpatialReference(hWgs84);
+                source.reset(OSRNewSpatialReference(nullptr));
+                if (OSRSetFromUserInput(source.get(), sourceSrs.c_str()) != OGRERR_NONE)
                     throw GDALException("computeStats: invalid source SRS " + sourceSrs);
-                }
-                OSRSetAxisMappingStrategy(hSource, OAMS_TRADITIONAL_GIS_ORDER);
+                OSRSetAxisMappingStrategy(source.get(), OAMS_TRADITIONAL_GIS_ORDER);
             }
+            OGRSpatialReferenceH hSource = source.get();
 
             const int layerCount = GDALDatasetGetLayerCount(hSrcDS);
             for (int i = 0; i < layerCount; i++)
@@ -163,17 +153,14 @@ namespace ddb
                                     std::string(authCode) == "4326");
                     if (!isWgs84)
                     {
-                        OGRCoordinateTransformationH hT =
-                            OCTNewCoordinateTransformation(hSrs, hWgs84);
+                        const CoordTransformPtr hT(OCTNewCoordinateTransformation(hSrs, hWgs84));
                         if (hT)
                         {
-                            if (!OCTTransform(hT, 4, xs, ys, nullptr))
+                            if (!OCTTransform(hT.get(), 4, xs, ys, nullptr))
                             {
                                 LOGD << "computeStats: layer " << i << " transform failed";
-                                OCTDestroyCoordinateTransformation(hT);
                                 continue;
                             }
-                            OCTDestroyCoordinateTransformation(hT);
                         }
                     }
                 }
@@ -197,8 +184,6 @@ namespace ddb
                 }
             }
 
-            if (hSource) OSRDestroySpatialReference(hSource);
-            if (hWgs84) OSRDestroySpatialReference(hWgs84);
             return s;
         }
 
@@ -271,24 +256,24 @@ namespace ddb
             for (auto &s : argStore) argv.push_back(const_cast<char *>(s.c_str()));
             argv.push_back(nullptr);
 
-            GDALVectorTranslateOptions *opts =
-                GDALVectorTranslateOptionsNew(argv.data(), nullptr);
+            GdalOptionsPtr<GDALVectorTranslateOptions> opts(
+                GDALVectorTranslateOptionsNew(argv.data(), nullptr));
             if (!opts)
                 throw AppException("Cannot create GDAL VectorTranslate options for GPKG");
 
             CPLErrorReset();
             errno = 0;
             int usageError = 0;
-            GDALDatasetH hOut = GDALVectorTranslate(
-                output.c_str(), nullptr, 1, &hSrcDS, opts, &usageError);
+            auto out = adoptDataset(GDALVectorTranslate(
+                output.c_str(), nullptr, 1, &hSrcDS, opts.get(), &usageError));
             const int translateSystemError = errno;
-            const bool translateFailed = !hOut || usageError ||
+            const bool translateFailed = !out || usageError ||
                 (translateSystemError == ENOSPC && CPLGetLastErrorType() >= CE_Failure);
             const char *error = CPLGetLastErrorMsg();
             const std::string translateMessage = error && *error ? error : "<no GDAL error>";
 
-            GDALVectorTranslateOptionsFree(opts);
-            const auto closeStatus = closeVectorOutput(hOut);
+            opts.reset();
+            const auto closeStatus = closeVectorOutput(std::move(out));
 
             if (translateFailed)
                 throwVectorWriteFailure("GDAL VectorTranslate (GPKG)", output,
@@ -493,8 +478,8 @@ namespace ddb
         // when the source has duplicate layer names (e.g. KMZ folders sharing
         // a <name>).
         //
-        // Returns the /vsimem/ path of the GPKG (caller owns: must VSIUnlink).
-        std::string buildSanitizedGpkg(GDALDatasetH hSrcDS,
+        // Returns the /vsimem/ file of the GPKG.
+        VsiMemFile buildSanitizedGpkg(GDALDatasetH hSrcDS,
                                        const std::vector<bool> &normalizeGeometries)
         {
             GDALDriverH hGpkg = GDALGetDriverByName("GPKG");
@@ -502,14 +487,14 @@ namespace ddb
                 throw AppException(
                     "GPKG driver not available; cannot sanitize the MVT source");
 
-            const std::string vsiPath =
-                "/vsimem/ddb_mvt_" + utils::generateRandomString(16) + ".gpkg";
+            VsiMemFile gpkg = VsiMemFile::unique("ddb_mvt_", ".gpkg");
 
-            GDALDatasetH hDst = GDALCreate(hGpkg, vsiPath.c_str(),
-                                            0, 0, 0, GDT_Unknown, nullptr);
-            if (!hDst)
+            auto dst = adoptDataset(GDALCreate(hGpkg, gpkg.c_str(),
+                                               0, 0, 0, GDT_Unknown, nullptr));
+            if (!dst)
                 throw AppException(
                     "Cannot create in-memory GPKG for MVT source sanitization");
+            GDALDatasetH hDst = datasetHandle(dst);
 
             std::set<std::string> used;
             const int n = GDALDatasetGetLayerCount(hSrcDS);
@@ -549,10 +534,10 @@ namespace ddb
                 }
             }
 
-            GDALClose(hDst);
+            dst.reset();
             LOGD << "MVT sanitization: copied " << copied << "/" << n
-                 << " layers into " << vsiPath;
-            return vsiPath;
+                 << " layers into " << gpkg.path();
+            return gpkg;
         }
 
         // Convert input to MVT directory, reprojected to EPSG:3857.
@@ -582,27 +567,25 @@ namespace ddb
             // the layers into an in-memory GPKG with sanitized, unique names
             // and encodable geometries, and translate from that instead.
             GDALDatasetH hTranslateSrc = hSrcDS;
-            std::string sanitizedPath;
-            GDALDatasetH hSanitizedDS = nullptr;
+            // The file outlives the dataset that reads it
+            VsiMemFile sanitized;
+            GDALDatasetUniquePtr sanitizedDS;
             const auto normalizeGeometries = layersNeedingGeometryNormalization(hSrcDS);
             const bool anyGeometryToNormalize =
                 std::find(normalizeGeometries.begin(), normalizeGeometries.end(), true) !=
                 normalizeGeometries.end();
             if (anyGeometryToNormalize || anyLayerNeedsSanitization(hSrcDS))
             {
-                sanitizedPath = buildSanitizedGpkg(hSrcDS, normalizeGeometries);
-                hSanitizedDS = GDALOpenEx(sanitizedPath.c_str(),
-                                          GDAL_OF_VECTOR | GDAL_OF_READONLY,
-                                          nullptr, nullptr, nullptr);
-                if (!hSanitizedDS)
-                {
-                    VSIUnlink(sanitizedPath.c_str());
+                sanitized = buildSanitizedGpkg(hSrcDS, normalizeGeometries);
+                sanitizedDS = adoptDataset(GDALOpenEx(sanitized.c_str(),
+                                                      GDAL_OF_VECTOR | GDAL_OF_READONLY,
+                                                      nullptr, nullptr, nullptr));
+                if (!sanitizedDS)
                     throw AppException(
                         "Cannot open sanitized GPKG for MVT translation: " +
-                        sanitizedPath);
-                }
-                hTranslateSrc = hSanitizedDS;
-                LOGD << "MVT: using sanitized GPKG (" << sanitizedPath
+                        sanitized.path());
+                hTranslateSrc = datasetHandle(sanitizedDS);
+                LOGD << "MVT: using sanitized GPKG (" << sanitized.path()
                      << ") for " << srcPath;
             }
 
@@ -633,34 +616,30 @@ namespace ddb
             for (auto &s : argStore) argv.push_back(const_cast<char *>(s.c_str()));
             argv.push_back(nullptr);
 
-            GDALVectorTranslateOptions *opts =
-                GDALVectorTranslateOptionsNew(argv.data(), nullptr);
+            GdalOptionsPtr<GDALVectorTranslateOptions> opts(
+                GDALVectorTranslateOptionsNew(argv.data(), nullptr));
             if (!opts)
-            {
-                if (hSanitizedDS) GDALClose(hSanitizedDS);
-                if (!sanitizedPath.empty()) VSIUnlink(sanitizedPath.c_str());
                 throw AppException("Cannot create GDAL VectorTranslate options for MVT");
-            }
 
             // Reset GDAL error state so CPLGetLastErrorMsg() reflects this op.
             CPLErrorReset();
 
             int usageError = 0;
             errno = 0;
-            GDALDatasetH hOut = GDALVectorTranslate(
-                outputDir.c_str(), nullptr, 1, &hTranslateSrc, opts, &usageError);
+            auto out = adoptDataset(GDALVectorTranslate(
+                outputDir.c_str(), nullptr, 1, &hTranslateSrc, opts.get(), &usageError));
             const int translateSystemError = errno;
-            const bool translateFailed = !hOut || usageError ||
+            const bool translateFailed = !out || usageError ||
                 (translateSystemError == ENOSPC && CPLGetLastErrorType() >= CE_Failure);
             const char *error = CPLGetLastErrorMsg();
             const std::string translateMessage = error && *error ? error : "<no GDAL error>";
 
-            GDALVectorTranslateOptionsFree(opts);
-            const auto closeStatus = closeVectorOutput(hOut);
+            opts.reset();
+            const auto closeStatus = closeVectorOutput(std::move(out));
 
             // Release sanitization resources whether or not translate succeeded.
-            if (hSanitizedDS) GDALClose(hSanitizedDS);
-            if (!sanitizedPath.empty()) VSIUnlink(sanitizedPath.c_str());
+            sanitizedDS.reset();
+            sanitized.reset();
 
             if (translateFailed)
                 throwVectorWriteFailure("GDAL VectorTranslate (MVT)", outputDir,
@@ -725,150 +704,131 @@ namespace ddb
         const std::string openPath = isCad ? cadSource->dxfPath().string() : input;
 
         // Step 3: open source once, reuse for both branches
-        GDALDatasetH hSrcDS = GDALOpenEx(openPath.c_str(),
-                                         GDAL_OF_VECTOR | GDAL_OF_READONLY,
-                                         nullptr, nullptr, nullptr);
-        if (!hSrcDS)
+        const auto srcDS = adoptDataset(GDALOpenEx(openPath.c_str(),
+                                                   GDAL_OF_VECTOR | GDAL_OF_READONLY,
+                                                   nullptr, nullptr, nullptr));
+        if (!srcDS)
             throw AppException("Cannot open vector source: " + input);
+        GDALDatasetH hSrcDS = datasetHandle(srcDS);
 
+        // Layers without an SRS: EPSG:4326 for non-CAD inputs (historical
+        // behaviour), the drawing's CRS for CAD, nothing for a local drawing.
+        std::string sourceSrs = "EPSG:4326";
+        bool local = false;
+        cad::CadCrs crs;
+        std::string units;
+        if (isCad)
+        {
+            const auto info = cad::readDxfInfo(openPath);
+            crs = cad::resolveCadCrs(fs::path(input), hSrcDS, info);
+            units = cad::insUnitsName(info.insUnits);
+            local = !crs.georeferenced;
+            if (!crs.srs.empty()) sourceSrs = crs.srs;
+            LOGD << "CAD CRS for " << input << ": source=" << crs.source
+                 << " label=" << crs.label << (local ? " (local)" : "");
+        }
+
+        const fs::path vecDir = basePath / "vec";
+        const fs::path mvtDir = basePath / "mvt";
+
+        // A previous aborted build can leave empty vec/ or mvt/ directories
+        // behind. Check for the actual artifacts inside (source.gpkg and
+        // the MVT tileset metadata.json, or local.json for a local drawing)
+        // so we don't silently skip and produce a broken state.
+        const bool vecExists = fs::exists(vecDir / "source.gpkg");
+        const bool upToDate = local ? fs::exists(vecDir / "local.json")
+                                    : fs::exists(mvtDir / "metadata.json") &&
+                                          !fs::exists(vecDir / "local.json");
+
+        if (vecExists && upToDate && !overwrite)
+        {
+            LOGD << "Vector artifacts already exist, skipping";
+            return;
+        }
+
+        // Stage both outputs under a single sibling directory so that a
+        // crash partway through leaves at most one orphan directory to
+        // clean up. The publish step then promotes the children with a
+        // best-effort rollback if a rename fails.
+        // Removed on any throw from here on.
+        const io::ScopedTempDir staging = io::ScopedTempDir::create(basePath, ".vec-stage-");
+        const fs::path &stagingDir = staging.path();
+        const fs::path stagingVec = stagingDir / "vec";
+        const fs::path stagingMvt = stagingDir / "mvt";
+        io::assureFolderExists(stagingVec);
+        // MVT driver creates its own output dir; ensure parent exists
+        // and the target child does not (pre-empt leftovers).
+        io::assureIsRemoved(stagingMvt);
+
+        const auto gpkgOut = (stagingVec / "source.gpkg").string();
+        if (local)
+        {
+            // Drawing coordinates, no SRS and no MVT pyramid: there is
+            // nothing to place on a map (the Hub shows it without a globe).
+            convertToGpkg(hSrcDS, gpkgOut, "", false);
+            json localInfo = {{"georeferenced", false}, {"units", units}};
+            if (crs.hasExtent)
+                localInfo["extent"] = {crs.extent.MinX, crs.extent.MinY,
+                                       crs.extent.MaxX, crs.extent.MaxY};
+            std::ofstream out((stagingVec / "local.json").string(), std::ios::binary);
+            out << localInfo.dump();
+            if (!out)
+                throw FSException("Cannot write " + (stagingVec / "local.json").string());
+        }
+        else
+        {
+            const VectorStats stats = computeStats(hSrcDS, sourceSrs);
+            LOGD << "Vector stats: features=" << stats.featureCount
+                 << " envelope=[" << stats.minX << "," << stats.minY << ","
+                 << stats.maxX << "," << stats.maxY << "]";
+            // Branch A: MVT first (cheaper to roll back).
+            convertToMvt(hSrcDS, input, stagingMvt.string(), stats, sourceSrs);
+            // Branch B: GPKG sidecar.
+            convertToGpkg(hSrcDS, gpkgOut, sourceSrs, true);
+        }
+
+        // Publish: move existing artifacts (if any) to a sibling backup
+        // dir, promote the staged outputs, and on failure restore from
+        // the backup so users never observe a half-published state. A
+        // local build publishes no mvt/, so an old pyramid is retired.
+        const fs::path backupDir = basePath /
+            (".vec-backup-" + utils::generateRandomString(16));
+        const fs::path backupVec = backupDir / "vec";
+        const fs::path backupMvt = backupDir / "mvt";
+        // Back up any existing directory at the publish target, even if
+        // it lacks the canonical artifact (e.g. an empty leftover from a
+        // previous aborted build): otherwise the promote-rename below
+        // would fail because the destination already exists.
+        // A GeoPackage of the previous build kept open for WFS/OGC queries would
+        // block the renames on Windows
+        RasterCache::instance().release(vecDir);
+        RasterCache::instance().release(mvtDir);
+        const bool hadVec = fs::exists(vecDir);
+        const bool hadMvt = fs::exists(mvtDir);
+        io::assureFolderExists(backupDir);
         try
         {
-            // Layers without an SRS: EPSG:4326 for non-CAD inputs (historical
-            // behaviour), the drawing's CRS for CAD, nothing for a local drawing.
-            std::string sourceSrs = "EPSG:4326";
-            bool local = false;
-            cad::CadCrs crs;
-            std::string units;
-            if (isCad)
-            {
-                const auto info = cad::readDxfInfo(openPath);
-                crs = cad::resolveCadCrs(fs::path(input), hSrcDS, info);
-                units = cad::insUnitsName(info.insUnits);
-                local = !crs.georeferenced;
-                if (!crs.srs.empty()) sourceSrs = crs.srs;
-                LOGD << "CAD CRS for " << input << ": source=" << crs.source
-                     << " label=" << crs.label << (local ? " (local)" : "");
-            }
-
-            const fs::path vecDir = basePath / "vec";
-            const fs::path mvtDir = basePath / "mvt";
-
-            // A previous aborted build can leave empty vec/ or mvt/ directories
-            // behind. Check for the actual artifacts inside (source.gpkg and
-            // the MVT tileset metadata.json, or local.json for a local drawing)
-            // so we don't silently skip and produce a broken state.
-            const bool vecExists = fs::exists(vecDir / "source.gpkg");
-            const bool upToDate = local ? fs::exists(vecDir / "local.json")
-                                        : fs::exists(mvtDir / "metadata.json") &&
-                                              !fs::exists(vecDir / "local.json");
-
-            if (vecExists && upToDate && !overwrite)
-            {
-                LOGD << "Vector artifacts already exist, skipping";
-                GDALClose(hSrcDS);
-                return;
-            }
-
-            // Stage both outputs under a single sibling directory so that a
-            // crash partway through leaves at most one orphan directory to
-            // clean up. The publish step then promotes the children with a
-            // best-effort rollback if a rename fails.
-            const fs::path stagingDir = basePath /
-                (".vec-stage-" + utils::generateRandomString(16));
-            const fs::path stagingVec = stagingDir / "vec";
-            const fs::path stagingMvt = stagingDir / "mvt";
-            io::assureFolderExists(stagingDir);
-            io::assureFolderExists(stagingVec);
-            // MVT driver creates its own output dir; ensure parent exists
-            // and the target child does not (pre-empt leftovers).
-            io::assureIsRemoved(stagingMvt);
-
-            try
-            {
-                const auto gpkgOut = (stagingVec / "source.gpkg").string();
-                if (local)
-                {
-                    // Drawing coordinates, no SRS and no MVT pyramid: there is
-                    // nothing to place on a map (the Hub shows it without a globe).
-                    convertToGpkg(hSrcDS, gpkgOut, "", false);
-                    json localInfo = {{"georeferenced", false}, {"units", units}};
-                    if (crs.hasExtent)
-                        localInfo["extent"] = {crs.extent.MinX, crs.extent.MinY,
-                                               crs.extent.MaxX, crs.extent.MaxY};
-                    std::ofstream out((stagingVec / "local.json").string(), std::ios::binary);
-                    out << localInfo.dump();
-                    if (!out)
-                        throw FSException("Cannot write " + (stagingVec / "local.json").string());
-                }
-                else
-                {
-                    const VectorStats stats = computeStats(hSrcDS, sourceSrs);
-                    LOGD << "Vector stats: features=" << stats.featureCount
-                         << " envelope=[" << stats.minX << "," << stats.minY << ","
-                         << stats.maxX << "," << stats.maxY << "]";
-                    // Branch A: MVT first (cheaper to roll back).
-                    convertToMvt(hSrcDS, input, stagingMvt.string(), stats, sourceSrs);
-                    // Branch B: GPKG sidecar.
-                    convertToGpkg(hSrcDS, gpkgOut, sourceSrs, true);
-                }
-            }
-            catch (...)
-            {
-                io::assureIsRemoved(stagingDir);
-                throw;
-            }
-
-            // Publish: move existing artifacts (if any) to a sibling backup
-            // dir, promote the staged outputs, and on failure restore from
-            // the backup so users never observe a half-published state. A
-            // local build publishes no mvt/, so an old pyramid is retired.
-            const fs::path backupDir = basePath /
-                (".vec-backup-" + utils::generateRandomString(16));
-            const fs::path backupVec = backupDir / "vec";
-            const fs::path backupMvt = backupDir / "mvt";
-            // Back up any existing directory at the publish target, even if
-            // it lacks the canonical artifact (e.g. an empty leftover from a
-            // previous aborted build): otherwise the promote-rename below
-            // would fail because the destination already exists.
-            // A GeoPackage of the previous build kept open for WFS/OGC queries would
-            // block the renames on Windows
-            RasterCache::instance().release(vecDir);
-            RasterCache::instance().release(mvtDir);
-            const bool hadVec = fs::exists(vecDir);
-            const bool hadMvt = fs::exists(mvtDir);
-            io::assureFolderExists(backupDir);
-            try
-            {
-                if (hadVec) io::rename(vecDir.string(), backupVec.string());
-                if (hadMvt) io::rename(mvtDir.string(), backupMvt.string());
-                io::rename(stagingVec.string(), vecDir.string());
-                if (!local) io::rename(stagingMvt.string(), mvtDir.string());
-            }
-            catch (...)
-            {
-                // Rollback: remove anything we already promoted, then
-                // restore the originals from the backup.
-                io::assureIsRemoved(vecDir);
-                io::assureIsRemoved(mvtDir);
-                if (hadVec && fs::exists(backupVec))
-                    io::rename(backupVec.string(), vecDir.string());
-                if (hadMvt && fs::exists(backupMvt))
-                    io::rename(backupMvt.string(), mvtDir.string());
-                io::assureIsRemoved(stagingDir);
-                io::assureIsRemoved(backupDir);
-                throw;
-            }
-
-            io::assureIsRemoved(stagingDir);
-            io::assureIsRemoved(backupDir);
+            if (hadVec) io::rename(vecDir.string(), backupVec.string());
+            if (hadMvt) io::rename(mvtDir.string(), backupMvt.string());
+            io::rename(stagingVec.string(), vecDir.string());
+            if (!local) io::rename(stagingMvt.string(), mvtDir.string());
         }
         catch (...)
         {
-            GDALClose(hSrcDS);
+            // Rollback: remove anything we already promoted, then
+            // restore the originals from the backup.
+            io::assureIsRemoved(vecDir);
+            io::assureIsRemoved(mvtDir);
+            if (hadVec && fs::exists(backupVec))
+                io::rename(backupVec.string(), vecDir.string());
+            if (hadMvt && fs::exists(backupMvt))
+                io::rename(backupMvt.string(), mvtDir.string());
+            io::assureIsRemoved(backupDir);
             throw;
         }
 
-        GDALClose(hSrcDS);
+        io::assureIsRemoved(stagingDir);
+        io::assureIsRemoved(backupDir);
     }
 
 } // namespace ddb

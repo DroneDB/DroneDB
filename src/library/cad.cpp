@@ -13,6 +13,7 @@
 #include <sstream>
 
 #include "exceptions.h"
+#include "gdal_raii.h"
 #include "logger.h"
 #include "mio.h"
 #include "process_runner.h"
@@ -123,9 +124,7 @@ namespace ddb
                 char *wkt = nullptr;
                 const char *options[] = {"FORMAT=WKT2_2019", nullptr};
                 s.exportToWkt(&wkt, options);
-                std::string out = wkt ? wkt : "";
-                CPLFree(wkt);
-                return out;
+                return takeGdalString(wkt);
             }
         } // namespace
 
@@ -194,21 +193,23 @@ namespace ddb
             // dwg2dxf exits 0 on files it could not decode (DDB-12 RESULTS §2, §5):
             // only a DXF that GDAL opens and that has features counts as converted.
             const char *drivers[] = {"DXF", nullptr};
-            GDALDatasetH ds = GDALOpenEx(outDxf.string().c_str(), GDAL_OF_VECTOR | GDAL_OF_READONLY,
-                                         drivers, nullptr, nullptr);
-            if (!ds)
+            auto dataset = adoptDataset(GDALOpenEx(outDxf.string().c_str(),
+                                                   GDAL_OF_VECTOR | GDAL_OF_READONLY, drivers,
+                                                   nullptr, nullptr));
+            if (!dataset)
             {
                 io::assureIsRemoved(outDxf);
                 throw AppException("DWG conversion failed (" + version +
                                    "): the converted drawing cannot be read" + kDxfAdvice);
             }
             GIntBig features = 0;
+            GDALDatasetH ds = datasetHandle(dataset);
             for (int i = 0; i < GDALDatasetGetLayerCount(ds); i++)
             {
                 const GIntBig n = OGR_L_GetFeatureCount(GDALDatasetGetLayer(ds, i), TRUE);
                 if (n > 0) features += n;
             }
-            GDALClose(ds);
+            dataset.reset();
             if (features == 0)
             {
                 io::assureIsRemoved(outDxf);
@@ -227,38 +228,18 @@ namespace ddb
                 return;
             }
 
+            // A member: removed when the conversion throws, as when the source is destroyed
             const fs::path parent = workDir.empty() ? fs::temp_directory_path() : workDir;
-            tempDir = parent / ("ddb-cad-" + utils::generateRandomString(16));
-            io::assureFolderExists(tempDir);
-            dxf = tempDir / (input.stem().string() + ".dxf");
+            tempDir = io::ScopedTempDir::create(parent, "ddb-cad-");
+            dxf = tempDir.path() / (input.stem().string() + ".dxf");
 
-            try
-            {
-                if (converter)
-                    converter->toDxf(input, dxf);
-                else
-                    LibreDwgConverter().toDxf(input, dxf);
-            }
-            catch (...)
-            {
-                io::assureIsRemoved(tempDir);
-                tempDir.clear();
-                throw;
-            }
+            if (converter)
+                converter->toDxf(input, dxf);
+            else
+                LibreDwgConverter().toDxf(input, dxf);
         }
 
-        CadSource::~CadSource()
-        {
-            if (tempDir.empty()) return;
-            try
-            {
-                io::assureIsRemoved(tempDir);
-            }
-            catch (const std::exception &e)
-            {
-                LOGW << "Cannot remove " << tempDir.string() << ": " << e.what();
-            }
-        }
+        CadSource::~CadSource() = default;
 
         DxfInfo readDxfInfo(const fs::path &dxf)
         {
@@ -499,8 +480,7 @@ namespace ddb
             char *wkt = nullptr;
             const char *options[] = {"FORMAT=WKT1_ESRI", nullptr};
             const auto err = s.exportToWkt(&wkt, options);
-            std::string out = wkt ? wkt : "";
-            CPLFree(wkt);
+            std::string out = takeGdalString(wkt);
             if (err != OGRERR_NONE || out.empty())
             {
                 // A CRS without an ESRI form (e.g. a derived CRS): WKT2 still reads back

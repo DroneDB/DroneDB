@@ -4,6 +4,7 @@
 #include "volume.h"
 #include "mathutil.h"
 #include "exceptions.h"
+#include "gdal_raii.h"
 #include "json.h"
 #include "logger.h"
 
@@ -29,35 +30,6 @@
 namespace ddb {
 
 namespace {
-
-// Keep the implementation self-contained: small RAII wrappers mirroring
-// those in raster_profile.cpp. Duplication is intentional - the helpers
-// are 3 lines each and cross-TU sharing would add a header only for them.
-
-struct OgrGeometryDeleter {
-    void operator()(OGRGeometry *g) const {
-        if (g) OGRGeometryFactory::destroyGeometry(g);
-    }
-};
-using OgrGeometryPtr = std::unique_ptr<OGRGeometry, OgrGeometryDeleter>;
-
-struct SrsHandle {
-    OGRSpatialReferenceH h = nullptr;
-    explicit SrsHandle(OGRSpatialReferenceH handle = nullptr) : h(handle) {}
-    ~SrsHandle() { if (h) OSRDestroySpatialReference(h); }
-    SrsHandle(const SrsHandle &) = delete;
-    SrsHandle &operator=(const SrsHandle &) = delete;
-};
-
-struct CtHandle {
-    OGRCoordinateTransformationH h = nullptr;
-    ~CtHandle() { if (h) OCTDestroyCoordinateTransformation(h); }
-};
-
-struct DsGuard {
-    GDALDatasetH h = nullptr;
-    ~DsGuard() { if (h) GDALClose(h); }
-};
 
 enum class BaseMethod {
     LowestPerimeter,
@@ -148,15 +120,15 @@ std::string calculateVolumeJson(const std::string &rasterPath,
     // --- Parse polygon (GeoJSON, WGS84) ---
     OGRGeometryH hRaw = OGR_G_CreateGeometryFromJson(polygonGeoJson.c_str());
     if (!hRaw) throw InvalidArgsException("Cannot parse polygon GeoJSON");
-    OgrGeometryPtr geom(reinterpret_cast<OGRGeometry *>(hRaw));
+    OGRGeometryUniquePtr geom(OGRGeometry::FromHandle(hRaw));
     const OGRwkbGeometryType gType = wkbFlatten(geom->getGeometryType());
     if (gType != wkbPolygon && gType != wkbMultiPolygon)
         throw InvalidArgsException("Volume geometry must be a Polygon or MultiPolygon");
 
     // --- Open raster ---
-    GDALDatasetH hDs = GDALOpen(rasterPath.c_str(), GA_ReadOnly);
-    if (!hDs) throw AppException("Cannot open raster: " + rasterPath);
-    DsGuard dsGuard{hDs};
+    const auto dataset = adoptDataset(GDALOpen(rasterPath.c_str(), GA_ReadOnly));
+    if (!dataset) throw AppException("Cannot open raster: " + rasterPath);
+    GDALDatasetH hDs = datasetHandle(dataset);
 
     double gt[6];
     if (GDALGetGeoTransform(hDs, gt) != CE_None)
@@ -175,9 +147,7 @@ std::string calculateVolumeJson(const std::string &rasterPath,
     const std::string projection = projRef ? projRef : "";
 
     // --- Reproject polygon WGS84 -> raster CRS (if needed) ---
-    SrsHandle wgs84(OSRNewSpatialReference(nullptr));
-    OSRImportFromEPSG(wgs84.h, 4326);
-    OSRSetAxisMappingStrategy(wgs84.h, OAMS_TRADITIONAL_GIS_ORDER);
+    const SrsPtr wgs84 = srsFromEpsg(4326);
 
     // Capture polygon centroid latitude in WGS84 *before* any reprojection
     // so we can convert pixel sizes to meters when the raster CRS is
@@ -189,27 +159,16 @@ std::string calculateVolumeJson(const std::string &rasterPath,
         polyCentroidLat = 0.5 * (wgsEnv.MinY + wgsEnv.MaxY);
     }
 
-    SrsHandle rasterSrs;
-    bool rasterIsGeographic = false;
-    if (!projection.empty()) {
-        rasterSrs.h = OSRNewSpatialReference(nullptr);
-        char *wktPtr = const_cast<char *>(projection.c_str());
-        if (OSRImportFromWkt(rasterSrs.h, &wktPtr) != OGRERR_NONE) {
-            OSRDestroySpatialReference(rasterSrs.h);
-            rasterSrs.h = nullptr;
-        } else {
-            OSRSetAxisMappingStrategy(rasterSrs.h, OAMS_TRADITIONAL_GIS_ORDER);
-            rasterIsGeographic = (OSRIsGeographic(rasterSrs.h) != 0);
-        }
-    }
+    const SrsPtr rasterSrs = srsFromWkt(projection.c_str());
+    const bool rasterIsGeographic = rasterSrs && OSRIsGeographic(rasterSrs.get()) != 0;
 
-    if (rasterSrs.h) {
-        CtHandle wgsToRaster;
-        wgsToRaster.h = OCTNewCoordinateTransformation(wgs84.h, rasterSrs.h);
-        if (!wgsToRaster.h)
+    if (rasterSrs) {
+        const CoordTransformPtr wgsToRaster(
+            OCTNewCoordinateTransformation(wgs84.get(), rasterSrs.get()));
+        if (!wgsToRaster)
             throw AppException("Cannot create WGS84 -> raster coordinate transformation");
-        if (OGR_G_Transform(reinterpret_cast<OGRGeometryH>(geom.get()),
-                            wgsToRaster.h) != OGRERR_NONE)
+        if (OGR_G_Transform(OGRGeometry::ToHandle(geom.get()),
+                            wgsToRaster.get()) != OGRERR_NONE)
             throw AppException("Cannot reproject polygon into raster CRS");
     }
 
@@ -259,9 +218,10 @@ std::string calculateVolumeJson(const std::string &rasterPath,
 
     GDALDriverH memDrv = GDALGetDriverByName("MEM");
     if (!memDrv) throw AppException("MEM driver unavailable");
-    GDALDatasetH maskDs = GDALCreate(memDrv, "", width, height, 1, GDT_Byte, nullptr);
-    if (!maskDs) throw AppException("Cannot create mask dataset");
-    DsGuard maskGuard{maskDs};
+    const auto maskOwner = adoptDataset(
+        GDALCreate(memDrv, "", width, height, 1, GDT_Byte, nullptr));
+    if (!maskOwner) throw AppException("Cannot create mask dataset");
+    GDALDatasetH maskDs = datasetHandle(maskOwner);
 
     double maskGt[6] = {
         gt[0] + startCol * gt[1] + startRow * gt[2],
@@ -272,7 +232,7 @@ std::string calculateVolumeJson(const std::string &rasterPath,
     GDALSetGeoTransform(maskDs, maskGt);
     if (!projection.empty()) GDALSetProjection(maskDs, projection.c_str());
 
-    OGRGeometryH hGeom = reinterpret_cast<OGRGeometryH>(geom.get());
+    OGRGeometryH hGeom = OGRGeometry::ToHandle(geom.get());
     int bandList[1] = {1};
     double burn[1] = {1.0};
     if (GDALRasterizeGeometries(maskDs, 1, bandList, 1, &hGeom,
@@ -374,7 +334,7 @@ std::string calculateVolumeJson(const std::string &rasterPath,
     // documented m^2 / m^3 outputs would be off by ~10^10.
     double pixelWidth = std::fabs(gt[1]);
     double pixelHeight = std::fabs(gt[5]);
-    if (rasterIsGeographic || !rasterSrs.h) {
+    if (rasterIsGeographic || !rasterSrs) {
         const double d2r = ddb::kPi / 180.0;
         const double mPerDeg = 111320.0; // good-enough WGS84 approximation
         pixelWidth = std::fabs(gt[1]) * mPerDeg * std::cos(polyCentroidLat * d2r);

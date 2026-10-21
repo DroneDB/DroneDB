@@ -5,31 +5,17 @@
 
 #include <algorithm>
 #include <cstring>
-#include <limits>
 #include <map>
 #include <mutex>
 
 #include "exceptions.h"
-#include "gdal_inc.h"
+#include "gdal_raii.h"
 #include "utils.h"
 
 namespace ddb
 {
     namespace
     {
-        struct DatasetCloser
-        {
-            GDALDatasetH handle;
-            explicit DatasetCloser(GDALDatasetH h) : handle(h) {}
-            ~DatasetCloser()
-            {
-                if (handle != nullptr)
-                    GDALClose(handle);
-            }
-            DatasetCloser(const DatasetCloser &) = delete;
-            DatasetCloser &operator=(const DatasetCloser &) = delete;
-        };
-
         bool allEqual(const std::vector<uint8_t> &plane, uint8_t value)
         {
             return std::all_of(plane.begin(), plane.end(), [value](uint8_t v) { return v == value; });
@@ -51,7 +37,7 @@ namespace ddb
         // Builds the MEM dataset the format can store: JPEG takes no alpha (transparent
         // pixels become white), WebP takes only RGB/RGBA (grey is expanded), an opaque
         // alpha plane is dropped.
-        GDALDatasetH toMemDataset(const RasterImage &image, ImageFormat format)
+        GDALDatasetUniquePtr toMemDataset(const RasterImage &image, ImageFormat format)
         {
             GDALDriverH memDrv = GDALGetDriverByName("MEM");
             if (memDrv == nullptr)
@@ -62,10 +48,11 @@ namespace ddb
             const int bands = colorBands + (keepAlpha ? 1 : 0);
             const size_t pixels = image.pixels();
 
-            GDALDatasetH ds = GDALCreate(memDrv, "", image.width, image.height, bands, GDT_Byte, nullptr);
-            if (ds == nullptr)
+            auto owned = adoptDataset(
+                GDALCreate(memDrv, "", image.width, image.height, bands, GDT_Byte, nullptr));
+            if (!owned)
                 throw GDALException("Cannot create in-memory image dataset");
-            DatasetCloser guard(ds);
+            GDALDatasetH ds = datasetHandle(owned);
 
             std::vector<uint8_t> plane;
             for (int b = 0; b < colorBands; b++)
@@ -95,8 +82,7 @@ namespace ddb
                 GDALSetRasterColorInterpretation(alphaBand, GCI_AlphaBand);
             }
 
-            guard.handle = nullptr;
-            return ds;
+            return owned;
         }
 
         void encodeToPath(const RasterImage &image, const EncodeOptions &options, const std::string &path)
@@ -105,35 +91,28 @@ namespace ddb
             if (drv == nullptr)
                 throw GDALException(std::string(driverName(options.format)) + " driver not available");
 
-            DatasetCloser mem(toMemDataset(image, options.format));
-            char **opts = nullptr;
+            const auto mem = toMemDataset(image, options.format);
+            CPLStringList opts;
             for (const auto &o : imageCreationOptions(options))
-                opts = CSLAddString(opts, o.c_str());
-            GDALDatasetH out = GDALCreateCopy(drv, path.c_str(), mem.handle, FALSE, opts, nullptr, nullptr);
-            CSLDestroy(opts);
-            if (out == nullptr)
-            {
-                const std::string error = CPLGetLastErrorMsg();
-                if (path.rfind("/vsimem/", 0) == 0)
-                    VSIUnlink(path.c_str());
-                throw GDALException("Cannot encode image to " + path + ": " + error);
-            }
-            GDALClose(out);
+                opts.AddString(o.c_str());
+            // A failed encode leaves no partial /vsimem/ file
+            VsiMemFile partial(path.rfind("/vsimem/", 0) == 0 ? path : std::string());
+            const auto out = adoptDataset(
+                GDALCreateCopy(drv, path.c_str(), datasetHandle(mem), FALSE, opts.List(), nullptr, nullptr));
+            if (!out)
+                throw GDALException("Cannot encode image to " + path + ": " + CPLGetLastErrorMsg());
+            partial.release();
         }
 
+        // Hands the encoded bytes of the /vsimem/ file to the caller (VSIFree); the file is gone
         void stealBuffer(const std::string &path, uint8_t **outBuffer, int *outBufferSize)
         {
-            vsi_l_offset size = 0;
-            GByte *data = VSIGetMemFileBuffer(path.c_str(), &size, TRUE);
-            if (data == nullptr)
+            int size = 0;
+            auto data = stealMemFileBuffer(path, size);
+            if (!data)
                 throw GDALException("Cannot read encoded image " + path);
-            if (size > static_cast<vsi_l_offset>(std::numeric_limits<int>::max()))
-            {
-                VSIFree(data);
-                throw GDALException("Exceeded max buf size");
-            }
-            *outBuffer = data;
-            *outBufferSize = static_cast<int>(size);
+            *outBuffer = data.release();
+            *outBufferSize = size;
         }
 
         // Encoded bytes of fully transparent images, per format and size
@@ -152,19 +131,20 @@ namespace ddb
             if (it != cache.end())
                 return it->second;
 
-            const std::string path = "/vsimem/ddb-blank-" + utils::generateRandomString(16) + "." +
-                                     imageFormatExtension(options.format);
+            const VsiMemFile file =
+                VsiMemFile::unique("ddb-blank-", std::string(".") + imageFormatExtension(options.format));
             // Pixels under alpha 0 are not shown: encode zeros so that the bytes are the
             // same for every blank image of this size
             // Encoded once, so at the smallest size
             EncodeOptions blankOptions = options;
             blankOptions.pngZLevel = 9;
-            encodeToPath(RasterImage(shape.width, shape.height, shape.colorBands, true), blankOptions, path);
+            encodeToPath(RasterImage(shape.width, shape.height, shape.colorBands, true), blankOptions,
+                         file.path());
             uint8_t *data = nullptr;
             int size = 0;
-            stealBuffer(path, &data, &size);
+            stealBuffer(file.path(), &data, &size);
+            const VsiFreePtr<uint8_t> owned(data);
             std::vector<uint8_t> bytes(data, data + size);
-            VSIFree(data);
             return cache.emplace(key, std::move(bytes)).first->second;
         }
 
@@ -182,12 +162,10 @@ namespace ddb
                 return;
             }
 
-            VSILFILE *f = VSIFOpenL(path.c_str(), "wb");
-            if (f == nullptr)
+            const VsiFilePtr f(VSIFOpenL(path.c_str(), "wb"));
+            if (!f)
                 throw GDALException("Cannot write " + path);
-            const size_t written = VSIFWriteL(bytes.data(), 1, bytes.size(), f);
-            VSIFCloseL(f);
-            if (written != bytes.size())
+            if (VSIFWriteL(bytes.data(), 1, bytes.size(), f.get()) != bytes.size())
                 throw GDALException("Cannot write " + path);
         }
     }
@@ -270,8 +248,8 @@ namespace ddb
     {
         if (outBuffer == nullptr || outBufferSize == nullptr)
             throw InvalidArgsException("Output buffer pointers are null");
-        const std::string path = "/vsimem/ddb-enc-" + utils::generateRandomString(16) + "." +
-                                 imageFormatExtension(options.format);
-        write(image, options, path, outBuffer, outBufferSize);
+        const VsiMemFile file =
+            VsiMemFile::unique("ddb-enc-", std::string(".") + imageFormatExtension(options.format));
+        write(image, options, file.path(), outBuffer, outBufferSize);
     }
 }

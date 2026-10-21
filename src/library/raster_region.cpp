@@ -11,7 +11,7 @@
 #include <string>
 #include <vector>
 
-#include "gdal_inc.h"
+#include "gdal_raii.h"
 #include "gdal_priv.h"
 #include "gdal_utils.h"
 #include "cpl_conv.h"
@@ -95,6 +95,18 @@ namespace ddb
             return {"-wo", "NUM_THREADS=" + threads};
         }
 
+        // Hands the bytes of a written /vsimem/ render to the caller (VSIFree); the file is gone
+        void takeRenderBytes(const VsiMemFile &file, uint8_t **outBytes, int *outSize,
+                             const std::string &label)
+        {
+            int size = 0;
+            auto buf = stealMemFileBuffer(file.path(), size);
+            if (!buf || size == 0)
+                throw GDALException("Empty render output for " + label);
+            *outBytes = reinterpret_cast<uint8_t *>(buf.release());
+            *outSize = size;
+        }
+
         // Encodes ds in the output format into a buffer allocated by GDAL (VSIFree)
         void encodeDataset(GDALDatasetH ds, const FormatInfo &fi, uint8_t **outBytes, int *outSize,
                            const std::string &label)
@@ -103,28 +115,16 @@ namespace ddb
             if (!driver)
                 throw GDALException(std::string("Driver not available: ") + fi.driver);
 
-            const std::string vsiPath = "/vsimem/ddb-render-" + utils::generateRandomString(16) + "." + fi.vsiExt;
-            char **createOpts = nullptr;
+            const VsiMemFile out = VsiMemFile::unique("ddb-render-", std::string(".") + fi.vsiExt);
+            CPLStringList createOpts;
             for (const auto &co : fi.creationOptions)
-                createOpts = CSLAddString(createOpts, co.c_str());
-            GDALDatasetH hOut = GDALCreateCopy(driver, vsiPath.c_str(), ds, FALSE, createOpts, nullptr, nullptr);
-            CSLDestroy(createOpts);
-            if (!hOut)
-            {
-                VSIUnlink(vsiPath.c_str());
+                createOpts.AddString(co.c_str());
+            // Closed before its bytes are taken: closing writes them
+            if (!adoptDataset(GDALCreateCopy(driver, out.c_str(), ds, FALSE, createOpts.List(),
+                                             nullptr, nullptr)))
                 throw GDALException("Cannot encode the render of " + label);
-            }
-            GDALClose(hOut);
 
-            vsi_l_offset size = 0;
-            GByte *buf = VSIGetMemFileBuffer(vsiPath.c_str(), &size, TRUE /*unlink+steal*/);
-            if (!buf || size == 0)
-            {
-                if (buf) VSIFree(buf);
-                throw GDALException("Empty render output for " + label);
-            }
-            *outBytes = reinterpret_cast<uint8_t *>(buf);
-            *outSize = static_cast<int>(size);
+            takeRenderBytes(out, outBytes, outSize, label);
         }
 
         std::string fmtDouble(double v) {
@@ -193,9 +193,7 @@ namespace ddb
         // the warp block by block on one thread. Warp into memory with the warper's
         // threads and encode the result instead.
         const bool directOutput = std::string(fi.driver) == "GTiff";
-        const std::string vsiPath =
-            "/vsimem/ddb-render-" + utils::generateRandomString(16) +
-            "." + fi.vsiExt;
+        const VsiMemFile out = VsiMemFile::unique("ddb-render-", std::string(".") + fi.vsiExt);
 
         // Build GDALWarp options
         std::vector<std::string> argStore;
@@ -247,42 +245,24 @@ namespace ddb
         for (auto &s : argStore) argv.push_back(const_cast<char *>(s.c_str()));
         argv.push_back(nullptr);
 
-        GDALWarpAppOptions *opts =
-            GDALWarpAppOptionsNew(argv.data(), nullptr);
+        const GdalOptionsPtr<GDALWarpAppOptions> opts(GDALWarpAppOptionsNew(argv.data(), nullptr));
         if (!opts)
             throw GDALException("Cannot build GDALWarp options");
 
         int usageErr = 0;
-        GDALDatasetH hOut = GDALWarp(directOutput ? vsiPath.c_str() : "", nullptr, 1, &hSrc, opts, &usageErr);
-        GDALWarpAppOptionsFree(opts);
-
-        if (!hOut || usageErr) {
-            if (hOut) GDALClose(hOut);
-            VSIUnlink(vsiPath.c_str());
+        auto warped = adoptDataset(
+            GDALWarp(directOutput ? out.c_str() : "", nullptr, 1, &hSrc, opts.get(), &usageErr));
+        if (!warped || usageErr)
             throw GDALException("GDALWarp failed for " + inputPath);
-        }
 
         if (!directOutput) {
-            try {
-                encodeDataset(hOut, fi, outBytes, outSize, inputPath);
-            } catch (...) {
-                GDALClose(hOut);
-                throw;
-            }
-            GDALClose(hOut);
+            encodeDataset(datasetHandle(warped), fi, outBytes, outSize, inputPath);
             return;
         }
-        GDALClose(hOut);
+        // Closed before its bytes are taken: closing writes them
+        warped.reset();
 
-        vsi_l_offset size = 0;
-        GByte *buf = VSIGetMemFileBuffer(vsiPath.c_str(), &size, TRUE /*unlink+steal*/);
-        if (!buf || size == 0) {
-            if (buf) VSIFree(buf);
-            throw GDALException("Empty render output for " + inputPath);
-        }
-
-        *outBytes = reinterpret_cast<uint8_t *>(buf);
-        *outSize = static_cast<int>(size);
+        takeRenderBytes(out, outBytes, outSize, inputPath);
     }
 
     // ---------------------------------------------------------------------
@@ -310,55 +290,39 @@ namespace ddb
             throw GDALException("Raster has no projection: " + inputPath);
         }
 
-        OGRSpatialReferenceH hDsSrs = OSRNewSpatialReference(wkt);
-        OSRSetAxisMappingStrategy(hDsSrs, OAMS_TRADITIONAL_GIS_ORDER);
-        OGRSpatialReferenceH hReqSrs = OSRNewSpatialReference(nullptr);
-        if (OSRSetFromUserInput(hReqSrs, requestedSrs.c_str()) != OGRERR_NONE) {
-            OSRDestroySpatialReference(hDsSrs);
-            OSRDestroySpatialReference(hReqSrs);
+        const SrsPtr hDsSrs(OSRNewSpatialReference(wkt));
+        OSRSetAxisMappingStrategy(hDsSrs.get(), OAMS_TRADITIONAL_GIS_ORDER);
+        const SrsPtr hReqSrs(OSRNewSpatialReference(nullptr));
+        if (OSRSetFromUserInput(hReqSrs.get(), requestedSrs.c_str()) != OGRERR_NONE) {
             throw InvalidArgsException("Invalid SRS: " + requestedSrs);
         }
-        OSRSetAxisMappingStrategy(hReqSrs, OAMS_TRADITIONAL_GIS_ORDER);
+        OSRSetAxisMappingStrategy(hReqSrs.get(), OAMS_TRADITIONAL_GIS_ORDER);
 
         // Transform (x,y) in request SRS to dataset SRS
         double dsX = x;
         double dsY = y;
-        if (!OSRIsSame(hReqSrs, hDsSrs)) {
-            OGRCoordinateTransformationH hT =
-                OCTNewCoordinateTransformation(hReqSrs, hDsSrs);
+        if (!OSRIsSame(hReqSrs.get(), hDsSrs.get())) {
+            const CoordTransformPtr hT(OCTNewCoordinateTransformation(hReqSrs.get(), hDsSrs.get()));
             if (!hT) {
-                OSRDestroySpatialReference(hDsSrs);
-                OSRDestroySpatialReference(hReqSrs);
                 throw GDALException("Cannot create coord transformation");
             }
-            if (!OCTTransform(hT, 1, &dsX, &dsY, nullptr)) {
-                OCTDestroyCoordinateTransformation(hT);
-                OSRDestroySpatialReference(hDsSrs);
-                OSRDestroySpatialReference(hReqSrs);
+            if (!OCTTransform(hT.get(), 1, &dsX, &dsY, nullptr)) {
                 throw GDALException("Point transformation failed");
             }
-            OCTDestroyCoordinateTransformation(hT);
         }
 
         // Also compute lon/lat (WGS84) for the response
         double lon = x, lat = y;
         {
-            OGRSpatialReferenceH hWgs84 = OSRNewSpatialReference(nullptr);
-            OSRImportFromEPSG(hWgs84, 4326);
-            OSRSetAxisMappingStrategy(hWgs84, OAMS_TRADITIONAL_GIS_ORDER);
-            if (!OSRIsSame(hReqSrs, hWgs84)) {
-                OGRCoordinateTransformationH hT =
-                    OCTNewCoordinateTransformation(hReqSrs, hWgs84);
+            const SrsPtr hWgs84 = srsFromEpsg(4326);
+            if (!OSRIsSame(hReqSrs.get(), hWgs84.get())) {
+                const CoordTransformPtr hT(
+                    OCTNewCoordinateTransformation(hReqSrs.get(), hWgs84.get()));
                 if (hT) {
-                    OCTTransform(hT, 1, &lon, &lat, nullptr);
-                    OCTDestroyCoordinateTransformation(hT);
+                    OCTTransform(hT.get(), 1, &lon, &lat, nullptr);
                 }
             }
-            OSRDestroySpatialReference(hWgs84);
         }
-
-        OSRDestroySpatialReference(hDsSrs);
-        OSRDestroySpatialReference(hReqSrs);
 
         // Invert geotransform: pixel <- world
         double invGt[6];
@@ -481,8 +445,7 @@ namespace ddb
             throw InvalidArgsException("Raster has insufficient bands for " + indexName);
         }
 
-        const std::string vsiTif =
-            "/vsimem/ddb-idx-" + utils::generateRandomString(16) + ".tif";
+        VsiMemFile vsiTif = VsiMemFile::unique("ddb-idx-", ".tif");
 
         std::vector<std::string> argStore = {
             "-of", "GTiff",
@@ -502,16 +465,15 @@ namespace ddb
         for (auto &s : argStore) argv.push_back(const_cast<char *>(s.c_str()));
         argv.push_back(nullptr);
 
-        GDALWarpAppOptions *opts = GDALWarpAppOptionsNew(argv.data(), nullptr);
+        const GdalOptionsPtr<GDALWarpAppOptions> opts(GDALWarpAppOptionsNew(argv.data(), nullptr));
         if (!opts) throw GDALException("Cannot build warp options");
         int usageErr = 0;
-        GDALDatasetH hWarp = GDALWarp(vsiTif.c_str(), nullptr, 1, &hSrc, opts, &usageErr);
-        GDALWarpAppOptionsFree(opts);
-        if (!hWarp || usageErr) {
-            if (hWarp) GDALClose(hWarp);
-            VSIUnlink(vsiTif.c_str());
+        auto warp = adoptDataset(
+            GDALWarp(vsiTif.c_str(), nullptr, 1, &hSrc, opts.get(), &usageErr));
+        if (!warp || usageErr) {
             throw GDALException("Warp failed for index render: " + inputPath);
         }
+        GDALDatasetH hWarp = datasetHandle(warp);
 
         // Step 2: read required bands as Float32 buffers and capture their
         // nodata values so that nodata pixels can be rendered as transparent
@@ -534,17 +496,11 @@ namespace ddb
             hasND = (hn != 0);
             ndVal = v;
         };
-        try {
-            readBand(idx.b1, b1.data(), has1, nd1);
-            readBand(idx.b2, b2.data(), has2, nd2);
-            if (idx.b3 > 0) readBand(idx.b3, b3.data(), has3, nd3);
-        } catch (...) {
-            GDALClose(hWarp);
-            VSIUnlink(vsiTif.c_str());
-            throw;
-        }
-        GDALClose(hWarp);
-        VSIUnlink(vsiTif.c_str());
+        readBand(idx.b1, b1.data(), has1, nd1);
+        readBand(idx.b2, b2.data(), has2, nd2);
+        if (idx.b3 > 0) readBand(idx.b3, b3.data(), has3, nd3);
+        warp.reset();
+        vsiTif.reset();
 
         // Helper to detect nodata in a single sample (tolerant of float NaN).
         auto isND = [](double v, bool hasND, double ndVal) {
@@ -605,10 +561,11 @@ namespace ddb
         GDALDriverH hMem = GDALGetDriverByName("MEM");
         if (!hMem)
             throw GDALException("GDALGetDriverByName(\"MEM\") returned null; MEM driver unavailable");
-        GDALDatasetH hRgba = GDALCreate(hMem, "", width, height, outBandCount,
-                                        GDT_Byte, nullptr);
-        if (!hRgba)
+        const auto rgbaDs = adoptDataset(GDALCreate(hMem, "", width, height, outBandCount,
+                                                    GDT_Byte, nullptr));
+        if (!rgbaDs)
             throw GDALException("GDALCreate failed for in-memory RGBA dataset");
+        GDALDatasetH hRgba = datasetHandle(rgbaDs);
         if (emitAlpha) {
             for (int b = 0; b < 4; ++b) {
                 GDALRasterBandH hB = GDALGetRasterBand(hRgba, b + 1);
@@ -643,13 +600,7 @@ namespace ddb
                 GDALSetRasterColorInterpretation(GDALGetRasterBand(hRgba, b + 1), ci[b]);
         }
 
-        try {
-            encodeDataset(hRgba, fi, outBytes, outSize, inputPath);
-        } catch (...) {
-            GDALClose(hRgba);
-            throw;
-        }
-        GDALClose(hRgba);
+        encodeDataset(hRgba, fi, outBytes, outSize, inputPath);
     }
 
 } // namespace ddb

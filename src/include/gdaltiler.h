@@ -37,8 +37,12 @@ namespace ddb
     /// once: RasterCache hands out one per caller and keeps them for the next tiles.
     class GDALTiler : public Tiler
     {
+        // The raster file, then the VRT warped to EPSG:3857 over it when the file has another
+        // SRS (declared after the file: closed before it)
+        GDALDatasetUniquePtr fileDataset;
+        GDALDatasetUniquePtr warpedDataset;
+        // What the tiles read: the warped VRT, or the file (not owned)
         GDALDatasetH inputDataset = nullptr;
-        GDALDatasetH origDataset = nullptr;
 
         int rasterCount;
 
@@ -46,7 +50,7 @@ namespace ddb
         bool sameProjection(const OGRSpatialReferenceH &a,
                             const OGRSpatialReferenceH &b);
         int dataBandsCount(const GDALDatasetH &dataset);
-        GDALDatasetH createWarpedVRT(
+        GDALDatasetUniquePtr createWarpedVRT(
             const GDALDatasetH &src, const OGRSpatialReferenceH &srs,
             GDALResampleAlg resampling = GRA_NearestNeighbour);
         void open();
