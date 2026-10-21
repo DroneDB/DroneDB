@@ -8,6 +8,7 @@
 #include "logger.h"
 #include "utils.h"
 #include "sensorprofile.h"
+#include "mio.h"
 
 #include <exiv2/exiv2.hpp>
 #include <gdal_priv.h>
@@ -74,7 +75,7 @@ struct FlirSegmentInfo {
 static FlirSegmentInfo findFlirSegment(const std::string &filePath) {
     FlirSegmentInfo info;
 
-    std::ifstream file(filePath, std::ios::binary);
+    std::ifstream file(io::fromUtf8(filePath), std::ios::binary);
     if (!file.is_open()) return info;
 
     // Read entire file into memory for simpler parsing
@@ -154,7 +155,7 @@ static FlirSegmentInfo findFlirSegment(const std::string &filePath) {
 
     // Try to extract width/height from XMP/EXIF first
     try {
-        auto exivImage = Exiv2::ImageFactory::open(filePath);
+        auto exivImage = openExivImage(io::fromUtf8(filePath));
         if (exivImage.get()) {
             exivImage->readMetadata();
             ExifParser parser(exivImage.get());
@@ -230,7 +231,7 @@ RawThermalData extractRawThermalData(const std::string &filePath) {
     // Method 1: Try FLIR APP1 segment extraction (FLIR R-JPEG format)
     FlirSegmentInfo seg = findFlirSegment(filePath);
     if (seg.found) {
-        std::ifstream file(filePath, std::ios::binary);
+        std::ifstream file(io::fromUtf8(filePath), std::ios::binary);
         if (!file.is_open()) return result;
 
         file.seekg(seg.rawDataOffset);
@@ -295,7 +296,7 @@ ThermalCalibration extractThermalCalibration(const std::string &filePath) {
     ThermalCalibration cal;
 
     try {
-        auto exivImage = Exiv2::ImageFactory::open(filePath);
+        auto exivImage = openExivImage(io::fromUtf8(filePath));
         if (!exivImage.get()) return cal;
         exivImage->readMetadata();
         ExifParser parser(exivImage.get());
@@ -443,7 +444,7 @@ bool isDirectTemperatureRaster(const std::string &filePath) {
 bool isThermalImage(const std::string &filePath) {
     // Method 1: Check EXIF Make/Model
     try {
-        auto exivImage = Exiv2::ImageFactory::open(filePath);
+        auto exivImage = openExivImage(io::fromUtf8(filePath));
         if (exivImage.get()) {
             exivImage->readMetadata();
             ExifParser parser(exivImage.get());

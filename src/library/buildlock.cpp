@@ -7,6 +7,7 @@
 #include "exceptions.h"
 #include "logger.h"
 #include "fs.h"
+#include "mio.h"
 
 #include <sstream>
 #include <fstream>
@@ -130,7 +131,7 @@ bool probeDirectoryWritable(const fs::path& dir) {
     static std::atomic<unsigned long> counter{0};
     auto probe = dir / (".ddb_lock_probe_" + std::to_string(_getpid()) + "_" +
                        std::to_string(counter.fetch_add(1)));
-    HANDLE h = CreateFileA(probe.string().c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
+    HANDLE h = CreateFileW(probe.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
                            FILE_ATTRIBUTE_HIDDEN | FILE_FLAG_DELETE_ON_CLOSE, nullptr);
     if (h == INVALID_HANDLE_VALUE) return false;
     CloseHandle(h);
@@ -318,16 +319,16 @@ void BuildLock::acquireLock(bool waitForLock) {
     LOGD << "Attempting to acquire build lock" << (waitForLock ? "" : " (no wait)") << ": " << lockFilePath;
 
     // Check if containing folder exists
-    fs::path lockPath(lockFilePath);
+    const fs::path lockPath = io::fromUtf8(lockFilePath);
     if (!fs::exists(lockPath.parent_path()))
-        throw BuildLockDirectoryException("Lock file directory does not exist: " + lockPath.parent_path().string());
+        throw BuildLockDirectoryException("Lock file directory does not exist: " + io::toUtf8(lockPath.parent_path()));
 
 
 #ifdef WIN32
     // Windows implementation using CreateFile with exclusive access
     // FILE_FLAG_DELETE_ON_CLOSE ensures automatic cleanup even if process crashes
-    fileHandle = CreateFileA(
-        lockFilePath.c_str(),
+    fileHandle = CreateFileW(
+        lockPath.c_str(),
         GENERIC_WRITE,              // We need write access to write PID info
         0,                          // No sharing - this is the key for exclusivity
         nullptr,                    // Default security attributes
@@ -476,7 +477,7 @@ bool BuildLock::isHeld(const std::string& outputPath) {
     // A live holder has the file open with GENERIC_WRITE, no sharing and delete-on-close, so
     // any open asking for data access fails. All share modes are granted here so that two
     // probes never see each other as holders; OPEN_EXISTING never creates the file.
-    HANDLE h = CreateFileA(lockFile.c_str(), GENERIC_READ,
+    HANDLE h = CreateFileW(io::toWide(lockFile).c_str(), GENERIC_READ,
                            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
                            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (h == INVALID_HANDLE_VALUE) {
@@ -521,7 +522,7 @@ bool BuildLock::isHeld(const std::string& outputPath) {
 
 bool BuildLock::removeIfStale(const std::string& outputPath) {
     std::error_code ec;
-    if (!fs::exists(buildLockPath(outputPath), ec))
+    if (!fs::exists(io::fromUtf8(buildLockPath(outputPath)), ec))
         return !ec;  // nothing to remove; a stat error leaves the state unknown
 
     try {

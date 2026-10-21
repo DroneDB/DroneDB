@@ -60,21 +60,21 @@ static void initializeXmp() {
 }
 
 void setupEnvironmentVariables(const std::string& exeFolder) {
-    // Setup PROJ paths (uniform for both platforms)
-    const auto projDataPath = fs::path(exeFolder).string();
+    // Setup PROJ paths (uniform for both platforms). PROJ reads PROJ_DATA as UTF-8.
+    const std::string &projDataPath = exeFolder;
 
     // Check for existence of proj.db
-    const auto projDbPath = fs::path(projDataPath) / "proj.db";
+    const auto projDbPath = io::fromUtf8(projDataPath) / "proj.db";
     if (!fs::exists(projDbPath)) {
-        LOGW << "PROJ database not found at: " << projDbPath.string();
+        LOGW << "PROJ database not found at: " << io::toUtf8(projDbPath);
         LOGW << "Coordinate transformations may fail";
     } else {
-        LOGD << "PROJ database found at: " << projDbPath.string();
+        LOGD << "PROJ database found at: " << io::toUtf8(projDbPath);
 
         // Debug: Print proj.db hash
         try {
-            const std::string projDbHash = Hash::fileSHA256(projDbPath.string());
-            LOGD << "proj.db hash: " << projDbHash << " (path: " << projDbPath.string() << ")";
+            const std::string projDbHash = Hash::fileSHA256(io::toUtf8(projDbPath));
+            LOGD << "proj.db hash: " << projDbHash << " (path: " << io::toUtf8(projDbPath) << ")";
 
         } catch (const std::exception& e) {
             LOGD << "Error computing proj.db hash: " << e.what();
@@ -85,14 +85,14 @@ void setupEnvironmentVariables(const std::string& exeFolder) {
     // Windows: uses _putenv_s for CRT synchronization
 
     // PROJ_DATA is the preferred (modern) variable
-    if (GetEnvironmentVariableA("PROJ_DATA", nullptr, 0) == 0) {
+    if (GetEnvironmentVariableW(L"PROJ_DATA", nullptr, 0) == 0) {
         _putenv_s("PROJ_DATA", projDataPath.c_str());
         LOGD << "Set PROJ_DATA: " << projDataPath;
     }
 
     // PROJ_LIB is only a legacy fallback if PROJ_DATA is not present
-    if (GetEnvironmentVariableA("PROJ_LIB", nullptr, 0) == 0 &&
-        GetEnvironmentVariableA("PROJ_DATA", nullptr, 0) == 0) {
+    if (GetEnvironmentVariableW(L"PROJ_LIB", nullptr, 0) == 0 &&
+        GetEnvironmentVariableW(L"PROJ_DATA", nullptr, 0) == 0) {
         _putenv_s("PROJ_LIB", projDataPath.c_str());
         LOGD << "Set PROJ_LIB (fallback): " << projDataPath;
     }
@@ -227,7 +227,7 @@ namespace ddb
             const int sqliteConfigRc = configureSqlite();
 
             LOGD << "Initializing DDB process";
-            const auto exeFolder = io::getExeFolderPath().string();
+            const auto exeFolder = io::toUtf8(io::getExeFolderPath());
 
             setupEnvironmentVariables(exeFolder);
             setupLocaleUnified();

@@ -54,12 +54,12 @@ namespace ddb
         io::Path p = io::Path(filePath);
         size_t filesize = p.getSize();
 
-        std::string filename = filePath.filename().string();
+        std::string filename = io::toUtf8(filePath.filename());
 
         // size_t gTotalBytes = p.getSize();
         // size_t gTxBytes = 0;
 
-        LOGD << "Uploading " << p.string();
+        LOGD << "Uploading " << io::toUtf8(filePath);
 
         // No retry loop here: the old one retried NetException only, which nothing on this
         // path throws (handleError raises AuthException/RegistryException and cpr transport
@@ -69,7 +69,7 @@ namespace ddb
 
         auto res = cpr::Post(cpr::Url(this->registry->getUrl("/share/upload/" + this->token)),
                              utils::authHeader(this->registry->getAuthToken()),
-                             cpr::Multipart{{cpr::Part("file", cpr::File(filePath.string())), cpr::Part("path", path)}},
+                             cpr::Multipart{{cpr::Part("file", utils::uploadFile(filePath)), cpr::Part("path", path)}},
                              cpr::Timeout{10000},
                              cpr::ProgressCallback([&cb, &filename](size_t, size_t, size_t uploadTotal, size_t uploadNow, intptr_t) -> bool
                                                    {

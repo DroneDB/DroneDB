@@ -52,10 +52,10 @@ namespace ddb
 
             fs::path searchOnPath()
             {
-                const char *path = std::getenv("PATH");
-                if (!path || !*path) return {};
+                const auto path = io::getEnvUtf8("PATH");
+                if (!path || path->empty()) return {};
 
-                std::string p(path);
+                const std::string &p = *path;
                 size_t start = 0;
                 while (start <= p.size())
                 {
@@ -64,7 +64,7 @@ namespace ddb
                     std::string dir = p.substr(start, end - start);
                     if (!dir.empty())
                     {
-                        fs::path candidate = fs::path(dir) / kBinaryName;
+                        fs::path candidate = io::fromUtf8(dir) / kBinaryName;
                         if (isExecutableFile(candidate)) return candidate;
                     }
                     if (end == p.size()) break;
@@ -82,7 +82,7 @@ namespace ddb
             fs::path expectedLodOutput(const fs::path &input)
             {
                 fs::path stem = input.stem(); // "model.spz" -> "model"
-                return input.parent_path() / (stem.string() + "-lod.rad");
+                return input.parent_path() / io::concat(stem, "-lod.rad");
             }
 
         } // namespace
@@ -95,18 +95,18 @@ namespace ddb
             fs::path found;
 
             // 1. Explicit override via env var (authoritative when non-empty).
-            if (const char *override = std::getenv("DDB_BUILDLOD_PATH"))
+            if (const auto override = io::getEnvUtf8("DDB_BUILDLOD_PATH"))
             {
-                if (override[0] != '\0')
+                if (!override->empty())
                 {
-                    fs::path p(override);
+                    const fs::path p = io::fromUtf8(*override);
                     if (isExecutableFile(p)) found = p;
                     g_cachedBinary = found;
                     g_cacheValid = true;
                     if (!found.empty())
-                        LOGD << "build-lod binary discovered via DDB_BUILDLOD_PATH at " << found.string();
+                        LOGD << "build-lod binary discovered via DDB_BUILDLOD_PATH at " << io::toUtf8(found);
                     else
-                        LOGD << "DDB_BUILDLOD_PATH=" << override << " is not an executable file; treating build-lod as unavailable";
+                        LOGD << "DDB_BUILDLOD_PATH=" << *override << " is not an executable file; treating build-lod as unavailable";
                     return found;
                 }
             }
@@ -139,7 +139,7 @@ namespace ddb
             g_cacheValid = true;
 
             if (!found.empty())
-                LOGD << "build-lod binary discovered at " << found.string();
+                LOGD << "build-lod binary discovered at " << io::toUtf8(found);
             else
                 LOGD << "build-lod binary not found in DDB_BUILDLOD_PATH, exe folder, install prefix or PATH";
 
@@ -208,7 +208,7 @@ namespace ddb
             if (!fs::exists(input, ec) || ec)
             {
                 result.errorCode = ec;
-                result.error = "build-lod input does not exist: " + input.string();
+                result.error = "build-lod input does not exist: " + io::toUtf8(input);
                 return result;
             }
 
@@ -229,7 +229,7 @@ namespace ddb
             }
 
             int clampedSh = maxSh < 0 ? 0 : (maxSh > 3 ? 3 : maxSh);
-            std::vector<std::string> args = {input.string(), quality ? "--quality" : "--quick",
+            std::vector<std::string> args = {io::toUtf8(input), quality ? "--quality" : "--quick",
                                             "--max-sh=" + std::to_string(clampedSh), "--rad"};
             LOGD << "Spawning build-lod: " << process::formatCommandLine(bin, args);
 
@@ -251,7 +251,7 @@ namespace ddb
             if (!fs::exists(producedRad, ec) || ec)
             {
                 result.errorCode = ec;
-                result.error = "build-lod reported success but expected output is missing: " + producedRad.string();
+                result.error = "build-lod reported success but expected output is missing: " + io::toUtf8(producedRad);
                 return result;
             }
 
@@ -265,7 +265,7 @@ namespace ddb
                 std::error_code copyEc;
                 fs::copy_file(producedRad, outputRad, fs::copy_options::overwrite_existing, copyEc);
                 if (copyEc)
-                    return failIo("failed to move build-lod output to " + outputRad.string(), copyEc);
+                    return failIo("failed to move build-lod output to " + io::toUtf8(outputRad), copyEc);
                 fs::remove(producedRad, ec);
             }
             result.succeeded = true;

@@ -23,10 +23,10 @@ namespace ddb
 
             fs::path searchOnPath(const std::string &fileName)
             {
-                const char *path = std::getenv("PATH");
-                if (!path || !*path) return {};
+                const auto path = io::getEnvUtf8("PATH");
+                if (!path || path->empty()) return {};
 
-                const std::string p(path);
+                const std::string &p = *path;
                 size_t start = 0;
                 while (start <= p.size())
                 {
@@ -35,7 +35,7 @@ namespace ddb
                     const std::string dir = p.substr(start, end - start);
                     if (!dir.empty())
                     {
-                        const fs::path candidate = fs::path(dir) / fileName;
+                        const fs::path candidate = io::fromUtf8(dir) / io::fromUtf8(fileName);
                         if (isExecutableFile(candidate)) return candidate;
                     }
                     if (end == p.size()) break;
@@ -66,15 +66,15 @@ namespace ddb
 
             if (envVar != nullptr)
             {
-                if (const char *override = std::getenv(envVar); override && *override)
+                if (const auto override = io::getEnvUtf8(envVar); override && !override->empty())
                 {
-                    const fs::path p(override);
+                    const fs::path p = io::fromUtf8(*override);
                     if (isExecutableFile(p))
                     {
-                        LOGD << fileName << " found via " << envVar << " at " << p.string();
+                        LOGD << fileName << " found via " << envVar << " at " << io::toUtf8(p);
                         return p;
                     }
-                    LOGD << envVar << "=" << override << " is not an executable file; treating "
+                    LOGD << envVar << "=" << *override << " is not an executable file; treating "
                          << fileName << " as unavailable";
                     return {};
                 }
@@ -83,9 +83,9 @@ namespace ddb
             const fs::path exeDir = io::getExeFolderPath();
             if (!exeDir.empty())
             {
-                if (const auto c = exeDir / fileName; isExecutableFile(c)) return c;
+                if (const auto c = exeDir / io::fromUtf8(fileName); isExecutableFile(c)) return c;
                 if (exeDir.has_parent_path())
-                    if (const auto c = exeDir.parent_path() / "bin" / fileName; isExecutableFile(c)) return c;
+                    if (const auto c = exeDir.parent_path() / "bin" / io::fromUtf8(fileName); isExecutableFile(c)) return c;
             }
 
             return searchOnPath(fileName);

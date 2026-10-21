@@ -8,6 +8,7 @@
 
 #include "exceptions.h"
 #include "process_config.h"
+#include "mio.h"
 
 namespace ddb
 {
@@ -26,19 +27,19 @@ namespace ddb
         {
             if (fs::create_directories(dir))
             {
-                LOGD << "Created " << dir.string();
+                LOGD << "Created " << io::toUtf8(dir);
             }
             else
             {
                 // Was it created by a competing process?
                 if (!fs::exists(dir))
-                    throw AppException("Cannot create profile directory: " + dir.string() + ". Check that you have permissions to write.");
-                LOGD << "Dir was already created (by another process?): " << dir.string();
+                    throw AppException("Cannot create profile directory: " + io::toUtf8(dir) + ". Check that you have permissions to write.");
+                LOGD << "Dir was already created (by another process?): " << io::toUtf8(dir);
             }
         }
         else
         {
-            LOGD << dir.string() << " exists";
+            LOGD << io::toUtf8(dir) << " exists";
         }
     }
 
@@ -49,31 +50,29 @@ namespace ddb
         {
             if (fromDdbHome != nullptr)
                 *fromDdbHome = false;
-            const char *ddb_home = std::getenv("DDB_HOME");
-            if (ddb_home)
+            // UTF-8 (io::getEnvUtf8): on Windows a non-ASCII user name is common
+            if (const auto ddbHome = io::getEnvUtf8("DDB_HOME"))
             {
                 if (fromDdbHome != nullptr)
                     *fromDdbHome = true;
-                return std::string(ddb_home);
+                return io::fromUtf8(*ddbHome);
             }
 
-            const char *home = std::getenv("HOME");
-            if (home)
-                return std::string(home);
+            if (const auto home = io::getEnvUtf8("HOME"))
+                return io::fromUtf8(*home);
 
-            home = std::getenv("USERPROFILE");
-            if (home)
-                return std::string(home);
+            if (const auto home = io::getEnvUtf8("USERPROFILE"))
+                return io::fromUtf8(*home);
 
-            home = std::getenv("HOMEDRIVE");
-            const char *homePath = std::getenv("HOMEPATH");
+            const auto homeDrive = io::getEnvUtf8("HOMEDRIVE");
+            const auto homePath = io::getEnvUtf8("HOMEPATH");
 
-            if (!home || !homePath)
+            if (!homeDrive || !homePath)
             {
                 throw AppException("Cannot find home directory. Make sure that either your HOME or USERPROFILE environment variable is set and points to the current user's home directory.");
             }
 
-            return fs::path(std::string(home)) / fs::path(std::string(homePath));
+            return io::fromUtf8(*homeDrive) / io::fromUtf8(*homePath);
         }
     } // namespace
 
@@ -114,7 +113,7 @@ namespace ddb
 
     fs::path UserProfile::getThumbsDir(int thumbSize)
     {
-        const fs::path thumbsSizeDir = getThumbsDir() / fs::path(std::to_string(thumbSize));
+        const fs::path thumbsSizeDir = getThumbsDir() / std::to_string(thumbSize);
         createDir(thumbsSizeDir);
         return thumbsSizeDir;
     }

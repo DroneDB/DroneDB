@@ -183,6 +183,10 @@ cpr::Header authHeader(const std::string& token);
 
 cpr::Header authCookie(const std::string& token);
 
+// A file part of a multipart upload. cpr would name the part with fs::path(std::string), the
+// ANSI code page on Windows: the UTF-8 file name is passed instead (mio.h, "Path encoding")
+cpr::File uploadFile(const fs::path& file);
+
 DDB_DLL void printVersions();
 
 // "Debug build ..." or "Release build ..." (from NDEBUG), compiler and build date

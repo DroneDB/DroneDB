@@ -49,7 +49,7 @@ namespace ddb
 
         auto res = cpr::Post(cpr::Url(this->registry->getUrl("/orgs/" + this->organization + "/ds/" +
                                                              this->dataset + "/push/upload")),
-                             cpr::Multipart{{"file", cpr::File{fullPath}},
+                             cpr::Multipart{{"file", utils::uploadFile(io::fromUtf8(fullPath))},
                                             {"path", file},
                                             {"token", token}},
                              utils::authHeader(this->registry->getAuthToken()),

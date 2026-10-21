@@ -42,7 +42,7 @@ fs::path getThumbFromUserCache(const fs::path& imagePath, int thumbSize, bool fo
     if (oneIn(1000))
         cleanupThumbsUserCache();
     if (!fs::exists(imagePath))
-        throw FSException(imagePath.filename().string() + " does not exist");
+        throw FSException(io::toUtf8(imagePath.filename()) + " does not exist");
     const fs::path outdir = UserProfile::get()->getThumbsDir(thumbSize);
     io::Path p = imagePath;
     const fs::path thumbPath = outdir / getThumbFilename(imagePath, p.getModifiedTime(), thumbSize);
@@ -62,10 +62,10 @@ void generateThumbs(const std::vector<std::string>& input,
     const bool outputIsFile = input.size() == 1 && io::Path(output).checkExtension(
                                                        {"jpg", "jpeg", "png", "webp", "json"});
 
-    const std::vector<fs::path> filePaths = std::vector<fs::path>(input.begin(), input.end());
+    const std::vector<fs::path> filePaths = io::fromUtf8(input);
 
     for (auto& fp : filePaths) {
-        LOGD << "Parsing entry " << fp.string();
+        LOGD << "Parsing entry " << io::toUtf8(fp);
 
         const EntryType type = fingerprint(fp);
         io::Path p(fp);
@@ -81,7 +81,7 @@ void generateThumbs(const std::vector<std::string>& input,
             } else {
                 outImagePath = output / fs::path(fp).replace_extension(".webp").filename();
             }
-            std::cout << generateThumb(fp, thumbSize, outImagePath, true, nullptr, nullptr).string()
+            std::cout << io::toUtf8(generateThumb(fp, thumbSize, outImagePath, true, nullptr, nullptr))
                       << std::endl;
         } else {
             LOGD << "Skipping " << fp;
@@ -93,8 +93,8 @@ fs::path getThumbFilename(const fs::path& imagePath, time_t modifiedTime, int th
     // Thumbnails are WEBP files idenfitied by:
     // CRC64(imagePath + "*" + modifiedTime + "*" + thumbSize).webp
     std::ostringstream os;
-    os << imagePath.string() << "*" << modifiedTime << "*" << thumbSize;
-    return fs::path(Hash::strCRC64(os.str()) + ".webp");
+    os << io::toUtf8(imagePath) << "*" << modifiedTime << "*" << thumbSize;
+    return io::fromUtf8(Hash::strCRC64(os.str()) + ".webp");
 }
 
 namespace {
@@ -125,23 +125,23 @@ void writeThumbnail(const RasterImage& image,
     if (outImagePath.empty() && outBuffer != nullptr)
         TileEncoder::encode(image, options, outBuffer, outBufferSize);
     else
-        TileEncoder::write(image, options, outImagePath.string());
+        TileEncoder::write(image, options, io::toUtf8(outImagePath));
 }
 
 // Open a source raster, transparently falling back between a /vsicurl/ URL
 // and the raw path when the input looks like a remote TIFF.
 GDALDatasetUniquePtr openThumbSource(const fs::path& imagePath, std::string& resolvedPath) {
-    resolvedPath = imagePath.string();
+    resolvedPath = io::toUtf8(imagePath);
     bool tryReopen = false;
     if (utils::isNetworkPath(resolvedPath) &&
-        io::Path(resolvedPath).checkExtension({"tif", "tiff"})) {
+        io::Path(io::fromUtf8(resolvedPath)).checkExtension({"tif", "tiff"})) {
         resolvedPath = "/vsicurl/" + resolvedPath;
         tryReopen = true;
     }
 
     auto src = adoptDataset(GDALOpen(resolvedPath.c_str(), GA_ReadOnly));
     if (!src && tryReopen) {
-        resolvedPath = imagePath.string();
+        resolvedPath = io::toUtf8(imagePath);
         src = adoptDataset(GDALOpen(resolvedPath.c_str(), GA_ReadOnly));
     }
     if (!src)
@@ -157,14 +157,14 @@ GDALDatasetUniquePtr openThumbSource(const fs::path& imagePath, std::string& res
 GDALDatasetUniquePtr openImageThumbSource(const fs::path& imagePath, int thumbSize, std::string& openPath,
                                           int& frameWidth, int& frameHeight) {
     frameWidth = frameHeight = 0;
-    if (!utils::isNetworkPath(imagePath.string()) && io::Path(imagePath).checkExtension({"jpg", "jpeg"})) {
+    if (!utils::isNetworkPath(io::toUtf8(imagePath)) && io::Path(imagePath).checkExtension({"jpg", "jpeg"})) {
         const JpegLayout layout = readJpegLayout(imagePath);
         if (const auto preview = pickJpegPreview(layout, thumbSize)) {
             openPath = jpegPreviewGdalPath(imagePath, *preview);
             if (auto previewDs = adoptDataset(GDALOpen(openPath.c_str(), GA_ReadOnly))) {
                 frameWidth = layout.width;
                 frameHeight = layout.height;
-                LOGD << "Thumbnail of " << imagePath.string() << " from its " << preview->width << "x"
+                LOGD << "Thumbnail of " << io::toUtf8(imagePath) << " from its " << preview->width << "x"
                      << preview->height << " preview";
                 return previewDs;
             }
@@ -314,7 +314,7 @@ RasterImage translateToImage(GDALDatasetH hSrc,
 
 // Display range of the source band (its minimum and maximum) for a stretch to 0-255
 ScaleRange bandRange(const fs::path& imagePath, GDALDatasetH hSrc, int band) {
-    const auto s = RasterStatsProvider::instance().get(imagePath.string(), hSrc, band);
+    const auto s = RasterStatsProvider::instance().get(io::toUtf8(imagePath), hSrc, band);
     return {s.min, s.max};
 }
 
@@ -368,9 +368,9 @@ void generateImageThumbEx(const fs::path& imagePath,
                           uint8_t** outBuffer,
                           int* outBufferSize,
                           const ThumbVisParams& visParams) {
-    const auto src = adoptDataset(GDALOpen(imagePath.string().c_str(), GA_ReadOnly));
+    const auto src = adoptDataset(GDALOpen(io::toUtf8(imagePath).c_str(), GA_ReadOnly));
     if (!src)
-        throw GDALException("Cannot open " + imagePath.string() + " for reading");
+        throw GDALException("Cannot open " + io::toUtf8(imagePath) + " for reading");
     GDALDatasetH hSrc = datasetHandle(src);
 
     const int width = GDALGetRasterXSize(hSrc);
@@ -384,7 +384,7 @@ void generateImageThumbEx(const fs::path& imagePath,
     // Formula mode: vegetation index rendered with its colormap
     if (!visParams.formula.empty()) {
         const RasterWindow window{0, 0, width, height, targetWidth, targetHeight};
-        const auto rgba = renderFormulaRgba(hSrc, imagePath.string(), window, visParams);
+        const auto rgba = renderFormulaRgba(hSrc, io::toUtf8(imagePath), window, visParams);
 
         RasterImage image(targetWidth, targetHeight, 3, true);
         for (size_t i = 0; i < image.pixels(); i++) {
@@ -396,7 +396,7 @@ void generateImageThumbEx(const fs::path& imagePath,
     }
 
     // Band selection (explicit, preset or detected sensor) + stretch
-    std::vector<int> bands = resolveVisBands(imagePath.string(), visParams, bandCount);
+    std::vector<int> bands = resolveVisBands(io::toUtf8(imagePath), visParams, bandCount);
     if (bands.empty())
         bands = bandCount <= 2 ? std::vector<int>{1, 1, 1} : std::vector<int>{1, 2, 3};
     bands.resize(3, bands.back());
@@ -411,14 +411,14 @@ void generateImageThumbEx(const fs::path& imagePath,
         double globalMin = std::numeric_limits<double>::max();
         double globalMax = std::numeric_limits<double>::lowest();
         for (int b : bands) {
-            const auto [sMin, sMax] = stretchRange(RasterStatsProvider::instance().get(imagePath.string(), hSrc, b));
+            const auto [sMin, sMax] = stretchRange(RasterStatsProvider::instance().get(io::toUtf8(imagePath), hSrc, b));
             globalMin = std::min(globalMin, sMin);
             globalMax = std::max(globalMax, sMax);
         }
         scales.assign(bands.size(), {globalMin, globalMax});
     }
 
-    RasterImage image = translateToImage(hSrc, targetWidth, targetHeight, bands, false, scales, imagePath.string());
+    RasterImage image = translateToImage(hSrc, targetWidth, targetHeight, bands, false, scales, io::toUtf8(imagePath));
     if (GDALRasterBandH hAlphaBand = resolveAlphaBand(hSrc, bandCount))
         readThumbAlpha(hAlphaBand, width, height, image);
 
@@ -435,8 +435,8 @@ void generatePointCloudThumb(const fs::path& copcPath,
 
     // Load COPC information
     int span;
-    if (!getCopcInfo(copcPath.string(), pcInfo, 3857, &span)) {
-        throw InvalidArgsException("Cannot get COPC info for " + copcPath.string());
+    if (!getCopcInfo(io::toUtf8(copcPath), pcInfo, 3857, &span)) {
+        throw InvalidArgsException("Cannot get COPC info for " + io::toUtf8(copcPath));
     }
 
     // Validate bounds array has required elements (minX, minY, minZ, maxX, maxY, maxZ)
@@ -493,9 +493,9 @@ void generatePointCloudThumb(const fs::path& copcPath,
 #ifdef _WIN32
     const fs::path caBundlePath = io::getDataPath("curl-ca-bundle.crt");
     if (!caBundlePath.empty()) {
-        LOGD << "ARBITRER CA Bundle: " << caBundlePath.string();
+        LOGD << "ARBITRER CA Bundle: " << io::toUtf8(caBundlePath);
         std::stringstream ss;
-        ss << "ARBITER_CA_INFO=" << caBundlePath.string();
+        ss << "ARBITER_CA_INFO=" << io::toUtf8(caBundlePath);
         if (_putenv(ss.str().c_str()) != 0) {
             LOGD << "Cannot set ARBITER_CA_INFO";
         }
@@ -509,7 +509,7 @@ void generatePointCloudThumb(const fs::path& copcPath,
         : PointsPerThumbnailPixel * static_cast<uint64_t>(thumbSize) * static_cast<uint64_t>(thumbSize);
     double resolution;
     try {
-        const auto hierarchy = readCopcHierarchy(copcPath.string());
+        const auto hierarchy = readCopcHierarchy(io::toUtf8(copcPath));
         const int depth = planCopcDepth(hierarchy.pointsPerDepth, budget);
         resolution = copcResolutionForDepth(hierarchy.spacing, depth);
         LOGD << "Point cloud thumbnail reads COPC depths 0-" << depth << " (resolution " << resolution << ")";
@@ -520,8 +520,8 @@ void generatePointCloudThumb(const fs::path& copcPath,
         resolution = tz < 0 ? 1 : mercator.resolution(tz);
     }
 
-    const auto copcThreads = copcReadThreads(copcPath.string());  // until the reader has run
-    pdal::Options copcOpts = copcReaderOptions(copcPath.string(), copcThreads);
+    const auto copcThreads = copcReadThreads(io::toUtf8(copcPath));  // until the reader has run
+    pdal::Options copcOpts = copcReaderOptions(io::toUtf8(copcPath), copcThreads);
     copcOpts.add("resolution", resolution);
 
     pdal::CopcReader copcReader;
@@ -721,14 +721,14 @@ void generateSplatThumb(const fs::path& spzPath,
     spz::GaussianCloud cloud;
     try {
         spz::UnpackOptions unpack;
-        cloud = spz::loadSpz(spzPath.string(), unpack);
+        cloud = spz::loadSpz(io::readAllBytes(spzPath), unpack); // not the file name overload (gsplat.cpp)
     } catch (const std::exception& e) {
         throw AppException(std::string("Cannot decode .spz for thumbnail: ") + e.what());
     }
 
     const size_t n = static_cast<size_t>(std::max(cloud.numPoints, 0));
     if (n == 0 || cloud.positions.size() < n * 3)
-        throw InvalidArgsException("No splats to render in " + spzPath.string());
+        throw InvalidArgsException("No splats to render in " + io::toUtf8(spzPath));
 
     // Convert SPZ-native attributes to display space: SH DC term -> RGB, logit -> opacity.
     std::vector<float> colors(n * 3, 0.5f);
@@ -744,7 +744,7 @@ void generateSplatThumb(const fs::path& spzPath,
     }
 
     rasterizeSplatPreview(cloud.positions, colors, opacities, n, thumbSize, outImagePath,
-                          spzPath.string(), outBuffer, outBufferSize);
+                          io::toUtf8(spzPath), outBuffer, outBufferSize);
 }
 
 // Render an on-demand preview from a Spark RAD level-of-detail file. The two coarsest chunks are
@@ -764,7 +764,7 @@ void generateSplatThumbFromRad(const fs::path& radPath,
     }
 
     rasterizeSplatPreview(splats.positions, splats.colors, splats.opacities, splats.count,
-                          thumbSize, outImagePath, radPath.string(), outBuffer, outBufferSize);
+                          thumbSize, outImagePath, io::toUtf8(radPath), outBuffer, outBufferSize);
 }
 
 // imagePath can be either absolute or relative or a network URL and it's up to the user to
@@ -778,15 +778,15 @@ fs::path generateThumb(const fs::path& inputPath,
     if (thumbSize <= 0)
         throw InvalidArgsException("thumbSize must be greater than 0");
 
-    if (!utils::isNetworkPath(inputPath.string()) && !exists(inputPath))
-        throw FSException(inputPath.string() + " does not exist");
+    if (!utils::isNetworkPath(io::toUtf8(inputPath)) && !exists(inputPath))
+        throw FSException(io::toUtf8(inputPath) + " does not exist");
 
     // Writing the thumbnail replaces an existing file, so it must not be the input
-    if (!utils::isNetworkPath(inputPath.string()))
+    if (!utils::isNetworkPath(io::toUtf8(inputPath)))
         io::assureDistinctOutput(inputPath, outImagePath);
 
     // Check existance of thumbnail, return if exists
-    if (!utils::isNetworkPath(inputPath.string()) && exists(outImagePath) && !forceRecreate)
+    if (!utils::isNetworkPath(io::toUtf8(inputPath)) && exists(outImagePath) && !forceRecreate)
         return outImagePath;
 
     LOGD << "ImagePath = " << inputPath;
@@ -823,9 +823,9 @@ void cleanupThumbsUserCache() {
                 fs::path thumb = t->path();
                 if (io::Path(thumb).getModifiedTime() < threshold) {
                     if (fs::remove(thumb))
-                        LOGD << "Cleaned " << thumb.string();
+                        LOGD << "Cleaned " << io::toUtf8(thumb);
                     else
-                        LOGD << "Cannot clean " << thumb.string();
+                        LOGD << "Cannot clean " << io::toUtf8(thumb);
                 }
             }
 
@@ -838,9 +838,9 @@ void cleanupThumbsUserCache() {
 
     for (auto& d : cleanupDirs) {
         if (fs::remove(d))
-            LOGD << "Cleaned " << d.string();
+            LOGD << "Cleaned " << io::toUtf8(d);
         else
-            LOGD << "Cannot clean " << d.string();
+            LOGD << "Cannot clean " << io::toUtf8(d);
     }
 }
 

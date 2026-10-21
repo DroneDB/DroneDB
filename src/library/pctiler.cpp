@@ -79,9 +79,9 @@ namespace ddb
         const fs::path caBundlePath = io::getDataPath("curl-ca-bundle.crt");
         if (!caBundlePath.empty())
         {
-            LOGD << "ARBITRER CA Bundle: " << caBundlePath.string();
+            LOGD << "ARBITRER CA Bundle: " << io::toUtf8(caBundlePath);
             std::stringstream ss;
-            ss << "ARBITER_CA_INFO=" << caBundlePath.string();
+            ss << "ARBITER_CA_INFO=" << io::toUtf8(caBundlePath);
             if (_putenv(ss.str().c_str()) != 0)
             {
                 LOGD << "Cannot set ARBITER_CA_INFO";

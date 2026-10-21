@@ -4,6 +4,7 @@
 #include "timezone.h"
 
 #include <memory>
+#include <vector>
 #include <mutex>
 
 #include "exceptions.h"
@@ -32,17 +33,29 @@ void Timezone::init() {
         fs::path dbPath = io::getDataPath("timezone21.bin");
         if (dbPath.empty())
             throw TimezoneException("Cannot find timezone database timezone21.bin");
-        db = ZDOpenDatabase(dbPath.string().c_str());
+#ifdef _WIN32
+        // ZoneDetect opens a file name with CreateFileA (ANSI code page): the database is read
+        // here and kept for the process (db is never closed)
+        static std::vector<uint8_t> database;
+        try {
+            database = io::readAllBytes(dbPath);
+        } catch (const FSException &e) {
+            throw TimezoneException(std::string("Cannot open timezone database: ") + e.what());
+        }
+        db = ZDOpenDatabaseFromMemory(database.data(), database.size());
+#else
+        db = ZDOpenDatabase(dbPath.c_str());
+#endif
         if (!db)
             throw TimezoneException("Cannot open timezone database ./timezone21.bin");
 
 #ifdef _WIN32
-        // On Windows, set TZDIR environment variable to help cctz find timezone data
+        // On Windows, set TZDIR environment variable to help cctz find timezone data. cctz
+        // opens it with fopen, which follows the CRT locale (UTF-8 after DDBRegisterProcess).
         fs::path zoneInfoPath = io::getDataPath("zoneinfo");
         if (!zoneInfoPath.empty()) {
-            std::string tzdir = "TZDIR=" + zoneInfoPath.string();
-            LOGD << "Setting TZDIR to: " << zoneInfoPath.string();
-            _putenv(tzdir.c_str());
+            LOGD << "Setting TZDIR to: " << io::toUtf8(zoneInfoPath);
+            _putenv_s("TZDIR", io::toUtf8(zoneInfoPath).c_str());
         }
 #endif
 

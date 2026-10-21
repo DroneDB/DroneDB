@@ -69,7 +69,7 @@ std::vector<BandAlignmentInfo> detectBandAlignment(const std::vector<std::string
 
     for (size_t i = 0; i < N; i++) {
         try {
-            auto exivImage = Exiv2::ImageFactory::open(inputPaths[i]);
+            auto exivImage = openExivImage(io::fromUtf8(inputPaths[i]));
             if (!exivImage.get()) continue;
             exivImage->readMetadata();
             ExifParser parser(exivImage.get());
@@ -374,7 +374,7 @@ MergeValidationResult validateMergeMultispectral(const std::vector<std::string> 
     std::vector<std::string> displayNames;
     displayNames.reserve(inputPaths.size());
     for (const auto &p : inputPaths) {
-        displayNames.push_back(fs::path(p).filename().string());
+        displayNames.push_back(io::toUtf8(io::fromUtf8(p).filename()));
     }
 
     // Open first file as reference
@@ -747,7 +747,7 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
                          const std::string &outputPath) {
     if (inputPaths.size() < 2) throw InvalidArgsException("At least 2 files required");
 
-    if (fs::exists(outputPath)) {
+    if (fs::exists(io::fromUtf8(outputPath))) {
         throw AppException("Output file already exists: " + outputPath);
     }
 
@@ -763,7 +763,7 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
     GeoLocation srcGps;
     bool hasGps = false;
     try {
-        auto exivImage = Exiv2::ImageFactory::open(inputPaths[0]);
+        auto exivImage = openExivImage(io::fromUtf8(inputPaths[0]));
         if (exivImage.get()) {
             exivImage->readMetadata();
             ExifParser parser(exivImage.get());
@@ -963,7 +963,7 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
                     // Try to compute GSD and yaw for GPS correction
                     double pixelPitch = 0, focalLength = 0, yawDeg = 0;
                     try {
-                        auto exivImg = Exiv2::ImageFactory::open(inputPaths[0]);
+                        auto exivImg = openExivImage(io::fromUtf8(inputPaths[0]));
                         if (exivImg.get()) {
                             exivImg->readMetadata();
                             ExifParser p(exivImg.get());

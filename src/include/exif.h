@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <cmath>
 #include "utils.h"
+#include "fs.h"
 #include "sensor_data.h"
 #include "ddb_export.h"
 
@@ -212,6 +213,15 @@ namespace ddb
         FingerprintContext(FingerprintContext &&) = default;
         FingerprintContext &operator=(FingerprintContext &&) = default;
     };
+
+    // Exiv2::ImageFactory::open of a file. Exiv2 0.28 opens a file name with fopen, which on
+    // Windows reads it in the ANSI code page (or the CRT locale): there a non-ASCII name is
+    // read into memory first (mio.h, "Path encoding"). Throws Exiv2::Error like the factory.
+    DDB_DLL Exiv2::Image::UniquePtr openExivImage(const fs::path &path);
+
+    // image.writeMetadata() for an image of openExivImage(path): an image read into memory
+    // is written back to path
+    DDB_DLL void writeExivMetadata(Exiv2::Image &image, const fs::path &path);
 
 }
 

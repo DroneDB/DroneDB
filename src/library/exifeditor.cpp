@@ -4,6 +4,8 @@
 #include "exifeditor.h"
 #include "logger.h"
 #include "exceptions.h"
+#include "mio.h"
+#include "exif.h"
 #include <exiv2/exiv2.hpp>
 #include <cmath>
 
@@ -12,12 +14,12 @@ namespace ddb
 
     ExifEditor::ExifEditor(std::vector<std::string> &files)
     {
-        this->files = std::vector<fs::path>(files.begin(), files.end());
+        this->files = io::fromUtf8(files);
     }
 
     ExifEditor::ExifEditor(const std::string &file)
     {
-        files.push_back(file);
+        files.push_back(io::fromUtf8(file));
     }
 
     // Verify that all files can be edited
@@ -33,19 +35,19 @@ namespace ddb
                     throw FSException("does not exist");
                 if (fs::is_directory(file))
                     throw FSException("cannot set EXIFs to a directory");
-                auto image = Exiv2::ImageFactory::open(file.string(), false);
+                auto image = openExivImage(file);
                 if (!image.get())
-                    throw FSException("cannot open " + file.string());
+                    throw FSException("cannot open " + io::toUtf8(file));
                 image->readMetadata();
             }
             catch (const FSException &e)
             {
-                std::cerr << file.string() << ": " << e.what() << std::endl;
+                std::cerr << io::toUtf8(file) << ": " << e.what() << std::endl;
                 rejectCount++;
             }
             catch (const Exiv2::Error &e)
             {
-                std::cerr << file.string() << ": " << e.what() << std::endl;
+                std::cerr << io::toUtf8(file) << ": " << e.what() << std::endl;
                 rejectCount++;
             }
 
@@ -61,7 +63,7 @@ namespace ddb
                  {
                      exifData["Exif.GPSInfo.GPSAltitude"] = doubleToFraction(altitude, 4);
                      exifData["Exif.GPSInfo.GPSAltitudeRef"] = altitude < 0.0 ? "1" : "0";
-                     LOGD << "Setting altitude to " << exifData["Exif.GPSInfo.GPSAltitude"].toString() << " (" << exifData["Exif.GPSInfo.GPSAltitudeRef"].toString() << ") for " << f.string();
+                     LOGD << "Setting altitude to " << exifData["Exif.GPSInfo.GPSAltitude"].toString() << " (" << exifData["Exif.GPSInfo.GPSAltitudeRef"].toString() << ") for " << io::toUtf8(f);
 
                      // TODO: adjust XMP DJI tags
                      // absolute/relative altitude
@@ -78,7 +80,7 @@ namespace ddb
         LOGD << "Setting latitude to " << doubleToDMS(latitude) << " " <<
                 exifData["Exif.GPSInfo.GPSLatitude"].toString() << " " <<
                 exifData["Exif.GPSInfo.GPSLatitudeRef"].toString() << " " <<
-                "for " << f.string(); });
+                "for " << io::toUtf8(f); });
     }
 
     void ExifEditor::SetGPSLongitude(double longitude)
@@ -90,7 +92,7 @@ namespace ddb
         LOGD << "Setting longitude to " <<
                 exifData["Exif.GPSInfo.GPSLongitude"].toString() << " " <<
                 exifData["Exif.GPSInfo.GPSLongitudeRef"].toString() << " " <<
-                "for " << f.string(); });
+                "for " << io::toUtf8(f); });
     }
 
     void ExifEditor::SetGPS(double latitude, double longitude, double altitude)
@@ -112,7 +114,7 @@ namespace ddb
                 exifData["Exif.GPSInfo.GPSLongitudeRef"].toString() << " " <<
                 "alt: " <<
                  exifData["Exif.GPSInfo.GPSAltitude"].toString() << " (" << exifData["Exif.GPSInfo.GPSAltitudeRef"].toString() << ") " <<
-                "for " << f.string(); });
+                "for " << io::toUtf8(f); });
     }
 
     // Convert a double into a DMS string
@@ -151,9 +153,9 @@ namespace ddb
     {
         for (auto &file : files)
         {
-            auto image = Exiv2::ImageFactory::open(file.string(), false);
+            auto image = openExivImage(file);
             if (!image.get())
-                throw FSException("Cannot open " + file.string());
+                throw FSException("Cannot open " + io::toUtf8(file));
             image->readMetadata();
 
             f(file, image->exifData());
@@ -161,12 +163,11 @@ namespace ddb
             image->setExifData(image->exifData());
             try
             {
-                image->writeMetadata();
-                // std::cout << "U\t" << file.string() << std::endl;
+                writeExivMetadata(*image, file);
             }
             catch (const Exiv2::Error &)
             {
-                std::cerr << "Cannot write metadata to " + file.string();
+                std::cerr << "Cannot write metadata to " + io::toUtf8(file);
             }
         }
     }

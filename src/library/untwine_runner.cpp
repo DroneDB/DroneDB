@@ -58,10 +58,10 @@ namespace ddb
 
             fs::path searchOnPath()
             {
-                const char *path = std::getenv("PATH");
-                if (!path || !*path) return {};
+                const auto path = io::getEnvUtf8("PATH");
+                if (!path || path->empty()) return {};
 
-                std::string p(path);
+                const std::string &p = *path;
                 size_t start = 0;
                 while (start <= p.size())
                 {
@@ -70,7 +70,7 @@ namespace ddb
                     std::string dir = p.substr(start, end - start);
                     if (!dir.empty())
                     {
-                        fs::path candidate = fs::path(dir) / kBinaryName;
+                        fs::path candidate = io::fromUtf8(dir) / kBinaryName;
                         if (isExecutableFile(candidate)) return candidate;
                     }
                     if (end == p.size()) break;
@@ -170,18 +170,18 @@ namespace ddb
             // (non-empty), it is authoritative: either it points to a usable
             // binary or no binary is considered available (so callers can pin
             // the backend deterministically and tests can simulate "missing").
-            if (const char *override = std::getenv("DDB_UNTWINE_PATH"))
+            if (const auto override = io::getEnvUtf8("DDB_UNTWINE_PATH"))
             {
-                if (override[0] != '\0')
+                if (!override->empty())
                 {
-                    fs::path p(override);
+                    const fs::path p = io::fromUtf8(*override);
                     if (isExecutableFile(p)) found = p;
                     g_cachedBinary = found;
                     g_cacheValid = true;
                     if (!found.empty())
-                        LOGD << "Untwine binary discovered via DDB_UNTWINE_PATH at " << found.string();
+                        LOGD << "Untwine binary discovered via DDB_UNTWINE_PATH at " << io::toUtf8(found);
                     else
-                        LOGD << "DDB_UNTWINE_PATH=" << override << " is not an executable file; treating Untwine as unavailable";
+                        LOGD << "DDB_UNTWINE_PATH=" << *override << " is not an executable file; treating Untwine as unavailable";
                     return found;
                 }
             }
@@ -214,7 +214,7 @@ namespace ddb
             g_cacheValid = true;
 
             if (!found.empty())
-                LOGD << "Untwine binary discovered at " << found.string();
+                LOGD << "Untwine binary discovered at " << io::toUtf8(found);
             else
                 LOGD << "Untwine binary not found in DDB_UNTWINE_PATH, exe folder, install prefix or PATH";
 
@@ -310,13 +310,13 @@ namespace ddb
             fs::remove(outputFile, ec);
             if (ec) return failIo("Cannot remove stale COPC output", ec);
 
-            std::vector<std::string> args = {"--files", filesArg, "--output_dir", outputFile.string()};
+            std::vector<std::string> args = {"--files", filesArg, "--output_dir", io::toUtf8(outputFile)};
             if (!tempDir.empty())
             {
                 fs::create_directories(tempDir, ec);
                 if (ec) return failIo("Cannot create Untwine temporary directory", ec);
                 args.push_back("--temp_dir");
-                args.push_back(tempDir.string());
+                args.push_back(io::toUtf8(tempDir));
             }
             args.push_back("--progress_fd");
             args.push_back(process::kExtraChannelPlaceholder);
@@ -351,7 +351,7 @@ namespace ddb
             if (!fs::exists(outputFile, ec) || ec)
             {
                 result.errorCode = ec;
-                result.error = "untwine reported success but output file is missing: " + outputFile.string();
+                result.error = "untwine reported success but output file is missing: " + io::toUtf8(outputFile);
                 return result;
             }
             result.succeeded = true;

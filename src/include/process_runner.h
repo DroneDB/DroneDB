@@ -142,7 +142,7 @@ namespace ddb
         };
 
         // Runs binary (an explicit path; no PATH search) with args (argv[1..]).
-        // argv[0] is binary.string().
+        // argv[0] is io::toUtf8(binary).
         DDB_DLL Result run(const fs::path &binary,
                            const std::vector<std::string> &args,
                            const Options &options = Options());

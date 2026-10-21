@@ -40,9 +40,23 @@ namespace ddb
             Ksplat  // mkkellogg format (requires the optional external enhancer)
         };
 
+        // SPZ's file name overloads open a std::string with the narrow code page on Windows
+        // (mio.h, "Path encoding"): the files are read and written here, through its buffer
+        // overloads. Same result as spz::saveSpz(cloud, options, filename).
+        bool saveSpzFile(const spz::GaussianCloud &cloud, const spz::PackOptions &options, const fs::path &file)
+        {
+            std::vector<uint8_t> data;
+            if (!spz::saveSpz(cloud, options, &data))
+                return false;
+            std::ofstream out(file, std::ios::binary | std::ios::out);
+            out.write(reinterpret_cast<const char *>(data.data()), static_cast<std::streamsize>(data.size()));
+            out.close();
+            return out.good();
+        }
+
         SplatFormat formatOf(const std::string &filename)
         {
-            io::Path p(filename);
+            io::Path p(io::fromUtf8(filename));
             if (p.checkExtension({"ply"}))
                 return SplatFormat::Ply;
             if (p.checkExtension({"splat"}))
@@ -65,7 +79,7 @@ namespace ddb
         // that the viewer can already read. NGSP/ZSTD (v4) files start with "NGSP" instead.
         bool isGzipSpz(const fs::path &path)
         {
-            std::ifstream in(path.string(), std::ios::binary);
+            std::ifstream in(path, std::ios::binary);
             if (!in.good())
                 return false;
             uint8_t magic[2] = {0};
@@ -126,7 +140,7 @@ namespace ddb
         // logit, color as the SH DC coefficient, rotations stored [x, y, z, w]).
         spz::GaussianCloud loadSplatBinary(const std::string &filename)
         {
-            std::ifstream in(filename, std::ios::binary | std::ios::ate);
+            std::ifstream in(io::fromUtf8(filename), std::ios::binary | std::ios::ate);
             if (!in.good())
                 throw FSException("Cannot open " + filename);
 
@@ -207,7 +221,7 @@ namespace ddb
         // read for the v4 ZSTD format, falling back to a full packed load for legacy files.
         bool readSpzInfo(const std::string &filename, GaussianSplatInfo &info)
         {
-            std::ifstream in(filename, std::ios::binary);
+            std::ifstream in(io::fromUtf8(filename), std::ios::binary);
             if (!in.good())
                 return false;
 
@@ -229,7 +243,7 @@ namespace ddb
             // Legacy gzip-compressed format (v1-3): decode the packed header.
             try
             {
-                const spz::PackedGaussians packed = spz::loadSpzPacked(filename);
+                const spz::PackedGaussians packed = spz::loadSpzPacked(io::readAllBytes(io::fromUtf8(filename)));
                 if (packed.numPoints <= 0)
                     return false;
                 info.splatCount = static_cast<size_t>(packed.numPoints);
@@ -264,17 +278,17 @@ namespace ddb
 
     bool isSpzPath(const std::string &filename)
     {
-        return io::Path(filename).checkExtension({"spz"});
+        return io::Path(io::fromUtf8(filename)).checkExtension({"spz"});
     }
 
     bool hasSplatExtension(const std::string &filename)
     {
-        return io::Path(filename).checkExtension({"spz", "splat", "ksplat"});
+        return io::Path(io::fromUtf8(filename)).checkExtension({"spz", "splat", "ksplat"});
     }
 
     bool looksLikeSpz(const fs::path &path)
     {
-        std::ifstream in(path.string(), std::ios::binary);
+        std::ifstream in(path, std::ios::binary);
         if (!in.good())
             return false;
         uint8_t magic[4] = {0};
@@ -306,7 +320,7 @@ namespace ddb
             case SplatFormat::Ply:
             {
                 PlyInfo ply;
-                if (!getPlyInfo(filename, ply) || !ply.isSplat)
+                if (!getPlyInfo(io::fromUtf8(filename), ply) || !ply.isSplat)
                     return false;
                 info.splatCount = ply.vertexCount;
                 info.shDegree = ply.shDegree >= 0 ? ply.shDegree : 0;
@@ -316,7 +330,7 @@ namespace ddb
             case SplatFormat::Splat:
             {
                 std::error_code ec;
-                const auto size = fs::file_size(filename, ec);
+                const auto size = fs::file_size(io::fromUtf8(filename), ec);
                 if (ec || size == 0 || (size % 32) != 0)
                     return false;
                 info.splatCount = static_cast<size_t>(size / 32);
@@ -337,7 +351,7 @@ namespace ddb
     {
         georef = GsplatGeoref();
 
-        std::ifstream in(coordsFile.string());
+        std::ifstream in(coordsFile);
         if (!in.good())
             return false;
 
@@ -390,23 +404,23 @@ namespace ddb
             io::assureFolderExists(parentDir);
         std::ofstream out;
         errno = 0;
-        out.open(outFile.string(), std::ios::binary | std::ios::trunc);
+        out.open(outFile, std::ios::binary | std::ios::trunc);
         const int openError = errno;
         if (!out.good())
-            throw FSException("Cannot write georef sidecar " + outFile.string(),
+            throw FSException("Cannot write georef sidecar " + io::toUtf8(outFile),
                               std::error_code(openError, std::generic_category()));
         errno = 0;
         out << georef.toJSON().dump(2);
         out.flush();
         const int writeError = errno;
         if (!out.good())
-            throw FSException("Failed while writing " + outFile.string(),
+            throw FSException("Failed while writing " + io::toUtf8(outFile),
                               std::error_code(writeError, std::generic_category()));
         errno = 0;
         out.close();
         const int closeError = errno;
         if (out.fail())
-            throw FSException("Failed while closing " + outFile.string(),
+            throw FSException("Failed while closing " + io::toUtf8(outFile),
                               std::error_code(closeError, std::generic_category()));
 
     }
@@ -423,31 +437,31 @@ namespace ddb
         if (fmt == SplatFormat::Unknown)
             throw InvalidArgsException("Unsupported Gaussian Splat format: " + input);
 
-        const fs::path parentDir = fs::path(output).parent_path();
+        const fs::path parentDir = io::fromUtf8(output).parent_path();
         if (!parentDir.empty())
             io::assureFolderExists(parentDir);
 
         if (fmt == SplatFormat::Spz)
         {
-            if (!looksLikeSpz(input))
+            if (!looksLikeSpz(io::fromUtf8(input)))
                 throw AppException("File does not look like a valid .spz: " + input);
             // Gzip-based SPZ (v1-3) is already viewer-compatible: copy it through unchanged.
             // NGSP/ZSTD SPZ (v4) must be transcoded to v3 so the Spark viewer can decode it.
-            if (isGzipSpz(input))
+            if (isGzipSpz(io::fromUtf8(input)))
             {
-                io::copy(input, output);
+                io::copy(io::fromUtf8(input), io::fromUtf8(output));
                 return;
             }
 
             spz::UnpackOptions unpack;
-            spz::GaussianCloud cloud = spz::loadSpz(input, unpack);
+            spz::GaussianCloud cloud = spz::loadSpz(io::readAllBytes(io::fromUtf8(input)), unpack);
             if (cloud.numPoints <= 0)
                 throw AppException("No splats decoded from: " + input);
 
             spz::PackOptions pack;
             pack.version = kDeliverySpzVersion;
             applyShBitsFromEnv(pack);
-            if (!spz::saveSpz(cloud, pack, output))
+            if (!saveSpzFile(cloud, pack, io::fromUtf8(output)))
                 throw AppException("Failed to transcode .spz to viewer-compatible version: " + output);
             return;
         }
@@ -456,6 +470,8 @@ namespace ddb
         if (fmt == SplatFormat::Ply)
         {
             spz::UnpackOptions unpack; // canonical (no coordinate conversion)
+            // SPZ has no buffer overload for PLY: on Windows its narrow file name follows the
+            // CRT locale (UTF-8 after DDBRegisterProcess, mio.h "Path encoding")
             cloud = spz::loadSplatFromPly(input, unpack);
             if (cloud.numPoints <= 0)
                 throw AppException("Not a valid Gaussian Splat PLY (no splats decoded): " + input);
@@ -471,7 +487,7 @@ namespace ddb
         pack.version = kDeliverySpzVersion;
         applyShBitsFromEnv(pack);
 
-        if (!spz::saveSpz(cloud, pack, output))
+        if (!saveSpzFile(cloud, pack, io::fromUtf8(output)))
             throw AppException("Failed to encode .spz: " + output);
     }
 
@@ -483,7 +499,7 @@ namespace ddb
 
     void buildGsplat(const std::string &input, const std::string &outdir, const GsplatGeoref &georef)
     {
-        io::assureFolderExists(outdir);
+        io::assureFolderExists(io::fromUtf8(outdir));
 
         // build-lod is a mandatory dependency: model.rad is the sole delivery artifact (streamed
         // by the viewer, and decoded on demand to render thumbnails). Run it directly on the
@@ -496,8 +512,8 @@ namespace ddb
                 "Building Gaussian Splats requires the build-lod tool, which was not found "
                 "(set DDB_BUILDLOD_PATH or place build-lod next to the DroneDB executable)");
 
-        const fs::path outRad = fs::path(outdir) / GsplatRadFileName;
-        const auto lodResult = buildlod::runBuildLodResult(input, outRad, /*quality=*/true, GsplatRadMaxSh);
+        const fs::path outRad = io::fromUtf8(outdir) / GsplatRadFileName;
+        const auto lodResult = buildlod::runBuildLodResult(io::fromUtf8(input), outRad, /*quality=*/true, GsplatRadMaxSh);
         if (!lodResult.succeeded) {
             lodResult.throwIfRetryable("build-lod failed for " + input + ": ");
             throw AppException("build-lod failed for " + input + ": " + lodResult.error);
@@ -512,20 +528,20 @@ namespace ddb
             json j;
             j["min"] = {boundsMin[0], boundsMin[1], boundsMin[2]};
             j["max"] = {boundsMax[0], boundsMax[1], boundsMax[2]};
-            const fs::path boundsFile = fs::path(outdir) / GsplatBoundsFileName;
-            std::ofstream out(boundsFile.string(), std::ios::binary);
+            const fs::path boundsFile = io::fromUtf8(outdir) / GsplatBoundsFileName;
+            std::ofstream out(boundsFile, std::ios::binary);
             if (out.good())
                 out << j.dump();
             else
-                LOGD << "Could not write " << boundsFile.string();
+                LOGD << "Could not write " << io::toUtf8(boundsFile);
         }
         else
         {
-            LOGD << "Skipping bounds.json: no centres decoded from " << outRad.string();
+            LOGD << "Skipping bounds.json: no centres decoded from " << io::toUtf8(outRad);
         }
 
         if (georef.valid)
-            writeGeoref(georef, fs::path(outdir) / GsplatGeorefFileName);
+            writeGeoref(georef, io::fromUtf8(outdir) / GsplatGeorefFileName);
     }
 
 } // namespace ddb

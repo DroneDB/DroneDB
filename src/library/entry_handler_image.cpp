@@ -35,7 +35,7 @@ EntryType detectImageFamily(const fs::path &path, FingerprintContext &ctx)
 
     if (tif)
     {
-        const auto dataset = adoptDataset(GDALOpen(p.string().c_str(), GA_ReadOnly));
+        const auto dataset = adoptDataset(GDALOpen(io::toUtf8(path).c_str(), GA_ReadOnly));
         if (dataset)
         {
             const char *proj = GDALGetProjectionRef(datasetHandle(dataset));
@@ -46,7 +46,7 @@ EntryType detectImageFamily(const fs::path &path, FingerprintContext &ctx)
         }
         else
         {
-            LOGD << "Cannot open " << p.string().c_str() << " for georaster test";
+            LOGD << "Cannot open " << io::toUtf8(path) << " for georaster test";
         }
     }
 
@@ -59,9 +59,9 @@ EntryType detectImageFamily(const fs::path &path, FingerprintContext &ctx)
 
         try
         {
-            ctx.exivImage = Exiv2::ImageFactory::open(path.string());
+            ctx.exivImage = openExivImage(path);
             if (!ctx.exivImage.get())
-                throw IndexException("Cannot open " + path.string());
+                throw IndexException("Cannot open " + io::toUtf8(path));
 
             ctx.exivImage->readMetadata();
             ctx.parser = std::make_unique<ExifParser>(ctx.exivImage.get());
@@ -97,7 +97,7 @@ EntryType detectImageFamily(const fs::path &path, FingerprintContext &ctx)
         }
         catch (Exiv2::Error &)
         {
-            LOGD << "Cannot read EXIF data: " << path.string();
+            LOGD << "Cannot read EXIF data: " << io::toUtf8(path);
             ctx.populated = false;
         }
     }
@@ -130,9 +130,9 @@ void parseImageMetadata(const fs::path &path, Entry &entry, FingerprintContext &
         // Fallback: open file if context not populated
         try
         {
-            localExivImage = Exiv2::ImageFactory::open(path.string());
+            localExivImage = openExivImage(path);
             if (!localExivImage.get())
-                throw IndexException("Cannot open " + path.string());
+                throw IndexException("Cannot open " + io::toUtf8(path));
 
             localExivImage->readMetadata();
             localParser = std::make_unique<ExifParser>(localExivImage.get());
@@ -140,7 +140,7 @@ void parseImageMetadata(const fs::path &path, Entry &entry, FingerprintContext &
         }
         catch (Exiv2::Error &)
         {
-            LOGD << "Cannot read EXIF data: " << path.string();
+            LOGD << "Cannot read EXIF data: " << io::toUtf8(path);
             e = nullptr;
         }
     }
@@ -298,7 +298,7 @@ void parseImageMetadata(const fs::path &path, Entry &entry, FingerprintContext &
     }
     else if (e)
     {
-        LOGD << "No XMP/EXIF data found in " << path.string();
+        LOGD << "No XMP/EXIF data found in " << io::toUtf8(path);
     }
 }
 

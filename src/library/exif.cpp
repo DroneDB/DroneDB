@@ -7,6 +7,10 @@
 #include "timezone.h"
 #include "dsmservice.h"
 #include "sensor_data.h"
+#include "mio.h"
+
+#include <algorithm>
+#include <fstream>
 
 namespace ddb
 {
@@ -910,6 +914,39 @@ namespace ddb
     bool ExifParser::hasTags()
     {
         return this->hasExif() || this->hasXmp();
+    }
+
+    Exiv2::Image::UniquePtr openExivImage(const fs::path &path)
+    {
+#ifdef _WIN32
+        const std::string utf8 = io::toUtf8(path);
+        if (!std::all_of(utf8.begin(), utf8.end(), [](unsigned char c) { return c < 0x80; }))
+        {
+            const std::vector<uint8_t> data = io::readAllBytes(path);
+            auto memory = std::make_unique<Exiv2::MemIo>();
+            memory->write(data.data(), data.size());
+            return Exiv2::ImageFactory::open(std::move(memory));
+        }
+        return Exiv2::ImageFactory::open(utf8);
+#else
+        return Exiv2::ImageFactory::open(path.native());
+#endif
+    }
+
+    void writeExivMetadata(Exiv2::Image &image, const fs::path &path)
+    {
+        image.writeMetadata();
+#ifdef _WIN32
+        if (auto *memory = dynamic_cast<Exiv2::MemIo *>(&image.io()))
+        {
+            std::ofstream out(path, std::ios::binary | std::ios::trunc);
+            out.write(reinterpret_cast<const char *>(memory->mmap()), static_cast<std::streamsize>(memory->size()));
+            if (!out)
+                throw FSException("Cannot write " + io::toUtf8(path));
+        }
+#else
+        (void)path;
+#endif
     }
 
 }

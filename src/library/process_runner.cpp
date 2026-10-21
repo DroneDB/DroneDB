@@ -17,6 +17,7 @@
 #include "cancellation.h"
 #include "logger.h"
 #include "unique_handle.h"
+#include "mio.h"
 
 #ifdef _WIN32
 #include <cwchar>
@@ -437,7 +438,7 @@ namespace ddb
                 // ---- Prepare everything before fork().
                 std::vector<std::string> argStrings;
                 argStrings.reserve(args.size() + 1);
-                argStrings.push_back(binary.string());
+                argStrings.push_back(io::toUtf8(binary));
                 for (auto &a : expandArgs(args, opts, std::to_string(kExtraChannelFd)))
                     argStrings.push_back(std::move(a));
                 std::vector<char *> argv;
@@ -468,7 +469,7 @@ namespace ddb
                 for (auto &e : envStrings) envp.push_back(const_cast<char *>(e.c_str()));
                 envp.push_back(nullptr);
 
-                const std::string path = binary.string();
+                const std::string path = io::toUtf8(binary);
 
                 // Every descriptor of the parent closes on return (and on an exception)
                 UniqueFd outPipe[2];
@@ -702,26 +703,16 @@ namespace ddb
 
             // -------------------------------------------------------------- Windows
 
-            std::wstring toWide(const std::string &s)
-            {
-                if (s.empty()) return std::wstring();
-                const int len = MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), nullptr, 0);
-                std::wstring w(static_cast<size_t>(len > 0 ? len : 0), L'\0');
-                if (len > 0)
-                    MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), w.data(), len);
-                return w;
-            }
-
             std::string winErrorMessage(DWORD err)
             {
-                LPSTR msg = nullptr;
-                const DWORD len = FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
+                LPWSTR msg = nullptr;
+                const DWORD len = FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
                                                      FORMAT_MESSAGE_IGNORE_INSERTS,
-                                                 nullptr, err, 0, reinterpret_cast<LPSTR>(&msg), 0, nullptr);
+                                                 nullptr, err, 0, reinterpret_cast<LPWSTR>(&msg), 0, nullptr);
                 std::string text;
                 if (len > 0 && msg)
                 {
-                    text.assign(msg, len);
+                    text = io::fromWide(std::wstring_view(msg, len));
                     while (!text.empty() && (text.back() == '\r' || text.back() == '\n' || text.back() == ' ' ||
                                              text.back() == '.'))
                         text.pop_back();
@@ -761,11 +752,11 @@ namespace ddb
                 }
                 for (const auto &ov : overrides)
                 {
-                    const std::wstring name = toWide(ov.first);
+                    const std::wstring name = io::toWide(ov.first);
                     entries.erase(std::remove_if(entries.begin(), entries.end(),
                                                  [&](const std::wstring &e) { return compareNames(envName(e), name) == 0; }),
                                   entries.end());
-                    entries.push_back(name + L"=" + toWide(ov.second));
+                    entries.push_back(name + L"=" + io::toWide(ov.second));
                 }
                 std::stable_sort(entries.begin(), entries.end(), [](const std::wstring &a, const std::wstring &b) {
                     return compareNames(envName(a), envName(b)) < 0;
@@ -854,13 +845,13 @@ namespace ddb
                 const std::string extraId =
                     extraWrite ? std::to_string(reinterpret_cast<uintptr_t>(extraWrite.get()))
                                : std::string();
-                std::string cmdLine = quoteForLog(binary.string());
+                std::string cmdLine = quoteForLog(io::toUtf8(binary));
                 for (const auto &a : expandArgs(args, opts, extraId))
                 {
                     cmdLine.push_back(' ');
                     cmdLine.append(quoteForLog(a));
                 }
-                std::wstring wideCmd = toWide(cmdLine);
+                std::wstring wideCmd = io::toWide(cmdLine);
                 wideCmd.push_back(L'\0'); // CreateProcessW may modify the buffer
                 const std::wstring wideBin = binary.wstring();
 
@@ -1095,7 +1086,7 @@ namespace ddb
             // Surface cleanup even for successful tool calls, whose wrappers may
             // otherwise log only failures or a generic completion message.
             if (result.descendantsTerminated)
-                LOGW << binary.string() << " " << result.describe();
+                LOGW << io::toUtf8(binary) << " " << result.describe();
             // The child is killed and reaped: the cancellation is the caller's to report
             if (result.canceled)
                 cancel::throwIfCanceled();
@@ -1104,7 +1095,7 @@ namespace ddb
 
         std::string formatCommandLine(const fs::path &binary, const std::vector<std::string> &args)
         {
-            std::string out = quoteForLog(binary.string());
+            std::string out = quoteForLog(io::toUtf8(binary));
             for (const auto &a : args)
             {
                 out.push_back(' ');

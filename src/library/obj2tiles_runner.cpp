@@ -59,10 +59,10 @@ namespace ddb
 
             fs::path searchOnPath()
             {
-                const char *path = std::getenv("PATH");
-                if (!path || !*path) return {};
+                const auto path = io::getEnvUtf8("PATH");
+                if (!path || path->empty()) return {};
 
-                std::string p(path);
+                const std::string &p = *path;
                 size_t start = 0;
                 while (start <= p.size())
                 {
@@ -71,7 +71,7 @@ namespace ddb
                     std::string dir = p.substr(start, end - start);
                     if (!dir.empty())
                     {
-                        fs::path candidate = fs::path(dir) / kBinaryName;
+                        fs::path candidate = io::fromUtf8(dir) / kBinaryName;
                         if (isExecutableFile(candidate)) return candidate;
                     }
                     if (end == p.size()) break;
@@ -218,18 +218,18 @@ namespace ddb
             // (non-empty), it is authoritative: either it points to a usable binary
             // or no binary is considered available (so callers can pin the tool
             // deterministically and tests can simulate "missing").
-            if (const char *override = std::getenv("DDB_OBJ2TILES_PATH"))
+            if (const auto override = io::getEnvUtf8("DDB_OBJ2TILES_PATH"))
             {
-                if (override[0] != '\0')
+                if (!override->empty())
                 {
-                    fs::path p(override);
+                    const fs::path p = io::fromUtf8(*override);
                     if (isExecutableFile(p)) found = p;
                     g_cachedBinary = found;
                     g_cacheValid = true;
                     if (!found.empty())
-                        LOGD << "Obj2Tiles binary discovered via DDB_OBJ2TILES_PATH at " << found.string();
+                        LOGD << "Obj2Tiles binary discovered via DDB_OBJ2TILES_PATH at " << io::toUtf8(found);
                     else
-                        LOGD << "DDB_OBJ2TILES_PATH=" << override << " is not an executable file; treating Obj2Tiles as unavailable";
+                        LOGD << "DDB_OBJ2TILES_PATH=" << *override << " is not an executable file; treating Obj2Tiles as unavailable";
                     return found;
                 }
             }
@@ -262,7 +262,7 @@ namespace ddb
             g_cacheValid = true;
 
             if (!found.empty())
-                LOGD << "Obj2Tiles binary discovered at " << found.string();
+                LOGD << "Obj2Tiles binary discovered at " << io::toUtf8(found);
             else
                 LOGD << "Obj2Tiles binary not found in DDB_OBJ2TILES_PATH, exe folder, install prefix or PATH";
 
@@ -283,7 +283,7 @@ namespace ddb
             const bool outputExists = fs::exists(outDir, ec);
             if (ec)
             {
-                errorOut = "could not inspect output directory '" + outDir.string() + "': " + ec.message();
+                errorOut = "could not inspect output directory '" + io::toUtf8(outDir) + "': " + ec.message();
                 return false;
             }
             if (outputExists)
@@ -292,7 +292,7 @@ namespace ddb
                 const bool empty = directory && !ec && fs::is_empty(outDir, ec);
                 if (ec || !empty)
                 {
-                    errorOut = "Obj2Tiles output directory must be absent or empty: '" + outDir.string() +
+                    errorOut = "Obj2Tiles output directory must be absent or empty: '" + io::toUtf8(outDir) +
                                "'. Use a fresh staging directory" + (ec ? ": " + ec.message() : ".");
                     return false;
                 }
@@ -307,7 +307,7 @@ namespace ddb
 
             if (!fs::exists(inputObj, ec))
             {
-                errorOut = "input OBJ does not exist: " + inputObj.string();
+                errorOut = "input OBJ does not exist: " + io::toUtf8(inputObj);
                 return false;
             }
 
@@ -316,7 +316,7 @@ namespace ddb
             fs::create_directories(outDir, ec);
             if (ec)
             {
-                errorOut = "could not create output directory '" + outDir.string() +
+                errorOut = "could not create output directory '" + io::toUtf8(outDir) +
                            "': " + ec.message();
                 return false;
             }
@@ -353,8 +353,8 @@ namespace ddb
             }
 
             std::vector<std::string> args;
-            args.push_back(inputObj.string()); // positional: Input
-            args.push_back(outDir.string());   // positional: Output
+            args.push_back(io::toUtf8(inputObj)); // positional: Input
+            args.push_back(io::toUtf8(outDir));   // positional: Output
             appendOptionArgs(args, effective);
 
             LOGD << "Spawning Obj2Tiles: " << process::formatCommandLine(bin, args);
@@ -400,11 +400,11 @@ namespace ddb
             if (!fs::is_regular_file(tilesetPath, ec) || ec || fs::file_size(tilesetPath, ec) == 0 || ec)
             {
                 std::ostringstream oss;
-                oss << "Obj2Tiles reported success but tileset.json is missing or empty: " << tilesetPath.string();
+                oss << "Obj2Tiles reported success but tileset.json is missing or empty: " << io::toUtf8(tilesetPath);
                 if (!res.outputTail.empty()) oss << ": " << res.tail(kErrorTailLength);
                 errorOut = oss.str();
 
-                LOGI << "Obj2Tiles exited with code 0 without writing " << tilesetPath.string()
+                LOGI << "Obj2Tiles exited with code 0 without writing " << io::toUtf8(tilesetPath)
                      << (res.outputTail.empty() ? std::string(", no output")
                                                 : ", output tail:\n" + res.tail(process::kDefaultOutputCapacity));
                 return false;
