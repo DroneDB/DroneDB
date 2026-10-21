@@ -308,6 +308,117 @@ namespace
             contract::takeJson(out));
     }
 
+    // XI-09: data-only STAC (ABI 1.1). Registry owns every STAC id and URL, so these outputs leave
+    // out the members built from them
+    TEST_F(ContractFixtures, StacData) {
+        const std::string r = root.string();
+        char* out = nullptr;
+        ASSERT_DDB_OK(DDBStacData(r.c_str(), nullptr, &out));
+        contract::expectMatchesFixture(fixture("stac-data-collection",
+                                               "DDBStacData(<root>, entry=NULL)",
+                                               "stac-data-collection.schema.json"),
+                                       contract::takeJson(out));
+
+        for (const std::string entry : {"ortho.tif", "sub/img.jpg"}) {
+            ASSERT_DDB_OK(DDBStacData(r.c_str(), entry.c_str(), &out));
+            contract::expectMatchesFixture(
+                fixture(entry == "ortho.tif" ? "stac-data-item-georaster" : "stac-data-item-image",
+                        "DDBStacData(<root>, entry=\"" + entry + "\")",
+                        "stac-data-item.schema.json"),
+                contract::takeJson(out));
+        }
+
+        ASSERT_DDB_OK(DDBStacItemCollectionData(r.c_str(), "", "", 10, 0, &out));
+        contract::expectMatchesFixture(
+            fixture(
+                "stac-data-item-collection",
+                "DDBStacItemCollectionData(<root>, bbox=\"\", datetime=\"\", limit=10, offset=0)",
+                "stac-data-item-collection.schema.json"),
+            contract::takeJson(out));
+    }
+
+    // A STAC document of DDBStac/DDBStacItemCollection without the members built from a URL or
+    // an ID: what the data-only exports return
+    json withoutUrlsAndIds(json doc) {
+        doc.erase("id");
+        doc.erase("collection");
+        doc.erase("links");
+        if (doc.contains("assets"))
+            for (auto& [name, asset] : doc["assets"].items())
+                asset.erase("href");
+        if (doc.contains("features"))
+            for (auto& feature : doc["features"])
+                feature = withoutUrlsAndIds(feature);
+        return doc;
+    }
+
+    // The data-only documents are the URL-building ones (same filters, id NULL) minus those
+    // members, and nothing else: no field is computed twice
+    TEST_F(ContractFixtures, StacDataIsStacWithoutUrlsAndIds) {
+        const std::string r = root.string();
+        for (const char* entry : {"", "ortho.tif", "sub/img.jpg", "layer.geojson", "cloud.las"}) {
+            SCOPED_TRACE(entry);
+            char* full = nullptr;
+            char* data = nullptr;
+            ASSERT_DDB_OK(DDBStac(r.c_str(), entry, kCollectionRoot, nullptr, kCatalogRoot, &full));
+            ASSERT_DDB_OK(DDBStacData(r.c_str(), entry, &data));
+            const json dataOnly = contract::takeJson(data);
+            EXPECT_EQ(dataOnly, withoutUrlsAndIds(contract::takeJson(full)));
+            EXPECT_EQ(dataOnly.dump().find("hub.example"), std::string::npos) << dataOnly.dump();
+        }
+
+        struct Filter {
+            const char* bbox;
+            const char* datetime;
+            int limit;
+            int offset;
+        };
+        for (const auto& f : {Filter{"", "", 10, 0},
+                              Filter{"", "", 1, 1},
+                              Filter{"-180,-90,180,90", "2023-11-01T00:00:00Z/..", 10, 0},
+                              Filter{"", "../2000-01-01", 10, 0}}) {
+            SCOPED_TRACE(std::string(f.bbox) + " " + f.datetime);
+            char* full = nullptr;
+            char* data = nullptr;
+            ASSERT_DDB_OK(DDBStacItemCollection(r.c_str(),
+                                                kCollectionRoot,
+                                                nullptr,
+                                                kCatalogRoot,
+                                                f.bbox,
+                                                f.datetime,
+                                                f.limit,
+                                                f.offset,
+                                                &full));
+            ASSERT_DDB_OK(
+                DDBStacItemCollectionData(r.c_str(), f.bbox, f.datetime, f.limit, f.offset, &data));
+            const json dataOnly = contract::takeJson(data);
+            EXPECT_EQ(dataOnly, withoutUrlsAndIds(contract::takeJson(full)));
+            EXPECT_EQ(dataOnly.dump().find("hub.example"), std::string::npos) << dataOnly.dump();
+        }
+    }
+
+    TEST_F(ContractFixtures, StacDataErrors) {
+        const std::string r = root.string();
+        char* out = nullptr;
+
+        DDBSetLastError("");
+        EXPECT_EQ(DDBStacData(r.c_str(), "missing.tif", &out), DDBERR_NOTFOUND);
+        EXPECT_STRNE(DDBGetLastError(), "");
+        EXPECT_EQ(out, nullptr);
+        // The URL-building export keeps its error code
+        EXPECT_EQ(DDBStac(r.c_str(), "missing.tif", kCollectionRoot, nullptr, kCatalogRoot, &out),
+                  DDBERR_EXCEPTION);
+
+        EXPECT_EQ(DDBStacData(nullptr, "", &out), DDBERR_EXCEPTION);
+        EXPECT_EQ(DDBStacData(r.c_str(), "", nullptr), DDBERR_EXCEPTION);
+        EXPECT_EQ(DDBStacItemCollectionData(nullptr, "", "", 10, 0, &out), DDBERR_EXCEPTION);
+        EXPECT_EQ(DDBStacItemCollectionData(r.c_str(), "", "", 10, 0, nullptr), DDBERR_EXCEPTION);
+        EXPECT_EQ(DDBStacItemCollectionData(r.c_str(), "1,2,3", "", 10, 0, &out), DDBERR_EXCEPTION);
+        EXPECT_EQ(DDBStacItemCollectionData(r.c_str(), "a,b,c,d", "", 10, 0, &out),
+                  DDBERR_EXCEPTION);
+        EXPECT_EQ(out, nullptr);
+    }
+
     TEST_F(ContractFixtures, RasterMetadata)
     {
         const std::string ortho = path("ortho.tif");

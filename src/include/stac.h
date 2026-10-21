@@ -31,6 +31,18 @@ namespace ddb
                                             int limit = 10,
                                             int offset = 0);
 
+    // Data-only STAC (XI-09): the documents of generateStac (with id "") and
+    // generateStacItemCollection without any member built from a URL or an ID: no "id",
+    // "collection" or "links", and no asset "href". Everything else is the same. Throws
+    // EntryNotFoundException for an entry that is not in the index.
+    DDB_DLL json generateStacData(const std::string& ddbPath, const std::string& entry = "");
+
+    DDB_DLL json generateStacItemCollectionData(const std::string& ddbPath,
+                                                const std::vector<double>& bbox = {},
+                                                const std::string& datetimeStart = "",
+                                                const std::string& datetimeEnd = "",
+                                                int limit = 10,
+                                                int offset = 0);
 }
 
 #endif // STAC_H

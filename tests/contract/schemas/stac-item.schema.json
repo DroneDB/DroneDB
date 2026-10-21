@@ -23,16 +23,42 @@
       "type": "string"
     },
     "stac_extensions": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
+      "$ref": "#/$defs/stacExtensions"
     },
     "id": {
       "type": "string"
     },
     "collection": {
       "type": "string"
+    },
+    "geometry": {
+      "$ref": "#/$defs/geometry"
+    },
+    "bbox": {
+      "$ref": "#/$defs/bbox"
+    },
+    "properties": {
+      "$ref": "#/$defs/properties"
+    },
+    "links": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/link"
+      }
+    },
+    "assets": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/asset"
+      }
+    }
+  },
+  "$defs": {
+    "stacExtensions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
     },
     "geometry": {
       "type": "object",
@@ -76,20 +102,6 @@
         }
       }
     },
-    "links": {
-      "type": "array",
-      "items": {
-        "$ref": "#/$defs/link"
-      }
-    },
-    "assets": {
-      "type": "object",
-      "additionalProperties": {
-        "$ref": "#/$defs/asset"
-      }
-    }
-  },
-  "$defs": {
     "link": {
       "type": "object",
       "required": [

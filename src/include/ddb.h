@@ -592,6 +592,30 @@ extern "C"
      *  @param offset number of items to skip (paging)
      *  @param output pointer to C-string where to store result (JSON) */
     DDB_DLL DDBErr DDBStacItemCollection(const char *ddbPath, const char *stacCollectionRoot, const char *id, const char *stacCatalogRoot, const char *bbox, const char *datetime, int limit, int offset, char **output);
+
+    /** Data-only STAC (XI-09, ABI 1.1): the document of DDBStac with id NULL, without any member
+     *  built from a URL or an ID, which the caller (Registry) owns: no "id", "collection" or
+     *  "links", and no asset "href". Everything else is the same: an Item keeps its entry path
+     *  as properties.title and as the key of its data asset, a Collection takes its title from
+     *  the dataset name or else the dataset folder name.
+     *  @param ddbPath path to the source DroneDB database (parent of ".ddb")
+     *  @param entry path of the entry to generate a STAC Item for; NULL or "" for the Collection
+     *  @param output pointer to C-string where to store result (JSON, free with DDBFree)
+     *  @return DDBERR_NONE on success, DDBERR_NOTFOUND if no entry has this path, an error
+     *          otherwise */
+    DDB_DLL DDBErr DDBStacData(const char* ddbPath, const char* entry, char** output);
+
+    /** Data-only STAC ItemCollection (XI-09, ABI 1.1): the document of DDBStacItemCollection
+     *  without "links", and with data-only features (DDBStacData). numberMatched and
+     *  numberReturned are kept. bbox, datetime, limit and offset are those of
+     *  DDBStacItemCollection.
+     *  @param output pointer to C-string where to store result (JSON, free with DDBFree) */
+    DDB_DLL DDBErr DDBStacItemCollectionData(const char* ddbPath,
+                                             const char* bbox,
+                                             const char* datetime,
+                                             int limit,
+                                             int offset,
+                                             char** output);
     /** Get raster info including bands, detected sensor, presets
      * @param path Path to raster file
      * @param output Pointer to receive JSON string (caller must free with DDBFree)

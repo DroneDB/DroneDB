@@ -1523,6 +1523,56 @@ DDB_DLL DDBErr DDBMetaRestore(const char* ddbPath, const char* dump, char** outp
     DDB_C_END
 }
 
+namespace {
+
+// A STAC API bbox "minX,minY,maxX,maxY" (EPSG:4326): empty when absent; throws on an invalid one
+std::vector<double> parseStacBbox(const char* bbox) {
+    std::vector<double> bboxVec;
+    if (bbox != nullptr && !utils::isNullOrEmptyOrWhitespace(bbox)) {
+        std::stringstream ss(bbox);
+        std::string token;
+        while (std::getline(ss, token, ',')) {
+            try {
+                bboxVec.push_back(std::stod(token));
+            } catch (...) {
+                throw InvalidArgsException("Invalid bbox value: " + token);
+            }
+        }
+        if (bboxVec.size() != 4)
+            throw InvalidArgsException("bbox must contain exactly 4 comma-separated values");
+    }
+    return bboxVec;
+}
+
+// A STAC API datetime: a single instant or an interval "start/end" ("../end" or "start/.." for
+// open ends); an empty bound is open
+struct StacDatetimeRange {
+    std::string start;
+    std::string end;
+};
+
+StacDatetimeRange parseStacDatetime(const char* datetime) {
+    StacDatetimeRange range;
+    if (datetime != nullptr && !utils::isNullOrEmptyOrWhitespace(datetime)) {
+        const std::string dt(datetime);
+        const auto slash = dt.find('/');
+        if (slash == std::string::npos) {
+            range.start = dt;
+            range.end = dt;
+        } else {
+            const std::string lo = dt.substr(0, slash);
+            const std::string hi = dt.substr(slash + 1);
+            if (lo != "..")
+                range.start = lo;
+            if (hi != "..")
+                range.end = hi;
+        }
+    }
+    return range;
+}
+
+}  // namespace
+
 DDB_DLL DDBErr DDBStac(const char* ddbPath,
                        const char* entry,
                        const char* stacCollectionRoot,
@@ -1579,52 +1629,67 @@ DDB_DLL DDBErr DDBStacItemCollection(const char* ddbPath,
     const std::string idStr = id ? std::string(id) : "";
     const std::string stacCatalogRootStr = stacCatalogRoot ? std::string(stacCatalogRoot) : "";
 
-    // Parse bbox "minX,minY,maxX,maxY" into a vector of doubles (empty if absent; throws on invalid)
-    std::vector<double> bboxVec;
-    if (bbox != nullptr && !utils::isNullOrEmptyOrWhitespace(bbox)) {
-        std::stringstream ss(bbox);
-        std::string token;
-        while (std::getline(ss, token, ',')) {
-            try {
-                bboxVec.push_back(std::stod(token));
-            } catch (...) {
-                throw InvalidArgsException("Invalid bbox value: " + token);
-            }
-        }
-        if (bboxVec.size() != 4)
-            throw InvalidArgsException("bbox must contain exactly 4 comma-separated values");
-    }
-
-    // Parse datetime: single instant or interval "start/end" ("../end" or "start/.." for open ends)
-    std::string datetimeStart;
-    std::string datetimeEnd;
-    if (datetime != nullptr && !utils::isNullOrEmptyOrWhitespace(datetime)) {
-        const std::string dt(datetime);
-        const auto slash = dt.find('/');
-        if (slash == std::string::npos) {
-            datetimeStart = dt;
-            datetimeEnd = dt;
-        } else {
-            const std::string lo = dt.substr(0, slash);
-            const std::string hi = dt.substr(slash + 1);
-            if (lo != "..")
-                datetimeStart = lo;
-            if (hi != "..")
-                datetimeEnd = hi;
-        }
-    }
+    const auto bboxVec = parseStacBbox(bbox);
+    const auto datetimeRange = parseStacDatetime(datetime);
 
     auto json = ddb::generateStacItemCollection(std::string(ddbPath),
                                                 stacCollectionRootStr,
                                                 idStr,
                                                 stacCatalogRootStr,
                                                 bboxVec,
-                                                datetimeStart,
-                                                datetimeEnd,
+                                                datetimeRange.start,
+                                                datetimeRange.end,
                                                 limit,
                                                 offset);
 
     utils::copyToPtr(json.dump(), output);
+
+    DDB_C_END
+}
+
+DDBErr DDBStacData(const char* ddbPath, const char* entry, char** output) {
+    DDB_C_BEGIN
+
+    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
+        throw InvalidArgsException("No directory provided");
+
+    if (output == nullptr)
+        throw InvalidArgsException("Output pointer is null");
+
+    try {
+        const auto stac =
+            ddb::generateStacData(std::string(ddbPath), entry != nullptr ? entry : "");
+        utils::copyToPtr(stac.dump(), output);
+    } catch (const EntryNotFoundException& e) {
+        DDBSetLastError(e.what());
+        return DDBERR_NOTFOUND;
+    }
+
+    DDB_C_END
+}
+
+DDBErr DDBStacItemCollectionData(const char* ddbPath,
+                                 const char* bbox,
+                                 const char* datetime,
+                                 int limit,
+                                 int offset,
+                                 char** output) {
+    DDB_C_BEGIN
+
+    if (utils::isNullOrEmptyOrWhitespace(ddbPath))
+        throw InvalidArgsException("No directory provided");
+
+    if (output == nullptr)
+        throw InvalidArgsException("Output pointer is null");
+
+    const auto datetimeRange = parseStacDatetime(datetime);
+    const auto stac = ddb::generateStacItemCollectionData(std::string(ddbPath),
+                                                          parseStacBbox(bbox),
+                                                          datetimeRange.start,
+                                                          datetimeRange.end,
+                                                          limit,
+                                                          offset);
+    utils::copyToPtr(stac.dump(), output);
 
     DDB_C_END
 }

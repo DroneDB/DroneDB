@@ -92,7 +92,9 @@ DDBSearch
 DDBSetLastError
 DDBSetTag
 DDBStac
+DDBStacData
 DDBStacItemCollection
+DDBStacItemCollectionData
 DDBStatus
 DDBTile
 DDBVSIFree

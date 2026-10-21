@@ -78,6 +78,9 @@ with ddb).
 | `stac-collection` | `DDBStac(<root>, "", <collection URL>, "contract", <catalog URL>)` | `stac-collection` | - |
 | `stac-item-georaster`, `stac-item-image` | `DDBStac(<root>, "ortho.tif" / "sub/img.jpg", ...)` | `stac-item` | - |
 | `stac-item-collection` | `DDBStacItemCollection(<root>, ..., limit=10, offset=0)` | `stac-item-collection` | - |
+| `stac-data-collection` | `DDBStacData(<root>, NULL)`: data only (see [Data-only STAC](#data-only-stac)) | `stac-data-collection` | - |
+| `stac-data-item-georaster`, `stac-data-item-image` | `DDBStacData(<root>, "ortho.tif" / "sub/img.jpg")` | `stac-data-item` | - |
+| `stac-data-item-collection` | `DDBStacItemCollectionData(<root>, "", "", limit=10, offset=0)` | `stac-data-item-collection` | - |
 | `raster-info` | `DDBGetRasterInfo(<root>/ortho.tif)` | `raster-info` | - |
 | `raster-metadata` | `DDBGetRasterMetadata(<root>/ortho.tif, NULL, NULL)`: per-band statistics | `raster-metadata` | - |
 | `raster-metadata-formula` | `DDBGetRasterMetadata(<root>/ortho.tif, "VARI", "RGB")`: formula statistics and histogram | `raster-metadata` | - |
@@ -96,6 +99,24 @@ Each fixture file holds:
   "output": "the normalised output"
 }
 ```
+
+## Data-only STAC
+
+`DDBStacData` and `DDBStacItemCollectionData` (XI-09, ABI 1.1) return the documents of `DDBStac`
+(with `id` NULL) and `DDBStacItemCollection` without any member built from a URL or an ID, which
+Registry owns: no `id`, `collection` or `links`, and no asset `href`. Every other member is the
+same, value for value (`ContractFixtures.StacDataIsStacWithoutUrlsAndIds` compares them). A
+caller builds the rest from what is left:
+
+* an Item's entry path is `properties.title` and the key of its data asset (role `data`); the
+  `thumbnail` asset (role `thumbnail`) is there when libddb can render a thumbnail of the entry;
+* a Collection's assets are keyed by entry path; its `title` is the dataset name, else the dataset
+  folder name;
+* `DDBStacData` returns `DDBERR_NOTFOUND` for an entry that is not in the index (`DDBStac`
+  keeps returning `DDBERR_EXCEPTION`).
+
+The existing `DDBStac` and `DDBStacItemCollection` outputs are unchanged (their fixtures did not
+change).
 
 ## Path vectors
 
@@ -189,6 +210,12 @@ Registry has to adopt first.
   `src/include/ddb.symbols`, so every new export updates this fixture too.
 * 2026-10-21: `normalize-path`, `normalize-path-rejected` and `vectors/entry-paths.json` added
   (XI-09, ABI 1.1: `DDBNormalizePath`); `capabilities` lists the new export.
+* 2026-10-21: `stac-data-collection`, `stac-data-item-georaster`, `stac-data-item-image` and
+  `stac-data-item-collection` added with their schemas (XI-09, ABI 1.1: `DDBStacData`,
+  `DDBStacItemCollectionData`); `capabilities` lists the new exports. The shared parts of
+  `stac-item.schema.json` (`stacExtensions`, `geometry`, `bbox`, `properties`) and
+  `stac-collection.schema.json` (`extent`) moved to their `$defs`, unchanged, so the data-only
+  schemas reference them.
 
 ## Cross-repository CI
 

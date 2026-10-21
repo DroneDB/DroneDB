@@ -68,6 +68,11 @@ namespace ddb
     {
         using AppException::AppException;
     };
+    // The requested entry is not in the index. The exports added in ABI 1.1 return it as
+    // DDBERR_NOTFOUND; the older ones keep returning DDBERR_EXCEPTION.
+    class EntryNotFoundException : public AppException {
+        using AppException::AppException;
+    };
     class GDALException : public AppException
     {
         using AppException::AppException;
