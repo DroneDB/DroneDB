@@ -2,13 +2,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// Freeing a SpatiaLite connection cache (spatialite_cleanup_ex) also runs xmlCleanupParser(),
+// Upstream, freeing a SpatiaLite connection cache (spatialite_cleanup_ex) also runs xmlCleanupParser(),
 // the process-wide libxml2 teardown, which is not thread-safe: connections closed at the same
 // time tore libxml2 down together. A teardown destroys libxml2's global mutexes (catalog,
 // schema types) right after releasing them: a thread it had just woken then fails to unlock
 // the destroyed mutex, and the next waiter sleeps forever. That was the rare 300 s hang of
 // concurrentAdd.manyThreadsOneDatabaseBaseline and DDB02_Open.concurrentOpensAndReadsSucceed
-// under a parallel ctest run, whose first closes run on many threads at once.
+// under a parallel ctest run, whose first closes run on many threads at once. Each teardown
+// also dropped the per-thread libxml2 state of live threads, which LSan reports as leaks.
+// vcpkg-overlays/libspatialite removes the call; freeSpatialiteCache serializes the frees.
 
 #include <atomic>
 #include <chrono>

@@ -26,13 +26,15 @@ namespace ddb
         if (cache == nullptr)
             return;
 
-        // spatialite_cleanup_ex() is not per connection only: it also runs xmlCleanupParser(),
-        // the process-wide libxml2 teardown, which is not thread-safe. Two caches freed at once
-        // tore libxml2 down together: one thread destroyed libxml2's catalog mutex while the
-        // other was waiting for it, and that thread blocked forever. Connections close on any
-        // thread (concurrent C API calls, DatabasePool), so the caches are freed one at a time.
-        // Never destroyed (like DatabasePool): a connection may still close during static
-        // destruction.
+        // Upstream spatialite_cleanup_ex() is not per connection only: it also runs
+        // xmlCleanupParser(), the process-wide libxml2 teardown, which is not thread-safe. Two
+        // caches freed at once tore libxml2 down together (one thread destroyed a libxml2 mutex
+        // another was waiting for, which then blocked forever), and per-thread libxml2 state
+        // leaked. Our libspatialite overlay (vcpkg-overlays/libspatialite) removes that call;
+        // the caches are still freed one at a time, so a libspatialite built without the
+        // overlay cannot deadlock. Connections close on any thread (concurrent C API calls,
+        // DatabasePool). Never destroyed (like DatabasePool): a connection may still close
+        // during static destruction.
         static auto *cleanupMutex = new std::mutex();
         std::lock_guard<std::mutex> lock(*cleanupMutex);
         spatialite_cleanup_ex(cache);
