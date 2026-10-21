@@ -43,8 +43,7 @@ namespace ddb
             // The SpatiaLite cache must outlive the connection that uses it
             if (handle != nullptr)
                 sqlite3_close_v2(handle);
-            if (spatialiteCache != nullptr)
-                spatialite_cleanup_ex(spatialiteCache);
+            freeSpatialiteCache(spatialiteCache);
         }
     }
 

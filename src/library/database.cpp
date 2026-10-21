@@ -21,18 +21,35 @@
 namespace ddb
 {
 
+    void freeSpatialiteCache(void *cache)
+    {
+        if (cache == nullptr)
+            return;
+
+        // spatialite_cleanup_ex() is not per connection only: it also runs xmlCleanupParser(),
+        // the process-wide libxml2 teardown, which is not thread-safe. Two caches freed at once
+        // tore libxml2 down together: one thread destroyed libxml2's catalog mutex while the
+        // other was waiting for it, and that thread blocked forever. Connections close on any
+        // thread (concurrent C API calls, DatabasePool), so the caches are freed one at a time.
+        // Never destroyed (like DatabasePool): a connection may still close during static
+        // destruction.
+        static auto *cleanupMutex = new std::mutex();
+        std::lock_guard<std::mutex> lock(*cleanupMutex);
+        spatialite_cleanup_ex(cache);
+    }
+
     void Database::afterOpen()
     {
         // spatialite_initialize() sets an unguarded global flag (and initializes libxml2) on
         // its first call, which spatialite_alloc_connection() makes implicitly: run it once.
         // With a reentrant GEOS build (GEOS_REENTRANT) the rest of the per-connection setup
-        // only touches the new cache and this handle, so connections can open concurrently.
+        // only touches the new cache and this handle, so connections can open concurrently
+        // (freeing a cache cannot: see freeSpatialiteCache).
         static std::once_flag spatialiteInitialized;
         std::call_once(spatialiteInitialized, [] { spatialite_initialize(); });
 
         // reopen() runs afterOpen() again on a closed handle
-        if (spatialiteCache != nullptr)
-            spatialite_cleanup_ex(spatialiteCache);
+        freeSpatialiteCache(spatialiteCache);
         spatialiteCache = spatialite_alloc_connection();
         spatialite_init_ex(db, spatialiteCache, 0);
 
@@ -639,11 +656,8 @@ END;
 
         // The SpatiaLite cache must outlive the connection that uses it
         closeConnection();
-        if (spatialiteCache != nullptr)
-        {
-            spatialite_cleanup_ex(spatialiteCache);
-            spatialiteCache = nullptr;
-        }
+        freeSpatialiteCache(spatialiteCache);
+        spatialiteCache = nullptr;
         return *this;
     }
 

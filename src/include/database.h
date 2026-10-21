@@ -74,6 +74,10 @@ namespace ddb
     DDB_DLL MetaManager *getMetaManager();
   };
 
+  /// Frees the SpatiaLite cache of a connection (spatialite_cleanup_ex) once the connection
+  /// is closed. Every cache is freed through here: one at a time in the process (database.cpp).
+  void freeSpatialiteCache(void *cache);
+
   DDB_DLL json wktBboxCoordinates(const std::string &wktBbox);
 
 }
