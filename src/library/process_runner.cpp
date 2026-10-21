@@ -14,6 +14,7 @@
 #include <string>
 #include <vector>
 
+#include "cancellation.h"
 #include "logger.h"
 #include "unique_handle.h"
 
@@ -212,6 +213,13 @@ namespace ddb
             std::string limitMessage(const Options &opts, bool runtimeHit)
             {
                 return runtimeHit ? runtimeMessage(opts.maxRuntime) : timeoutMessage(opts.idleTimeout);
+            }
+
+            // The work of the calling thread was canceled (cancellation.h): the child is killed
+            void markCanceled(Result &r)
+            {
+                r.canceled = true;
+                r.errorMessage = "killed: the call was canceled";
             }
 
             std::string quoteForLog(const std::string &arg)
@@ -546,8 +554,15 @@ namespace ddb
                             exitTime = Clock::now();
                         }
                     }
+                    if (!childExited && cancel::isCanceled())
+                    {
+                        markCanceled(r);
+                        killGroup(pid);
+                        killed = true;
+                        break;
+                    }
                     const auto now = Clock::now();
-                    long long waitMs = 500; // periodic check for child exit
+                    long long waitMs = 500; // periodic check for child exit and cancellation
                     if (!childExited && anyLimit(opts))
                     {
                         bool runtimeHit = false;
@@ -625,9 +640,9 @@ namespace ddb
 
                 // Every monitored pipe is closed but the child may still be running
                 // (e.g. it closed stdout/stderr itself): keep enforcing the idle
-                // timeout, measured from the last activity, instead of blocking in
-                // waitpid() forever. Nothing can count as activity any more.
-                if (!killed && !childExited && anyLimit(opts))
+                // timeout, measured from the last activity, and the cancellation instead
+                // of blocking in waitpid() forever. Nothing can count as activity any more.
+                if (!killed && !childExited)
                 {
                     for (;;)
                     {
@@ -637,17 +652,28 @@ namespace ddb
                         if (wr == 0 && si.si_pid == pid) break; // exited (not reaped yet)
                         if (wr < 0 && errno != EINTR) break;    // waitChild() reports it
 
-                        bool runtimeHit = false;
-                        const long long remaining =
-                            remainingBudget(opts, start, lastActivity, Clock::now(), runtimeHit);
-                        if (remaining <= 0)
+                        if (cancel::isCanceled())
                         {
-                            r.timedOut = true;
-                            r.errorMessage = limitMessage(opts, runtimeHit);
+                            markCanceled(r);
                             killGroup(pid);
                             break;
                         }
-                        ::poll(nullptr, 0, static_cast<int>(std::min<long long>(remaining, kExitPollMs)));
+                        long long pollMs = kExitPollMs;
+                        if (anyLimit(opts))
+                        {
+                            bool runtimeHit = false;
+                            const long long remaining =
+                                remainingBudget(opts, start, lastActivity, Clock::now(), runtimeHit);
+                            if (remaining <= 0)
+                            {
+                                r.timedOut = true;
+                                r.errorMessage = limitMessage(opts, runtimeHit);
+                                killGroup(pid);
+                                break;
+                            }
+                            pollMs = std::min<long long>(remaining, kExitPollMs);
+                        }
+                        ::poll(nullptr, 0, static_cast<int>(pollMs));
                     }
                 }
 
@@ -933,6 +959,12 @@ namespace ddb
                         childExited = true;
                         exitTime = Clock::now();
                     }
+                    if (!childExited && cancel::isCanceled())
+                    {
+                        markCanceled(r);
+                        terminate();
+                        break;
+                    }
                     bool active = pump(outRead, true);
                     active = pump(extraRead, false) || active;
                     const auto now = Clock::now();
@@ -962,29 +994,39 @@ namespace ddb
                 // Every monitored pipe is closed but the child may still be running:
                 // keep enforcing the idle timeout (from the last activity) instead of
                 // waiting forever.
-                if (!r.timedOut && !childExited && anyLimit(opts))
+                if (!r.timedOut && !r.canceled && !childExited)
                 {
                     for (;;)
                     {
                         if (WaitForSingleObject(childProcess.get(), 0) == WAIT_OBJECT_0) break;
-                        bool runtimeHit = false;
-                        const long long remaining =
-                            remainingBudget(opts, start, lastActivity, Clock::now(), runtimeHit);
-                        if (remaining <= 0)
+                        if (cancel::isCanceled())
                         {
-                            r.timedOut = true;
-                            r.errorMessage = limitMessage(opts, runtimeHit);
+                            markCanceled(r);
                             terminate();
                             break;
                         }
-                        const DWORD waitMs = static_cast<DWORD>(std::min<long long>(remaining, kExitPollMs));
-                        if (WaitForSingleObject(childProcess.get(), waitMs) != WAIT_TIMEOUT) break;
+                        long long pollMs = kExitPollMs;
+                        if (anyLimit(opts))
+                        {
+                            bool runtimeHit = false;
+                            const long long remaining =
+                                remainingBudget(opts, start, lastActivity, Clock::now(), runtimeHit);
+                            if (remaining <= 0)
+                            {
+                                r.timedOut = true;
+                                r.errorMessage = limitMessage(opts, runtimeHit);
+                                terminate();
+                                break;
+                            }
+                            pollMs = std::min<long long>(remaining, kExitPollMs);
+                        }
+                        if (WaitForSingleObject(childProcess.get(), static_cast<DWORD>(pollMs)) != WAIT_TIMEOUT) break;
                     }
                 }
 
                 WaitForSingleObject(childProcess.get(), INFINITE);
                 DWORD exitCode = 1;
-                if (GetExitCodeProcess(childProcess.get(), &exitCode) && !r.timedOut)
+                if (GetExitCodeProcess(childProcess.get(), &exitCode) && !r.timedOut && !r.canceled)
                 {
                     r.exited = true;
                     r.exitCode = static_cast<int>(exitCode);
@@ -1008,7 +1050,7 @@ namespace ddb
             {
                 oss << "failed to start: " << (errorMessage.empty() ? "unknown error" : errorMessage);
             }
-            else if (timedOut)
+            else if (timedOut || canceled)
             {
                 oss << errorMessage;
             }
@@ -1054,6 +1096,9 @@ namespace ddb
             // otherwise log only failures or a generic completion message.
             if (result.descendantsTerminated)
                 LOGW << binary.string() << " " << result.describe();
+            // The child is killed and reaped: the cancellation is the caller's to report
+            if (result.canceled)
+                cancel::throwIfCanceled();
             return result;
         }
 

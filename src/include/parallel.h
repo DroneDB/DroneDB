@@ -83,6 +83,10 @@ namespace ddb::parallel
     // lowest failed index is rethrown: the same one a serial loop would throw.
     // GDAL errors raised by fn go to GDAL's default handler on every thread, not
     // to the process-wide handler (which PDAL replaces while its stages run).
+    // The workers work for the calling thread's cancel token (cancellation.h),
+    // and every index checks it before it starts: once the token is canceled
+    // or the shutdown started, no new index starts and the loop throws
+    // CanceledException (ShutdownException), like a failed index.
     DDB_DLL void forEachIndex(size_t count, size_t maxThreads, const std::function<void(size_t)> &fn);
 
     // forEachIndex for a section bound by the disk rather than by the CPU (reading files to

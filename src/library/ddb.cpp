@@ -29,6 +29,7 @@
 #include "build_budget.h"
 #include "build_manifest.h"
 #include "c_api_util.h"
+#include "cancellation.h"
 #include "database.h"
 #include "databasepool.h"
 #include "raster_cache.h"
@@ -154,8 +155,26 @@ constexpr std::array kErrorCodes = {DDB_ERROR_CODE(NONE),
                                     DDB_ERROR_CODE(SHUTDOWN)};
 #undef DDB_ERROR_CODE
 
-// The exports that return DDBERR_CANCELED when their DDBProgressCallback asks to stop
-constexpr std::string_view kCancellable[] = {"DDBExportRaster2"};
+// The exports whose work checks the caller's cancel token while it runs (DQ-15, XI-07): their
+// steps check cancel::throwIfCanceled() or run through a checkpoint (GDAL progress, raster
+// reads, forEachIndex items, SQLite statements, external tools). Sorted, so the capabilities
+// list is stable. Rollout: the render paths, then DDBBuild; raster analysis and DDBApplyDelta
+// come later. DDBExportRaster2 also stops when its progress callback asks to.
+constexpr std::string_view kCancellable[] = {
+    "DDBBuild",
+    "DDBExportRaster",
+    "DDBExportRaster2",
+    "DDBGenerateMemoryThumbnail",
+    "DDBGenerateMemoryThumbnailEx",
+    "DDBGenerateThumbnail",
+    "DDBMemoryTile",
+    "DDBMemoryTileEx",
+    "DDBMemoryTileFmt",
+    "DDBRenderRasterIndex",
+    "DDBRenderRasterRegion",
+    "DDBRenderRasterRegionEx",
+    "DDBTile",
+};
 
 static_assert(
     [] {
@@ -171,6 +190,8 @@ static_assert(std::ranges::all_of(kCancellable,
                                              std::end(kExportedSymbols);
                                   }),
               "a cancellable function must be an export listed in ddb.symbols");
+static_assert(std::ranges::adjacent_find(kCancellable, std::ranges::greater_equal{}) == std::end(kCancellable),
+              "kCancellable must be sorted, without duplicates");
 
 json stringArray(std::span<const std::string_view> items) {
     json out = json::array();
@@ -242,6 +263,39 @@ void closeKeptResources() {
 
 DDBErr DDBShutdown(int timeoutMs) {
     return capi::shutdown(timeoutMs, &closeKeptResources);
+}
+
+// ------------------------------------------------------------------ cancellation (XI-07)
+
+// DDBCancelToken is opaque to the caller: the library's cancel::Token
+static cancel::Token* tokenOf(DDBCancelToken* token) noexcept {
+    return reinterpret_cast<cancel::Token*>(token);
+}
+
+DDBErr DDBCreateCancelToken(DDBCancelToken** token) {
+    return guardedOutput<kAbi11Codes>(token, [&] {
+        requireOutput(token);
+        return reinterpret_cast<DDBCancelToken*>(cancel::Token::create());
+    });
+}
+
+DDBErr DDBCancel(DDBCancelToken* token) {
+    // A host cancels its requests while it shuts down: allowed in any state
+    return guarded<kAbi11Codes, capi::CallKind::Unrestricted>([&] {
+        requireOutput(token, "No cancel token provided");
+        tokenOf(token)->cancel(cancel::kCanceledByToken);
+    });
+}
+
+// Exempt like DDBFree: works in any state and never touches the last error
+DDBErr DDBFreeCancelToken(DDBCancelToken* token) {
+    if (token != nullptr)
+        tokenOf(token)->release();
+    return DDBERR_NONE;
+}
+
+DDBErr DDBSetThreadCancelToken(DDBCancelToken* token) {
+    return guarded<kAbi11Codes, capi::CallKind::Setting>([&] { cancel::setThreadToken(tokenOf(token)); });
 }
 
 // ------------------------------------------------------------------ files and index
@@ -1825,10 +1879,29 @@ static int computeExportTileSize(GDALDatasetH hSrcDs, int bandCount, int tileSiz
     return std::clamp(result, 64, 8192);
 }
 
+// The output file of an export, deleted unless the export completed (commit): a failed or
+// canceled export leaves no partial file
+class PartialOutput {
+   public:
+    explicit PartialOutput(const char* path) : path_(path) {}
+    ~PartialOutput() {
+        if (!committed_)
+            VSIUnlink(path_);
+    }
+    PartialOutput(const PartialOutput&) = delete;
+    PartialOutput& operator=(const PartialOutput&) = delete;
+    void commit() noexcept { committed_ = true; }
+
+   private:
+    const char* path_;
+    bool committed_ = false;
+};
+
 // Internal block-windowed raster export shared by DDBExportRaster (legacy ABI)
-// and DDBExportRaster2. Returns 0 on success, 1 if canceled by the progress
-// callback. Throws on errors (mapped to a DDBErr by guarded() in the callers).
-static int exportRasterImpl(const char* inputPath, const char* outputPath,
+// and DDBExportRaster2. Throws on errors (mapped to a DDBErr by guarded() in the
+// callers), CanceledException when the progress callback asked to stop or the
+// call was canceled (DQ-15).
+static void exportRasterImpl(const char* inputPath, const char* outputPath,
                             const char* preset, const char* bands,
                             const char* formula, const char* bandFilter,
                             const char* colormap, const char* rescale,
@@ -1839,10 +1912,19 @@ static int exportRasterImpl(const char* inputPath, const char* outputPath,
     // Creating the output truncates an existing file, so it must not be the input
     io::assureDistinctOutput(pathArg(inputPath), pathArg(outputPath));
 
-    // Returns true if the operation should be canceled.
-    auto reportProgress = [&](double fraction, const char* phase) -> bool {
-        if (!progress) return false;
-        return progress(fraction, phase, progressUserData) != 0;
+    // One cancellation for the whole call (DQ-15): the token of this call is canceled by the
+    // caller's token, by the shutdown, and by the progress callback when it asks to stop
+    // (non-zero), so every checkpoint below, GDAL's included, honours all three.
+    cancel::CallToken callToken;
+    // Reports progress; never throws (GDAL calls it through its progress callback)
+    const auto askCallback = [&](double fraction, const char* phase) {
+        if (progress != nullptr && progress(fraction, phase, progressUserData) != 0)
+            callToken.cancel("Export canceled by the progress callback");
+    };
+    // Reports progress, then stops the export when it was canceled
+    const auto checkpoint = [&](double fraction, const char* phase) {
+        askCallback(fraction, phase);
+        cancel::throwIfCanceled();
     };
 
     // Closed on any return or throw
@@ -1951,6 +2033,7 @@ static int exportRasterImpl(const char* inputPath, const char* outputPath,
             size_t seen = 0;
             for (int ty = 0; ty < nty; ty++) {
                 for (int tx = 0; tx < ntx; tx++) {
+                    cancel::throwIfCanceled();
                     const int x0 = tx * tw, y0 = ty * th;
                     const int winW = std::min(tw, width - x0);
                     const int winH = std::min(th, height - y0);
@@ -1995,8 +2078,10 @@ static int exportRasterImpl(const char* inputPath, const char* outputPath,
         const auto cpu = parallel::tryAcquireThreads(parallel::hardwareThreads());
         createOpts.AddString(parallel::gdalNumThreads(cpu).c_str());
 
-        // Closed on any throw. On success or cancel we close it explicitly after the
-        // appropriate finalization.
+        // Deleted unless the export completes; declared first, so the dataset is closed
+        // before the file is deleted
+        PartialOutput partialOutput(outputPath);
+        // Closed on any throw. On success we close it explicitly after the finalization.
         auto outGuard = adoptDataset(
             GDALCreate(gtiffDrv, outputPath, width, height, 4, GDT_Byte, createOpts.List()));
         if (!outGuard)
@@ -2017,15 +2102,10 @@ static int exportRasterImpl(const char* inputPath, const char* outputPath,
         std::vector<uint8_t> chanData;
         size_t doneTiles = 0;
 
-        reportProgress(0.0, "rendering");
+        checkpoint(0.0, "rendering");
         for (int ty = 0; ty < nty; ty++) {
             for (int tx = 0; tx < ntx; tx++) {
-                if (reportProgress(static_cast<double>(doneTiles) / totalTiles, "rendering")) {
-                    outGuard.reset();  // closes hOut
-                    srcGuard.reset();  // closes hSrcDs
-                    GDALDeleteDataset(gtiffDrv, outputPath);
-                    return 1;
-                }
+                checkpoint(static_cast<double>(doneTiles) / totalTiles, "rendering");
 
                 const int x0 = tx * tw, y0 = ty * th;
                 const int winW = std::min(tw, width - x0);
@@ -2054,8 +2134,9 @@ static int exportRasterImpl(const char* inputPath, const char* outputPath,
         buildInternalOverviews(hOut, width, height);
         outGuard.reset();  // closes hOut
         srcGuard.reset();  // closes hSrcDs
-        reportProgress(1.0, "rendering");
-        return 0;
+        partialOutput.commit();
+        askCallback(1.0, "rendering");
+        return;
     } else {
         // Non-formula mode: band selection + rescale, export as GeoTIFF
         std::vector<int> selectedBands;
@@ -2081,11 +2162,9 @@ static int exportRasterImpl(const char* inputPath, const char* outputPath,
             throw;
         }
 
-        // Use GDALTranslate for band selection + rescale.
-        // Note: GDALTranslate does not expose an incremental progress callback
-        // via its options API, so callers will only receive progress at 0.0 and
-        // 1.0. Cancellation is only possible before the translate starts.
-        if (reportProgress(0.0, "converting")) return 1;
+        // Use GDALTranslate for band selection + rescale. Its progress goes to the
+        // callback, and it stops when the export is canceled.
+        checkpoint(0.0, "converting");
         CPLStringList targs;
         targs.AddString("-ot");
         targs.AddString("Byte");
@@ -2122,13 +2201,19 @@ static int exportRasterImpl(const char* inputPath, const char* outputPath,
             GDALTranslateOptionsNew(targs.List(), nullptr));
         if (!psOptions)
             throw GDALException("Cannot create GDALTranslate options");
+        cancel::GdalProgress translateProgress([&](double fraction) { askCallback(fraction, "converting"); });
+        translateProgress.attach(psOptions.get());
 
+        PartialOutput partialOutput(outputPath);
         int bUsageError = FALSE;
         auto out = adoptDataset(GDALTranslate(outputPath, hSrcDs, psOptions.get(), &bUsageError));
         srcGuard.reset();  // closes hSrcDs
 
-        if (!out || bUsageError)
+        if (!out || bUsageError) {
+            out.reset();
+            cancel::throwIfCanceled();
             throw GDALException("Cannot create output GeoTIFF");
+        }
 
         GDALFlushCache(datasetHandle(out));
         out.reset();
@@ -2137,8 +2222,8 @@ static int exportRasterImpl(const char* inputPath, const char* outputPath,
         if (const auto ovr = adoptDataset(GDALOpen(outputPath, GA_Update))) {
             buildInternalOverviews(datasetHandle(ovr), width, height);
         }
-        reportProgress(1.0, "converting");
-        return 0;
+        partialOutput.commit();
+        askCallback(1.0, "converting");
     }
 }
 
@@ -2148,7 +2233,7 @@ DDBErr DDBExportRaster(const char* inputPath, const char* outputPath,
                        const char* colormap, const char* rescale) {
     return guarded([&] {
         // Legacy ABI: forward to the block-windowed implementation with auto tile
-        // size and no progress callback (so it can never be canceled).
+        // size and no progress callback (only a cancel token cancels it).
         exportRasterImpl(inputPath, outputPath, preset, bands, formula, bandFilter,
                          colormap, rescale, 0, nullptr, nullptr);
     });
@@ -2162,11 +2247,8 @@ DDBErr DDBExportRaster2(const char* inputPath, const char* outputPath,
                         DDBProgressCallback progress, void* progressUserData) {
     // DDBExportRaster2 has always returned DDBERR_CANCELED (ABI 1.0)
     return guarded<kFrozenCodes | codeBit(DDBERR_CANCELED)>([&] {
-        const int canceled = exportRasterImpl(inputPath, outputPath, preset, bands,
-                                              formula, bandFilter, colormap, rescale,
-                                              tileSize, progress, progressUserData);
-        if (canceled)
-            throw CanceledException("Export canceled by the progress callback");
+        exportRasterImpl(inputPath, outputPath, preset, bands, formula, bandFilter, colormap, rescale,
+                         tileSize, progress, progressUserData);
     });
 }
 

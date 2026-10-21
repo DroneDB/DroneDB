@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+#include "cancellation.h"
 #include "dbops.h"
 #include "geoproject.h"
 #include "mio.h"
@@ -176,11 +177,17 @@ namespace ddb
                 GDALTranslateOptionsNew(targs.List(), nullptr));
             if (!psOptions)
                 throw GDALException("Cannot geoproject " + p.string() + ": invalid translate options");
+            // Both steps stop when the call is canceled (DQ-15)
+            cancel::GdalProgress progress;
+            progress.attach(psOptions.get());
 
             auto dstDataset = adoptDataset(
                 GDALTranslate("", datasetHandle(srcDataset), psOptions.get(), nullptr));
             if (!dstDataset)
+            {
+                cancel::throwIfCanceled();
                 throw GDALException("Cannot geoproject " + p.string() + ": " + CPLGetLastErrorMsg());
+            }
 
             // Run gdalwarp to add trasparency, apply GCPs
             CPLStringList wargs;
@@ -193,6 +200,7 @@ namespace ddb
                 GDALWarpAppOptionsNew(wargs.List(), nullptr));
             if (!waOptions)
                 throw GDALException("Cannot geoproject " + p.string() + ": invalid warp options");
+            progress.attach(waOptions.get());
 
             GDALDatasetH hDstDataset = datasetHandle(dstDataset);
             auto wrpDataset = adoptDataset(GDALWarp(tmpOutFile.c_str(),
@@ -210,6 +218,7 @@ namespace ddb
             if (!wrpDataset)
             {
                 io::assureIsRemoved(tmpOutFile);
+                cancel::throwIfCanceled();
                 throw GDALException("Cannot geoproject " + p.string() + ": " + CPLGetLastErrorMsg());
             }
 

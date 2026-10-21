@@ -6,6 +6,7 @@
 #include <fstream>
 #include <map>
 
+#include "cancellation.h"
 #include "exceptions.h"
 #include "fileversion.h"
 #include "json.h"
@@ -89,10 +90,15 @@ namespace ddb
         }
         else
         {
+            // A pass over the band (or an overview): it stops when the call is canceled
+            cancel::GdalProgress progress;
             if (GDALComputeRasterStatistics(hBand, TRUE, &s.min, &s.max, &s.mean, &s.stdDev,
-                                            nullptr, nullptr) != CE_None)
+                                            progress.function(), progress.data()) != CE_None)
+            {
+                cancel::throwIfCanceled();
                 throw GDALException("Cannot compute statistics of band " + std::to_string(band) +
                                     " of " + path);
+            }
             source = Source::Computed;
             LOGD << "Computed band " << band << " statistics of " << path << " (" << s.min << ", "
                  << s.max << ")";

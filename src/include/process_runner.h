@@ -51,6 +51,9 @@ namespace ddb
     // process group / job) when no byte arrives on ANY monitored pipe for the
     // idle timeout. run() blocks the calling thread (the child is forked on it)
     // and never throws for child failures: everything is reported in Result.
+    // It checks the cancellation of the calling thread's work (cancellation.h)
+    // at least every 500 ms: when it is canceled, the child is killed and
+    // reaped, and run() throws CanceledException (ShutdownException).
     namespace process
     {
 
@@ -115,6 +118,9 @@ namespace ddb
             int exitCode = -1;
             int termSignal = 0;     // POSIX: signal that terminated the child (0 = none)
             bool timedOut = false;  // killed by the idle timeout or the maxRuntime limit
+            // Killed because the work of the calling thread was canceled (cancellation.h:
+            // its cancel token, DDBShutdown); run() then throws instead of returning
+            bool canceled = false;
             // Drain grace expired after the direct child exited, so its remaining
             // descendants were terminated. This does not change child success.
             bool descendantsTerminated = false;
@@ -124,7 +130,7 @@ namespace ddb
             std::chrono::milliseconds duration{0};
 
             // True when the child ran and exited with code 0 (and was not killed).
-            bool success() const { return started && exited && exitCode == 0 && !timedOut; }
+            bool success() const { return started && exited && exitCode == 0 && !timedOut && !canceled; }
 
             // Human-readable status: "exited with code 3", "killed by signal 9 (Killed)",
             // "killed after 60 s without output", "failed to start: <reason>".

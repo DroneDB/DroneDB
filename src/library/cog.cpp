@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "gdal_raii.h"
 #include "cog.h"
+#include "cancellation.h"
 #include "build_budget.h"
 #include "parallel.h"
 #include "cog_utils.h"
@@ -24,18 +25,14 @@
 
 namespace ddb
 {
-    // Progress callback for GDALWarp: logs warp progress every ~5% to aid diagnostics.
-    // Uses an atomic counter to throttle log output (GDAL may call this very frequently).
-    static int CPL_STDCALL cogWarpProgress(double dfComplete,
-                                           const char* /*pszMessage*/,
-                                           void* pProgressArg) {
-        auto* lastPct = static_cast<std::atomic<int>*>(pProgressArg);
+    // Logs warp progress every ~5% to aid diagnostics. Uses an atomic counter to throttle
+    // log output (GDAL may call this very frequently, from its own threads too).
+    static void logWarpProgress(std::atomic<int>& lastPct, double dfComplete) {
         const int pct = static_cast<int>(dfComplete * 100.0);
-        int prev = lastPct->load();
-        if (pct >= prev + 5 && lastPct->compare_exchange_strong(prev, pct)) {
+        int prev = lastPct.load();
+        if (pct >= prev + 5 && lastPct.compare_exchange_strong(prev, pct)) {
             LOGD << "COG warp progress: " << pct << "%";
         }
-        return TRUE;
     }
 
     void buildCog(const std::string &inputGTiff, const std::string &outputCog)
@@ -253,9 +250,11 @@ namespace ddb
         // GDAL's 5%-of-RAM default made one warp peak at 12 GB without being faster.
         const ScopedGdalCacheMax cacheGuard(budget.cacheBytes);
 
-        // Attach progress callback for diagnostic logging during long warp operations
+        // Progress for diagnostic logging during long warp operations; the warp stops when
+        // the build is canceled (DQ-15)
         std::atomic<int> warpPct{0};
-        GDALWarpAppOptionsSetProgress(psOptions.get(), cogWarpProgress, &warpPct);
+        cancel::GdalProgress progress([&warpPct](double fraction) { logWarpProgress(warpPct, fraction); });
+        progress.attach(psOptions.get());
 
         // Capture the OS write error immediately, before cleanup or logging can
         // replace it. Clearing errno before each write API avoids stale errors.
@@ -269,6 +268,7 @@ namespace ddb
         const int warpSystemError = errno;
 
         if (!newDataset) {
+            cancel::throwIfCanceled();
             if (warpSystemError == ENOSPC)
                 throw RetryableBuildException("GDALWarp ran out of space creating COG: " + outputCog,
                                               RetryableBuildReason::NoSpaceOnDevice);

@@ -20,6 +20,7 @@
 
 #include "build_internal.h"
 #include "build_layout.h"
+#include "cancellation.h"
 #include "dbops.h"
 #include "exceptions.h"
 #include "mio.h"
@@ -264,9 +265,13 @@ void buildPending(Database* db, const std::string& outputPath, bool force) {
         }
 
         for (const auto& e : entries) {
+            // A canceled call stops before the next build (DQ-15)
+            cancel::throwIfCanceled();
             try {
                 LOGD << "Retrying pending build for " << e.path;
                 buildInternal(db, e, outPath, force);
+            } catch (const CanceledException&) {
+                throw;
             } catch (const BuildDepMissingException& err) {
                 LOGD << "Build of " << e.path << " is still pending: " << err.what();
             } catch (const BuildInProgressException& err) {

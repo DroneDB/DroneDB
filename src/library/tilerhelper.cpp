@@ -13,6 +13,7 @@
 #include <memory>
 #include <vector>
 
+#include "cancellation.h"
 #include "entry.h"
 #include "entry_handler.h"
 #include "exceptions.h"
@@ -87,9 +88,12 @@ namespace ddb
                                        const std::function<std::string(Tiler &)> &render)
     {
         // Files an entry handler tiles itself (COPC point clouds) are read in place; the
-        // others are downloaded when remote and tiled by GDAL
+        // others are downloaded when remote and tiled by GDAL. Each step checks whether the
+        // call was canceled (DQ-15); the GDAL steps also while they run.
+        cancel::throwIfCanceled();
         const TilerFactory *factory = findTilerFactory(tileablePath);
         const fs::path localPath = factory != nullptr ? tileablePath : toLocalFile(tileablePath, tileablePathHash);
+        cancel::throwIfCanceled();
 
         // A forced recreation must not be served by a tiler prepared before it
         if (forceRecreate)
@@ -103,6 +107,7 @@ namespace ddb
             const fs::path fileToTile = toGeoTIFF(localPath, tileSize, forceRecreate, "", tileablePathHash);
             return std::make_unique<GDALTiler>(fileToTile.string(), outputFolder.string(), tileSize, tms);
         });
+        cancel::throwIfCanceled();
         return render(*tiler);
     }
 

@@ -5,6 +5,7 @@
 #include <cassert>
 #include <string>
 
+#include "cancellation.h"
 #include "logger.h"
 #include "exceptions.h"
 #include "sqlite_database.h"
@@ -22,6 +23,8 @@ namespace ddb
         LOGD << "Opening connection to " << file;
         if (sqlite3_open(file.c_str(), &db) != SQLITE_OK)
             throw DBException("Can't open database: " + file);
+        // Statements stop when the work of the thread running them is canceled (DQ-15)
+        cancel::installSqliteProgressHandler(db);
 
         this->openFile = file;
         this->afterOpen();
@@ -75,6 +78,8 @@ namespace ddb
         {
             const std::string error(errMsg ? errMsg : sqlite3_errstr(rc));
             sqlite3_free(errMsg);
+            if (rc == SQLITE_INTERRUPT)
+                cancel::throwIfCanceled();
             if (rc == SQLITE_BUSY || rc == SQLITE_LOCKED)
                 throw DBBusyException(error);
             throw SQLException(error);

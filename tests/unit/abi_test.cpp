@@ -131,13 +131,16 @@ namespace
         EXPECT_EQ(reasons, json({"idleTimeout", "lowDiskSpace", "noSpaceOnDevice"}));
     }
 
-    TEST(Capabilities, cancellableAreExportsWithAProgressCallback)
+    // The exports that honour a cancel token (each one is called with a canceled token in
+    // c_abi_cancel_test.cpp): exports, sorted, DDBExportRaster2 (progress callback) among them
+    TEST(Capabilities, cancellableAreSortedExports)
     {
         const json caps = capabilities();
         const auto &symbols = caps["symbols"];
         ASSERT_TRUE(caps["cancellable"].is_array());
         for (const auto &name : caps["cancellable"])
             EXPECT_NE(std::find(symbols.begin(), symbols.end(), name), symbols.end()) << name;
+        EXPECT_TRUE(std::is_sorted(caps["cancellable"].begin(), caps["cancellable"].end()));
         EXPECT_NE(std::find(caps["cancellable"].begin(), caps["cancellable"].end(), "DDBExportRaster2"),
                   caps["cancellable"].end());
     }

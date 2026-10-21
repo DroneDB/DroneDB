@@ -4,6 +4,7 @@
 #include <assert.h>
 #include <utility>
 #include "statement.h"
+#include "cancellation.h"
 #include "exceptions.h"
 
 using namespace ddb;
@@ -103,6 +104,11 @@ Statement &Statement::step()
     case SQLITE_BUSY:
     case SQLITE_LOCKED:
         throw DBBusyException("Database busy executing " + query + ": " + sqlite3_errmsg(db));
+    case SQLITE_INTERRUPT:
+        // The progress handler stopped it: the work of this thread was canceled
+        hasRow = done = false;
+        cancel::throwIfCanceled();
+        [[fallthrough]];
     default:
         // Any other code (ERROR, MISUSE, IOERR, FULL, CORRUPT, READONLY, NOMEM...) is a
         // failure, never "no rows".

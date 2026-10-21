@@ -8,6 +8,7 @@
 #include <sstream>
 #include <tuple>
 
+#include "cancellation.h"
 #include "exceptions.h"
 #include "raster_utils.h"
 #include "sensorprofile.h"
@@ -109,13 +110,18 @@ namespace ddb
         std::vector<std::vector<float>> storage(bandCount);
         std::vector<float *> bands(bandCount);
         const auto nodataInfo = detectBandNodata(ds, bandCount);
+        cancel::GdalProgress progress; // the call is canceled (DQ-15)
+        GDALRasterIOExtraArg extra = progress.rasterIOExtraArg();
         for (int b = 0; b < bandCount; b++)
         {
             storage[b].resize(pixels);
             bands[b] = storage[b].data();
-            if (GDALRasterIO(GDALGetRasterBand(ds, b + 1), GF_Read, window.x, window.y, window.xsize, window.ysize,
-                             bands[b], window.outWidth, window.outHeight, GDT_Float32, 0, 0) != CE_None)
+            if (GDALRasterIOEx(GDALGetRasterBand(ds, b + 1), GF_Read, window.x, window.y, window.xsize, window.ysize,
+                               bands[b], window.outWidth, window.outHeight, GDT_Float32, 0, 0, &extra) != CE_None)
+            {
+                cancel::throwIfCanceled();
                 throw GDALException("Cannot read band " + std::to_string(b + 1));
+            }
         }
 
         // Transparent and nodata pixels stay out of the formula

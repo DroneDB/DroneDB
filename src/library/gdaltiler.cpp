@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "gdaltiler.h"
+#include "cancellation.h"
 
 #include <mutex>
 #include <memory>
@@ -241,22 +242,32 @@ namespace ddb
     {
         const GDALDataType type = GDALGetRasterDataType(GDALGetRasterBand(inputDataset, 1));
 
+        // A read through a warped VRT of a large raster can take long: it stops when the call
+        // is canceled (DQ-15)
+        cancel::GdalProgress progress;
+        GDALRasterIOExtraArg extra = progress.rasterIOExtraArg();
         if (type == GDT_Byte || type == GDT_Unknown)
         {
             // Straight into the tile planes
-            if (GDALDatasetRasterIO(inputDataset, GF_Read, g.r.x, g.r.y, g.r.xsize, g.r.ysize,
-                                    image.band(0) + static_cast<size_t>(g.w.y) * image.width + g.w.x,
-                                    g.w.xsize, g.w.ysize, GDT_Byte, bands, nullptr,
-                                    1, image.width, static_cast<GSpacing>(image.pixels())) != CE_None)
+            if (GDALDatasetRasterIOEx(inputDataset, GF_Read, g.r.x, g.r.y, g.r.xsize, g.r.ysize,
+                                      image.band(0) + static_cast<size_t>(g.w.y) * image.width + g.w.x,
+                                      g.w.xsize, g.w.ysize, GDT_Byte, bands, nullptr,
+                                      1, image.width, static_cast<GSpacing>(image.pixels()), &extra) != CE_None)
+            {
+                cancel::throwIfCanceled();
                 throw GDALException("Cannot read input dataset window");
+            }
             return;
         }
 
         const size_t windowPixels = static_cast<size_t>(g.w.xsize) * g.w.ysize;
         std::unique_ptr<uint8_t[]> buffer(new uint8_t[GDALGetDataTypeSizeBytes(type) * bands * windowPixels]);
-        if (GDALDatasetRasterIO(inputDataset, GF_Read, g.r.x, g.r.y, g.r.xsize, g.r.ysize, buffer.get(),
-                                g.w.xsize, g.w.ysize, type, bands, nullptr, 0, 0, 0) != CE_None)
+        if (GDALDatasetRasterIOEx(inputDataset, GF_Read, g.r.x, g.r.y, g.r.xsize, g.r.ysize, buffer.get(),
+                                  g.w.xsize, g.w.ysize, type, bands, nullptr, 0, 0, 0, &extra) != CE_None)
+        {
+            cancel::throwIfCanceled();
             throw GDALException("Cannot read input dataset window");
+        }
 
         // One stretch for all bands, from the statistics of the raster
         // TODO: allow people to specify rescale values
@@ -300,10 +311,15 @@ namespace ddb
         if (alphaBand == nullptr)
             alphaBand = GDALGetMaskBand(GDALGetRasterBand(inputDataset, 1));
 
-        if (GDALRasterIO(alphaBand, GF_Read, g.r.x, g.r.y, g.r.xsize, g.r.ysize,
-                         image.alpha.data() + static_cast<size_t>(g.w.y) * image.width + g.w.x,
-                         g.w.xsize, g.w.ysize, GDT_Byte, 1, image.width) != CE_None)
+        cancel::GdalProgress progress;
+        GDALRasterIOExtraArg extra = progress.rasterIOExtraArg();
+        if (GDALRasterIOEx(alphaBand, GF_Read, g.r.x, g.r.y, g.r.xsize, g.r.ysize,
+                           image.alpha.data() + static_cast<size_t>(g.w.y) * image.width + g.w.x,
+                           g.w.xsize, g.w.ysize, GDT_Byte, 1, image.width, &extra) != CE_None)
+        {
+            cancel::throwIfCanceled();
             throw GDALException("Cannot read input dataset alpha window");
+        }
     }
 
     std::string GDALTiler::tile(int tz, int tx, int ty, ImageFormat format, uint8_t **outBuffer, int *outBufferSize)
@@ -383,6 +399,8 @@ namespace ddb
         const size_t windowPixels = static_cast<size_t>(g.w.xsize) * g.w.ysize;
         std::vector<float> fBuf;
         std::vector<uint8_t> byteBuf(windowPixels);
+        cancel::GdalProgress progress;
+        GDALRasterIOExtraArg extra = progress.rasterIOExtraArg();
 
         for (size_t i = 0; i < bands.size(); i++)
         {
@@ -393,9 +411,12 @@ namespace ddb
             {
                 // Read as float, stretch over mean ± 2.33 σ (≈ p2-p98) clipped to min/max
                 fBuf.resize(windowPixels);
-                if (GDALRasterIO(hSrcBand, GF_Read, g.r.x, g.r.y, g.r.xsize, g.r.ysize,
-                                 fBuf.data(), g.w.xsize, g.w.ysize, GDT_Float32, 0, 0) != CE_None)
+                if (GDALRasterIOEx(hSrcBand, GF_Read, g.r.x, g.r.y, g.r.xsize, g.r.ysize,
+                                   fBuf.data(), g.w.xsize, g.w.ysize, GDT_Float32, 0, 0, &extra) != CE_None)
+                {
+                    cancel::throwIfCanceled();
                     throw GDALException("Cannot read band " + std::to_string(srcBand));
+                }
 
                 const auto [sMin, sMax] = stretchRange(bandStatistics(srcBand));
                 const double range = sMax - sMin;
@@ -405,9 +426,10 @@ namespace ddb
                     byteBuf[px] = static_cast<uint8_t>(255.0 * (v - sMin) / range);
                 }
             }
-            else if (GDALRasterIO(hSrcBand, GF_Read, g.r.x, g.r.y, g.r.xsize, g.r.ysize,
-                                  byteBuf.data(), g.w.xsize, g.w.ysize, GDT_Byte, 0, 0) != CE_None)
+            else if (GDALRasterIOEx(hSrcBand, GF_Read, g.r.x, g.r.y, g.r.xsize, g.r.ysize,
+                                    byteBuf.data(), g.w.xsize, g.w.ysize, GDT_Byte, 0, 0, &extra) != CE_None)
             {
+                cancel::throwIfCanceled();
                 throw GDALException("Cannot read band " + std::to_string(srcBand));
             }
 

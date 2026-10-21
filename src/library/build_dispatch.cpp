@@ -14,6 +14,7 @@
 #include "build_internal.h"
 #include "build_layout.h"
 #include "buildlock.h"
+#include "cancellation.h"
 #include "dbops.h"
 #include "deppath.h"
 #include "entry_handler.h"
@@ -55,6 +56,7 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
         outPath = db->buildDirectory().string();
 
     LOGD << "Building entry " << e.path << " type " << e.type;
+    cancel::throwIfCanceled();
 
     // The entry whose artifacts are built. Differs from e when e is a sidecar
     // (e.g. a .dbf) that triggers the build of its main file (the .shp): type
@@ -116,59 +118,72 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
     };
 
     try {
-        wasPending = fs::is_regular_file(pendFile);
-        if (wasPending) {
-            std::ifstream pending(pendFile.string(), std::ios::binary);
-            if (!pending.is_open())
-                throw FSException("Cannot read pending marker " + pendFile.string());
-            std::string timestamp;
-            std::getline(pending, timestamp);
-            pendingDependencyLines.assign(std::istreambuf_iterator<char>(pending), {});
-        }
-
-        // An interrupted publish (Model: 3D Tiles swap) is repaired under the
-        // primary lock, before the completeness check.
-        handler.recoverOutput(baseOutputPath);
-
-        // Recheck primary artifacts after serialized recovery. Success consumes
-        // pending work even when the output was already complete before this attempt.
-        if (handler.isComplete(baseOutputPath, false) && !force) {
-            LOGD << "Build output already exists after acquiring lock, skipping: " << outputFolder;
-            io::assureIsRemoved(pendFile);
-            return;
-        }
-
-        if (wasPending)
-            replacePendingMarker(pendFile, pendingDependencyLines);
-        // Both preflight and scratch creation are inside the classified attempt.
-        ensureSufficientDiskSpace(baseOutputPath);
-        io::assureFolderExists(tempFolder);
-
-        const BuildContext context{db,
-                                   target,
-                                   db->rootDirectory() / target.path,
-                                   db->rootDirectory(),
-                                   baseOutputPath,
-                                   fs::path(outputFolder),
-                                   fs::path(tempFolder),
-                                   force};
-        handler.build(context);
-
-        // A handler that publishes its own outputs (Vector) skips the standard rename
-        if (handler.usesTempFolder()) {
-            LOGD << "Build complete, moving temp folder to " << outputFolder;
-            if (fs::exists(outputFolder)) {
-                // Rasters of the previous output kept open would block this on Windows
-                releaseCachedFiles(outputFolder);
-                io::assureIsRemoved(outputFolder);
+        try {
+            wasPending = fs::is_regular_file(pendFile);
+            if (wasPending) {
+                std::ifstream pending(pendFile.string(), std::ios::binary);
+                if (!pending.is_open())
+                    throw FSException("Cannot read pending marker " + pendFile.string());
+                std::string timestamp;
+                std::getline(pending, timestamp);
+                pendingDependencyLines.assign(std::istreambuf_iterator<char>(pending), {});
             }
 
-            io::assureFolderExists(fs::path(outputFolder).parent_path());
-            io::rename(tempFolder, outputFolder);
-        }
+            // An interrupted publish (Model: 3D Tiles swap) is repaired under the
+            // primary lock, before the completeness check.
+            handler.recoverOutput(baseOutputPath);
 
-        io::assureIsRemoved(tempFolder);
-        io::assureIsRemoved(pendFile);
+            // Recheck primary artifacts after serialized recovery. Success consumes
+            // pending work even when the output was already complete before this attempt.
+            if (handler.isComplete(baseOutputPath, false) && !force) {
+                LOGD << "Build output already exists after acquiring lock, skipping: " << outputFolder;
+                io::assureIsRemoved(pendFile);
+                return;
+            }
+
+            if (wasPending)
+                replacePendingMarker(pendFile, pendingDependencyLines);
+            // Both preflight and scratch creation are inside the classified attempt.
+            ensureSufficientDiskSpace(baseOutputPath);
+            io::assureFolderExists(tempFolder);
+
+            const BuildContext context{db,
+                                       target,
+                                       db->rootDirectory() / target.path,
+                                       db->rootDirectory(),
+                                       baseOutputPath,
+                                       fs::path(outputFolder),
+                                       fs::path(tempFolder),
+                                       force};
+            handler.build(context);
+
+            // A handler that publishes its own outputs (Vector) skips the standard rename
+            if (handler.usesTempFolder()) {
+                LOGD << "Build complete, moving temp folder to " << outputFolder;
+                if (fs::exists(outputFolder)) {
+                    // Rasters of the previous output kept open would block this on Windows
+                    releaseCachedFiles(outputFolder);
+                    io::assureIsRemoved(outputFolder);
+                }
+
+                io::assureFolderExists(fs::path(outputFolder).parent_path());
+                io::rename(tempFolder, outputFolder);
+            }
+
+            io::assureIsRemoved(tempFolder);
+            io::assureIsRemoved(pendFile);
+        } catch (const CanceledException&) {
+            throw;
+        } catch (...) {
+            // A step that failed because the build was canceled (GDAL's "User terminated", a
+            // killed tool) is the cancellation, never a permanent failure of the input
+            cancel::throwIfCanceled();
+            throw;
+        }
+    } catch (const CanceledException&) {
+        // Like a transient failure: a pending build stays pending (DQ-15)
+        retainPending();
+        throw;
     } catch (const BuildDepMissingException& ex) {
         // Deferred success refreshes dependencies relative to the dataset root.
         // Atomic replacement also protects an existing marker if the disk is full.
@@ -242,9 +257,12 @@ void buildAll(Database* db, const std::string& outputPath, bool force) {
                 q->getInt64(5),
                 q->getInt(6));
 
-        // Call build on each of them
+        // Call build on each of them; a canceled call stops before the next one (DQ-15)
+        cancel::throwIfCanceled();
         try {
             buildInternal(db, e, outPath, force);
+        } catch (const CanceledException&) {
+            throw;
         } catch (const AppException& err) {
             LOGD << "Cannot build " << e.path << ": " << err.what();
         }

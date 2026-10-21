@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "cancellation.h"
 #include "coordstransformer.h"
 #include "copc_utils.h"
 #include "dbops.h"
@@ -232,13 +233,14 @@ GDALRasterBandH resolveAlphaBand(GDALDatasetH hSrc, int bandCount) {
 void readThumbAlpha(GDALRasterBandH hAlphaBand, int srcWidth, int srcHeight, RasterImage& image) {
     std::vector<uint8_t> buffer(image.pixels());
 
-    GDALRasterIOExtraArg extraArg;
-    INIT_RASTERIO_EXTRA_ARG(extraArg);
-    extraArg.eResampleAlg = GRIORA_Average;
+    // A full-raster read when the band has no overviews: it stops when the call is canceled
+    cancel::GdalProgress progress;
+    GDALRasterIOExtraArg extraArg = progress.rasterIOExtraArg(GRIORA_Average);
 
     if (GDALRasterIOEx(hAlphaBand, GF_Read, 0, 0, srcWidth, srcHeight,
                        buffer.data(), image.width, image.height,
                        GDT_Byte, 0, 0, &extraArg) != CE_None) {
+        cancel::throwIfCanceled();
         throw GDALException(std::string("Failed to read alpha/mask band: ") +
                             CPLGetLastErrorMsg());
     }
@@ -293,10 +295,15 @@ RasterImage translateToImage(GDALDatasetH hSrc,
         GDALTranslateOptionsNew(argv.data(), nullptr));
     if (!psOptions)
         throw GDALException("Failed to create GDAL translate options for " + sourceLabel);
+    // The resampling reads the whole raster: it stops when the call is canceled (DQ-15)
+    cancel::GdalProgress progress;
+    progress.attach(psOptions.get());
 
     const auto translated = adoptDataset(GDALTranslate("", hSrc, psOptions.get(), nullptr));
-    if (!translated)
+    if (!translated) {
+        cancel::throwIfCanceled();
         throw GDALException("Failed to normalize " + sourceLabel + " for thumbnail: " + CPLGetLastErrorMsg());
+    }
 
     RasterImage image(width, height, 3, false);
     if (GDALDatasetRasterIO(datasetHandle(translated), GF_Read, 0, 0, width, height, image.color.data(), width, height,
@@ -787,7 +794,8 @@ fs::path generateThumb(const fs::path& inputPath,
     LOGD << "Size = " << thumbSize;
 
     // COPC, RAD and SPZ files are rendered by their entry handler's generator, every other
-    // file as an image
+    // file as an image (whose GDAL steps stop when the call is canceled, DQ-15)
+    cancel::throwIfCanceled();
     if (const ThumbnailGenerator* generator = findThumbnailGenerator(inputPath))
         generator->generate(inputPath, thumbSize, outImagePath, outBuffer, outBufferSize);
     else

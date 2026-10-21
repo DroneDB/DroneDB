@@ -43,7 +43,7 @@ namespace ddb::capi {
 // The last error of the calling thread: the message and the reason of its last failed call.
 // Every guarded call clears it on entry. The exempt accessors (DDBGetLastError,
 // DDBGetLastErrorReason, DDBGetVersion, DDBGetAbiVersion, DDBGetCapabilities, DDBFree,
-// DDBVSIFree) never touch it.
+// DDBVSIFree, DDBFreeCancelToken) never touch it.
 void clearLastError() noexcept;
 // Stores message and reason, whole (no length limit). When they cannot be stored (out of memory)
 // the message reads "Out of memory" and the reason is "".
@@ -128,6 +128,12 @@ DDBErr reportCurrentException(CodeSet allowed) noexcept;
 // Sets the last error of a call refused because DDBShutdown started; returns DDBERR_SHUTDOWN
 DDBErr reportShutdown() noexcept;
 
+// The codes a call may return besides its own (allowed): DDBERR_SHUTDOWN always (DDBShutdown),
+// DDBERR_CANCELED when the caller set a cancel token on the thread (DDBSetThreadCancelToken).
+// A failure of a call whose work was asked to stop (a canceled token, the shutdown) is
+// reported as that, when it is not a more specific failure than DDBERR_EXCEPTION.
+CodeSet withRuntimeCodes(CodeSet allowed) noexcept;
+
 // ------------------------------------------------------------------ calls in flight and shutdown (XI-07)
 
 // What a guarded call is to the shutdown (DDBShutdown)
@@ -199,8 +205,8 @@ const std::string* initFailure() noexcept;
 // ------------------------------------------------------------------ the mapper
 
 // Runs body and returns DDBERR_NONE, or the code of the exception it threw (restricted to
-// Allowed, plus DDBERR_SHUTDOWN, which every export returns once DDBShutdown started). The last
-// error is cleared on entry and set for every other code.
+// Allowed and withRuntimeCodes). The last error is cleared on entry and set for every other
+// code. The outermost Operation of a thread resets the thread's cancel token when it returns.
 template <CodeSet Allowed = kFrozenCodes, CallKind Kind = CallKind::Operation, typename Body>
 DDBErr guarded(Body&& body) noexcept {
     static_assert(std::is_void_v<std::invoke_result_t<Body&&>>,
@@ -217,7 +223,7 @@ DDBErr guarded(Body&& body) noexcept {
         std::forward<Body>(body)();
         return DDBERR_NONE;
     } catch (...) {
-        return reportCurrentException(Allowed | codeBit(DDBERR_SHUTDOWN));
+        return reportCurrentException(withRuntimeCodes(Allowed));
     }
 }
 

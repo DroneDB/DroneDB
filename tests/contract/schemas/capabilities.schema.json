@@ -96,7 +96,7 @@
       }
     },
     "cancellable": {
-      "description": "Exports that return DDBERR_CANCELED when their DDBProgressCallback asks to stop",
+      "description": "Exports whose work checks a cancel token (DDBSetThreadCancelToken) while it runs and stops with DDBERR_CANCELED; DDBExportRaster2 also stops when its DDBProgressCallback asks to. Sorted in byte order",
       "type": "array",
       "items": {
         "$ref": "#/$defs/symbol"

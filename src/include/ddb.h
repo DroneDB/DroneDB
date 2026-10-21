@@ -42,14 +42,16 @@ extern "C"
      * codes its documentation names, DDBERR_NONE and DDBERR_EXCEPTION. In ABI 1.1 the exports
      * that existed before it keep the codes they always returned: an invalid argument and a
      * retryable failure are DDBERR_EXCEPTION there; DDBERR_INVALIDARGS and DDBERR_RETRYABLE are
-     * returned by the exports added in ABI 1.1 only. */
+     * returned by the exports added in ABI 1.1 only. Every export but the exempt ones (see
+     * DDBShutdown) returns DDBERR_SHUTDOWN once DDBShutdown started, and DDBERR_CANCELED when
+     * the caller set a cancel token on the thread (DDBSetThreadCancelToken) and canceled it. */
     typedef enum DDBErr
     {
         DDBERR_NONE = 0,            // No error
         DDBERR_EXCEPTION = 1,       // Generic app exception
         DDBERR_BUILDDEPMISSING = 2, // Build skipped: dependency missing
         DDBERR_BUILDINPROGRESS = 3, // Build skipped: another process holds the lock
-        DDBERR_CANCELED = 4,        // Operation canceled by the progress callback
+        DDBERR_CANCELED = 4,        // Canceled by the progress callback, or by a cancel token (ABI 1.1)
         DDBERR_BUSY = 5,            // Transient DB contention (SQLITE_BUSY/LOCKED); safe to retry
         DDBERR_NOTFOUND = 6,        // The requested entry does not exist
         DDBERR_INVALIDARGS = 7,     // An argument is invalid: fix the call, do not retry (ABI 1.1)
@@ -70,7 +72,7 @@ extern "C"
     /* The last error (XI-02) belongs to the calling thread. Every call clears it on entry and
      * sets it when it returns a code other than DDBERR_NONE, except the accessors that never
      * touch it: DDBGetLastError, DDBGetLastErrorReason, DDBGetVersion, DDBGetAbiVersion,
-     * DDBGetCapabilities, DDBFree and DDBVSIFree. Read it on the thread that made the failing
+     * DDBGetCapabilities, DDBFree, DDBVSIFree and DDBFreeCancelToken. Read it on the thread that made the failing
      * call, before any other libddb call on that thread (no await or thread hop in between).
      * Outputs are written only on DDBERR_NONE: on another code an output pointer is left
      * untouched (or set to NULL). */
@@ -116,7 +118,9 @@ extern "C"
      *   "version"      DDBGetVersion()
      *   "errorCodes"   every DDBErr code by name without the prefix: {"NONE": 0, "EXCEPTION": 1, ...}
      *   "errorReasons" every reason DDBGetLastErrorReason() returns, sorted
-     *   "cancellable"  the exports whose DDBProgressCallback can cancel them (DDBERR_CANCELED)
+     *   "cancellable"  the exports whose work checks a cancel token (DDBSetThreadCancelToken)
+     *                  while it runs, and stops with DDBERR_CANCELED when it is canceled;
+     *                  DDBExportRaster2 also stops when its DDBProgressCallback asks to
      *   "symbols"      every exported DDB* function, sorted (ddb.symbols)
      * Fields are only ever added. The string is built once and owned by the library: it stays
      * valid for the life of the process and is the same pointer on every call and every thread;
@@ -193,7 +197,8 @@ extern "C"
      *                  DDBERR_SHUTDOWN, or finish;
      *   shut down      no call is in flight any more and the teardown ran.
      * The exempt calls work in every state: DDBGetLastError, DDBGetLastErrorReason,
-     * DDBGetVersion, DDBGetAbiVersion, DDBGetCapabilities, DDBFree and DDBVSIFree. There is no
+     * DDBGetVersion, DDBGetAbiVersion, DDBGetCapabilities, DDBFree, DDBVSIFree and
+     * DDBFreeCancelToken; DDBCancel works too (it is not counted in flight). There is no
      * way back to running: the process exits after it. Without DDBShutdown, the exit-time
      * checkpoint of the idle index connections stays the fallback. */
 
@@ -214,6 +219,48 @@ extern "C"
      *         DDBERR_EXCEPTION when a teardown step failed (see DDBGetLastError): the library is
      *         shut down all the same */
     DDB_DLL DDBErr DDBShutdown(int timeoutMs);
+
+    /* Cancellation (DQ-15, XI-07, ABI 1.1). A cancel token stops the work of the calls made for
+     * it, without a new variant of every export:
+     *   1. DDBCreateCancelToken creates a token (one per request or job);
+     *   2. DDBSetThreadCancelToken(token) on the thread that makes the call, right before it: the
+     *      next call on that thread works for the token, and when that call returns the thread
+     *      has no token again (set it before every call that should be cancellable);
+     *   3. DDBCancel(token), from any thread at any time: the call stops at its next
+     *      checkpoint and returns DDBERR_CANCELED, with a message; or it completes;
+     *   4. DDBFreeCancelToken(token) when the host no longer needs it, even while a call that
+     *      uses it is still running (the library keeps its own references).
+     * A token is canceled for good. The checkpoints: every item of a parallel section, the GDAL
+     * progress of warps, translations, statistics and raster reads, SQLite statements, and
+     * external tools (killed). DDBGetCapabilities() lists as "cancellable" the exports whose
+     * work checks a token while it runs; any export may return DDBERR_CANCELED when a token is
+     * set and canceled, and no export returns it without one (but DDBExportRaster2, through its
+     * progress callback). DDBShutdown stops the work of every thread the same way, with
+     * DDBERR_SHUTDOWN. */
+
+    /** An opaque cancel token */
+    typedef struct DDBCancelToken DDBCancelToken;
+
+    /** Creates a cancel token, not canceled.
+     * @param token where to store the token (free it with DDBFreeCancelToken)
+     * @return DDBERR_NONE; DDBERR_INVALIDARGS when token is NULL */
+    DDB_DLL DDBErr DDBCreateCancelToken(DDBCancelToken **token);
+
+    /** Cancels a token: the calls working for it stop at their next checkpoint. Callable from
+     * any thread, also from a callback and in every state of the library (while it shuts down
+     * too); canceling a canceled token does nothing.
+     * @return DDBERR_NONE; DDBERR_INVALIDARGS when token is NULL */
+    DDB_DLL DDBErr DDBCancel(DDBCancelToken *token);
+
+    /** Frees the caller's token (NULL does nothing). Calls that use it keep working with it
+     * until they return. Like DDBFree it works in every state and never changes
+     * DDBGetLastError(). Always DDBERR_NONE. */
+    DDB_DLL DDBErr DDBFreeCancelToken(DDBCancelToken *token);
+
+    /** Sets the token the next call on this thread works for (NULL: none), until that call
+     * returns. The thread keeps a reference while it is set.
+     * @return DDBERR_NONE */
+    DDB_DLL DDBErr DDBSetThreadCancelToken(DDBCancelToken *token);
 
     /** Normalize a dataset-relative entry path, or reject it, with libddb's path rules (XI-09,
      * entry_path.h; golden vectors in tests/contract/vectors/entry-paths.json):

@@ -14,6 +14,7 @@
 
 #include "build_layout.h"
 #include "cad.h"
+#include "cancellation.h"
 #include "gdal_inc.h"
 #include "json.h"
 #include "vector.h"
@@ -261,6 +262,8 @@ namespace ddb
                 GDALVectorTranslateOptionsNew(argv.data(), nullptr));
             if (!opts)
                 throw AppException("Cannot create GDAL VectorTranslate options for GPKG");
+            cancel::GdalProgress progress; // stops when the build is canceled (DQ-15)
+            progress.attach(opts.get());
 
             CPLErrorReset();
             errno = 0;
@@ -276,6 +279,8 @@ namespace ddb
             opts.reset();
             const auto closeStatus = closeVectorOutput(std::move(out));
 
+            if (translateFailed)
+                cancel::throwIfCanceled();
             if (translateFailed)
                 throwVectorWriteFailure("GDAL VectorTranslate (GPKG)", output,
                     translateSystemError == ENOSPC ? translateSystemError :
@@ -621,6 +626,8 @@ namespace ddb
                 GDALVectorTranslateOptionsNew(argv.data(), nullptr));
             if (!opts)
                 throw AppException("Cannot create GDAL VectorTranslate options for MVT");
+            cancel::GdalProgress progress; // stops when the build is canceled (DQ-15)
+            progress.attach(opts.get());
 
             // Reset GDAL error state so CPLGetLastErrorMsg() reflects this op.
             CPLErrorReset();
@@ -642,6 +649,8 @@ namespace ddb
             sanitizedDS.reset();
             sanitized.reset();
 
+            if (translateFailed)
+                cancel::throwIfCanceled();
             if (translateFailed)
                 throwVectorWriteFailure("GDAL VectorTranslate (MVT)", outputDir,
                     translateSystemError == ENOSPC ? translateSystemError :

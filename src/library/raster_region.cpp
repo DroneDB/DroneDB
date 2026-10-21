@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 
+#include "cancellation.h"
 #include "gdal_raii.h"
 #include "gdal_priv.h"
 #include "gdal_utils.h"
@@ -120,9 +121,13 @@ namespace ddb
             for (const auto &co : fi.creationOptions)
                 createOpts.AddString(co.c_str());
             // Closed before its bytes are taken: closing writes them
+            cancel::GdalProgress progress;
             if (!adoptDataset(GDALCreateCopy(driver, out.c_str(), ds, FALSE, createOpts.List(),
-                                             nullptr, nullptr)))
+                                             progress.function(), progress.data())))
+            {
+                cancel::throwIfCanceled();
                 throw GDALException("Cannot encode the render of " + label);
+            }
 
             takeRenderBytes(out, outBytes, outSize, label);
         }
@@ -249,12 +254,17 @@ namespace ddb
         const GdalOptionsPtr<GDALWarpAppOptions> opts(GDALWarpAppOptionsNew(argv.data(), nullptr));
         if (!opts)
             throw GDALException("Cannot build GDALWarp options");
+        cancel::GdalProgress progress; // the warp stops when the call is canceled (DQ-15)
+        progress.attach(opts.get());
 
         int usageErr = 0;
         auto warped = adoptDataset(
             GDALWarp(directOutput ? out.c_str() : "", nullptr, 1, &hSrc, opts.get(), &usageErr));
         if (!warped || usageErr)
+        {
+            cancel::throwIfCanceled();
             throw GDALException("GDALWarp failed for " + inputPath);
+        }
 
         if (!directOutput) {
             encodeDataset(datasetHandle(warped), fi, outBytes, outSize, inputPath);
@@ -469,10 +479,13 @@ namespace ddb
 
         const GdalOptionsPtr<GDALWarpAppOptions> opts(GDALWarpAppOptionsNew(argv.data(), nullptr));
         if (!opts) throw GDALException("Cannot build warp options");
+        cancel::GdalProgress progress; // the warp stops when the call is canceled (DQ-15)
+        progress.attach(opts.get());
         int usageErr = 0;
         auto warp = adoptDataset(
             GDALWarp(vsiTif.c_str(), nullptr, 1, &hSrc, opts.get(), &usageErr));
         if (!warp || usageErr) {
+            cancel::throwIfCanceled();
             throw GDALException("Warp failed for index render: " + inputPath);
         }
         GDALDatasetH hWarp = datasetHandle(warp);

@@ -12,6 +12,7 @@
 #include <thread>
 #include <vector>
 
+#include "cancellation.h"
 #include "gdal_inc.h"
 #include "process_config.h"
 
@@ -58,7 +59,10 @@ namespace ddb::parallel
             if (threads <= 1)
             {
                 for (size_t i = 0; i < count; i++)
+                {
+                    cancel::throwIfCanceled();
                     fn(i);
+                }
                 return;
             }
 
@@ -72,6 +76,8 @@ namespace ddb::parallel
             {
                 try
                 {
+                    // A stop fails the item it would start: the loop ends like on an error
+                    cancel::throwIfCanceled();
                     fn(i);
                 }
                 catch (...)
@@ -91,6 +97,8 @@ namespace ddb::parallel
             };
 
             const size_t wantedWorkers = threads - 1;
+            // The workers work for the calling thread's cancel token
+            const cancel::TokenRef callerToken = cancel::threadToken();
             CpuTokens tokens; // outlives the workers: given back once they are joined
             std::vector<std::thread> workers;
             workers.reserve(wantedWorkers);
@@ -104,8 +112,9 @@ namespace ddb::parallel
                 try
                 {
                     for (; started < granted; started++)
-                        workers.emplace_back([&work]()
+                        workers.emplace_back([&work, &callerToken]()
                                              {
+                                                 const cancel::ScopedThreadToken token(callerToken);
                                                  const ThreadGdalErrorHandler workerGdalErrors;
                                                  work();
                                              });

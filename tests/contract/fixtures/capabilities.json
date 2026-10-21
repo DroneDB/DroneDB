@@ -13,7 +13,19 @@
       "minor": 1
     },
     "cancellable": [
-      "DDBExportRaster2"
+      "DDBBuild",
+      "DDBExportRaster",
+      "DDBExportRaster2",
+      "DDBGenerateMemoryThumbnail",
+      "DDBGenerateMemoryThumbnailEx",
+      "DDBGenerateThumbnail",
+      "DDBMemoryTile",
+      "DDBMemoryTileEx",
+      "DDBMemoryTileFmt",
+      "DDBRenderRasterIndex",
+      "DDBRenderRasterRegion",
+      "DDBRenderRasterRegionEx",
+      "DDBTile"
     ],
     "errorCodes": {
       "BUILDDEPMISSING": 2,
@@ -41,6 +53,7 @@
       "DDBApplyDelta",
       "DDBBuild",
       "DDBCalculateVolume",
+      "DDBCancel",
       "DDBChattr",
       "DDBCheckpoint",
       "DDBCleanup",
@@ -49,6 +62,7 @@
       "DDBConfigure",
       "DDBCopyBuildArtifacts",
       "DDBCountVector",
+      "DDBCreateCancelToken",
       "DDBDelta",
       "DDBDescribeVector",
       "DDBDetectAllStockpiles",
@@ -56,6 +70,7 @@
       "DDBExportRaster",
       "DDBExportRaster2",
       "DDBFree",
+      "DDBFreeCancelToken",
       "DDBGenerateContours",
       "DDBGenerateMemoryThumbnail",
       "DDBGenerateMemoryThumbnailEx",
@@ -121,6 +136,7 @@
       "DDBSearch",
       "DDBSetLastError",
       "DDBSetTag",
+      "DDBSetThreadCancelToken",
       "DDBShutdown",
       "DDBStac",
       "DDBStacData",

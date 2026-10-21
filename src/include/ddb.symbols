@@ -19,6 +19,7 @@ DDBAppendPassword
 DDBApplyDelta
 DDBBuild
 DDBCalculateVolume
+DDBCancel
 DDBChattr
 DDBCheckpoint
 DDBCleanup
@@ -27,6 +28,7 @@ DDBComputeDeltaLocals
 DDBConfigure
 DDBCopyBuildArtifacts
 DDBCountVector
+DDBCreateCancelToken
 DDBDelta
 DDBDescribeVector
 DDBDetectAllStockpiles
@@ -34,6 +36,7 @@ DDBDetectStockpile
 DDBExportRaster
 DDBExportRaster2
 DDBFree
+DDBFreeCancelToken
 DDBGenerateContours
 DDBGenerateMemoryThumbnail
 DDBGenerateMemoryThumbnailEx
@@ -99,6 +102,7 @@ DDBResolveBuildFile
 DDBSearch
 DDBSetLastError
 DDBSetTag
+DDBSetThreadCancelToken
 DDBShutdown
 DDBStac
 DDBStacData

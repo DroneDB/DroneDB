@@ -10,6 +10,7 @@
 #include <mutex>
 #include <new>
 
+#include "cancellation.h"
 #include "gdal_inc.h"
 #include "logger.h"
 #include "mio.h"
@@ -190,9 +191,25 @@ Failure classifyCurrentException() {
     }
 }
 
+// A generic failure (DDBERR_EXCEPTION) of work that was asked to stop is the stop: GDAL fails a
+// canceled call ("User terminated"), SQLite an interrupted statement
+Failure attributeToCancellation(Failure f) {
+    if (f.code != DDBERR_EXCEPTION)
+        return f;
+    if (cancel::shutdownRequested())
+        return Failure{DDBERR_SHUTDOWN, std::string(cancel::kShuttingDown) + ": " + f.message, ""};
+    if (const auto token = cancel::threadToken(); token && token.get()->canceled())
+        return Failure{DDBERR_CANCELED, std::string(token.get()->message()) + ": " + f.message, ""};
+    return f;
+}
+
+CodeSet withRuntimeCodes(CodeSet allowed) noexcept {
+    return allowed | codeBit(DDBERR_SHUTDOWN) | (cancel::hasThreadToken() ? codeBit(DDBERR_CANCELED) : 0);
+}
+
 DDBErr reportCurrentException(CodeSet allowed) noexcept {
     try {
-        const Failure f = classifyCurrentException();
+        const Failure f = attributeToCancellation(classifyCurrentException());
         setLastError(f.message, f.reason);
         return restrictCode(f.code, allowed);
     } catch (...) {
@@ -227,6 +244,9 @@ CallScope::CallScope(CallKind kind) noexcept : kind_(kind) {
 CallScope::~CallScope() {
     if (counted_)
         leaveCall();
+    // The token the caller set was for this call (DDBSetThreadCancelToken)
+    if (callDepth == 1 && kind_ == CallKind::Operation)
+        cancel::setThreadToken(nullptr);
     --callDepth;
 }
 
@@ -264,6 +284,7 @@ DDBErr shutdown(int timeoutMs, Teardown teardown) noexcept {
             return DDBERR_NONE;
 
         callWord.fetch_or(kShutdownBit);
+        cancel::requestShutdown();  // the calls in flight stop at their next checkpoint
         const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
             deadline - std::chrono::steady_clock::now());
         if (!waitForCalls(timeoutMs < 0 ? -1 : static_cast<int>(std::max<long long>(left.count(), 0)))) {
@@ -279,7 +300,8 @@ DDBErr shutdown(int timeoutMs, Teardown teardown) noexcept {
         try {
             teardown();
         } catch (...) {
-            result = reportCurrentException(codeSet());
+            setLastError("DDBShutdown could not close everything: " + classifyCurrentException().message);
+            result = DDBERR_EXCEPTION;
         }
         flush_logger();
         return result;
@@ -293,6 +315,7 @@ DDBErr shutdown(int timeoutMs, Teardown teardown) noexcept {
 void resetShutdownForTests() noexcept {
     const std::lock_guard serialize(shutdownMutex);
     callWord.fetch_and(~kShutdownBit);
+    cancel::resetShutdownForTests();
     tornDown = false;
 }
 
