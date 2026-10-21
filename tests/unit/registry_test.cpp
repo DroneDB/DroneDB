@@ -12,6 +12,22 @@ namespace
 
     using namespace ddb;
 
+    TEST(registryErrorMessage, ProblemDetailsAndLegacyBodies)
+    {
+        // RFC 9457 ProblemDetails (Registry RQ-05): detail first, then title
+        EXPECT_EQ(RegistryUtils::errorMessage(
+                      R"({"type":"t","title":"Conflict","status":409,"detail":"Destination exists","noRetry":true})"),
+                  "Destination exists");
+        EXPECT_EQ(RegistryUtils::errorMessage(R"({"title":"Forbidden","status":403})"), "Forbidden");
+        // Legacy body
+        EXPECT_EQ(RegistryUtils::errorMessage(R"({"error":"Invalid credentials","noRetry":true})"),
+                  "Invalid credentials");
+        // No message: not JSON, not an object, no known field
+        EXPECT_EQ(RegistryUtils::errorMessage("<html>502 Bad Gateway</html>"), "");
+        EXPECT_EQ(RegistryUtils::errorMessage("[1,2]"), "");
+        EXPECT_EQ(RegistryUtils::errorMessage(R"({"status":500})"), "");
+    }
+
     TEST(parseTag, Normal)
     {
         auto s = RegistryUtils::parseTag("test:3000/myorg/myds");

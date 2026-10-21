@@ -27,6 +27,12 @@ namespace ddb
     public:
         DDB_DLL static TagComponents parseTag(const std::string &tag, bool useInsecureRegistry = false);
         DDB_DLL static Registry createFromTag(const std::string &tag, bool useInsecureRegistry = false, bool sslVerify = true);
+
+        /// The message of a Registry error body, or "" when it has none (not JSON, no known
+        /// field). Reads an RFC 9457 ProblemDetails body (detail, then title) and the legacy
+        /// { "error" } body, so the client works with a Registry before and after its
+        /// ProblemDetails switch (RQ-05).
+        DDB_DLL static std::string errorMessage(const std::string &body);
     };
 
 }

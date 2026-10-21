@@ -105,6 +105,20 @@ namespace ddb
         return res;
     }
 
+    std::string RegistryUtils::errorMessage(const std::string &body)
+    {
+        const json j = json::parse(body, nullptr, false);
+        if (!j.is_object())
+            return "";
+        for (const char *field : {"detail", "error", "message", "title"})
+        {
+            const auto it = j.find(field);
+            if (it != j.end() && it->is_string() && !it->get<std::string>().empty())
+                return it->get<std::string>();
+        }
+        return "";
+    }
+
     Registry RegistryUtils::createFromTag(const std::string &tag,
                                           bool useInsecureRegistry,
                                           bool sslVerify)

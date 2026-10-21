@@ -16,6 +16,7 @@
 #include "exceptions.h"
 #include "hash.h"
 #include "json.h"
+#include "registryutils.h"
 #include "logger.h"
 #include "mio.h"
 #include "mzip.h"
@@ -78,9 +79,8 @@ std::string Registry::login(const std::string& username, const std::string& pass
                          cpr::Payload{{"username", username}, {"password", password}},
                          cpr::VerifySsl(this->sslVerify));
 
-    json j = json::parse(res.text);
-
     if (res.status_code == 200) {
+        const json j = json::parse(res.text);
         const auto token = j["token"].get<std::string>();
         const auto expiration = j["expires"].get<time_t>();
 
@@ -96,9 +96,8 @@ std::string Registry::login(const std::string& username, const std::string& pass
 
         return std::string(token);
     }
-    if (j.contains("error")) {
-        throw AuthException("Login failed: " + j["error"].get<std::string>());
-    }
+    if (const auto message = RegistryUtils::errorMessage(res.text); !message.empty())
+        throw AuthException("Login failed: " + message);
 
     throw AuthException("Login failed: host returned " + std::to_string(res.status_code));
 }
@@ -805,10 +804,8 @@ void Registry::handleError(cpr::Response& res) {
     if (res.status_code != 200) {
         // LOGD << "Request error: " << res.text;
 
-        json j = json::parse(res.text);
-        if (j.contains("error"))
-            throw RegistryException("Error response from registry: " +
-                                    j["error"].get<std::string>());
+        if (const auto message = RegistryUtils::errorMessage(res.text); !message.empty())
+            throw RegistryException("Error response from registry: " + message);
         throw RegistryException("Invalid response from registry: " + res.text);
     }
 
