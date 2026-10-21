@@ -8,7 +8,9 @@
 // io.h was taken :/
 
 #include <algorithm>
+#include <cstdint>
 #include <limits>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -87,9 +89,10 @@ namespace ddb
             // (path must be absolute)
             DDB_DLL Path withoutRoot();
 
-            // Cross-platform path.generic_string()
+            // The path in UTF-8 with '/' separators (toGenericUtf8)
             DDB_DLL std::string generic() const;
 
+            // The path in UTF-8 (toUtf8)
             DDB_DLL std::string string() const;
             DDB_DLL fs::path get() const { return p; }
         };
@@ -178,6 +181,9 @@ namespace ddb
         // reading it.
         DDB_DLL void assureDistinctOutput(const fs::path &input, const fs::path &output);
 
+        // The whole content of a file; throws FSException when it cannot be read
+        DDB_DLL std::vector<uint8_t> readAllBytes(const fs::path &p);
+
         // Prints to the provided buffer a nice number of bytes (KB, MB, GB, etc)
         DDB_DLL std::string bytesToHuman(std::uintmax_t bytes);
 
@@ -185,13 +191,49 @@ namespace ddb
         DDB_DLL fs::path commonDirPath(const std::vector<fs::path> &paths);
         size_t componentsCount(const fs::path &p);
 
-        // The C API passes paths as UTF-8 (XI-03). fromUtf8 makes a path from UTF-8 bytes and
-        // toUtf8 returns the UTF-8 bytes of a path, whatever the global or CRT locale: on Windows
-        // they convert from and to the native wide string (an invalid UTF-8 sequence throws
-        // std::system_error); on POSIX a path is bytes, so both copy them unchanged, without any
-        // validation.
+        // ---------------------------------------------------------------- Path encoding
+        //
+        // Inside libddb a path held in a std::string (or a const char *) is UTF-8, on every
+        // platform: the C API receives UTF-8 (XI-03), the index stores UTF-8, GDAL, PROJ,
+        // SQLite, PDAL, libzip, Assimp and KTX take UTF-8 file names, and logs and JSON are
+        // UTF-8. A string becomes an fs::path only through fromUtf8, and an fs::path becomes a
+        // string only through toUtf8 / toGenericUtf8: never fs::path(std::string), an implicit
+        // std::string -> fs::path conversion (fs::exists(str), dir / str, std::ifstream(str)),
+        // path.string() or path.generic_string(). On Windows (MSVC) those convert with the
+        // ANSI code page or the CRT locale, so "C:\data\città" would be mangled, or throw.
+        // String literals and ASCII constants ("cog", ".ddb", hashes) are safe either way.
+        //
+        // Win32 calls use the W variants with the wide form of a path: path.c_str(), or
+        // toWide for a string that is not a path. On POSIX a path is bytes: every helper
+        // copies them unchanged, without any validation, so Linux and macOS behave exactly
+        // as path(std::string) / path.string(). On Windows an invalid UTF-8 sequence (or an
+        // unpaired surrogate in a wide string) throws std::system_error.
+        //
+        // scripts/check-narrow-paths.py keeps the raw conversions from coming back (CI).
+
+        // The path of UTF-8 bytes
         DDB_DLL fs::path fromUtf8(std::string_view utf8);
+        // The paths of UTF-8 strings
+        DDB_DLL std::vector<fs::path> fromUtf8(const std::vector<std::string> &utf8);
+        // The UTF-8 bytes of a path (native separators)
         DDB_DLL std::string toUtf8(const fs::path &p);
+        // The UTF-8 bytes of a path with '/' separators (path.generic_string())
+        DDB_DLL std::string toGenericUtf8(const fs::path &p);
+
+        // p with UTF-8 text appended to its last component ("a/b.tif" + ".stats.json"):
+        // path.concat / += of a UTF-8 string
+        DDB_DLL fs::path concat(const fs::path &p, std::string_view utf8);
+
+        // The value of the environment variable `name` in UTF-8, or std::nullopt when it is
+        // not set. On Windows getenv returns it in the ANSI code page: this reads the wide
+        // environment instead. For values that are paths (or lists of paths, like PATH).
+        DDB_DLL std::optional<std::string> getEnvUtf8(const char *name);
+
+#ifdef _WIN32
+        // UTF-8 <-> UTF-16, for the Win32 W functions and wide CRT calls
+        DDB_DLL std::wstring toWide(std::string_view utf8);
+        DDB_DLL std::string fromWide(std::wstring_view wide);
+#endif
 
     }
 }

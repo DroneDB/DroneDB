@@ -88,6 +88,10 @@ target_include_directories(ddb_headers SYSTEM INTERFACE
     $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/vendor/libnexus>
 )
 target_link_libraries(ddb_headers INTERFACE cctz::cctz)
+# plog's char is UTF-8 everywhere (mio.h, "Path encoding"). Without it MSVC builds read every
+# narrow log string in the ANSI code page. One value for every target: plog's types depend on
+# it, and the library and the CLI share one logger.
+target_compile_definitions(ddb_headers INTERFACE PLOG_CHAR_IS_UTF8=1)
 if(WIN32)
     target_compile_definitions(ddb_headers INTERFACE PLOG_EXPORT)
 else()

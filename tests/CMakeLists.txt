@@ -39,7 +39,8 @@ if(BUILD_TESTING)
     # tests use the same executable on Windows and Linux.
     # Compile the lock implementation directly so the tiny helper does not load
     # the geospatial DLL graph before short lifecycle deadlines begin.
-    add_executable(ddbtest_child helpers/process_child.cpp ../src/library/buildlock.cpp)
+    add_executable(ddbtest_child helpers/process_child.cpp ../src/library/buildlock.cpp
+        ../src/library/path_encoding.cpp)
     target_link_libraries(ddbtest_child PRIVATE plog::plog Threads::Threads ddb_warnings)
     target_include_directories(ddbtest_child PRIVATE "${PROJECT_SOURCE_DIR}/src/include")
 

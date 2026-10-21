@@ -8,27 +8,16 @@
 #include <atomic>
 #include <cstdio>
 #include <iostream>
-#include <string>
 
 #include "log_forwarding.h"
 
+// The build defines PLOG_CHAR_IS_UTF8=1 (src/CMakeLists.txt): a record keeps the UTF-8 bytes it
+// was given (record.getMessage() is UTF-8), and plog converts them as UTF-8 for the Windows
+// console (WriteConsoleW)
+static_assert(PLOG_CHAR_IS_UTF8, "plog must keep log records in UTF-8 (mio.h, \"Path encoding\")");
+
 namespace
 {
-    // A record's message as UTF-8: plog keeps it in UTF-8 (char) except on Windows without
-    // /utf-8, where it converted the narrow input with the active code page into wchar_t
-#if PLOG_CHAR_IS_UTF8
-    const char *messageText(const plog::Record &record, std::string &)
-    {
-        return record.getMessage();
-    }
-#else
-    const char *messageText(const plog::Record &record, std::string &buffer)
-    {
-        buffer = plog::util::toNarrow(record.getMessage(), plog::codePage::kChar);
-        return buffer.c_str();
-    }
-#endif
-
     // The level of DDBLogLevel (log_forwarding.h) of a plog severity: verbose 0 .. fatal 5
     int levelOf(plog::Severity severity)
     {
@@ -43,8 +32,7 @@ namespace
     public:
         void write(const plog::Record &record) override
         {
-            std::string buffer;
-            if (ddb::logfwd::deliver(levelOf(record.getSeverity()), "ddb", messageText(record, buffer)))
+            if (ddb::logfwd::deliver(levelOf(record.getSeverity()), "ddb", record.getMessage()))
                 return;
             if (record.getSeverity() <= consoleMax_.load(std::memory_order_relaxed))
                 console_.write(record);
