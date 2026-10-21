@@ -104,6 +104,11 @@ jobs:
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
             python3 scripts/check-abi.py tag --tag "${GITHUB_REF_NAME}"
           fi
+      - name: Check narrow path conversions (ratchet)
+        # UTF-8 paths (src/include/mio.h, "Path encoding"): fails when a file of src/library,
+        # src/include or apps gains a raw path.string(), fs::path(<string>) or ANSI Win32 call
+        # (cmake/narrow-paths-baseline.txt). A text search, so it runs before the build.
+        run: python3 scripts/check-narrow-paths.py
       - name: Pin test_data (tests/test-data.sha)
         # The DroneDB/test_data commit the tests read their assets from (testDataUrl, tests/testfs.h);
         # the smoke tests below download from the same commit
