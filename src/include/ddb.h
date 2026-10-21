@@ -204,7 +204,8 @@ extern "C"
 
     /** Shuts the library down: refuses new calls (DDBERR_SHUTDOWN), waits up to timeoutMs for
      * the calls in flight on other threads to return, then runs a TRUNCATE checkpoint on every
-     * pooled index connection and closes them, closes the cached rasters and flushes the log.
+     * pooled index connection and closes them, closes the cached rasters, unregisters the log
+     * callback (DDBSetLogCallback) and flushes the log.
      * Idempotent: once shut down it returns DDBERR_NONE at once; concurrent calls wait for each
      * other within their timeouts. Never counted in flight itself; callable from any thread,
      * but not from inside a libddb call or callback.
@@ -212,10 +213,12 @@ extern "C"
      *                  without a limit, 0 does not wait
      * @return DDBERR_NONE when the library is shut down;
      *         DDBERR_BUSY when calls were still running after timeoutMs: the library is shutting
-     *         down (new calls are refused, the log is flushed) but the connections and rasters
+     *         down (new calls are refused, the log callback is unregistered, so what those calls
+     *         still log goes to stdout, and the log is flushed) but the connections and rasters
      *         are left open for the calls still running; a later DDBShutdown finishes the
      *         shutdown, and at exit the exit-time checkpoint covers the idle connections;
-     *         DDBERR_INVALIDARGS when called from inside a libddb call (a progress callback);
+     *         DDBERR_INVALIDARGS when called from inside a libddb call (a progress callback) or
+     *         from the log callback;
      *         DDBERR_EXCEPTION when a teardown step failed (see DDBGetLastError): the library is
      *         shut down all the same */
     DDB_DLL DDBErr DDBShutdown(int timeoutMs);
@@ -261,6 +264,61 @@ extern "C"
      * returns. The thread keeps a reference while it is set.
      * @return DDBERR_NONE */
     DDB_DLL DDBErr DDBSetThreadCancelToken(DDBCancelToken *token);
+
+    /* Logging (DQ-15, XI-08, ABI 1.1). A host receives libddb's log records and GDAL's messages
+     * in one callback, each with the operation id it set on the thread that made the call, and
+     * maps them to its own logger. While a callback is registered the records no longer go to
+     * stdout (GDAL's to stderr); the DDB_LOG file keeps them too.
+     *
+     * Threading: the callback is called on the thread that logs: the thread of the call, a
+     * worker of the call's parallel sections (with the call's operation id), or a thread of
+     * GDAL's own (operation id 0). It may run on several threads at once: make it thread-safe,
+     * quick, and never let an exception or a longjmp leave it. It must not call libddb (but the
+     * exempt accessors): libddb may hold a lock while it logs. What libddb logs on a thread
+     * while that thread runs the callback is dropped. DDBSetLogCallback and DDBShutdown called
+     * from the callback return DDBERR_INVALIDARGS.
+     *
+     * Levels: a record below the process log level is not produced at all. That level is set by
+     * DDBRegisterProcess: INFO, TRACE when verbose (or DDB_DEBUG/DDB_LOG is set), and the
+     * minLevel of a callback registered before DDBRegisterProcess; register the callback first
+     * to receive DEBUG and TRACE records without a verbose stdout. */
+
+    /** Log levels, in increasing severity (the order of .NET's LogLevel and Serilog's) */
+    typedef enum DDBLogLevel
+    {
+        DDB_LOG_TRACE = 0,
+        DDB_LOG_DEBUG = 1,
+        DDB_LOG_INFO = 2,
+        DDB_LOG_WARNING = 3,
+        DDB_LOG_ERROR = 4,
+        DDB_LOG_FATAL = 5
+    } DDBLogLevel;
+
+    /** The log callback (the platform's default C calling convention, like DDBProgressCallback).
+     * @param level a DDBLogLevel
+     * @param message the text, UTF-8, never NULL; valid during the call only
+     * @param source "ddb" for libddb's records, "gdal" for GDAL's messages (more may be added)
+     * @param opId the operation id of the thread (DDBSetThreadOperation), 0 for none
+     * @param userData the pointer given to DDBSetLogCallback */
+    typedef void (*DDBLogCallback)(int level, const char *message, const char *source, uint64_t opId,
+                                   void *userData);
+
+    /** Registers the log callback for the records of minLevel and above, replacing the previous
+     * one; NULL unregisters it (the records go to stdout again). Callable before
+     * DDBRegisterProcess (see the levels above). When it returns, the previous callback is not
+     * called any more: it waits for the threads still inside it. DDBShutdown unregisters it;
+     * at process exit libddb disables it before its exit-time handlers run.
+     * @param callback the callback, or NULL
+     * @param minLevel a DDBLogLevel (ignored when callback is NULL)
+     * @param userData passed to every call of callback
+     * @return DDBERR_NONE; DDBERR_INVALIDARGS when minLevel is not a DDBLogLevel or when called
+     *         from inside the callback */
+    DDB_DLL DDBErr DDBSetLogCallback(DDBLogCallback callback, int minLevel, void *userData);
+
+    /** Sets the operation id the next call on this thread logs with (0: none), until that call
+     * returns, like DDBSetThreadCancelToken: the host maps it to its request or job.
+     * @return DDBERR_NONE */
+    DDB_DLL DDBErr DDBSetThreadOperation(uint64_t opId);
 
     /** Normalize a dataset-relative entry path, or reject it, with libddb's path rules (XI-09,
      * entry_path.h; golden vectors in tests/contract/vectors/entry-paths.json):

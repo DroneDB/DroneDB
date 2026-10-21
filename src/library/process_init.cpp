@@ -21,6 +21,7 @@
 #include "ddb.h"
 #include "gdal_raii.h"
 #include "hash.h"
+#include "log_forwarding.h"
 #include "logger.h"
 #include "mio.h"
 #include "utils.h"
@@ -189,6 +190,9 @@ void initializeGDALandPROJ() {
     LOGD << "Initializing GDAL and PROJ libraries";
 
     GDALAllRegister();
+    // GDAL's messages go to the host's log callback when one is registered (DQ-15), else to
+    // GDAL's default handler as before
+    ddb::logfwd::installGdalErrorHandler();
 
     CPLSetConfigOption("OGR_CT_FORCE_TRADITIONAL_GIS_ORDER", "YES");
     CPLSetConfigOption("PROJ_NETWORK", "ON");

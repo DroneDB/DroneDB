@@ -266,6 +266,13 @@ Registry has to adopt first.
   `DDBGetEffectiveConfig`); `capabilities` lists the new exports. The existing fixtures did not
   change.
 
+* 2026-10-21: `capabilities` lists the new exports of DQ-15 (XI-07, XI-08, ABI 1.1):
+  `DDBShutdown`, `DDBCreateCancelToken`, `DDBCancel`, `DDBFreeCancelToken`,
+  `DDBSetThreadCancelToken`, `DDBSetLogCallback`, `DDBSetThreadOperation`. Its `cancellable` list
+  now names the exports whose work checks a cancel token (the render paths, the thumbnails,
+  `DDBExportRaster`/`DDBExportRaster2`, `DDBBuild`) instead of `DDBExportRaster2` only; the
+  schema describes it so. The other fixtures did not change.
+
 ## Cross-repository CI
 
 The `registry_contract` job of `.github/workflows/c-cpp.yml` installs the `.deb` that

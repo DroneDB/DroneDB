@@ -101,8 +101,10 @@ DDBRescanEx
 DDBResolveBuildFile
 DDBSearch
 DDBSetLastError
+DDBSetLogCallback
 DDBSetTag
 DDBSetThreadCancelToken
+DDBSetThreadOperation
 DDBShutdown
 DDBStac
 DDBStacData

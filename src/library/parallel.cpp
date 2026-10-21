@@ -14,23 +14,26 @@
 
 #include "cancellation.h"
 #include "gdal_inc.h"
+#include "log_forwarding.h"
 #include "process_config.h"
 
 namespace ddb::parallel
 {
     namespace
     {
-        // Sends the GDAL errors raised on this thread to GDAL's default handler (stderr, CPL_LOG)
-        // while in scope, whatever process-wide handler is installed: a thread-local handler
-        // takes precedence over the process-wide one. While any PDAL stage runs, PDAL installs
-        // its own process-wide GDAL handler (pdal::Stage::startLogging), which writes into that
-        // stage's Log; that Log is not synchronized with the stage's thread, so a GDAL error
-        // raised by another thread at the same time races with it (TSan, DQ-01). Parallel
-        // sections parse rasters while other threads run PDAL readers.
+        // Sends the GDAL errors raised on this thread to libddb's handler while in scope: the
+        // host's log callback with the thread's operation id, or GDAL's default handler (stderr,
+        // CPL_LOG) when none is registered (log_forwarding.h), whatever process-wide handler is
+        // installed: a thread-local handler takes precedence over the process-wide one. While any
+        // PDAL stage runs, PDAL installs its own process-wide GDAL handler
+        // (pdal::Stage::startLogging), which writes into that stage's Log; that Log is not
+        // synchronized with the stage's thread, so a GDAL error raised by another thread at the
+        // same time races with it (TSan, DQ-01). Parallel sections parse rasters while other
+        // threads run PDAL readers.
         class ThreadGdalErrorHandler
         {
         public:
-            ThreadGdalErrorHandler() { CPLPushErrorHandler(CPLDefaultErrorHandler); }
+            ThreadGdalErrorHandler() { CPLPushErrorHandler(logfwd::gdalErrorHandler); }
             ~ThreadGdalErrorHandler() { CPLPopErrorHandler(); }
             ThreadGdalErrorHandler(const ThreadGdalErrorHandler &) = delete;
             ThreadGdalErrorHandler &operator=(const ThreadGdalErrorHandler &) = delete;
@@ -97,8 +100,9 @@ namespace ddb::parallel
             };
 
             const size_t wantedWorkers = threads - 1;
-            // The workers work for the calling thread's cancel token
+            // The workers work for the calling thread's cancel token and operation id
             const cancel::TokenRef callerToken = cancel::threadToken();
+            const uint64_t callerOperation = logfwd::threadOperation();
             CpuTokens tokens; // outlives the workers: given back once they are joined
             std::vector<std::thread> workers;
             workers.reserve(wantedWorkers);
@@ -112,9 +116,10 @@ namespace ddb::parallel
                 try
                 {
                     for (; started < granted; started++)
-                        workers.emplace_back([&work, &callerToken]()
+                        workers.emplace_back([&work, &callerToken, callerOperation]()
                                              {
                                                  const cancel::ScopedThreadToken token(callerToken);
+                                                 const logfwd::ScopedOperation operation(callerOperation);
                                                  const ThreadGdalErrorHandler workerGdalErrors;
                                                  work();
                                              });

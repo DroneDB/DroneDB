@@ -12,6 +12,7 @@
 
 #include "cancellation.h"
 #include "gdal_inc.h"
+#include "log_forwarding.h"
 #include "logger.h"
 #include "mio.h"
 #include "utils.h"
@@ -244,9 +245,12 @@ CallScope::CallScope(CallKind kind) noexcept : kind_(kind) {
 CallScope::~CallScope() {
     if (counted_)
         leaveCall();
-    // The token the caller set was for this call (DDBSetThreadCancelToken)
-    if (callDepth == 1 && kind_ == CallKind::Operation)
+    // The token and the operation id the caller set were for this call
+    // (DDBSetThreadCancelToken, DDBSetThreadOperation)
+    if (callDepth == 1 && kind_ == CallKind::Operation) {
         cancel::setThreadToken(nullptr);
+        logfwd::setThreadOperation(0);
+    }
     --callDepth;
 }
 
@@ -264,9 +268,9 @@ bool shutdownStarted() noexcept {
 
 DDBErr shutdown(int timeoutMs, Teardown teardown) noexcept {
     clearLastError();
-    if (CallScope::depth() > 0) {
-        // It would wait for the call it runs in
-        setLastError("DDBShutdown cannot be called from inside a libddb call (a progress callback)");
+    if (CallScope::depth() > 0 || logfwd::inCallback()) {
+        // It would wait for the call or the callback it runs in
+        setLastError("DDBShutdown cannot be called from inside a libddb call or callback");
         return DDBERR_INVALIDARGS;
     }
     try {
@@ -288,7 +292,9 @@ DDBErr shutdown(int timeoutMs, Teardown teardown) noexcept {
         const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
             deadline - std::chrono::steady_clock::now());
         if (!waitForCalls(timeoutMs < 0 ? -1 : static_cast<int>(std::max<long long>(left.count(), 0)))) {
-            // Not destructive: the calls still running keep their connections and datasets
+            // Not destructive: the calls still running keep their connections and datasets.
+            // The host stops: its callback is not called any more, what they log goes to stdout.
+            logfwd::unregister();
             flush_logger();
             setLastError(callsLeftMessage(timeoutMs));
             return DDBERR_BUSY;
@@ -303,6 +309,7 @@ DDBErr shutdown(int timeoutMs, Teardown teardown) noexcept {
             setLastError("DDBShutdown could not close everything: " + classifyCurrentException().message);
             result = DDBERR_EXCEPTION;
         }
+        logfwd::unregister();  // after the teardown, which may log
         flush_logger();
         return result;
     } catch (...) {

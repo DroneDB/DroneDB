@@ -81,8 +81,10 @@ namespace ddb::parallel
     // Indexes are handed out in increasing order. When a call throws, no new
     // index starts, the calls already running finish, and the exception of the
     // lowest failed index is rethrown: the same one a serial loop would throw.
-    // GDAL errors raised by fn go to GDAL's default handler on every thread, not
-    // to the process-wide handler (which PDAL replaces while its stages run).
+    // GDAL errors raised by fn go to libddb's handler on every thread (the host's
+    // log callback, else GDAL's default handler), not to the process-wide handler
+    // (which PDAL replaces while its stages run). The workers log with the calling
+    // thread's operation id (log_forwarding.h).
     // The workers work for the calling thread's cancel token (cancellation.h),
     // and every index checks it before it starts: once the token is canceled
     // or the shutdown started, no new index starts and the loop throws

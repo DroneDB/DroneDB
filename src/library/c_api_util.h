@@ -178,11 +178,12 @@ int callsInFlight() noexcept;
 // destructive part (closing the pooled connections and the raster cache). It may throw.
 using Teardown = void (*)();
 
-// DDBShutdown(timeoutMs), see ddb.h: refuses new calls, waits up to timeoutMs (< 0: without a
-// limit) for the calls in flight, then runs teardown once and flushes the log. On timeout it
-// flushes the log and returns DDBERR_BUSY without the teardown, which a later DDBShutdown
-// finishes. Called from inside a guarded call (a progress callback): DDBERR_INVALIDARGS.
-// Never counted in flight itself.
+// DDBShutdown(timeoutMs), see ddb.h: refuses new calls and stops the work in flight
+// (cancellation.h), waits up to timeoutMs (< 0: without a limit) for the calls in flight, then
+// runs teardown once, unregisters the log callback and flushes the log. On timeout it
+// unregisters the callback, flushes the log and returns DDBERR_BUSY without the teardown,
+// which a later DDBShutdown finishes. Called from inside a guarded call (a progress callback)
+// or the log callback: DDBERR_INVALIDARGS. Never counted in flight itself.
 DDBErr shutdown(int timeoutMs, Teardown teardown) noexcept;
 
 // True once DDBShutdown started
@@ -206,7 +207,8 @@ const std::string* initFailure() noexcept;
 
 // Runs body and returns DDBERR_NONE, or the code of the exception it threw (restricted to
 // Allowed and withRuntimeCodes). The last error is cleared on entry and set for every other
-// code. The outermost Operation of a thread resets the thread's cancel token when it returns.
+// code. The outermost Operation of a thread resets the thread's cancel token and operation id
+// when it returns.
 template <CodeSet Allowed = kFrozenCodes, CallKind Kind = CallKind::Operation, typename Body>
 DDBErr guarded(Body&& body) noexcept {
     static_assert(std::is_void_v<std::invoke_result_t<Body&&>>,

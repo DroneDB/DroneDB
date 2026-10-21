@@ -30,6 +30,7 @@
 #include "build_manifest.h"
 #include "c_api_util.h"
 #include "cancellation.h"
+#include "log_forwarding.h"
 #include "database.h"
 #include "databasepool.h"
 #include "raster_cache.h"
@@ -296,6 +297,22 @@ DDBErr DDBFreeCancelToken(DDBCancelToken* token) {
 
 DDBErr DDBSetThreadCancelToken(DDBCancelToken* token) {
     return guarded<kAbi11Codes, capi::CallKind::Setting>([&] { cancel::setThreadToken(tokenOf(token)); });
+}
+
+// ------------------------------------------------------------------ logging (XI-08)
+
+static_assert(DDB_LOG_TRACE == logfwd::kTrace && DDB_LOG_DEBUG == logfwd::kDebug && DDB_LOG_INFO == logfwd::kInfo &&
+                  DDB_LOG_WARNING == logfwd::kWarning && DDB_LOG_ERROR == logfwd::kError &&
+                  DDB_LOG_FATAL == logfwd::kFatal,
+              "DDBLogLevel and the levels of log_forwarding.h are the same");
+static_assert(std::is_same_v<DDBLogCallback, logfwd::Callback>, "DDBLogCallback is log_forwarding's callback");
+
+DDBErr DDBSetLogCallback(DDBLogCallback callback, int minLevel, void* userData) {
+    return guarded<kAbi11Codes, capi::CallKind::Setting>([&] { logfwd::setCallback(callback, minLevel, userData); });
+}
+
+DDBErr DDBSetThreadOperation(uint64_t opId) {
+    return guarded<kAbi11Codes, capi::CallKind::Setting>([&] { logfwd::setThreadOperation(opId); });
 }
 
 // ------------------------------------------------------------------ files and index

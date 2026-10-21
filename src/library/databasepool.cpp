@@ -82,19 +82,22 @@ namespace ddb
     size_t DatabasePool::shutdown()
     {
         std::vector<Idle> closing;
+        std::vector<std::pair<std::string, int>> failed; // logged once the pool is unlocked
         {
             std::lock_guard<std::mutex> lock(mutex_);
             for (const auto &c : idle_)
             {
                 const int rc = sqlite3_wal_checkpoint_v2(c.handle, nullptr, SQLITE_CHECKPOINT_TRUNCATE, nullptr, nullptr);
                 if (rc != SQLITE_OK)
-                    LOGW << "Cannot checkpoint " << c.key << " at shutdown (" << sqlite3_errstr(rc)
-                         << "): its last close checkpoints it";
+                    failed.emplace_back(c.key, rc);
             }
             closing.assign(idle_.begin(), idle_.end());
             idle_.clear();
             stats_.discarded += closing.size();
         }
+        for (const auto &[key, rc] : failed)
+            LOGW << "Cannot checkpoint " << key << " at shutdown (" << sqlite3_errstr(rc)
+                 << "): its last close checkpoints it";
         const auto count = closing.size();
         closeAll(closing);
         return count;
