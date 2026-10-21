@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <fstream>
+#include <iterator>
 #include <set>
 #include <sstream>
 #include <string>
@@ -406,6 +407,31 @@ TEST(processRunner, execFailureReported) {
     const auto denied = process::run(notExec, {});
     EXPECT_FALSE(denied.started);
     EXPECT_NE(denied.describe().find("Permission denied"), std::string::npos) << denied.describe();
+}
+
+// DQ-04: the parent's pipe ends and /dev/null are owned by UniqueFd, so every exit path of
+// run() (success, extra channel, exec failure, timeout kill) closes all of them.
+TEST(processRunner, parentDescriptorsClosedOnEveryPath) {
+    SKIP_ON_WINDOWS();
+    SKIP_WITHOUT_PROC();
+    const auto openDescriptors = [] {
+        return std::distance(fs::directory_iterator("/proc/self/fd"), fs::directory_iterator());
+    };
+    const auto before = openDescriptors();
+
+    EXPECT_TRUE(sh("echo out").success());
+
+    process::Options extra;
+    extra.extraChannel = true;
+    EXPECT_TRUE(sh("echo progress >&$1", extra, {process::kExtraChannelPlaceholder}).success());
+
+    EXPECT_FALSE(process::run("/nonexistent/ddb_missing_tool", {}).started);
+
+    process::Options idle;
+    idle.idleTimeout = milliseconds(200);
+    EXPECT_TRUE(sh("exec sleep 30", idle).timedOut);
+
+    EXPECT_EQ(openDescriptors(), before);
 }
 
 TEST(processRunner, scriptWithShebangRuns) {

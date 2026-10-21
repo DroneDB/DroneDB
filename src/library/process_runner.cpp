@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "logger.h"
+#include "unique_handle.h"
 
 #ifdef _WIN32
 #include <cwchar>
@@ -284,26 +285,21 @@ namespace ddb
 
             // ---------------------------------------------------------------- POSIX
 
-            void closeFd(int &fd)
+            // pipe with FD_CLOEXEC on both ends (atomic where pipe2 exists); ends[0] is the
+            // read end, ends[1] the write end.
+            bool makePipe(UniqueFd (&ends)[2])
             {
-                if (fd >= 0)
-                {
-                    ::close(fd);
-                    fd = -1;
-                }
-            }
-
-            // pipe with FD_CLOEXEC on both ends (atomic where pipe2 exists).
-            bool makePipe(int fds[2])
-            {
+                int fds[2];
 #if defined(__linux__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__)
-                return ::pipe2(fds, O_CLOEXEC) == 0;
+                if (::pipe2(fds, O_CLOEXEC) != 0) return false;
 #else
                 if (::pipe(fds) != 0) return false;
                 ::fcntl(fds[0], F_SETFD, FD_CLOEXEC);
                 ::fcntl(fds[1], F_SETFD, FD_CLOEXEC);
-                return true;
 #endif
+                ends[0].reset(fds[0]);
+                ends[1].reset(fds[1]);
+                return true;
             }
 
             // Everything the child needs, prepared before fork().
@@ -466,23 +462,14 @@ namespace ddb
 
                 const std::string path = binary.string();
 
-                int outPipe[2] = {-1, -1};
-                int extraPipe[2] = {-1, -1};
-                int statusPipe[2] = {-1, -1};
-                int devNull = -1;
+                // Every descriptor of the parent closes on return (and on an exception)
+                UniqueFd outPipe[2];
+                UniqueFd extraPipe[2];
+                UniqueFd statusPipe[2];
+                UniqueFd devNull;
 
-                auto closeAll = [&]() {
-                    closeFd(outPipe[0]);
-                    closeFd(outPipe[1]);
-                    closeFd(extraPipe[0]);
-                    closeFd(extraPipe[1]);
-                    closeFd(statusPipe[0]);
-                    closeFd(statusPipe[1]);
-                    closeFd(devNull);
-                };
                 auto setupFailure = [&](const char *what) {
                     const int err = errno;
-                    closeAll();
                     r.errorMessage = std::string(what) + ": " + std::strerror(err);
                     r.duration = std::chrono::duration_cast<milliseconds>(Clock::now() - start);
                     sink.finish(r);
@@ -492,17 +479,17 @@ namespace ddb
                 if (!makePipe(outPipe)) return setupFailure("pipe() for output");
                 if (opts.extraChannel && !makePipe(extraPipe)) return setupFailure("pipe() for extra channel");
                 if (!makePipe(statusPipe)) return setupFailure("pipe() for exec status");
-                devNull = ::open("/dev/null", O_RDONLY | O_CLOEXEC);
-                if (devNull < 0) return setupFailure("open(/dev/null)");
+                devNull.reset(::open("/dev/null", O_RDONLY | O_CLOEXEC));
+                if (!devNull) return setupFailure("open(/dev/null)");
 
                 ChildPlan plan;
                 plan.path = path.c_str();
                 plan.argv = argv.data();
                 plan.envp = envp.data();
-                plan.devNull = devNull;
-                plan.outWrite = outPipe[1];
-                plan.extraWrite = extraPipe[1];
-                plan.statusWrite = statusPipe[1];
+                plan.devNull = devNull.get();
+                plan.outWrite = outPipe[1].get();
+                plan.extraWrite = extraPipe[1].get();
+                plan.statusWrite = statusPipe[1].get();
                 plan.maxFd = computeMaxFd();
                 plan.parentPid = ::getpid();
 
@@ -512,25 +499,24 @@ namespace ddb
 
                 // ---- Parent.
                 ::setpgid(pid, pid); // mirror the child's call (avoids a kill(-pid) race)
-                closeFd(outPipe[1]);
-                closeFd(extraPipe[1]);
-                closeFd(statusPipe[1]);
-                closeFd(devNull);
+                outPipe[1].reset();
+                extraPipe[1].reset();
+                statusPipe[1].reset();
+                devNull.reset();
 
                 // Exec status: EOF means execve succeeded (CLOEXEC), an int is errno.
                 int execErr = 0;
                 ssize_t sn;
                 do
                 {
-                    sn = ::read(statusPipe[0], &execErr, sizeof(execErr));
+                    sn = ::read(statusPipe[0].get(), &execErr, sizeof(execErr));
                 } while (sn < 0 && errno == EINTR);
-                closeFd(statusPipe[0]);
+                statusPipe[0].reset();
 
                 if (sn == static_cast<ssize_t>(sizeof(execErr)))
                 {
                     int status = 0;
                     waitChild(pid, status);
-                    closeAll();
                     r.errorMessage = std::strerror(execErr);
                     r.duration = std::chrono::duration_cast<milliseconds>(Clock::now() - start);
                     sink.finish(r);
@@ -545,7 +531,7 @@ namespace ddb
                 bool killed = false;
                 Clock::time_point exitTime;
 
-                while (outPipe[0] >= 0 || extraPipe[0] >= 0)
+                while (outPipe[0] || extraPipe[0])
                 {
                     if (!childExited)
                     {
@@ -594,14 +580,14 @@ namespace ddb
                     pollfd pfds[2];
                     int fdKinds[2];
                     nfds_t n = 0;
-                    if (outPipe[0] >= 0)
+                    if (outPipe[0])
                     {
-                        pfds[n] = {outPipe[0], POLLIN, 0};
+                        pfds[n] = {outPipe[0].get(), POLLIN, 0};
                         fdKinds[n++] = 0;
                     }
-                    if (extraPipe[0] >= 0)
+                    if (extraPipe[0])
                     {
-                        pfds[n] = {extraPipe[0], POLLIN, 0};
+                        pfds[n] = {extraPipe[0].get(), POLLIN, 0};
                         fdKinds[n++] = 1;
                     }
 
@@ -618,8 +604,8 @@ namespace ddb
                     for (nfds_t i = 0; i < n; ++i)
                     {
                         if (pfds[i].revents == 0) continue;
-                        int &fd = fdKinds[i] == 0 ? outPipe[0] : extraPipe[0];
-                        const ssize_t nr = ::read(fd, buf.data(), buf.size());
+                        UniqueFd &fd = fdKinds[i] == 0 ? outPipe[0] : extraPipe[0];
+                        const ssize_t nr = ::read(fd.get(), buf.data(), buf.size());
                         if (nr > 0)
                         {
                             lastActivity = Clock::now();
@@ -630,12 +616,12 @@ namespace ddb
                         }
                         else if (nr == 0 || (errno != EINTR && errno != EAGAIN))
                         {
-                            closeFd(fd); // EOF or unrecoverable error
+                            fd.reset(); // EOF or unrecoverable error
                         }
                     }
                 }
-                closeFd(outPipe[0]);
-                closeFd(extraPipe[0]);
+                outPipe[0].reset();
+                extraPipe[0].reset();
 
                 // Every monitored pipe is closed but the child may still be running
                 // (e.g. it closed stdout/stderr itself): keep enforcing the idle
@@ -720,12 +706,6 @@ namespace ddb
                 return oss.str();
             }
 
-            void closeHandle(HANDLE &h)
-            {
-                if (h != nullptr && h != INVALID_HANDLE_VALUE) CloseHandle(h);
-                h = nullptr;
-            }
-
             std::wstring envName(const std::wstring &entry)
             {
                 // Entries such as "=C:=C:\dir" start with '='; the name ends at the
@@ -782,21 +762,13 @@ namespace ddb
                 const auto start = Clock::now();
                 OutputSink sink(opts);
 
-                HANDLE outRead = nullptr, outWrite = nullptr;
-                HANDLE extraRead = nullptr, extraWrite = nullptr;
-                HANDLE nul = nullptr;
-                HANDLE job = nullptr;
+                // Every handle of the parent closes on return (and on an exception)
+                UniqueHandle outRead, outWrite;
+                UniqueHandle extraRead, extraWrite;
+                UniqueHandle nul;
+                UniqueHandle job;
 
-                auto closeAll = [&]() {
-                    closeHandle(outRead);
-                    closeHandle(outWrite);
-                    closeHandle(extraRead);
-                    closeHandle(extraWrite);
-                    closeHandle(nul);
-                    closeHandle(job);
-                };
                 auto setupFailure = [&](const std::string &what, DWORD err) {
-                    closeAll();
                     r.errorMessage = what + ": " + winErrorMessage(err);
                     r.duration = std::chrono::duration_cast<milliseconds>(Clock::now() - start);
                     sink.finish(r);
@@ -805,30 +777,29 @@ namespace ddb
 
                 // Pipes are created non-inheritable; only the child's ends are made
                 // inheritable, and only the handles in the explicit list are passed.
-                if (!CreatePipe(&outRead, &outWrite, nullptr, 0))
+                if (!CreatePipe(outRead.put(), outWrite.put(), nullptr, 0))
                     return setupFailure("CreatePipe for output", GetLastError());
-                if (!SetHandleInformation(outWrite, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT))
+                if (!SetHandleInformation(outWrite.get(), HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT))
                     return setupFailure("SetHandleInformation", GetLastError());
                 if (opts.extraChannel)
                 {
-                    if (!CreatePipe(&extraRead, &extraWrite, nullptr, 0))
+                    if (!CreatePipe(extraRead.put(), extraWrite.put(), nullptr, 0))
                         return setupFailure("CreatePipe for extra channel", GetLastError());
-                    if (!SetHandleInformation(extraWrite, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT))
+                    if (!SetHandleInformation(extraWrite.get(), HANDLE_FLAG_INHERIT,
+                                              HANDLE_FLAG_INHERIT))
                         return setupFailure("SetHandleInformation", GetLastError());
                 }
                 SECURITY_ATTRIBUTES saInherit{};
                 saInherit.nLength = sizeof(saInherit);
                 saInherit.bInheritHandle = TRUE;
-                nul = CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &saInherit, OPEN_EXISTING,
-                                  FILE_ATTRIBUTE_NORMAL, nullptr);
-                if (nul == INVALID_HANDLE_VALUE)
-                {
-                    nul = nullptr;
+                // INVALID_HANDLE_VALUE on failure, which UniqueHandle never closes
+                nul.reset(CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                      &saInherit, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
+                if (!nul)
                     return setupFailure("open NUL", GetLastError());
-                }
 
-                std::vector<HANDLE> inherit = {nul, outWrite};
-                if (extraWrite) inherit.push_back(extraWrite);
+                std::vector<HANDLE> inherit = {nul.get(), outWrite.get()};
+                if (extraWrite) inherit.push_back(extraWrite.get());
 
                 SIZE_T attrSize = 0;
                 InitializeProcThreadAttributeList(nullptr, 1, 0, &attrSize);
@@ -847,15 +818,16 @@ namespace ddb
                 STARTUPINFOEXW siex{};
                 siex.StartupInfo.cb = sizeof(siex);
                 siex.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
-                siex.StartupInfo.hStdInput = nul;
-                siex.StartupInfo.hStdOutput = outWrite;
-                siex.StartupInfo.hStdError = outWrite;
+                siex.StartupInfo.hStdInput = nul.get();
+                siex.StartupInfo.hStdOutput = outWrite.get();
+                siex.StartupInfo.hStdError = outWrite.get();
                 siex.lpAttributeList = attrList;
 
                 // The child inherits the handle with the same value: pass it as size_t
                 // (QgisUntwine convention for --progress_fd).
                 const std::string extraId =
-                    extraWrite ? std::to_string(reinterpret_cast<uintptr_t>(extraWrite)) : std::string();
+                    extraWrite ? std::to_string(reinterpret_cast<uintptr_t>(extraWrite.get()))
+                               : std::string();
                 std::string cmdLine = quoteForLog(binary.string());
                 for (const auto &a : expandArgs(args, opts, extraId))
                 {
@@ -875,13 +847,14 @@ namespace ddb
                 }
 
                 // Kill-on-close job: the child (and its descendants) die with us.
-                job = CreateJobObjectW(nullptr, nullptr);
+                job.reset(CreateJobObjectW(nullptr, nullptr));
                 if (job)
                 {
                     JOBOBJECT_EXTENDED_LIMIT_INFORMATION jeli{};
                     jeli.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-                    if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation, &jeli, sizeof(jeli)))
-                        closeHandle(job);
+                    if (!SetInformationJobObject(job.get(), JobObjectExtendedLimitInformation, &jeli,
+                                                 sizeof(jeli)))
+                        job.reset();
                 }
 
                 PROCESS_INFORMATION pi{};
@@ -892,32 +865,33 @@ namespace ddb
                 DeleteProcThreadAttributeList(attrList);
 
                 // The parent never uses the child's ends.
-                closeHandle(outWrite);
-                closeHandle(extraWrite);
-                closeHandle(nul);
+                outWrite.reset();
+                extraWrite.reset();
+                nul.reset();
 
                 if (!ok)
                 {
-                    closeAll();
                     r.errorMessage = winErrorMessage(createErr);
                     r.duration = std::chrono::duration_cast<milliseconds>(Clock::now() - start);
                     sink.finish(r);
                     return r;
                 }
 
-                bool inJob = job && AssignProcessToJobObject(job, pi.hProcess);
+                UniqueHandle childProcess(pi.hProcess);
+                UniqueHandle childThread(pi.hThread);
+                bool inJob = job && AssignProcessToJobObject(job.get(), childProcess.get());
                 if (!inJob)
                     LOGD << "Could not assign child process to a job object (error " << GetLastError()
                          << "); orphan protection is unavailable";
-                ResumeThread(pi.hThread);
-                CloseHandle(pi.hThread);
+                ResumeThread(childThread.get());
+                childThread.reset();
                 r.started = true;
 
                 auto terminate = [&]() {
                     if (inJob)
-                        TerminateJobObject(job, 1);
+                        TerminateJobObject(job.get(), 1);
                     else
-                        TerminateProcess(pi.hProcess, 1);
+                        TerminateProcess(childProcess.get(), 1);
                 };
 
                 // Anonymous pipes do not support overlapped I/O: poll with
@@ -927,20 +901,20 @@ namespace ddb
                 bool childExited = false;
                 Clock::time_point exitTime;
 
-                auto pump = [&](HANDLE &h, bool isOutput) -> bool {
+                auto pump = [&](UniqueHandle &h, bool isOutput) -> bool {
                     if (!h) return false;
                     DWORD avail = 0;
-                    if (!PeekNamedPipe(h, nullptr, 0, nullptr, &avail, nullptr))
+                    if (!PeekNamedPipe(h.get(), nullptr, 0, nullptr, &avail, nullptr))
                     {
-                        closeHandle(h); // ERROR_BROKEN_PIPE: writer closed and drained
+                        h.reset(); // ERROR_BROKEN_PIPE: writer closed and drained
                         return false;
                     }
                     if (avail == 0) return false;
                     DWORD nr = 0;
                     const DWORD want = static_cast<DWORD>(std::min<size_t>(avail, buf.size()));
-                    if (!ReadFile(h, buf.data(), want, &nr, nullptr) || nr == 0)
+                    if (!ReadFile(h.get(), buf.data(), want, &nr, nullptr) || nr == 0)
                     {
-                        closeHandle(h);
+                        h.reset();
                         return false;
                     }
                     if (isOutput)
@@ -954,7 +928,7 @@ namespace ddb
                 {
                     // Probe on every iteration, including when a descendant is
                     // continuously writing. Record the first observed exit once.
-                    if (!childExited && WaitForSingleObject(pi.hProcess, 0) == WAIT_OBJECT_0)
+                    if (!childExited && WaitForSingleObject(childProcess.get(), 0) == WAIT_OBJECT_0)
                     {
                         childExited = true;
                         exitTime = Clock::now();
@@ -982,8 +956,8 @@ namespace ddb
                     }
                     if (!active) Sleep(25);
                 }
-                closeHandle(outRead);
-                closeHandle(extraRead);
+                outRead.reset();
+                extraRead.reset();
 
                 // Every monitored pipe is closed but the child may still be running:
                 // keep enforcing the idle timeout (from the last activity) instead of
@@ -992,7 +966,7 @@ namespace ddb
                 {
                     for (;;)
                     {
-                        if (WaitForSingleObject(pi.hProcess, 0) == WAIT_OBJECT_0) break;
+                        if (WaitForSingleObject(childProcess.get(), 0) == WAIT_OBJECT_0) break;
                         bool runtimeHit = false;
                         const long long remaining =
                             remainingBudget(opts, start, lastActivity, Clock::now(), runtimeHit);
@@ -1004,19 +978,19 @@ namespace ddb
                             break;
                         }
                         const DWORD waitMs = static_cast<DWORD>(std::min<long long>(remaining, kExitPollMs));
-                        if (WaitForSingleObject(pi.hProcess, waitMs) != WAIT_TIMEOUT) break;
+                        if (WaitForSingleObject(childProcess.get(), waitMs) != WAIT_TIMEOUT) break;
                     }
                 }
 
-                WaitForSingleObject(pi.hProcess, INFINITE);
+                WaitForSingleObject(childProcess.get(), INFINITE);
                 DWORD exitCode = 1;
-                if (GetExitCodeProcess(pi.hProcess, &exitCode) && !r.timedOut)
+                if (GetExitCodeProcess(childProcess.get(), &exitCode) && !r.timedOut)
                 {
                     r.exited = true;
                     r.exitCode = static_cast<int>(exitCode);
                 }
-                CloseHandle(pi.hProcess);
-                closeHandle(job); // kills any remaining descendant in the job
+                childProcess.reset();
+                job.reset(); // kills any remaining descendant in the job
 
                 r.duration = std::chrono::duration_cast<milliseconds>(Clock::now() - start);
                 sink.finish(r);
