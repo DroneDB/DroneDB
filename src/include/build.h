@@ -17,11 +17,14 @@ namespace ddb
     DDB_DLL bool isBuildable(Database *db, const std::string &path, std::string &subfolder);
 
     /**
-     * The main files a sidecar belongs to, in lookup order (same folder and stem):
-     * .cpg/.dbf/.shx belong to a shapefile; a .prj also gives a CAD drawing its CRS (DDB-12).
+     * The indexed main files the sidecar at path belongs to (the SidecarRules of the entry
+     * handlers): .cpg/.dbf/.shx belong to a shapefile; a .prj also gives a CAD drawing its CRS
+     * (DDB-12). A main file has the sidecar's folder and stem (exact bytes) and a main
+     * extension in any letter case (.shp, .SHP, .Shp). Lookup order: the extensions in rule
+     * order, then lowercase, uppercase and other spellings, then byte order of the path.
      * Empty for any other file.
      */
-    DDB_DLL std::vector<std::string> sidecarMainCandidates(const std::string &path);
+    DDB_DLL std::vector<std::string> findSidecarMains(Database *db, const std::string &path);
 
     DDB_DLL void buildAll(Database *db, const std::string &outputPath, bool force = false);
     DDB_DLL void build(Database *db, const std::string &path, const std::string &outputPath, bool force = false);

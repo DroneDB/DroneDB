@@ -391,4 +391,57 @@ TEST(entryHandler, ScopedHandlerPutsBackTheOneItReplaced) {
     EXPECT_EQ(typeToHuman(Markdown), "Markdown");
 }
 
+// ---- Sidecars ------------------------------------------------------------------------------
+
+void insertEntry(Database* db, const std::string& path, const std::string& hash, EntryType type) {
+    auto q = db->query("INSERT INTO entries (path, hash, type, properties, mtime, size, depth) "
+                       "VALUES (?, ?, ?, '{}', 0, 1, ?)");
+    q->bind(1, path);
+    q->bind(2, hash);
+    q->bind(3, static_cast<int>(type));
+    q->bind(4, static_cast<int>(std::count(path.begin(), path.end(), '/')));
+    q->execute();
+}
+
+// The main file of a sidecar matches whatever the letter case of its extension (Registry's
+// rule, XI-04); it used to be found only as .shp or .SHP. The stem stays exact.
+TEST(entryHandler, SidecarMainExtensionMatchesAnyLetterCase) {
+    IndexFixture fx(TEST_NAME);
+    const std::string mainHash(64, 'a');
+    insertEntry(fx.db.get(), "maps/roads.Shp", mainHash, Vector);
+    insertEntry(fx.db.get(), "maps/roads.dbf", std::string(64, 'b'), Generic);
+    insertEntry(fx.db.get(), "maps/Roads.shx", std::string(64, 'c'), Generic);  // other stem
+    writeFile(fx.db->buildDirectory() / mainHash / "vec" / "source.gpkg", "x");
+    writeFile(fx.db->buildDirectory() / mainHash / "mvt" / "metadata.json", "x");
+
+    std::string subfolder;
+    EXPECT_TRUE(isBuildable(fx.db.get(), "maps/roads.dbf", subfolder));
+    EXPECT_EQ(subfolder, "vec");
+    EXPECT_TRUE(isBuildComplete(fx.db.get(), "maps/roads.dbf"));
+    EXPECT_FALSE(isBuildable(fx.db.get(), "maps/Roads.shx", subfolder));
+
+    const auto statuses = getBuildStatus(fx.db.get(), {"maps/roads.dbf", "maps/Roads.shx"});
+    ASSERT_EQ(statuses.size(), 2u);
+    EXPECT_TRUE(statuses[0].buildable);
+    EXPECT_TRUE(statuses[0].complete);
+    EXPECT_FALSE(statuses[1].buildable);
+    EXPECT_FALSE(statuses[1].complete);
+}
+
+// Lookup order: rule extensions (shp, dxf, dwg), then lowercase, uppercase, mixed spellings
+TEST(entryHandler, SidecarMainsLookupOrder) {
+    IndexFixture fx(TEST_NAME);
+    for (const auto* p : {"d/x.Shp", "d/x.SHP", "d/x.shp", "d/x.DWG", "d/x.dxf", "d/x.sHp", "d/x.prj",
+                          "d/x.backup.shp", "d/X.shp", "d/x.shp.zip", "d/xy.shp", "e/x.shp", "d/x.shpx"})
+        insertEntry(fx.db.get(), p, std::string(64, 'a'), Vector);
+
+    EXPECT_EQ(findSidecarMains(fx.db.get(), "d/x.prj"),
+              (std::vector<std::string>{"d/x.shp", "d/x.SHP", "d/x.Shp", "d/x.sHp", "d/x.dxf", "d/x.DWG"}));
+    EXPECT_EQ(findSidecarMains(fx.db.get(), "d/x.DBF"),
+              (std::vector<std::string>{"d/x.shp", "d/x.SHP", "d/x.Shp", "d/x.sHp"}));
+    EXPECT_TRUE(findSidecarMains(fx.db.get(), "d/x.shp").empty());   // not a sidecar
+    EXPECT_TRUE(findSidecarMains(fx.db.get(), "d/z.dbf").empty());   // no main file
+    EXPECT_EQ(findSidecarMains(fx.db.get(), "x.dbf"), std::vector<std::string>{});  // root folder
+}
+
 }  // namespace

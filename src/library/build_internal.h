@@ -11,6 +11,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "dbops.h"
 #include "entry_handler.h"
@@ -20,6 +21,8 @@ namespace ddb {
 
 // Reads an indexed entry by path; false when there is none.
 using EntryLookup = std::function<bool(const std::string&, Entry&)>;
+// The indexed paths that start with a prefix (byte-wise), in any order.
+using PrefixLookup = std::function<std::vector<std::string>(const std::string&)>;
 
 // ---- Build rules (build.cpp) ----------------------------------------------
 
@@ -37,11 +40,20 @@ struct BuildTarget {
     bool viaDependency = false;
 };
 
+// The indexed main files of the sidecar at path, in lookup order (see findSidecarMains
+// in build.h); siblings lists the indexed paths with a prefix.
+std::vector<std::string> findSidecarMains(const std::string& path, const PrefixLookup& siblings);
+
 // The build target of an entry, or nothing when neither the entry nor a main
-// file it is a sidecar of is buildable. lookup reads the main file candidates.
-std::optional<BuildTarget> resolveBuildTarget(const Entry& e, const EntryLookup& lookup);
-// Same, reading the main file candidates with getEntry().
+// file it is a sidecar of is buildable. siblings finds the main files, lookup
+// reads them.
+std::optional<BuildTarget> resolveBuildTarget(const Entry& e, const EntryLookup& lookup,
+                                              const PrefixLookup& siblings);
+// Same, reading the index of db.
 std::optional<BuildTarget> resolveBuildTarget(Database* db, const Entry& e);
+
+// The indexed paths of db that start with prefix (one range scan of the path index)
+std::vector<std::string> indexedPathsWithPrefix(Database* db, const std::string& prefix);
 
 // ---- Build dispatch (build_dispatch.cpp) ----------------------------------
 

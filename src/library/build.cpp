@@ -9,7 +9,9 @@
 
 #include "build.h"
 
+#include <algorithm>
 #include <optional>
+#include <tuple>
 
 #include "build_internal.h"
 #include "build_layout.h"
@@ -22,24 +24,72 @@
 
 namespace ddb {
 
-// Entry paths are dataset-relative, so the folder is kept. Until the main file is
-// looked up case-insensitively, the candidates are the lowercase and uppercase spellings
-// of each main extension.
-std::vector<std::string> sidecarMainCandidates(const std::string& path) {
-    std::vector<std::string> candidates;
-    for (const auto& ext : sidecarMainExtensions(path)) {
+std::vector<std::string> findSidecarMains(const std::string& path, const PrefixLookup& siblings) {
+    const std::vector<std::string> mainExtensions = sidecarMainExtensions(path);
+    if (mainExtensions.empty())
+        return {};
+
+    // Entry paths are dataset-relative and '/'-separated: the siblings of "dir/roads.dbf"
+    // with another extension are the paths "dir/roads.<ext>". The path has an extension
+    // (a SidecarRule matched it), so its last '.' is in the file name.
+    const std::string prefix = path.substr(0, path.rfind('.') + 1);
+
+    struct Ranked {
+        size_t extension;  // index in mainExtensions
+        int spelling;      // 0 lowercase, 1 uppercase, 2 mixed
+        std::string path;
+        bool operator<(const Ranked& o) const {
+            return std::tie(extension, spelling, path) < std::tie(o.extension, o.spelling, o.path);
+        }
+    };
+    std::vector<Ranked> mains;
+    for (auto& candidate : siblings(prefix)) {
+        if (candidate.size() <= prefix.size() || candidate.compare(0, prefix.size(), prefix) != 0)
+            continue;
+        const std::string ext = candidate.substr(prefix.size());
+        if (ext.find_first_of("./") != std::string::npos)
+            continue;
+        std::string lower = ext;
+        utils::toLower(lower);
+        const auto it = std::find(mainExtensions.begin(), mainExtensions.end(), lower);
+        if (it == mainExtensions.end())
+            continue;
         std::string upper = ext;
         utils::toUpper(upper);
-        for (const auto& spelling : {ext, upper})
-            candidates.push_back(fs::path(path).replace_extension("." + spelling).generic_string());
+        const int spelling = ext == lower ? 0 : ext == upper ? 1 : 2;
+        mains.push_back({static_cast<size_t>(it - mainExtensions.begin()), spelling, std::move(candidate)});
     }
-    return candidates;
+    std::sort(mains.begin(), mains.end());
+
+    std::vector<std::string> result;
+    result.reserve(mains.size());
+    for (auto& m : mains)
+        result.push_back(std::move(m.path));
+    return result;
 }
 
-static std::vector<std::string> dependencyMainCandidates(const Entry& e) {
-    if (e.type != EntryType::Generic)
-        return {};
-    return sidecarMainCandidates(e.path);
+// [prefix, prefix with its last byte + 1): a range of the BINARY path index
+static constexpr const char* PathsWithPrefixQuery = "SELECT path FROM entries WHERE path >= ? AND path < ?";
+
+static std::vector<std::string> fetchPathsWithPrefix(Statement& q, const std::string& prefix) {
+    std::string upper = prefix;
+    upper.back() = static_cast<char>(upper.back() + 1);
+    q.bind(1, prefix);
+    q.bind(2, upper);
+    std::vector<std::string> paths;
+    while (q.fetch())
+        paths.push_back(q.getText(0));
+    q.reset();
+    return paths;
+}
+
+std::vector<std::string> indexedPathsWithPrefix(Database* db, const std::string& prefix) {
+    const auto q = db->query(PathsWithPrefixQuery);
+    return fetchPathsWithPrefix(*q, prefix);
+}
+
+std::vector<std::string> findSidecarMains(Database* db, const std::string& path) {
+    return findSidecarMains(path, [db](const std::string& prefix) { return indexedPathsWithPrefix(db, prefix); });
 }
 
 // The handler that builds e, or nullptr when e is not built by itself
@@ -53,8 +103,12 @@ static const EntryHandler* buildingHandler(const Entry& e) {
 // of a drawing (SidecarRule). A sidecar is buildable only while its main file is
 // indexed: an orphan .prj next to a raster is not (otherwise it is never "complete"
 // and is rebuilt forever by completeness sweeps).
-static std::optional<BuildTarget> resolveDependencyTarget(const Entry& e, const EntryLookup& lookup) {
-    for (const auto& candidate : dependencyMainCandidates(e)) {
+static std::optional<BuildTarget> resolveDependencyTarget(const Entry& e, const EntryLookup& lookup,
+                                                          const PrefixLookup& siblings) {
+    if (e.type != EntryType::Generic)
+        return std::nullopt;
+
+    for (const auto& candidate : findSidecarMains(e.path, siblings)) {
         Entry mainEntry;
         if (!lookup(candidate, mainEntry))
             continue;
@@ -64,15 +118,18 @@ static std::optional<BuildTarget> resolveDependencyTarget(const Entry& e, const 
     return std::nullopt;
 }
 
-std::optional<BuildTarget> resolveBuildTarget(const Entry& e, const EntryLookup& lookup) {
+std::optional<BuildTarget> resolveBuildTarget(const Entry& e, const EntryLookup& lookup,
+                                              const PrefixLookup& siblings) {
     if (const EntryHandler* handler = buildingHandler(e))
         return BuildTarget{e, handler->subfolder(), handler, false};
 
-    return resolveDependencyTarget(e, lookup);
+    return resolveDependencyTarget(e, lookup, siblings);
 }
 
 std::optional<BuildTarget> resolveBuildTarget(Database* db, const Entry& e) {
-    return resolveBuildTarget(e, [db](const std::string& p, Entry& out) { return getEntry(db, p, out); });
+    return resolveBuildTarget(
+        e, [db](const std::string& p, Entry& out) { return getEntry(db, p, out); },
+        [db](const std::string& prefix) { return indexedPathsWithPrefix(db, prefix); });
 }
 
 bool isBuildable(Database* db, const std::string& path, std::string& subfolder) {
@@ -106,8 +163,10 @@ bool isBuildComplete(Database* db, const std::string& path) {
 }
 
 std::vector<BuildStatus> getBuildStatus(Database* db, const std::vector<std::string>& paths) {
-    // One prepared statement for every lookup; only the columns the build rules read
+    // One prepared statement per kind of lookup; only the columns the build rules read
     auto q = db->query("SELECT path, hash, type FROM entries WHERE path = ?");
+    auto qPrefix = db->query(PathsWithPrefixQuery);
+    const auto siblings = [&qPrefix](const std::string& prefix) { return fetchPathsWithPrefix(*qPrefix, prefix); };
     const auto lookup = [&q](const std::string& p, Entry& out) {
         q->bind(1, p);
         const bool found = q->fetch();
@@ -132,7 +191,7 @@ std::vector<BuildStatus> getBuildStatus(Database* db, const std::vector<std::str
         if (lookup(path, e)) {
             status.exists = true;
 
-            const auto target = resolveBuildTarget(e, lookup);
+            const auto target = resolveBuildTarget(e, lookup, siblings);
             status.buildable = target.has_value();
             status.complete = target && isTargetBuildComplete(buildDirectory, *target);
         }

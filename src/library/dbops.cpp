@@ -4,7 +4,7 @@
 #include "dbops.h"
 
 #include "build.h"
-#include "build_layout.h"
+#include "entry_handler.h"
 #include "cad.h"
 #include "databasepool.h"
 #include "raster_cache.h"
@@ -1069,7 +1069,7 @@ namespace
 
         const auto updateQ = db->query(UPDATE_QUERY);
         for (const auto &prj : prjPaths) {
-            for (const auto &mainPath : sidecarMainCandidates(prj)) {
+            for (const auto &mainPath : findSidecarMains(db, prj)) {
                 Entry old;
                 if (!getEntry(db, mainPath, old))
                     continue;
@@ -1088,8 +1088,8 @@ namespace
                     // A GeoPackage kept open for WFS/OGC queries would block this on Windows
                     const fs::path out = db->buildDirectory() / old.hash;
                     releaseCachedFiles(out);
-                    io::assureIsRemoved(out / VectorBuildSubfolder);
-                    io::assureIsRemoved(out / MvtBuildSubfolder);
+                    for (const auto &folder : entryHandler(old.type).artifactFolders())
+                        io::assureIsRemoved(out / folder);
                     LOGD << "Refreshed " << mainPath << " after a change to " << prj;
                 } catch (const std::exception &e) {
                     // The add/remove is already committed: never report it as failed
