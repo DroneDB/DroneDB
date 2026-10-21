@@ -9,6 +9,8 @@
 
 #include <algorithm>
 #include <limits>
+#include <string>
+#include <string_view>
 #include <utility>
 #include <fcntl.h>
 #include <vector>
@@ -182,6 +184,14 @@ namespace ddb
         // Computes the common directory path (if any) among the given paths
         DDB_DLL fs::path commonDirPath(const std::vector<fs::path> &paths);
         size_t componentsCount(const fs::path &p);
+
+        // The C API passes paths as UTF-8 (XI-03). fromUtf8 makes a path from UTF-8 bytes and
+        // toUtf8 returns the UTF-8 bytes of a path, whatever the global or CRT locale: on Windows
+        // they convert from and to the native wide string (an invalid UTF-8 sequence throws
+        // std::system_error); on POSIX a path is bytes, so both copy them unchanged, without any
+        // validation.
+        DDB_DLL fs::path fromUtf8(std::string_view utf8);
+        DDB_DLL std::string toUtf8(const fs::path &p);
 
     }
 }

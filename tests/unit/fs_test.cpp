@@ -232,4 +232,20 @@ namespace
 #endif
     }
 
+    // XI-03: the paths of the C API are UTF-8, whatever the locale
+    TEST(utf8Path, RoundTrip)
+    {
+        const std::string name = "citt\xC3\xA0_\xC3\xBC_\xE6\x97\xA5.txt"; // "città_ü_日.txt"
+        const fs::path p = io::fromUtf8(name);
+        EXPECT_EQ(io::toUtf8(p), name);
+        // The native form holds the characters, not the bytes read in another code page
+        EXPECT_TRUE(p.filename().u8string() == std::u8string(name.begin(), name.end()));
+        EXPECT_EQ(io::fromUtf8("a/b") / io::fromUtf8(name), io::fromUtf8("a/b/" + name));
+#ifndef _WIN32
+        // POSIX: bytes, not validated
+        const std::string invalid = "bad\xFF\xFE";
+        EXPECT_EQ(io::toUtf8(io::fromUtf8(invalid)), invalid);
+#endif
+    }
+
 }

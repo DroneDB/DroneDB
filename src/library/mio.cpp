@@ -613,6 +613,29 @@ namespace ddb
             return result;
         }
 
+#ifdef _WIN32
+        fs::path fromUtf8(std::string_view utf8)
+        {
+            return fs::path(std::u8string(utf8.begin(), utf8.end()));
+        }
+
+        std::string toUtf8(const fs::path &p)
+        {
+            const std::u8string utf8 = p.u8string();
+            return std::string(utf8.begin(), utf8.end());
+        }
+#else
+        fs::path fromUtf8(std::string_view utf8)
+        {
+            return fs::path(std::string(utf8));
+        }
+
+        std::string toUtf8(const fs::path &p)
+        {
+            return p.native();
+        }
+#endif
+
         fs::path assureFolderExists(const fs::path &d)
         {
             if (!fs::exists(d))
