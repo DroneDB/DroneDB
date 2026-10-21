@@ -310,12 +310,20 @@ TEST(CAbiLogProcess, callbackBeforeRegisterProcess) {
     // The callback replaces the console: the probe prints its own success line and no log record.
     // Other lines are allowed: stderr is captured too, where a sanitizer runtime reports at exit
     // (LSan's "Suppressions used" table in the ASan job).
+    // Lines end in "\r\n" on Windows
     std::istringstream lines(r.outputTail);
+    const auto nextLine = [&lines](std::string& line) {
+        if (!std::getline(lines, line))
+            return false;
+        if (!line.empty() && line.back() == '\r')
+            line.pop_back();
+        return true;
+    };
     std::string first;
-    std::getline(lines, first);
+    nextLine(first);
     EXPECT_EQ(first, "log probe ok") << r.outputTail;
     const std::regex logRecord(R"(^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3} )");
-    for (std::string line; std::getline(lines, line);)
+    for (std::string line; nextLine(line);)
         EXPECT_FALSE(std::regex_search(line, logRecord))
             << "the probe printed a log record while its callback was registered: " << line;
 }
