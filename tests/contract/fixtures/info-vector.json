@@ -1,0 +1,101 @@
+{
+  "call": "DDBInfo([<root>/layer.geojson], format=\"json\", recursive=false, maxRecursionDepth=0, geometry=\"auto\", withHash=true, stopOnError=true)",
+  "description": "The contract dataset: tests/contract/inputs (a.txt, cloud.las, layer.geojson, ortho.tif, sub/img.jpg) copied to <root> with mtime 1700000000, indexed with DDBAdd",
+  "normalisation": {
+    "placeholders": [
+      "<root>"
+    ],
+    "volatileKeys": [
+      "depth"
+    ]
+  },
+  "output": [
+    {
+      "depth": 0,
+      "hash": "6ff9caf347f675d2b45a6d9aa600a0b337f23c193c971302e55bca4a2151bde4",
+      "mtime": 1700000000,
+      "path": "file://<root>/layer.geojson",
+      "point_geom": {
+        "crs": {
+          "properties": {
+            "name": "EPSG:4326"
+          },
+          "type": "name"
+        },
+        "geometry": {
+          "coordinates": [
+            8.250499999999999,
+            46.840500000000006,
+            0.0
+          ],
+          "type": "Point"
+        },
+        "properties": {},
+        "type": "Feature"
+      },
+      "polygon_geom": {
+        "crs": {
+          "properties": {
+            "name": "EPSG:4326"
+          },
+          "type": "name"
+        },
+        "geometry": {
+          "coordinates": [
+            [
+              [
+                8.25,
+                46.84,
+                0.0
+              ],
+              [
+                8.251,
+                46.84,
+                0.0
+              ],
+              [
+                8.251,
+                46.841,
+                0.0
+              ],
+              [
+                8.25,
+                46.841,
+                0.0
+              ],
+              [
+                8.25,
+                46.84,
+                0.0
+              ]
+            ]
+          ],
+          "type": "Polygon"
+        },
+        "properties": {},
+        "type": "Feature"
+      },
+      "properties": {
+        "vector": {
+          "driver": "GeoJSON",
+          "layers": [
+            {
+              "extent": [
+                8.25,
+                46.84,
+                8.251,
+                46.841
+              ],
+              "featureCount": 2,
+              "geometryType": "Unknown (any)",
+              "name": "layer"
+            }
+          ]
+        }
+      },
+      "size": 336,
+      "type": 14
+    }
+  ],
+  "schema": "entries.schema.json"
+}

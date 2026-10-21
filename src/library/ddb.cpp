@@ -2040,6 +2040,8 @@ static int exportRasterImpl(const char* inputPath, const char* outputPath,
         throw InvalidArgsException("No input path provided");
     if (utils::isNullOrEmptyOrWhitespace(outputPath))
         throw InvalidArgsException("No output path provided");
+    // Creating the output truncates an existing file, so it must not be the input
+    io::assureDistinctOutput(inputPath, outputPath);
 
     // Returns true if the operation should be canceled.
     auto reportProgress = [&](double fraction, const char* phase) -> bool {

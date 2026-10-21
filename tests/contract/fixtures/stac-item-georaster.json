@@ -1,0 +1,130 @@
+{
+  "call": "DDBStac(<root>, entry=\"ortho.tif\", stacCollectionRoot=\"https://hub.example/orgs/contract/ds/fixtures\", id=\"contract\", stacCatalogRoot=\"https://hub.example\")",
+  "description": "The contract dataset: tests/contract/inputs (a.txt, cloud.las, layer.geojson, ortho.tif, sub/img.jpg) copied to <root> with mtime 1700000000, indexed with DDBAdd",
+  "normalisation": {
+    "placeholders": [
+      "<root>"
+    ],
+    "volatileKeys": []
+  },
+  "output": {
+    "assets": {
+      "ortho.tif": {
+        "href": "https://hub.example/orgs/contract/ds/fixtures/download?path=ortho.tif",
+        "roles": [
+          "data"
+        ],
+        "title": "ortho.tif",
+        "type": "image/tiff"
+      },
+      "thumbnail": {
+        "href": "https://hub.example/orgs/contract/ds/fixtures/thumb?path=ortho.tif&size=512",
+        "roles": [
+          "thumbnail"
+        ],
+        "title": "Thumbnail",
+        "type": "image/webp"
+      }
+    },
+    "bbox": [
+      9.0,
+      45.15347718317,
+      9.000203550941,
+      45.1536212103
+    ],
+    "collection": "contract",
+    "geometry": {
+      "coordinates": [
+        [
+          [
+            9,
+            45.1536212103,
+            0
+          ],
+          [
+            9.000203550941,
+            45.15362121012,
+            0
+          ],
+          [
+            9.000203550429,
+            45.15347718317,
+            0
+          ],
+          [
+            9,
+            45.15347718336,
+            0
+          ],
+          [
+            9,
+            45.1536212103,
+            0
+          ]
+        ]
+      ],
+      "type": "Polygon"
+    },
+    "id": "path-ortho-tif",
+    "links": [
+      {
+        "href": "https://hub.example/stac",
+        "rel": "root",
+        "type": "application/json"
+      },
+      {
+        "href": "https://hub.example/orgs/contract/ds/fixtures/stac",
+        "rel": "parent",
+        "type": "application/json"
+      },
+      {
+        "href": "https://hub.example/orgs/contract/ds/fixtures/stac",
+        "rel": "collection",
+        "type": "application/json"
+      },
+      {
+        "href": "https://hub.example/orgs/contract/ds/fixtures/stac/b3J0aG8udGlm",
+        "rel": "self",
+        "type": "application/geo+json"
+      }
+    ],
+    "properties": {
+      "bands": [
+        {
+          "colorInterp": "Red",
+          "type": "Byte"
+        },
+        {
+          "colorInterp": "Green",
+          "type": "Byte"
+        },
+        {
+          "colorInterp": "Blue",
+          "type": "Byte"
+        }
+      ],
+      "datetime": "2023-11-14T22:13:20Z",
+      "proj:code": "EPSG:32632",
+      "proj:shape": [
+        32,
+        32
+      ],
+      "proj:transform": [
+        500000.0,
+        0.5,
+        0.0,
+        5000016.0,
+        0.0,
+        -0.5
+      ],
+      "proj:wkt2": "PROJCS[\"WGS 84 / UTM zone 32N\",GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563,AUTHORITY[\"EPSG\",\"7030\"]],AUTHORITY[\"EPSG\",\"6326\"]],PRIMEM[\"Greenwich\",0,AUTHORITY[\"EPSG\",\"8901\"]],UNIT[\"degree\",0.0174532925199433,AUTHORITY[\"EPSG\",\"9122\"]],AUTHORITY[\"EPSG\",\"4326\"]],PROJECTION[\"Transverse_Mercator\"],PARAMETER[\"latitude_of_origin\",0],PARAMETER[\"central_meridian\",9],PARAMETER[\"scale_factor\",0.9996],PARAMETER[\"false_easting\",500000],PARAMETER[\"false_northing\",0],UNIT[\"metre\",1,AUTHORITY[\"EPSG\",\"9001\"]],AXIS[\"Easting\",EAST],AXIS[\"Northing\",NORTH],AUTHORITY[\"EPSG\",\"32632\"]]",
+      "title": "ortho.tif"
+    },
+    "stac_extensions": [
+      "https://stac-extensions.github.io/projection/v2.0.0/schema.json"
+    ],
+    "stac_version": "1.1.0",
+    "type": "Feature"
+  },
+  "schema": "stac-item.schema.json"
+}

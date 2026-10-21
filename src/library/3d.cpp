@@ -805,7 +805,8 @@ std::string buildNexus(const std::string& inputObj, const std::string& outputNxs
     const auto outFile =
         outputNxs.empty() ? fs::path(inputObj).replace_extension(".nxz").string() : outputNxs;
 
-    // Check if output file already exists
+    // Check if output file already exists (overwrite deletes it, so it must not be the input)
+    io::assureDistinctOutput(inputObj, outFile);
     if (fs::exists(outFile)) {
         if (overwrite)
             io::assureIsRemoved(outFile);

@@ -1,0 +1,110 @@
+{
+  "call": "DDBInfo([<root>/ortho.tif], format=\"json\", recursive=false, maxRecursionDepth=0, geometry=\"auto\", withHash=true, stopOnError=true)",
+  "description": "The contract dataset: tests/contract/inputs (a.txt, cloud.las, layer.geojson, ortho.tif, sub/img.jpg) copied to <root> with mtime 1700000000, indexed with DDBAdd",
+  "normalisation": {
+    "placeholders": [
+      "<root>"
+    ],
+    "volatileKeys": [
+      "depth"
+    ]
+  },
+  "output": [
+    {
+      "depth": 0,
+      "hash": "d0d2b869615dca09ef0055f2014401bab298503e3e1f10e339f14f5788ea702f",
+      "mtime": 1700000000,
+      "path": "file://<root>/ortho.tif",
+      "point_geom": {
+        "crs": {
+          "properties": {
+            "name": "EPSG:4326"
+          },
+          "type": "name"
+        },
+        "geometry": {
+          "coordinates": [
+            9.00010177534253,
+            45.153549196783544,
+            0.0
+          ],
+          "type": "Point"
+        },
+        "properties": {},
+        "type": "Feature"
+      },
+      "polygon_geom": {
+        "crs": {
+          "properties": {
+            "name": "EPSG:4326"
+          },
+          "type": "name"
+        },
+        "geometry": {
+          "coordinates": [
+            [
+              [
+                9.0,
+                45.15362121030084,
+                0.0
+              ],
+              [
+                9.000203550941414,
+                45.15362121011944,
+                0.0
+              ],
+              [
+                9.00020355042871,
+                45.15347718317464,
+                0.0
+              ],
+              [
+                9.0,
+                45.153477183356024,
+                0.0
+              ],
+              [
+                9.0,
+                45.15362121030084,
+                0.0
+              ]
+            ]
+          ],
+          "type": "Polygon"
+        },
+        "properties": {},
+        "type": "Feature"
+      },
+      "properties": {
+        "bands": [
+          {
+            "colorInterp": "Red",
+            "type": "Byte"
+          },
+          {
+            "colorInterp": "Green",
+            "type": "Byte"
+          },
+          {
+            "colorInterp": "Blue",
+            "type": "Byte"
+          }
+        ],
+        "geotransform": [
+          500000.0,
+          0.5,
+          0.0,
+          5000016.0,
+          0.0,
+          -0.5
+        ],
+        "height": 32,
+        "projection": "PROJCS[\"WGS 84 / UTM zone 32N\",GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563,AUTHORITY[\"EPSG\",\"7030\"]],AUTHORITY[\"EPSG\",\"6326\"]],PRIMEM[\"Greenwich\",0,AUTHORITY[\"EPSG\",\"8901\"]],UNIT[\"degree\",0.0174532925199433,AUTHORITY[\"EPSG\",\"9122\"]],AUTHORITY[\"EPSG\",\"4326\"]],PROJECTION[\"Transverse_Mercator\"],PARAMETER[\"latitude_of_origin\",0],PARAMETER[\"central_meridian\",9],PARAMETER[\"scale_factor\",0.9996],PARAMETER[\"false_easting\",500000],PARAMETER[\"false_northing\",0],UNIT[\"metre\",1,AUTHORITY[\"EPSG\",\"9001\"]],AXIS[\"Easting\",EAST],AXIS[\"Northing\",NORTH],AUTHORITY[\"EPSG\",\"32632\"]]",
+        "width": 32
+      },
+      "size": 3462,
+      "type": 4
+    }
+  ],
+  "schema": "entries.schema.json"
+}

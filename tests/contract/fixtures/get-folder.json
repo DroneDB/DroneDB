@@ -1,0 +1,18 @@
+{
+  "call": "DDBGet(<root>, \"sub\")",
+  "description": "The contract dataset: tests/contract/inputs (a.txt, cloud.las, layer.geojson, ortho.tif, sub/img.jpg) copied to <root> with mtime 1700000000, indexed with DDBAdd",
+  "normalisation": {
+    "placeholders": [
+      "<root>"
+    ],
+    "volatileKeys": []
+  },
+  "output": {
+    "depth": 0,
+    "mtime": 1700000000,
+    "path": "sub",
+    "size": 0,
+    "type": 1
+  },
+  "schema": "entry.schema.json"
+}

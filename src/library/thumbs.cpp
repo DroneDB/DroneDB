@@ -780,6 +780,10 @@ fs::path generateThumb(const fs::path& inputPath,
     if (!utils::isNetworkPath(inputPath.string()) && !exists(inputPath))
         throw FSException(inputPath.string() + " does not exist");
 
+    // Writing the thumbnail replaces an existing file, so it must not be the input
+    if (!utils::isNetworkPath(inputPath.string()))
+        io::assureDistinctOutput(inputPath, outImagePath);
+
     // Check existance of thumbnail, return if exists
     if (!utils::isNetworkPath(inputPath.string()) && exists(outImagePath) && !forceRecreate)
         return outImagePath;

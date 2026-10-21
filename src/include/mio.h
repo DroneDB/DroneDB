@@ -134,6 +134,16 @@ namespace ddb
         DDB_DLL void remove(const fs::path p);
         DDB_DLL bool exists(const fs::path p);
 
+        // Whether a and b name the same file: fs::equivalent when both exist (symlinks, hard
+        // links, case-insensitive names), otherwise their weakly canonical absolute forms
+        // (relative paths, "." and ".." segments, symlinked parent folders).
+        DDB_DLL bool isSamePath(const fs::path &a, const fs::path &b);
+
+        // Throws InvalidArgsException when output names the same file as input. A writer that
+        // replaces an existing output would otherwise delete or truncate its input before
+        // reading it.
+        DDB_DLL void assureDistinctOutput(const fs::path &input, const fs::path &output);
+
         // Prints to the provided buffer a nice number of bytes (KB, MB, GB, etc)
         DDB_DLL std::string bytesToHuman(std::uintmax_t bytes);
 

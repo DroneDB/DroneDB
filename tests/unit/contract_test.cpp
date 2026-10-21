@@ -1,0 +1,362 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+// XI-09: golden contract fixtures of the libddb JSON outputs Registry consumes. Each test makes
+// the contract dataset from tests/contract/inputs (committed files, fixed mtimes), calls the C
+// API as Registry does, and checks the output against its JSON Schema and its golden file in
+// tests/contract/fixtures (contract_fixtures.h). Any change to a field name, a type or a value
+// fails here; an intended one is recorded with DDB_UPDATE_CONTRACT_FIXTURES=1 and listed in
+// tests/contract/README.md. The drone image fixtures, which need a downloaded asset, are in
+// tests/integration/contract_drone_image_test.cpp.
+
+#include <fstream>
+#include <memory>
+#include <set>
+#include <string>
+#include <vector>
+
+#include "contract_fixtures.h"
+#include "ddb.h"
+#include "gtest/gtest.h"
+#include "json.h"
+#include "json_schema_check.h"
+#include "test.h"
+#include "testarea.h"
+#include "utils.h"
+
+namespace
+{
+    using contract::Fixture;
+
+#define ASSERT_DDB_OK(call) ASSERT_EQ((call), DDBERR_NONE) << #call << ": " << DDBGetLastError()
+
+    // The contract dataset: every file of tests/contract/inputs, indexed
+    const std::vector<std::string> kInputs = {"a.txt", "cloud.las", "layer.geojson", "ortho.tif", "sub"};
+    const char *kDescription = "The contract dataset: tests/contract/inputs (a.txt, cloud.las, layer.geojson, "
+                               "ortho.tif, sub/img.jpg) copied to <root> with mtime 1700000000, indexed with DDBAdd";
+    const char *kCollectionRoot = "https://hub.example/orgs/contract/ds/fixtures";
+    const char *kCatalogRoot = "https://hub.example";
+
+    class ContractFixtures : public ::testing::Test
+    {
+    protected:
+        std::unique_ptr<TestArea> ta;
+        fs::path root;
+        json added;
+
+        // Offline: no DSM download for the image without a relative altitude
+        EnvVarGuard noDsmKey{"DDB_OPENTOPOGRAPHY_KEY"};
+
+        void SetUp() override
+        {
+            unsetEnv("DDB_OPENTOPOGRAPHY_KEY");
+            ta = std::make_unique<TestArea>(TEST_NAME, true);
+            root = ta->getFolder("dataset");
+            std::vector<fs::path> inputs;
+            for (const auto &name : kInputs)
+                inputs.push_back(contract::inputsDir() / name);
+            added = contract::makeDataset(root, inputs);
+        }
+
+        void TearDown() override
+        {
+            // Close the pooled index connections, so the test area can be removed
+            DDBReleaseConnections(root.string().c_str(), nullptr);
+        }
+
+        // A fixture of the contract dataset; its root is the placeholder "<root>"
+        Fixture fixture(const std::string &name, const std::string &call, const std::string &schema,
+                        std::vector<std::string> volatileKeys = {}) const
+        {
+            return {name, kDescription, call, schema, contract::pathPlaceholders(root, "<root>"),
+                    std::move(volatileKeys), {}};
+        }
+
+        std::string path(const std::string &relative) const { return (root / relative).string(); }
+    };
+
+    TEST_F(ContractFixtures, Add)
+    {
+        contract::expectMatchesFixture(
+            fixture("add", "DDBAdd(<root>, [<root>/a.txt, <root>/cloud.las, <root>/layer.geojson, <root>/ortho.tif, "
+                           "<root>/sub], recursive=true)",
+                    "entries.schema.json"),
+            added);
+    }
+
+    TEST_F(ContractFixtures, List)
+    {
+        const std::string r = root.string();
+        const char *paths[] = {r.c_str()};
+        char *out = nullptr;
+        ASSERT_DDB_OK(DDBList(r.c_str(), paths, 1, &out, "json", true, 0));
+        contract::expectMatchesFixture(
+            fixture("list", "DDBList(<root>, [<root>], format=\"json\", recursive=true, maxRecursionDepth=0)",
+                    "entries.schema.json"),
+            contract::takeJson(out));
+    }
+
+    TEST_F(ContractFixtures, ListFolder)
+    {
+        const std::string sub = path("sub");
+        const char *paths[] = {sub.c_str()};
+        char *out = nullptr;
+        ASSERT_DDB_OK(DDBList(root.string().c_str(), paths, 1, &out, "json", false, 0));
+        contract::expectMatchesFixture(
+            fixture("list-folder", "DDBList(<root>, [<root>/sub], format=\"json\", recursive=false)",
+                    "entries.schema.json"),
+            contract::takeJson(out));
+    }
+
+    TEST_F(ContractFixtures, ListEntries)
+    {
+        char *out = nullptr;
+        ASSERT_DDB_OK(DDBListEntries(root.string().c_str(), "", true, "", "", true, &out));
+        contract::expectMatchesFixture(
+            fixture("list-entries", "DDBListEntries(<root>, folder=\"\", recursive=true, namePattern=\"\", "
+                                    "types=\"\", withDetails=true)",
+                    "entries.schema.json"),
+            contract::takeJson(out));
+    }
+
+    TEST_F(ContractFixtures, ListEntrySummaries)
+    {
+        char *out = nullptr;
+        ASSERT_DDB_OK(DDBListEntries(root.string().c_str(), "", true, "", "", false, &out));
+        contract::expectMatchesFixture(
+            fixture("list-entry-summaries", "DDBListEntries(<root>, folder=\"\", recursive=true, namePattern=\"\", "
+                                            "types=\"\", withDetails=false)",
+                    "entry-summaries.schema.json"),
+            contract::takeJson(out));
+    }
+
+    TEST_F(ContractFixtures, ListEntriesFiltered)
+    {
+        char *out = nullptr;
+        ASSERT_DDB_OK(DDBListEntries(root.string().c_str(), "", true, "*.TIF", "georaster,image", false, &out));
+        contract::expectMatchesFixture(
+            fixture("list-entries-filtered", "DDBListEntries(<root>, folder=\"\", recursive=true, "
+                                             "namePattern=\"*.TIF\", types=\"georaster,image\", withDetails=false)",
+                    "entry-summaries.schema.json"),
+            contract::takeJson(out));
+    }
+
+    TEST_F(ContractFixtures, Get)
+    {
+        for (const std::string entry : {"sub/img.jpg", "sub"})
+        {
+            char *out = nullptr;
+            ASSERT_DDB_OK(DDBGet(root.string().c_str(), entry.c_str(), &out));
+            const std::string name = entry == "sub" ? "get-folder" : "get-image";
+            contract::expectMatchesFixture(fixture(name, "DDBGet(<root>, \"" + entry + "\")", "entry.schema.json"),
+                                           contract::takeJson(out));
+        }
+    }
+
+    // DDBInfo of each kind of input, as Registry calls it (json, withHash) before adding a file.
+    // Its "depth" counts the folders of the absolute path (the temporary folder): normalised.
+    TEST_F(ContractFixtures, Info)
+    {
+        const std::vector<std::pair<std::string, std::string>> inputs = {
+            {"a.txt", "info-generic"},          {"cloud.las", "info-pointcloud"},
+            {"layer.geojson", "info-vector"},   {"ortho.tif", "info-georaster"},
+            {"sub/img.jpg", "info-image"},
+        };
+        for (const auto &[entry, name] : inputs)
+        {
+            const std::string p = path(entry);
+            const char *paths[] = {p.c_str()};
+            char *out = nullptr;
+            ASSERT_DDB_OK(DDBInfo(paths, 1, &out, "json", false, 0, "auto", true, true));
+            contract::expectMatchesFixture(
+                fixture(name, "DDBInfo([<root>/" + entry + "], format=\"json\", recursive=false, maxRecursionDepth=0, "
+                              "geometry=\"auto\", withHash=true, stopOnError=true)",
+                        "entries.schema.json", {"depth"}),
+                contract::takeJson(out));
+        }
+    }
+
+    // Meta outputs in the order Registry's meta endpoints produce them. Meta items get a new
+    // UUID ("id") and the current time ("mtime") when written: both are normalised.
+    TEST_F(ContractFixtures, Meta)
+    {
+        const std::string r = root.string();
+        const std::vector<std::string> volatileKeys = {"id", "mtime"};
+        // Meta items carry the volatile keys; key lists and removal counts do not
+        const auto check = [&](const std::string &name, const std::string &call, const std::string &schema,
+                               char *out)
+        {
+            const bool items = schema == "meta-item.schema.json" || schema == "meta-items.schema.json";
+            contract::expectMatchesFixture(fixture(name, call, schema, items ? volatileKeys : std::vector<std::string>{}),
+                                           contract::takeJson(out));
+        };
+        char *out = nullptr;
+
+        ASSERT_DDB_OK(DDBMetaAdd(r.c_str(), "", "tags", "\"survey\"", &out));
+        check("meta-add", "DDBMetaAdd(<root>, \"\", \"tags\", \"\\\"survey\\\"\")", "meta-item.schema.json", out);
+        ASSERT_DDB_OK(DDBMetaAdd(r.c_str(), "", "tags", "\"2024\"", &out));
+        DDBFree(out);
+        ASSERT_DDB_OK(DDBMetaSet(r.c_str(), "sub/img.jpg", "annotation", "{\"note\":\"tree\",\"level\":2}", &out));
+        check("meta-set", "DDBMetaSet(<root>, \"sub/img.jpg\", \"annotation\", {\"note\":\"tree\",\"level\":2})",
+              "meta-item.schema.json", out);
+        ASSERT_DDB_OK(DDBMetaSet(r.c_str(), "", "name", "\"Contract dataset\"", &out));
+        DDBFree(out);
+
+        ASSERT_DDB_OK(DDBMetaGet(r.c_str(), "", "tags", &out));
+        check("meta-get-list", "DDBMetaGet(<root>, \"\", \"tags\") (a key ending in s holds a list)",
+              "meta-items.schema.json", out);
+        ASSERT_DDB_OK(DDBMetaGet(r.c_str(), "sub/img.jpg", "annotation", &out));
+        check("meta-get", "DDBMetaGet(<root>, \"sub/img.jpg\", \"annotation\")", "meta-item.schema.json", out);
+        ASSERT_DDB_OK(DDBMetaList(r.c_str(), "", &out));
+        check("meta-list", "DDBMetaList(<root>, \"\")", "meta-list.schema.json", out);
+        ASSERT_DDB_OK(DDBMetaList(r.c_str(), "sub/img.jpg", &out));
+        check("meta-list-entry", "DDBMetaList(<root>, \"sub/img.jpg\")", "meta-list.schema.json", out);
+        ASSERT_DDB_OK(DDBMetaDump(r.c_str(), "[]", &out));
+        const json dump = contract::takeJson(out);
+        // The dump is ordered by id: random UUIDs
+        Fixture dumpFixture = fixture("meta-dump", "DDBMetaDump(<root>, \"[]\")", "meta-dump.schema.json", volatileKeys);
+        dumpFixture.sortBy = {"path", "key", "data"};
+        contract::expectMatchesFixture(dumpFixture, dump);
+
+        ASSERT_DDB_OK(DDBMetaUnset(r.c_str(), "", "name", &out));
+        check("meta-unset", "DDBMetaUnset(<root>, \"\", \"name\")", "meta-count.schema.json", out);
+        std::string surveyId;
+        for (const auto &item : dump)
+            if (item.at("data") == "\"survey\"")
+                surveyId = item.at("id").get<std::string>();
+        ASSERT_DDB_OK(DDBMetaRemove(r.c_str(), surveyId.c_str(), &out));
+        check("meta-remove", "DDBMetaRemove(<root>, <id of the \"survey\" tag>)", "meta-count.schema.json", out);
+    }
+
+    // Build state: ortho.tif built (COG), layer.geojson buildable and not built, a.txt not
+    // buildable, a path that is not indexed
+    TEST_F(ContractFixtures, BuildStatus)
+    {
+        const std::string r = root.string();
+        ASSERT_DDB_OK(DDBBuild(r.c_str(), "ortho.tif", nullptr, false, false));
+
+        const char *paths[] = {"ortho.tif", "layer.geojson", "a.txt", "missing.tif"};
+        char *out = nullptr;
+        ASSERT_DDB_OK(DDBGetBuildStatus(r.c_str(), paths, 4, &out));
+        contract::expectMatchesFixture(
+            fixture("build-status", "DDBBuild(<root>, \"ortho.tif\"), then DDBGetBuildStatus(<root>, [\"ortho.tif\", "
+                                    "\"layer.geojson\", \"a.txt\", \"missing.tif\"])",
+                    "build-status.schema.json"),
+            contract::takeJson(out));
+
+        ASSERT_DDB_OK(DDBGetPendingBuildInfo(r.c_str(), &out));
+        contract::expectMatchesFixture(fixture("pending-build-info-none", "DDBGetPendingBuildInfo(<root>) (nothing pending)",
+                                               "pending-build-info.schema.json"),
+                                       contract::takeJson(out));
+    }
+
+    // A build deferred for a missing dependency: a Shapefile without its .shx and .dbf. The
+    // marker records the time of the attempt ("lastAttempt", normalised).
+    TEST(ContractFixturesPending, PendingBuildInfo)
+    {
+        TestArea ta(TEST_NAME, true);
+        const fs::path root = ta.getFolder("dataset");
+        const fs::path shp = ta.getPath("roads.shp");
+        {
+            std::ofstream(shp, std::ios::binary) << "not a real shapefile: its .shx and .dbf are missing";
+        }
+        contract::makeDataset(root, {shp});
+
+        const std::string r = root.string();
+        EXPECT_EQ(DDBBuild(r.c_str(), "roads.shp", nullptr, false, false), DDBERR_BUILDDEPMISSING) << DDBGetLastError();
+        char *out = nullptr;
+        ASSERT_DDB_OK(DDBGetPendingBuildInfo(r.c_str(), &out));
+        contract::expectMatchesFixture(
+            {"pending-build-info",
+             "A dataset with roads.shp only (no .shx, .dbf), mtime 1700000000; DDBBuild deferred it",
+             "DDBBuild(<root>, \"roads.shp\") -> DDBERR_BUILDDEPMISSING, then DDBGetPendingBuildInfo(<root>)",
+             "pending-build-info.schema.json", contract::pathPlaceholders(root, "<root>"), {"lastAttempt"}, {}},
+            contract::takeJson(out));
+        DDBReleaseConnections(r.c_str(), nullptr);
+    }
+
+    TEST_F(ContractFixtures, Stac)
+    {
+        const std::string r = root.string();
+        char *out = nullptr;
+        ASSERT_DDB_OK(DDBStac(r.c_str(), "", kCollectionRoot, "contract", kCatalogRoot, &out));
+        contract::expectMatchesFixture(
+            fixture("stac-collection", std::string("DDBStac(<root>, entry=\"\", stacCollectionRoot=\"") +
+                                           kCollectionRoot + "\", id=\"contract\", stacCatalogRoot=\"" + kCatalogRoot +
+                                           "\")",
+                    "stac-collection.schema.json"),
+            contract::takeJson(out));
+
+        for (const std::string entry : {"ortho.tif", "sub/img.jpg"})
+        {
+            ASSERT_DDB_OK(DDBStac(r.c_str(), entry.c_str(), kCollectionRoot, "contract", kCatalogRoot, &out));
+            contract::expectMatchesFixture(
+                fixture(entry == "ortho.tif" ? "stac-item-georaster" : "stac-item-image",
+                        "DDBStac(<root>, entry=\"" + entry + "\", stacCollectionRoot=\"" + kCollectionRoot +
+                            "\", id=\"contract\", stacCatalogRoot=\"" + kCatalogRoot + "\")",
+                        "stac-item.schema.json"),
+                contract::takeJson(out));
+        }
+
+        ASSERT_DDB_OK(DDBStacItemCollection(r.c_str(), kCollectionRoot, "contract", kCatalogRoot, "", "", 10, 0, &out));
+        contract::expectMatchesFixture(
+            fixture("stac-item-collection", std::string("DDBStacItemCollection(<root>, stacCollectionRoot=\"") +
+                                                kCollectionRoot + "\", id=\"contract\", stacCatalogRoot=\"" +
+                                                kCatalogRoot + "\", bbox=\"\", datetime=\"\", limit=10, offset=0)",
+                    "stac-item-collection.schema.json"),
+            contract::takeJson(out));
+    }
+
+    TEST_F(ContractFixtures, RasterMetadata)
+    {
+        const std::string ortho = path("ortho.tif");
+        char *out = nullptr;
+        ASSERT_DDB_OK(DDBGetRasterInfo(ortho.c_str(), &out));
+        contract::expectMatchesFixture(
+            fixture("raster-info", "DDBGetRasterInfo(<root>/ortho.tif)", "raster-info.schema.json"),
+            contract::takeJson(out));
+
+        ASSERT_DDB_OK(DDBGetRasterMetadata(ortho.c_str(), nullptr, nullptr, &out));
+        contract::expectMatchesFixture(
+            fixture("raster-metadata", "DDBGetRasterMetadata(<root>/ortho.tif, formula=NULL, bandFilter=NULL)",
+                    "raster-metadata.schema.json"),
+            contract::takeJson(out));
+
+        ASSERT_DDB_OK(DDBGetRasterMetadata(ortho.c_str(), "VARI", "RGB", &out));
+        contract::expectMatchesFixture(
+            fixture("raster-metadata-formula", "DDBGetRasterMetadata(<root>/ortho.tif, formula=\"VARI\", bandFilter=\"RGB\")",
+                    "raster-metadata.schema.json"),
+            contract::takeJson(out));
+    }
+}
+
+namespace
+{
+    // The committed files themselves, as Registry reads them: every fixture names an existing
+    // schema and its output matches it, and every schema has a fixture
+    TEST(ContractFiles, FixturesMatchTheirSchemas)
+    {
+        const fs::path dir = contract::contractDir();
+        testutils::JsonSchemaCheck check(dir / "schemas");
+        std::set<std::string> used;
+        int fixtures = 0;
+        for (const auto &e : fs::directory_iterator(dir / "fixtures"))
+        {
+            SCOPED_TRACE(e.path().filename().string());
+            std::ifstream in(e.path(), std::ios::binary);
+            const json fixture = json::parse(in);
+            for (const auto *key : {"description", "call", "schema", "normalisation", "output"})
+                EXPECT_TRUE(fixture.contains(key)) << key;
+            const auto schema = fixture.at("schema").get<std::string>();
+            used.insert(schema);
+            const auto errors = check.validate(fixture.at("output"), schema);
+            EXPECT_TRUE(errors.empty()) << json(errors).dump(2);
+            fixtures++;
+        }
+        EXPECT_GT(fixtures, 0);
+        for (const auto &e : fs::directory_iterator(dir / "schemas"))
+            EXPECT_EQ(used.count(e.path().filename().string()), 1u)
+                << e.path().filename() << " has no fixture";
+    }
+}

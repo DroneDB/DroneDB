@@ -1,0 +1,38 @@
+{
+  "call": "DDBGetRasterInfo(<root>/ortho.tif)",
+  "description": "The contract dataset: tests/contract/inputs (a.txt, cloud.las, layer.geojson, ortho.tif, sub/img.jpg) copied to <root> with mtime 1700000000, indexed with DDBAdd",
+  "normalisation": {
+    "placeholders": [
+      "<root>"
+    ],
+    "volatileKeys": []
+  },
+  "output": {
+    "availablePresets": [],
+    "bandCount": 3,
+    "bands": [
+      {
+        "colorInterpretation": "Red",
+        "index": 1,
+        "name": "Red"
+      },
+      {
+        "colorInterpretation": "Green",
+        "index": 2,
+        "name": "Green"
+      },
+      {
+        "colorInterpretation": "Blue",
+        "index": 3,
+        "name": "Blue"
+      }
+    ],
+    "crs": "EPSG:32632",
+    "dataType": "Byte",
+    "defaultPreset": null,
+    "detectedSensor": null,
+    "height": 32,
+    "width": 32
+  },
+  "schema": "raster-info.schema.json"
+}

@@ -1,0 +1,21 @@
+{
+  "call": "DDBListEntries(<root>, folder=\"\", recursive=true, namePattern=\"*.TIF\", types=\"georaster,image\", withDetails=false)",
+  "description": "The contract dataset: tests/contract/inputs (a.txt, cloud.las, layer.geojson, ortho.tif, sub/img.jpg) copied to <root> with mtime 1700000000, indexed with DDBAdd",
+  "normalisation": {
+    "placeholders": [
+      "<root>"
+    ],
+    "volatileKeys": []
+  },
+  "output": [
+    {
+      "depth": 0,
+      "hash": "d0d2b869615dca09ef0055f2014401bab298503e3e1f10e339f14f5788ea702f",
+      "mtime": 1700000000,
+      "path": "ortho.tif",
+      "size": 3462,
+      "type": 4
+    }
+  ],
+  "schema": "entry-summaries.schema.json"
+}

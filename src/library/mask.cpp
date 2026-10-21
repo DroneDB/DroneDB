@@ -6,6 +6,7 @@
 #include "logger.h"
 #include "exceptions.h"
 #include "fs.h"
+#include "mio.h"
 #include <cstdint>
 
 namespace ddb
@@ -17,6 +18,9 @@ namespace ddb
                  bool white,
                  const std::string &color)
     {
+        // The existing output is deleted below, before the input is read
+        io::assureDistinctOutput(input, output);
+
         if (fs::exists(output)) {
             LOGD << "Output file " << output << " already exists, deleting it";
             fs::remove(output);

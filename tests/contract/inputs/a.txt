@@ -1,0 +1,1 @@
+DroneDB contract fixture input

@@ -738,6 +738,37 @@ namespace ddb
             return val;
         }
 
+        bool isSamePath(const fs::path &a, const fs::path &b)
+        {
+            if (a.empty() || b.empty())
+                return false;
+            if (io::exists(a) && io::exists(b))
+            {
+                std::error_code e;
+                return fs::equivalent(a, b, e) && !e;
+            }
+
+            // Lexical form when the file system cannot resolve the path
+            const auto canonical = [](const fs::path &p)
+            {
+                std::error_code e;
+                fs::path abs = fs::absolute(p, e);
+                if (e)
+                    abs = p;
+                const fs::path c = fs::weakly_canonical(abs, e);
+                return e ? abs.lexically_normal() : c;
+            };
+            return canonical(a) == canonical(b);
+        }
+
+        void assureDistinctOutput(const fs::path &input, const fs::path &output)
+        {
+            if (isSamePath(input, output))
+                throw InvalidArgsException("The output path " + output.string() +
+                                           " is the input file " + input.string() +
+                                           ": choose a different output path");
+        }
+
         void rename(const fs::path &from, const fs::path &to)
         {
             std::error_code e;

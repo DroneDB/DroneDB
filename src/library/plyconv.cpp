@@ -22,6 +22,7 @@
 #include "deppath.h"
 #include "exceptions.h"
 #include "logger.h"
+#include "mio.h"
 
 namespace ddb
 {
@@ -383,14 +384,6 @@ namespace ddb
                 if (std::isspace(static_cast<unsigned char>(c)))
                     c = '_';
             return n;
-        }
-
-        bool sameFile(const fs::path &a, const fs::path &b)
-        {
-            if (fs::absolute(a).lexically_normal() == fs::absolute(b).lexically_normal())
-                return true;
-            std::error_code ec;
-            return fs::equivalent(a, b, ec) && !ec;
         }
 
         // ------------------------------------------------------------------
@@ -912,7 +905,7 @@ namespace ddb
 
         PlyToObjResult res;
         const fs::path objPath = objPathFor(outputBase);
-        if (!texture.empty() && sameFile(objPath, texture))
+        if (!texture.empty() && io::isSamePath(objPath, texture))
             throw AppException(ctx(ply) + "OBJ output would overwrite the source texture: " + objPath.string());
         const fs::path outDir = objPath.parent_path();
         if (!outDir.empty())
@@ -932,11 +925,11 @@ namespace ddb
             fs::path mtlPath = outDir / sanitizedFilename(fs::path(objPath).replace_extension(".mtl"));
             // A source texture may have any extension. Choose a distinct material
             // filename before opening it, including when outputs share its folder.
-            while (sameFile(mtlPath, texture) || sameFile(mtlPath, objPath))
+            while (io::isSamePath(mtlPath, texture) || io::isSamePath(mtlPath, objPath))
                 mtlPath = outDir / (mtlPath.stem().string() + "_material.mtl");
             std::string texName = sanitizedFilename(texture);
             fs::path texDst = outDir / texName;
-            while (sameFile(texDst, objPath) || sameFile(texDst, mtlPath))
+            while (io::isSamePath(texDst, objPath) || io::isSamePath(texDst, mtlPath))
             {
                 texName = "texture_" + texName;
                 texDst = outDir / texName;
@@ -952,7 +945,7 @@ namespace ddb
             }
 
             std::error_code ec;
-            const bool same = sameFile(texture, texDst);
+            const bool same = io::isSamePath(texture, texDst);
             if (!same)
             {
                 guard.add(texDst);

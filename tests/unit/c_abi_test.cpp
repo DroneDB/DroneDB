@@ -615,6 +615,62 @@ namespace
         EXPECT_TRUE(fs::exists(output));
     }
 
+    // Calls `write(input, output)` with every form of an output path that names the input (the
+    // same path, a dotted and a relative form, a symlink, a hard link): each call must fail
+    // and leave the input as it was. Writers that replace an existing output deleted or
+    // truncated their input before reading it.
+    template <typename Write>
+    void expectRejectsOutputThatIsTheInput(TestArea &ta, const fs::path &input, Write write)
+    {
+        const auto original = calculateHash(input);
+
+        std::vector<fs::path> aliases = {input, ta.getFolder() / "." / input.filename(),
+                                         fs::relative(input, fs::current_path())};
+        std::error_code ec;
+        const auto symlink = ta.getPath("symlink" + input.extension().string());
+        fs::create_symlink(input, symlink, ec);
+        if (!ec)
+            aliases.push_back(symlink);
+        const auto hardlink = ta.getPath("hardlink" + input.extension().string());
+        fs::create_hard_link(input, hardlink, ec);
+        if (!ec)
+            aliases.push_back(hardlink);
+
+        for (const auto &alias : aliases)
+        {
+            EXPECT_DDB_INVALID(write(input.string(), alias.string()));
+            ASSERT_TRUE(fs::exists(input)) << alias;
+            EXPECT_EQ(calculateHash(input), original) << alias;
+        }
+    }
+
+    TEST_F(CAbi, MaskBordersRejectsOutputThatIsTheInput)
+    {
+        TestArea ta(TEST_NAME, true);
+        expectRejectsOutputThatIsTheInput(ta, smallRaster(ta.getPath("ortho.tif")),
+                                          [](const std::string &in, const std::string &out)
+                                          { return DDBMaskBorders(in.c_str(), out.c_str(), 15, false); });
+    }
+
+    TEST_F(CAbi, ExportRasterRejectsOutputThatIsTheInput)
+    {
+        TestArea ta(TEST_NAME, true);
+        expectRejectsOutputThatIsTheInput(ta, smallRaster(ta.getPath("ortho.tif")),
+                                          [](const std::string &in, const std::string &out)
+                                          {
+                                              return DDBExportRaster(in.c_str(), out.c_str(), nullptr, nullptr, nullptr,
+                                                                     nullptr, nullptr, nullptr);
+                                          });
+    }
+
+    TEST_F(CAbi, GenerateThumbnailRejectsOutputThatIsTheInput)
+    {
+        TestArea ta(TEST_NAME, true);
+        expectRejectsOutputThatIsTheInput(ta, smallRaster(ta.getPath("ortho.tif")),
+                                          [](const std::string &in, const std::string &out)
+                                          { return DDBGenerateThumbnail(in.c_str(), 64, out.c_str()); });
+    }
+
     // ------------------------------------------------------------------ multispectral
 
     // Single-band rasters on the same grid, as a multispectral camera writes them

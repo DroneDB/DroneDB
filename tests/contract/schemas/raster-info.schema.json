@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "libddb raster info",
+  "description": "DDBGetRasterInfo",
+  "type": "object",
+  "required": [
+    "width",
+    "height",
+    "bandCount",
+    "dataType",
+    "crs",
+    "bands",
+    "availablePresets",
+    "defaultPreset",
+    "detectedSensor"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "width": {
+      "type": "integer"
+    },
+    "height": {
+      "type": "integer"
+    },
+    "bandCount": {
+      "type": "integer"
+    },
+    "dataType": {
+      "type": "string"
+    },
+    "crs": {
+      "type": "string"
+    },
+    "bands": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "index",
+          "name"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "index": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "name": {
+            "type": "string"
+          },
+          "colorInterpretation": {
+            "type": "string"
+          },
+          "wavelength": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "availablePresets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "isDefault"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "bandMapping": {},
+          "isDefault": {
+            "type": "boolean"
+          },
+          "type": {
+            "const": "index"
+          },
+          "formula": {
+            "type": "string"
+          },
+          "colormap": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "defaultPreset": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "detectedSensor": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  }
+}

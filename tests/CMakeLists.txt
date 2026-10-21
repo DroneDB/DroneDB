@@ -75,6 +75,10 @@ if(BUILD_TESTING)
     endif()
     set_source_files_properties(testfs.cpp PROPERTIES
         COMPILE_DEFINITIONS DDB_TEST_DATA_SHA="${DDB_TEST_DATA_SHA}")
+    # The golden contract fixtures (XI-09, tests/contract/README.md): read from the source tree,
+    # and rewritten there with DDB_UPDATE_CONTRACT_FIXTURES=1
+    set_source_files_properties(contract_fixtures.cpp PROPERTIES
+        COMPILE_DEFINITIONS DDB_CONTRACT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/contract")
 
     # The version test compares ddb::version() with package.json; one source file only, so
     # no other test TU carries it on its compile line

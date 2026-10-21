@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "libddb STAC collection",
+  "description": "DDBStac without an entry",
+  "type": "object",
+  "required": [
+    "type",
+    "stac_version",
+    "id",
+    "title",
+    "description",
+    "license",
+    "extent",
+    "links",
+    "assets"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "Collection"
+    },
+    "stac_version": {
+      "type": "string"
+    },
+    "id": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "license": {
+      "type": "string"
+    },
+    "extent": {
+      "type": "object",
+      "required": [
+        "spatial",
+        "temporal"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "spatial": {
+          "type": "object",
+          "required": [
+            "bbox"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "bbox": {
+              "type": "array",
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                },
+                "minItems": 4,
+                "maxItems": 6
+              }
+            }
+          }
+        },
+        "temporal": {
+          "type": "object",
+          "required": [
+            "interval"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "interval": {
+              "type": "array",
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "minItems": 2,
+                "maxItems": 2
+              }
+            }
+          }
+        }
+      }
+    },
+    "links": {
+      "type": "array",
+      "items": {
+        "$ref": "stac-item.schema.json#/$defs/link"
+      }
+    },
+    "assets": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "stac-item.schema.json#/$defs/asset"
+      }
+    }
+  }
+}
