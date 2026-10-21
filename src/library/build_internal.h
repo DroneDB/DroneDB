@@ -13,6 +13,7 @@
 #include <string>
 
 #include "dbops.h"
+#include "entry_handler.h"
 #include "fs.h"
 
 namespace ddb {
@@ -28,30 +29,19 @@ struct BuildTarget {
     // sidecar belongs to (the .shp of a .dbf). Type dispatch, the input path and
     // the output hash all come from it.
     Entry entry;
-    // Output subfolder in "<build root>/<entry.hash>/" (see build_layout.h)
+    // Output subfolder in "<build root>/<entry.hash>/" (handler->subfolder())
     std::string subfolder;
+    // The registered handler of entry.type: builds it and checks its completeness
+    const EntryHandler* handler = nullptr;
     // The requested entry is a sidecar of `entry` (its build is forced)
     bool viaDependency = false;
 };
-
-// True if the entry type is built by itself; sets the output subfolder.
-bool isBuildableInternal(const Entry& e, std::string& subfolder);
 
 // The build target of an entry, or nothing when neither the entry nor a main
 // file it is a sidecar of is buildable. lookup reads the main file candidates.
 std::optional<BuildTarget> resolveBuildTarget(const Entry& e, const EntryLookup& lookup);
 // Same, reading the main file candidates with getEntry().
 std::optional<BuildTarget> resolveBuildTarget(Database* db, const Entry& e);
-
-bool fileExistsAndNonEmpty(const fs::path& p);
-
-// The artifacts of `e` (a build target) in baseOutputPath ("<build root>/<hash>")
-// exist and are not empty. checkTilesSwap: a Model with an interrupted 3D Tiles
-// swap is reported incomplete.
-bool isBuildOutputComplete(const fs::path& baseOutputPath,
-                           const Entry& e,
-                           const std::string& subfolder,
-                           bool checkTilesSwap = true);
 
 // ---- Build dispatch (build_dispatch.cpp) ----------------------------------
 

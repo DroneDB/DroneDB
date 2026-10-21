@@ -3,7 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 // Build dispatch: one build attempt of an entry (lock, scratch folder, the
-// per-type builder, publish) and the buildAll/build entry points.
+// build of its EntryHandler, publish) and the buildAll/build entry points.
 
 #include "build.h"
 
@@ -11,20 +11,15 @@
 #include <fstream>
 #include <optional>
 
-#include "3d.h"
 #include "build_internal.h"
 #include "build_layout.h"
 #include "buildlock.h"
-#include "cog.h"
 #include "dbops.h"
 #include "deppath.h"
+#include "entry_handler.h"
 #include "exceptions.h"
-#include "gsplat.h"
 #include "mio.h"
-#include "mzip.h"
-#include "pointcloud.h"
 #include "raster_cache.h"
-#include "vector.h"
 
 namespace ddb {
 
@@ -77,6 +72,7 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
     }
     const Entry& target = resolved->entry;
     const std::string& subfolder = resolved->subfolder;
+    const EntryHandler& handler = *resolved->handler;
 
     if (resolved->viaDependency) {
         // We need to force the build because this dependency file could add new data
@@ -125,9 +121,6 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
         cleanupTemporary();
     };
 
-    const std::string datasetRoot = db->rootDirectory().string();
-    auto relativePath = (db->rootDirectory() / target.path).string();
-
     try {
         wasPending = fs::is_regular_file(pendFile);
         if (wasPending) {
@@ -139,14 +132,13 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
             pendingDependencyLines.assign(std::istreambuf_iterator<char>(pending), {});
         }
 
-        // Lock order is primary Model lock then tiles lock. Recovery must run
-        // before the complete Nexus return, without recursively taking tiles lock.
-        if (target.type == EntryType::Model)
-            recoverModel3DTilesSwap((baseOutputPath / Tiles3DBuildSubfolder).string());
+        // An interrupted publish (Model: 3D Tiles swap) is repaired under the
+        // primary lock, before the completeness check.
+        handler.recoverOutput(baseOutputPath);
 
         // Recheck primary artifacts after serialized recovery. Success consumes
-        // pending work even when Nexus was already complete before this attempt.
-        if (isBuildOutputComplete(baseOutputPath, target, subfolder, false) && !force) {
+        // pending work even when the output was already complete before this attempt.
+        if (handler.isComplete(baseOutputPath, false) && !force) {
             LOGD << "Build output already exists after acquiring lock, skipping: " << outputFolder;
             io::assureIsRemoved(pendFile);
             return;
@@ -158,75 +150,18 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
         ensureSufficientDiskSpace(baseOutputPath);
         io::assureFolderExists(tempFolder);
 
-        bool built = false;
+        const BuildContext context{db,
+                                   target,
+                                   db->rootDirectory() / target.path,
+                                   db->rootDirectory(),
+                                   baseOutputPath,
+                                   fs::path(outputFolder),
+                                   fs::path(tempFolder),
+                                   force};
+        handler.build(context);
 
-        if (target.type == EntryType::PointCloud) {
-            const std::vector vec = {relativePath};
-            // Defensive cleanup: remove any legacy EPT artifacts from previous builds
-            io::assureIsRemoved(baseOutputPath / LegacyEptBuildSubfolder);
-            buildCopc(vec, tempFolder);
-            built = true;
-        } else if (target.type == EntryType::GeoRaster) {
-            buildCog(relativePath, (fs::path(tempFolder) / CogFileName).string());
-            built = true;
-        } else if (target.type == EntryType::Model) {
-            buildNexus(relativePath, (fs::path(tempFolder) / NexusFileName).string(), false,
-                       datasetRoot);
-            built = true;
-
-            // Additive, best-effort OGC 3D Tiles output for the unified Giro3D viewer.
-            // Written directly to a sibling 3dtiles/ folder (buildModel3DTiles performs
-            // its own atomic temp+rename), exactly as buildVector co-produces vec/+mvt/.
-            // Non-blocking by design: if Obj2Tiles is unavailable or fails on a given
-            // mesh, the Nexus output above is still published and build completeness
-            // stays keyed on nxs/ (see isBuildOutputComplete), so the build never loops.
-            // Nothing is rethrown from here, BuildDepMissingException included: it cannot
-            // occur (buildNexus validated the same input above), and rethrowing it would
-            // discard tempFolder before model.nxz reaches nxs/.
-            // Lock order is the primary lock (held here) then the "3dtiles" lock.
-            // cleanupBuild follows the same order, so the only way to meet a busy
-            // tiles lock is a tiles build started outside a Model build (the
-            // "ddb tiles3d" command on this output folder).
-            try {
-                buildModel3DTiles(relativePath, (baseOutputPath / Tiles3DBuildSubfolder).string(), true,
-                                  std::nullopt, true, datasetRoot);
-            } catch (const BuildInProgressException& tilesEx) {
-                LOGW << "3D Tiles for " << target.path << " not generated: another tiles build holds "
-                     << buildLockPath((baseOutputPath / Tiles3DBuildSubfolder).string())
-                     << " (for example 'ddb tiles3d'): "
-                     << tilesEx.what() << ". The Nexus output is published; rebuild with force to "
-                     << "produce the tiles";
-            } catch (const std::exception& tilesEx) {
-                LOGW << "3D Tiles generation skipped for " << target.path << ": " << tilesEx.what();
-            } catch (...) {
-                LOGW << "3D Tiles generation skipped for " << target.path << " (unknown error)";
-            }
-        } else if (target.type == EntryType::Vector) {
-            // buildVector manages its own atomic write to baseOutputPath/vec
-            // and baseOutputPath/mvt; do NOT use the standard tempFolder rename.
-            // Propagate the force flag so a partial build (e.g. vec/ present
-            // but mvt/ missing) is fully rebuilt instead of being silently
-            // treated as up-to-date inside buildVector.
-            buildVector(relativePath, baseOutputPath.string(), force);
-            // built stays false on purpose to skip the standard rename below.
-        } else if (target.type == EntryType::GaussianSplat) {
-            // Runs build-lod to produce model.rad + bounds.json (+ georef.json when known).
-            // Throws a plain AppException if build-lod is unavailable: a missing tool is
-            // not a missing dependency, so the build fails instead of staying pending.
-            buildGsplat(relativePath, tempFolder);
-            built = true;
-        } else if (target.type == EntryType::Tiles3D) {
-            // Extracts the .3tz (ZIP OGC 3D Tiles) into the 3dtiles/ subfolder. Extraction
-            // is hardened against Zip-Slip / absolute paths in mzip::_extractAll. The
-            // archive is only valid when tileset.json is present at its root; the temp
-            // folder is then renamed onto build/{hash}/3dtiles/ by the shared block below.
-            zip::extractAll(relativePath, tempFolder);
-            if (!fileExistsAndNonEmpty(fs::path(tempFolder) / TilesetFileName))
-                throw AppException("Invalid .3tz archive: tileset.json not found at root");
-            built = true;
-        }
-
-        if (built) {
+        // A handler that publishes its own outputs (Vector) skips the standard rename
+        if (handler.usesTempFolder()) {
             LOGD << "Build complete, moving temp folder to " << outputFolder;
             if (fs::exists(outputFolder)) {
                 // Rasters of the previous output kept open would block this on Windows
@@ -292,16 +227,17 @@ void buildAll(Database* db, const std::string& outputPath, bool force) {
 
     LOGD << "In buildAll('" << outputPath << "')";
 
-    // List all buildable files in DB
-    auto q = db->query(
-        "SELECT path, hash, type, properties, mtime, size, depth FROM entries WHERE type = ? OR "
-        "type = ? OR type = ? OR type = ? OR type = ? OR type = ?");
-    q->bind(1, PointCloud);
-    q->bind(2, GeoRaster);
-    q->bind(3, Model);
-    q->bind(4, Vector);
-    q->bind(5, GaussianSplat);
-    q->bind(6, Tiles3D);
+    // List all entries of the buildable types in DB
+    const std::vector<EntryType> types = buildableEntryTypes();
+    if (types.empty())
+        return;
+    std::string placeholders;
+    for (size_t i = 0; i < types.size(); i++)
+        placeholders += i == 0 ? "?" : ", ?";
+    auto q = db->query("SELECT path, hash, type, properties, mtime, size, depth FROM entries WHERE type IN (" +
+                       placeholders + ")");
+    for (size_t i = 0; i < types.size(); i++)
+        q->bind(static_cast<int>(i + 1), static_cast<int>(types[i]));
 
     while (q->fetch()) {
         Entry e(q->getText(0),

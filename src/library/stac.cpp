@@ -15,7 +15,7 @@
 #include <functional>
 #include <limits>
 #include "ddb.h"
-#include "thumbs.h"
+#include "entry_handler.h"
 #include "../../vendor/base64/base64.h"
 
 namespace ddb
@@ -479,8 +479,9 @@ namespace ddb
         if (urls != nullptr)
             j["assets"][path]["href"] = urls->collectionRoot + DOWNLOAD_ENDPOINT + pathQuery;
 
+        // Rendered from the file itself or from a build artifact (COPC, RAD)
         const EntryType t = static_cast<EntryType>(entryTypeInt);
-        if (supportsThumbnails(t) || t == PointCloud || t == GaussianSplat)
+        if (entryHandler(t).thumbnailSource() != ThumbnailSource::None)
         {
             j["assets"]["thumbnail"] = {{"title", "Thumbnail"},
                                         {"type", "image/webp"},

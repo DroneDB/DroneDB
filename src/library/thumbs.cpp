@@ -14,6 +14,7 @@
 #include "copc_utils.h"
 #include "dbops.h"
 #include "embedded_preview.h"
+#include "entry_handler.h"
 #include "point_rasterizer.h"
 #include "exceptions.h"
 #include "gdal_raii.h"
@@ -48,7 +49,7 @@ fs::path getThumbFromUserCache(const fs::path& imagePath, int thumbSize, bool fo
 }
 
 bool supportsThumbnails(EntryType type) {
-    return type == Image || type == GeoImage || type == GeoRaster;
+    return entryHandler(type).thumbnailSource() == ThumbnailSource::File;
 }
 
 void generateThumbs(const std::vector<std::string>& input,

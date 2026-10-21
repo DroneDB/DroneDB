@@ -218,7 +218,7 @@ namespace ddb
      * by 3D Tiles exporters, which use `mode: 0` plus KHR_gaussian_splatting) and
      * line geometry. Only triangle geometry can produce a 3D model build artifact,
      * so everything else is reported as EntryType::Generic and is consequently not
-     * buildable (see isBuildableInternal in build.cpp).
+     * buildable (see the Model entry handler, entry_handler_model.cpp).
      *
      * Mirrors @ref identifyPly: best-effort and never throws. A missing, unreadable
      * or malformed file is reported as EntryType::Generic, so it can still be
