@@ -792,15 +792,23 @@ jobs:
             New-ItemProperty -Path $key -Name DumpCount -PropertyType DWord -Value 3 -Force | Out-Null
           }
       - name: Run unit tests
-        # In parallel, as in the Linux job
+        # In parallel, as in the Linux job. A test process still running after 240 s (ctest stops
+        # it at 300 s, the unit TIMEOUT) is dumped into ddbtest-dumps with its thread stacks in
+        # this log (scripts/ci-hang-watchdog.ps1): a hang, at exit too, explains itself.
+        timeout-minutes: 30
         env:
           _NT_SYMBOL_PATH: ${{ github.workspace }}\build\vcpkg_installed\x64-windows-release\bin
         run: |
           cd build
-          ctest -C Release -L unit -j $env:NUMBER_OF_PROCESSORS --output-on-failure --schedule-random
+          ../scripts/ci-hang-watchdog.ps1 -ProcessName ddb_unit_tests -ThresholdSeconds 240 `
+            -DumpDir "$env:RUNNER_TEMP\ddbtest-dumps" `
+            -Command { ctest -C Release -L unit -j $env:NUMBER_OF_PROCESSORS --output-on-failure --schedule-random }
           exit $LASTEXITCODE
         shell: pwsh
       - name: Run integration tests
+        # One process for every test (about 9 minutes): still running after 30 minutes, it is
+        # dumped with its thread stacks in this log, then stopped (scripts/ci-hang-watchdog.ps1)
+        timeout-minutes: 45
         env:
           DDB_DWG2DXF_PATH: ${{ github.workspace }}\build\dwg2dxf.exe
           DDB_TEST_CACHE_DIR: ${{ runner.temp }}\ddb-test-cache
@@ -808,7 +816,8 @@ jobs:
           _NT_SYMBOL_PATH: ${{ github.workspace }}\build\vcpkg_installed\x64-windows-release\bin
         run: |
           cd build
-          .\ddbtest.exe --gtest_shuffle
+          ../scripts/ci-hang-watchdog.ps1 -ProcessName ddbtest -ThresholdSeconds 1800 -Kill `
+            -DumpDir "$env:RUNNER_TEMP\ddbtest-dumps" -Command { .\ddbtest.exe --gtest_shuffle }
           $code = $LASTEXITCODE
           # The pwsh step wrapper turns a negative (NTSTATUS) exit code into 1: print the real one
           "ddbtest exit code: $code (0x{0:X8})" -f $code
