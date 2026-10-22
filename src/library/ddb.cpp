@@ -250,20 +250,9 @@ DDBErr DDBGetEffectiveConfig(char** output) {
 
 // ------------------------------------------------------------------ shutdown (XI-07)
 
-namespace {
-
-// What DDBShutdown closes once no call is in flight: what the process keeps open between calls
-void closeKeptResources() {
-    const size_t connections = DatabasePool::instance().shutdown();
-    const size_t rasters = RasterCache::instance().clear();
-    LOGD << "Shutdown: closed " << connections << " pooled index connections and " << rasters
-         << " cached rasters";
-}
-
-}  // namespace
-
+// Once no call is in flight, DDBShutdown closes what the process keeps open between calls
 DDBErr DDBShutdown(int timeoutMs) {
-    return capi::shutdown(timeoutMs, &closeKeptResources);
+    return capi::shutdown(timeoutMs, &ddb::closeKeptResources);
 }
 
 // ------------------------------------------------------------------ cancellation (XI-07)

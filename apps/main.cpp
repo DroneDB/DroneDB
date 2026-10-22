@@ -17,6 +17,7 @@
 #include "ddb.h"
 #include "dbops.h"
 #include "mio.h"
+#include "process_init.h"
 #include "crash_handlers.h"
 
 using namespace std;
@@ -55,7 +56,7 @@ bool hasParam(int argc, char *argv[], const char *param)
 }
 
 // argv in UTF-8 (mio.h, "Path encoding")
-static int ddbMain(int argc, char *argv[])
+static int runCommand(int argc, char *argv[])
 {
     memcpy(argv[0], "ddb\0", 4);
 
@@ -128,6 +129,15 @@ static int ddbMain(int argc, char *argv[])
     }
 
     return 0;
+}
+
+// The command, then the process teardown while every thread still runs (process_init.h). The
+// CLI's exit() calls (help, usage errors) skip it: no GDAL work ran before them.
+static int ddbMain(int argc, char *argv[])
+{
+    const int code = runCommand(argc, argv);
+    ddb::finalizeProcess();
+    return code;
 }
 
 #ifdef _WIN32

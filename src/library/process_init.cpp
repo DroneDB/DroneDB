@@ -18,12 +18,14 @@
 #endif
 
 #include "build_budget.h"
+#include "databasepool.h"
 #include "ddb.h"
 #include "gdal_raii.h"
 #include "hash.h"
 #include "log_forwarding.h"
 #include "logger.h"
 #include "mio.h"
+#include "raster_cache.h"
 #include "utils.h"
 
 using namespace ddb;
@@ -254,6 +256,31 @@ namespace ddb
             }
 
             ddb::utils::printVersions();
+        });
+    }
+
+    void closeKeptResources()
+    {
+        const size_t connections = DatabasePool::instance().shutdown();
+        const size_t rasters = RasterCache::instance().clear();
+        LOGD << "Closed " << connections << " pooled index connections and " << rasters << " cached rasters";
+    }
+
+    void finalizeProcess()
+    {
+        static std::once_flag finalized;
+        std::call_once(finalized, [] {
+            // The cached rasters are GDAL datasets: closed by their owner, before GDAL goes
+            try
+            {
+                closeKeptResources();
+            }
+            catch (const std::exception &e)
+            {
+                LOGW << "Cannot close what the process keeps open: " << e.what();
+            }
+            LOGD << "Finalizing GDAL: its worker threads are joined while they run";
+            GDALDestroy();
         });
     }
 }

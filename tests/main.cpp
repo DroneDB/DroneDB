@@ -73,6 +73,10 @@ int main(int argc, char **argv)
 
     std::cout << "Tests finished in " << toHumanReadableTime(duration) << std::endl;
 
+    // Every test thread is joined: GDAL's worker threads are joined now, not left to GDAL's
+    // DllMain after ExitProcess terminated them (process_init.h)
+    ddb::finalizeProcess();
+
     return res;
 
 }

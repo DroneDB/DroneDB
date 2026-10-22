@@ -57,11 +57,8 @@ namespace cmd
                       << std::endl;
             usageError();
         }
-        catch (const ddb::AppException &e)
-        {
-            std::cerr << e.what() << std::endl;
-            exit(EXIT_FAILURE);
-        }
+        // Another AppException (a failed command) reaches main, which prints it and returns
+        // EXIT_FAILURE through the process teardown (ddb::finalizeProcess)
     }
 
     void Command::printHelp(std::ostream &out, bool exitAfterPrint)
