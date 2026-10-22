@@ -25,8 +25,10 @@ namespace
     }
 
     // The console, or the host's log callback while one is registered (DQ-15, XI-08): the
-    // records go to the callback instead of stdout. The console keeps its own level (info, or
-    // verbose for a verbose process): the logger may let more through for the callback.
+    // records go to the callback instead of the console. The console keeps its own level (info,
+    // or verbose for a verbose process): the logger may let more through for the callback.
+    // The console is stderr: stdout carries the output of the commands (ddb info -f json,
+    // ddb search, ddb stamp, ...), which scripts parse, and a log record there breaks it.
     class HostAppender : public plog::IAppender
     {
     public:
@@ -42,7 +44,7 @@ namespace
         plog::Severity consoleMax() const { return consoleMax_.load(); }
 
     private:
-        plog::ConsoleAppender<plog::TxtFormatter> console_;
+        plog::ConsoleAppender<plog::TxtFormatter> console_{plog::streamStdErr};
         std::atomic<plog::Severity> consoleMax_{plog::info};
     };
 
@@ -85,8 +87,8 @@ bool is_logger_verbose(){
 }
 
 void flush_logger() {
-    // The console appender writes to std::cout; GDAL's default handler and the C stdio of the
-    // other libraries to stderr and stdout
+    // The console appender writes to std::cerr, the commands their output to std::cout; GDAL's
+    // default handler and the C stdio of the other libraries to stderr and stdout
     std::cout.flush();
     std::cerr.flush();
     std::fflush(nullptr);

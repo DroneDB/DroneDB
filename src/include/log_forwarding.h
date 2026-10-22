@@ -11,7 +11,7 @@
 
 // The host's log callback (DQ-15, XI-08): libddb's log records (plog) and GDAL's errors go to
 // one callback the host registers (DDBSetLogCallback), with the operation id the host set on
-// the thread (DDBSetThreadOperation), instead of stdout/stderr.
+// the thread (DDBSetThreadOperation), instead of stderr.
 //
 // The callback is read lock-free: an atomic pointer to an immutable registration, never freed.
 // Replacing it waits until no thread is inside the previous one, so after setCallback returns

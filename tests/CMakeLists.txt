@@ -216,16 +216,22 @@ if(BUILD_TESTING)
     # the build root, next to the Windows DLLs: the binary users run.
     set(DDB_CLI_EXE "$<TARGET_FILE:${PROJECT_NAME}cmd>")
     function(ddb_add_cli_test)
-        cmake_parse_arguments(CLI "" "NAME;EXIT;WORKING_DIRECTORY;STDOUT" "ARGS" ${ARGN})
+        cmake_parse_arguments(CLI "JSON_STDOUT" "NAME;EXIT;WORKING_DIRECTORY;STDOUT;STDERR" "ARGS" ${ARGN})
         if(NOT CLI_WORKING_DIRECTORY)
             set(CLI_WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
         endif()
-        set(CLI_STDOUT_ARG "")
+        set(CLI_CHECK_ARGS "")
         if(DEFINED CLI_STDOUT)
-            set(CLI_STDOUT_ARG "-DEXPECTED_STDOUT=${CLI_STDOUT}")
+            list(APPEND CLI_CHECK_ARGS "-DEXPECTED_STDOUT=${CLI_STDOUT}")
+        endif()
+        if(DEFINED CLI_STDERR)
+            list(APPEND CLI_CHECK_ARGS "-DEXPECTED_STDERR=${CLI_STDERR}")
+        endif()
+        if(CLI_JSON_STDOUT)
+            list(APPEND CLI_CHECK_ARGS "-DEXPECTED_JSON_STDOUT=ON")
         endif()
         add_test(NAME ${CLI_NAME}
-            COMMAND ${CMAKE_COMMAND} -DEXPECTED=${CLI_EXIT} ${CLI_STDOUT_ARG}
+            COMMAND ${CMAKE_COMMAND} -DEXPECTED=${CLI_EXIT} ${CLI_CHECK_ARGS}
                 -P "${CMAKE_CURRENT_SOURCE_DIR}/cli_expect_exit.cmake" -- "${DDB_CLI_EXE}" ${CLI_ARGS}
             WORKING_DIRECTORY "${CLI_WORKING_DIRECTORY}")
         set_tests_properties(${CLI_NAME} PROPERTIES LABELS cli TIMEOUT 120)
@@ -239,6 +245,13 @@ if(BUILD_TESTING)
     ddb_add_cli_test(NAME cli.InvalidArgsFail EXIT 1 ARGS cog)
     ddb_add_cli_test(NAME cli.HelpSucceeds EXIT 0 ARGS --help)
     ddb_add_cli_test(NAME cli.CommandHelpSucceeds EXIT 0 ARGS cog --help)
+
+    # The log goes to stderr: stdout carries only the output of the command. --debug makes
+    # every run log (process start-up, GDAL/PROJ set-up), so a record on stdout breaks the JSON.
+    set(DDB_CLI_INFO_FILE "${CMAKE_CURRENT_BINARY_DIR}/cli_info.txt")
+    file(WRITE "${DDB_CLI_INFO_FILE}" "alpha")
+    ddb_add_cli_test(NAME cli.InfoJsonStdoutIsOnlyJson EXIT 0 JSON_STDOUT STDERR "DEBUG"
+        ARGS info -f json --debug "${DDB_CLI_INFO_FILE}")
 
     # Commands that need a dataset without a remote tag: push/pull used to print the error
     # on stdout and exit 0, an unknown password subcommand printed nothing and exited 0

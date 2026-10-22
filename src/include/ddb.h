@@ -102,7 +102,8 @@ extern "C"
     /** This must be called as the very first function of every DDB process/program, before any
      * other call but the exempt accessors. A failed initialization is final: this and every
      * later call return DDBERR_EXCEPTION with its message (ABI 1.1; returned void before).
-     * @param verbose whether the program should output log messages to stdout
+     * @param verbose whether the program should output its debug and trace log messages to
+     *                stderr (the console of the log; stdout is for the output of the commands)
      * @return DDBERR_NONE on success, DDBERR_EXCEPTION when the initialization failed */
     DDB_DLL DDBErr DDBRegisterProcess(bool verbose);
 
@@ -214,7 +215,7 @@ extern "C"
      * @return DDBERR_NONE when the library is shut down;
      *         DDBERR_BUSY when calls were still running after timeoutMs: the library is shutting
      *         down (new calls are refused, the log callback is unregistered, so what those calls
-     *         still log goes to stdout, and the log is flushed) but the connections and rasters
+     *         still log goes to stderr, and the log is flushed) but the connections and rasters
      *         are left open for the calls still running; a later DDBShutdown finishes the
      *         shutdown, and at exit the exit-time checkpoint covers the idle connections;
      *         DDBERR_INVALIDARGS when called from inside a libddb call (a progress callback) or
@@ -267,8 +268,9 @@ extern "C"
 
     /* Logging (DQ-15, XI-08, ABI 1.1). A host receives libddb's log records and GDAL's messages
      * in one callback, each with the operation id it set on the thread that made the call, and
-     * maps them to its own logger. While a callback is registered the records no longer go to
-     * stdout (GDAL's to stderr); the DDB_LOG file keeps them too.
+     * maps them to its own logger. Without a callback the records go to stderr, like GDAL's
+     * messages; stdout carries only the output of the CLI commands. While a callback is
+     * registered the records no longer go to stderr; the DDB_LOG file keeps them too.
      *
      * Threading: the callback is called on the thread that logs: the thread of the call, a
      * worker of the call's parallel sections (with the call's operation id), or a thread of
@@ -281,7 +283,7 @@ extern "C"
      * Levels: a record below the process log level is not produced at all. That level is set by
      * DDBRegisterProcess: INFO, TRACE when verbose (or DDB_DEBUG/DDB_LOG is set), and the
      * minLevel of a callback registered before DDBRegisterProcess; register the callback first
-     * to receive DEBUG and TRACE records without a verbose stdout. */
+     * to receive DEBUG and TRACE records without a verbose stderr. */
 
     /** Log levels, in increasing severity (the order of .NET's LogLevel and Serilog's) */
     typedef enum DDBLogLevel
@@ -304,7 +306,7 @@ extern "C"
                                    void *userData);
 
     /** Registers the log callback for the records of minLevel and above, replacing the previous
-     * one; NULL unregisters it (the records go to stdout again). Callable before
+     * one; NULL unregisters it (the records go to stderr again). Callable before
      * DDBRegisterProcess (see the levels above). When it returns, the previous callback is not
      * called any more: it waits for the threads still inside it. DDBShutdown unregisters it;
      * at process exit libddb disables it before its exit-time handlers run.
