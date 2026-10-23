@@ -8,14 +8,18 @@
 #include <cmath>
 
 #include <memory>
+#include <optional>
 
 #include "gtest/gtest.h"
 
 #include "coordstransformer.h"
+#include "dem.h"
 #include "exceptions.h"
 #include "gdal_inc.h"
 #include "gdal_raii.h"
 #include "mathutil.h"
+#include "test.h"
+#include "testarea.h"
 
 namespace
 {
@@ -174,5 +178,106 @@ namespace
         EXPECT_FALSE(srsFromUserInput(""));
         EXPECT_FALSE(srsFromProj4(""));
         EXPECT_FALSE(srsFromProj4(nullptr));
+    }
+
+    // ---- DEM context ----------------------------------------------------------------------
+
+    fs::path makeDemFile(const fs::path &path, int bands, int epsg, std::optional<double> nodata)
+    {
+        GDALDriver *drv = GetGDALDriverManager()->GetDriverByName("GTiff");
+        std::unique_ptr<GDALDataset> ds(drv->Create(path.string().c_str(), 16, 8, bands, GDT_Float32, nullptr));
+        const double gt[6] = {500000.0, 2.0, 0.0, 4500000.0, 0.0, -2.0};
+        ds->SetGeoTransform(const_cast<double *>(gt));
+        if (epsg != 0)
+        {
+            OGRSpatialReference srs;
+            srs.importFromEPSG(epsg);
+            char *wkt = nullptr;
+            srs.exportToWkt(&wkt);
+            ds->SetProjection(wkt);
+            CPLFree(wkt);
+        }
+        if (nodata)
+            for (int b = 1; b <= bands; b++)
+                ds->GetRasterBand(b)->SetNoDataValue(*nodata);
+        return path;
+    }
+
+    TEST(Dq06Dem, openDemReadsTheContextOfTheRaster)
+    {
+        TestArea ta(TEST_NAME, true);
+        const DemContext dem = openDem(makeDemFile(ta.getPath("utm.tif"), 2, 32632, -9999.0).string(), 2);
+        EXPECT_EQ(dem.width, 16);
+        EXPECT_EQ(dem.height, 8);
+        EXPECT_EQ(dem.gt[0], 500000.0);
+        EXPECT_EQ(dem.gt[5], -2.0);
+        EXPECT_EQ(dem.band, GDALGetRasterBand(dem.handle(), 2));
+        EXPECT_TRUE(dem.nodata.has);
+        EXPECT_EQ(dem.nodata.value, -9999.0);
+        EXPECT_FALSE(dem.projection.empty());
+        ASSERT_TRUE(dem.srs);
+        EXPECT_FALSE(dem.isGeographic);
+
+        const auto toDem = dem.wgs84ToDem();
+        ASSERT_NE(toDem, nullptr);
+        double x = 9.0, y = 45.0; // the central meridian of zone 32
+        toDem->transform(&x, &y);
+        EXPECT_NEAR(x, 500000.0, 1.0);
+        const auto toWgs = dem.demToWgs84();
+        ASSERT_NE(toWgs, nullptr);
+        toWgs->transform(&x, &y);
+        EXPECT_NEAR(x, 9.0, 1e-9);
+        EXPECT_NEAR(y, 45.0, 1e-9);
+    }
+
+    TEST(Dq06Dem, aGeographicDemAndAnUnreferencedOne)
+    {
+        TestArea ta(TEST_NAME, true);
+        const DemContext geographic = openDem(makeDemFile(ta.getPath("etrs89.tif"), 1, 4258, std::nullopt).string());
+        EXPECT_TRUE(geographic.isGeographic);
+        EXPECT_FALSE(geographic.nodata.has);
+        EXPECT_EQ(geographic.band, GDALGetRasterBand(geographic.handle(), 1));
+
+        // No CRS: no transformers, map coordinates are WGS84
+        const DemContext bare = openDem(makeDemFile(ta.getPath("bare.tif"), 1, 0, std::nullopt).string());
+        EXPECT_FALSE(bare.srs);
+        EXPECT_FALSE(bare.isGeographic);
+        EXPECT_EQ(bare.projection, "");
+        EXPECT_EQ(bare.wgs84ToDem(), nullptr);
+        EXPECT_EQ(bare.demToWgs84(), nullptr);
+    }
+
+    TEST(Dq06Dem, openDemErrors)
+    {
+        TestArea ta(TEST_NAME, true);
+        const std::string missing = ta.getPath("missing.tif").string();
+        try
+        {
+            openDem(missing);
+            FAIL();
+        }
+        catch (const GDALException &e)
+        {
+            EXPECT_EQ(std::string(e.what()), "Cannot open raster: " + missing);
+        }
+
+        const fs::path plain = ta.getPath("plain.tif");
+        {
+            GDALDriver *drv = GetGDALDriverManager()->GetDriverByName("GTiff");
+            std::unique_ptr<GDALDataset> ds(drv->Create(plain.string().c_str(), 4, 4, 1, GDT_Byte, nullptr));
+        }
+        try
+        {
+            openDem(plain.string());
+            FAIL();
+        }
+        catch (const GDALException &e)
+        {
+            EXPECT_EQ(std::string(e.what()), "Raster has no geotransform: " + plain.string());
+        }
+
+        const std::string ok = makeDemFile(ta.getPath("ok.tif"), 1, 32632, std::nullopt).string();
+        EXPECT_THROW(openDem(ok, 0), InvalidArgsException);
+        EXPECT_THROW(openDem(ok, 2), InvalidArgsException);
     }
 }

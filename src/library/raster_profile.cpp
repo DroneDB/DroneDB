@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "raster_profile.h"
+#include "dem.h"
 #include "json.h"
 #include "mathutil.h"
 #include "raster_analysis.h"
@@ -84,35 +85,21 @@ std::string getRasterProfileJson(const std::string &filePath,
         throw InvalidArgsException("LineString must have at least 2 points");
 
     // --- Open raster and inspect metadata ---
-    const auto dataset = adoptDataset(GDALOpen(filePath.c_str(), GA_ReadOnly));
-    if (!dataset)
-        throw AppException("Cannot open raster: " + filePath);
-    GDALDatasetH hDs = datasetHandle(dataset);
-
-    double gt[6];
-    if (GDALGetGeoTransform(hDs, gt) != CE_None)
-        throw AppException("Raster has no geotransform: " + filePath);
+    const DemContext dem = openDem(filePath);
+    const double *gt = dem.gt;
 
     double invGt[6];
     if (!GDALInvGeoTransform(gt, invGt))
         throw AppException("Cannot invert geotransform");
 
-    const int rasterW = GDALGetRasterXSize(hDs);
-    const int rasterH = GDALGetRasterYSize(hDs);
-    if (GDALGetRasterCount(hDs) < 1)
-        throw AppException("Raster has no bands");
+    const int rasterW = dem.width;
+    const int rasterH = dem.height;
 
-    GDALRasterBandH hBand = GDALGetRasterBand(hDs, 1);
+    GDALRasterBandH hBand = dem.band;
     const GDALDataType dt = GDALGetRasterDataType(hBand);
 
     const char *unitCStr = GDALGetRasterUnitType(hBand);
     std::string unit = unitCStr ? unitCStr : "";
-
-    int hasNoData = 0;
-    const double noData = GDALGetRasterNoDataValue(hBand, &hasNoData);
-
-    const char *projRef = GDALGetProjectionRef(hDs);
-    const std::string projection = projRef ? projRef : "";
 
     const bool isThermal = detectIsThermalProfile(filePath);
     ThermalCalibration cal;
@@ -122,15 +109,7 @@ std::string getRasterProfileJson(const std::string &filePath,
     if (unit.empty() && isThermal) unit = "\xC2\xB0\x43"; // UTF-8 "°C"
 
     // --- Setup coordinate transforms (WGS84 <-> raster CRS) ---
-    const SrsPtr wgs84 = srsFromEpsg(4326);
-
-    const SrsPtr rasterSrs = srsFromWkt(projection.c_str());
-    const bool rasterIsGeographic = rasterSrs && OSRIsGeographic(rasterSrs.get()) != 0;
-
-    CoordTransformPtr wgsToRaster;
-    if (rasterSrs) {
-        wgsToRaster.reset(OCTNewCoordinateTransformation(wgs84.get(), rasterSrs.get()));
-    }
+    const auto wgsToRaster = dem.wgs84ToDem();
 
     // --- Transform vertices WGS84 -> raster map coords ---
     std::vector<double> mapX(nVertices);
@@ -139,7 +118,7 @@ std::string getRasterProfileJson(const std::string &filePath,
         double mx = line->getX(i); // lon
         double my = line->getY(i); // lat
         if (wgsToRaster) {
-            if (!OCTTransform(wgsToRaster.get(), 1, &mx, &my, nullptr))
+            if (!wgsToRaster->tryTransform(1, &mx, &my))
                 throw AppException("Cannot transform profile vertex to raster CRS");
         }
         mapX[i] = mx;
@@ -151,7 +130,7 @@ std::string getRasterProfileJson(const std::string &filePath,
     double totalLengthMeters = 0.0;
     for (int i = 0; i < nVertices - 1; i++) {
         double len;
-        if (!rasterSrs || rasterIsGeographic) {
+        if (!dem.srs || dem.isGeographic) {
             len = haversineMeters(line->getX(i), line->getY(i),
                                   line->getX(i + 1), line->getY(i + 1));
         } else {
@@ -170,7 +149,7 @@ std::string getRasterProfileJson(const std::string &filePath,
     // --- Value sampling helper ---
     auto isNoDataValue = [&](double v) {
         if (!std::isfinite(v)) return true;
-        return hasNoData && std::abs(v - noData) < 1e-6;
+        return dem.nodata.has && std::abs(v - dem.nodata.value) < 1e-6;
     };
 
     auto applyThermal = [&](double v) -> double {

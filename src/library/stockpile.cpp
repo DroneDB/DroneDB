@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "stockpile.h"
+#include "dem.h"
 #include "mathutil.h"
 #include "exceptions.h"
 #include "gdal_raii.h"
@@ -217,37 +218,16 @@ std::string detectStockpileJson(const std::string &rasterPath,
          << " r=" << radiusMeters << " s=" << sensitivity;
 
     // --- Open raster ---
-    const auto dataset = adoptDataset(GDALOpen(rasterPath.c_str(), GA_ReadOnly));
-    if (!dataset) throw AppException("Cannot open raster: " + rasterPath);
-    GDALDatasetH hDs = datasetHandle(dataset);
+    const DemContext dem = openDem(rasterPath);
+    const double *gt = dem.gt;
+    const int rasterW = dem.width;
+    const int rasterH = dem.height;
+    GDALRasterBandH hBand = dem.band;
 
-    double gt[6];
-    if (GDALGetGeoTransform(hDs, gt) != CE_None)
-        throw AppException("Raster has no geotransform: " + rasterPath);
-
-    const int rasterW = GDALGetRasterXSize(hDs);
-    const int rasterH = GDALGetRasterYSize(hDs);
-    if (GDALGetRasterCount(hDs) < 1)
-        throw AppException("Raster has no bands");
-
-    GDALRasterBandH hBand = GDALGetRasterBand(hDs, 1);
-    int hasNoData = 0;
-    const double noData = GDALGetRasterNoDataValue(hBand, &hasNoData);
-    const char *projRef = GDALGetProjectionRef(hDs);
-    const std::string projection = projRef ? projRef : "";
-
-    // --- CRS setup (WGS84 <-> raster, WGS84 <-> raster) ---
-    const SrsPtr wgs84 = srsFromEpsg(4326);
-
-    const SrsPtr rasterSrs = srsFromWkt(projection.c_str());
-    const bool rasterIsGeographic = rasterSrs && OSRIsGeographic(rasterSrs.get()) != 0;
-
-    // Click coordinates in raster CRS.
+    // --- Click coordinates in raster CRS ---
     double clickX = lon, clickY = lat;
-    if (rasterSrs) {
-        const CoordTransformPtr wgsToRaster(
-            OCTNewCoordinateTransformation(wgs84.get(), rasterSrs.get()));
-        if (!wgsToRaster || !OCTTransform(wgsToRaster.get(), 1, &clickX, &clickY, nullptr))
+    if (const auto wgsToRaster = dem.wgs84ToDem()) {
+        if (!wgsToRaster->tryTransform(1, &clickX, &clickY))
             throw AppException("Cannot project click coordinates into raster CRS");
     }
 
@@ -267,7 +247,7 @@ std::string detectStockpileJson(const std::string &rasterPath,
     // already in meters; for geographic CRS we approximate using lat.
     double metersPerPixelX = std::fabs(gt[1]);
     double metersPerPixelY = std::fabs(gt[5]);
-    if (rasterIsGeographic || !rasterSrs) {
+    if (dem.isGeographic || !dem.srs) {
         const double mPerDeg = 111320.0; // good-enough WGS84 approximation
         metersPerPixelX = std::fabs(gt[1]) * mPerDeg * std::cos(lat * ddb::kDegToRad);
         metersPerPixelY = std::fabs(gt[5]) * mPerDeg;
@@ -293,7 +273,7 @@ std::string detectStockpileJson(const std::string &rasterPath,
 
     const auto isValid = [&](float v) {
         if (!std::isfinite(v)) return false;
-        if (hasNoData && std::fabs(static_cast<double>(v) - noData) < 1e-9) return false;
+        if (dem.nodata.has && std::fabs(static_cast<double>(v) - dem.nodata.value) < 1e-9) return false;
         return true;
     };
 
@@ -397,14 +377,10 @@ std::string detectStockpileJson(const std::string &rasterPath,
     // Back to WGS84 for GeoJSON output.
     std::vector<std::pair<double, double>> ring;
     ring.reserve(simplified.size());
-    if (rasterSrs) {
-        const CoordTransformPtr rasterToWgs(
-            OCTNewCoordinateTransformation(rasterSrs.get(), wgs84.get()));
-        if (!rasterToWgs)
-            throw AppException("Cannot build transform to WGS84");
+    if (const auto rasterToWgs = dem.demToWgs84()) {
         for (auto &p : simplified) {
             double x = p.first, y = p.second;
-            if (!OCTTransform(rasterToWgs.get(), 1, &x, &y, nullptr))
+            if (!rasterToWgs->tryTransform(1, &x, &y))
                 throw AppException("Cannot transform contour to WGS84");
             ring.push_back({x, y}); // lon, lat (traditional GIS order)
         }
@@ -547,35 +523,16 @@ std::string detectAllStockpilesJson(const std::string &rasterPath,
          << " maxResults=" << maxResults;
 
     // --- Open raster ---
-    const auto dataset = adoptDataset(GDALOpen(rasterPath.c_str(), GA_ReadOnly));
-    if (!dataset) throw AppException("Cannot open raster: " + rasterPath);
-    GDALDatasetH hDs = datasetHandle(dataset);
-
-    double gt[6];
-    if (GDALGetGeoTransform(hDs, gt) != CE_None)
-        throw AppException("Raster has no geotransform: " + rasterPath);
-
-    const int rasterW = GDALGetRasterXSize(hDs);
-    const int rasterH = GDALGetRasterYSize(hDs);
-    if (GDALGetRasterCount(hDs) < 1)
-        throw AppException("Raster has no bands");
-
-    GDALRasterBandH hBand = GDALGetRasterBand(hDs, 1);
-    int hasNoData = 0;
-    const double noData = GDALGetRasterNoDataValue(hBand, &hasNoData);
-    const char *projRef = GDALGetProjectionRef(hDs);
-    const std::string projection = projRef ? projRef : "";
-
-    // --- CRS setup ---
-    const SrsPtr wgs84 = srsFromEpsg(4326);
-
-    const SrsPtr rasterSrs = srsFromWkt(projection.c_str());
-    const bool rasterIsGeographic = rasterSrs && OSRIsGeographic(rasterSrs.get()) != 0;
+    const DemContext dem = openDem(rasterPath);
+    const double *gt = dem.gt;
+    const int rasterW = dem.width;
+    const int rasterH = dem.height;
+    GDALRasterBandH hBand = dem.band;
 
     // Approx pixel size in meters (for area/volume).
     double metersPerPixelX = std::fabs(gt[1]);
     double metersPerPixelY = std::fabs(gt[5]);
-    if (rasterIsGeographic || !rasterSrs) {
+    if (dem.isGeographic || !dem.srs) {
         // Use raster center latitude for the cosine factor.
         const double centerY = gt[3] + (rasterH / 2.0) * gt[5];
         const double mPerDeg = 111320.0;
@@ -611,7 +568,7 @@ std::string detectAllStockpilesJson(const std::string &rasterPath,
 
     const auto isValid = [&](float v) {
         if (!std::isfinite(v)) return false;
-        if (hasNoData && std::fabs(static_cast<double>(v) - noData) < 1e-9) return false;
+        if (dem.nodata.has && std::fabs(static_cast<double>(v) - dem.nodata.value) < 1e-9) return false;
         return true;
     };
 
@@ -712,12 +669,7 @@ std::string detectAllStockpilesJson(const std::string &rasterPath,
     }
 
     // --- Build coord transformer raster->WGS84 (reused for all components) ---
-    CoordTransformPtr rasterToWgs;
-    if (rasterSrs) {
-        rasterToWgs.reset(OCTNewCoordinateTransformation(rasterSrs.get(), wgs84.get()));
-        if (!rasterToWgs)
-            throw AppException("Cannot build transform to WGS84");
-    }
+    const auto rasterToWgs = dem.demToWgs84();
 
     auto pixelToMap = [&](double px, double py, double &mx, double &my) {
         // px, py are in the downsampled grid; convert to original raster coords.
@@ -730,7 +682,7 @@ std::string detectAllStockpilesJson(const std::string &rasterPath,
     auto mapToWgs = [&](double mx, double my, double &lon, double &lat) {
         lon = mx; lat = my;
         if (rasterToWgs) {
-            if (!OCTTransform(rasterToWgs.get(), 1, &lon, &lat, nullptr))
+            if (!rasterToWgs->tryTransform(1, &lon, &lat))
                 throw AppException("Cannot transform to WGS84");
         }
     };

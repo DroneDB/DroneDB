@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "volume.h"
+#include "dem.h"
 #include "stringutil.h"
 #include "mathutil.h"
 #include "exceptions.h"
@@ -125,29 +126,14 @@ std::string calculateVolumeJson(const std::string &rasterPath,
         throw InvalidArgsException("Volume geometry must be a Polygon or MultiPolygon");
 
     // --- Open raster ---
-    const auto dataset = adoptDataset(GDALOpen(rasterPath.c_str(), GA_ReadOnly));
-    if (!dataset) throw AppException("Cannot open raster: " + rasterPath);
-    GDALDatasetH hDs = datasetHandle(dataset);
-
-    double gt[6];
-    if (GDALGetGeoTransform(hDs, gt) != CE_None)
-        throw AppException("Raster has no geotransform: " + rasterPath);
-
-    const int rasterW = GDALGetRasterXSize(hDs);
-    const int rasterH = GDALGetRasterYSize(hDs);
-    if (GDALGetRasterCount(hDs) < 1)
-        throw AppException("Raster has no bands");
-
-    GDALRasterBandH hBand = GDALGetRasterBand(hDs, 1);
-    int hasNoData = 0;
-    const double noData = GDALGetRasterNoDataValue(hBand, &hasNoData);
-
-    const char *projRef = GDALGetProjectionRef(hDs);
-    const std::string projection = projRef ? projRef : "";
+    const DemContext dem = openDem(rasterPath);
+    const double *gt = dem.gt;
+    const int rasterW = dem.width;
+    const int rasterH = dem.height;
+    GDALRasterBandH hBand = dem.band;
+    const std::string &projection = dem.projection;
 
     // --- Reproject polygon WGS84 -> raster CRS (if needed) ---
-    const SrsPtr wgs84 = srsFromEpsg(4326);
-
     // Capture polygon centroid latitude in WGS84 *before* any reprojection
     // so we can convert pixel sizes to meters when the raster CRS is
     // geographic (e.g. EPSG:4326).
@@ -158,16 +144,9 @@ std::string calculateVolumeJson(const std::string &rasterPath,
         polyCentroidLat = 0.5 * (wgsEnv.MinY + wgsEnv.MaxY);
     }
 
-    const SrsPtr rasterSrs = srsFromWkt(projection.c_str());
-    const bool rasterIsGeographic = rasterSrs && OSRIsGeographic(rasterSrs.get()) != 0;
-
-    if (rasterSrs) {
-        const CoordTransformPtr wgsToRaster(
-            OCTNewCoordinateTransformation(wgs84.get(), rasterSrs.get()));
-        if (!wgsToRaster)
-            throw AppException("Cannot create WGS84 -> raster coordinate transformation");
+    if (const auto wgsToRaster = dem.wgs84ToDem()) {
         if (OGR_G_Transform(OGRGeometry::ToHandle(geom.get()),
-                            wgsToRaster.get()) != OGRERR_NONE)
+                            OGRCoordinateTransformation::ToHandle(wgsToRaster->get())) != OGRERR_NONE)
             throw AppException("Cannot reproject polygon into raster CRS");
     }
 
@@ -245,7 +224,7 @@ std::string calculateVolumeJson(const std::string &rasterPath,
 
     const auto isValid = [&](float v) {
         if (!std::isfinite(v)) return false;
-        if (hasNoData && std::fabs(static_cast<double>(v) - noData) < 1e-9) return false;
+        if (dem.nodata.has && std::fabs(static_cast<double>(v) - dem.nodata.value) < 1e-9) return false;
         return true;
     };
 
@@ -333,7 +312,7 @@ std::string calculateVolumeJson(const std::string &rasterPath,
     // documented m^2 / m^3 outputs would be off by ~10^10.
     double pixelWidth = std::fabs(gt[1]);
     double pixelHeight = std::fabs(gt[5]);
-    if (rasterIsGeographic || !rasterSrs) {
+    if (dem.isGeographic || !dem.srs) {
         const double mPerDeg = 111320.0; // good-enough WGS84 approximation
         pixelWidth = std::fabs(gt[1]) * mPerDeg * std::cos(polyCentroidLat * ddb::kDegToRad);
         pixelHeight = std::fabs(gt[5]) * mPerDeg;

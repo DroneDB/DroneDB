@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "contour.h"
+#include "dem.h"
 #include "exceptions.h"
 #include "gdal_raii.h"
 #include "json.h"
@@ -109,22 +110,8 @@ std::string generateContoursJson(const std::string &rasterPath,
         throw InvalidArgsException("'simplifyTolerance' must be >= 0");
 
     // --- Open raster ------------------------------------------------------
-    const auto dataset = adoptDataset(GDALOpen(rasterPath.c_str(), GA_ReadOnly));
-    if (!dataset)
-        throw GDALException("Cannot open raster: " + rasterPath);
-    GDALDatasetH hDs = datasetHandle(dataset);
-
-    double gt[6];
-    if (GDALGetGeoTransform(hDs, gt) != CE_None)
-        throw GDALException("Raster has no geotransform: " + rasterPath);
-
-    const int bandCount = GDALGetRasterCount(hDs);
-    if (options.bandIndex < 1 || options.bandIndex > bandCount)
-        throw InvalidArgsException("Invalid band index: " +
-                                   std::to_string(options.bandIndex));
-
-    GDALRasterBandH hBand = GDALGetRasterBand(hDs, options.bandIndex);
-    if (!hBand) throw GDALException("Cannot access raster band");
+    const DemContext dem = openDem(rasterPath, options.bandIndex);
+    GDALRasterBandH hBand = dem.band;
 
     const char *unitCStr = GDALGetRasterUnitType(hBand);
     const std::string unit = unitCStr ? unitCStr : "";
@@ -139,8 +126,7 @@ std::string generateContoursJson(const std::string &rasterPath,
     const double interval = resolveInterval(options, bMin, bMax);
 
     // --- Build in-memory OGR layer to collect contours --------------------
-    const SrsPtr rasterSrs = srsFromWkt(GDALGetProjectionRef(hDs));
-    const bool rasterHasSrs = rasterSrs != nullptr;
+    const bool rasterHasSrs = dem.srs != nullptr;
 
     GDALDriverH memDrv = GDALGetDriverByName("Memory");
     if (!memDrv) throw GDALException("Memory OGR driver not available");
@@ -151,7 +137,7 @@ std::string generateContoursJson(const std::string &rasterPath,
     GDALDatasetH hMemDs = datasetHandle(memDs);
 
     OGRLayerH hLayer = GDALDatasetCreateLayer(hMemDs, "contours",
-                                              rasterHasSrs ? rasterSrs.get() : nullptr,
+                                              rasterHasSrs ? dem.srs.get() : nullptr,
                                               wkbLineString, nullptr);
     if (!hLayer) throw GDALException("Cannot create contour layer");
 
@@ -167,16 +153,14 @@ std::string generateContoursJson(const std::string &rasterPath,
     OGR_Fld_Destroy(fElev);
 
     // --- Run GDAL contour generator --------------------------------------
-    int hasNoData = FALSE;
-    const double noData = GDALGetRasterNoDataValue(hBand, &hasNoData);
 
     CPLStringList opts;
     opts.SetNameValue("ELEV_FIELD", std::to_string(elevFieldIdx).c_str());
     opts.SetNameValue("ID_FIELD", std::to_string(idFieldIdx).c_str());
     opts.SetNameValue("LEVEL_INTERVAL", std::to_string(interval).c_str());
     opts.SetNameValue("LEVEL_BASE", std::to_string(options.baseOffset).c_str());
-    if (hasNoData) {
-        opts.SetNameValue("NODATA", std::to_string(noData).c_str());
+    if (dem.nodata.has) {
+        opts.SetNameValue("NODATA", std::to_string(dem.nodata.value).c_str());
     }
 
     const CPLErr cErr = GDALContourGenerateEx(hBand, hLayer, opts.List(),
@@ -186,14 +170,7 @@ std::string generateContoursJson(const std::string &rasterPath,
         throw GDALException("GDAL contour generation failed");
 
     // --- Build coordinate transform back to WGS84 -------------------------
-    const SrsPtr wgs84 = srsFromEpsg(4326);
-
-    CoordTransformPtr rasterToWgs;
-    if (rasterHasSrs) {
-        rasterToWgs.reset(OCTNewCoordinateTransformation(rasterSrs.get(), wgs84.get()));
-        if (!rasterToWgs)
-            throw GDALException("Cannot build raster -> WGS84 transform");
-    }
+    const auto rasterToWgs = dem.demToWgs84();
 
     // --- Iterate features, simplify, transform, serialize -----------------
     json features = json::array();
@@ -233,8 +210,7 @@ std::string generateContoursJson(const std::string &rasterPath,
         if (rasterToWgs) {
             ownedTransformed.reset(workGeom->clone());
             if (!ownedTransformed) continue;
-            if (ownedTransformed->transform(OGRCoordinateTransformation::FromHandle(
-                    rasterToWgs.get())) != OGRERR_NONE) {
+            if (ownedTransformed->transform(rasterToWgs->get()) != OGRERR_NONE) {
                 continue;
             }
             workGeom = ownedTransformed.get();
