@@ -417,64 +417,12 @@ jobs:
             build/package/*.deb
           retention-days: 90
 
-  # XI-09 cross-repository contract: Registry's libddb adapter suite (Registry.Adapters.Ddb.Test,
-  # which P/Invokes every export Registry uses and fails on a missing one) against the .deb that
-  # build_ubuntu just tested, installed as the Registry image installs it. Registry is checked out
-  # at the commit pinned in ci/registry-ref: bump it when Registry's adapter changes. Only the
-  # adapter test project runs; it does not build Registry.Web, so no Hub/npm is needed.
-  # Required for v* tags: release_assets and the Docker push wait for it.
-  registry_contract:
-    name: Registry contract (Registry.Adapters.Ddb.Test on the .deb)
-    needs: build_ubuntu
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - name: Read the pinned Registry commit (ci/registry-ref)
-        run: |
-          ref=$(head -n 1 ci/registry-ref)
-          [[ "$ref" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::ci/registry-ref must hold a full commit SHA, found '$ref'"; exit 1; }
-          echo "REGISTRY_REF=$ref" >> "$GITHUB_ENV"
-      - name: Get Debian package
-        uses: actions/download-artifact@v4
-        with:
-          name: Linux-Binaries
-          path: ${{ runner.temp }}/ddb-package
-      - name: Install Debian package
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq ${{ runner.temp }}/ddb-package/ddb_*.deb
-          ddb --version
-      - name: Checkout Registry
-        uses: actions/checkout@v4
-        with:
-          repository: DroneDB/Registry
-          ref: ${{ env.REGISTRY_REF }}
-          path: registry
-      - name: Setup .NET (registry/global.json)
-        uses: actions/setup-dotnet@v4
-        with:
-          global-json-file: registry/global.json
-      - name: Cache Registry test downloads
-        # The suite downloads DroneDB/test_data files once into the temp folder (TMPDIR below)
-        uses: actions/cache@v4
-        with:
-          path: ${{ runner.temp }}/registry-tmp
-          key: registry-test-data-${{ hashFiles('ci/registry-ref') }}
-          restore-keys: registry-test-data-
-      - name: Run Registry.Adapters.Ddb.Test
-        working-directory: registry
-        env:
-          TMPDIR: ${{ runner.temp }}/registry-tmp
-        run: |
-          mkdir -p "$TMPDIR"
-          dotnet test Registry.Adapters.Ddb.Test/Registry.Adapters.Ddb.Test.csproj -c Release
-
   # Every release asset (the .deb, the Windows zip, the LibreDWG source, ddb.h, ddb.symbols and
-  # SHA256SUMS) goes to the release only after the Registry contract passed on the .deb: the build
-  # jobs upload artifacts only, this job is the one that writes to the release.
+  # SHA256SUMS) goes to the release only after the build jobs passed: they upload artifacts only,
+  # this job is the one that writes to the release.
   release_assets:
     name: Upload Release Assets
-    needs: [build_ubuntu, build_windows, build_libredwg, registry_contract]
+    needs: [build_ubuntu, build_windows, build_libredwg]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-24.04
     steps:
@@ -615,12 +563,9 @@ jobs:
 
   # The dronedb/dronedb image installs the .deb that build_ubuntu just tested, so the
   # binary that ships is the binary that was tested and nothing is compiled twice.
-  # On v* tags it also waits for the Registry contract (registry_contract) to pass; on other
-  # refs a contract failure does not stop it.
   docker_image:
     name: Docker Image
-    needs: [build_ubuntu, registry_contract]
-    if: ${{ !cancelled() && needs.build_ubuntu.result == 'success' && (github.ref_type != 'tag' || needs.registry_contract.result == 'success') }}
+    needs: build_ubuntu
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4

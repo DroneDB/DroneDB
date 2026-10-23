@@ -5,6 +5,11 @@ Schema each. They freeze today's field names, types and values: any unplanned ch
 these outputs fails a DroneDB test, and Registry's contract tests (RQ-04, `FakeDdbWrapper`) read
 the same files.
 
+Registry validates the contract on its side, against a libddb build (its `Registry.Adapters.Ddb.Test`
+suite runs against the pinned libddb in Registry's CI, and a nightly job runs it against the
+latest DroneDB artifacts). DroneDB's CI does not run Registry: it tests its own documented output,
+which is what the tests of this folder do.
+
 The fixtures record the outputs **as they are today** (libddb 1.12.2, ABI 1.0). Nothing was
 renamed or retyped for them, including the mixed casing:
 
@@ -287,11 +292,4 @@ Registry has to adopt first.
   (`lastAttempt` + the 60 s backoff of `buildPending`), integer Unix seconds, null when
   `lastAttempt` is. Additive: no other field changed. In the two pending fixtures it is a volatile
   key next to `lastAttempt`. Registry's exact-JSON adapter tests of these outputs
-  (`Abi11ContractTests`) need the field before `ci/registry-ref` moves past them.
-
-## Cross-repository CI
-
-The `registry_contract` job of `.github/workflows/c-cpp.yml` installs the `.deb` that
-`build_ubuntu` tested, checks out DroneDB/Registry at the commit in `ci/registry-ref` and runs
-`Registry.Adapters.Ddb.Test`, which fails on a missing export. On `v*` tags the release upload
-of the `.deb` (`release_assets`) and the Docker image wait for it.
+  (`Abi11ContractTests`) need the field before Registry moves to a libddb build that has it.
