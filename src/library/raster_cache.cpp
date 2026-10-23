@@ -20,12 +20,6 @@ namespace ddb
 {
     namespace
     {
-        // A size or count from the environment (0 allowed: it turns the cache off), or the fallback
-        size_t envSize(const char *name, size_t fallback)
-        {
-            return static_cast<size_t>(env::readIntegerOrWarn(name, 0, UINT32_MAX).value_or(fallback));
-        }
-
         // Idle instances are closed at most this often when they expire
         constexpr std::chrono::seconds PurgeInterval{5};
 
@@ -57,10 +51,10 @@ namespace ddb
 
     RasterCache::RasterCache() : lastPurge_(std::chrono::steady_clock::now())
     {
-        options_.perRaster = envSize("DDB_RASTER_CACHE_SIZE", options_.perRaster);
-        options_.total = envSize("DDB_RASTER_CACHE_MAX", options_.total);
+        options_.perRaster = env::readSize("DDB_RASTER_CACHE_SIZE", options_.perRaster);
+        options_.total = env::readSize("DDB_RASTER_CACHE_MAX", options_.total);
         options_.idleTimeout = std::chrono::seconds(
-            envSize("DDB_RASTER_CACHE_IDLE_SECONDS", static_cast<size_t>(options_.idleTimeout.count())));
+            env::readSize("DDB_RASTER_CACHE_IDLE_SECONDS", static_cast<size_t>(options_.idleTimeout.count())));
     }
 
     RasterCache::Lease<Tiler> RasterCache::acquireTiler(const TilerKey &key, const TilerFactory &create)

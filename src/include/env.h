@@ -10,6 +10,7 @@
 // "1e3" are invalid, where std::stoul read 12, a huge number, 0 and 1). An empty variable is
 // unset.
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -47,6 +48,12 @@ DDB_DLL Integer readPositiveInt(const char *name, uint64_t max = kDefaultMaxInte
 // The value of the variable when it is a valid integer from min to max. An invalid value is
 // logged at warning level ("Ignoring invalid NAME=...") and treated as unset: nothing.
 DDB_DLL std::optional<uint64_t> readIntegerOrWarn(const char *name, uint64_t min, uint64_t max);
+
+// A size, count or number of seconds from 0 (a pool or cache turned off) to UINT32_MAX: the value
+// of the variable, or `fallback` when it is unset or invalid (the warning is logged).
+inline size_t readSize(const char *name, size_t fallback) {
+    return static_cast<size_t>(readIntegerOrWarn(name, 0, UINT32_MAX).value_or(fallback));
+}
 
 }  // namespace ddb::env
 

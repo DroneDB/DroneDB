@@ -156,6 +156,26 @@ TEST(Dq07Env, readIntegerTellsUnsetFromInvalid) {
     EXPECT_EQ(env::readIntegerOrWarn(name, 0, 10), 0u);
 }
 
+TEST(Dq07Env, readSizeIsTheSettingOfThePoolsAndCaches) {
+    const char *name = "DDB_DQ07_TEST_SIZE";
+    EnvVarGuard guard(name);
+
+    unsetEnv(name);
+    EXPECT_EQ(env::readSize(name, 7), 7u);
+
+    setEnv(name, "0");  // allowed: it turns a pool or a cache off
+    EXPECT_EQ(env::readSize(name, 7), 0u);
+
+    setEnv(name, "12");
+    EXPECT_EQ(env::readSize(name, 7), 12u);
+
+    // std::stoul read 12, a huge number, 0 and 1 from these
+    for (const char *bad : {"12abc", "-1", "0x10", "1e3", "4294967296", ""}) {
+        setEnv(name, bad);
+        EXPECT_EQ(env::readSize(name, 7), 7u) << bad;
+    }
+}
+
 // ------------------------------------------------------------------------ tools::findTool
 
 TEST(Dq07Locator, overrideIsAuthoritativeAndPartOfTheCacheKey) {

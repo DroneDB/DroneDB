@@ -7,6 +7,7 @@
 #include <cstdlib>
 
 #include "database.h"
+#include "env.h"
 #include "fileversion.h"
 #include "logger.h"
 #include "mio.h"
@@ -15,22 +16,6 @@ namespace ddb
 {
     namespace
     {
-        size_t envSize(const char *name, size_t fallback)
-        {
-            const char *value = std::getenv(name);
-            if (value == nullptr || *value == '\0')
-                return fallback;
-            try
-            {
-                return static_cast<size_t>(std::stoul(value));
-            }
-            catch (const std::exception &)
-            {
-                LOGW << "Ignoring invalid " << name << "=" << value;
-                return fallback;
-            }
-        }
-
         // Idle connections are closed at most this often when they expire
         constexpr std::chrono::seconds PurgeInterval{5};
 
@@ -58,10 +43,10 @@ namespace ddb
 
     DatabasePool::DatabasePool() : lastPurge_(std::chrono::steady_clock::now())
     {
-        options_.perIndex = envSize("DDB_DB_POOL_SIZE", options_.perIndex);
-        options_.total = envSize("DDB_DB_POOL_MAX", options_.total);
+        options_.perIndex = env::readSize("DDB_DB_POOL_SIZE", options_.perIndex);
+        options_.total = env::readSize("DDB_DB_POOL_MAX", options_.total);
         options_.idleTimeout = std::chrono::seconds(
-            envSize("DDB_DB_POOL_IDLE_SECONDS", static_cast<size_t>(options_.idleTimeout.count())));
+            env::readSize("DDB_DB_POOL_IDLE_SECONDS", static_cast<size_t>(options_.idleTimeout.count())));
 
         // Idle connections keep committed changes in the WAL and are never closed (the pool
         // outlives static destruction): empty the WAL at exit, so that no host leaves frames
