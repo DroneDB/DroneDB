@@ -126,8 +126,8 @@ if(BUILD_TESTING)
         cmake_parse_arguments(T "" "LABEL;TIMEOUT" "SOURCES;LINK;SLOW;SERIAL" ${ARGN})
         add_executable(${name} ${T_SOURCES})
         ddb_msvc_release_debug_info(${name})
-        # tests/ before the library headers: tests/utils.h has the same name as
-        # src/include/utils.h, and test sources in unit/ and integration/ mean the test one
+        # tests/ before the library headers, so that a test helper header (tests/utils.h) is never
+        # shadowed by a library header of the same name
         target_include_directories(${name} BEFORE PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
         # LINK first: ddbtest must resolve symbols that libddb exports (cpr, spz) from libddb,
         # before a static archive of the same library is searched

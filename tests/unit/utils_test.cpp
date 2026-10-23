@@ -4,12 +4,10 @@
 
 #include "dbops.h"
 #include "entry_path.h"
-#include "randomutil.h"
 #include "exceptions.h"
 #include "gtest/gtest.h"
 #include "test.h"
 #include "testarea.h"
-#include "utils.h"
 
 namespace
 {
