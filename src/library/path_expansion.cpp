@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 // Turns what a caller names (files, folders, glob patterns) into the paths to index or describe.
 #include "dbops.h"
+#include "dataset_walk.h"
 
 #include "entry_path.h"
 #include "exceptions.h"
@@ -11,10 +12,6 @@
 
 #include <unordered_map>
 #include <unordered_set>
-
-#ifdef _WIN32
-#include <windows.h>  // DWORD, GetFileAttributesW
-#endif
 
 #include <glob.hpp>
 
@@ -82,39 +79,23 @@ namespace ddb
             {
                 if (recursive)
                 {
-                    try
+                    walkDataset(p, {}, [&](const fs::directory_entry &entry)
                     {
-                        for (auto i = fs::recursive_directory_iterator(p,
-                             fs::directory_options::skip_permission_denied);
-                             i != fs::recursive_directory_iterator(); ++i)
+                        const fs::path &rp = entry.path();
+
+                        // The iterator knows the type from the directory listing: no stat
+                        if (entry.is_directory() && includeDirs)
                         {
-                            fs::path rp = i->path();
-
-                            // Skip .ddb (do not recurse into it and do not record
-                            // it as an indexable directory entry).
-                            if (isReservedSegment(rp.filename())) {
-                                i.disable_recursion_pending();
-                                continue;
-                            }
-
-                            // The iterator knows the type from the directory listing: no stat
-                            if (i->is_directory() && includeDirs)
-                            {
-                                directories[io::toUtf8(rp)] = true;
-                            }
-                            else
-                            {
-                                addFile(rp);
-                            }
-
-                            if (includeDirs)
-                                addParents(rp);
+                            directories[io::toUtf8(rp)] = true;
                         }
-                    }
-                    catch (const fs::filesystem_error &e)
-                    {
-                        throw FSException(e.what());
-                    }
+                        else
+                        {
+                            addFile(rp);
+                        }
+
+                        if (includeDirs)
+                            addParents(rp);
+                    });
                 }
 
                 // The dataset root is not an entry (`ddb add .` used to index it as "")
@@ -149,7 +130,12 @@ namespace ddb
                                       bool includeDirs, int maxDepth, bool includeFiles)
     {
         std::vector<fs::path> result;
-        std::unordered_map<std::string, bool> directories;
+
+        // maxDepth: N > 0 lists N levels below a folder, -1 its children only, anything else
+        // the whole tree
+        WalkOptions options;
+        options.levels = maxDepth > 0 ? maxDepth : (maxDepth == -1 ? 1 : 0);
+        options.skipHiddenAndSystem = true;
 
         for (const auto &pathUtf8 : paths)
         {
@@ -161,47 +147,11 @@ namespace ddb
             {
                 if (fs::is_directory(p))
                 {
-                    for (auto i = fs::recursive_directory_iterator(p,
-                         fs::directory_options::skip_permission_denied);
-                         i != fs::recursive_directory_iterator(); ++i)
+                    walkDataset(p, options, [&](const fs::directory_entry &entry)
                     {
-                        fs::path rp = i->path();
-
-                        // Ignore system files on Windows
-#ifdef WIN32
-                        const DWORD attrs =
-                            GetFileAttributesW(rp.wstring().c_str());
-                        if (attrs & FILE_ATTRIBUTE_HIDDEN ||
-                            attrs & FILE_ATTRIBUTE_SYSTEM)
-                        {
-                            i.disable_recursion_pending();
-                            continue;
-                        }
-#endif
-
-                        // Skip .ddb recursion (and don't record it as an entry)
-                        if (isReservedSegment(rp.filename())) {
-                            i.disable_recursion_pending();
-                            continue;
-                        }
-
-                        // Max depth
-                        if (maxDepth > 0 && i.depth() >= (maxDepth - 1))
-                            i.disable_recursion_pending();
-                        else if (maxDepth == -1)
-                            i.disable_recursion_pending();
-
-                        if (i->is_directory())
-                        {
-                            if (includeDirs)
-                                result.push_back(rp);
-                        }
-                        else
-                        {
-                            if (includeFiles)
-                                result.push_back(rp);
-                        }
-                    }
+                        if (entry.is_directory() ? includeDirs : includeFiles)
+                            result.push_back(entry.path());
+                    });
                 }
                 else if (fs::exists(p) && includeFiles)
                 {
@@ -351,16 +301,7 @@ namespace ddb
 
                     const size_t before = result.size();
                     pushUnique(p);
-                    for (auto it = fs::recursive_directory_iterator(p,
-                         fs::directory_options::skip_permission_denied);
-                         it != fs::recursive_directory_iterator(); ++it)
-                    {
-                        if (isReservedSegment(it->path().filename())) {
-                            it.disable_recursion_pending();
-                            continue;
-                        }
-                        pushUnique(it->path());
-                    }
+                    walkDataset(p, {}, [&](const fs::directory_entry &entry) { pushUnique(entry.path()); });
                     // Only count this directory as a match if at least one
                     // entry was actually added (e.g. the directory wasn't
                     // skipped for being inside a `.ddb` folder).
