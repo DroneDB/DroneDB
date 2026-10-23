@@ -25,8 +25,8 @@ namespace cmd
             .custom_help("clone (tag|url) folder")
             .add_options()
             ("t,target", "Repository tag or full url", cxxopts::value<std::string>())
-            ("f,folder", "Target folder", cxxopts::value<std::string>()->default_value(""))
-            ("k,insecure", "Disable SSL certificate verification", cxxopts::value<bool>());
+            ("f,folder", "Target folder", cxxopts::value<std::string>()->default_value(""));
+        cmd::addInsecureOption(opts);
 
         // clang-format on
         opts.parse_positional({"target", "folder"});
@@ -42,34 +42,27 @@ namespace cmd
         return "\r\n\r\nClones a repository into a newly created directory.";
     }
 
-    void Clone::run(cxxopts::ParseResult &opts)
+    int Clone::run(cxxopts::ParseResult &opts)
     {
-        try
+        if (opts["target"].count() != 1)
         {
-            if (opts["target"].count() != 1)
-            {
-                usageError();
-                return;
-            }
-
-            const auto tag =
-                ddb::RegistryUtils::parseTag(opts["target"].as<std::string>());
-
-            const auto folderRaw = opts["folder"].as<std::string>();
-
-            const auto folder = fs::absolute(ddb::io::fromUtf8(folderRaw.length() > 0 ? folderRaw : tag.dataset));
-
-            auto sslVerify = opts["insecure"].count() == 0;
-
-            LOGD << "Normalized folder = " << ddb::io::toGenericUtf8(folder);
-
-            clone(tag, ddb::io::toGenericUtf8(folder), sslVerify);
-        }
-        catch (ddb::InvalidArgsException &e)
-        {
-            std::cerr << "Error: " << e.what() << std::endl;
             usageError();
         }
+
+        const auto tag =
+            ddb::RegistryUtils::parseTag(opts["target"].as<std::string>());
+
+        const auto folderRaw = opts["folder"].as<std::string>();
+
+        const auto folder = fs::absolute(ddb::io::fromUtf8(folderRaw.length() > 0 ? folderRaw : tag.dataset));
+
+        auto sslVerify = opts["insecure"].count() == 0;
+
+        LOGD << "Normalized folder = " << ddb::io::toGenericUtf8(folder);
+
+        clone(tag, ddb::io::toGenericUtf8(folder), sslVerify);
+
+        return EXIT_SUCCESS;
     }
 
 } // namespace cmd

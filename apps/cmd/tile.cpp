@@ -18,9 +18,10 @@ namespace cmd
     .positional_help("[args]")
     .custom_help("tile [geo.tif | image.jpg | cloud.copc.laz | https://host.com/cog.tif | https://host.com/image.jpg | https://host.com/cloud.copc.laz] [output directory]")
     .add_options()
-    ("i,input", "Path or URL to file to tile", cxxopts::value<std::string>())
-    ("o,output", "Output directory where to store tiles", cxxopts::value<std::string>()->default_value("{filename}_tiles/"))
-    ("f,format", "Output format (text|json)", cxxopts::value<std::string>()->default_value("text"))
+    ("i,input", "Path or URL to file to tile", cxxopts::value<std::string>());
+    cmd::addOutputOption(opts, "Output directory where to store tiles", "{filename}_tiles/");
+    cmd::addFormatOption(opts);
+    opts.add_options()
     ("z", "Zoom levels, either a single zoom level \"N\" or a range \"min-max\" or \"auto\" to generate all zoom levels", cxxopts::value<std::string>()->default_value("auto"))
     ("x", "Generate a single tile with the specified coordinate (XYZ, unless --tms is used). Must be used with -y", cxxopts::value<std::string>()->default_value("auto"))
     ("y", "Generate a single tile with the specified coordinate (XYZ, unless --tms is used). Must be used with -x", cxxopts::value<std::string>()->default_value("auto"))
@@ -35,7 +36,7 @@ namespace cmd
         return "Generate tiles for GeoTIFFs, GeoImages and COPC point clouds";
     }
 
-    void Tile::run(cxxopts::ParseResult &opts)
+    int Tile::run(cxxopts::ParseResult &opts)
     {
         if (!opts.count("input"))
         {
@@ -58,6 +59,7 @@ namespace cmd
         auto tileSize = opts["size"].as<int>();
 
         ddb::TilerHelper::runTiler(ddb::io::fromUtf8(input), ddb::io::fromUtf8(output), tileSize, tms, std::cout, format, z, x, y);
+        return EXIT_SUCCESS;
     }
 
 }

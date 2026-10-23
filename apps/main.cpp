@@ -3,11 +3,13 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <string>
 #include <vector>
 #include "gdal_inc.h"
 
+#include "cmd/include/cli.h"
 #include "cmd/include/cmdlist.h"
 #include "cmd/include/gendocs.h"
 #include "logger.h"
@@ -23,29 +25,30 @@
 using namespace std;
 using namespace ddb;
 
-// Explicit help (-h/--help) goes to stdout and exits 0; a missing or unknown command is a
-// usage error: stderr and EXIT_FAILURE.
-[[noreturn]] void printHelp(char *argv[], std::ostream &out = std::cout, int exitCode = EXIT_SUCCESS)
+// The list of commands: explicit help (-h/--help) goes to stdout and returns EXIT_SUCCESS; a missing
+// or unknown command is a usage error: stderr and EXIT_FAILURE.
+static int printHelp(std::ostream &out, int exitCode)
 {
+    const auto &registry = cmd::CommandRegistry::builtin();
     out << "DroneDB v" << DDBGetVersion() << " - Effortless aerial data management and sharing" << std::endl
-              << "Usage:" << std::endl
-              << "	" << argv[0] << " <command> [args] [PATHS]" << std::endl
-              << std::endl
-              << "Commands:" << std::endl;
-    for (auto &cmd : cmd::commands)
+        << "Usage:" << std::endl
+        << "	" << cmd::ProgramName << " <command> [args] [PATHS]" << std::endl
+        << std::endl
+        << "Commands:" << std::endl;
+    for (const auto &name : registry.names())
     {
-        out << "	" << cmd.first << " - " << cmd.second->description() << std::endl;
+        out << "	" << name << " - " << registry.create(name)->description() << std::endl;
     }
     out << std::endl
-              << "	-h, --help		Print help" << std::endl
-              << "	--version		Print version" << std::endl
-              << std::endl
-              << "For detailed command help use: " << argv[0] << " <command> --help " << std::endl
-              << "See https://docs.dronedb.app for more information." << std::endl;
-    exit(exitCode);
+        << "	-h, --help		Print help" << std::endl
+        << "	--version		Print version" << std::endl
+        << std::endl
+        << "For detailed command help use: " << cmd::ProgramName << " <command> --help " << std::endl
+        << "See https://docs.dronedb.app for more information." << std::endl;
+    return exitCode;
 }
 
-bool hasParam(int argc, char *argv[], const char *param)
+static bool hasParam(int argc, char *argv[], const char *param)
 {
     for (int i = 0; i < argc; i++)
     {
@@ -58,8 +61,6 @@ bool hasParam(int argc, char *argv[], const char *param)
 // argv in UTF-8 (mio.h, "Path encoding")
 static int runCommand(int argc, char *argv[])
 {
-    memcpy(argv[0], "ddb\0", 4);
-
     // One command per process: open and close indexes directly (no idle connections)
 #ifdef _WIN32
     if (std::getenv("DDB_DB_POOL_SIZE") == nullptr)
@@ -82,57 +83,33 @@ static int runCommand(int argc, char *argv[])
     }
 
     if (argc <= 1)
-        printHelp(argv, std::cerr, EXIT_FAILURE);
-    else
+        return printHelp(std::cerr, EXIT_FAILURE);
+
+    const std::string cmdKey(argv[1]);
+    if (cmdKey == "--help" || cmdKey == "-h")
+        return printHelp(std::cout, EXIT_SUCCESS);
+
+    if (hasParam(argc, argv, "--version"))
     {
-        std::string cmdKey = std::string(argv[1]);
-
-        if (cmdKey == "--help" || cmdKey == "-h")
-        {
-            printHelp(argv);
-        }
-
-        if (hasParam(argc, argv, "--version"))
-        {
-            std::cout << DDBGetVersion() << std::endl;
-            exit(0);
-        }
-        else
-        {
-            auto aliasIter = cmd::aliases.find(cmdKey);
-            if (aliasIter != cmd::aliases.end())
-            {
-                cmdKey = aliasIter->second;
-            }
-
-            auto cmdIter = cmd::commands.find(cmdKey);
-            if (cmdIter == cmd::commands.end())
-            {
-                std::cerr << "Unknown command: " << cmdKey << std::endl
-                          << std::endl;
-                printHelp(argv, std::cerr, EXIT_FAILURE);
-            }
-
-            auto command = cmdIter->second;
-            try
-            {
-                // Run command
-                argv[1] = argv[0];
-                command->run(argc - 1, argv + 1);
-            }
-            catch (const AppException &exception)
-            {
-                std::cerr << exception.what() << std::endl;
-                return 1;
-            }
-        }
+        std::cout << DDBGetVersion() << std::endl;
+        return EXIT_SUCCESS;
     }
 
-    return 0;
+    const auto command = cmd::CommandRegistry::builtin().create(cmdKey);
+    if (!command)
+    {
+        std::cerr << "Unknown command: " << cmdKey << std::endl
+                  << std::endl;
+        return printHelp(std::cerr, EXIT_FAILURE);
+    }
+
+    // The command sees the program name and its own arguments
+    std::vector<char *> args{argv[0]};
+    args.insert(args.end(), argv + 2, argv + argc);
+    return cmd::execute(*command, static_cast<int>(args.size()), args.data());
 }
 
-// The command, then the process teardown while every thread still runs (process_init.h). The
-// CLI's exit() calls (help, usage errors) skip it: no GDAL work ran before them.
+// The command, then the process teardown while every thread still runs (process_init.h)
 static int ddbMain(int argc, char *argv[])
 {
     const int code = runCommand(argc, argv);

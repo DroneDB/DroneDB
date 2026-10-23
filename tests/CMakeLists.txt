@@ -11,6 +11,7 @@ if(BUILD_TESTING)
     find_package(exiv2 CONFIG REQUIRED)
     find_package(Threads REQUIRED)
     find_package(plog CONFIG REQUIRED)
+    find_package(cxxopts CONFIG REQUIRED)
 
     # Two test binaries (DQ-03), so the fast offline tests run on their own (and under the
     # sanitizers) and the rest keeps testing libddb as it ships:
@@ -25,7 +26,9 @@ if(BUILD_TESTING)
     #                   Links the library objects (ddb_core + ddb_capi, src/CMakeLists.txt)
     #                   and never libddb. main.cpp initializes the process through the core
     #                   (ddb::registerProcess); ddb_capi is linked for the unit tests of the C
-    #                   API functions (DDBGet, DDBList, DDBCalculateVolume, ...).
+    #                   API functions (DDBGet, DDBList, DDBCalculateVolume, ...); the CLI's
+    #                   commands (ddb_cli_commands, apps/CMakeLists.txt) for the unit tests of
+    #                   the command registry and of the handler that maps exceptions to exit codes.
     #   ddbtest         tests/integration/: every other test; links libddb. The name is kept
     #                   (CI, packaging docs, the Windows crash-dump key).
     #
@@ -186,7 +189,7 @@ if(BUILD_TESTING)
         TIMEOUT 300
         SOURCES ${DDB_UNIT_TEST_SOURCES} $<TARGET_OBJECTS:ddb_core> $<TARGET_OBJECTS:ddb_capi>
             $<TARGET_OBJECTS:ddb_c11_header>
-        LINK ddb_core_usage
+        LINK ddb_core_usage ddb_cli_commands
         SERIAL DDB03_Delta.isLinear
     )
     # The C API's private headers (src/library/c_api_util.h), for the unit tests of its mapper;
@@ -228,7 +231,7 @@ if(BUILD_TESTING)
     # the build root, next to the Windows DLLs: the binary users run.
     set(DDB_CLI_EXE "$<TARGET_FILE:${PROJECT_NAME}cmd>")
     function(ddb_add_cli_test)
-        cmake_parse_arguments(CLI "JSON_STDOUT" "NAME;EXIT;WORKING_DIRECTORY;STDOUT;STDERR" "ARGS" ${ARGN})
+        cmake_parse_arguments(CLI "JSON_STDOUT;EMPTY_STDOUT" "NAME;EXIT;WORKING_DIRECTORY;STDOUT;STDERR" "ARGS" ${ARGN})
         if(NOT CLI_WORKING_DIRECTORY)
             set(CLI_WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
         endif()
@@ -241,6 +244,9 @@ if(BUILD_TESTING)
         endif()
         if(CLI_JSON_STDOUT)
             list(APPEND CLI_CHECK_ARGS "-DEXPECTED_JSON_STDOUT=ON")
+        endif()
+        if(CLI_EMPTY_STDOUT)
+            list(APPEND CLI_CHECK_ARGS "-DEXPECTED_EMPTY_STDOUT=ON")
         endif()
         add_test(NAME ${CLI_NAME}
             COMMAND ${CMAKE_COMMAND} -DEXPECTED=${CLI_EXIT} ${CLI_CHECK_ARGS}
@@ -258,12 +264,28 @@ if(BUILD_TESTING)
     ddb_add_cli_test(NAME cli.HelpSucceeds EXIT 0 ARGS --help)
     ddb_add_cli_test(NAME cli.CommandHelpSucceeds EXIT 0 ARGS cog --help)
 
+    # Errors and usage go to stderr and leave stdout empty (DQ-12: one handler maps what a command
+    # throws to stderr and an exit code); an alias runs its command
+    ddb_add_cli_test(NAME cli.UnknownCommandIsReportedOnStderr EXIT 1 EMPTY_STDOUT STDERR "Unknown command: nosuchcommand"
+        ARGS nosuchcommand)
+    ddb_add_cli_test(NAME cli.NoArgsPrintsTheCommandsOnStderr EXIT 1 EMPTY_STDOUT STDERR "Commands:")
+    ddb_add_cli_test(NAME cli.MissingArgumentIsAUsageErrorOnStderr EXIT 1 EMPTY_STDOUT STDERR "Usage:" ARGS cog)
+    ddb_add_cli_test(NAME cli.MissingArgumentNamesTheArgument EXIT 1 EMPTY_STDOUT
+        STDERR "error: missing required argument 'input'" ARGS info)
+    ddb_add_cli_test(NAME cli.UnknownOptionIsAUsageError EXIT 1 EMPTY_STDOUT STDERR "error: " ARGS cog --no-such-option)
+    ddb_add_cli_test(NAME cli.AliasRunsItsCommand EXIT 0 STDOUT "List indexed files" ARGS ls --help)
+    ddb_add_cli_test(NAME cli.RemovedAliasIsUnknown EXIT 1 STDERR "Unknown command: attr" ARGS attr --help)
+
     # The log goes to stderr: stdout carries only the output of the command. --debug makes
     # every run log (process start-up, GDAL/PROJ set-up), so a record on stdout breaks the JSON.
     set(DDB_CLI_INFO_FILE "${CMAKE_CURRENT_BINARY_DIR}/cli_info.txt")
     file(WRITE "${DDB_CLI_INFO_FILE}" "alpha")
     ddb_add_cli_test(NAME cli.InfoJsonStdoutIsOnlyJson EXIT 0 JSON_STDOUT STDERR "DEBUG"
         ARGS info -f json --debug "${DDB_CLI_INFO_FILE}")
+
+    ddb_add_cli_test(NAME cli.InvalidFormatIsAUsageError EXIT 1 EMPTY_STDOUT STDERR "error: "
+        ARGS info -f xml "${DDB_CLI_INFO_FILE}")
+    ddb_add_cli_test(NAME cli.SetExifOnATextFileFails EXIT 1 ARGS setexif --gps-lat 1 "${DDB_CLI_INFO_FILE}")
 
     # Commands that need a dataset without a remote tag: push/pull used to print the error
     # on stdout and exit 0, an unknown password subcommand printed nothing and exited 0

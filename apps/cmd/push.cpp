@@ -22,10 +22,9 @@ namespace cmd
         // clang-format off
         opts
             .positional_help("[args]")
-            .custom_help("push [remote]")
-            .add_options()
-                ("r,remote", "The remote Registry", cxxopts::value<std::string>()->default_value(""))
-                ("k,insecure", "Disable SSL certificate verification", cxxopts::value<bool>());
+            .custom_help("push [remote]");
+        cmd::addRemoteOption(opts);
+        cmd::addInsecureOption(opts);
 
         // clang-format on
         opts.parse_positional({"remote"});
@@ -36,13 +35,14 @@ namespace cmd
         return "Pushes changes to a remote repository.";
     }
 
-    void Push::run(cxxopts::ParseResult &opts)
+    int Push::run(cxxopts::ParseResult &opts)
     {
         // Errors reach Command::run: stderr and a non-zero exit (invalid args also print usage)
         const auto remote = opts["remote"].as<std::string>();
         auto sslVerify = opts["insecure"].count() == 0;
 
         ddb::push(remote, sslVerify);
+        return EXIT_SUCCESS;
     }
 
 } // namespace cmd

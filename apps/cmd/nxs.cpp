@@ -18,8 +18,9 @@ namespace cmd
     .positional_help("[args]")
     .custom_help("nxs model.obj [output.nxz|output.nxs]")
     .add_options()
-    ("i,input", "File to process", cxxopts::value<std::string>())
-    ("o,output", "Nexus output file", cxxopts::value<std::string>())
+    ("i,input", "File to process", cxxopts::value<std::string>());
+    cmd::addOutputOption(opts, "Nexus output file");
+    opts.add_options()
     ("overwrite", "Overwrite output file if it exists", cxxopts::value<bool>()->default_value("false"));
         // clang-format on
         opts.parse_positional({"input", "output"});
@@ -30,7 +31,7 @@ namespace cmd
         return "Generate nexus (NXS/NXZ) files from 3D models (OBJ/GLTF/GLB/PLY).";
     }
 
-    void Nxs::run(cxxopts::ParseResult &opts)
+    int Nxs::run(cxxopts::ParseResult &opts)
     {
         if (!opts.count("input"))
         {
@@ -43,6 +44,7 @@ namespace cmd
             output = opts["output"].as<std::string>();
 
         std::cout << ddb::buildNexus(input, output, opts["overwrite"].as<bool>()) << std::endl;
+        return EXIT_SUCCESS;
     }
 
 } // namespace cmd

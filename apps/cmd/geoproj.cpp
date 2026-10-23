@@ -15,9 +15,9 @@ namespace cmd
         // clang-format off
     opts
     .positional_help("[args]")
-    .custom_help("geoproj output/ *.JPG")
-    .add_options()
-    ("o,output", "Output path (file or directory)", cxxopts::value<std::string>())
+    .custom_help("geoproj output/ *.JPG");
+    cmd::addOutputOption(opts, "Output path (file or directory)");
+    opts.add_options()
     ("i,images", "Images to project", cxxopts::value<std::vector<std::string>>())
     ("s,size", "Output image size (size[%]|0)", cxxopts::value<std::string>()->default_value("100%"));
         // clang-format on
@@ -29,7 +29,7 @@ namespace cmd
         return "Project images to georeferenced rasters";
     }
 
-    void GeoProj::run(cxxopts::ParseResult &opts)
+    int GeoProj::run(cxxopts::ParseResult &opts)
     {
         if (!opts.count("images") || !opts.count("output"))
         {
@@ -44,6 +44,7 @@ namespace cmd
                         {
         std::cout << "W\t" << imageWritten << std::endl;
         return true; });
+        return EXIT_SUCCESS;
     }
 
 }

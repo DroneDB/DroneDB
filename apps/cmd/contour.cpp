@@ -22,8 +22,9 @@ namespace cmd
         .positional_help("[args]")
         .custom_help("contour [options] input.tif")
         .add_options()
-        ("input", "Input single-band raster (DEM/DSM/DTM)", cxxopts::value<std::string>())
-        ("o,output", "Output GeoJSON file (default: stdout)", cxxopts::value<std::string>())
+        ("input", "Input single-band raster (DEM/DSM/DTM)", cxxopts::value<std::string>());
+        cmd::addOutputOption(opts, "Output GeoJSON file (default: stdout)");
+        opts.add_options()
         ("i,interval", "Vertical interval between contour levels (raster units)",
             cxxopts::value<double>()->default_value("0"))
         ("n,count", "Target number of contour levels (used when --interval is 0)",
@@ -47,12 +48,11 @@ namespace cmd
         return "Generate contour lines (GeoJSON) from a DEM/DSM/DTM raster.";
     }
 
-    void Contour::run(cxxopts::ParseResult &opts)
+    int Contour::run(cxxopts::ParseResult &opts)
     {
         if (!opts.count("input"))
         {
             usageError();
-            return;
         }
 
         const auto input = opts["input"].as<std::string>();
@@ -66,9 +66,7 @@ namespace cmd
 
         if (interval <= 0.0 && count <= 0)
         {
-            std::cerr << "Either --interval or --count must be > 0" << std::endl;
-            usageError();
-            return;
+            usageError("Either --interval or --count must be > 0");
         }
 
         ddb::ContourOptions o;
@@ -94,6 +92,7 @@ namespace cmd
         {
             std::cout << json << std::endl;
         }
+        return EXIT_SUCCESS;
     }
 
 }

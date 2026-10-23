@@ -2,17 +2,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "include/command.h"
-#include "json.h"
-#include "stringutil.h"
-#include "logger.h"
+
+#include <cstdlib>
+
 #include "exceptions.h"
+#include "json.h"
+#include "logger.h"
+#include "stringutil.h"
 
 namespace cmd
 {
-
-    Command::Command()
-    {
-    }
 
     cxxopts::Options Command::genOptions(const char *programName)
     {
@@ -26,53 +25,33 @@ namespace cmd
         return opts;
     }
 
-    void Command::run(int argc, char *argv[])
+    int Command::run(int argc, char *argv[])
     {
-        cxxopts::Options opts = genOptions(argv[0]);
+        cxxopts::Options opts = genOptions();
+        auto result = opts.parse(argc, argv);
 
-        try
+        if (result.count("help"))
         {
-            auto result = opts.parse(argc, argv);
-
-            if (result.count("help"))
-            {
-                printHelp();
-            }
-
-            if (result.count("debug"))
-            {
-                ddb::logging::setVerbose();
-            }
-
-            run(result);
+            printHelp();
+            return EXIT_SUCCESS;
         }
-        catch (const cxxopts::exceptions::exception &e)
+
+        if (result.count("debug"))
         {
-            std::cerr << "error: " << e.what() << std::endl
-                      << std::endl;
-            usageError();
+            ddb::logging::setVerbose();
         }
-        catch (const ddb::InvalidArgsException &e)
-        {
-            std::cerr << e.what() << std::endl
-                      << std::endl;
-            usageError();
-        }
-        // Another AppException (a failed command) reaches main, which prints it and returns
-        // EXIT_FAILURE through the process teardown (ddb::finalizeProcess)
+
+        return run(result);
     }
 
-    void Command::printHelp(std::ostream &out, bool exitAfterPrint)
+    void Command::printHelp(std::ostream &out)
     {
         out << genOptions().help({""});
-        if (exitAfterPrint)
-            exit(0);
     }
 
-    void Command::usageError()
+    void Command::usageError(const std::string &message)
     {
-        printHelp(std::cerr, false);
-        exit(EXIT_FAILURE);
+        throw UsageError(message);
     }
 
     void Command::output(std::ostream &out, const json &j, const std::string &format)

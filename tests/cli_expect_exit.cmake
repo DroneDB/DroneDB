@@ -3,9 +3,10 @@
 #   EXPECTED_STDERR=<text>   the standard error contains the text
 #   EXPECTED_JSON_STDOUT=ON  the standard output is one JSON document and nothing else (a log
 #                            record on stdout breaks the scripts that parse `ddb info -f json`)
+#   EXPECTED_EMPTY_STDOUT=ON the standard output is empty (errors and usage go to stderr)
 #
 #   cmake -DEXPECTED=<code> [-DEXPECTED_STDOUT=<text>] [-DEXPECTED_STDERR=<text>]
-#         [-DEXPECTED_JSON_STDOUT=ON] -P cli_expect_exit.cmake -- <command> [args...]
+#         [-DEXPECTED_JSON_STDOUT=ON] [-DEXPECTED_EMPTY_STDOUT=ON] -P cli_expect_exit.cmake -- <command> [args...]
 #
 # ctest's WILL_FAIL accepts any failure, including a crash or a missing DLL; this
 # script tells "exited with the expected code" apart from everything else.
@@ -58,6 +59,13 @@ if(DEFINED EXPECTED_STDERR)
     string(FIND "${_stderr}" "${EXPECTED_STDERR}" _found)
     if(_found EQUAL -1)
         message(FATAL_ERROR "cli_expect_exit: the error output does not contain '${EXPECTED_STDERR}': ${_command}")
+    endif()
+endif()
+
+if(EXPECTED_EMPTY_STDOUT)
+    string(STRIP "${_stdout}" _trimmed_stdout)
+    if(NOT "${_trimmed_stdout}" STREQUAL "")
+        message(FATAL_ERROR "cli_expect_exit: the standard output is not empty: ${_command}")
     endif()
 endif()
 

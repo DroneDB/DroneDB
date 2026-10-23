@@ -15,10 +15,9 @@ namespace cmd
         // clang-format off
     opts
     .positional_help("[args]")
-    .custom_help("stamp")
-    .add_options()
-    ("w,working-dir", "Working directory", cxxopts::value<std::string>()->default_value("."))
-    ("f,format", "Output format (text|json)", cxxopts::value<std::string>()->default_value("text"));
+    .custom_help("stamp");
+    cmd::addWorkingDirOption(opts);
+    cmd::addFormatOption(opts);
         // clang-format on
     }
 
@@ -27,13 +26,14 @@ namespace cmd
         return "Generate a stamp of the current index.";
     }
 
-    void Stamp::run(cxxopts::ParseResult &opts)
+    int Stamp::run(cxxopts::ParseResult &opts)
     {
         const auto ddbPath = opts["working-dir"].as<std::string>();
         const auto format = opts["format"].as<std::string>();
 
         const auto db = ddb::open(std::string(ddbPath), true);
         output(std::cout, db->getStamp(), format);
+        return EXIT_SUCCESS;
     }
 
 } // namespace cmd

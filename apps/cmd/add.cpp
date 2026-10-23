@@ -17,9 +17,9 @@ namespace cmd
         // clang-format off
     opts
     .positional_help("[args] [PATHS]")
-    .custom_help("add *.JPG")
-    .add_options()
-    ("w,working-dir", "Working directory", cxxopts::value<std::string>()->default_value("."))
+    .custom_help("add *.JPG");
+    cmd::addWorkingDirOption(opts);
+    opts.add_options()
     ("p,paths", "Paths or shell-style glob patterns to add to index (e.g. *.JPG, **/*.tif)", cxxopts::value<std::vector<std::string>>());
         // clang-format on
         opts.parse_positional({"paths"});
@@ -30,13 +30,11 @@ namespace cmd
         return "Add files and directories to an index.";
     }
 
-    void Add::run(cxxopts::ParseResult &opts)
+    int Add::run(cxxopts::ParseResult &opts)
     {
         if (!opts.count("paths"))
         {
-            std::cerr << "error: missing required argument 'paths'" << std::endl
-                      << std::endl;
-            usageError();
+            usageError("missing required argument 'paths'");
         }
 
         const auto ddbPath = opts["working-dir"].as<std::string>();
@@ -50,6 +48,7 @@ namespace cmd
                                  << std::endl;
                        return true;
                    });
+        return EXIT_SUCCESS;
     }
 
 } // namespace cmd

@@ -2,45 +2,6 @@
 # warnings, run scripts/check-warnings.py --update <log of a full build> and commit this file.
 # Compiler: GNU 13 (the CI build_ubuntu job measures with this compiler)
 # Format: <path> <flag> <number of distinct line:column locations>
-apps/cmd/command.cpp -Wshadow 1
-apps/cmd/include/add.h -Wnon-virtual-dtor 1
-apps/cmd/include/align.h -Wnon-virtual-dtor 1
-apps/cmd/include/build.h -Wnon-virtual-dtor 1
-apps/cmd/include/cleanup.h -Wnon-virtual-dtor 1
-apps/cmd/include/clone.h -Wnon-virtual-dtor 1
-apps/cmd/include/cog.h -Wnon-virtual-dtor 1
-apps/cmd/include/command.h -Wnon-virtual-dtor 1
-apps/cmd/include/contour.h -Wnon-virtual-dtor 1
-apps/cmd/include/copc.h -Wnon-virtual-dtor 1
-apps/cmd/include/delta.h -Wnon-virtual-dtor 1
-apps/cmd/include/geoproj.h -Wnon-virtual-dtor 1
-apps/cmd/include/gsplat.h -Wnon-virtual-dtor 1
-apps/cmd/include/info.h -Wnon-virtual-dtor 1
-apps/cmd/include/init.h -Wnon-virtual-dtor 1
-apps/cmd/include/list.h -Wnon-virtual-dtor 1
-apps/cmd/include/login.h -Wnon-virtual-dtor 1
-apps/cmd/include/logout.h -Wnon-virtual-dtor 1
-apps/cmd/include/mask.h -Wnon-virtual-dtor 1
-apps/cmd/include/merge_multispectral.h -Wnon-virtual-dtor 1
-apps/cmd/include/meta.h -Wnon-virtual-dtor 1
-apps/cmd/include/nxs.h -Wnon-virtual-dtor 1
-apps/cmd/include/password.h -Wnon-virtual-dtor 1
-apps/cmd/include/pull.h -Wnon-virtual-dtor 1
-apps/cmd/include/push.h -Wnon-virtual-dtor 1
-apps/cmd/include/remove.h -Wnon-virtual-dtor 1
-apps/cmd/include/rescan.h -Wnon-virtual-dtor 1
-apps/cmd/include/search.h -Wnon-virtual-dtor 1
-apps/cmd/include/setexif.h -Wnon-virtual-dtor 1
-apps/cmd/include/share.h -Wnon-virtual-dtor 1
-apps/cmd/include/stac.h -Wnon-virtual-dtor 1
-apps/cmd/include/stamp.h -Wnon-virtual-dtor 1
-apps/cmd/include/status.h -Wnon-virtual-dtor 1
-apps/cmd/include/sync.h -Wnon-virtual-dtor 1
-apps/cmd/include/system.h -Wnon-virtual-dtor 1
-apps/cmd/include/tag.h -Wnon-virtual-dtor 1
-apps/cmd/include/thumbs.h -Wnon-virtual-dtor 1
-apps/cmd/include/tile.h -Wnon-virtual-dtor 1
-apps/cmd/include/tiles3d.h -Wnon-virtual-dtor 1
 apps/cmd/progressbar.cpp -Wconversion 2
 apps/cmd/share.cpp -Wshadow 1
 apps/cmd/share.cpp -Wunused-parameter 2

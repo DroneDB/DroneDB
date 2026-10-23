@@ -16,9 +16,9 @@ namespace cmd
         // clang-format off
     opts
     .positional_help("[args]")
-    .custom_help("merge-multispectral -o output.tif band1.tif band2.tif ...")
-    .add_options()
-    ("o,output", "Output Cloud Optimized GeoTIFF path", cxxopts::value<std::string>())
+    .custom_help("merge-multispectral -o output.tif band1.tif band2.tif ...");
+    cmd::addOutputOption(opts, "Output Cloud Optimized GeoTIFF path");
+    opts.add_options()
     ("validate", "Only validate inputs, don't merge")
     ("i,input", "Input single-band raster files", cxxopts::value<std::vector<std::string>>());
 
@@ -31,7 +31,7 @@ namespace cmd
         return "Merge single-band raster files into a multi-band GeoTIFF.";
     }
 
-    void MergeMultispectral::run(cxxopts::ParseResult &opts)
+    int MergeMultispectral::run(cxxopts::ParseResult &opts)
     {
         if (!opts.count("input"))
         {
@@ -75,7 +75,7 @@ namespace cmd
             j["alignment"] = alignmentJson;
 
             std::cout << j.dump(2) << std::endl;
-            return;
+            return EXIT_SUCCESS;
         }
 
         if (!opts.count("output"))
@@ -86,6 +86,7 @@ namespace cmd
         auto output = opts["output"].as<std::string>();
         ddb::mergeMultispectral(inputs, output);
         std::cout << output << std::endl;
+        return EXIT_SUCCESS;
     }
 
 }

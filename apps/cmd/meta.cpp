@@ -21,9 +21,9 @@ namespace cmd
     ("c,command", "Command", cxxopts::value<std::string>())
     ("k,key", "Metadata key/ID", cxxopts::value<std::string>()->default_value(""))
     ("p,path", "Path to associate metadata with", cxxopts::value<std::string>()->default_value(""))
-    ("d,data", "Data string|number|JSON to set", cxxopts::value<std::string>()->default_value(""))
-    ("w,working-dir", "Working directory", cxxopts::value<std::string>()->default_value("."))
-    ("f,format", "Output format (text|json)", cxxopts::value<std::string>()->default_value("text"));
+    ("d,data", "Data string|number|JSON to set", cxxopts::value<std::string>()->default_value(""));
+    cmd::addWorkingDirOption(opts);
+    cmd::addFormatOption(opts);
 
         // clang-format on
         opts.parse_positional({"command", "key", "data"});
@@ -34,7 +34,7 @@ namespace cmd
         return "Manage database metadata";
     }
 
-    void Meta::run(cxxopts::ParseResult &opts)
+    int Meta::run(cxxopts::ParseResult &opts)
     {
         if (!opts.count("command"))
         {
@@ -106,6 +106,7 @@ namespace cmd
                 throw ddb::InvalidArgsException(e.what());
             }
         }
+        return EXIT_SUCCESS;
     }
 
 }

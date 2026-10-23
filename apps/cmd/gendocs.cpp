@@ -33,14 +33,15 @@ namespace cmd
 
         std::ofstream f(outfile, std::ios::out | std::ios::trunc);
 
-        for (auto &cmd : commands)
+        const auto &registry = CommandRegistry::builtin();
+        for (const auto &name : registry.names())
         {
-            f << "### " << cmd.first << std::endl
+            f << "### " << name << std::endl
               << std::endl
               << "```" << std::endl;
 
             std::stringstream ss;
-            cmd.second->printHelp(ss, false);
+            registry.create(name)->printHelp(ss);
             ss.seekg(0, std::ios::beg);
 
             std::string line;

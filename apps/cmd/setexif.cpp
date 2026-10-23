@@ -31,7 +31,7 @@ namespace cmd
         return "Modify EXIF values in files.";
     }
 
-    void SetExif::run(cxxopts::ParseResult &opts)
+    int SetExif::run(cxxopts::ParseResult &opts)
     {
         if (!opts.count("input"))
         {
@@ -52,7 +52,7 @@ namespace cmd
 
         if (!exifEditor.canEdit())
         {
-            exit(EXIT_FAILURE);
+            return EXIT_FAILURE;
         }
 
         if (opts.count("gps-alt"))
@@ -75,6 +75,7 @@ namespace cmd
             auto gps = opts["gps"].as<std::vector<double>>();
             exifEditor.SetGPS(gps[0], gps[1], gps[2]);
         }
+        return EXIT_SUCCESS;
     }
 
 }

@@ -27,7 +27,7 @@ namespace cmd
         return "Logout from all registries. To logout from a single registry, use the --server option.";
     }
 
-    void Logout::run(cxxopts::ParseResult &opts)
+    int Logout::run(cxxopts::ParseResult &opts)
     {
         if (opts["server"].count() > 0)
         {
@@ -50,6 +50,7 @@ namespace cmd
                 }
             }
         }
+        return EXIT_SUCCESS;
     }
 
 }

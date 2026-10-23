@@ -17,8 +17,9 @@ namespace cmd
         .custom_help("align -i source.tif -r reference.tif -o aligned.tif")
         .add_options()
         ("i,input",     "Source GeoTIFF to align",                         cxxopts::value<std::string>())
-        ("r,reference", "Reference GeoTIFF (ground truth, more accurate)", cxxopts::value<std::string>())
-        ("o,output",    "Output aligned GeoTIFF (COG, reprojected to EPSG:3857)",  cxxopts::value<std::string>())
+        ("r,reference", "Reference GeoTIFF (ground truth, more accurate)", cxxopts::value<std::string>());
+        cmd::addOutputOption(opts, "Output aligned GeoTIFF (COG, reprojected to EPSG:3857)");
+        opts.add_options()
         ("m,mode",      "similarity (default) | translation",              cxxopts::value<std::string>()->default_value("similarity"))
         ("validate",    "Only validate inputs; do not align")
         ("no-seed",     "Disable phase-correlation seed (slower NCC search)");
@@ -30,7 +31,7 @@ namespace cmd
         return "Align a GeoTIFF (ortho or DEM) to a reference GeoTIFF, correcting georeferencing offset.";
     }
 
-    void Align::run(cxxopts::ParseResult &opts)
+    int Align::run(cxxopts::ParseResult &opts)
     {
         if (!opts.count("input") || !opts.count("reference"))
             usageError();
@@ -42,7 +43,7 @@ namespace cmd
         {
             auto r = ddb::validateAlignRaster(source, reference);
             std::cout << ddb::alignValidationToJson(r) << std::endl;
-            return;
+            return EXIT_SUCCESS;
         }
 
         if (!opts.count("output"))
@@ -61,6 +62,7 @@ namespace cmd
 
         auto result = ddb::alignRaster(source, reference, output, aopts);
         std::cout << ddb::alignResultToJson(result) << std::endl;
+        return EXIT_SUCCESS;
     }
 
 }

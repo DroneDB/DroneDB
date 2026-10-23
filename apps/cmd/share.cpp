@@ -39,8 +39,9 @@ namespace cmd
             ("t,tag", "Tag to use (organization/dataset or server[:port]/organization/dataset)", cxxopts::value<std::string>()->default_value(DEFAULT_REGISTRY "//"))
             ("p,password", "Optional password to protect dataset", cxxopts::value<std::string>()->default_value(""))
             ("s,server", "Registry server to share dataset with (alias of: -t <server>//)", cxxopts::value<std::string>())
-            ("q,quiet", "Do not display progress", cxxopts::value<bool>())
-            ("k,insecure", "Disable SSL certificate verification", cxxopts::value<bool>())
+            ("q,quiet", "Do not display progress", cxxopts::value<bool>());
+        cmd::addInsecureOption(opts);
+        opts.add_options()
             ("non-interactive", "Do not prompt for credentials. Uses DDB_USERNAME and DDB_PASSWORD env vars if available.", cxxopts::value<bool>());
 
         opts.parse_positional({"input"});
@@ -51,13 +52,11 @@ namespace cmd
         return "Share files and folders to a registry";
     }
 
-    void Share::run(cxxopts::ParseResult &opts)
+    int Share::run(cxxopts::ParseResult &opts)
     {
         if (!opts.count("input"))
         {
-            std::cerr << "error: missing required argument 'input'" << std::endl
-                      << std::endl;
-            usageError();
+            usageError("missing required argument 'input'");
         }
 
         auto rawInput = opts["input"].as<std::vector<std::string>>();
@@ -161,6 +160,7 @@ namespace cmd
                 pb.done();
             throw;
         }
+        return EXIT_SUCCESS;
     }
 
 } // namespace cmd

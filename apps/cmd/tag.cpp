@@ -31,7 +31,7 @@ namespace cmd
         return "Gets or sets the dataset tag.";
     }
 
-    void Tag::run(cxxopts::ParseResult &opts)
+    int Tag::run(cxxopts::ParseResult &opts)
     {
         const auto tag = opts["tag"].as<std::string>();
 
@@ -55,6 +55,7 @@ namespace cmd
                 std::cout << res << std::endl;
             }
         }
+        return EXIT_SUCCESS;
     }
 
 } // namespace cmd

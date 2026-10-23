@@ -19,8 +19,8 @@ namespace cmd
     .positional_help("[args]")
     .custom_help("gsplat input.{ply|splat|spz} [output.spz]")
     .add_options()
-    ("i,input", "Gaussian Splat file to convert (.ply, .splat or .spz)", cxxopts::value<std::string>())
-    ("o,output", "Output .spz file", cxxopts::value<std::string>());
+    ("i,input", "Gaussian Splat file to convert (.ply, .splat or .spz)", cxxopts::value<std::string>());
+    cmd::addOutputOption(opts, "Output .spz file");
         // clang-format on
         opts.parse_positional({"input", "output"});
     }
@@ -30,7 +30,7 @@ namespace cmd
         return "Convert a Gaussian Splat (.ply/.splat/.spz) to the compressed .spz format.";
     }
 
-    void Gsplat::run(cxxopts::ParseResult &opts)
+    int Gsplat::run(cxxopts::ParseResult &opts)
     {
         if (!opts.count("input"))
         {
@@ -47,6 +47,7 @@ namespace cmd
 
         ddb::convertToSpz(input, output);
         std::cout << output << std::endl;
+        return EXIT_SUCCESS;
     }
 
 } // namespace cmd

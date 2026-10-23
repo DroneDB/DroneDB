@@ -17,9 +17,9 @@ namespace cmd
         // clang-format off
     opts
     .positional_help("[args] [PATHS]")
-    .custom_help("rm image1.JPG image2.JPG [...]")
-    .add_options()
-    ("w,working-dir", "Working directory", cxxopts::value<std::string>()->default_value("."))
+    .custom_help("rm image1.JPG image2.JPG [...]");
+    cmd::addWorkingDirOption(opts);
+    opts.add_options()
     ("p,paths", "Paths to remove from index (files or directories)", cxxopts::value<std::vector<std::string>>());
         // clang-format on
         opts.parse_positional({"paths"});
@@ -30,7 +30,7 @@ namespace cmd
         return "Remove files and directories from an index. The filesystem is left unchanged (actual files and directories will not be removed)";
     }
 
-    void Remove::run(cxxopts::ParseResult &opts)
+    int Remove::run(cxxopts::ParseResult &opts)
     {
         if (!opts.count("paths"))
         {
@@ -44,6 +44,7 @@ namespace cmd
 
         removeFromIndex(db.get(), paths, [](const std::string &path)
                         { std::cout << "D\t" << path << std::endl; });
+        return EXIT_SUCCESS;
     }
 
 }

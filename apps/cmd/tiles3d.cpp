@@ -22,8 +22,9 @@ namespace cmd
     .positional_help("[args]")
     .custom_help("3dtiles model.obj [output_dir]")
     .add_options()
-    ("i,input", "Model to process (OBJ/GLTF/GLB/PLY)", cxxopts::value<std::string>())
-    ("o,output", "Output 3D Tiles directory (defaults to a 3dtiles/ folder next to the input)", cxxopts::value<std::string>())
+    ("i,input", "Model to process (OBJ/GLTF/GLB/PLY)", cxxopts::value<std::string>());
+    cmd::addOutputOption(opts, "Output 3D Tiles directory (defaults to a 3dtiles/ folder next to the input)");
+    opts.add_options()
     ("lat", "Latitude of the model origin (WGS84). With --lon, forces a georeferenced tileset", cxxopts::value<double>())
     ("lon", "Longitude of the model origin (WGS84). With --lat, forces a georeferenced tileset", cxxopts::value<double>())
     ("alt", "Altitude of the model origin in meters (used with --lat/--lon)", cxxopts::value<double>()->default_value("0"))
@@ -39,7 +40,7 @@ namespace cmd
         return "Generate OGC 3D Tiles (tileset.json + b3dm) from 3D models (OBJ/GLTF/GLB/PLY) using Obj2Tiles.";
     }
 
-    void Tiles3d::run(cxxopts::ParseResult &opts)
+    int Tiles3d::run(cxxopts::ParseResult &opts)
     {
         if (!opts.count("input"))
         {
@@ -81,6 +82,7 @@ namespace cmd
         const bool autoDetect = !forceLocal && !georef.has_value();
 
         std::cout << ddb::buildModel3DTiles(input, output, overwrite, georef, autoDetect) << std::endl;
+        return EXIT_SUCCESS;
     }
 
 } // namespace cmd

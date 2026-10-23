@@ -25,12 +25,12 @@ namespace cmd
         // clang-format off
         opts
             .positional_help("[args]")
-            .custom_help("pull")
-            .add_options()
-            ("r,remote", "The remote Registry", cxxopts::value<std::string>()->default_value(""))
+            .custom_help("pull");
+        cmd::addRemoteOption(opts);
+        opts.add_options()
             ("t,keep-theirs", "Keep changes from remote registry and override local ones", cxxopts::value<bool>()->default_value("false"))
-            ("o,keep-ours", "Keep local changes override remote ones", cxxopts::value<bool>()->default_value("false"))
-            ("k,insecure", "Disable SSL certificate verification", cxxopts::value<bool>());
+            ("o,keep-ours", "Keep local changes override remote ones", cxxopts::value<bool>()->default_value("false"));
+        cmd::addInsecureOption(opts);
 
         // clang-format on
         // opts.parse_positional({"remote"});
@@ -41,7 +41,7 @@ namespace cmd
         return "Pulls changes from a remote repository.";
     }
 
-    void Pull::run(cxxopts::ParseResult &opts)
+    int Pull::run(cxxopts::ParseResult &opts)
     {
         // Errors reach Command::run: stderr and a non-zero exit (invalid args also print usage)
         // const auto force = opts["force"].as<bool>();
@@ -58,6 +58,7 @@ namespace cmd
             mergeStrategy = ddb::MergeStrategy::KeepOurs;
 
         ddb::pull(remote, mergeStrategy, sslVerify);
+        return EXIT_SUCCESS;
     }
 
 } // namespace cmd
