@@ -40,7 +40,7 @@ namespace cmd
 
             if (result.count("debug"))
             {
-                set_logger_verbose();
+                ddb::logging::setVerbose();
             }
 
             run(result);

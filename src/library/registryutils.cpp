@@ -4,7 +4,7 @@
 #include "registryutils.h"
 #include "stringutil.h"
 
-#include "url.h"
+#include "../../vendor/url/Url.h"
 
 #include "constants.h"
 #include "exceptions.h"

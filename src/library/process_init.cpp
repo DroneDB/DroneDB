@@ -178,9 +178,9 @@ void setupLogging(bool verbose) {
         // Enable verbose logging if the environment variable is set
         bool enableVerbose = verbose || std::getenv(DDB_DEBUG_ENV) != nullptr;
 
-        init_logger(logToFile);
+        ddb::logging::init(logToFile);
         if (enableVerbose || logToFile) {
-            set_logger_verbose();
+            ddb::logging::setVerbose();
         }
 
     } catch (const std::exception& e) {

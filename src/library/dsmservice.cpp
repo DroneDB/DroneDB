@@ -15,6 +15,8 @@
 #include "mio.h"
 #include "constants.h"
 
+using namespace ddb;
+
 #pragma clang diagnostic ignored "-Wdisabled-macro-expansion"
 
 DSMService *DSMService::get()

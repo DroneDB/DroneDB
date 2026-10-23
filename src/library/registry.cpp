@@ -29,7 +29,7 @@
 #include "raster_cache.h"
 #include "syncmanager.h"
 #include "tagmanager.h"
-#include "url.h"
+#include "../../vendor/url/Url.h"
 #include "userprofile.h"
 #include "http_helpers.h"
 

@@ -10,7 +10,6 @@
 #include <mio.h>
 #include <registryutils.h>
 #include <tagmanager.h>
-#include <url.h>
 #include <userprofile.h>
 
 #include <fstream>

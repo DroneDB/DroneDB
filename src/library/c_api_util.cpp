@@ -297,7 +297,7 @@ DDBErr shutdown(int timeoutMs, Teardown teardown) noexcept {
             // Not destructive: the calls still running keep their connections and datasets.
             // The host stops: its callback is not called any more, what they log goes to stdout.
             logfwd::unregister();
-            flush_logger();
+            logging::flush();
             setLastError(callsLeftMessage(timeoutMs));
             return DDBERR_BUSY;
         }
@@ -312,7 +312,7 @@ DDBErr shutdown(int timeoutMs, Teardown teardown) noexcept {
             result = DDBERR_EXCEPTION;
         }
         logfwd::unregister();  // after the teardown, which may log
-        flush_logger();
+        logging::flush();
         return result;
     } catch (...) {
         // The mutex (a system error) or the message: the shutdown flag may be set

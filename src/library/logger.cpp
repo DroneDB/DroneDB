@@ -16,6 +16,8 @@
 // console (WriteConsoleW)
 static_assert(PLOG_CHAR_IS_UTF8, "plog must keep log records in UTF-8 (mio.h, \"Path encoding\")");
 
+namespace ddb::logging
+{
 namespace
 {
     // The level of DDBLogLevel (log_forwarding.h) of a plog severity: verbose 0 .. fatal 5
@@ -63,33 +65,37 @@ namespace
             return console;
         return std::max(console, static_cast<plog::Severity>(plog::verbose - minLevel));
     }
+
+    constexpr const char *kLogFileName = "ddb-log.csv";
 }
 
-void init_logger(bool logToFile) {
+void init(bool logToFile) {
     auto &host = hostAppender();
     host.setConsoleMax(plog::info);
     const plog::Severity severity = loggerSeverity(plog::info);
 
     if (logToFile) {
-        static plog::RollingFileAppender<plog::CsvFormatter> fileAppender(LOG_FILE_NAME, 32000, 5);
+        static plog::RollingFileAppender<plog::CsvFormatter> fileAppender(kLogFileName, 32000, 5);
         plog::init(severity, &host).addAppender(&fileAppender);
     } else
         plog::init(severity, &host);
 }
 
-void set_logger_verbose() {
+void setVerbose() {
     hostAppender().setConsoleMax(plog::verbose);
     plog::get()->setMaxSeverity(plog::verbose);
 }
 
-bool is_logger_verbose(){
+bool isVerbose() {
     return hostAppender().consoleMax() == plog::verbose;
 }
 
-void flush_logger() {
+void flush() {
     // The console appender writes to std::cerr, the commands their output to std::cout; GDAL's
     // default handler and the C stdio of the other libraries to stderr and stdout
     std::cout.flush();
     std::cerr.flush();
     std::fflush(nullptr);
 }
+
+}  // namespace ddb::logging

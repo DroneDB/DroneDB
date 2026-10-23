@@ -7,6 +7,7 @@
 
 #include <string>
 #include <vector>
+#include <cstring>
 #include <unordered_map>
 #include <filesystem>
 #include <mutex>
@@ -16,8 +17,6 @@
 #include "geo.h"
 #include "ddb_export.h"
 
-using namespace ddb;
-
 struct DSMCacheEntry
 {
     unsigned int width, height;
@@ -26,7 +25,7 @@ struct DSMCacheEntry
 
     double geoTransform[6];
     std::vector<float> data;
-    BoundingBox<Point2D> bbox;
+    ddb::BoundingBox<ddb::Point2D> bbox;
 
     DDB_DLL DSMCacheEntry() : width(0), height(0), hasNodata(0), nodata(0)
     {

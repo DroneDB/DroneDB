@@ -5,15 +5,18 @@
 #define TIMEZONE_H
 
 #include <cctz/time_zone.h>
-#include "../../vendor/zonedetect/library/zonedetect.h"
 #include "ddb_export.h"
+
+// vendor/zonedetect/zonedetect.h: an opaque handle is all this header needs
+struct ZoneDetectOpaque;
+typedef struct ZoneDetectOpaque ZoneDetect;
 
 class Timezone
 {
-public:
     static bool initialized;
     static ZoneDetect *db;
 
+public:
     DDB_DLL static void init();
     DDB_DLL static cctz::time_zone lookupTimezone(double latitude, double longitude);
     DDB_DLL static double getUTCEpoch(int year, int month, int day, int hour, int minute, int second, double msecs, const cctz::time_zone &tz);
