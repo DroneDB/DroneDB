@@ -20,6 +20,7 @@
 #include "exceptions.h"
 #include "geoproject.h"
 #include "hash.h"
+#include "json.h"
 #include "logger.h"
 #include "http_client.h"
 #include "mio.h"
@@ -320,25 +321,37 @@ namespace ddb
             zb = parseZRange(zRange);
         }
 
-        const bool json = format == "json";
+        const bool asJson = format == "json";
 
-        if (json)
+        if (asJson)
         {
             os << "[";
         }
+
+        // One tile per line, or one JSON string per array member (escaped, "," between members
+        // across zoom levels as well)
+        bool firstTile = true;
+        const auto write = [&](const std::string &tilePath)
+        {
+            if (asJson)
+            {
+                if (!firstTile)
+                    os << ",";
+                os << json(tilePath).dump();
+            }
+            else
+            {
+                os << tilePath << std::endl;
+            }
+            firstTile = false;
+        };
 
         for (int z = zb.min; z <= zb.max; z++)
         {
             if (x != "auto" && y != "auto")
             {
                 // Just one tile
-                if (json)
-                    os << "\"";
-                os << tiler->tile(z, std::stoi(x), std::stoi(y));
-                if (json)
-                    os << "\"";
-                else
-                    os << std::endl;
+                write(tiler->tile(z, std::stoi(x), std::stoi(y)));
             }
             else
             {
@@ -346,27 +359,13 @@ namespace ddb
                 std::vector<ddb::TileInfo> tiles = tiler->getTilesForZoomLevel(z);
                 for (auto &t : tiles)
                 {
-                    if (json)
-                        os << "\"";
-
                     LOGD << "Tiling " << t.tx << " " << t.ty << " " << t.tz;
-                    os << tiler->tile(t);
-
-                    if (json)
-                    {
-                        os << "\"";
-                        if (&t != &tiles[tiles.size() - 1])
-                            os << ",";
-                    }
-                    else
-                    {
-                        os << std::endl;
-                    }
+                    write(tiler->tile(t));
                 }
             }
         }
 
-        if (json)
+        if (asJson)
         {
             os << "]";
         }
