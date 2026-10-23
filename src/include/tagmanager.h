@@ -11,7 +11,8 @@
 namespace ddb
 {
 
-#define TAGSFILE "tags.json"
+    // The file of the dataset's tag, in its .ddb folder
+    inline constexpr const char *kTagsFile = "tags.json";
 
     class TagManager
     {
@@ -20,7 +21,8 @@ namespace ddb
     public:
         TagManager(Database *db) : db(db) {}
 
-        DDB_DLL std::string getTag();
+        /// The tag of the dataset, "" when it has none; never creates the tags file
+        DDB_DLL std::string getTag() const;
         DDB_DLL void setTag(const std::string &tag);
     };
 
