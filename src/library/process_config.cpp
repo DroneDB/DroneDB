@@ -4,10 +4,10 @@
 #include "process_config.h"
 
 #include <array>
-#include <cstdlib>
 #include <string>
 #include <string_view>
 
+#include "env.h"
 #include "exceptions.h"
 #include "logger.h"
 #include "mio.h"
@@ -63,24 +63,6 @@ namespace ddb
                 break;
             }
             return "default";
-        }
-
-        // A decimal integer in [min, max], digits only (no sign, space or suffix)
-        std::optional<uint64_t> parseDecimal(std::string_view text, uint64_t min, uint64_t max)
-        {
-            if (text.empty())
-                return std::nullopt;
-            uint64_t value = 0;
-            for (const char c : text)
-            {
-                if (c < '0' || c > '9')
-                    return std::nullopt;
-                const auto digit = static_cast<uint64_t>(c - '0');
-                if (digit > max || value > (max - digit) / 10)
-                    return std::nullopt;  // above max (and never overflows)
-                value = value * 10 + digit;
-            }
-            return value >= min ? std::optional<uint64_t>(value) : std::nullopt;
         }
 
         std::string knownNames()
@@ -168,12 +150,14 @@ namespace ddb
             if (integers_[index])
                 return {*integers_[index], ConfigSource::Configure};
         }
-        if (const char *env = std::getenv(setting.env); env != nullptr && *env != '\0')
+        // Invalid values are logged at debug level only: this runs on every read of a setting
+        const auto fromEnv = env::readInteger(setting.env, setting.min, setting.max);
+        if (fromEnv.state == env::Integer::State::Valid)
+            return {fromEnv.value, ConfigSource::Environment};
+        if (fromEnv.state == env::Integer::State::Invalid)
         {
-            if (const auto parsed = parseDecimal(env, setting.min, setting.max))
-                return {*parsed, ConfigSource::Environment};
-            LOGD << "Ignoring " << setting.env << "=\"" << env << "\": expected an integer from " << setting.min
-                 << " to " << setting.max;
+            LOGD << "Ignoring " << setting.env << "=\"" << fromEnv.raw << "\": expected an integer from "
+                 << setting.min << " to " << setting.max;
         }
         return {setting.builtIn(), ConfigSource::Default};
     }

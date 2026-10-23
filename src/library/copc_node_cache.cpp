@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <string>
 
+#include "env.h"
 #include "exceptions.h"
 #include "fileversion.h"
 #include "logger.h"
@@ -23,20 +24,11 @@ namespace ddb
         // Nodes of one window decompress on up to this many threads (as readers.copc)
         constexpr size_t DecodeThreads = 4;
 
+        // Up to 1 TiB; 0 turns the cache off
         size_t capacityFromEnvironment()
         {
-            const char *value = std::getenv("DDB_COPC_NODE_CACHE_MB");
-            if (value == nullptr || *value == '\0')
-                return DefaultCapacityMb << 20;
-            try
-            {
-                return static_cast<size_t>(std::stoull(value)) << 20;
-            }
-            catch (const std::exception &)
-            {
-                LOGW << "Ignoring invalid DDB_COPC_NODE_CACHE_MB=" << value;
-                return DefaultCapacityMb << 20;
-            }
+            const auto mb = env::readIntegerOrWarn("DDB_COPC_NODE_CACHE_MB", 0, 1 << 20);
+            return static_cast<size_t>(mb.value_or(DefaultCapacityMb)) << 20;
         }
 
         std::string nodeKey(const std::string &file, const std::string &version, const CopcNodeKey &k)

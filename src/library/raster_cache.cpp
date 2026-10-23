@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cstdlib>
 
+#include "env.h"
 #include "exceptions.h"
 #include "fileversion.h"
 #include "gdal_raii.h"
@@ -19,20 +20,10 @@ namespace ddb
 {
     namespace
     {
+        // A size or count from the environment (0 allowed: it turns the cache off), or the fallback
         size_t envSize(const char *name, size_t fallback)
         {
-            const char *value = std::getenv(name);
-            if (value == nullptr || *value == '\0')
-                return fallback;
-            try
-            {
-                return static_cast<size_t>(std::stoul(value));
-            }
-            catch (const std::exception &)
-            {
-                LOGW << "Ignoring invalid " << name << "=" << value;
-                return fallback;
-            }
+            return static_cast<size_t>(env::readIntegerOrWarn(name, 0, UINT32_MAX).value_or(fallback));
         }
 
         // Idle instances are closed at most this often when they expire
