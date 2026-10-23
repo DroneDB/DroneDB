@@ -910,7 +910,7 @@ AlignResult alignRaster(const std::string &sourcePath,
     result.success      = true;
     result.txMapUnits   = sim.t.x;
     result.tyMapUnits   = sim.t.y;
-    result.thetaDeg     = std::atan2(sim.sinTheta, sim.cosTheta) * 180.0 / ddb::kPi;
+    result.thetaDeg     = ddb::rad2deg(std::atan2(sim.sinTheta, sim.cosTheta));
     result.scale        = sim.scale;
     result.inlierCount  = inlierCount;
     result.inlierRatio  = inlierRatio;

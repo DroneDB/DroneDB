@@ -268,9 +268,8 @@ std::string detectStockpileJson(const std::string &rasterPath,
     double metersPerPixelX = std::fabs(gt[1]);
     double metersPerPixelY = std::fabs(gt[5]);
     if (rasterIsGeographic || !rasterSrs) {
-        const double d2r = ddb::kPi / 180.0;
         const double mPerDeg = 111320.0; // good-enough WGS84 approximation
-        metersPerPixelX = std::fabs(gt[1]) * mPerDeg * std::cos(lat * d2r);
+        metersPerPixelX = std::fabs(gt[1]) * mPerDeg * std::cos(lat * ddb::kDegToRad);
         metersPerPixelY = std::fabs(gt[5]) * mPerDeg;
         if (metersPerPixelX < 1e-6) metersPerPixelX = mPerDeg * std::fabs(gt[1]);
     }
@@ -579,9 +578,8 @@ std::string detectAllStockpilesJson(const std::string &rasterPath,
     if (rasterIsGeographic || !rasterSrs) {
         // Use raster center latitude for the cosine factor.
         const double centerY = gt[3] + (rasterH / 2.0) * gt[5];
-        const double d2r = ddb::kPi / 180.0;
         const double mPerDeg = 111320.0;
-        metersPerPixelX = std::fabs(gt[1]) * mPerDeg * std::cos(centerY * d2r);
+        metersPerPixelX = std::fabs(gt[1]) * mPerDeg * std::cos(centerY * ddb::kDegToRad);
         metersPerPixelY = std::fabs(gt[5]) * mPerDeg;
         if (metersPerPixelX < 1e-6) metersPerPixelX = mPerDeg * std::fabs(gt[1]);
     }

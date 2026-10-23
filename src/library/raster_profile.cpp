@@ -35,11 +35,10 @@ constexpr double WGS84_RADIUS_M = 6378137.0;
 
 // Haversine distance on WGS84 ellipsoid approximated as a sphere (meters).
 double haversineMeters(double lon1, double lat1, double lon2, double lat2) {
-    const double d2r = ddb::kPi / 180.0;
-    const double dLat = (lat2 - lat1) * d2r;
-    const double dLon = (lon2 - lon1) * d2r;
+    const double dLat = (lat2 - lat1) * ddb::kDegToRad;
+    const double dLon = (lon2 - lon1) * ddb::kDegToRad;
     const double a = std::sin(dLat / 2) * std::sin(dLat / 2) +
-                     std::cos(lat1 * d2r) * std::cos(lat2 * d2r) *
+                     std::cos(lat1 * ddb::kDegToRad) * std::cos(lat2 * ddb::kDegToRad) *
                      std::sin(dLon / 2) * std::sin(dLon / 2);
     const double c = 2.0 * std::atan2(std::sqrt(a), std::sqrt(1.0 - a));
     return WGS84_RADIUS_M * c;

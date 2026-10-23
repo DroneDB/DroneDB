@@ -25,6 +25,12 @@ constexpr bool isPowerOfTwo(T value) {
     return value > 0 && (value & (value - 1)) == 0;
 }
 
+// The conversion factors. `x * kDegToRad` is not `deg2rad(x)`: that one is `(x * kPi) / 180.0`,
+// which rounds differently in the last bit for some x. Code that always multiplied by the factor
+// keeps doing so (its results are pinned by the golden outputs of DQ-06).
+inline constexpr double kDegToRad = kPi / 180.0;
+inline constexpr double kRadToDeg = 180.0 / kPi;
+
 constexpr double rad2deg(double rad) noexcept {
     return (rad * 180.0) / kPi;
 }

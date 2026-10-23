@@ -334,9 +334,8 @@ std::string calculateVolumeJson(const std::string &rasterPath,
     double pixelWidth = std::fabs(gt[1]);
     double pixelHeight = std::fabs(gt[5]);
     if (rasterIsGeographic || !rasterSrs) {
-        const double d2r = ddb::kPi / 180.0;
         const double mPerDeg = 111320.0; // good-enough WGS84 approximation
-        pixelWidth = std::fabs(gt[1]) * mPerDeg * std::cos(polyCentroidLat * d2r);
+        pixelWidth = std::fabs(gt[1]) * mPerDeg * std::cos(polyCentroidLat * ddb::kDegToRad);
         pixelHeight = std::fabs(gt[5]) * mPerDeg;
         if (pixelWidth < 1e-6) pixelWidth = mPerDeg * std::fabs(gt[1]);
     }

@@ -168,8 +168,8 @@ namespace ddb
         double lon = mx / originShift * 180.0;
         double lat = my / originShift * 180.0;
 
-        lat = 180.0 / ddb::kPi *
-              (2 * std::atan(std::exp(lat * ddb::kPi / 180.0)) - ddb::kPi / 2.0);
+        lat = ddb::kRadToDeg *
+              (2 * std::atan(std::exp(ddb::deg2rad(lat))) - ddb::kPi / 2.0);
         return Geographic2D(lon, lat);
     }
 

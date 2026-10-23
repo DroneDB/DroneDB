@@ -1004,13 +1004,13 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
                         //   unit vector = (cos(yaw), -sin(yaw))
                         // Image-down direction in geo = bearing (yaw+180):
                         //   unit vector = (-sin(yaw), -cos(yaw))
-                        double yawRad = yawDeg * ddb::kPi / 180.0;
+                        double yawRad = ddb::deg2rad(yawDeg);
                         double shiftE =  centerShiftXPx * std::cos(yawRad) - centerShiftYPx * std::sin(yawRad);
                         double shiftN = -centerShiftXPx * std::sin(yawRad) - centerShiftYPx * std::cos(yawRad);
 
                         double dLat = (shiftN * gsd) / 111320.0;
                         double dLon = (shiftE * gsd) /
-                            (111320.0 * std::cos(srcGps.latitude * ddb::kPi / 180.0));
+                            (111320.0 * std::cos(ddb::deg2rad(srcGps.latitude)));
                         srcGps.latitude += dLat;
                         srcGps.longitude += dLon;
                         LOGD << "GPS corrected for alignment crop: dLat=" << dLat
