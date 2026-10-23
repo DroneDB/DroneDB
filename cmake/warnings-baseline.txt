@@ -27,7 +27,6 @@ src/library/authmanager.cpp -Wshadow 1
 src/library/cog.cpp -Wconversion 2
 src/library/contour.cpp -Wdeprecated-declarations 1
 src/library/database.cpp -Wcatch-value= 1
-src/library/dbops.cpp -Wconversion 1
 src/library/ddb.cpp -Wconversion 6
 src/library/ddb.cpp -Wunused-result 1
 src/library/dsmservice.cpp -Wcatch-value= 1
@@ -39,6 +38,7 @@ src/library/exifeditor.cpp -Wshadow 1
 src/library/gdaltiler.cpp -Wshadow 4
 src/library/geo.cpp -Wold-style-cast 1
 src/library/geoproject.cpp -Wshadow 2
+src/library/index_maintenance.cpp -Wconversion 1
 src/library/metamanager.cpp -Wconversion 1
 src/library/metamanager.cpp -Wshadow 1
 src/library/mio.cpp -Wshadow 1

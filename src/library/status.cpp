@@ -10,9 +10,50 @@
 #include "mio.h"
 
 #include "exceptions.h"
+#include "hash.h"
+#include "logger.h"
+
+#include <cmath>
 
 namespace ddb
 {
+
+    FileStatus checkUpdate(Entry &e, const fs::path &p, double dbMtime,
+                           const std::string &dbHash, double *fileMtime)
+    {
+
+        if (!exists(p))
+            return Deleted;
+
+        const bool folder = fs::is_directory(p);
+
+        if (folder)
+            return NotModified;
+
+        // Did it change? Sub-second times catch an edit made in the same second as the
+        // previous add (same size, same whole-second time)
+        const double mtime = io::Path(p).getModifiedTimePrecise();
+        e.mtime = static_cast<time_t>(std::floor(mtime));
+        if (fileMtime != nullptr)
+            *fileMtime = mtime;
+
+        if (!io::sameModifiedTime(dbMtime, mtime))
+        {
+            LOGD << io::toUtf8(p) << " modified time ( " << std::fixed << dbMtime
+                 << " ) differs from file value: " << mtime;
+
+            e.hash = Hash::fileSHA256(io::toUtf8(p));
+
+            if (dbHash != e.hash)
+            {
+                LOGD << io::toUtf8(p) << " hash differs (old: " << dbHash
+                     << " | new: " << e.hash << ")";
+                return Modified;
+            }
+        }
+
+        return NotModified;
+    }
 
     void statusIndex(Database *db, const FileStatusCallback &cb)
     {

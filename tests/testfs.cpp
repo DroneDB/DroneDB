@@ -187,7 +187,7 @@ namespace
 
         const std::filesystem::path &path() const { return path_; }
 
-        // Same pattern as ensureEmptyIndexTemplate (dbops.cpp): a rename that fails because the
+        // Same pattern as ensureEmptyIndexTemplate (index_lifecycle.cpp): a rename that fails because the
         // destination exists (Windows does not replace it) means another process published it.
         void publish(const std::filesystem::path &destination)
         {

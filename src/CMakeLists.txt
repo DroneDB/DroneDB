@@ -105,7 +105,7 @@ list(TRANSFORM COMMON_LIBS REPLACE "^nxs$" "$<LINK_ONLY:nxs>" OUTPUT_VARIABLE DD
 add_library(ddb_core_usage INTERFACE)
 target_link_libraries(ddb_core_usage INTERFACE ${DDB_CORE_LIBS} boolinq ddb_headers)
 
-# Library sources only: glob.hpp (dbops.cpp), and <prefix>/include/pdal because PDAL's own
+# Library sources only: glob.hpp (path_expansion.cpp), and <prefix>/include/pdal because PDAL's own
 # headers include their siblings without the pdal/ prefix (ColorinterpFilter.hpp includes
 # <filters/StatsFilter.hpp>).
 find_path(PDAL_HEADERS_DIR "filters/StatsFilter.hpp" PATH_SUFFIXES pdal REQUIRED)

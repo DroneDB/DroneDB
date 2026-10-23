@@ -18,7 +18,7 @@ using namespace ddb;
 // file committing the other n-1 and reporting exactly one error - could not be exercised
 // end-to-end through the public addToIndex/addToIndexEx entry points as written. Two
 // independent, pre-existing behaviors block it:
-//   1. getIndexPathList() (dbops.cpp) eagerly validates existence for every literal input path
+//   1. getIndexPathList() (path_expansion.cpp) eagerly validates existence for every literal input path
 //      *before* PLAN/COMPUTE ever run, and throws FSException for the whole call if any path is
 //      missing - regardless of whether that path was previously indexed. This makes a
 //      missing-file item a batch-scoped failure, not an item-scoped one, at the API boundary.
