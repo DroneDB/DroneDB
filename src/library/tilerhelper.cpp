@@ -293,9 +293,11 @@ namespace ddb
                                const fs::path &output,
                                int tileSize, bool tms,
                                std::ostream &os,
-                               const std::string &format, const std::string &zRange,
+                               OutputFormat format, const std::string &zRange,
                                const std::string &x, const std::string &y)
     {
+        requireOutputFormat(format, {OutputFormat::Text, OutputFormat::Json});
+
         // Owned: parseZRange, std::stoi and tile() throw on bad input or failed tiles
         std::unique_ptr<Tiler> tiler;
 
@@ -321,7 +323,7 @@ namespace ddb
             zb = parseZRange(zRange);
         }
 
-        const bool asJson = format == "json";
+        const bool asJson = format == OutputFormat::Json;
 
         if (asJson)
         {

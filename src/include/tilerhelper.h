@@ -14,6 +14,7 @@
 #include "fs.h"
 #include "geo.h"
 #include "gdaltiler.h"
+#include "output_format.h"
 #include "thumbs.h"
 
 namespace ddb
@@ -46,10 +47,26 @@ namespace ddb
                                      int tileSize = 256,
                                      bool tms = false,
                                      std::ostream &os = std::cout,
-                                     const std::string &format = "text",
+                                     OutputFormat format = OutputFormat::Text,
                                      const std::string &zRange = "auto",
                                      const std::string &x = "auto",
                                      const std::string &y = "auto");
+
+        // The same for a caller that holds the format as text (the CLI): "json" writes JSON, any
+        // other name writes text, as it always did
+        static void runTiler(const fs::path &input,
+                             const fs::path &output,
+                             int tileSize, bool tms,
+                             std::ostream &os,
+                             const std::string &format,
+                             const std::string &zRange = "auto",
+                             const std::string &x = "auto",
+                             const std::string &y = "auto")
+        {
+            runTiler(input, output, tileSize, tms, os,
+                     format == outputFormatName(OutputFormat::Json) ? OutputFormat::Json : OutputFormat::Text,
+                     zRange, x, y);
+        }
 
         // Get a single tile from user cache
         DDB_DLL static fs::path getFromUserCache(const fs::path &tileablePath,

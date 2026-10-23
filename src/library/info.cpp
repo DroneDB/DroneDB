@@ -8,11 +8,21 @@
 #include "exceptions.h"
 #include "mio.h"
 
+#include <optional>
+
 namespace ddb
 {
 
+    namespace
+    {
+        // The GeoJSON feature collection wraps the features; entries without a geometry are left out
+        constexpr const char *kFeatureCollectionOpen =
+            R"<<<({"type":"FeatureCollection","crs":{"type":"name","properties":{"name":"EPSG:4326"}},"features":[)<<<";
+        constexpr const char *kFeatureCollectionClose = "]}";
+    } // namespace
+
     void info(const std::vector<std::string> &input, std::ostream &output,
-              const std::string &format, bool recursive, int maxRecursionDepth, const std::string &geometry,
+              OutputFormat format, bool recursive, int maxRecursionDepth, const std::string &geometry,
               bool withHash, bool stopOnError)
     {
         std::vector<fs::path> filePaths;
@@ -26,24 +36,12 @@ namespace ddb
             filePaths = io::fromUtf8(input);
         }
 
-        if (format == "json")
-        {
-            output << "[";
-        }
-        else if (format == "geojson")
-        {
-            output << R"<<<({"type":"FeatureCollection","crs":{"type":"name","properties":{"name":"EPSG:4326"}},"features":[)<<<";
-        }
-        else if (format == "text")
-        {
-            // Nothing
-        }
-        else
-        {
-            throw InvalidArgsException("Invalid format " + format);
-        }
-
-        bool first = true;
+        // Text is written entry by entry; the JSON formats are arrays of members
+        std::optional<JsonArrayWriter> writer;
+        if (format == OutputFormat::Json)
+            writer.emplace(output);
+        else if (format == OutputFormat::GeoJson)
+            writer.emplace(output, kFeatureCollectionOpen, kFeatureCollectionClose);
 
         for (auto &fp : filePaths)
         {
@@ -57,30 +55,20 @@ namespace ddb
                 // But we want the absolute path (in the unix path format)
                 e.path = "file://" + io::toGenericUtf8(fs::absolute(fp));
 
-                if (format == "json")
+                switch (format)
                 {
-                    if (!first)
-                        output << ",";
-                    output << json(e).dump();
-                    first = false;
-                }
-                else if (format == "geojson")
-                {
+                case OutputFormat::Json:
+                    writer->write(e);
+                    break;
+                case OutputFormat::GeoJson:
                     if (const auto feature = e.toGeoJSON(ddb::getBasicGeometryTypeFromName(geometry)))
-                    {
-                        if (!first)
-                            output << ",";
-                        output << feature->dump();
-                        first = false; // only a written feature needs a separator after it
-                    }
+                        writer->write(*feature);
                     else
-                    {
                         LOGD << "No geometries in " << io::toUtf8(fp) << ", skipping from GeoJSON export";
-                    }
-                }
-                else
-                {
+                    break;
+                case OutputFormat::Text:
                     output << e.toString() << "\n";
+                    break;
                 }
             }
             catch (const AppException &e)
@@ -91,14 +79,8 @@ namespace ddb
             }
         }
 
-        if (format == "json")
-        {
-            output << "]";
-        }
-        else if (format == "geojson")
-        {
-            output << "]}";
-        }
+        if (writer)
+            writer->finish();
     }
 
 }

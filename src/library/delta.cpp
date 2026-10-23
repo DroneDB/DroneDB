@@ -82,23 +82,23 @@ namespace ddb
         return getDelta(sourceDb->getStamp(), targetDb->getStamp());
     }
 
-    void delta(Database *sourceDb, Database *targetDb, std::ostream &output, const std::string &format)
+    void delta(Database *sourceDb, Database *targetDb, std::ostream &output, OutputFormat format)
     {
+        requireOutputFormat(format, {OutputFormat::Text, OutputFormat::Json}); // before the stamps are read
         delta(sourceDb->getStamp(), targetDb->getStamp(), output, format);
     }
 
-    void delta(const json &sourceDbStamp, const json &targetDbStamp, std::ostream &output, const std::string &format)
+    void delta(const json &sourceDbStamp, const json &targetDbStamp, std::ostream &output, OutputFormat format)
     {
+        requireOutputFormat(format, {OutputFormat::Text, OutputFormat::Json});
+
         auto delta = getDelta(sourceDbStamp, targetDbStamp);
 
-        if (format == "json")
+        if (format == OutputFormat::Json)
         {
-
-            json j = delta;
-
-            output << j.dump();
+            output << json(delta).dump();
         }
-        else if (format == "text")
+        else
         {
             for (const AddAction &add : delta.adds)
                 output << "A\t" << add.path << (add.isDirectory() ? " (D)" : "") << std::endl;

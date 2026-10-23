@@ -8,6 +8,7 @@
 #include <optional>
 
 #include "dbops.h"
+#include "output_format.h"
 #include "ddb_export.h"
 #include "simpleentry.h"
 
@@ -112,8 +113,25 @@ namespace ddb
 
     DDB_DLL Delta getDelta(Database *sourceDb, Database *targetDb);
 
-    DDB_DLL void delta(Database *sourceDb, Database *targetDb, std::ostream &output, const std::string &format);
-    DDB_DLL void delta(const json &sourceDbStamp, const json &targetDbStamp, std::ostream &output, const std::string &format);
+    /// Writes the delta as text (one "A"/"D" line per change) or JSON; any other format throws an
+    /// InvalidArgsException
+    DDB_DLL void delta(Database *sourceDb, Database *targetDb, std::ostream &output, OutputFormat format);
+    DDB_DLL void delta(const json &sourceDbStamp, const json &targetDbStamp, std::ostream &output, OutputFormat format);
+
+    /// The same for a caller that holds the format as text (the C API, the CLI). A name that is
+    /// not "text" or "json" writes nothing, as it always did.
+    inline void delta(Database *sourceDb, Database *targetDb, std::ostream &output, const std::string &format)
+    {
+        const auto known = findOutputFormat(format);
+        if (known == OutputFormat::Text || known == OutputFormat::Json)
+            delta(sourceDb, targetDb, output, *known);
+    }
+    inline void delta(const json &sourceDbStamp, const json &targetDbStamp, std::ostream &output, const std::string &format)
+    {
+        const auto known = findOutputFormat(format);
+        if (known == OutputFormat::Text || known == OutputFormat::Json)
+            delta(sourceDbStamp, targetDbStamp, output, *known);
+    }
 
     DDB_DLL std::vector<SimpleEntry> parseStampEntries(const json &stamp);
 

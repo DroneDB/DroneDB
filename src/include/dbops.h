@@ -13,6 +13,7 @@
 #include "entry.h"
 #include "entry_types.h"
 #include "fs.h"
+#include "output_format.h"
 #include "ddb_export.h"
 
 namespace ddb
@@ -136,9 +137,10 @@ namespace ddb
     // Adds members to the JSON of an entry before writeEntries writes it
     using EntryJsonDecorator = std::function<void(const Entry &, json &)>;
 
-    // Writes entries in "text" (one path per line) or "json" (array of Entry::toJSON) format,
-    // one entry at a time; decorate (json only) adds members to each entry's JSON
-    DDB_DLL void writeEntries(std::ostream &out, const std::vector<Entry> &entries, const std::string &format,
+    // Writes entries as text (one path per line) or JSON (an array of to_json(Entry)), one entry at
+    // a time; decorate (json only) adds members to each entry's JSON. Any other format throws
+    // an InvalidArgsException.
+    DDB_DLL void writeEntries(std::ostream &out, const std::vector<Entry> &entries, OutputFormat format,
                               const EntryJsonDecorator &decorate = nullptr);
     DDB_DLL void checkDeleteBuild(Database *db, const std::string &hash);
     DDB_DLL void checkDeleteMeta(Database *db, const std::string &path);
@@ -148,8 +150,20 @@ namespace ddb
     // doUpdate() storing `mtime` (with sub-second precision) instead of e.mtime
     DDB_DLL void doUpdate(Statement *updateQ, const Entry &e, double mtime);
 
-    DDB_DLL void listIndex(Database *db, const std::vector<std::string> &paths, std::ostream &out, const std::string &format, bool recursive = false, int maxRecursionDepth = 0);
-    DDB_DLL void searchIndex(Database *db, const std::string &query, std::ostream &out, const std::string &format);
+    // listIndex and searchIndex write text or JSON (writeEntries)
+    DDB_DLL void listIndex(Database *db, const std::vector<std::string> &paths, std::ostream &out, OutputFormat format, bool recursive = false, int maxRecursionDepth = 0);
+    DDB_DLL void searchIndex(Database *db, const std::string &query, std::ostream &out, OutputFormat format);
+
+    // The same for a caller that holds the format as text (the C API, the CLI): parsed first, an
+    // unknown or unsupported name throws an InvalidArgsException
+    inline void listIndex(Database *db, const std::vector<std::string> &paths, std::ostream &out, const std::string &format, bool recursive = false, int maxRecursionDepth = 0)
+    {
+        listIndex(db, paths, out, parseOutputFormat(format, {OutputFormat::Text, OutputFormat::Json}), recursive, maxRecursionDepth);
+    }
+    inline void searchIndex(Database *db, const std::string &query, std::ostream &out, const std::string &format)
+    {
+        searchIndex(db, query, out, parseOutputFormat(format, {OutputFormat::Text, OutputFormat::Json}));
+    }
     DDB_DLL void addToIndex(Database *db, const std::vector<std::string> &paths, AddCallback callback = nullptr);
 
     // A file (absolute path) with the SHA-256 the caller already knows; empty for folders.

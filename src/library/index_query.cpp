@@ -19,10 +19,9 @@
 namespace ddb
 {
 
-    void listIndex(Database *db, const std::vector<std::string> &paths, std::ostream &output, const std::string &format, bool recursive, int maxRecursionDepth)
+    void listIndex(Database *db, const std::vector<std::string> &paths, std::ostream &output, OutputFormat format, bool recursive, int maxRecursionDepth)
     {
-        if (format != "json" && format != "text")
-            throw InvalidArgsException("Invalid format " + format);
+        requireOutputFormat(format, {OutputFormat::Text, OutputFormat::Json});
 
         const fs::path directory = db->rootDirectory();
         std::vector<fs::path> pathList;
@@ -99,7 +98,7 @@ namespace ddb
         writeEntries(output, outputEntries, format);
     }
 
-    void searchIndex(Database *db, const std::string &query, std::ostream &out, const std::string &format)
+    void searchIndex(Database *db, const std::string &query, std::ostream &out, OutputFormat format)
     {
         auto entries = getMatchingEntries(db, io::fromUtf8(query), 0, false);
         std::sort(entries.begin(), entries.end(), [](const Entry &l, const Entry &r)
@@ -108,34 +107,27 @@ namespace ddb
         writeEntries(out, entries, format);
     }
 
-    void writeEntries(std::ostream &out, const std::vector<Entry> &entries, const std::string &format,
+    void writeEntries(std::ostream &out, const std::vector<Entry> &entries, OutputFormat format,
                       const EntryJsonDecorator &decorate)
     {
-        if (format == "text")
+        requireOutputFormat(format, {OutputFormat::Text, OutputFormat::Json});
+
+        if (format == OutputFormat::Text)
         {
             for (const auto &e : entries)
                 out << e.path << std::endl;
+            return;
         }
-        else if (format == "json")
+
+        JsonArrayWriter writer(out);
+        for (const auto &e : entries)
         {
-            out << "[";
-            bool first = true;
-            for (const auto &e : entries)
-            {
-                json j = e;
-                if (decorate)
-                    decorate(e, j);
-                if (!first)
-                    out << ",";
-                out << j.dump();
-                first = false;
-            }
-            out << "]";
+            json j = e;
+            if (decorate)
+                decorate(e, j);
+            writer.write(j);
         }
-        else
-        {
-            throw InvalidArgsException("Unsupported format '" + format + "'");
-        }
+        writer.finish();
     }
 
     static std::string sanitize_query_param(const std::string &str)

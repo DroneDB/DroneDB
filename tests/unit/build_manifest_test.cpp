@@ -346,7 +346,7 @@ TEST(BuildManifest, ListEntriesWithBuild) {
     query.withDetails = false;
 
     std::ostringstream plain;
-    writeEntries(plain, listEntries(fx.db.get(), query), "json");
+    writeEntries(plain, listEntries(fx.db.get(), query), OutputFormat::Json);
     EXPECT_EQ(listEntriesJson(fx.db.get(), query, false), plain.str());
 
     const json listed = json::parse(listEntriesJson(fx.db.get(), query, true));

@@ -286,11 +286,11 @@ std::string listEntriesJson(Database* db, const EntryQuery& query, bool withBuil
     const auto entries = listEntries(db, query);
     std::ostringstream out;
     if (!withBuild) {
-        writeEntries(out, entries, "json");
+        writeEntries(out, entries, OutputFormat::Json);
         return out.str();
     }
     BuildStateReader reader(db);
-    writeEntries(out, entries, "json", [&reader](const Entry& e, json& j) { j["build"] = reader.read(e); });
+    writeEntries(out, entries, OutputFormat::Json, [&reader](const Entry& e, json& j) { j["build"] = reader.read(e); });
     return out.str();
 }
 
