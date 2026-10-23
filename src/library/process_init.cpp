@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <mutex>
+#include <optional>
 #include <string>
 
 #include <exiv2/exiv2.hpp>
@@ -64,59 +65,57 @@ static void initializeXmp() {
     }
 }
 
-void setupEnvironmentVariables(const std::string& exeFolder) {
-    // Setup PROJ paths (uniform for both platforms). PROJ reads PROJ_DATA as UTF-8.
-    const std::string &projDataPath = exeFolder;
+// The folder libddb's data lookup (getDataPath: DDB_DATA, the folder of the executable, the working
+// directory, the folder of the library, /usr/share/ddb, ...) finds a data file it ships in: the
+// folder of `marker`, a path relative to the data folder ("proj.db", "gdal/gdalvrt.xsd"). The marker
+// file, not the folder name, picks it: a "gdal" folder of the working directory that is not GDAL's
+// data must not be taken. Empty when there is none.
+static fs::path findDataFolder(const fs::path& marker) {
+    const fs::path found = io::getDataPath(marker);
+    return found.empty() ? fs::path() : found.parent_path();
+}
 
-    // Check for existence of proj.db
-    const auto projDbPath = io::fromUtf8(projDataPath) / "proj.db";
-    if (!fs::exists(projDbPath)) {
-        LOGW << "PROJ database not found at: " << io::toUtf8(projDbPath);
+// Whether the host set an environment variable (an empty value is none)
+static bool hostSetEnv(const char* name) {
+    const auto value = io::getEnvUtf8(name);
+    return value.has_value() && !value->empty();
+}
+
+// PROJ's database (proj.db). PROJ looks for it in PROJ_DATA (PROJ_LIB, its legacy name), else in
+// the prefix it was built for, which does not exist where the library is deployed. It ships next
+// to the other data files, in a folder the host never told PROJ about (/usr/share/ddb of the
+// package for /usr/bin/ddb or a dotnet host), so libddb gives it to GDAL's PROJ contexts, where
+// every coordinate transformation of the library is made (OSRSetPROJSearchPaths: no environment
+// variable is changed, which would have to be written in the code page on Windows). A PROJ_DATA or
+// PROJ_LIB the host set wins.
+//
+// The argument is the folder of the executable, which the data lookup finds by itself; it stays
+// for the exported signature.
+void setupEnvironmentVariables(const std::string&) {
+    if (hostSetEnv("PROJ_DATA") || hostSetEnv("PROJ_LIB")) {
+        LOGD << "PROJ data: PROJ_DATA/PROJ_LIB of the host";
+        return;
+    }
+
+    const fs::path dataFolder = findDataFolder("proj.db");
+    if (dataFolder.empty()) {
+        LOGW << "PROJ database (proj.db) not found next to the library";
         LOGW << "Coordinate transformations may fail";
-    } else {
-        LOGD << "PROJ database found at: " << io::toUtf8(projDbPath);
-
-        // Debug: Print proj.db hash
-        try {
-            const std::string projDbHash = Hash::fileSHA256(io::toUtf8(projDbPath));
-            LOGD << "proj.db hash: " << projDbHash << " (path: " << io::toUtf8(projDbPath) << ")";
-
-        } catch (const std::exception& e) {
-            LOGD << "Error computing proj.db hash: " << e.what();
-        }
+        return;
     }
 
-#ifdef WIN32
-    // Windows: uses _putenv_s for CRT synchronization
+    const std::string dataDir = io::toUtf8(dataFolder);
+    const char* const searchPaths[] = {dataDir.c_str(), nullptr};
+    OSRSetPROJSearchPaths(searchPaths);
+    LOGD << "Set the PROJ search path: " << dataDir;
 
-    // PROJ_DATA is the preferred (modern) variable
-    if (GetEnvironmentVariableW(L"PROJ_DATA", nullptr, 0) == 0) {
-        _putenv_s("PROJ_DATA", projDataPath.c_str());
-        LOGD << "Set PROJ_DATA: " << projDataPath;
+    // Debug: Print proj.db hash
+    try {
+        const std::string projDbHash = Hash::fileSHA256(io::toUtf8(dataFolder / "proj.db"));
+        LOGD << "proj.db hash: " << projDbHash << " (path: " << dataDir << ")";
+    } catch (const std::exception& e) {
+        LOGD << "Error computing proj.db hash: " << e.what();
     }
-
-    // PROJ_LIB is only a legacy fallback if PROJ_DATA is not present
-    if (GetEnvironmentVariableW(L"PROJ_LIB", nullptr, 0) == 0 &&
-        GetEnvironmentVariableW(L"PROJ_DATA", nullptr, 0) == 0) {
-        _putenv_s("PROJ_LIB", projDataPath.c_str());
-        LOGD << "Set PROJ_LIB (fallback): " << projDataPath;
-    }
-
-#else
-    // Unix: uses setenv standard
-
-    // PROJ_DATA is the preferred (modern) variable
-    if (std::getenv("PROJ_DATA") == nullptr) {
-        setenv("PROJ_DATA", projDataPath.c_str(), 1);
-        LOGD << "Set PROJ_DATA: " << projDataPath;
-    }
-
-    // PROJ_LIB is only a legacy fallback if PROJ_DATA is not present
-    if (std::getenv("PROJ_LIB") == nullptr && std::getenv("PROJ_DATA") == nullptr) {
-        setenv("PROJ_LIB", projDataPath.c_str(), 1);
-        LOGD << "Set PROJ_LIB (fallback): " << projDataPath;
-    }
-#endif
 }
 
 void setupLocaleUnified() {
@@ -194,9 +193,9 @@ void setupLogging(bool verbose) {
 // them up through GDAL_DATA, else in the prefix it was built for, which does not exist where the
 // library is deployed: every raster build then warned "Cannot find tms_NZTM2000.json
 // (GDAL_DATA is not defined)". Like the other data files, they ship in a "gdal" folder next to
-// the library or the executable (getDataPath), so a host that never sourced the environment
-// script of the package (a service, Registry under dotnet) finds them too. A GDAL_DATA the host
-// set (environment or CPLSetConfigOption) wins.
+// the library or the executable, so a host that never sourced the environment script of the
+// package (a service, Registry under dotnet) finds them too. A GDAL_DATA the host set
+// (environment or CPLSetConfigOption) wins.
 static void setupGdalData() {
     const char* configured = CPLGetConfigOption("GDAL_DATA", nullptr);
     if (configured != nullptr && *configured != '\0') {
@@ -204,15 +203,13 @@ static void setupGdalData() {
         return;
     }
 
-    // The marker file picks the folder: a "gdal" folder of the working directory that is not
-    // GDAL's data must not be taken
-    const fs::path marker = io::getDataPath(fs::path("gdal") / GdalDataMarker);
-    if (marker.empty()) {
+    const fs::path dataFolder = findDataFolder(fs::path("gdal") / GdalDataMarker);
+    if (dataFolder.empty()) {
         LOGW << "GDAL data not found (no gdal/" << GdalDataMarker << " next to the library): "
              << "some GDAL drivers may warn about missing files";
         return;
     }
-    const std::string dataDir = io::toUtf8(marker.parent_path());
+    const std::string dataDir = io::toUtf8(dataFolder);
     CPLSetConfigOption("GDAL_DATA", dataDir.c_str());
     LOGD << "Set GDAL_DATA: " << dataDir;
 }

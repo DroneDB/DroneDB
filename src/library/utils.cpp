@@ -291,12 +291,19 @@ DDB_DLL void printVersions() {
     LOGV << "CURL: " << curl_version();
     LOGV << "PDAL: " << pdal::pdalVersion;
 
-    auto pj_info = proj_info();
-    LOGV << "PROJ: " << std::string(pj_info.release) + " (search path: " + pj_info.searchpath + ")";
+    LOGV << "PROJ: " << proj_info().release;
 
-    LOGV << "PROJ_LIB = " << getEnvOrUnset("PROJ_LIB");
-    LOGV << "GDAL_DATA = " << getEnvOrUnset("GDAL_DATA");
-    LOGV << "PROJ_DATA = " << getEnvOrUnset("PROJ_DATA");
+    // The data folders libddb really uses: GDAL's config option (which falls back to the
+    // environment) and the search paths of the PROJ contexts GDAL creates (PROJ_DATA/PROJ_LIB of
+    // the host, or what the process initialization gave them), not the environment variables,
+    // which libddb no longer sets
+    const char* gdalData = CPLGetConfigOption("GDAL_DATA", nullptr);
+    LOGV << "GDAL_DATA = " << (gdalData != nullptr && *gdalData != '\0' ? gdalData : "<unset>");
+    CPLStringList projPaths(OSRGetPROJSearchPaths());
+    std::string projSearchPaths;
+    for (int i = 0; i < projPaths.Count(); i++)
+        projSearchPaths += (i > 0 ? std::string(";") : std::string()) + projPaths[i];
+    LOGV << "PROJ search paths = " << (projSearchPaths.empty() ? "<unset>" : projSearchPaths);
 
     LOGD << "Current locale (LC_ALL): " << std::setlocale(LC_ALL, nullptr);
     LOGD << "Current locale (LC_CTYPE): " << std::setlocale(LC_CTYPE, nullptr);
