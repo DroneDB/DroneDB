@@ -7,6 +7,7 @@
 #include "logger.h"
 #include "exceptions.h"
 
+#include <fstream>
 #include <algorithm>
 #include <system_error>
 

@@ -9,45 +9,26 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <ctime>
 #include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
-#include <fcntl.h>
 #include <vector>
 #include "fs.h"
 #include "ddb_export.h"
-#include "hash.h"
-
-#ifdef WIN32
-#define stat _stat
-#endif
-
-#ifdef WIN32
-#include <io.h> // _get_osfhandle
-#define LOCK_EX 2
-#define LOCK_NB 4
-#else
-#include <sys/file.h>
-#include <utime.h>
-#define _close close
-#define _unlink unlink
-#define _open open
-#endif
-
-namespace fs = std::filesystem;
 
 namespace ddb
 {
     namespace io
     {
 
-        // What one stat() of a path returns
+        // The type, size and modification time of a path (Path::getState)
         struct FileState
         {
             bool directory = false;
-            std::uintmax_t size = 0;
+            std::uintmax_t size = 0; // 0 for a directory
             double mtime = 0; // seconds, with the sub-second part the file system keeps
         };
 
@@ -71,7 +52,7 @@ namespace ddb
             DDB_DLL time_t getModifiedTime();
             DDB_DLL bool setModifiedTime(time_t mtime);
 
-            // Type, size and modification time in one system call; throws FSException
+            // Type, size and modification time; throws FSException when the path cannot be read
             DDB_DLL FileState getState();
             // Modification time in seconds, with the sub-second part the file system keeps
             DDB_DLL double getModifiedTimePrecise();
@@ -115,11 +96,6 @@ namespace ddb
             DDB_DLL void lock(const fs::path &p);
             DDB_DLL void unlock();
         };
-
-#ifdef WIN32
-        // emulate flock
-        int flock(int fd, int operation);
-#endif
 
         // Owns a temporary path (a directory tree, or a single file) and removes it when the
         // scope exits, on success and on a throw alike, unless release()d (the path was moved
@@ -188,7 +164,6 @@ namespace ddb
         // Returns true when the file was renamed.
         DDB_DLL bool moveOrCopy(const fs::path &from, const fs::path &to);
         DDB_DLL void remove(const fs::path p);
-        DDB_DLL bool exists(const fs::path p);
 
         // Whether a and b name the same file: fs::equivalent when both exist (symlinks, hard
         // links, case-insensitive names), otherwise their weakly canonical absolute forms

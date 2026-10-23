@@ -2,22 +2,21 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "mio.h"
-#include "randomutil.h"
 
-#include <iterator>
-#include <ctime>
-#include <cstring>
-#include <cstdlib>
 #include <cerrno>
 #include <chrono>
 #include <climits>
 #include <cmath>
+#include <cstdlib>
+#include <cstring>
+#include <ctime>
 #include <fstream>
 #include <iomanip>
+#include <iterator>
 #include <sstream>
 #include <thread>
 
-#include <sys/stat.h>
+#include <fcntl.h>
 
 #include "exceptions.h"
 #include "logger.h"
@@ -25,11 +24,11 @@
 #include "stringutil.h"
 
 #ifdef _WIN32
+#include <io.h>  // _wopen, _close, _wunlink, _get_osfhandle
 #include <windows.h>
 #else
-#include <sys/file.h>
-#include <unistd.h>
-#include <utime.h>
+#include <sys/file.h>  // flock
+#include <unistd.h>    // close, unlink, readlink
 #endif
 
 #ifdef __APPLE__
@@ -72,163 +71,91 @@ namespace ddb
             return false;
         }
 
+        namespace
+        {
+            // A file time as the whole seconds since the Unix epoch (rounded down, also before
+            // 1970) and the sub-second part the file system keeps. std::chrono::clock_cast is
+            // the portable C++20 spelling of the conversion: MSVC has no file_clock::to_sys.
+            struct UnixTime
+            {
+                std::chrono::seconds seconds;
+                double fraction; // [0, 1)
+            };
+
+            UnixTime toUnixTime(fs::file_time_type t)
+            {
+                const auto sys = std::chrono::clock_cast<std::chrono::system_clock>(t);
+                const auto whole = std::chrono::floor<std::chrono::seconds>(sys);
+                return {whole.time_since_epoch(),
+                        std::chrono::duration<double>(sys - whole).count()};
+            }
+
+            fs::file_time_type fromUnixTime(std::chrono::seconds seconds, std::chrono::nanoseconds nanoseconds)
+            {
+                const std::chrono::sys_time<std::chrono::nanoseconds> sys(seconds + nanoseconds);
+                return std::chrono::clock_cast<fs::file_time_type::clock>(sys);
+            }
+
+            // What a failed file system call says: "<what> <path> (<reason>)"
+            [[noreturn]] void throwFsError(const char *what, const fs::path &p, const std::error_code &ec)
+            {
+                throw FSException(std::string(what) + " " + io::toUtf8(p) + " (" + ec.message() + ")");
+            }
+        }
+
         time_t Path::getModifiedTime()
         {
-#ifdef WIN32
-            HANDLE hFile;
-            FILETIME ftModified;
-            hFile = CreateFileW(p.wstring().c_str(), 0, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_BACKUP_SEMANTICS, NULL);
-            if (hFile == INVALID_HANDLE_VALUE)
-            {
-                throw FSException("Cannot stat mtime (open) " + io::toUtf8(p) + " (errcode: " + std::to_string(GetLastError()) + ")");
-            }
-
-            if (!GetFileTime(hFile, NULL, NULL, &ftModified))
-            {
-                CloseHandle(hFile);
-                throw FSException("Cannot stat mtime (get time) " + io::toUtf8(p));
-            }
-
-            CloseHandle(hFile);
-
-            // Get the number of seconds since January 1, 1970 12:00am UTC
-            LARGE_INTEGER li;
-            li.LowPart = ftModified.dwLowDateTime;
-            li.HighPart = ftModified.dwHighDateTime;
-
-            const int64_t UNIX_TIME_START = 0x019DB1DED53E8000; // January 1, 1970 (start of Unix epoch) in "ticks"
-            const int64_t TICKS_PER_SECOND = 10000000;          // a tick is 100ns
-
-            // Convert ticks since 1/1/1970 into seconds
-            return (li.QuadPart - UNIX_TIME_START) / TICKS_PER_SECOND;
-#else
-            struct stat result;
-            if (stat(p.c_str(), &result) == 0)
-            {
-                return result.st_mtime;
-            }
-            else
-            {
-                throw FSException("Cannot stat mtime " + io::toUtf8(p));
-            }
-#endif
+            std::error_code ec;
+            const auto mtime = fs::last_write_time(p, ec);
+            if (ec)
+                throwFsError("Cannot stat mtime", p, ec);
+            return static_cast<time_t>(toUnixTime(mtime).seconds.count());
         }
 
         bool Path::setModifiedTime(time_t mtime)
         {
-#ifdef WIN32
-            if (getModifiedTime() != mtime)
-            {
-                HANDLE hFile;
-                FILETIME ftModified;
-                FILETIME ftCreated;
-                FILETIME ftAccessed;
-                hFile = CreateFileW(p.wstring().c_str(), GENERIC_WRITE, FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_WRITE_ATTRIBUTES, NULL);
-                if (hFile == INVALID_HANDLE_VALUE)
-                {
-                    throw FSException("Cannot stat (open) " + io::toUtf8(p) +
-                                      " (errcode: " + std::to_string(GetLastError()) +
-                                      ")");
-                }
-
-                if (!GetFileTime(hFile, &ftCreated, &ftAccessed, &ftModified))
-                {
-                    CloseHandle(hFile);
-                    throw FSException("Cannot stat mtime (set time) " + io::toUtf8(p));
-                }
-
-                const int64_t UNIX_TIME_START =
-                    0x019DB1DED53E8000;                    // January 1, 1970 (start of Unix epoch) in
-                                                           // "ticks"
-                const int64_t TICKS_PER_SECOND = 10000000; // a tick is 100ns
-
-                // Change only mtime
-                LARGE_INTEGER li;
-                li.QuadPart = (mtime * TICKS_PER_SECOND) + UNIX_TIME_START;
-
-                ftModified.dwLowDateTime = li.LowPart;
-                ftModified.dwHighDateTime = li.HighPart;
-
-                if (!SetFileTime(hFile, &ftCreated, &ftAccessed, &ftModified))
-                {
-                    CloseHandle(hFile);
-                    throw FSException("Cannot set mtime " + io::toUtf8(p));
-                }
-
-                CloseHandle(hFile);
-
-                return true;
-            }
-            else
-            {
+            if (getModifiedTime() == mtime)
                 return false;
-            }
-#else
-            struct stat sres;
-            if (stat(p.c_str(), &sres) != 0)
-            {
-                throw FSException("Cannot stat " + io::toUtf8(p));
-            }
 
-            if (sres.st_mtime != mtime)
-            {
-                struct utimbuf t;
-                t.modtime = mtime;
-                t.actime = sres.st_atime;
-                if (utime(p.c_str(), &t) != 0)
-                {
-                    throw FSException("Cannot set mtime " + io::toUtf8(p));
-                }
-                return true;
-            }
-            else
-            {
-                return false;
-            }
-#endif
-        }
-
-        namespace
-        {
-            constexpr int64_t WINDOWS_UNIX_TIME_START = 0x019DB1DED53E8000; // January 1, 1970 in 100ns ticks
-            constexpr int64_t WINDOWS_TICKS_PER_SECOND = 10000000;
+            std::error_code ec;
+            fs::last_write_time(p, fromUnixTime(std::chrono::seconds(mtime), std::chrono::nanoseconds(0)), ec);
+            if (ec)
+                throwFsError("Cannot set mtime", p, ec);
+            return true;
         }
 
         FileState Path::getState()
         {
-            FileState state;
-#ifdef WIN32
-            WIN32_FILE_ATTRIBUTE_DATA data;
-            if (!GetFileAttributesExW(p.wstring().c_str(), GetFileExInfoStandard, &data))
-                throw FSException("Cannot stat " + io::toUtf8(p) + " (errcode: " + std::to_string(GetLastError()) + ")");
+            std::error_code ec;
+            const fs::file_status status = fs::status(p, ec);
+            if (ec)
+                throwFsError("Cannot stat", p, ec);
 
-            LARGE_INTEGER li;
-            li.LowPart = data.ftLastWriteTime.dwLowDateTime;
-            li.HighPart = data.ftLastWriteTime.dwHighDateTime;
-            const int64_t ticks = li.QuadPart - WINDOWS_UNIX_TIME_START;
-            state.mtime = static_cast<double>(ticks / WINDOWS_TICKS_PER_SECOND) +
-                          static_cast<double>(ticks % WINDOWS_TICKS_PER_SECOND) / WINDOWS_TICKS_PER_SECOND;
-            state.directory = (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
-            state.size = (static_cast<std::uintmax_t>(data.nFileSizeHigh) << 32) | data.nFileSizeLow;
-#else
-            struct stat result;
-            if (stat(p.c_str(), &result) != 0)
-                throw FSException("Cannot stat " + io::toUtf8(p));
-#ifdef __APPLE__
-            const auto &ts = result.st_mtimespec;
-#else
-            const auto &ts = result.st_mtim;
-#endif
-            state.mtime = static_cast<double>(ts.tv_sec) + static_cast<double>(ts.tv_nsec) / 1e9;
-            state.directory = S_ISDIR(result.st_mode);
-            state.size = static_cast<std::uintmax_t>(result.st_size);
-#endif
+            FileState state;
+            state.directory = status.type() == fs::file_type::directory;
+            if (!state.directory)
+            {
+                state.size = fs::file_size(p, ec);
+                if (ec)
+                    throwFsError("Cannot stat size", p, ec);
+            }
+
+            const auto mtime = fs::last_write_time(p, ec);
+            if (ec)
+                throwFsError("Cannot stat mtime", p, ec);
+            const UnixTime t = toUnixTime(mtime);
+            state.mtime = static_cast<double>(t.seconds.count()) + t.fraction;
             return state;
         }
 
         double Path::getModifiedTimePrecise()
         {
-            return getState().mtime;
+            std::error_code ec;
+            const auto mtime = fs::last_write_time(p, ec);
+            if (ec)
+                throwFsError("Cannot stat mtime", p, ec);
+            const UnixTime t = toUnixTime(mtime);
+            return static_cast<double>(t.seconds.count()) + t.fraction;
         }
 
         bool Path::setModifiedTimePrecise(double mtime)
@@ -238,32 +165,14 @@ namespace ddb
 
             const double seconds = std::floor(mtime);
             const auto nanoseconds = std::min<long long>(std::llround((mtime - seconds) * 1e9), 999999999);
-#ifdef WIN32
-            HANDLE hFile = CreateFileW(p.wstring().c_str(), FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
-                                       OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
-            if (hFile == INVALID_HANDLE_VALUE)
-                throw FSException("Cannot set mtime (open) " + io::toUtf8(p) + " (errcode: " + std::to_string(GetLastError()) + ")");
 
-            LARGE_INTEGER li;
-            li.QuadPart = static_cast<int64_t>(seconds) * WINDOWS_TICKS_PER_SECOND + nanoseconds / 100 + WINDOWS_UNIX_TIME_START;
-            FILETIME ftModified;
-            ftModified.dwLowDateTime = li.LowPart;
-            ftModified.dwHighDateTime = li.HighPart;
-
-            // NULL keeps the creation and access times
-            const bool ok = SetFileTime(hFile, NULL, NULL, &ftModified);
-            CloseHandle(hFile);
-            if (!ok)
-                throw FSException("Cannot set mtime " + io::toUtf8(p));
-#else
-            struct timespec times[2];
-            times[0].tv_sec = 0;
-            times[0].tv_nsec = UTIME_OMIT; // keep the access time
-            times[1].tv_sec = static_cast<time_t>(seconds);
-            times[1].tv_nsec = static_cast<long>(nanoseconds);
-            if (utimensat(AT_FDCWD, p.c_str(), times, 0) != 0)
-                throw FSException("Cannot set mtime " + io::toUtf8(p));
-#endif
+            std::error_code ec;
+            fs::last_write_time(p,
+                                fromUnixTime(std::chrono::seconds(static_cast<long long>(seconds)),
+                                             std::chrono::nanoseconds(nanoseconds)),
+                                ec);
+            if (ec)
+                throwFsError("Cannot set mtime", p, ec);
             return true;
         }
 
@@ -276,33 +185,11 @@ namespace ddb
 
         std::uintmax_t Path::getSize()
         {
-#ifdef WIN32
-            HANDLE hFile;
-            hFile = CreateFileW(p.wstring().c_str(), 0, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_BACKUP_SEMANTICS, NULL);
-            if (hFile == INVALID_HANDLE_VALUE)
-            {
-                throw FSException("Cannot stat size (open) " + io::toUtf8(p) + " (errcode: " + std::to_string(GetLastError()));
-            }
-
-            LARGE_INTEGER size;
-            if (!GetFileSizeEx(hFile, &size))
-            {
-                CloseHandle(hFile);
-                throw FSException("Cannot stat size (getfilesize) " + io::toUtf8(p));
-            }
-            CloseHandle(hFile);
-            return size.QuadPart;
-#else
-            struct stat result;
-            if (stat(p.c_str(), &result) == 0)
-            {
-                return result.st_size;
-            }
-            else
-            {
-                throw FSException("Cannot stat size " + io::toUtf8(p));
-            }
-#endif
+            std::error_code ec;
+            const auto size = fs::file_size(p, ec);
+            if (ec)
+                throwFsError("Cannot stat size", p, ec);
+            return size;
         }
 
         namespace
@@ -813,25 +700,15 @@ namespace ddb
             }
         }
 
-        bool exists(const fs::path p)
-        {
-            std::error_code e;
-            bool val = fs::exists(p, e);
-            if (e.value() != 0)
-            {
-                return false;
-            }
-            return val;
-        }
-
         bool isSamePath(const fs::path &a, const fs::path &b)
         {
             if (a.empty() || b.empty())
                 return false;
-            if (io::exists(a) && io::exists(b))
+            std::error_code e;
+            if (fs::exists(a, e) && !e && fs::exists(b, e) && !e)
             {
-                std::error_code e;
-                return fs::equivalent(a, b, e) && !e;
+                const bool same = fs::equivalent(a, b, e);
+                return same && !e;
             }
 
             // Lexical form when the file system cannot resolve the path
@@ -974,71 +851,23 @@ namespace ddb
             unlock();
         }
 
-        void FileLock::lock(const fs::path &p)
+        namespace
         {
-            if (!lockFile.empty())
-                throw ddb::AppException("lock() already called");
-            lockFile = io::toUtf8(p.parent_path() / p.filename()) + ".lock"; // UTF-8
-
-#ifdef WIN32
-            fd = _wopen(toWide(lockFile).c_str(), O_CREAT, 0644);
-#else
-            fd = _open(lockFile.c_str(), O_CREAT, 0644);
-#endif
-            if (fd == -1)
+#ifdef _WIN32
+            // Blocks until this process holds an exclusive lock on the whole file (flock(LOCK_EX))
+            int lockExclusive(int fd)
             {
-                throw ddb::AppException("Cannot acquire lock " + lockFile);
-            }
+                HANDLE h = (HANDLE)_get_osfhandle(fd);
 
-            // Block
-            LOGD << "Acquiring lock " << lockFile;
-            flock(fd, LOCK_EX);
-        }
-
-        void FileLock::unlock()
-        {
-            if (fd != -1)
-            {
-                LOGD << "Freeing lock " + lockFile;
-
-                if (_close(fd) != 0)
+                if (h == (HANDLE)-1)
                 {
-                    LOGD << "Cannot close lock " << lockFile;
+                    errno = EBADF;
+                    return -1;
                 }
 
-#ifdef WIN32
-                if (_wunlink(toWide(lockFile).c_str()) != 0)
-#else
-                if (_unlink(lockFile.c_str()) != 0)
-#endif
-                {
-                    LOGD << "Cannot remove lock " << lockFile;
-                }
-
-                fd = -1;
-            }
-        }
-
-#ifdef WIN32
-        int flock(int fd, int operation)
-        {
-            HANDLE h = (HANDLE)_get_osfhandle(fd);
-
-            if (h == (HANDLE)-1)
-            {
-                errno = EBADF;
-                return -1;
-            }
-
-            operation &= ~LOCK_NB;
-
-            // We implement just LOCK_EX
-            if (LOCK_EX)
-            {
                 DWORD lower, upper;
                 OVERLAPPED ol;
 
-                int flags = LOCKFILE_EXCLUSIVE_LOCK;
                 lower = GetFileSize(h, &upper);
                 if (lower == INVALID_FILE_SIZE)
                 {
@@ -1049,15 +878,67 @@ namespace ddb
                 // start offset = 0
                 memset(&ol, 0, sizeof ol);
 
-                return LockFileEx(h, flags, 0, lower, upper, &ol);
+                return LockFileEx(h, LOCKFILE_EXCLUSIVE_LOCK, 0, lower, upper, &ol);
             }
-            else
+
+            int openLockFile(const std::string &utf8Path)
             {
-                errno = EINVAL;
-                return -1;
+                return _wopen(toWide(utf8Path).c_str(), O_CREAT, 0644);
+            }
+
+            int closeLockFile(int fd) { return _close(fd); }
+
+            int removeLockFile(const std::string &utf8Path)
+            {
+                return _wunlink(toWide(utf8Path).c_str());
+            }
+#else
+            int lockExclusive(int fd) { return ::flock(fd, LOCK_EX); }
+
+            int openLockFile(const std::string &utf8Path) { return ::open(utf8Path.c_str(), O_CREAT, 0644); }
+
+            int closeLockFile(int fd) { return ::close(fd); }
+
+            int removeLockFile(const std::string &utf8Path) { return ::unlink(utf8Path.c_str()); }
+#endif
+        }
+
+        void FileLock::lock(const fs::path &p)
+        {
+            if (!lockFile.empty())
+                throw ddb::AppException("lock() already called");
+            lockFile = io::toUtf8(p.parent_path() / p.filename()) + ".lock"; // UTF-8
+
+            fd = openLockFile(lockFile);
+            if (fd == -1)
+            {
+                throw ddb::AppException("Cannot acquire lock " + lockFile);
+            }
+
+            // Block
+            LOGD << "Acquiring lock " << lockFile;
+            lockExclusive(fd);
+        }
+
+        void FileLock::unlock()
+        {
+            if (fd != -1)
+            {
+                LOGD << "Freeing lock " + lockFile;
+
+                if (closeLockFile(fd) != 0)
+                {
+                    LOGD << "Cannot close lock " << lockFile;
+                }
+
+                if (removeLockFile(lockFile) != 0)
+                {
+                    LOGD << "Cannot remove lock " << lockFile;
+                }
+
+                fd = -1;
             }
         }
-#endif
 
     }
 }

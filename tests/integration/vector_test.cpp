@@ -12,6 +12,7 @@
 #include "gdal_inc.h"
 #include "gdal_failure_counter.h"
 
+#include <memory>
 #include <algorithm>
 #include <cctype>
 #include <map>

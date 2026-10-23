@@ -5,10 +5,14 @@
 // DQ-05: the shared string and math helpers (stringutil.h, mathutil.h).
 
 #include <cmath>
+#include <filesystem>
+#include <fstream>
+#include <functional>
 #include <set>
 #include <string>
 #include <vector>
 
+#include "exceptions.h"
 #include "gtest/gtest.h"
 #include "mathutil.h"
 #include "mio.h"
@@ -192,6 +196,98 @@ TEST(Dq05Strings, LowerExtensionIsTheOneExtensionRule) {
     EXPECT_TRUE(io::Path("a/B.TIF").checkExtension({"png", "TIF"}));
     EXPECT_FALSE(io::Path("a/B.TIF").checkExtension({"png"}));
     EXPECT_FALSE(io::Path("noext").checkExtension({"png", ""}));
+}
+
+// ---------------------------------------------------------------- file times and state (mio)
+
+class Dq05Mio : public ::testing::Test {
+   protected:
+    void SetUp() override {
+        root = fs::temp_directory_path() / ("ddb_dq05_" + randomString(10));
+        fs::create_directories(root);
+    }
+    void TearDown() override {
+        std::error_code ec;
+        fs::remove_all(root, ec);
+    }
+    fs::path file(const std::string& content = "hello") const {
+        const fs::path p = root / "a.txt";
+        std::ofstream(p) << content;
+        return p;
+    }
+    fs::path root;
+};
+
+TEST_F(Dq05Mio, ModifiedTimeKeepsTheSubSecondPart) {
+    io::Path p(file());
+    ASSERT_TRUE(p.setModifiedTimePrecise(1577934245.678901));  // 2020-01-02 03:04:05.678901 UTC
+    EXPECT_NEAR(p.getModifiedTimePrecise(), 1577934245.678901, 1e-6);
+    EXPECT_EQ(p.getModifiedTime(), static_cast<time_t>(1577934245));
+    EXPECT_FALSE(p.setModifiedTimePrecise(1577934245.678901)) << "already the file's time";
+
+    const auto state = p.getState();
+    EXPECT_FALSE(state.directory);
+    EXPECT_EQ(state.size, 5u);
+    EXPECT_DOUBLE_EQ(state.mtime, p.getModifiedTimePrecise());
+}
+
+TEST_F(Dq05Mio, ModifiedTimeInWholeSeconds) {
+    io::Path p(file());
+    EXPECT_TRUE(p.setModifiedTime(1000000000));
+    EXPECT_EQ(p.getModifiedTime(), static_cast<time_t>(1000000000));
+    EXPECT_DOUBLE_EQ(p.getModifiedTimePrecise(), 1000000000.0);
+    EXPECT_FALSE(p.setModifiedTime(1000000000));
+}
+
+// The seconds are rounded down, also before 1970 (st_mtime is: tv_nsec is never negative)
+TEST_F(Dq05Mio, ModifiedTimeBefore1970) {
+    io::Path p(file());
+    ASSERT_TRUE(p.setModifiedTimePrecise(-1.25));
+    EXPECT_EQ(p.getModifiedTime(), static_cast<time_t>(-2));
+    EXPECT_NEAR(p.getModifiedTimePrecise(), -1.25, 1e-6);
+}
+
+TEST_F(Dq05Mio, StateOfADirectoryHasNoSize) {
+    const auto state = io::Path(root).getState();
+    EXPECT_TRUE(state.directory);
+    EXPECT_EQ(state.size, 0u);
+    EXPECT_GT(state.mtime, 0.0);
+    EXPECT_TRUE(io::Path(root).setModifiedTime(1000000000));
+    EXPECT_EQ(io::Path(root).getModifiedTime(), static_cast<time_t>(1000000000));
+}
+
+TEST_F(Dq05Mio, SizeAndFailures) {
+    EXPECT_EQ(io::Path(file("abc")).getSize(), 3u);
+
+    const fs::path missing = root / "missing.txt";
+    for (const auto& call : std::vector<std::function<void()>>{
+             [&] { io::Path(missing).getModifiedTime(); },
+             [&] { io::Path(missing).getModifiedTimePrecise(); },
+             [&] { io::Path(missing).setModifiedTime(5); },
+             [&] { io::Path(missing).getState(); },
+             [&] { io::Path(missing).getSize(); }})
+        EXPECT_THROW(call(), FSException);
+    try {
+        io::Path(missing).getState();
+    } catch (const FSException& e) {
+        EXPECT_NE(std::string(e.what()).find(io::toUtf8(missing)), std::string::npos) << e.what();
+    }
+}
+
+TEST(Dq05MioPaths, IsNetworkPath) {
+    EXPECT_TRUE(io::isNetworkPath("http://a/b.tif"));
+    EXPECT_TRUE(io::isNetworkPath("https://a/b.tif"));
+    EXPECT_FALSE(io::isNetworkPath("HTTP://a"));  // the schemes are compared byte for byte, as before
+    EXPECT_FALSE(io::isNetworkPath("ftp://a"));
+    EXPECT_FALSE(io::isNetworkPath("/data/http://x"));
+    EXPECT_FALSE(io::isNetworkPath(""));
+}
+
+TEST(Dq05MioPaths, SamePathOfMissingFilesIsLexical) {
+    const fs::path base = fs::temp_directory_path() / ("ddb_dq05_" + randomString(10));
+    EXPECT_TRUE(io::isSamePath(base / "x" / ".." / "y", base / "y"));
+    EXPECT_FALSE(io::isSamePath(base / "x", base / "y"));
+    EXPECT_FALSE(io::isSamePath("", base));
 }
 
 // ---------------------------------------------------------------- random names
