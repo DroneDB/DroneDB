@@ -75,6 +75,17 @@ for file in proj.db timezone21.bin sensor_data.sqlite curl-ca-bundle.crt; do
     fi
 done
 
+# GDAL's data folder: without it every raster build warns "Cannot find tms_NZTM2000.json
+# (GDAL_DATA is not defined)" in hosts that do not source /etc/profile.d/ddb.sh. libddb looks for
+# it in /usr/share/ddb/gdal (process_init.cpp setupGdalData).
+echo "Checking for the GDAL data folder..."
+for file in gdalvrt.xsd tms_NZTM2000.json gt_datum.csv; do
+    if [ ! -f "$TEMP_DIR/usr/share/ddb/gdal/$file" ]; then
+        echo "Error: gdal/$file not found in package!"
+        exit 1
+    fi
+done
+
 # Obj2Tiles is optional, but when shipped it must actually start: it is a .NET
 # single-file app whose appended bundle is destroyed by strip/dwz, and the only
 # symptom is a runtime "Failure processing application bundle" error.

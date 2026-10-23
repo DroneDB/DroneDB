@@ -271,6 +271,13 @@ override_dh_auto_install:
 	cp \$(CURDIR)/build/sensor_data.sqlite debian/ddb/usr/share/ddb/
 	cp \$(CURDIR)/build/curl-ca-bundle.crt debian/ddb/usr/share/ddb/
 
+	# GDAL's data files (tile matrix sets, CSV tables): libddb sets GDAL_DATA to this folder at
+	# start-up (process_init.cpp setupGdalData, through getDataPath), so hosts that never source
+	# /etc/profile.d/ddb.sh (Registry under dotnet, services) find them as well. The build step
+	# stages them without the CMake files of vcpkg's share/gdal (cmake/StageGdalData.cmake).
+	@test -f \$(CURDIR)/build/gdal/gdalvrt.xsd || { echo "ERROR: build/gdal (GDAL data) is missing"; exit 1; }
+	cp -r \$(CURDIR)/build/gdal debian/ddb/usr/share/ddb/gdal
+
 	# Copy license / attribution files (redistribution compliance)
 	mkdir -p debian/ddb/usr/share/doc/ddb
 	if [ -f \$(CURDIR)/LICENSE.md ]; then \\

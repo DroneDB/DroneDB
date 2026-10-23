@@ -239,10 +239,12 @@ foreach ($lic in $licenseFiles) {
     }
 }
 
-# Copy directories (zoneinfo, plugins)
+# Copy directories (zoneinfo, plugins, gdal)
 Write-Host ""
 Write-Host "Copying directories..." -ForegroundColor Cyan
-$directories = @("zoneinfo", "plugins")
+# gdal: GDAL's data files, found next to the library (process_init.cpp setupGdalData); the build
+# stages them (cmake/StageGdalData.cmake)
+$directories = @("zoneinfo", "plugins", "gdal")
 $copiedDirs = 0
 foreach ($dir in $directories) {
     $sourcePath = Join-Path $BuildDir $dir
@@ -255,6 +257,11 @@ foreach ($dir in $directories) {
     else {
         Write-Host "  - $dir/ (not found, skipping)" -ForegroundColor Yellow
     }
+}
+
+if (-not (Test-Path (Join-Path $stagingDir "gdal\gdalvrt.xsd"))) {
+    Write-Error "The GDAL data folder (gdal) is missing from the build: rasters would warn about missing GDAL data files."
+    exit 1
 }
 
 # Count total files staged

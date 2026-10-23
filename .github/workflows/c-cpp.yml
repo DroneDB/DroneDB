@@ -274,7 +274,7 @@ jobs:
           mkdir -p build/dist build/package
 
           # Verify required files exist in build directory
-          for file in ddbcmd libddb.so libnxs.so proj.db timezone21.bin sensor_data.sqlite curl-ca-bundle.crt; do
+          for file in ddbcmd libddb.so libnxs.so proj.db timezone21.bin sensor_data.sqlite curl-ca-bundle.crt gdal/gdalvrt.xsd; do
             if [ ! -f "build/$file" ]; then
               echo "Error: Required file $file not found in build directory!"
               exit 1
@@ -288,6 +288,18 @@ jobs:
           # Test linting of Debian package
           echo "Running lintian on Debian package..."
           lintian ../ddb_*.deb || echo "Lintian reported issues, but continuing..."
+
+          # GDAL's data files are required on every build: without them each raster build warns
+          # "Cannot find tms_NZTM2000.json (GDAL_DATA is not defined)" in hosts that do not
+          # source /etc/profile.d/ddb.sh (libddb finds them in /usr/share/ddb/gdal).
+          echo "Checking that the GDAL data folder is included in the Debian package..."
+          for file in gdalvrt.xsd tms_NZTM2000.json; do
+            if ! dpkg -c build/package/ddb_*.deb | grep -E "/usr/share/ddb/gdal/${file}\$" >/dev/null; then
+              echo "  ✗ /usr/share/ddb/gdal/${file} NOT present in .deb"
+              exit 1
+            fi
+          done
+          echo "  ✓ GDAL data present in .deb"
 
           # Verify untwine packaging. Required on release tags, informational otherwise.
           echo "Checking whether untwine is included in the Debian package..."

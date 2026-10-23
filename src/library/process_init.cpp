@@ -42,6 +42,9 @@ static int configureSqlite() {
     return sqlite3_config(SQLITE_CONFIG_MEMSTATUS, 0);
 }
 
+// A file every GDAL data folder has (it names the folder in setupGdalData)
+static constexpr const char* GdalDataMarker = "gdalvrt.xsd";
+
 // Thread-safe initialization using std::once_flag
 static std::once_flag initialization_flag;
 
@@ -187,10 +190,38 @@ void setupLogging(bool verbose) {
 }
 
 
+// GDAL's own data files (tile matrix sets, CSV tables, templates; vcpkg's share/gdal). GDAL looks
+// them up through GDAL_DATA, else in the prefix it was built for, which does not exist where the
+// library is deployed: every raster build then warned "Cannot find tms_NZTM2000.json
+// (GDAL_DATA is not defined)". Like the other data files, they ship in a "gdal" folder next to
+// the library or the executable (getDataPath), so a host that never sourced the environment
+// script of the package (a service, Registry under dotnet) finds them too. A GDAL_DATA the host
+// set (environment or CPLSetConfigOption) wins.
+static void setupGdalData() {
+    const char* configured = CPLGetConfigOption("GDAL_DATA", nullptr);
+    if (configured != nullptr && *configured != '\0') {
+        LOGD << "GDAL_DATA: " << configured;
+        return;
+    }
+
+    // The marker file picks the folder: a "gdal" folder of the working directory that is not
+    // GDAL's data must not be taken
+    const fs::path marker = io::getDataPath(fs::path("gdal") / GdalDataMarker);
+    if (marker.empty()) {
+        LOGW << "GDAL data not found (no gdal/" << GdalDataMarker << " next to the library): "
+             << "some GDAL drivers may warn about missing files";
+        return;
+    }
+    const std::string dataDir = io::toUtf8(marker.parent_path());
+    CPLSetConfigOption("GDAL_DATA", dataDir.c_str());
+    LOGD << "Set GDAL_DATA: " << dataDir;
+}
+
 void initializeGDALandPROJ() {
     // Initialize GDAL and PROJ
     LOGD << "Initializing GDAL and PROJ libraries";
 
+    setupGdalData();
     GDALAllRegister();
     // GDAL's messages go to the host's log callback when one is registered (DQ-15), else to
     // GDAL's default handler as before

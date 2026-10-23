@@ -97,6 +97,22 @@ else()
     message(WARNING "PROJ data directory not found - proj.db may not be available")
 endif()
 
+# Find GDAL data folder (vcpkg: share/gdal). libddb finds it next to itself at run time
+# (setupGdalData, process_init.cpp), so it is staged in the runtime folder and packaged.
+find_path(GDAL_DATA_DIR
+  NAMES gdalvrt.xsd
+  HINTS
+    "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/share/gdal"
+    "${CMAKE_CURRENT_SOURCE_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/share/gdal"
+  PATH_SUFFIXES share/gdal
+)
+
+if(GDAL_DATA_DIR)
+    message(STATUS "Found GDAL data directory: ${GDAL_DATA_DIR}")
+else()
+    message(WARNING "GDAL data directory not found - GDAL will warn about its missing data files")
+endif()
+
 # Add custom CMake modules
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 include(MsvcReleaseDebugInfo)

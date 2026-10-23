@@ -203,13 +203,23 @@ endfunction()
 
 # ddb_stage_runtime_files(<target>): everything a binary that contains the library code needs
 # at run time, copied to DDB_RUNTIME_DIR after <target> is built: the data files getDataPath()
-# looks up (PROJ database, sensor data, timezone data) and, on Windows, all the DLLs, so ddb and
+# looks up (PROJ database, GDAL data, sensor data, timezone data) and, on Windows, all the DLLs, so ddb and
 # ddb_unit_tests (which does not depend on ddb) each run on their own.
 function(ddb_stage_runtime_files target)
     if(PROJ_DATA_DIR AND EXISTS "${PROJ_DATA_DIR}/proj.db")
         add_custom_command(TARGET ${target} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${PROJ_DATA_DIR}/proj.db" "${DDB_RUNTIME_DIR}"
             COMMENT "Copying PROJ database from ${PROJ_DATA_DIR}"
+        )
+    endif()
+
+    if(GDAL_DATA_DIR)
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND}
+                -DSOURCE_DIR=${GDAL_DATA_DIR}
+                -DDEST_DIR=${DDB_RUNTIME_DIR}/gdal
+                -P "${CMAKE_SOURCE_DIR}/cmake/StageGdalData.cmake"
+            COMMENT "Copying GDAL data from ${GDAL_DATA_DIR}"
         )
     endif()
 
