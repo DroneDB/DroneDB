@@ -266,6 +266,8 @@ if(BUILD_TESTING)
 
     # Errors and usage go to stderr and leave stdout empty (DQ-12: one handler maps what a command
     # throws to stderr and an exit code); an alias runs its command
+    # contour could not run, nor print its help: the default of --min and --max was the text "nan"
+    ddb_add_cli_test(NAME cli.ContourHelpSucceeds EXIT 0 STDOUT "--interval" ARGS contour --help)
     ddb_add_cli_test(NAME cli.UnknownCommandIsReportedOnStderr EXIT 1 EMPTY_STDOUT STDERR "Unknown command: nosuchcommand"
         ARGS nosuchcommand)
     ddb_add_cli_test(NAME cli.NoArgsPrintsTheCommandsOnStderr EXIT 1 EMPTY_STDOUT STDERR "Commands:")

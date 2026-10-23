@@ -31,10 +31,8 @@ namespace cmd
             cxxopts::value<int>()->default_value("0"))
         ("b,base", "Reference base elevation",
             cxxopts::value<double>()->default_value("0"))
-        ("min", "Drop contours below this elevation",
-            cxxopts::value<double>()->default_value("nan"))
-        ("max", "Drop contours above this elevation",
-            cxxopts::value<double>()->default_value("nan"))
+        ("min", "Drop contours below this elevation", cxxopts::value<double>())
+        ("max", "Drop contours above this elevation", cxxopts::value<double>())
         ("s,simplify", "Geometry simplification tolerance (raster CRS units)",
             cxxopts::value<double>()->default_value("0"))
         ("band", "1-based raster band index",
@@ -59,8 +57,6 @@ namespace cmd
         const auto interval = opts["interval"].as<double>();
         const auto count = opts["count"].as<int>();
         const auto base = opts["base"].as<double>();
-        const auto minElev = opts["min"].as<double>();
-        const auto maxElev = opts["max"].as<double>();
         const auto simplify = opts["simplify"].as<double>();
         const auto band = opts["band"].as<int>();
 
@@ -73,8 +69,10 @@ namespace cmd
         if (interval > 0.0) o.interval = interval;
         if (count > 0) o.count = count;
         o.baseOffset = base;
-        if (std::isfinite(minElev)) o.minElev = minElev;
-        if (std::isfinite(maxElev)) o.maxElev = maxElev;
+        // No default value: cxxopts cannot parse "nan" as a double, which made every run of the
+        // command (and its --help) fail before it did anything
+        if (opts.count("min") && std::isfinite(opts["min"].as<double>())) o.minElev = opts["min"].as<double>();
+        if (opts.count("max") && std::isfinite(opts["max"].as<double>())) o.maxElev = opts["max"].as<double>();
         o.simplifyTolerance = std::max(0.0, simplify);
         o.bandIndex = (band > 0) ? band : 1;
 

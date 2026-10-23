@@ -142,6 +142,17 @@ TEST(Dq12Registry, anUnknownNameMakesNothing) {
     EXPECT_EQ(CommandRegistry::builtin().resolve(""), "");
 }
 
+TEST(Dq12Registry, everyCommandHelpRunsThroughTheHandler) {
+    const auto &registry = CommandRegistry::builtin();
+    for (const auto &name : registry.names()) {
+        auto command = registry.create(name);
+        const auto outcome = execute(*command, {"--help"});
+        EXPECT_EQ(outcome.code, EXIT_SUCCESS) << name;
+        EXPECT_NE(outcome.out.find("Usage:"), std::string::npos) << name;
+        EXPECT_TRUE(outcome.err.empty()) << name << ": " << outcome.err;
+    }
+}
+
 // ------------------------------------------------------------------------ option helpers
 
 TEST(Dq12Options, theSharedOptionsReadTheSameInEveryCommand) {
@@ -336,6 +347,17 @@ TEST(Dq12Commands, infoWritesOnlyTheJsonToStdout) {
     ASSERT_FALSE(outcome.out.empty());
     EXPECT_EQ(outcome.out.front(), '[');
     EXPECT_EQ(outcome.out.find_last_not_of(" \r\n"), outcome.out.rfind(']'));
+}
+
+// A DEM-less raster is enough: the command must get as far as opening the file. It never did:
+// the defaults of --min and --max were the text "nan", which cxxopts cannot parse as a double
+TEST(Dq12Commands, contourReachesItsWorkInsteadOfFailingToParseItsDefaults) {
+    TestArea ta("dq12_contour", true);
+    auto command = CommandRegistry::builtin().create("contour");
+    const auto outcome = execute(*command, {"-i", "1", ta.getPath("missing.tif").string()});
+    EXPECT_EQ(outcome.code, EXIT_FAILURE);
+    EXPECT_EQ(outcome.err.find("failed to parse"), std::string::npos) << outcome.err;
+    EXPECT_EQ(outcome.err.find("Usage:"), std::string::npos) << "not a usage error: " << outcome.err;
 }
 
 }  // namespace
