@@ -23,32 +23,65 @@ namespace ddb
         }
     }
 
-    void CoordsTransformer::createTransform()
+    void CoordsTransformer::forceTraditionalAxisOrder()
     {
+        src.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
+        tgt.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
+    }
+
+    CoordsTransformer::CoordsTransformer(const OGRSpatialReference &from, const OGRSpatialReference &to, NoThrow)
+        : src(from), tgt(to)
+    {
+        forceTraditionalAxisOrder();
         ct.reset(OGRCreateCoordinateTransformation(&src, &tgt));
+    }
+
+    CoordsTransformer::CoordsTransformer(const OGRSpatialReference &from, const OGRSpatialReference &to)
+        : CoordsTransformer(from, to, NoThrow{})
+    {
         if (!ct)
             throw GDALException("Failed to create coordinate transformation");
     }
 
-    CoordsTransformer::CoordsTransformer(int epsgFrom, int epsgTo)
+    std::unique_ptr<CoordsTransformer> CoordsTransformer::tryCreate(const OGRSpatialReference &from,
+                                                                    const OGRSpatialReference &to)
     {
-        importEpsg(src, epsgFrom);
-        importEpsg(tgt, epsgTo);
-        createTransform();
+        std::unique_ptr<CoordsTransformer> t(new CoordsTransformer(from, to, NoThrow{}));
+        if (!t->ct)
+            return nullptr;
+        return t;
+    }
+
+    namespace
+    {
+        OGRSpatialReference srsOfEpsg(int epsg)
+        {
+            OGRSpatialReference srs;
+            importEpsg(srs, epsg);
+            return srs;
+        }
+
+        OGRSpatialReference srsOfWkt(const std::string &wkt)
+        {
+            OGRSpatialReference srs;
+            importWkt(srs, wkt);
+            return srs;
+        }
+    }
+
+    CoordsTransformer::CoordsTransformer(int epsgFrom, int epsgTo)
+        : CoordsTransformer(srsOfEpsg(epsgFrom), srsOfEpsg(epsgTo))
+    {
     }
 
     CoordsTransformer::CoordsTransformer(const std::string &wktFrom, int epsgTo)
+        : CoordsTransformer(srsOfWkt(wktFrom), srsOfEpsg(epsgTo))
     {
-        importWkt(src, wktFrom);
-        importEpsg(tgt, epsgTo);
-        createTransform();
     }
 
     CoordsTransformer::CoordsTransformer(int epsgFrom, const std::string &wktTo)
+        : CoordsTransformer(srsOfEpsg(epsgFrom), srsOfWkt(wktTo))
     {
-        importEpsg(src, epsgFrom);
-        importWkt(tgt, wktTo);
-        createTransform();
     }
 
     CoordsTransformer::~CoordsTransformer() = default;
@@ -66,6 +99,13 @@ namespace ddb
     {
         if (!ct->Transform(1, x, y, z))
             throw GDALException("Transform failed");
+    }
+
+    bool CoordsTransformer::tryTransform(size_t n, double *x, double *y, double *z)
+    {
+        if (n == 0)
+            return true;
+        return ct->Transform(n, x, y, z) != 0;
     }
 
     void CoordsTransformer::transform(size_t n, double *x, double *y)

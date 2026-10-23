@@ -13,6 +13,7 @@
 
 #include "cancellation.h"
 #include "stringutil.h"
+#include "coordstransformer.h"
 #include "gdal_raii.h"
 #include "gdal_priv.h"
 #include "gdal_utils.h"
@@ -301,23 +302,24 @@ namespace ddb
             throw GDALException("Raster has no projection: " + inputPath);
         }
 
-        const SrsPtr hDsSrs(OSRNewSpatialReference(wkt));
-        OSRSetAxisMappingStrategy(hDsSrs.get(), OAMS_TRADITIONAL_GIS_ORDER);
-        const SrsPtr hReqSrs(OSRNewSpatialReference(nullptr));
-        if (OSRSetFromUserInput(hReqSrs.get(), requestedSrs.c_str()) != OGRERR_NONE) {
+        const SrsPtr hDsSrs = srsFromWkt(wkt);
+        if (!hDsSrs) {
+            throw GDALException("Cannot create coord transformation");
+        }
+        const SrsPtr hReqSrs = srsFromUserInput(requestedSrs.c_str());
+        if (!hReqSrs) {
             throw InvalidArgsException("Invalid SRS: " + requestedSrs);
         }
-        OSRSetAxisMappingStrategy(hReqSrs.get(), OAMS_TRADITIONAL_GIS_ORDER);
 
         // Transform (x,y) in request SRS to dataset SRS
         double dsX = x;
         double dsY = y;
         if (!OSRIsSame(hReqSrs.get(), hDsSrs.get())) {
-            const CoordTransformPtr hT(OCTNewCoordinateTransformation(hReqSrs.get(), hDsSrs.get()));
-            if (!hT) {
+            const auto toDataset = CoordsTransformer::tryCreate(srsOf(hReqSrs), srsOf(hDsSrs));
+            if (!toDataset) {
                 throw GDALException("Cannot create coord transformation");
             }
-            if (!OCTTransform(hT.get(), 1, &dsX, &dsY, nullptr)) {
+            if (!toDataset->tryTransform(1, &dsX, &dsY)) {
                 throw GDALException("Point transformation failed");
             }
         }
@@ -327,10 +329,8 @@ namespace ddb
         {
             const SrsPtr hWgs84 = srsFromEpsg(4326);
             if (!OSRIsSame(hReqSrs.get(), hWgs84.get())) {
-                const CoordTransformPtr hT(
-                    OCTNewCoordinateTransformation(hReqSrs.get(), hWgs84.get()));
-                if (hT) {
-                    OCTTransform(hT.get(), 1, &lon, &lat, nullptr);
+                if (const auto toWgs84 = CoordsTransformer::tryCreate(srsOf(hReqSrs), srsOf(hWgs84))) {
+                    toWgs84->tryTransform(1, &lon, &lat);
                 }
             }
         }

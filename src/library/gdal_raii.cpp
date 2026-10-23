@@ -32,6 +32,28 @@ namespace ddb
         return srs;
     }
 
+    SrsPtr srsFromProj4(const char *proj4)
+    {
+        if (proj4 == nullptr || proj4[0] == '\0')
+            return nullptr;
+        SrsPtr srs(OSRNewSpatialReference(nullptr));
+        if (OSRImportFromProj4(srs.get(), proj4) != OGRERR_NONE)
+            return nullptr;
+        OSRSetAxisMappingStrategy(srs.get(), OAMS_TRADITIONAL_GIS_ORDER);
+        return srs;
+    }
+
+    SrsPtr srsFromUserInput(const char *input)
+    {
+        if (input == nullptr || input[0] == '\0')
+            return nullptr;
+        SrsPtr srs(OSRNewSpatialReference(nullptr));
+        if (OSRSetFromUserInput(srs.get(), input) != OGRERR_NONE)
+            return nullptr;
+        OSRSetAxisMappingStrategy(srs.get(), OAMS_TRADITIONAL_GIS_ORDER);
+        return srs;
+    }
+
     VsiMemFile::~VsiMemFile()
     {
         reset();

@@ -13,6 +13,7 @@
 #include "build_layout.h"
 #include "json.h"
 #include "cad.h"
+#include "coordstransformer.h"
 #include "entry.h"
 #include "entry_handlers_builtin.h"
 #include "gdal_raii.h"
@@ -90,8 +91,8 @@ void parseVectorMetadata(const fs::path &path, Entry &entry)
 
             if (!crs.srs.empty())
             {
-                cadSrs.reset(OSRNewSpatialReference(nullptr));
-                if (OSRSetFromUserInput(cadSrs.get(), crs.srs.c_str()) != OGRERR_NONE)
+                cadSrs = srsFromUserInput(crs.srs.c_str());
+                if (!cadSrs)
                     throw GDALException("Invalid CAD coordinate system " + crs.label);
             }
         }
@@ -125,8 +126,6 @@ void parseVectorMetadata(const fs::path &path, Entry &entry)
 
             if (hSrs != nullptr)
             {
-                OSRSetAxisMappingStrategy(hSrs, OAMS_TRADITIONAL_GIS_ORDER);
-
                 // Check if reprojection is needed (skip if already WGS84).
                 const char *authCode = OSRGetAuthorityCode(hSrs, nullptr);
                 const char *authName = OSRGetAuthorityName(hSrs, nullptr);
@@ -147,15 +146,15 @@ void parseVectorMetadata(const fs::path &path, Entry &entry)
 
                     if (wgs84)
                     {
-                        const CoordTransformPtr hT(
-                            OCTNewCoordinateTransformation(hSrs, wgs84.get()));
-                        if (hT)
+                        const auto toWgs84 =
+                            CoordsTransformer::tryCreate(*OGRSpatialReference::FromHandle(hSrs), srsOf(wgs84));
+                        if (toWgs84)
                         {
                             // Transform all 4 corners (a single rectangle in src
                             // CRS can become a curved quadrilateral in WGS84).
                             double xs[4] = {env.MinX, env.MaxX, env.MaxX, env.MinX};
                             double ys[4] = {env.MinY, env.MinY, env.MaxY, env.MaxY};
-                            if (OCTTransform(hT.get(), 4, xs, ys, nullptr))
+                            if (toWgs84->tryTransform(4, xs, ys))
                             {
                                 envWgs84.MinX = std::min({xs[0], xs[1], xs[2], xs[3]});
                                 envWgs84.MaxX = std::max({xs[0], xs[1], xs[2], xs[3]});

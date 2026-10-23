@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <memory>
 #include <sstream>
+#include "coordstransformer.h"
+#include "gdal_raii.h"
 #include "geo.h"
 #include "exceptions.h"
 
@@ -87,22 +89,20 @@ namespace ddb
             return std::to_string(zone.zone) + (zone.north ? "N" : "S");
         }
 
-        // WGS84 <-> UTM zone transform. The SRS objects are cloned by the transform, so
-        // they can be locals; every failure throws and nothing leaks.
-        std::unique_ptr<OGRCoordinateTransformation> createUtmTransform(const UTMZone &zone, bool toUtm)
+        // WGS84 <-> UTM zone transform; every failure throws and nothing leaks.
+        std::unique_ptr<CoordsTransformer> createUtmTransform(const UTMZone &zone, bool toUtm)
         {
-            OGRSpatialReference utm;
             const std::string proj = getProjForUTM(zone);
-            if (utm.importFromProj4(proj.c_str()) != OGRERR_NONE)
+            const SrsPtr utm = srsFromProj4(proj.c_str());
+            if (!utm)
                 throw GDALException("Cannot import spatial reference system " + proj + ". Is PROJ available?");
 
-            OGRSpatialReference wgs84;
-            if (wgs84.importFromEPSG(4326) != OGRERR_NONE)
+            const SrsPtr wgs84 = srsFromEpsg(4326);
+            if (!wgs84)
                 throw GDALException("Cannot import EPSG:4326 spatial reference system. Is PROJ available?");
 
-            std::unique_ptr<OGRCoordinateTransformation> ct(
-                toUtm ? OGRCreateCoordinateTransformation(&wgs84, &utm)
-                      : OGRCreateCoordinateTransformation(&utm, &wgs84));
+            auto ct = toUtm ? CoordsTransformer::tryCreate(srsOf(wgs84), srsOf(utm))
+                            : CoordsTransformer::tryCreate(srsOf(utm), srsOf(wgs84));
             if (!ct)
                 throw GDALException("Cannot create coordinate transformation " +
                                     std::string(toUtm ? "to" : "from") + " UTM zone " + zoneLabel(zone));
@@ -116,7 +116,7 @@ namespace ddb
 
         double geoX = longitude;
         double geoY = latitude;
-        if (!ct->Transform(1, &geoX, &geoY))
+        if (!ct->tryTransform(1, &geoX, &geoY))
             throw GDALException("Cannot transform coordinates to UTM " + std::to_string(latitude) + "," + std::to_string(longitude));
 
         return Projected2D(geoX, geoY);
@@ -133,7 +133,7 @@ namespace ddb
 
         double geoX = x;
         double geoY = y;
-        if (!ct->Transform(1, &geoX, &geoY))
+        if (!ct->tryTransform(1, &geoX, &geoY))
             throw GDALException("Cannot transform coordinates from UTM " + std::to_string(x) + "," + std::to_string(y));
 
         return Geographic2D(geoX, geoY);

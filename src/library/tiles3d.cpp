@@ -9,6 +9,7 @@
 #include <zip.h>
 
 #include "build_layout.h"
+#include "coordstransformer.h"
 #include "gdal_raii.h"
 #include "json.h"
 #include "logger.h"
@@ -97,13 +98,13 @@ namespace ddb
             if (!ecef || !wgs84)
                 return false;
 
-            const CoordTransformPtr hT(OCTNewCoordinateTransformation(ecef.get(), wgs84.get()));
-            if (!hT)
+            const auto toWgs84 = CoordsTransformer::tryCreate(srsOf(ecef), srsOf(wgs84));
+            if (!toWgs84)
                 return false;
             lon = ecefX;
             lat = ecefY;
             alt = ecefZ;
-            return OCTTransform(hT.get(), 1, &lon, &lat, &alt) == TRUE;
+            return toWgs84->tryTransform(1, &lon, &lat, &alt);
         }
 
         // Builds an equirectangular footprint (approximate at tileset scale) of the given

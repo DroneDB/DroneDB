@@ -5,6 +5,7 @@
 #include "stringutil.h"
 #include "exif.h"
 #include "exceptions.h"
+#include "coordstransformer.h"
 #include "gdal_raii.h"
 #include "logger.h"
 #include "sensorprofile.h"
@@ -691,17 +692,15 @@ void pixelToGeo(double px, double py, const double geoTransform[6],
     if (projection.empty())
         return;
 
-    const SrsPtr hSrs(OSRNewSpatialReference(nullptr));
-    const SrsPtr hWgs84(OSRNewSpatialReference(nullptr));
-    char* wktPtr = const_cast<char*>(projection.c_str());
+    const SrsPtr hSrs = srsFromWkt(projection.c_str());
+    const SrsPtr hWgs84 = srsFromEpsg(4326);
 
-    if (OSRImportFromWkt(hSrs.get(), &wktPtr) == OGRERR_NONE &&
-        OSRImportFromEPSG(hWgs84.get(), 4326) == OGRERR_NONE) {
-        const CoordTransformPtr hCT(OCTNewCoordinateTransformation(hSrs.get(), hWgs84.get()));
-        if (hCT) {
+    if (hSrs && hWgs84) {
+        const auto toWgs84 = CoordsTransformer::tryCreate(srsOf(hSrs), srsOf(hWgs84));
+        if (toWgs84) {
             double x = geoX;
             double y = geoY;
-            if (OCTTransform(hCT.get(), 1, &x, &y, nullptr)) {
+            if (toWgs84->tryTransform(1, &x, &y)) {
                 geoX = x;
                 geoY = y;
             }

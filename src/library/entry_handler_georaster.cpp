@@ -14,6 +14,7 @@
 #include "entry.h"
 #include "entry_handlers_builtin.h"
 #include "gdal_priv.h"
+#include "coordstransformer.h"
 #include "gdal_raii.h"
 #include "ogr_spatialref.h"
 
@@ -75,27 +76,24 @@ void parseGeoRasterMetadata(const fs::path &path, Entry &entry)
                 entry.properties["projection"] = wkt;
 
                 // Get lat/lon extent of raster
-                OGRSpatialReference srs;
-                OGRSpatialReference wgs84;
+                const SrsPtr srs = srsFromWkt(wkt.c_str());
+                LOGV << "OSRImportFromWkt result: " << (srs ? "Success" : "Failed");
 
-                OGRErr importResult = srs.importFromWkt(wkt.c_str());
-                LOGV << "OSRImportFromWkt result: " << (importResult == OGRERR_NONE ? "Success" : "Failed");
-
-                if (importResult != OGRERR_NONE)
+                if (!srs)
                     throw GDALException("Cannot read spatial reference system for " + io::toUtf8(path) + ". Is PROJ available?");
 
-                if (wgs84.importFromEPSG(4326) != OGRERR_NONE)
+                const SrsPtr wgs84 = srsFromEpsg(4326);
+                if (!wgs84)
                     throw GDALException("Cannot read WGS84 spatial reference system for " + io::toUtf8(path) + ". Is PROJ available?");
 
                 LOGV << "OSRImportFromEPSG result: Success";
 
-                std::unique_ptr<OGRCoordinateTransformation> transform(
-                    OGRCreateCoordinateTransformation(&srs, &wgs84));
+                const auto transform = CoordsTransformer::tryCreate(srsOf(srs), srsOf(wgs84));
                 LOGV << "Created coordinate transformation: " << (transform ? "Success" : "Failed");
 
                 if (transform)
                 {
-                    OGRCoordinateTransformationH hTransform = OGRCoordinateTransformation::ToHandle(transform.get());
+                    OGRCoordinateTransformationH hTransform = OGRCoordinateTransformation::ToHandle(transform->get());
                     LOGV << "Computing corner coordinates";
 
                     auto ul = getRasterCoordinate(hTransform, geotransform, 0.0, 0.0);

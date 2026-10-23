@@ -15,9 +15,11 @@
 //   Features, geometries GDAL's own OGRFeatureUniquePtr / OGRGeometryUniquePtr (a C geometry
 //                        handle through OGRGeometry::FromHandle); FeaturePtr for the C feature
 //                        handles (OGR_L_GetNextFeature).
-//   Spatial references   OGRSpatialReference by value in C++ code; SrsPtr for the C handles.
-//   Transforms           std::unique_ptr<OGRCoordinateTransformation> in C++ code;
-//                        CoordTransformPtr for the C handles.
+//   Spatial references   OGRSpatialReference by value in C++ code; SrsPtr for the C handles, made
+//                        by srsFromWkt/srsFromEpsg/srsFromProj4/srsFromUserInput (always with
+//                        the traditional GIS axis order).
+//   Transforms           CoordsTransformer (coordstransformer.h) for every point transformation;
+//                        CoordTransformPtr only for the C handles of GDAL's own APIs.
 //   Option lists         GDAL's own CPLStringList (pass .List() to the C API).
 //   Utility options      GdalOptionsPtr<T> (GDALTranslateOptions, GDALWarpAppOptions...).
 //   VSI memory           VsiFreePtr<T> for buffers to release with VSIFree/CPLFree;
@@ -114,6 +116,18 @@ namespace ddb
     DDB_DLL SrsPtr srsFromWkt(const char *wkt);
     // A new SRS of an EPSG code, with the traditional GIS axis order. Null when unknown.
     DDB_DLL SrsPtr srsFromEpsg(int epsg);
+    // A new SRS from a PROJ string, with the traditional GIS axis order. Null when it does not
+    // parse.
+    DDB_DLL SrsPtr srsFromProj4(const char *proj4);
+    // A new SRS from anything GDAL accepts ("EPSG:3857", a WKT, a PROJ string, a URN), with the
+    // traditional GIS axis order. Null when it does not parse.
+    DDB_DLL SrsPtr srsFromUserInput(const char *input);
+
+    // The C++ object behind an owned SRS handle (for the C++ API; the handle keeps ownership)
+    inline const OGRSpatialReference &srsOf(const SrsPtr &srs) noexcept
+    {
+        return *OGRSpatialReference::FromHandle(srs.get());
+    }
 
     struct CoordTransformDeleter
     {

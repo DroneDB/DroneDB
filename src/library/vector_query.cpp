@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "coordstransformer.h"
 #include "gdal_raii.h"
 #include "stringutil.h"
 #include "gdal_priv.h"
@@ -167,22 +168,21 @@ namespace ddb
             // we can normalize the axis mapping strategy without mutating the dataset's
             // shared SRS object.
             OGRSpatialReference layerSrs(*layerSrsRef);
-            OGRSpatialReference reqSrs;
-            if (reqSrs.SetFromUserInput(requestedSrs.c_str()) != OGRERR_NONE)
+            const SrsPtr reqSrs = srsFromUserInput(requestedSrs.c_str());
+            if (!reqSrs)
                 throw InvalidArgsException("Invalid SRS: " + requestedSrs);
-            reqSrs.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
             layerSrs.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
-            if (reqSrs.IsSame(&layerSrs))
+            if (srsOf(reqSrs).IsSame(&layerSrs))
                 return rect;
 
-            std::unique_ptr<OGRCoordinateTransformation> t(OGRCreateCoordinateTransformation(&reqSrs, &layerSrs));
+            const auto t = CoordsTransformer::tryCreate(srsOf(reqSrs), layerSrs);
             if (!t)
                 throw GDALException("Cannot create bbox coordinate transformation from " + requestedSrs +
                                     " to layer SRS");
             // Transform all 4 corners
             double xs[4] = {rect.MinX, rect.MaxX, rect.MaxX, rect.MinX};
             double ys[4] = {rect.MinY, rect.MinY, rect.MaxY, rect.MaxY};
-            if (!t->Transform(4, xs, ys))
+            if (!t->tryTransform(4, xs, ys))
                 throw GDALException("bbox coordinate transformation failed (" + requestedSrs +
                                     " -> layer SRS); refusing to apply the bbox in the wrong CRS.");
             rect.MinX = *std::min_element(xs, xs + 4);

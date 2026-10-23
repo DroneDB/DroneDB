@@ -17,6 +17,7 @@
 #include "stringutil.h"
 #include "cad.h"
 #include "cancellation.h"
+#include "coordstransformer.h"
 #include "gdal_inc.h"
 #include "json.h"
 #include "vector.h"
@@ -97,15 +98,13 @@ namespace ddb
             const SrsPtr wgs84 = srsFromEpsg(4326);
             if (!wgs84)
                 throw GDALException("computeStats: failed to import EPSG:4326 - PROJ database may be missing or corrupted");
-            OGRSpatialReferenceH hWgs84 = wgs84.get();
 
             SrsPtr source;
             if (!sourceSrs.empty())
             {
-                source.reset(OSRNewSpatialReference(nullptr));
-                if (OSRSetFromUserInput(source.get(), sourceSrs.c_str()) != OGRERR_NONE)
+                source = srsFromUserInput(sourceSrs.c_str());
+                if (!source)
                     throw GDALException("computeStats: invalid source SRS " + sourceSrs);
-                OSRSetAxisMappingStrategy(source.get(), OAMS_TRADITIONAL_GIS_ORDER);
             }
             OGRSpatialReferenceH hSource = source.get();
 
@@ -139,9 +138,8 @@ namespace ddb
                 double xs[4] = {env.MinX, env.MaxX, env.MaxX, env.MinX};
                 double ys[4] = {env.MinY, env.MinY, env.MaxY, env.MaxY};
 
-                if (hSrs && hWgs84)
+                if (hSrs)
                 {
-                    OSRSetAxisMappingStrategy(hSrs, OAMS_TRADITIONAL_GIS_ORDER);
                     const char *authCode = OSRGetAuthorityCode(hSrs, nullptr);
                     const char *authName = OSRGetAuthorityName(hSrs, nullptr);
                     bool isWgs84 = (authName && authCode &&
@@ -149,10 +147,11 @@ namespace ddb
                                     std::string(authCode) == "4326");
                     if (!isWgs84)
                     {
-                        const CoordTransformPtr hT(OCTNewCoordinateTransformation(hSrs, hWgs84));
-                        if (hT)
+                        const auto toWgs84 =
+                            CoordsTransformer::tryCreate(*OGRSpatialReference::FromHandle(hSrs), srsOf(wgs84));
+                        if (toWgs84)
                         {
-                            if (!OCTTransform(hT.get(), 4, xs, ys, nullptr))
+                            if (!toWgs84->tryTransform(4, xs, ys))
                             {
                                 LOGD << "computeStats: layer " << i << " transform failed";
                                 continue;
