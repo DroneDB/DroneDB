@@ -103,6 +103,12 @@ static inline std::vector<std::string> split(const std::string& s, const std::st
     std::string token;
     std::vector<std::string> res;
 
+    // find("") matches at every position without advancing: the text is one token
+    if (delimiter.empty()) {
+        res.push_back(s);
+        return res;
+    }
+
     while ((posEnd = s.find(delimiter, posStart)) != std::string::npos) {
         token = s.substr(posStart, posEnd - posStart);
         posStart = posEnd + delimLen;

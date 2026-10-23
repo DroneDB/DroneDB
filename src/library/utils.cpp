@@ -159,8 +159,9 @@ std::string join(const std::vector<std::string>& vec, char separator) {
 
     auto paths = ss.str();
 
-    // Remove last comma
-    paths.pop_back();
+    // Remove the last separator (an empty list has none: pop_back() would be undefined)
+    if (!paths.empty())
+        paths.pop_back();
 
     return paths;
 }
