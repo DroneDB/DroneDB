@@ -153,8 +153,10 @@ namespace
     TEST(DataDirs, registerProcessFindsTheDataWhenTheHostSetsNothing)
     {
         TestArea area(TEST_NAME, true);
-        const std::string data = io::toUtf8(makeDataFolder(area, "data"));
-        expectChildPassed(runChild(data, "", "", data + "/gdal", data));
+        const fs::path dataFolder = makeDataFolder(area, "data");
+        const std::string data = io::toUtf8(dataFolder);
+        // libddb composes the folder as a path: native separators ("\\" on Windows)
+        expectChildPassed(runChild(data, "", "", io::toUtf8(dataFolder / "gdal"), data));
     }
 
     TEST(DataDirs, registerProcessKeepsTheDataFoldersOfTheHost)
