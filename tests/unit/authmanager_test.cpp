@@ -52,6 +52,24 @@ namespace
         EXPECT_EQ(filesIn(file.parent_path()), 1u);
     }
 
+    // The password is whatever follows the first colon
+    TEST(AuthManager, passwordWithColonsRoundTrips)
+    {
+        TestArea ta(TEST_NAME, true);
+        const fs::path file = ta.getPath("auth.json");
+        for (const std::string password : {"pass:word", "a:b:c", ":leading", "trailing:", "::"})
+        {
+            SCOPED_TRACE(password);
+            {
+                AuthManager am(file);
+                am.saveCredentials("https://example.test", AuthCredentials("user", password));
+            }
+            const AuthCredentials ac = AuthManager(file).loadCredentials("https://example.test");
+            EXPECT_EQ(ac.username, "user");
+            EXPECT_EQ(ac.password, password);
+        }
+    }
+
 #ifndef _WIN32
     TEST(AuthManager, newFileIsOwnerOnly)
     {

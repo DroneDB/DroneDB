@@ -76,8 +76,10 @@ namespace ddb
         if (auth["auths"].contains(url))
         {
             const std::string userpwd = Base64::decode(auth["auths"][url]["auth"]);
-            const size_t colonpos = userpwd.rfind(":");
-            if (colonpos > 0)
+            // "user:password": a user name has no colon (HTTP Basic, RFC 7617; Registry's names are
+            // letters and digits) while a password may have any: split at the first one
+            const size_t colonpos = userpwd.find(':');
+            if (colonpos != std::string::npos && colonpos > 0)
             {
                 LOGD << "Found username and password for " << url;
                 ac.username = userpwd.substr(0, colonpos);
