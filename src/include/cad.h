@@ -11,6 +11,7 @@
 #include "fs.h"
 #include "gdal_inc.h"
 #include "mio.h"
+#include "process_runner.h"
 
 // CAD drawings (DXF, DWG) as vector sources.
 //
@@ -28,8 +29,9 @@ namespace ddb
         DDB_DLL bool isDwgFile(const fs::path &p);
 
         // Locates dwg2dxf: DDB_DWG2DXF_PATH (authoritative when set), next to the
-        // running executable, <exe>/../bin, then PATH. Empty when unavailable.
-        DDB_DLL fs::path findDwg2DxfBinary();
+        // running executable, <exe>/../bin, then PATH. Empty when unavailable. The answer is
+        // cached like the other tools' (tools::findTool); forceRefresh searches again.
+        DDB_DLL fs::path findDwg2DxfBinary(bool forceRefresh = false);
 
         // "AC1032 (R2018)" from the DWG header; throws AppException ("... is not a
         // valid DWG file") when the file does not start with a DWG version magic.
@@ -50,12 +52,15 @@ namespace ddb
         class DDB_DLL LibreDwgConverter : public ICadConverter
         {
           public:
-            // Empty binary: findDwg2DxfBinary() at conversion time.
-            explicit LibreDwgConverter(fs::path binary = fs::path());
+            // Empty binary: findDwg2DxfBinary() at conversion time. The child is started by
+            // processRunner, which must outlive the converter (a test passes a fake).
+            explicit LibreDwgConverter(fs::path binaryPath = fs::path(),
+                                       const process::IProcessRunner &processRunner = process::systemProcessRunner());
             void toDxf(const fs::path &dwg, const fs::path &outDxf) const override;
 
           private:
             fs::path binary;
+            const process::IProcessRunner *runner;
         };
 
         // A GDAL-openable DXF for a CAD file: the file itself for .dxf, a

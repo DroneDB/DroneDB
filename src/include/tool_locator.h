@@ -22,8 +22,13 @@ namespace ddb
         //   3. <exe folder>/../bin (cmake --install layouts);
         //   4. the PATH (how hosts that are not ddb, e.g. Registry, find it).
         // baseName has no extension; ".exe" is appended on Windows. Returns an
-        // empty path when the tool is not found. Not cached.
-        DDB_DLL fs::path findTool(const std::string &baseName, const char *envVar);
+        // empty path when the tool is not found.
+        //
+        // The answer is cached for the lifetime of the process, per tool and per value of
+        // envVar (so pointing the variable somewhere else is looked up again);
+        // forceRefresh=true searches again and replaces the cached answer (a tool installed
+        // after the first lookup, a test that changed the PATH).
+        DDB_DLL fs::path findTool(const std::string &baseName, const char *envVar, bool forceRefresh = false);
     }
 }
 

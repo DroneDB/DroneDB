@@ -67,8 +67,6 @@ src/library/align.cpp -Wold-style-cast 40
 src/library/align.cpp -Wunused-result 2
 src/library/authcredentials.cpp -Wshadow 2
 src/library/authmanager.cpp -Wshadow 1
-src/library/buildlod_runner.cpp -Wdangling-else 1
-src/library/cad.cpp -Wshadow 1
 src/library/cog.cpp -Wconversion 2
 src/library/contour.cpp -Wdeprecated-declarations 1
 src/library/database.cpp -Wcatch-value= 1
@@ -114,7 +112,6 @@ src/library/threadlock.cpp -Wshadow 1
 src/library/tile_encoder.cpp -Wshadow 3
 src/library/tiler.cpp -Wfloat-conversion 1
 src/library/tiler.cpp -Wshadow 5
-src/library/untwine_runner.cpp -Wdangling-else 1
 src/library/vector.cpp -Wdangling-else 1
 src/library/vis_render.cpp -Wconversion 2
 src/library/volume.cpp -Wconversion 2

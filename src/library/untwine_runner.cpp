@@ -9,8 +9,6 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <mutex>
-#include <sstream>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -20,6 +18,7 @@
 #include "mio.h"
 #include "parallel.h"
 #include "process_runner.h"
+#include "tool_locator.h"
 
 namespace ddb
 {
@@ -28,57 +27,6 @@ namespace ddb
 
         namespace
         {
-
-#ifdef _WIN32
-            constexpr const char *kBinaryName = "untwine.exe";
-            constexpr char kPathSep = ';';
-#else
-            constexpr const char *kBinaryName = "untwine";
-            constexpr char kPathSep = ':';
-#endif
-
-            std::mutex g_cacheMutex;
-            bool g_cacheValid = false;
-            fs::path g_cachedBinary;
-
-            bool isExecutableFile(const fs::path &p)
-            {
-                std::error_code ec;
-                if (!fs::exists(p, ec) || ec) return false;
-                if (!fs::is_regular_file(p, ec) || ec) return false;
-#ifdef _WIN32
-                return true;
-#else
-                // Check executable bit for current user/group/other
-                auto perms = fs::status(p, ec).permissions();
-                if (ec) return false;
-                using fs::perms;
-                return (perms & (perms::owner_exec | perms::group_exec | perms::others_exec)) != perms::none;
-#endif
-            }
-
-            fs::path searchOnPath()
-            {
-                const auto path = io::getEnvUtf8("PATH");
-                if (!path || path->empty()) return {};
-
-                const std::string &p = *path;
-                size_t start = 0;
-                while (start <= p.size())
-                {
-                    size_t end = p.find(kPathSep, start);
-                    if (end == std::string::npos) end = p.size();
-                    std::string dir = p.substr(start, end - start);
-                    if (!dir.empty())
-                    {
-                        fs::path candidate = io::fromUtf8(dir) / kBinaryName;
-                        if (isExecutableFile(candidate)) return candidate;
-                    }
-                    if (end == p.size()) break;
-                    start = end + 1;
-                }
-                return {};
-            }
 
             // Tail of the captured output included in errorOut.
             constexpr size_t kErrorTailLength = 600;
@@ -162,64 +110,7 @@ namespace ddb
 
         fs::path findUntwineBinary(bool forceRefresh)
         {
-            std::lock_guard<std::mutex> lock(g_cacheMutex);
-            if (!forceRefresh && g_cacheValid) return g_cachedBinary;
-
-            fs::path found;
-
-            // 1. Explicit override via env var. When DDB_UNTWINE_PATH is set
-            // (non-empty), it is authoritative: either it points to a usable
-            // binary or no binary is considered available (so callers can pin
-            // the backend deterministically and tests can simulate "missing").
-            if (const auto override = io::getEnvUtf8("DDB_UNTWINE_PATH"))
-            {
-                if (!override->empty())
-                {
-                    const fs::path p = io::fromUtf8(*override);
-                    if (isExecutableFile(p)) found = p;
-                    g_cachedBinary = found;
-                    g_cacheValid = true;
-                    if (!found.empty())
-                        LOGD << "Untwine binary discovered via DDB_UNTWINE_PATH at " << io::toUtf8(found);
-                    else
-                        LOGD << "DDB_UNTWINE_PATH=" << *override << " is not an executable file; treating Untwine as unavailable";
-                    return found;
-                }
-            }
-
-            // 2. Folder of the current executable (where untwine is bundled by build/packaging)
-            {
-                fs::path exeDir = io::getExeFolderPath();
-                if (!exeDir.empty())
-                {
-                    fs::path candidate = exeDir / kBinaryName;
-                    if (isExecutableFile(candidate)) found = candidate;
-                }
-            }
-
-            // 3. <install_prefix>/bin (parent of exe folder + /bin) - covers cmake --install layouts
-            if (found.empty())
-            {
-                fs::path exeDir = io::getExeFolderPath();
-                if (!exeDir.empty() && exeDir.has_parent_path())
-                {
-                    fs::path candidate = exeDir.parent_path() / "bin" / kBinaryName;
-                    if (isExecutableFile(candidate)) found = candidate;
-                }
-            }
-
-            // 4. System PATH
-            if (found.empty()) found = searchOnPath();
-
-            g_cachedBinary = found;
-            g_cacheValid = true;
-
-            if (!found.empty())
-                LOGD << "Untwine binary discovered at " << io::toUtf8(found);
-            else
-                LOGD << "Untwine binary not found in DDB_UNTWINE_PATH, exe folder, install prefix or PATH";
-
-            return found;
+            return tools::findTool("untwine", "DDB_UNTWINE_PATH", forceRefresh);
         }
 
         CopcBackend resolveBackend(CopcBackend requested)
@@ -275,11 +166,12 @@ namespace ddb
                                       const fs::path &outputFile,
                                       const fs::path &tempDir,
                                       const fs::path &binary,
-                                      const process::Options &options)
+                                      const process::Options &options,
+                                      const process::IProcessRunner &runner)
         {
             ToolRunResult result;
-            fs::path bin = binary.empty() ? findUntwineBinary() : binary;
-            if (bin.empty() || !isExecutableFile(bin))
+            const fs::path bin = binary.empty() ? findUntwineBinary() : binary;
+            if (!tools::isExecutableFile(bin))
             {
                 result.error = "untwine binary not found";
                 return result;
@@ -336,18 +228,9 @@ namespace ddb
             popts.onExtraData = [&progress](const char *data, size_t n) { progress.feed(data, n); };
             popts.onOutputLine = [](const std::string &line) { LOGD << "[untwine] " << line; };
 
-            const process::Result res = process::run(bin, args, popts);
-            if (res.descendantsTerminated)
-                LOGW << "untwine " << res.describe();
-            if (!res.success())
-            {
-                result.timedOut = res.timedOut;
-                std::ostringstream oss;
-                oss << "untwine " << res.describe();
-                if (!res.outputTail.empty()) oss << ": " << res.tail(kErrorTailLength);
-                result.error = oss.str();
-                return result;
-            }
+            const process::Result res = runner.run(bin, args, popts);
+            if (const auto failure = ToolRunResult::fromProcess("untwine", res, kErrorTailLength); !failure.succeeded)
+                return failure;
             if (!fs::exists(outputFile, ec) || ec)
             {
                 result.errorCode = ec;

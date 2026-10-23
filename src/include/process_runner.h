@@ -139,6 +139,10 @@ namespace ddb
 
             // Last maxLen bytes of outputTail ("..." prefixed when truncated).
             std::string tail(size_t maxLen) const;
+
+            // describe(), then ": " and tail(tailLength) when the child printed anything:
+            // the text of a failure message ("exited with code 3: <last output>").
+            std::string failureText(size_t tailLength) const;
         };
 
         // Runs binary (an explicit path; no PATH search) with args (argv[1..]).
@@ -146,6 +150,32 @@ namespace ddb
         DDB_DLL Result run(const fs::path &binary,
                            const std::vector<std::string> &args,
                            const Options &options = Options());
+
+        // The seam of the tool runners (Obj2Tiles, Untwine, build-lod, dwg2dxf): they start their
+        // child through this interface, so a test substitutes a fake that returns the Result it
+        // wants (an exit code, a timeout, a missing binary) or throws CanceledException, and
+        // checks the arguments and options it was given, without running a tool. Same contract
+        // as process::run().
+        class IProcessRunner
+        {
+          public:
+            virtual ~IProcessRunner() = default;
+            virtual Result run(const fs::path &binary,
+                               const std::vector<std::string> &args,
+                               const Options &options) const = 0;
+        };
+
+        // The real one: process::run().
+        class DDB_DLL SystemProcessRunner final : public IProcessRunner
+        {
+          public:
+            Result run(const fs::path &binary,
+                       const std::vector<std::string> &args,
+                       const Options &options) const override;
+        };
+
+        // A shared SystemProcessRunner, the default of the runners.
+        DDB_DLL const IProcessRunner &systemProcessRunner();
 
         // Command line for logging, quoted as the child will see it on Windows.
         DDB_DLL std::string formatCommandLine(const fs::path &binary,

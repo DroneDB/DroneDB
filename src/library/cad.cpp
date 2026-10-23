@@ -13,6 +13,7 @@
 #include <regex>
 #include <sstream>
 
+#include "env.h"
 #include "exceptions.h"
 #include "gdal_raii.h"
 #include "logger.h"
@@ -35,18 +36,8 @@ namespace ddb
 
             std::chrono::milliseconds maxRuntime()
             {
-                long long seconds = kDefaultMaxSeconds;
-                if (const char *v = std::getenv(kMaxSecondsEnv); v && *v)
-                {
-                    char *end = nullptr;
-                    const long long parsed = std::strtoll(v, &end, 10);
-                    if (end && *end == '\0' && parsed > 0)
-                        seconds = parsed;
-                    else
-                        LOGW << kMaxSecondsEnv << "=" << v << " is not a positive integer; using "
-                             << kDefaultMaxSeconds;
-                }
-                return std::chrono::seconds(seconds);
+                const auto seconds = env::readIntegerOrWarn(kMaxSecondsEnv, 1, env::kDefaultMaxInteger);
+                return std::chrono::seconds(seconds ? static_cast<long long>(*seconds) : kDefaultMaxSeconds);
             }
 
             // One display line out of a tool's output tail.
@@ -122,9 +113,9 @@ namespace ddb
             return io::Path(p).checkExtension({"dwg"});
         }
 
-        fs::path findDwg2DxfBinary()
+        fs::path findDwg2DxfBinary(bool forceRefresh)
         {
-            return tools::findTool("dwg2dxf", kConverterEnv);
+            return tools::findTool("dwg2dxf", kConverterEnv, forceRefresh);
         }
 
         std::string dwgVersion(const fs::path &dwg)
@@ -147,14 +138,15 @@ namespace ddb
             return code;
         }
 
-        LibreDwgConverter::LibreDwgConverter(fs::path binary) : binary(std::move(binary)) {}
+        LibreDwgConverter::LibreDwgConverter(fs::path binaryPath, const process::IProcessRunner &processRunner)
+            : binary(std::move(binaryPath)), runner(&processRunner) {}
 
         void LibreDwgConverter::toDxf(const fs::path &dwg, const fs::path &outDxf) const
         {
             const std::string version = dwgVersion(dwg);
 
             const fs::path bin = binary.empty() ? findDwg2DxfBinary() : binary;
-            if (bin.empty() || !tools::isExecutableFile(bin))
+            if (!tools::isExecutableFile(bin))
                 throw AppException(std::string("DWG support needs dwg2dxf (LibreDWG); set ") +
                                    kConverterEnv + " or install dwg2dxf next to ddb");
 
@@ -163,14 +155,12 @@ namespace ddb
             opts.maxRuntime = maxRuntime();
 
             LOGD << "Converting " << io::toUtf8(dwg) << " (" << version << ") to DXF with " << io::toUtf8(bin);
-            const auto r = process::run(bin, {"-y", "-o", io::toUtf8(outDxf), io::toUtf8(dwg)}, opts);
+            const auto r = runner->run(bin, {"-y", "-o", io::toUtf8(outDxf), io::toUtf8(dwg)}, opts);
             if (!r.success())
             {
                 io::assureIsRemoved(outDxf);
-                std::string detail = r.describe();
-                const std::string tail = singleLine(r.tail(300));
-                if (!tail.empty()) detail += ": " + tail;
-                throw AppException("DWG conversion failed (" + version + "): " + detail + kDxfAdvice);
+                throw AppException("DWG conversion failed (" + version + "): " + singleLine(r.failureText(300)) +
+                                   kDxfAdvice);
             }
 
             // dwg2dxf exits 0 on files it could not decode (DDB-12 RESULTS §2, §5):

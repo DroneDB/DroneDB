@@ -8,6 +8,7 @@
 #include <string>
 #include "ddb_export.h"
 #include "fs.h"
+#include "process_runner.h"
 
 namespace ddb
 {
@@ -72,6 +73,8 @@ namespace ddb
          * @param opts Options forwarded to the tool.
          * @param errorOut Actionable failure diagnostic; cleared on entry.
          * @param binary Explicit executable, or empty to use findObj2TilesBinary().
+         * @param runner Starts the child (process::systemProcessRunner() by default; a test
+         *        passes a fake).
          * @return true when the child exits successfully and produces tileset.json;
          *         false on invalid destination, missing tool/input or tool failure.
          */
@@ -79,7 +82,8 @@ namespace ddb
                                   const fs::path &outDir,
                                   const Obj2TilesOptions &opts,
                                   std::string &errorOut,
-                                  const fs::path &binary = fs::path());
+                                  const fs::path &binary = fs::path(),
+                                  const process::IProcessRunner &runner = process::systemProcessRunner());
 
     } // namespace obj2tiles
 

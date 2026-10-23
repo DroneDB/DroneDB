@@ -8,7 +8,6 @@
 #include <cstdlib>
 #include <iomanip>
 #include <locale>
-#include <mutex>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -17,10 +16,13 @@
 #include <vector>
 
 #include "build_layout.h"
+#include "env.h"
 #include "logger.h"
 #include "mio.h"
 #include "parallel.h"
 #include "process_runner.h"
+#include "tool_locator.h"
+#include "tool_runner_result.h"
 
 namespace ddb
 {
@@ -29,56 +31,6 @@ namespace ddb
 
         namespace
         {
-
-#ifdef _WIN32
-            constexpr const char *kBinaryName = "Obj2Tiles.exe";
-            constexpr char kPathSep = ';';
-#else
-            constexpr const char *kBinaryName = "Obj2Tiles";
-            constexpr char kPathSep = ':';
-#endif
-
-            std::mutex g_cacheMutex;
-            bool g_cacheValid = false;
-            fs::path g_cachedBinary;
-
-            bool isExecutableFile(const fs::path &p)
-            {
-                std::error_code ec;
-                if (!fs::exists(p, ec) || ec) return false;
-                if (!fs::is_regular_file(p, ec) || ec) return false;
-#ifdef _WIN32
-                return true;
-#else
-                auto perms = fs::status(p, ec).permissions();
-                if (ec) return false;
-                using fs::perms;
-                return (perms & (perms::owner_exec | perms::group_exec | perms::others_exec)) != perms::none;
-#endif
-            }
-
-            fs::path searchOnPath()
-            {
-                const auto path = io::getEnvUtf8("PATH");
-                if (!path || path->empty()) return {};
-
-                const std::string &p = *path;
-                size_t start = 0;
-                while (start <= p.size())
-                {
-                    size_t end = p.find(kPathSep, start);
-                    if (end == std::string::npos) end = p.size();
-                    std::string dir = p.substr(start, end - start);
-                    if (!dir.empty())
-                    {
-                        fs::path candidate = io::fromUtf8(dir) / kBinaryName;
-                        if (isExecutableFile(candidate)) return candidate;
-                    }
-                    if (end == p.size()) break;
-                    start = end + 1;
-                }
-                return {};
-            }
 
             // Format a double with the classic (period) locale and enough precision
             // for geographic coordinates. Obj2Tiles is built with InvariantGlobalization,
@@ -161,44 +113,28 @@ namespace ddb
             // Tail of the captured output included in errorOut.
             constexpr size_t kErrorTailLength = 600;
 
-            // A core count: a non-empty string of decimal digits with a value from 1 to
-            // INT32_MAX; anything else (0, negative, hex, non-numeric, overflow) is nullopt.
+            // A core count: decimal digits with a value from 1 to INT32_MAX; anything else (0,
+            // negative, hex, non-numeric, overflow) is nullopt.
             std::optional<unsigned int> parseCoreCount(const std::string &value)
             {
-                if (value.empty()) return std::nullopt;
-                uint64_t n = 0;
-                for (char c : value)
-                {
-                    if (c < '0' || c > '9') return std::nullopt;
-                    n = n * 10 + static_cast<uint64_t>(c - '0');
-                    if (n > static_cast<uint64_t>(INT32_MAX)) return std::nullopt; // overflow
-                }
-                if (n == 0) return std::nullopt;
-                return static_cast<unsigned int>(n);
+                const auto n = env::parseDecimal(value, 1, INT32_MAX);
+                if (!n) return std::nullopt;
+                return static_cast<unsigned int>(*n);
             }
 
-            // Reads DDB_OBJ2TILES_MAX_CORES (spec C1): a core count (parseCoreCount);
-            // anything else is logged and treated as unset. The value is clamped to the
-            // hardware concurrency. Returns the effective cap, or nullopt for "no cap".
+            // Reads DDB_OBJ2TILES_MAX_CORES (spec C1): a core count (parseCoreCount); anything
+            // else is logged and treated as unset. The value is clamped to the hardware
+            // concurrency. Returns the effective cap, or nullopt for "no cap".
             std::optional<unsigned int> readMaxCores()
             {
-                const char *raw = std::getenv("DDB_OBJ2TILES_MAX_CORES");
-                if (!raw || raw[0] == '\0') return std::nullopt;
+                const auto n = env::readIntegerOrWarn("DDB_OBJ2TILES_MAX_CORES", 1, INT32_MAX);
+                if (!n) return std::nullopt;
 
-                const std::string value(raw);
-                const auto n = parseCoreCount(value);
-                if (!n)
-                {
-                    LOGW << "Ignoring invalid DDB_OBJ2TILES_MAX_CORES=\"" << value
-                         << "\" (expected a positive decimal integer)";
-                    return std::nullopt;
-                }
-
-                unsigned int cap = *n;
+                auto cap = static_cast<unsigned int>(*n);
                 const auto hw = static_cast<unsigned int>(parallel::hardwareThreads());
                 if (cap > hw)
                 {
-                    LOGD << "DDB_OBJ2TILES_MAX_CORES=" << value << " exceeds the " << hw
+                    LOGD << "DDB_OBJ2TILES_MAX_CORES=" << cap << " exceeds the " << hw
                          << " available cores; clamping";
                     cap = hw;
                 }
@@ -209,71 +145,15 @@ namespace ddb
 
         fs::path findObj2TilesBinary(bool forceRefresh)
         {
-            std::lock_guard<std::mutex> lock(g_cacheMutex);
-            if (!forceRefresh && g_cacheValid) return g_cachedBinary;
-
-            fs::path found;
-
-            // 1. Explicit override via env var. When DDB_OBJ2TILES_PATH is set
-            // (non-empty), it is authoritative: either it points to a usable binary
-            // or no binary is considered available (so callers can pin the tool
-            // deterministically and tests can simulate "missing").
-            if (const auto override = io::getEnvUtf8("DDB_OBJ2TILES_PATH"))
-            {
-                if (!override->empty())
-                {
-                    const fs::path p = io::fromUtf8(*override);
-                    if (isExecutableFile(p)) found = p;
-                    g_cachedBinary = found;
-                    g_cacheValid = true;
-                    if (!found.empty())
-                        LOGD << "Obj2Tiles binary discovered via DDB_OBJ2TILES_PATH at " << io::toUtf8(found);
-                    else
-                        LOGD << "DDB_OBJ2TILES_PATH=" << *override << " is not an executable file; treating Obj2Tiles as unavailable";
-                    return found;
-                }
-            }
-
-            // 2. Folder of the current executable (where Obj2Tiles is bundled by build/packaging)
-            {
-                fs::path exeDir = io::getExeFolderPath();
-                if (!exeDir.empty())
-                {
-                    fs::path candidate = exeDir / kBinaryName;
-                    if (isExecutableFile(candidate)) found = candidate;
-                }
-            }
-
-            // 3. <install_prefix>/bin (parent of exe folder + /bin) - covers cmake --install layouts
-            if (found.empty())
-            {
-                fs::path exeDir = io::getExeFolderPath();
-                if (!exeDir.empty() && exeDir.has_parent_path())
-                {
-                    fs::path candidate = exeDir.parent_path() / "bin" / kBinaryName;
-                    if (isExecutableFile(candidate)) found = candidate;
-                }
-            }
-
-            // 4. System PATH
-            if (found.empty()) found = searchOnPath();
-
-            g_cachedBinary = found;
-            g_cacheValid = true;
-
-            if (!found.empty())
-                LOGD << "Obj2Tiles binary discovered at " << io::toUtf8(found);
-            else
-                LOGD << "Obj2Tiles binary not found in DDB_OBJ2TILES_PATH, exe folder, install prefix or PATH";
-
-            return found;
+            return tools::findTool("Obj2Tiles", "DDB_OBJ2TILES_PATH", forceRefresh);
         }
 
         bool runObj2Tiles(const fs::path &inputObj,
                            const fs::path &outDir,
                            const Obj2TilesOptions &opts,
                            std::string &errorOut,
-                           const fs::path &binary)
+                           const fs::path &binary,
+                           const process::IProcessRunner &runner)
         {
             errorOut.clear();
 
@@ -298,8 +178,8 @@ namespace ddb
                 }
             }
 
-            fs::path bin = binary.empty() ? findObj2TilesBinary() : binary;
-            if (bin.empty() || !isExecutableFile(bin))
+            const fs::path bin = binary.empty() ? findObj2TilesBinary() : binary;
+            if (!tools::isExecutableFile(bin))
             {
                 errorOut = "Obj2Tiles binary not found";
                 return false;
@@ -372,14 +252,11 @@ namespace ddb
             // Full output at debug level, line by line as it arrives.
             popts.onOutputLine = [](const std::string &line) { LOGD << "[Obj2Tiles] " << line; };
 
-            const process::Result res = process::run(bin, args, popts);
+            const process::Result res = runner.run(bin, args, popts);
 
-            if (!res.success())
+            if (const auto failure = ToolRunResult::fromProcess("Obj2Tiles", res, kErrorTailLength); !failure.succeeded)
             {
-                std::ostringstream oss;
-                oss << "Obj2Tiles " << res.describe();
-                if (!res.outputTail.empty()) oss << ": " << res.tail(kErrorTailLength);
-                errorOut = oss.str();
+                errorOut = failure.error;
 
                 LOGI << "Obj2Tiles failed: " << res.describe()
                      << (res.outputTail.empty() ? std::string(", no output")

@@ -59,7 +59,8 @@ namespace ddb
                                                   bool quality = true,
                                                   int maxSh = 1,
                                                   const fs::path &binary = fs::path(),
-                                                  const process::Options &options = process::Options());
+                                                  const process::Options &options = process::Options(),
+                                                  const process::IProcessRunner &runner = process::systemProcessRunner());
 
     } // namespace buildlod
 

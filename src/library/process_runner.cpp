@@ -1076,6 +1076,13 @@ namespace ddb
             return "..." + outputTail.substr(outputTail.size() - maxLen);
         }
 
+        std::string Result::failureText(size_t tailLength) const
+        {
+            std::string text = describe();
+            if (!outputTail.empty()) text += ": " + tail(tailLength);
+            return text;
+        }
+
         Result run(const fs::path &binary, const std::vector<std::string> &args, const Options &options)
         {
 #ifdef _WIN32
@@ -1091,6 +1098,18 @@ namespace ddb
             if (result.canceled)
                 cancel::throwIfCanceled();
             return result;
+        }
+
+        Result SystemProcessRunner::run(const fs::path &binary, const std::vector<std::string> &args,
+                                        const Options &options) const
+        {
+            return process::run(binary, args, options);
+        }
+
+        const IProcessRunner &systemProcessRunner()
+        {
+            static const SystemProcessRunner runner;
+            return runner;
         }
 
         std::string formatCommandLine(const fs::path &binary, const std::vector<std::string> &args)

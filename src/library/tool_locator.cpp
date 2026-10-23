@@ -3,7 +3,8 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "tool_locator.h"
 
-#include <cstdlib>
+#include <map>
+#include <mutex>
 #include "logger.h"
 #include "mio.h"
 
@@ -43,6 +44,59 @@ namespace ddb
                 }
                 return {};
             }
+
+            // The override variable's value, "" when it is unset or empty
+            std::string overrideValue(const char *envVar)
+            {
+                if (envVar == nullptr) return {};
+                return io::getEnvUtf8(envVar).value_or(std::string());
+            }
+
+            // The search itself, not cached
+            fs::path locateTool(const std::string &fileName, const char *envVar, const std::string &override)
+            {
+                if (!override.empty())
+                {
+                    const fs::path p = io::fromUtf8(override);
+                    if (isExecutableFile(p))
+                    {
+                        LOGD << fileName << " found via " << envVar << " at " << io::toUtf8(p);
+                        return p;
+                    }
+                    LOGD << envVar << "=" << override << " is not an executable file; treating "
+                         << fileName << " as unavailable";
+                    return {};
+                }
+
+                const fs::path exeDir = io::getExeFolderPath();
+                if (!exeDir.empty())
+                {
+                    if (const auto c = exeDir / io::fromUtf8(fileName); isExecutableFile(c))
+                    {
+                        LOGD << fileName << " found next to the executable at " << io::toUtf8(c);
+                        return c;
+                    }
+                    if (exeDir.has_parent_path())
+                        if (const auto c = exeDir.parent_path() / "bin" / io::fromUtf8(fileName); isExecutableFile(c))
+                        {
+                            LOGD << fileName << " found in the install prefix at " << io::toUtf8(c);
+                            return c;
+                        }
+                }
+
+                const fs::path onPath = searchOnPath(fileName);
+                if (onPath.empty())
+                    LOGD << fileName << " not found in " << (envVar ? envVar : "an override variable")
+                         << ", the exe folder, the install prefix or the PATH";
+                else
+                    LOGD << fileName << " found on the PATH at " << io::toUtf8(onPath);
+                return onPath;
+            }
+
+            std::mutex g_cacheMutex;
+            // Keyed by tool and override value: pointing the variable somewhere else is a new
+            // question, whatever an earlier lookup answered
+            std::map<std::string, fs::path> g_cache;
         } // namespace
 
         bool isExecutableFile(const fs::path &p)
@@ -60,35 +114,17 @@ namespace ddb
 #endif
         }
 
-        fs::path findTool(const std::string &baseName, const char *envVar)
+        fs::path findTool(const std::string &baseName, const char *envVar, bool forceRefresh)
         {
             const std::string fileName = baseName + kExeSuffix;
+            const std::string override = overrideValue(envVar);
+            const std::string key = baseName + '\n' + override;
 
-            if (envVar != nullptr)
-            {
-                if (const auto override = io::getEnvUtf8(envVar); override && !override->empty())
-                {
-                    const fs::path p = io::fromUtf8(*override);
-                    if (isExecutableFile(p))
-                    {
-                        LOGD << fileName << " found via " << envVar << " at " << io::toUtf8(p);
-                        return p;
-                    }
-                    LOGD << envVar << "=" << *override << " is not an executable file; treating "
-                         << fileName << " as unavailable";
-                    return {};
-                }
-            }
+            std::lock_guard<std::mutex> lock(g_cacheMutex);
+            if (!forceRefresh)
+                if (const auto it = g_cache.find(key); it != g_cache.end()) return it->second;
 
-            const fs::path exeDir = io::getExeFolderPath();
-            if (!exeDir.empty())
-            {
-                if (const auto c = exeDir / io::fromUtf8(fileName); isExecutableFile(c)) return c;
-                if (exeDir.has_parent_path())
-                    if (const auto c = exeDir.parent_path() / "bin" / io::fromUtf8(fileName); isExecutableFile(c)) return c;
-            }
-
-            return searchOnPath(fileName);
+            return g_cache[key] = locateTool(fileName, envVar, override);
         }
     }
 }

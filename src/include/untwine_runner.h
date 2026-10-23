@@ -61,7 +61,8 @@ namespace ddb
                                                  const fs::path &outputFile,
                                                  const fs::path &tempDir,
                                                  const fs::path &binary = fs::path(),
-                                                 const process::Options &options = process::Options());
+                                                 const process::Options &options = process::Options(),
+                                                 const process::IProcessRunner &runner = process::systemProcessRunner());
 
     } // namespace untwine
 
