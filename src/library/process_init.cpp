@@ -225,7 +225,10 @@ void initializeGDALandPROJ() {
     // GDAL's default handler as before
     ddb::logfwd::installGdalErrorHandler();
 
-    CPLSetConfigOption("OGR_CT_FORCE_TRADITIONAL_GIS_ORDER", "YES");
+    // No OGR_CT_FORCE_TRADITIONAL_GIS_ORDER: every transformation of libddb goes through
+    // CoordsTransformer, which sets the traditional axis order (x = easting or longitude) on
+    // its own copies of the two SRSs, and the SRS the code reads (srsFromWkt, srsFromEpsg...)
+    // carry that order too (DQ-06).
     CPLSetConfigOption("PROJ_NETWORK", "ON");
 
     // Disable PAM (.aux.xml) files globally - we don't need sidecar files
