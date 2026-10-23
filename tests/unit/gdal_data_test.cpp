@@ -45,7 +45,8 @@ namespace
         ASSERT_NE(dataDir, nullptr) << "GDAL_DATA is not set once the process is registered";
         if (std::string(mode) == "default")
         {
-            EXPECT_EQ(fs::path(io::fromUtf8(dataDir)), stagedGdalData());
+            // The folder of libddb's data lookup (DDB_DATA, the executable's folder, ...)
+            EXPECT_EQ(fs::path(io::fromUtf8(dataDir)), io::getDataPath(fs::path("gdal") / "gdalvrt.xsd").parent_path());
             // What GDAL's drivers do when they open a data file: the warning of every raster build
             const char *found = CPLFindFile("gdal", DataFile);
             ASSERT_NE(found, nullptr) << DataFile << " not found by GDAL (GDAL_DATA=" << dataDir << ")";
