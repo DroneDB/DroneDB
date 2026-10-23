@@ -60,7 +60,7 @@ namespace
         {
             auto db = ddb::open(root.string(), false);
             Entry e;
-            return getEntry(db.get(), path, e);
+            return loadEntry(db.get(), path, e);
         }
 
         static DatabasePool::Stats stats() { return DatabasePool::instance().stats(); }
@@ -102,11 +102,11 @@ namespace
             // Two connections at once: the write goes through the second one
             auto reader = ddb::open(root.string(), false);
             Entry e;
-            EXPECT_FALSE(getEntry(reader.get(), "b.txt", e));
+            EXPECT_FALSE(loadEntry(reader.get(), "b.txt", e));
             std::ofstream(root / "b.txt") << "bravo";
             auto writer = ddb::open(root.string(), false);
             addToIndex(writer.get(), {(root / "b.txt").string()});
-            EXPECT_TRUE(getEntry(reader.get(), "b.txt", e));
+            EXPECT_TRUE(loadEntry(reader.get(), "b.txt", e));
         }
 
         EXPECT_TRUE(has(root, "b.txt"));
@@ -341,7 +341,7 @@ namespace
         auto db = ddb::open(root.string(), false);
         db->reopen();
         Entry e;
-        EXPECT_TRUE(getEntry(db.get(), "a.txt", e));
+        EXPECT_TRUE(loadEntry(db.get(), "a.txt", e));
         db.reset();
         EXPECT_EQ(stats().idle, 1u);
     }

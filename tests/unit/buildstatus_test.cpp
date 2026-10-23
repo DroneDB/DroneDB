@@ -71,10 +71,9 @@ namespace
             EXPECT_EQ(s.path, path);
 
             Entry e;
-            EXPECT_EQ(s.exists, getEntry(fx.db.get(), path, e));
+            EXPECT_EQ(s.exists, loadEntry(fx.db.get(), path, e));
 
-            std::string subfolder;
-            const bool buildable = s.exists && isBuildable(fx.db.get(), path, subfolder);
+            const bool buildable = s.exists && isBuildable(fx.db.get(), path);
             EXPECT_EQ(s.buildable, buildable);
             EXPECT_EQ(s.complete, isBuildComplete(fx.db.get(), path));
         }

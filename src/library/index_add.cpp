@@ -172,6 +172,19 @@ namespace ddb
         return static_cast<size_t>(parallel::threadsOption("DDB_INDEX_THREADS", 8));
     }
 
+    template <class T>
+    void appendTo(std::vector<T> &target, std::vector<T> &&items) {
+        target.insert(target.end(), std::make_move_iterator(items.begin()), std::make_move_iterator(items.end()));
+    }
+
+    // What COMPUTE made of a batch of planned items, each in input order: the entries to write,
+    // the item-scoped failures (only when stopOnError is false) and the paths with nothing to write
+    struct ComputedBatch {
+        std::vector<ComputedAddItem> computed;
+        std::vector<AddItemError> errors;
+        std::vector<std::string> unchanged;
+    };
+
     // What COMPUTE did with one planned item: an entry to write, no change, or an error
     struct ComputeOutcome {
         std::optional<ComputedAddItem> computed;
@@ -254,30 +267,37 @@ namespace ddb
     //
     // `knownHashes` (relative path -> SHA-256) holds hashes the caller already trusts: those
     // files are never hashed, and an indexed one is updated when its hash differs.
-    std::vector<ComputedAddItem> computeAddEntries(const std::vector<PlannedAddItem> &planned,
-                                                    const fs::path &directory, bool stopOnError,
-                                                    std::vector<AddItemError> &errors,
-                                                    std::vector<std::string> &unchanged,
-                                                    const KnownHashes *knownHashes = nullptr) {
+    ComputedBatch computeAddEntries(const std::vector<PlannedAddItem> &planned,
+                                    const fs::path &directory, bool stopOnError,
+                                    const KnownHashes *knownHashes = nullptr) {
         std::vector<ComputeOutcome> outcomes(planned.size());
         parallel::forEachIndex(planned.size(), indexThreads(), [&](size_t i) {
             outcomes[i] = computeAddEntry(planned[i], directory, stopOnError, knownHashes);
         });
 
-        std::vector<ComputedAddItem> computed;
-        computed.reserve(planned.size());
+        ComputedBatch batch;
+        batch.computed.reserve(planned.size());
         for (size_t i = 0; i < outcomes.size(); i++) {
             auto &outcome = outcomes[i];
             if (outcome.computed)
-                computed.push_back(std::move(*outcome.computed));
+                batch.computed.push_back(std::move(*outcome.computed));
             else if (outcome.error)
-                errors.push_back(std::move(*outcome.error));
+                batch.errors.push_back(std::move(*outcome.error));
             else if (outcome.unchanged)
-                unchanged.push_back(planned[i].relPath);
+                batch.unchanged.push_back(planned[i].relPath);
         }
 
-        return computed;
+        return batch;
     }
+
+    // What COMMIT did with the computed items: the entries written (Entry + isUpdate), the files
+    // that changed under us (absolute paths, to re-plan) and the paths a concurrent writer had
+    // already committed identically
+    struct CommitOutcome {
+        std::vector<std::pair<Entry, bool>> accepted;
+        std::vector<fs::path> conflicts;
+        std::vector<std::string> unchanged;
+    };
 
     // COMMIT: Transaction(Immediate); re-verify (mtime,size) to guard against a file that
     // changed between COMPUTE and COMMIT (TOCTOU), then
@@ -285,13 +305,11 @@ namespace ddb
     // Items whose (mtime,size) changed since COMPUTE are reported via `conflicts` (absolute
     // paths) instead of being written with stale metadata; the caller decides whether to
     // re-plan them (addToIndexEx) or let them self-heal on the next add/rescan (addToIndex).
-    void commitAddEntries(Database *db, const std::vector<ComputedAddItem> &computed,
-                          const fs::path &directory, AddCallback callback,
-                          std::vector<std::pair<Entry, bool>> *accepted,
-                          std::vector<fs::path> *conflicts,
-                          std::vector<std::string> *unchanged) {
+    CommitOutcome commitAddEntries(Database *db, const std::vector<ComputedAddItem> &computed,
+                                   const fs::path &directory, const AddCallback &callback) {
+        CommitOutcome outcome;
         if (computed.empty())
-            return;
+            return outcome;
 
         auto insertQ = db->query(
             "INSERT INTO entries (path, hash, type, properties, mtime, size, depth, "
@@ -303,7 +321,7 @@ namespace ddb
 
         Transaction tx(db, Transaction::Mode::Immediate);
 
-        // Buffered locally and only merged into `accepted` after a successful commit, so a
+        // Buffered locally and only merged into the outcome after a successful commit, so a
         // canceled/rolled-back batch never reports rolled-back writes as committed.
         std::vector<std::pair<Entry, bool>> tentative;
 
@@ -325,8 +343,7 @@ namespace ddb
             if (changed) {
                 LOGD << "Skipping '" << ci.entry.path
                     << "': changed between compute and commit (will be re-detected next add)";
-                if (conflicts != nullptr)
-                    conflicts->push_back(absPath);
+                outcome.conflicts.push_back(absPath);
                 continue;
             }
 
@@ -346,8 +363,7 @@ namespace ddb
                     // Unchanged — a concurrent writer already committed the identical
                     // row. Report the path (null-guarded) so the completeness contract
                     // holds: every input lands in exactly one of entries/unchanged/errors.
-                    if (unchanged != nullptr)
-                        unchanged->push_back(ci.entry.path);
+                    outcome.unchanged.push_back(ci.entry.path);
                     continue;
                 }
                 actuallyInsert = false; // treat as UPDATE instead
@@ -355,8 +371,7 @@ namespace ddb
                 // Planned as UPDATE but row was deleted — re-plan via conflict retry
                 LOGD << "Skipping '" << ci.entry.path
                     << "': update plan stale, row no longer exists (will be re-planned)";
-                if (conflicts != nullptr)
-                    conflicts->push_back(absPath);
+                outcome.conflicts.push_back(absPath);
                 continue;
             }
 
@@ -384,14 +399,14 @@ namespace ddb
                     // tx's destructor rolls back; log it explicitly so a canceled batch
                     // is never a silent loss (C8).
                     LOGD << "Add operation canceled by callback, rolling back transaction";
-                    return;
+                    return outcome;
                 }
         }
 
         tx.commit();
 
-        if (accepted != nullptr)
-            accepted->insert(accepted->end(), tentative.begin(), tentative.end());
+        outcome.accepted = std::move(tentative);
+        return outcome;
     }
 
     } // namespace
@@ -417,9 +432,10 @@ namespace ddb
         const auto updateQ = db->query(kUpdateEntrySql);
         for (const auto &prj : prjPaths) {
             for (const auto &mainPath : findSidecarMains(db, prj)) {
-                Entry old;
-                if (!getEntry(db, mainPath, old))
+                const auto found = getEntry(db, mainPath);
+                if (!found)
                     continue;
+                const Entry &old = *found;
 
                 try {
                     Entry fresh;
@@ -463,16 +479,13 @@ namespace ddb
         // path it adds): walking a folder could pick up files it did not add.
         auto pathList = getIndexPathList(directory, paths, true, /*recursive=*/knownHashes == nullptr);
 
-        std::vector<AddItemError> discardedErrors;
-        std::vector<std::string> discardedUnchanged;
-        auto planned = planAddCandidates(db, pathList, directory);
-        auto computed = computeAddEntries(planned, directory, /*stopOnError=*/true, discardedErrors, discardedUnchanged,
-                                          knownHashes);
-        std::vector<std::pair<Entry, bool>> accepted;
-        commitAddEntries(db, computed, directory, callback, &accepted, nullptr, nullptr);
+        // stopOnError: nothing lands in errors; unchanged and conflicting paths are not reported
+        const auto planned = planAddCandidates(db, pathList, directory);
+        const auto batch = computeAddEntries(planned, directory, /*stopOnError=*/true, knownHashes);
+        const auto committed = commitAddEntries(db, batch.computed, directory, callback);
 
         std::vector<std::string> prjPaths;
-        for (const auto &a : accepted)
+        for (const auto &a : committed.accepted)
             if (isPrjPath(a.first.path)) prjPaths.push_back(a.first.path);
         refreshPrjMains(db, directory, prjPaths, false);
     }
@@ -507,15 +520,17 @@ namespace ddb
         const size_t firstNewEntry = result.entries.size();
 
         for (int pass = 0; pass <= maxRetries && !pathList.empty(); ++pass) {
-            auto planned = planAddCandidates(db, pathList, directory);
-            auto computed = computeAddEntries(planned, directory, options.stopOnError,
-                                              result.errors, result.unchanged, knownHashes);
+            const auto planned = planAddCandidates(db, pathList, directory);
+            auto batch = computeAddEntries(planned, directory, options.stopOnError, knownHashes);
+            // Reported even when the commit throws: they are final
+            appendTo(result.errors, std::move(batch.errors));
+            appendTo(result.unchanged, std::move(batch.unchanged));
 
-            std::vector<fs::path> conflicts;
-            commitAddEntries(db, computed, directory, callback, &result.entries, &conflicts,
-                             &result.unchanged);
+            auto committed = commitAddEntries(db, batch.computed, directory, callback);
+            appendTo(result.entries, std::move(committed.accepted));
+            appendTo(result.unchanged, std::move(committed.unchanged));
 
-            pathList = conflicts; // bounded re-plan: only what actually changed under us
+            pathList = std::move(committed.conflicts); // bounded re-plan: only what actually changed under us
         }
 
         for (auto &p : pathList) {

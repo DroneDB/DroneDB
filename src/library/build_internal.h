@@ -24,8 +24,8 @@
 
 namespace ddb {
 
-// Reads an indexed entry by path; false when there is none.
-using EntryLookup = std::function<bool(const std::string&, Entry&)>;
+// Reads an indexed entry by path; nothing when there is none.
+using EntryLookup = std::function<std::optional<Entry>(const std::string&)>;
 // The indexed paths that start with a prefix (byte-wise), in any order.
 using PrefixLookup = std::function<std::vector<std::string>(const std::string&)>;
 
@@ -65,8 +65,8 @@ std::vector<std::string> indexedPathsWithPrefix(Database* db, const std::string&
 class IndexBuildTargets {
   public:
     explicit IndexBuildTargets(Database* db);
-    // Reads path, hash and type of the entry at path; false when there is none
-    bool lookup(const std::string& path, Entry& out);
+    // Reads path, hash and type of the entry at path; nothing when there is none
+    std::optional<Entry> lookup(const std::string& path);
     // resolveBuildTarget() over this index
     std::optional<BuildTarget> resolve(const Entry& e);
 
@@ -126,8 +126,8 @@ class BuildStateReader {
   public:
     explicit BuildStateReader(Database* db, const BuildProbe& probe = filesystemBuildProbe());
 
-    // Reads path, hash and type of the entry at path; false when there is none
-    bool lookup(const std::string& path, Entry& out) { return targets_.lookup(path, out); }
+    // Reads path, hash and type of the entry at path; nothing when there is none
+    std::optional<Entry> lookup(const std::string& path) { return targets_.lookup(path); }
     // The build state of an indexed entry (path, hash and type are read)
     EntryBuild read(const Entry& e);
 

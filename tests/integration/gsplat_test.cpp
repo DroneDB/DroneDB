@@ -701,7 +701,7 @@ TEST(gsplat, buildWithoutBuildLodFailsWithoutPending) {
     ddb::addToIndex(db.get(), {ply.string()});
     const auto rel = fs::relative(ply, dsFolder).generic_string();
     Entry e;
-    ASSERT_TRUE(ddb::getEntry(db.get(), rel, e));
+    ASSERT_TRUE(loadEntry(db.get(), rel, e));
     ASSERT_EQ(e.type, EntryType::GaussianSplat);
 
     const std::string missing = (ta.getFolder("nope") / "build-lod-missing").string();
@@ -1020,12 +1020,10 @@ TEST(gsplat, buildPipelineIntegration) {
     const auto rel = fs::relative(ply, dsFolder).string();
 
     Entry e;
-    ASSERT_TRUE(ddb::getEntry(db.get(), rel, e));
+    ASSERT_TRUE(loadEntry(db.get(), rel, e));
     EXPECT_EQ(e.type, EntryType::GaussianSplat);
 
-    std::string subfolder;
-    EXPECT_TRUE(ddb::isBuildable(db.get(), rel, subfolder));
-    EXPECT_EQ(subfolder, "gsplat");
+    EXPECT_EQ(ddb::buildSubfolder(db.get(), rel), "gsplat");
 
     EXPECT_FALSE(ddb::isBuildComplete(db.get(), rel));
     ddb::build(db.get(), rel, "", false);

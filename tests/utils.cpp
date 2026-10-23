@@ -227,16 +227,32 @@ void insertEntry(ddb::Database *db, const std::string &path, const std::string &
     q->execute();
 }
 
+bool loadEntry(ddb::Database *db, const std::string &path, ddb::Entry &out)
+{
+    auto entry = ddb::getEntry(db, path);
+    if (entry)
+        out = std::move(*entry);
+    return entry.has_value();
+}
+
+bool loadEntryWithMeta(ddb::Database *db, const std::string &path, ddb::Entry &out)
+{
+    auto entry = ddb::getEntryWithMeta(db, path);
+    if (entry)
+        out = std::move(*entry);
+    return entry.has_value();
+}
+
 std::string hashOf(ddb::Database *db, const std::string &path)
 {
     ddb::Entry e;
-    return ddb::getEntry(db, path, e) ? e.hash : "<missing>";
+    return loadEntry(db, path, e) ? e.hash : "<missing>";
 }
 
 std::string indexedHash(ddb::Database *db, const std::string &path)
 {
     ddb::Entry e;
-    EXPECT_TRUE(ddb::getEntry(db, path, e)) << path << " is not indexed";
+    EXPECT_TRUE(loadEntry(db, path, e)) << path << " is not indexed";
     return e.hash;
 }
 

@@ -144,7 +144,7 @@ namespace
         q = {};
         q.folder = "dir1/c.jpg";
         Entry expected;
-        ASSERT_TRUE(getEntryWithMeta(db.get(), "dir1/c.jpg", expected));
+        ASSERT_TRUE(loadEntryWithMeta(db.get(), "dir1/c.jpg", expected));
         const auto full = listEntries(db.get(), q);
         ASSERT_EQ(full.size(), 1u);
         EXPECT_EQ(full[0].toJSONString(), expected.toJSONString());

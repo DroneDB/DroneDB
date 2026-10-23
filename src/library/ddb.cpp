@@ -535,10 +535,10 @@ DDBErr DDBGet(const char* ddbPath, const char* path, char** output) {
 
         const auto db = ddb::open(std::string(ddbPath), false);
 
-        ddb::Entry entry;
-        if (!ddb::getEntryWithMeta(db.get(), std::string(path), entry))
+        const auto entry = ddb::getEntryWithMeta(db.get(), std::string(path));
+        if (!entry)
             throw EntryNotFoundException("No entry " + std::string(path));
-        return entry.toJSONString();
+        return entry->toJSONString();
     });
 }
 
@@ -1134,8 +1134,7 @@ DDBErr DDBIsBuildable(const char* ddbPath, const char* path, bool* isBuildable) 
         requireOutput(isBuildable, "Buildable parameter is null");
 
         const auto ddb = ddb::open(std::string(ddbPath), true);
-        std::string subfolder;
-        return ddb::isBuildable(ddb.get(), std::string(path), subfolder);
+        return ddb::isBuildable(ddb.get(), std::string(path));
     });
 }
 

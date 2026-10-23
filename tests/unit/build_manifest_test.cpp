@@ -99,9 +99,8 @@ struct ManifestFixture : IndexFixture {
         BuildStateReader reader(db.get(), probe);
         std::map<std::string, EntryBuild> builds;
         for (const auto& path : kPaths) {
-            Entry e;
-            if (reader.lookup(path, e))
-                builds[path] = reader.read(e);
+            if (const auto e = reader.lookup(path))
+                builds[path] = reader.read(*e);
         }
         return builds;
     }
@@ -244,12 +243,12 @@ TEST(BuildManifest, ProbeBudget) {
 
     for (const auto& path : kPaths) {
         SCOPED_TRACE(path);
-        Entry e;
-        if (!reader.lookup(path, e))
+        const auto e = reader.lookup(path);
+        if (!e)
             continue;
         CountingProbe probe;
         BuildStateReader counted(fx.db.get(), probe);
-        const EntryBuild b = counted.read(e);
+        const EntryBuild b = counted.read(*e);
 
         if (!b.buildable) {
             EXPECT_EQ(probe.total(), 0) << "a non-buildable entry costs no filesystem query";
@@ -267,11 +266,11 @@ TEST(BuildManifest, ProbeBudget) {
     }
 
     // A never-built entry: its build root listing and its marker read, nothing else
-    Entry dsm;
-    ASSERT_TRUE(reader.lookup("dsm.tif", dsm));
+    const auto dsm = reader.lookup("dsm.tif");
+    ASSERT_TRUE(dsm);
     CountingProbe probe;
     BuildStateReader counted(fx.db.get(), probe);
-    counted.read(dsm);
+    counted.read(*dsm);
     EXPECT_EQ(probe.total(), 2);
 }
 

@@ -135,8 +135,9 @@ namespace
             R"("boundingVolume":{"box":[0,0.07,0.02,0.075,0,0,0,-0.08,0,0,0,0.028]},"geometricError":0}})";
         const fs::path ttz = makeTtz(ta, "local", json);
 
-        Tiles3DInfo info;
-        ASSERT_TRUE(getTiles3DInfo(ttz.string(), info));
+        const auto found = getTiles3DInfo(ttz.string());
+        ASSERT_TRUE(found);
+        const Tiles3DInfo &info = *found;
         EXPECT_FALSE(info.georeferenced);
     }
 
@@ -152,8 +153,9 @@ namespace
             R"("geometricError":0}})";
         const fs::path ttz = makeTtz(ta, "region", json);
 
-        Tiles3DInfo info;
-        ASSERT_TRUE(getTiles3DInfo(ttz.string(), info));
+        const auto found = getTiles3DInfo(ttz.string());
+        ASSERT_TRUE(found);
+        const Tiles3DInfo &info = *found;
         EXPECT_TRUE(info.georeferenced);
         EXPECT_TRUE(info.hasBounds);
         // 0.1603 rad ~ 9.18 deg, 0.7934 rad ~ 45.46 deg.
@@ -175,8 +177,9 @@ namespace
             R"("boundingVolume":{"box":[0,0,0,1,0,0,0,1,0,0,0,1]},"geometricError":0}})";
         const fs::path ttz = makeTtz(ta, "ecef", json);
 
-        Tiles3DInfo info;
-        ASSERT_TRUE(getTiles3DInfo(ttz.string(), info));
+        const auto found = getTiles3DInfo(ttz.string());
+        ASSERT_TRUE(found);
+        const Tiles3DInfo &info = *found;
         EXPECT_TRUE(info.georeferenced);
         EXPECT_NEAR(info.centerLon, 9.19, 0.5);
         EXPECT_NEAR(info.centerLat, 45.46, 0.5);

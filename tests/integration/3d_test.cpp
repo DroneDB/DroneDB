@@ -1033,7 +1033,7 @@ namespace
         ds.add({"sub/model.gltf", "sub/tex.png"});
 
         Entry e;
-        ASSERT_TRUE(ddb::getEntry(ds.db.get(), "sub/model.gltf", e));
+        ASSERT_TRUE(loadEntry(ds.db.get(), "sub/model.gltf", e));
         ASSERT_EQ(e.type, EntryType::Model);
 
         ASSERT_NO_THROW(ddb::build(ds.db.get(), "sub/model.gltf", "", false));
@@ -1077,7 +1077,7 @@ namespace
         ds.add({"sub/model.gltf", "shared/tex.png"});
 
         Entry e;
-        ASSERT_TRUE(ddb::getEntry(ds.db.get(), "sub/model.gltf", e));
+        ASSERT_TRUE(loadEntry(ds.db.get(), "sub/model.gltf", e));
         ASSERT_EQ(e.type, EntryType::Model);
         expectGltfBuildFailsWithoutPending(ds, "sub/model.gltf", "../shared/tex.png");
 

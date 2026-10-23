@@ -268,11 +268,12 @@ json getBuildArtifactsJson(Database* db, const std::vector<std::string>& paths) 
     BuildStateReader reader(db);
     json result = json::array();
     for (const auto& path : paths) {
-        Entry e;
-        if (!reader.lookup(path, e)) {
+        const auto found = reader.lookup(path);
+        if (!found) {
             result.push_back({{"path", path}, {"exists", false}});
             continue;
         }
+        const Entry& e = *found;
         result.push_back({{"path", path},
                           {"exists", true},
                           {"hash", stringOrNull(e.hash)},

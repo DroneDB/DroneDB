@@ -523,9 +523,7 @@ TEST(PendingBuild, ShapefileSidecarInSubfolderBuildsMainFile) {
     Dataset ds(TEST_NAME);
     deferShapefileInSubfolder(ds);
 
-    std::string subfolder;
-    EXPECT_TRUE(ddb::isBuildable(ds.db.get(), "sub/layer.shx", subfolder));
-    EXPECT_EQ(subfolder, "vec");
+    EXPECT_EQ(ddb::buildSubfolder(ds.db.get(), "sub/layer.shx"), "vec");
 
     ASSERT_NO_THROW(ddb::build(ds.db.get(), "sub/layer.shx", "", false));
 
@@ -580,7 +578,7 @@ TEST(PendingBuild, PrimaryIdleTimeoutRetainsMarkerThroughFailedEntryBuild) {
     }
     ds.add({"sample.splat"});
     Entry entry;
-    ASSERT_TRUE(getEntry(ds.db.get(), "sample.splat", entry));
+    ASSERT_TRUE(loadEntry(ds.db.get(), "sample.splat", entry));
     ASSERT_EQ(entry.type, EntryType::GaussianSplat);
     ds.writePendingMarker("sample.splat", 1, {"previous dependency hint"});
     const auto realTool = buildlod::findBuildLodBinary(true);

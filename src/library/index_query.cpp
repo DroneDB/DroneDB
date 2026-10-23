@@ -287,8 +287,8 @@ namespace ddb
 
         if (!folder.empty())
         {
-            Entry self;
-            if (getEntry(db, folder, self) && self.type != EntryType::Directory)
+            const auto self = getEntry(db, folder);
+            if (self && self->type != EntryType::Directory)
                 conditions.add(PathPredicate{"e.path = ?", {folder}});
             else
             {
@@ -333,26 +333,27 @@ namespace ddb
     }
 
     // The entry stored at `path`, read up to `columns`
-    static bool readEntryAt(Database *db, const std::string &path, EntryColumns columns, Entry &entry)
+    static std::optional<Entry> readEntryAt(Database *db, const std::string &path, EntryColumns columns)
     {
         auto q = db->query(selectEntries(columns) + " WHERE e.path = ?");
         q->bind(1, path);
 
         if (!q->fetch())
-            return false;
+            return std::nullopt;
 
+        Entry entry;
         readEntry(*q, columns, entry);
-        return true;
+        return entry;
     }
 
-    bool getEntry(Database *db, const std::string &path, Entry &entry)
+    std::optional<Entry> getEntry(Database *db, const std::string &path)
     {
-        return readEntryAt(db, path, EntryColumns::Geometries, entry);
+        return readEntryAt(db, path, EntryColumns::Geometries);
     }
 
-    bool getEntryWithMeta(Database *db, const std::string &path, Entry &entry)
+    std::optional<Entry> getEntryWithMeta(Database *db, const std::string &path)
     {
-        return readEntryAt(db, path, EntryColumns::Meta, entry);
+        return readEntryAt(db, path, EntryColumns::Meta);
     }
 
 } // namespace ddb

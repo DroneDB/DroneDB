@@ -446,7 +446,7 @@ namespace
         fs::path buildDirOf(const std::string &path)
         {
             Entry e;
-            EXPECT_TRUE(ddb::getEntry(db.get(), path, e));
+            EXPECT_TRUE(loadEntry(db.get(), path, e));
             return db->buildDirectory() / e.hash;
         }
 
@@ -465,8 +465,8 @@ namespace
         ddb::addToIndex(db.get(), {geo.string(), local.string()});
 
         Entry g, l;
-        ASSERT_TRUE(ddb::getEntry(db.get(), "utm32n_site_geodata.dxf", g));
-        ASSERT_TRUE(ddb::getEntry(db.get(), "utm32n_site.dxf", l));
+        ASSERT_TRUE(loadEntry(db.get(), "utm32n_site_geodata.dxf", g));
+        ASSERT_TRUE(loadEntry(db.get(), "utm32n_site.dxf", l));
 
         ASSERT_FALSE(g.polygon_geom.empty());
         for (int i = 0; i < g.polygon_geom.size(); i++)
@@ -491,8 +491,8 @@ namespace
         ddb::addToIndex(db.get(), {assumed.string(), forced.string(), prj.string()});
 
         Entry a, f;
-        ASSERT_TRUE(ddb::getEntry(db.get(), "small_drawing.dxf", a));
-        ASSERT_TRUE(ddb::getEntry(db.get(), "small_drawing_local.dxf", f));
+        ASSERT_TRUE(loadEntry(db.get(), "small_drawing.dxf", a));
+        ASSERT_TRUE(loadEntry(db.get(), "small_drawing_local.dxf", f));
         EXPECT_EQ(a.properties["vector"]["crs"].value("source", ""), "lonlat");
         EXPECT_EQ(a.properties.value("georeferenced", false), true);
         EXPECT_FALSE(a.polygon_geom.empty());
@@ -516,8 +516,7 @@ namespace
 
         const auto prj = cadAsset(*ta, "utm32n_site.prj");
         ddb::addToIndex(db.get(), {prj.string()});
-        std::string sub;
-        ASSERT_TRUE(isBuildable(db.get(), "utm32n_site.prj", sub));
+        ASSERT_TRUE(isBuildable(db.get(), "utm32n_site.prj"));
         ddb::build(db.get(), "utm32n_site.prj", "");
 
         EXPECT_TRUE(isBuildComplete(db.get(), "utm32n_site.dxf"));
@@ -527,7 +526,7 @@ namespace
 
         // The main entry is re-parsed: it now has a WGS84 footprint.
         Entry e;
-        ASSERT_TRUE(ddb::getEntry(db.get(), "utm32n_site.dxf", e));
+        ASSERT_TRUE(loadEntry(db.get(), "utm32n_site.dxf", e));
         EXPECT_NE(e.properties.value("georeferenced", true), false);
         ASSERT_FALSE(e.polygon_geom.empty());
         EXPECT_GT(e.polygon_geom.getPoint(0).x, 9.17);
@@ -542,8 +541,7 @@ namespace
         std::ofstream(prj) << "GEOGCS[\"GCS_WGS_1984\"]";
         ddb::addToIndex(db.get(), {prj.string()});
 
-        std::string sub;
-        EXPECT_FALSE(isBuildable(db.get(), "orphan.prj", sub));
+        EXPECT_FALSE(isBuildable(db.get(), "orphan.prj"));
     }
 
     // Removing the .prj reverts the drawing to local: footprint dropped, old
@@ -560,7 +558,7 @@ namespace
         // re-read in between must already ignore the removed .prj.
         ddb::removeFromIndex(db.get(), {prj.string()});
         Entry e;
-        ASSERT_TRUE(ddb::getEntry(db.get(), "utm32n_site.dxf", e));
+        ASSERT_TRUE(loadEntry(db.get(), "utm32n_site.dxf", e));
         EXPECT_TRUE(e.polygon_geom.empty());
         EXPECT_EQ(e.properties.value("georeferenced", true), false);
         EXPECT_FALSE(isBuildComplete(db.get(), "utm32n_site.dxf"));
@@ -598,8 +596,7 @@ namespace
         std::ofstream(dbf) << "x";
         ddb::addToIndex(db.get(), {dbf.string()});
 
-        std::string sub;
-        EXPECT_FALSE(isBuildable(db.get(), "lonely.dbf", sub));
+        EXPECT_FALSE(isBuildable(db.get(), "lonely.dbf"));
         EXPECT_FALSE(isBuildComplete(db.get(), "lonely.dbf"));
     }
 
@@ -734,7 +731,7 @@ namespace
         noConverter.restore();
 
         Entry e;
-        ASSERT_TRUE(ddb::getEntry(db.get(), "utm32n_site_dwg.dwg", e));
+        ASSERT_TRUE(loadEntry(db.get(), "utm32n_site_dwg.dwg", e));
         EXPECT_EQ(e.type, EntryType::Vector);
         EXPECT_TRUE(e.polygon_geom.empty());
         EXPECT_NE(e.properties.value("warning", "").find("dwg2dxf"), std::string::npos) << e.properties.dump();
@@ -747,13 +744,13 @@ namespace
         const auto dwg = cadAsset(*ta, "utm32n_site_dwg.dwg");
         ddb::addToIndex(db.get(), {dwg.string()});
         Entry e;
-        ASSERT_TRUE(ddb::getEntry(db.get(), "utm32n_site_dwg.dwg", e));
+        ASSERT_TRUE(loadEntry(db.get(), "utm32n_site_dwg.dwg", e));
         EXPECT_EQ(e.properties.value("georeferenced", true), false);
         EXPECT_EQ(e.properties["vector"].value("converter", ""), "dwg2dxf");
 
         const auto prj = cadAsset(*ta, "utm32n_site_dwg.prj");
         ddb::addToIndex(db.get(), {prj.string()});
-        ASSERT_TRUE(ddb::getEntry(db.get(), "utm32n_site_dwg.dwg", e));
+        ASSERT_TRUE(loadEntry(db.get(), "utm32n_site_dwg.dwg", e));
         EXPECT_NE(e.properties.value("georeferenced", true), false);
         ASSERT_FALSE(e.polygon_geom.empty());
         EXPECT_GT(e.polygon_geom.getPoint(0).x, 9.17);

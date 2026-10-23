@@ -109,11 +109,11 @@ static std::optional<BuildTarget> resolveDependencyTarget(const Entry& e, const 
         return std::nullopt;
 
     for (const auto& candidate : findSidecarMains(e.path, siblings)) {
-        Entry mainEntry;
-        if (!lookup(candidate, mainEntry))
+        const auto mainEntry = lookup(candidate);
+        if (!mainEntry)
             continue;
-        if (const EntryHandler* handler = buildingHandler(mainEntry))
-            return BuildTarget{mainEntry, handler->subfolder(), handler, true};
+        if (const EntryHandler* handler = buildingHandler(*mainEntry))
+            return BuildTarget{*mainEntry, handler->subfolder(), handler, true};
     }
     return std::nullopt;
 }
@@ -128,23 +128,24 @@ std::optional<BuildTarget> resolveBuildTarget(const Entry& e, const EntryLookup&
 
 std::optional<BuildTarget> resolveBuildTarget(Database* db, const Entry& e) {
     return resolveBuildTarget(
-        e, [db](const std::string& p, Entry& out) { return getEntry(db, p, out); },
+        e, [db](const std::string& p) { return getEntry(db, p); },
         [db](const std::string& prefix) { return indexedPathsWithPrefix(db, prefix); });
 }
 
-bool isBuildable(Database* db, const std::string& path, std::string& subfolder) {
-    Entry e;
-
-    const bool entryExists = getEntry(db, path, e);
-    if (!entryExists)
+std::optional<std::string> buildSubfolder(Database* db, const std::string& path) {
+    const auto e = getEntry(db, path);
+    if (!e)
         throw InvalidArgsException(path + " is not a valid path in the database.");
 
-    const auto target = resolveBuildTarget(db, e);
+    const auto target = resolveBuildTarget(db, *e);
     if (!target)
-        return false;
+        return std::nullopt;
 
-    subfolder = target->subfolder;
-    return true;
+    return target->subfolder;
+}
+
+bool isBuildable(Database* db, const std::string& path) {
+    return buildSubfolder(db, path).has_value();
 }
 
 // isBuildComplete() for a resolved target. For dependencies, completeness is
@@ -154,11 +155,11 @@ static bool isTargetBuildComplete(const fs::path& buildDirectory, const BuildTar
 }
 
 bool isBuildComplete(Database* db, const std::string& path) {
-    Entry e;
-    if (!getEntry(db, path, e))
+    const auto e = getEntry(db, path);
+    if (!e)
         return false;
 
-    const auto target = resolveBuildTarget(db, e);
+    const auto target = resolveBuildTarget(db, *e);
     return target && isTargetBuildComplete(db->buildDirectory(), *target);
 }
 
@@ -167,13 +168,14 @@ IndexBuildTargets::IndexBuildTargets(Database* db)
     : byPath_(db->query("SELECT path, hash, type FROM entries WHERE path = ?")),
       byPrefix_(db->query(PathsWithPrefixQuery)) {}
 
-bool IndexBuildTargets::lookup(const std::string& path, Entry& out) {
+std::optional<Entry> IndexBuildTargets::lookup(const std::string& path) {
     byPath_->bind(1, path);
-    const bool found = byPath_->fetch();
-    if (found) {
-        out.path = byPath_->getText(0);
-        out.hash = byPath_->getText(1);
-        out.type = static_cast<EntryType>(byPath_->getInt(2));
+    std::optional<Entry> found;
+    if (byPath_->fetch()) {
+        found.emplace();
+        found->path = byPath_->getText(0);
+        found->hash = byPath_->getText(1);
+        found->type = static_cast<EntryType>(byPath_->getInt(2));
     }
     byPath_->reset();
     return found;
@@ -181,7 +183,7 @@ bool IndexBuildTargets::lookup(const std::string& path, Entry& out) {
 
 std::optional<BuildTarget> IndexBuildTargets::resolve(const Entry& e) {
     return resolveBuildTarget(
-        e, [this](const std::string& p, Entry& out) { return lookup(p, out); },
+        e, [this](const std::string& p) { return lookup(p); },
         [this](const std::string& prefix) { return fetchPathsWithPrefix(*byPrefix_, prefix); });
 }
 
@@ -195,11 +197,10 @@ std::vector<BuildStatus> getBuildStatus(Database* db, const std::vector<std::str
         BuildStatus status;
         status.path = path;
 
-        Entry e;
-        if (targets.lookup(path, e)) {
+        if (const auto e = targets.lookup(path)) {
             status.exists = true;
 
-            const auto target = targets.resolve(e);
+            const auto target = targets.resolve(*e);
             status.buildable = target.has_value();
             status.complete = target && isTargetBuildComplete(buildDirectory, *target);
         }
@@ -211,13 +212,12 @@ std::vector<BuildStatus> getBuildStatus(Database* db, const std::vector<std::str
 }
 
 bool isBuildActive(Database* db, const std::string& path) {
-    Entry e;
-    const bool entryExists = getEntry(db, path, e);
-    if (!entryExists)
+    const auto e = getEntry(db, path);
+    if (!e)
         return false;
 
     // For dependencies, the lock is the main file's
-    const auto target = resolveBuildTarget(db, e);
+    const auto target = resolveBuildTarget(db, *e);
     if (!target)
         return false;
 

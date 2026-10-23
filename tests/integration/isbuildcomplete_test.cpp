@@ -198,7 +198,7 @@ std::string addModel(Database* db, const fs::path& dbPath) {
     std::ofstream(obj) << "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
     ddb::addToIndex(db, {obj.string()});
     Entry e;
-    EXPECT_TRUE(ddb::getEntry(db, "model.obj", e));
+    EXPECT_TRUE(loadEntry(db, "model.obj", e));
     EXPECT_EQ(e.type, EntryType::Model);
     return "model.obj";
 }
@@ -239,7 +239,7 @@ TEST(isBuildComplete, modelSwapExceptionIsNarrowAndReadOnly) {
     auto db = ddb::open(root.string(), true);
     const auto rel = addModel(db.get(), root);
     Entry entry;
-    ASSERT_TRUE(getEntry(db.get(), rel, entry));
+    ASSERT_TRUE(loadEntry(db.get(), rel, entry));
     const fs::path base = db->buildDirectory() / entry.hash;
     const fs::path tiles = base / "3dtiles";
     const fs::path old = base / "3dtiles-old";

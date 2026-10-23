@@ -38,7 +38,7 @@ namespace
         const auto root = makeIndex(TEST_NAME);
         auto db = ddb::open(root.string(), false);
         Entry e;
-        ASSERT_TRUE(getEntry(db.get(), "a.txt", e));
+        ASSERT_TRUE(loadEntry(db.get(), "a.txt", e));
 
         // Tracked only when SQLITE_CONFIG_MEMSTATUS is on (the global allocator mutex)
         EXPECT_EQ(sqlite3_memory_used(), 0);
@@ -70,7 +70,7 @@ namespace
         {
             auto db = ddb::open(root.string(), false);
             Entry e;
-            ASSERT_TRUE(getEntry(db.get(), "a.txt", e));
+            ASSERT_TRUE(loadEntry(db.get(), "a.txt", e));
         }
         // The pool keeps connections open: close them for real
         DatabasePool::instance().releaseConnections(root);
@@ -103,7 +103,7 @@ namespace
 
         auto db = ddb::open(copy.string(), false);
         Entry e;
-        EXPECT_TRUE(getEntry(db.get(), "b.txt", e));
+        EXPECT_TRUE(loadEntry(db.get(), "b.txt", e));
     }
 
     TEST(DDB02_Open, replacedDatabaseFileIsNotMixedWithOldWal)
@@ -126,8 +126,8 @@ namespace
 
         auto db = ddb::open(root.string(), false);
         Entry e;
-        EXPECT_TRUE(getEntry(db.get(), "a.txt", e));
-        EXPECT_FALSE(getEntry(db.get(), "b.txt", e)) << "frames of the old WAL were replayed";
+        EXPECT_TRUE(loadEntry(db.get(), "a.txt", e));
+        EXPECT_FALSE(loadEntry(db.get(), "b.txt", e)) << "frames of the old WAL were replayed";
     }
 
     TEST(DDB02_Open, readOnlyOpenDoesNotWriteTheDatabaseFile)
@@ -143,7 +143,7 @@ namespace
         {
             auto db = ddb::open(root.string(), false);
             Entry e;
-            ASSERT_TRUE(getEntry(db.get(), "a.txt", e));
+            ASSERT_TRUE(loadEntry(db.get(), "a.txt", e));
         }
 
         EXPECT_EQ(fs::last_write_time(dbFile(root)), before);
@@ -196,7 +196,7 @@ namespace
                     {
                         auto db = ddb::open(root.string(), false);
                         Entry e;
-                        if (getEntryWithMeta(db.get(), "a.txt", e) && e.path == "a.txt")
+                        if (loadEntryWithMeta(db.get(), "a.txt", e) && e.path == "a.txt")
                             ok++;
                         else
                             failed++;

@@ -303,13 +303,11 @@ TEST(entryHandler, FakeTypeIsDetectedParsedAndBuiltWithoutAnyOtherChange) {
         EXPECT_EQ(fingerprint(fx.root / "b.DDBFAKE"), FakeType);
         addToIndex(fx.db.get(), {(fx.root / "a.ddbfake").string(), (fx.root / "b.DDBFAKE").string()});
         Entry a;
-        ASSERT_TRUE(getEntry(fx.db.get(), "a.ddbfake", a));
+        ASSERT_TRUE(loadEntry(fx.db.get(), "a.ddbfake", a));
         EXPECT_EQ(a.type, FakeType);
         EXPECT_EQ(a.properties.value("content", ""), "alpha");
 
-        std::string subfolder;
-        ASSERT_TRUE(isBuildable(fx.db.get(), "a.ddbfake", subfolder));
-        EXPECT_EQ(subfolder, "fake");
+        EXPECT_EQ(buildSubfolder(fx.db.get(), "a.ddbfake"), "fake");
         EXPECT_FALSE(isBuildComplete(fx.db.get(), "a.ddbfake"));
 
         build(fx.db.get(), "a.ddbfake", "", false);
@@ -336,8 +334,7 @@ TEST(entryHandler, FakeTypeIsDetectedParsedAndBuiltWithoutAnyOtherChange) {
     EXPECT_EQ(findEntryHandler(FakeType), nullptr);
     EXPECT_EQ(typeToHuman(FakeType), "?");
     EXPECT_EQ(fingerprint(fx.root / "a.ddbfake"), EntryType::Generic);
-    std::string subfolder;
-    EXPECT_FALSE(isBuildable(fx.db.get(), "a.ddbfake", subfolder));
+    EXPECT_FALSE(isBuildable(fx.db.get(), "a.ddbfake"));
 }
 
 // The extension table fingerprint() used to spell out, now declared by the handlers
@@ -410,11 +407,9 @@ TEST(entryHandler, SidecarMainExtensionMatchesAnyLetterCase) {
     writeFile(fx.db->buildDirectory() / mainHash / "vec" / "source.gpkg", "x");
     writeFile(fx.db->buildDirectory() / mainHash / "mvt" / "metadata.json", "x");
 
-    std::string subfolder;
-    EXPECT_TRUE(isBuildable(fx.db.get(), "maps/roads.dbf", subfolder));
-    EXPECT_EQ(subfolder, "vec");
+    EXPECT_EQ(buildSubfolder(fx.db.get(), "maps/roads.dbf"), "vec");
     EXPECT_TRUE(isBuildComplete(fx.db.get(), "maps/roads.dbf"));
-    EXPECT_FALSE(isBuildable(fx.db.get(), "maps/Roads.shx", subfolder));
+    EXPECT_FALSE(isBuildable(fx.db.get(), "maps/Roads.shx"));
 
     const auto statuses = getBuildStatus(fx.db.get(), {"maps/roads.dbf", "maps/Roads.shx"});
     ASSERT_EQ(statuses.size(), 2u);

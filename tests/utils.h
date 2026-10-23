@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "database.h"
+#include "entry.h"
 #include "delta.h"
 #include "entry_types.h"
 #include "testarea.h"
@@ -63,6 +64,12 @@ std::filesystem::path makeIndex(const std::string &testArea, const std::filesyst
 // "{}", mtime 0, size 1 and the depth of the path. For tests of the build rules, which read
 // path, hash and type only.
 void insertEntry(ddb::Database *db, const std::string &path, const std::string &hash, ddb::EntryType type);
+
+// Reads the entry `path` (relative to the dataset root) into `out`: false, with `out` untouched,
+// when it is not indexed. The optional of ddb::getEntry / getEntryWithMeta for the tests that
+// fill an Entry they declared.
+bool loadEntry(ddb::Database *db, const std::string &path, ddb::Entry &out);
+bool loadEntryWithMeta(ddb::Database *db, const std::string &path, ddb::Entry &out);
 
 // Hash of the entry `path` (relative to the dataset root), "<missing>" when it is not indexed
 std::string hashOf(ddb::Database *db, const std::string &path);

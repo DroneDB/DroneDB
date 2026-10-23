@@ -1356,7 +1356,7 @@ struct PlyDataset : IndexFixture {
     void add(const std::string& rel) { ddb::addToIndex(db.get(), {(root / rel).string()}); }
     Entry entry(const std::string& rel) {
         Entry e;
-        EXPECT_TRUE(ddb::getEntry(db.get(), rel, e)) << rel;
+        EXPECT_TRUE(loadEntry(db.get(), rel, e)) << rel;
         return e;
     }
     fs::path out(const std::string& rel) { return db->buildDirectory() / entry(rel).hash; }

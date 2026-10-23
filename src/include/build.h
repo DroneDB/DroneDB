@@ -8,13 +8,22 @@
 #include "dbops.h"
 
 #include <ctime>
+#include <optional>
 #include <string>
 #include <vector>
 
 namespace ddb
 {
 
-    DDB_DLL bool isBuildable(Database *db, const std::string &path, std::string &subfolder);
+    /**
+     * The output subfolder of the build of the entry at `path` ("<build root>/<hash>/<subfolder>"),
+     * or nothing when the entry is not buildable, neither itself nor as the sidecar of an indexed
+     * main file. Throws InvalidArgsException when `path` is not indexed.
+     */
+    DDB_DLL std::optional<std::string> buildSubfolder(Database *db, const std::string &path);
+
+    /// buildSubfolder() has a value; throws InvalidArgsException when `path` is not indexed
+    DDB_DLL bool isBuildable(Database *db, const std::string &path);
 
     /**
      * The indexed main files the sidecar at path belongs to (the SidecarRules of the entry

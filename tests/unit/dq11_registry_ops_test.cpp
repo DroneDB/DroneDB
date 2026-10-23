@@ -554,8 +554,7 @@ namespace
         EXPECT_NE(out.str().find("Pull completed"), std::string::npos) << out.str();
 
         auto db = ddb::open(f.local.root.string(), false);
-        Entry e;
-        EXPECT_TRUE(getEntry(db.get(), "r1.txt", e)); // indexed
+        EXPECT_TRUE(getEntry(db.get(), "r1.txt").has_value()); // indexed
         EXPECT_EQ(SyncManager(db.get()).getLastStamp(Url)["checksum"], f.remoteStamp["checksum"]);
         EXPECT_TRUE(fs::is_empty(db->ddbDirectory() / "tmp" / "pull_cache") || !fs::exists(db->ddbDirectory() / "tmp" / "pull_cache" / "org-ds"));
     }

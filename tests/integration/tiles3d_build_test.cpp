@@ -554,7 +554,7 @@ struct ModelDataset : IndexFixture {
         writeFile(root / rel, content);
         ddb::addToIndex(db.get(), {(root / rel).string()});
         Entry e;
-        ASSERT_TRUE(ddb::getEntry(db.get(), rel, e));
+        ASSERT_TRUE(loadEntry(db.get(), rel, e));
         ASSERT_EQ(e.type, EntryType::Model) << rel;
         hashes[rel] = e.hash;
     }

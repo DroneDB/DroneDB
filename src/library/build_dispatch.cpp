@@ -264,13 +264,11 @@ void buildAll(Database* db, const std::string& outputPath, bool force) {
 void build(Database* db, const std::string& path, const std::string& outputPath, bool force) {
     LOGD << "In build('" << path << "','" << outputPath << "')";
 
-    Entry e;
-
-    const bool entryExists = getEntry(db, path, e);
-    if (!entryExists)
+    const auto e = getEntry(db, path);
+    if (!e)
         throw InvalidArgsException(path + " is not a valid path in the database.");
 
-    buildInternal(db, e, outputPath, force);
+    buildInternal(db, *e, outputPath, force);
 }
 
 }  // namespace ddb

@@ -208,8 +208,8 @@ namespace
         removeFromIndex(fx.db.get(), {(fx.root / "IMG_1.JPG").string()});
 
         Entry e;
-        EXPECT_FALSE(getEntry(fx.db.get(), "IMG_1.JPG", e));
-        EXPECT_TRUE(getEntry(fx.db.get(), "imgx1.jpg", e)) << "removing IMG_1.JPG removed imgx1.jpg";
+        EXPECT_FALSE(loadEntry(fx.db.get(), "IMG_1.JPG", e));
+        EXPECT_TRUE(loadEntry(fx.db.get(), "imgx1.jpg", e)) << "removing IMG_1.JPG removed imgx1.jpg";
     }
 
     TEST(DDB01_Lookup, removeFolderKeepsSiblingFolder)
@@ -218,10 +218,10 @@ namespace
         removeFromIndex(fx.db.get(), {(fx.root / "dir").string()});
 
         Entry e;
-        EXPECT_FALSE(getEntry(fx.db.get(), "dir", e));
-        EXPECT_FALSE(getEntry(fx.db.get(), "dir/b.txt", e));
-        EXPECT_TRUE(getEntry(fx.db.get(), "dir2", e));
-        EXPECT_TRUE(getEntry(fx.db.get(), "dir2/d.txt", e));
+        EXPECT_FALSE(loadEntry(fx.db.get(), "dir", e));
+        EXPECT_FALSE(loadEntry(fx.db.get(), "dir/b.txt", e));
+        EXPECT_TRUE(loadEntry(fx.db.get(), "dir2", e));
+        EXPECT_TRUE(loadEntry(fx.db.get(), "dir2/d.txt", e));
     }
 
     TEST(DDB01_Lookup, deleteFromIndexEmptyQueryDeletesNothing)
@@ -238,8 +238,8 @@ namespace
         moveEntry(fx.db.get(), "dir", "moved");
 
         Entry e;
-        EXPECT_TRUE(getEntry(fx.db.get(), "moved/b.txt", e));
-        EXPECT_TRUE(getEntry(fx.db.get(), "dir2/d.txt", e)) << "moving dir moved dir2";
+        EXPECT_TRUE(loadEntry(fx.db.get(), "moved/b.txt", e));
+        EXPECT_TRUE(loadEntry(fx.db.get(), "dir2/d.txt", e)) << "moving dir moved dir2";
     }
 
     TEST(DDB01_Lookup, predicateStrategies)

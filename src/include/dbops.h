@@ -5,6 +5,7 @@
 #define DBOPS_H
 
 #include <functional>
+#include <optional>
 
 #include "database.h"
 #include "entry_filters.h"
@@ -219,10 +220,11 @@ namespace ddb
     DDB_DLL void rescanIndex(Database *db, const std::vector<EntryType> &types = {}, bool stopOnError = true, RescanCallback callback = nullptr);
     DDB_DLL void syncLocalMTimes(Database *db, const std::vector<std::string> &files = {});
     DDB_DLL void moveEntry(Database *db, const std::string &source, const std::string &dest);
-    DDB_DLL bool getEntry(Database *db, const std::string &path, Entry &entry);
+    /** Exact lookup of one entry (without its metadata); nothing when `path` is not indexed. */
+    DDB_DLL std::optional<Entry> getEntry(Database *db, const std::string &path);
 
-    /** Exact lookup of one entry, including its metadata (entry.meta). Returns false if not found. */
-    DDB_DLL bool getEntryWithMeta(Database *db, const std::string &path, Entry &entry);
+    /** Exact lookup of one entry, including its metadata (entry.meta); nothing when not found. */
+    DDB_DLL std::optional<Entry> getEntryWithMeta(Database *db, const std::string &path);
     DDB_DLL bool pathExists(Database *db, const std::string &path);
 
     DDB_DLL std::string initIndex(const std::string &directory, bool fromScratch = false);

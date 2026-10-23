@@ -4,6 +4,7 @@
 #ifndef DDB_TILES3D_H
 #define DDB_TILES3D_H
 
+#include <optional>
 #include <string>
 #include "ddb_export.h"
 
@@ -35,15 +36,14 @@ namespace ddb
      * and inspects `root.boundingVolume` (region / box / sphere, combined with an
      * optional `root.transform`) to compute a WGS84 footprint and a georeferenced flag.
      *
-     * Best-effort: returns false (leaving @p info untouched) when the archive cannot be
-     * opened, `tileset.json` is missing/invalid, or the bounding volume is not usable,
-     * so a .3tz can still be indexed without a footprint instead of failing the parse.
+     * Best-effort: returns nothing when the archive cannot be opened, `tileset.json` is
+     * missing/invalid, or the bounding volume is not usable, so a .3tz can still be indexed
+     * without a footprint instead of failing the parse.
      *
      * @param ttzPath Path to the .3tz archive.
-     * @param info Output footprint/georeferencing info (only written on success).
-     * @return true when a usable footprint was computed, false otherwise.
+     * @return the footprint/georeferencing info, or nothing when no usable bounding volume was found.
      */
-    DDB_DLL bool getTiles3DInfo(const std::string &ttzPath, Tiles3DInfo &info);
+    DDB_DLL std::optional<Tiles3DInfo> getTiles3DInfo(const std::string &ttzPath);
 
 }
 

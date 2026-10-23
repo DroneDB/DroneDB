@@ -95,9 +95,9 @@ bool canApply(Database* destination,
               const ConflictType conflictType,
               std::vector<Conflict>& conflicts,
               bool& indexed) {
-    Entry e;
-    indexed = getEntry(destination, path, e);
-    if (!indexed || hash == e.hash || (baseHash && *baseHash == e.hash))
+    const auto existing = getEntry(destination, path);
+    indexed = existing.has_value();
+    if (!indexed || hash == existing->hash || (baseHash && *baseHash == existing->hash))
         return true;
 
     switch (mergeStrategy) {

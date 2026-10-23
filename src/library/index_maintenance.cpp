@@ -493,13 +493,14 @@ namespace ddb
         if (source == dest)
             return;
 
-        Entry sourceEntry, destEntry;
-        bool sourceExists = getEntry(db, source, sourceEntry);
-        bool destExists = getEntry(db, dest, destEntry);
+        const auto sourceFound = getEntry(db, source);
+        const auto destFound = getEntry(db, dest);
 
         // Ensure entry consistency: cannot move file on folder and vice-versa
-        if (!sourceExists)
+        if (!sourceFound)
             throw InvalidArgsException("source path not found");
+        const Entry &sourceEntry = *sourceFound;
+        const bool destExists = destFound.has_value();
 
         // If dest exists
         if (destExists)
@@ -508,14 +509,14 @@ namespace ddb
             // If source is a folder we cannot move it on anything that exists (only new path)
             if (sourceEntry.type == EntryType::Directory)
             {
-                if (destEntry.type != EntryType::Directory)
+                if (destFound->type != EntryType::Directory)
                     throw InvalidArgsException("Cannot move a folder on a file");
 
                 throw InvalidArgsException("Cannot move a directory on another directory");
                 // If source is a file we cannot move it on a folder
             }
 
-            if (destEntry.type == EntryType::Directory)
+            if (destFound->type == EntryType::Directory)
                 throw InvalidArgsException("Cannot move a file on a directory");
         }
 

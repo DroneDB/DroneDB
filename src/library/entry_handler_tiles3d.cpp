@@ -23,12 +23,13 @@ void parseTiles3DMetadata(const fs::path &path, Entry &entry)
     // local space rather than aborting the parse.
     try
     {
-        Tiles3DInfo info;
-        if (!getTiles3DInfo(io::toUtf8(path), info))
+        const auto found = getTiles3DInfo(io::toUtf8(path));
+        if (!found)
         {
             entry.properties["georeferenced"] = false;
             return;
         }
+        const Tiles3DInfo &info = *found;
 
         entry.properties["georeferenced"] = info.georeferenced;
         if (!info.assetVersion.empty())

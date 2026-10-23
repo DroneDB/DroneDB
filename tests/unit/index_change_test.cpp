@@ -81,7 +81,7 @@ namespace
 
         // Listings and the C API keep whole seconds
         Entry e;
-        ASSERT_TRUE(getEntry(f.db.get(), "a.txt", e));
+        ASSERT_TRUE(loadEntry(f.db.get(), "a.txt", e));
         EXPECT_EQ(e.mtime, static_cast<time_t>(std::floor(fileMtime)));
 
         // Unchanged file: not reported again

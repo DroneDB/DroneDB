@@ -90,7 +90,7 @@ TEST_F(IsBuildActiveTest, OrthoFileWithActiveBuild) {
     // Test with an ortho file that has an active build
     Entry orthoEntry;
     fs::path relativePath = fs::relative(orthoPath, dbPath);
-    EXPECT_TRUE(ddb::getEntry(db.get(), relativePath.string(), orthoEntry));
+    EXPECT_TRUE(loadEntry(db.get(), relativePath.string(), orthoEntry));
 
     // Construct build path for ortho COG (Cloud Optimized GeoTIFF) - ensure directory exists
     std::string buildPath = db->buildDirectory().string();
@@ -114,7 +114,7 @@ TEST_F(IsBuildActiveTest, PointCloudFileWithActiveBuild) {
     // Test with a point cloud file that has an active build
     Entry pcEntry;
     fs::path relativePath = fs::relative(pointCloudPath, dbPath);
-    EXPECT_TRUE(ddb::getEntry(db.get(), relativePath.string(), pcEntry));
+    EXPECT_TRUE(loadEntry(db.get(), relativePath.string(), pcEntry));
 
     // Construct build path for point cloud (COPC) - ensure directory exists
     std::string buildPath = db->buildDirectory().string();
@@ -160,7 +160,7 @@ TEST_F(IsBuildActiveTest, RealBuildInThread) {
     // Test with a real build running in a separate thread
     Entry orthoEntry;
     fs::path relativePath = fs::relative(orthoPath, dbPath);
-    EXPECT_TRUE(ddb::getEntry(db.get(), relativePath.string(), orthoEntry));
+    EXPECT_TRUE(loadEntry(db.get(), relativePath.string(), orthoEntry));
 
     // Initially no build should be active
     EXPECT_FALSE(ddb::isBuildActive(db.get(), relativePath.string()));
@@ -235,7 +235,7 @@ TEST_F(IsBuildActiveTest, StaleLockFileIsCleanedUp) {
     // (lock files left by crashed processes with dead PIDs)
     Entry orthoEntry;
     fs::path relativePath = fs::relative(orthoPath, dbPath);
-    ASSERT_TRUE(ddb::getEntry(db.get(), relativePath.string(), orthoEntry));
+    ASSERT_TRUE(loadEntry(db.get(), relativePath.string(), orthoEntry));
 
     // Construct the build lock file path (matches what build.cpp uses)
     std::string buildPath = db->buildDirectory().string();
@@ -261,7 +261,7 @@ TEST_F(IsBuildActiveTest, ActiveLockFileIsNotCleaned) {
     // Test that isBuildActive does NOT clean up lock files held by active processes
     Entry orthoEntry;
     fs::path relativePath = fs::relative(orthoPath, dbPath);
-    ASSERT_TRUE(ddb::getEntry(db.get(), relativePath.string(), orthoEntry));
+    ASSERT_TRUE(loadEntry(db.get(), relativePath.string(), orthoEntry));
 
     std::string buildPath = db->buildDirectory().string();
     fs::path orthoOutputPath = fs::path(buildPath) / orthoEntry.hash / "cog";
