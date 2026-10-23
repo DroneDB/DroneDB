@@ -212,10 +212,10 @@ namespace ddb
         // j.at("properties").get_to(e.properties);
     }
 
-    bool Entry::toGeoJSON(json &j, BasicGeometryType type)
+    bool Entry::toGeoJSON(json &j, BasicGeometryType type) const
     {
         // Only export entries that have valid geometries
-        std::vector<BasicGeometry *> geoms;
+        std::vector<const BasicGeometry *> geoms;
         if (!point_geom.empty() && (type == BasicGeometryType::BGAuto || type == BasicGeometryType::BGPoint))
             geoms.push_back(&point_geom);
         if (!polygon_geom.empty() && (type == BasicGeometryType::BGAuto || type == BasicGeometryType::BGPolygon))
@@ -232,7 +232,7 @@ namespace ddb
         p["size"] = this->size;
 
         // Populate properties
-        for (json::iterator it = this->properties.begin(); it != this->properties.end(); ++it)
+        for (auto it = this->properties.begin(); it != this->properties.end(); ++it)
         {
             p[it.key()] = it.value();
         }
@@ -247,7 +247,7 @@ namespace ddb
         return true;
     }
 
-    std::string Entry::toString()
+    std::string Entry::toString() const
     {
         std::ostringstream s;
         s << "Path: " << this->path << "\n";
@@ -255,7 +255,7 @@ namespace ddb
             s << "SHA256: " << this->hash << "\n";
         s << "Type: " << typeToHuman(this->type) << " (" << entryTypeValue(this->type) << ")" << "\n";
 
-        for (json::iterator it = this->properties.begin(); it != this->properties.end(); ++it)
+        for (auto it = this->properties.begin(); it != this->properties.end(); ++it)
         {
             std::string k = it.key();
             if (k.length() > 0)
@@ -264,7 +264,7 @@ namespace ddb
             if (k == "Bands")
             {
                 s << k << ": " << it.value().size() << " [";
-                for (json::iterator b = it.value().begin(); b != it.value().end(); b++)
+                for (auto b = it.value().begin(); b != it.value().end(); b++)
                 {
                     auto band = b.value();
                     s << band["colorInterp"].get<std::string>() << "(" << band["type"].get<std::string>() << ")";

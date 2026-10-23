@@ -42,11 +42,12 @@ public:
 
   DDB_DLL bool fetch();
 
-  DDB_DLL int getInt(int columnId);
-  DDB_DLL long long getInt64(int columnId);
-  DDB_DLL std::string getText(int columnId);
-  DDB_DLL double getDouble(int columnId);
-  DDB_DLL const void *getBlob(int columnId);
+  // Readers of the current row: they do not change the statement
+  DDB_DLL int getInt(int columnId) const;
+  DDB_DLL long long getInt64(int columnId) const;
+  DDB_DLL std::string getText(int columnId) const;
+  DDB_DLL double getDouble(int columnId) const;
+  DDB_DLL const void *getBlob(int columnId) const;
 
   DDB_DLL int getColumnsCount() const;
   // TODO: more

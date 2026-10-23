@@ -126,19 +126,19 @@ bool Statement::fetch()
     return hasRow;
 }
 
-int Statement::getInt(int columnId)
+int Statement::getInt(int columnId) const
 {
     assert(stmt != nullptr);
     return sqlite3_column_int(stmt, columnId);
 }
 
-long long Statement::getInt64(int columnId)
+long long Statement::getInt64(int columnId) const
 {
     assert(stmt != nullptr);
     return sqlite3_column_int64(stmt, columnId);
 }
 
-std::string Statement::getText(int columnId)
+std::string Statement::getText(int columnId) const
 {
     assert(stmt != nullptr);
     const auto res = reinterpret_cast<const char *>(sqlite3_column_text(stmt, columnId));
@@ -146,13 +146,13 @@ std::string Statement::getText(int columnId)
     return res == nullptr ? std::string() : std::string(res);
 }
 
-const void *Statement::getBlob(int columnId)
+const void *Statement::getBlob(int columnId) const
 {
     assert(stmt != nullptr);
     return sqlite3_column_blob(stmt, columnId);
 }
 
-double Statement::getDouble(int columnId)
+double Statement::getDouble(int columnId) const
 {
     assert(stmt != nullptr);
     return sqlite3_column_double(stmt, columnId);
