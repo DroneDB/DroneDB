@@ -26,7 +26,6 @@
 #include "mio.h"
 #include "ply.h"
 #include "untwine_runner.h"
-#include "utils.h"
 
 namespace ddb {
 

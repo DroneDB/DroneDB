@@ -26,7 +26,6 @@
 #include "exceptions.h"
 #include "logger.h"
 #include "parallel.h"
-#include "utils.h"
 #include "json.h"
 
 namespace ddb

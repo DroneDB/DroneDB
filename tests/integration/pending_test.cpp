@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "3d.h"
+#include "timeutil.h"
 #include "build.h"
 #include "buildlock.h"
 #include "buildlod_runner.h"
@@ -106,7 +107,7 @@ struct Dataset : IndexFixture {
                 lines.push_back(line);
         }
         ASSERT_FALSE(lines.empty());
-        lines[0] = std::to_string(utils::currentUnixTimestamp() - secondsAgo);
+        lines[0] = std::to_string(ddb::currentUnixTimestamp() - secondsAgo);
         std::ofstream out(p.string(), std::ios::trunc);
         for (const auto& l : lines)
             out << l << "\n";
@@ -199,7 +200,7 @@ TEST(PendingBuild, OldFormatPendingClearsOnceDependencyExists) {
     writeFile(ds.path("sub/m.mtl"), mtlWithTexture("map_Kd tex/a.png"));
     ds.add({"sub/m.obj", "sub/m.mtl"});
 
-    ds.writePendingMarker("sub/m.obj", utils::currentUnixTimestamp() - 900, {"tex/a.png"});
+    ds.writePendingMarker("sub/m.obj", ddb::currentUnixTimestamp() - 900, {"tex/a.png"});
 
     // Still missing: the retry rewrites the marker with the dataset-relative name.
     ddb::buildPending(ds.db.get(), "", false);
@@ -224,7 +225,7 @@ TEST(PendingBuild, BackoffIsSixtySecondsAndForceBypassesIt) {
     ds.add({"m.obj", "m.mtl", "tex.png"});
 
     // Attempted 10 s ago: not due.
-    ds.writePendingMarker("m.obj", utils::currentUnixTimestamp() - 10, {"tex.png"});
+    ds.writePendingMarker("m.obj", ddb::currentUnixTimestamp() - 10, {"tex.png"});
     ddb::buildPending(ds.db.get(), "", false);
     EXPECT_TRUE(fs::exists(ds.pendingFile("m.obj")));
     EXPECT_FALSE(ddb::isBuildComplete(ds.db.get(), "m.obj"));
@@ -236,7 +237,7 @@ TEST(PendingBuild, BackoffIsSixtySecondsAndForceBypassesIt) {
     EXPECT_TRUE(ddb::isBuildComplete(ds.db.get(), "m.obj"));
 
     // A fresh marker is retried at once with force.
-    ds.writePendingMarker("m.obj", utils::currentUnixTimestamp(), {"tex.png"});
+    ds.writePendingMarker("m.obj", ddb::currentUnixTimestamp(), {"tex.png"});
     ddb::buildPending(ds.db.get(), "", true);
     EXPECT_FALSE(fs::exists(ds.pendingFile("m.obj")));
     EXPECT_TRUE(ddb::isBuildComplete(ds.db.get(), "m.obj"));
@@ -254,7 +255,7 @@ TEST(PendingBuild, CompleteOutputConsumesPendingMarker) {
     ddb::build(ds.db.get(), "m.obj", "", false);
     ASSERT_TRUE(ddb::isBuildComplete(ds.db.get(), "m.obj"));
 
-    ds.writePendingMarker("m.obj", utils::currentUnixTimestamp() - 900, {"not-indexed.png"});
+    ds.writePendingMarker("m.obj", ddb::currentUnixTimestamp() - 900, {"not-indexed.png"});
     ddb::buildPending(ds.db.get(), "", false);
 
     EXPECT_FALSE(fs::exists(ds.pendingFile("m.obj")));
@@ -545,7 +546,7 @@ TEST(PendingBuild, VectorNoSpaceRetainsExistingPendingHintsAndFreshTimestamp) {
             Dataset ds("PendingBuild-VecNoSpace-" + driver + (onClose ? "-close" : "-translate"));
             deferShapefileInSubfolder(ds); // dependency was missing, then arrived
             ds.backdatePending("sub/layer.shp");
-            const auto before = utils::currentUnixTimestamp();
+            const auto before = ddb::currentUnixTimestamp();
             {
                 EnvVarGuard enoughDisk("DDB_MIN_FREE_DISK_MB", "0");
                 ddb_test::withVectorWriteFailure(driver.c_str(), onClose, [&] {
@@ -583,7 +584,7 @@ TEST(PendingBuild, PrimaryIdleTimeoutRetainsMarkerThroughFailedEntryBuild) {
     ASSERT_EQ(entry.type, EntryType::GaussianSplat);
     ds.writePendingMarker("sample.splat", 1, {"previous dependency hint"});
     const auto realTool = buildlod::findBuildLodBinary(true);
-    const auto before = utils::currentUnixTimestamp();
+    const auto before = ddb::currentUnixTimestamp();
     const auto start = std::chrono::steady_clock::now();
     {
         EnvVarGuard tool("DDB_BUILDLOD_PATH", testChildPath().string().c_str());
@@ -684,7 +685,7 @@ TEST(PendingBuild, LowDiskRetainsPendingThenSucceedsAtSixtySecondBoundary) {
     writePng(ds.path("tex.png"));
     ds.add({"m.mtl", "tex.png"});
     ds.backdatePending("m.obj");
-    const auto beforeAttempt = utils::currentUnixTimestamp();
+    const auto beforeAttempt = ddb::currentUnixTimestamp();
     {
         EnvVarGuard lowDisk("DDB_MIN_FREE_DISK_MB", "100000000000");
         EXPECT_THROW(ddb::build(ds.db.get(), "m.obj", "", false), RetryableBuildException);

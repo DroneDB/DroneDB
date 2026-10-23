@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "raster_test_utils.h"
+#include "randomutil.h"
 
 #include <cstring>
 #include <mutex>
@@ -66,7 +67,7 @@ namespace testutils
 
     DecodedImage decodeImage(const uint8_t *data, size_t size)
     {
-        const std::string vsi = "/vsimem/test-decode-" + ddb::utils::generateRandomString(16);
+        const std::string vsi = "/vsimem/test-decode-" + ddb::randomString(16);
         VSIFCloseL(VSIFileFromMemBuffer(vsi.c_str(), const_cast<uint8_t *>(data), size, FALSE));
         GDALDatasetH ds = GDALOpen(vsi.c_str(), GA_ReadOnly);
         if (ds == nullptr)

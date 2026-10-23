@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "tiler.h"
+#include "randomutil.h"
 #include "mathutil.h"
 
 #include <mutex>
@@ -24,7 +25,7 @@ namespace ddb
     {
         if (outputFolder.empty())
         {
-            return "/vsimem/" + utils::generateRandomString(16) + "-" + std::to_string(z) + "-" + std::to_string(x) + "-" + std::to_string(y) + ".png";
+            return "/vsimem/" + randomString(16) + "-" + std::to_string(z) + "-" + std::to_string(x) + "-" + std::to_string(y) + ".png";
         }
         else
         {
@@ -48,7 +49,7 @@ namespace ddb
           tms(tms),
           mercator(GlobalMercator(tileSize))
     {
-        if (!fs::exists(io::fromUtf8(inputPath)) && !utils::isNetworkPath(inputPath))
+        if (!fs::exists(io::fromUtf8(inputPath)) && !io::isNetworkPath(inputPath))
             throw FSException(inputPath + " does not exist");
         if (!ddb::isPowerOfTwo(tileSize))
             throw GDALException("Tile size must be a power of 2 greater than 0");

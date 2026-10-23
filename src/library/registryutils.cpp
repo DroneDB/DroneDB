@@ -8,7 +8,6 @@
 
 #include "constants.h"
 #include "exceptions.h"
-#include "utils.h"
 #include <regex>
 
 namespace ddb

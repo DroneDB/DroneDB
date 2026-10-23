@@ -7,6 +7,7 @@
 #include <functional>
 
 #include "database.h"
+#include "entry_filters.h"
 #include "statement.h"
 #include "entry.h"
 #include "entry_types.h"
@@ -114,7 +115,7 @@ namespace ddb
         // The whole subtree of the folder, or its children only
         bool recursive = true;
         // File name pattern: '*' matches any characters, '?' one character; letters match
-        // regardless of case (utils::matchesNamePattern). Empty matches every name.
+        // regardless of case (filters::matchesNamePattern). Empty matches every name.
         std::string namePattern;
         // Entry types to return; empty returns every type
         std::vector<EntryType> types;
@@ -193,7 +194,7 @@ namespace ddb
      * @param types        Optional list of EntryType values to restrict which entries are rescanned.
      *                     If empty, all entry types are rescanned.
      * @param extensions   Optional list of file extensions (lowercase, without the dot, see
-     *                     utils::parseExtensionList) to restrict which entries are rescanned.
+     *                     filters::parseExtensionList) to restrict which entries are rescanned.
      *                     If empty, all extensions are rescanned. An entry must match both filters.
      * @param stopOnError  If true, the function throws an exception (AppException) on the first error encountered.
      *                     If false, errors are reported via the callback and rescanning continues.

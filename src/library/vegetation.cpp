@@ -8,7 +8,6 @@
 #include "exceptions.h"
 #include "gdal_raii.h"
 #include "logger.h"
-#include "utils.h"
 
 #include <gdal_priv.h>
 #include <cmath>

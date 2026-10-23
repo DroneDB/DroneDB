@@ -5,7 +5,6 @@
 #define GEO_H
 
 #include <iostream>
-#include "utils.h"
 #include "mathutil.h"
 #include "ddb_export.h"
 

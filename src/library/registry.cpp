@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "registry.h"
+#include "randomutil.h"
 #include "stringutil.h"
 
 #include <boolinq/boolinq.h>
@@ -30,7 +31,7 @@
 #include "tagmanager.h"
 #include "url.h"
 #include "userprofile.h"
-#include "utils.h"
+#include "http_helpers.h"
 
 using homer6::Url;
 
@@ -295,7 +296,7 @@ void Registry::downloadFiles(const std::string& organization,
         if (res.status_code != 200)
             this->handleError(res);
     } else {
-        const auto tempFile = (io::fromUtf8(folder) / (utils::generateRandomString(8) + ".tmp"));
+        const auto tempFile = (io::fromUtf8(folder) / (randomString(8) + ".tmp"));
         io::assureFolderExists(tempFile.parent_path());
 
         // Joins path list

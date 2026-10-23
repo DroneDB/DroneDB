@@ -29,7 +29,7 @@
 #include "tile_encoder.h"
 #include "tiler.h"
 #include "userprofile.h"
-#include "utils.h"
+#include "timeutil.h"
 #include "vis_render.h"
 
 // SPZ (vendored, MIT) - decode .spz to render an on-demand splat thumbnail.
@@ -133,7 +133,7 @@ void writeThumbnail(const RasterImage& image,
 GDALDatasetUniquePtr openThumbSource(const fs::path& imagePath, std::string& resolvedPath) {
     resolvedPath = io::toUtf8(imagePath);
     bool tryReopen = false;
-    if (utils::isNetworkPath(resolvedPath) &&
+    if (io::isNetworkPath(resolvedPath) &&
         io::Path(io::fromUtf8(resolvedPath)).checkExtension({"tif", "tiff"})) {
         resolvedPath = "/vsicurl/" + resolvedPath;
         tryReopen = true;
@@ -157,7 +157,7 @@ GDALDatasetUniquePtr openThumbSource(const fs::path& imagePath, std::string& res
 GDALDatasetUniquePtr openImageThumbSource(const fs::path& imagePath, int thumbSize, std::string& openPath,
                                           int& frameWidth, int& frameHeight) {
     frameWidth = frameHeight = 0;
-    if (!utils::isNetworkPath(io::toUtf8(imagePath)) && io::Path(imagePath).checkExtension({"jpg", "jpeg"})) {
+    if (!io::isNetworkPath(io::toUtf8(imagePath)) && io::Path(imagePath).checkExtension({"jpg", "jpeg"})) {
         const JpegLayout layout = readJpegLayout(imagePath);
         if (const auto preview = pickJpegPreview(layout, thumbSize)) {
             openPath = jpegPreviewGdalPath(imagePath, *preview);
@@ -778,15 +778,15 @@ fs::path generateThumb(const fs::path& inputPath,
     if (thumbSize <= 0)
         throw InvalidArgsException("thumbSize must be greater than 0");
 
-    if (!utils::isNetworkPath(io::toUtf8(inputPath)) && !exists(inputPath))
+    if (!io::isNetworkPath(io::toUtf8(inputPath)) && !exists(inputPath))
         throw FSException(io::toUtf8(inputPath) + " does not exist");
 
     // Writing the thumbnail replaces an existing file, so it must not be the input
-    if (!utils::isNetworkPath(io::toUtf8(inputPath)))
+    if (!io::isNetworkPath(io::toUtf8(inputPath)))
         io::assureDistinctOutput(inputPath, outImagePath);
 
     // Check existance of thumbnail, return if exists
-    if (!utils::isNetworkPath(io::toUtf8(inputPath)) && exists(outImagePath) && !forceRecreate)
+    if (!io::isNetworkPath(io::toUtf8(inputPath)) && exists(outImagePath) && !forceRecreate)
         return outImagePath;
 
     LOGD << "ImagePath = " << inputPath;
@@ -807,7 +807,7 @@ fs::path generateThumb(const fs::path& inputPath,
 void cleanupThumbsUserCache() {
     LOGD << "Cleaning up thumbs user cache";
 
-    const time_t threshold = utils::currentUnixTimestamp() - 60 * 60 * 24 * 5;  // 5 days
+    const time_t threshold = currentUnixTimestamp() - 60 * 60 * 24 * 5;  // 5 days
     const fs::path thumbsDir = UserProfile::get()->getThumbsDir();
     std::vector<fs::path> cleanupDirs;
 

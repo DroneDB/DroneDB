@@ -19,7 +19,6 @@
 #include "mio.h"
 #include "process_runner.h"
 #include "tool_locator.h"
-#include "utils.h"
 
 namespace ddb
 {

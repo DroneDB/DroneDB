@@ -4,7 +4,6 @@
 #include "include/command.h"
 #include "stringutil.h"
 #include "logger.h"
-#include "utils.h"
 #include "exceptions.h"
 
 namespace cmd

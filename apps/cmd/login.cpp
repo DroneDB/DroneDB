@@ -5,7 +5,7 @@
 #include "include/login.h"
 #include "registry.h"
 #include "constants.h"
-#include "utils.h"
+#include "terminal.h"
 
 namespace cmd
 {
@@ -41,7 +41,7 @@ namespace cmd
         }
         else
         {
-            username = ddb::utils::getPrompt("Username: ");
+            username = ddb::terminal::getPrompt("Username: ");
         }
 
         if (opts["password"].count() > 0)
@@ -50,7 +50,7 @@ namespace cmd
         }
         else
         {
-            password = ddb::utils::getPass("Password: ");
+            password = ddb::terminal::getPass("Password: ");
         }
 
         auto sslVerify = opts["insecure"].count() == 0;

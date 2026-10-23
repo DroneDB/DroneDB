@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "3d.h"
+#include "randomutil.h"
 #include "stringutil.h"
 
 #include <algorithm>
@@ -21,7 +22,6 @@
 #include "mio.h"
 #include "obj2tiles_runner.h"
 #include "plyconv.h"
-#include "utils.h"
 
 namespace ddb {
 namespace {
@@ -573,7 +573,7 @@ std::string convertGltfToObj(const std::string& inputGltf, io::ScopedTempDir& te
 
     fs::path inputPath = io::fromUtf8(inputGltf);
     fs::path tempDir =
-        fs::temp_directory_path() / ("ddb_gltf_convert_" + utils::generateRandomString(16));
+        fs::temp_directory_path() / ("ddb_gltf_convert_" + randomString(16));
     fs::create_directories(tempDir);
     tempGuard.reset(tempDir);
 
@@ -656,7 +656,7 @@ PreparedModel prepareModelInput(const std::string& input, ModelConsumer consumer
         }
 
         const fs::path tempDir =
-            fs::temp_directory_path() / ("ddb_ply_convert_" + utils::generateRandomString(16));
+            fs::temp_directory_path() / ("ddb_ply_convert_" + randomString(16));
         fs::create_directories(tempDir);
         tempGuard.reset(tempDir);
 
@@ -900,7 +900,7 @@ std::string buildModel3DTiles(const std::string& inputObj, const std::string& ou
 
     // Produce into a sibling temporary directory; outDir is untouched until
     // Obj2Tiles succeeds. The guard removes the temp folder on any failure.
-    const fs::path tempOut = parent / io::fromUtf8(outName + TempFolderInfix + utils::generateRandomString(16));
+    const fs::path tempOut = parent / io::fromUtf8(outName + TempFolderInfix + randomString(16));
     io::ScopedTempDir outGuard;
     io::assureIsRemoved(tempOut);
     io::assureFolderExists(tempOut);

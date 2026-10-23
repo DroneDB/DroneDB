@@ -24,7 +24,6 @@
 #include "stringutil.h"
 #include "logger.h"
 #include "exceptions.h"
-#include "utils.h"
 
 // libktx + stb_image_write for KTX2->PNG conversion
 #include <ktx.h>

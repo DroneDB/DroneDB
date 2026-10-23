@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "timezone.h"
 
+#include <cstdlib>
 #include <memory>
 #include <vector>
 #include <mutex>

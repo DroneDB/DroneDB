@@ -20,7 +20,6 @@
 #include "logger.h"
 #include "mio.h"
 #include "point_rasterizer.h"
-#include "utils.h"
 
 namespace ddb
 {
@@ -61,7 +60,7 @@ namespace ddb
         toCloud = std::make_unique<CoordsTransformer>(3857, pcInfo.wktProjection);
         toMercator = std::make_unique<CoordsTransformer>(pcInfo.wktProjection, 3857);
 
-        if (hasColors && !utils::isNetworkPath(inputPath))
+        if (hasColors && !io::isNetworkPath(inputPath))
         {
             try
             {

@@ -4,7 +4,6 @@
 #include "exif.h"
 #include "stringutil.h"
 #include "logger.h"
-#include "utils.h"
 #include "timezone.h"
 #include "dsmservice.h"
 #include "sensor_data.h"

@@ -10,7 +10,6 @@
 #include "logger.h"
 #include "exceptions.h"
 #include "sqlite_database.h"
-#include "utils.h"
 
 namespace ddb
 {

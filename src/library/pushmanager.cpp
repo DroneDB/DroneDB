@@ -9,7 +9,7 @@
 #include "registry.h"
 #include "registryutils.h"
 #include "userprofile.h"
-#include "utils.h"
+#include "http_helpers.h"
 #include <cpr/cpr.h>
 
 namespace ddb

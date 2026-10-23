@@ -1,4 +1,5 @@
 #include "../../vendor/base64/base64.h"
+#include "randomutil.h"
 #include "passwordmanager.h"
 #include "logger.h"
 #include "hash.h"
@@ -6,7 +7,6 @@
 
 #include <string>
 #include <random>
-#include "utils.h"
 
 namespace ddb
 {
@@ -32,7 +32,7 @@ namespace ddb
 			return;
 		}
 
-		const auto salt = utils::generateRandomString(SALT_LENGTH);
+		const auto salt = randomString(SALT_LENGTH);
 		const auto hash = Hash::strSHA256(salt + password);
 
 		const std::string sql = "INSERT INTO passwords VALUES(?, ?)";

@@ -21,7 +21,6 @@
 #include "entry_handler.h"
 #include "exceptions.h"
 #include "mio.h"
-#include "utils.h"
 
 namespace ddb {
 

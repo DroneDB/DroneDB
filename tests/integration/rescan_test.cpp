@@ -12,6 +12,7 @@
 #include "testarea.h"
 #include "testfs.h"
 #include "utils.h"
+#include "entry_filters.h"
 
 #include <algorithm>
 #include <fstream>
@@ -315,33 +316,33 @@ namespace
 
     TEST(parseExtensionList, normalizesItems)
     {
-        const auto exts = utils::parseExtensionList(" dwg, .DXF ,,copc.LAZ,");
+        const auto exts = filters::parseExtensionList(" dwg, .DXF ,,copc.LAZ,");
         ASSERT_EQ(exts.size(), 3);
         EXPECT_EQ(exts[0], "dwg");
         EXPECT_EQ(exts[1], "dxf");
         EXPECT_EQ(exts[2], "copc.laz");
 
-        EXPECT_TRUE(utils::parseExtensionList("").empty());
-        EXPECT_TRUE(utils::parseExtensionList(nullptr).empty());
+        EXPECT_TRUE(filters::parseExtensionList("").empty());
+        EXPECT_TRUE(filters::parseExtensionList(nullptr).empty());
     }
 
     TEST(parseExtensionList, rejectsInvalidItems)
     {
-        EXPECT_THROW(utils::parseExtensionList("."), InvalidArgsException);
-        EXPECT_THROW(utils::parseExtensionList("*.dwg"), InvalidArgsException);
-        EXPECT_THROW(utils::parseExtensionList("a/dwg"), InvalidArgsException);
-        EXPECT_THROW(utils::parseExtensionList("tar gz"), InvalidArgsException);
+        EXPECT_THROW(filters::parseExtensionList("."), InvalidArgsException);
+        EXPECT_THROW(filters::parseExtensionList("*.dwg"), InvalidArgsException);
+        EXPECT_THROW(filters::parseExtensionList("a/dwg"), InvalidArgsException);
+        EXPECT_THROW(filters::parseExtensionList("tar gz"), InvalidArgsException);
     }
 
     TEST(hasAnyExtension, matchesSuffixAfterDot)
     {
-        EXPECT_TRUE(utils::hasAnyExtension("plans/site.DWG", {"dwg"}));
-        EXPECT_TRUE(utils::hasAnyExtension("scan.copc.laz", {"copc.laz"}));
-        EXPECT_TRUE(utils::hasAnyExtension("scan.copc.laz", {"laz"}));
-        EXPECT_FALSE(utils::hasAnyExtension("scan.laz", {"copc.laz"}));
-        EXPECT_FALSE(utils::hasAnyExtension("dwg", {"dwg"}));
-        EXPECT_FALSE(utils::hasAnyExtension("plans/sitedwg", {"dwg"}));
-        EXPECT_FALSE(utils::hasAnyExtension("site.dwg.bak", {"dwg"}));
+        EXPECT_TRUE(filters::hasAnyExtension("plans/site.DWG", {"dwg"}));
+        EXPECT_TRUE(filters::hasAnyExtension("scan.copc.laz", {"copc.laz"}));
+        EXPECT_TRUE(filters::hasAnyExtension("scan.copc.laz", {"laz"}));
+        EXPECT_FALSE(filters::hasAnyExtension("scan.laz", {"copc.laz"}));
+        EXPECT_FALSE(filters::hasAnyExtension("dwg", {"dwg"}));
+        EXPECT_FALSE(filters::hasAnyExtension("plans/sitedwg", {"dwg"}));
+        EXPECT_FALSE(filters::hasAnyExtension("site.dwg.bak", {"dwg"}));
     }
 
     TEST(rescanIndex, rescanWithExtensionFilter)

@@ -8,7 +8,6 @@
 #include "entry_types.h"
 #include "logger.h"
 #include "exceptions.h"
-#include "utils.h"
 #include "hash.h"
 #include "exif.h"
 #include "basicgeometry.h"

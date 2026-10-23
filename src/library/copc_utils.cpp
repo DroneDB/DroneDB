@@ -19,7 +19,6 @@
 
 #include "exceptions.h"
 #include "gdal_raii.h"
-#include "utils.h"
 #include "mio.h"
 
 namespace ddb
@@ -147,7 +146,7 @@ namespace ddb
 
     CopcIndex readCopcIndex(const std::string &copcPath)
     {
-        const std::string path = utils::isNetworkPath(copcPath) ? "/vsicurl/" + copcPath : copcPath;
+        const std::string path = io::isNetworkPath(copcPath) ? "/vsicurl/" + copcPath : copcPath;
         VsiFile file(path);
 
         const auto header = file.read(0, LasHeaderSize + VlrHeaderSize + 160);
@@ -225,7 +224,7 @@ namespace ddb
             throw AppException(copcPath + " has an unsupported point format " + std::to_string(index.pointFormat));
         const int ebCount = index.pointSize - baseSize[index.pointFormat];
 
-        const std::string path = utils::isNetworkPath(copcPath) ? "/vsicurl/" + copcPath : copcPath;
+        const std::string path = io::isNetworkPath(copcPath) ? "/vsicurl/" + copcPath : copcPath;
         auto chunk = VsiFile(path).read(node.offset, static_cast<size_t>(node.byteSize));
 
         points.clear();
@@ -286,7 +285,7 @@ namespace ddb
         // Reads are LAZ-decompression bound: 4 threads instead of PDAL's 2 for local
         // files cut a z18 tile by a quarter (remote files keep PDAL's 10)
         constexpr size_t LocalReadThreads = 4;
-        return utils::isNetworkPath(copcPath) ? parallel::CpuTokens()
+        return io::isNetworkPath(copcPath) ? parallel::CpuTokens()
                                               : parallel::tryAcquireThreads(LocalReadThreads);
     }
 
@@ -294,10 +293,10 @@ namespace ddb
     {
         pdal::Options options;
         const fs::path path = io::fromUtf8(copcPath);
-        options.add("filename", (!utils::isNetworkPath(copcPath) && path.is_relative()) ? io::toUtf8("." / path)
+        options.add("filename", (!io::isNetworkPath(copcPath) && path.is_relative()) ? io::toUtf8("." / path)
                                                                                          : copcPath);
         options.add("nosrs", true);
-        if (!utils::isNetworkPath(copcPath))
+        if (!io::isNetworkPath(copcPath))
             options.add("threads", static_cast<int>(threads.threads()));
         return options;
     }

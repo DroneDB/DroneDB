@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "gtest/gtest.h"
+#include "diagnostics.h"
 #include "stringutil.h"
 
 #include "align.h"
@@ -347,9 +348,9 @@ namespace
         const char *name = "DDB_DQ02_TEST_UNSET_VARIABLE";
         EnvVarGuard guard(name);
         unsetEnv(name);
-        EXPECT_EQ(utils::getEnvOrUnset(name), "<unset>");
+        EXPECT_EQ(ddb::diagnostics::getEnvOrUnset(name), "<unset>");
         setEnv(name, "value");
-        EXPECT_EQ(utils::getEnvOrUnset(name), "value");
+        EXPECT_EQ(ddb::diagnostics::getEnvOrUnset(name), "value");
     }
 
     // Characterisation: the label tested DEBUG, which no build defines, so every build said
@@ -357,7 +358,7 @@ namespace
     // the fix).
     TEST(Dq02Defects, Target_BuildInfoLabelFollowsNdebug)
     {
-        const std::string info = utils::getBuildInfo();
+        const std::string info = ddb::diagnostics::getBuildInfo();
 #ifdef NDEBUG
         EXPECT_EQ(info.rfind("Release build", 0), 0u) << info;
 #else

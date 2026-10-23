@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "utils.h"
+#include "randomutil.h"
 
 #include <algorithm>
 #include <cstdlib>
@@ -42,7 +43,7 @@ void fileWriteAllText(const fs::path &path, const std::string &content)
 fs::path makeTree(const std::vector<ddb::SimpleEntry> &entries)
 {
     const auto tempFolder =
-        fs::temp_directory_path() / "diff_test" / ddb::utils::generateRandomString(8);
+        fs::temp_directory_path() / "diff_test" / ddb::randomString(8);
 
     create_directories(tempFolder);
 

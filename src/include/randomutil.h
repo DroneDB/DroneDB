@@ -6,6 +6,8 @@
 #define RANDOMUTIL_H
 
 #include <random>
+#include <string>
+#include <string_view>
 #include <type_traits>
 
 namespace ddb {
@@ -28,6 +30,18 @@ T randomInt(T lo, T hi) {
 // True with probability 1/n (n > 0): for occasional housekeeping such as cache cleanup.
 inline bool oneIn(unsigned n) {
     return n <= 1 || randomInt<unsigned>(0, n - 1) == 0;
+}
+
+// `length` random letters and digits from the calling thread's engine: unique file and folder
+// names, not secrets (use a cryptographic source for those). Safe for a file name on every
+// platform.
+inline std::string randomString(int length) {
+    constexpr std::string_view kAlphabet =
+        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    std::string result(static_cast<size_t>(length), '\0');
+    for (char& c : result)
+        c = kAlphabet[randomInt<size_t>(0, kAlphabet.size() - 1)];
+    return result;
 }
 
 }  // namespace ddb

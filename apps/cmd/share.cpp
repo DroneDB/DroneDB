@@ -15,7 +15,7 @@
 #include "registry.h"
 #include "registryutils.h"
 #include "shareservice.h"
-#include "utils.h"
+#include "terminal.h"
 
 namespace cmd
 {
@@ -140,8 +140,8 @@ namespace cmd
             }
 
             // Try logging-in interactively
-            auto username = ddb::utils::getPrompt("Username: ");
-            auto password = ddb::utils::getPass("Password: ");
+            auto username = ddb::terminal::getPrompt("Username: ");
+            auto password = ddb::terminal::getPass("Password: ");
 
             ddb::Registry reg = ddb::RegistryUtils::createFromTag(tag, false, sslVerify);
             if (reg.login(username, password).length() > 0)

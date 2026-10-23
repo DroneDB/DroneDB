@@ -5,12 +5,14 @@
 // DQ-05: the shared string and math helpers (stringutil.h, mathutil.h).
 
 #include <cmath>
+#include <set>
 #include <string>
 #include <vector>
 
 #include "gtest/gtest.h"
 #include "mathutil.h"
 #include "mio.h"
+#include "randomutil.h"
 #include "stringutil.h"
 
 namespace {
@@ -190,6 +192,23 @@ TEST(Dq05Strings, LowerExtensionIsTheOneExtensionRule) {
     EXPECT_TRUE(io::Path("a/B.TIF").checkExtension({"png", "TIF"}));
     EXPECT_FALSE(io::Path("a/B.TIF").checkExtension({"png"}));
     EXPECT_FALSE(io::Path("noext").checkExtension({"png", ""}));
+}
+
+// ---------------------------------------------------------------- random names
+
+// The alphabet of the old generateRandomString skipped 'V' ("...STUWXYZ")
+TEST(Dq05Strings, RandomStringUsesLettersAndDigitsOnly) {
+    EXPECT_EQ(randomString(0), "");
+    EXPECT_EQ(randomString(16).size(), 16u);
+
+    std::set<char> seen;
+    for (int i = 0; i < 400; i++)
+        for (char c : randomString(64)) {
+            EXPECT_TRUE(str::isAlnumChar(c)) << static_cast<int>(c);
+            seen.insert(c);
+        }
+    EXPECT_EQ(seen.size(), 62u);  // 25600 draws: every letter and digit shows up
+    EXPECT_TRUE(seen.count('V'));
 }
 
 // ---------------------------------------------------------------- math

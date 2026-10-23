@@ -6,6 +6,7 @@
 #include "exceptions.h"
 #include "mio.h"
 #include "exif.h"
+#include <iostream>
 #include <exiv2/exiv2.hpp>
 #include <cmath>
 

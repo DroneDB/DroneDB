@@ -73,6 +73,10 @@ DDB_DLL bool isReservedSegment(std::string_view segment) noexcept;
 /// the iteration over a path)
 DDB_DLL bool isReservedSegment(const fs::path& segment);
 
+/// True when a '/'-separated path has a "." or ".." segment (a literal path argument, before any
+/// normalization: the caller refuses it)
+DDB_DLL bool hasDotNotation(const std::string& path);
+
 /// Normalizes a dataset-relative path, or rejects it (rules above)
 DDB_DLL EntryPathResult normalizeEntryPath(std::string_view path, const ReservedRules& rules = {});
 

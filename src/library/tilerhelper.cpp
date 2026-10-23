@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "tilerhelper.h"
+#include "timeutil.h"
 #include "gdaltiler.h"
 #include "threadlock.h"
 #include "raster_cache.h"
@@ -139,7 +140,7 @@ namespace ddb
     {
         fs::path localTileablePath;
 
-        if (utils::isNetworkPath(io::toUtf8(tileablePath)))
+        if (io::isNetworkPath(io::toUtf8(tileablePath)))
         {
             // Download file to user cache
             const std::string ext = io::toUtf8(fs::path(tileablePath).extension());
@@ -171,7 +172,7 @@ namespace ddb
                 if (download)
                 {
                     // Download to a temp file so a failed transfer never lands in the cache
-                    const fs::path tmpPath = io::concat(localTileablePath, ".download-" + utils::generateRandomString(16));
+                    const fs::path tmpPath = io::concat(localTileablePath, ".download-" + randomString(16));
                     cpr::Response res;
                     bool writeOk = false;
                     {
@@ -267,7 +268,7 @@ namespace ddb
         LOGD << "Cleaning up tiles user cache";
 
         const time_t threshold =
-            utils::currentUnixTimestamp() - 60 * 60 * 24 * 5; // 5 days
+            currentUnixTimestamp() - 60 * 60 * 24 * 5; // 5 days
         const fs::path tilesDir = UserProfile::get()->getTilesDir();
 
         // Iterate directories

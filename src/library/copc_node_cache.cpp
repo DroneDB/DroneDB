@@ -11,7 +11,6 @@
 #include "fileversion.h"
 #include "logger.h"
 #include "parallel.h"
-#include "utils.h"
 #include "mio.h"
 
 namespace ddb
@@ -176,7 +175,7 @@ namespace ddb
     CopcNodeReader::CopcNodeReader(const std::string &copcPath)
         : path_(copcPath), cacheFile_(cacheKeyPath(io::fromUtf8(copcPath))), version_(fileVersion(io::fromUtf8(copcPath)))
     {
-        if (utils::isNetworkPath(copcPath))
+        if (io::isNetworkPath(copcPath))
             throw InvalidArgsException("CopcNodeReader reads local files only: " + copcPath);
         if (version_.empty())
             throw FSException(copcPath + " does not exist");

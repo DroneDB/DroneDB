@@ -7,6 +7,7 @@
 // path comes from the EntryHandler registry and build_layout.h.
 
 #include "build_manifest.h"
+#include "randomutil.h"
 
 #include <algorithm>
 #include <map>
@@ -23,7 +24,6 @@
 #include "logger.h"
 #include "mio.h"
 #include "raster_cache.h"
-#include "utils.h"
 
 namespace ddb {
 
@@ -371,7 +371,7 @@ void appendUnique(std::vector<std::string>& list, const std::string& value) {
 // folder "<to>-temp-<rand16>" (removed on failure), then renamed onto to, so a reader never sees
 // a half-copied folder under the artifact's name.
 void copyFolderReplacing(const fs::path& from, const fs::path& to) {
-    io::ScopedTempDir scratch(io::concat(to, TempFolderInfix + utils::generateRandomString(16)));
+    io::ScopedTempDir scratch(io::concat(to, TempFolderInfix + randomString(16)));
     std::error_code ec;
     fs::copy(from, scratch.path(), fs::copy_options::recursive, ec);
     if (ec)

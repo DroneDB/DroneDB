@@ -21,7 +21,6 @@
 #include "ply.h"
 #include "rad.h"
 #include "thumbs.h"
-#include "utils.h"
 
 // SPZ (vendored, MIT) - native Gaussian Splat encoder/decoder.
 #include "load-spz.h"

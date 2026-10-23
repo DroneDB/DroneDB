@@ -7,7 +7,6 @@
 #include "exceptions.h"
 #include "gdal_raii.h"
 #include "logger.h"
-#include "utils.h"
 #include "sensorprofile.h"
 #include "mio.h"
 

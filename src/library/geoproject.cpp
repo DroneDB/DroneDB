@@ -3,11 +3,11 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "cancellation.h"
+#include "randomutil.h"
 #include "stringutil.h"
 #include "dbops.h"
 #include "geoproject.h"
 #include "mio.h"
-#include "utils.h"
 #include <format>
 #include "gdal_raii.h"
 
@@ -73,7 +73,7 @@ namespace ddb
             }
 
             // Unique per call so concurrent processes sharing a cache don't clobber each other
-            std::string tmpOutFile = io::toUtf8(io::fromUtf8(outFile).replace_extension("." + utils::generateRandomString(8) + ".tif.tmp"));
+            std::string tmpOutFile = io::toUtf8(io::fromUtf8(outFile).replace_extension("." + randomString(8) + ".tif.tmp"));
 
             Point ul = e.polygon_geom.getPoint(0);
             Point ll = e.polygon_geom.getPoint(1);

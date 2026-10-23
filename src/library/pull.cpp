@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "authcredentials.h"
+#include "terminal.h"
 #include "ddb.h"
 #include "mio.h"
 #include "registryutils.h"
@@ -47,8 +48,8 @@ namespace ddb
         {
             if (ac.empty())
             {
-                const auto username = utils::getPrompt("Username: ");
-                const auto password = utils::getPass("Password: ");
+                const auto username = terminal::getPrompt("Username: ");
+                const auto password = terminal::getPass("Password: ");
 
                 if (reg.login(username, password).length() <= 0)
                     throw AuthException("Cannot authenticate with " +
@@ -70,8 +71,8 @@ namespace ddb
         }
         catch (const AuthException &)
         {
-            const auto username = utils::getPrompt("Username: ");
-            const auto password = utils::getPass("Password: ");
+            const auto username = terminal::getPrompt("Username: ");
+            const auto password = terminal::getPass("Password: ");
 
             if (reg.login(username, password).length() > 0)
             {

@@ -8,11 +8,11 @@
 #include "logger.h"
 #include "mio.h"
 #include "parallel.h"
-#include "utils.h"
 #include "exif.h"
 #include "exifeditor.h"
 #include "sensor_data.h"
 
+#include <cstdlib>
 #include <cmath>
 #include <sstream>
 #include <algorithm>

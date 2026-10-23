@@ -9,7 +9,6 @@
 
 #include "dbops.h"
 #include "ddb_export.h"
-#include "utils.h"
 #include "simpleentry.h"
 
 namespace ddb

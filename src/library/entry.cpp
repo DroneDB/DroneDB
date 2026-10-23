@@ -13,7 +13,6 @@
 #include "constants.h"
 
 #include "mio.h"
-#include "utils.h"
 #include "gdal_priv.h"
 #include "cpl_conv.h"
 #include "ogr_spatialref.h"

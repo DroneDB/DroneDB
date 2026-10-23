@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "testfs.h"
+#include "randomutil.h"
 #include "logger.h"
 #include "exceptions.h"
 #include "mio.h"
@@ -35,7 +36,7 @@ TestFS::TestFS(const std::string &testArchivePath, const std::string &baseTestFo
 {
 
     // Generate a random test folder path
-    testFolder = (std::filesystem::temp_directory_path() / baseTestFolder / ddb::utils::generateRandomString(16)).string();
+    testFolder = (std::filesystem::temp_directory_path() / baseTestFolder / ddb::randomString(16)).string();
     std::filesystem::create_directories(testFolder);
 
     if (!isLocalPath(testArchivePath))
@@ -174,7 +175,7 @@ namespace
     {
     public:
         explicit PartFile(const std::filesystem::path &destination)
-            : path_(destination.string() + ".part-" + ddb::utils::generateRandomString(16)) {}
+            : path_(destination.string() + ".part-" + ddb::randomString(16)) {}
         ~PartFile()
         {
             std::error_code e;

@@ -125,7 +125,7 @@ namespace ddb
     void GDALTiler::open()
     {
         std::string openPath = inputPath;
-        if (utils::isNetworkPath(openPath))
+        if (io::isNetworkPath(openPath))
         {
             CPLSetConfigOption("GDAL_DISABLE_READDIR_ON_OPEN", "YES");
             CPLSetConfigOption("CPL_VSIL_CURL_ALLOWED_EXTENSIONS", ".tif,.tiff");

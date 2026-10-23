@@ -3,7 +3,7 @@
 #include "database.h"
 #include "mio.h"
 #include "exceptions.h"
-#include "utils.h"
+#include "timeutil.h"
 #include "json.h"
 #include "transaction.h"
 #include "retrypolicy.h"
@@ -111,7 +111,7 @@ namespace ddb
         const auto ePath = entryPath(path, cwd);
         const auto eKey = getKey(key, true);
         const auto eData = validateData(data);
-        const long long eMtime = utils::currentUnixTimestamp();
+        const long long eMtime = currentUnixTimestamp();
 
         const auto q = db->query("INSERT INTO entries_meta (path, key, data, mtime) VALUES (?, ?, ?, ?)");
         q->bind(1, ePath);
@@ -130,7 +130,7 @@ namespace ddb
         const auto ePath = entryPath(path, cwd);
         const auto eKey = getKey(key, false);
         const auto eData = validateData(data);
-        const long long eMtime = utils::currentUnixTimestamp();
+        const long long eMtime = currentUnixTimestamp();
 
         // Delete previous meta first (we need to generate a new ID)
         const auto q = db->query("DELETE FROM entries_meta WHERE path = ? and key = ?");

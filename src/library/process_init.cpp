@@ -27,7 +27,7 @@
 #include "logger.h"
 #include "mio.h"
 #include "raster_cache.h"
-#include "utils.h"
+#include "diagnostics.h"
 
 using namespace ddb;
 
@@ -283,7 +283,7 @@ namespace ddb
                 LOGD << "FLIR XMP namespace already registered or error: " << e.what();
             }
 
-            ddb::utils::printVersions();
+            diagnostics::printVersions();
         });
     }
 

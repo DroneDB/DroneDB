@@ -229,7 +229,7 @@ DDBErr guarded(Body&& body) noexcept {
     }
 }
 
-// Copies text into *output, in memory the caller frees with DDBFree (utils::copyToPtr)
+// Copies text into *output (not written when it is NULL), in memory the caller frees with DDBFree
 void writeString(char** output, const std::string& text);
 
 // guarded() for an export with one output: body returns the value, which is written to *output
@@ -287,6 +287,24 @@ DDBErr guardedBuffer(uint8_t** outBuffer, int* outBufferSize, Body&& body) noexc
 }
 
 // ------------------------------------------------------------------ arguments
+
+// The checks of a C argument, with no exception: the require* functions below throw when one
+// fails. (Before DQ-05 they were utils::isNullOrEmptyOrWhitespace, isValid*Param and
+// hasNullStringInArray.)
+
+// True when text is NULL, empty or whitespace only
+bool isNullOrEmptyOrWhitespace(const char* text) noexcept;
+// True when any of the count strings is NULL, empty or whitespace only; also for a NULL array
+// and for count 0 (nothing was provided)
+bool isNullOrEmptyOrWhitespace(const char** items, int count) noexcept;
+// True when the array is NULL, count is negative, or any of the count strings is NULL
+bool hasNullStringInArray(const char** items, int count) noexcept;
+// False for a negative count, or a NULL array with a positive count
+bool isValidArrayParam(const char** array, int count) noexcept;
+// A string that may be empty but not NULL
+bool isValidStringParam(const char* text) noexcept;
+// A string that is not NULL and not empty (whitespace is accepted)
+bool isValidNonEmptyStringParam(const char* text) noexcept;
 
 // Throws InvalidArgsException(message) when text is NULL, empty or whitespace only
 void requireText(const char* text, const char* message);

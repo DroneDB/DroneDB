@@ -7,7 +7,6 @@
 #include "gdal_raii.h"
 #include "json.h"
 #include "logger.h"
-#include "utils.h"
 
 #include <gdal_priv.h>
 #include <ogr_api.h>

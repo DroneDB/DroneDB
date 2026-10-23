@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "build_layout.h"
+#include "randomutil.h"
 #include "stringutil.h"
 #include "cad.h"
 #include "cancellation.h"
@@ -25,7 +26,6 @@
 #include "raster_cache.h"
 #include "exceptions.h"
 #include "gdal_raii.h"
-#include "utils.h"
 
 namespace ddb
 {
@@ -794,7 +794,7 @@ namespace ddb
         // the backup so users never observe a half-published state. A
         // local build publishes no mvt/, so an old pyramid is retired.
         const fs::path backupDir = basePath /
-            (VectorBackupPrefix + utils::generateRandomString(16));
+            (VectorBackupPrefix + randomString(16));
         const fs::path backupVec = backupDir / VectorBuildSubfolder;
         const fs::path backupMvt = backupDir / MvtBuildSubfolder;
         // Back up any existing directory at the publish target, even if

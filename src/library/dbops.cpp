@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "dbops.h"
+#include "randomutil.h"
 #include "stringutil.h"
 
 #include "build.h"
@@ -21,6 +22,10 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#ifdef _WIN32
+#include <windows.h>  // DWORD, GetFileAttributesW
+#endif
+
 #include "entry_path.h"
 #include "entry_types.h"
 #include "exceptions.h"
@@ -32,7 +37,7 @@
 
 #include "userprofile.h"
 #include "utf8.h"
-#include "utils.h"
+#include "entry_filters.h"
 #include "version.h"
 #include "constants.h"
 #include "transaction.h"
@@ -101,7 +106,7 @@ namespace
             return;
 
         LOGD << "Creating " << io::toUtf8(templatePath);
-        TemporaryDatabaseFile temporary(io::concat(templatePath, ".tmp-" + utils::generateRandomString(16)));
+        TemporaryDatabaseFile temporary(io::concat(templatePath, ".tmp-" + randomString(16)));
         {
             Database db;
             db.open(io::toUtf8(temporary.path()));
@@ -1621,7 +1626,7 @@ namespace
         std::vector<Entry> entries;
         while (q->fetch())
         {
-            if (!query.namePattern.empty() && !utils::matchesNamePattern(fileName(q->getText(0)), query.namePattern))
+            if (!query.namePattern.empty() && !filters::matchesNamePattern(fileName(q->getText(0)), query.namePattern))
                 continue;
 
             Entry e;
@@ -1742,7 +1747,7 @@ namespace
         while (q->fetch())
         {
             const std::string path = q->getText(0);
-            if (!extensions.empty() && !utils::hasAnyExtension(path, extensions))
+            if (!extensions.empty() && !filters::hasAnyExtension(path, extensions))
                 continue;
 
             io::Path relPath = io::fromUtf8(path);
@@ -2055,13 +2060,13 @@ namespace
         if (source[source.length() - 1] == '/' || source[source.length() - 1] == '\\')
             throw InvalidArgsException("source cannot end with path separator");
 
-        if (utils::hasDotNotation(source))
+        if (hasDotNotation(source))
             throw InvalidArgsException("source path cannot contain any dot notations");
 
         if (dest[dest.length() - 1] == '/' || dest[dest.length() - 1] == '\\')
             throw InvalidArgsException("dest cannot end with path separator");
 
-        if (utils::hasDotNotation(dest))
+        if (hasDotNotation(dest))
             throw InvalidArgsException("dest path cannot contain any dot notations");
 
         // Nothing to do

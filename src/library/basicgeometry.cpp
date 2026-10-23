@@ -4,6 +4,7 @@
 
 #include "basicgeometry.h"
 #include "exceptions.h"
+#include <sstream>
 #include <format>
 
 namespace ddb

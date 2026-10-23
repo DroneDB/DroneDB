@@ -14,7 +14,6 @@
 #include <unordered_map>
 
 #include "entry_handlers_builtin.h"
-#include "utils.h"
 #include "mio.h"
 
 namespace ddb {

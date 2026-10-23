@@ -30,7 +30,7 @@
 #include "process_runner.h"
 #include "test.h"
 #include "testarea.h"
-#include "utils.h"
+#include "diagnostics.h"
 
 namespace
 {
@@ -103,7 +103,7 @@ namespace
 
         // The log names the folders in use (not the environment variables)
         logfwd::setCallback(&collect, logfwd::kTrace, nullptr);
-        utils::printVersions();
+        diagnostics::printVersions();
         logfwd::unregister();
         EXPECT_TRUE(wasLogged(std::string("GDAL_DATA = ") + expectGdal));
         EXPECT_TRUE(wasLogged(std::string("PROJ search paths = ") + expectProj));

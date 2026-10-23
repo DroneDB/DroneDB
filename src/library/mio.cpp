@@ -2,21 +2,53 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "mio.h"
-#include "stringutil.h"
-#include "utils.h"
+#include "randomutil.h"
 
+#include <iterator>
+#include <ctime>
+#include <cstring>
+#include <cstdlib>
 #include <cerrno>
+#include <chrono>
+#include <climits>
 #include <cmath>
 #include <fstream>
+#include <iomanip>
+#include <sstream>
+#include <thread>
+
+#include <sys/stat.h>
+
+#include "exceptions.h"
+#include "logger.h"
+#include "randomutil.h"
+#include "stringutil.h"
+
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <sys/file.h>
+#include <unistd.h>
+#include <utime.h>
+#endif
 
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
+#endif
+
+#ifndef PATH_MAX
+#define PATH_MAX 4096
 #endif
 
 namespace ddb
 {
     namespace io
     {
+
+        bool isNetworkPath(const std::string &path)
+        {
+            return path.starts_with("http://") || path.starts_with("https://");
+        }
 
         std::string lowerExtension(const fs::path &p)
         {
@@ -701,7 +733,7 @@ namespace ddb
 
         ScopedTempDir ScopedTempDir::create(const fs::path &parent, const std::string &prefix)
         {
-            ScopedTempDir dir(parent / (prefix + utils::generateRandomString(16)));
+            ScopedTempDir dir(parent / (prefix + randomString(16)));
             createDirectories(dir.path());
             return dir;
         }
@@ -852,7 +884,7 @@ namespace ddb
         void writeFileAtomic(const fs::path &target, const std::string &content, const std::string &what,
                              bool ownerOnly, const std::string &tempTag)
         {
-            const fs::path temporary = concat(target, tempTag + utils::generateRandomString(16));
+            const fs::path temporary = concat(target, tempTag + randomString(16));
             try
             {
                 std::ofstream out;

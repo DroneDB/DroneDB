@@ -7,6 +7,7 @@
 // and retrying the deferred builds.
 
 #include "build.h"
+#include "timeutil.h"
 
 #include <cctype>
 #include <fstream>
@@ -37,7 +38,7 @@ void writeMarkerAtomically(const fs::path& pendingPath, const std::string& conte
 // Failure (especially ENOSPC) must never remove the last pending marker.
 bool replacePendingMarker(const fs::path& pendingPath, const std::string& dependencyLines) {
     try {
-        writeMarkerAtomically(pendingPath, std::to_string(utils::currentUnixTimestamp()) + "\n" + dependencyLines);
+        writeMarkerAtomically(pendingPath, std::to_string(currentUnixTimestamp()) + "\n" + dependencyLines);
         return true;
     } catch (const std::exception& ex) {
         LOGW << "Cannot refresh pending marker '" << io::toUtf8(pendingPath)
@@ -76,7 +77,7 @@ std::optional<PendingMarker> readPendingMarker(const fs::path& pendingFilePath) 
         data.lastAttempt = std::stoll(line);
 
         // Basic validation - timestamp should be reasonable
-        const time_t currentTime = utils::currentUnixTimestamp();
+        const time_t currentTime = currentUnixTimestamp();
         if (data.lastAttempt > currentTime) {
             LOGW << "Timestamp in pending file is in the future: " << line;
         }
@@ -187,7 +188,7 @@ void buildPending(Database* db, const std::string& outputPath, bool force) {
         const auto hash = io::toUtf8(pendingPath.stem());
         const PendingMarker pending = parsePendingFile(pendingPath);
 
-        const time_t now = utils::currentUnixTimestamp();
+        const time_t now = currentUnixTimestamp();
         const time_t retryAfter = pendingRetryAfter(pending.lastAttempt);
         if (!force && now < retryAfter) {
             LOGD << "Skipping build attempt for hash " << hash << " (last attempt "

@@ -3,9 +3,11 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "gdal_inc.h"
 
+#include <algorithm>
 #include <memory>
 #include <sstream>
 #include "geo.h"
+#include "exceptions.h"
 
 namespace ddb
 {

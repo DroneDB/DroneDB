@@ -8,6 +8,7 @@
 #include <vector>
 #include <cpr/cpr.h>
 #include "registry.h"
+#include "http_helpers.h"
 #include "ddb_export.h"
 #include "mio.h"
 

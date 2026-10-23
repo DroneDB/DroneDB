@@ -6,6 +6,7 @@
 // scratch folders a crashed build left behind (cleanupBuild).
 
 #include "build.h"
+#include "randomutil.h"
 
 #include <optional>
 #include <unordered_set>
@@ -103,7 +104,7 @@ static void removeOrphanTilesFolders(const fs::path& hashDir,
 
         if (tilesLock) {
             const auto moveAside = [&](const fs::path& p) {
-                const fs::path trash = hashDir / (tiles3DTrashPrefix() + utils::generateRandomString(16));
+                const fs::path trash = hashDir / (tiles3DTrashPrefix() + randomString(16));
                 std::error_code ec;
                 fs::rename(p, trash, ec);
                 if (ec) {

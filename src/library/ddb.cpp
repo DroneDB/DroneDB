@@ -70,7 +70,7 @@
 #include "stockpile.h"
 #include "thumbs.h"
 #include "tilerhelper.h"
-#include "utils.h"
+#include "entry_filters.h"
 #include "vegetation.h"
 #include "version.h"
 
@@ -82,6 +82,9 @@ using capi::codeBit;
 using capi::guarded;
 using capi::guardedBuffer;
 using capi::guardedOutput;
+using capi::isNullOrEmptyOrWhitespace;
+using capi::isValidNonEmptyStringParam;
+using capi::isValidStringParam;
 using capi::kAbi11Codes;
 using capi::kFrozenCodes;
 using capi::optStr;
@@ -447,7 +450,7 @@ DDBErr DDBAddWithHints(const char *ddbPath, const DDBAddHint *files, int numFile
         known.reserve(static_cast<size_t>(numFiles));
         for (int i = 0; i < numFiles; i++) {
             const auto &f = files[i];
-            if (utils::isNullOrEmptyOrWhitespace(f.path))
+            if (isNullOrEmptyOrWhitespace(f.path))
                 throw InvalidArgsException("File " + std::to_string(i) + " has no path");
 
             const std::string p(f.path);
@@ -487,10 +490,10 @@ DDBErr DDBInfo(const char** paths,
                bool withHash,
                bool stopOnError) {
     return guardedOutput(output, [&] {
-        if (!utils::isValidNonEmptyStringParam(format))
+        if (!isValidNonEmptyStringParam(format))
             throw InvalidArgsException("No format provided");
 
-        if (!utils::isValidNonEmptyStringParam(geometry))
+        if (!isValidNonEmptyStringParam(geometry))
             throw InvalidArgsException("No geometry provided");
 
         const auto input = requirePathList(paths, numPaths);
@@ -548,7 +551,7 @@ DDBErr DDBList(const char* ddbPath,
     return guardedOutput(output, [&] {
         requireDdbPath(ddbPath);
 
-        if (!utils::isValidNonEmptyStringParam(format))
+        if (!isValidNonEmptyStringParam(format))
             throw InvalidArgsException("No format provided");
 
         const auto pathList = requirePathList(paths, numPaths);
@@ -572,7 +575,7 @@ static EntryQuery entryQuery(const char* folder, bool recursive, const char* nam
     query.folder = optStr(folder);
     query.recursive = recursive;
     query.namePattern = optStr(namePattern);
-    query.types = utils::parseEntryTypeList(types, /*allowDirectory=*/true);
+    query.types = filters::parseEntryTypeList(types, /*allowDirectory=*/true);
     query.withDetails = withDetails;
     return query;
 }
@@ -608,10 +611,10 @@ DDBErr DDBSearch(const char* ddbPath, const char* query, char** output, const ch
     return guardedOutput(output, [&] {
         requireDdbPath(ddbPath);
 
-        if (!utils::isValidStringParam(query))
+        if (!isValidStringParam(query))
             throw InvalidArgsException("No query provided");
 
-        if (!utils::isValidNonEmptyStringParam(format))
+        if (!isValidNonEmptyStringParam(format))
             throw InvalidArgsException("No format provided");
 
         requireOutput(output);
@@ -628,7 +631,7 @@ DDBErr DDBAppendPassword(const char* ddbPath, const char* password) {
     return guarded([&] {
         requireDdbPath(ddbPath);
 
-        if (!utils::isValidNonEmptyStringParam(password))
+        if (!isValidNonEmptyStringParam(password))
             throw InvalidArgsException("No password provided");
 
         const auto db = ddb::open(std::string(ddbPath), true);
@@ -698,7 +701,7 @@ DDBErr DDBChattr(const char* ddbPath, const char* attrsJson, char** output) {
     return guardedOutput(output, [&] {
         requireDdbPath(ddbPath);
 
-        if (!utils::isValidStringParam(attrsJson))
+        if (!isValidStringParam(attrsJson))
             throw InvalidArgsException("No attributes JSON provided");
 
         requireOutput(output);
@@ -865,7 +868,7 @@ DDBErr DDBDelta(const char* ddbSourceStamp,
         if (ddbTargetStamp == nullptr)
             throw InvalidArgsException("No ddb path provided");
 
-        if (!utils::isValidNonEmptyStringParam(format))
+        if (!isValidNonEmptyStringParam(format))
             throw InvalidArgsException("No format provided");
 
         requireOutput(output, "No output provided");
@@ -995,7 +998,7 @@ DDBErr DDBSetTag(const char* ddbPath, const char* newTag) {
     return guarded([&] {
         requireText(ddbPath, "No ddb path provided");
 
-        if (!utils::isValidStringParam(newTag))
+        if (!isValidStringParam(newTag))
             throw InvalidArgsException("No tag provided");
 
         const auto ddb = ddb::open(std::string(ddbPath), true);
@@ -1046,8 +1049,8 @@ DDBErr DDBRescanEx(const char* ddbPath, char** output, const char* types, const 
         requireOutput(output);
 
         // Parse filter strings into vectors
-        const std::vector<EntryType> typeFilter = utils::parseEntryTypeList(types);
-        const std::vector<std::string> extensionFilter = utils::parseExtensionList(extensions);
+        const std::vector<EntryType> typeFilter = filters::parseEntryTypeList(types);
+        const std::vector<std::string> extensionFilter = filters::parseExtensionList(extensions);
 
         const auto db = ddb::open(std::string(ddbPath), true);
         auto outJson = json::array();
@@ -1124,7 +1127,7 @@ DDBErr DDBIsBuildable(const char* ddbPath, const char* path, bool* isBuildable) 
     return guardedOutput(isBuildable, [&] {
         requireDdbPath(ddbPath);
 
-        if (!utils::isValidStringParam(path))
+        if (!isValidStringParam(path))
             throw InvalidArgsException("No path provided");
 
         requireOutput(isBuildable, "Buildable parameter is null");
@@ -1259,7 +1262,7 @@ static void requireMetaArgs(const char* ddbPath,
                             char** output) {
     requireDdbPath(ddbPath);
     for (const auto& [value, message] : strings)
-        if (!utils::isValidStringParam(value))
+        if (!isValidStringParam(value))
             throw InvalidArgsException(message);
     requireOutput(output);
 }
@@ -1367,7 +1370,7 @@ namespace {
 // A STAC API bbox "minX,minY,maxX,maxY" (EPSG:4326): empty when absent; throws on an invalid one
 std::vector<double> parseStacBbox(const char* bbox) {
     std::vector<double> bboxVec;
-    if (bbox != nullptr && !utils::isNullOrEmptyOrWhitespace(bbox)) {
+    if (bbox != nullptr && !isNullOrEmptyOrWhitespace(bbox)) {
         std::stringstream ss(bbox);
         std::string token;
         while (std::getline(ss, token, ',')) {
@@ -1392,7 +1395,7 @@ struct StacDatetimeRange {
 
 StacDatetimeRange parseStacDatetime(const char* datetime) {
     StacDatetimeRange range;
-    if (datetime != nullptr && !utils::isNullOrEmptyOrWhitespace(datetime)) {
+    if (datetime != nullptr && !isNullOrEmptyOrWhitespace(datetime)) {
         const std::string dt(datetime);
         const auto slash = dt.find('/');
         if (slash == std::string::npos) {

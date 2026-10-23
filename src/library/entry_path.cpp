@@ -7,6 +7,7 @@
 
 #include "ddb.h"
 #include "exceptions.h"
+#include "stringutil.h"
 #include "utf8.h"
 
 namespace ddb {
@@ -134,6 +135,13 @@ EntryPathResult normalizeEntryPath(std::string_view path, const ReservedRules& r
         result.path += segment;
     }
     return result;
+}
+
+bool hasDotNotation(const std::string& path) {
+    for (const std::string& segment : str::split(path, '/'))
+        if (segment == ".." || segment == ".")
+            return true;
+    return false;
 }
 
 }  // namespace ddb

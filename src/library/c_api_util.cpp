@@ -5,6 +5,8 @@
 #include "c_api_util.h"
 
 #include <atomic>
+#include <cstdlib>
+#include <cstring>
 #include <chrono>
 #include <condition_variable>
 #include <mutex>
@@ -15,7 +17,7 @@
 #include "log_forwarding.h"
 #include "logger.h"
 #include "mio.h"
-#include "utils.h"
+#include "stringutil.h"
 
 namespace ddb::capi {
 
@@ -358,7 +360,13 @@ const std::string* initFailure() noexcept {
 }
 
 void writeString(char** output, const std::string& text) {
-    utils::copyToPtr(text, output);
+    if (output == nullptr)
+        return;
+    // calloc: DDBFree is free()
+    *output = static_cast<char*>(std::calloc(text.size() + 1, sizeof(char)));
+    if (*output == nullptr)
+        throw std::bad_alloc();
+    std::memcpy(*output, text.c_str(), text.size());
 }
 
 BufferOutput::~BufferOutput() {
@@ -375,8 +383,42 @@ void BufferOutput::release(uint8_t** outBuffer, int* outBufferSize) noexcept {
         *outBufferSize = size_;
 }
 
+bool isNullOrEmptyOrWhitespace(const char* text) noexcept {
+    return text == nullptr || str::trimView(text).empty();
+}
+
+bool isNullOrEmptyOrWhitespace(const char** items, int count) noexcept {
+    if (items == nullptr || count == 0)
+        return true;
+    for (int i = 0; i < count; i++)
+        if (isNullOrEmptyOrWhitespace(items[i]))
+            return true;
+    return false;
+}
+
+bool hasNullStringInArray(const char** items, int count) noexcept {
+    if (items == nullptr || count < 0)
+        return true;
+    for (int i = 0; i < count; i++)
+        if (items[i] == nullptr)
+            return true;
+    return false;
+}
+
+bool isValidArrayParam(const char** array, int count) noexcept {
+    return count >= 0 && (array != nullptr || count == 0);
+}
+
+bool isValidStringParam(const char* text) noexcept {
+    return text != nullptr;
+}
+
+bool isValidNonEmptyStringParam(const char* text) noexcept {
+    return text != nullptr && *text != '\0';
+}
+
 void requireText(const char* text, const char* message) {
-    if (utils::isNullOrEmptyOrWhitespace(text))
+    if (isNullOrEmptyOrWhitespace(text))
         throw InvalidArgsException(message);
 }
 
@@ -385,19 +427,19 @@ void requireDdbPath(const char* ddbPath) {
 }
 
 std::vector<std::string> requirePathList(const char** paths, int numPaths) {
-    if (!utils::isValidArrayParam(paths, numPaths))
+    if (!isValidArrayParam(paths, numPaths))
         throw InvalidArgsException("Invalid paths array parameter");
     // NULL elements are blank too
-    if (utils::isNullOrEmptyOrWhitespace(paths, numPaths))
+    if (isNullOrEmptyOrWhitespace(paths, numPaths))
         throw InvalidArgsException("No paths provided");
     return std::vector<std::string>(paths, paths + numPaths);
 }
 
 std::vector<std::string> toStringList(const char** items, int count) {
-    if (!utils::isValidArrayParam(items, count))
+    if (!isValidArrayParam(items, count))
         throw InvalidArgsException("Invalid paths array parameter");
     // A NULL array is rejected too, even when empty
-    if (utils::hasNullStringInArray(items, count))
+    if (hasNullStringInArray(items, count))
         throw InvalidArgsException("Path array contains null elements");
     return std::vector<std::string>(items, items + count);
 }

@@ -157,6 +157,9 @@ namespace ddb
         // stored, and file systems that keep seconds only); otherwise to the microsecond.
         DDB_DLL bool sameModifiedTime(double stored, double file);
 
+        // Whether path is an http:// or https:// URL, not a file
+        DDB_DLL bool isNetworkPath(const std::string &path);
+
         DDB_DLL fs::path getExeFolderPath();
         DDB_DLL fs::path getDataPath(const fs::path &p);
         DDB_DLL fs::path getCwd();

@@ -2,12 +2,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "gdal_raii.h"
+#include "randomutil.h"
 
 #include <limits>
 #include <utility>
 
 #include "exceptions.h"
-#include "utils.h"
 
 namespace ddb
 {
@@ -50,7 +50,7 @@ namespace ddb
 
     VsiMemFile VsiMemFile::unique(const std::string &prefix, const std::string &suffix)
     {
-        return VsiMemFile("/vsimem/" + prefix + utils::generateRandomString(16) + suffix);
+        return VsiMemFile("/vsimem/" + prefix + randomString(16) + suffix);
     }
 
     VsiFreePtr<GByte> stealMemFileBuffer(const std::string &path, vsi_l_offset &size)

@@ -17,6 +17,7 @@
 #include "testarea.h"
 #include "utf8.h"
 #include "utils.h"
+#include "entry_filters.h"
 
 namespace
 {
@@ -24,21 +25,21 @@ namespace
 
     TEST(REG08_NamePattern, matchesLikeASimpleExpression)
     {
-        EXPECT_TRUE(utils::matchesNamePattern("photo.JPG", "*.jpg"));
-        EXPECT_TRUE(utils::matchesNamePattern("photo.jpg", "PHOTO.*"));
-        EXPECT_TRUE(utils::matchesNamePattern("photo.jpg", "*"));
-        EXPECT_TRUE(utils::matchesNamePattern("", "*"));
-        EXPECT_TRUE(utils::matchesNamePattern("a1.tif", "a?.tif"));
-        EXPECT_TRUE(utils::matchesNamePattern("aé.tif", "a?.tif")) << "'?' is one UTF-8 character";
-        EXPECT_TRUE(utils::matchesNamePattern("abcabd", "*abd"));
-        EXPECT_TRUE(utils::matchesNamePattern("x_y%z", "x_y%z"));
-        EXPECT_TRUE(utils::matchesNamePattern("photo", "p*o*o"));
+        EXPECT_TRUE(filters::matchesNamePattern("photo.JPG", "*.jpg"));
+        EXPECT_TRUE(filters::matchesNamePattern("photo.jpg", "PHOTO.*"));
+        EXPECT_TRUE(filters::matchesNamePattern("photo.jpg", "*"));
+        EXPECT_TRUE(filters::matchesNamePattern("", "*"));
+        EXPECT_TRUE(filters::matchesNamePattern("a1.tif", "a?.tif"));
+        EXPECT_TRUE(filters::matchesNamePattern("aé.tif", "a?.tif")) << "'?' is one UTF-8 character";
+        EXPECT_TRUE(filters::matchesNamePattern("abcabd", "*abd"));
+        EXPECT_TRUE(filters::matchesNamePattern("x_y%z", "x_y%z"));
+        EXPECT_TRUE(filters::matchesNamePattern("photo", "p*o*o"));
 
-        EXPECT_FALSE(utils::matchesNamePattern("photo.jpg", "*.tif"));
-        EXPECT_FALSE(utils::matchesNamePattern("a12.tif", "a?.tif"));
-        EXPECT_FALSE(utils::matchesNamePattern("photo.jpg", "photo"));
-        EXPECT_FALSE(utils::matchesNamePattern("xay", "x_y"));
-        EXPECT_FALSE(utils::matchesNamePattern("photo", ""));
+        EXPECT_FALSE(filters::matchesNamePattern("photo.jpg", "*.tif"));
+        EXPECT_FALSE(filters::matchesNamePattern("a12.tif", "a?.tif"));
+        EXPECT_FALSE(filters::matchesNamePattern("photo.jpg", "photo"));
+        EXPECT_FALSE(filters::matchesNamePattern("xay", "x_y"));
+        EXPECT_FALSE(filters::matchesNamePattern("photo", ""));
     }
 
     class REG08_ListEntries : public ::testing::Test
@@ -184,27 +185,27 @@ namespace
     // not only ASCII; a name or pattern that is not valid UTF-8 is compared byte for byte, with
     // ASCII letters in any case (as before)
     TEST(XI09_NamePatternCaseFolding, foldsNonAsciiLetters) {
-        EXPECT_TRUE(utils::matchesNamePattern("Überflug.JPG", "über*.jpg"));
-        EXPECT_TRUE(utils::matchesNamePattern("überflug.jpg", "ÜBER*"));
-        EXPECT_TRUE(utils::matchesNamePattern("ÉTÉ.tif", "été.TIF"));
-        EXPECT_TRUE(utils::matchesNamePattern("ΑΘΗΝΑ_01.jpg", "αθηνα_??.jpg"));
-        EXPECT_TRUE(utils::matchesNamePattern("ΟΔΟΣ.txt", "οδος.txt"))
+        EXPECT_TRUE(filters::matchesNamePattern("Überflug.JPG", "über*.jpg"));
+        EXPECT_TRUE(filters::matchesNamePattern("überflug.jpg", "ÜBER*"));
+        EXPECT_TRUE(filters::matchesNamePattern("ÉTÉ.tif", "été.TIF"));
+        EXPECT_TRUE(filters::matchesNamePattern("ΑΘΗΝΑ_01.jpg", "αθηνα_??.jpg"));
+        EXPECT_TRUE(filters::matchesNamePattern("ΟΔΟΣ.txt", "οδος.txt"))
             << "final sigma folds to sigma";
-        EXPECT_TRUE(utils::matchesNamePattern("МОСКВА.las", "*москва*"));
-        EXPECT_TRUE(utils::matchesNamePattern("Straße", "STRAẞE"))
+        EXPECT_TRUE(filters::matchesNamePattern("МОСКВА.las", "*москва*"));
+        EXPECT_TRUE(filters::matchesNamePattern("Straße", "STRAẞE"))
             << "U+1E9E folds to U+00DF (simple folding; the full folding to \"ss\" is not used)";
         EXPECT_TRUE(
-            utils::matchesNamePattern("\xE2\x84\xAA"
+            filters::matchesNamePattern("\xE2\x84\xAA"
                                       "elvin.txt",
                                       "kelvin.*"))
             << "KELVIN SIGN folds to k";
-        EXPECT_TRUE(utils::matchesNamePattern("a\xC5\xBF.txt", "AS.TXT")) << "LONG S folds to s";
-        EXPECT_TRUE(utils::matchesNamePattern("Ü", "?")) << "'?' is one character";
+        EXPECT_TRUE(filters::matchesNamePattern("a\xC5\xBF.txt", "AS.TXT")) << "LONG S folds to s";
+        EXPECT_TRUE(filters::matchesNamePattern("Ü", "?")) << "'?' is one character";
 
-        EXPECT_FALSE(utils::matchesNamePattern("über", "uber")) << "no accent stripping";
-        EXPECT_FALSE(utils::matchesNamePattern("Straße", "STRASSE")) << "no full folding";
-        EXPECT_FALSE(utils::matchesNamePattern("ΑΘΗΝΑ.jpg", "αθηνα"));
-        EXPECT_FALSE(utils::matchesNamePattern("ÜÜ", "?"));
+        EXPECT_FALSE(filters::matchesNamePattern("über", "uber")) << "no accent stripping";
+        EXPECT_FALSE(filters::matchesNamePattern("Straße", "STRASSE")) << "no full folding";
+        EXPECT_FALSE(filters::matchesNamePattern("ΑΘΗΝΑ.jpg", "αθηνα"));
+        EXPECT_FALSE(filters::matchesNamePattern("ÜÜ", "?"));
     }
 
     TEST(XI09_NamePatternCaseFolding, simpleCaseFoldingTable) {
@@ -234,21 +235,21 @@ namespace
 
     TEST(XI09_NamePatternCaseFolding, invalidUtf8ComparesBytes) {
         EXPECT_TRUE(
-            utils::matchesNamePattern("\xFF"
+            filters::matchesNamePattern("\xFF"
                                       "photo.JPG",
                                       "*.jpg"));
-        EXPECT_TRUE(utils::matchesNamePattern("\xFF", "\xFF"));
-        EXPECT_TRUE(utils::matchesNamePattern("\xC3", "?"));
+        EXPECT_TRUE(filters::matchesNamePattern("\xFF", "\xFF"));
+        EXPECT_TRUE(filters::matchesNamePattern("\xC3", "?"));
         EXPECT_TRUE(
-            utils::matchesNamePattern("\xFF"
+            filters::matchesNamePattern("\xFF"
                                       "ü",
                                       "*ü"));
         EXPECT_FALSE(
-            utils::matchesNamePattern("\xFF"
+            filters::matchesNamePattern("\xFF"
                                       "Ü",
                                       "*ü"))
             << "no folding without valid UTF-8";
-        EXPECT_FALSE(utils::matchesNamePattern("Ü", "\xFF"));
+        EXPECT_FALSE(filters::matchesNamePattern("Ü", "\xFF"));
     }
 
     // The index query selects the case variants too (its LIKE pre-filter folds ASCII only). The

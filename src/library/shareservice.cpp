@@ -11,7 +11,6 @@
 #include "registry.h"
 #include "registryutils.h"
 #include "userprofile.h"
-#include "utils.h"
 
 namespace ddb
 {

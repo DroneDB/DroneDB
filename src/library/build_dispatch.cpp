@@ -6,6 +6,7 @@
 // build of its EntryHandler, publish) and the buildAll/build entry points.
 
 #include "build.h"
+#include "randomutil.h"
 
 #include <cstdlib>
 #include <fstream>
@@ -103,7 +104,7 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
     bool wasPending = false;
     std::string pendingDependencyLines;
 
-    const auto tempFolder = outputFolder + TempFolderInfix + utils::generateRandomString(16);
+    const auto tempFolder = outputFolder + TempFolderInfix + randomString(16);
     auto cleanupTemporary = [&]() {
         try {
             io::assureIsRemoved(io::fromUtf8(tempFolder));

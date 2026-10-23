@@ -8,7 +8,6 @@
 #include <memory>
 #include <stdio.h>
 #include <cmath>
-#include "utils.h"
 #include "fs.h"
 #include "sensor_data.h"
 #include "ddb_export.h"

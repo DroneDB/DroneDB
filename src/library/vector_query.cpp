@@ -22,7 +22,6 @@
 #include "raster_cache.h"
 #include "exceptions.h"
 #include "logger.h"
-#include "utils.h"
 #include "json.h"
 
 namespace ddb

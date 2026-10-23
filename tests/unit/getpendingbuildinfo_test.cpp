@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "build.h"
+#include "timeutil.h"
 #include "dbops.h"
 #include "ddb.h"
 #include "exceptions.h"
@@ -151,7 +152,7 @@ TEST_F(GetPendingBuildInfoTest, MalformedTimestampToleratedAsZero) {
     ASSERT_EQ(pending.size(), 1u);
     EXPECT_EQ(pending[0].lastAttempt, 0);
     EXPECT_EQ(pending[0].retryAfter, 60);
-    EXPECT_LE(pending[0].retryAfter, utils::currentUnixTimestamp()) << "a marker without a time is due at once";
+    EXPECT_LE(pending[0].retryAfter, ddb::currentUnixTimestamp()) << "a marker without a time is due at once";
     ASSERT_EQ(pending[0].missingDependencies.size(), 1u);
     EXPECT_EQ(pending[0].missingDependencies[0], "layer.dbf");
 }
@@ -161,7 +162,7 @@ TEST_F(GetPendingBuildInfoTest, DoesNotTriggerBuildOrApplyBackoff) {
     // used by buildPending()) must still be reported: this is a pure query,
     // not a retry attempt.
     const auto hash = indexedHash(vectorPath);
-    const time_t now = utils::currentUnixTimestamp();
+    const time_t now = ddb::currentUnixTimestamp();
     writePendingFile(db->buildDirectory(), hash, std::to_string(now), {"layer.dbf"});
 
     const auto pending = ddb::getPendingBuildInfo(db.get());
@@ -175,12 +176,12 @@ TEST_F(GetPendingBuildInfoTest, RetryAfterTellsWhenBuildPendingRetries) {
     const auto hash = indexedHash(vectorPath);
 
     // Attempted 10 s ago: the retry is 50 s away, and buildPending() leaves the marker alone
-    const time_t recent = utils::currentUnixTimestamp() - 10;
+    const time_t recent = ddb::currentUnixTimestamp() - 10;
     writePendingFile(db->buildDirectory(), hash, std::to_string(recent), {"old.dbf"});
     auto pending = ddb::getPendingBuildInfo(db.get());
     ASSERT_EQ(pending.size(), 1u);
     EXPECT_EQ(pending[0].retryAfter, recent + 60);
-    EXPECT_GT(pending[0].retryAfter, utils::currentUnixTimestamp());
+    EXPECT_GT(pending[0].retryAfter, ddb::currentUnixTimestamp());
     ddb::buildPending(db.get(), "", false);
     pending = ddb::getPendingBuildInfo(db.get());
     ASSERT_EQ(pending.size(), 1u);
@@ -188,13 +189,13 @@ TEST_F(GetPendingBuildInfoTest, RetryAfterTellsWhenBuildPendingRetries) {
     EXPECT_EQ(pending[0].missingDependencies, std::vector<std::string>{"old.dbf"});
 
     // Attempted exactly the backoff ago: retryAfter has come, and buildPending() retries
-    const time_t due = utils::currentUnixTimestamp() - 60;
+    const time_t due = ddb::currentUnixTimestamp() - 60;
     writePendingFile(db->buildDirectory(), hash, std::to_string(due), {"old.dbf"});
     pending = ddb::getPendingBuildInfo(db.get());
     ASSERT_EQ(pending.size(), 1u);
     EXPECT_EQ(pending[0].retryAfter, due + 60);
-    EXPECT_LE(pending[0].retryAfter, utils::currentUnixTimestamp());
-    const time_t beforeRetry = utils::currentUnixTimestamp();
+    EXPECT_LE(pending[0].retryAfter, ddb::currentUnixTimestamp());
+    const time_t beforeRetry = ddb::currentUnixTimestamp();
     ddb::buildPending(db.get(), "", false);
     pending = ddb::getPendingBuildInfo(db.get());
     ASSERT_EQ(pending.size(), 1u);

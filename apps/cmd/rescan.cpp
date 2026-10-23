@@ -6,7 +6,7 @@
 #include "include/rescan.h"
 #include "dbops.h"
 #include "entry_types.h"
-#include "utils.h"
+#include "entry_filters.h"
 
 namespace cmd
 {
@@ -59,8 +59,8 @@ namespace cmd
         std::vector<ddb::EntryType> types;
         std::vector<std::string> extensions;
         try {
-            types = ddb::utils::parseEntryTypeList(typesStr.c_str());
-            extensions = ddb::utils::parseExtensionList(extensionsStr.c_str());
+            types = ddb::filters::parseEntryTypeList(typesStr.c_str());
+            extensions = ddb::filters::parseExtensionList(extensionsStr.c_str());
         } catch (const ddb::InvalidArgsException& e) {
             std::cerr << e.what() << std::endl;
             usageError();

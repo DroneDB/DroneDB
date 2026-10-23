@@ -4,6 +4,7 @@
 #include "tile_encoder.h"
 #include "stringutil.h"
 
+#include <utility>
 #include <algorithm>
 #include <cstring>
 #include <map>
@@ -11,7 +12,6 @@
 
 #include "exceptions.h"
 #include "gdal_raii.h"
-#include "utils.h"
 
 namespace ddb
 {

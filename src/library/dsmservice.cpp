@@ -10,7 +10,7 @@
 #include "mathutil.h"
 #include "exceptions.h"
 #include "gdal_raii.h"
-#include "utils.h"
+#include "http_helpers.h"
 #include <cpr/cpr.h>
 #include "mio.h"
 #include "constants.h"
