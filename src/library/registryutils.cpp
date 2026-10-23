@@ -119,6 +119,23 @@ namespace ddb
         return "";
     }
 
+    std::string RegistryUtils::transportError(const cpr::Response &res, const std::string &url)
+    {
+        if (res.error.code == cpr::ErrorCode::OK)
+            return "";
+
+        const std::string reason = res.error.message.empty() ? "unknown error" : res.error.message;
+        switch (res.error.code)
+        {
+        case cpr::ErrorCode::COULDNT_CONNECT:
+        case cpr::ErrorCode::COULDNT_RESOLVE_HOST:
+        case cpr::ErrorCode::COULDNT_RESOLVE_PROXY:
+            return "could not connect to " + url + ": " + reason;
+        default:
+            return "request to " + url + " failed: " + reason;
+        }
+    }
+
     Registry RegistryUtils::createFromTag(const std::string &tag,
                                           bool useInsecureRegistry,
                                           bool sslVerify)

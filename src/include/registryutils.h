@@ -33,6 +33,12 @@ namespace ddb
         /// { "error" } body, so the client works with a Registry before and after its
         /// ProblemDetails switch (RQ-05).
         DDB_DLL static std::string errorMessage(const std::string &body);
+
+        /// Why a request got no HTTP response at all (cpr reports status 0 and an error): "could
+        /// not connect to <url>: <reason>" for a refused or unresolvable host, "request to <url>
+        /// failed: <reason>" for the other transport errors (TLS, timeout, ...). "" when the
+        /// server answered, whatever the status.
+        DDB_DLL static std::string transportError(const cpr::Response &res, const std::string &url);
     };
 
 }

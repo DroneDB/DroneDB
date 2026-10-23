@@ -2,7 +2,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+#include <string>
+
 #include "gtest/gtest.h"
+#include "registry.h"
 #include "registryutils.h"
 #include "constants.h"
 #include "exceptions.h"
@@ -26,6 +29,82 @@ namespace
         EXPECT_EQ(RegistryUtils::errorMessage("<html>502 Bad Gateway</html>"), "");
         EXPECT_EQ(RegistryUtils::errorMessage("[1,2]"), "");
         EXPECT_EQ(RegistryUtils::errorMessage(R"({"status":500})"), "");
+    }
+
+    // cpr reports a request that got no HTTP response with status 0 and an error: the CLI said
+    // "Login failed: host returned 0"
+    void setError(cpr::Response &res, cpr::ErrorCode code, const std::string &message)
+    {
+        res.error.code = code;
+        res.error.message = message;
+    }
+
+    TEST(registryTransportError, NamesTheUrlAndTheReason)
+    {
+        cpr::Response res;
+        res.status_code = 0;
+        setError(res, cpr::ErrorCode::COULDNT_CONNECT, "Failed to connect to host port 1");
+        EXPECT_EQ(RegistryUtils::transportError(res, "http://host:1"),
+                  "could not connect to http://host:1: Failed to connect to host port 1");
+
+        setError(res, cpr::ErrorCode::COULDNT_RESOLVE_HOST, "Could not resolve host: nowhere");
+        EXPECT_EQ(RegistryUtils::transportError(res, "https://nowhere"),
+                  "could not connect to https://nowhere: Could not resolve host: nowhere");
+
+        // Not a connection problem: the server may be there
+        setError(res, cpr::ErrorCode::OPERATION_TIMEDOUT, "Operation timed out");
+        EXPECT_EQ(RegistryUtils::transportError(res, "https://slow"), "request to https://slow failed: Operation timed out");
+
+        setError(res, cpr::ErrorCode::SSL_CONNECT_ERROR, "");
+        EXPECT_EQ(RegistryUtils::transportError(res, "https://tls"), "request to https://tls failed: unknown error");
+    }
+
+    TEST(registryTransportError, NoneWhenTheServerAnswered)
+    {
+        cpr::Response res;
+        res.status_code = 500;
+        EXPECT_EQ(RegistryUtils::transportError(res, "http://host"), "");
+        res.status_code = 200;
+        EXPECT_EQ(RegistryUtils::transportError(res, "http://host"), "");
+    }
+
+    // Nothing listens on port 1 of the loopback interface: the connection is refused at once
+    constexpr const char *UnreachableRegistry = "http://127.0.0.1:1";
+
+    TEST(registryTransportError, LoginToAnUnreachableServer)
+    {
+        Registry registry(UnreachableRegistry);
+        try
+        {
+            registry.login("user", "password");
+            FAIL() << "the login of an unreachable server succeeded";
+        }
+        catch (const AuthException &e)
+        {
+            const std::string message = e.what();
+            EXPECT_NE(message.find("Login failed: could not connect to http://127.0.0.1:1: "), std::string::npos)
+                << message;
+            EXPECT_EQ(message.find("host returned 0"), std::string::npos) << message;
+        }
+    }
+
+    // The requests that follow a login report it the same way
+    TEST(registryTransportError, HandleErrorOfAnUnreachableServer)
+    {
+        Registry registry(UnreachableRegistry);
+        cpr::Response res = cpr::Get(cpr::Url(registry.getUrl("/users/authenticate")));
+        ASSERT_EQ(res.status_code, 0);
+        try
+        {
+            registry.handleError(res);
+            FAIL() << "handleError accepted a request that got no response";
+        }
+        catch (const RegistryException &e)
+        {
+            const std::string message = e.what();
+            EXPECT_NE(message.find("could not connect to http://127.0.0.1:1: "), std::string::npos) << message;
+            EXPECT_EQ(message.find("Invalid response"), std::string::npos) << message;
+        }
     }
 
     TEST(parseTag, Normal)

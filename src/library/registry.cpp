@@ -98,6 +98,8 @@ std::string Registry::login(const std::string& username, const std::string& pass
 
         return std::string(token);
     }
+    if (const auto transport = RegistryUtils::transportError(res, this->url); !transport.empty())
+        throw AuthException("Login failed: " + transport);
     if (const auto message = RegistryUtils::errorMessage(res.text); !message.empty())
         throw AuthException("Login failed: " + message);
 
@@ -824,6 +826,10 @@ void Registry::push(const std::string& path, std::ostream& out) {
 }
 
 void Registry::handleError(cpr::Response& res) {
+    // No HTTP response at all (status 0): the server was not reached
+    if (const auto transport = RegistryUtils::transportError(res, this->url); !transport.empty())
+        throw RegistryException("Registry request failed: " + transport);
+
     if (res.status_code == 401)
         throw AuthException("Unauthorized");
 
