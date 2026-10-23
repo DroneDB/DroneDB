@@ -776,13 +776,11 @@ void buildCopc(const std::vector<std::string>& filenames, const std::string& out
     buildCopcPdal(inputFiles, outPath, tmpDir);
 }
 
-json PointCloudInfo::toJSON() {
-    json j;
-    j["pointCount"] = pointCount;
-    j["projection"] = wktProjection;
-    j["dimensions"] = dimensions;
-
-    return j;
+void to_json(json& j, const PointCloudInfo& info) {
+    j = json::object();
+    j["pointCount"] = info.pointCount;
+    j["projection"] = info.wktProjection;
+    j["dimensions"] = info.dimensions;
 }
 
 void translateToLas(const std::string& input, const std::string& outputLas) {

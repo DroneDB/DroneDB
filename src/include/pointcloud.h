@@ -23,8 +23,10 @@ namespace ddb
         BasicPointGeometry centroid;
         BasicPolygonGeometry polyBounds;
 
-        json toJSON();
     };
+
+    /// The properties of a point cloud entry: {"pointCount", "projection", "dimensions"}
+    DDB_DLL void to_json(json &j, const PointCloudInfo &info);
 
     DDB_DLL bool getPointCloudInfo(const std::string &filename, PointCloudInfo &info, int polyboundsSrs = 4326);
 

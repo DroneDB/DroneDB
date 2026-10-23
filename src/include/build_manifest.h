@@ -62,11 +62,11 @@ struct EntryBuild {
 };
 
 // {"role", "path", "kind": "file"|"dir", "mediaType", "downloadName"?, "index"?, "legacy"?}
-DDB_DLL json buildArtifactJson(const BuildArtifact& artifact);
+DDB_DLL void to_json(json& j, const BuildArtifact& artifact);
 // {"buildable", "source", "hash", "root", "state", "missingDependencies", "lastAttempt",
 // "retryAfter", "artifacts"}; source, hash, root, lastAttempt and retryAfter are null when they
 // do not apply
-DDB_DLL json entryBuildJson(const EntryBuild& build);
+DDB_DLL void to_json(json& j, const EntryBuild& build);
 
 // DDBGetEntryTypes: one object per registered entry type, by id
 DDB_DLL json entryTypesJson();
@@ -76,7 +76,7 @@ DDB_DLL json entryTypesJson();
 DDB_DLL json getBuildArtifactsJson(Database* db, const std::vector<std::string>& paths);
 
 // DDBListEntries and DDBListEntriesEx: listEntries(db, query) as a JSON array of
-// Entry::toJSON (the "json" format of writeEntries), each entry with its "build" object when
+// to_json(Entry) (the "json" format of writeEntries), each entry with its "build" object when
 // withBuild. Serialized entry by entry: the listing is never held as one JSON document.
 DDB_DLL std::string listEntriesJson(Database* db, const EntryQuery& query, bool withBuild);
 

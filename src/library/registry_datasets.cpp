@@ -85,9 +85,7 @@ Entry RegistryClient::getDatasetInfo(const std::string &organization, const std:
     if (j.empty())
         throw RegistryException("Invalid empty response from registry");
 
-    Entry e;
-    e.fromJSON(j[0]);
-    return e;
+    return j[0].get<Entry>();
 }
 
 void RegistryClient::downloadDdb(const std::string &organization, const std::string &dataset,

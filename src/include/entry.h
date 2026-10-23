@@ -4,6 +4,8 @@
 #ifndef ENTRY_H
 #define ENTRY_H
 
+#include <optional>
+
 #include "gdal_inc.h"
 #include "entry_types.h"
 #include "logger.h"
@@ -34,10 +36,10 @@ namespace ddb
 
         json meta;
 
-        DDB_DLL void toJSON(json &j) const;
-        DDB_DLL std::string toJSONString() const;
-        DDB_DLL void fromJSON(const json &j);
-        DDB_DLL bool toGeoJSON(json &j, BasicGeometryType type = BasicGeometryType::BGAuto) const;
+        /// The entry as a GeoJSON feature of its first geometry of `type` (the other kinds of
+        /// geometry are left out: QGIS does not read GeometryCollections), with the entry as its
+        /// properties; nothing when the entry has no such geometry
+        DDB_DLL std::optional<json> toGeoJSON(BasicGeometryType type = BasicGeometryType::BGAuto) const;
         DDB_DLL std::string toString() const;
 
         Entry() {}
@@ -160,6 +162,13 @@ namespace ddb
             }
         }
     };
+
+    /// The JSON of an entry (ADL: `json(entry)`, `j.get<Entry>()`). The shape is frozen by the
+    /// contract fixtures: path, hash (when set), type, properties (when not empty), mtime,
+    /// size, depth, point_geom and polygon_geom (when set) and meta (when not empty).
+    /// from_json reads path, hash, type, size, depth and mtime.
+    DDB_DLL void to_json(json &j, const Entry &e);
+    DDB_DLL void from_json(const json &j, Entry &e);
 
     /** Parse an entry
      * @param path path to file

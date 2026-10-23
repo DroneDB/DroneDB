@@ -122,8 +122,7 @@ namespace ddb
             bool first = true;
             for (const auto &e : entries)
             {
-                json j;
-                e.toJSON(j);
+                json j = e;
                 if (decorate)
                     decorate(e, j);
                 if (!first)

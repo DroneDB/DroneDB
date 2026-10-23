@@ -42,7 +42,7 @@ void parseGaussianSplatMetadata(const fs::path &path, Entry &entry)
     GaussianSplatInfo info;
     if (getGaussianSplatInfo(io::toUtf8(path), info))
     {
-        entry.properties = info.toJSON();
+        entry.properties = info;
         entry.properties["georeferenced"] = false;
     }
 }

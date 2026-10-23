@@ -168,51 +168,42 @@ namespace ddb
         geom.addPoint(ul.longitude, ul.latitude, groundHeight);
     }
 
-    void Entry::toJSON(json &j) const
+    void to_json(json &j, const Entry &e)
     {
-        j["path"] = this->path;
-        if (this->hash != "")
-            j["hash"] = this->hash;
-        j["type"] = this->type;
-        if (!this->properties.empty())
-            j["properties"] = this->properties;
-        j["mtime"] = this->mtime;
-        j["size"] = this->size;
-        j["depth"] = this->depth;
+        j["path"] = e.path;
+        if (e.hash != "")
+            j["hash"] = e.hash;
+        j["type"] = e.type;
+        if (!e.properties.empty())
+            j["properties"] = e.properties;
+        j["mtime"] = e.mtime;
+        j["size"] = e.size;
+        j["depth"] = e.depth;
 
-        if (!this->point_geom.empty())
-            j["point_geom"] = this->point_geom.toGeoJSON();
-        if (!this->polygon_geom.empty())
-            j["polygon_geom"] = this->polygon_geom.toGeoJSON();
+        if (!e.point_geom.empty())
+            j["point_geom"] = e.point_geom.toGeoJSON();
+        if (!e.polygon_geom.empty())
+            j["polygon_geom"] = e.polygon_geom.toGeoJSON();
 
-        if (!this->meta.empty())
-            j["meta"] = this->meta;
+        if (!e.meta.empty())
+            j["meta"] = e.meta;
     }
 
-    std::string Entry::toJSONString() const
+    void from_json(const json &j, Entry &e)
     {
-        json j;
-        toJSON(j);
-        std::stringstream s;
-        s << j;
-        return s.str();
-    }
-
-    void Entry::fromJSON(const json &j)
-    {
-        j.at("path").get_to(this->path);
+        j.at("path").get_to(e.path);
         if (j.contains("hash") && !j.at("hash").is_null())
-            j.at("hash").get_to(this->hash);
-        j.at("type").get_to(this->type);
-        j.at("size").get_to(this->size);
-        j.at("depth").get_to(this->depth);
-        j.at("mtime").get_to(this->mtime);
+            j.at("hash").get_to(e.hash);
+        j.at("type").get_to(e.type);
+        j.at("size").get_to(e.size);
+        j.at("depth").get_to(e.depth);
+        j.at("mtime").get_to(e.mtime);
 
         // TODO: Add
         // j.at("properties").get_to(e.properties);
     }
 
-    bool Entry::toGeoJSON(json &j, BasicGeometryType type) const
+    std::optional<json> Entry::toGeoJSON(BasicGeometryType type) const
     {
         // Only export entries that have valid geometries
         std::vector<const BasicGeometry *> geoms;
@@ -221,7 +212,7 @@ namespace ddb
         if (!polygon_geom.empty() && (type == BasicGeometryType::BGAuto || type == BasicGeometryType::BGPolygon))
             geoms.push_back(&polygon_geom);
         if (geoms.size() == 0)
-            return false;
+            return std::nullopt;
 
         json p;
         p["path"] = this->path;
@@ -239,12 +230,12 @@ namespace ddb
 
         // QGIS does not support GeometryCollections, so we only output the first
         // available geometry
-        j = geoms[0]->toGeoJSON();
+        json j = geoms[0]->toGeoJSON();
         j["properties"] = p;
         if (!this->meta.empty())
             j["properties"]["meta"] = this->meta;
 
-        return true;
+        return j;
     }
 
     std::string Entry::toString() const

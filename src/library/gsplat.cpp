@@ -259,22 +259,20 @@ namespace ddb
         }
     } // namespace
 
-    json GaussianSplatInfo::toJSON() const
+    void to_json(json &j, const GaussianSplatInfo &info)
     {
-        json j;
-        j["splatCount"] = splatCount;
-        j["shDegree"] = shDegree;
-        return j;
+        j = json::object();
+        j["splatCount"] = info.splatCount;
+        j["shDegree"] = info.shDegree;
     }
 
-    json GsplatGeoref::toJSON() const
+    void to_json(json &j, const GsplatGeoref &georef)
     {
-        json j;
-        j["srs"] = srs;
-        j["offset"] = {offset[0], offset[1], offset[2]};
-        if (boundsWgs84.size() == 4)
-            j["boundsWgs84"] = boundsWgs84;
-        return j;
+        j = json::object();
+        j["srs"] = georef.srs;
+        j["offset"] = {georef.offset[0], georef.offset[1], georef.offset[2]};
+        if (georef.boundsWgs84.size() == 4)
+            j["boundsWgs84"] = georef.boundsWgs84;
     }
 
     bool isSpzPath(const std::string &filename)
@@ -411,7 +409,7 @@ namespace ddb
             throw FSException("Cannot write georef sidecar " + io::toUtf8(outFile),
                               std::error_code(openError, std::generic_category()));
         errno = 0;
-        out << georef.toJSON().dump(2);
+        out << json(georef).dump(2);
         out.flush();
         const int writeError = errno;
         if (!out.good())

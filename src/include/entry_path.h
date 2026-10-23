@@ -59,9 +59,10 @@ struct EntryPathResult {
 
     bool accepted() const { return rejected.empty(); }
 
-    /// {"path": "a/b"} or {"rejected": "<code>"}: the output of DDBNormalizePath
-    json toJson() const;
 };
+
+/// {"path": "a/b"} or {"rejected": "<code>"}: the output of DDBNormalizePath
+void to_json(json& j, const EntryPathResult& result);
 
 /// True for a separator of a dataset-relative path: '/' or '\'
 DDB_DLL bool isEntryPathSeparator(char c) noexcept;

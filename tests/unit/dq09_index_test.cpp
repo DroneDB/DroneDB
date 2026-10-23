@@ -45,8 +45,7 @@ namespace
         ASSERT_TRUE(entry);
         const Entry &constEntry = *entry;
         EXPECT_NE(constEntry.toString().find("Path: a.txt"), std::string::npos);
-        json geo;
-        EXPECT_FALSE(constEntry.toGeoJSON(geo)) << "a text file has no footprint";
+        EXPECT_FALSE(constEntry.toGeoJSON()) << "a text file has no footprint";
     }
 
     // ---------------------------------------------------------------- metadata key rule
@@ -146,7 +145,7 @@ namespace
         EXPECT_TRUE(read(EntryColumns::Meta).meta.contains("name"));
 
         // The levels are the same entry
-        EXPECT_EQ(read(EntryColumns::Meta).toJSONString(), getEntryWithMeta(f.db.get(), "a.txt")->toJSONString());
+        EXPECT_EQ(json(read(EntryColumns::Meta)).dump(), json(*getEntryWithMeta(f.db.get(), "a.txt")).dump());
     }
 
     // ------------------------------------------------------------------- IN lists, WHERE

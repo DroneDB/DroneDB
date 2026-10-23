@@ -80,7 +80,7 @@ TEST(EntryPathVectors, everyVectorMatchesInCppAndThroughTheCApi) {
         const std::string reservedJson =
             vector.contains("reserved") ? vector["reserved"].dump() : std::string();
         const auto rules = ReservedRules::fromJson(reservedJson.c_str());
-        EXPECT_EQ(normalizeEntryPath(input, rules).toJson(), expected);
+        EXPECT_EQ(json(normalizeEntryPath(input, rules)), expected);
 
         const bool cString = vector.value("cString", true);
         EXPECT_EQ(cString, input.find('\0') == std::string::npos)

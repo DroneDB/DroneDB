@@ -147,14 +147,12 @@ namespace
         ASSERT_TRUE(loadEntryWithMeta(db.get(), "dir1/c.jpg", expected));
         const auto full = listEntries(db.get(), q);
         ASSERT_EQ(full.size(), 1u);
-        EXPECT_EQ(full[0].toJSONString(), expected.toJSONString());
+        EXPECT_EQ(json(full[0]).dump(), json(expected).dump());
 
         q.withDetails = false;
         const auto lean = listEntries(db.get(), q);
         ASSERT_EQ(lean.size(), 1u);
-        json j;
-        lean[0].toJSON(j);
-        EXPECT_EQ(j, (json{{"path", "dir1/c.jpg"}, {"hash", expected.hash}, {"type", expected.type},
+        EXPECT_EQ(json(lean[0]), (json{{"path", "dir1/c.jpg"}, {"hash", expected.hash}, {"type", expected.type},
                            {"mtime", expected.mtime}, {"size", expected.size}, {"depth", 1}}));
     }
 

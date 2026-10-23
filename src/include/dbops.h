@@ -44,6 +44,12 @@ namespace ddb
         std::vector<AddItemError> errors;
     };
 
+    /// JSON of the add outputs (DDBAddWithOptions, DDBAddWithHints): an item error is
+    /// {"path", "code", "message"}; a result is {"entries": [<entry> + "status": "added" |
+    /// "updated"], "unchanged": [{"path"}], "errors": [<item error>]}
+    DDB_DLL void to_json(json &j, const AddItemError &error);
+    DDB_DLL void to_json(json &j, const AddResult &result);
+
     /// The AddItemError code of an item-scoped failure ("FS", "GDAL", "PDAL", "JSON" or
     /// "INDEX"), or nullptr when ex is not one of those exception types.
     DDB_DLL const char *addErrorCode(const std::exception &ex) noexcept;

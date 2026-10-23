@@ -39,8 +39,10 @@ namespace ddb
         // PLY property names, when the source is a .ply (empty for other formats).
         std::vector<std::string> dimensions;
 
-        json toJSON() const;
     };
+
+    /// The properties of a Gaussian splat entry: {"splatCount", "shDegree"}
+    DDB_DLL void to_json(json &j, const GaussianSplatInfo &info);
 
     // Georeferencing for a Gaussian Splat, following the ODX/ODM coordinates-file
     // convention: the splat geometry is stored in LOCAL coordinates, and the true
@@ -55,9 +57,10 @@ namespace ddb
         // Optional [west, south, east, north] WGS84 footprint (convenience for consumers).
         std::vector<double> boundsWgs84;
         bool valid = false;
-
-        json toJSON() const;
     };
+
+    /// The georef sidecar of a Gaussian splat: {"srs", "offset", "boundsWgs84"?}
+    DDB_DLL void to_json(json &j, const GsplatGeoref &georef);
 
     // True when the path ends with the canonical .spz delivery extension.
     DDB_DLL bool isSpzPath(const std::string &filename);

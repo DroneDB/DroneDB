@@ -85,10 +85,11 @@ ReservedRules ReservedRules::fromJson(const char* text) {
     return rules;
 }
 
-json EntryPathResult::toJson() const {
-    if (accepted())
-        return json{{"path", path}};
-    return json{{"rejected", std::string(rejected)}};
+void to_json(json& j, const EntryPathResult& result) {
+    if (result.accepted())
+        j = json{{"path", result.path}};
+    else
+        j = json{{"rejected", std::string(result.rejected)}};
 }
 
 bool isEntryPathSeparator(char c) noexcept {

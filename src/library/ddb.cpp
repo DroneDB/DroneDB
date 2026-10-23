@@ -317,7 +317,7 @@ DDBErr DDBNormalizePath(const char* path, const char* reservedJson, char** outpu
         requireOutput(output);
 
         const auto rules = ReservedRules::fromJson(reservedJson);
-        return normalizeEntryPath(path, rules).toJson();
+        return json(normalizeEntryPath(path, rules));
     });
 }
 
@@ -346,9 +346,7 @@ DDBErr DDBAdd(const char* ddbPath,
         addToIndex(db.get(),
                    ddb::expandPathList(pathList, recursive, 0),
                    [&outJson](const Entry& e, bool) {
-                       json j;
-                       e.toJSON(j);
-                       outJson.push_back(j);
+                       outJson.push_back(e);
                        return true;
                    });
         return outJson;
@@ -377,28 +375,6 @@ static void validateAddArgs(const char *ddbPath, const DDBAddOptions *options, c
     requireDdbPath(ddbPath);
     requireOutput(options, "Options pointer is null");
     requireOutput(output);
-}
-
-// { "entries": [...], "unchanged": [...], "errors": [...] }
-static json addResultJson(const AddResult &result) {
-    auto outJson = json::object();
-    outJson["entries"] = json::array();
-    for (auto& [entry, isUpdate] : result.entries) {
-        json j;
-        entry.toJSON(j);
-        j["status"] = isUpdate ? "updated" : "added";
-        outJson["entries"].push_back(j);
-    }
-
-    outJson["unchanged"] = json::array();
-    for (auto& path : result.unchanged)
-        outJson["unchanged"].push_back(json{{"path", path}});
-
-    outJson["errors"] = json::array();
-    for (auto& err : result.errors)
-        outJson["errors"].push_back(json{{"path", err.path}, {"code", err.code}, {"message", err.message}});
-
-    return outJson;
 }
 
 DDBErr DDBAddWithOptions(const char* ddbPath,
@@ -431,7 +407,7 @@ DDBErr DDBAddWithOptions(const char* ddbPath,
         }
 
         addToIndexEx(db.get(), expandedPaths, addOpts, result);
-        return addResultJson(result);
+        return json(result);
     });
 }
 
@@ -467,7 +443,7 @@ DDBErr DDBAddWithHints(const char *ddbPath, const DDBAddHint *files, int numFile
         }
 
         addToIndexEx(db.get(), known, addOpts, result);
-        return addResultJson(result);
+        return json(result);
     });
 }
 
@@ -538,7 +514,7 @@ DDBErr DDBGet(const char* ddbPath, const char* path, char** output) {
         const auto entry = ddb::getEntryWithMeta(db.get(), std::string(path));
         if (!entry)
             throw EntryNotFoundException("No entry " + std::string(path));
-        return entry->toJSONString();
+        return json(*entry).dump();
     });
 }
 
@@ -1058,13 +1034,9 @@ DDBErr DDBRescanEx(const char* ddbPath, char** output, const char* types, const 
 
         rescanIndex(db.get(), typeFilter, extensionFilter, stopOnError,
                     [&outJson](const Entry& e, bool success, const std::string& error) {
-                        json j;
-                        j["path"] = e.path;
+                        // A failed entry has its path only
+                        json j = success ? json(e) : json{{"path", e.path}, {"error", error}};
                         j["success"] = success;
-                        if (!success)
-                            j["error"] = error;
-                        if (success)
-                            e.toJSON(j);
                         outJson.push_back(j);
                         return true; // continue processing
                     });

@@ -62,8 +62,8 @@ std::string_view thumbnailName(ThumbnailSource source) {
 
 }  // namespace
 
-json buildArtifactJson(const BuildArtifact& artifact) {
-    json j = {{"role", artifact.role},
+void to_json(json& j, const BuildArtifact& artifact) {
+    j = {{"role", artifact.role},
               {"path", artifact.path},
               {"kind", artifact.kind == ArtifactKind::Directory ? "dir" : "file"},
               {"mediaType", artifact.mediaType}};
@@ -73,22 +73,21 @@ json buildArtifactJson(const BuildArtifact& artifact) {
         j["index"] = artifact.index;
     if (artifact.legacy)
         j["legacy"] = true;
-    return j;
 }
 
-json entryBuildJson(const EntryBuild& build) {
+void to_json(json& j, const EntryBuild& build) {
     json artifacts = json::array();
     for (const auto& a : build.artifacts)
-        artifacts.push_back(buildArtifactJson(a));
-    return {{"buildable", build.buildable},
-            {"source", stringOrNull(build.source)},
-            {"hash", stringOrNull(build.hash)},
-            {"root", build.root.empty() ? json(nullptr) : json(io::toUtf8(build.root))},
-            {"state", std::string(buildStateName(build.state))},
-            {"missingDependencies", build.missingDependencies},
-            {"lastAttempt", unixSecondsOrNull(build.lastAttempt)},
-            {"retryAfter", unixSecondsOrNull(build.retryAfter)},
-            {"artifacts", std::move(artifacts)}};
+        artifacts.push_back(a);
+    j = {{"buildable", build.buildable},
+         {"source", stringOrNull(build.source)},
+         {"hash", stringOrNull(build.hash)},
+         {"root", build.root.empty() ? json(nullptr) : json(io::toUtf8(build.root))},
+         {"state", std::string(buildStateName(build.state))},
+         {"missingDependencies", build.missingDependencies},
+         {"lastAttempt", unixSecondsOrNull(build.lastAttempt)},
+         {"retryAfter", unixSecondsOrNull(build.retryAfter)},
+         {"artifacts", std::move(artifacts)}};
 }
 
 json entryTypesJson() {
@@ -278,7 +277,7 @@ json getBuildArtifactsJson(Database* db, const std::vector<std::string>& paths) 
                           {"exists", true},
                           {"hash", stringOrNull(e.hash)},
                           {"type", static_cast<int>(e.type)},
-                          {"build", entryBuildJson(reader.read(e))}});
+                          {"build", reader.read(e)}});
     }
     return result;
 }
@@ -291,7 +290,7 @@ std::string listEntriesJson(Database* db, const EntryQuery& query, bool withBuil
         return out.str();
     }
     BuildStateReader reader(db);
-    writeEntries(out, entries, "json", [&reader](const Entry& e, json& j) { j["build"] = entryBuildJson(reader.read(e)); });
+    writeEntries(out, entries, "json", [&reader](const Entry& e, json& j) { j["build"] = reader.read(e); });
     return out.str();
 }
 
@@ -458,7 +457,7 @@ json copyBuildArtifacts(Database* source, Database* destination, const std::stri
                 if (std::find(seen.begin(), seen.end(), key) != seen.end())
                     continue;
                 seen.push_back(key);
-                artifacts.push_back(buildArtifactJson(a));
+                artifacts.push_back(a);
             }
     }
     return {{"hash", hash},

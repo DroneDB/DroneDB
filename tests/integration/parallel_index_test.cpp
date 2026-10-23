@@ -372,9 +372,7 @@ namespace
         {
             Entry e;
             parseEntry(file, root, e, true);
-            json j;
-            e.toJSON(j);
-            return j.dump();
+            return json(e).dump();
         };
 
         std::vector<std::string> expected;

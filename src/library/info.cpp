@@ -59,21 +59,17 @@ namespace ddb
 
                 if (format == "json")
                 {
-                    json j;
-                    e.toJSON(j);
                     if (!first)
                         output << ",";
-                    output << j.dump();
+                    output << json(e).dump();
                 }
                 else if (format == "geojson")
                 {
-                    json j;
-                    if (e.toGeoJSON(j, ddb::getBasicGeometryTypeFromName(geometry)))
+                    if (const auto feature = e.toGeoJSON(ddb::getBasicGeometryTypeFromName(geometry)))
                     {
                         if (!first)
                             output << ",";
-                        output << j.dump();
-                        j.clear();
+                        output << feature->dump();
                     }
                     else
                     {

@@ -90,9 +90,7 @@ namespace
         ASSERT_EQ(entries.size(), 1u);
         EXPECT_TRUE(entries[0].meta.empty());
 
-        json j;
-        entries[0].toJSON(j);
-        EXPECT_FALSE(j.contains("meta"));
+        EXPECT_FALSE(json(entries[0]).contains("meta"));
     }
 
     TEST(DDB01_Lookup, cApiGetWorksWithSeveralMetaRows)

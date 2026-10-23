@@ -28,6 +28,28 @@
 namespace ddb
 {
 
+    void to_json(json &j, const AddItemError &error)
+    {
+        j = json{{"path", error.path}, {"code", error.code}, {"message", error.message}};
+    }
+
+    void to_json(json &j, const AddResult &result)
+    {
+        j = json::object();
+        j["entries"] = json::array();
+        for (const auto &[entry, isUpdate] : result.entries) {
+            json item = entry;
+            item["status"] = isUpdate ? "updated" : "added";
+            j["entries"].push_back(std::move(item));
+        }
+
+        j["unchanged"] = json::array();
+        for (const auto &path : result.unchanged)
+            j["unchanged"].push_back(json{{"path", path}});
+
+        j["errors"] = result.errors;
+    }
+
     const char *addErrorCode(const std::exception &ex) noexcept
     {
         if (dynamic_cast<const FSException *>(&ex)) return "FS";

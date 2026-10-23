@@ -41,7 +41,7 @@ void parsePointCloudMetadata(const fs::path &path, Entry &entry)
     PointCloudInfo info;
     if (getPointCloudInfo(io::toUtf8(path), info))
     {
-        entry.properties = info.toJSON();
+        entry.properties = info;
         entry.polygon_geom = info.polyBounds;
         entry.point_geom = info.centroid;
     }
