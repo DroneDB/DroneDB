@@ -86,38 +86,55 @@ namespace ddb
         return {sMin, sMax};
     }
 
-    std::vector<uint8_t> renderFormulaRgba(GDALDatasetH ds, const std::string &rasterPath,
-                                           const RasterWindow &window, const ThumbVisParams &visParams)
+    FormulaPlan planFormula(GDALDatasetH ds, const std::string &formulaId, const BandFilter &filter,
+                            const std::string &colormapId, bool withColormap)
     {
         auto &ve = VegetationEngine::instance();
-        const int bandCount = GDALGetRasterCount(ds);
+        FormulaPlan plan;
+        plan.bandCount = GDALGetRasterCount(ds);
+        plan.filter = filter;
+
+        plan.formula = ve.getFormula(formulaId);
+        if (!plan.formula)
+            throw InvalidArgsException("Unknown formula: " + formulaId);
+
+        if (withColormap)
+        {
+            const std::string id = colormapId.empty() ? "rdylgn" : colormapId;
+            plan.colormap = ve.getColormap(id);
+            if (!plan.colormap)
+                throw InvalidArgsException("Unknown colormap: " + id);
+        }
+
+        plan.nodata = detectBandNodata(ds, plan.bandCount);
+        return plan;
+    }
+
+    FormulaPlan planFormula(GDALDatasetH ds, const std::string &rasterPath, const std::string &formulaId,
+                            const std::string &bandFilter, const std::string &colormapId, bool withColormap)
+    {
+        const BandFilter filter = !bandFilter.empty()
+                                      ? VegetationEngine::parseFilter(bandFilter, GDALGetRasterCount(ds))
+                                      : VegetationEngine::instance().autoDetectFilter(rasterPath);
+        return planFormula(ds, formulaId, filter, colormapId, withColormap);
+    }
+
+    void computeFormulaValues(GDALDatasetH ds, const FormulaPlan &plan, const RasterWindow &window,
+                              FormulaBuffers &buffers)
+    {
         const size_t pixels = window.outPixels();
+        buffers.bands.resize(plan.bandCount);
+        buffers.ptrs.resize(plan.bandCount);
 
-        const auto *formula = ve.getFormula(visParams.formula);
-        if (!formula)
-            throw InvalidArgsException("Unknown formula: " + visParams.formula);
-
-        const std::string colormapId = visParams.colormap.empty() ? "rdylgn" : visParams.colormap;
-        const auto *colormap = ve.getColormap(colormapId);
-        if (!colormap)
-            throw InvalidArgsException("Unknown colormap: " + colormapId);
-
-        const BandFilter filter = !visParams.bandFilter.empty()
-                                      ? VegetationEngine::parseFilter(visParams.bandFilter, bandCount)
-                                      : ve.autoDetectFilter(rasterPath);
-
-        // Read every band as float
-        std::vector<std::vector<float>> storage(bandCount);
-        std::vector<float *> bands(bandCount);
-        const auto nodataInfo = detectBandNodata(ds, bandCount);
         cancel::GdalProgress progress; // the call is canceled (DQ-15)
         GDALRasterIOExtraArg extra = progress.rasterIOExtraArg();
-        for (int b = 0; b < bandCount; b++)
+        for (int b = 0; b < plan.bandCount; b++)
         {
-            storage[b].resize(pixels);
-            bands[b] = storage[b].data();
+            buffers.bands[b].resize(pixels);
+            buffers.ptrs[b] = buffers.bands[b].data();
             if (GDALRasterIOEx(GDALGetRasterBand(ds, b + 1), GF_Read, window.x, window.y, window.xsize, window.ysize,
-                               bands[b], window.outWidth, window.outHeight, GDT_Float32, 0, 0, &extra) != CE_None)
+                               buffers.ptrs[b], window.outWidth, window.outHeight, GDT_Float32, 0, 0, &extra) !=
+                CE_None)
             {
                 cancel::throwIfCanceled();
                 throw GDALException("Cannot read band " + std::to_string(b + 1));
@@ -125,40 +142,59 @@ namespace ddb
         }
 
         // Transparent and nodata pixels stay out of the formula
-        const float nodata = NODATA_SENTINEL;
-        premaskNodata(bands, pixels, bandCount, nodataInfo, nodata);
+        premaskNodata(buffers.ptrs, pixels, plan.bandCount, plan.nodata, NODATA_SENTINEL);
 
-        std::vector<float> result(pixels);
-        ve.applyFormula(*formula, filter, bands, result.data(), pixels, nodata);
+        buffers.result.resize(pixels);
+        VegetationEngine::instance().applyFormula(*plan.formula, plan.filter, buffers.ptrs, buffers.result.data(),
+                                                  pixels, NODATA_SENTINEL);
+    }
+
+    std::optional<std::pair<float, float>> fixedDisplayRange(const std::string &rescale,
+                                                             const VegetationFormula &formula)
+    {
+        if (!rescale.empty())
+            return parseRescaleRange(rescale);
+        if (formula.hasRange && formula.rangeMin != formula.rangeMax)
+            return std::make_pair(static_cast<float>(formula.rangeMin), static_cast<float>(formula.rangeMax));
+        return std::nullopt;
+    }
+
+    std::pair<float, float> percentileDisplayRange(std::vector<float> &values)
+    {
+        if (values.empty())
+            return {0.0f, 1.0f};
+        std::sort(values.begin(), values.end());
+        return {values[static_cast<size_t>(values.size() * 0.02)],
+                values[std::min(values.size() - 1, static_cast<size_t>(values.size() * 0.98))]};
+    }
+
+    std::vector<uint8_t> renderFormulaRgba(GDALDatasetH ds, const std::string &rasterPath,
+                                           const RasterWindow &window, const ThumbVisParams &visParams)
+    {
+        const FormulaPlan plan = planFormula(ds, rasterPath, visParams.formula, visParams.bandFilter,
+                                             visParams.colormap, true);
+        FormulaBuffers buffers;
+        computeFormulaValues(ds, plan, window, buffers);
 
         // Display range: explicit, the formula's own, or p2-p98 of the rendered values
-        float rMin = 0, rMax = 1;
-        if (!visParams.rescale.empty())
+        std::pair<float, float> range;
+        if (const auto fixed = fixedDisplayRange(visParams.rescale, *plan.formula))
         {
-            std::tie(rMin, rMax) = parseRescaleRange(visParams.rescale);
-        }
-        else if (formula->hasRange && formula->rangeMin != formula->rangeMax)
-        {
-            rMin = static_cast<float>(formula->rangeMin);
-            rMax = static_cast<float>(formula->rangeMax);
+            range = *fixed;
         }
         else
         {
             std::vector<float> valid;
-            valid.reserve(pixels);
-            for (const float v : result)
-                if (v != nodata && !std::isnan(v))
+            valid.reserve(buffers.result.size());
+            for (const float v : buffers.result)
+                if (isFormulaValue(v))
                     valid.push_back(v);
-            if (!valid.empty())
-            {
-                std::sort(valid.begin(), valid.end());
-                rMin = valid[static_cast<size_t>(valid.size() * 0.02)];
-                rMax = valid[std::min(valid.size() - 1, static_cast<size_t>(valid.size() * 0.98))];
-            }
+            range = percentileDisplayRange(valid);
         }
 
-        std::vector<uint8_t> rgba(pixels * 4);
-        ve.applyColormap(result.data(), rgba.data(), pixels, *colormap, rMin, rMax, nodata);
+        std::vector<uint8_t> rgba(window.outPixels() * 4);
+        VegetationEngine::instance().applyColormap(buffers.result.data(), rgba.data(), window.outPixels(),
+                                                   *plan.colormap, range.first, range.second, NODATA_SENTINEL);
         return rgba;
     }
 }

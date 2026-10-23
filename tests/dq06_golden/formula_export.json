@@ -1,6 +1,6 @@
 {
  "badrescale": {
-  "error": "Invalid rescale format"
+  "error": "Invalid rescale format: oops. Expected format: min,max"
  },
  "bands": {
   "bands": [

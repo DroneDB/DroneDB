@@ -42,6 +42,7 @@
 #include "entry_types.h"
 #include "exceptions.h"
 #include "gdal_raii.h"
+#include "vis_render.h"
 #include "gtiff_options.h"
 #include "hash.h"
 #include "info.h"
@@ -1541,38 +1542,19 @@ DDBErr DDBGetRasterMetadata(const char* path, const char* formula,
 
         if (!formulaStr.empty()) {
             // Formula statistics: compute on-demand
-            const ddb::BandFilter &bf = effectiveFilter;
-            int width = GDALGetRasterXSize(hDs);
-            int height = GDALGetRasterYSize(hDs);
+            const int width = GDALGetRasterXSize(hDs);
+            const int height = GDALGetRasterYSize(hDs);
 
             // Sample at reduced resolution for performance
-            int sampleW = std::min(width, 512);
-            int sampleH = std::min(height, 512);
-            size_t pixCount = static_cast<size_t>(sampleW) * sampleH;
+            const int sampleW = std::min(width, 512);
+            const int sampleH = std::min(height, 512);
+            const size_t pixCount = static_cast<size_t>(sampleW) * sampleH;
 
-            std::vector<std::vector<float>> bandDataStorage(nBands);
-            std::vector<float*> bandDataPtrs(nBands);
-
-            // Read GDAL nodata values and detect alpha band
-            auto nodataInfo = detectBandNodata(hDs, nBands);
-            for (int b = 0; b < nBands; b++) {
-                bandDataStorage[b].resize(pixCount);
-                bandDataPtrs[b] = bandDataStorage[b].data();
-                GDALRasterBandH hBand = GDALGetRasterBand(hDs, b + 1);
-                GDALRasterIO(hBand, GF_Read, 0, 0, width, height,
-                             bandDataPtrs[b], sampleW, sampleH, GDT_Float32, 0, 0);
-            }
-
-            // Pre-mask: set pixels to output nodata where alpha=0 or any band
-            // matches its GDAL nodata value, so applyFormula excludes them
-            float nodata = NODATA_SENTINEL;
-            premaskNodata(bandDataPtrs, pixCount, nBands, nodataInfo, nodata);
-
-            std::vector<float> formulaResult(pixCount);
-            const auto* formulaObj = ve.getFormula(formulaStr);
-            if (!formulaObj)
-                throw InvalidArgsException("Unknown formula: " + formulaStr);
-            ve.applyFormula(*formulaObj, bf, bandDataPtrs, formulaResult.data(), pixCount, nodata);
+            const ddb::FormulaPlan plan = ddb::planFormula(hDs, formulaStr, effectiveFilter, "", false);
+            ddb::FormulaBuffers buffers;
+            ddb::computeFormulaValues(hDs, plan, ddb::RasterWindow{0, 0, width, height, sampleW, sampleH}, buffers);
+            const std::vector<float>& formulaResult = buffers.result;
+            const float nodata = NODATA_SENTINEL;
 
             // Compute statistics
             std::vector<double> valid;
@@ -2012,25 +1994,8 @@ static void exportRasterImpl(const char* inputPath, const char* outputPath,
         // Formula mode: apply formula + colormap, export as RGBA GeoTIFF.
         // Block-windowed so peak memory is O(tileW * tileH * bandCount) and
         // independent of the full raster size.
-        auto& ve = ddb::VegetationEngine::instance();
-
-        ddb::BandFilter bf;
-        if (!filterStr.empty()) {
-            bf = ddb::VegetationEngine::parseFilter(filterStr, bandCount);
-        } else {
-            bf = ve.autoDetectFilter(std::string(inputPath));
-        }
-
-        const auto* formulaPtr = ve.getFormula(formulaStr);
-        if (!formulaPtr)
-            throw InvalidArgsException("Unknown formula: " + formulaStr);
-        std::string cmId = colormapStr.empty() ? "rdylgn" : colormapStr;
-        const auto* cmap = ve.getColormap(cmId);
-        if (!cmap)
-            throw InvalidArgsException("Unknown colormap: " + cmId);
-
-        const auto nodataInfo = detectBandNodata(hSrcDs, bandCount);
-        const float nodata = NODATA_SENTINEL;
+        const ddb::FormulaPlan plan =
+            ddb::planFormula(hSrcDs, inputPath, formulaStr, filterStr, colormapStr, true);
 
         const int tw = computeExportTileSize(hSrcDs, bandCount, tileSize);
         const int th = tw;
@@ -2038,49 +2003,25 @@ static void exportRasterImpl(const char* inputPath, const char* outputPath,
         const int nty = (height + th - 1) / th;
         const size_t totalTiles = static_cast<size_t>(ntx) * nty;
 
-        // Reads a window of every band into the supplied per-band buffers and
-        // applies the formula, leaving the result in 'result'.
-        auto computeWindow = [&](int x0, int y0, int winW, int winH,
-                                 std::vector<std::vector<float>>& storage,
-                                 std::vector<float*>& ptrs,
-                                 std::vector<float>& result) {
-            const size_t winPix = static_cast<size_t>(winW) * winH;
-            for (int b = 0; b < bandCount; b++) {
-                storage[b].resize(winPix);
-                ptrs[b] = storage[b].data();
-                GDALRasterBandH hBand = GDALGetRasterBand(hSrcDs, b + 1);
-                if (GDALRasterIO(hBand, GF_Read, x0, y0, winW, winH,
-                                 ptrs[b], winW, winH, GDT_Float32, 0, 0) != CE_None)
-                    throw GDALException("Cannot read band " + std::to_string(b + 1));
-            }
-            premaskNodata(ptrs, winPix, bandCount, nodataInfo, nodata);
-            result.resize(winPix);
-            ve.applyFormula(*formulaPtr, bf, ptrs, result.data(), winPix, nodata);
+        // Reads a window of every band and applies the formula: buffers.result is its values
+        auto computeWindow = [&](int x0, int y0, int winW, int winH, ddb::FormulaBuffers& buffers) {
+            ddb::computeFormulaValues(hSrcDs, plan, ddb::RasterWindow{x0, y0, winW, winH, winW, winH}, buffers);
         };
 
         // Determine rescale range. Explicit rescale and formula-defined ranges
         // keep the export fully memory-bounded. The auto-percentile fallback
         // performs an extra windowed pass that collects valid values (only hit
         // when neither an explicit range nor a formula range is available).
-        float rMin, rMax;
-        if (!rescaleStr.empty()) {
-            auto commaPos = rescaleStr.find(',');
-            if (commaPos == std::string::npos)
-                throw InvalidArgsException("Invalid rescale format");
-            rMin = std::stof(rescaleStr.substr(0, commaPos));
-            rMax = std::stof(rescaleStr.substr(commaPos + 1));
-        } else if (formulaPtr->hasRange && formulaPtr->rangeMin != formulaPtr->rangeMax) {
-            rMin = static_cast<float>(formulaPtr->rangeMin);
-            rMax = static_cast<float>(formulaPtr->rangeMax);
+        std::pair<float, float> range;
+        if (const auto fixedRange = ddb::fixedDisplayRange(rescaleStr, *plan.formula)) {
+            range = *fixedRange;
         } else {
             // Auto-percentile fallback: collect valid values with a windowed
             // pass. To keep memory bounded regardless of raster size, values
             // are uniformly subsampled into a fixed-capacity reservoir instead
             // of storing every pixel.
             constexpr size_t kMaxSamples = 4ull * 1024 * 1024;  // 16 MB of floats
-            std::vector<std::vector<float>> storage(bandCount);
-            std::vector<float*> ptrs(bandCount);
-            std::vector<float> result;
+            ddb::FormulaBuffers buffers;
             std::vector<float> valid;
             valid.reserve(std::min<size_t>(kMaxSamples,
                 static_cast<size_t>(width) * height));
@@ -2095,9 +2036,9 @@ static void exportRasterImpl(const char* inputPath, const char* outputPath,
                     const int x0 = tx * tw, y0 = ty * th;
                     const int winW = std::min(tw, width - x0);
                     const int winH = std::min(th, height - y0);
-                    computeWindow(x0, y0, winW, winH, storage, ptrs, result);
-                    for (float v : result) {
-                        if (v == nodata || std::isnan(v)) continue;
+                    computeWindow(x0, y0, winW, winH, buffers);
+                    for (float v : buffers.result) {
+                        if (!ddb::isFormulaValue(v)) continue;
                         seen++;  // count this element before drawing (Algorithm R)
                         if (valid.size() < kMaxSamples) {
                             valid.push_back(v);
@@ -2110,13 +2051,7 @@ static void exportRasterImpl(const char* inputPath, const char* outputPath,
                     }
                 }
             }
-            if (!valid.empty()) {
-                std::sort(valid.begin(), valid.end());
-                rMin = valid[static_cast<size_t>(valid.size() * 0.02)];
-                rMax = valid[std::min(valid.size() - 1, static_cast<size_t>(valid.size() * 0.98))];
-            } else {
-                rMin = 0; rMax = 1;
-            }
+            range = ddb::percentileDisplayRange(valid);
         }
 
         // Create tiled output GeoTIFF with 4 bands (RGBA)
@@ -2148,9 +2083,7 @@ static void exportRasterImpl(const char* inputPath, const char* outputPath,
         GDALSetRasterColorInterpretation(GDALGetRasterBand(hOut, 3), GCI_BlueBand);
         GDALSetRasterColorInterpretation(GDALGetRasterBand(hOut, 4), GCI_AlphaBand);
 
-        std::vector<std::vector<float>> storage(bandCount);
-        std::vector<float*> ptrs(bandCount);
-        std::vector<float> result;
+        ddb::FormulaBuffers buffers;
         std::vector<uint8_t> rgba;
         std::vector<uint8_t> chanData;
         size_t doneTiles = 0;
@@ -2165,10 +2098,12 @@ static void exportRasterImpl(const char* inputPath, const char* outputPath,
                 const int winH = std::min(th, height - y0);
                 const size_t winPix = static_cast<size_t>(winW) * winH;
 
-                computeWindow(x0, y0, winW, winH, storage, ptrs, result);
+                computeWindow(x0, y0, winW, winH, buffers);
 
                 rgba.resize(winPix * 4);
-                ve.applyColormap(result.data(), rgba.data(), winPix, *cmap, rMin, rMax, nodata);
+                ddb::VegetationEngine::instance().applyColormap(buffers.result.data(), rgba.data(), winPix,
+                                                                *plan.colormap, range.first, range.second,
+                                                                NODATA_SENTINEL);
 
                 chanData.resize(winPix);
                 for (int ch = 0; ch < 4; ch++) {
