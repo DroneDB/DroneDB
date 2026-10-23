@@ -293,3 +293,9 @@ Registry has to adopt first.
   `lastAttempt` is. Additive: no other field changed. In the two pending fixtures it is a volatile
   key next to `lastAttempt`. Registry's exact-JSON adapter tests of these outputs
   (`Abi11ContractTests`) need the field before Registry moves to a libddb build that has it.
+
+* 2026-10-23: `entry-types` reports `thumbnail: "file"` for `Panorama` and `GeoPanorama` (it was
+  `"none"` in 2.0.0, which made Registry stop rendering their thumbnails: they are JPEG/TIFF images
+  rendered from the file like an `Image`). `Video` and `GeoVideo` stay `"none"`. A value of an
+  existing field changes (the schema's enum already allows it): Registry follows the field, so a
+  Registry on the new libddb renders panorama thumbnails again. No other fixture changed.

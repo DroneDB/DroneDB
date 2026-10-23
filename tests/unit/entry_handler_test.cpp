@@ -96,12 +96,14 @@ TEST(entryHandler, BuildableTypesAndSubfoldersArePinned) {
         EXPECT_EQ(entryHandler(t).usesTempFolder(), t != Vector) << typeToHuman(t);
 }
 
-// supportsThumbnails() (Image, GeoImage, GeoRaster) and the STAC thumbnail asset (those plus
-// PointCloud and GaussianSplat)
+// supportsThumbnails() (Image, GeoImage, Panorama, GeoPanorama, GeoRaster) and the STAC thumbnail
+// asset (those plus PointCloud and GaussianSplat)
 TEST(entryHandler, ThumbnailSourcesArePinned) {
     const std::map<EntryType, ThumbnailSource> sources = {
         {Image, ThumbnailSource::File},
         {GeoImage, ThumbnailSource::File},
+        {Panorama, ThumbnailSource::File},
+        {GeoPanorama, ThumbnailSource::File},
         {GeoRaster, ThumbnailSource::File},
         {PointCloud, ThumbnailSource::BuildArtifact},
         {GaussianSplat, ThumbnailSource::BuildArtifact}};

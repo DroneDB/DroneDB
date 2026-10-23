@@ -377,7 +377,9 @@ TEST(BuildManifest, EntryTypes) {
     EXPECT_EQ(byName["PointCloud"]["roles"], json::parse(R"(["pointcloud.copc", "pointcloud.ept"])"));
     EXPECT_EQ(byName["PointCloud"]["thumbnail"], "build");
     EXPECT_EQ(byName["Vector"]["sidecarExtensions"], json::parse(R"(["cpg", "dbf", "shx", "prj"])"));
-    EXPECT_EQ(byName["Panorama"]["thumbnail"], "none");
+    EXPECT_EQ(byName["Panorama"]["thumbnail"], "file");
+    EXPECT_EQ(byName["GeoPanorama"]["thumbnail"], "file");
+    EXPECT_EQ(byName["Video"]["thumbnail"], "none");
     EXPECT_EQ(byName["Generic"]["buildable"], false);
     EXPECT_TRUE(byName["Generic"]["roles"].empty());
 }

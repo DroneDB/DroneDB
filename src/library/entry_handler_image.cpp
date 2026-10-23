@@ -322,10 +322,18 @@ class ImageEntryHandler : public EntryHandler {
         parseImageMetadata(path, entry, ctx);
     }
 
-    // Panoramas and videos have no thumbnail of their own
+    // Images and panoramas are rendered from the file (a panorama is an image twice as wide as
+    // high); videos have no thumbnail of their own
     ThumbnailSource thumbnailSource() const override {
-        return type() == EntryType::Image || type() == EntryType::GeoImage ? ThumbnailSource::File
-                                                                          : ThumbnailSource::None;
+        switch (type()) {
+            case EntryType::Image:
+            case EntryType::GeoImage:
+            case EntryType::Panorama:
+            case EntryType::GeoPanorama:
+                return ThumbnailSource::File;
+            default:
+                return ThumbnailSource::None;
+        }
     }
 };
 

@@ -116,7 +116,7 @@
       "name": "Panorama",
       "roles": [],
       "sidecarExtensions": [],
-      "thumbnail": "none"
+      "thumbnail": "file"
     },
     {
       "buildable": false,
@@ -124,7 +124,7 @@
       "name": "GeoPanorama",
       "roles": [],
       "sidecarExtensions": [],
-      "thumbnail": "none"
+      "thumbnail": "file"
     },
     {
       "buildable": true,
