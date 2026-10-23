@@ -21,8 +21,11 @@
 #include <functional>
 #include <latch>
 #include <map>
+#include <mutex>
 #include <string>
 #include <thread>
+#include <utility>
+#include <vector>
 
 #include "c_api_util.h"
 #include "cancellation.h"
@@ -256,6 +259,56 @@ TEST_F(CancelToken, everyCancellableExportStopsWithACanceledToken) {
         // The same call without a token works (the token was reset by the canceled call)
         EXPECT_EQ(call(), DDBERR_NONE) << DDBGetLastError();
     }
+}
+
+// What a log callback received from the canceled calls
+struct LoggedRecords {
+    std::mutex mutex;
+    std::vector<std::pair<int, std::string>> records;  // level, "source: message"
+};
+
+void collectRecords(int level, const char* message, const char* source, uint64_t, void* userData) {
+    auto* logged = static_cast<LoggedRecords*>(userData);
+    const std::lock_guard lock(logged->mutex);
+    logged->records.emplace_back(level, std::string(source) + ": " + message);
+}
+
+// A canceled operation is not an error: GDAL reports the work its progress callback stopped as
+// errors ("User terminated CreateCopy()", the PNG driver's "libpng: No IDATs written into file"),
+// and the log callback of a host (Registry logs errors as errors) got them at ERROR level on every
+// aborted request. They reach it at DEBUG level, with their text.
+TEST_F(CancelToken, canceledExportsLogNoErrors) {
+    Inputs in(TEST_NAME);
+    const std::string cacheDir = in.area.getFolder("cache").string();
+    ASSERT_DDB_OK(DDBConfigure(json{{"cacheDir", cacheDir}}.dump().c_str()));
+    LoggedRecords logged;
+    ASSERT_DDB_OK(DDBSetLogCallback(&collectRecords, DDB_LOG_TRACE, &logged));
+    struct Reset {
+        ~Reset() {
+            DDBSetLogCallback(nullptr, DDB_LOG_TRACE, nullptr);
+            DDBConfigure(R"({"cacheDir": null})");
+        }
+    } reset;
+
+    for (const auto& [name, call] : cancellableCalls(in)) {
+        SCOPED_TRACE(name);
+        HostToken token;
+        ASSERT_DDB_OK(DDBCancel(token.get()));
+        ASSERT_DDB_OK(DDBSetThreadCancelToken(token.get()));
+        EXPECT_EQ(call(), DDBERR_CANCELED);
+    }
+
+    const std::lock_guard lock(logged.mutex);
+    bool gdalReportedTheCancellation = false;
+    for (const auto& [level, text] : logged.records) {
+        EXPECT_LT(level, DDB_LOG_ERROR) << "a canceled call logged an error: " << text;
+        if (text.rfind("gdal: ", 0) == 0 && text.find("User terminated") != std::string::npos) {
+            gdalReportedTheCancellation = true;
+            EXPECT_EQ(level, DDB_LOG_DEBUG) << text;
+        }
+    }
+    EXPECT_TRUE(gdalReportedTheCancellation)
+        << "no GDAL error was raised by the canceled calls: the test checks nothing";
 }
 
 // Free after Cancel while a parallel section works for the token: the workers keep their own

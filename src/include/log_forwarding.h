@@ -75,7 +75,9 @@ namespace ddb::logfwd
     DDB_DLL int levelOf(CPLErr errorClass) noexcept;
 
     // A GDAL error handler that sends GDAL's messages to the callback, and to GDAL's default
-    // handler (stderr) when none is registered. Installed process-wide by the process
+    // handler (stderr) when none is registered. The failures and warnings raised for a user
+    // interrupt, or while the work of the thread is canceled (cancellation.h), are the
+    // consequence of the cancellation, not errors: they are sent at debug level. Installed process-wide by the process
     // initialization and pushed on every thread of a parallel section.
     DDB_DLL void CPL_STDCALL gdalErrorHandler(CPLErr errorClass, CPLErrorNum errorNum, const char *message);
 

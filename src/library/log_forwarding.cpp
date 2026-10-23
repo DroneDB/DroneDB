@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "cancellation.h"
 #include "exceptions.h"
 
 namespace ddb::logfwd
@@ -181,10 +182,26 @@ namespace ddb::logfwd
         return kInfo;
     }
 
+    namespace
+    {
+        // GDAL's progress callbacks answer a cancellation with FALSE, and GDAL then reports the
+        // work it stopped as errors ("User terminated CreateCopy()", the PNG driver's "libpng: No
+        // IDATs written into file" for the image it did not finish): those are the consequence of
+        // the cancellation, not failures. They are logged at debug level when they are raised for
+        // a user interrupt or while the work of the thread is canceled (its token, the shutdown).
+        CPLErr effectiveClass(CPLErr errorClass, CPLErrorNum errorNum) noexcept
+        {
+            if (errorClass != CE_Failure && errorClass != CE_Warning)
+                return errorClass; // CE_Fatal aborts the process: it is always reported
+            return errorNum == CPLE_UserInterrupt || cancel::isCanceled() ? CE_Debug : errorClass;
+        }
+    }
+
     void CPL_STDCALL gdalErrorHandler(CPLErr errorClass, CPLErrorNum errorNum, const char *message)
     {
-        if (!deliver(levelOf(errorClass), "gdal", message))
-            CPLDefaultErrorHandler(errorClass, errorNum, message);
+        const CPLErr effective = effectiveClass(errorClass, errorNum);
+        if (!deliver(levelOf(effective), "gdal", message))
+            CPLDefaultErrorHandler(effective, errorNum, message); // debug: only printed with CPL_DEBUG
     }
 
     void installGdalErrorHandler()
