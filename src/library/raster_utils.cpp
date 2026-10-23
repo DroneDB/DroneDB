@@ -5,18 +5,25 @@
 
 namespace ddb {
 
+BandNodata readBandNodata(GDALRasterBandH band) {
+    BandNodata nd;
+    int has = 0;
+    nd.value = GDALGetRasterNoDataValue(band, &has);
+    nd.has = has != 0;
+    return nd;
+}
+
 RasterBandNodata detectBandNodata(GDALDatasetH hDataset, int bandCount) {
     RasterBandNodata info;
     info.alphaBandIdx = -1;
-    info.hasNodata.resize(bandCount, 0);
-    info.nodataValues.resize(bandCount, 0.0);
+    info.bands.resize(bandCount);
 
     for (int b = 0; b < bandCount; b++) {
         GDALRasterBandH hBand = GDALGetRasterBand(hDataset, b + 1);
         if (GDALGetRasterColorInterpretation(hBand) == GCI_AlphaBand) {
             info.alphaBandIdx = b;
         }
-        info.nodataValues[b] = GDALGetRasterNoDataValue(hBand, &info.hasNodata[b]);
+        info.bands[b] = readBandNodata(hBand);
     }
 
     return info;
@@ -37,15 +44,9 @@ void premaskNodata(const std::vector<float*>& bandPtrs,
         if (!masked) {
             for (int b = 0; b < bandCount; b++) {
                 if (b == info.alphaBandIdx) continue;
-                if (info.hasNodata[b]) {
-                    const double sampleValue = static_cast<double>(bandPtrs[b][i]);
-                    const bool isNodata =
-                        (std::isnan(info.nodataValues[b]) && std::isnan(sampleValue)) ||
-                        (!std::isnan(info.nodataValues[b]) && sampleValue == info.nodataValues[b]);
-                    if (isNodata) {
-                        masked = true;
-                        break;
-                    }
+                if (isNodata(static_cast<double>(bandPtrs[b][i]), info.bands[b])) {
+                    masked = true;
+                    break;
                 }
             }
         }

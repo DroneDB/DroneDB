@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "gdal_raii.h"
+#include "raster_utils.h"
 #include "cog.h"
 #include "cancellation.h"
 #include "build_budget.h"
@@ -77,11 +78,11 @@ namespace ddb
             throw GDALException("Cannot build COG: input file has no coordinate reference system: " + inputGTiff);
 
         // Detect and preserve nodata from source
-        int hasNoData;
         GDALRasterBandH hSrcBand1 = GDALGetRasterBand(hSrcDataset, 1);
         if (!hSrcBand1)
             throw GDALException("Cannot read band 1 from " + inputGTiff);
-        double srcNoData = GDALGetRasterNoDataValue(hSrcBand1, &hasNoData);
+        const BandNodata srcNoData = readBandNodata(hSrcBand1);
+        const bool hasNoData = srcNoData.has;
 
         // Some GDAL versions / code paths may fail to preserve a standalone
         // PER_DATASET mask when a COG is produced through a warp/reprojection step
@@ -137,12 +138,12 @@ namespace ddb
         if (hasNoData) {
             // Skip nodata preservation for special float values that cannot
             // be reliably serialized (infinity, NaN, extreme floats)
-            if (std::isfinite(srcNoData) && std::fabs(srcNoData) < 1e+30) {
+            if (std::isfinite(srcNoData.value) && std::fabs(srcNoData.value) < 1e+30) {
                 targs.AddString("-wo");
                 targs.AddString("UNIFIED_SRC_NODATA=YES");
                 targs.AddString("-dstnodata");
                 std::ostringstream oss;
-                oss << std::setprecision(15) << srcNoData;
+                oss << std::setprecision(15) << srcNoData.value;
                 targs.AddString(oss.str().c_str());
             } else {
                 // The nodata value cannot be reliably serialized as a
@@ -150,7 +151,7 @@ namespace ddb
                 // transparency as a destination alpha band instead, so masked
                 // pixels do not become opaque in the output COG. GDALWarp still
                 // reads the source nodata from the band itself to drive the mask.
-                LOGW << "Nodata value cannot be serialized (" << srcNoData
+                LOGW << "Nodata value cannot be serialized (" << srcNoData.value
                      << "); using -dstalpha to preserve transparency";
                 targs.AddString("-dstalpha");
             }

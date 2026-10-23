@@ -4,6 +4,7 @@
 #include "align.h"
 #include "mathutil.h"
 #include "gdal_raii.h"
+#include "raster_utils.h"
 #include "cog.h"        // buildCog() - DRY reuse of the COG pattern
 #include "exceptions.h"
 #include "logger.h"
@@ -612,8 +613,8 @@ static double computeZOffset(const std::string &alignedPath,
 
     std::vector<float> bufA, bufR;
     const bool readOk = readOverlap(hA, gtA, bufA) && readOverlap(hR, gtR, bufR);
-    int hasNdA; const double ndA = GDALGetRasterNoDataValue(GDALGetRasterBand(hA, 1), &hasNdA);
-    int hasNdR; const double ndR = GDALGetRasterNoDataValue(GDALGetRasterBand(hR, 1), &hasNdR);
+    const BandNodata ndA = readBandNodata(GDALGetRasterBand(hA, 1));
+    const BandNodata ndR = readBandNodata(GDALGetRasterBand(hR, 1));
     alignedDs.reset(); refDs.reset();
     if (!readOk) return 0.0;
 
@@ -621,8 +622,8 @@ static double computeZOffset(const std::string &alignedPath,
     diffs.reserve(bufA.size());
     for (size_t i = 0; i < bufA.size(); i++) {
         if (std::isnan(bufA[i]) || std::isnan(bufR[i])) continue;
-        if (hasNdA && std::abs(bufA[i] - static_cast<float>(ndA)) < 1e-3f) continue;
-        if (hasNdR && std::abs(bufR[i] - static_cast<float>(ndR)) < 1e-3f) continue;
+        if (ndA.has && std::abs(bufA[i] - static_cast<float>(ndA.value)) < 1e-3f) continue;
+        if (ndR.has && std::abs(bufR[i] - static_cast<float>(ndR.value)) < 1e-3f) continue;
         diffs.push_back(bufR[i] - bufA[i]);
     }
     if (diffs.empty()) return 0.0;
@@ -637,12 +638,12 @@ static void addZOffset(const std::string &path, double zOffset) {
     GDALDatasetH hDs = datasetHandle(dataset);
     GDALRasterBandH hBand = GDALGetRasterBand(hDs, 1);
     int W = GDALGetRasterXSize(hDs), H = GDALGetRasterYSize(hDs);
-    int hasNd; double nd = GDALGetRasterNoDataValue(hBand, &hasNd);
+    const BandNodata nd = readBandNodata(hBand);
     std::vector<float> row(W);
     for (int r = 0; r < H; r++) {
         GDALRasterIO(hBand, GF_Read, 0, r, W, 1, row.data(), W, 1, GDT_Float32, 0, 0);
         for (float &v : row)
-            if (!hasNd || std::abs(v - static_cast<float>(nd)) > 1e-3f)
+            if (!nd.has || std::abs(v - static_cast<float>(nd.value)) > 1e-3f)
                 v += static_cast<float>(zOffset);
         GDALRasterIO(hBand, GF_Write, 0, r, W, 1, row.data(), W, 1, GDT_Float32, 0, 0);
     }

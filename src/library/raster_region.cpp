@@ -15,6 +15,7 @@
 #include "stringutil.h"
 #include "coordstransformer.h"
 #include "gdal_raii.h"
+#include "raster_utils.h"
 #include "gdal_priv.h"
 #include "gdal_utils.h"
 #include "cpl_conv.h"
@@ -364,9 +365,8 @@ namespace ddb
         for (int b = 1; b <= bandCount; b++) {
             GDALRasterBandH hBand = GDALGetRasterBand(hDS, b);
             json bj;
-            int hasNodata = 0;
-            double nodata = GDALGetRasterNoDataValue(hBand, &hasNodata);
-            if (hasNodata) bj["nodata"] = nodata;
+            const BandNodata nodata = readBandNodata(hBand);
+            if (nodata.has) bj["nodata"] = nodata.value;
 
             if (!inBounds) {
                 bj["value"] = nullptr;
@@ -376,7 +376,7 @@ namespace ddb
                                           &val, 1, 1, GDT_Float64, 0, 0);
                 if (err != CE_None) {
                     bj["value"] = nullptr;
-                } else if (hasNodata && val == nodata) {
+                } else if (isNodata(val, nodata)) {
                     bj["value"] = nullptr;
                 } else {
                     bj["value"] = val;
@@ -497,32 +497,28 @@ namespace ddb
         const size_t npx = static_cast<size_t>(width) * height;
         std::vector<float> b1(npx), b2(npx), b3;
         if (idx.b3 > 0) b3.resize(npx);
-        bool has1 = false, has2 = false, has3 = false;
-        double nd1 = 0.0, nd2 = 0.0, nd3 = 0.0;
+        BandNodata nd1, nd2, nd3;
 
-        auto readBand = [&](int bi, float *dst, bool &hasND, double &ndVal) {
+        auto readBand = [&](int bi, float *dst, BandNodata &nd) {
             GDALRasterBandH hB = GDALGetRasterBand(hWarp, bi);
             if (!hB) throw GDALException("Missing band " + std::to_string(bi));
             CPLErr e = GDALRasterIO(hB, GF_Read, 0, 0, width, height,
                                     dst, width, height, GDT_Float32, 0, 0);
             if (e != CE_None) throw GDALException("RasterIO failed for band " + std::to_string(bi));
-            int hn = 0;
-            const double v = GDALGetRasterNoDataValue(hB, &hn);
-            hasND = (hn != 0);
-            ndVal = v;
+            nd = readBandNodata(hB);
         };
-        readBand(idx.b1, b1.data(), has1, nd1);
-        readBand(idx.b2, b2.data(), has2, nd2);
-        if (idx.b3 > 0) readBand(idx.b3, b3.data(), has3, nd3);
+        readBand(idx.b1, b1.data(), nd1);
+        readBand(idx.b2, b2.data(), nd2);
+        if (idx.b3 > 0) readBand(idx.b3, b3.data(), nd3);
         warp.reset();
         vsiTif.reset();
 
         // Helper to detect nodata in a single sample (tolerant of float NaN).
-        auto isND = [](double v, bool hasND, double ndVal) {
+        auto isND = [](double v, const BandNodata &nd) {
             if (std::isnan(v)) return true;
-            if (!hasND) return false;
-            if (std::isnan(ndVal)) return true;
-            return v == ndVal;
+            if (!nd.has) return false;
+            if (std::isnan(nd.value)) return true;
+            return v == nd.value;
         };
 
         // Step 3: compute the index per-pixel into RGBA byte buffer.
@@ -531,8 +527,8 @@ namespace ddb
             double v;
             const double v1 = b1[i], v2 = b2[i];
             const bool nodataHere =
-                isND(v1, has1, nd1) || isND(v2, has2, nd2) ||
-                (idx.b3 > 0 && isND(b3[i], has3, nd3));
+                isND(v1, nd1) || isND(v2, nd2) ||
+                (idx.b3 > 0 && isND(b3[i], nd3));
             if (nodataHere) {
                 v = std::nan("");
             } else {

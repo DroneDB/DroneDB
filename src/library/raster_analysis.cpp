@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "raster_analysis.h"
+#include "raster_utils.h"
 #include "json.h"
 #include "thermal.h"
 #include "sensorprofile.h"
@@ -374,14 +375,13 @@ std::string getRasterAreaStatsJson(const std::string &filePath,
 
             if (gotData) {
                 // Respect nodata.
-                int hasNoData = 0;
-                double noData = GDALGetRasterNoDataValue(hBand, &hasNoData);
+                const BandNodata noData = readBandNodata(hBand);
 
                 std::vector<float> values;
                 values.reserve(roiCount);
                 for (float v : roiData) {
                     if (!std::isfinite(v)) continue;
-                    if (hasNoData && std::abs(static_cast<double>(v) - noData) < 1e-6) continue;
+                    if (noData.has && std::abs(static_cast<double>(v) - noData.value) < 1e-6) continue;
                     values.push_back(v);
                 }
 

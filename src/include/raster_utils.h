@@ -13,10 +13,27 @@ namespace ddb {
 
 constexpr float NODATA_SENTINEL = -9999.0f;
 
+// The nodata value of one band: `has` tells whether the band declares one
+struct BandNodata {
+    bool has = false;
+    double value = 0.0;
+};
+
+// Reads the nodata value of a band. The one place that calls GDALGetRasterNoDataValue.
+DDB_DLL BandNodata readBandNodata(GDALRasterBandH band);
+
+// True when the sample v is the band's nodata value, compared exactly (a NaN nodata value matches
+// a NaN sample). False when the band declares none. A sample that is NaN or infinite without
+// matching is not nodata here: callers that exclude non-finite samples test std::isfinite as well.
+inline bool isNodata(double v, const BandNodata& nd) {
+    if (!nd.has) return false;
+    if (std::isnan(nd.value)) return std::isnan(v);
+    return v == nd.value;
+}
+
 struct RasterBandNodata {
     int alphaBandIdx = -1;
-    std::vector<int> hasNodata;
-    std::vector<double> nodataValues;
+    std::vector<BandNodata> bands;  // one per band, in band order
 };
 
 // Detect alpha band and nodata values for each band of a GDAL dataset

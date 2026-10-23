@@ -10,6 +10,7 @@
 #include "mathutil.h"
 #include "exceptions.h"
 #include "gdal_raii.h"
+#include "raster_utils.h"
 #include "http_helpers.h"
 #include <cpr/cpr.h>
 #include "mio.h"
@@ -252,7 +253,9 @@ bool DSMService::addGeoTIFFToCache(const fs::path &filePath, double latitude, do
         throw GDALException("More than 1 raster band found in elevation raster: " + ddb::io::toUtf8(filePath));
 
     GDALRasterBandH hBand = GDALGetRasterBand(hDataset, 1);
-    e.nodata = static_cast<float>(GDALGetRasterNoDataValue(hBand, &e.hasNodata));
+    const BandNodata nodata = readBandNodata(hBand);
+    e.hasNodata = nodata.has ? 1 : 0;
+    e.nodata = static_cast<float>(nodata.value);
 
     Point2D min(0, e.height);
     Point2D max(e.width, 0);
