@@ -5,13 +5,19 @@
 // DQ-05: the shared string and math helpers (stringutil.h, mathutil.h).
 
 #include <cmath>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <set>
+#include <type_traits>
+#include <utility>
 #include <string>
 #include <vector>
 
+#include "c_api_util.h"
+#include "entry_filters.h"
+#include "entry_types.h"
 #include "exceptions.h"
 #include "hash.h"
 #include "gtest/gtest.h"
@@ -289,6 +295,115 @@ TEST(Dq05MioPaths, SamePathOfMissingFilesIsLexical) {
     EXPECT_TRUE(io::isSamePath(base / "x" / ".." / "y", base / "y"));
     EXPECT_FALSE(io::isSamePath(base / "x", base / "y"));
     EXPECT_FALSE(io::isSamePath("", base));
+}
+
+// ---------------------------------------------------------------- entry types and filters
+
+// The index (entries.type) and the hosts (the C API, Registry) store these numbers: an enum class
+// must not renumber them
+TEST(Dq05EntryTypes, NumericValuesAreStable) {
+    const std::vector<std::pair<EntryType, int>> values = {
+        {EntryType::Undefined, 0},   {EntryType::Directory, 1},    {EntryType::Generic, 2},
+        {EntryType::GeoImage, 3},    {EntryType::GeoRaster, 4},    {EntryType::PointCloud, 5},
+        {EntryType::Image, 6},       {EntryType::DroneDB, 7},      {EntryType::Markdown, 8},
+        {EntryType::Video, 9},       {EntryType::GeoVideo, 10},    {EntryType::Model, 11},
+        {EntryType::Panorama, 12},   {EntryType::GeoPanorama, 13}, {EntryType::Vector, 14},
+        {EntryType::GaussianSplat, 15}, {EntryType::Tiles3D, 16}};
+    for (const auto& [type, value] : values) {
+        EXPECT_EQ(entryTypeValue(type), value);
+        EXPECT_EQ(static_cast<EntryType>(value), type);
+    }
+    static_assert(!std::is_convertible_v<EntryType, int>, "EntryType is a scoped enum");
+    static_assert(sizeof(EntryType) == sizeof(int));
+}
+
+TEST(Dq05EntryTypes, TypeNamesRoundTripInAnyCase) {
+    EXPECT_EQ(typeFromHuman("GeoRaster"), EntryType::GeoRaster);
+    EXPECT_EQ(typeFromHuman("georaster"), EntryType::GeoRaster);
+    EXPECT_EQ(typeFromHuman("GEORASTER"), EntryType::GeoRaster);
+    EXPECT_EQ(typeFromHuman("nope"), EntryType::Undefined);
+    EXPECT_EQ(typeFromHuman(""), EntryType::Undefined);
+    for (const std::string& name : getEntryTypeNames())
+        EXPECT_NE(typeFromHuman(name), EntryType::Undefined) << name;
+}
+
+TEST(Dq05Filters, EntryTypeListAllowsATrailingSeparator) {
+    EXPECT_EQ(filters::parseEntryTypeList("image, georaster"),
+              (std::vector<EntryType>{EntryType::Image, EntryType::GeoRaster}));
+    EXPECT_EQ(filters::parseEntryTypeList("image,"), (std::vector<EntryType>{EntryType::Image}));
+    EXPECT_TRUE(filters::parseEntryTypeList("").empty());
+    EXPECT_TRUE(filters::parseEntryTypeList(nullptr).empty());
+    EXPECT_THROW(filters::parseEntryTypeList("image,,vector"), InvalidArgsException);
+    EXPECT_THROW(filters::parseEntryTypeList(","), InvalidArgsException);
+    EXPECT_THROW(filters::parseEntryTypeList("image,bogus"), InvalidArgsException);
+    EXPECT_THROW(filters::parseEntryTypeList("directory"), InvalidArgsException);
+    EXPECT_EQ(filters::parseEntryTypeList("directory", true),
+              (std::vector<EntryType>{EntryType::Directory}));
+}
+
+TEST(Dq05Filters, ExtensionListAndSuffixTestUseTheSameCaseRule) {
+    EXPECT_EQ(filters::parseExtensionList("DWG, .Dxf,,copc.LAZ,"), (Strings{"dwg", "dxf", "copc.laz"}));
+    EXPECT_TRUE(filters::hasAnyExtension("A/Plan.DWG", {"dwg"}));
+    EXPECT_FALSE(filters::hasAnyExtension("dwg", {"dwg"}));
+    EXPECT_FALSE(filters::hasAnyExtension("a.dwg.bak", {"dwg"}));
+    EXPECT_FALSE(filters::hasAnyExtension("", {"dwg"}));
+}
+
+// ---------------------------------------------------------------- the checks of C arguments (c_api_util.h)
+
+TEST(Dq05CApiChecks, BlankText) {
+    EXPECT_TRUE(capi::isNullOrEmptyOrWhitespace(static_cast<const char*>(nullptr)));
+    EXPECT_TRUE(capi::isNullOrEmptyOrWhitespace(""));
+    EXPECT_TRUE(capi::isNullOrEmptyOrWhitespace(" \t\r\n"));
+    EXPECT_FALSE(capi::isNullOrEmptyOrWhitespace(" a "));
+    EXPECT_FALSE(capi::isNullOrEmptyOrWhitespace("\xc2\xa0"));  // a no-break space is not blank
+}
+
+TEST(Dq05CApiChecks, ArraysOfText) {
+    const char* ok[] = {"a", "b"};
+    const char* withBlank[] = {"a", " "};
+    const char* withNull[] = {"a", nullptr};
+
+    EXPECT_FALSE(capi::isNullOrEmptyOrWhitespace(ok, 2));
+    EXPECT_TRUE(capi::isNullOrEmptyOrWhitespace(withBlank, 2));
+    EXPECT_TRUE(capi::isNullOrEmptyOrWhitespace(withNull, 2));
+    EXPECT_TRUE(capi::isNullOrEmptyOrWhitespace(ok, 0)) << "nothing was provided";
+    EXPECT_TRUE(capi::isNullOrEmptyOrWhitespace(static_cast<const char**>(nullptr), 1));
+
+    EXPECT_FALSE(capi::hasNullStringInArray(ok, 2));
+    EXPECT_FALSE(capi::hasNullStringInArray(withBlank, 2));
+    EXPECT_TRUE(capi::hasNullStringInArray(withNull, 2));
+    EXPECT_TRUE(capi::hasNullStringInArray(nullptr, 0)) << "a NULL array is rejected even when empty";
+    EXPECT_TRUE(capi::hasNullStringInArray(ok, -1));
+
+    EXPECT_TRUE(capi::isValidArrayParam(ok, 2));
+    EXPECT_TRUE(capi::isValidArrayParam(nullptr, 0));
+    EXPECT_FALSE(capi::isValidArrayParam(nullptr, 1));
+    EXPECT_FALSE(capi::isValidArrayParam(ok, -1));
+}
+
+TEST(Dq05CApiChecks, StringParameters) {
+    EXPECT_TRUE(capi::isValidStringParam(""));
+    EXPECT_FALSE(capi::isValidStringParam(nullptr));
+    EXPECT_TRUE(capi::isValidNonEmptyStringParam(" "));  // whitespace is accepted here
+    EXPECT_FALSE(capi::isValidNonEmptyStringParam(""));
+    EXPECT_FALSE(capi::isValidNonEmptyStringParam(nullptr));
+}
+
+TEST(Dq05CApiChecks, WriteStringCopiesIntoMemoryForDDBFree) {
+    char* out = nullptr;
+    capi::writeString(&out, "hello");
+    ASSERT_NE(out, nullptr);
+    EXPECT_STREQ(out, "hello");
+    std::free(out);
+
+    capi::writeString(nullptr, "ignored");  // a NULL output is skipped
+
+    char* empty = nullptr;
+    capi::writeString(&empty, "");
+    ASSERT_NE(empty, nullptr);
+    EXPECT_STREQ(empty, "");
+    std::free(empty);
 }
 
 // ---------------------------------------------------------------- hashes

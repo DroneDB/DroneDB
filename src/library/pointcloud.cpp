@@ -701,7 +701,7 @@ void buildCopc(const std::vector<std::string>& filenames, const std::string& out
             throw FSException(f + " does not exist");
 
         const EntryType type = fingerprint(io::fromUtf8(f));
-        if (type != PointCloud)
+        if (type != EntryType::PointCloud)
             throw InvalidArgsException(f + " is not a supported point cloud file");
 
         // Get point cloud info for validation

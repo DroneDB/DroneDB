@@ -217,7 +217,7 @@ CleanupResult cleanupBuild(Database* db, const std::string& outputPath) {
     {
         auto qEntries = db->query(
             "SELECT path FROM entries WHERE type <> ? ORDER BY path");
-        qEntries->bind(1, EntryType::Directory);
+        qEntries->bind(1, entryTypeValue(EntryType::Directory));
         while (qEntries->fetch()) {
             const std::string entryPath = qEntries->getText(0);
             std::error_code existsErr;

@@ -402,20 +402,20 @@ namespace ddb
                 {
                     LOGD << "PLY " << io::toUtf8(plyFile) << " is not built as a Model: "
                          << info.unsupportedTextureReason;
-                    return Generic;
+                    return EntryType::Generic;
                 }
-                return Model;
+                return EntryType::Model;
             }
             // A 3D Gaussian Splat is a vertex-only PLY carrying SH/covariance
             // attributes. Check before falling back to a plain point cloud.
             if (info.isSplat)
             {
-                return GaussianSplat;
+                return EntryType::GaussianSplat;
             }
-            return PointCloud;
+            return EntryType::PointCloud;
         }
         else
-            return Generic;
+            return EntryType::Generic;
     }
 
 }

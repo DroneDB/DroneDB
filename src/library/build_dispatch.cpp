@@ -56,7 +56,7 @@ void buildInternal(Database* db, const Entry& e, const std::string& outputPath, 
     if (outPath.empty())
         outPath = io::toUtf8(db->buildDirectory());
 
-    LOGD << "Building entry " << e.path << " type " << e.type;
+    LOGD << "Building entry " << e.path << " type " << entryTypeValue(e.type);
     cancel::throwIfCanceled();
 
     // The entry whose artifacts are built. Differs from e when e is a sidecar

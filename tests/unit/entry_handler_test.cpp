@@ -28,17 +28,17 @@ namespace {
 using namespace ddb;
 
 const std::vector<EntryType> AllBuiltinTypes = {
-    Undefined, Directory, Generic,  GeoImage, GeoRaster,   PointCloud, Image,  DroneDB, Markdown,
-    Video,     GeoVideo,  Model,    Panorama, GeoPanorama, Vector,     GaussianSplat, Tiles3D};
+    EntryType::Undefined, EntryType::Directory, EntryType::Generic,  EntryType::GeoImage, EntryType::GeoRaster,   EntryType::PointCloud, EntryType::Image,  EntryType::DroneDB, EntryType::Markdown,
+    EntryType::Video,     EntryType::GeoVideo,  EntryType::Model,    EntryType::Panorama, EntryType::GeoPanorama, EntryType::Vector,     EntryType::GaussianSplat, EntryType::Tiles3D};
 
 TEST(entryHandler, EveryBuiltinTypeHasItsHandlerAndName) {
     const std::map<EntryType, std::string> names = {
-        {Undefined, "Undefined"},     {Directory, "Directory"},   {Generic, "Generic"},
-        {GeoImage, "GeoImage"},       {GeoRaster, "GeoRaster"},   {PointCloud, "PointCloud"},
-        {Image, "Image"},             {DroneDB, "DroneDB"},       {Markdown, "Markdown"},
-        {Video, "Video"},             {GeoVideo, "GeoVideo"},     {Model, "Model"},
-        {Panorama, "Panorama"},       {GeoPanorama, "GeoPanorama"}, {Vector, "Vector"},
-        {GaussianSplat, "GaussianSplat"}, {Tiles3D, "Tiles3D"}};
+        {EntryType::Undefined, "Undefined"},     {EntryType::Directory, "Directory"},   {EntryType::Generic, "Generic"},
+        {EntryType::GeoImage, "GeoImage"},       {EntryType::GeoRaster, "GeoRaster"},   {EntryType::PointCloud, "PointCloud"},
+        {EntryType::Image, "Image"},             {EntryType::DroneDB, "DroneDB"},       {EntryType::Markdown, "Markdown"},
+        {EntryType::Video, "Video"},             {EntryType::GeoVideo, "GeoVideo"},     {EntryType::Model, "Model"},
+        {EntryType::Panorama, "Panorama"},       {EntryType::GeoPanorama, "GeoPanorama"}, {EntryType::Vector, "Vector"},
+        {EntryType::GaussianSplat, "GaussianSplat"}, {EntryType::Tiles3D, "Tiles3D"}};
 
     for (const auto t : AllBuiltinTypes) {
         SCOPED_TRACE(static_cast<int>(t));
@@ -57,8 +57,8 @@ TEST(entryHandler, EveryBuiltinTypeHasItsHandlerAndName) {
 
     EXPECT_EQ(typeToHuman(static_cast<EntryType>(29)), "?");
     EXPECT_EQ(entryHandler(static_cast<EntryType>(29)).name(), "?");
-    EXPECT_EQ(typeFromHuman("geoRASTER"), GeoRaster);
-    EXPECT_EQ(typeFromHuman("nope"), Undefined);
+    EXPECT_EQ(typeFromHuman("geoRASTER"), EntryType::GeoRaster);
+    EXPECT_EQ(typeFromHuman("nope"), EntryType::Undefined);
 
     const std::vector<std::string> expectedNames = {
         "generic", "geoimage", "georaster", "pointcloud", "image", "dronedb", "markdown", "video",
@@ -69,8 +69,8 @@ TEST(entryHandler, EveryBuiltinTypeHasItsHandlerAndName) {
 // The types isBuildableInternal() built, with their output subfolders
 TEST(entryHandler, BuildableTypesAndSubfoldersArePinned) {
     const std::map<EntryType, std::string> buildable = {
-        {PointCloud, "copc"}, {GeoRaster, "cog"},        {Model, "nxs"},
-        {Vector, "vec"},      {GaussianSplat, "gsplat"}, {Tiles3D, "3dtiles"}};
+        {EntryType::PointCloud, "copc"}, {EntryType::GeoRaster, "cog"},        {EntryType::Model, "nxs"},
+        {EntryType::Vector, "vec"},      {EntryType::GaussianSplat, "gsplat"}, {EntryType::Tiles3D, "3dtiles"}};
 
     for (const auto t : AllBuiltinTypes) {
         SCOPED_TRACE(typeToHuman(t));
@@ -81,32 +81,32 @@ TEST(entryHandler, BuildableTypesAndSubfoldersArePinned) {
     }
 
     EXPECT_EQ(buildableEntryTypes(),
-              (std::vector<EntryType>{GeoRaster, PointCloud, Model, Vector, GaussianSplat, Tiles3D}));
+              (std::vector<EntryType>{EntryType::GeoRaster, EntryType::PointCloud, EntryType::Model, EntryType::Vector, EntryType::GaussianSplat, EntryType::Tiles3D}));
 
     // A point cloud inside a legacy EPT dataset is not built
     Entry leaf;
-    leaf.type = PointCloud;
+    leaf.type = EntryType::PointCloud;
     leaf.path = "survey/ept-data/0-0-0-0.laz";
-    EXPECT_FALSE(entryHandler(PointCloud).isBuildable(leaf));
+    EXPECT_FALSE(entryHandler(EntryType::PointCloud).isBuildable(leaf));
     leaf.path = "survey/cloud.laz";
-    EXPECT_TRUE(entryHandler(PointCloud).isBuildable(leaf));
+    EXPECT_TRUE(entryHandler(EntryType::PointCloud).isBuildable(leaf));
 
     // Only Vector publishes its outputs itself
     for (const auto t : buildableEntryTypes())
-        EXPECT_EQ(entryHandler(t).usesTempFolder(), t != Vector) << typeToHuman(t);
+        EXPECT_EQ(entryHandler(t).usesTempFolder(), t != EntryType::Vector) << typeToHuman(t);
 }
 
 // supportsThumbnails() (Image, GeoImage, Panorama, GeoPanorama, GeoRaster) and the STAC thumbnail
 // asset (those plus PointCloud and GaussianSplat)
 TEST(entryHandler, ThumbnailSourcesArePinned) {
     const std::map<EntryType, ThumbnailSource> sources = {
-        {Image, ThumbnailSource::File},
-        {GeoImage, ThumbnailSource::File},
-        {Panorama, ThumbnailSource::File},
-        {GeoPanorama, ThumbnailSource::File},
-        {GeoRaster, ThumbnailSource::File},
-        {PointCloud, ThumbnailSource::BuildArtifact},
-        {GaussianSplat, ThumbnailSource::BuildArtifact}};
+        {EntryType::Image, ThumbnailSource::File},
+        {EntryType::GeoImage, ThumbnailSource::File},
+        {EntryType::Panorama, ThumbnailSource::File},
+        {EntryType::GeoPanorama, ThumbnailSource::File},
+        {EntryType::GeoRaster, ThumbnailSource::File},
+        {EntryType::PointCloud, ThumbnailSource::BuildArtifact},
+        {EntryType::GaussianSplat, ThumbnailSource::BuildArtifact}};
 
     for (const auto t : AllBuiltinTypes) {
         SCOPED_TRACE(typeToHuman(t));
@@ -119,8 +119,8 @@ TEST(entryHandler, ThumbnailSourcesArePinned) {
 
 // generateThumb() and the tilers dispatched on these suffixes before the registry
 TEST(entryHandler, ThumbnailGeneratorsAndTilerFactoriesArePinned) {
-    const ThumbnailGenerator* copc = entryHandler(PointCloud).thumbnailGenerator();
-    const ThumbnailGenerator* splat = entryHandler(GaussianSplat).thumbnailGenerator();
+    const ThumbnailGenerator* copc = entryHandler(EntryType::PointCloud).thumbnailGenerator();
+    const ThumbnailGenerator* splat = entryHandler(EntryType::GaussianSplat).thumbnailGenerator();
     ASSERT_NE(copc, nullptr);
     ASSERT_NE(splat, nullptr);
     EXPECT_EQ(findThumbnailGenerator("build/h/copc/cloud.copc.laz"), copc);
@@ -130,7 +130,7 @@ TEST(entryHandler, ThumbnailGeneratorsAndTilerFactoriesArePinned) {
     EXPECT_EQ(findThumbnailGenerator("photo.jpg"), nullptr);
     EXPECT_EQ(findThumbnailGenerator("ortho.tif"), nullptr);
 
-    const TilerFactory* copcTiles = entryHandler(PointCloud).tilerFactory();
+    const TilerFactory* copcTiles = entryHandler(EntryType::PointCloud).tilerFactory();
     ASSERT_NE(copcTiles, nullptr);
     EXPECT_EQ(findTilerFactory("build/h/copc/cloud.copc.laz"), copcTiles);
     EXPECT_EQ(findTilerFactory("ortho.tif"), nullptr);
@@ -138,11 +138,11 @@ TEST(entryHandler, ThumbnailGeneratorsAndTilerFactoriesArePinned) {
 
     for (const auto t : AllBuiltinTypes) {
         SCOPED_TRACE(typeToHuman(t));
-        EXPECT_EQ(entryHandler(t).tilesWithoutReprojection(), t == GeoRaster);
-        if (t != PointCloud && t != GaussianSplat) {
+        EXPECT_EQ(entryHandler(t).tilesWithoutReprojection(), t == EntryType::GeoRaster);
+        if (t != EntryType::PointCloud && t != EntryType::GaussianSplat) {
             EXPECT_EQ(entryHandler(t).thumbnailGenerator(), nullptr);
         }
-        if (t != PointCloud) {
+        if (t != EntryType::PointCloud) {
             EXPECT_EQ(entryHandler(t).tilerFactory(), nullptr);
         }
     }
@@ -152,23 +152,23 @@ TEST(entryHandler, ThumbnailGeneratorsAndTilerFactoriesArePinned) {
 TEST(entryHandler, ArtifactManifestIsPinned) {
     using Row = std::tuple<std::string, std::string, ArtifactKind, std::string, bool>;  // role, path, kind, index, legacy
     const std::map<EntryType, std::vector<Row>> expected = {
-        {GeoRaster, {Row{"raster.cog", "cog/cog.tif", ArtifactKind::File, "", false}}},
-        {PointCloud,
+        {EntryType::GeoRaster, {Row{"raster.cog", "cog/cog.tif", ArtifactKind::File, "", false}}},
+        {EntryType::PointCloud,
          {Row{"pointcloud.copc", "copc/cloud.copc.laz", ArtifactKind::File, "", false},
           Row{"pointcloud.ept", "ept", ArtifactKind::Directory, "ept.json", true}}},
-        {Model,
+        {EntryType::Model,
          {Row{"model.nexus", "nxs/model.nxz", ArtifactKind::File, "", false},
           Row{"model.3dtiles", "3dtiles", ArtifactKind::Directory, "tileset.json", false}}},
-        {Vector,
+        {EntryType::Vector,
          {Row{"vector.gpkg", "vec/source.gpkg", ArtifactKind::File, "", false},
           Row{"vector.mvt", "mvt", ArtifactKind::Directory, "metadata.json", false},
           Row{"vector.local", "vec/local.json", ArtifactKind::File, "", false}}},
-        {GaussianSplat,
+        {EntryType::GaussianSplat,
          {Row{"gsplat.lod", "gsplat/model.rad", ArtifactKind::File, "", false},
           Row{"gsplat.spz", "gsplat/model.spz", ArtifactKind::File, "", false},
           Row{"gsplat.bounds", "gsplat/bounds.json", ArtifactKind::File, "", false},
           Row{"gsplat.georef", "gsplat/georef.json", ArtifactKind::File, "", false}}},
-        {Tiles3D, {Row{"model.3dtiles", "3dtiles", ArtifactKind::Directory, "tileset.json", false}}}};
+        {EntryType::Tiles3D, {Row{"model.3dtiles", "3dtiles", ArtifactKind::Directory, "tileset.json", false}}}};
 
     for (const auto t : AllBuiltinTypes) {
         SCOPED_TRACE(typeToHuman(t));
@@ -182,16 +182,16 @@ TEST(entryHandler, ArtifactManifestIsPinned) {
     }
 
     // The folders a build of the type owns
-    EXPECT_EQ(entryHandler(Vector).artifactFolders(), (std::vector<std::string>{"vec", "mvt"}));
-    EXPECT_EQ(entryHandler(PointCloud).artifactFolders(), (std::vector<std::string>{"copc"}));
-    EXPECT_EQ(entryHandler(Model).artifactFolders(), (std::vector<std::string>{"nxs", "3dtiles"}));
+    EXPECT_EQ(entryHandler(EntryType::Vector).artifactFolders(), (std::vector<std::string>{"vec", "mvt"}));
+    EXPECT_EQ(entryHandler(EntryType::PointCloud).artifactFolders(), (std::vector<std::string>{"copc"}));
+    EXPECT_EQ(entryHandler(EntryType::Model).artifactFolders(), (std::vector<std::string>{"nxs", "3dtiles"}));
 }
 
 TEST(entryHandler, SidecarRulesArePinned) {
-    EXPECT_EQ(entryHandler(Vector).sidecarExtensions(),
+    EXPECT_EQ(entryHandler(EntryType::Vector).sidecarExtensions(),
               (std::vector<std::string>{"cpg", "dbf", "shx", "prj"}));
     for (const auto t : AllBuiltinTypes) {
-        if (t != Vector) {
+        if (t != EntryType::Vector) {
             EXPECT_TRUE(entryHandler(t).sidecarRules().empty()) << typeToHuman(t);
         }
     }
@@ -212,28 +212,28 @@ TEST(entryHandler, CompletenessRules) {
 
     // Folder types: an empty folder is incomplete, any non-empty file completes it
     fs::create_directories(base / "cog");
-    EXPECT_FALSE(complete(GeoRaster));
+    EXPECT_FALSE(complete(EntryType::GeoRaster));
     writeFile(base / "cog" / "whatever.tif", "x");
-    EXPECT_TRUE(complete(GeoRaster));
+    EXPECT_TRUE(complete(EntryType::GeoRaster));
 
     // Vector: source.gpkg and (metadata.json or local.json)
     writeFile(base / "vec" / "source.gpkg", "x");
-    EXPECT_FALSE(complete(Vector));
+    EXPECT_FALSE(complete(EntryType::Vector));
     writeFile(base / "vec" / "local.json", "{}");
-    EXPECT_TRUE(complete(Vector));
+    EXPECT_TRUE(complete(EntryType::Vector));
 
     // Gaussian Splat: model.rad; Tiles3D: tileset.json
     writeFile(base / "gsplat" / "model.spz", "x");
-    EXPECT_FALSE(complete(GaussianSplat));
+    EXPECT_FALSE(complete(EntryType::GaussianSplat));
     writeFile(base / "gsplat" / "model.rad", "x");
-    EXPECT_TRUE(complete(GaussianSplat));
+    EXPECT_TRUE(complete(EntryType::GaussianSplat));
     fs::create_directories(base / "3dtiles");
-    EXPECT_FALSE(complete(Tiles3D));
+    EXPECT_FALSE(complete(EntryType::Tiles3D));
     writeFile(base / "3dtiles" / "tileset.json", "{}");
-    EXPECT_TRUE(complete(Tiles3D));
+    EXPECT_TRUE(complete(EntryType::Tiles3D));
 
     // Not built: never complete
-    EXPECT_FALSE(complete(Image));
+    EXPECT_FALSE(complete(EntryType::Image));
 }
 
 TEST(entryHandler, ExtensionsBelongToOneType) {
@@ -335,7 +335,7 @@ TEST(entryHandler, FakeTypeIsDetectedParsedAndBuiltWithoutAnyOtherChange) {
     // Unregistered again: the files are Generic and the entries are no longer buildable
     EXPECT_EQ(findEntryHandler(FakeType), nullptr);
     EXPECT_EQ(typeToHuman(FakeType), "?");
-    EXPECT_EQ(fingerprint(fx.root / "a.ddbfake"), Generic);
+    EXPECT_EQ(fingerprint(fx.root / "a.ddbfake"), EntryType::Generic);
     std::string subfolder;
     EXPECT_FALSE(isBuildable(fx.db.get(), "a.ddbfake", subfolder));
 }
@@ -343,13 +343,13 @@ TEST(entryHandler, FakeTypeIsDetectedParsedAndBuiltWithoutAnyOtherChange) {
 // The extension table fingerprint() used to spell out, now declared by the handlers
 TEST(entryHandler, ExtensionsArePinned) {
     const std::map<EntryType, std::vector<std::string>> expected = {
-        {Markdown, {"md"}},
-        {PointCloud, {"laz", "las", "e57", "pts", "xyz"}},
-        {GaussianSplat, {"spz", "splat", "ksplat"}},
-        {Model, {"obj", "ply", "gltf", "glb"}},
-        {Tiles3D, {"3tz"}},
-        {Vector, {"geojson", "dxf", "dwg", "shp", "shz", "fgb", "topojson", "kml", "kmz", "gpkg"}},
-        {Image, {"jpg", "jpeg", "dng", "tif", "tiff", "png", "gif", "webp", "mp4", "mov", "webm", "m4v", "avi",
+        {EntryType::Markdown, {"md"}},
+        {EntryType::PointCloud, {"laz", "las", "e57", "pts", "xyz"}},
+        {EntryType::GaussianSplat, {"spz", "splat", "ksplat"}},
+        {EntryType::Model, {"obj", "ply", "gltf", "glb"}},
+        {EntryType::Tiles3D, {"3tz"}},
+        {EntryType::Vector, {"geojson", "dxf", "dwg", "shp", "shz", "fgb", "topojson", "kml", "kmz", "gpkg"}},
+        {EntryType::Image, {"jpg", "jpeg", "dng", "tif", "tiff", "png", "gif", "webp", "mp4", "mov", "webm", "m4v", "avi",
                  "mkv"}}};
     for (const auto t : AllBuiltinTypes) {
         const auto it = expected.find(t);
@@ -357,8 +357,8 @@ TEST(entryHandler, ExtensionsArePinned) {
             << typeToHuman(t);
     }
 
-    EXPECT_EQ(findEntryHandlerByExtension("a/b/notes.MD"), findEntryHandler(Markdown));
-    EXPECT_EQ(findEntryHandlerByExtension("photo.JPG"), findEntryHandler(Image));
+    EXPECT_EQ(findEntryHandlerByExtension("a/b/notes.MD"), findEntryHandler(EntryType::Markdown));
+    EXPECT_EQ(findEntryHandlerByExtension("photo.JPG"), findEntryHandler(EntryType::Image));
     EXPECT_EQ(findEntryHandlerByExtension("noext"), nullptr);
     EXPECT_EQ(findEntryHandlerByExtension(".md"), nullptr);  // a hidden file, no extension
     EXPECT_EQ(findEntryHandlerByExtension("archive.zip"), nullptr);
@@ -369,32 +369,32 @@ TEST(entryHandler, FingerprintByExtension) {
     TestArea ta(TEST_NAME, true);
     const auto file = [&](const std::string& name) { return writeFile(ta.getFolder() / name, "x"); };
 
-    EXPECT_EQ(fingerprint(file("readme.md")), Markdown);
-    EXPECT_EQ(fingerprint(file("cloud.LAZ")), PointCloud);
-    EXPECT_EQ(fingerprint(file("model.obj")), Model);
-    EXPECT_EQ(fingerprint(file("city.3tz")), Tiles3D);
-    EXPECT_EQ(fingerprint(file("roads.shp")), Vector);
-    EXPECT_EQ(fingerprint(file("roads.dbf")), Generic);
-    EXPECT_EQ(fingerprint(file("splat.ksplat")), GaussianSplat);
-    EXPECT_EQ(fingerprint(file("noext")), Generic);
+    EXPECT_EQ(fingerprint(file("readme.md")), EntryType::Markdown);
+    EXPECT_EQ(fingerprint(file("cloud.LAZ")), EntryType::PointCloud);
+    EXPECT_EQ(fingerprint(file("model.obj")), EntryType::Model);
+    EXPECT_EQ(fingerprint(file("city.3tz")), EntryType::Tiles3D);
+    EXPECT_EQ(fingerprint(file("roads.shp")), EntryType::Vector);
+    EXPECT_EQ(fingerprint(file("roads.dbf")), EntryType::Generic);
+    EXPECT_EQ(fingerprint(file("splat.ksplat")), EntryType::GaussianSplat);
+    EXPECT_EQ(fingerprint(file("noext")), EntryType::Generic);
     // Unreadable content: the Image handler falls back to Image, a broken .ply to Generic
-    EXPECT_EQ(fingerprint(file("photo.png")), Image);
-    EXPECT_EQ(fingerprint(file("broken.ply")), Generic);
+    EXPECT_EQ(fingerprint(file("photo.png")), EntryType::Image);
+    EXPECT_EQ(fingerprint(file("broken.ply")), EntryType::Generic);
 }
 
 TEST(entryHandler, ScopedHandlerPutsBackTheOneItReplaced) {
-    const EntryHandler* original = findEntryHandler(Markdown);
+    const EntryHandler* original = findEntryHandler(EntryType::Markdown);
     ASSERT_NE(original, nullptr);
     {
         class Notes : public EntryHandler {
           public:
-            Notes() : EntryHandler(Markdown, "Notes") {}
+            Notes() : EntryHandler(EntryType::Markdown, "Notes") {}
         };
         ScopedEntryHandler replaced(std::make_unique<Notes>());
-        EXPECT_EQ(typeToHuman(Markdown), "Notes");
+        EXPECT_EQ(typeToHuman(EntryType::Markdown), "Notes");
     }
-    EXPECT_EQ(findEntryHandler(Markdown), original);
-    EXPECT_EQ(typeToHuman(Markdown), "Markdown");
+    EXPECT_EQ(findEntryHandler(EntryType::Markdown), original);
+    EXPECT_EQ(typeToHuman(EntryType::Markdown), "Markdown");
 }
 
 // ---- Sidecars ------------------------------------------------------------------------------
@@ -404,9 +404,9 @@ TEST(entryHandler, ScopedHandlerPutsBackTheOneItReplaced) {
 TEST(entryHandler, SidecarMainExtensionMatchesAnyLetterCase) {
     IndexFixture fx(TEST_NAME);
     const std::string mainHash(64, 'a');
-    insertEntry(fx.db.get(), "maps/roads.Shp", mainHash, Vector);
-    insertEntry(fx.db.get(), "maps/roads.dbf", std::string(64, 'b'), Generic);
-    insertEntry(fx.db.get(), "maps/Roads.shx", std::string(64, 'c'), Generic);  // other stem
+    insertEntry(fx.db.get(), "maps/roads.Shp", mainHash, EntryType::Vector);
+    insertEntry(fx.db.get(), "maps/roads.dbf", std::string(64, 'b'), EntryType::Generic);
+    insertEntry(fx.db.get(), "maps/Roads.shx", std::string(64, 'c'), EntryType::Generic);  // other stem
     writeFile(fx.db->buildDirectory() / mainHash / "vec" / "source.gpkg", "x");
     writeFile(fx.db->buildDirectory() / mainHash / "mvt" / "metadata.json", "x");
 
@@ -429,7 +429,7 @@ TEST(entryHandler, SidecarMainsLookupOrder) {
     IndexFixture fx(TEST_NAME);
     for (const auto* p : {"d/x.Shp", "d/x.SHP", "d/x.shp", "d/x.DWG", "d/x.dxf", "d/x.sHp", "d/x.prj",
                           "d/x.backup.shp", "d/X.shp", "d/x.shp.zip", "d/xy.shp", "e/x.shp", "d/x.shpx"})
-        insertEntry(fx.db.get(), p, std::string(64, 'a'), Vector);
+        insertEntry(fx.db.get(), p, std::string(64, 'a'), EntryType::Vector);
 
     EXPECT_EQ(findSidecarMains(fx.db.get(), "d/x.prj"),
               (std::vector<std::string>{"d/x.shp", "d/x.SHP", "d/x.Shp", "d/x.sHp", "d/x.dxf", "d/x.DWG"}));

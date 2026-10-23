@@ -30,15 +30,15 @@ namespace
     {
         explicit Fixture(const std::string &name) : IndexFixture(name)
         {
-            insert("ortho.tif", H_ORTHO, GeoRaster);     // complete build
-            insert("dsm.tif", H_DSM, GeoRaster);         // never built
-            insert("cloud.laz", H_CLOUD, PointCloud);    // empty stub left by an aborted build
-            insert("ept-data/x.laz", std::string(64, 'e'), PointCloud); // not buildable
-            insert("photo.jpg", std::string(64, 'f'), GeoImage);
-            insert("roads.shp", H_ROADS, Vector);        // complete build
-            insert("roads.dbf", std::string(64, '1'), Generic); // dependency of roads.shp
-            insert("orphan.dbf", std::string(64, '2'), Generic); // dependency without main file
-            insert("dir", "", Directory);
+            insert("ortho.tif", H_ORTHO, EntryType::GeoRaster);     // complete build
+            insert("dsm.tif", H_DSM, EntryType::GeoRaster);         // never built
+            insert("cloud.laz", H_CLOUD, EntryType::PointCloud);    // empty stub left by an aborted build
+            insert("ept-data/x.laz", std::string(64, 'e'), EntryType::PointCloud); // not buildable
+            insert("photo.jpg", std::string(64, 'f'), EntryType::GeoImage);
+            insert("roads.shp", H_ROADS, EntryType::Vector);        // complete build
+            insert("roads.dbf", std::string(64, '1'), EntryType::Generic); // dependency of roads.shp
+            insert("orphan.dbf", std::string(64, '2'), EntryType::Generic); // dependency without main file
+            insert("dir", "", EntryType::Directory);
 
             writeFile(db->buildDirectory() / H_ORTHO / "cog" / "cog.tif", "x");
             fs::create_directories(db->buildDirectory() / H_CLOUD / "copc");

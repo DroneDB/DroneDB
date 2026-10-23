@@ -253,7 +253,7 @@ namespace ddb
         s << "Path: " << this->path << "\n";
         if (this->hash != "")
             s << "SHA256: " << this->hash << "\n";
-        s << "Type: " << typeToHuman(this->type) << " (" << this->type << ")" << "\n";
+        s << "Type: " << typeToHuman(this->type) << " (" << entryTypeValue(this->type) << ")" << "\n";
 
         for (json::iterator it = this->properties.begin(); it != this->properties.end(); ++it)
         {

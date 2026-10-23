@@ -58,22 +58,22 @@ struct ManifestFixture : IndexFixture {
     fs::path build;
 
     explicit ManifestFixture(const std::string& name) : IndexFixture(name), build(fs::absolute(db->buildDirectory())) {
-        insertEntry(db.get(), "ortho.tif", H_COG, GeoRaster);
-        insertEntry(db.get(), "dsm.tif", H_DSM, GeoRaster);
-        insertEntry(db.get(), "cloud.laz", H_COPC, PointCloud);
-        insertEntry(db.get(), "old.laz", H_EPT, PointCloud);
-        insertEntry(db.get(), "roads.shp", H_ROADS, Vector);
-        insertEntry(db.get(), "roads.dbf", std::string(64, 'e'), Generic);
-        insertEntry(db.get(), "plan.dxf", H_CAD, Vector);
-        insertEntry(db.get(), "pending.shp", H_PENDING, Vector);
-        insertEntry(db.get(), "busy.tif", H_BUSY, GeoRaster);
-        insertEntry(db.get(), "stale.tif", H_STALE, GeoRaster);
-        insertEntry(db.get(), "splat.spz", H_SPLAT, GaussianSplat);
-        insertEntry(db.get(), "model.obj", H_MODEL, Model);
-        insertEntry(db.get(), "city.3tz", H_TILES, Tiles3D);
-        insertEntry(db.get(), "photo.jpg", std::string(64, '1'), GeoImage);
-        insertEntry(db.get(), "orphan.dbf", std::string(64, '2'), Generic);
-        insertEntry(db.get(), "dir", "", Directory);
+        insertEntry(db.get(), "ortho.tif", H_COG, EntryType::GeoRaster);
+        insertEntry(db.get(), "dsm.tif", H_DSM, EntryType::GeoRaster);
+        insertEntry(db.get(), "cloud.laz", H_COPC, EntryType::PointCloud);
+        insertEntry(db.get(), "old.laz", H_EPT, EntryType::PointCloud);
+        insertEntry(db.get(), "roads.shp", H_ROADS, EntryType::Vector);
+        insertEntry(db.get(), "roads.dbf", std::string(64, 'e'), EntryType::Generic);
+        insertEntry(db.get(), "plan.dxf", H_CAD, EntryType::Vector);
+        insertEntry(db.get(), "pending.shp", H_PENDING, EntryType::Vector);
+        insertEntry(db.get(), "busy.tif", H_BUSY, EntryType::GeoRaster);
+        insertEntry(db.get(), "stale.tif", H_STALE, EntryType::GeoRaster);
+        insertEntry(db.get(), "splat.spz", H_SPLAT, EntryType::GaussianSplat);
+        insertEntry(db.get(), "model.obj", H_MODEL, EntryType::Model);
+        insertEntry(db.get(), "city.3tz", H_TILES, EntryType::Tiles3D);
+        insertEntry(db.get(), "photo.jpg", std::string(64, '1'), EntryType::GeoImage);
+        insertEntry(db.get(), "orphan.dbf", std::string(64, '2'), EntryType::Generic);
+        insertEntry(db.get(), "dir", "", EntryType::Directory);
 
         writeFile(build / H_COG / "cog" / "cog.tif", "x");
         writeFile(build / H_COPC / "copc" / "cloud.copc.laz", "x");
@@ -304,7 +304,7 @@ TEST(BuildManifest, Json) {
     EXPECT_EQ(out[0]["path"], "ortho.tif");
     EXPECT_EQ(out[0]["exists"], true);
     EXPECT_EQ(out[0]["hash"], H_COG);
-    EXPECT_EQ(out[0]["type"], static_cast<int>(GeoRaster));
+    EXPECT_EQ(out[0]["type"], static_cast<int>(EntryType::GeoRaster));
     const json& cog = out[0]["build"];
     EXPECT_EQ(cog["state"], "complete");
     EXPECT_EQ(cog["root"], io::toUtf8(fx.build / H_COG));

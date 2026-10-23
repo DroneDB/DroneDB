@@ -60,9 +60,9 @@ namespace
         explicit Dataset(const std::string &name, const fs::path &folder = "ds", bool recreate = true)
             : index(name, folder, recreate), root(index.root.string()), build(fs::absolute(index.db->buildDirectory()))
         {
-            insertEntry(index.db.get(), "ortho.tif", H_COG, GeoRaster);
-            insertEntry(index.db.get(), "pending.shp", H_PENDING, Vector);
-            insertEntry(index.db.get(), "a.txt", std::string(64, 'c'), Generic);
+            insertEntry(index.db.get(), "ortho.tif", H_COG, EntryType::GeoRaster);
+            insertEntry(index.db.get(), "pending.shp", H_PENDING, EntryType::Vector);
+            insertEntry(index.db.get(), "a.txt", std::string(64, 'c'), EntryType::Generic);
         }
 
         ~Dataset() { DDBReleaseConnections(root.c_str(), nullptr); }

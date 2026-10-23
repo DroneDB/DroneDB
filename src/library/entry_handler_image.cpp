@@ -345,7 +345,7 @@ std::string imageTypeName(EntryType type) {
         case EntryType::GeoPanorama: return "GeoPanorama";
         case EntryType::Video: return "Video";
         case EntryType::GeoVideo: return "GeoVideo";
-        default: throw InvalidArgsException("Not an image or video type: " + std::to_string(type));
+        default: throw InvalidArgsException("Not an image or video type: " + std::to_string(entryTypeValue(type)));
     }
 }
 

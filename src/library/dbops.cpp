@@ -589,7 +589,7 @@ namespace
     {
         // Fields (a whole-number mtime is stored as an integer, like before)
         updateQ->bind(1, e.hash);
-        updateQ->bind(2, e.type);
+        updateQ->bind(2, entryTypeValue(e.type));
         updateQ->bind(3, e.properties.dump());
         updateQ->bind(4, mtime);
         updateQ->bind(5, static_cast<long long>(e.size));
@@ -659,7 +659,7 @@ namespace
 
         for (const Entry &entry : baseEntries)
         {
-            if (entry.type != Directory)
+            if (entry.type != EntryType::Directory)
                 outputEntries.emplace_back(Entry(entry));
             else
             {
@@ -1028,7 +1028,7 @@ namespace
             if (actuallyInsert) {
                 insertQ->bind(1, ci.entry.path);
                 insertQ->bind(2, ci.entry.hash);
-                insertQ->bind(3, ci.entry.type);
+                insertQ->bind(3, entryTypeValue(ci.entry.type));
                 insertQ->bind(4, ci.entry.properties.dump());
                 insertQ->bind(5, ci.observedMtime);
                 insertQ->bind(6, static_cast<long long>(ci.entry.size));
@@ -1429,10 +1429,10 @@ namespace
             for (const auto &[path, type] : targets)
             {
                 const auto cnt = exact.run({"path = ?", {path}}, deletedPaths, deletedHashes);
-                if (cnt > 0 && type != Directory && isPrjPath(path))
+                if (cnt > 0 && type != EntryType::Directory && isPrjPath(path))
                     removedPrj.push_back(path);
 
-                if (type == Directory && !path.empty())
+                if (type == EntryType::Directory && !path.empty())
                     descendants.run(descendantsPredicate(path, "path"), deletedPaths, deletedHashes);
             }
 
@@ -1727,7 +1727,7 @@ namespace
         // Always exclude directories from rescan because they do not contain file metadata
         // that can be re-parsed. This check is defensive and prevents potential issues
         // even if validation fails at higher layers (C API, CLI).
-        q->bind(1, EntryType::Directory);
+        q->bind(1, entryTypeValue(EntryType::Directory));
 
         // Bind types if specified
         for (size_t i = 0; i < types.size(); i++)
@@ -1824,8 +1824,8 @@ namespace
         }
 
         auto q = db->query(sql);
-        q->bind(1, EntryType::Directory);
-        q->bind(2, EntryType::DroneDB);
+        q->bind(1, entryTypeValue(EntryType::Directory));
+        q->bind(2, entryTypeValue(EntryType::DroneDB));
         for (unsigned long i = 0; i < files.size(); i++)
         {
             q->bind(3 + i, files[i]);
@@ -2086,16 +2086,16 @@ namespace
         {
 
             // If source is a folder we cannot move it on anything that exists (only new path)
-            if (sourceEntry.type == Directory)
+            if (sourceEntry.type == EntryType::Directory)
             {
-                if (destEntry.type != Directory)
+                if (destEntry.type != EntryType::Directory)
                     throw InvalidArgsException("Cannot move a folder on a file");
 
                 throw InvalidArgsException("Cannot move a directory on another directory");
                 // If source is a file we cannot move it on a folder
             }
 
-            if (destEntry.type == Directory)
+            if (destEntry.type == EntryType::Directory)
                 throw InvalidArgsException("Cannot move a file on a directory");
         }
 
@@ -2104,7 +2104,7 @@ namespace
         Transaction tx(db, Transaction::Mode::Immediate);
 
         // If we are moving a file
-        if (sourceEntry.type != Directory)
+        if (sourceEntry.type != EntryType::Directory)
         {
 
             if (destExists)

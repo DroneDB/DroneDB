@@ -98,7 +98,7 @@ namespace
     long countDataEntries(Database *db)
     {
         auto q = db->query("SELECT COUNT(*) FROM entries WHERE type <> ?");
-        q->bind(1, EntryType::Directory);
+        q->bind(1, entryTypeValue(EntryType::Directory));
         long n = 0;
         if (q->fetch())
             n = q->getInt64(0);
