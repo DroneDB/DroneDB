@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "volume.h"
+#include "stringutil.h"
 #include "mathutil.h"
 #include "exceptions.h"
 #include "gdal_raii.h"
@@ -39,9 +40,7 @@ enum class BaseMethod {
 };
 
 BaseMethod parseMethod(const std::string &raw) {
-    std::string m;
-    m.reserve(raw.size());
-    for (char c : raw) m.push_back(static_cast<char>(std::tolower((unsigned char)c)));
+    const std::string m = str::toLowerCopy(raw);
     if (m == "lowest_perimeter" || m.empty()) return BaseMethod::LowestPerimeter;
     if (m == "average_perimeter") return BaseMethod::AveragePerimeter;
     if (m == "best_fit") return BaseMethod::BestFit;

@@ -4,7 +4,7 @@
 
 #include "basicgeometry.h"
 #include "exceptions.h"
-#include "utils.h"
+#include <format>
 
 namespace ddb
 {
@@ -13,7 +13,7 @@ namespace ddb
     {
         if (empty())
             return "";
-        return utils::stringFormat("POINT Z (%lf %lf %lf)", points[0].x, points[0].y, points[0].z);
+        return std::format("POINT Z ({:f} {:f} {:f})", points[0].x, points[0].y, points[0].z);
     }
 
     json BasicPointGeometry::toGeoJSON() const

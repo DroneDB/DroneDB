@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "gdal_raii.h"
+#include "stringutil.h"
 #include "gdal_priv.h"
 #include "gdal_utils.h"
 #include "ogrsf_frmts.h"
@@ -39,9 +40,7 @@ namespace ddb
 
         FormatSpec resolveOutputFormat(const std::string &fmt)
         {
-            std::string f = fmt;
-            std::transform(f.begin(), f.end(), f.begin(),
-                           [](unsigned char c) { return std::tolower(c); });
+            const std::string f = str::toLowerCopy(fmt);
             if (f.empty() || f == "geojson" || f == "json")
                 return {"GeoJSON", "geojson", "RFC7946=YES"};
             if (f == "gml")

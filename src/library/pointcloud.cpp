@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "pointcloud.h"
+#include "stringutil.h"
 
 #include <algorithm>
 #include <fstream>
@@ -47,15 +48,11 @@ struct TextReaderConfig {
 
 // Trim leading/trailing whitespace and surrounding double quotes from a token
 static std::string trimAndUnquote(const std::string& token) {
-    size_t start = token.find_first_not_of(" \t\r\n");
-    size_t end = token.find_last_not_of(" \t\r\n");
-    if (start == std::string::npos)
-        return "";
-    std::string trimmed = token.substr(start, end - start + 1);
+    std::string_view trimmed = str::trimView(token, " \t\r\n");
     // Strip surrounding double quotes if present
     if (trimmed.size() >= 2 && trimmed.front() == '"' && trimmed.back() == '"')
         trimmed = trimmed.substr(1, trimmed.size() - 2);
-    return trimmed;
+    return std::string(trimmed);
 }
 
 // Check if a line is empty or contains only whitespace
@@ -77,7 +74,7 @@ static bool isSingleInteger(const std::string& line) {
     if (trimmed.empty())
         return false;
     for (char c : trimmed) {
-        if (!std::isdigit(static_cast<unsigned char>(c)))
+        if (!str::isDigitChar(c))
             return false;
     }
     return true;
@@ -86,7 +83,7 @@ static bool isSingleInteger(const std::string& line) {
 // Check if a line contains any alphabetic characters (indicator of a header line)
 static bool containsAlpha(const std::string& line) {
     for (char c : line) {
-        if (std::isalpha(static_cast<unsigned char>(c)))
+        if (str::isAlphaChar(c))
             return true;
     }
     return false;
@@ -94,24 +91,14 @@ static bool containsAlpha(const std::string& line) {
 
 // Split a line by a specific separator. For space, any run of whitespace is one separator.
 static std::vector<std::string> splitBySeparator(const std::string& line, char sep) {
+    // Whitespace-separated: split on runs of spaces/tabs
+    const std::vector<std::string> tokens = sep == ' ' ? str::splitWhitespace(line) : str::split(line, sep);
+
     std::vector<std::string> result;
-    if (sep == ' ') {
-        // Whitespace-separated: split on runs of spaces/tabs
-        std::istringstream iss(line);
-        std::string token;
-        while (iss >> token) {
-            std::string t = trimAndUnquote(token);
-            if (!t.empty())
-                result.push_back(t);
-        }
-    } else {
-        std::string token;
-        std::istringstream iss(line);
-        while (std::getline(iss, token, sep)) {
-            std::string t = trimAndUnquote(token);
-            if (!t.empty())
-                result.push_back(t);
-        }
+    for (const std::string& token : tokens) {
+        std::string t = trimAndUnquote(token);
+        if (!t.empty())
+            result.push_back(std::move(t));
     }
     return result;
 }
@@ -178,7 +165,7 @@ static bool looksLikeHeaderLine(const std::string& line) {
     // Exclude scientific-notation-only alpha (e/E) followed/preceded by digits or signs
     // Conservative: if the line contains any letter other than e/E, it's a header
     for (char c : line) {
-        if (std::isalpha(static_cast<unsigned char>(c)) && c != 'e' && c != 'E')
+        if (str::isAlphaChar(c) && c != 'e' && c != 'E')
             return true;
     }
     // Only e/E present: could be scientific notation, not a header
@@ -632,15 +619,7 @@ inline void updateGlobalBounds(const PointCloudInfo& info,
 }
 
 bool isCopcPath(const std::string& filename) {
-    if (filename.size() < 9) return false;
-    // Lowercase comparison of trailing ".copc.laz"
-    static const std::string suffix = ".copc.laz";
-    if (filename.size() < suffix.size()) return false;
-    const std::string tail = filename.substr(filename.size() - suffix.size());
-    std::string lc(tail.size(), '\0');
-    std::transform(tail.begin(), tail.end(), lc.begin(),
-                   [](unsigned char c) { return std::tolower(c); });
-    return lc == suffix;
+    return str::endsWithCI(filename, ".copc.laz");
 }
 
 // PDAL-based COPC builder: classic readers.las -> writers.copc pipeline.

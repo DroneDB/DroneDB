@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "registry.h"
+#include "stringutil.h"
 
 #include <boolinq/boolinq.h>
 
@@ -45,7 +46,7 @@ Registry::Registry(const std::string& url, bool sslVerify) {
     Url u;
 
     // Always append https if no protocol is specified
-    if (urlStr.find("https://") != 0 && urlStr.find("http://") != 0) {
+    if (!urlStr.starts_with("https://") && !urlStr.starts_with("http://")) {
         u.fromString("https://" + urlStr);
     } else {
         u.fromString(urlStr);
@@ -298,7 +299,7 @@ void Registry::downloadFiles(const std::string& organization,
         io::assureFolderExists(tempFile.parent_path());
 
         // Joins path list
-        const auto paths = utils::join(files);
+        const auto paths = str::join(files);
 
         // LOGD << "Paths = " << paths;
 

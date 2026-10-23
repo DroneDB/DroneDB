@@ -6,6 +6,8 @@
 #include <mutex>
 #include <ogrsf_frmts.h>
 #include "dsmservice.h"
+#include "stringutil.h"
+#include "mathutil.h"
 #include "exceptions.h"
 #include "gdal_raii.h"
 #include "utils.h"
@@ -43,7 +45,7 @@ std::optional<float> DSMService::lookupCache(double latitude, double longitude)
             if (it.second.data.empty()) continue;
 
             float elevation = it.second.getElevation(latitude, longitude);
-            if (!it.second.hasNodata || !utils::sameFloat(elevation, it.second.nodata))
+            if (!it.second.hasNodata || !ddb::sameFloat(elevation, it.second.nodata))
             {
                 return elevation;
             }
@@ -139,11 +141,11 @@ std::optional<std::string> buildDsmServiceUrl(const std::string &urlTemplate,
         return std::nullopt;
 
     std::string url = urlTemplate;
-    utils::stringReplace(url, "{west}", std::to_string(west));
-    utils::stringReplace(url, "{south}", std::to_string(south));
-    utils::stringReplace(url, "{east}", std::to_string(east));
-    utils::stringReplace(url, "{north}", std::to_string(north));
-    utils::stringReplace(url, "{key}", apiKey);
+    str::replaceAll(url, "{west}", std::to_string(west));
+    str::replaceAll(url, "{south}", std::to_string(south));
+    str::replaceAll(url, "{east}", std::to_string(east));
+    str::replaceAll(url, "{north}", std::to_string(north));
+    str::replaceAll(url, "{key}", apiKey);
     return url;
 }
 
@@ -152,7 +154,7 @@ std::string dsmServiceApiKey()
     const char *value = std::getenv(DSM_SERVICE_KEY_ENV);
     std::string key = value != nullptr ? std::string(value) : std::string();
     // A key pasted with a trailing newline or spaces would end up in the URL
-    utils::trim(key);
+    str::trim(key);
     return key;
 }
 
@@ -205,7 +207,7 @@ std::string DSMService::loadFromNetwork(double latitude, double longitude, const
     catch (const NetException &e)
     {
         std::string message = e.what();
-        utils::stringReplace(message, *url, redactedUrl);
+        str::replaceAll(message, *url, redactedUrl);
         throw NetException(message);
     }
 

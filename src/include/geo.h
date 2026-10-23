@@ -6,6 +6,7 @@
 
 #include <iostream>
 #include "utils.h"
+#include "mathutil.h"
 #include "ddb_export.h"
 
 namespace ddb
@@ -34,7 +35,7 @@ namespace ddb
         {
             double px = this->x;
             double py = this->y;
-            double radians = utils::deg2rad(degrees);
+            double radians = ddb::deg2rad(degrees);
             x = cos(radians) * (px - center.x) - sin(radians) * (py - center.y) + center.x;
             y = sin(radians) * (px - center.x) + cos(radians) * (py - center.y) + center.y;
         }

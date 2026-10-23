@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "gtest/gtest.h"
+#include "stringutil.h"
 
 #include "align.h"
 #include "constants.h"
@@ -385,30 +386,30 @@ namespace
     {
         static_assert(kPi == 3.14159265358979323846);
         EXPECT_EQ(kPi, std::acos(-1.0));
-        EXPECT_EQ(utils::deg2rad(180.0), std::acos(-1.0));
-        EXPECT_EQ(utils::rad2deg(std::acos(-1.0)), 180.0);
+        EXPECT_EQ(ddb::deg2rad(180.0), std::acos(-1.0));
+        EXPECT_EQ(ddb::rad2deg(std::acos(-1.0)), 180.0);
     }
 
-    // Characterisation: utils::toLower/toUpper passed a plain char (negative for UTF-8
+    // Characterisation: str::toLower/toUpper passed a plain char (negative for UTF-8
     // bytes) to std::tolower/toupper, which is undefined behaviour. glibc tolerates negative
     // values, so this passes before the fix too; MSVC debug builds assert.
     TEST(Dq02Defects, Target_CaseHelpersLeaveHighBitBytesUnchanged)
     {
         const std::string utf8 = "Caf\xc3\xa9 \xc3\x80" "BC \xe2\x82\xac" "9";  // "Café ÀBC €9"
         std::string lower = utf8;
-        utils::toLower(lower);
+        str::toLower(lower);
         EXPECT_EQ(lower, "caf\xc3\xa9 \xc3\x80" "bc \xe2\x82\xac" "9");
         std::string upper = utf8;
-        utils::toUpper(upper);
+        str::toUpper(upper);
         EXPECT_EQ(upper, "CAF\xc3\xa9 \xc3\x80" "BC \xe2\x82\xac" "9");
 
-        EXPECT_EQ(utils::toUpperChar('\xc3'), '\xc3');
-        EXPECT_EQ(utils::toLowerChar('\x80'), '\x80');
-        EXPECT_FALSE(utils::isDigitChar('\xd9'));
-        EXPECT_TRUE(utils::isDigitChar('7'));
+        EXPECT_EQ(str::toUpperChar('\xc3'), '\xc3');
+        EXPECT_EQ(str::toLowerChar('\x80'), '\x80');
+        EXPECT_FALSE(str::isDigitChar('\xd9'));
+        EXPECT_TRUE(str::isDigitChar('7'));
 
         std::string padded = "\xc2\xa0 x \xc2\xa0";  // NBSP bytes are not ASCII spaces
-        utils::trim(padded);
+        str::trim(padded);
         EXPECT_EQ(padded, "\xc2\xa0 x \xc2\xa0");
     }
     // std::rand() was called from several threads (thumbs, tiler cache cleanup, geoproject

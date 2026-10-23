@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "dbops.h"
+#include "stringutil.h"
 
 #include "build.h"
 #include "entry_handler.h"
@@ -454,7 +455,7 @@ namespace
                     // common shell expectation that `**` matches "zero or more
                     // directories", also run the non-recursive variant with
                     // the leading `**/` stripped and merge the results.
-                    if (recursive && pattern.rfind("**/", 0) == 0)
+                    if (recursive && pattern.starts_with("**/"))
                     {
                         const std::string topLevel = pattern.substr(3);
                         if (!topLevel.empty())
@@ -1202,10 +1203,10 @@ namespace
         std::string res(str);
 
         // TAKES INTO ACCOUNT PATHS THAT CONTAINS EVERY SORT OF STUFF
-        utils::stringReplace(res, "/", "//");
-        utils::stringReplace(res, "%", "/%");
-        // utils::stringReplace(res, "_", "/_");
-        utils::stringReplace(res, "*", "%");
+        str::replaceAll(res, "/", "//");
+        str::replaceAll(res, "%", "/%");
+        // str::replaceAll(res, "_", "/_");
+        str::replaceAll(res, "*", "%");
 
         return res;
     }

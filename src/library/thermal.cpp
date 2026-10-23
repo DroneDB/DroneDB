@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "thermal.h"
+#include "stringutil.h"
 #include "exif.h"
 #include "exceptions.h"
 #include "gdal_raii.h"
@@ -43,14 +44,14 @@ static const std::vector<std::pair<std::string, std::string>> thermalSensorPatte
 bool isThermalImageFromExif(const std::string &make, const std::string &model) {
     std::string makeLower = make;
     std::string modelLower = model;
-    utils::toLower(makeLower);
-    utils::toLower(modelLower);
+    str::toLower(makeLower);
+    str::toLower(modelLower);
 
     for (const auto &pattern : thermalSensorPatterns) {
         std::string patMake = pattern.first;
         std::string patModel = pattern.second;
-        utils::toLower(patMake);
-        utils::toLower(patModel);
+        str::toLower(patMake);
+        str::toLower(patModel);
 
         if (makeLower.find(patMake) != std::string::npos) {
             if (patModel.empty()) return true;
@@ -523,10 +524,10 @@ bool isThermalImage(const std::string &filePath) {
                     allMeta += s;
                     allMeta += ' ';
                 }
-                utils::toLower(allMeta);
+                str::toLower(allMeta);
 
                 std::string unitLower = unitStr;
-                utils::toLower(unitLower);
+                str::toLower(unitLower);
 
                 // DEM negative signals - reject early
                 static const std::vector<std::string> demKeywords = {

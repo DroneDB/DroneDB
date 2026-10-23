@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "registryutils.h"
+#include "stringutil.h"
 
 #include "url.h"
 
@@ -31,8 +32,8 @@ namespace ddb
                                           bool useInsecureRegistry)
     {
         auto t = tag;
-        utils::trim(t);
-        utils::toLower(t);
+        str::trim(t);
+        str::toLower(t);
 
         // Remove trailing slashes
         while (!t.empty() && t.back() == '/')
@@ -71,7 +72,7 @@ namespace ddb
         else
         {
             // TODO: should we validate the URL more thoroughly?
-            const bool hasProto = t.find("http://") == 0 || t.find("https://") == 0;
+            const bool hasProto = t.starts_with("http://") || t.starts_with("https://");
             if (hasProto)
                 res.registryUrl = t;
             else
@@ -81,8 +82,8 @@ namespace ddb
 
         // Check that we haven't parsed the server part into the
         // organization name
-        if (res.organization.find("http://") == 0 ||
-            res.organization.find("https://") == 0)
+        if (res.organization.starts_with("http://") ||
+            res.organization.starts_with("https://"))
         {
             throw InvalidArgsException("Invalid tag: " + tag +
                                        " missing dataset name");

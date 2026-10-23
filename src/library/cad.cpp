@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "cad.h"
+#include "stringutil.h"
 
 #include <cctype>
 #include <cmath>
@@ -32,13 +33,6 @@ namespace ddb
             constexpr auto kIdleTimeout = std::chrono::seconds(60);
             const std::string kDxfAdvice =
                 ". Export the drawing as DXF from your CAD software and upload that.";
-
-            std::string lowerExt(const fs::path &p)
-            {
-                auto ext = io::toUtf8(p.extension());
-                utils::toLower(ext);
-                return ext;
-            }
 
             std::chrono::milliseconds maxRuntime()
             {
@@ -84,23 +78,14 @@ namespace ddb
                 return out;
             }
 
-            std::string trim(std::string s)
-            {
-                while (!s.empty() && (s.back() == '\r' || std::isspace(static_cast<unsigned char>(s.back()))))
-                    s.pop_back();
-                size_t i = 0;
-                while (i < s.size() && std::isspace(static_cast<unsigned char>(s[i]))) i++;
-                return s.substr(i);
-            }
-
             bool parseCode(const std::string &line, int &code)
             {
-                const std::string t = trim(line);
+                const std::string t = str::trimCopy(line);
                 if (t.empty()) return false;
                 size_t i = (t[0] == '-') ? 1 : 0;
                 if (i >= t.size()) return false;
                 for (size_t j = i; j < t.size(); j++)
-                    if (!std::isdigit(static_cast<unsigned char>(t[j]))) return false;
+                    if (!str::isDigitChar(t[j])) return false;
                 code = std::atoi(t.c_str());
                 return true;
             }
@@ -130,13 +115,12 @@ namespace ddb
 
         bool isCadFile(const fs::path &p)
         {
-            const auto ext = lowerExt(p);
-            return ext == ".dxf" || ext == ".dwg";
+            return io::Path(p).checkExtension({"dxf", "dwg"});
         }
 
         bool isDwgFile(const fs::path &p)
         {
-            return lowerExt(p) == ".dwg";
+            return io::Path(p).checkExtension({"dwg"});
         }
 
         fs::path findDwg2DxfBinary()
@@ -151,7 +135,7 @@ namespace ddb
             in.read(magic, sizeof(magic));
             const auto got = in.gcount();
             if (got < 6 || magic[0] != 'A' || magic[1] != 'C' ||
-                !std::isdigit(static_cast<unsigned char>(magic[2])))
+                !str::isDigitChar(magic[2]))
                 throw AppException(io::toUtf8(dwg.filename()) + " is not a valid DWG file");
 
             const std::string code(magic, 6);
@@ -283,7 +267,7 @@ namespace ddb
                         inGeoData = false;
                         geoDataDone = !geoXml.empty() || geoType >= 0;
                     }
-                    const std::string v = trim(value);
+                    const std::string v = str::trimCopy(value);
                     if (v == "SECTION") { expectSectionName = true; continue; }
                     if (v == "ENDSEC")
                     {
@@ -302,7 +286,7 @@ namespace ddb
 
                 if (expectSectionName && code == 2)
                 {
-                    const std::string v = trim(value);
+                    const std::string v = str::trimCopy(value);
                     section = v == "HEADER" ? Section::Header : v == "OBJECTS" ? Section::Objects : Section::Other;
                     expectSectionName = false;
                     continue;
@@ -310,20 +294,20 @@ namespace ddb
 
                 if (section == Section::Header)
                 {
-                    if (code == 9) expectInsUnits = trim(value) == "$INSUNITS";
+                    if (code == 9) expectInsUnits = str::trimCopy(value) == "$INSUNITS";
                     else if (code == 70 && expectInsUnits)
                     {
-                        info.insUnits = std::atoi(trim(value).c_str());
+                        info.insUnits = std::atoi(str::trimCopy(value).c_str());
                         expectInsUnits = false;
                     }
                 }
                 else if (inGeoData)
                 {
-                    const auto number = [&value]() { return std::atof(trim(value).c_str()); };
+                    const auto number = [&value]() { return std::atof(str::trimCopy(value).c_str()); };
                     switch (code)
                     {
-                    case 70: if (geoType < 0) geoType = std::atoi(trim(value).c_str()); break;
-                    case 90: info.geoDataVersion = std::atoi(trim(value).c_str()); break;
+                    case 70: if (geoType < 0) geoType = std::atoi(str::trimCopy(value).c_str()); break;
+                    case 90: info.geoDataVersion = std::atoi(str::trimCopy(value).c_str()); break;
                     case 3: case 301: geoXml += decodeCaret(value); break;
                     case 10: info.geoDesignX = number(); break;
                     case 20: info.geoDesignY = number(); break;
@@ -426,7 +410,7 @@ namespace ddb
                 const auto conversion = wkt.find("CONVERSION[");
                 // PROJCRS["name",...: the name is the first quoted string
                 const auto nameEnd = wkt.find('"', 9);
-                if (wkt.rfind("PROJCRS[\"", 0) != 0 || geog == std::string::npos ||
+                if (!wkt.starts_with("PROJCRS[\"") || geog == std::string::npos ||
                     conversion == std::string::npos || nameEnd == std::string::npos)
                     return std::nullopt;
                 const std::string name = wkt.substr(8, nameEnd - 7);
@@ -467,7 +451,7 @@ namespace ddb
 
         std::string prjContent(const std::string &crs)
         {
-            const std::string input = trim(crs);
+            const std::string input = str::trimCopy(crs);
             if (input == "local")
                 return "LOCAL_CS[\"Drawing\"]";
 
@@ -588,7 +572,7 @@ namespace ddb
                 std::ifstream in(*prj, std::ios::binary);
                 std::stringstream ss;
                 ss << in.rdbuf();
-                const std::string content = trim(ss.str());
+                const std::string content = str::trimCopy(ss.str());
                 OGRSpatialReference s;
                 if (content.empty() ||
                     (s.SetFromUserInput(content.c_str()) != OGRERR_NONE &&

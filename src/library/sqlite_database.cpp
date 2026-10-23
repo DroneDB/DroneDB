@@ -6,6 +6,7 @@
 #include <string>
 
 #include "cancellation.h"
+#include "stringutil.h"
 #include "logger.h"
 #include "exceptions.h"
 #include "sqlite_database.h"
@@ -141,7 +142,7 @@ namespace ddb
             if (sqlDef.size() > 0 && sqlDef.find(columnDefBefore + ",") != std::string::npos)
             {
                 // Old definition
-                utils::stringReplace(sqlDef, columnDefBefore, columnDefAfter);
+                str::replaceAll(sqlDef, columnDefBefore, columnDefAfter);
 
                 this->setWritableSchema(true);
                 q = this->query("UPDATE sqlite_master SET sql = ? WHERE type = 'table' and name = ?");

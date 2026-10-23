@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "tile_encoder.h"
+#include "stringutil.h"
 
 #include <algorithm>
 #include <cstring>
@@ -96,7 +97,7 @@ namespace ddb
             for (const auto &o : imageCreationOptions(options))
                 opts.AddString(o.c_str());
             // A failed encode leaves no partial /vsimem/ file
-            VsiMemFile partial(path.rfind("/vsimem/", 0) == 0 ? path : std::string());
+            VsiMemFile partial(path.starts_with("/vsimem/") ? path : std::string());
             const auto out = adoptDataset(
                 GDALCreateCopy(drv, path.c_str(), datasetHandle(mem), FALSE, opts.List(), nullptr, nullptr));
             if (!out)
@@ -173,7 +174,7 @@ namespace ddb
     ImageFormat parseImageFormat(const std::string &format)
     {
         std::string f = format;
-        utils::toLower(f);
+        str::toLower(f);
         if (f.empty() || f == "png" || f == "image/png")
             return ImageFormat::Png;
         if (f == "jpeg" || f == "jpg" || f == "image/jpeg" || f == "image/jpg")

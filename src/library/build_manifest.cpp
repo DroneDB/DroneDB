@@ -319,7 +319,7 @@ bool isInsideArtifact(const EntryHandler& handler, const std::string& path) {
     return std::any_of(artifacts.begin(), artifacts.end(), [&](const BuildArtifact& a) {
         if (a.kind == ArtifactKind::File)
             return path == a.path;
-        return path.size() > a.path.size() + 1 && path.compare(0, a.path.size(), a.path) == 0 &&
+        return path.size() > a.path.size() + 1 && path.starts_with(a.path) &&
                path[a.path.size()] == '/';
     });
 }

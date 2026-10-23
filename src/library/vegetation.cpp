@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "vegetation.h"
+#include "stringutil.h"
 #include "sensorprofile.h"
 #include "thermal.h"
 #include "exceptions.h"
@@ -160,18 +161,18 @@ BandFilter VegetationEngine::autoDetectFilter(const std::string &rasterPath) con
         // Map band names to filter
         for (const auto &bi : det.bands) {
             std::string nameLC = bi.name;
-            utils::toLower(nameLC);
+            str::toLower(nameLC);
 
             if (nameLC.find("red edge") != std::string::npos ||
                 nameLC.find("rededge") != std::string::npos) {
                 if (bf.Re < 0) bf.Re = bi.index - 1; // 0-based
-            } else if (nameLC == "red" || nameLC.find("red") == 0) {
+            } else if (nameLC.starts_with("red")) {
                 if (bf.R < 0) bf.R = bi.index - 1;
-            } else if (nameLC == "green" || nameLC.find("green") == 0) {
+            } else if (nameLC.starts_with("green")) {
                 if (bf.G < 0) bf.G = bi.index - 1;
-            } else if (nameLC == "blue" || nameLC.find("blue") == 0) {
+            } else if (nameLC.starts_with("blue")) {
                 if (bf.B < 0) bf.B = bi.index - 1;
-            } else if (nameLC == "nir" || nameLC.find("nir") == 0) {
+            } else if (nameLC.starts_with("nir")) {
                 if (bf.N < 0) bf.N = bi.index - 1;
             } else if (nameLC == "lwir" || nameLC.find("thermal") != std::string::npos) {
                 if (bf.T < 0) bf.T = bi.index - 1;

@@ -8,6 +8,7 @@
 // pending_markers.cpp and the clean-up in build_cleanup.cpp.
 
 #include "build.h"
+#include "stringutil.h"
 
 #include <algorithm>
 #include <optional>
@@ -44,18 +45,18 @@ std::vector<std::string> findSidecarMains(const std::string& path, const PrefixL
     };
     std::vector<Ranked> mains;
     for (auto& candidate : siblings(prefix)) {
-        if (candidate.size() <= prefix.size() || candidate.compare(0, prefix.size(), prefix) != 0)
+        if (candidate.size() <= prefix.size() || !candidate.starts_with(prefix))
             continue;
         const std::string ext = candidate.substr(prefix.size());
         if (ext.find_first_of("./") != std::string::npos)
             continue;
         std::string lower = ext;
-        utils::toLower(lower);
+        str::toLower(lower);
         const auto it = std::find(mainExtensions.begin(), mainExtensions.end(), lower);
         if (it == mainExtensions.end())
             continue;
         std::string upper = ext;
-        utils::toUpper(upper);
+        str::toUpper(upper);
         const int spelling = ext == lower ? 0 : ext == upper ? 1 : 2;
         mains.push_back({static_cast<size_t>(it - mainExtensions.begin()), spelling, std::move(candidate)});
     }

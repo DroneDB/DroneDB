@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "include/command.h"
+#include "stringutil.h"
 #include "logger.h"
 #include "utils.h"
 #include "exceptions.h"
@@ -96,7 +97,7 @@ namespace cmd
                 {
                     std::string k = item.key();
                     if (k.length() > 0)
-                        k[0] = ddb::utils::toUpperChar(k[0]);
+                        k[0] = ddb::str::toUpperChar(k[0]);
                     std::string v = item.value().dump();
                     if (item.value().is_string())
                         v = item.value().get<std::string>();
@@ -113,7 +114,7 @@ namespace cmd
             {
                 std::string k = item.key();
                 if (k.length() > 0)
-                    k[0] = ddb::utils::toUpperChar(k[0]);
+                    k[0] = ddb::str::toUpperChar(k[0]);
                 std::string v = item.value().dump();
                 if (item.value().is_string())
                     v = item.value().get<std::string>();

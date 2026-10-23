@@ -51,6 +51,11 @@ namespace ddb
             double mtime = 0; // seconds, with the sub-second part the file system keeps
         };
 
+        // The extension of p as the handlers declare it: UTF-8, lowercase (ASCII), without the
+        // leading dot ("" when there is none). The one extension rule of libddb (Path::checkExtension
+        // is a comparison with it): "a/B.TIF" gives "tif", "x.copc.laz" gives "laz".
+        DDB_DLL std::string lowerExtension(const fs::path &p);
+
         class Path
         {
             fs::path p;

@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "cancellation.h"
+#include "stringutil.h"
 #include "gdal_raii.h"
 #include "gdal_priv.h"
 #include "gdal_utils.h"
@@ -408,7 +409,7 @@ namespace ddb
         IndexFormula resolveIndex(const std::string &n)
         {
             std::string u = n;
-            utils::toUpper(u);
+            str::toUpper(u);
             if (u == "NDVI") return {5, 1, 0, 0, 0.0};        // (NIR-R)/(NIR+R)
             if (u == "NDRE") return {5, 4, 0, 0, 0.0};        // (NIR-RE)/(NIR+RE)
             if (u == "NDWI") return {2, 5, 0, 0, 0.0};        // (G-NIR)/(G+NIR)

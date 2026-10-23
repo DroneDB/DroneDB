@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "build_layout.h"
+#include "stringutil.h"
 #include "cad.h"
 #include "cancellation.h"
 #include "gdal_inc.h"
@@ -67,13 +68,6 @@ namespace ddb
             if (systemError == ENOSPC)
                 throw RetryableBuildException(description, RetryableBuildReason::NoSpaceOnDevice);
             throw AppException(description);
-        }
-
-        std::string toLowerExt(const std::string &input)
-        {
-            auto ext = io::toUtf8(io::fromUtf8(input).extension());
-            ddb::utils::toLower(ext);
-            return ext;
         }
 
         // Compute total feature count and union envelope (in WGS84) for MAXZOOM.
@@ -314,11 +308,10 @@ namespace ddb
         bool isValidMvtLayerName(const std::string &name)
         {
             if (name.empty()) return false;
-            if (std::isdigit(static_cast<unsigned char>(name[0]))) return false;
+            if (str::isDigitChar(name[0])) return false;
             for (char c : name)
             {
-                const unsigned char uc = static_cast<unsigned char>(c);
-                if (!(std::isalnum(uc) || c == '_')) return false;
+                if (!(str::isAlnumChar(c) || c == '_')) return false;
             }
             return true;
         }
@@ -329,11 +322,10 @@ namespace ddb
             out.reserve(name.size());
             for (char c : name)
             {
-                const unsigned char uc = static_cast<unsigned char>(c);
-                out.push_back((std::isalnum(uc) || c == '_') ? c : '_');
+                out.push_back((str::isAlnumChar(c) || c == '_') ? c : '_');
             }
             if (out.empty()) out = "layer";
-            if (std::isdigit(static_cast<unsigned char>(out[0])))
+            if (str::isDigitChar(out[0]))
                 out.insert(out.begin(), '_');
             return out;
         }
@@ -673,12 +665,12 @@ namespace ddb
         if (!fs::exists(io::fromUtf8(input)))
             throw FSException(input + " does not exist");
 
-        const auto ext = toLowerExt(input);
-        if (ext == ".shp")
+        const auto ext = io::lowerExtension(io::fromUtf8(input));
+        if (ext == "shp")
         {
             deps.push_back(io::toUtf8(io::fromUtf8(input).replace_extension(".shx").filename()));
         }
-        else if (ext == ".shx")
+        else if (ext == "shx")
         {
             deps.push_back(io::toUtf8(io::fromUtf8(input).replace_extension(".shp").filename()));
         }

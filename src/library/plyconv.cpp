@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "plyconv.h"
+#include "stringutil.h"
 
 #include <algorithm>
 #include <cctype>
@@ -381,7 +382,7 @@ namespace ddb
         {
             std::string n = io::toUtf8(path.filename());
             for (auto &c : n)
-                if (std::isspace(static_cast<unsigned char>(c)))
+                if (str::isSpaceChar(c))
                     c = '_';
             return n;
         }
@@ -861,10 +862,7 @@ namespace ddb
         fs::path objPathFor(const std::string &outputBase)
         {
             fs::path p = io::fromUtf8(outputBase);
-            std::string ext = io::toUtf8(p.extension());
-            std::transform(ext.begin(), ext.end(), ext.begin(),
-                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-            if (ext == ".obj")
+            if (io::lowerExtension(p) == "obj")
                 return p;
             return io::fromUtf8(outputBase + ".obj");
         }

@@ -29,6 +29,7 @@
 #include <sstream>
 
 #include "entry_types.h"
+#include "stringutil.h"
 #include "utf8.h"
 #include "version.h"
 #include "mio.h"
@@ -117,17 +118,6 @@ time_t currentUnixTimestamp() {
         .count();
 }
 
-void stringReplace(std::string& str, const std::string& from, const std::string& to) {
-    if (from.empty())
-        return;
-    size_t start_pos = 0;
-    while ((start_pos = str.find(from, start_pos)) != std::string::npos) {
-        str.replace(start_pos, from.length(), to);
-        start_pos += to.length();  // In case 'to' contains 'from', like
-                                   // replacing 'x' with 'yx'
-    }
-}
-
 void sleep(int msecs) {
     std::this_thread::sleep_for(std::chrono::milliseconds(msecs));
 }
@@ -145,27 +135,6 @@ DDB_DLL std::string generateRandomString(int length) {
     return str;
 }
 
-/**
- * @brief Joins a vector of strings with a separator character
- *
- * @param vec Vector of strings to join
- * @param separator Character to place between elements
- * @return Joined string with separator between elements (no trailing separator)
- */
-std::string join(const std::vector<std::string>& vec, char separator) {
-    std::stringstream ss;
-    for (const auto& s : vec)
-        ss << s << separator;
-
-    auto paths = ss.str();
-
-    // Remove the last separator (an empty list has none: pop_back() would be undefined)
-    if (!paths.empty())
-        paths.pop_back();
-
-    return paths;
-}
-
 // Checks if path contains . or ..
 DDB_DLL bool hasDotNotation(const std::string& path) {
     std::stringstream stream(path);
@@ -178,16 +147,8 @@ DDB_DLL bool hasDotNotation(const std::string& path) {
     return false;
 }
 
-DDB_DLL bool isLowerCase(const std::string& str) {
-    for (size_t i = 0; i < str.length(); i++) {
-        if (std::isupper(static_cast<unsigned char>(str[i])))
-            return false;
-    }
-    return true;
-}
-
 DDB_DLL bool isNetworkPath(const std::string& path) {
-    return path.find("http://") == 0 || path.find("https://") == 0;
+    return path.starts_with("http://") || path.starts_with("https://");
 }
 
 cpr::Response downloadToFile(const std::string& url,
@@ -391,7 +352,7 @@ DDB_DLL std::vector<ddb::EntryType> parseEntryTypeList(const char* types, bool a
     std::stringstream ss(types);
     std::string item;
     while (std::getline(ss, item, ',')) {
-        trim(item);
+        str::trim(item);
 
         // Convert string to EntryType
         ddb::EntryType t = ddb::typeFromHuman(item);
@@ -467,7 +428,7 @@ DDB_DLL bool matchesNamePattern(const std::string& name, const std::string& patt
                 n++;
             return n;
         },
-        [](char a, char b) { return toLowerChar(a) == toLowerChar(b); });
+        [](char a, char b) { return str::toLowerChar(a) == str::toLowerChar(b); });
 }
 
 DDB_DLL std::vector<std::string> parseExtensionList(const char* extensions) {
@@ -479,7 +440,7 @@ DDB_DLL std::vector<std::string> parseExtensionList(const char* extensions) {
     std::stringstream ss(extensions);
     std::string item;
     while (std::getline(ss, item, ',')) {
-        trim(item);
+        str::trim(item);
         if (item.empty())
             continue;
 
@@ -487,7 +448,7 @@ DDB_DLL std::vector<std::string> parseExtensionList(const char* extensions) {
         if (ext.empty() || ext.find_first_of("/\\*? \t") != std::string::npos)
             throw InvalidArgsException("Invalid extension: " + item);
 
-        toLower(ext);
+        str::toLower(ext);
         result.push_back(ext);
     }
 
@@ -496,7 +457,7 @@ DDB_DLL std::vector<std::string> parseExtensionList(const char* extensions) {
 
 DDB_DLL bool hasAnyExtension(const std::string& path, const std::vector<std::string>& extensions) {
     std::string lower = path;
-    toLower(lower);
+    str::toLower(lower);
 
     for (const auto& ext : extensions) {
         // "a.dwg" matches "dwg", "x.copc.laz" matches "copc.laz" and "laz", "dwg" alone does not

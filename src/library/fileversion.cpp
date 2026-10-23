@@ -69,7 +69,7 @@ namespace ddb
 
     bool isCacheKeyUnder(const std::string &key, const std::string &prefix)
     {
-        if (prefix.empty() || key.size() < prefix.size() || key.compare(0, prefix.size(), prefix) != 0)
+        if (prefix.empty() || !key.starts_with(prefix))
             return false;
         return key.size() == prefix.size() || prefix.back() == '/' || key[prefix.size()] == '/';
     }

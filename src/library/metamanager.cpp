@@ -1,4 +1,5 @@
 #include "metamanager.h"
+#include "stringutil.h"
 #include "database.h"
 #include "mio.h"
 #include "exceptions.h"
@@ -34,7 +35,7 @@ namespace ddb
 
         if (key.empty())
             throw InvalidArgsException("Invalid empty metadata key");
-        if (!utils::isLowerCase(key))
+        if (!str::isLowerCase(key))
             throw InvalidArgsException("Metadata key must be lowercase");
 
         if (isList && key[key.length() - 1] != 's')

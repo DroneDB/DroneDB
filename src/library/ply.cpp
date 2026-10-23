@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <istream>
 #include "logger.h"
+#include "stringutil.h"
 #include "ply.h"
 #include "exceptions.h"
 #include "mio.h"
@@ -48,7 +49,7 @@ namespace ddb
             int fRestCount = 0;
             for (const auto &d : dims)
             {
-                if (d.rfind("f_rest_", 0) == 0)
+                if (d.starts_with("f_rest_"))
                     ++fRestCount;
             }
 
@@ -108,43 +109,21 @@ namespace ddb
             return any;
         }
 
-        bool isSpace(char c)
-        {
-            return c == ' ' || c == '\t' || c == '\r' || c == '\f' || c == '\v';
-        }
-
-        std::vector<std::string> tokenize(const std::string &line)
-        {
-            std::vector<std::string> tokens;
-            size_t i = 0;
-            while (i < line.size())
-            {
-                while (i < line.size() && isSpace(line[i]))
-                    ++i;
-                const size_t start = i;
-                while (i < line.size() && !isSpace(line[i]))
-                    ++i;
-                if (i > start)
-                    tokens.emplace_back(line.substr(start, i - start));
-            }
-            return tokens;
-        }
-
         // Text after the first `n` whitespace-separated tokens, trimmed.
         std::string restAfterTokens(const std::string &line, int n)
         {
             size_t i = 0;
             for (int k = 0; k < n; ++k)
             {
-                while (i < line.size() && isSpace(line[i]))
+                while (i < line.size() && str::isSpaceChar(line[i]))
                     ++i;
-                while (i < line.size() && !isSpace(line[i]))
+                while (i < line.size() && !str::isSpaceChar(line[i]))
                     ++i;
             }
-            while (i < line.size() && isSpace(line[i]))
+            while (i < line.size() && str::isSpaceChar(line[i]))
                 ++i;
             size_t end = line.size();
-            while (end > i && isSpace(line[end - 1]))
+            while (end > i && str::isSpaceChar(line[end - 1]))
                 --end;
             return line.substr(i, end - i);
         }
@@ -180,7 +159,7 @@ namespace ddb
             int i = 0;
             while (readHeaderLine(in, line, consumed, tooLong))
             {
-                const auto tokens = tokenize(line);
+                const auto tokens = str::splitWhitespace(line);
                 if (!tokens.empty())
                 {
                     const std::string &kw = tokens[0];

@@ -24,6 +24,7 @@
 #include <system_error>
 
 #include "fs.h"
+#include "stringutil.h"
 #include "mio.h"
 
 namespace ddb {
@@ -54,15 +55,10 @@ inline bool isAbsolute(const std::string& ref) {
         return false;
     if (ref[0] == '/' || ref[0] == '\\')
         return true;  // POSIX root, UNC prefix, or a root-relative Windows path
-    if (ref.size() >= 2 && std::isalpha(static_cast<unsigned char>(ref[0])) && ref[1] == ':')
+    if (ref.size() >= 2 && ddb::str::isAlphaChar(ref[0]) && ref[1] == ':')
         return true;  // drive letter ("C:\x", "C:/x", "C:x")
-    if (ref.size() >= 5) {
-        std::string scheme = ref.substr(0, 5);
-        for (auto& c : scheme)
-            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-        if (scheme == "file:")
-            return true;
-    }
+    if (ddb::str::startsWithCI(ref, "file:"))
+        return true;
     const fs::path p = io::fromUtf8(ref);
     return p.is_absolute() || p.has_root_name() || p.has_root_directory();
 }

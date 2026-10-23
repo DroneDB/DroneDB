@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "stac.h"
+#include "stringutil.h"
 #include "logger.h"
 #include "exceptions.h"
 #include "mio.h"
@@ -61,8 +62,8 @@ namespace ddb
         }
         for (char ch : input)
         {
-            char lower = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
-            if (std::isalnum(static_cast<unsigned char>(lower)))
+            const char lower = str::toLowerChar(ch);
+            if (str::isAlnumChar(lower))
             {
                 result += lower;
             }
@@ -86,9 +87,8 @@ namespace ddb
     // Get MIME type from file extension for STAC assets
     static std::string getStacMimeType(const std::string &path)
     {
-        auto ext = io::toUtf8(io::fromUtf8(path).extension());
-        std::transform(ext.begin(), ext.end(), ext.begin(),
-                       [](unsigned char c) { return std::tolower(c); });
+        // With the dot, as the table below spells its extensions
+        const auto ext = "." + io::lowerExtension(io::fromUtf8(path));
 
         // Images
         if (ext == ".jpg" || ext == ".jpeg") return "image/jpeg";

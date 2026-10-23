@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "3d.h"
+#include "stringutil.h"
 #include "logger.h"
 #include "exceptions.h"
 #include "utils.h"
@@ -236,7 +237,7 @@ static void patchMtlKtx2ToPng(const fs::path& mtlPath) {
         if (s.size() < 5)
             return false;
         std::string low = s;
-        utils::toLower(low);
+        str::toLower(low);
         return low.rfind(".ktx2") == low.size() - 5;
     };
 
@@ -252,10 +253,10 @@ static void patchMtlKtx2ToPng(const fs::path& mtlPath) {
     while (std::getline(lines, line)) {
         bool handled = false;
         for (auto* key : keys) {
-            if (line.rfind(key, 0) == 0) {
+            if (line.starts_with(key)) {
                 size_t pos = line.find_first_of(" \t");
                 std::string value = (pos == std::string::npos) ? "" : line.substr(pos + 1);
-                utils::trim(value);
+                str::trim(value);
                 if (!value.empty() && endsWithKtx2(value)) {
                     fs::path ktxPath = mtlDir / io::fromUtf8(value).lexically_normal();
                     fs::path pngPath = ktxPath;
@@ -365,11 +366,11 @@ static void exportWithAssimp(const aiScene* scene,
                         while (std::getline(lines, line)) {
                             bool handled = false;
                             for (auto* key : keys) {
-                                if (line.rfind(key, 0) == 0) {
+                                if (line.starts_with(key)) {
                                     size_t pos = line.find_first_of(" \t");
                                     if (pos != std::string::npos) {
                                         std::string value = line.substr(pos + 1);
-                                        utils::trim(value);
+                                        str::trim(value);
 
                                         // Check if it's an embedded texture reference (e.g., "*0")
                                         if (!value.empty() && value[0] == '*') {

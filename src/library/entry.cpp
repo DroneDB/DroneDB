@@ -4,6 +4,8 @@
 #include <exiv2/exiv2.hpp>
 #include <cmath>
 #include "dbops.h"
+#include "stringutil.h"
+#include "mathutil.h"
 #include "entry.h"
 #include "entry_handler.h"
 
@@ -123,14 +125,14 @@ namespace ddb
         }
 
         // From drone to...
-        double bottom = relAltitude * tan(utils::deg2rad(90.0 + pitch) - 0.5 * yView);
-        double top = relAltitude * tan(utils::deg2rad(90.0 + pitch) + 0.5 * yView);
-        double left = relAltitude * tan(utils::deg2rad(cameraOri.roll) - 0.5 * xView);
-        double right = relAltitude * tan(utils::deg2rad(cameraOri.roll) + 0.5 * xView);
+        double bottom = relAltitude * tan(ddb::deg2rad(90.0 + pitch) - 0.5 * yView);
+        double top = relAltitude * tan(ddb::deg2rad(90.0 + pitch) + 0.5 * yView);
+        double left = relAltitude * tan(ddb::deg2rad(cameraOri.roll) - 0.5 * xView);
+        double right = relAltitude * tan(ddb::deg2rad(cameraOri.roll) + 0.5 * xView);
         // ... of picture.
 
-        //    LOGD << "xView: " << utils::rad2deg(xView);
-        //    LOGD << "yView: " << utils::rad2deg(yView);
+        //    LOGD << "xView: " << ddb::rad2deg(xView);
+        //    LOGD << "yView: " << ddb::rad2deg(yView);
         //    LOGD << "bottom: " << bottom;
         //    LOGD << "top: " << top;
         //    LOGD << "left: " << left;
@@ -257,7 +259,7 @@ namespace ddb
         {
             std::string k = it.key();
             if (k.length() > 0)
-                k[0] = utils::toUpperChar(k[0]);
+                k[0] = str::toUpperChar(k[0]);
 
             if (k == "Bands")
             {

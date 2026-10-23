@@ -3,10 +3,12 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "cancellation.h"
+#include "stringutil.h"
 #include "dbops.h"
 #include "geoproject.h"
 #include "mio.h"
 #include "utils.h"
+#include <format>
 #include "gdal_raii.h"
 
 namespace ddb
@@ -113,7 +115,7 @@ namespace ddb
                         // Validate percentage format before conversion
                         std::string percentValue = outsize.substr(0, outsize.length() - 1);
                         for (char c : percentValue)
-                            if (!utils::isDigitChar(c) && c != '.' && c != '-' && c != '+')
+                            if (!str::isDigitChar(c) && c != '.' && c != '-' && c != '+')
                                 throw InvalidArgsException("Invalid percentage format: " + outsize);
 
                         double value = std::stod(percentValue);
@@ -126,7 +128,7 @@ namespace ddb
                     {
                         // Validate numeric format before conversion
                         for (char c : outsize)
-                            if (!utils::isDigitChar(c) && c != '.' && c != '-' && c != '+')
+                            if (!str::isDigitChar(c) && c != '.' && c != '-' && c != '+')
                                 throw InvalidArgsException("Invalid numeric format: " + outsize);
 
                         double value = std::stod(outsize);
@@ -134,7 +136,7 @@ namespace ddb
                             throw InvalidArgsException("Size must be positive: " + outsize);
 
                         ratio = value / width;
-                        targs.AddString(utils::toStr(ratio * height).c_str());
+                        targs.AddString(std::format("{:.6f}", ratio * height).c_str());
                     }
                 } catch (const std::invalid_argument& e) {
                     throw InvalidArgsException("Invalid size format: " + outsize);
@@ -152,26 +154,26 @@ namespace ddb
             targs.AddString("-gcp");
             targs.AddString("0");
             targs.AddString("0");
-            targs.AddString(utils::toStr(ul.x, 13).c_str());
-            targs.AddString(utils::toStr(ul.y, 13).c_str());
+            targs.AddString(std::format("{:.13f}", ul.x).c_str());
+            targs.AddString(std::format("{:.13f}", ul.y).c_str());
 
             targs.AddString("-gcp");
             targs.AddString("0");
             targs.AddString(std::to_string(scaledHeight).c_str());
-            targs.AddString(utils::toStr(ll.x, 13).c_str());
-            targs.AddString(utils::toStr(ll.y, 13).c_str());
+            targs.AddString(std::format("{:.13f}", ll.x).c_str());
+            targs.AddString(std::format("{:.13f}", ll.y).c_str());
 
             targs.AddString("-gcp");
             targs.AddString(std::to_string(scaledWidth).c_str());
             targs.AddString(std::to_string(scaledHeight).c_str());
-            targs.AddString(utils::toStr(lr.x, 13).c_str());
-            targs.AddString(utils::toStr(lr.y, 13).c_str());
+            targs.AddString(std::format("{:.13f}", lr.x).c_str());
+            targs.AddString(std::format("{:.13f}", lr.y).c_str());
 
             targs.AddString("-gcp");
             targs.AddString(std::to_string(scaledWidth).c_str());
             targs.AddString("0");
-            targs.AddString(utils::toStr(ur.x, 13).c_str());
-            targs.AddString(utils::toStr(ur.y, 13).c_str());
+            targs.AddString(std::format("{:.13f}", ur.x).c_str());
+            targs.AddString(std::format("{:.13f}", ur.y).c_str());
 
             const GdalOptionsPtr<GDALTranslateOptions> psOptions(
                 GDALTranslateOptionsNew(targs.List(), nullptr));

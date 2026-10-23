@@ -185,7 +185,7 @@ static void removeOrphanTempFolders(const fs::path& hashDir, CleanupResult& resu
 
         const std::string subfolder = name.substr(0, pos);
         if (subfolder == Tiles3DBuildSubfolder) {
-            if (name.rfind(tilesTrashPrefix, 0) == 0)
+            if (name.starts_with(tilesTrashPrefix))
                 tilesTrashFolders.push_back(it->path());
             else
                 tilesTempFolders.push_back(it->path());

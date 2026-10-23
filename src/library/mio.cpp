@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "mio.h"
+#include "stringutil.h"
 #include "utils.h"
 
 #include <cerrno>
@@ -17,21 +18,25 @@ namespace ddb
     namespace io
     {
 
-        bool Path::checkExtension(const std::initializer_list<std::string> &matches) const
+        std::string lowerExtension(const fs::path &p)
         {
             std::string ext = io::toUtf8(p.extension());
-            if (ext.size() < 1)
-                return false;
-            std::string extLowerCase = ext.substr(1, ext.length());
-            utils::toLower(extLowerCase);
+            if (ext.empty())
+                return ext;
+            ext.erase(0, 1);
+            str::toLower(ext);
+            return ext;
+        }
 
-            for (auto &m : matches)
-            {
-                std::string ext = m;
-                utils::toLower(ext);
-                if (ext == extLowerCase)
+        bool Path::checkExtension(const std::initializer_list<std::string> &matches) const
+        {
+            const std::string ext = lowerExtension(p);
+            if (ext.empty())
+                return false;
+
+            for (const auto &m : matches)
+                if (str::iequals(m, ext))
                     return true;
-            }
             return false;
         }
 
@@ -283,7 +288,7 @@ namespace ddb
             // by a separator: /foo is not a parent of /foobar)
             bool isBelow(const std::string &parent, const std::string &child)
             {
-                return child.size() > parent.size() && child.rfind(parent, 0) == 0 &&
+                return child.size() > parent.size() && child.starts_with(parent) &&
                        (parent.back() == fs::path::preferred_separator ||
                         child[parent.size()] == fs::path::preferred_separator);
             }

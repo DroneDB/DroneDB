@@ -229,7 +229,7 @@ namespace ddb::zip
                     if (excl[excl.length() - 1] == '/')
                     {
                         const auto folderName = excl.substr(0, excl.length() - 1);
-                        if (relPath.generic().find(folderName) == 0)
+                        if (relPath.generic().starts_with(folderName))
                         {
                             exclude = true;
                             i.disable_recursion_pending();

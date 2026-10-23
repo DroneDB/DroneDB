@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "3d.h"
+#include "stringutil.h"
 
 #include <algorithm>
 #include <cctype>
@@ -26,33 +27,27 @@ namespace ddb {
 namespace {
 // Check if file extension is GLTF or GLB
 bool isGltfFile(const fs::path& filePath) {
-    std::string ext = io::toUtf8(filePath.extension());
-    utils::toLower(ext);
-    return ext == ".gltf" || ext == ".glb";
+    return io::Path(filePath).checkExtension({"gltf", "glb"});
 }
 
 // Check if file extension is GLB (binary format with embedded resources)
 bool isGlbFile(const fs::path& filePath) {
-    std::string ext = io::toUtf8(filePath.extension());
-    utils::toLower(ext);
-    return ext == ".glb";
+    return io::Path(filePath).checkExtension({"glb"});
 }
 
 // Check if file extension is PLY
 bool isPlyFile(const fs::path& filePath) {
-    std::string ext = io::toUtf8(filePath.extension());
-    utils::toLower(ext);
-    return ext == ".ply";
+    return io::Path(filePath).checkExtension({"ply"});
 }
 
 // Helper to check if a URI is a data URI (embedded base64 content)
 bool isDataUri(const std::string& uri) {
-    return uri.find("data:") == 0;
+    return uri.starts_with("data:");
 }
 
 // Helper to check if a URI is absolute (external resource)
 bool isAbsoluteUri(const std::string& uri) {
-    return uri.find("http://") == 0 || uri.find("https://") == 0 || uri.find("file://") == 0;
+    return uri.starts_with("http://") || uri.starts_with("https://") || uri.starts_with("file://");
 }
 
 // Helper to validate and sanitize a relative path (prevent path traversal attacks)
@@ -209,13 +204,12 @@ json readGltfDocument(const std::string& gltf) {
         throw FSException(gltf + " does not exist");
 
     // Determine if GLTF (text JSON) or GLB (binary)
-    std::string ext = io::toUtf8(io::fromUtf8(gltf).extension());
-    utils::toLower(ext);
+    const std::string ext = io::lowerExtension(io::fromUtf8(gltf));
 
     json gltfJson;
 
     try {
-        if (ext == ".gltf") {
+        if (ext == "gltf") {
             // Read as text JSON file
             std::ifstream file(io::fromUtf8(gltf));
             if (!file.is_open())
@@ -226,7 +220,7 @@ json readGltfDocument(const std::string& gltf) {
             } catch (const json::exception& e) {
                 throw AppException("Invalid GLTF file: JSON parse error: " + std::string(e.what()));
             }
-        } else if (ext == ".glb") {
+        } else if (ext == "glb") {
             // Read binary GLB and extract JSON chunk
             gltfJson = readGlbJson(gltf);
         } else {
@@ -247,9 +241,7 @@ json readGltfDocument(const std::string& gltf) {
 }
 
 bool isHttpUri(const std::string& uri) {
-    std::string scheme = uri.substr(0, 8);
-    utils::toLower(scheme);
-    return scheme.rfind("http://", 0) == 0 || scheme.rfind("https://", 0) == 0;
+    return str::startsWithCI(uri, "http://") || str::startsWithCI(uri, "https://");
 }
 
 // Validate the file dependencies (buffer and image URIs) of a glTF or GLB.
@@ -340,7 +332,7 @@ std::string splitKeyword(const std::string& line, std::string& rest) {
     const std::string keyword =
         line.substr(begin, end == std::string::npos ? std::string::npos : end - begin);
     rest = end == std::string::npos ? "" : line.substr(end);
-    utils::trim(rest);
+    str::trim(rest);
     return keyword;
 }
 
@@ -374,7 +366,7 @@ std::optional<std::string> parseTextureArgument(const std::string& args) {
 
     size_t i = 0;
     while (i < tokens.size() && tokens[i].size() > 1 && tokens[i][0] == '-' &&
-           std::isalpha(static_cast<unsigned char>(tokens[i][1]))) {
+           str::isAlphaChar(tokens[i][1])) {
         const std::string opt = tokens[i++];
         if (opt == "-type" || opt == "-imfchan") {
             if (i < tokens.size())

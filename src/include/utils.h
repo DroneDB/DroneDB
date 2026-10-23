@@ -27,8 +27,6 @@
 #include "logger.h"
 #include "mathutil.h"
 
-#define F_EPSILON 0.000001
-
 #ifdef WIN32
 #include <direct.h>   // _getcwd
 #include <windows.h>  //GetModuleFileNameW
@@ -44,102 +42,6 @@
 
 namespace ddb {
 namespace utils {
-
-// <cctype> functions take an int that must be EOF or representable as unsigned char: a
-// plain (signed) char with the high bit set (any UTF-8 lead/continuation byte) is undefined
-// behaviour. These wrappers do the unsigned char conversion once.
-static inline char toLowerChar(char c) {
-    return static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-}
-
-static inline char toUpperChar(char c) {
-    return static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-}
-
-static inline bool isDigitChar(char c) {
-    return std::isdigit(static_cast<unsigned char>(c)) != 0;
-}
-
-static inline bool isSpaceChar(char c) {
-    return std::isspace(static_cast<unsigned char>(c)) != 0;
-}
-
-static inline void toLower(std::string& s) {
-    std::transform(s.begin(), s.end(), s.begin(), toLowerChar);
-}
-
-static inline void toUpper(std::string& s) {
-    std::transform(s.begin(), s.end(), s.begin(), toUpperChar);
-}
-
-static inline void ltrim(std::string& s) {
-    s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](char ch) { return !isSpaceChar(ch); }));
-}
-
-static inline void rtrim(std::string& s) {
-    s.erase(std::find_if(s.rbegin(), s.rend(), [](char ch) { return !isSpaceChar(ch); }).base(),
-            s.end());
-}
-
-static inline void trim(std::string& s) {
-    ltrim(s);
-    rtrim(s);
-}
-
-static inline double rad2deg(double rad) {
-    return (rad * 180.0) / kPi;
-}
-
-static inline double deg2rad(double deg) {
-    return (deg * kPi) / 180.0;
-}
-
-static inline bool sameFloat(float a, float b) {
-    return fabs(a - b) < F_EPSILON;
-}
-
-static inline std::vector<std::string> split(const std::string& s, const std::string& delimiter) {
-    size_t posStart = 0, posEnd, delimLen = delimiter.length();
-    std::string token;
-    std::vector<std::string> res;
-
-    // find("") matches at every position without advancing: the text is one token
-    if (delimiter.empty()) {
-        res.push_back(s);
-        return res;
-    }
-
-    while ((posEnd = s.find(delimiter, posStart)) != std::string::npos) {
-        token = s.substr(posStart, posEnd - posStart);
-        posStart = posEnd + delimLen;
-        res.push_back(token);
-    }
-
-    res.push_back(s.substr(posStart));
-    return res;
-}
-
-// TODO: To replace with std::format when we move to C++20
-// https://stackoverflow.com/questions/2342162/stdstring-formatting-like-sprintf/25440014
-template <typename... Args>
-std::string stringFormat(const std::string& format, Args... args) {
-    const size_t size = snprintf(nullptr, 0, format.c_str(), args...) + 1;  // Extra space for '\0'
-    if (size <= 0) {
-        throw std::runtime_error("Error during formatting.");
-    }
-    const std::unique_ptr<char[]> buf(new char[size]);
-    snprintf(buf.get(), size, format.c_str(), args...);
-    return std::string(buf.get(), buf.get() + size - 1);  // We don't want the '\0' inside
-}
-
-// https://stackoverflow.com/questions/16605967/set-precision-of-stdto-string-when-converting-floating-point-values
-template <typename T>
-std::string toStr(const T value, const int n = 6) {
-    std::ostringstream out;
-    out.precision(n);
-    out << std::fixed << value;
-    return out.str();
-}
 
 // Allocates memory to copy str into **ptr        // The caller is responsible for deallocating
 // the pointer
@@ -161,17 +63,11 @@ DDB_DLL std::string getPass(const std::string& prompt = "Password: ");
 
 time_t currentUnixTimestamp();
 
-// https://stackoverflow.com/questions/3418231/replace-part-of-a-string-with-another-string
-void stringReplace(std::string& str, const std::string& from, const std::string& to);
-
 void sleep(int msecs);
 
 DDB_DLL std::string generateRandomString(int length);
-std::string join(const std::vector<std::string>& vec, char separator = ',');
 
 DDB_DLL bool hasDotNotation(const std::string& path);
-
-DDB_DLL bool isLowerCase(const std::string& str);
 
 DDB_DLL bool isNetworkPath(const std::string& path);
 

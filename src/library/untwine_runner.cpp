@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "untwine_runner.h"
+#include "stringutil.h"
 
 #include <algorithm>
 #include <cctype>
@@ -236,8 +237,7 @@ namespace ddb
             // Explicit backend env (overrides argument)
             if (const char *envBackend = std::getenv("DDB_COPC_BACKEND"))
             {
-                std::string s(envBackend);
-                std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return std::tolower(c); });
+                const std::string s = str::toLowerCopy(envBackend);
                 if (s == "untwine") requested = CopcBackend::Untwine;
                 else if (s == "pdal") requested = CopcBackend::Pdal;
                 else if (s == "auto") requested = CopcBackend::Auto;

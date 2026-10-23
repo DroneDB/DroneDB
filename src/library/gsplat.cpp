@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "gsplat.h"
+#include "stringutil.h"
 
 #include <algorithm>
 #include <cmath>
@@ -106,7 +107,7 @@ namespace ddb
             if (env == nullptr || env[0] == '\0')
                 return;
 
-            const auto parts = utils::split(std::string(env), ",");
+            const auto parts = str::split(std::string(env), ",");
             try
             {
                 if (!parts.empty() && !parts[0].empty())
@@ -361,7 +362,7 @@ namespace ddb
         while (std::getline(in, line))
         {
             std::string t = line;
-            utils::trim(t);
+            str::trim(t);
             if (!t.empty())
             {
                 srs = t;
@@ -376,7 +377,7 @@ namespace ddb
         while (std::getline(in, line))
         {
             std::string t = line;
-            utils::trim(t);
+            str::trim(t);
             if (t.empty() || t[0] == '#')
                 continue;
             offsetLine = t;
