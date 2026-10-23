@@ -3,8 +3,6 @@
 # Compiler: GNU 13 (the CI build_ubuntu job measures with this compiler)
 # Format: <path> <flag> <number of distinct line:column locations>
 apps/cmd/progressbar.cpp -Wconversion 2
-apps/cmd/share.cpp -Wshadow 1
-apps/cmd/share.cpp -Wunused-parameter 2
 apps/crash_handlers.cpp -Wunused-parameter 4
 src/include/basicgeometry.h -Wnon-virtual-dtor 3
 src/include/basicgeometry.h -Wshadow 5
@@ -16,8 +14,6 @@ src/include/geo.h -Wshadow 6
 src/include/metamanager.h -Wshadow 1
 src/include/mio.h -Wshadow 1
 src/include/passwordmanager.h -Wshadow 1
-src/include/pushmanager.h -Wshadow 3
-src/include/registry.h -Wshadow 2
 src/include/simpleentry.h -Wshadow 3
 src/include/syncmanager.h -Wshadow 1
 src/include/tagmanager.h -Wshadow 1
@@ -58,13 +54,6 @@ src/library/process_runner.cpp -Wdangling-else 1
 src/library/raster_analysis.cpp -Wconversion 4
 src/library/raster_region.cpp -Wsign-compare 2
 src/library/raster_region.cpp -Wunused-result 2
-src/library/registry.cpp -Wconversion 1
-src/library/registry.cpp -Wfloat-conversion 1
-src/library/registry.cpp -Wshadow 2
-src/library/shareclient.cpp -Wshadow 1
-src/library/shareclient.cpp -Wunused-variable 1
-src/library/shareservice.cpp -Wshadow 1
-src/library/shareservice.cpp -Wunused-parameter 2
 src/library/sqlite_database.cpp -Wdangling-else 1
 src/library/statement.cpp -Wshadow 2
 src/library/stockpile.cpp -Wconversion 1
