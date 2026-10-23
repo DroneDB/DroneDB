@@ -342,8 +342,8 @@ namespace
             {
                 std::unique_ptr<GDALDataset> in(static_cast<GDALDataset *>(GDALOpen(inputs[b].string().c_str(), GA_ReadOnly)));
                 std::vector<uint8_t> plane(64 * 64);
-                in->GetRasterBand(1)->RasterIO(GF_Read, 0, 0, 64, 64, plane.data(), 64, 64, GDT_Byte, 0, 0);
-                out->GetRasterBand(b + 1)->RasterIO(GF_Write, 0, 0, 64, 64, plane.data(), 64, 64, GDT_Byte, 0, 0);
+                dq06::checkIo(in->GetRasterBand(1)->RasterIO(GF_Read, 0, 0, 64, 64, plane.data(), 64, 64, GDT_Byte, 0, 0));
+                dq06::checkIo(out->GetRasterBand(b + 1)->RasterIO(GF_Write, 0, 0, 64, 64, plane.data(), 64, 64, GDT_Byte, 0, 0));
             }
         }
         return fs::file_size(output);

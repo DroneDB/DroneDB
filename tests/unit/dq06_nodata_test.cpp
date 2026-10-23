@@ -185,11 +185,11 @@ namespace
             std::unique_ptr<GDALDataset> ds(static_cast<GDALDataset *>(GDALOpen(p.string().c_str(), GA_Update)));
             std::vector<float> plane(256 * 256);
             GDALRasterBand *band = ds->GetRasterBand(1);
-            band->RasterIO(GF_Read, 0, 0, 256, 256, plane.data(), 256, 256, GDT_Float32, 0, 0);
+            dq06::checkIo(band->RasterIO(GF_Read, 0, 0, 256, 256, plane.data(), 256, 256, GDT_Float32, 0, 0));
             for (int y = 0; y < 256; y++)
                 for (int x = 0; x < 256; x++)
                     plane[y * 256 + x] = (x < 10 && y < 10) ? static_cast<float>(declared) : plane[y * 256 + x] + static_cast<float>(offset);
-            band->RasterIO(GF_Write, 0, 0, 256, 256, plane.data(), 256, 256, GDT_Float32, 0, 0);
+            dq06::checkIo(band->RasterIO(GF_Write, 0, 0, 256, 256, plane.data(), 256, 256, GDT_Float32, 0, 0));
             band->SetNoDataValue(declared);
             return p;
         };

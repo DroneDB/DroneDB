@@ -10,6 +10,7 @@
 #include <cmath>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -20,6 +21,14 @@
 
 namespace dq06
 {
+    // A raster read or write that must work: the fixtures fail loudly instead of carrying on
+    // with a half-written file
+    inline void checkIo(CPLErr err)
+    {
+        if (err != CE_None)
+            throw std::runtime_error("GDAL raster I/O failed");
+    }
+
     constexpr double kNodata = -9999.0;
 
     // The terrain of every DEM: a plane, a conical mound centred on pixel (35, 35) and a
@@ -91,7 +100,7 @@ namespace dq06
         {
             for (int x = 0; x < spec.size; x++)
                 row[x] = terrain(x, y, patch);
-            band->RasterIO(GF_Write, 0, y, spec.size, 1, row.data(), spec.size, 1, GDT_Float32, 0, 0);
+            dq06::checkIo(band->RasterIO(GF_Write, 0, y, spec.size, 1, row.data(), spec.size, 1, GDT_Float32, 0, 0));
         }
         if (nodata)
             band->SetNoDataValue(*nodata);

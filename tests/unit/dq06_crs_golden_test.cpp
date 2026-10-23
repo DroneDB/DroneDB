@@ -225,7 +225,7 @@ namespace
         OGRLayer *layer = ds->CreateLayer("boxes", &srs, wkbPolygon, nullptr);
         ASSERT_NE(layer, nullptr);
         OGRFieldDefn nameField("name", OFTString);
-        layer->CreateField(&nameField);
+        ASSERT_EQ(layer->CreateField(&nameField), OGRERR_NONE);
         const double boxes[2][4] = {{10.00, 45.00, 10.05, 45.03}, {10.02, 45.01, 10.08, 45.05}};
         for (int i = 0; i < 2; i++)
         {
@@ -283,7 +283,8 @@ namespace
         {
             OGRLayer *layer = ds->GetLayer(i);
             OGREnvelope env;
-            layer->GetExtent(&env, TRUE);
+            if (layer->GetExtent(&env, TRUE) != OGRERR_NONE)
+                continue;
             const char *auth = layer->GetSpatialRef() != nullptr ? layer->GetSpatialRef()->GetAuthorityCode(nullptr) : nullptr;
             out.push_back({{"name", layer->GetName()},
                            {"features", layer->GetFeatureCount()},

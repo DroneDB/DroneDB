@@ -66,7 +66,7 @@ namespace
         testutils::createGeoRaster(path, spec);
         std::unique_ptr<GDALDataset> ds(static_cast<GDALDataset *>(GDALOpen(path.string().c_str(), GA_Update)));
         std::vector<uint8_t> zero(30 * 30, 0);
-        ds->GetRasterBand(4)->RasterIO(GF_Write, 30, 30, 30, 30, zero.data(), 30, 30, GDT_Byte, 0, 0);
+        dq06::checkIo(ds->GetRasterBand(4)->RasterIO(GF_Write, 30, 30, 30, 30, zero.data(), 30, 30, GDT_Byte, 0, 0));
         return path;
     }
 
@@ -91,8 +91,8 @@ namespace
         std::string all;
         for (int b = 1; b <= ds.GetRasterCount(); b++)
         {
-            ds.GetRasterBand(b)->RasterIO(GF_Read, 0, 0, ds.GetRasterXSize(), ds.GetRasterYSize(), plane.data(),
-                                          ds.GetRasterXSize(), ds.GetRasterYSize(), GDT_Float64, 0, 0);
+            dq06::checkIo(ds.GetRasterBand(b)->RasterIO(GF_Read, 0, 0, ds.GetRasterXSize(), ds.GetRasterYSize(), plane.data(),
+                                          ds.GetRasterXSize(), ds.GetRasterYSize(), GDT_Float64, 0, 0));
             all += dq06::fnv1a(plane.data(), plane.size() * sizeof(double));
         }
         return dq06::fnv1a(all.data(), all.size());
@@ -414,7 +414,7 @@ namespace
         {
             for (int x = 0; x < size; x++)
                 row[x] = (x * 5 + y * 3) % 200;
-            ds->GetRasterBand(1)->RasterIO(GF_Write, 0, y, size, 1, row.data(), size, 1, GDT_Float64, 0, 0);
+            dq06::checkIo(ds->GetRasterBand(1)->RasterIO(GF_Write, 0, y, size, 1, row.data(), size, 1, GDT_Float64, 0, 0));
         }
         return path;
     }
@@ -544,11 +544,11 @@ namespace
                     // 5 m higher than the reference, with a nodata patch
                     std::vector<float> plane(256 * 256);
                     GDALRasterBand *band = ds->GetRasterBand(1);
-                    band->RasterIO(GF_Read, 0, 0, 256, 256, plane.data(), 256, 256, GDT_Float32, 0, 0);
+                    dq06::checkIo(band->RasterIO(GF_Read, 0, 0, 256, 256, plane.data(), 256, 256, GDT_Float32, 0, 0));
                     for (int y = 0; y < 256; y++)
                         for (int x = 0; x < 256; x++)
                             plane[y * 256 + x] = (x < 10 && y < 10) ? static_cast<float>(kNodata) : plane[y * 256 + x] + 5.0f;
-                    band->RasterIO(GF_Write, 0, 0, 256, 256, plane.data(), 256, 256, GDT_Float32, 0, 0);
+                    dq06::checkIo(band->RasterIO(GF_Write, 0, 0, 256, 256, plane.data(), 256, 256, GDT_Float32, 0, 0));
                 }
             }
             const fs::path output = ta.getPath(name + "_aligned.tif");

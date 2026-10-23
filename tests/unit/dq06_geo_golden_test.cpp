@@ -187,7 +187,7 @@ namespace
             {
                 for (int x = 0; x < 70; x++)
                     row[x] = terrain(x, y);
-                ds->GetRasterBand(1)->RasterIO(GF_Write, 0, y, 70, 1, row.data(), 70, 1, GDT_Float32, 0, 0);
+                dq06::checkIo(ds->GetRasterBand(1)->RasterIO(GF_Write, 0, y, 70, 1, row.data(), 70, 1, GDT_Float32, 0, 0));
             }
             ds->GetRasterBand(1)->SetNoDataValue(kNodata);
         }
