@@ -9,6 +9,7 @@
 #include "entry_filters.h"
 #include "entry_path.h"
 #include "exceptions.h"
+#include "index_sql.h"
 #include "logger.h"
 #include "mio.h"
 #include "parallel.h"
@@ -284,32 +285,16 @@ namespace ddb
     {
         const fs::path directory = db->rootDirectory();
 
-        // Build query based on requested types
-        std::string sql = "SELECT path FROM entries WHERE type != ?";
-
-        if (!types.empty())
-        {
-            sql += " AND type IN (";
-            for (size_t i = 0; i < types.size(); i++)
-            {
-                if (i > 0)
-                    sql += ",";
-                sql += "?";
-            }
-            sql += ")";
-        }
-
-        auto q = db->query(sql);
         // Always exclude directories from rescan because they do not contain file metadata
         // that can be re-parsed. This check is defensive and prevents potential issues
         // even if validation fails at higher layers (C API, CLI).
-        q->bind(1, entryTypeValue(EntryType::Directory));
+        SqlConditions conditions;
+        conditions.add(typeCondition("type", "!=", EntryType::Directory));
+        if (!types.empty())
+            conditions.addEntryTypes("type", types);
 
-        // Bind types if specified
-        for (size_t i = 0; i < types.size(); i++)
-        {
-            q->bind(2 + static_cast<int>(i), static_cast<int>(types[i]));
-        }
+        auto q = db->query("SELECT path FROM entries" + conditions.whereClause());
+        conditions.bind(*q);
 
         const auto updateQ = db->query(kUpdateEntrySql);
 
@@ -390,22 +375,14 @@ namespace ddb
     void syncLocalMTimes(Database *db, const std::vector<std::string> &files)
     {
         const fs::path directory = db->rootDirectory();
-        std::string sql = "SELECT path,mtime FROM entries WHERE (type != ? AND type != ?)";
-        if (files.size() > 0)
-        {
-            sql += " AND path in (";
-            for (unsigned long i = 0; i < files.size() - 1; i++)
-                sql += "?,";
-            sql += "?)";
-        }
+        SqlConditions conditions;
+        conditions.add(typeCondition("type", "!=", EntryType::Directory));
+        conditions.add(typeCondition("type", "!=", EntryType::DroneDB));
+        if (!files.empty())
+            conditions.addInStrings("path", files);
 
-        auto q = db->query(sql);
-        q->bind(1, entryTypeValue(EntryType::Directory));
-        q->bind(2, entryTypeValue(EntryType::DroneDB));
-        for (unsigned long i = 0; i < files.size(); i++)
-        {
-            q->bind(3 + i, files[i]);
-        }
+        auto q = db->query("SELECT path,mtime FROM entries" + conditions.whereClause());
+        conditions.bind(*q);
 
         while (q->fetch())
         {
@@ -427,16 +404,9 @@ namespace ddb
         checkDeleteMeta(db, path);
     }
 
-#define FOLDER_CONSISTENCY_QUERY "SELECT B.folder FROM ( \
-    SELECT A.path, TRIM(A.folder, '/') AS folder FROM ( \
-        SELECT path, replace(path, replace(path, rtrim(path, replace(path, '/', '')), ''), '') AS folder FROM entries WHERE type != 1) AS A \
-        WHERE length(A.folder) > 0) AS B WHERE folder NOT IN (SELECT path FROM entries WHERE type = 1)"
-
-#define CREATE_FOLDER_QUERY "INSERT INTO entries (path, type, properties, mtime, size, depth) VALUES (?, 1, 'null', ?, 0, ?)"
-
     void addFolder(Database *db, const std::string path, const time_t mtime)
     {
-        const auto q = db->query(CREATE_FOLDER_QUERY);
+        const auto q = db->query(insertFolderSql());
         q->bind(1, path);
         q->bind(2, static_cast<long long>(mtime));
         q->bind(3, ddb::io::Path(io::fromUtf8(path)).depth());
@@ -446,7 +416,7 @@ namespace ddb
     void createMissingFolders(Database *db)
     {
 
-        const auto q = db->query(FOLDER_CONSISTENCY_QUERY);
+        const auto q = db->query(missingFoldersSql());
 
         while (q->fetch())
         {

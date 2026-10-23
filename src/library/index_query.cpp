@@ -8,6 +8,7 @@
 #include "entry_filters.h"
 #include "entry_path.h"
 #include "exceptions.h"
+#include "index_sql.h"
 #include "logger.h"
 #include "mio.h"
 #include "stringutil.h"
@@ -184,35 +185,6 @@ namespace ddb
             statement.bind(firstParam + static_cast<int>(i), predicate.bindings[i]);
     }
 
-    // Columns read by readEntryRow(). The metadata column is a correlated subquery
-    // (one seek on ix_entries_meta_path_key per entry); joining entries_meta instead
-    // would return each entry once per metadata row.
-    static const char *ENTRY_WITH_META_SELECT = R"<<<(
-        SELECT e.path, e.hash, e.type, e.properties, e.mtime, e.size, e.depth,
-        json_extract(AsGeoJSON(e.point_geom), '$.coordinates'), json_extract(AsGeoJSON(e.polygon_geom), '$.coordinates'),
-        (
-            SELECT NULLIF(json_group_object(key, json(meta)), '{}')
-            FROM (
-                SELECT emi.key AS key, CASE WHEN substr(emi.key, -1, 1) = 's'
-                                THEN json_group_array(json_object('id', emi.id, 'data', json(emi.data), 'mtime', emi.mtime))
-                                ELSE json_object('id', emi.id, 'data', json(emi.data), 'mtime', emi.mtime)
-                            END AS meta
-                FROM entries_meta emi
-                WHERE emi.path = e.path
-                GROUP BY emi.key
-            )
-        ) AS meta
-        FROM entries e
-    )<<<";
-
-    static void readEntryRow(Statement &q, Entry &e)
-    {
-        e.parseFields(q.getText(0), q.getText(1), q.getInt(2), q.getText(3),
-                      q.getInt64(4), q.getInt64(5), q.getInt(6),
-                      q.getText(7), q.getText(8),
-                      q.getText(9));
-    }
-
     std::vector<Entry> getMatchingEntries(Database *db, const fs::path &path,
                                           int maxRecursionDepth, bool isFolder)
     {
@@ -228,25 +200,20 @@ namespace ddb
 
         LOGD << "Predicate: " << (predicate.sql.empty() ? "<all>" : predicate.sql);
 
-        std::vector<std::string> conditions;
-        if (!predicate.sql.empty())
-            conditions.push_back(predicate.sql);
+        SqlConditions conditions;
+        conditions.add(predicate);
         if (maxRecursionDepth > 0)
-            conditions.push_back("e.depth <= " + std::to_string(maxRecursionDepth - 1));
+            conditions.addAtMost("e.depth", maxRecursionDepth - 1);
 
-        std::string sql = ENTRY_WITH_META_SELECT;
-        for (size_t i = 0; i < conditions.size(); i++)
-            sql += (i == 0 ? " WHERE " : " AND ") + conditions[i];
-
-        auto q = db->query(sql);
-        bindPathPredicate(*q, predicate);
+        auto q = db->query(selectEntries(EntryColumns::Meta) + conditions.whereClause());
+        conditions.bind(*q);
 
         std::vector<Entry> entries;
 
         while (q->fetch())
         {
             Entry e;
-            readEntryRow(*q, e);
+            readEntry(*q, EntryColumns::Meta, e);
             entries.push_back(std::move(e));
         }
 
@@ -316,48 +283,32 @@ namespace ddb
     {
         const std::string folder = normalizeFolder(query.folder);
 
-        std::vector<std::string> conditions;
-        std::vector<std::string> bindings;
-        const auto add = [&](const PathPredicate &predicate)
-        {
-            conditions.push_back(predicate.sql);
-            bindings.insert(bindings.end(), predicate.bindings.begin(), predicate.bindings.end());
-        };
+        SqlConditions conditions;
 
         if (!folder.empty())
         {
             Entry self;
             if (getEntry(db, folder, self) && self.type != EntryType::Directory)
-                add({"e.path = ?", {folder}});
+                conditions.add(PathPredicate{"e.path = ?", {folder}});
             else
             {
-                add(descendantsPredicate(folder, "e.path"));
+                conditions.add(descendantsPredicate(folder, "e.path"));
                 if (!query.recursive)
-                    conditions.push_back("e.depth = " + std::to_string(std::count(folder.begin(), folder.end(), '/') + 1));
+                    conditions.addEquals("e.depth", static_cast<int>(std::count(folder.begin(), folder.end(), '/')) + 1);
             }
         }
         else if (!query.recursive)
-            conditions.push_back("e.depth = 0");
+            conditions.addEquals("e.depth", 0);
 
         if (!query.types.empty())
-        {
-            std::string in;
-            for (const auto type : query.types)
-                in += (in.empty() ? "" : ",") + std::to_string(static_cast<int>(type));
-            conditions.push_back("e.type IN (" + in + ")");
-        }
+            conditions.addEntryTypes("e.type", query.types);
 
         if (!query.namePattern.empty())
-            add({"('/' || e.path) LIKE ? ESCAPE '/'", {namePatternToLike(query.namePattern)}});
+            conditions.add(PathPredicate{"('/' || e.path) LIKE ? ESCAPE '/'", {namePatternToLike(query.namePattern)}});
 
-        std::string sql = query.withDetails ? ENTRY_WITH_META_SELECT
-                                            : "SELECT e.path, e.hash, e.type, e.mtime, e.size, e.depth FROM entries e";
-        for (size_t i = 0; i < conditions.size(); i++)
-            sql += (i == 0 ? " WHERE " : " AND ") + conditions[i];
-        sql += " ORDER BY e.path";
-
-        auto q = db->query(sql);
-        bindPathPredicate(*q, {"", bindings});
+        const EntryColumns columns = query.withDetails ? EntryColumns::Meta : EntryColumns::Summary;
+        auto q = db->query(selectEntries(columns) + conditions.whereClause() + " ORDER BY e.path");
+        conditions.bind(*q);
 
         std::vector<Entry> entries;
         while (q->fetch())
@@ -366,17 +317,7 @@ namespace ddb
                 continue;
 
             Entry e;
-            if (query.withDetails)
-                readEntryRow(*q, e);
-            else
-            {
-                e.path = q->getText(0);
-                e.hash = q->getText(1);
-                e.type = static_cast<EntryType>(q->getInt(2));
-                e.mtime = static_cast<time_t>(q->getInt64(3));
-                e.size = static_cast<std::uintmax_t>(q->getInt64(4));
-                e.depth = q->getInt(5);
-            }
+            readEntry(*q, columns, e);
             entries.push_back(std::move(e));
         }
 
@@ -391,32 +332,27 @@ namespace ddb
         return q->getInt(0) > 0;
     }
 
-    bool getEntry(Database *db, const std::string &path, Entry &entry)
+    // The entry stored at `path`, read up to `columns`
+    static bool readEntryAt(Database *db, const std::string &path, EntryColumns columns, Entry &entry)
     {
-        auto q = db->query("SELECT path, hash, type, properties, mtime, size, depth, "
-                           "json_extract(AsGeoJSON(point_geom), '$.coordinates'), json_extract(AsGeoJSON(polygon_geom), '$.coordinates') FROM entries WHERE path = ? LIMIT 1");
-
+        auto q = db->query(selectEntries(columns) + " WHERE e.path = ?");
         q->bind(1, path);
 
         if (!q->fetch())
             return false;
 
-        entry.parseFields(q->getText(0), q->getText(1), q->getInt(2), q->getText(3),
-                          q->getInt64(4), q->getInt64(5), q->getInt(6),
-                          q->getText(7), q->getText(8));
+        readEntry(*q, columns, entry);
         return true;
+    }
+
+    bool getEntry(Database *db, const std::string &path, Entry &entry)
+    {
+        return readEntryAt(db, path, EntryColumns::Geometries, entry);
     }
 
     bool getEntryWithMeta(Database *db, const std::string &path, Entry &entry)
     {
-        auto q = db->query(std::string(ENTRY_WITH_META_SELECT) + " WHERE e.path = ?");
-        q->bind(1, path);
-
-        if (!q->fetch())
-            return false;
-
-        readEntryRow(*q, entry);
-        return true;
+        return readEntryAt(db, path, EntryColumns::Meta, entry);
     }
 
 } // namespace ddb

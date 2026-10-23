@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "stac.h"
+#include "index_sql.h"
 #include "json.h"
 #include "stringutil.h"
 #include "logger.h"
@@ -606,8 +607,9 @@ namespace ddb
 
             // Assets
             {
-                const auto q = db->query("SELECT path FROM entries WHERE point_geom IS NULL AND polygon_geom IS NULL "
-                                         "AND type != 1 AND type != 7 ORDER BY path");
+                const auto q = db->query("SELECT path FROM entries WHERE point_geom IS NULL AND polygon_geom IS NULL AND " +
+                                         typeCondition("type", "!=", EntryType::Directory) + " AND " +
+                                         typeCondition("type", "!=", EntryType::DroneDB) + " ORDER BY path");
                 while (q->fetch())
                 {
                     const std::string path = q->getText(0);

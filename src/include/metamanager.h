@@ -24,7 +24,6 @@ namespace ddb
         json metaStmtToJson(Statement *q) const;
         json getMetaJson(const std::string &q) const;
         std::string validateData(const std::string &data) const;
-        bool isList(const std::string &key) const;
 
     public:
         MetaManager(ddb::Database *db) : db(db) {}

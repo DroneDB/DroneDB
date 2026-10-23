@@ -1,4 +1,6 @@
 #include "metamanager.h"
+#include "index_sql.h"
+#include "metakey.h"
 #include "stringutil.h"
 #include "database.h"
 #include "mio.h"
@@ -38,10 +40,10 @@ namespace ddb
         if (!str::isLowerCase(key))
             throw InvalidArgsException("Metadata key must be lowercase");
 
-        if (isList && key[key.length() - 1] != 's')
+        if (isList && !metakey::isList(key))
             throw InvalidArgsException("Invalid metadata key (must be plural, for example: " + key + "s)");
 
-        if (!isList && key[key.length() - 1] == 's')
+        if (!isList && metakey::isList(key))
             throw InvalidArgsException("Invalid metadata key (must be singular, for example: " + key.substr(0, key.length() - 1) + ")");
 
         return key;
@@ -99,11 +101,6 @@ namespace ddb
                 throw JSONException("Invalid JSON (" + std::string(e.what()) + "): " + data);
             }
         }
-    }
-
-    bool MetaManager::isList(const std::string &key) const
-    {
-        return key.length() > 0 && key[key.length() - 1] == 's';
     }
 
     json MetaManager::add(const std::string &key, const std::string &data, const std::string &path, const std::string &cwd)
@@ -179,7 +176,7 @@ namespace ddb
         if (result.empty())
             throw InvalidArgsException("No metadata found for key " + key + (path.empty() ? "" : " and path " + path));
 
-        return isList(key) ? result : result[0].empty() ? json::object()
+        return metakey::isList(key) ? result : result[0].empty() ? json::object()
                                                         : result[0];
     }
 
@@ -226,31 +223,17 @@ namespace ddb
             throw InvalidArgsException("ids must be an array");
 
         json result = json::array();
-        std::string sql = "SELECT id,path,key,data,mtime FROM entries_meta";
-        if (ids.size() > 0)
-        {
-            sql += " WHERE id IN (";
-            for (unsigned long i = 0; i < ids.size(); i++)
-            {
-                sql += "?";
-                if (i < ids.size() - 1)
-                    sql += ",";
-            }
-            sql += ")";
-        }
-        sql += " ORDER by id ASC";
+        std::vector<std::string> idList;
+        for (auto &id : ids)
+            idList.push_back(id.is_string() ? id.get<std::string>() : "");
 
-        const auto q = db->query(sql);
+        SqlConditions conditions;
+        if (!idList.empty())
+            conditions.addInStrings("id", idList);
 
-        if (ids.size() > 0)
-        {
-            unsigned long i = 1;
-            for (auto &id : ids)
-            {
-                q->bind(i, id.is_string() ? id.get<std::string>() : "");
-                i++;
-            }
-        }
+        const auto q = db->query("SELECT id,path,key,data,mtime FROM entries_meta" + conditions.whereClause() +
+                                 " ORDER by id ASC");
+        conditions.bind(*q);
 
         while (q->fetch())
         {
@@ -295,7 +278,7 @@ namespace ddb
             const auto mtime = meta["mtime"].get<long long>();
 
             // Singular key?
-            if (key[key.length() - 1] != 'S' && key[key.length() - 1] != 's')
+            if (!metakey::isList(key))
             {
                 bool newerMetaExists = false;
 

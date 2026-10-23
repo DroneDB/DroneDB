@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "database.h"
+#include "index_sql.h"
 #include "json.h"
 #include "metamanager.h"
 #include "databasepool.h"
@@ -311,32 +312,8 @@ END;
 
         // Find meta
         {
-            const std::string sql = R"<<<(
-                SELECT json_group_object(key, json(meta)) AS meta
-                FROM (
-                  SELECT
-                    key,
-                    CASE
-                      WHEN substr(key, -1, 1) = 's' THEN
-                        json_group_array(
-                          json_object(
-                            'id',    id,
-                            'data',  json(data),
-                            'mtime', mtime
-                          )
-                        )
-                      ELSE
-                        json_object(
-                          'id',    id,
-                          'data',  json(data),
-                          'mtime', mtime
-                        )
-                    END AS meta
-                  FROM entries_meta
-                  WHERE path = ''
-                  GROUP BY key
-                )
-                )<<<";
+            // The metadata of the dataset: the entries_meta rows with the empty path
+            const std::string sql = metaAggregateSql("''");
             const auto q = this->query(sql);
             if (q->fetch())
             {

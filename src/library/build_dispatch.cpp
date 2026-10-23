@@ -20,6 +20,7 @@
 #include "deppath.h"
 #include "entry_handler.h"
 #include "exceptions.h"
+#include "index_sql.h"
 #include "mio.h"
 #include "process_config.h"
 #include "raster_cache.h"
@@ -241,22 +242,12 @@ void buildAll(Database* db, const std::string& outputPath, bool force) {
     const std::vector<EntryType> types = buildableEntryTypes();
     if (types.empty())
         return;
-    std::string placeholders;
-    for (size_t i = 0; i < types.size(); i++)
-        placeholders += i == 0 ? "?" : ", ?";
-    auto q = db->query("SELECT path, hash, type, properties, mtime, size, depth FROM entries WHERE type IN (" +
-                       placeholders + ")");
-    for (size_t i = 0; i < types.size(); i++)
-        q->bind(static_cast<int>(i + 1), static_cast<int>(types[i]));
+    auto q = db->query(selectEntries(EntryColumns::Properties) + " WHERE e.type IN " + inListSql(types.size()));
+    bindEntryTypes(*q, 1, types);
 
     while (q->fetch()) {
-        Entry e(q->getText(0),
-                q->getText(1),
-                q->getInt(2),
-                q->getText(3),
-                q->getInt64(4),
-                q->getInt64(5),
-                q->getInt(6));
+        Entry e;
+        readEntry(*q, EntryColumns::Properties, e);
 
         // Call build on each of them; a canceled call stops before the next one (DQ-15)
         cancel::throwIfCanceled();
