@@ -52,22 +52,6 @@ namespace ddb
                                      const std::string &x = "auto",
                                      const std::string &y = "auto");
 
-        // The same for a caller that holds the format as text (the CLI): "json" writes JSON, any
-        // other name writes text, as it always did
-        static void runTiler(const fs::path &input,
-                             const fs::path &output,
-                             int tileSize, bool tms,
-                             std::ostream &os,
-                             const std::string &format,
-                             const std::string &zRange = "auto",
-                             const std::string &x = "auto",
-                             const std::string &y = "auto")
-        {
-            runTiler(input, output, tileSize, tms, os,
-                     format == outputFormatName(OutputFormat::Json) ? OutputFormat::Json : OutputFormat::Text,
-                     zRange, x, y);
-        }
-
         // Get a single tile from user cache
         DDB_DLL static fs::path getFromUserCache(const fs::path &tileablePath,
                                                  int tz, int tx, int ty,

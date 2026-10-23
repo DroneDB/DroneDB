@@ -54,14 +54,14 @@ namespace cmd
         throw UsageError(message);
     }
 
-    void Command::output(std::ostream &out, const json &j, const std::string &format)
+    void Command::output(std::ostream &out, const json &j, ddb::OutputFormat format)
     {
-        if (format == "json")
+        ddb::requireOutputFormat(format, {ddb::OutputFormat::Text, ddb::OutputFormat::Json});
+
+        if (format == ddb::OutputFormat::Json)
             out << j << std::endl;
-        else if (format == "text")
-            printJsonToText(out, j);
         else
-            throw ddb::InvalidArgsException("Invalid format " + format);
+            printJsonToText(out, j);
     }
 
     void Command::printJsonToText(std::ostream &out, const json &j)

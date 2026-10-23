@@ -47,11 +47,11 @@ namespace cmd
 
         const auto sourceDdbPath = opts["source"].as<std::string>();
         const auto targetDdbPath = opts["target"].as<std::string>();
-        const auto format = opts["format"].as<std::string>();
+        const auto format = cmd::getFormatOption(opts);
 
         LOGD << "Source: " << sourceDdbPath;
         LOGD << "Target: " << targetDdbPath;
-        LOGD << "Format: " << format;
+        LOGD << "Format: " << ddb::outputFormatName(format);
 
         const auto source = ddb::open(sourceDdbPath, false);
         const auto target = ddb::open(targetDdbPath, false);

@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <functional>
 #include <set>
@@ -200,6 +201,26 @@ TEST(Dq12Options, theFormatHelperNamesTheFormatsOfTheCommand) {
     EXPECT_NE(two.help().find("Output format (text|json|geojson)"), std::string::npos);
 }
 
+TEST(Dq12Options, theFormatIsParsedOnceAtTheBoundaryOfTheCommand) {
+    cxxopts::Options options("ddb", "x");
+    cmd::addFormatOption(options, "text|json|geojson");
+    auto parse = [&](std::vector<std::string> args) {
+        std::vector<char *> argv{const_cast<char *>("ddb")};
+        for (auto &a : args)
+            argv.push_back(a.data());
+        return options.parse(static_cast<int>(argv.size()), argv.data());
+    };
+
+    EXPECT_EQ(cmd::getFormatOption(parse({})), ddb::OutputFormat::Text);
+    EXPECT_EQ(cmd::getFormatOption(parse({"-f", "json"})), ddb::OutputFormat::Json);
+    EXPECT_EQ(cmd::getFormatOption(parse({"-f", "geojson"}), {ddb::OutputFormat::GeoJson}), ddb::OutputFormat::GeoJson);
+
+    // what the command does not write is refused, with the same message whatever the reason
+    EXPECT_THROW(cmd::getFormatOption(parse({"-f", "geojson"})), ddb::InvalidArgsException);
+    EXPECT_THROW(cmd::getFormatOption(parse({"-f", "xml"})), ddb::InvalidArgsException);
+    EXPECT_THROW(cmd::getFormatOption(parse({"-f", "JSON"})), ddb::InvalidArgsException);
+}
+
 // ------------------------------------------------------------------------ the handler
 
 TEST(Dq12Handler, aCommandReturnsItsOwnExitCode) {
@@ -335,6 +356,30 @@ TEST(Dq12Commands, anUnknownMetaFormatIsAUsageErrorWithoutOutput) {
     EXPECT_TRUE(outcome.out.empty()) << outcome.out;
     EXPECT_NE(outcome.err.find("error: "), std::string::npos) << outcome.err;
     EXPECT_NE(outcome.err.find("Usage:"), std::string::npos);
+}
+
+// delta and tile wrote nothing, or text, for a format they did not know; list and search failed
+// only once their index was open (and list had already truncated its output file)
+TEST(Dq12Commands, everyCommandWithAFormatRefusesAnUnknownOneBeforeItDoesAnything) {
+    TestArea ta("dq12_unknown_format", true);
+    const auto target = ta.getPath("out.txt");
+    const std::vector<std::pair<std::string, std::vector<std::string>>> cases = {
+        {"list", {"-f", "xml", "-o", target.string()}},
+        {"list", {"-f", "geojson"}},
+        {"search", {"-f", "geojson", "*"}},
+        {"delta", {"-f", "xml", ta.getPath("a").string(), ta.getPath("b").string()}},
+        {"tile", {"-f", "xml", ta.getPath("missing.tif").string()}},
+        {"stamp", {"-f", "xml"}},
+    };
+
+    for (const auto &[name, args] : cases) {
+        auto command = CommandRegistry::builtin().create(name);
+        const auto outcome = execute(*command, args);
+        EXPECT_EQ(outcome.code, EXIT_FAILURE) << name;
+        EXPECT_TRUE(outcome.out.empty()) << name << ": " << outcome.out;
+        EXPECT_NE(outcome.err.find("Invalid format"), std::string::npos) << name << ": " << outcome.err;
+    }
+    EXPECT_FALSE(std::filesystem::exists(target)) << "list created its output file before it knew the format";
 }
 
 TEST(Dq12Commands, infoWritesOnlyTheJsonToStdout) {

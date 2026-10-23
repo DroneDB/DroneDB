@@ -74,14 +74,4 @@ namespace
         EXPECT_EQ(entries[0].at("size"), 1);
         EXPECT_TRUE(entries[1].contains("point_geom"));
     }
-
-    TEST(Dq09Info, AnUnknownFormatIsRejectedBeforeAnythingIsWritten)
-    {
-        TestArea ta(TEST_NAME);
-        const auto text = writeFile(ta.getFolder() / "a.txt", "x");
-
-        std::ostringstream out;
-        EXPECT_THROW(info({text.string()}, out, "xml"), InvalidArgsException);
-        EXPECT_TRUE(out.str().empty());
-    }
 }

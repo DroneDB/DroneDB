@@ -68,8 +68,8 @@ namespace
         const auto tif = makeRaster(ta);
 
         std::ostringstream asText, asJson;
-        TilerHelper::runTiler(tif, ta.getFolder("text"), 256, false, asText, "text", "14-17");
-        TilerHelper::runTiler(tif, ta.getFolder("json"), 256, false, asJson, "json", "14-17");
+        TilerHelper::runTiler(tif, ta.getFolder("text"), 256, false, asText, OutputFormat::Text, "14-17");
+        TilerHelper::runTiler(tif, ta.getFolder("json"), 256, false, asJson, OutputFormat::Json, "14-17");
 
         const auto textTiles = lines(asText.str());
         ASSERT_GT(textTiles.size(), 3u);
@@ -88,7 +88,7 @@ namespace
         const auto tif = makeRaster(ta);
 
         std::ostringstream all;
-        TilerHelper::runTiler(tif, ta.getFolder("all"), 256, false, all, "text", "16");
+        TilerHelper::runTiler(tif, ta.getFolder("all"), 256, false, all, OutputFormat::Text, "16");
         const std::string first = *lines(all.str()).begin();
         // <folder>/<z>/<x>/<y>.png
         const auto parts = [&]
@@ -104,7 +104,7 @@ namespace
         const std::string y = parts.back().substr(0, parts.back().find('.'));
 
         std::ostringstream out;
-        TilerHelper::runTiler(tif, ta.getFolder("single"), 256, false, out, "json", "16", x, y);
+        TilerHelper::runTiler(tif, ta.getFolder("single"), 256, false, out, OutputFormat::Json, "16", x, y);
         const json tiles = json::parse(out.str());
         ASSERT_EQ(tiles.size(), 1u);
         EXPECT_TRUE(tiles[0].is_string());
@@ -116,7 +116,7 @@ namespace
         const auto tif = makeRaster(ta);
 
         std::ostringstream out;
-        TilerHelper::runTiler(tif, ta.getFolder("tiles"), 256, false, out, "text", "16");
+        TilerHelper::runTiler(tif, ta.getFolder("tiles"), 256, false, out, OutputFormat::Text, "16");
         const auto tiles = lines(out.str());
         EXPECT_GE(tiles.size(), 1u);
         for (const auto &t : tiles)

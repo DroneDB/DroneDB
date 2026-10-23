@@ -29,7 +29,7 @@ namespace cmd
     int Stamp::run(cxxopts::ParseResult &opts)
     {
         const auto ddbPath = opts["working-dir"].as<std::string>();
-        const auto format = opts["format"].as<std::string>();
+        const auto format = cmd::getFormatOption(opts);
 
         const auto db = ddb::open(std::string(ddbPath), true);
         output(std::cout, db->getStamp(), format);

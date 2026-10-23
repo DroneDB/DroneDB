@@ -27,6 +27,12 @@ namespace cmd
                            cxxopts::value<std::string>()->default_value("text"));
     }
 
+    ddb::OutputFormat getFormatOption(const cxxopts::ParseResult &opts,
+                                      std::initializer_list<ddb::OutputFormat> allowed)
+    {
+        return ddb::parseOutputFormat(opts["format"].as<std::string>(), allowed);
+    }
+
     void addInsecureOption(cxxopts::Options &opts)
     {
         opts.add_options()("k,insecure", "Disable SSL certificate verification", cxxopts::value<bool>());

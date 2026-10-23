@@ -41,7 +41,7 @@ namespace cmd
         virtual int run(cxxopts::ParseResult &opts) = 0;
         virtual void setOptions(cxxopts::Options &opts) = 0;
 
-        void output(std::ostream &out, const json &j, const std::string &format);
+        void output(std::ostream &out, const json &j, ddb::OutputFormat format);
         void printJsonToText(std::ostream &out, const json &j);
 
         // Missing or invalid arguments: throws UsageError(message)

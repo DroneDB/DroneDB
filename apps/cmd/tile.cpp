@@ -52,7 +52,7 @@ namespace cmd
         }
 
         bool tms = opts["tms"].count() > 0;
-        auto format = opts["format"].as<std::string>();
+        const auto format = cmd::getFormatOption(opts);
         auto z = opts["z"].as<std::string>();
         auto x = opts["x"].as<std::string>();
         auto y = opts["y"].as<std::string>();

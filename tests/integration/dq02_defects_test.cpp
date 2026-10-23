@@ -210,7 +210,7 @@ namespace
         const auto missing = ta.getPath("does-not-exist.tif");
         std::ostringstream out;
 
-        EXPECT_THROW(info({missing.string()}, out, "json", false, 0, "auto", false, true), FSException);
+        EXPECT_THROW(info({missing.string()}, out, OutputFormat::Json, false, 0, "auto", false, true), FSException);
     }
 
     // Part 1 made Statement::step throw on SQLITE_READONLY, so a legacy (user_version 0)
@@ -606,7 +606,7 @@ namespace
         std::ostringstream out;
 
         const int before = openDatasetCount();
-        EXPECT_THROW(TilerHelper::runTiler(tif, ta.getFolder("tiles"), 256, false, out, "text", "abc"),
+        EXPECT_THROW(TilerHelper::runTiler(tif, ta.getFolder("tiles"), 256, false, out, OutputFormat::Text, "abc"),
                      std::invalid_argument);
         EXPECT_EQ(openDatasetCount(), before);
     }

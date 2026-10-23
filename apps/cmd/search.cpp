@@ -40,7 +40,7 @@ namespace cmd
 
 		const auto ddbPath = opts["working-dir"].as<std::string>();
 		const auto query = opts.count("query") > 0 ? opts["query"].as<std::string>() : "%";
-		const auto format = opts["format"].as<std::string>();
+		const auto format = cmd::getFormatOption(opts);
 
 		const auto db = ddb::open(std::string(ddbPath), true);
 

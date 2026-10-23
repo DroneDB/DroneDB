@@ -46,7 +46,8 @@ namespace cmd
         auto input = opts["input"].as<std::vector<std::string>>();
 
         bool withHash = opts["with-hash"].count() > 0;
-        auto format = opts["format"].as<std::string>();
+        const auto format = cmd::getFormatOption(
+            opts, {ddb::OutputFormat::Text, ddb::OutputFormat::Json, ddb::OutputFormat::GeoJson});
         auto geometry = opts["geometry"].as<std::string>();
 
         // Always recursive for symmetry with `list`. Use glob patterns to scope.

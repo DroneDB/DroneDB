@@ -43,7 +43,7 @@ namespace cmd
 
 		const auto ddbPath = opts["working-dir"].as<std::string>();
 		const auto paths = opts.count("input") > 0 ? opts["input"].as<std::vector<std::string>>() : std::vector<std::string>();
-		const auto format = opts["format"].as<std::string>();
+		const auto format = cmd::getFormatOption(opts);
 
 		// Always recursive: users can scope output via the input paths/patterns.
 		const bool recursive = true;

@@ -6,6 +6,7 @@
 #include "include/meta.h"
 #include "exceptions.h"
 #include "dbops.h"
+#include "metakey.h"
 #include "metamanager.h"
 
 namespace cmd
@@ -53,7 +54,7 @@ namespace cmd
         const auto ddbPath = opts["working-dir"].as<std::string>();
         const auto data = opts["data"].as<std::string>();
         const auto path = opts["path"].as<std::string>();
-        const auto format = opts["format"].as<std::string>();
+        const auto format = cmd::getFormatOption(opts);
         auto key = opts["key"].as<std::string>();
 
         const auto db = ddb::open(ddbPath, true);
@@ -63,9 +64,9 @@ namespace cmd
         {
             // Little help for singular keys (annotation --> annotations)
             // This should not be in the API, it's just a convenience
-            if (key.length() > 0 && key[key.length() - 1] != 's')
+            if (!key.empty() && !ddb::metakey::isList(key))
             {
-                key = key + "s";
+                key += ddb::metakey::kListSuffix;
                 std::cerr << "Note: saving metadata as \"" << key << "\" (plural)" << std::endl;
             }
             output(std::cout, metaManager.add(key, data, path), format);

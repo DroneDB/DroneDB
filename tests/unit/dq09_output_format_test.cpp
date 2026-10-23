@@ -99,42 +99,37 @@ namespace
         EXPECT_TRUE(rejected.str().empty());
     }
 
-    TEST(Dq09OutputFormat, ListAndSearchTakeTheEnumAndTheTextShim)
+    TEST(Dq09OutputFormat, ListAndSearchTakeTheEnum)
     {
         IndexFixture f(TEST_NAME);
         writeFile(f.root / "a.txt", "alpha");
         writeFile(f.root / "d" / "b.txt", "beta");
         addToIndex(f.db.get(), {f.root.string()});
 
-        std::ostringstream byEnum, byText;
+        std::ostringstream byEnum;
         searchIndex(f.db.get(), "*.txt", byEnum, OutputFormat::Text);
-        searchIndex(f.db.get(), "*.txt", byText, "text");
         EXPECT_EQ(byEnum.str(), "a.txt\nd/b.txt\n");
-        EXPECT_EQ(byText.str(), byEnum.str());
 
         std::ostringstream listed;
-        listIndex(f.db.get(), {f.root.string()}, listed, "json");
+        listIndex(f.db.get(), {f.root.string()}, listed, OutputFormat::Json);
         EXPECT_EQ(json::parse(listed.str()).size(), 2u);
 
         std::ostringstream out;
-        EXPECT_THROW(searchIndex(f.db.get(), "*", out, "geojson"), InvalidArgsException);
-        EXPECT_THROW(listIndex(f.db.get(), {f.root.string()}, out, "xml"), InvalidArgsException);
+        EXPECT_THROW(searchIndex(f.db.get(), "*", out, OutputFormat::GeoJson), InvalidArgsException);
         EXPECT_THROW(listIndex(f.db.get(), {f.root.string()}, out, OutputFormat::GeoJson), InvalidArgsException);
         EXPECT_TRUE(out.str().empty());
     }
 
-    TEST(Dq09OutputFormat, DeltaWritesTextOrJsonAndANameThatIsNeitherWritesNothing)
+    TEST(Dq09OutputFormat, DeltaWritesTextOrJson)
     {
         const json source = {{"entries", json::array({json{{"a.txt", "h1"}}})}, {"meta", json::array()}, {"checksum", "x"}};
         const json target = {{"entries", json::array()}, {"meta", json::array()}, {"checksum", "y"}};
 
-        std::ostringstream text, asJson, other;
+        std::ostringstream text, asJson;
         delta(source, target, text, OutputFormat::Text);
         delta(source, target, asJson, OutputFormat::Json);
-        delta(source, target, other, "xml");
         EXPECT_EQ(text.str(), "A\ta.txt\n");
         EXPECT_TRUE(json::parse(asJson.str()).contains("adds"));
-        EXPECT_TRUE(other.str().empty());
 
         std::ostringstream rejected;
         EXPECT_THROW(delta(source, target, rejected, OutputFormat::GeoJson), InvalidArgsException);

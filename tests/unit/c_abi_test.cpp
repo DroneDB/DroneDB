@@ -175,6 +175,8 @@ namespace
         EXPECT_DDB_INVALID(DDBSearch(ds.path().c_str(), "*", nullptr, "json"));
         EXPECT_DDB_INVALID(DDBSearch(ds.path().c_str(), "*", &out, nullptr));
         EXPECT_DDB_INVALID(DDBSearch(ds.path().c_str(), "*", &out, ""));
+        EXPECT_DDB_INVALID(DDBSearch(ds.path().c_str(), "*", &out, "geojson"));
+        EXPECT_DDB_INVALID(DDBSearch(ds.path().c_str(), "*", &out, "xml"));
 
         ASSERT_DDB_OK(DDBSearch(ds.path().c_str(), "*.txt", &out, "json"));
         const auto j = json::parse(take(out));
@@ -325,6 +327,8 @@ namespace
         EXPECT_DDB_INVALID(DDBDelta(sourceStamp.c_str(), targetStamp.c_str(), nullptr, "json"));
         EXPECT_DDB_INVALID(DDBDelta(sourceStamp.c_str(), targetStamp.c_str(), &out, nullptr));
         EXPECT_DDB_INVALID(DDBDelta(sourceStamp.c_str(), targetStamp.c_str(), &out, ""));
+        // an unknown format is an error, not an empty answer
+        EXPECT_DDB_INVALID(DDBDelta(sourceStamp.c_str(), targetStamp.c_str(), &out, "xml"));
         EXPECT_DDB_INVALID(DDBDelta("not json", targetStamp.c_str(), &out, "json"));
 
         // What the target needs to become the source: add a.txt

@@ -468,7 +468,7 @@ namespace
 
         std::ostringstream out;
 
-        listIndex(db.get(), toList, out, "text");
+        listIndex(db.get(), toList, out, OutputFormat::Text);
 
         std::cout << out.str() << std::endl;
         EXPECT_EQ(out.str(), "1JI_0065.JPG\n");
@@ -492,7 +492,7 @@ namespace
 
         std::ostringstream out;
 
-        listIndex(db.get(), toList, out, "text");
+        listIndex(db.get(), toList, out, OutputFormat::Text);
 
         std::cout << out.str() << std::endl;
 
@@ -517,7 +517,7 @@ namespace
 
         std::ostringstream out;
 
-        listIndex(db.get(), toList, out, "text");
+        listIndex(db.get(), toList, out, OutputFormat::Text);
 
         std::cout << out.str() << std::endl;
         EXPECT_EQ(out.str(), "1JI_0064.JPG\n1JI_0065.JPG\npics\npics.JPG\npics2\n");
@@ -543,7 +543,7 @@ namespace
 
         std::ostringstream out;
 
-        listIndex(db.get(), toList, out, "text");
+        listIndex(db.get(), toList, out, OutputFormat::Text);
 
         std::cout << out.str() << std::endl;
         EXPECT_EQ(out.str(), "pics/IMG_20160826_181302.jpg\npics/IMG_20160826_181305.jpg\npics/IMG_20160826_181309.jpg\npics/IMG_20160826_181314.jpg\npics/IMG_20160826_181317.jpg\npics/pics2\n");
@@ -567,7 +567,7 @@ namespace
 
         std::ostringstream out;
 
-        listIndex(db.get(), toList, out, "text");
+        listIndex(db.get(), toList, out, OutputFormat::Text);
 
         std::cout << out.str() << std::endl;
         EXPECT_EQ(out.str(), "pics/IMG_20160826_181302.jpg\npics/IMG_20160826_181305.jpg\npics/IMG_20160826_181309.jpg\npics/IMG_20160826_181314.jpg\npics/IMG_20160826_181317.jpg\npics/pics2\n");
@@ -591,7 +591,7 @@ namespace
 
         std::ostringstream out;
 
-        listIndex(db.get(), toList, out, "text");
+        listIndex(db.get(), toList, out, OutputFormat::Text);
 
         std::cout << out.str() << std::endl;
         EXPECT_EQ(out.str(), "pics/pics2/IMG_20160826_181305.jpg\npics/pics2/IMG_20160826_181309.jpg\n");
@@ -616,7 +616,7 @@ namespace
 
         std::ostringstream out;
 
-        listIndex(db.get(), toList, out, "json");
+        listIndex(db.get(), toList, out, OutputFormat::Json);
 
         auto j = json::parse(out.str());
 
@@ -648,7 +648,7 @@ namespace
 
         std::ostringstream out;
 
-        listIndex(db.get(), toList, out, "text");
+        listIndex(db.get(), toList, out, OutputFormat::Text);
 
         std::cout << out.str() << std::endl;
         EXPECT_EQ(out.str(), "pics/IMG_20160826_181314.jpg\n");
@@ -672,7 +672,7 @@ namespace
 
         std::ostringstream out;
 
-        listIndex(db.get(), toList, out, "text");
+        listIndex(db.get(), toList, out, OutputFormat::Text);
 
         std::cout << out.str() << std::endl;
         EXPECT_EQ(out.str(), "pics/IMG_20160826_181314.jpg\n");
@@ -696,7 +696,7 @@ namespace
 
         std::ostringstream out;
 
-        listIndex(db.get(), toList, out, "text");
+        listIndex(db.get(), toList, out, OutputFormat::Text);
 
         std::cout << out.str() << std::endl;
         EXPECT_EQ(out.str(), "pics/IMG_20160826_181314.jpg\n");
@@ -720,7 +720,7 @@ namespace
 
         std::ostringstream out;
 
-        listIndex(db.get(), toList, out, "text", true);
+        listIndex(db.get(), toList, out, OutputFormat::Text, true);
 
         std::cout << out.str() << std::endl;
         EXPECT_EQ(out.str(), "1JI_0064.JPG\n1JI_0065.JPG\npics\npics.JPG\npics/IMG_20160826_181302.jpg\npics/IMG_20160826_181305.jpg\npics/IMG_20160826_181309.jpg\npics/IMG_20160826_181314.jpg\npics/IMG_20160826_181317.jpg\npics/pics2\npics/pics2/IMG_20160826_181305.jpg\npics/pics2/IMG_20160826_181309.jpg\npics2\npics2/IMG_20160826_181305.jpg\npics2/IMG_20160826_181309.jpg\npics2/pics\npics2/pics/IMG_20160826_181302.jpg\npics2/pics/IMG_20160826_181305.jpg\npics2/pics/IMG_20160826_181309.jpg\npics2/pics/IMG_20160826_181314.jpg\npics2/pics/IMG_20160826_181317.jpg\npics2/pics/pics2\npics2/pics/pics2/IMG_20160826_181305.jpg\npics2/pics/pics2/IMG_20160826_181309.jpg\n");
@@ -744,7 +744,7 @@ namespace
 
         std::ostringstream out;
 
-        listIndex(db.get(), toList, out, "text", true);
+        listIndex(db.get(), toList, out, OutputFormat::Text, true);
 
         std::cout << out.str() << std::endl;
         EXPECT_EQ(out.str(), "pics/IMG_20160826_181302.jpg\npics/IMG_20160826_181305.jpg\npics/IMG_20160826_181309.jpg\npics/IMG_20160826_181314.jpg\npics/IMG_20160826_181317.jpg\npics/pics2\npics/pics2/IMG_20160826_181305.jpg\npics/pics2/IMG_20160826_181309.jpg\n");
@@ -768,7 +768,7 @@ namespace
 
         std::ostringstream out;
 
-        listIndex(db.get(), toList, out, "text", true, 2);
+        listIndex(db.get(), toList, out, OutputFormat::Text, true, 2);
 
         std::cout << out.str() << std::endl;
         EXPECT_EQ(out.str(), "pics/IMG_20160826_181302.jpg\npics/IMG_20160826_181305.jpg\npics/IMG_20160826_181309.jpg\npics/IMG_20160826_181314.jpg\npics/IMG_20160826_181317.jpg\npics/pics2\n");
@@ -792,7 +792,7 @@ namespace
 
         std::ostringstream out;
 
-        listIndex(db.get(), toList, out, "text", true);
+        listIndex(db.get(), toList, out, OutputFormat::Text, true);
 
         std::cout << out.str() << std::endl;
         EXPECT_EQ(out.str(), "pics\npics.JPG\npics/IMG_20160826_181302.jpg\npics/IMG_20160826_181305.jpg\npics/IMG_20160826_181309.jpg\npics/IMG_20160826_181314.jpg\npics/IMG_20160826_181317.jpg\npics/pics2\npics/pics2/IMG_20160826_181305.jpg\npics/pics2/IMG_20160826_181309.jpg\npics2\npics2/IMG_20160826_181305.jpg\npics2/IMG_20160826_181309.jpg\npics2/pics\npics2/pics/IMG_20160826_181302.jpg\npics2/pics/IMG_20160826_181305.jpg\npics2/pics/IMG_20160826_181309.jpg\npics2/pics/IMG_20160826_181314.jpg\npics2/pics/IMG_20160826_181317.jpg\npics2/pics/pics2\npics2/pics/pics2/IMG_20160826_181305.jpg\npics2/pics/pics2/IMG_20160826_181309.jpg\n");
@@ -816,7 +816,7 @@ namespace
 
         std::ostringstream out;
 
-        listIndex(db.get(), toList, out, "text", true, 2);
+        listIndex(db.get(), toList, out, OutputFormat::Text, true, 2);
 
         std::cout << out.str() << std::endl;
         EXPECT_EQ(out.str(), "pics\npics.JPG\npics/IMG_20160826_181302.jpg\npics/IMG_20160826_181305.jpg\npics/IMG_20160826_181309.jpg\npics/IMG_20160826_181314.jpg\npics/IMG_20160826_181317.jpg\npics/pics2\npics2\npics2/IMG_20160826_181305.jpg\npics2/IMG_20160826_181309.jpg\npics2/pics\n");
@@ -841,7 +841,7 @@ namespace
         std::vector<std::string> toList;
         toList.emplace_back((testFolder / "*").string());
         std::ostringstream out;
-        listIndex(db, toList, out, "text", true);
+        listIndex(db, toList, out, OutputFormat::Text, true);
         const auto str = out.str();
         std::cout << str << std::endl;
         return str;

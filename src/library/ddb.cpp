@@ -480,7 +480,7 @@ DDBErr DDBInfo(const char** paths,
             throw InvalidArgsException("Invalid max recursion depth");
 
         std::ostringstream ss;
-        info(input, ss, format, recursive, maxRecursionDepth, geometry, withHash, stopOnError);
+        info(input, ss, parseOutputFormat(format), recursive, maxRecursionDepth, geometry, withHash, stopOnError);
         return ss.str();
     });
 }
@@ -540,7 +540,7 @@ DDBErr DDBList(const char* ddbPath,
         const auto db = ddb::open(std::string(ddbPath), true);
 
         std::ostringstream ss;
-        listIndex(db.get(), pathList, ss, format, recursive, maxRecursionDepth);
+        listIndex(db.get(), pathList, ss, parseOutputFormat(format, {OutputFormat::Text, OutputFormat::Json}), recursive, maxRecursionDepth);
         return ss.str();
     });
 }
@@ -599,7 +599,7 @@ DDBErr DDBSearch(const char* ddbPath, const char* query, char** output, const ch
         const auto db = ddb::open(std::string(ddbPath), false);
 
         std::ostringstream ss;
-        searchIndex(db.get(), query, ss, format);
+        searchIndex(db.get(), query, ss, parseOutputFormat(format, {OutputFormat::Text, OutputFormat::Json}));
         return ss.str();
     });
 }
@@ -854,7 +854,7 @@ DDBErr DDBDelta(const char* ddbSourceStamp,
         const json dest = parseJsonArg(ddbTargetStamp);
 
         std::ostringstream ss;
-        delta(source, dest, ss, format);
+        delta(source, dest, ss, parseOutputFormat(format, {OutputFormat::Text, OutputFormat::Json}));
         return ss.str();
     });
 }

@@ -4,8 +4,10 @@
 #ifndef CMD_OPTIONS_H
 #define CMD_OPTIONS_H
 
+#include <initializer_list>
 #include <string>
 #include <cxxopts.hpp>
+#include "output_format.h"
 
 namespace cmd
 {
@@ -23,6 +25,12 @@ namespace cmd
 
     // -f, --format "Output format (<formats>)", default "text". Command::output() writes it.
     void addFormatOption(cxxopts::Options &opts, const std::string &formats = "text|json");
+
+    // The format the user gave with -f, parsed once at the boundary of the command: an
+    // InvalidArgsException "Invalid format <name>" for a name the command does not accept
+    ddb::OutputFormat getFormatOption(const cxxopts::ParseResult &opts,
+                                      std::initializer_list<ddb::OutputFormat> allowed = {
+                                          ddb::OutputFormat::Text, ddb::OutputFormat::Json});
 
     // -k, --insecure: do not verify the TLS certificate of a registry
     void addInsecureOption(cxxopts::Options &opts);

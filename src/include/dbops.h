@@ -150,20 +150,10 @@ namespace ddb
     // doUpdate() storing `mtime` (with sub-second precision) instead of e.mtime
     DDB_DLL void doUpdate(Statement *updateQ, const Entry &e, double mtime);
 
-    // listIndex and searchIndex write text or JSON (writeEntries)
+    // listIndex and searchIndex write text or JSON (writeEntries). Hosts that hold the format as
+    // text parse it first (parseOutputFormat): an unknown name throws an InvalidArgsException.
     DDB_DLL void listIndex(Database *db, const std::vector<std::string> &paths, std::ostream &out, OutputFormat format, bool recursive = false, int maxRecursionDepth = 0);
     DDB_DLL void searchIndex(Database *db, const std::string &query, std::ostream &out, OutputFormat format);
-
-    // The same for a caller that holds the format as text (the C API, the CLI): parsed first, an
-    // unknown or unsupported name throws an InvalidArgsException
-    inline void listIndex(Database *db, const std::vector<std::string> &paths, std::ostream &out, const std::string &format, bool recursive = false, int maxRecursionDepth = 0)
-    {
-        listIndex(db, paths, out, parseOutputFormat(format, {OutputFormat::Text, OutputFormat::Json}), recursive, maxRecursionDepth);
-    }
-    inline void searchIndex(Database *db, const std::string &query, std::ostream &out, const std::string &format)
-    {
-        searchIndex(db, query, out, parseOutputFormat(format, {OutputFormat::Text, OutputFormat::Json}));
-    }
     DDB_DLL void addToIndex(Database *db, const std::vector<std::string> &paths, AddCallback callback = nullptr);
 
     // A file (absolute path) with the SHA-256 the caller already knows; empty for folders.
