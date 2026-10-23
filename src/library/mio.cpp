@@ -4,6 +4,7 @@
 #include "mio.h"
 #include "utils.h"
 
+#include <cerrno>
 #include <cmath>
 #include <fstream>
 
@@ -840,6 +841,67 @@ namespace ddb
             {
                 throw FSException("Cannot move " + io::toUtf8(from) + " --> " + io::toUtf8(to) +
                                   " (" + e.message() + ")", e);
+            }
+        }
+
+        void writeFileAtomic(const fs::path &target, const std::string &content, const std::string &what,
+                             bool ownerOnly, const std::string &tempTag)
+        {
+            const fs::path temporary = concat(target, tempTag + utils::generateRandomString(16));
+            try
+            {
+                std::ofstream out;
+                errno = 0;
+                out.open(temporary, std::ios::binary | std::ios::trunc);
+                const int openError = errno;
+                if (!out.is_open())
+                    throw FSException("Cannot open " + what + " " + toUtf8(temporary),
+                                      std::error_code(openError, std::generic_category()));
+#ifndef WIN32
+                if (ownerOnly)
+                {
+                    // Still empty: nothing readable by others exists at any time
+                    std::error_code permError;
+                    fs::permissions(temporary, fs::perms::owner_read | fs::perms::owner_write,
+                                    fs::perm_options::replace, permError);
+                    if (permError)
+                        throw FSException("Cannot restrict " + what + " " + toUtf8(temporary) + " to its owner (" +
+                                              permError.message() + ")",
+                                          permError);
+                }
+#else
+                (void)ownerOnly;
+#endif
+                errno = 0;
+                out << content;
+                out.flush();
+                const int writeError = errno;
+                if (!out)
+                    throw FSException("Cannot write " + what + " " + toUtf8(temporary),
+                                      std::error_code(writeError, std::generic_category()));
+                errno = 0;
+                out.close();
+                const int closeError = errno;
+                if (out.fail())
+                    throw FSException("Cannot close " + what + " " + toUtf8(temporary),
+                                      std::error_code(closeError, std::generic_category()));
+#ifdef WIN32
+                // std::filesystem::rename does not replace an existing file on Windows.
+                if (!MoveFileExW(temporary.c_str(), target.c_str(),
+                                 MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+                {
+                    const std::error_code ec(GetLastError(), std::system_category());
+                    throw FSException("Cannot replace " + what + ": " + ec.message(), ec);
+                }
+#else
+                io::rename(temporary, target);
+#endif
+            }
+            catch (...)
+            {
+                std::error_code ignored;
+                fs::remove(temporary, ignored);
+                throw;
             }
         }
 

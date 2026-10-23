@@ -9,14 +9,9 @@
 #include "build.h"
 
 #include <cctype>
-#include <cerrno>
 #include <fstream>
 #include <iterator>
 #include <optional>
-
-#ifdef _WIN32
-#include <windows.h>
-#endif
 
 #include "build_internal.h"
 #include "build_layout.h"
@@ -29,49 +24,11 @@ namespace ddb {
 
 namespace {
 
-// Writes content into a sibling "<marker>.tmp-<rand16>" (see pendingMarkerTempInfix()) and
-// renames it onto pendingPath, so a reader sees the old marker or the new one, never a part.
-// Throws FSException; the sibling is removed and the previous marker kept on any failure
-// (especially ENOSPC: a full disk must never remove the last pending marker).
+// A reader sees the old marker or the new one, never a part; the previous marker is kept on any
+// failure (especially ENOSPC: a full disk must never remove the last pending marker). The sibling
+// is "<marker>.tmp-<rand16>" (see pendingMarkerTempInfix()). Throws FSException.
 void writeMarkerAtomically(const fs::path& pendingPath, const std::string& content) {
-    const fs::path temporary =
-        io::concat(pendingPath, PendingMarkerTempTag + utils::generateRandomString(16));
-    try {
-        std::ofstream out;
-        errno = 0;
-        out.open(temporary, std::ios::binary | std::ios::trunc);
-        const int openError = errno;
-        if (!out.is_open())
-            throw FSException("Cannot open pending marker " + io::toUtf8(temporary),
-                              std::error_code(openError, std::generic_category()));
-        errno = 0;
-        out << content;
-        out.flush();
-        const int writeError = errno;
-        if (!out)
-            throw FSException("Cannot write pending marker " + io::toUtf8(temporary),
-                              std::error_code(writeError, std::generic_category()));
-        errno = 0;
-        out.close();
-        const int closeError = errno;
-        if (out.fail())
-            throw FSException("Cannot close pending marker " + io::toUtf8(temporary),
-                              std::error_code(closeError, std::generic_category()));
-#ifdef _WIN32
-        // std::filesystem::rename does not replace an existing file on Windows.
-        if (!MoveFileExW(temporary.c_str(), pendingPath.c_str(),
-                         MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-            const std::error_code ec(GetLastError(), std::system_category());
-            throw FSException("Cannot replace pending marker: " + ec.message(), ec);
-        }
-#else
-        io::rename(temporary, pendingPath);
-#endif
-    } catch (...) {
-        std::error_code ignored;
-        fs::remove(temporary, ignored);
-        throw;
-    }
+    io::writeFileAtomic(pendingPath, content, "pending marker", false, PendingMarkerTempTag);
 }
 
 }  // namespace

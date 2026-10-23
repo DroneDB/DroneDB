@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "../../vendor/base64/base64.h"
 #include "authmanager.h"
+#include "exceptions.h"
 #include "logger.h"
 #include "mio.h"
 
@@ -26,11 +27,13 @@ namespace ddb
         }
     }
 
+    // The file holds passwords (base64 is an encoding, not protection): owner only (0600), and
+    // replaced atomically so a crash or a full disk never leaves a half-written credentials file
+    // that the next run would read as empty and overwrite. Throws FSException.
     void AuthManager::WriteToDisk()
     {
-        std::ofstream fout(authFile);
-        fout << auth;
-        LOGD << "Wrote " << authFile;
+        io::writeFileAtomic(authFile, auth.dump(), "credentials file", true);
+        LOGD << "Wrote " << io::toUtf8(authFile);
     }
 
     AuthManager::AuthManager(const fs::path &authFile) : authFile(authFile)
@@ -42,7 +45,15 @@ namespace ddb
         {
             LOGD << "Initializing " << authFile;
             auth["auths"] = {};
-            WriteToDisk();
+            try
+            {
+                WriteToDisk();
+            }
+            catch (const FSException &e)
+            {
+                // Nothing to lose yet: a read-only profile folder only fails the saves that follow
+                LOGW << "Cannot create " << io::toUtf8(authFile) << ": " << e.what();
+            }
         }
     }
 
