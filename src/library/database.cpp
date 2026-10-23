@@ -399,19 +399,15 @@ END;
     {
         // The checksum is a SHA-256 over every path+hash (path order), then every meta id
         // (id order). Clients compare it across versions: keep the input and order fixed.
-        EvpMdCtxPtr ctx(EVP_MD_CTX_new());
-        if (!ctx) throw AppException("Failed to create EVP_MD_CTX for SHA256");
-        if (EVP_DigestInit_ex(ctx.get(), EVP_sha256(), NULL) != 1) {
-            throw AppException("Failed to initialize SHA256 digest");
-        }
+        Sha256 checksum;
 
         auto q = this->query("SELECT path,hash FROM entries ORDER BY path ASC");
         while (q->fetch())
         {
             const std::string p = q->getText(0);
             const std::string h = q->getText(1);
-            safeDigestUpdate(ctx.get(), p.c_str(), p.length());
-            safeDigestUpdate(ctx.get(), h.c_str(), h.length());
+            checksum.update(p);
+            checksum.update(h);
             if (onEntry) onEntry(p, h);
         }
 
@@ -419,19 +415,11 @@ END;
         while (q->fetch())
         {
             const std::string id = q->getText(0);
-            safeDigestUpdate(ctx.get(), id.c_str(), id.length());
+            checksum.update(id);
             if (onMeta) onMeta(id);
         }
 
-        unsigned char hash[EVP_MAX_MD_SIZE];
-        unsigned int hashLen;
-        safeDigestFinal(ctx.get(), hash, &hashLen);
-
-        std::ostringstream oss;
-        for (unsigned int i = 0; i < hashLen; ++i) {
-            oss << std::hex << std::setfill('0') << std::setw(2) << (int)hash[i];
-        }
-        return oss.str();
+        return checksum.finishHex();
     }
 
     json Database::getStamp() const

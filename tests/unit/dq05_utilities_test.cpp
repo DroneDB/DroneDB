@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "exceptions.h"
+#include "hash.h"
 #include "gtest/gtest.h"
 #include "mathutil.h"
 #include "mio.h"
@@ -288,6 +289,50 @@ TEST(Dq05MioPaths, SamePathOfMissingFilesIsLexical) {
     EXPECT_TRUE(io::isSamePath(base / "x" / ".." / "y", base / "y"));
     EXPECT_FALSE(io::isSamePath(base / "x", base / "y"));
     EXPECT_FALSE(io::isSamePath("", base));
+}
+
+// ---------------------------------------------------------------- hashes
+
+TEST(Dq05Hash, Sha256KnownVectors) {
+    EXPECT_EQ(Hash::strSHA256(""), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+    EXPECT_EQ(Hash::strSHA256("abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+}
+
+TEST(Dq05Hash, IncrementalSha256EqualsOneShot) {
+    const std::string text(100000, 'x');
+    Sha256 sha;
+    for (size_t i = 0; i < text.size(); i += 7777)
+        sha.update(std::string_view(text).substr(i, 7777));
+    EXPECT_EQ(sha.finishHex(), Hash::strSHA256(text));
+
+    const unsigned char bytes[] = {'a', 'b', 'c'};
+    Sha256 fromBytes;
+    fromBytes.update(std::span<const unsigned char>(bytes));
+    EXPECT_EQ(fromBytes.finishHex(), Hash::strSHA256("abc"));
+}
+
+// More than one read buffer (about 1 MB), so the loop of fileSHA256 runs several times
+TEST_F(Dq05Mio, FileSha256EqualsTheHashOfItsContent) {
+    std::string content;
+    for (int i = 0; i < 600000; i++)
+        content += std::to_string(i) + ",";
+    const fs::path p = root / "big.txt";
+    {
+        std::ofstream out(p, std::ios::binary);
+        out << content;
+    }
+    ASSERT_GT(content.size(), 2u * 1008u * 1024u);
+    EXPECT_EQ(Hash::fileSHA256(io::toUtf8(p)), Hash::strSHA256(content));
+    EXPECT_THROW(Hash::fileSHA256(io::toUtf8(root / "missing")), FSException);
+}
+
+// The names of thumbnails and cache entries come from it: its output must never change
+TEST(Dq05Hash, Crc64KnownVectors) {
+    EXPECT_EQ(Hash::strCRC64(""), "0");
+    EXPECT_EQ(Hash::strCRC64("123456789"), "e9c6d914c4b8d9ca");  // the check value of CRC-64/Jones
+    const std::string withNul("a\0b", 3);
+    EXPECT_NE(Hash::strCRC64(withNul), Hash::strCRC64("a"));
+    EXPECT_EQ(Hash::strCRC64(std::string("123456789")), Hash::strCRC64("123456789"));
 }
 
 // ---------------------------------------------------------------- random names

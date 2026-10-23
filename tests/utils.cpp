@@ -151,7 +151,7 @@ std::vector<ddb::SimpleEntry> getEntries(const fs::path &path)
 
 std::string calculateHash(const fs::path &file)
 {
-    return Hash::fileSHA256(file.string());
+    return ddb::Hash::fileSHA256(file.string());
 }
 
 void createFile(const fs::path& filePath) {
