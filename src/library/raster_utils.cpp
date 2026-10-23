@@ -44,7 +44,7 @@ void premaskNodata(const std::vector<float*>& bandPtrs,
         if (!masked) {
             for (int b = 0; b < bandCount; b++) {
                 if (b == info.alphaBandIdx) continue;
-                if (isNodata(static_cast<double>(bandPtrs[b][i]), info.bands[b])) {
+                if (isNodata(bandPtrs[b][i], info.bands[b])) {
                     masked = true;
                     break;
                 }

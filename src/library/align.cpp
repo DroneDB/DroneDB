@@ -622,8 +622,7 @@ static double computeZOffset(const std::string &alignedPath,
     diffs.reserve(bufA.size());
     for (size_t i = 0; i < bufA.size(); i++) {
         if (std::isnan(bufA[i]) || std::isnan(bufR[i])) continue;
-        if (ndA.has && std::abs(bufA[i] - static_cast<float>(ndA.value)) < 1e-3f) continue;
-        if (ndR.has && std::abs(bufR[i] - static_cast<float>(ndR.value)) < 1e-3f) continue;
+        if (isNodata(bufA[i], ndA) || isNodata(bufR[i], ndR)) continue;
         diffs.push_back(bufR[i] - bufA[i]);
     }
     if (diffs.empty()) return 0.0;
@@ -643,7 +642,7 @@ static void addZOffset(const std::string &path, double zOffset) {
     for (int r = 0; r < H; r++) {
         GDALRasterIO(hBand, GF_Read, 0, r, W, 1, row.data(), W, 1, GDT_Float32, 0, 0);
         for (float &v : row)
-            if (!nd.has || std::abs(v - static_cast<float>(nd.value)) > 1e-3f)
+            if (!isNodata(v, nd))
                 v += static_cast<float>(zOffset);
         GDALRasterIO(hBand, GF_Write, 0, r, W, 1, row.data(), W, 1, GDT_Float32, 0, 0);
     }

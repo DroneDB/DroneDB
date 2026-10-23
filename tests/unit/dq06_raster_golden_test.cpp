@@ -29,6 +29,7 @@
 #include "cog_utils.h"
 #include "ddb.h"
 #include "dq06_golden_support.h"
+#include "dq06_raster_support.h"
 #include "gdal_inc.h"
 #include "gdaltiler.h"
 #include "mask.h"
@@ -39,56 +40,15 @@ namespace
 {
     using namespace ddb;
 
-    constexpr double kNodata = -9999.0;
-
-    // ---- the fixtures ----------------------------------------------------------------
-
-    // Five bands of reflectance (R, G, B, RedEdge, NIR) of a 128 x 128 raster in Web
-    // Mercator. Only exact IEEE operations, so every platform writes the same floats.
-    double reflectance(int band, int x, int y)
-    {
-        const int cell = (x * (2 + band) + y * (11 - band) + 17 * band) % 97;
-        return 0.05 + (cell / 97.0) * 0.7;
-    }
-
-    constexpr double kOriginX = 1113000.0;
-    constexpr double kOriginY = 5621000.0;
-    constexpr double kPixel = 4.0;
-    constexpr int kSize = 128;
-
-    // nodata in band 3 over (20..39, 20..39) and in band 5 over (80..99, 60..79)
-    double reflectanceWithNodata(int band, int x, int y)
-    {
-        if (band == 3 && x >= 20 && x < 40 && y >= 20 && y < 40)
-            return kNodata;
-        if (band == 5 && x >= 80 && x < 100 && y >= 60 && y < 80)
-            return kNodata;
-        return reflectance(band, x, y);
-    }
-
-    void setNodata(const fs::path &path, double nodata)
-    {
-        std::unique_ptr<GDALDataset> ds(static_cast<GDALDataset *>(GDALOpen(path.string().c_str(), GA_Update)));
-        ASSERT_NE(ds, nullptr);
-        for (int b = 1; b <= ds->GetRasterCount(); b++)
-            ds->GetRasterBand(b)->SetNoDataValue(nodata);
-    }
-
-    fs::path makeMultispectral(const fs::path &path)
-    {
-        testutils::GeoRasterSpec spec;
-        spec.width = spec.height = kSize;
-        spec.bands = 5;
-        spec.type = GDT_Float32;
-        spec.epsg = 3857;
-        spec.originX = kOriginX;
-        spec.originY = kOriginY;
-        spec.pixelSize = kPixel;
-        spec.value = reflectanceWithNodata;
-        testutils::createGeoRaster(path, spec);
-        setNodata(path, kNodata);
-        return path;
-    }
+    using dq06::kNodata;
+    using dq06::kOriginX;
+    using dq06::kOriginY;
+    using dq06::kPixel;
+    using dq06::kSize;
+    using dq06::makeMultispectral;
+    using dq06::makeRaster;
+    using dq06::reflectance;
+    using dq06::setNodata;
 
     // RGB + alpha, alpha 0 over (30..59, 30..59)
     fs::path makeRgba(const fs::path &path)
@@ -443,35 +403,6 @@ namespace
     }
 
     // ---- GeoTIFF creation options ------------------------------------------------------
-
-    fs::path makeRaster(const fs::path &path, int bands, GDALDataType type, bool alpha, std::optional<double> nodata,
-                        int size = 96)
-    {
-        testutils::GeoRasterSpec spec;
-        spec.width = spec.height = size;
-        spec.bands = bands;
-        spec.type = type;
-        spec.alphaBand = alpha;
-        spec.epsg = 32632;
-        spec.originX = 500000.0;
-        spec.originY = 4500000.0;
-        spec.pixelSize = 1.0;
-        const double scale = type == GDT_Byte ? 255.0 : 1.0;
-        spec.value = [scale](int band, int x, int y) {
-            return std::floor(((x * (3 + band) + y * (7 - band) + 13 * band) % 251) / 250.0 * scale * 100.0) / 100.0;
-        };
-        testutils::createGeoRaster(path, spec);
-        if (nodata)
-            setNodata(path, *nodata);
-        if (bands == 4 && !alpha)
-        {
-            // RGB + NIR: band 4 is not an alpha channel
-            std::unique_ptr<GDALDataset> ds(static_cast<GDALDataset *>(GDALOpen(path.string().c_str(), GA_Update)));
-            for (int b = 1; b <= 4; b++)
-                ds->GetRasterBand(b)->SetColorInterpretation(GCI_GrayIndex);
-        }
-        return path;
-    }
 
     // A raster without georeference
     fs::path makePlain(const fs::path &path, GDALDataType type, int size)

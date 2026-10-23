@@ -22,9 +22,21 @@ struct BandNodata {
 // Reads the nodata value of a band. The one place that calls GDALGetRasterNoDataValue.
 DDB_DLL BandNodata readBandNodata(GDALRasterBandH band);
 
-// True when the sample v is the band's nodata value, compared exactly (a NaN nodata value matches
-// a NaN sample). False when the band declares none. A sample that is NaN or infinite without
-// matching is not nodata here: callers that exclude non-finite samples test std::isfinite as well.
+// The one rule that says whether a sample is the band's nodata value: an exact match in the
+// precision of the sample, GDAL's own rule for its nodata masks. A NaN nodata value matches NaN
+// samples and nothing else; a band that declares none has no nodata sample. A sample that is
+// NaN or infinite without matching is not nodata here: callers that exclude every non-finite
+// sample test std::isfinite as well.
+//
+// float samples (what the analyses read, whatever the band's type) are compared with the
+// nodata value rounded to float, so -9999.9 declared by a Float64 band matches the float32
+// sample read from it. double samples are compared as they are.
+inline bool isNodata(float v, const BandNodata& nd) {
+    if (!nd.has) return false;
+    if (std::isnan(nd.value)) return std::isnan(v);
+    return v == static_cast<float>(nd.value);
+}
+
 inline bool isNodata(double v, const BandNodata& nd) {
     if (!nd.has) return false;
     if (std::isnan(nd.value)) return std::isnan(v);

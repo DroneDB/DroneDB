@@ -513,13 +513,8 @@ namespace ddb
         warp.reset();
         vsiTif.reset();
 
-        // Helper to detect nodata in a single sample (tolerant of float NaN).
-        auto isND = [](double v, const BandNodata &nd) {
-            if (std::isnan(v)) return true;
-            if (!nd.has) return false;
-            if (std::isnan(nd.value)) return true;
-            return v == nd.value;
-        };
+        // Helper to detect nodata in a single sample (NaN is always nodata here).
+        auto isND = [](float v, const BandNodata &nd) { return std::isnan(v) || isNodata(v, nd); };
 
         // Step 3: compute the index per-pixel into RGBA byte buffer.
         std::vector<uint8_t> rgba(static_cast<size_t>(npx) * 4);
@@ -527,7 +522,7 @@ namespace ddb
             double v;
             const double v1 = b1[i], v2 = b2[i];
             const bool nodataHere =
-                isND(v1, nd1) || isND(v2, nd2) ||
+                isND(b1[i], nd1) || isND(b2[i], nd2) ||
                 (idx.b3 > 0 && isND(b3[i], nd3));
             if (nodataHere) {
                 v = std::nan("");

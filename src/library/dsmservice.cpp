@@ -48,7 +48,7 @@ std::optional<float> DSMService::lookupCache(double latitude, double longitude)
             if (it.second.data.empty()) continue;
 
             float elevation = it.second.getElevation(latitude, longitude);
-            if (!it.second.hasNodata || !ddb::sameFloat(elevation, it.second.nodata))
+            if (!ddb::isNodata(elevation, it.second.nodata))
             {
                 return elevation;
             }
@@ -253,9 +253,7 @@ bool DSMService::addGeoTIFFToCache(const fs::path &filePath, double latitude, do
         throw GDALException("More than 1 raster band found in elevation raster: " + ddb::io::toUtf8(filePath));
 
     GDALRasterBandH hBand = GDALGetRasterBand(hDataset, 1);
-    const BandNodata nodata = readBandNodata(hBand);
-    e.hasNodata = nodata.has ? 1 : 0;
-    e.nodata = static_cast<float>(nodata.value);
+    e.nodata = readBandNodata(hBand);
 
     Point2D min(0, e.height);
     Point2D max(e.width, 0);

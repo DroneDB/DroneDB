@@ -224,7 +224,7 @@ std::string calculateVolumeJson(const std::string &rasterPath,
 
     const auto isValid = [&](float v) {
         if (!std::isfinite(v)) return false;
-        if (dem.nodata.has && std::fabs(static_cast<double>(v) - dem.nodata.value) < 1e-9) return false;
+        if (isNodata(v, dem.nodata)) return false;
         return true;
     };
 

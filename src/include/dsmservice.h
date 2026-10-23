@@ -13,6 +13,7 @@
 #include <mutex>
 #include <optional>
 #include "gdal_inc.h"
+#include "raster_utils.h"
 #include "userprofile.h"
 #include "geo.h"
 #include "ddb_export.h"
@@ -20,14 +21,13 @@
 struct DSMCacheEntry
 {
     unsigned int width, height;
-    int hasNodata;
-    float nodata;
+    ddb::BandNodata nodata;
 
     double geoTransform[6];
     std::vector<float> data;
     ddb::BoundingBox<ddb::Point2D> bbox;
 
-    DDB_DLL DSMCacheEntry() : width(0), height(0), hasNodata(0), nodata(0)
+    DDB_DLL DSMCacheEntry() : width(0), height(0)
     {
         memset(geoTransform, 0, sizeof(double) * 6);
     }

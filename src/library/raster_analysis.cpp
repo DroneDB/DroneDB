@@ -381,7 +381,7 @@ std::string getRasterAreaStatsJson(const std::string &filePath,
                 values.reserve(roiCount);
                 for (float v : roiData) {
                     if (!std::isfinite(v)) continue;
-                    if (noData.has && std::abs(static_cast<double>(v) - noData.value) < 1e-6) continue;
+                    if (isNodata(v, noData)) continue;
                     values.push_back(v);
                 }
 

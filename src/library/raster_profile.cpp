@@ -147,9 +147,8 @@ std::string getRasterProfileJson(const std::string &filePath,
         throw InvalidArgsException("LineString has zero length");
 
     // --- Value sampling helper ---
-    auto isNoDataValue = [&](double v) {
-        if (!std::isfinite(v)) return true;
-        return dem.nodata.has && std::abs(v - dem.nodata.value) < 1e-6;
+    auto isNoDataValue = [&](float v) {
+        return !std::isfinite(v) || isNodata(v, dem.nodata);
     };
 
     auto applyThermal = [&](double v) -> double {
@@ -231,10 +230,10 @@ std::string getRasterProfileJson(const std::string &filePath,
         }
 
         // Unpack (supports 1x1, 1x2, 2x1, 2x2 edge cases).
-        const double v00 = block[0];
-        const double v10 = (blockW > 1) ? block[1] : v00;
-        const double v01 = (blockH > 1) ? block[blockW] : v00;
-        const double v11 = (blockW > 1 && blockH > 1) ? block[blockW + 1]
+        const float v00 = block[0];
+        const float v10 = (blockW > 1) ? block[1] : v00;
+        const float v01 = (blockH > 1) ? block[blockW] : v00;
+        const float v11 = (blockW > 1 && blockH > 1) ? block[blockW + 1]
                           : (blockW > 1 ? v10 : (blockH > 1 ? v01 : v00));
 
         if (isNoDataValue(v00) || isNoDataValue(v10) ||
