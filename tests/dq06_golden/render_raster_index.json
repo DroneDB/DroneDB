@@ -1,0 +1,140 @@
+{
+ "EVI_image/jpeg": {
+  "alpha": false,
+  "bands": 3,
+  "height": 80,
+  "width": 80
+ },
+ "EVI_image/png": {
+  "alpha": true,
+  "bands": 4,
+  "height": 80,
+  "pixels": "c41e80d449bf8026",
+  "transparent": 2432,
+  "width": 80
+ },
+ "EVI_image/tiff": {
+  "alpha": true,
+  "bands": 4,
+  "height": 80,
+  "pixels": "c41e80d449bf8026",
+  "transparent": 2432,
+  "width": 80
+ },
+ "NDRE_image/jpeg": {
+  "alpha": false,
+  "bands": 3,
+  "height": 80,
+  "width": 80
+ },
+ "NDRE_image/png": {
+  "alpha": true,
+  "bands": 4,
+  "height": 80,
+  "pixels": "b0ebf40ff4917326",
+  "transparent": 2368,
+  "width": 80
+ },
+ "NDRE_image/tiff": {
+  "alpha": true,
+  "bands": 4,
+  "height": 80,
+  "pixels": "b0ebf40ff4917326",
+  "transparent": 2368,
+  "width": 80
+ },
+ "NDVI_image/jpeg": {
+  "alpha": false,
+  "bands": 3,
+  "height": 80,
+  "width": 80
+ },
+ "NDVI_image/png": {
+  "alpha": true,
+  "bands": 4,
+  "height": 80,
+  "pixels": "95b16becb7e240cd",
+  "transparent": 2368,
+  "width": 80
+ },
+ "NDVI_image/tiff": {
+  "alpha": true,
+  "bands": 4,
+  "height": 80,
+  "pixels": "95b16becb7e240cd",
+  "transparent": 2368,
+  "width": 80
+ },
+ "NDWI_image/jpeg": {
+  "alpha": false,
+  "bands": 3,
+  "height": 80,
+  "width": 80
+ },
+ "NDWI_image/png": {
+  "alpha": true,
+  "bands": 4,
+  "height": 80,
+  "pixels": "2921a5edc6a680a9",
+  "transparent": 2368,
+  "width": 80
+ },
+ "NDWI_image/tiff": {
+  "alpha": true,
+  "bands": 4,
+  "height": 80,
+  "pixels": "2921a5edc6a680a9",
+  "transparent": 2368,
+  "width": 80
+ },
+ "SAVI_image/jpeg": {
+  "alpha": false,
+  "bands": 3,
+  "height": 80,
+  "width": 80
+ },
+ "SAVI_image/png": {
+  "alpha": true,
+  "bands": 4,
+  "height": 80,
+  "pixels": "f0655519d9d8d2a7",
+  "transparent": 2368,
+  "width": 80
+ },
+ "SAVI_image/tiff": {
+  "alpha": true,
+  "bands": 4,
+  "height": 80,
+  "pixels": "f0655519d9d8d2a7",
+  "transparent": 2368,
+  "width": 80
+ },
+ "fewBands": {
+  "error": "Raster has insufficient bands for NDRE"
+ },
+ "ndvi_image/jpeg": {
+  "alpha": false,
+  "bands": 3,
+  "height": 80,
+  "width": 80
+ },
+ "ndvi_image/png": {
+  "alpha": true,
+  "bands": 4,
+  "height": 80,
+  "pixels": "95b16becb7e240cd",
+  "transparent": 2368,
+  "width": 80
+ },
+ "ndvi_image/tiff": {
+  "alpha": true,
+  "bands": 4,
+  "height": 80,
+  "pixels": "95b16becb7e240cd",
+  "transparent": 2368,
+  "width": 80
+ },
+ "unknown": {
+  "error": "Unknown spectral index: NOPE"
+ }
+}

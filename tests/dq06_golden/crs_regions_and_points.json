@@ -1,0 +1,662 @@
+{
+ "etrs89": {
+  "EPSG:3035": {
+   "bands": 4,
+   "height": 48,
+   "pixels": "9e1ad0066d38d6f4",
+   "transparent": 0,
+   "width": 48
+  },
+  "EPSG:32632": {
+   "bands": 4,
+   "height": 48,
+   "pixels": "0ed3b284fd820e41",
+   "transparent": 0,
+   "width": 48
+  },
+  "EPSG:3857": {
+   "bands": 4,
+   "height": 48,
+   "pixels": "e617528f2c9f5005",
+   "transparent": 0,
+   "width": 48
+  },
+  "EPSG:4258": {
+   "bands": 4,
+   "height": 48,
+   "pixels": "6d0051b7ec22ae65",
+   "transparent": 0,
+   "width": 48
+  },
+  "EPSG:4326": {
+   "bands": 4,
+   "height": 48,
+   "pixels": "6d0051b7ec22ae65",
+   "transparent": 0,
+   "width": 48
+  },
+  "point_EPSG:3035": {
+   "bands": [
+    {
+     "value": 130.0
+    },
+    {
+     "value": 171.0
+    },
+    {
+     "value": 212.0
+    }
+   ],
+   "lat": 45.03000000000001,
+   "lon": 10.02,
+   "pixel": [
+    50,
+    49
+   ]
+  },
+  "point_EPSG:32632": {
+   "bands": [
+    {
+     "value": 130.0
+    },
+    {
+     "value": 171.0
+    },
+    {
+     "value": 212.0
+    }
+   ],
+   "lat": 45.03,
+   "lon": 10.02,
+   "pixel": [
+    50,
+    49
+   ]
+  },
+  "point_EPSG:3857": {
+   "bands": [
+    {
+     "value": 127.0
+    },
+    {
+     "value": 167.0
+    },
+    {
+     "value": 207.0
+    }
+   ],
+   "lat": 45.02999999999999,
+   "lon": 10.019999999999998,
+   "pixel": [
+    49,
+    49
+   ]
+  },
+  "point_EPSG:4258": {
+   "bands": [
+    {
+     "value": 134.0
+    },
+    {
+     "value": 174.0
+    },
+    {
+     "value": 214.0
+    }
+   ],
+   "lat": 45.029999999999994,
+   "lon": 10.02,
+   "pixel": [
+    50,
+    50
+   ]
+  },
+  "point_EPSG:4326": {
+   "bands": [
+    {
+     "value": 134.0
+    },
+    {
+     "value": 174.0
+    },
+    {
+     "value": 214.0
+    }
+   ],
+   "lat": 45.029999999999994,
+   "lon": 10.02,
+   "pixel": [
+    50,
+    50
+   ]
+  }
+ },
+ "laea": {
+  "EPSG:3035": {
+   "bands": 4,
+   "height": 48,
+   "pixels": "b49d56ceaeaed153",
+   "transparent": 0,
+   "width": 48
+  },
+  "EPSG:32632": {
+   "bands": 4,
+   "height": 48,
+   "pixels": "d6744ceedf5601c8",
+   "transparent": 0,
+   "width": 48
+  },
+  "EPSG:3857": {
+   "bands": 4,
+   "height": 48,
+   "pixels": "f0d8b05c52effaea",
+   "transparent": 0,
+   "width": 48
+  },
+  "EPSG:4258": {
+   "bands": 4,
+   "height": 48,
+   "pixels": "7ac199a73128bafa",
+   "transparent": 0,
+   "width": 48
+  },
+  "EPSG:4326": {
+   "bands": 4,
+   "height": 48,
+   "pixels": "7ac199a73128bafa",
+   "transparent": 0,
+   "width": 48
+  },
+  "point_EPSG:3035": {
+   "bands": [
+    {
+     "value": 130.0
+    },
+    {
+     "value": 171.0
+    },
+    {
+     "value": 212.0
+    }
+   ],
+   "lat": 45.68881464406775,
+   "lon": 9.75001651862821,
+   "pixel": [
+    50,
+    49
+   ]
+  },
+  "point_EPSG:32632": {
+   "bands": [
+    {
+     "value": 134.0
+    },
+    {
+     "value": 174.0
+    },
+    {
+     "value": 214.0
+    }
+   ],
+   "lat": 45.68881464406774,
+   "lon": 9.75001651862821,
+   "pixel": [
+    50,
+    50
+   ]
+  },
+  "point_EPSG:3857": {
+   "bands": [
+    {
+     "value": 130.0
+    },
+    {
+     "value": 171.0
+    },
+    {
+     "value": 212.0
+    }
+   ],
+   "lat": 45.68881464406774,
+   "lon": 9.75001651862821,
+   "pixel": [
+    50,
+    49
+   ]
+  },
+  "point_EPSG:4258": {
+   "bands": [
+    {
+     "value": 130.0
+    },
+    {
+     "value": 171.0
+    },
+    {
+     "value": 212.0
+    }
+   ],
+   "lat": 45.68881464406775,
+   "lon": 9.75001651862821,
+   "pixel": [
+    50,
+    49
+   ]
+  },
+  "point_EPSG:4326": {
+   "bands": [
+    {
+     "value": 130.0
+    },
+    {
+     "value": 171.0
+    },
+    {
+     "value": 212.0
+    }
+   ],
+   "lat": 45.68881464406775,
+   "lon": 9.75001651862821,
+   "pixel": [
+    50,
+    49
+   ]
+  }
+ },
+ "utm32": {
+  "EPSG:3035": {
+   "bands": 4,
+   "height": 48,
+   "pixels": "6c64d7b022ed0013",
+   "transparent": 0,
+   "width": 48
+  },
+  "EPSG:32632": {
+   "bands": 4,
+   "height": 48,
+   "pixels": "b49d56ceaeaed153",
+   "transparent": 0,
+   "width": 48
+  },
+  "EPSG:3857": {
+   "bands": 4,
+   "height": 48,
+   "pixels": "f41f5e484a0b92cc",
+   "transparent": 0,
+   "width": 48
+  },
+  "EPSG:4258": {
+   "bands": 4,
+   "height": 48,
+   "pixels": "8c31acf9338363b5",
+   "transparent": 0,
+   "width": 48
+  },
+  "EPSG:4326": {
+   "bands": 4,
+   "height": 48,
+   "pixels": "8c31acf9338363b5",
+   "transparent": 0,
+   "width": 48
+  },
+  "point_EPSG:3035": {
+   "bands": [
+    {
+     "value": 134.0
+    },
+    {
+     "value": 174.0
+    },
+    {
+     "value": 214.0
+    }
+   ],
+   "lat": 45.045495186368534,
+   "lon": 10.009486645639667,
+   "pixel": [
+    50,
+    50
+   ]
+  },
+  "point_EPSG:32632": {
+   "bands": [
+    {
+     "value": 134.0
+    },
+    {
+     "value": 174.0
+    },
+    {
+     "value": 214.0
+    }
+   ],
+   "lat": 45.04549518636853,
+   "lon": 10.009486645639665,
+   "pixel": [
+    50,
+    50
+   ]
+  },
+  "point_EPSG:3857": {
+   "bands": [
+    {
+     "value": 134.0
+    },
+    {
+     "value": 174.0
+    },
+    {
+     "value": 214.0
+    }
+   ],
+   "lat": 45.045495186368534,
+   "lon": 10.009486645639663,
+   "pixel": [
+    50,
+    50
+   ]
+  },
+  "point_EPSG:4258": {
+   "bands": [
+    {
+     "value": 134.0
+    },
+    {
+     "value": 174.0
+    },
+    {
+     "value": 214.0
+    }
+   ],
+   "lat": 45.04549518636854,
+   "lon": 10.009486645639665,
+   "pixel": [
+    50,
+    50
+   ]
+  },
+  "point_EPSG:4326": {
+   "bands": [
+    {
+     "value": 134.0
+    },
+    {
+     "value": 174.0
+    },
+    {
+     "value": 214.0
+    }
+   ],
+   "lat": 45.04549518636854,
+   "lon": 10.009486645639665,
+   "pixel": [
+    50,
+    50
+   ]
+  }
+ },
+ "web": {
+  "EPSG:3035": {
+   "bands": 4,
+   "height": 48,
+   "pixels": "93997c48a06cf4ac",
+   "transparent": 0,
+   "width": 48
+  },
+  "EPSG:32632": {
+   "bands": 4,
+   "height": 48,
+   "pixels": "66f087f63b69c2e4",
+   "transparent": 0,
+   "width": 48
+  },
+  "EPSG:3857": {
+   "bands": 4,
+   "height": 48,
+   "pixels": "6d0051b7ec22ae65",
+   "transparent": 0,
+   "width": 48
+  },
+  "EPSG:4258": {
+   "bands": 4,
+   "height": 48,
+   "pixels": "902d2ce05ea28278",
+   "transparent": 0,
+   "width": 48
+  },
+  "EPSG:4326": {
+   "bands": 4,
+   "height": 48,
+   "pixels": "902d2ce05ea28278",
+   "transparent": 0,
+   "width": 48
+  },
+  "point_EPSG:3035": {
+   "bands": [
+    {
+     "value": 134.0
+    },
+    {
+     "value": 174.0
+    },
+    {
+     "value": 214.0
+    }
+   ],
+   "lat": 45.02209142716905,
+   "lon": 10.016215417932669,
+   "pixel": [
+    50,
+    50
+   ]
+  },
+  "point_EPSG:32632": {
+   "bands": [
+    {
+     "value": 134.0
+    },
+    {
+     "value": 174.0
+    },
+    {
+     "value": 214.0
+    }
+   ],
+   "lat": 45.02209142716904,
+   "lon": 10.016215417932663,
+   "pixel": [
+    50,
+    50
+   ]
+  },
+  "point_EPSG:3857": {
+   "bands": [
+    {
+     "value": 134.0
+    },
+    {
+     "value": 174.0
+    },
+    {
+     "value": 214.0
+    }
+   ],
+   "lat": 45.02209142716904,
+   "lon": 10.016215417932663,
+   "pixel": [
+    50,
+    50
+   ]
+  },
+  "point_EPSG:4258": {
+   "bands": [
+    {
+     "value": 134.0
+    },
+    {
+     "value": 174.0
+    },
+    {
+     "value": 214.0
+    }
+   ],
+   "lat": 45.02209142716905,
+   "lon": 10.016215417932663,
+   "pixel": [
+    50,
+    50
+   ]
+  },
+  "point_EPSG:4326": {
+   "bands": [
+    {
+     "value": 134.0
+    },
+    {
+     "value": 174.0
+    },
+    {
+     "value": 214.0
+    }
+   ],
+   "lat": 45.02209142716905,
+   "lon": 10.016215417932663,
+   "pixel": [
+    50,
+    50
+   ]
+  }
+ },
+ "wgs84": {
+  "EPSG:3035": {
+   "bands": 4,
+   "height": 48,
+   "pixels": "9e1ad0066d38d6f4",
+   "transparent": 0,
+   "width": 48
+  },
+  "EPSG:32632": {
+   "bands": 4,
+   "height": 48,
+   "pixels": "0ed3b284fd820e41",
+   "transparent": 0,
+   "width": 48
+  },
+  "EPSG:3857": {
+   "bands": 4,
+   "height": 48,
+   "pixels": "e617528f2c9f5005",
+   "transparent": 0,
+   "width": 48
+  },
+  "EPSG:4258": {
+   "bands": 4,
+   "height": 48,
+   "pixels": "6d0051b7ec22ae65",
+   "transparent": 0,
+   "width": 48
+  },
+  "EPSG:4326": {
+   "bands": 4,
+   "height": 48,
+   "pixels": "6d0051b7ec22ae65",
+   "transparent": 0,
+   "width": 48
+  },
+  "point_EPSG:3035": {
+   "bands": [
+    {
+     "value": 130.0
+    },
+    {
+     "value": 171.0
+    },
+    {
+     "value": 212.0
+    }
+   ],
+   "lat": 45.03000000000001,
+   "lon": 10.02,
+   "pixel": [
+    50,
+    49
+   ]
+  },
+  "point_EPSG:32632": {
+   "bands": [
+    {
+     "value": 130.0
+    },
+    {
+     "value": 171.0
+    },
+    {
+     "value": 212.0
+    }
+   ],
+   "lat": 45.03,
+   "lon": 10.02,
+   "pixel": [
+    50,
+    49
+   ]
+  },
+  "point_EPSG:3857": {
+   "bands": [
+    {
+     "value": 131.0
+    },
+    {
+     "value": 170.0
+    },
+    {
+     "value": 209.0
+    }
+   ],
+   "lat": 45.02999999999999,
+   "lon": 10.019999999999998,
+   "pixel": [
+    49,
+    50
+   ]
+  },
+  "point_EPSG:4258": {
+   "bands": [
+    {
+     "value": 134.0
+    },
+    {
+     "value": 174.0
+    },
+    {
+     "value": 214.0
+    }
+   ],
+   "lat": 45.029999999999994,
+   "lon": 10.02,
+   "pixel": [
+    50,
+    50
+   ]
+  },
+  "point_EPSG:4326": {
+   "bands": [
+    {
+     "value": 134.0
+    },
+    {
+     "value": 174.0
+    },
+    {
+     "value": 214.0
+    }
+   ],
+   "lat": 45.029999999999994,
+   "lon": 10.02,
+   "pixel": [
+    50,
+    50
+   ]
+  }
+ }
+}

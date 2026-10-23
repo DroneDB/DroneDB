@@ -1,0 +1,330 @@
+{
+ "byte3": {
+  "bands": [
+   {
+    "blockX": 256,
+    "blockY": 256,
+    "colorInterp": "Gray",
+    "maskFlags": 1,
+    "overviews": 0,
+    "type": "Byte"
+   },
+   {
+    "blockX": 256,
+    "blockY": 256,
+    "colorInterp": "Undefined",
+    "maskFlags": 1,
+    "overviews": 0,
+    "type": "Byte"
+   },
+   {
+    "blockX": 256,
+    "blockY": 256,
+    "colorInterp": "Undefined",
+    "maskFlags": 1,
+    "overviews": 0,
+    "type": "Byte"
+   }
+  ],
+  "bigTiff": false,
+  "driver": "GTiff",
+  "height": 64,
+  "srs": "WGS 84 / UTM zone 32N",
+  "structure": {
+   "COMPRESSION": "JPEG",
+   "INTERLEAVE": "PIXEL",
+   "JPEGTABLESMODE": "1",
+   "JPEG_QUALITY": "75",
+   "LAYOUT": "COG"
+  },
+  "width": 64
+ },
+ "byte3_plain": {
+  "bands": [
+   {
+    "blockX": 256,
+    "blockY": 256,
+    "colorInterp": "Undefined",
+    "maskFlags": 1,
+    "overviews": 0,
+    "type": "Byte"
+   },
+   {
+    "blockX": 256,
+    "blockY": 256,
+    "colorInterp": "Undefined",
+    "maskFlags": 1,
+    "overviews": 0,
+    "type": "Byte"
+   },
+   {
+    "blockX": 256,
+    "blockY": 256,
+    "colorInterp": "Undefined",
+    "maskFlags": 1,
+    "overviews": 0,
+    "type": "Byte"
+   }
+  ],
+  "bigTiff": false,
+  "driver": "GTiff",
+  "height": 64,
+  "srs": "",
+  "structure": {
+   "COMPRESSION": "JPEG",
+   "INTERLEAVE": "PIXEL",
+   "JPEGTABLESMODE": "1",
+   "JPEG_QUALITY": "75",
+   "LAYOUT": "COG"
+  },
+  "width": 64
+ },
+ "byte4": {
+  "bands": [
+   {
+    "blockX": 256,
+    "blockY": 256,
+    "colorInterp": "Gray",
+    "maskFlags": 1,
+    "overviews": 0,
+    "type": "Byte"
+   },
+   {
+    "blockX": 256,
+    "blockY": 256,
+    "colorInterp": "Undefined",
+    "maskFlags": 1,
+    "overviews": 0,
+    "type": "Byte"
+   },
+   {
+    "blockX": 256,
+    "blockY": 256,
+    "colorInterp": "Undefined",
+    "maskFlags": 1,
+    "overviews": 0,
+    "type": "Byte"
+   },
+   {
+    "blockX": 256,
+    "blockY": 256,
+    "colorInterp": "Undefined",
+    "maskFlags": 1,
+    "overviews": 0,
+    "type": "Byte"
+   }
+  ],
+  "bigTiff": false,
+  "driver": "GTiff",
+  "height": 64,
+  "srs": "WGS 84 / UTM zone 32N",
+  "structure": {
+   "COMPRESSION": "JPEG",
+   "INTERLEAVE": "PIXEL",
+   "JPEGTABLESMODE": "1",
+   "JPEG_QUALITY": "75",
+   "LAYOUT": "COG"
+  },
+  "width": 64
+ },
+ "byte5": {
+  "bands": [
+   {
+    "blockX": 256,
+    "blockY": 256,
+    "colorInterp": "Gray",
+    "maskFlags": 1,
+    "overviews": 0,
+    "type": "Byte"
+   },
+   {
+    "blockX": 256,
+    "blockY": 256,
+    "colorInterp": "Undefined",
+    "maskFlags": 1,
+    "overviews": 0,
+    "type": "Byte"
+   },
+   {
+    "blockX": 256,
+    "blockY": 256,
+    "colorInterp": "Undefined",
+    "maskFlags": 1,
+    "overviews": 0,
+    "type": "Byte"
+   },
+   {
+    "blockX": 256,
+    "blockY": 256,
+    "colorInterp": "Undefined",
+    "maskFlags": 1,
+    "overviews": 0,
+    "type": "Byte"
+   },
+   {
+    "blockX": 256,
+    "blockY": 256,
+    "colorInterp": "Undefined",
+    "maskFlags": 1,
+    "overviews": 0,
+    "type": "Byte"
+   }
+  ],
+  "bigTiff": false,
+  "driver": "GTiff",
+  "height": 64,
+  "pixels": "ec38a3f6713a63b4",
+  "srs": "WGS 84 / UTM zone 32N",
+  "structure": {
+   "COMPRESSION": "LZW",
+   "INTERLEAVE": "PIXEL",
+   "LAYOUT": "COG",
+   "PREDICTOR": "2"
+  },
+  "width": 64
+ },
+ "float4_plain": {
+  "bands": [
+   {
+    "blockX": 256,
+    "blockY": 256,
+    "colorInterp": "Gray",
+    "maskFlags": 1,
+    "overviews": 0,
+    "type": "Float32"
+   },
+   {
+    "blockX": 256,
+    "blockY": 256,
+    "colorInterp": "Undefined",
+    "maskFlags": 1,
+    "overviews": 0,
+    "type": "Float32"
+   },
+   {
+    "blockX": 256,
+    "blockY": 256,
+    "colorInterp": "Undefined",
+    "maskFlags": 1,
+    "overviews": 0,
+    "type": "Float32"
+   },
+   {
+    "blockX": 256,
+    "blockY": 256,
+    "colorInterp": "Undefined",
+    "maskFlags": 1,
+    "overviews": 0,
+    "type": "Float32"
+   }
+  ],
+  "bigTiff": false,
+  "driver": "GTiff",
+  "height": 64,
+  "pixels": "cd8b9cac9fbcad63",
+  "srs": "",
+  "structure": {
+   "COMPRESSION": "LZW",
+   "INTERLEAVE": "PIXEL",
+   "LAYOUT": "COG",
+   "PREDICTOR": "3"
+  },
+  "width": 64
+ },
+ "float5": {
+  "bands": [
+   {
+    "blockX": 256,
+    "blockY": 256,
+    "colorInterp": "Gray",
+    "maskFlags": 1,
+    "overviews": 0,
+    "type": "Float32"
+   },
+   {
+    "blockX": 256,
+    "blockY": 256,
+    "colorInterp": "Undefined",
+    "maskFlags": 1,
+    "overviews": 0,
+    "type": "Float32"
+   },
+   {
+    "blockX": 256,
+    "blockY": 256,
+    "colorInterp": "Undefined",
+    "maskFlags": 1,
+    "overviews": 0,
+    "type": "Float32"
+   },
+   {
+    "blockX": 256,
+    "blockY": 256,
+    "colorInterp": "Undefined",
+    "maskFlags": 1,
+    "overviews": 0,
+    "type": "Float32"
+   },
+   {
+    "blockX": 256,
+    "blockY": 256,
+    "colorInterp": "Undefined",
+    "maskFlags": 1,
+    "overviews": 0,
+    "type": "Float32"
+   }
+  ],
+  "bigTiff": false,
+  "driver": "GTiff",
+  "height": 64,
+  "pixels": "4d0cee7fe3f534b0",
+  "srs": "WGS 84 / UTM zone 32N",
+  "structure": {
+   "COMPRESSION": "LZW",
+   "INTERLEAVE": "PIXEL",
+   "LAYOUT": "COG",
+   "PREDICTOR": "3"
+  },
+  "width": 64
+ },
+ "uint16_3": {
+  "bands": [
+   {
+    "blockX": 256,
+    "blockY": 256,
+    "colorInterp": "Gray",
+    "maskFlags": 1,
+    "overviews": 0,
+    "type": "UInt16"
+   },
+   {
+    "blockX": 256,
+    "blockY": 256,
+    "colorInterp": "Undefined",
+    "maskFlags": 1,
+    "overviews": 0,
+    "type": "UInt16"
+   },
+   {
+    "blockX": 256,
+    "blockY": 256,
+    "colorInterp": "Undefined",
+    "maskFlags": 1,
+    "overviews": 0,
+    "type": "UInt16"
+   }
+  ],
+  "bigTiff": false,
+  "driver": "GTiff",
+  "height": 64,
+  "pixels": "b9841484edf40f84",
+  "srs": "WGS 84 / UTM zone 32N",
+  "structure": {
+   "COMPRESSION": "LZW",
+   "INTERLEAVE": "PIXEL",
+   "LAYOUT": "COG",
+   "PREDICTOR": "2"
+  },
+  "width": 64
+ }
+}

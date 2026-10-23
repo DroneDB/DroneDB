@@ -1,0 +1,122 @@
+{
+ "etrs89": {
+  "point": "POINT Z (10.003500 44.996500 0.000000)",
+  "polygon": "POLYGONZ ((10 45 0, 10.007 45 0, 10.007 44.993 0, 10 44.993 0, 10 45 0))",
+  "properties": {
+   "bands": [
+    {
+     "colorInterp": "Gray",
+     "type": "Float32"
+    }
+   ],
+   "geotransform": [
+    10.0,
+    0.0001,
+    0.0,
+    45.0,
+    0.0,
+    -0.0001
+   ],
+   "height": 70,
+   "projection": "GEOGCS[\"ETRS89\",DATUM[\"European_Terrestrial_Reference_System_1989\",SPHEROID[\"GRS 1980\",6378137,298.257222101,AUTHORITY[\"EPSG\",\"7019\"]],AUTHORITY[\"EPSG\",\"6258\"]],PRIMEM[\"Greenwich\",0,AUTHORITY[\"EPSG\",\"8901\"]],UNIT[\"degree\",0.0174532925199433,AUTHORITY[\"EPSG\",\"9122\"]],AXIS[\"Latitude\",NORTH],AXIS[\"Longitude\",EAST],AUTHORITY[\"EPSG\",\"4258\"]]",
+   "width": 70
+  },
+  "type": 4
+ },
+ "laea": {
+  "point": "POINT Z (9.735659 45.609041 0.000000)",
+  "polygon": "POLYGONZ ((9.731163384609 45.61218280326 0, 9.740124541234 45.61220517522 0, 9.74015443271 45.60589802469 0, 9.731194306796 45.60587565571 0, 9.731163384609 45.61218280326 0))",
+  "properties": {
+   "bands": [
+    {
+     "colorInterp": "Gray",
+     "type": "Float32"
+    }
+   ],
+   "geotransform": [
+    4300000.0,
+    10.0,
+    0.0,
+    2500000.0,
+    0.0,
+    -10.0
+   ],
+   "height": 70,
+   "projection": "PROJCS[\"ETRS89-extended / LAEA Europe\",GEOGCS[\"ETRS89\",DATUM[\"European_Terrestrial_Reference_System_1989\",SPHEROID[\"GRS 1980\",6378137,298.257222101,AUTHORITY[\"EPSG\",\"7019\"]],AUTHORITY[\"EPSG\",\"6258\"]],PRIMEM[\"Greenwich\",0,AUTHORITY[\"EPSG\",\"8901\"]],UNIT[\"degree\",0.0174532925199433,AUTHORITY[\"EPSG\",\"9122\"]],AUTHORITY[\"EPSG\",\"4258\"]],PROJECTION[\"Lambert_Azimuthal_Equal_Area\"],PARAMETER[\"latitude_of_center\",52],PARAMETER[\"longitude_of_center\",10],PARAMETER[\"false_easting\",4321000],PARAMETER[\"false_northing\",3210000],UNIT[\"metre\",1,AUTHORITY[\"EPSG\",\"9001\"]],AXIS[\"Northing\",NORTH],AXIS[\"Easting\",EAST],AUTHORITY[\"EPSG\",\"3035\"]]",
+   "width": 70
+  },
+  "type": 4
+ },
+ "utm32": {
+  "point": "POINT Z (9.994286 45.010971 0.000000)",
+  "polygon": "POLYGONZ ((9.98989940378 45.01416008048 0, 9.998781770893 45.0140827385 0, 9.998672264299 45.00778236053 0, 9.989790870661 45.00785968562 0, 9.98989940378 45.01416008048 0))",
+  "properties": {
+   "bands": [
+    {
+     "colorInterp": "Gray",
+     "type": "Float32"
+    }
+   ],
+   "geotransform": [
+    578000.0,
+    10.0,
+    0.0,
+    4985000.0,
+    0.0,
+    -10.0
+   ],
+   "height": 70,
+   "projection": "PROJCS[\"WGS 84 / UTM zone 32N\",GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563,AUTHORITY[\"EPSG\",\"7030\"]],AUTHORITY[\"EPSG\",\"6326\"]],PRIMEM[\"Greenwich\",0,AUTHORITY[\"EPSG\",\"8901\"]],UNIT[\"degree\",0.0174532925199433,AUTHORITY[\"EPSG\",\"9122\"]],AUTHORITY[\"EPSG\",\"4326\"]],PROJECTION[\"Transverse_Mercator\"],PARAMETER[\"latitude_of_origin\",0],PARAMETER[\"central_meridian\",9],PARAMETER[\"scale_factor\",0.9996],PARAMETER[\"false_easting\",500000],PARAMETER[\"false_northing\",0],UNIT[\"metre\",1,AUTHORITY[\"EPSG\",\"9001\"]],AXIS[\"Easting\",EAST],AXIS[\"Northing\",NORTH],AUTHORITY[\"EPSG\",\"32632\"]]",
+   "width": 70
+  },
+  "type": 4
+ },
+ "web": {
+  "point": "POINT Z (10.002022 44.994019 0.000000)",
+  "polygon": "POLYGONZ ((9.99824911225 44.99668739877 0, 10.00579496064 44.99668739877 0, 10.00579496064 44.99135112128 0, 9.99824911225 44.99135112128 0, 9.99824911225 44.99668739877 0))",
+  "properties": {
+   "bands": [
+    {
+     "colorInterp": "Gray",
+     "type": "Float32"
+    }
+   ],
+   "geotransform": [
+    1113000.0,
+    12.0,
+    0.0,
+    5621000.0,
+    0.0,
+    -12.0
+   ],
+   "height": 70,
+   "projection": "PROJCS[\"WGS 84 / Pseudo-Mercator\",GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563,AUTHORITY[\"EPSG\",\"7030\"]],AUTHORITY[\"EPSG\",\"6326\"]],PRIMEM[\"Greenwich\",0,AUTHORITY[\"EPSG\",\"8901\"]],UNIT[\"degree\",0.0174532925199433,AUTHORITY[\"EPSG\",\"9122\"]],AUTHORITY[\"EPSG\",\"4326\"]],PROJECTION[\"Mercator_1SP\"],PARAMETER[\"central_meridian\",0],PARAMETER[\"scale_factor\",1],PARAMETER[\"false_easting\",0],PARAMETER[\"false_northing\",0],UNIT[\"metre\",1,AUTHORITY[\"EPSG\",\"9001\"]],AXIS[\"Easting\",EAST],AXIS[\"Northing\",NORTH],EXTENSION[\"PROJ4\",\"+proj=merc +a=6378137 +b=6378137 +lat_ts=0 +lon_0=0 +x_0=0 +y_0=0 +k=1 +units=m +nadgrids=@null +wktext +no_defs\"],AUTHORITY[\"EPSG\",\"3857\"]]",
+   "width": 70
+  },
+  "type": 4
+ },
+ "wgs84": {
+  "point": "POINT Z (10.003500 44.996500 0.000000)",
+  "polygon": "POLYGONZ ((10 45 0, 10.007 45 0, 10.007 44.993 0, 10 44.993 0, 10 45 0))",
+  "properties": {
+   "bands": [
+    {
+     "colorInterp": "Gray",
+     "type": "Float32"
+    }
+   ],
+   "geotransform": [
+    10.0,
+    0.0001,
+    0.0,
+    45.0,
+    0.0,
+    -0.0001
+   ],
+   "height": 70,
+   "projection": "GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563,AUTHORITY[\"EPSG\",\"7030\"]],AUTHORITY[\"EPSG\",\"6326\"]],PRIMEM[\"Greenwich\",0,AUTHORITY[\"EPSG\",\"8901\"]],UNIT[\"degree\",0.0174532925199433,AUTHORITY[\"EPSG\",\"9122\"]],AXIS[\"Latitude\",NORTH],AXIS[\"Longitude\",EAST],AUTHORITY[\"EPSG\",\"4326\"]]",
+   "width": 70
+  },
+  "type": 4
+ }
+}

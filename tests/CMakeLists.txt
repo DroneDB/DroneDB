@@ -107,6 +107,10 @@ if(BUILD_TESTING)
     # The ABI test compares DDBGetCapabilities() with the symbol manifest (src/CMakeLists.txt)
     set_source_files_properties(unit/abi_test.cpp PROPERTIES
         COMPILE_DEFINITIONS DDB_SYMBOLS_MANIFEST="${DDB_SYMBOLS_MANIFEST}")
+    # The golden outputs of the geo and raster code (DQ-06): read from the source tree, and
+    # rewritten there with DDB_UPDATE_DQ06_GOLDEN=1 (see dq06_golden_support.h)
+    set_source_files_properties(dq06_golden_support.cpp PROPERTIES
+        COMPILE_DEFINITIONS DDB_DQ06_GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/dq06_golden")
     # The initIndex race test, the process teardown test and the GDAL data test run their own binary as child processes
     set_source_files_properties(unit/init_index_template_test.cpp unit/process_finalize_test.cpp unit/data_dirs_test.cpp PROPERTIES
         COMPILE_DEFINITIONS DDB_UNIT_TESTS_NAME="$<TARGET_FILE_NAME:ddb_unit_tests>")
