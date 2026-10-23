@@ -12,6 +12,7 @@
 #include <functional>
 
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include "cancellation.h"
@@ -323,29 +324,17 @@ namespace ddb
             zb = parseZRange(zRange);
         }
 
-        const bool asJson = format == OutputFormat::Json;
-
-        if (asJson)
-        {
-            os << "[";
-        }
-
-        // One tile per line, or one JSON string per array member (escaped, "," between members
-        // across zoom levels as well)
-        bool firstTile = true;
+        // One tile per line, or one JSON string per member of an array (escaped, separated across
+        // zoom levels as well)
+        std::optional<JsonArrayWriter> asJson;
+        if (format == OutputFormat::Json)
+            asJson.emplace(os);
         const auto write = [&](const std::string &tilePath)
         {
             if (asJson)
-            {
-                if (!firstTile)
-                    os << ",";
-                os << json(tilePath).dump();
-            }
+                asJson->write(tilePath);
             else
-            {
                 os << tilePath << std::endl;
-            }
-            firstTile = false;
         };
 
         for (int z = zb.min; z <= zb.max; z++)
@@ -368,9 +357,7 @@ namespace ddb
         }
 
         if (asJson)
-        {
-            os << "]";
-        }
+            asJson->finish();
     }
 
 } // namespace ddb
