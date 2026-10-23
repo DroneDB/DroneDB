@@ -10,6 +10,8 @@
 #include "gtest/gtest.h"
 
 #include "gdal_inc.h"
+#include "gdal_priv.h"
+#include "gdal_raii.h"
 #include "ogr_spatialref.h"
 #include "mio.h"
 #include "tilerhelper.h"
@@ -25,18 +27,19 @@ namespace
     {
         const auto tif = ta.getPath("raster.tif");
         double gt[6] = {1000000.0, 10.0, 0.0, 5000640.0, 0.0, -10.0};
-        GDALDriverH drv = GDALGetDriverByName("GTiff");
-        GDALDatasetH ds = GDALCreate(drv, tif.string().c_str(), 64, 64, 3, GDT_Byte, nullptr);
-        GDALSetGeoTransform(ds, gt);
+        GDALDriver *driver = GetGDALDriverManager()->GetDriverByName("GTiff");
+        auto ds = GDALDatasetUniquePtr(driver->Create(tif.string().c_str(), 64, 64, 3, GDT_Byte, nullptr));
+        EXPECT_TRUE(ds != nullptr);
+        ds->SetGeoTransform(gt);
         OGRSpatialReference srs;
         srs.importFromEPSG(3857);
         char *wkt = nullptr;
         srs.exportToWkt(&wkt);
-        GDALSetProjection(ds, wkt);
+        ds->SetProjection(wkt);
         CPLFree(wkt);
         for (int b = 1; b <= 3; b++)
-            GDALFillRaster(GDALGetRasterBand(ds, b), 100.0 + b, 0.0);
-        GDALClose(ds);
+            EXPECT_EQ(ds->GetRasterBand(b)->Fill(100.0 + b), CE_None);
+        EXPECT_EQ(closeDataset(std::move(ds)), CE_None);
         return tif;
     }
 

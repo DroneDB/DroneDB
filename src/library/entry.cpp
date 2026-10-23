@@ -235,7 +235,9 @@ namespace ddb
         if (!this->meta.empty())
             j["properties"]["meta"] = this->meta;
 
-        return j;
+        // Constructed in place: a json converts to std::optional<json> in two ways (the optional's
+        // converting constructor and json's own conversion operator), and compilers disagree on which
+        return std::optional<json>(std::in_place, std::move(j));
     }
 
     std::string Entry::toString() const

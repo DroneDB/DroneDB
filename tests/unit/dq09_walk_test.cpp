@@ -181,20 +181,21 @@ namespace
         IndexFixture f(TEST_NAME);
         writeFile(f.root / "a.txt", "a");
         writeFile(f.root / "locked" / "inside.txt", "i");
-        fs::permissions(f.root / "locked", fs::perms::none);
 
-        std::set<std::string> reported;
-        try
+        // Opens the folder again when the test ends, however it ends (the test area is removed)
+        struct Unlock
         {
-            addTree(f);
-            reported = notIndexed(f.db.get());
-        }
-        catch (...)
-        {
-            fs::permissions(f.root / "locked", fs::perms::owner_all);
-            throw;
-        }
-        fs::permissions(f.root / "locked", fs::perms::owner_all);
+            fs::path folder;
+            ~Unlock()
+            {
+                std::error_code ignored;
+                fs::permissions(folder, fs::perms::owner_all, ignored);
+            }
+        } unlock{f.root / "locked"};
+        fs::permissions(unlock.folder, fs::perms::none);
+
+        addTree(f);
+        const auto reported = notIndexed(f.db.get());
 
         EXPECT_TRUE(pathExists(f.db.get(), "locked")) << "the folder itself is an entry";
         EXPECT_FALSE(pathExists(f.db.get(), "locked/inside.txt"));
