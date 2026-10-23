@@ -11,6 +11,7 @@
 #include "mio.h"
 #include <format>
 #include "gdal_raii.h"
+#include "gtiff_options.h"
 
 namespace ddb
 {
@@ -196,8 +197,7 @@ namespace ddb
             CPLStringList wargs;
             wargs.AddString("-of");
             wargs.AddString("GTiff");
-            wargs.AddString("-co");
-            wargs.AddString("COMPRESS=JPEG");
+            GtiffOptions().compress(GtiffOptions::Codec::Jpeg).appendTo(wargs);
             wargs.AddString("-dstalpha");
             const GdalOptionsPtr<GDALWarpAppOptions> waOptions(
                 GDALWarpAppOptionsNew(wargs.List(), nullptr));

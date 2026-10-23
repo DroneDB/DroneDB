@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "gdal_raii.h"
+#include "gtiff_options.h"
 #include "raster_utils.h"
 #include "cog.h"
 #include "cancellation.h"
@@ -168,6 +169,7 @@ namespace ddb
         const int numBands = GDALGetRasterCount(hSrcDataset);
 
         // We can compress to JPG if these are 8bit bands (3 or 4) and no nodata
+        GtiffOptions creation;
         if ((numBands == 3 || numBands == 4) && !hasNoData)
         {
             bool all8Bit = true;
@@ -193,8 +195,6 @@ namespace ddb
             }
             if (jpegEligible)
             {
-                targs.AddString("-co");
-                targs.AddString("COMPRESS=JPEG");
                 // JPEG quality: configurable via DDB_COG_JPEG_QUALITY (default: 75, matching GDAL default).
                 // PREDICTOR is not valid for JPEG and is intentionally omitted.
                 int jpegQuality = 75;
@@ -202,30 +202,23 @@ namespace ddb
                 if (envQuality) {
                     jpegQuality = std::clamp(std::atoi(envQuality), 1, 100);
                 }
-                targs.AddString("-co");
-                targs.AddString(("QUALITY=" + std::to_string(jpegQuality)).c_str());
+                creation.compress(GtiffOptions::Codec::Jpeg).set("QUALITY", std::to_string(jpegQuality));
             }
             else
             {
                 // LZW by default for non-8bit data
-                targs.AddString("-co");
-                targs.AddString("COMPRESS=LZW");
-                targs.AddString("-co");
-                targs.AddString("PREDICTOR=YES");
+                creation.compress(GtiffOptions::Codec::Lzw).predictorAuto();
             }
         }
         else
         {
             // LZW by default for data with nodata values or other band counts
-            targs.AddString("-co");
-            targs.AddString("COMPRESS=LZW");
-            targs.AddString("-co");
-            targs.AddString("PREDICTOR=YES");
+            creation.compress(GtiffOptions::Codec::Lzw).predictorAuto();
         }
 
         // BigTIFF
-        targs.AddString("-co");
-        targs.AddString("BIGTIFF=IF_SAFER");
+        creation.bigTiffIfSafer();
+        creation.appendTo(targs);
 
         // Scope GDAL's temporary directory (CPL_TMPDIR) to the output's own folder (the
         // per-build temp folder when called from the build pipeline). The COG driver

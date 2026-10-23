@@ -4,6 +4,7 @@
 #include "align.h"
 #include "mathutil.h"
 #include "gdal_raii.h"
+#include "gtiff_options.h"
 #include "raster_utils.h"
 #include "cog.h"        // buildCog() - DRY reuse of the COG pattern
 #include "exceptions.h"
@@ -544,8 +545,7 @@ static void applyWarp(const std::string &sourcePath,
     args.AddString("-of");    args.AddString("GTiff");
     args.AddString("-t_srs"); args.AddString(targetCrs.c_str());
     args.AddString("-r");     args.AddString("bilinear");
-    args.AddString("-co");    args.AddString("COMPRESS=LZW");
-    args.AddString("-co");    args.AddString("BIGTIFF=IF_SAFER");
+    GtiffOptions().compress(GtiffOptions::Codec::Lzw).bigTiffIfSafer().appendTo(args);
 
     const GdalOptionsPtr<GDALWarpAppOptions> wOpts(GDALWarpAppOptionsNew(args.List(), nullptr));
     const auto out = adoptDataset(

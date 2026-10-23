@@ -42,6 +42,7 @@
 #include "entry_types.h"
 #include "exceptions.h"
 #include "gdal_raii.h"
+#include "gtiff_options.h"
 #include "hash.h"
 #include "info.h"
 #include "json.h"
@@ -2123,24 +2124,19 @@ static void exportRasterImpl(const char* inputPath, const char* outputPath,
         if (!gtiffDrv)
             throw GDALException("GTiff driver not available");
 
-        CPLStringList createOpts;
-        createOpts.AddString("TILED=YES");
-        createOpts.AddString(("BLOCKXSIZE=" + std::to_string(tw)).c_str());
-        createOpts.AddString(("BLOCKYSIZE=" + std::to_string(th)).c_str());
-        createOpts.AddString("COMPRESS=DEFLATE");
-        createOpts.AddString("PREDICTOR=2");
-        createOpts.AddString("BIGTIFF=IF_SAFER");
+        GtiffOptions createOpts;
+        createOpts.tiled(tw).compress(GtiffOptions::Codec::Deflate).predictorFor(GDT_Byte).bigTiffIfSafer();
         // Compression threads: this one and those the CPU pool allows (DQ-15), held until
         // the output is closed
         const auto cpu = parallel::tryAcquireThreads(parallel::hardwareThreads());
-        createOpts.AddString(parallel::gdalNumThreads(cpu).c_str());
+        createOpts.add(parallel::gdalNumThreads(cpu));
 
         // Deleted unless the export completes; declared first, so the dataset is closed
         // before the file is deleted
         PartialOutput partialOutput(outputPath);
         // Closed on any throw. On success we close it explicitly after the finalization.
         auto outGuard = adoptDataset(
-            GDALCreate(gtiffDrv, outputPath, width, height, 4, GDT_Byte, createOpts.List()));
+            GDALCreate(gtiffDrv, outputPath, width, height, 4, GDT_Byte, createOpts.list().List()));
         if (!outGuard)
             throw GDALException("Cannot create output GeoTIFF");
         GDALDatasetH hOut = datasetHandle(outGuard);
@@ -2249,10 +2245,7 @@ static void exportRasterImpl(const char* inputPath, const char* outputPath,
 
         targs.AddString("-of");
         targs.AddString("GTiff");
-        targs.AddString("-co");
-        targs.AddString("TILED=YES");
-        targs.AddString("-co");
-        targs.AddString("COMPRESS=DEFLATE");
+        GtiffOptions().tiled().compress(GtiffOptions::Codec::Deflate).appendTo(targs);
 
         const GdalOptionsPtr<GDALTranslateOptions> psOptions(
             GDALTranslateOptionsNew(targs.List(), nullptr));

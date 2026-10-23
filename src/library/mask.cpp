@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "gdal_raii.h"
+#include "gtiff_options.h"
 #include "mask.h"
 #include "logger.h"
 #include "exceptions.h"
@@ -144,62 +145,29 @@ namespace ddb
         // multi-GB intermediates and is very slow. The mask output is consumed by
         // buildCog right after, so the only requirement is that the compressor
         // supports the band layout/type.
-        const char *compressOpt = nullptr;
-        const char *photometricOpt = nullptr;
-        const char *predictorOpt = nullptr;
-        const char *qualityOrZlevelOpt = nullptr;
-
+        GtiffOptions creation;
         if (srcBands == 3) {
-            compressOpt = "COMPRESS=JPEG";
-            photometricOpt = "PHOTOMETRIC=YCBCR";
-            qualityOrZlevelOpt = "JPEG_QUALITY=75";
+            creation.compress(GtiffOptions::Codec::Jpeg).set("PHOTOMETRIC", "YCBCR").set("JPEG_QUALITY", "75");
         } else if (srcBands == 1 && srcType == GDT_Byte) {
-            compressOpt = "COMPRESS=JPEG";
-            photometricOpt = "PHOTOMETRIC=MINISBLACK";
-            qualityOrZlevelOpt = "JPEG_QUALITY=75";
+            creation.compress(GtiffOptions::Codec::Jpeg).set("PHOTOMETRIC", "MINISBLACK").set("JPEG_QUALITY", "75");
         } else {
             // 4-band Byte (RGBA) and 1-band non-Byte (integers/floats) all land here.
-            compressOpt = "COMPRESS=DEFLATE";
             // ZLEVEL=2: very fast, still gives big savings on flat-collar borders.
-            qualityOrZlevelOpt = "ZLEVEL=2";
-            predictorOpt = (srcType == GDT_Float32 || srcType == GDT_Float64)
-                               ? "PREDICTOR=3"
-                               : "PREDICTOR=2";
+            creation.compress(GtiffOptions::Codec::Deflate).predictorFor(srcType).set("ZLEVEL", "2");
         }
-
-        targs.AddString("-co");
-        targs.AddString(compressOpt);
-        if (photometricOpt) {
-            targs.AddString("-co");
-            targs.AddString(photometricOpt);
-        }
-        if (predictorOpt) {
-            targs.AddString("-co");
-            targs.AddString(predictorOpt);
-        }
-        targs.AddString("-co");
-        targs.AddString(qualityOrZlevelOpt);
 
         // BIGTIFF=IF_SAFER lets the GTiff driver decide whether BigTIFF is needed.
         // The estimate logged above is informational only.
-        targs.AddString("-co");
-        targs.AddString("BIGTIFF=IF_SAFER");
-
         // TILED + 512px blocks avoid giant-strip scratch buffers and match the COG
         // pipeline. We do not generate overviews here; mask output is treated as an
         // intermediate and overview generation is left to the build/COG pipeline.
-        targs.AddString("-co");
-        targs.AddString("TILED=YES");
-        targs.AddString("-co");
-        targs.AddString("BLOCKXSIZE=512");
-        targs.AddString("-co");
-        targs.AddString("BLOCKYSIZE=512");
+        creation.bigTiffIfSafer().tiled(512);
 
         // Compression threads: this one and those the CPU pool allows (DQ-15), held until
         // the output is closed
         const auto cpu = parallel::tryAcquireThreads(parallel::hardwareThreads());
-        targs.AddString("-co");
-        targs.AddString(parallel::gdalNumThreads(cpu).c_str());
+        creation.add(parallel::gdalNumThreads(cpu));
+        creation.appendTo(targs);
 
         int bUsageError = FALSE;
 

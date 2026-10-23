@@ -4,6 +4,7 @@
 #include "merge_multispectral.h"
 #include "mathutil.h"
 #include "gdal_raii.h"
+#include "gtiff_options.h"
 #include "exceptions.h"
 #include "logger.h"
 #include "mio.h"
@@ -668,31 +669,28 @@ SeparateVrt buildSeparateVrt(std::vector<GDALDatasetUniquePtr> sources,
     return v;
 }
 
-// Options of the tiled GTiff that GDALTranslate writes for a merge; numThreads is the GDAL
-// thread option of the merge's CPU tokens (parallel::gdalNumThreads)
-GdalOptionsPtr<GDALTranslateOptions> mergeTranslateOptions(const char *predictor, bool useJpeg,
+// The creation options of the tiled GTiff that a merge writes (GDALTranslate and GDALWarp
+// alike); numThreads is the GDAL thread option of the merge's CPU tokens
+// (parallel::gdalNumThreads). JPEG for 8-bit 3- and 4-band outputs, LZW for the rest, with the
+// predictor of the sample type.
+GtiffOptions mergeCreationOptions(GDALDataType dt, bool useJpeg, const std::string &numThreads) {
+    GtiffOptions creation;
+    creation.tiled().add(numThreads).bigTiffIfSafer().predictorFor(dt);
+    if (useJpeg) {
+        creation.compress(GtiffOptions::Codec::Jpeg).set("QUALITY", "90");
+    } else {
+        creation.compress(GtiffOptions::Codec::Lzw);
+    }
+    return creation;
+}
+
+// Options of the tiled GTiff that GDALTranslate writes for a merge
+GdalOptionsPtr<GDALTranslateOptions> mergeTranslateOptions(GDALDataType dt, bool useJpeg,
                                                            const std::string &numThreads) {
     CPLStringList transArgs;
     transArgs.AddString("-of");
     transArgs.AddString("GTiff");
-    transArgs.AddString("-co");
-    transArgs.AddString("TILED=YES");
-    transArgs.AddString("-co");
-    transArgs.AddString(numThreads.c_str());
-    transArgs.AddString("-co");
-    transArgs.AddString("BIGTIFF=IF_SAFER");
-    transArgs.AddString("-co");
-    transArgs.AddString(predictor);
-
-    if (useJpeg) {
-        transArgs.AddString("-co");
-        transArgs.AddString("COMPRESS=JPEG");
-        transArgs.AddString("-co");
-        transArgs.AddString("QUALITY=90");
-    } else {
-        transArgs.AddString("-co");
-        transArgs.AddString("COMPRESS=LZW");
-    }
+    mergeCreationOptions(dt, useJpeg, numThreads).appendTo(transArgs);
 
     return GdalOptionsPtr<GDALTranslateOptions>(GDALTranslateOptionsNew(transArgs.List(), nullptr));
 }
@@ -799,10 +797,6 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
     const std::string numThreads = parallel::gdalNumThreads(cpu);
     GDALDatasetUniquePtr out;
 
-    // Determine predictor type based on data type
-    // PREDICTOR=2 (horizontal differencing) for integer types
-    // PREDICTOR=3 (floating point) for float types
-    const char *predictor = (dt == GDT_Float32 || dt == GDT_Float64) ? "PREDICTOR=3" : "PREDICTOR=2";
 
     if (hasGeoTransform) {
         // Use GDALWarp for georeferenced data (supports reprojection)
@@ -812,24 +806,7 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
         warpArgs.AddString("-multi");
         warpArgs.AddString("-wo");
         warpArgs.AddString(numThreads.c_str());
-        warpArgs.AddString("-co");
-        warpArgs.AddString(numThreads.c_str());
-        warpArgs.AddString("-co");
-        warpArgs.AddString("TILED=YES");
-        warpArgs.AddString("-co");
-        warpArgs.AddString("BIGTIFF=IF_SAFER");
-        warpArgs.AddString("-co");
-        warpArgs.AddString(predictor);
-
-        if (useJpeg) {
-            warpArgs.AddString("-co");
-            warpArgs.AddString("COMPRESS=JPEG");
-            warpArgs.AddString("-co");
-            warpArgs.AddString("QUALITY=90");
-        } else {
-            warpArgs.AddString("-co");
-            warpArgs.AddString("COMPRESS=LZW");
-        }
+        mergeCreationOptions(dt, useJpeg, numThreads).appendTo(warpArgs);
 
         const GdalOptionsPtr<GDALWarpAppOptions> warpOpts(
             GDALWarpAppOptionsNew(warpArgs.List(), nullptr));
@@ -950,7 +927,7 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
                                      "_aligned.vrt", "Cannot build VRT for aligned merge");
 
                 // Translate to output
-                const auto transOpts = mergeTranslateOptions(predictor, useJpeg, numThreads);
+                const auto transOpts = mergeTranslateOptions(dt, useJpeg, numThreads);
                 out = adoptDataset(
                     GDALTranslate(outputPath.c_str(), aligned.handle(), transOpts.get(), nullptr));
                 aligned.close();
@@ -1028,7 +1005,7 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
 
         if (!applyShift) {
             // Standard non-shifted merge path
-            const auto transOpts = mergeTranslateOptions(predictor, useJpeg, numThreads);
+            const auto transOpts = mergeTranslateOptions(dt, useJpeg, numThreads);
             out = adoptDataset(
                 GDALTranslate(outputPath.c_str(), merged.handle(), transOpts.get(), nullptr));
         }

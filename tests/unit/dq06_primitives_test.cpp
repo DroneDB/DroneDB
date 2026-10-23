@@ -9,6 +9,8 @@
 
 #include <memory>
 #include <optional>
+#include <string>
+#include <vector>
 
 #include "gtest/gtest.h"
 
@@ -17,6 +19,7 @@
 #include "exceptions.h"
 #include "gdal_inc.h"
 #include "gdal_raii.h"
+#include "gtiff_options.h"
 #include "mathutil.h"
 #include "test.h"
 #include "testarea.h"
@@ -279,5 +282,46 @@ namespace
         const std::string ok = makeDemFile(ta.getPath("ok.tif"), 1, 32632, std::nullopt).string();
         EXPECT_THROW(openDem(ok, 0), InvalidArgsException);
         EXPECT_THROW(openDem(ok, 2), InvalidArgsException);
+    }
+
+    // ---- GeoTIFF creation options ----------------------------------------------------------
+
+    std::vector<std::string> asVector(const CPLStringList &list)
+    {
+        std::vector<std::string> out;
+        for (int i = 0; i < list.Count(); i++)
+            out.emplace_back(list[i]);
+        return out;
+    }
+
+    TEST(Dq06Gtiff, theOptionsAreKeyValueStringsInTheOrderTheyWereAdded)
+    {
+        GtiffOptions co;
+        co.compress(GtiffOptions::Codec::Deflate).predictorFor(GDT_Byte).tiled(256).bigTiffIfSafer().set("ZLEVEL", "2").add("NUM_THREADS=3");
+        EXPECT_EQ(asVector(co.list()),
+                  (std::vector<std::string>{"COMPRESS=DEFLATE", "PREDICTOR=2", "TILED=YES", "BLOCKXSIZE=256",
+                                            "BLOCKYSIZE=256", "BIGTIFF=IF_SAFER", "ZLEVEL=2", "NUM_THREADS=3"}));
+    }
+
+    TEST(Dq06Gtiff, theCodecsAndThePredictorOfTheSampleType)
+    {
+        EXPECT_EQ(asVector(GtiffOptions().compress(GtiffOptions::Codec::Lzw).list()), std::vector<std::string>{"COMPRESS=LZW"});
+        EXPECT_EQ(asVector(GtiffOptions().compress(GtiffOptions::Codec::Jpeg).list()), std::vector<std::string>{"COMPRESS=JPEG"});
+        for (const GDALDataType type : {GDT_Byte, GDT_Int16, GDT_UInt16, GDT_Int32, GDT_UInt32})
+            EXPECT_EQ(asVector(GtiffOptions().predictorFor(type).list()), std::vector<std::string>{"PREDICTOR=2"}) << GDALGetDataTypeName(type);
+        for (const GDALDataType type : {GDT_Float32, GDT_Float64})
+            EXPECT_EQ(asVector(GtiffOptions().predictorFor(type).list()), std::vector<std::string>{"PREDICTOR=3"}) << GDALGetDataTypeName(type);
+        EXPECT_EQ(asVector(GtiffOptions().predictorAuto().list()), std::vector<std::string>{"PREDICTOR=YES"});
+        EXPECT_EQ(asVector(GtiffOptions().tiled().list()), std::vector<std::string>{"TILED=YES"}) << "no block size without one";
+    }
+
+    TEST(Dq06Gtiff, appendToPutsCoInFrontOfEveryOption)
+    {
+        CPLStringList args;
+        args.AddString("-of");
+        args.AddString("GTiff");
+        GtiffOptions().compress(GtiffOptions::Codec::Lzw).bigTiffIfSafer().appendTo(args);
+        EXPECT_EQ(asVector(args),
+                  (std::vector<std::string>{"-of", "GTiff", "-co", "COMPRESS=LZW", "-co", "BIGTIFF=IF_SAFER"}));
     }
 }
