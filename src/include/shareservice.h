@@ -4,11 +4,13 @@
 #ifndef SHARESERVICE_H
 #define SHARESERVICE_H
 
+#include <functional>
 #include <string>
 #include <vector>
 
 #include "ddb_export.h"
-#include <cpr/cpr.h>
+#include "registry_auth.h"
+#include "registry_client.h"
 
 namespace ddb
 {
@@ -25,11 +27,18 @@ namespace ddb
 
     class ShareService
     {
+        RegistryDeps deps;
+
     public:
-        DDB_DLL ShareService();
+        DDB_DLL explicit ShareService(const RegistryDeps &registryDeps = {});
+
+        // Uploads the files (directories are skipped) to a new share of the Registry in `tag`
+        // and returns the URL of the result. The login goes through withAuthenticatedRegistry:
+        // `credentials` is asked when none are saved or the saved ones are refused.
         DDB_DLL std::string share(const std::vector<std::string> &input,
                                   const std::string &tag,
                                   const std::string &password,
+                                  CredentialProvider &credentials,
                                   const std::string &cwd = "",
                                   const ShareCallback &cb = nullptr,
                                   bool sslVerify = true);

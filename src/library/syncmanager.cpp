@@ -3,6 +3,8 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "syncmanager.h"
+#include <fstream>
+
 #include "json.h"
 
 #include "ddb.h"

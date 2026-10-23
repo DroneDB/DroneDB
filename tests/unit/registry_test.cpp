@@ -5,7 +5,10 @@
 #include <string>
 
 #include "gtest/gtest.h"
-#include "registry.h"
+#include "authmanager.h"
+#include "registry_client.h"
+#include "test.h"
+#include "testarea.h"
 #include "registryutils.h"
 #include "constants.h"
 #include "exceptions.h"
@@ -31,49 +34,72 @@ namespace
         EXPECT_EQ(RegistryUtils::errorMessage(R"({"status":500})"), "");
     }
 
-    // cpr reports a request that got no HTTP response with status 0 and an error: the CLI said
+    // A request that got no HTTP response has status 0 and a transport error: the CLI said
     // "Login failed: host returned 0"
-    void setError(cpr::Response &res, cpr::ErrorCode code, const std::string &message)
+    HttpResponse transportFailure(HttpTransportError kind, const std::string &message)
     {
-        res.error.code = code;
-        res.error.message = message;
+        HttpResponse res;
+        res.status = 0;
+        res.transport = kind;
+        res.transportMessage = message;
+        return res;
     }
 
     TEST(registryTransportError, NamesTheUrlAndTheReason)
     {
-        cpr::Response res;
-        res.status_code = 0;
-        setError(res, cpr::ErrorCode::COULDNT_CONNECT, "Failed to connect to host port 1");
-        EXPECT_EQ(RegistryUtils::transportError(res, "http://host:1"),
+        EXPECT_EQ(RegistryUtils::transportError(
+                      transportFailure(HttpTransportError::CouldNotConnect, "Failed to connect to host port 1"),
+                      "http://host:1"),
                   "could not connect to http://host:1: Failed to connect to host port 1");
 
-        setError(res, cpr::ErrorCode::COULDNT_RESOLVE_HOST, "Could not resolve host: nowhere");
-        EXPECT_EQ(RegistryUtils::transportError(res, "https://nowhere"),
-                  "could not connect to https://nowhere: Could not resolve host: nowhere");
-
         // Not a connection problem: the server may be there
-        setError(res, cpr::ErrorCode::OPERATION_TIMEDOUT, "Operation timed out");
-        EXPECT_EQ(RegistryUtils::transportError(res, "https://slow"), "request to https://slow failed: Operation timed out");
+        EXPECT_EQ(RegistryUtils::transportError(
+                      transportFailure(HttpTransportError::Other, "Operation timed out"), "https://slow"),
+                  "request to https://slow failed: Operation timed out");
 
-        setError(res, cpr::ErrorCode::SSL_CONNECT_ERROR, "");
-        EXPECT_EQ(RegistryUtils::transportError(res, "https://tls"), "request to https://tls failed: unknown error");
+        EXPECT_EQ(RegistryUtils::transportError(transportFailure(HttpTransportError::Other, ""), "https://tls"),
+                  "request to https://tls failed: unknown error");
     }
 
     TEST(registryTransportError, NoneWhenTheServerAnswered)
     {
-        cpr::Response res;
-        res.status_code = 500;
+        HttpResponse res;
+        res.status = 500;
         EXPECT_EQ(RegistryUtils::transportError(res, "http://host"), "");
-        res.status_code = 200;
+        res.status = 200;
         EXPECT_EQ(RegistryUtils::transportError(res, "http://host"), "");
+    }
+
+    TEST(registryNoRetry, ReadsTheFlagOfAnErrorBody)
+    {
+        EXPECT_TRUE(RegistryUtils::noRetry(R"({"title":"Quota","status":507,"noRetry":true})"));
+        EXPECT_FALSE(RegistryUtils::noRetry(R"({"title":"Busy","status":503,"noRetry":false})"));
+        EXPECT_FALSE(RegistryUtils::noRetry(R"({"title":"Busy","status":503})"));
+        EXPECT_FALSE(RegistryUtils::noRetry(R"({"noRetry":"true"})"));
+        EXPECT_FALSE(RegistryUtils::noRetry("<html>502</html>"));
+        EXPECT_FALSE(RegistryUtils::noRetry(""));
     }
 
     // Nothing listens on port 1 of the loopback interface: the connection is refused at once
     constexpr const char *UnreachableRegistry = "http://127.0.0.1:1";
 
+    // The real client (cpr), with nothing faked: the connection error reaches the user's message.
+    // The retries of the network policy run (three attempts) but do not wait here: the sleeper
+    // is replaced.
+    RegistryDeps noWaitDeps()
+    {
+        RegistryDeps deps;
+        deps.sleep = [](std::chrono::milliseconds) {};
+        return deps;
+    }
+
     TEST(registryTransportError, LoginToAnUnreachableServer)
     {
-        Registry registry(UnreachableRegistry);
+        TestArea ta(TEST_NAME, true);
+        AuthManager store(ta.getPath("auth.json"));
+        auto deps = noWaitDeps();
+        deps.credentials = &store;
+        RegistryClient registry(UnreachableRegistry, true, deps);
         try
         {
             registry.login("user", "password");
@@ -89,15 +115,20 @@ namespace
     }
 
     // The requests that follow a login report it the same way
-    TEST(registryTransportError, HandleErrorOfAnUnreachableServer)
+    TEST(registryTransportError, ARequestToAnUnreachableServer)
     {
-        Registry registry(UnreachableRegistry);
-        cpr::Response res = cpr::Get(cpr::Url(registry.getUrl("/users/authenticate")));
-        ASSERT_EQ(res.status_code, 0);
+        TestArea ta(TEST_NAME, true);
+        AuthManager store(ta.getPath("auth.json"));
+        auto deps = noWaitDeps();
+        deps.credentials = &store;
+        RegistryClient registry(UnreachableRegistry, true, deps);
+        const auto res = registry.get("/users/authenticate", AuthScheme::Cookie);
+        ASSERT_EQ(res.status, 0);
+        ASSERT_EQ(res.transport, HttpTransportError::CouldNotConnect);
         try
         {
-            registry.handleError(res);
-            FAIL() << "handleError accepted a request that got no response";
+            registry.expectOk(res);
+            FAIL() << "expectOk accepted a request that got no response";
         }
         catch (const RegistryException &e)
         {

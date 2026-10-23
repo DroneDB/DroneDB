@@ -3,9 +3,9 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "include/login.h"
-#include "registry.h"
+#include "registry_client.h"
 #include "constants.h"
-#include "terminal.h"
+#include "include/terminal.h"
 
 namespace cmd
 {
@@ -41,7 +41,7 @@ namespace cmd
         }
         else
         {
-            username = ddb::terminal::getPrompt("Username: ");
+            username = terminal::getPrompt("Username: ");
         }
 
         if (opts["password"].count() > 0)
@@ -50,12 +50,12 @@ namespace cmd
         }
         else
         {
-            password = ddb::terminal::getPass("Password: ");
+            password = terminal::getPass("Password: ");
         }
 
         auto sslVerify = opts["insecure"].count() == 0;
 
-        ddb::Registry reg(opts["server"].as<std::string>(), sslVerify);
+        ddb::RegistryClient reg(opts["server"].as<std::string>(), sslVerify);
         std::string token = reg.login(username, password);
         if (token.length() > 0)
         {

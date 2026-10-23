@@ -12,10 +12,10 @@
 #include "logger.h"
 #include "mio.h"
 #include "include/progressbar.h"
-#include "registry.h"
+#include "include/credentials.h"
+#include "registry_client.h"
 #include "registryutils.h"
 #include "shareservice.h"
-#include "terminal.h"
 
 namespace cmd
 {
@@ -76,7 +76,7 @@ namespace cmd
         ProgressBar pb;
         ddb::ShareCallback showProgress =
             [&pb](const std::vector<ddb::ShareFileProgress *> &files,
-                  size_t txBytes, size_t totalBytes)
+                  size_t, size_t)
         {
             if (!files.empty())
             {
@@ -96,27 +96,24 @@ namespace cmd
         if (quiet)
             showProgress = nullptr;
 
-        ddb::ShareService ss;
-
-        auto share = [&]()
-        {
-            const std::string url =
-                ss.share(input, tag, password, cwd, showProgress, sslVerify);
-            if (!quiet)
-                pb.done();
-            std::cout << url << std::endl;
-        };
+        // With --non-interactive nobody is asked: the credentials come from the saved ones and the
+        // environment only
+        InteractiveCredentials interactive;
+        RefusedCredentials refused("Authentication failed. Set DDB_USERNAME and "
+                                   "DDB_PASSWORD env vars or run `ddb login` first.");
+        ddb::CredentialProvider &credentials = nonInteractive ? static_cast<ddb::CredentialProvider &>(refused)
+                                                              : static_cast<ddb::CredentialProvider &>(interactive);
 
         // Try env-var credentials before the share attempt so that the very
-        // first request has them available (the alternative would be to wait
-        // for an AuthException).
+        // first request has them available (a login saves the credentials, which is
+        // where the share looks for them).
         const auto envUser = envOrEmpty("DDB_USERNAME");
         const auto envPass = envOrEmpty("DDB_PASSWORD");
         if (!envUser.empty() && !envPass.empty())
         {
             try
             {
-                ddb::Registry reg = ddb::RegistryUtils::createFromTag(tag, false, sslVerify);
+                ddb::RegistryClient reg = ddb::RegistryUtils::createFromTag(tag, false, sslVerify);
                 reg.login(envUser, envPass);
             }
             catch (const ddb::AppException &e)
@@ -127,32 +124,12 @@ namespace cmd
 
         try
         {
-            share();
-        }
-        catch (const ddb::AuthException &)
-        {
-            if (nonInteractive)
-            {
-                throw ddb::AuthException(
-                    "Authentication failed. Set DDB_USERNAME and "
-                    "DDB_PASSWORD env vars or run `ddb login` first.");
-            }
-
-            // Try logging-in interactively
-            auto username = ddb::terminal::getPrompt("Username: ");
-            auto password = ddb::terminal::getPass("Password: ");
-
-            ddb::Registry reg = ddb::RegistryUtils::createFromTag(tag, false, sslVerify);
-            if (reg.login(username, password).length() > 0)
-            {
-                // Retry
-                share();
-            }
-            else
-            {
-                throw ddb::AuthException("Cannot authenticate with " +
-                                         reg.getUrl());
-            }
+            ddb::ShareService ss;
+            const std::string url =
+                ss.share(input, tag, password, credentials, cwd, showProgress, sslVerify);
+            if (!quiet)
+                pb.done();
+            std::cout << url << std::endl;
         }
         catch (const ddb::AppException &e)
         {

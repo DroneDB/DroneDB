@@ -6,21 +6,20 @@
 #define TERMINAL_H
 
 // Reading from the terminal (DQ-05: out of utils.h, which pulled termios.h and windows.h into
-// every file). The library still prompts when push, pull and clone find no credentials;
-// DQ-11 moves the prompts to apps/ (CredentialProvider) and this header with them.
+// every file; DQ-11: out of the library, which must never prompt: a host such as the Registry
+// has no stdin to ask. The credentials the library needs come from a CredentialProvider, and the
+// CLI's is cmd::InteractiveCredentials).
 
 #include <string>
 
-#include "ddb_export.h"
-
-namespace ddb::terminal {
+namespace cmd::terminal {
 
 // Prints prompt and reads one line from stdin (without the newline); "" at end of input
-DDB_DLL std::string getPrompt(const std::string& prompt = "");
+std::string getPrompt(const std::string& prompt = "");
 
 // Prints prompt and reads one line from stdin without echoing it (getpass, also on Windows)
-DDB_DLL std::string getPass(const std::string& prompt = "Password: ");
+std::string getPass(const std::string& prompt = "Password: ");
 
-}  // namespace ddb::terminal
+}  // namespace cmd::terminal
 
 #endif  // TERMINAL_H

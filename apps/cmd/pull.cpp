@@ -8,6 +8,7 @@
 #include <constants.h>
 #include <ddb.h>
 #include <mio.h>
+#include <registry_ops.h>
 #include <registryutils.h>
 #include <tagmanager.h>
 #include <userprofile.h>
@@ -17,6 +18,7 @@
 
 #include "dbops.h"
 #include "exceptions.h"
+#include "include/credentials.h"
 
 namespace cmd
 {
@@ -57,7 +59,8 @@ namespace cmd
         else if (keepOurs)
             mergeStrategy = ddb::MergeStrategy::KeepOurs;
 
-        ddb::pull(remote, mergeStrategy, sslVerify);
+        InteractiveCredentials credentials;
+        ddb::pull(remote, mergeStrategy, sslVerify, credentials);
         return EXIT_SUCCESS;
     }
 

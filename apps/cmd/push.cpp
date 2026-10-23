@@ -7,6 +7,7 @@
 #include <constants.h>
 #include <ddb.h>
 #include <mio.h>
+#include <registry_ops.h>
 #include <registryutils.h>
 
 #include <fstream>
@@ -14,6 +15,7 @@
 
 #include "dbops.h"
 #include "exceptions.h"
+#include "include/credentials.h"
 
 namespace cmd
 {
@@ -41,7 +43,8 @@ namespace cmd
         const auto remote = opts["remote"].as<std::string>();
         auto sslVerify = opts["insecure"].count() == 0;
 
-        ddb::push(remote, sslVerify);
+        InteractiveCredentials credentials;
+        ddb::push(remote, sslVerify, credentials);
         return EXIT_SUCCESS;
     }
 

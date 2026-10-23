@@ -13,7 +13,6 @@
 #include "entry_types.h"
 #include "fs.h"
 #include "ddb_export.h"
-#include "registryutils.h"
 
 namespace ddb
 {
@@ -227,11 +226,6 @@ namespace ddb
     DDB_DLL bool pathExists(Database *db, const std::string &path);
 
     DDB_DLL std::string initIndex(const std::string &directory, bool fromScratch = false);
-
-    DDB_DLL void clone(const ddb::TagComponents &tag, const std::string &folder, bool sslVerify = true);
-
-    DDB_DLL void push(const std::string &registry, bool sslVerify = true);
-    DDB_DLL void pull(const std::string &registry, MergeStrategy mergeStrategy, bool sslVerify = true);
 
 }
 

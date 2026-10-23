@@ -34,7 +34,7 @@
 #include "json.h"
 #include "mio.h"
 #include "raster_test_utils.h"
-#include "registry.h"
+#include "delta_apply.h"
 #include "test.h"
 #include "testarea.h"
 #include "utils.h"

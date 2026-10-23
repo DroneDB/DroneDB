@@ -8,11 +8,8 @@
 #include <vector>
 
 #include "ddb_export.h"
-#include "mio.h"
-#include <cpr/cpr.h>
-#include "registry.h"
-#include "shareclient.h"
 #include "json_fwd.h"
+#include "registry_client.h"
 
 namespace ddb
 {
@@ -24,20 +21,23 @@ namespace ddb
         std::string token;
     };
 
+    // The four requests of a push (init, meta, upload, commit). None of them is tried again by
+    // the client: a push is a sequence the server tracks by token, and an upload that may have
+    // arrived must not be sent twice behind the caller's back. A push that fails is started again.
     class PushManager
     {
-        ddb::Registry *registry;
+        RegistryClient *registry;
         std::string organization;
         std::string dataset;
 
+        std::string endpoint(const std::string &name) const;
+
     public:
-        DDB_DLL PushManager(ddb::Registry *registry,
-                            const std::string &organization,
-                            const std::string &dataset)
+        DDB_DLL PushManager(RegistryClient *client,
+                            const std::string &org,
+                            const std::string &ds)
+            : registry(client), organization(org), dataset(ds)
         {
-            this->registry = registry;
-            this->organization = organization;
-            this->dataset = dataset;
         }
 
         DDB_DLL PushInitResponse init(const std::string &registryStampChecksum, const json &dbStamp);

@@ -1,7 +1,7 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
-#include "terminal.h"
+#include "include/terminal.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -15,7 +15,7 @@
 #include <unistd.h>
 #endif
 
-namespace ddb::terminal {
+namespace cmd::terminal {
 
 std::string getPass(const std::string& prompt) {
 #ifdef _WIN32
@@ -93,4 +93,4 @@ std::string getPrompt(const std::string& prompt) {
     return std::string(input);
 }
 
-}  // namespace ddb::terminal
+}  // namespace cmd::terminal

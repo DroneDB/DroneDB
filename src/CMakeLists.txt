@@ -66,7 +66,7 @@ set(COMMON_LIBS
 
 
 # boolinq is header-only and ships no CMake config: an INTERFACE target carries its include
-# dir to libddb (registry.cpp) and the tests (utils.cpp).
+# dir to libddb (pull.cpp) and the tests (utils.cpp).
 add_library(boolinq INTERFACE)
 target_include_directories(boolinq SYSTEM INTERFACE ${BOOLINQ_INCLUDE_DIRS})
 

@@ -7,6 +7,7 @@
 #include <constants.h>
 #include <ddb.h>
 #include <mio.h>
+#include <registry_ops.h>
 #include <registryutils.h>
 
 #include <fstream>
@@ -14,6 +15,7 @@
 
 #include "dbops.h"
 #include "exceptions.h"
+#include "include/credentials.h"
 
 namespace cmd
 {
@@ -60,7 +62,8 @@ namespace cmd
 
         LOGD << "Normalized folder = " << ddb::io::toGenericUtf8(folder);
 
-        clone(tag, ddb::io::toGenericUtf8(folder), sslVerify);
+        InteractiveCredentials credentials;
+        ddb::clone(tag, ddb::io::toGenericUtf8(folder), sslVerify, credentials);
 
         return EXIT_SUCCESS;
     }

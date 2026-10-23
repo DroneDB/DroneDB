@@ -4,8 +4,6 @@
 
 #include "ddb.h"
 
-#include <cpr/cpr.h>
-
 #include <cmath>
 #include <cstdlib>
 #include <memory>
@@ -37,6 +35,7 @@
 #include "dbops.h"
 #include "cad.h"
 #include "delta.h"
+#include "delta_apply.h"
 #include "entry.h"
 #include "entry_path.h"
 #include "entry_types.h"

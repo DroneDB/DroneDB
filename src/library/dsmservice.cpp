@@ -12,7 +12,6 @@
 #include "gdal_raii.h"
 #include "raster_utils.h"
 #include "http_helpers.h"
-#include <cpr/cpr.h>
 #include "mio.h"
 #include "constants.h"
 

@@ -120,29 +120,33 @@ namespace ddb
         return "";
     }
 
-    std::string RegistryUtils::transportError(const cpr::Response &res, const std::string &url)
+    bool RegistryUtils::noRetry(const std::string &body)
     {
-        if (res.error.code == cpr::ErrorCode::OK)
-            return "";
-
-        const std::string reason = res.error.message.empty() ? "unknown error" : res.error.message;
-        switch (res.error.code)
-        {
-        case cpr::ErrorCode::COULDNT_CONNECT:
-        case cpr::ErrorCode::COULDNT_RESOLVE_HOST:
-        case cpr::ErrorCode::COULDNT_RESOLVE_PROXY:
-            return "could not connect to " + url + ": " + reason;
-        default:
-            return "request to " + url + " failed: " + reason;
-        }
+        const json j = json::parse(body, nullptr, false);
+        if (!j.is_object())
+            return false;
+        const auto it = j.find("noRetry");
+        return it != j.end() && it->is_boolean() && it->get<bool>();
     }
 
-    Registry RegistryUtils::createFromTag(const std::string &tag,
-                                          bool useInsecureRegistry,
-                                          bool sslVerify)
+    std::string RegistryUtils::transportError(const HttpResponse &res, const std::string &url)
+    {
+        if (!res.hasTransportError())
+            return "";
+
+        const std::string reason = res.transportMessage.empty() ? "unknown error" : res.transportMessage;
+        if (res.transport == HttpTransportError::CouldNotConnect)
+            return "could not connect to " + url + ": " + reason;
+        return "request to " + url + " failed: " + reason;
+    }
+
+    RegistryClient RegistryUtils::createFromTag(const std::string &tag,
+                                                bool useInsecureRegistry,
+                                                bool sslVerify,
+                                                const RegistryDeps &deps)
     {
         const auto tc = parseTag(tag, useInsecureRegistry);
-        return Registry(tc.registryUrl, sslVerify);
+        return RegistryClient(tc.registryUrl, sslVerify, deps);
     }
 
     std::string TagComponents::tagWithoutUrl() const

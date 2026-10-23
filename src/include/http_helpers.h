@@ -5,35 +5,29 @@
 #ifndef HTTP_HELPERS_H
 #define HTTP_HELPERS_H
 
-// The cpr helpers of the registry, share and DSM code (DQ-05: out of utils.h, which pulled cpr
-// into every file). DQ-11 replaces them with IHttpClient and takes cpr out of the public headers.
+// Small helpers over an IHttpClient (DQ-11: cpr is gone from this header; the DQ-05 helpers of
+// the registry and share code moved into RegistryClient, readFile had no caller).
 
-#include <cpr/cpr.h>
-
-#include <functional>
 #include <string>
 
-#include "fs.h"
+#include "ddb_export.h"
+#include "http_client.h"
 
 namespace ddb::utils {
 
-cpr::Response downloadToFile(const std::string& url,
-                             const std::string& filePath,
-                             bool throwOnError = false,
-                             bool verifySsl = true);
+// Downloads `url` to `filePath` (replacing it). A failed or empty download leaves no file and, with
+// throwOnError, throws NetException; the response is returned either way.
+DDB_DLL HttpResponse downloadToFile(IHttpClient& client,
+                                    const std::string& url,
+                                    const std::string& filePath,
+                                    bool throwOnError = false,
+                                    bool verifySsl = true);
 
-std::string readFile(const std::string& url, bool throwOnError = false, bool verifySsl = true);
-
-typedef std::function<bool(std::string& fileName, size_t txBytes, size_t totalBytes)>
-    UploadCallback;
-
-cpr::Header authHeader(const std::string& token);
-
-cpr::Header authCookie(const std::string& token);
-
-// A file part of a multipart upload. cpr would name the part with fs::path(std::string), the
-// ANSI code page on Windows: the UTF-8 file name is passed instead (mio.h, "Path encoding")
-cpr::File uploadFile(const fs::path& file);
+// The same with the library's own client (defaultHttpClient)
+DDB_DLL HttpResponse downloadToFile(const std::string& url,
+                                    const std::string& filePath,
+                                    bool throwOnError = false,
+                                    bool verifySsl = true);
 
 }  // namespace ddb::utils
 

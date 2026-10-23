@@ -7,7 +7,7 @@
 #include "logger.h"
 #include "exceptions.h"
 #include "mio.h"
-#include <cpr/cpr.h>
+#include "http_client.h"
 #include <ctime>
 #include <iomanip>
 #include <sstream>
@@ -471,7 +471,7 @@ namespace ddb
         }
 
         const std::string pathQuery =
-            urls != nullptr ? "?path=" + std::string(cpr::util::urlEncode(path)) : "";
+            urls != nullptr ? "?path=" + urlEncode(path) : "";
 
         j["assets"] = json::object();
         j["assets"][path] = {{"title", path},
@@ -615,7 +615,7 @@ namespace ddb
                     if (urls != nullptr)
                         j["assets"][path]["href"] =
                             urls->collectionRoot + DOWNLOAD_ENDPOINT +
-                            "?path=" + std::string(cpr::util::urlEncode(path));
+                            "?path=" + urlEncode(path);
                 }
             }
         }

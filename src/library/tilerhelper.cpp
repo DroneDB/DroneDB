@@ -21,7 +21,7 @@
 #include "geoproject.h"
 #include "hash.h"
 #include "logger.h"
-#include <cpr/cpr.h>
+#include "http_client.h"
 #include "mio.h"
 #include "userprofile.h"
 
@@ -173,23 +173,25 @@ namespace ddb
                 {
                     // Download to a temp file so a failed transfer never lands in the cache
                     const fs::path tmpPath = io::concat(localTileablePath, ".download-" + randomString(16));
-                    cpr::Response res;
+                    HttpResponse res;
                     bool writeOk = false;
                     {
                         std::ofstream of(tmpPath, std::ios::binary);
-                        res = cpr::Download(of, cpr::Url(io::toUtf8(tileablePath)));
-                        // cpr's write callback ignores stream errors, so a disk-full
-                        // or I/O failure only shows up on the stream state
+                        HttpRequest request;
+                        request.url = io::toUtf8(tileablePath);
+                        res = defaultHttpClient().download(request, of);
+                        // A disk-full or I/O failure stops the transfer, and also shows on the
+                        // stream state
                         of.close();
                         writeOk = !of.fail();
                     }
 
-                    if (!writeOk || res.error || res.status_code < 200 || res.status_code >= 300)
+                    if (!writeOk || res.hasTransportError() || res.status < 200 || res.status >= 300)
                     {
                         io::assureIsRemoved(tmpPath);
                         throw NetException("Cannot download " + io::toUtf8(tileablePath) + " (HTTP " +
-                                           std::to_string(res.status_code) + "): " +
-                                           (writeOk ? res.error.message : std::string("write error")));
+                                           std::to_string(res.status) + "): " +
+                                           (writeOk ? res.transportMessage : std::string("write error")));
                     }
 
                     // Tilers kept open on the previous download would block the replace on Windows
