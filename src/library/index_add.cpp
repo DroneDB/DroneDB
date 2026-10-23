@@ -4,6 +4,7 @@
 // Adding to the index: plan (read-only), compute (hash and parse, no transaction), commit (short
 // write transaction).
 #include "dbops.h"
+#include "dataset_walk.h"
 #include "index_internal.h"
 
 #include "build.h"
@@ -141,12 +142,9 @@ namespace ddb
         for (auto &p : pathList) {
             io::Path relPath = io::Path(p).relativeTo(directory);
 
-            if (p.has_filename()) {
-                const auto fileName = io::toGenericUtf8(p.filename());
-                if (std::any_of(fileName.begin(), fileName.end(), isEntryPathSeparator)) {
-                    LOGD << "Skipping '" << p << "'";
-                    continue; // Skip file
-                }
+            if (!hasIndexableName(p)) {
+                LOGD << "Skipping '" << p << "'";
+                continue; // Skip file
             }
 
             PlannedAddItem item;

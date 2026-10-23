@@ -135,7 +135,6 @@ namespace ddb
         // the whole tree
         WalkOptions options;
         options.levels = maxDepth > 0 ? maxDepth : (maxDepth == -1 ? 1 : 0);
-        options.skipHiddenAndSystem = true;
 
         for (const auto &pathUtf8 : paths)
         {

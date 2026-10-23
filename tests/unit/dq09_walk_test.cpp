@@ -10,10 +10,13 @@
 
 #include "gtest/gtest.h"
 
+#include <unistd.h>
+
 #include "dataset_walk.h"
 #include "dbops.h"
 #include "exceptions.h"
 #include "mio.h"
+#include "status.h"
 #include "test.h"
 #include "testarea.h"
 #include "utils.h"
@@ -113,4 +116,87 @@ namespace
         EXPECT_FALSE(hasIndexableName("a/back\\slash.txt"));
         EXPECT_TRUE(hasIndexableName("back\\dir/file.txt")) << "only the name is checked, not the folders";
     }
+
+    // ----------------------------------------------------------------------------------------
+    // `ddb status` and `ddb add` look at the same tree: after an add, status has nothing to report
+    // ----------------------------------------------------------------------------------------
+
+    std::set<std::string> notIndexed(Database *db)
+    {
+        std::set<std::string> paths;
+        statusIndex(db, [&](const FileStatus status, const std::string &file)
+        {
+            if (status == NotIndexed)
+                paths.insert(file);
+        });
+        return paths;
+    }
+
+    void addTree(IndexFixture &f)
+    {
+        addToIndex(f.db.get(), expandGlobPatterns({f.root.string()}));
+    }
+
+    TEST(Dq09StatusParity, ADatasetAddedWholeHasNothingNotIndexed)
+    {
+        IndexFixture f(TEST_NAME);
+        writeFile(f.root / "a.txt", "a");
+        writeFile(f.root / "sub" / ".hidden", "h");
+        writeFile(f.root / "sub" / "sp ace #%.txt", "s");
+        addTree(f);
+        EXPECT_TRUE(notIndexed(f.db.get()).empty());
+    }
+
+    TEST(Dq09StatusParity, StatusReportsAFileThatWasNotAdded)
+    {
+        IndexFixture f(TEST_NAME);
+        writeFile(f.root / "a.txt", "a");
+        addTree(f);
+        writeFile(f.root / "later.txt", "l");
+        EXPECT_EQ(notIndexed(f.db.get()), (std::set<std::string>{"later.txt"}));
+    }
+
+#ifndef _WIN32
+    // A name with a backslash is legal on POSIX but cannot be an entry path: add skips the file
+    // (planAddCandidates), so status must not list it as waiting to be added forever
+    TEST(Dq09StatusParity, AFileNameWithABackslashIsNotReportedAsNotIndexed)
+    {
+        IndexFixture f(TEST_NAME);
+        writeFile(f.root / "a.txt", "a");
+        writeFile(f.root / "sub" / "back\\slash.txt", "b");
+        addTree(f);
+        EXPECT_FALSE(pathExists(f.db.get(), "sub/back\\slash.txt")) << "add never indexes it";
+        EXPECT_TRUE(notIndexed(f.db.get()).empty());
+    }
+
+    // add skips the folders it cannot read (skip_permission_denied); status stopped with an
+    // error on the first one
+    TEST(Dq09StatusParity, AFolderTheProcessCannotReadIsSkippedLikeAddDoes)
+    {
+        if (geteuid() == 0)
+            GTEST_SKIP() << "root reads every folder";
+
+        IndexFixture f(TEST_NAME);
+        writeFile(f.root / "a.txt", "a");
+        writeFile(f.root / "locked" / "inside.txt", "i");
+        fs::permissions(f.root / "locked", fs::perms::none);
+
+        std::set<std::string> reported;
+        try
+        {
+            addTree(f);
+            reported = notIndexed(f.db.get());
+        }
+        catch (...)
+        {
+            fs::permissions(f.root / "locked", fs::perms::owner_all);
+            throw;
+        }
+        fs::permissions(f.root / "locked", fs::perms::owner_all);
+
+        EXPECT_TRUE(pathExists(f.db.get(), "locked")) << "the folder itself is an entry";
+        EXPECT_FALSE(pathExists(f.db.get(), "locked/inside.txt"));
+        EXPECT_TRUE(reported.empty());
+    }
+#endif
 }

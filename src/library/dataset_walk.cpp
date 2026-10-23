@@ -46,7 +46,7 @@ namespace ddb
             {
                 const fs::path &path = i->path();
 
-                if (isReservedSegment(path.filename()) || (options.skipHiddenAndSystem && isHiddenOrSystem(path)))
+                if (isReservedSegment(path.filename()) || isHiddenOrSystem(path))
                 {
                     i.disable_recursion_pending();
                     continue;

@@ -20,15 +20,13 @@ namespace ddb
     {
         // Levels below the start folder to list: 0 = the whole tree, 1 = its children only
         int levels = 0;
-        // Skip Windows hidden and system files and folders (isHiddenOrSystem)
-        bool skipHiddenAndSystem = false;
     };
 
     /**
      * Calls visit for every file and folder below `folder` (never for the folder itself), in
      * the directory iterator's order. Not listed, and not entered:
      *  - ".ddb" folders (isReservedSegment);
-     *  - with skipHiddenAndSystem, hidden and system files and folders (Windows attributes);
+     *  - hidden and system files and folders (Windows attributes; isHiddenOrSystem);
      *  - folders the process cannot read (skipped, not an error).
      * A filesystem error aborts the walk with an FSException. The entries are not filtered by
      * hasIndexableName: that is the caller's decision, because indexing keeps looking below a

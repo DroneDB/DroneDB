@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+#include "dataset_walk.h"
 #include "dbops.h"
 #include "status.h"
 
@@ -79,46 +80,17 @@ namespace ddb
             cb(status, relPath.generic());
         }
 
-        try
+        // What `ddb add` would find: the same walk, so a file that add skips is never reported
+        walkDataset(directory, {}, [&](const fs::directory_entry &entry)
         {
-            for (auto i = fs::recursive_directory_iterator(directory);
-                 i != fs::recursive_directory_iterator();
-                 ++i)
-            {
+            const fs::path &path = entry.path();
 
-                auto path = i->path();
-                auto p = io::toGenericUtf8(path);
+            // Skips already checked folders
+            if (checkedPaths.count(io::toGenericUtf8(path)) == 1 || !hasIndexableName(path))
+                return;
 
-                // Skips already checked folders
-                if (checkedPaths.count(p) == 1)
-                    continue;
-
-                if (p == io::toGenericUtf8(directory))
-                {
-                    LOGD << "Skipping parent folder";
-                    continue;
-                }
-
-                // Skip .ddb
-                if (isReservedSegment(path.filename()))
-                    i.disable_recursion_pending();
-
-                // Match path components relative to the dataset root, not substrings of the
-                // absolute path: "a.ddbfile.txt" or a root under "x.ddb-y" must be reported.
-                const auto relPath = io::Path(io::fromUtf8(p)).relativeTo(directory);
-                if (containsDdbSegment(relPath.get()))
-                {
-                    LOGD << "Skipping ddb folder";
-                    continue;
-                }
-
-                cb(NotIndexed, relPath.generic());
-            }
-        }
-        catch (const fs::filesystem_error &e)
-        {
-            throw FSException(e.what());
-        }
+            cb(NotIndexed, io::Path(path).relativeTo(directory).generic());
+        });
     }
 
 } // namespace ddb
