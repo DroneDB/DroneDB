@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "dbops.h"
+#include "json.h"
 #include "info.h"
 #include "exceptions.h"
 #include "mio.h"

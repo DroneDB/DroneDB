@@ -10,7 +10,7 @@
 #include <list>
 #include <map>
 #include <mutex>
-#include "json.h"
+#include "json_fwd.h"
 #include "ddb_export.h"
 
 namespace ddb {

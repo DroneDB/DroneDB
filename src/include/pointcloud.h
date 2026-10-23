@@ -8,7 +8,7 @@
 #include <vector>
 #include "build_layout.h"
 #include "ddb_export.h"
-#include "json.h"
+#include "json_fwd.h"
 #include "basicgeometry.h"
 
 namespace ddb

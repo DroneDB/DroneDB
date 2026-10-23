@@ -5,7 +5,7 @@
 #define COMMAND_H
 
 #include <cxxopts.hpp>
-#include "json.h"
+#include "json_fwd.h"
 #include <iostream>
 
 namespace cmd

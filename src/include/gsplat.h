@@ -12,7 +12,7 @@
 #include "build_layout.h"
 #include "ddb_export.h"
 #include "fs.h"
-#include "json.h"
+#include "json_fwd.h"
 
 namespace ddb
 {

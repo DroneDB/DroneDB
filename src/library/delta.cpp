@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "mio.h"
+#include "json.h"
 
 #include <algorithm>
 #include <optional>

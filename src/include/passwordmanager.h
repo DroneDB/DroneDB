@@ -6,7 +6,7 @@
 
 #include <fstream>
 #include "fs.h"
-#include "json.h"
+#include "json_fwd.h"
 #include "database.h"
 
 namespace ddb

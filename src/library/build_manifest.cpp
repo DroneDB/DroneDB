@@ -7,6 +7,7 @@
 // path comes from the EntryHandler registry and build_layout.h.
 
 #include "build_manifest.h"
+#include "json.h"
 #include "randomutil.h"
 
 #include <algorithm>

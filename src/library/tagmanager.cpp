@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "tagmanager.h"
+#include "json.h"
 
 #include "ddb.h"
 #include "mio.h"

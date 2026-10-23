@@ -9,7 +9,7 @@
 #include "metamanager.h"
 #include "sqlite_database.h"
 #include "ddb_export.h"
-#include "json.h"
+#include "json_fwd.h"
 #include "constants.h"
 
 #include <functional>

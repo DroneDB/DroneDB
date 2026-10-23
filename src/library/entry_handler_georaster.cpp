@@ -8,6 +8,7 @@
 #include <memory>
 
 #include "build_layout.h"
+#include "json.h"
 #include "cog.h"
 #include "cpl_conv.h"
 #include "entry.h"

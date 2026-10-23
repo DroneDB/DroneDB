@@ -8,7 +8,7 @@
 
 #include "basicgeometry.h"
 #include "ddb_export.h"
-#include "json.h"
+#include "json_fwd.h"
 
 namespace ddb {
 

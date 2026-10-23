@@ -14,7 +14,7 @@
 #include "dbops.h"
 #include "entry_handler.h"
 #include "fs.h"
-#include "json.h"
+#include "json_fwd.h"
 
 /**
  * The build manifest (XI-04, decision D8): what a host needs to serve the builds of a dataset

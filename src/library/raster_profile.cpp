@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "raster_profile.h"
+#include "json.h"
 #include "mathutil.h"
 #include "raster_analysis.h"
 #include "thermal.h"

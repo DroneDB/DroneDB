@@ -5,6 +5,7 @@
 // PointCloud entries: LAS/LAZ/E57/PTS/XYZ (and point-only PLY), built into a COPC file.
 
 #include "build_layout.h"
+#include "json.h"
 #include "entry.h"
 #include "entry_handlers_builtin.h"
 #include "mio.h"

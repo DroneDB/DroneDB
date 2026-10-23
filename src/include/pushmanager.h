@@ -12,7 +12,7 @@
 #include <cpr/cpr.h>
 #include "registry.h"
 #include "shareclient.h"
-#include "json.h"
+#include "json_fwd.h"
 
 namespace ddb
 {

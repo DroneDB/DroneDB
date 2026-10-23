@@ -11,7 +11,7 @@
 
 #include "ddb_export.h"
 #include "fs.h"
-#include "json.h"
+#include "json_fwd.h"
 
 namespace ddb
 {

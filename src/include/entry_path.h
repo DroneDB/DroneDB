@@ -10,7 +10,7 @@
 
 #include "ddb_export.h"
 #include "fs.h"
-#include "json.h"
+#include "json_fwd.h"
 
 // The dataset path rules (XI-09): what a dataset-relative entry path may be, and its one
 // normalized spelling. libddb owns them; Registry calls DDBNormalizePath (ddb.h) so both sides

@@ -4,6 +4,7 @@
 
 #include "process_init.h"
 
+#include <stdexcept>
 #include <clocale>
 #include <cstdlib>
 #include <iostream>

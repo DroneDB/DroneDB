@@ -11,6 +11,7 @@
 #include <optional>
 
 #include "build_layout.h"
+#include "json.h"
 #include "cad.h"
 #include "entry.h"
 #include "entry_handlers_builtin.h"
