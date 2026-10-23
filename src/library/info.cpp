@@ -62,6 +62,7 @@ namespace ddb
                     if (!first)
                         output << ",";
                     output << json(e).dump();
+                    first = false;
                 }
                 else if (format == "geojson")
                 {
@@ -70,6 +71,7 @@ namespace ddb
                         if (!first)
                             output << ",";
                         output << feature->dump();
+                        first = false; // only a written feature needs a separator after it
                     }
                     else
                     {
@@ -80,8 +82,6 @@ namespace ddb
                 {
                     output << e.toString() << "\n";
                 }
-
-                first = false;
             }
             catch (const AppException &e)
             {
