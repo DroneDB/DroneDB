@@ -34,7 +34,7 @@
    "COMPRESSION": "JPEG",
    "INTERLEAVE": "PIXEL",
    "JPEGTABLESMODE": "1",
-   "JPEG_QUALITY": "75",
+   "JPEG_QUALITY": "90",
    "LAYOUT": "COG"
   },
   "width": 64
@@ -74,7 +74,7 @@
    "COMPRESSION": "JPEG",
    "INTERLEAVE": "PIXEL",
    "JPEGTABLESMODE": "1",
-   "JPEG_QUALITY": "75",
+   "JPEG_QUALITY": "90",
    "LAYOUT": "COG"
   },
   "width": 64
@@ -122,7 +122,7 @@
    "COMPRESSION": "JPEG",
    "INTERLEAVE": "PIXEL",
    "JPEGTABLESMODE": "1",
-   "JPEG_QUALITY": "75",
+   "JPEG_QUALITY": "90",
    "LAYOUT": "COG"
   },
   "width": 64

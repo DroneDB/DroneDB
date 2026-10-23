@@ -671,15 +671,16 @@ SeparateVrt buildSeparateVrt(std::vector<GDALDatasetUniquePtr> sources,
 
 // The creation options of the tiled GTiff that a merge writes (GDALTranslate and GDALWarp
 // alike); numThreads is the GDAL thread option of the merge's CPU tokens
-// (parallel::gdalNumThreads). JPEG for 8-bit 3- and 4-band outputs, LZW for the rest, with the
-// predictor of the sample type.
+// (parallel::gdalNumThreads). JPEG at quality 90 for 8-bit 3- and 4-band outputs (JPEG_QUALITY,
+// the GTiff key; it said QUALITY, which GTiff ignores, so the quality was always GDAL's 75), LZW
+// with the predictor of the sample type for the rest (a predictor is not valid for JPEG).
 GtiffOptions mergeCreationOptions(GDALDataType dt, bool useJpeg, const std::string &numThreads) {
     GtiffOptions creation;
-    creation.tiled().add(numThreads).bigTiffIfSafer().predictorFor(dt);
+    creation.tiled().add(numThreads).bigTiffIfSafer();
     if (useJpeg) {
-        creation.compress(GtiffOptions::Codec::Jpeg).set("QUALITY", "90");
+        creation.compress(GtiffOptions::Codec::Jpeg).set("JPEG_QUALITY", "90");
     } else {
-        creation.compress(GtiffOptions::Codec::Lzw);
+        creation.compress(GtiffOptions::Codec::Lzw).predictorFor(dt);
     }
     return creation;
 }

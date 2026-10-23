@@ -16,11 +16,13 @@
 
 #include "coordstransformer.h"
 #include "dem.h"
+#include "dq06_raster_support.h"
 #include "exceptions.h"
 #include "gdal_inc.h"
 #include "gdal_raii.h"
 #include "gtiff_options.h"
 #include "mathutil.h"
+#include "merge_multispectral.h"
 #include "test.h"
 #include "testarea.h"
 
@@ -323,5 +325,52 @@ namespace
         GtiffOptions().compress(GtiffOptions::Codec::Lzw).bigTiffIfSafer().appendTo(args);
         EXPECT_EQ(asVector(args),
                   (std::vector<std::string>{"-of", "GTiff", "-co", "COMPRESS=LZW", "-co", "BIGTIFF=IF_SAFER"}));
+    }
+
+    // The size of a GeoTIFF of the three bands, JPEG at `quality` (what a merge of three Byte
+    // rasters writes when the quality it asks for is applied)
+    uintmax_t jpegReferenceSize(const std::vector<fs::path> &inputs, const fs::path &output, int quality)
+    {
+        GDALDriver *drv = GetGDALDriverManager()->GetDriverByName("GTiff");
+        CPLStringList co;
+        co.AddString("COMPRESS=JPEG");
+        co.AddString(("JPEG_QUALITY=" + std::to_string(quality)).c_str());
+        co.AddString("TILED=YES");
+        {
+            std::unique_ptr<GDALDataset> out(drv->Create(output.string().c_str(), 64, 64, 3, GDT_Byte, co.List()));
+            for (int b = 0; b < 3; b++)
+            {
+                std::unique_ptr<GDALDataset> in(static_cast<GDALDataset *>(GDALOpen(inputs[b].string().c_str(), GA_ReadOnly)));
+                std::vector<uint8_t> plane(64 * 64);
+                in->GetRasterBand(1)->RasterIO(GF_Read, 0, 0, 64, 64, plane.data(), 64, 64, GDT_Byte, 0, 0);
+                out->GetRasterBand(b + 1)->RasterIO(GF_Write, 0, 0, 64, 64, plane.data(), 64, 64, GDT_Byte, 0, 0);
+            }
+        }
+        return fs::file_size(output);
+    }
+
+    // The merge asks for JPEG quality 90, with the key of the GTiff driver (JPEG_QUALITY). It wrote
+    // QUALITY, which GTiff ignores ("driver GTiff does not support creation option QUALITY"), so
+    // every JPEG merge came out at GDAL's default of 75; and it passed PREDICTOR with JPEG, which
+    // GDAL ignores too.
+    TEST(Dq06Gtiff, aJpegMergeIsWrittenAtQuality90)
+    {
+        TestArea ta(TEST_NAME, true);
+        std::vector<fs::path> inputs;
+        std::vector<std::string> paths;
+        for (int i = 0; i < 3; i++)
+        {
+            inputs.push_back(dq06::makeRaster(ta.getPath("band" + std::to_string(i) + ".tif"), 1, GDT_Byte, false, std::nullopt, 64));
+            paths.push_back(inputs.back().string());
+        }
+        const fs::path merged = ta.getPath("merged.tif");
+        mergeMultispectral(paths, merged.string());
+
+        const uintmax_t q75 = jpegReferenceSize(inputs, ta.getPath("q75.tif"), 75);
+        const uintmax_t q90 = jpegReferenceSize(inputs, ta.getPath("q90.tif"), 90);
+        ASSERT_GT(q90, q75 + q75 / 10) << "the references must differ for the test to mean anything";
+
+        const uintmax_t size = fs::file_size(merged);
+        EXPECT_GT(size, q75 + (q90 - q75) / 2) << "closer to quality 90 (" << q90 << ") than to 75 (" << q75 << ")";
     }
 }
