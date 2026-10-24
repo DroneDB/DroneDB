@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "database.h"
+#include "timeutil.h"
 #include "index_sql.h"
 #include "json.h"
 #include "metamanager.h"
@@ -157,6 +158,84 @@ END;
         return *this;
     }
 
+    // Brings a database created before the schema versioning (user_version 0) to the current schema:
+    // the tables and indexes it lacks and the migrations of the old releases
+    void Database::migrateLegacySchema(int dbVersion)
+    {
+        LOGD << "Legacy database detected, running full schema check and migrations";
+
+        if (!this->tableExists("entries"))
+        {
+            LOGD << "Entries table does not exist, creating it";
+            this->exec(entriesTableDdl);
+            LOGD << "Entries table created";
+        }
+
+        if (!this->tableExists("passwords"))
+        {
+            LOGD << "Passwords table does not exist, creating it";
+            this->exec(passwordsTableDdl);
+            LOGD << "Passwords table created";
+        }
+
+        if (!this->tableExists("entries_meta"))
+        {
+            LOGD << "Entries meta table does not exist, creating it";
+            this->exec(entriesMetaTableDdl);
+            LOGD << "Entries meta table created";
+        }
+
+        // Ensure indexes exist on existing databases (migration for new indexes)
+        // These are idempotent operations that will not fail if indexes already exist
+        LOGD << "Ensuring indexes exist";
+        this->exec("CREATE INDEX IF NOT EXISTS ix_entries_hash ON entries (hash)");
+        this->exec("DROP INDEX IF EXISTS ix_entries_meta_path");
+        this->exec("CREATE INDEX IF NOT EXISTS ix_entries_meta_path_key ON entries_meta (path, key)");
+        this->exec("CREATE INDEX IF NOT EXISTS ix_entries_meta_key ON entries_meta (key)");
+
+        // Migration from 0.9.11 to 0.9.12
+        // Renamed "entries.meta" --> "entries.properties"
+        if (this->renameColumnIfExists("entries", "meta TEXT", "properties TEXT"))
+        {
+            this->reopen();
+        }
+
+        // Migration from 1.0.7 --> 1.0.8
+        // Removed the attributes table (use entries_meta instead)
+        if (this->tableExists("attributes"))
+        {
+            // Port public attr info to visibility meta
+            {
+                const auto q = this->query("SELECT ivalue FROM attributes WHERE name = 'public'");
+                if (q->fetch())
+                {
+                    if (q->getInt(0) == 1)
+                    {
+                        this->getMetaManager()->set("visibility", "1");
+                        LOGD << "Migrated attributes.public to entries_meta.visibility";
+                    }
+                }
+            }
+
+            // Drop table
+            this->exec("DROP TABLE attributes");
+            LOGD << "Dropped attributes table";
+        }
+
+        // Mark database as migrated to current version. A read-only connection (read-only
+        // file or filesystem) got here only because the schema needed no change: it
+        // cannot record the version, so it leaves it for the next writable open.
+        if (this->isReadOnly())
+        {
+            LOGD << "Read-only database, schema version left at " << dbVersion;
+        }
+        else
+        {
+            this->setUserVersion(DDB_SCHEMA_VERSION);
+            LOGD << "Database migrated to schema version " << DDB_SCHEMA_VERSION;
+        }
+    }
+
     void Database::ensureSchemaConsistency()
     {
         LOGD << "Ensuring schema consistency";
@@ -182,80 +261,7 @@ END;
         // Legacy database (version 0) - run all table checks and migrations
         // This handles databases created before the versioning system was introduced
         if (dbVersion == 0)
-        {
-            LOGD << "Legacy database detected, running full schema check and migrations";
-
-            if (!this->tableExists("entries"))
-            {
-                LOGD << "Entries table does not exist, creating it";
-                this->exec(entriesTableDdl);
-                LOGD << "Entries table created";
-            }
-
-            if (!this->tableExists("passwords"))
-            {
-                LOGD << "Passwords table does not exist, creating it";
-                this->exec(passwordsTableDdl);
-                LOGD << "Passwords table created";
-            }
-
-            if (!this->tableExists("entries_meta"))
-            {
-                LOGD << "Entries meta table does not exist, creating it";
-                this->exec(entriesMetaTableDdl);
-                LOGD << "Entries meta table created";
-            }
-
-            // Ensure indexes exist on existing databases (migration for new indexes)
-            // These are idempotent operations that will not fail if indexes already exist
-            LOGD << "Ensuring indexes exist";
-            this->exec("CREATE INDEX IF NOT EXISTS ix_entries_hash ON entries (hash)");
-            this->exec("DROP INDEX IF EXISTS ix_entries_meta_path");
-            this->exec("CREATE INDEX IF NOT EXISTS ix_entries_meta_path_key ON entries_meta (path, key)");
-            this->exec("CREATE INDEX IF NOT EXISTS ix_entries_meta_key ON entries_meta (key)");
-
-            // Migration from 0.9.11 to 0.9.12
-            // Renamed "entries.meta" --> "entries.properties"
-            if (this->renameColumnIfExists("entries", "meta TEXT", "properties TEXT"))
-            {
-                this->reopen();
-            }
-
-            // Migration from 1.0.7 --> 1.0.8
-            // Removed the attributes table (use entries_meta instead)
-            if (this->tableExists("attributes"))
-            {
-                // Port public attr info to visibility meta
-                {
-                    const auto q = this->query("SELECT ivalue FROM attributes WHERE name = 'public'");
-                    if (q->fetch())
-                    {
-                        if (q->getInt(0) == 1)
-                        {
-                            this->getMetaManager()->set("visibility", "1");
-                            LOGD << "Migrated attributes.public to entries_meta.visibility";
-                        }
-                    }
-                }
-
-                // Drop table
-                this->exec("DROP TABLE attributes");
-                LOGD << "Dropped attributes table";
-            }
-
-            // Mark database as migrated to current version. A read-only connection (read-only
-            // file or filesystem) got here only because the schema needed no change: it
-            // cannot record the version, so it leaves it for the next writable open.
-            if (this->isReadOnly())
-            {
-                LOGD << "Read-only database, schema version left at " << dbVersion;
-            }
-            else
-            {
-                this->setUserVersion(DDB_SCHEMA_VERSION);
-                LOGD << "Database migrated to schema version " << DDB_SCHEMA_VERSION;
-            }
-        }
+            this->migrateLegacySchema(dbVersion);
 
         // Future migrations would be added here:
         // if (dbVersion < 2) { runMigration_1_to_2(); }
@@ -535,24 +541,8 @@ END;
                 double maxCapture = tq->getDouble(1);
                 if (minCapture > 0)
                 {
-                    time_t minSecs = static_cast<time_t>(minCapture / 1000.0);
-                    time_t maxSecs = static_cast<time_t>(maxCapture / 1000.0);
-                    struct tm utcTime;
-                    char buf[32];
-#ifdef _WIN32
-                    gmtime_s(&utcTime, &minSecs);
-#else
-                    gmtime_r(&minSecs, &utcTime);
-#endif
-                    strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &utcTime);
-                    startDatetime = buf;
-#ifdef _WIN32
-                    gmtime_s(&utcTime, &maxSecs);
-#else
-                    gmtime_r(&maxSecs, &utcTime);
-#endif
-                    strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &utcTime);
-                    endDatetime = buf;
+                    startDatetime = utcIso8601(static_cast<time_t>(minCapture / 1000.0));
+                    endDatetime = utcIso8601(static_cast<time_t>(maxCapture / 1000.0));
                 }
             }
         }
@@ -568,22 +558,8 @@ END;
                 time_t maxMtime = static_cast<time_t>(tq->getInt64(1));
                 if (minMtime > 0)
                 {
-                    struct tm utcTime;
-                    char buf[32];
-#ifdef _WIN32
-                    gmtime_s(&utcTime, &minMtime);
-#else
-                    gmtime_r(&minMtime, &utcTime);
-#endif
-                    strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &utcTime);
-                    startDatetime = buf;
-#ifdef _WIN32
-                    gmtime_s(&utcTime, &maxMtime);
-#else
-                    gmtime_r(&maxMtime, &utcTime);
-#endif
-                    strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &utcTime);
-                    endDatetime = buf;
+                    startDatetime = utcIso8601(minMtime);
+                    endDatetime = utcIso8601(maxMtime);
                 }
             }
         }
