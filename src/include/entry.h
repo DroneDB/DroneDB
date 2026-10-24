@@ -44,37 +44,41 @@ namespace ddb
 
         Entry() {}
 
-        Entry(const std::string &path, const std::string &hash,
-              int type, const std::string &propertiesJson,
-              long long mtime, std::uintmax_t size, int depth,
-              const std::string &pointCoordinatesJson = "", const std::string &polyCoordinatesJson = "", const std::string &metaJson = "")
+        // The columns of an index row as the database stores them (the JSON ones as text)
+        struct Row
         {
-            parseFields(path, hash, type, propertiesJson, mtime, size, depth, pointCoordinatesJson, polyCoordinatesJson, metaJson);
-        }
+            std::string path;
+            std::string hash;
+            int type = 0;
+            std::string propertiesJson;
+            long long mtime = 0;
+            std::uintmax_t size = 0;
+            int depth = 0;
+            std::string pointCoordinatesJson; // "" when the row has none
+            std::string polyCoordinatesJson;
+            std::string metaJson;
+        };
 
-        void parseFields(const std::string &path, const std::string &hash,
-                         int type, const std::string &propertiesJson,
-                         long long mtime, std::uintmax_t size, int depth,
-                         const std::string &pointCoordinatesJson = "", const std::string &polyCoordinatesJson = "", const std::string &metaJson = "")
+        void parseFields(const Row &row)
         {
-            this->path = path;
-            this->hash = hash;
-            this->type = static_cast<EntryType>(type);
+            this->path = row.path;
+            this->hash = row.hash;
+            this->type = static_cast<EntryType>(row.type);
             try
             {
-                this->properties = json::parse(propertiesJson, nullptr, false);
+                this->properties = json::parse(row.propertiesJson, nullptr, false);
             }
             catch (json::exception &e)
             {
                 LOGD << "Invalid entry JSON: " << e.what();
             }
-            this->mtime = static_cast<time_t>(mtime);
-            this->size = size;
-            this->depth = depth;
+            this->mtime = static_cast<time_t>(row.mtime);
+            this->size = row.size;
+            this->depth = row.depth;
 
-            this->parsePointGeometry(pointCoordinatesJson);
-            this->parsePolygonGeometry(polyCoordinatesJson);
-            this->parseMeta(metaJson);
+            this->parsePointGeometry(row.pointCoordinatesJson);
+            this->parsePolygonGeometry(row.polyCoordinatesJson);
+            this->parseMeta(row.metaJson);
         }
 
         void parsePointGeometry(const std::string &coordinatesJson)

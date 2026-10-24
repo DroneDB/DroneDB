@@ -19,6 +19,7 @@
 #include "cancellation.h"
 #include "dbops.h"
 #include "exceptions.h"
+#include "index_sql.h"
 #include "mio.h"
 
 namespace ddb {
@@ -198,18 +199,12 @@ void buildPending(Database* db, const std::string& outputPath, bool force) {
 
         std::vector<Entry> entries;
         {
-            auto q = db->query(
-                "SELECT path, hash, type, properties, mtime, size, depth FROM entries WHERE hash = "
-                "?");
+            auto q = db->query(selectEntries(EntryColumns::Properties) + " WHERE e.hash = ?");
             q->bind(1, hash);
             while (q->fetch()) {
-                entries.emplace_back(q->getText(0),
-                                     q->getText(1),
-                                     q->getInt(2),
-                                     q->getText(3),
-                                     q->getInt64(4),
-                                     q->getInt64(5),
-                                     q->getInt(6));
+                Entry e;
+                readEntry(*q, EntryColumns::Properties, e);
+                entries.push_back(std::move(e));
             }
         }
 

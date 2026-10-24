@@ -19,7 +19,8 @@ class Timezone
 public:
     DDB_DLL static void init();
     DDB_DLL static cctz::time_zone lookupTimezone(double latitude, double longitude);
-    DDB_DLL static double getUTCEpoch(int year, int month, int day, int hour, int minute, int second, double msecs, const cctz::time_zone &tz);
+    // The epoch (milliseconds) of the local civil time in tz, plus msecs
+    DDB_DLL static double getUTCEpoch(const cctz::civil_second &local, double msecs, const cctz::time_zone &tz);
 };
 
 #endif // TIMEZONE_H

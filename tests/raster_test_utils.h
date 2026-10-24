@@ -4,6 +4,7 @@
 #ifndef RASTER_TEST_UTILS_H
 #define RASTER_TEST_UTILS_H
 
+#include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <functional>
@@ -12,6 +13,7 @@
 
 #include "fs.h"
 #include "gdal_inc.h"
+#include "raster_region.h"
 
 namespace testutils
 {
@@ -31,6 +33,20 @@ namespace testutils
 
     /// Writes a GeoTIFF with spec's georeference and pixel values (bands 1-based)
     fs::path createGeoRaster(const fs::path &path, const GeoRasterSpec &spec);
+
+    /// The region of a raster the tests render: bbox is [minX, minY, maxX, maxY] in srs
+    inline ddb::RegionRequest regionRequest(const std::string &path, const double bbox[4], const std::string &srs,
+                                            int width, int height, const std::string &format)
+    {
+        ddb::RegionRequest request;
+        request.inputPath = path;
+        std::copy(bbox, bbox + 4, request.bbox.begin());
+        request.bboxSrs = srs;
+        request.width = width;
+        request.height = height;
+        request.format = format;
+        return request;
+    }
 
     /// An encoded image (PNG, JPEG, WebP) decoded with GDAL
     struct DecodedImage

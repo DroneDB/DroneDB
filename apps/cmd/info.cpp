@@ -51,8 +51,13 @@ namespace cmd
         auto geometry = opts["geometry"].as<std::string>();
 
         // Always recursive for symmetry with `list`. Use glob patterns to scope.
-        const bool recursive = true;
-        const int maxRecursionDepth = 0;
+        ddb::InfoOptions infoOptions;
+        infoOptions.format = format;
+        infoOptions.recursive = true;
+        infoOptions.maxRecursionDepth = 0;
+        infoOptions.geometry = geometry;
+        infoOptions.withHash = withHash;
+        infoOptions.stopOnError = !infoOptions.recursive;
 
         // Expand glob patterns to actual file paths.
         const auto expanded = ddb::expandGlobPatterns(input);
@@ -64,15 +69,13 @@ namespace cmd
             if (!file.is_open())
                 throw ddb::FSException("Cannot open " + filename);
 
-            ddb::info(expanded, file, format, recursive, maxRecursionDepth,
-                      geometry, withHash, !recursive);
+            ddb::info(expanded, file, infoOptions);
 
             file.close();
         }
         else
         {
-            ddb::info(expanded, std::cout, format, recursive, maxRecursionDepth,
-                      geometry, withHash, !recursive);
+            ddb::info(expanded, std::cout, infoOptions);
         }
 
         return EXIT_SUCCESS;

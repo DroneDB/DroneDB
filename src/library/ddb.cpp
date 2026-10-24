@@ -481,7 +481,14 @@ DDBErr DDBInfo(const char** paths,
             throw InvalidArgsException("Invalid max recursion depth");
 
         std::ostringstream ss;
-        info(input, ss, parseOutputFormat(format), recursive, maxRecursionDepth, geometry, withHash, stopOnError);
+        InfoOptions options;
+        options.format = parseOutputFormat(format);
+        options.recursive = recursive;
+        options.maxRecursionDepth = maxRecursionDepth;
+        options.geometry = geometry;
+        options.withHash = withHash;
+        options.stopOnError = stopOnError;
+        info(input, ss, options);
         return ss.str();
     });
 }
@@ -2028,6 +2035,23 @@ DDBErr DDBMaskBorders(const char *input, const char *output, int nearDist, bool 
 // OGC services C API (raster region rendering + vector query/describe).
 // =====================================================================
 
+namespace {
+
+// The region of the C arguments (bbox is checked by the callers)
+ddb::RegionRequest regionRequest(const char* inputPath, const double* bbox, const char* bboxSrs,
+                                 int width, int height, const char* format) {
+    ddb::RegionRequest request;
+    request.inputPath = inputPath;
+    std::copy(bbox, bbox + 4, request.bbox.begin());
+    request.bboxSrs = optStr(bboxSrs);
+    request.width = width;
+    request.height = height;
+    request.format = optStr(format);
+    return request;
+}
+
+}  // namespace
+
 DDBErr DDBRenderRasterRegion(const char *inputPath,
                              const double *bbox,
                              const char *bboxSrs,
@@ -2066,9 +2090,8 @@ DDBErr DDBRenderRasterRegionEx(const char *inputPath,
         std::vector<int> bandVec;
         if (bandCount > 0) bandVec.assign(bands, bands + bandCount);
 
-        ddb::renderRasterRegion(std::string(inputPath), bbox, optStr(bboxSrs),
-                                width, height, optStr(format), buffer, bufferSize,
-                                optStr(outputCrs), bandVec);
+        ddb::renderRasterRegion(regionRequest(inputPath, bbox, bboxSrs, width, height, format),
+                                {optStr(outputCrs), bandVec}, buffer, bufferSize);
     });
 }
 
@@ -2087,9 +2110,8 @@ DDBErr DDBRenderRasterIndex(const char *inputPath,
         if (outBuffer == nullptr || outBufferSize == nullptr)
             throw InvalidArgsException("outBuffer/outBufferSize is null");
 
-        ddb::renderRasterIndex(std::string(inputPath), std::string(indexName),
-                               bbox, optStr(bboxSrs), width, height, optStr(format),
-                               buffer, bufferSize);
+        ddb::renderRasterIndex(regionRequest(inputPath, bbox, bboxSrs, width, height, format),
+                               std::string(indexName), buffer, bufferSize);
     });
 }
 

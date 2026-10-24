@@ -47,8 +47,7 @@ namespace
     {
         uint8_t *buffer = nullptr;
         int size = 0;
-        renderRasterIndex(raster.string(), index, kBbox, "EPSG:3857", dq06::kSize, dq06::kSize, "image/png", &buffer,
-                          &size);
+        renderRasterIndex(testutils::regionRequest(raster.string(), kBbox, "EPSG:3857", dq06::kSize, dq06::kSize, "image/png"), index, &buffer, &size);
         return testutils::decodeImage(testutils::takeBuffer(buffer, size));
     }
 
@@ -170,7 +169,7 @@ namespace
         uint8_t *buffer = nullptr;
         int size = 0;
         for (const char *name : {"GLI", "VARI", "NOPE", ""})
-            EXPECT_THROW(renderRasterIndex(ms.string(), name, kBbox, "EPSG:3857", 16, 16, "image/png", &buffer, &size),
+            EXPECT_THROW(renderRasterIndex(testutils::regionRequest(ms.string(), kBbox, "EPSG:3857", 16, 16, "image/png"), name, &buffer, &size),
                          InvalidArgsException)
                 << name;
     }

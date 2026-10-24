@@ -298,8 +298,10 @@ namespace
         const auto out = ta.getPath("build");
         buildVector(dxf.string(), out.string());
 
-        const auto geojson = json::parse(queryVector((out / "vec" / "source.gpkg").string(), "", nullptr, "",
-                                                     1000, 0, "geojson"));
+        VectorQuery query;
+        query.maxFeatures = 1000;
+        query.outputFormat = "geojson";
+        const auto geojson = json::parse(queryVector((out / "vec" / "source.gpkg").string(), query));
         ASSERT_EQ(geojson["features"].size(), 4u);
         bool sawPoint = false;
         for (const auto &f : geojson["features"])

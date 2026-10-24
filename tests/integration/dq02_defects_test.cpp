@@ -210,7 +210,7 @@ namespace
         const auto missing = ta.getPath("does-not-exist.tif");
         std::ostringstream out;
 
-        EXPECT_THROW(info({missing.string()}, out, OutputFormat::Json, false, 0, "auto", false, true), FSException);
+        EXPECT_THROW(info({missing.string()}, out, {.format = OutputFormat::Json}), FSException);
     }
 
     // Part 1 made Statement::step throw on SQLITE_READONLY, so a legacy (user_version 0)

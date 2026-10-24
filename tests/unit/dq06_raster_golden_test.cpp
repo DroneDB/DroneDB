@@ -254,7 +254,7 @@ namespace
                 const std::string key = std::string(index) + "_" + format;
                 try
                 {
-                    renderRasterIndex(ms.string(), index, kBbox, "EPSG:3857", 80, 80, format, &buffer, &size);
+                    renderRasterIndex(testutils::regionRequest(ms.string(), kBbox, "EPSG:3857", 80, 80, format), index, &buffer, &size);
                 }
                 catch (const std::exception &e)
                 {
@@ -269,7 +269,7 @@ namespace
         int size = 0;
         try
         {
-            renderRasterIndex(ms.string(), "NOPE", kBbox, "EPSG:3857", 16, 16, "image/png", &buffer, &size);
+            renderRasterIndex(testutils::regionRequest(ms.string(), kBbox, "EPSG:3857", 16, 16, "image/png"), "NOPE", &buffer, &size);
         }
         catch (const std::exception &e)
         {
@@ -278,7 +278,7 @@ namespace
         const fs::path rgba = makeRgba(ta.getPath("rgba.tif"));
         try
         {
-            renderRasterIndex(rgba.string(), "NDRE", kBbox, "EPSG:3857", 16, 16, "image/png", &buffer, &size);
+            renderRasterIndex(testutils::regionRequest(rgba.string(), kBbox, "EPSG:3857", 16, 16, "image/png"), "NDRE", &buffer, &size);
         }
         catch (const std::exception &e)
         {

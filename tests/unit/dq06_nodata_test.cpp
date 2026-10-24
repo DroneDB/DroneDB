@@ -143,7 +143,7 @@ namespace
         int size = 0;
         const double bbox[4] = {dq06::kOriginX, dq06::kOriginY - dq06::kSize * dq06::kPixel,
                                 dq06::kOriginX + dq06::kSize * dq06::kPixel, dq06::kOriginY};
-        renderRasterIndex(raster.string(), "EVI", bbox, "EPSG:3857", 64, 64, "image/png", &buffer, &size);
+        renderRasterIndex(testutils::regionRequest(raster.string(), bbox, "EPSG:3857", 64, 64, "image/png"), "EVI", &buffer, &size);
         const auto img = testutils::decodeImage(testutils::takeBuffer(buffer, size));
         size_t transparent = 0;
         for (const uint8_t a : img.alpha())

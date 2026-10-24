@@ -21,15 +21,14 @@ namespace ddb
         constexpr const char *kFeatureCollectionClose = "]}";
     } // namespace
 
-    void info(const std::vector<std::string> &input, std::ostream &output,
-              OutputFormat format, bool recursive, int maxRecursionDepth, const std::string &geometry,
-              bool withHash, bool stopOnError)
+    void info(const std::vector<std::string> &input, std::ostream &output, const InfoOptions &options)
     {
+        const OutputFormat format = options.format;
         std::vector<fs::path> filePaths;
 
-        if (recursive)
+        if (options.recursive)
         {
-            filePaths = getPathList(input, true, maxRecursionDepth);
+            filePaths = getPathList(input, true, options.maxRecursionDepth);
         }
         else
         {
@@ -50,7 +49,7 @@ namespace ddb
             try
             {
                 Entry e;
-                parseEntry(fp, "/", e, withHash);
+                parseEntry(fp, "/", e, options.withHash);
                 // We override e.path because it's relative
                 // But we want the absolute path (in the unix path format)
                 e.path = "file://" + io::toGenericUtf8(fs::absolute(fp));
@@ -61,7 +60,7 @@ namespace ddb
                     writer->write(e);
                     break;
                 case OutputFormat::GeoJson:
-                    if (const auto feature = e.toGeoJSON(ddb::getBasicGeometryTypeFromName(geometry)))
+                    if (const auto feature = e.toGeoJSON(ddb::getBasicGeometryTypeFromName(options.geometry)))
                         writer->write(*feature);
                     else
                         LOGD << "No geometries in " << io::toUtf8(fp) << ", skipping from GeoJSON export";
@@ -74,7 +73,7 @@ namespace ddb
             catch (const AppException &e)
             {
                 LOGD << "Cannot parse " << io::toUtf8(fp) << ", skipping: " << e.what();
-                if (stopOnError)
+                if (options.stopOnError)
                     throw;
             }
         }

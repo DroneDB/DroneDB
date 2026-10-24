@@ -31,7 +31,7 @@ namespace
         const auto point = writeFile(ta.getFolder() / "b.geojson", kPointGeoJson);
 
         std::ostringstream out;
-        info({text.string(), point.string()}, out, OutputFormat::GeoJson);
+        info({text.string(), point.string()}, out, {.format = OutputFormat::GeoJson});
 
         const json collection = json::parse(out.str());
         EXPECT_EQ(collection.at("type"), "FeatureCollection");
@@ -45,7 +45,7 @@ namespace
         const auto text = writeFile(ta.getFolder() / "a.txt", "x");
 
         std::ostringstream out;
-        info({text.string()}, out, OutputFormat::GeoJson);
+        info({text.string()}, out, {.format = OutputFormat::GeoJson});
         EXPECT_EQ(json::parse(out.str()).at("features"), json::array());
     }
 
@@ -57,7 +57,7 @@ namespace
         const auto second = writeFile(ta.getFolder() / "c.geojson", kPointGeoJson);
 
         std::ostringstream out;
-        info({first.string(), text.string(), second.string()}, out, OutputFormat::GeoJson);
+        info({first.string(), text.string(), second.string()}, out, {.format = OutputFormat::GeoJson});
         EXPECT_EQ(json::parse(out.str()).at("features").size(), 2u);
     }
 
@@ -68,7 +68,7 @@ namespace
         const auto point = writeFile(ta.getFolder() / "b.geojson", kPointGeoJson);
 
         std::ostringstream out;
-        info({text.string(), point.string()}, out, OutputFormat::Json);
+        info({text.string(), point.string()}, out, {.format = OutputFormat::Json});
         const json entries = json::parse(out.str());
         ASSERT_EQ(entries.size(), 2u);
         EXPECT_EQ(entries[0].at("size"), 1);

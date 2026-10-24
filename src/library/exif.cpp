@@ -562,7 +562,7 @@ namespace ddb
                     double msecs = (seconds - s) * 1000.0;
 
                     cctz::time_zone utc = cctz::utc_time_zone();
-                    double result = Timezone::getUTCEpoch(year, month, day, h, m, s, msecs, utc);
+                    double result = Timezone::getUTCEpoch(cctz::civil_second(year, month, day, h, m, s), msecs, utc);
                     if (result > 0)
                     {
                         LOGD << "Using GPS timestamp as capture time (UTC)";
@@ -612,7 +612,7 @@ namespace ddb
             // DateTime is in local time; apply offset to convert to UTC
             // OffsetTime "+02:00" means local = UTC + 2h, so UTC = local - offset
             cctz::time_zone utc = cctz::utc_time_zone();
-            double result = Timezone::getUTCEpoch(year, month, day, hour, minute, second, msecs, utc);
+            double result = Timezone::getUTCEpoch(cctz::civil_second(year, month, day, hour, minute, second), msecs, utc);
             result -= offsetSecs * 1000.0;
 
             if (result > 0)
@@ -653,7 +653,7 @@ namespace ddb
                 LOGD << "No geolocation for timezone lookup, assuming UTC";
             }
 
-            return Timezone::getUTCEpoch(year, month, day, hour, minute, second, msecs, tz);
+            return Timezone::getUTCEpoch(cctz::civil_second(year, month, day, hour, minute, second), msecs, tz);
         }
 
         return 0.0;

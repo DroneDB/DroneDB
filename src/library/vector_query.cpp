@@ -327,25 +327,6 @@ namespace ddb
         return std::string(reinterpret_cast<char *>(buf.get()), static_cast<size_t>(size));
     }
 
-    std::string queryVector(const std::string &vectorPath,
-                            const std::string &layerName,
-                            const double *bbox,
-                            const std::string &bboxSrs,
-                            int maxFeatures,
-                            int startIndex,
-                            const std::string &outputFormat)
-    {
-        VectorQuery query;
-        query.layerName = layerName;
-        if (bbox != nullptr)
-            query.bbox = std::array<double, 4>{bbox[0], bbox[1], bbox[2], bbox[3]};
-        query.bboxSrs = bboxSrs;
-        query.maxFeatures = maxFeatures;
-        query.startIndex = startIndex;
-        query.outputFormat = outputFormat;
-        return queryVector(vectorPath, query);
-    }
-
     int64_t countVectorFeatures(const std::string &vectorPath, const VectorQuery &query)
     {
         if (vectorPath.empty())

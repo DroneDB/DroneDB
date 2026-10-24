@@ -126,15 +126,8 @@ cctz::time_zone Timezone::lookupTimezone(double latitude, double longitude) {
     return tz;
 }
 
-double Timezone::getUTCEpoch(int year,
-                             int month,
-                             int day,
-                             int hour,
-                             int minute,
-                             int second,
-                             double msecs,
-                             const cctz::time_zone& tz) {
-    auto time = tz.lookup(cctz::civil_second(year, month, day, hour, minute, second));
+double Timezone::getUTCEpoch(const cctz::civil_second& local, double msecs, const cctz::time_zone& tz) {
+    auto time = tz.lookup(local);
     return static_cast<double>(
                std::chrono::duration_cast<std::chrono::milliseconds>(time.post.time_since_epoch())
                    .count()) +

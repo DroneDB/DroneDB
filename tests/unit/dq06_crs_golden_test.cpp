@@ -171,7 +171,7 @@ namespace
                 int size = 0;
                 try
                 {
-                    renderRasterRegion(ortho.string(), bbox, requested, 48, 48, "image/png", &buffer, &size);
+                    renderRasterRegion(testutils::regionRequest(ortho.string(), bbox, requested, 48, 48, "image/png"), {}, &buffer, &size);
                     region[requested] = imageSummary(testutils::takeBuffer(buffer, size));
                 }
                 catch (const std::exception &e)

@@ -143,18 +143,15 @@ namespace ddb
             return os.str();
         }
 
-        void validateInputs(const std::string &inputPath, const double bbox[4],
-                            int width, int height)
+        void validateInputs(const RegionRequest &request)
         {
-            if (inputPath.empty())
+            if (request.inputPath.empty())
                 throw InvalidArgsException("renderRasterRegion: input path is empty");
-            if (bbox == nullptr)
-                throw InvalidArgsException("renderRasterRegion: bbox is null");
-            if (width  <= 0 || width  > 4096)
+            if (request.width  <= 0 || request.width  > 4096)
                 throw InvalidArgsException("renderRasterRegion: width out of range [1,4096]");
-            if (height <= 0 || height > 4096)
+            if (request.height <= 0 || request.height > 4096)
                 throw InvalidArgsException("renderRasterRegion: height out of range [1,4096]");
-            if (bbox[0] >= bbox[2] || bbox[1] >= bbox[3])
+            if (request.bbox[0] >= request.bbox[2] || request.bbox[1] >= request.bbox[3])
                 throw InvalidArgsException("renderRasterRegion: invalid bbox order");
         }
 
@@ -162,24 +159,24 @@ namespace ddb
 
     // ---------------------------------------------------------------------
 
-    void renderRasterRegion(const std::string &inputPath,
-                            const double bbox[4],
-                            const std::string &bboxSrs,
-                            int width, int height,
-                            const std::string &format,
+    void renderRasterRegion(const RegionRequest &request,
+                            const RegionOptions &options,
                             uint8_t **outBytes,
-                            int *outSize,
-                            const std::string &outputCrs,
-                            const std::vector<int> &bands)
+                            int *outSize)
     {
-        validateInputs(inputPath, bbox, width, height);
+        validateInputs(request);
         if (!outBytes || !outSize)
             throw InvalidArgsException("renderRasterRegion: outBytes/outSize null");
 
-        const FormatInfo fi = resolveFormat(format);
-        const std::string srs = bboxSrs.empty() ? std::string("EPSG:4326") : bboxSrs;
+        const std::string &inputPath = request.inputPath;
+        const auto &bbox = request.bbox;
+        const int width = request.width, height = request.height;
+        const std::vector<int> &bands = options.bands;
+
+        const FormatInfo fi = resolveFormat(request.format);
+        const std::string srs = request.bboxSrs.empty() ? std::string("EPSG:4326") : request.bboxSrs;
         // outputCrs empty → keep current behaviour (target SRS = bbox SRS).
-        const std::string tSrs = outputCrs.empty() ? srs : outputCrs;
+        const std::string tSrs = options.outputCrs.empty() ? srs : options.outputCrs;
 
         // A handle kept from previous requests: no open, warm block cache
         const auto source = RasterCache::instance().acquireDataset(inputPath);
@@ -251,12 +248,8 @@ namespace ddb
             argStore.emplace_back("-dstnodata"); argStore.emplace_back(nodataStr);
         }
 
-        std::vector<char *> argv;
-        argv.reserve(argStore.size() + 1);
-        for (auto &s : argStore) argv.push_back(const_cast<char *>(s.c_str()));
-        argv.push_back(nullptr);
-
-        const GdalOptionsPtr<GDALWarpAppOptions> opts(GDALWarpAppOptionsNew(argv.data(), nullptr));
+        CPLStringList argv = cslFromStrings(argStore);
+        const GdalOptionsPtr<GDALWarpAppOptions> opts(GDALWarpAppOptionsNew(argv.List(), nullptr));
         if (!opts)
             throw GDALException("Cannot build GDALWarp options");
         cancel::GdalProgress progress; // the warp stops when the call is canceled (DQ-15)
@@ -424,22 +417,22 @@ namespace ddb
         }
     } // anon
 
-    void renderRasterIndex(const std::string &inputPath,
+    void renderRasterIndex(const RegionRequest &request,
                            const std::string &indexName,
-                           const double bbox[4],
-                           const std::string &bboxSrs,
-                           int width, int height,
-                           const std::string &format,
                            uint8_t **outBytes,
                            int *outSize)
     {
-        validateInputs(inputPath, bbox, width, height);
+        validateInputs(request);
         if (!outBytes || !outSize)
             throw InvalidArgsException("renderRasterIndex: outBytes/outSize null");
 
+        const std::string &inputPath = request.inputPath;
+        const auto &bbox = request.bbox;
+        const int width = request.width, height = request.height;
+
         const char *formulaId = resolveIndexFormula(indexName);
-        const FormatInfo fi = resolveFormat(format);
-        const std::string srs = bboxSrs.empty() ? std::string("EPSG:4326") : bboxSrs;
+        const FormatInfo fi = resolveFormat(request.format);
+        const std::string srs = request.bboxSrs.empty() ? std::string("EPSG:4326") : request.bboxSrs;
 
         // Step 1: warp to /vsimem GTiff at target window & resolution (keep all bands).
         const auto source = RasterCache::instance().acquireDataset(inputPath);
@@ -471,12 +464,8 @@ namespace ddb
         parallel::CpuTokens warpTokens;
         for (const auto &arg : warpThreadArgs(inFlight, warpTokens))
             argStore.push_back(arg);
-        std::vector<char *> argv;
-        argv.reserve(argStore.size() + 1);
-        for (auto &s : argStore) argv.push_back(const_cast<char *>(s.c_str()));
-        argv.push_back(nullptr);
-
-        const GdalOptionsPtr<GDALWarpAppOptions> opts(GDALWarpAppOptionsNew(argv.data(), nullptr));
+        CPLStringList argv = cslFromStrings(argStore);
+        const GdalOptionsPtr<GDALWarpAppOptions> opts(GDALWarpAppOptionsNew(argv.List(), nullptr));
         if (!opts) throw GDALException("Cannot build warp options");
         cancel::GdalProgress progress; // the warp stops when the call is canceled (DQ-15)
         progress.attach(opts.get());

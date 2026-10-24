@@ -65,11 +65,22 @@ namespace ddb
 
         const bool geometries = columns >= EntryColumns::Geometries;
         const bool meta = columns >= EntryColumns::Meta;
-        entry.parseFields(statement.getText(0), statement.getText(1), statement.getInt(2), statement.getText(3),
-                          statement.getInt64(4), statement.getInt64(5), statement.getInt(6),
-                          geometries ? statement.getText(7) : std::string(),
-                          geometries ? statement.getText(8) : std::string(),
-                          meta ? statement.getText(9) : std::string());
+        Entry::Row row;
+        row.path = statement.getText(0);
+        row.hash = statement.getText(1);
+        row.type = statement.getInt(2);
+        row.propertiesJson = statement.getText(3);
+        row.mtime = statement.getInt64(4);
+        row.size = static_cast<std::uintmax_t>(statement.getInt64(5));
+        row.depth = statement.getInt(6);
+        if (geometries)
+        {
+            row.pointCoordinatesJson = statement.getText(7);
+            row.polyCoordinatesJson = statement.getText(8);
+        }
+        if (meta)
+            row.metaJson = statement.getText(9);
+        entry.parseFields(row);
     }
 
     std::string metaAggregateSql(std::string_view pathExpression)
