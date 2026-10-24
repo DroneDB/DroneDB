@@ -158,8 +158,8 @@ function(ddb_add_library_objects name)
 endfunction()
 
 # ddb_gc_sections(<target>): the linker drops the sections nothing refers to (the library is built
-# with one section per function). Linux/ELF with GNU or Clang only. libddb.so is 13 % smaller
-# stripped, ddbcmd 8 % (DQ-14, measured; docs in the proposal).
+# with one section per function). Linux/ELF with GNU or Clang only. Stripped, libddb.so is 12 %
+# smaller and ddbcmd 5 % (DQ-14, measured).
 function(ddb_gc_sections target)
     if(UNIX AND NOT APPLE AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         target_link_options(${target} PRIVATE LINKER:--gc-sections)
