@@ -104,7 +104,7 @@ static RasterGrid readToCommonGrid(GDALDatasetH hDs,
 {
     const double x0 = area.x0, y0 = area.y0, x1 = area.x1, y1 = area.y1;
     double gt[6];
-    GDALGetGeoTransform(hDs, gt);
+    requireGeoTransform(hDs, gt);
 
     // Source window in pixels
     int px0 = static_cast<int>(std::floor((x0 - gt[0]) / gt[1]));
@@ -550,7 +550,7 @@ static void applyWarp(const std::string &sourcePath,
     GDALDatasetH hSrc = datasetHandle(src);
 
     double gt[6];
-    GDALGetGeoTransform(hSrc, gt);
+    requireGeoTransform(hSrc, gt);
 
     double co = sim.cosTheta, si = sim.sinTheta, sc = sim.scale;
     double ngt[6];
@@ -574,8 +574,8 @@ static void applyWarp(const std::string &sourcePath,
                                            nullptr, nullptr, nullptr));
     if (!vrt) throw GDALException("Cannot create VRT wrapper for warp");
     GDALDatasetH hVrt = datasetHandle(vrt);
-    GDALSetGeoTransform(hVrt, ngt);
-    GDALSetProjection(hVrt, targetCrs.c_str());
+    if (GDALSetGeoTransform(hVrt, ngt) != CE_None || GDALSetProjection(hVrt, targetCrs.c_str()) != CE_None)
+        throw GDALException("Cannot georeference the VRT wrapper for warp");
 
     // GDALWarp → temporary LZW GTiff
     CPLStringList args;
@@ -663,18 +663,20 @@ static double computeZOffset(const std::string &alignedPath,
 void applyZOffset(const std::string &path, double zOffset) {
     if (std::abs(zOffset) < 1e-6) return;
     const auto dataset = adoptDataset(GDALOpen(path.c_str(), GA_Update));
-    if (!dataset) return;
+    if (!dataset) throw GDALException("Cannot open " + path + " to apply the vertical offset");
     GDALDatasetH hDs = datasetHandle(dataset);
     GDALRasterBandH hBand = GDALGetRasterBand(hDs, 1);
     int W = GDALGetRasterXSize(hDs), H = GDALGetRasterYSize(hDs);
     const BandNodata nd = readBandNodata(hBand);
     std::vector<float> row(W);
     for (int r = 0; r < H; r++) {
-        GDALRasterIO(hBand, GF_Read, 0, r, W, 1, row.data(), W, 1, GDT_Float32, 0, 0);
+        if (GDALRasterIO(hBand, GF_Read, 0, r, W, 1, row.data(), W, 1, GDT_Float32, 0, 0) != CE_None)
+            throw GDALException("Cannot read row " + std::to_string(r) + " of " + path);
         for (float &v : row)
             if (!isNodata(v, nd))
                 v += static_cast<float>(zOffset);
-        GDALRasterIO(hBand, GF_Write, 0, r, W, 1, row.data(), W, 1, GDT_Float32, 0, 0);
+        if (GDALRasterIO(hBand, GF_Write, 0, r, W, 1, row.data(), W, 1, GDT_Float32, 0, 0) != CE_None)
+            throw GDALException("Cannot write row " + std::to_string(r) + " of " + path);
     }
 }
 
@@ -708,7 +710,14 @@ AlignValidationResult validateAlignRaster(const std::string &sourcePath,
                              ", reference=" + r.summary.referenceType + "): alignment may be inaccurate");
 
     double gts[6], gtr[6];
-    GDALGetGeoTransform(hS, gts); GDALGetGeoTransform(hR, gtr);
+    const bool sourceHasGeoTransform = GDALGetGeoTransform(hS, gts) == CE_None;
+    const bool referenceHasGeoTransform = GDALGetGeoTransform(hR, gtr) == CE_None;
+    if (!sourceHasGeoTransform) r.errors.push_back("Source has no geotransform");
+    if (!referenceHasGeoTransform) r.errors.push_back("Reference has no geotransform");
+    if (!sourceHasGeoTransform || !referenceHasGeoTransform) {
+        r.ok = false;
+        return r;
+    }
     r.summary.sourceGsdM    = std::abs(gts[1]);
     r.summary.referenceGsdM = std::abs(gtr[1]);
 
@@ -774,7 +783,8 @@ AlignInputs loadInputs(const std::string &sourcePath, const std::string &referen
     GDALDatasetH hS = datasetHandle(srcDs);
     GDALDatasetH hR = datasetHandle(refDs);
     double gts[6], gtr[6];
-    GDALGetGeoTransform(hS, gts); GDALGetGeoTransform(hR, gtr);
+    requireGeoTransform(hS, gts);
+    requireGeoTransform(hR, gtr);
 
     const Extent src = Extent::of(hS, gts);
     const Extent ref = Extent::of(hR, gtr);

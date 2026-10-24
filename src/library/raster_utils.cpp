@@ -3,7 +3,17 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "raster_utils.h"
 
+#include <string>
+
+#include "exceptions.h"
+
 namespace ddb {
+
+void requireGeoTransform(GDALDatasetH ds, double gt[6]) {
+    if (GDALGetGeoTransform(ds, gt) != CE_None)
+        throw GDALException(std::string("Raster has no geotransform: ") + GDALGetDescription(ds));
+}
+
 
 BandNodata readBandNodata(GDALRasterBandH band) {
     BandNodata nd;

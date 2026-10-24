@@ -19,6 +19,10 @@ struct BandNodata {
     double value = 0.0;
 };
 
+// Reads the geotransform of a dataset into gt. Throws GDALException("Raster has no geotransform:
+// <the dataset's name>") when the dataset has none (GDAL would hand out its default one).
+DDB_DLL void requireGeoTransform(GDALDatasetH ds, double gt[6]);
+
 // Reads the nodata value of a band. The one place that calls GDALGetRasterNoDataValue.
 DDB_DLL BandNodata readBandNodata(GDALRasterBandH band);
 

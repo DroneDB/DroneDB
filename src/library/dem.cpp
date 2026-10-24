@@ -16,8 +16,7 @@ namespace ddb
             throw GDALException("Cannot open raster: " + path);
         const GDALDatasetH hDs = dem.handle();
 
-        if (GDALGetGeoTransform(hDs, dem.gt) != CE_None)
-            throw GDALException("Raster has no geotransform: " + path);
+        requireGeoTransform(hDs, dem.gt);
 
         dem.width = GDALGetRasterXSize(hDs);
         dem.height = GDALGetRasterYSize(hDs);
