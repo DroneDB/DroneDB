@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <fstream>
+#include <optional>
 
 namespace ddb
 {
@@ -264,136 +265,149 @@ namespace ddb
         }
     }
 
-    // Extract geolocation information
-    bool ExifParser::extractGeo(GeoLocation &geo)
+    // A position as an XMP video writes it, "[+-]lat[+-]lon[+-]alt" (+46.839139-91.999828+25.700);
+    // false unless it has at least a latitude and a longitude
+    static bool parseVideoGpsCoordinates(std::string gps, GeoLocation &geo)
+    {
+        // Xmp.video.GPSCoordinates +46.839139-91.999828+25.700
+        // [+-]lat[+-]lon[+-]alt
+        if (gps.length() < 1)
+        {
+            LOGD << "Invalid GPS coordinates (empty)";
+            return false;
+        }
+        if (gps[0] != '+' && gps[0] != '-')
+        {
+            LOGD << "Invalid GPS coordinates (" << gps << " doesn't start with +-)";
+            return false;
+        }
+
+        int component = 0;
+        std::string buf = "";
+        buf += gps[0];
+        gps = gps + "$";
+
+        for (unsigned long i = 1; i < gps.length(); i++)
+        {
+            if (str::isDigitChar(gps[i]) || gps[i] == ',' || gps[i] == '.')
+            {
+                buf += gps[i];
+            }
+            else if (gps[i] == '+' || gps[i] == '-' || gps[i] == '$')
+            {
+                try
+                {
+                    double val = std::stod(buf);
+                    if (component == 0)
+                    {
+                        geo.latitude = val;
+                    }
+                    else if (component == 1)
+                    {
+                        geo.longitude = val;
+                    }
+                    else if (component == 2)
+                    {
+                        geo.altitude = val;
+                    }
+                    else
+                    {
+                        LOGD << "Ignoring additional GPS coordinates " << gps;
+                    }
+                }
+                catch (const std::invalid_argument &ia)
+                {
+                    LOGD << "Cannot parse GPS coordinates " << gps;
+                    return false;
+                }
+
+                component++;
+                buf = gps[i];
+            }
+        }
+
+        LOGD << "Parsed " << component << " GPS components";
+
+        return component >= 2;
+    }
+
+    // The position of the EXIF GPS tags, refined by the XMP tags of DJI where they have more digits;
+    // false when the EXIF has no latitude and longitude
+    bool ExifParser::extractExifGeo(GeoLocation &geo)
     {
         auto latitude = findExifKey({"Exif.GPSInfo.GPSLatitude"});
         auto latitudeRef = findExifKey({"Exif.GPSInfo.GPSLatitudeRef"});
         auto longitude = findExifKey({"Exif.GPSInfo.GPSLongitude"});
         auto longitudeRef = findExifKey({"Exif.GPSInfo.GPSLongitudeRef"});
 
-        if (latitude != exifData.end() && longitude != exifData.end())
+        if (latitude == exifData.end() || longitude == exifData.end())
+            return false;
+
+        geo.latitude = geoToDecimal(latitude, latitudeRef);
+        geo.longitude = geoToDecimal(longitude, longitudeRef);
+
+        auto altitude = findExifKey({"Exif.GPSInfo.GPSAltitude"});
+        if (altitude != exifData.end())
         {
-            geo.latitude = geoToDecimal(latitude, latitudeRef);
-            geo.longitude = geoToDecimal(longitude, longitudeRef);
+            geo.altitude = evalFrac(altitude->toRational());
 
-            auto altitude = findExifKey({"Exif.GPSInfo.GPSAltitude"});
-            if (altitude != exifData.end())
+            auto altitudeRef = findExifKey({"Exif.GPSInfo.GPSAltitudeRef"});
+            if (altitudeRef != exifData.end())
             {
-                geo.altitude = evalFrac(altitude->toRational());
-
-                auto altitudeRef = findExifKey({"Exif.GPSInfo.GPSAltitudeRef"});
-                if (altitudeRef != exifData.end())
-                {
-                    geo.altitude *= altitudeRef->toInt64() == 1 ? -1 : 1;
-                }
+                geo.altitude *= altitudeRef->toInt64() == 1 ? -1 : 1;
             }
+        }
 
-            auto xmpAltitude = findXmpKey({"Xmp.drone-dji.AbsoluteAltitude"});
-            if (xmpAltitude != xmpData.end())
-            {
-                geo.altitude = static_cast<double>(xmpAltitude->toFloat());
-            }
+        auto xmpAltitude = findXmpKey({"Xmp.drone-dji.AbsoluteAltitude"});
+        if (xmpAltitude != xmpData.end())
+        {
+            geo.altitude = static_cast<double>(xmpAltitude->toFloat());
+        }
 
-            // Use DJI's XMP tags for lat/lon, if available
-            // certain models (e.g. Mavic Air) do not have sufficient
-            // precision in the EXIF coordinates
-            auto xmpLatitude = findXmpKey({"Xmp.drone-dji.Latitude"});
-            if (xmpLatitude != xmpData.end())
-            {
-                geo.latitude = xmpLatitude->toFloat();
-            }
-            auto xmpLongitude = findXmpKey({"Xmp.drone-dji.Longitude"});
-            if (xmpLongitude != xmpData.end())
-            {
-                geo.longitude = xmpLongitude->toFloat();
-            }
+        // Use DJI's XMP tags for lat/lon, if available
+        // certain models (e.g. Mavic Air) do not have sufficient
+        // precision in the EXIF coordinates
+        auto xmpLatitude = findXmpKey({"Xmp.drone-dji.Latitude"});
+        if (xmpLatitude != xmpData.end())
+        {
+            geo.latitude = xmpLatitude->toFloat();
+        }
+        auto xmpLongitude = findXmpKey({"Xmp.drone-dji.Longitude"});
+        if (xmpLongitude != xmpData.end())
+        {
+            geo.longitude = xmpLongitude->toFloat();
+        }
 
+        return true;
+    }
+
+    // The position of the DJI XMP tags alone (some models only write XMP); false without them
+    bool ExifParser::extractDjiXmpGeo(GeoLocation &geo)
+    {
+        auto xmpLat = findXmpKey({"Xmp.drone-dji.Latitude"});
+        auto xmpLon = findXmpKey({"Xmp.drone-dji.Longitude"});
+        if (xmpLat == xmpData.end() || xmpLon == xmpData.end())
+            return false;
+
+        geo.latitude = static_cast<double>(xmpLat->toFloat());
+        geo.longitude = static_cast<double>(xmpLon->toFloat());
+
+        auto xmpAlt = findXmpKey({"Xmp.drone-dji.AbsoluteAltitude"});
+        if (xmpAlt != xmpData.end())
+            geo.altitude = static_cast<double>(xmpAlt->toFloat());
+
+        return true;
+    }
+
+    // Extract geolocation information
+    bool ExifParser::extractGeo(GeoLocation &geo)
+    {
+        if (extractExifGeo(geo) || extractDjiXmpGeo(geo))
             return true;
-        }
-
-        // Fallback: DJI XMP tags without EXIF GPS (some models only write XMP)
-        {
-            auto xmpLat = findXmpKey({"Xmp.drone-dji.Latitude"});
-            auto xmpLon = findXmpKey({"Xmp.drone-dji.Longitude"});
-            if (xmpLat != xmpData.end() && xmpLon != xmpData.end())
-            {
-                geo.latitude = static_cast<double>(xmpLat->toFloat());
-                geo.longitude = static_cast<double>(xmpLon->toFloat());
-
-                auto xmpAlt = findXmpKey({"Xmp.drone-dji.AbsoluteAltitude"});
-                if (xmpAlt != xmpData.end())
-                    geo.altitude = static_cast<double>(xmpAlt->toFloat());
-
-                return true;
-            }
-        }
 
         auto gpsCoordinates = findXmpKey({"Xmp.video.GPSCoordinates"});
         if (gpsCoordinates != xmpData.end())
-        {
-            // Xmp.video.GPSCoordinates +46.839139-91.999828+25.700
-            // [+-]lat[+-]lon[+-]alt
-            std::string gps = gpsCoordinates->toString();
-            if (gps.length() < 1)
-            {
-                LOGD << "Invalid GPS coordinates (empty)";
-                return false;
-            }
-            if (gps[0] != '+' && gps[0] != '-')
-            {
-                LOGD << "Invalid GPS coordinates (" << gps << " doesn't start with +-)";
-                return false;
-            }
-
-            int component = 0;
-            std::string buf = "";
-            buf += gps[0];
-            gps = gps + "$";
-
-            for (unsigned long i = 1; i < gps.length(); i++)
-            {
-                if (str::isDigitChar(gps[i]) || gps[i] == ',' || gps[i] == '.')
-                {
-                    buf += gps[i];
-                }
-                else if (gps[i] == '+' || gps[i] == '-' || gps[i] == '$')
-                {
-                    try
-                    {
-                        double val = std::stod(buf);
-                        if (component == 0)
-                        {
-                            geo.latitude = val;
-                        }
-                        else if (component == 1)
-                        {
-                            geo.longitude = val;
-                        }
-                        else if (component == 2)
-                        {
-                            geo.altitude = val;
-                        }
-                        else
-                        {
-                            LOGD << "Ignoring additional GPS coordinates " << gps;
-                        }
-                    }
-                    catch (const std::invalid_argument &ia)
-                    {
-                        LOGD << "Cannot parse GPS coordinates " << gps;
-                        return false;
-                    }
-
-                    component++;
-                    buf = gps[i];
-                }
-            }
-
-            LOGD << "Parsed " << component << " GPS components";
-
-            return component >= 2;
-        }
+            return parseVideoGpsCoordinates(gpsCoordinates->toString(), geo);
 
         return false;
     }
@@ -507,92 +521,99 @@ namespace ddb
         return false;
     }
 
-    // Extracts the best available capture timestamp (milliseconds from Jan 1st 1970 UTC).
-    //
-    // Priority cascade (inspired by OpenSfM):
-    //   0. XMP video epoch (DateUTC / MediaCreateDate) - for video files
-    //   1. GPS DateStamp + TimeStamp - always UTC, highest accuracy
-    //   2. DateTime EXIF + OffsetTime - explicit timezone offset, accurate UTC conversion
-    //   3. DateTime EXIF + geo-timezone lookup - fallback using geolocation
-    //   4. DateTime EXIF naive (assume UTC) - last resort
-    double ExifParser::extractCaptureTime()
+    namespace
     {
-        // Priority 0: XMP video timestamps (Mac epoch)
-        auto xmpDate = findXmpKey({"Xmp.video.DateUTC", "Xmp.video.MediaCreateDate"});
-        if (xmpDate != xmpData.end())
+        // The EXIF date/time tags of an image, with the SubSecTime and OffsetTime that belong to each
+        struct DateTimeTriple
         {
-            try
-            {
-                // Number of seconds between Jan 1st 1904 and Jan 1st 1970
-                const long TO_UNIX_EPOCH = 2082844800;
-                const long d = xmpDate->toInt64();
-                double captureTime = (d - TO_UNIX_EPOCH) * 1000.0;
-                if (captureTime > 0)
-                {
-                    return captureTime;
-                }
-                else
-                {
-                    LOGD << "Cannot use XMP capture time (negative?)";
-                }
-            }
-            catch (const std::invalid_argument &ia)
-            {
-                LOGD << "Cannot parse XMP capture time " << xmpDate->toString();
-            }
-        }
-
-        // Priority 1: GPS DateStamp + TimeStamp (always UTC, most accurate)
-        {
-            auto datestamp = findExifKey("Exif.GPSInfo.GPSDateStamp");
-            auto timestamp = findExifKey("Exif.GPSInfo.GPSTimeStamp");
-
-            if (datestamp != exifData.end() && timestamp != exifData.end())
-            {
-                int year, month, day;
-                if (sscanf(datestamp->toString().c_str(), "%d:%d:%d", &year, &month, &day) == 3)
-                {
-                    double hours = evalFrac(timestamp->toRational(0));
-                    double minutes = evalFrac(timestamp->toRational(1));
-                    double seconds = evalFrac(timestamp->toRational(2));
-
-                    int h = static_cast<int>(hours);
-                    int m = static_cast<int>(minutes);
-                    int s = static_cast<int>(seconds);
-                    double msecs = (seconds - s) * 1000.0;
-
-                    cctz::time_zone utc = cctz::utc_time_zone();
-                    double result = Timezone::getUTCEpoch(cctz::civil_second(year, month, day, h, m, s), msecs, utc);
-                    if (result > 0)
-                    {
-                        LOGD << "Using GPS timestamp as capture time (UTC)";
-                        return result;
-                    }
-                }
-                else
-                {
-                    LOGD << "Invalid GPS date stamp: " << datestamp->toString();
-                }
-            }
-        }
-
-        // Priority 2 & 3: DateTime EXIF with aligned SubSec and OffsetTime triples
-        // Try each triple in order; within each, prefer OffsetTime (priority 2)
-        // over geo-timezone lookup (priority 3)
-        struct DateTimeTriple {
             const char *dateTimeKey;
             const char *subSecKey;
             const char *offsetKey;
         };
 
-        const DateTimeTriple triples[] = {
+        const DateTimeTriple dateTimeTriples[] = {
             {"Exif.Photo.DateTimeOriginal",  "Exif.Photo.SubSecTimeOriginal",  "Exif.Photo.OffsetTimeOriginal"},
             {"Exif.Photo.DateTimeDigitized", "Exif.Photo.SubSecTimeDigitized", "Exif.Photo.OffsetTimeDigitized"},
             {"Exif.Image.DateTime",          "Exif.Photo.SubSecTime",          "Exif.Photo.OffsetTime"}
         };
 
-        // First pass: try triples that have OffsetTime (most accurate after GPS)
-        for (const auto &t : triples)
+        // "YYYY:MM:DD HH:MM:SS", the format of the EXIF date/time tags
+        std::optional<cctz::civil_second> parseExifDateTime(const std::string &text)
+        {
+            int year, month, day, hour, minute, second;
+            if (sscanf(text.c_str(), "%d:%d:%d %d:%d:%d", &year, &month, &day, &hour, &minute, &second) != 6)
+                return std::nullopt;
+            return cctz::civil_second(year, month, day, hour, minute, second);
+        }
+    } // namespace
+
+    // Priority 0: XMP video timestamps (Mac epoch)
+    std::optional<double> ExifParser::captureTimeFromXmpVideo()
+    {
+        auto xmpDate = findXmpKey({"Xmp.video.DateUTC", "Xmp.video.MediaCreateDate"});
+        if (xmpDate == xmpData.end())
+            return std::nullopt;
+
+        try
+        {
+            // Number of seconds between Jan 1st 1904 and Jan 1st 1970
+            const long TO_UNIX_EPOCH = 2082844800;
+            const long d = xmpDate->toInt64();
+            double captureTime = (d - TO_UNIX_EPOCH) * 1000.0;
+            if (captureTime > 0)
+            {
+                return captureTime;
+            }
+            else
+            {
+                LOGD << "Cannot use XMP capture time (negative?)";
+            }
+        }
+        catch (const std::invalid_argument &ia)
+        {
+            LOGD << "Cannot parse XMP capture time " << xmpDate->toString();
+        }
+        return std::nullopt;
+    }
+
+    // Priority 1: GPS DateStamp + TimeStamp (always UTC, most accurate)
+    std::optional<double> ExifParser::captureTimeFromGpsStamp()
+    {
+        auto datestamp = findExifKey("Exif.GPSInfo.GPSDateStamp");
+        auto timestamp = findExifKey("Exif.GPSInfo.GPSTimeStamp");
+        if (datestamp == exifData.end() || timestamp == exifData.end())
+            return std::nullopt;
+
+        int year, month, day;
+        if (sscanf(datestamp->toString().c_str(), "%d:%d:%d", &year, &month, &day) != 3)
+        {
+            LOGD << "Invalid GPS date stamp: " << datestamp->toString();
+            return std::nullopt;
+        }
+
+        double hours = evalFrac(timestamp->toRational(0));
+        double minutes = evalFrac(timestamp->toRational(1));
+        double seconds = evalFrac(timestamp->toRational(2));
+
+        int h = static_cast<int>(hours);
+        int m = static_cast<int>(minutes);
+        int s = static_cast<int>(seconds);
+        double msecs = (seconds - s) * 1000.0;
+
+        cctz::time_zone utc = cctz::utc_time_zone();
+        double result = Timezone::getUTCEpoch(cctz::civil_second(year, month, day, h, m, s), msecs, utc);
+        if (result > 0)
+        {
+            LOGD << "Using GPS timestamp as capture time (UTC)";
+            return result;
+        }
+        return std::nullopt;
+    }
+
+    // Priority 2: the first DateTime EXIF tag that has an OffsetTime (the most accurate after GPS)
+    std::optional<double> ExifParser::captureTimeFromOffsetTime()
+    {
+        for (const auto &t : dateTimeTriples)
         {
             auto time = findExifKey(t.dateTimeKey);
             if (time == exifData.end())
@@ -603,8 +624,8 @@ namespace ddb
             if (!parseOffsetTime(offset, offsetSecs))
                 continue; // No valid offset - skip in this pass
 
-            int year, month, day, hour, minute, second;
-            if (sscanf(time->toString().c_str(), "%d:%d:%d %d:%d:%d", &year, &month, &day, &hour, &minute, &second) != 6)
+            const auto local = parseExifDateTime(time->toString());
+            if (!local)
                 continue;
 
             double msecs = parseSubSec(findExifKey(t.subSecKey));
@@ -612,7 +633,7 @@ namespace ddb
             // DateTime is in local time; apply offset to convert to UTC
             // OffsetTime "+02:00" means local = UTC + 2h, so UTC = local - offset
             cctz::time_zone utc = cctz::utc_time_zone();
-            double result = Timezone::getUTCEpoch(cctz::civil_second(year, month, day, hour, minute, second), msecs, utc);
+            double result = Timezone::getUTCEpoch(*local, msecs, utc);
             result -= offsetSecs * 1000.0;
 
             if (result > 0)
@@ -621,16 +642,21 @@ namespace ddb
                 return result;
             }
         }
+        return std::nullopt;
+    }
 
-        // Second pass: try triples without OffsetTime, using geo-timezone lookup
-        for (const auto &t : triples)
+    // Priority 3 and 4: the first DateTime EXIF tag, in the timezone of the geolocation, or in UTC
+    // without one
+    std::optional<double> ExifParser::captureTimeFromGeoTimezone()
+    {
+        for (const auto &t : dateTimeTriples)
         {
             auto time = findExifKey(t.dateTimeKey);
             if (time == exifData.end())
                 continue;
 
-            int year, month, day, hour, minute, second;
-            if (sscanf(time->toString().c_str(), "%d:%d:%d %d:%d:%d", &year, &month, &day, &hour, &minute, &second) != 6)
+            const auto local = parseExifDateTime(time->toString());
+            if (!local)
             {
                 LOGD << "Invalid date/time format: " << time->toString();
                 continue;
@@ -653,10 +679,28 @@ namespace ddb
                 LOGD << "No geolocation for timezone lookup, assuming UTC";
             }
 
-            return Timezone::getUTCEpoch(cctz::civil_second(year, month, day, hour, minute, second), msecs, tz);
+            return Timezone::getUTCEpoch(*local, msecs, tz);
         }
+        return std::nullopt;
+    }
 
-        return 0.0;
+    // Extracts the best available capture timestamp (milliseconds from Jan 1st 1970 UTC).
+    //
+    // Priority cascade (inspired by OpenSfM):
+    //   0. XMP video epoch (DateUTC / MediaCreateDate) - for video files
+    //   1. GPS DateStamp + TimeStamp - always UTC, highest accuracy
+    //   2. DateTime EXIF + OffsetTime - explicit timezone offset, accurate UTC conversion
+    //   3. DateTime EXIF + geo-timezone lookup - fallback using geolocation
+    //   4. DateTime EXIF naive (assume UTC) - last resort
+    double ExifParser::extractCaptureTime()
+    {
+        if (const auto time = captureTimeFromXmpVideo())
+            return *time;
+        if (const auto time = captureTimeFromGpsStamp())
+            return *time;
+        if (const auto time = captureTimeFromOffsetTime())
+            return *time;
+        return captureTimeFromGeoTimezone().value_or(0.0);
     }
 
     int ExifParser::extractImageOrientation()
