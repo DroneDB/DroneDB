@@ -114,7 +114,7 @@ Each fixture file holds:
 
 ## Data-only STAC
 
-`DDBStacData` and `DDBStacItemCollectionData` (XI-09, ABI 1.1) return the documents of `DDBStac`
+`DDBStacData` and `DDBStacItemCollectionData` (XI-09, 2.0.0) return the documents of `DDBStac`
 (with `id` NULL) and `DDBStacItemCollection` without any member built from a URL or an ID, which
 Registry owns: no `id`, `collection` or `links`, and no asset `href`. Every other member is the
 same, value for value (`ContractFixtures.StacDataIsStacWithoutUrlsAndIds` compares them). A
@@ -133,7 +133,7 @@ change).
 ## Build manifest
 
 `DDBGetEntryTypes`, `DDBGetBuildArtifacts`, `DDBResolveBuildFile`, `DDBCopyBuildArtifacts` and
-`DDBListEntriesEx` (XI-04, ABI 1.1) let a host serve builds without knowing their layout
+`DDBListEntriesEx` (XI-04, 2.0.0) let a host serve builds without knowing their layout
 (decision D8). The vocabulary and the fields are documented in `ddb.h` ("Build manifest");
 `build-artifacts.schema.json` holds the shared shapes: `$defs/build` (the build object of an
 entry, also embedded by `DDBListEntriesEx`) and `$defs/artifact`.
@@ -252,38 +252,38 @@ Registry has to adopt first.
 ### Changes
 
 * 2026-10-21: baseline (DroneDB `fixes-and-optimizations` after `7ee39d2`).
-* 2026-10-21: `capabilities` added (XI-01, ABI 1.1). Its `symbols` list is
+* 2026-10-21: `capabilities` added (XI-01, 2.0.0). Its `symbols` list is
   `src/include/ddb.symbols`, so every new export updates this fixture too.
 * 2026-10-21: `normalize-path`, `normalize-path-rejected` and `vectors/entry-paths.json` added
-  (XI-09, ABI 1.1: `DDBNormalizePath`); `capabilities` lists the new export.
+  (XI-09, 2.0.0: `DDBNormalizePath`); `capabilities` lists the new export.
 * 2026-10-21: `stac-data-collection`, `stac-data-item-georaster`, `stac-data-item-image` and
-  `stac-data-item-collection` added with their schemas (XI-09, ABI 1.1: `DDBStacData`,
+  `stac-data-item-collection` added with their schemas (XI-09, 2.0.0: `DDBStacData`,
   `DDBStacItemCollectionData`); `capabilities` lists the new exports. The shared parts of
   `stac-item.schema.json` (`stacExtensions`, `geometry`, `bbox`, `properties`) and
   `stac-collection.schema.json` (`extent`) moved to their `$defs`, unchanged, so the data-only
   schemas reference them.
 * 2026-10-21: `capabilities` gains the error codes `INVALIDARGS` (7), `RETRYABLE` (8) and
   `SHUTDOWN` (9), the `errorReasons` array (the reasons of `DDBGetLastErrorReason`) and the new
-  export `DDBGetLastErrorReason` (XI-02, DQ-10, ABI 1.1).
+  export `DDBGetLastErrorReason` (XI-02, DQ-10, 2.0.0).
 
 * 2026-10-21: `build-artifacts`, `build-artifacts-pending`, `list-entries-ex`,
   `resolve-build-file`, `copy-build-artifacts` and `entry-types` added with their schemas
-  (XI-04, ABI 1.1: `DDBGetBuildArtifacts`, `DDBListEntriesEx`, `DDBResolveBuildFile`,
+  (XI-04, 2.0.0: `DDBGetBuildArtifacts`, `DDBListEntriesEx`, `DDBResolveBuildFile`,
   `DDBCopyBuildArtifacts`, `DDBGetEntryTypes`; see [Build manifest](#build-manifest));
   `capabilities` lists the new exports. The existing fixtures did not change.
 
-* 2026-10-21: `effective-config` added with its schema (DQ-15, XI-06, ABI 1.1: `DDBConfigure`,
+* 2026-10-21: `effective-config` added with its schema (DQ-15, XI-06, 2.0.0: `DDBConfigure`,
   `DDBGetEffectiveConfig`); `capabilities` lists the new exports. The existing fixtures did not
   change.
 
-* 2026-10-21: `capabilities` lists the new exports of DQ-15 (XI-07, XI-08, ABI 1.1):
+* 2026-10-21: `capabilities` lists the new exports of DQ-15 (XI-07, XI-08, 2.0.0):
   `DDBShutdown`, `DDBCreateCancelToken`, `DDBCancel`, `DDBFreeCancelToken`,
   `DDBSetThreadCancelToken`, `DDBSetLogCallback`, `DDBSetThreadOperation`. Its `cancellable` list
   now names the exports whose work checks a cancel token (the render paths, the thumbnails,
   `DDBExportRaster`/`DDBExportRaster2`, `DDBBuild`) instead of `DDBExportRaster2` only; the
   schema describes it so. The other fixtures did not change.
 
-* 2026-10-21: `capabilities` lists the new export `DDBApplyDeltaEx` (XI-05, ABI 1.1). Its output
+* 2026-10-21: `capabilities` lists the new export `DDBApplyDeltaEx` (XI-05, 2.0.0). Its output
   is the conflict list of `DDBApplyDelta` (a JSON array of paths), so it has no fixture of its
   own. The other fixtures did not change.
 
