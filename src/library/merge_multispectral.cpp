@@ -1,673 +1,34 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+// The merge of single-band rasters into one multi-band GeoTIFF. The validation, the alignment
+// detection and the preview are in merge_multispectral_validate.cpp, _align.cpp and _preview.cpp.
+
 #include "merge_multispectral.h"
-#include "mathutil.h"
-#include "gdal_raii.h"
-#include "gtiff_options.h"
+
+#include <algorithm>
+#include <cmath>
+#include <optional>
+
 #include "exceptions.h"
-#include "logger.h"
-#include "mio.h"
-#include "parallel.h"
 #include "exif.h"
 #include "exifeditor.h"
-#include "sensor_data.h"
-
-#include <cstdlib>
-#include <cmath>
-#include <sstream>
-#include <algorithm>
-#include <numeric>
+#include "gdal_raii.h"
+#include "gtiff_options.h"
+#include "logger.h"
+#include "mathutil.h"
+#include "merge_vrt.h"
+#include "mio.h"
+#include "parallel.h"
 
 namespace ddb {
 
-static std::string gdalTypeName(GDALDataType dt) {
-    switch (dt) {
-        case GDT_Byte: return "Byte";
-        case GDT_UInt16: return "UInt16";
-        case GDT_Int16: return "Int16";
-        case GDT_UInt32: return "UInt32";
-        case GDT_Int32: return "Int32";
-        case GDT_Float32: return "Float32";
-        case GDT_Float64: return "Float64";
-        default: return "Unknown";
-    }
-}
-
-static bool parsePrincipalPoint(const std::string &ppStr, double &cx, double &cy) {
-    auto pos = ppStr.find(',');
-    if (pos == std::string::npos) return false;
-    try {
-        cx = std::stod(ppStr.substr(0, pos));
-        cy = std::stod(ppStr.substr(pos + 1));
-        return true;
-    } catch (...) {
-        return false;
-    }
-}
-
-std::vector<BandAlignmentInfo> detectBandAlignment(const std::vector<std::string> &inputPaths) {
-    const size_t N = inputPaths.size();
-    std::vector<BandAlignmentInfo> alignInfo(N);
-
-    if (N < 2) return alignInfo;
-
-    struct BandData {
-        double ppMmX = 0, ppMmY = 0;
-        bool hasPP = false;
-        double pixelPitchX = 0, pixelPitchY = 0;
-        bool hasPixelPitch = false;
-        double focalLengthMm = 0;
-        int centralWavelength = 0;
-        std::string bandName;
-        int rigCameraIndex = -1;
-        int imageWidth = 0, imageHeight = 0;
-        double relOptCenterX = 0, relOptCenterY = 0;
-        bool hasRelOptCenter = false;
-    };
-
-    std::vector<BandData> bands(N);
-
-    for (size_t i = 0; i < N; i++) {
-        try {
-            auto exivImage = openExivImage(io::fromUtf8(inputPaths[i]));
-            if (!exivImage.get()) continue;
-            exivImage->readMetadata();
-            ExifParser parser(exivImage.get());
-
-            auto imgSize = parser.extractImageSize();
-            bands[i].imageWidth = imgSize.width;
-            bands[i].imageHeight = imgSize.height;
-            alignInfo[i].imageWidth = imgSize.width;
-            alignInfo[i].imageHeight = imgSize.height;
-
-            // Read BandName
-            auto bandNameIt = parser.findXmpKey("Xmp.Camera.BandName");
-            if (bandNameIt != parser.xmpEnd()) {
-                bands[i].bandName = bandNameIt->toString();
-                alignInfo[i].bandName = bands[i].bandName;
-            }
-
-            // Read CentralWavelength
-            auto cwIt = parser.findXmpKey("Xmp.Camera.CentralWavelength");
-            if (cwIt != parser.xmpEnd()) {
-                try { bands[i].centralWavelength = std::stoi(cwIt->toString()); }
-                catch (const std::invalid_argument &) { /* non-numeric XMP, ignore */ }
-                catch (const std::out_of_range &) { /* out of range, ignore */ }
-                alignInfo[i].centralWavelength = bands[i].centralWavelength;
-            }
-
-            // Detect thermal band
-            if (bands[i].bandName == "LWIR" || bands[i].centralWavelength > 7000) {
-                alignInfo[i].isThermal = true;
-            }
-
-            // Read RigCameraIndex
-            auto rigIt = parser.findXmpKey("Xmp.Camera.RigCameraIndex");
-            if (rigIt != parser.xmpEnd()) {
-                try { bands[i].rigCameraIndex = std::stoi(rigIt->toString()); }
-                catch (const std::invalid_argument &) { /* non-numeric XMP, ignore */ }
-                catch (const std::out_of_range &) { /* out of range, ignore */ }
-            }
-
-            // Read PrincipalPoint (mm)
-            auto ppIt = parser.findXmpKey("Xmp.Camera.PrincipalPoint");
-            if (ppIt != parser.xmpEnd()) {
-                std::string ppStr = ppIt->toString();
-                if (parsePrincipalPoint(ppStr, bands[i].ppMmX, bands[i].ppMmY)) {
-                    bands[i].hasPP = true;
-                }
-            }
-
-            // Read PerspectiveFocalLength (mm)
-            auto flIt = parser.findXmpKey("Xmp.Camera.PerspectiveFocalLength");
-            if (flIt != parser.xmpEnd()) {
-                try { bands[i].focalLengthMm = std::stod(flIt->toString()); }
-                catch (const std::invalid_argument &) { /* non-numeric XMP, ignore */ }
-                catch (const std::out_of_range &) { /* out of range, ignore */ }
-            }
-
-            // Read DJI RelativeOpticalCenter
-            auto rocXIt = parser.findXmpKey("Xmp.drone-dji.RelativeOpticalCenterX");
-            auto rocYIt = parser.findXmpKey("Xmp.drone-dji.RelativeOpticalCenterY");
-            if (rocXIt != parser.xmpEnd() && rocYIt != parser.xmpEnd()) {
-                try {
-                    bands[i].relOptCenterX = std::stod(rocXIt->toString());
-                    bands[i].relOptCenterY = std::stod(rocYIt->toString());
-                    bands[i].hasRelOptCenter = true;
-                }
-                catch (const std::invalid_argument &) { /* non-numeric XMP, ignore */ }
-                catch (const std::out_of_range &) { /* out of range, ignore */ }
-            }
-
-            // --- Pixel Pitch derivation (Priority chain) ---
-
-            // Priority 1: FocalPlaneResolution
-            auto fUnit = parser.findExifKey("Exif.Photo.FocalPlaneResolutionUnit");
-            auto fXRes = parser.findExifKey("Exif.Photo.FocalPlaneXResolution");
-            auto fYRes = parser.findExifKey("Exif.Photo.FocalPlaneYResolution");
-
-            if (fUnit != parser.exifEnd() &&
-                fXRes != parser.exifEnd() &&
-                fYRes != parser.exifEnd()) {
-                long unit = fUnit->toInt64();
-                double rx = fXRes->toFloat();
-                double ry = fYRes->toFloat();
-                if (rx > 0 && ry > 0) {
-                    double mmPerUnit = parser.getMmPerUnit(unit);
-                    if (mmPerUnit > 0) {
-                        bands[i].pixelPitchX = mmPerUnit / rx;
-                        bands[i].pixelPitchY = mmPerUnit / ry;
-                        bands[i].hasPixelPitch = true;
-                        LOGD << "Band " << i << " pixel pitch from FocalPlaneRes: "
-                             << bands[i].pixelPitchX * 1000.0 << " um x "
-                             << bands[i].pixelPitchY * 1000.0 << " um";
-                    }
-                }
-            }
-
-            // Priority 2: CalibratedFocalLength (px) + PerspectiveFocalLength (mm)
-            if (!bands[i].hasPixelPitch && bands[i].focalLengthMm > 0) {
-                auto cflIt = parser.findXmpKey("Xmp.drone-dji.CalibratedFocalLength");
-                if (cflIt != parser.xmpEnd()) {
-                    try {
-                        double cfl = std::stod(cflIt->toString());
-                        if (cfl > 0) {
-                            double pp = bands[i].focalLengthMm / cfl;
-                            bands[i].pixelPitchX = pp;
-                            bands[i].pixelPitchY = pp;
-                            bands[i].hasPixelPitch = true;
-                            LOGD << "Band " << i << " pixel pitch from CalibratedFocalLength: "
-                                 << pp * 1000.0 << " um";
-                        }
-                    }
-                    catch (const std::invalid_argument &) { /* non-numeric XMP, ignore */ }
-                    catch (const std::out_of_range &) { /* out of range, ignore */ }
-                }
-            }
-
-            // Priority 3: Sensor database lookup
-            if (!bands[i].hasPixelPitch && bands[i].imageWidth > 0 && bands[i].imageHeight > 0) {
-                std::string sensor = parser.extractSensor();
-                if (SensorData::contains(sensor)) {
-                    double sensorWidthMm = SensorData::getFocal(sensor);
-                    if (sensorWidthMm > 0) {
-                        bands[i].pixelPitchX = sensorWidthMm / bands[i].imageWidth;
-                        double aspect = static_cast<double>(bands[i].imageWidth) / bands[i].imageHeight;
-                        double sensorHeightMm = sensorWidthMm / aspect;
-                        bands[i].pixelPitchY = sensorHeightMm / bands[i].imageHeight;
-                        bands[i].hasPixelPitch = true;
-                        LOGD << "Band " << i << " pixel pitch from sensor DB (" << sensor << "): "
-                             << bands[i].pixelPitchX * 1000.0 << " um";
-                    }
-                }
-            }
-
-            // Priority 4: FocalLength + FocalLength35mmEquiv
-            if (!bands[i].hasPixelPitch && bands[i].imageWidth > 0) {
-                Focal f;
-                if (parser.computeFocal(f) && f.length > 0 && f.length35 > 0) {
-                    double sensorWidthMm = f.length * 36.0 / f.length35;
-                    bands[i].pixelPitchX = sensorWidthMm / bands[i].imageWidth;
-                    bands[i].pixelPitchY = bands[i].pixelPitchX;
-                    bands[i].hasPixelPitch = true;
-                    LOGD << "Band " << i << " pixel pitch from FocalLength35mm: "
-                         << bands[i].pixelPitchX * 1000.0 << " um (square pixel assumed)";
-                }
-            }
-
-            // Do not mark detected here; detection status is set later
-            // when a shift source is actually selected and shifts computed.
-            // alignInfo[i].detected stays false (default) until then.
-
-            // Log lens model
-            auto modelTypeIt = parser.findXmpKey("Xmp.Camera.ModelType");
-            if (modelTypeIt != parser.xmpEnd()) {
-                LOGD << "Band " << alignInfo[i].bandName << ": lens model = " << modelTypeIt->toString();
-            }
-
-            // Log Sentera tags (not used)
-            auto alignMatrixIt = parser.findXmpKey("Xmp.Sentera.AlignMatrix");
-            if (alignMatrixIt != parser.xmpEnd()) {
-                LOGD << "Band " << alignInfo[i].bandName << ": Sentera AlignMatrix = "
-                     << alignMatrixIt->toString() << " (not used)";
-            }
-
-            // Log RigRelatives (not used)
-            auto rigRelIt = parser.findXmpKey("Xmp.MicaSense.RigRelatives");
-            if (rigRelIt != parser.xmpEnd()) {
-                LOGD << "Band " << alignInfo[i].bandName << ": RigRelatives = "
-                     << rigRelIt->toString() << " (not used)";
-            }
-
-        } catch (const Exiv2::Error &e) {
-            LOGD << "Could not read EXIF/XMP from " << inputPaths[i] << ": " << e.what();
-            continue;
-        }
-    }
-
-    // Select reference band: prefer Green
-    size_t REF = 0;
-    for (size_t i = 0; i < N; i++) {
-        if (bands[i].bandName == "Green" ||
-            (bands[i].centralWavelength >= 540 && bands[i].centralWavelength <= 570)) {
-            REF = i;
-            break;
-        }
-    }
-    LOGD << "Alignment reference band: " << REF << " (" << bands[REF].bandName << ")";
-
-    // Calculate max PP shift
-    double maxPPShift = 0;
-    bool allHavePPAndPitch = true;
-    for (size_t i = 0; i < N; i++) {
-        if (!bands[i].hasPP || !bands[i].hasPixelPitch) {
-            allHavePPAndPitch = false;
-            continue;
-        }
-        if (i == REF) continue;
-        if (!bands[REF].hasPP || !bands[REF].hasPixelPitch) {
-            allHavePPAndPitch = false;
-            continue;
-        }
-        double deltaCxMm = bands[i].ppMmX - bands[REF].ppMmX;
-        double deltaCyMm = bands[i].ppMmY - bands[REF].ppMmY;
-        double sx = deltaCxMm / bands[i].pixelPitchX;
-        double sy = deltaCyMm / bands[i].pixelPitchY;
-        maxPPShift = std::max(maxPPShift, std::max(std::abs(sx), std::abs(sy)));
-    }
-
-    // Check DJI RelOC availability
-    bool hasDjiRelOC = false;
-    for (size_t i = 0; i < N; i++) {
-        if (bands[i].hasRelOptCenter) { hasDjiRelOC = true; break; }
-    }
-
-    // Source selection
-    // Priority: DJI RelativeOpticalCenter → PrincipalPoint → none
-    enum ShiftSource { SOURCE_NONE, SOURCE_PRINCIPAL_POINT, SOURCE_DJI_RELATIVE_OC };
-    ShiftSource useSource = SOURCE_NONE;
-
-    if (hasDjiRelOC) {
-        useSource = SOURCE_DJI_RELATIVE_OC;
-    } else if (maxPPShift > 1.5 && allHavePPAndPitch) {
-        useSource = SOURCE_PRINCIPAL_POINT;
-    }
-
-    // Apply selected source
-    if (useSource == SOURCE_PRINCIPAL_POINT) {
-        for (size_t i = 0; i < N; i++) {
-            if (!bands[i].hasPP || !bands[i].hasPixelPitch) continue;
-            if (!bands[REF].hasPP || !bands[REF].hasPixelPitch) continue;
-            if (i == REF) {
-                alignInfo[i].shiftX = 0;
-                alignInfo[i].shiftY = 0;
-                alignInfo[i].shiftSource = "PrincipalPoint";
-                alignInfo[i].detected = true;
-                continue;
-            }
-            double deltaCxMm = bands[i].ppMmX - bands[REF].ppMmX;
-            double deltaCyMm = bands[i].ppMmY - bands[REF].ppMmY;
-            alignInfo[i].shiftX = deltaCxMm / bands[i].pixelPitchX;
-            alignInfo[i].shiftY = deltaCyMm / bands[i].pixelPitchY;
-            alignInfo[i].shiftSource = "PrincipalPoint";
-            alignInfo[i].detected = true;
-        }
-    } else if (useSource == SOURCE_DJI_RELATIVE_OC) {
-        // Find a reference band that actually has RelOC metadata
-        size_t djiRef = REF;
-        if (!bands[djiRef].hasRelOptCenter) {
-            for (size_t i = 0; i < N; i++) {
-                if (bands[i].hasRelOptCenter) { djiRef = i; break; }
-            }
-        }
-        if (!bands[djiRef].hasRelOptCenter) {
-            LOGD << "No band has DJI RelativeOpticalCenter metadata, skipping";
-        } else {
-            for (size_t i = 0; i < N; i++) {
-                if (!bands[i].hasRelOptCenter) continue;
-                double rocX = bands[i].relOptCenterX - bands[djiRef].relOptCenterX;
-                double rocY = bands[i].relOptCenterY - bands[djiRef].relOptCenterY;
-                alignInfo[i].shiftX = rocX;
-                alignInfo[i].shiftY = rocY;
-                alignInfo[i].shiftSource = "DJI_RelativeOpticalCenter";
-                alignInfo[i].detected = true;
-            }
-        }
-    }
-
-    // Validate plausible shifts
-    const double MAX_PLAUSIBLE_SHIFT_RATIO = 0.10;
-    for (size_t i = 0; i < N; i++) {
-        if (!alignInfo[i].detected) continue;
-        double maxDimPx = static_cast<double>(std::max(alignInfo[i].imageWidth, alignInfo[i].imageHeight));
-        double maxShiftPx = MAX_PLAUSIBLE_SHIFT_RATIO * maxDimPx;
-        if (std::abs(alignInfo[i].shiftX) > maxShiftPx ||
-            std::abs(alignInfo[i].shiftY) > maxShiftPx) {
-            LOGD << "Implausible shift for band " << alignInfo[i].bandName
-                 << ": (" << alignInfo[i].shiftX << ", " << alignInfo[i].shiftY << ") px - ignoring";
-            alignInfo[i].detected = false;
-            alignInfo[i].shiftX = 0;
-            alignInfo[i].shiftY = 0;
-        }
-    }
-
-    // Log results
-    for (size_t i = 0; i < N; i++) {
-        LOGD << "Band " << i << " (" << alignInfo[i].bandName << ")"
-             << " detected=" << alignInfo[i].detected
-             << " shift=(" << alignInfo[i].shiftX << ", " << alignInfo[i].shiftY << ") px"
-             << " source=" << alignInfo[i].shiftSource;
-    }
-
-    return alignInfo;
-}
-
-MergeValidationResult validateMergeMultispectral(const std::vector<std::string> &inputPaths) {
-    MergeValidationResult result;
-
-    if (inputPaths.size() < 2) {
-        result.errors.push_back("At least 2 files required");
-        return result;
-    }
-
-    // Build display names (filename only) for cleaner messages
-    std::vector<std::string> displayNames;
-    displayNames.reserve(inputPaths.size());
-    for (const auto &p : inputPaths) {
-        displayNames.push_back(io::toUtf8(io::fromUtf8(p).filename()));
-    }
-
-    // Open first file as reference
-    auto refDs = adoptDataset(GDALOpen(inputPaths[0].c_str(), GA_ReadOnly));
-    if (!refDs) {
-        result.errors.push_back("Cannot open " + displayNames[0]);
-        return result;
-    }
-    GDALDatasetH hRef = datasetHandle(refDs);
-
-    int refWidth = GDALGetRasterXSize(hRef);
-    int refHeight = GDALGetRasterYSize(hRef);
-    GDALDataType refType = GDALGetRasterDataType(GDALGetRasterBand(hRef, 1));
-
-    double refGt[6] = {0, 1, 0, 0, 0, -1};
-    bool hasGeoTransform = (GDALGetGeoTransform(hRef, refGt) == CE_None);
-    if (!hasGeoTransform) {
-        result.warnings.push_back("Cannot read geotransform from reference file: " + displayNames[0]);
-    }
-
-    const char *refProj = GDALGetProjectionRef(hRef);
-    SrsPtr refSrs(OSRNewSpatialReference(refProj));
-
-    result.summary.crs = refProj ? std::string(refProj) : "";
-    result.summary.width = refWidth;
-    result.summary.height = refHeight;
-    result.summary.pixelSizeX = refGt[1];
-    result.summary.pixelSizeY = refGt[5];
-    result.summary.dataType = gdalTypeName(refType);
-    result.summary.totalBands = 0;
-
-    // Check skew on reference
-    if (refGt[2] != 0 || refGt[4] != 0) {
-        result.errors.push_back("Reference file has non-zero skew (rotation not supported)");
-    }
-
-    int totalBands = GDALGetRasterCount(hRef);
-
-    if (GDALGetRasterCount(hRef) > 1) {
-        result.warnings.push_back(displayNames[0] + " has " + std::to_string(GDALGetRasterCount(hRef)) + " bands");
-    }
-
-    for (size_t i = 1; i < inputPaths.size(); i++) {
-        const auto dataset = adoptDataset(GDALOpen(inputPaths[i].c_str(), GA_ReadOnly));
-        if (!dataset) {
-            result.errors.push_back("Cannot open " + displayNames[i]);
-            continue;
-        }
-        GDALDatasetH hDs = datasetHandle(dataset);
-
-        // CRS check
-        const char *proj = GDALGetProjectionRef(hDs);
-        const SrsPtr srs(OSRNewSpatialReference(proj));
-        if (!OSRIsSame(refSrs.get(), srs.get())) {
-            result.errors.push_back("CRS mismatch: " + displayNames[i]);
-        }
-
-        // Dimension check
-        if (GDALGetRasterXSize(hDs) != refWidth || GDALGetRasterYSize(hDs) != refHeight) {
-            result.errors.push_back("Dimension mismatch: " + displayNames[i] +
-                " (" + std::to_string(GDALGetRasterXSize(hDs)) + "x" + std::to_string(GDALGetRasterYSize(hDs)) +
-                " vs " + std::to_string(refWidth) + "x" + std::to_string(refHeight) + ")");
-        }
-
-        // Data type check
-        GDALDataType dt = GDALGetRasterDataType(GDALGetRasterBand(hDs, 1));
-        if (dt != refType) {
-            result.errors.push_back("Data type mismatch: " + displayNames[i] +
-                " (" + gdalTypeName(dt) + " vs " + gdalTypeName(refType) + ")");
-        }
-
-        // Geotransform check
-        double gt[6];
-        if (GDALGetGeoTransform(hDs, gt) != CE_None) {
-            result.warnings.push_back("Cannot read geotransform from: " + displayNames[i]);
-        } else {
-            // Skew check
-            if (gt[2] != 0 || gt[4] != 0) {
-                result.errors.push_back(displayNames[i] + " has non-zero skew");
-            }
-
-            // Pixel size tolerance (relative)
-            double pxDiffX = std::abs(gt[1] - refGt[1]);
-            double pxDiffY = std::abs(gt[5] - refGt[5]);
-            double relDiffX = (std::abs(refGt[1]) > 0) ? pxDiffX / std::abs(refGt[1]) : 0;
-            double relDiffY = (std::abs(refGt[5]) > 0) ? pxDiffY / std::abs(refGt[5]) : 0;
-
-            if (relDiffX > 0.05 || relDiffY > 0.05) {
-                result.errors.push_back("Pixel size mismatch > 5%: " + displayNames[i]);
-            } else if (relDiffX > 0.01 || relDiffY > 0.01) {
-                result.warnings.push_back("Resolution differs slightly for " + displayNames[i] + ", bands will be resampled");
-            }
-
-            // Origin tolerance (1 pixel)
-            double origDiffX = std::abs(gt[0] - refGt[0]);
-            double origDiffY = std::abs(gt[3] - refGt[3]);
-            if (origDiffX > std::abs(refGt[1]) || origDiffY > std::abs(refGt[5])) {
-                result.errors.push_back("Origin mismatch > 1 pixel: " + displayNames[i]);
-            }
-        }
-
-        if (GDALGetRasterCount(hDs) > 1) {
-            result.warnings.push_back(displayNames[i] + " has " + std::to_string(GDALGetRasterCount(hDs)) + " bands");
-        }
-
-        totalBands += GDALGetRasterCount(hDs);
-    }
-
-    refSrs.reset();
-    refDs.reset();
-
-    result.summary.totalBands = totalBands;
-    result.summary.estimatedSize = static_cast<size_t>(refWidth) * refHeight * totalBands * GDALGetDataTypeSizeBytes(refType);
-    result.ok = result.errors.empty();
-
-    // Band alignment detection
-    auto alignInfo = detectBandAlignment(inputPaths);
-
-    int detectedCount = 0;
-    for (const auto &a : alignInfo) {
-        if (a.detected) detectedCount++;
-    }
-
-    if (detectedCount >= 2) {
-        result.alignment.detected = true;
-
-        double maxShift = 0;
-        std::string source;
-        for (const auto &a : alignInfo) {
-            if (!a.detected) continue;
-            double s = std::max(std::abs(a.shiftX), std::abs(a.shiftY));
-            if (s > maxShift) maxShift = s;
-            if (source.empty() && !a.shiftSource.empty()) source = a.shiftSource;
-        }
-        result.alignment.maxShiftPixels = maxShift;
-        result.alignment.shiftSource = source;
-        result.alignment.bands = alignInfo;
-
-        // Check if files are already georeferenced (have valid CRS + non-identity geotransform)
-        bool isGeoreferenced = hasGeoTransform &&
-            refProj != nullptr && std::string(refProj).length() > 0 &&
-            !(refGt[0] == 0 && refGt[1] == 1 && refGt[2] == 0 &&
-              refGt[3] == 0 && refGt[4] == 0 && refGt[5] == -1);
-
-        // Check all same dimensions
-        bool allSameDims = true;
-        for (const auto &a : alignInfo) {
-            if (a.imageWidth != refWidth || a.imageHeight != refHeight) {
-                allSameDims = false;
-                break;
-            }
-        }
-
-        // Check no thermal with different resolution
-        bool hasThermalDiffRes = false;
-        for (const auto &a : alignInfo) {
-            if (a.isThermal && (a.imageWidth != refWidth || a.imageHeight != refHeight)) {
-                hasThermalDiffRes = true;
-                break;
-            }
-        }
-
-        // Determine if correction should be applied
-        result.alignment.correctionApplied = !isGeoreferenced &&
-            detectedCount >= 2 &&
-            maxShift > 0.5 &&
-            allSameDims &&
-            !hasThermalDiffRes;
-
-        // Warnings
-        if (maxShift > 2.0) {
-            int shiftRounded = static_cast<int>(std::round(maxShift));
-            if (result.alignment.correctionApplied) {
-                result.warnings.push_back(
-                    "Band misalignment detected (~" + std::to_string(shiftRounded) +
-                    " pixels). Bands from multi-camera sensors (e.g. MicaSense, DJI Multispectral) "
-                    "are captured from slightly different viewpoints. For accurate vegetation indices "
-                    "(NDVI, NDRE, etc.), process raw imagery with a photogrammetry tool (e.g. WebODM, "
-                    "Pix4D) before merging. The merge will proceed with approximate pixel-shift correction.");
-            } else {
-                result.warnings.push_back(
-                    "Band misalignment detected (~" + std::to_string(shiftRounded) +
-                    " pixels). Bands from multi-camera sensors (e.g. MicaSense, DJI Multispectral) "
-                    "are captured from slightly different viewpoints. For accurate vegetation indices "
-                    "(NDVI, NDRE, etc.), process raw imagery with a photogrammetry tool (e.g. WebODM, "
-                    "Pix4D) before merging. Approximate pixel-shift correction is not being applied "
-                    "under the current input conditions.");
-            }
-        } else if (maxShift > 0.5) {
-            int shiftRounded = static_cast<int>(std::round(maxShift));
-            if (result.alignment.correctionApplied) {
-                result.warnings.push_back(
-                    "Minor band misalignment detected (~" + std::to_string(shiftRounded) +
-                    " pixels). Approximate correction will be applied.");
-            } else {
-                result.warnings.push_back(
-                    "Minor band misalignment detected (~" + std::to_string(shiftRounded) +
-                    " pixels). Approximate correction is not being applied under the current input "
-                    "conditions.");
-            }
-        }
-
-        // Partial metadata warning
-        if (detectedCount > 0 && detectedCount < static_cast<int>(alignInfo.size())) {
-            if (result.alignment.correctionApplied) {
-                result.warnings.push_back(
-                    "Band alignment metadata found for " + std::to_string(detectedCount) + "/" +
-                    std::to_string(alignInfo.size()) + " bands. Correction will only be applied to "
-                    "bands with calibration data. Results may be inconsistent.");
-            } else {
-                result.warnings.push_back(
-                    "Band alignment metadata found for " + std::to_string(detectedCount) + "/" +
-                    std::to_string(alignInfo.size()) + " bands, but approximate correction is not being "
-                    "applied under the current input conditions. Results may be inconsistent.");
-            }
-        }
-
-        // LWIR warning
-        for (const auto &a : alignInfo) {
-            if (a.isThermal) {
-                result.warnings.push_back(
-                    "Thermal (LWIR) band detected. Thermal bands have different optics and cannot "
-                    "be aligned using PrincipalPoint shift. Consider excluding the thermal band from the merge.");
-                break;
-            }
-        }
-    }
-
-    return result;
-}
-
 namespace {
 
-// Opens every path; throws GDALException naming the first that cannot be opened
-std::vector<GDALDatasetUniquePtr> openAll(const std::vector<std::string> &paths) {
-    std::vector<GDALDatasetUniquePtr> datasets;
-    datasets.reserve(paths.size());
-    for (const auto &p : paths) {
-        auto ds = adoptDataset(GDALOpen(p.c_str(), GA_ReadOnly));
-        if (!ds) throw GDALException("Cannot open " + p);
-        datasets.push_back(std::move(ds));
-    }
-    return datasets;
-}
-
-// The bands of a merge as one /vsimem/ VRT (-separate) with the sources it reads. The members
-// are declared so that the VRT closes first, then its file goes, then the sources and their
-// /vsimem/ files (the shifted bands). Movable, not assignable: a member-wise assignment would
-// close them in the wrong order; close() does it in the right one.
-struct SeparateVrt {
-    std::vector<VsiMemFile> sourceFiles;
-    std::vector<GDALDatasetUniquePtr> sources;
-    VsiMemFile file;
-    GDALDatasetUniquePtr vrt;
-
-    SeparateVrt() = default;
-    SeparateVrt(SeparateVrt &&) = default;
-    SeparateVrt &operator=(SeparateVrt &&) = delete;
-
-    GDALDatasetH handle() const { return datasetHandle(vrt); }
-
-    void close() {
-        vrt.reset();
-        file.reset();
-        sources.clear();
-        sourceFiles.clear();
-    }
-};
-
-// Builds the VRT over the sources (taking them and their files); the VRT file name ends with
-// suffix. Throws GDALException(error) when GDAL cannot build it.
-SeparateVrt buildSeparateVrt(std::vector<GDALDatasetUniquePtr> sources,
-                             std::vector<VsiMemFile> sourceFiles, const std::string &suffix,
-                             const std::string &error) {
-    SeparateVrt v;
-    v.sourceFiles = std::move(sourceFiles);
-    v.sources = std::move(sources);
-
-    CPLStringList args;
-    args.AddString("-separate");
-    args.AddString("-r");
-    args.AddString("average");
-    const GdalOptionsPtr<GDALBuildVRTOptions> opts(GDALBuildVRTOptionsNew(args.List(), nullptr));
-
-    v.file = VsiMemFile::unique("", suffix);
-    auto handles = datasetHandles(v.sources);
-    v.vrt = adoptDataset(GDALBuildVRT(v.file.c_str(), static_cast<int>(handles.size()),
-                                      handles.data(), nullptr, opts.get(), nullptr));
-    if (!v.vrt) throw GDALException(error);
-    GDALFlushCache(v.handle());
-    return v;
-}
+using merge::SeparateVrt;
+using merge::buildSeparateVrt;
+using merge::openAll;
 
 // The creation options of the tiled GTiff that a merge writes (GDALTranslate and GDALWarp
 // alike); numThreads is the GDAL thread option of the merge's CPU tokens
@@ -696,51 +57,261 @@ GdalOptionsPtr<GDALTranslateOptions> mergeTranslateOptions(GDALDataType dt, bool
     return GdalOptionsPtr<GDALTranslateOptions>(GDALTranslateOptionsNew(transArgs.List(), nullptr));
 }
 
-}  // namespace
+// How the merged raster is written
+struct MergeEncoding {
+    GDALDataType dataType;
+    bool useJpeg;
+    // The GDAL thread option of the CPU tokens held for the merge (parallel::gdalNumThreads)
+    std::string numThreads;
+};
 
-void previewMergeMultispectral(const std::vector<std::string> &inputPaths,
-                                const std::vector<int> &previewBands,
-                                int thumbSize,
-                                uint8_t **outBuffer, int *outBufferSize) {
-    if (inputPaths.empty()) throw InvalidArgsException("No input paths");
-    if (previewBands.size() < 3) throw InvalidArgsException("Need at least 3 preview bands");
+// The GPS position of the first input file (all bands come from the same capture position),
+// read before the merge
+struct SourceGps {
+    GeoLocation location;
+    bool present = false;
+};
 
-    // Build VRT with separate=TRUE
-    const SeparateVrt merged = buildSeparateVrt(openAll(inputPaths), {}, ".vrt", "Cannot build VRT");
+SourceGps readSourceGps(const std::string &path) {
+    SourceGps gps;
+    try {
+        auto exivImage = openExivImage(io::fromUtf8(path));
+        if (exivImage.get()) {
+            exivImage->readMetadata();
+            ExifParser parser(exivImage.get());
+            gps.present = parser.extractGeo(gps.location);
+            if (gps.present) {
+                LOGD << "Read GPS from " << path
+                     << ": lat=" << gps.location.latitude
+                     << " lon=" << gps.location.longitude
+                     << " alt=" << gps.location.altitude;
+            }
+        }
+    } catch (const Exiv2::Error &e) {
+        LOGD << "Could not read EXIF GPS from " << path << ": " << e.what();
+    }
+    return gps;
+}
 
-    // Translate with band selection and scaling
-    CPLStringList tArgs;
-    tArgs.AddString("-of");
-    tArgs.AddString("WEBP");
-    tArgs.AddString("-outsize");
-    tArgs.AddString(std::to_string(thumbSize).c_str());
-    tArgs.AddString(std::to_string(thumbSize).c_str());
-    tArgs.AddString("-ot");
-    tArgs.AddString("Byte");
-    tArgs.AddString("-scale");
+// The integer shift of every band against the reference band, and the margins that cropping to
+// the area all bands cover takes off each side
+struct AlignmentCrop {
+    std::vector<int> dx, dy;
+    int padLeft = 0, padRight = 0, padTop = 0, padBottom = 0;
+    int outW = 0, outH = 0;
+};
 
-    for (int band : previewBands) {
-        tArgs.AddString("-b");
-        tArgs.AddString(std::to_string(band).c_str());
+// Plans the crop of the validated alignment; nothing when the shift is so large that no area
+// would be left
+std::optional<AlignmentCrop> planAlignmentCrop(const MergeValidationResult &validation) {
+    LOGD << "Applying band alignment shift correction (max shift: "
+         << validation.alignment.maxShiftPixels << " px)";
+
+    const auto &alignBands = validation.alignment.bands;
+    const size_t N = alignBands.size();
+    int w = validation.summary.width;
+    int h = validation.summary.height;
+
+    // Calculate integer shifts
+    // Find REF (the band with shiftX=0 and shiftY=0)
+    size_t REF = 0;
+    for (size_t i = 0; i < N; i++) {
+        if (alignBands[i].detected && alignBands[i].shiftX == 0 && alignBands[i].shiftY == 0) {
+            REF = i;
+            break;
+        }
     }
 
-    const GdalOptionsPtr<GDALTranslateOptions> transOpts(
-        GDALTranslateOptionsNew(tArgs.List(), nullptr));
+    AlignmentCrop crop;
+    crop.dx.assign(N, 0);
+    crop.dy.assign(N, 0);
+    for (size_t i = 0; i < N; i++) {
+        if (i == REF || !alignBands[i].detected || alignBands[i].isThermal) continue;
+        crop.dx[i] = static_cast<int>(std::round(alignBands[i].shiftX));
+        crop.dy[i] = static_cast<int>(std::round(alignBands[i].shiftY));
+    }
 
-    const VsiMemFile outFile = VsiMemFile::unique("", ".webp");
-    auto out = adoptDataset(
-        GDALTranslate(outFile.c_str(), merged.handle(), transOpts.get(), nullptr));
-    if (!out)
-        throw GDALException("Cannot generate preview");
+    // Calculate asymmetric padding (intersection area)
+    int padLeft = *std::max_element(crop.dx.begin(), crop.dx.end());
+    int padRight = -(*std::min_element(crop.dx.begin(), crop.dx.end()));
+    int padTop = *std::max_element(crop.dy.begin(), crop.dy.end());
+    int padBottom = -(*std::min_element(crop.dy.begin(), crop.dy.end()));
+    crop.padLeft = std::max(0, padLeft);
+    crop.padRight = std::max(0, padRight);
+    crop.padTop = std::max(0, padTop);
+    crop.padBottom = std::max(0, padBottom);
 
-    GDALFlushCache(datasetHandle(out));
-    out.reset();
+    crop.outW = w - crop.padLeft - crop.padRight;
+    crop.outH = h - crop.padTop - crop.padBottom;
 
-    // Read memory buffer
-    int bufSize = 0;
-    *outBuffer = stealMemFileBuffer(outFile.path(), bufSize).release();
-    *outBufferSize = bufSize;
+    LOGD << "Alignment crop: pad L=" << crop.padLeft << " R=" << crop.padRight
+         << " T=" << crop.padTop << " B=" << crop.padBottom
+         << " => output " << crop.outW << "x" << crop.outH
+         << " (from " << w << "x" << h << ")";
+
+    if (crop.outW <= 0 || crop.outH <= 0) {
+        LOGD << "Shift too large, output would be empty. Falling back to no-shift merge.";
+        return std::nullopt;
+    }
+    return crop;
 }
+
+// The VRT over the inputs cropped to the area every band covers, each band shifted into place
+// with -srcwin
+SeparateVrt buildAlignedVrt(const std::vector<std::string> &inputPaths, const AlignmentCrop &crop) {
+    // Created via GDALTranslate with -srcwin (declared after their files: closed before they go)
+    std::vector<VsiMemFile> shiftedFiles;
+    std::vector<GDALDatasetUniquePtr> shiftedDatasets;
+
+    for (size_t i = 0; i < inputPaths.size(); i++) {
+        const auto src = adoptDataset(GDALOpen(inputPaths[i].c_str(), GA_ReadOnly));
+        if (!src) {
+            throw GDALException("Cannot open " + inputPaths[i]);
+        }
+        GDALDatasetH srcDs = datasetHandle(src);
+
+        int srcX = crop.padLeft - crop.dx[i];
+        int srcY = crop.padTop - crop.dy[i];
+
+        int srcW = GDALGetRasterXSize(srcDs);
+        int srcH = GDALGetRasterYSize(srcDs);
+        if (srcX < 0 || srcY < 0 ||
+            srcX + crop.outW > srcW || srcY + crop.outH > srcH) {
+            LOGD << "Invalid aligned crop window for band " << i
+                 << ": srcwin=(" << srcX << ", " << srcY << ", "
+                 << crop.outW << ", " << crop.outH << "), dataset=("
+                 << srcW << ", " << srcH << ")";
+            throw GDALException("Invalid aligned crop window for band " + std::to_string(i));
+        }
+
+        VsiMemFile shiftedFile =
+            VsiMemFile::unique("shifted_", "_" + std::to_string(i) + ".tif");
+
+        CPLStringList tArgs;
+        tArgs.AddString("-srcwin");
+        tArgs.AddString(std::to_string(srcX).c_str());
+        tArgs.AddString(std::to_string(srcY).c_str());
+        tArgs.AddString(std::to_string(crop.outW).c_str());
+        tArgs.AddString(std::to_string(crop.outH).c_str());
+
+        const GdalOptionsPtr<GDALTranslateOptions> srcOpts(
+            GDALTranslateOptionsNew(tArgs.List(), nullptr));
+
+        auto shiftedDs = adoptDataset(
+            GDALTranslate(shiftedFile.c_str(), srcDs, srcOpts.get(), nullptr));
+        if (!shiftedDs) {
+            throw GDALException("Cannot create shifted dataset for band " + std::to_string(i));
+        }
+
+        GDALFlushCache(datasetHandle(shiftedDs));
+        shiftedFiles.push_back(std::move(shiftedFile));
+        shiftedDatasets.push_back(std::move(shiftedDs));
+    }
+
+    // Build VRT from shifted datasets
+    return buildSeparateVrt(std::move(shiftedDatasets), std::move(shiftedFiles),
+                            "_aligned.vrt", "Cannot build VRT for aligned merge");
+}
+
+// What the GPS correction of a cropped merge needs to know about the camera
+struct CameraGeometry {
+    double pixelPitch = 0, focalLength = 0, yawDeg = 0;
+};
+
+// Reads the geometry of the camera from the EXIF/XMP of path (the width of the raster in pixels
+// gives the pixel pitch); what cannot be read stays 0
+CameraGeometry readCameraGeometry(const std::string &path, int rasterWidth) {
+    CameraGeometry camera;
+    try {
+        auto exivImg = openExivImage(io::fromUtf8(path));
+        if (exivImg.get()) {
+            exivImg->readMetadata();
+            ExifParser p(exivImg.get());
+
+            auto flIt = p.findXmpKey("Xmp.Camera.PerspectiveFocalLength");
+            if (flIt != p.xmpEnd()) {
+                try { camera.focalLength = std::stod(flIt->toString()); }
+                catch (const std::invalid_argument &) { /* non-numeric XMP, ignore */ }
+                catch (const std::out_of_range &) { /* out of range, ignore */ }
+            }
+            if (camera.focalLength <= 0) {
+                Focal f;
+                if (p.computeFocal(f)) camera.focalLength = f.length;
+            }
+
+            SensorSize ss;
+            if (p.extractSensorSize(ss) && rasterWidth > 0) {
+                camera.pixelPitch = ss.width / rasterWidth;
+            }
+
+            CameraOrientation cameraOri;
+            if (p.extractCameraOrientation(cameraOri)) {
+                camera.yawDeg = cameraOri.yaw;
+            }
+        }
+    } catch (const std::exception &e) {
+        LOGD << "GPS correction: failed to read EXIF for shift: " << e.what();
+    }
+    return camera;
+}
+
+// Moves the position by the shift of the center of the crop (the cropped area is not centered on
+// the original frame)
+void correctGpsForCrop(GeoLocation &gps, const AlignmentCrop &crop, const CameraGeometry &camera) {
+    double centerShiftXPx = (crop.padLeft - crop.padRight) / 2.0;
+    double centerShiftYPx = (crop.padTop - crop.padBottom) / 2.0;
+
+    if (gps.altitude > 0 && camera.focalLength > 0 && camera.pixelPitch > 0) {
+        double gsd = gps.altitude * camera.pixelPitch / camera.focalLength;
+
+        // Rotate pixel shift by camera yaw to convert from
+        // image-space (col/row) to geographic (east/north).
+        // Image axes: +X = right, +Y = down.
+        // Yaw: 0 = north, 90 = east (CW from north).
+        // Image-right direction in geo = bearing (yaw+90):
+        //   unit vector = (cos(yaw), -sin(yaw))
+        // Image-down direction in geo = bearing (yaw+180):
+        //   unit vector = (-sin(yaw), -cos(yaw))
+        double yawRad = ddb::deg2rad(camera.yawDeg);
+        double shiftE =  centerShiftXPx * std::cos(yawRad) - centerShiftYPx * std::sin(yawRad);
+        double shiftN = -centerShiftXPx * std::sin(yawRad) - centerShiftYPx * std::cos(yawRad);
+
+        double dLat = (shiftN * gsd) / 111320.0;
+        double dLon = (shiftE * gsd) /
+            (111320.0 * std::cos(ddb::deg2rad(gps.latitude)));
+        gps.latitude += dLat;
+        gps.longitude += dLon;
+        LOGD << "GPS corrected for alignment crop: dLat=" << dLat
+             << " dLon=" << dLon << " yaw=" << camera.yawDeg;
+    } else {
+        LOGD << "Cannot compute GSD for GPS correction (alt="
+             << gps.altitude << " fl=" << camera.focalLength << " pp=" << camera.pixelPitch << ")";
+    }
+}
+
+// GDALWarp for georeferenced data (supports reprojection)
+GDALDatasetUniquePtr warpMerge(GDALDatasetH hVrt, const std::string &outputPath, const MergeEncoding &enc) {
+    CPLStringList warpArgs;
+    warpArgs.AddString("-of");
+    warpArgs.AddString("GTiff");
+    warpArgs.AddString("-multi");
+    warpArgs.AddString("-wo");
+    warpArgs.AddString(enc.numThreads.c_str());
+    mergeCreationOptions(enc.dataType, enc.useJpeg, enc.numThreads).appendTo(warpArgs);
+
+    const GdalOptionsPtr<GDALWarpAppOptions> warpOpts(
+        GDALWarpAppOptionsNew(warpArgs.List(), nullptr));
+
+    return adoptDataset(GDALWarp(outputPath.c_str(), nullptr, 1, &hVrt, warpOpts.get(), nullptr));
+}
+
+// GDALTranslate for non-georeferenced data (no geotransform needed)
+GDALDatasetUniquePtr translateMerge(GDALDatasetH hVrt, const std::string &outputPath, const MergeEncoding &enc) {
+    const auto transOpts = mergeTranslateOptions(enc.dataType, enc.useJpeg, enc.numThreads);
+    return adoptDataset(GDALTranslate(outputPath.c_str(), hVrt, transOpts.get(), nullptr));
+}
+
+}  // namespace
 
 void mergeMultispectral(const std::vector<std::string> &inputPaths,
                          const std::string &outputPath) {
@@ -759,24 +330,7 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
 
     // Read GPS coordinates from the first input file before merge
     // All bands come from the same capture position, so we use the first file
-    GeoLocation srcGps;
-    bool hasGps = false;
-    try {
-        auto exivImage = openExivImage(io::fromUtf8(inputPaths[0]));
-        if (exivImage.get()) {
-            exivImage->readMetadata();
-            ExifParser parser(exivImage.get());
-            hasGps = parser.extractGeo(srcGps);
-            if (hasGps) {
-                LOGD << "Read GPS from " << inputPaths[0]
-                     << ": lat=" << srcGps.latitude
-                     << " lon=" << srcGps.longitude
-                     << " alt=" << srcGps.altitude;
-            }
-        }
-    } catch (const Exiv2::Error &e) {
-        LOGD << "Could not read EXIF GPS from " << inputPaths[0] << ": " << e.what();
-    }
+    SourceGps srcGps = readSourceGps(inputPaths[0]);
 
     // Build VRT with separate=TRUE
     SeparateVrt merged =
@@ -795,220 +349,35 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
     // Warp and compression threads: this one and those the CPU pool allows (DQ-15), held
     // until the output is closed
     const auto cpu = parallel::tryAcquireThreads(parallel::hardwareThreads());
-    const std::string numThreads = parallel::gdalNumThreads(cpu);
+    const MergeEncoding encoding{dt, useJpeg, parallel::gdalNumThreads(cpu)};
     GDALDatasetUniquePtr out;
 
-
     if (hasGeoTransform) {
-        // Use GDALWarp for georeferenced data (supports reprojection)
-        CPLStringList warpArgs;
-        warpArgs.AddString("-of");
-        warpArgs.AddString("GTiff");
-        warpArgs.AddString("-multi");
-        warpArgs.AddString("-wo");
-        warpArgs.AddString(numThreads.c_str());
-        mergeCreationOptions(dt, useJpeg, numThreads).appendTo(warpArgs);
-
-        const GdalOptionsPtr<GDALWarpAppOptions> warpOpts(
-            GDALWarpAppOptionsNew(warpArgs.List(), nullptr));
-
-        out = adoptDataset(
-            GDALWarp(outputPath.c_str(), nullptr, 1, &hVrt, warpOpts.get(), nullptr));
+        out = warpMerge(hVrt, outputPath, encoding);
     } else {
-        // Use GDALTranslate for non-georeferenced data (no geotransform needed)
         LOGD << "No geotransform found, using GDALTranslate for merge";
 
         // Check if alignment shift should be applied
-        bool applyShift = validation.alignment.correctionApplied;
+        std::optional<AlignmentCrop> crop;
+        if (validation.alignment.correctionApplied)
+            crop = planAlignmentCrop(validation);
 
-        if (applyShift) {
-            LOGD << "Applying band alignment shift correction (max shift: "
-                 << validation.alignment.maxShiftPixels << " px)";
+        if (crop) {
+            // Close the original VRT and datasets; the shifted ones replace them
+            merged.close();
 
-            const auto &alignBands = validation.alignment.bands;
-            const size_t N = alignBands.size();
-            int w = validation.summary.width;
-            int h = validation.summary.height;
+            SeparateVrt aligned = buildAlignedVrt(inputPaths, *crop);
+            out = translateMerge(aligned.handle(), outputPath, encoding);
+            aligned.close();
 
-            // Calculate integer shifts
-            // Find REF (the band with shiftX=0 and shiftY=0)
-            size_t REF = 0;
-            for (size_t i = 0; i < N; i++) {
-                if (alignBands[i].detected && alignBands[i].shiftX == 0 && alignBands[i].shiftY == 0) {
-                    REF = i;
-                    break;
-                }
+            // GPS correction for center shift
+            if (srcGps.present) {
+                const auto camera = readCameraGeometry(inputPaths[0], validation.summary.width);
+                correctGpsForCrop(srcGps.location, *crop, camera);
             }
-
-            std::vector<int> dxVec(N, 0), dyVec(N, 0);
-            for (size_t i = 0; i < N; i++) {
-                if (i == REF || !alignBands[i].detected || alignBands[i].isThermal) continue;
-                dxVec[i] = static_cast<int>(std::round(alignBands[i].shiftX));
-                dyVec[i] = static_cast<int>(std::round(alignBands[i].shiftY));
-            }
-
-            // Calculate asymmetric padding (intersection area)
-            int padLeft = *std::max_element(dxVec.begin(), dxVec.end());
-            int padRight = -(*std::min_element(dxVec.begin(), dxVec.end()));
-            int padTop = *std::max_element(dyVec.begin(), dyVec.end());
-            int padBottom = -(*std::min_element(dyVec.begin(), dyVec.end()));
-            padLeft = std::max(0, padLeft);
-            padRight = std::max(0, padRight);
-            padTop = std::max(0, padTop);
-            padBottom = std::max(0, padBottom);
-
-            int outW = w - padLeft - padRight;
-            int outH = h - padTop - padBottom;
-
-            LOGD << "Alignment crop: pad L=" << padLeft << " R=" << padRight
-                 << " T=" << padTop << " B=" << padBottom
-                 << " => output " << outW << "x" << outH
-                 << " (from " << w << "x" << h << ")";
-
-            if (outW <= 0 || outH <= 0) {
-                LOGD << "Shift too large, output would be empty. Falling back to no-shift merge.";
-                applyShift = false;
-            } else {
-                // Close the original VRT and datasets; we'll create shifted ones
-                merged.close();
-
-                // Create shifted datasets via GDALTranslate with -srcwin (declared after
-                // their files: closed before they go)
-                std::vector<VsiMemFile> shiftedFiles;
-                std::vector<GDALDatasetUniquePtr> shiftedDatasets;
-
-                for (size_t i = 0; i < N; i++) {
-                    const auto src = adoptDataset(GDALOpen(inputPaths[i].c_str(), GA_ReadOnly));
-                    if (!src) {
-                        throw GDALException("Cannot open " + inputPaths[i]);
-                    }
-                    GDALDatasetH srcDs = datasetHandle(src);
-
-                    int srcX = padLeft - dxVec[i];
-                    int srcY = padTop - dyVec[i];
-
-                    int srcW = GDALGetRasterXSize(srcDs);
-                    int srcH = GDALGetRasterYSize(srcDs);
-                    if (srcX < 0 || srcY < 0 ||
-                        srcX + outW > srcW || srcY + outH > srcH) {
-                        LOGD << "Invalid aligned crop window for band " << i
-                             << ": srcwin=(" << srcX << ", " << srcY << ", "
-                             << outW << ", " << outH << "), dataset=("
-                             << srcW << ", " << srcH << ")";
-                        throw GDALException("Invalid aligned crop window for band " + std::to_string(i));
-                    }
-
-                    VsiMemFile shiftedFile =
-                        VsiMemFile::unique("shifted_", "_" + std::to_string(i) + ".tif");
-
-                    CPLStringList tArgs;
-                    tArgs.AddString("-srcwin");
-                    tArgs.AddString(std::to_string(srcX).c_str());
-                    tArgs.AddString(std::to_string(srcY).c_str());
-                    tArgs.AddString(std::to_string(outW).c_str());
-                    tArgs.AddString(std::to_string(outH).c_str());
-
-                    const GdalOptionsPtr<GDALTranslateOptions> srcOpts(
-                        GDALTranslateOptionsNew(tArgs.List(), nullptr));
-
-                    auto shiftedDs = adoptDataset(
-                        GDALTranslate(shiftedFile.c_str(), srcDs, srcOpts.get(), nullptr));
-                    if (!shiftedDs) {
-                        throw GDALException("Cannot create shifted dataset for band " + std::to_string(i));
-                    }
-
-                    GDALFlushCache(datasetHandle(shiftedDs));
-                    shiftedFiles.push_back(std::move(shiftedFile));
-                    shiftedDatasets.push_back(std::move(shiftedDs));
-                }
-
-                // Build VRT from shifted datasets
-                SeparateVrt aligned =
-                    buildSeparateVrt(std::move(shiftedDatasets), std::move(shiftedFiles),
-                                     "_aligned.vrt", "Cannot build VRT for aligned merge");
-
-                // Translate to output
-                const auto transOpts = mergeTranslateOptions(dt, useJpeg, numThreads);
-                out = adoptDataset(
-                    GDALTranslate(outputPath.c_str(), aligned.handle(), transOpts.get(), nullptr));
-                aligned.close();
-
-                // GPS correction for center shift
-                if (hasGps) {
-                    double centerShiftXPx = (padLeft - padRight) / 2.0;
-                    double centerShiftYPx = (padTop - padBottom) / 2.0;
-
-                    // Try to compute GSD and yaw for GPS correction
-                    double pixelPitch = 0, focalLength = 0, yawDeg = 0;
-                    try {
-                        auto exivImg = openExivImage(io::fromUtf8(inputPaths[0]));
-                        if (exivImg.get()) {
-                            exivImg->readMetadata();
-                            ExifParser p(exivImg.get());
-
-                            auto flIt = p.findXmpKey("Xmp.Camera.PerspectiveFocalLength");
-                            if (flIt != p.xmpEnd()) {
-                                try { focalLength = std::stod(flIt->toString()); }
-                                catch (const std::invalid_argument &) { /* non-numeric XMP, ignore */ }
-                                catch (const std::out_of_range &) { /* out of range, ignore */ }
-                            }
-                            if (focalLength <= 0) {
-                                Focal f;
-                                if (p.computeFocal(f)) focalLength = f.length;
-                            }
-
-                            SensorSize ss;
-                            if (p.extractSensorSize(ss) && w > 0) {
-                                pixelPitch = ss.width / w;
-                            }
-
-                            CameraOrientation cameraOri;
-                            if (p.extractCameraOrientation(cameraOri)) {
-                                yawDeg = cameraOri.yaw;
-                            }
-                        }
-                    } catch (const std::exception &e) {
-                        LOGD << "GPS correction: failed to read EXIF for shift: " << e.what();
-                    }
-
-                    if (srcGps.altitude > 0 && focalLength > 0 && pixelPitch > 0) {
-                        double gsd = srcGps.altitude * pixelPitch / focalLength;
-
-                        // Rotate pixel shift by camera yaw to convert from
-                        // image-space (col/row) to geographic (east/north).
-                        // Image axes: +X = right, +Y = down.
-                        // Yaw: 0 = north, 90 = east (CW from north).
-                        // Image-right direction in geo = bearing (yaw+90):
-                        //   unit vector = (cos(yaw), -sin(yaw))
-                        // Image-down direction in geo = bearing (yaw+180):
-                        //   unit vector = (-sin(yaw), -cos(yaw))
-                        double yawRad = ddb::deg2rad(yawDeg);
-                        double shiftE =  centerShiftXPx * std::cos(yawRad) - centerShiftYPx * std::sin(yawRad);
-                        double shiftN = -centerShiftXPx * std::sin(yawRad) - centerShiftYPx * std::cos(yawRad);
-
-                        double dLat = (shiftN * gsd) / 111320.0;
-                        double dLon = (shiftE * gsd) /
-                            (111320.0 * std::cos(ddb::deg2rad(srcGps.latitude)));
-                        srcGps.latitude += dLat;
-                        srcGps.longitude += dLon;
-                        LOGD << "GPS corrected for alignment crop: dLat=" << dLat
-                             << " dLon=" << dLon << " yaw=" << yawDeg;
-                    } else {
-                        LOGD << "Cannot compute GSD for GPS correction (alt="
-                             << srcGps.altitude << " fl=" << focalLength << " pp=" << pixelPitch << ")";
-                    }
-                }
-
-                // out is set, datasets already cleaned up in shift path
-                // Fall through to GPS writing below
-            }
-        }
-
-        if (!applyShift) {
+        } else {
             // Standard non-shifted merge path
-            const auto transOpts = mergeTranslateOptions(dt, useJpeg, numThreads);
-            out = adoptDataset(
-                GDALTranslate(outputPath.c_str(), merged.handle(), transOpts.get(), nullptr));
+            out = translateMerge(merged.handle(), outputPath, encoding);
         }
     }
 
@@ -1023,10 +392,10 @@ void mergeMultispectral(const std::vector<std::string> &inputPaths,
     merged.close();
 
     // Write GPS coordinates from source to merged output
-    if (hasGps) {
+    if (srcGps.present) {
         try {
             ExifEditor editor(outputPath);
-            editor.SetGPS(srcGps.latitude, srcGps.longitude, srcGps.altitude);
+            editor.SetGPS(srcGps.location.latitude, srcGps.location.longitude, srcGps.location.altitude);
             LOGD << "GPS coordinates written to merged output: " << outputPath;
         } catch (const std::exception &e) {
             LOGD << "Could not write GPS to " << outputPath << ": " << e.what();
