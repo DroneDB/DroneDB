@@ -397,16 +397,26 @@ namespace
         EXPECT_EQ(f.net.http.calls.size(), 2u);
     }
 
-    TEST(Dq11RegistryClientRequests, TheMultipartTimeoutAndProgressReachTheRequest)
+    TEST(Dq11RegistryClientRequests, TheMultipartLimitsAndProgressReachTheRequest)
     {
+        using std::chrono::milliseconds;
         ClientFixture f(TEST_NAME);
         f.net.http.on("MULTIPART", "/up", reply(200));
         f.net.http.progressEvents = {HttpProgress{0, 0, 10, 5}};
         size_t uploaded = 0;
-        f.client.postMultipart("/up", {}, AuthScheme::Bearer, std::chrono::milliseconds(10000),
+        f.client.postMultipart("/up", {}, AuthScheme::Bearer, HttpLimits{milliseconds(0), milliseconds(5000), milliseconds(30000)},
                                [&](const HttpProgress &p) { uploaded = p.uploadNow; return true; });
-        EXPECT_EQ(f.net.http.calls.at(0).request.timeout, std::chrono::milliseconds(10000));
+        const auto &limits = f.net.http.calls.at(0).request.limits;
+        EXPECT_EQ(limits.total, milliseconds(0));
+        EXPECT_EQ(limits.connect, milliseconds(5000));
+        EXPECT_EQ(limits.stall, milliseconds(30000));
         EXPECT_EQ(uploaded, 5u);
+
+        // An upload given no limits has none
+        f.client.postMultipart("/up", {}, AuthScheme::Bearer);
+        EXPECT_EQ(f.net.http.calls.at(1).request.limits.total, milliseconds(0));
+        EXPECT_EQ(f.net.http.calls.at(1).request.limits.connect, milliseconds(0));
+        EXPECT_EQ(f.net.http.calls.at(1).request.limits.stall, milliseconds(0));
     }
 
     // ---------------------------------------------------------------------------- errors

@@ -744,7 +744,11 @@ namespace
         const auto up = f.net.http.callsTo("MULTIPART", "/share/upload/share-token").at(0);
         EXPECT_EQ(up.part("path"), "sub/b.txt");
         EXPECT_EQ(up.part("file"), "beta beta");
-        EXPECT_EQ(up.request.timeout, std::chrono::milliseconds(10000));
+        // A large file on a slow link must get through: no cap on the whole transfer, only on
+        // opening the connection and on a transfer that stopped moving
+        EXPECT_EQ(up.request.limits.total, std::chrono::milliseconds(0));
+        EXPECT_GT(up.request.limits.connect, std::chrono::milliseconds(0));
+        EXPECT_GT(up.request.limits.stall, std::chrono::milliseconds(0));
         EXPECT_EQ(up.header("Authorization"), "Bearer tok-1");
         ASSERT_EQ(progress.size(), 1u);
         EXPECT_EQ(progress[0], std::make_pair(size_t(40), size_t(100)));

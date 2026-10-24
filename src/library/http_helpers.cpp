@@ -19,7 +19,7 @@ HttpResponse downloadToFile(IHttpClient& client,
     HttpRequest request;
     request.url = url;
     request.verifySsl = verifySsl;
-    request.timeout = std::chrono::milliseconds(15000);
+    request.limits.total = std::chrono::milliseconds(15000);
     request.headers = {{"Accept-Encoding", "gzip"}};
 
     if (fs::exists(io::fromUtf8(filePath)))

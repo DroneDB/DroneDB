@@ -11,8 +11,12 @@
 namespace ddb
 {
 
-    // The whole transfer of one file must end within this (it has always been the share's limit)
-    constexpr std::chrono::milliseconds ShareUploadTimeout{10000};
+    // What an upload of one file of a share may take. Never the whole transfer (a 10 s cap on it
+    // aborted every large file on a slow link): the connection must open quickly, and the
+    // transfer must keep moving. The stall limit is generous because a proxy that buffers the
+    // body (nginx does) sends nothing back while it hands the file over to the Registry.
+    constexpr HttpLimits ShareUploadLimits{std::chrono::milliseconds{0}, std::chrono::seconds{10},
+                                           std::chrono::seconds{120}};
 
     ShareClient::ShareClient(RegistryClient *client) : registry(client)
     {
@@ -50,7 +54,7 @@ namespace ddb
         const auto res = registry->postMultipart(
             "/share/upload/" + this->token,
             {HttpPart::fromFile("file", filePath), HttpPart::text("path", path)}, AuthScheme::Bearer,
-            ShareUploadTimeout,
+            ShareUploadLimits,
             [&cb, &filename](const HttpProgress &progress) -> bool
             {
                 if (cb == nullptr)

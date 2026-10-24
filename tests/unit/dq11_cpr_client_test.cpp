@@ -33,9 +33,13 @@ namespace
 
     // Answers each connection with the next scripted reply (the last repeats), keeps what it
     // received, and closes: HTTP/1.1 with Connection: close. An empty reply closes the
-    // connection without answering.
+    // connection without answering; Hang keeps it open, silent, until the client leaves.
     class LoopbackServer
     {
+    public:
+        static constexpr const char *Hang = "<hang>";
+
+    private:
         int listener = -1;
         std::thread worker;
         std::atomic<bool> stopping{false};
@@ -89,7 +93,14 @@ namespace
                         break;
                     requests.push_back(readRequest(fd));
                     const std::string &reply = this->replies[std::min(i++, this->replies.size() - 1)];
-                    if (!reply.empty())
+                    if (reply == Hang)
+                    {
+                        char byte;
+                        while (!stopping && ::recv(fd, &byte, 1, 0) > 0)
+                        {
+                        }
+                    }
+                    else if (!reply.empty())
                         ::send(fd, reply.data(), reply.size(), 0);
                     ::close(fd);
                 }
@@ -202,7 +213,7 @@ namespace
         request.headers = {{"Authorization", "Bearer t"}};
         request.parts = {HttpPart::fromFile("file", file), HttpPart::text("path", "dir/photo one.txt"),
                          HttpPart::text("token", "tok")};
-        request.timeout = std::chrono::milliseconds(20000);
+        request.limits.total = std::chrono::milliseconds(20000);
 
         EXPECT_EQ(client.multipart(request).status, 200);
 
@@ -216,6 +227,29 @@ namespace
         // The parts keep their order: file, path, token
         EXPECT_LT(sent.find(R"(name="file")"), sent.find(R"(name="path")"));
         EXPECT_LT(sent.find(R"(name="path")"), sent.find(R"(name="token")"));
+    }
+
+    // The share upload had a 10 s cap on the whole transfer, which a large file on a slow link
+    // never met. The limit that stays is on a transfer that stopped moving.
+    TEST(Dq11CprClient, ATransferThatStopsMovingIsAbortedByTheStallLimit)
+    {
+        using std::chrono::milliseconds;
+        TestArea ta(TEST_NAME, true);
+        const auto file = writeFile(ta.getPath("big.bin"), "bytes");
+        LoopbackServer server({LoopbackServer::Hang});
+        CprHttpClient client;
+        HttpRequest request;
+        request.url = server.url("/share/upload/t");
+        request.parts = {HttpPart::fromFile("file", file)};
+        request.limits = HttpLimits{milliseconds(0), milliseconds(5000), milliseconds(1000)};
+
+        const auto started = std::chrono::steady_clock::now();
+        const auto res = client.multipart(request);
+        const auto waited = std::chrono::steady_clock::now() - started;
+
+        EXPECT_EQ(res.status, 0);
+        EXPECT_EQ(res.transport, HttpTransportError::Other) << res.transportMessage;
+        EXPECT_LT(waited, std::chrono::seconds(20)); // it ended: the server never answers
     }
 
     TEST(Dq11CprClient, DownloadWritesTheBodyToTheSinkAndNotToTheResponse)

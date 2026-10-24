@@ -55,7 +55,7 @@ HttpResponse toResponse(const cpr::Response &res) {
 }
 
 // Applies the settings every request has: the url, the headers, whether the certificate is checked, the
-// timeout of the transfer and the progress callback
+// limits of the transfer and the progress callback
 void configure(cpr::Session &session, const HttpRequest &request) {
     session.SetUrl(cpr::Url{request.url});
     session.SetVerifySsl(cpr::VerifySsl(request.verifySsl));
@@ -67,8 +67,14 @@ void configure(cpr::Session &session, const HttpRequest &request) {
         session.SetHeader(headers);
     }
 
-    if (request.timeout.count() > 0)
-        session.SetTimeout(cpr::Timeout{static_cast<int32_t>(request.timeout.count())});
+    const auto &limits = request.limits;
+    if (limits.total.count() > 0)
+        session.SetTimeout(cpr::Timeout{static_cast<int32_t>(limits.total.count())});
+    if (limits.connect.count() > 0)
+        session.SetConnectTimeout(cpr::ConnectTimeout{static_cast<int32_t>(limits.connect.count())});
+    if (limits.stall.count() > 0)
+        // libcurl measures in whole seconds: a stall of less than one second is one second
+        session.SetLowSpeed(cpr::LowSpeed{1, std::max(std::chrono::seconds(1), std::chrono::duration_cast<std::chrono::seconds>(limits.stall))});
 
     if (request.progress) {
         const auto &progress = request.progress;

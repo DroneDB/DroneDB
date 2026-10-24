@@ -73,13 +73,20 @@ struct HttpPart {
     static HttpPart fromFile(std::string name, fs::path file) { return {std::move(name), {}, std::move(file)}; }
 };
 
+// How long a transfer may take; 0 is no limit
+struct HttpLimits {
+    std::chrono::milliseconds total{0};   // the whole transfer: for a short exchange only, it aborts a large file on a slow link
+    std::chrono::milliseconds connect{0}; // opening the connection
+    std::chrono::milliseconds stall{0};   // a transfer that moves less than 1 byte per second, in either direction, for this long
+};
+
 struct HttpRequest {
     std::string url;
     HttpHeaders headers;
     HttpFields form;                 // post(), and download() of a POST
     std::vector<HttpPart> parts;     // multipart()
     bool verifySsl = true;
-    std::chrono::milliseconds timeout{0}; // for the whole transfer; 0: none
+    HttpLimits limits;
     HttpProgressCallback progress;   // optional: called while the body is sent or received
 };
 

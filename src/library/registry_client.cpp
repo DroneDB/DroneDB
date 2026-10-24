@@ -198,12 +198,12 @@ HttpResponse RegistryClient::postForm(const std::string &path, const HttpFields 
 }
 
 HttpResponse RegistryClient::postMultipart(const std::string &path, const std::vector<HttpPart> &parts,
-                                           AuthScheme scheme, std::chrono::milliseconds timeout,
+                                           AuthScheme scheme, const HttpLimits &limits,
                                            const HttpProgressCallback &progress) {
     ensureTokenValidity();
     HttpRequest req = request(path, authHeaders(scheme));
     req.parts = parts;
-    req.timeout = timeout;
+    req.limits = limits;
     req.progress = progress;
     return http().multipart(req);
 }

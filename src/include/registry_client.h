@@ -108,7 +108,7 @@ public:
                                   bool idempotent = false);
     // POST of a multipart body (an upload). Never tried again.
     DDB_DLL HttpResponse postMultipart(const std::string &path, const std::vector<HttpPart> &parts,
-                                       AuthScheme scheme, std::chrono::milliseconds timeout = {},
+                                       AuthScheme scheme, const HttpLimits &limits = {},
                                        const HttpProgressCallback &progress = nullptr);
     // GET of `path`, or POST of `form` when it has fields, written to `sink`. Never tried again:
     // the sink has the start of the body.
