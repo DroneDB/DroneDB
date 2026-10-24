@@ -182,7 +182,7 @@ namespace
         EXPECT_NE(err, DDBERR_NONE);
     }
 
-    // ---- REG-11: stable feature ids, fid lookups, counts, bbox with paging -----------------
+    // ---- Stable feature ids, fid lookups, counts, bbox with paging ---------------------------
 
     // Feature ids in a GML response, in order
     std::vector<std::string> gmlIds(const std::string &gml)
@@ -232,7 +232,7 @@ namespace
         return {minX, minY, maxX, maxY};
     }
 
-    TEST(REG11_VectorQuery, featureIdsAreTheFidsInEveryPage)
+    TEST(VectorQuery, featureIdsAreTheFidsInEveryPage)
     {
         const fs::path &gpkg = sharedTest2GeoJsonGpkg();
 
@@ -252,7 +252,7 @@ namespace
         EXPECT_EQ(fc["features"][0]["id"], 4);
     }
 
-    TEST(REG11_VectorQuery, fidsSelectFeaturesByPrimaryKey)
+    TEST(VectorQuery, fidsSelectFeaturesByPrimaryKey)
     {
         const fs::path &gpkg = sharedTest2GeoJsonGpkg();
 
@@ -281,7 +281,7 @@ namespace
                   DDBERR_NONE);
     }
 
-    TEST(REG11_VectorQuery, countsMatchTheQueries)
+    TEST(VectorQuery, countsMatchTheQueries)
     {
         const fs::path &gpkg = sharedTest2GeoJsonGpkg();
 
@@ -306,7 +306,7 @@ namespace
     // WFS filters translated to SQL: the where expression filters queries (both paths) and
     // counts. Literals are quoted text: the column type decides the comparison (SQLite
     // affinity), so "id" > '99999' compares numbers.
-    TEST(REG11_VectorQuery, whereFiltersQueriesAndCounts)
+    TEST(VectorQuery, whereFiltersQueriesAndCounts)
     {
         const fs::path &gpkg = sharedTest2GeoJsonGpkg();
         const auto ids = [&](const std::string &where, int maxFeatures = 10, int startIndex = 0) {
@@ -356,7 +356,7 @@ namespace
     }
 
     // The bbox used to be dropped for pages after the first (startIndex > 0 goes through SQL)
-    TEST(REG11_VectorQuery, bboxAppliesToLaterPages)
+    TEST(VectorQuery, bboxAppliesToLaterPages)
     {
         const fs::path &gpkg = sharedTest2GeoJsonGpkg();
 
@@ -377,7 +377,7 @@ namespace
     }
 
     // Queries reuse an open dataset, and the filters of one never leak into the next
-    TEST(REG11_VectorQuery, reusedDatasetsStartWithoutFilters)
+    TEST(VectorQuery, reusedDatasetsStartWithoutFilters)
     {
         const fs::path &gpkg = sharedTest2GeoJsonGpkg();
         auto &cache = ddb::RasterCache::instance();

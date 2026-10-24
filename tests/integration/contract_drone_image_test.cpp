@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// XI-09: contract fixtures of a real drone image (DJI, from DroneDB/test_data at the pinned
+// Contract fixtures of a real drone image (DJI, from DroneDB/test_data at the pinned
 // commit). Unlike the generated JPEG of tests/unit/contract_test.cpp it has the camera, gimbal
 // and relative altitude that give an image its footprint (polygon_geom) and its XMP
 // properties. Integration test: the asset is downloaded (or read from DDB_TEST_CACHE_DIR).

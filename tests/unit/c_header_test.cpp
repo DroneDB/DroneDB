@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// DQ-10 (XI-03): ddb.h as C sees it. c11_header.c includes ddb.h in a C11 translation unit built
+// ddb.h as C sees it. c11_header.c includes ddb.h in a C11 translation unit built
 // with warnings as errors (tests/CMakeLists.txt); here its layout of the public types must equal
 // C++'s, and calls made from C behave as documented.
 

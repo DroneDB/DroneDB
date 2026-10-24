@@ -1,4 +1,4 @@
-# LeakSanitizer suppressions for the ASan build (DQ-01, docs/sanitizers.md).
+# LeakSanitizer suppressions for the ASan build (docs/sanitizers.md).
 #
 # Third-party one-time allocations only. A leak whose allocation stack goes through our own
 # code to our own allocation is a bug to fix, not to list here. Each entry says why it is not

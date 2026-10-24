@@ -5,7 +5,7 @@
 // The test areas of two processes never meet. ctest -j runs every test in a process of its own,
 // and two ctest runs (a developer's and a CI job's, two worktrees) may share one temp folder: the
 // areas were <temp>/ddb_test_areas/<name>, so two processes running a test of the same name
-// removed and refilled each other's files (CAbi.Tiles, Dq06Geo.profileOnEveryCrs failed that way).
+// removed and refilled each other's files (CAbi.Tiles, GeoGolden.profileOnEveryCrs failed that way).
 // Now an area lives in the folder of its process (TestArea::processRoot), removed when the
 // process ends.
 //

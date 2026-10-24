@@ -2,13 +2,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// DDB-11 — regression tests for the latent bugs found during the performance audit.
+// Regression tests for latent bugs:
 //
-//  B2 negativeOnlyRasterStretch    globalMax must start at numeric_limits::lowest().
-//  B3 zeroHeight*DoesNotCrash      fingerprint() must not divide by a zero height.
-//  B1/B4 generatesWithoutGdalWarnings  no WEBP WRITE_EXIF_METADATA warning; run under
-//        ASan to also catch the alloc-dealloc mismatch (B1).
-//  B6 registerProcessKeepsHostSignalHandlers  DDBRegisterProcess must not replace the
+//  negativeOnlyRasterStretch    globalMax must start at numeric_limits::lowest().
+//  zeroHeight*DoesNotCrash      fingerprint() must not divide by a zero height.
+//  generatesWithoutGdalWarnings  no WEBP WRITE_EXIF_METADATA warning; run under
+//        ASan to also catch the alloc-dealloc mismatch.
+//  registerProcessKeepsHostSignalHandlers  DDBRegisterProcess must not replace the
 //        host's SIGSEGV/SIGFPE/SIGTERM/SIGINT handlers (the .NET Registry relies on them).
 
 #include <cstdlib>
@@ -83,7 +83,7 @@ namespace
         return mx;
     }
 
-    TEST(DDB11_Tiler, negativeOnlyRasterStretch)
+    TEST(TilerDefects, negativeOnlyRasterStretch)
     {
         TestArea ta(TEST_NAME, true);
         const auto raster = createNegativeRaster(ta.getPath("neg.tif"), 512, 512);
@@ -109,7 +109,7 @@ namespace
         EXPECT_GE(brightest, 250);
     }
 
-    TEST(DDB11_Fingerprint, zeroHeightImageDoesNotCrash)
+    TEST(FingerprintDefects, zeroHeightImageDoesNotCrash)
     {
         TestArea ta(TEST_NAME, true);
         const fs::path jpg = ta.downloadTestAsset(
@@ -142,7 +142,7 @@ namespace
 
     // Exiv2 takes the dimensions from EXIF when present, so the SIGFPE needs a
     // JPEG without EXIF whose SOF0 height is 0 (truncated/stripped files).
-    TEST(DDB11_Fingerprint, zeroHeightExiflessJpegDoesNotCrash)
+    TEST(FingerprintDefects, zeroHeightExiflessJpegDoesNotCrash)
     {
         TestArea ta(TEST_NAME, true);
         const fs::path jpg = ta.getPath("noexif.jpg");
@@ -189,7 +189,7 @@ namespace
     };
     std::vector<std::string> WarningCollector::warnings;
 
-    TEST(DDB11_PointCloudThumb, generatesWithoutGdalWarnings)
+    TEST(PointCloudThumbDefects, generatesWithoutGdalWarnings)
     {
         TestArea ta(TEST_NAME, true);
         const fs::path laz = ta.downloadTestAsset(
@@ -201,15 +201,15 @@ namespace
         CPLPushErrorHandler(WarningCollector::handler);
         uint8_t *buf = nullptr;
         int size = 0;
-        generateThumb(copc, 256, "", false, &buf, &size);   // -> generatePointCloudThumb; B1: run under ASan for alloc-dealloc-mismatch
+        generateThumb(copc, 256, "", false, &buf, &size);   // -> generatePointCloudThumb; run under ASan for alloc-dealloc-mismatch
         CPLPopErrorHandler();
         ASSERT_NE(buf, nullptr);
         EXPECT_GT(size, 0);
         VSIFree(buf);
         for (const auto &w : WarningCollector::warnings)
-            ADD_FAILURE() << "GDAL warning during thumbnail: " << w;  // B4: WRITE_EXIF_METADATA on WEBP
+            ADD_FAILURE() << "GDAL warning during thumbnail: " << w;  // WRITE_EXIF_METADATA on WEBP
     }
-    TEST(DDB11_Signals, registerProcessKeepsHostSignalHandlers)
+    TEST(SignalDefects, registerProcessKeepsHostSignalHandlers)
     {
         const fs::path probe = io::getExeFolderPath() / DDB_SIGNAL_PROBE_NAME;
         ASSERT_TRUE(fs::exists(probe)) << probe;

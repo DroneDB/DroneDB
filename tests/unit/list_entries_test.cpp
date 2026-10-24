@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// REG-08: listEntries()/DDBListEntries filter by folder, name pattern and type in the index
+// listEntries()/DDBListEntries filter by folder, name pattern and type in the index
 // query, and can skip properties, geometries and meta.
 
 #include <string>
@@ -23,7 +23,7 @@ namespace
 {
     using namespace ddb;
 
-    TEST(REG08_NamePattern, matchesLikeASimpleExpression)
+    TEST(NamePattern, matchesLikeASimpleExpression)
     {
         EXPECT_TRUE(filters::matchesNamePattern("photo.JPG", "*.jpg"));
         EXPECT_TRUE(filters::matchesNamePattern("photo.jpg", "PHOTO.*"));
@@ -42,7 +42,7 @@ namespace
         EXPECT_FALSE(filters::matchesNamePattern("photo", ""));
     }
 
-    class REG08_ListEntries : public ::testing::Test
+    class ListEntries : public ::testing::Test
     {
     protected:
         void SetUp() override
@@ -75,7 +75,7 @@ namespace
 
     using Paths = std::vector<std::string>;
 
-    TEST_F(REG08_ListEntries, folderRecursiveAndChildren)
+    TEST_F(ListEntries, folderRecursiveAndChildren)
     {
         EntryQuery q;
         q.folder = "dir1";
@@ -101,7 +101,7 @@ namespace
         EXPECT_THROW(paths(q), InvalidArgsException);
     }
 
-    TEST_F(REG08_ListEntries, namePattern)
+    TEST_F(ListEntries, namePattern)
     {
         EntryQuery q;
         q.namePattern = "*.jpg";
@@ -127,7 +127,7 @@ namespace
         EXPECT_EQ(paths(q), (Paths{"dir1/sub"})) << "only the name, not the folders above it, is matched";
     }
 
-    TEST_F(REG08_ListEntries, typesAndDetails)
+    TEST_F(ListEntries, typesAndDetails)
     {
         EntryQuery q;
         q.types = {EntryType::Directory};
@@ -156,7 +156,7 @@ namespace
                            {"mtime", expected.mtime}, {"size", expected.size}, {"depth", 1}}));
     }
 
-    TEST_F(REG08_ListEntries, cApiMatchesDdbList)
+    TEST_F(ListEntries, cApiMatchesDdbList)
     {
         // Full details: the same JSON as DDBList for the same folder
         const auto ddbPath = root.string();
@@ -179,10 +179,10 @@ namespace
         EXPECT_EQ(DDBListEntries(ddbPath.c_str(), "", true, "", "nosuchtype", false, &found), DDBERR_EXCEPTION);
     }
 
-    // XI-09: letters match regardless of case for every script (Unicode simple case folding),
+    // Letters match regardless of case for every script (Unicode simple case folding),
     // not only ASCII; a name or pattern that is not valid UTF-8 is compared byte for byte, with
     // ASCII letters in any case (as before)
-    TEST(XI09_NamePatternCaseFolding, foldsNonAsciiLetters) {
+    TEST(NamePatternCaseFolding, foldsNonAsciiLetters) {
         EXPECT_TRUE(filters::matchesNamePattern("Überflug.JPG", "über*.jpg"));
         EXPECT_TRUE(filters::matchesNamePattern("überflug.jpg", "ÜBER*"));
         EXPECT_TRUE(filters::matchesNamePattern("ÉTÉ.tif", "été.TIF"));
@@ -206,7 +206,7 @@ namespace
         EXPECT_FALSE(filters::matchesNamePattern("ÜÜ", "?"));
     }
 
-    TEST(XI09_NamePatternCaseFolding, simpleCaseFoldingTable) {
+    TEST(NamePatternCaseFolding, simpleCaseFoldingTable) {
         EXPECT_EQ(utf8::foldCase(U'A'), U'a');
         EXPECT_EQ(utf8::foldCase(U'a'), U'a');
         EXPECT_EQ(utf8::foldCase(U'1'), U'1');
@@ -231,7 +231,7 @@ namespace
         EXPECT_FALSE(utf8::hasNonAsciiFoldVariant('\0'));
     }
 
-    TEST(XI09_NamePatternCaseFolding, invalidUtf8ComparesBytes) {
+    TEST(NamePatternCaseFolding, invalidUtf8ComparesBytes) {
         EXPECT_TRUE(
             filters::matchesNamePattern("\xFF"
                                       "photo.JPG",
@@ -252,7 +252,7 @@ namespace
 
     // The index query selects the case variants too (its LIKE pre-filter folds ASCII only). The
     // rows are inserted directly: Windows converts narrow file names with the ANSI code page.
-    TEST(XI09_NamePatternCaseFolding, listEntriesSelectsNonAsciiCaseVariants) {
+    TEST(NamePatternCaseFolding, listEntriesSelectsNonAsciiCaseVariants) {
         TestArea area(TEST_NAME, true);
         const fs::path root = area.getFolder("ds");
         initIndex(root.string());

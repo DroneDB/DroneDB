@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "libddb normalized entry path",
-  "description": "DDBNormalizePath (XI-09): the normalized dataset-relative path, or the code of the first rule that rejects it (src/include/entry_path.h). Also the 'expected' value of every vector in vectors/entry-paths.json.",
+  "description": "DDBNormalizePath: the normalized dataset-relative path, or the code of the first rule that rejects it (src/include/entry_path.h). Also the 'expected' value of every vector in vectors/entry-paths.json.",
   "oneOf": [
     {
       "type": "object",

@@ -1,4 +1,4 @@
-# UndefinedBehaviorSanitizer suppressions for the ASan+UBSan build (DQ-01, docs/sanitizers.md).
+# UndefinedBehaviorSanitizer suppressions for the ASan+UBSan build (docs/sanitizers.md).
 #
 # Vendored third-party code only: submodules are not patched in this repository. A report in
 # src/, apps/ or tests/ is a bug to fix, not to list here. Each entry says what it is and why

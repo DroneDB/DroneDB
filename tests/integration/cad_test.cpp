@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// CAD drawings (DDB-12): DWG support via LibreDWG dwg2dxf; CAD CRS from the
+// CAD drawings: DWG support via LibreDWG dwg2dxf; CAD CRS from the
 // drawing's GEODATA or an optional same-name .prj; drawings without a CRS
 // build in local coordinates (shown without a globe); honest failures; no
 // orphan-.prj builds.
@@ -332,7 +332,7 @@ namespace
     }
 
     // GEODATA type 1 (local grid): the design point of the drawing is the reference
-    // point of the coordinate system (DDB-12 P4). The site drawing, its GEODATA turned
+    // point of the coordinate system. The site drawing, its GEODATA turned
     // into a local grid, lands where the projected grid put it, or 1 km east of it
     // when its design point moves 1 km west.
     TEST(cadVector, CadGeodataLocalGridPlacesTheDrawing)
@@ -368,7 +368,7 @@ namespace
         EXPECT_NEAR(east.extent.MinY, g.extent.MinY, 2e-4);
     }
 
-    // Decision D1: CAD files without a CRS whose coordinates fit in lon/lat
+    // CAD files without a CRS whose coordinates fit in lon/lat
     // keep the historical EPSG:4326 assumption (all five older DXF test assets
     // do; civil_war_by_campaign.dxf is real lon/lat).
     TEST(cadVector, CadWithoutCrsInsideLonLatStillBuilds)
@@ -383,7 +383,7 @@ namespace
         EXPECT_GT(s.features, 0);
     }
 
-    // D1: the lon/lat assumption is for DXF only. A DWG is written by CAD software,
+    // The lon/lat assumption is for DXF only. A DWG is written by CAD software,
     // which stores GEODATA when the drawing is georeferenced; a DWG without CRS
     // that fits in +-180/+-90 is a design drawing (all 6 such samples were).
     TEST(cadVector, DwgWithoutCrsInsideLonLatBuildsLocal)

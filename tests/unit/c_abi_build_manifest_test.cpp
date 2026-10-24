@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// XI-04: the C ABI of the build manifest (DDBGetEntryTypes, DDBGetBuildArtifacts,
+// The C ABI of the build manifest (DDBGetEntryTypes, DDBGetBuildArtifacts,
 // DDBResolveBuildFile, DDBCopyBuildArtifacts, DDBListEntriesEx). They are exports new in 2.0, so an
 // invalid argument is DDBERR_INVALIDARGS, a missing entry or file DDBERR_NOTFOUND, a running
 // build DDBERR_BUILDINPROGRESS and a full disk DDBERR_RETRYABLE; outputs are written on
@@ -161,7 +161,7 @@ namespace
             EXPECT_STREQ(DDBGetLastErrorReason(), "lowDiskSpace");
         }
         {
-            // The DDBConfigure floor wins over DDB_MIN_FREE_DISK_MB=0 (DQ-15)
+            // The DDBConfigure floor wins over DDB_MIN_FREE_DISK_MB=0
             const ScopedProcessConfig floor(R"({"minFreeDiskMb": 10000000000000})");
             EXPECT_DDB_FAILS(DDBERR_RETRYABLE, DDBCopyBuildArtifacts(s, d, H_COG.c_str(), &out), out);
             EXPECT_STREQ(DDBGetLastErrorReason(), "lowDiskSpace");
@@ -182,7 +182,7 @@ namespace
         EXPECT_EQ(state[0]["build"]["retryAfter"], 1700000060) << "the copied marker keeps its retry time";
     }
 
-    // The options struct (XI-03): structSize first, at least the 2.0 size; a newer caller's
+    // The options struct: structSize first, at least the 2.0 size; a newer caller's
     // unknown fields must be zero
     TEST(CAbiBuildManifest, ListEntriesEx)
     {

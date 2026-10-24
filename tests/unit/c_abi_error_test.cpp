@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// DQ-10 (XI-02, XI-03): the error contract of the C API (new in 2.0).
+// The error contract of the C API (new in 2.0).
 //
 //  - the last error is per thread, whole (no length limit), cleared on entry of every call and
 //    set for every code but DDBERR_NONE; the exempt accessors never touch it;
@@ -64,7 +64,7 @@ struct Dataset {
 
 // ------------------------------------------------------------------ the last error
 
-// XI-02: the message was cut at 254 bytes, possibly inside a UTF-8 sequence
+// The message was cut at 254 bytes, possibly inside a UTF-8 sequence
 TEST(LastError, isWholeWithoutLengthLimit) {
     const Dataset ds(TEST_NAME);
     std::string entry;
@@ -79,7 +79,7 @@ TEST(LastError, isWholeWithoutLengthLimit) {
     EXPECT_EQ(out, kUntouched);
 }
 
-// XI-02: the message of a failure stayed after later successful calls
+// The message of a failure stayed after later successful calls
 TEST(LastError, isClearedOnEntryOfEveryCall) {
     const Dataset ds(TEST_NAME);
     char* out = nullptr;
@@ -175,7 +175,7 @@ TEST(ErrorMapper, codeTable) {
                   {DDBERR_SHUTDOWN, DDBERR_SHUTDOWN, "shutting down", ""});
     expectMapping("InvalidArgsException", [] { throw InvalidArgsException("bad"); },
                   {DDBERR_EXCEPTION, DDBERR_INVALIDARGS, "bad", ""});
-    // A refused entry path is INVALIDARGS in every export (DQ-09), the exports of 1.x included
+    // A refused entry path is INVALIDARGS in every export, the exports of 1.x included
     expectMapping("InvalidPathException", [] { throw InvalidPathException("Invalid path 'x': traversal"); },
                   {DDBERR_INVALIDARGS, DDBERR_INVALIDARGS, "Invalid path 'x': traversal", ""});
     expectMapping("RetryableBuildException(LowDiskSpace)",
@@ -384,7 +384,7 @@ TEST(ProcessInit, failureIsSticky) {
     EXPECT_EXIT(stickyInitChild(), ::testing::ExitedWithCode(0), "sticky init ok");
 }
 
-// ------------------------------------------------------------------ UTF-8 paths (XI-03)
+// ------------------------------------------------------------------ UTF-8 paths
 
 // Restores the global locale on scope exit
 struct LocaleGuard {

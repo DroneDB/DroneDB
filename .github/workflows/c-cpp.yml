@@ -43,7 +43,7 @@ jobs:
           path: libredwg-out
           retention-days: 90
 
-  # clang-format on the lines a change touches only (DQ-01: no mass reformat). Fails when a
+  # clang-format on the lines a change touches only (no mass reformat). Fails when a
   # changed line in src/, apps/ or tests/ does not follow .clang-format; the log shows the fix.
   lint_format:
     name: clang-format on changed lines
@@ -54,7 +54,7 @@ jobs:
         with:
           fetch-depth: 0
       # Report-only until .clang-format matches the code base: the current file would flag
-      # most changes (209 hunks in the last 30 commits). DQ-01 left open: tune it, then drop
+      # most changes (209 hunks in the last 30 commits). Open: tune it, then drop
       # --report-only so formatting of changed lines fails the job.
       - name: Check formatting of changed lines
         env:
@@ -94,7 +94,7 @@ jobs:
           echo "GITHUB_SHA=${GITHUB_SHA}"
           ls -la
       - name: Check the ABI version and the release tag
-        # XI-01 (scripts/check-abi.py), before the build so a bad tag fails fast. The library,
+        # scripts/check-abi.py, before the build so a bad tag fails fast. The library,
         # the C ABI and the release have one version, package.json "version" (semver): a change
         # to src/include/ddb.symbols since the previous release tag needs a higher MINOR for an
         # added export and a higher MAJOR for a removed one, and a v* tag must equal the version.
@@ -180,7 +180,7 @@ jobs:
         # Windows baseline exists.
         run: python3 scripts/check-warnings.py build/build.log --build-dir build
       - name: Check the exported symbols (libddb.so == src/include/ddb.symbols)
-        # XI-01, DQ-14: the defined dynamic symbols (nm -D) are exactly the manifest, which also
+        # The defined dynamic symbols (nm -D) are exactly the manifest, which also
         # matches ddb.h (every DDB_DLL declaration): no C++ symbol, nothing from the static libraries
         run: python3 scripts/check-abi.py exports --library build/libddb.so
       - name: clang-tidy on changed lines (report-only)
@@ -250,7 +250,7 @@ jobs:
         # atomically: InitIndexTemplate.concurrentProcessesOnFreshProfile)
         run: cd build && ctest -L unit -j$(nproc) --output-on-failure --schedule-random
       - name: Check that every header compiles on its own
-        # DQ-14: one translation unit per header; the installed ones also as C11 (ctest -L headers)
+        # One translation unit per header; the installed ones also as C11 (ctest -L headers)
         run: cd build && ctest -L headers --output-on-failure
       - name: Run integration tests
         env:
@@ -261,7 +261,7 @@ jobs:
       - name: Run CLI Exit Code Tests
         run: cd build && ctest -R '^cli\.' --output-on-failure
       - name: Run the shared library smoke test
-        # DQ-14: the tests and the CLI contain the library objects; this runs libddb.so as a host loads it
+        # The tests and the CLI contain the library objects; this runs libddb.so as a host loads it
         run: cd build && ctest -L shared --output-on-failure
       - name: Run Program Smoke Test
         run: cd build && ./ddbcmd --version --debug
@@ -451,7 +451,7 @@ jobs:
       - name: Checkout (ddb.h and the symbol manifest of the tag)
         uses: actions/checkout@v4
       - name: Collect the ABI files and write SHA256SUMS
-        # XI-01: every release publishes the C header (ddb.h and the two headers it includes:
+        # Every release publishes the C header (ddb.h and the two headers it includes:
         # ddb_export.h, the export macro, one file for every platform, and ddb_version.h,
         # generated from package.json by the same CMake code a build uses: the ABI is the MAJOR
         # and MINOR of the version), the symbol manifest and SHA256SUMS, one line per release
@@ -509,7 +509,7 @@ jobs:
           tag: ${{ github.ref }}
           overwrite: true
 
-  # AddressSanitizer + UndefinedBehaviorSanitizer (DQ-01, docs/sanitizers.md): a Debug -O1 build of
+  # AddressSanitizer + UndefinedBehaviorSanitizer (docs/sanitizers.md): a Debug -O1 build of
   # the unit tests and the CLI, run under LeakSanitizer too. Suppression files list third-party
   # frames only. The known libnexus reports (docs/sanitizers.md) come from 3D builds, which are
   # integration tests, so no unit test is excluded.
@@ -565,7 +565,7 @@ jobs:
       - name: Run unit and CLI tests
         env:
           # Timing assertions mean nothing under instrumentation
-          DDB03_SKIP_TIMING: "1"
+          DDB_SKIP_TIMING_TESTS: "1"
           ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
           LSAN_OPTIONS: suppressions=${{ github.workspace }}/tests/lsan.supp
           UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1:suppressions=${{ github.workspace }}/tests/ubsan.supp
@@ -708,7 +708,7 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "Build failed with exit code $LASTEXITCODE" }
             dir
       - name: Check the exported symbols (ddb.dll == src/include/ddb.symbols)
-        # XI-01, DQ-14: the names in the export table of ddb.dll (read from the PE file, so no
+        # The names in the export table of ddb.dll (read from the PE file, so no
         # Visual Studio environment is needed for dumpbin) are exactly the manifest, as on Linux
         run: python scripts/check-abi.py exports --library build/ddb.dll
         shell: pwsh
@@ -775,7 +775,7 @@ jobs:
           exit $LASTEXITCODE
         shell: pwsh
       - name: Check that every header compiles on its own
-        # DQ-14: one translation unit per header; the installed ones also as C11 (ctest -L headers)
+        # One translation unit per header; the installed ones also as C11 (ctest -L headers)
         run: |
           cd build
           ctest -C Release -L headers --output-on-failure
@@ -816,7 +816,7 @@ jobs:
           ctest -C Release -R '^cli\.' --output-on-failure
         shell: pwsh
       - name: Run the shared library smoke test
-        # DQ-14: the tests and the CLI contain the library objects; this runs ddb.dll as a host loads it
+        # The tests and the CLI contain the library objects; this runs ddb.dll as a host loads it
         run: |
           cd build
           ctest -C Release -L shared --output-on-failure

@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// DQ-06: the vegetation-index map layer (renderRasterIndex: NDVI, NDRE, NDWI, SAVI, EVI on the
+// The vegetation-index map layer (renderRasterIndex: NDVI, NDRE, NDWI, SAVI, EVI on the
 // bands 1..5) renders through the shared formula engine (VegetationEngine, vis_render.h), like
 // the thumbnails and the tiles. Its own ramp (red, yellow, green over [-1, 1]) is the engine's
 // colormap "ryg", which the engine does not list. Before, the layer had its own double-precision
@@ -27,7 +27,7 @@
 #include "raster_test_utils.h"
 
 #include "ddb.h"
-#include "dq06_raster_support.h"
+#include "synthetic_raster_support.h"
 #include "gdaltiler.h"
 #include "raster_region.h"
 #include "raster_utils.h"
@@ -45,14 +45,14 @@ namespace
     };
 
     // The extent of the raster, so the layer's warp is an identity
-    const double kBbox[4] = {dq06::kOriginX, dq06::kOriginY - dq06::kSize * dq06::kPixel,
-                             dq06::kOriginX + dq06::kSize * dq06::kPixel, dq06::kOriginY};
+    const double kBbox[4] = {golden::kOriginX, golden::kOriginY - golden::kSize * golden::kPixel,
+                             golden::kOriginX + golden::kSize * golden::kPixel, golden::kOriginY};
 
     testutils::DecodedImage renderLayer(const fs::path &raster, const std::string &index)
     {
         uint8_t *buffer = nullptr;
         int size = 0;
-        renderRasterIndex(testutils::regionRequest(raster.string(), kBbox, "EPSG:3857", dq06::kSize, dq06::kSize, "image/png"), index, &buffer, &size);
+        renderRasterIndex(testutils::regionRequest(raster.string(), kBbox, "EPSG:3857", golden::kSize, golden::kSize, "image/png"), index, &buffer, &size);
         return testutils::decodeImage(testutils::takeBuffer(buffer, size));
     }
 
@@ -71,34 +71,34 @@ namespace
         std::unique_ptr<GDALDataset> ds(static_cast<GDALDataset *>(GDALOpen(raster.string().c_str(), GA_ReadOnly)));
         EXPECT_NE(ds, nullptr);
         GDALDatasetH handle = GDALDataset::ToHandle(ds.get());
-        const RasterWindow window{0, 0, dq06::kSize, dq06::kSize, dq06::kSize, dq06::kSize};
+        const RasterWindow window{0, 0, golden::kSize, golden::kSize, golden::kSize, golden::kSize};
         return renderPlannedFormulaRgba(handle, layerPlan(handle, index), window, "", mask);
     }
 
-    // The multispectral raster of the DQ-06 tests with a sixth band that is alpha, 255 everywhere: a
+    // The multispectral raster of the golden tests with a sixth band that is alpha, 255 everywhere: a
     // Float32 raster, or a UInt16 one (the bands are scaled to its range, as ODM writes them)
     fs::path makeMultispectralWithAlpha(const fs::path &path, GDALDataType type, bool withPatches)
     {
         testutils::GeoRasterSpec spec;
-        spec.width = spec.height = dq06::kSize;
+        spec.width = spec.height = golden::kSize;
         spec.bands = 6;
         spec.type = type;
         spec.alphaBand = true;
         spec.epsg = 3857;
-        spec.originX = dq06::kOriginX;
-        spec.originY = dq06::kOriginY;
-        spec.pixelSize = dq06::kPixel;
+        spec.originX = golden::kOriginX;
+        spec.originY = golden::kOriginY;
+        spec.pixelSize = golden::kPixel;
         // The nodata is -9999, or 0 where the type cannot hold a negative value
         const double scale = type == GDT_UInt16 ? 60000.0 : 1.0;
-        const double nodata = type == GDT_UInt16 ? 0.0 : dq06::kNodata;
+        const double nodata = type == GDT_UInt16 ? 0.0 : golden::kNodata;
         spec.value = [=](int band, int x, int y) {
-            const double value = withPatches ? dq06::reflectanceWithNodata(band, x, y, nodata / scale)
-                                             : dq06::reflectance(band, x, y);
+            const double value = withPatches ? golden::reflectanceWithNodata(band, x, y, nodata / scale)
+                                             : golden::reflectance(band, x, y);
             return std::floor(value * scale * 1000.0) / 1000.0;
         };
         testutils::createGeoRaster(path, spec);
         if (withPatches)
-            dq06::setNodata(path, nodata);
+            golden::setNodata(path, nodata);
         return path;
     }
 
@@ -156,7 +156,7 @@ namespace
     TEST_F(RasterIndexLayer, everyIndexIsWhatTheEngineRenders)
     {
         TestArea ta(TEST_NAME, true);
-        const fs::path ms = dq06::makeMultispectral(ta.getPath("ms.tif"));
+        const fs::path ms = golden::makeMultispectral(ta.getPath("ms.tif"));
         for (const char *index : {"NDVI", "NDRE", "NDWI", "SAVI", "EVI"})
         {
             SCOPED_TRACE(index);
@@ -168,7 +168,7 @@ namespace
     TEST_F(RasterIndexLayer, namesAreCaseInsensitiveAndOnlyTheFiveIndicesRender)
     {
         TestArea ta(TEST_NAME, true);
-        const fs::path ms = dq06::makeMultispectral(ta.getPath("ms.tif"));
+        const fs::path ms = golden::makeMultispectral(ta.getPath("ms.tif"));
         EXPECT_EQ(differences(renderLayer(ms, "ndvi"), renderEngine(ms, "NDVI")), 0u);
         EXPECT_EQ(differences(renderLayer(ms, "Savi"), renderEngine(ms, "SAVI")), 0u);
         uint8_t *buffer = nullptr;
@@ -192,7 +192,7 @@ namespace
             EXPECT_EQ(colormap.listed, colormap.id != "ryg") << colormap.id;
 
         TestArea ta(TEST_NAME, true);
-        const fs::path ms = dq06::makeMultispectral(ta.getPath("ms.tif"));
+        const fs::path ms = golden::makeMultispectral(ta.getPath("ms.tif"));
         std::unique_ptr<GDALDataset> ds(static_cast<GDALDataset *>(GDALOpen(ms.string().c_str(), GA_ReadOnly)));
         GDALDatasetH handle = GDALDataset::ToHandle(ds.get());
         EXPECT_THROW(planFormula(handle, "NDVI", VegetationEngine::parseFilter("RGBReN", 5), "ryg", true),
@@ -217,7 +217,7 @@ namespace
     TEST_F(RasterIndexLayer, aPixelIsTransparentWhenABandTheIndexReadsHasNoValue)
     {
         TestArea ta(TEST_NAME, true);
-        const fs::path ms = dq06::makeMultispectral(ta.getPath("ms.tif"));
+        const fs::path ms = golden::makeMultispectral(ta.getPath("ms.tif"));
         for (const char *index : {"NDVI", "NDRE", "NDWI", "SAVI", "EVI"})
         {
             SCOPED_TRACE(index);
@@ -243,13 +243,13 @@ namespace
     TEST_F(RasterIndexLayer, theEngineStillMasksByAnyBandUnlessAskedNotTo)
     {
         TestArea ta(TEST_NAME, true);
-        const fs::path ms = dq06::makeMultispectral(ta.getPath("ms.tif"));
+        const fs::path ms = golden::makeMultispectral(ta.getPath("ms.tif"));
         const std::vector<uint8_t> any = renderEngine(ms, "NDVI", NodataMask::AnyBand);
         const std::vector<uint8_t> read = renderEngine(ms, "NDVI", NodataMask::BandsRead);
         size_t patchDrawnOnlyByRead = 0;
         for (size_t p = 0; p < any.size() / 4; p++)
         {
-            const size_t x = p % dq06::kSize, y = p / dq06::kSize;
+            const size_t x = p % golden::kSize, y = p / golden::kSize;
             const bool inBlue = x >= 20 && x < 40 && y >= 20 && y < 40;
             if (inBlue)
             {
@@ -426,7 +426,7 @@ namespace
         std::function<double(int, int)> alphaValue = [](int, int) { return 255.0; };
         // A band is `fill` where the alpha is 0 (the bands of an orthophoto are 0 outside of it)
         double fill = 0.0;
-        int size = dq06::kSize;
+        int size = golden::kSize;
     };
 
     fs::path makeConstantRaster(const fs::path &path, const ConstantRaster &raster)
@@ -439,9 +439,9 @@ namespace
         spec.alphaValue = raster.alphaValue;
         spec.bandNames = raster.names;
         spec.epsg = 3857;
-        spec.originX = dq06::kOriginX;
-        spec.originY = dq06::kOriginY;
-        spec.pixelSize = dq06::kPixel;
+        spec.originX = golden::kOriginX;
+        spec.originY = golden::kOriginY;
+        spec.pixelSize = golden::kPixel;
         spec.value = [raster](int band, int x, int y) {
             if (raster.alpha && raster.alphaValue(x, y) == 0.0)
                 return raster.fill;
@@ -456,8 +456,8 @@ namespace
     {
         for (int i = 0; i < 4; i++)
             out[i] = kBbox[i];
-        out[0] += shift * dq06::kPixel;
-        out[2] += shift * dq06::kPixel;
+        out[0] += shift * golden::kPixel;
+        out[2] += shift * golden::kPixel;
     }
 
     testutils::DecodedImage renderWindow(const fs::path &raster, const std::string &index, const double bbox[4],
@@ -465,7 +465,7 @@ namespace
     {
         uint8_t *buffer = nullptr;
         int size = 0;
-        renderRasterIndex(testutils::regionRequest(raster.string(), bbox, "EPSG:3857", dq06::kSize, dq06::kSize, format), index, &buffer, &size);
+        renderRasterIndex(testutils::regionRequest(raster.string(), bbox, "EPSG:3857", golden::kSize, golden::kSize, format), index, &buffer, &size);
         return testutils::decodeImage(testutils::takeBuffer(buffer, size));
     }
 
@@ -591,8 +591,8 @@ namespace
         expectRamp(renderWindow(unnamed16, "NDVI", bbox), 64, 64, 0.5);
         EXPECT_EQ(indexLayerOf(unnamed16), (std::vector<std::string>{"NDVI", "NDRE", "NDWI"}));
 
-        // The synthetic raster of the DQ-06 tests
-        EXPECT_EQ(indexLayerOf(dq06::makeMultispectral(ta.getPath("ms.tif"))), kAllFive);
+        // The synthetic raster of the golden tests
+        EXPECT_EQ(indexLayerOf(golden::makeMultispectral(ta.getPath("ms.tif"))), kAllFive);
     }
 
     // Neither the names nor the band count give the bands: nothing to draw, and the reason says which bands
@@ -855,13 +855,13 @@ namespace
         double bbox[4];
         shiftedBbox(0.4, bbox);
         ConstantRaster spec = edgeRaster(GDT_Float32, 48);
-        spec.fill = dq06::kNodata;
+        spec.fill = golden::kNodata;
         const fs::path raster = makeConstantRaster(ta.getPath("nodata.tif"), spec);
         {
             std::unique_ptr<GDALDataset> ds(static_cast<GDALDataset *>(GDALOpen(raster.string().c_str(), GA_Update)));
             ASSERT_NE(ds, nullptr);
             for (int b = 1; b <= 5; b++)
-                ds->GetRasterBand(b)->SetNoDataValue(dq06::kNodata);
+                ds->GetRasterBand(b)->SetNoDataValue(golden::kNodata);
         }
         for (const IndexValue &index : kIndexValues)
         {
@@ -952,13 +952,13 @@ namespace
         ConstantRaster spec;
         spec.values = {0.2, 0.4, 0.1, 0.3, 0.6};
         testutils::GeoRasterSpec geo;
-        geo.width = geo.height = dq06::kSize;
+        geo.width = geo.height = golden::kSize;
         geo.bands = 5;
         geo.type = GDT_Float32;
         geo.epsg = 3857;
-        geo.originX = dq06::kOriginX;
-        geo.originY = dq06::kOriginY;
-        geo.pixelSize = dq06::kPixel;
+        geo.originX = golden::kOriginX;
+        geo.originY = golden::kOriginY;
+        geo.pixelSize = golden::kPixel;
         const double nan = std::numeric_limits<double>::quiet_NaN();
         // NaN in the red band (1) of the pixel (30, 30) and in the red edge band (4) of (60, 60)
         geo.value = [&](int band, int x, int y) {
@@ -995,7 +995,7 @@ namespace
         spec.values = {0.2, 0.4, 0.1, 0.3, 0.6};
         const fs::path raster = makeConstantRaster(ta.getPath("plain.tif"), spec);
         // A window that is the raster and a margin of 16 pixels on every side
-        const double margin = 16 * dq06::kPixel;
+        const double margin = 16 * golden::kPixel;
         const double bbox[4] = {kBbox[0] - margin, kBbox[1] - margin, kBbox[2] + margin, kBbox[3] + margin};
         for (const IndexValue &index : kIndexValues)
         {

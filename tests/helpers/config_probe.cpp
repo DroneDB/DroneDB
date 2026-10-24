@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// DQ-15 probe: a host configures libddb before DDBRegisterProcess, as Registry does. Runs as
+// Probe: a host configures libddb before DDBRegisterProcess, as Registry does. Runs as
 // its own process because DDBRegisterProcess initializes once per process (the test binaries
 // register in main). The cache folder comes from DDB_PROBE_CACHE_DIR (an absolute path), so
 // the command line needs no quoting. Exits 0 when DDBConfigure and DDBGetEffectiveConfig work

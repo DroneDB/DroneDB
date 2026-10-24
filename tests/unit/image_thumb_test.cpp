@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// DDB-10: image thumbnails stretch only non-Byte data and keep transparency
+// Image thumbnails stretch only non-Byte data and keep transparency
 
 #include <algorithm>
 #include <numeric>
@@ -31,7 +31,7 @@ namespace
         return {*mn, *mx};
     }
 
-    TEST(DDB10_Thumb, byteRgbNotStretched)
+    TEST(ImageThumbnail, byteRgbNotStretched)
     {
         TestArea ta(TEST_NAME, true);
         GeoRasterSpec spec;
@@ -49,7 +49,7 @@ namespace
         }
     }
 
-    TEST(DDB10_Thumb, floatDsmStillStretched)
+    TEST(ImageThumbnail, floatDsmStillStretched)
     {
         TestArea ta(TEST_NAME, true);
         GeoRasterSpec spec;
@@ -65,7 +65,7 @@ namespace
         EXPECT_GE(mx, 250);
     }
 
-    TEST(DDB10_Thumb, alphaPreserved)
+    TEST(ImageThumbnail, alphaPreserved)
     {
         TestArea ta(TEST_NAME, true);
         GeoRasterSpec spec;

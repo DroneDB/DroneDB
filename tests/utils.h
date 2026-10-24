@@ -5,7 +5,7 @@
 #define TEST_UTILS_H
 
 // Shared test helpers: the only home of the file, index and environment helpers the test
-// files use (DQ-03), so a test never carries its own copy.
+// files use, so a test never carries its own copy.
 
 #include <cstdint>
 #include <filesystem>

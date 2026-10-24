@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "libddb build copy",
-  "description": "DDBCopyBuildArtifacts (XI-04, new in 2.0): what the destination has after the copy",
+  "description": "DDBCopyBuildArtifacts (new in 2.0): what the destination has after the copy",
   "type": "object",
   "required": [
     "hash",

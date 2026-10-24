@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// DQ-08: the EntryHandler registry is the one place that knows each entry type. These tests
+// The EntryHandler registry is the one place that knows each entry type. These tests
 // pin what the built-in handlers declare (the dispatch tables they replaced) and register a
 // fake type that is detected, parsed, built and reported complete without any other change.
 
@@ -148,7 +148,7 @@ TEST(entryHandler, ThumbnailGeneratorsAndTilerFactoriesArePinned) {
     }
 }
 
-// The XI-04 role vocabulary, with paths composed from build_layout.h
+// The role vocabulary of the build manifest, with paths composed from build_layout.h
 TEST(entryHandler, ArtifactManifestIsPinned) {
     using Row = std::tuple<std::string, std::string, ArtifactKind, std::string, bool>;  // role, path, kind, index, legacy
     const std::map<EntryType, std::vector<Row>> expected = {
@@ -397,7 +397,7 @@ TEST(entryHandler, ScopedHandlerPutsBackTheOneItReplaced) {
 // ---- Sidecars ------------------------------------------------------------------------------
 
 // The main file of a sidecar matches whatever the letter case of its extension (Registry's
-// rule, XI-04); it used to be found only as .shp or .SHP. The stem stays exact.
+// rule). The stem stays exact.
 TEST(entryHandler, SidecarMainExtensionMatchesAnyLetterCase) {
     IndexFixture fx(TEST_NAME);
     const std::string mainHash(64, 'a');

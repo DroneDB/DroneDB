@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-/* DQ-10 (XI-03): ddb.h is valid C11. tests/CMakeLists.txt compiles this file as C11 with
+/* ddb.h is valid C11. tests/CMakeLists.txt compiles this file as C11 with
  * -Wall -Wextra -Wpedantic -Wstrict-prototypes -Werror (MSVC: /std:c11 /W4 /WX), so a C++-only
  * construct in ddb.h (a default argument, an enum used without its typedef, bool without
  * <stdbool.h>, an empty parameter list) fails the build of ddb_unit_tests. ddb.h also checks the

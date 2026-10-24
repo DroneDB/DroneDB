@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// DDB-09: indexing hashes and parses files on several threads (parallel::forEachIndex), with
+// Indexing hashes and parses files on several threads (parallel::forEachIndex), with
 // results, errors and callbacks identical to the serial run.
 
 #include <atomic>
@@ -60,7 +60,7 @@ namespace
 
     // ---- parallel::forEachIndex -----------------------------------------------------------
 
-    TEST(DDB09_Parallel, visitsEveryIndexOnce)
+    TEST(ParallelLoop, visitsEveryIndexOnce)
     {
         constexpr size_t count = 1000;
         std::vector<std::atomic<int>> visits(count);
@@ -70,7 +70,7 @@ namespace
             EXPECT_EQ(visits[i].load(), 1) << i;
     }
 
-    TEST(DDB09_Parallel, usesAtMostMaxThreads)
+    TEST(ParallelLoop, usesAtMostMaxThreads)
     {
         std::mutex mutex;
         std::set<std::thread::id> threads;
@@ -94,7 +94,7 @@ namespace
         EXPECT_GT(peak.load(), 1) << "the work did not run in parallel";
     }
 
-    TEST(DDB09_Parallel, oneThreadRunsInlineInOrder)
+    TEST(ParallelLoop, oneThreadRunsInlineInOrder)
     {
         const auto caller = std::this_thread::get_id();
         std::vector<size_t> order;
@@ -114,7 +114,7 @@ namespace
         EXPECT_EQ(calls, 3u);
     }
 
-    TEST(DDB09_Parallel, rethrowsTheFirstFailureInIndexOrder)
+    TEST(ParallelLoop, rethrowsTheFirstFailureInIndexOrder)
     {
         // Index 7 fails at once, index 3 fails later: a serial loop would report 3
         std::vector<std::atomic<int>> ran(32);
@@ -143,13 +143,13 @@ namespace
 
     // PDAL replaces GDAL's process-wide error handler while one of its stages runs, and that
     // handler writes into the running stage's log without synchronization: a GDAL error raised
-    // by an indexing thread at that moment raced with the PDAL thread (TSan, DQ-01). The calls
+    // by an indexing thread at that moment raced with the PDAL thread (found by TSan). The calls
     // run by forEachIndex, on every thread, must not reach the process-wide handler; the error
     // itself is still recorded for the thread that raised it.
     std::atomic<int> processWideGdalErrors{0};
     void CPL_STDCALL countProcessWideGdalError(CPLErr, CPLErrorNum, const char *) { processWideGdalErrors++; }
 
-    TEST(DDB09_Parallel, gdalErrorsBypassTheProcessWideHandler)
+    TEST(ParallelLoop, gdalErrorsBypassTheProcessWideHandler)
     {
         processWideGdalErrors = 0;
         const CPLErrorHandler previous = CPLSetErrorHandler(&countProcessWideGdalError);
@@ -159,7 +159,7 @@ namespace
         for (const size_t threads : {size_t{1}, size_t{8}})
             parallel::forEachIndex(count, threads, [&](size_t i)
                                    {
-                                       CPLError(CE_Failure, CPLE_AppDefined, "DDB09 expected error %d",
+                                       CPLError(CE_Failure, CPLE_AppDefined, "expected error %d",
                                                 static_cast<int>(i));
                                        if (CPLGetLastErrorType() == CE_Failure)
                                            recorded++;
@@ -167,7 +167,7 @@ namespace
         const int fromParallel = processWideGdalErrors.load();
 
         // The handler is back once forEachIndex returns
-        CPLError(CE_Failure, CPLE_AppDefined, "DDB09 expected error after forEachIndex");
+        CPLError(CE_Failure, CPLE_AppDefined, "expected error after forEachIndex");
         const int afterwards = processWideGdalErrors.load();
         CPLSetErrorHandler(previous);
         CPLErrorReset();
@@ -177,7 +177,7 @@ namespace
         EXPECT_EQ(afterwards, 1);
     }
 
-    TEST(DDB09_Parallel, threadsOption)
+    TEST(ParallelLoop, threadsOption)
     {
         const int cores = static_cast<int>(parallel::hardwareThreads());
         {
@@ -189,7 +189,7 @@ namespace
             EXPECT_EQ(parallel::threadsOption("DDB_TEST_THREADS", 8), 3);
         }
         {
-            // Every core, as a count (DQ-15: no "ALL_CPUS"; the CPU pool bounds what runs)
+            // Every core, as a count (no "ALL_CPUS"; the CPU pool bounds what runs)
             ScopedConfigOption opt("DDB_TEST_THREADS", "0");
             EXPECT_EQ(parallel::threadsOption("DDB_TEST_THREADS", 8), cores);
         }
@@ -272,7 +272,7 @@ namespace
         return run;
     }
 
-    TEST(DDB09_Index, parallelMatchesSerial)
+    TEST(ParallelIndex, parallelMatchesSerial)
     {
         TestArea ta(TEST_NAME, true);
         const auto root = makeMixedFolder(ta);
@@ -285,7 +285,7 @@ namespace
         EXPECT_EQ(parallel.results, serial.results);
     }
 
-    TEST(DDB09_Index, callbackRunsOnTheCallerThread)
+    TEST(ParallelIndex, callbackRunsOnTheCallerThread)
     {
         TestArea ta(TEST_NAME, true);
         const auto root = makeMixedFolder(ta);
@@ -299,7 +299,7 @@ namespace
 #ifndef _WIN32
     // An unreadable file fails only itself (stopOnError=false), and the first one in input
     // order aborts the batch (stopOnError=true), with nothing committed
-    TEST(DDB09_Index, errorsAreCollectedNotLost)
+    TEST(ParallelIndex, errorsAreCollectedNotLost)
     {
         if (geteuid() == 0)
             GTEST_SKIP() << "root reads files without read permission";
@@ -360,7 +360,7 @@ namespace
 
     // Many threads parsing the same files give the same entries as one thread (Exiv2, GDAL,
     // PDAL and OGR state is per call)
-    TEST(DDB09_Index, concurrentParsesMatchSerial)
+    TEST(ParallelIndex, concurrentParsesMatchSerial)
     {
         TestArea ta(TEST_NAME, true);
         const auto root = makeMixedFolder(ta);

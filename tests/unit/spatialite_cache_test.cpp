@@ -7,7 +7,7 @@
 // time tore libxml2 down together. A teardown destroys libxml2's global mutexes (catalog,
 // schema types) right after releasing them: a thread it had just woken then fails to unlock
 // the destroyed mutex, and the next waiter sleeps forever. That was the rare 300 s hang of
-// concurrentAdd.manyThreadsOneDatabaseBaseline and DDB02_Open.concurrentOpensAndReadsSucceed
+// concurrentAdd.manyThreadsOneDatabaseBaseline and OpenIndex.concurrentOpensAndReadsSucceed
 // under a parallel ctest run, whose first closes run on many threads at once. Each teardown
 // also dropped the per-thread libxml2 state of live threads, which LSan reports as leaks.
 // vcpkg-overlays/libspatialite removes the call; freeSpatialiteCache serializes the frees.

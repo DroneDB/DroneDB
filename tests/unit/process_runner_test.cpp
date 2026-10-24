@@ -246,7 +246,7 @@ TEST(processRunner, idleTimeoutKillsProcessGroup) {
     EXPECT_TRUE(processGone(grandchild, milliseconds(3000))) << "grandchild " << grandchild << " survived";
 }
 
-// A4: a child that closes every monitored pipe but keeps running is still
+// A child that closes every monitored pipe but keeps running is still
 // subject to the idle timeout (measured from its last output).
 TEST(processRunner, idleTimeoutAppliesAfterPipesClosed) {
     process::Options opts;
@@ -280,7 +280,7 @@ TEST(processRunner, idleTimeoutAppliesAfterPipesClosed) {
 }
 
 // A child that never stops writing never trips the idle timeout; maxRuntime
-// still bounds it (DDB-12: dwg2dxf can loop while printing warnings).
+// still bounds it (dwg2dxf can loop while printing warnings).
 TEST(processRunner, maxRuntimeKillsChattyChild) {
     process::Options opts;
     opts.idleTimeout = milliseconds(800);
@@ -315,7 +315,7 @@ TEST(processRunner, maxRuntimeAppliesAfterPipesClosed) {
     EXPECT_TRUE(quick.success()) << quick.describe();
 }
 
-// P6: activity on the extra channel alone keeps the child alive.
+// Activity on the extra channel alone keeps the child alive.
 TEST(processRunner, extraChannelActivityResetsIdleTimer) {
     std::string extra;
     process::Options opts;
@@ -409,7 +409,7 @@ TEST(processRunner, execFailureReported) {
     EXPECT_NE(denied.describe().find("Permission denied"), std::string::npos) << denied.describe();
 }
 
-// DQ-04: the parent's pipe ends and /dev/null are owned by UniqueFd, so every exit path of
+// The parent's pipe ends and /dev/null are owned by UniqueFd, so every exit path of
 // run() (success, extra channel, exec failure, timeout kill) closes all of them.
 TEST(processRunner, parentDescriptorsClosedOnEveryPath) {
     SKIP_ON_WINDOWS();

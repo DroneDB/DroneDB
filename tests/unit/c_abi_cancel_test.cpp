@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// DQ-15 (XI-07): cancel tokens through the C API (new in 2.0): DDBCreateCancelToken, DDBCancel,
+// Cancel tokens through the C API (new in 2.0): DDBCreateCancelToken, DDBCancel,
 // DDBFreeCancelToken, DDBSetThreadCancelToken.
 //
 //  - every export listed as "cancellable" in DDBGetCapabilities() returns DDBERR_CANCELED, with
@@ -705,7 +705,7 @@ TEST_F(CancelToken, canceledMaskBordersLeavesNoOutput) {
 
 // ------------------------------------------------------------------ DDBApplyDelta
 
-// What DDBApplyDelta does when it is canceled (XI-07): it is whole or it did not start. It stops at
+// What DDBApplyDelta does when it is canceled: it is whole or it did not start. It stops at
 // once while it reads and hashes the added files (nothing changed), and from its first change on
 // it applies the delta whole and returns DDBERR_NONE, whatever the token or the shutdown say.
 struct ApplyCase {

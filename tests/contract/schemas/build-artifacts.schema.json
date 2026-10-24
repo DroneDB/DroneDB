@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "libddb build artifacts",
-  "description": "DDBGetBuildArtifacts (XI-04, new in 2.0): one item per input path, in input order. $defs/build is also the \"build\" object of DDBListEntriesEx, $defs/artifact an artifact of the manifest (ddb.h, build manifest).",
+  "description": "DDBGetBuildArtifacts (new in 2.0): one item per input path, in input order. $defs/build is also the \"build\" object of DDBListEntriesEx, $defs/artifact an artifact of the manifest (ddb.h, build manifest).",
   "type": "array",
   "items": {
     "oneOf": [

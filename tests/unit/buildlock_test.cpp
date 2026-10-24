@@ -632,7 +632,7 @@ TEST_F(BuildLockTest, LockFdNotInheritedByChildren) {
 }
 #endif
 
-// ---- BuildLock::isHeld / removeIfStale (DQ-08) -----------------------------------------
+// ---- BuildLock::isHeld / removeIfStale -----------------------------------------
 
 std::string readWholeFile(const fs::path& p) {
     std::ifstream in(p.string(), std::ios::binary);

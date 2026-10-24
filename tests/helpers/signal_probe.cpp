@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// DDB-11 B6 probe. Acts like a host process (the .NET Registry): it owns its crash and
+// Probe. Acts like a host process (the .NET Registry): it owns its crash and
 // termination handlers, then calls libddb's entry point. Exits 0 when
 // DDBRegisterProcess left every handler in place, 1 (and names them) otherwise.
 // Runs as its own process because DDBRegisterProcess initializes once per process.

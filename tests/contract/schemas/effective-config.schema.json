@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "libddb effective process configuration",
-  "description": "DDBGetEffectiveConfig (DQ-15, XI-06, new in 2.0): every setting of the process configuration with its value and where the value comes from. The settings object is accepted by DDBConfigure as is.",
+  "description": "DDBGetEffectiveConfig (new in 2.0): every setting of the process configuration with its value and where the value comes from. The settings object is accepted by DDBConfigure as is.",
   "type": "object",
   "required": [
     "settings",

@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// DQ-09 (XI-09): the exports that take a dataset-relative entry path apply the rule of
+// The exports that take a dataset-relative entry path apply the rule of
 // DDBNormalizePath (entry_path.h) to it, and refuse a path outside the dataset or in the reserved
 // ".ddb" folder with DDBERR_INVALIDARGS, also the exports of 1.x (whose other invalid arguments
 // stay DDBERR_EXCEPTION).

@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// DQ-15 (XI-07): the cancellation checkpoints of the core (cancellation.h): tokens and their
+// The cancellation checkpoints of the core (cancellation.h): tokens and their
 // references, the thread's token and its propagation to forEachIndex workers, GDAL progress
 // callbacks (from any thread), the SQLite progress handler and process::run, which kills the
 // child. The C API side (DDBCreateCancelToken ...) is in c_abi_cancel_test.cpp.

@@ -20,7 +20,7 @@ namespace
 
     TEST(registryErrorMessage, ProblemDetailsAndLegacyBodies)
     {
-        // RFC 9457 ProblemDetails (Registry RQ-05): detail first, then title
+        // RFC 9457 ProblemDetails: detail first, then title
         EXPECT_EQ(RegistryUtils::errorMessage(
                       R"({"type":"t","title":"Conflict","status":409,"detail":"Destination exists","noRetry":true})"),
                   "Destination exists");

@@ -431,7 +431,7 @@ MANUAL_TEST(obj2tiles, endToEndGeoreferenced) {
 }
 
 // ---------------------------------------------------------------------------
-// D-C1: DDB_OBJ2TILES_MAX_CORES -> DOTNET_PROCESSOR_COUNT in the child only.
+// DDB_OBJ2TILES_MAX_CORES -> DOTNET_PROCESSOR_COUNT in the child only.
 // A fake Obj2Tiles (POSIX shell script) dumps its environment; the tests check
 // only the child's environment (the runtime effect is measured manually).
 // ---------------------------------------------------------------------------
@@ -684,7 +684,7 @@ TEST(obj2tiles, ktx2ThreadsDroppedUnderCoreCap) {
     EXPECT_EQ(argValue(childArgs(ta, "invalid", ktx2Opts(4)), "--ktx2-threads"), std::optional<std::string>("4"));
 }
 
-// A2.2 / A4: failures carry the exit code or signal number and the output tail.
+// Failures carry the exit code or signal number and the output tail.
 TEST(obj2tiles, runReportsExitCodeSignalAndTail) {
     SKIP_WITHOUT_POSIX_SHELL();
     TestArea ta(TEST_NAME);
@@ -718,7 +718,7 @@ TEST(obj2tiles, runReportsExitCodeSignalAndTail) {
     EXPECT_NE(err.find("tileset.json is missing"), std::string::npos) << err;
 }
 
-// A2.2: exit 0 without tileset.json still reports the output tail.
+// Exit 0 without tileset.json still reports the output tail.
 TEST(obj2tiles, runReportsTailWhenTilesetMissing) {
     SKIP_WITHOUT_POSIX_SHELL();
     TestArea ta(TEST_NAME);

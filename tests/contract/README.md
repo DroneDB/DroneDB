@@ -1,8 +1,8 @@
-# libddb contract fixtures (XI-09)
+# libddb contract fixtures
 
 The JSON outputs of libddb that Registry consumes, recorded as golden fixtures with a JSON
 Schema each. They freeze today's field names, types and values: any unplanned change to one of
-these outputs fails a DroneDB test, and Registry's contract tests (RQ-04, `FakeDdbWrapper`) read
+these outputs fails a DroneDB test, and Registry's contract tests (`FakeDdbWrapper`) read
 the same files.
 
 Registry validates the contract on its side, against a libddb build (its `Registry.Adapters.Ddb.Test`
@@ -114,7 +114,7 @@ Each fixture file holds:
 
 ## Data-only STAC
 
-`DDBStacData` and `DDBStacItemCollectionData` (XI-09, 2.0.0) return the documents of `DDBStac`
+`DDBStacData` and `DDBStacItemCollectionData` (2.0.0) return the documents of `DDBStac`
 (with `id` NULL) and `DDBStacItemCollection` without any member built from a URL or an ID, which
 Registry owns: no `id`, `collection` or `links`, and no asset `href`. Every other member is the
 same, value for value (`ContractFixtures.StacDataIsStacWithoutUrlsAndIds` compares them). A
@@ -133,8 +133,8 @@ change).
 ## Build manifest
 
 `DDBGetEntryTypes`, `DDBGetBuildArtifacts`, `DDBResolveBuildFile`, `DDBCopyBuildArtifacts` and
-`DDBListEntriesEx` (XI-04, 2.0.0) let a host serve builds without knowing their layout
-(decision D8). The vocabulary and the fields are documented in `ddb.h` ("Build manifest");
+`DDBListEntriesEx` (2.0.0) let a host serve builds without knowing their layout.
+The vocabulary and the fields are documented in `ddb.h` ("Build manifest");
 `build-artifacts.schema.json` holds the shared shapes: `$defs/build` (the build object of an
 entry, also embedded by `DDBListEntriesEx`) and `$defs/artifact`.
 
@@ -165,7 +165,7 @@ under the `<root>` placeholder.
 
 ## Path vectors
 
-`vectors/entry-paths.json` pins libddb's dataset path rules (XI-09, `src/include/entry_path.h`,
+`vectors/entry-paths.json` pins libddb's dataset path rules (`src/include/entry_path.h`,
 `DDBNormalizePath` in `ddb.h`). libddb's unit tests run every vector, and Registry's
 `DatasetPathPolicy` tests are meant to run the same file against `DDBNormalizePath`, so both
 sides accept and reject the same paths.
@@ -252,43 +252,43 @@ Registry has to adopt first.
 ### Changes
 
 * 2026-10-21: baseline (DroneDB `fixes-and-optimizations` after `7ee39d2`).
-* 2026-10-21: `capabilities` added (XI-01, 2.0.0). Its `symbols` list is
+* 2026-10-21: `capabilities` added (2.0.0). Its `symbols` list is
   `src/include/ddb.symbols`, so every new export updates this fixture too.
 * 2026-10-21: `normalize-path`, `normalize-path-rejected` and `vectors/entry-paths.json` added
-  (XI-09, 2.0.0: `DDBNormalizePath`); `capabilities` lists the new export.
+  (2.0.0: `DDBNormalizePath`); `capabilities` lists the new export.
 * 2026-10-21: `stac-data-collection`, `stac-data-item-georaster`, `stac-data-item-image` and
-  `stac-data-item-collection` added with their schemas (XI-09, 2.0.0: `DDBStacData`,
+  `stac-data-item-collection` added with their schemas (2.0.0: `DDBStacData`,
   `DDBStacItemCollectionData`); `capabilities` lists the new exports. The shared parts of
   `stac-item.schema.json` (`stacExtensions`, `geometry`, `bbox`, `properties`) and
   `stac-collection.schema.json` (`extent`) moved to their `$defs`, unchanged, so the data-only
   schemas reference them.
 * 2026-10-21: `capabilities` gains the error codes `INVALIDARGS` (7), `RETRYABLE` (8) and
   `SHUTDOWN` (9), the `errorReasons` array (the reasons of `DDBGetLastErrorReason`) and the new
-  export `DDBGetLastErrorReason` (XI-02, DQ-10, 2.0.0).
+  export `DDBGetLastErrorReason` (2.0.0).
 
 * 2026-10-21: `build-artifacts`, `build-artifacts-pending`, `list-entries-ex`,
   `resolve-build-file`, `copy-build-artifacts` and `entry-types` added with their schemas
-  (XI-04, 2.0.0: `DDBGetBuildArtifacts`, `DDBListEntriesEx`, `DDBResolveBuildFile`,
+  (2.0.0: `DDBGetBuildArtifacts`, `DDBListEntriesEx`, `DDBResolveBuildFile`,
   `DDBCopyBuildArtifacts`, `DDBGetEntryTypes`; see [Build manifest](#build-manifest));
   `capabilities` lists the new exports. The existing fixtures did not change.
 
-* 2026-10-21: `effective-config` added with its schema (DQ-15, XI-06, 2.0.0: `DDBConfigure`,
+* 2026-10-21: `effective-config` added with its schema (2.0.0: `DDBConfigure`,
   `DDBGetEffectiveConfig`); `capabilities` lists the new exports. The existing fixtures did not
   change.
 
-* 2026-10-21: `capabilities` lists the new exports of DQ-15 (XI-07, XI-08, 2.0.0):
+* 2026-10-21: `capabilities` lists the new exports for the process configuration, shutdown, cancellation and logging (2.0.0):
   `DDBShutdown`, `DDBCreateCancelToken`, `DDBCancel`, `DDBFreeCancelToken`,
   `DDBSetThreadCancelToken`, `DDBSetLogCallback`, `DDBSetThreadOperation`. Its `cancellable` list
   now names the exports whose work checks a cancel token (the render paths, the thumbnails,
   `DDBExportRaster`/`DDBExportRaster2`, `DDBBuild`) instead of `DDBExportRaster2` only; the
   schema describes it so. The other fixtures did not change.
 
-* 2026-10-21: `capabilities` lists the new export `DDBApplyDeltaEx` (XI-05, 2.0.0). Its output
+* 2026-10-21: `capabilities` lists the new export `DDBApplyDeltaEx` (2.0.0). Its output
   is the conflict list of `DDBApplyDelta` (a JSON array of paths), so it has no fixture of its
   own. The other fixtures did not change.
 
 * 2026-10-22: the build object (`build-artifacts`, `build-artifacts-pending`, `list-entries-ex`)
-  and `pending-build-info` gain `retryAfter` (XI-04, XI-09): when the pending build is retried
+  and `pending-build-info` gain `retryAfter`: when the pending build is retried
   (`lastAttempt` + the 60 s backoff of `buildPending`), integer Unix seconds, null when
   `lastAttempt` is. Additive: no other field changed. In the two pending fixtures it is a volatile
   key next to `lastAttempt`. Registry's exact-JSON adapter tests of these outputs
@@ -301,7 +301,7 @@ Registry has to adopt first.
   Registry on the new libddb renders panorama thumbnails again. No other fixture changed.
 
 * 2026-10-24: every export that takes a dataset-relative entry path applies the rules of
-  `DDBNormalizePath` to it (DQ-09, XI-09; behaviour change, no output changed, so no fixture
+  `DDBNormalizePath` to it (behaviour change, no output changed, so no fixture
   did): `\` and `/` separate segments, `.` segments and repeated or trailing separators are
   dropped, and a path that is absolute, has a `..` segment, names a `.ddb` folder or is not valid
   UTF-8 is refused with `DDBERR_INVALIDARGS` (also by the exports of 1.x, which keep
@@ -320,14 +320,14 @@ Registry has to adopt first.
   `DDBList`, `DDBInfo`, dataset folders, output files, `DDBBuild`'s `dest`. The tests are
   `tests/unit/c_abi_entry_path_test.cpp` (every vector through every export).
 
-* 2026-10-24: `effective-config` gains the setting `gdalCacheMb` and its source (DQ-15, XI-06):
+* 2026-10-24: `effective-config` gains the setting `gdalCacheMb` and its source:
   an integer from 16 to 1048576 (MiB), the size of GDAL's block cache for the whole process. The
   fixture sets it to 256 through `DDBConfigure`; without it the value is the bound from
   `DDB_GDAL_CACHE_MB` or 1024, source `environment` or `default`. Additive: the other
   settings did not change.
 
-* 2026-10-24: the `cancellable` list of `capabilities` grows (XI-07, DQ-15, cancellation steps 3
-  and 4): `DDBGetRasterMetadata`, `DDBGetRasterValueInfo`, `DDBGetRasterPointValue`,
+* 2026-10-24: the `cancellable` list of `capabilities` grows (the analyses, the
+  delta and the masks check the token too): `DDBGetRasterMetadata`, `DDBGetRasterValueInfo`, `DDBGetRasterPointValue`,
   `DDBGetRasterAreaStats`, `DDBGetRasterProfile`, `DDBCalculateVolume`, `DDBDetectStockpile`,
   `DDBDetectAllStockpiles`, `DDBGenerateContours`, `DDBMaskBorders`, `DDBComputeDeltaLocals`,
   `DDBApplyDelta` and `DDBApplyDeltaEx` (13 exports, 26 in all). Additive: no other member and no

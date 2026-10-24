@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// REG-02 — getBuildStatus() / DDBGetBuildStatus answer isBuildable() and
+// getBuildStatus() / DDBGetBuildStatus answer isBuildable() and
 // isBuildComplete() for a whole listing with one index open (the Registry used to
 // make two native calls, i.e. two opens, per buildable entry).
 
@@ -101,7 +101,7 @@ namespace
         EXPECT_TRUE(at("roads.shp").complete);
         EXPECT_TRUE(at("roads.dbf").buildable);
         EXPECT_TRUE(at("roads.dbf").complete) << "a dependency is complete when its main file is";
-        // A sidecar without its main file is not buildable (DDB-12): "buildable
+        // A sidecar without its main file is not buildable: "buildable
         // but never complete" made completeness sweeps re-enqueue it forever.
         EXPECT_FALSE(at("orphan.dbf").buildable);
         EXPECT_FALSE(at("orphan.dbf").complete);

@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// DDB-05: raster tiles reuse a prepared tiler, compute statistics once and encode
+// Raster tiles reuse a prepared tiler, compute statistics once and encode
 // through TileEncoder
 
 #include <algorithm>
@@ -89,7 +89,7 @@ namespace
         return *std::max_element(img.bands[band].begin(), img.bands[band].end());
     }
 
-    TEST(DDB05_Tiler, cacheHitSkipsOpen)
+    TEST(TilerCache, cacheHitSkipsOpen)
     {
         TestArea ta(TEST_NAME, true);
         auto spec = rgbGradient();
@@ -115,7 +115,7 @@ namespace
         EXPECT_GE(RasterCache::instance().stats().reused, before.reused + 2);
     }
 
-    TEST(DDB05_Tiler, statsComputedOnce)
+    TEST(TilerCache, statsComputedOnce)
     {
         TestArea ta(TEST_NAME, true);
         const auto raster = createGeoRaster(ta.getPath("float.tif"), floatRamp(10, 500));
@@ -130,7 +130,7 @@ namespace
         EXPECT_EQ(after.fromSidecar, before.fromSidecar);
     }
 
-    TEST(DDB05_Tiler, sidecarUsed)
+    TEST(TilerCache, sidecarUsed)
     {
         TestArea ta(TEST_NAME, true);
         const auto raster = createGeoRaster(ta.getPath("float.tif"), floatRamp(0, 500));
@@ -149,7 +149,7 @@ namespace
         EXPECT_NEAR(brightest, 127, 2) << "500 of [0, 1000] is mid grey";
     }
 
-    TEST(DDB05_Tiler, concurrentTilesSameRaster)
+    TEST(TilerCache, concurrentTilesSameRaster)
     {
         TestArea ta(TEST_NAME, true);
         const auto raster = createGeoRaster(ta.getPath("rgb.tif"), rgbGradient());
@@ -187,7 +187,7 @@ namespace
         EXPECT_EQ(mismatches.load(), 0);
     }
 
-    TEST(DDB05_Tiler, evictOnRebuild)
+    TEST(TilerCache, evictOnRebuild)
     {
         TestArea ta(TEST_NAME, true);
         auto spec = rgbGradient();
@@ -202,7 +202,7 @@ namespace
         EXPECT_EQ(maxOfBand(decodeImage(memoryTile(raster, tile)), 0), 200);
     }
 
-    TEST(DDB05_Tiler, releaseClosesIdleRasters)
+    TEST(TilerCache, releaseClosesIdleRasters)
     {
         TestArea ta(TEST_NAME, true);
         const auto raster = createGeoRaster(ta.getPath("rgb.tif"), rgbGradient());
@@ -217,7 +217,7 @@ namespace
         EXPECT_GE(closed, 1);
     }
 
-    TEST(DDB05_Tiler, opaqueTileHasNoAlpha)
+    TEST(TilerCache, opaqueTileHasNoAlpha)
     {
         TestArea ta(TEST_NAME, true);
         const auto raster = createGeoRaster(ta.getPath("rgb.tif"), rgbGradient());
@@ -231,7 +231,7 @@ namespace
         EXPECT_TRUE(edgeWithAlpha);
     }
 
-    TEST(DDB05_Tiler, webpAndJpegTiles)
+    TEST(TilerCache, webpAndJpegTiles)
     {
         TestArea ta(TEST_NAME, true);
         const auto raster = createGeoRaster(ta.getPath("rgb.tif"), rgbGradient());
@@ -253,7 +253,7 @@ namespace
         EXPECT_EQ(jpeg[1], 0xD8);
     }
 
-    TEST(DDB05_Tiler, blankTilesShareTheirBytes)
+    TEST(TilerCache, blankTilesShareTheirBytes)
     {
         TestArea ta(TEST_NAME, true);
         const auto raster = createGeoRaster(ta.getPath("rgb.tif"), rgbGradient());
@@ -265,7 +265,7 @@ namespace
         EXPECT_EQ(maxOfBand(img, static_cast<int>(img.bands.size()) - 1), 0);
     }
 
-    TEST(DDB05_Tiler, sensorDetectionIsMemoised)
+    TEST(TilerCache, sensorDetectionIsMemoised)
     {
         TestArea ta(TEST_NAME, true);
         GeoRasterSpec spec;
@@ -288,7 +288,7 @@ namespace
         EXPECT_EQ(spm.uncachedDetections() - before, 2u) << "a rewritten raster is detected again";
     }
 
-    TEST(DDB05_TileEncoder, formats)
+    TEST(TileEncoderFormats, formats)
     {
         RasterImage image(16, 16, 3, true);
         std::fill(image.color.begin(), image.color.end(), 100);

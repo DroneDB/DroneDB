@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// DQ-15 (XI-06): the C ABI of the process configuration, DDBConfigure and DDBGetEffectiveConfig
+// The C ABI of the process configuration, DDBConfigure and DDBGetEffectiveConfig
 // (exports new in 2.0: an invalid argument is DDBERR_INVALIDARGS, outputs are written on
 // DDBERR_NONE only). The output shape is pinned by the effective-config contract fixture
 // (contract_test.cpp); that DDBConfigure works before DDBRegisterProcess is tested in its own

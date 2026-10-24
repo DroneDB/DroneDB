@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// DQ-08: build_layout.h names the on-disk build layout once. Registry, the Hub and the
+// build_layout.h names the on-disk build layout once. Registry, the Hub and the
 // datasets already on disk depend on these exact bytes, so every value is pinned here with a
 // literal: changing one is a layout migration, never a rename.
 

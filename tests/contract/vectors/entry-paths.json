@@ -1,5 +1,5 @@
 {
-  "description": "Golden vectors of libddb's dataset path rules (XI-09): DDBNormalizePath and ddb::normalizeEntryPath (src/include/entry_path.h). Format: tests/contract/README.md, section 'Path vectors'.",
+  "description": "Golden vectors of libddb's dataset path rules: DDBNormalizePath and ddb::normalizeEntryPath (src/include/entry_path.h). Format: tests/contract/README.md, section 'Path vectors'.",
   "vectors": [
     {
       "input": "photos/a.jpg",

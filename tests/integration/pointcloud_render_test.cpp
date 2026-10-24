@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// DDB-06 (point-cloud tiles) and DDB-07 (point-cloud thumbnails): shared rasterizer,
+// Point-cloud tiles and thumbnails: shared rasterizer,
 // batched reprojection, cached tiler, octree level chosen from a point budget
 
 #include <atomic>
@@ -30,7 +30,7 @@ namespace
     using namespace ddb;
     using namespace testutils;
 
-    // The point drawing of the tiler before DDB-06, kept as the reference
+    // The point drawing the tiler used to do, kept as the reference
     void referenceDrawCircle(uint8_t *buffer, uint8_t *alpha, int px, int py, int radius, uint8_t r, uint8_t g,
                              uint8_t b, int tileSize, int wSize)
     {
@@ -75,7 +75,7 @@ namespace
         return b;
     }
 
-    TEST(DDB06_PointRasterizer, goldenImage)
+    TEST(PointRasterizer, goldenImage)
     {
         const int tileSize = 256;
         const double minX = 1000, minY = 2000, tileMeters = 150;
@@ -85,7 +85,7 @@ namespace
         {
             const auto points = randomPoints(20000, minX, minY, tileMeters, sixteenBit, 42);
 
-            // Reference: the tiler loop before DDB-06
+            // Reference: the loop the tiler used to run
             const int wSize = tileSize * tileSize;
             const int pointRadius = 2;
             const double pointRadiusMeters = pointRadius * resolution;
@@ -141,7 +141,7 @@ namespace
         }
     }
 
-    TEST(DDB06_PointCloudTiler, reprojectionMatchesPerPoint)
+    TEST(PointCloudTiler, reprojectionMatchesPerPoint)
     {
         const std::string utm33 =
             "PROJCS[\"WGS 84 / UTM zone 33N\",GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563]],"
@@ -172,7 +172,7 @@ namespace
         return copc;
     }
 
-    TEST(DDB06_PointCloudTiler, cacheHitSkipsCopcInfo)
+    TEST(PointCloudTiler, cacheHitSkipsCopcInfo)
     {
         TestArea ta(TEST_NAME, true);
         const auto copc = brightonCopc(ta);
@@ -195,7 +195,7 @@ namespace
         EXPECT_EQ(opaqueTiles, 5);
     }
 
-    TEST(DDB07_Thumb, plannerPicksDeepestLevelInBudget)
+    TEST(PointCloudThumbBudget, plannerPicksDeepestLevelInBudget)
     {
         const std::vector<uint64_t> counts{1000, 4000, 16000, 64000};
         EXPECT_EQ(planCopcDepth(counts, 500), 0) << "the root is always read";
@@ -205,7 +205,7 @@ namespace
         EXPECT_EQ(planCopcDepth(counts, 1000000), 3);
     }
 
-    TEST(DDB07_Thumb, resolutionSelectsDepth)
+    TEST(PointCloudThumbBudget, resolutionSelectsDepth)
     {
         // readers.copc reads the depths below max(1, ceil(log2(spacing / resolution)) + 1)
         for (const double spacing : {0.37, 8.0, 21.5, 1000.0})
@@ -227,7 +227,7 @@ namespace
         return total;
     }
 
-    TEST(DDB07_Thumb, hierarchyCountsAllPoints)
+    TEST(PointCloudThumbBudget, hierarchyCountsAllPoints)
     {
         TestArea ta(TEST_NAME, true);
         const auto copc = brightonCopc(ta);
@@ -269,14 +269,14 @@ namespace
             << "read " << planned << " of " << totalPoints(h) << " points";
     }
 
-    TEST(DDB07_Thumb, pointBudgetRespected)
+    TEST(PointCloudThumbBudget, pointBudgetRespected)
     {
         TestArea ta(TEST_NAME, true);
         // 24.5k points: a 64 px thumbnail (budget 8192) reads the root level only
         expectBudgetedThumbnailComplete(brightonCopc(ta), 64);
 
-        // Large cloud given by DDB07_LARGE_COPC (e.g. Autzen, 10.6 M points), at 512 px
-        const char *large = std::getenv("DDB07_LARGE_COPC");
+        // Large cloud given by DDB_TEST_LARGE_COPC (e.g. Autzen, 10.6 M points), at 512 px
+        const char *large = std::getenv("DDB_TEST_LARGE_COPC");
         if (large != nullptr && fs::exists(large))
             expectBudgetedThumbnailComplete(large, 512);
     }
@@ -291,7 +291,7 @@ namespace
         }
     };
 
-    TEST(DDB07_Thumb, noGdalWarnings)
+    TEST(PointCloudThumbBudget, noGdalWarnings)
     {
         TestArea ta(TEST_NAME, true);
         const auto copc = brightonCopc(ta);
@@ -317,12 +317,12 @@ namespace
         return -1;
     }
 
-    // Large cloud given by DDB07_LARGE_COPC (e.g. Autzen, 10.6 M points), skipped otherwise
-    TEST(DDB07_Thumb, memoryBounded)
+    // Large cloud given by DDB_TEST_LARGE_COPC (e.g. Autzen, 10.6 M points), skipped otherwise
+    TEST(PointCloudThumbBudget, memoryBounded)
     {
-        const char *large = std::getenv("DDB07_LARGE_COPC");
+        const char *large = std::getenv("DDB_TEST_LARGE_COPC");
         if (large == nullptr || !fs::exists(large))
-            GTEST_SKIP() << "Set DDB07_LARGE_COPC to a large .copc.laz";
+            GTEST_SKIP() << "Set DDB_TEST_LARGE_COPC to a large .copc.laz";
 
         // Reset the peak RSS (VmHWM) to the current RSS
         std::ofstream("/proc/self/clear_refs") << "5";

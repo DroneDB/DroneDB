@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// DDB-01 — path lookups use the primary key and return each entry once.
+// Path lookups use the primary key and return each entry once.
 //
 //  - an exact path is an index seek (`path = ?`), a folder is a key range, only
 //    patterns with `*` fall back to LIKE;
@@ -63,7 +63,7 @@ namespace
                            { return e.path == path; });
     }
 
-    TEST(DDB01_Lookup, entryWithSeveralMetaRowsIsReturnedOnce)
+    TEST(EntryLookup, entryWithSeveralMetaRowsIsReturnedOnce)
     {
         Fixture fx(TEST_NAME);
         MetaManager mm(fx.db.get());
@@ -83,7 +83,7 @@ namespace
         EXPECT_EQ(getMatchingEntries(fx.db.get(), "*").size(), 6u);
     }
 
-    TEST(DDB01_Lookup, entryWithoutMetaHasEmptyMeta)
+    TEST(EntryLookup, entryWithoutMetaHasEmptyMeta)
     {
         Fixture fx(TEST_NAME);
         const auto entries = getMatchingEntries(fx.db.get(), "dir/b.txt");
@@ -93,7 +93,7 @@ namespace
         EXPECT_FALSE(json(entries[0]).contains("meta"));
     }
 
-    TEST(DDB01_Lookup, cApiGetWorksWithSeveralMetaRows)
+    TEST(EntryLookup, cApiGetWorksWithSeveralMetaRows)
     {
         Fixture fx(TEST_NAME);
         MetaManager mm(fx.db.get());
@@ -111,7 +111,7 @@ namespace
         EXPECT_EQ(j["meta"]["annotations"].size(), 2u);
     }
 
-    TEST(DDB01_Lookup, cApiGetReturnsFolderEntry)
+    TEST(EntryLookup, cApiGetReturnsFolderEntry)
     {
         Fixture fx(TEST_NAME);
         fx.db->close();
@@ -124,7 +124,7 @@ namespace
         EXPECT_EQ(j["type"].get<int>(), static_cast<int>(EntryType::Directory));
     }
 
-    TEST(DDB01_Lookup, cApiGetMissingEntryIsNotFound)
+    TEST(EntryLookup, cApiGetMissingEntryIsNotFound)
     {
         Fixture fx(TEST_NAME);
         fx.db->close();
@@ -138,7 +138,7 @@ namespace
         EXPECT_EQ(DDBGet(fx.root.string().c_str(), "*.txt", &out), DDBERR_NOTFOUND);
     }
 
-    TEST(DDB01_Lookup, folderPrefixDoesNotLeakIntoSiblingFolders)
+    TEST(EntryLookup, folderPrefixDoesNotLeakIntoSiblingFolders)
     {
         Fixture fx(TEST_NAME);
         // "dir" must not match "dir2/..."
@@ -148,7 +148,7 @@ namespace
         EXPECT_EQ(entries.size(), 2u);
     }
 
-    TEST(DDB01_Lookup, folderDepthLimitStillApplies)
+    TEST(EntryLookup, folderDepthLimitStillApplies)
     {
         Fixture fx(TEST_NAME);
         fs::create_directories(fx.root / "dir" / "sub");
@@ -163,7 +163,7 @@ namespace
         EXPECT_TRUE(containsPath(all, "dir/sub/e.txt"));
     }
 
-    TEST(DDB01_Lookup, wildcardStillSupported)
+    TEST(EntryLookup, wildcardStillSupported)
     {
         Fixture fx(TEST_NAME);
         const auto entries = getMatchingEntries(fx.db.get(), "*.txt");
@@ -173,7 +173,7 @@ namespace
         EXPECT_EQ(inDir.size(), 2u);
     }
 
-    TEST(DDB01_Lookup, emptyPathMatchesWholeIndex)
+    TEST(EntryLookup, emptyPathMatchesWholeIndex)
     {
         Fixture fx(TEST_NAME);
         EXPECT_EQ(getMatchingEntries(fx.db.get(), "").size(), 6u);
@@ -181,7 +181,7 @@ namespace
         EXPECT_EQ(getMatchingEntries(fx.db.get(), "", 1).size(), 3u);
     }
 
-    TEST(DDB01_Lookup, exactLookupIsLiteral)
+    TEST(EntryLookup, exactLookupIsLiteral)
     {
         Fixture fx(TEST_NAME);
         fx.add("IMG_1.JPG", "one");
@@ -197,7 +197,7 @@ namespace
         EXPECT_EQ(getMatchingEntries(fx.db.get(), "100%.txt").size(), 1u);
     }
 
-    TEST(DDB01_Lookup, removeDoesNotRemoveLookalikeEntries)
+    TEST(EntryLookup, removeDoesNotRemoveLookalikeEntries)
     {
         Fixture fx(TEST_NAME);
         fx.add("IMG_1.JPG", "one");
@@ -210,7 +210,7 @@ namespace
         EXPECT_TRUE(loadEntry(fx.db.get(), "imgx1.jpg", e)) << "removing IMG_1.JPG removed imgx1.jpg";
     }
 
-    TEST(DDB01_Lookup, removeFolderKeepsSiblingFolder)
+    TEST(EntryLookup, removeFolderKeepsSiblingFolder)
     {
         Fixture fx(TEST_NAME);
         removeFromIndex(fx.db.get(), {(fx.root / "dir").string()});
@@ -222,7 +222,7 @@ namespace
         EXPECT_TRUE(loadEntry(fx.db.get(), "dir2/d.txt", e));
     }
 
-    TEST(DDB01_Lookup, moveFolderKeepsSiblingFolder)
+    TEST(EntryLookup, moveFolderKeepsSiblingFolder)
     {
         Fixture fx(TEST_NAME);
         moveEntry(fx.db.get(), "dir", "moved");
@@ -232,7 +232,7 @@ namespace
         EXPECT_TRUE(loadEntry(fx.db.get(), "dir2/d.txt", e)) << "moving dir moved dir2";
     }
 
-    TEST(DDB01_Lookup, predicateStrategies)
+    TEST(EntryLookup, predicateStrategies)
     {
         const auto exact = buildPathPredicate("a/b_c.txt", false);
         EXPECT_EQ(exact.sql, "path = ?");
@@ -253,7 +253,7 @@ namespace
         EXPECT_TRUE(buildPathPredicate("", true).sql.empty());
     }
 
-    TEST(DDB01_Lookup, exactAndFolderPredicatesUseThePrimaryKey)
+    TEST(EntryLookup, exactAndFolderPredicatesUseThePrimaryKey)
     {
         Fixture fx(TEST_NAME);
 

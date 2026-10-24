@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// XI-04: the build manifest (build_manifest.h). The build state and the existing artifacts of
+// The build manifest (build_manifest.h). The build state and the existing artifacts of
 // entries come from the EntryHandler registry; reading them is side-effect free and costs a
 // bounded number of filesystem queries (counted through the BuildProbe seam); build files are
 // resolved inside an artifact only; a build copies with its pending marker.
@@ -225,7 +225,7 @@ TEST(BuildManifest, AgreesWithGetBuildStatus) {
     }
 }
 
-// The probe budget (P3-6): no filesystem query for an entry that is not buildable; for a
+// The probe budget: no filesystem query for an entry that is not buildable; for a
 // buildable one, the build root listing and the pending marker read, a lock probe only when a
 // lock file exists, one query per existing artifact folder, and at most the completeness check
 // getBuildStatus() makes (none for a building or pending entry, or a missing build root)
@@ -411,7 +411,7 @@ TEST(BuildManifest, RealBuildsMatchTheManifest) {
     }
 }
 
-// ---- A new type reaches the manifest with no other change (DQ-08 acceptance) -------------------
+// ---- A new type reaches the manifest with no other change ---------------------------------
 
 constexpr auto ManifestFakeType = static_cast<EntryType>(31);
 

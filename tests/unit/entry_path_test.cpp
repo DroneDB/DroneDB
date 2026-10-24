@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// XI-09: libddb's dataset path rules (entry_path.h) and DDBNormalizePath. Every golden vector of
+// libddb's dataset path rules (entry_path.h) and DDBNormalizePath. Every golden vector of
 // tests/contract/vectors/entry-paths.json runs through the C++ function and, unless it holds a
 // NUL ("cString": false), through the C API; Registry runs the same file against
 // DDBNormalizePath. The existing skips of the indexer (".ddb" segments, names with '\') call

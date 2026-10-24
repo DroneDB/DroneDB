@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// DQ-15 (XI-06): the process configuration (ProcessConfig: DDBConfigure > environment >
+// The process configuration (ProcessConfig: DDBConfigure > environment >
 // default) and the process-wide CPU token pool (parallel.h). The pool is only ever tried: these
 // tests prove that nested sections, concurrent calls and a pool of 0 never wait for a token,
 // with latches and barriers instead of timings (a broken pool hangs a test, which the ctest
@@ -213,7 +213,7 @@ namespace
         EXPECT_EQ(parallel::cpuTokensInUse(), 0u);
     }
 
-    // P3-7 (M4): a pool of 1, sections nested in a section's worker and GDAL threads in a
+    // A pool of 1, sections nested in a section's worker and GDAL threads in a
     // worker. Every section gets 0..N tokens and none waits, so the whole tree completes and
     // never holds more than the pool.
     TEST(CpuPool, PoolOfOneNestedSectionsAndGdalComplete)
@@ -263,7 +263,7 @@ namespace
         EXPECT_EQ(parallel::cpuTokensInUse(), 0u);
     }
 
-    // P3-7 (M4): with a pool of 0, two calls at once both run, each on its own calling
+    // With a pool of 0, two calls at once both run, each on its own calling
     // thread. The barrier needs both calls inside their first item: a call that waited for a
     // token would never get there.
     TEST(CpuPool, PoolOfZeroConcurrentCallsComplete)

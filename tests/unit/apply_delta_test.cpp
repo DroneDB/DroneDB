@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// DDB-04 — applyDelta() moves the added files instead of copying them, indexes them with
+// applyDelta() moves the added files instead of copying them, indexes them with
 // the hashes of the delta in one transaction, and removes entries in one transaction.
 //
 //  - a file is renamed into the dataset unless it has other hard links (computeDeltaLocals
@@ -111,7 +111,7 @@ namespace
             return applyDelta(d, db.get(), application, out);
         }
 
-        // applyDelta for a caller that verified `verified` itself (XI-05)
+        // applyDelta for a caller that verified `verified` itself
         std::vector<Conflict> applyVerified(const Delta &d, const VerifiedHashes &verified, bool verify = true)
         {
             std::ostringstream out;
@@ -156,7 +156,7 @@ namespace
     }
 #endif
 
-    TEST(DDB04_ApplyDelta, addsRemovesAndUpdates)
+    TEST(ApplyDeltaFiles, addsRemovesAndUpdates)
     {
         Fixture f(TEST_NAME);
         Delta d;
@@ -188,7 +188,7 @@ namespace
         EXPECT_NE(log.find("U\told.txt\n"), std::string::npos) << log;
     }
 
-    TEST(DDB04_ApplyDelta, movesFilesWhenSameVolume)
+    TEST(ApplyDeltaFiles, movesFilesWhenSameVolume)
     {
         Fixture f(TEST_NAME);
         Delta d;
@@ -206,7 +206,7 @@ namespace
 #endif
     }
 
-    TEST(DDB04_ApplyDelta, hardLinkedLocalFileIsCopied)
+    TEST(ApplyDeltaFiles, hardLinkedLocalFileIsCopied)
     {
         // A local file with the hash of an add is hard-linked into the source folder
         // (computeDeltaLocals): it must not end up sharing its data with the original.
@@ -225,7 +225,7 @@ namespace
         EXPECT_EQ(hashOf(f.db.get(), "copy-of-keep.txt"), hashOf(f.db.get(), "keep.txt"));
     }
 
-    TEST(DDB04_ApplyDelta, doesNotRehashWithoutVerification)
+    TEST(ApplyDeltaFiles, doesNotRehashWithoutVerification)
     {
         // The index stores the delta's hash: the file is not read again.
         Fixture f(TEST_NAME);
@@ -238,7 +238,7 @@ namespace
         EXPECT_EQ(hashOf(f.db.get(), "a.txt"), "declared-hash");
     }
 
-    TEST(DDB04_ApplyDelta, verificationRejectsMismatchBeforeAnyChange)
+    TEST(ApplyDeltaFiles, verificationRejectsMismatchBeforeAnyChange)
     {
         Fixture f(TEST_NAME);
         Delta d;
@@ -257,7 +257,7 @@ namespace
         EXPECT_NE(hashOf(f.db.get(), "keep.txt"), "<missing>");
     }
 
-    TEST(DDB04_ApplyDelta, addsInOneTransaction)
+    TEST(ApplyDeltaFiles, addsInOneTransaction)
     {
         Fixture f(TEST_NAME);
         Delta d;
@@ -286,7 +286,7 @@ namespace
         EXPECT_EQ(q->getInt(0), 20);
     }
 
-    TEST(DDB04_ApplyDelta, indexesOnlyDeltaPaths)
+    TEST(ApplyDeltaFiles, indexesOnlyDeltaPaths)
     {
         // Adding a folder indexes the folder, not whatever else sits in it on disk
         Fixture f(TEST_NAME);
@@ -302,7 +302,7 @@ namespace
         EXPECT_EQ(hashOf(f.db.get(), "new/unrelated.txt"), "<missing>");
     }
 
-    TEST(DDB04_IndexPathList, eachFileOnceAndOptionalRecursion)
+    TEST(IndexPathList, eachFileOnceAndOptionalRecursion)
     {
         TestArea ta(TEST_NAME, true);
         const auto root = ta.getFolder("ds");
@@ -324,7 +324,7 @@ namespace
         EXPECT_EQ(list.size(), 2u);
     }
 
-    TEST(DDB04_ApplyDelta, unsortedRemoves)
+    TEST(ApplyDeltaFiles, unsortedRemoves)
     {
         // A hand-made delta may list a folder before its content
         Fixture f(TEST_NAME);
@@ -338,7 +338,7 @@ namespace
         EXPECT_EQ(hashOf(f.db.get(), "dir/gone.txt"), "<missing>");
     }
 
-    TEST(DDB04_ApplyDelta, typeFlipFolderToFile)
+    TEST(ApplyDeltaFiles, typeFlipFolderToFile)
     {
         Fixture f(TEST_NAME);
         Delta d;
@@ -354,7 +354,7 @@ namespace
         EXPECT_EQ(hashOf(f.db.get(), "dir/gone.txt"), "<missing>");
     }
 
-    TEST(DDB04_ApplyDelta, conflicts)
+    TEST(ApplyDeltaFiles, conflicts)
     {
         // The remote side changed old.txt and removed keep.txt, but its base hashes differ
         // from ours (both were modified locally)
@@ -459,7 +459,7 @@ namespace
         }
     }
 
-    TEST(DDB04_ApplyDelta, cApiVerifiesHashes)
+    TEST(ApplyDeltaFiles, cApiVerifiesHashes)
     {
         Fixture f(TEST_NAME);
         writeFile(f.source / "a.txt", "alpha");
@@ -478,9 +478,9 @@ namespace
         EXPECT_TRUE(fs::exists(f.source / "a.txt"));
     }
 
-    // ------------------------------------------------------------------ XI-05: verified hashes
+    // ------------------------------------------------------------------ verified hashes
 
-    TEST(XI05_ApplyDelta, verifiedFilesAreNotReadAgain)
+    TEST(ApplyDeltaVerifiedHashes, verifiedFilesAreNotReadAgain)
     {
         // b.txt does not have the hash the delta declares: trusted, it is indexed with the
         // delta's hash, so its bytes were never read
@@ -497,7 +497,7 @@ namespace
         EXPECT_EQ(hashOf(f.db.get(), "b.txt"), declared);
     }
 
-    TEST(XI05_ApplyDelta, filesNotListedAreStillHashed)
+    TEST(ApplyDeltaVerifiedHashes, filesNotListedAreStillHashed)
     {
         Fixture f(TEST_NAME);
         Delta d;
@@ -518,7 +518,7 @@ namespace
         EXPECT_EQ(hashOf(f.db.get(), "a.txt"), "<missing>");
     }
 
-    TEST(XI05_ApplyDelta, verifiedHashMustBeTheDeltaHash)
+    TEST(ApplyDeltaVerifiedHashes, verifiedHashMustBeTheDeltaHash)
     {
         // The caller verified other bytes than the delta declares: rejected before any change,
         // with or without the hash check of the other files
@@ -546,7 +546,7 @@ namespace
         }
     }
 
-    TEST(XI05_ApplyDelta, verifiedHashOfAPathTheDeltaDoesNotAddIsRejected)
+    TEST(ApplyDeltaVerifiedHashes, verifiedHashOfAPathTheDeltaDoesNotAddIsRejected)
     {
         Fixture f(TEST_NAME);
         Delta d;
@@ -555,7 +555,7 @@ namespace
         const auto h = d.adds[1].hash;
 
         // Another file, a folder add (no hash), a name that differs by its case (the paths are
-        // compared byte for byte). "new\\a.txt" is the delta's "new/a.txt" since DQ-09: both
+        // compared byte for byte). "new\\a.txt" is the delta's "new/a.txt": both
         // are normalized before they are compared (c_abi_entry_path_test.cpp)
         for (const VerifiedHashes &bad : {VerifiedHashes{{"other.txt", h}}, VerifiedHashes{{"new", ""}},
                                           VerifiedHashes{{"new/A.txt", h}}})
@@ -569,7 +569,7 @@ namespace
         EXPECT_THROW(f.applyVerified(Delta(), {{"new/a.txt", h}}), InvalidArgsException);
     }
 
-    TEST(XI05_ApplyDeltaEx, nullVerifiedHashesIsDDBApplyDelta)
+    TEST(ApplyDeltaEx, nullVerifiedHashesIsDDBApplyDelta)
     {
         Fixture f(TEST_NAME);
         writeFile(f.source / "a.txt", "alpha");
@@ -590,7 +590,7 @@ namespace
         EXPECT_EQ(hashOf(f.db.get(), "a.txt"), d.adds[0].hash);
     }
 
-    TEST(XI05_ApplyDeltaEx, explicitHashesIgnoreTheEnvironment)
+    TEST(ApplyDeltaEx, explicitHashesIgnoreTheEnvironment)
     {
         // An empty object: the caller verified nothing, every file is hashed even with
         // DDB_VERIFY_PUSH_HASHES=0
@@ -606,7 +606,7 @@ namespace
         EXPECT_TRUE(fs::exists(f.source / "a.txt"));
     }
 
-    TEST(XI05_ApplyDeltaEx, trustsTheVerifiedFiles)
+    TEST(ApplyDeltaEx, trustsTheVerifiedFiles)
     {
         Fixture f(TEST_NAME);
         Delta d;
@@ -623,7 +623,7 @@ namespace
         EXPECT_FALSE(fs::exists(f.source / "b.txt"));
     }
 
-    TEST(XI05_ApplyDeltaEx, invalidVerifiedHashesAreInvalidArgs)
+    TEST(ApplyDeltaEx, invalidVerifiedHashesAreInvalidArgs)
     {
         Fixture f(TEST_NAME);
         Delta d;
@@ -667,7 +667,7 @@ namespace
     }
 
 #ifdef __linux__
-    TEST(XI05_ApplyDeltaEx, pushReadsEachFileOnce)
+    TEST(ApplyDeltaEx, pushReadsEachFileOnce)
     {
         // A push of N files: DDBApplyDelta reads every added byte again to hash it, the
         // caller that hashed the stream passes the hashes and libddb reads none of them
@@ -719,7 +719,7 @@ namespace
     }
 #endif
 
-    TEST(DDB04_RemoveFromIndex, oneTransaction)
+    TEST(RemoveFromIndex, oneTransaction)
     {
         // A path without entries rolls back the removal of the paths before it
         Fixture f(TEST_NAME);
@@ -740,7 +740,7 @@ namespace
         EXPECT_EQ(hashOf(f.db.get(), "dir/gone.txt"), "<missing>");
     }
 
-    TEST(DDB04_RemoveFromIndex, pathListedTwiceOrInsideAListedFolder)
+    TEST(RemoveFromIndex, pathListedTwiceOrInsideAListedFolder)
     {
         // Removed once; the repeat must not fail (and roll back) the whole removal
         Fixture f(TEST_NAME);
@@ -757,7 +757,7 @@ namespace
         EXPECT_NE(hashOf(f.db.get(), "old.txt"), "<missing>");
     }
 
-    TEST(DDB04_ApplyDelta, removeListedTwice)
+    TEST(ApplyDeltaFiles, removeListedTwice)
     {
         Fixture f(TEST_NAME);
         const auto hash = hashOf(f.db.get(), "old.txt");
@@ -770,7 +770,7 @@ namespace
         EXPECT_EQ(hashOf(f.db.get(), "old.txt"), "<missing>");
     }
 
-    TEST(DDB04_ApplyDelta, failedAddStillIndexesTheFilesAlreadyMoved)
+    TEST(ApplyDeltaFiles, failedAddStillIndexesTheFilesAlreadyMoved)
     {
         Fixture f(TEST_NAME);
         writeFile(f.root / "blocker", "a file where the delta expects a folder");
@@ -788,7 +788,7 @@ namespace
         EXPECT_EQ(hashOf(f.db.get(), "blocker/c.txt"), "<missing>");
     }
 
-    TEST(DDB04_MoveOrCopy, renamesSingleLinkAndCopiesSharedData)
+    TEST(MoveOrCopyFile, renamesSingleLinkAndCopiesSharedData)
     {
         TestArea ta(TEST_NAME, true);
         const auto dir = ta.getFolder("files");

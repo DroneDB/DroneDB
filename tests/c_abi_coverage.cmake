@@ -1,4 +1,4 @@
-# C ABI coverage (DQ-03): every function ddb.h exports (DDB_DLL ... DDBName(...)) must be called
+# C ABI coverage: every function ddb.h exports (DDB_DLL ... DDBName(...)) must be called
 # by at least one test in tests/unit/ or tests/integration/, so a new export comes with a test.
 # Run by ctest (c_abi.ExportsHaveTests, label unit):
 #   cmake -DDDB_HEADER=<src/include/ddb.h> -DDDB_TESTS=<tests folder> -P c_abi_coverage.cmake

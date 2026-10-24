@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// DQ-14 probe: libddb as a host loads it. The test binaries and the CLI contain the library
+// Probe: libddb as a host loads it. The test binaries and the CLI contain the library
 // objects (they use C++ code libddb does not export), so this is the one test that runs the
 // shared library itself, through ddb.h only, as Registry does over P/Invoke: it registers the
 // process, indexes a small dataset (SQLite, SpatiaLite, Exiv2, GDAL, PROJ), reads it back,

@@ -954,7 +954,7 @@ namespace
     }
 
     // ---------------------------------------------------------------------------
-    // glTF inside a dataset (P3): the original glTF is validated against the dataset
+    // glTF inside a dataset: the original glTF is validated against the dataset
     // root, the OBJ converted into a temp folder is not, and its textures must
     // still be found.
     // ---------------------------------------------------------------------------
@@ -1107,7 +1107,7 @@ namespace
 
     // A remote (http/https) image is not a dependency and is never fetched. The
     // converted model still references it, which the temp-folder validation
-    // reports (P3) as a plain AppException naming the original glTF: the build
+    // reports as a plain AppException naming the original glTF: the build
     // fails and is never deferred with temp-folder names.
     TEST(file3d, buildGltfRemoteImageNeverPending)
     {

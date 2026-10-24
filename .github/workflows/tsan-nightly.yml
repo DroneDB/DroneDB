@@ -1,6 +1,6 @@
 name: TSan (nightly)
 
-# ThreadSanitizer on the concurrency tests (DQ-01, docs/sanitizers.md). Report-only until the
+# ThreadSanitizer on the concurrency tests (docs/sanitizers.md). Report-only until the
 # reports are triaged: the job never fails the workflow. tests/tsan.supp suppresses third-party
 # frames only; a report in src/, apps/ or tests/ is a bug to fix.
 on:
@@ -67,10 +67,10 @@ jobs:
       - name: Concurrency tests (unit binary)
         run: |
           cd build-tsan
-          ./ddb_unit_tests --gtest_filter='BuildLockTest.*:concurrentAdd.*:DDB02_Pool.*:DDB02_Open.concurrent*:DDB05_Tiler.concurrent*:Shutdown.*:CancelToken.*:Cancellation.*:CAbiLog.*'
+          ./ddb_unit_tests --gtest_filter='BuildLockTest.*:concurrentAdd.*:PooledConnections.*:OpenIndex.concurrent*:TilerCache.concurrent*:Shutdown.*:CancelToken.*:Cancellation.*:CAbiLog.*'
       - name: Concurrency tests (integration binary)
         # These test files download their inputs, so they are integration tests (tests/CMakeLists.txt)
         if: always()
         run: |
           cd build-tsan
-          ./ddbtest --gtest_filter='DDB06_*.concurrent*:DDB09_Parallel.*:DDB09_Index.*:IsBuildActiveTest.RealBuildInThread:tiles3dBuild.cleanupNeverStripsTilesFromConcurrentModelBuild:Dq02Defects.Target_RandomHelperGivesEachThreadItsOwnEngine:Dq02Defects.Target_SingletonsAgreeUnderConcurrentFirstUse:Dq02Defects.Target_DsmCache*'
+          ./ddbtest --gtest_filter='CopcNodeCache.concurrent*:CopcNodeReader.concurrent*:PointCloudTiler.concurrent*:PointRasterizer.concurrent*:ParallelLoop.*:ParallelIndex.*:IsBuildActiveTest.RealBuildInThread:tiles3dBuild.cleanupNeverStripsTilesFromConcurrentModelBuild:Defects.Target_RandomHelperGivesEachThreadItsOwnEngine:Defects.Target_SingletonsAgreeUnderConcurrentFirstUse:Defects.Target_DsmCache*'

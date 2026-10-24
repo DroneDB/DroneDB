@@ -154,7 +154,7 @@ namespace
         EXPECT_NE(err, DDBERR_NONE);
     }
 
-    // E3: validate DDBRenderRasterIndex end-to-end on a synthetic 5-band
+    // Validate DDBRenderRasterIndex end-to-end on a synthetic 5-band
     // georeferenced raster, plus a negative test that the API rejects a
     // raster with insufficient bands.
     TEST(testRasterRegionApi, RenderIndexNdvi)

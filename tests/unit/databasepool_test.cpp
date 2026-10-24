@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// DDB-02 Phase 2 — ddb::open() reuses idle index connections (DatabasePool).
+// ddb::open() reuses idle index connections (DatabasePool).
 
 #include <algorithm>
 #include <atomic>
@@ -31,7 +31,7 @@ namespace
     using namespace ddb;
 
     // Every test starts with an empty pool and known limits, and restores the defaults
-    class DDB02_Pool : public ::testing::Test
+    class PooledConnections : public ::testing::Test
     {
     protected:
         DatabasePool::Options saved;
@@ -66,7 +66,7 @@ namespace
         static DatabasePool::Stats stats() { return DatabasePool::instance().stats(); }
     };
 
-    TEST_F(DDB02_Pool, closedConnectionIsReused)
+    TEST_F(PooledConnections, closedConnectionIsReused)
     {
         const auto root = makeIndex(TEST_NAME);
         const auto before = stats();
@@ -80,7 +80,7 @@ namespace
         EXPECT_EQ(after.idle, 1u);
     }
 
-    TEST_F(DDB02_Pool, disabledPoolOpensEveryTime)
+    TEST_F(PooledConnections, disabledPoolOpensEveryTime)
     {
         DatabasePool::instance().configure({0, 64, std::chrono::seconds(60)});
         const auto root = makeIndex(TEST_NAME);
@@ -93,7 +93,7 @@ namespace
         EXPECT_EQ(stats().idle, 0u);
     }
 
-    TEST_F(DDB02_Pool, writesAreVisibleToIdleConnections)
+    TEST_F(PooledConnections, writesAreVisibleToIdleConnections)
     {
         const auto root = makeIndex(TEST_NAME);
         EXPECT_FALSE(has(root, "b.txt")); // leaves an idle connection with a warm cache
@@ -138,7 +138,7 @@ namespace
         return fs::path((root / DDB_FOLDER / DDB_DATABASE_FILE).string() + "-wal");
     }
 
-    TEST_F(DDB02_Pool, releasedWriterDoesNotCheckpoint)
+    TEST_F(PooledConnections, releasedWriterDoesNotCheckpoint)
     {
         // A checkpoint per write costs two or three fsyncs: the frames stay in the WAL
         const auto root = makeIndex(TEST_NAME);
@@ -150,7 +150,7 @@ namespace
         EXPECT_TRUE(has(root, "b.txt")) << "a pooled reader sees the write";
     }
 
-    TEST_F(DDB02_Pool, checkpointPutsTheWritesInTheDatabaseFile)
+    TEST_F(PooledConnections, checkpointPutsTheWritesInTheDatabaseFile)
     {
         const auto root = makeIndex(TEST_NAME);
         addFile(root, "b.txt", "bravo");
@@ -170,7 +170,7 @@ namespace
         EXPECT_EQ(fs::file_size(walOf(root)), 0u);
     }
 
-    TEST_F(DDB02_Pool, checkpointThroughTheCApi)
+    TEST_F(PooledConnections, checkpointThroughTheCApi)
     {
         const auto root = makeIndex(TEST_NAME);
         addFile(root, "b.txt", "bravo");
@@ -185,7 +185,7 @@ namespace
     // Windows cannot delete or replace a file a connection keeps open: there
     // releaseConnections() must come first, and fileIdentity() is a constant
 #ifndef _WIN32
-    TEST_F(DDB02_Pool, recreatedDatasetIsNotServedByTheOldConnection)
+    TEST_F(PooledConnections, recreatedDatasetIsNotServedByTheOldConnection)
     {
         const auto root = makeIndex(TEST_NAME);
         addFile(root, "b.txt", "bravo");
@@ -200,7 +200,7 @@ namespace
         EXPECT_EQ(stats().discarded - discarded, 1u);
     }
 
-    TEST_F(DDB02_Pool, databaseFileReplacedByRenameIsDetected)
+    TEST_F(PooledConnections, databaseFileReplacedByRenameIsDetected)
     {
         const auto root = makeIndex(TEST_NAME);
         const auto dbFile = root / DDB_FOLDER / DDB_DATABASE_FILE;
@@ -220,7 +220,7 @@ namespace
         EXPECT_TRUE(has(root, "a.txt"));
     }
 
-    TEST_F(DDB02_Pool, connectionToAReplacedFileIsNotReused)
+    TEST_F(PooledConnections, connectionToAReplacedFileIsNotReused)
     {
         const auto root = makeIndex(TEST_NAME);
         const auto dbFile = root / DDB_FOLDER / DDB_DATABASE_FILE;
@@ -237,7 +237,7 @@ namespace
     }
 #endif
 
-    TEST_F(DDB02_Pool, openTransactionIsNotKept)
+    TEST_F(PooledConnections, openTransactionIsNotKept)
     {
         const auto root = makeIndex(TEST_NAME);
         const auto discarded = stats().discarded;
@@ -250,7 +250,7 @@ namespace
         EXPECT_TRUE(has(root, "a.txt"));
     }
 
-    TEST_F(DDB02_Pool, liveStatementIsNotKept)
+    TEST_F(PooledConnections, liveStatementIsNotKept)
     {
         const auto root = makeIndex(TEST_NAME);
         const auto discarded = stats().discarded;
@@ -265,7 +265,7 @@ namespace
         EXPECT_TRUE(has(root, "a.txt"));
     }
 
-    TEST_F(DDB02_Pool, perIndexAndTotalLimits)
+    TEST_F(PooledConnections, perIndexAndTotalLimits)
     {
         DatabasePool::instance().configure({2, 3, std::chrono::seconds(60)});
         const auto a = makeIndex(TEST_NAME);
@@ -287,7 +287,7 @@ namespace
         EXPECT_EQ(stats().idle, 3u) << "total limit";
     }
 
-    TEST_F(DDB02_Pool, idleConnectionsExpire)
+    TEST_F(PooledConnections, idleConnectionsExpire)
     {
         DatabasePool::instance().configure({4, 64, std::chrono::seconds(1)});
         const auto root = makeIndex(TEST_NAME);
@@ -301,7 +301,7 @@ namespace
         EXPECT_EQ(stats().opened - before.opened, 1u);
     }
 
-    TEST_F(DDB02_Pool, releaseConnectionsClosesOnlyThatFolder)
+    TEST_F(PooledConnections, releaseConnectionsClosesOnlyThatFolder)
     {
         const auto ds = makeIndex(TEST_NAME);
         const auto sibling = makeIndex(TEST_NAME, "ds2", false); // same prefix "ds"
@@ -319,7 +319,7 @@ namespace
     }
 
 #ifdef _WIN32
-    TEST_F(DDB02_Pool, releaseConnectionsIgnoresLetterCase)
+    TEST_F(PooledConnections, releaseConnectionsIgnoresLetterCase)
     {
         // Windows paths are case-insensitive: another spelling names the same folder
         const auto ds = makeIndex(TEST_NAME);
@@ -335,7 +335,7 @@ namespace
     }
 #endif
 
-    TEST_F(DDB02_Pool, reopenUsesANewConnection)
+    TEST_F(PooledConnections, reopenUsesANewConnection)
     {
         const auto root = makeIndex(TEST_NAME);
         auto db = ddb::open(root.string(), false);
@@ -346,7 +346,7 @@ namespace
         EXPECT_EQ(stats().idle, 1u);
     }
 
-    TEST_F(DDB02_Pool, concurrentCallsShareConnections)
+    TEST_F(PooledConnections, concurrentCallsShareConnections)
     {
         const auto root = makeIndex(TEST_NAME);
         constexpr int threads = 8;
@@ -393,7 +393,7 @@ namespace
     // exited left them there, and a later process that put another database file in place
     // (a restore, or a test copying a fresh index) had them applied to it: "database disk
     // image is malformed". At a normal exit the pool now moves the WAL into the file.
-    TEST_F(DDB02_Pool, exitLeavesTheDataInTheDatabaseFile)
+    TEST_F(PooledConnections, exitLeavesTheDataInTheDatabaseFile)
     {
         const auto root = makeIndex(TEST_NAME);
         const auto wal = root / ".ddb" / "dbase.sqlite-wal";

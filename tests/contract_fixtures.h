@@ -4,7 +4,7 @@
 #ifndef CONTRACT_FIXTURES_H
 #define CONTRACT_FIXTURES_H
 
-// Golden contract fixtures of libddb's JSON outputs (XI-09, tests/contract/README.md).
+// Golden contract fixtures of libddb's JSON outputs (tests/contract/README.md).
 //
 // expectMatchesFixture() validates an output against its JSON Schema, normalises its volatile
 // values and compares it with tests/contract/fixtures/<name>.json. With the environment

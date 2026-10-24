@@ -216,7 +216,7 @@ TEST_F(ExportRaster2Test, Cancel) {
                                         nullptr, 128, progressCallback, &st);
 
     EXPECT_EQ(err, DDBERR_CANCELED);
-    // XI-02: every code but NONE comes with a message (CANCELED used to come without one)
+    // Every code but NONE comes with a message (CANCELED used to come without one)
     EXPECT_STRNE(DDBGetLastError(), "");
     EXPECT_FALSE(fs::exists(output)) << "Canceled export must not leave an output file";
 }

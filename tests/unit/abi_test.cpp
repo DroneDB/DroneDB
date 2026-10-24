@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// XI-01: the ABI handshake. The library, the C ABI and the release have one version, the
+// The ABI handshake. The library, the C ABI and the release have one version, the
 // "version" of package.json: ddb_version.h is generated from it, and the ABI is its MAJOR and
 // MINOR. DDBGetAbiVersion() encodes DDB_ABI_MAJOR/DDB_ABI_MINOR, and
 // DDBGetCapabilities() returns the version, the error codes, the cancellable exports and the

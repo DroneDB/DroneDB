@@ -2,14 +2,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// DDB-03 — getDelta() is a merge-join over the two sorted stamps (it used to search the
+// getDelta() is a merge-join over the two sorted stamps (it used to search the
 // other list linearly for every entry: 5 s for 50k vs 50k), and DDBGetStamp writes the
 // stamp without building a json document.
 //
 //  - semantics*: the add/remove rules the merge-join must keep;
 //  - matchesReferenceImplementation: randomised stamp pairs give the same delta as the
 //    previous O(n·m) implementation (kept below as the reference);
-//  - isLinear*: timing, skipped with DDB03_SKIP_TIMING=1 (Debug builds).
+//  - isLinear*: timing, skipped with DDB_SKIP_TIMING_TESTS=1 (Debug builds).
 
 #include <chrono>
 #include <cstdlib>
@@ -79,7 +79,7 @@ namespace
         }
     }
 
-    TEST(DDB03_Delta, semanticsAddsModifiedAndNew)
+    TEST(DeltaDiff, semanticsAddsModifiedAndNew)
     {
         const auto src = makeStamp({{"a.jpg", "h1"}, {"b.jpg", "h2-new"}, {"c.jpg", "h3"}, {"d", ""}});
         const auto dst = makeStamp({{"a.jpg", "h1"}, {"b.jpg", "h2-old"}, {"d", ""}});
@@ -88,7 +88,7 @@ namespace
         EXPECT_TRUE(d.removes.empty());
     }
 
-    TEST(DDB03_Delta, semanticsRemovesMissingAndTypeFlips)
+    TEST(DeltaDiff, semanticsRemovesMissingAndTypeFlips)
     {
         // "x" is a folder in the destination and a file in the source: the
         // destination folder is removed and the source file is added.
@@ -99,7 +99,7 @@ namespace
         EXPECT_EQ(paths(d.removes), (std::vector<std::string>{"gone.jpg", "x"}));
     }
 
-    TEST(DDB03_Delta, semanticsRemovesSortedDescending)
+    TEST(DeltaDiff, semanticsRemovesSortedDescending)
     {
         // applyDelta deletes children before parents: removes must be path-descending.
         const auto src = makeStamp({});
@@ -110,7 +110,7 @@ namespace
             EXPECT_GT(d.removes[i - 1].path, d.removes[i].path);
     }
 
-    TEST(DDB03_Delta, semanticsMeta)
+    TEST(DeltaDiff, semanticsMeta)
     {
         const auto src = makeStamp({}, {"m1", "m2"});
         const auto dst = makeStamp({}, {"m2", "m3"});
@@ -119,7 +119,7 @@ namespace
         EXPECT_EQ(d.metaRemoves, (std::vector<std::string>{"m3"}));
     }
 
-    TEST(DDB03_Delta, semanticsUnsortedInput)
+    TEST(DeltaDiff, semanticsUnsortedInput)
     {
         // Stamps from other tools are not necessarily sorted.
         const auto src = makeStamp({{"z.jpg", "h"}, {"a.jpg", "h"}, {"m.jpg", "new"}});
@@ -156,7 +156,7 @@ namespace
         EXPECT_TRUE(getDelta(dst, src).empty());
     }
 
-    TEST(DDB03_Delta, matchesReferenceImplementation)
+    TEST(DeltaDiff, matchesReferenceImplementation)
     {
         std::mt19937 rng(20261019);
         const std::vector<std::string> names = {"a", "A", "a.jpg", "A.JPG", "b", "b/c.tif", "b/C.tif",
@@ -220,9 +220,9 @@ namespace
     // 50k (16 times that at 200k). The bound sits between the two, with a wide margin on both
     // sides: this test checks the complexity, not the speed of the machine. It runs serially
     // (tests/CMakeLists.txt), so other tests do not take its CPU.
-    TEST(DDB03_Delta, isLinear)
+    TEST(DeltaDiff, isLinear)
     {
-        if (std::getenv("DDB03_SKIP_TIMING") != nullptr)
+        if (std::getenv("DDB_SKIP_TIMING_TESTS") != nullptr)
             GTEST_SKIP() << "timing test disabled";
 
         const auto [s, t] = scalingStamps(200000);
@@ -231,7 +231,7 @@ namespace
 
         EXPECT_EQ(d.adds.size(), 4000u);  // 2000 missing in dst + 2000 modified
         EXPECT_EQ(d.removes.size(), 0u);
-        std::cout << "[ DDB03 ] getDelta(200k, 200k) took " << ms << " ms" << std::endl;
+        std::cout << "[ delta ] getDelta(200k, 200k) took " << ms << " ms" << std::endl;
         EXPECT_LT(ms, 10000) << "getDelta is quadratic (about 80 s at 200k before the merge-join)";
     }
 
@@ -256,7 +256,7 @@ namespace
         }
     };
 
-    TEST(DDB03_Stamp, jsonMatchesDocument)
+    TEST(DatasetStamp, jsonMatchesDocument)
     {
         StampFixture f(TEST_NAME);
         const auto stamp = f.db->getStamp();
@@ -271,7 +271,7 @@ namespace
         EXPECT_EQ(json::parse(f.db->getStampJson()), stamp);
     }
 
-    TEST(DDB03_Stamp, checksumMatchesStamp)
+    TEST(DatasetStamp, checksumMatchesStamp)
     {
         StampFixture f(TEST_NAME);
         const auto before = f.db->getStampChecksum();
@@ -284,7 +284,7 @@ namespace
         EXPECT_EQ(f.db->getStampChecksum(), f.db->getStamp()["checksum"].get<std::string>());
     }
 
-    TEST(DDB03_Stamp, emptyIndex)
+    TEST(DatasetStamp, emptyIndex)
     {
         TestArea ta(TEST_NAME, true);
         const auto root = ta.getFolder("ds");
@@ -293,7 +293,7 @@ namespace
         EXPECT_EQ(db->getStampJson(), db->getStamp().dump());
     }
 
-    TEST(DDB03_Stamp, cApi)
+    TEST(DatasetStamp, cApi)
     {
         StampFixture f(TEST_NAME);
         const auto path = f.root.string();

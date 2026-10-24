@@ -219,7 +219,7 @@ namespace
 #endif
     }
 
-    // XI-03: the paths of the C API are UTF-8, whatever the locale
+    // The paths of the C API are UTF-8, whatever the locale
     TEST(utf8Path, RoundTrip)
     {
         const std::string name = "citt\xC3\xA0_\xC3\xBC_\xE6\x97\xA5.txt"; // "città_ü_日.txt"

@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// DQ-03: C ABI tests for the exports of ddb.h that had no direct test. They pin the behaviour
+// C ABI tests for the exports of ddb.h that had no direct test. They pin the behaviour
 // of today's ABI (1.0), offline, with inputs made by the test:
 //
 //  - null and invalid arguments return DDBERR_EXCEPTION and set a non-empty DDBGetLastError(),

@@ -13,9 +13,9 @@ if(BUILD_TESTING)
     find_package(plog CONFIG REQUIRED)
     find_package(cxxopts CONFIG REQUIRED)
 
-    # Two test binaries (DQ-03), so the fast offline tests run on their own (and under the
+    # Two test binaries, so the fast offline tests run on their own (and under the
     # sanitizers) and the rest keeps the downloads, the external tools and the 3D builds apart.
-    # Both contain the library (DQ-14): libddb exports nothing but its C API, and the tests use the
+    # Both contain the library: libddb exports nothing but its C API, and the tests use the
     # C++ code, so they link the library objects (ddb_embed_library, src/CMakeLists.txt) like the
     # CLI. The shared libddb is tested as it ships by the probes below (a process each, C API
     # only) and by scripts/check-abi.py exports (the dynamic symbols equal the manifest).
@@ -51,22 +51,22 @@ if(BUILD_TESTING)
     target_link_libraries(ddbtest_child PRIVATE plog::plog Threads::Threads ddb_warnings)
     target_include_directories(ddbtest_child PRIVATE "${PROJECT_SOURCE_DIR}/src/include")
 
-    # Host-process stand-in for DDB-11 B6: checks that DDBRegisterProcess leaves the
+    # Host-process stand-in: checks that DDBRegisterProcess leaves the
     # host's signal handlers alone. Separate process: libddb initializes once per process.
     add_executable(ddbtest_signal_probe helpers/signal_probe.cpp)
     target_link_libraries(ddbtest_signal_probe PRIVATE ${PROJECT_NAME} ddb_warnings)
 
-    # DQ-15 probe: DDBConfigure before DDBRegisterProcess, in a process of its own for the same
+    # Probe: DDBConfigure before DDBRegisterProcess, in a process of its own for the same
     # reason (CAbiConfig.ConfigureBeforeRegisterProcess runs it).
     add_executable(ddbtest_config_probe helpers/config_probe.cpp)
     target_link_libraries(ddbtest_config_probe PRIVATE ${PROJECT_NAME} ddb_warnings)
 
-    # DQ-15 probe: DDBSetLogCallback before DDBRegisterProcess, in a process of its own for the
+    # Probe: DDBSetLogCallback before DDBRegisterProcess, in a process of its own for the
     # same reason (CAbiLog.callbackBeforeRegisterProcess runs it).
     add_executable(ddbtest_log_probe helpers/log_probe.cpp)
     target_link_libraries(ddbtest_log_probe PRIVATE ${PROJECT_NAME} ddb_warnings)
 
-    # DQ-14 probe: libddb as a host loads it (C API only), the one test that runs the shared library
+    # Probe: libddb as a host loads it (C API only), the one test that runs the shared library
     # itself. ctest runs it (shared.LibddbSmoke below).
     add_executable(ddbtest_shared_probe helpers/shared_probe.cpp)
     target_link_libraries(ddbtest_shared_probe PRIVATE ${PROJECT_NAME} ddb_warnings)
@@ -107,14 +107,14 @@ if(BUILD_TESTING)
     endif()
     set_source_files_properties(testfs.cpp PROPERTIES
         COMPILE_DEFINITIONS DDB_TEST_DATA_SHA="${DDB_TEST_DATA_SHA}")
-    # The golden contract fixtures (XI-09, tests/contract/README.md): read from the source tree,
+    # The golden contract fixtures (tests/contract/README.md): read from the source tree,
     # and rewritten there with DDB_UPDATE_CONTRACT_FIXTURES=1
     set_source_files_properties(contract_fixtures.cpp PROPERTIES
         COMPILE_DEFINITIONS DDB_CONTRACT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/contract")
 
     # The version test compares ddb::version() with package.json; one source file only, so
     # no other test TU carries it on its compile line
-    set_source_files_properties(unit/dq01_version_test.cpp PROPERTIES
+    set_source_files_properties(unit/version_test.cpp PROPERTIES
         COMPILE_DEFINITIONS DDB_PACKAGE_JSON="${PROJECT_SOURCE_DIR}/package.json")
     # The ABI test compares DDBGetCapabilities() with the symbol manifest (src/CMakeLists.txt),
     # and the ABI macros (generated from package.json) with package.json
@@ -122,10 +122,10 @@ if(BUILD_TESTING)
         COMPILE_DEFINITIONS DDB_SYMBOLS_MANIFEST="${DDB_SYMBOLS_MANIFEST}")
     set_property(SOURCE unit/abi_test.cpp APPEND PROPERTY
         COMPILE_DEFINITIONS DDB_PACKAGE_JSON="${PROJECT_SOURCE_DIR}/package.json")
-    # The golden outputs of the geo and raster code (DQ-06): read from the source tree, and
-    # rewritten there with DDB_UPDATE_DQ06_GOLDEN=1 (see dq06_golden_support.h)
-    set_source_files_properties(dq06_golden_support.cpp PROPERTIES
-        COMPILE_DEFINITIONS DDB_DQ06_GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/dq06_golden")
+    # The golden outputs of the geo and raster code: read from the source tree, and
+    # rewritten there with DDB_UPDATE_GOLDEN=1 (see golden_support.h)
+    set_source_files_properties(golden_support.cpp PROPERTIES
+        COMPILE_DEFINITIONS DDB_GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/golden")
     # The initIndex race test, the process teardown test, the GDAL data test and the test area test run their own binary as child processes
     set_source_files_properties(unit/init_index_template_test.cpp unit/process_finalize_test.cpp unit/data_dirs_test.cpp
         unit/testarea_isolation_test.cpp PROPERTIES
@@ -178,7 +178,7 @@ if(BUILD_TESTING)
         endif()
     endfunction()
 
-    # ddb.h is valid C (DQ-10, XI-03): unit/c11_header.c includes it as C11 with warnings as
+    # ddb.h is valid C: unit/c11_header.c includes it as C11 with warnings as
     # errors, and is linked into ddb_unit_tests (unit/c_header_test.cpp calls it), so a header
     # that is not valid C fails the build of the unit tests. Only the public include folder: no
     # flag or define of the C++ targets reaches it, but DDB_STATIC_DEFINE: it is linked with the
@@ -201,7 +201,7 @@ if(BUILD_TESTING)
         TIMEOUT 300
         SOURCES ${DDB_UNIT_TEST_SOURCES} $<TARGET_OBJECTS:ddb_c11_header>
         LINK ddb_cli_commands
-        SERIAL DDB03_Delta.isLinear
+        SERIAL DeltaDiff.isLinear
     )
     # The C API's private headers (src/library/c_api_util.h), for the unit tests of its mapper;
     # after tests/ and the public headers, so no name there is shadowed
@@ -221,7 +221,7 @@ if(BUILD_TESTING)
     )
     ddb_stage_runtime_files(ddbtest)
 
-    # Every header compiles on its own (DQ-14): one tiny translation unit per header (a single
+    # Every header compiles on its own: one tiny translation unit per header (a single
     # #include), so a header that needs another one it does not include fails here and not in the
     # next file that happens to include it first. Three object libraries, built on request
     # (ctest -L headers, or the ddb_header_check target) because they compile every header again:
@@ -284,7 +284,7 @@ if(BUILD_TESTING)
     set_tests_properties(shared.LibddbSmoke PROPERTIES LABELS shared TIMEOUT 300
         ENVIRONMENT "DDB_PROBE_INPUT_DIR=${CMAKE_CURRENT_SOURCE_DIR}/contract/inputs;DDB_PROBE_WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/shared_probe_dataset")
 
-    # Every export of ddb.h is called by a test (DQ-03): a new export without one fails here
+    # Every export of ddb.h is called by a test: a new export without one fails here
     add_test(NAME c_abi.ExportsHaveTests
         COMMAND ${CMAKE_COMMAND} "-DDDB_HEADER=${PROJECT_SOURCE_DIR}/src/include/ddb.h"
             "-DDDB_TESTS=${CMAKE_CURRENT_SOURCE_DIR}"
@@ -301,7 +301,7 @@ if(BUILD_TESTING)
         set_tests_properties(abi.CheckAbiSemver PROPERTIES LABELS unit TIMEOUT 120)
     endif()
 
-    # CLI exit codes (DQ-02): usage errors and failed commands must exit 1, an explicit
+    # CLI exit codes: usage errors and failed commands must exit 1, an explicit
     # help request exits 0. Each test checks the exact code (cli_expect_exit.cmake), so a
     # crash or a loader failure no longer counts as an expected failure. ddbcmd is built in
     # the build root, next to the Windows DLLs: the binary users run.
@@ -340,7 +340,7 @@ if(BUILD_TESTING)
     ddb_add_cli_test(NAME cli.HelpSucceeds EXIT 0 ARGS --help)
     ddb_add_cli_test(NAME cli.CommandHelpSucceeds EXIT 0 ARGS cog --help)
 
-    # Errors and usage go to stderr and leave stdout empty (DQ-12: one handler maps what a command
+    # Errors and usage go to stderr and leave stdout empty (one handler maps what a command
     # throws to stderr and an exit code); an alias runs its command
     # contour could not run, nor print its help: the default of --min and --max was the text "nan"
     ddb_add_cli_test(NAME cli.ContourHelpSucceeds EXIT 0 STDOUT "--interval" ARGS contour --help)

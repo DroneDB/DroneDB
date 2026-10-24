@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// Pending-build recovery (spec A1): a retry is a full build attempt, the
+// Pending-build recovery: a retry is a full build attempt, the
 // dependency names stored in ".pending" are dataset-root-relative and for
 // display only, and dependencies that can never be satisfied fail the build.
 
@@ -243,7 +243,7 @@ TEST(PendingBuild, BackoffIsSixtySecondsAndForceBypassesIt) {
     EXPECT_TRUE(ddb::isBuildComplete(ds.db.get(), "m.obj"));
 }
 
-// P1: an attempt that finds the output already complete still consumes ".pending",
+// An attempt that finds the output already complete still consumes ".pending",
 // whatever the marker lists.
 TEST(PendingBuild, CompleteOutputConsumesPendingMarker) {
     Dataset ds(TEST_NAME);
@@ -300,7 +300,7 @@ TEST(PendingBuild, IgnoresNonHashAndNestedPendingFiles) {
 }
 
 // ---------------------------------------------------------------------------
-// Path contract (A1.2)
+// Path contract
 // ---------------------------------------------------------------------------
 
 // mtllib mats/m.mtl + map_Kd tex.png: satisfied by mats/tex.png (MTL folder) ...
@@ -460,7 +460,7 @@ TEST(PendingBuild, ValidateDependenciesReportsMissingFile) {
 }
 
 // ---------------------------------------------------------------------------
-// Shapefile sidecars (P2)
+// Shapefile sidecars
 // ---------------------------------------------------------------------------
 
 // Writes a one-point EPSG:4326 shapefile (.shp/.shx/.dbf/.prj).

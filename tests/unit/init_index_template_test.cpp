@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// D2-7a: initIndex() copies the empty-index template of the user profile
+// initIndex() copies the empty-index template of the user profile
 // (<profile>/templates/empty-dbase-<revision>.sqlite), creating it first when the profile has
 // none. Processes that start on a fresh profile at the same time used to create it in place
 // together (only an in-process mutex guarded it): one copied a half-written file ("Table

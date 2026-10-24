@@ -51,7 +51,7 @@ namespace
             ASSERT_NE(hLayer, nullptr);
 
             OGRSpatialReferenceH hSRS = OGR_L_GetSpatialRef(hLayer);
-            // E1: every GPKG layer produced by buildVector MUST have an
+            // Every GPKG layer produced by buildVector MUST have an
             // explicit SRS. A missing SRS used to silently pass the test
             // because the EPSG check was guarded by `if (hSRS != nullptr)`.
             ASSERT_NE(hSRS, nullptr)

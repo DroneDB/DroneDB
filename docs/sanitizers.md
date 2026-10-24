@@ -49,12 +49,12 @@ The suppression files are in `tests/`. They list third-party code only; a report
 `apps/` or `tests/` is a bug to fix, never an entry to add.
 
 ASan + UBSan, unit and CLI tests (what the `sanitizers_asan_ubsan` CI job runs). Timing
-assertions mean nothing under instrumentation, so `DDB03_SKIP_TIMING=1` skips them. ctest runs
+assertions mean nothing under instrumentation, so `DDB_SKIP_TIMING_TESTS=1` skips them. ctest runs
 the tests from the build root, so the suppression paths must be absolute:
 
 ```bash
 cd build-asan
-export DDB03_SKIP_TIMING=1 \
+export DDB_SKIP_TIMING_TESTS=1 \
   ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
   LSAN_OPTIONS=suppressions=$PWD/../tests/lsan.supp \
   UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1:suppressions=$PWD/../tests/ubsan.supp
@@ -77,8 +77,8 @@ TSan, concurrency tests (what the nightly `TSan (nightly)` workflow runs, report
 ```bash
 cd build-tsan
 export TSAN_OPTIONS=halt_on_error=0:second_deadlock_stack=1:suppressions=$PWD/../tests/tsan.supp
-./ddb_unit_tests --gtest_filter='BuildLockTest.*:concurrentAdd.*:DDB02_Pool.*:DDB02_Open.concurrent*:DDB05_Tiler.concurrent*:Shutdown.*:CancelToken.*:Cancellation.*:CAbiLog.*'
-./ddbtest --gtest_filter='DDB06_*.concurrent*:DDB09_Parallel.*:DDB09_Index.*:IsBuildActiveTest.RealBuildInThread:tiles3dBuild.cleanupNeverStripsTilesFromConcurrentModelBuild:Dq02Defects.Target_RandomHelperGivesEachThreadItsOwnEngine:Dq02Defects.Target_SingletonsAgreeUnderConcurrentFirstUse:Dq02Defects.Target_DsmCache*'
+./ddb_unit_tests --gtest_filter='BuildLockTest.*:concurrentAdd.*:PooledConnections.*:OpenIndex.concurrent*:TilerCache.concurrent*:Shutdown.*:CancelToken.*:Cancellation.*:CAbiLog.*'
+./ddbtest --gtest_filter='CopcNodeCache.concurrent*:CopcNodeReader.concurrent*:PointCloudTiler.concurrent*:PointRasterizer.concurrent*:ParallelLoop.*:ParallelIndex.*:IsBuildActiveTest.RealBuildInThread:tiles3dBuild.cleanupNeverStripsTilesFromConcurrentModelBuild:Defects.Target_RandomHelperGivesEachThreadItsOwnEngine:Defects.Target_SingletonsAgreeUnderConcurrentFirstUse:Defects.Target_DsmCache*'
 ```
 
 TSan only sees code it instrumented: frames of the prebuilt dependencies are missing from its

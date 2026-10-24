@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// DDB-02 (Phase 1) — cost of the per-call index open.
+// Cost of the per-call index open.
 //
 //  - opens are no longer serialized by a process-wide mutex, and SQLite's allocation
 //    statistics (a global mutex on every malloc) are off, so concurrent opens scale;
@@ -10,7 +10,7 @@
 //    deleted and recreated by every read-only call) and the WAL is truncated to zero
 //    bytes once checkpointed, so no stale frames sit next to the database file;
 //  - the journal mode is only written when the database is not in WAL mode yet;
-//  - the busy timeout is DroneDB's floor, not the one SpatiaLite sets (D2-7a).
+//  - the busy timeout is DroneDB's floor, not the one SpatiaLite sets.
 
 #include <atomic>
 #include <fstream>
@@ -33,7 +33,7 @@ namespace
     fs::path dbFile(const fs::path &root) { return root / DDB_FOLDER / DDB_DATABASE_FILE; }
     fs::path walFile(const fs::path &root) { return fs::path(dbFile(root).string() + "-wal"); }
 
-    TEST(DDB02_Open, sqliteMemoryStatisticsAreOff)
+    TEST(OpenIndex, sqliteMemoryStatisticsAreOff)
     {
         const auto root = makeIndex(TEST_NAME);
         auto db = ddb::open(root.string(), false);
@@ -46,7 +46,7 @@ namespace
 
     // spatialite_init_ex() sets a 5 s busy timeout on the connection it initializes: the
     // DroneDB floor must be applied after it, on every connection
-    TEST(DDB02_Open, busyTimeoutIsDroneDbFloor)
+    TEST(OpenIndex, busyTimeoutIsDroneDbFloor)
     {
         const auto root = makeIndex(TEST_NAME);
         const auto busyTimeout = [](const Database &db) {
@@ -63,7 +63,7 @@ namespace
         EXPECT_EQ(busyTimeout(*pooled), Database::busyTimeoutMs);
     }
 
-    TEST(DDB02_Open, walIsKeptAndEmptyAfterLastClose)
+    TEST(OpenIndex, walIsKeptAndEmptyAfterLastClose)
     {
         const auto root = makeIndex(TEST_NAME);
 
@@ -79,7 +79,7 @@ namespace
         EXPECT_EQ(fs::file_size(walFile(root)), 0u) << "checkpointed frames left in the WAL";
     }
 
-    TEST(DDB02_Open, writesAreInTheMainFileAfterCheckpoint)
+    TEST(OpenIndex, writesAreInTheMainFileAfterCheckpoint)
     {
         const auto root = makeIndex(TEST_NAME);
 
@@ -106,7 +106,7 @@ namespace
         EXPECT_TRUE(loadEntry(db.get(), "b.txt", e));
     }
 
-    TEST(DDB02_Open, replacedDatabaseFileIsNotMixedWithOldWal)
+    TEST(OpenIndex, replacedDatabaseFileIsNotMixedWithOldWal)
     {
         const auto root = makeIndex(TEST_NAME);
         const auto snapshot = dbFile(root).string() + ".snapshot";
@@ -130,7 +130,7 @@ namespace
         EXPECT_FALSE(loadEntry(db.get(), "b.txt", e)) << "frames of the old WAL were replayed";
     }
 
-    TEST(DDB02_Open, readOnlyOpenDoesNotWriteTheDatabaseFile)
+    TEST(OpenIndex, readOnlyOpenDoesNotWriteTheDatabaseFile)
     {
         const auto root = makeIndex(TEST_NAME);
         { auto db = ddb::open(root.string(), false); }
@@ -150,7 +150,7 @@ namespace
         EXPECT_EQ(fs::file_size(dbFile(root)), sizeBefore);
     }
 
-    TEST(DDB02_Open, rollbackJournalDatabaseIsSwitchedToWal)
+    TEST(OpenIndex, rollbackJournalDatabaseIsSwitchedToWal)
     {
         const auto root = makeIndex(TEST_NAME);
         // Leaving WAL mode needs the only connection to the file
@@ -176,7 +176,7 @@ namespace
         EXPECT_EQ(db->getJournalMode(), "wal");
     }
 
-    TEST(DDB02_Open, concurrentOpensAndReadsSucceed)
+    TEST(OpenIndex, concurrentOpensAndReadsSucceed)
     {
         const auto root = makeIndex(TEST_NAME);
         constexpr int threads = 8;
@@ -217,7 +217,7 @@ namespace
         EXPECT_EQ(ok.load(), threads * iterations);
     }
 
-    TEST(DDB02_Open, concurrentInitIndexSucceeds)
+    TEST(OpenIndex, concurrentInitIndexSucceeds)
     {
         TestArea ta(TEST_NAME, true);
         constexpr int threads = 6;

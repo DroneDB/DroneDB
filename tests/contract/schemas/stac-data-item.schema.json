@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "libddb data-only STAC item",
-  "description": "DDBStacData with an entry; also the features of DDBStacItemCollectionData (XI-09). The DDBStac item without the members built from a URL or an ID: no id, collection, links or asset href.",
+  "description": "DDBStacData with an entry; also the features of DDBStacItemCollectionData. The DDBStac item without the members built from a URL or an ID: no id, collection, links or asset href.",
   "type": "object",
   "required": [
     "type",

@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// DDB-10: JPEG thumbnails decode an embedded MPF preview of the same framing when it is
+// JPEG thumbnails decode an embedded MPF preview of the same framing when it is
 // large enough
 
 
@@ -99,7 +99,7 @@ namespace
     bool isBlue(Rgb c) { return c.b > 150 && c.r < 100; }
     bool isRed(Rgb c) { return c.r > 150 && c.b < 100; }
 
-    TEST(DDB10_Preview, layoutListsTheMpfPreview)
+    TEST(EmbeddedPreview, layoutListsTheMpfPreview)
     {
         TestArea ta(TEST_NAME, true);
         const auto file = writeFile(ta.getPath("dji.jpg"), mpfJpeg(solidJpeg(1600, 1200, Red), solidJpeg(800, 600, Blue)));
@@ -112,7 +112,7 @@ namespace
         EXPECT_EQ(layout.previews[0].height, 600);
     }
 
-    TEST(DDB10_Preview, thumbnailDecodesThePreview)
+    TEST(EmbeddedPreview, thumbnailDecodesThePreview)
     {
         TestArea ta(TEST_NAME, true);
         const auto file = writeFile(ta.getPath("dji.jpg"), mpfJpeg(solidJpeg(1600, 1200, Red), solidJpeg(800, 600, Blue)));
@@ -123,7 +123,7 @@ namespace
         EXPECT_TRUE(isBlue(centre(img))) << "the preview was not used";
     }
 
-    TEST(DDB10_Preview, previewSmallerThanTheThumbnailIsNotUsed)
+    TEST(EmbeddedPreview, previewSmallerThanTheThumbnailIsNotUsed)
     {
         TestArea ta(TEST_NAME, true);
         const auto file = writeFile(ta.getPath("dji.jpg"), mpfJpeg(solidJpeg(1600, 1200, Red), solidJpeg(400, 300, Blue)));
@@ -134,7 +134,7 @@ namespace
         EXPECT_TRUE(isRed(centre(img)));
     }
 
-    TEST(DDB10_Preview, previewOfAnotherFramingIsNotUsed)
+    TEST(EmbeddedPreview, previewOfAnotherFramingIsNotUsed)
     {
         TestArea ta(TEST_NAME, true);
         const auto file = writeFile(ta.getPath("dji.jpg"), mpfJpeg(solidJpeg(1600, 1200, Red), solidJpeg(800, 450, Blue)));
@@ -143,7 +143,7 @@ namespace
         EXPECT_TRUE(isRed(centre(thumbnail(file, 256))));
     }
 
-    TEST(DDB10_Preview, staleIndexIsIgnored)
+    TEST(EmbeddedPreview, staleIndexIsIgnored)
     {
         TestArea ta(TEST_NAME, true);
         const auto preview = solidJpeg(800, 600, Blue);
@@ -159,7 +159,7 @@ namespace
         EXPECT_TRUE(isRed(centre(thumbnail(inside, 256))));
     }
 
-    TEST(DDB10_Preview, plainJpegAndOtherFiles)
+    TEST(EmbeddedPreview, plainJpegAndOtherFiles)
     {
         TestArea ta(TEST_NAME, true);
         const auto plain = writeFile(ta.getPath("plain.jpg"), solidJpeg(640, 480, Red));

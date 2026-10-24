@@ -756,7 +756,7 @@ namespace
         return out;
     }
 
-    // A3.5 race: the "3dtiles" lock is held only while the leftovers are renamed
+    // Race: the "3dtiles" lock is held only while the leftovers are renamed
     // aside ("3dtiles-temp-trash-<rand>"); the deletion happens after its release.
     // Trash left by an earlier cleanup is deleted even under a live tiles lock.
     TEST(cleanupBuild, TilesLeftoversDeletedOutsideTheTilesLock)

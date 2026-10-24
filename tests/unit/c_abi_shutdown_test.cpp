@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// DQ-15 (XI-07): DDBShutdown (new in 2.0).
+// DDBShutdown (new in 2.0).
 //
 //  - once DDBShutdown started, every call but the exempt accessors returns DDBERR_SHUTDOWN
 //    without running; the exempt accessors keep working and keep the last error;

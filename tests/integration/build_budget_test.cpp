@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// DDB-08 — the GDAL block cache is bounded during COG builds and by default
+// The GDAL block cache is bounded during COG builds and by default
 // in the process, and the build thread budget is configurable.
 
 #include <mutex>
@@ -50,7 +50,7 @@ namespace
         GIntBig cache_;
     };
 
-    TEST(DDB08_Budget, defaultsAndOverrides)
+    TEST(GdalCacheBudget, defaultsAndOverrides)
     {
         ConfigSnapshot snap({"DDB_COG_CACHE_MB", "DDB_WARP_MEMORY_MB", "DDB_BUILD_THREADS"});
         CPLSetConfigOption("DDB_COG_CACHE_MB", nullptr);
@@ -69,7 +69,7 @@ namespace
         b = BuildResourceBudget::fromConfig();
         EXPECT_EQ(b.cacheBytes, 256 * MiB);
         EXPECT_EQ(b.warpMemoryMb, 128);
-        // 0 is every core, as a count: the CPU pool decides how many run (DQ-15, no ALL_CPUS)
+        // 0 is every core, as a count: the CPU pool decides how many run (no ALL_CPUS)
         EXPECT_EQ(b.threads, static_cast<int>(parallel::hardwareThreads()));
 
         // Invalid values fall back to the defaults.
@@ -80,7 +80,7 @@ namespace
         EXPECT_GE(b.threads, 1);
     }
 
-    TEST(DDB08_Budget, scopedCacheLowersAndRestores)
+    TEST(GdalCacheBudget, scopedCacheLowersAndRestores)
     {
         ConfigSnapshot snap({});
         GDALSetCacheMax64(8192 * MiB);
@@ -93,7 +93,7 @@ namespace
 
     // Two builds overlap in one process: the first one to finish must not put the
     // unbounded cache back while the second one is still running.
-    TEST(DDB08_Budget, overlappingGuardsStayBoundedUntilTheLastEnds)
+    TEST(GdalCacheBudget, overlappingGuardsStayBoundedUntilTheLastEnds)
     {
         ConfigSnapshot snap({});
         GDALSetCacheMax64(8192 * MiB);
@@ -107,7 +107,7 @@ namespace
         EXPECT_EQ(GDALGetCacheMax64(), 8192 * MiB);   // last guard restores the original
     }
 
-    TEST(DDB08_Budget, defaultBoundLowersLargeCache)
+    TEST(GdalCacheBudget, defaultBoundLowersLargeCache)
     {
         ConfigSnapshot snap({"GDAL_CACHEMAX", "DDB_GDAL_CACHE_MB"});
         CPLSetConfigOption("GDAL_CACHEMAX", nullptr);
@@ -122,7 +122,7 @@ namespace
         EXPECT_EQ(GDALGetCacheMax64(), 400 * MiB);
     }
 
-    TEST(DDB08_Cog, respectsUserCacheMax)
+    TEST(CogCacheBudget, respectsUserCacheMax)
     {
         ConfigSnapshot snap({"GDAL_CACHEMAX"});
         CPLSetConfigOption("GDAL_CACHEMAX", "8192");
@@ -148,7 +148,7 @@ namespace
     std::mutex WarpCacheProbe::mutex;
     std::vector<GIntBig> WarpCacheProbe::samples;
 
-    TEST(DDB08_Cog, cacheIsBoundedDuringBuild)
+    TEST(CogCacheBudget, cacheIsBoundedDuringBuild)
     {
         TestArea ta(TEST_NAME, true);
         const fs::path input = ta.downloadTestAsset(

@@ -4,7 +4,7 @@
 #ifndef FAKE_HTTP_CLIENT_H
 #define FAKE_HTTP_CLIENT_H
 
-// An IHttpClient that answers from a script (DQ-11), so the Registry code runs without a network:
+// An IHttpClient that answers from a script, so the Registry code runs without a network:
 // a reply is queued for a route (method + the end of the URL) and the requests are recorded, the
 // files of a multipart body read at the time of the call. Nothing sleeps: RegistryDeps with a
 // recording sleeper and a settable clock are made by FakeNetwork.

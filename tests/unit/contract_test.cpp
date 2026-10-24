@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// XI-09: golden contract fixtures of the libddb JSON outputs Registry consumes. Each test makes
+// Golden contract fixtures of the libddb JSON outputs Registry consumes. Each test makes
 // the contract dataset from tests/contract/inputs (committed files, fixed mtimes), calls the C
 // API as Registry does, and checks the output against its JSON Schema and its golden file in
 // tests/contract/fixtures (contract_fixtures.h). Any change to a field name, a type or a value
@@ -282,7 +282,7 @@ namespace
         DDBReleaseConnections(r.c_str(), nullptr);
     }
 
-    // XI-04: the build manifest. ortho.tif built (COG), layer.geojson and cloud.las buildable and
+    // The build manifest. ortho.tif built (COG), layer.geojson and cloud.las buildable and
     // not built, a.txt and the folder sub not buildable, a path that is not indexed
     TEST_F(ContractFixtures, BuildArtifacts)
     {
@@ -368,7 +368,7 @@ namespace
         DDBReleaseConnections(r.c_str(), nullptr);
     }
 
-    // XI-04: the entry types and what libddb does with them (no dataset)
+    // The entry types and what libddb does with them (no dataset)
     TEST(ContractFixturesEntryTypes, EntryTypes)
     {
         char *out = nullptr;
@@ -379,7 +379,7 @@ namespace
             contract::takeJson(out));
     }
 
-    // DQ-15: the process configuration after a host set every setting (no dataset)
+    // The process configuration after a host set every setting (no dataset)
     TEST(ContractFixturesConfig, EffectiveConfig)
     {
         TestArea ta(TEST_NAME, true);
@@ -432,7 +432,7 @@ namespace
             contract::takeJson(out));
     }
 
-    // XI-09: data-only STAC (new in 2.0). Registry owns every STAC id and URL, so these outputs leave
+    // data-only STAC (new in 2.0). Registry owns every STAC id and URL, so these outputs leave
     // out the members built from them
     TEST_F(ContractFixtures, StacData) {
         const std::string r = root.string();
@@ -569,7 +569,7 @@ namespace
             contract::takeJson(out));
     }
 
-    // XI-01: the ABI handshake Registry reads at startup. The library version changes with every
+    // The ABI handshake Registry reads at startup. The library version changes with every
     // build ("version", normalised); a new export or error code changes the fixture on purpose.
     // The string is owned by the library: no DDBFree.
     TEST(ContractFixturesCapabilities, Capabilities)
@@ -581,7 +581,7 @@ namespace
                                        json::parse(caps));
     }
 
-    // XI-09: DDBNormalizePath, accepted and rejected (no dataset). The rules themselves are the
+    // DDBNormalizePath, accepted and rejected (no dataset). The rules themselves are the
     // golden vectors of tests/contract/vectors/entry-paths.json (entry_path_test.cpp).
     TEST(ContractFixturesNormalizePath, NormalizePath) {
         char* out = nullptr;

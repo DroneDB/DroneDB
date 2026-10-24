@@ -5,7 +5,7 @@
 #define JSON_SCHEMA_CHECK_H
 
 // A JSON Schema (draft 2020-12) checker for the subset of keywords the contract schemas in
-// tests/contract/schemas use (XI-09). No JSON Schema library is among the vcpkg dependencies,
+// tests/contract/schemas use. No JSON Schema library is among the vcpkg dependencies,
 // so this one covers exactly that subset and rejects every other keyword: a schema cannot use
 // a keyword that would be silently ignored here. tests/contract/check_schemas.py validates the
 // same schemas and fixtures with the reference Python implementation, for a cross-check.

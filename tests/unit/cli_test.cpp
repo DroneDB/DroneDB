@@ -1,0 +1,471 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+// The command registry (every alias resolves, every command can be made), the option
+// helpers, and the one handler that turns what a command throws into stderr and an exit code,
+// with the commands' output (stdout) left clean.
+
+#include <algorithm>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <functional>
+#include <set>
+#include <sstream>
+#include <string>
+#include <vector>
+
+#include "cmd/include/cli.h"
+#include "cmd/include/cmdlist.h"
+#include "cmd/include/credentials.h"
+#include "cmd/include/pull.h"
+#include "cmd/include/push.h"
+#include "exceptions.h"
+#include "fake_http_client.h"
+#include "gtest/gtest.h"
+#include "tagmanager.h"
+#include "test.h"
+#include "testarea.h"
+#include "utils.h"
+
+namespace {
+
+using cmd::Command;
+using cmd::CommandRegistry;
+
+// A command the test scripts: one option, and a body that returns or throws what it is told
+class FakeCommand : public Command {
+public:
+    explicit FakeCommand(std::function<int(cxxopts::ParseResult &)> work = [](cxxopts::ParseResult &) { return EXIT_SUCCESS; })
+        : body(std::move(work)) {}
+
+    std::string description() override { return "A fake command."; }
+
+    int run(cxxopts::ParseResult &opts) override { return body(opts); }
+
+    void setOptions(cxxopts::Options &opts) override {
+        opts.positional_help("[args]").custom_help("fake [-n number]").add_options()(
+            "n,number", "A number", cxxopts::value<int>()->default_value("1"));
+        cmd::addWorkingDirOption(opts);
+    }
+
+    using Command::usageError;
+
+private:
+    std::function<int(cxxopts::ParseResult &)> body;
+};
+
+struct Outcome {
+    int code = -1;
+    std::string out;  // what the process wrote to stdout
+    std::string err;
+};
+
+// Runs a command line through the handler, capturing stdout (the handler writes to `err`)
+Outcome execute(Command &command, std::vector<std::string> args) {
+    std::vector<char *> argv{const_cast<char *>("ddb")};
+    for (auto &a : args)
+        argv.push_back(a.data());
+
+    std::ostringstream out, err;
+    std::streambuf *previous = std::cout.rdbuf(out.rdbuf());
+    Outcome outcome;
+    try {
+        outcome.code = cmd::execute(command, static_cast<int>(argv.size()), argv.data(), err);
+    } catch (...) {
+        std::cout.rdbuf(previous);
+        throw;
+    }
+    std::cout.rdbuf(previous);
+    outcome.out = out.str();
+    outcome.err = err.str();
+    return outcome;
+}
+
+// ------------------------------------------------------------------------ registry
+
+TEST(CliRegistry, everyAliasResolvesToARegisteredCommand) {
+    const auto &registry = CommandRegistry::builtin();
+    const auto names = registry.names();
+    const std::set<std::string> registered(names.begin(), names.end());
+
+    ASSERT_FALSE(registry.aliases().empty());
+    for (const auto &[alias, target] : registry.aliases()) {
+        EXPECT_TRUE(registered.count(target)) << "alias '" << alias << "' names '" << target << "', which is not a command";
+        EXPECT_FALSE(registered.count(alias)) << "alias '" << alias << "' hides a command";
+        EXPECT_EQ(registry.resolve(alias), target);
+        EXPECT_NE(registry.create(alias), nullptr) << alias;
+    }
+}
+
+TEST(CliRegistry, attribAndAttrAreGoneWithTheCommandTheyPointedTo) {
+    // They named chattr, a command that never existed
+    const auto &registry = CommandRegistry::builtin();
+    EXPECT_EQ(registry.create("chattr"), nullptr);
+    EXPECT_EQ(registry.create("attrib"), nullptr);
+    EXPECT_EQ(registry.create("attr"), nullptr);
+}
+
+TEST(CliRegistry, aDanglingOrRepeatedRegistrationIsRefused) {
+    CommandRegistry registry;
+    registry.add<FakeCommand>("fake");
+    EXPECT_THROW(registry.add<FakeCommand>("fake"), std::logic_error);
+    EXPECT_THROW(registry.alias("f", "missing"), std::logic_error);
+    registry.alias("f", "fake");
+    EXPECT_THROW(registry.alias("f", "fake"), std::logic_error);
+    EXPECT_THROW(registry.alias("fake", "fake"), std::logic_error);
+    EXPECT_EQ(registry.resolve("f"), "fake");
+    EXPECT_EQ(registry.resolve("nope"), "");
+}
+
+TEST(CliRegistry, everyCommandIsMadeFreshAndDescribesItself) {
+    const auto &registry = CommandRegistry::builtin();
+    const auto names = registry.names();
+    EXPECT_GE(names.size(), 37u);
+    for (const auto &name : names) {
+        const auto a = registry.create(name);
+        const auto b = registry.create(name);
+        ASSERT_NE(a, nullptr) << name;
+        EXPECT_NE(a.get(), b.get()) << name << ": one object per request, no shared state";
+        EXPECT_FALSE(a->description().empty()) << name;
+
+        std::ostringstream help;
+        a->printHelp(help);
+        EXPECT_NE(help.str().find("Usage:"), std::string::npos) << name;
+        EXPECT_NE(help.str().find("--help"), std::string::npos) << name;
+        EXPECT_NE(help.str().find("--debug"), std::string::npos) << name;
+        EXPECT_NE(help.str().find("ddb "), std::string::npos) << name << ": the program is called ddb";
+    }
+}
+
+TEST(CliRegistry, namesAreSortedAsTheHelpListsThem) {
+    const auto names = CommandRegistry::builtin().names();
+    EXPECT_TRUE(std::is_sorted(names.begin(), names.end()));
+}
+
+TEST(CliRegistry, anUnknownNameMakesNothing) {
+    EXPECT_EQ(CommandRegistry::builtin().create("nosuchcommand"), nullptr);
+    EXPECT_EQ(CommandRegistry::builtin().resolve(""), "");
+}
+
+TEST(CliRegistry, everyCommandHelpRunsThroughTheHandler) {
+    const auto &registry = CommandRegistry::builtin();
+    for (const auto &name : registry.names()) {
+        auto command = registry.create(name);
+        const auto outcome = execute(*command, {"--help"});
+        EXPECT_EQ(outcome.code, EXIT_SUCCESS) << name;
+        EXPECT_NE(outcome.out.find("Usage:"), std::string::npos) << name;
+        EXPECT_TRUE(outcome.err.empty()) << name << ": " << outcome.err;
+    }
+}
+
+// ------------------------------------------------------------------------ option helpers
+
+TEST(CliOptions, theSharedOptionsReadTheSameInEveryCommand) {
+    const auto &registry = CommandRegistry::builtin();
+    int workingDir = 0, insecure = 0, remote = 0, format = 0, output = 0;
+    for (const auto &name : registry.names()) {
+        std::ostringstream help;
+        registry.create(name)->printHelp(help);
+        const auto text = help.str();
+        if (text.find("--working-dir") != std::string::npos) {
+            workingDir++;
+            EXPECT_NE(text.find("-w, --working-dir arg"), std::string::npos) << name;
+            EXPECT_NE(text.find("Working directory (default: .)"), std::string::npos) << name;
+        }
+        if (text.find("--insecure") != std::string::npos) {
+            insecure++;
+            EXPECT_NE(text.find("-k, --insecure"), std::string::npos) << name;
+            EXPECT_NE(text.find("Disable SSL certificate verification"), std::string::npos) << name;
+        }
+        if (text.find("--remote") != std::string::npos) {
+            remote++;
+            EXPECT_NE(text.find("The remote Registry (default: \"\")"), std::string::npos) << name;
+        }
+        if (text.find("--format") != std::string::npos) {
+            format++;
+            EXPECT_NE(text.find("-f, --format arg"), std::string::npos) << name;
+            EXPECT_NE(text.find("(default: text)"), std::string::npos) << name;
+        }
+        if (text.find("--output") != std::string::npos)
+            output++;
+    }
+    // The commands that declare them
+    EXPECT_EQ(workingDir, 14);
+    EXPECT_EQ(insecure, 5);
+    EXPECT_EQ(remote, 2);
+    EXPECT_EQ(format, 7);
+    EXPECT_EQ(output, 15);
+}
+
+TEST(CliOptions, theFormatHelperNamesTheFormatsOfTheCommand) {
+    cxxopts::Options one("ddb", "x"), two("ddb", "x");
+    cmd::addFormatOption(one);
+    cmd::addFormatOption(two, "text|json|geojson");
+    EXPECT_NE(one.help().find("Output format (text|json)"), std::string::npos);
+    EXPECT_NE(two.help().find("Output format (text|json|geojson)"), std::string::npos);
+}
+
+TEST(CliOptions, theFormatIsParsedOnceAtTheBoundaryOfTheCommand) {
+    cxxopts::Options options("ddb", "x");
+    cmd::addFormatOption(options, "text|json|geojson");
+    auto parse = [&](std::vector<std::string> args) {
+        std::vector<char *> argv{const_cast<char *>("ddb")};
+        for (auto &a : args)
+            argv.push_back(a.data());
+        return options.parse(static_cast<int>(argv.size()), argv.data());
+    };
+
+    EXPECT_EQ(cmd::getFormatOption(parse({})), ddb::OutputFormat::Text);
+    EXPECT_EQ(cmd::getFormatOption(parse({"-f", "json"})), ddb::OutputFormat::Json);
+    EXPECT_EQ(cmd::getFormatOption(parse({"-f", "geojson"}), {ddb::OutputFormat::GeoJson}), ddb::OutputFormat::GeoJson);
+
+    // what the command does not write is refused, with the same message whatever the reason
+    EXPECT_THROW(cmd::getFormatOption(parse({"-f", "geojson"})), ddb::InvalidArgsException);
+    EXPECT_THROW(cmd::getFormatOption(parse({"-f", "xml"})), ddb::InvalidArgsException);
+    EXPECT_THROW(cmd::getFormatOption(parse({"-f", "JSON"})), ddb::InvalidArgsException);
+}
+
+// ------------------------------------------------------------------------ the handler
+
+TEST(CliHandler, aCommandReturnsItsOwnExitCode) {
+    FakeCommand ok;
+    EXPECT_EQ(execute(ok, {}).code, EXIT_SUCCESS);
+
+    FakeCommand seven([](cxxopts::ParseResult &) { return 7; });
+    const auto outcome = execute(seven, {});
+    EXPECT_EQ(outcome.code, 7);
+    EXPECT_TRUE(outcome.err.empty());
+}
+
+TEST(CliHandler, theCommandReadsItsOptions) {
+    int seen = 0;
+    FakeCommand command([&seen](cxxopts::ParseResult &opts) {
+        seen = opts["number"].as<int>();
+        return EXIT_SUCCESS;
+    });
+    EXPECT_EQ(execute(command, {"-n", "42"}).code, EXIT_SUCCESS);
+    EXPECT_EQ(seen, 42);
+    EXPECT_EQ(execute(command, {}).code, EXIT_SUCCESS);
+    EXPECT_EQ(seen, 1);
+}
+
+TEST(CliHandler, helpPrintsTheUsageOnStdoutAndSucceeds) {
+    bool ran = false;
+    FakeCommand command([&ran](cxxopts::ParseResult &) {
+        ran = true;
+        return EXIT_SUCCESS;
+    });
+    for (const char *flag : {"--help", "-h"}) {
+        const auto outcome = execute(command, {flag});
+        EXPECT_EQ(outcome.code, EXIT_SUCCESS) << flag;
+        EXPECT_NE(outcome.out.find("A fake command."), std::string::npos) << flag;
+        EXPECT_NE(outcome.out.find("-n, --number arg"), std::string::npos) << flag;
+        EXPECT_TRUE(outcome.err.empty()) << flag;
+    }
+    EXPECT_FALSE(ran) << "help runs nothing";
+}
+
+TEST(CliHandler, aUsageErrorPrintsTheMessageAndTheUsageOnStderr) {
+    FakeCommand command;
+    FakeCommand failing([&command](cxxopts::ParseResult &) -> int { command.usageError("missing required argument 'x'"); });
+    const auto outcome = execute(failing, {});
+    EXPECT_EQ(outcome.code, EXIT_FAILURE);
+    EXPECT_TRUE(outcome.out.empty()) << "stdout stays clean: " << outcome.out;
+    EXPECT_EQ(outcome.err.find("error: missing required argument 'x'\n\n"), 0u) << outcome.err;
+    EXPECT_NE(outcome.err.find("Usage:"), std::string::npos);
+    EXPECT_NE(outcome.err.find("-n, --number arg"), std::string::npos);
+
+    FakeCommand silent([&command](cxxopts::ParseResult &) -> int { command.usageError(); });
+    const auto without = execute(silent, {});
+    EXPECT_EQ(without.code, EXIT_FAILURE);
+    EXPECT_EQ(without.err.find("error:"), std::string::npos) << "no message, only the usage";
+    EXPECT_NE(without.err.find("Usage:"), std::string::npos);
+}
+
+TEST(CliHandler, optionsThatDoNotParseAreUsageErrors) {
+    FakeCommand command;
+    for (const std::vector<std::string> &args :
+         {std::vector<std::string>{"--no-such-option"}, {"-n", "abc"}, {"-n"}}) {
+        const auto outcome = execute(command, args);
+        EXPECT_EQ(outcome.code, EXIT_FAILURE) << args[0];
+        EXPECT_TRUE(outcome.out.empty());
+        EXPECT_EQ(outcome.err.find("error: "), 0u) << outcome.err;
+        EXPECT_NE(outcome.err.find("Usage:"), std::string::npos);
+    }
+}
+
+TEST(CliHandler, invalidArgumentsOfTheLibraryAreUsageErrors) {
+    FakeCommand command([](cxxopts::ParseResult &) -> int { throw ddb::InvalidArgsException("Invalid format xml"); });
+    const auto outcome = execute(command, {});
+    EXPECT_EQ(outcome.code, EXIT_FAILURE);
+    EXPECT_TRUE(outcome.out.empty());
+    EXPECT_EQ(outcome.err.find("error: Invalid format xml\n\n"), 0u) << outcome.err;
+    EXPECT_NE(outcome.err.find("Usage:"), std::string::npos);
+}
+
+TEST(CliHandler, aFailedCommandPrintsItsMessageOnStderr) {
+    FakeCommand command([](cxxopts::ParseResult &) -> int { throw ddb::AppException("Cannot push if no tag is specified"); });
+    const auto outcome = execute(command, {});
+    EXPECT_EQ(outcome.code, EXIT_FAILURE);
+    EXPECT_TRUE(outcome.out.empty());
+    EXPECT_EQ(outcome.err, "Cannot push if no tag is specified\n");
+
+    FakeCommand fs([](cxxopts::ParseResult &) -> int { throw ddb::FSException("Cannot open x"); });
+    EXPECT_EQ(execute(fs, {}).err, "Cannot open x\n");
+    FakeCommand canceled([](cxxopts::ParseResult &) -> int { throw ddb::CanceledException("canceled"); });
+    EXPECT_EQ(execute(canceled, {}).code, EXIT_FAILURE);
+}
+
+TEST(CliHandler, anyOtherExceptionIsAnErrorNotACrash) {
+    FakeCommand command([](cxxopts::ParseResult &) -> int { throw std::runtime_error("disk on fire"); });
+    const auto outcome = execute(command, {});
+    EXPECT_EQ(outcome.code, EXIT_FAILURE);
+    EXPECT_TRUE(outcome.out.empty());
+    EXPECT_EQ(outcome.err, "error: disk on fire\n");
+
+    FakeCommand alloc([](cxxopts::ParseResult &) -> int { throw std::bad_alloc(); });
+    EXPECT_EQ(execute(alloc, {}).code, EXIT_FAILURE);
+}
+
+TEST(CliHandler, theOutputOfACommandReachesStdoutUntouchedWhenItFails) {
+    FakeCommand command([](cxxopts::ParseResult &) -> int {
+        std::cout << "{\"partial\":true}\n";
+        throw ddb::AppException("then it failed");
+    });
+    const auto outcome = execute(command, {});
+    EXPECT_EQ(outcome.code, EXIT_FAILURE);
+    EXPECT_EQ(outcome.out, "{\"partial\":true}\n");
+    EXPECT_EQ(outcome.err, "then it failed\n");
+}
+
+// ------------------------------------------------------------------------ real commands
+
+TEST(CliCommands, aRealCommandWithoutItsArgumentsIsAUsageError) {
+    for (const char *name : {"cog", "copc", "add", "remove", "geoproj", "mask", "nxs", "thumbs", "tile"}) {
+        auto command = CommandRegistry::builtin().create(name);
+        const auto outcome = execute(*command, {});
+        EXPECT_EQ(outcome.code, EXIT_FAILURE) << name;
+        EXPECT_TRUE(outcome.out.empty()) << name << ": " << outcome.out;
+        EXPECT_NE(outcome.err.find("Usage:"), std::string::npos) << name;
+    }
+}
+
+TEST(CliCommands, anUnknownMetaFormatIsAUsageErrorWithoutOutput) {
+    TestArea ta("cli_info_format", true);
+    const auto file = ta.getPath("a.txt");
+    std::ofstream(file) << "alpha";
+    auto command = CommandRegistry::builtin().create("info");
+    const auto outcome = execute(*command, {"-f", "xml", file.string()});
+    EXPECT_EQ(outcome.code, EXIT_FAILURE);
+    EXPECT_TRUE(outcome.out.empty()) << outcome.out;
+    EXPECT_NE(outcome.err.find("error: "), std::string::npos) << outcome.err;
+    EXPECT_NE(outcome.err.find("Usage:"), std::string::npos);
+}
+
+// delta and tile wrote nothing, or text, for a format they did not know; list and search failed
+// only once their index was open (and list had already truncated its output file)
+TEST(CliCommands, everyCommandWithAFormatRefusesAnUnknownOneBeforeItDoesAnything) {
+    TestArea ta("cli_unknown_format", true);
+    const auto target = ta.getPath("out.txt");
+    const std::vector<std::pair<std::string, std::vector<std::string>>> cases = {
+        {"list", {"-f", "xml", "-o", target.string()}},
+        {"list", {"-f", "geojson"}},
+        {"search", {"-f", "geojson", "*"}},
+        {"delta", {"-f", "xml", ta.getPath("a").string(), ta.getPath("b").string()}},
+        {"tile", {"-f", "xml", ta.getPath("missing.tif").string()}},
+        {"stamp", {"-f", "xml"}},
+    };
+
+    for (const auto &[name, args] : cases) {
+        auto command = CommandRegistry::builtin().create(name);
+        const auto outcome = execute(*command, args);
+        EXPECT_EQ(outcome.code, EXIT_FAILURE) << name;
+        EXPECT_TRUE(outcome.out.empty()) << name << ": " << outcome.out;
+        EXPECT_NE(outcome.err.find("Invalid format"), std::string::npos) << name << ": " << outcome.err;
+    }
+    EXPECT_FALSE(std::filesystem::exists(target)) << "list created its output file before it knew the format";
+}
+
+TEST(CliCommands, infoWritesOnlyTheJsonToStdout) {
+    TestArea ta("cli_info_json", true);
+    const auto file = ta.getPath("a.txt");
+    std::ofstream(file) << "alpha";
+    auto command = CommandRegistry::builtin().create("info");
+    const auto outcome = execute(*command, {"-f", "json", file.string()});
+    EXPECT_EQ(outcome.code, EXIT_SUCCESS) << outcome.err;
+    ASSERT_FALSE(outcome.out.empty());
+    EXPECT_EQ(outcome.out.front(), '[');
+    EXPECT_EQ(outcome.out.find_last_not_of(" \r\n"), outcome.out.rfind(']'));
+}
+
+// A DEM-less raster is enough: the command must get as far as opening the file. It never did:
+// the defaults of --min and --max were the text "nan", which cxxopts cannot parse as a double
+TEST(CliCommands, contourReachesItsWorkInsteadOfFailingToParseItsDefaults) {
+    TestArea ta("cli_contour", true);
+    auto command = CommandRegistry::builtin().create("contour");
+    const auto outcome = execute(*command, {"-i", "1", ta.getPath("missing.tif").string()});
+    EXPECT_EQ(outcome.code, EXIT_FAILURE);
+    EXPECT_EQ(outcome.err.find("failed to parse"), std::string::npos) << outcome.err;
+    EXPECT_EQ(outcome.err.find("Usage:"), std::string::npos) << "not a usage error: " << outcome.err;
+}
+
+// ------------------------------------------------------------------------ offline
+
+// Answers every question with alice/pw and counts them
+class CountingCredentials : public ddb::CredentialProvider {
+public:
+    int asked = 0;
+    AuthCredentials credentialsFor(const std::string &) override {
+        asked++;
+        return AuthCredentials("alice", "pw");
+    }
+};
+
+// A dataset tagged for a Registry nobody can reach, as the current folder of the command
+struct OfflineDataset {
+    static constexpr const char *Url = "https://registry.test";
+
+    IndexFixture dataset;
+    fake::Network net;
+    CountingCredentials credentials;
+    std::filesystem::path previous = std::filesystem::current_path();
+
+    explicit OfflineDataset(const std::string &name)
+        : dataset(name), net(dataset.ta.getPath("auth.json")) {
+        ddb::TagManager(dataset.db.get()).setTag(std::string(Url) + "/org/ds");
+        dataset.db->close();
+        net.http.on("POST", "/users/authenticate", fake::transportFailure());
+        std::filesystem::current_path(dataset.root);
+    }
+    ~OfflineDataset() { std::filesystem::current_path(previous); }
+
+    cmd::RegistryServices services() { return {&credentials, net.deps()}; }
+};
+
+// A refused connection or an unresolvable host during the login was an AuthException, so the
+// operation asked for a password it could not use: ddb push offline prompted, then failed
+TEST(CliCommands, pushAndPullOfflineFailWithTheTransportErrorAndDoNotPrompt) {
+    for (const bool saved : {true, false}) {
+        OfflineDataset f(saved ? "cli_offline_saved" : "cli_offline_unsaved");
+        if (saved)
+            f.net.credentials.saveCredentials(OfflineDataset::Url, AuthCredentials("alice", "pw"));
+
+        cmd::Push push(f.services());
+        cmd::Pull pull(f.services());
+        for (cmd::Command *command : {static_cast<cmd::Command *>(&push), static_cast<cmd::Command *>(&pull)}) {
+            f.credentials.asked = 0;
+            const auto outcome = execute(*command, {});
+
+            EXPECT_EQ(outcome.code, EXIT_FAILURE);
+            EXPECT_TRUE(outcome.out.empty()) << outcome.out;
+            EXPECT_NE(outcome.err.find("could not connect to https://registry.test: Connection refused"), std::string::npos)
+                << outcome.err;
+            // Nothing saved: the one login needs the credentials once. Saved: nobody is asked.
+            EXPECT_EQ(f.credentials.asked, saved ? 0 : 1);
+        }
+    }
+}
+
+}  // namespace

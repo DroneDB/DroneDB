@@ -1,4 +1,4 @@
-# ThreadSanitizer suppressions for the TSan build (DQ-01, docs/sanitizers.md).
+# ThreadSanitizer suppressions for the TSan build (docs/sanitizers.md).
 #
 # Third-party code only. vcpkg dependencies are prebuilt without TSan instrumentation, so TSan
 # cannot see their atomics, memory barriers or internal locks; vendored submodules are not

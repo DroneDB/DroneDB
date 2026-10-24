@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// DQ-15 (XI-06): the gdalCacheMb setting of DDBConfigure sets GDAL's process-wide block cache.
+// The gdalCacheMb setting of DDBConfigure sets GDAL's process-wide block cache.
 //  - set with DDBConfigure it is the size of the cache (raising it too), at once;
 //  - put back to null it restores the cache GDAL had, then bounds it by the environment variable
 //    or the default, as DDBRegisterProcess does;

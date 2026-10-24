@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// DDB-06: point-cloud tiles read COPC nodes through a shared cache of decoded nodes and
+// point-cloud tiles read COPC nodes through a shared cache of decoded nodes and
 // get exactly the points readers.copc returns for the same bounds and resolution
 
 #include <algorithm>
@@ -118,17 +118,17 @@ namespace
         }
     }
 
-    TEST(DDB06_NodeReader, samePointsAsReadersCopc)
+    TEST(CopcNodeReader, samePointsAsReadersCopc)
     {
         TestArea ta(TEST_NAME, true);
         expectSamePointsAsReadersCopc(brightonCopc(ta));
 
         // Any other coloured COPC, e.g. the bench cloud (autzen-classified.copc.laz)
-        if (const char *extra = std::getenv("DDB06_EXTRA_COPC"))
+        if (const char *extra = std::getenv("DDB_TEST_EXTRA_COPC"))
             expectSamePointsAsReadersCopc(extra);
     }
 
-    TEST(DDB06_NodeCache, hitDecodesNothing)
+    TEST(CopcNodeCache, hitDecodesNothing)
     {
         TestArea ta(TEST_NAME, true);
         const auto copc = brightonCopc(ta);
@@ -148,7 +148,7 @@ namespace
         EXPECT_GT(CopcNodeCache::instance().bytes(), 0u);
     }
 
-    TEST(DDB06_NodeCache, concurrentReadersDecodeEachNodeOnce)
+    TEST(CopcNodeCache, concurrentReadersDecodeEachNodeOnce)
     {
         TestArea ta(TEST_NAME, true);
         const auto copc = brightonCopc(ta);
@@ -175,7 +175,7 @@ namespace
             EXPECT_TRUE(r == results[0]);
     }
 
-    TEST(DDB06_NodeCache, staysWithinItsCapacity)
+    TEST(CopcNodeCache, staysWithinItsCapacity)
     {
         TestArea ta(TEST_NAME, true);
         const auto copc = brightonCopc(ta);
@@ -194,7 +194,7 @@ namespace
         cache.setCapacity(256u << 20);
     }
 
-    TEST(DDB06_NodeCache, rewrittenCloudIsReadAgainAndReleaseDropsIt)
+    TEST(CopcNodeCache, rewrittenCloudIsReadAgainAndReleaseDropsIt)
     {
         TestArea ta(TEST_NAME, true);
         const auto copc = brightonCopc(ta);
@@ -227,7 +227,7 @@ namespace
         EXPECT_EQ(cache.bytes(), 0u);
     }
 
-    TEST(DDB06_PointCloudTiler, concurrentTilesMatchSerial)
+    TEST(PointCloudTiler, concurrentTilesMatchSerial)
     {
         TestArea ta(TEST_NAME, true);
         const auto copc = brightonCopc(ta);

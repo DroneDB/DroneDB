@@ -2,11 +2,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// 3D Tiles integration: safe tiles rebuild (spec A3), the Model build producing
-// Nexus + best-effort tiles (D-A2) and the input dispatch of buildModel3DTiles
-// for PLY and glTF (B3, B5).
+// 3D Tiles integration: safe tiles rebuild, the Model build producing
+// Nexus + best-effort tiles and the input dispatch of buildModel3DTiles
+// for PLY and glTF.
 //
-// The A3 tests drive buildModel3DTiles with a fake Obj2Tiles (a POSIX shell
+// The safe-rebuild tests drive buildModel3DTiles with a fake Obj2Tiles (a POSIX shell
 // script that records its arguments and writes a tileset, or fails), so they do
 // not depend on the real binary; they are skipped on Windows. Tests that need the
 // real Obj2Tiles are skipped when it is not available.
@@ -133,10 +133,10 @@ std::string gridObj(int n = 4) {
     return o.str();
 }
 
-// n x n grid as an ASCII PLY mesh with uchar vertex colours (fixture F3 shape).
+// n x n grid as an ASCII PLY mesh with uchar vertex colours (the shape of an untextured PLY with colours).
 std::string gridPly(int n = 6) {
     std::ostringstream o;
-    o << "ply\nformat ascii 1.0\ncomment synthetic F3\n"
+    o << "ply\nformat ascii 1.0\ncomment synthetic\n"
       << "element vertex " << n * n << "\n"
       << "property float x\nproperty float y\nproperty float z\n"
       << "property uchar red\nproperty uchar green\nproperty uchar blue\n"
@@ -217,7 +217,7 @@ void expectNoLeftovers(const fs::path& outDir) {
 }
 
 // ---------------------------------------------------------------------------
-// A3: safe tiles rebuild
+// Safe tiles rebuild
 // ---------------------------------------------------------------------------
 
 TEST(tiles3dBuild, failedRebuildKeepsPreviousTiles) {
@@ -387,7 +387,7 @@ TEST(tiles3dBuild, busyTilesLockLeavesOutputAlone) {
 }
 
 // ---------------------------------------------------------------------------
-// B3: input dispatch (PLY, no-UV glTF)
+// Input dispatch (PLY, no-UV glTF)
 // ---------------------------------------------------------------------------
 
 // A PLY reaches Obj2Tiles as the converter's OBJ, with options computed from the
@@ -442,7 +442,7 @@ TEST(tiles3dBuild, plyIsConvertedToObjForTiles) {
     expectNoLeftovers(out);
 }
 
-// B3.5: a glTF without texture coordinates becomes an OBJ (not a PLY) for the
+// A glTF without texture coordinates becomes an OBJ (not a PLY) for the
 // tiles path, and the OBJ exporter keeps its vertex colours.
 TEST(tiles3dBuild, noUvGltfConvertsToColouredObj) {
     TestArea ta(TEST_NAME);
@@ -544,7 +544,7 @@ MANUAL_TEST(tiles3dBuild, realObj2TilesFromBrightonPly) {
 }
 
 // ---------------------------------------------------------------------------
-// D-A2: buildInternal for a Model (Nexus + best-effort tiles)
+// buildInternal for a Model (Nexus + best-effort tiles)
 // ---------------------------------------------------------------------------
 
 struct ModelDataset : IndexFixture {
@@ -779,7 +779,7 @@ TEST(tiles3dBuild, modelBuildWithRealObj2Tiles) {
     expectNoLeftovers(ds.out("sub/mesh.ply") / "3dtiles");
 }
 
-// An untextured PLY still goes to Nexus as is (B5) and builds through build().
+// An untextured PLY still goes to Nexus as is and builds through build().
 TEST(tiles3dBuild, untexturedPlyBuildsNexus) {
     Obj2TilesEnvReset reset;
     ModelDataset ds(TEST_NAME);
@@ -792,9 +792,9 @@ TEST(tiles3dBuild, untexturedPlyBuildsNexus) {
     EXPECT_TRUE(ddb::isBuildComplete(ds.db.get(), "mesh.ply"));
 }
 
-// ---- Spec-coverage additions (independent verification) ----
+// ---- Untextured and unordered PLY inputs ----
 
-// B5: an untextured PLY is handed to Nexus as is. A PLY whose element order the
+// An untextured PLY is handed to Nexus as is. A PLY whose element order the
 // converter forbids (face before vertex) fails inside Nexus ("Could not build
 // nexus file"), not in the converter, which proves no conversion preceded Nexus.
 TEST(tiles3dBuild, untexturedPlyGoesToNexusUnconverted) {
@@ -859,7 +859,7 @@ struct CaptureScope {
     plog::Severity prev_;
 };
 
-// B3.4: when the converter supplies face count and bounds, getModelInfo (Assimp)
+// When the converter supplies face count and bounds, getModelInfo (Assimp)
 // is not consulted for a PLY (it still is for an OBJ). The decision is visible in
 // the debug log: "(from the converter)" vs the Assimp-based message.
 TEST(tiles3dBuild, converterInfoSkipsGetModelInfo) {

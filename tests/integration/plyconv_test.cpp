@@ -232,8 +232,8 @@ bool writeJpeg(const fs::path& path, int w = 8, int h = 8) {
     return fs::exists(path);
 }
 
-// F1: faces + per-face texcoord lists (MeshLab style) + `comment TextureFile tex.jpg`.
-void writeF1(const fs::path& ply, const std::string& textureComment = "TextureFile tex.jpg") {
+// Faces + per-face texcoord lists (MeshLab style) + `comment TextureFile tex.jpg`.
+void writeTexturedPly(const fs::path& ply, const std::string& textureComment = "TextureFile tex.jpg") {
     const int n = 6;
     PlySpec s;
     s.comments = {"VCGLIB generated", textureComment};
@@ -251,8 +251,8 @@ void writeF1(const fs::path& ply, const std::string& textureComment = "TextureFi
     writePly(ply, s);
 }
 
-// F2: faces + vertex s,t, no TextureFile comment.
-void writeF2(const fs::path& ply) {
+// Faces + vertex s,t, no TextureFile comment.
+void writeVertexStPly(const fs::path& ply) {
     const int n = 6;
     PlySpec s;
     Elem v{"vertex", {{"float", "x", ""}, {"float", "y", ""}, {"float", "z", ""}, {"float", "s", ""}, {"float", "t", ""}}, {}};
@@ -266,8 +266,8 @@ void writeF2(const fs::path& ply) {
     writePly(ply, s);
 }
 
-// F3: untextured, uchar red/green/blue.
-void writeF3(const fs::path& ply, int n = 8, bool quads = false) {
+// Untextured, uchar red/green/blue.
+void writeColoredPly(const fs::path& ply, int n = 8, bool quads = false) {
     PlySpec s;
     Elem v{"vertex",
            {{"float", "x", ""}, {"float", "y", ""}, {"float", "z", ""}, {"uchar", "red", ""}, {"uchar", "green", ""}, {"uchar", "blue", ""}},
@@ -454,10 +454,10 @@ TEST(ply, headerModel) {
 TEST(ply, identifyFixtures) {
     TestArea ta(TEST_NAME);
 
-    // F1: textured mesh -> Model (B4 spike PASS, see texturedPlyBuildsNexusF1); the
+    // Textured mesh -> Model (see texturedPlyBuildsNexus); the
     // texture name is exposed.
-    const fs::path f1 = ta.getPath("f1.ply");
-    writeF1(f1);
+    const fs::path f1 = ta.getPath("textured.ply");
+    writeTexturedPly(f1);
     EXPECT_EQ(identifyPly(f1), EntryType::Model);
     PlyInfo i1;
     ASSERT_TRUE(getPlyInfo(f1, i1));
@@ -467,18 +467,18 @@ TEST(ply, identifyFixtures) {
     EXPECT_EQ(i1.vertexCount, 36u);
     EXPECT_EQ(i1.dimensions, (std::vector<std::string>{"x", "y", "z", "vertex_indices", "texcoord"}));
 
-    // F2: vertex s,t, no comment -> Model.
-    const fs::path f2 = ta.getPath("f2.ply");
-    writeF2(f2);
+    // Vertex s,t, no comment -> Model.
+    const fs::path f2 = ta.getPath("vertex_st.ply");
+    writeVertexStPly(f2);
     EXPECT_EQ(identifyPly(f2), EntryType::Model);
     PlyInfo i2;
     ASSERT_TRUE(getPlyInfo(f2, i2));
     EXPECT_FALSE(i2.hasTextures);
     EXPECT_TRUE(i2.textureFilename.empty());
 
-    // F3: untextured uchar rgb -> Model.
-    const fs::path f3 = ta.getPath("f3.ply");
-    writeF3(f3);
+    // Untextured uchar rgb -> Model.
+    const fs::path f3 = ta.getPath("colored.ply");
+    writeColoredPly(f3);
     EXPECT_EQ(identifyPly(f3), EntryType::Model);
 }
 
@@ -830,7 +830,7 @@ TEST(plyconv, perFaceTexcoords) {
     EXPECT_EQ(st.faces, 3u);
 }
 
-// P9: the per-face texcoord list must hold 2 values per corner.
+// The per-face texcoord list must hold 2 values per corner.
 TEST(plyconv, perFaceTexcoordWrongCount) {
     TestArea ta(TEST_NAME);
     const fs::path ply = ta.getPath("bad_ft.ply");
@@ -1045,14 +1045,14 @@ TEST(plyconv, unsupportedInput) {
 }
 
 // ---------------------------------------------------------------------------
-// Texture (B4)
+// Texture
 // ---------------------------------------------------------------------------
 
 TEST(plyconv, textureWritten) {
     TestArea ta(TEST_NAME);
-    const fs::path ply = ta.getPath("ds/f1.ply");
+    const fs::path ply = ta.getPath("ds/textured.ply");
     fs::create_directories(ply.parent_path());
-    writeF1(ply);
+    writeTexturedPly(ply);
     ASSERT_TRUE(writeJpeg(ta.getPath("ds/tex.jpg")));
 
     EXPECT_EQ(fs::path(getPlyTexture(ply.string(), ta.getPath("ds").string())), ta.getPath("ds/tex.jpg"));
@@ -1089,7 +1089,7 @@ TEST(plyconv, textureWritten) {
 
     // A name with spaces is copied under a whitespace-free name.
     const fs::path spaced = ta.getPath("ds/spaced.ply");
-    writeF1(spaced, "TextureFile my tex.jpg");
+    writeTexturedPly(spaced, "TextureFile my tex.jpg");
     fs::copy_file(ta.getPath("ds/tex.jpg"), ta.getPath("ds/my tex.jpg"), fs::copy_options::overwrite_existing);
     const auto r3 = convertPlyToObj(spaced.string(), ta.getPath("out3/m").string());
     EXPECT_EQ(objLines(r3.mtlPath), (std::vector<std::string>{"newmtl material0", "map_Kd my_tex.jpg"}));
@@ -1099,7 +1099,7 @@ TEST(plyconv, textureWritten) {
 TEST(plyconv, materialFilenameSanitizesWhitespaceAndPreservesObjPath) {
     TestArea ta(TEST_NAME, true);
     const fs::path ply = ta.getPath("input.ply");
-    writeF1(ply);
+    writeTexturedPly(ply);
     std::ofstream(ta.getPath("tex.jpg"), std::ios::binary) << "source texture";
     std::vector<std::string> names = {"public  model.obj"};
 #ifndef _WIN32
@@ -1124,7 +1124,7 @@ TEST(plyconv, generatedOutputsDoNotOverwriteSourceTexture) {
     const fs::path ply = ta.getPath("input.ply");
     // A source texture may have a material-like name. Material output gets a
     // separate filename before any output is opened.
-    writeF1(ply, "TextureFile result.mtl");
+    writeTexturedPly(ply, "TextureFile result.mtl");
     const fs::path source = ta.getPath("result.mtl");
     std::ofstream(source) << "source texture bytes";
     const auto result = convertPlyToObj(ply.string(), ta.getPath("result").string());
@@ -1136,7 +1136,7 @@ TEST(plyconv, generatedOutputsDoNotOverwriteSourceTexture) {
     // must choose a separate copied-texture filename as well.
     const fs::path nested = ta.getFolder("nested") / "model.mtl";
     std::ofstream(nested) << "nested source";
-    writeF1(ply, "TextureFile nested/model.mtl");
+    writeTexturedPly(ply, "TextureFile nested/model.mtl");
     const auto copied = convertPlyToObj(ply.string(), ta.getPath("out/model").string());
     EXPECT_NE(fs::path(copied.texturePath), fs::path(copied.mtlPath));
     EXPECT_EQ(readAll(copied.texturePath), "nested source");
@@ -1146,7 +1146,7 @@ TEST(plyconv, generatedOutputsDoNotOverwriteSourceTexture) {
     // texture itself, so reject the call before opening any outputs.
     const fs::path objSource = ta.getPath("source.obj");
     std::ofstream(objSource) << "keep source";
-    writeF1(ply, "TextureFile source.obj");
+    writeTexturedPly(ply, "TextureFile source.obj");
     EXPECT_THROW(convertPlyToObj(ply.string(), objSource.string()), AppException);
     EXPECT_EQ(readAll(objSource), "keep source");
 }
@@ -1260,8 +1260,8 @@ TEST(plyconv, textureDependencyContract) {
 
     // Missing texture -> BuildDepMissingException naming it relative to the PLY folder,
     // thrown before any output is written.
-    const fs::path f1 = root / "sub" / "f1.ply";
-    writeF1(f1, "TextureFile .\\textures\\tex.jpg");
+    const fs::path f1 = root / "sub" / "textured.ply";
+    writeTexturedPly(f1, "TextureFile .\\textures\\tex.jpg");
     for (int pass = 0; pass < 2; ++pass) {
         try {
             if (pass == 0)
@@ -1278,7 +1278,7 @@ TEST(plyconv, textureDependencyContract) {
     // Absolute names are unsatisfiable: AppException, never BuildDepMissingException.
     for (const std::string abs : {"/abs/tex.jpg", "C:\\tex.jpg", "\\\\server\\share\\tex.jpg"}) {
         const fs::path p = root / ("abs" + std::to_string(abs.size()) + ".ply");
-        writeF1(p, "TextureFile " + abs);
+        writeTexturedPly(p, "TextureFile " + abs);
         try {
             getPlyTexture(p.string());
             FAIL() << "expected AppException for " << abs;
@@ -1291,7 +1291,7 @@ TEST(plyconv, textureDependencyContract) {
 
     // Root-escaping name: unsatisfiable when the dataset root is known.
     const fs::path esc = root / "esc.ply";
-    writeF1(esc, "TextureFile ../outside.jpg");
+    writeTexturedPly(esc, "TextureFile ../outside.jpg");
     ASSERT_TRUE(writeJpeg(ta.getPath("outside.jpg")));
     try {
         getPlyTexture(esc.string(), root.string());
@@ -1306,7 +1306,7 @@ TEST(plyconv, textureDependencyContract) {
 
     // "../" staying inside the dataset is allowed.
     const fs::path inside = root / "sub" / "inside.ply";
-    writeF1(inside, "TextureFile ../shared.jpg");
+    writeTexturedPly(inside, "TextureFile ../shared.jpg");
     ASSERT_TRUE(writeJpeg(root / "shared.jpg"));
     PlyToObjOptions opts;
     opts.datasetRoot = root.string();
@@ -1315,41 +1315,41 @@ TEST(plyconv, textureDependencyContract) {
     EXPECT_FALSE(r.mtlPath.empty());
 
     // No TextureFile -> empty.
-    const fs::path f3 = root / "f3.ply";
-    writeF3(f3);
+    const fs::path f3 = root / "colored.ply";
+    writeColoredPly(f3);
     EXPECT_TRUE(getPlyTexture(f3.string(), root.string()).empty());
 }
 
-// B4 spike (fixture F1), kept as the regression test: the converter's OBJ + MTL +
+// The converter's OBJ + MTL +
 // texture for a textured PLY is accepted by buildNexus and yields a non-empty .nxz
 // that carries the texture (larger than the same mesh converted without it).
-TEST(plyconv, texturedPlyBuildsNexusF1) {
+TEST(plyconv, texturedPlyBuildsNexus) {
     TestArea ta(TEST_NAME);
     const fs::path root = ta.getFolder("ds");
-    const fs::path ply = root / "f1.ply";
-    writeF1(ply);
+    const fs::path ply = root / "textured.ply";
+    writeTexturedPly(ply);
     ASSERT_TRUE(writeJpeg(root / "tex.jpg", 64, 64));
 
     PlyToObjOptions opts;
     opts.datasetRoot = root.string();
-    const auto r = convertPlyToObj(ply.string(), ta.getPath("out/f1").string(), opts);
+    const auto r = convertPlyToObj(ply.string(), ta.getPath("out/textured").string(), opts);
     ASSERT_FALSE(r.mtlPath.empty());
     ASSERT_TRUE(fs::exists(r.texturePath));
 
-    const std::string nxz = buildNexus(r.objPath, ta.getPath("out/f1.nxz").string(), true);
+    const std::string nxz = buildNexus(r.objPath, ta.getPath("out/textured.nxz").string(), true);
     ASSERT_TRUE(fs::exists(nxz));
     const auto texturedSize = fs::file_size(nxz);
     EXPECT_GT(texturedSize, 0u);
 
     PlyToObjOptions noTex;
     noTex.withTexture = false;
-    const auto r2 = convertPlyToObj(ply.string(), ta.getPath("out2/f1").string(), noTex);
-    const std::string nxz2 = buildNexus(r2.objPath, ta.getPath("out2/f1.nxz").string(), true);
+    const auto r2 = convertPlyToObj(ply.string(), ta.getPath("out2/textured").string(), noTex);
+    const std::string nxz2 = buildNexus(r2.objPath, ta.getPath("out2/textured.nxz").string(), true);
     ASSERT_TRUE(fs::exists(nxz2));
     EXPECT_GT(texturedSize, fs::file_size(nxz2));
 }
 
-// B4 through build(): a textured PLY is indexed as a Model, its texture is a
+// Through build(): a textured PLY is indexed as a Model, its texture is a
 // dependency (header-only check inside buildNexus, before Nexus runs).
 struct PlyDataset : IndexFixture {
     explicit PlyDataset(const std::string& name) : IndexFixture(name) {}
@@ -1365,33 +1365,33 @@ struct PlyDataset : IndexFixture {
 TEST(plyconv, texturedPlyBuildDefersUntilTextureExists) {
     PlyDataset ds(TEST_NAME);
     fs::create_directories(ds.root / "sub");
-    writeF1(ds.root / "sub" / "f1.ply");
-    ds.add("sub/f1.ply");
-    ASSERT_EQ(ds.entry("sub/f1.ply").type, EntryType::Model);
+    writeTexturedPly(ds.root / "sub" / "textured.ply");
+    ds.add("sub/textured.ply");
+    ASSERT_EQ(ds.entry("sub/textured.ply").type, EntryType::Model);
 
-    EXPECT_THROW(ddb::build(ds.db.get(), "sub/f1.ply", "", false), BuildDepMissingException);
+    EXPECT_THROW(ddb::build(ds.db.get(), "sub/textured.ply", "", false), BuildDepMissingException);
     const auto pending = ddb::getPendingBuildInfo(ds.db.get());
     ASSERT_EQ(pending.size(), 1u);
     EXPECT_EQ(pending[0].missingDependencies, (std::vector<std::string>{"sub/tex.jpg"}));
-    EXPECT_FALSE(fs::exists(ds.out("sub/f1.ply") / "nxs"));
+    EXPECT_FALSE(fs::exists(ds.out("sub/textured.ply") / "nxs"));
 
     ASSERT_TRUE(writeJpeg(ds.root / "sub" / "tex.jpg", 32, 32));
     ds.add("sub/tex.jpg");
-    ddb::build(ds.db.get(), "sub/f1.ply", "", false);
+    ddb::build(ds.db.get(), "sub/textured.ply", "", false);
 
     EXPECT_FALSE(ddb::isBuildPending(ds.db.get()));
-    EXPECT_TRUE(ddb::isBuildComplete(ds.db.get(), "sub/f1.ply"));
-    const fs::path nxz = ds.out("sub/f1.ply") / "nxs" / "model.nxz";
+    EXPECT_TRUE(ddb::isBuildComplete(ds.db.get(), "sub/textured.ply"));
+    const fs::path nxz = ds.out("sub/textured.ply") / "nxs" / "model.nxz";
     ASSERT_TRUE(fs::exists(nxz));
     EXPECT_GT(fs::file_size(nxz), 0u);
     if (!obj2tiles::findObj2TilesBinary(true).empty())
-        EXPECT_TRUE(fs::exists(ds.out("sub/f1.ply") / "3dtiles" / "tileset.json"));
+        EXPECT_TRUE(fs::exists(ds.out("sub/textured.ply") / "3dtiles" / "tileset.json"));
 }
 
 TEST(plyconv, texturedPlyUnsatisfiableTextureFailsWithoutPending) {
     PlyDataset ds(TEST_NAME);
-    writeF1(ds.root / "abs.ply", "TextureFile /abs/tex.jpg");
-    writeF1(ds.root / "esc.ply", "TextureFile ../outside.jpg");
+    writeTexturedPly(ds.root / "abs.ply", "TextureFile /abs/tex.jpg");
+    writeTexturedPly(ds.root / "esc.ply", "TextureFile ../outside.jpg");
     ASSERT_TRUE(writeJpeg(ds.ta.getPath("outside.jpg")));  // next to the dataset root
     ds.add("abs.ply");
     ds.add("esc.ply");
@@ -1468,12 +1468,12 @@ void differential(const fs::path& ply, const fs::path& outBase) {
 
 TEST(plyconv, differentialFixtures) {
     TestArea ta(TEST_NAME);
-    writeF1(ta.getPath("f1.ply"));
+    writeTexturedPly(ta.getPath("textured.ply"));
     ASSERT_TRUE(writeJpeg(ta.getPath("tex.jpg")));
-    writeF2(ta.getPath("f2.ply"));
-    writeF3(ta.getPath("f3.ply"));
-    writeF3(ta.getPath("f3q.ply"), 9, true);
-    for (const std::string n : {"f1", "f2", "f3", "f3q"})
+    writeVertexStPly(ta.getPath("vertex_st.ply"));
+    writeColoredPly(ta.getPath("colored.ply"));
+    writeColoredPly(ta.getPath("colored_quads.ply"), 9, true);
+    for (const std::string n : {"textured", "vertex_st", "colored", "colored_quads"})
         differential(ta.getPath(n + ".ply"), ta.getPath("out/" + n));
 }
 
@@ -1525,9 +1525,9 @@ TEST(plyconv, obj2tilesParsesOutput) {
         GTEST_SKIP() << "Obj2Tiles binary not available";
 
     TestArea ta(TEST_NAME);
-    writeF3(ta.getPath("f3.ply"), 12);
-    const auto r3 = convertPlyToObj(ta.getPath("f3.ply").string(), ta.getPath("f3").string());
-    runThroughObj2Tiles(r3.objPath, ta.getPath("tiles_f3"));
+    writeColoredPly(ta.getPath("colored.ply"), 12);
+    const auto r3 = convertPlyToObj(ta.getPath("colored.ply").string(), ta.getPath("colored").string());
+    runThroughObj2Tiles(r3.objPath, ta.getPath("tiles_colored"));
 
     // Quads + n-gons with vertex colours.
     PlySpec s;
@@ -1553,7 +1553,7 @@ TEST(plyconv, realObj2TilesParsesTexturedRepeatedSpaceFilename) {
         GTEST_SKIP() << "Obj2Tiles binary not available";
     TestArea ta(TEST_NAME, true);
     const fs::path ply = ta.getPath("source  mesh.ply");
-    writeF1(ply, "TextureFile my  texture.jpg");
+    writeTexturedPly(ply, "TextureFile my  texture.jpg");
     ASSERT_TRUE(writeJpeg(ta.getPath("my  texture.jpg")));
     const auto result = convertPlyToObj(ply.string(), ta.getPath("converted  model.obj").string());
     EXPECT_EQ(fs::path(result.mtlPath).filename(), "converted__model.mtl");

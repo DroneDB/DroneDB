@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// DQ-15 probe (XI-08): a host registers its log callback before DDBRegisterProcess, as Registry
+// Probe: a host registers its log callback before DDBRegisterProcess, as Registry
 // does. Runs as its own process because DDBRegisterProcess initializes once per process (the
 // test binaries register in main). Exits 0 when:
 //   - the DEBUG records of the initialization reach the callback (the callback's minLevel sets

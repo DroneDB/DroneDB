@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "libddb capabilities",
-  "description": "DDBGetCapabilities (XI-01): ABI version (the MAJOR and MINOR of the library version, package.json), library version, error codes, error reasons, cancellable exports and the exported symbols (src/include/ddb.symbols)",
+  "description": "DDBGetCapabilities: ABI version (the MAJOR and MINOR of the library version, package.json), library version, error codes, error reasons, cancellable exports and the exported symbols (src/include/ddb.symbols)",
   "type": "object",
   "required": [
     "abi",

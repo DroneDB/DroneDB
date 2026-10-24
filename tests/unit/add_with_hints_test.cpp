@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// UPL-01 E.1: the Registry hashes an upload while it streams to disk and passes the digest to
+// The Registry hashes an upload while it streams to disk and passes the digest to
 // DDBAddWithHints. A hint is used only while the file keeps the size and mtime it had when the
 // hash was computed, so a stale hint never indexes a wrong hash.
 
