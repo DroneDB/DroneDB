@@ -11,7 +11,7 @@ vcpkg_from_github(
         libkml.patch
         sqlite3.diff
         target-is-valid.patch
-        # DroneDB (DDB-12): read fit-point-only DXF SPLINEs (written by LibreDWG
+        # DroneDB: read fit-point-only DXF SPLINEs (written by LibreDWG
         # dwg2dxf) instead of dropping them. Not upstream as of GDAL 3.13.3;
         # drop this patch once upstream GDAL ships the change.
         dxf-fit-point-splines.patch
