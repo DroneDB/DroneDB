@@ -8,6 +8,7 @@
 #include <string_view>
 #include <unordered_set>
 
+#include "cancellation.h"
 #include "delta.h"
 #include "entry_path.h"
 #include "exceptions.h"
@@ -280,17 +281,26 @@ std::vector<Conflict> applyDelta(const Delta& rawDelta,
                                  Database* destination,
                                  const DeltaApplication& application,
                                  std::ostream& out) {
+    cancel::throwIfCanceled();
     std::vector<Conflict> conflicts;
     ApplyPolicy policy(destination, application.mergeStrategy, conflicts);
     // Before anything changes: a path outside the dataset refuses the whole delta
     const Delta d = withNormalizedPaths(rawDelta);
     const auto unverifiedFiles = filesToVerify(d, withNormalizedPaths(application.verifiedHashes));
 
+    // Reading and hashing the files is the long part and changes nothing: it stops when the call
+    // is canceled. Then the delta is applied whole: the files are moved, the index and the
+    // metadata change, and a cancel (or a shutdown) after this point is not seen until the
+    // delta is applied, so a canceled DDBApplyDelta leaves the dataset as it was, never half done.
+    if (application.verifyHashes)
+        verifyDeltaHashes(unverifiedFiles, application.sourcePath);
+    cancel::throwIfCanceled();
+    const cancel::UninterruptibleScope applyWhole;
+    LOGD << "Applying a delta: " << d.adds.size() << " adds, " << d.removes.size() << " removes, "
+         << d.metaAdds.size() << " metadata adds, " << d.metaRemoves.size() << " metadata removes";
+
     // File operations
     if (d.adds.size() > 0 || d.removes.size() > 0) {
-        if (application.verifyHashes)
-            verifyDeltaHashes(unverifiedFiles, application.sourcePath);
-
         applyRemoves(d, destination, policy, out);
         applyAdds(d, destination, application.sourcePath, policy, out);
 
@@ -333,6 +343,8 @@ std::unordered_map<std::string, bool> computeDeltaLocals(Delta d,
         if (add.hash.empty())
             continue;
 
+        // Checking a local file hashes it when it changed: a checkpoint of the call (DQ-15)
+        cancel::throwIfCanceled();
         q->bind(1, add.hash);
         if (q->fetch()) {
             auto ePath = q->getText(0);

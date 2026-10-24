@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "volume.h"
+#include "cancellation.h"
 #include "dem.h"
 #include "stringutil.h"
 #include "mathutil.h"
@@ -199,10 +200,14 @@ std::vector<uint8_t> rasterizeMask(const DemContext &dem, const Window &w, OGRGe
     OGRGeometryH hGeom = OGRGeometry::ToHandle(&geom);
     int bandList[1] = {1};
     double burn[1] = {1.0};
+    // The rasterization stops when the call is canceled (DQ-15)
+    cancel::GdalProgress progress;
     if (GDALRasterizeGeometries(maskDs, 1, bandList, 1, &hGeom,
                                 nullptr, nullptr, burn, nullptr,
-                                nullptr, nullptr) != CE_None)
+                                progress.function(), progress.data()) != CE_None) {
+        cancel::throwIfCanceled();
         throw AppException("Failed to rasterize polygon");
+    }
     GDALRasterBandH maskBand = GDALGetRasterBand(maskDs, 1);
     if (GDALRasterIO(maskBand, GF_Read, 0, 0, w.width, w.height,
                      mask.data(), w.width, w.height, GDT_Byte, 0, 0) != CE_None)
@@ -225,6 +230,7 @@ Perimeter collectPerimeter(const DemContext &dem, const Window &w, const std::ve
     p.z.reserve(p.mx.capacity());
 
     for (int r = 0; r < w.height; r++) {
+        cancel::throwIfCanceled();
         for (int c = 0; c < w.width; c++) {
             if (!mask[w.index(r, c)]) continue;
             bool onEdge = (r == 0 || r == w.height - 1 || c == 0 || c == w.width - 1)
@@ -316,6 +322,7 @@ VolumeTotals accumulateVolume(const DemContext &dem, const Window &w, const std:
     VolumeTotals t;
 
     for (int r = 0; r < w.height; r++) {
+        cancel::throwIfCanceled();
         for (int c = 0; c < w.width; c++) {
             if (!mask[w.index(r, c)]) continue;
             const float z = elev[w.index(r, c)];
@@ -363,6 +370,7 @@ std::string calculateVolumeJson(const std::string &rasterPath,
                                 const std::string &polygonGeoJson,
                                 const std::string &baseMethod,
                                 double flatElevation) {
+    cancel::throwIfCanceled();
     const BaseMethod method = parseMethod(baseMethod);
     LOGD << "calculateVolume method=" << methodName(method) << " path=" << rasterPath;
 

@@ -32,7 +32,7 @@ namespace ddb::cancel
 
     // ---- Token
 
-    Token::Token(Token *parent) noexcept : parent_(parent)
+    Token::Token(Token *parent, bool shield) noexcept : parent_(parent), shield_(shield)
     {
         if (parent_ != nullptr)
             parent_->retain();
@@ -46,7 +46,17 @@ namespace ddb::cancel
 
     Token *Token::create(Token *parent)
     {
-        return new Token(parent);
+        return new Token(parent, false);
+    }
+
+    Token *Token::createShield()
+    {
+        return new Token(nullptr, true);
+    }
+
+    bool Token::shielded() const noexcept
+    {
+        return shield_ || (parent_ != nullptr && parent_->shielded());
     }
 
     void Token::retain() noexcept
@@ -131,6 +141,8 @@ namespace ddb::cancel
         currentToken = std::move(previous_);
     }
 
+    UninterruptibleScope::UninterruptibleScope() : scope_(TokenRef::adopt(Token::createShield())) {}
+
     CallToken::CallToken() : token_(TokenRef::adopt(Token::create(currentToken.get()))), scope_(token_) {}
 
     // ---- shutdown
@@ -154,7 +166,8 @@ namespace ddb::cancel
 
     bool isCanceled(const Token *token) noexcept
     {
-        return shutdownRequested() || (token != nullptr && token->canceled());
+        const bool shielded = token != nullptr && token->shielded();
+        return (shutdownRequested() && !shielded) || (token != nullptr && token->canceled());
     }
 
     bool isCanceled() noexcept
@@ -164,9 +177,10 @@ namespace ddb::cancel
 
     void throwIfCanceled()
     {
-        if (shutdownRequested())
+        const Token *token = currentToken.get();
+        if (shutdownRequested() && !(token != nullptr && token->shielded()))
             throw ShutdownException(kShuttingDown);
-        if (const Token *token = currentToken.get())
+        if (token != nullptr)
             if (const char *message = token->message())
                 throw CanceledException(message);
     }
@@ -205,6 +219,11 @@ namespace ddb::cancel
     void GdalProgress::attach(GDALVectorTranslateOptions *options) noexcept
     {
         GDALVectorTranslateOptionsSetProgress(options, function(), data());
+    }
+
+    void GdalProgress::attach(GDALNearblackOptions *options) noexcept
+    {
+        GDALNearblackOptionsSetProgress(options, function(), data());
     }
 
     GDALRasterIOExtraArg GdalProgress::rasterIOExtraArg(GDALRIOResampleAlg resampling) noexcept

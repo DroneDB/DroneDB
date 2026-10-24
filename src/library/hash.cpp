@@ -11,6 +11,7 @@
 #include <stdexcept>
 #include <vector>
 
+#include "cancellation.h"
 #include "exceptions.h"
 #include "mio.h"
 
@@ -207,6 +208,8 @@ std::string Hash::fileSHA256(const std::string& path) {
     std::vector<unsigned char> buffer(BufferSize);
 
     while (f) {
+        // A big file takes a while: it is a checkpoint of the call (DQ-15)
+        cancel::throwIfCanceled();
         f.read(reinterpret_cast<char*>(buffer.data()), BufferSize);
         const size_t numBytesRead = size_t(f.gcount());
         if (numBytesRead > 0)

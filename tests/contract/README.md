@@ -325,3 +325,14 @@ Registry has to adopt first.
   fixture sets it to 256 through `DDBConfigure`; without it the value is the bound from
   `DDB_GDAL_CACHE_MB` or 1024, source `environment` or `default`. Additive: the other
   settings did not change.
+
+* 2026-10-24: the `cancellable` list of `capabilities` grows (XI-07, DQ-15, cancellation steps 3
+  and 4): `DDBGetRasterMetadata`, `DDBGetRasterValueInfo`, `DDBGetRasterPointValue`,
+  `DDBGetRasterAreaStats`, `DDBGetRasterProfile`, `DDBCalculateVolume`, `DDBDetectStockpile`,
+  `DDBDetectAllStockpiles`, `DDBGenerateContours`, `DDBMaskBorders`, `DDBComputeDeltaLocals`,
+  `DDBApplyDelta` and `DDBApplyDeltaEx` (13 exports, 26 in all). Additive: no other member and no
+  other fixture changed. `DDBApplyDelta(Ex)` is atomic to a cancel: it stops with
+  `DDBERR_CANCELED` while it reads and hashes the added files, with the dataset and the source
+  files untouched, and once it starts to change the dataset it applies the delta whole and
+  returns `DDBERR_NONE` (a cancel or a shutdown that comes later is not seen). A canceled
+  `DDBMaskBorders` leaves no output file.

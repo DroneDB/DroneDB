@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "contour.h"
+#include "cancellation.h"
 #include "dem.h"
 #include "exceptions.h"
 #include "gdal_raii.h"
@@ -154,11 +155,15 @@ ContourLayer generateContourLayer(const DemContext &dem, double interval, const 
         opts.SetNameValue("NODATA", std::to_string(dem.nodata.value).c_str());
     }
 
+    // The generation stops when the call is canceled (DQ-15)
+    cancel::GdalProgress progress;
     const CPLErr cErr = GDALContourGenerateEx(dem.band, hLayer, opts.List(),
-                                              nullptr, nullptr);
+                                              progress.function(), progress.data());
 
-    if (cErr != CE_None)
+    if (cErr != CE_None) {
+        cancel::throwIfCanceled();
         throw GDALException("GDAL contour generation failed");
+    }
     return out;
 }
 
@@ -180,6 +185,7 @@ ContourFeatures collectFeatures(OGRLayerH hLayer, const DemContext &dem, const C
 
     OGR_L_ResetReading(hLayer);
     while (true) {
+        cancel::throwIfCanceled();
         const FeaturePtr feature(OGR_L_GetNextFeature(hLayer));
         if (!feature) break;
         OGRFeatureH hFeat = feature.get();
@@ -237,6 +243,7 @@ ContourFeatures collectFeatures(OGRLayerH hLayer, const DemContext &dem, const C
 std::string generateContoursJson(const std::string &rasterPath,
                                  const ContourOptions &options) {
     validateOptions(options);
+    cancel::throwIfCanceled();
 
     // --- Open raster ------------------------------------------------------
     const DemContext dem = openDem(rasterPath, options.bandIndex);
@@ -246,11 +253,18 @@ std::string generateContoursJson(const std::string &rasterPath,
     const std::string unit = unitCStr ? unitCStr : "";
 
     // Band statistics drive interval-from-count and JSON metadata.
+    // (the statistics stored with the raster, else a pass over it that stops when the call is canceled)
     double bMin = 0.0, bMax = 0.0, bMean = 0.0, bStdDev = 0.0;
-    const CPLErr statErr = GDALGetRasterStatistics(hBand, FALSE, TRUE,
-                                                   &bMin, &bMax, &bMean, &bStdDev);
-    if (statErr != CE_None)
+    CPLErr statErr = GDALGetRasterStatistics(hBand, FALSE, FALSE, &bMin, &bMax, &bMean, &bStdDev);
+    if (statErr != CE_None) {
+        cancel::GdalProgress progress;
+        statErr = GDALComputeRasterStatistics(hBand, FALSE, &bMin, &bMax, &bMean, &bStdDev,
+                                              progress.function(), progress.data());
+    }
+    if (statErr != CE_None) {
+        cancel::throwIfCanceled();
         throw GDALException("Cannot compute raster statistics");
+    }
 
     const double interval = resolveInterval(options, bMin, bMax);
 

@@ -258,7 +258,12 @@ extern "C"
      * work checks a token while it runs; any export may return DDBERR_CANCELED when a token is
      * set and canceled, and no export returns it without one (but DDBExportRaster2, through its
      * progress callback). DDBShutdown stops the work of every thread the same way, with
-     * DDBERR_SHUTDOWN. */
+     * DDBERR_SHUTDOWN.
+     * The cancellable exports are the render, tile and thumbnail paths, the exports of rasters
+     * (export, mask, statistics and metadata, point and area values, profile, volume, stockpiles,
+     * contours), DDBBuild, DDBComputeDeltaLocals and DDBApplyDelta(Ex). A canceled call leaves
+     * no half result: a raster output file is deleted, and DDBApplyDelta changes the dataset
+     * whole or not at all (see there). */
 
     /** An opaque cancel token */
     typedef struct DDBCancelToken DDBCancelToken;
@@ -636,7 +641,13 @@ extern "C"
 
     /** Apply a delta on a database. The added files are moved out of sourcePath, and each
      * must match the hash in the delta (checked before any change; set the environment
-     * variable DDB_VERIFY_PUSH_HASHES=0 to skip the check; DDBApplyDeltaEx skips it per file)
+     * variable DDB_VERIFY_PUSH_HASHES=0 to skip the check; DDBApplyDeltaEx skips it per file).
+     * Cancellable (DDBSetThreadCancelToken), until it starts to change the dataset: reading and
+     * hashing the added files is the long part, and stops at once with DDBERR_CANCELED, the
+     * dataset, the index and the source files untouched. From the first removal or move on the
+     * delta is applied whole, whatever happens to the token or to DDBShutdown meanwhile (which
+     * waits for it): the call returns DDBERR_NONE (or its conflicts), never half done, and a
+     * cancel that came too late is not an error.
      * @param delta JSON delta between databases; its paths are entry paths (see "Entry paths":
      *        one refused path refuses the call before anything changes)
      * @param sourcePath path to source database (or path to partial files to be added)

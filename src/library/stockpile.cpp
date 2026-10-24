@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "stockpile.h"
+#include "cancellation.h"
 #include "dem.h"
 #include "mathutil.h"
 #include "exceptions.h"
@@ -48,6 +49,7 @@ void gaussianFilter(std::vector<float> &data, int width, int height, float sigma
     std::vector<float> tmp(data.size(), 0.0f);
     // Horizontal pass
     for (int r = 0; r < height; r++) {
+        cancel::throwIfCanceled();
         const int rowBase = r * width;
         for (int c = 0; c < width; c++) {
             float v = 0;
@@ -60,6 +62,7 @@ void gaussianFilter(std::vector<float> &data, int width, int height, float sigma
     }
     // Vertical pass
     for (int c = 0; c < width; c++) {
+        cancel::throwIfCanceled();
         for (int r = 0; r < height; r++) {
             float v = 0;
             for (int i = 0; i < ksize; i++) {
@@ -88,7 +91,11 @@ std::vector<uint8_t> floodFill(const std::vector<uint8_t> &binary,
     count = 1;
     const int dx[4] = {0, 0, -1, 1};
     const int dy[4] = {-1, 1, 0, 0};
+    size_t steps = 0;
     while (!q.empty()) {
+        // A checkpoint every 64 Ki pixels: a fill can cover a whole raster
+        if ((++steps & 0xFFFF) == 0)
+            cancel::throwIfCanceled();
         auto [cx, cy] = q.front();
         q.pop();
         for (int d = 0; d < 4; d++) {
@@ -393,6 +400,7 @@ std::string detectStockpileJson(const std::string &rasterPath,
                                 double lat, double lon,
                                 double radiusMeters,
                                 float sensitivity) {
+    cancel::throwIfCanceled();
     sensitivity = std::clamp(sensitivity, 0.0f, 1.0f);
     if (!(radiusMeters > 0.0))
         throw InvalidArgsException("radius must be positive");
@@ -508,6 +516,7 @@ std::vector<int32_t> labelConnectedComponents(const std::vector<uint8_t> &binary
 
     // First pass.
     for (int y = 0; y < height; y++) {
+        cancel::throwIfCanceled();
         for (int x = 0; x < width; x++) {
             const size_t idx = static_cast<size_t>(y) * width + x;
             if (!binary[idx]) continue;
@@ -636,6 +645,7 @@ std::vector<ComponentStat> componentStats(const std::vector<int32_t> &labels, co
     for (int32_t i = 0; i <= numLabels; i++) stats[i].id = i;
 
     for (int y = 0; y < height; y++) {
+        cancel::throwIfCanceled();
         for (int x = 0; x < width; x++) {
             const size_t idx = static_cast<size_t>(y) * width + x;
             const int32_t lab = labels[idx];
@@ -771,6 +781,7 @@ std::string detectAllStockpilesJson(const std::string &rasterPath,
                                     float sensitivity,
                                     double minAreaM2,
                                     int maxResults) {
+    cancel::throwIfCanceled();
     sensitivity = std::clamp(sensitivity, 0.0f, 1.0f);
     if (minAreaM2 < 0.0) minAreaM2 = 0.0;
     if (maxResults <= 0) maxResults = 50;
@@ -836,6 +847,7 @@ std::string detectAllStockpilesJson(const std::string &rasterPath,
     detections.reserve(numLabels);
 
     for (int32_t lab = 1; lab <= numLabels; lab++) {
+        cancel::throwIfCanceled();
         const auto &s = stats[lab];
         const double areaM2 = static_cast<double>(s.pixelCount) * raster.cellArea;
         if (areaM2 < minAreaM2) continue;

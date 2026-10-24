@@ -1,6 +1,7 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+#include "cancellation.h"
 #include "gdal_raii.h"
 #include "gtiff_options.h"
 #include "mask.h"
@@ -210,6 +211,7 @@ namespace ddb
 
         int bUsageError = FALSE;
 
+        cancel::GdalProgress progress;
         GDALDatasetUniquePtr outDataset;
         {
             // Force internal GeoTIFF mask instead of .msk sidecar, especially for GDAL < 3.9.
@@ -219,6 +221,8 @@ namespace ddb
                 GDALNearblackOptionsNew(targs.List(), nullptr));
             if (!psOptions)
                 throw GDALException("Failed to create nearblack options");
+            // The pass over the raster stops when the call is canceled (DQ-15)
+            progress.attach(psOptions.get());
 
             outDataset = adoptDataset(
                 GDALNearblack(output.c_str(), nullptr, hSrcDataset, psOptions.get(), &bUsageError));
@@ -227,8 +231,16 @@ namespace ddb
         if (bUsageError)
             throw GDALException("GDALNearblack usage error");
 
-        if (!outDataset)
+        if (!outDataset) {
+            // A canceled pass leaves no output
+            if (cancel::isCanceled()) {
+                std::error_code ignored;
+                fs::remove(io::fromUtf8(output), ignored);
+                fs::remove(io::fromUtf8(output + ".msk"), ignored);
+            }
+            cancel::throwIfCanceled();
             throw GDALException("GDALNearblack failed to create output: " + output);
+        }
 
         outDataset.reset();
 

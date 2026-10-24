@@ -27,7 +27,10 @@ constexpr std::string_view kExportedSymbols[] = {
 
 // Every DDBErr code under its enumerator name without the DDBERR_ prefix (the same token, so a
 // name cannot drift from its code), in value order
-#define DDB_ERROR_CODE(name) std::pair<std::string_view, DDBErr>{#name, DDBERR_##name}
+#define DDB_ERROR_CODE(name)              \
+    std::pair<std::string_view, DDBErr> { \
+        #name, DDBERR_##name              \
+    }
 constexpr std::array kErrorCodes = {DDB_ERROR_CODE(NONE),
                                     DDB_ERROR_CODE(EXCEPTION),
                                     DDB_ERROR_CODE(BUILDDEPMISSING),
@@ -45,12 +48,25 @@ constexpr std::array kErrorCodes = {DDB_ERROR_CODE(NONE),
 // reads, forEachIndex items, SQLite statements, external tools). Sorted, so the capabilities
 // list is stable. DDBExportRaster2 also stops when its progress callback asks to.
 constexpr std::string_view kCancellable[] = {
+    "DDBApplyDelta",
+    "DDBApplyDeltaEx",
     "DDBBuild",
+    "DDBCalculateVolume",
+    "DDBComputeDeltaLocals",
+    "DDBDetectAllStockpiles",
+    "DDBDetectStockpile",
     "DDBExportRaster",
     "DDBExportRaster2",
+    "DDBGenerateContours",
     "DDBGenerateMemoryThumbnail",
     "DDBGenerateMemoryThumbnailEx",
     "DDBGenerateThumbnail",
+    "DDBGetRasterAreaStats",
+    "DDBGetRasterMetadata",
+    "DDBGetRasterPointValue",
+    "DDBGetRasterProfile",
+    "DDBGetRasterValueInfo",
+    "DDBMaskBorders",
     "DDBMemoryTile",
     "DDBMemoryTileEx",
     "DDBMemoryTileFmt",
@@ -74,7 +90,8 @@ static_assert(std::ranges::all_of(kCancellable,
                                              std::end(kExportedSymbols);
                                   }),
               "a cancellable function must be an export listed in ddb.symbols");
-static_assert(std::ranges::adjacent_find(kCancellable, std::ranges::greater_equal{}) == std::end(kCancellable),
+static_assert(std::ranges::adjacent_find(kCancellable, std::ranges::greater_equal{}) ==
+                  std::end(kCancellable),
               "kCancellable must be sorted, without duplicates");
 
 json stringArray(std::span<const std::string_view> items) {

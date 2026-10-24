@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "dem.h"
 
+#include "cancellation.h"
 #include "exceptions.h"
 #include "mathutil.h"
 
@@ -59,8 +60,15 @@ namespace ddb
     std::vector<float> DemContext::readElevations(int x, int y, int w, int h, int bufferW, int bufferH) const
     {
         std::vector<float> samples(static_cast<size_t>(bufferW) * bufferH);
-        if (GDALRasterIO(band, GF_Read, x, y, w, h, samples.data(), bufferW, bufferH, GDT_Float32, 0, 0) != CE_None)
+        // The read stops when the call is canceled (DQ-15)
+        cancel::GdalProgress progress;
+        GDALRasterIOExtraArg extra = progress.rasterIOExtraArg();
+        if (GDALRasterIOEx(band, GF_Read, x, y, w, h, samples.data(), bufferW, bufferH, GDT_Float32, 0, 0, &extra) !=
+            CE_None)
+        {
+            cancel::throwIfCanceled();
             throw AppException("Cannot read raster data");
+        }
         return samples;
     }
 

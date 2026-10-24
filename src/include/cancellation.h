@@ -39,23 +39,30 @@ namespace ddb::cancel
         // Drops a reference; the last one deletes the token
         void release() noexcept;
 
+        // A token that is never canceled and that the shutdown does not stop either, nor that
+        // of a child made under it: the token of an UninterruptibleScope
+        static Token *createShield();
+
         // Cancels the token; message (a string literal, it is never copied) says why. The first
         // message stays.
         void cancel(const char *message) noexcept;
         bool canceled() const noexcept { return message() != nullptr; }
         // Why the token (or its parent) is canceled, nullptr while it is not
         const char *message() const noexcept;
+        // True for a shield, and for a token made under one: the shutdown does not stop it
+        bool shielded() const noexcept;
 
         Token(const Token &) = delete;
         Token &operator=(const Token &) = delete;
 
     private:
-        explicit Token(Token *parent) noexcept;
+        Token(Token *parent, bool shield) noexcept;
         ~Token();
 
         std::atomic<int> refs_{1};
         std::atomic<const char *> message_{nullptr};
         Token *const parent_; // a reference is held on it
+        const bool shield_;
     };
 
     // A counted reference to a token (or none)
@@ -100,6 +107,21 @@ namespace ddb::cancel
 
     private:
         TokenRef previous_;
+    };
+
+    // While in scope the work of the calling thread, and of the parallel sections it starts, does
+    // not stop for the caller's token nor for the shutdown: the checks (throwIfCanceled,
+    // isCanceled, the GDAL and SQLite checkpoints) see nothing to stop. For the part of a call
+    // that must not be left half done (DDBApplyDelta once it changed the dataset): the caller's
+    // token is checked before it, and the scope ends with the call's result, so the next check
+    // after the scope sees the token again.
+    class UninterruptibleScope
+    {
+    public:
+        UninterruptibleScope();
+
+    private:
+        ScopedThreadToken scope_;
     };
 
     // A token for one call, child of the thread's token and made the thread's token while in
@@ -158,6 +180,7 @@ namespace ddb::cancel
         void attach(GDALWarpAppOptions *options) noexcept;
         void attach(GDALTranslateOptions *options) noexcept;
         void attach(GDALVectorTranslateOptions *options) noexcept;
+        void attach(GDALNearblackOptions *options) noexcept;
         // The extra argument of GDALRasterIOEx/GDALDatasetRasterIOEx with this progress
         GDALRasterIOExtraArg rasterIOExtraArg(GDALRIOResampleAlg resampling = GRIORA_NearestNeighbour) noexcept;
 

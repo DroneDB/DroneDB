@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "raster_analysis.h"
+#include "cancellation.h"
 #include "raster_region.h"
 #include "raster_utils.h"
 #include "json.h"
@@ -90,12 +91,20 @@ std::optional<std::vector<float>> readAreaBand(GDALRasterBandH hBand, GDALDataTy
     const size_t roiCount = static_cast<size_t>(roiW) * roiH;
     std::vector<float> roiData(roiCount);
 
+    // The read stops when the call is canceled (DQ-15)
+    cancel::GdalProgress progress;
+    GDALRasterIOExtraArg extra = progress.rasterIOExtraArg();
+    const auto failed = [] {
+        cancel::throwIfCanceled();
+        return std::optional<std::vector<float>>();
+    };
+
     if (dt == GDT_UInt16) {
         std::vector<uint16_t> rawRoi(roiCount);
-        if (GDALRasterIO(hBand, GF_Read, b.x0, b.y0, roiW, roiH,
-                         rawRoi.data(), roiW, roiH,
-                         GDT_UInt16, 0, 0) != CE_None)
-            return std::nullopt;
+        if (GDALRasterIOEx(hBand, GF_Read, b.x0, b.y0, roiW, roiH,
+                           rawRoi.data(), roiW, roiH,
+                           GDT_UInt16, 0, 0, &extra) != CE_None)
+            return failed();
         for (size_t i = 0; i < roiCount; i++) {
             roiData[i] = needsConversion
                 ? static_cast<float>(rawToTemperature(rawRoi[i], cal))
@@ -105,9 +114,9 @@ std::optional<std::vector<float>> readAreaBand(GDALRasterBandH hBand, GDALDataTy
     }
 
     // Floating point and other integer types: read as Float32.
-    if (GDALRasterIO(hBand, GF_Read, b.x0, b.y0, roiW, roiH,
-                     roiData.data(), roiW, roiH, GDT_Float32, 0, 0) != CE_None)
-        return std::nullopt;
+    if (GDALRasterIOEx(hBand, GF_Read, b.x0, b.y0, roiW, roiH,
+                       roiData.data(), roiW, roiH, GDT_Float32, 0, 0, &extra) != CE_None)
+        return failed();
     return roiData;
 }
 
@@ -284,6 +293,7 @@ std::string readGdalUnitType(const std::string &filePath) {
 }
 
 std::string getRasterValueInfoJson(const std::string &filePath) {
+    cancel::throwIfCanceled();
     std::string sensorId;
     const bool isThermal = detectIsThermal(filePath, sensorId);
     ThermalCalibration cal;
@@ -310,9 +320,14 @@ std::string getRasterValueInfoJson(const std::string &filePath) {
             const char *u = GDALGetRasterUnitType(hBand);
             if (u != nullptr) unit = u;
 
+            // A pass over the band (or an overview): it stops when the call is canceled
+            cancel::GdalProgress progress;
             double bMin, bMax, bMean, bStdDev;
-            if (GDALComputeRasterStatistics(hBand, TRUE, &bMin, &bMax, &bMean, &bStdDev,
-                                            nullptr, nullptr) == CE_None) {
+            const CPLErr statsErr = GDALComputeRasterStatistics(hBand, TRUE, &bMin, &bMax, &bMean, &bStdDev,
+                                                                progress.function(), progress.data());
+            if (statsErr != CE_None)
+                cancel::throwIfCanceled();
+            if (statsErr == CE_None) {
                 if (isThermal && dt == GDT_UInt16 && cal.valid) {
                     vMin = static_cast<float>(rawToTemperature(static_cast<uint16_t>(bMin), cal));
                     vMax = static_cast<float>(rawToTemperature(static_cast<uint16_t>(bMax), cal));
@@ -371,6 +386,7 @@ std::string getRasterValueInfoJson(const std::string &filePath) {
 }
 
 std::string getRasterPointJson(const std::string &filePath, int x, int y) {
+    cancel::throwIfCanceled();
     std::string sensorId;
     const bool isThermal = detectIsThermal(filePath, sensorId);
 
@@ -406,6 +422,7 @@ std::string getRasterPointJson(const std::string &filePath, int x, int y) {
 
 std::string getRasterAreaStatsJson(const std::string &filePath,
                                    int x0, int y0, int x1, int y1) {
+    cancel::throwIfCanceled();
     std::string sensorId;
     const bool isThermal = detectIsThermal(filePath, sensorId);
 
@@ -565,7 +582,13 @@ json bandStatistics(GDALDatasetH hDs) {
     for (int i = 1; i <= nBands; i++) {
         GDALRasterBandH hBand = GDALGetRasterBand(hDs, i);
         double bMin, bMax, bMean, bStdDev;
-        if (GDALComputeRasterStatistics(hBand, TRUE, &bMin, &bMax, &bMean, &bStdDev, nullptr, nullptr) == CE_None) {
+        // A pass over the band (or an overview): it stops when the call is canceled (DQ-15)
+        cancel::GdalProgress progress;
+        const CPLErr statsErr = GDALComputeRasterStatistics(hBand, TRUE, &bMin, &bMax, &bMean, &bStdDev,
+                                                            progress.function(), progress.data());
+        if (statsErr != CE_None)
+            cancel::throwIfCanceled();
+        if (statsErr == CE_None) {
             stats[std::to_string(i)] = {
                 {"min", bMin}, {"max", bMax}, {"mean", bMean}, {"std", bStdDev},
                 {"percentiles", {{"p2", bMean - 2.33 * bStdDev}, {"p98", bMean + 2.33 * bStdDev}}}
@@ -601,6 +624,7 @@ json algorithmList(const VegetationEngine &ve, GDALDatasetH hDs, const BandFilte
 } // anonymous namespace
 
 std::string getRasterMetadataJson(const std::string &path, const std::string &formula, const std::string &bandFilter) {
+    cancel::throwIfCanceled();
     // Owned: the formula, statistics and sensor steps below can throw while it is open
     auto dataset = adoptDataset(GDALOpen(path.c_str(), GA_ReadOnly));
     if (!dataset)
