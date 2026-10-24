@@ -23,6 +23,18 @@ struct VegetationFormula {
     double rangeMax = 0;
     bool hasRange = false;
     std::string requiredBands; // e.g. "RG", "RGN", "RGNRe"
+    // The formula adds constants to the band values (SAVI +0.5, OSAVI +0.16, EVI +1, 6R, 7.5B): it
+    // only means something on reflectance (0..1), so it is offered and computed only over
+    // floating-point rasters. The ratio indices are scale-free and need nothing of the data.
+    bool needsReflectance = false;
+};
+
+// The data of a raster, as far as the formulas are concerned: its data bands (the alpha band is
+// not one) and their type
+struct RasterDataKind {
+    std::string typeName;       // GDAL's name of the type, e.g. "UInt16"
+    bool floatingPoint = false; // every data band is Float32 or Float64: values that can be reflectance
+    int bandCount = 0;          // data bands
 };
 
 // Band filter maps band symbols (R, G, B, N, Re, T) to 0-based band indices in the raster
@@ -66,7 +78,26 @@ public:
     static VegetationEngine& instance();
 
     const std::vector<VegetationFormula>& getAllFormulas() const { return formulas_; }
-    std::vector<VegetationFormula> getFormulasForFilter(const BandFilter &filter) const;
+
+    // The formulas a raster can compute: those whose bands filter maps and whose data it can take
+    std::vector<VegetationFormula> getFormulasForFilter(const BandFilter &filter, const RasterDataKind &data) const;
+
+    // Why a raster cannot compute a formula, "" when it can: the one availability rule, which
+    // the lists of formulas (getFormulasForFilter, the raster metadata) and the planning of every
+    // render (planFormula) all ask. A band the filter does not map is "Requires bands: ..."
+    static std::string unavailableReason(const VegetationFormula &formula, const BandFilter &filter,
+                                         const RasterDataKind &data);
+
+    // The part of the rule that is about the data: "" or why the formula needs another type
+    // ("SAVI needs reflectance values: the raster is UInt16 ..."). Does not look at the bands, so
+    // a render that maps its own bands asks it alone
+    static std::string dataRefusal(const VegetationFormula &formula, const RasterDataKind &data);
+
+    // The symbols of the formula's bands that filter does not map
+    static std::vector<char> missingSymbols(const VegetationFormula &formula, const BandFilter &filter);
+
+    // The name of a band symbol (R, G, B, N, e, T): "Red", "Green", "Blue", "NIR", "Red edge", "Thermal"
+    static const char *symbolName(char symbol);
 
     const VegetationFormula* getFormula(const std::string &id) const;
 
@@ -118,7 +149,7 @@ public:
     json getColormapsJson() const;
 
     // Get formulas as JSON for a given filter
-    json getFormulasJson(const BandFilter &filter) const;
+    json getFormulasJson(const BandFilter &filter, const RasterDataKind &data) const;
 
 private:
     VegetationEngine();

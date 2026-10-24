@@ -86,6 +86,26 @@ namespace ddb
         return {sMin, sMax};
     }
 
+    RasterDataKind rasterDataKind(GDALDatasetH ds)
+    {
+        RasterDataKind kind;
+        kind.floatingPoint = true;
+        const int bandCount = GDALGetRasterCount(ds);
+        for (int b = 1; b <= bandCount; b++)
+        {
+            GDALRasterBandH band = GDALGetRasterBand(ds, b);
+            if (GDALGetRasterColorInterpretation(band) == GCI_AlphaBand)
+                continue;
+            kind.bandCount++;
+            const GDALDataType type = GDALGetRasterDataType(band);
+            if (kind.floatingPoint && (kind.typeName.empty() || !GDALDataTypeIsFloating(type)))
+                kind.typeName = GDALGetDataTypeName(type);
+            if (!GDALDataTypeIsFloating(type))
+                kind.floatingPoint = false;
+        }
+        return kind;
+    }
+
     FormulaPlan planFormula(GDALDatasetH ds, const std::string &formulaId, const BandFilter &filter,
                             const std::string &colormapId, bool withColormap)
     {
@@ -97,6 +117,11 @@ namespace ddb
         plan.formula = ve.getFormula(formulaId);
         if (!plan.formula)
             throw InvalidArgsException("Unknown formula: " + formulaId);
+
+        // The one rule of what a raster can compute (the lists of formulas ask it too)
+        const std::string refusal = VegetationEngine::dataRefusal(*plan.formula, rasterDataKind(ds));
+        if (!refusal.empty())
+            throw InvalidArgsException(refusal);
 
         if (withColormap)
         {

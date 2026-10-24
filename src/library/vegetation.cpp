@@ -96,8 +96,8 @@ void VegetationEngine::initFormulas() {
     formulas_.push_back({"NDVI", "Normalized Difference Vegetation Index", "(N - R) / (N + R)", "Amount of green vegetation", -1, 1, true, "RN"});
     formulas_.push_back({"NDWI", "Normalized Difference Water Index", "(G - N) / (G + N)", "Water content", -1, 1, true, "GN"});
     formulas_.push_back({"GNDVI", "Green NDVI", "(N - G) / (N + G)", "NDVI on green spectrum", -1, 1, true, "GN"});
-    formulas_.push_back({"SAVI", "Soil Adjusted Vegetation Index", "(1.5 * (N - R)) / (N + R + 0.5)", "NDVI with soil correction", -1, 1, true, "RN"});
-    formulas_.push_back({"EVI", "Enhanced Vegetation Index", "2.5 * (N - R) / (N + 6*R - 7.5*B + 1)", "Better where NDVI saturates", -1, 1, true, "RBN"});
+    formulas_.push_back({"SAVI", "Soil Adjusted Vegetation Index", "(1.5 * (N - R)) / (N + R + 0.5)", "NDVI with soil correction", -1, 1, true, "RN", true});
+    formulas_.push_back({"EVI", "Enhanced Vegetation Index", "2.5 * (N - R) / (N + 6*R - 7.5*B + 1)", "Better where NDVI saturates", -1, 1, true, "RBN", true});
 
     // Phase 0 - Red Edge
     formulas_.push_back({"NDRE", "Normalized Difference Red Edge", "(N - Re) / (N + Re)", "Green vegetation in mature crops", -1, 1, true, "NRe"});
@@ -105,7 +105,7 @@ void VegetationEngine::initFormulas() {
     // Phase 1 formulas
     formulas_.push_back({"NDYI", "Normalized Difference Yellowness Index", "(G - B) / (G + B)", "Yellowness detection", -1, 1, true, "GB"});
     formulas_.push_back({"MPRI", "Modified Photochemical Reflectance Index", "(G - R) / (G + R)", "Photochemical reflectance", -1, 1, true, "RG"});
-    formulas_.push_back({"OSAVI", "Optimized Soil Adjusted Vegetation Index", "(N - R) / (N + R + 0.16)", "Optimized for sparse vegetation", -1, 1, true, "RN"});
+    formulas_.push_back({"OSAVI", "Optimized Soil Adjusted Vegetation Index", "(N - R) / (N + R + 0.16)", "Optimized for sparse vegetation", -1, 1, true, "RN", true});
     formulas_.push_back({"GRVI", "Green Ratio Vegetation Index", "N / G", "Green ratio", 0, 0, false, "GN"});
     formulas_.push_back({"ENDVI", "Enhanced NDVI", "((N + G) - (2*B)) / ((N + G) + (2*B))", "Enhanced NDVI", 0, 0, false, "GBN"});
     formulas_.push_back({"ARVI", "Atmospherically Resistant Vegetation Index", "(N - (2*R) + B) / (N + (2*R) + B)", "Corrects atmospheric effects", -1, 1, true, "RBN"});
@@ -142,17 +142,42 @@ std::vector<int> VegetationEngine::bandsRead(const VegetationFormula &formula, c
     return bands;
 }
 
-std::vector<VegetationFormula> VegetationEngine::getFormulasForFilter(const BandFilter &filter) const {
+std::vector<char> VegetationEngine::missingSymbols(const VegetationFormula &formula, const BandFilter &filter) {
+    std::vector<char> missing;
+    for (const char symbol : requiredSymbols(formula))
+        if (!filter.has(symbol)) missing.push_back(symbol);
+    return missing;
+}
+
+const char *VegetationEngine::symbolName(char symbol) {
+    switch (symbol) {
+        case 'R': return "Red";
+        case 'G': return "Green";
+        case 'B': return "Blue";
+        case 'N': return "NIR";
+        case 'e': return "Red edge";
+        case 'T': return "Thermal";
+        default: return "?";
+    }
+}
+
+std::string VegetationEngine::dataRefusal(const VegetationFormula &formula, const RasterDataKind &data) {
+    if (!formula.needsReflectance || data.floatingPoint) return "";
+    return formula.id + " needs reflectance values (0 to 1, a floating-point raster): the raster is " +
+           data.typeName + ", whose values are not reflectance";
+}
+
+std::string VegetationEngine::unavailableReason(const VegetationFormula &formula, const BandFilter &filter,
+                                                const RasterDataKind &data) {
+    if (!missingSymbols(formula, filter).empty()) return "Requires bands: " + formula.requiredBands;
+    return dataRefusal(formula, data);
+}
+
+std::vector<VegetationFormula> VegetationEngine::getFormulasForFilter(const BandFilter &filter,
+                                                                      const RasterDataKind &data) const {
     std::vector<VegetationFormula> result;
     for (const auto &f : formulas_) {
-        bool compatible = true;
-        for (const char symbol : requiredSymbols(f)) {
-            if (!filter.has(symbol)) {
-                compatible = false;
-                break;
-            }
-        }
-        if (compatible) result.push_back(f);
+        if (unavailableReason(f, filter, data).empty()) result.push_back(f);
     }
     return result;
 }
@@ -224,6 +249,15 @@ BandFilter VegetationEngine::autoDetectFilter(const std::string &rasterPath) con
     return bf;
 }
 
+namespace {
+
+// A sample with no value to compute with: the nodata value of the computation, NaN or infinity
+bool hasNoValue(float v, float nodata) {
+    return v == nodata || !std::isfinite(v);
+}
+
+} // anonymous namespace
+
 void VegetationEngine::applyFormula(const VegetationFormula &formula,
                                      const BandFilter &filter,
                                      const std::vector<float*> &bandData,
@@ -254,13 +288,14 @@ void VegetationEngine::applyFormula(const VegetationFormula &formula,
         float N = pN ? pN[i] : 0;
         float Re = pRe ? pRe[i] : 0;
 
-        // Check nodata on any source band used
+        // A pixel has no value when a source band used has none: nodata, or not a number (NaN,
+        // infinite), which no formula turns into a value
         bool isNodata = false;
-        if (pR && R == nodata) isNodata = true;
-        if (pG && G == nodata) isNodata = true;
-        if (pB && B == nodata) isNodata = true;
-        if (pN && N == nodata) isNodata = true;
-        if (pRe && Re == nodata) isNodata = true;
+        if (pR && hasNoValue(R, nodata)) isNodata = true;
+        if (pG && hasNoValue(G, nodata)) isNodata = true;
+        if (pB && hasNoValue(B, nodata)) isNodata = true;
+        if (pN && hasNoValue(N, nodata)) isNodata = true;
+        if (pRe && hasNoValue(Re, nodata)) isNodata = true;
 
         if (isNodata) {
             outData[i] = nodata;
@@ -323,13 +358,13 @@ void VegetationEngine::applyFormula(const VegetationFormula &formula,
             // For single-band thermal rasters, use band index 0 directly
             if (bandData.size() > 0 && bandData[0] != nullptr) {
                 float val = bandData[0][i];
-                result = (val == nodata) ? nodata : val;
+                result = hasNoValue(val, nodata) ? nodata : val;
             }
         } else if (id == "KELVIN") {
             // Convert Celsius to Kelvin
             if (bandData.size() > 0 && bandData[0] != nullptr) {
                 float val = bandData[0][i];
-                result = (val == nodata) ? nodata : val + 273.15f;
+                result = hasNoValue(val, nodata) ? nodata : val + 273.15f;
             }
         }
 
@@ -396,8 +431,8 @@ json VegetationEngine::getColormapsJson() const {
     return arr;
 }
 
-json VegetationEngine::getFormulasJson(const BandFilter &filter) const {
-    auto formulas = getFormulasForFilter(filter);
+json VegetationEngine::getFormulasJson(const BandFilter &filter, const RasterDataKind &data) const {
+    auto formulas = getFormulasForFilter(filter, data);
     json arr = json::array();
     for (const auto &f : formulas) {
         json fj;

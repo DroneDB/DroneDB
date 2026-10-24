@@ -1600,12 +1600,11 @@ DDBErr DDBGetRasterMetadata(const char* path, const char* formula,
 
         result["statistics"] = statsJson;
 
-        // Available algorithms for this band filter
-        // Include all formulas, mark incompatible ones as disabled
-        auto compatibleFormulas = ve.getFormulasForFilter(effectiveFilter);
-        auto allFormulas = ve.getAllFormulas();
+        // Available algorithms for this band filter and this data
+        // Include all formulas, mark the ones the raster cannot compute as disabled
+        const ddb::RasterDataKind dataKind = ddb::rasterDataKind(hDs);
         json algJson = json::array();
-        for (const auto& f : allFormulas) {
+        for (const auto& f : ve.getAllFormulas()) {
             json fj = {
                 {"id", f.id}, {"name", f.name}, {"expr", f.expr},
                 {"help", f.help}
@@ -1613,13 +1612,10 @@ DDBErr DDBGetRasterMetadata(const char* path, const char* formula,
             if (f.hasRange) {
                 fj["range"] = {f.rangeMin, f.rangeMax};
             }
-            bool compatible = false;
-            for (const auto& cf : compatibleFormulas) {
-                if (cf.id == f.id) { compatible = true; break; }
-            }
-            if (!compatible) {
+            const std::string reason = ddb::VegetationEngine::unavailableReason(f, effectiveFilter, dataKind);
+            if (!reason.empty()) {
                 fj["disabled"] = true;
-                fj["disabledReason"] = "Requires bands: " + f.requiredBands;
+                fj["disabledReason"] = reason;
             }
             algJson.push_back(fj);
         }

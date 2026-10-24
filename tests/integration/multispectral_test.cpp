@@ -180,7 +180,7 @@ TEST(multispectral, defaultBandMappingFallback) {
 TEST(multispectral, vegetationFormulaList) {
     auto& ve = VegetationEngine::instance();
     BandFilter rgbFilter = VegetationEngine::parseFilter("RGB", 3);
-    auto formulas = ve.getFormulasForFilter(rgbFilter);
+    auto formulas = ve.getFormulasForFilter(rgbFilter, RasterDataKind{"UInt16", false, 3});
 
     // RGB filter should have at least VARI, EXG, GLI, vNDVI
     bool hasVARI = false;
@@ -193,7 +193,7 @@ TEST(multispectral, vegetationFormulaList) {
 TEST(multispectral, vegetationFormulaNIR) {
     auto& ve = VegetationEngine::instance();
     BandFilter rgbnFilter = VegetationEngine::parseFilter("RGBN", 4);
-    auto formulas = ve.getFormulasForFilter(rgbnFilter);
+    auto formulas = ve.getFormulasForFilter(rgbnFilter, RasterDataKind{"UInt16", false, 4});
 
     // RGBN filter should have NDVI
     bool hasNDVI = false;

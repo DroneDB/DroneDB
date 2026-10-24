@@ -44,6 +44,11 @@ namespace ddb
     /// Display range of a band: mean ± 2.33 σ (≈ p2-p98) clipped to [min, max]
     std::pair<double, double> stretchRange(const BandStatistics &s);
 
+    /// The type of the data bands of ds (the alpha band does not count): floating point when every
+    /// one is Float32 or Float64. What decides whether a formula that needs reflectance can be
+    /// computed (VegetationEngine::dataRefusal).
+    RasterDataKind rasterDataKind(GDALDatasetH ds);
+
     /// What the render of a formula over one raster decides once: the formula, the band filter
     /// that maps R, G, B, N, Re and T to bands, the colormap and the nodata of every band. The
     /// thumbnails, tiles, statistics and the export of a formula all start from one.
@@ -58,7 +63,9 @@ namespace ddb
 
     /// Resolves formulaId, the band filter (bandFilter, "" = detected from the sensor profile of
     /// rasterPath) and, with withColormap, the colormap (colormapId, "" = "rdylgn"). Throws
-    /// InvalidArgsException for an unknown formula or colormap.
+    /// InvalidArgsException for an unknown formula or colormap, and for a formula that needs
+    /// reflectance over a raster whose data is not floating point (SAVI, OSAVI, EVI over UInt16):
+    /// every render of a formula plans it here, so none can skip the rule.
     FormulaPlan planFormula(GDALDatasetH ds, const std::string &rasterPath, const std::string &formulaId,
                             const std::string &bandFilter, const std::string &colormapId, bool withColormap);
 
