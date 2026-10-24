@@ -117,18 +117,6 @@ namespace ddb
             return static_cast<time_t>(toUnixTime(mtime).seconds.count());
         }
 
-        bool Path::setModifiedTime(time_t mtime)
-        {
-            if (getModifiedTime() == mtime)
-                return false;
-
-            std::error_code ec;
-            fs::last_write_time(p, fromUnixTime(std::chrono::seconds(mtime), std::chrono::nanoseconds(0)), ec);
-            if (ec)
-                throwFsError("Cannot set mtime", p, ec);
-            return true;
-        }
-
         FileState Path::getState()
         {
             std::error_code ec;
@@ -331,11 +319,6 @@ namespace ddb
                 res.pop_back();
 
             return res;
-        }
-
-        std::string Path::string() const
-        {
-            return io::toUtf8(p);
         }
 
         fs::path getExeFolderPath()
@@ -840,10 +823,6 @@ namespace ddb
             io::copy(from, to);
             io::remove(from);
             return false;
-        }
-
-        FileLock::FileLock()
-        {
         }
 
         FileLock::FileLock(const fs::path &p)

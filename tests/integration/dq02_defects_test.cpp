@@ -504,7 +504,7 @@ namespace
         EXPECT_THROW(CoordsTransformer("not a wkt", 4326), GDALException);
         EXPECT_THROW(CoordsTransformer(4326, "not a wkt"), GDALException);
 
-        CoordsTransformer a(4326, 3857);
+        EpsgTransformer a(4326, 3857);
         CoordsTransformer b(std::move(a));
         double x = 0.0, y = 0.0;
         b.transform(&x, &y);

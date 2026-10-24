@@ -49,7 +49,6 @@ namespace ddb
             bool checkExtension(const std::initializer_list<std::string> &matches) const;
 
             time_t getModifiedTime();
-            bool setModifiedTime(time_t mtime);
 
             // Type, size and modification time; throws FSException when the path cannot be read
             FileState getState();
@@ -77,23 +76,21 @@ namespace ddb
             // The path in UTF-8 with '/' separators (toGenericUtf8)
             std::string generic() const;
 
-            // The path in UTF-8 (toUtf8)
-            std::string string() const;
             fs::path get() const { return p; }
         };
 
+        // Holds an exclusive flock on the file p (created when missing) until it is destroyed
         class FileLock
         {
             int fd = -1;
             std::string lockFile;
 
-        public:
-            FileLock();
-            FileLock(const fs::path &p);
-            ~FileLock();
-
             void lock(const fs::path &p);
             void unlock();
+
+        public:
+            explicit FileLock(const fs::path &p);
+            ~FileLock();
         };
 
         // Owns a temporary path (a directory tree, or a single file) and removes it when the

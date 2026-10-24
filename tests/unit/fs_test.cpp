@@ -178,37 +178,18 @@ namespace
         EXPECT_TRUE(io::Path(io::getDataPath("timezone21.bin")).getModifiedTime() > 0);
     }
 
-    TEST(setModifiedTime, Normal)
-    {
-
-        #ifdef _WIN32        
-        GTEST_SKIP() << "Skipping test on Windows";
-        #endif
-
-        auto f = io::Path(io::getDataPath("timezone21.bin"));
-        time_t mtime = f.getModifiedTime();
-        f.setModifiedTime(mtime);
-
-        // Hasn't changed
-        EXPECT_EQ(mtime, f.getModifiedTime());
-
-        // Now change it
-        f.setModifiedTime(20);
-        EXPECT_EQ(20, f.getModifiedTime());
-    }
-
     TEST(withoutRoot, Normal)
     {
 #ifdef _WIN32
-        EXPECT_EQ(io::Path("C:\\test\\abc").withoutRoot().string(),
-                  io::Path("test\\abc").string());
-        EXPECT_EQ(io::Path("D:\\..\\abc").withoutRoot().string(),
-                  io::Path("..\\abc").string());
+        EXPECT_EQ(io::Path("C:\\test\\abc").withoutRoot().get(),
+                  io::Path("test\\abc").get());
+        EXPECT_EQ(io::Path("D:\\..\\abc").withoutRoot().get(),
+                  io::Path("..\\abc").get());
 #else
-        EXPECT_EQ(io::Path("/test/abc").withoutRoot().string(),
-                  io::Path("test/abc").string());
-        EXPECT_EQ(io::Path("../abc").withoutRoot().string(),
-                  io::Path("../abc").string());
+        EXPECT_EQ(io::Path("/test/abc").withoutRoot().get(),
+                  io::Path("test/abc").get());
+        EXPECT_EQ(io::Path("../abc").withoutRoot().get(),
+                  io::Path("../abc").get());
 #endif
     }
 

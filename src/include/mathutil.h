@@ -5,7 +5,6 @@
 #ifndef MATHUTIL_H
 #define MATHUTIL_H
 
-#include <cmath>
 #include <numbers>
 #include <type_traits>
 
@@ -15,9 +14,6 @@ namespace ddb {
 // so it must not be used or redefined.
 inline constexpr double kPi = std::numbers::pi;
 
-// How close two floats must be to count as the same value (sameFloat)
-inline constexpr double kFloatEpsilon = 0.000001;
-
 // True when value is a positive integral power of two (1, 2, 4, ...).
 template <typename T>
 constexpr bool isPowerOfTwo(T value) {
@@ -25,11 +21,10 @@ constexpr bool isPowerOfTwo(T value) {
     return value > 0 && (value & (value - 1)) == 0;
 }
 
-// The conversion factors. `x * kDegToRad` is not `deg2rad(x)`: that one is `(x * kPi) / 180.0`,
+// The conversion factor. `x * kDegToRad` is not `deg2rad(x)`: that one is `(x * kPi) / 180.0`,
 // which rounds differently in the last bit for some x. Code that always multiplied by the factor
 // keeps doing so (its results are pinned by the golden outputs of DQ-06).
 inline constexpr double kDegToRad = kPi / 180.0;
-inline constexpr double kRadToDeg = 180.0 / kPi;
 
 constexpr double rad2deg(double rad) noexcept {
     return (rad * 180.0) / kPi;
@@ -37,11 +32,6 @@ constexpr double rad2deg(double rad) noexcept {
 
 constexpr double deg2rad(double deg) noexcept {
     return (deg * kPi) / 180.0;
-}
-
-// True when a and b differ by less than kFloatEpsilon
-inline bool sameFloat(float a, float b) noexcept {
-    return std::fabs(a - b) < kFloatEpsilon;
 }
 
 }  // namespace ddb

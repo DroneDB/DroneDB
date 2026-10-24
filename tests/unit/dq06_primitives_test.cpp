@@ -25,6 +25,7 @@
 #include "merge_multispectral.h"
 #include "test.h"
 #include "testarea.h"
+#include "utils.h"
 
 namespace
 {
@@ -45,7 +46,6 @@ namespace
         }
         EXPECT_GT(differing, 0) << "if this ever fails the two forms agree and kDegToRad is redundant";
         EXPECT_EQ(kDegToRad, kPi / 180.0);
-        EXPECT_EQ(kRadToDeg, 180.0 / kPi);
     }
 
     TEST(Dq06Math, deg2radAndRad2degAreTheExpressionsTheyReplaced)
@@ -55,7 +55,6 @@ namespace
             const double x = i * 0.1234567;
             EXPECT_EQ(deg2rad(x), x * kPi / 180.0);  // merge_multispectral, tiler
             EXPECT_EQ(rad2deg(x), x * 180.0 / kPi);  // align
-            EXPECT_EQ(kRadToDeg * x, 180.0 / kPi * x); // tiler
         }
     }
 
@@ -84,19 +83,19 @@ namespace
             const ThreadForceOrder force(setting);
 
             double x = 10.0, y = 45.0;
-            CoordsTransformer(4326, 4258).transform(&x, &y);
+            EpsgTransformer(4326, 4258).transform(&x, &y);
             EXPECT_NEAR(x, 10.0, 1e-6);
             EXPECT_NEAR(y, 45.0, 1e-6);
 
             x = 10.0;
             y = 45.0;
-            CoordsTransformer(4326, 3035).transform(&x, &y);
+            EpsgTransformer(4326, 3035).transform(&x, &y);
             EXPECT_NEAR(x, 4321000.0 + 0.0, 4e5) << "easting first";
             EXPECT_LT(y, 3000000.0);
 
             x = 4300000.0;
             y = 2500000.0;
-            CoordsTransformer(3035, 4326).transform(&x, &y);
+            EpsgTransformer(3035, 4326).transform(&x, &y);
             EXPECT_NEAR(x, 9.7, 0.1);
             EXPECT_NEAR(y, 45.6, 0.1);
         }
@@ -154,7 +153,7 @@ namespace
 
     TEST(Dq06Coords, tryTransformReportsAFailedPoint)
     {
-        CoordsTransformer toUtm(4326, 32632);
+        EpsgTransformer toUtm(4326, 32632);
         double x[2] = {10.0, 10.0}, y[2] = {45.0, 45.0};
         EXPECT_TRUE(toUtm.tryTransform(2, x, y));
         EXPECT_NEAR(x[0], 578000.0, 2000.0);

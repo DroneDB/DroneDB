@@ -69,11 +69,6 @@ namespace ddb
         }
     }
 
-    CoordsTransformer::CoordsTransformer(int epsgFrom, int epsgTo)
-        : CoordsTransformer(srsOfEpsg(epsgFrom), srsOfEpsg(epsgTo))
-    {
-    }
-
     CoordsTransformer::CoordsTransformer(const std::string &wktFrom, int epsgTo)
         : CoordsTransformer(srsOfWkt(wktFrom), srsOfEpsg(epsgTo))
     {
@@ -92,12 +87,6 @@ namespace ddb
     {
         double none = 0.0;
         if (!ct->Transform(1, x, y, &none))
-            throw GDALException("Transform failed");
-    }
-
-    void CoordsTransformer::transform(double *x, double *y, double *z)
-    {
-        if (!ct->Transform(1, x, y, z))
             throw GDALException("Transform failed");
     }
 

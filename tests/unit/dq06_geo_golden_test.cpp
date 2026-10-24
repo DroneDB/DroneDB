@@ -19,6 +19,7 @@
 #include "gtest/gtest.h"
 #include "test.h"
 #include "testarea.h"
+#include "utils.h"
 
 #include "contour.h"
 #include "coordstransformer.h"
@@ -230,15 +231,15 @@ namespace
         json out = json::object();
         for (const int epsg : {3857, 4258, 3035, 32632, 32719, 2056, 4979})
         {
-            CoordsTransformer t(4326, epsg);
+            EpsgTransformer t(4326, epsg);
             out["from4326_to" + std::to_string(epsg)] = transformed(t, lonLat);
         }
         {
-            CoordsTransformer t(4258, 4326);
+            EpsgTransformer t(4258, 4326);
             out["from4258_to4326"] = transformed(t, lonLat);
         }
         {
-            CoordsTransformer t(3035, 4326);
+            EpsgTransformer t(3035, 4326);
             out["from3035_to4326"] = transformed(t, {{4300000.0, 2500000.0}, {4321000.0, 3210000.0}});
         }
         {
@@ -258,19 +259,19 @@ namespace
             out["from4326_toWkt3035"] = transformed(t, lonLat);
         }
         {
-            CoordsTransformer t(4326, 3035);
+            EpsgTransformer t(4326, 3035);
             std::vector<double> xs = {10.0, 11.0, 12.0}, ys = {45.0, 46.0, 47.0};
             t.transform(xs.size(), xs.data(), ys.data());
             out["batch4326_to3035"] = {{xs[0], ys[0]}, {xs[1], ys[1]}, {xs[2], ys[2]}};
         }
         {
             // Geocentric (ECEF) to WGS84 with a height: tileset roots and positions
-            CoordsTransformer t(4978, 4326);
+            EpsgTransformer t(4978, 4326);
             json ecef = json::array();
             for (const auto &p : std::vector<std::array<double, 3>>{{4396000.0, 722000.0, 4558000.0}, {6378137.0, 0.0, 0.0}})
             {
                 double x = p[0], y = p[1], z = p[2];
-                t.transform(&x, &y, &z);
+                ASSERT_TRUE(t.tryTransform(1, &x, &y, &z));
                 ecef.push_back({x, y, z});
             }
             out["from4978_to4326"] = ecef;
@@ -278,12 +279,12 @@ namespace
         dq06::expectGolden("coords_transformer", out);
 
         // The axis order, whatever the global setting: x is the longitude or the easting
-        CoordsTransformer geographic(4326, 4258);
+        EpsgTransformer geographic(4326, 4258);
         double x = 10.0, y = 45.0;
         geographic.transform(&x, &y);
         EXPECT_NEAR(x, 10.0, 1e-6);
         EXPECT_NEAR(y, 45.0, 1e-6);
-        CoordsTransformer laea(4326, 3035);
+        EpsgTransformer laea(4326, 3035);
         x = 10.0;
         y = 45.0;
         laea.transform(&x, &y);

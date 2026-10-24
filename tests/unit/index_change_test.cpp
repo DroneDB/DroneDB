@@ -116,7 +116,7 @@ namespace
         f.add("a.txt");
         const auto stored = f.storedMtime("a.txt").first;
 
-        io::Path(f.root / "a.txt").setModifiedTime(static_cast<time_t>(std::floor(stored)) - 100);
+        io::Path(f.root / "a.txt").setModifiedTimePrecise(std::floor(stored) - 100);
         syncLocalMTimes(f.db.get(), {"a.txt"});
 
         EXPECT_TRUE(io::sameModifiedTime(stored, io::Path(f.root / "a.txt").getModifiedTimePrecise()));

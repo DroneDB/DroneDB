@@ -39,7 +39,6 @@ namespace ddb
     public:
         // Throws GDALException when GDAL cannot build the transformation
         CoordsTransformer(const OGRSpatialReference &from, const OGRSpatialReference &to);
-        CoordsTransformer(int epsgFrom, int epsgTo);
         CoordsTransformer(const std::string &wktFrom, int epsgTo);
         CoordsTransformer(int epsgFrom, const std::string &wktTo);
         ~CoordsTransformer();
@@ -56,7 +55,6 @@ namespace ddb
 
         // These throw GDALException when the point cannot be transformed
         void transform(double *x, double *y);
-        void transform(double *x, double *y, double *z);
 
         // Transforms n points in place in one PROJ call. Points that cannot be
         // transformed are set to HUGE_VAL instead of failing the call.

@@ -73,7 +73,6 @@ TEST(Dq05Strings, CaseConversionLeavesNonAsciiBytesAlone) {
     str::toUpper(upper);
     EXPECT_EQ(upper, "CAF\xc3\xa9 \xc3\x80" "BC \xe2\x82\xac" "9");
     EXPECT_EQ(str::toLowerCopy(kUtf8), lower);
-    EXPECT_EQ(str::toUpperCopy(kUtf8), upper);
     EXPECT_EQ(str::toLowerCopy(""), "");
 }
 
@@ -240,10 +239,10 @@ TEST_F(Dq05Mio, ModifiedTimeKeepsTheSubSecondPart) {
 
 TEST_F(Dq05Mio, ModifiedTimeInWholeSeconds) {
     io::Path p(file());
-    EXPECT_TRUE(p.setModifiedTime(1000000000));
+    EXPECT_TRUE(p.setModifiedTimePrecise(1000000000.0));
     EXPECT_EQ(p.getModifiedTime(), static_cast<time_t>(1000000000));
     EXPECT_DOUBLE_EQ(p.getModifiedTimePrecise(), 1000000000.0);
-    EXPECT_FALSE(p.setModifiedTime(1000000000));
+    EXPECT_FALSE(p.setModifiedTimePrecise(1000000000.0));
 }
 
 // The seconds are rounded down, also before 1970 (st_mtime is: tv_nsec is never negative)
@@ -259,7 +258,7 @@ TEST_F(Dq05Mio, StateOfADirectoryHasNoSize) {
     EXPECT_TRUE(state.directory);
     EXPECT_EQ(state.size, 0u);
     EXPECT_GT(state.mtime, 0.0);
-    EXPECT_TRUE(io::Path(root).setModifiedTime(1000000000));
+    EXPECT_TRUE(io::Path(root).setModifiedTimePrecise(1000000000.0));
     EXPECT_EQ(io::Path(root).getModifiedTime(), static_cast<time_t>(1000000000));
 }
 
@@ -270,7 +269,7 @@ TEST_F(Dq05Mio, SizeAndFailures) {
     for (const auto& call : std::vector<std::function<void()>>{
              [&] { io::Path(missing).getModifiedTime(); },
              [&] { io::Path(missing).getModifiedTimePrecise(); },
-             [&] { io::Path(missing).setModifiedTime(5); },
+             [&] { io::Path(missing).setModifiedTimePrecise(5.0); },
              [&] { io::Path(missing).getState(); },
              [&] { io::Path(missing).getSize(); }})
         EXPECT_THROW(call(), FSException);
@@ -475,14 +474,6 @@ TEST(Dq05Math, PiAndAngleConversions) {
     EXPECT_EQ(rad2deg(kPi), 180.0);
     EXPECT_DOUBLE_EQ(rad2deg(deg2rad(33.3)), 33.3);
     EXPECT_EQ(deg2rad(0.0), 0.0);
-}
-
-TEST(Dq05Math, SameFloat) {
-    EXPECT_TRUE(sameFloat(1.0f, 1.0f));
-    EXPECT_TRUE(sameFloat(1.0f, 1.0f + 5e-7f));
-    EXPECT_FALSE(sameFloat(1.0f, 1.001f));
-    EXPECT_FALSE(sameFloat(-9999.0f, -9998.0f));
-    EXPECT_FALSE(sameFloat(std::nanf(""), std::nanf("")));
 }
 
 TEST(Dq05Math, IsPowerOfTwo) {

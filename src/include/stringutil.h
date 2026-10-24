@@ -75,12 +75,6 @@ inline std::string toLowerCopy(std::string_view s) {
     return result;
 }
 
-inline std::string toUpperCopy(std::string_view s) {
-    std::string result(s);
-    toUpper(result);
-    return result;
-}
-
 // True when s has no uppercase letter (ASCII)
 inline bool isLowerCase(std::string_view s) noexcept {
     for (char c : s)
