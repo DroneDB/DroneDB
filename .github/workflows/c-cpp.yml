@@ -249,6 +249,9 @@ jobs:
         # order, in parallel (initIndex publishes the empty-index template of a fresh profile
         # atomically: InitIndexTemplate.concurrentProcessesOnFreshProfile)
         run: cd build && ctest -L unit -j$(nproc) --output-on-failure --schedule-random
+      - name: Check that every header compiles on its own
+        # DQ-14: one translation unit per header; the installed ones also as C11 (ctest -L headers)
+        run: cd build && ctest -L headers --output-on-failure
       - name: Run integration tests
         env:
           # Real-converter tests skip when the binary is absent (non-tag builds).

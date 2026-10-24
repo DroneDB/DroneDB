@@ -66,6 +66,11 @@ if(BUILD_TESTING)
     add_executable(ddbtest_log_probe helpers/log_probe.cpp)
     target_link_libraries(ddbtest_log_probe PRIVATE ${PROJECT_NAME} ddb_warnings)
 
+    # DQ-14 probe: libddb as a host loads it (C API only), the one test that runs the shared library
+    # itself. ctest runs it (shared.LibddbSmoke below).
+    add_executable(ddbtest_shared_probe helpers/shared_probe.cpp)
+    target_link_libraries(ddbtest_shared_probe PRIVATE ${PROJECT_NAME} ddb_warnings)
+
     # Nexus exit probe: the Nexus build on a worker thread, then exit() (the NexusExit tests run it
     # as a process of its own: the crash it looks for happens while the process exits).
     add_executable(ddbtest_nexus_probe helpers/nexus_probe.cpp)
@@ -146,7 +151,7 @@ if(BUILD_TESTING)
         ddb_embed_library(${name})
         target_link_libraries(${name} PRIVATE ${T_LINK} ddb_test_support ddb_warnings)
         add_dependencies(${name} ddbtest_child ddbtest_signal_probe ddbtest_config_probe ddbtest_log_probe
-            ddbtest_nexus_probe)
+            ddbtest_nexus_probe ddbtest_shared_probe)
 
         gtest_discover_tests(${name}
             WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
@@ -214,6 +219,68 @@ if(BUILD_TESTING)
         SLOW thumbnail.orthoEdgeBatch EdgeRasterTest.NodataInfinity52Bands
     )
     ddb_stage_runtime_files(ddbtest)
+
+    # Every header compiles on its own (DQ-14): one tiny translation unit per header (a single
+    # #include), so a header that needs another one it does not include fails here and not in the
+    # next file that happens to include it first. Three object libraries, built on request
+    # (ctest -L headers, or the ddb_header_check target) because they compile every header again:
+    #   * the headers libddb installs (ddb.h, ddb_version.h, ddb_export.h; CMakeLists.txt), as C++
+    #     and as C11, with warnings as errors, in a folder that holds copies of those files and
+    #     nothing else: what a user of the installed library sees. Not DDB_STATIC_DEFINE: a user
+    #     links libddb;
+    #   * every other header of src/include (the C++ API of the library objects), as C++, with the
+    #     flags and include directories of the library sources.
+    set(DDB_HEADER_CHECK_DIR "${CMAKE_CURRENT_BINARY_DIR}/header_check")
+    set(DDB_INSTALLED_HEADERS ddb.h ddb_version.h ddb_export.h)
+    file(MAKE_DIRECTORY "${DDB_HEADER_CHECK_DIR}/installed")
+    configure_file("${PROJECT_SOURCE_DIR}/src/include/ddb.h" "${DDB_HEADER_CHECK_DIR}/installed/ddb.h" COPYONLY)
+    configure_file("${DDB_GENERATED_INCLUDE_DIR}/ddb_version.h" "${DDB_HEADER_CHECK_DIR}/installed/ddb_version.h" COPYONLY)
+    configure_file("${PROJECT_SOURCE_DIR}/src/include/ddb_export.h" "${DDB_HEADER_CHECK_DIR}/installed/ddb_export.h" COPYONLY)
+
+    # ddb_header_units(<out> <language extension> <folder> <header>...): writes the units of the
+    # headers, sets <out> to their paths. The typedef is there because a C translation unit with
+    # nothing but macros is empty, which -Wpedantic rejects.
+    function(ddb_header_units out extension folder)
+        set(units "")
+        foreach(header IN LISTS ARGN)
+            set(unit "${DDB_HEADER_CHECK_DIR}/${folder}/${header}.${extension}")
+            file(CONFIGURE OUTPUT "${unit}" CONTENT "#include \"${header}\"\ntypedef int ddb_header_unit;\n" @ONLY)
+            list(APPEND units "${unit}")
+        endforeach()
+        set(${out} "${units}" PARENT_SCOPE)
+    endfunction()
+
+    ddb_header_units(DDB_INSTALLED_UNITS_CXX cpp installed_cxx ${DDB_INSTALLED_HEADERS})
+    ddb_header_units(DDB_INSTALLED_UNITS_C c installed_c ${DDB_INSTALLED_HEADERS})
+    add_library(ddb_installed_headers_cxx OBJECT EXCLUDE_FROM_ALL ${DDB_INSTALLED_UNITS_CXX})
+    add_library(ddb_installed_headers_c OBJECT EXCLUDE_FROM_ALL ${DDB_INSTALLED_UNITS_C})
+    set_target_properties(ddb_installed_headers_c PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+    foreach(target ddb_installed_headers_cxx ddb_installed_headers_c)
+        target_include_directories(${target} PRIVATE "${DDB_HEADER_CHECK_DIR}/installed")
+        if(MSVC)
+            target_compile_options(${target} PRIVATE /W4 /WX)
+        else()
+            target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Werror)
+        endif()
+    endforeach()
+
+    file(GLOB DDB_INTERNAL_HEADERS CONFIGURE_DEPENDS RELATIVE "${PROJECT_SOURCE_DIR}/src/include"
+        "${PROJECT_SOURCE_DIR}/src/include/*.h")
+    list(REMOVE_ITEM DDB_INTERNAL_HEADERS ${DDB_INSTALLED_HEADERS})
+    ddb_header_units(DDB_INTERNAL_UNITS cpp internal ${DDB_INTERNAL_HEADERS})
+    ddb_add_library_objects(ddb_internal_headers ${DDB_INTERNAL_UNITS})
+    set_target_properties(ddb_internal_headers PROPERTIES EXCLUDE_FROM_ALL ON)
+
+    add_custom_target(ddb_header_check DEPENDS ddb_installed_headers_cxx ddb_installed_headers_c ddb_internal_headers)
+    set_target_properties(ddb_header_check PROPERTIES EXCLUDE_FROM_ALL ON)
+    add_test(NAME headers.CompileOnTheirOwn
+        COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target ddb_header_check --parallel 8)
+    set_tests_properties(headers.CompileOnTheirOwn PROPERTIES LABELS headers TIMEOUT 1800)
+
+    # libddb as it ships: the dataset flow of a host through the C API, in the probe's own process
+    add_test(NAME shared.LibddbSmoke COMMAND ddbtest_shared_probe WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+    set_tests_properties(shared.LibddbSmoke PROPERTIES LABELS unit TIMEOUT 300
+        ENVIRONMENT "DDB_PROBE_INPUT_DIR=${CMAKE_CURRENT_SOURCE_DIR}/contract/inputs;DDB_PROBE_WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/shared_probe_dataset")
 
     # Every export of ddb.h is called by a test (DQ-03): a new export without one fails here
     add_test(NAME c_abi.ExportsHaveTests
