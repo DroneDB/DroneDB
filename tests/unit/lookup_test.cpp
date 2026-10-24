@@ -222,14 +222,6 @@ namespace
         EXPECT_TRUE(loadEntry(fx.db.get(), "dir2/d.txt", e));
     }
 
-    TEST(DDB01_Lookup, deleteFromIndexEmptyQueryDeletesNothing)
-    {
-        Fixture fx(TEST_NAME);
-        EXPECT_EQ(deleteFromIndex(fx.db.get(), "", false), 0);
-        EXPECT_EQ(deleteFromIndex(fx.db.get(), "", true), 0);
-        EXPECT_EQ(getMatchingEntries(fx.db.get(), "").size(), 6u);
-    }
-
     TEST(DDB01_Lookup, moveFolderKeepsSiblingFolder)
     {
         Fixture fx(TEST_NAME);

@@ -70,7 +70,6 @@ namespace ddb
         /// Replaces the options; closes idle connections beyond the new limits
         void configure(const Options &options);
         Options options() const;
-        bool enabled() const;
 
         /// Gives db an idle connection to dbFile. False when none is available.
         bool acquire(const fs::path &dbFile, Database &db);

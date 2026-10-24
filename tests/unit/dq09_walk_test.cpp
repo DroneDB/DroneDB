@@ -173,7 +173,7 @@ namespace
         writeFile(f.root / "a.txt", "a");
         writeFile(f.root / "sub" / "back\\slash.txt", "b");
         addTree(f);
-        EXPECT_FALSE(pathExists(f.db.get(), "sub/back\\slash.txt")) << "add never indexes it";
+        EXPECT_FALSE(getEntry(f.db.get(), "sub/back\\slash.txt").has_value()) << "add never indexes it";
         EXPECT_TRUE(notIndexed(f.db.get()).empty());
     }
 
@@ -203,8 +203,8 @@ namespace
         addTree(f);
         const auto reported = notIndexed(f.db.get());
 
-        EXPECT_TRUE(pathExists(f.db.get(), "locked")) << "the folder itself is an entry";
-        EXPECT_FALSE(pathExists(f.db.get(), "locked/inside.txt"));
+        EXPECT_TRUE(getEntry(f.db.get(), "locked").has_value()) << "the folder itself is an entry";
+        EXPECT_FALSE(getEntry(f.db.get(), "locked/inside.txt").has_value());
         EXPECT_TRUE(reported.empty());
     }
 #endif

@@ -135,34 +135,6 @@ namespace ddb
         }
     }
 
-    int deleteFromIndex(Database *db, const std::string &query, bool isFolder, RemoveCallback callback)
-    {
-
-        LOGD << "Query: " << query;
-
-        // An empty query never matched anything here (unlike getMatchingEntries, where it
-        // means the whole index): keep it that way rather than deleting every entry.
-        if (query.empty())
-            return 0;
-
-        const auto predicate = buildPathPredicate(query, isFolder);
-
-        LOGD << "Predicate: " << predicate.sql;
-
-        std::vector<std::string> deletedPaths, deletedHashes;
-        Transaction tx(db, Transaction::Mode::Immediate);
-        const int count = RowDeleter(db, predicate.sql).run(predicate, deletedPaths, deletedHashes);
-        tx.commit();
-
-        if (callback != nullptr)
-            for (const auto &path : deletedPaths)
-                callback(path);
-
-        deleteBuildFolders(db, deletedHashes);
-
-        return count;
-    }
-
     void removeFromIndex(Database *db, const std::vector<std::string> &paths, RemoveCallback callback)
     {
         if (paths.empty())
@@ -178,7 +150,7 @@ namespace ddb
 
         {
             // One transaction for the whole list: a path without entries removes nothing.
-            Transaction tx(db, Transaction::Mode::Immediate);
+            Transaction tx(db);
 
             // Every path must match before anything is removed: a path listed twice, or
             // inside a folder also listed, is then removed once instead of failing the
@@ -236,7 +208,7 @@ namespace ddb
         // consumers reading between statements. The cost is that re-index holds the sole SQLite
         // writer lock for its entire duration; concurrent addToIndexEx callers see busy and
         // retry/jitter per RetryPolicy.
-        Transaction tx(db, Transaction::Mode::Immediate);
+        Transaction tx(db);
 
         while (q->fetch())
         {
@@ -276,11 +248,6 @@ namespace ddb
         tx.commit();
     }
 
-    void rescanIndex(Database *db, const std::vector<EntryType> &types, bool stopOnError, RescanCallback callback)
-    {
-        rescanIndex(db, types, {}, stopOnError, callback);
-    }
-
     void rescanIndex(Database *db, const std::vector<EntryType> &types, const std::vector<std::string> &extensions,
                      bool stopOnError, RescanCallback callback)
     {
@@ -304,7 +271,7 @@ namespace ddb
         // consumers reading between statements. The cost is that re-scan holds the sole SQLite
         // writer lock for its entire duration; concurrent addToIndexEx callers see busy and
         // retry/jitter per RetryPolicy.
-        Transaction tx(db, Transaction::Mode::Immediate);
+        Transaction tx(db);
 
         while (q->fetch())
         {
@@ -523,7 +490,7 @@ namespace ddb
 
         const fs::path directory = db->rootDirectory();
 
-        Transaction tx(db, Transaction::Mode::Immediate);
+        Transaction tx(db);
 
         // If we are moving a file
         if (sourceEntry.type != EntryType::Directory)

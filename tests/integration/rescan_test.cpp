@@ -131,7 +131,7 @@ namespace
         // Rescan should succeed
         int rescanCount = 0;
         EXPECT_NO_THROW(
-            ddb::rescanIndex(db.get(), {}, true,
+            ddb::rescanIndex(db.get(), {}, {}, true,
                 [&rescanCount](const Entry &e, bool success, const std::string &error) {
                     if (success) rescanCount++;
                     return true;
@@ -172,7 +172,7 @@ namespace
         // Rescan only markdown files
         int rescanCount = 0;
         std::vector<EntryType> typeFilter = {EntryType::Markdown};
-        ddb::rescanIndex(db.get(), typeFilter, true,
+        ddb::rescanIndex(db.get(), typeFilter, {}, true,
             [&rescanCount](const Entry &e, bool success, const std::string &error) {
                 if (success) rescanCount++;
                 return true;
@@ -204,7 +204,7 @@ namespace
 
         // Rescan with stopOnError=true should throw
         EXPECT_THROW(
-            ddb::rescanIndex(db.get(), {}, true, nullptr),
+            ddb::rescanIndex(db.get(), {}, {}, true, nullptr),
             FSException
         );
 
@@ -212,7 +212,7 @@ namespace
         int errorCount = 0;
         int successCount = 0;
         EXPECT_NO_THROW(
-            ddb::rescanIndex(db.get(), {}, false,
+            ddb::rescanIndex(db.get(), {}, {}, false,
                 [&errorCount, &successCount](const Entry &e, bool success, const std::string &error) {
                     if (success) successCount++;
                     else errorCount++;
@@ -251,7 +251,7 @@ namespace
 
         // Rescan but cancel after first file
         int rescanCount = 0;
-        ddb::rescanIndex(db.get(), {}, true,
+        ddb::rescanIndex(db.get(), {}, {}, true,
             [&rescanCount](const Entry &e, bool success, const std::string &error) {
                 rescanCount++;
                 return false; // Cancel after first
@@ -282,7 +282,7 @@ namespace
 
         // Rescan
         int rescanCount = 0;
-        ddb::rescanIndex(db.get(), {}, true,
+        ddb::rescanIndex(db.get(), {}, {}, true,
             [&rescanCount](const Entry &e, bool success, const std::string &error) {
                 if (success) rescanCount++;
                 return true;

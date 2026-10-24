@@ -368,7 +368,7 @@ namespace ddb
         const auto updateQ = db->query(kUpdateEntrySql);
         const auto recheckQ = db->query("SELECT mtime,hash FROM entries WHERE path=?");
 
-        Transaction tx(db, Transaction::Mode::Immediate);
+        Transaction tx(db);
 
         // Buffered locally and only merged into the outcome after a successful commit, so a
         // canceled/rolled-back batch never reports rolled-back writes as committed.
@@ -474,7 +474,7 @@ namespace ddb
                     parseEntry(directory / io::Path(io::fromUtf8(mainPath)).get(), directory, fresh, true);
 
                     {
-                        Transaction tx(db, Transaction::Mode::Immediate);
+                        Transaction tx(db);
                         doUpdate(updateQ.get(), fresh);
                         tx.commit();
                     }

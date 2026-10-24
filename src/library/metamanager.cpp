@@ -254,7 +254,7 @@ namespace ddb
         if (!metaDump.is_array())
             throw InvalidArgsException("metaDump must be an array");
 
-        Transaction tx(db, Transaction::Mode::Immediate);
+        Transaction tx(db);
 
         const auto q = db->query("INSERT OR REPLACE INTO entries_meta(id, path, key, data, mtime) VALUES (?, ?, ?, ?, ?)");
         const auto singularDupQ = db->query("SELECT id,mtime FROM entries_meta WHERE path = ? AND key = ?");
@@ -326,7 +326,7 @@ namespace ddb
     {
         const auto q = db->query("DELETE FROM entries_meta WHERE id = ?");
 
-        Transaction tx(db, Transaction::Mode::Immediate);
+        Transaction tx(db);
 
         int i = 0;
         for (auto &id : ids)

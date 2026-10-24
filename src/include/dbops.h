@@ -146,7 +146,6 @@ namespace ddb
                       const EntryJsonDecorator &decorate = nullptr);
     void checkDeleteBuild(Database *db, const std::string &hash);
     void checkDeleteMeta(Database *db, const std::string &path);
-    int deleteFromIndex(Database *db, const std::string &query, bool isFolder = false, RemoveCallback callback = nullptr);
 
     void doUpdate(Statement *updateQ, const Entry &e);
     // doUpdate() storing `mtime` (with sub-second precision) instead of e.mtime
@@ -231,7 +230,6 @@ namespace ddb
     void rescanIndex(Database *db, const std::vector<EntryType> &types,
                      const std::vector<std::string> &extensions, bool stopOnError = true,
                      RescanCallback callback = nullptr);
-    void rescanIndex(Database *db, const std::vector<EntryType> &types = {}, bool stopOnError = true, RescanCallback callback = nullptr);
     void syncLocalMTimes(Database *db, const std::vector<std::string> &files = {});
     void moveEntry(Database *db, const std::string &source, const std::string &dest);
     /** Exact lookup of one entry (without its metadata); nothing when `path` is not indexed. */
@@ -239,7 +237,6 @@ namespace ddb
 
     /** Exact lookup of one entry, including its metadata (entry.meta); nothing when not found. */
     std::optional<Entry> getEntryWithMeta(Database *db, const std::string &path);
-    bool pathExists(Database *db, const std::string &path);
 
     std::string initIndex(const std::string &directory, bool fromScratch = false);
 

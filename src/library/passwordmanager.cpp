@@ -45,7 +45,7 @@ namespace ddb
 		// Single-statement autocommit writer; wrapped in an IMMEDIATE transaction so BEGIN is
 		// retried with jitter on SQLITE_BUSY (busy_timeout is only a 200 ms floor). Safe: never
 		// called with a transaction already open on the connection (C API only, ddb.cpp).
-		Transaction tx(this->db, Transaction::Mode::Immediate);
+		Transaction tx(this->db);
 		q->execute();
 		q->reset();
 		tx.commit();
@@ -91,7 +91,7 @@ namespace ddb
 		const auto q = this->db->query(sql);
 		q->execute();
 		// Same rationale as append(): retried IMMEDIATE transaction around the write.
-		Transaction tx(this->db, Transaction::Mode::Immediate);
+		Transaction tx(this->db);
 		q->execute();
 		q->reset();
 		tx.commit();

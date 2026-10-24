@@ -300,14 +300,6 @@ namespace ddb
         return entries;
     }
 
-    bool pathExists(Database *db, const std::string &path)
-    {
-        auto q = db->query("SELECT COUNT(path) FROM entries WHERE path = ?");
-        q->bind(1, path);
-        q->fetch();
-        return q->getInt(0) > 0;
-    }
-
     // The entry stored at `path`, read up to `columns`
     static std::optional<Entry> readEntryAt(Database *db, const std::string &path, EntryColumns columns)
     {

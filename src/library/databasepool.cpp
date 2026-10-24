@@ -106,12 +106,6 @@ namespace ddb
         return options_;
     }
 
-    bool DatabasePool::enabled() const
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        return options_.perIndex > 0 && options_.total > 0;
-    }
-
     bool DatabasePool::acquire(const fs::path &dbFile, Database &db)
     {
         const auto key = poolKey(dbFile);
