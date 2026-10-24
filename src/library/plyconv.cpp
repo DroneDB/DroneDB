@@ -420,26 +420,10 @@ namespace ddb
                    t == PlyScalarType::Float64;
         }
 
-        Plan makePlan(const fs::path &ply, const PlyHeader &h)
+        // Every property read before the end of the face element must have a known type.
+        void requireKnownPropertyTypes(const fs::path &ply, const PlyHeader &h, int lastElement)
         {
-            if (h.format == PlyFormat::Unknown)
-                throw AppException(ctx(ply) + "unsupported or missing format '" + h.formatName +
-                                   "' (expected ascii, binary_little_endian or binary_big_endian)");
-            if (h.version != "1.0")
-                LOGD << "PLY " << io::toUtf8(ply) << " declares version '" << h.version << "', reading it as 1.0";
-
-            Plan plan;
-            plan.vertexElement = h.findElement("vertex");
-            plan.faceElement = h.findElement("face");
-            if (plan.vertexElement < 0)
-                throw AppException(ctx(ply) + "no 'vertex' element");
-            if (plan.faceElement < 0)
-                throw AppException(ctx(ply) + "no 'face' element (not a mesh)");
-            if (plan.faceElement < plan.vertexElement)
-                throw AppException(ctx(ply) + "the 'face' element precedes the 'vertex' element (unsupported order)");
-
-            // Every property read before the end of the face element must have a known type.
-            for (int e = 0; e <= plan.faceElement; ++e)
+            for (int e = 0; e <= lastElement; ++e)
             {
                 for (const auto &p : h.elements[e].properties)
                 {
@@ -450,19 +434,19 @@ namespace ddb
                         LOGD << "PLY list '" << p.name << "' uses a floating-point count type";
                 }
             }
+        }
 
-            const PlyElement &ve = h.elements[plan.vertexElement];
-            const auto scalar = [&ve](const char *name) {
-                const int i = ve.findProperty(name);
-                return (i >= 0 && !ve.properties[i].isList) ? i : -1;
-            };
+        // The index of a scalar (not list) property of the element, -1 without one
+        int scalarProperty(const PlyElement &e, const char *name)
+        {
+            const int i = e.findProperty(name);
+            return (i >= 0 && !e.properties[i].isList) ? i : -1;
+        }
 
-            plan.px = scalar("x");
-            plan.py = scalar("y");
-            plan.pz = scalar("z");
-            if (plan.px < 0 || plan.py < 0 || plan.pz < 0)
-                throw AppException(ctx(ply) + "the 'vertex' element lacks scalar x, y and z properties");
-
+        // Chooses the vertex colour properties of the plan: the first complete set of a supported
+        // type, else none (or an error when the only complete set has an unsupported type)
+        void selectVertexColors(const fs::path &ply, const PlyElement &ve, Plan &plan)
+        {
             static const char *colorSets[][3] = {
                 {"red", "green", "blue"}, {"diffuse_red", "diffuse_green", "diffuse_blue"}, {"r", "g", "b"}};
             // The first complete set of a supported type wins. A complete set of an
@@ -472,7 +456,7 @@ namespace ddb
             int unsupportedColor = -1;
             for (const auto &cs : colorSets)
             {
-                const int c[3] = {scalar(cs[0]), scalar(cs[1]), scalar(cs[2])};
+                const int c[3] = {scalarProperty(ve, cs[0]), scalarProperty(ve, cs[1]), scalarProperty(ve, cs[2])};
                 if (c[0] < 0 || c[1] < 0 || c[2] < 0)
                     continue;
                 int bad = -1;
@@ -504,6 +488,38 @@ namespace ddb
                      << ve.properties[unsupportedColor].name << "' of unsupported type '"
                      << typeNameOf(ve.properties[unsupportedColor]) << "'";
             }
+        }
+
+        Plan makePlan(const fs::path &ply, const PlyHeader &h)
+        {
+            if (h.format == PlyFormat::Unknown)
+                throw AppException(ctx(ply) + "unsupported or missing format '" + h.formatName +
+                                   "' (expected ascii, binary_little_endian or binary_big_endian)");
+            if (h.version != "1.0")
+                LOGD << "PLY " << io::toUtf8(ply) << " declares version '" << h.version << "', reading it as 1.0";
+
+            Plan plan;
+            plan.vertexElement = h.findElement("vertex");
+            plan.faceElement = h.findElement("face");
+            if (plan.vertexElement < 0)
+                throw AppException(ctx(ply) + "no 'vertex' element");
+            if (plan.faceElement < 0)
+                throw AppException(ctx(ply) + "no 'face' element (not a mesh)");
+            if (plan.faceElement < plan.vertexElement)
+                throw AppException(ctx(ply) + "the 'face' element precedes the 'vertex' element (unsupported order)");
+
+            requireKnownPropertyTypes(ply, h, plan.faceElement);
+
+            const PlyElement &ve = h.elements[plan.vertexElement];
+            const auto scalar = [&ve](const char *name) { return scalarProperty(ve, name); };
+
+            plan.px = scalar("x");
+            plan.py = scalar("y");
+            plan.pz = scalar("z");
+            if (plan.px < 0 || plan.py < 0 || plan.pz < 0)
+                throw AppException(ctx(ply) + "the 'vertex' element lacks scalar x, y and z properties");
+
+            selectVertexColors(ply, ve, plan);
 
             static const char *uvSets[][2] = {
                 {"s", "t"}, {"u", "v"}, {"texture_u", "texture_v"}, {"texture_s", "texture_t"}};
@@ -723,125 +739,144 @@ namespace ddb
                 }
             }
 
+            // Reads the record i of the face element: the vertex indices of the face into corners and
+            // its per-face texcoords into tc (cleared first); the other properties are skipped
+            void readFaceRecord(const PlyElement &e, uint64_t i, std::vector<uint64_t> &corners, std::vector<double> &tc)
+            {
+                corners.clear();
+                tc.clear();
+                for (size_t k = 0; k < e.properties.size(); ++k)
+                {
+                    const PlyProperty &p = e.properties[k];
+                    if (static_cast<int>(k) == plan.faceIndices)
+                    {
+                        const uint64_t n = listCount(e, i, p);
+                        if (n > kMaxFaceCorners)
+                            throw AppException(ctx(ply) + "face " + std::to_string(i) + " declares " +
+                                               std::to_string(n) + " corners (limit " +
+                                               std::to_string(kMaxFaceCorners) + ")");
+                        for (uint64_t c = 0; c < n; ++c)
+                        {
+                            const double v = value(e, i, p, p.type);
+                            if (!(v >= 0) || v != std::floor(v) || v >= static_cast<double>(vertexCount))
+                            {
+                                std::ostringstream vs;
+                                vs.imbue(std::locale::classic());
+                                vs << v;
+                                throw AppException(ctx(ply) + "face " + std::to_string(i) +
+                                                   " references vertex index " + vs.str() +
+                                                   " out of range (vertex count " +
+                                                   std::to_string(vertexCount) + ")");
+                            }
+                            corners.push_back(static_cast<uint64_t>(v));
+                        }
+                    }
+                    else if (static_cast<int>(k) == plan.faceTexcoord)
+                    {
+                        const uint64_t n = listCount(e, i, p);
+                        if (n > 2 * kMaxFaceCorners)
+                            throw AppException(ctx(ply) + "face " + std::to_string(i) + " declares " +
+                                               std::to_string(n) + " texture coordinates (limit " +
+                                               std::to_string(2 * kMaxFaceCorners) + ")");
+                        for (uint64_t c = 0; c < n; ++c)
+                            tc.push_back(value(e, i, p, p.type));
+                    }
+                    else
+                    {
+                        skipProperty(e, i, p);
+                    }
+                }
+            }
+
+            // The per-face texcoords of a face of n corners: two finite values per corner
+            void checkFaceTexcoords(const PlyElement &e, uint64_t i, size_t n, const std::vector<double> &tc) const
+            {
+                if (tc.size() != 2 * n)
+                    throw AppException(ctx(ply) + "face " + std::to_string(i) + " has " +
+                                       std::to_string(tc.size()) + " texcoord values, expected " +
+                                       std::to_string(2 * n) + " (2 per corner)");
+                for (size_t c = 0; c < tc.size(); ++c)
+                    if (!std::isfinite(tc[c]))
+                        throw AppException(ctx(ply) + "face " + std::to_string(i) +
+                                           " has a non-finite texcoord (property '" +
+                                           e.properties[plan.faceTexcoord].name +
+                                           "', value " + std::to_string(c) + ")");
+            }
+
+            // Writes a face: with per-face texcoords one vt per corner, in face order, right before the
+            // f lines, then the fan of triangles
+            void writeFace(const std::vector<uint64_t> &corners, const std::vector<double> &tc, int tcPrecision)
+            {
+                const bool perVertexTc = plan.perVertexTexcoords();
+                const bool perFaceTc = plan.perFaceTexcoords();
+                const size_t n = corners.size();
+
+                std::string &b = obj.buffer();
+                const uint64_t vtBase = vtCount; // 0-based index of this face's first vt
+                if (perFaceTc)
+                {
+                    for (size_t c = 0; c < n; ++c)
+                    {
+                        b += "vt ";
+                        appendNumber(b, tc[2 * c], tcPrecision);
+                        b += ' ';
+                        appendNumber(b, tc[2 * c + 1], tcPrecision);
+                        b += '\n';
+                    }
+                    vtCount += n;
+                }
+
+                const auto corner = [&](size_t c) {
+                    appendUInt(b, corners[c] + 1);
+                    if (perFaceTc)
+                    {
+                        b += '/';
+                        appendUInt(b, vtBase + c + 1);
+                    }
+                    else if (perVertexTc)
+                    {
+                        b += '/';
+                        appendUInt(b, corners[c] + 1);
+                    }
+                };
+
+                // Fan triangulation: (c0, ci, ci+1). Exact for triangles and convex
+                // polygons, wrong for concave n-gons (documented limitation).
+                for (size_t c = 1; c + 1 < n; ++c)
+                {
+                    b += "f ";
+                    corner(0);
+                    b += ' ';
+                    corner(c);
+                    b += ' ';
+                    corner(c + 1);
+                    b += '\n';
+                    ++triangles;
+                }
+            }
+
             void readFaces()
             {
                 const PlyElement &e = h.elements[plan.faceElement];
-                const bool perVertexTc = plan.perVertexTexcoords();
-                const bool perFaceTc = plan.perFaceTexcoords();
                 std::vector<uint64_t> corners;
                 std::vector<double> tc;
                 int tcPrecision = 9;
-                if (perFaceTc)
+                if (plan.perFaceTexcoords())
                     tcPrecision = precisionFor(e.properties[plan.faceTexcoord].type);
 
                 for (uint64_t i = 0; i < e.count; ++i)
                 {
-                    corners.clear();
-                    tc.clear();
-                    for (size_t k = 0; k < e.properties.size(); ++k)
-                    {
-                        const PlyProperty &p = e.properties[k];
-                        if (static_cast<int>(k) == plan.faceIndices)
-                        {
-                            const uint64_t n = listCount(e, i, p);
-                            if (n > kMaxFaceCorners)
-                                throw AppException(ctx(ply) + "face " + std::to_string(i) + " declares " +
-                                                   std::to_string(n) + " corners (limit " +
-                                                   std::to_string(kMaxFaceCorners) + ")");
-                            for (uint64_t c = 0; c < n; ++c)
-                            {
-                                const double v = value(e, i, p, p.type);
-                                if (!(v >= 0) || v != std::floor(v) || v >= static_cast<double>(vertexCount))
-                                {
-                                    std::ostringstream vs;
-                                    vs.imbue(std::locale::classic());
-                                    vs << v;
-                                    throw AppException(ctx(ply) + "face " + std::to_string(i) +
-                                                       " references vertex index " + vs.str() +
-                                                       " out of range (vertex count " +
-                                                       std::to_string(vertexCount) + ")");
-                                }
-                                corners.push_back(static_cast<uint64_t>(v));
-                            }
-                        }
-                        else if (static_cast<int>(k) == plan.faceTexcoord)
-                        {
-                            const uint64_t n = listCount(e, i, p);
-                            if (n > 2 * kMaxFaceCorners)
-                                throw AppException(ctx(ply) + "face " + std::to_string(i) + " declares " +
-                                                   std::to_string(n) + " texture coordinates (limit " +
-                                                   std::to_string(2 * kMaxFaceCorners) + ")");
-                            for (uint64_t c = 0; c < n; ++c)
-                                tc.push_back(value(e, i, p, p.type));
-                        }
-                        else
-                        {
-                            skipProperty(e, i, p);
-                        }
-                    }
+                    readFaceRecord(e, i, corners, tc);
 
-                    const size_t n = corners.size();
-                    if (n < 3)
+                    if (corners.size() < 3)
                     {
                         ++degenerate;
                         continue;
                     }
+                    if (plan.perFaceTexcoords())
+                        checkFaceTexcoords(e, i, corners.size(), tc);
 
-                    if (perFaceTc && tc.size() != 2 * n)
-                        throw AppException(ctx(ply) + "face " + std::to_string(i) + " has " +
-                                           std::to_string(tc.size()) + " texcoord values, expected " +
-                                           std::to_string(2 * n) + " (2 per corner)");
-                    if (perFaceTc)
-                        for (size_t c = 0; c < tc.size(); ++c)
-                            if (!std::isfinite(tc[c]))
-                                throw AppException(ctx(ply) + "face " + std::to_string(i) +
-                                                   " has a non-finite texcoord (property '" +
-                                                   e.properties[plan.faceTexcoord].name +
-                                                   "', value " + std::to_string(c) + ")");
-
-                    std::string &b = obj.buffer();
-                    // Per-face texcoords: one vt per corner, in face order, right before the f lines.
-                    const uint64_t vtBase = vtCount; // 0-based index of this face's first vt
-                    if (perFaceTc)
-                    {
-                        for (size_t c = 0; c < n; ++c)
-                        {
-                            b += "vt ";
-                            appendNumber(b, tc[2 * c], tcPrecision);
-                            b += ' ';
-                            appendNumber(b, tc[2 * c + 1], tcPrecision);
-                            b += '\n';
-                        }
-                        vtCount += n;
-                    }
-
-                    const auto corner = [&](size_t c) {
-                        appendUInt(b, corners[c] + 1);
-                        if (perFaceTc)
-                        {
-                            b += '/';
-                            appendUInt(b, vtBase + c + 1);
-                        }
-                        else if (perVertexTc)
-                        {
-                            b += '/';
-                            appendUInt(b, corners[c] + 1);
-                        }
-                    };
-
-                    // Fan triangulation: (c0, ci, ci+1). Exact for triangles and convex
-                    // polygons, wrong for concave n-gons (documented limitation).
-                    for (size_t c = 1; c + 1 < n; ++c)
-                    {
-                        b += "f ";
-                        corner(0);
-                        b += ' ';
-                        corner(c);
-                        b += ' ';
-                        corner(c + 1);
-                        b += '\n';
-                        ++triangles;
-                    }
+                    writeFace(corners, tc, tcPrecision);
                     obj.maybeFlush();
                 }
             }
