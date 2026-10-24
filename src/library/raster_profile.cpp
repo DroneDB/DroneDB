@@ -23,6 +23,7 @@
 #include <cmath>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <vector>
 
 namespace ddb {
@@ -60,6 +61,157 @@ bool detectIsThermalProfile(const std::string &filePath) {
     return isThermalImage(filePath) || isDirectTemperatureRaster(filePath);
 }
 
+// The profile line (GeoJSON, WGS84 lon/lat); throws InvalidArgsException when it is not a
+// LineString of at least 2 points
+OGRGeometryUniquePtr parseProfileLine(const std::string &geoJsonLineString) {
+    OGRGeometryH hRawGeom = OGR_G_CreateGeometryFromJson(geoJsonLineString.c_str());
+    if (hRawGeom == nullptr)
+        throw InvalidArgsException("Cannot parse GeoJSON geometry");
+
+    OGRGeometryUniquePtr geom(OGRGeometry::FromHandle(hRawGeom));
+    const OGRwkbGeometryType gType = wkbFlatten(geom->getGeometryType());
+    if (gType != wkbLineString)
+        throw InvalidArgsException("Profile geometry must be a LineString");
+
+    if (geom->toLineString()->getNumPoints() < 2)
+        throw InvalidArgsException("LineString must have at least 2 points");
+    return geom;
+}
+
+// The line in raster map coordinates, with the length of each segment in meters
+struct ProfilePath {
+    std::vector<double> mapX, mapY;
+    std::vector<double> segLenMeters;
+    double totalLengthMeters = 0.0;
+};
+
+ProfilePath buildPath(const DemContext &dem, const OGRLineString &line) {
+    const int nVertices = line.getNumPoints();
+    ProfilePath path;
+
+    // --- Setup coordinate transforms (WGS84 <-> raster CRS) ---
+    const auto wgsToRaster = dem.wgs84ToDem();
+
+    // --- Transform vertices WGS84 -> raster map coords ---
+    path.mapX.resize(nVertices);
+    path.mapY.resize(nVertices);
+    for (int i = 0; i < nVertices; i++) {
+        double mx = line.getX(i); // lon
+        double my = line.getY(i); // lat
+        if (wgsToRaster) {
+            if (!wgsToRaster->tryTransform(1, &mx, &my))
+                throw AppException("Cannot transform profile vertex to raster CRS");
+        }
+        path.mapX[i] = mx;
+        path.mapY[i] = my;
+    }
+
+    // --- Segment lengths in meters + total length ---
+    path.segLenMeters.assign(nVertices - 1, 0.0);
+    for (int i = 0; i < nVertices - 1; i++) {
+        double len;
+        if (!dem.srs || dem.isGeographic) {
+            len = haversineMeters(line.getX(i), line.getY(i),
+                                  line.getX(i + 1), line.getY(i + 1));
+        } else {
+            const double dx = path.mapX[i + 1] - path.mapX[i];
+            const double dy = path.mapY[i + 1] - path.mapY[i];
+            len = std::sqrt(dx * dx + dy * dy); // assume linear unit = meter
+        }
+        path.segLenMeters[i] = len;
+        path.totalLengthMeters += len;
+    }
+
+    // Degenerate: all vertices coincide.
+    if (path.totalLengthMeters <= 0.0)
+        throw InvalidArgsException("LineString has zero length");
+    return path;
+}
+
+// The value of the raster at a point of the profile: bilinear, in physical units for a thermal
+// raster
+class ProfileSampler {
+    const DemContext &dem;
+    double invGt[6];
+    std::optional<ThermalCalibration> thermal;
+
+    double applyThermal(double v) const {
+        if (!thermal) return v;
+        return rawToTemperature(static_cast<uint16_t>(v), *thermal);
+    }
+
+    bool isNoDataValue(float v) const {
+        return !std::isfinite(v) || isNodata(v, dem.nodata);
+    }
+
+public:
+    // Throws when the geotransform of the raster cannot be inverted
+    explicit ProfileSampler(const DemContext &dem) : dem(dem) {
+        if (!GDALInvGeoTransform(dem.gt, invGt))
+            throw AppException("Cannot invert geotransform");
+    }
+
+    // The raster holds raw UInt16 values of a thermal sensor: report them as temperatures
+    void calibrate(const ThermalCalibration &cal) {
+        if (cal.valid) thermal = cal;
+    }
+
+    // Nothing when the point is outside the raster, the read fails or a sample is nodata
+    std::optional<double> valueAt(double smx, double smy) const {
+        const int rasterW = dem.width;
+        const int rasterH = dem.height;
+
+        // Map -> pixel (fractional).
+        double px, py;
+        GDALApplyGeoTransform(invGt, smx, smy, &px, &py);
+
+        if (px < 0 || py < 0 || px >= rasterW || py >= rasterH)
+            return std::nullopt;
+
+        // Bilinear sampling at fractional pixel center (subtract 0.5 to get
+        // the center of pixel (0,0) at coord (0.5, 0.5) convention).
+        const double cx = std::clamp(px - 0.5, 0.0, static_cast<double>(rasterW - 1));
+        const double cy = std::clamp(py - 0.5, 0.0, static_cast<double>(rasterH - 1));
+        const int x0 = static_cast<int>(std::floor(cx));
+        const int y0 = static_cast<int>(std::floor(cy));
+        const int x1 = std::min(x0 + 1, rasterW - 1);
+        const int y1 = std::min(y0 + 1, rasterH - 1);
+        const double fx = cx - x0;
+        const double fy = cy - y0;
+
+        const int blockW = x1 - x0 + 1;
+        const int blockH = y1 - y0 + 1;
+        float block[4] = {0.f, 0.f, 0.f, 0.f};
+
+        if (GDALRasterIO(dem.band, GF_Read, x0, y0, blockW, blockH,
+                         block, blockW, blockH, GDT_Float32, 0, 0) != CE_None)
+            return std::nullopt;
+
+        // Unpack (supports 1x1, 1x2, 2x1, 2x2 edge cases).
+        const float v00 = block[0];
+        const float v10 = (blockW > 1) ? block[1] : v00;
+        const float v01 = (blockH > 1) ? block[blockW] : v00;
+        const float v11 = (blockW > 1 && blockH > 1) ? block[blockW + 1]
+                          : (blockW > 1 ? v10 : (blockH > 1 ? v01 : v00));
+
+        if (isNoDataValue(v00) || isNoDataValue(v10) ||
+            isNoDataValue(v01) || isNoDataValue(v11))
+            return std::nullopt;
+
+        // Apply thermal calibration to raw UInt16 values before interpolating
+        // so we operate in physical units (otherwise blending non-linear
+        // Planck values would be wrong at edges).
+        const double c00 = applyThermal(v00);
+        const double c10 = applyThermal(v10);
+        const double c01 = applyThermal(v01);
+        const double c11 = applyThermal(v11);
+
+        const double top = c00 + fx * (c10 - c00);
+        const double bot = c01 + fx * (c11 - c01);
+        return top + fy * (bot - top);
+    }
+};
+
 } // anonymous namespace
 
 std::string getRasterProfileJson(const std::string &filePath,
@@ -70,30 +222,13 @@ std::string getRasterProfileJson(const std::string &filePath,
     if (samples > MAX_SAMPLES) samples = MAX_SAMPLES;
 
     // --- Parse GeoJSON LineString (expected WGS84 lon/lat) ---
-    OGRGeometryH hRawGeom = OGR_G_CreateGeometryFromJson(geoJsonLineString.c_str());
-    if (hRawGeom == nullptr)
-        throw InvalidArgsException("Cannot parse GeoJSON geometry");
-
-    OGRGeometryUniquePtr geom(OGRGeometry::FromHandle(hRawGeom));
-    const OGRwkbGeometryType gType = wkbFlatten(geom->getGeometryType());
-    if (gType != wkbLineString)
-        throw InvalidArgsException("Profile geometry must be a LineString");
-
-    OGRLineString *line = geom->toLineString();
+    const OGRGeometryUniquePtr geom = parseProfileLine(geoJsonLineString);
+    const OGRLineString *line = geom->toLineString();
     const int nVertices = line->getNumPoints();
-    if (nVertices < 2)
-        throw InvalidArgsException("LineString must have at least 2 points");
 
     // --- Open raster and inspect metadata ---
     const DemContext dem = openDem(filePath);
-    const double *gt = dem.gt;
-
-    double invGt[6];
-    if (!GDALInvGeoTransform(gt, invGt))
-        throw AppException("Cannot invert geotransform");
-
-    const int rasterW = dem.width;
-    const int rasterH = dem.height;
+    ProfileSampler sampler(dem);
 
     GDALRasterBandH hBand = dem.band;
     const GDALDataType dt = GDALGetRasterDataType(hBand);
@@ -104,57 +239,18 @@ std::string getRasterProfileJson(const std::string &filePath,
     const bool isThermal = detectIsThermalProfile(filePath);
     ThermalCalibration cal;
     const bool needsThermalCalib = isThermal && dt == GDT_UInt16;
-    if (needsThermalCalib) cal = extractThermalCalibration(filePath);
+    if (needsThermalCalib) {
+        cal = extractThermalCalibration(filePath);
+        sampler.calibrate(cal);
+    }
 
     if (unit.empty() && isThermal) unit = "\xC2\xB0\x43"; // UTF-8 "°C"
 
-    // --- Setup coordinate transforms (WGS84 <-> raster CRS) ---
-    const auto wgsToRaster = dem.wgs84ToDem();
-
-    // --- Transform vertices WGS84 -> raster map coords ---
-    std::vector<double> mapX(nVertices);
-    std::vector<double> mapY(nVertices);
-    for (int i = 0; i < nVertices; i++) {
-        double mx = line->getX(i); // lon
-        double my = line->getY(i); // lat
-        if (wgsToRaster) {
-            if (!wgsToRaster->tryTransform(1, &mx, &my))
-                throw AppException("Cannot transform profile vertex to raster CRS");
-        }
-        mapX[i] = mx;
-        mapY[i] = my;
-    }
-
-    // --- Segment lengths in meters + total length ---
-    std::vector<double> segLenMeters(nVertices - 1, 0.0);
-    double totalLengthMeters = 0.0;
-    for (int i = 0; i < nVertices - 1; i++) {
-        double len;
-        if (!dem.srs || dem.isGeographic) {
-            len = haversineMeters(line->getX(i), line->getY(i),
-                                  line->getX(i + 1), line->getY(i + 1));
-        } else {
-            const double dx = mapX[i + 1] - mapX[i];
-            const double dy = mapY[i + 1] - mapY[i];
-            len = std::sqrt(dx * dx + dy * dy); // assume linear unit = meter
-        }
-        segLenMeters[i] = len;
-        totalLengthMeters += len;
-    }
-
-    // Degenerate: all vertices coincide.
-    if (totalLengthMeters <= 0.0)
-        throw InvalidArgsException("LineString has zero length");
-
-    // --- Value sampling helper ---
-    auto isNoDataValue = [&](float v) {
-        return !std::isfinite(v) || isNodata(v, dem.nodata);
-    };
-
-    auto applyThermal = [&](double v) -> double {
-        if (!needsThermalCalib || !cal.valid) return v;
-        return rawToTemperature(static_cast<uint16_t>(v), cal);
-    };
+    const ProfilePath path = buildPath(dem, *line);
+    const std::vector<double> &mapX = path.mapX;
+    const std::vector<double> &mapY = path.mapY;
+    const std::vector<double> &segLenMeters = path.segLenMeters;
+    const double totalLengthMeters = path.totalLengthMeters;
 
     // --- Generate equispaced samples ---
     json samplesArr = json::array();
@@ -197,71 +293,20 @@ std::string getRasterProfileJson(const std::string &filePath,
         sampleObj["lon"] = lon;
         sampleObj["lat"] = lat;
 
-        // Map -> pixel (fractional).
-        double px, py;
-        GDALApplyGeoTransform(invGt, smx, smy, &px, &py);
-
-        if (px < 0 || py < 0 || px >= rasterW || py >= rasterH) {
+        const std::optional<double> value = sampler.valueAt(smx, smy);
+        if (!value) {
             sampleObj["value"] = nullptr;
             samplesArr.push_back(sampleObj);
             continue;
         }
 
-        // Bilinear sampling at fractional pixel center (subtract 0.5 to get
-        // the center of pixel (0,0) at coord (0.5, 0.5) convention).
-        const double cx = std::clamp(px - 0.5, 0.0, static_cast<double>(rasterW - 1));
-        const double cy = std::clamp(py - 0.5, 0.0, static_cast<double>(rasterH - 1));
-        const int x0 = static_cast<int>(std::floor(cx));
-        const int y0 = static_cast<int>(std::floor(cy));
-        const int x1 = std::min(x0 + 1, rasterW - 1);
-        const int y1 = std::min(y0 + 1, rasterH - 1);
-        const double fx = cx - x0;
-        const double fy = cy - y0;
-
-        const int blockW = x1 - x0 + 1;
-        const int blockH = y1 - y0 + 1;
-        float block[4] = {0.f, 0.f, 0.f, 0.f};
-
-        if (GDALRasterIO(hBand, GF_Read, x0, y0, blockW, blockH,
-                         block, blockW, blockH, GDT_Float32, 0, 0) != CE_None) {
-            sampleObj["value"] = nullptr;
-            samplesArr.push_back(sampleObj);
-            continue;
-        }
-
-        // Unpack (supports 1x1, 1x2, 2x1, 2x2 edge cases).
-        const float v00 = block[0];
-        const float v10 = (blockW > 1) ? block[1] : v00;
-        const float v01 = (blockH > 1) ? block[blockW] : v00;
-        const float v11 = (blockW > 1 && blockH > 1) ? block[blockW + 1]
-                          : (blockW > 1 ? v10 : (blockH > 1 ? v01 : v00));
-
-        if (isNoDataValue(v00) || isNoDataValue(v10) ||
-            isNoDataValue(v01) || isNoDataValue(v11)) {
-            sampleObj["value"] = nullptr;
-            samplesArr.push_back(sampleObj);
-            continue;
-        }
-
-        // Apply thermal calibration to raw UInt16 values before interpolating
-        // so we operate in physical units (otherwise blending non-linear
-        // Planck values would be wrong at edges).
-        const double c00 = applyThermal(v00);
-        const double c10 = applyThermal(v10);
-        const double c01 = applyThermal(v01);
-        const double c11 = applyThermal(v11);
-
-        const double top = c00 + fx * (c10 - c00);
-        const double bot = c01 + fx * (c11 - c01);
-        const double value = top + fy * (bot - top);
-
-        sampleObj["value"] = value;
+        sampleObj["value"] = *value;
         samplesArr.push_back(sampleObj);
 
-        if (std::isfinite(value)) {
-            vMin = std::min(vMin, value);
-            vMax = std::max(vMax, value);
-            vSum += value;
+        if (std::isfinite(*value)) {
+            vMin = std::min(vMin, *value);
+            vMax = std::max(vMax, *value);
+            vSum += *value;
             vCount++;
         }
     }
