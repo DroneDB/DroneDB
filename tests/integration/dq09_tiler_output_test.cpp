@@ -90,18 +90,11 @@ namespace
         std::ostringstream all;
         TilerHelper::runTiler(tif, ta.getFolder("all"), 256, false, all, OutputFormat::Text, "16");
         const std::string first = *lines(all.str()).begin();
-        // <folder>/<z>/<x>/<y>.png
-        const auto parts = [&]
-        {
-            std::vector<std::string> p;
-            std::istringstream in(first);
-            for (std::string part; std::getline(in, part, '/');)
-                p.push_back(part);
-            return p;
-        }();
-        ASSERT_GE(parts.size(), 3u);
-        const std::string x = parts[parts.size() - 2];
-        const std::string y = parts.back().substr(0, parts.back().find('.'));
+        // <folder>/<z>/<x>/<y>.png, with the platform's separators
+        const fs::path tile = io::fromUtf8(first);
+        ASSERT_FALSE(tile.parent_path().empty()) << first;
+        const std::string x = io::toUtf8(tile.parent_path().filename());
+        const std::string y = io::toUtf8(tile.stem());
 
         std::ostringstream out;
         TilerHelper::runTiler(tif, ta.getFolder("single"), 256, false, out, OutputFormat::Json, "16", x, y);
