@@ -43,7 +43,6 @@ namespace
         }
 
         void setConsoleMax(plog::Severity severity) { consoleMax_.store(severity); }
-        plog::Severity consoleMax() const { return consoleMax_.load(); }
 
     private:
         plog::ConsoleAppender<plog::TxtFormatter> console_{plog::streamStdErr};
@@ -84,10 +83,6 @@ void init(bool logToFile) {
 void setVerbose() {
     hostAppender().setConsoleMax(plog::verbose);
     plog::get()->setMaxSeverity(plog::verbose);
-}
-
-bool isVerbose() {
-    return hostAppender().consoleMax() == plog::verbose;
 }
 
 void flush() {

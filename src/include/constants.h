@@ -5,7 +5,6 @@
 #define CONSTANTS_H
 
 #define DDB_DATABASE_FILE "dbase.sqlite"
-#define DDB_EMPTY_DATABASE_FILE "dbase.empty.sqlite"
 
 #define DEFAULT_REGISTRY "hub.dronedb.app"
 // OpenTopography global DEM. The API key is never stored in the source: it is read from

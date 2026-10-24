@@ -18,8 +18,7 @@
 //   Spatial references   OGRSpatialReference by value in C++ code; SrsPtr for the C handles, made
 //                        by srsFromWkt/srsFromEpsg/srsFromProj4/srsFromUserInput (always with
 //                        the traditional GIS axis order).
-//   Transforms           CoordsTransformer (coordstransformer.h) for every point transformation;
-//                        CoordTransformPtr only for the C handles of GDAL's own APIs.
+//   Transforms           CoordsTransformer (coordstransformer.h) for every point transformation.
 //   Option lists         GDAL's own CPLStringList (pass .List() to the C API).
 //   Utility options      GdalOptionsPtr<T> (GDALTranslateOptions, GDALWarpAppOptions...).
 //   VSI memory           VsiFreePtr<T> for buffers to release with VSIFree/CPLFree;
@@ -166,18 +165,6 @@ namespace ddb
     {
         return *OGRSpatialReference::FromHandle(srs.get());
     }
-
-    struct CoordTransformDeleter
-    {
-        using pointer = OGRCoordinateTransformationH;
-        void operator()(OGRCoordinateTransformationH ct) const noexcept
-        {
-            OCTDestroyCoordinateTransformation(ct);
-        }
-    };
-    // An owned OGRCoordinateTransformationH (OCTNewCoordinateTransformation)
-    using CoordTransformPtr =
-        std::unique_ptr<std::remove_pointer_t<OGRCoordinateTransformationH>, CoordTransformDeleter>;
 
     struct FeatureDeleter
     {

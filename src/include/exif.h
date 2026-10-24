@@ -184,8 +184,6 @@ namespace ddb
         bool extractGpsDirection(GpsDirection &direction);
         bool extractPanoramaInfo(PanoramaInfo &info);
 
-        void printAllTags(std::ostream &out);
-
         bool hasExif();
         bool hasXmp();
         bool hasTags();

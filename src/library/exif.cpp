@@ -924,28 +924,6 @@ namespace ddb
         return true;
     }
 
-    void ExifParser::printAllTags(std::ostream &out)
-    {
-        Exiv2::ExifData::const_iterator end = exifData.end();
-        for (Exiv2::ExifData::const_iterator i = exifData.begin(); i != end; ++i)
-        {
-            const char *tn = i->typeName();
-            out << i->key() << " "
-                      << i->value()
-                      << " | " << tn
-                      << std::endl;
-        }
-        Exiv2::XmpData::const_iterator xend = xmpData.end();
-        for (Exiv2::XmpData::const_iterator i = xmpData.begin(); i != xend; ++i)
-        {
-            const char *tn = i->typeName();
-            out << i->key() << " "
-                      << i->value()
-                      << " | " << tn
-                      << std::endl;
-        }
-    }
-
     bool ExifParser::hasExif()
     {
         return !exifData.empty();

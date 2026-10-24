@@ -83,7 +83,6 @@ namespace ddb
 
     fs::path rootDirectory() const;
     fs::path ddbDirectory() const;
-    fs::path tmpDirectory() const;
     fs::path buildDirectory() const;
 
     std::string getReadme() const;

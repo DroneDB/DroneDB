@@ -277,21 +277,6 @@ std::string thermalImagePointJson(const std::string &filePath, int x, int y) {
 
 } // anonymous namespace
 
-std::string readGdalUnitType(const std::string &filePath) {
-    const auto dataset = adoptDataset(GDALOpen(filePath.c_str(), GA_ReadOnly));
-    if (!dataset) return std::string();
-    GDALDatasetH hDs = datasetHandle(dataset);
-
-    std::string unit;
-    if (GDALGetRasterCount(hDs) >= 1) {
-        GDALRasterBandH hBand = GDALGetRasterBand(hDs, 1);
-        const char *u = GDALGetRasterUnitType(hBand);
-        if (u != nullptr) unit = u;
-    }
-
-    return unit;
-}
-
 std::string getRasterValueInfoJson(const std::string &filePath) {
     cancel::throwIfCanceled();
     std::string sensorId;

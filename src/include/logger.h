@@ -20,7 +20,6 @@ namespace ddb::logging {
 // logToFile also the rolling file ddb-log.csv
 void init(bool logToFile = false);
 void setVerbose();
-bool isVerbose();
 // Writes out what the log appenders buffered (stdout, stderr): before the host exits (DDBShutdown)
 void flush();
 

@@ -31,7 +31,6 @@ namespace ddb
     {
         BasicGeometry() {}
 
-        void addPoint(const Point &p);
         void addPoint(double x, double y, double z);
         Point getPoint(int index);
         bool empty() const;

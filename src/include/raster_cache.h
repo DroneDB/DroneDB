@@ -202,7 +202,6 @@ namespace ddb
         std::chrono::steady_clock::time_point lastPurge_;
     };
 
-    using TilerLease = RasterCache::Lease<Tiler>;
     using DatasetLease = RasterCache::Lease<OpenedDataset>;
 
     /// Releases what this process keeps of the files under path (a file or a folder):

@@ -179,7 +179,7 @@ namespace ddb
      * @param entry reference to output Entry object
      * @param withHash whether to compute the hash of the file (slow)
      */
-    void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entry, bool wishHash = true);
+    void parseEntry(const fs::path &path, const fs::path &rootDirectory, Entry &entry, bool withHash = true);
 
     /** Parse an entry with context reuse
      * @param path path to file

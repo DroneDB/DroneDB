@@ -21,13 +21,6 @@
 
 namespace ddb {
 
-void ensureParentFolderExists(const fs::path& folder) {
-    if (folder.has_parent_path()) {
-        const auto parentPath = folder.parent_path();
-        io::assureFolderExists(parentPath);
-    }
-}
-
 void to_json(json& j, const Conflict& conflict) {
     j = conflict.path;
 }

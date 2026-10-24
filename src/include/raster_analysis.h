@@ -79,10 +79,6 @@ std::string getRasterMetadataJson(const std::string &path, const std::string &fo
  */
 std::string getRasterInfoJson(const std::string &path);
 
-/** Read GDAL UNITTYPE of the first band of a raster.
- *  Returns empty string if unset or file cannot be opened. */
-std::string readGdalUnitType(const std::string &filePath);
-
 } // namespace ddb
 
 #endif // RASTER_ANALYSIS_H

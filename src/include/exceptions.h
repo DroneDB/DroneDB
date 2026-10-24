@@ -101,10 +101,6 @@ namespace ddb
     {
         using AppException::AppException;
     };
-    class URLException : public AppException
-    {
-        using AppException::AppException;
-    };
     class AuthException : public AppException
     {
         using AppException::AppException;
@@ -118,10 +114,6 @@ namespace ddb
         using AppException::AppException;
     };
     class RegistryNotFoundException : public RegistryException
-    {
-        using RegistryException::RegistryException;
-    };
-    class NoStampException : public RegistryException
     {
         using RegistryException::RegistryException;
     };
@@ -149,10 +141,6 @@ namespace ddb
 
     private:
         std::vector<std::string> missingDependencies;
-    };
-    class NotImplementedException : public AppException
-    {
-        using AppException::AppException;
     };
     // A progress callback asked to stop: the C API returns DDBERR_CANCELED from the exports
     // listed as cancellable in DDBGetCapabilities()

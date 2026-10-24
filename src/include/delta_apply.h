@@ -87,7 +87,6 @@ struct DeltaApplication {
  */
 std::vector<Conflict> applyDelta(const Delta &d, Database *destination,
                                  const DeltaApplication &application, std::ostream &out);
-void ensureParentFolderExists(const fs::path &folder);
 std::unordered_map<std::string, bool> computeDeltaLocals(Delta d, Database *destination,
                                                                 const std::string &hlDestFolder);
 

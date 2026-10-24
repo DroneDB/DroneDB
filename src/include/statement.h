@@ -46,10 +46,6 @@ public:
   long long getInt64(int columnId) const;
   std::string getText(int columnId) const;
   double getDouble(int columnId) const;
-  const void *getBlob(int columnId) const;
-
-  int getColumnsCount() const;
-  // TODO: more
 
   void reset();
   void execute();

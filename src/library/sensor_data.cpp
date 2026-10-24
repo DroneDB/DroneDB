@@ -78,10 +78,4 @@ namespace ddb
         }
     }
 
-    void SensorData::clearCache()
-    {
-        cacheHits.clear();
-        cacheMiss.clear();
-    }
-
 }

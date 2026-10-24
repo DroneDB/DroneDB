@@ -76,11 +76,6 @@ namespace ddb
         return j;
     }
 
-    void BasicGeometry::addPoint(const Point &p)
-    {
-        points.push_back(p);
-    }
-
     void BasicGeometry::addPoint(double x, double y, double z)
     {
         points.push_back(Point(x, y, z));

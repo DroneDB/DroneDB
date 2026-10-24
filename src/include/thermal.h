@@ -27,35 +27,6 @@ struct ThermalCalibration {
     bool valid = false;
 };
 
-struct ThermalInfo {
-    ThermalCalibration calibration;
-    double temperatureMin = 0.0;
-    double temperatureMax = 0.0;
-    bool isDirectTemperature = false;
-    std::string sensorId;
-    int width = 0;
-    int height = 0;
-};
-
-struct ThermalPoint {
-    double temperature = 0.0;
-    double rawValue = 0.0;
-    int x = 0;
-    int y = 0;
-    double geoX = 0.0;
-    double geoY = 0.0;
-    bool hasGeo = false;
-};
-
-struct ThermalAreaStats {
-    double min = 0.0;
-    double max = 0.0;
-    double mean = 0.0;
-    double stddev = 0.0;
-    double median = 0.0;
-    int pixelCount = 0;
-};
-
 // R-JPEG raw thermal data extracted from FLIR APP1 segment
 struct RawThermalData {
     std::vector<uint16_t> data;

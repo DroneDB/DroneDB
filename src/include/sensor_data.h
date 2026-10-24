@@ -18,7 +18,6 @@ public:
     static void checkDbInit();
     static bool contains(const std::string &sensor);
     static double getFocal(const std::string &sensor);
-    static void clearCache();
 };
 
 }

@@ -146,22 +146,10 @@ std::string Statement::getText(int columnId) const
     return res == nullptr ? std::string() : std::string(res);
 }
 
-const void *Statement::getBlob(int columnId) const
-{
-    assert(stmt != nullptr);
-    return sqlite3_column_blob(stmt, columnId);
-}
-
 double Statement::getDouble(int columnId) const
 {
     assert(stmt != nullptr);
     return sqlite3_column_double(stmt, columnId);
-}
-
-int Statement::getColumnsCount() const
-{
-    assert(stmt != nullptr);
-    return sqlite3_column_count(stmt);
 }
 
 void Statement::reset()
