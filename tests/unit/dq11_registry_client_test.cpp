@@ -610,7 +610,7 @@ namespace
         const auto src = f.ta.getFolder("src");
         { std::ofstream(src / "a.txt") << "alpha"; std::ofstream(src / "b.txt") << "beta"; }
         const auto zipFile = f.ta.getPath("src.zip");
-        zip::zipFolder(io::toUtf8(src), io::toUtf8(zipFile), {});
+        ddb::zip::zipFolder(io::toUtf8(src), io::toUtf8(zipFile), {});
         std::ifstream zin(zipFile, std::ios::binary);
         std::stringstream zbytes;
         zbytes << zin.rdbuf();

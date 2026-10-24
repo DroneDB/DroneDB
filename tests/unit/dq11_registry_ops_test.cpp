@@ -695,7 +695,7 @@ namespace
         const auto staging = f.remote.ta.getFolder("staging");
         writeFile(staging / "r1.txt", "one");
         writeFile(staging / "r2.txt", "two two");
-        zip::zipFolder(io::toUtf8(staging), io::toUtf8(zipFile), {});
+        ddb::zip::zipFolder(io::toUtf8(staging), io::toUtf8(zipFile), {});
         f.net.http.on("DOWNLOAD-POST", "/orgs/org/ds/ds/download", reply(200, slurp(zipFile)));
         auto client = f.loggedIn();
         std::ostringstream out;
