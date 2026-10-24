@@ -143,6 +143,24 @@ namespace dq06
         EXPECT_TRUE(jsonNear(actual, golden, where)) << name << " differs from its golden at " << where;
     }
 
+    std::string scrubFolder(std::string message, const std::string &folder)
+    {
+        if (folder.empty())
+            return message;
+        const std::string marker = "<dir>";
+        for (size_t at = message.find(folder); at != std::string::npos; at = message.find(folder, at + marker.size()))
+        {
+            message.replace(at, folder.size(), marker);
+            // The rest of that path is written with the platform's separators: the goldens use '/'
+            for (size_t i = at + marker.size();
+                 i < message.size() && message[i] != ' ' && message[i] != '"' && message[i] != '\'' && message[i] != ')';
+                 i++)
+                if (message[i] == '\\')
+                    message[i] = '/';
+        }
+        return message;
+    }
+
     json capture(const std::function<std::string()> &call, const std::string &scrub)
     {
         try
@@ -151,12 +169,7 @@ namespace dq06
         }
         catch (const std::exception &e)
         {
-            std::string message = e.what();
-            if (!scrub.empty())
-            {
-                for (size_t at = message.find(scrub); at != std::string::npos; at = message.find(scrub, at + 5))
-                    message.replace(at, scrub.size(), "<dir>");
-            }
+            std::string message = scrubFolder(e.what(), scrub);
             return json{{"error", message}};
         }
     }

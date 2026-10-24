@@ -174,12 +174,9 @@ namespace
     }
 
     // `message` with the folder of the test replaced by "<dir>"
-    std::string scrubbed(std::string message, TestArea &ta)
+    std::string scrubbed(const std::string &message, TestArea &ta)
     {
-        const std::string dir = ta.getFolder().string();
-        for (size_t at = message.find(dir); at != std::string::npos; at = message.find(dir, at + 5))
-            message.replace(at, dir.size(), "<dir>");
-        return message;
+        return dq06::scrubFolder(message, ta.getFolder().string());
     }
 
     bool isPng(const std::vector<uint8_t> &b) { return b.size() > 4 && b[1] == 'P' && b[2] == 'N' && b[3] == 'G'; }

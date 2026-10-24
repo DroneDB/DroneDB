@@ -26,8 +26,12 @@ namespace dq06
     // volatile keys (timestamps)
     void expectGolden(const std::string &name, json actual);
 
+    // `message` with `folder` (a folder of the test) replaced by "<dir>" and the rest of that
+    // path in '/' separators, so that the goldens are the same on Windows
+    std::string scrubFolder(std::string message, const std::string &folder);
+
     // The JSON a call returns; an exception becomes {"error": what()} so that error messages
-    // are part of the golden. `scrub` (a folder of the test) is replaced by "<dir>" in them.
+    // are part of the golden. `scrub` (a folder of the test) is replaced in them (scrubFolder).
     json capture(const std::function<std::string()> &call, const std::string &scrub = "");
 
     // Writes `value` to DDB_DQ06_DUMP_DIR/<name>.json when that variable is set, and nothing
