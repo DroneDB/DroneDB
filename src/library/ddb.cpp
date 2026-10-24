@@ -1433,15 +1433,17 @@ DDBErr DDBStacItemCollection(const char* ddbPath,
         const auto bboxVec = parseStacBbox(bbox);
         const auto datetimeRange = parseStacDatetime(datetime);
 
+        ddb::StacItemQuery query;
+        query.bbox = bboxVec;
+        query.datetimeStart = datetimeRange.start;
+        query.datetimeEnd = datetimeRange.end;
+        query.limit = limit;
+        query.offset = offset;
         return ddb::generateStacItemCollection(std::string(ddbPath),
                                                optStr(stacCollectionRoot),
                                                optStr(id),
                                                optStr(stacCatalogRoot),
-                                               bboxVec,
-                                               datetimeRange.start,
-                                               datetimeRange.end,
-                                               limit,
-                                               offset);
+                                               query);
     });
 }
 
@@ -1466,12 +1468,13 @@ DDBErr DDBStacItemCollectionData(const char* ddbPath,
 
         const auto bboxVec = parseStacBbox(bbox);
         const auto datetimeRange = parseStacDatetime(datetime);
-        return ddb::generateStacItemCollectionData(std::string(ddbPath),
-                                                   bboxVec,
-                                                   datetimeRange.start,
-                                                   datetimeRange.end,
-                                                   limit,
-                                                   offset);
+        ddb::StacItemQuery query;
+        query.bbox = bboxVec;
+        query.datetimeStart = datetimeRange.start;
+        query.datetimeEnd = datetimeRange.end;
+        query.limit = limit;
+        query.offset = offset;
+        return ddb::generateStacItemCollectionData(std::string(ddbPath), query);
     });
 }
 

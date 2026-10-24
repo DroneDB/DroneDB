@@ -349,16 +349,35 @@ namespace ddb
         return !id.empty() ? id : io::toUtf8(fs::weakly_canonical(db->rootDirectory()).filename());
     }
 
+    // The columns of an entry row a STAC Item is built from (the SELECT of stacItemSql)
+    struct StacRow {
+        std::string path;
+        std::string propertiesText;
+        std::string geomText;
+        int entryTypeInt = 0;
+        long long mtime = 0;
+    };
+
+    // path, properties, the GeoJSON of the footprint, type and mtime, in the order StacRow reads them
+    static const char* const stacRowColumns =
+        "path, properties, "
+        "CASE WHEN polygon_geom IS NOT NULL THEN AsGeoJSON(polygon_geom) "
+        "WHEN point_geom IS NOT NULL THEN AsGeoJSON(point_geom) ELSE NULL END AS geom, "
+        "type, mtime";
+
+    static StacRow readStacRow(Statement& q) {
+        return {q.getText(0), q.getText(1), q.getText(2), q.getInt(3), q.getInt64(4)};
+    }
+
     // Build a complete STAC Item (Feature) JSON for a single entry row.
     // Shared by the single-item endpoint and the ItemCollection endpoint (DRY).
     // urls: null for the data-only item (no id, collection, links or asset hrefs)
-    static json buildStacItem(const std::string& path,
-                              const std::string& propertiesText,
-                              const std::string& geomText,
-                              int entryTypeInt,
-                              long long mtime,
-                              const StacUrls* urls,
-                              const std::string& rootId) {
+    static json buildStacItem(const StacRow& row, const StacUrls* urls, const std::string& rootId) {
+        const std::string& path = row.path;
+        const std::string& propertiesText = row.propertiesText;
+        const std::string& geomText = row.geomText;
+        const int entryTypeInt = row.entryTypeInt;
+        const long long mtime = row.mtime;
         json j;
         j["stac_version"] = STAC_VERSION;
         j["type"] = "Feature";
@@ -519,29 +538,12 @@ namespace ddb
 
         if (!entry.empty())
         {
-            const auto q = db->query(R"<<<(
-                    SELECT path,
-                           properties,
-                           CASE
-                                WHEN polygon_geom IS NOT NULL THEN AsGeoJSON(polygon_geom)
-                                WHEN point_geom IS NOT NULL THEN AsGeoJSON(point_geom)
-                                ELSE NULL
-                           END AS geom,
-                           type,
-                           mtime
-                    FROM entries WHERE path = ?
-                )<<<");
+            const auto q = db->query(std::string("SELECT ") + stacRowColumns + " FROM entries WHERE path = ?");
             q->bind(1, entry);
             if (q->fetch())
             {
                 // STAC Item (delegates to the shared builder)
-                j = buildStacItem(q->getText(0),
-                                  q->getText(1),
-                                  q->getText(2),
-                                  q->getInt(3),
-                                  q->getInt64(4),
-                                  urls,
-                                  rootId);
+                j = buildStacItem(readStacRow(*q), urls, rootId);
             }
             else
             {
@@ -642,14 +644,13 @@ namespace ddb
     static json generateItemCollection(const std::string& ddbPath,
                                        const StacUrls* urls,
                                        const std::string& id,
-                                       const std::vector<double>& bbox,
-                                       const std::string& datetimeStart,
-                                       const std::string& datetimeEnd,
-                                       int limit,
-                                       int offset) {
+                                       const StacItemQuery& query) {
         if (ddbPath.empty())
             throw AppException("No ddbPath is set for generating STAC");
 
+        const std::vector<double>& bbox = query.bbox;
+        int limit = query.limit;
+        int offset = query.offset;
         if (limit <= 0)
             limit = 10;
         if (offset < 0)
@@ -679,8 +680,8 @@ namespace ddb
         }
 
         time_t dtStart = 0, dtEnd = 0;
-        const bool hasStart = parseIso8601ToEpochSecs(datetimeStart, dtStart);
-        const bool hasEnd = parseIso8601ToEpochSecs(datetimeEnd, dtEnd);
+        const bool hasStart = parseIso8601ToEpochSecs(query.datetimeStart, dtStart);
+        const bool hasEnd = parseIso8601ToEpochSecs(query.datetimeEnd, dtEnd);
 
         // Per-entry instant (seconds): captureTime (ms) if present and > 0, else mtime
         const std::string instantExpr =
@@ -706,12 +707,8 @@ namespace ddb
                 numberMatched = cq->getInt64(0);
         }
 
-        const std::string sql =
-            "SELECT path, properties, "
-            "CASE WHEN polygon_geom IS NOT NULL THEN AsGeoJSON(polygon_geom) "
-            "WHEN point_geom IS NOT NULL THEN AsGeoJSON(point_geom) ELSE NULL END AS geom, "
-            "type, mtime FROM entries WHERE " +
-            where + " ORDER BY path LIMIT ? OFFSET ?";
+        const std::string sql = std::string("SELECT ") + stacRowColumns + " FROM entries WHERE " +
+                                where + " ORDER BY path LIMIT ? OFFSET ?";
 
         const auto q = db->query(sql);
         int idx = 1;
@@ -725,13 +722,7 @@ namespace ddb
         json features = json::array();
         while (q->fetch())
         {
-            features.push_back(buildStacItem(q->getText(0),
-                                             q->getText(1),
-                                             q->getText(2),
-                                             q->getInt(3),
-                                             q->getInt64(4),
-                                             urls,
-                                             rootId));
+            features.push_back(buildStacItem(readStacRow(*q), urls, rootId));
         }
 
         json fc;
@@ -764,35 +755,12 @@ namespace ddb
                                     const std::string& stacCollectionRoot,
                                     const std::string& id,
                                     const std::string& stacCatalogRoot,
-                                    const std::vector<double>& bbox,
-                                    const std::string& datetimeStart,
-                                    const std::string& datetimeEnd,
-                                    int limit,
-                                    int offset) {
+                                    const StacItemQuery& query) {
         const StacUrls urls{stacCollectionRoot, stacCatalogRoot};
-        return generateItemCollection(ddbPath,
-                                      &urls,
-                                      id,
-                                      bbox,
-                                      datetimeStart,
-                                      datetimeEnd,
-                                      limit,
-                                      offset);
+        return generateItemCollection(ddbPath, &urls, id, query);
     }
 
-    json generateStacItemCollectionData(const std::string& ddbPath,
-                                        const std::vector<double>& bbox,
-                                        const std::string& datetimeStart,
-                                        const std::string& datetimeEnd,
-                                        int limit,
-                                        int offset) {
-        return generateItemCollection(ddbPath,
-                                      nullptr,
-                                      "",
-                                      bbox,
-                                      datetimeStart,
-                                      datetimeEnd,
-                                      limit,
-                                      offset);
+    json generateStacItemCollectionData(const std::string& ddbPath, const StacItemQuery& query) {
+        return generateItemCollection(ddbPath, nullptr, "", query);
     }
 }

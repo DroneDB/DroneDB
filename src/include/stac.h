@@ -18,6 +18,16 @@ namespace ddb
                               const std::string &id = "",
                               const std::string &stacCatalogRoot = "");
 
+    // The filters and the page of a STAC ItemCollection
+    struct StacItemQuery
+    {
+        std::vector<double> bbox;     // [minX, minY, maxX, maxY] in EPSG:4326; anything else = no filter
+        std::string datetimeStart;    // RFC 3339; empty = open
+        std::string datetimeEnd;
+        int limit = 10;               // a value of 0 or less is 10
+        int offset = 0;
+    };
+
     // Generate a STAC API ItemCollection (GeoJSON FeatureCollection of STAC Items)
     // for all geometry-bearing entries of a dataset, with optional bbox / datetime
     // filtering and limit/offset paging.
@@ -25,11 +35,7 @@ namespace ddb
                                             const std::string &stacCollectionRoot = ".",
                                             const std::string &id = "",
                                             const std::string &stacCatalogRoot = "",
-                                            const std::vector<double> &bbox = {},
-                                            const std::string &datetimeStart = "",
-                                            const std::string &datetimeEnd = "",
-                                            int limit = 10,
-                                            int offset = 0);
+                                            const StacItemQuery &query = {});
 
     // Data-only STAC (XI-09): the documents of generateStac (with id "") and
     // generateStacItemCollection without any member built from a URL or an ID: no "id",
@@ -37,12 +43,7 @@ namespace ddb
     // EntryNotFoundException for an entry that is not in the index.
     DDB_DLL json generateStacData(const std::string& ddbPath, const std::string& entry = "");
 
-    DDB_DLL json generateStacItemCollectionData(const std::string& ddbPath,
-                                                const std::vector<double>& bbox = {},
-                                                const std::string& datetimeStart = "",
-                                                const std::string& datetimeEnd = "",
-                                                int limit = 10,
-                                                int offset = 0);
+    DDB_DLL json generateStacItemCollectionData(const std::string& ddbPath, const StacItemQuery& query = {});
 }
 
 #endif // STAC_H

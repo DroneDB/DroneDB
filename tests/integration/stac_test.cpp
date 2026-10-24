@@ -172,7 +172,7 @@ namespace
         ddb::addToIndex(db.get(), {orthoPath.string(), imagePath.string()});
 
         auto page = generateStacItemCollection(ta->getFolder().string(), ".", "acme/brighton",
-                                               "", {}, "", "", 1, 0);
+                                               "", {.limit = 1});
         EXPECT_EQ(page["numberReturned"], 1);
         EXPECT_GE(page["numberMatched"].get<long long>(), 1);
     }
@@ -518,14 +518,14 @@ namespace
 
         // Bbox that covers nothing (remote ocean area) → 0 features
         auto fcEmpty = generateStacItemCollection(ta->getFolder().string(), ".", "", "",
-                                                   {-179.0, -89.0, -178.0, -88.0});
+                                                   {.bbox = {-179.0, -89.0, -178.0, -88.0}});
         EXPECT_EQ(fcEmpty["numberReturned"].get<size_t>(), 0)
             << "Bbox covering no data should return 0 features";
         EXPECT_EQ(fcEmpty["numberMatched"].get<long long>(), 0);
 
         // World bbox → should return all geometry-bearing features
         auto fcWorld = generateStacItemCollection(ta->getFolder().string(), ".", "", "",
-                                                   {-180.0, -90.0, 180.0, 90.0});
+                                                   {.bbox = {-180.0, -90.0, 180.0, 90.0}});
         EXPECT_GE(fcWorld["numberReturned"].get<size_t>(), 1)
             << "World bbox should return at least one feature";
         EXPECT_EQ(fcWorld["numberReturned"], fcWorld["numberMatched"]);
@@ -540,27 +540,27 @@ namespace
 
         // Far-future interval → 0 features
         auto fcFuture = generateStacItemCollection(ta->getFolder().string(), ".", "", "",
-                                                    {}, "2099-01-01T00:00:00Z", "2099-12-31T23:59:59Z");
+                                                    {.datetimeStart = "2099-01-01T00:00:00Z", .datetimeEnd = "2099-12-31T23:59:59Z"});
         EXPECT_EQ(fcFuture["numberMatched"].get<long long>(), 0)
             << "Future datetime range should return 0 features";
 
         // Open-ended start (../now+future): everything before far-future end
         auto fcOpenStart = generateStacItemCollection(ta->getFolder().string(), ".", "", "",
-                                                       {}, "", "2099-12-31T23:59:59Z");
+                                                       {.datetimeEnd = "2099-12-31T23:59:59Z"});
         EXPECT_GE(fcOpenStart["numberMatched"].get<long long>(), 1)
             << "Open-start range ending in far future should return all features";
 
         // Open-ended end (epoch start/..): everything after epoch
         auto fcOpenEnd = generateStacItemCollection(ta->getFolder().string(), ".", "", "",
-                                                     {}, "1970-01-01T00:00:00Z", "");
+                                                     {.datetimeStart = "1970-01-01T00:00:00Z"});
         EXPECT_GE(fcOpenEnd["numberMatched"].get<long long>(), 1)
             << "Open-end range starting at epoch should return all features";
 
         // Timezone offset handling: same instant expressed differently should give same count
         auto fcUtc  = generateStacItemCollection(ta->getFolder().string(), ".", "", "",
-                                                  {}, "1970-01-01T00:00:00Z", "2099-01-01T00:00:00+00:00");
+                                                  {.datetimeStart = "1970-01-01T00:00:00Z", .datetimeEnd = "2099-01-01T00:00:00+00:00"});
         auto fcOff  = generateStacItemCollection(ta->getFolder().string(), ".", "", "",
-                                                  {}, "1970-01-01T00:00:00Z", "2099-01-01T02:00:00+02:00");
+                                                  {.datetimeStart = "1970-01-01T00:00:00Z", .datetimeEnd = "2099-01-01T02:00:00+02:00"});
         EXPECT_EQ(fcUtc["numberMatched"], fcOff["numberMatched"])
             << "Equivalent datetime with timezone offset should give the same result";
     }
