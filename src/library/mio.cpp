@@ -93,10 +93,12 @@ namespace ddb
             fs::file_time_type fromUnixTime(std::chrono::seconds seconds, std::chrono::nanoseconds nanoseconds)
             {
                 const std::chrono::sys_time<std::chrono::nanoseconds> sys(seconds + nanoseconds);
-                // file_time_type's duration is the clock's own tick (100 ns on Windows), not
-                // nanoseconds: round down to it
-                return std::chrono::floor<fs::file_time_type::duration>(
-                    std::chrono::clock_cast<fs::file_time_type::clock>(sys));
+                // Round down to the file clock's own tick (100 ns on Windows) BEFORE the clock
+                // conversion: clock_cast keeps the finer duration, and the 1601 -> 1970 offset
+                // (1.16e19 ns) overflows a 64-bit nanosecond count, so the time stored would be
+                // garbage and last_write_time would fail with ERROR_INVALID_PARAMETER.
+                return std::chrono::clock_cast<fs::file_time_type::clock>(
+                    std::chrono::floor<fs::file_time_type::duration>(sys));
             }
 
             // What a failed file system call says: "<what> <path> (<reason>)"
