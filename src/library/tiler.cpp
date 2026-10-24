@@ -143,15 +143,6 @@ namespace ddb
         maxZoomLevel = 99;
     }
 
-    BoundingBox<Geographic2D> GlobalMercator::tileLatLonBounds(int tx, int ty,
-                                                               int zoom) const
-    {
-        const BoundingBox<Projected2D> bounds = tileBounds(tx, ty, zoom);
-        const Geographic2D min = metersToLatLon(bounds.min.x, bounds.min.y);
-        const Geographic2D max = metersToLatLon(bounds.max.x, bounds.max.y);
-        return BoundingBox<Geographic2D>(min, max);
-    }
-
     BoundingBox<Projected2D> GlobalMercator::tileBounds(int tx, int ty,
                                                         int zoom) const
     {
@@ -161,16 +152,6 @@ namespace ddb
         const Projected2D max =
             pixelsToMeters((tx + 1.0) * size, (ty + 1.0) * size, zoom);
         return BoundingBox<Projected2D>(min, max);
-    }
-
-    Geographic2D GlobalMercator::metersToLatLon(double mx, double my) const
-    {
-        double lon = mx / originShift * 180.0;
-        double lat = my / originShift * 180.0;
-
-        lat = ddb::kRadToDeg *
-              (2 * std::atan(std::exp(ddb::deg2rad(lat))) - ddb::kPi / 2.0);
-        return Geographic2D(lon, lat);
     }
 
     Projected2Di GlobalMercator::metersToTile(double mx, double my,

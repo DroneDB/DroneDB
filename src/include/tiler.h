@@ -26,14 +26,8 @@ namespace ddb
     public:
         GlobalMercator(int tileSize);
 
-        BoundingBox<Geographic2D> tileLatLonBounds(int tx, int ty, int zoom) const;
-
         // Bounds of the given tile in EPSG:3857 coordinates
         BoundingBox<Projected2D> tileBounds(int tx, int ty, int zoom) const;
-
-        // Converts XY point from Spherical Mercator EPSG:3857 to lat/lon in WGS84
-        // Datum
-        Geographic2D metersToLatLon(double mx, double my) const;
 
         // Tile for given mercator coordinates
         Projected2Di metersToTile(double mx, double my, int zoom) const;

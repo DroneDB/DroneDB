@@ -86,11 +86,6 @@ namespace ddb
         std::string tile(int tz, int tx, int ty, ImageFormat format,
                          uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr) override;
 
-        // Format-aware overload. outputFormat is "png", "jpeg" or "webp" (or a MIME type).
-        std::string tile(int tz, int tx, int ty,
-                         const std::string &outputFormat,
-                         uint8_t **outBuffer = nullptr, int *outBufferSize = nullptr);
-
         // Band-aware tile generation with visualization parameters
         std::string tile(int tz, int tx, int ty,
                          const ThumbVisParams &visParams,

@@ -10,23 +10,11 @@
 #include "exceptions.h"
 #include "hash.h"
 #include "mio.h"
-#include "randomutil.h"
 #include "thumb_internal.h"
 #include "timeutil.h"
 #include "userprofile.h"
 
 namespace ddb {
-
-fs::path getThumbFromUserCache(const fs::path& imagePath, int thumbSize, bool forceRecreate) {
-    if (oneIn(1000))
-        cleanupThumbsUserCache();
-    if (!fs::exists(imagePath))
-        throw FSException(io::toUtf8(imagePath.filename()) + " does not exist");
-    const fs::path outdir = UserProfile::get()->getThumbsDir(thumbSize);
-    io::Path p = imagePath;
-    const fs::path thumbPath = outdir / getThumbFilename(imagePath, p.getModifiedTime(), thumbSize);
-    return generateThumb(imagePath, thumbSize, thumbPath, forceRecreate, nullptr, nullptr);
-}
 
 bool supportsThumbnails(EntryType type) {
     return entryHandler(type).thumbnailSource() == ThumbnailSource::File;

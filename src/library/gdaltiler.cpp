@@ -341,12 +341,6 @@ namespace ddb
         return writeTile(image, format, tz, tx, ty, outBuffer, outBufferSize);
     }
 
-    std::string GDALTiler::tile(int tz, int tx, int ty, const std::string &outputFormat, uint8_t **outBuffer,
-                                int *outBufferSize)
-    {
-        return tile(tz, tx, ty, parseImageFormat(outputFormat), outBuffer, outBufferSize);
-    }
-
     std::string GDALTiler::tile(int tz, int tx, int ty, const ThumbVisParams &visParams, uint8_t **outBuffer,
                                 int *outBufferSize)
     {

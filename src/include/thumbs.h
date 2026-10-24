@@ -24,7 +24,6 @@ namespace ddb
         std::string rescale;     // Rescale range "min,max"
     };
 
-    fs::path getThumbFromUserCache(const fs::path &imagePath, int thumbSize, bool forceRecreate);
     // Writes a thumbnail per file the generators support; onGenerated gets the path of each one
     // as soon as it is written
     void generateThumbs(const std::vector<std::string> &input, const fs::path &output, int thumbSize, bool useCrc,

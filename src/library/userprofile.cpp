@@ -78,17 +78,7 @@ namespace ddb
 
     fs::path UserProfile::defaultProfileDir(bool *fromDdbHome) { return homeDir(fromDdbHome) / DDB_FOLDER; }
 
-    fs::path UserProfile::getHomeDir() { return homeDir(nullptr); }
-
     fs::path UserProfile::getProfileDir() { return defaultProfileDir(); }
-
-    fs::path UserProfile::getProfilePath(const fs::path &p, bool createIfNeeded = true)
-    {
-        const fs::path profilePath = getProfileDir() / p;
-        if (createIfNeeded)
-            createDir(profilePath);
-        return profilePath;
-    }
 
     fs::path UserProfile::getCacheDir()
     {
@@ -109,13 +99,6 @@ namespace ddb
         const fs::path thumbsDir = getCacheDir() / fs::path("thumbs");
         createDir(thumbsDir);
         return thumbsDir;
-    }
-
-    fs::path UserProfile::getThumbsDir(int thumbSize)
-    {
-        const fs::path thumbsSizeDir = getThumbsDir() / std::to_string(thumbSize);
-        createDir(thumbsSizeDir);
-        return thumbsSizeDir;
     }
 
     fs::path UserProfile::getTilesDir()

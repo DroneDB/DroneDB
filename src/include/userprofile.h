@@ -30,14 +30,11 @@ namespace ddb
         // AppException when no home folder is set.
         static fs::path defaultProfileDir(bool *fromDdbHome = nullptr);
 
-        fs::path getHomeDir();
         fs::path getProfileDir();
-        fs::path getProfilePath(const fs::path &p, bool createIfNeeded);
         // The cache folder (created) and a folder in it (created)
         fs::path getCacheDir();
         fs::path getCachePath(const fs::path &p);
         fs::path getThumbsDir();
-        fs::path getThumbsDir(int thumbSize);
         fs::path getTilesDir();
         fs::path getTemplatesDir();
 
