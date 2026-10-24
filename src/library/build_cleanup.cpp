@@ -207,10 +207,10 @@ static void removeOrphanTempFolders(const fs::path& hashDir, CleanupResult& resu
         removeOrphanTilesFolders(hashDir, tilesTempFolders, tilesOldFolder, tilesTrashFolders, result);
 }
 
-CleanupResult cleanupBuild(Database* db, const std::string& outputPath) {
-    CleanupResult result;
+namespace {
 
-    // -------- Phase 1: remove DB entries whose underlying file is gone --------
+// Phase 1: removes the DB entries whose underlying file is gone
+void removeStaleEntries(Database* db, CleanupResult& result) {
     const fs::path rootDir = db->rootDirectory();
     std::vector<std::string> missingPaths;
 
@@ -232,24 +232,188 @@ CleanupResult cleanupBuild(Database* db, const std::string& outputPath) {
         }
     }
 
-    if (!missingPaths.empty()) {
-        LOGD << "cleanupBuild: removing " << missingPaths.size()
-             << " stale DB entry/entries";
-        // Remove entries one at a time so that a failure on a single path
-        // does not lose the record of paths that were actually removed.
-        // removeFromIndex expects absolute paths (it computes the relative
-        // form internally via io::Path::relativeTo).
-        for (const auto& rel : missingPaths) {
-            const std::string absPath = io::toUtf8(rootDir / io::fromUtf8(rel));
-            try {
-                removeFromIndex(db, std::vector<std::string>{absPath});
-                result.removedEntries.push_back(rel);
-            } catch (const AppException& e) {
-                LOGW << "Failed to remove stale DB entry '" << rel
-                     << "': " << e.what();
-            }
+    if (missingPaths.empty())
+        return;
+
+    LOGD << "cleanupBuild: removing " << missingPaths.size()
+         << " stale DB entry/entries";
+    // Remove entries one at a time so that a failure on a single path
+    // does not lose the record of paths that were actually removed.
+    // removeFromIndex expects absolute paths (it computes the relative
+    // form internally via io::Path::relativeTo).
+    for (const auto& rel : missingPaths) {
+        const std::string absPath = io::toUtf8(rootDir / io::fromUtf8(rel));
+        try {
+            removeFromIndex(db, std::vector<std::string>{absPath});
+            result.removedEntries.push_back(rel);
+        } catch (const AppException& e) {
+            LOGW << "Failed to remove stale DB entry '" << rel
+                 << "': " << e.what();
         }
     }
+}
+
+// Whether a build of the orphan directory may be running: a held lock, or a directory that cannot
+// be scanned for locks. Lock files live one level deep: <hash>/<subfolder>.building. Uses a
+// non-recursive scan and treats any iteration error as "potentially active" to avoid wrongly
+// deleting a locked dir.
+bool mayHaveActiveBuild(const fs::path& p) {
+    std::error_code subErr;
+    fs::directory_iterator subIt(p, subErr);
+    if (subErr) {
+        LOGW << "Cannot scan orphan '" << io::toUtf8(p)
+             << "' for active locks (" << subErr.message()
+             << "); skipping removal as a precaution";
+        return true;
+    }
+
+    const fs::directory_iterator subEnd;
+    for (; subIt != subEnd; subIt.increment(subErr)) {
+        if (subErr) {
+            LOGW << "Iteration error inside '" << io::toUtf8(p)
+                 << "': " << subErr.message()
+                 << "; skipping removal as a precaution";
+            return true;
+        }
+        // "<subfolder>.building" is the lock of "<subfolder>"
+        if (subIt->path().extension() == BuildLockSuffix &&
+            BuildLock::isHeld(io::toUtf8(p / subIt->path().stem()))) {
+            LOGD << "Skipping orphan with active build lock: " << io::toUtf8(p);
+            return true;
+        }
+    }
+    return false;
+}
+
+// A directory of the build folder: a referenced hash keeps its output (and loses its stale temp
+// folders), an orphan hash is removed unless a build may be running in it
+void cleanupBuildDirectory(const fs::path& p, const std::string& name,
+                           const std::unordered_set<std::string>& validHashes, CleanupResult& result) {
+    // Directory name is expected to be a content hash. Skip anything
+    // that doesn't look like one to avoid clobbering unrelated dirs.
+    if (!isHashLike(name)) {
+        LOGD << "Skipping non-hash directory: " << io::toUtf8(p);
+        return;
+    }
+    if (validHashes.find(name) != validHashes.end()) {
+        // Still referenced: keep the build output, but reclaim any
+        // orphaned "<subfolder>-temp-<rand>" scratch folders left behind
+        // by a build that crashed before its RAII cleanup ran (a SIGSEGV
+        // bypasses the cleanup in buildInternal). Folders whose build is
+        // still active (live .building lock) are skipped.
+        removeOrphanTempFolders(p, result);
+        return;  // still referenced
+    }
+
+    if (mayHaveActiveBuild(p))
+        return;
+
+    std::error_code rmErr;
+    fs::remove_all(p, rmErr);
+    if (rmErr) {
+        LOGW << "Failed to remove orphan build directory '" << io::toUtf8(p)
+             << "': " << rmErr.message();
+    } else {
+        result.removedBuilds.push_back(io::toUtf8(p));
+        LOGD << "Removed orphan build directory: " << io::toUtf8(p);
+    }
+}
+
+// <hash>.pending: removed when no entry has that hash
+void cleanupPendingFile(const fs::path& p, const std::unordered_set<std::string>& validHashes,
+                        CleanupResult& result) {
+    // .pending file naming convention: <hash>.pending. Validate the
+    // stem before deleting so we never touch unrelated *.pending files.
+    const std::string hash = io::toUtf8(p.stem());
+    if (!isHashLike(hash)) {
+        LOGD << "Skipping non-hash pending file: " << io::toUtf8(p);
+        return;
+    }
+    if (validHashes.find(hash) != validHashes.end())
+        return;
+
+    std::error_code rmErr;
+    fs::remove(p, rmErr);
+    if (rmErr) {
+        LOGW << "Failed to remove orphan pending file '" << io::toUtf8(p)
+             << "': " << rmErr.message();
+    } else {
+        result.removedBuilds.push_back(io::toUtf8(p));
+        LOGD << "Removed orphan pending file: " << io::toUtf8(p);
+    }
+}
+
+// Leftover of replacePendingMarker() interrupted between write and rename. It is never valid
+// state, whatever its hash, but a fresh one may belong to a live writer: collect it only once it
+// is old.
+void cleanupPendingMarkerTemp(const fs::path& p, CleanupResult& result) {
+    std::error_code timeErr;
+    const auto writeTime = fs::last_write_time(p, timeErr);
+    if (timeErr) {
+        LOGW << "Cannot read the age of pending marker temp file '" << io::toUtf8(p)
+             << "' (" << timeErr.message() << "); keeping it";
+        return;
+    }
+    if (fs::file_time_type::clock::now() - writeTime < PendingMarkerTempMinAge) {
+        LOGD << "Keeping recent pending marker temp file: " << io::toUtf8(p);
+        return;
+    }
+
+    std::error_code rmErr;
+    fs::remove(p, rmErr);
+    if (rmErr) {
+        LOGW << "Failed to remove pending marker temp file '" << io::toUtf8(p)
+             << "': " << rmErr.message();
+    } else {
+        result.removedBuilds.push_back(io::toUtf8(p));
+        LOGD << "Removed stale pending marker temp file: " << io::toUtf8(p);
+    }
+}
+
+// Phase 2: removes the orphan build artifacts of the build folder
+void removeOrphanArtifacts(const fs::path& buildDir, const std::unordered_set<std::string>& validHashes,
+                           CleanupResult& result) {
+    // Artifact names are validated with isHashLike() before deleting so we never
+    // wipe unrelated files/directories that may live in a user-specified output path.
+
+    std::error_code iterErr;
+    fs::directory_iterator it(buildDir, iterErr);
+    if (iterErr) {
+        LOGW << "Cannot open build directory '" << io::toUtf8(buildDir)
+             << "': " << iterErr.message();
+        return;
+    }
+
+    const fs::directory_iterator end;
+    for (; it != end; it.increment(iterErr)) {
+        if (iterErr) {
+            LOGW << "Error iterating build directory '" << io::toUtf8(buildDir)
+                 << "': " << iterErr.message();
+            break;
+        }
+
+        const auto& entry = *it;
+        const auto& p = entry.path();
+        const std::string name = io::toUtf8(p.filename());
+
+        std::error_code typeErr;
+        if (entry.is_directory(typeErr)) {
+            cleanupBuildDirectory(p, name, validHashes, result);
+        } else if (entry.is_regular_file(typeErr) && p.extension() == PendingMarkerExtension) {
+            cleanupPendingFile(p, validHashes, result);
+        } else if (entry.is_regular_file(typeErr) && isPendingMarkerTempName(name)) {
+            cleanupPendingMarkerTemp(p, result);
+        }
+    }
+}
+
+}  // namespace
+
+CleanupResult cleanupBuild(Database* db, const std::string& outputPath) {
+    CleanupResult result;
+
+    // -------- Phase 1: remove DB entries whose underlying file is gone --------
+    removeStaleEntries(db, result);
 
     // -------- Phase 2: remove orphan build artifacts --------
     const fs::path buildDir = outputPath.empty() ? db->buildDirectory() : io::fromUtf8(outputPath);
@@ -275,138 +439,7 @@ CleanupResult cleanupBuild(Database* db, const std::string& outputPath) {
     LOGD << "cleanupBuild: " << validHashes.size() << " valid hash(es) in DB; scanning "
          << io::toUtf8(buildDir);
 
-    // Artifact names are validated with isHashLike() before deleting so we never
-    // wipe unrelated files/directories that may live in a user-specified output path.
-
-    std::error_code iterErr;
-    fs::directory_iterator it(buildDir, iterErr);
-    if (iterErr) {
-        LOGW << "Cannot open build directory '" << io::toUtf8(buildDir)
-             << "': " << iterErr.message();
-        return result;
-    }
-
-    const fs::directory_iterator end;
-    for (; it != end; it.increment(iterErr)) {
-        if (iterErr) {
-            LOGW << "Error iterating build directory '" << io::toUtf8(buildDir)
-                 << "': " << iterErr.message();
-            break;
-        }
-
-        const auto& entry = *it;
-        const auto& p = entry.path();
-        const std::string name = io::toUtf8(p.filename());
-
-        std::error_code typeErr;
-        if (entry.is_directory(typeErr)) {
-            // Directory name is expected to be a content hash. Skip anything
-            // that doesn't look like one to avoid clobbering unrelated dirs.
-            if (!isHashLike(name)) {
-                LOGD << "Skipping non-hash directory: " << io::toUtf8(p);
-                continue;
-            }
-            if (validHashes.find(name) != validHashes.end()) {
-                // Still referenced: keep the build output, but reclaim any
-                // orphaned "<subfolder>-temp-<rand>" scratch folders left behind
-                // by a build that crashed before its RAII cleanup ran (a SIGSEGV
-                // bypasses the cleanup in buildInternal). Folders whose build is
-                // still active (live .building lock) are skipped.
-                removeOrphanTempFolders(p, result);
-                continue;  // still referenced
-            }
-
-            // Lock files live one level deep: <hash>/<subfolder>.building.
-            // Use a non-recursive scan and treat any iteration error as
-            // "potentially active" to avoid wrongly deleting a locked dir.
-            bool skip = false;
-            std::error_code subErr;
-            fs::directory_iterator subIt(p, subErr);
-            if (subErr) {
-                LOGW << "Cannot scan orphan '" << io::toUtf8(p)
-                     << "' for active locks (" << subErr.message()
-                     << "); skipping removal as a precaution";
-                skip = true;
-            } else {
-                const fs::directory_iterator subEnd;
-                for (; !skip && subIt != subEnd; subIt.increment(subErr)) {
-                    if (subErr) {
-                        LOGW << "Iteration error inside '" << io::toUtf8(p)
-                             << "': " << subErr.message()
-                             << "; skipping removal as a precaution";
-                        skip = true;
-                        break;
-                    }
-                    // "<subfolder>.building" is the lock of "<subfolder>"
-                    if (subIt->path().extension() == BuildLockSuffix &&
-                        BuildLock::isHeld(io::toUtf8(p / subIt->path().stem()))) {
-                        LOGD << "Skipping orphan with active build lock: " << io::toUtf8(p);
-                        skip = true;
-                        break;
-                    }
-                }
-            }
-
-            if (skip)
-                continue;
-
-            std::error_code rmErr;
-            fs::remove_all(p, rmErr);
-            if (rmErr) {
-                LOGW << "Failed to remove orphan build directory '" << io::toUtf8(p)
-                     << "': " << rmErr.message();
-            } else {
-                result.removedBuilds.push_back(io::toUtf8(p));
-                LOGD << "Removed orphan build directory: " << io::toUtf8(p);
-            }
-        } else if (entry.is_regular_file(typeErr) && p.extension() == PendingMarkerExtension) {
-            // .pending file naming convention: <hash>.pending. Validate the
-            // stem before deleting so we never touch unrelated *.pending files.
-            const std::string hash = io::toUtf8(p.stem());
-            if (!isHashLike(hash)) {
-                LOGD << "Skipping non-hash pending file: " << io::toUtf8(p);
-                continue;
-            }
-            if (validHashes.find(hash) != validHashes.end())
-                continue;
-
-            std::error_code rmErr;
-            fs::remove(p, rmErr);
-            if (rmErr) {
-                LOGW << "Failed to remove orphan pending file '" << io::toUtf8(p)
-                     << "': " << rmErr.message();
-            } else {
-                result.removedBuilds.push_back(io::toUtf8(p));
-                LOGD << "Removed orphan pending file: " << io::toUtf8(p);
-            }
-        } else if (entry.is_regular_file(typeErr) && isPendingMarkerTempName(name)) {
-            // Leftover of replacePendingMarker() interrupted between write and
-            // rename. It is never valid state, whatever its hash, but a fresh one
-            // may belong to a live writer: collect it only once it is old.
-            std::error_code timeErr;
-            const auto writeTime = fs::last_write_time(p, timeErr);
-            if (timeErr) {
-                LOGW << "Cannot read the age of pending marker temp file '" << io::toUtf8(p)
-                     << "' (" << timeErr.message() << "); keeping it";
-                continue;
-            }
-            if (fs::file_time_type::clock::now() - writeTime < PendingMarkerTempMinAge) {
-                LOGD << "Keeping recent pending marker temp file: " << io::toUtf8(p);
-                continue;
-            }
-
-            std::error_code rmErr;
-            fs::remove(p, rmErr);
-            if (rmErr) {
-                LOGW << "Failed to remove pending marker temp file '" << io::toUtf8(p)
-                     << "': " << rmErr.message();
-            } else {
-                result.removedBuilds.push_back(io::toUtf8(p));
-                LOGD << "Removed stale pending marker temp file: " << io::toUtf8(p);
-            }
-        }
-    }
-
+    removeOrphanArtifacts(buildDir, validHashes, result);
     return result;
 }
 
