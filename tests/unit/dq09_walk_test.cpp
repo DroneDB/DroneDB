@@ -115,7 +115,13 @@ namespace
     {
         EXPECT_TRUE(hasIndexableName("a/b.txt"));
         EXPECT_TRUE(hasIndexableName("a/.hidden"));
+#ifdef _WIN32
+        // '\' separates the folders of a Windows path: "a/back\slash.txt" is the file "slash.txt" in
+        // "a/back", so no name with a backslash exists there to be rejected
+        EXPECT_TRUE(hasIndexableName("a/back\\slash.txt"));
+#else
         EXPECT_FALSE(hasIndexableName("a/back\\slash.txt"));
+#endif
         EXPECT_TRUE(hasIndexableName("back\\dir/file.txt")) << "only the name is checked, not the folders";
     }
 
