@@ -77,6 +77,14 @@ int main(int argc, char **argv)
     // DllMain after ExitProcess terminated them (process_init.h)
     ddb::finalizeProcess();
 
+    // The test areas of this process (TestArea::processRoot) are removed when it ends, but not
+    // after a failure: they are what to look at
+    if (res != 0)
+    {
+        TestArea::keepProcessRoot();
+        std::cout << "Test areas kept in " << TestArea::processRoot().string() << std::endl;
+    }
+
     return res;
 
 }

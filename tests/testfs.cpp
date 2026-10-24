@@ -42,9 +42,7 @@ TestFS::TestFS(const std::string &testArchivePath, const std::string &baseTestFo
     if (!isLocalPath(testArchivePath))
     {
         // Handle remote URL
-        const auto tempPath = downloadCacheFolder().empty()
-                                  ? std::filesystem::temp_directory_path() / baseTestFolder / extractFileName(testArchivePath)
-                                  : cachedAssetPath(testArchivePath);
+        const auto tempPath = cachedAssetPath(testArchivePath);
         std::filesystem::create_directories(tempPath.parent_path());
         // A download is only published complete (downloadWith), so an existing archive is whole
         if (!std::filesystem::exists(tempPath))
@@ -81,7 +79,8 @@ std::string testDataUrl(const std::string &path)
 std::filesystem::path TestFS::downloadCacheFolder()
 {
     const char *folder = std::getenv("DDB_TEST_CACHE_DIR");
-    return folder != nullptr && *folder != '\0' ? std::filesystem::path(folder) : std::filesystem::path();
+    return folder != nullptr && *folder != '\0' ? std::filesystem::path(folder)
+                                                : std::filesystem::temp_directory_path() / "ddb_test_cache";
 }
 
 std::filesystem::path TestFS::cachedAssetPath(const std::string &url)
@@ -134,17 +133,6 @@ void TestFS::clearCache(const std::string &baseTestFolder)
 bool TestFS::isLocalPath(const std::string &path)
 {
     return path.rfind("file:/", 0) == 0 || (path.rfind("http://", 0) != 0 && path.rfind("https://", 0) != 0 && path.rfind("ftp://", 0) != 0);
-}
-
-/**
- * @brief Extracts the file name from a given path.
- * @param path The full path to extract the file name from.
- * @return The file name extracted from the path.
- */
-std::string TestFS::extractFileName(const std::string &path)
-{
-    size_t pos = path.find_last_of("/");
-    return (pos == std::string::npos) ? path : path.substr(pos + 1);
 }
 
 /**

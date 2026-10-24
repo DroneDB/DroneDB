@@ -98,16 +98,17 @@ public:
         const DownloadRetry &retry = {});
 
     /**
-     * @brief Folder of the shared download cache: $DDB_TEST_CACHE_DIR, or empty when it is not set.
+     * @brief Folder of the shared download cache: $DDB_TEST_CACHE_DIR, else <temp>/ddb_test_cache.
      *
-     * With the cache, every download (TestFS archives, TestArea::downloadTestAsset) is kept once,
-     * under the URL's host and path, and copied to the test from there; CI keeps the folder
-     * between runs. Without it, downloads stay where they always were (the system temp folder).
+     * Every download (TestFS archives, TestArea::downloadTestAsset) is kept once, under the URL's
+     * host and path, and copied to the test from there: tests run in processes of their own
+     * (TestArea::processRoot), so it is the one place downloads outlive a test; CI keeps the
+     * folder between runs.
      */
     static std::filesystem::path downloadCacheFolder();
 
     /**
-     * @brief Path of a URL in the shared download cache (downloadCacheFolder() must be set).
+     * @brief Path of a URL in the shared download cache (under downloadCacheFolder()).
      */
     static std::filesystem::path cachedAssetPath(const std::string &url);
 
@@ -142,14 +143,6 @@ private:
      * @return True if the path is local, otherwise false.
      */
     static bool isLocalPath(const std::string &path);
-
-    /**
-     * @brief Extracts the file name from a given path.
-     * @param path The full path to extract the file name from.
-     * @return The file name extracted from the path.
-     */
-    static std::string extractFileName(const std::string &path);
-
 
 };
 
