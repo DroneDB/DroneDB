@@ -253,12 +253,15 @@ const TilerFactory* findTilerFactory(const fs::path& tileablePath);
 std::vector<std::string> sidecarMainExtensions(const std::string& path);
 
 // Registers handler for handler->type() and returns the handler it replaces (nullptr if none).
+// Tests register fake handlers with it to check that the registry alone drives detection and the
+// build manifest of a type.
 // Throws InvalidArgsException when one of its extensions belongs to another type.
 std::unique_ptr<EntryHandler> registerEntryHandler(std::unique_ptr<EntryHandler> handler);
 // Removes the handler of type and returns it (nullptr if none)
 std::unique_ptr<EntryHandler> unregisterEntryHandler(EntryType type);
 
-// Registers a handler for its lifetime and then puts back the one it replaced (tests).
+// Registers a handler for its lifetime and then puts back the one it replaced: the way tests
+// register a fake handler without leaking it into the next test.
 class ScopedEntryHandler {
   public:
     explicit ScopedEntryHandler(std::unique_ptr<EntryHandler> handler) : type_(handler->type()) {

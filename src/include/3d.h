@@ -212,6 +212,7 @@ namespace ddb
      * @throws FSException if @p obj does not exist.
      * @throws AppException if a reference is absolute, or escapes @p datasetRoot.
      */
+    // Tests read the dependencies of an OBJ through it to check the path contract above.
     std::vector<std::string> getObjDependencies(const std::string &obj, const std::string &datasetRoot = "");
 
     /**

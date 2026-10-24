@@ -67,7 +67,8 @@ namespace ddb
 
         static DatabasePool &instance();
 
-        /// Replaces the options; closes idle connections beyond the new limits
+        /// Replaces the options; closes idle connections beyond the new limits. Tests set small
+        /// limits and a short idle timeout with it, and restore the options they read back.
         void configure(const Options &options);
         Options options() const;
 
@@ -86,6 +87,7 @@ namespace ddb
         size_t releaseConnections(const fs::path &path);
 
         /// Closes all idle connections
+        /// (Tests start from an empty pool with it.)
         size_t clear();
 
         /// Moves the WAL of every idle connection into its database file (TRUNCATE
@@ -97,6 +99,8 @@ namespace ddb
         /// exit-time checkpoint. Returns how many were closed.
         size_t shutdown();
 
+        /// Tests read these counters to check that a reopened index reuses an idle connection and
+        /// that limits, expiry and shutdown close the connections they should.
         Stats stats() const;
 
     private:

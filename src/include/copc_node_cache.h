@@ -50,11 +50,13 @@ namespace ddb
         /// Drops the nodes of path, or of every file under path when it is a folder
         size_t release(const fs::path &path);
 
+        /// Tests start from an empty cache with clear(), shrink it with setCapacity() and read bytes()
+        /// to check that the cache stays within its capacity and drops a released cloud.
         void clear();
         void setCapacity(size_t bytes);
         size_t bytes() const;
 
-        /// Nodes loaded since start (misses), for tests and diagnostics
+        /// Nodes loaded since start (misses). Tests read it to check that a cache hit decodes nothing.
         uint64_t loads() const { return loads_.load(); }
 
     private:

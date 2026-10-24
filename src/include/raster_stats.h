@@ -56,10 +56,11 @@ namespace ddb
         /// (used only when the statistics are not cached yet).
         BandStatistics get(const std::string &path, GDALDatasetH ds, int band);
 
-        /// How the statistics returned so far were obtained (test and diagnostics seam)
+        /// How the statistics returned so far were obtained. Tests read it to check that the
+        /// statistics of a raster are computed once and that a sidecar is used when there is one.
         Counters counters() const;
 
-        /// Forgets every cached file
+        /// Forgets every cached file (tests start from an empty cache with it)
         void clear();
 
     private:

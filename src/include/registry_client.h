@@ -90,6 +90,7 @@ public:
     AuthCredentials savedCredentials() const;
     // Deletes the saved credentials; false when there were none
     bool logout();
+    // Tests read the token and its expiry to check what a login, a failed login and a refresh leave
     std::string getAuthToken() const { return authToken; }
     std::time_t getTokenExpiration() const { return tokenExpiration; }
 

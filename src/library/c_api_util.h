@@ -176,7 +176,8 @@ class CallScope {
     bool counted_ = false;
 };
 
-// Guarded calls admitted and still running, on every thread (diagnostics and tests)
+// Guarded calls admitted and still running, on every thread. Tests read it to check that a
+// shutdown waits for the calls in flight and that a finished call is no longer counted.
 int callsInFlight() noexcept;
 
 // What DDBShutdown does once no call is in flight, before it returns DDBERR_NONE: the
@@ -191,7 +192,8 @@ using Teardown = void (*)();
 // or the log callback: DDBERR_INVALIDARGS. Never counted in flight itself.
 DDBErr shutdown(int timeoutMs, Teardown teardown) noexcept;
 
-// True once DDBShutdown started
+// True once DDBShutdown started. Tests read it to check that a refused shutdown (from inside a
+// call) does not start one and that a timed-out one has.
 bool shutdownStarted() noexcept;
 
 // Unit tests only: back to the running state after a test called DDBShutdown (the teardown

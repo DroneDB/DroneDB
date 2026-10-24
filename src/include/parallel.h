@@ -66,7 +66,8 @@ namespace ddb::parallel
     // (until the dataset that was created with the option is closed).
     std::string gdalNumThreads(const CpuTokens &tokens);
 
-    // Tokens held in the whole process (diagnostics and tests)
+    // Tokens held in the whole process. Tests read it to check how many tokens the sections hold
+    // and that they are all given back when the sections end.
     size_t cpuTokensInUse() noexcept;
 
     // ---- Parallel loops ---------------------------------------------------------------------

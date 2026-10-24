@@ -135,7 +135,8 @@ public:
     // are not mapped by the filter are left out)
     static std::vector<int> bandsRead(const VegetationFormula &formula, const BandFilter &filter);
 
-    // The whole table of colormaps, the unlisted ones included
+    // The whole table of colormaps, the unlisted ones included. Tests check the table through it
+    // (the ids and names, which ramps are listed, and a hash of each ramp).
     const std::vector<Colormap>& getColormaps() const { return colormaps_; }
 
     // The colormap of a public id (null for an unknown id, and for an unlisted colormap unless

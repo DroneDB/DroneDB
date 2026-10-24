@@ -170,9 +170,12 @@ namespace ddb
         /// Closes every idle instance
         size_t clear();
 
-        /// Replaces the options; closes idle instances beyond the new limits
+        /// Replaces the options; closes idle instances beyond the new limits. Tests turn the cache
+        /// off or shrink it with it and restore the options they read back.
         void configure(const Options &options);
         Options options() const;
+        /// Tests read these counters to check that a repeated tile reuses the open dataset or
+        /// tiler, and that a rebuilt or released raster is opened again.
         Stats stats() const;
 
     private:
