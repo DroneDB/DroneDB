@@ -40,13 +40,10 @@ void pushDataset(RegistryClient& client, const std::string& path, std::ostream& 
     // Call POST endpoint passing database stamp
     PushManager pushManager(&client, tagInfo.organization, tagInfo.dataset);
 
-    std::string registryStampChecksum = "";
-    try {
-        const auto regStamp = syncManager.getLastStamp(tagInfo.registryUrl);
-        registryStampChecksum = regStamp["checksum"];
-    } catch (const NoStampException&) {
-        // Nothing, this is the first time we push
-    }
+    // The stamp of the Registry as of the last sync: the empty dataset on a first push, which a
+    // Registry that has no such dataset does not look at and one with content answers with
+    // "pull first"
+    const std::string registryStampChecksum = syncManager.getLastStamp(tagInfo.registryUrl)["checksum"];
 
     const auto pir = pushManager.init(registryStampChecksum, db->getStamp());
 

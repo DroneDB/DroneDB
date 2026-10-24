@@ -306,7 +306,8 @@ namespace
     {
         IndexFixture ds;
 
-        explicit PushFixture(const std::string &name, bool tagged = true)
+        // `synced`: the dataset was pushed or pulled before (it has the stamp of that sync)
+        explicit PushFixture(const std::string &name, bool tagged = true, bool synced = true)
             : RegistryFixture(name), ds(name + "-ds", "ds", true)
         {
             writeFile(ds.root / "a.txt", "alpha");
@@ -315,7 +316,8 @@ namespace
             if (tagged)
                 TagManager(ds.db.get()).setTag(Tag);
             // A stamp that is not the dataset's: what the last push left
-            SyncManager(ds.db.get()).setLastStamp(Url, json{{"checksum", "last-push"}, {"entries", json::array()}});
+            if (synced)
+                SyncManager(ds.db.get()).setLastStamp(Url, json{{"checksum", "last-push"}, {"entries", json::array()}});
             ds.db->close();
         }
 
@@ -502,6 +504,38 @@ namespace
         EXPECT_THROW(pushDataset(client, f.ds.root.string(), out), RegistryException);
     }
 
+    // Nothing was ever synced: the Registry is told the dataset it last saw was empty, not that
+    // it has the dataset's own checksum (which is true of no Registry)
+    TEST(Dq11Push, TheFirstPushNamesTheEmptyDatasetAsTheStampOfTheRegistry)
+    {
+        PushFixture f(TEST_NAME, true, false);
+        f.serve({"a.txt", "sub/b.txt"});
+        auto client = f.loggedIn();
+        std::ostringstream out;
+
+        pushDataset(client, f.ds.root.string(), out);
+
+        const auto init = f.net.http.callsTo("POST", "/push/init").at(0);
+        EXPECT_EQ(init.field("checksum"), Database::emptyStamp()["checksum"].get<std::string>());
+        EXPECT_NE(init.field("checksum"), f.datasetChecksum());
+        EXPECT_EQ(json::parse(init.field("stamp"))["checksum"], f.datasetChecksum()); // what is pushed is the dataset
+
+        // and it is the dataset that was pushed which the next push is based on
+        EXPECT_EQ(f.lastChecksum(), f.datasetChecksum());
+    }
+
+    // A pull is required, with its own message, when the Registry has content of its own
+    TEST(Dq11Push, AFirstPushToADatasetWithContentIsToldToPullFirst)
+    {
+        PushFixture f(TEST_NAME, true, false);
+        f.serve({});
+        f.net.http.on("POST", "/push/init", jsonReply({{"pullRequired", true}}));
+        auto client = f.loggedIn();
+        std::ostringstream out;
+        EXPECT_THROW(pushDataset(client, f.ds.root.string(), out), PullRequiredException);
+        EXPECT_TRUE(f.net.http.callsTo("MULTIPART", "/push/upload").empty());
+    }
+
     TEST(Dq11Push, ADatasetWithoutATagCannotBePushed)
     {
         PushFixture f(TEST_NAME, false);
@@ -534,8 +568,10 @@ namespace
         IndexFixture local;
         json remoteStamp;
 
+        // `synced`: the local dataset was pulled before, and has not changed since
         explicit PullFixture(const std::string &name, const std::map<std::string, std::string> &remoteFiles,
-                             const std::map<std::string, std::string> &localFiles = {}, bool tagged = true)
+                             const std::map<std::string, std::string> &localFiles = {}, bool tagged = true,
+                             bool synced = true)
             : RegistryFixture(name), remote(name, "remote", true), local(name, "local", false)
         {
             std::vector<std::string> paths;
@@ -559,7 +595,8 @@ namespace
             if (tagged)
                 TagManager(local.db.get()).setTag(Tag);
             // The stamp of the last pull: the dataset as it is
-            SyncManager(local.db.get()).setLastStamp(Url, local.db.get());
+            if (synced)
+                SyncManager(local.db.get()).setLastStamp(Url, local.db.get());
             local.db->close();
 
             net.http.on("GET", "/orgs/org/ds/ds/stamp", jsonReply(remoteStamp));
@@ -586,6 +623,68 @@ namespace
         EXPECT_TRUE(getEntry(db.get(), "r1.txt").has_value()); // indexed
         EXPECT_EQ(SyncManager(db.get()).getLastStamp(Url)["checksum"], f.remoteStamp["checksum"]);
         EXPECT_TRUE(fs::is_empty(db->ddbDirectory() / "tmp" / "pull_cache") || !fs::exists(db->ddbDirectory() / "tmp" / "pull_cache" / "org-ds"));
+    }
+
+    // The first pull has no stamp of a previous one: the baseline is the empty dataset, not the
+    // local one. With the local one, a file the Registry does not have was a file the Registry
+    // deleted, and the first pull deleted it from the disk.
+    TEST(Dq11Pull, TheFirstPullKeepsTheLocalFilesTheRegistryDoesNotHave)
+    {
+        PullFixture f(TEST_NAME, {}, {{"mine.txt", "mine"}}, true, false);
+        auto client = f.loggedIn();
+        std::ostringstream out;
+
+        pullDataset(client, f.local.root.string(), MergeStrategy::DontMerge, out);
+
+        EXPECT_EQ(slurp(f.local.root / "mine.txt"), "mine");
+        EXPECT_EQ(out.str().find("D\tmine.txt"), std::string::npos) << out.str();
+        auto db = ddb::open(f.local.root.string(), false);
+        EXPECT_TRUE(getEntry(db.get(), "mine.txt").has_value());
+        EXPECT_EQ(SyncManager(db.get()).getLastStamp(Url)["checksum"], f.remoteStamp["checksum"]);
+    }
+
+    TEST(Dq11Pull, TheFirstPullAddsTheRemoteFilesAndKeepsTheLocalOnes)
+    {
+        PullFixture f(TEST_NAME, {{"r1.txt", "remote one"}}, {{"mine.txt", "mine"}}, true, false);
+        f.net.http.on("DOWNLOAD", "/orgs/org/ds/ds/download?path=r1.txt", reply(200, "remote one"));
+        auto client = f.loggedIn();
+        std::ostringstream out;
+
+        pullDataset(client, f.local.root.string(), MergeStrategy::DontMerge, out);
+
+        EXPECT_EQ(slurp(f.local.root / "r1.txt"), "remote one");
+        EXPECT_EQ(slurp(f.local.root / "mine.txt"), "mine");
+    }
+
+    // Both sides have the path and the content differs: nobody deleted or changed it since a
+    // sync (there was none), so it is a conflict for the user to settle, not an overwrite
+    TEST(Dq11Pull, TheFirstPullReportsAFileBothSidesHaveAsAConflict)
+    {
+        PullFixture f(TEST_NAME, {{"both.txt", "theirs"}}, {{"both.txt", "ours"}}, true, false);
+        f.net.http.on("DOWNLOAD", "/orgs/org/ds/ds/download?path=both.txt", reply(200, "theirs"));
+        auto client = f.loggedIn();
+        std::ostringstream out;
+
+        pullDataset(client, f.local.root.string(), MergeStrategy::DontMerge, out);
+
+        EXPECT_EQ(slurp(f.local.root / "both.txt"), "ours");
+        EXPECT_NE(out.str().find("C\tboth.txt"), std::string::npos) << out.str();
+        auto db = ddb::open(f.local.root.string(), false);
+        EXPECT_NE(SyncManager(db.get()).getLastStamp(Url)["checksum"], f.remoteStamp["checksum"]); // not recorded: conflicts
+    }
+
+    TEST(Dq11Pull, SameFilesOnBothSidesAreNotAConflict)
+    {
+        PullFixture f(TEST_NAME, {{"same.txt", "same"}}, {{"same.txt", "same"}}, true, false);
+        auto client = f.loggedIn();
+        std::ostringstream out;
+
+        pullDataset(client, f.local.root.string(), MergeStrategy::DontMerge, out);
+
+        EXPECT_EQ(out.str().find("C\t"), std::string::npos) << out.str();
+        EXPECT_TRUE(f.net.http.callsTo("DOWNLOAD", "same.txt").empty());
+        auto db = ddb::open(f.local.root.string(), false);
+        EXPECT_EQ(SyncManager(db.get()).getLastStamp(Url)["checksum"], f.remoteStamp["checksum"]);
     }
 
     TEST(Dq11Pull, SeveralNewFilesComeInOneArchive)

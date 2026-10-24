@@ -66,6 +66,9 @@ namespace ddb
 
     DDB_DLL json getProperties() const;
     DDB_DLL json getStamp() const;
+    /// The stamp of an index with nothing in it: what a Registry reports for a dataset nobody has
+    /// pushed to, and the baseline of a dataset that was never synced with one
+    DDB_DLL static json emptyStamp();
     /// getStamp().dump(), without building the json document
     DDB_DLL std::string getStampJson() const;
     /// getStamp()["checksum"], without collecting the entries

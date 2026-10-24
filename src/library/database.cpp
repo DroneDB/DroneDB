@@ -400,6 +400,12 @@ END;
         return checksum.finishHex();
     }
 
+    json Database::emptyStamp()
+    {
+        // The checksum of readStamp over no entry and no metadata
+        return json{{"entries", json::array()}, {"meta", json::array()}, {"checksum", Sha256().finishHex()}};
+    }
+
     json Database::getStamp() const
     {
         json j;
