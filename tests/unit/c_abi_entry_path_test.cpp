@@ -529,8 +529,8 @@ TEST(CAbiEntryPath, everyAcceptedVectorReachesTheEntryAtItsNormalizedSpelling) {
             SCOPED_TRACE(e.name);
             // The file exists only at the normalized spelling; "keep.txt" is the other entry
             Dataset ds(TEST_NAME, v.normalized);
-            ASSERT_NE(std::find(ds.entries().begin(), ds.entries().end(), v.normalized),
-                      ds.entries().end());
+            const auto indexed = ds.entries();
+            ASSERT_NE(std::find(indexed.begin(), indexed.end(), v.normalized), indexed.end());
 
             const DDBErr rc = e.call(ds, v.input);
             ASSERT_EQ(rc, DDBERR_NONE) << DDBGetLastError();
