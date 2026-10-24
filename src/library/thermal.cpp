@@ -11,6 +11,7 @@
 #include "sensorprofile.h"
 #include "mio.h"
 
+#include <optional>
 #include <exiv2/exiv2.hpp>
 #include <gdal_priv.h>
 #include <cpl_conv.h>
@@ -73,29 +74,13 @@ struct FlirSegmentInfo {
     bool found = false;
 };
 
-static FlirSegmentInfo findFlirSegment(const std::string &filePath) {
-    FlirSegmentInfo info;
-
-    std::ifstream file(io::fromUtf8(filePath), std::ios::binary);
-    if (!file.is_open()) return info;
-
-    // Read entire file into memory for simpler parsing
-    file.seekg(0, std::ios::end);
-    size_t fileSize = static_cast<size_t>(file.tellg());
-    file.seekg(0, std::ios::beg);
-
-    if (fileSize < 20) return info;
-
-    std::vector<uint8_t> data(fileSize);
-    file.read(reinterpret_cast<char*>(data.data()), fileSize);
-    file.close();
+// The offset just after the "FLIR\0" magic of an APP1 segment, when the file has one
+static std::optional<size_t> findFlirMagic(const std::vector<uint8_t> &data) {
+    const size_t fileSize = data.size();
 
     // Search for FLIR FFF record marker within APP1 segments
     // Pattern: FF E1 (APP1 marker) ... "FLIR\0" magic
     const uint8_t flirMagic[] = { 'F', 'L', 'I', 'R', 0x00 };
-
-    size_t flirSegmentStart = 0;
-    bool foundMagic = false;
 
     for (size_t i = 0; i < fileSize - 10; i++) {
         // Check for APP1 marker: 0xFF 0xE1
@@ -106,54 +91,17 @@ static FlirSegmentInfo findFlirSegment(const std::string &filePath) {
             // Check for FLIR magic after length
             if (i + 4 + 5 <= fileSize &&
                 std::memcmp(&data[i + 4], flirMagic, 5) == 0) {
-                flirSegmentStart = i + 4 + 5; // After "FLIR\0"
-                foundMagic = true;
                 LOGD << "Found FLIR APP1 segment at offset " << i << ", length " << segLen;
-                break;
+                return i + 4 + 5; // After "FLIR\0"
             }
         }
     }
+    return std::nullopt;
+}
 
-    if (!foundMagic) {
-        LOGD << "No FLIR APP1 segment found in " << filePath;
-        return info;
-    }
-
-    // After FLIR magic, skip 3 bytes (segment index info)
-    // Then look for FFF record directory
-    size_t pos = flirSegmentStart + 3;
-
-    // Search for raw thermal data record type (0x0001 = RawData)
-    // The FFF record directory has entries of 32 bytes each
-    // Record type at offset 0 (uint16 BE), followed by various fields
-    // We look for the raw data embedded in the FLIR segment
-
-    // Simplified approach: scan for patterns that indicate raw thermal data
-    // In FLIR FFF format, raw thermal data is typically UInt16 Little-Endian
-    // preceded by width/height metadata
-
-    // Look for a secondary FLIR marker or raw data indicator
-    // The typical FLIR R-JPEG has the raw data at a specific offset
-    // encoded in the FFF record directory
-
-    // Parse FFF header
-    if (pos + 64 > fileSize) return info;
-
-    // Skip to raw data record - in most FLIR R-JPEGs, the raw data
-    // follows a recognizable pattern. We search for the raw data record.
-
-    // FLIR FFF Record Directory parsing:
-    // After the FLIR magic + 3 bytes, there are records.
-    // Each record: type(2) + ... + dataOffset(4) + dataLength(4) at specific positions
-
-    // Actually, the FLIR segment after magic+3 contains:
-    // [1 byte: segment sequence number]  - already skipped as part of +3
-    // Then: direct raw thermal data or FFF sub-segments
-
-    // For DJI thermal images, the structure is simpler:
-    // The thermal data is embedded directly as raw UInt16 values
-    // We need to find resolution from EXIF and locate raw block
-
+// The dimensions of the raw thermal image: from the FLIR XMP, else the largest of the common
+// thermal camera resolutions that fits in the data after the FLIR header (remainingData bytes)
+static void findRawDimensions(const std::string &filePath, size_t remainingData, FlirSegmentInfo &info) {
     // Try to extract width/height from XMP/EXIF first
     try {
         auto exivImage = openExivImage(io::fromUtf8(filePath));
@@ -182,7 +130,6 @@ static FlirSegmentInfo findFlirSegment(const std::string &filePath) {
             {1280, 1024}, {384, 288}, {640, 480}
         };
 
-        size_t remainingData = fileSize - pos;
         for (const auto &s : commonSizes) {
             size_t expectedSize = static_cast<size_t>(s.w) * s.h * 2; // UInt16
             if (remainingData >= expectedSize) {
@@ -192,16 +139,14 @@ static FlirSegmentInfo findFlirSegment(const std::string &filePath) {
             }
         }
     }
+}
 
-    if (info.rawWidth == 0 || info.rawHeight == 0) return info;
-
-    // Search for the raw thermal data blob
-    // It's typically a contiguous block of rawWidth * rawHeight * 2 bytes
+// Search for the raw thermal data blob: a contiguous block of rawWidth * rawHeight * 2 bytes
+// near the beginning of the FLIR APP1 data area
+static void locateRawData(const std::vector<uint8_t> &data, size_t flirSegmentStart, FlirSegmentInfo &info) {
+    const size_t fileSize = data.size();
     size_t expectedRawSize = static_cast<size_t>(info.rawWidth) * info.rawHeight * 2;
 
-    // Scan the FLIR segment area for the raw data
-    // The raw data is usually near the beginning of the FLIR segment
-    // Look in the FLIR APP1 data area
     for (size_t searchPos = flirSegmentStart; searchPos + expectedRawSize <= fileSize; searchPos++) {
         // Heuristic: raw thermal data typically has values in a reasonable range
         // Check first few pixels to validate
@@ -220,7 +165,45 @@ static FlirSegmentInfo findFlirSegment(const std::string &filePath) {
             break;
         }
     }
+}
 
+// Locates the raw UInt16 thermal block of a FLIR or DJI R-JPEG. The FFF record directory is not
+// parsed: the segment after the magic and 3 index bytes holds the raw values directly (DJI) or
+// FFF sub-segments, so the block is found by its size (from the XMP, or a common sensor size)
+// and the range of its values.
+static FlirSegmentInfo findFlirSegment(const std::string &filePath) {
+    FlirSegmentInfo info;
+
+    std::ifstream file(io::fromUtf8(filePath), std::ios::binary);
+    if (!file.is_open()) return info;
+
+    // Read entire file into memory for simpler parsing
+    file.seekg(0, std::ios::end);
+    size_t fileSize = static_cast<size_t>(file.tellg());
+    file.seekg(0, std::ios::beg);
+
+    if (fileSize < 20) return info;
+
+    std::vector<uint8_t> data(fileSize);
+    file.read(reinterpret_cast<char*>(data.data()), fileSize);
+    file.close();
+
+    const auto flirSegmentStart = findFlirMagic(data);
+    if (!flirSegmentStart) {
+        LOGD << "No FLIR APP1 segment found in " << filePath;
+        return info;
+    }
+
+    // After FLIR magic, skip 3 bytes (segment index info)
+    size_t pos = *flirSegmentStart + 3;
+
+    // Parse FFF header
+    if (pos + 64 > fileSize) return info;
+
+    findRawDimensions(filePath, fileSize - pos, info);
+    if (info.rawWidth == 0 || info.rawHeight == 0) return info;
+
+    locateRawData(data, *flirSegmentStart, info);
     return info;
 }
 
