@@ -510,8 +510,9 @@ namespace ddb
         if (emitAlpha) {
             for (int b = 0; b < 4; ++b) {
                 GDALRasterBandH hB = GDALGetRasterBand(hRgba, b + 1);
-                GDALRasterIO(hB, GF_Write, 0, 0, width, height,
-                             rgba.data() + b, width, height, GDT_Byte, 4, 4 * width);
+                if (GDALRasterIO(hB, GF_Write, 0, 0, width, height,
+                                 rgba.data() + b, width, height, GDT_Byte, 4, 4 * width) != CE_None)
+                    throw GDALException("Cannot write the index render of " + inputPath);
             }
             GDALColorInterp ci[4] = { GCI_RedBand, GCI_GreenBand, GCI_BlueBand, GCI_AlphaBand };
             for (int b = 0; b < 4; ++b)
@@ -533,8 +534,9 @@ namespace ddb
             }
             for (int b = 0; b < 3; ++b) {
                 GDALRasterBandH hB = GDALGetRasterBand(hRgba, b + 1);
-                GDALRasterIO(hB, GF_Write, 0, 0, width, height,
-                             rgb.data() + b, width, height, GDT_Byte, 3, 3 * width);
+                if (GDALRasterIO(hB, GF_Write, 0, 0, width, height,
+                                 rgb.data() + b, width, height, GDT_Byte, 3, 3 * width) != CE_None)
+                    throw GDALException("Cannot write the index render of " + inputPath);
             }
             GDALColorInterp ci[3] = { GCI_RedBand, GCI_GreenBand, GCI_BlueBand };
             for (int b = 0; b < 3; ++b)
