@@ -1,4 +1,4 @@
-# Warning baseline for scripts/check-warnings.py (DQ-01). Do not edit by hand: after removing
+# Warning baseline for scripts/check-warnings.py. Do not edit by hand: after removing
 # warnings, run scripts/check-warnings.py --update <log of a full build> and commit this file.
 # Compiler: GNU 13 (the CI build_ubuntu job measures with this compiler)
 # Format: <path> <flag> <number of distinct line:column locations>
@@ -31,7 +31,7 @@ src/library/gdaltiler.cpp -Wshadow 4
 src/library/metamanager.cpp -Wshadow 1
 src/library/mio.cpp -Wshadow 1
 src/library/mzip.cpp -Wconversion 1
-src/library/mzip.cpp -Wdeprecated-declarations 2
+src/library/mzip.cpp -Wdeprecated-declarations 1
 src/library/nxconv.cpp -Wdangling-else 1
 src/library/pctiler.cpp -Wfloat-conversion 1
 src/library/pctiler.cpp -Wshadow 4
