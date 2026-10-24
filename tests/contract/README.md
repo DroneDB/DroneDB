@@ -336,3 +336,12 @@ Registry has to adopt first.
   files untouched, and once it starts to change the dataset it applies the delta whole and
   returns `DDBERR_NONE` (a cancel or a shutdown that comes later is not seen). A canceled
   `DDBMaskBorders` leaves no output file.
+
+* 2026-10-25: the artifact role `gsplat.georef` is removed from the manifest: the `roles` of the
+  `GaussianSplat` entry type in `entry-types` are now `gsplat.lod`, `gsplat.spz` and
+  `gsplat.bounds`, and `DDBGetBuildArtifacts` and `DDBListEntriesEx` no longer list a
+  `gsplat/georef.json` artifact. No build ever wrote that file (libddb has no way to give a splat
+  a georeference), so no output lost data; a host that reads the role list must not require it.
+  The `properties` of a Gaussian splat entry no longer carry `"georeferenced": false` either; a
+  splat is never georeferenced, so a host reads the absent member as false. The `entry-types`
+  fixture changed; no other fixture did.

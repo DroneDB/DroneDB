@@ -3,7 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 // GaussianSplat entries: SPZ/SPLAT/KSPLAT (and splat-flavoured PLY), built into a
-// level-of-detail RAD container with its bounds (and georeferencing when known).
+// level-of-detail RAD container with its bounds.
 
 #include "build_layout.h"
 #include "json.h"
@@ -36,15 +36,9 @@ class SplatThumbnailGenerator : public ThumbnailGenerator {
 void parseGaussianSplatMetadata(const fs::path &path, Entry &entry)
 {
     // Lightweight metadata only (no full decode): splat count + SH degree.
-    // Georeferencing (and therefore footprint geometry) is established at
-    // build time from an ODX coords file; a freshly indexed splat renders
-    // in local space until then.
     GaussianSplatInfo info;
     if (getGaussianSplatInfo(io::toUtf8(path), info))
-    {
         entry.properties = info;
-        entry.properties["georeferenced"] = false;
-    }
 }
 
 class GaussianSplatEntryHandler : public EntryHandler {
@@ -78,8 +72,6 @@ class GaussianSplatEntryHandler : public EntryHandler {
                 {"gsplat.spz", artifactPath(GsplatBuildSubfolder, GsplatFileName), ArtifactKind::File,
                  "application/octet-stream", "", "", false},
                 {"gsplat.bounds", artifactPath(GsplatBuildSubfolder, GsplatBoundsFileName), ArtifactKind::File,
-                 "application/json", "", "", false},
-                {"gsplat.georef", artifactPath(GsplatBuildSubfolder, GsplatGeorefFileName), ArtifactKind::File,
                  "application/json", "", "", false}};
     }
 
@@ -87,7 +79,7 @@ class GaussianSplatEntryHandler : public EntryHandler {
         return fileExistsAndNonEmpty(baseOutputPath / GsplatBuildSubfolder / GsplatRadFileName);
     }
 
-    // Runs build-lod to produce model.rad + bounds.json (+ georef.json when known). Throws a
+    // Runs build-lod to produce model.rad + bounds.json. Throws a
     // plain AppException if build-lod is unavailable: a missing tool is not a missing
     // dependency, so the build fails instead of staying pending.
     void build(const BuildContext& ctx) const override {

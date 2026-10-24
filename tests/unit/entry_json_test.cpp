@@ -154,11 +154,5 @@ namespace
         splat.shDegree = 2;
         EXPECT_EQ(json(splat), (json{{"splatCount", 5}, {"shDegree", 2}}));
 
-        GsplatGeoref georef;
-        georef.srs = "EPSG:32632";
-        georef.offset = {1.0, 2.0, 3.0};
-        EXPECT_EQ(json(georef), (json{{"srs", "EPSG:32632"}, {"offset", json::array({1.0, 2.0, 3.0})}}));
-        georef.boundsWgs84 = {1, 2, 3, 4};
-        EXPECT_EQ(json(georef).at("boundsWgs84"), (json::array({1, 2, 3, 4})));
     }
 }

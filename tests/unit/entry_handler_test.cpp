@@ -166,8 +166,7 @@ TEST(entryHandler, ArtifactManifestIsPinned) {
         {EntryType::GaussianSplat,
          {Row{"gsplat.lod", "gsplat/model.rad", ArtifactKind::File, "", false},
           Row{"gsplat.spz", "gsplat/model.spz", ArtifactKind::File, "", false},
-          Row{"gsplat.bounds", "gsplat/bounds.json", ArtifactKind::File, "", false},
-          Row{"gsplat.georef", "gsplat/georef.json", ArtifactKind::File, "", false}}},
+          Row{"gsplat.bounds", "gsplat/bounds.json", ArtifactKind::File, "", false}}},
         {EntryType::Tiles3D, {Row{"model.3dtiles", "3dtiles", ArtifactKind::Directory, "tileset.json", false}}}};
 
     for (const auto t : AllBuiltinTypes) {

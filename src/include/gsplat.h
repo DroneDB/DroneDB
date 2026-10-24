@@ -16,7 +16,7 @@
 namespace ddb
 {
     // The Gaussian Splat artifact names (GsplatBuildSubfolder, GsplatRadFileName,
-    // GsplatBoundsFileName, GsplatGeorefFileName, ...) are in build_layout.h.
+    // GsplatBoundsFileName, ...) are in build_layout.h.
 
     // Web LOD delivery profile: bhatt-lod ("quality")
     // with full spherical harmonics (degree 3) so the streamed .rad preserves the look of the
@@ -41,24 +41,6 @@ namespace ddb
     /// The properties of a Gaussian splat entry: {"splatCount", "shDegree"}
     void to_json(json &j, const GaussianSplatInfo &info);
 
-    // Georeferencing for a Gaussian Splat, following the ODX/ODM coordinates-file
-    // convention: the splat geometry is stored in LOCAL coordinates, and the true
-    // projected coordinate of any point is (local + offset), interpreted in `srs`.
-    struct GsplatGeoref
-    {
-        // SRS header in any PROJ-understandable form: an ODM header ("WGS84 UTM 17N"),
-        // an authority code ("EPSG:32617"), a proj4 string or WKT.
-        std::string srs;
-        // East, North, Z offset added to local coordinates to obtain projected coordinates.
-        std::array<double, 3> offset = {0.0, 0.0, 0.0};
-        // Optional [west, south, east, north] WGS84 footprint (convenience for consumers).
-        std::vector<double> boundsWgs84;
-        bool valid = false;
-    };
-
-    /// The georef sidecar of a Gaussian splat: {"srs", "offset", "boundsWgs84"?}
-    void to_json(json &j, const GsplatGeoref &georef);
-
     // True when the path ends with the canonical .spz delivery extension.
     bool isSpzPath(const std::string &filename);
 
@@ -70,9 +52,6 @@ namespace ddb
     // (.ply | .splat | .spz). Returns false if the file cannot be interpreted.
     bool getGaussianSplatInfo(const std::string &filename, GaussianSplatInfo &info);
 
-    // Writes the georef.json sidecar described by `georef`.
-    void writeGeoref(const GsplatGeoref &georef, const fs::path &outFile);
-
     // Converts a splat source (.ply | .splat | .spz) into a single .spz file.
     // Throws AppException on failure, including for formats that require an external
     // tool that is not available (e.g. .ksplat needs splat-transform).
@@ -81,11 +60,8 @@ namespace ddb
     // Builds the Gaussian Splat delivery artifacts from a splat source into `outdir`.
     // Requires the build-lod tool; throws AppException if it is unavailable.
     // Produces `<outdir>/model.rad` (RAD container) and `<outdir>/bounds.json` (bounding box).
-    // If `georef.valid`, also writes `<outdir>/georef.json`.
     // The intermediate .spz is not kept after a successful build.
     void buildGsplat(const std::string &input, const std::string &outdir);
-    void buildGsplat(const std::string &input, const std::string &outdir,
-                     const GsplatGeoref &georef);
 
 } // namespace ddb
 

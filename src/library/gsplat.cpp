@@ -266,15 +266,6 @@ namespace ddb
         j["shDegree"] = info.shDegree;
     }
 
-    void to_json(json &j, const GsplatGeoref &georef)
-    {
-        j = json::object();
-        j["srs"] = georef.srs;
-        j["offset"] = {georef.offset[0], georef.offset[1], georef.offset[2]};
-        if (georef.boundsWgs84.size() == 4)
-            j["boundsWgs84"] = georef.boundsWgs84;
-    }
-
     bool isSpzPath(const std::string &filename)
     {
         return io::Path(io::fromUtf8(filename)).checkExtension({"spz"});
@@ -339,34 +330,6 @@ namespace ddb
                 // .ksplat is recognized as a type but not natively decodable here.
                 return false;
         }
-    }
-
-    void writeGeoref(const GsplatGeoref &georef, const fs::path &outFile)
-    {
-        const fs::path parentDir = outFile.parent_path();
-        if (!parentDir.empty())
-            io::assureFolderExists(parentDir);
-        std::ofstream out;
-        errno = 0;
-        out.open(outFile, std::ios::binary | std::ios::trunc);
-        const int openError = errno;
-        if (!out.good())
-            throw FSException("Cannot write georef sidecar " + io::toUtf8(outFile),
-                              std::error_code(openError, std::generic_category()));
-        errno = 0;
-        out << json(georef).dump(2);
-        out.flush();
-        const int writeError = errno;
-        if (!out.good())
-            throw FSException("Failed while writing " + io::toUtf8(outFile),
-                              std::error_code(writeError, std::generic_category()));
-        errno = 0;
-        out.close();
-        const int closeError = errno;
-        if (out.fail())
-            throw FSException("Failed while closing " + io::toUtf8(outFile),
-                              std::error_code(closeError, std::generic_category()));
-
     }
 
     void convertToSpz(const std::string &input, const std::string &output)
@@ -437,12 +400,6 @@ namespace ddb
 
     void buildGsplat(const std::string &input, const std::string &outdir)
     {
-        GsplatGeoref none;
-        buildGsplat(input, outdir, none);
-    }
-
-    void buildGsplat(const std::string &input, const std::string &outdir, const GsplatGeoref &georef)
-    {
         io::assureFolderExists(io::fromUtf8(outdir));
 
         // build-lod is a mandatory dependency: model.rad is the sole delivery artifact (streamed
@@ -483,9 +440,6 @@ namespace ddb
         {
             LOGD << "Skipping bounds.json: no centres decoded from " << io::toUtf8(outRad);
         }
-
-        if (georef.valid)
-            writeGeoref(georef, io::fromUtf8(outdir) / GsplatGeorefFileName);
     }
 
 } // namespace ddb

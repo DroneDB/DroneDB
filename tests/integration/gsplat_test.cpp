@@ -420,9 +420,6 @@ TEST(gsplat, buildOutputsArtifacts) {
     EXPECT_FALSE(fs::exists(outdir / GsplatThumbFileName))
         << "thumbnails are rendered on demand from the .rad, not at build time";
 
-    // No georef supplied -> no sidecar.
-    EXPECT_FALSE(fs::exists(outdir / GsplatGeorefFileName));
-
     // A bounds sidecar is always written for deterministic camera framing in the viewer.
     const fs::path bounds = outdir / GsplatBoundsFileName;
     ASSERT_TRUE(fs::exists(bounds)) << "buildGsplat must write bounds.json";
@@ -877,57 +874,6 @@ TEST(gsplat, truncatedSpzRejected) {
     GaussianSplatInfo info4;
     EXPECT_TRUE(ddb::getGaussianSplatInfo(halfV4.string(), info4));
     EXPECT_EQ(info4.splatCount, 64u);
-}
-
-// ---------------------------------------------------------------------------
-// Georeferencing (ODX convention)
-// ---------------------------------------------------------------------------
-
-TEST(gsplat, writeGeoref) {
-    TestArea ta(TEST_NAME);
-
-    GsplatGeoref g;
-    g.srs = "WGS84 UTM 17N";
-    g.offset = {263892.0, 4156842.0, 0.0};
-    g.valid = true;
-
-    const fs::path georef = ta.getPath("georef.json");
-    ddb::writeGeoref(g, georef);
-    ASSERT_TRUE(fs::exists(georef));
-
-    std::ifstream in(georef.string());
-    json j;
-    in >> j;
-    EXPECT_EQ(j["srs"].get<std::string>(), "WGS84 UTM 17N");
-    ASSERT_TRUE(j["offset"].is_array());
-    EXPECT_DOUBLE_EQ(j["offset"][0].get<double>(), 263892.0);
-    EXPECT_DOUBLE_EQ(j["offset"][1].get<double>(), 4156842.0);
-}
-
-TEST(gsplat, buildWithGerefWritesSidecar) {
-    TestArea ta(TEST_NAME);
-    const fs::path ply = ta.getPath("scene.ply");
-    writeSplatPly(ply, 40, 0);
-
-    REQUIRE_BUILDLOD_OR_SKIP("build-lod not discoverable; skipping georef sidecar test");
-
-    GsplatGeoref g;
-    g.srs = "EPSG:32617";
-    g.offset = {263892.0, 4156842.0, 0.0};
-    g.valid = true;
-
-    const fs::path outdir = ta.getFolder("gsplat_geo");
-    ddb::buildGsplat(ply.string(), outdir.string(), g);
-
-    // model.rad is the sole delivery artifact - no intermediate .spz is kept.
-    ASSERT_TRUE(fs::exists(outdir / GsplatRadFileName)) << "model.rad must be produced";
-    EXPECT_FALSE(fs::exists(outdir / GsplatFileName)) << "no intermediate model.spz is kept";
-    ASSERT_TRUE(fs::exists(outdir / GsplatGeorefFileName));
-
-    std::ifstream in((outdir / GsplatGeorefFileName).string());
-    json j;
-    in >> j;
-    EXPECT_EQ(j["srs"].get<std::string>(), "EPSG:32617");
 }
 
 // ---------------------------------------------------------------------------

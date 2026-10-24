@@ -842,7 +842,6 @@ extern "C"
      *   gsplat.lod       level-of-detail Gaussian Splat (Spark RAD, streamed with range requests)
      *   gsplat.spz       Gaussian Splat in SPZ
      *   gsplat.bounds    local bounding box of a splat (JSON)
-     *   gsplat.georef    georeference of a splat (JSON)
      *
      * An artifact: {"role", "path", "kind", "mediaType", "downloadName"?, "index"?, "legacy"?}
      *   path          relative to the build root ("root" below), '/'-separated; URLs append it

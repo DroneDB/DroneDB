@@ -46,7 +46,6 @@ TEST(buildLayout, ArtifactFileNamesArePinned) {
     EXPECT_STREQ(VectorLocalFileName, "local.json");
     EXPECT_STREQ(TilesetFileName, "tileset.json");
     EXPECT_STREQ(GsplatFileName, "model.spz");
-    EXPECT_STREQ(GsplatGeorefFileName, "georef.json");
     EXPECT_STREQ(GsplatRadFileName, "model.rad");
     EXPECT_STREQ(GsplatBoundsFileName, "bounds.json");
     EXPECT_STREQ(GsplatThumbFileName, "thumbnail.webp");

@@ -150,8 +150,7 @@
       "roles": [
         "gsplat.lod",
         "gsplat.spz",
-        "gsplat.bounds",
-        "gsplat.georef"
+        "gsplat.bounds"
       ],
       "sidecarExtensions": [],
       "thumbnail": "build"

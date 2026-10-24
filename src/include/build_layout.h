@@ -75,7 +75,6 @@ constexpr const char* TilesetFileName = "tileset.json";
 
 // Gaussian Splat. Mirrors the COPC/COG/NXS conventions.
 constexpr const char* GsplatFileName = "model.spz";
-constexpr const char* GsplatGeorefFileName = "georef.json";
 // Level-of-detail delivery artifact (Spark "RAD" container). Produced by the vendored
 // build-lod tool; streamed progressively by the viewer via HTTP range requests (paged: true).
 // This is the sole delivery artifact - the intermediate .spz is not kept after a successful build.
