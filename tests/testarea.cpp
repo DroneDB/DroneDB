@@ -5,8 +5,6 @@
 #include "testfs.h"
 
 #include <algorithm>
-#include <thread>
-#include <chrono>
 #include <fstream>
 #include <cstring>
 
@@ -16,6 +14,7 @@
 #include <unistd.h>
 #endif
 
+#include "ddb.h"
 #include "exceptions.h"
 #include "logger.h"
 #include "mio.h"
@@ -73,17 +72,15 @@ TestArea::TestArea(const std::string& name, bool recreateIfExists) : name(name) 
     if (recreateIfExists) {
         if (fs::exists(root)) {
             LOGD << "Removing " << root;
+            // The library keeps the index connections and the rasters of recent calls open
+            // between calls: a host releases them before it deletes a dataset folder (ddb.h),
+            // or Windows refuses to delete the open files. A test reusing its area is such a host.
+            DDBReleaseConnections(ddb::io::toUtf8(root).c_str(), nullptr);
             std::error_code ec;
-            auto removed = fs::remove_all(root, ec);
-            if (ec) {
-                LOGD << "Error removing " << root << ": " << ec.message();
-                // Try again with a small delay (Windows file locking issues)
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                removed = fs::remove_all(root, ec);
-                if (ec) {
-                    LOGD << "Second attempt failed: " << ec.message();
-                }
-            }
+            const auto removed = fs::remove_all(root, ec);
+            if (ec)
+                throw ddb::FSException("Cannot recreate the test area " + ddb::io::toUtf8(root) + ": " + ec.message(),
+                                       ec);
             LOGD << "Removed " << removed << " files/folders";
         }
     }
