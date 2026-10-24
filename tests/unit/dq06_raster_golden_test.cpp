@@ -287,6 +287,70 @@ namespace
         dq06::expectGolden("render_raster_index", out);
     }
 
+    // The edge of an alpha band, pixel by pixel. A raster of the DQ-06 bands in 16 or 32 bits, alpha 0 over
+    // the columns before 48 (the bands are 0 there, as ODM writes them) and 255 from 48 on, rendered over a
+    // window moved by 0.4 pixel: the pixel of column 47 is the 0.4 of the way to the opaque column, so the
+    // warp blends it. The golden holds the RGBA of the eight pixels of two rows around the edge (columns 44
+    // to 51), for the five indices on the Float32 raster and the three ratio indices on the UInt16 one (SAVI
+    // and EVI are for reflectance, so they are refused there; the golden has their refusal).
+    json edgePixels(const fs::path &raster, const char *index)
+    {
+        const double shift = 0.4 * kPixel;
+        const double bbox[4] = {kOriginX + 44 * kPixel + shift, kOriginY - 42 * kPixel, kOriginX + 52 * kPixel + shift,
+                                kOriginY - 40 * kPixel};
+        uint8_t *buffer = nullptr;
+        int size = 0;
+        try
+        {
+            renderRasterIndex(testutils::regionRequest(raster.string(), bbox, "EPSG:3857", 8, 2, "image/png"), index, &buffer, &size);
+        }
+        catch (const std::exception &e)
+        {
+            return {{"error", e.what()}};
+        }
+        const testutils::DecodedImage img = testutils::decodeImage(take(buffer, size));
+        json rows = json::array();
+        for (int y = 0; y < img.height; y++)
+        {
+            json row = json::array();
+            for (int x = 0; x < img.width; x++)
+            {
+                const size_t p = static_cast<size_t>(y) * img.width + x;
+                row.push_back({img.bands[0][p], img.bands[1][p], img.bands[2][p], img.bands[3][p]});
+            }
+            rows.push_back(row);
+        }
+        return rows;
+    }
+
+    TEST_F(Dq06Raster, renderRasterIndexAlphaEdge)
+    {
+        TestArea ta(TEST_NAME, true);
+        json out = json::object();
+        for (const GDALDataType type : {GDT_Float32, GDT_UInt16})
+        {
+            testutils::GeoRasterSpec spec;
+            spec.width = spec.height = kSize;
+            spec.bands = 6;
+            spec.type = type;
+            spec.alphaBand = true;
+            spec.epsg = 3857;
+            spec.originX = kOriginX;
+            spec.originY = kOriginY;
+            spec.pixelSize = kPixel;
+            const double scale = type == GDT_Float32 ? 1.0 : 60000.0;
+            spec.alphaValue = [](int x, int) { return x < 48 ? 0.0 : 255.0; };
+            spec.value = [scale](int band, int x, int y) {
+                return x < 48 ? 0.0 : std::floor(reflectance(band, x, y) * scale * 1000.0) / 1000.0;
+            };
+            const std::string typeName = GDALGetDataTypeName(type);
+            const fs::path raster = testutils::createGeoRaster(ta.getPath(typeName + ".tif"), spec);
+            for (const char *index : {"NDVI", "NDRE", "NDWI", "SAVI", "EVI"})
+                out[typeName + "_" + index] = edgePixels(raster, index);
+        }
+        dq06::expectGolden("render_raster_index_alpha_edge", out);
+    }
+
     struct Formula
     {
         const char *formula;

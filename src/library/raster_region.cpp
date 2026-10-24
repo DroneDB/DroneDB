@@ -410,6 +410,12 @@ namespace ddb
         // table. It is not a colormap clients pick: the engine does not list it.
         constexpr const char *kIndexColormap = "ryg";
 
+        // The value that is opaque in the alpha band the warper itself writes (-dstalpha, for a
+        // raster that has no alpha band and no nodata value): 255 where it has a pixel, 0 where the
+        // window leaves the raster. A source's own alpha band has the opaque value of its data
+        // (alphaOpaqueValue)
+        constexpr double kWarperAlphaMax = 255.0;
+
         const char *resolveIndexFormula(const std::string &n)
         {
             std::string u = n;
@@ -474,6 +480,38 @@ namespace ddb
             }
         };
 
+        // Divides the bands of the warped window that the formula reads by the coverage (the
+        // warped alpha over its maximum), where there is some. -nosrcalpha makes the warper blend
+        // the bands with the 0 of the transparent pixels around an edge as it blends the alpha
+        // band, so at the edge a band is its value times the coverage: dividing gives the value of
+        // the pixels that are opaque, which SAVI and EVI (they add constants) need and the ratio
+        // indices do not. A band that declares a nodata value is left alone: the warper left its
+        // nodata pixels out of the blend, so it is not diluted.
+        void restoreDilutedBands(GDALDatasetH warped, const std::vector<int> &bands, const RasterBandNodata &sourceNodata,
+                                 const std::vector<float> &coverage, int width, int height)
+        {
+            std::vector<float> plane(coverage.size());
+            for (const int band : bands)
+            {
+                if (sourceNodata.bands[band].has)
+                    continue;
+                GDALRasterBandH hBand = GDALGetRasterBand(warped, band + 1);
+                if (GDALRasterIO(hBand, GF_Read, 0, 0, width, height, plane.data(), width, height, GDT_Float32, 0, 0) != CE_None)
+                    throw GDALException("Cannot read band " + std::to_string(band + 1) + " of the index render");
+                bool changed = false;
+                for (size_t i = 0; i < plane.size(); ++i)
+                {
+                    if (coverage[i] > 0.0f && coverage[i] < 1.0f && std::isfinite(plane[i]))
+                    {
+                        plane[i] /= coverage[i];
+                        changed = true;
+                    }
+                }
+                if (changed &&
+                    GDALRasterIO(hBand, GF_Write, 0, 0, width, height, plane.data(), width, height, GDT_Float32, 0, 0) != CE_None)
+                    throw GDALException("Cannot write band " + std::to_string(band + 1) + " of the index render");
+            }
+        }
     } // anon
 
     std::vector<std::string> rasterIndexLayerIndices(const std::string &rasterPath)
@@ -514,6 +552,14 @@ namespace ddb
         if (!choice.refusal.empty())
             throw InvalidArgsException(choice.refusal);
 
+        const RasterBandNodata sourceNodata = detectBandNodata(hSrc, GDALGetRasterCount(hSrc));
+        const bool sourceHasAlpha = sourceNodata.alphaBandIdx >= 0;
+        const bool sourceHasNodata = std::any_of(sourceNodata.bands.begin(), sourceNodata.bands.end(),
+                                                 [](const BandNodata &nodata) { return nodata.has; });
+        // Nothing says where the raster has no pixels, so outside of it the warp would write 0 in
+        // every band, a value to SAVI and EVI: it writes the alpha of the pixels it has
+        const bool warperAlpha = !sourceHasAlpha && !sourceHasNodata;
+
         VsiMemFile vsiTif = VsiMemFile::unique("ddb-idx-", ".tif");
 
         std::vector<std::string> argStore = {
@@ -529,9 +575,17 @@ namespace ddb
             // source's own 0 (no data) and not what the warper makes of it: with a source alpha the
             // warper rescales it by the maximum of the band's type (65535 for UInt16, where ODM writes
             // 255), which turned a fully opaque raster into alpha 0, and it turns the pixels that are
-            // nodata in a band into 0 instead of leaving them nodata.
+            // nodata in a band into 0 instead of leaving them nodata. (And it takes the alpha for a
+            // validity of 0 or 1: the edge of the alpha would not be anti-aliased.) The warped alpha
+            // is then the coverage of the pixel, which is what the output alpha is made from below.
             "-nosrcalpha"
         };
+        if (warperAlpha)
+        {
+            argStore.emplace_back("-dstalpha");
+            argStore.emplace_back("-wo");
+            argStore.emplace_back("DST_ALPHA_MAX=" + std::to_string(static_cast<int>(kWarperAlphaMax)));
+        }
         const RenderInFlight inFlight;
         parallel::CpuTokens warpTokens;
         for (const auto &arg : warpThreadArgs(inFlight, warpTokens))
@@ -551,14 +605,36 @@ namespace ddb
         GDALDatasetH hWarp = datasetHandle(warp);
         const size_t npx = static_cast<size_t>(width) * height;
 
-        // Step 2: the shared engine reads the bands of the warped window as Float32, leaves the
+        // Step 2: the coverage of every pixel, from the alpha band of the warp: 1 inside the
+        // source's pixels, 0 outside, between them along an edge where the warp blended the two.
+        // The alpha band of a raster is 255 in a Byte band and also in the UInt16 bands ODM writes:
+        // the value that is opaque is derived from the band's data (kept with the dataset).
+        std::vector<float> coverage;
+        if (sourceHasAlpha || warperAlpha)
+        {
+            const int alphaBand = sourceHasAlpha ? sourceNodata.alphaBandIdx + 1 : GDALGetRasterCount(hWarp);
+            const double opaque = sourceHasAlpha ? source->alphaOpaque(alphaBand) : kWarperAlphaMax;
+            coverage.resize(npx);
+            if (GDALRasterIO(GDALGetRasterBand(hWarp, alphaBand), GF_Read, 0, 0, width, height, coverage.data(), width, height,
+                             GDT_Float32, 0, 0) != CE_None)
+                throw GDALException("Cannot read the alpha band of the index render of " + inputPath);
+            for (float &c : coverage)
+                c = std::isfinite(c) ? static_cast<float>(std::clamp(c / opaque, 0.0, 1.0)) : 0.0f;
+        }
+        if (sourceHasAlpha)
+            restoreDilutedBands(hWarp, VegetationEngine::bandsRead(*choice.formula, choice.filter), sourceNodata, coverage, width, height);
+
+        // Step 3: the shared engine reads the bands of the warped window as Float32, leaves the
         // nodata and transparent pixels out of the formula (they are rendered with alpha = 0
         // instead of being colorized as if they were valid samples) and colorizes the values
-        // over the range of the formula.
+        // over the range of the formula; the alpha of the output is then the coverage.
         FormulaPlan plan = planFormula(hWarp, formulaId, choice.filter, "", false);
         plan.colormap = VegetationEngine::instance().getColormap(kIndexColormap, true);
         const RasterWindow window{0, 0, width, height, width, height};
         std::vector<uint8_t> rgba = renderPlannedFormulaRgba(hWarp, plan, window, "", NodataMask::BandsRead);
+        if (!coverage.empty())
+            for (size_t i = 0; i < npx; ++i)
+                rgba[i * 4 + 3] = static_cast<uint8_t>(std::lround(rgba[i * 4 + 3] * coverage[i]));
         warp.reset();
         vsiTif.reset();
 

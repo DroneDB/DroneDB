@@ -88,7 +88,10 @@ namespace ddb
      * A pixel is transparent in the output when a band the index reads has no value
      * (nodata, NaN), or when the alpha band, if the raster has one, is 0: alpha says
      * "no data here" for every band. A gap in a band the index does not read (the blue
-     * band for NDVI) does not hide the pixel.
+     * band for NDVI) does not hide the pixel. Along the edge of an alpha band (or of
+     * the raster) the output alpha is the coverage the warp made of the pixel (partial,
+     * anti-aliased) and the index is that of the opaque values, not of their blend with
+     * the transparent pixels beside them.
      *
      * @param request     The region: request.inputPath is the multi-band raster, and the
      *                    format is one of image/png | image/jpeg | image/webp |

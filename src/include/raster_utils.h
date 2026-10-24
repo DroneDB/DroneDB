@@ -54,6 +54,15 @@ struct RasterBandNodata {
 // Detect alpha band and nodata values for each band of a GDAL dataset
 RasterBandNodata detectBandNodata(GDALDatasetH hDataset, int bandCount);
 
+// The value of an alpha band that is opaque, derived from the band's data. GDAL assumes the
+// maximum of the band's type (or its NBITS), which is wrong for the rasters that write 255 in a
+// UInt16 alpha band (ODM). The approximate maximum of the band (GDALComputeRasterMinMax, from
+// the overviews or a sample of the blocks, never persisted) is rounded up to the all-ones value
+// that holds it, as an alpha band is a k-bit channel: 255 -> 255, 254 -> 255, 1 -> 1, 65535 ->
+// 65535; a band with no value above 0 (all transparent as far as sampled, or no sample) has the
+// maximum of its type (1 for floating-point types).
+double alphaOpaqueValue(GDALRasterBandH alphaBand);
+
 // Pre-mask pixels: sets all bands to NODATA_SENTINEL where alpha==0
 // or any band matches its GDAL nodata value (NaN-safe comparison).
 // A null entry of bandPtrs is a band that was not read: it is neither inspected nor

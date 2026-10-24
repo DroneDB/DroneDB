@@ -39,6 +39,15 @@ namespace ddb
         OpenedDataset &operator=(const OpenedDataset &) = delete;
 
         GDALDatasetH handle() const { return GDALDataset::ToHandle(dataset_.get()); }
+
+        /// The value that is opaque in the alpha band `band` (1-based) of this raster
+        /// (alphaOpaqueValue), derived from its data on the first call and kept with the
+        /// handle. An instance is used by one caller at a time, so nothing is locked.
+        double alphaOpaque(int band) const;
+
+    private:
+        mutable int alphaBand_ = 0;
+        mutable double alphaOpaque_ = 0.0;
     };
 
     /// What a cached tiler was built for: the same file tiled with other settings is

@@ -3,8 +3,10 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 #include "raster_utils.h"
 
+#include <cmath>
 #include <string>
 
+#include "cpl_error.h"
 #include "exceptions.h"
 
 namespace ddb {
@@ -21,6 +23,25 @@ BandNodata readBandNodata(GDALRasterBandH band) {
     nd.value = GDALGetRasterNoDataValue(band, &has);
     nd.has = has != 0;
     return nd;
+}
+
+double alphaOpaqueValue(GDALRasterBandH alphaBand) {
+    // A band with nothing to sample (every pixel nodata) reports an error that is not one here
+    CPLPushErrorHandler(CPLQuietErrorHandler);
+    double minMax[2] = {0.0, 0.0};
+    const bool sampled = GDALComputeRasterMinMax(alphaBand, TRUE, minMax) == CE_None;
+    CPLPopErrorHandler();
+
+    if (sampled && minMax[1] > 0.0) {
+        // The all-ones value that holds the maximum: 2^bits - 1
+        const double bits = std::ceil(std::log2(std::ceil(minMax[1]) + 1.0));
+        return std::ldexp(1.0, static_cast<int>(bits)) - 1.0;
+    }
+
+    const GDALDataType type = GDALGetRasterDataType(alphaBand);
+    if (GDALDataTypeIsFloating(type)) return 1.0;
+    const int bits = GDALGetDataTypeSizeBits(type) - (GDALDataTypeIsSigned(type) ? 1 : 0);
+    return std::ldexp(1.0, bits) - 1.0;
 }
 
 RasterBandNodata detectBandNodata(GDALDatasetH hDataset, int bandCount) {

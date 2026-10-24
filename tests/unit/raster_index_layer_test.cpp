@@ -450,6 +450,16 @@ namespace
         return testutils::createGeoRaster(path, spec);
     }
 
+    // The window of kBbox moved by `shift` pixels to the east: its pixels fall between those of the
+    // raster, so the warp blends neighbours (bilinear)
+    void shiftedBbox(double shift, double out[4])
+    {
+        for (int i = 0; i < 4; i++)
+            out[i] = kBbox[i];
+        out[0] += shift * dq06::kPixel;
+        out[2] += shift * dq06::kPixel;
+    }
+
     testutils::DecodedImage renderWindow(const fs::path &raster, const std::string &index, const double bbox[4],
                                          const std::string &format = "image/png")
     {
@@ -776,6 +786,20 @@ namespace
 
     // ---- R3 and the alpha band: what the layer makes of the edge of the alpha -----------------------
 
+    // Every index, with its value over the constants {R 0.2, G 0.4, B 0.1, Re 0.3, N 0.6}:
+    // NDVI 0.4 / 0.8; NDRE 0.3 / 0.9; NDWI -0.2 / 1.0; SAVI 0.6 / 1.3; EVI 1.0 / 2.05
+    struct IndexValue
+    {
+        const char *name;
+        double value;
+        bool floatingPointOnly;
+    };
+    const std::vector<IndexValue> kIndexValues = {{"NDVI", 0.5, false},
+                                                  {"NDRE", 1.0 / 3.0, false},
+                                                  {"NDWI", -0.2, false},
+                                                  {"SAVI", 0.6 / 1.3, true},
+                                                  {"EVI", 1.0 / 2.05, true}};
+
     ConstantRaster edgeRaster(GDALDataType type, int alphaStart)
     {
         ConstantRaster raster;
@@ -788,9 +812,112 @@ namespace
         return raster;
     }
 
+    // The columns of the raster before x 48 are transparent. Moved by 0.4 pixel the window falls
+    // between the pixels: the pixel of column 47 is 0.4 of the way to the opaque column 48. In the
+    // alpha band the warp makes it 0.4 * 255 = 102, in a band 0.4 of the value (the neighbour is 0)
+    TEST_F(RasterIndexLayer, theFringeOfAnAlphaEdgeIsTheColourOfTheInteriorWithAPartialAlpha)
+    {
+        TestArea ta(TEST_NAME, true);
+        double bbox[4];
+        shiftedBbox(0.4, bbox);
+        for (const GDALDataType type : {GDT_Float32, GDT_UInt16})
+        {
+            const fs::path raster = makeConstantRaster(ta.getPath(type == GDT_Float32 ? "f32.tif" : "u16.tif"), edgeRaster(type, 48));
+            for (const IndexValue &index : kIndexValues)
+            {
+                if (index.floatingPointOnly && type != GDT_Float32)
+                    continue;
+                SCOPED_TRACE(std::string(index.name) + (type == GDT_Float32 ? " Float32" : " UInt16"));
+                const testutils::DecodedImage img = renderWindow(raster, index.name, bbox);
+                // The interior: opaque, in the colour of the index
+                expectRamp(img, 80, 64, index.value);
+                expectRamp(img, 49, 64, index.value);
+                expectRamp(img, 48, 64, index.value);
+                // Beyond the edge: nothing
+                EXPECT_EQ(pixelOf(img, 46, 64)[3], 0);
+                EXPECT_EQ(pixelOf(img, 10, 64)[3], 0);
+                // The fringe pixel: the colour of the undiluted values, and the partial alpha of the warp
+                const auto fringe = pixelOf(img, 47, 64);
+                const auto interior = pixelOf(img, 80, 64);
+                EXPECT_NEAR(fringe[0], interior[0], 2) << "R";
+                EXPECT_NEAR(fringe[1], interior[1], 2) << "G";
+                EXPECT_NEAR(fringe[2], interior[2], 2) << "B";
+                EXPECT_NEAR(fringe[3], 102, 2) << "alpha: 0.4 of 255";
+            }
+        }
+    }
 
+    // The same edge where the bands of the transparent area are the declared nodata (-9999) and not
+    // 0: the warp leaves those pixels out of the bands, which are then not diluted at all
+    TEST_F(RasterIndexLayer, theFringeIsTheSameWhenTheBandsDeclareTheNodataOfTheTransparentArea)
+    {
+        TestArea ta(TEST_NAME, true);
+        double bbox[4];
+        shiftedBbox(0.4, bbox);
+        ConstantRaster spec = edgeRaster(GDT_Float32, 48);
+        spec.fill = dq06::kNodata;
+        const fs::path raster = makeConstantRaster(ta.getPath("nodata.tif"), spec);
+        {
+            std::unique_ptr<GDALDataset> ds(static_cast<GDALDataset *>(GDALOpen(raster.string().c_str(), GA_Update)));
+            ASSERT_NE(ds, nullptr);
+            for (int b = 1; b <= 5; b++)
+                ds->GetRasterBand(b)->SetNoDataValue(dq06::kNodata);
+        }
+        for (const IndexValue &index : kIndexValues)
+        {
+            SCOPED_TRACE(index.name);
+            const testutils::DecodedImage img = renderWindow(raster, index.name, bbox);
+            expectRamp(img, 80, 64, index.value);
+            const auto fringe = pixelOf(img, 47, 64);
+            const auto interior = pixelOf(img, 80, 64);
+            EXPECT_NEAR(fringe[0], interior[0], 2);
+            EXPECT_NEAR(fringe[1], interior[1], 2);
+            EXPECT_NEAR(fringe[3], 102, 2);
+            EXPECT_EQ(pixelOf(img, 46, 64)[3], 0);
+        }
+    }
 
+    // The alpha runs from 0 to its maximum across the edge: the pixel between them is partly
+    // transparent whatever the maximum is (255 in a Byte band; 255 in an ODM UInt16 band; 65535)
+    TEST_F(RasterIndexLayer, theAlphaOfTheOutputIsTheWarpedAlphaOverItsMaximum)
+    {
+        TestArea ta(TEST_NAME, true);
+        double bbox[4];
+        shiftedBbox(0.5, bbox);
+        for (const double maximum : {255.0, 65535.0})
+        {
+            for (const GDALDataType type : {GDT_Float32, GDT_UInt16})
+            {
+                SCOPED_TRACE("maximum " + std::to_string(maximum) + (type == GDT_Float32 ? " Float32" : " UInt16"));
+                ConstantRaster spec = edgeRaster(type, 48);
+                spec.alphaValue = [maximum](int x, int) { return x < 48 ? 0.0 : maximum; };
+                const fs::path raster = makeConstantRaster(
+                    ta.getPath("a" + std::to_string(static_cast<int>(maximum)) + (type == GDT_Float32 ? "f.tif" : "u.tif")), spec);
+                const testutils::DecodedImage img = renderWindow(raster, "NDVI", bbox);
+                expectRamp(img, 80, 64, 0.5);
+                expectRamp(img, 48, 64, 0.5);
+                EXPECT_EQ(pixelOf(img, 46, 64)[3], 0);
+                // Half way: half of the alpha
+                EXPECT_NEAR(pixelOf(img, 47, 64)[3], 128, 2);
+                EXPECT_NEAR(pixelOf(img, 47, 64)[0], pixelOf(img, 80, 64)[0], 1);
+            }
+        }
+    }
 
+    // A raster whose alpha is partly transparent over a whole region (not an edge): the index is the same
+    // (the ratio indices do not depend on the scale of the bands), the output is that partly transparent
+    TEST_F(RasterIndexLayer, aPartialAlphaOverARegionIsPartialInTheOutput)
+    {
+        TestArea ta(TEST_NAME, true);
+        ConstantRaster spec = edgeRaster(GDT_Float32, 0);
+        spec.alphaValue = [](int x, int) { return x < 64 ? 255.0 : (x < 100 ? 128.0 : 0.0); };
+        const fs::path raster = makeConstantRaster(ta.getPath("partial.tif"), spec);
+        const double bbox[4] = {kBbox[0], kBbox[1], kBbox[2], kBbox[3]};
+        const testutils::DecodedImage img = renderWindow(raster, "NDVI", bbox);
+        expectRamp(img, 30, 64, 0.5, 255);
+        expectRamp(img, 80, 64, 0.5, 128);
+        EXPECT_EQ(pixelOf(img, 110, 64)[3], 0);
+    }
 
     // The alpha says no data: 0 stays 0 and 255 stays 255 in the three types an alpha has
     TEST_F(RasterIndexLayer, anAlphaOfZeroIsTransparentAndOfItsMaximumOpaque)
@@ -859,4 +986,37 @@ namespace
         }
     }
 
+    // A raster with no alpha and no nodata: where the window leaves the raster the warp has nothing, and
+    // that is transparent for every index (SAVI and EVI gave a value, 0, to the bands of no data)
+    TEST_F(RasterIndexLayer, whereTheWindowLeavesARasterWithNeitherAlphaNorNodataTheOutputIsTransparent)
+    {
+        TestArea ta(TEST_NAME, true);
+        ConstantRaster spec;
+        spec.values = {0.2, 0.4, 0.1, 0.3, 0.6};
+        const fs::path raster = makeConstantRaster(ta.getPath("plain.tif"), spec);
+        // A window that is the raster and a margin of 16 pixels on every side
+        const double margin = 16 * dq06::kPixel;
+        const double bbox[4] = {kBbox[0] - margin, kBbox[1] - margin, kBbox[2] + margin, kBbox[3] + margin};
+        for (const IndexValue &index : kIndexValues)
+        {
+            SCOPED_TRACE(index.name);
+            uint8_t *buffer = nullptr;
+            int size = 0;
+            renderRasterIndex(testutils::regionRequest(raster.string(), bbox, "EPSG:3857", 160, 160, "image/png"), index.name, &buffer, &size);
+            const testutils::DecodedImage img = testutils::decodeImage(testutils::takeBuffer(buffer, size));
+            EXPECT_EQ(pixelOf(img, 5, 80)[3], 0);
+            EXPECT_EQ(pixelOf(img, 80, 5)[3], 0);
+            EXPECT_EQ(pixelOf(img, 154, 80)[3], 0);
+            EXPECT_EQ(pixelOf(img, 80, 154)[3], 0);
+            expectRamp(img, 80, 80, index.value);
+            // The pixels of the raster beside the margin: opaque, the edge pixels in the colour of the interior
+            const auto interior = pixelOf(img, 80, 80);
+            for (const auto &edge : {pixelOf(img, 16, 80), pixelOf(img, 143, 80), pixelOf(img, 80, 16), pixelOf(img, 80, 143)})
+            {
+                EXPECT_EQ(edge[3], 255);
+                EXPECT_NEAR(edge[0], interior[0], 1);
+                EXPECT_NEAR(edge[1], interior[1], 1);
+            }
+        }
+    }
 }

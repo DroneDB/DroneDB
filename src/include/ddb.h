@@ -1372,7 +1372,8 @@ extern "C"
      * colour interpretation); a raster that names none of them and has five data bands or more is
      * read as R=1, G=2, B=3, RedEdge=4, NIR=5. SAVI and EVI add constants to the band values, so
      * they need a floating-point (reflectance) raster. An index the raster cannot render is
-     * refused with the reason: DDBGetRasterInfo lists the renderable ones ("indexLayer").
+     * refused with the reason: DDBGetRasterInfo lists the renderable ones ("indexLayer"). Along
+     * the edge of the raster's alpha band the output alpha is partial (anti-aliased).
      *
      * @param inputPath Source raster path.
      * @param indexName One of: "NDVI", "NDRE", "NDWI", "SAVI", "EVI" (case-insensitive).

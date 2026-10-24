@@ -13,6 +13,7 @@
 #include "fileversion.h"
 #include "gdal_raii.h"
 #include "logger.h"
+#include "raster_utils.h"
 #include "tiler.h"
 #include "mio.h"
 
@@ -40,6 +41,16 @@ namespace ddb
     }
 
     OpenedDataset::~OpenedDataset() = default;
+
+    double OpenedDataset::alphaOpaque(int band) const
+    {
+        if (alphaBand_ != band)
+        {
+            alphaOpaque_ = alphaOpaqueValue(GDALGetRasterBand(handle(), band));
+            alphaBand_ = band;
+        }
+        return alphaOpaque_;
+    }
 
     RasterCache &RasterCache::instance()
     {
